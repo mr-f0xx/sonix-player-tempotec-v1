@@ -30,6 +30,12 @@ int bp_tile_radius(void);
 int bp_header_button_size(void);
 int bp_header_button_gap(void);
 
+// One geometry number written for both panels: `compact` on a 240x320 V1,
+// `regular` on the 480-pixel HiBy players.  Pages whose layout is a list of
+// pixel sizes (the equaliser columns, the firmware card, the reorder rows)
+// read better with this than with a bp_is_tempotec_v1() ternary per line.
+int bp_pick(int compact, int regular);
+
 // Fonts used by the most crowded player/list labels.  On the V1 fonts.c also
 // maps the remaining large named UI fonts to compact raster sizes, so pages
 // which use font_ui_24 directly do not keep 24 physical pixels on a 240-pixel

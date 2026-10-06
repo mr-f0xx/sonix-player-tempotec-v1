@@ -5,6 +5,7 @@
 #include <string.h>
 
 #include "src/gui/shell/confirm.h"
+#include "src/gui/board_profile.h"
 #include "src/gui/fonts/fonts.h"
 #include "src/gui/shell/icons.h"
 #include "src/gui/audio/peqsettings.h"
@@ -179,18 +180,18 @@ static void graph_paint_theme(void) {
 static void build_graph(lv_obj_t *parent) {
 	lv_obj_t *card = lv_obj_create(parent);
 	lv_obj_set_width(card, lv_pct(100));
-	lv_obj_set_height(card, 236);
+	lv_obj_set_height(card, bp_pick(140, 236));
 	lv_obj_add_style(card, &theme_style_card, 0);
-	lv_obj_set_style_radius(card, 12, 0);
+	lv_obj_set_style_radius(card, bp_pick(bp_tile_radius(), 12), 0);
 	lv_obj_set_style_border_width(card, 0, 0);
 	lv_obj_set_style_shadow_width(card, 0, 0);
-	lv_obj_set_style_pad_all(card, 14, 0);
+	lv_obj_set_style_pad_all(card, bp_pick(8, 14), 0);
 	lv_obj_set_scrollable(card, false);
 	// Not clickable, so the back gesture can start on top of the graph.
 	lv_obj_set_clickable(card, false);
 
 	graph = lv_chart_create(card);
-	lv_obj_set_size(graph, lv_pct(100), 168);
+	lv_obj_set_size(graph, lv_pct(100), bp_pick(96, 168));
 	lv_obj_align(graph, LV_ALIGN_TOP_MID, 0, 0);
 	lv_obj_set_clickable(graph, false);
 	lv_obj_set_style_border_width(graph, 0, 0);

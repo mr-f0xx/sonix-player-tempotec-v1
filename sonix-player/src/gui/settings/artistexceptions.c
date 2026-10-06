@@ -6,6 +6,7 @@
 #include <string.h>
 #include <strings.h>
 
+#include "src/gui/board_profile.h"
 #include "src/gui/fonts/fonts.h"
 #include "src/gui/shell/icons.h"
 #include "src/gui/shell/keyboard.h"
@@ -57,12 +58,12 @@ static void rebuild(void) {
 	lv_obj_clean(list);
 	for (int i = 0; i < name_count; i++) {
 		lv_obj_t *row = lv_obj_create(list);
-		lv_obj_set_size(row, lv_pct(100), 84);
+		lv_obj_set_size(row, lv_pct(100), bp_pick(52, 84));
 		lv_obj_add_style(row, &theme_style_card, 0);
-		lv_obj_set_style_radius(row, 12, 0);
+		lv_obj_set_style_radius(row, bp_pick(bp_tile_radius(), 12), 0);
 		lv_obj_set_style_border_width(row, 0, 0);
 		lv_obj_set_style_shadow_width(row, 0, 0);
-		lv_obj_set_style_pad_left(row, 20, 0);
+		lv_obj_set_style_pad_left(row, bp_pick(8, 20), 0);
 		lv_obj_set_style_pad_right(row, 8, 0);
 		lv_obj_set_style_pad_ver(row, 0, 0);
 		lv_obj_set_scrollable(row, false);
@@ -78,7 +79,7 @@ static void rebuild(void) {
 		lv_obj_set_style_text_font(label, &font_ui_24, 0);
 
 		lv_obj_t *del = lv_btn_create(row);
-		lv_obj_set_size(del, 64, 64);
+		lv_obj_set_size(del, bp_pick(40, 64), bp_pick(40, 64));
 		lv_obj_set_style_bg_opa(del, LV_OPA_TRANSP, 0);
 		lv_obj_set_style_border_width(del, 0, 0);
 		lv_obj_set_style_shadow_width(del, 0, 0);
@@ -249,14 +250,15 @@ void artistexceptions_init(gui_config_t *cfg, void (*changed)(void)) {
 	lv_textarea_set_one_line(name_field, true);
 	lv_textarea_set_max_length(name_field, NAME_MAX_LEN);
 	lv_textarea_set_placeholder_text(name_field, tr("name"));
-	lv_obj_set_size(name_field, cfg->screen_width - 2 * cfg->padding, 62);
+	lv_obj_set_size(name_field, cfg->screen_width - 2 * cfg->padding, bp_pick(40, 62));
 	lv_obj_set_scrollbar_mode(name_field, LV_SCROLLBAR_MODE_OFF);
-	lv_obj_align(name_field, LV_ALIGN_TOP_LEFT, cfg->padding, cfg->padding + cfg->top_bar_height + 60);
+	lv_obj_align(name_field, LV_ALIGN_TOP_LEFT, cfg->padding,
+				 cfg->padding + cfg->top_bar_height + bp_pick(38, 60));
 	lv_obj_add_style(name_field, &theme_style_card, 0);
-	lv_obj_set_style_radius(name_field, 12, 0);
+	lv_obj_set_style_radius(name_field, bp_pick(bp_tile_radius(), 12), 0);
 	lv_obj_set_style_border_width(name_field, 0, 0);
 	lv_obj_set_style_shadow_width(name_field, 0, 0);
-	lv_obj_set_style_pad_all(name_field, 14, 0);
+	lv_obj_set_style_pad_all(name_field, bp_pick(8, 14), 0);
 	lv_obj_set_style_text_font(name_field, &font_ui_24, 0);
 	keyboard_style_caret(name_field);
 

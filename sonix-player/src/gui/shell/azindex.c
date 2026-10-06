@@ -12,6 +12,8 @@
 // The track lists' numbers, so the two strips are one design.
 #define BUCKETS LIBRARY_INDEX_BUCKETS
 #define BAR_WIDTH 28
+#define COMPACT_BAR_WIDTH 20 // 28 px is a ninth of a 240 px panel
+#define BAR_PAD_V 4			 // so the first and last letter are not flush
 #define HIDE_MS 2500 // no scrolling and no touch for this long: it goes
 #define HINT_MS 450	 // the big letter outstays the finger by a moment
 #define ENGAGE_PX 6	 // upward or downward movement that claims the press
@@ -20,6 +22,25 @@ static const char *const TEXT[BUCKETS] = {"#", "A", "B", "C", "D", "E", "F", "G"
 										  "J", "K", "L", "M", "N", "O", "P", "Q", "R", "S",
 										  "T", "U", "V", "W", "X", "Y", "Z", "\xE2\x80\xA6"};
 
+// ---------------------------------------------------------------------------
+// Fitting the alphabet into the strip
+//
+// There are 28 buckets and a label is a line of text tall.  On a 480x720 or
+// 480x800 panel all 28 fit down the right edge with room to spare; on the
+// TempoTec V1's 240x320 panel the strip is about 240 px high and a line of the
+// smallest UI font is ~17 px, so only around 14 of them fit.  Laying out 28
+// anyway is what "the index bar is broken" looks like: LVGL's flex layout
+// cannot give them negative gaps, so the column grows past the bar, the last
+// letters are drawn outside it (or clipped away), and because the press is
+// mapped by asking the labels where they are, the bottom half of the strip
+// answers with the wrong letter.
+//
+// So the strip draws as many letters as actually fit, evenly spread over the
+// alphabet ('#' and the past-Z bucket always among them), and the buckets with
+// no label of their own stay reachable: once the strip is collapsed the press
+// is mapped by position across the labels' span rather than by label.
+// ---------------------------------------------------------------------------
+
 struct azindex {
 	lv_obj_t *list;
 	int row_pitch;
@@ -27,6 +48,10 @@ struct azindex {
 
 	lv_obj_t *bar;
 	lv_obj_t *letters[BUCKETS];
+	// How many of `letters` exist, and which bucket slot each one shows.
+	// shown == BUCKETS is the uncollapsed strip: slot_of[i] == i.
+	int shown;
+	int slot_of[BUCKETS];
 	lv_obj_t *hint;
 	lv_obj_t *hint_label;
 
@@ -50,6 +75,33 @@ struct azindex {
 static azindex_t *strips[MAX_STRIPS];
 static int strip_count;
 static lv_timer_t *timer;
+
+// How many letters a strip `bar_height` tall can print without the column
+// growing past it. One line of the strip's font each, and at least two so the
+// span the presses are mapped over is never a single point.
+static int letters_that_fit(int bar_height) {
+	int line = lv_font_get_line_height(&font_ui_14);
+	if (line <= 0) {
+		return BUCKETS;
+	}
+	int fits = (bar_height - 2 * BAR_PAD_V) / line;
+	if (fits >= BUCKETS) {
+		return BUCKETS;
+	}
+	return fits < 2 ? 2 : fits;
+}
+
+// The bucket the i-th of `shown` labels stands for: the two ends are always
+// '#' and the past-Z bucket, the rest are spread evenly between them.
+static int label_slot(int i, int shown) {
+	if (shown >= BUCKETS) {
+		return i;
+	}
+	if (shown < 2) {
+		return 0;
+	}
+	return (i * (BUCKETS - 1) + (shown - 1) / 2) / (shown - 1);
+}
 
 static void show_bar(azindex_t *ix, bool shown) {
 	if (shown) {
@@ -96,7 +148,11 @@ void azindex_set_rows(azindex_t *ix, const int first[LIBRARY_INDEX_BUCKETS], int
 	for (int slot = 0; slot < BUCKETS; slot++) {
 		int bucket = descending ? BUCKETS - 1 - slot : slot;
 		ix->row[slot] = first[bucket];
-		lv_label_set_text(ix->letters[slot], TEXT[bucket]);
+	}
+	for (int i = 0; i < ix->shown; i++) {
+		int slot = ix->slot_of[i];
+		int bucket = descending ? BUCKETS - 1 - slot : slot;
+		lv_label_set_text(ix->letters[i], TEXT[bucket]);
 	}
 
 	// A letter nothing starts with still has to answer: it lands on the first
@@ -140,20 +196,47 @@ static void go(azindex_t *ix, int slot) {
 	}
 }
 
-// The slot the finger is over. Asked of the letters themselves rather than
-// worked out from the strip's height: the labels are laid out with even gaps
-// around them, so they do not quite fill the box, and arithmetic on the box
-// answers a press near either end with the neighbouring letter.
+// The slot the finger is over. With a label per bucket it is asked of the
+// letters themselves rather than worked out from the strip's height: the labels
+// are laid out with even gaps around them, so they do not quite fill the box,
+// and arithmetic on the box answers a press near either end with the
+// neighbouring letter.
+//
+// A collapsed strip has no label for most buckets, so there it is the labels'
+// span -- first letter's top to last letter's bottom -- that is divided into
+// the 28 buckets. Every letter stays reachable, including the ones the strip
+// has no room to print.
 static void go_at(azindex_t *ix, lv_point_t point) {
-	for (int slot = 0; slot < BUCKETS; slot++) {
-		lv_area_t area;
-		lv_obj_get_coords(ix->letters[slot], &area);
-		if (point.y <= area.y2) {
-			go(ix, slot);
-			return;
-		}
+	if (ix->shown <= 0) {
+		return; // never built
 	}
-	go(ix, BUCKETS - 1); // past the last letter: the last letter
+	if (ix->shown >= BUCKETS) {
+		for (int slot = 0; slot < BUCKETS; slot++) {
+			lv_area_t area;
+			lv_obj_get_coords(ix->letters[slot], &area);
+			if (point.y <= area.y2) {
+				go(ix, slot);
+				return;
+			}
+		}
+		go(ix, BUCKETS - 1); // past the last letter: the last letter
+		return;
+	}
+
+	lv_area_t top_area;
+	lv_area_t bottom_area;
+	lv_obj_get_coords(ix->letters[0], &top_area);
+	lv_obj_get_coords(ix->letters[ix->shown - 1], &bottom_area);
+	int span = bottom_area.y2 - top_area.y1;
+	if (span <= 0) {
+		go(ix, 0);
+		return;
+	}
+	int offset = point.y - top_area.y1;
+	if (offset < 0) {
+		offset = 0;
+	}
+	go(ix, offset * BUCKETS / span);
 }
 
 // The strip carries the page's own gestures as well -- the swipe back and the
@@ -247,15 +330,19 @@ azindex_t *azindex_create(lv_obj_t *screen, gui_config_t *cfg, lv_obj_t *list, i
 	ix->row_pitch = row_pitch;
 	ix->jumped = jumped;
 
+	bool compact = cfg->screen_width < 320;
+	int bar_width = compact ? COMPACT_BAR_WIDTH : BAR_WIDTH;
 	int content_top = settingsrow_content_top(cfg);
+	int bar_height = cfg->screen_height - content_top - 8;
 
 	ix->bar = lv_obj_create(screen);
 	lv_obj_remove_style_all(ix->bar);
-	lv_obj_set_size(ix->bar, BAR_WIDTH, cfg->screen_height - content_top - 8);
+	lv_obj_set_size(ix->bar, bar_width, bar_height);
 	lv_obj_align(ix->bar, LV_ALIGN_TOP_RIGHT, -2, content_top + 4);
+	lv_obj_set_style_pad_ver(ix->bar, BAR_PAD_V, 0);
 	lv_obj_set_style_bg_color(ix->bar, theme()->surface, 0);
 	lv_obj_set_style_bg_opa(ix->bar, LV_OPA_60, 0);
-	lv_obj_set_style_radius(ix->bar, BAR_WIDTH / 2, 0);
+	lv_obj_set_style_radius(ix->bar, bar_width / 2, 0);
 	lv_obj_set_scrollable(ix->bar, false);
 	lv_obj_set_hidden(ix->bar, true);
 	lv_obj_set_flex_flow(ix->bar, LV_FLEX_FLOW_COLUMN);
@@ -272,11 +359,14 @@ azindex_t *azindex_create(lv_obj_t *screen, gui_config_t *cfg, lv_obj_t *list, i
 	switcher_attach_back_gesture(ix->bar);
 	player_sheet_attach_drag(ix->bar, true);
 
-	for (int i = 0; i < BUCKETS; i++) {
+	ix->shown = letters_that_fit(bar_height);
+	for (int i = 0; i < ix->shown; i++) {
+		ix->slot_of[i] = label_slot(i, ix->shown);
 		ix->letters[i] = lv_label_create(ix->bar);
-		lv_label_set_text(ix->letters[i], TEXT[i]);
+		lv_label_set_text(ix->letters[i], TEXT[ix->slot_of[i]]);
 		lv_obj_add_style(ix->letters[i], &theme_style_text_dim, 0);
 		lv_obj_set_style_text_font(ix->letters[i], &font_ui_14, 0);
+		lv_obj_set_style_pad_all(ix->letters[i], 0, 0);
 		lv_obj_set_clickable(ix->letters[i], false);
 	}
 
@@ -284,11 +374,11 @@ azindex_t *azindex_create(lv_obj_t *screen, gui_config_t *cfg, lv_obj_t *list, i
 	// is not, in the accent colour so it stands off the cards under it.
 	ix->hint = lv_obj_create(screen);
 	lv_obj_remove_style_all(ix->hint);
-	lv_obj_set_size(ix->hint, 132, 124);
+	lv_obj_set_size(ix->hint, compact ? 88 : 132, compact ? 84 : 124);
 	lv_obj_align(ix->hint, LV_ALIGN_CENTER, 0, 0);
 	lv_obj_set_style_bg_color(ix->hint, theme()->accent, 0);
 	lv_obj_set_style_bg_opa(ix->hint, LV_OPA_90, 0);
-	lv_obj_set_style_radius(ix->hint, 26, 0);
+	lv_obj_set_style_radius(ix->hint, compact ? 18 : 26, 0);
 	lv_obj_set_scrollable(ix->hint, false);
 	lv_obj_set_clickable(ix->hint, false);
 	lv_obj_set_hidden(ix->hint, true);

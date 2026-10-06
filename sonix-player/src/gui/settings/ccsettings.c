@@ -2,6 +2,7 @@
 
 #include "lvgl/lvgl.h"
 
+#include "src/gui/board_profile.h"
 #include "src/gui/fonts/fonts.h"
 #include "src/gui/shell/icons.h"
 #include "src/gui/shell/quickpanel.h"
@@ -28,18 +29,34 @@ lv_obj_t *ccsettings_screen;
 // or bottom edge.
 // ---------------------------------------------------------------------------
 
-#define ROW_HEIGHT 72
-#define ROW_GAP 8
-#define ROW_PITCH (ROW_HEIGHT + ROW_GAP)
-#define ROW_RADIUS 12
-#define ROW_PAD 20
-#define ICON_BOX 56
-#define HEADING_H 40
 
+// The reorder rows are laid out in absolute pixels (they are dragged between
+// two lists on one canvas, so they cannot be flex children).  A 72 px row with
+// a 56 px icon box and 64 px of grip leaves 72 px for the name on a 240 px
+// panel, which is where the page stopped being readable; every number below
+// therefore has a compact counterpart.  They are functions, not constants, so
+// the whole file -- including the drop-position arithmetic -- keeps using one
+// set of names.
+static int cc_row_height(void) { return bp_pick(48, 72); }
+static int cc_row_gap(void) { return bp_pick(4, 8); }
+static int cc_row_radius(void) { return bp_pick(bp_tile_radius(), 12); }
+static int cc_row_pad(void) { return bp_pick(8, 20); }
+static int cc_icon_box(void) { return bp_pick(30, 56); }
+static int cc_heading_h(void) { return bp_pick(26, 40); }
 // The grip is only as large as its glyph and a margin round it; the room kept
 // for it at the end of the row is wider.
-#define GRIP_SIZE 48
-#define GRIP_SPACE 64
+static int cc_grip_size(void) { return bp_pick(30, 48); }
+static int cc_grip_space(void) { return bp_pick(38, 64); }
+
+#define ROW_HEIGHT cc_row_height()
+#define ROW_GAP cc_row_gap()
+#define ROW_PITCH (ROW_HEIGHT + ROW_GAP)
+#define ROW_RADIUS cc_row_radius()
+#define ROW_PAD cc_row_pad()
+#define ICON_BOX cc_icon_box()
+#define HEADING_H cc_heading_h()
+#define GRIP_SIZE cc_grip_size()
+#define GRIP_SPACE cc_grip_space()
 
 // Either list is a drop target even when it is empty, so neither is ever
 // shorter than one row.
@@ -50,8 +67,8 @@ lv_obj_t *ccsettings_screen;
 
 // How close to the top or bottom of the page a held row has to be before the
 // page moves under it, and how far it moves each time the event comes round.
-#define EDGE_PX 70
-#define EDGE_STEP 18
+#define EDGE_PX bp_pick(40, 70)
+#define EDGE_STEP bp_pick(12, 18)
 
 typedef struct {
 	lv_obj_t *row;
@@ -320,8 +337,9 @@ static void make_row(entry_t *entry, int width) {
 	lv_obj_add_style(entry->name, &theme_style_text, 0);
 	lv_obj_set_style_text_font(entry->name, &font_ui_24, 0);
 	lv_label_set_long_mode(entry->name, LV_LABEL_LONG_DOT);
-	lv_obj_set_width(entry->name, width - ROW_PAD - ICON_BOX - 16 - GRIP_SPACE);
-	lv_obj_align(entry->name, LV_ALIGN_LEFT_MID, ICON_BOX + 16, 0);
+	int icon_gap = bp_pick(8, 16);
+	lv_obj_set_width(entry->name, width - ROW_PAD - ICON_BOX - icon_gap - GRIP_SPACE);
+	lv_obj_align(entry->name, LV_ALIGN_LEFT_MID, ICON_BOX + icon_gap, 0);
 
 	// The handle, and the only part of the row that can be taken hold of. Not
 	// a button: a tap on it does nothing. A drag on it must not find the page
