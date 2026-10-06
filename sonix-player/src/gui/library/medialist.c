@@ -102,6 +102,8 @@ lv_obj_t *medialist_albums_screen;
 #define INDEX_BUCKETS LIBRARY_INDEX_BUCKETS
 #define INDEX_PAST_Z_SLOT LIBRARY_INDEX_PAST_Z_SLOT
 #define INDEX_BAR_WIDTH 28
+#define INDEX_COMPACT_BAR_WIDTH 20	// 28 px is a ninth of a 240 px panel
+#define INDEX_BAR_PAD_V 4			// so the first and last letter are not flush
 #define INDEX_HIDE_MS 2500	// no scrolling and no touch for this long: it goes
 #define INDEX_HINT_MS 450	// the big letter outstays the finger by a moment
 #define INDEX_MIN_ROWS 30	// shorter lists are quicker to just scroll
@@ -214,6 +216,10 @@ typedef struct {
 	// each letter jumps to.
 	lv_obj_t *index_bar;
 	lv_obj_t *index_letters[INDEX_BUCKETS];
+	// How many of index_letters exist, and which bucket slot each one shows.
+	// index_shown == INDEX_BUCKETS is the uncollapsed strip, one per bucket.
+	int index_shown;
+	int index_slot_of[INDEX_BUCKETS];
 	lv_obj_t *index_hint;
 	lv_obj_t *index_hint_label;
 	int index_row[INDEX_BUCKETS];
@@ -1712,6 +1718,37 @@ static const char *const INDEX_TEXT[INDEX_BUCKETS] = {"#", "A", "B", "C", "D", "
 													  "T", "U", "V", "W", "X", "Y", "Z", "\xE2\x80\xA6"};
 
 
+// How many letters a strip `bar_height` tall can print without the column
+// growing past it.  On the 240x320 panel the strip holds about fourteen of the
+// twenty-eight buckets: laying out all of them makes the column overflow the
+// bar -- flex has no negative gaps -- so the lower letters are drawn outside
+// it or clipped, and the press mapping, which asks the labels where they are,
+// answers the bottom of the strip with the wrong letter.
+static int index_letters_that_fit(int bar_height) {
+	int line = lv_font_get_line_height(&font_ui_14);
+	if (line <= 0) {
+		return INDEX_BUCKETS;
+	}
+	int fits = (bar_height - 2 * INDEX_BAR_PAD_V) / line;
+	if (fits >= INDEX_BUCKETS) {
+		return INDEX_BUCKETS;
+	}
+	return fits < 2 ? 2 : fits;
+}
+
+// The bucket the i-th of `shown` labels stands for: the two ends are always
+// '#' and the past-Z bucket, the rest are spread evenly between them.  The
+// buckets with no label of their own stay reachable -- see index_go_at().
+static int index_label_slot(int i, int shown) {
+	if (shown >= INDEX_BUCKETS) {
+		return i;
+	}
+	if (shown < 2) {
+		return 0;
+	}
+	return (i * (INDEX_BUCKETS - 1) + (shown - 1) / 2) / (shown - 1);
+}
+
 static void index_show_bar(panel_t *p, bool shown) {
 	if (!p->index_bar) {
 		return;
@@ -1814,7 +1851,11 @@ static void index_rebuild(panel_t *p, bool enabled, bool descending) {
 	for (int slot = 0; slot < INDEX_BUCKETS; slot++) {
 		int bucket = descending ? INDEX_BUCKETS - 1 - slot : slot;
 		p->index_row[slot] = first[bucket];
-		lv_label_set_text(p->index_letters[slot], INDEX_TEXT[bucket]);
+	}
+	for (int i = 0; i < p->index_shown; i++) {
+		int slot = p->index_slot_of[i];
+		int bucket = descending ? INDEX_BUCKETS - 1 - slot : slot;
+		lv_label_set_text(p->index_letters[i], INDEX_TEXT[bucket]);
 	}
 
 
@@ -1864,15 +1905,39 @@ static void index_go(panel_t *p, int slot) {
 // gaps around it, so it does not quite fill the box, and arithmetic on the box
 // answers a press near either end with the neighbouring letter.
 static void index_go_at(panel_t *p, lv_point_t point) {
-	for (int slot = 0; slot < INDEX_BUCKETS; slot++) {
-		lv_area_t area;
-		lv_obj_get_coords(p->index_letters[slot], &area);
-		if (point.y <= area.y2) {
-			index_go(p, slot);
-			return;
-		}
+	if (p->index_shown <= 0) {
+		return; // never built
 	}
-	index_go(p, INDEX_BUCKETS - 1); // past the last letter: the last letter
+	if (p->index_shown >= INDEX_BUCKETS) {
+		for (int slot = 0; slot < INDEX_BUCKETS; slot++) {
+			lv_area_t area;
+			lv_obj_get_coords(p->index_letters[slot], &area);
+			if (point.y <= area.y2) {
+				index_go(p, slot);
+				return;
+			}
+		}
+		index_go(p, INDEX_BUCKETS - 1); // past the last letter: the last letter
+		return;
+	}
+
+	// A collapsed strip has no label for most buckets, so the labels' span --
+	// first letter's top to last letter's bottom -- is divided into the whole
+	// twenty-eight instead.  Every letter stays reachable, printed or not.
+	lv_area_t top_area;
+	lv_area_t bottom_area;
+	lv_obj_get_coords(p->index_letters[0], &top_area);
+	lv_obj_get_coords(p->index_letters[p->index_shown - 1], &bottom_area);
+	int span = bottom_area.y2 - top_area.y1;
+	if (span <= 0) {
+		index_go(p, 0);
+		return;
+	}
+	int offset = point.y - top_area.y1;
+	if (offset < 0) {
+		offset = 0;
+	}
+	index_go(p, offset * INDEX_BUCKETS / span);
 }
 
 // The strip carries the page's own gestures as well -- the swipe back and the
@@ -2090,15 +2155,19 @@ static void index_theme_refresh(void) {
 
 // The strip and the big letter, built once with the panel and hidden.
 static void index_build(panel_t *p, gui_config_t *cfg) {
+	bool compact = cfg->screen_width < 320;
+	int bar_width = compact ? INDEX_COMPACT_BAR_WIDTH : INDEX_BAR_WIDTH;
 	int content_top = settingsrow_content_top(cfg);
+	int bar_height = cfg->screen_height - content_top - 8;
 
 	p->index_bar = lv_obj_create(p->screen);
 	lv_obj_remove_style_all(p->index_bar);
-	lv_obj_set_size(p->index_bar, INDEX_BAR_WIDTH, cfg->screen_height - content_top - 8);
+	lv_obj_set_size(p->index_bar, bar_width, bar_height);
 	lv_obj_align(p->index_bar, LV_ALIGN_TOP_RIGHT, -2, content_top + 4);
+	lv_obj_set_style_pad_ver(p->index_bar, INDEX_BAR_PAD_V, 0);
 	lv_obj_set_style_bg_color(p->index_bar, theme()->surface, 0);
 	lv_obj_set_style_bg_opa(p->index_bar, LV_OPA_60, 0);
-	lv_obj_set_style_radius(p->index_bar, INDEX_BAR_WIDTH / 2, 0);
+	lv_obj_set_style_radius(p->index_bar, bar_width / 2, 0);
 	lv_obj_set_scrollable(p->index_bar, false);
 	lv_obj_set_hidden(p->index_bar, true);
 	lv_obj_set_flex_flow(p->index_bar, LV_FLEX_FLOW_COLUMN);
@@ -2116,11 +2185,14 @@ static void index_build(panel_t *p, gui_config_t *cfg) {
 	switcher_attach_back_gesture(p->index_bar);
 	player_sheet_attach_drag(p->index_bar, true);
 
-	for (int i = 0; i < INDEX_BUCKETS; i++) {
+	p->index_shown = index_letters_that_fit(bar_height);
+	for (int i = 0; i < p->index_shown; i++) {
+		p->index_slot_of[i] = index_label_slot(i, p->index_shown);
 		p->index_letters[i] = lv_label_create(p->index_bar);
-		lv_label_set_text(p->index_letters[i], INDEX_TEXT[i]);
+		lv_label_set_text(p->index_letters[i], INDEX_TEXT[p->index_slot_of[i]]);
 		lv_obj_add_style(p->index_letters[i], &theme_style_text_dim, 0);
 		lv_obj_set_style_text_font(p->index_letters[i], &font_ui_14, 0);
+		lv_obj_set_style_pad_all(p->index_letters[i], 0, 0);
 		// The presses belong to the strip as a whole: the letter under the
 		// finger comes from where it is, not from which label it landed on.
 		lv_obj_set_clickable(p->index_letters[i], false);
@@ -2131,11 +2203,11 @@ static void index_build(panel_t *p, gui_config_t *cfg) {
 	// a list of cards, and a card on cards is a card nobody sees.
 	p->index_hint = lv_obj_create(p->screen);
 	lv_obj_remove_style_all(p->index_hint);
-	lv_obj_set_size(p->index_hint, 132, 124);
+	lv_obj_set_size(p->index_hint, compact ? 88 : 132, compact ? 84 : 124);
 	lv_obj_align(p->index_hint, LV_ALIGN_CENTER, 0, 0);
 	lv_obj_set_style_bg_color(p->index_hint, theme()->accent, 0);
 	lv_obj_set_style_bg_opa(p->index_hint, LV_OPA_90, 0);
-	lv_obj_set_style_radius(p->index_hint, 26, 0);
+	lv_obj_set_style_radius(p->index_hint, compact ? 18 : 26, 0);
 	lv_obj_set_scrollable(p->index_hint, false);
 	lv_obj_set_clickable(p->index_hint, false);
 	lv_obj_set_hidden(p->index_hint, true);

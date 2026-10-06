@@ -251,7 +251,7 @@ static void build_login(gui_config_t *cfg) {
 	int field_pitch = cfg->screen_width < 320 ? 50 : 78;
 	password_field = make_field(login_screen, cfg, "password", top + field_pitch);
 	keyboard_style_password(password_field, 0);
-	lv_obj_set_style_pad_right(password_field, 60, 0);
+	lv_obj_set_style_pad_right(password_field, cfg->screen_width < 320 ? 46 : 60, 0);
 
 	lv_obj_t *eye = lv_btn_create(login_screen);
 	lv_obj_set_size(eye, cfg->screen_width < 320 ? 44 : 56, cfg->screen_width < 320 ? 44 : 56);

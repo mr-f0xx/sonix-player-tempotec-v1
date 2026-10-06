@@ -7,6 +7,7 @@
 
 #include "src/gui/fonts/fonts.h"
 #include "src/gui/shell/gui.h"
+#include "src/gui/board_profile.h"
 #include "src/gui/shell/theme.h"
 #include "src/system/core/lang.h"
 #include "src/system/device/firmware.h"
@@ -16,6 +17,11 @@
 
 #define CARD_W 420
 #define BUTTON_H 64
+// The card is already clamped to the screen, but its contents are not: three
+// 64 px buttons, a progress bar, two labels and notes worth two fifths of the
+// panel add up to more than a 320 px screen holds, and the card is centred, so
+// the overflow is cut off at both ends.
+#define COMPACT_BUTTON_H 40
 #define BUTTONS 3
 #define POLL_MS 200
 
@@ -85,11 +91,11 @@ static void build(void) {
 	lv_obj_set_height(card, LV_SIZE_CONTENT);
 	lv_obj_center(card);
 	lv_obj_add_style(card, &theme_style_card, 0);
-	lv_obj_set_style_radius(card, 18, 0);
+	lv_obj_set_style_radius(card, bp_pick(14, 18), 0);
 	lv_obj_set_style_border_width(card, 0, 0);
 	lv_obj_set_style_shadow_width(card, 0, 0);
-	lv_obj_set_style_pad_all(card, 22, 0);
-	lv_obj_set_style_pad_gap(card, 14, 0);
+	lv_obj_set_style_pad_all(card, bp_pick(10, 22), 0);
+	lv_obj_set_style_pad_gap(card, bp_pick(6, 14), 0);
 	lv_obj_set_scrollable(card, false);
 	lv_obj_set_flex_flow(card, LV_FLEX_FLOW_COLUMN);
 	lv_obj_set_flex_align(card, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
@@ -111,7 +117,7 @@ static void build(void) {
 	// A fixed height, set in fit_notes(): with LV_SIZE_CONTENT the box is
 	// measured with its scroll offset, and dragging past the end of the notes
 	// shrinks it and the card with it.
-	notes_max_h = screen_h * NOTES_MAX_PERCENT / 100;
+	notes_max_h = screen_h * bp_pick(26, NOTES_MAX_PERCENT) / 100;
 	notes_box = lv_obj_create(card);
 	lv_obj_set_width(notes_box, lv_pct(100));
 	lv_obj_set_height(notes_box, notes_max_h);
@@ -134,7 +140,7 @@ static void build(void) {
 
 	bar = lv_bar_create(card);
 	lv_obj_set_width(bar, lv_pct(100));
-	lv_obj_set_height(bar, 12);
+	lv_obj_set_height(bar, bp_pick(8, 12));
 	lv_bar_set_range(bar, 0, 1000);
 	lv_obj_set_style_radius(bar, LV_RADIUS_CIRCLE, LV_PART_MAIN);
 	lv_obj_set_style_bg_opa(bar, LV_OPA_40, LV_PART_MAIN);
@@ -146,15 +152,15 @@ static void build(void) {
 	lv_obj_set_style_bg_opa(column, 0, 0);
 	lv_obj_set_style_border_width(column, 0, 0);
 	lv_obj_set_style_pad_all(column, 0, 0);
-	lv_obj_set_style_pad_gap(column, 12, 0);
+	lv_obj_set_style_pad_gap(column, bp_pick(6, 12), 0);
 	lv_obj_set_scrollable(column, false);
 	lv_obj_set_flex_flow(column, LV_FLEX_FLOW_COLUMN);
 
 	for (int i = 0; i < BUTTONS; i++) {
 		lv_obj_t *btn = lv_btn_create(column);
 		lv_obj_set_width(btn, lv_pct(100));
-		lv_obj_set_height(btn, BUTTON_H);
-		lv_obj_set_style_radius(btn, 12, 0);
+		lv_obj_set_height(btn, bp_pick(COMPACT_BUTTON_H, BUTTON_H));
+		lv_obj_set_style_radius(btn, bp_pick(bp_tile_radius(), 12), 0);
 		lv_obj_set_style_border_width(btn, 0, 0);
 		lv_obj_set_style_shadow_width(btn, 0, 0);
 		lv_obj_add_event_cb(btn, button_cb, LV_EVENT_CLICKED, (void *)(intptr_t)i);

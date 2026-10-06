@@ -2,6 +2,7 @@
 
 #include "lvgl/lvgl.h"
 
+#include "src/gui/board_profile.h"
 #include "src/gui/fonts/fonts.h"
 #include "src/gui/shell/icons.h"
 #include "src/gui/shell/keyboard.h"
@@ -25,12 +26,23 @@ lv_obj_t *kblayoutpage_screen;
 // is held near its top or bottom edge.
 // ---------------------------------------------------------------------------
 
-#define ROW_HEIGHT 72
-#define ROW_GAP 8
+// Absolute-pixel rows, as in ccsettings.c: a 72 px row with 64 px of grip and
+// 20 px of padding is most of a 240 px panel, so each number has a compact
+// counterpart and the file keeps using one set of names for both.
+static int kb_row_height(void) { return bp_pick(48, 72); }
+static int kb_row_gap(void) { return bp_pick(4, 8); }
+static int kb_row_radius(void) { return bp_pick(bp_tile_radius(), 12); }
+static int kb_heading_h(void) { return bp_pick(26, 40); }
+static int kb_grip_size(void) { return bp_pick(38, 64); }
+static int kb_row_pad(void) { return bp_pick(8, 20); }
+
+#define ROW_HEIGHT kb_row_height()
+#define ROW_GAP kb_row_gap()
 #define ROW_PITCH (ROW_HEIGHT + ROW_GAP)
-#define ROW_RADIUS 12
-#define HEADING_H 40
-#define GRIP_SIZE 64
+#define ROW_RADIUS kb_row_radius()
+#define HEADING_H kb_heading_h()
+#define GRIP_SIZE kb_grip_size()
+#define ROW_PAD kb_row_pad()
 
 // The second list is a drop target even when it is empty, so it is never
 // shorter than one row.
@@ -41,8 +53,8 @@ lv_obj_t *kblayoutpage_screen;
 
 // A held row this close to either end of the page scrolls it by EDGE_STEP per
 // input read.
-#define EDGE_PX 70
-#define EDGE_STEP 18
+#define EDGE_PX bp_pick(40, 70)
+#define EDGE_STEP bp_pick(12, 18)
 
 typedef struct {
 	lv_obj_t *row;
@@ -220,7 +232,7 @@ static void drag_cb(lv_event_t *e) {
 		lv_obj_set_style_border_width(drag_ghost, 2, 0);
 		lv_obj_set_style_border_color(drag_ghost, theme()->accent, 0);
 		lv_obj_set_style_shadow_width(drag_ghost, 0, 0);
-		lv_obj_set_style_pad_hor(drag_ghost, 20, 0);
+		lv_obj_set_style_pad_hor(drag_ghost, ROW_PAD, 0);
 		lv_obj_set_scrollable(drag_ghost, false);
 
 		lv_obj_t *label = lv_label_create(drag_ghost);
@@ -303,7 +315,7 @@ void kblayoutpage_init(gui_config_t *cfg) {
 		lv_obj_set_style_radius(row, ROW_RADIUS, 0);
 		lv_obj_set_style_border_width(row, 0, 0);
 		lv_obj_set_style_shadow_width(row, 0, 0);
-		lv_obj_set_style_pad_hor(row, 20, 0);
+		lv_obj_set_style_pad_hor(row, ROW_PAD, 0);
 		lv_obj_set_scrollable(row, false);
 
 		entries[i].row = row;

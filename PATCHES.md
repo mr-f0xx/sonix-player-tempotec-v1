@@ -38,6 +38,27 @@ and the on-screen keyboard uses a 144 px compact tray with narrower action
 keys. Quick Settings retains eight controls in a 2×4 layout; its buttons,
 artwork and two card heights are reduced to fit the 320 px sheet.
 
+The **A–Z index strip** draws as many letters as the strip is tall enough to
+hold rather than all twenty-eight. On the 240×320 panel about fourteen fit; the
+rest of the alphabet stays reachable because a collapsed strip maps a press by
+position across the letters' span instead of by which label it landed on. Laid
+out in full, the column overflowed the bar — LVGL's flex layout has no negative
+gaps — so the lower letters were drawn outside it and the bottom of the strip
+jumped to the wrong rows. The strip is 20 px wide on the V1 and the big letter
+under the finger is an 88×84 card.
+
+Settings pages whose layout is written in pixels rather than built from
+`settingsrow` rows now carry compact counterparts for every one of those
+numbers: Date and time (five rollers, the zone list, the pills and Confirm),
+the first-boot language panel, the equaliser band card (which scrolls sideways
+on the V1 instead of squeezing ten columns into 216 px), MSEB, the parametric
+graph, brightness and keyboard type, System's microSD card, Processes, Artist
+exceptions, the firmware-update card, the screensaver strip and the two
+drag-to-reorder pages (Control centre, Keyboard layout). **Remap buttons** has
+no V1 photo and no room for a 480-pixel one, so on that board it is the same
+page as a plain list: one row per button, its action on the right, the same
+chooser on a tap.
+
 ### Touch input is intentionally not guessed
 
 This profile does **not** hard-code a `/dev/input/eventN` node or a speculative

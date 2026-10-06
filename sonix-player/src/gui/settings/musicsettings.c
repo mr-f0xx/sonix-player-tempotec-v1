@@ -5,6 +5,7 @@
 
 #include "lvgl/lvgl.h"
 
+#include "src/gui/board_profile.h"
 #include "src/gui/shell/confirm.h"
 #include "src/gui/shell/icons.h"
 #include "src/gui/fonts/fonts.h"
@@ -859,13 +860,13 @@ static void build_mseb_page(gui_config_t *cfg) {
 	for (int i = 0; i < MSEB_BANDS; i++) {
 		lv_obj_t *card = lv_obj_create(container);
 		lv_obj_set_width(card, lv_pct(100));
-		lv_obj_set_height(card, 104);
+		lv_obj_set_height(card, bp_pick(70, 104));
 		lv_obj_add_style(card, &theme_style_card, 0);
-		lv_obj_set_style_radius(card, 12, 0);
+		lv_obj_set_style_radius(card, bp_pick(bp_tile_radius(), 12), 0);
 		lv_obj_set_style_border_width(card, 0, 0);
 		lv_obj_set_style_shadow_width(card, 0, 0);
-		lv_obj_set_style_pad_hor(card, 20, 0);
-		lv_obj_set_style_pad_ver(card, 12, 0);
+		lv_obj_set_style_pad_hor(card, bp_pick(8, 20), 0);
+		lv_obj_set_style_pad_ver(card, bp_pick(8, 12), 0);
 		lv_obj_set_scrollable(card, false);
 		lv_obj_set_event_bubble(card, true);
 
@@ -884,7 +885,7 @@ static void build_mseb_page(gui_config_t *cfg) {
 		lv_obj_t *slider = lv_slider_create(card);
 		lv_obj_set_width(slider, lv_pct(100));
 		lv_obj_set_height(slider, 10);
-		lv_obj_align(slider, LV_ALIGN_BOTTOM_MID, 0, -10);
+		lv_obj_align(slider, LV_ALIGN_BOTTOM_MID, 0, bp_pick(-4, -10));
 		lv_slider_set_range(slider, -mseb_get_range(), mseb_get_range());
 		// MSEB sliders are bipolar: zero sits in the middle and the coloured
 		// bar grows from there, forwards for positives and backwards for
@@ -901,7 +902,7 @@ static void build_mseb_page(gui_config_t *cfg) {
 		lv_obj_set_style_radius(slider, LV_RADIUS_CIRCLE, LV_PART_KNOB);
 		lv_obj_set_style_bg_color(slider, lv_color_white(), LV_PART_KNOB);
 		theme_apply_slider_knob(slider);
-		lv_obj_set_style_pad_all(slider, 7, LV_PART_KNOB);
+		lv_obj_set_style_pad_all(slider, bp_pick(5, 7), LV_PART_KNOB);
 		lv_obj_set_style_shadow_width(slider, 6, LV_PART_KNOB);
 		lv_obj_set_style_shadow_opa(slider, LV_OPA_30, LV_PART_KNOB);
 		lv_obj_set_style_shadow_color(slider, lv_color_black(), LV_PART_KNOB);
@@ -1041,26 +1042,35 @@ static void build_eq_page(gui_config_t *cfg) {
 	}
 
 	// The band card: ten vertical sliders side by side, frequency underneath.
+	//
+	// Ten columns do not fit across 240 px, and a 360 px card is taller than
+	// the whole V1 panel, so on that board the card is as tall as the page can
+	// give it and the row of bands scrolls sideways inside it. Squeezing ten
+	// columns into 216 px instead would leave 21 px each: narrower than the
+	// frequency under them, which is what made the page unreadable.
 	lv_obj_t *card = lv_obj_create(container);
 	lv_obj_set_width(card, lv_pct(100));
-	lv_obj_set_height(card, 360);
+	lv_obj_set_height(card, bp_pick(176, 360));
 	lv_obj_add_style(card, &theme_style_card, 0);
-	lv_obj_set_style_radius(card, 12, 0);
+	lv_obj_set_style_radius(card, bp_pick(bp_tile_radius(), 12), 0);
 	lv_obj_set_style_border_width(card, 0, 0);
 	lv_obj_set_style_shadow_width(card, 0, 0);
-	lv_obj_set_style_pad_all(card, 14, 0);
+	lv_obj_set_style_pad_all(card, bp_pick(8, 14), 0);
 	lv_obj_set_style_pad_gap(card, 0, 0);
-	lv_obj_set_scrollable(card, false);
+	lv_obj_set_scrollable(card, bp_is_tempotec_v1());
+	lv_obj_set_scroll_dir(card, LV_DIR_HOR);
+	lv_obj_set_scrollbar_mode(card, LV_SCROLLBAR_MODE_AUTO);
 	lv_obj_set_flex_flow(card, LV_FLEX_FLOW_ROW);
-	lv_obj_set_flex_align(card, LV_FLEX_ALIGN_SPACE_EVENLY, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+	lv_obj_set_flex_align(card, bp_pick(LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_SPACE_EVENLY), LV_FLEX_ALIGN_CENTER,
+						  LV_FLEX_ALIGN_CENTER);
 
 	for (int i = 0; i < EQ_BANDS; i++) {
 		lv_obj_t *column = lv_obj_create(card);
-		lv_obj_set_size(column, 38, lv_pct(100));
+		lv_obj_set_size(column, bp_pick(30, 38), lv_pct(100));
 		lv_obj_set_style_bg_opa(column, 0, 0);
 		lv_obj_set_style_border_width(column, 0, 0);
 		lv_obj_set_style_pad_all(column, 0, 0);
-		lv_obj_set_style_pad_gap(column, 8, 0);
+		lv_obj_set_style_pad_gap(column, bp_pick(4, 8), 0);
 		lv_obj_set_scrollable(column, false);
 		lv_obj_set_flex_flow(column, LV_FLEX_FLOW_COLUMN);
 		lv_obj_set_flex_align(column, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
@@ -1093,7 +1103,7 @@ static void build_eq_page(gui_config_t *cfg) {
 		lv_obj_t *label = lv_label_create(column);
 		lv_label_set_text(label, text);
 		lv_obj_add_style(label, &theme_style_text_dim, 0);
-		lv_obj_set_style_text_font(label, &font_ui_18, 0);
+		lv_obj_set_style_text_font(label, bp_is_tempotec_v1() ? &font_ui_14 : &font_ui_18, 0);
 	}
 
 	// A dead slider looks dead: half opacity while the EQ is off.

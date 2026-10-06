@@ -55,6 +55,7 @@ int bp_status_bar_h(void) { return bp_is_tempotec_v1() ? 24 : 44; }
 int bp_tile_radius(void) { return bp_is_tempotec_v1() ? 10 : 12; }
 int bp_header_button_size(void) { return bp_is_tempotec_v1() ? 36 : 56; }
 int bp_header_button_gap(void) { return bp_is_tempotec_v1() ? 4 : 6; }
+int bp_pick(int compact, int regular) { return bp_is_tempotec_v1() ? compact : regular; }
 
 const lv_font_t *bp_title_font(void) { return bp_is_tempotec_v1() ? &font_ui_16 : &font_ui_26; }
 const lv_font_t *bp_artist_font(void) { return bp_is_tempotec_v1() ? &font_ui_14 : &font_ui_24; }

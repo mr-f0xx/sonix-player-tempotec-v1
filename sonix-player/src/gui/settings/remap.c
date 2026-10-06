@@ -11,6 +11,7 @@
 
 #include "lvgl/lvgl.h"
 
+#include "src/gui/board_profile.h"
 #include "src/gui/fonts/fonts.h"
 #include "src/gui/shell/popover.h"
 #include "src/gui/shell/settingsrow.h"
@@ -627,10 +628,39 @@ static void refresh_theme(void) {
 	}
 }
 
+// The V1 has no photo of its flank, and no room for one: the HiBy pictures are
+// 185x411 and 229x663, both taller than a 320 px panel, and the column of rows
+// beside them assumes the 480 px width that is left over.  Rather than draw
+// another player's case at the wrong size, the compact profile shows the same
+// page as a plain list -- one row per button, its action on the right, the
+// same chooser on a tap.  Photos are never loaded, so side_load() is never
+// asked for a file that does not exist.
+static void build_list_page(gui_config_t *cfg) {
+	lv_obj_t *container = settingsrow_page(remap_screen, cfg, "remap_buttons");
+	lv_obj_set_scrollable(remap_screen, false);
+
+	row_font = &font_ui_18;
+	for (int i = 0; i < KEYMAP_BTN_COUNT; i++) {
+		lv_obj_t *value = NULL;
+		rows[i] = settingsrow_add(container, BUTTON_NAMES[i], &value, pick_clicked_cb, (void *)(intptr_t)i);
+		value_labels[i] = value;
+	}
+
+	refresh_values();
+	lv_obj_add_event_cb(remap_screen, screen_loaded_cb, LV_EVENT_SCREEN_LOADED, NULL);
+	switcher_attach_back_gesture(remap_screen);
+	fonts_register_change(refresh_values);
+}
+
 void remap_init(gui_config_t *cfg) {
 	remap_screen = lv_obj_create(NULL);
 	lv_obj_add_style(remap_screen, &theme_style_screen, 0);
 	lv_obj_set_scrollable(remap_screen, false);
+
+	if (bp_is_tempotec_v1()) {
+		build_list_page(cfg);
+		return;
+	}
 
 	const sysinfo_model_t *model = sysinfo_model();
 	if (!model) {

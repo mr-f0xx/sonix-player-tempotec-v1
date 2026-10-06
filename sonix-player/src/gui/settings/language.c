@@ -1,5 +1,6 @@
 #include "language.h"
 
+#include "src/gui/board_profile.h"
 #include "src/gui/fonts/fonts.h"
 #include "src/gui/shell/icons.h"
 #include "src/gui/shell/settingsrow.h"
@@ -177,10 +178,10 @@ static void build_panel(gui_config_t *cfg) {
 	// panel can centre because two cards and a button leave room to; this one
 	// does not.
 	lv_obj_set_flex_align(panel, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_START);
-	lv_obj_set_style_pad_gap(panel, 18, 0);
+	lv_obj_set_style_pad_gap(panel, bp_is_tempotec_v1() ? 8 : 18, 0);
 
 	// Where the status bar would be, if this panel did not cover it.
-	lv_obj_set_style_pad_top(panel, cfg->top_bar_height + 10, 0);
+	lv_obj_set_style_pad_top(panel, cfg->top_bar_height + (bp_is_tempotec_v1() ? 4 : 10), 0);
 
 	// The heading is the first item in the column rather than pinned out of it,
 	// the way the date panel does it: a pinned label is positioned from inside
@@ -212,7 +213,9 @@ static void build_panel(gui_config_t *cfg) {
 	}
 
 	lv_obj_t *confirm = lv_btn_create(panel);
-	lv_obj_set_size(confirm, 228, 64);
+	// 228 px of a 240 px panel leaves no inset at all, and 64 px of the 320 px
+	// one is a fifth of the page: the first-boot button follows the panel.
+	lv_obj_set_size(confirm, bp_is_tempotec_v1() ? 150 : 228, bp_is_tempotec_v1() ? 40 : 64);
 	lv_obj_set_style_radius(confirm, LV_RADIUS_CIRCLE, 0);
 	lv_obj_set_style_bg_color(confirm, theme()->accent, 0);
 	lv_obj_set_style_shadow_width(confirm, 0, 0);
