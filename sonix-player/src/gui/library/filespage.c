@@ -12,6 +12,7 @@
 #include "lvgl/lvgl.h"
 
 #include "src/gui/shell/confirm.h"
+#include "src/gui/board_profile.h"
 #include "src/gui/fonts/fonts.h"
 #include "src/gui/shell/gui.h"
 #include "src/gui/shell/icons.h"
@@ -59,7 +60,16 @@ static bool gesture_not_tap(void) {
 #define ROWS_FIRST 14
 #define ROWS_MORE 14
 
-#define ROW_HEIGHT 76
+// This page was written only for the 480-px players: at 76 px a row the V1
+// showed three of them.  Every number a row is built from goes through
+// bp_pick() now, to the same 44 px row the library lists use.
+#define ROW_HEIGHT bp_pick(44, 76)
+#define FILE_ROW_RADIUS bp_pick(10, 12)
+#define FILE_ROW_PAD_HOR bp_pick(8, 16)
+#define FILE_ROW_GAP bp_pick(8, 14)
+#define FILE_ROW_DOTS bp_pick(28, 44)
+#define FILE_NAME_FONT (bp_is_tempotec_v1() ? &font_ui_16 : &font_ui_22)
+#define FILE_SIZE_FONT (bp_is_tempotec_v1() ? &font_ui_14 : &font_ui_18)
 
 typedef struct {
 	char *name;	 // in the pool
@@ -736,11 +746,16 @@ static void pick_rebuild(void) {
 		lv_obj_set_size(row, lv_pct(100), ROW_HEIGHT);
 		lv_obj_add_style(row, &theme_style_card, 0);
 		lv_obj_add_style(row, &theme_style_card_pressed, LV_STATE_PRESSED);
-		lv_obj_set_style_radius(row, 12, 0);
+		lv_obj_set_style_radius(row, FILE_ROW_RADIUS, 0);
 		lv_obj_set_style_border_width(row, 0, 0);
 		lv_obj_set_style_shadow_width(row, 0, 0);
-		lv_obj_set_style_pad_hor(row, 16, 0);
-		lv_obj_set_style_pad_column(row, 14, 0);
+		lv_obj_set_style_pad_hor(row, FILE_ROW_PAD_HOR, 0);
+		lv_obj_set_style_pad_column(row, FILE_ROW_GAP, 0);
+		// A button keeps a default vertical padding big enough to swallow a
+		// 44 px row whole; the 480-px players keep theirs.
+		if (bp_is_tempotec_v1()) {
+			lv_obj_set_style_pad_ver(row, 2, 0);
+		}
 		lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
 		lv_obj_set_flex_align(row, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 		// The row owns the copy the callback reads: the array above is freed
@@ -761,9 +776,9 @@ static void pick_rebuild(void) {
 		lv_label_set_text(label, names[i]);
 		lv_label_set_long_mode(label, LV_LABEL_LONG_DOT);
 		lv_obj_set_flex_grow(label, 1);
-		lv_obj_set_height(label, 32);
+		lv_obj_set_height(label, lv_font_get_line_height(FILE_NAME_FONT));
 		lv_obj_add_style(label, &theme_style_text, 0);
-		lv_obj_set_style_text_font(label, &font_ui_22, 0);
+		lv_obj_set_style_text_font(label, FILE_NAME_FONT, 0);
 	}
 	free(names);
 }
@@ -984,11 +999,16 @@ static void build_row(int index) {
 	lv_obj_set_size(row, lv_pct(100), ROW_HEIGHT);
 	lv_obj_add_style(row, &theme_style_card, 0);
 	lv_obj_add_style(row, &theme_style_card_pressed, LV_STATE_PRESSED);
-	lv_obj_set_style_radius(row, 12, 0);
+	lv_obj_set_style_radius(row, FILE_ROW_RADIUS, 0);
 	lv_obj_set_style_border_width(row, 0, 0);
 	lv_obj_set_style_shadow_width(row, 0, 0);
-	lv_obj_set_style_pad_hor(row, 16, 0);
-	lv_obj_set_style_pad_column(row, 14, 0);
+	lv_obj_set_style_pad_hor(row, FILE_ROW_PAD_HOR, 0);
+	lv_obj_set_style_pad_column(row, FILE_ROW_GAP, 0);
+	// A button keeps a default vertical padding big enough to swallow a
+	// 44 px row whole; the 480-px players keep theirs.
+	if (bp_is_tempotec_v1()) {
+		lv_obj_set_style_pad_ver(row, 2, 0);
+	}
 	lv_obj_set_event_bubble(row, true);
 	lv_obj_add_event_cb(row, row_clicked_cb, LV_EVENT_CLICKED, (void *)(intptr_t)index);
 	lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
@@ -1008,9 +1028,9 @@ static void build_row(int index) {
 	lv_obj_set_flex_grow(label, 1);
 	// One line, then dots. Without a height the label wraps instead, and a long
 	// name then grows past the fixed row it lives in.
-	lv_obj_set_height(label, 32);
+	lv_obj_set_height(label, lv_font_get_line_height(FILE_NAME_FONT));
 	lv_obj_add_style(label, &theme_style_text, 0);
-	lv_obj_set_style_text_font(label, &font_ui_22, 0);
+	lv_obj_set_style_text_font(label, FILE_NAME_FONT, 0);
 
 	// The size, asked of the card only for the rows that are really built.
 	if (!entry->dir) {
@@ -1022,12 +1042,12 @@ static void build_row(int index) {
 			lv_obj_t *size_label = lv_label_create(row);
 			lv_label_set_text(size_label, text);
 			lv_obj_add_style(size_label, &theme_style_text_dim, 0);
-			lv_obj_set_style_text_font(size_label, &font_ui_18, 0);
+			lv_obj_set_style_text_font(size_label, FILE_SIZE_FONT, 0);
 		}
 	}
 
 	lv_obj_t *dots = lv_btn_create(row);
-	lv_obj_set_size(dots, 44, 44);
+	lv_obj_set_size(dots, FILE_ROW_DOTS, FILE_ROW_DOTS);
 	lv_obj_set_style_bg_opa(dots, LV_OPA_TRANSP, 0);
 	lv_obj_set_style_border_width(dots, 0, 0);
 	lv_obj_set_style_shadow_width(dots, 0, 0);

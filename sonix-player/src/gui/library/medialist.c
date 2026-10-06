@@ -38,13 +38,23 @@ lv_obj_t *medialist_albums_screen;
 // Each number goes through bp_pick(): the regular 480-px geometry stays as it
 // was, and the 240x320 V1 gets rows sized for its panel -- the old 100-px rows
 // with 14 px of padding left barely two and a half of them visible at once.
-#define ROW_HEIGHT bp_pick(64, 100)
+// The V1 list viewport is exactly 248 px (320 less the 72 px of status bar and
+// title row), so five rows need a pitch of 49 or under.  44 + 5 leaves the row
+// 36 px of content between its paddings, which is a title line and a detail
+// line with a pixel to spare.
+#define ROW_HEIGHT bp_pick(44, 100)
 #define ROW_GAP bp_pick(5, 8)
 #define ROW_PITCH (ROW_HEIGHT + ROW_GAP)
 #define ROW_RADIUS bp_pick(10, 12)
-#define ROW_PAD bp_pick(8, 14)
-#define THUMB_SIZE bp_pick(48, 72)
-#define QUALITY_GAP bp_pick(2, 4) // between a title and the badge under it
+#define ROW_PAD bp_pick(4, 14)
+#define THUMB_SIZE bp_pick(36, 72)
+#define QUALITY_GAP bp_pick(0, 4) // between a title and the badge under it
+
+// The row's two lines.  On the V1 these are a step below the shell's usual
+// sizes: at the regular font_ui_24/font_ui_20 pair the two lines alone are
+// taller than the whole compact row.
+#define ROW_TITLE_FONT (bp_is_tempotec_v1() ? &font_ui_18 : &font_ui_24)
+#define ROW_DETAIL_FONT (bp_is_tempotec_v1() ? &font_ui_14 : &font_ui_20)
 #define ROW_POOL 12
 
 // How many rows are held in RAM for a query-backed list: the twelve on screen
@@ -57,7 +67,7 @@ lv_obj_t *medialist_albums_screen;
 // space for it -- the thumbnail still starts at ROW_PAD whether the mark is
 // there or not.
 #define PLAYMARK_WIDTH bp_pick(4, 6)
-#define PLAYMARK_HEIGHT bp_pick(36, 52)
+#define PLAYMARK_HEIGHT bp_pick(26, 52)
 #define PLAYMARK_INSET bp_pick(3, 4) // from the row's left edge
 
 // Where in the coverloader's slot table each pool lives (the browser owns
@@ -3421,9 +3431,9 @@ static void build_panel(panel_t *p, gui_config_t *cfg, bool is_tracks, int slot_
 		lv_obj_set_width(row->label, LV_PCT(100));
 		// One line, always. LV_LABEL_LONG_DOT wraps before it truncates, and a
 		// title on two lines pushes the badge under it out of the row.
-		lv_obj_set_height(row->label, lv_font_get_line_height(&font_ui_24));
+		lv_obj_set_height(row->label, lv_font_get_line_height(ROW_TITLE_FONT));
 		lv_obj_add_style(row->label, &theme_style_text, 0);
-		lv_obj_set_style_text_font(row->label, &font_ui_24, 0);
+		lv_obj_set_style_text_font(row->label, ROW_TITLE_FONT, 0);
 
 		row->detail = lv_obj_create(row->text);
 		lv_obj_remove_style_all(row->detail);
@@ -3450,9 +3460,9 @@ static void build_panel(panel_t *p, gui_config_t *cfg, bool is_tracks, int slot_
 		lv_label_set_text(row->artist, "");
 		lv_label_set_long_mode(row->artist, LV_LABEL_LONG_DOT);
 		lv_obj_set_flex_grow(row->artist, 1);
-		lv_obj_set_height(row->artist, lv_font_get_line_height(&font_ui_20));
+		lv_obj_set_height(row->artist, lv_font_get_line_height(ROW_DETAIL_FONT));
 		lv_obj_add_style(row->artist, &theme_style_text_dim, 0);
-		lv_obj_set_style_text_font(row->artist, &font_ui_20, 0);
+		lv_obj_set_style_text_font(row->artist, ROW_DETAIL_FONT, 0);
 		lv_obj_set_hidden(row->artist, true);
 
 		// Out of the flex layout on purpose: it sits in the row's own left

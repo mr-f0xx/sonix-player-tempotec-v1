@@ -22,16 +22,11 @@ on:
       - sonix-player/src/**
   # Working branches build themselves: the image is the only way to try a
   # layout change on the device, and a dispatch needs a token that can write
-  # to Actions.
+  # to Actions. No path filter here on purpose - a session branch has to be
+  # able to produce an image on request, not only when a build input changed.
   push:
     branches:
       - arena/**
-    paths:
-      - .github/workflows/build-tempotec-v1.yml
-      - sonix-packer/**
-      - sonix-player/Makefile
-      - sonix-player/rockboxdev/**
-      - sonix-player/src/**
 
 permissions:
   contents: read

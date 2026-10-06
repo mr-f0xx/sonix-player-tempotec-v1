@@ -13,6 +13,10 @@
 
 #define GRID_GAP 14
 #define COMPACT_TILE_ICON_MAX 46
+// The empty-state art is alone on the page rather than inside a 75 px tile, so
+// it can be bigger than a tile icon and still leave the sentence and the scan
+// button their room.
+#define COMPACT_EMPTY_ICON_MAX 56
 
 static bool compact_grid(void) { return bp_is_tempotec_v1(); }
 static int grid_gap(void) { return compact_grid() ? 6 : GRID_GAP; }
@@ -180,6 +184,7 @@ lv_obj_t *gridpage_build(lv_obj_t *screen, gui_config_t *cfg, const grid_entry_t
 
 lv_obj_t *gridpage_empty_panel(lv_obj_t *screen, gui_config_t *cfg, const lv_image_dsc_t *icon, const char *text,
 							   lv_event_cb_t scan_cb) {
+	const bool compact = compact_grid();
 	int top = settingsrow_content_top(cfg);
 
 	lv_obj_t *panel = lv_obj_create(screen);
@@ -188,16 +193,33 @@ lv_obj_t *gridpage_empty_panel(lv_obj_t *screen, gui_config_t *cfg, const lv_ima
 	lv_obj_align(panel, LV_ALIGN_TOP_LEFT, 0, top);
 	lv_obj_set_style_pad_hor(panel, cfg->padding * 2, 0);
 	lv_obj_set_style_pad_bottom(panel, cfg->padding * 2, 0);
-	lv_obj_set_style_pad_row(panel, 22, 0);
+	lv_obj_set_style_pad_row(panel, bp_pick(8, 22), 0);
 	lv_obj_set_scrollable(panel, false);
 	lv_obj_set_flex_flow(panel, LV_FLEX_FLOW_COLUMN);
 	lv_obj_set_flex_align(panel, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 	lv_obj_set_hidden(panel, true);
 
+	// The source art is 128 px, which is more than half of the V1's 236 px of
+	// content height on its own.  As on the tiles, the drawing *and* the
+	// layout box both have to shrink: lv_image_set_scale() alone would leave a
+	// 128 px box in the flex column and push the button off the bottom of the
+	// panel, which is exactly what the full-size geometry used to do here.
 	lv_obj_t *picture = lv_image_create(panel);
 	lv_image_set_src(picture, icon);
 	lv_obj_add_style(picture, &theme_style_icon, 0);
 	lv_obj_set_style_image_recolor_opa(picture, LV_OPA_COVER, 0);
+	if (compact && icon) {
+		int source_w = (int)icon->header.w;
+		int source_h = (int)icon->header.h;
+		int max_side = LV_MAX(source_w, source_h);
+		if (max_side > COMPACT_EMPTY_ICON_MAX) {
+			int icon_w = LV_MAX(1, source_w * COMPACT_EMPTY_ICON_MAX / max_side);
+			int icon_h = LV_MAX(1, source_h * COMPACT_EMPTY_ICON_MAX / max_side);
+			lv_obj_set_size(picture, icon_w, icon_h);
+			lv_image_set_inner_align(picture, LV_IMAGE_ALIGN_CENTER);
+			lv_image_set_scale(picture, (uint32_t)(LV_SCALE_NONE * COMPACT_EMPTY_ICON_MAX / max_side));
+		}
+	}
 
 	lv_obj_t *label = lv_label_create(panel);
 	lv_label_set_text(label, tr(text));
@@ -205,10 +227,15 @@ lv_obj_t *gridpage_empty_panel(lv_obj_t *screen, gui_config_t *cfg, const lv_ima
 	lv_obj_set_width(label, lv_pct(100));
 	lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_CENTER, 0);
 	lv_obj_add_style(label, &theme_style_text_dim, 0);
-	lv_obj_set_style_text_font(label, &font_ui_24, 0);
+	// One step down from the regular size on the V1: this sentence is the
+	// longest piece of running text in the shell, and a translation of it has
+	// to be able to wrap to six lines and still leave room for the button.
+	lv_obj_set_style_text_font(label, compact ? &font_ui_20 : &font_ui_24, 0);
 
+	// 240 px is the full width of the V1 panel, so the regular button was also
+	// wider than the padded column it sits in.
 	lv_obj_t *button = lv_btn_create(panel);
-	lv_obj_set_size(button, 240, 68);
+	lv_obj_set_size(button, bp_pick(132, 240), bp_pick(38, 68));
 	lv_obj_add_style(button, &theme_style_card_pressed, LV_STATE_PRESSED);
 	lv_obj_set_style_bg_color(button, theme()->accent, 0);
 	lv_obj_set_style_bg_opa(button, LV_OPA_COVER, 0);
@@ -218,7 +245,7 @@ lv_obj_t *gridpage_empty_panel(lv_obj_t *screen, gui_config_t *cfg, const lv_ima
 
 	lv_obj_t *button_label = lv_label_create(button);
 	lv_label_set_text(button_label, tr("scan"));
-	lv_obj_set_style_text_font(button_label, &font_ui_24, 0);
+	lv_obj_set_style_text_font(button_label, compact ? &font_ui_20 : &font_ui_24, 0);
 	lv_obj_set_style_text_color(button_label, lv_color_white(), 0);
 	lv_obj_center(button_label);
 

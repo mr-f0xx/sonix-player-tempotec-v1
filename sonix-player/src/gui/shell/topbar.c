@@ -966,10 +966,16 @@ void topbar_init(gui_config_t *cfg) {
 	// above both. The cavity is sized by scaling both edges and taking the
 	// difference rather than scaling width and height directly: rounding each
 	// independently leaves the fill a pixel short of the bottom of the shell.
-	cavity_x = (BATTERY_CAVITY_X * battery_icon_size) / 24;
-	cavity_y = (BATTERY_CAVITY_Y * battery_icon_size) / 24;
-	cavity_w = (((BATTERY_CAVITY_X + BATTERY_CAVITY_W) * battery_icon_size + 23) / 24) - cavity_x;
-	cavity_h = (((BATTERY_CAVITY_Y + BATTERY_CAVITY_H) * battery_icon_size + 23) / 24) - cavity_y;
+	//
+	// Both edges are rounded to nearest. Flooring the near edge and taking the
+	// ceiling of the far one, as this did, makes the fill up to two pixels
+	// wider and taller than the hole it is supposed to sit in. At the 38 px
+	// icon that is a hairline; at the V1's 20 px icon the fill is 13x10 in an
+	// 11.7x8.3 cavity, and it spills out past the outline on three sides.
+	cavity_x = (BATTERY_CAVITY_X * battery_icon_size + 12) / 24;
+	cavity_y = (BATTERY_CAVITY_Y * battery_icon_size + 12) / 24;
+	cavity_w = (((BATTERY_CAVITY_X + BATTERY_CAVITY_W) * battery_icon_size + 12) / 24) - cavity_x;
+	cavity_h = (((BATTERY_CAVITY_Y + BATTERY_CAVITY_H) * battery_icon_size + 12) / 24) - cavity_y;
 
 	bat_widget = lv_obj_create(container_right);
 	lv_obj_set_size(bat_widget, battery_icon_size, battery_icon_size);
@@ -1080,9 +1086,13 @@ void topbar_set_battery_percent(bool shown) {
 	if (!bat_label) {
 		return;
 	}
-	// With both radios visible, a numeric percentage would run underneath the
-	// centred clock on a 240 px bar. The shell remains and conveys the level.
-	lv_obj_set_hidden(bat_label, !shown || topbar_compact);
+	// The V1 used to be forced off here, on the grounds that a percentage
+	// would run under the centred clock. At font_ui_14 "100%" is about 32 px
+	// and the compact battery is 20, so the right-hand group reaches roughly
+	// 55 px in from the edge -- or 91 with both radios lit -- against a clock
+	// that ends near 140. It fits, and the reading is worth more than the
+	// margin. Setting > Display still turns it off.
+	lv_obj_set_hidden(bat_label, !shown);
 }
 
 void topbar_bring_to_front(void) {
