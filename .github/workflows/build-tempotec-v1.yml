@@ -20,6 +20,18 @@ on:
       - sonix-player/Makefile
       - sonix-player/rockboxdev/**
       - sonix-player/src/**
+  # Working branches build themselves: the image is the only way to try a
+  # layout change on the device, and a dispatch needs a token that can write
+  # to Actions.
+  push:
+    branches:
+      - arena/**
+    paths:
+      - .github/workflows/build-tempotec-v1.yml
+      - sonix-packer/**
+      - sonix-player/Makefile
+      - sonix-player/rockboxdev/**
+      - sonix-player/src/**
 
 permissions:
   contents: read
