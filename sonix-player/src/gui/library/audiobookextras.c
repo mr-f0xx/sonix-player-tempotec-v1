@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "src/gui/board_profile.h"
 #include "src/gui/fonts/fonts.h"
 #include "src/gui/library/audiobooks.h"
 #include "src/gui/nowplaying/player.h"
@@ -62,14 +63,14 @@ static lv_obj_t *make_card(lv_obj_t *parent) {
 	lv_obj_set_height(row, LV_SIZE_CONTENT);
 	lv_obj_add_style(row, &theme_style_card, 0);
 	lv_obj_add_style(row, &theme_style_card_pressed, LV_STATE_PRESSED);
-	lv_obj_set_style_radius(row, 12, 0);
+	lv_obj_set_style_radius(row, bp_pick(10, 12), 0);
 	lv_obj_set_style_border_width(row, 0, 0);
 	lv_obj_set_style_shadow_width(row, 0, 0);
-	lv_obj_set_style_pad_all(row, 18, 0);
-	lv_obj_set_style_min_height(row, 88, 0);
+	lv_obj_set_style_pad_all(row, bp_pick(10, 18), 0);
+	lv_obj_set_style_min_height(row, bp_pick(56, 88), 0);
 	lv_obj_set_flex_flow(row, LV_FLEX_FLOW_COLUMN);
 	lv_obj_set_flex_align(row, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
-	lv_obj_set_style_pad_row(row, 6, 0);
+	lv_obj_set_style_pad_row(row, bp_pick(4, 6), 0);
 	lv_obj_set_event_bubble(row, true);
 	return row;
 }
@@ -92,7 +93,7 @@ static lv_obj_t *empty_note(lv_obj_t *parent, const char *text) {
 	lv_obj_add_style(label, &theme_style_text_dim, 0);
 	lv_obj_set_style_text_font(label, &font_ui_20, 0);
 	lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_CENTER, 0);
-	lv_obj_set_style_pad_top(label, 60, 0);
+	lv_obj_set_style_pad_top(label, bp_pick(30, 60), 0);
 	lv_label_set_text(label, tr(text));
 	lv_obj_set_hidden(label, true);
 	return label;
@@ -103,7 +104,7 @@ static lv_obj_t *column_list(lv_obj_t *container) {
 	lv_obj_remove_style_all(list);
 	lv_obj_set_size(list, lv_pct(100), LV_SIZE_CONTENT);
 	lv_obj_set_flex_flow(list, LV_FLEX_FLOW_COLUMN);
-	lv_obj_set_style_pad_row(list, 10, 0);
+	lv_obj_set_style_pad_row(list, bp_pick(6, 10), 0);
 	lv_obj_set_scrollable(list, false);
 	// One step at a time: a row hands the press to this, and this to the
 	// container, which is where the swipe that goes back is watched.
@@ -455,7 +456,7 @@ void audiobookextras_init(gui_config_t *cfg) {
 	books_screen = lv_obj_create(NULL);
 	lv_obj_add_style(books_screen, &theme_style_screen, 0);
 	lv_obj_t *container = settingsrow_page(books_screen, cfg, "bookmarks");
-	lv_obj_set_style_pad_row(container, 10, 0);
+	lv_obj_set_style_pad_row(container, bp_pick(6, 10), 0);
 	books_list = column_list(container);
 	books_empty = empty_note(container, "audiobook_bookmarks_empty");
 	lv_obj_add_event_cb(books_screen, books_loaded_cb, LV_EVENT_SCREEN_LOADED, NULL);
@@ -468,7 +469,7 @@ void audiobookextras_init(gui_config_t *cfg) {
 	marks_screen = lv_obj_create(NULL);
 	lv_obj_add_style(marks_screen, &theme_style_screen, 0);
 	container = settingsrow_page(marks_screen, cfg, "bookmarks");
-	lv_obj_set_style_pad_row(container, 10, 0);
+	lv_obj_set_style_pad_row(container, bp_pick(6, 10), 0);
 	// The heading says which book, so it is rewritten every time one opens.
 	marks_title = settingsrow_page_title(marks_screen);
 	marks_list = column_list(container);

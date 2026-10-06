@@ -9,6 +9,7 @@
 #include <time.h>
 #include <unistd.h>
 
+#include "src/gui/board_profile.h"
 #include "src/gui/fonts/fonts.h"
 #include "src/gui/nowplaying/cover.h"
 #include "src/gui/nowplaying/player.h"
@@ -25,8 +26,8 @@
 #include "src/system/streaming/podcastcache.h"
 #include "src/system/streaming/podcastdl.h"
 
-#define SAVED_ROW_HEIGHT 88
-#define SAVED_THUMB 60
+#define SAVED_ROW_HEIGHT bp_pick(60, 88)
+#define SAVED_THUMB bp_pick(44, 60)
 #define SAVED_MAX_SHOWS 128
 #define SAVED_MAX_EPISODES 400
 
@@ -210,12 +211,12 @@ static lv_obj_t *make_row(lv_obj_t *parent, const cover_image_t *image, const ch
 	lv_obj_set_size(row, lv_pct(100), SAVED_ROW_HEIGHT);
 	lv_obj_add_style(row, &theme_style_card, 0);
 	lv_obj_add_style(row, &theme_style_card_pressed, LV_STATE_PRESSED);
-	lv_obj_set_style_radius(row, 12, 0);
+	lv_obj_set_style_radius(row, bp_pick(10, 12), 0);
 	lv_obj_set_style_border_width(row, 0, 0);
 	lv_obj_set_style_shadow_width(row, 0, 0);
-	lv_obj_set_style_pad_hor(row, 16, 0);
+	lv_obj_set_style_pad_hor(row, bp_pick(8, 16), 0);
 	lv_obj_set_style_pad_ver(row, 0, 0);
-	lv_obj_set_style_pad_column(row, 12, 0);
+	lv_obj_set_style_pad_column(row, bp_pick(8, 12), 0);
 	lv_obj_set_scrollable(row, false);
 	lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
 	lv_obj_set_flex_align(row, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);

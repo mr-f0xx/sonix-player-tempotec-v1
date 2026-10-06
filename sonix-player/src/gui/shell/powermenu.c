@@ -8,6 +8,7 @@
 
 #include "lvgl/lvgl.h"
 
+#include "src/gui/board_profile.h"
 #include "src/gui/shell/gui.h"
 #include "src/gui/fonts/fonts.h"
 #include "src/gui/shell/icons.h"
@@ -30,9 +31,14 @@
 // take a deliberate gesture, not a stray tap.
 // ---------------------------------------------------------------------------
 
-#define SLIDE_WIDTH 380
-#define SLIDE_HEIGHT 76
-#define SLIDE_KNOB 64
+// All of the geometry through bp_pick(): the 480-px HiBy layout keeps its
+// numbers, and the 240x320 TempoTec V1 gets a pill that actually fits the
+// panel.  On the V1 the old fixed 380-px pill hung 140 px past the right edge,
+// so the knob could never be dragged to the commit point: the power menu
+// could neither shut down nor reboot the player.
+#define SLIDE_WIDTH bp_pick(216, 380)
+#define SLIDE_HEIGHT bp_pick(52, 76)
+#define SLIDE_KNOB bp_pick(44, 64)
 // How far along (as a fraction of the track) the knob has to be on release.
 #define SLIDE_COMMIT_PCT 88
 
@@ -41,7 +47,7 @@
 // the track by half a knob (plus a hair of margin) keeps it inside.
 #define SLIDE_INSET (SLIDE_KNOB / 2 + 6)
 
-#define CANCEL_SIZE 76
+#define CANCEL_SIZE bp_pick(52, 76)
 
 static lv_obj_t *panel;
 
@@ -243,8 +249,9 @@ static void make_slide(lv_obj_t *parent, slide_t *s, const lv_image_dsc_t *icon,
 	lv_image_set_src(s->knob_icon, icon);
 	// A touch smaller than the raw 56 px bitmap, so the disc keeps a clear
 	// rim around the glyph. Scaling happens about the centre, so the
-	// centring maths below is unaffected.
-	lv_image_set_scale(s->knob_icon, 200); // 200/256 = ~44 px
+	// centring maths below is unaffected. The compact knob is 44 px, so its
+	// glyph shrinks further to keep the same rim.
+	lv_image_set_scale(s->knob_icon, (uint32_t)bp_pick(137, 200)); // ~30 px / ~44 px
 	s->knob_icon_w = (int)icon->header.w;
 	lv_obj_set_style_image_recolor(s->knob_icon, icon_tint, 0);
 	lv_obj_set_style_image_recolor_opa(s->knob_icon, LV_OPA_COVER, 0);
@@ -270,11 +277,11 @@ void powermenu_init(gui_config_t *cfg) {
 	// The two pills, upper third of the screen, like the real thing.
 	lv_obj_t *pills = lv_obj_create(panel);
 	lv_obj_set_size(pills, lv_pct(100), LV_SIZE_CONTENT);
-	lv_obj_align(pills, LV_ALIGN_TOP_MID, 0, cfg->top_bar_height + 70);
+	lv_obj_align(pills, LV_ALIGN_TOP_MID, 0, cfg->top_bar_height + bp_pick(28, 70));
 	lv_obj_set_style_bg_opa(pills, 0, 0);
 	lv_obj_set_style_border_width(pills, 0, 0);
 	lv_obj_set_style_pad_all(pills, 0, 0);
-	lv_obj_set_style_pad_gap(pills, 26, 0);
+	lv_obj_set_style_pad_gap(pills, bp_pick(16, 26), 0);
 	lv_obj_set_scrollable(pills, false);
 	lv_obj_set_flex_flow(pills, LV_FLEX_FLOW_COLUMN);
 	lv_obj_set_flex_align(pills, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
@@ -289,7 +296,7 @@ void powermenu_init(gui_config_t *cfg) {
 	// finger, with its label floating underneath.
 	lv_obj_t *cancel = lv_btn_create(panel);
 	lv_obj_set_size(cancel, CANCEL_SIZE, CANCEL_SIZE);
-	lv_obj_align(cancel, LV_ALIGN_BOTTOM_MID, 0, -84);
+	lv_obj_align(cancel, LV_ALIGN_BOTTOM_MID, 0, bp_pick(-58, -84));
 	lv_obj_set_style_radius(cancel, LV_RADIUS_CIRCLE, 0);
 	lv_obj_set_style_bg_color(cancel, lv_color_white(), 0);
 	lv_obj_set_style_bg_opa(cancel, LV_OPA_30, 0);
@@ -309,6 +316,6 @@ void powermenu_init(gui_config_t *cfg) {
 	lv_label_set_text(cancel_label, tr("cancel"));
 	lv_obj_set_style_text_font(cancel_label, &font_ui_24, 0);
 	lv_obj_set_style_text_color(cancel_label, lv_color_white(), 0);
-	lv_obj_align(cancel_label, LV_ALIGN_BOTTOM_MID, 0, -44);
+	lv_obj_align(cancel_label, LV_ALIGN_BOTTOM_MID, 0, bp_pick(-28, -44));
 
 }
