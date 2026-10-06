@@ -9,6 +9,7 @@
 #include <string.h>
 #include <strings.h>
 
+#include "src/gui/board_profile.h"
 #include "src/gui/nowplaying/coverloader.h"
 #include "src/gui/fonts/fonts.h"
 #include "src/gui/shell/gui.h"
@@ -34,13 +35,16 @@ lv_obj_t *medialist_tracks_screen;
 lv_obj_t *medialist_albums_screen;
 
 // The exact geometry of the file browser's rows, so the two lists are twins.
-#define ROW_HEIGHT 100
-#define ROW_GAP 8
+// Each number goes through bp_pick(): the regular 480-px geometry stays as it
+// was, and the 240x320 V1 gets rows sized for its panel -- the old 100-px rows
+// with 14 px of padding left barely two and a half of them visible at once.
+#define ROW_HEIGHT bp_pick(64, 100)
+#define ROW_GAP bp_pick(5, 8)
 #define ROW_PITCH (ROW_HEIGHT + ROW_GAP)
-#define ROW_RADIUS 12
-#define ROW_PAD 14
-#define THUMB_SIZE 72
-#define QUALITY_GAP 4 // between a title and the badge under it
+#define ROW_RADIUS bp_pick(10, 12)
+#define ROW_PAD bp_pick(8, 14)
+#define THUMB_SIZE bp_pick(48, 72)
+#define QUALITY_GAP bp_pick(2, 4) // between a title and the badge under it
 #define ROW_POOL 12
 
 // How many rows are held in RAM for a query-backed list: the twelve on screen
@@ -52,9 +56,9 @@ lv_obj_t *medialist_albums_screen;
 // It lives INSIDE the row's left padding, so nothing on the row moves to make
 // space for it -- the thumbnail still starts at ROW_PAD whether the mark is
 // there or not.
-#define PLAYMARK_WIDTH 6
-#define PLAYMARK_HEIGHT 52
-#define PLAYMARK_INSET 4 // from the row's left edge
+#define PLAYMARK_WIDTH bp_pick(4, 6)
+#define PLAYMARK_HEIGHT bp_pick(36, 52)
+#define PLAYMARK_INSET bp_pick(3, 4) // from the row's left edge
 
 // Where in the coverloader's slot table each pool lives (the browser owns
 // 0..9; see coverloader.h).
@@ -3374,7 +3378,7 @@ static void build_panel(panel_t *p, gui_config_t *cfg, bool is_tracks, int slot_
 	lv_obj_set_style_text_align(p->empty, LV_TEXT_ALIGN_CENTER, 0);
 	lv_obj_add_style(p->empty, &theme_style_text_dim, 0);
 	lv_obj_set_style_text_font(p->empty, &font_ui_24, 0);
-	lv_obj_align(p->empty, LV_ALIGN_TOP_MID, 0, 120);
+	lv_obj_align(p->empty, LV_ALIGN_TOP_MID, 0, bp_pick(60, 120));
 	lv_obj_set_hidden(p->empty, true);
 
 	for (int i = 0; i < ROW_POOL; i++) {
@@ -3426,7 +3430,7 @@ static void build_panel(panel_t *p, gui_config_t *cfg, bool is_tracks, int slot_
 		lv_obj_set_size(row->detail, LV_PCT(100), LV_SIZE_CONTENT);
 		lv_obj_set_flex_flow(row->detail, LV_FLEX_FLOW_ROW);
 		lv_obj_set_flex_align(row->detail, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-		lv_obj_set_style_pad_column(row->detail, 8, 0);
+		lv_obj_set_style_pad_column(row->detail, bp_pick(5, 8), 0);
 		lv_obj_set_scrollable(row->detail, false);
 		lv_obj_set_clickable(row->detail, false);
 		lv_obj_set_event_bubble(row->detail, true);

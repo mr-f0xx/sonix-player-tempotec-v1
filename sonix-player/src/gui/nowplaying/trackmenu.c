@@ -4,6 +4,7 @@
 #include <string.h>
 #include <sys/stat.h>
 
+#include "src/gui/board_profile.h"
 #include "src/gui/fonts/fonts.h"
 #include "src/gui/shell/icons.h"
 #include "src/gui/library/medialist.h"
@@ -38,9 +39,9 @@ lv_obj_t *details_screen;
 // widgets rides the scroll position, and each row looks up its title (one
 // indexed database lookup) at the moment it binds. Opening the page costs a
 // dozen binds, not hundreds, which is what makes it instant.
-#define QUEUE_THUMB_SIZE 56
-#define QUEUE_ROW_HEIGHT 72
-#define QUEUE_ROW_GAP 8
+#define QUEUE_THUMB_SIZE bp_pick(40, 56)
+#define QUEUE_ROW_HEIGHT bp_pick(52, 72)
+#define QUEUE_ROW_GAP bp_pick(5, 8)
 #define QUEUE_ROW_PITCH (QUEUE_ROW_HEIGHT + QUEUE_ROW_GAP)
 #define QUEUE_ROW_POOL 12
 
@@ -280,7 +281,7 @@ static void build_queue_page(gui_config_t *cfg) {
 	lv_obj_set_style_text_align(queue_empty, LV_TEXT_ALIGN_CENTER, 0);
 	lv_obj_add_style(queue_empty, &theme_style_text_dim, 0);
 	lv_obj_set_style_text_font(queue_empty, &font_ui_24, 0);
-	lv_obj_align(queue_empty, LV_ALIGN_TOP_MID, 0, 120);
+	lv_obj_align(queue_empty, LV_ALIGN_TOP_MID, 0, bp_pick(60, 120));
 	lv_obj_set_hidden(queue_empty, true);
 
 	for (int i = 0; i < QUEUE_ROW_POOL; i++) {
@@ -291,11 +292,11 @@ static void build_queue_page(gui_config_t *cfg) {
 		lv_obj_set_x(row->button, 0);
 		lv_obj_add_style(row->button, &theme_style_card, 0);
 		lv_obj_add_style(row->button, &theme_style_card_pressed, LV_STATE_PRESSED);
-		lv_obj_set_style_radius(row->button, 12, 0);
+		lv_obj_set_style_radius(row->button, bp_pick(10, 12), 0);
 		lv_obj_set_style_border_width(row->button, 0, 0);
 		lv_obj_set_style_shadow_width(row->button, 0, 0);
-		lv_obj_set_style_pad_all(row->button, 8, 0);
-		lv_obj_set_style_pad_column(row->button, 14, 0);
+		lv_obj_set_style_pad_all(row->button, bp_pick(6, 8), 0);
+		lv_obj_set_style_pad_column(row->button, bp_pick(8, 14), 0);
 		lv_obj_set_hidden(row->button, true);
 		lv_obj_set_event_bubble(row->button, true);
 		lv_obj_add_event_cb(row->button, queue_row_clicked_cb, LV_EVENT_CLICKED, NULL);
@@ -593,7 +594,7 @@ static void build_details_page(gui_config_t *cfg) {
 	lv_obj_set_style_radius(details_card, 12, 0);
 	lv_obj_set_style_border_width(details_card, 0, 0);
 	lv_obj_set_style_shadow_width(details_card, 0, 0);
-	lv_obj_set_style_pad_all(details_card, 18, 0);
+	lv_obj_set_style_pad_all(details_card, bp_pick(10, 18), 0);
 	lv_obj_set_style_pad_gap(details_card, 14, 0);
 	lv_obj_set_scrollable(details_card, false);
 	lv_obj_set_event_bubble(details_card, true);

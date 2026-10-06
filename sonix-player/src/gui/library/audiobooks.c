@@ -7,6 +7,7 @@
 
 #include "lvgl/lvgl.h"
 
+#include "src/gui/board_profile.h"
 #include "src/gui/fonts/fonts.h"
 #include "src/gui/library/audiobookextras.h"
 #include "src/gui/nowplaying/coverloader.h"
@@ -153,6 +154,9 @@ static lv_obj_t *corner_button(lv_obj_t *screen, gui_config_t *cfg, int slot, co
 	lv_obj_t *icon = lv_image_create(button);
 	lv_image_set_src(icon, glyph);
 	lv_obj_add_style(icon, &theme_style_icon, 0);
+	if (cfg->screen_width < 320) {
+		lv_image_set_scale(icon, 192); // ~34 px source -> about 25 px, like the Music page
+	}
 	lv_obj_center(icon);
 	return button;
 }
@@ -193,7 +197,7 @@ static lv_obj_t *make_viewport(lv_obj_t *screen, gui_config_t *cfg, lv_obj_t **b
 	lv_obj_set_style_text_align(empty, LV_TEXT_ALIGN_CENTER, 0);
 	lv_obj_add_style(empty, &theme_style_text_dim, 0);
 	lv_obj_set_style_text_font(empty, &font_ui_24, 0);
-	lv_obj_align(empty, LV_ALIGN_TOP_MID, 0, 90);
+	lv_obj_align(empty, LV_ALIGN_TOP_MID, 0, bp_pick(45, 90));
 	lv_obj_set_hidden(empty, true);
 
 	player_sheet_attach_drag(list, true);
@@ -215,21 +219,24 @@ static lv_obj_t *make_viewport(lv_obj_t *screen, gui_config_t *cfg, lv_obj_t **b
 // a book -- and a band of forty-eight rows read back as the viewport moves.
 // ---------------------------------------------------------------------------
 
-#define ROW_HEIGHT 100
-#define ROW_GAP 8
+// Through bp_pick(), like the music lists: the 480-px HiBy geometry on the
+// left of each pair is untouched, the compact number keeps the rows inside
+// the V1's 240x320 panel.
+#define ROW_HEIGHT bp_pick(64, 100)
+#define ROW_GAP bp_pick(5, 8)
 #define ROW_PITCH (ROW_HEIGHT + ROW_GAP)
-#define ROW_RADIUS 12
-#define ROW_PAD 14
-#define THUMB_SIZE 72
+#define ROW_RADIUS bp_pick(10, 12)
+#define ROW_PAD bp_pick(8, 14)
+#define THUMB_SIZE bp_pick(48, 72)
 #define ROW_POOL 12
 
 // How many rows are read from the database at a time. Four times the pool, so
 // scrolling a screenful does not go back to the database.
 #define WINDOW_ROWS 48
 
-#define PLAYMARK_WIDTH 6
-#define PLAYMARK_HEIGHT 52
-#define PLAYMARK_INSET 4 // from the row's left edge
+#define PLAYMARK_WIDTH bp_pick(4, 6)
+#define PLAYMARK_HEIGHT bp_pick(36, 52)
+#define PLAYMARK_INSET bp_pick(3, 4) // from the row's left edge
 
 #define THUMB_POLL_MS 150
 
@@ -303,6 +310,9 @@ static audiobookdb_index_t *books_index_open(void) {
 
 static void row_show_glyph(row_t *row) {
 	lv_image_set_src(row->icon, &icon_book_headphones_row);
+	// The glyph is a 64 px bitmap. The V1's 48 px thumb box needs it drawn
+	// smaller, or it hangs out of the row; 176/256 of 64 px is 44 px.
+	lv_image_set_scale(row->icon, (uint32_t)bp_pick(176, LV_SCALE_NONE));
 	lv_obj_add_style(row->icon, &theme_style_icon, 0);
 	lv_obj_set_style_image_recolor_opa(row->icon, LV_OPA_COVER, 0);
 }
@@ -311,6 +321,8 @@ static void row_show_glyph(row_t *row) {
 // off for as long as a picture is on the row.
 static void row_show_cover(row_t *row, const lv_image_dsc_t *dsc) {
 	lv_image_set_src(row->icon, dsc);
+	// The jacket is produced at THUMB_SIZE already: undo the glyph's shrink.
+	lv_image_set_scale(row->icon, LV_SCALE_NONE);
 	lv_obj_set_style_image_recolor_opa(row->icon, LV_OPA_TRANSP, 0);
 }
 
@@ -812,7 +824,7 @@ static void build_books_page(gui_config_t *cfg) {
 // names are few enough to hold -- one per author or series, not per book.
 // ---------------------------------------------------------------------------
 
-#define NAME_ROW_HEIGHT 88
+#define NAME_ROW_HEIGHT bp_pick(48, 88)
 #define NAME_ROW_PITCH (NAME_ROW_HEIGHT + ROW_GAP)
 
 typedef struct {
@@ -979,8 +991,8 @@ static void build_names_page(gui_config_t *cfg) {
 		lv_obj_set_style_radius(row->button, ROW_RADIUS, 0);
 		lv_obj_set_style_border_width(row->button, 0, 0);
 		lv_obj_set_style_shadow_width(row->button, 0, 0);
-		lv_obj_set_style_pad_hor(row->button, 20, 0);
-		lv_obj_set_style_pad_column(row->button, 12, 0);
+		lv_obj_set_style_pad_hor(row->button, bp_pick(10, 20), 0);
+		lv_obj_set_style_pad_column(row->button, bp_pick(8, 12), 0);
 		lv_obj_set_hidden(row->button, true);
 		lv_obj_set_event_bubble(row->button, true);
 		lv_obj_add_event_cb(row->button, name_clicked_cb, LV_EVENT_CLICKED, NULL);
@@ -1026,6 +1038,27 @@ static void bookmarks_cb(lv_event_t *e) {
 	audiobookextras_open_bookmarks();
 }
 
+// The compact header's overflow: the 240 px title row has room for two
+// actions beside the back button and a readable heading, so the finished
+// books and the bookmarks fold into one menu, the way the Music page does it.
+static void section_finished_action(void *unused) {
+	(void)unused;
+	finished_cb(NULL);
+}
+
+static void section_bookmarks_action(void *unused) {
+	(void)unused;
+	bookmarks_cb(NULL);
+}
+
+static void section_more_cb(lv_event_t *e) {
+	popover_item_t items[] = {
+		{"audiobook_finished", section_finished_action, NULL, false},
+		{"bookmarks", section_bookmarks_action, NULL, false},
+	};
+	popover_show(lv_event_get_target(e), items, (int)(sizeof(items) / sizeof(items[0])));
+}
+
 // An index written by an older scan has no authors, series or folder books.
 // It is read again once, the first time the section is opened, through the
 // usual scan page.
@@ -1065,11 +1098,20 @@ static void build_section_page(gui_config_t *cfg) {
 
 	// The options, to their left the finished books, and to the left of those
 	// the bookmarks -- the same glyph the ebook shelf opens its bookmarks with.
-	settingsrow_title_corner_slots(settingsrow_title(audiobooks_screen, cfg, "audiobooks"), cfg, 3);
+	// On the 240 px header three buttons would squeeze the heading to an
+	// ellipsis, so the finished books and the bookmarks share one overflow
+	// menu there instead.
+	bool compact_header = cfg->screen_width < 320;
+	settingsrow_title_corner_slots(settingsrow_title(audiobooks_screen, cfg, "audiobooks"), cfg,
+								   compact_header ? 2 : 3);
 	lv_obj_t *options_btn = corner_button(audiobooks_screen, cfg, 0, &icon_music_settings, NULL);
 	lv_obj_add_event_cb(options_btn, switch_screen_cb, LV_EVENT_CLICKED, audiobooksettings_screen);
-	corner_button(audiobooks_screen, cfg, 1, &icon_book_finished, finished_cb);
-	corner_button(audiobooks_screen, cfg, 2, &icon_bookmark, bookmarks_cb);
+	if (compact_header) {
+		corner_button(audiobooks_screen, cfg, 1, &icon_ellipsis_vertical, section_more_cb);
+	} else {
+		corner_button(audiobooks_screen, cfg, 1, &icon_book_finished, finished_cb);
+		corner_button(audiobooks_screen, cfg, 2, &icon_bookmark, bookmarks_cb);
+	}
 
 	lv_obj_add_event_cb(audiobooks_screen, section_loaded_cb, LV_EVENT_SCREEN_LOADED, NULL);
 }
@@ -1126,11 +1168,11 @@ static void build_toggle_pills(lv_obj_t *parent, const char *title, lv_event_cb_
 	lv_obj_set_width(card, lv_pct(100));
 	lv_obj_set_height(card, LV_SIZE_CONTENT);
 	lv_obj_add_style(card, &theme_style_card, 0);
-	lv_obj_set_style_radius(card, 12, 0);
+	lv_obj_set_style_radius(card, bp_pick(10, 12), 0);
 	lv_obj_set_style_border_width(card, 0, 0);
 	lv_obj_set_style_shadow_width(card, 0, 0);
-	lv_obj_set_style_pad_all(card, 20, 0);
-	lv_obj_set_style_pad_row(card, 18, 0);
+	lv_obj_set_style_pad_all(card, bp_pick(8, 20), 0);
+	lv_obj_set_style_pad_row(card, bp_pick(8, 18), 0);
 	lv_obj_set_scrollable(card, false);
 	lv_obj_set_event_bubble(card, true);
 	lv_obj_set_flex_flow(card, LV_FLEX_FLOW_COLUMN);
@@ -1153,7 +1195,7 @@ static void build_toggle_pills(lv_obj_t *parent, const char *title, lv_event_cb_
 	lv_obj_set_style_text_font(name, &font_ui_24, 0);
 
 	lv_obj_t *toggle = lv_switch_create(head);
-	lv_obj_set_size(toggle, 68, 36);
+	lv_obj_set_size(toggle, bp_pick(48, 68), bp_pick(28, 36));
 	lv_obj_add_style(toggle, &theme_style_switch, LV_PART_MAIN);
 	lv_obj_add_style(toggle, &theme_style_switch_checked, LV_PART_INDICATOR | LV_STATE_CHECKED);
 	lv_obj_add_event_cb(toggle, toggle_cb, LV_EVENT_VALUE_CHANGED, NULL);
@@ -1163,7 +1205,7 @@ static void build_toggle_pills(lv_obj_t *parent, const char *title, lv_event_cb_
 	lv_obj_set_style_bg_opa(pills, 0, 0);
 	lv_obj_set_style_border_width(pills, 0, 0);
 	lv_obj_set_style_pad_all(pills, 0, 0);
-	lv_obj_set_style_pad_gap(pills, 10, 0);
+	lv_obj_set_style_pad_gap(pills, bp_pick(6, 10), 0);
 	lv_obj_set_scrollable(pills, false);
 	lv_obj_set_event_bubble(pills, true);
 	// Wrapping, because the four minute pills plus "end of chapter" are more
@@ -1178,8 +1220,8 @@ static void build_toggle_pills(lv_obj_t *parent, const char *title, lv_event_cb_
 
 static lv_obj_t *make_pill(lv_obj_t *parent, const char *text, int value, lv_event_cb_t cb) {
 	lv_obj_t *btn = lv_btn_create(parent);
-	lv_obj_set_size(btn, LV_SIZE_CONTENT, 56);
-	lv_obj_set_style_pad_hor(btn, 18, 0);
+	lv_obj_set_size(btn, LV_SIZE_CONTENT, bp_pick(36, 56));
+	lv_obj_set_style_pad_hor(btn, bp_pick(12, 18), 0);
 	lv_obj_set_style_radius(btn, LV_RADIUS_CIRCLE, 0); // Adwaita pill button
 	lv_obj_set_style_shadow_width(btn, 0, 0);
 	lv_obj_set_style_border_width(btn, 0, 0);
@@ -1373,10 +1415,10 @@ static void pick_forward_cb(lv_event_t *e) {
 
 static lv_obj_t *make_skip_choice(lv_obj_t *parent, const char *text, int seconds, lv_event_cb_t cb) {
 	lv_obj_t *btn = lv_btn_create(parent);
-	lv_obj_set_size(btn, LV_SIZE_CONTENT, 64);
+	lv_obj_set_size(btn, LV_SIZE_CONTENT, bp_pick(36, 64));
 	// Three across the card instead of two, so tighter than the Appearance
 	// page's pair: enough that -60 does not fall off the right edge.
-	lv_obj_set_style_pad_hor(btn, 22, 0);
+	lv_obj_set_style_pad_hor(btn, bp_pick(10, 22), 0);
 	lv_obj_set_style_radius(btn, LV_RADIUS_CIRCLE, 0); // Adwaita pill button
 	lv_obj_set_style_shadow_width(btn, 0, 0);
 	lv_obj_set_style_border_width(btn, 0, 0);
@@ -1397,11 +1439,11 @@ static lv_obj_t *make_control_card(lv_obj_t *parent, const char *title) {
 	lv_obj_set_width(card, lv_pct(100));
 	lv_obj_set_height(card, LV_SIZE_CONTENT);
 	lv_obj_add_style(card, &theme_style_card, 0);
-	lv_obj_set_style_radius(card, 12, 0);
+	lv_obj_set_style_radius(card, bp_pick(10, 12), 0);
 	lv_obj_set_style_border_width(card, 0, 0);
 	lv_obj_set_style_shadow_width(card, 0, 0);
-	lv_obj_set_style_pad_all(card, 20, 0);
-	lv_obj_set_style_pad_gap(card, 18, 0);
+	lv_obj_set_style_pad_all(card, bp_pick(8, 20), 0);
+	lv_obj_set_style_pad_gap(card, bp_pick(8, 18), 0);
 	lv_obj_set_scrollable(card, false);
 	lv_obj_set_event_bubble(card, true);
 	lv_obj_set_flex_flow(card, LV_FLEX_FLOW_COLUMN);
@@ -1417,7 +1459,7 @@ static lv_obj_t *make_control_card(lv_obj_t *parent, const char *title) {
 	lv_obj_set_style_bg_opa(row, 0, 0);
 	lv_obj_set_style_border_width(row, 0, 0);
 	lv_obj_set_style_pad_all(row, 0, 0);
-	lv_obj_set_style_pad_gap(row, 14, 0);
+	lv_obj_set_style_pad_gap(row, bp_pick(6, 14), 0);
 	lv_obj_set_scrollable(row, false);
 	lv_obj_set_event_bubble(row, true);
 	lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
@@ -1536,7 +1578,9 @@ static void scan_row_cb(lv_event_t *e) {
 
 static lv_obj_t *scan_make_button(const char *text, lv_color_t colour, lv_event_cb_t cb, gui_config_t *cfg) {
 	lv_obj_t *button = lv_btn_create(audiobookscan_screen);
-	lv_obj_set_size(button, 240, 68);
+	// Narrower than the panel on the V1: a fixed 240 px would have run the
+	// pill from edge to edge of the 240-px screen.
+	lv_obj_set_size(button, bp_pick(150, 240), bp_pick(44, 68));
 	lv_obj_align(button, LV_ALIGN_BOTTOM_MID, 0, -(cfg->padding * 2));
 	lv_obj_add_style(button, &theme_style_card_pressed, LV_STATE_PRESSED);
 	lv_obj_set_style_bg_color(button, colour, 0);
@@ -1583,7 +1627,15 @@ static void build_scan_page(gui_config_t *cfg) {
 	lv_image_set_src(book, &icon_book_headphones);
 	lv_obj_add_style(book, &theme_style_icon, 0);
 	lv_obj_set_style_image_recolor_opa(book, LV_OPA_COVER, 0);
-	lv_obj_set_style_pad_bottom(book, 16, 0);
+	lv_obj_set_style_pad_bottom(book, bp_pick(8, 16), 0);
+	if (bp_is_tempotec_v1()) {
+		// The 128 px art with the labels and the bottom button is more than
+		// the 240x320 page holds: shrink both the drawing and its layout box,
+		// the way the menu tiles do (see gridpage.c).
+		lv_obj_set_size(book, 80, 80);
+		lv_image_set_inner_align(book, LV_IMAGE_ALIGN_CENTER);
+		lv_image_set_scale(book, 160); // 80/128 of LV_SCALE_NONE
+	}
 
 	scan_count_label = lv_label_create(container);
 	lv_label_set_text(scan_count_label, "0");

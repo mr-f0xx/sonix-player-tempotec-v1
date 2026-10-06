@@ -2,6 +2,7 @@
 
 #include <string.h>
 
+#include "src/gui/board_profile.h"
 #include "src/gui/fonts/fonts.h"
 #include "src/gui/shell/theme.h"
 #include "src/system/core/lang.h"
@@ -10,8 +11,8 @@
 // allocator to speak of, a modal that builds and tears down its widgets on
 // every question is a leak waiting to happen.
 
-#define CARD_W 400
-#define BUTTON_H 64
+#define CARD_W bp_pick(216, 400)
+#define BUTTON_H bp_pick(44, 64)
 
 static lv_obj_t *veil;
 static lv_obj_t *card;
@@ -71,7 +72,7 @@ static lv_obj_t *make_button(lv_obj_t *parent, const char *text, bool accent, lv
 	lv_obj_t *btn = lv_btn_create(parent);
 	lv_obj_set_height(btn, BUTTON_H);
 	lv_obj_set_flex_grow(btn, 1);
-	lv_obj_set_style_radius(btn, 12, 0);
+	lv_obj_set_style_radius(btn, bp_pick(10, 12), 0);
 	lv_obj_set_style_border_width(btn, 0, 0);
 	lv_obj_set_style_shadow_width(btn, 0, 0);
 	lv_obj_add_event_cb(btn, cb, LV_EVENT_CLICKED, NULL);
@@ -113,15 +114,16 @@ void confirm_init(gui_config_t *cfg) {
 	lv_obj_add_event_cb(veil, veil_cb, LV_EVENT_CLICKED, NULL);
 
 	card = lv_obj_create(veil);
-	lv_obj_set_width(card, CARD_W < cfg->screen_width - 40 ? CARD_W : cfg->screen_width - 40);
+	int max_card_w = (int)cfg->screen_width - 40;
+	lv_obj_set_width(card, CARD_W < max_card_w ? CARD_W : max_card_w);
 	lv_obj_set_height(card, LV_SIZE_CONTENT);
 	lv_obj_center(card);
 	lv_obj_add_style(card, &theme_style_card, 0);
-	lv_obj_set_style_radius(card, 18, 0);
+	lv_obj_set_style_radius(card, bp_pick(14, 18), 0);
 	lv_obj_set_style_border_width(card, 0, 0);
 	lv_obj_set_style_shadow_width(card, 0, 0);
-	lv_obj_set_style_pad_all(card, 22, 0);
-	lv_obj_set_style_pad_gap(card, 14, 0);
+	lv_obj_set_style_pad_all(card, bp_pick(12, 22), 0);
+	lv_obj_set_style_pad_gap(card, bp_pick(10, 14), 0);
 	lv_obj_set_scrollable(card, false);
 	lv_obj_set_flex_flow(card, LV_FLEX_FLOW_COLUMN);
 	lv_obj_set_flex_align(card, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
@@ -146,7 +148,7 @@ void confirm_init(gui_config_t *cfg) {
 	lv_obj_set_style_bg_opa(buttons, 0, 0);
 	lv_obj_set_style_border_width(buttons, 0, 0);
 	lv_obj_set_style_pad_all(buttons, 0, 0);
-	lv_obj_set_style_pad_gap(buttons, 12, 0);
+	lv_obj_set_style_pad_gap(buttons, bp_pick(8, 12), 0);
 	lv_obj_set_scrollable(buttons, false);
 	lv_obj_set_flex_flow(buttons, LV_FLEX_FLOW_ROW);
 	lv_obj_set_flex_align(buttons, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);

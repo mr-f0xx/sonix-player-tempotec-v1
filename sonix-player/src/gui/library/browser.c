@@ -50,21 +50,23 @@
 // ---------------------------------------------------------------------------
 
 // Side of the album art thumbnail shown in front of each row.
-#define THUMB_SIZE 72
+#define THUMB_SIZE bp_pick(48, 72)
 
 // Row geometry. The pitch is what the windowing maths is built on, so it has
-// to be exact: the row height plus the gap underneath it.
-#define ROW_HEIGHT 100
-#define LIST_ROW_GAP 8
+// to be exact: the row height plus the gap underneath it. Every number goes
+// through bp_pick(), so the library lists (medialist.c keeps this geometry
+// verbatim) and this browser shrink together on the 240x320 V1.
+#define ROW_HEIGHT bp_pick(64, 100)
+#define LIST_ROW_GAP bp_pick(5, 8)
 #define ROW_PITCH (ROW_HEIGHT + LIST_ROW_GAP)
-#define LIST_ROW_RADIUS 12 // Adwaita boxed-list corner radius
-#define LIST_ROW_PAD 14
+#define LIST_ROW_RADIUS bp_pick(10, 12) // Adwaita boxed-list corner radius
+#define LIST_ROW_PAD bp_pick(8, 14)
 
 // The now-playing mark, the same one the library lists carry: a rounded
 // accent bar in the row's own left padding, so nothing on the row moves.
-#define PLAYMARK_WIDTH 6
-#define PLAYMARK_HEIGHT 52
-#define PLAYMARK_INSET 4
+#define PLAYMARK_WIDTH bp_pick(4, 6)
+#define PLAYMARK_HEIGHT bp_pick(36, 52)
+#define PLAYMARK_INSET bp_pick(3, 4)
 
 // How many row widgets exist. A 720 px panel shows six or seven; the spares
 // cover the partly visible rows at each end and give the recycling somewhere
@@ -1465,7 +1467,7 @@ static void init_list_styles(void) {
 	lv_style_set_radius(&style_list_btn, LIST_ROW_RADIUS);
 	lv_style_set_shadow_width(&style_list_btn, 0);
 	lv_style_set_pad_all(&style_list_btn, LIST_ROW_PAD);
-	lv_style_set_pad_column(&style_list_btn, 14);
+	lv_style_set_pad_column(&style_list_btn, bp_pick(8, 14));
 }
 
 // Builds the fixed pool of rows. This runs once, at startup: from here on the
