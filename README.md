@@ -105,57 +105,6 @@ The downloaded artifact package contains:
 
 > **Restoring Stock Firmware:** If you ever wish to revert to stock firmware, copy the official TempoTec `v1.upt` and its `v1_md5.txt` to the root of your MicroSD card and repeat the update procedure.
 
----
-
-## Testing with the Host Simulator
-
-You can run and test the complete TempoTec V1 240×320 user interface directly on your PC inside an SDL2 window.
-
-### Prerequisites
-
-**Debian / Ubuntu / Mint:**
-```bash
-sudo apt install build-essential git pkg-config \
-                 libsdl2-dev libfreetype-dev libopusfile-dev \
-                 libwavpack-dev libasound2-dev
-```
-
-**Fedora / RHEL:**
-```bash
-sudo dnf install gcc gcc-c++ make git pkgconf-pkg-config \
-                 SDL2-devel freetype-devel opusfile-devel \
-                 wavpack-devel alsa-lib-devel
-```
-
-**Arch Linux:**
-```bash
-sudo pacman -S base-devel git sdl2 freetype2 opusfile wavpack alsa-lib
-```
-
-### Compiling the Host Binary
-
-```bash
-cd sonix-player
-make host -j$(nproc)
-```
-
-### Launching in TempoTec V1 Mode
-
-Run the simulator with the 240×320 screen resolution and TempoTec V1 profile:
-
-```bash
-SONIX_PANEL=240x320 ./sonix_player_host
-```
-or explicitly with the board identifier:
-```bash
-BOARD=tempotec_v1 ./sonix_player_host
-```
-
-To point the simulator to a local music collection instead of your default documents folder:
-```bash
-SONIX_SD_ROOT=/path/to/music SONIX_PANEL=240x320 ./sonix_player_host
-```
-
 ### Keyboard Shortcuts (Simulating Hardware Buttons)
 
 | Key | TempoTec V1 Action | Description |
@@ -166,54 +115,6 @@ SONIX_SD_ROOT=/path/to/music SONIX_PANEL=240x320 ./sonix_player_host
 | `n` | Play / Pause | Toggles track playback |
 | `b` | Previous Track | Skips to previous track |
 | `m` | Next Track | Skips to next track |
-
----
-
-## Building Locally for the Device
-
-### Prerequisites
-
-In addition to the host packages, install the cross-compilation and packaging utilities:
-
-```bash
-sudo apt install texinfo bison flex gawk gperf p7zip-full squashfs-tools genisoimage
-```
-
-### Step 1: Cross-Compile Target Binaries
-
-```bash
-cd sonix-player
-make target -j$(nproc)
-```
-
-On first run, this automatically:
-1. Builds the Rockbox MIPS GCC cross-toolchain (`mipsel-rockbox-linux-gnu-gcc`)
-2. Cross-compiles static FreeType (`freetype-target/`)
-3. Cross-compiles static audio decoders: `libogg`, `libopus`, `opusfile`, and `libwavpack` (`audio-target/`)
-4. Compiles and links `sonix_player` with MIPS32r2 `-mplt` flags and glibc 2.22 compatibility shims
-5. Verifies dynamic symbol ABI via `mipsel-rockbox-linux-gnu-readelf`
-6. Strips `sonix_player` and generates `sonix_player_debug` and `sonix_launch`
-
-### Step 2: Package the `v1.upt` Image
-
-1. Copy the compiled binaries to `sonix-packer/`:
-   ```bash
-   cp sonix-player/sonix_player sonix-packer/
-   cp sonix-player/sonix_launch sonix-packer/
-   ```
-2. Place the official TempoTec stock firmware as `v1_original.upt` inside `sonix-packer/`:
-   ```bash
-   sonix-packer/prepare_v1_stock.sh /path/to/stock_v1_download sonix-packer
-   ```
-3. Run the firmware packaging script:
-   ```bash
-   cd sonix-packer
-   ./sonix_firmware_packer.sh
-   ```
-4. Verify the output image:
-   ```bash
-   ./verify_upt.sh v1.upt --sonix-v1
-   ```
 
 ---
 
