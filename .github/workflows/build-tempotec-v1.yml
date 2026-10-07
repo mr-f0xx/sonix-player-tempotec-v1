@@ -1,4 +1,4 @@
-name: Build experimental TempoTec V1 firmware
+name: Build TempoTec V1 firmware
 
 on:
   workflow_dispatch:
@@ -8,8 +8,8 @@ on:
         required: true
         type: string
         default: https://drive.google.com/drive/folders/1jbT9lhRvJ8sbJuepnaBpss861mpsYwnv?usp=sharing
-      acknowledge_experimental:
-        description: I understand this V1 image is experimental and not hardware-validated
+      acknowledge_community_build:
+        description: I understand this is an unofficial community build and will keep the matching official firmware and checksum for recovery
         required: true
         type: boolean
         default: false
@@ -45,10 +45,11 @@ jobs:
     timeout-minutes: 300
 
     steps:
-      - name: Require experimental-build acknowledgement
-        if: github.event_name == 'workflow_dispatch' && inputs.acknowledge_experimental != true
+      - name: Require firmware-build acknowledgement
+        if: github.event_name == 'workflow_dispatch' && inputs.acknowledge_community_build != true
         run: |
-          echo 'This workflow creates an experimental, not hardware-validated V1 image.' >&2
+          echo 'This workflow creates an unofficial TempoTec V1 firmware image.' >&2
+          echo 'Keep the matching official stock firmware and checksum available for recovery.' >&2
           echo 'Run it again and select the acknowledgement checkbox.' >&2
           exit 1
 
@@ -118,7 +119,7 @@ jobs:
         working-directory: sonix-player
         run: make target -j"$(nproc)"
 
-      - name: Build experimental v1.upt
+      - name: Build v1.upt
         run: |
           install -m 0755 sonix-player/sonix_player sonix-packer/sonix_player
           install -m 0755 sonix-player/sonix_launch sonix-packer/sonix_launch
@@ -145,7 +146,7 @@ jobs:
           image_sha256="$(sha256sum sonix-packer/v1.upt | awk '{print $1}')"
           image_md5="$(md5sum sonix-packer/v1.upt | awk '{print $1}')"
           cat > "$out/BUILD-REPORT.txt" <<EOF
-          EXPERIMENTAL TEMPOTEC V1 FIRMWARE - NOT HARDWARE-VALIDATED
+          COMMUNITY TEMPOTEC V1 FIRMWARE BUILD
 
           Commit: ${GITHUB_SHA}
           Actions run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}
@@ -156,8 +157,9 @@ jobs:
 
           The package structure, rootfs hash chain, Sonix installation, model
           identity, and unchanged stock kernel were checked automatically.
-          Those checks do not prove that audio, input, charging, suspend, or the
-          recovery updater are compatible with this physical device.
+          This workflow does not install or re-test the generated image on
+          physical hardware. Keep the official stock firmware and its matching
+          checksum available before installing it.
           EOF
 
       - name: Upload firmware artifact
