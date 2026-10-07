@@ -78,6 +78,108 @@ The TempoTec V1 port is **experimental**:
 
 > **Restoring Stock Firmware:** If you ever wish to revert to stock firmware, copy the official TempoTec `v1.upt` and its `v1_md5.txt` to the root of your MicroSD card and repeat the update procedure.
 
+---
+
+## Streaming Services and Their Keys
+
+Qobuz, Tidal, Podcast Index and Last.fm all refuse to answer a client that
+cannot identify itself, and the credentials that identify one are **not in this
+repository**. A firmware built from this source — and every `v1.upt` published
+from it — therefore starts with those services switched off, and their pages say
+so instead of failing halfway through a login:
+
+> *Streaming keys not found. Copy streaming-keys.ini to the microSD card and restart.*
+
+That message is not a fault and it is not specific to development builds. It
+means the one file below is missing, and it is fixed with that one file.
+
+### The file
+
+`streaming-keys.ini` is a plain INI, one section per service. Fill in only the
+services you have credentials for; the others stay off and say so.
+
+```ini
+[qobuz]
+app_id = 
+app_secret = 
+
+[tidal]
+client_id = 
+client_secret = 
+
+[podcast]
+api_key = 
+api_secret = 
+
+[lastfm]
+api_key = 
+api_secret = 
+```
+
+Where the values come from:
+
+| Service | Where the pair comes from |
+|---|---|
+| **Podcast Index** | Free, requested on [podcastindex.org](https://podcastindex.org) — this one identifies *this player*, and it is yours to ask for. |
+| **Last.fm** | Free, an API account on [last.fm/api](https://www.last.fm/api). |
+| **Qobuz** / **Tidal** | No public sign-up: both are issued to hardware partners. The pair the device already uses sits inside `usr/bin/hiby_player` in the stock firmware (`app_id` as a digit string, `app_secret` as 32 hex characters; Tidal's client secret is assembled at run time, so it never appears as one string). They are the manufacturer's keys, not this project's, which is exactly why the source does not carry them — publishing them would publish someone else's contract. Extracting them from a device you own and using them on that device is your decision to make. |
+
+### Three ways to install it
+
+**1. On the microSD card** — no rebuild, no reflash, and the way to go for a
+firmware you downloaded. Copy `streaming-keys.ini` to the **root** of the card
+and restart the player. It is read once the card is mounted, before the first
+screen is drawn, and the log says which services came on.
+
+> A firmware built **before** the card was searched looks in the image only. On
+> one of those, use method 3, or reflash with a newer build.
+
+**2. Sealed into an image you build yourself** — what a published firmware
+should carry, so that nobody who unpacks the image can read the keys:
+
+```sh
+cd sonix-player
+cp streaming-keys.ini.example streaming-keys.ini   # then fill it in
+python3 tools/seal_streamkeys.py seal              # writes streaming-keys.bin into every assets tree
+```
+
+`streaming-keys.key` is made on the first run and is what the player is
+subsequently built with; the packer warns if a tree would ship the plain `.ini`
+and drops it. See the header of `tools/seal_streamkeys.py` for the format and
+for what the sealing does and does not protect against.
+
+**3. Anywhere else** — over ADB, for a device whose card you would rather not
+touch. `Settings` > `Developer options` > `ADB` turns the daemon on; that row
+appears once the build number on `Settings` > `System` has been tapped five
+times.
+
+```sh
+adb push streaming-keys.ini /usr/data/streaming-keys.ini
+adb shell "printf '[streaming]\nkeys_file = /usr/data/streaming-keys.ini\n' >> /usr/data/device_config.ini"
+adb shell reboot
+```
+
+`keys_file` wins over both other places, which is also the quick path the day a
+service rotates its credentials.
+
+### Checking what happened
+
+The player logs one line either way, and never a value from the file:
+
+```
+streamkeys: from /mnt/sd_0/streaming-keys.ini -- Qobuz yes, Tidal no, Podcast no, Last.fm no
+```
+
+or, when nothing was found:
+
+```
+streamkeys: no /usr/resource/sonix/components/streaming-keys.bin, Tidal, Qobuz, podcasts and Last.fm stay off
+```
+
+With the log switched on (`Settings` > `Developer options` > `Log to microSD`)
+that line is in `sonix_player.log` at the card's root. A `.bin` sealed with a
+different key is reported as such and ignored rather than guessed at.
+
 ### Keyboard Shortcuts (Simulating Hardware Buttons)
 
 | Key | TempoTec V1 Action | Description |

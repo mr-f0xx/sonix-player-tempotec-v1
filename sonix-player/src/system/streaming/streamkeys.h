@@ -41,8 +41,15 @@
 // for the simulator and for builds made without a key. Which of the two a file
 // is, is decided by its first bytes, not its name.
 //
-// Without either, or without a section, the matching service disables itself
-// and its menu entry says so instead of failing halfway through a login.
+// A third place is the microSD card: streaming-keys.bin or streaming-keys.ini
+// at the card's root, read by streamkeys_load_card() once the card is mounted.
+// It is there because an image published for anyone to download ships without
+// keys -- there is no other way it could be published -- and the person who
+// installs it should be able to turn streaming on without building a firmware.
+// Copy one file to the card and restart.
+//
+// Without any of them, or without a section, the matching service disables
+// itself and its menu entry says so instead of failing halfway through a login.
 //
 // The path can be changed with [streaming] keys_file in device_config.ini, to
 // keep the keys on the card instead of the read-only rootfs -- the easy path
@@ -53,9 +60,26 @@
 #define STREAMKEYS_PATH SONIX_RESOURCE_DIR "/components/streaming-keys.bin"
 #define STREAMKEYS_PLAIN_PATH SONIX_RESOURCE_DIR "/components/streaming-keys.ini"
 
+// The two names looked for at the card's root, in this order.
+#define STREAMKEYS_CARD_BIN "streaming-keys.bin"
+#define STREAMKEYS_CARD_INI "streaming-keys.ini"
+
 // Reads the file. Call once at startup, after config_init(). A missing file is
 // not an error.
 void streamkeys_init(void);
+
+// Looks for the same two files at the root of the microSD card: .bin first,
+// then .ini. Call once, after the card is mounted, which is long after
+// streamkeys_init() has run -- nothing mounts the card before the player does,
+// so at startup there is nothing to read there yet.
+//
+// Only a firmware that found no keys of its own is affected: one that ships a
+// sealed streaming-keys.bin keeps it, and a card cannot quietly replace what
+// the image says. That is what makes this safe to leave in a release.
+//
+// True when keys are now held that were not held before, which is the caller's
+// signal to hand them to the services that read them at their own startup.
+bool streamkeys_load_card(const char *card_root);
 
 // NULL when absent. The pointers stay valid for the life of the program.
 const char *streamkeys_qobuz_app_id(void);

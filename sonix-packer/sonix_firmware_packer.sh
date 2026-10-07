@@ -365,7 +365,8 @@ build_one() {
 		warn "$MODEL_DIR/$PLAIN_KEYS is in the clear and was left out; seal it with tools/seal_streamkeys.py"
 	fi
 	if [ ! -f "$SQUASH_DIR/usr/resource/sonix/components/streaming-keys.bin" ]; then
-		warn "no streaming-keys.bin in $MODEL_DIR: Tidal, Qobuz and podcasts will be off"
+		warn "no streaming-keys.bin in $MODEL_DIR: Tidal, Qobuz, podcasts and Last.fm stay off"
+		warn "whoever installs it can still turn them on: streaming-keys.ini at the card's root is read at boot"
 	fi
 
 	# What the other model's tree carries and this one does not. Nothing is
