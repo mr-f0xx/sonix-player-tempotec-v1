@@ -239,11 +239,12 @@ int mseb_preset_for_each(mseb_preset_cb_t cb, void *user);
 // ---------------------------------------------------------------------------
 
 // The width is carried in hundredths, so it stays integer arithmetic all the
-// way to the samples.
+// way to the samples. Start at a clearly audible but moderate widening: 1.00 is
+// deliberately neutral, so it made the on/off switch seem broken on first use.
 #define SOUNDFIELD_WIDTH_MIN 0
 #define SOUNDFIELD_WIDTH_MAX 200
 #define SOUNDFIELD_WIDTH_STEP 5
-#define SOUNDFIELD_WIDTH_DEFAULT 100
+#define SOUNDFIELD_WIDTH_DEFAULT 150
 
 void soundfield_set_enabled(bool enabled); // saved to config
 bool soundfield_get_enabled(void);
