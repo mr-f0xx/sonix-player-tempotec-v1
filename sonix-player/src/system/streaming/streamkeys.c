@@ -248,6 +248,19 @@ static bool load(const char *path) {
 	return true;
 }
 
+// The log records that the keys are present, never their values: the log
+// lands on the card and from there goes to whoever asks for it about any
+// problem at all.
+static void report(const char *path) {
+	snprintf(source_path, sizeof(source_path), "%s", path);
+
+	printf("streamkeys: from %s -- Qobuz %s, Tidal %s, Podcast %s, Last.fm %s\n", path,
+		   qobuz_app_id[0] && qobuz_app_secret[0] ? "yes" : "no",
+		   tidal_client_id[0] && tidal_client_secret[0] ? "yes" : "no",
+		   podcast_key[0] && podcast_secret[0] ? "yes" : "no",
+		   lastfm_key[0] && lastfm_secret[0] ? "yes" : "no");
+}
+
 void streamkeys_init(void) {
 	const char *configured = config_get("streaming", "keys_file", NULL);
 	const char *path = NULL;
@@ -265,16 +278,36 @@ void streamkeys_init(void) {
 		return;
 	}
 
-	snprintf(source_path, sizeof(source_path), "%s", path);
+	report(path);
+}
 
-	// The log records that the keys are present, never their values: the log
-	// lands on the card and from there goes to whoever asks for it about any
-	// problem at all.
-	printf("streamkeys: from %s -- Qobuz %s, Tidal %s, Podcast %s, Last.fm %s\n", path,
-		   qobuz_app_id[0] && qobuz_app_secret[0] ? "yes" : "no",
-		   tidal_client_id[0] && tidal_client_secret[0] ? "yes" : "no",
-		   podcast_key[0] && podcast_secret[0] ? "yes" : "no",
-		   lastfm_key[0] && lastfm_secret[0] ? "yes" : "no");
+bool streamkeys_load_card(const char *card_root) {
+	// A firmware that carries its own keys keeps them. The card is a way in
+	// for the builds that ship none, not a way to replace what an image says.
+	if (loaded_any) {
+		return false;
+	}
+	if (!card_root || !card_root[0]) {
+		return false;
+	}
+
+	char path[512];
+	const char *const names[] = {STREAMKEYS_CARD_BIN, STREAMKEYS_CARD_INI};
+	for (size_t i = 0; i < sizeof(names) / sizeof(names[0]); i++) {
+		snprintf(path, sizeof(path), "%s/%s", card_root, names[i]);
+		if (load(path)) {
+			// A .bin sealed with another key reads as a file and yields
+			// nothing; the .ini beside it, if there is one, still gets its
+			// turn.
+			if (!loaded_any) {
+				continue;
+			}
+			printf("streamkeys: the microSD card has them\n");
+			report(path);
+			return true;
+		}
+	}
+	return false;
 }
 
 static const char *or_null(const char *s) { return s[0] ? s : NULL; }
