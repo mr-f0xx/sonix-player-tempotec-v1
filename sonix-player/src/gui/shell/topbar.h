@@ -15,6 +15,11 @@ void topbar_refresh_clock(void);
 // whatever just changed the level.
 void topbar_refresh_volume(int percent);
 
+// Refreshes the wired and USB audio-output indicators from hardware. Called
+// before the first repaint on wake so unplugging while the screen was dark is
+// reflected in the very first visible status bar.
+void topbar_refresh_audio_outputs(void);
+
 // Repaints the play/pause indicator. The battery poll only comes round every
 // five seconds, so the player calls this the moment the transport state
 // changes rather than letting the glyph lag behind the button.

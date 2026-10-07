@@ -10,6 +10,7 @@
 
 #include "lvgl/lvgl.h"
 
+#include "src/gui/board_profile.h"
 #include "src/gui/fonts/fonts.h"
 #include "src/gui/library/music.h"
 #include "src/gui/shell/icons.h"
@@ -29,20 +30,27 @@
 // Fast enough that the number never looks stuck, slow enough that redrawing it
 // costs nothing next to reading tags off a card.
 #define SCAN_POLL_MS 200
+#define SCAN_BUTTON_WIDTH bp_pick(184, 240)
+#define SCAN_BUTTON_HEIGHT bp_pick(52, 68)
+#define SCAN_BUTTON_BOTTOM bp_pick(12, 30)
+#define SCAN_CONTENT_GAP bp_pick(10, 16)
 
 lv_obj_t *libraryscan_screen;
 
 static lv_obj_t *count_label;
 static lv_obj_t *status_label;
+static lv_obj_t *progress_label;
 static lv_obj_t *ok_button;
 static lv_obj_t *cancel_button;
 static lv_timer_t *poll_timer;
+static char shown_file[512];
 
 static const char *sd_root;
 
 static void show_finished(int found) {
 	lv_label_set_text_fmt(count_label, "%d", found);
 	lv_label_set_text(status_label, found == 1 ? tr("libraryscan_track_found") : tr("libraryscan_tracks_found"));
+	lv_obj_set_hidden(progress_label, true);
 
 	lv_obj_set_hidden(cancel_button, true);
 	lv_obj_set_hidden(ok_button, false);
@@ -54,8 +62,27 @@ static void show_finished(int found) {
 static void poll_cb(lv_timer_t *timer) {
 	int found = library_scan_found();
 	lv_label_set_text_fmt(count_label, "%d", found);
+	lv_label_set_text(status_label, found == 1 ? tr("libraryscan_track_found") : tr("libraryscan_tracks_found"));
 
 	if (library_scan_running()) {
+		char path[512];
+		library_scan_current_file(path, sizeof(path));
+		if (!path[0]) {
+			// Before the first file is opened, or while a directory is being
+			// walked, show where the scan is instead of leaving a blank line.
+			library_scan_current_folder(path, sizeof(path));
+		}
+		const char *item = strrchr(path, '/');
+		item = item ? item + 1 : path;
+		if (item[0]) {
+			if (strcmp(shown_file, item) != 0) {
+				snprintf(shown_file, sizeof(shown_file), "%s", item);
+				lv_label_set_text(progress_label, shown_file);
+			}
+			lv_obj_set_hidden(progress_label, false);
+		} else {
+			lv_obj_set_hidden(progress_label, true);
+		}
 		return;
 	}
 
@@ -91,6 +118,9 @@ static void cancel_cb(lv_event_t *e) {
 void libraryscan_begin(void) {
 	lv_label_set_text(count_label, "0");
 	lv_label_set_text(status_label, tr("libraryscan_tracks_found"));
+	shown_file[0] = '\0';
+	lv_label_set_text(progress_label, "");
+	lv_obj_set_hidden(progress_label, true);
 	lv_obj_set_hidden(ok_button, true);
 	lv_obj_set_hidden(cancel_button, false);
 
@@ -114,7 +144,15 @@ void libraryscan_begin(void) {
 // Which folders: the card's top-level folders, ticked, before the scan starts
 // ---------------------------------------------------------------------------
 
-#define PICK_CHROME_H 250 // the card's title, note, buttons and padding
+#define PICK_CHROME_H bp_pick(180, 250) // the card's title, note, buttons and padding
+#define PICK_CARD_PAD bp_pick(10, 20)
+#define PICK_CARD_GAP bp_pick(6, 12)
+#define PICK_LIST_GAP bp_pick(4, 6)
+#define PICK_ROW_HEIGHT bp_pick(44, 60)
+#define PICK_ROW_PAD bp_pick(10, 16)
+#define PICK_ROW_GAP bp_pick(6, 10)
+#define PICK_BUTTON_HEIGHT bp_pick(44, 56)
+#define PICK_BUTTON_GAP bp_pick(8, 12)
 // Rows are made this many at a time, more as the list nears its end.
 #define PICK_BATCH 30
 
@@ -272,7 +310,7 @@ static void pick_scan_cb(lv_event_t *e) {
 
 static lv_obj_t *pick_button(lv_obj_t *parent, const char *text, bool accent, lv_event_cb_t cb) {
 	lv_obj_t *btn = lv_btn_create(parent);
-	lv_obj_set_height(btn, 56);
+	lv_obj_set_height(btn, PICK_BUTTON_HEIGHT);
 	lv_obj_set_flex_grow(btn, 1);
 	lv_obj_set_style_radius(btn, LV_RADIUS_CIRCLE, 0);
 	lv_obj_set_style_shadow_width(btn, 0, 0);
@@ -281,7 +319,7 @@ static lv_obj_t *pick_button(lv_obj_t *parent, const char *text, bool accent, lv
 	lv_obj_add_event_cb(btn, cb, LV_EVENT_CLICKED, NULL);
 	lv_obj_t *label = lv_label_create(btn);
 	lv_label_set_text(label, tr(text));
-	lv_obj_set_style_text_font(label, &font_ui_22, 0);
+	lv_obj_set_style_text_font(label, bp_is_tempotec_v1() ? &font_ui_18 : &font_ui_22, 0);
 	lv_obj_set_style_text_color(label, accent ? lv_color_white() : theme()->text_primary, 0);
 	lv_obj_center(label);
 	return btn;
@@ -310,8 +348,8 @@ static void pick_build(void) {
 	lv_obj_set_style_radius(card, 16, 0);
 	lv_obj_set_style_border_width(card, 0, 0);
 	lv_obj_set_style_shadow_width(card, 0, 0);
-	lv_obj_set_style_pad_all(card, 20, 0);
-	lv_obj_set_style_pad_row(card, 12, 0);
+	lv_obj_set_style_pad_all(card, PICK_CARD_PAD, 0);
+	lv_obj_set_style_pad_row(card, PICK_CARD_GAP, 0);
 	lv_obj_set_scrollable(card, false);
 	lv_obj_set_clickable(card, true);
 	lv_obj_set_event_bubble(card, false);
@@ -323,14 +361,14 @@ static void pick_build(void) {
 	lv_label_set_long_mode(title, LV_LABEL_LONG_WRAP);
 	lv_obj_set_width(title, lv_pct(100));
 	lv_obj_add_style(title, &theme_style_text, 0);
-	lv_obj_set_style_text_font(title, &font_ui_24, 0);
+	lv_obj_set_style_text_font(title, bp_is_tempotec_v1() ? &font_ui_18 : &font_ui_24, 0);
 
 	lv_obj_t *note = lv_label_create(card);
 	lv_label_set_text(note, tr("libraryscan_choose_folders_note"));
 	lv_label_set_long_mode(note, LV_LABEL_LONG_WRAP);
 	lv_obj_set_width(note, lv_pct(100));
 	lv_obj_add_style(note, &theme_style_text_dim, 0);
-	lv_obj_set_style_text_font(note, &font_ui_18, 0);
+	lv_obj_set_style_text_font(note, bp_is_tempotec_v1() ? &font_ui_14 : &font_ui_18, 0);
 
 	// The folders scroll; the title and the buttons stay put.
 	pick_list = lv_obj_create(card);
@@ -340,7 +378,7 @@ static void pick_build(void) {
 	// What the panel leaves once the title, the note and the buttons are in.
 	lv_obj_set_style_max_height(pick_list, cfg->screen_height - cfg->top_bar_height - 2 * cfg->padding - PICK_CHROME_H,
 								0);
-	lv_obj_set_style_pad_row(pick_list, 6, 0);
+	lv_obj_set_style_pad_row(pick_list, PICK_LIST_GAP, 0);
 	lv_obj_set_flex_flow(pick_list, LV_FLEX_FLOW_COLUMN);
 	lv_obj_set_scroll_dir(pick_list, LV_DIR_VER);
 	lv_obj_set_scrollbar_mode(pick_list, LV_SCROLLBAR_MODE_AUTO);
@@ -349,7 +387,7 @@ static void pick_build(void) {
 	lv_obj_t *buttons = lv_obj_create(card);
 	lv_obj_remove_style_all(buttons);
 	lv_obj_set_size(buttons, lv_pct(100), LV_SIZE_CONTENT);
-	lv_obj_set_style_pad_column(buttons, 12, 0);
+	lv_obj_set_style_pad_column(buttons, PICK_BUTTON_GAP, 0);
 	lv_obj_set_flex_flow(buttons, LV_FLEX_FLOW_ROW);
 	pick_button(buttons, "cancel", false, pick_cancel_cb);
 	pick_scan_btn = pick_button(buttons, "scan", true, pick_scan_cb);
@@ -360,13 +398,13 @@ static void pick_append(int n) {
 	int last = pick_built + n < pick_count ? pick_built + n : pick_count;
 	for (int i = pick_built; i < last; i++) {
 		lv_obj_t *row = lv_btn_create(pick_list);
-		lv_obj_set_size(row, lv_pct(100), 60);
+		lv_obj_set_size(row, lv_pct(100), PICK_ROW_HEIGHT);
 		lv_obj_set_style_bg_color(row, theme()->surface_pressed, 0);
 		lv_obj_set_style_radius(row, 10, 0);
 		lv_obj_set_style_shadow_width(row, 0, 0);
 		lv_obj_set_style_border_width(row, 0, 0);
-		lv_obj_set_style_pad_hor(row, 16, 0);
-		lv_obj_set_style_pad_column(row, 10, 0);
+		lv_obj_set_style_pad_hor(row, PICK_ROW_PAD, 0);
+		lv_obj_set_style_pad_column(row, PICK_ROW_GAP, 0);
 		lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
 		lv_obj_set_flex_align(row, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 		lv_obj_set_scroll_on_focus(row, true);
@@ -380,9 +418,10 @@ static void pick_append(int n) {
 		lv_label_set_text(label, pick_names[i]);
 		lv_label_set_long_mode(label, LV_LABEL_LONG_DOT);
 		lv_obj_set_flex_grow(label, 1);
-		lv_obj_set_height(label, lv_font_get_line_height(&font_ui_22));
+		const lv_font_t *row_font = bp_is_tempotec_v1() ? &font_ui_16 : &font_ui_22;
+		lv_obj_set_height(label, lv_font_get_line_height(row_font));
 		lv_obj_add_style(label, &theme_style_text, 0);
-		lv_obj_set_style_text_font(label, &font_ui_22, 0);
+		lv_obj_set_style_text_font(label, row_font, 0);
 
 		pick_marks[i] = lv_image_create(row);
 		lv_image_set_src(pick_marks[i], &icon_check);
@@ -423,11 +462,10 @@ void libraryscan_choose_folders(void) {
 
 // Both buttons sit at the same place at the bottom of the screen; only one is
 // ever visible.
-static lv_obj_t *make_button(lv_obj_t *parent, const char *text, lv_color_t colour, lv_event_cb_t cb,
-							 gui_config_t *cfg) {
+static lv_obj_t *make_button(lv_obj_t *parent, const char *text, lv_color_t colour, lv_event_cb_t cb) {
 	lv_obj_t *button = lv_btn_create(parent);
-	lv_obj_set_size(button, 240, 68);
-	lv_obj_align(button, LV_ALIGN_BOTTOM_MID, 0, -(cfg->padding * 2));
+	lv_obj_set_size(button, SCAN_BUTTON_WIDTH, SCAN_BUTTON_HEIGHT);
+	lv_obj_align(button, LV_ALIGN_BOTTOM_MID, 0, -SCAN_BUTTON_BOTTOM);
 	lv_obj_add_style(button, &theme_style_card_pressed, LV_STATE_PRESSED);
 	lv_obj_set_style_bg_color(button, colour, 0);
 	lv_obj_set_style_bg_opa(button, LV_OPA_COVER, 0);
@@ -560,15 +598,21 @@ void libraryscan_init(gui_config_t *cfg) {
 	lv_obj_set_style_text_align(title, LV_TEXT_ALIGN_CENTER, 0);
 
 	int content_top = settingsrow_content_top(cfg);
+	int content_height = cfg->screen_height - content_top;
+	if (bp_is_tempotec_v1()) {
+		// Keep the live count and the file being read above the bottom action,
+		// which otherwise covers the last line on this short panel.
+		content_height -= SCAN_BUTTON_HEIGHT + SCAN_BUTTON_BOTTOM + SCAN_CONTENT_GAP;
+	}
 
 	lv_obj_t *container = lv_obj_create(libraryscan_screen);
-	lv_obj_set_size(container, lv_pct(100), cfg->screen_height - content_top);
+	lv_obj_set_size(container, lv_pct(100), content_height);
 	lv_obj_align(container, LV_ALIGN_TOP_LEFT, 0, content_top);
 	lv_obj_set_style_bg_opa(container, 0, 0);
 	lv_obj_set_style_border_width(container, 0, 0);
 	lv_obj_set_style_radius(container, 0, 0);
 	lv_obj_set_style_pad_all(container, cfg->padding, 0);
-	lv_obj_set_style_pad_gap(container, 10, 0);
+	lv_obj_set_style_pad_gap(container, bp_pick(6, 10), 0);
 	lv_obj_set_scrollable(container, false);
 	lv_obj_set_flex_flow(container, LV_FLEX_FLOW_COLUMN);
 	lv_obj_set_flex_align(container, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
@@ -577,7 +621,7 @@ void libraryscan_init(gui_config_t *cfg) {
 	lv_image_set_src(note, &icon_music_note);
 	lv_obj_add_style(note, &theme_style_icon, 0);
 	lv_obj_set_style_image_recolor_opa(note, LV_OPA_COVER, 0);
-	lv_obj_set_style_pad_bottom(note, 16, 0);
+	lv_obj_set_style_pad_bottom(note, bp_pick(6, 16), 0);
 
 	// The count is the whole point of the page, so it gets the accent colour
 	// and the largest type on it.
@@ -591,10 +635,19 @@ void libraryscan_init(gui_config_t *cfg) {
 	lv_obj_add_style(status_label, &theme_style_text, 0);
 	lv_obj_set_style_text_font(status_label, &font_ui_26, 0);
 
+	progress_label = lv_label_create(container);
+	lv_label_set_text(progress_label, "");
+	lv_label_set_long_mode(progress_label, LV_LABEL_LONG_DOT);
+	lv_obj_set_width(progress_label, lv_pct(100));
+	lv_obj_add_style(progress_label, &theme_style_text_dim, 0);
+	lv_obj_set_style_text_font(progress_label, &font_ui_16, 0);
+	lv_obj_set_style_text_align(progress_label, LV_TEXT_ALIGN_CENTER, 0);
+	lv_obj_set_hidden(progress_label, true);
+
 	// The two buttons share the foot of the page: cancel while the scan runs, OK
 	// once it is done.
-	cancel_button = make_button(libraryscan_screen, "cancel", lv_color_make(210, 66, 58), cancel_cb, cfg);
-	ok_button = make_button(libraryscan_screen, "ok", theme()->accent, ok_cb, cfg);
+	cancel_button = make_button(libraryscan_screen, "cancel", lv_color_make(210, 66, 58), cancel_cb);
+	ok_button = make_button(libraryscan_screen, "ok", theme()->accent, ok_cb);
 	lv_obj_set_hidden(ok_button, true);
 
 	poll_timer = lv_timer_create(poll_cb, SCAN_POLL_MS, NULL);

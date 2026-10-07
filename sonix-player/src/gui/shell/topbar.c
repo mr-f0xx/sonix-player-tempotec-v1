@@ -107,6 +107,8 @@ static lv_obj_t *container_left;  // volume group (and the clock, when "left")
 static lv_obj_t *container_right; // battery group (and the clock, when "right")
 static lv_timer_t *battery_timer;
 static lv_timer_t *jack_timer;
+static int last_jack_state = -1;
+static int last_usb_audio_state = -1;
 
 // The last battery reading painted. Kept here rather than inside the poll so a
 // theme switch can throw it away: the poll only repaints when the reading has
@@ -262,10 +264,9 @@ void topbar_refresh_volume(int percent) {
 
 // Shows or hides the headphone glyph to match what is in the jacks. Four times
 // a second, off jack_timer, so the glyph changes while the plug is still going
-// in; everything below returns at once when nothing has moved.
-static void refresh_headphone_icon(void) {
-	static int last_state = -1;
-	static int last_usb = -1;
+// in. A forced refresh is also used on wake so the first frame cannot carry an
+// output icon left over from before the screen went dark.
+static void refresh_headphone_icon(bool force) {
 	int state = headphone_jack_state();
 
 	// The same poll is where line out finds out that its jack has gone: the
@@ -278,33 +279,39 @@ static void refresh_headphone_icon(void) {
 	usbaudio_poll();
 
 	int usb = usbaudio_active() ? 1 : 0;
-	if (state == last_state && usb == last_usb) {
+	bool changed = state != last_jack_state || usb != last_usb_audio_state;
+
+	if (changed) {
+		// Something left one of the sockets. Pausing belongs here and not
+		// further down because this is the only code that remembers what was
+		// plugged in a quarter of a second ago.
+		//
+		// -1 is the first poll after boot, where there is no "before" to have
+		// left. And only the output actually carrying the music counts: with a
+		// DAC on the port or headphones on the radio, the jacks are not what
+		// anyone is listening to, and pulling a cable out of an unused socket
+		// must not stop the album.
+		if (last_usb_audio_state == 1 && usb == 0) {
+			player_output_unplugged("the USB-C DAC");
+		} else if (last_jack_state > JACK_NONE && state == JACK_NONE && !usb) {
+			char device[160];
+			audio_get_output_device(device, sizeof(device));
+			if (!device[0] || strcmp(device, "default") == 0) {
+				player_output_unplugged(last_jack_state == JACK_BALANCED ? "the 4.4 mm jack" : "the 3.5 mm jack");
+			}
+		}
+
+		last_jack_state = state;
+		last_usb_audio_state = usb;
+	}
+
+	// A normal poll can return when the hardware answer is unchanged. The forced
+	// wake refresh bypasses this cache and redraws the current output state
+	// before the first frame is presented.
+	if (!hp_icon) {
 		return;
 	}
-
-	// Something left one of the sockets. Pausing belongs here and not further
-	// down because the icon work below returns early in several places, and
-	// because this is the only code that remembers what was plugged in a
-	// quarter of a second ago.
-	//
-	// -1 is the first poll after boot, where there is no "before" to have left.
-	// And only the output actually carrying the music counts: with a DAC on the
-	// port or headphones on the radio, the jacks are not what anyone is
-	// listening to, and pulling a cable out of an unused socket must not stop
-	// the album.
-	if (last_usb == 1 && usb == 0) {
-		player_output_unplugged("the USB-C DAC");
-	} else if (last_state > JACK_NONE && state == JACK_NONE && !usb) {
-		char device[160];
-		audio_get_output_device(device, sizeof(device));
-		if (!device[0] || strcmp(device, "default") == 0) {
-			player_output_unplugged(last_state == JACK_BALANCED ? "the 4.4 mm jack" : "the 3.5 mm jack");
-		}
-	}
-
-	last_state = state;
-	last_usb = usb;
-	if (!hp_icon) {
+	if (!changed && !force) {
 		return;
 	}
 
@@ -335,6 +342,10 @@ static void refresh_headphone_icon(void) {
 		lv_obj_remove_local_style_prop(hp_icon, LV_STYLE_IMAGE_RECOLOR_OPA, 0);
 	}
 }
+
+// Called before the wake repaint so a cable removed while the screen was dark
+// cannot leave a stale headphone glyph in the first visible frame.
+void topbar_refresh_audio_outputs(void) { refresh_headphone_icon(true); }
 
 // The codec the Bluetooth link is carrying, in whichever direction it runs:
 // headphones being fed from here, or a phone sending to this player. Both are
@@ -579,7 +590,7 @@ static void refresh_play_icon(const device_state_t *state) {
 static void jack_timer_cb(lv_timer_t *timer) {
 	(void)timer;
 
-	refresh_headphone_icon();
+	refresh_headphone_icon(false);
 
 	// The charger, on the same beat and for the same reason as the jacks: it is
 	// something the user just did with their hands, and up to five seconds of a

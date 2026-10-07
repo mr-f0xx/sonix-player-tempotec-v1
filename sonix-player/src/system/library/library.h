@@ -194,6 +194,9 @@ int library_scan_found(void);
 // possibly without a terminator.
 void library_scan_current_folder(char *out, size_t size);
 
+// The file being read right now, copied into the caller's buffer.
+void library_scan_current_file(char *out, size_t size);
+
 // Asks a running scan to stop early; it winds up at the next file.
 void library_scan_stop(void);
 

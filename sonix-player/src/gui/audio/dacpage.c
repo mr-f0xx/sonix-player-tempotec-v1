@@ -226,6 +226,7 @@ static void loaded_cb(lv_event_t *e) {
 }
 
 void dacpage_init(gui_config_t *cfg) {
+	const bool compact = cfg->screen_width < 320;
 	lv_obj_t *container = settingsrow_page(dacpage_screen, cfg, "dac");
 
 	// The mode is a switch, not a side effect of arriving: the page can be
@@ -240,9 +241,19 @@ void dacpage_init(gui_config_t *cfg) {
 	// settingsrow_page() builds already centres its children on the cross axis,
 	// and an object positioned by alignment leaves the flow and is measured as
 	// taking no space, so it would overlap the row above and steal its presses.
+	// The original 200 px mark nearly fills the V1's 240 px panel and pushes the
+	// status copy below the fold. Give the image a compact layout box as well as
+	// a smaller draw scale so it takes only the space it visibly occupies.
 	big_icon = lv_image_create(container);
 	lv_image_set_src(big_icon, &icon_dac_page);
-	lv_obj_set_style_margin_top(big_icon, 40, 0);
+	int icon_size = compact ? 96 : 200;
+	int source_side = LV_MAX((int)icon_dac_page.header.w, (int)icon_dac_page.header.h);
+	lv_obj_set_size(big_icon, icon_size, icon_size);
+	lv_image_set_inner_align(big_icon, LV_IMAGE_ALIGN_CENTER);
+	if (source_side > 0) {
+		lv_image_set_scale(big_icon, (uint32_t)(LV_SCALE_NONE * icon_size / source_side));
+	}
+	lv_obj_set_style_margin_top(big_icon, compact ? 8 : 40, 0);
 
 	format_label = lv_label_create(container);
 	lv_obj_set_width(format_label, lv_pct(100));
@@ -251,8 +262,8 @@ void dacpage_init(gui_config_t *cfg) {
 	// so invisible on the dark theme.
 	lv_obj_add_style(format_label, &theme_style_text, 0);
 	lv_obj_set_style_text_align(format_label, LV_TEXT_ALIGN_CENTER, 0);
-	lv_obj_set_style_text_font(format_label, &font_ui_24_bold, 0);
-	lv_obj_set_style_margin_top(format_label, 20, 0);
+	lv_obj_set_style_text_font(format_label, compact ? &font_ui_20_bold : &font_ui_24_bold, 0);
+	lv_obj_set_style_margin_top(format_label, compact ? 6 : 20, 0);
 	lv_label_set_text(format_label, "");
 
 	status_label = lv_label_create(container);
@@ -260,8 +271,8 @@ void dacpage_init(gui_config_t *cfg) {
 	lv_label_set_long_mode(status_label, LV_LABEL_LONG_WRAP);
 	lv_obj_set_style_text_align(status_label, LV_TEXT_ALIGN_CENTER, 0);
 	lv_obj_add_style(status_label, &theme_style_text_dim, 0);
-	lv_obj_set_style_text_font(status_label, &font_ui_22, 0);
-	lv_obj_set_style_margin_top(status_label, 10, 0);
+	lv_obj_set_style_text_font(status_label, compact ? &font_ui_14 : &font_ui_22, 0);
+	lv_obj_set_style_margin_top(status_label, compact ? 2 : 10, 0);
 	lv_label_set_text(status_label, "");
 	status_normal_color = lv_obj_get_style_text_color(status_label, LV_PART_MAIN);
 

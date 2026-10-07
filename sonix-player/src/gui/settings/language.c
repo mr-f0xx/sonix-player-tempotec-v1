@@ -3,6 +3,7 @@
 #include "src/gui/board_profile.h"
 #include "src/gui/fonts/fonts.h"
 #include "src/gui/shell/icons.h"
+#include "src/gui/shell/powermenu.h"
 #include "src/gui/shell/settingsrow.h"
 #include "src/gui/shell/switcher.h"
 #include "src/gui/shell/theme.h"
@@ -40,22 +41,20 @@ static lv_obj_t *panel_title;
 static lv_obj_t *page_title;
 static lv_obj_t *menu_label; // the language row on the settings page
 
-// The word for "language" in the language now in use, followed by the English
-// one. Somebody who has just set the player to a language they cannot read has
-// to be able to find the way back, and "Language" is the word they look for. In
-// English the two would be the same word twice, so only one is shown.
+// Show the language name exactly as translated. In particular, French is
+// simply "Langue" rather than a bilingual "Langue/Language" label.
 static void language_label(char *out, size_t size) {
 	const char *own = tr("language");
-	if (strcmp(own, "Language") == 0) {
-		snprintf(out, size, "%s", own);
-	} else {
-		snprintf(out, size, "%s/Language", own);
+	// A few installed French catalogs called this row "Langues". Keep the
+	// navigation label singular even when an older catalog is still present.
+	if (strcmp(own, "Langues") == 0) {
+		own = "Langue";
 	}
+	snprintf(out, size, "%s", own);
 }
 
-// The three places that name is shown. Not left to the general re-labelling
-// pass, which only recognises whole strings present in the language file: this
-// label is two of them joined together and is not in there.
+// The three places that name is shown. Keep them in step with the active
+// translation, including after a language is chosen on this very page.
 static void refresh_titles(void) {
 	char text[128];
 	language_label(text, sizeof(text));
@@ -120,6 +119,10 @@ static void pick_cb(lv_event_t *e) {
 	}
 	paint_checks();
 	refresh_titles();
+	// The short power-menu actions can share their translation with another
+	// page, so the generic reverse-translation pass cannot always identify
+	// their keys unambiguously.
+	powermenu_refresh_labels();
 }
 
 // A row that marks itself instead of leading somewhere. settingsrow_action
@@ -188,7 +191,7 @@ static void build_panel(gui_config_t *cfg) {
 	// the panel's padding, so it would slide down with the very padding meant
 	// to clear the status bar and end up behind the list.
 	panel_title = lv_label_create(panel);
-	lv_label_set_text(panel_title, "Lingua/Language"); // replaced by refresh_titles()
+	lv_label_set_text(panel_title, tr("language"));
 	lv_obj_add_style(panel_title, &theme_style_text, 0);
 	lv_obj_set_style_text_font(panel_title, &font_ui_32, 0);
 

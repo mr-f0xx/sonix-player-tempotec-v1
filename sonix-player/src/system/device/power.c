@@ -46,6 +46,7 @@
 #include "src/system/device/sysinfo.h"
 #include "src/system/device/axpcharge.h"
 #include "src/gui/shell/gui.h"
+#include "src/gui/shell/topbar.h"
 
 #include <errno.h>
 #include <fcntl.h>
@@ -184,6 +185,17 @@ static void backlight_write(long value) {
 	g_hw_brightness = value;
 	if (g_cfg.brightness_path) {
 		write_long_to_file(g_cfg.brightness_path, value);
+	}
+}
+
+// Keep the backlight truly off while the panel is being unblanked and its first
+// complete frame is drawn. Zero is a valid hardware value (it disables the
+// PWM); it is intentionally not part of the user's brightness range. The
+// configured level is restored with the wake fade after the repaint.
+static void backlight_hold_off(void) {
+	g_hw_brightness = 0;
+	if (g_cfg.brightness_path) {
+		write_long_to_file(g_cfg.brightness_path, 0);
 	}
 }
 
@@ -932,6 +944,15 @@ void power_shutdown(void) {
 	// never be written.
 	device_state_remember_flush();
 
+	// Dark the panel immediately, then fade/close audio before the kernel takes
+	// power away from the output stage. In particular, the HBC3000 is parked on
+	// its unused socket while its amplifier is still powered, avoiding a pop in
+	// the connected headphones during shutdown.
+	power_screen_off();
+	if (!audio_prepare_poweroff()) {
+		fprintf(stderr, "power: audio did not quiesce completely before shutdown\n");
+	}
+
 	// The time goes into the RTC before anything else, exactly as the stock
 	// player does on its way out: whatever the clock has learned since it was
 	// last set is otherwise lost the moment the power goes.
@@ -948,12 +969,6 @@ void power_shutdown(void) {
 	tidalcache_clear_on_exit();
 	podcastcache_clear_on_exit();
 	dlna_clear_on_exit();
-
-	// Dark the panel first: `poweroff` goes through init's shutdown hooks,
-	// which it must -- the raw syscall with USB attached leaves the PMIC to
-	// boot the device straight back up -- and those take a few seconds. With
-	// the screen already off the wait is invisible.
-	power_screen_off();
 
 	// The charger back on before the power goes: the driver keeps that bit
 	// across a shutdown -- mp2731_shutdown writes it from the property it has
@@ -1483,15 +1498,23 @@ void power_screen_on(void) {
 		(void)g_wake_hook();
 	}
 
-	screen_power(true);			 // panel, backlight and touch controller back up
-	usleep(SCREEN_ON_SETTLE_US); // let the panel + backlight finish re-initializing
-	set_indevs_enabled(true);
-	indev_timers_set_paused(false);
+	// The unblank can briefly expose an uninitialised framebuffer. Hold the
+	// backlight at zero across the repaint and the panel's reset so no white
+	// frame can reach the user; the configured level comes back with the wake
+	// fade below, after the UI is ready.
+	backlight_hold_off();
 
-	// The painting timers come back before the repaint below, and each runs
-	// once straight away, so the first frame after the wake already has the
-	// right time, the right battery and the right playback position on it.
+	// Resume the timers and repaint the entire interface into the framebuffer
+	// BEFORE unblanking the panel: presenting the old buffer for the 60 ms
+	// panel settle was the brief static-looking wake flash. Each painting
+	// timer runs once straight away, so the first frame after the wake already
+	// has the right time, the right battery and the right playback position.
 	standby_timers_set_paused(false);
+
+	// The jack poll is slowed while the screen is dark. Read it synchronously
+	// now, before the repaint, so an unplugged headphone cannot survive in the
+	// first status-bar frame after wake.
+	topbar_refresh_audio_outputs();
 
 	// resume ongoing refresh (if it was paused) ...
 	if (g_refr_timer) {
@@ -1501,31 +1524,25 @@ void power_screen_on(void) {
 	if (anim_timer) {
 		lv_timer_resume(anim_timer);
 	}
-	// ... and force an immediate, full repaint of the framebuffer. The blank
-	// cleared the panel to black, so the whole UI must be redrawn; this is not
-	// gated on g_refr_timer, and lv_refr_now() draws even if the timer is paused.
-	//
-	// The sysfs blank/unblank cycle tears down the panel's scan-out, and on this
-	// hardware the controller does not re-present the framebuffer just because
-	// fresh pixels were copied into it -- it must be kicked explicitly. How
-	// depends on which display path is active, so main.c owns the kick: it
-	// restores the video mode (some drivers reset the page-flipping display's
-	// double-height virtual resolution on blank) and re-arms scan-out around
-	// this one wake repaint.
 	display_wake_begin(g_disp);
 	lv_obj_t *scr = lv_screen_active();
 	if (scr) {
 		lv_obj_invalidate(scr);
 	}
 	lv_obj_invalidate(lv_layer_top());
-	lv_refr_now(g_disp);
+	lv_refr_now(g_disp); // explicit refresh works even when the refresh timer is paused
 	display_wake_end(g_disp);
 
-	// The panel came back at its pre-blank (dim) level, and the backlight driver
-	// may not have restored the configured brightness on unblank. Forcing the
-	// tracked value to MIN and fading up guarantees every ramp step is written
-	// to sysfs after the unblank and settle, so the backlight reliably returns.
-	g_hw_brightness = BRIGHTNESS_MIN;
+	screen_power(true);		 // show the freshly painted frame; PWM stays off
+	backlight_hold_off(); // unblank notifiers may restore their saved PWM value
+	usleep(SCREEN_ON_SETTLE_US); // let the panel + backlight finish re-initializing
+	backlight_hold_off(); // reassert after the panel's resume notifier settles
+	set_indevs_enabled(true);
+	indev_timers_set_paused(false);
+
+	// The backlight was held at zero until this full repaint completed. Restore
+	// the user's configured level gradually; g_hw_brightness still records the
+	// zero written after the panel's resume notifier.
 	fade_up_quickly(g_cfg.brightness);
 	lv_display_trigger_activity(g_disp);
 

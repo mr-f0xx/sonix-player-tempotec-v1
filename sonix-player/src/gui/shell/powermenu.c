@@ -14,6 +14,7 @@
 #include "src/gui/shell/icons.h"
 #include "src/gui/shell/theme.h"
 #include "src/system/device/clock.h"
+#include "src/system/audio/audio.h"
 #include "src/system/playback/device_state.h"
 #include "src/system/core/lang.h"
 #include "src/system/device/power.h"
@@ -63,6 +64,15 @@ typedef struct {
 static slide_t slide_off;
 static slide_t slide_reboot;
 
+void powermenu_refresh_labels(void) {
+	if (slide_off.label) {
+		lv_label_set_text(slide_off.label, tr("powermenu_slide_to_power_off"));
+	}
+	if (slide_reboot.label) {
+		lv_label_set_text(slide_reboot.label, tr("powermenu_slide_to_restart"));
+	}
+}
+
 bool powermenu_is_open(void) { return panel && !lv_obj_is_hidden(panel); }
 
 // ---------------------------------------------------------------------------
@@ -110,13 +120,16 @@ static void do_power_off(void) {
 static void do_reboot(void) {
 	printf("power: rebooting\n");
 	device_state_remember_flush();
+	power_screen_off();
+	if (!audio_prepare_poweroff()) {
+		fprintf(stderr, "power: audio did not quiesce completely before reboot\n");
+	}
 	clock_shutdown();
 	radio_store_close();
 	qobuzcache_clear_on_exit();
 	tidalcache_clear_on_exit();
 	podcastcache_clear_on_exit();
 	dlna_clear_on_exit();
-	power_screen_off(); // same instant-feedback trick as the shutdown
 	storage_release_for_shutdown();
 	sync();
 
@@ -156,7 +169,7 @@ static void slide_track_knob(slide_t *s) {
 	int knob_center = SLIDE_HEIGHT / 2 + (travel * value) / 100;
 	lv_obj_align(s->knob_icon, LV_ALIGN_LEFT_MID, knob_center - s->knob_icon_w / 2, 0);
 
-	// The hint fades as the knob approaches, exactly like the real thing.
+	// The action label fades as the knob approaches, exactly like the real thing.
 	lv_obj_set_style_opa(s->label, (lv_opa_t)(LV_OPA_COVER - (LV_OPA_COVER * value) / 100), 0);
 }
 
@@ -183,7 +196,7 @@ static void slide_event_cb(lv_event_t *e) {
 	}
 }
 
-// One pill: a rounded container carrying the hint text, with a transparent
+// One pill: a rounded container carrying the action label, with a transparent
 // slider inside it that is half a knob narrower on each side -- LVGL runs the
 // knob's centre from slider edge to slider edge, so insetting the slider is
 // what keeps the white disc inside the pill at both extremes.
@@ -201,7 +214,7 @@ static void make_slide(lv_obj_t *parent, slide_t *s, const lv_image_dsc_t *icon,
 	lv_obj_set_style_pad_all(s->pill, 0, 0);
 	lv_obj_set_scrollable(s->pill, false);
 
-	// The instruction, centred on the pill; it fades as the knob advances.
+	// The localized action label, centred on the pill; it fades as the knob advances.
 	s->label = lv_label_create(s->pill);
 	lv_label_set_text(s->label, tr(text));
 	lv_obj_set_style_text_font(s->label, &font_ui_24, 0);
