@@ -30,8 +30,12 @@
 #define INDEX_MAX (4u * 1024u * 1024u)
 #define PROFILE_MAX (128u * 1024u)
 
-#define INDEX_URL "https://raw.githubusercontent.com/jaakkopasanen/AutoEq/refs/heads/master/results/INDEX.md"
-#define RESULTS_URL "https://raw.githubusercontent.com/jaakkopasanen/AutoEq/refs/heads/master/results/"
+// raw.githubusercontent.com takes the branch name as one path component; the
+// refs/heads/ prefix is for Git refs, not part of a raw-file URL. Keeping both
+// requests on the same base avoids letting the catalogue load while every
+// selected profile download fails (or vice versa).
+#define RESULTS_URL "https://raw.githubusercontent.com/jaakkopasanen/AutoEq/master/results/"
+#define INDEX_URL RESULTS_URL "INDEX.md"
 
 typedef struct {
 	char name[128];

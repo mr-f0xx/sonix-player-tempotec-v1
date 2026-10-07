@@ -28,7 +28,8 @@
 - **MSEB** - HiBy's MageSound tuning, matched to the stock player: 10
   characteristics driven by 13 filters, with the slider travel selectable
   between 20, 40 and 100.
-- **Soundfield** - mid/side width from mono to twice natural.
+- **Soundfield** - mid/side width from mono to twice natural, starting at 1.50
+  for an audible widening when switched on (1.00 is neutral).
 - **Channel balance** - ±20 dB in half-decibel steps.
 - **Crossfeed** - level, cutoff and delay, all adjustable.
 - **ReplayGain** - off, track or album, read from the tags.
