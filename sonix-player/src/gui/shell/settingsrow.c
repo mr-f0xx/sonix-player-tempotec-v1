@@ -440,6 +440,30 @@ lv_obj_t *settingsrow_slider(lv_obj_t *parent, const char *name, int steps, lv_o
 							 lv_obj_t **slider_out, lv_event_cb_t cb) {
 	lv_obj_t *card = make_card(parent, name, value_out, compact_rows() ? 84 : 140);
 
+	// A compact card cannot keep the regular side-by-side heading widths: a
+	// translated title such as French "Extinction de l'écran" runs beneath its
+	// value. Give the title a two-line column and the value its own right-aligned
+	// column. This keeps the slider below both without changing the larger
+	// players' original layout.
+	if (compact_rows() && value_out && *value_out) {
+		lv_obj_t *label = lv_obj_get_child(card, 0);
+		lv_obj_t *value = *value_out;
+		const lv_font_t *compact_font = &font_ui_18;
+		int line_h = lv_font_get_line_height(compact_font);
+
+		lv_obj_set_style_text_font(label, compact_font, 0);
+		lv_obj_set_style_text_line_space(label, 0, 0);
+		lv_obj_set_width(label, lv_pct(54));
+		lv_obj_set_height(label, line_h * 2);
+		lv_label_set_long_mode(label, LV_LABEL_LONG_DOT);
+
+		lv_obj_set_style_text_font(value, compact_font, 0);
+		lv_obj_set_style_text_align(value, LV_TEXT_ALIGN_RIGHT, 0);
+		lv_obj_set_width(value, lv_pct(38));
+		lv_obj_set_height(value, line_h);
+		lv_label_set_long_mode(value, LV_LABEL_LONG_DOT);
+	}
+
 	lv_obj_t *slider = make_slider(card, steps, cb);
 	lv_obj_align(slider, LV_ALIGN_BOTTOM_MID, 0, compact_rows() ? -8 : -18);
 

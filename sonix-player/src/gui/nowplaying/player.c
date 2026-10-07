@@ -77,6 +77,9 @@ static void update_repeat_button(void);
 // one thing that still belonged to some other page.
 static lv_color_t chrome_accent(void);
 static lv_obj_t *progress_slider;
+// The compact slider leaves room for its oversized endpoint knob and shadow.
+// Zero means use the original percentage width on the HiBy panels.
+static int compact_progress_width;
 static lv_obj_t *elapsed_label; // start of the track, under the left end of the bar
 static lv_obj_t *remaining_label; // end of the track, under the right end
 // Where this track sits in the queue, between the two clocks: the row under the
@@ -108,11 +111,13 @@ static bool progress_running;
 #define POLL_PERIOD_PLAYING_MS 500
 #define POLL_PERIOD_IDLE_MS 2000
 
-// How far past their 56 px the buttons at the two ends of the transport row
-// take a tap. Upwards and downwards the 84 px row still clips it; sideways the
-// previous and next buttons start about 50 px further in, so 20 reaches
-// neither.
+// How far the end controls' hit areas grow past their visible buttons. On the
+// compact row the visible gap is much smaller, so its extension stays short of
+// the previous/next buttons instead of making adjacent targets overlap.
 #define CORNER_BTN_EXT_CLICK 20
+#define COMPACT_CORNER_BTN_EXT_CLICK 6
+#define COMPACT_PROGRESS_EXTRA_INSET 12
+#define COMPACT_CONTROLS_EXTRA_INSET 4
 
 // How often the progress display is carried forward between polls.
 //
@@ -1178,7 +1183,8 @@ static void slider_over_waveform(bool over) {
 		lv_obj_set_parent(progress_slider, player_menu);
 		lv_obj_move_to_index(progress_slider, lv_obj_get_index(wave_box) + 1);
 	}
-	lv_obj_set_size(progress_slider, lv_pct(100), PROGRESS_TRACK_HEIGHT);
+	lv_obj_set_size(progress_slider, compact_progress_width > 0 ? compact_progress_width : lv_pct(100),
+				 PROGRESS_TRACK_HEIGHT);
 	lv_obj_remove_local_style_prop(progress_slider, LV_STYLE_BG_OPA, LV_PART_MAIN);
 	lv_obj_set_style_bg_opa(progress_slider, LV_OPA_30, LV_PART_MAIN);
 	lv_obj_remove_local_style_prop(progress_slider, LV_STYLE_BG_OPA, LV_PART_INDICATOR);
@@ -4519,6 +4525,12 @@ void player_init(gui_config_t *cfg) {
 	// bars down both sides. Decode/crop a full-width 240 x cover-height image
 	// instead, flush to every edge.
 	const bool compact = bp_is_tempotec_v1();
+	compact_progress_width = compact
+						 ? (int)cfg->screen_width - 2 * (cfg->padding + COMPACT_PROGRESS_EXTRA_INSET)
+						 : 0;
+	if (compact_progress_width < 1) {
+		compact_progress_width = 0;
+	}
 	int cover_height = (int)cfg->screen_width;
 	int menu_height = (int)cfg->screen_height - cover_height;
 	int min_menu_h = compact ? 128 : PLAYER_MENU_MIN_HEIGHT;
@@ -4668,7 +4680,7 @@ void player_init(gui_config_t *cfg) {
 
 	// Playback progress, drawn as described at PROGRESS_TRACK_HEIGHT.
 	progress_slider = lv_slider_create(player_menu);
-	lv_obj_set_width(progress_slider, lv_pct(100));
+	lv_obj_set_width(progress_slider, compact_progress_width > 0 ? compact_progress_width : lv_pct(100));
 	lv_obj_set_height(progress_slider, PROGRESS_TRACK_HEIGHT);
 	lv_slider_set_range(progress_slider, 0, 1000);
 
@@ -4720,7 +4732,8 @@ void player_init(gui_config_t *cfg) {
 
 	lv_obj_t *below_slider_group = lv_obj_create(player_menu);
 	below_slider_obj = below_slider_group;
-	lv_obj_set_size(below_slider_group, lv_pct(100), LV_SIZE_CONTENT);
+	lv_obj_set_size(below_slider_group, compact_progress_width > 0 ? compact_progress_width : lv_pct(100),
+				 LV_SIZE_CONTENT);
 	lv_obj_set_style_bg_opa(below_slider_group, 0, 0);
 	lv_obj_set_style_border_width(below_slider_group, 0, 0);
 	lv_obj_set_style_radius(below_slider_group, 0, 0);
@@ -4755,16 +4768,18 @@ void player_init(gui_config_t *cfg) {
 	// the left, out of the way of the transport controls.
 	lv_obj_t *player_controls_buttons = lv_obj_create(player_menu);
 	controls_row = player_controls_buttons;
-	lv_obj_set_size(player_controls_buttons, lv_pct(100), LV_SIZE_CONTENT);
+	int controls_width = (int)cfg->screen_width -
+					  2 * (cfg->padding + (compact ? COMPACT_CONTROLS_EXTRA_INSET : 0));
+	lv_obj_set_size(player_controls_buttons, compact ? controls_width : lv_pct(100), LV_SIZE_CONTENT);
 	lv_obj_set_style_bg_opa(player_controls_buttons, 0, 0);
 	lv_obj_set_style_border_width(player_controls_buttons, 0, 0);
 	lv_obj_set_style_radius(player_controls_buttons, 0, 0);
 	lv_obj_set_style_pad_all(player_controls_buttons, 0, 0);
 	lv_obj_set_flex_flow(player_controls_buttons, LV_FLEX_FLOW_ROW);
 	lv_obj_set_flex_align(player_controls_buttons, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-	// Lifted a touch off the screen edge on the larger panels. The compact row
-	// already uses every pixel of its controls block.
-	lv_obj_set_style_translate_y(player_controls_buttons, compact ? 0 : -8, 0);
+	// Lift the transport from the bottom bezel on both layouts. The compact
+	// page gets a gentler lift because its controls block is only 128 px tall.
+	lv_obj_set_style_translate_y(player_controls_buttons, compact ? -4 : -8, 0);
 
 	// The repeat/shuffle button, kept out of the flex row so the transport
 	// stays centred on the screen.
@@ -4776,9 +4791,9 @@ void player_init(gui_config_t *cfg) {
 	lv_obj_set_style_shadow_width(repeat_btn, 0, 0);
 	lv_obj_add_event_cb(repeat_btn, repeat_btn_event_cb, LV_EVENT_CLICKED, NULL);
 	lv_obj_align(repeat_btn, LV_ALIGN_LEFT_MID, 0, 0);
-	// The glyph stays 56 px; the area that takes the tap does not, out to the
-	// height of the row and short of the previous button.
-	lv_obj_set_ext_click_area(repeat_btn, CORNER_BTN_EXT_CLICK);
+	// The side controls grow their hit targets without stealing the adjacent
+	// skip button's tap, even in the tighter V1 layout.
+	lv_obj_set_ext_click_area(repeat_btn, compact ? COMPACT_CORNER_BTN_EXT_CLICK : CORNER_BTN_EXT_CLICK);
 
 	repeat_btn_icon = lv_image_create(repeat_btn);
 	lv_obj_center(repeat_btn_icon);
@@ -4795,7 +4810,7 @@ void player_init(gui_config_t *cfg) {
 	lv_obj_set_style_shadow_width(speed_btn, 0, 0);
 	lv_obj_add_event_cb(speed_btn, speed_btn_event_cb, LV_EVENT_CLICKED, NULL);
 	lv_obj_align(speed_btn, LV_ALIGN_LEFT_MID, 0, 0);
-	lv_obj_set_ext_click_area(speed_btn, CORNER_BTN_EXT_CLICK);
+	lv_obj_set_ext_click_area(speed_btn, compact ? COMPACT_CORNER_BTN_EXT_CLICK : CORNER_BTN_EXT_CLICK);
 	lv_obj_set_hidden(speed_btn, true);
 
 	speed_btn_icon = lv_image_create(speed_btn);
@@ -4814,7 +4829,7 @@ void player_init(gui_config_t *cfg) {
 	lv_obj_set_style_shadow_width(more_btn, 0, 0);
 	lv_obj_add_event_cb(more_btn, more_btn_event_cb, LV_EVENT_CLICKED, NULL);
 	lv_obj_align(more_btn, LV_ALIGN_RIGHT_MID, 0, 0);
-	lv_obj_set_ext_click_area(more_btn, CORNER_BTN_EXT_CLICK);
+	lv_obj_set_ext_click_area(more_btn, compact ? COMPACT_CORNER_BTN_EXT_CLICK : CORNER_BTN_EXT_CLICK);
 
 	lv_obj_t *more_icon = lv_image_create(more_btn);
 	more_btn_icon = more_icon;
