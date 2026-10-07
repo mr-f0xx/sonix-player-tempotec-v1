@@ -33,7 +33,7 @@ The TempoTec Variations V1 is an ultra-compact digital audio player (DAP) powere
 | **Display** | 2.0-inch QVGA TFT panel, **240×320 pixels** portrait |
 | **DAC** | Dual Cirrus Logic CS43131 |
 | **Audio Outputs** | 3.5 mm single-ended + 4.4 mm balanced headphone jacks |
-| **Storage** | Dual MicroSD card slots (SD1 & SD2, exFAT / FAT32) |
+| **Storage** | One MicroSD card slot (exFAT / FAT32) |
 | **Controls** | Side flank buttons (Power, Vol+, Vol-, Play/Pause, Next/Prev) + capacitive touchscreen |
 | **Wireless** | 2.4 GHz Wi-Fi (802.11 b/g/n) and bi-directional Bluetooth |
 | **USB** | USB Type-C (bidirectional USB DAC & USB audio out) |
