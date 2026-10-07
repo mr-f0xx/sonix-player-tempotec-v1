@@ -4,8 +4,6 @@ Sonix Player is a community port of the Sonix music player to the **TempoTec Var
 
 This is not an official TempoTec or HiBy release. **The port has been tested on physical TempoTec Variations V1 hardware and works perfectly on the tested device.** It targets the **TempoTec Variations V1 only**; compatibility with the V1-A or other players in the Variations family is not established.
 
-> [!WARNING]
-> Firmware updates always carry some risk. GitHub Actions checks each image's package structure, checksums, model identity and preservation of the stock kernel, but does not install each generated artifact on hardware. Keep the matching official firmware and checksum available before trying any build.
 
 ## Contents
 
