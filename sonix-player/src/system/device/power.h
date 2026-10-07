@@ -64,6 +64,13 @@ void power_init(const power_config_t *cfg, lv_display_t *disp);
 void display_wake_begin(lv_display_t *disp);
 void display_wake_end(lv_display_t *disp);
 
+// Blocks until the display controller has finished `frames` more scan-outs,
+// so the frame last flushed is known to have reached the panel. True when the
+// driver answered; false when it cannot be asked (the plain fbdev fallback,
+// the host build, a kernel without FBIO_WAITFORVSYNC), in which case the
+// caller falls back to a fixed delay. Also main.c's.
+bool display_wait_vsync(int frames);
+
 // Screen rotation: turns the picture (and the touch panel with it) through
 // 180 degrees. Also implemented by main.c, for the same reason -- only the
 // display owner knows how the framebuffer is being fed. LVGL 9.1 has no

@@ -32,6 +32,7 @@ static const sysinfo_model_t MODELS[] = {
 		.tap_wake = true,
 		.one_flank = false,
 		.media_keys_swapped = true,
+		.headset_switch_idle_one = false,
 	},
 	{
 		.name = "HiBy R1",
@@ -44,6 +45,7 @@ static const sysinfo_model_t MODELS[] = {
 		.tap_wake = false,
 		.one_flank = true,
 		.media_keys_swapped = false,
+		.headset_switch_idle_one = false,
 	},
 	{
 		// The Variations V1 has two CS43131s and both 3.5 mm and 4.4 mm
@@ -60,6 +62,10 @@ static const sysinfo_model_t MODELS[] = {
 		.tap_wake = false,
 		.one_flank = true,
 		.media_keys_swapped = false,
+		// Measured on the device: /sys/class/switch holds only `headset`, no
+		// `balance`, and its state reads 1 with both sockets empty. Read as
+		// the HiBy nodes are, that is a 3.5 mm plug that is never pulled out.
+		.headset_switch_idle_one = true,
 	},
 };
 

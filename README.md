@@ -15,15 +15,15 @@ The TempoTec Variations V1 is an ultra-compact digital audio player (DAP) powere
        │ 10:42        100%  🔋 │  <-- 24 px compact status bar
        ├──────────────────────┤
        │                      │
-       │    ┌───────────┐     │  <-- Centred 156×156 sleeve
-        │    │           │     │
+       │    ┌───────────┐     │  <-- Centred ~154×154 sleeve on the
+        │    │           │     │      blurred artwork, full screen
         │    │    Art    │     │
         │    │           │     │
         │    └───────────┘     │
         ├──────────────────────┤
         │ Track Title          │
         │ Artist Name          │
-        │ 01:24 ━━━━━●── 03:45 │  <-- 152 px compact control deck
+        │ 01:24 ━━━━━●── 03:45 │  <-- Deck sized from the fonts (~150 px)
        │     ⏮   ⏯   ⏭       │
        └──────────────────────┘
 ```
@@ -50,12 +50,14 @@ Rather than blindly scaling down an interface designed for larger screens, Sonix
 
 * **Compact Status Bar & Layout Geometry:** Uses a 24 px status bar, 6 px margins, and 36 px header action targets.
 * **Overflow Header Menus:** The main Music screen combines title actions with a dedicated overflow menu (`...`) so long titles are never truncated to `Musi…`.
-* **Centred-Sleeve Now Playing Screen:** Displays a centred 156×156 px square sleeve with rounded corners inside the cover panel, paired with a roomier 152 px control deck so the title, progress and transport stay visually connected.
+* **Centred-Sleeve Now Playing Screen:** The blurred artwork fills the whole screen and a centred square sleeve (about 154×154 px, rounded corners) floats on it, so there is no edge between the artwork area and the controls. The control deck below is sized at start-up from the actual font line heights — names, bar, clocks and transport each get their own row, and the transport can no longer overlap the queue position.
 * **Adaptive A–Z Index Strip:** Automatically scales down to ~14 visible letter slots to fit the 320 px vertical height. Pressing anywhere along the strip proportionally navigates the full alphabet with an 88×84 touch preview card.
 * **Scrollable 10-Band EQ:** The graphic equaliser card scrolls smoothly horizontally instead of cramming ten sliders into 216 px.
 * **Compact Quick Settings:** Retains eight quick toggles arranged in an ergonomic 2×4 sheet.
 * **Pixel-Tuned Dialogs & Keyboard:** Bespoke layouts for Date/Time picker rollers, MSEB tuning, PEQ curves, and a 144 px compact on-screen keyboard tray.
 * **Button Remapping:** Configured as a clean, single-column scrollable list with direct tap-to-assign actions.
+* **Headphone Detection That Matches The Board:** The V1 kernel exposes a single `/sys/class/switch/headset` node, and it reads `1` with the socket empty. The status-bar headphone icon follows that node's real meaning on this model, so it only appears when something is plugged in; the raw value is logged on every change so the 4.4 mm socket can be mapped as well.
+* **Flash-Free Wake:** The panel comes out of its reset white, and the picture only reaches it after a frame has been scanned out. On wake the backlight is held at its floor until the display controller reports two frames delivered (`FBIO_WAITFORVSYNC`), then fades up over the finished screen — no white frame.
 
 ---
 

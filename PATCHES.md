@@ -25,12 +25,33 @@ Music landing page keeps Settings plus one overflow menu in the title row;
 Playlists/Browse, Favourites and Search remain available inside that menu
 without allowing four actions to reduce the heading to `Musi…`.
 
-Now Playing shows a centred **156×156 px** square sleeve with soft-clipped corners
-inside the cover panel, with the source badges and alternative-layout pills
-travelling on the sleeve itself. The remaining 152 px is an independently sized
-compact control deck, with enough room for the title, progress and transport to
-read as one connected layout. The full panel stays the swipe and lyrics-gesture
-hit target, and the blurred per-track backdrop still fills the controls block.
+Now Playing on the V1 shows the blurred artwork behind the **whole screen**, as
+Studio does on every player, with a centred square sleeve (about 154×154 px,
+soft-clipped corners) floating on it; the source badges and alternative-layout
+pills travel on the sleeve itself. The cover panel and the control deck are
+both transparent on this board, so there is no horizontal edge under the
+sleeve where the panel colour used to meet the deck's own blurred block. The
+deck is not a fixed height: `compact_deck_height()` adds up the four rows --
+names, bar, clocks, transport -- from the line heights of the fonts in force
+(and the shorter 44 px waveform of the alternative layout), so the transport is
+never lifted into the queue-position row above it. The full panel stays the
+swipe and lyrics-gesture hit target.
+
+Two board matters that are not layout live beside the profile. The V1 kernel
+has one switch node, `/sys/class/switch/headset`, and no `balance` node; with
+nothing in either socket the headset node reads `1`, which the HiBy logic took
+for a plug. `sysinfo_model_t` therefore carries `headset_switch_idle_one`, set
+for the V1, and `headphone_jack_state_raw()` on such a model treats `1` as no
+plug and any other value as a 3.5 mm headset (never balanced: that route has
+not been exercised on this board), logging the raw value to stderr whenever it
+changes so the 4.4 mm socket's encoding can be read off a real plug later.
+And the wake sequence in `power.c` no longer unblanks on a fixed 60 ms timer:
+the panel resets white and the kernel's unblank returns before the first frame
+has been transferred, so `power_screen_on()` holds the backlight at
+`BRIGHTNESS_MIN` (not 0 -- a stopped PWM pin may idle high), unblanks, waits
+for `display_wait_vsync()` in `main.c` to report two scan-outs (or a 160 ms
+fallback where `FBIO_WAITFORVSYNC` is not answered), re-asserting the hold
+every 15 ms, and only then fades up.
 
 Two-column, three-row pages with five entries let the fifth tile span the last
 row. Compact tile captions are one fixed line with an ellipsis and no extra

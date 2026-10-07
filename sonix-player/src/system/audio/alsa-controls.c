@@ -13,6 +13,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <time.h>
 #include <unistd.h>
@@ -1258,14 +1259,61 @@ void set_high_gain(int enabled) {
 int get_high_gain(void) { return high_gain; }
 
 
+#define HEADSET_SWITCH "/sys/class/switch/headset/state"
+#define BALANCE_SWITCH "/sys/class/switch/balance/state"
+
+// The switch node's state as a number, or -1 when the node is not there or
+// does not hold one.
+static long read_switch_state(const char *path) {
+	FILE *f = fopen(path, "r");
+	if (!f) {
+		return -1;
+	}
+	char line[32];
+	long value = -1;
+	if (fgets(line, sizeof(line), f)) {
+		char *end = NULL;
+		long parsed = strtol(line, &end, 10);
+		if (end != line) {
+			value = parsed;
+		}
+	}
+	fclose(f);
+	return value;
+}
+
 // One raw sample from the kernel switch nodes. Balanced wins when both report
 // plugged. Keep this separate from the public answer so a transient read while
 // the plug contacts are moving cannot change the route or flash the icon.
+//
+// The HiBy players publish two nodes, `headset` for the 3.5 mm socket and
+// `balance` for the 4.4 mm one, each 1 while a plug is in. The TempoTec V1
+// publishes `headset` alone, and on it 1 is what the node reads with both
+// sockets EMPTY (measured on the device) -- so taken the HiBy way the status
+// bar showed a plug that was never there. On that board the idle value is the
+// one thing known for certain, and the rule is built on it: 1 is nothing, any
+// other reading is a plug. Which socket it is in cannot be told from one node
+// whose encoding the kernel does not document, so it is reported as the 3.5 mm
+// jack, which keeps the route at 2 -- the route the board has been playing
+// through all along. Every change of the raw value is logged so the encoding
+// can be read off a device with a plug in it.
 static int headphone_jack_state_raw(void) {
-	if (file_matches("/sys/class/switch/balance/state", "1")) {
+	if (file_matches(BALANCE_SWITCH, "1")) {
 		return JACK_BALANCED;
 	}
-	if (file_matches("/sys/class/switch/headset/state", "1")) {
+
+	const sysinfo_model_t *model = sysinfo_model();
+	if (model && model->headset_switch_idle_one) {
+		static long last_logged = -2;
+		long state = read_switch_state(HEADSET_SWITCH);
+		if (state != last_logged) {
+			fprintf(stderr, "alsa: headset switch reads %ld (1 is the empty socket on this board)\n", state);
+			last_logged = state;
+		}
+		return state < 0 || state == 1 ? JACK_NONE : JACK_HEADSET;
+	}
+
+	if (file_matches(HEADSET_SWITCH, "1")) {
 		return JACK_HEADSET;
 	}
 	return JACK_NONE;

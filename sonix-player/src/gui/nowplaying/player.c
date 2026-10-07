@@ -141,11 +141,24 @@ static int polls_since_stop = POLLS_FAST_AFTER_STOP;
 
 // Height the controls block needs for its two lines of text, the bar, the
 // clocks and the buttons. Only used as a floor on screens too short to fit a
-// full-width square cover on top of it. The V1 pairs a centred square sleeve
-// with a 152 px deck: enough room for the title, progress and transport to
-// read as one connected layout without crowding the bottom bezel.
+// full-width square cover on top of it.
 #define PLAYER_MENU_MIN_HEIGHT 210
-#define COMPACT_PLAYER_MENU_MIN_HEIGHT 152
+
+// The V1's deck is not a fixed number: it is added up at start-up from the
+// line heights of the fonts in force (compact_deck_height()), so the four rows
+// -- names, bar, clocks, transport -- always fit one under the other with
+// these gaps between them and nothing lifted into the row above. The rest of
+// the 320 px goes to the sleeve, which keeps COMPACT_SLEEVE_MARGIN above and
+// below it and at least COMPACT_SLEEVE_SIDE_MARGIN off either bezel.
+#define COMPACT_DECK_PAD_TOP 4
+#define COMPACT_DECK_PAD_BOTTOM 6
+#define COMPACT_DECK_GAP 5
+#define COMPACT_DECK_SLACK 2 // Large text draws a size up; keep the last row on screen
+#define COMPACT_FAV_BTN_H 26
+#define COMPACT_PLAY_BTN 48
+#define COMPACT_SKIP_BTN 42
+#define COMPACT_SLEEVE_MARGIN 8
+#define COMPACT_SLEEVE_SIDE_MARGIN 28
 
 // The controls block as the R3 Pro II has it, 720 - 480. A taller panel (the
 // R1's 800) spreads what it has over the rows rather than leaving it empty
@@ -249,6 +262,7 @@ static int cover_art_w, cover_art_h;   // the visible sleeve, inset on compact p
 // this size a hairline is one pixel of a colour that is half background, and
 // the whole thing reads as noise.
 #define WAVE_HEIGHT 64
+#define COMPACT_WAVE_HEIGHT 44 // the V1's deck, where the shape stands in the bar's row
 #define WAVE_BAR_GAP 3
 #define WAVE_MIN_BAR 3	  // a silent column is still a mark, not a hole
 #define WAVE_PAST_OPA 255 // the part already played
@@ -311,6 +325,7 @@ static lv_obj_t *wave_box;
 static lv_obj_t *wave_canvas;
 static uint8_t *wave_buf;
 static int wave_w; // the buffer's width, which is what the painting must use
+static int wave_h = WAVE_HEIGHT; // and its height: WAVE_HEIGHT, or the V1's shorter one
 static uint8_t wave_bars[WAVEFORM_BARS];
 static bool wave_have;		// the shape of this track is known
 static int wave_drawn = -1; // where the playhead was, in pixels, when it was drawn
@@ -322,6 +337,19 @@ static int backdrop_w, backdrop_h;	   // size of the controls block it sits behi
 // coarse. `backdrop_is_studio` is the shape the picture on hand was made at.
 static int backdrop_studio_h;
 static bool backdrop_is_studio;
+
+// The V1 shows the blurred copy behind the whole screen in every arrangement,
+// not only in Studio: a 240 px panel has no room for a full-width sleeve, and
+// a smaller sleeve on a flat panel over a blurred deck put a hard edge right
+// under the artwork. With the blur running top to bottom the sleeve floats on
+// it and the deck has no border to meet. `backdrop_full` is the choice for this
+// board; `backdrop_is_full` is the shape the picture on hand was made at, the
+// screen's or the deck's.
+static bool backdrop_full;
+static bool backdrop_is_full;
+static lv_style_t compact_clear_style; // the two surfaces the full blur shows through
+
+static bool backdrop_fills_screen(void) { return layout_studio_now || backdrop_full; }
 
 static double current_total_length = 0; // cached from the last device_state snapshot, so slider math works between polls
 static char progress_label_text[32];
@@ -910,6 +938,13 @@ static void cover_show(bool have_cover) {
 	} else {
 		lv_obj_set_hidden(cover_placeholder_icon, true);
 	}
+	// On the V1 the cover panel is clear, so the empty sleeve is drawn by the
+	// frame itself: a rounded square of the cover colour with the note on it.
+	// Only while there is nothing in it -- under a picture it is covered, and
+	// in Studio, which draws its own empty square, it would show through.
+	if (cover_art_group && backdrop_full) {
+		lv_obj_set_style_bg_opa(cover_art_group, !have_cover && !studio ? LV_OPA_COVER : LV_OPA_TRANSP, 0);
+	}
 }
 
 static void set_over_cover(bool on) {
@@ -1180,7 +1215,7 @@ static void slider_over_waveform(bool over) {
 
 	if (over && wave_box) {
 		lv_obj_set_parent(progress_slider, wave_box);
-		lv_obj_set_size(progress_slider, lv_pct(100), WAVE_HEIGHT);
+		lv_obj_set_size(progress_slider, lv_pct(100), wave_h);
 		lv_obj_align(progress_slider, LV_ALIGN_CENTER, 0, 0);
 		lv_obj_set_style_bg_opa(progress_slider, LV_OPA_TRANSP, LV_PART_MAIN);
 		lv_obj_set_style_bg_opa(progress_slider, LV_OPA_TRANSP, LV_PART_INDICATOR);
@@ -1231,6 +1266,25 @@ static lv_obj_t *studio_quality;	  // the icon and the format line under the sle
 static lv_obj_t *studio_quality_icon;
 static bool studio_up;
 static int studio_box_w, studio_box_h; // the panel this arrangement is laid out on
+static bool lyrics_look_on;			   // the words have Studio's look up, see lyrics_look()
+
+// Puts the V1's screen-sized blur up behind the standard and alternative
+// arrangements, or takes it down, to match whether there is a backdrop on
+// hand. Studio draws the same object itself and the words borrow it while they
+// are up, so both of those are left alone here; the cover panel and the deck
+// are already clear on this board (compact_clear_style), so there is nothing
+// else to switch.
+static void full_backdrop_apply(void) {
+	if (!backdrop_full || !studio_bg || layout_studio_now || lyrics_look_on) {
+		return;
+	}
+	bool have = current_backdrop.pixels != NULL && backdrop_is_full;
+	lv_image_set_src(studio_bg, have ? &current_backdrop.dsc : NULL);
+	lv_obj_set_hidden(studio_bg, !have);
+	if (have) {
+		lv_obj_move_background(studio_bg);
+	}
+}
 static int menu_pad_ver = PLAYER_MENU_PAD_VER; // the controls block's spacing, see PLAYER_MENU_REF_HEIGHT
 static int menu_gap = PLAYER_MENU_GAP;
 static int studio_cover_size;
@@ -1575,7 +1629,9 @@ static void lyrics_scroll_cb(lv_event_t *e) {
 // The blurred sleeve the words sit on: Studio's own, or the one made for the
 // other two arrangements. NULL while there is none.
 static const lv_image_dsc_t *lyrics_backdrop(void) {
-	if (layout_studio_now) {
+	// Studio's copy is already the shape of the screen, and so is the V1's in
+	// every arrangement: nothing to make a second one from.
+	if (layout_studio_now || backdrop_is_full) {
 		return current_backdrop.pixels ? &current_backdrop.dsc : NULL;
 	}
 	return lyrics_screen_pic.pixels ? &lyrics_screen_pic.dsc : NULL;
@@ -1597,8 +1653,8 @@ static void lyrics_head_sync(void) {
 // screen-sized blend redrawn on every frame of the swipe is what this
 // processor cannot keep up with. Only with a picture to show; without one the
 // page keeps its own background, whole, and the words take the theme's
-// colours.
-static bool lyrics_look_on;
+// colours. (lyrics_look_on is declared with the Studio state above, where
+// full_backdrop_apply() reads it.)
 
 static void lyrics_look(bool on) {
 	if (layout_studio_now) {
@@ -1622,6 +1678,8 @@ static void lyrics_look(bool on) {
 		lv_obj_remove_local_style_prop(player_menu, LV_STYLE_BG_IMAGE_OPA, 0);
 	}
 	lyrics_look_on = on;
+	// The V1 had the same blur up before the words came, and wants it back.
+	full_backdrop_apply();
 	// The words are white over a blurred sleeve, and in the theme's own
 	// colour over the page's own background where there is no picture.
 	lv_color_t ink = lyrics_backdrop() ? lv_color_white() : theme()->text_primary;
@@ -1782,7 +1840,7 @@ static void lyrics_layout(void) {
 		pane_y = top;
 		int bottom = studio_box_h - STUDIO_BOTTOM;
 		if (layout_wave_now && wave_canvas) {
-			bottom -= WAVE_HEIGHT - PROGRESS_TRACK_HEIGHT;
+			bottom -= wave_h - PROGRESS_TRACK_HEIGHT;
 		}
 		x = STUDIO_MARGIN;
 		w = studio_box_w - 2 * STUDIO_MARGIN;
@@ -2101,8 +2159,8 @@ static void lyrics_bg_forget(void) {
 // Starts the blur of the sleeve just put up. Not in Studio, which has its own
 // blurred copy behind the whole screen already.
 static void lyrics_bg_prepare(void) {
-	if (layout_studio_now || !current_cover.pixels) {
-		return;
+	if (layout_studio_now || backdrop_is_full || !current_cover.pixels) {
+		return; // the copy on hand is the screen's shape already
 	}
 	lyrics_bg_job_t *job = calloc(1, sizeof(*job));
 	if (!job) {
@@ -2360,8 +2418,14 @@ static void studio_take_back(void) {
 		if (player_menu) {
 			lv_obj_remove_local_style_prop(player_menu, LV_STYLE_BG_OPA, 0);
 			lv_obj_remove_local_style_prop(player_menu, LV_STYLE_BG_IMAGE_OPA, 0);
-			lv_obj_set_flex_align(player_menu, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+			// The V1's deck is laid out from its top edge with its own bottom
+			// padding (see player_init); the others centre their rows.
+			lv_obj_set_flex_align(player_menu, backdrop_full ? LV_FLEX_ALIGN_START : LV_FLEX_ALIGN_CENTER,
+								  LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 			lv_obj_set_style_pad_ver(player_menu, menu_pad_ver, 0);
+			if (backdrop_full) {
+				lv_obj_set_style_pad_bottom(player_menu, COMPACT_DECK_PAD_BOTTOM, 0);
+			}
 			lv_obj_set_style_pad_gap(player_menu, menu_gap, 0);
 		}
 		// The standard-size picture comes back, and the note with it when
@@ -2580,6 +2644,7 @@ static void apply_layout(void) {
 		studio_put();
 	} else {
 		lyrics_layout(); // studio_put() places the page itself
+		full_backdrop_apply(); // studio_take_back() took the V1's blur down with Studio's
 	}
 	align_title_with_star(); // the title may have just left its row, or come back to it
 
@@ -2623,9 +2688,10 @@ static void update_layout(const device_state_t *state) {
 	apply_layout();
 	lyrics_request(state);
 
-	// The blurred copy is made at the shape of whatever shows it, so moving in
-	// or out of Studio means the one on hand is the wrong shape and the picture
-	// is asked for again. Only on a change of arrangement, which is a setting
+	// The blurred copy is made at the shape of whatever shows it, and the
+	// sleeve at the size the arrangement draws it, so moving in or out of
+	// Studio means the ones on hand are the wrong shape and the picture is
+	// asked for again. Only on a change of arrangement, which is a setting
 	// the user has just touched.
 	if (studio != backdrop_is_studio && cover_shown_path[0]) {
 		reload_cover(cover_shown_path);
@@ -2689,7 +2755,7 @@ static void wave_paint(int played_px) {
 	// been laid out yet answers with something else, and painting to that
 	// number writes past the end of the buffer.
 	int w = wave_w;
-	int h = WAVE_HEIGHT;
+	int h = wave_h;
 	if (w <= 0) {
 		return;
 	}
@@ -2809,11 +2875,12 @@ static void reload_cover(const char *filepath) {
 	// The blur of the picture going away goes with it, from behind the words
 	// too: until the new one is made they are on a plain dark page.
 	lyrics_bg_forget();
-	if (layout_studio_now && studio_bg) {
-		lv_image_set_src(studio_bg, NULL); // Studio's points at the backdrop freed below
+	if (studio_bg && lv_image_get_src(studio_bg) == &current_backdrop.dsc) {
+		lv_image_set_src(studio_bg, NULL); // Studio's, or the V1's, points at the backdrop freed below
 	}
 	cover_free(&current_cover);
 	cover_free(&current_backdrop);
+	full_backdrop_apply(); // nothing to show behind the V1's page until the next one lands
 
 	cover_show(false);
 	// Studio holds pointers to both of those, so it is told in the same breath:
@@ -2833,7 +2900,8 @@ static void reload_cover(const char *filepath) {
 
 	if (filepath && filepath[0]) {
 		backdrop_is_studio = layout_studio_now;
-		cover_set_backdrop_upright(backdrop_is_studio);
+		backdrop_is_full = backdrop_fills_screen();
+		cover_set_backdrop_upright(backdrop_is_full);
 
 		// The sleeve is asked for at the size the arrangement in force will
 		// draw it. A picture that does not match its widget is resampled by
@@ -2845,7 +2913,7 @@ static void reload_cover(const char *filepath) {
 		int cover_w = backdrop_is_studio ? studio_cover_geometry(NULL) : cover_art_w;
 		int cover_h = backdrop_is_studio ? cover_w : cover_art_h;
 		coverloader_request_player(filepath, cover_w, cover_h, backdrop_w,
-								   backdrop_is_studio ? backdrop_studio_h : backdrop_h);
+								   backdrop_is_full ? backdrop_studio_h : backdrop_h);
 		cover_request_outstanding = true;
 
 		// The collector rides on the progress timer; make sure it is ticking
@@ -2958,7 +3026,13 @@ static void apply_cover_result(void) {
 		if (new_backdrop.pixels) {
 			current_backdrop = new_backdrop;
 			current_backdrop.dsc.data = current_backdrop.pixels;
-			lv_obj_set_style_bg_image_src(player_menu, &current_backdrop.dsc, 0);
+			if (backdrop_full) {
+				// The screen-sized copy goes behind the whole page; the deck
+				// is clear and shows it through (full_backdrop_apply).
+				full_backdrop_apply();
+			} else {
+				lv_obj_set_style_bg_image_src(player_menu, &current_backdrop.dsc, 0);
+			}
 		}
 
 		// The dark backdrop is up: light chrome, in both themes.
@@ -3017,6 +3091,9 @@ static void player_refresh_theme(void) {
 	}
 
 	lv_obj_set_style_bg_color(cover_panel, theme()->cover_bg, 0);
+	if (cover_art_group && backdrop_full) {
+		lv_obj_set_style_bg_color(cover_art_group, theme()->cover_bg, 0);
+	}
 	lv_obj_set_style_image_recolor(cover_placeholder_icon, theme()->text_secondary, 0);
 	// The backdrop over a loaded cover is always the dark treatment -- same
 	// look in both themes; only the no-cover panel follows the theme.
@@ -4515,6 +4592,27 @@ void player_sheet_attach_drag(lv_obj_t *obj, bool opening) {
 	lv_obj_add_event_cb(obj, sheet_drag_cb, LV_EVENT_PRESS_LOST, (void *)(uintptr_t)opening);
 }
 
+// The height of the V1's deck: its four rows at the fonts in force, the gaps
+// between them and the padding either end, added up rather than guessed. The
+// first row is the taller of the two names stacked (no row gap between them on
+// this board) and the star over the format; the third is the taller of the two
+// clock fonts. A deck this tall never has a row drawn over another, whatever
+// size the faces come back at.
+static int compact_deck_height(void) {
+	int title_h = lv_font_get_line_height(bp_title_font());
+	int artist_h = lv_font_get_line_height(bp_artist_font());
+	int format_h = lv_font_get_line_height(bp_format_label_font());
+	int clock_h = LV_MAX(lv_font_get_line_height(bp_time_font()), lv_font_get_line_height(bp_queue_label_font()));
+	int info_h = LV_MAX(title_h + artist_h, COMPACT_FAV_BTN_H + format_h);
+	int standard = info_h + COMPACT_DECK_GAP + PROGRESS_TRACK_HEIGHT;
+	// The alternative arrangement moves the names onto the sleeve and puts
+	// the shape of the track where the bar was; the deck has to hold
+	// whichever of the two stacks is the taller.
+	int alternative = COMPACT_WAVE_HEIGHT;
+	return COMPACT_DECK_PAD_TOP + LV_MAX(standard, alternative) + COMPACT_DECK_GAP + clock_h + COMPACT_DECK_GAP +
+		   COMPACT_PLAY_BTN + COMPACT_DECK_PAD_BOTTOM + COMPACT_DECK_SLACK;
+}
+
 // Builds the player sheet: artwork, controls and the poll that drives them.
 void player_init(gui_config_t *cfg) {
 	// The artwork decodes on the shared worker; make sure it exists before
@@ -4535,10 +4633,11 @@ void player_init(gui_config_t *cfg) {
 
 
 	// Geometry first, because everything else hangs off it. The V1 gets a
-	// shorter cover panel and a centred square sleeve, leaving more room below
-	// for the title, seek bar and transport. That also lifts the playback row
-	// instead of squeezing it against the bottom bezel.
+	// deck exactly as tall as its four rows need (compact_deck_height()), a
+	// centred square sleeve in what is left above it, and the blurred artwork
+	// behind the whole screen rather than behind the deck alone.
 	const bool compact = bp_is_tempotec_v1();
+	backdrop_full = compact;
 	compact_progress_width = compact
 						 ? (int)cfg->screen_width - 2 * (cfg->padding + COMPACT_PROGRESS_EXTRA_INSET)
 						 : 0;
@@ -4547,7 +4646,7 @@ void player_init(gui_config_t *cfg) {
 	}
 	int cover_height = (int)cfg->screen_width;
 	int menu_height = (int)cfg->screen_height - cover_height;
-	int min_menu_h = compact ? COMPACT_PLAYER_MENU_MIN_HEIGHT : PLAYER_MENU_MIN_HEIGHT;
+	int min_menu_h = compact ? compact_deck_height() : PLAYER_MENU_MIN_HEIGHT;
 	if (menu_height < min_menu_h) {
 		menu_height = min_menu_h;
 		cover_height = (int)cfg->screen_height - menu_height;
@@ -4566,16 +4665,29 @@ void player_init(gui_config_t *cfg) {
 	alt_pill_pad_h = compact ? 10 : ALT_PILL_PAD_H;
 	alt_pill_pad_v = compact ? 5 : ALT_PILL_PAD_V;
 	if (compact) {
-		int side = LV_MIN(cover_box_w - 64, cover_box_h - 12);
+		// The sleeve: as large as the panel allows with its margins kept, and
+		// an even number so it centres on whole pixels.
+		int side = LV_MIN(cover_box_w - 2 * COMPACT_SLEEVE_SIDE_MARGIN, cover_box_h - 2 * COMPACT_SLEEVE_MARGIN);
 		if (side < 64) {
 			side = LV_MIN(cover_box_w, cover_box_h);
 		}
+		side &= ~1;
 		cover_art_w = side;
 		cover_art_h = side;
 	}
 	backdrop_w = (int)cfg->screen_width;
 	backdrop_h = menu_height;
 	backdrop_studio_h = (int)cfg->screen_height;
+
+	// The two surfaces the V1's screen-sized blur shows through. A style
+	// rather than local properties, so the words' look and Studio can set and
+	// clear their own local ones over it without ever bringing the panel's
+	// colour or the deck's own blurred block back.
+	if (compact) {
+		lv_style_init(&compact_clear_style);
+		lv_style_set_bg_opa(&compact_clear_style, LV_OPA_TRANSP);
+		lv_style_set_bg_image_opa(&compact_clear_style, LV_OPA_TRANSP);
+	}
 
 	// The controls block. Its background is the current track's artwork,
 	// flipped and blurred (set per track in refresh_cover); the panel colour is
@@ -4590,8 +4702,13 @@ void player_init(gui_config_t *cfg) {
 	lv_obj_set_style_radius(player_menu, 0, 0);
 	lv_obj_set_style_pad_hor(player_menu, cfg->padding, 0);
 	if (compact) {
-		menu_pad_ver = 4;
-		menu_gap = 4;
+		// The rows start at the top of the deck rather than floating in the
+		// middle of it: the deck is the height they add up to, and what the
+		// slack leaves over belongs at the bottom, off the bezel.
+		menu_pad_ver = COMPACT_DECK_PAD_TOP;
+		menu_gap = COMPACT_DECK_GAP;
+		lv_obj_set_flex_align(player_menu, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+		lv_obj_add_style(player_menu, &compact_clear_style, 0);
 	}
 	int spare = menu_height - PLAYER_MENU_REF_HEIGHT;
 	if (!compact && spare > 0) {
@@ -4599,6 +4716,9 @@ void player_init(gui_config_t *cfg) {
 		menu_gap = PLAYER_MENU_GAP + spare / 5;
 	}
 	lv_obj_set_style_pad_ver(player_menu, menu_pad_ver, 0);
+	if (compact) {
+		lv_obj_set_style_pad_bottom(player_menu, COMPACT_DECK_PAD_BOTTOM, 0);
+	}
 	lv_obj_set_style_pad_gap(player_menu, menu_gap, 0);
 	lv_obj_set_scrollable(player_menu, false);
 
@@ -4625,6 +4745,10 @@ void player_init(gui_config_t *cfg) {
 	lv_obj_set_style_bg_opa(song_text, 0, 0);
 	lv_obj_set_style_border_width(song_text, 0, 0);
 	lv_obj_set_style_pad_all(song_text, 0, 0);
+	if (compact) {
+		// The theme's row gap is ten pixels, a third of a line on this panel.
+		lv_obj_set_style_pad_row(song_text, 0, 0);
+	}
 	lv_obj_set_flex_flow(song_text, LV_FLEX_FLOW_COLUMN);
 	lv_obj_set_scrollable(song_text, false);
 
@@ -4660,7 +4784,7 @@ void player_init(gui_config_t *cfg) {
 
 	lv_obj_t *fav_btn = lv_btn_create(song_side);
 	fav_btn_obj = fav_btn;
-	lv_obj_set_size(fav_btn, compact ? 34 : 48, compact ? 28 : 44);
+	lv_obj_set_size(fav_btn, compact ? 34 : 48, compact ? COMPACT_FAV_BTN_H : 44);
 	lv_obj_set_style_bg_opa(fav_btn, LV_OPA_TRANSP, 0);
 	lv_obj_set_style_border_width(fav_btn, 0, 0);
 	lv_obj_set_style_shadow_width(fav_btn, 0, 0);
@@ -4685,7 +4809,8 @@ void player_init(gui_config_t *cfg) {
 	// already knows how to do the second.
 	wave_box = lv_obj_create(player_menu);
 	lv_obj_remove_style_all(wave_box);
-	lv_obj_set_size(wave_box, lv_pct(100), WAVE_HEIGHT);
+	wave_h = compact ? COMPACT_WAVE_HEIGHT : WAVE_HEIGHT;
+	lv_obj_set_size(wave_box, lv_pct(100), wave_h);
 	lv_obj_set_scrollable(wave_box, false);
 	lv_obj_set_hidden(wave_box, true);
 
@@ -4694,12 +4819,12 @@ void player_init(gui_config_t *cfg) {
 		if (wave_w < WAVEFORM_BARS) {
 			wave_w = WAVEFORM_BARS;
 		}
-		wave_buf = malloc((size_t)wave_w * WAVE_HEIGHT * 3);
+		wave_buf = malloc((size_t)wave_w * wave_h * 3);
 		if (wave_buf) {
-			memset(wave_buf, 0, (size_t)wave_w * WAVE_HEIGHT * 3);
+			memset(wave_buf, 0, (size_t)wave_w * wave_h * 3);
 			wave_canvas = lv_canvas_create(wave_box);
-			lv_canvas_set_buffer(wave_canvas, wave_buf, wave_w, WAVE_HEIGHT, LV_COLOR_FORMAT_RGB565A8);
-			lv_obj_set_size(wave_canvas, wave_w, WAVE_HEIGHT);
+			lv_canvas_set_buffer(wave_canvas, wave_buf, wave_w, wave_h, LV_COLOR_FORMAT_RGB565A8);
+			lv_obj_set_size(wave_canvas, wave_w, wave_h);
 			lv_obj_align(wave_canvas, LV_ALIGN_CENTER, 0, 0);
 			lv_obj_set_clickable(wave_canvas, false);
 		} else {
@@ -4806,10 +4931,15 @@ void player_init(gui_config_t *cfg) {
 	lv_obj_set_style_pad_all(player_controls_buttons, 0, 0);
 	lv_obj_set_flex_flow(player_controls_buttons, LV_FLEX_FLOW_ROW);
 	lv_obj_set_flex_align(player_controls_buttons, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-	// Lift the transport from the bottom bezel on both layouts. The compact
-	// cover now gives the controls more room, so the row can sit visibly higher
-	// without crowding the progress labels above it.
-	lv_obj_set_style_translate_y(player_controls_buttons, compact ? -10 : -8, 0);
+	// Lift the transport from the bottom bezel on the HiBy panels. Not on the
+	// V1: its deck is laid out at exactly the height of its rows, and a row
+	// moved up by hand from there lands on the clocks and the queue position
+	// above it -- which is what used to happen -- rather than in empty space.
+	if (compact) {
+		lv_obj_set_style_pad_column(player_controls_buttons, 8, 0);
+	} else {
+		lv_obj_set_style_translate_y(player_controls_buttons, -8, 0);
+	}
 
 	// The repeat/shuffle button, kept out of the flex row so the transport
 	// stays centred on the screen.
@@ -4873,7 +5003,7 @@ void player_init(gui_config_t *cfg) {
 	// and plain glyphs read better there than filled boxes.
 	lv_obj_t *prev_btn = lv_btn_create(player_controls_buttons);
 	prev_btn_obj = prev_btn;
-	lv_obj_set_size(prev_btn, compact ? 42 : 76, compact ? 42 : 76);
+	lv_obj_set_size(prev_btn, compact ? COMPACT_SKIP_BTN : 76, compact ? COMPACT_SKIP_BTN : 76);
 	lv_obj_set_style_bg_opa(prev_btn, 0, 0);
 	lv_obj_set_style_shadow_width(prev_btn, 0, 0);
 	prev_icon = lv_image_create(prev_btn);
@@ -4886,7 +5016,7 @@ void player_init(gui_config_t *cfg) {
 
 	// Play/pause: a white disc, with the glyph carrying the colour.
 	play_btn = lv_btn_create(player_controls_buttons);
-	lv_obj_set_size(play_btn, compact ? 48 : 84, compact ? 48 : 84);
+	lv_obj_set_size(play_btn, compact ? COMPACT_PLAY_BTN : 84, compact ? COMPACT_PLAY_BTN : 84);
 	lv_obj_set_style_radius(play_btn, LV_RADIUS_CIRCLE, 0);
 	lv_obj_set_style_bg_color(play_btn, lv_color_white(), 0); // repainted by set_over_cover
 	lv_obj_set_style_bg_opa(play_btn, LV_OPA_COVER, 0);
@@ -4900,7 +5030,7 @@ void player_init(gui_config_t *cfg) {
 
 	lv_obj_t *next_btn = lv_btn_create(player_controls_buttons);
 	next_btn_obj = next_btn;
-	lv_obj_set_size(next_btn, compact ? 42 : 76, compact ? 42 : 76);
+	lv_obj_set_size(next_btn, compact ? COMPACT_SKIP_BTN : 76, compact ? COMPACT_SKIP_BTN : 76);
 	lv_obj_set_style_bg_opa(next_btn, 0, 0);
 	lv_obj_set_style_shadow_width(next_btn, 0, 0);
 	next_icon = lv_image_create(next_btn);
@@ -4929,6 +5059,12 @@ void player_init(gui_config_t *cfg) {
 	lv_obj_set_style_radius(cover_panel, 0, 0);
 	lv_obj_set_style_pad_all(cover_panel, 0, 0);
 	lv_obj_set_scrollable(cover_panel, false);
+	if (compact) {
+		// Clear, like the deck: the page's background, and the blur over it
+		// once a cover is up, run from the top of the screen to the bottom
+		// with no edge where the panel used to end.
+		lv_obj_add_style(cover_panel, &compact_clear_style, 0);
+	}
 
 	// A transparent frame exactly the size of the sleeve. Its rounded clip
 	// keeps both the artwork and its overlays inside the same soft corners; the
@@ -4944,6 +5080,12 @@ void player_init(gui_config_t *cfg) {
 	lv_obj_set_style_clip_corner(cover_art_group, true, 0);
 	lv_obj_set_scrollable(cover_art_group, false);
 	lv_obj_set_clickable(cover_art_group, false);
+	if (compact) {
+		// The empty sleeve's colour, switched on by cover_show() while there
+		// is no picture to cover it.
+		lv_obj_set_style_bg_color(cover_art_group, theme()->cover_bg, 0);
+		lv_obj_set_style_bg_opa(cover_art_group, LV_OPA_COVER, 0);
+	}
 
 	// The live badge, top right over the artwork: the one thing that has to be
 	// legible at a glance is that this is not a file being played but a

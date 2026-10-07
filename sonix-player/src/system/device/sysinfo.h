@@ -73,6 +73,7 @@ typedef struct {
 	bool tap_wake;			   // the touch controller can wake the screen (power.h)
 	bool one_flank;			   // every button on the right flank (remap.c)
 	bool media_keys_swapped;   // KEY_NEXTSONG is the upper skip key, not next (system.c)
+	bool headset_switch_idle_one; // the one jack switch reads 1 with the sockets empty (alsa-controls.c)
 } sysinfo_model_t;
 
 // The entry for the name in the file, or NULL when the file says nothing or
