@@ -73,6 +73,13 @@ static const char *const KB_SYM2_ROWS[KB_LAYOUT_ROWS] = {
 #define KB_T9_KEYS KB_LAYOUT_T9_KEYS
 #define KB_T9_COMMIT_MS 800
 
+// The shortest key row that still carries the number-mode caps on two lines
+// (the digit over its share of symbols): two lines of the T9 label font and a
+// little air. Anything shorter -- the 26 px rows of the compact tray -- gets
+// one line instead, because a two-line cap there hangs out of the key above
+// and below.
+#define KB_T9_CAPS_TWO_LINE_MIN_H 44
+
 // Number mode: the digit first, then the sixteen symbols of the first QWERTY
 // symbol page shared out at the tail of each cycle (.,:; -_ '" !? () &@ + %),
 // none left out.
@@ -89,6 +96,11 @@ static const char *const KB_T9_NUM2[KB_T9_KEYS] = {
 struct keyboard_s {
 	lv_obj_t *tray;
 	lv_obj_t *field;
+
+	// The height of one key row in the tray: the caps have to fit it. The
+	// number-mode T9 caps choose one or two lines by it (see
+	// KB_T9_CAPS_TWO_LINE_MIN_H).
+	int row_h;
 
 	// The two panels inside the tray: only one is visible, per
 	// [other] keyboard_t9 (see keyboard_refresh_type).
@@ -374,10 +386,14 @@ static void kb_refresh_caps(keyboard_t *kb) {
 		char cap[16];
 		if (kb->t9_numbers) {
 			const char *cycle = (kb->symbols2 ? KB_T9_NUM2 : KB_T9_NUM)[i];
-			if (cycle[1] != '\0') {
+			if (cycle[1] == '\0') {
+				snprintf(cap, sizeof(cap), "%c", cycle[0]);
+			} else if (kb->row_h >= KB_T9_CAPS_TWO_LINE_MIN_H) {
 				snprintf(cap, sizeof(cap), "%c\n%s", cycle[0], cycle + 1);
 			} else {
-				snprintf(cap, sizeof(cap), "%c", cycle[0]);
+				// One line on the short rows: the digit first, then its share
+				// of symbols, the same order the taps type them in.
+				snprintf(cap, sizeof(cap), "%c %s", cycle[0], cycle + 1);
 			}
 		} else {
 			cap[0] = '\0';
@@ -969,6 +985,8 @@ keyboard_t *keyboard_create(lv_obj_t *parent, int width, int height, lv_obj_t *f
 	int wide_key_w = width < 320 ? 44 : 84;
 	int index = 0;
 
+	kb->row_h = row_h;
+
 	// The two panels, stacked inside the tray: QWERTY and T9. Only one stays
 	// visible (keyboard_refresh_type), and every keyboard in the player
 	// switches together when the setting changes.
@@ -1070,7 +1088,8 @@ keyboard_t *keyboard_create(lv_obj_t *parent, int width, int height, lv_obj_t *f
 	lv_obj_add_event_cb(t9_mode, kb_layouts_cb, LV_EVENT_LONG_PRESSED, kb);
 	kb->t9_shift_btn = kb_make_key(t9_row4, key_w + 14, kb_t9_shift_cb, kb);
 	kb->t9_shift_icon = kb_key_icon(kb->t9_shift_btn, &icon_shift);
-	// The "0" that takes the shift icon's place in number mode.
+	// Space exists in both modes; the 0 stays on the 9 key's cycle, where the
+	// number table puts it.
 	lv_obj_t *t9_space = kb_make_key(t9_row4, 0, kb_t9_space_cb, kb); // grows
 	kb_key_icon(t9_space, &icon_space);
 	lv_obj_t *t9_del = kb_make_key(t9_row4, key_w + 14, kb_delete_cb, kb);

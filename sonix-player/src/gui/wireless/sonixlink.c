@@ -796,13 +796,28 @@ void sonixlink_page_init(gui_config_t *cfg) {
 	sd_root = cfg->sd_root_path;
 	sonixlink_set_card_root(sd_root);
 
+	const bool compact = cfg->screen_width < 320;
+
 	lv_obj_t *container = settingsrow_page(sonixlink_screen, cfg, "sonixlink");
 
 	settingsrow_toggle(container, "sonixlink", &toggle, toggle_changed_cb);
 
+	// Straight into the flex flow, with no alignment of its own: the container
+	// settingsrow_page() builds already centres its children on the cross axis.
+	// The 200 px logo nearly fills the V1's 240 px panel and pushes the status
+	// copy and the link row below the fold, so there -- as on the DAC page --
+	// the image gets a compact layout box as well as a smaller draw scale, and
+	// takes only the space it visibly occupies.
 	glyph = lv_image_create(container);
 	lv_image_set_src(glyph, &icon_sonixlink_page);
-	lv_obj_set_style_margin_top(glyph, 40, 0);
+	int icon_size = compact ? 96 : 200;
+	int source_side = LV_MAX((int)icon_sonixlink_page.header.w, (int)icon_sonixlink_page.header.h);
+	lv_obj_set_size(glyph, icon_size, icon_size);
+	lv_image_set_inner_align(glyph, LV_IMAGE_ALIGN_CENTER);
+	if (source_side > 0) {
+		lv_image_set_scale(glyph, (uint32_t)(LV_SCALE_NONE * icon_size / source_side));
+	}
+	lv_obj_set_style_margin_top(glyph, compact ? 8 : 40, 0);
 
 	status_label = lv_label_create(container);
 	lv_obj_set_width(status_label, lv_pct(100));
@@ -811,7 +826,7 @@ void sonixlink_page_init(gui_config_t *cfg) {
 	lv_obj_set_style_text_font(status_label, &font_ui_22, 0);
 	lv_obj_set_style_text_align(status_label, LV_TEXT_ALIGN_CENTER, 0);
 	lv_obj_set_style_pad_hor(status_label, 4, 0);
-	lv_obj_set_style_margin_top(status_label, 20, 0);
+	lv_obj_set_style_margin_top(status_label, compact ? 8 : 20, 0);
 
 	// The notice says what is missing; these lead to where it is fixed. Two
 	// halves of one row, since either link will do.
@@ -820,7 +835,7 @@ void sonixlink_page_init(gui_config_t *cfg) {
 	lv_obj_set_size(links_row, lv_pct(100), LV_SIZE_CONTENT);
 	lv_obj_set_flex_flow(links_row, LV_FLEX_FLOW_ROW);
 	lv_obj_set_style_pad_column(links_row, 12, 0);
-	lv_obj_set_style_margin_top(links_row, 16, 0);
+	lv_obj_set_style_margin_top(links_row, compact ? 8 : 16, 0);
 	lv_obj_set_scrollable(links_row, false);
 	lv_obj_set_event_bubble(links_row, true);
 	lv_obj_t *wifi_half = settingsrow_add(links_row, "wi_fi", NULL, wifi_row_cb, NULL);

@@ -113,11 +113,20 @@ static uint32_t since(uint32_t mark, uint32_t now) {
 // after the unblank (FBIO_WAITFORVSYNC, see display_wait_vsync), and in any
 // case for WAKE_HOLD_MIN_MS, re-writing the hold level every WAKE_HOLD_STEP_MS
 // in case the unblank path restores a level of its own along the way. Where
-// the vsync ioctl is not answered, WAKE_HOLD_FALLBACK_MS stands in for it.
+// the vsync ioctl is not answered -- or answers at once, which is the same
+// thing: it cannot have watched a frame go by -- WAKE_HOLD_FALLBACK_MS stands
+// in for it. The fallback must cover the panel's whole wake: the init
+// sequence's own delays (sleep-out style panels want up to 120 ms) PLUS two
+// scan-out periods, because on some firmware the init has not finished by the
+// time the blank write returns. The first version of the hold measured 160 ms
+// and still lit a white panel, so it now carries almost twice that.
 #define WAKE_HOLD_MIN_MS 90
-#define WAKE_HOLD_FALLBACK_MS 160
+#define WAKE_HOLD_FALLBACK_MS 300
 #define WAKE_HOLD_STEP_MS 15
 #define WAKE_VSYNC_FRAMES 2
+// Faster than two frames could physically be scanned out: a vsync wait that
+// returns within this time was not waiting on any frame.
+#define WAKE_VSYNC_PLAUSIBLE_MS 25
 
 // Bluetooth. A firmware whose /etc/init.d/S80_bt_init has not been replaced
 // still powers the chip up at every boot -- rfkill on, patchram, bluetoothd,
@@ -226,11 +235,25 @@ static void backlight_hold(void) {
 // until the controller has scanned WAKE_VSYNC_FRAMES frames out to it, or the
 // fallback delay where the controller cannot be asked, and never less than
 // WAKE_HOLD_MIN_MS in all. The hold level is re-asserted at every step.
+//
+// The vsync answer is only believed when it cost what two scan-outs cost:
+// some fb drivers return from FBIO_WAITFORVSYNC at once (or error out only on
+// the second call), and counting that as having watched two frames ends the
+// hold while the panel is still coming up -- which is the white flash coming
+// back. A too-fast answer falls through to the same long wait as no answer.
 static void backlight_hold_until_panel_shows(void) {
+	if (!g_cfg.blank_path) {
+		return; // the panel was never powered down: no reset, nothing to wait out
+	}
 	uint32_t started = monotonic_ms();
 	backlight_hold();
 
+	uint32_t vsync_at = monotonic_ms();
 	bool vsynced = display_wait_vsync(WAKE_VSYNC_FRAMES);
+	uint32_t vsync_took = monotonic_ms() - vsync_at;
+	if (vsynced && vsync_took < WAKE_VSYNC_PLAUSIBLE_MS) {
+		vsynced = false; // too quick to have seen any frame go by
+	}
 	backlight_hold();
 
 	uint32_t total = vsynced ? WAKE_HOLD_MIN_MS : WAKE_HOLD_FALLBACK_MS;

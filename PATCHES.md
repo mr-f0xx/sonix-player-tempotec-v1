@@ -49,9 +49,14 @@ And the wake sequence in `power.c` no longer unblanks on a fixed 60 ms timer:
 the panel resets white and the kernel's unblank returns before the first frame
 has been transferred, so `power_screen_on()` holds the backlight at
 `BRIGHTNESS_MIN` (not 0 -- a stopped PWM pin may idle high), unblanks, waits
-for `display_wait_vsync()` in `main.c` to report two scan-outs (or a 160 ms
+for `display_wait_vsync()` in `main.c` to report two scan-outs (or a 300 ms
 fallback where `FBIO_WAITFORVSYNC` is not answered), re-asserting the hold
-every 15 ms, and only then fades up.
+every 15 ms, and only then fades up. The vsync answer is only believed when it
+cost what two scan-outs cost: an ioctl that returns at once cannot have
+watched any frame go by and falls through to the same long wait. The fallback
+covers the panel's whole wake -- its init sequence's own delays plus two
+scan-out periods -- because the 160 ms first version still lit a white panel;
+on the V1 the unblank evidently takes longer than the vsync answer admits.
 
 Two-column, three-row pages with five entries let the fifth tile span the last
 row. Compact tile captions are one fixed line with an ellipsis and no extra
