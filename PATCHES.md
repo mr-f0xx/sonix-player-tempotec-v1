@@ -25,12 +25,17 @@ Music landing page keeps Settings plus one overflow menu in the title row;
 Playlists/Browse, Favourites and Search remain available inside that menu
 without allowing four actions to reduce the heading to `Musi…`.
 
-Now Playing shows a centred **156×156 px** square sleeve with soft-clipped corners
-inside the cover panel, with the source badges and alternative-layout pills
-travelling on the sleeve itself. The remaining 152 px is an independently sized
-compact control deck, with enough room for the title, progress and transport to
-read as one connected layout. The full panel stays the swipe and lyrics-gesture
-hit target, and the blurred per-track backdrop still fills the controls block.
+Now Playing on the V1 shows the blurred artwork behind the **whole screen**, as
+Studio does on every player, with a centred square sleeve (about 154×154 px,
+soft-clipped corners) floating on it; the source badges and alternative-layout
+pills travel on the sleeve itself. The cover panel and the control deck are
+both transparent on this board, so there is no horizontal edge under the
+sleeve where the panel colour used to meet the deck's own blurred block. The
+deck is not a fixed height: `compact_deck_height()` adds up the four rows --
+names, bar, clocks, transport -- from the line heights of the fonts in force
+(and the shorter 44 px waveform of the alternative layout), so the transport is
+never lifted into the queue-position row above it. The full panel stays the
+swipe and lyrics-gesture hit target.
 
 Two-column, three-row pages with five entries let the fifth tile span the last
 row. Compact tile captions are one fixed line with an ellipsis and no extra
