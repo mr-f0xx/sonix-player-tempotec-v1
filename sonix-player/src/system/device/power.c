@@ -46,6 +46,7 @@
 #include "src/system/device/sysinfo.h"
 #include "src/system/device/axpcharge.h"
 #include "src/gui/shell/gui.h"
+#include "src/gui/shell/topbar.h"
 
 #include <errno.h>
 #include <fcntl.h>
@@ -184,6 +185,17 @@ static void backlight_write(long value) {
 	g_hw_brightness = value;
 	if (g_cfg.brightness_path) {
 		write_long_to_file(g_cfg.brightness_path, value);
+	}
+}
+
+// Keep the backlight truly off while the panel is being unblanked and its first
+// complete frame is drawn. Zero is a valid hardware value (it disables the
+// PWM); it is intentionally not part of the user's brightness range. The
+// configured level is restored with the wake fade after the repaint.
+static void backlight_hold_off(void) {
+	g_hw_brightness = 0;
+	if (g_cfg.brightness_path) {
+		write_long_to_file(g_cfg.brightness_path, 0);
 	}
 }
 
@@ -1486,11 +1498,25 @@ void power_screen_on(void) {
 		(void)g_wake_hook();
 	}
 
-	// Resume the timers and prepare the scan-out while the panel is still
-	// blank. Repaint the entire interface into the framebuffer BEFORE unblanking
-	// it: presenting the old buffer for the 60 ms panel settle was the brief
-	// static-looking wake flash.
+	// The unblank can briefly expose an uninitialised framebuffer. Hold the
+	// backlight at zero across the repaint and the panel's reset so no white
+	// frame can reach the user; the configured level comes back with the wake
+	// fade below, after the UI is ready.
+	backlight_hold_off();
+
+	// Resume the timers and repaint the entire interface into the framebuffer
+	// BEFORE unblanking the panel: presenting the old buffer for the 60 ms
+	// panel settle was the brief static-looking wake flash. Each painting
+	// timer runs once straight away, so the first frame after the wake already
+	// has the right time, the right battery and the right playback position.
 	standby_timers_set_paused(false);
+
+	// The jack poll is slowed while the screen is dark. Read it synchronously
+	// now, before the repaint, so an unplugged headphone cannot survive in the
+	// first status-bar frame after wake.
+	topbar_refresh_audio_outputs();
+
+	// resume ongoing refresh (if it was paused) ...
 	if (g_refr_timer) {
 		lv_timer_resume(g_refr_timer);
 	}
@@ -1507,16 +1533,16 @@ void power_screen_on(void) {
 	lv_refr_now(g_disp); // explicit refresh works even when the refresh timer is paused
 	display_wake_end(g_disp);
 
-	screen_power(true);			 // show the freshly painted frame
+	screen_power(true);		 // show the freshly painted frame; PWM stays off
+	backlight_hold_off(); // unblank notifiers may restore their saved PWM value
 	usleep(SCREEN_ON_SETTLE_US); // let the panel + backlight finish re-initializing
+	backlight_hold_off(); // reassert after the panel's resume notifier settles
 	set_indevs_enabled(true);
 	indev_timers_set_paused(false);
 
-	// The panel came back at its pre-blank (dim) level, and the backlight driver
-	// may not have restored the configured brightness on unblank. Forcing the
-	// tracked value to MIN and fading up guarantees every ramp step is written
-	// to sysfs after the unblank and settle, so the backlight reliably returns.
-	g_hw_brightness = BRIGHTNESS_MIN;
+	// The backlight was held at zero until this full repaint completed. Restore
+	// the user's configured level gradually; g_hw_brightness still records the
+	// zero written after the panel's resume notifier.
 	fade_up_quickly(g_cfg.brightness);
 	lv_display_trigger_activity(g_disp);
 

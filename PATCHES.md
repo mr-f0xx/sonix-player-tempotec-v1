@@ -25,10 +25,12 @@ Music landing page keeps Settings plus one overflow menu in the title row;
 Playlists/Browse, Favourites and Search remain available inside that menu
 without allowing four actions to reduce the heading to `Musi…`.
 
-Now Playing keeps the cover **240 px wide** and centre-crops it to the available
-192 px height. The remaining 128 px is an independently sized compact control
-area. The artwork, its hit target and generated backdrop therefore share the
-same edge-to-edge bounds instead of producing black side bands.
+Now Playing shows a centred **156×156 px** square sleeve with soft-clipped corners
+inside the cover panel, with the source badges and alternative-layout pills
+travelling on the sleeve itself. The remaining 152 px is an independently sized
+compact control deck, with enough room for the title, progress and transport to
+read as one connected layout. The full panel stays the swipe and lyrics-gesture
+hit target, and the blurred per-track backdrop still fills the controls block.
 
 Two-column, three-row pages with five entries let the fifth tile span the last
 row. Compact tile captions are one fixed line with an ellipsis and no extra

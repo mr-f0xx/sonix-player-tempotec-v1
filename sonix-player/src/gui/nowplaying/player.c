@@ -141,8 +141,11 @@ static int polls_since_stop = POLLS_FAST_AFTER_STOP;
 
 // Height the controls block needs for its two lines of text, the bar, the
 // clocks and the buttons. Only used as a floor on screens too short to fit a
-// full-width square cover on top of it.
+// full-width square cover on top of it. The V1 pairs a centred square sleeve
+// with a 152 px deck: enough room for the title, progress and transport to
+// read as one connected layout without crowding the bottom bezel.
 #define PLAYER_MENU_MIN_HEIGHT 210
+#define COMPACT_PLAYER_MENU_MIN_HEIGHT 152
 
 // The controls block as the R3 Pro II has it, 720 - 480. A taller panel (the
 // R1's 800) spreads what it has over the rows rather than leaving it empty
@@ -4544,12 +4547,13 @@ void player_init(gui_config_t *cfg) {
 	}
 	int cover_height = (int)cfg->screen_width;
 	int menu_height = (int)cfg->screen_height - cover_height;
-	int min_menu_h = compact ? 152 : PLAYER_MENU_MIN_HEIGHT;
+	int min_menu_h = compact ? COMPACT_PLAYER_MENU_MIN_HEIGHT : PLAYER_MENU_MIN_HEIGHT;
 	if (menu_height < min_menu_h) {
 		menu_height = min_menu_h;
 		cover_height = (int)cfg->screen_height - menu_height;
 		if (cover_height < 64) {
 			cover_height = 64;
+			menu_height = (int)cfg->screen_height - cover_height;
 		}
 	}
 
@@ -4586,8 +4590,8 @@ void player_init(gui_config_t *cfg) {
 	lv_obj_set_style_radius(player_menu, 0, 0);
 	lv_obj_set_style_pad_hor(player_menu, cfg->padding, 0);
 	if (compact) {
-		menu_pad_ver = 2;
-		menu_gap = 2;
+		menu_pad_ver = 4;
+		menu_gap = 4;
 	}
 	int spare = menu_height - PLAYER_MENU_REF_HEIGHT;
 	if (!compact && spare > 0) {
