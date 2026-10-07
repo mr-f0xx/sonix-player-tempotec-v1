@@ -1580,6 +1580,9 @@ static void *input_thread_func(void *arg) {
 	uint32_t held_since = 0;   // when it went down
 	uint32_t next_repeat = 0;  // when the next volume step is due
 	bool long_press_done = false;
+	// A power press on a dark screen starts waking on key-down. Remember that
+	// here so the matching release does not toggle the screen straight back off.
+	bool power_wake_started_on_press = false;
 	// Next and previous do their work on the way up, so that holding them can
 	// mean something else. `deferred` says the press left a job for the release;
 	// `seeked` says the hold took it over and there is no longer one.
@@ -1730,6 +1733,25 @@ static void *input_thread_func(void *arg) {
 			// power into a screenshot or a lock.
 			bool combo = !info->headset && combo_press(ev.code);
 
+			// A wake is the one short power action that should not wait for the
+			// key-up edge. Starting the existing guarded wake sequence here makes
+			// it run during the user's button press; the release below is then
+			// consumed so it cannot immediately blank the screen again.
+			if (ev.code == KEY_POWER) {
+				power_wake_started_on_press = false;
+				if (!combo && !power_screen_is_on()) {
+					// Leave the chord window alone when either power+volume
+					// gesture is armed. In particular, key-lock is intentionally
+					// available while the screen is dark.
+					bool chord_armed = !info->headset &&
+								   (screenshot_enabled() || key_lock_gesture_armed());
+					if (!chord_armed) {
+						power_wake_started_on_press = true;
+						power_notify_power_button();
+					}
+				}
+			}
+
 			// A scrub still open from a button whose release never arrived --
 			// another key went down first and took `held` with it -- is closed
 			// here rather than left to freeze the position for good.
@@ -1771,10 +1793,11 @@ static void *input_thread_func(void *arg) {
 				continue;
 			}
 
-			// The power key is decided on release (short) or on the deadline
-			// (long), so nothing happens here for it. Next and previous are the
-			// same shape of decision for the same reason: a press that turns
-			// into a hold is a seek, and only a press that does not is a skip.
+			// A power key on an already-lit screen is decided on release
+			// (short) or on the deadline (long). Waking a dark screen is the
+			// exception: it was queued on key-down above. Next and previous are
+			// decided on release for the same reason: a press that turns into a
+			// hold is a seek, and only a press that does not is a skip.
 			if (dbl_first) {
 				// Decided on release, or by the hold: see the release below.
 				deferred = true;
@@ -1804,9 +1827,13 @@ static void *input_thread_func(void *arg) {
 		if (ev.value == 0) {
 			bool combo = !info->headset && combo_release(ev.code);
 
-			if (ev.code == KEY_POWER && !long_press_done && !combo) {
-				// Short press: the screen toggle.
-				power_notify_power_button();
+			if (ev.code == KEY_POWER) {
+				if (!long_press_done && !combo && !power_wake_started_on_press) {
+					// Short press: the screen toggle. A wake from the dark
+					// screen was already queued on key-down.
+					power_notify_power_button();
+				}
+				power_wake_started_on_press = false;
 			}
 
 			if (ev.code == held) {

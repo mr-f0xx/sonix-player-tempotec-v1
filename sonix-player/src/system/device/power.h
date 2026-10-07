@@ -148,8 +148,11 @@ void power_slow_in_standby(lv_timer_t *timer, uint32_t standby_period_ms);
 // does. It returns true if it put something on screen, which is what tells
 // power.c whether the extra repaint is worth doing. NULL clears it.
 void power_set_wake_hook(bool (*cb)(void));
-// Queue a power-button short-press. Consumed on the next state-machine tick,
-// which toggles the screen (or is absorbed as the wake event after suspend).
+// Queue a power-button action. The physical key reader posts this on key-down
+// for a dark-screen wake when no volume chord is armed (and consumes key-up);
+// otherwise short presses post on release. Touch wake uses the same queue.
+// Consumed on the next state-machine tick, which toggles the screen or absorbs
+// a wake press after suspend.
 void power_notify_power_button(void);
 
 // True from just before the device suspends to RAM until a moment after it
