@@ -37,6 +37,22 @@ names, bar, clocks, transport -- from the line heights of the fonts in force
 never lifted into the queue-position row above it. The full panel stays the
 swipe and lyrics-gesture hit target.
 
+Two board matters that are not layout live beside the profile. The V1 kernel
+has one switch node, `/sys/class/switch/headset`, and no `balance` node; with
+nothing in either socket the headset node reads `1`, which the HiBy logic took
+for a plug. `sysinfo_model_t` therefore carries `headset_switch_idle_one`, set
+for the V1, and `headphone_jack_state_raw()` on such a model treats `1` as no
+plug and any other value as a 3.5 mm headset (never balanced: that route has
+not been exercised on this board), logging the raw value to stderr whenever it
+changes so the 4.4 mm socket's encoding can be read off a real plug later.
+And the wake sequence in `power.c` no longer unblanks on a fixed 60 ms timer:
+the panel resets white and the kernel's unblank returns before the first frame
+has been transferred, so `power_screen_on()` holds the backlight at
+`BRIGHTNESS_MIN` (not 0 -- a stopped PWM pin may idle high), unblanks, waits
+for `display_wait_vsync()` in `main.c` to report two scan-outs (or a 160 ms
+fallback where `FBIO_WAITFORVSYNC` is not answered), re-asserting the hold
+every 15 ms, and only then fades up.
+
 Two-column, three-row pages with five entries let the fifth tile span the last
 row. Compact tile captions are one fixed line with an ellipsis and no extra
 line spacing, so long translations such as “Artistes d’album” cannot draw

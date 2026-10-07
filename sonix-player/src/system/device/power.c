@@ -93,11 +93,31 @@ static uint32_t since(uint32_t mark, uint32_t now) {
 // come back essentially black (backlight technically on, but too dim to see).
 #define BRIGHTNESS_ON_FLOOR 20
 
-// After unblanking, wait this long before pushing a new brightness at the panel.
-// The fb blank notifier re-inits the panel + re-powers the backlight on unblank;
-// a brightness write that lands mid-reinit can be swallowed, leaving the screen
-// dark. A short settle makes the wake reliable.
-#define SCREEN_ON_SETTLE_US 60000 // 60ms
+// After unblanking, how long the backlight is held down before the configured
+// level is brought back -- the time the panel takes to come out of reset and
+// receive the frame LVGL drew for it while it was dark.
+//
+// This is what the white flash at a wake was. The panel is an SLCD: its glass
+// shows the contents of its own memory, and a reset leaves that memory white.
+// Writing 0 to the blank node resets and re-initialises the panel and starts
+// the controller's DMA again, but the write returns before the first frame has
+// been transferred -- the init sequence has its own delays and a frame takes
+// a scan-out period -- so a backlight brought up on a fixed 60 ms timer lit a
+// white panel for the frames the picture had not reached yet, at whatever
+// level the ramp had got to. (Holding the PWM at 0 for those 60 ms did not
+// help, and may well have hurt: a disabled PWM pin can idle high, which on a
+// backlight is full brightness, and a zero is not within the user's range on
+// any account.)
+//
+// So the hold lasts until the controller has scanned two whole frames out
+// after the unblank (FBIO_WAITFORVSYNC, see display_wait_vsync), and in any
+// case for WAKE_HOLD_MIN_MS, re-writing the hold level every WAKE_HOLD_STEP_MS
+// in case the unblank path restores a level of its own along the way. Where
+// the vsync ioctl is not answered, WAKE_HOLD_FALLBACK_MS stands in for it.
+#define WAKE_HOLD_MIN_MS 90
+#define WAKE_HOLD_FALLBACK_MS 160
+#define WAKE_HOLD_STEP_MS 15
+#define WAKE_VSYNC_FRAMES 2
 
 // Bluetooth. A firmware whose /etc/init.d/S80_bt_init has not been replaced
 // still powers the chip up at every boot -- rfkill on, patchram, bluetoothd,
@@ -188,14 +208,40 @@ static void backlight_write(long value) {
 	}
 }
 
-// Keep the backlight truly off while the panel is being unblanked and its first
-// complete frame is drawn. Zero is a valid hardware value (it disables the
-// PWM); it is intentionally not part of the user's brightness range. The
-// configured level is restored with the wake fade after the repaint.
-static void backlight_hold_off(void) {
-	g_hw_brightness = 0;
+// The level the backlight is held at across an unblank: the lowest level the
+// PWM is still running at, which is the darkest this driver can be trusted to
+// be. Not 0 -- see WAKE_HOLD_MIN_MS for why. Written whether or not the value
+// tracked already says so, because the unblank path in the kernel writes the
+// hardware without telling anyone.
+static uint32_t monotonic_ms(void);
+
+static void backlight_hold(void) {
+	g_hw_brightness = BRIGHTNESS_MIN;
 	if (g_cfg.brightness_path) {
-		write_long_to_file(g_cfg.brightness_path, 0);
+		write_long_to_file(g_cfg.brightness_path, BRIGHTNESS_MIN);
+	}
+}
+
+// Keeps the backlight held for the time the panel needs after its unblank:
+// until the controller has scanned WAKE_VSYNC_FRAMES frames out to it, or the
+// fallback delay where the controller cannot be asked, and never less than
+// WAKE_HOLD_MIN_MS in all. The hold level is re-asserted at every step.
+static void backlight_hold_until_panel_shows(void) {
+	uint32_t started = monotonic_ms();
+	backlight_hold();
+
+	bool vsynced = display_wait_vsync(WAKE_VSYNC_FRAMES);
+	backlight_hold();
+
+	uint32_t total = vsynced ? WAKE_HOLD_MIN_MS : WAKE_HOLD_FALLBACK_MS;
+	for (;;) {
+		uint32_t elapsed = monotonic_ms() - started;
+		if (elapsed >= total) {
+			break;
+		}
+		uint32_t left = total - elapsed;
+		usleep((left < WAKE_HOLD_STEP_MS ? left : WAKE_HOLD_STEP_MS) * 1000u);
+		backlight_hold();
 	}
 }
 
@@ -1498,11 +1544,11 @@ void power_screen_on(void) {
 		(void)g_wake_hook();
 	}
 
-	// The unblank can briefly expose an uninitialised framebuffer. Hold the
-	// backlight at zero across the repaint and the panel's reset so no white
-	// frame can reach the user; the configured level comes back with the wake
-	// fade below, after the UI is ready.
-	backlight_hold_off();
+	// The panel comes out of reset white (see WAKE_HOLD_MIN_MS). Hold the
+	// backlight at its floor from here until the frame drawn below is known
+	// to have reached the glass; the configured level comes back with the
+	// wake fade at the end.
+	backlight_hold();
 
 	// Resume the timers and repaint the entire interface into the framebuffer
 	// BEFORE unblanking the panel: presenting the old buffer for the 60 ms
@@ -1533,16 +1579,14 @@ void power_screen_on(void) {
 	lv_refr_now(g_disp); // explicit refresh works even when the refresh timer is paused
 	display_wake_end(g_disp);
 
-	screen_power(true);		 // show the freshly painted frame; PWM stays off
-	backlight_hold_off(); // unblank notifiers may restore their saved PWM value
-	usleep(SCREEN_ON_SETTLE_US); // let the panel + backlight finish re-initializing
-	backlight_hold_off(); // reassert after the panel's resume notifier settles
+	screen_power(true); // panel and touch controller back up, backlight still at its floor
+	// And held there until the controller has scanned the painted frame out
+	// to the panel -- the moment before this is when the white used to show.
+	backlight_hold_until_panel_shows();
 	set_indevs_enabled(true);
 	indev_timers_set_paused(false);
 
-	// The backlight was held at zero until this full repaint completed. Restore
-	// the user's configured level gradually; g_hw_brightness still records the
-	// zero written after the panel's resume notifier.
+	// The picture is on the glass: bring the user's level back over it.
 	fade_up_quickly(g_cfg.brightness);
 	lv_display_trigger_activity(g_disp);
 

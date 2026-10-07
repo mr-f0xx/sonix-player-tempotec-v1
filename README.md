@@ -56,6 +56,8 @@ Rather than blindly scaling down an interface designed for larger screens, Sonix
 * **Compact Quick Settings:** Retains eight quick toggles arranged in an ergonomic 2×4 sheet.
 * **Pixel-Tuned Dialogs & Keyboard:** Bespoke layouts for Date/Time picker rollers, MSEB tuning, PEQ curves, and a 144 px compact on-screen keyboard tray.
 * **Button Remapping:** Configured as a clean, single-column scrollable list with direct tap-to-assign actions.
+* **Headphone Detection That Matches The Board:** The V1 kernel exposes a single `/sys/class/switch/headset` node, and it reads `1` with the socket empty. The status-bar headphone icon follows that node's real meaning on this model, so it only appears when something is plugged in; the raw value is logged on every change so the 4.4 mm socket can be mapped as well.
+* **Flash-Free Wake:** The panel comes out of its reset white, and the picture only reaches it after a frame has been scanned out. On wake the backlight is held at its floor until the display controller reports two frames delivered (`FBIO_WAITFORVSYNC`), then fades up over the finished screen — no white frame.
 
 ---
 

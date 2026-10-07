@@ -1176,6 +1176,10 @@ static lv_display_t *init_host_display(void) {
 // No panel to re-arm on the host: the SDL window never blanks.
 void display_wake_begin(lv_display_t *disp) { (void)disp; }
 void display_wake_end(lv_display_t *disp) { (void)disp; }
+bool display_wait_vsync(int frames) {
+	(void)frames;
+	return false;
+}
 
 // The folder that stands in for the memory card: SONIX_SD_ROOT, else the
 // documents folder named by XDG, else ~/Documents or ~/Documenti.
@@ -1597,6 +1601,31 @@ void display_wake_end(lv_display_t *disp) {
 		return; // the wake repaint's own flush pans to the freshly drawn page
 	}
 	lv_linux_fbdev_set_force_refresh(disp, false);
+}
+
+// FBIO_WAITFORVSYNC returns once the controller has scanned a frame out to
+// the panel. After an unblank that is the only word from the kernel that the
+// page LVGL drew while the panel was dark has actually been transferred into
+// the panel's own memory, which is what a frame on an SLCD is: until then the
+// glass still shows whatever its reset left in it. Only on the page-flipping
+// display, whose descriptor is at hand; the plain fbdev fallback keeps its
+// own and is not asked.
+bool display_wait_vsync(int frames) {
+	if (fb_fd < 0) {
+		return false;
+	}
+	for (int i = 0; i < frames; i++) {
+		uint32_t crtc = 0;
+		if (ioctl(fb_fd, FBIO_WAITFORVSYNC, &crtc) < 0) {
+			static bool said;
+			if (!said) {
+				said = true;
+				perror("fb: FBIO_WAITFORVSYNC");
+			}
+			return false;
+		}
+	}
+	return true;
 }
 
 // Frees the RAM pages once the refresh that may still be reading them is
