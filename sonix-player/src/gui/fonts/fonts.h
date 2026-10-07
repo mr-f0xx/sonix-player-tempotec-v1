@@ -21,9 +21,13 @@
 //   japanese.otf  FOT-Rodin, for kana, kanji and CJK punctuation when the
 //                 interface is in Japanese
 //
-// The last four each have a -bold file for the bold sizes, optional like
-// bold.otf. fonts_init() opens them once and builds one fallback chain per
-// size: default answers first, Korean, Thai and Arabic fill in what it lacks.
+// On the TempoTec V1, Neon.ttf (Neon 80s) is the primary face for all UI text.
+// MiSans remains in the fallback chain for scripts and symbols Neon lacks; its
+// regular face is also used at bold sizes because Neon has no bold companion.
+//
+// The script faces each have an optional -bold file, like bold.otf.
+// fonts_init() opens them once and builds one fallback chain per size; the
+// V1 chain ends with MiSans so unsupported Neon glyphs still render.
 // In Japanese, Rodin answers the CJK letters ahead of default (see fonts.c).
 // FreeType maps the files -- nothing is decoded up front -- and rendered
 // glyphs live in the shared FTC cache (LV_FREETYPE_CACHE_FT_GLYPH_CNT), so

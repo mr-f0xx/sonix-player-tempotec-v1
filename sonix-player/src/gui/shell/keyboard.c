@@ -920,6 +920,29 @@ static lv_obj_t *kb_key_icon(lv_obj_t *btn, const lv_image_dsc_t *glyph) {
 	return icon;
 }
 
+// The search icon is 34 px, taller than the 26 px keys on the V1's compact
+// T9 keyboard. Fit accept icons to short rows only when needed; full-size
+// keyboards keep their original icon.
+static void kb_fit_accept_icon(keyboard_t *kb, lv_obj_t *icon, const lv_image_dsc_t *glyph) {
+	if (!kb || !icon || !glyph) {
+		return;
+	}
+
+	int source_w = (int)glyph->header.w;
+	int source_h = (int)glyph->header.h;
+	int source_side = LV_MAX(source_w, source_h);
+	int box_side = kb->row_h - 6;
+	if (source_side <= 0 || box_side <= 0 || source_side <= box_side) {
+		return;
+	}
+
+	lv_obj_set_size(icon, LV_MAX(1, source_w * box_side / source_side),
+					LV_MAX(1, source_h * box_side / source_side));
+	lv_image_set_inner_align(icon, LV_IMAGE_ALIGN_CENTER);
+	lv_image_set_scale(icon, (uint32_t)(LV_SCALE_NONE * box_side / source_side));
+	lv_obj_center(icon);
+}
+
 // Letter keys carry the preview bubble; the control keys (shift, delete, 123,
 // space, accept) do not, exactly like a phone keyboard.
 static void kb_attach_preview(lv_obj_t *btn, key_ref_t *ref) {
@@ -1044,6 +1067,7 @@ keyboard_t *keyboard_create(lv_obj_t *parent, int width, int height, lv_obj_t *f
 	lv_obj_set_style_bg_color(kb->accept_btn, theme()->accent, 0);
 	if (accept_icon) {
 		lv_obj_t *glyph = kb_key_icon(kb->accept_btn, accept_icon);
+		kb_fit_accept_icon(kb, glyph, accept_icon);
 		lv_obj_set_style_image_recolor(glyph, lv_color_white(), 0);
 	} else {
 		lv_obj_t *label = kb_key_label(kb->accept_btn);
@@ -1099,6 +1123,7 @@ keyboard_t *keyboard_create(lv_obj_t *parent, int width, int height, lv_obj_t *f
 	lv_obj_set_style_bg_color(kb->t9_accept_btn, theme()->accent, 0);
 	if (accept_icon) {
 		lv_obj_t *glyph = kb_key_icon(kb->t9_accept_btn, accept_icon);
+		kb_fit_accept_icon(kb, glyph, accept_icon);
 		lv_obj_set_style_image_recolor(glyph, lv_color_white(), 0);
 	} else {
 		lv_obj_t *label = kb_key_label(kb->t9_accept_btn);
