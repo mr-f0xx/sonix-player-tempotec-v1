@@ -220,8 +220,16 @@ static void fit_title(lv_obj_t *label, int width) {
 // Anything that already fits is left alone: the size drops only when needed,
 // like the page title, so rows in other languages are untouched.
 static void fit_row_label(lv_obj_t *label, int32_t width) {
-	static lv_font_t *const STEPS[] = {&font_ui_24, &font_ui_22, &font_ui_20};
-	const size_t count = sizeof(STEPS) / sizeof(STEPS[0]);
+	// The 240-pixel V1 sometimes has both a translated row name and a live
+	// value (the Bluetooth adapter name) on the same line. The regular 24/22/20
+	// sequence can still be wider than the space left beside that value, so
+	// compact rows get smaller steps too. They are only used when needed.
+	static lv_font_t *const REGULAR_STEPS[] = {&font_ui_24, &font_ui_22, &font_ui_20};
+	static lv_font_t *const COMPACT_STEPS[] = {&font_ui_24, &font_ui_22, &font_ui_20, &font_ui_18, &font_ui_16,
+												  &font_ui_14};
+	lv_font_t *const *steps = compact_rows() ? COMPACT_STEPS : REGULAR_STEPS;
+	const size_t count = compact_rows() ? sizeof(COMPACT_STEPS) / sizeof(COMPACT_STEPS[0])
+												 : sizeof(REGULAR_STEPS) / sizeof(REGULAR_STEPS[0]);
 
 	const char *text = lv_label_get_text(label);
 	if (!text || !text[0] || width <= 0) {
@@ -230,12 +238,12 @@ static void fit_row_label(lv_obj_t *label, int32_t width) {
 
 	for (size_t i = 0; i < count; i++) {
 		lv_point_t size;
-		lv_text_get_size(&size, text, STEPS[i], 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+		lv_text_get_size(&size, text, steps[i], 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
 		if (size.x <= width || i + 1 == count) {
 			// Only when it actually changes: setting the same font again
 			// retriggers layout, and this runs from a layout event.
-			if (lv_obj_get_style_text_font(label, LV_PART_MAIN) != STEPS[i]) {
-				lv_obj_set_style_text_font(label, STEPS[i], 0);
+			if (lv_obj_get_style_text_font(label, LV_PART_MAIN) != steps[i]) {
+				lv_obj_set_style_text_font(label, steps[i], 0);
 			}
 			return;
 		}

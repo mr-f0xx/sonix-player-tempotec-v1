@@ -527,7 +527,16 @@ void btaudio_init(gui_config_t *cfg) {
 
 	// The player's own name, first: it is about this device rather than about
 	// whatever is connected to it.
-	settingsrow_add(container, "bt_rename", &name_row_value, name_row_cb, NULL);
+	lv_obj_t *name_row = settingsrow_add(container, "bt_rename", &name_row_value, name_row_cb, NULL);
+	if (cfg->screen_width < 320 && name_row && name_row_value) {
+		// On the V1, a translated action and the live adapter name can run into
+		// one another. Give the name a bounded, right-aligned column; settingsrow
+		// fits the label into the remaining width (including smaller V1 sizes).
+		lv_obj_set_width(name_row_value, lv_pct(42));
+		lv_obj_set_style_text_font(name_row_value, &font_ui_14, 0);
+		lv_obj_set_style_text_align(name_row_value, LV_TEXT_ALIGN_RIGHT, 0);
+		lv_label_set_long_mode(name_row_value, LV_LABEL_LONG_DOT);
+	}
 
 	// The AirPods row, above the codec: it is about the headphones themselves
 	// rather than about the link, and it is the one row here that is not
