@@ -269,8 +269,7 @@ static void fit_row(lv_obj_t *row) {
 
 	// The right side holds either the chevron or the value, and neither space
 	// belongs to the name. The value counts as much as the chevron: a name like
-	// "Version du systeme d'exploitation" at 24 px runs straight into the
-	// number beside it.
+	// Longer translated names can run into the value beside them at 24 px.
 	lv_obj_t *right = lv_obj_get_child(row, 1);
 	if (right) {
 		avail -= lv_obj_get_width(right) + ROW_LABEL_GAP;

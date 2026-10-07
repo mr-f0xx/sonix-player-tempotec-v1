@@ -2000,15 +2000,15 @@ int main(int argc, char **argv) {
 
 	// The fonts, before anything can create a widget: every lv_font_t the
 	// interface points at is filled in here, from /usr/resource/sonix/fonts through
-	// FreeType -- the stock player's own mechanism. Without default.otf there
-	// is no drawing so much as an error message, so that is fatal.
+	// FreeType -- the stock player's own mechanism. Without a usable base face
+	// (default.otf, or Neon.ttf on the V1), startup cannot draw the interface.
 	if (!fonts_init()) {
 #ifdef HOST_BUILD
-		fprintf(stderr, "fonts: no default.otf in usr/resource/sonix/fonts or assets/fonts --\n"
+		fprintf(stderr, "fonts: no default.otf or V1 Neon.ttf in usr/resource/sonix/fonts or assets/fonts --\n"
 						"       start the simulator from the folder that holds them\n");
 		return 1;
 #else
-		park("fonts: /usr/resource/sonix/fonts/default.otf is missing or unreadable");
+		park("fonts: no readable default.otf or V1 Neon.ttf in /usr/resource/sonix/fonts");
 		return 1;
 #endif
 	}

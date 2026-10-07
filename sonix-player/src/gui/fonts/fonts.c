@@ -36,14 +36,15 @@
 
 // The main faces ship as .ttf on some firmwares and .otf on others, and
 // FreeType reads both. Each face is therefore a list of candidate names, tried
-// in order, and the first one present wins. A default face that is not found
-// means an interface with no text in it at all.
+// in order, and the first one present wins. Normal builds use default.otf; the
+// V1 may prefer Neon.ttf and keep default.otf as a glyph fallback.
 #define FACE_FILES(base)                                                                                               \
 	{FONT_DIR "/" base ".ttf", FONT_DIR "/" base ".otf", FONT_DIR_FALLBACK "/" base ".ttf",                          \
 	 FONT_DIR_FALLBACK "/" base ".otf", NULL}
 
 static const char *const FONT_DEFAULT_FILES[] = FACE_FILES("default");
 static const char *const FONT_BOLD_FILES[] = FACE_FILES("bold");
+static const char *const FONT_NEON_FILES[] = FACE_FILES("Neon");
 
 // The scripts MiSans has no letters for, one face each, chained behind the
 // main face so they only answer for what it lacks. The bold file is optional:
@@ -201,6 +202,9 @@ static bool set_built[2];
 
 static const char *regular_file;
 static const char *bold_file;
+static const char *fallback_regular_file;
+static const char *fallback_bold_file;
+static bool neon_primary;
 
 static lv_font_t *open_face(const char *path, int size) {
 	if (access(path, R_OK) != 0) {
@@ -319,8 +323,29 @@ static lv_font_t *open_chain(const ui_font_t *ui, int size) {
 		}
 	}
 
-	// The main face again, answering everything: the kanji Rodin lacks.
-	if (rodin) {
+	// On the V1, Neon 80s is the primary face but carries only Latin glyphs.
+	// Keep MiSans at the end of the chain for any character Neon and the
+	// script-specific faces do not contain. Bold labels try MiSans Bold first,
+	// then regular MiSans as a final safety net for any remaining glyphs.
+	const char *fallback_path = (ui->bold && fallback_bold_file) ? fallback_bold_file : fallback_regular_file;
+	if (fallback_path) {
+		lv_font_t *fallback = open_face(fallback_path, size);
+		if (fallback) {
+			tail->fallback = fallback;
+			tail = fallback;
+		}
+	}
+	if (ui->bold && fallback_bold_file && fallback_regular_file) {
+		lv_font_t *fallback = open_face(fallback_regular_file, size);
+		if (fallback) {
+			tail->fallback = fallback;
+			tail = fallback;
+		}
+	}
+
+	// In the regular MiSans-first builds, the main face again answers anything
+	// Rodin lacks for Japanese. The V1 has its separate MiSans fallback above.
+	if (rodin && !neon_primary) {
 		lv_font_t *again = NULL;
 		if (ui->bold && bold_file) {
 			again = open_face(bold_file, size);
@@ -359,8 +384,24 @@ static bool build_set(bool large) {
 }
 
 bool fonts_init(void) {
-	regular_file = first_present(FONT_DEFAULT_FILES);
-	bold_file = first_present(FONT_BOLD_FILES);
+	const char *default_file = first_present(FONT_DEFAULT_FILES);
+	const char *default_bold_file = first_present(FONT_BOLD_FILES);
+	const char *neon_file = first_present(FONT_NEON_FILES);
+	neon_primary = bp_is_tempotec_v1() && neon_file != NULL;
+	if (neon_primary) {
+		// Neon 80s is a display face with no bold companion and limited script
+		// coverage. Keep MiSans behind it for missing glyphs and bold fallbacks.
+		regular_file = neon_file;
+		bold_file = NULL;
+		fallback_regular_file = default_file;
+		fallback_bold_file = default_bold_file;
+	} else {
+		regular_file = default_file;
+		bold_file = default_bold_file;
+		fallback_regular_file = NULL;
+		fallback_bold_file = NULL;
+	}
+
 	for (size_t i = 0; i < SCRIPT_COUNT; i++) {
 		scripts[i].regular = first_present(scripts[i].regular_files);
 		scripts[i].bold = first_present(scripts[i].bold_files);
@@ -370,7 +411,7 @@ bool fonts_init(void) {
 	japanese_ui = strcmp(lang_current(), FONTS_JAPANESE_LANGUAGE) == 0;
 
 	if (!regular_file) {
-		fprintf(stderr, "fonts: no default.ttf or default.otf in %s or %s\n", FONT_DIR, FONT_DIR_FALLBACK);
+		fprintf(stderr, "fonts: no readable default.ttf/default.otf or V1 Neon.ttf in %s or %s\n", FONT_DIR, FONT_DIR_FALLBACK);
 		return false;
 	}
 
@@ -385,8 +426,21 @@ bool fonts_init(void) {
 
 	// Records the actual file names, so the log shows which container this
 	// firmware ships.
-	int len = snprintf(summary, sizeof(summary), "%s%s%s", basename_of(regular_file), bold_file ? ", " : "",
+	int len;
+	if (neon_primary) {
+		len = snprintf(summary, sizeof(summary), "%s", basename_of(regular_file));
+		if (fallback_regular_file && len > 0 && (size_t)len < sizeof(summary)) {
+			len += snprintf(summary + len, sizeof(summary) - (size_t)len, ", fallback %s",
+							basename_of(fallback_regular_file));
+		}
+		if (fallback_bold_file && len > 0 && (size_t)len < sizeof(summary)) {
+			len += snprintf(summary + len, sizeof(summary) - (size_t)len, ", bold fallback %s",
+							basename_of(fallback_bold_file));
+		}
+	} else {
+		len = snprintf(summary, sizeof(summary), "%s%s%s", basename_of(regular_file), bold_file ? ", " : "",
 					   bold_file ? basename_of(bold_file) : "");
+	}
 	const char *sep = ", ";
 	if (japanese.used && len > 0 && (size_t)len < sizeof(summary)) {
 		len += snprintf(summary + len, sizeof(summary) - (size_t)len, "%s%s", sep, japanese.name);

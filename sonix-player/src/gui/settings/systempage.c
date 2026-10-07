@@ -372,13 +372,22 @@ static void build_sysinfo_page(gui_config_t *cfg) {
 	lv_obj_t *os_value = NULL;
 	lv_obj_t *os_row = system_value_row(container, "system_operating_system_version", &os_value, NULL, NULL, true);
 	const char *os = sysinfo_os_version();
-	lv_label_set_text(os_value, os[0] ? os : "\xE2\x80\x94"); // em dash
+	const char *build = sysinfo_build_version();
+	char os_display[128];
+	// The V1 release channel is stored as "Beta" in system-info.json; its
+	// exact build stamp is injected by the packer, so show the channel and this
+	// image's stamp together without baking a timestamp into the source tree.
+	if (os[0] && strcmp(os, "Beta") == 0 && build[0]) {
+		snprintf(os_display, sizeof(os_display), "%s %s", os, build);
+	} else {
+		snprintf(os_display, sizeof(os_display), "%s", os);
+	}
+	lv_label_set_text(os_value, os_display[0] ? os_display : "\xE2\x80\x94"); // em dash
 	easteregg_attach(os_row);
 
 	// Five taps reveal the developer options.
 	lv_obj_t *build_value = NULL;
 	system_value_row(container, "system_build_number", &build_value, build_tapped_cb, NULL, true);
-	const char *build = sysinfo_build_version();
 	lv_label_set_text(build_value, build[0] ? build : "\xE2\x80\x94");
 
 	if (compact) {
