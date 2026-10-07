@@ -1,6 +1,8 @@
 # Sonix Player for TempoTec Variations V1
 
-Sonix Player is a community port of the Sonix music player to the **TempoTec Variations V1**. The firmware builder starts with an official V1 update package, replaces the stock music player and its interface with Sonix, then repackages the update as `v1.upt`.
+This repository is a community port of the original **[Sonix Player](https://github.com/Jepl4r/sonix-player)** project by **[Jepl4r](https://github.com/Jepl4r)** — a replacement music player for the HiBy R3 Pro II and HiBy R1 — to the **TempoTec Variations V1**. The player and the firmware packer come from that project; this fork adds the V1 board profile, the V1 packaging path and the V1 documentation. See [Credits](#credits).
+
+The firmware builder starts with an official V1 update package, replaces the stock music player and its interface with Sonix, then repackages the update as `v1.upt`.
 
 This is not an official TempoTec or HiBy release. **The port has been tested on physical TempoTec Variations V1 hardware and works perfectly on the tested device.** It targets the **TempoTec Variations V1 only**; compatibility with the V1-A or other players in the Variations family is not established.
 
@@ -14,6 +16,7 @@ This is not an official TempoTec or HiBy release. **The port has been tested on 
 - [Streaming credentials](#streaming-credentials)
 - [Build from source](#build-from-source)
 - [Project files and documentation](#project-files-and-documentation)
+- [Credits](#credits)
 
 ## Target device
 
@@ -140,3 +143,33 @@ The packer also checks the V1 model identity and builds the root filesystem's up
 - `LICENSE` — GNU General Public License, version 3. Third-party components retain their own licenses.
 
 For bug reports, include the exact model, the firmware build/commit and relevant logs. Remove personal data and **never attach streaming credentials**.
+
+## Credits
+
+This port exists because of the original **[Sonix Player](https://github.com/Jepl4r/sonix-player)** project. Almost everything in `sonix-player/` and `sonix-packer/` is that project's work, carried here and adapted; what this fork adds is the TempoTec V1 support and the documentation for it. The original is licensed under the GPL-3.0, and so is this fork.
+
+- **[Jepl4r](https://github.com/Jepl4r)** — author and maintainer of Sonix Player, and the source of the player, the packer and the interface this port is built on.
+- **[Tartarus6](https://github.com/Tartarus6)**, **[noisetta](https://github.com/noisetta)**, **[endgame47](https://github.com/endgame47)**, **[hkhrithik007](https://github.com/hkhrithik007)** — the people named in the original project's own "Special thanks" list.
+- **[Hinatai](https://github.com/Hinatai)**, **[KrajzegaX](https://github.com/KrajzegaX)**, **[noemdespertis](https://github.com/noemdespertis)** and everyone else on the upstream [contributor list](https://github.com/Jepl4r/sonix-player/graphs/contributors), whose commits this fork inherits.
+- The HiBy and TempoTec communities — the people who test, report, translate and explain both projects — who do the work no commit log shows.
+
+Third-party components carried in the tree, or fetched by the build, keep their own authors and licences:
+
+| component | used for |
+|---|---|
+| [LVGL](https://github.com/lvgl/lvgl) 9.6 | the whole interface |
+| [Gearboy](https://github.com/drhelius/Gearboy) by Ignacio Sanchez | the Game Boy core in `sonix-player/src/gb/core/`, kept verbatim |
+| [dr_libs](https://github.com/mackron/dr_libs) by David Reid | FLAC and MP3 decoding |
+| [stb](https://github.com/nothings/stb) by Sean Barrett | cover art and image read/write |
+| [miniz](https://github.com/richgel999/miniz) (RAD Game Tools, Valve, Rich Geldreich) | inflate for covers and EPUB |
+| TJpgDec by ChaN | JPEG decoding on the target |
+| [SQLite](https://sqlite.org) | the library index |
+| [FreeType](https://freetype.org) | fonts at runtime |
+| [libogg, libopus and opusfile](https://opus-codec.org) (Xiph.Org) | Opus playback |
+| [WavPack](https://www.wavpack.com) by David Bryant | WavPack playback |
+| [BlueALSA](https://github.com/arkq/bluez-alsa) by Arkadiusz Bokowy | Bluetooth audio in the HiBy overlay trees, inherited from upstream |
+| [Lucide](https://lucide.dev) | the Wi-Fi transfer page glyphs |
+| the [Rockbox](https://rockbox.org) toolchain scripts in `sonix-player/rockboxdev/` | the MIPS cross-compiler |
+
+The licence notice for each component sits with it in the source tree; [LICENSE](LICENSE) covers the project as a whole. The official TempoTec V1 firmware used as the base of a build is not part of this repository, and TempoTec, HiBy and the other vendors own their names and firmware.
+
