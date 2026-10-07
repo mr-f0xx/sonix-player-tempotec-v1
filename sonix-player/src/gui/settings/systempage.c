@@ -374,14 +374,8 @@ static void build_sysinfo_page(gui_config_t *cfg) {
 	const char *os = sysinfo_os_version();
 	const char *build = sysinfo_build_version();
 	char os_display[128];
-	// The V1 release channel is stored as "Beta" in system-info.json; its
-	// exact build stamp is injected by the packer, so show the channel and this
-	// image's stamp together without baking a timestamp into the source tree.
-	if (os[0] && strcmp(os, "Beta") == 0 && build[0]) {
-		snprintf(os_display, sizeof(os_display), "%s %s", os, build);
-	} else {
-		snprintf(os_display, sizeof(os_display), "%s", os);
-	}
+	// The V1 release channel is stored as "beta" in system-info.json.
+	snprintf(os_display, sizeof(os_display), "%s", os);
 	lv_label_set_text(os_value, os_display[0] ? os_display : "\xE2\x80\x94"); // em dash
 	easteregg_attach(os_row);
 
