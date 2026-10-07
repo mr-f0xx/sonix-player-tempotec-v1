@@ -17,13 +17,19 @@ This is not an official TempoTec or HiBy release. **The port has been tested on 
 
 ## Target device
 
-| Component | Target |
-| --- | --- |
-| Device | TempoTec Variations V1 |
-| SoC | Ingenic X1600, MIPS32r2 / o32 |
-| Display | 240 × 320 portrait |
-| Audio | Dual Cirrus Logic CS43131; 3.5 mm single-ended and 4.4 mm balanced outputs |
-| Update package | `v1.upt` with companion `v1_md5.txt` |
+The **TempoTec Variations V1**:
+
+| Component | Specification |
+|---|---|
+| **SoC** | Ingenic X1600 (MIPS32r2 core, o32 ABI, glibc 2.22 compatibility) |
+| **Display** | 2.0-inch QVGA TFT panel, **240×320 pixels** portrait |
+| **DAC** | Dual Cirrus Logic CS43131 |
+| **Audio Outputs** | 3.5 mm single-ended + 4.4 mm balanced headphone jacks |
+| **Storage** | One MicroSD card slot (exFAT / FAT32) |
+| **Controls** | Side flank buttons (Power, Vol+, Vol-, Play/Pause, Next/Prev) + capacitive touchscreen |
+| **Wireless** | 2.4 GHz Wi-Fi (802.11 b/g/n) and bi-directional Bluetooth |
+| **USB** | USB Type-C (bidirectional USB DAC & USB audio out) |
+| **Firmware Package** | `v1.upt` with accompanying `v1_md5.txt` |
 
 The player UI is built with LVGL 9.6 and adapted for the V1's small display. The package is based on vendor firmware; it is **not** a Linux distribution or a kernel replacement.
 
