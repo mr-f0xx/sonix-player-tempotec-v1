@@ -66,33 +66,6 @@ The TempoTec V1 port is **experimental**:
 
 ---
 
-## Getting the Firmware
-
-### Option 1: Build with GitHub Actions (Recommended)
-
-No local cross-compilation environment or Linux installation is needed:
-
-1. Open the repository's **[Actions](https://github.com/mr-f0xx/sonix-player-tempotec-v1/actions)** tab.
-2. Select **Build experimental TempoTec V1 firmware**.
-3. Click **Run workflow**. (The official TempoTec V1.2 firmware Google Drive folder is configured as the default stock source).
-4. Select the experimental acknowledgement checkbox and click **Run workflow**.
-5. Once complete (typically ~5 minutes when toolchain cache is warm), open the run and download the **`sonix-tempotec-v1-...`** artifact.
-
-#### Artifact Contents
-
-The downloaded artifact package contains:
-
-* `v1.upt` – Packaged firmware image ready for flashing
-* `v1_md5.txt` – MD5 checksum required by the stock updater
-* `sonix_player` – Stripped MIPS32r2 target binary
-* `sonix_player_debug` – Unstripped binary with full symbol table and DWARF debug info
-* `sonix_launch` – Lightweight supervisor binary
-* `STOCK-VALIDATION.txt` – Verification log of the downloaded official stock firmware
-* `OUTPUT-VALIDATION.txt` – Automated validation log of the generated image and rootfs
-* `BUILD-REPORT.txt` – Build metadata, commit SHA, and cryptographic hashes
-
----
-
 ## Flashing Instructions
 
 1. **Format MicroSD Card:** Use a FAT32 or exFAT formatted MicroSD card.
@@ -159,40 +132,6 @@ Plays virtually all lossless and lossy audio formats up to 384 kHz / 32-bit and 
 
 * **Gearboy (Game Boy / Game Boy Color):** Integrated full-speed Game Boy emulator with on-screen button controls and save state support.
 * **EPUB E-Book Reader:** Built-in reader supporting EPUB reflowable text, customizable font sizing, margins, and night mode themes.
-
----
-
-## Directory Structure
-
-```
-sonix-player-tempotec-v1/
-│
-├── .github/workflows/
-│   └── build-tempotec-v1.yml     # Automated GitHub Actions cross-compile workflow
-│
-├── sonix-packer/
-│   ├── prepare_v1_stock.sh       # Downloads & extracts official TempoTec V1 firmware
-│   ├── sonix_firmware_packer.sh  # Unpacks, modifies rootfs, and repacks v1.upt
-│   ├── verify_upt.sh             # Validates ISO, chunk hash chain, kernel, and Sonix
-│   └── assets/
-│       └── V1/                   # TempoTec V1 overlay and system-info.json
-│
-├── sonix-player/
-│   ├── Makefile                  # Build rules for host simulator and target MIPS
-│   ├── launcher/                 # sonix_launch.c process supervisor
-│   ├── rockboxdev/               # MIPS cross-toolchain bootstrap scripts
-│   ├── src/
-│   │   ├── gui/                  # LVGL user interface (board profile, nowplaying, eq)
-│   │   ├── system/               # Audio pipeline, decoders, ALSA, Wi-Fi, database
-│   │   └── gb/                   # Gearboy core
-│   ├── tools/                    # Asset and icon conversion scripts
-│   └── web/                      # HTML5 Wi-Fi file transfer interface
-│
-├── FEATURES.md                   # Full audio and playback feature list
-├── LICENSE                       # GNU General Public License v3.0
-├── PATCHES.md                    # Technical documentation on V1 profile and patches
-└── README.md                     # This documentation
-```
 
 ---
 
