@@ -45,18 +45,53 @@ for the V1, and `headphone_jack_state_raw()` on such a model treats `1` as no
 plug and any other value as a 3.5 mm headset (never balanced: that route has
 not been exercised on this board), logging the raw value to stderr whenever it
 changes so the 4.4 mm socket's encoding can be read off a real plug later.
-And the wake sequence in `power.c` no longer unblanks on a fixed 60 ms timer:
-the panel resets white and the kernel's unblank returns before the first frame
-has been transferred, so `power_screen_on()` holds the backlight at
-`BRIGHTNESS_MIN` (not 0 -- a stopped PWM pin may idle high), unblanks, waits
-for `display_wait_vsync()` in `main.c` to report two scan-outs (or a 300 ms
-fallback where `FBIO_WAITFORVSYNC` is not answered), re-asserting the hold
-every 15 ms, and only then fades up. The vsync answer is only believed when it
-cost what two scan-outs cost: an ioctl that returns at once cannot have
-watched any frame go by and falls through to the same long wait. The fallback
-covers the panel's whole wake -- its init sequence's own delays plus two
-scan-out periods -- because the 160 ms first version still lit a white panel;
-on the V1 the unblank evidently takes longer than the vsync answer admits.
+### The white flash on wake, and what it actually was
+
+The panel is an SLCD: its glass shows the contents of its own memory, and a
+reset leaves that memory white. Writing `0` to `/sys/class/graphics/fb0/blank`
+resets and re-initialises the panel and re-arms the controller's scan-out, and
+the write returns before the panel's own init sequence has finished -- the
+sleep-out delays alone are up to 120 ms. A frame pushed before the panel is
+listening is lost without a word.
+
+Which is why the first three attempts at this did not fix it. They were all
+about the backlight: hold it at 0 (PR #12), hold it at `BRIGHTNESS_MIN`, wait
+for `FBIO_WAITFORVSYNC` to report two scan-outs, raise the fallback to 300 ms
+and distrust a vsync answer that comes back too fast (PR #14, #15). Every one
+of them painted the interface into the framebuffer *before* the unblank. That
+leaves the controller nothing to carry to the glass after it, so the panel sat
+on its reset white until something unrelated -- the status-bar clock, a button
+-- next happened to paint, and the backlight faded up over *that*. Holding the
+backlight down cannot cover a glass that is still white when it is released,
+however long the hold is.
+
+`power_screen_on()` now does three things, in this order:
+
+1. **The backlight goes to a true zero, not to the floor, before the unblank
+   and stays there** until the picture is on the glass. `BRIGHTNESS_MIN` is a
+   level the panel is *looked at through*; a white reset frame at one percent
+   is still a white frame. Zero is safe here as well as darker: the blank the
+   driver already performs puts the PWM at zero with the panel unpowered
+   behind it, and the screen stays dark for as long as the screen is off. The
+   same zero is left behind at the screen-off blank, so the level the driver
+   itself restores at an unblank is already a dark one. Overridable as
+   `[screen] wake_hold_level` in `device_config.ini` for a board whose driver
+   needs the floor back (set it to 1).
+2. **The panel's own init is waited out, still dark** (`WAKE_PANEL_SETTLE_MS`,
+   120 ms), before a frame is pushed at it.
+3. **A frame is pushed after the unblank, twice** (`wake_repaint()`: the kick
+   from `main.c` that re-arms the video mode and the scan-out, then a full
+   repaint that pans to the frame), `WAKE_PUSH_SETTLE_MS` apart, because a push
+   that arrives before the panel is listening is lost in silence and there is
+   no way to ask. Only then does `backlight_hold_until_panel_shows()` end the
+   hold -- on two `FBIO_WAITFORVSYNC` scan-outs, believed only when they cost
+   what two scan-outs cost, or on a fallback now that stands in for those
+   frames rather than for the whole wake -- and the configured level fades up
+   over the finished picture.
+
+The cost is a wake that takes roughly a third of a second of dark screen from
+the unblank to the fade. The panel is asleep behind it, so nothing about that
+is visible; what was visible was the white.
 
 Two-column, three-row pages with five entries let the fifth tile span the last
 row. Compact tile captions are one fixed line with an ellipsis and no extra
