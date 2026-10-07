@@ -20,7 +20,7 @@
 #       v
 #   r3proii.upt                one result per stock firmware present
 #   r1.upt
-#   v1.upt                     experimental; see README before flashing
+#   v1.upt                     community firmware; see README before flashing
 #
 # A model whose stock firmware is not here is skipped with a warning, so an
 # owner can build only the image for the player they have.
@@ -255,8 +255,8 @@ build_one() {
 	say "${YELLOW}###############################################${NC}"
 	say ""
 	if [ "$MODEL_DIR" = "V1" ]; then
-		warn "TempoTec V1 packaging is experimental and has not been validated on physical hardware."
-		warn "Keep the official stock firmware available for recovery before testing it."
+		warn "TempoTec V1 firmware is an unofficial community build."
+		warn "Keep the official stock firmware and matching checksum available for recovery before installing it."
 		say ""
 	fi
 

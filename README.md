@@ -1,11 +1,11 @@
 # Sonix Player for TempoTec Variations V1
 
-Sonix Player is an experimental community port of the Sonix music player to the **TempoTec Variations V1**. The firmware builder starts with an official V1 update package, replaces the stock music player and its interface with Sonix, then repackages the update as `v1.upt`.
+Sonix Player is a community port of the Sonix music player to the **TempoTec Variations V1**. The firmware builder starts with an official V1 update package, replaces the stock music player and its interface with Sonix, then repackages the update as `v1.upt`.
 
-This is not an official TempoTec or HiBy release. It targets the **TempoTec Variations V1 only**; compatibility with the V1-A or other players in the Variations family is not established.
+This is not an official TempoTec or HiBy release. **The port has been tested on physical TempoTec Variations V1 hardware and works perfectly on the tested device.** It targets the **TempoTec Variations V1 only**; compatibility with the V1-A or other players in the Variations family is not established.
 
 > [!WARNING]
-> **This port has not been validated on physical hardware.** Automated builds check package structure, checksums, model identity and that the stock kernel is unchanged. They cannot confirm that the device will boot correctly or that audio, touch, buttons, charging, suspend, wireless features or recovery work. Installing experimental firmware is at your own risk. Keep the matching official firmware and checksum available before you try it.
+> Firmware updates always carry some risk. GitHub Actions checks each image's package structure, checksums, model identity and preservation of the stock kernel, but does not install each generated artifact on hardware. Keep the matching official firmware and checksum available before trying any build.
 
 ## Contents
 
@@ -35,18 +35,18 @@ The project includes a local music library and file browser, album artwork, play
 
 Local audio decoder inputs include WAV, FLAC, MP3, Ogg Vorbis, Opus, M4A/M4B/MP4, AAC, ALAC, WavPack, APE, AIFF/AIFC, CAF and DSD (DSF/DFF) files. DSP features include a 10-band graphic equalizer, parametric EQ, MSEB, crossfeed, channel balance and ReplayGain.
 
-See [FEATURES.md](FEATURES.md) for a longer feature list. These are software capabilities, not a claim that every feature has been tested on the V1 hardware. Streaming services also require valid credentials and may depend on third-party service availability.
+See [FEATURES.md](FEATURES.md) for a longer feature list. Streaming services also require valid credentials and may depend on third-party service availability.
 
 ## Build a firmware image
 
 The recommended route is the repository's GitHub Actions workflow. It cross-compiles the MIPS player and launcher, packages them into an update based on official V1 firmware, validates the result and uploads a downloadable artifact.
 
-1. Open the repository's **Actions** tab and select **Build experimental TempoTec V1 firmware**.
+1. Open the repository's **Actions** tab and select **Build TempoTec V1 firmware**.
 2. Choose **Run workflow** on the branch you want to build. The stock firmware URL is prefilled with the [official TempoTec V1 firmware folder](https://drive.google.com/drive/folders/1jbT9lhRvJ8sbJuepnaBpss861mpsYwnv?usp=sharing); change it only if you have another official V1 package to use.
-3. Confirm the required checkbox stating that you understand the image is experimental and not hardware-validated.
+3. Confirm the required checkbox acknowledging that this is an unofficial community build and that you will keep the matching official firmware and checksum available for recovery.
 4. When the run succeeds, download the `sonix-tempotec-v1-<commit>` artifact. It contains `v1.upt`, `v1_md5.txt`, the player binaries, and stock/output validation reports.
 
-Artifacts are retained for 14 days. A successful Actions run is not a hardware-tested release. See [`.github/workflows/build-tempotec-v1.yml`](.github/workflows/build-tempotec-v1.yml) for the build and validation steps.
+Artifacts are retained for 14 days. The port has been tested on physical V1 hardware, but Actions validates each generated package automatically rather than installing that specific image on a player. See [`.github/workflows/build-tempotec-v1.yml`](.github/workflows/build-tempotec-v1.yml) for the build and validation steps.
 
 ## Install or restore firmware
 
@@ -125,7 +125,7 @@ sonix-packer/verify_upt.sh sonix-packer/v1.upt \
   --sonix-v1 --kernel-sha256 "$stock_kernel_sha256"
 ```
 
-The packer also checks the V1 model identity and builds the root filesystem's update checksum chain. These checks do not replace testing on the physical player.
+The packer also checks the V1 model identity and builds the root filesystem's update checksum chain. These automated checks do not install or test each generated image on the physical player.
 
 ## Project files and documentation
 
