@@ -86,12 +86,14 @@ however long the hold is.
    no way to ask. Only then does `backlight_hold_until_panel_shows()` end the
    hold -- on two `FBIO_WAITFORVSYNC` scan-outs, believed only when they cost
    what two scan-outs cost, or on a fallback now that stands in for those
-   frames rather than for the whole wake -- and the configured level fades up
-   over the finished picture.
+   frames rather than for the whole wake. A credible two-frame answer now has
+   a 50 ms minimum total hold instead of 90 ms; the fallback remains longer.
+   The configured level then fades up over the finished picture.
 
-The cost is a wake that takes roughly a third of a second of dark screen from
-the unblank to the fade. The panel is asleep behind it, so nothing about that
-is visible; what was visible was the white.
+With a working vsync path the wake takes about a quarter of a second of dark
+screen from the unblank to the fade; the conservative fallback takes a little
+over a third. The backlight stays at zero until the confirmed frame is ready,
+so the wait stays invisible; what was visible was the white.
 
 Two-column, three-row pages with five entries let the fifth tile span the last
 row. Compact tile captions are one fixed line with an ellipsis and no extra

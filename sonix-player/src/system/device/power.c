@@ -151,7 +151,11 @@ static uint32_t since(uint32_t mark, uint32_t now) {
 // scan-outs, not for the wake.
 #define WAKE_PANEL_SETTLE_MS 120
 #define WAKE_PUSH_SETTLE_MS 60
-#define WAKE_HOLD_MIN_MS 90
+// Two credible vsync waits already prove that the freshly drawn frame has
+// reached the panel. Keep a short minimum total hold around that check, but
+// avoid the old 90 ms minimum on the normal page-flipping path; unsupported or
+// untrusted vsync still gets the longer fallback below.
+#define WAKE_HOLD_MIN_MS 50
 #define WAKE_HOLD_FALLBACK_MS 150
 #define WAKE_HOLD_STEP_MS 15
 #define WAKE_VSYNC_FRAMES 2
