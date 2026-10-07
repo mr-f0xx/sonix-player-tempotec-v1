@@ -1,250 +1,138 @@
-# Sonix Player – TempoTec Variations V1 Release
+# Sonix Player for TempoTec Variations V1
 
-A modern, high-performance, open-source replacement firmware and player for the **TempoTec Variations V1** (and V1-A / Variations family), built on **LVGL 9.6**.
+Sonix Player is an experimental community port of the Sonix music player to the **TempoTec Variations V1**. The firmware builder starts with an official V1 update package, replaces the stock music player and its interface with Sonix, then repackages the update as `v1.upt`.
 
-This release adapts Sonix Player to the ultra-compact form factor of the TempoTec V1, replacing the legacy stock player application while preserving the official Linux kernel, device drivers, and recovery subsystem intact.
+This is not an official TempoTec or HiBy release. It targets the **TempoTec Variations V1 only**; compatibility with the V1-A or other players in the Variations family is not established.
 
----
+> [!WARNING]
+> **This port has not been validated on physical hardware.** Automated builds check package structure, checksums, model identity and that the stock kernel is unchanged. They cannot confirm that the device will boot correctly or that audio, touch, buttons, charging, suspend, wireless features or recovery work. Installing experimental firmware is at your own risk. Keep the matching official firmware and checksum available before you try it.
 
-## Overview
+## Contents
 
-The TempoTec Variations V1 is an ultra-compact digital audio player (DAP) powered by an Ingenic MIPS SoC and high-grade dual Cirrus Logic DACs. Sonix Player completely replaces the stock user interface with a fast, modern UI engineered specifically for the V1's 240×320 screen geometry.
+- [Target device](#target-device)
+- [Features](#features)
+- [Build a firmware image](#build-a-firmware-image)
+- [Install or restore firmware](#install-or-restore-firmware)
+- [Streaming credentials](#streaming-credentials)
+- [Build from source](#build-from-source)
+- [Project files and documentation](#project-files-and-documentation)
 
-```
-       ┌──────────────────────┐
-       │ 10:42        100%  🔋 │  <-- 24 px compact status bar
-       ├──────────────────────┤
-       │                      │
-       │    ┌───────────┐     │  <-- Centred ~154×154 sleeve on the
-        │    │           │     │      blurred artwork, full screen
-        │    │    Art    │     │
-        │    │           │     │
-        │    └───────────┘     │
-        ├──────────────────────┤
-        │ Track Title          │
-        │ Artist Name          │
-        │ 01:24 ━━━━━●── 03:45 │  <-- Deck sized from the fonts (~150 px)
-       │     ⏮   ⏯   ⏭       │
-       └──────────────────────┘
-```
+## Target device
 
-### Hardware Specifications
+| Component | Target |
+| --- | --- |
+| Device | TempoTec Variations V1 |
+| SoC | Ingenic X1600, MIPS32r2 / o32 |
+| Display | 240 × 320 portrait |
+| Audio | Dual Cirrus Logic CS43131; 3.5 mm single-ended and 4.4 mm balanced outputs |
+| Update package | `v1.upt` with companion `v1_md5.txt` |
 
-| Component | Specification |
-|---|---|
-| **SoC** | Ingenic X1600 (MIPS32r2 core, o32 ABI, glibc 2.22 compatibility) |
-| **Display** | 2.0-inch QVGA TFT panel, **240×320 pixels** portrait |
-| **DAC** | Dual Cirrus Logic CS43131 |
-| **Audio Outputs** | 3.5 mm single-ended + 4.4 mm balanced headphone jacks |
-| **Storage** | One MicroSD card slot (exFAT / FAT32) |
-| **Controls** | Side flank buttons (Power, Vol+, Vol-, Play/Pause, Next/Prev) + capacitive touchscreen |
-| **Wireless** | 2.4 GHz Wi-Fi (802.11 b/g/n) and bi-directional Bluetooth |
-| **USB** | USB Type-C (bidirectional USB DAC & USB audio out) |
-| **Firmware Package** | `v1.upt` with accompanying `v1_md5.txt` |
-
----
-
-## Tailored 240×320 Interface Profile
-
-Rather than blindly scaling down an interface designed for larger screens, Sonix Player features an interface profile crafted specifically for the 240×320 panel:
-
-* **Compact Status Bar & Layout Geometry:** Uses a 24 px status bar, 6 px margins, and 36 px header action targets.
-* **Overflow Header Menus:** The main Music screen combines title actions with a dedicated overflow menu (`...`) so long titles are never truncated to `Musi…`.
-* **Centred-Sleeve Now Playing Screen:** The blurred artwork fills the whole screen and a centred square sleeve (about 154×154 px, rounded corners) floats on it, so there is no edge between the artwork area and the controls. The control deck below is sized at start-up from the actual font line heights — names, bar, clocks and transport each get their own row, and the transport can no longer overlap the queue position.
-* **Adaptive A–Z Index Strip:** Automatically scales down to ~14 visible letter slots to fit the 320 px vertical height. Pressing anywhere along the strip proportionally navigates the full alphabet with an 88×84 touch preview card.
-* **Scrollable 10-Band EQ:** The graphic equaliser card scrolls smoothly horizontally instead of cramming ten sliders into 216 px.
-* **Compact Quick Settings:** Retains eight quick toggles arranged in an ergonomic 2×4 sheet.
-* **Pixel-Tuned Dialogs & Keyboard:** Bespoke layouts for Date/Time picker rollers, MSEB tuning, PEQ curves, and a 144 px compact on-screen keyboard tray.
-* **Button Remapping:** Configured as a clean, single-column scrollable list with direct tap-to-assign actions.
-* **Headphone Detection That Matches The Board:** The V1 kernel exposes a single `/sys/class/switch/headset` node, and it reads `1` with the socket empty. The status-bar headphone icon follows that node's real meaning on this model, so it only appears when something is plugged in; the raw value is logged on every change so the 4.4 mm socket can be mapped as well.
-* **Flash-Free Wake:** The panel comes out of its reset white, and the controller will not carry the framebuffer to it on its own — a frame has to be pushed *after* the unblank, or the glass keeps its reset white until something else happens to paint. On wake the backlight is held at a true zero while the panel's own init is waited out, the interface is painted into it twice, and only then does the level fade up over the finished screen — no white frame.
-
----
-
-## Experimental Status & Safety
-
-The TempoTec V1 port is **experimental**:
-
-* **Stock Kernel Preserved:** The packaging script extracts the official `v1.upt`, leaves the stock Linux kernel (`xImage`) byte-for-byte identical (verified via SHA-256), preserves official hardware driver modules, and installs only the Sonix runtime and model-independent resources.
-* **Automated Hash Chain Verification:** Every build validates the ISO image structure, squashfs integrity, chunked md5 hash chain, glibc 2.22 ABI compliance, and system identification metadata.
-* **Recovery Safety:** The recovery updater remains unchanged. Always keep an official stock `v1.upt` on a spare MicroSD card in case you want to revert.
-
----
-
-## Flashing Instructions
-
-1. **Format MicroSD Card:** Use a FAT32 or exFAT formatted MicroSD card.
-2. **Copy Firmware Files:** Copy both `v1.upt` and `v1_md5.txt` directly to the **root** of the MicroSD card (slot 1).
-3. **Insert & Charge:** Insert the card into your TempoTec V1. Ensure battery level is **above 30%**.
-4. **Initiate Update:**
-   * **From Stock Firmware:** Go to `System Settings` > `Firmware Update` (or `Update from SD card`).
-   * **From Sonix Player:** Go to `Settings` > `System` > `Update firmware` > `From SD card`.
-5. **Wait for Completion:** The screen will display *Upgrading...* followed by *Succeeded*, then automatically reboot into Sonix Player.
-
-> **Restoring Stock Firmware:** If you ever wish to revert to stock firmware, copy the official TempoTec `v1.upt` and its `v1_md5.txt` to the root of your MicroSD card and repeat the update procedure.
-
----
-
-## Streaming Services and Their Keys
-
-Qobuz, Tidal, Podcast Index and Last.fm all refuse to answer a client that
-cannot identify itself, and the credentials that identify one are **not in this
-repository**. A firmware built from this source — and every `v1.upt` published
-from it — therefore starts with those services switched off, and their pages say
-so instead of failing halfway through a login:
-
-> *Streaming keys not found. Copy streaming-keys.ini to the microSD card and restart.*
-
-That message is not a fault and it is not specific to development builds. It
-means the one file below is missing, and it is fixed with that one file.
-
-### The file
-
-`streaming-keys.ini` is a plain INI, one section per service. Fill in only the
-services you have credentials for; the others stay off and say so.
-
-```ini
-[qobuz]
-app_id = 
-app_secret = 
-
-[tidal]
-client_id = 
-client_secret = 
-
-[podcast]
-api_key = 
-api_secret = 
-
-[lastfm]
-api_key = 
-api_secret = 
-```
-
-Where the values come from:
-
-| Service | Where the pair comes from |
-|---|---|
-| **Podcast Index** | Free, requested on [podcastindex.org](https://podcastindex.org) — this one identifies *this player*, and it is yours to ask for. |
-| **Last.fm** | Free, an API account on [last.fm/api](https://www.last.fm/api). |
-| **Qobuz** / **Tidal** | No public sign-up: both are issued to hardware partners. The pair the device already uses sits inside `usr/bin/hiby_player` in the stock firmware (`app_id` as a digit string, `app_secret` as 32 hex characters; Tidal's client secret is assembled at run time, so it never appears as one string). They are the manufacturer's keys, not this project's, which is exactly why the source does not carry them — publishing them would publish someone else's contract. Extracting them from a device you own and using them on that device is your decision to make. |
-
-### Three ways to install it
-
-**1. On the microSD card** — no rebuild, no reflash, and the way to go for a
-firmware you downloaded. Copy `streaming-keys.ini` to the **root** of the card
-and restart the player. It is read once the card is mounted, before the first
-screen is drawn, and the log says which services came on.
-
-> A firmware built **before** the card was searched looks in the image only. On
-> one of those, use method 3, or reflash with a newer build.
-
-**2. Sealed into an image you build yourself** — what a published firmware
-should carry, so that nobody who unpacks the image can read the keys:
-
-```sh
-cd sonix-player
-cp streaming-keys.ini.example streaming-keys.ini   # then fill it in
-python3 tools/seal_streamkeys.py seal              # writes streaming-keys.bin into every assets tree
-```
-
-`streaming-keys.key` is made on the first run and is what the player is
-subsequently built with; the packer warns if a tree would ship the plain `.ini`
-and drops it. See the header of `tools/seal_streamkeys.py` for the format and
-for what the sealing does and does not protect against.
-
-**3. Anywhere else** — over ADB, for a device whose card you would rather not
-touch. `Settings` > `Developer options` > `ADB` turns the daemon on; that row
-appears once the build number on `Settings` > `System` has been tapped five
-times.
-
-```sh
-adb push streaming-keys.ini /usr/data/streaming-keys.ini
-adb shell "printf '[streaming]\nkeys_file = /usr/data/streaming-keys.ini\n' >> /usr/data/device_config.ini"
-adb shell reboot
-```
-
-`keys_file` wins over both other places, which is also the quick path the day a
-service rotates its credentials.
-
-### Checking what happened
-
-The player logs one line either way, and never a value from the file:
-
-```
-streamkeys: from /mnt/sd_0/streaming-keys.ini -- Qobuz yes, Tidal no, Podcast no, Last.fm no
-```
-
-or, when nothing was found:
-
-```
-streamkeys: no /usr/resource/sonix/components/streaming-keys.bin, Tidal, Qobuz, podcasts and Last.fm stay off
-```
-
-With the log switched on (`Settings` > `Developer options` > `Log to microSD`)
-that line is in `sonix_player.log` at the card's root. A `.bin` sealed with a
-different key is reported as such and ignored rather than guessed at.
-
-### Keyboard Shortcuts (Simulating Hardware Buttons)
-
-| Key | TempoTec V1 Action | Description |
-|---|---|---|
-| `p` | Power button | Tap to toggle screen, hold to open power menu |
-| `u` | Volume Up | Increases audio volume |
-| `i` | Volume Down | Decreases audio volume |
-| `n` | Play / Pause | Toggles track playback |
-| `b` | Previous Track | Skips to previous track |
-| `m` | Next Track | Skips to next track |
-
----
+The player UI is built with LVGL 9.6 and adapted for the V1's small display. The package is based on vendor firmware; it is **not** a Linux distribution or a kernel replacement.
 
 ## Features
 
-### Audio Format Support
+The project includes a local music library and file browser, album artwork, playlists, lyrics, audiobooks, DSP controls, an EPUB reader, and a Gearboy Game Boy / Game Boy Color emulator. The player also contains code for streaming and network features such as Bluetooth audio, AirPlay, DLNA and Wi-Fi file transfer.
 
-Plays virtually all lossless and lossy audio formats up to 384 kHz / 32-bit and native DSD:
+Local audio decoder inputs include WAV, FLAC, MP3, Ogg Vorbis, Opus, M4A/M4B/MP4, AAC, ALAC, WavPack, APE, AIFF/AIFC, CAF and DSD (DSF/DFF) files. DSP features include a 10-band graphic equalizer, parametric EQ, MSEB, crossfeed, channel balance and ReplayGain.
 
-* **Lossless / Hi-Res:** `.flac`, `.wav`, `.aif`, `.aiff`, `.aifc`, `.caf`, `.wv` (WavPack), `.wvc`, `.ape` (Monkey's Audio), `.alac`
-* **Lossy Formats:** `.mp3`, `.ogg`, `.opus`, `.m4a`, `.m4b`, `.mp4`, `.aac`
-* **DSD Audio:** `.dsf` and `.dff` files via DoP (DSD over PCM) or internal high-quality 176.4 kHz conversion
-* **CUE Sheets:** Full `.cue` sheet parsing splitting single-file album rips into individual tracks
+See [FEATURES.md](FEATURES.md) for a longer feature list. These are software capabilities, not a claim that every feature has been tested on the V1 hardware. Streaming services also require valid credentials and may depend on third-party service availability.
 
-### Audio Engine & DSP
+## Build a firmware image
 
-* **Graphic EQ:** 10-band equaliser (31 Hz – 16 kHz, ±12 dB) with presets and horizontal scrolling card.
-* **Parametric EQ (PEQ):** 10 fully parametric bands (20 Hz – 20 kHz, gain ±15 dB, Q 0.10–10.00, Peak/Shelf/Low-Pass/High-Pass) with real-time response curve rendering and Equalizer APO / AutoEq import.
-* **MSEB:** MageSound Eighteen sound tuning algorithm matched to hardware characteristics.
-* **Soundfield & Crossfeed:** Adjustable spatial width from mono to 200% stereo, plus headphone crossfeed.
-* **Channel Balance:** ±20 dB balance control in 0.5 dB increments.
-* **Playback Controls:** Bit-perfect gapless playback, ReplayGain (track & album), adjustable track fade (1–12 s).
-* **Hardware Output Routing:** Independent volume level memory for 3.5 mm, 4.4 mm, and USB outputs; Line Out mode; USB DAC mode (32–384 kHz).
+The recommended route is the repository's GitHub Actions workflow. It cross-compiles the MIPS player and launcher, packages them into an update based on official V1 firmware, validates the result and uploads a downloadable artifact.
 
-### Library & Organization
+1. Open the repository's **Actions** tab and select **Build experimental TempoTec V1 firmware**.
+2. Choose **Run workflow** on the branch you want to build. The stock firmware URL is prefilled with the [official TempoTec V1 firmware folder](https://drive.google.com/drive/folders/1jbT9lhRvJ8sbJuepnaBpss861mpsYwnv?usp=sharing); change it only if you have another official V1 package to use.
+3. Confirm the required checkbox stating that you understand the image is experimental and not hardware-validated.
+4. When the run succeeds, download the `sonix-tempotec-v1-<commit>` artifact. It contains `v1.upt`, `v1_md5.txt`, the player binaries, and stock/output validation reports.
 
-* Ultra-fast SQLite-backed media indexer and tag reader (supporting UTF-8 and multilingual metadata).
-* Embedded and folder album art extraction with smooth coverflow browsing.
-* Embedded and external `.lrc` synchronized lyrics display.
-* Full audiobook resume support with chapter markers (`.m4b` and ID3 chapter frames).
-* File browser with direct folder playback, favorites, and custom playlists.
+Artifacts are retained for 14 days. A successful Actions run is not a hardware-tested release. See [`.github/workflows/build-tempotec-v1.yml`](.github/workflows/build-tempotec-v1.yml) for the build and validation steps.
 
-### Wireless & Streaming
+## Install or restore firmware
 
-* **Wi-Fi Web Transfer:** Built-in HTTP server allows uploading, downloading, and managing music on the player from any web browser.
-* **Streaming Services:** Native client support for Tidal, Qobuz, Podcast Index, and internet radio.
-* **Remote Streaming:** DLNA digital media renderer and Apple AirPlay audio receiver.
-* **Last.fm Scrobbler:** Caches scrobbles offline and submits them when Wi-Fi connects.
-* **Bluetooth Audio:** High-resolution wireless playback supporting SBC, AAC, aptX, and LDAC.
+Only attempt this on a TempoTec Variations V1. Read the warning above before proceeding.
 
-### Built-in Applications
+1. Keep the **official V1 `v1.upt` and its matching `v1_md5.txt`** somewhere safe. They are needed if you want to return to stock.
+2. Extract the workflow artifact and copy **both** `v1.upt` and `v1_md5.txt` to the root of a microSD card supported by the device.
+3. Charge the player adequately, insert the card and start the device's built-in firmware update process. Menu names vary by stock firmware version; follow the device's on-screen instructions and do not interrupt the update.
+4. If you want to restore stock firmware, put the original vendor `v1.upt` and its matching checksum file at the card root and use the same update process.
 
-* **Gearboy (Game Boy / Game Boy Color):** Integrated full-speed Game Boy emulator with on-screen button controls and save state support.
-* **EPUB E-Book Reader:** Built-in reader supporting EPUB reflowable text, customizable font sizing, margins, and night mode themes.
+The package builder is designed to preserve the stock `xImage` kernel and leave the existing update/recovery path in place. This is checked during the build, but it is **not** a guarantee that recovery will work on every device or in every failure case.
 
----
+## Streaming credentials
 
-## Credits & Acknowledgements
+Credentials for Qobuz, Tidal, Podcast Index and Last.fm are not included in this repository or in the standard workflow artifact. Without usable credentials, those services remain disabled; local playback does not require them.
 
-* **Sonix Player Team & Contributors:** [@Tartarus6](https://github.com/Tartarus6), [@noisetta](https://github.com/noisetta), [@endgame47](https://github.com/endgame47), [@hkhrithik007](https://github.com/hkhrithik007)
-* **LVGL:** Lightweight and Versatile Graphics Library
-* **Rockbox Project:** Cross-compiler toolchain foundation
-* **Gearboy:** Game Boy emulator core by Ignacio Sanchez
+To try credentials on a build that has no keys embedded, copy `sonix-player/streaming-keys.ini.example` to the root of the microSD card as `streaming-keys.ini`, fill in only the services for which you have authorized credentials, then restart the player. Do not commit or share this file.
+
+```ini
+[qobuz]
+app_id =
+app_secret =
+
+[tidal]
+client_id =
+client_secret =
+
+[podcast]
+api_key =
+api_secret =
+
+[lastfm]
+api_key =
+api_secret =
+```
+
+For a private development build, `sonix-player/tools/seal_streamkeys.py` can place a sealed credentials file in the assets before compilation. This format is **obfuscation, not secure encryption**: the key is compiled into the player binary and can be recovered by someone who analyzes it. Never publish a binary containing credentials you do not intend to disclose.
+
+## Build from source
+
+The GitHub Actions workflow is the easiest option because it also obtains the official stock image and assembles the final package. For a local Debian/Ubuntu build, install the toolchain and firmware utilities first:
+
+```sh
+sudo apt-get update
+sudo apt-get install -y \
+  build-essential git pkg-config wget curl ca-certificates \
+  texinfo bison flex gawk gperf patch xz-utils bzip2 gzip \
+  autoconf automake libtool libtool-bin \
+  libgmp-dev libmpfr-dev libmpc-dev \
+  p7zip-full squashfs-tools genisoimage python3
+```
+
+Then build the V1 target binaries. On a first build, Make downloads LVGL and builds the MIPS cross-toolchain and target libraries; this can take a while and requires network access.
+
+```sh
+make -C sonix-player target -j"$(nproc)"
+```
+
+To package them, download the official V1 `v1.upt` (or the folder/archive containing it), then run:
+
+```sh
+chmod +x sonix-packer/*.sh
+sonix-packer/prepare_v1_stock.sh /path/to/official-v1-firmware sonix-packer
+install -m 0755 sonix-player/sonix_player sonix-packer/sonix_player
+install -m 0755 sonix-player/sonix_launch sonix-packer/sonix_launch
+sonix-packer/sonix_firmware_packer.sh
+```
+
+The generated files are `sonix-packer/v1.upt` and `sonix-packer/v1_md5.txt`. To validate the generated package and confirm that its kernel hash matches the stock package:
+
+```sh
+set -euo pipefail
+stock_kernel_sha256="$(sonix-packer/verify_upt.sh sonix-packer/v1_original.upt \
+  | sed -n 's/^Kernel SHA-256: //p')"
+sonix-packer/verify_upt.sh sonix-packer/v1.upt \
+  --sonix-v1 --kernel-sha256 "$stock_kernel_sha256"
+```
+
+The packer also checks the V1 model identity and builds the root filesystem's update checksum chain. These checks do not replace testing on the physical player.
+
+## Project files and documentation
+
+- `sonix-player/` — player sources, LVGL configuration, launcher and build system.
+- `sonix-packer/` — stock-image preparation, firmware packaging and validation scripts.
+- `FEATURES.md` — detailed feature notes.
+- `PATCHES.md` — device-porting and implementation notes.
+- `LICENSE` — GNU General Public License, version 3. Third-party components retain their own licenses.
+
+For bug reports, include the exact model, the firmware build/commit and relevant logs. Remove personal data and **never attach streaming credentials**.
