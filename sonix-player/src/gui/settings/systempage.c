@@ -190,13 +190,93 @@ static void build_tapped_cb(lv_event_t *e) {
 // building the two pages
 // ---------------------------------------------------------------------------
 
-// A card with the name on the left and the value on the right, like any other
-// row, but not clickable: the versions and the card usage are information, not
-// commands. `value_out` receives the right-hand label.
+// The V1 has 240 pixels across: a name beside a value leaves too little room
+// for real DAC names, serials and translated labels. Stack the name and value
+// on their own lines there, while leaving the regular players' shared settings
+// row untouched. The single-line labels use dots rather than running beyond
+// the card when a firmware or translation supplies a long value.
+static lv_obj_t *compact_info_row(lv_obj_t *parent, const char *name, lv_obj_t **value_out,
+							  lv_event_cb_t callback, void *user_data, bool clickable) {
+	lv_obj_t *row = lv_btn_create(parent);
+	lv_obj_set_width(row, lv_pct(100));
+	lv_obj_set_height(row, 48);
+	lv_obj_add_style(row, &theme_style_card, 0);
+	if (clickable) {
+		lv_obj_add_style(row, &theme_style_card_pressed, LV_STATE_PRESSED);
+	}
+	lv_obj_set_style_radius(row, bp_tile_radius(), 0);
+	lv_obj_set_style_border_width(row, 0, 0);
+	lv_obj_set_style_shadow_width(row, 0, 0);
+	lv_obj_set_style_pad_hor(row, 8, 0);
+	lv_obj_set_style_pad_ver(row, 4, 0);
+	lv_obj_set_scrollable(row, false);
+	lv_obj_set_event_bubble(row, true);
+	lv_obj_set_clickable(row, clickable);
+	if (callback) {
+		lv_obj_add_event_cb(row, callback, LV_EVENT_CLICKED, user_data);
+	}
+
+	lv_obj_t *label = lv_label_create(row);
+	lv_label_set_text(label, tr(name));
+	lv_obj_add_style(label, &theme_style_text_dim, 0);
+	lv_obj_set_style_text_font(label, &font_ui_14, 0);
+	lv_label_set_long_mode(label, LV_LABEL_LONG_DOT);
+	lv_obj_set_width(label, lv_pct(100));
+	lv_obj_set_height(label, lv_font_get_line_height(&font_ui_14));
+	lv_obj_align(label, LV_ALIGN_TOP_LEFT, 0, 0);
+
+	lv_obj_t *value = lv_label_create(row);
+	lv_obj_add_style(value, &theme_style_text, 0);
+	lv_obj_set_style_text_font(value, &font_ui_20, 0);
+	lv_label_set_long_mode(value, LV_LABEL_LONG_DOT);
+	lv_obj_set_width(value, lv_pct(100));
+	lv_obj_set_height(value, lv_font_get_line_height(&font_ui_20));
+	lv_obj_align(value, LV_ALIGN_BOTTOM_LEFT, 0, 0);
+	if (value_out) {
+		*value_out = value;
+	}
+
+	return row;
+}
+
+// A read-only card with the name on the left and value on the right on the
+// larger players. On the V1, `compact_info_row()` stacks them to keep both
+// readable within the narrow panel.
 static lv_obj_t *info_row(lv_obj_t *parent, const char *name, lv_obj_t **value_out) {
+	if (bp_is_tempotec_v1()) {
+		return compact_info_row(parent, name, value_out, NULL, NULL, false);
+	}
+
 	lv_obj_t *row = settingsrow_add(parent, name, value_out, NULL, NULL);
 	lv_obj_set_clickable(row, false);
 	return row;
+}
+
+static lv_obj_t *system_value_row(lv_obj_t *parent, const char *name, lv_obj_t **value_out,
+								  lv_event_cb_t callback, void *user_data, bool clickable) {
+	if (bp_is_tempotec_v1()) {
+		return compact_info_row(parent, name, value_out, callback, user_data, clickable);
+	}
+
+	lv_obj_t *row = settingsrow_add(parent, name, value_out, callback, user_data);
+	if (!clickable) {
+		lv_obj_set_clickable(row, false);
+	}
+	return row;
+}
+
+// Percentage widths are resolved by the list layout. Refresh dotted labels
+// once that layout has settled so an early, zero-width measurement cannot leave
+// a translated label displaying only its ellipsis.
+static void refresh_dotted_labels(lv_obj_t *obj) {
+	if (lv_obj_check_type(obj, &lv_label_class) && lv_label_get_long_mode(obj) == LV_LABEL_LONG_DOT) {
+		lv_label_set_text(obj, NULL);
+	}
+
+	uint32_t count = lv_obj_get_child_count(obj);
+	for (uint32_t i = 0; i < count; i++) {
+		refresh_dotted_labels(lv_obj_get_child(obj, (int32_t)i));
+	}
 }
 
 static void sysinfo_loaded_cb(lv_event_t *e) {
@@ -236,35 +316,49 @@ static void build_sysinfo_page(gui_config_t *cfg) {
 	const char *sn = sysinfo_serial_number();
 	lv_label_set_text(serial_value, sn[0] ? sn : "\xE2\x80\x94");
 
-	// --- microSD card: value on the right, bar underneath ---
+	// --- microSD card ---
+	// On the narrow V1, the amount sits on its own line instead of fighting
+	// the heading for the same 212 pixels. The larger layout keeps its original
+	// side-by-side treatment.
+	const bool compact = bp_is_tempotec_v1();
 	lv_obj_t *sd_card = lv_obj_create(container);
 	lv_obj_set_width(sd_card, lv_pct(100));
-	lv_obj_set_height(sd_card, bp_pick(72, 116));
+	lv_obj_set_height(sd_card, bp_pick(60, 116));
 	lv_obj_add_style(sd_card, &theme_style_card, 0);
 	lv_obj_set_style_radius(sd_card, bp_pick(bp_tile_radius(), 12), 0);
 	lv_obj_set_style_border_width(sd_card, 0, 0);
 	lv_obj_set_style_shadow_width(sd_card, 0, 0);
 	lv_obj_set_style_pad_hor(sd_card, bp_pick(8, 20), 0);
-	lv_obj_set_style_pad_ver(sd_card, bp_pick(8, 16), 0);
+	lv_obj_set_style_pad_ver(sd_card, bp_pick(6, 16), 0);
 	lv_obj_set_scrollable(sd_card, false);
 	lv_obj_set_clickable(sd_card, false);
 
 	lv_obj_t *sd_name = lv_label_create(sd_card);
 	lv_label_set_text(sd_name, tr("system_sd_card"));
 	lv_obj_add_style(sd_name, &theme_style_text, 0);
-	lv_obj_set_style_text_font(sd_name, &font_ui_24, 0);
+	lv_obj_set_style_text_font(sd_name, compact ? &font_ui_14 : &font_ui_24, 0);
+	if (compact) {
+		lv_obj_set_width(sd_name, lv_pct(100));
+		lv_label_set_long_mode(sd_name, LV_LABEL_LONG_DOT);
+	}
 	lv_obj_align(sd_name, LV_ALIGN_TOP_LEFT, 0, 0);
 
 	sd_value = lv_label_create(sd_card);
 	lv_obj_add_style(sd_value, &theme_style_text_dim, 0);
-	lv_obj_set_style_text_font(sd_value, &font_ui_20, 0);
-	lv_obj_align(sd_value, LV_ALIGN_TOP_RIGHT, 0, 0);
+	lv_obj_set_style_text_font(sd_value, compact ? &font_ui_16 : &font_ui_20, 0);
+	if (compact) {
+		lv_obj_set_width(sd_value, lv_pct(100));
+		lv_label_set_long_mode(sd_value, LV_LABEL_LONG_DOT);
+		lv_obj_align(sd_value, LV_ALIGN_TOP_LEFT, 0, lv_font_get_line_height(&font_ui_14) + 3);
+	} else {
+		lv_obj_align(sd_value, LV_ALIGN_TOP_RIGHT, 0, 0);
+	}
 	lv_label_set_text(sd_value, "");
 
 	sd_bar = lv_bar_create(sd_card);
 	lv_obj_set_width(sd_bar, lv_pct(100));
-	lv_obj_set_height(sd_bar, bp_pick(8, 10));
-	lv_obj_align(sd_bar, LV_ALIGN_BOTTOM_MID, 0, 0);
+	lv_obj_set_height(sd_bar, bp_pick(5, 10));
+	lv_obj_align(sd_bar, LV_ALIGN_BOTTOM_MID, 0, compact ? -1 : 0);
 	lv_bar_set_range(sd_bar, 0, 100);
 	lv_obj_set_style_radius(sd_bar, LV_RADIUS_CIRCLE, LV_PART_MAIN);
 	lv_obj_set_style_bg_color(sd_bar, theme()->text_secondary, LV_PART_MAIN);
@@ -276,16 +370,21 @@ static void build_sysinfo_page(gui_config_t *cfg) {
 	// The system version carries the thank-you (see easteregg.c), so it stays
 	// clickable where the rows above it are not.
 	lv_obj_t *os_value = NULL;
-	lv_obj_t *os_row = settingsrow_add(container, "system_operating_system_version", &os_value, NULL, NULL);
+	lv_obj_t *os_row = system_value_row(container, "system_operating_system_version", &os_value, NULL, NULL, true);
 	const char *os = sysinfo_os_version();
 	lv_label_set_text(os_value, os[0] ? os : "\xE2\x80\x94"); // em dash
 	easteregg_attach(os_row);
 
 	// Five taps reveal the developer options.
 	lv_obj_t *build_value = NULL;
-	settingsrow_add(container, "system_build_number", &build_value, build_tapped_cb, NULL);
+	system_value_row(container, "system_build_number", &build_value, build_tapped_cb, NULL, true);
 	const char *build = sysinfo_build_version();
 	lv_label_set_text(build_value, build[0] ? build : "\xE2\x80\x94");
+
+	if (compact) {
+		lv_obj_update_layout(container);
+		refresh_dotted_labels(container);
+	}
 
 	lv_obj_add_event_cb(sysinfo_screen, sysinfo_loaded_cb, LV_EVENT_SCREEN_LOADED, NULL);
 	switcher_attach_back_gesture(sysinfo_screen);
