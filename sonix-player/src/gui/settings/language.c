@@ -3,6 +3,7 @@
 #include "src/gui/board_profile.h"
 #include "src/gui/fonts/fonts.h"
 #include "src/gui/shell/icons.h"
+#include "src/gui/shell/powermenu.h"
 #include "src/gui/shell/settingsrow.h"
 #include "src/gui/shell/switcher.h"
 #include "src/gui/shell/theme.h"
@@ -46,6 +47,11 @@ static lv_obj_t *menu_label; // the language row on the settings page
 // English the two would be the same word twice, so only one is shown.
 static void language_label(char *out, size_t size) {
 	const char *own = tr("language");
+	// A few installed French catalogs called this row "Langues". Keep the
+	// navigation label singular even when an older catalog is still present.
+	if (strcmp(own, "Langues") == 0) {
+		own = "Langue";
+	}
 	if (strcmp(own, "Language") == 0) {
 		snprintf(out, size, "%s", own);
 	} else {
@@ -120,6 +126,10 @@ static void pick_cb(lv_event_t *e) {
 	}
 	paint_checks();
 	refresh_titles();
+	// The short power-menu actions can share their translation with another
+	// page, so the generic reverse-translation pass cannot always identify
+	// their keys unambiguously.
+	powermenu_refresh_labels();
 }
 
 // A row that marks itself instead of leading somewhere. settingsrow_action

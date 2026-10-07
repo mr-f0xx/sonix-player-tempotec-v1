@@ -103,13 +103,16 @@ long alsa_volume_gain_db100(int percent);
 // It has no caller; see the note in alsa-controls.c.
 void alsa_controls_reapply(void);
 
-// The DAC silenced before a suspend and brought back after it, on the R3 Pro
-// II. Parking the route mutes the analogue port, but the DAC feeding it was
-// still live as its supply went, and that is a click of its own. Mute writes
-// the channel controls to silent; restore writes back the level in force.
-// Nothing on the R1, whose CS43131 is not on that path.
+// Temporarily mute the CS43198 DAC around an HBC3000 route transition or
+// suspend, then restore the level in force. The analogue route switch mutes
+// its own port, but the live DAC can still make a transient while the bridge
+// changes sockets. No-op on the R1 CS43131 path.
 void alsa_suspend_mute(void);
 void alsa_suspend_restore(void);
+
+// Sticky version for a terminal shutdown/reboot: route callbacks may finish,
+// but none may restore the DAC after this is set.
+void alsa_poweroff_mute(void);
 
 
 // The hardware control is an attenuation: 0 is loudest, 255 is silent. Nothing

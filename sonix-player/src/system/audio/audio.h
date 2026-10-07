@@ -57,6 +57,11 @@ bool audio_suspend_quiesce(int timeout_ms);
 // player+0xBB8 set before mem, consumed by the play afterwards).
 bool audio_suspend_freeze(int timeout_ms);
 
+// Before a real power-off/reboot: temporarily mute the DAC, close local and
+// external PCM streams, wait for playback teardown, then park the HBC3000 on
+// its unused socket. The playback position must be saved by the caller first.
+bool audio_prepare_poweroff(void);
+
 // True while play_file() is running, paused included; used by the test bench
 // and the logs.
 bool audio_playback_context_active(void);
@@ -68,7 +73,7 @@ bool audio_playback_context_active(void);
 // it the first play after standby reboots the device.
 void audio_force_output_reinit_after_resume(void);
 // Moves the route to the unused socket so the driver mutes the one in use
-// before mem cuts the amplifier's power (R3 Pro II; see audio.c).
+// before suspend or shutdown removes power from the HBC3000 output stage.
 void audio_park_output_before_suspend(void);
 
 // True while the playback thread holds an open PCM handle. The suspend path

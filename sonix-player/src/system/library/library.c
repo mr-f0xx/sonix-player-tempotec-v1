@@ -9,6 +9,7 @@
 #include <errno.h>
 #include <pthread.h>
 #include <stdint.h>
+#include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -344,10 +345,12 @@ static volatile bool scan_cancel;
 // transaction that will not commit. The walk stops on scan_cancel, and this
 // says the stop was a fault rather than the user pressing back.
 static volatile bool scan_db_failed;
-static volatile int scan_found;
+// Polled by the scan page and SonixLink without taking the database lock.
+static atomic_int scan_found;
 static char scan_root[512];
 static char scan_folder[512];
-static pthread_mutex_t scan_folder_lock = PTHREAD_MUTEX_INITIALIZER;
+static char scan_file[512];
+static pthread_mutex_t scan_progress_lock = PTHREAD_MUTEX_INITIALIZER;
 
 // Whether every file is named in the log as it is read. Developer options has
 // the switch; see library_set_log_database.
@@ -3090,9 +3093,18 @@ static int format_of(const char *name) {
 }
 
 static void set_scan_folder(const char *path) {
-	pthread_mutex_lock(&scan_folder_lock);
+	pthread_mutex_lock(&scan_progress_lock);
 	snprintf(scan_folder, sizeof(scan_folder), "%s", path);
-	pthread_mutex_unlock(&scan_folder_lock);
+	pthread_mutex_unlock(&scan_progress_lock);
+}
+
+// The file currently being read. The folder can stay the same for thousands
+// of entries, so showing the file gives the scan page something live to show
+// while a slow card or a large tag block is being read.
+static void set_scan_file(const char *path) {
+	pthread_mutex_lock(&scan_progress_lock);
+	snprintf(scan_file, sizeof(scan_file), "%s", path);
+	pthread_mutex_unlock(&scan_progress_lock);
 }
 
 // ---------------------------------------------------------------------------
@@ -4220,6 +4232,7 @@ static bool scan_cue_sheet(const char *path, const struct stat *st) {
 }
 
 static void scan_one_file(const char *child, const char *name, const struct stat *st) {
+	set_scan_file(child);
 	// Before the file is touched, not after: what is wanted is the name of the
 	// file the player was on when it died, and by then no code here runs.
 	crumb_set(child);
@@ -5750,11 +5763,12 @@ static bool scan_launch(const char *root, scan_mode_t mode) {
 	rules_load(&rules);
 	scan_mode = mode;
 	scan_id_base = 0;
-	scan_found = 0;
+	atomic_store_explicit(&scan_found, 0, memory_order_relaxed);
 	scan_cancel = false;
 	scan_db_failed = false;
 	scan_running = true;
 	set_scan_folder(mode == SCAN_REORGANIZE ? "" : root);
+	set_scan_file("");
 
 	// Off by default: a line per file is a write to the card per file, which
 	// slows the scan and wears the card. It is turned on to catch a death that
@@ -5899,15 +5913,24 @@ bool library_is_open(void) {
 
 bool library_scan_running(void) { return scan_running; }
 
-int library_scan_found(void) { return scan_found; }
+int library_scan_found(void) { return atomic_load_explicit(&scan_found, memory_order_relaxed); }
 
 void library_scan_current_folder(char *out, size_t size) {
 	if (!out || size == 0) {
 		return;
 	}
-	pthread_mutex_lock(&scan_folder_lock);
+	pthread_mutex_lock(&scan_progress_lock);
 	snprintf(out, size, "%s", scan_folder);
-	pthread_mutex_unlock(&scan_folder_lock);
+	pthread_mutex_unlock(&scan_progress_lock);
+}
+
+void library_scan_current_file(char *out, size_t size) {
+	if (!out || size == 0) {
+		return;
+	}
+	pthread_mutex_lock(&scan_progress_lock);
+	snprintf(out, size, "%s", scan_file);
+	pthread_mutex_unlock(&scan_progress_lock);
 }
 
 void library_scan_stop(void) {

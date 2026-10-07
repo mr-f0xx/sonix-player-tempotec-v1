@@ -932,6 +932,15 @@ void power_shutdown(void) {
 	// never be written.
 	device_state_remember_flush();
 
+	// Dark the panel immediately, then fade/close audio before the kernel takes
+	// power away from the output stage. In particular, the HBC3000 is parked on
+	// its unused socket while its amplifier is still powered, avoiding a pop in
+	// the connected headphones during shutdown.
+	power_screen_off();
+	if (!audio_prepare_poweroff()) {
+		fprintf(stderr, "power: audio did not quiesce completely before shutdown\n");
+	}
+
 	// The time goes into the RTC before anything else, exactly as the stock
 	// player does on its way out: whatever the clock has learned since it was
 	// last set is otherwise lost the moment the power goes.
@@ -948,12 +957,6 @@ void power_shutdown(void) {
 	tidalcache_clear_on_exit();
 	podcastcache_clear_on_exit();
 	dlna_clear_on_exit();
-
-	// Dark the panel first: `poweroff` goes through init's shutdown hooks,
-	// which it must -- the raw syscall with USB attached leaves the PMIC to
-	// boot the device straight back up -- and those take a few seconds. With
-	// the screen already off the wait is invisible.
-	power_screen_off();
 
 	// The charger back on before the power goes: the driver keeps that bit
 	// across a shutdown -- mp2731_shutdown writes it from the property it has
@@ -1483,17 +1486,11 @@ void power_screen_on(void) {
 		(void)g_wake_hook();
 	}
 
-	screen_power(true);			 // panel, backlight and touch controller back up
-	usleep(SCREEN_ON_SETTLE_US); // let the panel + backlight finish re-initializing
-	set_indevs_enabled(true);
-	indev_timers_set_paused(false);
-
-	// The painting timers come back before the repaint below, and each runs
-	// once straight away, so the first frame after the wake already has the
-	// right time, the right battery and the right playback position on it.
+	// Resume the timers and prepare the scan-out while the panel is still
+	// blank. Repaint the entire interface into the framebuffer BEFORE unblanking
+	// it: presenting the old buffer for the 60 ms panel settle was the brief
+	// static-looking wake flash.
 	standby_timers_set_paused(false);
-
-	// resume ongoing refresh (if it was paused) ...
 	if (g_refr_timer) {
 		lv_timer_resume(g_refr_timer);
 	}
@@ -1501,25 +1498,19 @@ void power_screen_on(void) {
 	if (anim_timer) {
 		lv_timer_resume(anim_timer);
 	}
-	// ... and force an immediate, full repaint of the framebuffer. The blank
-	// cleared the panel to black, so the whole UI must be redrawn; this is not
-	// gated on g_refr_timer, and lv_refr_now() draws even if the timer is paused.
-	//
-	// The sysfs blank/unblank cycle tears down the panel's scan-out, and on this
-	// hardware the controller does not re-present the framebuffer just because
-	// fresh pixels were copied into it -- it must be kicked explicitly. How
-	// depends on which display path is active, so main.c owns the kick: it
-	// restores the video mode (some drivers reset the page-flipping display's
-	// double-height virtual resolution on blank) and re-arms scan-out around
-	// this one wake repaint.
 	display_wake_begin(g_disp);
 	lv_obj_t *scr = lv_screen_active();
 	if (scr) {
 		lv_obj_invalidate(scr);
 	}
 	lv_obj_invalidate(lv_layer_top());
-	lv_refr_now(g_disp);
+	lv_refr_now(g_disp); // explicit refresh works even when the refresh timer is paused
 	display_wake_end(g_disp);
+
+	screen_power(true);			 // show the freshly painted frame
+	usleep(SCREEN_ON_SETTLE_US); // let the panel + backlight finish re-initializing
+	set_indevs_enabled(true);
+	indev_timers_set_paused(false);
 
 	// The panel came back at its pre-blank (dim) level, and the backlight driver
 	// may not have restored the configured brightness on unblank. Forcing the

@@ -340,21 +340,20 @@ void audio_force_output_reinit_after_resume(void) {
 	alsa_suspend_restore();
 }
 
-// The pop into the headphones as the R3 Pro II goes into mem.
-//
-// mem cuts the HBC3000's power with its output stage still switched on to the
-// socket, and the amplifier losing its supply with the headphones connected is
-// the thump. The mixer offers no mute for that stage -- the card's controls are
+// The HBC3000's final power transition: both suspend-to-RAM and shutdown can
+// remove its supply with the output stage still switched on to a socket, and
+// the amplifier losing power with headphones connected is the thump. The mixer
+// offers no separate mute for that stage -- the card's controls are
 // the route, the balanced line-out flag and DOP_EN, the codec's are before the
 // amplifier -- but a route change is the machine driver's own orderly sequence
 // (mute the old port, reconfigure, unmute the new one), and it is silent: the
 // re-init above runs one at every wake and nobody hears it.
 //
-// So before the suspend the route is moved to the other socket, the empty one.
-// The port in use is muted by the driver, and what goes down in mem is an
-// amplifier driving nothing. The wake needs nothing more: the re-init writes
-// the partner and then the real route, and the second write is a real change
-// from the parked one, which is the full sequence that powers the HBC3000 back.
+// Before the power transition the route is moved to the other socket, the
+// empty one. The port in use is muted by the driver, and suspend carries an
+// amplifier driving nothing into mem. On wake, the re-init writes the partner
+// and then the real route, a real change from the parked one that powers the
+// HBC3000 back. On shutdown, the route stays parked until power is removed.
 //
 // Called with the PCM closed: audio_suspend_freeze() has run.
 void audio_park_output_before_suspend(void) {
@@ -367,12 +366,13 @@ void audio_park_output_before_suspend(void) {
 	}
 	int y = output_reinit_partner(x);
 	// The DAC first: the route change mutes the old port, but the DAC feeding
-	// it would still be live when its supply goes. Silent until the wake has
-	// put the real route back (audio_force_output_reinit_after_resume()).
+	// it would still be live when its supply goes. It stays muted through
+	// suspend; shutdown never restores it.
 	alsa_suspend_mute();
 	// The balanced line-out flag with it: on the 4.4 mm socket headphone and
 	// line out are the same route, and a report of a pop has to say which.
-	fprintf(stderr, "audio: output parked on %d before mem (was %d, balanced line out %d)\n", y, x, alsa_output_key() & 1);
+	fprintf(stderr, "audio: output parked on %d before power-down (was %d, balanced line out %d)\n", y, x,
+			alsa_output_key() & 1);
 #ifndef HOST_BUILD
 	alsa_set_control("Output Port Switch", y);
 	usleep(120 * 1000); // the driver's mute and route change, before the power goes
@@ -2276,6 +2276,10 @@ static snd_pcm_sframes_t pcm_write_recover(snd_pcm_t **pcm, const void *buf, snd
 // the codec switch cannot stall anything.
 static bool pcm_reroute(snd_pcm_t **pcm, int channels, int rate, int bits, snd_pcm_uframes_t *period) {
 	fprintf(stderr, "audio[%ld]: jack changed, rerouting\n", log_ms());
+	// Mute before stopping the stream: a jack-detect transition can arrive
+	// after the analogue contacts have already touched, and leaving the DAC at
+	// full level through the close-and-route window makes that transient louder.
+	alsa_suspend_mute();
 	if (*pcm) {
 		snd_pcm_drop(*pcm);
 		snd_pcm_close(*pcm);
@@ -2283,6 +2287,7 @@ static bool pcm_reroute(snd_pcm_t **pcm, int channels, int rate, int bits, snd_p
 	}
 	usleep(150 * 1000); // let the switch settle before the codec is poked
 	auto_set_output();
+	alsa_suspend_restore(); // also covers a route that did not need rewriting
 	*pcm = open_pcm_device(channels, rate, bits, period);
 	return *pcm != NULL;
 }
@@ -4133,6 +4138,26 @@ bool audio_suspend_freeze(int timeout_ms) {
 	return true;
 }
 
+// A real power-off or reboot has the same last transition as suspend, except
+// that nothing is coming back to unmute the route. Fade the DAC to silence
+// first, close every PCM (local, gapless, and external), then park the HBC3000
+// route on the unused socket before the kernel removes power from its output
+// stage. The caller has already saved the playback position.
+bool audio_prepare_poweroff(void) {
+	alsa_poweroff_mute();
+	audio_external_end();
+	if (!audio_suspend_freeze(3000)) {
+		// A route transition finishing concurrently may have restored its
+		// short-lived mute; reassert the shutdown mute before returning to the
+		// caller, which is about to hand power to init.
+		alsa_poweroff_mute();
+		fprintf(stderr, "audio: could not fully quiesce before power-off; leaving the DAC muted\n");
+		return false;
+	}
+	audio_park_output_before_suspend();
+	return true;
+}
+
 void audio_pause(void) {
 	printf("pausing\n");
 	pthread_mutex_lock(&audio_mutex);
@@ -4482,13 +4507,18 @@ static bool external_follow_output(void) {
 
 	// Dropped rather than drained: what is still in the buffer belongs to the
 	// socket nobody is listening to any more, and draining it would play it
-	// there before the change took effect.
+	// there before the change took effect. Mute before the close so the DAC's
+	// last samples cannot leak through while the HBC3000 changes routes.
+	alsa_suspend_mute();
 	snd_pcm_drop(external_pcm);
 	snd_pcm_close(external_pcm);
 	external_pcm = NULL;
 	pcm_device_open = false;
+	usleep(150 * 1000); // the same settle window as local playback reroutes
 
-	if (!external_open_locked()) {
+	bool opened = external_open_locked();
+	alsa_suspend_restore();
+	if (!opened) {
 		// The new device would not open. Saying so once is enough: the check
 		// runs again in a quarter of a second, and the next plug -- or the
 		// same one seated properly -- is another go at it.

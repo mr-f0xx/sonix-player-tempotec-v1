@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "src/gui/board_profile.h"
 #include "src/gui/nowplaying/cover.h"
 #include "src/gui/nowplaying/coverloader.h"
 #include "src/gui/fonts/fonts.h"
@@ -113,7 +114,6 @@
 #define CF_FLIP_MS 130
 #define CF_BACK_W 380
 #define CF_BACK_PAD 18
-#define CF_BACK_BODY_W (CF_BACK_W - 2 * CF_BACK_PAD)
 #define CF_BACK_H_MIN 120
 #define CF_BACK_LIST_MAX 400
 #define CF_BACK_ROW_H 50
@@ -196,6 +196,14 @@ static lv_obj_t *back_sub;
 static lv_obj_t *back_list;
 static library_index_t *back_ix;
 static int back_count;
+static int back_card_width = CF_BACK_W;
+static int back_card_pad = CF_BACK_PAD;
+static int back_body_width = CF_BACK_W - 2 * CF_BACK_PAD;
+static int back_card_min_height = CF_BACK_H_MIN;
+static int back_card_max_height = CF_BACK_H_MIN;
+static int back_list_max_height = CF_BACK_LIST_MAX;
+static int back_row_height = CF_BACK_ROW_H;
+static int back_card_radius = CF_BACK_RADIUS;
 static bool flipped;
 static bool flipping;
 
@@ -206,6 +214,7 @@ static int32_t scroll_max;
 static int centre;
 static int mid_x;
 static int mid_y;
+static int record_scale = LV_SCALE_NONE;
 static lv_obj_t *glow_obj;
 static lv_image_dsc_t glow_dsc;
 static uint8_t *glow_map; // the alpha map, always CF_GLOW_MAX_W wide whatever is drawn in it
@@ -295,6 +304,10 @@ void coverflow_set_enabled(bool on) {
 // facing the viewer and fully turned, over a hundred and twenty heights, so the
 // far edge moved three pixels at a time and stood still in between -- which is
 // visible as a stutter at exactly the moment a record comes round to the front.
+static int record_px(int px) {
+	return (int)(((int64_t)px * record_scale + LV_SCALE_NONE / 2) / LV_SCALE_NONE);
+}
+
 static int32_t height_to_far(int height) {
 	int turn = CF_MID_W - height; // 0 flat, CF_MID_W - CF_LEAN_H fully turned
 	int span = CF_MID_W - CF_LEAN_H;
@@ -618,7 +631,9 @@ static int place_offset(int32_t d) {
 	int32_t away = d < 0 ? -d : d;
 	int32_t near_part = away > CF_ONE ? CF_ONE : away;
 	int32_t far_part = away > CF_ONE ? away - CF_ONE : 0;
-	int32_t px = (int32_t)(((int64_t)near_part * CF_PITCH_NEAR + (int64_t)far_part * CF_PITCH_FAR) >> 16);
+	int pitch_near = record_px(CF_PITCH_NEAR);
+	int pitch_far = record_px(CF_PITCH_FAR);
+	int32_t px = (int32_t)(((int64_t)near_part * pitch_near + (int64_t)far_part * pitch_far) >> 16);
 	return d < 0 ? -px : px;
 }
 
@@ -667,6 +682,8 @@ static void slot_turn(int i, int height) {
 	// The image cache is off in this build (LV_CACHE_DEF_SIZE is 0), so the same
 	// descriptor with new contents and a new height is simply read again.
 	lv_image_set_src(slot->image, &slot->warp_dsc);
+	lv_image_set_scale_x(slot->image, (uint32_t)record_scale);
+	lv_image_set_scale_y(slot->image, (uint32_t)record_scale);
 }
 
 static void slot_bind(int i) {
@@ -744,7 +761,9 @@ static void slot_bind(int i) {
 	if (slot->warp_h > 0) {
 		height = slot->warp_h;
 	}
-	int y = mid_y + place_offset(d) - height / 2;
+	int display_height = record_px(height);
+	int center_y = mid_y + place_offset(d);
+	int y = center_y - height / 2; // LVGL scales around the image's source-space centre
 	lv_obj_set_pos(slot->image, mid_x - CF_MID_W / 2, y);
 
 	// The glow belongs to whichever record is nearest the middle, and it is
@@ -754,7 +773,7 @@ static void slot_bind(int i) {
 	int32_t away = d < 0 ? -d : d;
 	if (away < glow_best) {
 		glow_best = away;
-		glow_bottom = y + height;
+		glow_bottom = center_y + display_height / 2;
 		glow_height = height;
 		glow_tone = slot->tone;
 	}
@@ -965,9 +984,12 @@ static void place_glow(void) {
 		glow_map_h = gh;
 	}
 
-	int top = glow_bottom - glow_height + (glow_height - gh) / 2;
+	int display_height = record_px(glow_height);
+	int center_y = glow_bottom - display_height / 2;
+	int source_w = gw + 2 * CF_GLOW_REACH;
+	int source_h = gh + 2 * CF_GLOW_REACH;
 	lv_obj_set_hidden(glow_obj, false);
-	lv_obj_set_pos(glow_obj, mid_x - gw / 2 - CF_GLOW_REACH, top - CF_GLOW_REACH);
+	lv_obj_set_pos(glow_obj, mid_x - source_w / 2, center_y - source_h / 2);
 	// The colour is the image's recolour, which is what lets one alpha map serve
 	// every album.
 	lv_obj_set_style_image_recolor(glow_obj, lv_color_hex(glow_tone ? glow_tone : lv_color_to_u32(theme()->accent)),
@@ -1156,7 +1178,7 @@ static bool track_fill_cb(const char *name, const char *path, const char *artist
 
 	lv_obj_t *row = lv_obj_create(back_list);
 	lv_obj_remove_style_all(row);
-	lv_obj_set_size(row, lv_pct(100), CF_BACK_ROW_H);
+	lv_obj_set_size(row, lv_pct(100), back_row_height);
 	lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
 	lv_obj_set_flex_align(row, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 	lv_obj_set_style_pad_column(row, 12, 0);
@@ -1247,9 +1269,12 @@ static void back_fill(const char *album) {
 	// it means laying out two dozen rows again -- for a height that cannot have
 	// changed, since only the width is moving.
 	lv_obj_update_layout(back_body);
-	int height = lv_obj_get_height(back_body) + 2 * CF_BACK_PAD;
-	if (height < CF_BACK_H_MIN) {
-		height = CF_BACK_H_MIN;
+	int height = lv_obj_get_height(back_body) + 2 * back_card_pad;
+	if (height < back_card_min_height) {
+		height = back_card_min_height;
+	}
+	if (height > back_card_max_height) {
+		height = back_card_max_height;
 	}
 	lv_obj_set_height(back_card, height);
 	lv_obj_align(back_card, LV_ALIGN_CENTER, 0, 0);
@@ -1264,8 +1289,9 @@ static void card_width_cb(void *obj, int32_t v) {
 
 static void record_width_cb(void *obj, int32_t v) {
 	lv_obj_t *image = (lv_obj_t *)obj;
-	lv_image_set_scale_x(image, (uint32_t)((int64_t)LV_SCALE_NONE * v / CF_MID_W));
-	lv_obj_set_x(image, mid_x - CF_MID_W / 2);
+	lv_image_set_scale_x(image, (uint32_t)((int64_t)record_scale * v / CF_MID_W));
+	lv_image_set_scale_y(image, (uint32_t)record_scale);
+	lv_obj_set_x(image, mid_x - CF_MID_W / 2); // keep the transform pivot centred
 }
 
 static void back_grown_cb(lv_anim_t *a) {
@@ -1286,7 +1312,7 @@ static void record_narrowed_cb(lv_anim_t *a) {
 	lv_anim_init(&g);
 	lv_anim_set_var(&g, back_card);
 	lv_anim_set_exec_cb(&g, card_width_cb);
-	lv_anim_set_values(&g, 0, CF_BACK_W);
+	lv_anim_set_values(&g, 0, back_card_width);
 	lv_anim_set_duration(&g, CF_FLIP_MS);
 	lv_anim_set_completed_cb(&g, back_grown_cb);
 	lv_anim_start(&g);
@@ -1313,7 +1339,7 @@ static void flip_open(void) {
 
 static void record_widened_cb(lv_anim_t *a) {
 	(void)a;
-	lv_image_set_scale_x(slots[CF_BEFORE].image, LV_SCALE_NONE);
+	lv_image_set_scale_x(slots[CF_BEFORE].image, (uint32_t)record_scale);
 	flipping = false;
 	relayout();
 }
@@ -1660,7 +1686,7 @@ static void column_drag_cb(lv_event_t *e) {
 			// The travel that armed the drag is not thrown away, but it must not
 			// jump the column either: the position it started from is moved up to
 			// meet the finger.
-			start_scroll = scroll + (int32_t)(((int64_t)dy << 16) / CF_STEP_PX);
+			start_scroll = scroll + (int32_t)(((int64_t)dy << 16) / record_px(CF_STEP_PX));
 		}
 
 		uint32_t now = lv_tick_get();
@@ -1674,7 +1700,7 @@ static void column_drag_cb(lv_event_t *e) {
 			last_tick = now;
 		}
 
-		scroll_set(start_scroll - (int32_t)(((int64_t)dy << 16) / CF_STEP_PX));
+		scroll_set(start_scroll - (int32_t)(((int64_t)dy << 16) / record_px(CF_STEP_PX)));
 		return;
 	}
 
@@ -1696,7 +1722,7 @@ static void column_drag_cb(lv_event_t *e) {
 		if (lv_tick_elaps(last_tick) > 80) {
 			velocity = 0; // the finger stopped before it lifted
 		}
-		int32_t coast = (int32_t)(((int64_t)velocity * CF_FLING_MS) / CF_STEP_PX);
+		int32_t coast = (int32_t)(((int64_t)velocity * CF_FLING_MS) / record_px(CF_STEP_PX));
 		int32_t limit = CF_FLING_MAX_PLACES * CF_ONE;
 		if (coast > limit) {
 			coast = limit;
@@ -1907,6 +1933,22 @@ static void refresh_theme(void) {
 
 void coverflow_init(gui_config_t *cfg) {
 	sheet_h = cfg->screen_height;
+	record_scale = bp_pick(224, LV_SCALE_NONE);
+	back_card_width = LV_MIN(CF_BACK_W, (int)cfg->screen_width - 2 * bp_pick(12, 24));
+	if (back_card_width < 120) {
+		back_card_width = (int)cfg->screen_width;
+	}
+	back_card_pad = bp_pick(10, CF_BACK_PAD);
+	back_body_width = back_card_width - 2 * back_card_pad;
+	back_card_min_height = bp_pick(112, CF_BACK_H_MIN);
+	back_card_max_height = LV_MAX(back_card_min_height, (int)cfg->screen_height - 24);
+	back_list_max_height = LV_MIN(CF_BACK_LIST_MAX,
+								  back_card_max_height - 2 * back_card_pad - 92);
+	if (back_list_max_height < 64) {
+		back_list_max_height = 64;
+	}
+	back_row_height = bp_pick(38, CF_BACK_ROW_H);
+	back_card_radius = bp_pick(12, CF_BACK_RADIUS);
 
 	sheet = lv_obj_create(lv_layer_top());
 	lv_obj_remove_style_all(sheet);
@@ -1942,7 +1984,7 @@ void coverflow_init(gui_config_t *cfg) {
 	// record on its way past the top edge stops at the grip instead of sliding
 	// over it.
 	int top = cfg->top_bar_height + CF_BAR_TOP + CF_BAR_HIT_H;
-	int bottom = 74; // the album name below the crate
+	int bottom = bp_pick(60, 74); // room for the album name below the crate
 	int height = cfg->screen_height - top - bottom;
 	viewport = lv_obj_create(sheet);
 	lv_obj_remove_style_all(viewport);
@@ -1974,6 +2016,7 @@ void coverflow_init(gui_config_t *cfg) {
 	// The map itself is not made here: it belongs to the sheet being up, and
 	// buffers_alloc() asks for it along with the faces.
 	glow_obj = lv_image_create(viewport);
+	lv_image_set_scale(glow_obj, (uint32_t)record_scale);
 	lv_obj_set_hidden(glow_obj, true);
 
 	for (int i = 0; i < CF_SLOTS; i++) {
@@ -2033,8 +2076,8 @@ void coverflow_init(gui_config_t *cfg) {
 
 	back_card = lv_obj_create(back_veil);
 	lv_obj_add_style(back_card, &theme_style_card, 0);
-	lv_obj_set_size(back_card, CF_BACK_W, CF_BACK_H_MIN);
-	lv_obj_set_style_radius(back_card, CF_BACK_RADIUS, 0);
+	lv_obj_set_size(back_card, back_card_width, back_card_min_height);
+	lv_obj_set_style_radius(back_card, back_card_radius, 0);
 	// theme_style_card sets three colours and nothing else, so what LVGL's own
 	// default put on the object -- a two-pixel border, a five-pixel radius, an
 	// outline on focus -- is still there until it is taken off by hand.
@@ -2056,7 +2099,7 @@ void coverflow_init(gui_config_t *cfg) {
 	// and re-laid out twenty-odd rows underneath.
 	back_body = lv_obj_create(back_card);
 	lv_obj_remove_style_all(back_body);
-	lv_obj_set_width(back_body, CF_BACK_BODY_W);
+	lv_obj_set_width(back_body, back_body_width);
 	lv_obj_set_height(back_body, LV_SIZE_CONTENT);
 	lv_obj_set_flex_flow(back_body, LV_FLEX_FLOW_COLUMN);
 	lv_obj_set_style_pad_row(back_body, 0, 0);
@@ -2088,7 +2131,7 @@ void coverflow_init(gui_config_t *cfg) {
 	lv_obj_set_width(back_list, lv_pct(100));
 	lv_obj_set_height(back_list, LV_SIZE_CONTENT);
 	// Short records make a short card; long ones stop here and scroll.
-	lv_obj_set_style_max_height(back_list, CF_BACK_LIST_MAX, 0);
+	lv_obj_set_style_max_height(back_list, back_list_max_height, 0);
 	lv_obj_set_flex_flow(back_list, LV_FLEX_FLOW_COLUMN);
 	lv_obj_set_style_pad_row(back_list, 0, 0);
 	lv_obj_set_scroll_dir(back_list, LV_DIR_VER);

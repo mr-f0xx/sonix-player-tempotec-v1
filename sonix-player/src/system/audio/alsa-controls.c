@@ -9,15 +9,26 @@
 #include "src/system/device/sysinfo.h"
 
 #include <alsa/asoundlib.h>
+#include <pthread.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
+#include <time.h>
 #include <unistd.h>
 
 static long current_volume;
 static int current_percent = 50;
 static long current_output = -1; // last value written to "Output Port Switch"
+
+// The jack switches can chatter while a plug is being seated. Use the same
+// settled answer for the status icon and the route key, so one noisy sample
+// neither flashes a false headphone glyph nor needlessly reprograms the DAC.
+#define JACK_SETTLE_MS 120
+static pthread_mutex_t jack_state_lock = PTHREAD_MUTEX_INITIALIZER;
+static int jack_state_stable = -1;
+static int jack_state_candidate = -1;
+static uint64_t jack_candidate_since_ms;
 
 // ---------------------------------------------------------------------------
 // Line out
@@ -326,33 +337,27 @@ int alsa_set_control(const char *name, long value) {
 // Returns a valid value for ALSA "Output Port Switch" based on what is plugged
 // in.
 int detect_output(void) {
-	const char *const sysfs_hs_switch = "/sys/class/switch/headset/state";
-	const char *const sysfs_bal_switch = "/sys/class/switch/balance/state";
-
 	// One socket, and route 1 would power the DAC down. Line out on it is the
 	// fixed level alone.
 	if (alsa_board_is_cs43131()) {
 		return 2;
 	}
 
-	bool balanced = file_matches(sysfs_bal_switch, "1");
+	int jack = headphone_jack_state();
 
 	// Line out rides the jack that is plugged in: the balanced hole keeps route
 	// 3 and is told apart by the flag, the 3.5 mm one moves from 2 to 1. With
 	// nothing plugged in the 3.5 mm route is the default here as well.
 	if (lineout_on) {
-		return balanced ? 3 : 1;
+		return jack == JACK_BALANCED ? 3 : 1;
 	}
 
-	if (balanced) {
+	if (jack == JACK_BALANCED) {
 		return 3; // 4.4mm balanced output
 	}
 
-	if (file_matches(sysfs_hs_switch, "1")) {
-		return 2; // 3.5mm headset output
-	}
-
-	return 2; // Default to 3.5mm device
+	// Both the 3.5 mm jack and the idle default use route 2.
+	return 2;
 }
 
 // See alsa-controls.h. Two sockets: {1, 2} single-ended and {3} balanced.
@@ -533,42 +538,101 @@ static long with_dsd_gain(long raw) {
 	return raw;
 }
 
+// A temporary digital mute used around an output-route transition, suspend,
+// or power-off. The HBC3000 machine driver mutes its analogue path while it
+// changes sockets; muting the DAC as well prevents its last live samples from
+// reaching the amplifier as the route or its supply changes.
+static bool suspend_muted;
+static bool poweroff_muted;
+static pthread_mutex_t dac_volume_lock = PTHREAD_MUTEX_INITIALIZER;
+
 // The two channel controls, from the index in force. Its own function because
 // three things reach it: a volume change, a gain change, and entering or
 // leaving DoP -- and that last one runs on the playback thread, which has no
-// business touching the USB device, the software volume or Bluetooth.
+// business touching the USB device, the software volume or Bluetooth. A DoP
+// teardown during a pending suspend/power-off must not undo the mute. Serialize
+// the two mixer writes with the mute, so whichever gets the lock second leaves
+// the hardware in the right state.
 static void write_dac_attenuation(void) {
-	current_volume = with_dsd_gain(percent_to_raw(current_percent));
+	pthread_mutex_lock(&dac_volume_lock);
+	long attenuation = with_dsd_gain(percent_to_raw(current_percent));
+	current_volume = (suspend_muted || poweroff_muted) ? 255 : attenuation;
 	alsa_set_control("Right Playback Volume", current_volume);
 	alsa_set_control("Left Playback Volume", current_volume);
+	pthread_mutex_unlock(&dac_volume_lock);
 }
 
-// The DAC silent through a suspend: see alsa_suspend_mute() in the header.
-static bool suspend_muted;
-
 void alsa_suspend_mute(void) {
-	if (alsa_board_is_cs43131() || suspend_muted) {
+	if (alsa_board_is_cs43131()) {
 		return;
 	}
+	pthread_mutex_lock(&dac_volume_lock);
+	if (suspend_muted || poweroff_muted) {
+		pthread_mutex_unlock(&dac_volume_lock);
+		return;
+	}
+	// Publish the mute before the mixer round trips: a playback-thread DoP
+	// cleanup running at the same time must see this and stay at 255.
+	suspend_muted = true;
 #ifndef HOST_BUILD
 	alsa_set_control("Right Playback Volume", 255);
 	alsa_set_control("Left Playback Volume", 255);
-	usleep(30 * 1000); // the codec's own volume ramp
 #endif
-	suspend_muted = true;
-	fprintf(stderr, "alsa: DAC muted for suspend\n");
+	pthread_mutex_unlock(&dac_volume_lock);
+#ifndef HOST_BUILD
+	usleep(30 * 1000); // let the codec's own volume ramp reach silence
+#endif
+	fprintf(stderr, "alsa: DAC temporarily muted\n");
+}
+
+// A distinct sticky mute for a terminal power transition. Ordinary route
+// changes are allowed to restore their short-lived mute; no route callback is
+// allowed to unmute once shutdown has started.
+void alsa_poweroff_mute(void) {
+	if (alsa_board_is_cs43131()) {
+		return;
+	}
+	pthread_mutex_lock(&dac_volume_lock);
+	if (poweroff_muted) {
+		pthread_mutex_unlock(&dac_volume_lock);
+		return;
+	}
+	poweroff_muted = true;
+#ifndef HOST_BUILD
+	alsa_set_control("Right Playback Volume", 255);
+	alsa_set_control("Left Playback Volume", 255);
+#endif
+	pthread_mutex_unlock(&dac_volume_lock);
+#ifndef HOST_BUILD
+	usleep(30 * 1000);
+#endif
+	fprintf(stderr, "alsa: DAC muted for power-off\n");
 }
 
 void alsa_suspend_restore(void) {
+	pthread_mutex_lock(&dac_volume_lock);
 	if (!suspend_muted) {
+		pthread_mutex_unlock(&dac_volume_lock);
 		return;
 	}
 	suspend_muted = false;
+	bool keep_silent = poweroff_muted;
+	pthread_mutex_unlock(&dac_volume_lock);
+	if (keep_silent) {
+		fprintf(stderr, "alsa: route mute ended; DAC remains muted for power-off\n");
+		return;
+	}
 #ifndef HOST_BUILD
-	write_dac_attenuation();
+	// Line out is a fixed level; restoring the ordinary user index here would
+	// briefly hand that level to an amplifier after a route transition.
+	if (lineout_on) {
+		apply_volume_hw(LINEOUT_VOLUME_INDEX);
+	} else {
+		write_dac_attenuation();
+	}
 	usleep(30 * 1000);
 #endif
-	fprintf(stderr, "alsa: DAC level restored after suspend\n");
+	fprintf(stderr, "alsa: DAC level restored\n");
 }
 
 int alsa_dsd_gain_index(void) { return dsd_gain_index; }
@@ -708,6 +772,9 @@ static int write_output_route(int route) {
 // streaming stalls the audio DMA on this hardware, freezing the old stream for
 // seconds and ending it in "write error: Input/output error". The
 // current_output cache is what keeps the route from being touched mid-track.
+// The playback paths close the PCM before calling this. A short DAC mute around
+// the machine driver's own route transition also suppresses the transient that
+// can otherwise reach the headphones while the HBC3000 changes sockets.
 void auto_set_output(void) {
 	// The CS43131 board: one route, no line-out flag, no transition to force.
 	if (alsa_board_is_cs43131()) {
@@ -723,42 +790,49 @@ void auto_set_output(void) {
 	// the flag have to be decided from the same picture of the world.
 	int output = detect_output();
 	int flag = (lineout_on && output == 3) ? 1 : 0;
-	bool flag_changed = flag != current_balance_lineout;
+	bool flag_pending = flag != current_balance_lineout;
+	bool route_pending = output != current_output;
+	if (!flag_pending && !route_pending) {
+		return;
+	}
+
+	alsa_suspend_mute();
 
 	// The flag first and always, because the driver reads it while applying the
 	// route: on the balanced jack the pair is what decides headphone or line
 	// out. Written even for the 3.5 mm route, so that coming back to the
 	// balanced hole cannot find a stale 1 still set.
-	if (flag_changed) {
-		if (alsa_set_control("Balance Lineout En", flag) < 0) {
-			// The cache must never claim a write that did not happen: the next
-			// call would skip it and the driver would read the old flag while
-			// applying the route.
-			flag_changed = false;
-		} else {
+	bool flag_written = false;
+	if (flag_pending) {
+		if (alsa_set_control("Balance Lineout En", flag) >= 0) {
 			current_balance_lineout = flag;
+			flag_written = true;
 		}
 	}
 
-	if (output == current_output && !flag_changed) {
-		return;
-	}
-
-	if (output == current_output) {
-		// Same route, different flag: this write looks redundant and is not.
-		// It is what makes the driver run its HBC3000 reconfiguration for the
-		// new flag -- that step happens before the "same route, nothing to do"
-		// shortcut -- so it must not be optimised away.
-		alsa_set_control("Output Port Switch", output);
-		printf("set output to %d (balanced line out %d)\n", output, flag);
+	if (!route_pending) {
+		if (flag_written) {
+			// Same route, different flag: this write looks redundant and is not.
+			// It is what makes the driver run its HBC3000 reconfiguration for the
+			// new flag -- that step happens before the "same route, nothing to do"
+			// shortcut -- so it must not be optimised away.
+			if (alsa_set_control("Output Port Switch", output) < 0) {
+				current_balance_lineout = -1; // retry the pair next time
+			}
+			printf("set output to %d (balanced line out %d)\n", output, flag);
+		}
+		alsa_suspend_restore();
 		return;
 	}
 
 	if (write_output_route(output) >= 0) {
 		current_output = output;
+	} else if (flag_written) {
+		current_balance_lineout = -1; // a later call must retry both controls
 	}
 
 	printf("set output to %d\n", output);
+	alsa_suspend_restore();
 }
 
 // Realigns the route cache after something else wrote "Output Port Switch"
@@ -1184,9 +1258,10 @@ void set_high_gain(int enabled) {
 int get_high_gain(void) { return high_gain; }
 
 
-// Which jack is occupied right now: reads the same switch nodes the output
-// route detection uses. Balanced wins when both report plugged.
-int headphone_jack_state(void) {
+// One raw sample from the kernel switch nodes. Balanced wins when both report
+// plugged. Keep this separate from the public answer so a transient read while
+// the plug contacts are moving cannot change the route or flash the icon.
+static int headphone_jack_state_raw(void) {
 	if (file_matches("/sys/class/switch/balance/state", "1")) {
 		return JACK_BALANCED;
 	}
@@ -1194,6 +1269,40 @@ int headphone_jack_state(void) {
 		return JACK_HEADSET;
 	}
 	return JACK_NONE;
+}
+
+// Which jack is occupied right now: the same switch nodes output routing uses,
+// accepted only after the reading has held steady for JACK_SETTLE_MS. The
+// first read is used immediately so a plug already present at boot is shown
+// without an artificial delay.
+int headphone_jack_state(void) {
+	int raw = headphone_jack_state_raw();
+	struct timespec now;
+	bool have_time = clock_gettime(CLOCK_MONOTONIC, &now) == 0;
+	uint64_t now_ms = have_time ? (uint64_t)now.tv_sec * 1000u + (uint64_t)now.tv_nsec / 1000000u : 0;
+
+	pthread_mutex_lock(&jack_state_lock);
+	if (!have_time) {
+		// If the monotonic clock is unavailable, keep the hardware reading
+		// authoritative rather than leaving a change pending forever.
+		jack_state_stable = raw;
+		jack_state_candidate = raw;
+	} else if (jack_state_stable < 0) {
+		jack_state_stable = raw;
+		jack_state_candidate = raw;
+		jack_candidate_since_ms = now_ms;
+	} else if (raw == jack_state_stable) {
+		jack_state_candidate = raw;
+		jack_candidate_since_ms = now_ms;
+	} else if (raw != jack_state_candidate) {
+		jack_state_candidate = raw;
+		jack_candidate_since_ms = now_ms;
+	} else if (now_ms >= jack_candidate_since_ms && now_ms - jack_candidate_since_ms >= JACK_SETTLE_MS) {
+		jack_state_stable = jack_state_candidate;
+	}
+	int settled = jack_state_stable;
+	pthread_mutex_unlock(&jack_state_lock);
+	return settled < 0 ? JACK_NONE : settled;
 }
 
 // Raw attenuation delta, clamped to the 0-255 register range.

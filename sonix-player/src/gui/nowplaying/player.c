@@ -159,10 +159,12 @@ static int polls_since_stop = POLLS_FAST_AFTER_STOP;
 // what its wider gaps take.
 #define STUDIO_CONTROLS_H 172
 
-// Album art: an image on top of a placeholder panel. The panel is always
-// there, so the layout doesn't jump between a track that has a cover and one
-// that doesn't -- the image is simply hidden in the latter case.
+// Album art: a rounded, clipped sleeve centred in the cover panel, with the
+// source marks and alternative-layout pills travelling with it. The panel is
+// always there, so the layout doesn't jump between a track that has a cover
+// and one that doesn't -- only the image is hidden in the latter case.
 static lv_obj_t *cover_panel;
+static lv_obj_t *cover_art_group;
 static lv_obj_t *cover_img;
 static lv_obj_t *cover_placeholder_icon;
 
@@ -211,7 +213,8 @@ static bool audiobook_mode_valid;   // false until the first apply, so it paints
 
 static cover_image_t current_cover;	   // pixels currently referenced by cover_img
 static cover_image_t current_backdrop; // upside-down blurred copy behind the controls
-static int cover_box_w, cover_box_h;   // the artwork spans the full screen width
+static int cover_box_w, cover_box_h;   // the full panel that owns lyrics and gestures
+static int cover_art_w, cover_art_h;   // the visible sleeve, inset on compact panels
 
 // ---------------------------------------------------------------------------
 // The two arrangements
@@ -254,6 +257,10 @@ static int cover_box_w, cover_box_h;   // the artwork spans the full screen widt
 #define ALT_FAV_SIZE 64
 #define ALT_PILL_PAD_H 18 // what a pill keeps to the left and right of its text
 #define ALT_PILL_PAD_V 8
+static int alt_pad = ALT_PAD;
+static int alt_fav_size = ALT_FAV_SIZE;
+static int alt_pill_pad_h = ALT_PILL_PAD_H;
+static int alt_pill_pad_v = ALT_PILL_PAD_V;
 
 // What the sleeve's colour becomes once it has to be painted rather than
 // thrown.
@@ -1689,16 +1696,18 @@ static void lyrics_progress_apply(int32_t progress) {
 		lyrics_shift(studio_quality, away);
 		return;
 	}
-	lyrics_shift(cover_img, away);
+	// The clipped group carries the sleeve, source badges, and alternative
+	// layout overlays together; the no-art placeholder remains a separate
+	// sibling at the same centre point.
+	lyrics_shift(cover_art_group, away);
 	lyrics_shift(cover_placeholder_icon, away);
 	if (!layout_alt_now) {
 		return; // the names stay in their row below the sleeve
 	}
 
 	// With the shape of the track the names are pills on the sleeve, so they
-	// go with it, and come up at the top once the words are in.
-	lyrics_shift(alt_text_col, away);
-	lyrics_shift(alt_fav_circle, away);
+	// travel with the artwork group and the star comes up into the head once
+	// the words are all the way in.
 	bool full = progress == LYRICS_FULL;
 	lyrics_star_to_head(full);
 	if (full) {
@@ -2352,8 +2361,8 @@ static void studio_take_back(void) {
 			lv_obj_set_style_pad_ver(player_menu, menu_pad_ver, 0);
 			lv_obj_set_style_pad_gap(player_menu, menu_gap, 0);
 		}
-		// The picture at full width comes back, and the note with it when there
-		// is no picture. studio_up is already down, so cover_show() agrees.
+		// The standard-size picture comes back, and the note with it when
+		// there is no picture. studio_up is already down, so cover_show() agrees.
 		cover_show(current_cover.pixels != NULL);
 		if (format_label && song_side_obj) {
 			lv_obj_set_parent(format_label, song_side_obj);
@@ -2364,7 +2373,7 @@ static void studio_take_back(void) {
 		lv_obj_t *const marks[] = {live_badge, qobuz_badge, tidal_badge, podcast_badge};
 		for (size_t i = 0; i < sizeof(marks) / sizeof(marks[0]); i++) {
 			if (marks[i]) {
-				lv_obj_set_parent(marks[i], cover_panel);
+				lv_obj_set_parent(marks[i], cover_art_group);
 				lv_obj_align(marks[i], LV_ALIGN_TOP_RIGHT, -BADGE_INSET, BADGE_INSET);
 			}
 		}
@@ -2486,7 +2495,10 @@ static void apply_layout(void) {
 		// nothing at all. Here they size themselves -- so each pill ends where
 		// its own text ends -- up to what is left of the sleeve once the star's
 		// disc and the margins are taken off.
-		int room = cover_box_w - 2 * ALT_PAD - ALT_FAV_SIZE - 2 * ALT_PILL_PAD_H - 24;
+		int room = cover_art_w - 2 * alt_pad - alt_fav_size - 2 * alt_pill_pad_h - 24;
+		if (room < 40) {
+			room = 40;
+		}
 		if (song_title_label) {
 			lv_obj_set_parent(song_title_label, alt_title_pill);
 			lv_obj_set_width(song_title_label, LV_SIZE_CONTENT);
@@ -2827,8 +2839,8 @@ static void reload_cover(const char *filepath) {
 		// Studio the picture is decoded at the width of the screen and shown
 		// at two thirds of it, and that resampling is the interface's core
 		// being spent again and again on an answer that never changes.
-		int cover_w = backdrop_is_studio ? studio_cover_geometry(NULL) : cover_box_w;
-		int cover_h = backdrop_is_studio ? cover_w : cover_box_h;
+		int cover_w = backdrop_is_studio ? studio_cover_geometry(NULL) : cover_art_w;
+		int cover_h = backdrop_is_studio ? cover_w : cover_art_h;
 		coverloader_request_player(filepath, cover_w, cover_h, backdrop_w,
 								   backdrop_is_studio ? backdrop_studio_h : backdrop_h);
 		cover_request_outstanding = true;
@@ -4519,11 +4531,10 @@ void player_init(gui_config_t *cfg) {
 	lv_obj_set_hidden(player_screen, true);
 
 
-	// Geometry first, because everything else hangs off it. On the V1 the
-	// controls need some of the square sleeve's height, but never its width:
-	// keeping the old square width equal to the shortened height produced black
-	// bars down both sides. Decode/crop a full-width 240 x cover-height image
-	// instead, flush to every edge.
+	// Geometry first, because everything else hangs off it. The V1 gets a
+	// shorter cover panel and a centred square sleeve, leaving more room below
+	// for the title, seek bar and transport. That also lifts the playback row
+	// instead of squeezing it against the bottom bezel.
 	const bool compact = bp_is_tempotec_v1();
 	compact_progress_width = compact
 						 ? (int)cfg->screen_width - 2 * (cfg->padding + COMPACT_PROGRESS_EXTRA_INSET)
@@ -4533,7 +4544,7 @@ void player_init(gui_config_t *cfg) {
 	}
 	int cover_height = (int)cfg->screen_width;
 	int menu_height = (int)cfg->screen_height - cover_height;
-	int min_menu_h = compact ? 128 : PLAYER_MENU_MIN_HEIGHT;
+	int min_menu_h = compact ? 152 : PLAYER_MENU_MIN_HEIGHT;
 	if (menu_height < min_menu_h) {
 		menu_height = min_menu_h;
 		cover_height = (int)cfg->screen_height - menu_height;
@@ -4544,6 +4555,20 @@ void player_init(gui_config_t *cfg) {
 
 	cover_box_w = (int)cfg->screen_width;
 	cover_box_h = cover_height;
+	cover_art_w = cover_box_w;
+	cover_art_h = cover_box_h;
+	alt_pad = compact ? 8 : ALT_PAD;
+	alt_fav_size = compact ? 44 : ALT_FAV_SIZE;
+	alt_pill_pad_h = compact ? 10 : ALT_PILL_PAD_H;
+	alt_pill_pad_v = compact ? 5 : ALT_PILL_PAD_V;
+	if (compact) {
+		int side = LV_MIN(cover_box_w - 64, cover_box_h - 12);
+		if (side < 64) {
+			side = LV_MIN(cover_box_w, cover_box_h);
+		}
+		cover_art_w = side;
+		cover_art_h = side;
+	}
 	backdrop_w = (int)cfg->screen_width;
 	backdrop_h = menu_height;
 	backdrop_studio_h = (int)cfg->screen_height;
@@ -4778,8 +4803,9 @@ void player_init(gui_config_t *cfg) {
 	lv_obj_set_flex_flow(player_controls_buttons, LV_FLEX_FLOW_ROW);
 	lv_obj_set_flex_align(player_controls_buttons, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 	// Lift the transport from the bottom bezel on both layouts. The compact
-	// page gets a gentler lift because its controls block is only 128 px tall.
-	lv_obj_set_style_translate_y(player_controls_buttons, compact ? -4 : -8, 0);
+	// cover now gives the controls more room, so the row can sit visibly higher
+	// without crowding the progress labels above it.
+	lv_obj_set_style_translate_y(player_controls_buttons, compact ? -10 : -8, 0);
 
 	// The repeat/shuffle button, kept out of the flex row so the transport
 	// stays centred on the screen.
@@ -4881,10 +4907,10 @@ void player_init(gui_config_t *cfg) {
 	lv_obj_add_event_cb(next_btn, next_btn_event_cb, LV_EVENT_CLICKED, NULL);
 	lv_obj_set_style_opa(next_btn, LV_OPA_40, LV_STATE_DISABLED);
 
-	// Album art: a square as wide as the screen, flush against the top edge
-	// (this page hides the status bar, see switch_screen). The picture is
-	// centre-cropped to fill it rather than letterboxed. Sizes were worked out
-	// at the top of this function, before the controls were laid out.
+	// Album art panel, flush against the top edge (this page hides the status
+	// bar, see switch_screen). On the V1 the square sleeve is smaller and
+	// centred inside this wider panel; the other players keep their original
+	// full-width sleeve. Sizes were worked out before laying out the controls.
 	cover_panel = lv_obj_create(player_screen);
 	// Dragging the artwork to the right pushes the player back off screen.
 	player_sheet_attach_drag(cover_panel, false);
@@ -4900,12 +4926,27 @@ void player_init(gui_config_t *cfg) {
 	lv_obj_set_style_pad_all(cover_panel, 0, 0);
 	lv_obj_set_scrollable(cover_panel, false);
 
+	// A transparent frame exactly the size of the sleeve. Its rounded clip
+	// keeps both the artwork and its overlays inside the same soft corners; the
+	// full panel remains the hit target for swipes and the lyrics gesture.
+	cover_art_group = lv_obj_create(cover_panel);
+	lv_obj_remove_style_all(cover_art_group);
+	lv_obj_set_size(cover_art_group, cover_art_w, cover_art_h);
+	lv_obj_center(cover_art_group);
+	lv_obj_set_style_bg_opa(cover_art_group, LV_OPA_TRANSP, 0);
+	lv_obj_set_style_border_width(cover_art_group, 0, 0);
+	lv_obj_set_style_pad_all(cover_art_group, 0, 0);
+	lv_obj_set_style_radius(cover_art_group, compact ? 14 : 18, 0);
+	lv_obj_set_style_clip_corner(cover_art_group, true, 0);
+	lv_obj_set_scrollable(cover_art_group, false);
+	lv_obj_set_clickable(cover_art_group, false);
+
 	// The live badge, top right over the artwork: the one thing that has to be
 	// legible at a glance is that this is not a file being played but a
 	// broadcast going past. Red because that is what a live indicator is, and
 	// deliberately not the accent colour -- it says something about the
 	// stream, not about the theme.
-	live_badge = lv_label_create(cover_panel);
+	live_badge = lv_label_create(cover_art_group);
 	lv_label_set_text(live_badge, tr("player_live"));
 	lv_obj_set_style_text_font(live_badge, &font_ui_18, 0);
 	lv_obj_set_style_text_color(live_badge, lv_color_white(), 0);
@@ -4921,20 +4962,20 @@ void player_init(gui_config_t *cfg) {
 	// what is playing comes from. It is the white-outlined image, legible even
 	// over a black cover, and is not recoloured (theme_style_icon would turn
 	// it into a solid square).
-	qobuz_badge = lv_image_create(cover_panel);
+	qobuz_badge = lv_image_create(cover_art_group);
 	lv_image_set_src(qobuz_badge, &icon_qobuz_badge);
 	lv_obj_align(qobuz_badge, LV_ALIGN_TOP_RIGHT, -BADGE_INSET, BADGE_INSET);
 	lv_obj_set_hidden(qobuz_badge, true);
 
 	// Same corner, same size: the marks replace each other instead of sitting
 	// side by side, and update_qobuz_badge() decides which.
-	tidal_badge = lv_image_create(cover_panel);
+	tidal_badge = lv_image_create(cover_art_group);
 	lv_image_set_src(tidal_badge, &icon_tidal_badge);
 	lv_obj_align(tidal_badge, LV_ALIGN_TOP_RIGHT, -BADGE_INSET, BADGE_INSET);
 	lv_obj_set_hidden(tidal_badge, true);
 
 	// And the third, same corner and same size as the other two.
-	podcast_badge = lv_image_create(cover_panel);
+	podcast_badge = lv_image_create(cover_art_group);
 	lv_image_set_src(podcast_badge, &icon_podcast_badge);
 	lv_obj_align(podcast_badge, LV_ALIGN_TOP_RIGHT, -BADGE_INSET, BADGE_INSET);
 	lv_obj_set_hidden(podcast_badge, true);
@@ -4951,13 +4992,13 @@ void player_init(gui_config_t *cfg) {
 	// one bottom corner of the sleeve and a disc in the other. Built empty and
 	// hidden; apply_layout() moves the real labels into them.
 	//
-	// Children of cover_panel so they sit on the sleeve and travel with it.
-	// The column is what keeps the two pills stacked and both left-aligned
+	// Children of the clipped artwork frame so they sit on the sleeve and
+	// travel with it. The column keeps the two pills stacked and left-aligned
 	// while each is only as wide as its own words.
-	alt_text_col = lv_obj_create(cover_panel);
+	alt_text_col = lv_obj_create(cover_art_group);
 	lv_obj_remove_style_all(alt_text_col);
 	lv_obj_set_size(alt_text_col, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
-	lv_obj_align(alt_text_col, LV_ALIGN_BOTTOM_LEFT, ALT_PAD, -ALT_PAD);
+	lv_obj_align(alt_text_col, LV_ALIGN_BOTTOM_LEFT, alt_pad, -alt_pad);
 	lv_obj_set_flex_flow(alt_text_col, LV_FLEX_FLOW_COLUMN);
 	lv_obj_set_flex_align(alt_text_col, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
 	lv_obj_set_style_pad_row(alt_text_col, 6, 0);
@@ -4975,8 +5016,8 @@ void player_init(gui_config_t *cfg) {
 		lv_obj_remove_style_all(pill);
 		lv_obj_set_style_radius(pill, LV_RADIUS_CIRCLE, 0);
 		lv_obj_set_style_bg_opa(pill, LV_OPA_COVER, 0);
-		lv_obj_set_style_pad_hor(pill, ALT_PILL_PAD_H, 0);
-		lv_obj_set_style_pad_ver(pill, ALT_PILL_PAD_V, 0);
+		lv_obj_set_style_pad_hor(pill, alt_pill_pad_h, 0);
+		lv_obj_set_style_pad_ver(pill, alt_pill_pad_v, 0);
 		lv_obj_set_size(pill, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
 		// No shadow. There was one, to keep a pill from disappearing into a
 		// patch of sleeve the same colour as itself -- but that was when the
@@ -4992,19 +5033,21 @@ void player_init(gui_config_t *cfg) {
 		}
 	}
 
-	alt_fav_circle = lv_obj_create(cover_panel);
+	alt_fav_circle = lv_obj_create(cover_art_group);
 	lv_obj_remove_style_all(alt_fav_circle);
-	lv_obj_set_size(alt_fav_circle, ALT_FAV_SIZE, ALT_FAV_SIZE);
+	lv_obj_set_size(alt_fav_circle, alt_fav_size, alt_fav_size);
 	lv_obj_set_style_radius(alt_fav_circle, LV_RADIUS_CIRCLE, 0);
 	lv_obj_set_style_bg_opa(alt_fav_circle, LV_OPA_COVER, 0);
-	lv_obj_align(alt_fav_circle, LV_ALIGN_BOTTOM_RIGHT, -ALT_PAD, -ALT_PAD);
+	lv_obj_align(alt_fav_circle, LV_ALIGN_BOTTOM_RIGHT, -alt_pad, -alt_pad);
 	lv_obj_set_scrollable(alt_fav_circle, false);
 	// Likewise: the star's own button is a child of this and takes its own
 	// presses, so the disc around it has no reason to take any.
 	lv_obj_set_clickable(alt_fav_circle, false);
 	lv_obj_set_hidden(alt_fav_circle, true);
 
-	cover_img = lv_image_create(cover_panel);
+	cover_img = lv_image_create(cover_art_group);
+	lv_obj_set_style_radius(cover_img, compact ? 14 : 18, 0);
+	lv_obj_set_style_clip_corner(cover_img, true, 0);
 	lv_obj_center(cover_img);
 	lv_obj_set_hidden(cover_img, true);
 
@@ -5073,6 +5116,8 @@ void player_init(gui_config_t *cfg) {
 	studio_cover = lv_image_create(studio_box);
 	lv_obj_set_ignore_layout(studio_cover, true);
 	lv_image_set_inner_align(studio_cover, LV_IMAGE_ALIGN_STRETCH);
+	lv_obj_set_style_radius(studio_cover, compact ? 14 : 18, 0);
+	lv_obj_set_style_clip_corner(studio_cover, true, 0);
 	lv_obj_set_clickable(studio_cover, false);
 
 	// What stands in the sleeve's place when the track has no artwork: the same

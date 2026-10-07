@@ -10,6 +10,8 @@
 void powermenu_init(gui_config_t *cfg);
 
 void powermenu_show(void);
+// Reapply action labels after a runtime language change.
+void powermenu_refresh_labels(void);
 bool powermenu_is_open(void);
 
 // Safe to call from the input thread: the panel is raised on the UI thread via
