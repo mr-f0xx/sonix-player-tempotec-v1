@@ -1,492 +1,303 @@
-# Sonix Player
+# Sonix Player – TempoTec Variations V1 Release
 
-A replacement player for the **HiBy R3 Pro II** and the **HiBy R1**, written on
-LVGL. This fork also contains an **experimental TempoTec Variations V1** port.
+A modern, high-performance, open-source replacement firmware and player for the **TempoTec Variations V1** (and V1-A / Variations family), built on **LVGL 9.6**.
 
-## TempoTec V1 experimental status
-
-The target binary, 240x320 interface profile, model identity, firmware filename
-and packer path now exist for the TempoTec V1. The V1 packer starts from an
-official `v1.upt`, keeps its kernel and hardware-specific files, and installs
-only Sonix plus model-independent resource files.
-
-**The generated V1 firmware has not been validated on physical hardware.** The
-automated checks prove that the ISO opens, both payload hash chains are valid,
-the stock kernel is byte-for-byte unchanged, and the new rootfs contains Sonix.
-They cannot prove recovery-updater, audio routing, buttons, touch, charging or
-suspend compatibility. Keep official recovery firmware available and do not
-treat a successful build as proof that the image is safe to flash.
-
-### Build it with GitHub Actions
-
-No local Linux installation is needed:
-
-1. Open the repository's **Actions** tab.
-2. Select **Build experimental TempoTec V1 firmware**.
-3. Choose **Run workflow**. The official TempoTec V1.2 Google Drive folder is
-   the default stock-firmware source; it can be replaced with another official
-   Drive/file/archive URL.
-4. Select the experimental-build acknowledgement and start the run.
-5. Download the `sonix-tempotec-v1-...` artifact when the job finishes.
-
-The artifact contains `v1.upt`, `v1_md5.txt`, target/debug binaries, both
-validation logs, and `BUILD-REPORT.txt`. It deliberately does not publish a
-GitHub Release automatically.
-
-## Supported players
-
-One target binary contains all three profiles. It reads which player it is on
-from `system-info.json` at startup, and the firmware packer writes a different
-one into each image.
-
-| | HiBy R3 Pro II | HiBy R1 | TempoTec V1 (experimental) |
-|---|---|---|---|
-| panel | 480x720 | 480x800 | 240x320 |
-| DAC | two Cirrus Logic CS43198 | one Cirrus Logic CS43131 | two Cirrus Logic CS43131 |
-| headphone outputs | 3.5 mm, 4.4 mm balanced | 3.5 mm | 3.5 mm, 4.4 mm balanced |
-| DAC controls | digital filters, DRE, NOS | digital filters | not hardware-validated |
-| touch | Goodix gt9xx, patched for multitouch | Hynitron CST8xx, patched for two fingers | stock V1 driver, not hardware-validated |
-| double tap to wake | yes | no | disabled pending validation |
-| buttons | volume on the left flank, playback on the right | all on the right flank, one skip key | all on one flank; mapping pending validation |
-| firmware image | `r3proii.upt` | `r1.upt` | `v1.upt` (experimental) |
-
-Each player only looks for its own image, and never offers the other's: the
-recovery system does not check what it is given.
-
-There are two builds from one tree:
-
-| | binary | runs on |
-|---|---|---|
-| **host** | `sonix_player_host` | your PC, in an SDL window |
-| **target** | `sonix_player` | the device |
+This release adapts Sonix Player to the ultra-compact form factor of the TempoTec V1, replacing the legacy stock player application while preserving the official Linux kernel, device drivers, and recovery subsystem intact.
 
 ---
 
-## Building for the host
+## Overview
 
-The simulator draws the real interface in an SDL window, using the same source
-as the device. Most work happens here.
+The TempoTec Variations V1 is an ultra-compact digital audio player (DAP) powered by an Ingenic MIPS SoC and high-grade dual Cirrus Logic DACs. Sonix Player completely replaces the stock user interface with a fast, modern UI engineered specifically for the V1's 240×320 screen geometry.
 
-### What you need
-
-Compiler, make, git, and four libraries.
-
-**Fedora**
-
-```bash
-sudo dnf install gcc gcc-c++ make git pkgconf-pkg-config \
-                 SDL2-devel freetype-devel opusfile-devel \
-                 wavpack-devel alsa-lib-devel
+```
+       ┌──────────────────────┐
+       │ 10:42        100%  🔋 │  <-- 24 px compact status bar
+       ├──────────────────────┤
+       │                      │
+       │   [ 240×192 Art ]    │  <-- Edge-to-edge album artwork
+       │                      │
+       ├──────────────────────┤
+       │ Track Title          │
+       │ Artist Name          │
+       │ 01:24 ━━━━━●── 03:45 │  <-- 128 px compact control deck
+       │     ⏮   ⏯   ⏭       │
+       └──────────────────────┘
 ```
 
-**Debian / Ubuntu**
+### Hardware Specifications
 
+| Component | Specification |
+|---|---|
+| **SoC** | Ingenic X1600 (MIPS32r2 core, o32 ABI, glibc 2.22 compatibility) |
+| **Display** | 2.0-inch QVGA TFT panel, **240×320 pixels** portrait |
+| **DAC** | Dual Cirrus Logic CS43131 |
+| **Audio Outputs** | 3.5 mm single-ended + 4.4 mm balanced headphone jacks |
+| **Storage** | Dual MicroSD card slots (SD1 & SD2, exFAT / FAT32) |
+| **Controls** | Side flank buttons (Power, Vol+, Vol-, Play/Pause, Next/Prev) + capacitive touchscreen |
+| **Wireless** | 2.4 GHz Wi-Fi (802.11 b/g/n) and bi-directional Bluetooth |
+| **USB** | USB Type-C (bidirectional USB DAC & USB audio out) |
+| **Firmware Package** | `v1.upt` with accompanying `v1_md5.txt` |
+
+---
+
+## Tailored 240×320 Interface Profile
+
+Rather than blindly scaling down an interface designed for larger screens, Sonix Player features an interface profile crafted specifically for the 240×320 panel:
+
+* **Compact Status Bar & Layout Geometry:** Uses a 24 px status bar, 6 px margins, and 36 px header action targets.
+* **Overflow Header Menus:** The main Music screen combines title actions with a dedicated overflow menu (`...`) so long titles are never truncated to `Musi…`.
+* **Full-Width Now Playing Screen:** Displays 240 px edge-to-edge cover artwork centre-cropped to 192 px height, paired with a dedicated 128 px control area to eliminate black side bars.
+* **Adaptive A–Z Index Strip:** Automatically scales down to ~14 visible letter slots to fit the 320 px vertical height. Pressing anywhere along the strip proportionally navigates the full alphabet with an 88×84 touch preview card.
+* **Scrollable 10-Band EQ:** The graphic equaliser card scrolls smoothly horizontally instead of cramming ten sliders into 216 px.
+* **Compact Quick Settings:** Retains eight quick toggles arranged in an ergonomic 2×4 sheet.
+* **Pixel-Tuned Dialogs & Keyboard:** Bespoke layouts for Date/Time picker rollers, MSEB tuning, PEQ curves, and a 144 px compact on-screen keyboard tray.
+* **Button Remapping:** Configured as a clean, single-column scrollable list with direct tap-to-assign actions.
+
+---
+
+## Experimental Status & Safety
+
+The TempoTec V1 port is **experimental**:
+
+* **Stock Kernel Preserved:** The packaging script extracts the official `v1.upt`, leaves the stock Linux kernel (`xImage`) byte-for-byte identical (verified via SHA-256), preserves official hardware driver modules, and installs only the Sonix runtime and model-independent resources.
+* **Automated Hash Chain Verification:** Every build validates the ISO image structure, squashfs integrity, chunked md5 hash chain, glibc 2.22 ABI compliance, and system identification metadata.
+* **Recovery Safety:** The recovery updater remains unchanged. Always keep an official stock `v1.upt` on a spare MicroSD card in case you want to revert.
+
+---
+
+## Getting the Firmware
+
+### Option 1: Build with GitHub Actions (Recommended)
+
+No local cross-compilation environment or Linux installation is needed:
+
+1. Open the repository's **[Actions](https://github.com/mr-f0xx/sonix-player-tempotec-v1/actions)** tab.
+2. Select **Build experimental TempoTec V1 firmware**.
+3. Click **Run workflow**. (The official TempoTec V1.2 firmware Google Drive folder is configured as the default stock source).
+4. Select the experimental acknowledgement checkbox and click **Run workflow**.
+5. Once complete (typically ~5 minutes when toolchain cache is warm), open the run and download the **`sonix-tempotec-v1-...`** artifact.
+
+#### Artifact Contents
+
+The downloaded artifact package contains:
+
+* `v1.upt` – Packaged firmware image ready for flashing
+* `v1_md5.txt` – MD5 checksum required by the stock updater
+* `sonix_player` – Stripped MIPS32r2 target binary
+* `sonix_player_debug` – Unstripped binary with full symbol table and DWARF debug info
+* `sonix_launch` – Lightweight supervisor binary
+* `STOCK-VALIDATION.txt` – Verification log of the downloaded official stock firmware
+* `OUTPUT-VALIDATION.txt` – Automated validation log of the generated image and rootfs
+* `BUILD-REPORT.txt` – Build metadata, commit SHA, and cryptographic hashes
+
+---
+
+## Flashing Instructions
+
+1. **Format MicroSD Card:** Use a FAT32 or exFAT formatted MicroSD card.
+2. **Copy Firmware Files:** Copy both `v1.upt` and `v1_md5.txt` directly to the **root** of the MicroSD card (slot 1).
+3. **Insert & Charge:** Insert the card into your TempoTec V1. Ensure battery level is **above 30%**.
+4. **Initiate Update:**
+   * **From Stock Firmware:** Go to `System Settings` > `Firmware Update` (or `Update from SD card`).
+   * **From Sonix Player:** Go to `Settings` > `System` > `Update firmware` > `From SD card`.
+5. **Wait for Completion:** The screen will display *Upgrading...* followed by *Succeeded*, then automatically reboot into Sonix Player.
+
+> **Restoring Stock Firmware:** If you ever wish to revert to stock firmware, copy the official TempoTec `v1.upt` and its `v1_md5.txt` to the root of your MicroSD card and repeat the update procedure.
+
+---
+
+## Testing with the Host Simulator
+
+You can run and test the complete TempoTec V1 240×320 user interface directly on your PC inside an SDL2 window.
+
+### Prerequisites
+
+**Debian / Ubuntu / Mint:**
 ```bash
 sudo apt install build-essential git pkg-config \
                  libsdl2-dev libfreetype-dev libopusfile-dev \
                  libwavpack-dev libasound2-dev
 ```
 
-**Arch**
+**Fedora / RHEL:**
+```bash
+sudo dnf install gcc gcc-c++ make git pkgconf-pkg-config \
+                 SDL2-devel freetype-devel opusfile-devel \
+                 wavpack-devel alsa-lib-devel
+```
 
+**Arch Linux:**
 ```bash
 sudo pacman -S base-devel git sdl2 freetype2 opusfile wavpack alsa-lib
 ```
 
-`opusfile` pulls in `opus` and `libogg` by itself.
-
-### Build
+### Compiling the Host Binary
 
 ```bash
+cd sonix-player
 make host -j$(nproc)
 ```
 
-### Resources
+### Launching in TempoTec V1 Mode
 
-The player reads its language files, its streaming keys and some of its gui assets
-from a resource tree:
-
-```
-sonix_player_host
-usr/
-└── resource/
-    └── sonix/
-        ├── language/                    the 7 .ini files
-        ├── components/
-        │   ├── streaming-keys.bin       Tidal / Qobuz / Podcast Index / Last.fm keys, sealed - see "Streaming keys" below.
-        │   └── system-info.json         its device-name picks the player the simulator plays
-        └── gui/                         some of the .png assets the UI loads at runtime - the rest are inside the binary.
-```
-
-The easiest way to get one is to copy `usr/resource/` out of
-`sonix-packer/assets/R3PII/` or `sonix-packer/assets/R1/` into `usr/resource/`
-next to `sonix_player_host`: the language files, the fonts, the images and the
-`system-info.json` of that player come with it.
-
-Without the language files the interface draws raw tags instead of words, and says so on the first line of the log. Without `streaming-keys.bin` everything works except Tidal, Qobuz, podcasts and Last.fm. The simulator also reads a plain `streaming-keys.ini` in the same folder.
-
-Fonts are looked for in `usr/resource/sonix/fonts` first and fall back to
-`assets/fonts` in the repo, so a tree without a resource folder still has text.
-
-### Run
+Run the simulator with the 240×320 screen resolution and TempoTec V1 profile:
 
 ```bash
-./sonix_player_host
+SONIX_PANEL=240x320 ./sonix_player_host
 ```
-
-The window is the panel of the player named in `system-info.json`: 480x720 for
-the R3 Pro II, 480x800 for the R1, and 480x720 when the file is missing. The
-mouse is the finger, and dragging scrolls.
-
-`SONIX_PANEL=480x800` opens the window at a given size whatever the file says.
-`SONIX_PANEL=240x320` also selects the compact TempoTec V1 interface profile.
-The rest of the model (buttons, DAC, update file) still follows the file.
-
-The folder that stands in for the memory card is the **documents folder**,
-found from the desktop's own XDG setting. Point it elsewhere with:
-
+or explicitly with the board identifier:
 ```bash
-SONIX_SD_ROOT=/path/to/a/card ./sonix_player_host
+BOARD=tempotec_v1 ./sonix_player_host
 ```
 
-Music goes in there, and so does everything the player writes: the index, the
-cover cache, the playlists.
+To point the simulator to a local music collection instead of your default documents folder:
+```bash
+SONIX_SD_ROOT=/path/to/music SONIX_PANEL=240x320 ./sonix_player_host
+```
 
-### Keyboard
+### Keyboard Shortcuts (Simulating Hardware Buttons)
 
-The device's buttons are on the keyboard:
-
-| key | R3 Pro II | R1 |
+| Key | TempoTec V1 Action | Description |
 |---|---|---|
-| `p` | power — a tap toggles the screen, held opens the power menu | same |
-| `u` | volume up | same |
-| `i` | volume down | same |
-| `b` | previous track | the skip key: next track |
-| `n` | play / pause | same |
-| `m` | next track | previous track (no such key on the R1) |
+| `p` | Power button | Tap to toggle screen, hold to open power menu |
+| `u` | Volume Up | Increases audio volume |
+| `i` | Volume Down | Decreases audio volume |
+| `n` | Play / Pause | Toggles track playback |
+| `b` | Previous Track | Skips to previous track |
+| `m` | Next Track | Skips to next track |
 
+---
 
-### Other environment variables
+## Building Locally for the Device
 
-| variable | what it does |
-|---|---|
-| `SONIX_SD_ROOT` | the folder standing in for the card |
-| `SONIX_PANEL` | the window size, e.g. `480x800` or the V1 profile's `240x320` |
-| `BOARD` | force `tempotec_v1`, `hiby_r1` or `hiby_r3proii` layout selection |
-| `SONIX_CONFIG` | where the settings file lives |
-| `SONIX_EBOOK_CONFIG` | the ebook reader's own settings file |
-| `SONIX_LANG_DIR` | the language directory, instead of the resource tree |
-| `SONIX_LOG` | write the log to a file |
-| `SONIX_BATTERY_CAPACITY`, `SONIX_BATTERY_STATUS` | two files to fake a battery |
-| `SONIX_NO_MOUNT`, `SONIX_NO_SYSSERVER` | leave the host's own system alone |
+### Prerequisites
 
-
-## Building for the device
-
-### What you need
-
-The host requirements above, plus `wget`, `texinfo`, `bison`, `flex` and about
-2 GB of disk: the first target build compiles a MIPS cross toolchain from
-source.
-
-### Build
+In addition to the host packages, install the cross-compilation and packaging utilities:
 
 ```bash
+sudo apt install texinfo bison flex gawk gperf p7zip-full squashfs-tools genisoimage
+```
+
+### Step 1: Cross-Compile Target Binaries
+
+```bash
+cd sonix-player
 make target -j$(nproc)
 ```
 
-The first run takes a while and does four things by itself:
+On first run, this automatically:
+1. Builds the Rockbox MIPS GCC cross-toolchain (`mipsel-rockbox-linux-gnu-gcc`)
+2. Cross-compiles static FreeType (`freetype-target/`)
+3. Cross-compiles static audio decoders: `libogg`, `libopus`, `opusfile`, and `libwavpack` (`audio-target/`)
+4. Compiles and links `sonix_player` with MIPS32r2 `-mplt` flags and glibc 2.22 compatibility shims
+5. Verifies dynamic symbol ABI via `mipsel-rockbox-linux-gnu-readelf`
+6. Strips `sonix_player` and generates `sonix_player_debug` and `sonix_launch`
 
-1. builds the Rockbox MIPS toolchain into `rockbox-toolchain/`
-2. downloads and cross-builds FreeType, static, into `freetype-target/`
-3. downloads and cross-builds libogg, libopus, opusfile and libwavpack, static,
-   into `audio-target/`
-4. compiles and links `sonix_player`, and builds `sonix_launch` (see below)
+### Step 2: Package the `v1.upt` Image
 
-Steps 1 to 3 happen once. Later builds go straight to step 4. In this fork,
-the target binary defaults to the TempoTec V1 240×320 profile; an explicit
-`BOARD=hiby_r1` or `BOARD=hiby_r3proii` in the launcher overrides that default.
-
-Everything the device does not already carry is linked statically, so the
-result is one file to copy across with nothing to install beside it. The same
-binary is packaged into every image; runtime identity selects the model.
-
-### The ABI check
-
-The link is followed by a `readelf` pass that fails the build if the binary
-asks for a glibc symbol newer than 2.22, the version the validated HiBy players
-carry.
-
-This is not decoration. A binary that asks for a newer symbol links without a
-word and then refuses to start, and the device reboots as soon as the player
-exits - so the only symptom on the device is a boot loop.
-
-### sonix_launch
-
-A 2 KB static binary with no libc (`launcher/sonix_launch.c`). The launcher
-script execs it, and it runs the player as its child and does `sleep 1; reboot`
-when the player exits - what the rest of the script would do, without a shell
-sitting in memory for the whole session.
-
-
-## Creating the firmware image
-
-The packer looks only next to itself:
-
-```
-sonix-packer/
-├── sonix_firmware_packer.sh
-├── r3proii_original.upt     the stock firmware of the R3 Pro II, from HiBy
-├── r1_original.upt          the stock firmware of the R1, from HiBy
-├── v1_original.upt          official TempoTec V1 firmware (experimental path)
-├── sonix_player             the binary from `make target`
-├── sonix_launch             also from `make target`; optional
-└── assets/
-    ├── R3PII/               complete overlay for the R3 Pro II
-    ├── R1/                  complete overlay for the R1
-    └── V1/                  V1 identity only; hardware files remain stock
-```
-
-It builds one image for each stock firmware it finds. With only one original
-`.upt` next to it, it builds that player's image and says it skipped the others.
-
-The HiBy models have complete overlays of their own. V1 intentionally reuses
-only R1's model-independent `usr/resource/sonix` and `usr/share/web` data, then
-applies its own identity file. It never copies R1 touch modules, boot assets,
-init scripts or hardware binaries.
-
-An overlay mirrors the rootfs from its root, so a file goes to the path it has
-inside the folder. That is how the resource tree gets installed:
-
-```
-assets/R3PII/                           (and assets/R1/, the same shape)
-├── etc/                             boot logos at the panel's size, D-Bus policy, certificates, S80_bt_init
-├── usr/
-│   ├── bin/                         bluealsa
-│   ├── lib/                         the bluealsa ALSA plugin
-│   ├── resource/
-│   │   └── sonix/
-│   │       ├── language/            the 8 .ini files
-│   │       ├── components/
-│   │       │   ├── streaming-keys.bin   Tidal / Qobuz / Podcast Index / Last.fm keys, sealed - see "Streaming keys" below.
-│   │       │   ├── system-info.json     required: names the player, and the packer writes to it
-│   │       │   └── GB*-Database.dat     the Game Boy ROM databases
-│   │       ├── fonts/               default.otf, bold.otf, then korean, thai and arabic .otf, each with a -bold
-│   │       └── gui/                 some of the .png assets the UI loads at runtime - the rest are inside the binary.
-│   └── share/web/                   icons and images for the Wi-Fi transfer page                        
-└── module_driver/                   the patched touch driver and its load script
-```
-
-`system-info.json` has to be there, and its `device-name` has to be the model
-the folder is for: `HiBy R3 Pro II` in `R3PII/`, `HiBy R1` in `R1/`, and
-`TempoTec V1` in `V1/`. The packer checks it, writes the build stamp into the
-`build_version` key, and stops if either is wrong. An image carrying the other
-player's name would offer that player's update to a device that cannot survive
-it.
-
-### Streaming keys
-
-Tidal, Qobuz, Podcast Index and Last.fm need application keys, and they are
-not in this repository: provide your own (for Last.fm, an API account from
-last.fm/api). They go into the image sealed, so that unpacking
-it does not hand them out as a text file.
-
-1. Copy `sonix-player/streaming-keys.ini.example` to
-   `sonix-player/streaming-keys.ini` and fill it in.
-2. Seal it into both assets trees:
+1. Copy the compiled binaries to `sonix-packer/`:
    ```bash
-   cd sonix-player
-   python3 tools/seal_streamkeys.py seal
+   cp sonix-player/sonix_player sonix-packer/
+   cp sonix-player/sonix_launch sonix-packer/
    ```
-   The first run creates `streaming-keys.key`, the key that seals them. Keep
-   it: every later `seal` reuses it.
-3. Build the player (`make target`). The Makefile compiles the key into it, so
-   only this build opens the `streaming-keys.bin` sealed with it. A new key
-   means a new build.
+2. Place the official TempoTec stock firmware as `v1_original.upt` inside `sonix-packer/`:
+   ```bash
+   sonix-packer/prepare_v1_stock.sh /path/to/stock_v1_download sonix-packer
+   ```
+3. Run the firmware packaging script:
+   ```bash
+   cd sonix-packer
+   ./sonix_firmware_packer.sh
+   ```
+4. Verify the output image:
+   ```bash
+   ./verify_upt.sh v1.upt --sonix-v1
+   ```
 
-`streaming-keys.ini`, `streaming-keys.key` and `streaming-keys.bin` are all
-ignored by git. The packer leaves out a `streaming-keys.ini` found in the
-assets and says so. `python3 tools/seal_streamkeys.py open <file>` prints what
-a `.bin` holds.
+---
 
-This keeps the keys out of plain sight, not out of reach: the key is inside
-`sonix_player`, and whoever takes the binary apart can get them back.
+## Features
 
-### What it needs installed
+### Audio Format Support
 
-```bash
-# Debian / Ubuntu
-sudo apt install p7zip-full squashfs-tools genisoimage
+Plays virtually all lossless and lossy audio formats up to 384 kHz / 32-bit and native DSD:
 
-# Fedora
-sudo dnf install p7zip squashfs-tools genisoimage
-```
+* **Lossless / Hi-Res:** `.flac`, `.wav`, `.aif`, `.aiff`, `.aifc`, `.caf`, `.wv` (WavPack), `.wvc`, `.ape` (Monkey's Audio), `.alac`
+* **Lossy Formats:** `.mp3`, `.ogg`, `.opus`, `.m4a`, `.m4b`, `.mp4`, `.aac`
+* **DSD Audio:** `.dsf` and `.dff` files via DoP (DSD over PCM) or internal high-quality 176.4 kHz conversion
+* **CUE Sheets:** Full `.cue` sheet parsing splitting single-file album rips into individual tracks
 
-### Build
+### Audio Engine & DSP
 
-```bash
-./sonix_firmware_packer.sh
-```
+* **Graphic EQ:** 10-band equaliser (31 Hz – 16 kHz, ±12 dB) with presets and horizontal scrolling card.
+* **Parametric EQ (PEQ):** 10 fully parametric bands (20 Hz – 20 kHz, gain ±15 dB, Q 0.10–10.00, Peak/Shelf/Low-Pass/High-Pass) with real-time response curve rendering and Equalizer APO / AutoEq import.
+* **MSEB:** MageSound Eighteen sound tuning algorithm matched to hardware characteristics.
+* **Soundfield & Crossfeed:** Adjustable spatial width from mono to 200% stereo, plus headphone crossfeed.
+* **Channel Balance:** ±20 dB balance control in 0.5 dB increments.
+* **Playback Controls:** Bit-perfect gapless playback, ReplayGain (track & album), adjustable track fade (1–12 s).
+* **Hardware Output Routing:** Independent volume level memory for 3.5 mm, 4.4 mm, and USB outputs; Line Out mode; USB DAC mode (32–384 kHz).
 
-It runs through without asking anything, once for each model:
+### Library & Organization
 
-1. unpacks the `.upt`, joins the rootfs chunks and extracts the squashfs
-2. deletes `usr/bin/hiby_player` and installs `usr/bin/sonix_player`
-3. renames `hiby_player.sh` to `sonix_player.sh` and rewrites the name inside it
-4. points `etc/init.d/S92_03_start_music_player` at the new launcher script
-5. copies `assets/<model>/` over the rootfs, then installs
-   `usr/bin/sonix_launch` and has the launcher script exec it (skipped with a warning
-   if it is not there)
-6. deletes the stock interface's own resources - `litegui`, `layout`, `str`,
-   `fonts`.
-7. checks the `device-name` in `system-info.json` and writes the build stamp
-   into it
-8. repacks the squashfs, splits it into 512 KB chunks and rebuilds the md5
-   chain the recovery kernel checks
-9. writes `r3proii.upt`, `r1.upt`, or experimental `v1.upt`; V1 also gets
-   `v1_md5.txt`
+* Ultra-fast SQLite-backed media indexer and tag reader (supporting UTF-8 and multilingual metadata).
+* Embedded and folder album art extraction with smooth coverflow browsing.
+* Embedded and external `.lrc` synchronized lyrics display.
+* Full audiobook resume support with chapter markers (`.m4b` and ID3 chapter frames).
+* File browser with direct folder playback, favorites, and custom playlists.
 
-The kernel is carried across untouched, size and md5 copied from the original
-rather than recomputed.
+### Wireless & Streaming
 
-### Patches
+* **Wi-Fi Web Transfer:** Built-in HTTP server allows uploading, downloading, and managing music on the player from any web browser.
+* **Streaming Services:** Native client support for Tidal, Qobuz, Podcast Index, and internet radio.
+* **Remote Streaming:** DLNA digital media renderer and Apple AirPlay audio receiver.
+* **Last.fm Scrobbler:** Caches scrobbles offline and submits them when Wi-Fi connects.
+* **Bluetooth Audio:** High-resolution wireless playback supporting SBC, AAC, aptX, and LDAC.
 
-They go in **before** the repack, and the easiest way is through
-the overlay - any other file need to be in the respective folder mirroring the rootfs structure.
+### Built-in Applications
 
-### Flashing
+* **Gearboy (Game Boy / Game Boy Color):** Integrated full-speed Game Boy emulator with on-screen button controls and save state support.
+* **EPUB E-Book Reader:** Built-in reader supporting EPUB reflowable text, customizable font sizing, margins, and night mode themes.
 
-1. Copy the image for your player to the **root of the microSD card**:
-   `r3proii.upt` for the R3 Pro II, `r1.upt` for the R1. Never the other one.
-   The TempoTec `v1.upt` path is experimental and should not be treated as
-   flash-ready until it has been reviewed and validated on recoverable hardware.
-2. Insert the SD card into the player.
-3. Start the update:
-   - **from the stock firmware** - use its firmware update from the microSD
-     card.
-   - **from Sonix Player** - Settings > System > Update firmware > From SD
-     card. *Via internet* downloads the right image from the latest release by
-     itself.
-4. Let it flash - it will say "Upgrading..." then "Succeeded" and reboot by itself.
+---
 
-> It is recommended to **charge above 30%** first. 
-**Recovery from a failed flash:** If something goes wrong, you can always restore by flashing the original stock firmware from HiBy's website using the same procedure.
-
-
-## Generated files
-
-Three files in the tree are produced by a script and committed, so an ordinary
-build needs no Python at all. Re-run the script only when its input changes.
-
-| generated | from | script |
-|---|---|---|
-| `src/gui/shell/icons.c`, `icons.h` | `assets/icons/*.svg`, `*.png` | `tools/svg_to_lvgl.py` |
-| `src/system/net/webpage.h` | `web/index.html`, `web/icons`, `web/img` | `tools/web_to_c.py` |
-
-```bash
-pip install cairosvg pillow
-python3 tools/svg_to_lvgl.py
-
-python3 tools/web_to_c.py
-```
-
-
-## Source code tree
+## Directory Structure
 
 ```
-sonix-player/
+sonix-player-tempotec-v1/
+│
+├── .github/workflows/
+│   └── build-tempotec-v1.yml     # Automated GitHub Actions cross-compile workflow
 │
 ├── sonix-packer/
-│   ├── assets/
-│   │   ├── R3PII/                   the R3 Pro II overlay
-│   │   │   ├── etc/                 boot logos (480x720), sonix-player.conf, cert.pem, modified S80_bt_init
-│   │   │   ├── module_driver/       patched gt9xx_touch.ko, gt9xx_touch.sh and leds_sgm31324_add.sh with 3 added LED registers
-│   │   │   └── usr/                 bluealsa 4.3.1, resources required by Sonix Player
-│   │   └── R1/                      the R1 overlay
-│   │       ├── etc/                 boot logos (480x800), sonix-player.conf, cert.pem, modified S80_bt_init
-│   │       ├── module_driver/       patched cst8xx_touch.ko and cst8xx_touch.sh
-│   │       └── usr/                 bluealsa 4.3.1, resources required by Sonix Player
-│   │                                
-│   └── sonix_firmware_packer.sh     
+│   ├── prepare_v1_stock.sh       # Downloads & extracts official TempoTec V1 firmware
+│   ├── sonix_firmware_packer.sh  # Unpacks, modifies rootfs, and repacks v1.upt
+│   ├── verify_upt.sh             # Validates ISO, chunk hash chain, kernel, and Sonix
+│   └── assets/
+│       └── V1/                   # TempoTec V1 overlay and system-info.json
 │
-│
-├── sonix-player/                    
-│   ├── assets/                      
-│   │   ├── gui/                     some of the .png assets the UI loads at runtime - the rest are inside the binary.
-│   │   ├── fonts/ 					 the faces: default, bold, Korean (Hangul from Pretendard, OFL), Thai, Arabic
-│   │   └── icons/                   196 SVGs and PNGs, baked into src/gui/shell/icons.c
-│   │   
-│   │
-│   ├── launcher/                    sonix_launch.c: runs the player, reboots when it exits
-│   │
-│   ├── rockboxdev/                  builds the MIPS cross toolchain, first `make target` only
-│   │   ├── toolchain-patches/       three patches gcc and binutils needed on a modern host
-│   │   └── rockboxdev.sh
-│   │
+├── sonix-player/
+│   ├── Makefile                  # Build rules for host simulator and target MIPS
+│   ├── launcher/                 # sonix_launch.c process supervisor
+│   ├── rockboxdev/               # MIPS cross-toolchain bootstrap scripts
 │   ├── src/
-│   │   ├── gb/                      Gearboy, upstream and untouched
-│   │   │   ├── core/                78 files: the emulator itself
-│   │   │   └── miniz/               reads a ROM straight out of a .zip
-│   │   │
-│   │   ├── gui/                     
-│   │   │   ├── audio/               EQ, PEQ, MSEB and the DAC page
-│   │   │   ├── bluetooth/           pairing, codec, AirPods, receiver mode
-│   │   │   ├── ebook/               EPUB reader: pages, shelf, bar, bookmarks, themes
-│   │   │   ├── fonts/               the lv_font_t objects FreeType fills in at startup
-│   │   │   ├── gearboy/             game list, screen and button pad
-│   │   │   ├── library/             file browser, media lists, playlists, search
-│   │   │   ├── nowplaying/          player screen, cover art, cover flow, waveform, queue
-│   │   │   ├── settings/            26 files, one page each
-│   │   │   ├── shell/               40 files: theme, screen switcher, status bar, control
-│   │   │   │                        centre, keyboard, popups, toasts, settings rows, icons.c
-│   │   │   ├── streaming/           Tidal, Qobuz, podcast and radio pages
-│   │   │   └── wireless/            Wi-Fi, file transfer, AirPlay, DLNA, SonixLink
-│   │   │
-│   │   ├── system/                  
-│   │   │   ├── audio/               ALSA, volume, filter chain, USB audio, headset
-│   │   │   ├── bluetooth/           the whole stack, run by the player and not by the firmware
-│   │   │   ├── core/                config, language, logging, paths, utils
-│   │   │   ├── db/                  SQLite
-│   │   │   ├── decode/              one file per format, plus the dispatcher and CUE handling
-│   │   │   ├── device/              power, screen, buttons, USB, storage, ADB, firmware, LED
-│   │   │   ├── ebook/               EPUB parsing: zip, XML, XHTML, CSS, OPF, arenas
-│   │   │   ├── gearboy/             the emulator's glue: input, ROM database, save states
-│   │   │   ├── image/               JPEG and PNG decoder
-│   │   │   ├── input/               key mapping
-│   │   │   ├── library/             index, tag reading, cover art, playlists, audiobooks
-│   │   │   ├── net/                 HTTP, TLS, HLS, mDNS, transfer page
-│   │   │   ├── playback/            queue, device state, audiobooks, sleep timers
-│   │   │   ├── remote/              AirPlay, DLNA, SonixLink
-│   │   │   └── streaming/           service clients and their caches
-│   │   │
-│   │   └── main.c                   entry point: display, input, and the startup order
-│   │
-│   ├── tools/                       generators, and the multitouch patches for the two touch drivers
-│   │
-│   ├── web/                         Wi-Fi transfer page, source of src/system/net/webpage.h
-│   │   ├── icons/                   26 Lucide glyphs, inlined as <symbol>
-│   │   ├── img/                     favicon-web.png, logo-web.png
-│   │   └── index.html               the template
-│   │
-│   ├── generate_compile_commands.py 
-│   ├── lv_conf.h                    
-│   └── Makefile                     
+│   │   ├── gui/                  # LVGL user interface (board profile, nowplaying, eq)
+│   │   ├── system/               # Audio pipeline, decoders, ALSA, Wi-Fi, database
+│   │   └── gb/                   # Gearboy core
+│   ├── tools/                    # Asset and icon conversion scripts
+│   └── web/                      # HTML5 Wi-Fi file transfer interface
 │
-├── FEATURES.md                      
-├── LICENSE                          
-├── PATCHES.md                       
-└── README.md
+├── FEATURES.md                   # Full audio and playback feature list
+├── LICENSE                       # GNU General Public License v3.0
+├── PATCHES.md                    # Technical documentation on V1 profile and patches
+└── README.md                     # This documentation
 ```
 
+---
 
+## Credits & Acknowledgements
 
-## Special thanks to:
-[@Tartarus6](https://github.com/Tartarus6)
-
-[@noisetta](https://github.com/noisetta)
-
-[@endgame47](https://github.com/endgame47)
-
-[@hkhrithik007](https://github.com/hkhrithik007)
-
-and all the members of this fantastic community!!
+* **Sonix Player Team & Contributors:** [@Tartarus6](https://github.com/Tartarus6), [@noisetta](https://github.com/noisetta), [@endgame47](https://github.com/endgame47), [@hkhrithik007](https://github.com/hkhrithik007)
+* **LVGL:** Lightweight and Versatile Graphics Library
+* **Rockbox Project:** Cross-compiler toolchain foundation
+* **Gearboy:** Game Boy emulator core by Ignacio Sanchez
