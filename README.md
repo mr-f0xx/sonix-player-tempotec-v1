@@ -15,12 +15,12 @@ The TempoTec Variations V1 is an ultra-compact digital audio player (DAP) powere
        │ 10:42        100%  🔋 │  <-- 24 px compact status bar
        ├──────────────────────┤
        │                      │
-       │   [ 240×192 Art ]    │  <-- Edge-to-edge album artwork
+       │   [ 240×176 Art ]    │  <-- Edge-to-edge album artwork
        │                      │
        ├──────────────────────┤
        │ Track Title          │
        │ Artist Name          │
-       │ 01:24 ━━━━━●── 03:45 │  <-- 128 px compact control deck
+       │ 01:24 ━━━━━●── 03:45 │  <-- 144 px compact control deck
        │     ⏮   ⏯   ⏭       │
        └──────────────────────┘
 ```
@@ -47,7 +47,7 @@ Rather than blindly scaling down an interface designed for larger screens, Sonix
 
 * **Compact Status Bar & Layout Geometry:** Uses a 24 px status bar, 6 px margins, and 36 px header action targets.
 * **Overflow Header Menus:** The main Music screen combines title actions with a dedicated overflow menu (`...`) so long titles are never truncated to `Musi…`.
-* **Full-Width Now Playing Screen:** Displays 240 px edge-to-edge cover artwork centre-cropped to 192 px height, paired with a dedicated 128 px control area to eliminate black side bars.
+* **Full-Width Now Playing Screen:** Displays 240 px edge-to-edge cover artwork centre-cropped to 176 px height, paired with a roomier 144 px control area so the title, progress and transport stay visually connected without black side bars.
 * **Adaptive A–Z Index Strip:** Automatically scales down to ~14 visible letter slots to fit the 320 px vertical height. Pressing anywhere along the strip proportionally navigates the full alphabet with an 88×84 touch preview card.
 * **Scrollable 10-Band EQ:** The graphic equaliser card scrolls smoothly horizontally instead of cramming ten sliders into 216 px.
 * **Compact Quick Settings:** Retains eight quick toggles arranged in an ergonomic 2×4 sheet.

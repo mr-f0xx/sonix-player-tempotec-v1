@@ -19,8 +19,8 @@ extern lv_obj_t *language_screen;
 void language_init(gui_config_t *cfg);
 
 // Hands over the Settings row that opens this page, so its name can be
-// kept as "Lingua/Language" -- see language.c. Call it right after making the
-// row; without it the row keeps whatever name it was built with.
+// refreshed with the current language -- see language.c. Call it right after
+// making the row; without it the row keeps whatever name it was built with.
 void language_bind_menu_row(lv_obj_t *row);
 
 // True when nobody has ever chosen: the panel should come up on its own.

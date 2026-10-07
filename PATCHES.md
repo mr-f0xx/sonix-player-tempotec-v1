@@ -26,8 +26,9 @@ Playlists/Browse, Favourites and Search remain available inside that menu
 without allowing four actions to reduce the heading to `Musi…`.
 
 Now Playing keeps the cover **240 px wide** and centre-crops it to the available
-192 px height. The remaining 128 px is an independently sized compact control
-area. The artwork, its hit target and generated backdrop therefore share the
+176 px height. The remaining 144 px is an independently sized compact control
+deck, with enough room for the title, progress and transport to read as one
+connected layout. The artwork, its hit target and generated backdrop share the
 same edge-to-edge bounds instead of producing black side bands.
 
 Two-column, three-row pages with five entries let the fifth tile span the last

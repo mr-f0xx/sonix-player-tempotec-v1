@@ -141,8 +141,11 @@ static int polls_since_stop = POLLS_FAST_AFTER_STOP;
 
 // Height the controls block needs for its two lines of text, the bar, the
 // clocks and the buttons. Only used as a floor on screens too short to fit a
-// full-width square cover on top of it.
+// full-width square cover on top of it. The V1 gets a little more room than its
+// original 128 px deck: 144 px keeps the title, progress and transport together
+// without making the artwork/control boundary feel cramped.
 #define PLAYER_MENU_MIN_HEIGHT 210
+#define COMPACT_PLAYER_MENU_MIN_HEIGHT 144
 
 // The controls block as the R3 Pro II has it, 720 - 480. A taller panel (the
 // R1's 800) spreads what it has over the rows rather than leaving it empty
@@ -4533,12 +4536,13 @@ void player_init(gui_config_t *cfg) {
 	}
 	int cover_height = (int)cfg->screen_width;
 	int menu_height = (int)cfg->screen_height - cover_height;
-	int min_menu_h = compact ? 128 : PLAYER_MENU_MIN_HEIGHT;
+	int min_menu_h = compact ? COMPACT_PLAYER_MENU_MIN_HEIGHT : PLAYER_MENU_MIN_HEIGHT;
 	if (menu_height < min_menu_h) {
 		menu_height = min_menu_h;
 		cover_height = (int)cfg->screen_height - menu_height;
 		if (cover_height < 64) {
 			cover_height = 64;
+			menu_height = (int)cfg->screen_height - cover_height;
 		}
 	}
 
@@ -4561,8 +4565,8 @@ void player_init(gui_config_t *cfg) {
 	lv_obj_set_style_radius(player_menu, 0, 0);
 	lv_obj_set_style_pad_hor(player_menu, cfg->padding, 0);
 	if (compact) {
-		menu_pad_ver = 2;
-		menu_gap = 2;
+		menu_pad_ver = 4;
+		menu_gap = 4;
 	}
 	int spare = menu_height - PLAYER_MENU_REF_HEIGHT;
 	if (!compact && spare > 0) {
@@ -4778,7 +4782,7 @@ void player_init(gui_config_t *cfg) {
 	lv_obj_set_flex_flow(player_controls_buttons, LV_FLEX_FLOW_ROW);
 	lv_obj_set_flex_align(player_controls_buttons, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 	// Lift the transport from the bottom bezel on both layouts. The compact
-	// page gets a gentler lift because its controls block is only 128 px tall.
+	// page gets a gentler lift to preserve a comfortable target above the bezel.
 	lv_obj_set_style_translate_y(player_controls_buttons, compact ? -4 : -8, 0);
 
 	// The repeat/shuffle button, kept out of the flex row so the transport
