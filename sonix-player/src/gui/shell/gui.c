@@ -567,6 +567,11 @@ void gui_notify_power_menu(void) { gui_post(power_menu_async_cb, NULL); }
 
 
 void gui_init(gui_config_t *cfg) {
+	// The card's fonts, before any page is built: a UI font stored as
+	// "card:<file>" is only resolvable once the storage has found the card,
+	// which main.c has done by now. See fonts_set_card_root().
+	fonts_set_card_root(cfg->sd_root_path);
+
 	// Colours first: every screen below styles itself from the active palette.
 	theme_init();
 

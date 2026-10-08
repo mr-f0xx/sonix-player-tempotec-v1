@@ -20,7 +20,16 @@ SONIX_PANEL=240x320 ./sonix_player_host
 The profile is more than a font substitution. It makes `gui_config_t` use the
 real 240×320 panel, a 24 px status bar and 6 px page padding; remaps the named UI
 font faces to compact raster sizes; and gives shared headers, settings rows,
-grids and status icons compact geometry. Header actions use 36 px slots. The
+grids and status icons compact geometry.
+
+The face those sizes are drawn from is not part of the profile any more. The V1
+had Neon 80s as its primary face; it is now one of the choices in
+Settings → Appearance → Font, beside MiSans (the default, and the face the
+interface was designed with) and the other families the image carries, with the
+card's own `Fonts` folder listed after them. Each family keeps MiSans at the end
+of its fallback chain for the scripts it has no letters for, and the whole face
+is rebuilt and the pages relaid out when the choice changes — see the comment at
+the top of `src/gui/fonts/fonts.c`. Header actions use 36 px slots. The
 Music landing page keeps Settings plus one overflow menu in the title row;
 Playlists/Browse, Favourites and Search remain available inside that menu
 without allowing four actions to reduce the heading to `Musi…`.
