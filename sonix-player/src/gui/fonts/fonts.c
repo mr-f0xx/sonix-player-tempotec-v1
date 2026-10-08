@@ -67,8 +67,9 @@ static const char *const FONT_BARLOW_FILES[] = FACE_FILES("BarlowSemiCondensed")
 // regular file answers the bold sizes as well, which is how the V1 has always
 // drawn Neon 80s.
 //
-// A family whose files are not in this firmware is not offered at all -- see
-// face_available() -- so the list never holds a face that cannot be opened.
+// A family whose files are not in this firmware is not offered at all -- the
+// picker only lists what first_present() can find -- so the list never holds a
+// face that cannot be opened.
 // ---------------------------------------------------------------------------
 typedef struct {
 	const char *id; // what [ui] font stores, and what fonts_set_face() takes
