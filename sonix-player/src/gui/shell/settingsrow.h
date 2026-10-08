@@ -35,6 +35,13 @@ int settingsrow_corner_button_size(gui_config_t *cfg);
 int settingsrow_corner_button_gap(gui_config_t *cfg);
 void settingsrow_place_corner_button(lv_obj_t *button, gui_config_t *cfg, int slot);
 
+// The glyph that goes inside such a button. The sources are ~34 px while the
+// V1's corner buttons are 36 px whole, so an unscaled glyph fills its whole
+// touch target and reads bigger than the rest of the header. Draw it at three
+// quarters -- the size the Music page's gear settled on; larger panels keep
+// the natural size.
+void settingsrow_scale_corner_icon(lv_obj_t *icon, gui_config_t *cfg);
+
 // The heading a settingsrow_page() built, for a page whose title changes after
 // it is built (Language names itself in two languages and one of them moves).
 lv_obj_t *settingsrow_page_title(lv_obj_t *screen);

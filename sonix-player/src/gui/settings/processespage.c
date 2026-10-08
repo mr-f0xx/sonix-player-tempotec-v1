@@ -252,6 +252,7 @@ void processespage_init(gui_config_t *cfg) {
 		lv_obj_t *icon = lv_image_create(button);
 		lv_image_set_src(icon, &icon_refresh);
 		lv_obj_add_style(icon, &theme_style_icon, 0);
+		settingsrow_scale_corner_icon(icon, cfg);
 		lv_obj_center(icon);
 	}
 

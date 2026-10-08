@@ -1422,6 +1422,7 @@ void playlistpage_init(gui_config_t *cfg) {
 	lv_obj_t *cancel_icon = lv_image_create(cancel);
 	lv_image_set_src(cancel_icon, &icon_close);
 	lv_obj_add_style(cancel_icon, &theme_style_icon, 0);
+	settingsrow_scale_corner_icon(cancel_icon, cfg);
 	lv_obj_center(cancel_icon);
 
 	name_field = lv_textarea_create(name_layer);
@@ -1454,6 +1455,7 @@ void playlistpage_init(gui_config_t *cfg) {
 	lv_image_set_src(import_glyph, &icon_import);
 	lv_obj_add_style(import_glyph, &theme_style_icon, 0);
 	lv_obj_set_style_image_recolor_opa(import_glyph, LV_OPA_COVER, 0);
+	settingsrow_scale_corner_icon(import_glyph, cfg);
 	lv_obj_center(import_glyph);
 
 	// --- the import dialog: the same full-screen layer shape as the naming one
@@ -1488,6 +1490,7 @@ void playlistpage_init(gui_config_t *cfg) {
 	lv_obj_t *import_close_icon = lv_image_create(import_close);
 	lv_image_set_src(import_close_icon, &icon_close);
 	lv_obj_add_style(import_close_icon, &theme_style_icon, 0);
+	settingsrow_scale_corner_icon(import_close_icon, cfg);
 	lv_obj_center(import_close_icon);
 
 	// The button sits on the bottom edge; the list has whatever is left.

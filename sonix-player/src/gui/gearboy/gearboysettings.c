@@ -2,6 +2,7 @@
 
 #include "lvgl/lvgl.h"
 
+#include "src/gui/board_profile.h"
 #include "src/gui/fonts/fonts.h"
 #include "src/gui/shell/settingsrow.h"
 #include "src/gui/shell/switcher.h"
@@ -83,8 +84,8 @@ static void bootrom_toggle_cb(lv_event_t *e) {
 
 static lv_obj_t *make_pill(lv_obj_t *parent, const char *text, lv_event_cb_t cb, int value) {
 	lv_obj_t *btn = lv_btn_create(parent);
-	lv_obj_set_size(btn, LV_SIZE_CONTENT, 60);
-	lv_obj_set_style_pad_hor(btn, 18, 0);
+	lv_obj_set_size(btn, LV_SIZE_CONTENT, bp_pick(44, 60));
+	lv_obj_set_style_pad_hor(btn, bp_pick(12, 18), 0);
 	lv_obj_set_style_radius(btn, LV_RADIUS_CIRCLE, 0); // the Adwaita pill
 	lv_obj_set_style_shadow_width(btn, 0, 0);
 	lv_obj_set_style_border_width(btn, 0, 0);

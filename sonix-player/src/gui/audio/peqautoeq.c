@@ -821,6 +821,7 @@ static void build_pages(gui_config_t *config) {
 	lv_obj_t *update_icon = lv_image_create(update_btn);
 	lv_image_set_src(update_icon, &icon_autoeq_update);
 	lv_obj_add_style(update_icon, &theme_style_icon, 0);
+	settingsrow_scale_corner_icon(update_icon, config);
 	lv_obj_center(update_icon);
 
 	search_keyboard = keyboard_create(search_screen, config->screen_width, keyboard_h, search_field, &icon_search, NULL,
