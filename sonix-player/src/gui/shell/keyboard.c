@@ -434,12 +434,16 @@ static void kb_shift_press(keyboard_t *kb); // defined with the shift key, below
 // as on QWERTY, unless caps lock is on) is consumed. The character is already
 // in the field; committing only means it stops being replaced.
 static void kb_t9_commit(keyboard_t *kb) {
+	// Starting a fresh cycle also comes through here. Do not consume an armed
+	// one-shot shift unless there really is a character being committed: doing
+	// so makes the caps turn upper-case, then types the first tap in lower-case.
+	bool had_pending = kb->t9_last_key >= 0;
 	kb->t9_last_key = -1;
 	kb->t9_tap = 0;
 	if (kb->t9_timer) {
 		lv_timer_pause(kb->t9_timer);
 	}
-	if (kb->shift && !kb->caps) {
+	if (had_pending && kb->shift && !kb->caps) {
 		kb->shift = false;
 		kb_refresh_caps(kb);
 	}
