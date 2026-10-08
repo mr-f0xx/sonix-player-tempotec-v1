@@ -1,6 +1,8 @@
 #include "appearance.h"
 
 #include <stdint.h>
+#include <stdio.h>
+#include <string.h>
 
 #include "lvgl/lvgl.h"
 
@@ -9,6 +11,7 @@
 #include "src/gui/shell/settingsrow.h"
 #include "src/gui/shell/switcher.h"
 #include "src/gui/shell/theme.h"
+#include "src/gui/shell/toast.h"
 #include "src/gui/shell/topbar.h"
 #include "src/system/core/config.h"
 #include "src/system/core/lang.h"
@@ -58,6 +61,96 @@ static void text_size_cb(lv_event_t *e) {
 	config_set_int("ui", "text_size", size);
 	config_save();
 	refresh_text_size_pills();
+}
+
+// ---------------------------------------------------------------------------
+// Settings -> Appearance -> Font
+//
+// The face the whole interface is drawn with, as a row of pills: the families
+// in this firmware first (MiSans, and the others its fonts directory carries),
+// then whatever the user has put in the Fonts folder on the card. See fonts.c
+// for what a choice means and what it costs.
+//
+// The pills are the family's own names, so they are not translated, and the
+// row is built from what is actually there: a family whose files are missing
+// is not offered, and a card font appears when the card does -- which is why
+// the row is looked at again every time the page is opened.
+// ---------------------------------------------------------------------------
+
+// The families in the firmware plus the ones on the card, as fonts_choices()
+// reports them: a handful, and the row wraps onto as many lines as it needs
+// if there are ever more -- the page scrolls, the row does not.
+#define FONT_CHOICES_MAX 24
+#define FONT_ID_MAX 160
+
+static lv_obj_t *font_pills;
+static lv_obj_t *font_pill[FONT_CHOICES_MAX];
+static char font_pill_id[FONT_CHOICES_MAX][FONT_ID_MAX]; // the pill's own copy: fonts_choices() reuses its buffers
+static int font_pill_count;
+
+// Paints the chosen family as the filled accent pill, the rest quiet.
+static void refresh_font_pills(void) {
+	const char *active_id = fonts_choice();
+	for (int i = 0; i < font_pill_count; i++) {
+		settingsrow_pill_active(font_pill[i], strcmp(font_pill_id[i], active_id) == 0);
+	}
+}
+
+// The pill's number in the row, one-based, as the pill helpers pass a value
+// to their callback: the id itself is looked up here rather than carried as
+// the user data, so the list can be rebuilt without leaving a pill pointing
+// at a buffer that has moved on.
+static void font_pick_cb(lv_event_t *e) {
+	if (switcher_back_drag_active()) {
+		return;
+	}
+	int index = (int)(intptr_t)lv_event_get_user_data(e) - 1;
+	if (index < 0 || index >= font_pill_count) {
+		return;
+	}
+	const char *id = font_pill_id[index];
+	if (!fonts_set_face(id)) {
+		// A card that was pulled out between the page opening and the tap, or
+		// a file too large to hold in memory. The row repaints over whatever
+		// the failed attempt left behind.
+		toast_error("appearance_font_failed");
+		refresh_font_pills();
+		return;
+	}
+	config_set("ui", "font", id);
+	config_save();
+	refresh_font_pills();
+}
+
+// Builds the row, and rebuilds it when the list itself has changed: a font
+// copied onto the card (or taken off it) appears the next time the page is
+// opened, without the pills already there being disturbed in between.
+static void font_pills_rebuild(void) {
+	const char *ids[FONT_CHOICES_MAX];
+	const char *labels[FONT_CHOICES_MAX];
+	int count = fonts_choices(ids, labels, FONT_CHOICES_MAX);
+
+	bool same = count == font_pill_count;
+	for (int i = 0; same && i < count; i++) {
+		same = strcmp(ids[i], font_pill_id[i]) == 0;
+	}
+	if (same) {
+		refresh_font_pills();
+		return;
+	}
+
+	lv_obj_clean(font_pills);
+	font_pill_count = count;
+	for (int i = 0; i < count; i++) {
+		snprintf(font_pill_id[i], FONT_ID_MAX, "%s", ids[i]);
+		font_pill[i] = settingsrow_pill_text(font_pills, labels[i], i + 1, font_pick_cb);
+	}
+	refresh_font_pills();
+}
+
+static void font_pills_reload_cb(lv_event_t *e) {
+	(void)e;
+	font_pills_rebuild();
 }
 
 // Paints the pair: the active choice is the filled accent button, the other a
@@ -310,12 +403,27 @@ void appearance_init(gui_config_t *cfg) {
 	text_size_pill[FONTS_TEXT_LARGE] =
 		settingsrow_pill(text_size_pills, "appearance_text_large", FONTS_TEXT_LARGE, text_size_cb);
 
+	// The face of the whole interface, right under the size of it: the two are
+	// the same decision taken twice. The row wraps -- there can be eight
+	// families now and a cardful later -- and a family's name is not
+	// translated: it is its name.
+	settingsrow_pills(container, "appearance_font", &font_pills);
+
+	lv_obj_t *font_note = lv_label_create(container);
+	lv_label_set_long_mode(font_note, LV_LABEL_LONG_WRAP);
+	lv_obj_set_width(font_note, lv_pct(100));
+	lv_obj_add_style(font_note, &theme_style_text_dim, 0);
+	lv_obj_set_style_text_font(font_note, &font_ui_22, 0);
+	lv_label_set_text(font_note, tr("appearance_font_note"));
+
 	// A fifth card, and the last plain switch on the page: whether the status
 	// bar prints the charge as a number as well as drawing it.
 	settingsrow_toggle(container, "appearance_battery_percentage", &battery_percent_toggle, battery_percent_cb);
 	if (config_get_int("screen", "battery_percent", 1) != 0) {
 		lv_obj_add_state(battery_percent_toggle, LV_STATE_CHECKED);
 	}
+
+	font_pills_rebuild();
 
 	refresh_buttons();
 	refresh_clock_buttons();
@@ -325,4 +433,10 @@ void appearance_init(gui_config_t *cfg) {
 	theme_register_refresh(refresh_text_size_pills);
 	theme_register_refresh(refresh_clock_buttons);
 	theme_register_refresh(refresh_accent_buttons);
+	theme_register_refresh(refresh_font_pills);
+
+	// The card's fonts again on every visit: one copied over the USB cable
+	// while the player was running is offered the next time this page comes
+	// up, and one whose card has been pulled out is gone from the row.
+	lv_obj_add_event_cb(appearance_screen, font_pills_reload_cb, LV_EVENT_SCREEN_LOADED, NULL);
 }

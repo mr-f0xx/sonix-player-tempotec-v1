@@ -5,7 +5,8 @@
 
 #include "lvgl/lvgl.h"
 
-// The UI fonts -- every size the interface draws with.
+// The UI fonts -- every size the interface draws with, and the face they are
+// drawn from.
 //
 // There are no fonts inside the binary. Everything is rendered through
 // FreeType from the faces shipped in /usr/resource/sonix/fonts:
@@ -21,13 +22,15 @@
 //   japanese.otf  FOT-Rodin, for kana, kanji and CJK punctuation when the
 //                 interface is in Japanese
 //
-// On the TempoTec V1, Neon.ttf (Neon 80s) is the primary face for all UI text.
-// MiSans remains in the fallback chain for scripts and symbols Neon lacks; its
-// regular face is also used at bold sizes because Neon has no bold companion.
+// MiSans is the face the interface was designed with, and the one it falls
+// back to. Settable families are the others in the directory: Neon 80s on the
+// V1, and Roboto Mono, Roboto Condensed, Inter and Barlow Semi Condensed
+// (their files are optional -- a family the firmware does not carry is simply
+// not offered). MiSans stays at the end of every chain, so a face with no
+// Cyrillic, no kanji or no Hangul still draws the whole interface.
 //
 // The script faces each have an optional -bold file, like bold.otf.
-// fonts_init() opens them once and builds one fallback chain per size; the
-// V1 chain ends with MiSans so unsupported Neon glyphs still render.
+// fonts_init() opens them once and builds one fallback chain per size.
 // In Japanese, Rodin answers the CJK letters ahead of default (see fonts.c).
 // FreeType maps the files -- nothing is decoded up front -- and rendered
 // glyphs live in the shared FTC cache (LV_FREETYPE_CACHE_FT_GLYPH_CNT), so
@@ -38,8 +41,8 @@
 // has to carry the presentation forms, which MiSans Arabic does.
 //
 // These are real objects, not pointers, so `&font_ui_24` is a valid
-// lv_font_t * at every call site.
-
+// lv_font_t * at every call site. A face change fills them in again, which is
+// why nothing may hold on to a font they were copied from.
 extern lv_font_t font_ui_14;
 extern lv_font_t font_ui_16;
 extern lv_font_t font_ui_18;
@@ -83,6 +86,44 @@ bool fonts_set_large_text(bool large);
 // Called after every such switch, for a page that worked something out from a
 // font when it was built and has to work it out again.
 void fonts_register_change(void (*cb)(void));
+
+// ---------------------------------------------------------------------------
+// Settings -> Appearance -> UI font
+//
+// Which face the whole interface is drawn with, stored as [ui] font. The
+// value is one of the ids below, or "card:<file name>" for a font the user
+// put in the Fonts folder on the card.
+// ---------------------------------------------------------------------------
+
+// The faces on offer, in the order the picker shows them: `ids` are what
+// fonts_set_face() and the config take, `labels` are what the buttons say (a
+// face's own name, the same in every language, so not put through tr()).
+// Both arrays receive `max` entries at most; the count is what is returned.
+//
+// A family whose files are not in this firmware is left out, and so is every
+// card font while there is no card. The list therefore only ever holds faces
+// that can actually be opened.
+int fonts_choices(const char **ids, const char **labels, int max);
+
+// The face in force -- normally the stored choice, but the default face when
+// the stored one could not be opened (a card font whose card has been taken
+// out). Never NULL.
+const char *fonts_choice(void);
+
+// Switches the face on the running interface, the way fonts_set_large_text()
+// switches the size: the objects above are refilled, every page is measured
+// and laid out again, and the fonts the old face was drawing through are
+// handed back. Does not touch the config.
+//
+// False, with nothing on screen touched, when the face cannot be opened -- a
+// file that is not there, or one too large to hold in memory.
+bool fonts_set_face(const char *id);
+
+// Where the card's own fonts live: <root>/Fonts. Call once the card root is
+// known and before the pages are built. A card font chosen before the player
+// started is picked up here, and the picker's list of card fonts is read
+// after this.
+void fonts_set_card_root(const char *sd_root);
 
 // The language file whose interface draws CJK letters from japanese.otf.
 #define FONTS_JAPANESE_LANGUAGE "Japanese"

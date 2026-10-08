@@ -1,4 +1,4 @@
-﻿# Features
+# Features
 
 ---
 
@@ -138,6 +138,7 @@ certificate checking, and HLS.
 ## Settings
 
 - **Appearance** - dark and light, six accent colors, clock position, a dynamic tint that borrows the accent's hue for backgrounds and cards, and a toggle to show/hide the battery percentage.
+- **Appearance → Font** - the face the whole interface is drawn with: MiSans (the default), Neon 80s and, where the image carries them, Roboto Mono, Roboto Condensed, Inter and Barlow Semi Condensed. Text can also be sized Normal or Large. Any `.ttf` or `.otf` file put in the `Fonts` folder on the card is offered beside those, so people can install their own; a face without Cyrillic, Hangul, kanji or Greek still draws the whole interface, because MiSans stays behind it for the letters it does not have.
 - **Screen** - brightness, screen-off timeout, double-tap to wake, screensaver,
   and 180° rotation with the touch rotated with it.
 - **Screensaver** - choose to show the cover of the current playing track or pictures from the `Screensaver` folder.

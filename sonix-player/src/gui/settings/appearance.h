@@ -7,7 +7,9 @@
 
 // The Appearance page: theme (dark, the default, or light) as two
 // Adwaita-style segmented buttons rather than a row that silently flips, plus
-// the accent colour, the clock position and the battery percentage.
+// the accent colour, the clock position, the battery percentage, the text
+// size and the face the whole interface is drawn with -- MiSans, the others
+// the image carries, and the fonts in the card's Fonts folder. See fonts.h.
 
 extern lv_obj_t *appearance_screen;
 
