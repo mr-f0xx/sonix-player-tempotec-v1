@@ -626,6 +626,7 @@ static lv_obj_t *corner_button(lv_obj_t *screen, gui_config_t *cfg, int slot, co
 	lv_obj_t *icon = lv_image_create(button);
 	lv_image_set_src(icon, glyph);
 	lv_obj_add_style(icon, &theme_style_icon, 0);
+	settingsrow_scale_corner_icon(icon, cfg);
 	lv_obj_center(icon);
 	if (icon_out) {
 		*icon_out = icon;

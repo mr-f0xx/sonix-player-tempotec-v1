@@ -189,6 +189,7 @@ void artistexceptions_init(gui_config_t *cfg, void (*changed)(void)) {
 	lv_obj_t *plus = lv_image_create(add);
 	lv_image_set_src(plus, &icon_plus);
 	lv_obj_add_style(plus, &theme_style_icon, 0);
+	settingsrow_scale_corner_icon(plus, cfg);
 	lv_obj_center(plus);
 
 	lv_obj_t *note = lv_label_create(container);
@@ -244,6 +245,7 @@ void artistexceptions_init(gui_config_t *cfg, void (*changed)(void)) {
 	lv_obj_t *cancel_icon = lv_image_create(cancel);
 	lv_image_set_src(cancel_icon, &icon_close);
 	lv_obj_add_style(cancel_icon, &theme_style_icon, 0);
+	settingsrow_scale_corner_icon(cancel_icon, cfg);
 	lv_obj_center(cancel_icon);
 
 	name_field = lv_textarea_create(name_layer);

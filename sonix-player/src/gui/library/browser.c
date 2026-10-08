@@ -1553,6 +1553,7 @@ static lv_obj_t *corner_button(gui_config_t *cfg, int slot, const lv_image_dsc_t
 	lv_obj_t *image = lv_image_create(btn);
 	lv_image_set_src(image, glyph);
 	lv_obj_add_style(image, &theme_style_icon, 0);
+	settingsrow_scale_corner_icon(image, cfg);
 	lv_obj_center(image);
 	return btn;
 }

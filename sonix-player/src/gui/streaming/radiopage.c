@@ -1096,6 +1096,7 @@ static void build_list_page(gui_config_t *cfg) {
 	sort_icon = lv_image_create(sort_btn);
 	lv_image_set_src(sort_icon, &icon_sort_az);
 	lv_obj_add_style(sort_icon, &theme_style_icon, 0);
+	settingsrow_scale_corner_icon(sort_icon, cfg);
 	lv_obj_center(sort_icon);
 
 	list_index = azindex_create(radiolist_screen, cfg, list_view, ROW_PITCH, list_window_update);
@@ -1126,6 +1127,7 @@ static lv_obj_t *corner_button(gui_config_t *cfg, int slot, const lv_image_dsc_t
 	lv_obj_t *icon = lv_image_create(button);
 	lv_image_set_src(icon, glyph);
 	lv_obj_add_style(icon, &theme_style_icon, 0);
+	settingsrow_scale_corner_icon(icon, cfg);
 	lv_obj_center(icon);
 
 	return button;

@@ -1204,6 +1204,7 @@ void filespage_init(gui_config_t *cfg) {
 	lv_image_set_src(newdir_glyph, &icon_folder_new);
 	lv_obj_add_style(newdir_glyph, &theme_style_icon, 0);
 	lv_obj_set_style_image_recolor_opa(newdir_glyph, LV_OPA_COVER, 0);
+	settingsrow_scale_corner_icon(newdir_glyph, cfg);
 	lv_obj_center(newdir_glyph);
 
 	int content_top = settingsrow_content_top(cfg);
@@ -1253,6 +1254,7 @@ void filespage_init(gui_config_t *cfg) {
 	lv_obj_t *cancel_icon = lv_image_create(cancel);
 	lv_image_set_src(cancel_icon, &icon_close);
 	lv_obj_add_style(cancel_icon, &theme_style_icon, 0);
+	settingsrow_scale_corner_icon(cancel_icon, cfg);
 	lv_obj_center(cancel_icon);
 
 	name_field = lv_textarea_create(name_layer);
@@ -1302,6 +1304,7 @@ void filespage_init(gui_config_t *cfg) {
 	lv_obj_t *pick_cancel_icon = lv_image_create(pick_cancel);
 	lv_image_set_src(pick_cancel_icon, &icon_close);
 	lv_obj_add_style(pick_cancel_icon, &theme_style_icon, 0);
+	settingsrow_scale_corner_icon(pick_cancel_icon, cfg);
 	lv_obj_center(pick_cancel_icon);
 
 	// The button first, so the list can be sized against what it leaves.

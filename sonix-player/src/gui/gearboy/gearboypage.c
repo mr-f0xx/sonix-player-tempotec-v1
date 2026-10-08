@@ -7,6 +7,7 @@
 
 #include "lvgl/lvgl.h"
 
+#include "src/gui/board_profile.h"
 #include "src/gui/fonts/fonts.h"
 #include "src/gui/gearboy/gearboyplay.h"
 #include "src/gui/gearboy/gearboysettings.h"
@@ -118,8 +119,8 @@ static void pick_view_cb(lv_event_t *e) {
 
 static lv_obj_t *make_view_choice(lv_obj_t *parent, const char *text, bool color) {
 	lv_obj_t *btn = lv_btn_create(parent);
-	lv_obj_set_size(btn, LV_SIZE_CONTENT, 56);
-	lv_obj_set_style_pad_hor(btn, 26, 0);
+	lv_obj_set_size(btn, LV_SIZE_CONTENT, bp_pick(40, 56));
+	lv_obj_set_style_pad_hor(btn, bp_pick(16, 26), 0);
 	lv_obj_set_style_radius(btn, LV_RADIUS_CIRCLE, 0); // Adwaita pill button
 	lv_obj_set_style_shadow_width(btn, 0, 0);
 	lv_obj_set_style_border_width(btn, 0, 0);
@@ -237,6 +238,7 @@ void gearboypage_init(gui_config_t *cfg) {
 		lv_obj_t *icon = lv_image_create(button);
 		lv_image_set_src(icon, &icon_music_settings);
 		lv_obj_add_style(icon, &theme_style_icon, 0);
+		settingsrow_scale_corner_icon(icon, cfg);
 		lv_obj_center(icon);
 	}
 

@@ -47,6 +47,15 @@ void settingsrow_place_corner_button(lv_obj_t *button, gui_config_t *cfg, int sl
 	lv_obj_align(button, LV_ALIGN_TOP_RIGHT, -cfg->padding - slot * (size + gap), cfg->padding + cfg->top_bar_height);
 }
 
+void settingsrow_scale_corner_icon(lv_obj_t *icon, gui_config_t *cfg) {
+	if (!icon || !cfg || cfg->screen_width >= 320) {
+		return;
+	}
+	// 192/256: the ~34 px sources become about 25 px, the size the Music
+	// page's gear settled on for the 240 px panel.
+	lv_image_set_scale(icon, 192);
+}
+
 // Stepped slider: a thin round track with a small mark on each intermediate
 // value. Slightly thicker than Adwaita's own trough: on a 480 px panel held at
 // arm's length, 6 px is a hairline with no room for the step marks.

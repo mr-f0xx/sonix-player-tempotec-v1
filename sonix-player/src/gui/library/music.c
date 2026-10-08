@@ -116,9 +116,7 @@ static lv_obj_t *corner_button(gui_config_t *cfg, int slot, const lv_image_dsc_t
 	lv_obj_t *icon = lv_image_create(button);
 	lv_image_set_src(icon, glyph);
 	lv_obj_add_style(icon, &theme_style_icon, 0);
-	if (cfg->screen_width < 320) {
-		lv_image_set_scale(icon, 192); // 34 px source -> about 25 px
-	}
+	settingsrow_scale_corner_icon(icon, cfg);
 	lv_obj_center(icon);
 
 	return button;

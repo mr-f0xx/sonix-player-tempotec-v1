@@ -285,6 +285,7 @@ void btreceiverpage_init(gui_config_t *cfg) {
 	lv_obj_t *codec_glyph = lv_image_create(codec_btn);
 	lv_image_set_src(codec_glyph, &icon_change_codec);
 	lv_obj_add_style(codec_glyph, &theme_style_icon, 0);
+	settingsrow_scale_corner_icon(codec_glyph, cfg);
 	lv_obj_center(codec_glyph);
 
 	// Straight into the flex flow with no alignment of its own: the container

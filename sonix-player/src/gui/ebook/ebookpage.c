@@ -302,6 +302,7 @@ static lv_obj_t *corner_button(gui_config_t *cfg, int slot, const lv_image_dsc_t
 	lv_image_set_src(icon, glyph);
 	// A style and not a recolour: a style follows the theme by itself.
 	lv_obj_add_style(icon, &theme_style_icon, 0);
+	settingsrow_scale_corner_icon(icon, cfg);
 	lv_obj_center(icon);
 	return button;
 }
@@ -380,6 +381,7 @@ void ebookpage_init(gui_config_t *cfg) {
 	lv_image_set_src(marks_icon, &icon_bookmark);
 	// A style and not a recolour: a style follows the theme by itself.
 	lv_obj_add_style(marks_icon, &theme_style_icon, 0);
+	settingsrow_scale_corner_icon(marks_icon, cfg);
 	lv_obj_center(marks_icon);
 	lv_obj_set_style_pad_row(container, TILE_GAP, 0);
 
