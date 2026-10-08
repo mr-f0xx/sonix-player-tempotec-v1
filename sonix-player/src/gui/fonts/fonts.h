@@ -73,15 +73,17 @@ bool fonts_init(void);
 // fonts_init().
 #define FONTS_TEXT_NORMAL 0
 #define FONTS_TEXT_LARGE 1
+#define FONTS_TEXT_SMALL 2 // keep existing saved values for normal and large
+#define FONTS_TEXT_COUNT 3
 
-// Whether the small sizes are drawn larger (see fonts.c).
-bool fonts_large_text(void);
+// The active text size (see fonts.c).
+int fonts_text_size(void);
 
 // Switches the size on the running interface: the objects above are drawn at
-// the other size from the next frame, and every page is measured and laid out
+// the new size from the next frame, and every page is measured and laid out
 // again. Does not touch the config. False, changing nothing, when the faces
-// cannot be opened at the new sizes.
-bool fonts_set_large_text(bool large);
+// cannot be opened at the new sizes or the value is invalid.
+bool fonts_set_text_size(int size);
 
 // Called after every such switch, for a page that worked something out from a
 // font when it was built and has to work it out again.
@@ -110,7 +112,7 @@ int fonts_choices(const char **ids, const char **labels, int max);
 // out). Never NULL.
 const char *fonts_choice(void);
 
-// Switches the face on the running interface, the way fonts_set_large_text()
+// Switches the face on the running interface, the way fonts_set_text_size()
 // switches the size: the objects above are refilled, every page is measured
 // and laid out again, and the fonts the old face was drawing through are
 // handed back. Does not touch the config.

@@ -209,20 +209,25 @@ static char summary[160] = "";
 // being told.
 typedef struct {
 	int size;
-	int large;
+	int drawn;
 } text_step_t;
 
 static const text_step_t LARGE_STEPS[] = {
 	{14, 17}, {16, 19}, {18, 21}, {20, 23}, {22, 25}, {24, 26},
 };
 
-static bool large_text;
+// Small steps down the same secondary sizes; headings and clocks stay put.
+static const text_step_t SMALL_STEPS[] = {
+	{14, 12}, {16, 14}, {18, 16}, {20, 18}, {22, 20}, {24, 22},
+};
+
+static int text_size = FONTS_TEXT_NORMAL;
 
 // The named font objects are used throughout the interface.  Remapping them
 // here is both safer and more complete than chasing hundreds of explicit
 // &font_ui_24 references: every page keeps its typography hierarchy, while a
 // "24" font no longer consumes a tenth of the V1's entire width per word.
-static int tempotec_drawn_size(int size, bool large) {
+static int tempotec_drawn_size(int size, int setting) {
 	int compact;
 	switch (size) {
 	case 14: compact = 14; break;
@@ -239,24 +244,25 @@ static int tempotec_drawn_size(int size, bool large) {
 	case 72: compact = 36; break;
 	default: compact = size; break;
 	}
-	// Large text remains useful on the small display, but one restrained step
-	// avoids recreating the overflows this profile exists to remove.
-	if (large && size <= 36) {
-		compact += 1;
+	// On the small panel one pixel each way makes a visible difference without
+	// upsetting the compact layout. Leave the oversized letters and clock alone.
+	if (size <= 36) {
+		compact += setting == FONTS_TEXT_LARGE ? 1 : setting == FONTS_TEXT_SMALL ? -1 : 0;
 	}
 	return compact;
 }
 
-static int drawn_size(int size, bool large) {
+static int drawn_size(int size, int setting) {
 	if (bp_is_tempotec_v1()) {
-		return tempotec_drawn_size(size, large);
+		return tempotec_drawn_size(size, setting);
 	}
-	if (!large) {
+	const text_step_t *steps = setting == FONTS_TEXT_LARGE ? LARGE_STEPS : SMALL_STEPS;
+	if (setting == FONTS_TEXT_NORMAL) {
 		return size;
 	}
 	for (size_t i = 0; i < sizeof(LARGE_STEPS) / sizeof(LARGE_STEPS[0]); i++) {
-		if (LARGE_STEPS[i].size == size) {
-			return LARGE_STEPS[i].large;
+		if (steps[i].size == size) {
+			return steps[i].drawn;
 		}
 	}
 	return size;
@@ -283,7 +289,7 @@ static face_t active;
 static face_t pending;
 static const face_t *building = &active;
 
-bool fonts_large_text(void) { return large_text; }
+int fonts_text_size(void) { return text_size; }
 
 // The extension that makes a file a face, and its length (0 for anything
 // else). FreeType reads both containers by itself.
@@ -546,8 +552,8 @@ typedef struct {
 	bool built;
 } font_set_t;
 
-// The two sizes of the face in force: FONTS_TEXT_NORMAL and FONTS_TEXT_LARGE.
-static font_set_t current_sets[2];
+// One lazily built set per text-size setting, all belonging to the active face.
+static font_set_t current_sets[FONTS_TEXT_COUNT];
 
 // The size being built while a face is switched. A whole set rather than a
 // pointer into the ones above, so that the face on screen is still complete
@@ -752,34 +758,39 @@ static void free_font_set(font_set_t *set) {
 	set->built = false;
 }
 
-// Fills `set` with one size of the face `building` describes. `share_from` is
-// the other size's set when it belongs to the same face: a size that one
-// already draws at the same pixels is borrowed rather than opened twice, and
-// stays the property of the set that opened it. NULL while a face is being
-// switched to, where nothing on screen is the new face.
-static bool build_font_set(font_set_t *set, bool large, const font_set_t *share_from) {
+// Fills `set` with the requested size of the face `building` describes.
+// Sizes drawn at the same pixels can borrow fonts from an already-built set
+// of this face. Borrowed entries have no heap to free, and their owner stays
+// alive until all sets are replaced together on a face change. A staged new
+// face cannot borrow from the current one.
+static bool build_font_set(font_set_t *set, int setting, bool reuse_current) {
 	for (size_t i = 0; i < UI_FONT_COUNT; i++) {
 		const ui_font_t *ui = &ui_fonts[i];
-		int size = drawn_size(ui->size, large);
-		if (share_from && share_from->built && size == ui->size && drawn_size(ui->size, !large) == size) {
-			set->fonts[i] = share_from->fonts[i];
-			set->heap_len[i] = 0;
-			continue;
+		int size = drawn_size(ui->size, setting);
+		bool borrowed = false;
+		if (reuse_current) {
+			for (int other = 0; other < FONTS_TEXT_COUNT; other++) {
+				if (current_sets[other].built && drawn_size(ui->size, other) == size) {
+					set->fonts[i] = current_sets[other].fonts[i];
+					borrowed = true;
+					break;
+				}
+			}
 		}
-		if (!open_chain(ui, size, set, i)) {
+		if (!borrowed && !open_chain(ui, size, set, i)) {
 			return false;
 		}
 	}
 	return true;
 }
 
-// The other size of the face in force, built on first use.
-static bool build_current_size(bool large) {
-	if (current_sets[large].built) {
+// A size of the face in force, built on first use.
+static bool build_current_size(int setting) {
+	if (current_sets[setting].built) {
 		return true;
 	}
-	font_set_t *set = &current_sets[large];
-	if (!build_font_set(set, large, current_sets[!large].built ? &current_sets[!large] : NULL)) {
+	font_set_t *set = &current_sets[setting];
+	if (!build_font_set(set, setting, true)) {
 		free_font_set(set);
 		return false;
 	}
@@ -890,21 +901,25 @@ static void refresh_interface(const int32_t *old_line) {
 	}
 }
 
-bool fonts_set_large_text(bool large) {
-	if (large == large_text) {
+bool fonts_set_text_size(int setting) {
+	if (setting < 0 || setting >= FONTS_TEXT_COUNT) {
+		return false;
+	}
+	if (setting == text_size) {
 		return true;
 	}
-	if (!build_current_size(large)) {
+	if (!build_current_size(setting)) {
 		return false;
 	}
 
 	int32_t old_line[UI_FONT_COUNT];
 	measure_line_heights(old_line);
-	copy_into_objects(&current_sets[large]);
-	large_text = large;
+	copy_into_objects(&current_sets[setting]);
+	text_size = setting;
 
 	refresh_interface(old_line);
-	fprintf(stderr, "fonts: %s text\n", large ? "large" : "normal");
+	fprintf(stderr, "fonts: %s text\n", setting == FONTS_TEXT_LARGE ? "large" :
+			setting == FONTS_TEXT_SMALL ? "small" : "normal");
 	return true;
 }
 
@@ -950,7 +965,7 @@ bool fonts_set_face(const char *id) {
 	pending = wanted;
 	building = &pending;
 	memset(&staged_set, 0, sizeof(staged_set));
-	bool built = build_font_set(&staged_set, large_text, NULL);
+	bool built = build_font_set(&staged_set, text_size, false);
 	building = &active;
 
 	if (!built) {
@@ -970,11 +985,12 @@ bool fonts_set_face(const char *id) {
 	// label can ask for a glyph from a font that has been handed back.
 	const face_t previous = active;
 	active = wanted;
-	free_font_set(&current_sets[0]);
-	free_font_set(&current_sets[1]);
-	current_sets[large_text] = staged_set;
+	for (int i = 0; i < FONTS_TEXT_COUNT; i++) {
+		free_font_set(&current_sets[i]);
+	}
+	current_sets[text_size] = staged_set;
 	memset(&staged_set, 0, sizeof(staged_set));
-	copy_into_objects(&current_sets[large_text]);
+	copy_into_objects(&current_sets[text_size]);
 
 	refresh_interface(old_line);
 
@@ -1070,12 +1086,15 @@ bool fonts_init(void) {
 	}
 	building = &active;
 
-	large_text = config_get_int("ui", "text_size", FONTS_TEXT_NORMAL) == FONTS_TEXT_LARGE;
-	if (!build_current_size(large_text)) {
+	text_size = config_get_int("ui", "text_size", FONTS_TEXT_NORMAL);
+	if (text_size < 0 || text_size >= FONTS_TEXT_COUNT) {
+		text_size = FONTS_TEXT_NORMAL;
+	}
+	if (!build_current_size(text_size)) {
 		return false;
 	}
 	// Fill the static objects the interface points at.
-	copy_into_objects(&current_sets[large_text]);
+	copy_into_objects(&current_sets[text_size]);
 
 	build_summary();
 
@@ -1087,7 +1106,8 @@ bool fonts_init(void) {
 				 active.regular_file);
 	}
 	fprintf(stderr, "fonts: %d sizes from %s (%s)%s\n", (int)UI_FONT_COUNT, from, summary,
-			large_text ? ", large text" : "");
+			text_size == FONTS_TEXT_LARGE ? ", large text" :
+			text_size == FONTS_TEXT_SMALL ? ", small text" : "");
 	return true;
 }
 

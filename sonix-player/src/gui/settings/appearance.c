@@ -24,7 +24,7 @@ static lv_obj_t *btn_clock[4]; // left / centre / right / hidden
 static lv_obj_t *btn_accent[THEME_ACCENT_COUNT]; // the coloured circles
 static lv_obj_t *tint_toggle;
 static lv_obj_t *battery_percent_toggle;
-static lv_obj_t *text_size_pill[2]; // normal / large
+static lv_obj_t *text_size_pill[FONTS_TEXT_COUNT]; // normal / large / small
 // The status bar draws the battery either way; this setting is only about the
 // number beside it, and is on by default.
 static void battery_percent_cb(lv_event_t *e) {
@@ -43,19 +43,19 @@ static void dynamic_tint_cb(lv_event_t *e) {
 }
 
 static void refresh_text_size_pills(void) {
-	int active = fonts_large_text() ? FONTS_TEXT_LARGE : FONTS_TEXT_NORMAL;
-	for (int i = 0; i < 2; i++) {
+	int active = fonts_text_size();
+	for (int i = 0; i < FONTS_TEXT_COUNT; i++) {
 		settingsrow_pill_active(text_size_pill[i], i == active);
 	}
 }
 
-// Applied at once, on every page: see fonts_set_large_text().
+// Applied at once, on every page: see fonts_set_text_size().
 static void text_size_cb(lv_event_t *e) {
 	if (switcher_back_drag_active()) {
 		return;
 	}
 	int size = (int)(intptr_t)lv_event_get_user_data(e);
-	if (!fonts_set_large_text(size == FONTS_TEXT_LARGE)) {
+	if (!fonts_set_text_size(size)) {
 		return;
 	}
 	config_set_int("ui", "text_size", size);
@@ -394,10 +394,12 @@ void appearance_init(gui_config_t *cfg) {
 	lv_obj_set_style_text_font(tint_note, &font_ui_22, 0);
 	lv_label_set_text(tint_note, tr("appearance_dynamic_tint_note"));
 
-	// How big the small text on every page is: the secondary lines, notes,
-	// clocks and counters. See fonts.c for which sizes grow and by how much.
+	// How big the text on every page is: secondary lines, notes, clocks and
+	// counters. See fonts.c for which sizes change and by how much.
 	lv_obj_t *text_size_pills;
 	settingsrow_pills(container, "appearance_text_size", &text_size_pills);
+	text_size_pill[FONTS_TEXT_SMALL] =
+		settingsrow_pill(text_size_pills, "appearance_text_small", FONTS_TEXT_SMALL, text_size_cb);
 	text_size_pill[FONTS_TEXT_NORMAL] =
 		settingsrow_pill(text_size_pills, "appearance_text_normal", FONTS_TEXT_NORMAL, text_size_cb);
 	text_size_pill[FONTS_TEXT_LARGE] =
