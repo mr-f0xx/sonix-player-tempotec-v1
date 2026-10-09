@@ -91,13 +91,15 @@ static void *write_main(void *arg) {
 			break;
 		}
 
-		// The stock player's own command, %-256s and all: the C format pads
-		// the marker out to 256 columns, and nandwrite's -p fills the rest of
-		// the page. The shell drops the padding again when it splits the
-		// arguments, which is why only the bytes that matter land.
+		// The stock player's own pipeline, %-256s and all, but quoted: the
+		// marker carries a space between its two fields now, and an unquoted
+		// one is split into words there, which shell printf then prints back
+		// to back -- "theme:3logo:2", the second field destroyed. Quoted, the
+		// padded marker is one argument and reaches the flash as written;
+		// nandwrite's -p fills the rest of the page as before.
 		char write_cmd[512];
-		snprintf(write_cmd, sizeof(write_cmd), "printf %-256s | nandwrite -q -s %s -p %s -", want, MARKER_OFFSET,
-				 MTD_DEVICE);
+		snprintf(write_cmd, sizeof(write_cmd), "printf '%%-256s' '%s' | nandwrite -q -s %s -p %s -", want,
+				 MARKER_OFFSET, MTD_DEVICE);
 		if (system(write_cmd) != 0) {
 			fprintf(stderr, "bootlogo: nandwrite failed\n");
 			break;
