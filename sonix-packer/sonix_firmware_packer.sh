@@ -391,6 +391,179 @@ build_one() {
 	say ""
 
 	# ==========================================================================
+	# 5a. The boot script learns the extra boot screens
+	# ==========================================================================
+	#
+	# The script that draws the logo picks one of three files from one field of
+	# the flash marker, and four boot screens do not fit in three branches. So
+	# a block of our own goes in just before the vendor's display logic: it
+	# reads the marker's second field, at byte 8 of the same block, draws Space
+	# or Travelling in space with the vendor's own display command, and exits;
+	# every other marker leaves the stock chain untouched. Inserted rather than
+	# shipped whole because the script is the vendor's and stays the vendor's.
+	#
+	# Nothing about that script is assumed -- not its name, not its display
+	# command, not the shape of its branches. The script is whichever under
+	# etc/init.d mentions a logo jpeg; the display command is the words the
+	# script itself puts in front of a logo path; the block goes in before the
+	# first line that mentions one. And everything found is written to
+	# boot-script-report.txt, because a patch that silently does not apply is
+	# worse than one that shouts.
+	#
+	# The [ -f ] guards and the && exit are the fallback: a missing picture, or
+	# a display command that fails, hands control back to the stock chain, so
+	# what a device can lose is the choice, not the boot.
+	step "[$MODEL_NAME] teaching the boot script the extra boot screens"
+
+	REPORT="$SCRIPT_DIR/boot-script-report.txt"
+	{
+		echo "== $MODEL_NAME"
+		echo "-- init scripts mentioning a logo jpeg or the marker:"
+		grep -lE 'logo[0-9a-z_]*\.jpeg|0x20000' "$SQUASH_DIR"/etc/init.d/* 2>/dev/null |
+			sed 's|.*/|   |' || echo "   (none)"
+	} >> "$REPORT"
+
+	BOOT_SCRIPT=""
+	for cand in "$SQUASH_DIR"/etc/init.d/*; do
+		[ -f "$cand" ] || continue
+		if grep -qE 'logo[0-9a-z_]*\.jpeg' "$cand"; then
+			BOOT_SCRIPT="$cand"
+			break
+		fi
+	done
+	if [ -z "$BOOT_SCRIPT" ]; then
+		for cand in "$SQUASH_DIR"/etc/init.d/*; do
+			[ -f "$cand" ] || continue
+			if grep -q "0x20000" "$cand"; then
+				BOOT_SCRIPT="$cand"
+				break
+			fi
+		done
+	fi
+
+	if [ -z "$BOOT_SCRIPT" ]; then
+		warn "no init script mentions a logo jpeg or the marker here."
+		warn "the boot screen setting will only offer what the stock script can draw."
+		echo "-- no boot script found; nothing patched." >> "$REPORT"
+	elif grep -q "sonix boot screen choice" "$BOOT_SCRIPT"; then
+		say "    $(basename "$BOOT_SCRIPT") already carries the choice block"
+		echo "-- $(basename "$BOOT_SCRIPT"): already carried the choice block." >> "$REPORT"
+	else
+		# The display command with its arguments: everything on the first line
+		# carrying a logo path, from just after the last shell keyword up to
+		# just before the path. "then cmd_jpeg_display /etc/logo1.jpeg" gives
+		# cmd_jpeg_display; a vendor that passes flags keeps them.
+		DISPLAY_CMD="$(awk '
+			taken == 0 {
+				for (i = 1; i <= NF; i++) {
+					f = $i; gsub(/["\047]/, "", f)
+					if (f ~ /logo[0-9a-z_]*\.jpeg$/) {
+						cmd = ""
+						for (j = i - 1; j >= 1; j--) {
+							t = $j
+							if (t == "then" || t == "else" || t == "do" || t == "if" ||
+							    t == "elif" || t == ";" || t == "&&" || t == "||" ||
+							    t ~ /=$/ || t ~ /\)$/ || t ~ /^\(/) break
+							cmd = (cmd == "" ? t : t " " cmd)
+						}
+						if (cmd != "" && cmd != "[" && cmd != "[[" && cmd != "test") { print cmd; taken = 1; exit }
+					}
+				}
+			}
+		' "$BOOT_SCRIPT")"
+		# A script that keeps the path in a variable and displays that: the same
+		# walk, ending at the variable instead of at a path.
+		if [ -z "$DISPLAY_CMD" ]; then
+			DISPLAY_CMD="$(awk '
+				taken == 0 {
+					for (i = 1; i <= NF; i++) {
+						f = $i; gsub(/["\047]/, "", f)
+						if (f ~ /^\$[A-Za-z_]/ || f ~ /^\{?[A-Za-z_][A-Za-z0-9_]*\}$/ && seen[f]) {
+							cmd = ""
+							for (j = i - 1; j >= 1; j--) {
+								t = $j
+								if (t == "then" || t == "else" || t == "do" || t == "if" ||
+								    t == "elif" || t == ";" || t == "&&" || t == "||" ||
+								    t ~ /=$/ || t ~ /\)$/ || t ~ /^\(/) break
+								cmd = (cmd == "" ? t : t " " cmd)
+							}
+							if (cmd != "" && cmd != "[" && cmd != "[[" && cmd != "test") { print cmd; taken = 1; exit }
+						}
+						if ($i ~ /^[A-Za-z_][A-Za-z0-9_]*=/) { v = $i; sub(/=.*/, "", v); seen[v] = 1 }
+					}
+				}
+			' "$BOOT_SCRIPT")"
+		fi
+		[ -n "$DISPLAY_CMD" ] || DISPLAY_CMD="cmd_jpeg_display"
+
+		# How the block leaves the vendor script running. The V1 display logic
+		# lives in a function that, after drawing, raises the panel backlight;
+		# an exit there would draw our picture onto a dark panel. So a display
+		# command that is a plain name is shadowed with a no-op function once
+		# ours has drawn: the vendor's own branches then run to the end,
+		# backlight and all, and draw nothing over ours. A command that is a
+		# path cannot be shadowed -- a function cannot wear a slash -- and
+		# exits instead, keeping the picture at the cost of the vendor's tail.
+		# A path cannot be a function name, so a display command that is one
+		# exits after drawing instead of shadowing, at the cost of whatever
+		# the vendor script does after its branches -- on the V1, that is the
+		# backlight, which is why the plain name matters.
+		if [ "${DISPLAY_CMD#/}" = "$DISPLAY_CMD" ]; then
+			LEAVE="$DISPLAY_CMD() { :; }"
+		else
+			LEAVE="exit 0"
+		fi
+
+		# The second field is read as part of one aligned 14-byte read, the same
+		# call shape the vendor's own read uses, and split in the shell: an
+		# unaligned -s is one more thing a vendor nanddump could stumble over,
+		# and this has been wrong often enough to owe us a trace. The trace
+		# file is what the player's Developer options page shows after a boot.
+		BOOT_BLOCK="# --- sonix boot screen choice (added by the firmware packer) ---
+boot_raw=\$(nanddump -q -s 0x20000 -l 14 /dev/mtd5 -a 2>/dev/null)
+boot_sel=\${boot_raw#* }
+echo \"sel=\$boot_sel raw=\$boot_raw\" > /tmp/.bootlogo_trace 2>/dev/null
+if [ \"\$boot_sel\" = \"logo:2\" ] && [ -f /etc/logo_space.jpeg ]; then $DISPLAY_CMD /etc/logo_space.jpeg && { echo \"drawn=space\" >> /tmp/.bootlogo_trace; boot_drawn=1; $LEAVE; }; fi
+if [ \"\$boot_sel\" = \"logo:3\" ] && [ -f /etc/logo_travelling.jpeg ]; then $DISPLAY_CMD /etc/logo_travelling.jpeg && { echo \"drawn=travelling\" >> /tmp/.bootlogo_trace; boot_drawn=1; $LEAVE; }; fi
+[ -n \"\$boot_drawn\" ] || echo \"drawn=stock-chain\" >> /tmp/.bootlogo_trace 2>/dev/null
+# --- end sonix boot screen choice ---
+"
+		# The anchor: the line that reads the marker, a plain assignment at the
+		# top of the script and a statement boundary in every shape a shell
+		# script takes -- inside a case arm, which the first logo path can be,
+		# an inserted if would be a syntax error that costs the whole script.
+		# Failing that the first logo path; failing that the top.
+		ANCHOR="$(grep -n "nanddump" "$BOOT_SCRIPT" | head -1 | cut -d: -f1)"
+		[ -n "$ANCHOR" ] || ANCHOR="$(grep -nE 'logo[0-9a-z_]*\.jpeg' "$BOOT_SCRIPT" | head -1 | cut -d: -f1)"
+		[ -n "$ANCHOR" ] || ANCHOR=1
+
+		awk -v block="$BOOT_BLOCK" -v at="$ANCHOR" '
+			NR == at { printf "%s", block }
+			{ print }
+		' "$BOOT_SCRIPT" > "$BOOT_SCRIPT.packer.tmp"
+
+		grep -q "sonix boot screen choice" "$BOOT_SCRIPT.packer.tmp" ||
+			die "the choice block was not inserted into $(basename "$BOOT_SCRIPT")."
+
+		# cat onto the file rather than mv over it: the init script's mode and
+		# owner are the stock ones and the image boots through them.
+		cat "$BOOT_SCRIPT.packer.tmp" > "$BOOT_SCRIPT"
+		rm -f "$BOOT_SCRIPT.packer.tmp"
+		chmod 755 "$BOOT_SCRIPT"
+		say "    $(basename "$BOOT_SCRIPT"): choice block at line $ANCHOR, display command \"$DISPLAY_CMD\""
+
+		{
+			echo "-- patched $(basename "$BOOT_SCRIPT") at line $ANCHOR; display command: $DISPLAY_CMD"
+			echo "-- the logo files in the image:"
+			ls -l "$SQUASH_DIR"/etc/logo*.jpeg 2>/dev/null | sed 's|.*/||; s/^/   /' || echo "   (none)"
+			echo "-- the script as it goes into the image:"
+			sed -n '1,44p' "$BOOT_SCRIPT" | sed 's/^/   /'
+		} >> "$REPORT"
+	fi
+	echo "" >> "$REPORT"
+	say ""
+
+	# ==========================================================================
 	# 5b. The modes that decide whether any of this runs
 	# ==========================================================================
 	#

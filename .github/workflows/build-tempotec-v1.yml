@@ -29,7 +29,9 @@ on:
       - arena/**
 
 permissions:
-  contents: read
+  # write: the last step publishes the boot-script report back to the
+  # working branch, [skip ci] and all, so the next build never flies blind.
+  contents: write
 
 concurrency:
   group: tempotec-v1-${{ github.workflow }}-${{ github.ref }}
@@ -143,6 +145,12 @@ jobs:
              sonix-player/sonix_launch "$out/"
           cp "$RUNNER_TEMP/v1-stock-validation.txt" "$out/STOCK-VALIDATION.txt"
           cp "$RUNNER_TEMP/v1-output-validation.txt" "$out/OUTPUT-VALIDATION.txt"
+          # What the packer found in the stock boot script and what it put
+          # there: the one page that tells a boot-screen patch story straight.
+          if [ -f sonix-packer/boot-script-report.txt ]; then
+            cp sonix-packer/boot-script-report.txt "$out/BOOT-SCRIPT-REPORT.txt"
+            { echo "## Boot script patch report"; echo '```'; cat sonix-packer/boot-script-report.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          fi
           image_sha256="$(sha256sum sonix-packer/v1.upt | awk '{print $1}')"
           image_md5="$(md5sum sonix-packer/v1.upt | awk '{print $1}')"
           cat > "$out/BUILD-REPORT.txt" <<EOF
@@ -170,3 +178,14 @@ jobs:
           if-no-files-found: error
           compression-level: 0
           retention-days: 14
+
+      - name: Publish the boot-script report to the branch
+        run: |
+          [ -f sonix-packer/boot-script-report.txt ] || exit 0
+          mkdir -p docs/ci
+          cp sonix-packer/boot-script-report.txt docs/ci/boot-script-report.txt
+          git config user.name "sonix-ci"
+          git config user.email "sonix-ci@users.noreply.github.com"
+          git add docs/ci/boot-script-report.txt
+          git commit -m "ci: what the packer found in the stock boot script [skip ci]" || exit 0
+          git push origin "HEAD:${GITHUB_REF_NAME}" || echo "report push skipped (branch busy)"

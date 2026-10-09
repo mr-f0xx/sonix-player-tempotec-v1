@@ -15,11 +15,13 @@
 #include "src/gui/shell/topbar.h"
 #include "src/system/core/config.h"
 #include "src/system/core/lang.h"
+#include "src/system/device/bootlogo.h"
 
 lv_obj_t *appearance_screen;
 
 static lv_obj_t *btn_dark;
 static lv_obj_t *btn_light;
+static lv_obj_t *btn_boot[4]; // Stock / Retrospace / Space / Travelling in space
 static lv_obj_t *btn_clock[4]; // left / centre / right / hidden
 static lv_obj_t *btn_accent[THEME_ACCENT_COUNT]; // the coloured circles
 static lv_obj_t *tint_toggle;
@@ -251,6 +253,56 @@ static void pick_cb(lv_event_t *e) {
 	refresh_buttons();
 }
 
+// ---------------------------------------------------------------------------
+// The boot screen: the picture the next power-on opens with
+//
+// Four choices -- Stock, Retrospace, Space and Travelling in space -- painted
+// like the theme pair above. The choice is the one setting on this page that
+// is not only a config value: it also goes into the flash marker the boot
+// script reads, because that script runs before any filesystem a config could
+// live on is mounted. What is picked here is therefore what the next boot
+// shows, and nothing before it.
+// ---------------------------------------------------------------------------
+
+static void refresh_boot_buttons(void) {
+	int choice = theme_boot_screen();
+	for (int i = 0; i < 4; i++) {
+		if (!btn_boot[i]) {
+			continue;
+		}
+		bool on = i == choice;
+		lv_obj_set_style_bg_color(btn_boot[i], on ? theme()->accent : theme()->surface_pressed, 0);
+		lv_obj_set_style_text_color(lv_obj_get_child(btn_boot[i], 0),
+									on ? lv_color_white() : theme()->text_primary, 0);
+	}
+}
+
+static void boot_pick_cb(lv_event_t *e) {
+	int choice = (int)(intptr_t)lv_event_get_user_data(e);
+	theme_set_boot_screen(choice);
+	refresh_boot_buttons();
+}
+
+// The two names are not translated, the way a font's name is not: they are
+// the names this setting gives the two pictures, and they are the words the
+// flash notes and the changelog use.
+static lv_obj_t *make_boot_choice(lv_obj_t *parent, const char *text, int choice, bool compact) {
+	lv_obj_t *btn = lv_btn_create(parent);
+	lv_obj_set_size(btn, LV_SIZE_CONTENT, compact ? 40 : 64);
+	lv_obj_set_style_pad_hor(btn, compact ? 14 : 34, 0);
+	lv_obj_set_style_radius(btn, LV_RADIUS_CIRCLE, 0); // Adwaita pill button
+	lv_obj_set_style_shadow_width(btn, 0, 0);
+	lv_obj_set_style_border_width(btn, 0, 0);
+	lv_obj_add_event_cb(btn, boot_pick_cb, LV_EVENT_CLICKED, (void *)(intptr_t)choice);
+
+	lv_obj_t *label = lv_label_create(btn);
+	lv_label_set_text(label, text);
+	lv_obj_set_style_text_font(label, compact ? &font_ui_18 : &font_ui_24, 0);
+	lv_obj_center(label);
+
+	return btn;
+}
+
 static lv_obj_t *make_choice(lv_obj_t *parent, const char *text, bool dark, bool compact) {
 	lv_obj_t *btn = lv_btn_create(parent);
 	lv_obj_set_size(btn, LV_SIZE_CONTENT, compact ? 40 : 64);
@@ -306,7 +358,59 @@ void appearance_init(gui_config_t *cfg) {
 	btn_dark = make_choice(row, "appearance_dark", true, compact);
 	btn_light = make_choice(row, "appearance_light", false, compact);
 
-	// A second card: where the clock sits in the status bar.
+	// A second card: which picture the next power-on shows. Unlike every
+	// other choice on this page it is not only a config value -- it also
+	// goes into the flash marker the boot script reads, so it takes effect
+	// at the next boot and not a moment before.
+	lv_obj_t *boot_card = lv_obj_create(container);
+	lv_obj_set_width(boot_card, lv_pct(100));
+	lv_obj_set_height(boot_card, LV_SIZE_CONTENT);
+	lv_obj_add_style(boot_card, &theme_style_card, 0);
+	lv_obj_set_style_radius(boot_card, compact ? 10 : 12, 0);
+	lv_obj_set_style_border_width(boot_card, 0, 0);
+	lv_obj_set_style_shadow_width(boot_card, 0, 0);
+	lv_obj_set_style_pad_all(boot_card, compact ? 8 : 20, 0);
+	lv_obj_set_style_pad_gap(boot_card, compact ? 8 : 18, 0);
+	lv_obj_set_scrollable(boot_card, false);
+	lv_obj_set_event_bubble(boot_card, true);
+	lv_obj_set_flex_flow(boot_card, LV_FLEX_FLOW_COLUMN);
+	lv_obj_set_flex_align(boot_card, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
+
+	lv_obj_t *boot_name = lv_label_create(boot_card);
+	lv_label_set_text(boot_name, tr("appearance_boot_screen"));
+	lv_obj_add_style(boot_name, &theme_style_text, 0);
+	lv_obj_set_style_text_font(boot_name, compact ? &font_ui_18 : &font_ui_24, 0);
+
+	lv_obj_t *boot_row = lv_obj_create(boot_card);
+	lv_obj_set_size(boot_row, lv_pct(100), LV_SIZE_CONTENT);
+	lv_obj_set_style_bg_opa(boot_row, 0, 0);
+	lv_obj_set_style_border_width(boot_row, 0, 0);
+	lv_obj_set_style_pad_all(boot_row, 0, 0);
+	lv_obj_set_style_pad_gap(boot_row, compact ? 6 : 14, 0);
+	lv_obj_set_scrollable(boot_row, false);
+	lv_obj_set_event_bubble(boot_row, true);
+	// Wrapped like the clock row: four pills, two of them long words, do not
+	// fit across one line on either panel, and a pill that does not fit is
+	// drawn off the card rather than shrunk.
+	lv_obj_set_flex_flow(boot_row, LV_FLEX_FLOW_ROW_WRAP);
+	lv_obj_set_flex_align(boot_row, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_START);
+
+	btn_boot[BOOTLOGO_STOCK] = make_boot_choice(boot_row, "Stock", BOOTLOGO_STOCK, compact);
+	btn_boot[BOOTLOGO_RETROSPACE] = make_boot_choice(boot_row, "Retrospace", BOOTLOGO_RETROSPACE, compact);
+	btn_boot[BOOTLOGO_SPACE] = make_boot_choice(boot_row, "Space", BOOTLOGO_SPACE, compact);
+	btn_boot[BOOTLOGO_TRAVELLING] =
+		make_boot_choice(boot_row, "Travelling in space", BOOTLOGO_TRAVELLING, compact);
+
+	// Under the card, like the other notes on this page: when the change
+	// becomes visible.
+	lv_obj_t *boot_note = lv_label_create(container);
+	lv_label_set_long_mode(boot_note, LV_LABEL_LONG_WRAP);
+	lv_obj_set_width(boot_note, lv_pct(100));
+	lv_obj_add_style(boot_note, &theme_style_text_dim, 0);
+	lv_obj_set_style_text_font(boot_note, &font_ui_22, 0);
+	lv_label_set_text(boot_note, tr("appearance_boot_screen_note"));
+
+	// A third card: where the clock sits in the status bar.
 	lv_obj_t *clock_card = lv_obj_create(container);
 	lv_obj_set_width(clock_card, lv_pct(100));
 	lv_obj_set_height(clock_card, LV_SIZE_CONTENT);
@@ -345,7 +449,7 @@ void appearance_init(gui_config_t *cfg) {
 	btn_clock[TOPBAR_CLOCK_RIGHT] = make_clock_choice(clock_row, "right", TOPBAR_CLOCK_RIGHT, compact);
 	btn_clock[TOPBAR_CLOCK_HIDDEN] = make_clock_choice(clock_row, "hide", TOPBAR_CLOCK_HIDDEN, compact);
 
-	// A third card: the accent colour, as two rows of coloured circles.
+	// A fourth card: the accent colour, as two rows of coloured circles.
 	lv_obj_t *accent_card = lv_obj_create(container);
 	lv_obj_set_width(accent_card, lv_pct(100));
 	lv_obj_set_height(accent_card, LV_SIZE_CONTENT);
@@ -431,10 +535,12 @@ void appearance_init(gui_config_t *cfg) {
 	font_pills_rebuild();
 
 	refresh_buttons();
+	refresh_boot_buttons();
 	refresh_clock_buttons();
 	refresh_accent_buttons();
 	refresh_text_size_pills();
 	theme_register_refresh(refresh_buttons);
+	theme_register_refresh(refresh_boot_buttons);
 	theme_register_refresh(refresh_text_size_pills);
 	theme_register_refresh(refresh_clock_buttons);
 	theme_register_refresh(refresh_accent_buttons);
