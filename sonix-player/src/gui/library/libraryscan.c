@@ -34,6 +34,14 @@
 #define SCAN_BUTTON_HEIGHT bp_pick(52, 68)
 #define SCAN_BUTTON_BOTTOM bp_pick(12, 30)
 #define SCAN_CONTENT_GAP bp_pick(10, 16)
+// The space between the four things in the middle of the page: the note and
+// the three lines of text under it.
+#define SCAN_ROW_GAP bp_pick(6, 10)
+// The note is sized from what those lines leave (see scan_fit_note() below);
+// these are only the bounds. Its source art is 128 px, which is what the
+// 480 px players draw it at.
+#define SCAN_NOTE_MAX bp_pick(96, 128)
+#define SCAN_NOTE_MIN 32
 
 lv_obj_t *libraryscan_screen;
 
@@ -42,6 +50,8 @@ static lv_obj_t *status_label;
 static lv_obj_t *progress_label;
 static lv_obj_t *ok_button;
 static lv_obj_t *cancel_button;
+static lv_obj_t *scan_note;
+static lv_obj_t *scan_container;
 static lv_timer_t *poll_timer;
 static char shown_file[512];
 
@@ -483,6 +493,76 @@ static lv_obj_t *make_button(lv_obj_t *parent, const char *text, lv_color_t colo
 }
 
 // ---------------------------------------------------------------------------
+// Fitting the note
+//
+// The note is the one thing on this page that can give way: the count, the
+// status line and the name of the file being read are text, and a cut-off line
+// at the bottom is exactly what this page is there to report.
+//
+// Its source art is 128 px, nearly the whole of the gap between the page title
+// and the button on the V1 -- more than the three lines of text put together.
+// A flex column centres its overflow, so the note used to run up under the
+// title while the file name was clipped at the other end: clipped and not
+// pushed off, because this container does not scroll.
+//
+// So the note takes what the text leaves. Both its draw scale and its layout
+// box are set: lv_image_set_scale() alone would leave the image's intrinsic
+// 128 px box in the column and push the text out just the same (gridpage.c
+// has the same story for the menu art). On the V1 the fit lands at about a
+// quarter of the panel width, the proportion the art has on the 480 px
+// players, and on those the result is the 128 px it was always drawn at.
+// ---------------------------------------------------------------------------
+
+static void scan_fit_note(void) {
+	if (!scan_container || !scan_note || !count_label || !status_label || !progress_label) {
+		return;
+	}
+
+	// On the V1 the file name is one line ending in an ellipsis, the way
+	// LV_LABEL_LONG_DOT is meant to draw it. A label left to size itself never
+	// overflows its own height, so LVGL never brings the dots in and a long
+	// name simply wraps to a second line -- which is the line this page was
+	// clipping. Pinning the height gives the ellipsis a boundary, as the tile
+	// captions do in gridpage.c.
+	if (bp_is_tempotec_v1()) {
+		lv_obj_set_height(progress_label, lv_font_get_line_height(&font_ui_16));
+		lv_obj_set_style_text_line_space(progress_label, 0, 0);
+	}
+
+	// The file name is hidden between files and a hidden object takes no part
+	// in the layout, so it is measured with the flag off: the page has to be
+	// laid out for the moment the name is there. The status sentence is
+	// measured too, because in some languages it wraps to two lines.
+	bool hidden = lv_obj_is_hidden(progress_label);
+	lv_obj_set_hidden(progress_label, false);
+	lv_obj_update_layout(scan_container);
+	int text = lv_obj_get_height(count_label) + lv_obj_get_height(status_label) +
+			   lv_obj_get_height(progress_label);
+	if (hidden) {
+		lv_obj_set_hidden(progress_label, true);
+	}
+
+	// Note, count, status line, file name: three gaps between the four, and
+	// the note's own pad_bottom under it. `size` is the side of the note as it
+	// is drawn; the box it takes in the column is that plus the padding, which
+	// is what lv_obj_set_size() sizes.
+	int pad_bottom = lv_obj_get_style_pad_bottom(scan_note, 0);
+	int size = lv_obj_get_height(scan_container) - lv_obj_get_style_pad_top(scan_container, 0) -
+			   lv_obj_get_style_pad_bottom(scan_container, 0) - text - SCAN_ROW_GAP * 3 - pad_bottom;
+
+	if (size > SCAN_NOTE_MAX) {
+		size = SCAN_NOTE_MAX;
+	}
+	if (size < SCAN_NOTE_MIN) {
+		size = SCAN_NOTE_MIN;
+	}
+
+	lv_obj_set_size(scan_note, size, size + pad_bottom);
+	lv_image_set_inner_align(scan_note, LV_IMAGE_ALIGN_CENTER);
+	lv_image_set_scale(scan_note, (uint32_t)((int64_t)LV_SCALE_NONE * size / (int)icon_music_note.header.h));
+}
+
+// ---------------------------------------------------------------------------
 // What the user is told about the runs on the scan thread
 //
 // Detect changes works in the background: a glyph in the status bar while it
@@ -612,16 +692,18 @@ void libraryscan_init(gui_config_t *cfg) {
 	lv_obj_set_style_border_width(container, 0, 0);
 	lv_obj_set_style_radius(container, 0, 0);
 	lv_obj_set_style_pad_all(container, cfg->padding, 0);
-	lv_obj_set_style_pad_gap(container, bp_pick(6, 10), 0);
+	lv_obj_set_style_pad_gap(container, SCAN_ROW_GAP, 0);
 	lv_obj_set_scrollable(container, false);
 	lv_obj_set_flex_flow(container, LV_FLEX_FLOW_COLUMN);
 	lv_obj_set_flex_align(container, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+	scan_container = container;
 
 	lv_obj_t *note = lv_image_create(container);
 	lv_image_set_src(note, &icon_music_note);
 	lv_obj_add_style(note, &theme_style_icon, 0);
 	lv_obj_set_style_image_recolor_opa(note, LV_OPA_COVER, 0);
 	lv_obj_set_style_pad_bottom(note, bp_pick(6, 16), 0);
+	scan_note = note;
 
 	// The count is the whole point of the page, so it gets the accent colour
 	// and the largest type on it.
@@ -632,6 +714,12 @@ void libraryscan_init(gui_config_t *cfg) {
 
 	status_label = lv_label_create(container);
 	lv_label_set_text(status_label, tr("libraryscan_tracks_found"));
+	// Wrapped inside the panel rather than run past it: a label that sizes
+	// itself keeps its single line however wide it gets, and a centred flex
+	// column then cuts it off at both edges -- which a translation of "tracks
+	// found" is long enough to do on 240 px.
+	lv_obj_set_width(status_label, lv_pct(100));
+	lv_obj_set_style_text_align(status_label, LV_TEXT_ALIGN_CENTER, 0);
 	lv_obj_add_style(status_label, &theme_style_text, 0);
 	lv_obj_set_style_text_font(status_label, &font_ui_26, 0);
 
@@ -642,7 +730,15 @@ void libraryscan_init(gui_config_t *cfg) {
 	lv_obj_add_style(progress_label, &theme_style_text_dim, 0);
 	lv_obj_set_style_text_font(progress_label, &font_ui_16, 0);
 	lv_obj_set_style_text_align(progress_label, LV_TEXT_ALIGN_CENTER, 0);
+
+	// Measured with the file name still on screen: it is the last line and the
+	// one that was being cut off.
+	scan_fit_note();
 	lv_obj_set_hidden(progress_label, true);
+
+	// Another face or another text size re-measures every line here, so the
+	// note has to give way again.
+	fonts_register_change(scan_fit_note);
 
 	// The two buttons share the foot of the page: cancel while the scan runs, OK
 	// once it is done.

@@ -112,6 +112,22 @@ and the on-screen keyboard uses a 144 px compact tray with narrower action
 keys. Quick Settings retains eight controls in a 2×4 layout; its buttons,
 artwork and two card heights are reduced to fit the 320 px sheet.
 
+The **Scan** page sizes its music note to what the three lines under it leave.
+The source art is 128 px, most of the gap between the page title and the
+Cancel/OK button on a 320 px panel, and a centred flex column overflows at both
+ends at once: the note ran up under the title while the name of the file being
+read was clipped at the bottom — the column does not scroll, so nothing was
+pushed off the page, it was cut. The note is now measured against the count, the
+status line and that file name, and both its layout box and its draw scale are
+set from the space left over: on the V1 about a quarter of the panel width, the
+proportion the art has on the 480 px players, and on those the 128 px it was
+always drawn at. The status line wraps inside the panel instead of running past
+both edges, and the file name is one line ending in an ellipsis — which
+`LV_LABEL_LONG_DOT` only draws when the label has a pinned height, so a long
+name used to take a second line that was the one being cut. The fit runs again
+whenever the interface font or text size changes, since that is where the line
+heights come from.
+
 The **A–Z index strip** draws as many letters as the strip is tall enough to
 hold rather than all twenty-eight. On the 240×320 panel about fourteen fit; the
 rest of the alphabet stays reachable because a collapsed strip maps a press by
