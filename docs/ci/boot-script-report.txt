@@ -21,8 +21,8 @@
    
    # --- sonix boot screen choice (added by the firmware packer) ---
    boot_sel=$(nanddump -q -s 0x20008 -l 6 /dev/mtd5 -a 2>/dev/null)
-   if [ "$boot_sel" = "logo:2" ] && [ -f /etc/logo_space.jpeg ]; then cmd_jpeg_display /etc/logo_space.jpeg && exit 0; fi
-   if [ "$boot_sel" = "logo:3" ] && [ -f /etc/logo_travelling.jpeg ]; then cmd_jpeg_display /etc/logo_travelling.jpeg && exit 0; fi
+   if [ "$boot_sel" = "logo:2" ] && [ -f /etc/logo_space.jpeg ]; then cmd_jpeg_display /etc/logo_space.jpeg && cmd_jpeg_display() { :; }; fi
+   if [ "$boot_sel" = "logo:3" ] && [ -f /etc/logo_travelling.jpeg ]; then cmd_jpeg_display /etc/logo_travelling.jpeg && cmd_jpeg_display() { :; }; fi
    # --- end sonix boot screen choice ---
        theme=$(nanddump -q -s 0x20000 -l 7 /dev/mtd5 -a)
        if [ "$theme" == "theme:1" ]; then
