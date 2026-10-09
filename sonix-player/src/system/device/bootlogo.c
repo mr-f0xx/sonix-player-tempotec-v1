@@ -45,11 +45,11 @@ int bootlogo_current(void) {
 	if (got < MARKER_LENGTH || strncmp(buf, "theme:", 6) != 0) {
 		return 0;
 	}
-	if (buf[6] == '1') {
-		return 1;
-	}
-	if (buf[6] == '2') {
-		return 2;
+	// 3 is the marker this player writes for Retrospace: the stock script
+	// does not know it, falls through to /etc/logo.jpeg, and that is exactly
+	// the file the firmware fills with the Retrospace picture.
+	if (buf[6] >= '1' && buf[6] <= '3') {
+		return buf[6] - '0';
 	}
 	return 0;
 }
@@ -104,9 +104,11 @@ static void *write_main(void *arg) {
 	return NULL;
 }
 
-void bootlogo_follow_theme(bool dark) {
-	// logo1 is the pale image, logo2 the dark one.
-	int want = dark ? 2 : 1;
+void bootlogo_set(int choice, bool dark) {
+	// logo1 is the pale stock image and logo2 the dark one; any other choice
+	// asks for the third file, which the firmware fills with Retrospace and
+	// the script reaches through the marker it does not know.
+	int want = choice == BOOTLOGO_STOCK ? (dark ? 2 : 1) : 3;
 
 	if (access(MTD_DEVICE, W_OK) != 0) {
 		return; // no such flash here (the host build, or a different device)

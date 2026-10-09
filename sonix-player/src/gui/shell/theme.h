@@ -82,6 +82,14 @@ void theme_set_accent(int index);
 // Picks a specific theme rather than flipping; no-op when already active.
 void theme_set_dark(bool dark);
 
+// The picture the next power-on shows (Appearance > Boot screen):
+// BOOTLOGO_STOCK, the firmware's own light/dark pair, or BOOTLOGO_RETROSPACE,
+// one image for both palettes. The choice is kept in the config like every
+// other setting, and pushed to the flash marker the boot script reads -- see
+// bootlogo.h for why it cannot be a file. Retrospace is the default.
+int theme_boot_screen(void);
+void theme_set_boot_screen(int choice);
+
 // The dynamic tint (Appearance > Dynamic tint): the neutral colours --
 // backgrounds, cards, the status bar -- borrow the accent's hue, the way
 // Material You colours a system from one seed. Each colour keeps its brightest

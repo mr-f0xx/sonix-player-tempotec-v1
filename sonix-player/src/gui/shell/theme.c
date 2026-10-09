@@ -203,6 +203,26 @@ static void apply_palette(void) {
 	lv_style_set_bg_color(&theme_style_slider_track, active->text_secondary);
 }
 
+// Which picture the next power-on shows (Appearance > Boot screen): the
+// stock light/dark pair, or Retrospace. Retrospace is the default, and it is
+// also what a device with no marker at all draws, because the script's
+// fallback file is the one that carries it -- see bootlogo.h.
+int theme_boot_screen(void) {
+	int choice = (int)config_get_int("ui", "boot_screen", BOOTLOGO_RETROSPACE);
+	return choice == BOOTLOGO_STOCK ? BOOTLOGO_STOCK : BOOTLOGO_RETROSPACE;
+}
+
+// Remembers the choice and moves the flash marker now rather than at the next
+// theme switch: the setting is only worth anything from the next boot on.
+void theme_set_boot_screen(int choice) {
+	choice = choice == BOOTLOGO_STOCK ? BOOTLOGO_STOCK : BOOTLOGO_RETROSPACE;
+
+	config_set_int("ui", "boot_screen", choice);
+	config_save();
+
+	bootlogo_set(choice, active->dark);
+}
+
 void theme_init(void) {
 	lv_style_init(&theme_style_screen);
 	lv_style_set_bg_opa(&theme_style_screen, LV_OPA_COVER);
@@ -239,6 +259,12 @@ void theme_init(void) {
 
 	// Whatever was chosen last time. Dark is the default for a first boot.
 	dark_selected = config_get_bool("ui", "dark_theme", true);
+
+	// The marker the boot script reads has to agree with the setting too, not
+	// only with the theme: a device coming from an older firmware carries a
+	// stock marker while this build defaults to Retrospace, and the write is
+	// a no-op on every boot where the two already agree.
+	bootlogo_set(theme_boot_screen(), dark_selected);
 
 	// The accent as it was left; both palettes carry the same one.
 	accent_index = (int)config_get_int("ui", "accent", 0);
@@ -409,7 +435,7 @@ void theme_toggle(void) {
 	// written into raw flash rather than into the config, because the script
 	// that draws it runs long before any filesystem holding a config is
 	// mounted -- see bootlogo.h.
-	bootlogo_follow_theme(active->dark);
+	bootlogo_set(theme_boot_screen(), active->dark);
 
 	refresh_all();
 }
