@@ -143,6 +143,12 @@ jobs:
              sonix-player/sonix_launch "$out/"
           cp "$RUNNER_TEMP/v1-stock-validation.txt" "$out/STOCK-VALIDATION.txt"
           cp "$RUNNER_TEMP/v1-output-validation.txt" "$out/OUTPUT-VALIDATION.txt"
+          # What the packer found in the stock boot script and what it put
+          # there: the one page that tells a boot-screen patch story straight.
+          if [ -f sonix-packer/boot-script-report.txt ]; then
+            cp sonix-packer/boot-script-report.txt "$out/BOOT-SCRIPT-REPORT.txt"
+            { echo "## Boot script patch report"; echo '```'; cat sonix-packer/boot-script-report.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          fi
           image_sha256="$(sha256sum sonix-packer/v1.upt | awk '{print $1}')"
           image_md5="$(md5sum sonix-packer/v1.upt | awk '{print $1}')"
           cat > "$out/BUILD-REPORT.txt" <<EOF
