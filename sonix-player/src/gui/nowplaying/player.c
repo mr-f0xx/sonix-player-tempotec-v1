@@ -1236,13 +1236,18 @@ static void slider_over_waveform(bool over) {
 // when.
 // ---------------------------------------------------------------------------
 
-#define STUDIO_MARGIN 14	  // what the sleeve keeps to the side edges
-#define STUDIO_HEAD_H 78	  // the title, the artist and the ellipsis
-#define STUDIO_COVER_GAP 24	  // between the head and the top of the sleeve
-#define STUDIO_BADGE_GAP 6	  // between the head and the source mark under the ellipsis
-#define STUDIO_QUALITY_GAP 10 // between the sleeve and the line under it
+#define STUDIO_MARGIN 14 // what the sleeve keeps to the side edges
+// The regular numbers are the wide panels'. The V1's head holds two lines of
+// 16 and 14 px faces -- forty-odd pixels of words -- and at 78, with the gaps
+// the wide panels keep, the head, the line under the sleeve and the controls
+// left a 70 px sleeve on a 240 px screen, against 174 in the standard
+// arrangement. The compact numbers hand the sleeve 120 px instead.
+#define STUDIO_HEAD_H bp_pick(48, 78)		// the title, the artist and the ellipsis
+#define STUDIO_COVER_GAP bp_pick(10, 24)	// between the head and the top of the sleeve
+#define STUDIO_BADGE_GAP 6					// between the head and the source mark under the ellipsis
+#define STUDIO_QUALITY_GAP bp_pick(6, 10)	// between the sleeve and the line under it
 #define STUDIO_QUALITY_H 30
-#define STUDIO_BOTTOM 10 // under that line, before the controls begin
+#define STUDIO_BOTTOM bp_pick(6, 10)		// under that line, before the controls begin
 #define STUDIO_COVER_MAX_PCT 83
 
 static lv_obj_t *studio_bg;		  // the blurred sleeve, the size of the screen
@@ -2212,6 +2217,8 @@ static const lv_image_dsc_t *studio_quality_mark(const device_state_t *state) {
 	return NULL;
 }
 
+static void studio_empty_rescale(void);
+
 // The top of the sleeve, and how large it is.
 //
 // The sleeve is as large as the narrower of the two constraints allows: the
@@ -2295,6 +2302,7 @@ static void studio_place(void) {
 	// than leaving a bare screen.
 	lv_obj_set_size(studio_empty, size, size);
 	lv_obj_set_pos(studio_empty, cover_x, cover_y);
+	studio_empty_rescale(); // the mark scales with the square it sits in
 
 	// The line under the sleeve is as wide as the panel, not as wide as the
 	// sleeve: on the V1 the sleeve is narrower than "24/176.4 FLAC", and a
@@ -2334,6 +2342,7 @@ static void studio_refresh_cover(void) {
 		// headphones for a book, the aerial for a station.
 		lv_image_set_src(studio_empty_icon, lv_image_get_src(cover_placeholder_icon));
 		lv_obj_set_style_image_recolor(studio_empty_icon, theme()->text_secondary, 0);
+		studio_empty_rescale(); // the mark's native size is read off its source
 	}
 
 	if (studio_bg) {
@@ -4633,16 +4642,16 @@ static int compact_deck_height(bool alternative) {
 // 128x128, which is most of a V1 sleeve and overflows it. It is scaled to a
 // fixed share of the sleeve, and never past its native size: an upscaled mark
 // is a blurry one, and on the wide panels 128 px is already the right size.
-static void placeholder_rescale(void) {
-	if (!cover_placeholder_icon) {
+static void placeholder_scale(lv_obj_t *icon, int sleeve_size) {
+	if (!icon) {
 		return;
 	}
-	const lv_image_dsc_t *src = lv_image_get_src(cover_placeholder_icon);
+	const lv_image_dsc_t *src = lv_image_get_src(icon);
 	if (!src || src->header.w == 0) {
 		return;
 	}
 	int native = (int)src->header.w;
-	int target = cover_art_w * 40 / 100;
+	int target = sleeve_size * 40 / 100;
 	int scale = 256;
 	if (target < native) {
 		scale = target * 256 / native;
@@ -4650,8 +4659,16 @@ static void placeholder_rescale(void) {
 			scale = 32;
 		}
 	}
-	lv_image_set_scale(cover_placeholder_icon, scale);
+	lv_image_set_scale(icon, scale);
 }
+
+static void placeholder_rescale(void) { placeholder_scale(cover_placeholder_icon, cover_art_w); }
+
+// Studio's empty square draws the same mark at the size its own sleeve is.
+// Scaled with it now; never scaled before, the square clipped the mark to the
+// middle of the glyph on any sleeve smaller than its native 128 px -- every
+// V1 sleeve.
+static void studio_empty_rescale(void) { placeholder_scale(studio_empty_icon, studio_cover_size); }
 
 // Where the placeholder mark sits in the sleeve. Centred, except in the
 // alternative arrangement, where the title and artist pills take the bottom
@@ -5384,12 +5401,14 @@ void player_init(gui_config_t *cfg) {
 
 	// What stands in the sleeve's place when the track has no artwork: the same
 	// surface and the same mark the full-width cover panel uses, at the size
-	// this arrangement gives the sleeve.
+	// this arrangement gives the sleeve, and the sleeve's own corners -- a track
+	// with no artwork must not leave a square that looks different from the one
+	// a track with artwork leaves.
 	studio_empty = lv_obj_create(studio_box);
 	lv_obj_set_ignore_layout(studio_empty, true);
 	lv_obj_add_style(studio_empty, &theme_style_panel, 0);
 	lv_obj_set_style_border_width(studio_empty, 0, 0);
-	lv_obj_set_style_radius(studio_empty, 8, 0);
+	lv_obj_set_style_radius(studio_empty, compact ? 14 : 18, 0);
 	lv_obj_set_scrollable(studio_empty, false);
 	lv_obj_set_clickable(studio_empty, false);
 	lv_obj_set_hidden(studio_empty, true);
