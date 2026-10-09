@@ -64,4 +64,10 @@
 // build.
 void bootlogo_set(int choice, bool dark);
 
+// What the boot script left in /tmp this boot, and what the marker writer
+// made of the flash: two machine-readable lines for the Developer options
+// page, or NULL when there is nothing to show yet.
+const char *bootlogo_trace(void);
+const char *bootlogo_status(void);
+
 #endif /* BOOTLOGO_H */

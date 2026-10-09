@@ -1,5 +1,7 @@
 #include "devoptions.h"
 
+#include <stdio.h>
+
 #include "lvgl/lvgl.h"
 
 #include "src/gui/fonts/fonts.h"
@@ -13,6 +15,7 @@
 #include "src/system/library/library.h"
 #include "src/system/core/logging.h"
 #include "src/system/core/config.h"
+#include "src/system/device/bootlogo.h"
 
 lv_obj_t *devoptions_screen;
 
@@ -192,6 +195,26 @@ void devoptions_init(gui_config_t *cfg) {
 	bt_log_name_label = lv_obj_get_child(bt_card, 0);
 	bt_log_path_label = add_path_label(bt_card);
 	add_note(container, "devoptions_bluetooth_log_note");
+
+	// How far the boot script and the marker writer each got this boot. The
+	// boot screen is drawn before anything in the player can log, so the
+	// script leaves its trace in /tmp and this row repeats it, with the
+	// player's own line under it: a boot-screen bug read off the device
+	// instead of guessed at from a desktop.
+	lv_obj_t *trace_label = lv_label_create(container);
+	lv_label_set_long_mode(trace_label, LV_LABEL_LONG_WRAP);
+	lv_obj_set_width(trace_label, lv_pct(100));
+	lv_obj_add_style(trace_label, &theme_style_text_dim, 0);
+	lv_obj_set_style_text_font(trace_label, &font_ui_22, 0);
+	{
+		static char trace_text[768];
+		const char *trace = bootlogo_trace();
+		const char *status = bootlogo_status();
+		snprintf(trace_text, sizeof(trace_text), "%s\n%s%s%s", tr("devoptions_boot_trace"),
+				 trace ? trace : "(no trace left this boot)",
+				 status ? "\n" : "", status ? status : "(marker untouched so far)");
+		lv_label_set_text(trace_label, trace_text);
+	}
 
 	// Opens the page showing RAM and running processes. A navigation row with a
 	// chevron, like the developer options entry on the previous page.

@@ -504,16 +504,28 @@ build_one() {
 		# backlight and all, and draw nothing over ours. A command that is a
 		# path cannot be shadowed -- a function cannot wear a slash -- and
 		# exits instead, keeping the picture at the cost of the vendor's tail.
+		# A path cannot be a function name, so a display command that is one
+		# exits after drawing instead of shadowing, at the cost of whatever
+		# the vendor script does after its branches -- on the V1, that is the
+		# backlight, which is why the plain name matters.
 		if [ "${DISPLAY_CMD#/}" = "$DISPLAY_CMD" ]; then
 			LEAVE="$DISPLAY_CMD() { :; }"
 		else
 			LEAVE="exit 0"
 		fi
 
+		# The second field is read as part of one aligned 14-byte read, the same
+		# call shape the vendor's own read uses, and split in the shell: an
+		# unaligned -s is one more thing a vendor nanddump could stumble over,
+		# and this has been wrong often enough to owe us a trace. The trace
+		# file is what the player's Developer options page shows after a boot.
 		BOOT_BLOCK="# --- sonix boot screen choice (added by the firmware packer) ---
-boot_sel=\$(nanddump -q -s 0x20008 -l 6 /dev/mtd5 -a 2>/dev/null)
-if [ \"\$boot_sel\" = \"logo:2\" ] && [ -f /etc/logo_space.jpeg ]; then $DISPLAY_CMD /etc/logo_space.jpeg && $LEAVE; fi
-if [ \"\$boot_sel\" = \"logo:3\" ] && [ -f /etc/logo_travelling.jpeg ]; then $DISPLAY_CMD /etc/logo_travelling.jpeg && $LEAVE; fi
+boot_raw=\$(nanddump -q -s 0x20000 -l 14 /dev/mtd5 -a 2>/dev/null)
+boot_sel=\${boot_raw#* }
+echo \"sel=\$boot_sel raw=\$boot_raw\" > /tmp/.bootlogo_trace 2>/dev/null
+if [ \"\$boot_sel\" = \"logo:2\" ] && [ -f /etc/logo_space.jpeg ]; then $DISPLAY_CMD /etc/logo_space.jpeg && { echo \"drawn=space\" >> /tmp/.bootlogo_trace; boot_drawn=1; $LEAVE; }; fi
+if [ \"\$boot_sel\" = \"logo:3\" ] && [ -f /etc/logo_travelling.jpeg ]; then $DISPLAY_CMD /etc/logo_travelling.jpeg && { echo \"drawn=travelling\" >> /tmp/.bootlogo_trace; boot_drawn=1; $LEAVE; }; fi
+[ -n \"\$boot_drawn\" ] || echo \"drawn=stock-chain\" >> /tmp/.bootlogo_trace 2>/dev/null
 # --- end sonix boot screen choice ---
 "
 		# The anchor: the line that reads the marker, a plain assignment at the
@@ -542,8 +554,10 @@ if [ \"\$boot_sel\" = \"logo:3\" ] && [ -f /etc/logo_travelling.jpeg ]; then $DI
 
 		{
 			echo "-- patched $(basename "$BOOT_SCRIPT") at line $ANCHOR; display command: $DISPLAY_CMD"
+			echo "-- the logo files in the image:"
+			ls -l "$SQUASH_DIR"/etc/logo*.jpeg 2>/dev/null | sed 's|.*/||; s/^/   /' || echo "   (none)"
 			echo "-- the script as it goes into the image:"
-			sed -n '1,40p' "$BOOT_SCRIPT" | sed 's/^/   /'
+			sed -n '1,44p' "$BOOT_SCRIPT" | sed 's/^/   /'
 		} >> "$REPORT"
 	fi
 	echo "" >> "$REPORT"

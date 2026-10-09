@@ -22,6 +22,14 @@ static volatile bool worker_running;
 static volatile int pending_choice; // what the worker should write
 static volatile bool pending_dark;
 
+// What this boot did, in two lines: the trace the boot script left in /tmp
+// before the player existed, and what the worker made of the flash marker.
+// The boot screen is drawn before anything here can log, so the script has to
+// leave something behind to be read later -- see the packer's choice block.
+static char trace_buf[512];
+static bool trace_loaded;
+static char status_buf[64];
+
 // The marker for a choice and a theme, as it has to land in the flash. The
 // stock pair keeps the theme field the stock script expects; everything else
 // asks for theme:3, the value that falls through to /etc/logo.jpeg, and says
@@ -81,6 +89,9 @@ static void *write_main(void *arg) {
 		// must not cost an erase cycle each time.
 		char have[MARKER_LENGTH + 1];
 		if (read_marker(have) && strncmp(have, want, MARKER_LENGTH) == 0) {
+			pthread_mutex_lock(&lock);
+			snprintf(status_buf, sizeof(status_buf), "marker agrees: %s", want);
+			pthread_mutex_unlock(&lock);
 			break;
 		}
 
@@ -106,6 +117,9 @@ static void *write_main(void *arg) {
 		}
 
 		printf("bootlogo: marker \"%s\" written to %s\n", want, MTD_DEVICE);
+		pthread_mutex_lock(&lock);
+		snprintf(status_buf, sizeof(status_buf), "marker written: %s", want);
+		pthread_mutex_unlock(&lock);
 
 		// The choice or the theme may have moved again while the flash was
 		// busy; the loop looks at the pending pair once more.
@@ -121,6 +135,29 @@ static void *write_main(void *arg) {
 	worker_running = false;
 	pthread_mutex_unlock(&lock);
 	return NULL;
+}
+
+const char *bootlogo_trace(void) {
+	pthread_mutex_lock(&lock);
+	if (!trace_loaded) {
+		trace_loaded = true;
+		FILE *f = fopen("/tmp/.bootlogo_trace", "rb");
+		if (f) {
+			size_t got = fread(trace_buf, 1, sizeof(trace_buf) - 1, f);
+			trace_buf[got] = '\0';
+			fclose(f);
+		}
+	}
+	const char *out = trace_buf[0] ? trace_buf : NULL;
+	pthread_mutex_unlock(&lock);
+	return out;
+}
+
+const char *bootlogo_status(void) {
+	pthread_mutex_lock(&lock);
+	const char *out = status_buf[0] ? status_buf : NULL;
+	pthread_mutex_unlock(&lock);
+	return out;
 }
 
 void bootlogo_set(int choice, bool dark) {
