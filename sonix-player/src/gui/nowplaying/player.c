@@ -362,9 +362,8 @@ static char progress_label_text[32];
 static double view_start;
 static double view_length;
 
-// True while the controls sit on a loaded cover's dark backdrop. The play
-// button wears its white disc there (it has to stand out against artwork);
-// on the plain no-cover panel it is flat, like prev and next.
+// True while the controls sit on a loaded cover's dark backdrop. Text and
+// prev/next glyphs turn light there to stay legible against the artwork.
 static bool chrome_over_cover;
 
 // While a station connects, stop, previous and next are greyed out and do
@@ -987,15 +986,6 @@ static void set_over_cover(bool on) {
 		}
 	}
 
-	// The disc: white over artwork and in the dark theme, where white reads
-	// as the brightest thing on screen. The one case it has to go dark is the
-	// light theme with no cover -- a white disc on a near-white panel is
-	// invisible.
-	if (play_btn) {
-		bool white_disc = on || theme()->dark;
-		lv_obj_set_style_bg_color(play_btn, white_disc ? lv_color_white() : theme()->surface_pressed, 0);
-		lv_obj_set_style_bg_opa(play_btn, LV_OPA_COVER, 0);
-	}
 	if (play_btn_icon) {
 		lv_obj_set_style_image_recolor(play_btn_icon, chrome_accent(), 0);
 		lv_obj_set_style_image_recolor_opa(play_btn_icon, LV_OPA_COVER, 0);
@@ -1078,7 +1068,7 @@ static lv_color_t alt_ink(void) {
 static void lyrics_repaint_lit(void);
 
 // The two glyphs that wear the accent, repainted whenever the accent of the
-// moment can have moved: the play/pause disc and the repeat/shuffle mode.
+// moment can have moved: the play/pause glyph and the repeat/shuffle mode.
 static void paint_transport_tint(void) {
 	if (play_btn_icon) {
 		lv_obj_set_style_image_recolor(play_btn_icon, chrome_accent(), 0);
@@ -3100,7 +3090,7 @@ static void player_refresh_theme(void) {
 	cover_set_backdrop_light(false);
 	lv_obj_set_style_bg_color(progress_slider, theme()->accent, LV_PART_INDICATOR);
 	lv_obj_set_style_bg_color(progress_slider, theme()->accent, LV_PART_KNOB);
-	set_over_cover(chrome_over_cover); // repaints the play disc for the new palette
+	set_over_cover(chrome_over_cover); // recolours the play glyph for the new palette
 	update_repeat_button();
 	update_speed_button();
 
@@ -5014,12 +5004,10 @@ void player_init(gui_config_t *cfg) {
 	lv_obj_add_event_cb(prev_btn, prev_btn_event_cb, LV_EVENT_CLICKED, NULL);
 	lv_obj_set_style_opa(prev_btn, LV_OPA_40, LV_STATE_DISABLED); // see apply_connecting()
 
-	// Play/pause: a white disc, with the glyph carrying the colour.
+	// Play/pause: a plain glyph like prev/next, with the same generous hit target.
 	play_btn = lv_btn_create(player_controls_buttons);
 	lv_obj_set_size(play_btn, compact ? COMPACT_PLAY_BTN : 84, compact ? COMPACT_PLAY_BTN : 84);
-	lv_obj_set_style_radius(play_btn, LV_RADIUS_CIRCLE, 0);
-	lv_obj_set_style_bg_color(play_btn, lv_color_white(), 0); // repainted by set_over_cover
-	lv_obj_set_style_bg_opa(play_btn, LV_OPA_COVER, 0);
+	lv_obj_set_style_bg_opa(play_btn, LV_OPA_TRANSP, 0);
 	lv_obj_set_style_shadow_width(play_btn, 0, 0);
 	lv_obj_add_event_cb(play_btn, play_btn_event_cb, LV_EVENT_CLICKED, NULL);
 	lv_obj_set_style_opa(play_btn, LV_OPA_40, LV_STATE_DISABLED);
