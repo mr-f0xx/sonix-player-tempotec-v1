@@ -345,7 +345,7 @@ void appearance_init(gui_config_t *cfg) {
 	btn_clock[TOPBAR_CLOCK_RIGHT] = make_clock_choice(clock_row, "right", TOPBAR_CLOCK_RIGHT, compact);
 	btn_clock[TOPBAR_CLOCK_HIDDEN] = make_clock_choice(clock_row, "hide", TOPBAR_CLOCK_HIDDEN, compact);
 
-	// A third card: the accent colour, as a row of coloured circles.
+	// A third card: the accent colour, as two rows of coloured circles.
 	lv_obj_t *accent_card = lv_obj_create(container);
 	lv_obj_set_width(accent_card, lv_pct(100));
 	lv_obj_set_height(accent_card, LV_SIZE_CONTENT);
@@ -370,11 +370,14 @@ void appearance_init(gui_config_t *cfg) {
 	lv_obj_set_style_bg_opa(accent_row, 0, 0);
 	lv_obj_set_style_border_width(accent_row, 0, 0);
 	lv_obj_set_style_pad_all(accent_row, 0, 0);
+	// Twelve circles do not fit on one line, so the row wraps onto two of
+	// six: at each size the gap is the widest that still keeps six on a line
+	// (the row runs 410 and 212 pixels wide on the two panel widths).
 	lv_obj_set_style_pad_gap(accent_row, compact ? 4 : 14, 0);
 	lv_obj_set_scrollable(accent_row, false);
 	lv_obj_set_event_bubble(accent_row, true);
-	lv_obj_set_flex_flow(accent_row, LV_FLEX_FLOW_ROW);
-	lv_obj_set_flex_align(accent_row, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+	lv_obj_set_flex_flow(accent_row, LV_FLEX_FLOW_ROW_WRAP);
+	lv_obj_set_flex_align(accent_row, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 
 	for (int i = 0; i < THEME_ACCENT_COUNT; i++) {
 		btn_accent[i] = make_accent_circle(accent_row, i, compact);

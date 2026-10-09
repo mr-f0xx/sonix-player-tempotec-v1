@@ -71,9 +71,10 @@ bool theme_is_dark(void);
 void theme_toggle(void);
 
 // The accent colour, chosen from a fixed set of presets (Appearance > Accent
-// colour): 0 blue (default), 1 orange, 2 yellow, 3 green, 4 purple, 5 pink.
+// colour): 0 blue (default), 1 red, 2 orange, 3 yellow, 4 lime, 5 green,
+// 6 cyan, 7 indigo, 8 purple, 9 pink, 10 brown, 11 slate.
 // Applies to both dark and light palettes, persists in the config.
-#define THEME_ACCENT_COUNT 6
+#define THEME_ACCENT_COUNT 12
 lv_color_t theme_accent_preset(int index);
 int theme_get_accent(void);
 void theme_set_accent(int index);
