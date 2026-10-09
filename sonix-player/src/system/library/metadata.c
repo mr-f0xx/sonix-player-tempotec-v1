@@ -2,7 +2,6 @@
 
 #include "src/system/library/cue.h"
 #include "src/system/decode/decode.h"
-#include "src/system/decode/dr_flac.h"
 #include "src/system/decode/mp4.h"
 #include "src/system/decode/stb_vorbis_decl.h"
 #include "src/system/decode/wavpackdec.h"
@@ -442,28 +441,97 @@ static void apply_vorbis_comment(song_metadata_t *out, const char *comment, size
 	dst[copy_len] = '\0';
 }
 
-static void flac_meta_callback(void *pUserData, drflac_metadata *pMetadata) {
-	if (pMetadata->type != DRFLAC_METADATA_BLOCK_TYPE_VORBIS_COMMENT)
+// ---------------------------------------------------------------------------
+// FLAC
+//
+// Only the VORBIS_COMMENT block is read. A FLAC's PICTURE block is the whole
+// embedded cover -- megabytes, pulled off a card the audio thread is reading
+// from -- and it is wanted nowhere here: the tags are read for the title and
+// the artist, and the cover is read where it is shown, by the artwork loader.
+//
+// dr_flac's metadata callback reads every block it is handed, cover included,
+// so the blocks are walked by hand instead: each header is four bytes, and
+// the comments are the one block worth stopping for. This is also what keeps
+// a track change quick enough for gapless -- the PCM held from the last track
+// is draining while the next one is being started, and reading the cover
+// before the engine is signalled can outlast what the card has queued.
+// ---------------------------------------------------------------------------
+
+static uint32_t flac_le32(const uint8_t *p) {
+	return (uint32_t)p[0] | ((uint32_t)p[1] << 8) | ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
+}
+
+// The VORBIS_COMMENT block: a little-endian vendor length and string, a
+// little-endian comment count, then that many length-prefixed "KEY=value"
+// entries. Each entry goes to the same place the decoder's callback sent it.
+static void flac_read_vorbis_comments(song_metadata_t *out, const uint8_t *block, uint32_t size) {
+	if (size < 8) {
 		return;
-
-	song_metadata_t *out = (song_metadata_t *)pUserData;
-
-	drflac_vorbis_comment_iterator iter;
-	drflac_init_vorbis_comment_iterator(&iter, pMetadata->data.vorbis_comment.commentCount,
-										 pMetadata->data.vorbis_comment.pComments);
-
-	drflac_uint32 comment_len;
-	const char *comment;
-	while ((comment = drflac_next_vorbis_comment(&iter, &comment_len)) != NULL) {
-		apply_vorbis_comment(out, comment, comment_len);
+	}
+	uint32_t pos = 4;
+	uint32_t vendor_len = flac_le32(block);
+	if (vendor_len > size - pos) {
+		return;
+	}
+	pos += vendor_len;
+	if (size - pos < 4) {
+		return;
+	}
+	uint32_t count = flac_le32(block + pos);
+	pos += 4;
+	for (uint32_t i = 0; i < count && pos + 4 <= size; i++) {
+		uint32_t len = flac_le32(block + pos);
+		pos += 4;
+		if (len > size - pos) {
+			break;
+		}
+		apply_vorbis_comment(out, (const char *)block + pos, len);
+		pos += len;
 	}
 }
 
 static void read_flac_metadata(const char *filepath, song_metadata_t *out) {
-	drflac *flac = drflac_open_file_with_metadata(filepath, flac_meta_callback, out, NULL);
-	if (flac) {
-		drflac_close(flac);
+	FILE *f = fopen(filepath, "rb");
+	if (!f) {
+		return;
 	}
+	uint8_t magic[4];
+	if (fread(magic, 1, 4, f) != 4 || memcmp(magic, "fLaC", 4) != 0) {
+		fclose(f);
+		return;
+	}
+
+	// Metadata blocks: a 4-byte header (last-block flag, 7-bit type, 24-bit
+	// length), then the block. STREAMINFO is always first and is skipped like
+	// any other block the tags do not live in; the walk stops at the last
+	// block or at anything that does not add up.
+	for (int guard = 0; guard < 64; guard++) {
+		uint8_t header[4];
+		if (fread(header, 1, 4, f) != 4) {
+			break;
+		}
+		bool last = (header[0] & 0x80) != 0;
+		unsigned type = header[0] & 0x7F;
+		uint32_t size = ((uint32_t)header[1] << 16) | ((uint32_t)header[2] << 8) | header[3];
+		if (type == 0 && guard > 0) {
+			break; // STREAMINFO only ever comes first: not a FLAC to read tags from
+		}
+		if (type == 4 && size >= 8 && size <= (4u * 1024u * 1024u)) { // VORBIS_COMMENT
+			uint8_t *block = malloc(size);
+			if (block) {
+				if (fread(block, 1, size, f) == size) {
+					flac_read_vorbis_comments(out, block, size);
+				}
+				free(block);
+			}
+		} else if (fseeko(f, (off_t)size, SEEK_CUR) != 0) {
+			break;
+		}
+		if (last) {
+			break;
+		}
+	}
+	fclose(f);
 }
 
 static void read_ogg_metadata(const char *filepath, song_metadata_t *out) {
