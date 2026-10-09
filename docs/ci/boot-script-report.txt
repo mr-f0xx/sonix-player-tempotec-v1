@@ -3,6 +3,12 @@
    S11jpeg_display_shell
    (none)
 -- patched S11jpeg_display_shell at line 16; display command: cmd_jpeg_display
+-- the logo files in the image:
+   logo.jpeg
+   logo1.jpeg
+   logo2.jpeg
+   logo_space.jpeg
+   logo_travelling.jpeg
 -- the script as it goes into the image:
    #!/bin/sh
    
@@ -20,9 +26,12 @@
    	echo "Wait display... "
    
    # --- sonix boot screen choice (added by the firmware packer) ---
-   boot_sel=$(nanddump -q -s 0x20008 -l 6 /dev/mtd5 -a 2>/dev/null)
-   if [ "$boot_sel" = "logo:2" ] && [ -f /etc/logo_space.jpeg ]; then cmd_jpeg_display /etc/logo_space.jpeg && cmd_jpeg_display() { :; }; fi
-   if [ "$boot_sel" = "logo:3" ] && [ -f /etc/logo_travelling.jpeg ]; then cmd_jpeg_display /etc/logo_travelling.jpeg && cmd_jpeg_display() { :; }; fi
+   boot_raw=$(nanddump -q -s 0x20000 -l 14 /dev/mtd5 -a 2>/dev/null)
+   boot_sel=${boot_raw#* }
+   echo "sel=$boot_sel raw=$boot_raw" > /tmp/.bootlogo_trace 2>/dev/null
+   if [ "$boot_sel" = "logo:2" ] && [ -f /etc/logo_space.jpeg ]; then cmd_jpeg_display /etc/logo_space.jpeg && { echo "drawn=space" >> /tmp/.bootlogo_trace; boot_drawn=1; cmd_jpeg_display() { :; }; }; fi
+   if [ "$boot_sel" = "logo:3" ] && [ -f /etc/logo_travelling.jpeg ]; then cmd_jpeg_display /etc/logo_travelling.jpeg && { echo "drawn=travelling" >> /tmp/.bootlogo_trace; boot_drawn=1; cmd_jpeg_display() { :; }; }; fi
+   [ -n "$boot_drawn" ] || echo "drawn=stock-chain" >> /tmp/.bootlogo_trace 2>/dev/null
    # --- end sonix boot screen choice ---
        theme=$(nanddump -q -s 0x20000 -l 7 /dev/mtd5 -a)
        if [ "$theme" == "theme:1" ]; then
@@ -44,4 +53,5 @@
    
        ;;
        *)
+           exit 1
 
