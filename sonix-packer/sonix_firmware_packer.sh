@@ -496,10 +496,24 @@ build_one() {
 		fi
 		[ -n "$DISPLAY_CMD" ] || DISPLAY_CMD="cmd_jpeg_display"
 
+		# How the block leaves the vendor script running. The V1 display logic
+		# lives in a function that, after drawing, raises the panel backlight;
+		# an exit there would draw our picture onto a dark panel. So a display
+		# command that is a plain name is shadowed with a no-op function once
+		# ours has drawn: the vendor's own branches then run to the end,
+		# backlight and all, and draw nothing over ours. A command that is a
+		# path cannot be shadowed -- a function cannot wear a slash -- and
+		# exits instead, keeping the picture at the cost of the vendor's tail.
+		if [ "${DISPLAY_CMD#/}" = "$DISPLAY_CMD" ]; then
+			LEAVE="$DISPLAY_CMD() { :; }"
+		else
+			LEAVE="exit 0"
+		fi
+
 		BOOT_BLOCK="# --- sonix boot screen choice (added by the firmware packer) ---
 boot_sel=\$(nanddump -q -s 0x20008 -l 6 /dev/mtd5 -a 2>/dev/null)
-if [ \"\$boot_sel\" = \"logo:2\" ] && [ -f /etc/logo_space.jpeg ]; then $DISPLAY_CMD /etc/logo_space.jpeg && exit 0; fi
-if [ \"\$boot_sel\" = \"logo:3\" ] && [ -f /etc/logo_travelling.jpeg ]; then $DISPLAY_CMD /etc/logo_travelling.jpeg && exit 0; fi
+if [ \"\$boot_sel\" = \"logo:2\" ] && [ -f /etc/logo_space.jpeg ]; then $DISPLAY_CMD /etc/logo_space.jpeg && $LEAVE; fi
+if [ \"\$boot_sel\" = \"logo:3\" ] && [ -f /etc/logo_travelling.jpeg ]; then $DISPLAY_CMD /etc/logo_travelling.jpeg && $LEAVE; fi
 # --- end sonix boot screen choice ---
 "
 		# The anchor: the line that reads the marker, a plain assignment at the
