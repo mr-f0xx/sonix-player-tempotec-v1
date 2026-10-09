@@ -245,13 +245,8 @@ void topbar_refresh_volume(int percent) {
 
 	lv_label_set_text_fmt(vol_label, "%d", percent);
 
-	// Past this threshold the number turns red, warning that the next steps are
-	// the loud ones. The volume pop-up uses the same threshold.
-	if (percent > VOLUME_WARN_PERCENT) {
-		lv_obj_set_style_text_color(vol_label, VOLUME_WARN_COLOR, 0);
-	} else {
-		lv_obj_remove_local_style_prop(vol_label, LV_STYLE_TEXT_COLOR, 0);
-	}
+	// Keep the main-screen volume number white at every level.
+	lv_obj_set_style_text_color(vol_label, lv_color_white(), 0);
 
 	const lv_image_dsc_t *icon = &icon_volume_high;
 	if (percent < VOLUME_LOW_PERCENT) {
@@ -898,6 +893,7 @@ void topbar_init(gui_config_t *cfg) {
 	vol_label = lv_label_create(container_left);
 	lv_label_set_text(vol_label, "--");
 	lv_obj_add_style(vol_label, &theme_style_text, 0);
+	lv_obj_set_style_text_color(vol_label, lv_color_white(), 0);
 	lv_obj_set_style_text_font(vol_label, topbar_compact ? &font_ui_14 : &font_ui_24, 0);
 
 	// The jack indicator: appears when headphones are plugged in, theme-coloured

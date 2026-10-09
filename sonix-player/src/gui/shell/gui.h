@@ -14,9 +14,9 @@ typedef struct {
 	const char *sd_root_path;
 } gui_config_t;
 
-// Above this the volume readout turns red -- the status bar's number and the
-// pop-up's alike. Not a limit, just the point where the scale stops being
-// polite: this DAC is at -21 dB there, and every step above is loud.
+// Above this the volume pop-up's readout turns red; the status bar stays white.
+// Not a limit, just the point where the scale stops being polite: this DAC is
+// at -21 dB there, and every step above is loud.
 #define VOLUME_WARN_PERCENT 55
 #define VOLUME_WARN_COLOR lv_color_make(224, 60, 50)
 

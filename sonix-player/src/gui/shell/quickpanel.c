@@ -402,13 +402,9 @@ static void refresh_now_playing_card(void) {
 		}
 	}
 
-	// Accent glyph on a disc that is white under the dark theme and the quiet
-	// dark circle under the light one, where white would vanish into the card.
+	// The bare play/pause glyph follows the accent, without a filled background.
 	lv_obj_set_style_image_recolor(np_play_icon, theme()->accent, 0);
 	lv_obj_set_style_image_recolor_opa(np_play_icon, LV_OPA_COVER, 0);
-	if (np_play_btn) {
-		lv_obj_set_style_bg_color(np_play_btn, theme()->dark ? lv_color_white() : theme()->surface_pressed, 0);
-	}
 
 	// On a radio the star is about the station and lives in the radio database:
 	// there is no file to look up in the music library.
@@ -2274,12 +2270,8 @@ void quickpanel_init(gui_config_t *cfg) {
 	}
 	lv_obj_center(prev_icon);
 
-	// The play disc keeps the neutral circle colour the other round controls use;
-	// the white disc belongs over artwork, not on a card that follows the theme.
+	// Play/pause uses the same transparent button as prev/next, keeping its hit target.
 	lv_obj_t *play_btn = make_flat_button(transport, qp_compact ? 44 : 84, play_cb);
-	lv_obj_set_style_radius(play_btn, LV_RADIUS_CIRCLE, 0);
-	lv_obj_add_style(play_btn, &theme_style_switch, 0);
-	lv_obj_set_style_bg_opa(play_btn, LV_OPA_COVER, 0);
 	np_play_btn = play_btn;
 	np_play_icon = lv_image_create(play_btn);
 	lv_obj_add_style(np_play_icon, &theme_style_icon, 0);
