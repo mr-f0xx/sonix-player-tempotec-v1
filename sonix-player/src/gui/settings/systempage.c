@@ -252,6 +252,34 @@ static lv_obj_t *info_row(lv_obj_t *parent, const char *name, lv_obj_t **value_o
 	return row;
 }
 
+// The credit values (a person's name) must stay whole: an ellipsis in a name
+// is worse than a smaller one. On the V1 the value line is 20 px in a space
+// whose width is already known from the config, so the size steps down
+// through the same sizes fit_row_label() steps its names through, and the
+// last one fits any face the player ships.
+static void credit_value_fit(lv_obj_t *value, int content_width) {
+	static const lv_font_t *const STEPS[] = {&font_ui_20, &font_ui_18, &font_ui_16, &font_ui_14};
+	const size_t count = sizeof(STEPS) / sizeof(STEPS[0]);
+
+	const char *text = lv_label_get_text(value);
+	if (!text || !text[0] || content_width <= 0) {
+		return;
+	}
+
+	for (size_t i = 0; i < count; i++) {
+		lv_point_t size;
+		lv_text_get_size(&size, text, STEPS[i], 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+		if (size.x <= content_width || i + 1 == count) {
+			// Only when it actually changes: setting the same font again
+			// retriggers layout.
+			if (lv_obj_get_style_text_font(value, LV_PART_MAIN) != STEPS[i]) {
+				lv_obj_set_style_text_font(value, STEPS[i], 0);
+			}
+			return;
+		}
+	}
+}
+
 static lv_obj_t *system_value_row(lv_obj_t *parent, const char *name, lv_obj_t **value_out,
 								  lv_event_cb_t callback, void *user_data, bool clickable) {
 	if (bp_is_tempotec_v1()) {
@@ -383,6 +411,29 @@ static void build_sysinfo_page(gui_config_t *cfg) {
 	lv_obj_t *build_value = NULL;
 	system_value_row(container, "system_build_number", &build_value, build_tapped_cb, NULL, true);
 	lv_label_set_text(build_value, build[0] ? build : "\xE2\x80\x94");
+
+	// --- the credits ---
+	// Proper names, the same in every language, so they come in as written and
+	// never go through tr(): Jepl4r wrote the original Sonix Player for the
+	// HiBy players, and this fork carries it to the TempoTec V1.
+	//
+	// How wide a value line on this page can be: the screen, the page padding
+	// on both sides and the row's own. Only the V1 needs it.
+	const int value_width = compact ? cfg->screen_width - 2 * cfg->padding - 16 : 0;
+
+	lv_obj_t *original_author_value = NULL;
+	info_row(container, "system_original_author", &original_author_value);
+	lv_label_set_text(original_author_value, "Jepl4r");
+	if (compact) {
+		credit_value_fit(original_author_value, value_width);
+	}
+
+	lv_obj_t *forked_by_value = NULL;
+	info_row(container, "system_forked_by", &forked_by_value);
+	lv_label_set_text(forked_by_value, "Imre Ferenczi (mr-f0xx)");
+	if (compact) {
+		credit_value_fit(forked_by_value, value_width);
+	}
 
 	if (compact) {
 		lv_obj_update_layout(container);
