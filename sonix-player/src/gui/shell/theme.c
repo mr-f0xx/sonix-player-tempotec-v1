@@ -66,17 +66,32 @@ static theme_palette_t tinted;
 
 static theme_palette_t *active = &palette_dark;
 
-// The accent presets, Adwaita's named accents, ordered as requested: blue
-// (the default), then warm to cool -- orange, yellow, green, purple, pink.
+// The accent presets, Adwaita's named accents plus four more to fill the
+// gaps between them -- lime between the yellow and the green, indigo between
+// the blue and the purple -- and the two neutrals, brown and slate, at the
+// end. Blue (the default) comes first, then warm to cool: red, orange,
+// yellow, lime, green, cyan, indigo, purple, pink.
 static const lv_color_t ACCENT_COLORS[THEME_ACCENT_COUNT] = {
-	LV_COLOR_MAKE(53, 132, 228), // blue (#3584e4, the default)
-	LV_COLOR_MAKE(255, 120, 0),  // orange (#ff7800)
-	LV_COLOR_MAKE(229, 165, 10), // yellow (#e5a50a)
-	LV_COLOR_MAKE(46, 194, 126), // green (#2ec27e)
-	LV_COLOR_MAKE(145, 65, 172), // purple (#9141ac)
-	LV_COLOR_MAKE(213, 97, 153), // pink (#d56199)
+	LV_COLOR_MAKE(53, 132, 228),  // blue (#3584e4, the default)
+	LV_COLOR_MAKE(224, 27, 36),   // red (#e01b24)
+	LV_COLOR_MAKE(255, 120, 0),   // orange (#ff7800)
+	LV_COLOR_MAKE(229, 165, 10),  // yellow (#e5a50a)
+	LV_COLOR_MAKE(153, 197, 0),   // lime (#99c500)
+	LV_COLOR_MAKE(46, 194, 126),  // green (#2ec27e)
+	LV_COLOR_MAKE(0, 176, 214),   // cyan (#00b0d6)
+	LV_COLOR_MAKE(102, 91, 224),  // indigo (#665be0)
+	LV_COLOR_MAKE(145, 65, 172),  // purple (#9141ac)
+	LV_COLOR_MAKE(213, 97, 153),  // pink (#d56199)
+	LV_COLOR_MAKE(168, 101, 48),  // brown (#a86530)
+	LV_COLOR_MAKE(139, 142, 148), // slate (#8b8e94)
 };
 static int accent_index;
+
+// Where the six presets of the old palette sit in this one: a config written
+// by an older firmware names an old slot, so the first boot on this build
+// moves the choice to the matching new slot and leaves the marker that the
+// init reads below, so the remap runs once rather than on every boot.
+static const int LEGACY_ACCENT_MAP[6] = {0, 2, 3, 5, 8, 9};
 
 lv_color_t theme_accent_preset(int index) {
 	if (index < 0 || index >= THEME_ACCENT_COUNT) {
@@ -229,6 +244,17 @@ void theme_init(void) {
 	accent_index = (int)config_get_int("ui", "accent", 0);
 	if (accent_index < 0 || accent_index >= THEME_ACCENT_COUNT) {
 		accent_index = 0;
+	}
+	if (config_get_int("ui", "accent_scheme", 0) == 0) {
+		// No marker: the value came from the six-preset palette. Move the
+		// choice to its place among the twelve and write the marker, so a
+		// boot after this one reads the index as it is.
+		if (accent_index < 6) {
+			accent_index = LEGACY_ACCENT_MAP[accent_index];
+		}
+		config_set_int("ui", "accent", accent_index);
+		config_set_int("ui", "accent_scheme", 1);
+		config_save();
 	}
 	palette_dark.accent = ACCENT_COLORS[accent_index];
 	palette_light.accent = ACCENT_COLORS[accent_index];
