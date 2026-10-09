@@ -151,14 +151,14 @@ static int polls_since_stop = POLLS_FAST_AFTER_STOP;
 // the 320 px goes to the sleeve, which keeps COMPACT_SLEEVE_MARGIN above and
 // below it and at least COMPACT_SLEEVE_SIDE_MARGIN off either bezel.
 #define COMPACT_DECK_PAD_TOP 4
-#define COMPACT_DECK_PAD_BOTTOM 6
-#define COMPACT_DECK_GAP 5
+#define COMPACT_DECK_PAD_BOTTOM 4
+#define COMPACT_DECK_GAP 4
 #define COMPACT_DECK_SLACK 2 // Large text draws a size up; keep the last row on screen
 #define COMPACT_FAV_BTN_H 26
-#define COMPACT_PLAY_BTN 48
+#define COMPACT_PLAY_BTN 44
 #define COMPACT_SKIP_BTN 42
-#define COMPACT_SLEEVE_MARGIN 8
-#define COMPACT_SLEEVE_SIDE_MARGIN 28
+#define COMPACT_SLEEVE_MARGIN 4
+#define COMPACT_SLEEVE_SIDE_MARGIN 10
 
 // The controls block as the R3 Pro II has it, 720 - 480. A taller panel (the
 // R1's 800) spreads what it has over the rows rather than leaving it empty
@@ -262,7 +262,7 @@ static int cover_art_w, cover_art_h;   // the visible sleeve, inset on compact p
 // this size a hairline is one pixel of a colour that is half background, and
 // the whole thing reads as noise.
 #define WAVE_HEIGHT 64
-#define COMPACT_WAVE_HEIGHT 44 // the V1's deck, where the shape stands in the bar's row
+#define COMPACT_WAVE_HEIGHT 36 // the V1's deck, where the shape stands in the bar's row
 #define WAVE_BAR_GAP 3
 #define WAVE_MIN_BAR 3	  // a silent column is still a mark, not a hole
 #define WAVE_PAST_OPA 255 // the part already played
@@ -1278,6 +1278,10 @@ static void full_backdrop_apply(void) {
 static int menu_pad_ver = PLAYER_MENU_PAD_VER; // the controls block's spacing, see PLAYER_MENU_REF_HEIGHT
 static int menu_gap = PLAYER_MENU_GAP;
 static int studio_cover_size;
+// The controls block's height, and so the cover panel's. The V1's deck is as
+// tall as the arrangement on show needs (compact_deck_height), so these move
+// when the arrangement changes: see player_apply_geometry().
+static int menu_height;
 
 // ---------------------------------------------------------------------------
 // Lyrics
@@ -2292,8 +2296,12 @@ static void studio_place(void) {
 	lv_obj_set_size(studio_empty, size, size);
 	lv_obj_set_pos(studio_empty, cover_x, cover_y);
 
-	lv_obj_set_size(studio_quality, size, STUDIO_QUALITY_H);
-	lv_obj_set_pos(studio_quality, cover_x, cover_y + size + STUDIO_QUALITY_GAP);
+	// The line under the sleeve is as wide as the panel, not as wide as the
+	// sleeve: on the V1 the sleeve is narrower than "24/176.4 FLAC", and a
+	// line laid out at the sleeve's width clipped the format and the mark.
+	// Centred, so the mark stays under the middle of the sleeve.
+	lv_obj_set_size(studio_quality, screen_w - 2 * STUDIO_MARGIN, STUDIO_QUALITY_H);
+	lv_obj_set_pos(studio_quality, STUDIO_MARGIN, cover_y + size + STUDIO_QUALITY_GAP);
 
 	lyrics_layout();
 }
@@ -2532,6 +2540,9 @@ static void studio_put(void) {
 // Reparenting and not rebuilding: the title label carries its scrolling, the
 // star carries what it does when pressed, and copying either of them would be
 // copying behaviour.
+static void player_apply_geometry(void);
+static void placeholder_place(void);
+
 static void apply_layout(void) {
 	if (!alt_title_pill || !song_text_obj) {
 		return;
@@ -2540,6 +2551,12 @@ static void apply_layout(void) {
 	// Always first: the two arrangements below know nothing about Studio, so
 	// they have to find the ellipsis and the star where they left them.
 	studio_take_back();
+
+	// The panel split follows the arrangement (the alternative one leaves the
+	// names on the sleeve, so its deck is shorter and the sleeve taller).
+	// Before the pill room is worked out below, which is measured from the
+	// sleeve.
+	player_apply_geometry();
 
 	if (layout_alt_now) {
 		// A pill each, and not one pill with two lines in it: the title and the
@@ -2552,7 +2569,7 @@ static void apply_layout(void) {
 		// nothing at all. Here they size themselves -- so each pill ends where
 		// its own text ends -- up to what is left of the sleeve once the star's
 		// disc and the margins are taken off.
-		int room = cover_art_w - 2 * alt_pad - alt_fav_size - 2 * alt_pill_pad_h - 24;
+		int room = cover_art_w - 2 * alt_pad - alt_fav_size - 2 * alt_pill_pad_h - bp_pick(8, 24);
 		if (room < 40) {
 			room = 40;
 		}
@@ -2638,6 +2655,7 @@ static void apply_layout(void) {
 	}
 	align_title_with_star(); // the title may have just left its row, or come back to it
 
+	placeholder_place();
 	paint_alt_tint();
 }
 
@@ -4582,25 +4600,128 @@ void player_sheet_attach_drag(lv_obj_t *obj, bool opening) {
 	lv_obj_add_event_cb(obj, sheet_drag_cb, LV_EVENT_PRESS_LOST, (void *)(uintptr_t)opening);
 }
 
-// The height of the V1's deck: its four rows at the fonts in force, the gaps
-// between them and the padding either end, added up rather than guessed. The
-// first row is the taller of the two names stacked (no row gap between them on
-// this board) and the star over the format; the third is the taller of the two
-// clock fonts. A deck this tall never has a row drawn over another, whatever
-// size the faces come back at.
-static int compact_deck_height(void) {
-	int title_h = lv_font_get_line_height(bp_title_font());
-	int artist_h = lv_font_get_line_height(bp_artist_font());
-	int format_h = lv_font_get_line_height(bp_format_label_font());
+// The height of the V1's deck for the arrangement on show: its rows at the
+// fonts in force, the gaps between them and the padding either end, added up
+// rather than guessed. A deck this tall never has a row drawn over another,
+// whatever size the faces come back at.
+//
+// The alternative arrangement leaves the names on the sleeve as pills and
+// turns the bar into the shape of the track, so its deck holds neither the
+// info row nor a bar of its own -- and is that much shorter, which is what
+// makes the sleeve above it taller. The panel split follows the arrangement:
+// see player_apply_geometry().
+static int compact_deck_height(bool alternative) {
 	int clock_h = LV_MAX(lv_font_get_line_height(bp_time_font()), lv_font_get_line_height(bp_queue_label_font()));
-	int info_h = LV_MAX(title_h + artist_h, COMPACT_FAV_BTN_H + format_h);
-	int standard = info_h + COMPACT_DECK_GAP + PROGRESS_TRACK_HEIGHT;
-	// The alternative arrangement moves the names onto the sleeve and puts
-	// the shape of the track where the bar was; the deck has to hold
-	// whichever of the two stacks is the taller.
-	int alternative = COMPACT_WAVE_HEIGHT;
-	return COMPACT_DECK_PAD_TOP + LV_MAX(standard, alternative) + COMPACT_DECK_GAP + clock_h + COMPACT_DECK_GAP +
-		   COMPACT_PLAY_BTN + COMPACT_DECK_PAD_BOTTOM + COMPACT_DECK_SLACK;
+	int first;
+	if (alternative) {
+		first = COMPACT_WAVE_HEIGHT;
+	} else {
+		// The first row is the taller of the two names stacked (no row gap
+		// between them on this board) and the star over the format; the bar
+		// rides beneath them.
+		int title_h = lv_font_get_line_height(bp_title_font());
+		int artist_h = lv_font_get_line_height(bp_artist_font());
+		int format_h = lv_font_get_line_height(bp_format_label_font());
+		int info_h = LV_MAX(title_h + artist_h, COMPACT_FAV_BTN_H + format_h);
+		first = info_h + COMPACT_DECK_GAP + PROGRESS_TRACK_HEIGHT;
+	}
+	return COMPACT_DECK_PAD_TOP + first + COMPACT_DECK_GAP + clock_h + COMPACT_DECK_GAP + COMPACT_PLAY_BTN +
+		   COMPACT_DECK_PAD_BOTTOM + COMPACT_DECK_SLACK;
+}
+
+// The mark that stands in for artwork when a track has none is drawn at
+// 128x128, which is most of a V1 sleeve and overflows it. It is scaled to a
+// fixed share of the sleeve, and never past its native size: an upscaled mark
+// is a blurry one, and on the wide panels 128 px is already the right size.
+static void placeholder_rescale(void) {
+	if (!cover_placeholder_icon) {
+		return;
+	}
+	const lv_image_dsc_t *src = lv_image_get_src(cover_placeholder_icon);
+	if (!src || src->header.w == 0) {
+		return;
+	}
+	int native = (int)src->header.w;
+	int target = cover_art_w * 40 / 100;
+	int scale = 256;
+	if (target < native) {
+		scale = target * 256 / native;
+		if (scale < 32) {
+			scale = 32;
+		}
+	}
+	lv_image_set_scale(cover_placeholder_icon, scale);
+}
+
+// Where the placeholder mark sits in the sleeve. Centred, except in the
+// alternative arrangement, where the title and artist pills take the bottom
+// of the sleeve: the mark is centred in the space above them, so the two do
+// not sit one on the other.
+static void placeholder_place(void) {
+	if (!cover_placeholder_icon) {
+		return;
+	}
+	int lift = 0;
+	if (layout_alt_now) {
+		int pills = lv_font_get_line_height(bp_title_font()) + lv_font_get_line_height(bp_artist_font()) +
+					4 * alt_pill_pad_v + 6;
+		lift = (pills + alt_pad) / 2;
+	}
+	lv_obj_align(cover_placeholder_icon, LV_ALIGN_CENTER, 0, -lift);
+}
+
+// Recomputes the panel split and the sleeve size for the arrangement on show
+// and applies them to the widgets. The V1's deck is only as tall as the
+// arrangement needs (compact_deck_height), so switching to the alternative
+// arrangement -- which leaves the names on the sleeve -- makes the deck
+// shorter and the sleeve taller. The wide panels keep their fixed split.
+static void player_apply_geometry(void) {
+	if (!player_menu || !cover_panel || !bp_is_tempotec_v1()) {
+		return;
+	}
+	int want_menu = compact_deck_height(layout_alt_now);
+	if (want_menu == menu_height) {
+		return; // the arrangement did not change the deck
+	}
+	menu_height = want_menu;
+	int screen_h = (int)lv_obj_get_height(player_screen);
+	int want_cover = screen_h - menu_height;
+	if (want_cover < 64) {
+		want_cover = 64;
+		menu_height = screen_h - want_cover;
+	}
+	cover_box_h = want_cover;
+
+	// The sleeve: as large as the panel allows with its margins kept, and an
+	// even number so it centres on whole pixels.
+	int side = LV_MIN(cover_box_w - 2 * COMPACT_SLEEVE_SIDE_MARGIN, cover_box_h - 2 * COMPACT_SLEEVE_MARGIN);
+	if (side < 64) {
+		side = LV_MIN(cover_box_w, cover_box_h);
+	}
+	side &= ~1;
+	cover_art_w = side;
+	cover_art_h = side;
+	backdrop_h = menu_height;
+
+	lv_obj_set_size(player_menu, cover_box_w, menu_height);
+	lv_obj_set_size(cover_panel, cover_box_w, cover_box_h);
+	lv_obj_set_size(cover_art_group, cover_art_w, cover_art_h);
+	lv_obj_center(cover_art_group);
+	lv_obj_center(cover_img);
+	placeholder_rescale();
+	placeholder_place();
+
+	// Studio's panel is laid out over the cover panel and reaches into the
+	// deck; its own height is the screen minus its controls, floored at the
+	// cover panel's.
+	studio_box_h = screen_h - bp_pick(96, STUDIO_CONTROLS_H);
+	if (studio_box_h < cover_box_h) {
+		studio_box_h = cover_box_h;
+	}
+	lv_obj_set_size(studio_box, studio_box_w, studio_box_h);
+	if (layout_studio_now) {
+		studio_place();
+	}
 }
 
 // Builds the player sheet: artwork, controls and the poll that drives them.
@@ -4635,8 +4756,12 @@ void player_init(gui_config_t *cfg) {
 		compact_progress_width = 0;
 	}
 	int cover_height = (int)cfg->screen_width;
-	int menu_height = (int)cfg->screen_height - cover_height;
-	int min_menu_h = compact ? compact_deck_height() : PLAYER_MENU_MIN_HEIGHT;
+	menu_height = (int)cfg->screen_height - cover_height;
+	// The deck is as tall as the arrangement on show needs. At this point no
+	// arrangement is up yet (apply_layout below puts the standard one up), so
+	// this is the standard height; a saved alternative arrangement re-sizes
+	// the panels when the first local track brings it up (player_apply_geometry).
+	int min_menu_h = compact ? compact_deck_height(layout_alt_now) : PLAYER_MENU_MIN_HEIGHT;
 	if (menu_height < min_menu_h) {
 		menu_height = min_menu_h;
 		cover_height = (int)cfg->screen_height - menu_height;
@@ -4650,8 +4775,8 @@ void player_init(gui_config_t *cfg) {
 	cover_box_h = cover_height;
 	cover_art_w = cover_box_w;
 	cover_art_h = cover_box_h;
-	alt_pad = compact ? 8 : ALT_PAD;
-	alt_fav_size = compact ? 44 : ALT_FAV_SIZE;
+	alt_pad = compact ? 6 : ALT_PAD;
+	alt_fav_size = compact ? 36 : ALT_FAV_SIZE;
 	alt_pill_pad_h = compact ? 10 : ALT_PILL_PAD_H;
 	alt_pill_pad_v = compact ? 5 : ALT_PILL_PAD_V;
 	if (compact) {
@@ -5114,13 +5239,16 @@ void player_init(gui_config_t *cfg) {
 	lv_obj_align(podcast_badge, LV_ALIGN_TOP_RIGHT, -BADGE_INSET, BADGE_INSET);
 	lv_obj_set_hidden(podcast_badge, true);
 
-	// Shown while there is no artwork for the current track.
+	// Shown while there is no artwork for the current track. The mark is drawn
+	// at 128x128 natively, which overflows a V1 sleeve, so it is scaled to a
+	// share of the sleeve (placeholder_rescale, also on a change of layout).
 	cover_placeholder_icon = lv_image_create(cover_panel);
 	lv_image_set_src(cover_placeholder_icon, &icon_music_note);
 	lv_obj_add_style(cover_placeholder_icon, &theme_style_text_dim, 0);
 	lv_obj_set_style_image_recolor(cover_placeholder_icon, theme()->text_secondary, 0);
 	lv_obj_set_style_image_recolor_opa(cover_placeholder_icon, LV_OPA_COVER, 0);
 	lv_obj_center(cover_placeholder_icon);
+	placeholder_rescale();
 
 	// Where the title and the star go in the alternative layout: two pills in
 	// one bottom corner of the sleeve and a disc in the other. Built empty and
