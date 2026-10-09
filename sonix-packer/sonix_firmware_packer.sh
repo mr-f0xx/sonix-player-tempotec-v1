@@ -391,6 +391,62 @@ build_one() {
 	say ""
 
 	# ==========================================================================
+	# 5a. The boot script learns the extra boot screens
+	# ==========================================================================
+	#
+	# The script that draws the logo picks one of three files from one field of
+	# the flash marker, and four boot screens do not fit in three branches. So
+	# a block of our own goes in just before the script's first
+	# cmd_jpeg_display: it reads the marker's second field, at byte 8 of the
+	# same block, and draws Space or Travelling in space itself, leaving the
+	# stock chain untouched for every other marker. Inserted rather than
+	# shipped whole because the script is the vendor's and stays the vendor's
+	# -- everything in it this block does not intercept runs exactly as before.
+	#
+	# The [ -f ] guards are the fallback: a rootfs whose overlay carried no
+	# such picture draws the stock chain's own choice instead of nothing.
+	step "[$MODEL_NAME] teaching the boot script the extra boot screens"
+
+	BOOT_SCRIPT=""
+	for cand in "$SQUASH_DIR"/etc/init.d/*; do
+		[ -f "$cand" ] || continue
+		if grep -q "cmd_jpeg_display" "$cand"; then
+			BOOT_SCRIPT="$cand"
+			break
+		fi
+	done
+
+	if [ -z "$BOOT_SCRIPT" ]; then
+		warn "no init script calls cmd_jpeg_display here."
+		warn "the boot screen setting will only offer what the stock script can draw."
+	elif grep -q "sonix boot screen choice" "$BOOT_SCRIPT"; then
+		say "    $(basename "$BOOT_SCRIPT") already carries the choice block"
+	else
+		BOOT_BLOCK='# --- sonix boot screen choice (added by the firmware packer) ---
+boot_sel=$(nanddump -q -s 0x20008 -l 6 /dev/mtd5 -a 2>/dev/null)
+if [ "$boot_sel" = "logo:2" ] && [ -f /etc/logo_space.jpeg ]; then cmd_jpeg_display /etc/logo_space.jpeg; exit 0; fi
+if [ "$boot_sel" = "logo:3" ] && [ -f /etc/logo_travelling.jpeg ]; then cmd_jpeg_display /etc/logo_travelling.jpeg; exit 0; fi
+# --- end sonix boot screen choice ---
+'
+		awk -v block="$BOOT_BLOCK" '
+			done == 0 && /cmd_jpeg_display/ { printf "%s", block; done = 1 }
+			{ print }
+		' "$BOOT_SCRIPT" > "$BOOT_SCRIPT.packer.tmp"
+
+		grep -q "sonix boot screen choice" "$BOOT_SCRIPT.packer.tmp" ||
+			die "$(basename "$BOOT_SCRIPT") never calls cmd_jpeg_display on one line.
+  The boot screen choice block was not inserted; check the script by hand."
+
+		# cat onto the file rather than mv over it: the init script's mode and
+		# owner are the stock ones and the image boots through them.
+		cat "$BOOT_SCRIPT.packer.tmp" > "$BOOT_SCRIPT"
+		rm -f "$BOOT_SCRIPT.packer.tmp"
+		chmod 755 "$BOOT_SCRIPT"
+		say "    $(basename "$BOOT_SCRIPT"): choice block inserted before its first cmd_jpeg_display"
+	fi
+	say ""
+
+	# ==========================================================================
 	# 5b. The modes that decide whether any of this runs
 	# ==========================================================================
 	#

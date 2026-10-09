@@ -83,10 +83,11 @@ void theme_set_accent(int index);
 void theme_set_dark(bool dark);
 
 // The picture the next power-on shows (Appearance > Boot screen):
-// BOOTLOGO_STOCK, the firmware's own light/dark pair, or BOOTLOGO_RETROSPACE,
-// one image for both palettes. The choice is kept in the config like every
-// other setting, and pushed to the flash marker the boot script reads -- see
-// bootlogo.h for why it cannot be a file. Retrospace is the default.
+// BOOTLOGO_STOCK, the firmware's own light/dark pair, or one of the three
+// added pictures -- BOOTLOGO_RETROSPACE, BOOTLOGO_SPACE, BOOTLOGO_TRAVELLING
+// -- one image each for both palettes. The choice is kept in the config like
+// every other setting, and pushed to the flash marker the boot script reads
+// -- see bootlogo.h for why it cannot be a file. Retrospace is the default.
 int theme_boot_screen(void);
 void theme_set_boot_screen(int choice);
 
