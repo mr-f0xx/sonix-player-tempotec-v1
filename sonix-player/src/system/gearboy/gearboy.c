@@ -29,6 +29,7 @@ const uint16_t *gearboy_screen(void) { return NULL; }
 bool gearboy_present(void) { return false; }
 uint32_t gearboy_frame_count(void) { return 0; }
 void gearboy_set_keys(uint16_t mask) { (void)mask; }
+void gearboy_set_key_overlay(uint16_t mask) { (void)mask; }
 void gearboy_set_paused(bool paused) { (void)paused; }
 bool gearboy_paused(void) { return false; }
 void gearboy_request_savestate(void) {}
@@ -38,14 +39,26 @@ void gearboy_refresh_video_settings(void) {}
 
 // The layout still asks for these, so they answer as the regular build does.
 static int stub_scale = GEARBOY_SCALE_MAX;
+static int stub_width = GB_WIDTH * GEARBOY_SCALE_MAX;
+static int stub_height = GB_HEIGHT * GEARBOY_SCALE_MAX;
 void gearboy_set_scale(int scale) {
 	if (scale >= 1 && scale <= GEARBOY_SCALE_MAX) {
 		stub_scale = scale;
+		stub_width = GB_WIDTH * scale;
+		stub_height = GB_HEIGHT * scale;
+	}
+}
+void gearboy_set_frame_size(int width, int height) {
+	if (width >= GB_WIDTH && height >= GB_HEIGHT && width <= GB_WIDTH * GEARBOY_SCALE_MAX &&
+		height <= GB_HEIGHT * GEARBOY_SCALE_MAX) {
+		stub_scale = 0;
+		stub_width = width;
+		stub_height = height;
 	}
 }
 int gearboy_scale(void) { return stub_scale; }
-int gearboy_frame_w(void) { return GB_WIDTH * stub_scale; }
-int gearboy_frame_h(void) { return GB_HEIGHT * stub_scale; }
+int gearboy_frame_w(void) { return stub_width; }
+int gearboy_frame_h(void) { return stub_height; }
 
 #else
 
@@ -91,9 +104,9 @@ static volatile bool failed_flag;
 //
 // The panel swaps two pages with FBIOPAN_DISPLAY, so no half-drawn page is ever
 // scanned out. That does not help if the tear is already in the image: writing
-// the 3x upscale from the emulator thread while the UI thread reads it seams the
-// picture, because the reader is much the slower of the two -- those 414 KB go
-// into the mapped framebuffer, which is uncached on this SoC.
+// an enlarged frame from the emulator thread while the UI thread reads it seams
+// the picture, because the reader is much slower -- up to 414 KB go into the
+// mapped framebuffer, which is uncached on this SoC.
 //
 // So the two jobs are split:
 //
@@ -112,12 +125,13 @@ static volatile bool failed_flag;
 
 #define GB_FRAME_BUFFERS 2
 
-// The scale the picture is shown at, and so the size of the framebuffer below:
-// 3 on the 480-wide HiBy panels, 1 on the V1's 240x320 one. Set by the page
-// through gearboy_set_scale() before the first start; read on every frame.
+// The output frame size. HiBy uses an integer 3x; the V1 sets 240x216 before
+// the first start. `frame_scale` is zero for that custom nearest-neighbour fit.
 static int frame_scale = GEARBOY_SCALE_MAX;
+static int frame_width = GB_WIDTH * GEARBOY_SCALE_MAX;
+static int frame_height = GB_HEIGHT * GEARBOY_SCALE_MAX;
 
-static uint16_t *screen;					// the upscaled image, frame_w x frame_h
+static uint16_t *screen;					// the scaled image, frame_width x frame_height
 static uint16_t *gb_frames[GB_FRAME_BUFFERS]; // 160x144, as they leave the core
 static int16_t *audio_buf;					// one frame's samples
 
@@ -128,6 +142,7 @@ static volatile int gb_ready_index = -1;
 
 static volatile uint32_t frame_count;
 static volatile uint16_t key_mask;
+static volatile uint16_t key_overlay_mask;
 static volatile bool paused_flag;
 
 // Requests from the in-game menu and their outcome. Plain bools and an int
@@ -186,24 +201,33 @@ const char *gearboy_title(void) { return title; }
 const uint16_t *gearboy_screen(void) { return screen; }
 
 void gearboy_set_scale(int scale) {
-	if (scale < 1 || scale > GEARBOY_SCALE_MAX) {
+	if (scale < 1 || scale > GEARBOY_SCALE_MAX || running_flag) {
 		return;
 	}
 	// A running game holds a framebuffer of the old size and an image pointing
-	// at it (see gearboy.h): changing the scale under it would read past the
-	// end of one of them. The page sets this once, at build time, before
-	// anything is started.
-	if (running_flag) {
+	// at it (see gearboy.h): changing the output under it could read past the
+	// end of one of them. The page sets this before anything is started.
+	frame_scale = scale;
+	frame_width = GB_WIDTH * scale;
+	frame_height = GB_HEIGHT * scale;
+}
+
+void gearboy_set_frame_size(int width, int height) {
+	if (running_flag || width < GB_WIDTH || height < GB_HEIGHT || width > GB_WIDTH * GEARBOY_SCALE_MAX ||
+		height > GB_HEIGHT * GEARBOY_SCALE_MAX) {
 		return;
 	}
-	frame_scale = scale;
+	frame_scale = 0;
+	frame_width = width;
+	frame_height = height;
 }
 
 int gearboy_scale(void) { return frame_scale; }
-int gearboy_frame_w(void) { return GB_WIDTH * frame_scale; }
-int gearboy_frame_h(void) { return GB_HEIGHT * frame_scale; }
+int gearboy_frame_w(void) { return frame_width; }
+int gearboy_frame_h(void) { return frame_height; }
 
 static void blit1x(const uint16_t *src, uint16_t *dst);
+static void blit_nearest(const uint16_t *src, uint16_t *dst);
 static void blit3x(const uint16_t *src, uint16_t *dst);
 static void blit3x_grid(const uint16_t *src, uint16_t *dst, int shader);
 
@@ -221,21 +245,18 @@ bool gearboy_present(void) {
 			return false;
 		}
 		__sync_synchronize();
-		switch (frame_scale) {
-		case 1:
-			// The V1: one panel pixel per Game Boy pixel. There is no second
-			// pixel of a game pixel to dim into a grid, so the shaders have
-			// nothing to draw here and the picture is shown as it left the
-			// core. (The page does not offer them on this board.)
+		if (frame_scale == 1) {
 			blit1x(gb_frames[index], screen);
-			break;
-		default:
+		} else if (frame_scale == GEARBOY_SCALE_MAX) {
 			if (g_shader != 0) {
 				blit3x_grid(gb_frames[index], screen, g_shader);
 			} else {
 				blit3x(gb_frames[index], screen);
 			}
-			break;
+		} else {
+			// Custom/fractional sizes use nearest-neighbour sampling. The V1
+			// uses this to fill its width at 1.5x without stretching the game.
+			blit_nearest(gb_frames[index], screen);
 		}
 		__sync_synchronize();
 		// Only once the core has advanced by as many frames as there are
@@ -248,14 +269,16 @@ bool gearboy_present(void) {
 }
 uint32_t gearboy_frame_count(void) { return frame_count; }
 void gearboy_set_keys(uint16_t mask) { key_mask = mask; }
+void gearboy_set_key_overlay(uint16_t mask) { key_overlay_mask = mask; }
 bool gearboy_paused(void) { return paused_flag; }
 
 void gearboy_set_paused(bool paused) {
 	if (paused) {
 		// No key survives a pause: fingers leave the glass to reach the menu,
 		// and without this the direction they were holding would stay pressed
-		// until play resumes.
+		// until play resumes. The hardware-button overlay is cleared too.
 		key_mask = 0;
+		key_overlay_mask = 0;
 	}
 	paused_flag = paused;
 }
@@ -296,17 +319,44 @@ static const char *saves_dir(void) {
 // the scaling
 // ---------------------------------------------------------------------------
 //
-// 160x144 -> gearboy_frame_w() x gearboy_frame_h(), with no filtering: three
-// times in each direction on the 480-wide panels (480x432), once on the V1
-// (160x144). Integer scale means every pixel becomes an exact square of panel
-// pixels with nothing to interpolate, which is also the right way to show a
-// Game Boy: a blurred pixel is no longer a pixel.
-//
-// blit1x() is the whole story at 1x: the rows are contiguous in both buffers,
-// so it is one memcpy of 46 KB -- a quarter of the 3x blit's work, which is
-// something the V1's slower panel path does not have to spare.
+// 160x144 -> gearboy_frame_w() x gearboy_frame_h(). The HiBy panels use an
+// integer 3x scale; the V1's 240x216 fit keeps the original aspect ratio with
+// nearest-neighbour sampling, trading perfectly uniform pixel squares for a
+// larger, full-width picture.
 static void blit1x(const uint16_t *src, uint16_t *dst) {
 	memcpy(dst, src, (size_t)GB_WIDTH * GB_HEIGHT * 2);
+}
+
+// General nearest-neighbour scaler for custom output sizes. The remainder
+// accumulators distribute repeated source pixels evenly without a division in
+// the inner loop (the V1's 3:2 fit alternates one- and two-pixel runs).
+static void blit_nearest(const uint16_t *src, uint16_t *dst) {
+	const int dst_w = gearboy_frame_w();
+	const int dst_h = gearboy_frame_h();
+	int src_y = 0;
+	int y_remainder = 0;
+
+	for (int y = 0; y < dst_h; y++) {
+		const uint16_t *s = src + (size_t)src_y * GB_WIDTH;
+		uint16_t *d = dst + (size_t)y * dst_w;
+		int src_x = 0;
+		int x_remainder = 0;
+
+		for (int x = 0; x < dst_w; x++) {
+			d[x] = s[src_x];
+			x_remainder += GB_WIDTH;
+			while (x_remainder >= dst_w) {
+				x_remainder -= dst_w;
+				src_x++;
+			}
+		}
+
+		y_remainder += GB_HEIGHT;
+		while (y_remainder >= dst_h) {
+			y_remainder -= dst_h;
+			src_y++;
+		}
+	}
 }
 
 // The 3x case. The loop walks the source in pairs: two 16-bit pixels become
@@ -508,7 +558,7 @@ static void *emu_worker(void *unused) {
 			continue;
 		}
 
-		gb_core_set_keys(core, key_mask);
+		gb_core_set_keys(core, (uint16_t)(key_mask | key_overlay_mask));
 
 		int samples = 0;
 		gb_core_run_frame(core, gb_frames[gb_write_index], audio_buf, &samples);
@@ -562,8 +612,8 @@ bool gearboy_start(const char *rom_path_in, const char *title_in) {
 	audio_stop();
 
 	if (!screen) {
-		// The size of the picture in use, not the largest one: 46 KB on the V1
-		// against 414 (see gearboy_set_scale()).
+		// The size of the picture in use, not the largest one: about 104 KB on
+		// the V1 against 414 KB on a 480-wide panel.
 		screen = calloc(1, (size_t)gearboy_frame_w() * gearboy_frame_h() * 2);
 	}
 	for (int i = 0; i < GB_FRAME_BUFFERS; i++) {
@@ -589,6 +639,7 @@ bool gearboy_start(const char *rom_path_in, const char *title_in) {
 	gb_write_index = 0;
 	gb_ready_index = -1;
 	key_mask = 0;
+	key_overlay_mask = 0;
 	paused_flag = false;
 	want_savestate = false;
 	want_loadstate = false;
@@ -618,9 +669,11 @@ void gearboy_stop(void) {
 	pthread_join(worker, NULL);
 	thread_live = false;
 	running_flag = false;
+	key_mask = 0;
+	key_overlay_mask = 0;
 	title[0] = '\0';
 
-	// About half a megabyte across the upscaled image, the core frames and the
+	// About half a megabyte across the scaled image, the core frames and the
 	// samples. The thread has ended so nothing writes them any more; making
 	// sure nothing reads them is the caller's job (see gearboy.h).
 	free(screen);

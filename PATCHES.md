@@ -37,21 +37,19 @@ without allowing four actions to reduce the heading to `Musi…`.
 The Game Boy / Game Boy Color emulator had its own geometry, written for the
 480-wide panels only: the picture was the panel's full width (160×144 at 3×,
 480×432), the D-pad was 220 px a side and the in-game menu was a 360 px card,
-all of which ran off a 240 px screen. The V1 shows the picture at **1×** —
-160×144, one panel pixel per Game Boy pixel, centred in the upper half with 40 px
-of black either side of it — because 3× does not fit 240 and a fractional scale
-would make some Game Boy pixels a row wider than their neighbours, which is what
-a Game Boy picture must not look like. The controls take the 176 rows under it
-at about half the linear size (D-pad 120, A/B 60, Select/Start as one row of
-80×28 pills at the foot), and the in-game menu becomes the 200 px card this
-interface uses for modals on the V1 instead of a scaled 360. The zone that opens
-that menu is the middle 96×72 of the picture, still where a playing hand never
-rests. Every touch rectangle stays inside the panel, and no two of them overlap
-(the emulator's reader takes the first zone a finger is in, so an overlap
-between two buttons would silently prefer one of them). The
-shader choices (the pixel grid of the real panels) are left out on this board:
-they are drawn *inside* the 3× upscale, and at 1× there is no second pixel of a
-game pixel to dim. Palettes, GBC colour correction and save states are
+all of which ran off a 240 px screen. The V1 now fits the picture to **240×216**
+with nearest-neighbour sampling: it fills the panel width at 1.5× while keeping
+the Game Boy aspect ratio, trading uniform pixel-square sizes for a much larger
+playing area. A compact 102 px D-pad and 46 px A/B buttons sit in the 104 rows
+below it. The physical Play/Pause key supplies Game Boy Start; the previous and
+next skip keys supply Select, so those two controls no longer take touchscreen
+space. The in-game menu is the 200 px card this interface uses for modals on the
+V1 instead of a scaled 360. The zone that opens that menu is the middle 96×72
+of the picture, still where a playing hand never rests. Every touch rectangle
+stays inside the panel, and no two of them overlap (the emulator's reader takes
+the first zone a finger is in, so an overlap between two buttons would silently
+prefer one of them). The shader choices (the pixel grid of the real panels) are
+left out on this board; palettes, GBC colour correction and save states are
 unaffected. See the layout comment at the top of
 `src/gui/gearboy/gearboyplay.c` and the scale note in
 `src/system/gearboy/gearboy.h`.
