@@ -14,37 +14,37 @@ Interface previews, rendered at the V1's native 240 × 320 resolution. Click any
 <table>
   <tr>
     <td align="center">
-      <a href="https://github.com/mr-f0xx/Winamp360-AP80-Pro-Max/blob/main/Main%20menu.png"><img src="https://github.com/mr-f0xx/Winamp360-AP80-Pro-Max/blob/main/Main%20menu.png?raw=true" width="180" alt="Main menu"></a>
+      <a href="screenshots/main-menu.png"><img src="screenshots/main-menu.png" width="180" alt="Main menu"></a>
       <br><sub><b>Main menu</b></sub>
     </td>
     <td align="center">
-      <a href="https://github.com/mr-f0xx/Winamp360-AP80-Pro-Max/blob/main/Music.png"><img src="https://github.com/mr-f0xx/Winamp360-AP80-Pro-Max/blob/main/Music.png?raw=true" width="180" alt="Music"></a>
+      <a href="screenshots/music.png"><img src="screenshots/music.png" width="180" alt="Music"></a>
       <br><sub><b>Music</b></sub>
     </td>
     <td align="center">
-      <a href="https://github.com/mr-f0xx/Winamp360-AP80-Pro-Max/blob/main/More.png"><img src="https://github.com/mr-f0xx/Winamp360-AP80-Pro-Max/blob/main/More.png?raw=true" width="180" alt="More"></a>
+      <a href="screenshots/more.png"><img src="screenshots/more.png" width="180" alt="More"></a>
       <br><sub><b>More</b></sub>
     </td>
     <td align="center">
-      <a href="https://github.com/mr-f0xx/Winamp360-AP80-Pro-Max/blob/main/Wireless.png"><img src="https://github.com/mr-f0xx/Winamp360-AP80-Pro-Max/blob/main/Wireless.png?raw=true" width="180" alt="Wireless"></a>
+      <a href="screenshots/wireless.png"><img src="screenshots/wireless.png" width="180" alt="Wireless"></a>
       <br><sub><b>Wireless</b></sub>
     </td>
   </tr>
   <tr>
     <td align="center">
-      <a href="https://github.com/mr-f0xx/Winamp360-AP80-Pro-Max/blob/main/Settings.png"><img src="https://github.com/mr-f0xx/Winamp360-AP80-Pro-Max/blob/main/Settings.png?raw=true" width="180" alt="Settings"></a>
+      <a href="screenshots/settings.png"><img src="screenshots/settings.png" width="180" alt="Settings"></a>
       <br><sub><b>Settings</b></sub>
     </td>
     <td align="center">
-      <a href="https://github.com/mr-f0xx/Winamp360-AP80-Pro-Max/blob/main/Now%20Playing.png"><img src="https://github.com/mr-f0xx/Winamp360-AP80-Pro-Max/blob/main/Now%20Playing.png?raw=true" width="180" alt="Now Playing"></a>
+      <a href="screenshots/now-playing.png"><img src="screenshots/now-playing.png" width="180" alt="Now Playing"></a>
       <br><sub><b>Now Playing</b></sub>
     </td>
     <td align="center">
-      <a href="https://github.com/mr-f0xx/Winamp360-AP80-Pro-Max/blob/main/File%20Browser.png"><img src="https://github.com/mr-f0xx/Winamp360-AP80-Pro-Max/blob/main/File%20Browser.png?raw=true" width="180" alt="File Browser"></a>
+      <a href="screenshots/file-browser.png"><img src="screenshots/file-browser.png" width="180" alt="File Browser"></a>
       <br><sub><b>File Browser</b></sub>
     </td>
     <td align="center">
-      <a href="https://github.com/mr-f0xx/Winamp360-AP80-Pro-Max/blob/main/Steaming.png"><img src="https://github.com/mr-f0xx/Winamp360-AP80-Pro-Max/blob/main/Steaming.png?raw=true" width="180" alt="Streaming"></a>
+      <a href="screenshots/streaming.png"><img src="screenshots/streaming.png" width="180" alt="Streaming"></a>
       <br><sub><b>Streaming</b></sub>
     </td>
   </tr>
