@@ -2,6 +2,7 @@
 
 #include <dirent.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -156,6 +157,113 @@ static bool run_script(const char *script, const char *action) {
 
 #define ADB_GADGET "/sys/kernel/config/usb_gadget/adb_demo"
 #define ADB_FFS_DIR "/dev/usb-ffs/adb"
+#define ADB_UDC_ATTR ADB_GADGET "/UDC"
+#define ADB_UDC_DIR "/sys/class/udc"
+
+// How a bind is asked for, and how long it is kept asking.
+//
+// The first write after the card reader's gadget was handed over races the
+// driver letting go of the controller: for a few tens of milliseconds it is
+// answered -ENODEV, which is the kernel's own
+//
+//     configfs-gadget 13500000.otg_new: failed to start adb_demo: -19
+//
+// and, from a shell, "write error: No such device". On a TempoTec V1 the very
+// same write succeeded 67 ms later, with the host connecting six seconds after
+// that -- so a single attempt left ADB off with the switch on, and the only
+// trace was a line from the shell in the middle of the player's own.
+//
+// Ten tries a hundred and fifty milliseconds apart is a second and a half:
+// long enough to outlast the hand-over, short enough that a controller that is
+// really not coming up is reported rather than waited on.
+#define ADB_BIND_ATTEMPTS 10
+#define ADB_BIND_WAIT_MS 150
+
+// Reads a one-line sysfs attribute without its trailing newline. False when the
+// file is not there yet, which is the gadget having not been built.
+static bool read_sysfs_line(const char *path, char *out, size_t size) {
+	if (size == 0) {
+		return false;
+	}
+	out[0] = '\0';
+	FILE *f = fopen(path, "re");
+	if (!f) {
+		return false;
+	}
+	bool got = fgets(out, (int)size, f) != NULL;
+	fclose(f);
+	if (got) {
+		out[strcspn(out, " \t\r\n")] = '\0';
+	}
+	return got;
+}
+
+// The name of the first USB device controller, which is the only one this
+// family of SoCs carries.
+static bool udc_controller_name(char *out, size_t size) {
+	DIR *dir = opendir(ADB_UDC_DIR);
+	if (!dir) {
+		return false;
+	}
+	bool found = false;
+	struct dirent *entry;
+	while ((entry = readdir(dir)) != NULL) {
+		if (entry->d_name[0] == '.') {
+			continue;
+		}
+		snprintf(out, size, "%s", entry->d_name);
+		found = true;
+		break;
+	}
+	closedir(dir);
+	return found;
+}
+
+// Whether the controller is carrying a gadget, whichever one it is. The UDC
+// attribute holds the controller's name once it is bound and is empty when it
+// is not, so the attribute itself is the only answer worth believing: a write
+// that returned no error is not proof that anything started.
+static bool udc_is_bound(void) {
+	char bound[128];
+	return read_sysfs_line(ADB_UDC_ATTR, bound, sizeof(bound)) && bound[0] != '\0';
+}
+
+// Puts the gadget on the controller, and says whether it got there.
+static bool adb_bind_udc(void) {
+	char udc[128];
+	if (!udc_controller_name(udc, sizeof(udc)) || udc[0] == '\0') {
+		fprintf(stderr, "adb: no controller under %s, nothing to bind\n", ADB_UDC_DIR);
+		return false;
+	}
+
+	for (int attempt = 1; attempt <= ADB_BIND_ATTEMPTS; attempt++) {
+		if (udc_is_bound()) {
+			return true; // bound already: by whom is not this function's business
+		}
+
+		int fd = open(ADB_UDC_ATTR, O_WRONLY);
+		if (fd < 0) {
+			fprintf(stderr, "adb: cannot open %s: %s\n", ADB_UDC_ATTR, strerror(errno));
+			return false;
+		}
+		ssize_t wrote = write(fd, udc, strlen(udc));
+		int err = wrote < 0 ? errno : 0;
+		close(fd);
+
+		if (wrote < 0) {
+			fprintf(stderr, "adb: binding to %s refused (%s), attempt %d of %d\n", udc, strerror(err), attempt,
+					ADB_BIND_ATTEMPTS);
+		} else if (udc_is_bound()) {
+			printf("adb: bound to %s\n", udc);
+			return true;
+		}
+		usleep(ADB_BIND_WAIT_MS * 1000);
+	}
+
+	fprintf(stderr, "adb: %s is not carrying the gadget after %d attempts in %d ms\n", udc, ADB_BIND_ATTEMPTS,
+			ADB_BIND_ATTEMPTS * ADB_BIND_WAIT_MS);
+	return false;
+}
 
 // True once the player owns the USB configfs, which is as soon as the card
 // reader's gadget exists, and is exactly when the firmware's script gives up.
@@ -226,11 +334,13 @@ static bool adb_gadget_start(void) {
 		usleep(100 * 1000);
 	}
 
-	rc = system("grep -q '[a-zA-Z0-9]' " ADB_GADGET "/UDC 2>/dev/null || "
-				"echo $(ls /sys/class/udc/ | head -n1) > " ADB_GADGET "/UDC");
-	printf("adb: gadget bound -> %d, adbd %s\n", rc, adb_is_running() ? "running" : "not running");
+	// Not `adb_is_running()` alone, which is what this used to answer: the
+	// daemon can be up while the gadget never reached the controller, and then
+	// the switch reads on, the card reader stays off and the host sees nothing.
+	bool bound = adb_bind_udc();
+	printf("adb: gadget %s, adbd %s\n", bound ? "bound" : "NOT bound", adb_is_running() ? "running" : "not running");
 
-	return adb_is_running();
+	return bound && adb_is_running();
 }
 
 // Waits for adbd to be gone. True when it is.
