@@ -34,7 +34,7 @@
 - **Crossfeed** - level, cutoff and delay, all adjustable.
 - **ReplayGain** - off, track or album, read from the tags.
 - **Fade** - one to twelve seconds at the track boundary.
-- **Gapless** - the PCM device stays open between tracks of the same shape.
+- **Gapless** - on by default; the PCM device stays open between tracks of the same shape. A track that ends on its own hands over its queue. A manual skip (next, previous, or a track picked from a list) drops the old queue and keeps the device open, so the next track skips the device open and the DAC mute. A saved `audio.gapless = 0` turns it off.
 - **DSD** - DoP by default, with nothing in the chain allowed to touch the
   samples; or converted here to 176.4 kHz PCM. DoP falls back to conversion by
   itself when the device refuses the rate.

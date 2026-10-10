@@ -1963,7 +1963,8 @@ int main(int argc, char **argv) {
 	eq_init();
 	// Gapless playback, before anything can start: the engine reads this at
 	// the end of every track.
-	audio_set_gapless(config_get_int("audio", "gapless", 0) != 0);
+	// On by default: an unset key means a new install, and a saved 0 stays off.
+	audio_set_gapless(config_get_int("audio", "gapless", 1) != 0);
 	clock_init();
 	adb_apply_saved_state();
 	// The buttons on the headset cable: the kernel module starts disabled and
