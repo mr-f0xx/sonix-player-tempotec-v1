@@ -143,10 +143,17 @@ void gearboysettings_init(gui_config_t *cfg) {
 		palette_pills[i] = make_pill(pal_pills, PALETTE_NAMES[i], palette_pick_cb, i);
 	}
 
-	// Shaders: the real panels' grid, drawn inside the 3x upscale.
+	// Shaders: the real panels' grid, drawn inside the 3x upscale. The V1's
+	// picture is one panel pixel per Game Boy pixel, so there is no second pixel
+	// of a game pixel to dim into a grid: the card is left off that board rather
+	// than offering four choices with nothing behind them.
 	lv_obj_t *sh_pills = make_pill_card(container, "gearboy_shaders");
-	for (int i = 0; i < 4; i++) {
-		shader_pills[i] = make_pill(sh_pills, SHADER_NAMES[i], shader_pick_cb, i);
+	if (bp_is_tempotec_v1()) {
+		lv_obj_set_hidden(lv_obj_get_parent(sh_pills), true);
+	} else {
+		for (int i = 0; i < 4; i++) {
+			shader_pills[i] = make_pill(sh_pills, SHADER_NAMES[i], shader_pick_cb, i);
+		}
 	}
 
 	settingsrow_toggle(container, "gearboy_gbc_color_correction", &correction_switch, correction_toggle_cb);

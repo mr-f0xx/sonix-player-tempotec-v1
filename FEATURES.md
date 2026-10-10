@@ -134,6 +134,12 @@ certificate checking, and HLS.
   databases.
 - Save states, battery RAM, five palettes, shaders and GBC color
   correction.
+- On the V1 the picture is shown at one panel pixel per Game Boy pixel
+  (160x144, centred in the upper half) with the touch controls -- D-pad, A/B,
+  Select/Start -- laid out under it, so a small panel keeps a pixel-perfect
+  picture. The shader overlays (the pixel grid of the real LCD panels) are drawn
+  inside the 3x upscale the 480-px HiBy panels use and are not offered on the
+  V1; palettes and GBC color correction apply on every board.
 
 ## Settings
 

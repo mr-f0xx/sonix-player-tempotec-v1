@@ -43,8 +43,9 @@ typedef struct {
 #define GBINPUT_MAX_CONTACTS 5
 
 // The size of the screen in pixels: 480x720 on the R3 Pro II, 480x800 on the
-// R1. Zones are in screen coordinates and raw touches are mapped onto this.
-// Call before gbinput_start(); zero or negative leaves the value unchanged.
+// R1, 240x320 on the V1. Zones are in screen coordinates and raw touches are
+// mapped onto this. Call before gbinput_start(); zero or negative leaves the
+// value unchanged.
 void gbinput_set_glass(int width, int height);
 
 // Takes the screen. `zones` is copied, so the caller may free it. False when
