@@ -148,8 +148,9 @@ static int polls_since_stop = POLLS_FAST_AFTER_STOP;
 // line heights of the fonts in force (compact_deck_height()), so the four rows
 // -- names, bar, clocks, transport -- always fit one under the other with
 // these gaps between them and nothing lifted into the row above. The rest of
-// the 320 px goes to the sleeve, which keeps COMPACT_SLEEVE_MARGIN above and
-// below it and at least COMPACT_SLEEVE_SIDE_MARGIN off either bezel.
+// the 320 px goes to the sleeve, which keeps COMPACT_SLEEVE_TOP clear of the
+// chevron's row, COMPACT_SLEEVE_MARGIN off the deck, and
+// COMPACT_SLEEVE_SIDE_MARGIN off either bezel where the width is the limit.
 #define COMPACT_DECK_PAD_TOP 4
 #define COMPACT_DECK_PAD_BOTTOM 4
 #define COMPACT_DECK_GAP 4
@@ -157,11 +158,14 @@ static int polls_since_stop = POLLS_FAST_AFTER_STOP;
 #define COMPACT_FAV_BTN_H 26
 #define COMPACT_PLAY_BTN 44
 #define COMPACT_SKIP_BTN 42
-#define COMPACT_SLEEVE_MARGIN 4
+#define COMPACT_SLEEVE_MARGIN 2
 #define COMPACT_SLEEVE_SIDE_MARGIN 10
-// The sleeve starts below the chevron's row (it ends at y 40 on the V1) rather
-// than being centred in the panel, which put its top a few pixels from the edge.
-#define COMPACT_SLEEVE_TOP 44
+// The sleeve starts just under the chevron's row rather than being centred in
+// the panel, which put its top a few pixels from the edge. The chevron keeps
+// the left 42 px and the sleeve is centred, so the two share the band of y
+// without sharing a pixel: the corner arc stays clear of the chevron at every
+// sleeve size this panel allows.
+#define COMPACT_SLEEVE_TOP 42
 
 // The controls block as the R3 Pro II has it, 720 - 480. A taller panel (the
 // R1's 800) spreads what it has over the rows rather than leaving it empty
@@ -2579,21 +2583,29 @@ static void apply_layout(void) {
 		// The labels are a percentage of their parent in the standard layout,
 		// and a percentage of a parent that is itself sized by its contents is
 		// nothing at all. Here they size themselves -- so each pill ends where
-		// its own text ends -- up to what is left of the sleeve once the star's
-		// disc and the margins are taken off.
-		int room = cover_art_w - 2 * alt_pad - alt_fav_size - 2 * alt_pill_pad_h - bp_pick(8, 24);
-		if (room < 40) {
-			room = 40;
+		// its own text ends -- up to what is left of the sleeve once the
+		// margins are taken off. The two rows keep different limits: the title
+		// is the top row, clear of the star's disc, and may run the whole way
+		// across; the artist sits in the disc's own row and has to stop short
+		// of it. That is a short name's width on both, and only a long one
+		// still goes around.
+		int title_room = cover_art_w - 2 * alt_pad - 2 * alt_pill_pad_h - bp_pick(4, 12);
+		int artist_room = cover_art_w - 2 * alt_pad - alt_fav_size - 2 * alt_pill_pad_h - bp_pick(4, 12);
+		if (title_room < 40) {
+			title_room = 40;
+		}
+		if (artist_room < 40) {
+			artist_room = 40;
 		}
 		if (song_title_label) {
 			lv_obj_set_parent(song_title_label, alt_title_pill);
 			lv_obj_set_width(song_title_label, LV_SIZE_CONTENT);
-			lv_obj_set_style_max_width(song_title_label, room, 0);
+			lv_obj_set_style_max_width(song_title_label, title_room, 0);
 		}
 		if (song_artist_label) {
 			lv_obj_set_parent(song_artist_label, alt_artist_pill);
 			lv_obj_set_width(song_artist_label, LV_SIZE_CONTENT);
-			lv_obj_set_style_max_width(song_artist_label, room, 0);
+			lv_obj_set_style_max_width(song_artist_label, artist_room, 0);
 		}
 
 		if (fav_btn_obj && alt_fav_circle) {
@@ -4689,21 +4701,29 @@ static void placeholder_rescale(void) { placeholder_scale(cover_placeholder_icon
 // V1 sleeve.
 static void studio_empty_rescale(void) { placeholder_scale(studio_empty_icon, studio_cover_size); }
 
-// Where the placeholder mark sits in the sleeve. Centred, except in the
-// alternative arrangement, where the title and artist pills take the bottom
-// of the sleeve: the mark is centred in the space above them, so the two do
-// not sit one on the other.
+// Where the placeholder mark sits in the sleeve.
+//
+// The mark stands in for the sleeve, so it is centred on the sleeve. The wide
+// panels' sleeve is the panel itself, so that is the panel's middle. On the
+// V1 the sleeve is the square kept off the chevron's row and the deck, and the
+// panel's middle sat a line and a half above it, which is how the note hung
+// high in the empty sleeve.
+//
+// In the alternative arrangement the title and artist pills take the bottom
+// of the sleeve: the mark is lifted out of their way, as it has always been.
 static void placeholder_place(void) {
 	if (!cover_placeholder_icon) {
 		return;
 	}
-	int lift = 0;
+	int dy = 0;
 	if (layout_alt_now) {
 		int pills = lv_font_get_line_height(bp_title_font()) + lv_font_get_line_height(bp_artist_font()) +
 					4 * alt_pill_pad_v + 6;
-		lift = (pills + alt_pad) / 2;
+		dy = -(pills + alt_pad) / 2;
+	} else if (bp_is_tempotec_v1()) {
+		dy = COMPACT_SLEEVE_TOP + cover_art_h / 2 - cover_box_h / 2;
 	}
-	lv_obj_align(cover_placeholder_icon, LV_ALIGN_CENTER, 0, -lift);
+	lv_obj_align(cover_placeholder_icon, LV_ALIGN_CENTER, 0, dy);
 }
 
 // Recomputes the panel split and the sleeve size for the arrangement on show
