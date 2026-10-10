@@ -20,8 +20,9 @@
 extern "C" {
 #endif
 
-// The Game Boy screen size. Times 3 it is 480x432, exactly the panel width and
-// 432 of its 720 rows.
+// The Game Boy screen size. Times 3 it is 480x432, exactly the width of the
+// 480-wide HiBy panels; the V1's 240x320 panel shows it at 1x (see
+// gearboy_set_scale in src/system/gearboy/gearboy.h).
 #define GB_WIDTH 160
 #define GB_HEIGHT 144
 

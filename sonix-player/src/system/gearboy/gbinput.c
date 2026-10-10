@@ -55,7 +55,9 @@ static int zone_count;
 static void (*menu_cb)(void);
 
 // The screen size raw coordinates are mapped onto, set by gbinput_set_glass().
-// Defaults to the R3 Pro II's panel. (Not panel_: PANEL_H is panel.h's guard.)
+// Defaults to the R3 Pro II's panel; the page that draws the zones sets its own
+// before the first start, the V1's 240x320 among them. (Not panel_: PANEL_H is
+// panel.h's guard.)
 static int glass_w = 480;
 static int glass_h = 720;
 
