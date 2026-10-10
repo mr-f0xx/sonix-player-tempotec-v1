@@ -159,6 +159,9 @@ static int polls_since_stop = POLLS_FAST_AFTER_STOP;
 #define COMPACT_SKIP_BTN 42
 #define COMPACT_SLEEVE_MARGIN 4
 #define COMPACT_SLEEVE_SIDE_MARGIN 10
+// The sleeve starts below the chevron's row (it ends at y 40 on the V1) rather
+// than being centred in the panel, which put its top a few pixels from the edge.
+#define COMPACT_SLEEVE_TOP 44
 
 // The controls block as the R3 Pro II has it, 720 - 480. A taller panel (the
 // R1's 800) spreads what it has over the rows rather than leaving it empty
@@ -4609,6 +4612,22 @@ void player_sheet_attach_drag(lv_obj_t *obj, bool opening) {
 	lv_obj_add_event_cb(obj, sheet_drag_cb, LV_EVENT_PRESS_LOST, (void *)(uintptr_t)opening);
 }
 
+// The V1's sleeve side: as large as fits between the chevron's row and the
+// deck, with the side margins kept, and an even number so it sits on whole
+// pixels. Falls back to the panel's short side on a screen too small for that.
+static int compact_sleeve_side(void) {
+	int side = LV_MIN(cover_box_w - 2 * COMPACT_SLEEVE_SIDE_MARGIN, cover_box_h - COMPACT_SLEEVE_TOP - COMPACT_SLEEVE_MARGIN);
+	if (side < 64) {
+		side = LV_MIN(cover_box_w, cover_box_h);
+	}
+	return side & ~1;
+}
+
+// Places the V1's sleeve under the chevron row, centred side to side.
+static void compact_place_sleeve(void) {
+	lv_obj_align(cover_art_group, LV_ALIGN_TOP_MID, 0, COMPACT_SLEEVE_TOP);
+}
+
 // The height of the V1's deck for the arrangement on show: its rows at the
 // fonts in force, the gaps between them and the padding either end, added up
 // rather than guessed. A deck this tall never has a row drawn over another,
@@ -4709,13 +4728,7 @@ static void player_apply_geometry(void) {
 	}
 	cover_box_h = want_cover;
 
-	// The sleeve: as large as the panel allows with its margins kept, and an
-	// even number so it centres on whole pixels.
-	int side = LV_MIN(cover_box_w - 2 * COMPACT_SLEEVE_SIDE_MARGIN, cover_box_h - 2 * COMPACT_SLEEVE_MARGIN);
-	if (side < 64) {
-		side = LV_MIN(cover_box_w, cover_box_h);
-	}
-	side &= ~1;
+	int side = compact_sleeve_side();
 	cover_art_w = side;
 	cover_art_h = side;
 	backdrop_h = menu_height;
@@ -4723,7 +4736,7 @@ static void player_apply_geometry(void) {
 	lv_obj_set_size(player_menu, cover_box_w, menu_height);
 	lv_obj_set_size(cover_panel, cover_box_w, cover_box_h);
 	lv_obj_set_size(cover_art_group, cover_art_w, cover_art_h);
-	lv_obj_center(cover_art_group);
+	compact_place_sleeve();
 	lv_obj_center(cover_img);
 	placeholder_rescale();
 	placeholder_place();
@@ -4797,13 +4810,7 @@ void player_init(gui_config_t *cfg) {
 	alt_pill_pad_h = compact ? 10 : ALT_PILL_PAD_H;
 	alt_pill_pad_v = compact ? 5 : ALT_PILL_PAD_V;
 	if (compact) {
-		// The sleeve: as large as the panel allows with its margins kept, and
-		// an even number so it centres on whole pixels.
-		int side = LV_MIN(cover_box_w - 2 * COMPACT_SLEEVE_SIDE_MARGIN, cover_box_h - 2 * COMPACT_SLEEVE_MARGIN);
-		if (side < 64) {
-			side = LV_MIN(cover_box_w, cover_box_h);
-		}
-		side &= ~1;
+		int side = compact_sleeve_side();
 		cover_art_w = side;
 		cover_art_h = side;
 	}
@@ -5202,7 +5209,11 @@ void player_init(gui_config_t *cfg) {
 	cover_art_group = lv_obj_create(cover_panel);
 	lv_obj_remove_style_all(cover_art_group);
 	lv_obj_set_size(cover_art_group, cover_art_w, cover_art_h);
-	lv_obj_center(cover_art_group);
+	if (compact) {
+		compact_place_sleeve();
+	} else {
+		lv_obj_center(cover_art_group);
+	}
 	lv_obj_set_style_bg_opa(cover_art_group, LV_OPA_TRANSP, 0);
 	lv_obj_set_style_border_width(cover_art_group, 0, 0);
 	lv_obj_set_style_pad_all(cover_art_group, 0, 0);
