@@ -51,7 +51,7 @@ See [FEATURES.md](FEATURES.md) for a longer feature list. Streaming services als
 
 ## Screenshots
 
-Interface previews, rendered at the V1's native 240 × 320 resolution. Click any picture to open it full size.
+Interface previews, rendered at the V1's native 240 × 320 resolution. Click any picture to open it full size. (This is not the default font neither the color)
 
 <table>
   <tr>
