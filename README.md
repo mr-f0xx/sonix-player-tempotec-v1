@@ -186,11 +186,13 @@ The packer also checks the V1 model identity and builds the root filesystem's up
 
 - `sonix-player/` — player sources, LVGL configuration, launcher and build system.
 - `sonix-packer/` — stock-image preparation, firmware packaging and validation scripts.
+- `docs/collecting-logs.md` — which logs to send with a bug report, and how to take them.
+- `sonix-player/tools/sonix-bugreport.sh` — one-file diagnostic bundle, run on the device over ADB.
 - `FEATURES.md` — detailed feature notes.
 - `PATCHES.md` — device-porting and implementation notes.
 - `LICENSE` — GNU General Public License, version 3. Third-party components retain their own licenses.
 
-For bug reports, include the exact model, the firmware build/commit and relevant logs. Remove personal data and **never attach streaming credentials**.
+For bug reports, include the exact model, the firmware build/commit and relevant logs — see [Collecting logs for a bug report](docs/collecting-logs.md) for what to turn on and where the files are. Remove personal data and **never attach streaming credentials**.
 
 ## Credits
 
