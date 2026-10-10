@@ -11,6 +11,7 @@ This is not an official TempoTec or HiBy release. **The port has been tested on 
 
 - [Target device](#target-device)
 - [Features](#features)
+- [Screenshots](#screenshots)
 - [Build a firmware image](#build-a-firmware-image)
 - [Install or restore firmware](#install-or-restore-firmware)
 - [Streaming credentials](#streaming-credentials)
@@ -47,6 +48,49 @@ The interface font is a setting (Settings → Appearance → Font): MiSans, Neon
 The boot screen is a setting too (Settings → Appearance → Boot screen): **Retrospace**, the default, **Space**, **Travelling in space**, or **Stock**, the firmware's own light and dark pictures. The choice cannot live in the config — the script that draws the logo runs before any filesystem holding a config is mounted — so it is written to the same flash marker the theme uses, and appears from the next power-on.
 
 See [FEATURES.md](FEATURES.md) for a longer feature list. Streaming services also require valid credentials and may depend on third-party service availability.
+
+## Screenshots
+
+Interface previews, rendered at the V1's native 240 × 320 resolution. Click any picture to open it full size.
+
+<table>
+  <tr>
+    <td align="center">
+      <a href="https://github.com/mr-f0xx/Winamp360-AP80-Pro-Max/blob/main/Main%20menu.png"><img src="https://github.com/mr-f0xx/Winamp360-AP80-Pro-Max/blob/main/Main%20menu.png?raw=true" width="180" alt="Main menu"></a>
+      <br><sub><b>Main menu</b></sub>
+    </td>
+    <td align="center">
+      <a href="https://github.com/mr-f0xx/Winamp360-AP80-Pro-Max/blob/main/Music.png"><img src="https://github.com/mr-f0xx/Winamp360-AP80-Pro-Max/blob/main/Music.png?raw=true" width="180" alt="Music"></a>
+      <br><sub><b>Music</b></sub>
+    </td>
+    <td align="center">
+      <a href="https://github.com/mr-f0xx/Winamp360-AP80-Pro-Max/blob/main/More.png"><img src="https://github.com/mr-f0xx/Winamp360-AP80-Pro-Max/blob/main/More.png?raw=true" width="180" alt="More"></a>
+      <br><sub><b>More</b></sub>
+    </td>
+    <td align="center">
+      <a href="https://github.com/mr-f0xx/Winamp360-AP80-Pro-Max/blob/main/Wireless.png"><img src="https://github.com/mr-f0xx/Winamp360-AP80-Pro-Max/blob/main/Wireless.png?raw=true" width="180" alt="Wireless"></a>
+      <br><sub><b>Wireless</b></sub>
+    </td>
+  </tr>
+  <tr>
+    <td align="center">
+      <a href="https://github.com/mr-f0xx/Winamp360-AP80-Pro-Max/blob/main/Settings.png"><img src="https://github.com/mr-f0xx/Winamp360-AP80-Pro-Max/blob/main/Settings.png?raw=true" width="180" alt="Settings"></a>
+      <br><sub><b>Settings</b></sub>
+    </td>
+    <td align="center">
+      <a href="https://github.com/mr-f0xx/Winamp360-AP80-Pro-Max/blob/main/Now%20Playing.png"><img src="https://github.com/mr-f0xx/Winamp360-AP80-Pro-Max/blob/main/Now%20Playing.png?raw=true" width="180" alt="Now Playing"></a>
+      <br><sub><b>Now Playing</b></sub>
+    </td>
+    <td align="center">
+      <a href="https://github.com/mr-f0xx/Winamp360-AP80-Pro-Max/blob/main/File%20Browser.png"><img src="https://github.com/mr-f0xx/Winamp360-AP80-Pro-Max/blob/main/File%20Browser.png?raw=true" width="180" alt="File Browser"></a>
+      <br><sub><b>File Browser</b></sub>
+    </td>
+    <td align="center">
+      <a href="https://github.com/mr-f0xx/Winamp360-AP80-Pro-Max/blob/main/Steaming.png"><img src="https://github.com/mr-f0xx/Winamp360-AP80-Pro-Max/blob/main/Steaming.png?raw=true" width="180" alt="Streaming"></a>
+      <br><sub><b>Streaming</b></sub>
+    </td>
+  </tr>
+</table>
 
 ## Build a firmware image
 
