@@ -817,6 +817,9 @@ static bool gapless_enabled;
 // card to finish, and nobody should queue up behind that.
 static pthread_mutex_t held_lock = PTHREAD_MUTEX_INITIALIZER;
 static snd_pcm_t *held_pcm;
+// The held PCM was handed over by a manual skip, with its queue already dropped.
+// Set and cleared under held_lock with held_pcm.
+static bool held_from_skip;
 static int held_channels;
 static int held_rate;
 static int held_bits;
@@ -983,20 +986,27 @@ static void pcm_drain_bounded(snd_pcm_t *pcm) {
 static void gapless_release(void) {
 	pthread_mutex_lock(&held_lock);
 	snd_pcm_t *pcm = held_pcm;
+	bool from_skip = held_from_skip;
 	held_pcm = NULL;
+	held_from_skip = false;
 	pthread_mutex_unlock(&held_lock);
 
 	if (!pcm) {
 		return;
 	}
 	fprintf(stderr, "audio[%ld]: gapless: closing the held PCM\n", log_ms());
-	if (snd_pcm_state(pcm) == SND_PCM_STATE_PREPARED) {
-		snd_pcm_start(pcm);
+	if (from_skip) {
+		// A skip already dropped the old track's queue: there is no tail to hear.
+		snd_pcm_drop(pcm);
+	} else {
+		if (snd_pcm_state(pcm) == SND_PCM_STATE_PREPARED) {
+			snd_pcm_start(pcm);
+		}
+		// Drain rather than drop: what is in there is the real tail of the track
+		// that just ended, and it has to be heard. With a deadline, because a
+		// handle that will never drain must not take the thread with it.
+		pcm_drain_bounded(pcm);
 	}
-	// Drain rather than drop: what is in there is the real tail of the track
-	// that just ended, and it has to be heard. With a deadline, because a
-	// handle that will never drain must not take the thread with it.
-	pcm_drain_bounded(pcm);
 	snd_pcm_close(pcm);
 	pcm_device_open = false;
 }
@@ -1013,6 +1023,7 @@ static bool gapless_holding(void) {
 static void gapless_hold(snd_pcm_t *pcm, int channels, int rate, int bits, snd_pcm_uframes_t period) {
 	pthread_mutex_lock(&held_lock);
 	held_pcm = pcm;
+	held_from_skip = false;
 	pthread_mutex_unlock(&held_lock);
 	held_channels = channels;
 	held_rate = rate;
@@ -1026,6 +1037,28 @@ static void gapless_hold(snd_pcm_t *pcm, int channels, int rate, int bits, snd_p
 	const char *opened_as = pcm_device_name(pcm);
 	snprintf(held_device, sizeof(held_device), "%s", opened_as ? opened_as : AUDIO_DEFAULT_PCM);
 	fprintf(stderr, "audio[%ld]: gapless: holding the PCM (%d ch, %d Hz, %d bit)\n", log_ms(), channels, rate, bits);
+}
+
+// A manual skip (next, previous, a track picked from a list) ends the track
+// early, and the old queue must not be heard. The card is still not closed for
+// it: the queue is dropped, the handle is prepared again and held, and the next
+// track takes it through gapless_take() like any other hand-over. What the skip
+// saves is the device open, the route check and the DAC mute, which is most of
+// the gap. The decode of the next track still comes first.
+//
+// Returns false with the handle untouched if the prepare fails; the caller
+// then closes it the usual way.
+static bool gapless_hold_after_skip(snd_pcm_t *pcm, int channels, int rate, int bits, snd_pcm_uframes_t period) {
+	snd_pcm_drop(pcm);
+	if (snd_pcm_prepare(pcm) < 0) {
+		return false;
+	}
+	gapless_hold(pcm, channels, rate, bits, period);
+	pthread_mutex_lock(&held_lock);
+	held_from_skip = true;
+	pthread_mutex_unlock(&held_lock);
+	fprintf(stderr, "audio[%ld]: gapless: skip, the old queue is dropped and the PCM kept\n", log_ms());
+	return true;
 }
 
 // Whether a bluealsa handle can be held for the next track, or taken back for
@@ -2904,6 +2937,7 @@ static void play_wav_file(const char *filepath) {
 
 	pthread_mutex_lock(&audio_mutex);
 	mark_stopped_unless_replaced();
+	bool replacing = play_request;
 	pthread_mutex_unlock(&audio_mutex);
 
 	// Gapless, on the same conditions as the decoded path.
@@ -2912,6 +2946,15 @@ static void play_wav_file(const char *filepath) {
 	if (keep_open) {
 		gapless_hold(pcm_handle, info.channels, info.sample_rate, info.out_bits, period_size);
 		pcm_handle = NULL;
+	}
+
+	// A manual skip keeps the card open with its queue dropped, as on the
+	// decoded path.
+	if (!keep_open && replacing && !played_to_the_end && pcm_handle && gapless_enabled && !is_paused &&
+		!pcm_is_bluetooth(pcm_handle) &&
+		gapless_hold_after_skip(pcm_handle, info.channels, info.sample_rate, info.out_bits, period_size)) {
+		pcm_handle = NULL;
+		keep_open = true;
 	}
 
 	// Leaving a track while the device is paused must not drain: snd_pcm_drain()
@@ -3678,6 +3721,8 @@ static void play_decoded_file(const char *filepath, decode_format_t format) {
 
 	pthread_mutex_lock(&audio_mutex);
 	mark_stopped_unless_replaced();
+	// A request waiting here means the user moved on (see the skip hold below).
+	bool replacing = play_request;
 	pthread_mutex_unlock(&audio_mutex);
 
 	// The track ended on its own, gapless is on and nothing special happened:
@@ -3691,6 +3736,16 @@ static void play_decoded_file(const char *filepath, decode_format_t format) {
 	if (keep_open) {
 		gapless_hold(pcm_handle, channels, out_rate, out_bits, period_size);
 		pcm_handle = NULL;
+	}
+
+	// A manual skip keeps the card open too, with its queue dropped (see
+	// gapless_hold_after_skip). Not over Bluetooth, not paused, not DSD: those
+	// exits keep their own rules.
+	if (!keep_open && replacing && !played_to_the_end && pcm_handle && gapless_enabled && !is_paused && !passthrough &&
+		!pcm_is_bluetooth(pcm_handle) &&
+		gapless_hold_after_skip(pcm_handle, channels, out_rate, out_bits, period_size)) {
+		pcm_handle = NULL;
+		keep_open = true;
 	}
 
 	if (pcm_handle) {
