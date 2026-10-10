@@ -160,6 +160,12 @@ static bool lineout_on;
 static int lineout_saved_percent = -1;
 static int lineout_jack; // the jack the mode was switched on for
 static int current_balance_lineout = -1; // last value written to "Balance Lineout En"
+// The value the driver last refused for "Balance Lineout En", or -1. A refused
+// write leaves current_balance_lineout where it was, so without this record the
+// flag would look pending on every call. auto_set_output() runs at the start of
+// every track and mutes the DAC whenever something is pending, which made each
+// track start a mute-and-restore for a write that could never succeed.
+static int refused_balance_lineout = -1;
 
 static void apply_volume_hw(int percent);
 
@@ -713,6 +719,7 @@ void alsa_controls_reapply(void) {
 
 	current_output = -1; // force the route to be written again
 	current_balance_lineout = -1; // and the line-out flag with it
+	refused_balance_lineout = -1; // one more ask after a reapply, not a refusal carried over
 	current_filter = -1;
 	current_dre = -1;
 	current_nos = -1;
@@ -791,7 +798,10 @@ void auto_set_output(void) {
 	// the flag have to be decided from the same picture of the world.
 	int output = detect_output();
 	int flag = (lineout_on && output == 3) ? 1 : 0;
-	bool flag_pending = flag != current_balance_lineout;
+	// A value the driver has refused is not pending: asking again is the same
+	// refusal, and it is what used to mute the DAC at every track start. It is
+	// asked again only once the wanted value changes (line out on or off).
+	bool flag_pending = flag != current_balance_lineout && flag != refused_balance_lineout;
 	bool route_pending = output != current_output;
 	if (!flag_pending && !route_pending) {
 		return;
@@ -807,7 +817,11 @@ void auto_set_output(void) {
 	if (flag_pending) {
 		if (alsa_set_control("Balance Lineout En", flag) >= 0) {
 			current_balance_lineout = flag;
+			refused_balance_lineout = -1;
 			flag_written = true;
+		} else {
+			refused_balance_lineout = flag;
+			fprintf(stderr, "alsa: Balance Lineout En refused %d, not asked again until line out changes\n", flag);
 		}
 	}
 

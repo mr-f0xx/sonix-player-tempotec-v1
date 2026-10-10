@@ -3780,7 +3780,16 @@ static void play_file(const char *filepath) {
 	// wedges this driver (see pcm_reroute), and this is the one place on the
 	// way into a track where nothing is holding a lock.
 	release_external_output();
-	auto_set_output();
+	// The gapless hand-over. The held PCM is already on this route (the key is
+	// the same as when it was opened), so there is nothing to write. And writing
+	// anything now would be worse than useless: auto_set_output() mutes the DAC
+	// around a mixer write, and the previous track's tail is still playing out of
+	// the card's queue right then -- the mute would cut it for tens of
+	// milliseconds at every track change. gapless_take() below checks the rest.
+	bool reuse_held = gapless_holding() && alsa_output_key() == held_route;
+	if (!reuse_held) {
+		auto_set_output();
+	}
 
 	if (format == DECODE_FORMAT_UNKNOWN) {
 		play_wav_file(filepath);
