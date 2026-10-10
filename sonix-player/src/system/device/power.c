@@ -189,6 +189,12 @@ static lv_timer_t *g_power_timer;
 static bool g_screen_on = true;
 static uint32_t g_screen_off_at; // lv_tick when the panel last went dark
 
+// Whether the panel is blanked, which is not the same question as whether the
+// screen is on: a wake turns the screen on first and unblanks the panel a few
+// hundred milliseconds into its own sequence, after its first repaint. Kept by
+// screen_power(), read by the display through power_panel_is_blanked().
+static bool g_panel_blanked;
+
 // The standby countdown: the idle wait before a suspend attempt. It restarts at
 // every activity -- something playing, a key, the cable going in or out --
 // rather than counting from the screen blank. Pause therefore counts as idle
@@ -364,10 +370,19 @@ static void fade_up_quickly(long target) {
 // takes the blank as a reason to put the PWM at zero.
 static void screen_power(bool on) {
 	if (!g_cfg.blank_path) {
+		// No blank control on this platform, so the panel is never blanked --
+		// which is what the flag has to say, or the display would skip the
+		// pan on a panel that is perfectly able to take it.
+		g_panel_blanked = false;
 		return;
 	}
+	g_panel_blanked = !on;
 	write_long_to_file(g_cfg.blank_path, on ? FB_BLANK_UNBLANK : FB_BLANK_POWERDOWN);
 }
+
+// What screen_power() last wrote. Asked by the display, which must not attempt
+// a page flip on a panel that is still blanked (see display_wake_begin).
+bool power_panel_is_blanked(void) { return g_panel_blanked; }
 
 // Enable/disable every LVGL input device (i.e. the touchscreen). Physical
 // buttons live in their own threads and are unaffected, so volume/power keys

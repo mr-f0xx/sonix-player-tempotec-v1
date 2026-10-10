@@ -1588,7 +1588,15 @@ void display_wake_begin(lv_display_t *disp) {
 		if (ioctl(fb_fd, FBIOPUT_VSCREENINFO, &fb_var) < 0) {
 			perror("fb: FBIOPUT_VSCREENINFO (wake)");
 		}
-		if (ioctl(fb_fd, FBIOPAN_DISPLAY, &fb_var) < 0) {
+		// Not while the panel is still blanked. The controller refuses a pan
+		// with EBUSY from the blank until the unblank, which is exactly when
+		// the first repaint of a wake runs -- the one drawn before
+		// screen_power(true) -- so that attempt could never succeed and said
+		// so in the log at every single wake. The two repaints that follow the
+		// unblank pan for real, so skipping this one costs no frame: while the
+		// panel is dark there is nothing on it to lose. The mode is still put
+		// back above, which is the half that re-arms scan-out.
+		if (!power_panel_is_blanked() && ioctl(fb_fd, FBIOPAN_DISPLAY, &fb_var) < 0) {
 			perror("fb: FBIOPAN_DISPLAY (wake)");
 		}
 		return;

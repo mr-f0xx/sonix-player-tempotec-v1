@@ -58,9 +58,14 @@ void power_init(const power_config_t *cfg, lv_display_t *disp);
 // driver -- calling the fbdev driver's functions on the page-flipping display
 // dereferences driver data it does not have). The blank/unblank cycle tears
 // down the panel's scan-out and may reset the video mode, so waking needs a
-// display-specific kick: `begin` is called right after the unblank, before
-// the wake repaint (it restores the video mode and re-arms scan-out), `end`
-// right after the repaint. Both are no-ops on the host build.
+// display-specific kick: `begin` restores the video mode and re-arms scan-out,
+// `end` closes it off. Both are no-ops on the host build.
+//
+// `begin` brackets each repaint of a wake, and there are three: one drawn
+// while the panel is still blanked, so the frame is waiting when the
+// controller comes back, and two after the unblank, because a frame pushed
+// before the panel is listening is lost without a word. Only the last two can
+// pan -- see power_panel_is_blanked().
 void display_wake_begin(lv_display_t *disp);
 void display_wake_end(lv_display_t *disp);
 
@@ -105,6 +110,14 @@ void power_screen_on(void);
 void power_screen_off(void);
 void power_toggle_screen(void);
 bool power_screen_is_on(void);
+
+// Whether the panel itself is blanked, which is not the same question as
+// whether the screen is on: a wake unblanks the panel in the middle of its own
+// sequence, after the first of its repaints. The display uses it to skip what
+// cannot succeed while the panel is dark -- see display_wake_begin(). False
+// when the platform has no blank control, because then the panel is never
+// blanked at all.
+bool power_panel_is_blanked(void);
 
 // --- Activity notifications (thread-safe; call from any thread) ---
 // Reset the idle timers because the user did something (e.g. a physical
