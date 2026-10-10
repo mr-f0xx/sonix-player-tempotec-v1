@@ -148,9 +148,9 @@ static int polls_since_stop = POLLS_FAST_AFTER_STOP;
 // line heights of the fonts in force (compact_deck_height()), so the four rows
 // -- names, bar, clocks, transport -- always fit one under the other with
 // these gaps between them and nothing lifted into the row above. The rest of
-// the 320 px goes to the sleeve, which keeps COMPACT_SLEEVE_TOP clear of the
-// chevron's row, COMPACT_SLEEVE_MARGIN off the deck, and
-// COMPACT_SLEEVE_SIDE_MARGIN off either bezel where the width is the limit.
+// the 320 px goes to the sleeve. The standard sleeve shares the chevron's
+// top edge and keeps a generous gap off the names; the alternative sleeve
+// stays below the chevron row. Both keep the side margins when width-limited.
 #define COMPACT_DECK_PAD_TOP 4
 #define COMPACT_DECK_PAD_BOTTOM 4
 #define COMPACT_DECK_GAP 4
@@ -159,12 +159,12 @@ static int polls_since_stop = POLLS_FAST_AFTER_STOP;
 #define COMPACT_PLAY_BTN 44
 #define COMPACT_SKIP_BTN 42
 #define COMPACT_SLEEVE_MARGIN 2
+#define COMPACT_STANDARD_SLEEVE_MARGIN 14
+// The visible stroke begins 8 px below the top of its 36 px touch slot.
+#define COMPACT_CHEVRON_INSET_TOP 8
 #define COMPACT_SLEEVE_SIDE_MARGIN 10
-// The sleeve starts just under the chevron's row rather than being centred in
-// the panel, which put its top a few pixels from the edge. The chevron keeps
-// the left 42 px and the sleeve is centred, so the two share the band of y
-// without sharing a pixel: the corner arc stays clear of the chevron at every
-// sleeve size this panel allows.
+// The alternative sleeve stays below the chevron row: it can grow much
+// wider than the standard sleeve because its names live on the artwork.
 #define COMPACT_SLEEVE_TOP 42
 
 // The controls block as the R3 Pro II has it, 720 - 480. A taller panel (the
@@ -4624,20 +4624,29 @@ void player_sheet_attach_drag(lv_obj_t *obj, bool opening) {
 	lv_obj_add_event_cb(obj, sheet_drag_cb, LV_EVENT_PRESS_LOST, (void *)(uintptr_t)opening);
 }
 
-// The V1's sleeve side: as large as fits between the chevron's row and the
-// deck, with the side margins kept, and an even number so it sits on whole
-// pixels. Falls back to the panel's short side on a screen too small for that.
+// The standard sleeve starts at the visible top of the back chevron, not
+// below its touch slot. Derive it from the shell's player position so moving
+// the chevron cannot leave the artwork on a different top line.
+static int compact_sleeve_top(void) {
+	return layout_alt_now ? COMPACT_SLEEVE_TOP
+						  : back_btn_centre_y() - bp_header_button_size() / 2 + COMPACT_CHEVRON_INSET_TOP;
+}
+
+// As large as fits above the deck, with an even side for whole-pixel centring.
+// Raising the standard sleeve gives it a modest size increase while reserving
+// real breathing room above the names, rather than spending it all on artwork.
 static int compact_sleeve_side(void) {
-	int side = LV_MIN(cover_box_w - 2 * COMPACT_SLEEVE_SIDE_MARGIN, cover_box_h - COMPACT_SLEEVE_TOP - COMPACT_SLEEVE_MARGIN);
+	int bottom = layout_alt_now ? COMPACT_SLEEVE_MARGIN : COMPACT_STANDARD_SLEEVE_MARGIN;
+	int side = LV_MIN(cover_box_w - 2 * COMPACT_SLEEVE_SIDE_MARGIN, cover_box_h - compact_sleeve_top() - bottom);
 	if (side < 64) {
 		side = LV_MIN(cover_box_w, cover_box_h);
 	}
 	return side & ~1;
 }
 
-// Places the V1's sleeve under the chevron row, centred side to side.
+// Both arrangements keep the sleeve centred side to side.
 static void compact_place_sleeve(void) {
-	lv_obj_align(cover_art_group, LV_ALIGN_TOP_MID, 0, COMPACT_SLEEVE_TOP);
+	lv_obj_align(cover_art_group, LV_ALIGN_TOP_MID, 0, compact_sleeve_top());
 }
 
 // The height of the V1's deck for the arrangement on show: its rows at the
@@ -4705,9 +4714,8 @@ static void studio_empty_rescale(void) { placeholder_scale(studio_empty_icon, st
 //
 // The mark stands in for the sleeve, so it is centred on the sleeve. The wide
 // panels' sleeve is the panel itself, so that is the panel's middle. On the
-// V1 the sleeve is the square kept off the chevron's row and the deck, and the
-// panel's middle sat a line and a half above it, which is how the note hung
-// high in the empty sleeve.
+// V1 the sleeve is the square floating above the deck, not the whole panel,
+// so the mark must follow the sleeve's position rather than the panel's middle.
 //
 // In the alternative arrangement the title and artist pills take the bottom
 // of the sleeve: the mark is lifted out of their way, as it has always been.
@@ -4721,7 +4729,7 @@ static void placeholder_place(void) {
 					4 * alt_pill_pad_v + 6;
 		dy = -(pills + alt_pad) / 2;
 	} else if (bp_is_tempotec_v1()) {
-		dy = COMPACT_SLEEVE_TOP + cover_art_h / 2 - cover_box_h / 2;
+		dy = compact_sleeve_top() + cover_art_h / 2 - cover_box_h / 2;
 	}
 	lv_obj_align(cover_placeholder_icon, LV_ALIGN_CENTER, 0, dy);
 }
