@@ -7,48 +7,6 @@ The firmware builder starts with an official V1 update package, replaces the sto
 This is not an official TempoTec or HiBy release. **The port has been tested on physical TempoTec Variations V1 hardware and works perfectly on the tested device.** It targets the **TempoTec Variations V1 only**; compatibility with the V1-A or other players in the Variations family is not established.
 
 
-## Contents
-
-- [Target device](#target-device)
-- [Features](#features)
-- [Screenshots](#screenshots)
-- [Build a firmware image](#build-a-firmware-image)
-- [Install or restore firmware](#install-or-restore-firmware)
-- [Streaming credentials](#streaming-credentials)
-- [Build from source](#build-from-source)
-- [Project files and documentation](#project-files-and-documentation)
-- [Credits](#credits)
-
-## Target device
-
-The **TempoTec Variations V1**:
-
-| Component | Specification |
-|---|---|
-| **SoC** | Ingenic X1600 (MIPS32r2 core, o32 ABI, glibc 2.22 compatibility) |
-| **Display** | 2.0-inch QVGA TFT panel, **240×320 pixels** portrait |
-| **DAC** | Dual Cirrus Logic CS43131 |
-| **Audio Outputs** | 3.5 mm single-ended + 4.4 mm balanced headphone jacks |
-| **Storage** | One MicroSD card slot (exFAT / FAT32) |
-| **Controls** | Side flank buttons (Power, Vol+, Vol-, Play/Pause, Next/Prev) + capacitive touchscreen |
-| **Wireless** | 2.4 GHz Wi-Fi (802.11 b/g/n) and bi-directional Bluetooth |
-| **USB** | USB Type-C (bidirectional USB DAC & USB audio out) |
-| **Firmware Package** | `v1.upt` with accompanying `v1_md5.txt` |
-
-The player UI is built with LVGL 9.6 and adapted for the V1's small display. The package is based on vendor firmware; it is **not** a Linux distribution or a kernel replacement.
-
-## Features
-
-The project includes a local music library and file browser, album artwork, playlists, lyrics, audiobooks, DSP controls, an EPUB reader, and a Gearboy Game Boy / Game Boy Color emulator. The player also contains code for streaming and network features such as Bluetooth audio, AirPlay, DLNA and Wi-Fi file transfer.
-
-Local audio decoder inputs include WAV, FLAC, MP3, Ogg Vorbis, Opus, M4A/M4B/MP4, AAC, ALAC, WavPack, APE, AIFF/AIFC, CAF and DSD (DSF/DFF) files. DSP features include a 10-band graphic equalizer, parametric EQ, MSEB, crossfeed, channel balance and ReplayGain.
-
-The interface font is a setting (Settings → Appearance → Font): MiSans, Neon 80s, Roboto Mono, Roboto Condensed, Inter and Barlow Semi Condensed, plus any `.ttf`/`.otf` file put in the `Fonts` folder on the card. Whatever a face is missing — Cyrillic, Greek, Hangul, kanji, Arabic — is drawn by MiSans behind it, so the whole interface stays legible in every language. The four added families are under the SIL Open Font License; see [`sonix-player/assets/fonts/FONT-LICENSES.txt`](sonix-player/assets/fonts/FONT-LICENSES.txt) for the copyright notices and the exact files.
-
-The boot screen is a setting too (Settings → Appearance → Boot screen): **Retrospace**, the default, **Space**, **Travelling in space**, or **Stock**, the firmware's own light and dark pictures. The choice cannot live in the config — the script that draws the logo runs before any filesystem holding a config is mounted — so it is written to the same flash marker the theme uses, and appears from the next power-on.
-
-See [FEATURES.md](FEATURES.md) for a longer feature list. Streaming services also require valid credentials and may depend on third-party service availability.
-
 ## Screenshots
 
 Interface previews, rendered at the V1's native 240 × 320 resolution. Click any picture to open it full size. (This is not the default font neither the color)
@@ -91,6 +49,48 @@ Interface previews, rendered at the V1's native 240 × 320 resolution. Click any
     </td>
   </tr>
 </table>
+
+## Contents
+
+- [Target device](#target-device)
+- [Features](#features)
+- [Screenshots](#screenshots)
+- [Build a firmware image](#build-a-firmware-image)
+- [Install or restore firmware](#install-or-restore-firmware)
+- [Streaming credentials](#streaming-credentials)
+- [Build from source](#build-from-source)
+- [Project files and documentation](#project-files-and-documentation)
+- [Credits](#credits)
+
+## Target device
+
+The **TempoTec Variations V1**:
+
+| Component | Specification |
+|---|---|
+| **SoC** | Ingenic X1600 (MIPS32r2 core, o32 ABI, glibc 2.22 compatibility) |
+| **Display** | 2.0-inch QVGA TFT panel, **240×320 pixels** portrait |
+| **DAC** | Dual Cirrus Logic CS43131 |
+| **Audio Outputs** | 3.5 mm single-ended + 4.4 mm balanced headphone jacks |
+| **Storage** | One MicroSD card slot (exFAT / FAT32) |
+| **Controls** | Side flank buttons (Power, Vol+, Vol-, Play/Pause, Next/Prev) + capacitive touchscreen |
+| **Wireless** | 2.4 GHz Wi-Fi (802.11 b/g/n) and bi-directional Bluetooth |
+| **USB** | USB Type-C (bidirectional USB DAC & USB audio out) |
+| **Firmware Package** | `v1.upt` with accompanying `v1_md5.txt` |
+
+The player UI is built with LVGL 9.6 and adapted for the V1's small display. The package is based on vendor firmware; it is **not** a Linux distribution or a kernel replacement.
+
+## Features
+
+The project includes a local music library and file browser, album artwork, playlists, lyrics, audiobooks, DSP controls, an EPUB reader, and a Gearboy Game Boy / Game Boy Color emulator. The player also contains code for streaming and network features such as Bluetooth audio, AirPlay, DLNA and Wi-Fi file transfer.
+
+Local audio decoder inputs include WAV, FLAC, MP3, Ogg Vorbis, Opus, M4A/M4B/MP4, AAC, ALAC, WavPack, APE, AIFF/AIFC, CAF and DSD (DSF/DFF) files. DSP features include a 10-band graphic equalizer, parametric EQ, MSEB, crossfeed, channel balance and ReplayGain.
+
+The interface font is a setting (Settings → Appearance → Font): MiSans, Neon 80s, Roboto Mono, Roboto Condensed, Inter and Barlow Semi Condensed, plus any `.ttf`/`.otf` file put in the `Fonts` folder on the card. Whatever a face is missing — Cyrillic, Greek, Hangul, kanji, Arabic — is drawn by MiSans behind it, so the whole interface stays legible in every language. The four added families are under the SIL Open Font License; see [`sonix-player/assets/fonts/FONT-LICENSES.txt`](sonix-player/assets/fonts/FONT-LICENSES.txt) for the copyright notices and the exact files.
+
+The boot screen is a setting too (Settings → Appearance → Boot screen): **Retrospace**, the default, **Space**, **Travelling in space**, or **Stock**, the firmware's own light and dark pictures. The choice cannot live in the config — the script that draws the logo runs before any filesystem holding a config is mounted — so it is written to the same flash marker the theme uses, and appears from the next power-on.
+
+See [FEATURES.md](FEATURES.md) for a longer feature list. Streaming services also require valid credentials and may depend on third-party service availability.
 
 ## Build a firmware image
 
