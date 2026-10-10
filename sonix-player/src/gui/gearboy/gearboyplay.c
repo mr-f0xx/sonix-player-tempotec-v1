@@ -28,31 +28,25 @@ lv_obj_t *gearboyplay_screen;
 // the layout
 // ---------------------------------------------------------------------------
 //
-// Two boards, two arrangements, and every number that differs between them goes
-// through bp_pick(compact, regular):
+// Two layouts, with every dimension that differs between them expressed through
+// bp_pick(compact, regular):
 //
-//   * HiBy R3 Pro II and R1: the panel is 480 wide and 720 (R3 Pro II) or 800
-//     (R1) tall. The picture takes the first 432 rows at 3x -- the full width --
-//     and the controls take the rest.
+//   * HiBy R3 Pro II and R1: the 480x432 picture uses an integer 3x scale and
+//     fills the panel width; the controls sit beneath it.
 //
-//   * TempoTec V1: the panel is 240x320, narrower than three times 160, and
-//     there is no scale in between that keeps every Game Boy pixel the same
-//     whole number of panel pixels. The picture is therefore shown at 1x --
-//     160x144, the size the Game Boy drew it -- centred in the upper half, and
-//     the controls take the 176 rows under it. Everything the controls are made
-//     of is drawn at about half the linear size, which is the same shapes for
-//     the same thumbs on a panel half as wide.
+//   * TempoTec V1: a 240x216 picture fills the 240x320 panel width. It uses a
+//     crisp nearest-neighbour 3:2 fit rather than leaving the Game Boy image at
+//     160x144; the compact D-pad and A/B buttons fit in the 104 rows below it.
+//     The physical Play/Pause and skip keys provide Start and Select.
 //
 // D-pad on the left, A/B on the right and diagonal with A higher. The sizes are
 // in pixels because the same rectangles go to gbinput, which works in screen
-// coordinates. The D-pad and A/B sit at the same place on both HiBy panels; the
-// rows below them, where there are any, hold Select and Start (see PILL_).
+// coordinates.
 
 #define SCREEN_TOP 0
 
-// The picture: whatever the emulator scales into (gearboy_set_scale), centred.
-// 480x432 at x=0 on the HiBy panels, 160x144 at x=40 on the V1 -- where GAME_X
-// is also the width of the black pillar either side of it.
+// The picture: whatever the emulator scales into, centred. 480x432 at x=0 on
+// the HiBy panels and 240x216 at x=0 on the V1.
 #define GAME_W gearboy_frame_w()
 #define GAME_H gearboy_frame_h()
 #define GAME_X ((panel_w - GAME_W) / 2)
@@ -65,50 +59,24 @@ lv_obj_t *gearboyplay_screen;
 // finger sitting between up and right produces nothing instead of the obvious
 // command, and a platformer cannot be played diagonally.
 //
-// 220 pixels a side, so the left thumb of a hand holding the device can find it
-// without looking; 120 (40 a cell) on the V1, which is the same thumb on a panel
-// half as wide.
+// The regular layout uses a 220-pixel pad; the V1 gets a 102-pixel pad (34 per
+// cell) that fits beside the enlarged picture without taking over the screen.
 #define DPAD_X0 bp_pick(6, 20)
-#define DPAD_Y0 bp_pick(156, 466)
-#define DPAD_SIZE bp_pick(120, 220)
+#define DPAD_Y0 (SCREEN_TOP + GAME_H + bp_pick(1, 34))
+#define DPAD_SIZE bp_pick(102, 220)
 #define DPAD_CELL (DPAD_SIZE / 3)
 #define DPAD_CX (DPAD_X0 + DPAD_SIZE / 2)
 #define DPAD_CY (DPAD_Y0 + DPAD_SIZE / 2)
 #define DPAD_ARM_RADIUS bp_pick(10, 16)
 #define DPAD_HUB bp_pick(20, 38)
 
-// A and B, diagonal as on the real machine. The rectangle is both the drawing
-// and the touch area: 110 pixels, already wider than a fingertip, and growing
-// the area past the drawing would make the two buttons touch. On the V1 they
-// are 60 -- 7.6 mm on that panel -- and the rectangles still do not meet: A's
-// bottom edge is exactly B's top edge, so a touch belongs to one of the two and
-// never to both (zones are matched in order, first hit wins).
-#define BTN_SIZE bp_pick(60, 110)
-#define A_X bp_pick(176, 352)
-#define A_Y bp_pick(148, 450)
-#define B_X bp_pick(136, 300)
-#define B_Y bp_pick(208, 592)
-
-// Select and Start: two drawn pills in a row under the D-pad and A/B when the
-// panel has PILL_ROW_NEEDS rows (the V1 and the R1), otherwise two invisible
-// rectangles in the bottom corners of the picture (the R3 Pro II).
-#define CORNER_W bp_pick(60, 110)
-#define CORNER_H bp_pick(32, 60)
-#define CORNER_Y (GAME_H - CORNER_H)
-
-#define PILL_W bp_pick(80, 150)
-#define PILL_H bp_pick(28, 52)
-#define PILL_GAP bp_pick(16, 40) // between the two
-#define PILL_TOP_GAP bp_pick(16, 16) // clear of B, the lowest of the round buttons
-#define PILL_BOTTOM_GAP bp_pick(8, 24) // clear of the bottom edge
-#define PILL_X0 ((panel_w - 2 * PILL_W - PILL_GAP) / 2)
-
-// The lowest pixel the D-pad and A/B reach.
-#define CONTROLS_BOTTOM (B_Y + BTN_SIZE)
-
-// The shortest panel that fits the row. 794 on the regular layout, so the R3
-// Pro II (720) does not and the R1 (800) does; 312 on the V1, which has 320.
-#define PILL_ROW_NEEDS (CONTROLS_BOTTOM + PILL_TOP_GAP + PILL_H + PILL_BOTTOM_GAP)
+// A and B, diagonal as on the real machine. Each visible circle is its touch
+// area; the compact buttons stay separated so a thumb never presses both.
+#define BTN_SIZE bp_pick(46, 110)
+#define A_X bp_pick(184, 352)
+#define A_Y (SCREEN_TOP + GAME_H + bp_pick(2, 18))
+#define B_X bp_pick(156, 300)
+#define B_Y (SCREEN_TOP + GAME_H + bp_pick(52, 160))
 
 // The in-game menu: in the MIDDLE of the picture, not in a corner.
 //
@@ -120,7 +88,7 @@ lv_obj_t *gearboyplay_screen;
 // The middle because it is the only part of the picture a playing hand never
 // rests on.
 //
-// The zone scales with the picture (96x72 of the V1's 160x144, against 240x200
+// The zone scales with the picture (96x72 of the V1's 240x216, against 240x200
 // of the HiBy 480x432). The card that opens does NOT: on the V1 it is the same
 // size as this interface's other modals (see confirm.c) rather than a scaled
 // copy of the 480-wide one, because a card is read, not played.
@@ -177,17 +145,11 @@ static void refresh_period_restore(void) {
 	saved_refresh_ms = 0;
 }
 
-// The panel, from gui_config_t at init. Both are needed before anything is
-// built: the horizontal one places the centred picture and the Select/Start
-// row, the vertical one decides whether that row is drawn at all. Until then
-// they hold the layout's own reference panel, the HiBy one.
+// The panel, from gui_config_t at init. The width centres the picture and the
+// height bounds the touch-control background. Until then they hold the layout's
+// reference panel, the HiBy one.
 static int panel_w = 480;
 static int panel_h = PANEL_H_REF;
-
-// Whether Select and Start are the drawn row at the foot of the screen (true)
-// or the invisible corners of the picture (false). Decided once, from panel_h.
-static bool pill_row;
-static int pill_y;
 
 static lv_obj_t *game_image;
 static lv_obj_t *pause_veil;
@@ -230,6 +192,51 @@ static char pending_title[GEARBOY_TITLE_MAX];
 static void menu_open(void);
 static void menu_close_and_resume(void);
 
+// The side media keys report taps rather than press/release state. Keep the
+// Game Boy key down for several frames so even a quick hardware tap is noticed
+// by the emulator; touch input remains independently held underneath it.
+#define MEDIA_KEY_PULSE_MS 100
+static uint32_t media_start_until;
+static uint32_t media_select_until;
+static bool media_start_active;
+static bool media_select_active;
+
+static void media_keys_update(void) {
+	uint32_t now = lv_tick_get();
+	uint16_t mask = 0;
+
+	if (media_start_active && (int32_t)(media_start_until - now) > 0) {
+		mask |= GB_KEY_START;
+	} else {
+		media_start_active = false;
+	}
+	if (media_select_active && (int32_t)(media_select_until - now) > 0) {
+		mask |= GB_KEY_SELECT;
+	} else {
+		media_select_active = false;
+	}
+	gearboy_set_key_overlay(mask);
+}
+
+static void media_key_tap(uint16_t key) {
+	uint32_t until = lv_tick_get() + MEDIA_KEY_PULSE_MS;
+	if (key & GB_KEY_START) {
+		media_start_until = until;
+		media_start_active = true;
+	}
+	if (key & GB_KEY_SELECT) {
+		media_select_until = until;
+		media_select_active = true;
+	}
+	media_keys_update();
+}
+
+static void media_keys_clear(void) {
+	media_start_active = false;
+	media_select_active = false;
+	gearboy_set_key_overlay(0);
+}
+
 // ---------------------------------------------------------------------------
 // the touch zones, which are the same geometry as the drawing
 // ---------------------------------------------------------------------------
@@ -265,27 +272,10 @@ static int build_zones(gbinput_zone_t *out, int max) {
 	if (n < max) {
 		out[n++] = (gbinput_zone_t){A_X, A_Y, BTN_SIZE, BTN_SIZE, GB_KEY_A};
 	}
-	// The menu BEFORE Select and Start: zones are tested in order and the first
-	// match wins, so whichever sits on top must be listed first. These do not
-	// overlap, but the rule holds and is worth keeping visible.
+	// The menu is tested after the visible buttons; it does not overlap them,
+	// but keeping the priority explicit makes the zone order easy to audit.
 	if (n < max) {
 		out[n++] = (gbinput_zone_t){MENU_X, MENU_Y, MENU_W, MENU_H, GBINPUT_KEY_MENU};
-	}
-	if (pill_row) {
-		if (n < max) {
-			out[n++] = (gbinput_zone_t){PILL_X0, pill_y, PILL_W, PILL_H, GB_KEY_SELECT};
-		}
-		if (n < max) {
-			out[n++] = (gbinput_zone_t){PILL_X0 + PILL_W + PILL_GAP, pill_y, PILL_W, PILL_H, GB_KEY_START};
-		}
-	} else {
-		if (n < max) {
-			out[n++] = (gbinput_zone_t){GAME_X, CORNER_Y, CORNER_W, CORNER_H, GB_KEY_SELECT};
-		}
-		if (n < max) {
-			out[n++] =
-				(gbinput_zone_t){GAME_X + GAME_W - CORNER_W, CORNER_Y, CORNER_W, CORNER_H, GB_KEY_START};
-		}
 	}
 
 	return n;
@@ -392,8 +382,8 @@ static void build_button(lv_obj_t *parent, int x, int y, const char *label, uint
 	lv_obj_set_style_bg_opa(o, LV_OPA_COVER, 0);
 	lv_obj_set_style_radius(o, LV_RADIUS_CIRCLE, 0);
 
-	// Bold: on a 110-pixel circle a regular weight gets lost, and these are the
-	// only two letters looked at while playing.
+	// Bold labels stay legible on both the compact and regular circles; these
+	// are the only two letters looked at while playing.
 	lv_obj_t *text = lv_label_create(o);
 	lv_label_set_text(text, label);
 	lv_obj_set_style_text_font(text, &font_ui_36_bold, 0);
@@ -401,26 +391,6 @@ static void build_button(lv_obj_t *parent, int x, int y, const char *label, uint
 	lv_obj_center(text);
 
 	pressable(parent, x, y, BTN_SIZE, BTN_SIZE, key);
-}
-
-// One of the Select/Start pills, in the D-pad's grey. Level rather than slanted:
-// gbinput zones are axis-aligned rectangles.
-static void build_pill(lv_obj_t *parent, int x, const char *label, uint16_t key) {
-	lv_obj_t *o = lv_obj_create(parent);
-	lv_obj_remove_style_all(o);
-	lv_obj_set_size(o, PILL_W, PILL_H);
-	lv_obj_set_pos(o, x, pill_y);
-	lv_obj_set_style_bg_color(o, lv_color_make(58, 58, 62), 0);
-	lv_obj_set_style_bg_opa(o, LV_OPA_COVER, 0);
-	lv_obj_set_style_radius(o, LV_RADIUS_CIRCLE, 0);
-
-	lv_obj_t *text = lv_label_create(o);
-	lv_label_set_text(text, label);
-	lv_obj_set_style_text_font(text, &font_ui_18, 0);
-	lv_obj_set_style_text_color(text, lv_color_make(190, 190, 195), 0);
-	lv_obj_center(text);
-
-	pressable(parent, x, pill_y, PILL_W, PILL_H, key);
 }
 
 // ---------------------------------------------------------------------------
@@ -443,6 +413,7 @@ static void menu_open(void) {
 	// Pause the game first, then hand back the glass. The other order leaves a
 	// window in which the emulator runs with nobody feeding it keys, seen as a
 	// character that keeps walking on its own.
+	media_keys_clear();
 	gearboy_set_paused(true);
 	gbinput_stop();
 	fallback_keys = 0;
@@ -461,6 +432,36 @@ static void menu_close_and_resume(void) {
 	gearboy_set_paused(false);
 }
 
+// The physical media keys double as the two small Game Boy buttons that no
+// longer need to take up space on the touchscreen. Play/Pause is Start; either
+// skip action is Select. Return true on the game page so those keys never leak
+// through and start/skip music underneath the emulator.
+bool gearboyplay_handle_key(gui_key_t key) {
+	if (lv_screen_active() != gearboyplay_screen) {
+		return false;
+	}
+
+	if (menu_layer && !lv_obj_is_hidden(menu_layer)) {
+		if (key == GUI_KEY_PLAY_PAUSE) {
+			menu_close_and_resume();
+		}
+		return true;
+	}
+	if (!gearboy_running() || gearboy_paused() || waiting_for_state) {
+		return true;
+	}
+
+	switch (key) {
+	case GUI_KEY_PLAY_PAUSE:
+		media_key_tap(GB_KEY_START);
+		break;
+	case GUI_KEY_NEXT:
+	case GUI_KEY_PREV:
+		media_key_tap(GB_KEY_SELECT);
+		break;
+	}
+	return true;
+}
 
 // How long the badge stays up.
 //
@@ -729,6 +730,7 @@ static void report_state_result(void) {
 static void poll_cb(lv_timer_t *timer) {
 	(void)timer;
 
+	media_keys_update();
 	report_state_result();
 
 	const uint16_t *pixels = gearboy_screen();
@@ -792,6 +794,7 @@ static void screen_loaded_cb(lv_event_t *e) {
 	// player's volume pill is the answer -- same drawing, same place -- and
 	// applies here for as long as the page is on screen.
 	volume_overlay_allow_outside_player(true);
+	media_keys_clear();
 
 	if (pending_rom[0]) {
 		gearboy_start(pending_rom, pending_title);
@@ -837,6 +840,7 @@ static void screen_unloaded_cb(lv_event_t *e) {
 
 	// Release the glass first, then stop the game. The other order leaves the
 	// reader writing keys into an emulator that is shutting down.
+	media_keys_clear();
 	gbinput_stop();
 	fallback_keys = 0;
 
@@ -884,14 +888,15 @@ void gearboyplay_init(gui_config_t *cfg) {
 	panel_w = (int)cfg->screen_width;
 	panel_h = (int)cfg->screen_height;
 
-	// The picture's scale for this panel, before any of the geometry below is
-	// read: 3 where the panel is 480 wide, 1 on the V1's 240 (see gearboy.h).
-	// gearboy_frame_w()/h() answer with it from here on, and GAME_W/GAME_H are
-	// those answers.
-	gearboy_set_scale(bp_pick(1, 3));
-
-	pill_row = panel_h >= PILL_ROW_NEEDS;
-	pill_y = panel_h - PILL_BOTTOM_GAP - PILL_H;
+	// Set the display framebuffer before any of the geometry below is read.
+	// The HiBy panels use their crisp integer 3x scale; the V1 fits the full
+	// 160x144 picture into a larger 240x216 viewport with nearest-neighbour
+	// sampling, leaving the bottom 104 rows for compact touch controls.
+	if (bp_is_tempotec_v1()) {
+		gearboy_set_frame_size(panel_w, panel_w * GB_HEIGHT / GB_WIDTH);
+	} else {
+		gearboy_set_scale(3);
+	}
 
 	// gbinput maps touches onto the display's resolution, the same surface
 	// LVGL clamps its own touches to. Set before the first gbinput_start().
@@ -899,18 +904,17 @@ void gearboyplay_init(gui_config_t *cfg) {
 	int glass_w = disp ? (int)lv_display_get_horizontal_resolution(disp) : panel_w;
 	int glass_h = disp ? (int)lv_display_get_vertical_resolution(disp) : panel_h;
 	gbinput_set_glass(glass_w, glass_h);
-	printf("gearboyplay: layout %ux%u, picture %dx%d at %d,%d (scale %d), glass %dx%d, Select/Start %s\n",
-		   (unsigned)cfg->screen_width, (unsigned)cfg->screen_height, GAME_W, GAME_H, GAME_X, SCREEN_TOP,
-		   gearboy_scale(), glass_w, glass_h, pill_row ? "below the controls" : "in the picture");
+	printf("gearboyplay: layout %ux%u, picture %dx%d at %d,%d, glass %dx%d, Play=Start and skip=Select\n",
+		   (unsigned)cfg->screen_width, (unsigned)cfg->screen_height, GAME_W, GAME_H, GAME_X, SCREEN_TOP, glass_w,
+		   glass_h);
 
 	lv_obj_add_style(gearboyplay_screen, &theme_style_screen, 0);
 	lv_obj_set_style_bg_color(gearboyplay_screen, lv_color_black(), 0);
 	lv_obj_set_scrollable(gearboyplay_screen, false);
 
-	// Background for the controls half. This page's screen is black because the
-	// game picture sits above it and any other colour would frame it; below the
-	// picture there is nothing to frame, so the controls take the theme's own
-	// background rather than leaving a black band on the light theme.
+	// Background for the control band below the picture. The game area stays
+	// black; the controls use the theme's own background rather than leaving a
+	// black band on the light theme.
 	controls_bg = lv_obj_create(gearboyplay_screen);
 	lv_obj_remove_style_all(controls_bg);
 	lv_obj_set_pos(controls_bg, 0, SCREEN_TOP + GAME_H);
@@ -942,16 +946,8 @@ void gearboyplay_init(gui_config_t *cfg) {
 	lv_obj_set_size(game_image, GAME_W, GAME_H);
 	lv_obj_set_hidden(game_image, true);
 
-	// Select and Start in the picture corners, when there is no row for them.
-	// Invisible: the objects exist only for the simulator, which has no
-	// touchscreen reader. The drawn row is built with the controls below.
-	if (!pill_row) {
-		pressable(gearboyplay_screen, GAME_X, SCREEN_TOP + CORNER_Y, CORNER_W, CORNER_H, GB_KEY_SELECT);
-		pressable(gearboyplay_screen, GAME_X + GAME_W - CORNER_W, SCREEN_TOP + CORNER_Y, CORNER_W, CORNER_H,
-				  GB_KEY_START);
-	}
-
-	// And the centre of the picture, which opens the menu. Invisible too.
+	// The centre of the picture opens the in-game menu on the simulator; on
+	// device the multitouch reader uses the matching menu zone above.
 	{
 		lv_obj_t *zone = lv_obj_create(gearboyplay_screen);
 		lv_obj_remove_style_all(zone);
@@ -964,14 +960,13 @@ void gearboyplay_init(gui_config_t *cfg) {
 
 	build_dpad(gearboyplay_screen);
 
-	// The eight D-pad touch cells, on top of the drawing.
+	// The eight D-pad touch cells, on top of the drawing. A/B have separate
+	// pressables; Start and Select come from the physical media keys.
 	{
 		gbinput_zone_t zones[16];
 		int n = build_zones(zones, 16);
 		for (int i = 0; i < n; i++) {
-			// A, B, Select, Start and the menu already have theirs: D-pad
-			// only here.
-			if (zones[i].keys & (GB_KEY_A | GB_KEY_B | GB_KEY_SELECT | GB_KEY_START | GBINPUT_KEY_MENU)) {
+			if (zones[i].keys & (GB_KEY_A | GB_KEY_B | GBINPUT_KEY_MENU)) {
 				continue;
 			}
 			pressable(gearboyplay_screen, zones[i].x, zones[i].y, zones[i].w, zones[i].h, zones[i].keys);
@@ -980,12 +975,6 @@ void gearboyplay_init(gui_config_t *cfg) {
 
 	build_button(gearboyplay_screen, B_X, B_Y, "B", GB_KEY_B);
 	build_button(gearboyplay_screen, A_X, A_Y, "A", GB_KEY_A);
-
-	if (pill_row) {
-		// The legends printed on the machine, not translated.
-		build_pill(gearboyplay_screen, PILL_X0, "SELECT", GB_KEY_SELECT);
-		build_pill(gearboyplay_screen, PILL_X0 + PILL_W + PILL_GAP, "START", GB_KEY_START);
-	}
 
 	// The menu and the badge last: they are the only two things that must sit
 	// above everything else on the page.

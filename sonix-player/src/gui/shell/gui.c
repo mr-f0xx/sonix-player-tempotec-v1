@@ -497,6 +497,12 @@ static void modal_init(gui_config_t *cfg) {
 static void key_async_cb(void *user_data) {
 	gui_key_t key = (gui_key_t)(uintptr_t)user_data;
 
+	// While a Game Boy is open the device's Play/Pause and skip keys are
+	// Start/Select inputs, not music transport commands.
+	if (gearboyplay_handle_key(key)) {
+		return;
+	}
+
 	// The side keys act on the local transport, and there are states in which
 	// that transport is not what the device is doing. Pressing them then does
 	// not do nothing -- it starts a local track underneath whatever is actually

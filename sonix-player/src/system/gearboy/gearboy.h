@@ -14,13 +14,10 @@
 // sound cannot drift apart because one loop produces both. A computed usleep
 // in place of that would slip a frame every few seconds.
 //
-// The framebuffer is already scaled up from the core's 160x144 -- three times
-// on the 480-wide HiBy panels, once on the TempoTec V1, whose 240x320 panel is
-// too narrow for 480 and has no scale in between that keeps a Game Boy pixel a
-// square of whole panel pixels (see gearboy_set_scale). The scaling costs a
-// millisecond and runs on the emulator thread, which has room for it, rather
-// than on the UI thread, which does not -- and at 1x it is a plain copy, 46 KB
-// instead of 414.
+// The framebuffer is scaled from the core's 160x144: three times on the
+// 480-wide HiBy panels, and to 240x216 on the TempoTec V1 so the picture fills
+// its narrower display without distorting its aspect ratio. The V1 fit uses
+// nearest-neighbour sampling; the integer 3x path remains pixel-perfect.
 
 #define GEARBOY_SCALE_MAX 3
 
@@ -54,7 +51,7 @@ bool gearboy_failed(void);
 const char *gearboy_title(void);
 
 // The framebuffer, gearboy_frame_w() x gearboy_frame_h() RGB565 (480x432 on
-// the HiBy players, 160x144 on the V1). NULL until a game is running.
+// the HiBy players, 240x216 on the V1). NULL until a game is running.
 //
 // Only the UI thread writes it, inside gearboy_present(); the emulator thread
 // never touches it. That single-writer rule is what keeps a mid-screen seam
@@ -65,23 +62,19 @@ const uint16_t *gearboy_screen(void);
 // How much the picture is scaled up for the panel in use
 // ---------------------------------------------------------------------------
 //
-// Three times gives 480x432, the full width of the HiBy panels. The V1's panel
-// is 240 wide, so three times 160 does not fit it and there is nothing between
-// 1x and 3x that keeps every Game Boy pixel the same whole number of panel
-// pixels: a fractional scale makes some pixels a row wider than their
-// neighbours, which is what a Game Boy picture must not look like. The V1
-// therefore shows the picture at one panel pixel per Game Boy pixel, and its
-// page lays the controls out under it.
+// Three times gives 480x432, the full width of the HiBy panels. The V1 uses a
+// custom 240x216 nearest-neighbour fit: a deliberate trade-off that makes the
+// picture larger while preserving its aspect ratio. `gearboy_scale()` returns
+// zero when this custom size is active.
 //
-// Set once, by the page, before the first gearboy_start(): the framebuffer is
-// sized from it and the page sizes its image from gearboy_frame_w() at the same
-// moment. The default is 3, so a caller that never asks -- a test, or a board
-// with no page of its own -- gets the HiBy picture.
+// Set the scale or custom frame size before the first gearboy_start(): the
+// framebuffer is sized from it and the page sizes its image from the same
+// getters. The default is 3, so a caller that never asks gets the HiBy picture.
 void gearboy_set_scale(int scale);
+void gearboy_set_frame_size(int width, int height);
 int gearboy_scale(void);
 
-// The framebuffer's size: 160x144 times the scale in use, which is also the
-// size of the image the page has to draw.
+// The framebuffer's output size, also the size of the image the page draws.
 int gearboy_frame_w(void);
 int gearboy_frame_h(void);
 
@@ -96,9 +89,13 @@ bool gearboy_present(void);
 // something new instead of on every tick.
 uint32_t gearboy_frame_count(void);
 
-// All button states at once, as a mask of GB_KEY_* (src/gb/gbcore.h). Written
-// by the touch reader, read by the emulator thread.
+// All touch/fallback button states at once, as a mask of GB_KEY_*
+// (src/gb/gbcore.h). Written by the touch reader, read by the emulator thread.
 void gearboy_set_keys(uint16_t mask);
+
+// Extra momentary buttons from outside the touch reader (the device's physical
+// Play/Pause and skip keys), ORed with the main key mask by the emulator thread.
+void gearboy_set_key_overlay(uint16_t mask);
 
 // ---------------------------------------------------------------------------
 // Pausing, and what can be done while paused
