@@ -31,6 +31,9 @@ static lv_obj_t *back_btn_icon;
 static bool chevron_in_player;
 static bool chevron_over_cover;
 
+// How much of the chevron shows over the player's artwork (LV_OPA_COVER = all).
+#define CHEVRON_OVER_COVER_OPA LV_OPA_60
+
 // Where the back button sits depends on whether the page below it shows the
 // status bar: normally it tucks in underneath, on the player (status bar
 // hidden, artwork at the top) it moves up to the top edge.
@@ -653,9 +656,12 @@ static void chevron_apply_color(void) {
 	if (chevron_in_player && chevron_over_cover) {
 		lv_obj_set_style_image_recolor(back_btn_icon, lv_color_white(), 0);
 		lv_obj_set_style_image_recolor_opa(back_btn_icon, LV_OPA_COVER, 0);
+		// See-through over the artwork, so the sleeve shows behind the chevron.
+		lv_obj_set_style_image_opa(back_btn_icon, CHEVRON_OVER_COVER_OPA, 0);
 	} else {
 		lv_obj_remove_local_style_prop(back_btn_icon, LV_STYLE_IMAGE_RECOLOR, 0);
 		lv_obj_remove_local_style_prop(back_btn_icon, LV_STYLE_IMAGE_RECOLOR_OPA, 0);
+		lv_obj_remove_local_style_prop(back_btn_icon, LV_STYLE_IMAGE_OPA, 0);
 	}
 }
 
