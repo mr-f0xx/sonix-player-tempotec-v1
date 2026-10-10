@@ -167,6 +167,10 @@ static int polls_since_stop = POLLS_FAST_AFTER_STOP;
 // wider than the standard sleeve because its names live on the artwork.
 #define COMPACT_SLEEVE_TOP 42
 
+// Raise the track-info row as a unit so the title and artist keep a little
+// extra room from the progress bar without shifting the controls below it.
+#define PLAYER_TRACK_INFO_LIFT 4
+
 // The controls block as the R3 Pro II has it, 720 - 480. A taller panel (the
 // R1's 800) spreads what it has over the rows rather than leaving it empty
 // above and below them: a fifth to each end and a fifth to each of the three
@@ -4897,6 +4901,9 @@ void player_init(gui_config_t *cfg) {
 	lv_obj_set_style_radius(song_info, 0, 0);
 	lv_obj_set_style_pad_all(song_info, 0, 0);
 	lv_obj_set_style_pad_column(song_info, compact ? 4 : 10, 0);
+	// Raise the complete row so the text stays aligned with the star and has
+	// a little more breathing room above the progress bar on every track.
+	lv_obj_set_style_translate_y(song_info, -PLAYER_TRACK_INFO_LIFT, 0);
 	lv_obj_set_flex_flow(song_info, LV_FLEX_FLOW_ROW);
 	lv_obj_set_flex_align(song_info, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 	lv_obj_set_scrollable(song_info, false);
