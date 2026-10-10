@@ -35,11 +35,12 @@ Playlists/Browse, Favourites and Search remain available inside that menu
 without allowing four actions to reduce the heading to `Musi…`.
 
 Now Playing on the V1 shows the blurred artwork behind the **whole screen**, as
-Studio does on every player, with a centred square sleeve (about 138×138 px in
-the standard arrangement, and a little taller while the alternative arrangement
-keeps the deck to the waveform, clocks and transport, soft-clipped corners
-throughout) floating on it; the source badges and alternative-layout pills
-travel on the sleeve itself. The cover panel and the control deck are
+Studio does on every player, with a horizontally centred square sleeve (about
+150×150 px in the standard arrangement, its top aligned with the visible back
+chevron and at least 18 px of air before the track-info row; a little taller
+while the alternative arrangement keeps the deck to the waveform, clocks and
+transport, soft-clipped corners throughout) floating on it; the source badges
+and alternative-layout pills travel on the sleeve itself. The cover panel and the control deck are
 both transparent on this board, so there is no horizontal edge under the
 sleeve where the panel colour used to meet the deck's own blurred block. The
 deck is not a fixed height: `compact_deck_height()` adds up the four rows --
