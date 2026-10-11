@@ -48,6 +48,11 @@ void gridpage_set_tile_icon_style(lv_obj_t *grid, int index, const lv_image_dsc_
 // Tokyo Night home menu; existing themes keep their original construction.
 void gridpage_set_tile_orientation(lv_obj_t *grid, int index, bool horizontal);
 
+// Lets selected Tokyo Night captions use up to `lines` tidy lines instead of
+// the default one-line ellipsis (for labels such as File Manager and Album
+// artist). The caller restores one line when returning to Dark or Light.
+void gridpage_set_tile_label_lines(lv_obj_t *grid, int index, int lines);
+
 // Reflows an existing grid into a different screen area. Used by the V1's
 // Tokyo Night home screen to reserve space for its heading and mini-player,
 // without duplicating the six tile objects or changing Dark/Light geometry.

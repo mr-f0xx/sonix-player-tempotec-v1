@@ -6,8 +6,10 @@
 
 #include "lvgl/lvgl.h"
 
+#include "src/gui/board_profile.h"
 #include "src/gui/fonts/fonts.h"
 #include "src/gui/nowplaying/player.h"
+#include "src/gui/shell/icons.h"
 #include "src/gui/shell/settingsrow.h"
 #include "src/gui/shell/switcher.h"
 #include "src/gui/shell/theme.h"
@@ -26,6 +28,9 @@ static lv_obj_t *btn_accent[THEME_ACCENT_COUNT]; // the coloured circles
 static lv_obj_t *tint_toggle;
 static lv_obj_t *battery_percent_toggle;
 static lv_obj_t *text_size_pill[FONTS_TEXT_COUNT]; // normal / large / small
+static lv_obj_t *tokyo_palette_card;
+static lv_obj_t *tokyo_glyph_card;
+static lv_obj_t *tokyo_glyph_icons[4];
 // The status bar draws the battery either way; this setting is only about the
 // number beside it, and is on by default.
 static void battery_percent_cb(lv_event_t *e) {
@@ -336,6 +341,100 @@ static lv_obj_t *make_theme_choice(lv_obj_t *parent, const char *text, theme_kin
 	return btn;
 }
 
+static lv_obj_t *tokyo_preview_card(lv_obj_t *parent, const char *title, bool compact) {
+	lv_obj_t *card = lv_obj_create(parent);
+	lv_obj_set_width(card, lv_pct(100));
+	lv_obj_set_height(card, LV_SIZE_CONTENT);
+	lv_obj_add_style(card, &theme_style_card, 0);
+	lv_obj_set_style_radius(card, compact ? 10 : 12, 0);
+	lv_obj_set_style_border_width(card, 0, 0);
+	lv_obj_set_style_shadow_width(card, 0, 0);
+	lv_obj_set_style_pad_all(card, compact ? 8 : 20, 0);
+	lv_obj_set_style_pad_gap(card, compact ? 6 : 14, 0);
+	lv_obj_set_scrollable(card, false);
+	lv_obj_set_event_bubble(card, true);
+	lv_obj_set_flex_flow(card, LV_FLEX_FLOW_COLUMN);
+	lv_obj_set_flex_align(card, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
+
+	lv_obj_t *name = lv_label_create(card);
+	lv_label_set_text(name, tr(title));
+	lv_obj_add_style(name, &theme_style_text, 0);
+	lv_obj_set_style_text_font(name, compact ? &font_ui_16 : &font_ui_24, 0);
+	return card;
+}
+
+static void appearance_preview_refresh(void) {
+	bool show = bp_is_tempotec_v1() && theme_is_tokyo_night();
+	if (tokyo_palette_card) {
+		lv_obj_set_hidden(tokyo_palette_card, !show);
+	}
+	if (tokyo_glyph_card) {
+		lv_obj_set_hidden(tokyo_glyph_card, !show);
+	}
+	static const theme_semantic_t tones[4] = {
+		THEME_SEMANTIC_CYAN, THEME_SEMANTIC_BLUE, THEME_SEMANTIC_BLUE, THEME_SEMANTIC_PURPLE,
+	};
+	for (int i = 0; i < 4; i++) {
+		if (!tokyo_glyph_icons[i]) {
+			continue;
+		}
+		lv_obj_set_style_image_recolor(tokyo_glyph_icons[i], theme_semantic_color(tones[i]), 0);
+		lv_obj_set_style_image_recolor_opa(tokyo_glyph_icons[i], LV_OPA_COVER, 0);
+	}
+}
+
+static void build_tokyo_previews(lv_obj_t *container, bool compact) {
+	if (!compact) {
+		return;
+	}
+
+	tokyo_palette_card = tokyo_preview_card(container, "appearance_tokyo_palette", compact);
+	lv_obj_t *palette = lv_obj_create(tokyo_palette_card);
+	lv_obj_set_size(palette, lv_pct(100), 13);
+	lv_obj_set_style_bg_opa(palette, LV_OPA_TRANSP, 0);
+	lv_obj_set_style_border_width(palette, 0, 0);
+	lv_obj_set_style_pad_all(palette, 0, 0);
+	lv_obj_set_style_pad_column(palette, 3, 0);
+	lv_obj_set_flex_flow(palette, LV_FLEX_FLOW_ROW);
+	lv_obj_set_flex_align(palette, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+	static const lv_color_t swatches[] = {
+		LV_COLOR_MAKE(26, 27, 38), LV_COLOR_MAKE(36, 40, 59), LV_COLOR_MAKE(192, 202, 245),
+		LV_COLOR_MAKE(122, 162, 247), LV_COLOR_MAKE(125, 207, 255), LV_COLOR_MAKE(187, 154, 247),
+		LV_COLOR_MAKE(158, 206, 106), LV_COLOR_MAKE(247, 118, 142),
+	};
+	for (unsigned int i = 0; i < sizeof(swatches) / sizeof(swatches[0]); i++) {
+		lv_obj_t *swatch = lv_obj_create(palette);
+		lv_obj_set_height(swatch, 12);
+		lv_obj_set_flex_grow(swatch, 1);
+		lv_obj_set_style_bg_color(swatch, swatches[i], 0);
+		lv_obj_set_style_bg_opa(swatch, LV_OPA_COVER, 0);
+		lv_obj_set_style_border_width(swatch, 0, 0);
+		lv_obj_set_style_radius(swatch, 3, 0);
+	}
+
+	tokyo_glyph_card = tokyo_preview_card(container, "appearance_function_glyphs", compact);
+	lv_obj_t *glyph_row = lv_obj_create(tokyo_glyph_card);
+	lv_obj_set_size(glyph_row, lv_pct(100), 24);
+	lv_obj_set_style_bg_opa(glyph_row, LV_OPA_TRANSP, 0);
+	lv_obj_set_style_border_width(glyph_row, 0, 0);
+	lv_obj_set_style_pad_all(glyph_row, 0, 0);
+	lv_obj_set_style_pad_column(glyph_row, 10, 0);
+	lv_obj_set_flex_flow(glyph_row, LV_FLEX_FLOW_ROW);
+	lv_obj_set_flex_align(glyph_row, LV_FLEX_ALIGN_SPACE_AROUND, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+	static const lv_image_dsc_t *const glyphs[4] = {&icon_music2, &icon_play_status, &icon_wifi, &icon_equalizer};
+	for (int i = 0; i < 4; i++) {
+		lv_obj_t *icon = lv_image_create(glyph_row);
+		lv_image_set_src(icon, glyphs[i]);
+		lv_obj_add_style(icon, &theme_style_icon, 0);
+		lv_obj_set_size(icon, 18, 18);
+		lv_image_set_inner_align(icon, LV_IMAGE_ALIGN_CENTER);
+		lv_image_set_scale(icon, (uint32_t)(LV_SCALE_NONE * 18 / LV_MAX((int)glyphs[i]->header.w,
+																(int)glyphs[i]->header.h)));
+		tokyo_glyph_icons[i] = icon;
+	}
+	appearance_preview_refresh();
+}
+
 void appearance_init(gui_config_t *cfg) {
 	const bool compact = cfg->screen_width < 320;
 	lv_obj_t *container = settingsrow_page(appearance_screen, cfg, "appearance");
@@ -382,6 +481,11 @@ void appearance_init(gui_config_t *cfg) {
 	lv_obj_add_style(theme_note, &theme_style_text_dim, 0);
 	lv_obj_set_style_text_font(theme_note, compact ? &font_ui_14 : &font_ui_18, 0);
 	lv_label_set_text(theme_note, tr("appearance_theme_note"));
+
+	// Compact Tokyo Night palette and glyph examples, immediately after the
+	// theme switch. Hidden for Dark/Light so their existing Appearance page
+	// remains unchanged; all of the real controls below stay in place.
+	build_tokyo_previews(container, compact);
 
 	// A second card: which picture the next power-on shows. Unlike every
 	// other choice on this page it is not only a config value -- it also
@@ -570,6 +674,7 @@ void appearance_init(gui_config_t *cfg) {
 	theme_register_refresh(refresh_clock_buttons);
 	theme_register_refresh(refresh_accent_buttons);
 	theme_register_refresh(refresh_font_pills);
+	theme_register_refresh(appearance_preview_refresh);
 
 	// The card's fonts again on every visit: one copied over the USB cable
 	// while the player was running is offered the next time this page comes

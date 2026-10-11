@@ -269,8 +269,15 @@ typedef struct {
 	theme_semantic_t tone;
 } settingsrow_leading_icon_t;
 
+typedef struct {
+	lv_obj_t *row;
+	lv_obj_t *label;
+} settingsrow_caption_t;
+
 static settingsrow_leading_icon_t leading_icons[SETTINGSROW_MAX_LEADING_ICONS];
+static settingsrow_caption_t captions[24];
 static int leading_icon_count;
+static int caption_count;
 static bool settingsrow_refresh_registered;
 static void fit_row(lv_obj_t *row);
 static void settingsrow_refresh_theme(void);
@@ -279,6 +286,15 @@ static lv_obj_t *settingsrow_leading_icon(lv_obj_t *row) {
 	for (int i = 0; i < leading_icon_count; i++) {
 		if (leading_icons[i].row == row) {
 			return leading_icons[i].icon;
+		}
+	}
+	return NULL;
+}
+
+static lv_obj_t *settingsrow_caption(lv_obj_t *row) {
+	for (int i = 0; i < caption_count; i++) {
+		if (captions[i].row == row) {
+			return captions[i].label;
 		}
 	}
 	return NULL;
@@ -320,6 +336,33 @@ static void fit_row(lv_obj_t *row) {
 	lv_obj_t *leading = settingsrow_leading_icon(row);
 	int32_t leading_width = theme_is_tokyo_night() && leading ? lv_obj_get_width(leading) + ROW_LABEL_GAP : 0;
 	avail -= leading_width;
+
+	lv_obj_t *caption = settingsrow_caption(row);
+	bool two_line = caption && compact_rows() && theme_is_tokyo_night();
+	if (caption) {
+		lv_obj_set_hidden(caption, !two_line);
+	}
+	if (two_line) {
+		lv_obj_set_height(row, 60);
+		lv_obj_set_style_text_font(label, &font_ui_18, 0);
+		lv_label_set_long_mode(label, LV_LABEL_LONG_DOT);
+		lv_obj_set_style_text_line_space(label, 0, 0);
+		lv_obj_set_width(label, LV_MAX(1, avail));
+		lv_obj_set_height(label, lv_font_get_line_height(&font_ui_18));
+		lv_obj_align(label, LV_ALIGN_TOP_LEFT, leading_width, 4);
+
+		lv_label_set_long_mode(caption, LV_LABEL_LONG_DOT);
+		lv_obj_set_style_text_line_space(caption, 0, 0);
+		lv_obj_set_width(caption, LV_MAX(1, avail));
+		lv_obj_set_height(caption, lv_font_get_line_height(&font_ui_14));
+		lv_obj_align(caption, LV_ALIGN_TOP_LEFT, leading_width, lv_font_get_line_height(&font_ui_18) + 7);
+		return;
+	}
+
+	if (caption) {
+		lv_obj_set_height(row, row_height());
+		lv_obj_set_style_text_font(label, &font_ui_24, 0);
+	}
 	lv_obj_align(label, LV_ALIGN_LEFT_MID, leading_width, 0);
 	fit_row_label(label, avail);
 }
@@ -436,6 +479,11 @@ static void settingsrow_refresh_theme(void) {
 			lv_obj_remove_local_style_prop(icon, LV_STYLE_IMAGE_RECOLOR_OPA, 0);
 		}
 		fit_row(row);
+	}
+	for (int i = 0; i < caption_count; i++) {
+		if (captions[i].row && captions[i].label) {
+			fit_row(captions[i].row);
+		}
 	}
 }
 
@@ -865,6 +913,46 @@ void settingsrow_add_icon(lv_obj_t *row, const lv_image_dsc_t *source, theme_sem
 	lv_obj_add_event_cb(row, settingsrow_icon_row_deleted_cb, LV_EVENT_DELETE, NULL);
 	settingsrow_register_refresh();
 	settingsrow_refresh_theme();
+}
+
+static void settingsrow_caption_row_deleted_cb(lv_event_t *e) {
+	lv_obj_t *row = lv_event_get_target(e);
+	for (int i = 0; i < caption_count; i++) {
+		if (captions[i].row == row) {
+			captions[i] = captions[--caption_count];
+			return;
+		}
+	}
+}
+
+void settingsrow_add_caption(lv_obj_t *row, const char *text) {
+	if (!row || !text) {
+		return;
+	}
+	lv_obj_t *caption = settingsrow_caption(row);
+	if (caption) {
+		lv_label_set_text(caption, tr(text));
+		fit_row(row);
+		return;
+	}
+	if (caption_count >= (int)(sizeof(captions) / sizeof(captions[0]))) {
+		return;
+	}
+
+	caption = lv_label_create(row);
+	lv_label_set_text(caption, tr(text));
+	lv_obj_add_style(caption, &theme_style_text_dim, 0);
+	lv_obj_set_style_text_font(caption, &font_ui_14, 0);
+	lv_label_set_long_mode(caption, LV_LABEL_LONG_DOT);
+	lv_obj_set_width(caption, lv_pct(100));
+	lv_obj_set_height(caption, lv_font_get_line_height(&font_ui_14));
+	lv_obj_set_clickable(caption, false);
+	lv_obj_set_scrollable(caption, false);
+	lv_obj_set_hidden(caption, true);
+	captions[caption_count++] = (settingsrow_caption_t){.row = row, .label = caption};
+	lv_obj_add_event_cb(row, settingsrow_caption_row_deleted_cb, LV_EVENT_DELETE, NULL);
+	settingsrow_register_refresh();
+	fit_row(row);
 }
 
 // The name label is the first thing settingsrow_add() puts in a row, and the

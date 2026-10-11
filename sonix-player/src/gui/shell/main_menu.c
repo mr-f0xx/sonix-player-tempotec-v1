@@ -220,7 +220,7 @@ static void main_menu_refresh_theme(void) {
 	for (int i = 0; i < 6; i++) {
 		if (tokyo) {
 			gridpage_set_tile_icon_style(menu_grid, i, TOKYO_MENU_ICONS[i], compact ? 22 : 46, true,
-										 theme_semantic_color(TOKYO_MENU_TONES[i]), prototype_layout && i < 5);
+										 theme_semantic_color(TOKYO_MENU_TONES[i]), prototype_layout && i < 5 && i != 1 && i != 3);
 		} else {
 			// The original Dark and Light menu art and its full V1 icon size are
 			// retained exactly; the glyph-only treatment is scoped to Tokyo Night.
@@ -279,15 +279,15 @@ void main_menu_init(gui_config_t *cfg) {
 	menu_cfg = cfg;
 
 	const grid_entry_t entries[] = {
-		{"music", &icon_menu_music, &music_screen},
-		{"streaming", &icon_menu_streaming, &streaming_screen},
-		{"wireless", &icon_menu_wireless, &wireless_screen},
+		{"music", &icon_menu_music, &music_screen, NULL},
+		{"streaming", &icon_menu_streaming, &streaming_screen, NULL},
+		{"wireless", &icon_menu_wireless, &wireless_screen, NULL},
 		{"audiobooks", &icon_menu_audiobooks, NULL, open_audiobooks},
 		// The door to the More page, which holds the DAC and anything else
 		// that does not fit. The main menu has exactly six tiles, and one of
 		// them has to be able to keep growing.
-		{"more", &icon_menu_more, &morepage_screen},
-		{"settings", &icon_menu_settings, &settings_screen},
+		{"more", &icon_menu_more, &morepage_screen, NULL},
+		{"settings", &icon_menu_settings, &settings_screen, NULL},
 	};
 
 	menu_grid = gridpage_build(main_menu_screen, cfg, entries, (int)(sizeof(entries) / sizeof(entries[0])), 2, 3, false);

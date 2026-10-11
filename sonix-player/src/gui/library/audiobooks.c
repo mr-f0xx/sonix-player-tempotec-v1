@@ -35,8 +35,21 @@ lv_obj_t *audiobookcontrols_screen;
 // The two list pages the tiles lead to: books, and authors or series.
 static lv_obj_t *books_screen;
 static lv_obj_t *names_screen;
+static lv_obj_t *section_grid;
+static lv_obj_t *section_empty;
+static lv_obj_t *tokyo_books_panel;
+static lv_obj_t *tokyo_continue_empty;
+static lv_obj_t *tokyo_continue_book;
+static lv_obj_t *tokyo_continue_title;
+static lv_obj_t *tokyo_continue_author;
+static lv_obj_t *tokyo_scan_button;
+static char tokyo_continue_path[512];
 
 static void start_scan(void *user);
+static void section_scan_cb(lv_event_t *e);
+static void finished_cb(lv_event_t *e);
+static void bookmarks_cb(lv_event_t *e);
+static void section_refresh_theme(void);
 
 // ---------------------------------------------------------------------------
 // Which list a page shows, and the order it is read in
@@ -1026,6 +1039,295 @@ static void open_series(void) { names_open(LIST_SERIES); }
 static void open_authors(void) { names_open(LIST_AUTHORS); }
 static void open_continue(void) { books_open(LIST_CONTINUE, NULL, tr("audiobook_continue")); }
 
+static bool continue_preview_row(const char *name, const char *path, void *user) {
+	char *title = user;
+	if (!title || !path || !path[0]) {
+		return true;
+	}
+	snprintf(title, 256, "%s", name ? name : "");
+	snprintf(tokyo_continue_path, sizeof(tokyo_continue_path), "%s", path);
+	return true;
+}
+
+static void continue_preview_refresh(void) {
+	if (!tokyo_continue_empty || !tokyo_continue_book) {
+		return;
+	}
+	tokyo_continue_path[0] = '\0';
+	char book_title[256] = "";
+	char book_author[256] = "";
+	audiobook_order_t order;
+	bool desc;
+	sort_to_order(list_sort(LIST_CONTINUE), &order, &desc);
+	audiobookdb_index_t *index = audiobookdb_index_open(AUDIOBOOK_LIST_CONTINUE, NULL, order, desc);
+	int count = audiobookdb_index_count(index);
+	if (index && count > 0) {
+		audiobookdb_index_window(index, 0, 1, continue_preview_row, book_title);
+		if (tokyo_continue_path[0]) {
+			char info_title[256] = "";
+			audiobookdb_book_info(tokyo_continue_path, info_title, sizeof(info_title), book_author,
+								 sizeof(book_author), NULL);
+		}
+	}
+	audiobookdb_index_close(index);
+
+	bool has_book = tokyo_continue_path[0] != '\0';
+	lv_obj_set_hidden(tokyo_continue_empty, has_book);
+	lv_obj_set_hidden(tokyo_continue_book, !has_book);
+	if (has_book) {
+		lv_label_set_text(tokyo_continue_title, book_title[0] ? book_title : tr("audiobook_continue"));
+		lv_label_set_text(tokyo_continue_author, book_author);
+	}
+}
+
+static void tokyo_continue_book_cb(lv_event_t *e) {
+	(void)e;
+	if (tokyo_continue_path[0]) {
+		play_book(tokyo_continue_path);
+	}
+}
+
+static void tokyo_open_continue_cb(lv_event_t *e) {
+	(void)e;
+	open_continue();
+}
+
+static void tokyo_open_library_cb(lv_event_t *e) { (void)e; open_library(); }
+static void tokyo_open_series_cb(lv_event_t *e) { (void)e; open_series(); }
+static void tokyo_open_authors_cb(lv_event_t *e) { (void)e; open_authors(); }
+
+static lv_obj_t *tokyo_section_card(lv_obj_t *parent) {
+	lv_obj_t *card = lv_obj_create(parent);
+	lv_obj_set_width(card, lv_pct(100));
+	lv_obj_set_height(card, LV_SIZE_CONTENT);
+	lv_obj_add_style(card, &theme_style_card, 0);
+	lv_obj_set_style_radius(card, bp_tile_radius(), 0);
+	lv_obj_set_style_border_width(card, 0, 0);
+	lv_obj_set_style_shadow_width(card, 0, 0);
+	lv_obj_set_style_pad_all(card, 4, 0);
+	lv_obj_set_scrollable(card, false);
+	lv_obj_set_flex_flow(card, LV_FLEX_FLOW_COLUMN);
+	lv_obj_set_flex_align(card, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
+	return card;
+}
+
+static void tokyo_continue_panel_build(gui_config_t *cfg) {
+	if (!bp_is_tempotec_v1()) {
+		return;
+	}
+	int top = settingsrow_content_top(cfg);
+	tokyo_books_panel = lv_obj_create(audiobooks_screen);
+	lv_obj_set_size(tokyo_books_panel, lv_pct(100), cfg->screen_height - top);
+	lv_obj_align(tokyo_books_panel, LV_ALIGN_TOP_LEFT, 0, top);
+	lv_obj_set_style_bg_opa(tokyo_books_panel, LV_OPA_TRANSP, 0);
+	lv_obj_set_style_border_width(tokyo_books_panel, 0, 0);
+	lv_obj_set_style_radius(tokyo_books_panel, 0, 0);
+	lv_obj_set_style_pad_hor(tokyo_books_panel, cfg->padding, 0);
+	lv_obj_set_style_pad_ver(tokyo_books_panel, 4, 0);
+	lv_obj_set_style_pad_gap(tokyo_books_panel, 6, 0);
+	lv_obj_set_flex_flow(tokyo_books_panel, LV_FLEX_FLOW_COLUMN);
+	lv_obj_set_flex_align(tokyo_books_panel, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_START);
+	lv_obj_set_scroll_dir(tokyo_books_panel, LV_DIR_VER);
+	lv_obj_set_scrollbar_mode(tokyo_books_panel, LV_SCROLLBAR_MODE_AUTO);
+	lv_obj_set_hidden(tokyo_books_panel, true);
+
+	lv_obj_t *continue_heading = lv_label_create(tokyo_books_panel);
+	lv_label_set_text(continue_heading, tr("audiobook_continue_listening"));
+	lv_obj_add_style(continue_heading, &theme_style_text, 0);
+	lv_obj_set_style_text_font(continue_heading, &font_ui_14, 0);
+
+	lv_obj_t *continue_card = tokyo_section_card(tokyo_books_panel);
+	tokyo_continue_empty = lv_label_create(continue_card);
+	lv_label_set_text(tokyo_continue_empty, tr("audiobook_continue_empty"));
+	lv_label_set_long_mode(tokyo_continue_empty, LV_LABEL_LONG_DOT);
+	lv_obj_set_width(tokyo_continue_empty, lv_pct(100));
+	lv_obj_set_height(tokyo_continue_empty, 32);
+	lv_obj_add_style(tokyo_continue_empty, &theme_style_text_dim, 0);
+	lv_obj_set_style_text_font(tokyo_continue_empty, &font_ui_14, 0);
+	lv_obj_set_style_text_align(tokyo_continue_empty, LV_TEXT_ALIGN_CENTER, 0);
+
+	tokyo_continue_book = lv_btn_create(continue_card);
+	lv_obj_set_size(tokyo_continue_book, lv_pct(100), 41);
+	lv_obj_set_style_bg_opa(tokyo_continue_book, LV_OPA_TRANSP, 0);
+	lv_obj_add_style(tokyo_continue_book, &theme_style_card_pressed, LV_STATE_PRESSED);
+	lv_obj_set_style_border_width(tokyo_continue_book, 0, 0);
+	lv_obj_set_style_pad_hor(tokyo_continue_book, 4, 0);
+	lv_obj_set_style_pad_column(tokyo_continue_book, 7, 0);
+	lv_obj_set_flex_flow(tokyo_continue_book, LV_FLEX_FLOW_ROW);
+	lv_obj_set_flex_align(tokyo_continue_book, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+	lv_obj_set_event_bubble(tokyo_continue_book, true);
+	lv_obj_add_event_cb(tokyo_continue_book, tokyo_continue_book_cb, LV_EVENT_CLICKED, NULL);
+	lv_obj_t *book_icon = lv_image_create(tokyo_continue_book);
+	lv_image_set_src(book_icon, &icon_book_headphones_row);
+	lv_obj_add_style(book_icon, &theme_style_icon, 0);
+	lv_obj_set_size(book_icon, 24, 24);
+	lv_image_set_scale(book_icon, (uint32_t)(LV_SCALE_NONE * 24 / 64));
+	lv_image_set_inner_align(book_icon, LV_IMAGE_ALIGN_CENTER);
+	lv_obj_set_style_image_recolor(book_icon, theme_semantic_color(THEME_SEMANTIC_AMBER), 0);
+	lv_obj_set_style_image_recolor_opa(book_icon, LV_OPA_COVER, 0);
+	lv_obj_t *copy = lv_obj_create(tokyo_continue_book);
+	lv_obj_remove_style_all(copy);
+	lv_obj_set_flex_grow(copy, 1);
+	lv_obj_set_height(copy, LV_SIZE_CONTENT);
+	lv_obj_set_style_pad_all(copy, 0, 0);
+	lv_obj_set_style_pad_row(copy, 1, 0);
+	lv_obj_set_scrollable(copy, false);
+	lv_obj_set_flex_flow(copy, LV_FLEX_FLOW_COLUMN);
+	tokyo_continue_title = lv_label_create(copy);
+	lv_label_set_long_mode(tokyo_continue_title, LV_LABEL_LONG_DOT);
+	lv_obj_set_width(tokyo_continue_title, lv_pct(100));
+	lv_obj_set_height(tokyo_continue_title, lv_font_get_line_height(&font_ui_14));
+	lv_obj_add_style(tokyo_continue_title, &theme_style_text, 0);
+	lv_obj_set_style_text_font(tokyo_continue_title, &font_ui_14, 0);
+	tokyo_continue_author = lv_label_create(copy);
+	lv_label_set_long_mode(tokyo_continue_author, LV_LABEL_LONG_DOT);
+	lv_obj_set_width(tokyo_continue_author, lv_pct(100));
+	lv_obj_set_height(tokyo_continue_author, lv_font_get_line_height(&font_ui_14));
+	lv_obj_add_style(tokyo_continue_author, &theme_style_text_dim, 0);
+	lv_obj_set_style_text_font(tokyo_continue_author, &font_ui_14, 0);
+	lv_obj_set_hidden(tokyo_continue_book, true);
+
+	lv_obj_t *open_continue = lv_btn_create(continue_card);
+	lv_obj_set_size(open_continue, lv_pct(100), 36);
+	lv_obj_set_style_bg_opa(open_continue, LV_OPA_TRANSP, 0);
+	lv_obj_add_style(open_continue, &theme_style_card_pressed, LV_STATE_PRESSED);
+	lv_obj_set_style_border_width(open_continue, 0, 0);
+	lv_obj_set_style_pad_hor(open_continue, 4, 0);
+	lv_obj_set_style_pad_column(open_continue, 7, 0);
+	lv_obj_set_flex_flow(open_continue, LV_FLEX_FLOW_ROW);
+	lv_obj_set_flex_align(open_continue, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+	lv_obj_set_event_bubble(open_continue, true);
+	lv_obj_add_event_cb(open_continue, tokyo_open_continue_cb, LV_EVENT_CLICKED, NULL);
+	lv_obj_t *open_icon = lv_image_create(open_continue);
+	lv_image_set_src(open_icon, &icon_play);
+	lv_obj_add_style(open_icon, &theme_style_icon, 0);
+	lv_obj_set_size(open_icon, 17, 17);
+	lv_image_set_inner_align(open_icon, LV_IMAGE_ALIGN_CENTER);
+	lv_image_set_scale(open_icon, (uint32_t)(LV_SCALE_NONE * 17 / 40));
+	lv_obj_set_style_image_recolor(open_icon, theme_semantic_color(THEME_SEMANTIC_AMBER), 0);
+	lv_obj_set_style_image_recolor_opa(open_icon, LV_OPA_COVER, 0);
+	lv_obj_t *open_label = lv_label_create(open_continue);
+	lv_label_set_text(open_label, tr("audiobook_continue"));
+	lv_label_set_long_mode(open_label, LV_LABEL_LONG_DOT);
+	lv_obj_set_flex_grow(open_label, 1);
+	lv_obj_add_style(open_label, &theme_style_text, 0);
+	lv_obj_set_style_text_font(open_label, &font_ui_14, 0);
+	lv_obj_t *open_chevron = lv_image_create(open_continue);
+	lv_image_set_src(open_chevron, &icon_chevron_right);
+	lv_obj_add_style(open_chevron, &theme_style_icon, 0);
+	lv_obj_set_size(open_chevron, 14, 14);
+	lv_image_set_scale(open_chevron, (uint32_t)(LV_SCALE_NONE * 14 / 36));
+	lv_image_set_inner_align(open_chevron, LV_IMAGE_ALIGN_CENTER);
+	lv_obj_set_style_image_opa(open_chevron, LV_OPA_60, 0);
+
+	lv_obj_t *categories = tokyo_section_card(tokyo_books_panel);
+	static const struct {
+		const char *label;
+		const lv_image_dsc_t *icon;
+		theme_semantic_t tone;
+		lv_event_cb_t callback;
+	} category_rows[] = {
+		{"audiobook_library", &icon_book_headphones_row, THEME_SEMANTIC_AMBER, tokyo_open_library_cb},
+		{"audiobook_series", &icon_sort_series, THEME_SEMANTIC_PURPLE, tokyo_open_series_cb},
+		{"audiobook_authors", &icon_artist, THEME_SEMANTIC_BLUE, tokyo_open_authors_cb},
+		{"audiobook_finished", &icon_book_finished, THEME_SEMANTIC_GREEN, finished_cb},
+		{"bookmarks", &icon_bookmark, THEME_SEMANTIC_CYAN, bookmarks_cb},
+	};
+	for (size_t i = 0; i < sizeof(category_rows) / sizeof(category_rows[0]); i++) {
+		lv_obj_t *button = lv_btn_create(categories);
+		lv_obj_set_size(button, lv_pct(100), 38);
+		lv_obj_set_style_bg_opa(button, LV_OPA_TRANSP, 0);
+		lv_obj_add_style(button, &theme_style_card_pressed, LV_STATE_PRESSED);
+		lv_obj_set_style_border_width(button, 0, 0);
+		if (i + 1 < sizeof(category_rows) / sizeof(category_rows[0])) {
+			lv_obj_set_style_border_side(button, LV_BORDER_SIDE_BOTTOM, 0);
+			lv_obj_set_style_border_width(button, 1, 0);
+			lv_obj_set_style_border_color(button, theme()->text_secondary, 0);
+			lv_obj_set_style_border_opa(button, LV_OPA_20, 0);
+		}
+		lv_obj_set_style_radius(button, 0, 0);
+		lv_obj_set_style_pad_hor(button, 5, 0);
+		lv_obj_set_style_pad_column(button, 7, 0);
+		lv_obj_set_flex_flow(button, LV_FLEX_FLOW_ROW);
+		lv_obj_set_flex_align(button, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+		lv_obj_set_event_bubble(button, true);
+		lv_obj_add_event_cb(button, category_rows[i].callback, LV_EVENT_CLICKED, NULL);
+
+		lv_obj_t *icon = lv_image_create(button);
+		lv_image_set_src(icon, category_rows[i].icon);
+		lv_obj_add_style(icon, &theme_style_icon, 0);
+		lv_obj_set_size(icon, 18, 18);
+		int side = LV_MAX((int)category_rows[i].icon->header.w, (int)category_rows[i].icon->header.h);
+		lv_image_set_scale(icon, side ? (uint32_t)(LV_SCALE_NONE * 18 / side) : LV_SCALE_NONE);
+		lv_image_set_inner_align(icon, LV_IMAGE_ALIGN_CENTER);
+		lv_obj_set_style_image_recolor(icon, theme_semantic_color(category_rows[i].tone), 0);
+		lv_obj_set_style_image_recolor_opa(icon, LV_OPA_COVER, 0);
+		lv_obj_t *label = lv_label_create(button);
+		lv_label_set_text(label, tr(category_rows[i].label));
+		lv_label_set_long_mode(label, LV_LABEL_LONG_DOT);
+		lv_obj_set_flex_grow(label, 1);
+		lv_obj_add_style(label, &theme_style_text, 0);
+		lv_obj_set_style_text_font(label, &font_ui_14, 0);
+		lv_obj_t *chevron = lv_image_create(button);
+		lv_image_set_src(chevron, &icon_chevron_right);
+		lv_obj_add_style(chevron, &theme_style_icon, 0);
+		lv_obj_set_size(chevron, 14, 14);
+		lv_image_set_scale(chevron, (uint32_t)(LV_SCALE_NONE * 14 / 36));
+		lv_image_set_inner_align(chevron, LV_IMAGE_ALIGN_CENTER);
+		lv_obj_set_style_image_opa(chevron, LV_OPA_60, 0);
+	}
+
+	tokyo_scan_button = lv_btn_create(tokyo_books_panel);
+	lv_obj_set_size(tokyo_scan_button, lv_pct(100), 38);
+	lv_obj_add_style(tokyo_scan_button, &theme_style_card, 0);
+	lv_obj_add_style(tokyo_scan_button, &theme_style_card_pressed, LV_STATE_PRESSED);
+	lv_obj_set_style_radius(tokyo_scan_button, bp_tile_radius(), 0);
+	lv_obj_set_style_border_width(tokyo_scan_button, 0, 0);
+	lv_obj_set_style_pad_hor(tokyo_scan_button, 8, 0);
+	lv_obj_set_style_pad_column(tokyo_scan_button, 7, 0);
+	lv_obj_set_flex_flow(tokyo_scan_button, LV_FLEX_FLOW_ROW);
+	lv_obj_set_flex_align(tokyo_scan_button, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+	lv_obj_set_event_bubble(tokyo_scan_button, true);
+	lv_obj_add_event_cb(tokyo_scan_button, section_scan_cb, LV_EVENT_CLICKED, NULL);
+	lv_obj_t *scan_icon = lv_image_create(tokyo_scan_button);
+	lv_image_set_src(scan_icon, &icon_book_headphones_row);
+	lv_obj_add_style(scan_icon, &theme_style_icon, 0);
+	lv_obj_set_size(scan_icon, 18, 18);
+	lv_image_set_scale(scan_icon, (uint32_t)(LV_SCALE_NONE * 18 / 64));
+	lv_image_set_inner_align(scan_icon, LV_IMAGE_ALIGN_CENTER);
+	lv_obj_set_style_image_recolor(scan_icon, theme_semantic_color(THEME_SEMANTIC_AMBER), 0);
+	lv_obj_set_style_image_recolor_opa(scan_icon, LV_OPA_COVER, 0);
+	lv_obj_t *scan_label = lv_label_create(tokyo_scan_button);
+	lv_label_set_text(scan_label, tr("audiobook_scan_audiobooks_2"));
+	lv_label_set_long_mode(scan_label, LV_LABEL_LONG_DOT);
+	lv_obj_set_flex_grow(scan_label, 1);
+	lv_obj_add_style(scan_label, &theme_style_text, 0);
+	lv_obj_set_style_text_font(scan_label, &font_ui_14, 0);
+
+	player_sheet_attach_drag(tokyo_books_panel, true);
+	switcher_attach_back_gesture(tokyo_books_panel);
+}
+
+static void section_refresh_theme(void) {
+	bool tokyo = bp_is_tempotec_v1() && theme_is_tokyo_night();
+	if (tokyo && tokyo_books_panel) {
+		lv_obj_set_hidden(section_grid, true);
+		lv_obj_set_hidden(section_empty, true);
+		lv_obj_set_hidden(tokyo_books_panel, false);
+		if (tokyo_scan_button) {
+			bool no_books = !audiobookdb_scan_running() && audiobookdb_count() == 0;
+			lv_obj_set_hidden(tokyo_scan_button, !no_books);
+		}
+		continue_preview_refresh();
+	} else {
+		if (tokyo_books_panel) {
+			lv_obj_set_hidden(tokyo_books_panel, true);
+		}
+		gridpage_show_empty(section_grid, section_empty,
+						!audiobookdb_scan_running() && audiobookdb_count() == 0);
+	}
+}
+
 static void finished_cb(lv_event_t *e) {
 	(void)e;
 	books_open(LIST_FINISHED, NULL, tr("audiobook_finished"));
@@ -1063,9 +1365,6 @@ static void section_more_cb(lv_event_t *e) {
 static bool upgrade_offered;
 
 // With no books indexed the page says a scan is needed instead of its tiles.
-static lv_obj_t *section_grid;
-static lv_obj_t *section_empty;
-
 static void section_scan_cb(lv_event_t *e) {
 	(void)e;
 	start_scan(NULL);
@@ -1073,7 +1372,7 @@ static void section_scan_cb(lv_event_t *e) {
 
 static void section_loaded_cb(lv_event_t *e) {
 	(void)e;
-	gridpage_show_empty(section_grid, section_empty, !audiobookdb_scan_running() && audiobookdb_count() == 0);
+	section_refresh_theme();
 	if (!upgrade_offered && audiobookdb_needs_rescan()) {
 		upgrade_offered = true;
 		// After this page's own load has finished, not inside it.
@@ -1093,6 +1392,7 @@ static void build_section_page(gui_config_t *cfg) {
 		gridpage_build(audiobooks_screen, cfg, entries, (int)(sizeof(entries) / sizeof(entries[0])), 2, 3, true);
 	section_empty =
 		gridpage_empty_panel(audiobooks_screen, cfg, &icon_book_headphones, "audiobook_no_database", section_scan_cb);
+	tokyo_continue_panel_build(cfg);
 
 	// The options, to their left the finished books, and to the left of those
 	// the bookmarks -- the same glyph the ebook shelf opens its bookmarks with.
@@ -1662,4 +1962,6 @@ void audiobooks_init(gui_config_t *cfg) {
 	build_settings_page(cfg);
 	build_controls_page(cfg);
 	build_scan_page(cfg);
+	section_refresh_theme();
+	theme_register_refresh(section_refresh_theme);
 }

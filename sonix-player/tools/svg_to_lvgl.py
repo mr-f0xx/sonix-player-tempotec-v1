@@ -117,6 +117,9 @@ ICONS = [
     # not there: they ride inside the 72 px thumbnail box on a library row and
     # the 56 px one on a search hit.
     ("music-2.svg", "music2", 32),
+    ("bird.svg", "bird", 32),  # Flappy Bird's monochrome Tokyo Night glyph
+    ("tidal-mark.svg", "tidal_mark", 32),  # Tokyo Night's letter-only streaming mark
+    ("qobuz-mark.svg", "qobuz_mark", 32),
     ("artist.svg", "artist", 32),
     ("podcast-list.svg", "podcast_list", 40), # 40 px for the 60 px podcast rows
     ("artist-album.svg", "artist_album", 32),

@@ -232,8 +232,8 @@ static bool gridpage_tokyo_icon(const char *label, const lv_image_dsc_t **icon, 
 		{"transfer", &icon_wifi_transfer_quick, THEME_SEMANTIC_GREEN},
 		{"sonixlink", &icon_sonixlink_quick, THEME_SEMANTIC_AMBER},
 		{"dlna", &icon_dlna_quick, THEME_SEMANTIC_BLUE},
-		{"tidal", &icon_tidal_badge, THEME_SEMANTIC_RED},
-		{"qobuz", &icon_qobuz_badge, THEME_SEMANTIC_GREEN},
+		{"tidal", &icon_tidal_mark, THEME_SEMANTIC_CYAN},
+		{"qobuz", &icon_qobuz_mark, THEME_SEMANTIC_PURPLE},
 		{"radio", &icon_radio_player, THEME_SEMANTIC_PURPLE},
 		{"podcasts", &icon_podcast_list, THEME_SEMANTIC_CYAN},
 		{"audiobook_library", &icon_book_headphones, THEME_SEMANTIC_AMBER},
@@ -244,7 +244,7 @@ static bool gridpage_tokyo_icon(const char *label, const lv_image_dsc_t **icon, 
 		{"gearboy", &icon_files_game, THEME_SEMANTIC_GREEN},
 		{"books", &icon_files_book, THEME_SEMANTIC_AMBER},
 		{"file_explorer", &icon_folder, THEME_SEMANTIC_BLUE},
-		{"flappy_bird", &icon_menu_flappy_bird, THEME_SEMANTIC_PURPLE},
+		{"flappy_bird", &icon_bird, THEME_SEMANTIC_PURPLE},
 	};
 
 	if (!label || !icon || !tone) {
@@ -362,6 +362,28 @@ void gridpage_set_tile_orientation(lv_obj_t *grid, int index, bool horizontal) {
 	lv_obj_update_layout(tile);
 	if (tile_has_icon_halo(tile)) {
 		lv_obj_align_to(lv_obj_get_child(tile, 0), icon, LV_ALIGN_CENTER, 0, 0);
+	}
+}
+
+void gridpage_set_tile_label_lines(lv_obj_t *grid, int index, int lines) {
+	if (!grid || index < 0 || index >= (int)lv_obj_get_child_count(grid)) {
+		return;
+	}
+
+	lv_obj_t *tile = lv_obj_get_child(grid, index);
+	lv_obj_t *label = tile_label_object(tile);
+	if (!label) {
+		return;
+	}
+
+	lines = LV_CLAMP(lines, 1, 3);
+	const lv_font_t *font = compact_grid() ? bp_tile_label_font() : &font_ui_24_bold;
+	lv_label_set_long_mode(label, LV_LABEL_LONG_DOT);
+	lv_obj_set_style_text_line_space(label, 0, 0);
+	lv_obj_set_height(label, lv_font_get_line_height(font) * lines);
+	lv_obj_update_layout(tile);
+	if (tile_has_icon_halo(tile)) {
+		lv_obj_align_to(lv_obj_get_child(tile, 0), tile_icon_object(tile), LV_ALIGN_CENTER, 0, 0);
 	}
 }
 

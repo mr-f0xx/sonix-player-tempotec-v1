@@ -3,18 +3,15 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#11131d">
-  <title>Sonix Player · Tokyo Night on TempoTec V1</title>
+  <meta name="theme-color" content="#1a1b26">
+  <title>Sonix Player · Tokyo Night · TempoTec V1</title>
   <style>
     :root {
       color-scheme: dark;
       --page: #10121b;
-      --page-2: #151823;
-      --panel: #1a1d29;
-      --line: #2b3041;
       --ink: #eef0fa;
       --muted: #a1a8be;
-      --soft: #707991;
+      --line: #2b3041;
       --blue: #7aa2f7;
       --cyan: #7dcfff;
       --purple: #bb9af7;
@@ -24,7 +21,6 @@
       --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
       --sans: Inter, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
     }
-
     * { box-sizing: border-box; }
     html { min-width: 320px; background: var(--page); }
     body {
@@ -32,49 +28,37 @@
       min-height: 100vh;
       color: var(--ink);
       font-family: var(--sans);
-      background:
-        radial-gradient(ellipse at 17% -8%, rgba(122,162,247,.16), transparent 36rem),
-        radial-gradient(ellipse at 95% 16%, rgba(187,154,247,.09), transparent 31rem),
-        var(--page);
+      background: radial-gradient(ellipse at 18% -8%, rgba(122,162,247,.13), transparent 37rem), var(--page);
     }
-    button, input { font: inherit; }
+    button, input, select { font: inherit; }
     button { color: inherit; }
-    button:focus-visible, input:focus-visible {
-      outline: 2px solid var(--cyan);
-      outline-offset: 2px;
-    }
-
-    .page-wrap { max-width: 1180px; margin: 0 auto; padding: 34px 26px 44px; }
-    .masthead { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; margin: 0 0 28px; }
-    .eyebrow { color: var(--cyan); font: 700 11px/1.3 var(--mono); letter-spacing: .16em; text-transform: uppercase; }
-    h1 { margin: 8px 0 7px; font-size: clamp(26px, 4vw, 38px); letter-spacing: -.045em; line-height: 1.06; }
-    .intro { max-width: 680px; margin: 0; color: #a6aec3; font-size: 14px; line-height: 1.55; }
-    .native-tag { flex: 0 0 auto; padding: 10px 13px; border: 1px solid #343b54; border-radius: 999px; color: #c0caf5; background: rgba(26,27,38,.7); font: 11px var(--mono); white-space: nowrap; }
-
-    .workspace { display: grid; grid-template-columns: minmax(360px, .95fr) minmax(390px, 1.05fr); gap: clamp(24px, 5vw, 62px); align-items: start; }
+    button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px; }
+    .page-wrap { max-width: 1140px; margin: 0 auto; padding: 32px 24px 44px; }
+    .masthead { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; margin: 0 0 22px; }
+    .eyebrow { color: var(--cyan); font: 700 11px/1.3 var(--mono); letter-spacing: .15em; text-transform: uppercase; }
+    h1 { margin: 8px 0 7px; font-size: clamp(27px, 4vw, 38px); letter-spacing: -.045em; line-height: 1.06; }
+    .intro { max-width: 690px; margin: 0; color: #a6aec3; font-size: 14px; line-height: 1.55; }
+    .native-tag { flex: 0 0 auto; padding: 9px 12px; border: 1px solid #343b54; border-radius: 999px; color: #c0caf5; background: rgba(26,27,38,.8); font: 10px var(--mono); white-space: nowrap; }
+    .workspace { display: grid; grid-template-columns: minmax(300px, 390px) minmax(360px, 1fr); gap: clamp(25px, 5vw, 62px); align-items: start; }
     .preview-column { min-width: 0; }
-    .demo-label { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 0 0 10px; color: #8f99b3; font: 10px var(--mono); letter-spacing: .11em; text-transform: uppercase; }
+    .demo-label { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 0 0 9px; color: #8f99b3; font: 10px var(--mono); letter-spacing: .1em; text-transform: uppercase; }
     .demo-label strong { color: #c0caf5; font-weight: 600; }
-    .view-tabs { display: grid; grid-template-columns: repeat(4, 1fr); gap: 5px; padding: 5px; margin: 0 auto 17px; max-width: 465px; border: 1px solid #292e42; border-radius: 12px; background: #171a25; }
-    .view-tab { min-height: 34px; padding: 7px 5px; border: 0; border-radius: 8px; color: #929bb3; background: transparent; cursor: pointer; font-size: 11px; transition: background .15s, color .15s; }
+    .view-tabs { display: flex; gap: 4px; max-width: 480px; overflow-x: auto; padding: 5px; margin: 0 auto 15px; border: 1px solid #292e42; border-radius: 11px; background: #171a25; scrollbar-width: thin; }
+    .view-tab { flex: 1 0 auto; min-height: 33px; padding: 7px 9px; border: 0; border-radius: 7px; color: #929bb3; background: transparent; cursor: pointer; font-size: 10px; transition: background .15s, color .15s; }
     .view-tab:hover { color: #d3daf2; background: #222638; }
-    .view-tab[aria-pressed="true"] { color: #e6edff; background: #29334b; box-shadow: inset 0 0 0 1px rgba(122,162,247,.26); }
-
-    .stage { --scale: 1.34; position: relative; width: calc(260px * var(--scale)); height: calc(340px * var(--scale)); margin: 0 auto; }
+    .view-tab[aria-pressed="true"] { color: #e6edff; background: #29334b; box-shadow: inset 0 0 0 1px rgba(122,162,247,.27); }
+    .stage { --scale: 1.28; position: relative; width: calc(260px * var(--scale)); height: calc(340px * var(--scale)); margin: 0 auto; }
     .device {
       position: absolute; inset: 0 auto auto 0; width: 260px; height: 340px; padding: 10px;
       transform: scale(var(--scale)); transform-origin: top left;
       border: 1px solid #3c4256; border-radius: 22px;
       background: linear-gradient(145deg, #292d3b, #191b25 44%, #101118);
-      box-shadow: 0 28px 65px rgba(0,0,0,.52), inset 0 1px rgba(255,255,255,.08), inset 0 -2px rgba(0,0,0,.4);
+      box-shadow: 0 26px 60px rgba(0,0,0,.5), inset 0 1px rgba(255,255,255,.08), inset 0 -2px rgba(0,0,0,.4);
     }
     .device::before, .device::after { content: ""; position: absolute; left: -3px; width: 3px; border-radius: 3px 0 0 3px; background: #404657; }
     .device::before { top: 58px; height: 33px; }
     .device::after { top: 103px; height: 43px; }
     .screen {
-      position: relative; width: 240px; height: 320px; overflow: hidden; isolation: isolate;
-      border-radius: 11px; background: var(--screen-bg); color: var(--screen-text);
-      box-shadow: inset 0 0 0 1px rgba(255,255,255,.04);
       --screen-bg: #1a1b26;
       --surface: #24283b;
       --surface-pressed: #2d3554;
@@ -88,31 +72,30 @@
       --accent-green: #9ece6a;
       --accent-amber: #e0af68;
       --accent-red: #f7768e;
+      position: relative; width: 240px; height: 320px; overflow: hidden; isolation: isolate;
+      border-radius: 11px; background: var(--screen-bg); color: var(--screen-text);
+      box-shadow: inset 0 0 0 1px rgba(255,255,255,.035);
+      transition: background-color .15s, color .15s;
     }
     body[data-theme="dark"] .screen {
       --screen-bg: #242424; --surface: #303030; --surface-pressed: #404040; --panel-bg: #1e1e1e;
-      --screen-text: #ffffff; --screen-muted: #a0a0a0; --screen-soft: #797979; --accent: #3584e4;
+      --screen-text: #fff; --screen-muted: #a0a0a0; --screen-soft: #797979; --accent: #3584e4;
       --accent-cyan: #00b0d6; --accent-purple: #9141ac; --accent-green: #2ec27e; --accent-amber: #ff7800; --accent-red: #e01b24;
     }
     body[data-theme="light"] .screen {
-      --screen-bg: #ecedf0; --surface: #ffffff; --surface-pressed: #dddfe4; --panel-bg: #ffffff;
+      --screen-bg: #ecedf0; --surface: #fff; --surface-pressed: #dddfe4; --panel-bg: #fff;
       --screen-text: #323232; --screen-muted: #737373; --screen-soft: #919191; --accent: #3584e4;
       --accent-cyan: #0099bc; --accent-purple: #9141ac; --accent-green: #17875a; --accent-amber: #a86530; --accent-red: #d92132;
     }
-    /* Keep the mockup aligned with the repository's light palette. */
-    body[data-theme="light"][data-tint="on"] .screen { --screen-bg: #e7e9ee; --surface: #f9faff; }
-    body[data-theme="dark"][data-tint="on"] .screen { --screen-bg: #252832; --surface: #30323f; }
-    body[data-theme="tokyo"][data-tint="on"] .screen { --screen-bg: #1c1e2d; --surface: #252a40; }
-
-    .glyph {
-      display: inline-block; width: var(--glyph-size, 18px); height: var(--glyph-size, 18px); flex: 0 0 auto;
-      background-color: currentColor;
-      -webkit-mask-image: var(--glyph-image); mask-image: var(--glyph-image);
-      -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat;
-      -webkit-mask-position: center; mask-position: center;
-      -webkit-mask-size: contain; mask-size: contain;
-    }
-    .status-bar { position: relative; z-index: 1; display: flex; align-items: center; justify-content: space-between; height: 24px; padding: 0 7px; background: var(--panel-bg); color: var(--screen-text); font-size: 10px; line-height: 1; }
+    body[data-tint="on"][data-theme="tokyo"] .screen { --screen-bg: #1c1e2d; --surface: #252a40; }
+    body[data-tint="on"][data-theme="dark"] .screen { --screen-bg: #252832; --surface: #30323f; }
+    body[data-tint="on"][data-theme="light"] .screen { --screen-bg: #e7e9ee; --surface: #f9faff; }
+    .glyph { display: inline-block; width: var(--glyph-size,18px); height: var(--glyph-size,18px); flex: 0 0 auto; background-color: currentColor; -webkit-mask-image: var(--glyph-image); mask-image: var(--glyph-image); -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat; -webkit-mask-position: center; mask-position: center; -webkit-mask-size: contain; mask-size: contain; }
+    .service-mark { display: inline-grid; width: 22px; height: 22px; flex: 0 0 22px; place-items: center; border: 1px solid color-mix(in srgb,currentColor 62%,transparent); border-radius: 6px; background: color-mix(in srgb,currentColor 11%,var(--surface)); font: 700 13px/1 var(--mono); }
+    .service-mark.tidal { color: var(--accent-cyan); }
+    .service-mark.qobuz { color: var(--accent-purple); }
+    .bird-glyph { display: inline-block; flex: 0 0 auto; width: var(--glyph-size,18px); height: var(--glyph-size,18px); color: currentColor; }
+    .status-bar { position: relative; z-index: 1; display: flex; align-items: center; justify-content: space-between; height: 24px; padding: 0 7px; background: var(--panel-bg); color: var(--screen-text); font-size: 9px; line-height: 1; }
     .status-left, .status-right { display: flex; align-items: center; gap: 5px; min-width: 0; }
     .status-left { font-weight: 650; letter-spacing: .01em; }
     .status-right { gap: 4px; color: var(--screen-muted); }
@@ -120,541 +103,502 @@
     .status-right .battery-glyph { width: 15px; }
     .status-time { position: absolute; left: 50%; top: 50%; transform: translate(-50%,-50%); font: 10px var(--mono); color: var(--screen-text); }
     .page-header { display: flex; align-items: center; height: 36px; padding: 0 6px; gap: 5px; border-bottom: 1px solid color-mix(in srgb, var(--screen-muted) 13%, transparent); }
-    .header-back, .header-action { display: grid; place-items: center; flex: 0 0 28px; width: 28px; height: 30px; border: 0; border-radius: 7px; background: transparent; color: var(--screen-muted); cursor: pointer; }
-    .header-back:hover, .header-action:hover { background: var(--surface); color: var(--screen-text); }
-    .header-back .glyph { width: 18px; height: 18px; }
-    .page-title { overflow: hidden; margin: 0; color: var(--screen-text); font-size: 15px; font-weight: 650; line-height: 1; text-overflow: ellipsis; white-space: nowrap; }
+    .header-back, .header-action { display: grid; place-items: center; flex: 0 0 28px; width: 28px; height: 30px; border: 0; border-radius: 7px; color: var(--screen-muted); background: transparent; cursor: pointer; }
+    .header-back:hover, .header-action:hover { color: var(--screen-text); background: var(--surface); }
+    .header-back .glyph { width: 17px; height: 17px; }
+    .page-title { min-width: 0; overflow: hidden; margin: 0; color: var(--screen-text); font-size: 14px; font-weight: 650; line-height: 1; text-overflow: ellipsis; white-space: nowrap; }
     .header-spacer { flex: 1; }
     .header-action .glyph { width: 16px; height: 16px; }
     .page-body { height: 260px; overflow-y: auto; overscroll-behavior: contain; padding: 6px; scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--screen-muted) 36%, transparent) transparent; }
     .page-body::-webkit-scrollbar { width: 3px; }
     .page-body::-webkit-scrollbar-thumb { border-radius: 9px; background: color-mix(in srgb, var(--screen-muted) 38%, transparent); }
-    .screen-card { border: 1px solid color-mix(in srgb, var(--screen-muted) 10%, transparent); border-radius: 10px; background: var(--surface); box-shadow: 0 3px 12px rgba(0,0,0,.08); }
+    .screen-card { border: 1px solid color-mix(in srgb, var(--screen-muted) 10%, transparent); border-radius: 9px; background: var(--surface); box-shadow: 0 3px 12px rgba(0,0,0,.07); }
     .card-pad { padding: 8px; }
-    .card-head { display: flex; align-items: center; justify-content: space-between; gap: 6px; margin: 0 0 7px; color: var(--screen-text); font-size: 12px; font-weight: 650; }
-    .card-head small { color: var(--screen-soft); font: 8px var(--mono); letter-spacing: .08em; text-transform: uppercase; }
-    .subtle-copy { margin: 6px 0 0; color: var(--screen-muted); font-size: 9px; line-height: 1.35; }
-    .stack { display: flex; flex-direction: column; gap: 6px; }
-
-    .theme-choices { display: grid; grid-template-columns: 1fr 1fr 1.3fr; gap: 4px; }
-    .theme-choice { position: relative; min-height: 34px; padding: 5px 4px; border: 1px solid color-mix(in srgb, var(--screen-muted) 16%, transparent); border-radius: 7px; color: var(--screen-muted); background: var(--surface-pressed); cursor: pointer; font-size: 9.5px; font-weight: 600; white-space: nowrap; }
-    .theme-choice:hover { color: var(--screen-text); }
-    .theme-choice[aria-checked="true"] { border-color: var(--accent); color: var(--screen-text); background: color-mix(in srgb, var(--accent) 18%, var(--surface)); box-shadow: inset 0 -2px var(--accent); }
-    body[data-theme="tokyo"] .theme-choice[aria-checked="true"] { color: #e7edff; }
-    body[data-theme="dark"] .theme-choice[aria-checked="true"] { color: #fff; }
-    body[data-theme="light"] .theme-choice[aria-checked="true"] { color: #18345f; }
-
-    .palette-row { display: flex; gap: 4px; height: 13px; margin-top: 8px; overflow: hidden; border-radius: 5px; }
-    .palette-row span { flex: 1; border-radius: 3px; }
-    .glyph-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; }
-    .glyph-demo { display: flex; min-width: 0; min-height: 47px; flex-direction: column; align-items: center; justify-content: center; gap: 3px; padding: 4px 2px 3px; border: 1px solid transparent; border-radius: 7px; color: var(--screen-muted); background: color-mix(in srgb, var(--screen-bg) 24%, transparent); cursor: pointer; }
-    .glyph-demo:hover { border-color: color-mix(in srgb, var(--accent) 42%, transparent); }
-    .glyph-demo[aria-pressed="true"] { border-color: color-mix(in srgb, var(--accent) 65%, transparent); background: color-mix(in srgb, var(--accent) 12%, var(--surface)); }
-    .glyph-demo .glyph { width: 18px; height: 18px; }
-    .glyph-demo span:last-child { font-size: 8px; line-height: 1; }
-    .accent-blue { color: var(--accent); }
-    .accent-cyan { color: var(--accent-cyan); }
-    .accent-purple { color: var(--accent-purple); }
-    .accent-green { color: var(--accent-green); }
-    .accent-amber { color: var(--accent-amber); }
-    .accent-red { color: var(--accent-red); }
-    .muted-icon { color: var(--screen-muted); }
-    .glowable { filter: none; }
-    body[data-glow="subtle"] .glowable { filter: drop-shadow(0 0 2px currentColor); }
-    body[data-glow="subtle"] .glyph-demo[aria-pressed="true"] .glowable { filter: drop-shadow(0 0 3px currentColor); }
-    .notice { display: flex; align-items: center; gap: 7px; margin-top: 6px; padding: 7px; border-radius: 7px; color: var(--screen-muted); background: color-mix(in srgb, var(--surface-pressed) 60%, transparent); font-size: 8px; line-height: 1.35; }
-    .notice .glyph { width: 13px; height: 13px; flex: 0 0 13px; }
-
-    .simple-row, .track-row { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 42px; padding: 6px 7px; border: 0; border-bottom: 1px solid color-mix(in srgb, var(--screen-muted) 11%, transparent); color: var(--screen-text); text-align: left; background: transparent; cursor: pointer; }
-    .simple-row:last-child, .track-row:last-child { border-bottom: 0; }
-    .simple-row:hover, .track-row:hover { border-radius: 7px; background: var(--surface-pressed); }
-    .simple-row .glyph, .track-row .glyph { width: 19px; height: 19px; flex: 0 0 19px; }
-    .row-copy { display: flex; flex: 1; min-width: 0; flex-direction: column; gap: 3px; }
-    .row-copy strong { overflow: hidden; font-size: 11px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
-    .row-copy small { overflow: hidden; color: var(--screen-muted); font-size: 8.5px; text-overflow: ellipsis; white-space: nowrap; }
-    .row-end { color: var(--screen-soft); font-size: 8px; white-space: nowrap; }
-    .chevron-right { width: 15px !important; height: 15px !important; color: var(--screen-soft); }
-    .settings-card { overflow: hidden; }
-
+    .card-head { display: flex; align-items: center; justify-content: space-between; gap: 6px; margin: 0 0 6px; color: var(--screen-text); font-size: 11px; font-weight: 650; }
+    .card-head small { color: var(--screen-soft); font: 7px var(--mono); letter-spacing: .07em; text-transform: uppercase; }
+    .subtle-copy { margin: 5px 0 0; color: var(--screen-muted); font-size: 8px; line-height: 1.35; }
+    .service-detail-head { display: flex; align-items: center; gap: 8px; min-height: 33px; }
+    .service-detail-head .service-mark { width: 28px; height: 28px; flex-basis: 28px; font-size: 16px; }
+    .service-detail-head .row-copy strong { font-size: 11px; }
     .home-title-note { margin: 0 1px 6px; color: var(--screen-muted); font-size: 9px; }
-    .menu-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
-    .menu-tile { display: flex; min-height: 53px; align-items: center; gap: 8px; padding: 8px; border: 1px solid color-mix(in srgb, var(--screen-muted) 10%, transparent); border-radius: 9px; color: var(--screen-text); background: var(--surface); cursor: pointer; text-align: left; }
-    .menu-tile:hover { border-color: color-mix(in srgb, var(--accent) 58%, transparent); background: var(--surface-pressed); }
-    .menu-tile .glyph { width: 22px; height: 22px; flex: 0 0 22px; }
-    .menu-tile .tile-text { min-width: 0; font-size: 10px; font-weight: 600; line-height: 1.15; }
-    .now-playing-strip { display: flex; align-items: center; gap: 7px; min-height: 42px; margin-top: 7px; padding: 4px 6px; border: 1px solid color-mix(in srgb, var(--accent) 27%, transparent); border-radius: 8px; background: color-mix(in srgb, var(--accent) 8%, var(--surface)); cursor: pointer; }
+    .stack { display: flex; flex-direction: column; gap: 6px; }
+    .menu-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 6px; }
+    .menu-tile { display: flex; min-width: 0; min-height: 51px; align-items: center; gap: 8px; padding: 7px; border: 1px solid color-mix(in srgb,var(--screen-muted) 10%,transparent); border-radius: 8px; color: var(--screen-text); background: var(--surface); cursor: pointer; text-align: left; }
+    .menu-tile:hover { border-color: color-mix(in srgb,var(--accent) 58%,transparent); background: var(--surface-pressed); }
+    .menu-tile .glyph,.menu-tile .bird-glyph { width: 20px; height: 20px; flex: 0 0 20px; }
+    .tile-text { min-width: 0; font-size: 9px; font-weight: 600; line-height: 1.15; }
+    .menu-grid.more-grid .menu-tile { min-height: 63px; justify-content: flex-start; }
+    .menu-grid.more-grid .menu-tile:last-child { grid-column: 1 / -1; width: calc((100% - 6px)/2); justify-self: center; flex-direction: column; justify-content: center; gap: 4px; text-align: center; }
+    .menu-grid.more-grid .menu-tile:last-child .tile-text { max-width: 68px; }
+    .now-playing-strip { display: flex; align-items: center; gap: 7px; min-height: 41px; margin-top: 7px; padding: 4px 6px; border: 1px solid color-mix(in srgb,var(--accent) 27%,transparent); border-radius: 8px; color: var(--screen-text); background: color-mix(in srgb,var(--accent) 8%,var(--surface)); cursor: pointer; text-align: left; }
     .now-playing-strip .glyph { width: 15px; height: 15px; flex: 0 0 15px; }
     .now-playing-strip .row-copy strong { font-size: 9px; }
     .now-playing-strip .row-copy small { font-size: 7.5px; }
-
-    .track-list { overflow: hidden; }
-    .track-row { min-height: 48px; padding: 6px 7px; }
-    .track-art { display: grid; width: 31px; height: 31px; flex: 0 0 31px; place-items: center; border-radius: 6px; background: color-mix(in srgb, var(--accent-purple) 20%, var(--surface-pressed)); }
-    .track-art .glyph { width: 18px; height: 18px; color: var(--accent-purple); }
-    .track-row[aria-current="true"] { background: color-mix(in srgb, var(--accent) 11%, var(--surface)); }
+    .row-copy { display: flex; flex: 1; min-width: 0; flex-direction: column; gap: 2px; }
+    .row-copy strong { overflow: hidden; font-size: 10px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+    .row-copy small { overflow: hidden; color: var(--screen-muted); font-size: 8px; text-overflow: ellipsis; white-space: nowrap; }
+    .row-end { color: var(--screen-soft); font-size: 7px; white-space: nowrap; }
+    .chevron-right { width: 14px !important; height: 14px !important; color: var(--screen-soft); }
+    .simple-row,.track-row { display: flex; align-items: center; gap: 7px; width: 100%; min-height: 40px; padding: 5px 6px; border: 0; border-bottom: 1px solid color-mix(in srgb,var(--screen-muted) 11%,transparent); color: var(--screen-text); text-align: left; background: transparent; cursor: pointer; }
+    .simple-row:last-child,.track-row:last-child { border-bottom: 0; }
+    .simple-row:hover,.track-row:hover { border-radius: 6px; background: var(--surface-pressed); }
+    .simple-row>.glyph,.track-row>.glyph { width: 18px; height: 18px; flex: 0 0 18px; }
+    .settings-card,.wireless-card,.track-list { overflow: hidden; }
+    .track-row { min-height: 43px; }
+    .track-art { display: grid; width: 29px; height: 29px; flex: 0 0 29px; place-items: center; border-radius: 5px; color: var(--accent-purple); background: color-mix(in srgb,var(--accent-purple) 18%,var(--surface-pressed)); }
+    .track-art .glyph { width: 17px; height: 17px; }
+    .track-row[aria-current="true"] { background: color-mix(in srgb,var(--accent) 10%,var(--surface)); }
     .track-row[aria-current="true"] .row-copy strong { color: var(--accent); }
-    .track-row .playmark { width: 15px; height: 15px; color: var(--accent-cyan); }
-
-    .player-content { display: flex; flex-direction: column; align-items: center; padding: 1px 7px 6px; }
-    .cover-art { position: relative; display: grid; width: 104px; height: 104px; place-items: center; overflow: hidden; margin: 2px auto 8px; border: 1px solid color-mix(in srgb, var(--accent-cyan) 36%, transparent); border-radius: 13px; background: radial-gradient(circle at 50% 47%, color-mix(in srgb, var(--accent-purple) 30%, var(--surface)) 0 17%, transparent 18%), linear-gradient(135deg, #20243a, #161824 58%, #242b42); box-shadow: 0 0 18px color-mix(in srgb, var(--accent) 13%, transparent); }
-    .cover-art::before, .cover-art::after { content: ""; position: absolute; width: 132px; height: 1px; background: color-mix(in srgb, var(--accent-cyan) 24%, transparent); transform: rotate(-34deg); }
-    .cover-art::after { transform: rotate(34deg); background: color-mix(in srgb, var(--accent-purple) 24%, transparent); }
-    .cover-art .glyph { z-index: 1; width: 40px; height: 40px; color: var(--accent-cyan); }
-    .track-title { max-width: 100%; margin: 0; overflow: hidden; color: var(--screen-text); font-size: 14px; font-weight: 680; letter-spacing: -.02em; text-overflow: ellipsis; white-space: nowrap; }
-    .artist-name { margin: 3px 0 0; color: var(--screen-muted); font-size: 9px; }
-    .quality-pill { margin-top: 5px; padding: 3px 6px; border: 1px solid color-mix(in srgb, var(--accent-cyan) 25%, transparent); border-radius: 999px; color: var(--accent-cyan); font: 7px var(--mono); }
-    .timeline { width: 100%; margin-top: 8px; }
-    .seek-range { display: block; width: 100%; height: 14px; margin: 0; accent-color: var(--accent); cursor: pointer; }
-    .seek-times { display: flex; align-items: center; justify-content: space-between; color: var(--screen-muted); font: 8px var(--mono); }
-    .transport { display: flex; align-items: center; justify-content: center; gap: 13px; width: 100%; margin-top: 7px; }
-    .transport-button { display: grid; width: 32px; height: 32px; place-items: center; border: 0; border-radius: 50%; color: var(--screen-muted); background: transparent; cursor: pointer; }
-    .transport-button:hover { color: var(--screen-text); background: var(--surface-pressed); }
-    .transport-button .glyph { width: 19px; height: 19px; }
-    .transport-button.primary { width: 42px; height: 42px; border: 1px solid color-mix(in srgb, var(--accent) 65%, transparent); color: #11131b; background: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 13%, transparent); }
-    .transport-button.primary:hover { filter: brightness(1.08); }
-    .transport-button.primary .glyph { width: 20px; height: 20px; color: #11131b; }
-    .transport-button.favorite { position: absolute; right: 14px; top: 4px; width: 28px; height: 28px; }
-    .player-topline { position: relative; width: 100%; display: flex; justify-content: center; }
-    .player-utilities { display: flex; justify-content: space-between; align-items: center; width: 100%; margin-top: 3px; }
-    .player-utility { display: flex; align-items: center; gap: 4px; padding: 3px 4px; border: 0; border-radius: 5px; color: var(--screen-muted); background: transparent; cursor: pointer; font-size: 8px; }
-    .player-utility:hover, .player-utility[aria-pressed="true"] { color: var(--accent-purple); background: color-mix(in srgb, var(--accent-purple) 12%, transparent); }
-    .player-utility .glyph { width: 12px; height: 12px; }
-
-    .wireless-card { overflow: hidden; }
-    .wireless-row { display: flex; align-items: center; gap: 8px; min-height: 50px; padding: 7px 8px; border-bottom: 1px solid color-mix(in srgb, var(--screen-muted) 11%, transparent); }
+    .track-row .playmark { width: 14px; height: 14px; color: var(--accent-cyan); }
+    .browse-grid { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 4px; }
+    .glyph-demo { display: flex; min-width: 0; min-height: 45px; flex-direction: column; align-items: center; justify-content: center; gap: 3px; padding: 3px 2px; border: 1px solid transparent; border-radius: 6px; color: var(--screen-muted); background: color-mix(in srgb,var(--screen-bg) 23%,transparent); cursor: pointer; }
+    .glyph-demo:hover { border-color: color-mix(in srgb,var(--accent) 42%,transparent); }
+    .glyph-demo .glyph { width: 17px; height: 17px; }
+    .glyph-demo span:last-child { max-width: 100%; overflow: hidden; font-size: 7px; line-height: 1; text-overflow: ellipsis; white-space: nowrap; }
+    .glyph-demo.two-line-demo span:last-child { max-height: 16px; overflow: hidden; text-align: center; text-overflow: clip; white-space: normal; }
+    .accent-blue { color: var(--accent); } .accent-cyan { color: var(--accent-cyan); } .accent-purple { color: var(--accent-purple); }
+    .accent-green { color: var(--accent-green); } .accent-amber { color: var(--accent-amber); } .accent-red { color: var(--accent-red); }
+    .muted-icon { color: var(--screen-muted); }
+    .empty-state { display: flex; min-height: 42px; flex-direction: column; align-items: center; justify-content: center; gap: 7px; padding: 8px; color: var(--screen-muted); text-align: center; font-size: 8px; line-height: 1.4; }
+    .inline-action { display: inline-flex; align-items: center; gap: 5px; border: 0; padding: 5px 3px; color: var(--accent-cyan); background: transparent; cursor: pointer; font-size: 8px; }
+    .inline-action .glyph { width: 13px; height: 13px; }
+    .wireless-row { display: flex; align-items: center; gap: 8px; min-height: 48px; padding: 6px 8px; border-bottom: 1px solid color-mix(in srgb,var(--screen-muted) 11%,transparent); }
     .wireless-row:last-child { border: 0; }
-    .wireless-row > .glyph { width: 21px; height: 21px; flex: 0 0 21px; }
-    .mini-toggle { width: 34px; height: 19px; padding: 2px; border: 0; border-radius: 99px; background: var(--surface-pressed); cursor: pointer; }
-    .mini-toggle::after { content: ""; display: block; width: 15px; height: 15px; border-radius: 50%; background: var(--screen-muted); transition: transform .12s, background .12s; }
+    .wireless-row>.glyph { width: 20px; height: 20px; flex: 0 0 20px; }
+    .mini-toggle { position: relative; flex: 0 0 29px; width: 29px; height: 17px; border: 0; border-radius: 999px; background: var(--screen-soft); cursor: pointer; }
+    .mini-toggle::after { content: ""; position: absolute; top: 2px; left: 2px; width: 13px; height: 13px; border-radius: 50%; background: #fff; transition: transform .15s; }
     .mini-toggle[aria-checked="true"] { background: var(--accent); }
-    .mini-toggle[aria-checked="true"]::after { transform: translateX(15px); background: #f6f8ff; }
-    .toast { position: absolute; z-index: 5; left: 50%; bottom: 8px; transform: translate(-50%, 12px); max-width: 205px; padding: 7px 10px; border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent); border-radius: 9px; opacity: 0; color: var(--screen-text); background: var(--surface); font-size: 9px; text-align: center; pointer-events: none; transition: opacity .16s, transform .16s; }
-    .toast.show { transform: translate(-50%, 0); opacity: 1; }
-
-    .device-caption { margin: 13px auto 0; color: #6e7892; font: 10px var(--mono); text-align: center; }
-    .device-caption strong { color: #aab4cc; font-weight: 500; }
-
-    .info-column { display: flex; min-width: 0; flex-direction: column; gap: 13px; }
-    .info-card { padding: 17px 18px; border: 1px solid #292e42; border-radius: 15px; background: linear-gradient(145deg, rgba(27,30,44,.95), rgba(20,22,32,.94)); box-shadow: 0 9px 30px rgba(0,0,0,.15); }
-    .info-card h2 { display: flex; align-items: center; gap: 8px; margin: 0 0 12px; color: #dbe2f6; font-size: 14px; letter-spacing: -.01em; }
-    .info-card h2 .glyph { width: 16px; height: 16px; color: var(--cyan); }
-    .info-card p { margin: 0; color: #a0a9c1; font-size: 12px; line-height: 1.55; }
-    .preview-controls { display: flex; flex-wrap: wrap; gap: 7px; align-items: center; }
-    .control-label { flex-basis: 100%; margin: 0 0 1px; color: #858fa9; font: 9px var(--mono); letter-spacing: .09em; text-transform: uppercase; }
-    .glow-option { min-height: 32px; padding: 6px 11px; border: 1px solid #343b54; border-radius: 8px; color: #a6afc6; background: #1b1e2b; cursor: pointer; font-size: 11px; }
-    .glow-option:hover { border-color: #6279aa; color: #e1e7f6; }
-    .glow-option[aria-pressed="true"] { border-color: rgba(125,207,255,.55); color: #dff6ff; background: rgba(125,207,255,.1); }
-    .preview-only { margin-top: 8px !important; color: #7f8aa4 !important; font-size: 10px !important; }
-    .token-strip { display: flex; gap: 5px; margin-top: 11px; }
-    .token { flex: 1; min-width: 0; }
-    .token-swatch { height: 23px; border: 1px solid rgba(255,255,255,.09); border-radius: 6px; }
-    .token-label { display: block; overflow: hidden; margin-top: 5px; color: #8590a9; font: 8px var(--mono); text-overflow: ellipsis; white-space: nowrap; }
-    .plan-list { display: flex; flex-direction: column; gap: 10px; margin: 0; padding: 0; list-style: none; counter-reset: plan; }
-    .plan-list li { position: relative; min-height: 26px; padding-left: 31px; color: #abb3c8; font-size: 11px; line-height: 1.45; counter-increment: plan; }
-    .plan-list li::before { content: "0" counter(plan); position: absolute; left: 0; top: 0; display: grid; width: 23px; height: 22px; place-items: center; border: 1px solid #34405c; border-radius: 6px; color: #8faef2; background: #202638; font: 9px var(--mono); }
-    .plan-list strong { color: #e0e6f7; font-weight: 600; }
-    .palette-code { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px 12px; margin-top: 12px; }
-    .code-line { display: flex; align-items: center; gap: 7px; color: #909bb3; font: 9px var(--mono); }
-    .code-line i { width: 10px; height: 10px; flex: 0 0 10px; border-radius: 3px; box-shadow: 0 0 8px color-mix(in srgb, currentColor 24%, transparent); }
-    .resource-note { display: flex; align-items: flex-start; gap: 9px; padding: 11px 12px; border: 1px solid rgba(158,206,106,.18); border-radius: 11px; background: rgba(158,206,106,.05); }
-    .resource-note .glyph { width: 17px; height: 17px; flex: 0 0 17px; margin-top: 1px; color: var(--green); }
-    .resource-note p { color: #a5b098; font-size: 10px; }
-    .asset-proof { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
-    .asset-proof span { padding: 4px 7px; border: 1px solid #343b53; border-radius: 99px; color: #9da8c1; background: #1a1d29; font: 8px var(--mono); }
-    .footer-note { margin-top: 20px; color: #65708a; font: 9px/1.6 var(--mono); text-align: center; }
-
-    @media (max-width: 830px) {
-      .page-wrap { max-width: 660px; padding: 26px 18px 36px; }
-      .masthead { align-items: flex-start; flex-direction: column; gap: 13px; margin-bottom: 20px; }
-      .workspace { grid-template-columns: minmax(0,1fr); gap: 25px; }
-      .preview-column { width: 100%; }
-      .stage { --scale: 1.22; }
-      .info-column { width: 100%; }
+    .mini-toggle[aria-checked="true"]::after { transform: translateX(12px); }
+    .theme-choices { display: grid; grid-template-columns: 1fr 1fr 1.3fr; gap: 4px; }
+    .theme-choice { min-height: 31px; padding: 4px; border: 1px solid color-mix(in srgb,var(--screen-muted) 16%,transparent); border-radius: 6px; color: var(--screen-muted); background: var(--surface-pressed); cursor: pointer; font-size: 8px; font-weight: 600; white-space: nowrap; }
+    .theme-choice[aria-checked="true"] { border-color: var(--accent); color: var(--screen-text); background: color-mix(in srgb,var(--accent) 17%,var(--surface)); box-shadow: inset 0 -2px var(--accent); }
+    .palette-row { display: flex; gap: 3px; height: 12px; margin-top: 6px; overflow: hidden; border-radius: 4px; }
+    .palette-row span { flex: 1; border-radius: 2px; }
+    .accent-row { display: flex; gap: 6px; padding: 3px 0; }
+    .accent-dot { width: 18px; height: 18px; border: 2px solid transparent; border-radius: 50%; cursor: pointer; }
+    .accent-dot[aria-pressed="true"] { outline: 1px solid var(--screen-text); outline-offset: 1px; }
+    .switch-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 32px; color: var(--screen-text); font-size: 9px; }
+    .switch-row button { display: flex; align-items: center; justify-content: center; width: 35px; height: 19px; border: 0; border-radius: 999px; color: var(--screen-text); background: var(--surface-pressed); cursor: pointer; font-size: 7px; }
+    .switch-row button[aria-checked="true"] { color: #10121b; background: var(--accent); }
+    .player-content { display: flex; flex-direction: column; align-items: center; padding: 2px 7px 7px; }
+    .cover-art { display: grid; width: 94px; height: 94px; place-items: center; overflow: hidden; margin: 2px auto 7px; border: 1px solid color-mix(in srgb,var(--accent-cyan) 35%,transparent); border-radius: 10px; background: linear-gradient(145deg,color-mix(in srgb,var(--accent) 18%,var(--surface)),var(--panel-bg) 68%,color-mix(in srgb,var(--accent-purple) 18%,var(--surface))); box-shadow: 0 4px 14px rgba(0,0,0,.22); }
+    .cover-art .glyph { width: 34px; height: 34px; color: var(--accent-cyan); }
+    .track-title { max-width: 100%; margin: 0; overflow: hidden; color: var(--screen-text); font-size: 12px; font-weight: 680; text-overflow: ellipsis; white-space: nowrap; }
+    .artist-name { max-width: 100%; margin: 3px 0 0; overflow: hidden; color: var(--screen-muted); font-size: 8px; text-overflow: ellipsis; white-space: nowrap; }
+    .seek-block { width: 100%; margin-top: 8px; }
+    .seek-head { display: flex; align-items: center; justify-content: space-between; color: var(--screen-soft); font: 7px var(--mono); }
+    .seek-range { display: block; width: 100%; height: 13px; margin: 3px 0 0; accent-color: var(--accent-cyan); cursor: pointer; }
+    .transport { display: flex; align-items: center; justify-content: center; gap: 12px; width: 100%; margin-top: 2px; }
+    .transport-button { display: grid; width: 30px; height: 30px; place-items: center; border: 0; border-radius: 50%; color: var(--accent-cyan); background: transparent; cursor: pointer; }
+    .transport-button.primary { width: 38px; height: 38px; color: #11131b; background: var(--accent); }
+    .transport-button .glyph { width: 18px; height: 18px; }
+    .transport-button.primary .glyph { color: #11131b; }
+    .player-actions { display: flex; width: 100%; margin-top: 4px; border: 1px solid color-mix(in srgb,var(--screen-muted) 10%,transparent); border-radius: 7px; background: var(--surface); }
+    .player-actions .simple-row { flex: 1 1 0; min-width: 0; width: auto; min-height: 34px; border: 0; padding: 4px 7px; }
+    .player-actions .simple-row + .simple-row { border-left: 1px solid color-mix(in srgb,var(--screen-muted) 10%,transparent); }
+    .player-actions .simple-row .row-copy strong { font-size: 8px; }
+    .player-actions .glyph { width: 15px; height: 15px; }
+    .search-form { display: flex; gap: 5px; padding: 7px; }
+    .search-form input,.demo-form input { min-width: 0; flex: 1; padding: 6px 7px; border: 1px solid var(--line); border-radius: 6px; color: var(--screen-text); background: var(--panel-bg); font-size: 9px; }
+    .search-form button,.form-button { border: 1px solid color-mix(in srgb,var(--accent) 35%,transparent); border-radius: 6px; padding: 5px 7px; color: var(--screen-text); background: color-mix(in srgb,var(--accent) 15%,var(--surface)); cursor: pointer; font-size: 8px; }
+    .bird-game { display: grid; min-height: 157px; place-items: center; margin: 4px 0; border: 1px solid var(--line); border-radius: 8px; background: linear-gradient(#20263a,#171a29); cursor: pointer; }
+    .bird-game .bird-glyph { width: 36px; height: 36px; color: var(--amber); }
+    .game-score { margin: 5px 0 0; color: var(--screen-muted); font: 8px var(--mono); text-align: center; }
+    .note-panel { padding: 12px; border: 1px solid #292e42; border-radius: 10px; color: #a6aec3; background: rgba(26,29,41,.55); font-size: 13px; line-height: 1.55; }
+    .note-panel h2 { margin: 0 0 7px; color: #dce4ff; font-size: 14px; }
+    .note-panel p { margin: 0 0 9px; }
+    .note-panel p:last-child { margin-bottom: 0; }
+    .note-panel code { color: #c0caf5; font: 11px var(--mono); }
+    .demo-data { margin-top: 12px; padding: 12px; border: 1px solid #292e42; border-radius: 10px; background: #151823; }
+    .demo-data h2 { margin: 0 0 5px; color: #dce4ff; font-size: 13px; }
+    .demo-data p { margin: 0 0 9px; color: #929bb3; font-size: 11px; line-height: 1.45; }
+    .demo-form { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+    .demo-form input { min-height: 32px; border-color: #30364b; color: #e7edff; background: #10121b; }
+    .demo-form .form-button { grid-column: 1 / -1; min-height: 32px; }
+    .demo-controls { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 8px; color: #8f99b3; font: 10px var(--mono); }
+    .demo-controls button { border: 0; padding: 4px 0; color: #7dcfff; background: transparent; cursor: pointer; font: inherit; }
+    .toast { position: absolute; z-index: 9; left: 50%; bottom: 10px; max-width: 205px; transform: translate(-50%,10px); padding: 7px 10px; border: 1px solid color-mix(in srgb,var(--accent) 36%,transparent); border-radius: 7px; color: var(--screen-text); background: var(--panel-bg); box-shadow: 0 5px 18px rgba(0,0,0,.3); opacity: 0; pointer-events: none; font-size: 8px; text-align: center; transition: opacity .15s, transform .15s; }
+    .toast.show { transform: translate(-50%,0); opacity: 1; }
+    .lower { display: grid; grid-template-columns: minmax(300px,390px) minmax(360px,1fr); gap: clamp(25px,5vw,62px); margin-top: 20px; }
+    @media (max-width: 760px) {
+      .page-wrap { padding: 23px 15px 34px; }
+      .masthead { display: block; }
+      .native-tag { display: inline-block; margin-top: 12px; }
+      .workspace,.lower { grid-template-columns: 1fr; gap: 18px; }
+      .preview-column { max-width: 430px; width: 100%; margin: 0 auto; }
+      .notes-column { max-width: 560px; width: 100%; margin: 0 auto; }
+      .stage { --scale: 1.08; }
     }
-    @media (max-width: 430px) {
-      .page-wrap { padding: 20px 12px 30px; }
-      .native-tag { font-size: 9px; }
-      .stage { --scale: 1.12; }
-      .info-card { padding: 14px; }
-      .view-tab { font-size: 10px; }
-    }
-    @media (prefers-reduced-motion: reduce) {
-      *, *::before, *::after { transition-duration: .01ms !important; scroll-behavior: auto !important; }
-    }
+    @media (max-width: 370px) { .stage { --scale: .96; } }
   </style>
 </head>
-<body data-theme="tokyo" data-glow="subtle" data-tint="off">
+<body data-theme="tokyo" data-tint="off">
   <div class="page-wrap">
     <header class="masthead">
       <div>
-        <div class="eyebrow">Sonix Player · TempoTec V1</div>
-        <h1>Tokyo Night, sized for the V1.</h1>
-        <p class="intro">A clickable design preview for a third Appearance → Theme choice. The device display below uses a 240 × 320 logical canvas; it is enlarged for viewing, not redesigned for a larger screen.</p>
+        <div class="eyebrow">Interactive device prototype · 240 × 320</div>
+        <h1>Tokyo Night for TempoTec V1</h1>
+        <p class="intro">A navigable preview of the home menu, Music, Now Playing, Appearance, Wireless, Audiobooks, Settings, Streaming, and More. It uses the Tokyo Night background and matching Tidal / Qobuz letter glyphs.</p>
       </div>
-      <div class="native-tag">240 × 320 px &nbsp;·&nbsp; portrait &nbsp;·&nbsp; V1</div>
+      <div class="native-tag">SONIX PLAYER · V1</div>
     </header>
 
-    <main class="workspace">
-      <section class="preview-column" aria-label="Interactive player mockup">
-        <div class="demo-label"><strong>Interactive device preview</strong><span>Tap the screen controls</span></div>
-        <nav class="view-tabs" aria-label="Preview screen">
-          <button class="view-tab" type="button" data-view="appearance" aria-pressed="true">Appearance</button>
-          <button class="view-tab" type="button" data-view="home" aria-pressed="false">Menu</button>
-          <button class="view-tab" type="button" data-view="music" aria-pressed="false">Music</button>
-          <button class="view-tab" type="button" data-view="player" aria-pressed="false">Now Playing</button>
+    <div class="workspace">
+      <section class="preview-column" aria-label="Device preview">
+        <div class="demo-label"><strong>Screen preview</strong><span>tap rows and controls</span></div>
+        <nav class="view-tabs" aria-label="Preview screens">
+          <button class="view-tab" type="button" data-tab="home">Home</button>
+          <button class="view-tab" type="button" data-tab="music">Music</button>
+          <button class="view-tab" type="button" data-tab="player">Now Playing</button>
+          <button class="view-tab" type="button" data-tab="appearance">Appearance</button>
+          <button class="view-tab" type="button" data-tab="wireless">Wireless</button>
+          <button class="view-tab" type="button" data-tab="streaming">Streaming</button>
+          <button class="view-tab" type="button" data-tab="books">Audiobooks</button>
+          <button class="view-tab" type="button" data-tab="settings">Settings</button>
+          <button class="view-tab" type="button" data-tab="more">More</button>
         </nav>
-
-        <div class="stage" aria-label="TempoTec V1 body preview">
+        <div class="stage">
           <div class="device">
-            <div class="screen" id="screen" aria-label="240 by 320 pixel mock player screen">
+            <div class="screen" id="screen" aria-live="polite">
               <div class="status-bar" id="status-bar"></div>
               <div id="viewport"></div>
-              <div class="toast" id="toast" role="status" aria-live="polite"></div>
+              <div class="toast" id="toast" role="status"></div>
             </div>
           </div>
         </div>
-        <p class="device-caption"><strong>Native panel:</strong> 240 × 320 logical px &nbsp;·&nbsp; preview enlarged with CSS</p>
       </section>
 
-      <aside class="info-column" aria-label="Prototype details and implementation plan">
-        <section class="info-card">
-          <h2><span class="glyph" style="--glyph-image:url('../../sonix-player/assets/icons/sun.svg')" aria-hidden="true"></span>Compare the icon halo</h2>
-          <div class="preview-controls" role="group" aria-label="Mockup-only icon halo preview">
-            <p class="control-label">Mockup-only visual comparison</p>
-            <button class="glow-option" type="button" data-glow-choice="off" aria-pressed="false">No halo</button>
-            <button class="glow-option" type="button" data-glow-choice="subtle" aria-pressed="true">Subtle static halo</button>
-          </div>
-          <p class="preview-only">This control is only for comparing the concept; it is not a proposed new setting on the player. In the firmware, any glow would be limited to active/selected glyphs, not applied as an animated effect everywhere.</p>
+      <aside class="notes-column">
+        <section class="note-panel">
+          <h2>Design and behaviour</h2>
+          <p><strong>Background:</strong> <code>#1a1b26</code>; cards use <code>#24283b</code> and pressed states use <code>#2d3554</code>. Dark and Light remain available in Appearance.</p>
+          <p><strong>Navigation:</strong> section tiles and browse controls open their own preview screens; back buttons and the top tabs remain usable throughout.</p>
+          <p><strong>Music data:</strong> the recent rows are derived from the active queue in this prototype, not represented as persistent listening history. Add your own queue rows below to preview the layout; the firmware will read its real queue and library.</p>
+          <p><strong>Icons:</strong> function-matched line glyphs from the repository, with the Flappy Bird tile drawn as a centered bird glyph rather than bitmap artwork.</p>
         </section>
 
-        <section class="info-card">
-          <h2><span class="glyph" style="--glyph-image:url('../../sonix-player/assets/icons/music-settings.svg')" aria-hidden="true"></span>Tokyo Night palette</h2>
-          <p>Deep blue-black surfaces, readable lavender text, and restrained electric accents. Existing Dark and Light palettes are shown too and are not altered by this prototype.</p>
-          <div class="token-strip" aria-label="Tokyo Night color swatches">
-            <div class="token"><div class="token-swatch" style="background:#1a1b26"></div><span class="token-label">Background</span></div>
-            <div class="token"><div class="token-swatch" style="background:#24283b"></div><span class="token-label">Surface</span></div>
-            <div class="token"><div class="token-swatch" style="background:#c0caf5"></div><span class="token-label">Text</span></div>
-            <div class="token"><div class="token-swatch" style="background:#7aa2f7"></div><span class="token-label">Blue</span></div>
-            <div class="token"><div class="token-swatch" style="background:#7dcfff"></div><span class="token-label">Cyan</span></div>
-            <div class="token"><div class="token-swatch" style="background:#bb9af7"></div><span class="token-label">Violet</span></div>
-            <div class="token"><div class="token-swatch" style="background:#9ece6a"></div><span class="token-label">Green</span></div>
-          </div>
-          <div class="palette-code">
-            <div class="code-line"><i style="background:#1a1b26"></i>BG&nbsp; #1A1B26</div>
-            <div class="code-line"><i style="background:#24283b"></i>Surface&nbsp; #24283B</div>
-            <div class="code-line"><i style="background:#c0caf5"></i>Text&nbsp; #C0CAF5</div>
-            <div class="code-line"><i style="background:#7aa2f7"></i>Blue&nbsp; #7AA2F7</div>
-            <div class="code-line"><i style="background:#7dcfff"></i>Cyan&nbsp; #7DCFFF</div>
-            <div class="code-line"><i style="background:#bb9af7"></i>Violet&nbsp; #BB9AF7</div>
-          </div>
+        <section class="demo-data" aria-label="Prototype queue data">
+          <h2>Optional queue preview data</h2>
+          <p>No sample tracks are preloaded. Add a title and artist to see how real queue-derived rows fit; this only changes the local prototype.</p>
+          <form class="demo-form" id="queue-form">
+            <input name="title" maxlength="80" placeholder="Track title" aria-label="Track title" required>
+            <input name="artist" maxlength="80" placeholder="Artist" aria-label="Artist" required>
+            <input name="album" maxlength="80" placeholder="Album (optional)" aria-label="Album">
+            <input name="genre" maxlength="60" placeholder="Genre (optional)" aria-label="Genre">
+            <input name="albumArtist" maxlength="80" placeholder="Album artist (optional)" aria-label="Album artist">
+            <button class="form-button" type="submit">Add current queue item</button>
+          </form>
+          <div class="demo-controls"><span id="queue-count">0 queue items</span><button type="button" id="clear-queue">Clear prototype queue</button></div>
         </section>
-
-        <section class="info-card">
-          <h2><span class="glyph" style="--glyph-image:url('../../sonix-player/assets/icons/check.svg')" aria-hidden="true"></span>What I would change after approval</h2>
-          <ol class="plan-list">
-            <li><strong>Add a third choice in the existing Theme card</strong> on Appearance: Dark, Light, Tokyo Night. Selection applies immediately and persists.</li>
-            <li><strong>Add a Tokyo Night palette to the shared theme manager</strong> while leaving today's Dark/Light colors and settings behavior intact; read older saved Dark/Light preferences as before.</li>
-            <li><strong>Recolor the existing function-matched icons</strong>—music, playback, wireless, settings, EQ—with Tokyo Night foreground and semantic accent colors. No AI-generated icon artwork.</li>
-            <li><strong>Validate the V1 profile</strong> at 240 × 320, including the wrapped/compact Theme choices and memory/performance-sensitive drawing.</li>
-          </ol>
-          <div class="asset-proof" aria-label="Existing icon assets used in the prototype">
-            <span>music-2.svg</span><span>radio-recent.svg</span><span>wifi-high.svg</span><span>bluetooth.svg</span><span>music-settings.svg</span><span>files-audiobook.svg</span>
-          </div>
-        </section>
-
-        <div class="resource-note">
-          <span class="glyph" style="--glyph-image:url('../../sonix-player/assets/icons/zap.svg')" aria-hidden="true"></span>
-          <p><strong>V1-friendly approach:</strong> the prototype reuses the repository’s existing glyphs. The production palette would be a few static colors; no new fonts, large icon packs, full-screen blur buffers, or animated glow. A subtle active-icon halo can be evaluated separately against the device’s draw cost.</p>
-        </div>
       </aside>
-    </main>
-    <p class="footer-note">DESIGN GATE · THIS PAGE IS A STANDALONE MOCKUP. FIRMWARE SOURCES HAVE NOT BEEN CHANGED.</p>
+    </div>
+
+    <div class="lower">
+      <div aria-hidden="true"></div>
+      <section class="note-panel">
+        <h2>On-device scope</h2>
+        <p>Appearance keeps the existing theme, accent, dynamic tint, clock, boot-screen, text-size, font, and battery controls. Wireless preserves the Wi-Fi, Bluetooth, AirPlay, transfer, SonixLink, and DLNA destinations. Audiobooks keeps Library, Series, Authors, Continue, Finished, and Bookmarks. More retains DAC, optional Gearboy, Books, File Manager, and Flappy Bird.</p>
+      </section>
+    </div>
   </div>
 
   <script>
     (() => {
       const root = document.body;
       const viewport = document.getElementById('viewport');
-      const screen = document.getElementById('screen');
       const statusBar = document.getElementById('status-bar');
       const toast = document.getElementById('toast');
+      const queueForm = document.getElementById('queue-form');
+      const queueCount = document.getElementById('queue-count');
+      const queueKey = 'sonix-tokyo-v1-preview-queue';
+      const initialQueue = (() => {
+        try { return JSON.parse(localStorage.getItem(queueKey) || '[]'); }
+        catch (_) { return []; }
+      })();
       const state = {
-        theme: 'tokyo',
-        view: 'appearance',
-        previousView: 'home',
-        halo: 'subtle',
-        currentTrack: 1,
-        playing: true,
-        favorite: false,
-        shuffle: false,
-        repeat: false,
-        wifi: true,
-        bluetooth: true,
-        selectedDemo: 'play',
-        tint: false,
-        progress: 38
+        theme: 'tokyo', view: 'home', history: [], tint: false, wifi: false, bluetooth: false,
+        battery: true, accent: 'blue', queue: Array.isArray(initialQueue) ? initialQueue : [], current: -1,
+        playing: false, progress: 0, favorites: new Set(), search: '', selectedGroup: '', birdScore: 0
       };
-
-      const tracks = [
-        { title: 'A Walk Through Blue', artist: 'NOVA WAVE', album: 'Night Signals', length: '4:12', quality: 'FLAC · 24 / 96' },
-        { title: 'Midnight City', artist: 'M83', album: 'Hurry Up, We’re Dreaming', length: '4:03', quality: 'FLAC · 16 / 44.1' },
-        { title: 'Soft Lights', artist: 'Luna Park', album: 'Afterglow', length: '3:48', quality: 'FLAC · 24 / 96' }
-      ];
+      if (state.queue.length) state.current = state.queue.length - 1;
 
       const iconFiles = {
-        back: 'chevron-left.svg', next: 'chevron-right.svg', music: 'music-2.svg', note: 'music-note.svg',
-        radio: 'radio-recent.svg', wifi: 'wifi-high.svg', bluetooth: 'bluetooth.svg', books: 'files-audiobook.svg',
-        more: 'ellipsis-vertical.svg', settings: 'music-settings.svg', search: 'search.svg', play: 'play.svg',
-        pause: 'pause.svg', prev: 'skip-back.svg', skip: 'skip-forward.svg', album: 'album.svg', heart: 'heart.svg',
-        list: 'list-music.svg', eq: 'equalizer.svg', headphones: 'headphones.svg', artist: 'artist.svg',
-        battery: 'battery.svg', check: 'check.svg', sun: 'sun.svg', shuffle: 'shuffle.svg', repeat: 'repeat.svg',
-        star: 'star.svg', zap: 'zap.svg', folder: 'folder.svg', chevron: 'chevron-right.svg', close: 'close.svg'
+        back: 'chevron-left.svg', next: 'chevron-right.svg', music: 'music-2.svg', stream: 'play-status.svg',
+        wifi: 'wifi-high.svg', bluetooth: 'bluetooth.svg', books: 'files-book.svg', more: 'ellipsis-vertical.svg',
+        settings: 'music-settings.svg', search: 'search.svg', play: 'play.svg', pause: 'pause.svg',
+        prev: 'skip-back.svg', skip: 'skip-forward.svg', album: 'album.svg', artist: 'artist.svg',
+        albumArtist: 'artist-album.svg', genre: 'genre.svg', list: 'list-music.svg', heart: 'heart.svg',
+        folder: 'folder.svg', file: 'file.svg', headphones: 'headphones.svg', dac: 'usb-audio-out.svg',
+        airplay: 'airplay-status.svg', transfer: 'wifi-transfer-quick.svg', sonixlink: 'sonixlink-status.svg',
+        dlna: 'dlna-quick.svg', game: 'files-gamepad.svg', ebook: 'files-book.svg', finished: 'book-finished.svg',
+        bookmark: 'bookmark.svg', sun: 'sun.svg', power: 'power-off.svg', clock: 'history.svg',
+        battery: 'battery.svg', zap: 'zap.svg', chevron: 'chevron-right.svg', shuffle: 'shuffle.svg',
+        eq: 'equalizer.svg', radio: 'radio-player.svg', podcast: 'podcast-list.svg', check: 'check.svg'
       };
       const iconPath = name => `../../sonix-player/assets/icons/${iconFiles[name] || name}`;
-      const glyph = (name, tone = 'muted-icon', size = 18, extra = '', label = '') =>
-        `<span class="glyph ${tone} ${extra}" style="--glyph-image:url('${iconPath(name)}');--glyph-size:${size}px"${label ? ` role="img" aria-label="${label}"` : ' aria-hidden="true"'}></span>`;
-
-      function applyState() {
-        root.dataset.theme = state.theme;
-        root.dataset.glow = state.halo;
-        root.dataset.tint = state.tint ? 'on' : 'off';
-        document.querySelectorAll('[data-glow-choice]').forEach(button => {
-          button.setAttribute('aria-pressed', String(button.dataset.glowChoice === state.halo));
-        });
-        document.querySelectorAll('.view-tab').forEach(button => {
-          const current = button.dataset.view === state.view || (button.dataset.view === 'appearance' && state.view === 'settings') || (button.dataset.view === 'music' && ['streaming','wireless','books','more'].includes(state.view));
-          button.setAttribute('aria-pressed', String(current));
-        });
-      }
-
-      function renderStatus() {
-        statusBar.innerHTML = `
-          <div class="status-left">${glyph('headphones','accent-cyan',12,'glowable')}<span>67</span></div>
-          <span class="status-time">11:26</span>
-          <div class="status-right">
-            ${glyph(state.wifi ? 'wifi' : 'wifi','accent-cyan',12, state.wifi ? 'glowable' : '')}
-            ${glyph('bluetooth','accent-blue',11, state.bluetooth ? 'glowable' : '')}
-            <span>78%</span>${glyph('battery','accent-green',14,'battery-glyph')}
-          </div>`;
-      }
-
-      function pageHeader(title, backView = 'home', action = '') {
-        return `<header class="page-header">
-          <button class="header-back" type="button" data-action="navigate" data-view="${backView}" aria-label="Go back">${glyph('back','muted-icon',18)}</button>
-          <h2 class="page-title">${title}</h2><span class="header-spacer"></span>${action}
-        </header>`;
-      }
-
-      function renderAppearance() {
-        const choices = [
-          ['dark', 'Dark'], ['light', 'Light'], ['tokyo', 'Tokyo Night']
-        ].map(([id, label]) => `<button class="theme-choice" type="button" role="radio" aria-checked="${state.theme === id}" data-action="theme" data-theme-choice="${id}">${label}</button>`).join('');
-        const demos = [
-          ['music','Music','accent-cyan'], ['play','Play','accent-blue'], ['wifi','Wi-Fi','accent-cyan'], ['eq','EQ','accent-purple']
-        ].map(([icon,label,tone]) => `<button class="glyph-demo" type="button" aria-pressed="${state.selectedDemo === icon}" data-action="demo-icon" data-demo="${icon}" aria-label="Preview ${label} icon">${glyph(icon,tone,18,state.selectedDemo === icon ? 'glowable' : '')}<span>${label}</span></button>`).join('');
-        return `${pageHeader('Appearance','settings')}
-          <main class="page-body" aria-label="Appearance settings preview">
-            <div class="stack">
-              <section class="screen-card card-pad">
-                <div class="card-head"><span>Theme</span><small>DISPLAY</small></div>
-                <div class="theme-choices" role="radiogroup" aria-label="Theme">${choices}</div>
-                <p class="subtle-copy">Applies now · saved on this device</p>
-              </section>
-              <section class="screen-card card-pad">
-                <div class="card-head"><span>Tokyo Night colors</span><small>PALETTE</small></div>
-                <div class="palette-row" aria-label="Tokyo Night palette preview">
-                  <span style="background:#1a1b26"></span><span style="background:#24283b"></span><span style="background:#c0caf5"></span><span style="background:#7aa2f7"></span><span style="background:#7dcfff"></span><span style="background:#bb9af7"></span><span style="background:#9ece6a"></span><span style="background:#f7768e"></span>
-                </div>
-                <p class="subtle-copy">Blue for playback · cyan for audio · violet for DSP · green for success</p>
-              </section>
-              <section class="screen-card card-pad">
-                <div class="card-head"><span>Function-matched glyphs</span><small>PREVIEW</small></div>
-                <div class="glyph-grid">${demos}</div>
-              </section>
-              <section class="screen-card settings-card" aria-label="Other Appearance options retained">
-                <button class="simple-row" type="button" data-action="toggle-tint">
-                  ${glyph('sun','accent-amber',18)}<span class="row-copy"><strong>Dynamic tint</strong><small>Existing Appearance option</small></span>
-                  <span class="row-end">${state.tint ? 'On' : 'Off'}</span>
-                </button>
-                <button class="simple-row" type="button" data-action="notice" data-message="Existing font, clock, and boot-screen choices stay below this section.">
-                  ${glyph('settings','muted-icon',18)}<span class="row-copy"><strong>Other appearance options</strong><small>Font · clock · boot screen · accent</small></span>${glyph('chevron','muted-icon',15,'chevron-right')}
-                </button>
-              </section>
-            </div>
-          </main>`;
-      }
-
-      function renderSettings() {
-        return `${pageHeader('Settings','home')}
-          <main class="page-body">
-            <p class="home-title-note">Choose an option to continue.</p>
-            <section class="screen-card settings-card">
-              <button class="simple-row" type="button" data-action="navigate" data-view="appearance">
-                ${glyph('sun','accent-cyan',20,'glowable')}<span class="row-copy"><strong>Appearance</strong><small>Theme · colors · icons</small></span>${glyph('chevron','muted-icon',15,'chevron-right')}
-              </button>
-              <button class="simple-row" type="button" data-action="notice" data-message="This concept focuses on Appearance; this existing settings route stays as-is.">
-                ${glyph('album','accent-purple',19)}<span class="row-copy"><strong>Screen</strong><small>Brightness · timeout</small></span>${glyph('chevron','muted-icon',15,'chevron-right')}
-              </button>
-              <button class="simple-row" type="button" data-action="notice" data-message="This concept focuses on Appearance; this existing settings route stays as-is.">
-                ${glyph('settings','muted-icon',19)}<span class="row-copy"><strong>Date and time</strong><small>Clock · time zone</small></span>${glyph('chevron','muted-icon',15,'chevron-right')}
-              </button>
-              <button class="simple-row" type="button" data-action="notice" data-message="This concept focuses on Appearance; this existing settings route stays as-is.">
-                ${glyph('zap','accent-amber',19)}<span class="row-copy"><strong>Power</strong><small>Sleep · charge limit</small></span>${glyph('chevron','muted-icon',15,'chevron-right')}
-              </button>
-            </section>
-          </main>`;
-      }
-
-      const menuItems = [
-        ['Music','music','accent-cyan','music'], ['Streaming','radio','accent-purple','streaming'],
-        ['Wireless','wifi','accent-blue','wireless'], ['Audiobooks','books','accent-amber','books'],
-        ['More','more','accent-green','more'], ['Settings','settings','muted-icon','settings']
-      ];
-      function renderHome() {
-        const tiles = menuItems.map(([label,icon,tone,target]) => `<button class="menu-tile" type="button" data-action="navigate" data-view="${target}">${glyph(icon,tone,22,label === 'Settings' ? '' : 'glowable')}<span class="tile-text">${label}</span></button>`).join('');
-        return `<header class="page-header"><span style="width:5px"></span><h2 class="page-title">Sonix Player</h2></header>
-          <main class="page-body"><p class="home-title-note">Your music, ready when you are.</p><div class="menu-grid">${tiles}</div>
-          <button class="now-playing-strip" type="button" data-action="navigate" data-view="player">${glyph(state.playing ? 'pause' : 'play','accent-cyan',15,'glowable')}<span class="row-copy"><strong>${tracks[state.currentTrack].title}</strong><small>${tracks[state.currentTrack].artist}</small></span>${glyph('chevron','muted-icon',14,'chevron-right')}</button></main>`;
-      }
-
-      function renderMusic() {
-        const list = tracks.map((track,index) => `<button class="track-row" type="button" data-action="select-track" data-index="${index}" aria-current="${state.currentTrack === index}">
-          <span class="track-art">${glyph(index === state.currentTrack ? 'album' : 'music','accent-purple',18)}</span>
-          <span class="row-copy"><strong>${track.title}</strong><small>${track.artist} · ${track.album}</small></span>
-          ${state.currentTrack === index ? glyph(state.playing ? 'pause' : 'play','accent-cyan',15,'playmark glowable') : `<span class="row-end">${track.length}</span>`}
-        </button>`).join('');
-        return `${pageHeader('Music','home',`<button class="header-action" type="button" data-action="notice" data-message="Search is represented by the real search glyph in the player UI." aria-label="Search">${glyph('search','accent-cyan',16)}</button>`)}
-          <main class="page-body"><p class="home-title-note">Recently played · tap a track</p><section class="screen-card track-list">${list}</section>
-          <section class="screen-card card-pad" style="margin-top:6px"><div class="card-head"><span>Browse music</span><small>LIBRARY</small></div><div class="glyph-grid">${[['artist','Artists','accent-cyan'],['album','Albums','accent-purple'],['list','Playlists','accent-blue'],['search','Search','accent-amber']].map(([icon,label,tone]) => `<button class="glyph-demo" type="button" data-action="notice" data-message="${label} uses its existing function-matched icon.">${glyph(icon,tone,17)}<span>${label}</span></button>`).join('')}</div></section></main>`;
-      }
-
-      function renderPlayer() {
-        const track = tracks[state.currentTrack];
-        const elapsed = Math.floor((state.progress / 100) * 236);
-        const elapsedText = `${Math.floor(elapsed / 60)}:${String(elapsed % 60).padStart(2,'0')}`;
-        return `${pageHeader('Now Playing','music',`<button class="header-action" type="button" data-action="favorite" aria-label="${state.favorite ? 'Remove favorite' : 'Add favorite'}">${glyph('heart',state.favorite ? 'accent-red' : 'muted-icon',16,state.favorite ? 'glowable' : '')}</button>`)}
-          <main class="page-body"><div class="player-content">
-            <div class="cover-art" aria-label="Placeholder album art using the existing album glyph">${glyph('album','accent-cyan',40,'glowable')}</div>
-            <div class="player-topline"><div style="min-width:0;text-align:center"><h3 class="track-title">${track.title}</h3><p class="artist-name">${track.artist} · ${track.album}</p><div class="quality-pill">${track.quality}</div></div></div>
-            <div class="timeline"><input class="seek-range" type="range" min="0" max="100" value="${state.progress}" data-progress aria-label="Seek in track"><div class="seek-times"><span class="elapsed-time">${elapsedText}</span><span>${track.length}</span></div></div>
-            <div class="transport" role="group" aria-label="Playback controls">
-              <button class="transport-button" type="button" data-action="previous" aria-label="Previous track">${glyph('prev','accent-cyan',19)}</button>
-              <button class="transport-button primary" type="button" data-action="play-pause" aria-label="${state.playing ? 'Pause' : 'Play'}">${glyph(state.playing ? 'pause' : 'play','',20,'glowable')}</button>
-              <button class="transport-button" type="button" data-action="next" aria-label="Next track">${glyph('skip','accent-cyan',19)}</button>
-            </div>
-            <div class="player-utilities">
-              <button class="player-utility" type="button" data-action="shuffle" aria-pressed="${state.shuffle}">${glyph('shuffle',state.shuffle ? 'accent-purple' : 'muted-icon',12)}Shuffle</button>
-              <button class="player-utility" type="button" data-action="favorite" aria-pressed="${state.favorite}">${glyph('heart',state.favorite ? 'accent-red' : 'muted-icon',12)}${state.favorite ? 'Saved' : 'Favorite'}</button>
-              <button class="player-utility" type="button" data-action="repeat" aria-pressed="${state.repeat}">${glyph('repeat',state.repeat ? 'accent-purple' : 'muted-icon',12)}Repeat</button>
-            </div>
-          </div></main>`;
-      }
-
-      function renderWireless() {
-        const row = (kind,label,detail,on) => `<div class="wireless-row">${glyph(kind,on ? 'accent-cyan' : 'muted-icon',21,on ? 'glowable' : '')}<span class="row-copy"><strong>${label}</strong><small>${detail}</small></span><button class="mini-toggle" type="button" role="switch" aria-checked="${on}" data-action="toggle-${kind}" aria-label="Toggle ${label}"></button></div>`;
-        return `${pageHeader('Wireless','home')}<main class="page-body"><p class="home-title-note">Connectivity preview</p><section class="screen-card wireless-card">${row('wifi','Wi-Fi',state.wifi ? 'Connected · Home network' : 'Off',state.wifi)}${row('bluetooth','Bluetooth',state.bluetooth ? 'Connected · Headphones' : 'Off',state.bluetooth)}</section>
-          <section class="screen-card card-pad" style="margin-top:6px"><div class="card-head"><span>Audio output</span><small>DAC</small></div><button class="simple-row" type="button" data-action="notice" style="padding-left:0;padding-right:0">${glyph('headphones','accent-purple',19)}<span class="row-copy"><strong>Headphones</strong><small>3.5 mm · high quality</small></span></button></section></main>`;
-      }
-
-      function renderBooks() {
-        return `${pageHeader('Audiobooks','home')}<main class="page-body"><p class="home-title-note">Continue listening</p><section class="screen-card track-list">
-          <button class="track-row" type="button" data-action="play-book">${glyph('books','accent-amber',23)}<span class="row-copy"><strong>The Long Way Home</strong><small>R. A. North · Chapter 8</small></span>${glyph('play','accent-cyan',15,'glowable')}</button>
-          <button class="track-row" type="button" data-action="play-book">${glyph('books','accent-purple',23)}<span class="row-copy"><strong>Quiet Hours</strong><small>M. Vale · Chapter 2</small></span><span class="row-end">6h 18m</span></button>
-          </section></main>`;
-      }
-
-      function renderMore() {
-        return `${pageHeader('More','home')}<main class="page-body"><p class="home-title-note">More player features</p><section class="screen-card settings-card">
-          <button class="simple-row" type="button" data-action="navigate" data-view="wireless">${glyph('eq','accent-purple',19)}<span class="row-copy"><strong>Equalizer</strong><small>Shape your sound</small></span>${glyph('chevron','muted-icon',15,'chevron-right')}</button>
-          <button class="simple-row" type="button" data-action="navigate" data-view="music">${glyph('folder','accent-amber',19)}<span class="row-copy"><strong>File browser</strong><small>Browse storage</small></span>${glyph('chevron','muted-icon',15,'chevron-right')}</button>
-          <button class="simple-row" type="button" data-action="notice" data-message="This preview uses the existing Sonix Player feature names and icon family.">${glyph('search','accent-cyan',19)}<span class="row-copy"><strong>Search</strong><small>Find music on the device</small></span>${glyph('chevron','muted-icon',15,'chevron-right')}</button>
-          </section></main>`;
-      }
-
-      function render() {
-        applyState();
-        renderStatus();
-        const views = {
-          appearance: renderAppearance,
-          settings: renderSettings,
-          home: renderHome,
-          music: renderMusic,
-          player: renderPlayer,
-          streaming: () => `${pageHeader('Streaming','home')}<main class="page-body"><p class="home-title-note">Services use recognizable existing player controls.</p><section class="screen-card settings-card">
-            <button class="simple-row" type="button" data-action="notice" data-message="Qobuz · streaming service">${glyph('music','accent-cyan',19)}<span class="row-copy"><strong>Qobuz</strong><small>Albums · artists · playlists</small></span>${glyph('chevron','muted-icon',15,'chevron-right')}</button>
-            <button class="simple-row" type="button" data-action="notice" data-message="Radio · live playback">${glyph('radio','accent-purple',19)}<span class="row-copy"><strong>Radio</strong><small>Stations · recent</small></span>${glyph('chevron','muted-icon',15,'chevron-right')}</button>
-            <button class="simple-row" type="button" data-action="notice" data-message="Podcasts · episodes and downloads">${glyph('list','accent-amber',19)}<span class="row-copy"><strong>Podcasts</strong><small>Episodes · downloads</small></span>${glyph('chevron','muted-icon',15,'chevron-right')}</button>
-          </section></main>`,
-          wireless: renderWireless,
-          books: renderBooks,
-          more: renderMore
+      const bird = (tone, size, label = 'Bird glyph') => `<svg class="bird-glyph ${tone}" style="--glyph-size:${size}px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="${label}"><path d="M21 7.8c-1.7.2-3.1-.2-4.3-1.4-1.3-1.3-3.3-1.5-4.9-.4-1.5 1-2.5 2.7-2.9 4.7L8.2 14H5.5c-.7 0-1.3.3-1.8.8L2.5 16c.6 1.3 1.8 2 3.2 2h5.2c4.7 0 8.5-3.8 8.5-8.5V8z"/><path d="m9.1 13.8 4.2-3.4M16.7 7.1h.01"/><path d="M3.2 18.2 2 20"/></svg>`;
+      const glyph = (name, tone = 'muted-icon', size = 18, extra = '', label = '') => {
+        if (name === 'bird') return bird(tone, size, label || 'Bird glyph');
+        return `<span class="glyph ${tone} ${extra}" style="--glyph-image:url('${iconPath(name)}');--glyph-size:${size}px"${label ? ` role="img" aria-label="${label}"` : ' aria-hidden="true"'}></span>`;
+      };
+      const escapeHtml = value => String(value || '').replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
+      const safeTrack = track => ({title: escapeHtml(track.title), artist: escapeHtml(track.artist), album: escapeHtml(track.album), genre: escapeHtml(track.genre), albumArtist: escapeHtml(track.albumArtist)});
+      const currentTab = view => ({'home':'home','music':'music','player':'player','library':'music','artists':'music','albums':'music','album-artists':'music','genres':'music','playlists':'music','favourites':'music','search':'music','files':'music','appearance':'appearance','wireless':'wireless','wireless-airplay':'wireless','wireless-transfer':'wireless','wireless-sonixlink':'wireless','wireless-dlna':'wireless','books':'books','book-library':'books','book-series':'books','book-authors':'books','book-continue':'books','book-finished':'books','bookmarks':'books','settings':'settings','settings-music':'music','settings-screen':'settings','settings-time':'settings','settings-power':'settings','settings-language':'settings','settings-more':'settings','settings-system':'settings','dac':'more','gearboy':'more','ebook':'more','bird-game':'more','streaming':'streaming','streaming-tidal':'streaming','streaming-qobuz':'streaming','streaming-radio':'streaming','streaming-podcasts':'streaming'}[view] || 'home');
+      const go = (view, push = true) => {
+        if (!view) return;
+        if (push && state.view !== view) state.history.push(state.view);
+        state.view = view;
+        render();
+      };
+      const back = () => {
+        state.view = state.history.pop() || 'home';
+        render();
+      };
+      const pageHeader = (title, action = '') => `<header class="page-header"><button class="header-back" type="button" data-action="back" aria-label="Back">${glyph('back','muted-icon',17)}</button><h2 class="page-title">${title}</h2><span class="header-spacer"></span>${action}</header>`;
+      const row = (icon, title, detail, view, tone = 'accent-blue', end = '') => `<button class="simple-row" type="button" data-action="navigate" data-view="${view}">${glyph(icon,tone,18)}<span class="row-copy"><strong>${title}</strong>${detail ? `<small>${detail}</small>` : ''}</span>${end || glyph('chevron','muted-icon',14,'chevron-right')}</button>`;
+      const trackRows = (items, withCurrent = false) => {
+        if (!items.length) return `<div class="empty-state">No queue tracks to show. Add your own queue item beside the preview.</div>`;
+        return items.map(({track,index}) => {
+          const t = safeTrack(track);
+          return `<button class="track-row" type="button" data-action="select-track" data-index="${index}" aria-current="${withCurrent && state.current === index}"><span class="track-art">${glyph('music','accent-purple',16)}</span><span class="row-copy"><strong>${t.title || 'Untitled track'}</strong><small>${t.artist || ''}</small></span>${state.current === index ? glyph('play','accent-cyan',14,'playmark') : ''}</button>`;
+        }).join('');
+      };
+      const recentItems = () => {
+        if (state.current < 0 || !state.queue[state.current]) return [];
+        const first = Math.max(0, state.current - 2);
+        const result = [];
+        for (let index = first; index <= state.current; index++) result.push({track: state.queue[index], index});
+        return result.reverse();
+      };
+      const setStatus = () => {
+        statusBar.innerHTML = `<div class="status-left">${glyph('headphones','accent-cyan',12)}<span>67</span></div><span class="status-time">11:26</span><div class="status-right">${glyph('wifi',state.wifi ? 'accent-cyan' : 'muted-icon',12)}${glyph('bluetooth',state.bluetooth ? 'accent-blue' : 'muted-icon',11)}<span>${state.battery ? '78%' : ''}</span>${state.battery ? glyph('battery','accent-green',14,'battery-glyph') : ''}</div>`;
+      };
+      const renderHome = () => {
+        const tiles = [
+          ['Music','music','accent-cyan','music'], ['Streaming','stream','accent-purple','streaming'],
+          ['Wireless','wifi','accent-blue','wireless'], ['Audiobooks','books','accent-amber','books'],
+          ['More','more','accent-green','more'], ['Settings','settings','muted-icon','settings']
+        ].map(([title,icon,tone,view]) => `<button class="menu-tile" type="button" data-action="navigate" data-view="${view}">${glyph(icon,tone,20)}<span class="tile-text">${title}</span></button>`).join('');
+        const current = state.queue[state.current];
+        const title = current ? escapeHtml(current.title) : 'No track loaded';
+        const artist = current ? escapeHtml(current.artist) : '';
+        return `<header class="page-header"><span style="width:5px"></span><h2 class="page-title">Sonix Player</h2></header><main class="page-body"><p class="home-title-note">Ta musique, prête quand tu l'es.</p><div class="menu-grid">${tiles}</div><button class="now-playing-strip" type="button" data-action="navigate" data-view="player">${glyph(state.playing ? 'pause' : 'play','accent-cyan',15)}<span class="row-copy"><strong>${title}</strong><small>${artist}</small></span></button></main>`;
+      };
+      const renderMusic = () => {
+        const browse = [['artist','Artists','accent-cyan','artists'],['album','Albums','accent-purple','albums'],['albumArtist','Album artist','accent-blue','album-artists'],['search','Search','accent-amber','search']].map(([icon,title,tone,view]) => `<button class="glyph-demo ${title === 'Album artist' ? 'two-line-demo' : ''}" type="button" data-action="navigate" data-view="${view}">${glyph(icon,tone,17)}<span>${title === 'Album artist' ? 'Album<br>artist' : title}</span></button>`).join('');
+        const more = `<button class="header-action" type="button" data-action="navigate" data-view="library" aria-label="More music lists">${glyph('list','muted-icon',16)}</button>`;
+        return `${pageHeader('Music',`<button class="header-action" type="button" data-action="navigate" data-view="settings-music" aria-label="Music settings">${glyph('settings','muted-icon',16)}</button>${more}`)}<main class="page-body"><div class="stack"><section><div class="card-head"><span>Recently played</span><small>ACTIVE QUEUE</small></div><section class="screen-card track-list">${trackRows(recentItems(),true)}</section><p class="subtle-copy">Queue-derived · not persistent listening history</p></section><section class="screen-card card-pad"><div class="card-head"><span>Browse music</span><small>LIBRARY</small></div><div class="browse-grid">${browse}</div></section><section class="screen-card settings-card">${row('list','All tracks','Indexed music library','library','accent-cyan')}${row('albumArtist','Album artist','Browse credited artists','album-artists','accent-blue')}${row('genre','Genres','Browse by genre','genres','accent-amber')}${row('folder','File Manager','Browse storage','files','accent-green')}${row('heart','Favourites','Saved tracks','favourites','accent-red')}</section></div></main>`;
+      };
+      const renderAppearance = () => {
+        const choices = [['dark','Dark'],['light','Light'],['tokyo','Tokyo Night']].map(([id,label]) => `<button class="theme-choice" type="button" role="radio" aria-checked="${state.theme === id}" data-action="theme" data-theme-choice="${id}">${label}</button>`).join('');
+        const swatches = ['#1a1b26','#24283b','#c0caf5','#7aa2f7','#7dcfff','#bb9af7','#9ece6a','#f7768e'].map(color => `<span style="background:${color}"></span>`).join('');
+        const accents = [['blue','#7aa2f7'],['cyan','#7dcfff'],['purple','#bb9af7'],['green','#9ece6a'],['amber','#e0af68'],['red','#f7768e']].map(([id,color]) => `<button class="accent-dot" type="button" aria-label="${id} accent" aria-pressed="${state.accent === id}" data-action="accent" data-accent="${id}" style="background:${color}"></button>`).join('');
+        return `${pageHeader('Appearance')}<main class="page-body"><div class="stack"><section class="screen-card card-pad"><div class="card-head"><span>Theme</span><small>DISPLAY</small></div><div class="theme-choices" role="radiogroup" aria-label="Theme">${choices}</div><p class="subtle-copy">Applies now · saved on this device</p></section><section class="screen-card card-pad"><div class="card-head"><span>Tokyo Night colors</span><small>PALETTE</small></div><div class="palette-row">${swatches}</div><p class="subtle-copy">Blue · cyan · violet · green · amber · red</p></section><section class="screen-card card-pad"><div class="card-head"><span>Accent colour</span><small>PREVIEW</small></div><div class="accent-row">${accents}</div></section><section class="screen-card card-pad"><div class="switch-row"><span>Dynamic tint</span><button type="button" role="switch" aria-checked="${state.tint}" data-action="toggle-tint">${state.tint ? 'On' : 'Off'}</button></div><div class="switch-row"><span>Battery percentage</span><button type="button" role="switch" aria-checked="${state.battery}" data-action="toggle-battery">${state.battery ? 'On' : 'Off'}</button></div></section><section class="screen-card settings-card">${row('sun','Boot screen','Choose the next power-on image','settings-screen','accent-amber')}${row('clock','Clock position','Status bar alignment','settings-time','accent-cyan')}${row('settings','Text size and font','Interface typography','settings-more','accent-purple')}</section></div></main>`;
+      };
+      const renderSettings = () => `${pageHeader('Settings')}<main class="page-body"><p class="home-title-note">Choose an option to continue.</p><section class="screen-card settings-card">${row('sun','Appearance','Theme · accent · display','appearance','accent-purple')}${row('sun','Screen','Brightness · timeout','settings-screen','accent-cyan')}${row('clock','Date and time','Clock · time zone','settings-time','accent-blue')}${row('power','Power','Sleep · charge limit','settings-power','accent-red')}${row('list','Language','Interface language','settings-language','accent-amber')}${row('more','More','Remote · controls · developer options','settings-more','accent-green')}${row('settings','System','Firmware · device information','settings-system','muted-icon')}</section></main>`;
+      const renderWireless = () => {
+        const toggleRow = (kind,title,detail,on,tone) => `<div class="wireless-row">${glyph(kind,tone,20)}<span class="row-copy"><strong>${title}</strong><small>${detail}</small></span><button class="mini-toggle" type="button" role="switch" aria-checked="${on}" data-action="toggle-${kind}" aria-label="Toggle ${title}"></button></div>`;
+        return `${pageHeader('Wireless')}<main class="page-body"><div class="stack"><section class="screen-card wireless-card">${toggleRow('wifi','Wi-Fi',state.wifi ? 'On · manage networks' : 'Off',state.wifi,'accent-cyan')}${toggleRow('bluetooth','Bluetooth',state.bluetooth ? 'On · manage devices' : 'Off',state.bluetooth,'accent-purple')}</section><section class="screen-card card-pad"><div class="card-head"><span>Audio output</span><small>DEVICE</small></div>${row('headphones','Headphones','3.5 mm · high quality','dac','accent-purple')}</section><section class="screen-card settings-card"><div class="card-head" style="padding:7px 7px 0"><span>Wireless features</span></div>${row('airplay','AirPlay','Receive music from Apple devices','wireless-airplay','accent-cyan')}${row('transfer','Wi-Fi Transfer','Move files over Wi-Fi','wireless-transfer','accent-green')}${row('sonixlink','SonixLink','Connect to Sonix Player','wireless-sonixlink','accent-amber')}${row('dlna','DLNA','Network audio renderer','wireless-dlna','accent-blue')}</section></div></main>`;
+      };
+      const renderBooks = () => `${pageHeader('Audiobooks')}<main class="page-body"><div class="stack"><section><div class="card-head"><span>Continue listening</span><small>ON THIS DEVICE</small></div><section class="screen-card track-list"><div class="empty-state">Books with a saved position appear here. No sample books are included in this preview.</div><button class="simple-row" type="button" data-action="navigate" data-view="book-continue">${glyph('play','accent-amber',17)}<span class="row-copy"><strong>Open Continue list</strong><small>Resume a saved book position</small></span>${glyph('chevron','muted-icon',14,'chevron-right')}</button></section></section><section class="screen-card settings-card">${row('books','Library','All audiobooks','book-library','accent-amber')}${row('list','Series','Browse book series','book-series','accent-purple')}${row('artist','Authors','Browse by author','book-authors','accent-blue')}${row('finished','Finished','Completed audiobooks','book-finished','accent-green')}${row('bookmark','Bookmarks','Saved reading positions','bookmarks','accent-cyan')}</section></div></main>`;
+      const renderMore = () => {
+        const tiles = [['DAC','dac','accent-cyan','dac'],['Gearboy','game','accent-green','gearboy'],['Books','ebook','accent-amber','ebook'],['File Manager','folder','accent-blue','files'],['Flappy Bird','bird','accent-purple','bird-game']].map(([title,icon,tone,view]) => `<button class="menu-tile" type="button" data-action="navigate" data-view="${view}">${glyph(icon,tone,20,'',icon === 'bird' ? 'Centered bird glyph' : '')}<span class="tile-text">${title === 'File Manager' ? 'File<br>Manager' : title}</span></button>`).join('');
+        return `${pageHeader('More')}<main class="page-body"><p class="home-title-note">More player features</p><div class="menu-grid more-grid">${tiles}</div></main>`;
+      };
+      const itemView = (key, label, detail, icon, tone = 'accent-blue') => `${pageHeader(label)}<main class="page-body"><section class="screen-card card-pad"><div style="display:flex;align-items:center;gap:8px">${glyph(icon,tone,23)}<span class="row-copy"><strong>${label}</strong><small>${detail}</small></span></div><p class="subtle-copy">This route represents the existing on-device feature. Navigation is active in this prototype.</p></section></main>`;
+      const uniqueValues = key => [...new Set(state.queue.map(track => (track[key] || '').trim()).filter(Boolean))].sort((a,b) => a.localeCompare(b));
+      const groupView = (key,title,icon,tone) => {
+        const values = uniqueValues(key);
+        if (!values.length) return `${pageHeader(title)}<main class="page-body"><section class="screen-card empty-state">No ${title.toLowerCase()} are present in the optional prototype queue.</section></main>`;
+        return `${pageHeader(title)}<main class="page-body"><section class="screen-card settings-card">${values.map(value => row(icon,escapeHtml(value),'Open matching queue tracks',`group:${key}:${encodeURIComponent(value)}`,tone)).join('')}</section></main>`;
+      };
+      const renderGroupTracks = () => {
+        const [_,key,encoded] = state.view.split(':');
+        const value = decodeURIComponent(encoded || '');
+        const rows = state.queue.map((track,index) => ({track,index})).filter(({track}) => (track[key] || '').trim() === value);
+        return `${pageHeader(escapeHtml(value))}<main class="page-body"><section class="screen-card track-list">${trackRows(rows,true)}</section></main>`;
+      };
+      const renderMusicLibrary = () => `${pageHeader('Music library')}<main class="page-body"><section class="screen-card settings-card">${row('list','All tracks','Indexed music library','library','accent-cyan')}${row('album','Albums','Browse records','albums','accent-purple')}${row('artist','Artists','Browse performers','artists','accent-green')}${row('albumArtist','Album artist','Browse credited artists','album-artists','accent-blue')}${row('genre','Genres','Browse by style','genres','accent-amber')}${row('list','Playlists','Saved lists','playlists','accent-cyan')}${row('heart','Favourites','Saved tracks','favourites','accent-red')}${row('folder','File Manager','Browse storage','files','accent-blue')}</section></main>`;
+      const renderAllTracks = () => `${pageHeader('All tracks')}<main class="page-body"><section class="screen-card track-list">${trackRows(state.queue.map((track,index)=>({track,index})),true)}</section></main>`;
+      const renderFavorites = () => {
+        const rows = state.queue.map((track,index)=>({track,index})).filter(({index})=>state.favorites.has(index));
+        return `${pageHeader('Favourites')}<main class="page-body"><section class="screen-card track-list">${trackRows(rows,true)}</section>${state.queue.length ? `<button class="inline-action" data-action="clear-favourites">Clear prototype favourites</button>` : ''}</main>`;
+      };
+      const renderSearch = () => {
+        const hits = state.queue.map((track,index)=>({track,index})).filter(({track})=>!state.search || `${track.title} ${track.artist} ${track.album} ${track.albumArtist} ${track.genre}`.toLowerCase().includes(state.search.toLowerCase()));
+        return `${pageHeader('Search')}<main class="page-body"><form class="screen-card search-form" data-form="search"><input name="query" value="${escapeHtml(state.search)}" placeholder="Search queue preview" aria-label="Search queue preview"><button type="submit">Search</button></form><section class="screen-card track-list" style="margin-top:6px">${trackRows(hits,true)}</section></main>`;
+      };
+      const renderPlayer = () => {
+        const track = state.queue[state.current];
+        const t = track ? safeTrack(track) : {title:'No track loaded',artist:''};
+        const disabled = track ? '' : ' disabled';
+        const progress = Math.max(0, Math.min(100, Math.round(state.progress)));
+        const actions = `<div class="player-actions"><button class="simple-row" type="button" data-action="toggle-favorite"${disabled}>${glyph('heart',state.favorites.has(state.current) ? 'accent-red' : 'muted-icon',15)}<span class="row-copy"><strong>${state.favorites.has(state.current) ? 'Remove favourite' : 'Add to favourites'}</strong></span></button><button class="simple-row" type="button" data-action="navigate" data-view="music">${glyph('list','accent-cyan',15)}<span class="row-copy"><strong>Queue</strong></span></button></div>`;
+        return `${pageHeader('Now Playing',`<button class="header-action" type="button" data-action="navigate" data-view="music" aria-label="Open queue">${glyph('list','muted-icon',16)}</button>`)}<main class="page-body"><div class="player-content"><div class="cover-art">${glyph('album','accent-cyan',34)}</div><h3 class="track-title" title="${t.title}">${t.title || 'Untitled track'}</h3><p class="artist-name" title="${t.artist}">${track ? t.artist || '—' : 'Add a queue item to preview playback'}</p><div class="seek-block"><div class="seek-head"><span>POSITION</span><output id="seek-position">${track ? `${progress}%` : '—'}</output></div><input class="seek-range" type="range" min="0" max="100" value="${progress}" data-action="seek" aria-label="Seek position"${disabled}></div><div class="transport"><button class="transport-button" type="button" data-action="previous" aria-label="Previous"${disabled}>${glyph('prev','accent-cyan',18)}</button><button class="transport-button primary" type="button" data-action="play-pause" aria-label="Play or pause"${disabled}>${glyph(state.playing ? 'pause' : 'play','',19)}</button><button class="transport-button" type="button" data-action="next" aria-label="Next"${disabled}>${glyph('skip','accent-cyan',18)}</button></div>${actions}</div></main>`;
+      };
+      const renderGeneric = () => {
+        const map = {
+          'wireless-airplay':['AirPlay','Receive audio from Apple devices','airplay','accent-cyan'],
+          'wireless-transfer':['Wi-Fi Transfer','Transfer files to and from the player','transfer','accent-green'],
+          'streaming-radio':['Radio','Browse stations and recent streams','radio','accent-purple'],
+          'streaming-podcasts':['Podcasts','Browse episodes and downloads','podcast','accent-cyan'],
+          'playlists':['Playlists','Browse indexed playlists','list','accent-purple'],
+          'wireless-sonixlink':['SonixLink','Connect to a compatible Sonix device','sonixlink','accent-amber'],
+          'wireless-dlna':['DLNA','Use the player as a network renderer','dlna','accent-blue'],
+          'book-library':['Audiobook library','All indexed audiobooks','books','accent-amber'],
+          'book-series':['Series','Browse audiobooks by series','list','accent-purple'],
+          'book-authors':['Authors','Browse audiobooks by author','artist','accent-blue'],
+          'book-continue':['Continue listening','Resume a saved listening position','play','accent-green'],
+          'book-finished':['Finished','Completed audiobooks','finished','accent-green'],
+          'bookmarks':['Bookmarks','Saved audiobook positions','bookmark','accent-cyan'],
+          'settings-screen':['Screen','Brightness · timeout · rotation','sun','accent-cyan'],
+          'settings-time':['Date and time','Clock · time zone','clock','accent-blue'],
+          'settings-power':['Power','Sleep · charge limit','power','accent-red'],
+          'settings-language':['Language','Interface language','list','accent-amber'],
+          'settings-more':['More settings','Remote · controls · developer options','more','accent-green'],
+          'settings-music':['Music settings','Library · playback · playlists','settings','accent-cyan'],
+          'settings-system':['System','Firmware · device information','settings','muted-icon'],
+          'dac':['Audio output','Headphone and USB DAC options','dac','accent-cyan'],
+          'gearboy':['Gearboy','Game Boy emulator','game','accent-green'],
+          'ebook':['Books','E-book shelf and bookmarks','ebook','accent-amber'],
+          'files':['File Manager','Browse files and music folders','folder','accent-blue']
         };
-        viewport.innerHTML = (views[state.view] || renderHome)();
-      }
-
+        const [title,detail,icon,tone] = map[state.view] || ['Feature','On-device feature','settings','accent-blue'];
+        return itemView(state.view,title,detail,icon,tone);
+      };
+      const renderBirdGame = () => `${pageHeader('Flappy Bird')}<main class="page-body"><button class="bird-game" type="button" data-action="bird-jump" aria-label="Tap to flap">${bird('accent-amber',36,'Centered bird glyph')}</button><p class="game-score">SCORE ${state.birdScore} · TAP THE BIRD TO FLAP</p></main>`;
+      const renderStreaming = () => {
+        const serviceRow = (letter,kind,title,detail,view) => `<button class="simple-row" type="button" data-action="navigate" data-view="${view}"><span class="service-mark ${kind}" role="img" aria-label="${title} mark">${letter}</span><span class="row-copy"><strong>${title}</strong><small>${detail}</small></span>${glyph('chevron','muted-icon',14,'chevron-right')}</button>`;
+        return `${pageHeader('Streaming')}<main class="page-body"><div class="stack"><section class="screen-card settings-card">${row('radio','Radio','Stations · recent','streaming-radio','accent-purple')}${row('podcast','Podcasts','Episodes · downloads','streaming-podcasts','accent-cyan')}</section><section class="screen-card settings-card">${serviceRow('T','tidal','Tidal','Open the existing Tidal section','streaming-tidal')}${serviceRow('Q','qobuz','Qobuz','Open the existing Qobuz section','streaming-qobuz')}</section></div></main>`;
+      };
+      const renderStreamingService = () => {
+        const tidal = state.view === 'streaming-tidal';
+        const name = tidal ? 'Tidal' : 'Qobuz';
+        const kind = tidal ? 'tidal' : 'qobuz';
+        const letter = tidal ? 'T' : 'Q';
+        return `${pageHeader(name)}<main class="page-body"><section class="screen-card card-pad"><div class="service-detail-head"><span class="service-mark ${kind}" role="img" aria-label="${name} mark">${letter}</span><span class="row-copy"><strong>${name}</strong><small>Existing on-device streaming section</small></span></div><p class="subtle-copy">This preview opens the existing player route; service sign-in and catalogue data remain on the device.</p><button class="inline-action" type="button" data-action="navigate" data-view="player">Open Now Playing</button></section></main>`;
+      };
+      const render = () => {
+        root.dataset.theme = state.theme;
+        root.dataset.tint = state.tint ? 'on' : 'off';
+        setStatus();
+        const view = state.view;
+        let html;
+        if (view === 'home') html = renderHome();
+        else if (view === 'music') html = renderMusic();
+        else if (view === 'appearance') html = renderAppearance();
+        else if (view === 'wireless') html = renderWireless();
+        else if (view === 'books') html = renderBooks();
+        else if (view === 'settings') html = renderSettings();
+        else if (view === 'more') html = renderMore();
+        else if (view === 'library') html = renderMusicLibrary();
+        else if (view === 'artists') html = groupView('artist','Artists','artist','accent-green');
+        else if (view === 'albums') html = groupView('album','Albums','album','accent-purple');
+        else if (view === 'album-artists') html = groupView('albumArtist','Album artist','albumArtist','accent-blue');
+        else if (view === 'genres') html = groupView('genre','Genres','genre','accent-amber');
+        else if (view.startsWith('group:')) html = renderGroupTracks();
+        else if (view === 'all-tracks') html = renderAllTracks();
+        else if (view === 'favourites') html = renderFavorites();
+        else if (view === 'search') html = renderSearch();
+        else if (view === 'player') html = renderPlayer();
+        else if (view === 'streaming') html = renderStreaming();
+        else if (view === 'streaming-tidal' || view === 'streaming-qobuz') html = renderStreamingService();
+        else if (view === 'bird-game') html = renderBirdGame();
+        else if (view === 'book-continue') html = `${pageHeader('Continue listening')}<main class="page-body"><section class="screen-card empty-state">No saved audiobook position is loaded in the standalone preview.</section></main>`;
+        else html = renderGeneric();
+        viewport.innerHTML = html;
+        document.querySelectorAll('.view-tab').forEach(button => button.setAttribute('aria-pressed', String(button.dataset.tab === currentTab(view))));
+        queueCount.textContent = `${state.queue.length} queue ${state.queue.length === 1 ? 'item' : 'items'}`;
+        try { localStorage.setItem(queueKey, JSON.stringify(state.queue)); } catch (_) {}
+      };
       let toastTimer;
-      function showToast(message) {
+      const showToast = message => {
         toast.textContent = message;
         toast.classList.add('show');
         clearTimeout(toastTimer);
-        toastTimer = setTimeout(() => toast.classList.remove('show'), 1850);
-      }
-      function navigate(view) {
-        if (!view) return;
-        if (state.view !== 'player') state.previousView = state.view;
-        state.view = view;
-        render();
-      }
-      function updateSeek(value) {
-        state.progress = Number(value);
-        const input = screen.querySelector('[data-progress]');
-        if (input) input.style.setProperty('--progress', `${state.progress}%`);
-        const elapsed = Math.floor((state.progress / 100) * 236);
-        const label = screen.querySelector('.elapsed-time');
-        if (label) label.textContent = `${Math.floor(elapsed / 60)}:${String(elapsed % 60).padStart(2,'0')}`;
-      }
-
-      document.querySelectorAll('.view-tab').forEach(button => button.addEventListener('click', () => navigate(button.dataset.view)));
-      document.querySelectorAll('[data-glow-choice]').forEach(button => button.addEventListener('click', () => { state.halo = button.dataset.glowChoice; applyState(); }));
-
+        toastTimer = setTimeout(() => toast.classList.remove('show'), 1700);
+      };
+      document.querySelectorAll('[data-tab]').forEach(button => button.addEventListener('click', () => {
+        state.history = [];
+        go(button.dataset.tab, false);
+      }));
       viewport.addEventListener('click', event => {
         const button = event.target.closest('[data-action]');
         if (!button) return;
         const action = button.dataset.action;
-        switch (action) {
-          case 'theme':
-            state.theme = button.dataset.themeChoice;
-            render();
-            showToast(`${state.theme === 'tokyo' ? 'Tokyo Night' : state.theme === 'dark' ? 'Dark' : 'Light'} theme preview`);
-            break;
-          case 'navigate': navigate(button.dataset.view); break;
-          case 'select-track':
-            state.currentTrack = Number(button.dataset.index);
-            state.playing = true;
+        if (action === 'back') { back(); return; }
+        if (action === 'navigate') {
+          const view = button.dataset.view;
+          if (view.startsWith('group:')) go(view);
+          else go(view);
+          return;
+        }
+        if (action === 'theme') { state.theme = button.dataset.themeChoice; render(); showToast(`${state.theme === 'tokyo' ? 'Tokyo Night' : state.theme === 'dark' ? 'Dark' : 'Light'} theme preview`); return; }
+        if (action === 'accent') { state.accent = button.dataset.accent; showToast(`${state.accent} accent selected in preview`); render(); return; }
+        if (action === 'toggle-tint') { state.tint = !state.tint; render(); return; }
+        if (action === 'toggle-battery') { state.battery = !state.battery; render(); return; }
+        if (action === 'toggle-wifi') { state.wifi = !state.wifi; render(); return; }
+        if (action === 'toggle-bluetooth') { state.bluetooth = !state.bluetooth; render(); return; }
+        if (action === 'select-track') {
+          state.current = Number(button.dataset.index);
+          state.progress = 0;
+          state.playing = true;
+          go('player');
+          return;
+        }
+        if (action === 'play-pause') { state.playing = !state.playing; render(); return; }
+        if (action === 'previous' || action === 'next') {
+          if (state.queue.length) {
+            state.current = (state.current + (action === 'next' ? 1 : state.queue.length - 1)) % state.queue.length;
             state.progress = 0;
-            state.view = 'player';
-            render();
-            break;
-          case 'play-pause': state.playing = !state.playing; render(); break;
-          case 'previous': case 'next':
-            state.currentTrack = (state.currentTrack + (action === 'next' ? 1 : tracks.length - 1)) % tracks.length;
-            state.progress = 0; state.playing = true; render(); break;
-          case 'favorite': state.favorite = !state.favorite; render(); showToast(state.favorite ? 'Added to favourites' : 'Removed from favourites'); break;
-          case 'shuffle': state.shuffle = !state.shuffle; render(); break;
-          case 'repeat': state.repeat = !state.repeat; render(); break;
-          case 'demo-icon': state.selectedDemo = button.dataset.demo; render(); break;
-          case 'toggle-tint': state.tint = !state.tint; render(); break;
-          case 'toggle-wifi': state.wifi = !state.wifi; render(); break;
-          case 'toggle-bluetooth': state.bluetooth = !state.bluetooth; render(); break;
-          case 'play-book': state.currentTrack = 0; state.playing = true; state.view = 'player'; render(); break;
-          case 'notice': showToast(button.dataset.message || 'Prototype interaction'); break;
-          default: break;
+          }
+          state.playing = true;
+          render();
+          return;
+        }
+        if (action === 'toggle-favorite' && state.current >= 0) {
+          state.favorites.has(state.current) ? state.favorites.delete(state.current) : state.favorites.add(state.current);
+          render();
+          return;
+        }
+        if (action === 'clear-favourites') { state.favorites.clear(); render(); return; }
+        if (action === 'bird-jump') { state.birdScore += 1; render(); return; }
+      });
+      viewport.addEventListener('input', event => {
+        if (event.target.matches('[data-action="seek"]')) {
+          state.progress = Number(event.target.value);
+          const output = document.getElementById('seek-position');
+          if (output) output.value = `${state.progress}%`;
         }
       });
-      screen.addEventListener('input', event => {
-        if (event.target.matches('[data-progress]')) updateSeek(event.target.value);
+      viewport.addEventListener('submit', event => {
+        if (event.target.matches('[data-form="search"]')) {
+          event.preventDefault();
+          state.search = new FormData(event.target).get('query') || '';
+          render();
+          return;
+        }
       });
-
+      queueForm.addEventListener('submit', event => {
+        event.preventDefault();
+        const form = new FormData(queueForm);
+        const title = String(form.get('title') || '').trim();
+        const artist = String(form.get('artist') || '').trim();
+        if (!title || !artist) return;
+        state.queue.push({title,artist,album:String(form.get('album')||'').trim(),genre:String(form.get('genre')||'').trim(),albumArtist:String(form.get('albumArtist')||'').trim()});
+        state.current = state.queue.length - 1;
+        state.playing = true;
+        queueForm.reset();
+        render();
+        showToast('Added to the prototype queue');
+      });
+      document.getElementById('clear-queue').addEventListener('click', () => {
+        state.queue = [];
+        state.current = -1;
+        state.playing = false;
+        state.favorites.clear();
+        render();
+      });
       render();
     })();
   </script>
