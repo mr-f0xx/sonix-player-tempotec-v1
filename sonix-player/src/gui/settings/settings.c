@@ -18,6 +18,7 @@
 #include "src/gui/settings/powersettings.h"
 #include "src/gui/settings/remap.h"
 #include "src/gui/settings/screensaver.h"
+#include "src/gui/shell/icons.h"
 #include "src/gui/shell/settingsrow.h"
 #include "src/gui/shell/switcher.h"
 #include "src/gui/settings/systempage.h"
@@ -500,17 +501,26 @@ void settings_init(gui_config_t *cfg) {
 	build_screen_page(cfg);
 	build_other_page(cfg);
 
-	settingsrow_add(container, "appearance", NULL, switch_screen_cb, appearance_screen);
-	settingsrow_add(container, "settings_screen", NULL, switch_screen_cb, screensettings_screen);
-	settingsrow_add(container, "date_and_time", NULL, clock_clicked_cb, NULL);
-	settingsrow_add(container, "power", NULL, switch_screen_cb, powersettings_screen);
-	language_bind_menu_row(settingsrow_add(container, "language", NULL, switch_screen_cb, language_screen));
+	lv_obj_t *appearance_row = settingsrow_add(container, "appearance", NULL, switch_screen_cb, appearance_screen);
+	settingsrow_add_icon(appearance_row, &icon_sun, THEME_SEMANTIC_PURPLE);
+	lv_obj_t *screen_row = settingsrow_add(container, "settings_screen", NULL, switch_screen_cb, screensettings_screen);
+	settingsrow_add_icon(screen_row, &icon_sun, THEME_SEMANTIC_CYAN);
+	lv_obj_t *clock_row = settingsrow_add(container, "date_and_time", NULL, clock_clicked_cb, NULL);
+	settingsrow_add_icon(clock_row, &icon_sort_date_new, THEME_SEMANTIC_BLUE);
+	lv_obj_t *power_row = settingsrow_add(container, "power", NULL, switch_screen_cb, powersettings_screen);
+	settingsrow_add_icon(power_row, &icon_power_off, THEME_SEMANTIC_RED);
+	lv_obj_t *language_row = settingsrow_add(container, "language", NULL, switch_screen_cb, language_screen);
+	settingsrow_add_icon(language_row, &icon_sort_az, THEME_SEMANTIC_AMBER);
+	language_bind_menu_row(language_row);
 
-	settingsrow_add(container, "more", NULL, switch_screen_cb, othersettings_screen);
-	settingsrow_add(container, "system", NULL, switch_screen_cb, systempage_screen);
+	lv_obj_t *more_row = settingsrow_add(container, "more", NULL, switch_screen_cb, othersettings_screen);
+	settingsrow_add_icon(more_row, &icon_ellipsis_vertical, THEME_SEMANTIC_GREEN);
+	lv_obj_t *system_row = settingsrow_add(container, "system", NULL, switch_screen_cb, systempage_screen);
+	settingsrow_add_icon(system_row, &icon_music_settings, THEME_SEMANTIC_MUTED);
 	// Hidden until the build number in System > Info is tapped five times.
 	// Built regardless, so unlocking is a visibility change rather than a
 	// rebuild of the page.
 	devoptions_row = settingsrow_add(container, "developer_options", NULL, switch_screen_cb, devoptions_screen);
+	settingsrow_add_icon(devoptions_row, &icon_zap, THEME_SEMANTIC_AMBER);
 	settings_refresh_devoptions();
 }

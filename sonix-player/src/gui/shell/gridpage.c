@@ -2,10 +2,13 @@
 
 #include "lvgl/lvgl.h"
 
+#include <string.h>
+
 #include "src/gui/nowplaying/coverflow.h"
 #include "src/gui/board_profile.h"
 #include "src/gui/fonts/fonts.h"
 #include "src/gui/nowplaying/player.h"
+#include "src/gui/shell/icons.h"
 #include "src/gui/shell/settingsrow.h"
 #include "src/gui/shell/switcher.h"
 #include "src/gui/shell/theme.h"
@@ -20,6 +23,27 @@
 
 static bool compact_grid(void) { return bp_is_tempotec_v1(); }
 static int grid_gap(void) { return compact_grid() ? 6 : GRID_GAP; }
+
+// A compact list of the tiled menu pages. The entry arrays passed to
+// gridpage_build() are local to each init function, so retain just the icon
+// and translation key that are needed to restore Dark/Light or apply Tokyo
+// Night later. V1 has six tiles per page; the extra slots cover optional
+// builds without allocating per-tile theme objects.
+#define GRIDPAGE_THEME_PAGE_MAX 12
+#define GRIDPAGE_THEME_TILE_MAX 8
+typedef struct {
+	lv_obj_t *grid;
+	int count;
+	const lv_image_dsc_t *normal_icons[GRIDPAGE_THEME_TILE_MAX];
+	const char *labels[GRIDPAGE_THEME_TILE_MAX];
+} gridpage_theme_page_t;
+
+static gridpage_theme_page_t theme_pages[GRIDPAGE_THEME_PAGE_MAX];
+static int theme_page_count;
+static bool theme_refresh_registered;
+
+static void gridpage_apply_theme_page(gridpage_theme_page_t *page);
+static gridpage_theme_page_t *gridpage_theme_page_for(lv_obj_t *grid);
 
 static void unavailable_cb(lv_event_t *e) {
 	if (player_sheet_drag_active() || switcher_back_drag_active() || coverflow_drag_active()) {
@@ -71,6 +95,20 @@ void gridpage_set_tile(lv_obj_t *grid, int index, const lv_image_dsc_t *icon, co
 	}
 	if (label) {
 		lv_label_set_text(tile_label_object(tile), tr(label));
+	}
+
+	// Music swaps this slot between Browse and Playlists at runtime. Keep the
+	// original target and label in sync so a theme switch never restores stale
+	// menu art, and immediately reapply the selected icon treatment.
+	gridpage_theme_page_t *page = gridpage_theme_page_for(grid);
+	if (page && index < page->count) {
+		if (icon) {
+			page->normal_icons[index] = icon;
+		}
+		if (label) {
+			page->labels[index] = label;
+		}
+		gridpage_apply_theme_page(page);
 	}
 }
 
@@ -164,6 +202,128 @@ void gridpage_set_tile_icon_style(lv_obj_t *grid, int index, const lv_image_dsc_
 	// flex layout has had a chance to size the foreground image.
 	lv_obj_update_layout(tile);
 	lv_obj_align_to(halo, icon, LV_ALIGN_CENTER, 0, 0);
+}
+
+static bool gridpage_tokyo_icon(const char *label, const lv_image_dsc_t **icon, theme_semantic_t *tone) {
+	// Function-matched monochrome icons: the bitmap menu illustrations remain
+	// untouched in Dark/Light, while Tokyo Night uses the existing compact
+	// glyphs and a restrained semantic accent per destination.
+	static const struct {
+		const char *label;
+		const lv_image_dsc_t *icon;
+		theme_semantic_t tone;
+	} icons[] = {
+		{"music", &icon_music2, THEME_SEMANTIC_CYAN},
+		{"streaming", &icon_radio_player, THEME_SEMANTIC_PURPLE},
+		{"wireless", &icon_wifi_high, THEME_SEMANTIC_BLUE},
+		{"audiobooks", &icon_files_audiobook, THEME_SEMANTIC_AMBER},
+		{"more", &icon_ellipsis_vertical, THEME_SEMANTIC_GREEN},
+		{"settings", &icon_music_settings, THEME_SEMANTIC_MUTED},
+		{"music_all_tracks", &icon_list_music, THEME_SEMANTIC_CYAN},
+		{"albums", &icon_album, THEME_SEMANTIC_PURPLE},
+		{"artists", &icon_artist, THEME_SEMANTIC_GREEN},
+		{"music_album_artists", &icon_artist_album, THEME_SEMANTIC_BLUE},
+		{"music_genres", &icon_genre, THEME_SEMANTIC_AMBER},
+		{"music_browse", &icon_folder, THEME_SEMANTIC_MUTED},
+		{"playlists", &icon_list_music, THEME_SEMANTIC_CYAN},
+		{"wi_fi", &icon_wifi, THEME_SEMANTIC_BLUE},
+		{"bluetooth", &icon_bluetooth, THEME_SEMANTIC_PURPLE},
+		{"airplay", &icon_airplay_quick, THEME_SEMANTIC_CYAN},
+		{"transfer", &icon_wifi_transfer_quick, THEME_SEMANTIC_GREEN},
+		{"sonixlink", &icon_sonixlink_quick, THEME_SEMANTIC_AMBER},
+		{"dlna", &icon_dlna_quick, THEME_SEMANTIC_BLUE},
+		{"tidal", &icon_tidal_badge, THEME_SEMANTIC_RED},
+		{"qobuz", &icon_qobuz_badge, THEME_SEMANTIC_GREEN},
+		{"radio", &icon_radio_player, THEME_SEMANTIC_PURPLE},
+		{"podcasts", &icon_podcast_list, THEME_SEMANTIC_CYAN},
+		{"audiobook_library", &icon_book_headphones, THEME_SEMANTIC_AMBER},
+		{"audiobook_series", &icon_book_finished, THEME_SEMANTIC_PURPLE},
+		{"audiobook_authors", &icon_artist, THEME_SEMANTIC_BLUE},
+		{"audiobook_continue", &icon_play, THEME_SEMANTIC_GREEN},
+		{"dac", &icon_usbaudioout, THEME_SEMANTIC_CYAN},
+		{"gearboy", &icon_files_game, THEME_SEMANTIC_GREEN},
+		{"books", &icon_files_book, THEME_SEMANTIC_AMBER},
+		{"file_explorer", &icon_folder, THEME_SEMANTIC_BLUE},
+		{"flappy_bird", &icon_menu_flappy_bird, THEME_SEMANTIC_PURPLE},
+	};
+
+	if (!label || !icon || !tone) {
+		return false;
+	}
+	for (unsigned int i = 0; i < sizeof(icons) / sizeof(icons[0]); i++) {
+		if (strcmp(label, icons[i].label) == 0) {
+			*icon = icons[i].icon;
+			*tone = icons[i].tone;
+			return true;
+		}
+	}
+	return false;
+}
+
+static void gridpage_apply_theme_page(gridpage_theme_page_t *page) {
+	if (!page || !page->grid) {
+		return;
+	}
+
+	bool tokyo = theme_is_tokyo_night();
+	bool horizontal = tokyo && compact_grid();
+	for (int i = 0; i < page->count; i++) {
+		const lv_image_dsc_t *icon = page->normal_icons[i];
+		theme_semantic_t tone = THEME_SEMANTIC_BLUE;
+		if (tokyo) {
+			gridpage_tokyo_icon(page->labels[i], &icon, &tone);
+		}
+		gridpage_set_tile_icon_style(page->grid, i, icon, tokyo ? (compact_grid() ? 22 : 42) :
+							 compact_grid() ? COMPACT_TILE_ICON_MAX : 0,
+							 tokyo, theme_semantic_color(tone), false);
+		gridpage_set_tile_orientation(page->grid, i, horizontal);
+
+		lv_obj_t *tile = lv_obj_get_child(page->grid, i);
+		if (tile) {
+			lv_obj_set_style_border_width(tile, tokyo ? 1 : 0, 0);
+			if (tokyo) {
+				lv_obj_set_style_border_color(tile, theme()->text_secondary, 0);
+				lv_obj_set_style_border_opa(tile, LV_OPA_20, 0);
+			} else {
+				lv_obj_set_style_border_opa(tile, LV_OPA_COVER, 0);
+			}
+		}
+	}
+}
+
+static void gridpage_refresh_theme(void) {
+	for (int i = 0; i < theme_page_count; i++) {
+		gridpage_apply_theme_page(&theme_pages[i]);
+	}
+}
+
+static gridpage_theme_page_t *gridpage_theme_page_for(lv_obj_t *grid) {
+	for (int i = 0; i < theme_page_count; i++) {
+		if (theme_pages[i].grid == grid) {
+			return &theme_pages[i];
+		}
+	}
+	return NULL;
+}
+
+static void gridpage_register_theme_page(lv_obj_t *grid, const grid_entry_t *entries, int count) {
+	if (!grid || !entries || count < 1 || count > GRIDPAGE_THEME_TILE_MAX ||
+			theme_page_count >= GRIDPAGE_THEME_PAGE_MAX) {
+		return;
+	}
+
+	gridpage_theme_page_t *page = &theme_pages[theme_page_count++];
+	page->grid = grid;
+	page->count = count;
+	for (int i = 0; i < count; i++) {
+		page->normal_icons[i] = entries[i].icon;
+		page->labels[i] = entries[i].label;
+	}
+	if (!theme_refresh_registered) {
+		theme_register_refresh(gridpage_refresh_theme);
+		theme_refresh_registered = true;
+	}
+	gridpage_apply_theme_page(page);
 }
 
 void gridpage_set_tile_orientation(lv_obj_t *grid, int index, bool horizontal) {
@@ -366,6 +526,7 @@ lv_obj_t *gridpage_build(lv_obj_t *screen, gui_config_t *cfg, const grid_entry_t
 	// Handed back for the same reason: a caller that wants a gesture of its own
 	// on the page has to put it on this object, because nothing below it
 	// bubbles any further.
+	gridpage_register_theme_page(grid, entries, count);
 	return grid;
 }
 

@@ -1,6 +1,5 @@
 #include "main_menu.h"
 
-#include <stdio.h>
 #include <stdint.h>
 #include <string.h>
 
@@ -28,11 +27,11 @@ lv_obj_t *main_menu_screen;
 static lv_obj_t *menu_grid;
 static lv_obj_t *home_header;
 static lv_obj_t *home_title;
-static lv_obj_t *home_settings_icon;
 static lv_obj_t *home_note;
 static lv_obj_t *mini_player;
 static lv_obj_t *mini_player_halo;
 static lv_obj_t *mini_player_icon;
+static lv_obj_t *mini_player_copy;
 static lv_obj_t *mini_player_title;
 static lv_obj_t *mini_player_subtitle;
 static lv_timer_t *mini_player_timer;
@@ -103,38 +102,74 @@ static void set_label_if_changed(lv_obj_t *label, const char *text) {
 	}
 }
 
-// The compact strip mirrors the prototype but always uses the track, station
-// and playback state that are actually on the player. It never invents sample
-// metadata, and the whole strip opens the real now-playing sheet.
+// Fit the V1's live strip around two fixed one-line labels. Explicitly sizing
+// the text column from the row's content width keeps both glyphs and ellipses
+// inside the card, including after a font-size or theme change.
+static void main_menu_layout_tokyo_home(bool force) {
+	if (!menu_grid || !menu_cfg || !mini_player || !mini_player_copy ||
+			!bp_is_tempotec_v1() || !theme_is_tokyo_night()) {
+		return;
+	}
+
+	int line_height = lv_font_get_line_height(&font_ui_14);
+	int footer_height = LV_MAX(42, line_height * 2 + 8);
+	int footer_y = (int)menu_cfg->screen_height - (int)menu_cfg->padding - footer_height;
+	bool needs_reflow = force || (int)lv_obj_get_height(mini_player) != footer_height ||
+			(int)lv_obj_get_y(mini_player) != footer_y;
+	if (!needs_reflow) {
+		return;
+	}
+
+	lv_obj_set_size(mini_player, (int)menu_cfg->screen_width - 2 * (int)menu_cfg->padding, footer_height);
+	lv_obj_set_pos(mini_player, menu_cfg->padding, footer_y);
+	lv_obj_update_layout(mini_player);
+	lv_obj_set_height(mini_player_copy, line_height * 2);
+	lv_obj_set_flex_grow(mini_player_copy, 0);
+	int content_width = lv_obj_get_content_width(mini_player);
+	int copy_width = content_width - lv_obj_get_width(mini_player_icon) - 14 - 2 * 7;
+	lv_obj_set_width(mini_player_copy, LV_MAX(1, copy_width));
+	lv_obj_set_width(mini_player_title, lv_pct(100));
+	lv_obj_set_width(mini_player_subtitle, lv_pct(100));
+	lv_obj_set_height(mini_player_title, line_height);
+	lv_obj_set_height(mini_player_subtitle, line_height);
+
+	int bottom = (int)menu_cfg->padding + footer_height + 1;
+	gridpage_set_layout(menu_grid, menu_cfg, (int)menu_cfg->top_bar_height + 62, bottom, menu_cfg->padding, 6, 2, 3);
+	for (int i = 0; i < 6; i++) {
+		gridpage_set_tile_orientation(menu_grid, i, true);
+	}
+}
+
+// The mini-player shows the live title and artist only. LVGL owns its label
+// text after lv_label_set_text(), so the metadata may safely come from this
+// local state snapshot; one-line dot mode clips long text without overlap.
 static void main_menu_refresh_now_playing(void) {
 	if (!mini_player || !menu_cfg) {
 		return;
 	}
+	main_menu_layout_tokyo_home(false);
 
 	device_state_t state;
 	device_state_get(&state);
 	bool loaded = state.live || state.current_file[0] != '\0';
-	char title[256];
-	char subtitle[544];
+	const char *title = NULL;
+	const char *artist = "";
 
 	if (!loaded) {
-		snprintf(title, sizeof(title), "%s", tr("main_menu_now_playing"));
-		snprintf(subtitle, sizeof(subtitle), "%s", tr("player_no_track_loaded"));
+		title = tr("player_no_track_loaded");
 		lv_image_set_src(mini_player_icon, &icon_music2);
 		lv_obj_set_style_image_recolor(mini_player_icon, theme()->text_secondary, 0);
 	} else {
 		if (state.metadata.title[0]) {
-			snprintf(title, sizeof(title), "%s", state.metadata.title);
+			title = state.metadata.title;
 		} else if (state.live) {
-			snprintf(title, sizeof(title), "%s", tr("player_live"));
+			title = tr("player_live");
 		} else {
 			const char *file = strrchr(state.current_file, '/');
-			snprintf(title, sizeof(title), "%s", file ? file + 1 : state.current_file);
+			title = file ? file + 1 : state.current_file;
 		}
 		if (state.metadata.artist[0]) {
-			snprintf(subtitle, sizeof(subtitle), "%s · %s", state.metadata.artist, tr("main_menu_now_playing"));
-		} else {
-			snprintf(subtitle, sizeof(subtitle), "%s", tr("main_menu_now_playing"));
+			artist = state.metadata.artist;
 		}
 
 		lv_image_set_src(mini_player_icon,
@@ -155,8 +190,8 @@ static void main_menu_refresh_now_playing(void) {
 		lv_obj_update_layout(mini_player);
 		lv_obj_align_to(mini_player_halo, mini_player_icon, LV_ALIGN_CENTER, 0, 0);
 	}
-	set_label_if_changed(mini_player_title, title);
-	set_label_if_changed(mini_player_subtitle, subtitle);
+	set_label_if_changed(mini_player_title, title ? title : "");
+	set_label_if_changed(mini_player_subtitle, artist);
 }
 
 static void mini_player_timer_cb(lv_timer_t *timer) {
@@ -211,16 +246,10 @@ static void main_menu_refresh_theme(void) {
 		// Status bar: y=0..24. The 36 px title row and single-line note lead
 		// into six horizontal icon-and-label cards; the mini-player sits below.
 		// The six existing tile objects are simply reflowed, not duplicated.
-		gridpage_set_layout(menu_grid, menu_cfg, (int)menu_cfg->top_bar_height + 62, 45, menu_cfg->padding, 6, 2, 3);
-		for (int i = 0; i < 6; i++) {
-			gridpage_set_tile_orientation(menu_grid, i, true);
-		}
 		lv_obj_set_style_border_width(home_header, 1, 0);
 		lv_obj_set_style_border_side(home_header, LV_BORDER_SIDE_BOTTOM, 0);
 		lv_obj_set_style_border_color(home_header, theme()->surface_pressed, 0);
 		lv_obj_set_style_border_opa(home_header, LV_OPA_20, 0);
-		lv_obj_set_style_image_recolor(home_settings_icon, theme()->text_secondary, 0);
-		lv_obj_set_style_image_recolor_opa(home_settings_icon, LV_OPA_COVER, 0);
 
 		lv_color_t strip_fill = lv_color_mix(theme()->accent, theme()->surface, LV_OPA_10);
 		lv_color_t strip_edge = lv_color_mix(theme()->accent, theme()->surface, LV_OPA_30);
@@ -229,6 +258,7 @@ static void main_menu_refresh_theme(void) {
 		lv_obj_set_style_border_color(mini_player, strip_edge, 0);
 		lv_obj_set_style_border_opa(mini_player, LV_OPA_COVER, 0);
 		lv_obj_set_style_border_width(mini_player, 1, 0);
+		main_menu_layout_tokyo_home(true);
 	} else {
 		lv_obj_set_hidden(home_header, true);
 		lv_obj_set_hidden(home_note, true);
@@ -284,20 +314,6 @@ void main_menu_init(gui_config_t *cfg) {
 	lv_obj_set_style_text_font(home_title, &font_ui_16, 0);
 	lv_obj_set_flex_grow(home_title, 1);
 
-	lv_obj_t *settings_button = lv_btn_create(home_header);
-	lv_obj_set_size(settings_button, 28, 30);
-	lv_obj_set_style_bg_opa(settings_button, LV_OPA_TRANSP, 0);
-	lv_obj_set_style_border_width(settings_button, 0, 0);
-	lv_obj_set_style_radius(settings_button, 7, 0);
-	lv_obj_set_style_pad_all(settings_button, 0, 0);
-	lv_obj_add_style(settings_button, &theme_style_card_pressed, LV_STATE_PRESSED);
-	lv_obj_add_event_cb(settings_button, switch_screen_cb, LV_EVENT_CLICKED, settings_screen);
-	home_settings_icon = lv_image_create(settings_button);
-	lv_image_set_src(home_settings_icon, &icon_music_settings);
-	fit_menu_icon(home_settings_icon, &icon_music_settings, 16);
-	lv_obj_add_style(home_settings_icon, &theme_style_icon, 0);
-	lv_obj_center(home_settings_icon);
-
 	home_note = lv_label_create(main_menu_screen);
 	lv_label_set_text(home_note, tr("main_menu_tagline"));
 	lv_label_set_long_mode(home_note, LV_LABEL_LONG_DOT);
@@ -341,8 +357,10 @@ void main_menu_init(gui_config_t *cfg) {
 	fit_menu_icon(mini_player_icon, &icon_music2, 15);
 	lv_obj_add_style(mini_player_icon, &theme_style_icon, 0);
 
-	lv_obj_t *copy = lv_obj_create(mini_player);
+	mini_player_copy = lv_obj_create(mini_player);
+	lv_obj_t *copy = mini_player_copy;
 	lv_obj_remove_style_all(copy);
+	lv_obj_set_width(copy, LV_SIZE_CONTENT);
 	lv_obj_set_height(copy, LV_SIZE_CONTENT);
 	lv_obj_set_style_bg_opa(copy, LV_OPA_TRANSP, 0);
 	lv_obj_set_style_pad_all(copy, 0, 0);
@@ -350,7 +368,7 @@ void main_menu_init(gui_config_t *cfg) {
 	lv_obj_set_scrollable(copy, false);
 	lv_obj_set_flex_flow(copy, LV_FLEX_FLOW_COLUMN);
 	lv_obj_set_flex_align(copy, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER);
-	lv_obj_set_flex_grow(copy, 1);
+	lv_obj_set_flex_grow(copy, 0);
 
 	mini_player_title = lv_label_create(copy);
 	lv_label_set_long_mode(mini_player_title, LV_LABEL_LONG_DOT);
