@@ -1,0 +1,662 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#11131d">
+  <title>Sonix Player · Tokyo Night on TempoTec V1</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --page: #10121b;
+      --page-2: #151823;
+      --panel: #1a1d29;
+      --line: #2b3041;
+      --ink: #eef0fa;
+      --muted: #a1a8be;
+      --soft: #707991;
+      --blue: #7aa2f7;
+      --cyan: #7dcfff;
+      --purple: #bb9af7;
+      --green: #9ece6a;
+      --amber: #e0af68;
+      --red: #f7768e;
+      --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+      --sans: Inter, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+    html { min-width: 320px; background: var(--page); }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      color: var(--ink);
+      font-family: var(--sans);
+      background:
+        radial-gradient(ellipse at 17% -8%, rgba(122,162,247,.16), transparent 36rem),
+        radial-gradient(ellipse at 95% 16%, rgba(187,154,247,.09), transparent 31rem),
+        var(--page);
+    }
+    button, input { font: inherit; }
+    button { color: inherit; }
+    button:focus-visible, input:focus-visible {
+      outline: 2px solid var(--cyan);
+      outline-offset: 2px;
+    }
+
+    .page-wrap { max-width: 1180px; margin: 0 auto; padding: 34px 26px 44px; }
+    .masthead { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; margin: 0 0 28px; }
+    .eyebrow { color: var(--cyan); font: 700 11px/1.3 var(--mono); letter-spacing: .16em; text-transform: uppercase; }
+    h1 { margin: 8px 0 7px; font-size: clamp(26px, 4vw, 38px); letter-spacing: -.045em; line-height: 1.06; }
+    .intro { max-width: 680px; margin: 0; color: #a6aec3; font-size: 14px; line-height: 1.55; }
+    .native-tag { flex: 0 0 auto; padding: 10px 13px; border: 1px solid #343b54; border-radius: 999px; color: #c0caf5; background: rgba(26,27,38,.7); font: 11px var(--mono); white-space: nowrap; }
+
+    .workspace { display: grid; grid-template-columns: minmax(360px, .95fr) minmax(390px, 1.05fr); gap: clamp(24px, 5vw, 62px); align-items: start; }
+    .preview-column { min-width: 0; }
+    .demo-label { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 0 0 10px; color: #8f99b3; font: 10px var(--mono); letter-spacing: .11em; text-transform: uppercase; }
+    .demo-label strong { color: #c0caf5; font-weight: 600; }
+    .view-tabs { display: grid; grid-template-columns: repeat(4, 1fr); gap: 5px; padding: 5px; margin: 0 auto 17px; max-width: 465px; border: 1px solid #292e42; border-radius: 12px; background: #171a25; }
+    .view-tab { min-height: 34px; padding: 7px 5px; border: 0; border-radius: 8px; color: #929bb3; background: transparent; cursor: pointer; font-size: 11px; transition: background .15s, color .15s; }
+    .view-tab:hover { color: #d3daf2; background: #222638; }
+    .view-tab[aria-pressed="true"] { color: #e6edff; background: #29334b; box-shadow: inset 0 0 0 1px rgba(122,162,247,.26); }
+
+    .stage { --scale: 1.34; position: relative; width: calc(260px * var(--scale)); height: calc(340px * var(--scale)); margin: 0 auto; }
+    .device {
+      position: absolute; inset: 0 auto auto 0; width: 260px; height: 340px; padding: 10px;
+      transform: scale(var(--scale)); transform-origin: top left;
+      border: 1px solid #3c4256; border-radius: 22px;
+      background: linear-gradient(145deg, #292d3b, #191b25 44%, #101118);
+      box-shadow: 0 28px 65px rgba(0,0,0,.52), inset 0 1px rgba(255,255,255,.08), inset 0 -2px rgba(0,0,0,.4);
+    }
+    .device::before, .device::after { content: ""; position: absolute; left: -3px; width: 3px; border-radius: 3px 0 0 3px; background: #404657; }
+    .device::before { top: 58px; height: 33px; }
+    .device::after { top: 103px; height: 43px; }
+    .screen {
+      position: relative; width: 240px; height: 320px; overflow: hidden; isolation: isolate;
+      border-radius: 11px; background: var(--screen-bg); color: var(--screen-text);
+      box-shadow: inset 0 0 0 1px rgba(255,255,255,.04);
+      --screen-bg: #1a1b26;
+      --surface: #24283b;
+      --surface-pressed: #2d3554;
+      --panel-bg: #16161e;
+      --screen-text: #c0caf5;
+      --screen-muted: #a9b1d6;
+      --screen-soft: #707a9a;
+      --accent: #7aa2f7;
+      --accent-cyan: #7dcfff;
+      --accent-purple: #bb9af7;
+      --accent-green: #9ece6a;
+      --accent-amber: #e0af68;
+      --accent-red: #f7768e;
+    }
+    body[data-theme="dark"] .screen {
+      --screen-bg: #242424; --surface: #303030; --surface-pressed: #404040; --panel-bg: #1e1e1e;
+      --screen-text: #ffffff; --screen-muted: #a0a0a0; --screen-soft: #797979; --accent: #3584e4;
+      --accent-cyan: #00b0d6; --accent-purple: #9141ac; --accent-green: #2ec27e; --accent-amber: #ff7800; --accent-red: #e01b24;
+    }
+    body[data-theme="light"] .screen {
+      --screen-bg: #ecedf0; --surface: #ffffff; --surface-pressed: #dddfe4; --panel-bg: #ffffff;
+      --screen-text: #323232; --screen-muted: #737373; --screen-soft: #919191; --accent: #3584e4;
+      --accent-cyan: #0099bc; --accent-purple: #9141ac; --accent-green: #17875a; --accent-amber: #a86530; --accent-red: #d92132;
+    }
+    /* Keep the mockup aligned with the repository's light palette. */
+    body[data-theme="light"][data-tint="on"] .screen { --screen-bg: #e7e9ee; --surface: #f9faff; }
+    body[data-theme="dark"][data-tint="on"] .screen { --screen-bg: #252832; --surface: #30323f; }
+    body[data-theme="tokyo"][data-tint="on"] .screen { --screen-bg: #1c1e2d; --surface: #252a40; }
+
+    .glyph {
+      display: inline-block; width: var(--glyph-size, 18px); height: var(--glyph-size, 18px); flex: 0 0 auto;
+      background-color: currentColor;
+      -webkit-mask-image: var(--glyph-image); mask-image: var(--glyph-image);
+      -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat;
+      -webkit-mask-position: center; mask-position: center;
+      -webkit-mask-size: contain; mask-size: contain;
+    }
+    .status-bar { position: relative; z-index: 1; display: flex; align-items: center; justify-content: space-between; height: 24px; padding: 0 7px; background: var(--panel-bg); color: var(--screen-text); font-size: 10px; line-height: 1; }
+    .status-left, .status-right { display: flex; align-items: center; gap: 5px; min-width: 0; }
+    .status-left { font-weight: 650; letter-spacing: .01em; }
+    .status-right { gap: 4px; color: var(--screen-muted); }
+    .status-right .glyph { width: 12px; height: 12px; }
+    .status-right .battery-glyph { width: 15px; }
+    .status-time { position: absolute; left: 50%; top: 50%; transform: translate(-50%,-50%); font: 10px var(--mono); color: var(--screen-text); }
+    .page-header { display: flex; align-items: center; height: 36px; padding: 0 6px; gap: 5px; border-bottom: 1px solid color-mix(in srgb, var(--screen-muted) 13%, transparent); }
+    .header-back, .header-action { display: grid; place-items: center; flex: 0 0 28px; width: 28px; height: 30px; border: 0; border-radius: 7px; background: transparent; color: var(--screen-muted); cursor: pointer; }
+    .header-back:hover, .header-action:hover { background: var(--surface); color: var(--screen-text); }
+    .header-back .glyph { width: 18px; height: 18px; }
+    .page-title { overflow: hidden; margin: 0; color: var(--screen-text); font-size: 15px; font-weight: 650; line-height: 1; text-overflow: ellipsis; white-space: nowrap; }
+    .header-spacer { flex: 1; }
+    .header-action .glyph { width: 16px; height: 16px; }
+    .page-body { height: 260px; overflow-y: auto; overscroll-behavior: contain; padding: 6px; scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--screen-muted) 36%, transparent) transparent; }
+    .page-body::-webkit-scrollbar { width: 3px; }
+    .page-body::-webkit-scrollbar-thumb { border-radius: 9px; background: color-mix(in srgb, var(--screen-muted) 38%, transparent); }
+    .screen-card { border: 1px solid color-mix(in srgb, var(--screen-muted) 10%, transparent); border-radius: 10px; background: var(--surface); box-shadow: 0 3px 12px rgba(0,0,0,.08); }
+    .card-pad { padding: 8px; }
+    .card-head { display: flex; align-items: center; justify-content: space-between; gap: 6px; margin: 0 0 7px; color: var(--screen-text); font-size: 12px; font-weight: 650; }
+    .card-head small { color: var(--screen-soft); font: 8px var(--mono); letter-spacing: .08em; text-transform: uppercase; }
+    .subtle-copy { margin: 6px 0 0; color: var(--screen-muted); font-size: 9px; line-height: 1.35; }
+    .stack { display: flex; flex-direction: column; gap: 6px; }
+
+    .theme-choices { display: grid; grid-template-columns: 1fr 1fr 1.3fr; gap: 4px; }
+    .theme-choice { position: relative; min-height: 34px; padding: 5px 4px; border: 1px solid color-mix(in srgb, var(--screen-muted) 16%, transparent); border-radius: 7px; color: var(--screen-muted); background: var(--surface-pressed); cursor: pointer; font-size: 9.5px; font-weight: 600; white-space: nowrap; }
+    .theme-choice:hover { color: var(--screen-text); }
+    .theme-choice[aria-checked="true"] { border-color: var(--accent); color: var(--screen-text); background: color-mix(in srgb, var(--accent) 18%, var(--surface)); box-shadow: inset 0 -2px var(--accent); }
+    body[data-theme="tokyo"] .theme-choice[aria-checked="true"] { color: #e7edff; }
+    body[data-theme="dark"] .theme-choice[aria-checked="true"] { color: #fff; }
+    body[data-theme="light"] .theme-choice[aria-checked="true"] { color: #18345f; }
+
+    .palette-row { display: flex; gap: 4px; height: 13px; margin-top: 8px; overflow: hidden; border-radius: 5px; }
+    .palette-row span { flex: 1; border-radius: 3px; }
+    .glyph-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; }
+    .glyph-demo { display: flex; min-width: 0; min-height: 47px; flex-direction: column; align-items: center; justify-content: center; gap: 3px; padding: 4px 2px 3px; border: 1px solid transparent; border-radius: 7px; color: var(--screen-muted); background: color-mix(in srgb, var(--screen-bg) 24%, transparent); cursor: pointer; }
+    .glyph-demo:hover { border-color: color-mix(in srgb, var(--accent) 42%, transparent); }
+    .glyph-demo[aria-pressed="true"] { border-color: color-mix(in srgb, var(--accent) 65%, transparent); background: color-mix(in srgb, var(--accent) 12%, var(--surface)); }
+    .glyph-demo .glyph { width: 18px; height: 18px; }
+    .glyph-demo span:last-child { font-size: 8px; line-height: 1; }
+    .accent-blue { color: var(--accent); }
+    .accent-cyan { color: var(--accent-cyan); }
+    .accent-purple { color: var(--accent-purple); }
+    .accent-green { color: var(--accent-green); }
+    .accent-amber { color: var(--accent-amber); }
+    .accent-red { color: var(--accent-red); }
+    .muted-icon { color: var(--screen-muted); }
+    .glowable { filter: none; }
+    body[data-glow="subtle"] .glowable { filter: drop-shadow(0 0 2px currentColor); }
+    body[data-glow="subtle"] .glyph-demo[aria-pressed="true"] .glowable { filter: drop-shadow(0 0 3px currentColor); }
+    .notice { display: flex; align-items: center; gap: 7px; margin-top: 6px; padding: 7px; border-radius: 7px; color: var(--screen-muted); background: color-mix(in srgb, var(--surface-pressed) 60%, transparent); font-size: 8px; line-height: 1.35; }
+    .notice .glyph { width: 13px; height: 13px; flex: 0 0 13px; }
+
+    .simple-row, .track-row { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 42px; padding: 6px 7px; border: 0; border-bottom: 1px solid color-mix(in srgb, var(--screen-muted) 11%, transparent); color: var(--screen-text); text-align: left; background: transparent; cursor: pointer; }
+    .simple-row:last-child, .track-row:last-child { border-bottom: 0; }
+    .simple-row:hover, .track-row:hover { border-radius: 7px; background: var(--surface-pressed); }
+    .simple-row .glyph, .track-row .glyph { width: 19px; height: 19px; flex: 0 0 19px; }
+    .row-copy { display: flex; flex: 1; min-width: 0; flex-direction: column; gap: 3px; }
+    .row-copy strong { overflow: hidden; font-size: 11px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+    .row-copy small { overflow: hidden; color: var(--screen-muted); font-size: 8.5px; text-overflow: ellipsis; white-space: nowrap; }
+    .row-end { color: var(--screen-soft); font-size: 8px; white-space: nowrap; }
+    .chevron-right { width: 15px !important; height: 15px !important; color: var(--screen-soft); }
+    .settings-card { overflow: hidden; }
+
+    .home-title-note { margin: 0 1px 6px; color: var(--screen-muted); font-size: 9px; }
+    .menu-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+    .menu-tile { display: flex; min-height: 58px; align-items: center; gap: 8px; padding: 8px; border: 1px solid color-mix(in srgb, var(--screen-muted) 10%, transparent); border-radius: 9px; color: var(--screen-text); background: var(--surface); cursor: pointer; text-align: left; }
+    .menu-tile:hover { border-color: color-mix(in srgb, var(--accent) 58%, transparent); background: var(--surface-pressed); }
+    .menu-tile .glyph { width: 22px; height: 22px; flex: 0 0 22px; }
+    .menu-tile .tile-text { min-width: 0; font-size: 10px; font-weight: 600; line-height: 1.15; }
+    .now-playing-strip { display: flex; align-items: center; gap: 7px; min-height: 35px; margin-top: 7px; padding: 4px 6px; border: 1px solid color-mix(in srgb, var(--accent) 27%, transparent); border-radius: 8px; background: color-mix(in srgb, var(--accent) 8%, var(--surface)); cursor: pointer; }
+    .now-playing-strip .glyph { width: 15px; height: 15px; flex: 0 0 15px; }
+    .now-playing-strip .row-copy strong { font-size: 9px; }
+    .now-playing-strip .row-copy small { font-size: 7.5px; }
+
+    .track-list { overflow: hidden; }
+    .track-row { min-height: 48px; padding: 6px 7px; }
+    .track-art { display: grid; width: 31px; height: 31px; flex: 0 0 31px; place-items: center; border-radius: 6px; background: color-mix(in srgb, var(--accent-purple) 20%, var(--surface-pressed)); }
+    .track-art .glyph { width: 18px; height: 18px; color: var(--accent-purple); }
+    .track-row[aria-current="true"] { background: color-mix(in srgb, var(--accent) 11%, var(--surface)); }
+    .track-row[aria-current="true"] .row-copy strong { color: var(--accent); }
+    .track-row .playmark { width: 15px; height: 15px; color: var(--accent-cyan); }
+
+    .player-content { display: flex; flex-direction: column; align-items: center; padding: 1px 7px 6px; }
+    .cover-art { position: relative; display: grid; width: 104px; height: 104px; place-items: center; overflow: hidden; margin: 2px auto 8px; border: 1px solid color-mix(in srgb, var(--accent-cyan) 36%, transparent); border-radius: 13px; background: radial-gradient(circle at 50% 47%, color-mix(in srgb, var(--accent-purple) 30%, var(--surface)) 0 17%, transparent 18%), linear-gradient(135deg, #20243a, #161824 58%, #242b42); box-shadow: 0 0 18px color-mix(in srgb, var(--accent) 13%, transparent); }
+    .cover-art::before, .cover-art::after { content: ""; position: absolute; width: 132px; height: 1px; background: color-mix(in srgb, var(--accent-cyan) 24%, transparent); transform: rotate(-34deg); }
+    .cover-art::after { transform: rotate(34deg); background: color-mix(in srgb, var(--accent-purple) 24%, transparent); }
+    .cover-art .glyph { z-index: 1; width: 40px; height: 40px; color: var(--accent-cyan); }
+    .track-title { max-width: 100%; margin: 0; overflow: hidden; color: var(--screen-text); font-size: 14px; font-weight: 680; letter-spacing: -.02em; text-overflow: ellipsis; white-space: nowrap; }
+    .artist-name { margin: 3px 0 0; color: var(--screen-muted); font-size: 9px; }
+    .quality-pill { margin-top: 5px; padding: 3px 6px; border: 1px solid color-mix(in srgb, var(--accent-cyan) 25%, transparent); border-radius: 999px; color: var(--accent-cyan); font: 7px var(--mono); }
+    .timeline { width: 100%; margin-top: 8px; }
+    .seek-range { display: block; width: 100%; height: 14px; margin: 0; accent-color: var(--accent); cursor: pointer; }
+    .seek-times { display: flex; align-items: center; justify-content: space-between; color: var(--screen-muted); font: 8px var(--mono); }
+    .transport { display: flex; align-items: center; justify-content: center; gap: 13px; width: 100%; margin-top: 7px; }
+    .transport-button { display: grid; width: 32px; height: 32px; place-items: center; border: 0; border-radius: 50%; color: var(--screen-muted); background: transparent; cursor: pointer; }
+    .transport-button:hover { color: var(--screen-text); background: var(--surface-pressed); }
+    .transport-button .glyph { width: 19px; height: 19px; }
+    .transport-button.primary { width: 42px; height: 42px; border: 1px solid color-mix(in srgb, var(--accent) 65%, transparent); color: #11131b; background: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 13%, transparent); }
+    .transport-button.primary:hover { filter: brightness(1.08); }
+    .transport-button.primary .glyph { width: 20px; height: 20px; color: #11131b; }
+    .transport-button.favorite { position: absolute; right: 14px; top: 4px; width: 28px; height: 28px; }
+    .player-topline { position: relative; width: 100%; display: flex; justify-content: center; }
+    .player-utilities { display: flex; justify-content: space-between; align-items: center; width: 100%; margin-top: 3px; }
+    .player-utility { display: flex; align-items: center; gap: 4px; padding: 3px 4px; border: 0; border-radius: 5px; color: var(--screen-muted); background: transparent; cursor: pointer; font-size: 8px; }
+    .player-utility:hover, .player-utility[aria-pressed="true"] { color: var(--accent-purple); background: color-mix(in srgb, var(--accent-purple) 12%, transparent); }
+    .player-utility .glyph { width: 12px; height: 12px; }
+
+    .wireless-card { overflow: hidden; }
+    .wireless-row { display: flex; align-items: center; gap: 8px; min-height: 50px; padding: 7px 8px; border-bottom: 1px solid color-mix(in srgb, var(--screen-muted) 11%, transparent); }
+    .wireless-row:last-child { border: 0; }
+    .wireless-row > .glyph { width: 21px; height: 21px; flex: 0 0 21px; }
+    .mini-toggle { width: 34px; height: 19px; padding: 2px; border: 0; border-radius: 99px; background: var(--surface-pressed); cursor: pointer; }
+    .mini-toggle::after { content: ""; display: block; width: 15px; height: 15px; border-radius: 50%; background: var(--screen-muted); transition: transform .12s, background .12s; }
+    .mini-toggle[aria-checked="true"] { background: var(--accent); }
+    .mini-toggle[aria-checked="true"]::after { transform: translateX(15px); background: #f6f8ff; }
+    .toast { position: absolute; z-index: 5; left: 50%; bottom: 8px; transform: translate(-50%, 12px); max-width: 205px; padding: 7px 10px; border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent); border-radius: 9px; opacity: 0; color: var(--screen-text); background: var(--surface); font-size: 9px; text-align: center; pointer-events: none; transition: opacity .16s, transform .16s; }
+    .toast.show { transform: translate(-50%, 0); opacity: 1; }
+
+    .device-caption { margin: 13px auto 0; color: #6e7892; font: 10px var(--mono); text-align: center; }
+    .device-caption strong { color: #aab4cc; font-weight: 500; }
+
+    .info-column { display: flex; min-width: 0; flex-direction: column; gap: 13px; }
+    .info-card { padding: 17px 18px; border: 1px solid #292e42; border-radius: 15px; background: linear-gradient(145deg, rgba(27,30,44,.95), rgba(20,22,32,.94)); box-shadow: 0 9px 30px rgba(0,0,0,.15); }
+    .info-card h2 { display: flex; align-items: center; gap: 8px; margin: 0 0 12px; color: #dbe2f6; font-size: 14px; letter-spacing: -.01em; }
+    .info-card h2 .glyph { width: 16px; height: 16px; color: var(--cyan); }
+    .info-card p { margin: 0; color: #a0a9c1; font-size: 12px; line-height: 1.55; }
+    .preview-controls { display: flex; flex-wrap: wrap; gap: 7px; align-items: center; }
+    .control-label { flex-basis: 100%; margin: 0 0 1px; color: #858fa9; font: 9px var(--mono); letter-spacing: .09em; text-transform: uppercase; }
+    .glow-option { min-height: 32px; padding: 6px 11px; border: 1px solid #343b54; border-radius: 8px; color: #a6afc6; background: #1b1e2b; cursor: pointer; font-size: 11px; }
+    .glow-option:hover { border-color: #6279aa; color: #e1e7f6; }
+    .glow-option[aria-pressed="true"] { border-color: rgba(125,207,255,.55); color: #dff6ff; background: rgba(125,207,255,.1); }
+    .preview-only { margin-top: 8px !important; color: #7f8aa4 !important; font-size: 10px !important; }
+    .token-strip { display: flex; gap: 5px; margin-top: 11px; }
+    .token { flex: 1; min-width: 0; }
+    .token-swatch { height: 23px; border: 1px solid rgba(255,255,255,.09); border-radius: 6px; }
+    .token-label { display: block; overflow: hidden; margin-top: 5px; color: #8590a9; font: 8px var(--mono); text-overflow: ellipsis; white-space: nowrap; }
+    .plan-list { display: flex; flex-direction: column; gap: 10px; margin: 0; padding: 0; list-style: none; counter-reset: plan; }
+    .plan-list li { position: relative; min-height: 26px; padding-left: 31px; color: #abb3c8; font-size: 11px; line-height: 1.45; counter-increment: plan; }
+    .plan-list li::before { content: "0" counter(plan); position: absolute; left: 0; top: 0; display: grid; width: 23px; height: 22px; place-items: center; border: 1px solid #34405c; border-radius: 6px; color: #8faef2; background: #202638; font: 9px var(--mono); }
+    .plan-list strong { color: #e0e6f7; font-weight: 600; }
+    .palette-code { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px 12px; margin-top: 12px; }
+    .code-line { display: flex; align-items: center; gap: 7px; color: #909bb3; font: 9px var(--mono); }
+    .code-line i { width: 10px; height: 10px; flex: 0 0 10px; border-radius: 3px; box-shadow: 0 0 8px color-mix(in srgb, currentColor 24%, transparent); }
+    .resource-note { display: flex; align-items: flex-start; gap: 9px; padding: 11px 12px; border: 1px solid rgba(158,206,106,.18); border-radius: 11px; background: rgba(158,206,106,.05); }
+    .resource-note .glyph { width: 17px; height: 17px; flex: 0 0 17px; margin-top: 1px; color: var(--green); }
+    .resource-note p { color: #a5b098; font-size: 10px; }
+    .asset-proof { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+    .asset-proof span { padding: 4px 7px; border: 1px solid #343b53; border-radius: 99px; color: #9da8c1; background: #1a1d29; font: 8px var(--mono); }
+    .footer-note { margin-top: 20px; color: #65708a; font: 9px/1.6 var(--mono); text-align: center; }
+
+    @media (max-width: 830px) {
+      .page-wrap { max-width: 660px; padding: 26px 18px 36px; }
+      .masthead { align-items: flex-start; flex-direction: column; gap: 13px; margin-bottom: 20px; }
+      .workspace { grid-template-columns: minmax(0,1fr); gap: 25px; }
+      .preview-column { width: 100%; }
+      .stage { --scale: 1.22; }
+      .info-column { width: 100%; }
+    }
+    @media (max-width: 430px) {
+      .page-wrap { padding: 20px 12px 30px; }
+      .native-tag { font-size: 9px; }
+      .stage { --scale: 1.12; }
+      .info-card { padding: 14px; }
+      .view-tab { font-size: 10px; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { transition-duration: .01ms !important; scroll-behavior: auto !important; }
+    }
+  </style>
+</head>
+<body data-theme="tokyo" data-glow="subtle" data-tint="off">
+  <div class="page-wrap">
+    <header class="masthead">
+      <div>
+        <div class="eyebrow">Sonix Player · TempoTec V1</div>
+        <h1>Tokyo Night, sized for the V1.</h1>
+        <p class="intro">A clickable design preview for a third Appearance → Theme choice. The device display below uses a 240 × 320 logical canvas; it is enlarged for viewing, not redesigned for a larger screen.</p>
+      </div>
+      <div class="native-tag">240 × 320 px &nbsp;·&nbsp; portrait &nbsp;·&nbsp; V1</div>
+    </header>
+
+    <main class="workspace">
+      <section class="preview-column" aria-label="Interactive player mockup">
+        <div class="demo-label"><strong>Interactive device preview</strong><span>Tap the screen controls</span></div>
+        <nav class="view-tabs" aria-label="Preview screen">
+          <button class="view-tab" type="button" data-view="appearance" aria-pressed="true">Appearance</button>
+          <button class="view-tab" type="button" data-view="home" aria-pressed="false">Menu</button>
+          <button class="view-tab" type="button" data-view="music" aria-pressed="false">Music</button>
+          <button class="view-tab" type="button" data-view="player" aria-pressed="false">Now Playing</button>
+        </nav>
+
+        <div class="stage" aria-label="TempoTec V1 body preview">
+          <div class="device">
+            <div class="screen" id="screen" aria-label="240 by 320 pixel mock player screen">
+              <div class="status-bar" id="status-bar"></div>
+              <div id="viewport"></div>
+              <div class="toast" id="toast" role="status" aria-live="polite"></div>
+            </div>
+          </div>
+        </div>
+        <p class="device-caption"><strong>Native panel:</strong> 240 × 320 logical px &nbsp;·&nbsp; preview enlarged with CSS</p>
+      </section>
+
+      <aside class="info-column" aria-label="Prototype details and implementation plan">
+        <section class="info-card">
+          <h2><span class="glyph" style="--glyph-image:url('../../sonix-player/assets/icons/sun.svg')" aria-hidden="true"></span>Compare the icon halo</h2>
+          <div class="preview-controls" role="group" aria-label="Mockup-only icon halo preview">
+            <p class="control-label">Mockup-only visual comparison</p>
+            <button class="glow-option" type="button" data-glow-choice="off" aria-pressed="false">No halo</button>
+            <button class="glow-option" type="button" data-glow-choice="subtle" aria-pressed="true">Subtle static halo</button>
+          </div>
+          <p class="preview-only">This control is only for comparing the concept; it is not a proposed new setting on the player. In the firmware, any glow would be limited to active/selected glyphs, not applied as an animated effect everywhere.</p>
+        </section>
+
+        <section class="info-card">
+          <h2><span class="glyph" style="--glyph-image:url('../../sonix-player/assets/icons/music-settings.svg')" aria-hidden="true"></span>Tokyo Night palette</h2>
+          <p>Deep blue-black surfaces, readable lavender text, and restrained electric accents. Existing Dark and Light palettes are shown too and are not altered by this prototype.</p>
+          <div class="token-strip" aria-label="Tokyo Night color swatches">
+            <div class="token"><div class="token-swatch" style="background:#1a1b26"></div><span class="token-label">Background</span></div>
+            <div class="token"><div class="token-swatch" style="background:#24283b"></div><span class="token-label">Surface</span></div>
+            <div class="token"><div class="token-swatch" style="background:#c0caf5"></div><span class="token-label">Text</span></div>
+            <div class="token"><div class="token-swatch" style="background:#7aa2f7"></div><span class="token-label">Blue</span></div>
+            <div class="token"><div class="token-swatch" style="background:#7dcfff"></div><span class="token-label">Cyan</span></div>
+            <div class="token"><div class="token-swatch" style="background:#bb9af7"></div><span class="token-label">Violet</span></div>
+            <div class="token"><div class="token-swatch" style="background:#9ece6a"></div><span class="token-label">Green</span></div>
+          </div>
+          <div class="palette-code">
+            <div class="code-line"><i style="background:#1a1b26"></i>BG&nbsp; #1A1B26</div>
+            <div class="code-line"><i style="background:#24283b"></i>Surface&nbsp; #24283B</div>
+            <div class="code-line"><i style="background:#c0caf5"></i>Text&nbsp; #C0CAF5</div>
+            <div class="code-line"><i style="background:#7aa2f7"></i>Blue&nbsp; #7AA2F7</div>
+            <div class="code-line"><i style="background:#7dcfff"></i>Cyan&nbsp; #7DCFFF</div>
+            <div class="code-line"><i style="background:#bb9af7"></i>Violet&nbsp; #BB9AF7</div>
+          </div>
+        </section>
+
+        <section class="info-card">
+          <h2><span class="glyph" style="--glyph-image:url('../../sonix-player/assets/icons/check.svg')" aria-hidden="true"></span>What I would change after approval</h2>
+          <ol class="plan-list">
+            <li><strong>Add a third choice in the existing Theme card</strong> on Appearance: Dark, Light, Tokyo Night. Selection applies immediately and persists.</li>
+            <li><strong>Add a Tokyo Night palette to the shared theme manager</strong> while leaving today's Dark/Light colors and settings behavior intact; read older saved Dark/Light preferences as before.</li>
+            <li><strong>Recolor the existing function-matched icons</strong>—music, playback, wireless, settings, EQ—with Tokyo Night foreground and semantic accent colors. No AI-generated icon artwork.</li>
+            <li><strong>Validate the V1 profile</strong> at 240 × 320, including the wrapped/compact Theme choices and memory/performance-sensitive drawing.</li>
+          </ol>
+          <div class="asset-proof" aria-label="Existing icon assets used in the prototype">
+            <span>music-2.svg</span><span>radio-recent.svg</span><span>wifi-high.svg</span><span>bluetooth.svg</span><span>music-settings.svg</span><span>files-audiobook.svg</span>
+          </div>
+        </section>
+
+        <div class="resource-note">
+          <span class="glyph" style="--glyph-image:url('../../sonix-player/assets/icons/zap.svg')" aria-hidden="true"></span>
+          <p><strong>V1-friendly approach:</strong> the prototype reuses the repository’s existing glyphs. The production palette would be a few static colors; no new fonts, large icon packs, full-screen blur buffers, or animated glow. A subtle active-icon halo can be evaluated separately against the device’s draw cost.</p>
+        </div>
+      </aside>
+    </main>
+    <p class="footer-note">DESIGN GATE · THIS PAGE IS A STANDALONE MOCKUP. FIRMWARE SOURCES HAVE NOT BEEN CHANGED.</p>
+  </div>
+
+  <script>
+    (() => {
+      const root = document.body;
+      const viewport = document.getElementById('viewport');
+      const screen = document.getElementById('screen');
+      const statusBar = document.getElementById('status-bar');
+      const toast = document.getElementById('toast');
+      const state = {
+        theme: 'tokyo',
+        view: 'appearance',
+        previousView: 'home',
+        halo: 'subtle',
+        currentTrack: 1,
+        playing: true,
+        favorite: false,
+        shuffle: false,
+        repeat: false,
+        wifi: true,
+        bluetooth: true,
+        selectedDemo: 'play',
+        tint: false,
+        progress: 38
+      };
+
+      const tracks = [
+        { title: 'A Walk Through Blue', artist: 'NOVA WAVE', album: 'Night Signals', length: '4:12', quality: 'FLAC · 24 / 96' },
+        { title: 'Midnight City', artist: 'M83', album: 'Hurry Up, We’re Dreaming', length: '4:03', quality: 'FLAC · 16 / 44.1' },
+        { title: 'Soft Lights', artist: 'Luna Park', album: 'Afterglow', length: '3:48', quality: 'FLAC · 24 / 96' }
+      ];
+
+      const iconFiles = {
+        back: 'chevron-left.svg', next: 'chevron-right.svg', music: 'music-2.svg', note: 'music-note.svg',
+        radio: 'radio-recent.svg', wifi: 'wifi-high.svg', bluetooth: 'bluetooth.svg', books: 'files-audiobook.svg',
+        more: 'ellipsis-vertical.svg', settings: 'music-settings.svg', search: 'search.svg', play: 'play.svg',
+        pause: 'pause.svg', prev: 'skip-back.svg', skip: 'skip-forward.svg', album: 'album.svg', heart: 'heart.svg',
+        list: 'list-music.svg', eq: 'equalizer.svg', headphones: 'headphones.svg', artist: 'artist.svg',
+        battery: 'battery.svg', check: 'check.svg', sun: 'sun.svg', shuffle: 'shuffle.svg', repeat: 'repeat.svg',
+        star: 'star.svg', zap: 'zap.svg', folder: 'folder.svg', chevron: 'chevron-right.svg', close: 'close.svg'
+      };
+      const iconPath = name => `../../sonix-player/assets/icons/${iconFiles[name] || name}`;
+      const glyph = (name, tone = 'muted-icon', size = 18, extra = '', label = '') =>
+        `<span class="glyph ${tone} ${extra}" style="--glyph-image:url('${iconPath(name)}');--glyph-size:${size}px"${label ? ` role="img" aria-label="${label}"` : ' aria-hidden="true"'}></span>`;
+
+      function applyState() {
+        root.dataset.theme = state.theme;
+        root.dataset.glow = state.halo;
+        root.dataset.tint = state.tint ? 'on' : 'off';
+        document.querySelectorAll('[data-glow-choice]').forEach(button => {
+          button.setAttribute('aria-pressed', String(button.dataset.glowChoice === state.halo));
+        });
+        document.querySelectorAll('.view-tab').forEach(button => {
+          const current = button.dataset.view === state.view || (button.dataset.view === 'appearance' && state.view === 'settings') || (button.dataset.view === 'music' && ['streaming','wireless','books','more'].includes(state.view));
+          button.setAttribute('aria-pressed', String(current));
+        });
+      }
+
+      function renderStatus() {
+        statusBar.innerHTML = `
+          <div class="status-left">${glyph('headphones','accent-cyan',12,'glowable')}<span>67</span></div>
+          <span class="status-time">11:26</span>
+          <div class="status-right">
+            ${glyph(state.wifi ? 'wifi' : 'wifi','accent-cyan',12, state.wifi ? 'glowable' : '')}
+            ${glyph('bluetooth','accent-blue',11, state.bluetooth ? 'glowable' : '')}
+            <span>78%</span>${glyph('battery','accent-green',14,'battery-glyph')}
+          </div>`;
+      }
+
+      function pageHeader(title, backView = 'home', action = '') {
+        return `<header class="page-header">
+          <button class="header-back" type="button" data-action="navigate" data-view="${backView}" aria-label="Go back">${glyph('back','muted-icon',18)}</button>
+          <h2 class="page-title">${title}</h2><span class="header-spacer"></span>${action}
+        </header>`;
+      }
+
+      function renderAppearance() {
+        const choices = [
+          ['dark', 'Dark'], ['light', 'Light'], ['tokyo', 'Tokyo Night']
+        ].map(([id, label]) => `<button class="theme-choice" type="button" role="radio" aria-checked="${state.theme === id}" data-action="theme" data-theme-choice="${id}">${label}</button>`).join('');
+        const demos = [
+          ['music','Music','accent-cyan'], ['play','Play','accent-blue'], ['wifi','Wi-Fi','accent-cyan'], ['eq','EQ','accent-purple']
+        ].map(([icon,label,tone]) => `<button class="glyph-demo" type="button" aria-pressed="${state.selectedDemo === icon}" data-action="demo-icon" data-demo="${icon}" aria-label="Preview ${label} icon">${glyph(icon,tone,18,state.selectedDemo === icon ? 'glowable' : '')}<span>${label}</span></button>`).join('');
+        return `${pageHeader('Appearance','settings')}
+          <main class="page-body" aria-label="Appearance settings preview">
+            <div class="stack">
+              <section class="screen-card card-pad">
+                <div class="card-head"><span>Theme</span><small>DISPLAY</small></div>
+                <div class="theme-choices" role="radiogroup" aria-label="Theme">${choices}</div>
+                <p class="subtle-copy">Applies now · saved on this device</p>
+              </section>
+              <section class="screen-card card-pad">
+                <div class="card-head"><span>Tokyo Night colors</span><small>PALETTE</small></div>
+                <div class="palette-row" aria-label="Tokyo Night palette preview">
+                  <span style="background:#1a1b26"></span><span style="background:#24283b"></span><span style="background:#c0caf5"></span><span style="background:#7aa2f7"></span><span style="background:#7dcfff"></span><span style="background:#bb9af7"></span><span style="background:#9ece6a"></span><span style="background:#f7768e"></span>
+                </div>
+                <p class="subtle-copy">Blue for playback · cyan for audio · violet for DSP · green for success</p>
+              </section>
+              <section class="screen-card card-pad">
+                <div class="card-head"><span>Function-matched glyphs</span><small>PREVIEW</small></div>
+                <div class="glyph-grid">${demos}</div>
+              </section>
+              <section class="screen-card settings-card" aria-label="Other Appearance options retained">
+                <button class="simple-row" type="button" data-action="toggle-tint">
+                  ${glyph('sun','accent-amber',18)}<span class="row-copy"><strong>Dynamic tint</strong><small>Existing Appearance option</small></span>
+                  <span class="row-end">${state.tint ? 'On' : 'Off'}</span>
+                </button>
+                <button class="simple-row" type="button" data-action="notice" data-message="Existing font, clock, and boot-screen choices stay below this section.">
+                  ${glyph('settings','muted-icon',18)}<span class="row-copy"><strong>Other appearance options</strong><small>Font · clock · boot screen · accent</small></span>${glyph('chevron','muted-icon',15,'chevron-right')}
+                </button>
+              </section>
+            </div>
+          </main>`;
+      }
+
+      function renderSettings() {
+        return `${pageHeader('Settings','home')}
+          <main class="page-body">
+            <p class="home-title-note">Choose an option to continue.</p>
+            <section class="screen-card settings-card">
+              <button class="simple-row" type="button" data-action="navigate" data-view="appearance">
+                ${glyph('sun','accent-cyan',20,'glowable')}<span class="row-copy"><strong>Appearance</strong><small>Theme · colors · icons</small></span>${glyph('chevron','muted-icon',15,'chevron-right')}
+              </button>
+              <button class="simple-row" type="button" data-action="notice" data-message="This concept focuses on Appearance; this existing settings route stays as-is.">
+                ${glyph('album','accent-purple',19)}<span class="row-copy"><strong>Screen</strong><small>Brightness · timeout</small></span>${glyph('chevron','muted-icon',15,'chevron-right')}
+              </button>
+              <button class="simple-row" type="button" data-action="notice" data-message="This concept focuses on Appearance; this existing settings route stays as-is.">
+                ${glyph('settings','muted-icon',19)}<span class="row-copy"><strong>Date and time</strong><small>Clock · time zone</small></span>${glyph('chevron','muted-icon',15,'chevron-right')}
+              </button>
+              <button class="simple-row" type="button" data-action="notice" data-message="This concept focuses on Appearance; this existing settings route stays as-is.">
+                ${glyph('zap','accent-amber',19)}<span class="row-copy"><strong>Power</strong><small>Sleep · charge limit</small></span>${glyph('chevron','muted-icon',15,'chevron-right')}
+              </button>
+            </section>
+          </main>`;
+      }
+
+      const menuItems = [
+        ['Music','music','accent-cyan','music'], ['Streaming','radio','accent-purple','streaming'],
+        ['Wireless','wifi','accent-blue','wireless'], ['Audiobooks','books','accent-amber','books'],
+        ['More','more','accent-green','more'], ['Settings','settings','muted-icon','settings']
+      ];
+      function renderHome() {
+        const tiles = menuItems.map(([label,icon,tone,target]) => `<button class="menu-tile" type="button" data-action="navigate" data-view="${target}">${glyph(icon,tone,22,label === 'Settings' ? '' : 'glowable')}<span class="tile-text">${label}</span></button>`).join('');
+        return `<header class="page-header"><span style="width:5px"></span><h2 class="page-title">Sonix Player</h2><span class="header-spacer"></span><button class="header-action" type="button" data-action="navigate" data-view="settings" aria-label="Settings">${glyph('settings','muted-icon',16)}</button></header>
+          <main class="page-body"><p class="home-title-note">Your music, ready when you are.</p><div class="menu-grid">${tiles}</div>
+          <button class="now-playing-strip" type="button" data-action="navigate" data-view="player">${glyph(state.playing ? 'pause' : 'play','accent-cyan',15,'glowable')}<span class="row-copy"><strong>${tracks[state.currentTrack].title}</strong><small>${tracks[state.currentTrack].artist} · Now playing</small></span>${glyph('chevron','muted-icon',14,'chevron-right')}</button></main>`;
+      }
+
+      function renderMusic() {
+        const list = tracks.map((track,index) => `<button class="track-row" type="button" data-action="select-track" data-index="${index}" aria-current="${state.currentTrack === index}">
+          <span class="track-art">${glyph(index === state.currentTrack ? 'album' : 'music','accent-purple',18)}</span>
+          <span class="row-copy"><strong>${track.title}</strong><small>${track.artist} · ${track.album}</small></span>
+          ${state.currentTrack === index ? glyph(state.playing ? 'pause' : 'play','accent-cyan',15,'playmark glowable') : `<span class="row-end">${track.length}</span>`}
+        </button>`).join('');
+        return `${pageHeader('Music','home',`<button class="header-action" type="button" data-action="notice" data-message="Search is represented by the real search glyph in the player UI." aria-label="Search">${glyph('search','accent-cyan',16)}</button>`)}
+          <main class="page-body"><p class="home-title-note">Recently played · tap a track</p><section class="screen-card track-list">${list}</section>
+          <section class="screen-card card-pad" style="margin-top:6px"><div class="card-head"><span>Browse music</span><small>LIBRARY</small></div><div class="glyph-grid">${[['artist','Artists','accent-cyan'],['album','Albums','accent-purple'],['list','Playlists','accent-blue'],['search','Search','accent-amber']].map(([icon,label,tone]) => `<button class="glyph-demo" type="button" data-action="notice" data-message="${label} uses its existing function-matched icon.">${glyph(icon,tone,17)}<span>${label}</span></button>`).join('')}</div></section></main>`;
+      }
+
+      function renderPlayer() {
+        const track = tracks[state.currentTrack];
+        const elapsed = Math.floor((state.progress / 100) * 236);
+        const elapsedText = `${Math.floor(elapsed / 60)}:${String(elapsed % 60).padStart(2,'0')}`;
+        return `${pageHeader('Now Playing','music',`<button class="header-action" type="button" data-action="favorite" aria-label="${state.favorite ? 'Remove favorite' : 'Add favorite'}">${glyph('heart',state.favorite ? 'accent-red' : 'muted-icon',16,state.favorite ? 'glowable' : '')}</button>`)}
+          <main class="page-body"><div class="player-content">
+            <div class="cover-art" aria-label="Placeholder album art using the existing album glyph">${glyph('album','accent-cyan',40,'glowable')}</div>
+            <div class="player-topline"><div style="min-width:0;text-align:center"><h3 class="track-title">${track.title}</h3><p class="artist-name">${track.artist} · ${track.album}</p><div class="quality-pill">${track.quality}</div></div></div>
+            <div class="timeline"><input class="seek-range" type="range" min="0" max="100" value="${state.progress}" data-progress aria-label="Seek in track"><div class="seek-times"><span class="elapsed-time">${elapsedText}</span><span>${track.length}</span></div></div>
+            <div class="transport" role="group" aria-label="Playback controls">
+              <button class="transport-button" type="button" data-action="previous" aria-label="Previous track">${glyph('prev','accent-cyan',19)}</button>
+              <button class="transport-button primary" type="button" data-action="play-pause" aria-label="${state.playing ? 'Pause' : 'Play'}">${glyph(state.playing ? 'pause' : 'play','',20,'glowable')}</button>
+              <button class="transport-button" type="button" data-action="next" aria-label="Next track">${glyph('skip','accent-cyan',19)}</button>
+            </div>
+            <div class="player-utilities">
+              <button class="player-utility" type="button" data-action="shuffle" aria-pressed="${state.shuffle}">${glyph('shuffle',state.shuffle ? 'accent-purple' : 'muted-icon',12)}Shuffle</button>
+              <button class="player-utility" type="button" data-action="favorite" aria-pressed="${state.favorite}">${glyph('heart',state.favorite ? 'accent-red' : 'muted-icon',12)}${state.favorite ? 'Saved' : 'Favorite'}</button>
+              <button class="player-utility" type="button" data-action="repeat" aria-pressed="${state.repeat}">${glyph('repeat',state.repeat ? 'accent-purple' : 'muted-icon',12)}Repeat</button>
+            </div>
+          </div></main>`;
+      }
+
+      function renderWireless() {
+        const row = (kind,label,detail,on) => `<div class="wireless-row">${glyph(kind,on ? 'accent-cyan' : 'muted-icon',21,on ? 'glowable' : '')}<span class="row-copy"><strong>${label}</strong><small>${detail}</small></span><button class="mini-toggle" type="button" role="switch" aria-checked="${on}" data-action="toggle-${kind}" aria-label="Toggle ${label}"></button></div>`;
+        return `${pageHeader('Wireless','home')}<main class="page-body"><p class="home-title-note">Connectivity preview</p><section class="screen-card wireless-card">${row('wifi','Wi-Fi',state.wifi ? 'Connected · Home network' : 'Off',state.wifi)}${row('bluetooth','Bluetooth',state.bluetooth ? 'Connected · Headphones' : 'Off',state.bluetooth)}</section>
+          <section class="screen-card card-pad" style="margin-top:6px"><div class="card-head"><span>Audio output</span><small>DAC</small></div><button class="simple-row" type="button" data-action="notice" style="padding-left:0;padding-right:0">${glyph('headphones','accent-purple',19)}<span class="row-copy"><strong>Headphones</strong><small>3.5 mm · high quality</small></span></button></section></main>`;
+      }
+
+      function renderBooks() {
+        return `${pageHeader('Audiobooks','home')}<main class="page-body"><p class="home-title-note">Continue listening</p><section class="screen-card track-list">
+          <button class="track-row" type="button" data-action="play-book">${glyph('books','accent-amber',23)}<span class="row-copy"><strong>The Long Way Home</strong><small>R. A. North · Chapter 8</small></span>${glyph('play','accent-cyan',15,'glowable')}</button>
+          <button class="track-row" type="button" data-action="play-book">${glyph('books','accent-purple',23)}<span class="row-copy"><strong>Quiet Hours</strong><small>M. Vale · Chapter 2</small></span><span class="row-end">6h 18m</span></button>
+          </section></main>`;
+      }
+
+      function renderMore() {
+        return `${pageHeader('More','home')}<main class="page-body"><p class="home-title-note">More player features</p><section class="screen-card settings-card">
+          <button class="simple-row" type="button" data-action="navigate" data-view="wireless">${glyph('eq','accent-purple',19)}<span class="row-copy"><strong>Equalizer</strong><small>Shape your sound</small></span>${glyph('chevron','muted-icon',15,'chevron-right')}</button>
+          <button class="simple-row" type="button" data-action="navigate" data-view="music">${glyph('folder','accent-amber',19)}<span class="row-copy"><strong>File browser</strong><small>Browse storage</small></span>${glyph('chevron','muted-icon',15,'chevron-right')}</button>
+          <button class="simple-row" type="button" data-action="notice" data-message="This preview uses the existing Sonix Player feature names and icon family.">${glyph('search','accent-cyan',19)}<span class="row-copy"><strong>Search</strong><small>Find music on the device</small></span>${glyph('chevron','muted-icon',15,'chevron-right')}</button>
+          </section></main>`;
+      }
+
+      function render() {
+        applyState();
+        renderStatus();
+        const views = {
+          appearance: renderAppearance,
+          settings: renderSettings,
+          home: renderHome,
+          music: renderMusic,
+          player: renderPlayer,
+          streaming: () => `${pageHeader('Streaming','home')}<main class="page-body"><p class="home-title-note">Services use recognizable existing player controls.</p><section class="screen-card settings-card">
+            <button class="simple-row" type="button" data-action="notice" data-message="Qobuz · streaming service">${glyph('music','accent-cyan',19)}<span class="row-copy"><strong>Qobuz</strong><small>Albums · artists · playlists</small></span>${glyph('chevron','muted-icon',15,'chevron-right')}</button>
+            <button class="simple-row" type="button" data-action="notice" data-message="Radio · live playback">${glyph('radio','accent-purple',19)}<span class="row-copy"><strong>Radio</strong><small>Stations · recent</small></span>${glyph('chevron','muted-icon',15,'chevron-right')}</button>
+            <button class="simple-row" type="button" data-action="notice" data-message="Podcasts · episodes and downloads">${glyph('list','accent-amber',19)}<span class="row-copy"><strong>Podcasts</strong><small>Episodes · downloads</small></span>${glyph('chevron','muted-icon',15,'chevron-right')}</button>
+          </section></main>`,
+          wireless: renderWireless,
+          books: renderBooks,
+          more: renderMore
+        };
+        viewport.innerHTML = (views[state.view] || renderHome)();
+      }
+
+      let toastTimer;
+      function showToast(message) {
+        toast.textContent = message;
+        toast.classList.add('show');
+        clearTimeout(toastTimer);
+        toastTimer = setTimeout(() => toast.classList.remove('show'), 1850);
+      }
+      function navigate(view) {
+        if (!view) return;
+        if (state.view !== 'player') state.previousView = state.view;
+        state.view = view;
+        render();
+      }
+      function updateSeek(value) {
+        state.progress = Number(value);
+        const input = screen.querySelector('[data-progress]');
+        if (input) input.style.setProperty('--progress', `${state.progress}%`);
+        const elapsed = Math.floor((state.progress / 100) * 236);
+        const label = screen.querySelector('.elapsed-time');
+        if (label) label.textContent = `${Math.floor(elapsed / 60)}:${String(elapsed % 60).padStart(2,'0')}`;
+      }
+
+      document.querySelectorAll('.view-tab').forEach(button => button.addEventListener('click', () => navigate(button.dataset.view)));
+      document.querySelectorAll('[data-glow-choice]').forEach(button => button.addEventListener('click', () => { state.halo = button.dataset.glowChoice; applyState(); }));
+
+      viewport.addEventListener('click', event => {
+        const button = event.target.closest('[data-action]');
+        if (!button) return;
+        const action = button.dataset.action;
+        switch (action) {
+          case 'theme':
+            state.theme = button.dataset.themeChoice;
+            render();
+            showToast(`${state.theme === 'tokyo' ? 'Tokyo Night' : state.theme === 'dark' ? 'Dark' : 'Light'} theme preview`);
+            break;
+          case 'navigate': navigate(button.dataset.view); break;
+          case 'select-track':
+            state.currentTrack = Number(button.dataset.index);
+            state.playing = true;
+            state.progress = 0;
+            state.view = 'player';
+            render();
+            break;
+          case 'play-pause': state.playing = !state.playing; render(); break;
+          case 'previous': case 'next':
+            state.currentTrack = (state.currentTrack + (action === 'next' ? 1 : tracks.length - 1)) % tracks.length;
+            state.progress = 0; state.playing = true; render(); break;
+          case 'favorite': state.favorite = !state.favorite; render(); showToast(state.favorite ? 'Added to favourites' : 'Removed from favourites'); break;
+          case 'shuffle': state.shuffle = !state.shuffle; render(); break;
+          case 'repeat': state.repeat = !state.repeat; render(); break;
+          case 'demo-icon': state.selectedDemo = button.dataset.demo; render(); break;
+          case 'toggle-tint': state.tint = !state.tint; render(); break;
+          case 'toggle-wifi': state.wifi = !state.wifi; render(); break;
+          case 'toggle-bluetooth': state.bluetooth = !state.bluetooth; render(); break;
+          case 'play-book': state.currentTrack = 0; state.playing = true; state.view = 'player'; render(); break;
+          case 'notice': showToast(button.dataset.message || 'Prototype interaction'); break;
+          default: break;
+        }
+      });
+      screen.addEventListener('input', event => {
+        if (event.target.matches('[data-progress]')) updateSeek(event.target.value);
+      });
+
+      render();
+    })();
+  </script>
+</body>
+</html>

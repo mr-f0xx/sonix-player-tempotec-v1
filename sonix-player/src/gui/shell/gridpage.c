@@ -48,6 +48,16 @@ static void action_cb(lv_event_t *e) {
 #define TILE_ICON_CHILD 0
 #define TILE_LABEL_CHILD 1
 
+static bool tile_has_icon_halo(lv_obj_t *tile) { return tile && lv_obj_get_child_count(tile) >= 3; }
+
+static lv_obj_t *tile_icon_object(lv_obj_t *tile) {
+	return lv_obj_get_child(tile, tile_has_icon_halo(tile) ? 1 : TILE_ICON_CHILD);
+}
+
+static lv_obj_t *tile_label_object(lv_obj_t *tile) {
+	return lv_obj_get_child(tile, tile_has_icon_halo(tile) ? 2 : TILE_LABEL_CHILD);
+}
+
 void gridpage_set_tile(lv_obj_t *grid, int index, const lv_image_dsc_t *icon, const char *label) {
 	if (!grid || index < 0 || index >= (int)lv_obj_get_child_count(grid)) {
 		return;
@@ -57,10 +67,187 @@ void gridpage_set_tile(lv_obj_t *grid, int index, const lv_image_dsc_t *icon, co
 		return;
 	}
 	if (icon) {
-		lv_image_set_src(lv_obj_get_child(tile, TILE_ICON_CHILD), icon);
+		lv_image_set_src(tile_icon_object(tile), icon);
 	}
 	if (label) {
-		lv_label_set_text(lv_obj_get_child(tile, TILE_LABEL_CHILD), tr(label));
+		lv_label_set_text(tile_label_object(tile), tr(label));
+	}
+}
+
+// Sets a tile glyph at a known display size. The optional echo is a separate
+// static image object: it costs no bitmap memory, stays outside flex layout,
+// and is created only for the handful of Tokyo Night home-menu icons.
+void gridpage_set_tile_icon_style(lv_obj_t *grid, int index, const lv_image_dsc_t *source, int icon_size,
+								  bool recolor, lv_color_t color, bool glow) {
+	if (!grid || !source || index < 0 || index >= (int)lv_obj_get_child_count(grid)) {
+		return;
+	}
+
+	lv_obj_t *tile = lv_obj_get_child(grid, index);
+	if (!tile) {
+		return;
+	}
+
+	lv_obj_t *halo = NULL;
+	if (tile_has_icon_halo(tile)) {
+		halo = lv_obj_get_child(tile, 0);
+	} else if (glow) {
+		halo = lv_image_create(tile);
+		lv_obj_set_floating(halo, true);
+		lv_obj_set_clickable(halo, false);
+		lv_obj_set_scrollable(halo, false);
+		lv_obj_move_to_index(halo, 0); // behind the sharp icon and label
+	}
+
+	lv_obj_t *icon = tile_icon_object(tile);
+	if (!icon) {
+		return;
+	}
+	lv_image_set_src(icon, source);
+
+	int source_w = (int)source->header.w;
+	int source_h = (int)source->header.h;
+	int max_side = LV_MAX(source_w, source_h);
+	if (max_side <= 0) {
+		return;
+	}
+	int target_side = icon_size > 0 ? icon_size : max_side;
+	int icon_w = LV_MAX(1, source_w * target_side / max_side);
+	int icon_h = LV_MAX(1, source_h * target_side / max_side);
+	uint32_t icon_scale = (uint32_t)(LV_SCALE_NONE * target_side / max_side);
+	if (icon_scale == 0) {
+		icon_scale = 1;
+	}
+
+	lv_obj_set_size(icon, icon_w, icon_h);
+	lv_image_set_inner_align(icon, LV_IMAGE_ALIGN_CENTER);
+	lv_image_set_scale(icon, icon_scale);
+	if (recolor) {
+		lv_obj_set_style_image_recolor(icon, color, 0);
+		lv_obj_set_style_image_recolor_opa(icon, LV_OPA_COVER, 0);
+	} else {
+		lv_obj_remove_local_style_prop(icon, LV_STYLE_IMAGE_RECOLOR, 0);
+		lv_obj_remove_local_style_prop(icon, LV_STYLE_IMAGE_RECOLOR_OPA, 0);
+	}
+
+	if (!halo) {
+		return;
+	}
+	lv_image_set_src(halo, source);
+	lv_obj_set_style_bg_opa(halo, LV_OPA_TRANSP, 0);
+	lv_obj_set_style_border_width(halo, 0, 0);
+	lv_obj_set_style_image_opa(halo, LV_OPA_20, 0);
+	if (recolor) {
+		lv_obj_set_style_image_recolor(halo, color, 0);
+		lv_obj_set_style_image_recolor_opa(halo, LV_OPA_COVER, 0);
+	} else {
+		lv_obj_remove_local_style_prop(halo, LV_STYLE_IMAGE_RECOLOR, 0);
+		lv_obj_remove_local_style_prop(halo, LV_STYLE_IMAGE_RECOLOR_OPA, 0);
+	}
+
+	// The larger copy is still a single source glyph and is static. It is not
+	// a blur, animation or screen-sized buffer, so the draw cost is limited to
+	// five small menu glyphs on the V1.
+	int halo_side = target_side + 6;
+	int halo_w = LV_MAX(1, source_w * halo_side / max_side);
+	int halo_h = LV_MAX(1, source_h * halo_side / max_side);
+	uint32_t halo_scale = (uint32_t)(LV_SCALE_NONE * halo_side / max_side);
+	if (halo_scale == 0) {
+		halo_scale = 1;
+	}
+	lv_obj_set_size(halo, halo_w, halo_h);
+	lv_image_set_inner_align(halo, LV_IMAGE_ALIGN_CENTER);
+	lv_image_set_scale(halo, halo_scale);
+	lv_obj_set_hidden(halo, !glow);
+
+	// If a theme change moved the tile, refresh the echo's position after the
+	// flex layout has had a chance to size the foreground image.
+	lv_obj_update_layout(tile);
+	lv_obj_align_to(halo, icon, LV_ALIGN_CENTER, 0, 0);
+}
+
+void gridpage_set_tile_orientation(lv_obj_t *grid, int index, bool horizontal) {
+	if (!grid || index < 0 || index >= (int)lv_obj_get_child_count(grid)) {
+		return;
+	}
+
+	lv_obj_t *tile = lv_obj_get_child(grid, index);
+	if (!tile) {
+		return;
+	}
+	lv_obj_t *icon = tile_icon_object(tile);
+	lv_obj_t *label = tile_label_object(tile);
+	if (!icon || !label) {
+		return;
+	}
+
+	bool compact = compact_grid();
+	int padding = horizontal ? bp_pick(4, 8) : (compact ? 3 : 8);
+	int gap = horizontal ? bp_pick(6, 8) : (compact ? 2 : 8);
+	lv_obj_set_style_pad_all(tile, padding, 0);
+	lv_obj_set_style_pad_gap(tile, gap, 0);
+	lv_obj_set_flex_flow(tile, horizontal ? LV_FLEX_FLOW_ROW : LV_FLEX_FLOW_COLUMN);
+	lv_obj_set_flex_align(tile, horizontal ? LV_FLEX_ALIGN_START : LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER,
+					  LV_FLEX_ALIGN_CENTER);
+
+	if (horizontal) {
+		int label_width = lv_obj_get_width(tile) - 2 * padding - lv_obj_get_width(icon) - gap;
+		lv_obj_set_width(label, LV_MAX(1, label_width));
+		lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_LEFT, 0);
+	} else {
+		lv_obj_set_width(label, lv_pct(100));
+		lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_CENTER, 0);
+	}
+
+	lv_obj_update_layout(tile);
+	if (tile_has_icon_halo(tile)) {
+		lv_obj_align_to(lv_obj_get_child(tile, 0), icon, LV_ALIGN_CENTER, 0, 0);
+	}
+}
+
+void gridpage_set_layout(lv_obj_t *grid, gui_config_t *cfg, int top, int bottom, int padding, int gap, int columns,
+						 int rows) {
+	if (!grid || !cfg || columns < 1 || rows < 1 || top < 0 || bottom < 0 || top + bottom >= (int)cfg->screen_height) {
+		return;
+	}
+
+	int grid_height = (int)cfg->screen_height - top - bottom;
+	lv_obj_set_size(grid, lv_pct(100), grid_height);
+	lv_obj_align(grid, LV_ALIGN_TOP_LEFT, 0, top);
+	lv_obj_set_style_pad_all(grid, padding, 0);
+	lv_obj_set_style_pad_gap(grid, gap, 0);
+
+	int usable_w = (int)cfg->screen_width - 2 * padding;
+	int usable_h = grid_height - 2 * padding;
+	if (usable_w <= 0 || usable_h <= 0) {
+		return;
+	}
+	int tile_w = (usable_w - (columns - 1) * gap) / columns;
+	int tile_h = (usable_h - (rows - 1) * gap) / rows;
+	if (tile_w <= 0 || tile_h <= 0) {
+		return;
+	}
+
+	int count = (int)lv_obj_get_child_count(grid);
+	for (int i = 0; i < count; i++) {
+		lv_obj_t *tile = lv_obj_get_child(grid, i);
+		bool lone_last = count == columns * rows - 1 && i == count - 1;
+		lv_obj_set_size(tile, lone_last ? usable_w : tile_w, tile_h);
+	}
+	lv_obj_update_layout(grid);
+
+	// A halo is a floating child, so the layout ignores it; explicitly follow
+	// its tile icon after the grid has moved or changed size.
+	for (int i = 0; i < count; i++) {
+		lv_obj_t *tile = lv_obj_get_child(grid, i);
+		if (!tile_has_icon_halo(tile)) {
+			continue;
+		}
+		lv_obj_t *halo = lv_obj_get_child(tile, 0);
+		lv_obj_t *icon = tile_icon_object(tile);
+		if (halo && icon) {
+			lv_obj_align_to(halo, icon, LV_ALIGN_CENTER, 0, 0);
+		}
 	}
 }
 

@@ -19,8 +19,7 @@
 
 lv_obj_t *appearance_screen;
 
-static lv_obj_t *btn_dark;
-static lv_obj_t *btn_light;
+static lv_obj_t *theme_buttons[3];
 static lv_obj_t *btn_boot[4]; // Stock / Retrospace / Space / Travelling in space
 static lv_obj_t *btn_clock[4]; // left / centre / right / hidden
 static lv_obj_t *btn_accent[THEME_ACCENT_COUNT]; // the coloured circles
@@ -155,19 +154,35 @@ static void font_pills_reload_cb(lv_event_t *e) {
 	font_pills_rebuild();
 }
 
-// Paints the pair: the active choice is the filled accent button, the other a
-// quiet neutral, like libadwaita's suggested-action beside a regular button.
+// Paints the active theme choice. Dark and Light keep their original filled
+// accent treatment; Tokyo Night gets the quieter selected pill from the
+// approved compact mockup.
 static void refresh_buttons(void) {
-	bool dark = theme_is_dark();
-
-	lv_obj_t *on = dark ? btn_dark : btn_light;
-	lv_obj_t *off = dark ? btn_light : btn_dark;
-
-	lv_obj_set_style_bg_color(on, theme()->accent, 0);
-	lv_obj_set_style_text_color(lv_obj_get_child(on, 0), lv_color_white(), 0);
-
-	lv_obj_set_style_bg_color(off, theme()->surface_pressed, 0);
-	lv_obj_set_style_text_color(lv_obj_get_child(off, 0), theme()->text_primary, 0);
+	theme_kind_t active_kind = theme_get_kind();
+	for (int i = 0; i < 3; i++) {
+		lv_obj_t *button = theme_buttons[i];
+		if (!button) {
+			continue;
+		}
+		lv_obj_t *label = lv_obj_get_child(button, 0);
+		bool active = i == (int)active_kind;
+		if (active && active_kind == THEME_KIND_TOKYO_NIGHT) {
+			lv_obj_set_style_bg_color(button, lv_color_mix(theme()->accent, theme()->surface, (lv_opa_t)64), 0);
+			lv_obj_set_style_text_color(label, theme()->text_primary, 0);
+			lv_obj_set_style_border_width(button, 1, 0);
+			lv_obj_set_style_border_color(button, theme()->accent, 0);
+			lv_obj_set_style_border_opa(button, LV_OPA_COVER, 0);
+		} else if (active) {
+			lv_obj_set_style_bg_color(button, theme()->accent, 0);
+			lv_obj_set_style_text_color(label, lv_color_white(), 0);
+			lv_obj_set_style_border_width(button, 0, 0);
+		} else {
+			lv_obj_set_style_bg_color(button, theme()->surface_pressed, 0);
+			lv_obj_set_style_text_color(label, theme()->text_primary, 0);
+			lv_obj_set_style_border_width(button, 0, 0);
+		}
+		lv_obj_set_style_bg_opa(button, LV_OPA_COVER, 0);
+	}
 }
 
 // The active circle wears a ring in the text colour; the rest sit flat.
@@ -247,9 +262,9 @@ static lv_obj_t *make_clock_choice(lv_obj_t *parent, const char *text, int pos, 
 	return btn;
 }
 
-static void pick_cb(lv_event_t *e) {
-	bool dark = (bool)(uintptr_t)lv_event_get_user_data(e);
-	theme_set_dark(dark);
+static void theme_pick_cb(lv_event_t *e) {
+	theme_kind_t kind = (theme_kind_t)(intptr_t)lv_event_get_user_data(e);
+	theme_set_kind(kind);
 	refresh_buttons();
 }
 
@@ -303,18 +318,19 @@ static lv_obj_t *make_boot_choice(lv_obj_t *parent, const char *text, int choice
 	return btn;
 }
 
-static lv_obj_t *make_choice(lv_obj_t *parent, const char *text, bool dark, bool compact) {
+static lv_obj_t *make_theme_choice(lv_obj_t *parent, const char *text, theme_kind_t kind, bool compact) {
 	lv_obj_t *btn = lv_btn_create(parent);
-	lv_obj_set_size(btn, LV_SIZE_CONTENT, compact ? 40 : 64);
-	lv_obj_set_style_pad_hor(btn, compact ? 14 : 34, 0);
-	lv_obj_set_style_radius(btn, LV_RADIUS_CIRCLE, 0); // Adwaita pill button
+	lv_obj_set_size(btn, LV_SIZE_CONTENT, compact ? 34 : 64);
+	lv_obj_set_style_pad_hor(btn, compact ? 4 : 34, 0);
+	lv_obj_set_style_radius(btn, compact ? 7 : LV_RADIUS_CIRCLE, 0);
 	lv_obj_set_style_shadow_width(btn, 0, 0);
 	lv_obj_set_style_border_width(btn, 0, 0);
-	lv_obj_add_event_cb(btn, pick_cb, LV_EVENT_CLICKED, (void *)(uintptr_t)dark);
+	lv_obj_set_flex_grow(btn, compact ? (kind == THEME_KIND_TOKYO_NIGHT ? 2 : 1) : 0);
+	lv_obj_add_event_cb(btn, theme_pick_cb, LV_EVENT_CLICKED, (void *)(intptr_t)kind);
 
 	lv_obj_t *label = lv_label_create(btn);
 	lv_label_set_text(label, tr(text));
-	lv_obj_set_style_text_font(label, compact ? &font_ui_18 : &font_ui_24, 0);
+	lv_obj_set_style_text_font(label, compact ? &font_ui_14 : &font_ui_24, 0);
 	lv_obj_center(label);
 
 	return btn;
@@ -349,14 +365,23 @@ void appearance_init(gui_config_t *cfg) {
 	lv_obj_set_style_bg_opa(row, 0, 0);
 	lv_obj_set_style_border_width(row, 0, 0);
 	lv_obj_set_style_pad_all(row, 0, 0);
-	lv_obj_set_style_pad_gap(row, compact ? 6 : 14, 0);
+	lv_obj_set_style_pad_gap(row, compact ? 4 : 14, 0);
 	lv_obj_set_scrollable(row, false);
 	lv_obj_set_event_bubble(row, true);
-	lv_obj_set_flex_flow(row, compact ? LV_FLEX_FLOW_ROW_WRAP : LV_FLEX_FLOW_ROW);
+	lv_obj_set_flex_flow(row, compact ? LV_FLEX_FLOW_ROW : LV_FLEX_FLOW_ROW_WRAP);
 	lv_obj_set_flex_align(row, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_START);
 
-	btn_dark = make_choice(row, "appearance_dark", true, compact);
-	btn_light = make_choice(row, "appearance_light", false, compact);
+	theme_buttons[THEME_KIND_DARK] = make_theme_choice(row, "appearance_dark", THEME_KIND_DARK, compact);
+	theme_buttons[THEME_KIND_LIGHT] = make_theme_choice(row, "appearance_light", THEME_KIND_LIGHT, compact);
+	theme_buttons[THEME_KIND_TOKYO_NIGHT] =
+		make_theme_choice(row, "appearance_tokyo_night", THEME_KIND_TOKYO_NIGHT, compact);
+
+	lv_obj_t *theme_note = lv_label_create(card);
+	lv_label_set_long_mode(theme_note, LV_LABEL_LONG_WRAP);
+	lv_obj_set_width(theme_note, lv_pct(100));
+	lv_obj_add_style(theme_note, &theme_style_text_dim, 0);
+	lv_obj_set_style_text_font(theme_note, compact ? &font_ui_14 : &font_ui_18, 0);
+	lv_label_set_text(theme_note, tr("appearance_theme_note"));
 
 	// A second card: which picture the next power-on shows. Unlike every
 	// other choice on this page it is not only a config value -- it also

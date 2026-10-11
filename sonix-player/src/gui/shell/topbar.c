@@ -173,7 +173,8 @@ static void update_battery_indicator(int percent, bool charging) {
 
 	lv_label_set_text_fmt(bat_label, "%d%%", percent);
 
-	lv_obj_set_style_image_recolor(bat_shell, theme()->text_primary, 0);
+	lv_obj_set_style_image_recolor(bat_shell,
+								   theme_is_tokyo_night() ? theme_semantic_color(THEME_SEMANTIC_GREEN) : theme()->text_primary, 0);
 
 	if (charging) {
 		lv_obj_set_hidden(bat_fill, true);
@@ -189,7 +190,13 @@ static void update_battery_indicator(int percent, bool charging) {
 	lv_obj_set_pos(bat_fill, cavity_x, cavity_y);
 	lv_obj_set_size(bat_fill, width, cavity_h);
 
-	lv_color_t color = (percent <= BATTERY_LOW_PERCENT) ? lv_color_make(220, 60, 50) : lv_color_make(60, 190, 90);
+	lv_color_t color;
+	if (theme_is_tokyo_night()) {
+		color = (percent <= BATTERY_LOW_PERCENT) ? theme_semantic_color(THEME_SEMANTIC_RED)
+														  : theme_semantic_color(THEME_SEMANTIC_GREEN);
+	} else {
+		color = (percent <= BATTERY_LOW_PERCENT) ? lv_color_make(220, 60, 50) : lv_color_make(60, 190, 90);
+	}
 	lv_obj_set_style_bg_color(bat_fill, color, 0);
 }
 
@@ -314,8 +321,13 @@ static void refresh_headphone_icon(bool force) {
 	// whatever is plugged into them.
 	if (usb) {
 		lv_image_set_src(hp_icon, &icon_usbaudioout);
-		lv_obj_remove_local_style_prop(hp_icon, LV_STYLE_IMAGE_RECOLOR, 0);
-		lv_obj_remove_local_style_prop(hp_icon, LV_STYLE_IMAGE_RECOLOR_OPA, 0);
+		if (theme_is_tokyo_night()) {
+			lv_obj_set_style_image_recolor(hp_icon, theme_semantic_color(THEME_SEMANTIC_CYAN), 0);
+			lv_obj_set_style_image_recolor_opa(hp_icon, LV_OPA_COVER, 0);
+		} else {
+			lv_obj_remove_local_style_prop(hp_icon, LV_STYLE_IMAGE_RECOLOR, 0);
+			lv_obj_remove_local_style_prop(hp_icon, LV_STYLE_IMAGE_RECOLOR_OPA, 0);
+		}
 		lv_obj_set_hidden(hp_icon, false);
 		return;
 	}
@@ -331,8 +343,12 @@ static void refresh_headphone_icon(bool force) {
 		// Gold marks the balanced output.
 		lv_obj_set_style_image_recolor(hp_icon, lv_color_make(212, 175, 55), 0);
 		lv_obj_set_style_image_recolor_opa(hp_icon, LV_OPA_COVER, 0);
+	} else if (theme_is_tokyo_night()) {
+		// Cyan marks the listening/output glyph in Tokyo Night.
+		lv_obj_set_style_image_recolor(hp_icon, theme_semantic_color(THEME_SEMANTIC_CYAN), 0);
+		lv_obj_set_style_image_recolor_opa(hp_icon, LV_OPA_COVER, 0);
 	} else {
-		// The single-ended jack keeps the theme's icon colour.
+		// The single-ended jack keeps the original theme's icon colour.
 		lv_obj_remove_local_style_prop(hp_icon, LV_STYLE_IMAGE_RECOLOR, 0);
 		lv_obj_remove_local_style_prop(hp_icon, LV_STYLE_IMAGE_RECOLOR_OPA, 0);
 	}
@@ -438,6 +454,16 @@ void topbar_refresh_radios(void) {
 		}
 	}
 
+	if (wifi_icon) {
+		if (theme_is_tokyo_night()) {
+			lv_obj_set_style_image_recolor(wifi_icon, theme_semantic_color(THEME_SEMANTIC_CYAN), 0);
+			lv_obj_set_style_image_recolor_opa(wifi_icon, LV_OPA_COVER, 0);
+		} else {
+			lv_obj_remove_local_style_prop(wifi_icon, LV_STYLE_IMAGE_RECOLOR, 0);
+			lv_obj_remove_local_style_prop(wifi_icon, LV_STYLE_IMAGE_RECOLOR_OPA, 0);
+		}
+	}
+
 	if (bt_icon) {
 		// Same rule as the wifi glyph, and it matters more here: bringing the
 		// Bluetooth stack back up takes the best part of ten seconds, and a
@@ -458,6 +484,9 @@ void topbar_refresh_radios(void) {
 			bt_current_codec(codec, sizeof(codec));
 			if (codec[0] && bt_codec_color(codec, &color)) {
 				lv_obj_set_style_image_recolor(bt_icon, color, 0);
+				lv_obj_set_style_image_recolor_opa(bt_icon, LV_OPA_COVER, 0);
+			} else if (theme_is_tokyo_night()) {
+				lv_obj_set_style_image_recolor(bt_icon, theme_semantic_color(THEME_SEMANTIC_BLUE), 0);
 				lv_obj_set_style_image_recolor_opa(bt_icon, LV_OPA_COVER, 0);
 			} else {
 				lv_obj_remove_local_style_prop(bt_icon, LV_STYLE_IMAGE_RECOLOR, 0);
@@ -572,7 +601,10 @@ static void refresh_play_icon(const device_state_t *state) {
 	// going. A fixed Bluetooth blue rather than the accent colour, because it
 	// means wireless, not active.
 	if (state->status == AUDIO_STATUS_PLAYING && bluetooth_audio_active()) {
-		lv_obj_set_style_image_recolor(play_icon, lv_color_make(0, 122, 255), 0);
+		lv_obj_set_style_image_recolor(play_icon,
+									   theme_is_tokyo_night() ? theme_semantic_color(THEME_SEMANTIC_BLUE)
+														 : lv_color_make(0, 122, 255),
+									   0);
 	} else {
 		lv_obj_remove_local_style_prop(play_icon, LV_STYLE_IMAGE_RECOLOR, 0);
 	}
@@ -749,9 +781,17 @@ static void topbar_refresh_theme(void) {
 	if (jack_timer) {
 		lv_timer_ready(jack_timer);
 	}
+	if (battery_timer) {
+		lv_timer_ready(battery_timer);
+	}
 	if (radio_timer) {
 		lv_timer_ready(radio_timer);
 	}
+	// These glyphs carry local semantic recolours rather than only the shared
+	// theme style, so repaint them in the same frame as the palette switch.
+	refresh_headphone_icon(true);
+	topbar_refresh_radios();
+	topbar_refresh_playback();
 }
 
 // A downward drag starting on the status bar pulls the control panel in, and the

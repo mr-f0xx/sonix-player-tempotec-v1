@@ -5,6 +5,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 lv_style_t theme_style_screen;
 lv_style_t theme_style_panel;
@@ -50,10 +51,35 @@ static theme_palette_t palette_light = {
 	.dark = false,
 };
 
-// Whether the dark preset is the chosen one, kept apart from `active` because
-// with the dynamic tint on `active` points at a derived copy rather than at
-// either preset.
-static bool dark_selected = true;
+// Tokyo Night, matching the approved V1 mockup. There are no extra font or
+// bitmap packs: the six main-menu glyphs reuse the existing generated icons.
+static theme_palette_t palette_tokyo = {
+	.screen_bg = LV_COLOR_MAKE(26, 27, 38),       // #1a1b26
+	.surface = LV_COLOR_MAKE(36, 40, 59),         // #24283b
+	.surface_pressed = LV_COLOR_MAKE(45, 53, 84), // #2d3554
+	.panel = LV_COLOR_MAKE(22, 22, 30),           // #16161e
+	.cover_bg = LV_COLOR_MAKE(22, 22, 30),
+	.text_primary = LV_COLOR_MAKE(192, 202, 245), // #c0caf5
+	.text_secondary = LV_COLOR_MAKE(169, 177, 214), // #a9b1d6
+	.accent = LV_COLOR_MAKE(122, 162, 247),       // #7aa2f7
+	.dark = true,
+};
+
+// The selected preset is kept apart from `active` because dynamic tint points
+// `active` at a derived copy rather than at any of the three presets.
+static theme_kind_t selected_kind = THEME_KIND_DARK;
+
+static theme_palette_t *selected_palette(void) {
+	switch (selected_kind) {
+	case THEME_KIND_LIGHT:
+		return &palette_light;
+	case THEME_KIND_TOKYO_NIGHT:
+		return &palette_tokyo;
+	case THEME_KIND_DARK:
+	default:
+		return &palette_dark;
+	}
+}
 
 // The dynamic tint: the neutral colours -- backgrounds, cards, the status bar
 // -- borrow the accent's hue, the way Material You colours a system from one
@@ -96,6 +122,11 @@ static const int LEGACY_ACCENT_MAP[6] = {0, 2, 3, 5, 8, 9};
 lv_color_t theme_accent_preset(int index) {
 	if (index < 0 || index >= THEME_ACCENT_COUNT) {
 		index = 0;
+	}
+	// Tokyo Night's default is its native blue. An explicitly saved non-default
+	// accent still carries across themes just as it did between Dark and Light.
+	if (selected_kind == THEME_KIND_TOKYO_NIGHT && index == 0) {
+		return lv_color_make(122, 162, 247);
 	}
 	return ACCENT_COLORS[index];
 }
@@ -161,7 +192,7 @@ static lv_color_t tint_with(lv_color_t c, lv_color_t accent, float strength) {
 
 // Points `active` at the chosen preset, or at a tinted copy of it.
 static void rebuild_active(void) {
-	theme_palette_t *base = dark_selected ? &palette_dark : &palette_light;
+	theme_palette_t *base = selected_palette();
 
 	if (!dynamic_tint) {
 		active = base;
@@ -263,14 +294,23 @@ void theme_init(void) {
 	lv_style_set_bg_opa(&theme_style_slider_track, LV_OPA_40);
 	lv_style_set_radius(&theme_style_slider_track, LV_RADIUS_CIRCLE);
 
-	// Whatever was chosen last time. Dark is the default for a first boot.
-	dark_selected = config_get_bool("ui", "dark_theme", true);
+	// Read the new three-way choice when present; configs from older builds
+	// have only `dark_theme`, so they keep their original Dark/Light setting.
+	const char *saved_theme = config_get("ui", "theme", NULL);
+	if (saved_theme && strcmp(saved_theme, "light") == 0) {
+		selected_kind = THEME_KIND_LIGHT;
+	} else if (saved_theme && strcmp(saved_theme, "tokyo-night") == 0) {
+		selected_kind = THEME_KIND_TOKYO_NIGHT;
+	} else if (saved_theme && strcmp(saved_theme, "dark") == 0) {
+		selected_kind = THEME_KIND_DARK;
+	} else {
+		selected_kind = config_get_bool("ui", "dark_theme", true) ? THEME_KIND_DARK : THEME_KIND_LIGHT;
+	}
 
 	// The marker the boot script reads has to agree with the setting too, not
-	// only with the theme: a device coming from an older firmware carries a
-	// stock marker while this build defaults to Retrospace, and the write is
-	// a no-op on every boot where the two already agree.
-	bootlogo_set(theme_boot_screen(), dark_selected);
+	// only with the theme. Tokyo Night is a dark appearance for that legacy
+	// light/dark boot-logo switch.
+	bootlogo_set(theme_boot_screen(), selected_palette()->dark);
 
 	// The accent as it was left; both palettes carry the same one.
 	accent_index = (int)config_get_int("ui", "accent", 0);
@@ -290,6 +330,7 @@ void theme_init(void) {
 	}
 	palette_dark.accent = ACCENT_COLORS[accent_index];
 	palette_light.accent = ACCENT_COLORS[accent_index];
+	palette_tokyo.accent = (accent_index == 0) ? lv_color_make(122, 162, 247) : ACCENT_COLORS[accent_index];
 
 	dynamic_tint = config_get_bool("ui", "dynamic_tint", false);
 
@@ -333,12 +374,38 @@ const theme_palette_t *theme(void) { return active; }
 
 bool theme_is_dark(void) { return active->dark; }
 
-void theme_set_dark(bool dark) {
-	if (active->dark == dark) {
-		return;
+bool theme_is_tokyo_night(void) { return selected_kind == THEME_KIND_TOKYO_NIGHT; }
+
+theme_kind_t theme_get_kind(void) { return selected_kind; }
+
+lv_color_t theme_semantic_color(theme_semantic_t role) {
+	if (role == THEME_SEMANTIC_MUTED) {
+		return active->text_secondary;
 	}
-	theme_toggle();
+	if (selected_kind != THEME_KIND_TOKYO_NIGHT) {
+		return active->accent;
+	}
+
+	switch (role) {
+	case THEME_SEMANTIC_BLUE:
+		return active->accent;
+	case THEME_SEMANTIC_CYAN:
+		return lv_color_make(125, 207, 255); // #7dcfff
+	case THEME_SEMANTIC_PURPLE:
+		return lv_color_make(187, 154, 247); // #bb9af7
+	case THEME_SEMANTIC_GREEN:
+		return lv_color_make(158, 206, 106); // #9ece6a
+	case THEME_SEMANTIC_AMBER:
+		return lv_color_make(224, 175, 104); // #e0af68
+	case THEME_SEMANTIC_RED:
+		return lv_color_make(247, 118, 142); // #f7768e
+	case THEME_SEMANTIC_MUTED:
+	default:
+		return active->text_secondary;
+	}
 }
+
+void theme_set_dark(bool dark) { theme_set_kind(dark ? THEME_KIND_DARK : THEME_KIND_LIGHT); }
 
 // Which palette the pages on screen were last walked for.
 //
@@ -429,22 +496,41 @@ static void refresh_all(void) {
 	}
 }
 
-void theme_toggle(void) {
-	dark_selected = !dark_selected;
+static const char *theme_config_value(theme_kind_t kind) {
+	switch (kind) {
+	case THEME_KIND_LIGHT:
+		return "light";
+	case THEME_KIND_TOKYO_NIGHT:
+		return "tokyo-night";
+	case THEME_KIND_DARK:
+	default:
+		return "dark";
+	}
+}
+
+void theme_set_kind(theme_kind_t kind) {
+	if (kind < THEME_KIND_DARK || kind > THEME_KIND_TOKYO_NIGHT || selected_kind == kind) {
+		return;
+	}
+
+	selected_kind = kind;
+	palette_tokyo.accent = (accent_index == 0) ? lv_color_make(122, 162, 247) : ACCENT_COLORS[accent_index];
 	rebuild_active();
 	apply_palette();
 
+	// Keep the new string key and the old boolean in step: older builds still
+	// read `dark_theme`, while new builds can distinguish the three palettes.
+	config_set("ui", "theme", theme_config_value(kind));
 	config_set_bool("ui", "dark_theme", active->dark);
 	config_save();
 
-	// The picture shown while the player boots follows the theme too. It is
-	// written into raw flash rather than into the config, because the script
-	// that draws it runs long before any filesystem holding a config is
-	// mounted -- see bootlogo.h.
+	// The boot script understands only light and dark; Tokyo Night uses its
+	// dark image and marker.
 	bootlogo_set(theme_boot_screen(), active->dark);
-
 	refresh_all();
 }
+
+void theme_toggle(void) { theme_set_kind(active->dark ? THEME_KIND_LIGHT : THEME_KIND_DARK); }
 
 void theme_set_accent(int index) {
 	if (index < 0 || index >= THEME_ACCENT_COUNT) {
@@ -453,6 +539,7 @@ void theme_set_accent(int index) {
 	accent_index = index;
 	palette_dark.accent = ACCENT_COLORS[index];
 	palette_light.accent = ACCENT_COLORS[index];
+	palette_tokyo.accent = (index == 0) ? lv_color_make(122, 162, 247) : ACCENT_COLORS[index];
 	rebuild_active(); // the tint is drawn from the accent, so it moves with it
 	apply_palette();
 

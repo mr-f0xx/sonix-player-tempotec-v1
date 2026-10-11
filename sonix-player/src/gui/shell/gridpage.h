@@ -36,6 +36,24 @@ typedef struct {
 // the grid does not have to be built again to swap two of them.
 void gridpage_set_tile(lv_obj_t *grid, int index, const lv_image_dsc_t *icon, const char *label);
 
+// Replaces a tile's image and optionally tints it with a Tokyo Night semantic
+// colour. `icon_size` is the displayed long side (the source is scaled without
+// changing its pixel data); `glow` adds a small, static low-opacity echo behind
+// the glyph. Passing glow=false hides an echo that was created earlier.
+void gridpage_set_tile_icon_style(lv_obj_t *grid, int index, const lv_image_dsc_t *icon, int icon_size,
+								  bool recolor, lv_color_t color, bool glow);
+
+// Sets a tile's contents in a horizontal icon-and-label row, or restores the
+// original centered vertical layout. The horizontal form is used by the V1's
+// Tokyo Night home menu; existing themes keep their original construction.
+void gridpage_set_tile_orientation(lv_obj_t *grid, int index, bool horizontal);
+
+// Reflows an existing grid into a different screen area. Used by the V1's
+// Tokyo Night home screen to reserve space for its heading and mini-player,
+// without duplicating the six tile objects or changing Dark/Light geometry.
+void gridpage_set_layout(lv_obj_t *grid, gui_config_t *cfg, int top, int bottom, int padding, int gap, int columns,
+						 int rows);
+
 lv_obj_t *gridpage_build(lv_obj_t *screen, gui_config_t *cfg, const grid_entry_t *entries, int count, int columns, int rows,
 					bool clear_corner_buttons);
 

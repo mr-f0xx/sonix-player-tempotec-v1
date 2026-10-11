@@ -991,6 +991,9 @@ static void set_over_cover(bool on) {
 		if (on) {
 			lv_obj_set_style_image_recolor(icon_objs[i], lv_color_white(), 0);
 			lv_obj_set_style_image_recolor_opa(icon_objs[i], LV_OPA_COVER, 0);
+		} else if (theme_is_tokyo_night()) {
+			lv_obj_set_style_image_recolor(icon_objs[i], theme_semantic_color(THEME_SEMANTIC_CYAN), 0);
+			lv_obj_set_style_image_recolor_opa(icon_objs[i], LV_OPA_COVER, 0);
 		} else {
 			lv_obj_remove_local_style_prop(icon_objs[i], LV_STYLE_IMAGE_RECOLOR, 0);
 			lv_obj_remove_local_style_prop(icon_objs[i], LV_STYLE_IMAGE_RECOLOR_OPA, 0);
