@@ -1973,6 +1973,11 @@ int main(int argc, char **argv) {
 	// the end of every track.
 	// On by default: an unset key means a new install, and a saved 0 stays off.
 	audio_set_gapless(config_get_int("audio", "gapless", 1) != 0);
+	// How DSD leaves the player, before anything can start as well. The
+	// settings page reads the same value back when it builds its row, so the
+	// two cannot disagree. DoP by default: it is the path the DACs are built
+	// for, and an unset key means a new install.
+	audio_set_dsd_mode((int)config_get_int("audio", "dsd_mode", AUDIO_DSD_DOP));
 	clock_init();
 	adb_apply_saved_state();
 	// The buttons on the headset cable: the kernel module starts disabled and

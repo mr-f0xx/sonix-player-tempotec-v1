@@ -3564,7 +3564,8 @@ static void update_format_label(const device_state_t *state) {
 
 	// A DSD track says what it is rather than what carries it: "24/176.4 DSF"
 	// is true of a DSD64 file and of a DSD256 one, and tells the listener
-	// nothing. How it gets there is not said: DoP is the only way it does.
+	// nothing. How it leaves the player is not said either: DoP or PCM is a
+	// setting, not a property of the file.
 	int dsd = audio_get_dsd_multiple();
 	if (dsd > 0) {
 		lv_label_set_text_fmt(format_label, "DSD%d", dsd);

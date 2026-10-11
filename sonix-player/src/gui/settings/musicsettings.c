@@ -776,6 +776,43 @@ static void dsd_gain_pick_cb(lv_event_t *e) {
 	dsd_gain_store((int)(intptr_t)lv_event_get_user_data(e));
 }
 
+// ---------------------------------------------------------------------------
+// The DSD output mode
+//
+// Two ways out and no third. DoP hands the DAC the bitstream in PCM frames
+// with a marker on top and lets the codec decode it: untouched on the way, and
+// the DSP chain stands down for the length of the track. PCM filters the track
+// to 176.4 kHz here, so the equaliser, the volume and the fade all work on it
+// and any output can take it.
+//
+// There is no "native" pill: the codec's own DSD mode is entered by the sound
+// card's DoP control, marker detection and all, and the SoC's I2S controller
+// is a PCM one -- an unmarked DSD stream has no route to the DAC on this
+// hardware. See the note in audio.h.
+// ---------------------------------------------------------------------------
+
+static lv_obj_t *dsd_mode_pill[2];
+
+static void dsd_mode_refresh(void) {
+	if (!dsd_mode_pill[0]) {
+		return;
+	}
+	int mode = audio_get_dsd_mode();
+	settingsrow_pill_active(dsd_mode_pill[0], mode == AUDIO_DSD_DOP);
+	settingsrow_pill_active(dsd_mode_pill[1], mode == AUDIO_DSD_PCM);
+}
+
+static void dsd_mode_pick_cb(lv_event_t *e) {
+	if (player_sheet_drag_active() || switcher_back_drag_active()) {
+		return;
+	}
+	int mode = (int)(intptr_t)lv_event_get_user_data(e);
+	audio_set_dsd_mode(mode);
+	config_set_int("audio", "dsd_mode", mode);
+	config_save();
+	dsd_mode_refresh();
+}
+
 // The round corner buttons on the MSEB and equalizer pages, the same shape the
 // music page uses for its gear and its search.
 static lv_obj_t *corner_button(lv_obj_t *screen, gui_config_t *cfg, int slot, const lv_image_dsc_t *glyph,
@@ -1916,6 +1953,19 @@ void musicsettings_init(gui_config_t *cfg) {
 	if (config_get_int("audio", "high_gain", 0)) {
 		lv_obj_add_state(gain_switch, LV_STATE_CHECKED);
 	}
+
+	// How a DSD track leaves the player. Before the compensation below,
+	// because DoP is the path that compensation is about: with the output set
+	// to PCM the track arrives as ordinary 176.4 kHz audio and the normal
+	// volume curve applies, so there is nothing to compensate.
+	lv_obj_t *dsd_mode_pills = NULL;
+	settingsrow_pills(container, "musicsettings_dsd_mode", &dsd_mode_pills);
+	dsd_mode_pill[0] =
+		settingsrow_pill(dsd_mode_pills, "musicsettings_dsd_mode_dop", AUDIO_DSD_DOP, dsd_mode_pick_cb);
+	dsd_mode_pill[1] =
+		settingsrow_pill(dsd_mode_pills, "musicsettings_dsd_mode_pcm", AUDIO_DSD_PCM, dsd_mode_pick_cb);
+	dsd_mode_refresh();
+	theme_register_refresh(dsd_mode_refresh);
 
 	// How loud DSD comes out. The DAC is the only thing that plays it here, so
 	// this is the only place its level can be touched at all.
