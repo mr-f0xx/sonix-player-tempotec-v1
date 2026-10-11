@@ -167,8 +167,36 @@ bool audio_stream_is_lossy(void);
 // container's, that is, the extension.
 void audio_get_stream_codec(char *out, size_t size);
 
-// 64/128/256 while a DSD track is playing, 0 otherwise. It is always going to
-// the DAC untouched over DoP; see dsd.h.
+// How a DSD track is carried to the output. Two ways, and the hardware has no
+// third.
+//
+// DoP is the one the DAC is built for: the DSD bits travel in ordinary PCM
+// frames with a marker byte on top, the sound card puts the codec into its DSD
+// mode, and the codec finds the markers by itself. Nothing in the player may
+// touch a sample on the way, so the equaliser, the software volume and the
+// fade all stand down for the length of the track; the DAC's own registers are
+// the only place its level can be moved (the DSD gain compensation).
+//
+// PCM converts the track here, to 176.4 kHz 24-bit (dsd.c), and sends it like
+// any other audio: the DSP chain works on it, the volume curve applies to it,
+// and an output with no DSD mode of its own can take it. Bluetooth is always
+// this, whatever the setting says -- an A2DP link has nothing to switch into.
+//
+// There is no "native" mode to offer next to these: the codec's DSD path is
+// entered by the sound card's own DoP control and looks for the marker there,
+// and the X1600's I2S controller is a PCM one, so an unmarked stream has no
+// route to the DAC on this hardware (alsa-controls.c, dsd.h).
+//
+// Read when a track starts, like the output device, so a change takes effect
+// with the next DSD track.
+#define AUDIO_DSD_DOP 0
+#define AUDIO_DSD_PCM 1
+void audio_set_dsd_mode(int mode);
+int audio_get_dsd_mode(void);
+
+// 64/128/256 while a DSD track is playing, 0 otherwise. The file's own
+// multiple, whichever way the track is leaving the player; see the DSD output
+// mode above and dsd.h.
 int audio_get_dsd_multiple(void);
 
 void audio_seek(double seconds);

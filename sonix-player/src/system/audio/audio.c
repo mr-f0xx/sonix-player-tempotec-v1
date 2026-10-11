@@ -851,6 +851,19 @@ void audio_set_gapless(bool enabled) {
 
 bool audio_get_gapless(void) { return gapless_enabled; }
 
+// How DSD leaves the player; see audio.h. A plain variable like the gapless
+// flag beside it: the playback thread reads it when a track opens and the
+// settings page writes it, which is the same bargain every other setting on
+// that page makes.
+static int dsd_mode = AUDIO_DSD_DOP;
+
+void audio_set_dsd_mode(int mode) {
+	dsd_mode = (mode == AUDIO_DSD_PCM) ? AUDIO_DSD_PCM : AUDIO_DSD_DOP;
+	printf("audio: DSD output %s\n", dsd_mode == AUDIO_DSD_PCM ? "PCM (176.4 kHz, converted here)" : "DoP");
+}
+
+int audio_get_dsd_mode(void) { return dsd_mode; }
+
 // How long a stream is given to play out what it still holds before it is
 // dropped instead. Comfortably more than the deepest buffer this player opens,
 // and short enough that a link which is never going to drain does not take the
@@ -3070,8 +3083,18 @@ static void play_decoded_file(const char *filepath, decode_format_t format) {
 		return;
 	}
 
-	// Headphones have no DSD mode to switch into: DSD goes to them as PCM.
-	bool dsd_as_pcm = decoder_passthrough(dec) && output_is_bluetooth() && decoder_dsd_to_pcm(dec);
+	// A DSD track leaves two ways, and Bluetooth is always the second one: an
+	// A2DP link has no DSD mode to switch into, so the track is filtered to
+	// PCM here whatever the DSD output setting says (see audio.h).
+	//
+	// The filter wants a little memory per channel for the tail of the stream;
+	// when it cannot have it the track still plays, over DoP, and the log says
+	// which of the two happened rather than leaving that to be guessed at.
+	bool dsd_wants_pcm = decoder_passthrough(dec) && (dsd_mode == AUDIO_DSD_PCM || output_is_bluetooth());
+	bool dsd_as_pcm = dsd_wants_pcm && decoder_dsd_to_pcm(dec);
+	if (dsd_wants_pcm && !dsd_as_pcm) {
+		fprintf(stderr, "audio: not enough memory to filter this DSD track to PCM; it plays over DoP instead\n");
+	}
 
 	int channels = decoder_channels(dec);
 	int sample_rate = decoder_sample_rate(dec);
@@ -3098,8 +3121,10 @@ static void play_decoded_file(const char *filepath, decode_format_t format) {
 	decimator_t decim;
 	int decim_factor = bluetooth_decimation(sample_rate, channels, out_bits, passthrough);
 	// 176.4 kHz is more than any Bluetooth link carries, whatever the
-	// decimation settings say.
-	if (dsd_as_pcm && decim_factor == 1) {
+	// decimation settings say. Only a Bluetooth output is pushed down here;
+	// the device's own DAC gets the converted track at its real 176.4 kHz,
+	// which is what the conversion is for (audio.h).
+	if (dsd_as_pcm && output_is_bluetooth() && decim_factor == 1) {
 		unsigned sink = bluetooth_sink_rate();
 		decim_factor = decimate_factor_for(sample_rate, sink ? (int)sink : 44100);
 	}
@@ -3176,9 +3201,13 @@ static void play_decoded_file(const char *filepath, decode_format_t format) {
 	if (!pcm_handle && passthrough) {
 		// DSD256 asks the card for 705.6 kHz, which an output that is not this
 		// device's own DAC may simply refuse. The track does not play and the
-		// log says why rather than leaving a silent stop to be guessed at; only
-		// Bluetooth is sent PCM instead (decoder_dsd_to_pcm, above).
-		fprintf(stderr, "audio: DoP at %d Hz refused by this output; the track cannot play\n", sample_rate);
+		// log says why rather than leaving a silent stop to be guessed at. The
+		// track is not converted behind the listener's back either: DoP was
+		// asked for, and the way out of this is the DSD output setting, so the
+		// log names it.
+		fprintf(stderr, "audio: DoP at %d Hz refused by this output; the track cannot play "
+						"(set the DSD output to PCM to play it as 176.4 kHz PCM)\n",
+				sample_rate);
 	}
 	if (!pcm_handle) {
 		set_dac_dop(0);
