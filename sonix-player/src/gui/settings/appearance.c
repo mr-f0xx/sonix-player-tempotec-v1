@@ -28,6 +28,8 @@ static lv_obj_t *btn_clock[4]; // left / centre / right / hidden
 static lv_obj_t *btn_accent[THEME_ACCENT_COUNT]; // the coloured circles
 static lv_obj_t *tint_toggle;
 static lv_obj_t *main_menu_icons_toggle;
+static lv_obj_t *home_buttons_screen;
+static lv_obj_t *home_button_switches[MAIN_MENU_BUTTON_COUNT];
 static lv_obj_t *battery_percent_toggle;
 static lv_obj_t *text_size_pill[FONTS_TEXT_COUNT]; // normal / large / small
 static lv_obj_t *theme_palette_card;
@@ -56,6 +58,64 @@ static void dynamic_tint_cb(lv_event_t *e) {
 static void main_menu_icons_cb(lv_event_t *e) {
 	(void)e;
 	main_menu_set_icons_only(lv_obj_has_state(main_menu_icons_toggle, LV_STATE_CHECKED));
+}
+
+static void home_buttons_refresh(void) {
+	for (int i = 0; i < MAIN_MENU_BUTTON_COUNT; i++) {
+		if (home_button_switches[i]) {
+			lv_obj_set_state(home_button_switches[i], LV_STATE_CHECKED,
+							 main_menu_button_enabled((main_menu_button_t)i));
+		}
+	}
+}
+
+static void home_buttons_cb(lv_event_t *e) {
+	lv_obj_t *toggle = lv_event_get_target(e);
+	for (int i = 0; i < MAIN_MENU_BUTTON_COUNT; i++) {
+		if (home_button_switches[i] != toggle) {
+			continue;
+		}
+		if (switcher_back_drag_active()) {
+			home_buttons_refresh();
+			return;
+		}
+		bool enabled = lv_obj_has_state(toggle, LV_STATE_CHECKED);
+		if (!main_menu_set_button_enabled((main_menu_button_t)i, enabled)) {
+			home_buttons_refresh(); // refuse a seventh tile, not a lying switch
+			toast_error("appearance_home_buttons_full");
+		}
+		return;
+	}
+}
+
+static void home_buttons_loaded_cb(lv_event_t *e) {
+	(void)e;
+	home_buttons_refresh();
+}
+
+static void build_home_buttons_page(gui_config_t *cfg) {
+	home_buttons_screen = lv_obj_create(NULL);
+	lv_obj_t *container = settingsrow_page(home_buttons_screen, cfg, "appearance_home_buttons");
+	switcher_attach_back_gesture(home_buttons_screen);
+
+	lv_obj_t *note = lv_label_create(container);
+	lv_label_set_text(note, tr("appearance_home_buttons_note"));
+	lv_label_set_long_mode(note, LV_LABEL_LONG_WRAP);
+	lv_obj_set_width(note, lv_pct(100));
+	lv_obj_add_style(note, &theme_style_text_dim, 0);
+	lv_obj_set_style_text_font(note, cfg->screen_width < 320 ? &font_ui_16 : &font_ui_22, 0);
+
+	for (int i = 0; i < MAIN_MENU_BUTTON_COUNT; i++) {
+		if (main_menu_button_available((main_menu_button_t)i)) {
+			settingsrow_toggle(container, main_menu_button_label((main_menu_button_t)i),
+							   &home_button_switches[i], home_buttons_cb);
+		}
+	}
+	// Always offer the way back to Appearance. Show it in the list, but don't
+	// allow the Settings switch to be changed by touch.
+	lv_obj_add_state(home_button_switches[MAIN_MENU_SETTINGS], LV_STATE_DISABLED);
+	home_buttons_refresh();
+	lv_obj_add_event_cb(home_buttons_screen, home_buttons_loaded_cb, LV_EVENT_SCREEN_LOADED, NULL);
 }
 
 static void refresh_text_size_pills(void) {
@@ -525,6 +585,7 @@ static void build_theme_previews(lv_obj_t *container, bool compact) {
 
 void appearance_init(gui_config_t *cfg) {
 	const bool compact = cfg->screen_width < 320;
+	build_home_buttons_page(cfg);
 	lv_obj_t *container = settingsrow_page(appearance_screen, cfg, "appearance");
 
 	// One tall card: the option's name on top, the two choices under it.
@@ -582,6 +643,10 @@ void appearance_init(gui_config_t *cfg) {
 	lv_obj_add_style(menu_note, &theme_style_text_dim, 0);
 	lv_obj_set_style_text_font(menu_note, &font_ui_22, 0);
 	lv_label_set_text(menu_note, tr("appearance_main_menu_icons_only_note"));
+
+	// Which destinations get a tile on the home screen. Keep the choices on
+	// their own scrollable page so the rest of Appearance stays easy to scan.
+	settingsrow_add(container, "appearance_home_buttons", NULL, switch_screen_cb, home_buttons_screen);
 
 	// A second card: which picture the next power-on shows. Unlike every
 	// other choice on this page it is not only a config value -- it also

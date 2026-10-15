@@ -82,7 +82,10 @@ sizes, all five themes, exact icon sizes and centering, glow-free icon-only
 tiles, unchanged secondary-menu tiles, restoration of the labeled layout and
 its decorative glows, real switch callbacks and config save/reload,
 theme/accent/tint/font changes, hidden-label translation, and the six tile
-destinations. Both language asset trees are used. Icon-only images must have
+destinations. It also exercises **Home buttons**: saved selections, the
+Appearance switches, the six-tile limit, Books replacing Audiobooks, More
+shortcuts, navigation, repeated rebuilds, invalid config and the always-visible
+Settings tile. Both language asset trees are used. Icon-only images must have
 native-size sources and no scaling transform, including after font-metric
 reflows. Actual LVGL snapshots verify pixel-for-pixel alpha edges, theme tints
 and opaque pixels in ARGB8888 and the panel's RGB565 format; geometry alone

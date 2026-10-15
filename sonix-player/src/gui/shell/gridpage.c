@@ -309,12 +309,29 @@ static gridpage_theme_page_t *gridpage_theme_page_for(lv_obj_t *grid) {
 	return NULL;
 }
 
+static void gridpage_theme_page_deleted_cb(lv_event_t *e) {
+	lv_obj_t *grid = lv_event_get_target(e);
+	for (int i = 0; i < theme_page_count; i++) {
+		if (theme_pages[i].grid == grid) {
+			// A home selection replaces its grid. Don't let later theme changes
+			// dereference the old tiles or exhaust the page registry.
+			theme_page_count--;
+			if (i < theme_page_count) {
+				memmove(&theme_pages[i], &theme_pages[i + 1],
+						(size_t)(theme_page_count - i) * sizeof(theme_pages[0]));
+			}
+			return;
+		}
+	}
+}
+
 static void gridpage_register_theme_page(lv_obj_t *grid, const grid_entry_t *entries, int count) {
 	if (!grid || !entries || count < 1 || count > GRIDPAGE_THEME_TILE_MAX ||
 			theme_page_count >= GRIDPAGE_THEME_PAGE_MAX) {
 		return;
 	}
 
+	lv_obj_add_event_cb(grid, gridpage_theme_page_deleted_cb, LV_EVENT_DELETE, NULL);
 	gridpage_theme_page_t *page = &theme_pages[theme_page_count++];
 	page->grid = grid;
 	page->count = count;
@@ -427,7 +444,9 @@ void gridpage_set_layout(lv_obj_t *grid, gui_config_t *cfg, int top, int bottom,
 	int count = (int)lv_obj_get_child_count(grid);
 	for (int i = 0; i < count; i++) {
 		lv_obj_t *tile = lv_obj_get_child(grid, i);
-		bool lone_last = count == columns * rows - 1 && i == count - 1;
+		// The home grid can now have one, three or five tiles: let a lone
+		// final tile fill its row, rather than leaving a card-sized hole.
+		bool lone_last = count <= columns * rows && count % columns == 1 && i == count - 1;
 		lv_obj_set_size(tile, lone_last ? usable_w : tile_w, tile_h);
 	}
 	lv_obj_update_layout(grid);

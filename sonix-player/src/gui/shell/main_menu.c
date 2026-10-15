@@ -5,9 +5,14 @@
 
 #include "lvgl/lvgl.h"
 
+#include "src/gui/audio/dacpage.h"
 #include "src/gui/board_profile.h"
+#include "src/gui/ebook/ebookpage.h"
+#include "src/gui/flappybird/flappybird.h"
 #include "src/gui/fonts/fonts.h"
+#include "src/gui/gearboy/gearboypage.h"
 #include "src/gui/library/audiobooks.h"
+#include "src/gui/library/filespage.h"
 #include "src/gui/library/music.h"
 #include "src/gui/nowplaying/coverflow.h"
 #include "src/gui/nowplaying/player.h"
@@ -39,6 +44,7 @@ static lv_obj_t *mini_player_title;
 static lv_obj_t *mini_player_subtitle;
 static lv_timer_t *mini_player_timer;
 static gui_config_t *menu_cfg;
+static main_menu_button_t tile_buttons[MAIN_MENU_MAX_TILES];
 
 // lv_btn supplies state-specific focus and shadow styles. Those do not inherit
 // the zero-width default style below, and on the compact footer their bottom
@@ -68,33 +74,6 @@ static void mini_player_clear_edge(void) {
 	}
 }
 
-static const lv_image_dsc_t *const NORMAL_MENU_ICONS[6] = {
-	&icon_menu_music,
-	&icon_menu_streaming,
-	&icon_menu_wireless,
-	&icon_menu_audiobooks,
-	&icon_menu_more,
-	&icon_menu_settings,
-};
-
-static const lv_image_dsc_t *const TOKYO_MENU_ICONS[6] = {
-	&icon_music2,           // Music
-	&icon_radio_player,     // Streaming
-	&icon_wifi_high,        // Wireless
-	&icon_files_audiobook,  // Audiobooks
-	&icon_ellipsis_vertical, // More
-	&icon_music_settings,   // Settings
-};
-
-static const theme_semantic_t TOKYO_MENU_TONES[6] = {
-	THEME_SEMANTIC_CYAN,
-	THEME_SEMANTIC_PURPLE,
-	THEME_SEMANTIC_BLUE,
-	THEME_SEMANTIC_AMBER,
-	THEME_SEMANTIC_GREEN,
-	THEME_SEMANTIC_MUTED,
-};
-
 // Audiobooks reads its library straight off the card, so it is the one tile
 // that opens onto nothing when the card is out or at a computer. Music has the
 // same rule a level deeper, where a list is asked for.
@@ -104,6 +83,142 @@ static void open_audiobooks(void) {
 		return;
 	}
 	switch_screen(audiobooks_screen);
+}
+
+// The selection is keyed by identity, never by position. In particular the
+// Books action must prepare the shelf on every visit, as it does from More.
+static const grid_entry_t MENU_ENTRIES[MAIN_MENU_BUTTON_COUNT] = {
+	[MAIN_MENU_MUSIC] = {"music", &icon_menu_music, &music_screen, NULL},
+	[MAIN_MENU_STREAMING] = {"streaming", &icon_menu_streaming, &streaming_screen, NULL},
+	[MAIN_MENU_WIRELESS] = {"wireless", &icon_menu_wireless, &wireless_screen, NULL},
+	[MAIN_MENU_AUDIOBOOKS] = {"audiobooks", &icon_menu_audiobooks, NULL, open_audiobooks},
+	[MAIN_MENU_BOOKS] = {"books", &icon_menu_books, NULL, ebookpage_open},
+	[MAIN_MENU_DAC] = {"dac", &icon_menu_dac, &dacpage_screen, NULL},
+#if GB_CORE
+	[MAIN_MENU_GEARBOY] = {"gearboy", &icon_menu_gearboy, &gearboypage_screen, NULL},
+#endif
+	[MAIN_MENU_FILE_EXPLORER] = {"file_explorer", &icon_menu_file_explorer, NULL, filespage_open},
+	[MAIN_MENU_FLAPPY_BIRD] = {"flappy_bird", &icon_menu_flappy_bird, NULL, flappybird_open},
+	[MAIN_MENU_MORE] = {"more", &icon_menu_more, &morepage_screen, NULL},
+	[MAIN_MENU_SETTINGS] = {"settings", &icon_menu_settings, &settings_screen, NULL},
+};
+
+static const lv_image_dsc_t *const TOKYO_MENU_ICONS[MAIN_MENU_BUTTON_COUNT] = {
+	[MAIN_MENU_MUSIC] = &icon_music2,
+	[MAIN_MENU_STREAMING] = &icon_radio_player,
+	[MAIN_MENU_WIRELESS] = &icon_wifi_high,
+	[MAIN_MENU_AUDIOBOOKS] = &icon_files_audiobook,
+	[MAIN_MENU_BOOKS] = &icon_files_book,
+	[MAIN_MENU_DAC] = &icon_usbaudioout,
+	[MAIN_MENU_GEARBOY] = &icon_files_game,
+	[MAIN_MENU_FILE_EXPLORER] = &icon_folder,
+	[MAIN_MENU_FLAPPY_BIRD] = &icon_bird,
+	[MAIN_MENU_MORE] = &icon_ellipsis_vertical,
+	[MAIN_MENU_SETTINGS] = &icon_music_settings,
+};
+
+static const theme_semantic_t TOKYO_MENU_TONES[MAIN_MENU_BUTTON_COUNT] = {
+	[MAIN_MENU_MUSIC] = THEME_SEMANTIC_CYAN,
+	[MAIN_MENU_STREAMING] = THEME_SEMANTIC_PURPLE,
+	[MAIN_MENU_WIRELESS] = THEME_SEMANTIC_BLUE,
+	[MAIN_MENU_AUDIOBOOKS] = THEME_SEMANTIC_AMBER,
+	[MAIN_MENU_BOOKS] = THEME_SEMANTIC_AMBER,
+	[MAIN_MENU_DAC] = THEME_SEMANTIC_CYAN,
+	[MAIN_MENU_GEARBOY] = THEME_SEMANTIC_GREEN,
+	[MAIN_MENU_FILE_EXPLORER] = THEME_SEMANTIC_BLUE,
+	[MAIN_MENU_FLAPPY_BIRD] = THEME_SEMANTIC_PURPLE,
+	[MAIN_MENU_MORE] = THEME_SEMANTIC_GREEN,
+	[MAIN_MENU_SETTINGS] = THEME_SEMANTIC_MUTED,
+};
+
+#define MENU_BIT(button) (1u << (button))
+#define DEFAULT_MENU_BUTTONS (MENU_BIT(MAIN_MENU_MUSIC) | MENU_BIT(MAIN_MENU_STREAMING) | \
+	MENU_BIT(MAIN_MENU_WIRELESS) | MENU_BIT(MAIN_MENU_AUDIOBOOKS) | \
+	MENU_BIT(MAIN_MENU_MORE) | MENU_BIT(MAIN_MENU_SETTINGS))
+
+_Static_assert(MAIN_MENU_BUTTON_COUNT < 31, "Home button mask must fit in an int");
+
+bool main_menu_button_available(main_menu_button_t button) {
+	return button >= 0 && button < MAIN_MENU_BUTTON_COUNT && MENU_ENTRIES[button].label != NULL;
+}
+
+const char *main_menu_button_label(main_menu_button_t button) {
+	return main_menu_button_available(button) ? MENU_ENTRIES[button].label : NULL;
+}
+
+// Normalize hand-edited/stale config values too: no removed destinations, at
+// most six tiles, and Settings always last. A missing key keeps the old menu.
+static uint32_t main_menu_buttons_mask(void) {
+	uint32_t saved = (uint32_t)config_get_int("ui", "home_buttons", DEFAULT_MENU_BUTTONS);
+	uint32_t mask = MENU_BIT(MAIN_MENU_SETTINGS);
+	int count = 1;
+	for (int i = 0; i < MAIN_MENU_BUTTON_COUNT; i++) {
+		if (i != MAIN_MENU_SETTINGS && (saved & MENU_BIT(i)) &&
+				main_menu_button_available((main_menu_button_t)i) && count < MAIN_MENU_MAX_TILES) {
+			mask |= MENU_BIT(i);
+			count++;
+		}
+	}
+	return mask;
+}
+
+bool main_menu_button_enabled(main_menu_button_t button) {
+	return main_menu_button_available(button) && (main_menu_buttons_mask() & MENU_BIT(button)) != 0;
+}
+
+static void main_menu_refresh_theme(void);
+
+// Only the home grid is replaced. Its theme registration is released when the
+// old grid is deleted; the header, mini-player and other menu pages stay put.
+static void main_menu_build_grid(void) {
+	if (!menu_cfg || !main_menu_screen) {
+		return;
+	}
+	if (menu_grid) {
+		lv_obj_delete(menu_grid);
+		menu_grid = NULL;
+	}
+
+	grid_entry_t entries[MAIN_MENU_MAX_TILES];
+	int count = 0;
+	uint32_t mask = main_menu_buttons_mask();
+	for (int i = 0; i < MAIN_MENU_BUTTON_COUNT; i++) {
+		if (mask & MENU_BIT(i)) {
+			tile_buttons[count] = (main_menu_button_t)i;
+			entries[count++] = MENU_ENTRIES[i];
+		}
+	}
+	menu_grid = gridpage_build(main_menu_screen, menu_cfg, entries, count, 2, 3, false);
+	lv_obj_move_to_index(menu_grid, 0); // behind the header and mini-player
+	coverflow_attach_edge(menu_grid, menu_cfg);
+}
+
+bool main_menu_set_button_enabled(main_menu_button_t button, bool enabled) {
+	if (!main_menu_button_available(button) || (button == MAIN_MENU_SETTINGS && !enabled)) {
+		return false;
+	}
+	uint32_t mask = main_menu_buttons_mask();
+	uint32_t bit = MENU_BIT(button);
+	if (((mask & bit) != 0) == enabled) {
+		return true;
+	}
+	if (enabled) {
+		int count = 0;
+		for (int i = 0; i < MAIN_MENU_BUTTON_COUNT; i++) {
+			count += (mask & MENU_BIT(i)) != 0;
+		}
+		if (count >= MAIN_MENU_MAX_TILES) {
+			return false;
+		}
+		mask |= bit;
+	} else {
+		mask &= ~bit;
+	}
+	config_set_int("ui", "home_buttons", mask);
+	config_save();
+	main_menu_build_grid();
+	main_menu_refresh_theme();
+	return true;
 }
 
 static void fit_menu_icon(lv_obj_t *image, const lv_image_dsc_t *source, int size) {
@@ -152,7 +267,8 @@ static void main_menu_refresh_tiles(void) {
 	bool tokyo = theme_uses_function_glyphs();
 	bool icons_only = main_menu_icons_only();
 	bool horizontal = compact && tokyo && !icons_only;
-	for (int i = 0; i < 6; i++) {
+	for (int i = 0; i < (int)lv_obj_get_child_count(menu_grid); i++) {
+		main_menu_button_t button = tile_buttons[i];
 		lv_obj_t *tile = lv_obj_get_child(menu_grid, i);
 		int icon_size = tokyo ? (compact ? 22 : 46) : (compact ? 46 : 0);
 		if (icons_only) {
@@ -169,14 +285,14 @@ static void main_menu_refresh_tiles(void) {
 			icon_size = LV_MAX(1, (icon_size * 95 + 50) / 100);
 		}
 
-		const lv_image_dsc_t *source = tokyo ? TOKYO_MENU_ICONS[i] : NORMAL_MENU_ICONS[i];
+		const lv_image_dsc_t *source = tokyo ? TOKYO_MENU_ICONS[button] : MENU_ENTRIES[button].icon;
 		if (icons_only) {
 			// Use art pre-rasterized at the final pixel size, not stretched
 			// toolbar glyphs or colored art filtered for a second time.
 			// Matching source/layout sizes also avoids LVGL's fractional image
 			// transform and its extra edge interpolation. Other menus and the
 			// labeled layout continue to use their original sources and sizes.
-			const lv_image_dsc_t *native = main_menu_icon_native(i, tokyo, icon_size);
+			const lv_image_dsc_t *native = main_menu_icon_native(button, tokyo, icon_size);
 			if (native) {
 				source = native;
 			}
@@ -186,7 +302,7 @@ static void main_menu_refresh_tiles(void) {
 			// Keep the decorative left-column glow only in the labeled layout.
 			bool glow = !icons_only && compact && (i % 2 == 0);
 			gridpage_set_tile_icon_style(menu_grid, i, source, icon_size, true,
-										 theme_semantic_color(TOKYO_MENU_TONES[i]), glow);
+										 theme_semantic_color(TOKYO_MENU_TONES[button]), glow);
 		} else {
 			gridpage_set_tile_icon_style(menu_grid, i, source, icon_size, false,
 										 theme()->text_primary, false);
@@ -366,23 +482,9 @@ void main_menu_set_icons_only(bool enabled) {
 
 void main_menu_init(gui_config_t *cfg) {
 	menu_cfg = cfg;
-
-	const grid_entry_t entries[] = {
-		{"music", &icon_menu_music, &music_screen, NULL},
-		{"streaming", &icon_menu_streaming, &streaming_screen, NULL},
-		{"wireless", &icon_menu_wireless, &wireless_screen, NULL},
-		{"audiobooks", &icon_menu_audiobooks, NULL, open_audiobooks},
-		// The door to the More page, which holds the DAC and anything else
-		// that does not fit. The main menu has exactly six tiles, and one of
-		// them has to be able to keep growing.
-		{"more", &icon_menu_more, &morepage_screen, NULL},
-		{"settings", &icon_menu_settings, &settings_screen, NULL},
-	};
-
-	menu_grid = gridpage_build(main_menu_screen, cfg, entries, (int)(sizeof(entries) / sizeof(entries[0])), 2, 3, false);
-	// Cover Flow is a main-menu destination: pull up from the bottom edge,
-	// just as the music grid used to, without entering Music first.
-	coverflow_attach_edge(menu_grid, cfg);
+	main_menu_build_grid();
+	// Cover Flow remains available by pulling up from the home grid, even
+	// when the visible tiles have been changed.
 
 	// Tokyo Night's compact home chrome: the header, note and live mini-player
 	// are ordinary LVGL objects, and remain hidden in the unchanged Dark/Light
