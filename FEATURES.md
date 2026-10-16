@@ -35,9 +35,14 @@
 - **ReplayGain** - off, track or album, read from the tags.
 - **Fade** - one to twelve seconds at the track boundary.
 - **Gapless** - on by default; the PCM device stays open between tracks of the same shape. A track that ends on its own hands over its queue. A manual skip (next, previous, or a track picked from a list) drops the old queue and keeps the device open, so the next track skips the device open and the DAC mute. A saved `audio.gapless = 0` turns it off.
-- **DSD** - DoP by default, with nothing in the chain allowed to touch the
-  samples; or converted here to 176.4 kHz PCM. DoP falls back to conversion by
-  itself when the device refuses the rate.
+- **DSD** - two outputs, chosen in Settings → Music: **DoP**, the default, hands
+  the bitstream to the DAC in marked PCM frames with nothing in the chain
+  allowed to touch the samples; **PCM** filters the track here to 176.4 kHz
+  24-bit, so the equaliser, the volume and the fade work on it and any output
+  can take it. Bluetooth is always PCM. There is no *native* mode: the DAC's
+  DSD path is entered by the sound card's DoP control alone, so an unmarked DSD
+  stream has no route to it on this hardware. A DoP track whose rate the output
+  refuses does not play, and the log says so and names the setting.
 - **DAC controls** - four digital filters, DRE, NOS, high gain, and DSD gain
   compensation from 0 to 6 dB.
 - **Line out** - drives the jack at a fixed level for an amplifier, refuses
