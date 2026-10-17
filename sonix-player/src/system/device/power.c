@@ -1,3 +1,4 @@
+#include "src/system/streaming/qobuzdownload.h"
 /*
  * This file is largely LLM-written, be warned
  */
@@ -743,7 +744,7 @@ static bool wifi_in_use(void) {
 	return subsonic_api_busy() || subsonicstream_network_wanted() || wifi_busy() || wifi_scan_running() || streaming_playback_active() || airplay_get_enabled() ||
 		   dlna_get_enabled() || sonixlink_get_enabled() ||
 		   wifitransfer_get_enabled() || qobuzcache_downloading_id() > 0 ||
-		   qobuzcache_network_wanted() || tidalcache_downloading_id() > 0 || tidalcache_network_wanted() ||
+		   qobuzcache_network_wanted() || qobuzdownload_busy() || tidalcache_downloading_id() > 0 || tidalcache_network_wanted() ||
 		   podcastcache_downloading_id() > 0 || podcastcache_network_wanted() || podcastdl_busy() ||
 		   lastfm_network_wanted() || ota_busy();
 }
