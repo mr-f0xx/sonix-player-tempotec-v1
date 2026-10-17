@@ -787,10 +787,9 @@ static bool make_backdrop(const raw_image_t *src, int box_w, int box_h, bool fro
 
 	// Flip while shrinking, so the stretch back up only has to interpolate and
 	// no separate flip pass is needed. Not for a bottom band: that one stands
-	// in for the pixels underneath it and has to face the same way. Nor when
-	// the backdrop is the whole screen with the sleeve shown over it, where the
-	// two are plainly the same picture and one of them being upside down is the
-	// only thing anybody sees.
+	// in for the pixels underneath it and has to face the same way. Callers can
+	// also request an upright full-screen backdrop when it should line up with
+	// a sharp copy of the same sleeve.
 	bool flip = !from_bottom && !backdrop_upright;
 	uint8_t *small = resample_rgb(src, &crop, small_w, small_h, flip);
 	if (!small)
@@ -1074,10 +1073,10 @@ typedef struct {
 	bool backdrop; // build the blurred, flipped copy instead of a plain scale
 	// The backdrop comes from the BOTTOM band of the source instead of a
 	// centred crop of it, and is not flipped. What a blurred block that sits
-	// ON the picture wants -- the screensaver's foot, and the player's
-	// Immersive deck: there the blur stands over the part of the photograph it
-	// frosts, so it has to be a blurred continuation of exactly those pixels;
-	// a mirrored centre crop would read as a different photograph.
+	// ON the picture wants -- the screensaver's foot: the blur stands over the
+	// part of the photograph it frosts, so it has to be a blurred continuation
+	// of exactly those pixels; a mirrored centre crop would read as a different
+	// photograph.
 	bool from_bottom;
 	// The box the picture this band stands over was made at, with from_bottom:
 	// the band is cut from that crop's own foot so its colours continue the

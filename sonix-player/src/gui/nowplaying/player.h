@@ -62,6 +62,12 @@ typedef enum {
 player_layout_t player_layout_get(void);
 void player_layout_set(player_layout_t layout);
 
+// Whether the playback controls use the blurred album-art backdrop in their
+// current layout. The image is built by the low-priority cover worker; this
+// preference only changes what the UI draws and never touches the audio path.
+bool player_artwork_backdrop_enabled(void);
+void player_artwork_backdrop_set_enabled(bool enabled);
+
 // The output the music was going to has just been unplugged -- a jack pulled
 // out, a USB-C DAC removed, headphones that walked out of range. Pauses, so
 // that taking the headphones off does not cost three tracks of an album, and

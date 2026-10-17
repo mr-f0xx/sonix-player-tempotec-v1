@@ -1597,6 +1597,11 @@ static lv_obj_t *layout_alternative_pill;
 static lv_obj_t *layout_studio_pill;
 static lv_obj_t *layout_immersive_pill;
 static lv_obj_t *layout_poster_pill;
+static lv_obj_t *player_artwork_backdrop_switch;
+
+static void player_artwork_backdrop_cb(lv_event_t *e) {
+	player_artwork_backdrop_set_enabled(lv_obj_has_state(lv_event_get_target(e), LV_STATE_CHECKED));
+}
 
 static void layout_refresh(void) {
 	if (!layout_standard_pill) {
@@ -1726,6 +1731,15 @@ static void build_display_page(gui_config_t *cfg) {
 	// stream from a phone and an audiobook all get the standard one whatever
 	// this says. Studio asks for less and takes all of them.
 	option_note(container, "musicsettings_local_only_note");
+
+	// The reflected, blurred sleeve behind the controls is independent of the
+	// selected arrangement, so one switch applies to every player layout.
+	settingsrow_toggle(container, "musicsettings_artwork_backdrop", &player_artwork_backdrop_switch,
+					   player_artwork_backdrop_cb);
+	option_note(container, "musicsettings_artwork_backdrop_note");
+	if (player_artwork_backdrop_enabled()) {
+		lv_obj_add_state(player_artwork_backdrop_switch, LV_STATE_CHECKED);
+	}
 
 	// Whether a start with a remembered track lands on the now-playing page
 	// rather than on the home screen. Read once, at startup (main.c).

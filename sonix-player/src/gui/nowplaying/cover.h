@@ -69,9 +69,9 @@ bool cover_load_image_memory(const void *data, size_t size, int box_w, int box_h
 uint64_t cover_source_id(const char *filepath);
 
 // Decodes the artwork once and builds both images the player screen needs: the
-// artwork itself, and the upside-down blurred copy drawn behind the controls.
-// Either output may be skipped by passing NULL for its size. Returns false if
-// the track has no artwork at all, leaving both outputs zeroed.
+// artwork itself, and its mirrored, blurred backdrop for the controls and other
+// player surfaces. Either output may be skipped by passing NULL for its size.
+// Returns false if the track has no artwork at all, leaving both outputs zeroed.
 bool cover_load_player_images(const char *filepath, int cover_w, int cover_h, cover_image_t *cover_out,
 							  int backdrop_w, int backdrop_h, cover_image_t *backdrop_out);
 
@@ -79,11 +79,11 @@ bool cover_load_player_images(const char *filepath, int cover_w, int cover_h, co
 // itself filling the screen, and the blurred block along the bottom that the
 // clock and the track name sit on.
 //
-// Not cover_load_player_images() with different numbers: there the blurred
-// block sits BELOW the artwork and is a mirrored centre crop of it, while here
-// it sits ON TOP of a picture that fills the whole screen, so it has to be the
-// bottom band of that same picture, blurred and the right way up. Anything
-// else reads as a second photograph laid over the first.
+// Not cover_load_player_images() with different numbers: the player's backdrop
+// is a mirrored centre crop for use behind or under its controls, while this
+// strip sits ON TOP of a picture that fills the whole screen. It has to be the
+// bottom band of that same picture, blurred and the right way up. Anything else
+// reads as a second photograph laid over the first.
 //
 // One decode feeds both. False when the file cannot be read or decoded, with
 // both outputs zeroed.
@@ -116,12 +116,11 @@ void cover_free(cover_image_t *img);
 // Takes effect the next time a backdrop is built.
 void cover_set_backdrop_light(bool light);
 
-// Whether the blurred backdrop is built the right way up.
-//
-// Behind the controls it is turned over: it stands below the sleeve and reads
-// as its reflection. Filling the screen with the sleeve shown on top of it, it
-// has to face the same way the sleeve does. Takes effect the next time a
-// backdrop is built; the screensaver's bottom band is never flipped either way.
+// Whether the blurred backdrop is upright or mirrored vertically. The player
+// uses the mirrored treatment behind its controls across layouts; a caller can
+// request an upright copy when it must align with the same sharp sleeve. Takes
+// effect the next time a backdrop is built; the screensaver's bottom band is
+// never flipped either way.
 void cover_set_backdrop_upright(bool upright);
 
 // Whether the blurred backdrop is the BOTTOM band of the picture rather than a

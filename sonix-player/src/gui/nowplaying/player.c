@@ -351,7 +351,7 @@ static player_layout_t layout_choice; // the setting, saved in the config
 static bool layout_alt_now;		// and whether the current source can use it
 static bool layout_studio_now;	// likewise for the third arrangement
 static bool layout_immersive_now; // and for the fourth: the sleeve from edge to edge
-static bool layout_poster_now;  // and for the fifth: the sleeve at the width of the screen, the deck on its own ground
+static bool layout_poster_now;  // and for the fifth: wide sleeve with optional backdrop under the deck
 // The shape of the track and the sleeve's colour: up with the alternative
 // layout, and kept when the words are shown over it.
 static bool layout_wave_now;
@@ -361,10 +361,9 @@ static uint32_t album_tone; // the sleeve's colour, 0 when there is no sleeve
 static lv_obj_t *song_text_obj; // the title and artist, wherever they live now
 static lv_obj_t *song_side_obj; // the star and the format, likewise
 static void align_title_with_star(void);
-// Two pieces of the Immersive arrangement that other code asks for by name:
-// the block of controls made clear, and the frosted band at the foot of the
-// screen, which follows the deck's rectangle, the artwork's arrival and the
-// words' page (immersive_blur_apply).
+// Two pieces of Immersive that other code asks for by name: the controls block
+// made clear, and the mirrored blur under it, which follows the deck's
+// rectangle, the artwork's arrival and the words' page (immersive_blur_apply).
 static void immersive_deck_clear(void);
 static void immersive_blur_apply(void);
 static lv_obj_t *alt_text_col;	// the two pills, stacked at the foot of the sleeve
@@ -397,7 +396,12 @@ static bool backdrop_is_studio;
 // screen's or the deck's.
 static bool backdrop_full;
 static bool backdrop_is_full;
+static bool artwork_backdrop_enabled;
+static bool compact_clear_style_active;
 static lv_style_t compact_clear_style; // the two surfaces the full blur shows through
+static void player_artwork_backdrop_apply(void);
+static void compact_clear_style_set(bool clear);
+static void player_menu_backdrop_apply(void);
 
 // Immersive draws the sleeve at the shape of the whole screen rather than at
 // the square the other arrangements keep, so the picture on hand is the wrong
@@ -413,17 +417,14 @@ static bool cover_shape_immersive;
 // on hand was asked for at that width.
 static bool cover_shape_poster;
 
-// Immersive asks for the blurred copy as the FOOT of the photograph, at the
-// size of the deck, rather than as the whole screen: it stands over the part
-// of the picture it frosts, so the artwork stays there to be seen through it
-// instead of under a second, screen-sized blur. `backdrop_is_band` is the
-// shape the picture on hand was made at, as the two above are.
-static bool backdrop_is_band;
+// Immersive places its controls backdrop over the lower part of the artwork
+// instead of behind a separate deck. It is still a mirrored, blurred crop; this
+// flag records where the image belongs, not how it was cropped.
+static bool backdrop_is_immersive;
 
-// Poster keeps the deck on its own opaque ground rather than showing the
-// blurred sleeve through it, so on this board the screen-sized blur is not
-// wanted while Poster is in force: the sleeve itself covers everything above
-// the deck, and the deck covers the rest.
+// Poster shows the sleeve at screen width and uses a deck-sized backdrop on
+// the controls block when enabled. It does not need the screen-sized blur: the
+// sleeve covers the picture area, and the deck supplies its own surface below.
 static bool backdrop_fills_screen(void) { return layout_studio_now || (backdrop_full && !layout_poster_now); }
 
 static double current_total_length = 0; // cached from the last device_state snapshot, so slider math works between polls
@@ -1034,11 +1035,10 @@ static void cover_show(bool have_cover) {
 static void set_over_cover(bool on) {
 	chrome_over_cover = on;
 
-	// Poster's deck stands on its own opaque ground rather than on the blurred
-	// sleeve, so the chrome on it keeps the theme's colours whatever is
-	// playing; the chevron still parks over the artwork, which reaches the top
-	// of the screen in that arrangement.
-	bool over = on && !layout_poster_now;
+	// Poster keeps theme-colored chrome on the controls deck, whether its
+	// surface is the theme fill or the optional mirrored blur. The chevron
+	// still parks over the artwork, which reaches the top of the screen here.
+	bool over = on && !layout_poster_now && (artwork_backdrop_enabled || layout_immersive_now);
 
 	// Amber on Black and OLED: the deck's own role colours, over artwork or not.
 	bool mono = theme_is_monochrome();
@@ -1418,18 +1418,13 @@ static bool studio_up;
 static int studio_box_w, studio_box_h; // the panel this arrangement is laid out on
 static bool lyrics_look_on;			   // the words have Studio's look up, see lyrics_look()
 
-// OLED keeps the page black behind Now Playing: the blurred copy of the sleeve
-// the V1 lays behind the standard and alternative arrangements, and behind the
-// words, is a lit background, and the theme has none. Studio and Immersive keep
-// theirs -- there the artwork is what the arrangement is.
-static bool backdrop_blur_wanted(void) { return !theme_is_oled(); }
+// Whether a blurred cover should be shown. OLED no longer hard-codes this
+// choice: the saved player setting is the user's decision for every layout.
+static bool backdrop_blur_wanted(void) { return artwork_backdrop_enabled; }
 
-// Puts the V1's screen-sized blur up behind the standard and alternative
-// arrangements, or takes it down, to match whether there is a backdrop on
-// hand (and whether the theme wants one, backdrop_blur_wanted()). Studio draws the same object itself and the words borrow it while they
-// are up, so both of those are left alone here; the cover panel and the deck
-// are already clear on this board (compact_clear_style), so there is nothing
-// else to switch.
+// Puts the V1's screen-sized blur up behind the standard and waveform layouts,
+// or takes it down. Studio draws the same object itself and the words borrow it
+// while they are up, so both of those are left alone here.
 static void full_backdrop_apply(void) {
 	if (!backdrop_full || !studio_bg || layout_studio_now || lyrics_look_on) {
 		return;
@@ -1439,6 +1434,44 @@ static void full_backdrop_apply(void) {
 	lv_obj_set_hidden(studio_bg, !have);
 	if (have) {
 		lv_obj_move_background(studio_bg);
+	}
+}
+
+// The compact player normally lets the screen-sized blur show through both
+// the cover frame and the controls block. When the user switches it off, those
+// same surfaces return to their ordinary theme fills instead of revealing the
+// screen behind them.
+static void compact_clear_style_set(bool clear) {
+	if (!backdrop_full || !cover_panel || !player_menu || clear == compact_clear_style_active) {
+		return;
+	}
+	if (clear) {
+		lv_obj_add_style(cover_panel, &compact_clear_style, 0);
+		lv_obj_add_style(player_menu, &compact_clear_style, 0);
+	} else {
+		lv_obj_remove_style(cover_panel, &compact_clear_style, 0);
+		lv_obj_remove_style(player_menu, &compact_clear_style, 0);
+	}
+	compact_clear_style_active = clear;
+}
+
+// The non-full-screen version of the backdrop belongs on the controls block:
+// standard/waveform on wide panels and Poster on the compact panel. Studio and
+// Immersive each place their own image elsewhere.
+static void player_menu_backdrop_apply(void) {
+	if (!player_menu) {
+		return;
+	}
+	bool use_menu_backdrop = artwork_backdrop_enabled && current_backdrop.pixels && !backdrop_is_full &&
+							 !backdrop_is_immersive && !layout_studio_now && !layout_immersive_now &&
+							 (!backdrop_full || layout_poster_now);
+	lv_obj_set_style_bg_image_src(player_menu, use_menu_backdrop ? &current_backdrop.dsc : NULL, 0);
+
+	// Poster keeps an opaque theme-colored deck when the setting is off. On the
+	// V1, its compact clear style otherwise suppresses background images, so
+	// let the blurred deck image through explicitly when it is selected.
+	if (layout_poster_now && backdrop_full) {
+		lv_obj_set_style_bg_image_opa(player_menu, use_menu_backdrop ? LV_OPA_COVER : LV_OPA_TRANSP, 0);
 	}
 }
 static int menu_pad_ver = PLAYER_MENU_PAD_VER; // the controls block's spacing, see PLAYER_MENU_REF_HEIGHT
@@ -1452,52 +1485,14 @@ static int menu_height;
 // ---------------------------------------------------------------------------
 // Immersive: the sleeve from edge to edge
 //
-// The picture the page has already decoded, asked for at the shape of the
-// screen rather than at the square every other arrangement shows it in, and
-// cropped to fill it: a cover is square and the screen is not, so what the crop
-// takes is the two sides. Nothing else is laid out any differently -- the
-// title, the favourite button, the format, the bar, the clocks and the transport
-// stay exactly where the standard arrangement keeps them -- but the ground under
-// them is the artwork, which reaches the bezel on all four sides with square
-// corners.
-//
-// The photograph above the controls is left at its own brightness: it is there
-// to be looked at, and a veil over it is a veil over the thing the arrangement
-// exists for. What the chrome is read on is the frost alone -- the foot of the
-// picture, blurred and kept at most of its own light, asked for at the size of
-// the deck and cut out of the very crop the picture above it was made from, so
-// its colours continue the photograph and the artwork is seen through it,
-// softly. The band is frosted glass rather than a panel: the names, the bar,
-// the clocks and the transport stand on the picture itself, softened, and the
-// chevron and the source marks take their chance over the sharp part of it in
-// white, as they do over every sleeve in this player. A flat black scrim over
-// the whole screen was the first dressing here, and gradients were tried
-// before it -- a ramp's ends are a step in the alpha's slope, and on this panel
-// each of them draws a visible line across the photograph -- but both are
-// darkening a picture that the deck's frost already carries the chrome on.
-//
-// The frost is a child of the artwork's own frame rather than of the page, for
-// two reasons: the source marks are children of that frame and are brought to
-// the front of it when they appear, so they keep their own colour over the
-// band instead of being blurred with the picture; and the frame is what the
-// words' page slides out from under, so the frost travels with the sleeve
-// rather than staying behind to fog the page it uncovers. Where the band meets
-// the sharp picture above it is the one edge on the screen, and it is the edge
-// of the frost.
+// The cover fills the screen and stays sharp. The controls keep their usual
+// positions, over a separate, mirrored blur sized to the deck. That makes the
+// lower controls easy to read without tinting the whole photograph, and keeps
+// the artwork treatment consistent with the other layouts. The backdrop is a
+// child of the sleeve frame so it travels with the artwork and its source marks.
 // ---------------------------------------------------------------------------
 
-// How much of its own light the frost keeps, in per cent of the photograph.
-// On the device this turned out to be a question about the type, not about the
-// picture: at 80 per cent a pale sleeve frosts to a light wash and the cream
-// title and the amber clocks float on it with nothing to hold them. At this
-// number the glass sits at the darkness the type reads on, and what the sleeve
-// keeps of itself in the band is hue rather than light -- which the tint in
-// make_backdrop() looks after. The colour masses still stand in it, the blur
-// being light, so the band stays a window: a window in the evening, which is
-// the light a player's chrome has always wanted to be read in.
-#define IMMERSIVE_FROST_PCT 55
-
-static lv_obj_t *immersive_blur; // the frosted foot the deck stands on
+static lv_obj_t *immersive_blur; // the mirrored blur behind the lower controls
 static bool immersive_up;
 // Where the controls' block sat among the page's children before this
 // arrangement lifted it to the front, so putting it down again is putting it
@@ -1912,8 +1907,8 @@ static void lyrics_look(bool on) {
 	lyrics_look_on = on;
 	// The V1 had the same blur up before the words came, and wants it back.
 	full_backdrop_apply();
-	// Immersive's frost likewise: down while the words' own blur is up, back
-	// at the foot of the picture when they go.
+	// Immersive's controls blur likewise stays down while the words' own
+	// full-screen blur is up, and returns when they go.
 	immersive_blur_apply();
 	// The words are white over a blurred sleeve, and in the theme's own
 	// colour over the page's own background where there is no picture.
@@ -2589,13 +2584,10 @@ static void studio_refresh_cover(void) {
 		studio_empty_rescale(); // the mark's native size is read off its source
 	}
 
-	if (studio_bg) {
-		lv_image_set_src(studio_bg, current_backdrop.pixels ? &current_backdrop.dsc : NULL);
-		if (current_backdrop.pixels) {
-			lv_obj_set_hidden(studio_bg, false);
-		} else {
-			lv_obj_set_hidden(studio_bg, true);
-		}
+	if (studio_bg && !lyrics_look_on) {
+		bool show_backdrop = backdrop_blur_wanted() && current_backdrop.pixels != NULL;
+		lv_image_set_src(studio_bg, show_backdrop ? &current_backdrop.dsc : NULL);
+		lv_obj_set_hidden(studio_bg, !show_backdrop);
 	}
 }
 
@@ -2809,32 +2801,46 @@ static void immersive_deck_clear(void) {
 	lv_obj_set_style_bg_image_opa(player_menu, LV_OPA_TRANSP, 0);
 }
 
-// The frosted foot of the arrangement, up or down: the blurred band the worker
-// made for the deck's own rectangle, shown at exactly that rectangle -- the
-// foot of the screen -- over the picture and under the controls. It wants
-// three things at once to be there: the arrangement in force, a band-shaped
-// blur on hand, and no words' page up over it (the words bring Studio's own
-// blur and the two would be two frosts on one screen). Anything less and the
-// chrome stands on the sharp picture itself, or on the page's own colour when
-// there is no picture at all.
+// The mirrored blur for Immersive's lower controls. It is shown at the deck's
+// own size, over the sharp artwork and under the controls; it is hidden while
+// the lyrics page is up, since that page supplies its own full-screen blur.
 static void immersive_blur_apply(void) {
 	if (!immersive_blur) {
 		return;
 	}
-	bool have = layout_immersive_now && !lyrics_look_on && backdrop_is_band && current_backdrop.pixels != NULL;
+	bool have = backdrop_blur_wanted() && layout_immersive_now && !lyrics_look_on && backdrop_is_immersive &&
+				current_backdrop.pixels != NULL;
 	lv_image_set_src(immersive_blur, have ? &current_backdrop.dsc : NULL);
 	lv_obj_set_hidden(immersive_blur, !have);
 	if (have) {
 		// The deck's own rectangle: as wide as the page, as tall as the
 		// arrangement's rows, at the foot of the screen. Resized here rather
-		// than where the geometry moves, so a band on hand follows a deck that
-		// grew or shrank without waiting for the next track.
+		// than where the geometry moves, so a backdrop on hand follows a deck
+		// that grew or shrank without waiting for the next track.
 		lv_obj_set_size(immersive_blur, cover_box_w, menu_height);
 		lv_obj_align(immersive_blur, LV_ALIGN_BOTTOM_MID, 0, 0);
 	}
 }
 
-// The sleeve over the whole screen, with the controls on the frost over it.
+// Applies the preference to whichever surface the current layout uses. It is
+// only a visibility/style update: the already-decoded backdrop is reused, with
+// no image work in the audio path or on every frame.
+static void player_artwork_backdrop_apply(void) {
+	compact_clear_style_set(artwork_backdrop_enabled);
+	full_backdrop_apply();
+	if (!lyrics_look_on && layout_studio_now) {
+		studio_refresh_cover();
+	}
+	immersive_blur_apply();
+	player_menu_backdrop_apply();
+	poster_fade_apply();
+	set_over_cover(chrome_over_cover);
+	if (layout_alt_now) {
+		paint_alt_tint(); // keeps the sleeve's own ink on its title pill
+	}
+}
+
+// The sleeve over the whole screen, with the controls on the reflected blur.
 static void immersive_put(void) {
 	if (!cover_art_group) {
 		return;
@@ -2879,8 +2885,8 @@ static void immersive_put(void) {
 	if (player_menu) {
 		lv_obj_move_foreground(player_menu);
 	}
-	// The frosted foot, at the deck's new rectangle: up if a band is on hand,
-	// down until the worker brings one.
+	// The mirrored blur, at the deck's new rectangle: up if the image is on
+	// hand, down until the worker brings it.
 	immersive_blur_apply();
 
 	// The picture or the note: cover_show() is the one place that knows which.
@@ -2898,8 +2904,8 @@ static bool immersive_take_back(void) {
 	}
 	immersive_up = false;
 
-	// The frost goes too: what stands behind the controls from here is
-	// whichever blur the arrangement now in force asked for.
+	// The blur goes too: what stands behind the controls from here belongs
+	// to whichever arrangement is now in force.
 	immersive_blur_apply();
 
 	// The sleeve's own corners: where it sits and how big it is belong to the
@@ -2923,19 +2929,18 @@ static bool immersive_take_back(void) {
 }
 
 // ---------------------------------------------------------------------------
-// Poster: the sleeve at the width of the screen, the deck on its own ground
+// Poster: the sleeve at the width of the screen, with an optional deck blur
 //
 // The sleeve is scaled to the width of the screen and held at its top, with
 // square corners and no inset: the whole picture from side to side, nothing
 // cropped off its sides and nothing stretched -- which is the difference from
 // Immersive, where the photograph fills the screen and, the screen not being
-// square, takes its crop from the two sides. What Poster cannot show is the
-// part of the picture below the top of the deck: the deck stands in front of
-// the sleeve rather than over it, on its own opaque ground, so the foot of the
-// sleeve is behind the deck and not cut out of the picture. The split of the
-// panel is the standard one's (compact_deck_height), so what stands above the
-// deck is as much of the sleeve as the deck leaves room for, at the largest
-// size the screen allows.
+// square, takes its crop from the two sides. The part of the sleeve below the
+// top of the deck is behind the controls block, which keeps its theme surface
+// or shows the mirrored blur when enabled. The split of the panel is the
+// standard one's (compact_deck_height), so what stands above the deck is as
+// much of the sleeve as the deck leaves room for, at the largest size the
+// screen allows.
 // ---------------------------------------------------------------------------
 
 static bool poster_up;
@@ -2973,7 +2978,9 @@ static void poster_fade_apply(void) {
 	if (!poster_fade) {
 		return;
 	}
-	lv_obj_set_hidden(poster_fade, !(layout_poster_now && current_cover.pixels != NULL));
+	bool needs_solid_deck_fade = !backdrop_blur_wanted() || !current_backdrop.pixels;
+	lv_obj_set_hidden(poster_fade,
+					  !(layout_poster_now && current_cover.pixels != NULL && needs_solid_deck_fade));
 }
 
 static void poster_put(void) {
@@ -2998,9 +3005,9 @@ static void poster_put(void) {
 	lv_obj_set_style_radius(cover_art_group, 0, 0);
 	lv_obj_set_style_radius(cover_img, 0, 0);
 
-	// The deck stands on the page's own panel colour rather than on the
-	// blurred sleeve: opaque ground, not glass. A local property, over both
-	// the theme's panel style and the clear style this board's deck wears.
+	// The deck stays opaque so its theme surface is the fallback when the
+	// backdrop is off. With the preference on, player_menu_backdrop_apply()
+	// puts the blurred sleeve image over that surface instead.
 	if (player_menu) {
 		lv_obj_set_style_bg_opa(player_menu, LV_OPA_COVER, 0);
 	}
@@ -3028,6 +3035,7 @@ static bool poster_take_back(void) {
 	}
 	if (player_menu) {
 		lv_obj_remove_local_style_prop(player_menu, LV_STYLE_BG_OPA, 0);
+		lv_obj_remove_local_style_prop(player_menu, LV_STYLE_BG_IMAGE_OPA, 0);
 	}
 	placeholder_rescale();
 	cover_show(current_cover.pixels != NULL);
@@ -3158,13 +3166,14 @@ static void apply_layout(void) {
 			poster_put(); // which places the words' page with it
 		}
 		lyrics_layout();
-		// studio_take_back() took the V1's blur down with Studio's, and Poster
-		// wants it down as well: its deck is opaque ground and the sleeve
-		// covers everything above it. What is on hand is settled by the reload
-		// a change of arrangement triggers; until it lands, the deck's own
-		// opacity hides the blur behind it.
+		// The full-screen blur belongs to the other compact layouts. Poster
+		// either shows its deck-sized blur directly on the controls block or
+		// keeps the theme surface, depending on the saved preference.
 		full_backdrop_apply();
 	}
+	player_menu_backdrop_apply();
+	poster_fade_apply();
+	set_over_cover(chrome_over_cover);
 	align_title_with_star(); // the title may have just left its row, or come back to it
 
 	placeholder_place();
@@ -3408,7 +3417,7 @@ static void reload_cover(const char *filepath) {
 	cover_free(&current_cover);
 	cover_free(&current_backdrop);
 	full_backdrop_apply(); // nothing to show behind the V1's page until the next one lands
-	immersive_blur_apply(); // and nothing for the frost to be made of, likewise
+	immersive_blur_apply(); // and no lower backdrop to show until the new one lands
 
 	cover_show(false);
 	// Studio holds pointers to both of those, so it is told in the same breath:
@@ -3428,15 +3437,16 @@ static void reload_cover(const char *filepath) {
 
 	if (filepath && filepath[0]) {
 		backdrop_is_studio = layout_studio_now;
-		backdrop_is_band = layout_immersive_now;
-		backdrop_is_full = backdrop_fills_screen() && !backdrop_is_band;
+		backdrop_is_immersive = layout_immersive_now;
+		backdrop_is_full = backdrop_fills_screen() && !backdrop_is_immersive;
 		cover_shape_immersive = layout_immersive_now;
 		cover_shape_poster = layout_poster_now;
-		// The band faces the way the picture does, like every blur that is
-		// looked at rather than looked through, and it is cut from the foot of
-		// the photograph -- the part of it the deck stands over.
-		cover_set_backdrop_upright(backdrop_is_full || backdrop_is_band);
-		cover_set_backdrop_from_bottom(backdrop_is_band);
+		// Keep the treatment consistent on every layout: the cover worker
+		// downsamples, flips and blurs the artwork once for the controls.
+		// Immersive places that reflected crop over its bottom deck; the
+		// others use the same treatment behind their controls or screen.
+		cover_set_backdrop_upright(false);
+		cover_set_backdrop_from_bottom(false);
 
 		// The sleeve is asked for at the size the arrangement in force will
 		// draw it. A picture that does not match its widget is resampled by
@@ -3567,22 +3577,13 @@ static void apply_cover_result(void) {
 		if (new_backdrop.pixels) {
 			current_backdrop = new_backdrop;
 			current_backdrop.dsc.data = current_backdrop.pixels;
-			if (backdrop_is_band) {
-				// Immersive's frost: the band stands over the picture itself,
-				// at the foot of the screen under the deck, rather than behind
-				// a page or a block (immersive_blur_apply).
-				immersive_blur_apply();
-			} else if (backdrop_full) {
-				// The screen-sized copy goes behind the whole page; the deck
-				// is clear and shows it through (full_backdrop_apply).
-				full_backdrop_apply();
-			} else {
-				lv_obj_set_style_bg_image_src(player_menu, &current_backdrop.dsc, 0);
-			}
 		}
 
-		// The dark backdrop is up: light chrome, in both themes.
+		// The saved preference chooses which surface receives the image:
+		// the screen, the controls deck or Immersive's lower backdrop. The
+		// cached picture is reused as layouts change.
 		set_over_cover(true);
+		player_artwork_backdrop_apply();
 
 		// And the sleeve's own colour, which is what the alternative layout is
 		// drawn in.
@@ -4814,6 +4815,23 @@ void player_play_file(const char *filepath) {
 // control that did not take.
 player_layout_t player_layout_get(void) { return layout_choice; }
 
+bool player_artwork_backdrop_enabled(void) { return artwork_backdrop_enabled; }
+
+void player_artwork_backdrop_set_enabled(bool enabled) {
+	if (enabled == artwork_backdrop_enabled) {
+		return;
+	}
+	artwork_backdrop_enabled = enabled;
+	config_set_bool("screen", "player_artwork_backdrop", enabled);
+	config_save();
+
+	// Use the image already on hand. Toggling this is only a draw/style change;
+	// decoding, blur and audio playback keep their existing worker/thread paths.
+	player_artwork_backdrop_apply();
+	lv_obj_invalidate(cover_panel);
+	lv_obj_invalidate(player_menu);
+}
+
 void player_layout_set(player_layout_t layout) {
 	if (layout == layout_choice) {
 		return;
@@ -5396,7 +5414,7 @@ static void player_apply_geometry(bool force) {
 	if (layout_studio_now) {
 		studio_place();
 	}
-	// The frost follows the deck it stands under, which has just been measured.
+	// The lower blur follows the deck it sits behind, which has just been measured.
 	immersive_blur_apply();
 }
 
@@ -5405,6 +5423,11 @@ void player_init(gui_config_t *cfg) {
 	// The artwork decodes on the shared worker; make sure it exists before
 	// the first track can be started. Safe to call more than once.
 	coverloader_start();
+
+	// Preserve the old default look: non-OLED themes start with the blur, while
+	// OLED starts on its plain black surface unless the listener opts in.
+	artwork_backdrop_enabled = config_get_bool("screen", "player_artwork_backdrop", !theme_is_oled());
+	compact_clear_style_active = false;
 
 	lv_obj_add_style(player_screen, &theme_style_screen, 0);
 
@@ -5436,9 +5459,6 @@ void player_init(gui_config_t *cfg) {
 		overflow_color = theme_player_chrome_color(THEME_PLAYER_CHROME_OVERFLOW);
 	}
 	backdrop_full = compact;
-	// The frost Immersive puts under its deck keeps more of the photograph's
-	// light than the blur a title is read on elsewhere: it is looked through.
-	cover_set_backdrop_band_brightness(IMMERSIVE_FROST_PCT);
 	// The side inset every row of the deck is laid out at, and the width of a
 	// row that follows from it. Outside the V1 that is the panel's own padding,
 	// and the bar takes the row whole.
@@ -5513,7 +5533,10 @@ void player_init(gui_config_t *cfg) {
 		menu_pad_ver = COMPACT_DECK_PAD_TOP;
 		menu_gap = COMPACT_DECK_GAP;
 		lv_obj_set_flex_align(player_menu, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-		lv_obj_add_style(player_menu, &compact_clear_style, 0);
+		if (artwork_backdrop_enabled) {
+			lv_obj_add_style(player_menu, &compact_clear_style, 0);
+			compact_clear_style_active = true;
+		}
 	}
 	int spare = menu_height - PLAYER_MENU_REF_HEIGHT;
 	if (!compact && spare > 0) {
@@ -5876,7 +5899,7 @@ void player_init(gui_config_t *cfg) {
 	lv_obj_set_style_radius(cover_panel, 0, 0);
 	lv_obj_set_style_pad_all(cover_panel, 0, 0);
 	lv_obj_set_scrollable(cover_panel, false);
-	if (compact) {
+	if (compact && artwork_backdrop_enabled) {
 		// Clear, like the deck: the page's background, and the blur over it
 		// once a cover is up, run from the top of the screen to the bottom
 		// with no edge where the panel used to end.
@@ -6047,14 +6070,12 @@ void player_init(gui_config_t *cfg) {
 	poster_fade_paint(); // the stops take the deck's colour
 	lv_obj_set_hidden(poster_fade, true);
 
-	// Immersive's frosted foot: the image object the blurred band lands in,
-	// parked at the foot of the artwork's frame at the size of the deck. A
-	// child of the frame, so drawn over the picture and under the source marks,
-	// which are brought to the front of this same frame when they appear; and
-	// made before the words' page -- a child of the panel, below -- so under
-	// that. COVER and not STRETCH: between the change of arrangement and the
-	// band that follows it, the picture on hand is still the old shape, and
-	// stretching that is a visibly squashed sleeve.
+	// Immersive's lower controls backdrop: a mirrored blur parked at the foot
+	// of the artwork frame, sized to the deck. A child of the frame, so it is
+	// drawn over the picture and under the source marks, which are brought to
+	// the front when they appear; and made before the lyrics page so it stays
+	// beneath it. COVER rather than STRETCH keeps a previous crop from looking
+	// squashed while the next layout's artwork is loading.
 	immersive_blur = lv_image_create(cover_art_group);
 	lv_obj_set_size(immersive_blur, cover_box_w, menu_height);
 	lv_obj_align(immersive_blur, LV_ALIGN_BOTTOM_MID, 0, 0);
