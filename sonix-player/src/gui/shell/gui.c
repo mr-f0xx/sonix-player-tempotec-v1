@@ -12,6 +12,8 @@
 #include "src/gui/nowplaying/coverflow.h"
 #include "src/gui/settings/ccsettings.h"
 #include "src/gui/nowplaying/chapters.h"
+#include "src/gui/streaming/spotifypage.h"
+#include "src/system/streaming/spotify.h"
 #include "src/gui/wireless/airplay.h"
 #include "src/gui/bluetooth/airpodspage.h"
 #include "src/gui/settings/appearance.h"
@@ -544,6 +546,31 @@ static void key_async_cb(void *user_data) {
 		break;
 	}
 
+	// Spotify is the other exception, and it goes the same way: when the
+	// receiver was the last thing that played, the press belongs to the phone
+	// casting to it. The phone is reachable on a socket rather than over
+	// AVRCP, and the answer comes back through the receiver's own status file,
+	// so the keys simply do what they say and the page follows.
+	//
+	// The latch is what makes this safe: it is set only while the receiver has
+	// audio flowing or says it is playing, and it is cleared the moment local
+	// playback takes the DAC back -- see spotify_owns_playback().
+	if (spotify_owns_playback()) {
+		switch (key) {
+		case GUI_KEY_PLAY_PAUSE:
+			spotify_control(SPOTIFY_CMD_PLAY_PAUSE);
+			return;
+		case GUI_KEY_NEXT:
+			spotify_control(SPOTIFY_CMD_NEXT);
+			return;
+		case GUI_KEY_PREV:
+			spotify_control(SPOTIFY_CMD_PREV);
+			return;
+		default:
+			break;
+		}
+	}
+
 	switch (key) {
 	case GUI_KEY_PLAY_PAUSE:
 		player_key_play_pause();
@@ -766,6 +793,7 @@ void gui_init(gui_config_t *cfg) {
 		wireless_screen,
 		wifisettings_screen,
 		btsettings_screen, btaudio_screen,	 airpodspage_screen, airplay_screen,   streaming_screen,
+		spotify_screen,
 		radiopage_screen,  radiolist_screen, radiosearch_screen,
 		dlna_screen,	   sonixlink_screen,	 morepage_screen,	  gearboypage_screen,
 	};

@@ -32,6 +32,7 @@
 #include "src/system/device/adb.h"
 #include "src/system/library/library.h"
 #include "src/system/remote/airplay.h"
+#include "src/system/streaming/spotify.h"
 #include "src/system/streaming/radio.h"
 #include "src/system/net/wifi.h"
 #include "src/system/net/wifitransfer.h"
@@ -740,7 +741,11 @@ static bool wifi_in_use(void) {
 	// A scan or a connect in flight counts as use: parking the radio out from
 	// under wpa_supplicant mid-association leaves the driver to sort out a
 	// teardown it did not expect.
+	// Spotify's switch is here, with AirPlay's, and not below with the browsers:
+	// a receiver waiting to be found is the point of it, and a phone finds it
+	// over the radio whether or not anything is playing.
 	return subsonic_api_busy() || subsonicstream_network_wanted() || wifi_busy() || wifi_scan_running() || streaming_playback_active() || airplay_get_enabled() ||
+		   spotify_enabled() ||
 		   dlna_get_enabled() || sonixlink_get_enabled() ||
 		   wifitransfer_get_enabled() || qobuzcache_downloading_id() > 0 ||
 		   qobuzcache_network_wanted() || tidalcache_downloading_id() > 0 || tidalcache_network_wanted() ||
@@ -800,6 +805,10 @@ static bool player_is_busy(bool playing, uint32_t input_idle) {
 		   gearboy_running() ||					   // the emulator
 		   library_scan_running() ||			   // a scan, which is also writing to the card
 		   audiobookdb_scan_running() || wifitransfer_running() || dlna_running() || airplay_running() ||
+		   // A receiver merely switched on is not on this list -- it holds the radio
+		   // (see wifi_in_use) without holding the device awake. One that is playing
+		   // or busy answering the browser is doing something.
+		   spotifysink_playing() || spotify_browse_busy() ||
 		   sonixlink_is_connected() || // a phone driving the player, not a switch left on
 		   qobuzcache_downloading_id() > 0 || tidalcache_downloading_id() > 0 || podcastcache_downloading_id() > 0 ||
 		   ota_busy(); // a firmware update being fetched
@@ -1101,6 +1110,11 @@ void power_shutdown(void) {
 	tidalcache_clear_on_exit();
 	podcastcache_clear_on_exit();
 	dlna_clear_on_exit();
+
+	// Spotify's receiver is a process on the card, started by us: it has to be
+	// stopped before the card is released, or the unmount finds its cache
+	// still open and the next boot finds a filesystem that was never tidied.
+	spotify_shutdown();
 
 	// The charger back on before the power goes: the driver keeps that bit
 	// across a shutdown -- mp2731_shutdown writes it from the property it has

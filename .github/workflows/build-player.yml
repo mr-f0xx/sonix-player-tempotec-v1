@@ -59,3 +59,6 @@ jobs:
 
       - name: Run Subsonic and stream-bridge tests
         run: make -C sonix-player/tests test
+
+      - name: Run Spotify receiver tests
+        run: make -C sonix-player/tests spotify

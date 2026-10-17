@@ -120,6 +120,7 @@ ICONS = [
     ("bird.svg", "bird", 32),  # Flappy Bird's monochrome Tokyo Night glyph
     ("tidal-mark.svg", "tidal_mark", 32),  # Tokyo Night's letter-only streaming mark
     ("qobuz-mark.svg", "qobuz_mark", 32),
+    ("spotify-mark.svg", "spotify_mark", 32),  # the same letter-free mark for Spotify
     ("artist.svg", "artist", 32),
     ("podcast-list.svg", "podcast_list", 40), # 40 px for the 60 px podcast rows
     ("artist-album.svg", "artist_album", 32),
@@ -426,6 +427,7 @@ COLOR_ICONS = [
     ("qobuz.png", "menu_qobuz", SECTION_ICON_SIZE),
     ("radio.png", "menu_radio", SECTION_ICON_SIZE),
     ("podcast.png", "menu_podcast", SECTION_ICON_SIZE),
+    ("spotify.png", "menu_spotify", SECTION_ICON_SIZE),
     ("audiobooks.png", "menu_audiobooks", MAIN_MENU_ICON_SIZE),
     ("audiobook-library.png", "menu_audiobook_library", SECTION_ICON_SIZE),
     ("audiobook-series.png", "menu_audiobook_series", SECTION_ICON_SIZE),

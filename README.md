@@ -191,6 +191,7 @@ Showcase of **OLED** appearance: true black backgrounds with white as the accent
 - [Install or restore firmware](#install-or-restore-firmware)
 - [Streaming credentials](#streaming-credentials)
 - [Subsonic / Gonic](#subsonic--gonic)
+- [Spotify](#spotify)
 - [Build from source](#build-from-source)
 - [Project files and documentation](#project-files-and-documentation)
 - [Credits](#credits)
@@ -303,12 +304,21 @@ No application API key is needed. Prefer HTTPS; credentials stay in memory unles
 
 See [setup, design, limitations and the V1 validation checklist](docs/subsonic.md), and [host integration tests](sonix-player/tests/README.md).
 
+## Spotify
+
+**Streaming → Spotify** turns the player into a Spotify Connect receiver and browsers its library from the player itself. Spotify's protocol is not implemented here: the receiver is [q2-librespot](https://github.com/diamondBond/q2-librespot), the librespot fork written for the Shanling Q2, and it lives on the microSD card in `.spotify/` rather than in the firmware. The player drives it through the fork's status file, control socket and Q2SPOT/1 browse socket, and reads its PCM through the FIFO route AirPlay already uses — so the V1's volume, jack detection and DAC hand-over keep working, and the player's own transport keys drive it while it is what is playing.
+
+Liked songs, playlists, albums, artists, the queue, downloaded tracks and search are all browsable in pages of 50, and a track plays within its list so Next continues the album. Shuffle, repeat, bitrate, the card cache, the device name and an idle stop are on the receiver settings page. Nothing is flashed for it, and a card without the receiver shows a message instead of a dead switch.
+
+The receiver binary has to be cross-compiled for `mipsel-unknown-linux-musl` soft-float and is **not** provided here — see [setup, card layout and the V1 checklist](docs/spotify.md).
+
 ## Project files and documentation
 
 - `sonix-player/` — player sources, LVGL configuration, launcher and build system.
 - `sonix-packer/` — stock-image preparation, firmware packaging and validation scripts.
 - `docs/collecting-logs.md` — which logs to send with a bug report, and how to take them.
 - `docs/subsonic.md` — Subsonic/Gonic setup, RAM transport and hardware validation.
+- `docs/spotify.md` — Spotify receiver on the card, protocol, settings and hardware validation.
 - `docs/sgm31324-led-control.md` — driving the RGB status LED directly over I²C.
 - `sonix-player/tools/sonix-bugreport.sh` — one-file diagnostic bundle, run on the device over ADB.
 - `FEATURES.md` — detailed feature notes.

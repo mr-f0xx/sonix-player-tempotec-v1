@@ -1163,9 +1163,36 @@ static snd_pcm_t *gapless_take(int channels, int rate, int bits, snd_pcm_uframes
 // retry loop is about to find busy anyway, so a stale read costs at worst one
 // request that was not needed, or one that arrives a moment late.
 static snd_pcm_t *external_pcm;
-static bool (*external_release_cb)(void);
 
-void audio_set_external_release_cb(bool (*cb)(void)) { external_release_cb = cb; }
+// Who to ask for the output back. A list rather than a single pointer, because
+// there is more than one external source that can be holding it: the AirPlay
+// receiver registers at startup and stays registered for the life of the
+// process, the Spotify receiver registers when it is switched on, and with one
+// slot the second would silently unhook the first the moment it was enabled --
+// leaving an AirPlay receiver that holds the DAC with nobody to ask.
+//
+// Everyone is asked; each answers for itself (a source that holds nothing
+// returns true without doing anything), and one of them owns the device at any
+// moment because only one PCM can be open.
+#define EXTERNAL_RELEASE_CBS 4
+static bool (*external_release_cbs[EXTERNAL_RELEASE_CBS])(void);
+static int external_release_cb_count;
+
+void audio_set_external_release_cb(bool (*cb)(void)) {
+	if (!cb) {
+		return;
+	}
+	for (int i = 0; i < external_release_cb_count; i++) {
+		if (external_release_cbs[i] == cb) {
+			return; // already registered: enabling a source twice is one entry
+		}
+	}
+	if (external_release_cb_count >= EXTERNAL_RELEASE_CBS) {
+		fprintf(stderr, "audio: no room for another external release callback\n");
+		return;
+	}
+	external_release_cbs[external_release_cb_count++] = cb;
+}
 
 // Asks whoever holds the output for it back, if anyone does.
 //
@@ -1174,15 +1201,18 @@ void audio_set_external_release_cb(bool (*cb)(void)) { external_release_cb = cb;
 // open for its whole life. Without this, a local track or a streamed one would
 // meet a busy device, retry for two seconds and give up.
 //
-// The request does not block: the hand-back happens on the AirPlay thread
-// within its poll, and the retry loop in open_pcm_device() is already built to
-// wait out a device that is busy for a moment.
+// The request does not block: the hand-back happens on the receiver's own
+// thread within its poll, and the retry loop in open_pcm_device() is already
+// built to wait out a device that is busy for a moment.
 //
 // Never fires on the external path itself: audio_external_begin_latency() only
 // reaches open_pcm_device() with external_pcm still NULL.
 static void release_external_output(void) {
-	if (external_pcm && external_release_cb) {
-		external_release_cb();
+	if (!external_pcm) {
+		return;
+	}
+	for (int i = 0; i < external_release_cb_count; i++) {
+		external_release_cbs[i]();
 	}
 }
 

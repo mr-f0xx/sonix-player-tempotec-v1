@@ -19,7 +19,7 @@ CORE = $(ROOT)/src/system/streaming/subsonic.c \
        $(ROOT)/src/system/core/json.c $(ROOT)/src/system/core/md5.c \
        $(ROOT)/src/system/core/config.c $(ROOT)/src/system/playback/playlist.c
 
-.PHONY: test sanitize clean
+.PHONY: test sanitize clean spotify
 
 test: $(BUILD)/test_subsonic
 	python3 run_subsonic_tests.py $(BUILD)/test_subsonic
@@ -69,6 +69,31 @@ calculator: $(BUILD)/test_calculator
 $(BUILD)/test_calculator: $(CALC_SRC) $(ROOT)/src/gui/calculator/calcmodel.h
 	@mkdir -p $(BUILD)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ $(CALC_SRC) $(LDFLAGS) $(LDLIBS)
+
+# Spotify: the Q2SPOT/1 protocol, the receiver's status and control sockets,
+# and the sink that carries its PCM to the DAC. The real spotify.c, spotifysink.c
+# and spotifybrowse.c, with a stand-in receiver on a temporary card and
+# audio_external_* stubbed -- no librespot, no account, no network.
+# core/utils.c is here for deadline_in_ms(), and it is here for real rather than
+# stubbed: the sink waits on statically initialized condvars, so the clock that
+# helper computes its deadlines on is the difference between threads that sleep
+# and threads that spin -- which, on the device, is the difference between a
+# device that works and a device that freezes. A stub of it in this file would
+# hide exactly the bug this suite is meant to hold. thread_be_realtime() comes
+# with it, so the playback thread really does ask to be real time.
+SPOTIFY_SRC = test_spotify.c $(ROOT)/src/system/streaming/spotify.c \
+              $(ROOT)/src/system/streaming/spotifysink.c \
+              $(ROOT)/src/system/streaming/spotifybrowse.c \
+              $(ROOT)/src/system/core/config.c $(ROOT)/src/system/core/utils.c
+.PHONY: spotify
+spotify: $(BUILD)/test_spotify
+	$(BUILD)/test_spotify
+
+$(BUILD)/test_spotify: $(SPOTIFY_SRC) $(ROOT)/src/system/streaming/spotify.h \
+                       $(ROOT)/src/system/streaming/spotifysink.h \
+                       $(ROOT)/src/system/streaming/spotifybrowse.h
+	@mkdir -p $(BUILD)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ $(SPOTIFY_SRC) $(LDFLAGS) $(LDLIBS)
 
 NOTES_SRC = test_notes.c $(ROOT)/src/system/notes/notesstore.c $(ROOT)/src/system/text/textfile.c
 .PHONY: notes
@@ -141,8 +166,19 @@ TOOLS_SRC = $(ROOT)/tests/ui/test_tools_pages.c \
 TOOLS_OBJ = $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(TOOLS_SRC)) \
             $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(UI_LVGL_SRC))
 
+# The Spotify page on the same renderer: the switch, the browser and the
+# settings, with the receiver stubbed and the Q2SPOT/1 client with it.
+SPOTPAGE_SRC = $(ROOT)/tests/ui/test_spotify_page.c \
+               $(ROOT)/src/gui/streaming/spotifypage.c \
+               $(ROOT)/src/gui/shell/settingsrow.c $(ROOT)/src/gui/shell/scrolltext.c \
+               $(ROOT)/src/gui/shell/theme.c $(ROOT)/src/gui/shell/icons.c \
+               $(ROOT)/src/gui/board_profile.c \
+               $(ROOT)/src/system/core/config.c $(ROOT)/src/system/core/lang.c
+SPOTPAGE_OBJ = $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(SPOTPAGE_SRC)) \
+               $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(UI_LVGL_SRC))
+
 .PHONY: ui
-ui: $(BUILD)/test_main_menu $(BUILD)/test_screensaver $(BUILD)/test_tools_pages
+ui: $(BUILD)/test_main_menu $(BUILD)/test_screensaver $(BUILD)/test_tools_pages $(BUILD)/test_spotify_page
 	BOARD=tempotec_v1 $(BUILD)/test_main_menu ../../sonix-packer/assets/R1/usr/resource/sonix/language
 	BOARD=tempotec_v1 $(BUILD)/test_main_menu ../../sonix-packer/assets/R1/usr/resource/sonix/language saved
 	BOARD=hiby_r1 $(BUILD)/test_main_menu ../../sonix-packer/assets/R3PII/usr/resource/sonix/language
@@ -153,6 +189,8 @@ ui: $(BUILD)/test_main_menu $(BUILD)/test_screensaver $(BUILD)/test_tools_pages
 	BOARD=hiby_r1 $(BUILD)/test_screensaver ../../sonix-packer/assets/R3PII/usr/resource/sonix/language saved
 	BOARD=tempotec_v1 $(BUILD)/test_tools_pages ../../sonix-packer/assets/R1/usr/resource/sonix/language
 	BOARD=hiby_r1 $(BUILD)/test_tools_pages ../../sonix-packer/assets/R3PII/usr/resource/sonix/language
+	BOARD=tempotec_v1 $(BUILD)/test_spotify_page ../../sonix-packer/assets/R1/usr/resource/sonix/language
+	BOARD=hiby_r1 $(BUILD)/test_spotify_page ../../sonix-packer/assets/R3PII/usr/resource/sonix/language
 
 $(BUILD)/test_main_menu: $(UI_OBJ)
 	$(CC) -o $@ $^ $(LDFLAGS) $(LDLIBS)
@@ -161,6 +199,9 @@ $(BUILD)/test_screensaver: $(SAVER_OBJ)
 	$(CC) -o $@ $^ $(LDFLAGS) $(LDLIBS)
 
 $(BUILD)/test_tools_pages: $(TOOLS_OBJ)
+	$(CC) -o $@ $^ $(LDFLAGS) $(LDLIBS)
+
+$(BUILD)/test_spotify_page: $(SPOTPAGE_OBJ)
 	$(CC) -o $@ $^ $(LDFLAGS) $(LDLIBS)
 
 $(BUILD)/ui/%.o: $(ROOT)/%.c ui/lv_conf.h $(ROOT)/lv_conf.h
@@ -172,4 +213,4 @@ $(BUILD)/ui/lvgl/%.o: $(ROOT)/lvgl/%.c ui/lv_conf.h $(ROOT)/lv_conf.h
 	@mkdir -p $(dir $@)
 	$(CC) $(UI_CPPFLAGS) $(filter-out -Werror,$(UI_CFLAGS)) -c $< -o $@
 
--include $(sort $(UI_OBJ:.o=.d) $(SAVER_OBJ:.o=.d))
+-include $(sort $(UI_OBJ:.o=.d) $(SAVER_OBJ:.o=.d) $(TOOLS_OBJ:.o=.d) $(SPOTPAGE_OBJ:.o=.d))

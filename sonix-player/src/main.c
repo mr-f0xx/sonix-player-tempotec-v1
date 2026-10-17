@@ -50,6 +50,7 @@
 #include "src/system/core/panel.h"
 #include "src/system/streaming/qobuzcache.h"
 #include "src/system/streaming/podcastcache.h"
+#include "src/system/streaming/spotify.h"
 #include "src/system/streaming/podcastsubs.h"
 #include "src/system/streaming/tidalcache.h"
 #include "src/system/streaming/streamkeys.h"
@@ -2230,6 +2231,11 @@ int main(int argc, char **argv) {
 	podcastsubs_set_root(card_root && card_root[0] ? card_root : gui_cfg.sd_root_path);
 	// And where a track arriving over DLNA lands: same card, same reason.
 	dlna_set_root(card_root && card_root[0] ? card_root : gui_cfg.sd_root_path);
+	// And Spotify's receiver, which is not ours to run but is ours to start:
+	// the launcher lives in .spotify on the card (docs/spotify.md). Read here
+	// rather than in the page so the answer is known before the page is built
+	// -- a card without a receiver shows a sentence instead of a switch.
+	spotify_init(card_root && card_root[0] ? card_root : gui_cfg.sd_root_path);
 	// And where the emulator looks for Games/GB and Games/GBC. Unlike the
 	// lines above this uses gui_cfg.sd_root_path and not storage_sd_root():
 	// those write a cache, which belongs on the real card, while games are

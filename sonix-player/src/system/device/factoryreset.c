@@ -14,6 +14,7 @@
 #include "src/system/streaming/podcastcache.h"
 #include "src/system/streaming/tidalcache.h"
 #include "src/system/remote/dlna.h"
+#include "src/system/streaming/spotify.h"
 #include "src/system/device/sysserver.h"
 #include "src/system/device/system.h"
 
@@ -177,6 +178,10 @@ void factoryreset_run(void) {
 	tidalcache_clear_on_exit();
 	podcastcache_clear_on_exit();
 	dlna_clear_on_exit();
+	// The receiver is a process of ours on the card: it goes before the card
+	// is unmounted below, and before its cache is left behind in a folder the
+	// reset is meant to clear.
+	spotify_shutdown();
 
 	// Push the time into the RTC as on every other exit path, otherwise the
 	// reboot comes back with whatever the RTC remembered.

@@ -24,6 +24,7 @@
 #include "src/system/streaming/podcastcache.h"
 #include "src/system/streaming/tidalcache.h"
 #include "src/system/remote/dlna.h"
+#include "src/system/streaming/spotify.h"
 #include "src/system/streaming/radio.h"
 
 // ---------------------------------------------------------------------------
@@ -134,6 +135,8 @@ static void do_reboot(void) {
 	tidalcache_clear_on_exit();
 	podcastcache_clear_on_exit();
 	dlna_clear_on_exit();
+	// The receiver on the card, before the card is released.
+	spotify_shutdown();
 	storage_release_for_shutdown();
 	sync();
 

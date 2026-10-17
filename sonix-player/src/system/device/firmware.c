@@ -17,6 +17,7 @@
 #include "src/system/streaming/podcastcache.h"
 #include "src/system/streaming/tidalcache.h"
 #include "src/system/remote/dlna.h"
+#include "src/system/streaming/spotify.h"
 #include "src/system/device/power.h"
 #include "src/system/device/sysinfo.h"
 #include "src/system/device/system.h"
@@ -126,6 +127,9 @@ void firmware_update_start(void) {
 	tidalcache_clear_on_exit();
 	podcastcache_clear_on_exit();
 	dlna_clear_on_exit();
+	// The recovery kernel reads the update off the card, so nothing of ours
+	// may still be holding it.
+	spotify_shutdown();
 
 	// The clock goes into the RTC on the way out, like every other exit path
 	// -- recovery reboots the device a second time when it is done, and the

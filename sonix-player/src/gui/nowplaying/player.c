@@ -33,6 +33,7 @@
 #include "src/system/playback/device_state.h"
 #include "src/system/remote/airplay.h"
 #include "src/system/remote/dlna.h"
+#include "src/system/streaming/spotify.h"
 #include "src/system/bluetooth/btreceiver.h"
 #include "src/system/core/config.h"
 #include "src/system/core/lang.h"
@@ -1309,6 +1310,11 @@ static bool playing_local_file(const device_state_t *state) {
 	airplay_state_t air;
 	airplay_get_state(&air);
 	if (air.playing) {
+		return false;
+	}
+	// Spotify's sound comes out of the DAC through the same external path,
+	// and the file behind it is the receiver's, not one of ours.
+	if (spotify_owns_playback()) {
 		return false;
 	}
 	const char *f = state->current_file;

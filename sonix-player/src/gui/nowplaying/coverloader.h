@@ -24,7 +24,13 @@
 // takes 36..59 -- its twelve track hits and twelve album hits; the audiobook
 // list takes 60..71 for its twelve rows; one artist's records take 72..83; and the
 // album carousel takes 84..89 -- so the pools never trample each other's requests.
-#define COVERLOADER_SLOTS 90
+//
+// 90 is the Spotify page's one picture: the artwork the receiver writes beside
+// its status file, asked for again on every track change. Their own slot rather
+// than one of the browser's, because the page polls it on a timer while the
+// lists behind it are not on screen.
+#define COVERLOADER_SLOTS 91
+#define COVERLOADER_SPOTIFY_SLOT 90
 #define COVERLOADER_SEARCH_BASE 36
 #define COVERLOADER_SEARCH_COUNT 24
 #define COVERLOADER_AUDIOBOOKS_BASE 60

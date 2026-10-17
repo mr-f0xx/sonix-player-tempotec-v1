@@ -235,3 +235,55 @@ structure, with filler where the picture data would be.
   them. It avoids the picture already up while there is another, and falls
   back to it when it is the only one. Twenty `._` files beside one picture
   never make it miss.
+
+## Spotify
+
+`make -C sonix-player/tests spotify` builds and runs `test_spotify` -- the
+receiver's three interfaces as the player's code sees them, with a shell
+stand-in receiver and a stub audio layer, no Spotify account and no network.
+
+- **Protocol:** the Q2SPOT/1 client's escaping, oversized argument refusal, the
+  8 KiB request ceiling, the 64 KiB reply ceiling, the "closed without a
+  trailing newline" last row, mismatched request ids, field counts, the 50-row
+  limit, connect failure and the deadline.
+- **Status file:** every field of the `key=value` file, `at`-based position
+  advancing, `cover=0/1`, truncation and a half-written file.
+- **Control socket:** each of the five datagrams, and a socket that is not
+  there.
+- **Service:** start/stop, the ownership latch and the DAC hand-back, a child
+  that dies on its own being reported with its log tail, the idle stop needing
+  a page to be shut and the receiver to have played, and the shutdown paths
+  waiting for the process to leave. The receiver's process is checked from
+  inside itself -- the stand-in records the `oom_score_adj` and the niceness the
+  spawn gave it, so a change that stops running it below the interface, or that
+  lets it inherit the player's own protection from the OOM killer, fails here --
+  and the log it writes into the tmpfs is checked to be trimmed back to its own
+  tail.
+- **Cost of waiting:** with the service up and the stand-in sending no audio,
+  this process's own CPU over a set window is measured against a ceiling. The
+  sink's playback thread asks to be real time, so a timed wait whose deadline is
+  on the wrong clock is not a warm device but a frozen one: the wait returns at
+  once, the thread spins, and the kernel throttles the whole real-time class --
+  which is what froze a V1 at the switch. `core/utils.c` is linked here for real
+  rather than stubbed for the same reason: the clock `deadline_in_ms()` computes
+  on is the thing being held.
+- **Sink:** the ring's wrap, frame alignment, largest-popped-oldest on a stall,
+  the widen-to-32 retry, and the three ways the output is released -- including
+  a release asked for while the ring is full, which has to be answered by the
+  same pass rather than by the one that finds nothing to play.
+
+The page is covered separately by the `ui` target's `test_spotify_page`, which
+links the real page, rows, scrolling labels, themes and language loader with
+`spotify.h`, the shell and the keyboard stubbed. It records every op and
+argument the page sends, so the checks are about the protocol the page speaks:
+the switch refusing with no receiver or no Wi-Fi, the canned status reaching
+the title/artist/album lines, each browser row's op, a track row's
+`play <context> <position> <uri>`, a queue row's `skip`, the cursor as the last
+argument of a next-page request, back walking up the lists one page at a time
+before leaving the page, the settings page's pills, sign-out's confirmation,
+and a search's category and term. Both language asset trees and both panel
+sizes are used.
+
+Neither suite is hardware certification: there is no real receiver, no ALSA
+device and no Wi-Fi in either one. See
+[the V1 checklist](../../docs/spotify.md#validation).
