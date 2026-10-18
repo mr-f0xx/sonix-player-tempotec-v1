@@ -57,7 +57,8 @@ static const char *const SCHEMA[] = {
 	"has_child_file INT,begin_time INT,end_time INT,cue_id INT,character TEXT COLLATE NOCASE,size INT,"
 	"sample_rate INT,bit_rate INT,bit INT,channel INT,format INT,quality TEXT COLLATE NOCASE,"
 	"album_pic_path TEXT COLLATE NOCASE,lrc_path TEXT COLLATE NOCASE,track_gain REAL,track_peak REAL,"
-	"album_artist TEXT COLLATE NOCASE,ctime INT,mtime INT,sortkey TEXT,disc INT,PRIMARY KEY(id, path, cue_id))",
+	"album_artist TEXT COLLATE NOCASE,ctime INT,mtime INT,sortkey TEXT,disc INT,play_count INT DEFAULT 0,"
+	"PRIMARY KEY(id, path, cue_id))",
 
 	"CREATE TABLE IF NOT EXISTS ALBUM_TABLE(id INT, album TEXT COLLATE NOCASE,character TEXT COLLATE NOCASE,"
 	" cn INT, sortkey TEXT, PRIMARY KEY(album))",
@@ -7195,4 +7196,117 @@ int library_search(const char *query, int per_category, library_search_cb_t cb, 
 	}
 	pthread_mutex_unlock(&db_lock);
 	return total;
+}
+
+// ---------------------------------------------------------------------------
+// Play count tracking
+// ---------------------------------------------------------------------------
+
+// Increments the play count for a track by its path. Creates the row with
+// count 1 if it does not exist yet (should not happen for indexed tracks).
+void library_increment_play_count(const char *path) {
+	if (!path || !path[0]) {
+		return;
+	}
+
+	pthread_mutex_lock(&db_lock);
+	if (db) {
+		sqlite3_stmt *stmt = NULL;
+		// Upsert: increment if exists, insert with 1 if not.
+		if (sqlite3_prepare_v2(db,
+				"INSERT INTO MEDIA_TABLE(path, play_count) VALUES(?1, 1)"
+				" ON CONFLICT(path) DO UPDATE SET play_count = play_count + 1",
+				-1, &stmt, NULL) == SQLITE_OK) {
+			sqlite3_bind_text(stmt, 1, path, -1, SQLITE_TRANSIENT);
+			sqlite3_step(stmt);
+			sqlite3_finalize(stmt);
+		}
+	}
+	pthread_mutex_unlock(&db_lock);
+}
+
+// Gets the most played tracks. Fills `out` with up to `max` paths and returns
+// the count. Returns 0 when the library is empty or `max` is 0.
+int library_most_played(char out[][512], int max) {
+	if (max <= 0) {
+		return 0;
+	}
+
+	int count = 0;
+	pthread_mutex_lock(&db_lock);
+	if (db) {
+		sqlite3_stmt *stmt = NULL;
+		if (sqlite3_prepare_v2(db,
+				"SELECT path FROM MEDIA_TABLE WHERE play_count > 0"
+				" ORDER BY play_count DESC, name LIMIT ?",
+				-1, &stmt, NULL) == SQLITE_OK) {
+			sqlite3_bind_int(stmt, 1, max);
+			while (sqlite3_step(stmt) == SQLITE_ROW && count < max) {
+				const char *path = (const char *)sqlite3_column_text(stmt, 0);
+				if (path) {
+					strncpy(out[count], path, 511);
+					out[count][511] = '\0';
+					count++;
+				}
+			}
+			sqlite3_finalize(stmt);
+		}
+	}
+	pthread_mutex_unlock(&db_lock);
+	return count;
+}
+
+// Gets distinct years from the library. Fills `out` with up to `max` years
+// (as strings) and returns the count. Years with no tracks are not included.
+int library_get_years(char out[][16], int max) {
+	if (max <= 0) {
+		return 0;
+	}
+
+	int count = 0;
+	pthread_mutex_lock(&db_lock);
+	if (db) {
+		sqlite3_stmt *stmt = NULL;
+		if (sqlite3_prepare_v2(db,
+				"SELECT DISTINCT year FROM MEDIA_TABLE WHERE year > 0"
+				" ORDER BY year LIMIT ?",
+				-1, &stmt, NULL) == SQLITE_OK) {
+			sqlite3_bind_int(stmt, 1, max);
+			while (sqlite3_step(stmt) == SQLITE_ROW && count < max) {
+				int year = sqlite3_column_int(stmt, 0);
+				if (year > 0) {
+					snprintf(out[count], 15, "%d", year);
+					out[count][15] = '\0';
+					count++;
+				}
+			}
+			sqlite3_finalize(stmt);
+		}
+	}
+	pthread_mutex_unlock(&db_lock);
+	return count;
+}
+
+// Gets the count of tracks for a given year.
+int library_track_count_for_year(int year) {
+	if (year <= 0) {
+		return 0;
+	}
+
+	int count = 0;
+	pthread_mutex_lock(&db_lock);
+	if (db) {
+		sqlite3_stmt *stmt = NULL;
+		if (sqlite3_prepare_v2(db,
+				"SELECT COUNT(*) FROM MEDIA_TABLE WHERE year = ?",
+				-1, &stmt, NULL) == SQLITE_OK) {
+			sqlite3_bind_int(stmt, 1, year);
+			if (sqlite3_step(stmt) == SQLITE_ROW) {
+				count = sqlite3_column_int(stmt, 0);
+			}
+			sqlite3_finalize(stmt);
+		}
+	}
+	pthread_mutex_unlock(&db_lock);
+	return count;
 }

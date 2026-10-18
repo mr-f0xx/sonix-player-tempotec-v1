@@ -40,6 +40,7 @@
 #include "src/gui/library/medialist.h"
 #include "src/gui/library/filespage.h"
 #include "src/gui/library/textview.h"
+#include "src/gui/library/imageview.h"
 #include "src/gui/calculator/calculator.h"
 #include "src/gui/notes/noteeditor.h"
 #include "src/gui/notes/notes.h"
@@ -652,6 +653,7 @@ void gui_init(gui_config_t *cfg) {
 	morepage_screen = lv_obj_create(NULL);
 	filespage_screen = lv_obj_create(NULL);
 	textview_screen = lv_obj_create(NULL);
+	imageview_screen = lv_obj_create(NULL);
 	gearboypage_screen = lv_obj_create(NULL);
 	gearboyplay_screen = lv_obj_create(NULL);
 	flappybird_screen = lv_obj_create(NULL);
@@ -714,6 +716,7 @@ void gui_init(gui_config_t *cfg) {
 	morepage_init(cfg);
 	textview_init(cfg); // before filespage: a text file tapped there opens here
 	filespage_init(cfg);
+	imageview_init(cfg); // after filespage: an image tapped there opens here
 	streaming_init(cfg);
 
 	player_init(cfg);

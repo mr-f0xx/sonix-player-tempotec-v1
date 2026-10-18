@@ -206,8 +206,11 @@ static void screen_off_changed_cb(lv_event_t *e) {
 }
 
 // 0..100 scale -- anything under that is indistinguishable from off.
+// The stock player never writes below 5 of its Blanking this panel powers its
+// touch controller down with it, so the only way back is the power key.
+// Allow down to 1% for users who want the dimmest possible setting.
 static long brightness_floor(long max) {
-	long floor = max / 20;
+	long floor = max / 100;
 	return floor > 0 ? floor : 1;
 }
 
@@ -292,7 +295,7 @@ static void build_screen_page(gui_config_t *cfg) {
 	lv_obj_set_width(brightness_slider, lv_pct(100));
 	lv_obj_set_height(brightness_slider, 10);
 	lv_obj_align(brightness_slider, LV_ALIGN_BOTTOM_MID, 0, bp_pick(-8, -14));
-	lv_slider_set_range(brightness_slider, 5, 100);
+	lv_slider_set_range(brightness_slider, 1, 100);
 
 	lv_obj_set_style_radius(brightness_slider, LV_RADIUS_CIRCLE, LV_PART_MAIN);
 	lv_obj_set_style_bg_color(brightness_slider, theme()->text_secondary, LV_PART_MAIN);

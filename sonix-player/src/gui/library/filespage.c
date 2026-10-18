@@ -25,6 +25,7 @@
 #include "src/gui/shell/switcher.h"
 #include "src/gui/shell/theme.h"
 #include "src/gui/shell/toast.h"
+#include "src/gui/library/imageview.h"
 #include "src/system/core/lang.h"
 #include "src/system/core/utils.h"
 #include "src/system/device/system.h"
@@ -969,15 +970,22 @@ static void row_clicked_cb(lv_event_t *e) {
 		return;
 	}
 
-	// A text file opens to be read. Any other file has nothing to open into,
-	// and the tap does nothing: the menu is what the three dots are for, and a
-	// row that opens a menu when pressed anywhere is a row that opens one every
-	// time a scroll ends on it.
+	// A text file opens to be read. An image file opens in the image viewer.
+	// Any other file has nothing to open into, and the tap does nothing: the
+	// menu is what the three dots are for, and a row that opens a menu when
+	// pressed anywhere is a row that opens one every time a scroll ends on it.
 	if (!entries[index].dir) {
 		char file[PATH_MAX_LEN];
-		if (ext_in(ext_of(entries[index].name), EXT_TEXT) && child_path(entries[index].name, file, sizeof(file)) &&
-			!textview_open(file)) {
-			gui_notify_popup("files_text_unreadable");
+		if (child_path(entries[index].name, file, sizeof(file))) {
+			if (ext_in(ext_of(entries[index].name), EXT_TEXT)) {
+				if (!textview_open(file)) {
+					gui_notify_popup("files_text_unreadable");
+				}
+			} else if (ext_in(ext_of(entries[index].name), EXT_IMAGE)) {
+				if (!imageview_open(file)) {
+					gui_notify_popup("imageview_open_failed");
+				}
+			}
 		}
 		return;
 	}

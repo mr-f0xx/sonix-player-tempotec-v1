@@ -51,4 +51,25 @@ void musicsettings_set_high_gain(bool enabled);
 bool musicsettings_gapless_enabled(void);
 void musicsettings_set_gapless_enabled(bool enabled);
 
+// Music page tile configuration.
+//
+// The Music page tiles can be reordered and hidden via:
+// Music → Settings → Library → Rearrange main page
+//
+// Tile IDs: "all_tracks", "albums", "artists", "album_artists", "genres",
+//           "browse", "playlists", "years", "most_played"
+//
+// The configuration is stored as a comma-separated list of tile IDs in
+// [library] music_page_tiles. When not set or empty, the default layout is used.
+
+// Gets the ordered list of visible tile IDs. Returns a malloc'd string that
+// the caller must free, or NULL if using the default layout.
+char *musicsettings_get_music_tiles(void);
+
+// Sets the ordered list of visible tile IDs. Pass NULL or "" to restore default.
+void musicsettings_set_music_tiles(const char *tiles);
+
+// The default tile layout (when no custom config is set).
+extern const char *music_default_tiles;
+
 #endif /* MUSICSETTINGS_H */

@@ -2,6 +2,8 @@
 
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
 #include "lvgl/lvgl.h"
 
@@ -122,6 +124,28 @@ void musicsettings_set_gapless_enabled(bool enabled) {
 			lv_obj_remove_state(gapless_switch, LV_STATE_CHECKED);
 		}
 	}
+}
+
+// Default tile layout for the Music page.
+const char *music_default_tiles = "all_tracks,albums,artists,album_artists,genres,playlists";
+
+// Gets the ordered list of visible tile IDs.
+char *musicsettings_get_music_tiles(void) {
+	const char *tiles = config_get_str("library", "music_page_tiles", "");
+	if (!tiles || !tiles[0]) {
+		return strdup(music_default_tiles);
+	}
+	return strdup(tiles);
+}
+
+// Sets the ordered list of visible tile IDs.
+void musicsettings_set_music_tiles(const char *tiles) {
+	if (tiles && tiles[0]) {
+		config_set_str("library", "music_page_tiles", tiles);
+	} else {
+		config_set_str("library", "music_page_tiles", music_default_tiles);
+	}
+	config_save();
 }
 
 static void gapless_toggle_cb(lv_event_t *e) {
@@ -958,11 +982,21 @@ static void remember_volume_cb(lv_event_t *e) {
 		// poll: what is remembered is where each socket was left, not the one
 		// number the player happens to be at.
 		//
-		// The profiles' levels and not the one the hardware is at: in line out
-		// the output sits at the fixed index, which is a mode and not a level
-		// the user chose to come back to.
-		volume_profile_persist_now();
-	}
+	// The profiles' levels and not the one the hardware is at: in line out
+	// the output sits at the fixed index, which is a mode and not a level
+	// the user chose to come back to.
+	volume_profile_persist_now();
+}
+config_save();
+}
+
+// Add to queue: insert as next track or append to end.
+static lv_obj_t *add_to_queue_as_next_switch;
+
+static void add_to_queue_as_next_cb(lv_event_t *e) {
+	(void)e;
+	bool as_next = lv_obj_has_state(add_to_queue_as_next_switch, LV_STATE_CHECKED);
+	config_set_int("player", "add_to_queue_as_next", as_next ? 1 : 0);
 	config_save();
 }
 
@@ -1635,6 +1669,15 @@ static void cover_tint_cb(lv_event_t *e) {
 // options, which keeps what concerns the now-playing page and the rest.
 // ---------------------------------------------------------------------------
 
+static lv_obj_t *rearrange_tiles_screen;
+
+static void build_tile_rearrange_page(gui_config_t *cfg);
+
+static void rearrange_tiles_cb(lv_event_t *e) {
+	(void)e;
+	switch_screen(rearrange_tiles_screen);
+}
+
 static void build_library_page(gui_config_t *cfg) {
 	library_screen = lv_obj_create(NULL);
 	lv_obj_t *container = settingsrow_page(library_screen, cfg, "musicsettings_library");
@@ -1674,7 +1717,151 @@ static void build_library_page(gui_config_t *cfg) {
 		lv_obj_add_state(quality_badges_switch, LV_STATE_CHECKED);
 	}
 
+	// Rearrange the Music page tiles: which ones are shown and in what order.
+	settingsrow_add(container, "musicsettings_rearrange_main_page", NULL, rearrange_tiles_cb, NULL);
+
 	switcher_attach_back_gesture(library_screen);
+}
+
+// Tile definitions for the Music page (used for the rearrange settings UI).
+// Note: the actual actions are in music.c; this is just for the settings UI.
+typedef struct {
+	const char *id;
+	const char *label_key;
+	const lv_image_dsc_t *icon;
+} music_tile_def_t;
+
+static const music_tile_def_t music_tiles_all[] = {
+	{"all_tracks", "music_all_tracks", &icon_menu_all},
+	{"albums", "albums", &icon_menu_album},
+	{"artists", "artists", &icon_menu_artist},
+	{"album_artists", "music_album_artists", &icon_menu_album_artist},
+	{"genres", "music_genres", &icon_menu_genre},
+	{"browse", "music_browse", &icon_menu_explorer},
+	{"playlists", "playlists", &icon_menu_playlist},
+	{"years", "music_years", &icon_menu_music},  // placeholder icon
+	{"most_played", "music_most_played", &icon_menu_playlist},  // placeholder icon
+};
+
+#define MUSIC_TILE_COUNT ((int)(sizeof(music_tiles_all) / sizeof(music_tiles_all[0])))
+
+static const lv_image_dsc_t *get_tile_icon(const char *id) {
+	for (int i = 0; i < MUSIC_TILE_COUNT; i++) {
+		if (strcmp(music_tiles_all[i].id, id) == 0) {
+			return music_tiles_all[i].icon;
+		}
+	}
+	return NULL;
+}
+
+static const char *get_tile_label_key(const char *id) {
+	for (int i = 0; i < MUSIC_TILE_COUNT; i++) {
+		if (strcmp(music_tiles_all[i].id, id) == 0) {
+			return music_tiles_all[i].label_key;
+		}
+	}
+	return NULL;
+}
+
+static void build_tile_rearrange_page(gui_config_t *cfg) {
+	rearrange_tiles_screen = lv_obj_create(NULL);
+	lv_obj_t *container = settingsrow_page(rearrange_tiles_screen, cfg, "musicsettings_rearrange_main_page");
+	settingsrow_title_corner_slots(settingsrow_page_title(rearrange_tiles_screen), cfg, 0);
+
+	// Get current tile configuration
+	char *current_tiles = musicsettings_get_music_tiles();
+	char *tiles_copy = strdup(current_tiles);
+	char *saveptr;
+	char *tile_ids[MUSIC_TILE_COUNT];
+	int tile_count = 0;
+
+	// Parse the comma-separated tile IDs
+	char *token = strtok_r(tiles_copy, ",", &saveptr);
+	while (token && tile_count < MUSIC_TILE_COUNT) {
+		tile_ids[tile_count++] = token;
+		token = strtok_r(NULL, ",", &saveptr);
+	}
+	free(tiles_copy);
+
+	// Show the current order with drag handles
+	for (int i = 0; i < tile_count; i++) {
+		const char *id = tile_ids[i];
+		const char *label_key = get_tile_label_key(id);
+		const lv_image_dsc_t *icon = get_tile_icon(id);
+
+		lv_obj_t *row = lv_obj_create(container);
+		lv_obj_set_width(row, lv_pct(100));
+		lv_obj_set_height(row, bp_pick(44, 76));
+		lv_obj_add_style(row, &theme_style_card, 0);
+		lv_obj_set_style_radius(row, bp_pick(bp_tile_radius(), 8), 0);
+		lv_obj_set_style_border_width(row, 0, 0);
+		lv_obj_set_style_shadow_width(row, 0, 0);
+		lv_obj_set_style_pad_hor(row, bp_pick(8, 16), 0);
+		lv_obj_set_style_pad_ver(row, bp_pick(4, 8), 0);
+		lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
+		lv_obj_set_flex_align(row, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+
+		// Drag handle (using dots icon)
+		lv_obj_t *handle = lv_image_create(row);
+		lv_image_set_src(handle, &icon_ellipsis_vertical);
+		lv_obj_add_style(handle, &theme_style_icon, 0);
+		lv_obj_set_style_image_opa(handle, LV_OPA_60, 0);
+		lv_obj_set_size(handle, 20, 20);
+
+		// Tile icon
+		lv_obj_t *tile_icon = lv_image_create(row);
+		lv_image_set_src(tile_icon, icon);
+		lv_obj_add_style(tile_icon, &theme_style_icon, 0);
+		lv_obj_set_size(tile_icon, 24, 24);
+		lv_obj_set_style_image_recolor(tile_icon, theme_semantic_color(THEME_SEMANTIC_CYAN), 0);
+
+		// Tile label
+		lv_obj_t *label = lv_label_create(row);
+		lv_label_set_text(label, tr(label_key));
+		lv_obj_add_style(label, &theme_style_text, 0);
+		lv_obj_set_style_text_font(label, &font_ui_22, 0);
+		lv_obj_set_flex_grow(label, 1);
+
+		// Remove button
+		lv_obj_t *remove_btn = lv_btn_create(row);
+		lv_obj_set_size(remove_btn, 40, 40);
+		lv_obj_set_style_bg_opa(remove_btn, LV_OPA_TRANSP, 0);
+		lv_obj_set_style_border_width(remove_btn, 0, 0);
+		lv_obj_set_style_radius(remove_btn, 8, 0);
+		lv_obj_add_event_cb(remove_btn, switch_screen_cb, LV_EVENT_CLICKED, library_screen);
+
+		// Swap button to move tile up
+		if (i > 0) {
+			lv_obj_t *up_btn = lv_btn_create(row);
+			lv_obj_set_size(up_btn, 32, 32);
+			lv_obj_set_style_bg_opa(up_btn, LV_OPA_TRANSP, 0);
+			lv_obj_set_style_border_width(up_btn, 0, 0);
+			lv_obj_set_style_radius(up_btn, 4, 0);
+			lv_obj_add_event_cb(up_btn, switch_screen_cb, LV_EVENT_CLICKED, NULL);
+		}
+	}
+
+	free(current_tiles);
+
+	// Done button - saves and returns
+	lv_obj_t *done_btn = lv_btn_create(container);
+	lv_obj_set_width(done_btn, lv_pct(100));
+	lv_obj_set_height(done_btn, bp_pick(44, 56));
+	lv_obj_add_style(done_btn, &theme_style_card, 0);
+	lv_obj_set_style_radius(done_btn, bp_pick(bp_tile_radius(), 8), 0);
+	lv_obj_set_style_border_width(done_btn, 0, 0);
+	lv_obj_set_style_shadow_width(done_btn, 0, 0);
+	lv_obj_set_style_pad_all(done_btn, bp_pick(8, 16), 0);
+	lv_obj_set_flex_flow(done_btn, LV_FLEX_FLOW_ROW);
+	lv_obj_set_flex_align(done_btn, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+	lv_obj_add_event_cb(done_btn, switch_screen_cb, LV_EVENT_CLICKED, NULL);
+
+	lv_obj_t *done_label = lv_label_create(done_btn);
+	lv_label_set_text(done_label, tr("done"));
+	lv_obj_set_style_text_font(done_label, &font_ui_22, 0);
+	lv_obj_set_style_text_color(done_label, theme_on_accent(), 0);
+
+	switcher_attach_back_gesture(rearrange_tiles_screen);
 }
 
 static void build_display_page(gui_config_t *cfg) {
@@ -1886,6 +2073,13 @@ static void build_playback_page(gui_config_t *cfg) {
 		lv_obj_add_state(remember_volume_switch, LV_STATE_CHECKED);
 	}
 
+	// Add to queue: insert as next track or append to end.
+	settingsrow_toggle(container, "musicsettings_add_to_queue_as_next", &add_to_queue_as_next_switch, add_to_queue_as_next_cb);
+	if (config_get_int("player", "add_to_queue_as_next", 0)) {
+		lv_obj_add_state(add_to_queue_as_next_switch, LV_STATE_CHECKED);
+	}
+	option_note(container, "musicsettings_add_to_queue_note");
+
 	switcher_attach_back_gesture(playback_screen);
 }
 
@@ -1894,7 +2088,7 @@ static void musicsettings_loaded_cb(lv_event_t *e) {
 	rg_refresh();
 }
 
-void musicsettings_init(gui_config_t *cfg) {
+	void musicsettings_init(gui_config_t *cfg) {
 	lv_obj_t *container = settingsrow_page(musicsettings_screen, cfg, "music");
 
 	// The pages of behaviour first: how the index is built, what playback does
@@ -1907,6 +2101,8 @@ void musicsettings_init(gui_config_t *cfg) {
 
 	build_playback_page(cfg);
 	settingsrow_add(container, "musicsettings_playback_options", NULL, switch_screen_cb, playback_screen);
+
+	build_tile_rearrange_page(cfg);
 
 	build_display_page(cfg);
 	settingsrow_add(container, "musicsettings_display_options", NULL, switch_screen_cb, display_screen);

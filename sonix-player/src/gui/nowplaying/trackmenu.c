@@ -35,13 +35,23 @@
 lv_obj_t *queue_screen;
 lv_obj_t *details_screen;
 
+// Selection mode for the queue
+static bool queue_selection_mode = false;
+static bool *queue_selected = NULL;
+static int queue_selected_count = 0;
+
+// Reorder drag state
+static int queue_drag_source = -1;
+static int queue_drag_target = -1;
+static bool queue_drag_active = false;
+
 // The queue is windowed like every other long list here: a fixed pool of row
 // widgets rides the scroll position, and each row looks up its title (one
 // indexed database lookup) at the moment it binds. Opening the page costs a
 // dozen binds, not hundreds, which is what makes it instant.
-#define QUEUE_THUMB_SIZE bp_pick(40, 56)
-#define QUEUE_ROW_HEIGHT bp_pick(52, 72)
-#define QUEUE_ROW_GAP bp_pick(5, 8)
+#define QUEUE_THUMB_SIZE bp_pick(36, 48)
+#define QUEUE_ROW_HEIGHT bp_pick(48, 64)
+#define QUEUE_ROW_GAP bp_pick(4, 6)
 #define QUEUE_ROW_PITCH (QUEUE_ROW_HEIGHT + QUEUE_ROW_GAP)
 #define QUEUE_ROW_POOL 12
 
@@ -49,6 +59,8 @@ typedef struct {
 	lv_obj_t *button;
 	lv_obj_t *icon;
 	lv_obj_t *label;
+	lv_obj_t *checkbox;  // selection checkbox
+	lv_obj_t *drag_handle;  // drag handle for reordering
 	int index; // position in the queue, or -1
 	bool has_thumb;
 	cover_image_t thumb;
@@ -68,6 +80,49 @@ static gui_config_t *g_cfg;
 // Queue: the current track and the ones after it, tappable to jump.
 // ---------------------------------------------------------------------------
 
+static void queue_toggle_selection(void) {
+	queue_selection_mode = !queue_selection_mode;
+	if (!queue_selection_mode) {
+		// Clear all selections
+		for (int i = 0; i < queue_total; i++) {
+			if (queue_selected && i < queue_selected_count) {
+				queue_selected[i] = false;
+			}
+		}
+		queue_selected_count = 0;
+	}
+	queue_rebuild();
+}
+
+static void queue_select_all(void) {
+	if (!queue_selected) return;
+	for (int i = 0; i < queue_total && i < queue_selected_count; i++) {
+		queue_selected[i] = true;
+	}
+	queue_selected_count = queue_total;
+	queue_rebuild();
+}
+
+static void queue_remove_selected(void) {
+	if (!queue_selected || queue_selected_count == 0) return;
+
+	// Remove selected tracks from bottom to top to preserve indices
+	for (int i = queue_total - 1; i >= 0; i--) {
+		if (i < queue_selected_count && queue_selected[i]) {
+			playlist_remove_at(i);
+		}
+	}
+
+	// Free selection array
+	if (queue_selected) {
+		free(queue_selected);
+		queue_selected = NULL;
+	}
+	queue_selected_count = 0;
+	queue_selection_mode = false;
+	queue_rebuild();
+}
+
 static void queue_row_clicked_cb(lv_event_t *e) {
 	if (player_sheet_drag_active() || switcher_back_drag_active()) {
 		return;
@@ -76,11 +131,33 @@ static void queue_row_clicked_cb(lv_event_t *e) {
 	lv_obj_t *button = lv_event_get_current_target(e);
 	for (int i = 0; i < QUEUE_ROW_POOL; i++) {
 		if (queue_rows[i].button == button && queue_rows[i].index >= 0) {
+			// If in selection mode, toggle selection instead of playing
+			if (queue_selection_mode) {
+				int idx = queue_rows[i].index;
+				if (idx < queue_selected_count) {
+					queue_selected[idx] = !queue_selected[idx];
+					queue_selected_count += queue_selected[idx] ? 1 : -1;
+					queue_row_rebuild(idx);
+				}
+				return;
+			}
+
+			// Normal mode: play the track
 			if (device_state_play_queue_index(queue_rows[i].index)) {
 				player_refresh_now_playing();
 				switch_screen(player_screen);
 			}
 			return;
+		}
+	}
+}
+
+// Rebuild a single row to update checkbox state
+static void queue_row_rebuild(int index) {
+	for (int i = 0; i < QUEUE_ROW_POOL; i++) {
+		if (queue_rows[i].index == index) {
+			queue_row_bind(&queue_rows[i], index);
+			break;
 		}
 	}
 }
@@ -132,6 +209,10 @@ void trackmenu_notify_now_playing(void) {
 // an indexed lookup is cheap enough to do during a scroll.
 static void queue_row_bind(queue_row_t *row, int index) {
 	if (row->index == index) {
+		// Still update checkbox state if in selection mode
+		if (queue_selection_mode && index >= 0 && index < queue_selected_count && queue_selected) {
+			lv_obj_set_style_image_opa(row->checkbox, queue_selected[index] ? LV_OPA_COVER : LV_OPA_0, 0);
+		}
 		return;
 	}
 
@@ -173,7 +254,39 @@ static void queue_row_bind(queue_row_t *row, int index) {
 	lv_obj_set_y(row->button, index * QUEUE_ROW_PITCH);
 	lv_label_set_text(row->label, title);
 
+	// Update checkbox visibility based on selection mode
+	if (queue_selection_mode && index < queue_selected_count && queue_selected) {
+		lv_obj_set_style_image_opa(row->checkbox, queue_selected[index] ? LV_OPA_COVER : LV_OPA_0, 0);
+		lv_obj_set_hidden(row->checkbox, false);
+		lv_obj_set_hidden(row->drag_handle, true);
+	} else {
+		lv_obj_set_style_image_opa(row->checkbox, LV_OPA_0, 0);
+		lv_obj_set_hidden(row->checkbox, true);
+		lv_obj_set_hidden(row->drag_handle, false);
+	}
+
 	queue_row_paint_mark(row);
+}
+
+// Enter selection mode
+void trackmenu_queue_enter_selection(void) {
+	queue_selection_mode = true;
+	queue_selected_count = 0;
+
+	// Allocate selection array
+	if (queue_total > 0) {
+		queue_selected = calloc(queue_total, sizeof(bool));
+		queue_selected_count = queue_total;
+	}
+
+	queue_selection_bar_show();
+	trackmenu_update_selection_bar();
+	queue_rebuild();
+}
+
+// Exit selection mode
+void trackmenu_queue_exit_selection(void) {
+	queue_toggle_selection();
 }
 
 static void queue_window_update(void) {
@@ -247,6 +360,37 @@ static void queue_loaded_cb(lv_event_t *e) {
 	queue_rebuild();
 }
 
+static lv_obj_t *queue_selection_bar;
+
+static void queue_selection_bar_hide(void) {
+	if (queue_selection_bar) {
+		lv_obj_set_hidden(queue_selection_bar, true);
+	}
+}
+
+static void queue_selection_bar_show(void) {
+	if (queue_selection_bar) {
+		lv_obj_set_hidden(queue_selection_bar, false);
+	}
+}
+
+static void queue_select_all_cb(lv_event_t *e) {
+	(void)e;
+	queue_select_all();
+}
+
+static void queue_remove_selected_cb(lv_event_t *e) {
+	(void)e;
+	if (queue_selected_count > 0) {
+		queue_remove_selected();
+	}
+}
+
+static void queue_cancel_selection_cb(lv_event_t *e) {
+	(void)e;
+	queue_toggle_selection();
+}
+
 static void build_queue_page(gui_config_t *cfg) {
 	lv_obj_add_style(queue_screen, &theme_style_screen, 0);
 	settingsrow_title(queue_screen, cfg, "trackmenu_queue");
@@ -254,8 +398,62 @@ static void build_queue_page(gui_config_t *cfg) {
 	int content_top = settingsrow_content_top(cfg);
 	int width = cfg->screen_width - 2 * cfg->padding;
 
+	// Selection toolbar (shown when in selection mode)
+	queue_selection_bar = lv_obj_create(queue_screen);
+	lv_obj_set_size(queue_selection_bar, cfg->screen_width, bp_pick(44, 52));
+	lv_obj_align(queue_selection_bar, LV_ALIGN_TOP_LEFT, 0, content_top - bp_pick(44, 52));
+	lv_obj_set_style_bg_color(queue_selection_bar, theme()->surface, 0);
+	lv_obj_set_style_bg_opa(queue_selection_bar, LV_OPA_COVER, 0);
+	lv_obj_set_style_border_width(queue_selection_bar, 0, 0);
+	lv_obj_set_style_radius(queue_selection_bar, 0, 0);
+	lv_obj_set_style_pad_all(queue_selection_bar, cfg->padding, 0);
+	lv_obj_set_flex_flow(queue_selection_bar, LV_FLEX_FLOW_ROW);
+	lv_obj_set_flex_align(queue_selection_bar, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+	lv_obj_set_hidden(queue_selection_bar, true);
+
+	lv_obj_t *sel_label = lv_label_create(queue_selection_bar);
+	lv_label_set_text(sel_label, tr("trackmenu_selected_x", queue_selected_count));
+	lv_obj_add_style(sel_label, &theme_style_text, 0);
+	lv_obj_set_style_text_font(sel_label, &font_ui_18, 0);
+	lv_obj_set_flex_grow(sel_label, 0);
+	lv_obj_set_width(sel_label, bp_pick(80, 120));
+
+	// Select all button
+	lv_obj_t *select_all_btn = lv_btn_create(queue_selection_bar);
+	lv_obj_set_size(select_all_btn, bp_pick(80, 100), LV_SIZE_CONTENT);
+	lv_obj_set_style_bg_opa(select_all_btn, LV_OPA_TRANSP, 0);
+	lv_obj_set_style_border_width(select_all_btn, 0, 0);
+	lv_obj_set_style_shadow_width(select_all_btn, 0, 0);
+	lv_obj_add_event_cb(select_all_btn, queue_select_all_cb, LV_EVENT_CLICKED, NULL);
+	lv_obj_t *select_all_icon = lv_image_create(select_all_btn);
+	lv_image_set_src(select_all_icon, &icon_check);
+	lv_obj_add_style(select_all_icon, &theme_style_icon, 0);
+
+	// Remove button
+	lv_obj_t *remove_btn = lv_btn_create(queue_selection_bar);
+	lv_obj_set_size(remove_btn, bp_pick(80, 100), LV_SIZE_CONTENT);
+	lv_obj_set_style_bg_opa(remove_btn, LV_OPA_TRANSP, 0);
+	lv_obj_set_style_border_width(remove_btn, 0, 0);
+	lv_obj_set_style_shadow_width(remove_btn, 0, 0);
+	lv_obj_add_event_cb(remove_btn, queue_remove_selected_cb, LV_EVENT_CLICKED, NULL);
+	lv_obj_t *remove_icon = lv_image_create(remove_btn);
+	lv_image_set_src(remove_icon, &icon_close);
+	lv_obj_add_style(remove_icon, &theme_style_icon, 0);
+
+	// Cancel button
+	lv_obj_t *cancel_btn = lv_btn_create(queue_selection_bar);
+	lv_obj_set_size(cancel_btn, bp_pick(80, 100), LV_SIZE_CONTENT);
+	lv_obj_set_style_bg_opa(cancel_btn, LV_OPA_TRANSP, 0);
+	lv_obj_set_style_border_width(cancel_btn, 0, 0);
+	lv_obj_set_style_shadow_width(cancel_btn, 0, 0);
+	lv_obj_add_event_cb(cancel_btn, queue_cancel_selection_cb, LV_EVENT_CLICKED, NULL);
+	lv_obj_t *cancel_icon = lv_image_create(cancel_btn);
+	lv_image_set_src(cancel_icon, &icon_chevron_left);
+	lv_obj_add_style(cancel_icon, &theme_style_icon, 0);
+	lv_obj_set_style_image_recolor(cancel_icon, theme()->text_secondary, 0);
+
 	queue_list = lv_obj_create(queue_screen);
-	lv_obj_set_size(queue_list, cfg->screen_width, cfg->screen_height - content_top);
+	lv_obj_set_size(queue_list, cfg->screen_width, cfg->screen_height - content_top - bp_pick(44, 52));
 	lv_obj_align(queue_list, LV_ALIGN_TOP_LEFT, 0, content_top);
 	lv_obj_set_style_bg_opa(queue_list, 0, 0);
 	lv_obj_set_style_border_width(queue_list, 0, 0);
@@ -303,6 +501,15 @@ static void build_queue_page(gui_config_t *cfg) {
 		lv_obj_set_flex_flow(row->button, LV_FLEX_FLOW_ROW);
 		lv_obj_set_flex_align(row->button, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 
+		// Checkbox for selection mode
+		row->checkbox = lv_img_create(row->button);
+		lv_image_set_src(row->checkbox, &icon_check);
+		lv_obj_add_style(row->checkbox, &theme_style_icon, 0);
+		lv_obj_set_size(row->checkbox, 24, 24);
+		lv_obj_set_style_image_opa(row->checkbox, LV_OPA_0, 0);
+		lv_obj_set_style_image_recolor(row->checkbox, theme()->accent, 0);
+		lv_obj_set_style_image_recolor_opa(row->checkbox, LV_OPA_COVER, 0);
+
 		row->icon = lv_image_create(row->button);
 		lv_obj_set_size(row->icon, QUEUE_THUMB_SIZE, QUEUE_THUMB_SIZE);
 		lv_image_set_inner_align(row->icon, LV_IMAGE_ALIGN_CENTER);
@@ -310,9 +517,16 @@ static void build_queue_page(gui_config_t *cfg) {
 		row->label = lv_label_create(row->button);
 		lv_label_set_long_mode(row->label, LV_LABEL_LONG_DOT);
 		lv_obj_set_flex_grow(row->label, 1);
-		lv_obj_set_height(row->label, 32);
+		lv_obj_set_height(row->label, 28);
 		lv_obj_add_style(row->label, &theme_style_text, 0);
-		lv_obj_set_style_text_font(row->label, &font_ui_24, 0);
+		lv_obj_set_style_text_font(row->label, &font_ui_22, 0);
+
+		// Drag handle for reordering (simplified - just a visual indicator)
+		row->drag_handle = lv_img_create(row->button);
+		lv_image_set_src(row->drag_handle, &icon_grip_vertical);
+		lv_obj_add_style(row->drag_handle, &theme_style_icon, 0);
+		lv_obj_set_size(row->drag_handle, 20, 20);
+		lv_obj_set_style_image_opa(row->drag_handle, LV_OPA_40, 0);
 
 		row->index = -1;
 		row->has_thumb = false;
@@ -322,6 +536,18 @@ static void build_queue_page(gui_config_t *cfg) {
 	// list being read. The swipe-back drag still works from here.
 	switcher_attach_back_gesture(queue_list);
 	lv_obj_add_event_cb(queue_screen, queue_loaded_cb, LV_EVENT_SCREEN_LOADED, NULL);
+}
+
+// Update the selection bar label
+void trackmenu_update_selection_bar(void) {
+	if (queue_selection_bar && queue_selected_count > 0) {
+		static char buf[64];
+		snprintf(buf, sizeof(buf), tr("trackmenu_selected_x"), queue_selected_count);
+		lv_obj_t *label = lv_obj_get_child(queue_selection_bar, 0);
+		if (label) {
+			lv_label_set_text(label, buf);
+		}
+	}
 }
 
 // ---------------------------------------------------------------------------

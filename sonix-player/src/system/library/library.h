@@ -520,6 +520,24 @@ typedef void (*library_search_cb_t)(library_search_type_t type, const char *name
 int library_search(const char *query, int per_category, library_search_cb_t cb, void *user);
 
 // ---------------------------------------------------------------------------
+// Play count tracking
+// ---------------------------------------------------------------------------
+
+// Increments the play count for a track by its path.
+void library_increment_play_count(const char *path);
+
+// Gets the most played tracks. Fills `out` with up to `max` paths and returns
+// the count.
+int library_most_played(char out[][512], int max);
+
+// Gets distinct years from the library. Fills `out` with up to `max` years
+// (as strings) and returns the count.
+int library_get_years(char out[][16], int max);
+
+// Gets the count of tracks for a given year.
+int library_track_count_for_year(int year);
+
+// ---------------------------------------------------------------------------
 // Playlists
 //
 // One table per playlist, named "M3U_" followed by the playlist's own name --

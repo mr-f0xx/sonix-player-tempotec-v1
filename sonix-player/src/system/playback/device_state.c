@@ -529,6 +529,12 @@ static void load_and_play_at(const char *filepath, double position) {
 		audio_play(current_metadata_file);
 	}
 
+	// Track playback started: increment play count for library tracks.
+	// Skip streams and podcast episodes - only count local files.
+	if (current_metadata_file[0] && !current_metadata.is_stream) {
+		library_increment_play_count(current_metadata_file);
+	}
+
 	// Any track load supersedes the note: it belongs to the one press that
 	// follows the storage coming back.
 	interrupted_file[0] = '\0';

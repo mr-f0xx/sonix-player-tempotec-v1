@@ -681,19 +681,96 @@ static lv_obj_t *corner_button(gui_config_t *cfg, int slot, const lv_image_dsc_t
 	return button;
 }
 
+// Tile configuration for the Music page.
+// Reads from musicsettings and builds the grid accordingly.
+typedef struct {
+	const char *id;
+	const char *label_key;
+	const lv_image_dsc_t *icon;
+	void (*action)(void);
+} music_tile_info_t;
+
+// All available tiles
+static const music_tile_info_t all_tiles[] = {
+	{"all_tracks", "music_all_tracks", &icon_menu_all, open_all_tracks},
+	{"albums", "albums", &icon_menu_album, open_albums},
+	{"artists", "artists", &icon_menu_artist, open_artists},
+	{"album_artists", "music_album_artists", &icon_menu_album_artist, open_album_artists},
+	{"genres", "music_genres", &icon_menu_genre, open_genres},
+	{"browse", "music_browse", &icon_menu_explorer, open_tile_slot},
+	{"playlists", "playlists", &icon_menu_playlist, playlistpage_open},
+	{"years", "music_years", &icon_menu_music, open_all_tracks},  // Placeholder icon
+	{"most_played", "music_most_played", &icon_menu_playlist, open_all_tracks},  // Placeholder icon
+};
+
+#define ALL_TILE_COUNT ((int)(sizeof(all_tiles) / sizeof(all_tiles[0])))
+
 void music_init(gui_config_t *cfg) {
 	music_cfg = cfg;
-	const grid_entry_t entries[] = {
-		{"music_all_tracks", &icon_menu_all, NULL, open_all_tracks},
-		{"albums", &icon_menu_album, NULL, open_albums},
-		{"artists", &icon_menu_artist, NULL, open_artists},
-		{"music_album_artists", &icon_menu_album_artist, NULL, open_album_artists},
-		{"music_genres", &icon_menu_genre, NULL, open_genres},
-		// The V1's tile swaps Browse and Playlists with the music preference.
-		{"music_browse", &icon_menu_explorer, NULL, open_tile_slot},
-	};
 
-	tile_grid = gridpage_build(music_screen, cfg, entries, (int)(sizeof(entries) / sizeof(entries[0])), 2, 3, true);
+	// Read tile configuration
+	char *tile_config = musicsettings_get_music_tiles();
+	char *tiles_copy = strdup(tile_config);
+	char *saveptr;
+	char *tile_ids[ALL_TILE_COUNT];
+	int tile_count = 0;
+
+	// Parse the comma-separated tile IDs
+	char *token = strtok_r(tiles_copy, ",", &saveptr);
+	while (token && tile_count < ALL_TILE_COUNT) {
+		tile_ids[tile_count++] = token;
+		token = strtok_r(NULL, ",", &saveptr);
+	}
+	free(tiles_copy);
+
+	// Build the grid entries from configuration
+	grid_entry_t entries[ALL_TILE_COUNT];
+	int entry_count = 0;
+
+	for (int i = 0; i < tile_count && entry_count < ALL_TILE_COUNT; i++) {
+		const char *id = tile_ids[i];
+		const music_tile_info_t *info = NULL;
+
+		// Find the tile info for this ID
+		for (int j = 0; j < ALL_TILE_COUNT; j++) {
+			if (strcmp(all_tiles[j].id, id) == 0) {
+				info = &all_tiles[j];
+				break;
+			}
+		}
+
+		if (info) {
+			entries[entry_count].label = info->label_key;
+			entries[entry_count].icon = info->icon;
+			entries[entry_count].action = info->action;
+			entries[entry_count].target = NULL;
+			entry_count++;
+		}
+	}
+
+	// Ensure we have at least 6 tiles for the 2x3 grid
+	// If fewer, fill with defaults
+	if (entry_count < 6) {
+		// Add default tiles that aren't already in the config
+		for (int j = 0; j < ALL_TILE_COUNT && entry_count < 6; j++) {
+			bool found = false;
+			for (int k = 0; k < tile_count; k++) {
+				if (strcmp(tile_ids[k], all_tiles[j].id) == 0) {
+					found = true;
+					break;
+				}
+			}
+			if (!found) {
+				entries[entry_count].label = all_tiles[j].label_key;
+				entries[entry_count].icon = all_tiles[j].icon;
+				entries[entry_count].action = all_tiles[j].action;
+				entries[entry_count].target = NULL;
+				entry_count++;
+			}
+		}
+	}
+
+	tile_grid = gridpage_build(music_screen, cfg, entries, entry_count, 2, 3, true);
 
 	bool compact_header = cfg->screen_width < 320;
 	settingsrow_title_corner_slots(settingsrow_title(music_screen, cfg, "music"), cfg, compact_header ? 2 : 4);
