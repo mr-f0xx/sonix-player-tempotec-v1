@@ -31,6 +31,7 @@
 #include "src/system/library/library.h"
 #include "src/system/playback/playlist.h"
 #include "src/system/core/utils.h"
+#include <stdlib.h>
 
 lv_obj_t *queue_screen;
 lv_obj_t *details_screen;
@@ -39,11 +40,6 @@ lv_obj_t *details_screen;
 static bool queue_selection_mode = false;
 static bool *queue_selected = NULL;
 static int queue_selected_count = 0;
-
-// Reorder drag state
-static int queue_drag_source = -1;
-static int queue_drag_target = -1;
-static bool queue_drag_active = false;
 
 // The queue is windowed like every other long list here: a fixed pool of row
 // widgets rides the scroll position, and each row looks up its title (one
@@ -60,7 +56,6 @@ typedef struct {
 	lv_obj_t *icon;
 	lv_obj_t *label;
 	lv_obj_t *checkbox;  // selection checkbox
-	lv_obj_t *drag_handle;  // drag handle for reordering
 	int index; // position in the queue, or -1
 	bool has_thumb;
 	cover_image_t thumb;
@@ -71,6 +66,16 @@ static lv_obj_t *queue_body; // fixed-height canvas the pool rows sit on
 static lv_obj_t *queue_empty;
 static queue_row_t queue_rows[QUEUE_ROW_POOL];
 static int queue_total; // how many tracks the queue holds, from its first
+
+static lv_obj_t *queue_selection_bar;
+
+// Forward declarations
+static void queue_selection_bar_hide(void);
+static void queue_selection_bar_show(void);
+void trackmenu_update_selection_bar(void);
+static void queue_rebuild(void);
+static void queue_row_bind(queue_row_t *row, int index);
+static void queue_row_rebuild(int index);
 
 static lv_obj_t *details_card;
 static lv_obj_t *details_scroll;
@@ -258,11 +263,9 @@ static void queue_row_bind(queue_row_t *row, int index) {
 	if (queue_selection_mode && index < queue_selected_count && queue_selected) {
 		lv_obj_set_style_image_opa(row->checkbox, queue_selected[index] ? LV_OPA_COVER : LV_OPA_0, 0);
 		lv_obj_set_hidden(row->checkbox, false);
-		lv_obj_set_hidden(row->drag_handle, true);
 	} else {
 		lv_obj_set_style_image_opa(row->checkbox, LV_OPA_0, 0);
 		lv_obj_set_hidden(row->checkbox, true);
-		lv_obj_set_hidden(row->drag_handle, false);
 	}
 
 	queue_row_paint_mark(row);
@@ -412,7 +415,9 @@ static void build_queue_page(gui_config_t *cfg) {
 	lv_obj_set_hidden(queue_selection_bar, true);
 
 	lv_obj_t *sel_label = lv_label_create(queue_selection_bar);
-	lv_label_set_text(sel_label, tr("trackmenu_selected_x", queue_selected_count));
+	static char sel_label_buf[64];
+	snprintf(sel_label_buf, sizeof(sel_label_buf), tr("trackmenu_selected_x"), queue_selected_count);
+	lv_label_set_text(sel_label, sel_label_buf);
 	lv_obj_add_style(sel_label, &theme_style_text, 0);
 	lv_obj_set_style_text_font(sel_label, &font_ui_18, 0);
 	lv_obj_set_flex_grow(sel_label, 0);
@@ -514,23 +519,16 @@ static void build_queue_page(gui_config_t *cfg) {
 		lv_obj_set_size(row->icon, QUEUE_THUMB_SIZE, QUEUE_THUMB_SIZE);
 		lv_image_set_inner_align(row->icon, LV_IMAGE_ALIGN_CENTER);
 
-		row->label = lv_label_create(row->button);
-		lv_label_set_long_mode(row->label, LV_LABEL_LONG_DOT);
-		lv_obj_set_flex_grow(row->label, 1);
-		lv_obj_set_height(row->label, 28);
-		lv_obj_add_style(row->label, &theme_style_text, 0);
-		lv_obj_set_style_text_font(row->label, &font_ui_22, 0);
+	row->label = lv_label_create(row->button);
+	lv_label_set_long_mode(row->label, LV_LABEL_LONG_DOT);
+	lv_obj_set_flex_grow(row->label, 1);
+	lv_obj_set_height(row->label, 28);
+	lv_obj_add_style(row->label, &theme_style_text, 0);
+	lv_obj_set_style_text_font(row->label, &font_ui_22, 0);
 
-		// Drag handle for reordering (simplified - just a visual indicator)
-		row->drag_handle = lv_img_create(row->button);
-		lv_image_set_src(row->drag_handle, &icon_grip_vertical);
-		lv_obj_add_style(row->drag_handle, &theme_style_icon, 0);
-		lv_obj_set_size(row->drag_handle, 20, 20);
-		lv_obj_set_style_image_opa(row->drag_handle, LV_OPA_40, 0);
-
-		row->index = -1;
-		row->has_thumb = false;
-	}
+	row->index = -1;
+	row->has_thumb = false;
+}
 
 	// No player-sheet swipe on the queue: it kept sliding the player over the
 	// list being read. The swipe-back drag still works from here.

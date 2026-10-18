@@ -29,4 +29,8 @@ void trackmenu_details_open(const char *path);
 // list -- so nothing here rebinds or re-reads anything.
 void trackmenu_notify_now_playing(void);
 
+// Queue selection mode
+void trackmenu_queue_enter_selection(void);
+void trackmenu_queue_exit_selection(void);
+
 #endif /* TRACKMENU_H */
