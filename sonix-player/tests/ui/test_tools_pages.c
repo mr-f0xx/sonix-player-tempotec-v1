@@ -300,7 +300,7 @@ static bool is_ini(const char *name) {
  * own two names, the calculator's error state, and the notes shelf's rows and
  * notices. tr() falls back to the key it is given, so a string missing from a
  * file does not fail; it shows the tag itself, which is how a page ends up
- * labelled "notes_new" on a Japanese player and nobody notices. */
+ * labelled "notes_new" on a translated player and nobody notices. */
 static void check_strings(const char *language_dir) {
 	static const char *const KEYS[] = {
 		"calculator", "calculator_error", "notes", "notes_new", "notes_empty",
@@ -334,7 +334,7 @@ static void check_strings(const char *language_dir) {
 		languages++;
 	}
 	closedir(dir);
-	assert(languages == 11);
+	assert(languages == 7);
 	assert(lang_set("English"));
 }
 

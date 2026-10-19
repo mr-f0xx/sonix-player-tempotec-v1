@@ -213,7 +213,7 @@ a self-signed certificate), and HLS.
 - **Appearance → Show Books on home screen** - replaces the Audiobooks tile with Books, opening the EPUB shelf directly from home. Off by default; Audiobooks remain available when switched off.
 - **Appearance → Main menu icons only** - optionally hide the six main-menu tile labels and show larger, centered icons. Dedicated native-pixel art avoids stretching small toolbar glyphs or repeatedly filtering the colored illustrations. Applies immediately in every theme and is saved across restarts; other menus, the status bar and the now-playing strip are unchanged. Off by default.
 - **Appearance → Boot screen** - the picture the next power-on opens with: Retrospace (the default), Space, Travelling in space, or Stock, the firmware's own light and dark pictures. The choice is written to the flash marker the boot script reads, so it takes effect at the next boot.
-- **Appearance → Font** - the face the whole interface is drawn with: MiSans (the default), Neon 80s and, where the image carries them, Roboto Mono, Roboto Condensed, Inter and Barlow Semi Condensed. Text can also be sized Normal or Large. Any `.ttf` or `.otf` file put in the `Fonts` folder on the card is offered beside those, so people can install their own; a face without Cyrillic, Hangul, kanji or Greek still draws the whole interface, because MiSans stays behind it for the letters it does not have.
+- **Appearance → Font** - the face the whole interface is drawn with: MiSans (the default), Neon 80s and, where the image carries them, Roboto and Inter. Text can also be sized Normal or Large. Any `.ttf` or `.otf` file put in the `Fonts` folder on the card is offered beside those, so people can install their own; a face without Cyrillic, Hangul, kanji or Greek still draws the whole interface, because MiSans stays behind it for the letters it does not have.
 - **Screen** - brightness (1% to 100%), screen-off timeout, double-tap to wake, screensaver,
   and 180° rotation with the touch rotated with it.
 - **Screensaver** - choose to show the cover of the current playing track or pictures from the `Screensaver` folder. On the V1's Tokyo Night, Amber on Black and OLED themes the artwork fills the whole panel and the title, artist and clock are read on a translucent field of the palette's own colour over its foot; Dark and Light keep the blurred strip. Under **Album art**, **Fill** keeps that full-bleed look (the default). **Framed** shows the whole cover instead, at its own resolution, in a rounded frame with margins round it, above the title, artist and clock. That frame is 160 px on the V1. The cover is decoded for exactly that size and never enlarged, so it never turns into blocks.
@@ -235,9 +235,9 @@ a self-signed certificate), and HLS.
   and transition speed (20 ms to 2 s) are set under Power.
 - **Date and time** - set by hand and written to the RTC, 24-hour clock, and a
   time zone with its own standard and daylight choice.
-- **Language** - English, Italiano, Deutsch, Español, Français, Russian, Chinese,
-  Japanese. Titles and tags in Korean, Thai and Arabic are shown too, Arabic
-  right to left.
+- **Language** - English, Italiano, Deutsch, Español, Français, Polski and
+  Português BR. Titles and tags in Korean, Thai and Arabic are shown too,
+  Arabic right to left.
 - **Remap buttons** - the three media buttons and the two volume buttons, each
   assignable to nothing, play/pause, previous, next, volume up or volume down.
 - **Keyboard layout** - six layouts: English, Italian, German, Spanish, French

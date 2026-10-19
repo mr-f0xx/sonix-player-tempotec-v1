@@ -511,7 +511,7 @@ static void check_settings_card(const char *language_dir) {
 		languages++;
 	}
 	closedir(dir);
-	assert(languages == 11);
+	assert(languages == 7);
 	assert(lang_set("English"));
 	assert(strcmp(lv_label_get_text(caption), "Album art") == 0);
 	lv_screen_load(previous);
@@ -558,7 +558,7 @@ static void check_picture_limit(const char *language_dir) {
 		languages++;
 	}
 	closedir(dir);
-	assert(languages == 11);
+	assert(languages == 7);
 	assert(lang_set("English"));
 
 	int asks = folder_asks;

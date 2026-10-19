@@ -111,7 +111,7 @@ typedef struct {
 bool sysinfo_sd_usage(sysinfo_storage_t *out);
 
 // "12.3 GB", "512 MB", "48 KB". Decimal point rather than comma: it is the same
-// string in all five languages and does not pass through tr().
+// string in every language and does not pass through tr().
 void sysinfo_format_size(uint64_t bytes, char *out, size_t out_size);
 
 #endif /* SYSINFO_H */

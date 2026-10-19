@@ -34,9 +34,8 @@ static const char *const WELCOME_WORDS[] = {
 	"Welkom",	  // Dutch
 	"Witamy",	  // Polish
 	"Bem-vindo",  // Portuguese
-	// The default face draws Cyrillic, kana and the CJK block, as the whole
-	// interface does in Russian, Chinese and Japanese, so none of these needs
-	// a font of its own.
+	// MiSans includes Cyrillic, kana and the CJK block, so the welcome words
+	// in these scripts need no separate font.
 	"Добро пожаловать",
 	"欢迎",
 	"ようこそ",
