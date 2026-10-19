@@ -118,6 +118,8 @@ void bluetooth_refresh(void);
 void bluetooth_pair(const char *mac);
 void bluetooth_connect(const char *mac);
 void bluetooth_disconnect(const char *mac);
+// Queues a persistent local alias; false for empty or oversized names.
+bool bluetooth_rename(const char *mac, const char *name);
 void bluetooth_forget(const char *mac);
 
 // The outcome of the last action the user asked for, reported once.

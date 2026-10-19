@@ -943,6 +943,25 @@ bool btstack_set_alias(const char *alias) {
 	return dbus_call_send(c, CALL_MS, NULL, 0);
 }
 
+// BlueZ persists Device1.Alias locally; the remote device is not renamed.
+bool btstack_set_device_alias(const char *address, const char *alias) {
+	char path[OBJECT_PATH_MAX];
+	if (!alias || !alias[0] || !device_path(address, path, sizeof(path))) {
+		return false;
+	}
+	pthread_mutex_lock(&lock);
+	dbus_conn_t *c = conn;
+	pthread_mutex_unlock(&lock);
+	if (!c) {
+		return false;
+	}
+	dbus_writer_t *w = dbus_call_begin(c, BLUEZ_SERVICE, path, PROPS_IFACE, "Set", "ssv");
+	dbus_w_string(w, BLUEZ_DEVICE_IFACE);
+	dbus_w_string(w, "Alias");
+	dbus_w_variant_string(w, alias);
+	return dbus_call_send(c, CALL_MS, NULL, 0);
+}
+
 bool btstack_discovery(bool on) {
 	pthread_mutex_lock(&lock);
 	dbus_conn_t *c = conn;

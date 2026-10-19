@@ -98,6 +98,7 @@ bool btstack_get_powered(bool *out);
 bool btstack_set_discoverable(bool on);
 bool btstack_set_discoverable_timeout(unsigned seconds);
 bool btstack_set_pairable(bool on);
+bool btstack_set_device_alias(const char *address, const char *alias);
 bool btstack_set_alias(const char *alias);
 
 // StartDiscovery/StopDiscovery. "Already discovering" is not an error: bluez

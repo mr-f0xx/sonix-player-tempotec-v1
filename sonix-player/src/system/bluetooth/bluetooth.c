@@ -113,6 +113,7 @@ typedef enum {
 	JOB_CONNECT,
 	JOB_DISCONNECT,
 	JOB_FORGET,
+	JOB_RENAME,
 	JOB_CODECS,		  // re-read what the connected sink offers
 	JOB_LDAC_QUALITY, // restart bluealsa so it reads the new --ldac-quality
 	JOB_RECEIVER_PROFILE, // restart bluealsa with or without the A2DP sink
@@ -132,7 +133,7 @@ typedef enum {
 typedef struct {
 	job_type_t type;
 	char mac[BT_MAC_MAX];
-	char text[BT_CODEC_MAX];
+	char text[BT_NAME_MAX];
 	int arg_int;
 } job_t;
 
@@ -1841,6 +1842,7 @@ static bool user_job_waiting(void) {
 		case JOB_PAIR:
 		case JOB_CONNECT:
 		case JOB_DISCONNECT:
+		case JOB_RENAME:
 		case JOB_FORGET:
 			waiting = true;
 			break;
@@ -2936,6 +2938,9 @@ static void post_job(const job_t *job) {
 	pthread_mutex_unlock(&lock);
 
 	if (!queued) {
+		if (job->type == JOB_RENAME) {
+			set_op(BT_OP_FAILED, job->text);
+		}
 		fprintf(stderr, "bluetooth: job queue full (%d); dropping a job of type %d\n", JOB_QUEUE_LEN, (int)job->type);
 	}
 }
@@ -3151,6 +3156,11 @@ static void *bluetooth_worker(void *arg) {
 				sleep_ms(400);
 				refresh_devices();
 				set_op(BT_OP_OK, name);
+				break;
+
+			case JOB_RENAME:
+				set_op(btstack_set_device_alias(job.mac, job.text) ? BT_OP_OK : BT_OP_FAILED, job.text);
+				refresh_devices();
 				break;
 
 			case JOB_FORGET:
@@ -3502,6 +3512,23 @@ void bluetooth_pair(const char *mac) { post_device_job(JOB_PAIR, mac); }
 void bluetooth_connect(const char *mac) { post_device_job(JOB_CONNECT, mac); }
 void bluetooth_disconnect(const char *mac) { post_device_job(JOB_DISCONNECT, mac); }
 void bluetooth_forget(const char *mac) { post_device_job(JOB_FORGET, mac); }
+
+// Validate byte length before copying: the keyboard counts Unicode characters.
+bool bluetooth_rename(const char *mac, const char *name) {
+	if (!mac || !mac[0] || !name || strlen(name) >= BT_NAME_MAX) {
+		return false;
+	}
+	while (*name == ' ' || *name == '\t' || *name == '\n' || *name == '\r') name++;
+	job_t job = {.type = JOB_RENAME};
+	snprintf(job.mac, sizeof(job.mac), "%s", mac);
+	snprintf(job.text, sizeof(job.text), "%s", name);
+	size_t len = strlen(job.text);
+	while (len && strchr(" \t\r\n", job.text[len - 1])) job.text[--len] = '\0';
+	if (!len) return false;
+	set_op(BT_OP_BUSY, NULL);
+	post_job(&job);
+	return true;
+}
 
 // A connected peer other than a phone used only for SonixLink. This is useful
 // for the "anything connected?" checks; when the audio output itself matters,

@@ -1980,6 +1980,21 @@ static void menu_theme_refresh(void) {
 
 static void build_chapters(void);
 static void build_font(void);
+static lv_obj_t *reading_brightness_value;
+
+static void reading_brightness_cb(lv_event_t *e) {
+	lv_obj_t *slider = lv_event_get_target(e);
+	long value = lv_slider_get_value(slider);
+	long max = lv_slider_get_max_value(slider);
+	power_set_brightness(value);
+	lv_label_set_text_fmt(reading_brightness_value, "%d%%", (int)((value * 100 + max / 2) / max));
+}
+
+static void reading_brightness_save_cb(lv_event_t *e) {
+	config_set_int("screen", "brightness", lv_slider_get_value(lv_event_get_target(e)));
+	config_save();
+}
+
 static void build_theme(void);
 
 static void menu_close(void) {
@@ -2505,6 +2520,22 @@ static void turn_row(lv_obj_t *parent, int index, const lv_image_dsc_t *icon, co
 }
 
 static void build_theme(void) {
+	// Rebuilt on every opening, so changes from Screen settings are reflected.
+	long max = power_get_max_brightness();
+	if (max <= 0) max = 100;
+	long floor = max / 100;
+	if (floor < 1) floor = 1;
+	long value = power_get_brightness();
+	if (value < floor) value = floor;
+	if (value > max) value = max;
+	lv_obj_t *slider;
+	settingsrow_slider(menu_body, "brightness", (int)max + 1, &reading_brightness_value,
+					   &slider, reading_brightness_cb);
+	lv_slider_set_range(slider, (int32_t)floor, (int32_t)max);
+	lv_slider_set_value(slider, (int32_t)value, LV_ANIM_OFF);
+	lv_label_set_text_fmt(reading_brightness_value, "%d%%", (int)((value * 100 + max / 2) / max));
+	lv_obj_add_event_cb(slider, reading_brightness_save_cb, LV_EVENT_RELEASED, NULL);
+
 	lv_obj_t *pills = NULL;
 	settingsrow_pills(menu_body, "ebookreader_reading_theme", &pills);
 	theme_pills[0] = settingsrow_pill(pills, "ebookreader_theme_paper", THEME_LIGHT, theme_cb);

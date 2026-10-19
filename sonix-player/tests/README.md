@@ -251,3 +251,19 @@ structure, with filler where the picture data would be.
   them. It avoids the picture already up while there is another, and falls
   back to it when it is the only one. Twenty `._` files beside one picture
   never make it miss.
+
+## Bluetooth rename and ebook brightness
+
+With the normal LVGL checkout present, `make -C sonix-player/tests bt-rename`
+checks empty/oversized names, whitespace trimming, UTF-8 names, and the copied
+MAC/name payload queued for the Bluetooth worker. No radio is needed.
+
+Device checks (not covered by the host test):
+- In Bluetooth, open a paired device's three-dot menu and choose Change name.
+  Check connected and disconnected devices, cancel, blank input, and a saved
+  name. Confirm the alias survives a radio restart and does not change the
+  player's own Bluetooth name. A failed write must not report success.
+- Open a book, then its theme panel. Drag Brightness: the backlight and percent
+  should follow immediately without closing the book or changing the page.
+  Release, reopen the panel, and check Screen settings and a reboot retain the
+  same level. Check minimum brightness never turns the display off.

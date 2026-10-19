@@ -12,6 +12,7 @@
 #include "src/gui/fonts/fonts.h"
 #include "src/gui/shell/gui.h"
 #include "src/gui/shell/icons.h"
+#include "src/gui/shell/keyboard.h"
 #include "src/gui/shell/popover.h"
 #include "src/gui/shell/scrolltext.h"
 #include "src/gui/shell/settingsrow.h"
@@ -56,6 +57,7 @@ typedef enum {
 	ACTION_CONNECT,
 	ACTION_DISCONNECT,
 	ACTION_FORGET,
+	ACTION_RENAME,
 } last_action_t;
 
 static last_action_t last_action;
@@ -207,6 +209,99 @@ static void forget_action(void *user) {
 	bluetooth_forget(menu_mac);
 }
 
+static lv_obj_t *name_layer, *name_field;
+static keyboard_t *name_keyboard;
+static char rename_mac[BT_MAC_MAX];
+
+static void name_layer_hide(void) {
+	if (name_layer) lv_obj_set_hidden(name_layer, true);
+	back_btn_force_hidden(false);
+}
+
+static void name_cancel_cb(lv_event_t *e) {
+	(void)e;
+	name_layer_hide();
+}
+
+static void name_accept_cb(lv_event_t *e) {
+	(void)e;
+	if (!bluetooth_rename(rename_mac, lv_textarea_get_text(name_field))) {
+		gui_notify_popup("bt_name_invalid");
+		return;
+	}
+	last_action = ACTION_RENAME;
+	name_layer_hide();
+}
+
+static void rename_action(void *user) {
+	(void)user;
+	snprintf(rename_mac, sizeof(rename_mac), "%s", menu_mac);
+	bt_device_t devices[BT_MAX_DEVICES];
+	int count = bluetooth_get_paired(devices, BT_MAX_DEVICES);
+	lv_textarea_set_text(name_field, "");
+	for (int i = 0; i < count; i++) {
+		if (strcasecmp(devices[i].mac, rename_mac) == 0) {
+			lv_textarea_set_text(name_field, devices[i].name);
+			break;
+		}
+	}
+	keyboard_reset(name_keyboard);
+	lv_obj_set_hidden(name_layer, false);
+	lv_obj_move_foreground(name_layer);
+	back_btn_force_hidden(true);
+}
+
+static void build_name_layer(gui_config_t *cfg) {
+	name_layer = lv_obj_create(btsettings_screen);
+	lv_obj_set_size(name_layer, lv_pct(100), lv_pct(100));
+	lv_obj_align(name_layer, LV_ALIGN_TOP_LEFT, 0, 0);
+	lv_obj_add_style(name_layer, &theme_style_screen, 0);
+	lv_obj_set_style_bg_opa(name_layer, LV_OPA_COVER, 0);
+	lv_obj_set_style_border_width(name_layer, 0, 0);
+	lv_obj_set_style_radius(name_layer, 0, 0);
+	lv_obj_set_style_pad_all(name_layer, 0, 0);
+	lv_obj_set_scrollable(name_layer, false);
+	lv_obj_set_hidden(name_layer, true);
+
+	lv_obj_t *heading = lv_label_create(name_layer);
+	lv_label_set_text(heading, tr("bt_rename"));
+	lv_obj_add_style(heading, &theme_style_text, 0);
+	lv_obj_set_style_text_font(heading, &font_ui_24, 0);
+	lv_obj_align(heading, LV_ALIGN_TOP_LEFT, cfg->padding, cfg->padding + cfg->top_bar_height + 10);
+
+	lv_obj_t *cancel = lv_btn_create(name_layer);
+	settingsrow_place_corner_button(cancel, cfg, 0);
+	lv_obj_set_style_bg_opa(cancel, LV_OPA_TRANSP, 0);
+	lv_obj_set_style_border_width(cancel, 0, 0);
+	lv_obj_set_style_shadow_width(cancel, 0, 0);
+	lv_obj_set_style_pad_all(cancel, 0, 0);
+	lv_obj_add_event_cb(cancel, name_cancel_cb, LV_EVENT_CLICKED, NULL);
+
+	lv_obj_t *cancel_icon = lv_image_create(cancel);
+	lv_image_set_src(cancel_icon, &icon_close);
+	lv_obj_add_style(cancel_icon, &theme_style_icon, 0);
+	settingsrow_scale_corner_icon(cancel_icon, cfg);
+	lv_obj_center(cancel_icon);
+
+	name_field = lv_textarea_create(name_layer);
+	lv_textarea_set_one_line(name_field, true);
+	// Character limit; the backend also checks the UTF-8 byte length.
+	lv_textarea_set_max_length(name_field, BT_NAME_MAX - 1);
+	lv_textarea_set_placeholder_text(name_field, tr("name"));
+	lv_obj_set_size(name_field, cfg->screen_width - 2 * cfg->padding, 62);
+	lv_obj_set_scrollbar_mode(name_field, LV_SCROLLBAR_MODE_OFF);
+	lv_obj_align(name_field, LV_ALIGN_TOP_LEFT, cfg->padding, cfg->padding + cfg->top_bar_height + 60);
+	lv_obj_add_style(name_field, &theme_style_card, 0);
+	lv_obj_set_style_radius(name_field, 12, 0);
+	lv_obj_set_style_border_width(name_field, 0, 0);
+	lv_obj_set_style_shadow_width(name_field, 0, 0);
+	lv_obj_set_style_pad_all(name_field, 14, 0);
+	lv_obj_set_style_text_font(name_field, &font_ui_24, 0);
+	keyboard_style_caret(name_field);
+
+	name_keyboard = keyboard_create(name_layer, cfg->screen_width, cfg->screen_width < 320 ? 144 : 316, name_field, NULL, "ok", name_accept_cb, NULL);
+}
+
 static void row_free_cb(lv_event_t *e) { free(lv_event_get_user_data(e)); }
 
 static void remember_mac(const char *mac) { snprintf(menu_mac, sizeof(menu_mac), "%s", mac); }
@@ -215,24 +310,27 @@ static void show_device_menu(lv_obj_t *anchor, bool connected, bool audio_connec
 	if (audio_connected) {
 		static const popover_item_t items[] = {
 			{"disconnect", disconnect_action, NULL},
+			{"bt_rename", rename_action, NULL},
 			{"bt_forget", forget_action, NULL},
 		};
-		popover_show(anchor, items, 2);
+		popover_show(anchor, items, 3);
 	} else if (connected) {
 		// The ACL link can remain up after A2DP has gone. Let the user request
 		// the audio profile again without cycling the whole Bluetooth radio.
 		static const popover_item_t items[] = {
 			{"connect", connect_action, NULL},
 			{"disconnect", disconnect_action, NULL},
+			{"bt_rename", rename_action, NULL},
 			{"bt_forget", forget_action, NULL},
 		};
-		popover_show(anchor, items, 3);
+		popover_show(anchor, items, 4);
 	} else {
 		static const popover_item_t items[] = {
 			{"connect", connect_action, NULL},
+			{"bt_rename", rename_action, NULL},
 			{"bt_forget", forget_action, NULL},
 		};
-		popover_show(anchor, items, 2);
+		popover_show(anchor, items, 3);
 	}
 }
 
@@ -614,6 +712,9 @@ static void poll_cb(lv_timer_t *timer) {
 		case ACTION_DISCONNECT:
 			toast_success("bt_device_disconnected");
 			break;
+		case ACTION_RENAME:
+			toast_success("bt_name_changed");
+			break;
 		case ACTION_FORGET:
 			toast_success("bt_device_removed");
 			break;
@@ -630,8 +731,8 @@ static void poll_cb(lv_timer_t *timer) {
 		topbar_refresh_radios();
 		break;
 	case BT_OP_FAILED:
+		gui_notify_popup(last_action == ACTION_RENAME ? "bt_rename_failed" : "bt_connect_failed");
 		last_action = ACTION_NONE;
-		gui_notify_popup("bt_connect_failed");
 		break;
 	default:
 		break;
@@ -662,6 +763,7 @@ static void screen_loaded_cb(lv_event_t *e) {
 static void screen_unloaded_cb(lv_event_t *e) {
 	(void)e;
 	lv_timer_pause(poll_timer);
+	name_layer_hide();
 	bluetooth_set_discoverable(false);
 	if (bluetooth_scan_running()) {
 		bluetooth_scan_stop(); // a scan nobody is watching only costs battery
@@ -762,6 +864,7 @@ void btsettings_init(gui_config_t *cfg) {
 	lv_obj_add_event_cb(btsettings_screen, screen_unloaded_cb, LV_EVENT_SCREEN_UNLOADED, NULL);
 	switcher_attach_back_gesture(btsettings_screen);
 
+	build_name_layer(cfg);
 	refresh_status_label();
 	rebuild_lists();
 }

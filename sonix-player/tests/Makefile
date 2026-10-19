@@ -202,3 +202,12 @@ $(BUILD)/ui/lvgl/%.o: $(ROOT)/lvgl/%.c ui/lv_conf.h $(ROOT)/lv_conf.h
 	$(CC) $(UI_CPPFLAGS) $(filter-out -Werror,$(UI_CFLAGS)) -c $< -o $@
 
 -include $(sort $(UI_OBJ:.o=.d) $(SAVER_OBJ:.o=.d) $(WIFIPAGE_OBJ:.o=.d))
+
+# Rename input validation and immutable worker payload; requires the LVGL headers.
+.PHONY: bt-rename
+bt-rename: $(BUILD)/test_bt_rename
+	$(BUILD)/test_bt_rename
+
+$(BUILD)/test_bt_rename: test_bt_rename.c $(ROOT)/src/system/bluetooth/bluetooth.c
+	@mkdir -p $(BUILD)
+	$(CC) $(UI_CPPFLAGS) $(CFLAGS) -Wno-missing-field-initializers -o $@ $< $(LDFLAGS) $(LDLIBS)
