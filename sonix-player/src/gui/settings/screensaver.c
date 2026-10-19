@@ -50,6 +50,15 @@ static int strip_h;
 // over the sleeve rather than under it.
 #define DEFAULT_STRIP_H bp_pick(132, 250)
 
+// The clock is drawn this far above the place the strip's column gives it.
+// The column centres the title, the artist and the time in the strip, and on
+// the small panel the time's line box -- which carries the face's descent
+// under figures that have none -- ends within a pixel or two of the chevron's
+// ink, so a deeper line or a larger text size has the two touching. Lifting
+// the label is drawn, not laid out: the title and the artist keep their
+// places, and the time gains the air without the block above it moving.
+#define CLOCK_LIFT bp_pick(4, 8)
+
 // How much of the sleeve still shows through that field, per palette. Amber's
 // cream and amber type is bright enough to read through half; Tokyo Night's
 // violet, cyan and blue are dimmer inks, so its film is a step heavier.
@@ -1100,10 +1109,12 @@ void screensaver_init(gui_config_t *cfg) {
 	lv_obj_set_style_text_align(artist_label, LV_TEXT_ALIGN_CENTER, 0);
 	scrolltext_apply(artist_label);
 
-	// The time, in the largest figures the screen has.
+	// The time, in the largest figures the screen has, kept clear of the
+	// chevron below it by CLOCK_LIFT.
 	clock_label = lv_label_create(info_strip);
 	lv_obj_set_style_text_font(clock_label, &font_ui_72, 0);
 	lv_obj_set_style_pad_top(clock_label, bp_pick(2, 6), 0);
+	lv_obj_set_style_translate_y(clock_label, -CLOCK_LIFT, 0);
 
 	// The way out, spelled out: swipe up. A sign, not a button -- tapping it
 	// does nothing, since the screensaver is only dismissed by dragging -- so it
