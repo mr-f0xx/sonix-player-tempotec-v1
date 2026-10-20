@@ -21,9 +21,11 @@
 // would destroy the markers and the DAC would fall back to hearing white
 // noise.
 //
-// PCM, for an output with no DSD mode of its own (Bluetooth): dsd_to_pcm()
-// filters the stream to 176.4 kHz, 24-bit, with a table-driven FIR that costs
-// table lookups and adds and no multiplications (see dsd.c).
+// PCM, for an output with no DSD mode of its own (Bluetooth) and for whoever
+// asks for it: dsd_to_pcm() filters the stream to 176.4 kHz, 24-bit, with a
+// table-driven FIR that costs table lookups and adds and no multiplications
+// (see dsd.c). The DSD output setting in the interface is what chooses between
+// the two for the player's own DAC; see audio.h.
 
 typedef struct dsd_file dsd_file_t;
 
