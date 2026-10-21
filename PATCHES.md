@@ -41,6 +41,18 @@ Music landing page keeps Settings plus one overflow menu in the title row;
 Playlists/Browse, Favourites and Search remain available inside that menu
 without allowing four actions to reduce the heading to `Musi…`.
 
+The header row centres its heading by the middle of its ink, not by a fixed
+offset under the status bar. How far the letters of a line sit from the top of
+the line box is the face's own business: MiSans keeps over a third of its line
+height above the capitals (a 1.04 em ascent over a 0.74 em cap height) where
+Roboto keeps a tenth, so the one fixed offset that centres a Roboto-sized line
+left MiSans — the default face — hanging some 4 px below the chevron beside it
+on the V1, and further still on the 480-wide panels. `settingsrow_header_top()`
+reads a capital and a descender out of the face in force and puts the middle of
+the ink on the middle of the back and corner buttons' row; page headings and
+the dialog layers' own headings both go through it, and re-place themselves
+when a text-size or font change refits them.
+
 The Game Boy / Game Boy Color emulator had its own geometry, written for the
 480-wide panels only: the picture was the panel's full width (160×144 at 3×,
 480×432), the D-pad was 220 px a side and the in-game menu was a 360 px card,

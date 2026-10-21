@@ -80,6 +80,11 @@ static void fit_title(lv_obj_t *label, int width);
 // label's own, which is what both callers of fit_title() pass.
 #define SETTINGSROW_MAX_TITLES 160
 static lv_obj_t *titles[SETTINGSROW_MAX_TITLES];
+static gui_config_t *title_cfgs[SETTINGSROW_MAX_TITLES]; // the geometry each one was placed with
+// Page headings are fitted to their width again on every font change, because
+// the step each one settled on was chosen at the old size; registered dialog
+// headings carry a fixed font and only have to be re-centred on the row.
+static bool title_refits[SETTINGSROW_MAX_TITLES];
 static int title_count;
 
 static void title_deleted_cb(lv_event_t *e) {
@@ -87,15 +92,104 @@ static void title_deleted_cb(lv_event_t *e) {
 	for (int i = 0; i < title_count; i++) {
 		if (titles[i] == label) {
 			titles[i] = titles[--title_count];
+			title_cfgs[i] = title_cfgs[title_count];
+			title_refits[i] = title_refits[title_count];
 			return;
 		}
 	}
 }
 
+static void refit_titles(void);
+
+static void add_title(lv_obj_t *label, gui_config_t *cfg, bool refits) {
+	if (title_count == 0) {
+		fonts_register_change(refit_titles);
+	}
+	if (title_count == SETTINGSROW_MAX_TITLES) {
+		return;
+	}
+	titles[title_count] = label;
+	title_cfgs[title_count] = cfg;
+	title_refits[title_count] = refits;
+	title_count++;
+	lv_obj_add_event_cb(label, title_deleted_cb, LV_EVENT_DELETE, NULL);
+}
+
+// The middle of a line of `font`, in pixels from the top of its line box: a
+// capital for the top of the ink, a descender for the bottom. A face with no
+// Latin letters at all falls back to the middle of the line box itself.
+static int32_t ink_mid(const lv_font_t *font) {
+	int32_t line = lv_font_get_line_height(font);
+	int32_t ink_top = 0;
+	int32_t ink_bottom = line;
+	lv_font_glyph_dsc_t g;
+	// A glyph's box is placed box_h + ofs_y above the baseline, which is
+	// base_line up from the bottom of the line (see player.c).
+	if (lv_font_get_glyph_dsc(font, &g, 'H', 0) && g.box_h > 0) {
+		ink_top = line - font->base_line - g.box_h - g.ofs_y;
+	}
+	if (lv_font_get_glyph_dsc(font, &g, 'p', 0) && g.box_h > 0) {
+		ink_bottom = line - font->base_line - g.ofs_y;
+	}
+	return (ink_top + ink_bottom) / 2;
+}
+
+int settingsrow_header_top(gui_config_t *cfg, const lv_font_t *font) {
+	if (!cfg || !font) {
+		return 0;
+	}
+	// The middle of the ink on the middle of the back button's row, read out
+	// of the face rather than from a fixed offset.
+	//
+	// A fixed offset cannot do this job, because how far the letters of a
+	// line sit from the top of the line box is the face's own business. MiSans
+	// keeps over a third of its line height above the capitals (a 1.04 em
+	// ascent over a 0.74 em cap height) where Roboto keeps a tenth, so the one
+	// offset that centres a Roboto-sized line leaves MiSans hanging below the
+	// chevron beside it. Measuring the ink puts the letters of every face in
+	// the middle of the header row, whatever metrics the file carries.
+	int button = settingsrow_corner_button_size(cfg);
+	return cfg->top_bar_height + cfg->padding + button / 2 - ink_mid(font);
+}
+
+// Where a heading sits vertically: the middle of its ink on the middle of the
+// back button's row.
+static int title_top(lv_obj_t *label, gui_config_t *cfg) {
+	return settingsrow_header_top(cfg, lv_obj_get_style_text_font(label, LV_PART_MAIN));
+}
+
+// Puts a heading beside the back button: on the left the width it was fitted
+// to, on the top the ink-centred header row. Both callers of fit_title() put
+// the label again afterwards: the step a title settles on decides its line
+// height, and with it where the letters land.
+static void place_title(lv_obj_t *label, gui_config_t *cfg) {
+	int button = settingsrow_corner_button_size(cfg);
+	int air = cfg->screen_width < 320 ? 6 : 14;
+	int left = cfg->padding + button + air;
+	lv_obj_align(label, LV_ALIGN_TOP_LEFT, left, title_top(label, cfg));
+}
+
 static void refit_titles(void) {
 	for (int i = 0; i < title_count; i++) {
-		fit_title(titles[i], lv_obj_get_style_width(titles[i], LV_PART_MAIN));
+		if (title_refits[i]) {
+			fit_title(titles[i], lv_obj_get_style_width(titles[i], LV_PART_MAIN));
+			place_title(titles[i], title_cfgs[i]);
+		} else {
+			// A fixed font, but not fixed metrics: the same object is refilled
+			// from the new face, and its ink then sits elsewhere in the line.
+			lv_obj_set_y(titles[i], title_top(titles[i], title_cfgs[i]));
+		}
 	}
+}
+
+// Keeps a dialog layer's own heading centred on the header row across font
+// and text-size changes, the way every page heading is. The label keeps
+// whatever font and width its dialog gave it; only its y is re-placed.
+void settingsrow_register_header(lv_obj_t *label, gui_config_t *cfg) {
+	if (!label || !cfg) {
+		return;
+	}
+	add_title(label, cfg, false);
 }
 
 lv_obj_t *settingsrow_title(lv_obj_t *screen, gui_config_t *cfg, const char *text) {
@@ -116,16 +210,8 @@ lv_obj_t *settingsrow_title(lv_obj_t *screen, gui_config_t *cfg, const char *tex
 	// instead.
 	lv_obj_set_height(label, lv_font_get_line_height(&font_ui_32));
 	fit_title(label, cfg->screen_width - left - cfg->padding - button - air);
-	lv_obj_align(label, LV_ALIGN_TOP_LEFT, left,
-				 cfg->top_bar_height + cfg->padding + (cfg->screen_width < 320 ? 6 : 10));
-
-	if (title_count == 0) {
-		fonts_register_change(refit_titles);
-	}
-	if (title_count < SETTINGSROW_MAX_TITLES) {
-		titles[title_count++] = label;
-		lv_obj_add_event_cb(label, title_deleted_cb, LV_EVENT_DELETE, NULL);
-	}
+	place_title(label, cfg);
+	add_title(label, cfg, true);
 
 	return label;
 }
@@ -408,6 +494,7 @@ void settingsrow_title_corner_slots(lv_obj_t *title, gui_config_t *cfg, int butt
 	}
 	lv_obj_set_width(title, width);
 	fit_title(title, width);
+	place_title(title, cfg);
 }
 
 // Returns the heading settingsrow_page() created, for pages whose title is not

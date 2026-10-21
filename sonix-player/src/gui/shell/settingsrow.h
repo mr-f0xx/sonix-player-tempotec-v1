@@ -16,6 +16,21 @@
 // the same place.
 lv_obj_t *settingsrow_title(lv_obj_t *screen, gui_config_t *cfg, const char *text);
 
+// The y a one-line label set in `font` has to sit at to be optically centred
+// on the header row -- the band the back button and the corner buttons occupy
+// -- for a dialog layer that draws its own heading beside its corner button
+// instead of using settingsrow_title(). The middle of the ink is centred, not
+// the middle of the line box: faces carry very different amounts of air above
+// the capitals (MiSans a third of its line height, Roboto a tenth), so a line
+// box centred on the row still leaves one face's letters below the button
+// beside it.
+int settingsrow_header_top(gui_config_t *cfg, const lv_font_t *font);
+
+// Keeps such a dialog heading centred on the header row across font and
+// text-size changes, the way every page heading is. The label keeps whatever
+// font and width its dialog gave it; only its y is re-placed.
+void settingsrow_register_header(lv_obj_t *label, gui_config_t *cfg);
+
 // How far down a page's content has to start to clear the heading and the
 // corner buttons.
 int settingsrow_content_top(gui_config_t *cfg);

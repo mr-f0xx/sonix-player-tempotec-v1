@@ -850,6 +850,12 @@ static void import_heading_set(const char *key) {
 			break;
 		}
 	}
+	// The step the heading settled on decides its line height, and with it
+	// where the letters land in the header row.
+	if (config) {
+		lv_obj_set_y(import_heading,
+					 settingsrow_header_top(config, lv_obj_get_style_text_font(import_heading, LV_PART_MAIN)));
+	}
 }
 
 // --- the report, on the interface thread -----------------------------------
@@ -1571,7 +1577,8 @@ void playlistpage_init(gui_config_t *cfg) {
 	lv_obj_set_style_text_font(heading, &font_ui_24, 0);
 	// Offset clear of the floating back chevron, which sits on top of this
 	// layer; the same offset every page title uses.
-	lv_obj_align(heading, LV_ALIGN_TOP_LEFT, cfg->padding + 56 + 14, cfg->padding + cfg->top_bar_height + 10);
+	lv_obj_align(heading, LV_ALIGN_TOP_LEFT, cfg->padding + 56 + 14, settingsrow_header_top(cfg, &font_ui_24));
+	settingsrow_register_header(heading, cfg);
 
 	lv_obj_t *cancel = lv_btn_create(name_layer);
 	settingsrow_place_corner_button(cancel, cfg, 0);
@@ -1638,7 +1645,8 @@ void playlistpage_init(gui_config_t *cfg) {
 	lv_obj_add_style(import_heading, &theme_style_text, 0);
 	lv_label_set_long_mode(import_heading, LV_LABEL_LONG_DOT);
 	lv_obj_set_width(import_heading, cfg->screen_width - 2 * cfg->padding - 56 - 14);
-	lv_obj_align(import_heading, LV_ALIGN_TOP_LEFT, cfg->padding, cfg->padding + cfg->top_bar_height + 10);
+	lv_obj_align(import_heading, LV_ALIGN_TOP_LEFT, cfg->padding, settingsrow_header_top(cfg, &font_ui_24));
+	settingsrow_register_header(import_heading, cfg);
 	import_heading_set("playlist_import_playlists");
 
 	lv_obj_t *import_close = lv_btn_create(import_layer);
