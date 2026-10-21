@@ -13,6 +13,7 @@
 #include "src/gui/fonts/fonts.h"
 #include "src/gui/nowplaying/cover.h"
 #include "src/gui/nowplaying/player.h"
+#include "src/gui/streaming/podcastpage.h"
 #include "src/gui/shell/confirm.h"
 #include "src/gui/shell/icons.h"
 #include "src/gui/shell/popover.h"
@@ -27,6 +28,7 @@
 #include "src/system/playback/playlist.h"
 #include "src/system/streaming/podcastcache.h"
 #include "src/system/streaming/podcastdl.h"
+#include "src/system/streaming/podcastplayed.h"
 
 #define SAVED_ROW_HEIGHT bp_pick(60, 88)
 #define SAVED_THUMB bp_pick(44, 60)
@@ -41,6 +43,7 @@ static lv_obj_t *shows_list;
 static lv_obj_t *shows_empty;
 static lv_obj_t *episodes_list;
 static lv_obj_t *episodes_title;
+static lv_obj_t *order_btn;
 
 typedef struct {
 	char name[256];
@@ -57,6 +60,8 @@ typedef struct {
 	char title[256];
 	tagdate_t date; // what the date came to, at the precision it had
 	time_t when;	// the same date as one moment: what the list sorts by
+	long long episode_id; // 0 when the file names no episode (copied by hand)
+	bool heard;			  // the mark the episode list shows
 } episode_t;
 
 static show_t *shows;
@@ -149,6 +154,16 @@ static void episodes_free(void) {
 	cover_free(&episode_thumb);
 }
 
+// The list read the other way round. A swap of whole entries: the path each
+// one owns travels with it, so nothing is freed or copied.
+static void episodes_reverse(void) {
+	for (int i = 0, j = episode_count - 1; i < j; i++, j--) {
+		episode_t swap = episodes[i];
+		episodes[i] = episodes[j];
+		episodes[j] = swap;
+	}
+}
+
 // The file name without its folder and extension: the episode's title when
 // nothing better is on the card.
 static void episode_name(const char *path, char *out, size_t size) {
@@ -176,6 +191,13 @@ static void episode_name(const char *path, char *out, size_t size) {
 // the file's name and mtime -- the copy's date is better than no date, but
 // worse than the one the file was published with.
 static void episode_row_read(const char *path, const struct stat *st, episode_t *ep) {
+	// Which episode this is, and whether it has been heard. The id comes from
+	// the sidecar for an episode kept for good, and from the file name in the
+	// cache; a file copied onto the card by hand names no episode, and so has
+	// no mark either.
+	ep->episode_id = podcastcache_episode_id(path);
+	ep->heard = podcastplayed_get(ep->episode_id);
+
 	char sidecar[1200];
 	snprintf(sidecar, sizeof(sidecar), "%.1100s.tags", path);
 	struct stat side_st;
@@ -252,6 +274,12 @@ static void episodes_read(void) {
 	}
 	closedir(dir);
 	qsort(episodes, (size_t)episode_count, sizeof(*episodes), episode_cmp);
+	// episode_cmp() puts the newest on top, which is the catalogue's own order
+	// and the one the page has always had. Oldest first is that list read the
+	// other way round: no second compare, no second read of the card.
+	if (!podcastpage_episodes_newest_first()) {
+		episodes_reverse();
+	}
 	cover_thumb_load(folder, true, SAVED_THUMB, &episode_thumb);
 }
 
@@ -297,7 +325,7 @@ static void paint_thumb(lv_obj_t *thumb, const cover_image_t *image) {
 }
 
 static lv_obj_t *make_row(lv_obj_t *parent, const cover_image_t *image, const char *title, const char *detail,
-						  lv_event_cb_t cb, lv_event_cb_t long_cb, int index) {
+						  lv_event_cb_t cb, lv_event_cb_t long_cb, int index, bool heard) {
 	lv_obj_t *row = lv_btn_create(parent);
 	lv_obj_set_size(row, lv_pct(100), SAVED_ROW_HEIGHT);
 	lv_obj_add_style(row, &theme_style_card, 0);
@@ -340,14 +368,30 @@ static lv_obj_t *make_row(lv_obj_t *parent, const cover_image_t *image, const ch
 	lv_obj_add_style(name, &theme_style_text, 0);
 	lv_obj_set_style_text_font(name, &font_ui_22, 0);
 
+	lv_obj_t *sub = NULL;
 	if (detail && detail[0]) {
-		lv_obj_t *sub = lv_label_create(texts);
+		sub = lv_label_create(texts);
 		lv_label_set_text(sub, detail);
 		lv_label_set_long_mode(sub, LV_LABEL_LONG_DOT);
 		lv_obj_set_width(sub, lv_pct(100));
 		lv_obj_set_height(sub, lv_font_get_line_height(&font_ui_18));
 		lv_obj_add_style(sub, &theme_style_text_dim, 0);
 		lv_obj_set_style_text_font(sub, &font_ui_18, 0);
+	}
+
+	// An episode heard to its end wears the tick the online list gives it, and
+	// its two lines go dim: the same mark on both lists, so a podcast heard
+	// halfway through the day reads the same whether it is on the card or not.
+	if (heard) {
+		lv_obj_t *tick = lv_image_create(row);
+		lv_obj_set_size(tick, bp_pick(22, 30), bp_pick(22, 30));
+		lv_image_set_src(tick, &icon_check);
+		lv_obj_add_style(tick, &theme_style_icon, 0);
+		lv_obj_set_event_bubble(tick, true);
+		lv_obj_set_style_text_opa(name, LV_OPA_50, 0);
+		if (sub) {
+			lv_obj_set_style_text_opa(sub, LV_OPA_50, 0);
+		}
 	}
 	return row;
 }
@@ -381,7 +425,7 @@ static void shows_fill(void) {
 		} else {
 			snprintf(detail, sizeof(detail), tr("podcast_episodes_2"), shows[i].episodes);
 		}
-		make_row(shows_list, &shows[i].thumb, shows[i].name, detail, show_clicked_cb, NULL, i);
+		make_row(shows_list, &shows[i].thumb, shows[i].name, detail, show_clicked_cb, NULL, i, false);
 	}
 	if (show_count == 0) {
 		lv_obj_set_hidden(shows_empty, false);
@@ -407,6 +451,8 @@ static void shows_unloaded_cb(lv_event_t *e) {
 // ---------------------------------------------------------------------------
 
 static void episodes_fill(void);
+static void paint_order_button(void);
+static void episode_long_cb(lv_event_t *e);
 
 // The episodes in the order shown, from the one tapped onwards into the past,
 // as the online list plays them.
@@ -471,6 +517,42 @@ static void delete_cb(void *user) {
 	confirm_show("podcast_delete_download", episodes[menu_episode].title, "delete", delete_confirmed, NULL);
 }
 
+// ---------------------------------------------------------------------------
+// heard to the end, or by hand
+// ---------------------------------------------------------------------------
+
+// The rows only, no card: a mark changes one entry, and re-reading the folder
+// for it would also throw away the covers a scroll just fetched.
+static void episodes_rows(void) {
+	lv_obj_clean(episodes_list);
+	for (int i = 0; i < episode_count; i++) {
+		char when[48];
+		format_date(&episodes[i].date, when, sizeof(when));
+		make_row(episodes_list, &episode_thumb, episodes[i].title, when, episode_clicked_cb, episode_long_cb, i,
+				 episodes[i].heard);
+	}
+}
+
+static void mark_heard_cb(void *user) {
+	(void)user;
+	if (menu_episode < 0 || menu_episode >= episode_count) {
+		return;
+	}
+	podcastplayed_set(episodes[menu_episode].episode_id, true);
+	episodes[menu_episode].heard = podcastplayed_get(episodes[menu_episode].episode_id);
+	episodes_rows();
+}
+
+static void mark_not_heard_cb(void *user) {
+	(void)user;
+	if (menu_episode < 0 || menu_episode >= episode_count) {
+		return;
+	}
+	podcastplayed_set(episodes[menu_episode].episode_id, false);
+	episodes[menu_episode].heard = podcastplayed_get(episodes[menu_episode].episode_id);
+	episodes_rows();
+}
+
 static void episode_long_cb(lv_event_t *e) {
 	int i = (int)(intptr_t)lv_event_get_user_data(e);
 	if (i < 0 || i >= episode_count) {
@@ -483,20 +565,26 @@ static void episode_long_cb(lv_event_t *e) {
 	if (indev) {
 		lv_indev_wait_release(indev);
 	}
-	static const popover_item_t ITEMS[] = {{"delete", delete_cb, NULL}};
-	popover_show(lv_event_get_current_target(e), ITEMS, 1);
+	static const popover_item_t HEARD[] = {{"podcast_mark_not_listened", mark_not_heard_cb, NULL},
+										  {"delete", delete_cb, NULL}};
+	static const popover_item_t NOT_HEARD[] = {{"podcast_mark_listened", mark_heard_cb, NULL},
+										  {"delete", delete_cb, NULL}};
+	// A file copied onto the card by hand names no episode, so there is no id to
+	// keep the mark under and the menu offers only the one thing left to do.
+	static const popover_item_t DELETE_ONLY[] = {{"delete", delete_cb, NULL}};
+	if (episodes[i].episode_id <= 0) {
+		popover_show(lv_event_get_current_target(e), DELETE_ONLY, 1);
+	} else {
+		popover_show(lv_event_get_current_target(e), episodes[i].heard ? HEARD : NOT_HEARD, 2);
+	}
 }
 
 static void episodes_fill(void) {
-	lv_obj_clean(episodes_list);
 	episodes_read();
+	episodes_rows();
 	lv_label_set_text(episodes_title, open_show);
-	settingsrow_title_corner_slots(episodes_title, g_cfg, 0);
-	for (int i = 0; i < episode_count; i++) {
-		char when[48];
-		format_date(&episodes[i].date, when, sizeof(when));
-		make_row(episodes_list, &episode_thumb, episodes[i].title, when, episode_clicked_cb, episode_long_cb, i);
-	}
+	settingsrow_title_corner_slots(episodes_title, g_cfg, 1);
+	paint_order_button();
 }
 
 static void episodes_loaded_cb(lv_event_t *e) {
@@ -508,6 +596,58 @@ static void episodes_unloaded_cb(lv_event_t *e) {
 	(void)e;
 	lv_obj_clean(episodes_list);
 	episodes_free();
+}
+
+// ---------------------------------------------------------------------------
+// the order of the list
+//
+// The same two glyphs, and the same setting, as the online episode list: the
+// order is a property of the user's reading, not of one screen, so turning it
+// round on a podcast's page finds the downloads the same way round.
+// ---------------------------------------------------------------------------
+
+static void paint_order_button(void) {
+	if (!order_btn) {
+		return;
+	}
+	lv_obj_t *icon = lv_obj_get_child(order_btn, 0);
+	if (icon) {
+		lv_image_set_src(icon, podcastpage_episodes_newest_first() ? &icon_sort_date_new : &icon_sort_date_old);
+	}
+}
+
+static void order_cb(lv_event_t *e) {
+	(void)e;
+	if (switcher_back_drag_active() || player_sheet_drag_active()) {
+		return;
+	}
+	podcastpage_set_episodes_newest_first(!podcastpage_episodes_newest_first());
+	// The list is already read: turn it and draw it, rather than going back to
+	// the card for the same files in the other order.
+	if (episode_count > 1) {
+		episodes_reverse();
+		episodes_rows();
+	}
+	paint_order_button();
+}
+
+static lv_obj_t *corner_button(gui_config_t *cfg, lv_obj_t *parent, int slot, const lv_image_dsc_t *glyph,
+							 lv_event_cb_t cb) {
+	lv_obj_t *button = lv_btn_create(parent);
+	settingsrow_place_corner_button(button, cfg, slot);
+	lv_obj_set_style_bg_opa(button, LV_OPA_TRANSP, 0);
+	lv_obj_set_style_border_width(button, 0, 0);
+	lv_obj_set_style_shadow_width(button, 0, 0);
+	lv_obj_set_style_pad_all(button, 0, 0);
+
+	lv_obj_t *icon = lv_image_create(button);
+	lv_image_set_src(icon, glyph);
+	lv_obj_add_style(icon, &theme_style_icon, 0);
+	settingsrow_scale_corner_icon(icon, cfg);
+	lv_obj_center(icon);
+
+	lv_obj_add_event_cb(button, cb, LV_EVENT_CLICKED, NULL);
+	return button;
 }
 
 // ---------------------------------------------------------------------------
@@ -539,6 +679,10 @@ void podcastsaved_init(gui_config_t *cfg) {
 	episodes_list = settingsrow_page(episodes_screen, cfg, "podcasts");
 	lv_obj_set_flex_align(episodes_list, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
 	episodes_title = settingsrow_page_title(episodes_screen);
+	// The order button sits in the heading of the download list too: a podcast
+	// kept on the card is read the same way round as one streamed.
+	settingsrow_title_corner_slots(episodes_title, cfg, 1);
+	order_btn = corner_button(cfg, episodes_screen, 0, &icon_sort_date_new, order_cb);
 	player_sheet_attach_drag(episodes_list, true);
 	switcher_attach_back_gesture(episodes_screen);
 	lv_obj_add_event_cb(episodes_screen, episodes_loaded_cb, LV_EVENT_SCREEN_LOADED, NULL);

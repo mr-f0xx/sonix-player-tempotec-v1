@@ -42,6 +42,7 @@
 #include "src/system/playback/playlist.h"
 #include "src/system/streaming/podcast.h"
 #include "src/system/streaming/podcastcache.h"
+#include "src/system/streaming/podcastplayed.h"
 #include "src/system/streaming/podcastsubs.h"
 #include "src/system/streaming/qobuzcache.h"
 #include "src/system/streaming/subsonicstream.h"
@@ -4432,6 +4433,17 @@ static void handle_track_finished(void) {
 	// for, which is what makes this the cheaper half of the audiobook's version.
 	char path[512];
 	audio_get_current_file(path, sizeof(path));
+
+	// Heard to the end: that is what marks an episode listened, and it is the
+	// only place that can be sure -- a stop or a skip is not an ending, and
+	// audio.c's completion only fires when the file itself ran out. Marked
+	// before the early return below, so an episode that ends under "Stop at end
+	// of episode" is counted as heard too.
+	if (podcastcache_is_episode(path)) {
+		long long episode = podcastcache_episode_id(path);
+		podcastplayed_set(episode, true);
+	}
+
 	if (podcast_stop_at_episode_end() && podcastcache_is_episode(path)) {
 		fprintf(stderr, "player: end of the episode; not starting the next\n");
 		refresh_now_playing();

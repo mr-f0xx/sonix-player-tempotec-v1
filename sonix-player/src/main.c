@@ -50,6 +50,7 @@
 #include "src/system/core/panel.h"
 #include "src/system/streaming/qobuzcache.h"
 #include "src/system/streaming/podcastcache.h"
+#include "src/system/streaming/podcastplayed.h"
 #include "src/system/streaming/podcastsubs.h"
 #include "src/system/streaming/tidalcache.h"
 #include "src/system/streaming/streamkeys.h"
@@ -2228,6 +2229,7 @@ int main(int argc, char **argv) {
 	tidalcache_set_root(card_root && card_root[0] ? card_root : gui_cfg.sd_root_path);
 	podcastcache_set_root(card_root && card_root[0] ? card_root : gui_cfg.sd_root_path);
 	podcastsubs_set_root(card_root && card_root[0] ? card_root : gui_cfg.sd_root_path);
+	podcastplayed_set_root(card_root && card_root[0] ? card_root : gui_cfg.sd_root_path);
 	// And where a track arriving over DLNA lands: same card, same reason.
 	dlna_set_root(card_root && card_root[0] ? card_root : gui_cfg.sd_root_path);
 	// And where the emulator looks for Games/GB and Games/GBC. Unlike the

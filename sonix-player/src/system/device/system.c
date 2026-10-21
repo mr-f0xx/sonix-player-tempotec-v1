@@ -38,6 +38,7 @@
 #include "src/system/core/panel.h"
 #include "src/system/streaming/qobuzcache.h"
 #include "src/system/streaming/podcastcache.h"
+#include "src/system/streaming/podcastplayed.h"
 #include "src/system/streaming/podcastsubs.h"
 #include "src/system/streaming/radio.h"
 #include "src/system/streaming/tidalcache.h"
@@ -850,6 +851,7 @@ static void card_databases_attach(const char *root) {
 	tidalcache_set_root(root);
 	podcastcache_set_root(root);
 	podcastsubs_set_root(root);
+	podcastplayed_set_root(root);
 	dlna_set_root(root);
 	gbdb_set_root(root);
 
@@ -870,6 +872,7 @@ void storage_card_files_recheck(void) {
 	audiobookdb_reopen_if_replaced();
 	radio_store_reopen_if_replaced();
 	podcastsubs_reload_if_replaced();
+	podcastplayed_reload_if_replaced();
 	cover_cache_reopen_if_replaced();
 }
 

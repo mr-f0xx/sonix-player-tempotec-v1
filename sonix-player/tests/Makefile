@@ -132,6 +132,20 @@ $(BUILD)/test_mostplayed: $(MOSTPLAYED_SRC) $(BUILD)/sqlite3_impl.o \
 	@mkdir -p $(BUILD)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ $(MOSTPLAYED_SRC) $(BUILD)/sqlite3_impl.o $(LDFLAGS) $(LDLIBS)
 
+# Heard podcast episodes against the real podcast.db: the marks themselves, the
+# sorted set the binary search reads, what survives a restart, and a card whose
+# database is deleted under the player. The card is a temporary directory; the
+# only stub is utils.c's file identity, which is reproduced with stat().
+.PHONY: podcastplayed
+podcastplayed: $(BUILD)/test_podcastplayed
+	$(BUILD)/test_podcastplayed
+
+$(BUILD)/test_podcastplayed: test_podcastplayed.c $(ROOT)/src/system/streaming/podcastplayed.c \
+                             $(ROOT)/src/system/streaming/podcastplayed.h $(BUILD)/sqlite3_impl.o
+	@mkdir -p $(BUILD)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ test_podcastplayed.c \
+		$(ROOT)/src/system/streaming/podcastplayed.c $(BUILD)/sqlite3_impl.o $(LDFLAGS) $(LDLIBS)
+
 # The vendored SQLite amalgamation keeps its own warnings to itself: third-
 # party code, built separately (and quietly) so the suite around it keeps
 # -Werror.

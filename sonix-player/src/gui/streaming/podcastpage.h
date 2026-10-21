@@ -26,4 +26,11 @@ bool podcastpage_open_feed(long long feed_id, const char *title);
 // control centre's sleep button for podcasts opens on a long press.
 lv_obj_t *podcastpage_settings_screen(void);
 
+// Which way round episode lists run. The catalogue answers newest first; oldest
+// first is the same list read backwards. Kept in the config because the Saved
+// page's list of downloaded episodes follows the same setting: the order is a
+// property of the reader, not of one screen.
+bool podcastpage_episodes_newest_first(void);
+void podcastpage_set_episodes_newest_first(bool newest);
+
 #endif /* PODCASTPAGE_H */

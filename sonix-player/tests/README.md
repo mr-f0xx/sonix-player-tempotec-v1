@@ -11,6 +11,7 @@ make -C sonix-player/tests calculator
 make -C sonix-player/tests notes
 make -C sonix-player/tests tagdate
 make -C sonix-player/tests mostplayed
+make -C sonix-player/tests podcastplayed
 ```
 
 These require only a C compiler, Make and Python 3 (plus standard pthread/dl/math libraries). They **do not require LVGL, ALSA, a MIPS toolchain, a music server, a real account, or downloaded audio**.
@@ -64,6 +65,21 @@ and with a PEQ band boosted and MSEB moved off flat a 1 kHz tone comes out at
 the same level as it does from the 16-bit path, within half a decibel, at every
 rate the DAC answers to (44.1, 48, 96, 192 and 384 kHz) -- so a curve cannot
 sound different over the cable than it does from the card.
+
+## Heard podcast episodes
+
+`make -C sonix-player/tests podcastplayed` checks the store behind the tick on a
+podcast episode, against the real `podcast.db` on a temporary card. The set is
+held sorted in memory and read by binary search on every row, so the suite
+feeds it five hundred 64-bit catalogue ids in descending order and then asks
+for every one of them, before and after a restart: a lookup that only worked on
+the last insertion would fail here. It also checks that marking twice writes
+one row, that unmarking removes it and the removal survives a restart, that an
+id naming no episode (0, negative) is refused by both doors, and that a card
+loses the database under the player and the store notices instead of answering
+from the old set -- and makes the folder again for the next mark. The
+significant four are the real ones; only `utils.c`'s file identity is
+reproduced with `stat()`.
 
 ## Wi-Fi hidden networks
 

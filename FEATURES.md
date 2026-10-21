@@ -34,6 +34,13 @@
   a file and the computer's stream is not the player's own, but what is tuned
   is for the headphones -- neither is an exception. DSD from the host passes
   through untouched, as DoP does on a track.
+- **The three equalisers on the DAC page** - the status bar cannot be pulled
+  down while DAC mode holds the screen, so the page carries its own EQ, PEQ and
+  MSEB buttons: one card of three pills under the mode switch, lit while that
+  equaliser is on. Pills rather than three switch rows because the V1's panel is
+  240x320 -- four 56 px switch rows fill almost all of the page's 248 px and
+  would push the host's sample rate off it. Same settings, same calls as the
+  control centre's circles, so either place shows what the other did.
 - **Soundfield** - mid/side width from mono to twice natural, starting at 1.50
   for an audible widening when switched on (1.00 is neutral).
 - **Channel balance** - ±20 dB in half-decibel steps.
@@ -91,6 +98,12 @@
 shows kept on the device. Downloaded episodes land in the card's `Podcast`
 folder, which also takes podcasts copied there by hand — see
 [Podcasts on the card](#podcasts-on-the-card).
+- **Episodes heard and unheard** - an episode played to its end is ticked and
+dimmed in the list, kept in `podcast.db` by episode id, so it reads the same
+whether it was streamed or downloaded. A long press marks one heard (or heard
+and-not) by hand, for what was finished somewhere else or marked by mistake.
+The order button in the heading turns an episode list round: newest first, or
+oldest first, remembered in the config and shared with the card's list.
 - **Radio** - the radio-browser.info directory by language, country or genre,
 plus search, favourites, recently played, and **My stations** read from a
 `radio.txt` you write yourself in the card root. MP3 and AAC, HTTPS with real
@@ -142,6 +155,11 @@ a self-signed certificate), and HLS.
   the artwork embedded in the episode files' own tags.
 - **Played as podcasts** - the now-playing page marks an episode from this
   folder as a podcast, with its own skip buttons and sleep timer.
+- **Heard marks and order here too** - a downloaded episode carries the same
+  tick and the same dimming as the streamed one, and the long press marks it
+  heard or unheard. A file copied onto the card by hand has no catalogue id, so
+  it offers only Delete. The heading's order button turns this list round, and
+  the setting is the one the online episode list uses.
 
 ## Audiobooks
 

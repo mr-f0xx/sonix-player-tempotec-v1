@@ -23,11 +23,13 @@
 #include "src/gui/wireless/wifisettings.h"
 #include "src/system/decode/growfile.h"
 #include "src/system/playback/device_state.h"
+#include "src/system/core/config.h"
 #include "src/system/core/lang.h"
 #include "src/system/playback/playlist.h"
 #include "src/system/streaming/podcast.h"
 #include "src/system/streaming/podcastcache.h"
 #include "src/system/streaming/podcastdl.h"
+#include "src/system/streaming/podcastplayed.h"
 #include "src/system/streaming/podcastsubs.h"
 #include "src/system/streaming/streamturn.h"
 #include "src/system/device/power.h"
@@ -93,6 +95,7 @@ static lv_obj_t *busy_label;
 static lv_obj_t *search_btn;
 static lv_obj_t *settings_btn;
 static lv_obj_t *saved_btn; // the downloaded podcasts, which need no network
+static lv_obj_t *order_btn; // newest / oldest first, on an episode list
 
 // The two pills at the top -- "My podcasts" and "Trending" -- and the row that
 // holds them. Shown only while one of the two lists they name is underneath: on
@@ -308,6 +311,9 @@ typedef struct {
 	lv_obj_t *title;
 	lv_obj_t *detail;
 	lv_obj_t *menu_btn;
+	// The tick an episode that has been heard wears. Built on every row and
+	// shown only on the episode list, like the three dots above it.
+	lv_obj_t *heard;
 	// The entry drawn on it: -1 for a row with nothing to show, and -2 for one
 	// that must be redrawn even though its number has not changed -- the list
 	// reloaded underneath it to the same length.
@@ -559,6 +565,35 @@ static void maybe_load_more(void);
 static void row_detail(int index, char *out, size_t size);
 static bool kind_has_row_menu(job_kind_t kind);
 
+// ---------------------------------------------------------------------------
+// which order the episodes are shown in
+//
+// The catalogue answers newest first and the Saved page sorts by date the same
+// way. Oldest first is the same list backwards -- nothing is re-queried, and
+// the queue built from a tap still walks towards older episodes, whichever way
+// the list is drawn (see JOB_PLAY).
+//
+// Kept in the config rather than in this page: the Saved list of downloaded
+// episodes reads it too.
+// ---------------------------------------------------------------------------
+
+bool podcastpage_episodes_newest_first(void) {
+	return config_get_int("podcast", "newest_first", 1) != 0;
+}
+
+void podcastpage_set_episodes_newest_first(bool newest) {
+	config_set_int("podcast", "newest_first", newest ? 1 : 0);
+	config_save();
+}
+
+static void reverse_episodes(podcast_episode_t *list, int n) {
+	for (int i = 0, j = n - 1; i < j; i++, j--) {
+		podcast_episode_t swap = list[i];
+		list[i] = list[j];
+		list[j] = swap;
+	}
+}
+
 // Puts entry `index` on one pooled widget, or hides it when there is no entry.
 // Nothing is created here: the widgets were built once and only ever change
 // what they say and where they sit.
@@ -612,6 +647,14 @@ static void row_bind(row_t *row, int index) {
 		lv_obj_set_hidden(row->menu_btn, true);
 	}
 
+	// Heard: the tick says so, and the text steps back so a list of them reads
+	// as a list of what is left. Only episodes can be heard, so the rows of a
+	// podcast list are never dimmed by this.
+	bool heard = list_kind == JOB_EPISODES && podcastplayed_get(result_episodes[index].id);
+	lv_obj_set_hidden(row->heard, !heard);
+	lv_obj_set_style_text_opa(row->title, heard ? LV_OPA_50 : LV_OPA_COVER, 0);
+	lv_obj_set_style_text_opa(row->detail, heard ? LV_OPA_50 : LV_OPA_COVER, 0);
+
 	paint_thumb(row->thumb, index);
 }
 
@@ -650,6 +693,20 @@ static void list_scrolled_cb(lv_event_t *e) {
 	(void)e;
 	window_update();
 	maybe_load_more();
+}
+
+// One entry changed under the rows -- heard, or heard-and-not: bind the row
+// that is showing it again, and only that one. The other eleven keep theirs.
+static void refresh_row(int index) {
+	if (index < 0) {
+		return;
+	}
+	for (int i = 0; i < ROW_POOL; i++) {
+		if (rows[i].index == index) {
+			rows[i].index = -2;
+		}
+	}
+	window_update();
 }
 
 static void art_forget_rows(void) {
@@ -731,6 +788,12 @@ static void list_loaded_cb(lv_event_t *e) {
 	// Whatever was given back while the page was away is asked for again. Free
 	// when nothing was dropped: every row still holding its picture is skipped.
 	art_wake();
+	// Every row is bound again, not only the ones whose number moved: an
+	// episode played while the player was up has become one heard, and coming
+	// back to the list has to show that. Twelve binds are nothing.
+	for (int i = 0; i < ROW_POOL; i++) {
+		rows[i].index = -2;
+	}
 	window_update();
 }
 
@@ -820,6 +883,21 @@ static void build_rows(int width) {
 		lv_obj_set_height(row->detail, lv_font_get_line_height(&font_ui_18));
 		lv_obj_add_style(row->detail, &theme_style_text_dim, 0);
 		lv_obj_set_style_text_font(row->detail, &font_ui_18, 0);
+
+		// The tick of an episode that has been heard. Between the text and the
+		// three dots, because a podcast row shows no dots and an episode row
+		// shows no dots either: whichever list this row is bound to, the tick
+		// has the end of the row to itself.
+		row->heard = lv_image_create(row->button);
+		lv_obj_set_size(row->heard, 32, 32);
+		lv_image_set_src(row->heard, &icon_check);
+		lv_obj_add_style(row->heard, &theme_style_icon, 0);
+		// Half strength, and only the opacity: the colour is the theme's own
+		// and follows a theme change, which a colour taken here would not.
+		lv_obj_set_style_image_recolor_opa(row->heard, LV_OPA_50, 0);
+		lv_image_set_scale(row->heard, 156); // 36 px source -> about 22 px
+		lv_obj_set_event_bubble(row->heard, true);
+		lv_obj_set_hidden(row->heard, true);
 
 		row->menu_btn = lv_btn_create(row->button);
 		lv_obj_set_size(row->menu_btn, 44, 44);
@@ -931,12 +1009,24 @@ static void row_detail(int index, char *out, size_t size) {
 // destroyed either way -- the list is only as long as the body object says it
 // is, and the pool slides over it.
 static void fill_list(int from) {
+	list_kind = result_kind;
+	list_count = result_count;
+
+	// Oldest first puts a new page at the FRONT: the episodes a longer answer
+	// added are the older ones. The rows were drawn from the end of the array
+	// before, so the whole pool is bound again -- and the view is moved down by
+	// as many rows as went in above it, or the reader would be thrown back to
+	// the beginning of the list they had scrolled through.
+	int prepended = 0;
+	if (from > 0 && list_kind == JOB_EPISODES && !podcastpage_episodes_newest_first()) {
+		prepended = list_count - from;
+		from = 0;
+	}
+	int was_scrolled = prepended > 0 ? (int)lv_obj_get_scroll_y(list_container) : 0;
+
 	if (from == 0) {
 		art_forget_rows();
 	}
-
-	list_kind = result_kind;
-	list_count = result_count;
 	if (list_kind == JOB_EPISODES) {
 		snprintf(list_feed_title, sizeof(list_feed_title), "%s", result_title);
 	}
@@ -961,6 +1051,10 @@ static void fill_list(int from) {
 		lv_obj_scroll_to_y(list_container, 0, LV_ANIM_OFF);
 	}
 	window_update();
+	if (prepended > 0) {
+		lv_obj_scroll_to_y(list_container, was_scrolled + prepended * ROW_PITCH, LV_ANIM_OFF);
+		window_update();
+	}
 
 	// The pills only on the two lists they name. The title says "Podcasts"
 	// there, because the lit pill already says which of the two is on screen;
@@ -1514,6 +1608,11 @@ static void *worker_main(void *arg) {
 
 		result_error[0] = '\0';
 
+		// The order this answer is put in, read once: the rows that land on
+		// screen are drawn by the same rule, and a toggle mid-request must not
+		// leave half the list one way and half the other.
+		bool newest_first = podcastpage_episodes_newest_first();
+
 		// Playback does not clear the list, and that is not a detail: what is
 		// playing is an episode of THIS list, and the list stays on screen with
 		// its tappable rows. Cleared, a second tap on another episode finds
@@ -1575,6 +1674,9 @@ static void *worker_main(void *arg) {
 			} else {
 				result_count = n;
 				result_raw = podcast_last_raw_count();
+				if (!newest_first) {
+					reverse_episodes(result_episodes, n);
+				}
 				// The episodes that just arrived become the ones the downloader
 				// can look up: this is where it takes the address from when the
 				// queue reaches one that is not there yet.
@@ -1617,6 +1719,9 @@ static void *worker_main(void *arg) {
 				long long wanted_id = queued_episodes[index].id;
 				long long feed = queued_episodes[index].feed_id;
 				int n = podcast_episodes(feed, result_episodes, PODCAST_EPISODES_STEP);
+				if (n > 0 && !newest_first) {
+					reverse_episodes(result_episodes, n);
+				}
 				if (n > queued_count) {
 					memcpy(queued_episodes, result_episodes, sizeof(result_episodes[0]) * (size_t)n);
 					queued_count = n;
@@ -1652,13 +1757,18 @@ static void *worker_main(void *arg) {
 				break;
 			}
 
-			// The queue: this episode and the ones AFTER it in the list, that is,
-			// going back in time. The others are not downloaded now -- they come
-			// down when their turn arrives (see podcastpage_prepare_track).
+			// The queue: this episode and the ones AFTER it in time, that is, going
+			// back. Which way that is in the array depends on the order the list is
+			// drawn in -- newest first walks up the array, oldest first walks down
+			// it -- and the tapped one comes first either way.
+			//
+			// The others are not downloaded now: they come down when their turn
+			// arrives (see podcastpage_prepare_track).
 			static char paths[PODCAST_QUEUE_MAX][512];
 			static const char *path_ptr[PODCAST_QUEUE_MAX];
 			int count = 0;
-			for (int i = index; i < queued_count && count < PODCAST_QUEUE_MAX; i++) {
+			int step = newest_first ? 1 : -1;
+			for (int i = index; i >= 0 && i < queued_count && count < PODCAST_QUEUE_MAX; i += step) {
 				if (i == index) {
 					snprintf(paths[count], sizeof(paths[0]), "%s", path);
 				} else if (!podcastcache_find(queued_episodes[i].id, paths[count], sizeof(paths[0]))) {
@@ -1950,7 +2060,30 @@ static void download_cb(void *user) {
 	lv_timer_resume(dl_timer);
 }
 
-// An episode: the long press offers to keep it on the card.
+// The tick, set or taken away by hand. A menu that says "Mark as listened" is
+// the only way to retire an episode one has already heard somewhere else -- or
+// to put one back that was marked by mistake.
+static void mark_heard_cb(void *user) {
+	(void)user;
+	if (dl_row < 0 || dl_row >= list_count || list_kind != JOB_EPISODES) {
+		return;
+	}
+	podcastplayed_set(result_episodes[dl_row].id, true);
+	refresh_row(dl_row);
+}
+
+static void mark_not_heard_cb(void *user) {
+	(void)user;
+	if (dl_row < 0 || dl_row >= list_count || list_kind != JOB_EPISODES) {
+		return;
+	}
+	podcastplayed_set(result_episodes[dl_row].id, false);
+	refresh_row(dl_row);
+}
+
+// An episode: the long press offers to keep it on the card, and to say whether
+// it has been heard. Two tables of initialisers rather than one label chosen
+// with a ternary, for the same reason as the follow menu above.
 static void row_long_cb(lv_event_t *e) {
 	if (list_kind != JOB_EPISODES || switcher_back_drag_active() || player_sheet_drag_active()) {
 		return;
@@ -1965,8 +2098,12 @@ static void row_long_cb(lv_event_t *e) {
 	if (indev) {
 		lv_indev_wait_release(indev);
 	}
-	static const popover_item_t ITEMS[] = {{"podcast_download", download_cb, NULL}};
-	popover_show(lv_event_get_current_target(e), ITEMS, 1);
+	static const popover_item_t NOT_HEARD[] = {{"podcast_mark_listened", mark_heard_cb, NULL},
+											 {"podcast_download", download_cb, NULL}};
+	static const popover_item_t HEARD[] = {{"podcast_mark_not_listened", mark_not_heard_cb, NULL},
+									   {"podcast_download", download_cb, NULL}};
+	bool heard = podcastplayed_get(result_episodes[dl_row].id);
+	popover_show(lv_event_get_current_target(e), heard ? HEARD : NOT_HEARD, 2);
 }
 
 // ---------------------------------------------------------------------------
@@ -2013,32 +2150,73 @@ static void paint_pill(lv_obj_t *btn, bool on) {
 	lv_obj_set_style_text_color(lv_obj_get_child(btn, 0), on ? theme_on_accent() : theme()->text_primary, 0);
 }
 
+// The order button wears the order the list is in: the same two glyphs the
+// track lists use for their date sorting.
+static void paint_order_button(void) {
+	if (!order_btn) {
+		return;
+	}
+	lv_obj_t *icon = lv_obj_get_child(order_btn, 0);
+	if (icon) {
+		lv_image_set_src(icon, podcastpage_episodes_newest_first() ? &icon_sort_date_new : &icon_sort_date_old);
+	}
+}
+
+// Turning a list round: the same episodes, the other way. The array the rows
+// read and the copy a tap walks (queued_episodes) both go, so the queue still
+// runs towards the older episodes whichever way they are drawn.
+static void order_cb(lv_event_t *e) {
+	(void)e;
+	if (switcher_back_drag_active() || player_sheet_drag_active()) {
+		return;
+	}
+	podcastpage_set_episodes_newest_first(!podcastpage_episodes_newest_first());
+	if (list_kind == JOB_EPISODES && result_count > 0) {
+		reverse_episodes(result_episodes, result_count);
+		reverse_episodes(queued_episodes, queued_count);
+		fill_list(0);
+	}
+	paint_order_button();
+}
+
 // The corner buttons' visibility has a single owner, because two owners of one
 // flag means whichever runs last wins. The magnifier needs the keys, a network
 // and a home view (the two pills). The gear and the downloads need none of
 // that and stay up over the notices too: the podcast settings apply to the
-// downloaded episodes as well. From the edge: gear, downloads, magnifier.
+// downloaded episodes as well. The order belongs to the episodes view alone.
+//
+// Slots are handed out from the right to whatever is showing, rather than fixed
+// at build time: the order button and the magnifier never share a list, so
+// leaving a hole between them would be a hole in the heading's width.
 static void refresh_corner_buttons(void) {
 	bool home_view = list_kind == JOB_FOLLOWED || list_kind == JOB_TRENDING || list_kind == JOB_NONE;
 	bool online = podcast_configured() && network_up();
 	bool search = online && home_view;
 	bool local = home_view || !online;
-	if (list_title && g_cfg) {
-		// The heading gets the width the buttons are not using.
-		settingsrow_title_corner_slots(list_title, g_cfg, (search ? 1 : 0) + (local ? 2 : 0));
-	}
-	lv_obj_t *const buttons[] = {search_btn, settings_btn, saved_btn};
-	const bool shown[] = {search, local, local};
-	for (int i = 0; i < 3; i++) {
+	bool order = list_kind == JOB_EPISODES;
+
+	lv_obj_t *const buttons[] = {settings_btn, saved_btn, search_btn, order_btn};
+	const bool shown[] = {local, local, search, order};
+	int slots = 0;
+	for (int i = 0; i < 4; i++) {
 		if (!buttons[i]) {
 			continue;
 		}
 		if (shown[i]) {
+			if (g_cfg) {
+				settingsrow_place_corner_button(buttons[i], g_cfg, slots);
+			}
+			slots++;
 			lv_obj_set_hidden(buttons[i], false);
 		} else {
 			lv_obj_set_hidden(buttons[i], true);
 		}
 	}
+	if (list_title && g_cfg) {
+		// The heading gets the width the buttons are not using.
+		settingsrow_title_corner_slots(list_title, g_cfg, slots);
+	}
+	paint_order_button();
 }
 
 // The pill colours are set by hand, so a theme change does not touch them on
@@ -2807,6 +2985,9 @@ void podcastpage_init(gui_config_t *cfg) {
 	settings_btn = corner_button(cfg, 0, &icon_music_settings, open_settings_cb);
 	saved_btn = corner_button(cfg, 1, &icon_podcast_downloaded, open_saved_cb);
 	search_btn = corner_button(cfg, 2, &icon_search, open_search_cb);
+	// Its slot is decided by refresh_corner_buttons() on every list, since it
+	// is the only button that shares its list with nothing.
+	order_btn = corner_button(cfg, 3, &icon_sort_date_new, order_cb);
 
 	build_search_page(cfg);
 	build_settings_page(cfg);
@@ -2828,6 +3009,7 @@ void podcastpage_init(gui_config_t *cfg) {
 
 	podcastcache_set_root(storage_sd_root());
 	podcastsubs_set_root(storage_sd_root());
+	podcastplayed_set_root(storage_sd_root());
 
 	// Notices only: the first list is asked for by the page when it really
 	// opens, not at player startup -- at startup the card may not have been read
