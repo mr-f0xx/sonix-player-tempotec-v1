@@ -28,9 +28,12 @@
 - **MSEB** - HiBy's MageSound tuning, matched to the stock player: 10
   characteristics driven by 13 filters, with the slider travel selectable
   between 20, 40 and 100.
-- The graphic EQ, PEQ and MSEB run on **radio stations** too: the same chain a
-  track from the card goes through, applied to the stereo PCM about to be
-  written. A station is not a file, but what is tuned is for the headphones.
+- The graphic EQ, PEQ and MSEB run on **radio stations** and on sound coming
+  from a computer in **USB DAC mode** too: the same chain a track from the card
+  goes through, applied to the stereo PCM about to be written. A station is not
+  a file and the computer's stream is not the player's own, but what is tuned
+  is for the headphones -- neither is an exception. DSD from the host passes
+  through untouched, as DoP does on a track.
 - **Soundfield** - mid/side width from mono to twice natural, starting at 1.50
   for an audible widening when switched on (1.00 is neutral).
 - **Channel balance** - ±20 dB in half-decibel steps.
@@ -45,7 +48,9 @@
   compensation from 0 to 6 dB.
 - **Line out** - drives the jack at a fixed level for an amplifier, refuses
   volume changes while on, and puts your level back on the way out.
-- **USB DAC** - the player becomes a USB sound card, 32 kHz to 384 kHz.
+- **USB DAC** - the player becomes a USB sound card, 32 kHz to 384 kHz, with
+  the equalisers above applied to what the computer sends. Turning it on stops
+  a station that is playing, as the computer takes the output.
 - **USB audio out** - a DAC or USB-C headphones driven with the player as host.
 - **In-line remote** - the three-button cable remote: one click play/pause, two
   next, three previous.

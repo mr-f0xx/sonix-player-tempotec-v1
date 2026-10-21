@@ -3,11 +3,13 @@
 #include "usbdac.h"
 
 #include "src/system/audio/audio.h"
+#include "src/system/audio/eq.h"
 #include "src/system/core/config.h"
 #include "src/system/core/lang.h"
 #include "src/system/device/power.h"
 #include "src/system/device/system.h"
 #include "src/system/device/usb.h"
+#include "src/system/streaming/radio.h"
 
 #include <errno.h>
 #include <dirent.h>
@@ -578,8 +580,26 @@ static void *audio_main(void *arg) {
 		}
 
 		// Eight bytes to a frame, and audio_external_write() counts frames.
+		int frames = (int)(got / 8);
+
 		if (output_open) {
-			audio_external_write(buffer, (int)(got / 8));
+			// The same chain a track from the card and a radio station go
+			// through: the graphic EQ, PEQ and MSEB, in place on the stereo
+			// pair about to be written, and a no-op when all three are off.
+			//
+			// The host's samples arrive as 32-bit words with the value
+			// left-justified -- the shape the card's own hi-res path feeds the
+			// chain -- which is what eq_process_s32() takes; the two entry
+			// points share one set of filters, so a curve set here sounds the
+			// same as it does on a track from the card.
+			//
+			// DSD is handed over untouched, exactly as DoP is on the local
+			// path: one bit per sample is not PCM, and nothing in this chain
+			// may filter it.
+			if (!dsd) {
+				eq_process_s32((int32_t *)buffer, frames, 2, fmt.rate);
+			}
+			audio_external_write(buffer, frames);
 		}
 	}
 
@@ -606,6 +626,16 @@ static void *start_main(void *arg) {
 	// One PCM takes one writer, and in DAC mode the player is not playing
 	// anything of its own.
 	audio_stop();
+
+	// A live station is the other candidate: it writes through
+	// audio_external_*() on a thread of its own, and this mode takes that same
+	// output. Left running it would share the DAC's PCM -- and now the
+	// equaliser's filter state -- with the computer's stream. A station is
+	// stopped rather than paused, as it is when the file server starts; play
+	// afterwards reconnects to it.
+	if (radio_is_playing()) {
+		radio_stop();
+	}
 
 	// Tell usb.c to keep off the controller first: its watcher thread reacts to
 	// the cable being in by rebuilding the mass-storage gadget, which would

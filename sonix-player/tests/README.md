@@ -45,7 +45,7 @@ the sound is leaving over the USB-C port. The three routing answers (Bluetooth,
 a card on the port, that card's volume control) are stubbed; the curve, the
 coefficients and the scaling are the real ones.
 
-## Equaliser on PCM, including radio
+## Equaliser on PCM, including radio and USB DAC mode
 
 `make -C sonix-player/tests eq` checks the chain radio stations share with a
 track from the card. Internet radio does not go through `audio.c`: it decodes
@@ -55,6 +55,15 @@ be written. The suite links the real `eq.c` and drives that function: with
 EQ, PEQ and MSEB all off it is a no-op; with each one on in turn a sine
 changes; and both 44.1 kHz and 48 kHz, the rates stations arrive at, run.
 The config store is a temporary file; nothing else is stubbed.
+
+USB DAC mode is the other source outside `audio.c`: the computer's PCM comes
+off `/dev/uac_sa` as 32-bit left-justified words and `usbdac.c` runs
+`eq_process_s32()` on them before they reach the DAC. The suite checks that
+entry point too: with everything off it is a bit-for-bit no-op on those words,
+and with a PEQ band boosted and MSEB moved off flat a 1 kHz tone comes out at
+the same level as it does from the 16-bit path, within half a decibel, at every
+rate the DAC answers to (44.1, 48, 96, 192 and 384 kHz) -- so a curve cannot
+sound different over the cable than it does from the card.
 
 ## Wi-Fi hidden networks
 

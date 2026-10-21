@@ -40,6 +40,11 @@
 // milliseconds at eight bytes per frame -- stereo, 32 bits per sample. So the
 // samples come off the node as 32-bit stereo whatever the host sends, except
 // in DSD, where the flags word is 1 and the payload is one bit per sample.
+//
+// Those PCM words are not written to the DAC raw: the graphic EQ, PEQ and MSEB
+// run on them first, the same chain a track from the card and a radio station
+// go through (eq.h), so a curve set on the player is heard over the cable too.
+// DSD is handed over untouched, exactly as DoP is on the local path.
 
 typedef struct {
 	bool starting;	 // being switched on: slow work in progress on a worker
