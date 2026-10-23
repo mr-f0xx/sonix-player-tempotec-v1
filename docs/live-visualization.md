@@ -17,6 +17,25 @@ has not yet been validated on a physical TempoTec V1.
 These are **live audio displays**, independent of the existing whole-track
 Waveform layout (a cached overview of a track, not a live analyzer).
 
+## Visual treatment
+
+The display is deliberately not a diagnostic graph: no grid, axes, bright
+rectangular frame or repeated labels. Both modes use the player's accent.
+
+- **Spectrum:** narrow rounded bars shaded from a pale tip into the dark floor,
+  fast attack / 250 ms release, falling peak caps with a short hold, and a faint
+  reflection. Quiet/unresolved bands stay as small dim dashes, not fake levels.
+- **Live wave:** a continuous light trace with edge fading, a translucent fill
+  and a fixed-width optical halo (not a blur). A five-point display filter and
+  rising-zero-crossing alignment reduce jaggedness and jitter. Display-only
+  normalization is capped at 4×; digital silence is still flat.
+- Smoothing/peaks are fixed-size UI state, advanced **only by fresh PCM frames**.
+  There is no extra animation timer, queued animation, FFT or audio-thread work.
+  Pause, Off, stale PCM and mode changes reset that history immediately.
+- Rendering is bounded: at most 48 spectrum rectangles, or 95 waveform segments
+  with two strokes and one fill each. No blur buffers or full-screen effects.
+  Physical V1 frame cost and battery use still require hardware validation.
+
 ## Playback comes first
 
 - The playback thread copies at most **512 first-channel PCM samples per tap**
@@ -55,8 +74,11 @@ lead to some visual/audio offset.
 ## Preview
 
 The GIFs use the **production renderer and analyzer**, driven by deterministic
-synthetic PCM, in a representative 240×320 player shell enlarged 2×. The shell,
+bass-led synthetic PCM with moving upper harmonics, in a representative 240×320 player shell enlarged 2×. The shell,
 labels and transport are a test fixture, **not a full-player or hardware capture**.
+The displayed track name is illustrative, not the source of the synthetic audio.
+The mint preview colour demonstrates accent-following; it is not a new colour setting
+or a change to the existing player controls.
 
 [Spectrum animation](../screenshots/visualization/spectrum.gif) ·
 [Live waveform animation](../screenshots/visualization/waveform.gif)
@@ -74,7 +96,10 @@ The optional PPM output is generated/ignored. The DSP checks exercise known
 tones and levels, silence, anti-phase stereo, 16-/32-bit samples, invalid inputs,
 partial blocks and format changes, disable/discard, throttling, recovery
 cooldown, extreme rates/amplitudes, and concurrent feed/read/disable. The UI test
-renders both modes and checks the idle, hidden and destruction paths.
+renders both modes and checks release, immediate history resets, immutable input,
+no autonomous animation, tiny/large panel bounds, and the idle, hidden and
+destruction paths. The drawing suite has also been run with AddressSanitizer and
+UBSan.
 
 Before release, test on a V1 with MP3/FLAC/WAV, high-rate PCM and native DSD;
 exercise switching/Off, layout restoration, seek/skip, pause/resume, screen

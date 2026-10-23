@@ -33,3 +33,7 @@
 #define LV_FONT_MONTSERRAT_36 1
 #undef LV_FONT_MONTSERRAT_48
 #define LV_FONT_MONTSERRAT_48 1
+
+/* Small, restrained labels in the live visualization preview fixture. */
+#undef LV_FONT_MONTSERRAT_12
+#define LV_FONT_MONTSERRAT_12 1
