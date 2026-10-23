@@ -5,6 +5,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <errno.h>
+#include <limits.h>
 
 #include "src/system/core/config.h"
 #include "src/system/net/http.h"
@@ -63,7 +65,7 @@ void qobuz_init(void) {
 	snprintf(app_secret, sizeof(app_secret), "%s", secret ? secret : "");
 
 	// The token only, never the password: when it expires it is asked for once,
-	// and meanwhile nothing on disk is worth an account login.
+	// the saved bearer token is sensitive and must not be shared.
 	snprintf(auth_token, sizeof(auth_token), "%s", config_get("qobuz", "token", ""));
 	snprintf(display_name, sizeof(display_name), "%s", config_get("qobuz", "user", ""));
 
@@ -97,6 +99,7 @@ void qobuz_logout(void) {
 	auth_token[0] = '\0';
 	display_name[0] = '\0';
 	config_set("qobuz", "token", "");
+	config_set("qobuz", "user_id", "");
 	config_set("qobuz", "user", "");
 	config_save();
 	printf("qobuz: session closed\n");
@@ -109,10 +112,10 @@ void qobuz_logout(void) {
 // The common headers: X-App-Id always, the token when there is one. Qobuz takes
 // the token in the query too, but in a header it stays out of the logs of the
 // proxies along the way.
-static void build_headers(char *out, size_t size, const char *extra) {
+static void build_headers(char *out, size_t size, const char *extra, const char *token) {
 	int n = snprintf(out, size, "X-App-Id: %s\r\n", app_id);
-	if (auth_token[0] && n > 0 && (size_t)n < size) {
-		n += snprintf(out + n, size - (size_t)n, "X-User-Auth-Token: %s\r\n", auth_token);
+	if (token[0] && n > 0 && (size_t)n < size) {
+		n += snprintf(out + n, size - (size_t)n, "X-User-Auth-Token: %s\r\n", token);
 	}
 	if (extra && n > 0 && (size_t)n < size) {
 		snprintf(out + n, size - (size_t)n, "%s", extra);
@@ -135,7 +138,7 @@ static bool note_api_error(const json_doc_t *doc, int status) {
 // Makes the request, parses the reply, and fills last_error on failure. On
 // success the caller must free *body only after it is done with *doc: the
 // document points into the text instead of copying it.
-static bool api_call(const char *url, const char *extra_headers, char **body, json_doc_t *doc) {
+static bool api_call_token(const char *url, const char *extra_headers, char **body, json_doc_t *doc, const char *token) {
 	clear_error();
 
 	if (!qobuz_configured()) {
@@ -144,7 +147,7 @@ static bool api_call(const char *url, const char *extra_headers, char **body, js
 	}
 
 	char headers[768];
-	build_headers(headers, sizeof(headers), extra_headers);
+	build_headers(headers, sizeof(headers), extra_headers, token);
 
 	int status = 0;
 	size_t len = 0;
@@ -183,6 +186,10 @@ static bool api_call(const char *url, const char *extra_headers, char **body, js
 	return true;
 }
 
+static bool api_call(const char *url, const char *extra_headers, char **body, json_doc_t *doc) {
+    return api_call_token(url, extra_headers, body, doc, auth_token);
+}
+
 static void api_done(char *body, json_doc_t *doc) {
 	json_free(doc);
 	free(body);
@@ -191,6 +198,51 @@ static void api_done(char *body, json_doc_t *doc) {
 // ---------------------------------------------------------------------------
 // sign-in
 // ---------------------------------------------------------------------------
+
+bool qobuz_login_token(const char *token, const char *user_id) {
+    clear_error();
+    if (!token || !*token || strlen(token) >= sizeof(auth_token) || !user_id || !*user_id) {
+        set_error("Invalid user_auth_token or user_id");
+        return false;
+    }
+    /* Tokens are used both in HTTP headers and existing signed URL queries. */
+    for (const unsigned char *p = (const unsigned char *)token; *p; p++) {
+        if (!((*p >= 'a' && *p <= 'z') || (*p >= 'A' && *p <= 'Z') ||
+              (*p >= '0' && *p <= '9') || *p == '-' || *p == '_' || *p == '.' || *p == '~')) {
+            set_error("Invalid user_auth_token characters");
+            return false;
+        }
+    }
+    for (const char *p = user_id; *p; p++) {
+        if (*p < '0' || *p > '9') { set_error("user_id must be a positive number"); return false; }
+    }
+    errno = 0;
+    char *end;
+    long id = strtol(user_id, &end, 10);
+    if (errno || *end || id <= 0 || id > INT_MAX) {
+        set_error("user_id is out of range"); return false;
+    }
+    char url[512];
+    snprintf(url, sizeof(url), "%s/user/get?user_id=%ld", base_url, id);
+    char *body = NULL;
+    json_doc_t doc;
+    /* Validate without changing the current session or saving rejected tokens. */
+    if (!api_call_token(url, NULL, &body, &doc, token)) return false;
+    int root = json_root(&doc);
+    bool valid = json_obj_long(&doc, root, "id", 0) == id;
+    char name[QOBUZ_NAME_MAX] = "";
+    json_obj_str(&doc, root, "display_name", name, sizeof(name));
+    if (!name[0]) snprintf(name, sizeof(name), "Qobuz %ld", id);
+    api_done(body, &doc);
+    if (!valid) { set_error("Qobuz did not confirm the supplied user_id"); return false; }
+    snprintf(auth_token, sizeof(auth_token), "%s", token);
+    snprintf(display_name, sizeof(display_name), "%s", name);
+    config_set("qobuz", "token", auth_token);
+    config_set("qobuz", "user", display_name);
+    config_set_int("qobuz", "user_id", id);
+    config_save();
+    return true;
+}
 
 bool qobuz_login(const char *username, const char *password) {
 	clear_error();
@@ -255,8 +307,10 @@ bool qobuz_login(const char *username, const char *password) {
 		snprintf(name, sizeof(name), "%s", username);
 	}
 
+	long account_id = user >= 0 ? json_obj_long(&doc, user, "id", 0) : 0;
 	api_done(body, &doc);
 
+	config_set_int("qobuz", "user_id", account_id);
 	snprintf(auth_token, sizeof(auth_token), "%s", token);
 	snprintf(display_name, sizeof(display_name), "%s", name);
 	config_set("qobuz", "token", auth_token);
@@ -716,6 +770,10 @@ static void sign_request(const char *object, const char *method, qobuz_param_t *
 // ---------------------------------------------------------------------------
 
 bool qobuz_track_url(long track_id, char *url_out, size_t url_size, char *mime, size_t mime_size, int *format_out) {
+	return qobuz_track_url_format(track_id, qobuz_get_format(), url_out, url_size, mime, mime_size, format_out);
+}
+
+bool qobuz_track_url_format(long track_id, int format_id, char *url_out, size_t url_size, char *mime, size_t mime_size, int *format_out) {
 	clear_error();
 
 	if (!url_out || url_size == 0) {

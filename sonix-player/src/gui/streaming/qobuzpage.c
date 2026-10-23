@@ -23,6 +23,7 @@
 #include "src/system/core/lang.h"
 #include "src/system/playback/playlist.h"
 #include "src/system/streaming/qobuz.h"
+#include "src/system/streaming/qobuzdownload.h"
 #include "src/system/streaming/qobuzcache.h"
 #include "src/system/streaming/streamturn.h"
 #include "src/system/streaming/qobuzsync.h"
@@ -83,10 +84,11 @@ typedef enum {
 typedef struct {
 	job_kind_t kind;
 	char text[256];	   // search terms, or user name
-	char text2[128];   // password
+	char text2[256];   // password
 	char id_text[40];  // album identifier
 	long id;		   // numeric identifier
 	int index;		   // which track of the list playback starts from
+	bool token_login;
 	int offset;		   // first entry of this page: 0 = new list
 } job_t;
 
@@ -375,6 +377,32 @@ static void ask_playlist_delete(void *user) {
 	confirm_show("delete_the_playlist", message, "delete", do_playlist_delete, NULL);
 }
 
+static void download_result_ui(void *user) {
+    char *message = user;
+    gui_notify_popup(message);
+    free(message);
+}
+
+static void download_done(const char *error) {
+    char *message = strdup(error ? error : "Saved to Music/Qobuz. Rescan music to update library.");
+    if (message) gui_post(download_result_ui, message);
+}
+
+static void download_track(void *user) {
+    (void)user;
+    if (menu_index < 0 || menu_index >= result_count) return;
+    if (qobuzdownload_start(storage_sd_root(), &result_tracks[menu_index], download_done))
+        gui_notify_popup("Download started. Track menu has Cancel download.");
+    else
+        gui_notify_popup("Cannot start: download busy, no card, or track unavailable.");
+}
+
+static void cancel_download(void *user) {
+    (void)user;
+    qobuzdownload_cancel();
+    gui_notify_popup("Cancelling download (may wait for network timeout).");
+}
+
 static void row_menu_cb(lv_event_t *e) {
 	lv_event_stop_bubbling(e); // the tap belongs to the menu, not to the row
 	if (switcher_back_drag_active() || player_sheet_drag_active()) {
@@ -422,7 +450,15 @@ static void row_menu_cb(lv_event_t *e) {
 		return;
 	}
 
-	popover_show(lv_event_get_current_target(e), &item, 1);
+	popover_item_t items[2] = {item};
+    int count = 1;
+    row_menu_t kind = row_menu_kind(list_kind);
+    if (kind == ROW_MENU_TRACK_ADD || kind == ROW_MENU_TRACK_REMOVE) {
+        items[1].label = qobuzdownload_busy() ? "Cancel download" : "Download to music folder";
+        items[1].action = qobuzdownload_busy() ? cancel_download : download_track;
+        count = 2;
+    }
+    popover_show(lv_event_get_current_target(e), items, count);
 }
 
 // Side of a row thumbnail, in pixels.
@@ -1541,7 +1577,7 @@ static void *worker_main(void *arg) {
 		int n = 0;
 		switch (job.kind) {
 		case JOB_LOGIN:
-			if (!qobuz_login(job.text, job.text2)) {
+			if (!(job.token_login ? qobuz_login_token(job.text2, job.text) : qobuz_login(job.text, job.text2))) {
 				snprintf(result_error, sizeof(result_error), "%s", qobuz_last_error());
 			}
 			break;
@@ -1930,6 +1966,7 @@ static void build_search_page(gui_config_t *cfg) {
 // sign in
 // ---------------------------------------------------------------------------
 
+static bool token_login_mode;
 static lv_obj_t *user_field;
 static lv_obj_t *password_field;
 static lv_obj_t *password_eye_icon;
@@ -1974,6 +2011,7 @@ static void login_accept_cb(lv_event_t *e) {
 
 	job_t job = {0};
 	job.kind = JOB_LOGIN;
+	job.token_login = token_login_mode;
 	snprintf(job.text, sizeof(job.text), "%s", user);
 	snprintf(job.text2, sizeof(job.text2), "%s", password);
 	run(&job, "qobuz_sign_in_to_qobuz");
@@ -2045,7 +2083,11 @@ static void build_login_page(gui_config_t *cfg) {
 }
 
 static void open_login_cb(lv_event_t *e) {
-	(void)e;
+	token_login_mode = e && lv_event_get_user_data(e);
+	lv_textarea_set_placeholder_text(user_field, token_login_mode ? "user_id" : tr("qobuz_username_or_email"));
+	lv_textarea_set_placeholder_text(password_field, token_login_mode ? "user_auth_token" : tr("password"));
+	lv_textarea_set_max_length(user_field, token_login_mode ? 10 : 255);
+	lv_textarea_set_max_length(password_field, 255);
 	lv_textarea_set_text(user_field, "");
 	lv_textarea_set_text(password_field, "");
 	lv_textarea_set_password_mode(password_field, true);
@@ -2299,6 +2341,7 @@ static void rebuild_home(void) {
 	if (!qobuz_logged_in()) {
 		update_corner_buttons();
 		settingsrow_add(home_container, "sign_in", NULL, open_login_cb, NULL);
+		settingsrow_add(home_container, "Sign in with token", NULL, open_login_cb, (void *)1);
 		return;
 	}
 
