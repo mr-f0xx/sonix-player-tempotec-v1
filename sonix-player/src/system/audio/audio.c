@@ -1,3 +1,4 @@
+#include "visualizer.h"
 #include "audio.h"
 #include "src/system/audio/alsa-controls.h"
 #include "src/system/bluetooth/bluetooth.h"
@@ -2274,6 +2275,7 @@ static snd_pcm_sframes_t pcm_write_recover(snd_pcm_t **pcm, const void *buf, snd
 			return written;
 		}
 
+		visualizer_backoff();
 		write_recoveries++;
 		fprintf(stderr, "audio[%ld]: write error: %s (recovery %d)\n", log_ms(), snd_strerror((int)written),
 				attempt + 1);
@@ -2935,6 +2937,8 @@ static void play_wav_file(const char *filepath) {
 				swvolume_apply_s32((int32_t *)buffer, samples);
 			}
 		}
+
+		visualizer_feed(buffer, (int)frames_to_write, info.channels, info.sample_rate, info.out_bits);
 
 		health_lap(&health, STAGE_EFFECTS);
 		snd_pcm_sframes_t written = pcm_write_recover(&pcm_handle, buffer, frames_to_write, info.channels,
@@ -3750,6 +3754,8 @@ static void play_decoded_file(const char *filepath, decode_format_t format) {
 				swvolume_apply_s16((short *)buffer, samples);
 			}
 		}
+
+		if (!passthrough) visualizer_feed(buffer, (int)frames_read, channels, out_rate, out_bits);
 
 		health_lap(&health, STAGE_EFFECTS);
 		snd_pcm_sframes_t written =

@@ -51,6 +51,9 @@ jobs:
       - name: Check the More, Calculator and Notes pages (headless LVGL)
         run: make -C sonix-player/tests ui -j"$(nproc)"
 
+      - name: Check live visualization DSP and rendering
+        run: make -C sonix-player/tests visualizer sanitize-visualizer ui-visualization -j"$(nproc)"
+
       - name: Check the Calculator's arithmetic and the notes folder
         run: make -C sonix-player/tests calculator notes -j"$(nproc)"
 

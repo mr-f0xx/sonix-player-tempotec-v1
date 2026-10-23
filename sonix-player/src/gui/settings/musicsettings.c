@@ -1648,6 +1648,18 @@ static void aam_leftie_show(void) {
 	}
 }
 
+static lv_obj_t *visualization_pills[3];
+static void visualization_refresh(void) {
+	for (int i = 0; i < 3; i++) {
+		if (visualization_pills[i]) settingsrow_pill_active(visualization_pills[i], player_visualization_get() == (visualizer_mode_t)i);
+	}
+}
+static void visualization_pick_cb(lv_event_t *e) {
+	if (player_sheet_drag_active() || switcher_back_drag_active()) return;
+	player_visualization_set((visualizer_mode_t)(intptr_t)lv_event_get_user_data(e));
+	visualization_refresh();
+}
+
 static void layout_refresh(void) {
 	if (!layout_standard_pill) {
 		return;
@@ -2402,6 +2414,15 @@ static void build_display_page(gui_config_t *cfg) {
 	if (coverflow_enabled()) {
 		lv_obj_add_state(coverflow_switch, LV_STATE_CHECKED);
 	}
+
+	lv_obj_t *vis_pills = NULL;
+	settingsrow_pills(container, "musicsettings_visualization", &vis_pills);
+	visualization_pills[0] = settingsrow_pill(vis_pills, "musicsettings_visualization_off", VISUALIZER_OFF, visualization_pick_cb);
+	visualization_pills[1] = settingsrow_pill(vis_pills, "musicsettings_visualization_spectrum", VISUALIZER_SPECTRUM, visualization_pick_cb);
+	visualization_pills[2] = settingsrow_pill(vis_pills, "musicsettings_visualization_waveform", VISUALIZER_WAVEFORM, visualization_pick_cb);
+	option_note(container, "musicsettings_visualization_note");
+	visualization_refresh();
+	theme_register_refresh(visualization_refresh);
 
 	// How the now-playing page is arranged.
 	lv_obj_t *layout_pills = NULL;

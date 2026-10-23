@@ -187,4 +187,9 @@ const char *player_cover_path(void);
 void player_set_cover_release_cb(void (*cb)(void));
 
 
+// Live visualizations use Standard while enabled; Off restores the chosen layout.
+#include "src/system/audio/visualizer.h"
+visualizer_mode_t player_visualization_get(void);
+void player_visualization_set(visualizer_mode_t mode);
+
 #endif

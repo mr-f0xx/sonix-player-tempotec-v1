@@ -266,3 +266,28 @@ $(BUILD)/ui/lvgl/%.o: $(ROOT)/lvgl/%.c ui/lv_conf.h $(ROOT)/lv_conf.h
 	$(CC) $(UI_CPPFLAGS) $(filter-out -Werror,$(UI_CFLAGS)) -c $< -o $@
 
 -include $(sort $(UI_OBJ:.o=.d) $(SAVER_OBJ:.o=.d) $(WIFIPAGE_OBJ:.o=.d))
+
+# Live PCM visualizer: real integer FFT, no ALSA or LVGL.
+VISUALIZER_SRC = test_visualizer.c $(ROOT)/src/system/audio/visualizer.c
+.PHONY: visualizer sanitize-visualizer
+visualizer: $(BUILD)/test_visualizer
+	$(BUILD)/test_visualizer
+
+$(BUILD)/test_visualizer: $(VISUALIZER_SRC) $(ROOT)/src/system/audio/visualizer.h
+	@mkdir -p $(BUILD)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ $(VISUALIZER_SRC) $(LDFLAGS) $(LDLIBS)
+
+sanitize-visualizer:
+	$(MAKE) BUILD=.build/sanitize-visualizer CFLAGS='-O1 -g -std=gnu11 -Wall -Wextra -Werror -fsanitize=address,undefined -fno-omit-frame-pointer' LDFLAGS='-fsanitize=address,undefined' visualizer
+
+# Real drawing widget, deterministic synthetic PCM. Optional PPM frames for GIFs.
+VISUALIZATION_SRC = $(ROOT)/tests/ui/test_visualization.c $(ROOT)/src/gui/nowplaying/visualization.c \
+                    $(ROOT)/src/system/audio/visualizer.c
+VISUALIZATION_OBJ = $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(VISUALIZATION_SRC)) \
+                    $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(UI_LVGL_SRC))
+.PHONY: ui-visualization
+ui-visualization: $(BUILD)/test_visualization
+	$(BUILD)/test_visualization
+
+$(BUILD)/test_visualization: $(VISUALIZATION_OBJ)
+	$(CC) -o $@ $^ $(LDFLAGS) $(LDLIBS)

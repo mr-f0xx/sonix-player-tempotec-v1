@@ -1,4 +1,5 @@
 #include "player.h"
+#include "visualization.h"
 
 #include <pthread.h>
 #include <stdint.h>
@@ -397,6 +398,11 @@ static int alt_pill_pad_v = ALT_PILL_PAD_V;
 // and a Qobuz track is a cache entry that will be gone tomorrow. So the setting
 // says what the user wants for their music, and `layout_alt_now` says whether
 // what is playing is music of that kind. Everything that draws asks the second.
+static visualizer_mode_t visualization_mode;
+static lv_obj_t *visualization_view;
+static lv_timer_t *visualization_timer;
+static uint32_t visualization_last_frame;
+static bool visualization_empty = true;
 static player_layout_t layout_choice; // the setting, saved in the config
 static bool layout_alt_now;		  // and whether the current source can use it
 static bool layout_studio_now;	  // likewise for the third arrangement
@@ -4111,16 +4117,17 @@ static void update_layout(const device_state_t *state) {
 	// is playing: a file, a cached Qobuz or Tidal track, a podcast, a book, a
 	// station.
 	bool local = playing_local_file(state);
-	bool lyrics = lyrics_wanted && local;
-	bool studio = layout_choice == PLAYER_LAYOUT_STUDIO;
-	bool immersive = layout_choice == PLAYER_LAYOUT_IMMERSIVE;
-	bool poster = layout_choice == PLAYER_LAYOUT_POSTER;
+	player_layout_t effective = visualization_mode != VISUALIZER_OFF ? PLAYER_LAYOUT_STANDARD : layout_choice;
+	bool lyrics = lyrics_wanted && local && visualization_mode == VISUALIZER_OFF;
+	bool studio = effective == PLAYER_LAYOUT_STUDIO;
+	bool immersive = effective == PLAYER_LAYOUT_IMMERSIVE;
+	bool poster = effective == PLAYER_LAYOUT_POSTER;
 	// Album Art Max is measured for the 240x320 panel, and every number in it
 	// is one of that panel's. On the wide boards the choice is remembered but
 	// the page keeps the standard arrangement -- the same way Waveform falls
 	// back for a source with no file to draw.
-	bool aam = layout_choice == PLAYER_LAYOUT_ALBUM_ART_MAX && bp_is_tempotec_v1();
-	bool wave = layout_choice == PLAYER_LAYOUT_ALTERNATIVE && local;
+	bool aam = effective == PLAYER_LAYOUT_ALBUM_ART_MAX && bp_is_tempotec_v1();
+	bool wave = effective == PLAYER_LAYOUT_ALTERNATIVE && local;
 	bool alt = wave;
 
 	if (studio == layout_studio_now && immersive == layout_immersive_now && poster == layout_poster_now &&
@@ -5710,6 +5717,19 @@ static void book_summary_action(void *user) {
 	audiobookextras_open_current_summary();
 }
 
+static void visualization_action(void *user) {
+	player_visualization_set((visualizer_mode_t)(intptr_t)user);
+}
+static void visualization_menu_cb(lv_event_t *e) {
+	if (player_sheet_drag_active() || switcher_back_drag_active()) return;
+	popover_item_t items[] = {
+		{"musicsettings_visualization_off", visualization_action, (void *)(intptr_t)VISUALIZER_OFF, visualization_mode == VISUALIZER_OFF},
+		{"musicsettings_visualization_spectrum", visualization_action, (void *)(intptr_t)VISUALIZER_SPECTRUM, visualization_mode == VISUALIZER_SPECTRUM},
+		{"musicsettings_visualization_waveform", visualization_action, (void *)(intptr_t)VISUALIZER_WAVEFORM, visualization_mode == VISUALIZER_WAVEFORM},
+	};
+	popover_show(lv_event_get_current_target(e), items, 3);
+}
+
 // The overflow button: the book's menu on a book, the episode queue on a
 // podcast, the track menu on anything else.
 static void more_btn_event_cb(lv_event_t *e) {
@@ -5864,6 +5884,44 @@ void player_play_file(const char *filepath) {
 	device_state_play_file(filepath); // builds folder queue, loads metadata, starts playback
 
 	player_refresh_now_playing();
+}
+
+// A 15 Hz picture is disposable. No FFT while the sheet is closed, the panel
+// is dark, or playback is paused (one repaint clears the paused picture). Expire stale samples so
+// native DSD, unsupported sources and buffering never show frozen fake audio.
+static void visualization_tick(lv_timer_t *timer) {
+	bool show = visualization_mode != VISUALIZER_OFF && visualization_view;
+	if (visualization_view) lv_obj_set_hidden(visualization_view, !show);
+	bool active = show && sheet_open && power_screen_is_on() && audio_get_status() == AUDIO_STATUS_PLAYING;
+	visualizer_enable(active);
+	if (timer) lv_timer_set_period(timer, active ? 67 : 500);
+	if (!show || !sheet_open || !power_screen_is_on()) return;
+	visualizer_frame_t frame;
+	if (active && visualizer_read(visualization_mode, &frame)) {
+		visualization_last_frame = lv_tick_get();
+		visualization_empty = false;
+		visualization_update(visualization_view, visualization_mode, &frame, chrome_accent());
+	} else if (!visualization_empty && (!active || lv_tick_elaps(visualization_last_frame) > 250)) {
+		visualization_empty = true;
+		visualization_update(visualization_view, visualization_mode, NULL, chrome_accent());
+	}
+}
+
+visualizer_mode_t player_visualization_get(void) { return visualization_mode; }
+
+void player_visualization_set(visualizer_mode_t mode) {
+	if (mode < VISUALIZER_OFF || mode > VISUALIZER_WAVEFORM || mode == visualization_mode) return;
+	visualization_mode = mode;
+	visualizer_enable(false);
+	visualization_last_frame = 0;
+	visualization_empty = true;
+	if (visualization_view) visualization_update(visualization_view, mode, NULL, chrome_accent());
+	config_set_int("screen", "player_visualization", mode);
+	config_save();
+	device_state_t state;
+	device_state_get(&state);
+	update_layout(&state);
+	visualization_tick(visualization_timer);
 }
 
 // audio_pause() rather than device_state_toggle_play_pause(): this is a pause,
@@ -6126,6 +6184,7 @@ static void sheet_hidden_anim_ready_cb(lv_anim_t *a) {
 void player_sheet_close(bool animate) {
 	bool was_open = sheet_open;
 	sheet_open = false;
+	visualizer_enable(false);
 	back_btn_player_ink_inset(0); // the chevron back in the middle of its slot
 	back_btn_player_mode(false);
 	lyrics_screen_hold_update();
@@ -7022,6 +7081,7 @@ void player_init(gui_config_t *cfg) {
 	cover_panel = lv_obj_create(player_screen);
 	// Dragging the artwork to the right pushes the player back off screen.
 	player_sheet_attach_drag(cover_panel, false);
+	lv_obj_add_event_cb(cover_panel, visualization_menu_cb, LV_EVENT_LONG_PRESSED, NULL);
 	// And the two taps that stand in for the transport in Album Art Max. On the
 	// panel rather than on the sleeve so that the drag above keeps seeing its
 	// presses; the callback decides for itself whether the pair landed on the
@@ -7327,6 +7387,9 @@ void player_init(gui_config_t *cfg) {
 
 	lyrics_build();
 
+	visualization_view = visualization_create(cover_panel);
+	visualization_timer = lv_timer_create(visualization_tick, 500, NULL);
+
 	// Album Art Max's own pieces: the header row, the block the band stands
 	// in, the veil and the clocks, the two corners of the sleeve, and the
 	// three lines that stand in for the ellipsis. Built in every arrangement
@@ -7359,6 +7422,9 @@ void player_init(gui_config_t *cfg) {
 	// Whichever arrangement was left selected, now that every widget it moves
 	// exists -- and whether the controls follow the sleeve's colour, which is
 	// off unless it was switched on.
+	int vis_saved = (int)config_get_int("screen", "player_visualization", 0);
+	visualization_mode = vis_saved >= VISUALIZER_OFF && vis_saved <= VISUALIZER_WAVEFORM ?
+		(visualizer_mode_t)vis_saved : VISUALIZER_OFF;
 	cover_tint = config_get_bool("screen", "player_cover_tint", false);
 	aam_leftie = config_get_bool("screen", "player_aam_leftie", false);
 	int saved = (int)config_get_int("screen", "player_layout_alt", 0);
@@ -7368,6 +7434,7 @@ void player_init(gui_config_t *cfg) {
 						: (saved == (int)PLAYER_LAYOUT_POSTER)	   ? PLAYER_LAYOUT_POSTER
 						: (saved == (int)PLAYER_LAYOUT_ALBUM_ART_MAX) ? PLAYER_LAYOUT_ALBUM_ART_MAX
 																  : PLAYER_LAYOUT_STANDARD;
+	visualization_update(visualization_view, visualization_mode, NULL, chrome_accent());
 	// apply_layout() below puts the standard one up first: none of the others
 	// is in force until it says so.
 	layout_alt_now = false;

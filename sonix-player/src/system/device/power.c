@@ -9,6 +9,7 @@
 #include "lvgl/src/misc/lv_timer_private.h"
 
 #include "src/system/audio/waveform.h"
+#include "src/system/audio/visualizer.h"
 #include "src/system/device/ota.h"
 #include "src/system/device/system.h"
 
@@ -1538,6 +1539,7 @@ void power_screen_off(void) {
 		return;
 	}
 	g_screen_on = false;
+	visualizer_enable(false);
 	g_screen_off_at = lv_tick_get();
 	// The screen going dark opens a new idle window: the standby countdown
 	// starts here, unless activity keeps pushing it back.
