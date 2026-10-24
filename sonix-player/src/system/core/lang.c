@@ -392,7 +392,7 @@ void lang_init(const char *dir) {
 	}
 
 	// The name on file can be one this firmware no longer carries: this fork
-	// ships eight languages and a device updated from a build that had Russian,
+	// ships nine languages and a device updated from a build that had Russian,
 	// Chinese or Japanese selected keeps that name in its settings with nothing
 	// behind it. It falls back rather than showing tags -- tags are the sign the
 	// language folder is missing altogether, not the sign one language was

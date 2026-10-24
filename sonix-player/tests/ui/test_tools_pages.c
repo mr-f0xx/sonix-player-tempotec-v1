@@ -29,10 +29,12 @@
 #include "src/gui/shell/gridpage.h"
 #include "src/system/playback/device_state.h"
 #include "src/gui/shell/icons.h"
+#include "src/gui/shell/keyboard.h"
 #include "src/gui/shell/morepage.h"
 #include "src/gui/shell/theme.h"
 #include "src/system/core/config.h"
 #include "src/system/core/lang.h"
+#include "src/system/input/kblayout.h"
 #include "src/system/notes/notesstore.h"
 #include "src/system/text/textfile.h"
 
@@ -374,9 +376,9 @@ static void check_strings(const char *language_dir) {
 		languages++;
 	}
 	closedir(dir);
-	// The eight this firmware ships. A ninth added to the folder is meant to
+	// The nine this firmware ships. A tenth added to the folder is meant to
 	// make this fail, so its texts get checked the same way.
-	assert(languages == 8);
+	assert(languages == 9);
 	assert(lang_set("English"));
 }
 
@@ -807,6 +809,31 @@ static void check_notes_page(gui_config_t *cfg, const char *dir, const char *tag
 	assert(lv_obj_get_height(field) < read_height);
 	assert(find_image_button(toggle, &icon_check));
 	dump_snapshot(noteeditor_screen, tag_editor_edit);
+
+	// The 12-key Ukrainian ЙЦУКЕН rows, T9 keypad and held-key variants fit on
+	// the 240x320 panel as well.
+	assert(strcmp(kblayout_name(KB_LAYOUT_UKRAINIAN), "Українська") == 0);
+	assert(kblayout_row_len(KB_LAYOUT_UKRAINIAN, 0) == 12);
+	assert(kblayout_row_len(KB_LAYOUT_UKRAINIAN, 1) == 11);
+	assert(kblayout_row_len(KB_LAYOUT_UKRAINIAN, 2) == 9);
+	assert(strcmp(kblayout_letter(KB_LAYOUT_UKRAINIAN, 0, 11, false), "ї") == 0);
+	assert(strcmp(kblayout_letter(KB_LAYOUT_UKRAINIAN, 1, 10, true), "Є") == 0);
+	assert(kblayout_variant_count("г") == 1 && strcmp(kblayout_variant("г", 0), "ґ") == 0);
+	assert(kblayout_variant_count("Г") == 1 && strcmp(kblayout_variant("Г", 0), "Ґ") == 0);
+	assert(kblayout_variant_count("і") == 1 && strcmp(kblayout_variant("і", 0), "ї") == 0);
+	kblayout_move_in_use(KB_LAYOUT_UKRAINIAN, 0);
+	keyboard_refresh_layout();
+	lv_obj_update_layout(noteeditor_screen);
+	check_within_panel(noteeditor_screen, cfg, "Note editor (Ukrainian keyboard)");
+	config_set_int("other", "keyboard_t9", 1);
+	keyboard_refresh_type();
+	lv_obj_update_layout(noteeditor_screen);
+	check_within_panel(noteeditor_screen, cfg, "Note editor (Ukrainian T9)");
+	config_set_int("other", "keyboard_t9", 0);
+	keyboard_refresh_type();
+	kblayout_move_in_use(KB_LAYOUT_ENGLISH, 0);
+	kblayout_move_others(KB_LAYOUT_UKRAINIAN, 0);
+	keyboard_refresh_layout();
 
 	// Typing, then leaving the page: the writing reaches the card even though
 	// the check button was never pressed. Nothing here is the only copy.

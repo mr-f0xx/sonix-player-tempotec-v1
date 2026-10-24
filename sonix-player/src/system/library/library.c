@@ -611,6 +611,9 @@ static uint32_t fold_case(uint32_t code) {
 	if (code >= 0x400 && code <= 0x40F) {
 		return code + 80; // Cyrillic Ё and friends
 	}
+	if (code == 0x490) {
+		return 0x491; // Cyrillic Ґ -> ґ
+	}
 	return code;
 }
 

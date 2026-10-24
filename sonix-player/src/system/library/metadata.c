@@ -677,7 +677,13 @@ static uint32_t cp1251_code(uint8_t c) {
 
 // A Cyrillic LETTER in the code page -- what a word is made of, as opposed to
 // the quotes and the currency signs that share the upper half.
-static bool cp1251_is_letter(uint8_t c) { return c >= 0xC0 || c == 0xA8 || c == 0xB8; }
+static bool cp1251_is_letter(uint8_t c) {
+	if (c < 0x80) {
+		return false;
+	}
+	uint32_t code = cp1251_code(c);
+	return code >= 0x0400 && code <= 0x04FF;
+}
 
 static bool ascii_alnum(uint8_t c) {
 	return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9');
