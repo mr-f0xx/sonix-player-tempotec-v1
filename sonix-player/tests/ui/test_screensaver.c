@@ -620,9 +620,9 @@ static void check_settings_card(const char *language_dir) {
 		languages++;
 	}
 	closedir(dir);
-	// The nine this firmware ships. A tenth added to the folder is meant to
+	// The ten this firmware ships. An eleventh added to the folder is meant to
 	// make this fail, so its texts get checked the same way.
-	assert(languages == 9);
+	assert(languages == 10);
 	assert(lang_set("English"));
 	assert(strcmp(lv_label_get_text(caption), "Album art") == 0);
 	lv_screen_load(previous);
@@ -669,9 +669,9 @@ static void check_picture_limit(const char *language_dir) {
 		languages++;
 	}
 	closedir(dir);
-	// The nine this firmware ships. A tenth added to the folder is meant to
+	// The ten this firmware ships. An eleventh added to the folder is meant to
 	// make this fail, so its texts get checked the same way.
-	assert(languages == 9);
+	assert(languages == 10);
 	assert(lang_set("English"));
 
 	int asks = folder_asks;

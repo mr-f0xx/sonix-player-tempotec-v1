@@ -392,8 +392,8 @@ void lang_init(const char *dir) {
 	}
 
 	// The name on file can be one this firmware no longer carries: this fork
-	// ships nine languages and a device updated from a build that had Russian,
-	// Chinese or Japanese selected keeps that name in its settings with nothing
+	// ships ten languages and a device updated from a build that had Chinese
+	// or Japanese selected keeps that name in its settings with nothing
 	// behind it. It falls back rather than showing tags -- tags are the sign the
 	// language folder is missing altogether, not the sign one language was
 	// dropped -- and the name it settled on is written back, so the next boot

@@ -3,19 +3,21 @@
 #include "src/system/core/respath.h"
 
 #include <stdio.h>
+#include <string.h>
 
 #include "lvgl/lvgl.h"
 #include "lvgl/src/misc/cache/instance/lv_image_cache.h"
 
 #include "src/gui/nowplaying/cover.h"
 #include "src/gui/shell/icons.h"
+#include "src/system/core/lang.h"
 
 // ---------------------------------------------------------------------------
-// The code
+// The two codes
 //
-// One code, whatever the interface language: this firmware has no Russian
-// interface, and Ko-fi takes no cards issued in Russia, so there is nothing
-// for a Boosty code to answer any more.
+// Ko-fi takes no cards issued in Russia, so the Russian interface gets a
+// Boosty code instead; every other language gets Ko-fi. The language is the
+// only thing there is to go on -- the device has no country and no account.
 //
 // The pictures live in /usr/resource/sonix/gui rather than in the binary, for
 // the same reason the button photographs do (see remap.c): a 380x380 RGB565
@@ -29,7 +31,8 @@
 // unpack with no scaling.
 // ---------------------------------------------------------------------------
 
-#define QR_PATH SONIX_RESOURCE_DIR "/gui/ko-fi-qr-code.png"
+#define QR_KOFI SONIX_RESOURCE_DIR "/gui/ko-fi-qr-code.png"
+#define QR_BOOSTY SONIX_RESOURCE_DIR "/gui/boosty-qr-code.png"
 #define QR_SIZE 380
 
 // White border around the code. The file has its own quiet zone; this is the
@@ -61,6 +64,11 @@ static cover_image_t qr;
 static lv_obj_t *heart;
 
 // ---------------------------------------------------------------------------
+
+static const char *qr_path(void) {
+	const char *language = lang_current();
+	return (language && strcmp(language, "Russian") == 0) ? QR_BOOSTY : QR_KOFI;
+}
 
 static void qr_release(void) {
 	if (qr_image) {
@@ -166,8 +174,9 @@ static void qr_open(void) {
 		return;
 	}
 
-	if (!cover_load_image_file(QR_PATH, QR_SIZE, QR_SIZE, COVER_FIT_CONTAIN, &qr)) {
-		fprintf(stderr, "easteregg: cannot read %s\n", QR_PATH);
+	const char *path = qr_path();
+	if (!cover_load_image_file(path, QR_SIZE, QR_SIZE, COVER_FIT_CONTAIN, &qr)) {
+		fprintf(stderr, "easteregg: cannot read %s\n", path);
 		return;
 	}
 

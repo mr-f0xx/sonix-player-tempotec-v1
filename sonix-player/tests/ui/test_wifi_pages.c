@@ -310,9 +310,9 @@ static void check_strings(const char *language_dir) {
 		languages++;
 	}
 	closedir(dir);
-	// The nine this firmware ships. A tenth added to the folder is meant to
+	// The ten this firmware ships. An eleventh added to the folder is meant to
 	// make this fail, so its texts get checked the same way.
-	assert(languages == 9);
+	assert(languages == 10);
 	assert(lang_set("English"));
 }
 

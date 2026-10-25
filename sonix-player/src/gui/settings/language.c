@@ -182,7 +182,7 @@ static void build_panel(gui_config_t *cfg) {
 	lv_obj_set_scrollable(panel, false);
 	lv_obj_set_hidden(panel, true);
 	lv_obj_set_flex_flow(panel, LV_FLEX_FLOW_COLUMN);
-	// Down from the top rather than centred: with eight languages the column is
+	// Down from the top rather than centred: with ten languages the column is
 	// tall enough that centring would slide it up over the heading. The date
 	// panel can centre because two cards and a button leave room to; this one
 	// does not.
@@ -202,7 +202,7 @@ static void build_panel(gui_config_t *cfg) {
 	lv_obj_set_style_text_font(panel_title, &font_ui_32, 0);
 
 	// The list takes whatever is left between the heading and the button, and
-	// scrolls inside it. Sized to its content instead, eight languages already
+	// scrolls inside it. Sized to its content instead, ten languages already
 	// push the button off the bottom of a 720 px panel -- and the point of
 	// reading the folder rather than a table in here is that there is no fixed
 	// number of them.
@@ -253,7 +253,7 @@ void language_show_first_boot(void) {
 	lv_obj_set_hidden(panel, false);
 	lv_obj_move_foreground(panel);
 
-	// Reading eight languages takes as long as it takes, and blanking a panel
+	// Reading ten languages takes as long as it takes, and blanking a panel
 	// on the top layer also kills the touchscreen.
 	power_hold_screen_on(true);
 }
