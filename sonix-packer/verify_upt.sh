@@ -39,8 +39,29 @@ trap cleanup EXIT
 
 7z t "$UPT" >/dev/null
 7z x "$UPT" -o"$WORK/iso" -y >/dev/null
-OTA="$WORK/iso/ota_v0"
-[ -f "$OTA/ota_update.in" ] || { echo "Error: image has no ota_v0/ota_update.in." >&2; exit 1; }
+# The OTA directory is named after the version it carries, which is the
+# stock baseline's name unless the packer stamped a newer one. It is found by
+# what it holds rather than assumed, so a stamped image verifies the same way
+# an unstamped one does.
+OTA=""
+for candidate in "$WORK/iso"/ota_v*/ota_update.in; do
+	[ -f "$candidate" ] || continue
+	OTA="$(dirname "$candidate")"
+	break
+done
+[ -n "$OTA" ] || { echo "Error: image has no ota_v*/ota_update.in." >&2; exit 1; }
+
+# The stock scripts read ota_version from ota_update.in and current_version
+# from ota_config.in and refuse the update when the two disagree.
+config_version="$(sed -n 's/^[[:space:]]*current_version[[:space:]]*=[[:space:]]*//p' \
+	"$WORK/iso/ota_config.in" 2>/dev/null | head -n 1 | tr -d '\r ')"
+update_version="$(sed -n 's/^[[:space:]]*ota_version[[:space:]]*=[[:space:]]*//p' \
+	"$OTA/ota_update.in" | head -n 1 | tr -d '\r ')"
+if [ -n "$config_version" ] && [ "$config_version" != "$update_version" ]; then
+	echo "Error: ota_config.in declares current_version $config_version but ota_update.in declares ota_version $update_version." >&2
+	exit 1
+fi
+printf 'Verified ota directory %-14s version %s\n' "$(basename "$OTA")" "${update_version:-none}"
 
 metadata_for() {
 	local wanted="$1" key="$2"

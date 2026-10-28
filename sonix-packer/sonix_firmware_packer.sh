@@ -74,8 +74,24 @@ OUTPUT_UPT="$SCRIPT_DIR/v1.upt"
 ASSETS_DIR="$SCRIPT_DIR/assets"
 MODEL_ASSETS="$ASSETS_DIR/$MODEL_DIR"
 
+# The version this image declares to the stock firmware's update machinery.
+#
+# The stock OTA scripts refuse an update whose declared version is not newer
+# than the one the device already records, and the version an image carries is
+# the one its stock baseline shipped: the packer re-emits ota_config.in and the
+# ota_v<version> directory exactly as the stock .upt had them. An image built
+# from stock 1.2 therefore declares 1.2, and a stock 1.3 player -- which
+# records a newer version -- refuses it. Declaring the Sonix player's own
+# version instead, which is newer than every stock V1 release, makes one image
+# installable on every V1 baseline, 1.2 and 1.3 alike.
+#
+# SONIX_OTA_VERSION overrides the default.
+SONIX_OTA_VERSION="${SONIX_OTA_VERSION:-1.9.0}"
+
 WORK_DIR="$SCRIPT_DIR/temp"
-OTA_DIR="$WORK_DIR/ota_v0"
+# Filled in from the stock image itself in step 1: the directory is named
+# ota_v<version>, and the version is the stock baseline's, not ours.
+OTA_DIR=""
 SQUASH_DIR="$SCRIPT_DIR/squashfs-root"
 MERGED_SQUASHFS="$SCRIPT_DIR/rootfs_original.squashfs"
 
@@ -236,7 +252,18 @@ build_image() {
 
 	7z x "$SOURCE_UPT" -o"$WORK_DIR" -y > /dev/null
 
-	[ -d "$OTA_DIR" ] || die "there is no ota_v0 folder inside the .upt: not a firmware of this kind."
+	# The OTA directory is named after the version it carries, and the name is
+	# the stock image's, not ours: stock 1.2 ships ota_v0, a newer baseline may
+	# ship another. It is found by what it holds rather than assumed, because
+	# assuming ota_v0 is what would stop this script building from a newer
+	# stock at all.
+	OTA_DIR=""
+	for candidate in "$WORK_DIR"/ota_v*/ota_update.in; do
+		[ -f "$candidate" ] || continue
+		OTA_DIR="$(dirname "$candidate")"
+		break
+	done
+	[ -n "$OTA_DIR" ] || die "there is no ota_v*/ota_update.in inside the .upt: not a firmware of this kind."
 
 	say "    Joining the rootfs chunks..."
 	( cd "$OTA_DIR" && cat rootfs.squashfs.* ) > "$MERGED_SQUASHFS"
@@ -254,7 +281,57 @@ build_image() {
 	say ""
 
 	# ==========================================================================
-	# 1b. The stock player's own Qobuz credentials (opt in)
+	# 1b. The version this image declares
+	# ==========================================================================
+	#
+	# See SONIX_OTA_VERSION above. Two files at the root of the .upt tell the
+	# stock machinery what is being offered: ota_config.in's current_version,
+	# and the ota_v<version> directory that carries the update. Both are
+	# rewritten here, and the .ok sentinel beside the directory with them,
+	# because the device looks the update up by that version and would find
+	# nothing if the directory kept the stock baseline's name.
+	step "[$MODEL_NAME] stamping the OTA version"
+
+	OTA_CONFIG="$WORK_DIR/ota_config.in"
+	[ -f "$OTA_CONFIG" ] || die "the image has no ota_config.in: not a firmware of this kind."
+
+	STOCK_VERSION="$(sed -n 's/^[[:space:]]*current_version[[:space:]]*=[[:space:]]*//p' \
+		"$OTA_CONFIG" | head -n 1 | tr -d '\r ')"
+	if [ -z "$STOCK_VERSION" ]; then
+		STOCK_VERSION="$(basename "$OTA_DIR")"
+		STOCK_VERSION="${STOCK_VERSION#ota_v}"
+	fi
+
+	OTA_VERSION="$SONIX_OTA_VERSION"
+	case "$OTA_VERSION" in
+		''|*[!0-9.]*) die "SONIX_OTA_VERSION='$SONIX_OTA_VERSION' is not a version number." ;;
+	esac
+
+	sed_file "s|^[[:space:]]*current_version[[:space:]]*=.*|current_version=$OTA_VERSION|" \
+		"$OTA_CONFIG"
+	grep -q "^current_version=$OTA_VERSION" "$OTA_CONFIG" ||
+		die "current_version was not stamped with $OTA_VERSION."
+
+	# The directory is named ota_v<version>, and the .ok sentinel the stock
+	# scripts look for is named after it too. Both move together, or the
+	# device would find the version it was told about and no update under it.
+	OTA_SUFFIX="$(basename "$OTA_DIR")"
+	OTA_SUFFIX="${OTA_SUFFIX#ota_v}"
+
+	if [ "$OTA_VERSION" != "$OTA_SUFFIX" ]; then
+		for entry in "$WORK_DIR"/ota_v"$OTA_SUFFIX" "$WORK_DIR"/ota_v"$OTA_SUFFIX".*; do
+			[ -e "$entry" ] || continue
+			mv "$entry" "$WORK_DIR/ota_v$OTA_VERSION${entry#"$WORK_DIR"/ota_v"$OTA_SUFFIX"}"
+		done
+	fi
+
+	OTA_DIR="$WORK_DIR/ota_v$OTA_VERSION"
+	[ -d "$OTA_DIR" ] || die "the image has no ota_v$OTA_VERSION directory after stamping."
+	say "    current_version: $STOCK_VERSION -> $OTA_VERSION"
+	say ""
+
+	# ==========================================================================
+	# 1c. The stock player's own Qobuz credentials (opt in)
 	# ==========================================================================
 	#
 	# Qobuz issues no application credentials for personal or open-source
@@ -779,8 +856,11 @@ if [ \"\$boot_sel\" = \"logo:4\" ]; then boot_waited=0; while [ \$boot_waited -l
 
 	[ -n "$X_SIZE" ] && [ -n "$X_MD5" ] || die "cannot read the kernel entry from ota_update.in."
 
+	# The version line is the one this image declares, not a constant: the
+	# stock scripts read ota_version from this file and current_version from
+	# ota_config.in and refuse the update when the two disagree.
 	cat > "$OTA_DIR/ota_update.in" <<-EOF
-	ota_version=0
+	ota_version=$OTA_VERSION
 
 	img_type=kernel
 	img_name=xImage

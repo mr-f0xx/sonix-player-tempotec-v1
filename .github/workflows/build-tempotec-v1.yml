@@ -29,6 +29,16 @@ on:
         description: Release tag to upload the built image to, replacing its assets (v1.upt, v1_md5.txt). Empty publishes nothing.
         required: false
         type: string
+      # The version the image declares to the stock firmware's update machinery.
+      # The stock scripts refuse an update that is not newer than the version
+      # the device already records, and an image built from stock 1.2 carries
+      # 1.2 -- which a stock 1.3 player rejects. The default sits above every
+      # stock V1 release, so one image installs on 1.2 and 1.3 alike.
+      sonix_ota_version:
+        description: Version this image declares to the stock updater (must be newer than the newest stock V1 release).
+        required: false
+        type: string
+        default: '1.9.0'
   pull_request:
     paths:
       - .github/workflows/build-tempotec-v1.yml
@@ -173,6 +183,8 @@ jobs:
         run: make target -j"$(nproc)"
 
       - name: Build v1.upt
+        env:
+          SONIX_OTA_VERSION: ${{ inputs.sonix_ota_version || '1.9.0' }}
         run: |
           install -m 0755 sonix-player/sonix_player sonix-packer/sonix_player
           install -m 0755 sonix-player/sonix_launch sonix-packer/sonix_launch

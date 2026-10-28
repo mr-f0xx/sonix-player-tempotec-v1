@@ -32,7 +32,9 @@ is_v1_upt() {
 	[ -f "$file" ] || return 1
 	# The update must be an ISO understood by 7-Zip and carry the OTA metadata,
 	# not merely be any file somebody happened to call v1.upt.
-	7z l "$file" 2>/dev/null | tr '\\' '/' | grep -E 'ota_v0/ota_update\.in$' >/dev/null
+	# The OTA directory is named after the version it carries, so a stock
+	# image is not necessarily ota_v0: match the shape, not the version.
+	7z l "$file" 2>/dev/null | tr '\\' '/' | grep -E 'ota_v[^/]*/ota_update\.in$' >/dev/null
 }
 
 find_named_upt() {
@@ -74,7 +76,7 @@ fi
 	exit 1
 }
 is_v1_upt "$CANDIDATE" || {
-	echo "Error: $CANDIDATE has no ota_v0/ota_update.in and is not a supported V1 firmware image." >&2
+	echo "Error: $CANDIDATE has no ota_v*/ota_update.in and is not a supported V1 firmware image." >&2
 	exit 1
 }
 

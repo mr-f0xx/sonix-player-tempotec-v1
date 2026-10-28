@@ -240,6 +240,8 @@ Only attempt this on a TempoTec Variations V1. Read the warning above before pro
 
 The package builder is designed to preserve the stock `xImage` kernel and leave the existing update/recovery path in place. This is checked during the build, but it is **not** a guarantee that recovery will work on every device or in every failure case.
 
+The image declares itself to the stock updater as the Sonix firmware's own version, not as the stock version it was built from. The stock scripts refuse an update that is not newer than the version the device already records, so an image that carried its baseline's version would be rejected by any player recording a newer one — which is why a stock 1.3 player rejects an image built from stock 1.2. Declaring a version above every stock V1 release makes **one image installable on every V1 baseline, 1.2 and 1.3 alike**. `SONIX_OTA_VERSION` sets what the image declares; in the workflow it is the `sonix_ota_version` input, and it must stay newer than the newest stock V1 release.
+
 ## Streaming credentials
 
 Credentials for Qobuz, Tidal, Podcast Index and Last.fm are not included in this repository or in the standard workflow artifact. Without usable credentials, those services remain disabled; local playback does not require them.
