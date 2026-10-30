@@ -26,4 +26,8 @@ void panel_touch_enable(bool enabled);
 // device.
 const char *panel_touch_device(void);
 
+// Drains any accumulated events from the evdev queue and resets the touch filter
+// so that wake-up transients or touches during screen-off do not trigger ghost clicks.
+void panel_touch_flush(void);
+
 #endif /* PANEL_H */

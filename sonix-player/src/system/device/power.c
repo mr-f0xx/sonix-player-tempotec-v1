@@ -11,6 +11,7 @@
 #include "src/system/audio/waveform.h"
 #include "src/system/device/ota.h"
 #include "src/system/device/system.h"
+#include "src/system/core/panel.h"
 
 #include <dirent.h>
 #include <sys/reboot.h>
@@ -1583,6 +1584,7 @@ void power_screen_off(void) {
 	power_set_double_tap_wake(g_double_tap_wake);
 
 	set_indevs_enabled(false); // no touch events into LVGL while the panel is down
+	panel_touch_flush();
 	fade_to(BRIGHTNESS_MIN);   // smooth dim down
 	screen_power(false);
 
@@ -1760,6 +1762,7 @@ void power_screen_on(void) {
 	// Hold at zero until the controller has carried the fresh frame out to
 	// the panel -- the moment before this is when the reset white could show.
 	backlight_hold_until_panel_shows();
+	panel_touch_flush();
 	set_indevs_enabled(true);
 	indev_timers_set_paused(false);
 
