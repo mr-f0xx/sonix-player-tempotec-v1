@@ -22,6 +22,7 @@
 #include <unistd.h>
 
 #include "src/system/core/config.h"
+#include "src/system/db/sqlite3.h"
 #include "src/system/library/cue.h"
 #include "src/system/library/library.h"
 #include "src/system/decode/mp4.h"
@@ -242,6 +243,28 @@ static void test_replay_from_start_counts_again(void) {
 	library_index_close(ix);
 }
 
+static void test_track_artists(const char *path) {
+	char names[7][LIBRARY_ARTIST_NAME_MAX];
+	library_close();
+	sqlite3 *db = NULL;
+	CHECK(sqlite3_open(path, &db) == SQLITE_OK);
+	const char *sql =
+		"INSERT INTO MEDIA_TABLE(id,path,artist) VALUES(100,'/single','Solo'),"
+		"(101,'/split','First feat. Second'),(102,'/empty','');"
+		"INSERT INTO ARTIST_LINK(path,artist) VALUES('/split','First'),('/split','Second');";
+	CHECK(sqlite3_exec(db, sql, NULL, NULL, NULL) == SQLITE_OK);
+	sqlite3_close(db);
+	CHECK(library_open(path));
+	CHECK(library_track_artists("/single", names, 7) == 1);
+	CHECK(strcmp(names[0], "Solo") == 0);
+	CHECK(library_track_artists("/split", names, 7) == 2);
+	CHECK(strcmp(names[0], "First") == 0 && strcmp(names[1], "Second") == 0);
+	CHECK(library_track_artists("/split", names, 1) == 1);
+	CHECK(library_track_artists("/empty", names, 7) == 0);
+	CHECK(library_track_artists("/missing", names, 7) == 0);
+	CHECK(library_track_artists(NULL, names, 7) == 0);
+}
+
 int main(void) {
 	char dir[] = "/tmp/sonix-mostplayed-test-XXXXXX";
 	if (!mkdtemp(dir)) {
@@ -264,6 +287,7 @@ int main(void) {
 	test_order_follows_counts();
 	test_counts_survive_reopen();
 	test_replay_from_start_counts_again();
+	test_track_artists(db);
 
 	library_close();
 
