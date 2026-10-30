@@ -36,12 +36,22 @@ lv_obj_t *playlistpage_screen;
 // thousands of tracks, so the browser's windowing machinery would cost more
 // than it saves here.
 
+// The V1 has only 240x320 pixels. Keep both creation actions and the empty
+// hint visible below its header, without making playlist rows too small to tap.
 #define ROW_HEIGHT 88
 #define ROW_GAP 8
+static gui_config_t *config;
+static bool compact_page(void) { return config && config->screen_width < 320; }
+static int page_row_height(void) { return compact_page() ? 56 : ROW_HEIGHT; }
+static int page_row_gap(void) { return compact_page() ? 4 : ROW_GAP; }
+static int page_row_pad(void) { return compact_page() ? 10 : 16; }
+static int page_icon_gap(void) { return compact_page() ? 8 : 14; }
+static void scale_row_icon(lv_obj_t *icon) {
+	if (compact_page()) lv_image_set_scale(icon, 192); // 34 px -> 25 px
+}
 #define ROW_RADIUS 12
 #define NAME_MAX 200
 
-static gui_config_t *config;
 static lv_obj_t *list;
 static lv_obj_t *title_label;
 
@@ -602,15 +612,15 @@ static lv_obj_t *add_row(const char *name, const char *subtitle, const lv_image_
 	}
 
 	lv_obj_t *row = lv_btn_create(list);
-	lv_obj_set_size(row, lv_pct(100), ROW_HEIGHT);
+	lv_obj_set_size(row, lv_pct(100), page_row_height());
 	lv_obj_add_style(row, &theme_style_card, 0);
 	lv_obj_add_style(row, &theme_style_card_pressed, LV_STATE_PRESSED);
 	lv_obj_set_style_radius(row, ROW_RADIUS, 0);
 	lv_obj_set_style_border_width(row, 0, 0);
 	lv_obj_set_style_shadow_width(row, 0, 0);
-	lv_obj_set_style_pad_hor(row, 16, 0);
-	lv_obj_set_style_pad_ver(row, 10, 0);
-	lv_obj_set_style_pad_column(row, 14, 0);
+	lv_obj_set_style_pad_hor(row, page_row_pad(), 0);
+	lv_obj_set_style_pad_ver(row, compact_page() ? 6 : 10, 0);
+	lv_obj_set_style_pad_column(row, page_icon_gap(), 0);
 	lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
 	lv_obj_set_flex_align(row, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 	lv_obj_set_event_bubble(row, true); // the player sheet drags from here too
@@ -635,6 +645,7 @@ static lv_obj_t *add_row(const char *name, const char *subtitle, const lv_image_
 
 	lv_obj_t *icon = lv_image_create(row);
 	lv_image_set_src(icon, glyph);
+	scale_row_icon(icon);
 	lv_obj_add_style(icon, &theme_style_icon, 0);
 	lv_obj_set_style_image_recolor_opa(icon, LV_OPA_COVER, 0);
 
@@ -654,16 +665,16 @@ static lv_obj_t *add_row(const char *name, const char *subtitle, const lv_image_
 	lv_label_set_long_mode(name_label, LV_LABEL_LONG_DOT);
 	lv_obj_set_width(name_label, lv_pct(100));
 	// One line, cut with dots past it.
-	lv_obj_set_height(name_label, lv_font_get_line_height(&font_ui_24));
+	lv_obj_set_height(name_label, lv_font_get_line_height(compact_page() ? &font_ui_18 : &font_ui_24));
 	lv_obj_add_style(name_label, &theme_style_text, 0);
-	lv_obj_set_style_text_font(name_label, &font_ui_24, 0);
+	lv_obj_set_style_text_font(name_label, compact_page() ? &font_ui_18 : &font_ui_24, 0);
 
 	lv_obj_t *sub = NULL;
 	if (subtitle && subtitle[0]) {
 		sub = lv_label_create(texts);
 		lv_label_set_text(sub, subtitle);
 		lv_obj_add_style(sub, &theme_style_text_dim, 0);
-		lv_obj_set_style_text_font(sub, &font_ui_16, 0);
+		lv_obj_set_style_text_font(sub, compact_page() ? &font_ui_14 : &font_ui_16, 0);
 	}
 
 	if (qobuz_id > 0 || uuid) {
@@ -672,7 +683,7 @@ static lv_obj_t *add_row(const char *name, const char *subtitle, const lv_image_
 
 	// The ellipsis on the right edge, as on every track row.
 	lv_obj_t *menu_btn = lv_btn_create(row);
-	lv_obj_set_size(menu_btn, 44, 44);
+	lv_obj_set_size(menu_btn, compact_page() ? 40 : 44, compact_page() ? 40 : 44);
 	lv_obj_set_style_bg_opa(menu_btn, LV_OPA_TRANSP, 0);
 	lv_obj_set_style_border_width(menu_btn, 0, 0);
 	lv_obj_set_style_shadow_width(menu_btn, 0, 0);
@@ -681,6 +692,7 @@ static lv_obj_t *add_row(const char *name, const char *subtitle, const lv_image_
 
 	lv_obj_t *dots = lv_image_create(menu_btn);
 	lv_image_set_src(dots, &icon_ellipsis_vertical);
+	scale_row_icon(dots);
 	lv_obj_add_style(dots, &theme_style_icon, 0);
 	lv_obj_set_style_image_recolor_opa(dots, LV_OPA_COVER, 0);
 	lv_obj_center(dots);
@@ -878,37 +890,37 @@ static void report_add_entry(const import_entry_t *entry) {
 	lv_obj_set_style_radius(card, ROW_RADIUS, 0);
 	lv_obj_set_style_border_width(card, 0, 0);
 	lv_obj_set_style_shadow_width(card, 0, 0);
-	lv_obj_set_style_pad_hor(card, 16, 0);
-	lv_obj_set_style_pad_ver(card, 14, 0);
+	lv_obj_set_style_pad_hor(card, page_row_pad(), 0);
+	lv_obj_set_style_pad_ver(card, compact_page() ? 8 : 14, 0);
 	lv_obj_set_style_pad_row(card, 6, 0);
 	lv_obj_set_flex_flow(card, LV_FLEX_FLOW_COLUMN);
 	lv_obj_set_scrollable(card, false);
 	lv_obj_set_clickable(card, false);
 
 	const playlists_import_result_t *got = &entry->got;
-	report_line(card, got->name, &font_ui_28, false);
+	report_line(card, got->name, compact_page() ? &font_ui_18 : &font_ui_28, false);
 
 	if (!entry->imported) {
-		report_line(card, tr("playlist_import_nothing_usable"), &font_ui_22, true);
+		report_line(card, tr("playlist_import_nothing_usable"), compact_page() ? &font_ui_16 : &font_ui_22, true);
 		return;
 	}
 
 	char line[192];
 	snprintf(line, sizeof(line), tr("playlist_found_d_missing_d"), got->found, got->missing);
-	report_line(card, line, &font_ui_24, false);
+	report_line(card, line, compact_page() ? &font_ui_16 : &font_ui_24, false);
 	if (got->by_name > 0) {
 		snprintf(line, sizeof(line), tr("playlist_d_found_again_by_file_name"), got->by_name);
-		report_line(card, line, &font_ui_22, true);
+		report_line(card, line, compact_page() ? &font_ui_16 : &font_ui_22, true);
 	}
 	if (got->missing > 0) {
-		report_line(card, tr("playlist_not_found_2"), &font_ui_22, true);
+		report_line(card, tr("playlist_not_found_2"), compact_page() ? &font_ui_16 : &font_ui_22, true);
 		for (int m = 0; m < got->missing_listed; m++) {
-			lv_obj_t *name = report_line(card, got->missing_names[m], &font_ui_20, true);
+			lv_obj_t *name = report_line(card, got->missing_names[m], compact_page() ? &font_ui_14 : &font_ui_20, true);
 			lv_obj_set_style_pad_left(name, 14, 0);
 		}
 		if (got->missing > got->missing_listed) {
 			snprintf(line, sizeof(line), tr("playlist_not_listed_d"), got->missing - got->missing_listed);
-			lv_obj_t *more = report_line(card, line, &font_ui_20, true);
+			lv_obj_t *more = report_line(card, line, compact_page() ? &font_ui_14 : &font_ui_20, true);
 			lv_obj_set_style_pad_left(more, 14, 0);
 		}
 	}
@@ -1048,7 +1060,7 @@ static bool import_start(void) {
 	lv_label_set_long_mode(label, LV_LABEL_LONG_WRAP);
 	lv_obj_set_width(label, lv_pct(100));
 	lv_obj_add_style(label, &theme_style_text_dim, 0);
-	lv_obj_set_style_text_font(label, &font_ui_24, 0);
+	lv_obj_set_style_text_font(label, compact_page() ? &font_ui_16 : &font_ui_24, 0);
 	lv_obj_set_hidden(import_action, true);
 	return true;
 }
@@ -1155,21 +1167,22 @@ char* get_playlist_location_tr(playlists_candidate_t candidate) {
 
 static void import_add_candidate_row(int index) {
 	lv_obj_t *row = lv_btn_create(import_body);
-	lv_obj_set_size(row, lv_pct(100), ROW_HEIGHT);
+	lv_obj_set_size(row, lv_pct(100), page_row_height());
 	lv_obj_add_style(row, &theme_style_card, 0);
 	lv_obj_add_style(row, &theme_style_card_pressed, LV_STATE_PRESSED);
 	lv_obj_set_style_radius(row, ROW_RADIUS, 0);
 	lv_obj_set_style_border_width(row, 0, 0);
 	lv_obj_set_style_shadow_width(row, 0, 0);
-	lv_obj_set_style_pad_hor(row, 16, 0);
-	lv_obj_set_style_pad_ver(row, 10, 0);
-	lv_obj_set_style_pad_column(row, 14, 0);
+	lv_obj_set_style_pad_hor(row, page_row_pad(), 0);
+	lv_obj_set_style_pad_ver(row, compact_page() ? 6 : 10, 0);
+	lv_obj_set_style_pad_column(row, page_icon_gap(), 0);
 	lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
 	lv_obj_set_flex_align(row, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 	lv_obj_add_event_cb(row, import_row_clicked_cb, LV_EVENT_CLICKED, (void *)(intptr_t)index);
 
 	lv_obj_t *tick = lv_image_create(row);
 	lv_image_set_src(tick, &icon_check);
+	scale_row_icon(tick);
 	lv_obj_add_style(tick, &theme_style_icon, 0);
 	lv_obj_set_style_image_recolor_opa(tick, LV_OPA_COVER, 0);
 	import_ticks[index] = tick;
@@ -1190,19 +1203,20 @@ static void import_add_candidate_row(int index) {
 	lv_label_set_text(name, import_candidates[index].name);
 	lv_label_set_long_mode(name, LV_LABEL_LONG_DOT);
 	lv_obj_set_width(name, lv_pct(100));
-	lv_obj_set_height(name, lv_font_get_line_height(&font_ui_24));
+	lv_obj_set_height(name, lv_font_get_line_height(compact_page() ? &font_ui_18 : &font_ui_24));
 	lv_obj_add_style(name, &theme_style_text, 0);
-	lv_obj_set_style_text_font(name, &font_ui_24, 0);
+	lv_obj_set_style_text_font(name, compact_page() ? &font_ui_18 : &font_ui_24, 0);
 
 	lv_obj_t *where = lv_label_create(texts);
 	lv_label_set_text(where,tr(get_playlist_location_tr(import_candidates[index])));
 	lv_obj_add_style(where, &theme_style_text_dim, 0);
-	lv_obj_set_style_text_font(where, &font_ui_16, 0);
+	lv_obj_set_style_text_font(where, compact_page() ? &font_ui_14 : &font_ui_16, 0);
 
 	// A playlist by this name is already there, and importing replaces it.
 	if (import_candidates[index].exists) {
 		lv_obj_t *alert = lv_image_create(row);
 		lv_image_set_src(alert, &icon_playlist_overwrite_alert);
+		scale_row_icon(alert);
 		lv_obj_set_style_image_recolor(alert, lv_color_hex(IMPORT_ALERT_COLOUR), 0);
 		lv_obj_set_style_image_recolor_opa(alert, LV_OPA_COVER, 0);
 	}
@@ -1383,14 +1397,14 @@ static unsigned rows_revision;
 // path drawn differently would read as a different kind of thing.
 static lv_obj_t *action_row(const char *label_key, const lv_image_dsc_t *glyph, lv_event_cb_t cb) {
 	lv_obj_t *row = lv_btn_create(list);
-	lv_obj_set_size(row, lv_pct(100), ROW_HEIGHT);
+	lv_obj_set_size(row, lv_pct(100), page_row_height());
 	lv_obj_add_style(row, &theme_style_card, 0);
 	lv_obj_add_style(row, &theme_style_card_pressed, LV_STATE_PRESSED);
 	lv_obj_set_style_radius(row, ROW_RADIUS, 0);
 	lv_obj_set_style_border_width(row, 0, 0);
 	lv_obj_set_style_shadow_width(row, 0, 0);
-	lv_obj_set_style_pad_hor(row, 16, 0);
-	lv_obj_set_style_pad_column(row, 14, 0);
+	lv_obj_set_style_pad_hor(row, page_row_pad(), 0);
+	lv_obj_set_style_pad_column(row, page_icon_gap(), 0);
 	lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
 	lv_obj_set_flex_align(row, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 	lv_obj_set_event_bubble(row, true);
@@ -1398,6 +1412,7 @@ static lv_obj_t *action_row(const char *label_key, const lv_image_dsc_t *glyph, 
 
 	lv_obj_t *icon = lv_image_create(row);
 	lv_image_set_src(icon, glyph);
+	scale_row_icon(icon);
 	lv_obj_add_style(icon, &theme_style_icon, 0);
 	lv_obj_set_style_image_recolor(icon, theme()->accent, 0);
 	lv_obj_set_style_image_recolor_opa(icon, LV_OPA_COVER, 0);
@@ -1405,7 +1420,9 @@ static lv_obj_t *action_row(const char *label_key, const lv_image_dsc_t *glyph, 
 	lv_obj_t *label = lv_label_create(row);
 	lv_label_set_text(label, tr(label_key));
 	lv_obj_add_style(label, &theme_style_text, 0);
-	lv_obj_set_style_text_font(label, &font_ui_24, 0);
+	lv_obj_set_style_text_font(label, compact_page() ? &font_ui_18 : &font_ui_24, 0);
+	lv_label_set_long_mode(label, LV_LABEL_LONG_DOT);
+	lv_obj_set_flex_grow(label, 1);
 	lv_obj_set_style_text_color(label, theme()->accent, 0);
 	return row;
 }
@@ -1507,11 +1524,11 @@ static void rebuild_rows(void) {
 		lv_obj_t *note = lv_label_create(list);
 		lv_label_set_text(note, tr("playlist_empty_note"));
 		lv_obj_add_style(note, &theme_style_text_dim, 0);
-		lv_obj_set_style_text_font(note, &font_ui_24, 0);
+		lv_obj_set_style_text_font(note, compact_page() ? &font_ui_16 : &font_ui_24, 0);
 		lv_label_set_long_mode(note, LV_LABEL_LONG_WRAP);
 		lv_obj_set_width(note, lv_pct(100));
 		lv_obj_set_style_pad_hor(note, 8, 0);
-		lv_obj_set_style_pad_top(note, 12, 0);
+		lv_obj_set_style_pad_top(note, compact_page() ? 6 : 12, 0);
 		lv_obj_set_clickable(note, false);
 	}
 }
@@ -1608,8 +1625,8 @@ void playlistpage_init(gui_config_t *cfg) {
 	lv_obj_set_style_border_width(list, 0, 0);
 	lv_obj_set_style_radius(list, 0, 0);
 	lv_obj_set_style_pad_hor(list, cfg->padding, 0);
-	lv_obj_set_style_pad_bottom(list, 12, 0);
-	lv_obj_set_style_pad_gap(list, ROW_GAP, 0);
+	lv_obj_set_style_pad_bottom(list, compact_page() ? cfg->padding : 12, 0);
+	lv_obj_set_style_pad_gap(list, page_row_gap(), 0);
 	lv_obj_set_scroll_dir(list, LV_DIR_VER);
 	lv_obj_set_scrollbar_mode(list, LV_SCROLLBAR_MODE_AUTO);
 	lv_obj_set_flex_flow(list, LV_FLEX_FLOW_COLUMN);
@@ -1634,7 +1651,8 @@ void playlistpage_init(gui_config_t *cfg) {
 	lv_obj_set_style_text_font(heading, &font_ui_24, 0);
 	// Offset clear of the floating back chevron, which sits on top of this
 	// layer; the same offset every page title uses.
-	lv_obj_align(heading, LV_ALIGN_TOP_LEFT, cfg->padding + 56 + 14, cfg->padding + cfg->top_bar_height + 10);
+	lv_obj_align(heading, LV_ALIGN_TOP_LEFT, cfg->padding + settingsrow_corner_button_size(cfg) + (compact_page() ? 6 : 14),
+			 cfg->padding + cfg->top_bar_height + (compact_page() ? 6 : 10));
 
 	lv_obj_t *cancel = lv_btn_create(name_layer);
 	settingsrow_place_corner_button(cancel, cfg, 0);
@@ -1654,14 +1672,14 @@ void playlistpage_init(gui_config_t *cfg) {
 	lv_textarea_set_one_line(name_field, true);
 	lv_textarea_set_max_length(name_field, NAME_MAX);
 	lv_textarea_set_placeholder_text(name_field, tr("name"));
-	lv_obj_set_size(name_field, cfg->screen_width - 2 * cfg->padding, 62);
+	lv_obj_set_size(name_field, cfg->screen_width - 2 * cfg->padding, compact_page() ? 44 : 62);
 	lv_obj_set_scrollbar_mode(name_field, LV_SCROLLBAR_MODE_OFF);
-	lv_obj_align(name_field, LV_ALIGN_TOP_LEFT, cfg->padding, cfg->padding + cfg->top_bar_height + 60);
+	lv_obj_align(name_field, LV_ALIGN_TOP_LEFT, cfg->padding, cfg->padding + cfg->top_bar_height + (compact_page() ? 46 : 60));
 	lv_obj_add_style(name_field, &theme_style_card, 0);
 	lv_obj_set_style_radius(name_field, 12, 0);
 	lv_obj_set_style_border_width(name_field, 0, 0);
 	lv_obj_set_style_shadow_width(name_field, 0, 0);
-	lv_obj_set_style_pad_all(name_field, 14, 0);
+	lv_obj_set_style_pad_all(name_field, compact_page() ? 8 : 14, 0);
 	lv_obj_set_style_text_font(name_field, &font_ui_24, 0);
 	keyboard_style_caret(name_field);
 
@@ -1700,8 +1718,8 @@ void playlistpage_init(gui_config_t *cfg) {
 	import_heading = lv_label_create(import_layer);
 	lv_obj_add_style(import_heading, &theme_style_text, 0);
 	lv_label_set_long_mode(import_heading, LV_LABEL_LONG_DOT);
-	lv_obj_set_width(import_heading, cfg->screen_width - 2 * cfg->padding - 56 - 14);
-	lv_obj_align(import_heading, LV_ALIGN_TOP_LEFT, cfg->padding, cfg->padding + cfg->top_bar_height + 10);
+	lv_obj_set_width(import_heading, cfg->screen_width - 2 * cfg->padding - settingsrow_corner_button_size(cfg) - (compact_page() ? 6 : 14));
+	lv_obj_align(import_heading, LV_ALIGN_TOP_LEFT, cfg->padding, cfg->padding + cfg->top_bar_height + (compact_page() ? 6 : 10));
 	import_heading_set("playlist_import_playlists");
 
 	lv_obj_t *import_close = lv_btn_create(import_layer);
@@ -1720,7 +1738,7 @@ void playlistpage_init(gui_config_t *cfg) {
 
 	// The button sits on the bottom edge; the list has whatever is left.
 	import_action = lv_btn_create(import_layer);
-	lv_obj_set_size(import_action, cfg->screen_width - 2 * cfg->padding, 62);
+	lv_obj_set_size(import_action, cfg->screen_width - 2 * cfg->padding, compact_page() ? 44 : 62);
 	lv_obj_align(import_action, LV_ALIGN_BOTTOM_MID, 0, -cfg->padding);
 	lv_obj_set_style_bg_color(import_action, theme()->accent, 0);
 	lv_obj_set_style_border_width(import_action, 0, 0);
@@ -1730,20 +1748,20 @@ void playlistpage_init(gui_config_t *cfg) {
 
 	import_action_label = lv_label_create(import_action);
 	lv_label_set_text(import_action_label, tr("playlist_import"));
-	lv_obj_set_style_text_font(import_action_label, &font_ui_24, 0);
+	lv_obj_set_style_text_font(import_action_label, compact_page() ? &font_ui_18 : &font_ui_24, 0);
 	lv_obj_set_style_text_color(import_action_label, theme_on_accent(), 0);
 	lv_obj_center(import_action_label);
 
 	int import_top = content_top;
 	import_body = lv_obj_create(import_layer);
-	lv_obj_set_size(import_body, cfg->screen_width, cfg->screen_height - import_top - 62 - 2 * cfg->padding);
+	lv_obj_set_size(import_body, cfg->screen_width, cfg->screen_height - import_top - (compact_page() ? 44 : 62) - 2 * cfg->padding);
 	lv_obj_align(import_body, LV_ALIGN_TOP_LEFT, 0, import_top);
 	lv_obj_set_style_bg_opa(import_body, 0, 0);
 	lv_obj_set_style_border_width(import_body, 0, 0);
 	lv_obj_set_style_radius(import_body, 0, 0);
 	lv_obj_set_style_pad_hor(import_body, cfg->padding, 0);
 	lv_obj_set_style_pad_ver(import_body, 4, 0);
-	lv_obj_set_style_pad_gap(import_body, ROW_GAP, 0);
+	lv_obj_set_style_pad_gap(import_body, page_row_gap(), 0);
 	lv_obj_set_scroll_dir(import_body, LV_DIR_VER);
 	lv_obj_set_scrollbar_mode(import_body, LV_SCROLLBAR_MODE_AUTO);
 	lv_obj_set_flex_flow(import_body, LV_FLEX_FLOW_COLUMN);
