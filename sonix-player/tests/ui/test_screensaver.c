@@ -327,6 +327,19 @@ static int spectrum_bar_height(lv_obj_t *spectrum, int band) {
     return height;
 }
 
+/* The Neon style lives under the same spectrum object, after the segmented
+ * style's rail and bands: one rail container, then a halo and a core per
+ * four-pixel column. The core's drawn height is the column's own. */
+static lv_obj_t *neon_obj(lv_obj_t *spectrum) { return lv_obj_get_child(spectrum, 1 + VISUALIZER_BANDS * 24); }
+static int neon_bar_count(void) { return screen_w / 4; }
+static int neon_height(lv_obj_t *neon, int bar) {
+    // The columns are sized at runtime rather than laid out, so the cached
+    // coords LVGL measures from are only as fresh as the last layout.
+    lv_obj_update_layout(neon);
+    lv_obj_t *core = lv_obj_get_child(neon, 2 + 2 * bar);
+    return lv_obj_is_hidden(core) ? 0 : (int)lv_obj_get_height(core);
+}
+
 static void hide_now(void) {
 	screensaver_hide();
 	for (int i = 0; i < 100 && screensaver_is_visible(); i++) {
@@ -571,6 +584,14 @@ static void check_settings_card(const char *language_dir) {
 	lv_obj_t *group = settingsrow_pills_group(card, "screensaver_album_art", &style_pills);
 	lv_obj_t *fill = settingsrow_pill(style_pills, "screensaver_style_fill", SCREENSAVER_STYLE_FILL, noop_cb);
 	lv_obj_t *framed = settingsrow_pill(style_pills, "screensaver_style_framed", SCREENSAVER_STYLE_FRAMED, noop_cb);
+	// The visualizer's own card below it: the switch and the two looks it
+	// chooses between, built from the same helpers settings.c builds it
+	// with.
+	lv_obj_t *v_toggle = NULL, *v_pills = NULL;
+	lv_obj_t *v_card = settingsrow_toggle_pills(page, "screensaver_visualizer", noop_cb, &v_toggle, &v_pills);
+	(void)v_card;
+	lv_obj_t *bars = settingsrow_pill(v_pills, "screensaver_visualizer_bars", SCREENSAVER_VISUALIZER_BARS, noop_cb);
+	lv_obj_t *neon_pill = settingsrow_pill(v_pills, "screensaver_visualizer_neon", SCREENSAVER_VISUALIZER_NEON, noop_cb);
 	settingsrow_pill_active(fill, false);
 	settingsrow_pill_active(framed, true);
 	lv_obj_update_layout(page);
@@ -605,9 +626,10 @@ static void check_settings_card(const char *language_dir) {
 	assert(lv_obj_get_height(card) < tall);
 	lv_obj_set_hidden(group, false);
 
-	// Every language has the three texts -- a missing one would show its
+	// Every language has the five texts -- a missing one would show its
 	// bare tag -- and what is on screen follows a switch.
-	const char *keys[] = {"screensaver_album_art", "screensaver_style_fill", "screensaver_style_framed"};
+	const char *keys[] = {"screensaver_album_art", "screensaver_style_fill", "screensaver_style_framed",
+						  "screensaver_visualizer_bars", "screensaver_visualizer_neon"};
 	DIR *dir = opendir(language_dir);
 	assert(dir);
 	int languages = 0;
@@ -626,6 +648,8 @@ static void check_settings_card(const char *language_dir) {
 		assert(strcmp(lv_label_get_text(caption), tr("screensaver_album_art")) == 0);
 		assert(strcmp(lv_label_get_text(lv_obj_get_child(fill, 0)), tr("screensaver_style_fill")) == 0);
 		assert(strcmp(lv_label_get_text(lv_obj_get_child(framed, 0)), tr("screensaver_style_framed")) == 0);
+		assert(strcmp(lv_label_get_text(lv_obj_get_child(bars, 0)), tr("screensaver_visualizer_bars")) == 0);
+		assert(strcmp(lv_label_get_text(lv_obj_get_child(neon_pill, 0)), tr("screensaver_visualizer_neon")) == 0);
 		languages++;
 	}
 	closedir(dir);
@@ -634,6 +658,8 @@ static void check_settings_card(const char *language_dir) {
 	assert(languages == 11);
 	assert(lang_set("English"));
 	assert(strcmp(lv_label_get_text(caption), "Album art") == 0);
+	assert(strcmp(lv_label_get_text(lv_obj_get_child(bars, 0)), "Bars") == 0);
+	assert(strcmp(lv_label_get_text(lv_obj_get_child(neon_pill, 0)), "Neon") == 0);
 	lv_screen_load(previous);
 	lv_obj_delete(page);
 }
@@ -1002,6 +1028,64 @@ int main(int argc, char **argv) {
 	pump(100);
 	int falling_height = spectrum_bar_height(spectrum, 4);
 	assert(falling_height > 0 && falling_height < rising_height);
+
+	/* The Neon style: the same music through a different drawing. The
+	 * columns mirror about the dashed centre rail, eased from the same eight
+	 * bands, in the style's own cyan-to-magenta run rather than the
+	 * accent's. */
+	screensaver_set_visualizer_style(SCREENSAVER_VISUALIZER_NEON);
+	assert(screensaver_visualizer_style() == SCREENSAVER_VISUALIZER_NEON);
+	assert(config_init(config) &&
+		   config_get_int("screen", "screensaver_visualizer_style", -1) == SCREENSAVER_VISUALIZER_NEON);
+	lv_obj_t *neon = neon_obj(spectrum);
+	// The segmented style's own rail went with the reset; Neon carries the
+	// dashed centre line below rather than the accent bar at the foot.
+	assert(lv_obj_is_hidden(lv_obj_get_child(spectrum, 0)));
+	// The rail, then a halo and a core per four-pixel column...
+	assert((int)lv_obj_get_child_count(neon) == 1 + 2 * neon_bar_count());
+	// ...all resting: the style change resets whichever look was drawing.
+	for (int b = 0; b < VISUALIZER_BANDS; b++)
+		for (int y = 0; y < 24; y++) assert(lv_obj_is_hidden(lv_obj_get_child(spectrum, 1 + b * 24 + y)));
+	for (int i = 0; i < neon_bar_count(); i++) assert(neon_height(neon, i) == 0);
+	// The palette is the style's own: cyan at the edges, magenta at the
+	// middle of the wave -- and it does not follow the accent, which the
+	// segmented style above does.
+	assert(lv_color_eq(lv_obj_get_style_bg_color(lv_obj_get_child(neon, 2), 0), lv_color_make(0, 229, 255)));
+	int middle = (neon_bar_count() - 1) / 2;
+	assert(lv_color_eq(lv_obj_get_style_bg_color(lv_obj_get_child(neon, 2 + 2 * middle), 0),
+			   lv_color_make(255, 46, 199)));
+	theme_set_accent(1);
+	assert(lv_color_eq(lv_obj_get_style_bg_color(lv_obj_get_child(neon, 2), 0), lv_color_make(0, 229, 255)));
+	theme_set_accent(0);
+	// The same 850 Hz tone through the same levels: the column nearest band
+	// four swells, mirrored evenly about the centre line, and the column at
+	// the low-frequency edge -- seven bands away -- stays under it.
+	visualizer_feed(original, 4096, 2, 16, 44100);
+	int col = (4 * (neon_bar_count() - 1) + 3) / 7;
+	pump(50);
+	int neon_first = neon_height(neon, col);
+	assert(neon_first > 0);
+	lv_obj_t *core = lv_obj_get_child(neon, 2 + 2 * col);
+	assert((int)lv_obj_get_y(core) + (int)lv_obj_get_height(core) / 2 == (screen_h - strip_h) / 2);
+	assert(lv_obj_get_height(lv_obj_get_child(neon, 1 + 2 * col)) == lv_obj_get_height(core) + 2);
+	pump(100);
+	int neon_rising = neon_height(neon, col);
+	assert(neon_rising > neon_first);
+	assert(neon_height(neon, 0) < neon_rising);
+	dump_snapshot("neon-tone");
+	// Silence sinks the wave back toward the rail.
+	memset(pcm, 0, sizeof(pcm));
+	visualizer_feed(pcm, 4096, 2, 16, 44100);
+	pump(200);
+	int neon_fallen = neon_height(neon, col);
+	assert(neon_fallen > 0 && neon_fallen < neon_rising);
+	// And Bars again: the columns go with the reset, the segments with them.
+	screensaver_set_visualizer_style(SCREENSAVER_VISUALIZER_BARS);
+	assert(screensaver_visualizer_style() == SCREENSAVER_VISUALIZER_BARS);
+	assert(config_init(config) &&
+		   config_get_int("screen", "screensaver_visualizer_style", -1) == SCREENSAVER_VISUALIZER_BARS);
+	assert(!lv_obj_is_hidden(lv_obj_get_child(spectrum, 0)));
+	for (int i = 0; i < neon_bar_count(); i++) assert(neon_height(neon, i) == 0);
 	screensaver_set_visualizer(false);
 	assert(lv_obj_is_hidden(spectrum));
 	assert(!lv_obj_is_hidden(cover_box()));

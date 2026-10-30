@@ -72,6 +72,9 @@ static lv_obj_t *screensaver_images_pill;
 static lv_obj_t *screensaver_style_group; // "Album art", under the pills above
 static lv_obj_t *screensaver_fill_pill;
 static lv_obj_t *screensaver_framed_pill;
+static lv_obj_t *screensaver_visualizer_pills; // Bars and Neon, under the visualizer's switch
+static lv_obj_t *screensaver_bars_pill;
+static lv_obj_t *screensaver_neon_pill;
 static lv_obj_t *rotate_switch;
 
 static void doubletap_toggle_cb(lv_event_t *e) {
@@ -109,12 +112,32 @@ static void screensaver_refresh(void) {
 	screensaver_style_t style = screensaver_style();
 	settingsrow_pill_active(screensaver_fill_pill, style == SCREENSAVER_STYLE_FILL);
 	settingsrow_pill_active(screensaver_framed_pill, style == SCREENSAVER_STYLE_FRAMED);
+
+	// The visualizer's look, under its switch: only while the visualizer is
+	// on, the way the pills above follow the screensaver's own switch. Bars
+	// is what every setup had before Neon existed -- the only style there
+	// was -- so a config that never mentioned a style still reads as Bars.
+	lv_obj_set_hidden(screensaver_visualizer_pills, !screensaver_get_visualizer());
+	screensaver_visualizer_style_t vstyle = screensaver_visualizer_style();
+	settingsrow_pill_active(screensaver_bars_pill, vstyle == SCREENSAVER_VISUALIZER_BARS);
+	settingsrow_pill_active(screensaver_neon_pill, vstyle == SCREENSAVER_VISUALIZER_NEON);
 }
 
 static void screensaver_visualizer_cb(lv_event_t *e) {
     (void)e;
     screensaver_set_visualizer(lv_obj_has_state(screensaver_visualizer_switch, LV_STATE_CHECKED));
     screensaver_refresh();
+}
+
+// Bars or Neon. Like Fill or Framed above, the choice is only a drawing
+// decision: the same music feeds either look, and it takes effect on the
+// screensaver that is already up, if it is.
+static void screensaver_visualizer_style_cb(lv_event_t *e) {
+	if (player_sheet_drag_active() || switcher_back_drag_active()) {
+		return;
+	}
+	screensaver_set_visualizer_style((screensaver_visualizer_style_t)(intptr_t)lv_event_get_user_data(e));
+	screensaver_refresh();
 }
 
 static void screensaver_toggle_cb(lv_event_t *e) {
@@ -384,9 +407,20 @@ static void build_screen_page(gui_config_t *cfg) {
 		settingsrow_pill(style_pills, "screensaver_style_fill", SCREENSAVER_STYLE_FILL, screensaver_style_cb);
 	screensaver_framed_pill =
 		settingsrow_pill(style_pills, "screensaver_style_framed", SCREENSAVER_STYLE_FRAMED, screensaver_style_cb);
-	screensaver_refresh();
-	settingsrow_toggle(container, "screensaver_visualizer", &screensaver_visualizer_switch, screensaver_visualizer_cb);
+	// The visualizer, and which of its two looks: the accent-coloured bars
+	// or the neon-pulse wave. In one card, since the look only means
+	// anything while the visualizer is on -- its pills are shown and hidden
+	// with the switch, the way the screensaver's own pills above are.
+	settingsrow_toggle_pills(container, "screensaver_visualizer", screensaver_visualizer_cb,
+							 &screensaver_visualizer_switch, &screensaver_visualizer_pills);
+	screensaver_bars_pill = settingsrow_pill(screensaver_visualizer_pills, "screensaver_visualizer_bars",
+											 SCREENSAVER_VISUALIZER_BARS, screensaver_visualizer_style_cb);
+	screensaver_neon_pill = settingsrow_pill(screensaver_visualizer_pills, "screensaver_visualizer_neon",
+											 SCREENSAVER_VISUALIZER_NEON, screensaver_visualizer_style_cb);
 	if (screensaver_get_visualizer()) lv_obj_add_state(screensaver_visualizer_switch, LV_STATE_CHECKED);
+	// After every pill above exists, so the refresh can light the ones it
+	// should and hide the rows that mean nothing yet.
+	screensaver_refresh();
 
 	// Upside down, for holding the player the other way up.
 	settingsrow_toggle(container, "settings_rotate_screen", &rotate_switch, rotate_toggle_cb);

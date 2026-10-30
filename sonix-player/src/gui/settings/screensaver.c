@@ -42,12 +42,65 @@ static lv_timer_t *clock_timer;
 
 static bool enabled;
 static bool visualizer_selected;
-static lv_obj_t *spectrum, *spectrum_segments[VISUALIZER_BANDS][24];
+static lv_obj_t *spectrum, *spectrum_rail, *spectrum_segments[VISUALIZER_BANDS][24];
 static lv_timer_t *spectrum_timer;
 // Fixed-point bar heights, and the last rendered segment count.
 static int spectrum_level[VISUALIZER_BANDS], spectrum_height[VISUALIZER_BANDS];
 static uint8_t spectrum_target[VISUALIZER_BANDS];
 static unsigned spectrum_frame;
+
+// ---------------------------------------------------------------------------
+// The Neon style
+//
+// The visualizer's second look (see screensaver_visualizer_style_t in the
+// header), after the neon-pulse wave that music players and VJ loops draw:
+// thin columns mirrored about a dashed centre line, their heights one smooth
+// envelope interpolated from the same eight bands the segmented style reads,
+// and a fixed cyan-to-magenta run across the screen -- the glow is the
+// style, and an amber neon would not be one.
+//
+// Each column is two flat rectangles rather than a blurred shadow: a dim
+// halo a whole pitch wide, and a bright core half of that inside it. Flat
+// fills are what the software renderer can afford at twenty frames a
+// second, and two stacked flats read as a glow about as well as a blur
+// would, at a small fraction of its cost.
+// ---------------------------------------------------------------------------
+
+// Column pitch, in pixels: 60 columns across the 240 px panel, a two-pixel
+// core with a pixel of halo either side of it. The rail's dashes are half a
+// pitch wide with half a pitch of black between, so the line reads dashed
+// rather than solid under the quiet columns at the edges.
+#define NEON_PITCH 4
+#define NEON_HALO_W NEON_PITCH
+#define NEON_CORE_W (NEON_PITCH / 2)
+#define NEON_RAIL_H 2
+// The two ends of the colour run: cyan at the screen's edges, magenta at
+// the middle of the wave. Bars between them take the straight lerp of the
+// two, which passes through the blue-violet the reference look wears at
+// three-quarters of the way in.
+#define NEON_EDGE lv_color_make(0, 229, 255)
+#define NEON_MID lv_color_make(255, 46, 199)
+#define NEON_RAIL lv_color_make(165, 175, 255)
+#define NEON_HALO_OPA LV_OPA_30
+
+static screensaver_visualizer_style_t visualizer_style;
+static lv_obj_t *neon;	   // the whole style, laid over the spectrum's black page
+static lv_obj_t *neon_rail; // the dashed line the columns mirror about
+// One halo and one core per column, hidden until a tick draws them; the
+// height last drawn (halves of the column, so the mirrored pair is even),
+// and the fixed-point height easing toward the latest measurement.
+#define NEON_MAX_BARS 120
+static struct {
+	lv_obj_t *halo, *core;
+} neon_bars[NEON_MAX_BARS];
+static int neon_count, neon_center, neon_max_half;
+static int neon_half[NEON_MAX_BARS], neon_level[NEON_MAX_BARS];
+// Which two bands each column reads and in what proportion, worked out once
+// from the cosine ease below. The tick itself is then whole integer
+// arithmetic: sixty cosines a frame is work the start-up can spare and the
+// twenty-hertz pass cannot.
+static uint8_t neon_band_a[NEON_MAX_BARS], neon_band_b[NEON_MAX_BARS];
+static uint16_t neon_mix[NEON_MAX_BARS]; // weight of band a, 0..256
 
 static int screen_w, screen_h;
 static int strip_h;
@@ -107,6 +160,10 @@ static int strip_h;
 
 static screensaver_source_t source;
 static bool spectrum_now(void) { return visualizer_selected && source == SCREENSAVER_SOURCE_ALBUM; }
+// Which of the two looks the spectrum area is drawing. The Neon columns and
+// the segmented bars share that area, the timer and the levels; only one of
+// them is ever drawn at a time.
+static bool neon_now(void) { return spectrum_now() && visualizer_style == SCREENSAVER_VISUALIZER_NEON; }
 
 // The largest picture the folder is read for. Elsewhere that is the panel
 // itself, so a picture is drawn as it was made and never shrunk (see
@@ -229,6 +286,25 @@ void screensaver_set_visualizer(bool on) {
 		if (spectrum_now()) lv_timer_resume(spectrum_timer); else { lv_timer_pause(spectrum_timer); spectrum_reset(); }
 		refresh_content();
 	}
+}
+
+screensaver_visualizer_style_t screensaver_visualizer_style(void) { return visualizer_style; }
+
+void screensaver_set_visualizer_style(screensaver_visualizer_style_t chosen) {
+	visualizer_style = chosen == SCREENSAVER_VISUALIZER_NEON ? SCREENSAVER_VISUALIZER_NEON
+															 : SCREENSAVER_VISUALIZER_BARS;
+	config_set_int("screen", "screensaver_visualizer_style", (int)visualizer_style);
+	config_save();
+	// Both styles live under the same spectrum area, and the reset drops
+	// whichever was drawing so the other starts from nothing: the columns
+	// hidden, the segments hidden, the next tick redrawing from the music
+	// rather than from what the other look left behind. The segmented
+	// style's rail goes with its segments and comes back with them; Neon
+	// carries its own dashed line at the centre.
+	if (screensaver_is_visible() && spectrum_now()) {
+		spectrum_reset();
+	}
+	lv_obj_set_hidden(spectrum_rail, visualizer_style == SCREENSAVER_VISUALIZER_NEON);
 }
 
 static void request_next(void);
@@ -1044,6 +1120,42 @@ static void spectrum_tick(lv_timer_t *timer) {
     (void)timer;
     if (!screensaver_is_visible() || !spectrum_now() || !power_screen_is_on()) return;
     if ((spectrum_frame++ & 1u) == 0) visualizer_levels(spectrum_target);
+    if (neon_now()) {
+        for (int i = 0; i < neon_count; i++) {
+            // The eight band levels as the one smooth envelope the columns
+            // were mapped to at start-up (see screensaver_init), so a beat
+            // swells a hump of columns the way the reference wave does
+            // rather than eight separate blocks of them.
+            int level = (spectrum_target[neon_band_a[i]] * neon_mix[i] +
+                         spectrum_target[neon_band_b[i]] * (256 - neon_mix[i]) + 128) >> 8;
+            int target = level * neon_max_half * 256 / 255;
+            int delta = target - neon_level[i];
+            // The same quick attack and slower release as the segments, so
+            // both styles follow the music with the same feel.
+            int divisor = delta > 0 ? 3 : 6;
+            int step = delta / divisor;
+            if (!step && delta) step = delta > 0 ? 1 : -1;
+            neon_level[i] += step;
+            int half = (neon_level[i] + 255) / 256;
+            if (half == neon_half[i]) continue;
+            neon_half[i] = half;
+            if (half <= 0) {
+                lv_obj_set_hidden(neon_bars[i].halo, true);
+                lv_obj_set_hidden(neon_bars[i].core, true);
+                continue;
+            }
+            // Mirrored about the centre line: the core spans it evenly, the
+            // halo a pixel further each way for the glow's vertical reach.
+            int y = neon_center - half;
+            lv_obj_set_pos(neon_bars[i].halo, i * NEON_PITCH, y - 1);
+            lv_obj_set_size(neon_bars[i].halo, NEON_HALO_W, half * 2 + 2);
+            lv_obj_set_pos(neon_bars[i].core, i * NEON_PITCH + (NEON_PITCH - NEON_CORE_W) / 2, y);
+            lv_obj_set_size(neon_bars[i].core, NEON_CORE_W, half * 2);
+            lv_obj_set_hidden(neon_bars[i].halo, false);
+            lv_obj_set_hidden(neon_bars[i].core, false);
+        }
+        return;
+    }
     for (int b = 0; b < VISUALIZER_BANDS; b++) {
         int target = spectrum_target[b] * 24 * 256 / 255;
         int delta = target - spectrum_level[b];
@@ -1067,6 +1179,11 @@ static void spectrum_reset(void) {
         spectrum_level[b] = spectrum_height[b] = 0;
         spectrum_target[b] = 0;
     }
+    for (int i = 0; i < neon_count; i++) {
+        lv_obj_set_hidden(neon_bars[i].halo, true);
+        lv_obj_set_hidden(neon_bars[i].core, true);
+        neon_half[i] = neon_level[i] = 0;
+    }
     spectrum_frame = 0;
 }
 
@@ -1080,6 +1197,10 @@ void screensaver_init(gui_config_t *cfg) {
 	screensaver_set_card_root(cfg->sd_root_path);
 	enabled = config_get_bool("screen", "screensaver", false);
 	visualizer_selected = config_get_bool("screen", "screensaver_visualizer", false);
+	visualizer_style = config_get_int("screen", "screensaver_visualizer_style", SCREENSAVER_VISUALIZER_BARS) ==
+								   SCREENSAVER_VISUALIZER_NEON
+							   ? SCREENSAVER_VISUALIZER_NEON
+							   : SCREENSAVER_VISUALIZER_BARS;
 	source = config_get_int("screen", "screensaver_source", SCREENSAVER_SOURCE_ALBUM) == SCREENSAVER_SOURCE_IMAGES
 				 ? SCREENSAVER_SOURCE_IMAGES
 				 : SCREENSAVER_SOURCE_ALBUM;
@@ -1243,14 +1364,14 @@ void screensaver_init(gui_config_t *cfg) {
 	int step = (rail_y - screen_h / 12) / 24;
 	if (step < 2) step = 2;
 	int cell = (screen_w - 2 * margin) / VISUALIZER_BANDS;
-	lv_obj_t *rail = lv_obj_create(spectrum);
-	lv_obj_set_pos(rail, margin, rail_y);
-	lv_obj_set_size(rail, screen_w - 2 * margin, rail_h);
-	lv_obj_add_style(rail, &theme_style_accent_bg, 0);
-	lv_obj_set_style_bg_opa(rail, LV_OPA_COVER, 0);
-	lv_obj_set_style_border_width(rail, 0, 0);
-	lv_obj_set_style_radius(rail, 0, 0);
-	lv_obj_set_clickable(rail, false);
+	spectrum_rail = lv_obj_create(spectrum);
+	lv_obj_set_pos(spectrum_rail, margin, rail_y);
+	lv_obj_set_size(spectrum_rail, screen_w - 2 * margin, rail_h);
+	lv_obj_add_style(spectrum_rail, &theme_style_accent_bg, 0);
+	lv_obj_set_style_bg_opa(spectrum_rail, LV_OPA_COVER, 0);
+	lv_obj_set_style_border_width(spectrum_rail, 0, 0);
+	lv_obj_set_style_radius(spectrum_rail, 0, 0);
+	lv_obj_set_clickable(spectrum_rail, false);
 	for (int b = 0; b < VISUALIZER_BANDS; b++) for (int y = 0; y < 24; y++) {
 		lv_obj_t *segment = lv_obj_create(spectrum);
 		spectrum_segments[b][y] = segment;
@@ -1263,6 +1384,98 @@ void screensaver_init(gui_config_t *cfg) {
 		lv_obj_set_clickable(segment, false);
 		lv_obj_set_hidden(segment, true);
 	}
+	// The Neon style's own drawing inside the same area, built after the
+	// segments above so the indices the segmented style is reached by -- the
+	// rail first, then eight bands of twenty-four -- keep holding. The dashed
+	// centre line, then each column's halo and core: hidden until the first
+	// tick draws them, in the style's own palette rather than the accent's
+	// (see the Neon block at the top of this file).
+	neon_count = screen_w / NEON_PITCH;
+	if (neon_count > NEON_MAX_BARS) {
+		neon_count = NEON_MAX_BARS;
+	}
+	neon_center = spectrum_h / 2;
+	neon_max_half = neon_center - NEON_RAIL_H - 1;
+	// Whence each column reads: the eight band levels drawn as one smooth
+	// envelope, smoothstepped between neighbouring centres, so the tick is
+	// whole integer arithmetic (see neon_band_a above). The step is the
+	// usual t*t*(3-2t), in eight bits: zero slope at either end, like the
+	// cosine it stands in for.
+	for (int i = 0; i < neon_count; i++) {
+		int pos = neon_count > 1 ? i * (VISUALIZER_BANDS - 1) * 256 / (neon_count - 1) : 0;
+		int a = pos >> 8, b = a + 1 < VISUALIZER_BANDS ? a + 1 : a;
+		int t = pos & 0xff;
+		int ease = (t * t * (3 * 256 - 2 * t)) >> 16; // 0 on band a, 256 on band b
+		neon_band_a[i] = (uint8_t)a;
+		neon_band_b[i] = (uint8_t)b;
+		neon_mix[i] = (uint16_t)(256 - ease); // weight of band a
+	}
+	neon = lv_obj_create(spectrum);
+	lv_obj_set_size(neon, screen_w, spectrum_h);
+	lv_obj_set_pos(neon, 0, 0);
+	lv_obj_set_style_bg_opa(neon, LV_OPA_TRANSP, 0);
+	lv_obj_set_style_border_width(neon, 0, 0);
+	lv_obj_set_style_radius(neon, 0, 0);
+	lv_obj_set_style_pad_all(neon, 0, 0);
+	lv_obj_set_scrollable(neon, false);
+	lv_obj_set_clickable(neon, false);
+	neon_rail = lv_obj_create(neon);
+	lv_obj_set_size(neon_rail, screen_w, NEON_RAIL_H);
+	lv_obj_set_pos(neon_rail, 0, neon_center - NEON_RAIL_H / 2);
+	lv_obj_set_style_bg_opa(neon_rail, LV_OPA_TRANSP, 0);
+	lv_obj_set_style_border_width(neon_rail, 0, 0);
+	lv_obj_set_style_pad_all(neon_rail, 0, 0);
+	lv_obj_set_scrollable(neon_rail, false);
+	lv_obj_set_clickable(neon_rail, false);
+	for (int i = 0; i < neon_count; i++) {
+		lv_obj_t *dash = lv_obj_create(neon_rail);
+		lv_obj_set_pos(dash, i * NEON_PITCH, 0);
+		lv_obj_set_size(dash, NEON_PITCH - NEON_CORE_W, NEON_RAIL_H);
+		lv_obj_set_style_bg_color(dash, NEON_RAIL, 0);
+		lv_obj_set_style_bg_opa(dash, LV_OPA_COVER, 0);
+		lv_obj_set_style_border_width(dash, 0, 0);
+		lv_obj_set_style_radius(dash, 0, 0);
+		lv_obj_set_clickable(dash, false);
+		// Cyan at the screen's edges, magenta at the middle of the wave --
+		// set once here, from the column's place rather than from anything
+		// that changes, so a theme or accent change has nothing to repaint.
+		// The two ends are the literals themselves, not a mix of them: the
+		// endpoints of the run are what the style is named by.
+		lv_color_t tint = NEON_MID;
+		if (neon_count > 1) {
+			int mid = (neon_count - 1) / 2;
+			int d = i > mid ? i - mid : mid - i;
+			int t = 255 * d / mid; // 0 at the middle, 255 out at the edges
+			if (t >= 255) {
+				tint = NEON_EDGE;
+			} else if (t > 0) {
+				tint = lv_color_mix(NEON_EDGE, NEON_MID, (uint8_t)t);
+			}
+		}
+		lv_obj_t *halo = lv_obj_create(neon);
+		lv_obj_t *core = lv_obj_create(neon);
+		neon_bars[i].halo = halo;
+		neon_bars[i].core = core;
+		lv_obj_set_pos(halo, i * NEON_PITCH, neon_center - 1);
+		lv_obj_set_size(halo, NEON_HALO_W, 2);
+		lv_obj_set_style_bg_color(halo, tint, 0);
+		lv_obj_set_style_bg_opa(halo, NEON_HALO_OPA, 0);
+		lv_obj_set_style_border_width(halo, 0, 0);
+		lv_obj_set_style_radius(halo, 0, 0);
+		lv_obj_set_clickable(halo, false);
+		lv_obj_set_hidden(halo, true);
+		lv_obj_set_pos(core, i * NEON_PITCH + (NEON_PITCH - NEON_CORE_W) / 2, neon_center);
+		lv_obj_set_size(core, NEON_CORE_W, 0);
+		lv_obj_set_style_bg_color(core, tint, 0);
+		lv_obj_set_style_bg_opa(core, LV_OPA_COVER, 0);
+		lv_obj_set_style_border_width(core, 0, 0);
+		lv_obj_set_style_radius(core, 0, 0);
+		lv_obj_set_clickable(core, false);
+		lv_obj_set_hidden(core, true);
+	}
+	// The segmented style's rail belongs to that look; Neon carries its own
+	// dashed line at the centre instead.
+	lv_obj_set_hidden(spectrum_rail, visualizer_style == SCREENSAVER_VISUALIZER_NEON);
 	spectrum_timer = lv_timer_create(spectrum_tick, 50, NULL);
 	lv_timer_pause(spectrum_timer);
 	power_pause_in_standby(spectrum_timer);

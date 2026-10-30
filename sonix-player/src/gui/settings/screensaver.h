@@ -35,6 +35,27 @@ bool screensaver_get_enabled(void);
 void screensaver_set_visualizer(bool enabled);
 bool screensaver_get_visualizer(void);
 
+// How the visualizer draws. Config-backed ("screen"/"screensaver_visualizer_style");
+// either style reads the same eight live bands.
+//
+// Bars is the segmented equalizer the visualizer has always had, and the
+// default: eight bands of stacked segments over a rail, in the theme's
+// accent colour.
+//
+// Neon is the neon-pulse look -- the wave player visualizers and VJ loops
+// draw: thin columns mirrored about a dashed centre line, their heights one
+// smooth envelope interpolated from the same eight bands, glowing cyan at
+// the screen's edges through violet to magenta at the middle of the wave,
+// on black. The palette is the style's own rather than the theme's accent:
+// a neon that took the accent would not be neon.
+typedef enum {
+	SCREENSAVER_VISUALIZER_BARS = 0,
+	SCREENSAVER_VISUALIZER_NEON,
+} screensaver_visualizer_style_t;
+
+screensaver_visualizer_style_t screensaver_visualizer_style(void);
+void screensaver_set_visualizer_style(screensaver_visualizer_style_t style);
+
 // Where the picture comes from.
 //
 // Album is the artwork of what is playing, borrowed from the player and free.
