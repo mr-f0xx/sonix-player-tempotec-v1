@@ -1090,7 +1090,13 @@ int main(int argc, char **argv) {
 		assert(!lv_obj_is_hidden(seg));
 		assert(lv_color_eq(lv_obj_get_style_bg_color(seg, 0), LED_UNLIT));
 	}
+	// The grid fills the panel: the top slot touches the top edge of the
+	// screen and the sixteenth bar its right one, with no margin the
+	// reference frame has never heard of.
+	assert(lv_obj_get_y(led_seg(spectrum, 0, 23)) == 0);
+	assert(lv_obj_get_x(led_seg(spectrum, 15, 0)) + lv_obj_get_width(led_seg(spectrum, 15, 0)) >= 239);
 	assert(lv_color_eq(lv_obj_get_style_bg_color(led_cap(spectrum, 0), 0), lv_color_make(255, 232, 165)));
+	assert(lv_obj_get_style_shadow_width(led_cap(spectrum, 0), 0) == 0); // no grey fog round the caps
 	assert(lv_color_eq(lv_obj_get_style_bg_color(led_glow_of(spectrum, 0), 0), lv_color_make(255, 56, 2)));
 	assert(lv_obj_get_style_shadow_width(led_glow_of(spectrum, 0), 0) > 0); // the halo
 	// The colors are the analyzer's own: a palette change moves none of them.

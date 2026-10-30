@@ -71,7 +71,8 @@ static int led_level[VISUALIZER_LED_BANDS], led_height[VISUALIZER_LED_BANDS];
 static int led_peak[VISUALIZER_LED_BANDS], led_peak_shown[VISUALIZER_LED_BANDS];
 static int led_glow_h[VISUALIZER_LED_BANDS]; // the glow column's last height
 static uint8_t led_target[VISUALIZER_LED_BANDS];
-static int led_step, led_base_y, led_cell; // the grid's geometry, worked out when built
+static int led_base_y, led_cell; // the grid's geometry, worked out when built
+static int led_row_top[LED_SEGMENTS], led_row_h[LED_SEGMENTS]; // and its slots
 
 static int screen_w, screen_h;
 static int strip_h;
@@ -1140,12 +1141,14 @@ static lv_color_t led_segment_color(int seg) {
 	return lv_color_make(255, 152, 2);
 }
 
-// The LED grid: sixteen bars across the panel, their segments stacked from a
-// baseline just above the metadata strip to a breath below the top -- the
-// reference frame's proportions at this panel's size. Built the first time
-// the style is wanted (see led_built). Everything sits in one layer so the
-// style can swap the whole grid for Neon's; the glows are made first so they
-// paint under every segment.
+// The LED grid: sixteen bars shoulder to shoulder, the full width of the
+// panel, their segments stacked from a baseline just above the metadata
+// strip right up to the top edge of the screen -- every slot placed by its
+// share of the baseline, so neither the top nor the right can be left with
+// a margin the reference frame never has. Built the first time the style is
+// wanted (see led_built). Everything sits in one layer so the style can swap
+// the whole grid for Neon's; the glows are made first so they paint under
+// every segment.
 static void led_build(void) {
 	if (led_built) {
 		return;
@@ -1153,22 +1156,18 @@ static void led_build(void) {
 	led_built = true;
 
 	int area_h = screen_h - DEFAULT_STRIP_H;
-	int margin = screen_w / 60;
-	if (margin < 2) {
-		margin = 2;
-	}
-	int cell = (screen_w - 2 * margin) / VISUALIZER_LED_BANDS;
-	if (cell < 4) {
-		cell = 4;
-	}
 	int bottom = screen_h / 40;
-	int top = screen_h / 60;
-	led_step = (area_h - bottom - top) / LED_SEGMENTS;
-	if (led_step < 3) {
-		led_step = 3;
-	}
 	led_base_y = area_h - bottom;
-	led_cell = cell;
+	led_cell = screen_w / VISUALIZER_LED_BANDS;
+	if (led_cell < 4) {
+		led_cell = 4;
+	}
+	// The slot edges as their share of the baseline: slot 23's top is
+	// exactly the top of the spectrum area, slot 0's bottom the floor.
+	for (int y = 0; y < LED_SEGMENTS; y++) {
+		led_row_top[y] = (long)(LED_SEGMENTS - 1 - y) * led_base_y / LED_SEGMENTS;
+		led_row_h[y] = (long)(LED_SEGMENTS - y) * led_base_y / LED_SEGMENTS - led_row_top[y];
+	}
 
 	led_layer = lv_obj_create(spectrum);
 	lv_obj_set_size(led_layer, screen_w, area_h);
@@ -1187,28 +1186,28 @@ static void led_build(void) {
 	for (int b = 0; b < VISUALIZER_LED_BANDS; b++) {
 		lv_obj_t *glow = lv_obj_create(led_layer);
 		led_glow[b] = glow;
-		lv_obj_set_pos(glow, margin + b * cell + 1, led_base_y);
-		lv_obj_set_size(glow, cell - 2, 0);
+		lv_obj_set_pos(glow, b * led_cell + 1, led_base_y);
+		lv_obj_set_size(glow, led_cell - 2, 0);
 		lv_obj_set_style_bg_color(glow, lv_color_make(255, 56, 2), 0);
 		lv_obj_set_style_bg_grad_color(glow, lv_color_make(255, 16, 0), 0);
 		lv_obj_set_style_bg_grad_dir(glow, LV_GRAD_DIR_VER, 0);
 		lv_obj_set_style_bg_opa(glow, LV_OPA_60, 0);
 		lv_obj_set_style_border_width(glow, 0, 0);
 		lv_obj_set_style_radius(glow, 0, 0);
-		lv_obj_set_style_shadow_width(glow, cell, 0);
+		lv_obj_set_style_shadow_width(glow, led_cell, 0);
 		lv_obj_set_style_shadow_opa(glow, LV_OPA_50, 0);
 		lv_obj_set_style_shadow_color(glow, lv_color_make(255, 44, 0), 0);
 		lv_obj_set_clickable(glow, false);
 		lv_obj_set_hidden(glow, true);
 	}
 
-	int seg_gap = led_step >= 6 ? 2 : 1;
 	for (int b = 0; b < VISUALIZER_LED_BANDS; b++) {
 		for (int y = 0; y < LED_SEGMENTS; y++) {
 			lv_obj_t *segment = lv_obj_create(led_layer);
 			led_segments[b][y] = segment;
-			lv_obj_set_pos(segment, margin + b * cell + 1, led_base_y - (y + 1) * led_step);
-			lv_obj_set_size(segment, cell - 2, led_step - seg_gap);
+			int gap = led_row_h[y] >= 6 ? 2 : 1;
+			lv_obj_set_pos(segment, b * led_cell + 1, led_row_top[y]);
+			lv_obj_set_size(segment, led_cell - 2, led_row_h[y] - gap);
 			lv_obj_set_style_bg_color(segment, LED_UNLIT, 0);
 			lv_obj_set_style_bg_opa(segment, LED_UNLIT_OPA, 0);
 			lv_obj_set_style_border_width(segment, 0, 0);
@@ -1216,19 +1215,17 @@ static void led_build(void) {
 			lv_obj_set_clickable(segment, false);
 		}
 		// The cap: a bright sliver that rides the peak above the bar while
-		// the music falls away under it, then goes with it -- and, on the
-		// board, blooms into the dark above the bar.
+		// the music falls away under it, then goes with it. It brings no
+		// bloom of its own -- the halo is the glow column's, the red one
+		// the board casts, not the grey fog a bright shadow leaves.
 		lv_obj_t *cap = lv_obj_create(led_layer);
 		led_peak_obj[b] = cap;
-		lv_obj_set_pos(cap, margin + b * cell + 1, led_base_y - LED_SEGMENTS * led_step);
-		lv_obj_set_size(cap, cell - 2, led_step - seg_gap);
+		lv_obj_set_pos(cap, b * led_cell + 1, led_row_top[LED_SEGMENTS - 1]);
+		lv_obj_set_size(cap, led_cell - 2, led_row_h[LED_SEGMENTS - 1] - 1);
 		lv_obj_set_style_bg_color(cap, lv_color_make(255, 232, 165), 0);
 		lv_obj_set_style_bg_opa(cap, LV_OPA_COVER, 0);
 		lv_obj_set_style_border_width(cap, 0, 0);
 		lv_obj_set_style_radius(cap, 0, 0);
-		lv_obj_set_style_shadow_width(cap, led_step * 2, 0);
-		lv_obj_set_style_shadow_opa(cap, LV_OPA_50, 0);
-		lv_obj_set_style_shadow_color(cap, lv_color_make(255, 190, 110), 0);
 		lv_obj_set_clickable(cap, false);
 		lv_obj_set_hidden(cap, true);
 		led_peak_shown[b] = -1;
@@ -1263,7 +1260,14 @@ static void spectrum_tick_led(void) {
 
 		// The glow follows the bar: as tall as the lit stack, a breath
 		// above its top segment, and gone when there is nothing to light.
-		int glow_h = height > 0 ? height * led_step + led_step / 2 : 0;
+		int glow_h = 0;
+		if (height > 0) {
+			int glow_top = led_row_top[height - 1] - led_row_h[height - 1] / 2;
+			if (glow_top < 0) {
+				glow_top = 0;
+			}
+			glow_h = led_base_y - glow_top;
+		}
 		if (glow_h != led_glow_h[b]) {
 			led_glow_h[b] = glow_h;
 			if (glow_h > 0) {
@@ -1292,7 +1296,10 @@ static void spectrum_tick_led(void) {
 		// the cap, the way the reference frame draws it.
 		if (cap > height) {
 			if (led_peak_shown[b] != cap) {
-				lv_obj_set_y(led_peak_obj[b], led_base_y - cap * led_step);
+				int slot = cap - 1;
+				int gap = led_row_h[slot] >= 6 ? 2 : 1;
+				lv_obj_set_y(led_peak_obj[b], led_row_top[slot]);
+				lv_obj_set_height(led_peak_obj[b], led_row_h[slot] - gap);
 				if (led_peak_shown[b] < 0) {
 					lv_obj_set_hidden(led_peak_obj[b], false);
 				}
