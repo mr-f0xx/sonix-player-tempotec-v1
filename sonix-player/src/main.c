@@ -1,4 +1,7 @@
 #include "lvgl/lvgl.h"
+// The touch panel's read callback, called directly to drain the panel (see
+// panel_touch_flush() below).
+#include "lvgl/src/indev/lv_indev_private.h"
 
 #include <dirent.h>
 #include <malloc.h>
@@ -1259,6 +1262,7 @@ void display_set_rotated(bool rotated) { host_rotated = rotated; }
 // is no evdev node to hand over, and nothing to switch off.
 void panel_touch_enable(bool enabled) { (void)enabled; }
 const char *panel_touch_device(void) { return NULL; }
+void panel_touch_flush(void) {}
 
 // There is no framebuffer to read on the simulator, but the SDL renderer can
 // be read back. The rest of the path is identical (same copy, same flash, same
@@ -1660,8 +1664,27 @@ const char *panel_touch_device(void) { return fb_touch_node[0] ? fb_touch_node :
 // not polled and stops reading the node, so events pile up unread in the
 // kernel queue. Whatever re-enables it must wait a moment before trusting the
 // first touch (see gearboyplay.c).
+// Throws away what the panel sent while nobody was reading it. A disabled indev
+// is not polled, so the kernel queue fills with whatever the glass did during
+// the blank -- wake transients, a palm on the screen, the tap that woke it --
+// and the first poll afterwards would replay all of it as presses and swipes.
+// The read callback is called by hand to consume the queue and its result is
+// dropped; the indev is then told to ignore the pointer until the finger is up.
+void panel_touch_flush(void) {
+	if (!fb_touch || !fb_touch->read_cb) {
+		return;
+	}
+	lv_indev_data_t discard;
+	memset(&discard, 0, sizeof(discard));
+	fb_touch->read_cb(fb_touch, &discard);
+	lv_indev_wait_release(fb_touch);
+}
+
 void panel_touch_enable(bool enabled) {
 	if (fb_touch) {
+		if (enabled) {
+			panel_touch_flush();
+		}
 		lv_indev_enable(fb_touch, enabled);
 	}
 }
