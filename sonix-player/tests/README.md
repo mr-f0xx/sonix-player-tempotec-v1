@@ -327,3 +327,12 @@ the seed counting toward the requested size, unique independently owned output
 paths, invalid sizes, missing seeds, cancellation/card invalidation, shorter
 mixes when candidates run out, and failure when only the seed is available.
 No LVGL, database or card is required.
+
+## TempoTec base build in About
+
+Run `make -C sonix-player/tests basebuild` from the repository root. This checks
+extraction of the stock player's `Firmware Built` timestamp (including invalid,
+missing and ambiguous stamps), the packer's JSON substitution, and loading the
+separate `base_build_version` field without confusing it with Sonix's build
+number. The C test also checks older/missing metadata and clearing cached values.
+No stock firmware, LVGL or cross-compiler is required.
