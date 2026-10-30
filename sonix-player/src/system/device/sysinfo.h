@@ -5,7 +5,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-// What the information page has to show: the two version numbers, and how much
+// What the information page has to show: the firmware versions, and how much
 // space is left on the card.
 
 // ---------------------------------------------------------------------------
@@ -20,6 +20,7 @@
 //         "dac-info": "Dual Cirrus Logic CS43131",
 //         "OS_version": "beta",
 //         "Build_version": "182",
+//         "base_build_version": "1.2",
 //         "ota-repo": "mr-f0xx/sonix-player-tempotec-v1"
 //     }
 //
@@ -38,6 +39,10 @@ void sysinfo_load(void);
 // "" when the file is missing or does not carry the key.
 const char *sysinfo_os_version(void);
 const char *sysinfo_build_version(void);
+
+// Release version of the official TempoTec firmware used by the packer.
+// Separate from Sonix's build number; "" for older images or unknown stock builds.
+const char *sysinfo_base_build_version(void);
 
 // The name of the player, verbatim from the file: "TempoTec V1". "" when the
 // file does not say.

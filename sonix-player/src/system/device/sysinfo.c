@@ -14,6 +14,7 @@
 
 static char os_version[64];
 static char build_version[64];
+static char base_build_version[64];
 static char device_name[64];
 static char dac_info[96];
 static char ota_repo[128];
@@ -77,8 +78,8 @@ static const char *find_nocase(const char *haystack, const char *needle) {
 
 // A miniature JSON reader, deliberately so: it looks for "key", then the colon,
 // then the string that follows. It handles no numbers, nesting or escape
-// sequences, and does not need to -- the file is defined here and holds two
-// strings. All it has to do is survive a badly written file: on anything
+// sequences, and does not need to -- the file is defined here and holds only
+// simple strings. All it has to do is survive a badly written file: on anything
 // unexpected the field stays empty and the page shows a dash.
 static bool json_string_field(const char *text, const char *key, char *out, size_t out_size) {
 	out[0] = '\0';
@@ -128,6 +129,7 @@ static bool json_string_field(const char *text, const char *key, char *out, size
 void sysinfo_load(void) {
 	os_version[0] = '\0';
 	build_version[0] = '\0';
+	base_build_version[0] = '\0';
 	device_name[0] = '\0';
 	dac_info[0] = '\0';
 	ota_repo[0] = '\0';
@@ -148,6 +150,7 @@ void sysinfo_load(void) {
 	// The names the file uses, matched case-insensitively by find_nocase.
 	json_string_field(buf, "OS_version", os_version, sizeof(os_version));
 	json_string_field(buf, "Build_version", build_version, sizeof(build_version));
+	json_string_field(buf, "base_build_version", base_build_version, sizeof(base_build_version));
 	json_string_field(buf, "device-name", device_name, sizeof(device_name));
 	json_string_field(buf, "dac-info", dac_info, sizeof(dac_info));
 	json_string_field(buf, "ota-repo", ota_repo, sizeof(ota_repo));
@@ -159,6 +162,7 @@ void sysinfo_load(void) {
 
 const char *sysinfo_os_version(void) { return os_version; }
 const char *sysinfo_build_version(void) { return build_version; }
+const char *sysinfo_base_build_version(void) { return base_build_version; }
 const char *sysinfo_device_name(void) { return device_name; }
 const char *sysinfo_dac_info(void) { return dac_info; }
 const char *sysinfo_ota_repo(void) { return ota_repo; }

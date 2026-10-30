@@ -394,7 +394,7 @@ static void build_sysinfo_page(gui_config_t *cfg) {
 	lv_obj_set_style_radius(sd_bar, LV_RADIUS_CIRCLE, LV_PART_INDICATOR);
 	lv_obj_set_style_bg_color(sd_bar, theme()->accent, LV_PART_INDICATOR);
 
-	// --- the two versions ---
+	// --- the firmware versions ---
 	// The system version carries the thank-you (see easteregg.c), so it stays
 	// clickable where the rows above it are not.
 	lv_obj_t *os_value = NULL;
@@ -411,6 +411,12 @@ static void build_sysinfo_page(gui_config_t *cfg) {
 	lv_obj_t *build_value = NULL;
 	system_value_row(container, "system_build_number", &build_value, build_tapped_cb, NULL, true);
 	lv_label_set_text(build_value, build[0] ? build : "\xE2\x80\x94");
+
+	// The stock firmware's release version, captured before applying the overlay.
+	lv_obj_t *base_value = NULL;
+	info_row(container, "system_base_build_version", &base_value);
+	const char *base = sysinfo_base_build_version();
+	lv_label_set_text(base_value, base[0] ? base : "\xE2\x80\x94");
 
 	// --- the credits ---
 	// Proper names, the same in every language, so they come in as written and
