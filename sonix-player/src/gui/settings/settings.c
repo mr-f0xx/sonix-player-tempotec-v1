@@ -72,6 +72,11 @@ static lv_obj_t *screensaver_images_pill;
 static lv_obj_t *screensaver_style_group; // "Album art", under the pills above
 static lv_obj_t *screensaver_fill_pill;
 static lv_obj_t *screensaver_framed_pill;
+// The visualizer's own card: the switch, and under it the two styles --
+// Neon, the segmented bars in the theme's colour, and LED, the analyzer.
+static lv_obj_t *screensaver_viz_pills;
+static lv_obj_t *screensaver_neon_pill;
+static lv_obj_t *screensaver_led_pill;
 static lv_obj_t *rotate_switch;
 
 static void doubletap_toggle_cb(lv_event_t *e) {
@@ -105,10 +110,20 @@ static void screensaver_refresh(void) {
 	// How the album is drawn, under its pill: only while the album is what
 	// the screensaver shows. A folder picture is made for the screen and is
 	// always drawn the one way.
-	lv_obj_set_hidden(screensaver_style_group, !on || source != SCREENSAVER_SOURCE_ALBUM || screensaver_get_visualizer());
+	bool viz = screensaver_get_visualizer();
+	lv_obj_set_hidden(screensaver_style_group, !on || source != SCREENSAVER_SOURCE_ALBUM || viz);
 	screensaver_style_t style = screensaver_style();
 	settingsrow_pill_active(screensaver_fill_pill, style == SCREENSAVER_STYLE_FILL);
 	settingsrow_pill_active(screensaver_framed_pill, style == SCREENSAVER_STYLE_FRAMED);
+
+	// Which spectrum the visualizer draws when it is on: Neon or LED.
+	// Hidden with the switch, and with the screensaver itself.
+	if (screensaver_viz_pills) {
+		lv_obj_set_hidden(screensaver_viz_pills, !on || !viz);
+		screensaver_viz_style_t viz_style = screensaver_visualizer_style();
+		settingsrow_pill_active(screensaver_neon_pill, viz_style == SCREENSAVER_VIZ_STYLE_NEON);
+		settingsrow_pill_active(screensaver_led_pill, viz_style == SCREENSAVER_VIZ_STYLE_LED);
+	}
 }
 
 static void screensaver_visualizer_cb(lv_event_t *e) {
@@ -152,6 +167,16 @@ static void screensaver_style_cb(lv_event_t *e) {
 		return;
 	}
 	screensaver_set_style((screensaver_style_t)(intptr_t)lv_event_get_user_data(e));
+	screensaver_refresh();
+}
+
+// Neon or LED: which of the two spectra the visualizer draws. Takes effect at
+// the next wake, like the screensaver it belongs to.
+static void screensaver_viz_style_cb(lv_event_t *e) {
+	if (player_sheet_drag_active() || switcher_back_drag_active()) {
+		return;
+	}
+	screensaver_set_visualizer_style((screensaver_viz_style_t)(intptr_t)lv_event_get_user_data(e));
 	screensaver_refresh();
 }
 
@@ -384,9 +409,21 @@ static void build_screen_page(gui_config_t *cfg) {
 		settingsrow_pill(style_pills, "screensaver_style_fill", SCREENSAVER_STYLE_FILL, screensaver_style_cb);
 	screensaver_framed_pill =
 		settingsrow_pill(style_pills, "screensaver_style_framed", SCREENSAVER_STYLE_FRAMED, screensaver_style_cb);
-	screensaver_refresh();
-	settingsrow_toggle(container, "screensaver_visualizer", &screensaver_visualizer_switch, screensaver_visualizer_cb);
+
+	// The visualizer, on its own card below: the switch replaces the album
+	// with a live spectrum, and the pills under it say which -- Neon, the
+	// segmented bars in the theme's colour, or LED, the analyzer. The pills
+	// hide with the switch (see screensaver_refresh).
+	lv_obj_t *viz_pills = NULL;
+	settingsrow_toggle_pills(container, "screensaver_visualizer", screensaver_visualizer_cb,
+							 &screensaver_visualizer_switch, &viz_pills);
+	screensaver_viz_pills = viz_pills;
+	screensaver_neon_pill =
+		settingsrow_pill(viz_pills, "screensaver_viz_neon", SCREENSAVER_VIZ_STYLE_NEON, screensaver_viz_style_cb);
+	screensaver_led_pill =
+		settingsrow_pill(viz_pills, "screensaver_viz_led", SCREENSAVER_VIZ_STYLE_LED, screensaver_viz_style_cb);
 	if (screensaver_get_visualizer()) lv_obj_add_state(screensaver_visualizer_switch, LV_STATE_CHECKED);
+	screensaver_refresh();
 
 	// Upside down, for holding the player the other way up.
 	settingsrow_toggle(container, "settings_rotate_screen", &rotate_switch, rotate_toggle_cb);
