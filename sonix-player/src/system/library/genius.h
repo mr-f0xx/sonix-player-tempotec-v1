@@ -32,6 +32,7 @@ typedef enum {
 	GENIUS_INVALID,
 } genius_result_t;
 
+#define GENIUS_MAX_TRACKS 30
 #define GENIUS_MAX_NODES 4096
 #define GENIUS_MAX_EDGES 131072
 // Snapshot, traversal arrays, rule state and independently owned output.
@@ -39,10 +40,11 @@ typedef enum {
 #define GENIUS_CANCEL_INTERVAL 32
 
 // Background worker only.
-// The seed counts toward the target of ten and minimum of two. Failures leave
+// The seed counts toward target_count (2..GENIUS_MAX_TRACKS) and the minimum
+// of two. A successful mix may be shorter if similar tracks run out. Failures leave
 // out empty; a successful list stays valid after the snapshot is released.
 // Cancellation is checked at each node and every 32 edges or candidates.
-genius_result_t genius_mix_build(const geniusdb_snapshot_t *snapshot, const char *seed_path, unsigned seed, const atomic_bool *cancel, genius_mix_t *out);
+genius_result_t genius_mix_build(const geniusdb_snapshot_t *snapshot, const char *seed_path, int target_count, unsigned seed, const atomic_bool *cancel, genius_mix_t *out);
 void genius_mix_free(genius_mix_t *mix);
 
 #endif // GENIUS_H

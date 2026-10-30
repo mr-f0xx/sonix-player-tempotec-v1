@@ -8,7 +8,6 @@
 
 #include "src/system/library/geniusdb.h"
 
-#define GENIUS_TARGET 10
 #define GENIUS_MINIMUM 2
 
 typedef enum { GENIUS_RULE_CLUSTER, GENIUS_RULE_DISTANCE, GENIUS_RULE_JITTER } genius_rule_kind_t;
@@ -37,7 +36,7 @@ typedef struct {
 } genius_key_counter_t;
 
 typedef struct {
-	genius_key_counter_t counters[GENIUS_TARGET];
+	genius_key_counter_t counters[GENIUS_MAX_TRACKS];
 	int count, distance, seen;
 } genius_rule_state_t;
 
@@ -51,8 +50,8 @@ typedef struct {
 	unsigned char *seen, *used;
 	int32_t queue_index, capacity;
 	int output_index;
-	int32_t output[GENIUS_TARGET];
-	int count, round;
+	int32_t output[GENIUS_MAX_TRACKS];
+	int count, round, target_count;
 	unsigned nodes, edges, discovered;
 	size_t bytes;
 	uint32_t random;
@@ -165,7 +164,7 @@ static int genius_eval_chain(genius_playlist_t *playlist, const genius_meta_t *m
 
 static void genius_consume_track(genius_playlist_t *playlist, int32_t id) {
 	const genius_meta_t *meta = geniusdb_get_meta(playlist->snapshot, id);
-	if (!meta || playlist->count >= GENIUS_TARGET) {
+	if (!meta || playlist->count >= playlist->target_count) {
 		playlist->result = GENIUS_INVALID;
 		return;
 	}
@@ -188,7 +187,7 @@ static void genius_consume_track(genius_playlist_t *playlist, int32_t id) {
 			}
 		}
 		if (!found) {
-			if (state->count >= GENIUS_TARGET) {
+			if (state->count >= GENIUS_MAX_TRACKS) {
 				fprintf(stderr, "genius: distance rule counter limit exceeded\n");
 				playlist->result = GENIUS_BUDGET;
 				return;
@@ -347,19 +346,22 @@ static bool genius_next_track(genius_playlist_t *playlist) {
 	return false;
 }
 
-genius_result_t genius_mix_build(const geniusdb_snapshot_t *snapshot, const char *seed_path, unsigned seed, const atomic_bool *cancel, genius_mix_t *out) {
+genius_result_t genius_mix_build(const geniusdb_snapshot_t *snapshot, const char *seed_path, int target_count, unsigned seed, const atomic_bool *cancel, genius_mix_t *out) {
 	if (!out) {
 		fprintf(stderr, "genius: mix output is missing\n");
 		return GENIUS_INVALID;
 	}
 	*out = (genius_mix_t){0};
+	if (target_count < GENIUS_MINIMUM || target_count > GENIUS_MAX_TRACKS) {
+		return GENIUS_INVALID;
+	}
 	int32_t id = geniusdb_find_path(snapshot, seed_path);
 	const genius_meta_t *meta = geniusdb_get_meta(snapshot, id);
 	if (!meta) {
 		fprintf(stderr, "genius: seed has no metadata\n");
 		return GENIUS_NO_DATA;
 	}
-	genius_playlist_t playlist = {.snapshot = snapshot, .cancel = cancel, .seed = id, .random = (uint32_t)seed, .discovered = 1};
+	genius_playlist_t playlist = {.snapshot = snapshot, .cancel = cancel, .seed = id, .random = (uint32_t)seed, .discovered = 1, .target_count = target_count};
 	playlist.bytes = geniusdb_snapshot_bytes(snapshot);
 	int32_t paths = geniusdb_path_count(snapshot);
 	playlist.capacity = paths < GENIUS_MAX_NODES ? paths : GENIUS_MAX_NODES;
@@ -379,7 +381,7 @@ genius_result_t genius_mix_build(const geniusdb_snapshot_t *snapshot, const char
 	for (size_t i = 0; i < GENIUS_RULE_COUNT; i++) {
 		playlist.states[i].distance = GENIUS_RULES[i].distance;
 	}
-	while (playlist.count < GENIUS_TARGET && genius_next_track(&playlist)) {
+	while (playlist.count < playlist.target_count && genius_next_track(&playlist)) {
 	}
 	if (playlist.result != GENIUS_OK || genius_check_cancel(&playlist)) {
 		goto done;

@@ -10,6 +10,7 @@ make -C sonix-player/tests eq
 make -C sonix-player/tests calculator
 make -C sonix-player/tests notes
 make -C sonix-player/tests tagdate
+make -C sonix-player/tests genius
 make -C sonix-player/tests mostplayed
 make -C sonix-player/tests aamlayout
 make -C sonix-player/tests extractkeys
@@ -317,3 +318,12 @@ structure, with filler where the picture data would be.
   them. It avoids the picture already up while there is another, and falls
   back to it when it is the only one. Twenty `._` files beside one picture
   never make it miss.
+
+## Smart Mix sizes
+
+`make -C sonix-player/tests genius` links the real mix generator to a synthetic
+memory-only similarity graph. It checks every popup size (10, 15, 20, 25, 30),
+the seed counting toward the requested size, unique independently owned output
+paths, invalid sizes, missing seeds, cancellation/card invalidation, shorter
+mixes when candidates run out, and failure when only the seed is available.
+No LVGL, database or card is required.
