@@ -43,10 +43,13 @@ bool screensaver_get_visualizer(void);
 // accent colour on black, over a matching rail.
 //
 // LED is the classic bench spectrum analyzer: sixteen narrower bars of
-// horizontal segments on a dark red field, each segment's colour its height --
-// cream at the foot through amber and orange to red at the top, with a bright
-// cap riding each bar's peak and falling behind it. Its colours are its own,
-// not the theme's: the fire gradient is the look, not a tint over it.
+// horizontal segments on a dark red field. Every slot of every bar is drawn
+// all the time -- unlit ones as dark red ghosts of the segment to come, lit
+// ones blazing orange, the bottom few brightening to white where the light
+// pools at the floor -- with a warm glow behind each lit stack that shows in
+// the gaps between its segments, and a bright cap riding each bar's peak and
+// falling behind it. Its colours are its own, not the theme's: the fire and
+// the ghosts are the look, not a tint over it.
 typedef enum {
 	SCREENSAVER_VIZ_STYLE_NEON = 0,
 	SCREENSAVER_VIZ_STYLE_LED,

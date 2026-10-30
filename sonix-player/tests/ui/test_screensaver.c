@@ -327,19 +327,32 @@ static int spectrum_bar_height(lv_obj_t *spectrum, int band) {
     return height;
 }
 
-// The same for the LED style: its grid starts after Neon's rail and bars, and
-// each band is 24 segments followed by its peak cap.
-static int led_first_child(void) { return 1 + VISUALIZER_BANDS * 24; }
+// The same for the LED style: its grid lives in one layer after Neon's rail
+// and bars. Inside the layer come the sixteen glow columns, then each band's
+// 24 segments and its peak cap.
+static lv_obj_t *led_layer_of(lv_obj_t *spectrum) { return lv_obj_get_child(spectrum, 1 + VISUALIZER_BANDS * 24); }
+static lv_obj_t *led_glow_of(lv_obj_t *spectrum, int band) { return lv_obj_get_child(led_layer_of(spectrum), band); }
+static lv_obj_t *led_seg(lv_obj_t *spectrum, int band, int y) {
+    return lv_obj_get_child(led_layer_of(spectrum), VISUALIZER_LED_BANDS + band * 25 + y);
+}
+static lv_obj_t *led_cap(lv_obj_t *spectrum, int band) {
+    return lv_obj_get_child(led_layer_of(spectrum), VISUALIZER_LED_BANDS + band * 25 + 24);
+}
+
+// An unlit slot: the dark red ghost every bar shows of the segment that would
+// light there. A bar's height is therefore how many of its slots are NOT
+// ghosts -- the grid never hides anything, it only moves the light.
+#define LED_UNLIT lv_color_make(78, 8, 3)
+
+static bool led_slot_lit(lv_obj_t *segment) {
+    return !lv_color_eq(lv_obj_get_style_bg_color(segment, 0), LED_UNLIT);
+}
 
 static int led_bar_height(lv_obj_t *spectrum, int band) {
     int height = 0;
     for (int y = 0; y < 24; y++)
-        if (!lv_obj_is_hidden(lv_obj_get_child(spectrum, led_first_child() + band * 25 + y))) height++;
+        if (led_slot_lit(led_seg(spectrum, band, y))) height++;
     return height;
-}
-
-static lv_obj_t *led_cap(lv_obj_t *spectrum, int band) {
-    return lv_obj_get_child(spectrum, led_first_child() + band * 25 + 24);
 }
 
 static void hide_now(void) {
@@ -1050,32 +1063,42 @@ int main(int argc, char **argv) {
 	assert(levels[0] >= levels[7]);
 
 	/* LED: the bench analyzer. Its own dark red field, sixteen bars of the
-	 * fire gradient, caps over the peaks -- and every bar answers music at
-	 * its own centre, bass end included. */
+	 * lit palette over their dark-red ghosts, a glow behind every lit
+	 * stack, caps over the peaks -- and every bar answers music at its own
+	 * centre, bass end included. */
+	assert((int)lv_obj_get_child_count(spectrum) == 1 + VISUALIZER_BANDS * 24); // no grid until LED is wanted
 	screensaver_set_visualizer_style(SCREENSAVER_VIZ_STYLE_LED);
 	assert(screensaver_visualizer_style() == SCREENSAVER_VIZ_STYLE_LED);
 	assert(config_init(config) &&
 		   config_get_int("screen", "screensaver_visualizer_style", -1) == SCREENSAVER_VIZ_STYLE_LED);
 	assert(!lv_obj_is_hidden(spectrum)); // a drawing, not an on/off: still up
 	lv_obj_update_layout(saver_obj());
-	assert(lv_color_eq(lv_obj_get_style_bg_color(spectrum, 0), lv_color_make(10, 0, 0)));
+	assert(lv_color_eq(lv_obj_get_style_bg_color(spectrum, 0), lv_color_make(14, 0, 0)));
 	assert(lv_obj_get_style_bg_grad_dir(spectrum, 0) == LV_GRAD_DIR_VER);
-	// Neon's grid is untouched underneath: the rail, then its eight bars.
+	// Neon's grid is untouched underneath: the rail, then its eight bars,
+	// then the one layer the analyzer's whole grid lives in.
 	assert(lv_color_eq(lv_obj_get_style_bg_color(lv_obj_get_child(spectrum, 0), 0), theme()->accent));
-	assert((int)lv_obj_get_child_count(spectrum) == led_first_child() + VISUALIZER_LED_BANDS * 25);
-	// The fire gradient: cream at the floor, red at the top, cream caps.
-	assert(lv_color_eq(lv_obj_get_style_bg_color(lv_obj_get_child(spectrum, led_first_child() + 0), 0),
-					   lv_color_make(255, 245, 200)));
-	assert(lv_color_eq(lv_obj_get_style_bg_color(lv_obj_get_child(spectrum, led_first_child() + 23), 0),
-					   lv_color_make(255, 42, 0)));
-	assert(lv_color_eq(lv_obj_get_style_bg_color(led_cap(spectrum, 0), 0), lv_color_make(255, 250, 225)));
-	// The colours are the analyzer's own: a palette change moves none of them.
+	assert((int)lv_obj_get_child_count(spectrum) == 1 + VISUALIZER_BANDS * 24 + 1);
+	lv_obj_t *layer = led_layer_of(spectrum);
+	assert(!lv_obj_is_hidden(layer));
+	assert((int)lv_obj_get_child_count(layer) ==
+		   VISUALIZER_LED_BANDS + VISUALIZER_LED_BANDS * 25); // glows, then bands of segments and a cap
+	// The slots are drawn whether or not they are lit: a ghost of the
+	// segment that would light there, never a hidden one.
+	for (int y = 0; y < 24; y++) {
+		lv_obj_t *seg = led_seg(spectrum, 0, y);
+		assert(!lv_obj_is_hidden(seg));
+		assert(lv_color_eq(lv_obj_get_style_bg_color(seg, 0), LED_UNLIT));
+	}
+	assert(lv_color_eq(lv_obj_get_style_bg_color(led_cap(spectrum, 0), 0), lv_color_make(255, 232, 165)));
+	assert(lv_color_eq(lv_obj_get_style_bg_color(led_glow_of(spectrum, 0), 0), lv_color_make(255, 56, 2)));
+	assert(lv_obj_get_style_shadow_width(led_glow_of(spectrum, 0), 0) > 0); // the halo
+	// The colors are the analyzer's own: a palette change moves none of them.
 	for (int kind = 0; kind < THEME_KIND_COUNT; kind++) {
 		theme_set_kind((theme_kind_t)kind);
-		assert(lv_color_eq(lv_obj_get_style_bg_color(spectrum, 0), lv_color_make(10, 0, 0)));
-		assert(lv_color_eq(lv_obj_get_style_bg_color(lv_obj_get_child(spectrum, led_first_child() + 0), 0),
-						   lv_color_make(255, 245, 200)));
-		assert(lv_color_eq(lv_obj_get_style_bg_color(led_cap(spectrum, 0), 0), lv_color_make(255, 250, 225)));
+		assert(lv_color_eq(lv_obj_get_style_bg_color(spectrum, 0), lv_color_make(14, 0, 0)));
+		assert(lv_color_eq(lv_obj_get_style_bg_color(led_seg(spectrum, 0, 0), 0), LED_UNLIT));
+		assert(lv_color_eq(lv_obj_get_style_bg_color(led_cap(spectrum, 0), 0), lv_color_make(255, 232, 165)));
 	}
 	theme_set_kind(THEME_KIND_DARK);
 	static const double LED_CENTRES[VISUALIZER_LED_BANDS] = {45,   60,   82,   112,  153,  209,  286,  392,
@@ -1095,24 +1118,38 @@ int main(int argc, char **argv) {
 	for (int b = 0; b < VISUALIZER_LED_BANDS; b++) {
 		int height = led_bar_height(spectrum, b);
 		assert(height > 8 && height < 24);
+		// Lit slots are lit, the rest stay ghosts, and the glow column
+		// behind the bar has taken the stack's height.
+		for (int y = 0; y < 24; y++)
+			assert(led_slot_lit(led_seg(spectrum, b, y)) == (y < height));
+		assert(!lv_obj_is_hidden(led_glow_of(spectrum, b)));
 	}
+	// The lit palette sampled off the reference: white where the light
+	// pools at the floor, bright orange up the body of a full bar.
+	assert(lv_color_eq(lv_obj_get_style_bg_color(led_seg(spectrum, 0, 0), 0), lv_color_make(255, 255, 240)));
+	assert(lv_color_eq(lv_obj_get_style_bg_color(led_seg(spectrum, 0, 10), 0), lv_color_make(255, 172, 8)));
 	// At a steady note the bar's own top segment is the cap, the way the
 	// reference frame draws it: the bright sliver rides above the bar only
 	// while the music has moved on from the peak.
 	assert(lv_obj_is_hidden(led_cap(spectrum, 0)));
-	// Silence: the bars fall, the caps stay behind and sink after them.
+	// Silence: the bars fall, the caps stay behind and sink after them,
+	// and the glow shrinks with the light it was there for.
 	memset(pcm, 0, sizeof(pcm));
 	visualizer_feed(pcm, 4096, 2, 16, 44100);
 	pump(150);
-	for (int b = 0; b < VISUALIZER_LED_BANDS; b++) assert(led_bar_height(spectrum, b) < 24);
+	for (int b = 0; b < VISUALIZER_LED_BANDS; b++) {
+		int height = led_bar_height(spectrum, b);
+		assert(height < 24 && height > 0);
+		assert(!lv_obj_is_hidden(led_glow_of(spectrum, b)));
+	}
 	assert(!lv_obj_is_hidden(led_cap(spectrum, 0)));
-	// Back to Neon while it is up: its black field returns, and the caps and
-	// bars of the analyzer go with the style.
+	// Back to Neon while it is up: its black field returns, and the whole
+	// analyzer layer -- ghosts, glows, bars and caps -- goes with the style.
 	screensaver_set_visualizer_style(SCREENSAVER_VIZ_STYLE_NEON);
 	assert(screensaver_visualizer_style() == SCREENSAVER_VIZ_STYLE_NEON);
 	assert(lv_color_eq(lv_obj_get_style_bg_color(spectrum, 0), lv_color_black()));
 	assert(lv_obj_get_style_bg_grad_dir(spectrum, 0) == LV_GRAD_DIR_NONE);
-	assert(lv_obj_is_hidden(led_cap(spectrum, 0)));
+	assert(lv_obj_is_hidden(led_layer_of(spectrum)));
 
 	screensaver_set_visualizer(false);
 	assert(lv_obj_is_hidden(spectrum));

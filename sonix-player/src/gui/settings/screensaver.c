@@ -49,10 +49,13 @@ static int spectrum_level[VISUALIZER_BANDS], spectrum_height[VISUALIZER_BANDS];
 static uint8_t spectrum_target[VISUALIZER_BANDS];
 static unsigned spectrum_frame;
 
-// The LED style: twice the bars, a fifth of the width each, every segment
-// coloured by its height on a dark red field, and a bright cap riding each
-// bar's peak. Built the first time the style is wanted rather than at init,
-// so a player that never leaves Neon carries none of it.
+// The LED style: twice the bars, a fifth of the width each, on a dark red
+// field. Every slot of every bar is drawn all the time -- unlit ones as dark
+// red ghosts of the segment to come, lit ones blazing with the glow of a
+// backlit board: a warm column of light behind the lit stack that shows in
+// the gaps between its segments, and a bright cap riding the bar's peak.
+// Built the first time the style is wanted rather than at init, so a player
+// that never leaves Neon carries none of it.
 #define LED_SEGMENTS 24
 // How fast the caps fall, in the same fixed point the bars use: 32 a tick at
 // 20 Hz is a touch over two seconds from full height to the floor, the slow
@@ -60,12 +63,15 @@ static unsigned spectrum_frame;
 #define LED_PEAK_FALL 32
 static screensaver_viz_style_t viz_style;
 static bool led_built;
+static lv_obj_t *led_layer; // everything LED under it: glows, segments, caps
+static lv_obj_t *led_glow[VISUALIZER_LED_BANDS];
 static lv_obj_t *led_segments[VISUALIZER_LED_BANDS][LED_SEGMENTS];
 static lv_obj_t *led_peak_obj[VISUALIZER_LED_BANDS];
 static int led_level[VISUALIZER_LED_BANDS], led_height[VISUALIZER_LED_BANDS];
 static int led_peak[VISUALIZER_LED_BANDS], led_peak_shown[VISUALIZER_LED_BANDS];
+static int led_glow_h[VISUALIZER_LED_BANDS]; // the glow column's last height
 static uint8_t led_target[VISUALIZER_LED_BANDS];
-static int led_step, led_base_y; // the grid's geometry, worked out when built
+static int led_step, led_base_y, led_cell; // the grid's geometry, worked out when built
 
 static int screen_w, screen_h;
 static int strip_h;
@@ -1086,41 +1092,60 @@ static void spectrum_apply_backdrop(void) {
 		return;
 	}
 	if (led_now()) {
-		lv_obj_set_style_bg_color(spectrum, lv_color_make(10, 0, 0), 0);
-		lv_obj_set_style_bg_grad_color(spectrum, lv_color_make(44, 2, 2), 0);
+		lv_obj_set_style_bg_color(spectrum, lv_color_make(14, 0, 0), 0);
+		lv_obj_set_style_bg_grad_color(spectrum, lv_color_make(52, 4, 3), 0);
 		lv_obj_set_style_bg_grad_dir(spectrum, LV_GRAD_DIR_VER, 0);
 	} else {
 		lv_obj_set_style_bg_color(spectrum, lv_color_black(), 0);
 		lv_obj_set_style_bg_grad_dir(spectrum, LV_GRAD_DIR_NONE, 0);
 	}
+	// The LED grid is one layer so it can be swapped for Neon's whole: its
+	// segments are never hidden one by one, only recoloured between lit and
+	// the dark red of an unlit slot.
+	if (led_built) {
+		lv_obj_set_hidden(led_layer, !led_now());
+	}
 }
 
-// The fire gradient, sampled off the reference frame: cream where a bar
-// meets the floor, through amber and orange to red at the top.
+// The unlit slot: the dark red ghost every bar shows of the segment that
+// would light there, faint enough to read as the board behind the LEDs and
+// slightly transparent, so the glow of a neighbouring lit stack washes over
+// it the way the reference frame's does.
+#define LED_UNLIT lv_color_make(78, 8, 3)
+#define LED_UNLIT_OPA LV_OPA_80
+
+// The lit palette, sampled off the reference frame: the body of a bar is one
+// bright orange, the bottom few segments brighten through yellow to white
+// where the board's light pools at the floor, and the top runs a shade
+// deeper.
 static lv_color_t led_segment_color(int seg) {
+	if (seg < 1) {
+		return lv_color_make(255, 255, 240);
+	}
+	if (seg < 2) {
+		return lv_color_make(255, 245, 175);
+	}
 	if (seg < 3) {
-		return lv_color_make(255, 245, 200);
+		return lv_color_make(255, 228, 110);
 	}
-	if (seg < 6) {
-		return lv_color_make(255, 220, 100);
+	if (seg < 4) {
+		return lv_color_make(255, 208, 60);
 	}
-	if (seg < 10) {
-		return lv_color_make(255, 176, 40);
+	if (seg < 5) {
+		return lv_color_make(255, 190, 30);
 	}
-	if (seg < 15) {
-		return lv_color_make(255, 128, 10);
+	if (seg < 13) {
+		return lv_color_make(255, 172, 8);
 	}
-	if (seg < 20) {
-		return lv_color_make(255, 78, 0);
-	}
-	return lv_color_make(255, 42, 0);
+	return lv_color_make(255, 152, 2);
 }
 
 // The LED grid: sixteen bars across the panel, their segments stacked from a
 // baseline just above the metadata strip to a breath below the top -- the
 // reference frame's proportions at this panel's size. Built the first time
-// the style is wanted (see led_built); every segment and cap is fixed in
-// colour and place from then on, so only the hidden flag ever moves.
+// the style is wanted (see led_built). Everything sits in one layer so the
+// style can swap the whole grid for Neon's; the glows are made first so they
+// paint under every segment.
 static void led_build(void) {
 	if (led_built) {
 		return;
@@ -1143,30 +1168,67 @@ static void led_build(void) {
 		led_step = 3;
 	}
 	led_base_y = area_h - bottom;
+	led_cell = cell;
 
+	led_layer = lv_obj_create(spectrum);
+	lv_obj_set_size(led_layer, screen_w, area_h);
+	lv_obj_set_pos(led_layer, 0, 0);
+	lv_obj_set_style_bg_opa(led_layer, LV_OPA_TRANSP, 0);
+	lv_obj_set_style_border_width(led_layer, 0, 0);
+	lv_obj_set_style_radius(led_layer, 0, 0);
+	lv_obj_set_style_pad_all(led_layer, 0, 0);
+	lv_obj_set_scrollable(led_layer, false);
+	lv_obj_set_clickable(led_layer, false);
+	lv_obj_set_hidden(led_layer, true);
+
+	// The glow columns first: a warm shaft of light as tall as each bar's
+	// lit stack, its shadow the halo that bleeds into the gaps between
+	// segments and out over the ghosts of the bars beside it.
+	for (int b = 0; b < VISUALIZER_LED_BANDS; b++) {
+		lv_obj_t *glow = lv_obj_create(led_layer);
+		led_glow[b] = glow;
+		lv_obj_set_pos(glow, margin + b * cell + 1, led_base_y);
+		lv_obj_set_size(glow, cell - 2, 0);
+		lv_obj_set_style_bg_color(glow, lv_color_make(255, 56, 2), 0);
+		lv_obj_set_style_bg_grad_color(glow, lv_color_make(255, 16, 0), 0);
+		lv_obj_set_style_bg_grad_dir(glow, LV_GRAD_DIR_VER, 0);
+		lv_obj_set_style_bg_opa(glow, LV_OPA_60, 0);
+		lv_obj_set_style_border_width(glow, 0, 0);
+		lv_obj_set_style_radius(glow, 0, 0);
+		lv_obj_set_style_shadow_width(glow, cell, 0);
+		lv_obj_set_style_shadow_opa(glow, LV_OPA_50, 0);
+		lv_obj_set_style_shadow_color(glow, lv_color_make(255, 44, 0), 0);
+		lv_obj_set_clickable(glow, false);
+		lv_obj_set_hidden(glow, true);
+	}
+
+	int seg_gap = led_step >= 6 ? 2 : 1;
 	for (int b = 0; b < VISUALIZER_LED_BANDS; b++) {
 		for (int y = 0; y < LED_SEGMENTS; y++) {
-			lv_obj_t *segment = lv_obj_create(spectrum);
+			lv_obj_t *segment = lv_obj_create(led_layer);
 			led_segments[b][y] = segment;
 			lv_obj_set_pos(segment, margin + b * cell + 1, led_base_y - (y + 1) * led_step);
-			lv_obj_set_size(segment, cell - 2, led_step - 1);
-			lv_obj_set_style_bg_color(segment, led_segment_color(y), 0);
-			lv_obj_set_style_bg_opa(segment, LV_OPA_COVER, 0);
+			lv_obj_set_size(segment, cell - 2, led_step - seg_gap);
+			lv_obj_set_style_bg_color(segment, LED_UNLIT, 0);
+			lv_obj_set_style_bg_opa(segment, LED_UNLIT_OPA, 0);
 			lv_obj_set_style_border_width(segment, 0, 0);
 			lv_obj_set_style_radius(segment, 0, 0);
 			lv_obj_set_clickable(segment, false);
-			lv_obj_set_hidden(segment, true);
 		}
 		// The cap: a bright sliver that rides the peak above the bar while
-		// the music falls away under it, then goes with it.
-		lv_obj_t *cap = lv_obj_create(spectrum);
+		// the music falls away under it, then goes with it -- and, on the
+		// board, blooms into the dark above the bar.
+		lv_obj_t *cap = lv_obj_create(led_layer);
 		led_peak_obj[b] = cap;
 		lv_obj_set_pos(cap, margin + b * cell + 1, led_base_y - LED_SEGMENTS * led_step);
-		lv_obj_set_size(cap, cell - 2, led_step - 1);
-		lv_obj_set_style_bg_color(cap, lv_color_make(255, 250, 225), 0);
+		lv_obj_set_size(cap, cell - 2, led_step - seg_gap);
+		lv_obj_set_style_bg_color(cap, lv_color_make(255, 232, 165), 0);
 		lv_obj_set_style_bg_opa(cap, LV_OPA_COVER, 0);
 		lv_obj_set_style_border_width(cap, 0, 0);
 		lv_obj_set_style_radius(cap, 0, 0);
+		lv_obj_set_style_shadow_width(cap, led_step * 2, 0);
+		lv_obj_set_style_shadow_opa(cap, LV_OPA_50, 0);
+		lv_obj_set_style_shadow_color(cap, lv_color_make(255, 190, 110), 0);
 		lv_obj_set_clickable(cap, false);
 		lv_obj_set_hidden(cap, true);
 		led_peak_shown[b] = -1;
@@ -1174,7 +1236,9 @@ static void led_build(void) {
 }
 
 // The LED bars: the same attack and release Neon eases with, plus the caps
-// that ride each bar's peak and sink behind the bar as it falls.
+// that ride each bar's peak and sink behind the bar as it falls. Segments
+// never appear or disappear -- they change between lit and ghost, so the
+// board's slots are always there and only the light moves.
 static void spectrum_tick_led(void) {
 	for (int b = 0; b < VISUALIZER_LED_BANDS; b++) {
 		int target = led_target[b] * LED_SEGMENTS * 256 / 255;
@@ -1188,12 +1252,30 @@ static void spectrum_tick_led(void) {
 		int height = (led_level[b] + 255) / 256;
 		int old = led_height[b];
 		for (int y = old; y < height; y++) {
-			lv_obj_set_hidden(led_segments[b][y], false);
+			lv_obj_set_style_bg_color(led_segments[b][y], led_segment_color(y), 0);
+			lv_obj_set_style_bg_opa(led_segments[b][y], LV_OPA_COVER, 0);
 		}
 		for (int y = height; y < old; y++) {
-			lv_obj_set_hidden(led_segments[b][y], true);
+			lv_obj_set_style_bg_color(led_segments[b][y], LED_UNLIT, 0);
+			lv_obj_set_style_bg_opa(led_segments[b][y], LED_UNLIT_OPA, 0);
 		}
 		led_height[b] = height;
+
+		// The glow follows the bar: as tall as the lit stack, a breath
+		// above its top segment, and gone when there is nothing to light.
+		int glow_h = height > 0 ? height * led_step + led_step / 2 : 0;
+		if (glow_h != led_glow_h[b]) {
+			led_glow_h[b] = glow_h;
+			if (glow_h > 0) {
+				lv_obj_set_size(led_glow[b], led_cell - 2, glow_h);
+				lv_obj_set_y(led_glow[b], led_base_y - glow_h);
+				if (lv_obj_is_hidden(led_glow[b])) {
+					lv_obj_set_hidden(led_glow[b], false);
+				}
+			} else {
+				lv_obj_set_hidden(led_glow[b], true);
+			}
+		}
 
 		// The cap snaps up with the music and falls a fixed step every
 		// frame -- slow enough to stay readable over a falling bar.
@@ -1259,10 +1341,17 @@ static void spectrum_reset(void) {
     }
     if (led_built) {
         for (int b = 0; b < VISUALIZER_LED_BANDS; b++) {
-            for (int y = 0; y < led_height[b]; y++) lv_obj_set_hidden(led_segments[b][y], true);
+            for (int y = 0; y < led_height[b]; y++) {
+                lv_obj_set_style_bg_color(led_segments[b][y], LED_UNLIT, 0);
+                lv_obj_set_style_bg_opa(led_segments[b][y], LED_UNLIT_OPA, 0);
+            }
             if (led_peak_shown[b] >= 0) {
                 lv_obj_set_hidden(led_peak_obj[b], true);
                 led_peak_shown[b] = -1;
+            }
+            if (led_glow_h[b] > 0) {
+                lv_obj_set_hidden(led_glow[b], true);
+                led_glow_h[b] = 0;
             }
             led_level[b] = led_height[b] = led_peak[b] = 0;
             led_target[b] = 0;
