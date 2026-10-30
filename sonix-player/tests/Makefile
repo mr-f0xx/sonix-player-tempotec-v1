@@ -435,3 +435,13 @@ $(BUILD)/ui/lvgl/%.o: $(ROOT)/lvgl/%.c ui/lv_conf.h $(ROOT)/lv_conf.h
 	$(CC) $(UI_CPPFLAGS) $(filter-out -Werror,$(UI_CFLAGS)) -c $< -o $@
 
 -include $(sort $(UI_OBJ:.o=.d) $(SAVER_OBJ:.o=.d) $(WIFIPAGE_OBJ:.o=.d) $(LYRICSEARCH_OBJ:.o=.d))
+
+# Smart Mix track-count limits and traversal, with a memory-only graph fixture.
+GENIUS_SRC = test_genius.c $(ROOT)/src/system/library/genius.c
+.PHONY: genius
+genius: $(BUILD)/test_genius
+	$(BUILD)/test_genius
+
+$(BUILD)/test_genius: $(GENIUS_SRC) $(ROOT)/src/system/library/genius.h $(ROOT)/src/system/library/geniusdb.h
+	@mkdir -p $(BUILD)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ $(GENIUS_SRC) $(LDFLAGS) $(LDLIBS)

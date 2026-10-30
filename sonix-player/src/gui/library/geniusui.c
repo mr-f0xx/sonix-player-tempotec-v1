@@ -12,6 +12,7 @@
 #include "src/gui/nowplaying/player.h"
 #include "src/gui/shell/gui.h"
 #include "src/gui/shell/icons.h"
+#include "src/gui/shell/popover.h"
 #include "src/gui/shell/spinner.h"
 #include "src/gui/shell/switcher.h"
 #include "src/gui/shell/theme.h"
@@ -39,6 +40,7 @@ typedef struct {
 	// below writes the playlist and cannot reach the language table.
 	char prefix[64];
 	genius_mode_t mode;
+	int target_count;
 	unsigned random;
 	atomic_bool cancel;
 	atomic_bool delivery_failed;
@@ -58,7 +60,7 @@ static struct {
 	lv_timer_t *timer;
 } genius_ui;
 
-static void genius_begin(const char *seed_path, genius_mode_t mode, const char *prefix);
+static void genius_begin(const char *seed_path, genius_mode_t mode, const char *prefix, int target_count);
 
 static void genius_finish(void *user) {
 	genius_job_t *job = user;
@@ -147,7 +149,7 @@ static void *genius_build(void *user) {
 	thread_be_low_priority("smart mix");
 	geniusdb_result_t read = geniusdb_load_snapshot(&job->snapshot, &job->cancel);
 	if (read == GENIUSDB_OK) {
-		job->result = genius_mix_build(job->snapshot, job->seed_path, job->random, &job->cancel, &job->mix);
+		job->result = genius_mix_build(job->snapshot, job->seed_path, job->target_count, job->random, &job->cancel, &job->mix);
 		// Writing the playlist belongs to this thread: it reads tags off the
 		// card for every entry. A mix that cannot be written is reported as a
 		// failure, and the playlist it half made is taken back off the card
@@ -206,15 +208,59 @@ static void genius_cancel_button(lv_obj_t *parent) {
 
 bool geniusui_available(void) { return gui_card_available() && geniusdb_available(); }
 
-void geniusui_start(const char *seed_path) { genius_begin(seed_path, GENIUS_MODE_PLAY, NULL); }
+// The originating list/menu may close as soon as it hands us the seed. Keep
+// our own copy until the size choice is made; never borrow a row's path.
+static struct {
+	char seed_path[512];
+	genius_mode_t mode;
+	uint64_t session;
+	char labels[5][64];
+} genius_choice;
 
-void geniusui_create_playlist(const char *seed_path) {
-	// The name is composed here, on the GUI thread: the worker that writes the
-	// playlist has no way to ask the language table what the feature is called.
-	genius_begin(seed_path, GENIUS_MODE_PLAYLIST, tr("smartmix_playlist_prefix"));
+static void genius_size_picked(void *user) {
+	if (library_session() != genius_choice.session) {
+		gui_notify_popup("smartmix_cancelled");
+		return;
+	}
+	// Translate on the GUI thread, only once the user confirms the count.
+	genius_begin(genius_choice.seed_path, genius_choice.mode,
+				 genius_choice.mode == GENIUS_MODE_PLAYLIST ? tr("smartmix_playlist_prefix") : NULL,
+				 (int)(intptr_t)user);
 }
 
-static void genius_begin(const char *seed_path, genius_mode_t mode, const char *prefix) {
+static void genius_choose_size(const char *seed_path, genius_mode_t mode) {
+	if (genius_ui.job) {
+		return;
+	}
+	if (!geniusui_available() || !seed_path || !seed_path[0]) {
+		gui_notify_popup("smartmix_no_data");
+		return;
+	}
+	if (strlen(seed_path) >= sizeof(genius_choice.seed_path)) {
+		gui_notify_popup("smartmix_failed");
+		return;
+	}
+	snprintf(genius_choice.seed_path, sizeof(genius_choice.seed_path), "%s", seed_path);
+	genius_choice.mode = mode;
+	genius_choice.session = library_session();
+	popover_item_t items[6] = {0};
+	for (int i = 0; i < 5; i++) {
+		int count = 10 + i * 5;
+		snprintf(genius_choice.labels[i], sizeof(genius_choice.labels[i]), tr("playlist_tracks"), count);
+		items[i] = (popover_item_t){.label = genius_choice.labels[i], .action = genius_size_picked,
+			.user = (void *)(intptr_t)count, .verbatim = true};
+	}
+	items[5] = (popover_item_t){.label = "cancel"};
+	popover_show(lv_screen_active(), items, 6);
+}
+
+void geniusui_start(const char *seed_path) { genius_choose_size(seed_path, GENIUS_MODE_PLAY); }
+
+void geniusui_create_playlist(const char *seed_path) {
+	genius_choose_size(seed_path, GENIUS_MODE_PLAYLIST);
+}
+
+static void genius_begin(const char *seed_path, genius_mode_t mode, const char *prefix, int target_count) {
 	if (genius_ui.job) {
 		return;
 	}
@@ -232,6 +278,7 @@ static void genius_begin(const char *seed_path, genius_mode_t mode, const char *
 	snprintf(job->seed_path, sizeof(job->seed_path), "%s", seed_path);
 	snprintf(job->prefix, sizeof(job->prefix), "%s", prefix ? prefix : "");
 	job->mode = mode;
+	job->target_count = target_count;
 	job->random = lv_rand(0, INT32_MAX);
 	atomic_init(&job->cancel, false);
 	atomic_init(&job->delivery_failed, false);
