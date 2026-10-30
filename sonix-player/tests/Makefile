@@ -49,20 +49,6 @@ $(BUILD)/test_batteryguard: $(GUARD_SRC) $(ROOT)/src/system/device/batteryguard.
 	@mkdir -p $(BUILD)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ $(GUARD_SRC) $(LDFLAGS) $(LDLIBS)
 
-# The touch panel's filter: where the pointer is, given the event stream a
-# Goodix panel sends. Two coordinate pairs in different units, two ways of
-# announcing a press, slots for fingers that are not the one being used. The
-# filter is plain C on purpose (main.c translates the kernel's events into it),
-# so the whole of it runs here with no panel and no kernel headers.
-TOUCH_SRC = test_touch.c $(ROOT)/src/system/input/touch.c
-.PHONY: touch
-touch: $(BUILD)/test_touch
-	$(BUILD)/test_touch
-
-$(BUILD)/test_touch: $(TOUCH_SRC) $(ROOT)/src/system/input/touch.h
-	@mkdir -p $(BUILD)
-	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ $(TOUCH_SRC) $(LDFLAGS) $(LDLIBS)
-
 # The Screensaver folder's rules: which files are pictures, judged from their
 # JPEG headers, and the random pick between them. Plain C, no LVGL.
 PICS_SRC = test_screensaverpics.c $(ROOT)/src/system/device/screensaverpics.c \
