@@ -20,11 +20,11 @@ int main(void) {
 
 	FILE *f = fopen(path, "w");
 	assert(f);
-	fputs("{\"BASE_BUILD_VERSION\":\"2026-03-26 18:49:34\","
+	fputs("{\"BASE_BUILD_VERSION\":\"1.2\","
 		  "\"build_version\":\"1234\",\"OS_version\":\"beta\"}", f);
 	fclose(f);
 	sysinfo_load();
-	assert(strcmp(sysinfo_base_build_version(), "2026-03-26 18:49:34") == 0);
+	assert(strcmp(sysinfo_base_build_version(), "1.2") == 0);
 	assert(strcmp(sysinfo_build_version(), "1234") == 0);
 	assert(strcmp(sysinfo_os_version(), "beta") == 0);
 

@@ -412,14 +412,11 @@ static void build_sysinfo_page(gui_config_t *cfg) {
 	system_value_row(container, "system_build_number", &build_value, build_tapped_cb, NULL, true);
 	lv_label_set_text(build_value, build[0] ? build : "\xE2\x80\x94");
 
-	// The stock player's build stamp, captured before the packer replaces it.
+	// The stock firmware's release version, captured before applying the overlay.
 	lv_obj_t *base_value = NULL;
 	info_row(container, "system_base_build_version", &base_value);
 	const char *base = sysinfo_base_build_version();
 	lv_label_set_text(base_value, base[0] ? base : "\xE2\x80\x94");
-	if (compact) {
-		lv_obj_set_style_text_font(base_value, &font_ui_16, 0);
-	}
 
 	// --- the credits ---
 	// Proper names, the same in every language, so they come in as written and

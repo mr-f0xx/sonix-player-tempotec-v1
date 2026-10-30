@@ -446,7 +446,7 @@ $(BUILD)/test_genius: $(GENIUS_SRC) $(ROOT)/src/system/library/genius.h $(ROOT)/
 	@mkdir -p $(BUILD)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ $(GENIUS_SRC) $(LDFLAGS) $(LDLIBS)
 
-# The stock TempoTec build stamp and its separate Sonix metadata field.
+# The stock TempoTec release version and its separate Sonix metadata field.
 .PHONY: basebuild
 basebuild: $(BUILD)/test_sysinfo
 	python3 test_base_build.py

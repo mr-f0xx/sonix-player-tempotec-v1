@@ -253,13 +253,13 @@ build_image() {
 	[ -f "$SQUASH_DIR/$INIT_SCRIPT" ]    || die "the rootfs has no $INIT_SCRIPT: unexpected firmware."
 	say ""
 
-	# Capture the vendor build before removing hiby_player. Do not use the UPT
-	# filename, OTA version (often zero), or Sonix binary's own build date.
-	BASE_BUILD="$(python3 "$SCRIPT_DIR/extract_base_build.py" "$SQUASH_DIR/$STOCK_PLAYER")"
+	# Capture the vendor release version before applying the Sonix overlay.
+	# Use the product section, not the schema version, dates or library versions.
+	BASE_BUILD="$(python3 "$SCRIPT_DIR/extract_base_build.py" "$SQUASH_DIR/usr/resource/config.json")"
 	if [ -n "$BASE_BUILD" ]; then
-		say "    TempoTec base build = $BASE_BUILD"
+		say "    TempoTec base version = $BASE_BUILD"
 	else
-		warn "stock player has no unambiguous build stamp; About will show a dash"
+		warn "stock config has no unambiguous TempoTec V1 release version; About will show a dash"
 	fi
 
 	# ==========================================================================
@@ -754,7 +754,7 @@ if [ \"\$boot_sel\" = \"logo:4\" ]; then boot_waited=0; while [ \$boot_waited -l
 	grep -q "\"$BUILD_STAMP\"" "$JSON" || die "$KEY was not rewritten."
 	say "    $KEY = $BUILD_STAMP"
 
-	# The extractor emits only a validated ISO date/time, safe in this replacement.
+	# The extractor emits only a dotted numeric version, safe in this replacement.
 	grep -q '"base_build_version"' "$JSON" || die "$SYSTEM_INFO has no base_build_version key."
 	sed_file "s/(\"base_build_version\"[[:space:]]*:[[:space:]]*\")[^\"]*(\")/\\1$BASE_BUILD\\2/" "$JSON"
 	say "    base_build_version = $BASE_BUILD"

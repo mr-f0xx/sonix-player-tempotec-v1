@@ -328,11 +328,13 @@ paths, invalid sizes, missing seeds, cancellation/card invalidation, shorter
 mixes when candidates run out, and failure when only the seed is available.
 No LVGL, database or card is required.
 
-## TempoTec base build in About
+## TempoTec base version in About
 
 Run `make -C sonix-player/tests basebuild` from the repository root. This checks
-extraction of the stock player's `Firmware Built` timestamp (including invalid,
-missing and ambiguous stamps), the packer's JSON substitution, and loading the
-separate `base_build_version` field without confusing it with Sonix's build
-number. The C test also checks older/missing metadata and clearing cached values.
-No stock firmware, LVGL or cross-compiler is required.
+extraction of the release version from the TempoTec V1 product section in stock
+`usr/resource/config.json` (not the schema version, a library version or a date),
+including invalid/missing metadata and ambiguous products. It also tests the
+packer's JSON substitution and loading the separate `base_build_version` field
+without confusing it with Sonix's build number. The C test checks older/missing
+metadata and clearing cached values. No stock firmware, LVGL or cross-compiler
+is required.

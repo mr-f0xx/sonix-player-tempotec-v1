@@ -1,37 +1,37 @@
 #!/usr/bin/env python3
-"""Read the official player's Firmware Built stamp without executing its ELF.
+"""Read the TempoTec V1 release version from stock usr/resource/config.json.
 
-Only this timestamp is retained, never the vendor binary or its credentials.
-Unknown/ambiguous stamps produce an empty value rather than a guessed version.
+Use the product section, not the config schema version or bundled libraries.
+Unknown, malformed or ambiguous metadata yields an empty value, never a date.
 """
-import datetime
+import json
 import re
 import sys
 from pathlib import Path
 
 
-STAMP = re.compile(
-    rb"(?:^|\x00)Firmware Built\s*:\s*"
-    rb"([A-Z][a-z]{2}\s+[0-9]{1,2}\s+[0-9]{4}\s+[0-9]{2}:[0-9]{2}:[0-9]{2})\x00"
-)
-MONTHS = "Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec".split()
-
-
 def extract_base_build(data):
-    stamps = set()
-    for match in STAMP.finditer(data):
-        month, day, year, time = match[1].decode("ascii").split()
-        try:
-            hour, minute, second = map(int, time.split(":"))
-            date = datetime.datetime(int(year), MONTHS.index(month) + 1,
-                                     int(day), hour, minute, second)
-        except ValueError:
-            continue
-        stamps.add(date.isoformat(sep=" "))
-    return stamps.pop() if len(stamps) == 1 else ""
+    try:
+        config = json.loads(data)
+    except (ValueError, UnicodeDecodeError):
+        return ""
+    if not isinstance(config, list):
+        return ""
+    products = [entry for entry in config
+                if isinstance(entry, dict) and entry.get("type") == "product"]
+    if len(products) != 1:
+        return ""
+    product = products[0]
+    if product.get("company") != "TempoTec" or product.get("device") != "V1":
+        return ""
+    version = product.get("version")
+    if not isinstance(version, str) or not re.fullmatch(r"[0-9]+(?:\.[0-9]+)+", version):
+        return ""
+    return version if len(version) < 64 else ""
 
 
 if __name__ == "__main__":
     if len(sys.argv) != 2:
-        sys.exit("Usage: extract_base_build.py STOCK_HIBY_PLAYER")
-    print(extract_base_build(Path(sys.argv[1]).read_bytes()))
+        sys.exit("Usage: extract_base_build.py STOCK_CONFIG_JSON")
+    path = Path(sys.argv[1])
+    print(extract_base_build(path.read_bytes()) if path.is_file() else "")

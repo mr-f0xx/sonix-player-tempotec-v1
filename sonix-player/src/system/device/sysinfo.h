@@ -20,7 +20,7 @@
 //         "dac-info": "Dual Cirrus Logic CS43131",
 //         "OS_version": "beta",
 //         "Build_version": "182",
-//         "base_build_version": "2026-03-26 18:49:34",
+//         "base_build_version": "1.2",
 //         "ota-repo": "mr-f0xx/sonix-player-tempotec-v1"
 //     }
 //
@@ -40,7 +40,7 @@ void sysinfo_load(void);
 const char *sysinfo_os_version(void);
 const char *sysinfo_build_version(void);
 
-// Build timestamp of the official TempoTec player replaced by the packer.
+// Release version of the official TempoTec firmware used by the packer.
 // Separate from Sonix's build number; "" for older images or unknown stock builds.
 const char *sysinfo_base_build_version(void);
 
