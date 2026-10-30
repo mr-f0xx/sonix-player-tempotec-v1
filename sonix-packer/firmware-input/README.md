@@ -1,5 +1,21 @@
-# Local stock firmware input
+# Stock firmware input
 
-Place the official TempoTec V1 `v1.upt` file for the firmware version you want to inspect in this folder. This is a local input area; the firmware image is intentionally excluded from Git and must not be committed or redistributed.
+The split `v1_upload.7z.001` and `v1_upload.7z.002` files in this directory
+are the supplied TempoTec V1 1.3 stock update. Keep both parts together. To
+prepare them locally (requires 7-Zip):
 
-After placing the file, tell the coding agent it is available at `sonix-packer/firmware-input/v1.upt`. The packer workflow can then prepare a private working copy and inspect/build from it.
+```sh
+sonix-packer/prepare_v1_stock.sh sonix-packer/firmware-input/v1_upload.7z.001
+sonix-packer/verify_upt.sh sonix-packer/v1_original.upt
+```
+
+The extracted `v1.upt` has SHA-256
+`9f929a92319a05a81bbd16cbf0fb8a886a9bb2def192f5a6786b6ea7032fa05d`.
+The build workflow uses this archive by default; its optional stock firmware
+URL overrides it. Other official updates can also be supplied to the prepare
+script as a raw `v1.upt`, an archive, or a directory. Extracted UPTs are
+ignored by Git. Retain the matching official firmware and checksum for recovery.
+
+The stock 1.3 image contains the launcher and init paths expected by the
+packer. Packaging checks are not a substitute for testing on a physical V1;
+flashing an unofficial image always carries a risk.

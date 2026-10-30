@@ -240,6 +240,8 @@ Only attempt this on a TempoTec Variations V1. Read the warning above before pro
 3. Charge the player adequately, insert the card and start the device's built-in firmware update process. Menu names vary by stock firmware version; follow the device's on-screen instructions and do not interrupt the update.
 4. If you want to restore stock firmware, put the original vendor `v1.upt` and its matching checksum file at the card root and use the same update process.
 
+The build workflow defaults to the supplied V1 1.3 stock archive; an optional workflow URL selects a different stock image. See [stock firmware input](sonix-packer/firmware-input/README.md) for local preparation. The 1.3 archive has been inspected, but a Sonix image based on it has not been verified on hardware.
+
 The package builder is designed to preserve the stock `xImage` kernel and leave the existing update/recovery path in place. This is checked during the build, but it is **not** a guarantee that recovery will work on every device or in every failure case.
 
 ## Streaming credentials
