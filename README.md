@@ -346,3 +346,8 @@ Third-party components carried in the tree, or fetched by the build, keep their 
 
 The licence notice for each component sits with it in the source tree; [LICENSE](LICENSE) covers the project as a whole. The official TempoTec V1 firmware used as the base of a build is not part of this repository, and TempoTec, HiBy and the other vendors own their names and firmware.
 
+
+### Permanent Qobuz downloads
+
+Track menus support saving MP3/FLAC to `Music/Qobuz` on the microSD, separately
+from the temporary playback cache. See [setup, limitations and tests](docs/qobuz-downloads.md).

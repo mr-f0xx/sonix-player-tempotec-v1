@@ -123,6 +123,10 @@ const char *qobuz_display_name(void); // empty when not logged in
 // Blocks. On success stores the token and returns true.
 bool qobuz_login(const char *username, const char *password);
 
+// Validates an existing bearer token against user/get before persisting it.
+// Blocks: worker thread only. Failed validation preserves the current session.
+bool qobuz_login_token(const char *user_auth_token, const char *user_id);
+
 // Forgets the token, here and in the configuration.
 void qobuz_logout(void);
 
@@ -160,6 +164,10 @@ int qobuz_featured_albums(const char *type, int offset, qobuz_album_t *out, int 
 // The URL is valid for a few minutes and must not be stored: request it every
 // time the track is played.
 bool qobuz_track_url(long track_id, char *url, size_t url_size, char *mime, size_t mime_size, int *format_out);
+
+// Explicit quality snapshot for background downloads.
+bool qobuz_track_url_format(long track_id, int format_id, char *url, size_t url_size,
+                            char *mime, size_t mime_size, int *format_out);
 
 // ---------------------------------------------------------------------------
 // Writing to the account
