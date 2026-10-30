@@ -3016,6 +3016,8 @@ void medialist_open_artist(const char *name) {
 	medialist_open(name, artist_records ? LIBRARY_LIST_ALBUMS : LIBRARY_LIST_TRACKS, LIBRARY_FILTER_ARTIST, name);
 }
 
+lv_obj_t *medialist_artist_screen(void) { return artist_records ? medialist_albums_screen : medialist_tracks_screen; }
+
 void medialist_open_years(void) {
 	medialist_open(tr("music_years"), LIBRARY_LIST_YEARS, LIBRARY_FILTER_NONE, NULL);
 }

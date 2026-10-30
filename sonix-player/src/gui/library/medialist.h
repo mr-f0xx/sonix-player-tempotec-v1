@@ -92,6 +92,7 @@ void medialist_open_seed(const char *title, medialist_seed_cb_t cb, void *user);
 // Opens one artist the way their disc button was last left: the records, or
 // the tracks strung out. What the search opens an artist with.
 void medialist_open_artist(const char *name);
+lv_obj_t *medialist_artist_screen(void);
 void medialist_open_years(void);
 void medialist_open_most_played(void);
 

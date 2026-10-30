@@ -82,6 +82,8 @@
 
 ## Now playing
 
+- **Show artist** in the player menu opens the current track’s library artist page; tracks filed under multiple artists offer a choice. Tidal tracks retain their artist search.
+
 - Artwork edge to edge across the top, and the same picture flipped, blurred and dimmed behind the controls. Embedded or folder covers up to 32 MB are memory-mapped directly from the card, pre-fetched for the upcoming track, and cached as JPEGs (up to 1,000 Now Playing sleeves alongside list thumbnails) with a dedicated cache-lookup worker for near-instant skips.
 - **Alternative layout** - the progress bar becomes a **waveform**
 - **Immersive layout** - the picture itself, edge to edge across the whole panel: the sleeve fills the screen and is centre-cropped, at its own brightness, with nothing laid over it. The controls stand on a frosted band: the foot of the same photograph, lightly blurred, dimmed to the darkness the type reads on and tinted so the sleeve's colour survives in it, cut to the deck's rectangle - so the artwork is still seen through the glass, softly, while the names, the bar, the clocks and the transport are read on top; the chevron and the source marks take their chance in white over the sharp part. Anything holding artwork gets one - local files, podcasts, audiobooks, Subsonic and the streaming services alike - and without a picture the page falls back to its own colour with the controls in the theme's ink.
