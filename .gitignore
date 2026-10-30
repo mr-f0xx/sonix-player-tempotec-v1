@@ -35,6 +35,8 @@ sonix-player/wavpack-5.6.0.tar.bz2
 sonix-player/libogg-1.3.5.tar.gz
 sonix-player/freetype-2.13.3.tar.xz
 
+sonix-packer/firmware-input/*.upt
+sonix-packer/firmware-input/*md5*.txt
 sonix-packer/v1.upt
 sonix-packer/v1_md5.txt
 sonix-packer/sonix_player
