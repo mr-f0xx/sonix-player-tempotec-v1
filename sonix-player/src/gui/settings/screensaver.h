@@ -35,6 +35,26 @@ bool screensaver_get_enabled(void);
 void screensaver_set_visualizer(bool enabled);
 bool screensaver_get_visualizer(void);
 
+// How that spectrum is drawn. Config-backed
+// ("screen"/"screensaver_visualizer_style"); whichever it is, the track
+// information and the clock stay where they always were.
+//
+// Neon is the visualizer as it came: eight wide segmented bars in the theme's
+// accent colour on black, over a matching rail.
+//
+// LED is the classic bench spectrum analyzer: sixteen narrower bars of
+// horizontal segments on a dark red field, each segment's colour its height --
+// cream at the foot through amber and orange to red at the top, with a bright
+// cap riding each bar's peak and falling behind it. Its colours are its own,
+// not the theme's: the fire gradient is the look, not a tint over it.
+typedef enum {
+	SCREENSAVER_VIZ_STYLE_NEON = 0,
+	SCREENSAVER_VIZ_STYLE_LED,
+} screensaver_viz_style_t;
+
+screensaver_viz_style_t screensaver_visualizer_style(void);
+void screensaver_set_visualizer_style(screensaver_viz_style_t style);
+
 // Where the picture comes from.
 //
 // Album is the artwork of what is playing, borrowed from the player and free.

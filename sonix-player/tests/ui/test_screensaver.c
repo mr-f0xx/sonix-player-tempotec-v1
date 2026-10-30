@@ -327,6 +327,21 @@ static int spectrum_bar_height(lv_obj_t *spectrum, int band) {
     return height;
 }
 
+// The same for the LED style: its grid starts after Neon's rail and bars, and
+// each band is 24 segments followed by its peak cap.
+static int led_first_child(void) { return 1 + VISUALIZER_BANDS * 24; }
+
+static int led_bar_height(lv_obj_t *spectrum, int band) {
+    int height = 0;
+    for (int y = 0; y < 24; y++)
+        if (!lv_obj_is_hidden(lv_obj_get_child(spectrum, led_first_child() + band * 25 + y))) height++;
+    return height;
+}
+
+static lv_obj_t *led_cap(lv_obj_t *spectrum, int band) {
+    return lv_obj_get_child(spectrum, led_first_child() + band * 25 + 24);
+}
+
 static void hide_now(void) {
 	screensaver_hide();
 	for (int i = 0; i < 100 && screensaver_is_visible(); i++) {
@@ -573,7 +588,18 @@ static void check_settings_card(const char *language_dir) {
 	lv_obj_t *framed = settingsrow_pill(style_pills, "screensaver_style_framed", SCREENSAVER_STYLE_FRAMED, noop_cb);
 	settingsrow_pill_active(fill, false);
 	settingsrow_pill_active(framed, true);
+	// The visualizer's own card below it: the switch, and Neon and LED under
+	// it -- the same shape settings.c builds.
+	lv_obj_t *viz_switch = NULL, *viz_pills = NULL;
+	lv_obj_t *viz_card = settingsrow_toggle_pills(page, "screensaver_visualizer", noop_cb, &viz_switch, &viz_pills);
+	lv_obj_t *neon = settingsrow_pill(viz_pills, "screensaver_viz_neon", SCREENSAVER_VIZ_STYLE_NEON, noop_cb);
+	lv_obj_t *led = settingsrow_pill(viz_pills, "screensaver_viz_led", SCREENSAVER_VIZ_STYLE_LED, noop_cb);
 	lv_obj_update_layout(page);
+
+	assert(lv_obj_get_parent(viz_pills) == viz_card);
+	assert(lv_obj_get_parent(neon) == viz_pills && lv_obj_get_parent(led) == viz_pills);
+	assert(strcmp(lv_label_get_text(lv_obj_get_child(neon, 0)), "Neon") == 0);
+	assert(strcmp(lv_label_get_text(lv_obj_get_child(led, 0)), "LED") == 0);
 
 	assert(lv_obj_get_parent(group) == card && lv_obj_get_parent(style_pills) == group);
 	lv_obj_t *caption = lv_obj_get_child(group, 0);
@@ -605,9 +631,10 @@ static void check_settings_card(const char *language_dir) {
 	assert(lv_obj_get_height(card) < tall);
 	lv_obj_set_hidden(group, false);
 
-	// Every language has the three texts -- a missing one would show its
+	// Every language has the five texts -- a missing one would show its
 	// bare tag -- and what is on screen follows a switch.
-	const char *keys[] = {"screensaver_album_art", "screensaver_style_fill", "screensaver_style_framed"};
+	const char *keys[] = {"screensaver_album_art", "screensaver_style_fill", "screensaver_style_framed",
+						  "screensaver_viz_neon", "screensaver_viz_led"};
 	DIR *dir = opendir(language_dir);
 	assert(dir);
 	int languages = 0;
@@ -626,6 +653,8 @@ static void check_settings_card(const char *language_dir) {
 		assert(strcmp(lv_label_get_text(caption), tr("screensaver_album_art")) == 0);
 		assert(strcmp(lv_label_get_text(lv_obj_get_child(fill, 0)), tr("screensaver_style_fill")) == 0);
 		assert(strcmp(lv_label_get_text(lv_obj_get_child(framed, 0)), tr("screensaver_style_framed")) == 0);
+		assert(strcmp(lv_label_get_text(lv_obj_get_child(neon, 0)), tr("screensaver_viz_neon")) == 0);
+		assert(strcmp(lv_label_get_text(lv_obj_get_child(led, 0)), tr("screensaver_viz_led")) == 0);
 		languages++;
 	}
 	closedir(dir);
@@ -1002,6 +1031,89 @@ int main(int argc, char **argv) {
 	pump(100);
 	int falling_height = spectrum_bar_height(spectrum, 4);
 	assert(falling_height > 0 && falling_height < rising_height);
+
+	/* The whole scale, not just one tone: equal energy at every band centre
+	 * lights every bar -- the bass end included, which used to rest empty
+	 * while the treble sat high on its noise floor. And with equal energy
+	 * the bass still stands the taller of the two ends: music lives there,
+	 * and the mapping is weighted so the display reads the way it sounds. */
+	static const double NEON_CENTRES[VISUALIZER_BANDS] = {85, 150, 270, 480, 850, 1500, 2700, 4400};
+	for (int i = 0; i < 4096; i++) {
+		double t = 0;
+		for (int b = 0; b < VISUALIZER_BANDS; b++)
+			t += sin(2 * 3.14159265 * NEON_CENTRES[b] * i / 44100);
+		pcm[2 * i] = pcm[2 * i + 1] = (int16_t)(2000 * t); // 0.06 a band: no clipping
+	}
+	visualizer_feed(pcm, 4096, 2, 16, 44100);
+	visualizer_levels(levels);
+	for (int b = 0; b < VISUALIZER_BANDS; b++) assert(levels[b] > 64);
+	assert(levels[0] >= levels[7]);
+
+	/* LED: the bench analyzer. Its own dark red field, sixteen bars of the
+	 * fire gradient, caps over the peaks -- and every bar answers music at
+	 * its own centre, bass end included. */
+	screensaver_set_visualizer_style(SCREENSAVER_VIZ_STYLE_LED);
+	assert(screensaver_visualizer_style() == SCREENSAVER_VIZ_STYLE_LED);
+	assert(config_init(config) &&
+		   config_get_int("screen", "screensaver_visualizer_style", -1) == SCREENSAVER_VIZ_STYLE_LED);
+	assert(!lv_obj_is_hidden(spectrum)); // a drawing, not an on/off: still up
+	lv_obj_update_layout(saver_obj());
+	assert(lv_color_eq(lv_obj_get_style_bg_color(spectrum, 0), lv_color_make(10, 0, 0)));
+	assert(lv_obj_get_style_bg_grad_dir(spectrum, 0) == LV_GRAD_DIR_VER);
+	// Neon's grid is untouched underneath: the rail, then its eight bars.
+	assert(lv_color_eq(lv_obj_get_style_bg_color(lv_obj_get_child(spectrum, 0), 0), theme()->accent));
+	assert((int)lv_obj_get_child_count(spectrum) == led_first_child() + VISUALIZER_LED_BANDS * 25);
+	// The fire gradient: cream at the floor, red at the top, cream caps.
+	assert(lv_color_eq(lv_obj_get_style_bg_color(lv_obj_get_child(spectrum, led_first_child() + 0), 0),
+					   lv_color_make(255, 245, 200)));
+	assert(lv_color_eq(lv_obj_get_style_bg_color(lv_obj_get_child(spectrum, led_first_child() + 23), 0),
+					   lv_color_make(255, 42, 0)));
+	assert(lv_color_eq(lv_obj_get_style_bg_color(led_cap(spectrum, 0), 0), lv_color_make(255, 250, 225)));
+	// The colours are the analyzer's own: a palette change moves none of them.
+	for (int kind = 0; kind < THEME_KIND_COUNT; kind++) {
+		theme_set_kind((theme_kind_t)kind);
+		assert(lv_color_eq(lv_obj_get_style_bg_color(spectrum, 0), lv_color_make(10, 0, 0)));
+		assert(lv_color_eq(lv_obj_get_style_bg_color(lv_obj_get_child(spectrum, led_first_child() + 0), 0),
+						   lv_color_make(255, 245, 200)));
+		assert(lv_color_eq(lv_obj_get_style_bg_color(led_cap(spectrum, 0), 0), lv_color_make(255, 250, 225)));
+	}
+	theme_set_kind(THEME_KIND_DARK);
+	static const double LED_CENTRES[VISUALIZER_LED_BANDS] = {45,   60,   82,   112,  153,  209,  286,  392,
+	                                                         536,  733, 1003, 1372, 1877, 2567, 3510, 4800};
+	for (int i = 0; i < 4096; i++) {
+		double t = 0;
+		for (int b = 0; b < VISUALIZER_LED_BANDS; b++)
+			t += sin(2 * 3.14159265 * LED_CENTRES[b] * i / 44100);
+		pcm[2 * i] = pcm[2 * i + 1] = (int16_t)(1300 * t); // 0.04 a band: no clipping
+	}
+	visualizer_feed(pcm, 4096, 2, 16, 44100);
+	uint8_t led[VISUALIZER_LED_BANDS];
+	visualizer_led_levels(led);
+	for (int b = 0; b < VISUALIZER_LED_BANDS; b++) assert(led[b] > 80);
+	pump(2500); // every bar settles on its band's own mark
+	dump_snapshot("led"); // the analyzer as the reference frame draws it
+	for (int b = 0; b < VISUALIZER_LED_BANDS; b++) {
+		int height = led_bar_height(spectrum, b);
+		assert(height > 8 && height < 24);
+	}
+	// At a steady note the bar's own top segment is the cap, the way the
+	// reference frame draws it: the bright sliver rides above the bar only
+	// while the music has moved on from the peak.
+	assert(lv_obj_is_hidden(led_cap(spectrum, 0)));
+	// Silence: the bars fall, the caps stay behind and sink after them.
+	memset(pcm, 0, sizeof(pcm));
+	visualizer_feed(pcm, 4096, 2, 16, 44100);
+	pump(150);
+	for (int b = 0; b < VISUALIZER_LED_BANDS; b++) assert(led_bar_height(spectrum, b) < 24);
+	assert(!lv_obj_is_hidden(led_cap(spectrum, 0)));
+	// Back to Neon while it is up: its black field returns, and the caps and
+	// bars of the analyzer go with the style.
+	screensaver_set_visualizer_style(SCREENSAVER_VIZ_STYLE_NEON);
+	assert(screensaver_visualizer_style() == SCREENSAVER_VIZ_STYLE_NEON);
+	assert(lv_color_eq(lv_obj_get_style_bg_color(spectrum, 0), lv_color_black()));
+	assert(lv_obj_get_style_bg_grad_dir(spectrum, 0) == LV_GRAD_DIR_NONE);
+	assert(lv_obj_is_hidden(led_cap(spectrum, 0)));
+
 	screensaver_set_visualizer(false);
 	assert(lv_obj_is_hidden(spectrum));
 	assert(!lv_obj_is_hidden(cover_box()));
