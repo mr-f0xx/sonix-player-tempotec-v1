@@ -11,6 +11,9 @@ sonix-packer/verify_upt.sh sonix-packer/v1_original.upt
 
 The extracted `v1.upt` has SHA-256
 `9f929a92319a05a81bbd16cbf0fb8a886a9bb2def192f5a6786b6ea7032fa05d`.
+The packer maps this hash to the release label `1.3` shown as TempoTec base
+version in Settings → System → About, because the package's internal product
+version (`usr/resource/config.json`) still reads `1.2`.
 The build workflow uses this archive by default; its optional stock firmware
 URL overrides it. Other official updates can also be supplied to the prepare
 script as a raw `v1.upt`, an archive, or a directory. Extracted UPTs are

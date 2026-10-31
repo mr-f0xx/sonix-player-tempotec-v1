@@ -2,6 +2,7 @@
 """Host checks for stock build extraction and packer metadata stamping."""
 import importlib.util
 import json
+import re
 import subprocess
 import sys
 import tempfile
@@ -11,9 +12,13 @@ from pathlib import Path
 sys.dont_write_bytecode = True
 ROOT = Path(__file__).resolve().parents[2]
 PACKER = ROOT / "sonix-packer"
+sys.path.insert(0, str(PACKER))
 spec = importlib.util.spec_from_file_location("base_build", PACKER / "extract_base_build.py")
 module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(module)
+spec = importlib.util.spec_from_file_location("stock_release", PACKER / "stock_release.py")
+release = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(release)
 
 
 class BaseBuildTest(unittest.TestCase):
@@ -59,6 +64,41 @@ class BaseBuildTest(unittest.TestCase):
                 self.assertEqual(data["base_build_version"], stamp)
                 self.assertEqual(data["build_version"], "")
                 self.assertEqual(data["OS_version"], "beta")
+
+
+class StockReleaseTest(unittest.TestCase):
+    # The hash of the supplied V1 1.3 archive, as recorded in
+    # sonix-packer/firmware-input/README.md.
+    V13_SHA256 = "9f929a92319a05a81bbd16cbf0fb8a886a9bb2def192f5a6786b6ea7032fa05d"
+
+    @staticmethod
+    def config(version="1.2"):
+        return json.dumps([{"type": "slef", "version": 1},
+                           {"type": "product", "company": "TempoTec",
+                            "device": "V1", "version": version}]).encode()
+
+    def test_known_package_wins_over_product_metadata(self):
+        # The 1.3 package's own config.json still says 1.2; the package hash
+        # is what names the release.
+        self.assertEqual(release.stock_release(self.V13_SHA256, self.config("1.2")), "1.3")
+        self.assertEqual(release.stock_release(self.V13_SHA256.upper(), self.config("1.2")), "1.3")
+        self.assertEqual(release.stock_release(self.V13_SHA256, b""), "1.3")
+
+    def test_unknown_package_falls_back_to_product_version(self):
+        other = "0" * 64
+        for version in ("1.2", "1.4.2"):
+            self.assertEqual(release.stock_release(other, self.config(version)), version)
+        for data in (b"", b"not JSON", b"[]"):
+            self.assertEqual(release.stock_release(other, data), "")
+        self.assertEqual(release.stock_release("", self.config("1.2")), "1.2")
+
+    def test_documented_hash_is_known(self):
+        readme = (PACKER / "firmware-input/README.md").read_text()
+        documented = re.findall(r"`([0-9a-f]{64})`", readme)
+        self.assertIn(self.V13_SHA256, documented)
+        self.assertIn(self.V13_SHA256, release.KNOWN_RELEASES)
+        for label in release.KNOWN_RELEASES.values():
+            self.assertRegex(label, r"^[0-9]+(\.[0-9]+)+$")
 
 
 if __name__ == "__main__":
