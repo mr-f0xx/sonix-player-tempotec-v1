@@ -119,6 +119,13 @@ void audiobooks_open(void) { switch_screen(audiobooks_screen); }
  * home menu whether Books took its Audiobooks slot. */
 bool main_menu_books(void) { return config_get_bool("ui", "home_books", false); }
 void flappybird_open(void) { /* not reached from this test */ }
+/* The games' page chrome: the way back in the header, and the status bar and
+ * volume overlay a game hides while it is on screen. The games are opened
+ * from More in this suite, so the shell they hide is a stub. */
+void back_btn_cb(lv_event_t *e) { (void)e; }
+void back_btn_force_hidden(bool hidden) { (void)hidden; }
+void topbar_set_hidden(bool hidden) { (void)hidden; }
+void volume_overlay_allow_outside_player(bool allow) { (void)allow; }
 
 /* The metronome's click is a thread writing into the PCM, which this suite has
  * no output for. The page asks it only these questions, and the two counters
@@ -491,12 +498,20 @@ static void check_more_page(gui_config_t *cfg, const char *tag) {
 	assert(has_entry(shown, tr("file_explorer")));
 	assert(has_entry(shown, tr("flappy_bird")));
 	assert(has_entry(shown, tr("metronome")));
+	// The three games are on the page too, after Flappy Bird, which they sit
+	// beside: they are the rows the More menu gained back.
+	assert(has_entry(shown, tr("2048")));
+	assert(has_entry(shown, tr("snake")));
+	assert(has_entry(shown, tr("dino")));
 
 	// A tile of a page that does not scroll has to be on the glass, every one
 	// of them: an entry laid out past the foot of a page that cannot be
 	// scrolled is an entry nobody can reach. (The list does scroll, so its
 	// rows may run past the foot; there, what matters is that a row is a
-	// finger target.)
+	// finger target.) A grid scrolls once it holds more entries than it has
+	// places for, and then the tiles past the fold are reached by scrolling,
+	// the same as the list's rows.
+	bool scrolls = lv_obj_is_scrollable(shown);
 	int entries = 0;
 	for (uint32_t i = 0; i < lv_obj_get_child_count(shown); i++) {
 		lv_obj_t *entry = lv_obj_get_child(shown, i);
@@ -508,7 +523,9 @@ static void check_more_page(gui_config_t *cfg, const char *tag) {
 		assert(lv_obj_get_width(entry) <= (int32_t)cfg->screen_width);
 		assert(area.x1 >= 0 && area.x2 < (int32_t)cfg->screen_width);
 		if (tiles) {
-			assert(area.y1 >= 0 && area.y2 < (int32_t)cfg->screen_height);
+			if (!scrolls) {
+				assert(area.y1 >= 0 && area.y2 < (int32_t)cfg->screen_height);
+			}
 			// Small enough to fit seven on the V1's panel, never smaller
 			// than a tile the label font can still be read on.
 			assert(lv_obj_get_width(entry) >= bp_pick(70, 90));
@@ -525,6 +542,11 @@ static void check_more_page(gui_config_t *cfg, const char *tag) {
 		}
 	}
 	assert(entries >= 5);
+	// Nine places on the V1 grid, three rows of three. Past that the page has to
+	// scroll, or the last entries could not be reached at all.
+	if (tiles && entries > 9) {
+		assert(scrolls);
+	}
 }
 
 /* The two libraries share one slot on the home screen. When Books takes it,

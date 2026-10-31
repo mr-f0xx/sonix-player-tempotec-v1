@@ -9,6 +9,9 @@
 #include "src/gui/calculator/calculator.h"
 #include "src/gui/ebook/ebookpage.h"
 #include "src/gui/flappybird/flappybird.h"
+#include "src/gui/games/dino.h"
+#include "src/gui/games/game2048.h"
+#include "src/gui/games/snake.h"
 #include "src/gui/gearboy/gearboypage.h"
 #include "src/gui/library/audiobooks.h"
 #include "src/gui/library/filespage.h"
@@ -61,6 +64,15 @@ static bool more_tokyo_icon(const char *label, const lv_image_dsc_t **icon, them
 	} else if (strcmp(label, "flappy_bird") == 0) {
 		*icon = &icon_bird;
 		*tone = THEME_SEMANTIC_PURPLE;
+	} else if (strcmp(label, "2048") == 0) {
+		*icon = &icon_game_2048;
+		*tone = THEME_SEMANTIC_BLUE;
+	} else if (strcmp(label, "snake") == 0) {
+		*icon = &icon_game_snake;
+		*tone = THEME_SEMANTIC_GREEN;
+	} else if (strcmp(label, "dino") == 0) {
+		*icon = &icon_game_dino;
+		*tone = THEME_SEMANTIC_AMBER;
 	} else if (strcmp(label, "calculator") == 0) {
 		*icon = &icon_calculator;
 		*tone = THEME_SEMANTIC_CYAN;
@@ -147,6 +159,14 @@ static const grid_entry_t MORE_ENTRIES[] = {
 	{"file_explorer", &icon_menu_file_explorer, NULL, filespage_open},
 	// An action: the artwork is read from the resource tree on the way in.
 	{"flappy_bird", &icon_menu_flappy_bird, NULL, flappybird_open},
+	// The three games take the same route as Flappy Bird: an action rather than
+	// a screen, because a run is read back from the config on the way in. 2048
+	// picks up where its board was left, and the other two agree with the best
+	// score on the card. Each has a drawing of what it is about, so the picture
+	// says which game it is before the caption does.
+	{"2048", &icon_game_2048, NULL, game2048_open},
+	{"snake", &icon_game_snake, NULL, snake_open},
+	{"dino", &icon_game_dino, NULL, dino_open},
 	// Both of these are actions rather than screens for the file
 	// manager's reason: the calculator repaints its display from the sum
 	// it was left holding, and the notes shelf reads the card.
