@@ -17,6 +17,8 @@
 #include "src/gui/library/filespage.h"
 #include "src/gui/metronome/metronome.h"
 #include "src/gui/notes/notes.h"
+#include "src/gui/pet/petpage.h"
+#include "src/gui/pet/peticon.h"
 #include "src/gui/nowplaying/player.h"
 #include "src/gui/shell/gridpage.h"
 #include "src/gui/shell/icons.h"
@@ -82,6 +84,9 @@ static bool more_tokyo_icon(const char *label, const lv_image_dsc_t **icon, them
 	} else if (strcmp(label, "metronome") == 0) {
 		*icon = &icon_metronome;
 		*tone = THEME_SEMANTIC_GREEN;
+	} else if (strcmp(label, "pet") == 0) {
+		*icon = &icon_pet;
+		*tone = THEME_SEMANTIC_PURPLE;
 	} else {
 		return false;
 	}
@@ -176,6 +181,12 @@ static const grid_entry_t MORE_ENTRIES[] = {
 	// from the settings as they were left, and the page repaints them on the
 	// way in.
 	{"metronome", &icon_menu_metronome, NULL, metronome_open},
+	// The pet is an action for the same reason, and one more: it is built the
+	// first time it is opened, so a player who never visits it pays nothing for
+	// it. What it knows about the music comes from a one-second tick that runs
+	// whether or not the page is up (petwatch.c), which is why it is not simply
+	// a screen with a timer of its own.
+	{"pet", &icon_pet, NULL, petpage_open},
 };
 
 #define MORE_ENTRIES_MAX 12

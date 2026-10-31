@@ -1269,6 +1269,113 @@ of the layout code (`gridpage_set_layout`, `gridpage_build`,
 `gridpage_replace_entries`), which now share the one predicate instead of
 repeating it.
 
+## A pet that eats music
+
+The More menu gained a small creature whose mood is the listening: play, and it
+gets happier and livelier; leave the player quiet, and both drift down. It grows
+through five stages -- egg, hatchling, sprout, companion, maestro -- over about
+fifteen hours of music, and it is petted by tapping it, which it likes once a
+minute.
+
+### Where it lives, and what it does not cost
+
+There is no daemon and no thread. `petwatch.c` owns one `lv_timer` at 1 Hz,
+created at startup beside the status bar's own timers; the interface thread is
+already awake several times a second, so the pet adds one callback to a loop
+that is running anyway, and the callback is a few comparisons and a `time()`
+when nothing is playing. The page's repaint is a second timer, and that one
+exists only while the page is on the glass: it is created on
+`LV_EVENT_SCREEN_LOADED`, deleted on `LV_EVENT_SCREEN_UNLOADED`, and registered
+with `power_pause_in_standby()` so a dark screen costs nothing.
+
+The watcher is deliberately *not* registered with `power_pause_in_standby()`.
+Most listening happens with the panel off, and a paused watcher would credit
+none of it. It reads the same predicate the rest of the player uses for "music
+is coming out": `audio_get_status() == AUDIO_STATUS_PLAYING`, or
+`radio_is_playing()`, or `btreceiver_is_streaming()` -- so local files, streams,
+internet radio and a phone over Bluetooth all feed the pet.
+
+The tick credits at most five seconds to a late callback. The interface thread
+can be busy opening a file or decoding for longer than a second, and a gap of
+thirty seconds is not thirty seconds of proven listening; the rest is handed to
+`pet_advance()` as idle time, which is the truthful reading of a gap nobody
+observed.
+
+### The arithmetic is plain C, and tested without a screen
+
+`pet.c` knows nothing about LVGL, audio or the config store: it is given `now`,
+the local day and how many seconds of music were heard since the last call, and
+it returns a set of events. That is what makes it testable, and `tests/test_pet.c`
+does exactly that -- the feeds, the decay, the seven-day offline ceiling, a clock
+moved backwards, the daily goal and its streak, all five stages, all five moods
+including the sleep after six hours without music or a pat, the petting cooldown,
+and the round trip through `device_config.ini`.
+
+The numbers, chosen so that a normal day moves the creature and a weekend away
+does not destroy it:
+
+- **Happiness** gains a point per 20 seconds of music -- a three-minute track is
+  nine points -- and loses one per 30 minutes of silence. A pet with no energy
+  left earns happiness at half rate until the music has fed it again, which is
+  the only thing hunger changes: the pet is slower to cheer up, never punished.
+- **Energy** gains a point per 12 seconds of music and loses one per 10 minutes
+  idle. It is the meter that makes the creature look tired before it looks sad.
+- **The day** is 20 minutes of music, counted afresh at local midnight. Meeting
+  it continues a streak if yesterday's was met and restarts it at one if not;
+  jumping several days at once ends the run, because no day in between was ever
+  met. A clock moved backwards keeps the run and restarts the day's count rather
+  than calling it a broken streak.
+- **Stages** arrive at 0 seconds, 5 minutes, 1 hour, 4 hours and 15 hours of
+  cumulative music. Growth is announced once, from an event, not by comparing
+  stages on every repaint.
+
+The state is sixteen integers and a name in `[pet]` in the settings file. It is
+written after two minutes of music, on a goal or a stage, when the page is left,
+when the creature is petted, and in `power_shutdown()` -- never once a second.
+`config_set_*` already ignores a value that has not changed, and
+`config_store_save()` writes only a dirty store, so a long listen settles into a
+few small writes and a paused player writes nothing at all.
+
+### The clock that has never been set
+
+A player whose clock is still at the epoch adopts the pet at the epoch, and the
+first real `time()` after setup would look like fifty-six years of neglect. The
+watcher remembers whether `clock_is_set()` was true at startup; when it becomes
+true for the first time, every timestamp the pet holds is moved by the same
+amount, so its age and its listening survive and only the calendar changes. The
+same shift is done at boot when the clock is already true but the stored
+timestamps are still from before 2020 -- the case where the setup screen ran
+while the player was off.
+
+### Drawn from the pieces that were already there
+
+The creature adds no art to the image. It is a handful of LVGL objects -- discs,
+rounded bars, one arc for the mouth -- with a body size per stage, and it is
+re-placed rather than rebuilt when it grows. The palette is fixed and pastel
+(`#8FD6B0` and friends) because a pet that changed colour with the theme would
+stop being the same creature; the hearts, the energy bar, the note icon and the
+button still follow the theme, including the monochrome one. Mood changes which
+eyes, lids, mouth, cheeks and tears are shown, adds the "z z" of sleep, and
+starts the gentle bob and the drifting note only while music is playing and the
+creature is awake.
+
+The page is built the first time it is opened, the way the calculator's is, so
+boot pays nothing for a feature nobody has opened. `tests/ui/test_tools_pages.c`
+opens it, checks that everything it draws is on the 240 x 320 panel, that the
+words are translated, and that the button really pets the creature; the strings
+are in all eleven language files.
+
+### What to expect, honestly
+
+The pet is a spinner for listening, not a session log: it never looks at which
+track, only that one is playing. A song left looping for an hour feeds it for an
+hour. With the panel off it keeps counting, which is the point, at the cost of
+one wake-up a second that the audio pipeline has already paid for. Leaving the
+player off for a week comes back to a sad, tired creature -- that is the seven-day
+ceiling, not a bug -- and an unset clock is forgiven once. And it is a hobby:
+nothing here touches the audio path, the library, or the shape of the settings
+file beyond its own section.
+
 ## The charger, with the player off
 
 The stock player comes up on a battery screen when the device was switched off

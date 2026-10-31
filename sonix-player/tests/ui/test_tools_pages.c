@@ -27,6 +27,7 @@
 #include "src/gui/nowplaying/cover.h"
 #include "src/gui/notes/noteeditor.h"
 #include "src/gui/notes/notes.h"
+#include "src/gui/pet/petpage.h"
 #include "src/gui/shell/gridpage.h"
 #include "src/system/playback/device_state.h"
 #include "src/gui/shell/icons.h"
@@ -37,6 +38,7 @@
 #include "src/system/core/lang.h"
 #include "src/system/input/kblayout.h"
 #include "src/system/notes/notesstore.h"
+#include "src/system/pet/pet.h"
 #include "src/system/text/textfile.h"
 
 /* ---- the parts of the shell these pages lean on, substituted ------------- */
@@ -156,6 +158,25 @@ void metronomeclick_stop(void) { click_started = false; }
 bool metronomeclick_failed(void) { return click_failed; }
 unsigned metronomeclick_beats(void) { return click_written; }
 int metronomeclick_beat_index(void) { return click_last; }
+
+/* The music pet's watcher: the page asks it four things, and the arithmetic
+ * under it is the real pet.c (linked below). What is substituted is the
+ * listening -- there is no audio engine in this suite -- so the pet is a
+ * creature that has heard music and is being looked at. */
+static pet_state_t pet_state;
+static bool pet_listening;
+
+const pet_state_t *petwatch_state(void) { return &pet_state; }
+bool petwatch_listening(void) { return pet_listening; }
+int64_t petwatch_now(void) { return 1761868800; } // 2025-10-31, the day the test adopts
+void petwatch_track_title(char *out, size_t out_size) {
+	if (out && out_size) {
+		snprintf(out, out_size, "%s", "Test track");
+	}
+}
+bool petwatch_pet_now(void) { return pet_pet(&pet_state, petwatch_now()); }
+int petwatch_take_events(void) { return 0; }
+void petwatch_flush(void) {}
 
 /* A timer parked for the screen's dark half; there is no power manager here. */
 void power_pause_in_standby(lv_timer_t *timer) { (void)timer; }
@@ -392,6 +413,12 @@ static void check_strings(const char *language_dir) {
 		"musicsettings_rearrange_main_page",
 		"metronome", "metronome_bpm", "metronome_beats", "metronome_start",
 		"metronome_stop", "metronome_tap", "metronome_no_audio",
+		"pet", "pet_mood_sleeping", "pet_mood_sad", "pet_mood_okay", "pet_mood_happy",
+		"pet_mood_blissful", "pet_stage_egg", "pet_stage_baby", "pet_stage_child",
+		"pet_stage_teen", "pet_stage_adult", "pet_energy", "pet_today", "pet_streak",
+		"pet_streak_none", "pet_feeding", "pet_feeding_music", "pet_feed_me",
+		"pet_asleep", "pet_pet", "pet_purr", "pet_cooldown", "pet_goal_toast",
+		"pet_stage_toast",
 	};
 	DIR *dir = opendir(language_dir);
 	assert(dir);
@@ -498,6 +525,7 @@ static void check_more_page(gui_config_t *cfg, const char *tag) {
 	assert(has_entry(shown, tr("file_explorer")));
 	assert(has_entry(shown, tr("flappy_bird")));
 	assert(has_entry(shown, tr("metronome")));
+	assert(has_entry(shown, tr("pet")));
 	// The three games are on the page too, after Flappy Bird, which they sit
 	// beside: they are the rows the More menu gained back.
 	assert(has_entry(shown, tr("2048")));
@@ -842,6 +870,34 @@ static lv_obj_t *beat_choice(lv_obj_t *page, int beats) {
 
 static void choose_beats(lv_obj_t *page, int beats) {
 	lv_obj_send_event(lv_obj_get_parent(beat_choice(page, beats)), LV_EVENT_CLICKED, NULL);
+}
+
+/* The pet: its page is built the first time it is opened, everything it draws
+ * is inside the panel, the words are translated, and the button really pets
+ * the creature rather than only moving a picture. */
+static void check_pet_page(gui_config_t *cfg, const char *tag) {
+	petpage_open();
+	assert(lv_screen_active() == petpage_screen);
+	lv_obj_update_layout(petpage_screen);
+	check_within_panel(petpage_screen, cfg, "Pet");
+	dump_snapshot(petpage_screen, tag);
+
+	char name[40];
+	pet_name(name, sizeof(name));
+	assert(find_label(petpage_screen, name));
+	assert(find_label(petpage_screen, tr("pet_energy")));
+	assert(find_label(petpage_screen, tr("pet_pet")));
+	// Nothing is playing in this suite, so the line under the creature says
+	// what to do about it.
+	assert(find_label(petpage_screen, tr("pet_feed_me")));
+
+	int pets = pet_state.pets;
+	press_key(petpage_screen, tr("pet_pet"));
+	assert(pet_state.pets == pets + 1);
+
+	// Leaving gives the timer and the animations back: the page is a still
+	// picture again, and the state has been written out.
+	lv_screen_load(morepage_screen);
 }
 
 static void check_metronome_page(gui_config_t *cfg, const char *tag) {
@@ -1244,6 +1300,7 @@ int main(int argc, char **argv) {
 	calculator_screen = lv_obj_create(NULL);
 	notes_screen = lv_obj_create(NULL);
 	metronome_screen = lv_obj_create(NULL);
+	petpage_screen = lv_obj_create(NULL);
 	noteeditor_screen = lv_obj_create(NULL);
 
 	/* The notes the card already has, put there the way a computer would
@@ -1277,6 +1334,8 @@ int main(int argc, char **argv) {
 	noteeditor_init(&cfg);
 	notes_init(&cfg);
 	metronome_init(&cfg);
+	pet_defaults(&pet_state, petwatch_now(), pet_day_now(petwatch_now()));
+	petpage_init(&cfg);
 	morepage_init(&cfg);
 	player_drag_attaches = 0; // counting from here: only the viewers are built below
 	textview_init(&cfg); // the notes shelf shows a long note through it
@@ -1314,6 +1373,7 @@ int main(int argc, char **argv) {
 
 	check_calculator_page(&cfg, bp_is_tempotec_v1() ? "v1-calculator" : "hiby-calculator");
 	check_metronome_page(&cfg, bp_is_tempotec_v1() ? "v1-metronome" : "hiby-metronome");
+	check_pet_page(&cfg, bp_is_tempotec_v1() ? "v1-pet" : "hiby-pet");
 	check_notes_page(&cfg, dir, bp_is_tempotec_v1() ? "v1-notes" : "hiby-notes",
 					 bp_is_tempotec_v1() ? "v1-note-editor" : "hiby-note-editor",
 					 bp_is_tempotec_v1() ? "v1-note-editor-writing" : "hiby-note-editor-writing",
@@ -1321,6 +1381,6 @@ int main(int argc, char **argv) {
 					 bp_is_tempotec_v1() ? "v1-note-long" : "hiby-note-long");
 
 	lv_deinit();
-	printf("PASS calculator, notes and metronome pages (%s)\n", bp_is_tempotec_v1() ? "240x320" : "480x720");
+	printf("PASS calculator, notes, metronome and pet pages (%s)\n", bp_is_tempotec_v1() ? "240x320" : "480x720");
 	return 0;
 }

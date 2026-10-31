@@ -191,10 +191,10 @@ a self-signed certificate), and HLS.
 
 ## Tools
 
-> **Calculator**, **Notes** and **Metronome** are in the **More** menu, under
-> the file manager. All three are drawn for the panel they are on: on the
-> 240x320 V1 the twenty keys stay a finger's width, and each page -- display,
-> keypad and labels -- fits without scrolling.
+> **Calculator**, **Notes**, **Metronome** and **Pet** are in the **More**
+> menu, under the file manager. All four are drawn for the panel they are on:
+> on the 240x320 V1 the twenty keys stay a finger's width, and each page --
+> display, keypad and labels -- fits without scrolling.
 
 - **Calculator** - a display and the twenty keys of an ordinary pocket
   calculator: the four operations, sign, percent, backspace and clear. The sum
@@ -241,6 +241,17 @@ a self-signed certificate), and HLS.
   glass cannot drift from what is in the ear. The tempo and the bar are
   remembered across visits and across a reboot; leaving the page stops the
   click, because the page is the only place it can be stopped from.
+
+- **Pet** - a small creature fed by the music: happiness and energy rise while
+  something is playing -- local files, streams, internet radio or a phone over
+  Bluetooth -- and fall while the player is quiet. It grows through five stages
+  over about fifteen hours of listening, sleeps after six hours without music,
+  and is petted by a tap, once a minute. A **20-minute daily goal** builds a
+  streak, and the hearts, the energy bar and the day's count are drawn on the
+  page. Its state lives in the settings file and survives a reboot; the only
+  cost is one callback a second in the interface loop that is already running,
+  and nothing at all when the page is not open. The creature is drawn from the
+  interface's own shapes, so it adds no art to the image.
 
 ## Games
 

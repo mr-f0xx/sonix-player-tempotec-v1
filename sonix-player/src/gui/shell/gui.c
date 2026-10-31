@@ -48,6 +48,7 @@
 #include "src/gui/library/pictureview.h"
 #include "src/gui/library/textview.h"
 #include "src/gui/calculator/calculator.h"
+#include "src/gui/pet/petpage.h"
 #include "src/gui/notes/noteeditor.h"
 #include "src/gui/metronome/metronome.h"
 #include "src/gui/notes/notes.h"
@@ -690,6 +691,7 @@ void gui_init(gui_config_t *cfg) {
 	gearboyplay_screen = lv_obj_create(NULL);
 	flappybird_screen = lv_obj_create(NULL);
 	calculator_screen = lv_obj_create(NULL);
+	petpage_screen = lv_obj_create(NULL);
 	notes_screen = lv_obj_create(NULL);
 	metronome_screen = lv_obj_create(NULL);
 	noteeditor_screen = lv_obj_create(NULL);
@@ -754,6 +756,9 @@ void gui_init(gui_config_t *cfg) {
 	ebookpage_init(cfg);
 	// Before morepage: the More menu points at both of them.
 	calculator_init(cfg);
+	// Also before morepage: its tile opens the pet. The page itself is built
+	// on the first visit, so a player who never looks at it pays nothing.
+	petpage_init(cfg);
 	noteeditor_init(cfg); // before notes: a row of the shelf opens it
 	notes_init(cfg);
 	metronome_init(cfg); // before morepage: its tile opens it
@@ -830,6 +835,7 @@ void gui_init(gui_config_t *cfg) {
 		btsettings_screen, btaudio_screen,	 airpodspage_screen, airplay_screen,   streaming_screen,
 		radiopage_screen,  radiolist_screen, radiosearch_screen,
 		dlna_screen,	   sonixlink_screen,	 morepage_screen,	  gearboypage_screen,
+		petpage_screen,
 	};
 	for (size_t i = 0; i < sizeof(back_swipe_screens) / sizeof(back_swipe_screens[0]); i++) {
 		switcher_attach_back_gesture(back_swipe_screens[i]);
