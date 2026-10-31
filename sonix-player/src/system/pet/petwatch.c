@@ -10,6 +10,7 @@
 
 #include "src/system/audio/audio.h"
 #include "src/system/bluetooth/btreceiver.h"
+#include "src/system/core/config.h"
 #include "src/system/playback/device_state.h"
 #include "src/system/device/clock.h"
 #include "src/system/streaming/radio.h"
@@ -347,6 +348,20 @@ bool petwatch_pet_now(void) {
 		return false;
 	}
 	save_now();
+	return true;
+}
+
+bool petwatch_set_species(pet_species_t species) {
+	if (!pet_set_species(&state, species)) {
+		return false;
+	}
+	save_now();
+	return true;
+}
+
+bool petwatch_set_name(const char *name) {
+	pet_set_name(name);
+	config_save(); // a name typed once is worth a write
 	return true;
 }
 

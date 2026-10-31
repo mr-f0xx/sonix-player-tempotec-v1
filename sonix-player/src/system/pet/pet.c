@@ -14,15 +14,13 @@
 
 #define PET_SECTION "pet"
 
-// Lifetime credited seconds of music at which each stage begins. The egg is the
-// first handful of minutes -- long enough to be noticed, short enough that the
-// first album hatches it -- and the last stage is about fifteen hours of
-// listening. At the four-hour daily ceiling that is four full days of music,
-// and at an hour a day a fortnight; an overnight player gains no shortcut.
+// Lifetime credited seconds of music at which each stage begins. The first is
+// the animal as it arrives; the last is about fifteen hours of listening. At
+// the four-hour daily ceiling that is four full days of music, and at an hour a
+// day a fortnight; an overnight player gains no shortcut.
 static const int64_t STAGE_SECS[PET_STAGE_COUNT] = {
-	0,		// egg
-	5 * 60,		// baby: hatched by the first track or two
-	60 * 60,	// child: about an hour
+	0,		// baby: the animal as it arrives
+	30 * 60,	// child: half an hour of music
 	4 * 60 * 60,	// teen: about four hours
 	15 * 60 * 60,	// adult: about fifteen hours
 };
@@ -208,6 +206,7 @@ void pet_defaults(pet_state_t *st, int64_t now, long day) {
 	st->energy = 80;
 	st->wearing = PET_ITEM_NONE;
 	st->room = 0;
+	st->species = PET_SPECIES_NONE;
 }
 
 int pet_advance(pet_state_t *st, int64_t now, long day, int listened_secs, int bonus_percent) {
@@ -449,7 +448,7 @@ pet_stage_t pet_stage(const pet_state_t *st) {
 		xp = 0;
 	}
 
-	pet_stage_t stage = PET_STAGE_EGG;
+	pet_stage_t stage = PET_STAGE_BABY;
 	for (int i = 1; i < PET_STAGE_COUNT; i++) {
 		if (xp >= STAGE_SECS[i]) {
 			stage = (pet_stage_t)i;
@@ -536,18 +535,50 @@ const char *pet_mood_tag(pet_mood_t mood) {
 
 const char *pet_stage_tag(pet_stage_t stage) {
 	switch (stage) {
-	case PET_STAGE_EGG:
-		return "pet_stage_egg";
-	case PET_STAGE_BABY:
-		return "pet_stage_baby";
 	case PET_STAGE_CHILD:
 		return "pet_stage_child";
 	case PET_STAGE_TEEN:
 		return "pet_stage_teen";
 	case PET_STAGE_ADULT:
 		return "pet_stage_adult";
+	case PET_STAGE_BABY:
 	default:
-		return "pet_stage_egg";
+		return "pet_stage_baby";
+	}
+}
+
+// ---------------------------------------------------------------------------
+// The animal
+// ---------------------------------------------------------------------------
+
+pet_species_t pet_species(const pet_state_t *st) {
+	if (!st || st->species < 1 || st->species >= PET_SPECIES_COUNT) {
+		return PET_SPECIES_NONE;
+	}
+	return (pet_species_t)st->species;
+}
+
+bool pet_set_species(pet_state_t *st, pet_species_t species) {
+	if (!st || species <= PET_SPECIES_NONE || species >= PET_SPECIES_COUNT) {
+		return false;
+	}
+	st->species = (int)species;
+	return true;
+}
+
+const char *pet_species_tag(pet_species_t species) {
+	switch (species) {
+	case PET_SPECIES_CAT:
+		return "pet_species_cat";
+	case PET_SPECIES_DOG:
+		return "pet_species_dog";
+	case PET_SPECIES_DRAGON:
+		return "pet_species_dragon";
+	case PET_SPECIES_FISH:
+		return "pet_species_fish";
+	case PET_SPECIES_NONE:
+	default:
+		return "pet_species";
 	}
 }
 
@@ -794,6 +825,7 @@ void pet_load(pet_state_t *st, int64_t now, long day) {
 	st->idle_happy_credit = (int)config_get_int(PET_SECTION, "idle_happy_credit", 0);
 	st->idle_energy_credit = (int)config_get_int(PET_SECTION, "idle_energy_credit", 0);
 	st->pets = (int)config_get_int(PET_SECTION, "pets", 0);
+	st->species = (int)config_get_int(PET_SECTION, "species", PET_SPECIES_NONE);
 	load_hashes("day_genres", st->day_genres, &st->day_genre_count);
 	load_hashes("day_albums", st->day_albums, &st->day_album_count);
 
@@ -816,6 +848,9 @@ void pet_load(pet_state_t *st, int64_t now, long day) {
 	st->idle_energy_credit = clamp_int(st->idle_energy_credit, 0, PET_IDLE_ENERGY_SECS_PER_POINT);
 	st->freezes = clamp_int(st->freezes, 0, 999);
 	st->pets = clamp_int(st->pets, 0, INT_MAX);
+	if (st->species < 0 || st->species >= PET_SPECIES_COUNT) {
+		st->species = PET_SPECIES_NONE; // unknowable: ask again
+	}
 
 	// Only the achievements and the things this build knows how to sell; a
 	// bit from a newer build would otherwise be a wardrobe entry nobody can
@@ -887,8 +922,38 @@ void pet_save(const pet_state_t *st) {
 	config_set_int(PET_SECTION, "idle_happy_credit", st->idle_happy_credit);
 	config_set_int(PET_SECTION, "idle_energy_credit", st->idle_energy_credit);
 	config_set_int(PET_SECTION, "pets", st->pets);
+	config_set_int(PET_SECTION, "species", st->species);
 	save_hashes("day_genres", st->day_genres, st->day_genre_count);
 	save_hashes("day_albums", st->day_albums, st->day_album_count);
+}
+
+void pet_set_name(const char *name) {
+	const char *start = name ? name : "";
+	while (*start && isspace((unsigned char)*start)) {
+		start++;
+	}
+	const char *end = start + strlen(start);
+	while (end > start && isspace((unsigned char)end[-1])) {
+		end--;
+	}
+
+	// The page has room for a short name, and the settings file is read by
+	// people: 24 bytes, cut at a character boundary rather than inside one.
+	size_t length = (size_t)(end - start);
+	if (length > 24) {
+		length = 24;
+		while (length > 0 && ((unsigned char)start[length] & 0xC0) == 0x80) {
+			length--;
+		}
+	}
+
+	char clean[32];
+	memcpy(clean, start, length);
+	clean[length] = '\0';
+	if (length == 0) {
+		snprintf(clean, sizeof(clean), "Momo"); // an empty name is no name
+	}
+	config_set(PET_SECTION, "name", clean);
 }
 
 void pet_name(char *out, size_t out_size) {

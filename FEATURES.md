@@ -244,22 +244,31 @@ a self-signed certificate), and HLS.
 
 - **Pet** - a small creature fed by the music it can actually be heard by: a
   local track, a stream, internet radio or a phone over Bluetooth, at a volume
-  at or above 10 percent. It grows through five stages, keeps a daily streak,
-  earns **Musical Notes** for the minutes it heard and spends them in a
-  wardrobe on hats, headphones, a scarf, a crown, two room themes and streak
-  freezes. A **15-minute daily goal** builds the streak and a bought freeze
-  covers one missed day. Achievements for listening late, hearing an album
-  through, five genres in a day and half an hour without a pause are worth
-  extra notes. A genre tag nudges how it moves: a slow sway for jazz, ambient
-  or lo-fi, a faster bob for rock, metal and electronic. It never dies, and
-  nothing it does punishes a player for not listening: forty-eight hours
-  without music is only "sleepy", and the first track wakes it. The page shows
-  the stage, the mood, the hearts, the energy, the day's minutes, the streak
-  and the wallet; a star in the corner opens the wardrobe. Its state lives in
-  the settings file and survives a reboot; the only cost is one callback a
-  second in the interface loop that is already running, and nothing at all
-  when the page is not open. The creature is drawn from the interface's own
-  shapes, so it adds no art to the image.
+  at or above 10 percent. The first time the page opens it asks which animal to
+  raise -- **cat, dog, dragon or fish** -- and what to call it; the name can be
+  changed whenever you like from the pencil in the corner. There is no egg: the
+  animal you choose is the animal from the first minute, and it grows through
+  four stages (hatchling, child, teen, adult). A fish lives in an aquarium --
+  water, sand, weeds and slow bubbles -- instead of the room the others sit in.
+  It keeps a daily streak, earns **Musical Notes** for the minutes it heard and
+  spends them in a wardrobe on hats, headphones, a scarf, a crown, two room
+  themes and streak freezes. A **15-minute daily goal** builds the streak and a
+  bought freeze covers one missed day. Achievements for listening late, hearing
+  an album through, five genres in a day and half an hour without a pause are
+  worth extra notes. A genre tag nudges how it moves: a slow sway for jazz,
+  ambient or lo-fi, a faster bob for rock, metal and electronic, and a breath no
+  faster than two seconds even then. It never dies, and nothing it does
+  punishes a player for not listening: forty-eight hours without music is only
+  "sleepy", and the first track wakes it. The page is one borderless card: the
+  name and stage top left, **hearts and energy top right**, the animal in the
+  middle -- **pat it by touching it** -- the track it is feeding on along the
+  bottom, a close corner bottom right, and the day's minutes and the streak in
+  two lines under the card. A pencil opens the name and the animal, a star the
+  wardrobe; both are sheets over the page, and the chevron closes them in turn.
+  Its state lives in the settings file and survives a reboot; the only cost is
+  one callback a second in the interface loop that is already running, and
+  nothing at all when the page is not open. The creature is drawn from the
+  interface's own shapes, so it adds no art to the image.
 
 ## Games
 

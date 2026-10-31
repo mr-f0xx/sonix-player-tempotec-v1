@@ -77,7 +77,8 @@ static void test_defaults(void) {
 	assert(st.day == DAY0);
 	assert(st.day_genre_count == 0);
 	assert(st.day_album_count == 0);
-	assert(pet_stage(&st) == PET_STAGE_EGG);
+	assert(pet_stage(&st) == PET_STAGE_BABY);
+	assert(pet_species(&st) == PET_SPECIES_NONE);
 	assert(pet_hearts(&st) == 3); // 50 percent, rounded
 	assert(pet_mood(&st, T0) == PET_MOOD_HAPPY);
 }
@@ -229,19 +230,16 @@ static void test_a_freeze_covers_a_missed_day(void) {
 
 static void test_growth(void) {
 	fresh();
-	assert(pet_stage(&st) == PET_STAGE_EGG);
-	assert(pet_stage_percent(&st) == 0);
-	assert(pet_stage_remaining(&st) == 5 * 60);
-
-	listen(5 * 60);
 	assert(pet_stage(&st) == PET_STAGE_BABY);
 	assert(pet_stage_percent(&st) == 0);
-	assert(pet_stage_remaining(&st) == 55 * 60);
+	assert(pet_stage_remaining(&st) == 30 * 60);
 
-	listen(HOUR); // past the hour, into the child
+	listen(30 * 60);
 	assert(pet_stage(&st) == PET_STAGE_CHILD);
+	assert(pet_stage_percent(&st) == 0);
+	assert(pet_stage_remaining(&st) == 210 * 60);
 
-	listen(3 * HOUR);
+	listen(3 * HOUR + 30 * 60); // up to four hours, into the teen
 	assert(pet_stage(&st) == PET_STAGE_TEEN);
 
 	listen(11 * HOUR);
@@ -251,7 +249,7 @@ static void test_growth(void) {
 
 	// The stage-up is reported once, at the crossing.
 	fresh();
-	int events = pet_advance(&st, T0, DAY0, 5 * 60, 0);
+	int events = pet_advance(&st, T0, DAY0, 30 * 60, 0);
 	assert(events & PET_EVENT_STAGE_UP);
 	events = pet_advance(&st, st.last_seen + 1, DAY0, 1, 0);
 	assert(!(events & PET_EVENT_STAGE_UP));
@@ -540,6 +538,7 @@ static void test_persistence(void) {
 	st.owned = (1 << PET_ITEM_PARTY_HAT) | (1 << PET_ITEM_ROOM_NIGHT);
 	st.wearing = PET_ITEM_PARTY_HAT;
 	st.room = 2;
+	st.species = PET_SPECIES_FISH;
 	int events = 0;
 	pet_note_track(&st, "Jazz", "Kind of Blue", &events);
 	pet_note_track(&st, "Rock", "Abbey Road", &events);
@@ -565,6 +564,7 @@ static void test_persistence(void) {
 	assert(loaded.owned == st.owned);
 	assert(loaded.wearing == st.wearing);
 	assert(loaded.room == st.room);
+	assert(loaded.species == PET_SPECIES_FISH);
 	assert(loaded.day == DAY0);
 	assert(loaded.day_genre_count == 2);
 	assert(loaded.day_album_count == 2);
@@ -604,6 +604,32 @@ static void test_persistence(void) {
 	assert(loaded.notes == 0);
 	assert(loaded.wearing == -1);
 	assert(loaded.room == 0);
+	assert(loaded.species == PET_SPECIES_NONE);
+
+	// A species that is not one of the four is not a species.
+	config_set_int("pet", "species", 99);
+	pet_load(&loaded, T0, DAY0);
+	assert(pet_species(&loaded) == PET_SPECIES_NONE);
+}
+
+static void test_species(void) {
+	fresh();
+	assert(pet_species(&st) == PET_SPECIES_NONE);
+	assert(!pet_set_species(&st, PET_SPECIES_NONE));
+	assert(!pet_set_species(&st, PET_SPECIES_COUNT));
+
+	assert(pet_set_species(&st, PET_SPECIES_CAT));
+	assert(pet_species(&st) == PET_SPECIES_CAT);
+	assert(pet_set_species(&st, PET_SPECIES_DOG));
+	assert(pet_species(&st) == PET_SPECIES_DOG);
+	assert(pet_set_species(&st, PET_SPECIES_DRAGON));
+	assert(pet_species(&st) == PET_SPECIES_DRAGON);
+	assert(pet_set_species(&st, PET_SPECIES_FISH));
+	assert(pet_species(&st) == PET_SPECIES_FISH);
+
+	assert(strcmp(pet_species_tag(PET_SPECIES_CAT), "pet_species_cat") == 0);
+	assert(strcmp(pet_species_tag(PET_SPECIES_FISH), "pet_species_fish") == 0);
+	assert(strcmp(pet_species_tag(PET_SPECIES_NONE), "pet_species") == 0);
 }
 
 static void test_name(void) {
@@ -658,6 +684,7 @@ int main(void) {
 	test_petting();
 	test_vibe();
 	test_persistence();
+	test_species();
 	test_name();
 
 	printf("PASS music pet: XP ceiling, bonuses, wallet, goals, stages and persistence\n");

@@ -63,6 +63,12 @@ pet_vibe_t petwatch_vibe(void);
 // awarded by the watcher.
 bool petwatch_focus(void);
 
+// The owner's choices. `species` is one of the four animals, or NONE to clear
+// it (which puts the chooser back); the name is written straight to the
+// settings, trimmed, and an empty one restores the default. Both save.
+bool petwatch_set_species(pet_species_t species);
+bool petwatch_set_name(const char *name);
+
 // The wardrobe and the wallet, both of which change the live state: buy an item
 // (notes are checked in pet_buy()), or put an owned outfit/room on. Both write
 // the settings only when they did something.

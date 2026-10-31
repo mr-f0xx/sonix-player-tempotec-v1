@@ -126,14 +126,26 @@
 // this is a milestone rather than a per-track reward.
 #define PET_DEEP_DIVER_TRACKS 3
 
+// Four stages of one animal: it arrives small and grows with the listening.
+// There is no egg -- the pet the owner chose is the pet they get.
 typedef enum {
-	PET_STAGE_EGG = 0, // the first few minutes: the egg is warming up
-	PET_STAGE_BABY,	   // hatched
+	PET_STAGE_BABY = 0,
 	PET_STAGE_CHILD,
 	PET_STAGE_TEEN,
 	PET_STAGE_ADULT,
 	PET_STAGE_COUNT,
 } pet_stage_t;
+
+// What the owner chose to live with. NONE is a pet that has not been chosen
+// yet: the page puts up the chooser before it draws anything.
+typedef enum {
+	PET_SPECIES_NONE = 0,
+	PET_SPECIES_CAT,
+	PET_SPECIES_DOG,
+	PET_SPECIES_DRAGON,
+	PET_SPECIES_FISH,
+	PET_SPECIES_COUNT,
+} pet_species_t;
 
 typedef enum {
 	PET_MOOD_SLEEPING = 0,
@@ -251,6 +263,10 @@ typedef struct {
 	int idle_happy_credit;
 	int idle_energy_credit;
 
+	// PET_SPECIES_*, chosen once and changeable: a fish lives in an aquarium,
+	// the rest in a room.
+	int species;
+
 	int pets; // how many times it has been petted, for the sake of a number
 } pet_state_t;
 
@@ -290,6 +306,19 @@ bool pet_pet(pet_state_t *st, int64_t now);
 // What the face and the label say. Sleeping outranks every mood, because a
 // creature with its eyes shut is not sad, it is asleep.
 pet_mood_t pet_mood(const pet_state_t *st, int64_t now);
+
+// The animal, or PET_SPECIES_NONE before one has been chosen.
+pet_species_t pet_species(const pet_state_t *st);
+
+// Chooses or changes it. False for anything that is not one of the four.
+bool pet_set_species(pet_state_t *st, pet_species_t species);
+
+// The species' translation tag, for the chooser.
+const char *pet_species_tag(pet_species_t species);
+
+// Writes the name into the settings, trimmed and cut at a character boundary.
+// An empty name puts the default back.
+void pet_set_name(const char *name);
 
 // The stage the lifetime listening has earned.
 pet_stage_t pet_stage(const pet_state_t *st);

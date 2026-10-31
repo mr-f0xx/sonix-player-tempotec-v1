@@ -1463,6 +1463,113 @@ counting, at the cost of one wake-up a second the audio pipeline has already
 paid for. And it is a hobby: nothing here touches the audio path, the library,
 or the shape of the settings file beyond its own section.
 
+## The pet, second pass: your animal, your name
+
+The first pet was a fixed creature called Momo, in an egg for its first half
+hour, drawn on a page of outlined cards. Three of those were the user's first
+three remarks: they wanted to pick the animal, they wanted to name it, and they
+wanted no white borders. The fourth was that the page had to *fit* the 240x320
+panel rather than be squeezed onto it.
+
+### The egg, gone
+
+The egg stage was the pet's first thirty minutes and nothing else: an oval that
+could be neither patted nor fed differently, followed by a "hatching" that the
+player could not miss and could not cause. It also made one store of the
+creature's age say two things -- "no animal yet" and "an animal, but new" -- and
+the page had to draw both. It is gone: `PET_STAGE_BABY` is the first stage, the
+chosen animal is the animal from the first minute, and the stages that remain
+are hatchling, child, teen and adult. The clock the rest of it runs on is
+unchanged (30 minutes, 4 hours, 15 hours), and a pet that was an egg when it
+saved comes back as a hatchling, which is where it would have been anyway.
+
+### Cat, dog, dragon, fish
+
+`pet_species_t` is stored as `[pet] species`, rejected when it is `NONE` or out
+of range (an out-of-range value is reset to `NONE`, so a corrupt file asks the
+question again rather than inventing an animal), and never inferred: a pet with
+no species opens on the chooser. The four animals are the same body with
+different parts drawn on it -- pointed ears, a tail that curls, a muzzle, horns,
+fins -- so they cost the image nothing and every stage, item and mood works for
+all four. Only the fish changes the scene: it swims in water rather than sitting
+in a room, so the wash over the card becomes the teal of the aquarium and the
+sand, the weeds and three slow bubbles come out; the room themes tint the water
+instead of the air. Its shadow is removed, because a fish swims.
+
+The names are the animal's, in the language files: `pet_species_cat`, `_dog`,
+`_dragon`, `_fish`. `pet_species_tag()` maps the enum to them, and `NONE` maps
+to `pet_species`, which no screen shows -- the chooser is what a species-less
+pet sees.
+
+### A name you choose
+
+`pet_set_name()` trims the string, cuts it to 24 bytes on a UTF-8 boundary
+rather than through a character, and falls back to "Momo" if nothing is left.
+The name lives in `[pet] name` and is written by `petwatch_set_name()`, which
+also saves. `pet_name()` is the reader, and it never returns an empty string.
+The keyboard is the same one the AirPods and the Wi-Fi pages use, in its own
+layer over the chooser: enter accepts and closes, the corner X cancels, and the
+hardware back closes the keyboard before it closes the sheet.
+
+### The page, measured against the panel
+
+The habitat is one card, no border, radius 14 on this board (22 on the 480-wide
+ones), sized `screen_width - 2 * padding` by whatever is left of the panel after
+the title and the two footer lines. On the V1 that is 220x202, and everything in
+it is placed from those two numbers:
+
+| where | what |
+|---|---|
+| top left | the name (20 px), the stage under it (14 px, dim) |
+| top right | a heart and a bar and its number, a bolt and a bar and its number, the wallet of notes under them |
+| middle | the animal, 104x96, pat it by touching it |
+| bottom left | a music note and the track it is feeding on, one ellipsized line |
+| bottom right | an X that leaves the page |
+
+The stage line says the stage and not the mood, because "Hatchling - Happy"
+does not fit in the 108 px between the name's column and the meters, and the
+face is already saying how it feels. The two footer lines under the card carry
+the day's minutes and the streak. Nothing is outlined: the meters are bars on
+the card's own colour, the corner controls are glyphs, and the only shape with
+an edge is the animal.
+
+The animal is built from the shell's own primitives -- discs, rounded bars and
+arcs -- and placed from the body's size, one body per stage (46x40 as a
+hatchling, 72x56 as an adult, a fifth shorter for a fish). The wardrobe's
+headwear hides the ears and the horns, because two hats on one head is a hat and
+a mistake.
+
+### Slow on purpose
+
+The animation is one bob per breath of the root, one sway of the tail (or the
+fish's tail fin), and, while music is playing, two notes drifting up with the
+bubbles in the aquarium. The durations are chosen for a processor that draws
+this panel at a handful of frames a second: a breath is 2.6 seconds with nothing
+playing and 1.1 to 1.9 with music, the tail takes eight seconds to go and come
+back, the notes take four or five, the bubbles nine to fourteen. Nothing uses a
+spring or an overshoot path; everything eases in and out. The animations are
+started when the page is loaded and deleted when it is unloaded, and restarting
+them is what a change of vibe or of species does.
+
+### The chooser, and the test that opens it
+
+The chooser is a sheet over the page rather than a page of its own: the title,
+the name as a row that opens the keyboard, and four tiles in two rows of two --
+wide enough for the longest animal name in any of the eleven languages
+("Дракон"). The chosen tile is the lit one, in the accent colour, instead of a
+word saying "selected". The pencil opens it, the pencil closes it, the X closes
+it, and the chevron closes the keyboard, then the sheet, then the page.
+
+`tests/ui/test_tools_pages.c` opens the page with no species at all: the
+chooser is up, its four animals and its name row are there, and the page it
+covers has not moved. It picks the cat, checks the sheet is gone and the page is
+220x202 inside the panel, taps the animal itself (there is no button any more)
+and checks that `pets` went up by one, opens the chooser with the pencil and
+closes it with the same, then opens the wardrobe with the star, buys a hat and
+two freezes, and leaves the page. `tests/test_pet.c` covers the rest without a
+screen: the species round trip including the corrupt value, the name's trimming,
+its byte cap and its default, and the stages starting at the hatchling.
+
 ## The charger, with the player off
 
 The stock player comes up on a battery screen when the device was switched off
