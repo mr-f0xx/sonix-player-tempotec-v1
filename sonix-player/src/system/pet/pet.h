@@ -126,6 +126,58 @@
 // this is a milestone rather than a per-track reward.
 #define PET_DEEP_DIVER_TRACKS 3
 
+// ---- what the listening was, over a month -------------------------------
+//
+// The pet's temperament comes from the *kind* of music it heard most over the
+// last thirty days, not from what is playing now: a month of the same family
+// of tags is what a person's listening actually looks like, and a page that
+// changed character with every track would be noise. One entry a day, the
+// family the day was mostly spent in, kept in a ring thirty days long.
+#define PET_TEMPERAMENT_DAYS 30
+
+// Fewer than this many days with a recognisable genre and there is no
+// temperament yet: three days is enough to mean something and short enough that
+// a new pet has a character by the end of its first week.
+#define PET_TEMPERAMENT_MIN_DAYS 3
+
+// What an Upbeat pet's liveliness is worth: energy fills faster, and every two
+// minutes of credited music has a chance of turning up a note or two on the
+// floor. The chance is a hash of the day and the bucket, not a random number
+// generator, so the same listening always pays the same and the suite can
+// predict it.
+#define PET_UPBEAT_ENERGY_SECS_PER_POINT 8
+#define PET_DROP_EVERY_SECS 120
+#define PET_DROP_CHANCE_PERCENT 60
+
+// What a long session turns up for a Curious (indie and alternative) pet:
+// after this much uninterrupted listening, once a day, something is found.
+#define PET_FORAGE_SECS (45 * 60)
+#define PET_FORAGE_CHANCE 3 // one day in three
+
+// ---- being skipped at ----------------------------------------------------
+//
+// Skipping is not a crime, but flicking through a library is not listening.
+// More than PET_SKIP_LIMIT tracks abandoned inside PET_SKIP_WINDOW seconds and
+// the pet is Dizzy for PET_DIZZY_SECS: the meters still fill with whatever
+// music is on, but nothing is credited towards the stage, the notes or the day.
+// Fifteen minutes, not an hour, and never a lost stage.
+#define PET_SKIP_LIMIT 5
+#define PET_SKIP_WINDOW_SECS 600
+#define PET_DIZZY_SECS (15 * 60)
+#define PET_SKIP_RING 8
+
+// ---- tap along -----------------------------------------------------------
+//
+// Once a day the page offers a short rhythm game: sixteen beats of the tempo
+// the metronome page uses, tapped on the glass. The score is the share of the
+// beats hit near their moment, and it pays a handful of notes and a little of
+// both meters. It is a game, not a source of income: the ceiling is a dozen
+// notes a day.
+#define PET_RHYTHM_BPM 100
+#define PET_RHYTHM_BEATS 16
+#define PET_RHYTHM_PERFECT_MS 120
+#define PET_RHYTHM_GOOD_MS 260
+
 // Four stages of one animal: it arrives small and grows with the listening.
 // There is no egg -- the pet the owner chose is the pet they get.
 typedef enum {
@@ -153,8 +205,31 @@ typedef enum {
 	PET_MOOD_OKAY,
 	PET_MOOD_HAPPY,
 	PET_MOOD_BLISSFUL,
+	PET_MOOD_DIZZY,
 	PET_MOOD_COUNT,
 } pet_mood_t;
+
+// The families the genre words are sorted into. There are four because there
+// are three temperaments and everything else; a longer list would need a
+// taxonomy nobody agrees on, and the point is a character, not a library
+// classification.
+typedef enum {
+	PET_FAMILY_OTHER = 0,
+	PET_FAMILY_UPBEAT, // pop, dance, electronic, rock, hip hop
+	PET_FAMILY_CALM,   // classical, jazz, ambient, lo-fi, acoustic, soul
+	PET_FAMILY_CURIOUS,// indie, alternative, punk, metal, experimental
+	PET_FAMILY_COUNT,
+} pet_family_t;
+
+// What thirty days of listening made of the pet. NONE until there are enough
+// days to say: a pet does not have a personality on its first evening.
+typedef enum {
+	PET_TEMPERAMENT_NONE = 0,
+	PET_TEMPERAMENT_UPBEAT,
+	PET_TEMPERAMENT_CALM,
+	PET_TEMPERAMENT_CURIOUS,
+	PET_TEMPERAMENT_COUNT,
+} pet_temperament_t;
 
 // What one advance did that a page may want to celebrate. An advance can carry
 // both; pet_note_track() reports its own.
@@ -163,6 +238,9 @@ typedef enum {
 	PET_EVENT_GOAL_MET = 1 << 0,  // the daily goal was reached just now
 	PET_EVENT_STAGE_UP = 1 << 1,  // it grew a stage just now
 	PET_EVENT_POLYMATH = 1 << 2,  // this track added the fifth genre today
+	PET_EVENT_DROP = 1 << 3,      // an Upbeat pet found notes on the floor
+	PET_EVENT_DIZZY = 1 << 4,     // too much skipping: the pet is dizzy now
+	PET_EVENT_FORAGE = 1 << 5,    // a Curious pet found something on a long session
 } pet_event_t;
 
 // Achievements are permanent, a bit each. The notes they pay are one-off.
@@ -267,6 +345,33 @@ typedef struct {
 	// the rest in a room.
 	int species;
 
+	// The last thirty days, oldest first, each entry a PET_FAMILY_*: the
+	// family that day was mostly spent in. This is what the temperament is
+	// read from.
+	uint8_t genre_history[PET_TEMPERAMENT_DAYS];
+
+	// Today's tally, per family, of the tracks noted (pet_note_track). Not
+	// persisted: a reboot in the middle of a day costs that day's count, which
+	// a temperament that needs three days cannot notice.
+	int day_family[PET_FAMILY_COUNT];
+
+	// Epoch seconds the pet stops being dizzy, 0 when it is not. See
+	// pet_skip() and PET_SKIP_LIMIT.
+	int64_t dizzy_until;
+
+	// The abandoned tracks still in the window, newest last. In memory only:
+	// a reboot is not a way to grind skips, it is also not a way to dodge the
+	// consequence of having done it.
+	int64_t skip_times[PET_SKIP_RING];
+	int skip_count;
+
+	// The day the tap-along was last paid for, and the best score so far.
+	long rhythm_day;
+	int rhythm_best;
+
+	// The day a Curious pet last found something while foraging.
+	long forage_day;
+
 	int pets; // how many times it has been petted, for the sake of a number
 } pet_state_t;
 
@@ -356,6 +461,61 @@ bool pet_has_achievement(const pet_state_t *st, int achievement);
 // Awards an achievement and its one-off notes. True when it was not already
 // there; false for a repeat or an unknown bit.
 bool pet_award_achievement(pet_state_t *st, int achievement);
+
+// The family a genre tag belongs to. Same matching as pet_vibe_for_genre()
+// (sub-strings, case-insensitive), and PET_FAMILY_OTHER for an empty tag.
+pet_family_t pet_family_for_genre(const char *genre);
+
+// The temperament the last thirty days earned. NONE until
+// PET_TEMPERAMENT_MIN_DAYS days have a recognisable family.
+pet_temperament_t pet_temperament(const pet_state_t *st);
+
+// The temperament's translation tag, for the page's caption.
+const char *pet_temperament_tag(pet_temperament_t temperament);
+
+// How many days of the ring hold each family, for the page's one-line summary
+// and for the suite. `out` is PET_FAMILY_COUNT long and may be NULL.
+void pet_temperament_days(const pet_state_t *st, int *out);
+
+// True when the temperament is Upbeat, which is what makes the energy meter
+// fill faster: the page says so under the meters.
+bool pet_is_upbeat(const pet_state_t *st);
+
+// True when the temperament is Calm, which unlocks the drifting soundscape on
+// the page. It is a picture, not audio: nothing here decodes music.
+bool pet_has_soundscape(const pet_state_t *st);
+
+// Seconds of music per point of energy, from the temperament.
+int pet_energy_secs_per_point(const pet_state_t *st);
+
+// ---- skipping -------------------------------------------------------------
+//
+// Records an abandoned track. Returns true when this one was the skip that
+// tipped the pet into being dizzy, which the caller celebrates with a toast.
+// The window is a ring of the last eight skips and the answer is whether more
+// than PET_SKIP_LIMIT of them fall inside PET_SKIP_WINDOW_SECS.
+bool pet_skip(pet_state_t *st, int64_t now);
+
+// True while the pet is dizzy: nothing is credited to the stage, the notes or
+// the day's XP until this is false again. The meters still fill.
+bool pet_dizzy(const pet_state_t *st, int64_t now);
+
+// ---- foraging -------------------------------------------------------------
+//
+// Called with the length of the current uninterrupted session. A Curious pet
+// that has listened for PET_FORAGE_SECS without a break, once a day, turns
+// something up: notes, and on the days the hash says so, a streak freeze in
+// hand. Returns the notes found (0 when nothing was, or when the temperament
+// is not Curious).
+int pet_forage(pet_state_t *st, int session_secs);
+
+// ---- the tap-along --------------------------------------------------------
+//
+// Ready once a day. pet_rhythm_finish() pays for the score (0 to 100) and
+// returns the notes it earned; a score of 90 or more also leaves a streak
+// freeze in hand. False/0 when today has already been paid for.
+bool pet_rhythm_ready(const pet_state_t *st);
+int pet_rhythm_finish(pet_state_t *st, int score);
 
 // The genre's mood, for the page's animation. Case-insensitive, and tolerant of
 // the sub-genres taggers actually write ("Lo-Fi Hip Hop", "Melodic Death

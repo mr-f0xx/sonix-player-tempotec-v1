@@ -186,6 +186,10 @@ bool petwatch_set_name(const char *name) {
 	pet_set_name(name);
 	return true;
 }
+pet_temperament_t petwatch_temperament(void) { return pet_temperament(&pet_state); }
+bool petwatch_has_soundscape(void) { return pet_has_soundscape(&pet_state); }
+bool petwatch_rhythm_ready(void) { return pet_rhythm_ready(&pet_state); }
+int petwatch_rhythm_finish(int score) { return pet_rhythm_finish(&pet_state, score); }
 void petwatch_flush(void) {}
 
 /* A timer parked for the screen's dark half; there is no power manager here. */
@@ -325,6 +329,36 @@ static lv_obj_t *entry_with_label(lv_obj_t *container, const char *label) {
 }
 
 /* Presses what a finger would press to reach `text`: the button carrying it. */
+/* The same search, but only through what is actually on the glass: the sheets
+ * over the pet page each have their own OK, and the hidden ones must not be
+ * pressed. */
+static lv_obj_t *find_visible_label(lv_obj_t *obj, const char *text) {
+	if (!obj || lv_obj_is_hidden(obj)) {
+		return NULL;
+	}
+	if (lv_obj_check_type(obj, &lv_label_class) && strcmp(lv_label_get_text(obj), text) == 0) {
+		return obj;
+	}
+	for (uint32_t i = 0; i < lv_obj_get_child_count(obj); i++) {
+		lv_obj_t *found = find_visible_label(lv_obj_get_child(obj, (int32_t)i), text);
+		if (found) {
+			return found;
+		}
+	}
+	return NULL;
+}
+
+static void press_visible_key(lv_obj_t *root, const char *text) {
+	lv_obj_t *label = find_visible_label(root, text);
+	assert(label);
+	lv_obj_t *key = lv_obj_get_parent(label);
+	while (key && !lv_obj_check_type(key, &lv_button_class)) {
+		key = lv_obj_get_parent(key);
+	}
+	assert(key);
+	lv_obj_send_event(key, LV_EVENT_CLICKED, NULL);
+}
+
 static void press_key(lv_obj_t *root, const char *text) {
 	lv_obj_t *label = find_label(root, text);
 	assert(label);
@@ -428,7 +462,18 @@ static void check_strings(const char *language_dir) {
 		"pet_stage_teen", "pet_stage_adult", "pet_energy", "pet_today", "pet_streak",
 		"pet_streak_none", "pet_feeding", "pet_feeding_music", "pet_feed_me",
 		"pet_asleep", "pet_pet", "pet_purr", "pet_cooldown", "pet_goal_toast",
-		"pet_stage_toast",
+		"pet_stage_toast", "pet_customise", "pet_choose_pet", "pet_species",
+		"pet_species_cat", "pet_species_dog", "pet_species_dragon", "pet_species_fish",
+		"pet_mood_dizzy", "pet_temperament_none", "pet_temperament_upbeat",
+		"pet_temperament_calm", "pet_temperament_curious", "pet_dizzy_hint",
+		"pet_dizzy_toast", "pet_drop_toast", "pet_forage_toast", "pet_tap_game",
+		"pet_tap_hint", "pet_tap", "pet_tap_score", "pet_tap_done", "pet_tap_played",
+		"pet_wardrobe", "pet_notes_balance", "pet_wearing_now", "pet_owned", "pet_price",
+		"pet_item_party_hat", "pet_item_headphones", "pet_item_scarf", "pet_item_crown",
+		"pet_item_room_sunset", "pet_item_room_night", "pet_item_streak_freeze",
+		"pet_achievement", "pet_ach_night_owl", "pet_ach_locked",
+		"pet_freezes", "pet_bought", "pet_not_enough", "pet_worn", "pet_already_worn",
+		"pet_freeze_note", "pet_room_note", "pet_item_none",
 	};
 	DIR *dir = opendir(language_dir);
 	assert(dir);
@@ -888,9 +933,12 @@ static void choose_beats(lv_obj_t *page, int beats) {
 /* The page's two corner controls, outer first: the wardrobe's star and the
  * pencil. They carry icons rather than words, so they are found by the place
  * they are drawn in. */
-static void find_corner_buttons(lv_obj_t *screen, lv_obj_t **outer, lv_obj_t **inner) {
+static void find_corner_buttons(lv_obj_t *screen, lv_obj_t **outer, lv_obj_t **inner, lv_obj_t **third) {
 	*outer = NULL;
 	*inner = NULL;
+	if (third) {
+		*third = NULL;
+	}
 	for (uint32_t i = 0; i < lv_obj_get_child_count(screen); i++) {
 		lv_obj_t *child = lv_obj_get_child(screen, (int32_t)i);
 		if (!lv_obj_check_type(child, &lv_button_class)) {
@@ -905,6 +953,8 @@ static void find_corner_buttons(lv_obj_t *screen, lv_obj_t **outer, lv_obj_t **i
 			*outer = child;
 		} else if (!*inner) {
 			*inner = child;
+		} else if (third && !*third) {
+			*third = child;
 		}
 	}
 }
@@ -961,8 +1011,9 @@ static void check_pet_page(gui_config_t *cfg, const char *tag) {
 	// The pencil brings the chooser back; the pencil closes it again.
 	lv_obj_t *star = NULL;
 	lv_obj_t *pencil = NULL;
-	find_corner_buttons(petpage_screen, &star, &pencil);
-	assert(star && pencil);
+	lv_obj_t *notebutton = NULL;
+	find_corner_buttons(petpage_screen, &star, &pencil, &notebutton);
+	assert(star && pencil && notebutton);
 	lv_obj_send_event(pencil, LV_EVENT_CLICKED, NULL);
 	lv_obj_update_layout(petpage_screen);
 	assert(lv_obj_is_visible(chooser_title));
@@ -1002,6 +1053,26 @@ static void check_pet_page(gui_config_t *cfg, const char *tag) {
 	lv_obj_send_event(star, LV_EVENT_CLICKED, NULL);
 	lv_obj_update_layout(petpage_screen);
 	assert(!lv_obj_is_visible(wardrobe_title));
+
+	// The day's tap-along: the note in the corner opens it, and finishing pays
+	// whatever the score was worth -- two notes for turning up.
+	assert(pet_rhythm_ready(&pet_state));
+	int before_game = pet_state.notes;
+	lv_obj_send_event(notebutton, LV_EVENT_CLICKED, NULL);
+	lv_obj_update_layout(petpage_screen);
+	lv_obj_t *tap_title = find_label(petpage_screen, tr("pet_tap_game"));
+	assert(tap_title);
+	assert(lv_obj_is_visible(tap_title));
+	check_within_panel(petpage_screen, cfg, "Pet tap-along");
+	char tap_tag[64];
+	snprintf(tap_tag, sizeof(tap_tag), "%s-tap", tag);
+	dump_snapshot(petpage_screen, tap_tag);
+
+	press_visible_key(petpage_screen, tr("ok"));
+	lv_obj_update_layout(petpage_screen);
+	assert(!lv_obj_is_visible(tap_title));
+	assert(pet_state.notes == before_game + 2);
+	assert(!pet_rhythm_ready(&pet_state));
 
 	// Leaving gives the timer and the animations back: the page is a still
 	// picture again, and the state has been written out.

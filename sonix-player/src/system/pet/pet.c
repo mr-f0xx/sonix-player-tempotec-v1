@@ -168,6 +168,12 @@ int pet_note_track(pet_state_t *st, const char *genre, const char *album, int *e
 
 	bool genre_new = hash_add(st->day_genres, &st->day_genre_count, genre);
 	bool album_new = hash_add(st->day_albums, &st->day_album_count, album);
+
+	// What kind of music the day was spent in, for the month's temperament.
+	int family = (int)pet_family_for_genre(genre);
+	if (family > PET_FAMILY_OTHER && family < PET_FAMILY_COUNT && st->day_family[family] < 100000) {
+		st->day_family[family]++;
+	}
 	int bonus = (genre_new || album_new) ? PET_DIVERSITY_BONUS_PERCENT : 0;
 
 	// Five genres in a day is Polymath. The award carries its own notes, and
@@ -208,6 +214,10 @@ void pet_defaults(pet_state_t *st, int64_t now, long day) {
 	st->room = 0;
 	st->species = PET_SPECIES_NONE;
 }
+
+// Defined with the month's listening, below; the day rollover in pet_advance()
+// is the only caller and it comes first in the file.
+static void record_day_family(pet_state_t *st, long day);
 
 int pet_advance(pet_state_t *st, int64_t now, long day, int listened_secs, int bonus_percent) {
 	if (!st) {
@@ -255,6 +265,9 @@ int pet_advance(pet_state_t *st, int64_t now, long day, int listened_secs, int b
 					st->streak = 0;
 				}
 			}
+			// Yesterday, as a line of the month: this is what the
+			// temperament is read from.
+			record_day_family(st, day);
 			st->day = day;
 			st->today_secs = 0;
 			st->today_xp_secs = 0;
@@ -293,7 +306,9 @@ int pet_advance(pet_state_t *st, int64_t now, long day, int listened_secs, int b
 
 		// XP and notes stop at the daily ceiling. The meters do not: the music
 		// is real even when the day's progression has already been earned.
-		int remaining = PET_DAILY_XP_SECS - st->today_xp_secs;
+		// While the pet is dizzy they stop at zero instead -- flicking through
+		// a library is not listening -- but the meters still fill.
+		int remaining = pet_dizzy(st, now) ? 0 : PET_DAILY_XP_SECS - st->today_xp_secs;
 		if (remaining < 0) {
 			remaining = 0;
 		}
@@ -321,6 +336,22 @@ int pet_advance(pet_state_t *st, int64_t now, long day, int listened_secs, int b
 			st->note_credit %= 60;
 		}
 
+		// An Upbeat pet finds a note or two on the floor every so often. The
+		// roll is a hash of the day and the bucket of credited music, so the
+		// same listening always pays the same and no random number generator
+		// has to live in a settings file.
+		if (pet_is_upbeat(st)) {
+			int before = (st->today_xp_secs - credited) / PET_DROP_EVERY_SECS;
+			int after = st->today_xp_secs / PET_DROP_EVERY_SECS;
+			for (int bucket = before + 1; bucket <= after; bucket++) {
+				uint32_t roll = (uint32_t)(st->day * 2654435761u) ^ (uint32_t)((uint32_t)bucket * 40503u + 12345u);
+				if ((int)(roll % 100) < PET_DROP_CHANCE_PERCENT) {
+					st->notes = clamp_int(st->notes + 1 + (int)((roll >> 8) % 3u), 0, INT_MAX);
+					events |= PET_EVENT_DROP;
+				}
+			}
+		}
+
 		st->today_secs += listened_secs;
 		if (st->today_secs > 86400) {
 			st->today_secs = 86400;
@@ -328,11 +359,14 @@ int pet_advance(pet_state_t *st, int64_t now, long day, int listened_secs, int b
 
 		// Energy first: it is what makes the happiness gain worth anything.
 		if (st->energy < PET_ENERGY_MAX) {
+			// An Upbeat pet's energy fills faster; that is what its month of
+			// pop bought it.
+			int rate = pet_energy_secs_per_point(st);
 			st->energy_credit += listened_secs;
-			int whole = st->energy_credit / PET_ENERGY_SECS_PER_POINT;
+			int whole = st->energy_credit / rate;
 			if (whole > 0) {
 				st->energy = clamp_int(st->energy + whole, 0, PET_ENERGY_MAX);
-				st->energy_credit -= whole * PET_ENERGY_SECS_PER_POINT;
+				st->energy_credit -= whole * rate;
 				if (st->energy >= PET_ENERGY_MAX) {
 					st->energy_credit = 0;
 				}
@@ -497,6 +531,12 @@ pet_mood_t pet_mood(const pet_state_t *st, int64_t now) {
 		return PET_MOOD_SLEEPING;
 	}
 
+	// Dizzy is a mood of its own and outranks the meters: the face is what
+	// says why nothing is being credited.
+	if (pet_dizzy(st, now)) {
+		return PET_MOOD_DIZZY;
+	}
+
 	int happy = clamp_int(st->happy, 0, PET_HAPPY_MAX);
 	if (happy >= 80) {
 		return PET_MOOD_BLISSFUL;
@@ -528,6 +568,8 @@ const char *pet_mood_tag(pet_mood_t mood) {
 		return "pet_mood_happy";
 	case PET_MOOD_BLISSFUL:
 		return "pet_mood_blissful";
+	case PET_MOOD_DIZZY:
+		return "pet_mood_dizzy";
 	default:
 		return "pet_mood_okay";
 	}
@@ -745,6 +787,285 @@ pet_vibe_t pet_vibe_for_genre(const char *genre) {
 }
 
 // ---------------------------------------------------------------------------
+// The month's listening: family, temperament, and what they change
+// ---------------------------------------------------------------------------
+
+static void lower_copy(char *out, size_t size, const char *text) {
+	size_t used = 0;
+	if (!out || size == 0) {
+		return;
+	}
+	if (text) {
+		for (const char *p = text; *p && used < size - 1; p++) {
+			out[used++] = (char)tolower((unsigned char)*p);
+		}
+	}
+	out[used] = '\0';
+}
+
+// Which family a tag belongs to. Three rules, in order: calm first, so that
+// "lo-fi hip hop" is calm and not upbeat; then the curious ones, so "indie pop"
+// and "alternative rock" are exploring rather than chart music; then everything
+// that is meant to be danced to.
+pet_family_t pet_family_for_genre(const char *genre) {
+	if (!genre || !genre[0]) {
+		return PET_FAMILY_OTHER;
+	}
+
+	char lower[64];
+	lower_copy(lower, sizeof(lower), genre);
+
+	static const char *const calm[] = {
+		"ambient", "lo-fi", "lofi", "chill", "classical", "acoustic", "folk", "jazz", "blues",
+		"soul",    "downtempo", "new age", "piano", "bossa", "sleep", "meditation", "ballad",
+		"orchestra", "chamber", "swing", "lounge", "gospel", "celtic",
+	};
+	static const char *const curious[] = {
+		"indie", "alternative", "alt-", "experimental", "avant", "shoegaze", "post-", "math",
+		"punk", "metal", "noise", "garage", "psych", "emo", "grunge", "hardcore",
+	};
+	static const char *const upbeat[] = {
+		"pop", "dance", "edm", "house", "techno", "electronic", "hip-hop", "hip hop", "rap",
+		"funk", "disco", "r&b", "rnb", "rock", "synthwave", "trance", "drum", "dnb", "dubstep",
+		"bass", "breakbeat", "ska", "reggaeton", "latin", "country",
+	};
+
+	for (size_t i = 0; i < sizeof(calm) / sizeof(calm[0]); i++) {
+		if (contains_word(lower, calm[i])) {
+			return PET_FAMILY_CALM;
+		}
+	}
+	for (size_t i = 0; i < sizeof(curious) / sizeof(curious[0]); i++) {
+		if (contains_word(lower, curious[i])) {
+			return PET_FAMILY_CURIOUS;
+		}
+	}
+	for (size_t i = 0; i < sizeof(upbeat) / sizeof(upbeat[0]); i++) {
+		if (contains_word(lower, upbeat[i])) {
+			return PET_FAMILY_UPBEAT;
+		}
+	}
+	return PET_FAMILY_OTHER;
+}
+
+// Shifts the month by the days that have passed since the stored one, and
+// appends the family yesterday was mostly spent in. A gap of a month or more
+// empties the ring: a pet that has been off for two months has no recent
+// listening, and pretending otherwise would keep a temperament alive for ever.
+static void record_day_family(pet_state_t *st, long day) {
+	if (!st || day <= st->day) {
+		return;
+	}
+
+	int winner = PET_FAMILY_OTHER;
+	int best = 0;
+	for (int f = 1; f < PET_FAMILY_COUNT; f++) {
+		if (st->day_family[f] > best) {
+			best = st->day_family[f];
+			winner = f;
+		}
+	}
+
+	long gap = day - st->day;
+	if (gap >= PET_TEMPERAMENT_DAYS) {
+		memset(st->genre_history, 0, sizeof(st->genre_history));
+	} else {
+		memmove(st->genre_history, st->genre_history + gap, (size_t)(PET_TEMPERAMENT_DAYS - gap));
+		for (long i = PET_TEMPERAMENT_DAYS - gap; i < PET_TEMPERAMENT_DAYS; i++) {
+			st->genre_history[i] = PET_FAMILY_OTHER;
+		}
+	}
+	st->genre_history[PET_TEMPERAMENT_DAYS - 1] = (uint8_t)winner;
+	memset(st->day_family, 0, sizeof(st->day_family));
+}
+
+void pet_temperament_days(const pet_state_t *st, int *out) {
+	if (!out) {
+		return;
+	}
+	for (int f = 0; f < PET_FAMILY_COUNT; f++) {
+		out[f] = 0;
+	}
+	if (!st) {
+		return;
+	}
+	for (int i = 0; i < PET_TEMPERAMENT_DAYS; i++) {
+		int f = st->genre_history[i];
+		if (f >= 0 && f < PET_FAMILY_COUNT) {
+			out[f]++;
+		}
+	}
+}
+
+pet_temperament_t pet_temperament(const pet_state_t *st) {
+	if (!st) {
+		return PET_TEMPERAMENT_NONE;
+	}
+
+	int days[PET_FAMILY_COUNT];
+	pet_temperament_days(st, days);
+	int known = 0;
+	for (int f = 1; f < PET_FAMILY_COUNT; f++) {
+		known += days[f];
+	}
+	if (known < PET_TEMPERAMENT_MIN_DAYS) {
+		return PET_TEMPERAMENT_NONE;
+	}
+
+	// The most days wins; a tie goes to the family heard most recently,
+	// which is why the ring is walked backwards.
+	int best_family = PET_FAMILY_OTHER;
+	int best_count = 0;
+	for (int i = PET_TEMPERAMENT_DAYS - 1; i >= 0; i--) {
+		int f = st->genre_history[i];
+		if (f <= PET_FAMILY_OTHER || f >= PET_FAMILY_COUNT) {
+			continue;
+		}
+		if (days[f] > best_count) {
+			best_count = days[f];
+			best_family = f;
+		}
+	}
+
+	switch (best_family) {
+	case PET_FAMILY_UPBEAT:
+		return PET_TEMPERAMENT_UPBEAT;
+	case PET_FAMILY_CALM:
+		return PET_TEMPERAMENT_CALM;
+	case PET_FAMILY_CURIOUS:
+		return PET_TEMPERAMENT_CURIOUS;
+	default:
+		return PET_TEMPERAMENT_NONE;
+	}
+}
+
+const char *pet_temperament_tag(pet_temperament_t temperament) {
+	switch (temperament) {
+	case PET_TEMPERAMENT_UPBEAT:
+		return "pet_temperament_upbeat";
+	case PET_TEMPERAMENT_CALM:
+		return "pet_temperament_calm";
+	case PET_TEMPERAMENT_CURIOUS:
+		return "pet_temperament_curious";
+	case PET_TEMPERAMENT_NONE:
+	default:
+		return "pet_temperament_none";
+	}
+}
+
+bool pet_is_upbeat(const pet_state_t *st) { return pet_temperament(st) == PET_TEMPERAMENT_UPBEAT; }
+
+bool pet_has_soundscape(const pet_state_t *st) { return pet_temperament(st) == PET_TEMPERAMENT_CALM; }
+
+int pet_energy_secs_per_point(const pet_state_t *st) {
+	return pet_is_upbeat(st) ? PET_UPBEAT_ENERGY_SECS_PER_POINT : PET_ENERGY_SECS_PER_POINT;
+}
+
+// ---------------------------------------------------------------------------
+// Skipping, and being dizzy
+// ---------------------------------------------------------------------------
+
+bool pet_skip(pet_state_t *st, int64_t now) {
+	if (!st || now <= 0) {
+		return false;
+	}
+
+	// The ring holds the newest skip last. One that has fallen out of the
+	// window on the left is dropped first, so the eight slots are always the
+	// last eight skips rather than the first eight.
+	while (st->skip_count > 0 && now - st->skip_times[0] > PET_SKIP_WINDOW_SECS) {
+		for (int i = 1; i < st->skip_count; i++) {
+			st->skip_times[i - 1] = st->skip_times[i];
+		}
+		st->skip_count--;
+	}
+	if (st->skip_count >= PET_SKIP_RING) {
+		for (int i = 1; i < PET_SKIP_RING; i++) {
+			st->skip_times[i - 1] = st->skip_times[i];
+		}
+		st->skip_count = PET_SKIP_RING - 1;
+	}
+	st->skip_times[st->skip_count++] = now;
+
+	int in_window = 0;
+	for (int i = 0; i < st->skip_count; i++) {
+		if (now - st->skip_times[i] <= PET_SKIP_WINDOW_SECS) {
+			in_window++;
+		}
+	}
+	if (in_window <= PET_SKIP_LIMIT) {
+		return false;
+	}
+	if (pet_dizzy(st, now)) {
+		return false; // already dizzy: one toast, not one per skip
+	}
+	st->dizzy_until = now + PET_DIZZY_SECS;
+	return true;
+}
+
+bool pet_dizzy(const pet_state_t *st, int64_t now) {
+	if (!st || now <= 0 || st->dizzy_until <= 0) {
+		return false;
+	}
+	return now < st->dizzy_until;
+}
+
+// ---------------------------------------------------------------------------
+// Foraging, and the tap-along
+// ---------------------------------------------------------------------------
+
+int pet_forage(pet_state_t *st, int session_secs) {
+	if (!st || session_secs < PET_FORAGE_SECS) {
+		return 0;
+	}
+	if (pet_temperament(st) != PET_TEMPERAMENT_CURIOUS) {
+		return 0;
+	}
+	if (st->day <= 0 || st->forage_day == st->day) {
+		return 0;
+	}
+	st->forage_day = st->day;
+
+	// One day in three the find is an object rather than notes: a streak
+	// freeze, which the wardrobe sells for 150.
+	uint32_t roll = (uint32_t)(st->day * 2246822519u) ^ 0x9E3779B9u;
+	int notes = 0;
+	if ((int)(roll % PET_FORAGE_CHANCE) == 0) {
+		st->freezes = clamp_int(st->freezes + 1, 0, 999);
+		notes = 15;
+	} else {
+		notes = 20 + (int)((roll >> 8) % 41);
+	}
+	st->notes = clamp_int(st->notes + notes, 0, INT_MAX);
+	return notes;
+}
+
+bool pet_rhythm_ready(const pet_state_t *st) { return st && st->day > 0 && st->rhythm_day != st->day; }
+
+int pet_rhythm_finish(pet_state_t *st, int score) {
+	if (!pet_rhythm_ready(st)) {
+		return 0;
+	}
+	score = clamp_int(score, 0, 100);
+
+	st->rhythm_day = st->day;
+	if (score > st->rhythm_best) {
+		st->rhythm_best = score;
+	}
+
+	// A game, not an income: two notes for turning up, ten more for a clean
+	// run, and a freeze for a nearly perfect one.
+	int notes = 2 + score / 10;
+	st->notes = clamp_int(st->notes + notes, 0, INT_MAX);
+	st->happy = clamp_int(st->happy + score / 5, 0, PET_HAPPY_MAX);
+	st->energy = clamp_int(st->energy + score / 10, 0, PET_ENERGY_MAX);
+	if (score >= 90) {
+		st->freezes = clamp_int(st->freezes + 1, 0, 999);
+	}
+	return notes;
+}
+
+// ---------------------------------------------------------------------------
 // The configuration
 // ---------------------------------------------------------------------------
 
@@ -781,6 +1102,29 @@ static void load_hashes(const char *key, uint32_t *set, int *count) {
 			text++;
 		} else if (*text && *text != ' ') {
 			break;
+		}
+	}
+}
+
+// The month as one line of digits, oldest first: "0012000...". Empty when the
+// pet has never had a day with a genre in it.
+static void save_history(const uint8_t *history) {
+	char text[PET_TEMPERAMENT_DAYS + 1];
+	for (int i = 0; i < PET_TEMPERAMENT_DAYS; i++) {
+		int value = history[i];
+		text[i] = (char)('0' + (value >= 0 && value < PET_FAMILY_COUNT ? value : 0));
+	}
+	text[PET_TEMPERAMENT_DAYS] = '\0';
+	config_set(PET_SECTION, "genre_history", text);
+}
+
+static void load_history(uint8_t *history) {
+	memset(history, 0, PET_TEMPERAMENT_DAYS);
+	const char *text = config_get(PET_SECTION, "genre_history", "");
+	int i = 0;
+	for (; text[i] && i < PET_TEMPERAMENT_DAYS; i++) {
+		if (text[i] >= '0' && text[i] < '0' + PET_FAMILY_COUNT) {
+			history[i] = (uint8_t)(text[i] - '0');
 		}
 	}
 }
@@ -828,6 +1172,11 @@ void pet_load(pet_state_t *st, int64_t now, long day) {
 	st->species = (int)config_get_int(PET_SECTION, "species", PET_SPECIES_NONE);
 	load_hashes("day_genres", st->day_genres, &st->day_genre_count);
 	load_hashes("day_albums", st->day_albums, &st->day_album_count);
+	load_history(st->genre_history);
+	st->dizzy_until = (int64_t)config_get_int(PET_SECTION, "dizzy_until", 0);
+	st->rhythm_day = config_get_int(PET_SECTION, "rhythm_day", 0);
+	st->rhythm_best = (int)config_get_int(PET_SECTION, "rhythm_best", 0);
+	st->forage_day = config_get_int(PET_SECTION, "forage_day", 0);
 
 	// A hand edit, a half-written file or a state from a much older build is
 	// brought back inside the ranges this arithmetic assumes.
@@ -925,6 +1274,11 @@ void pet_save(const pet_state_t *st) {
 	config_set_int(PET_SECTION, "species", st->species);
 	save_hashes("day_genres", st->day_genres, st->day_genre_count);
 	save_hashes("day_albums", st->day_albums, st->day_album_count);
+	save_history(st->genre_history);
+	config_set_int(PET_SECTION, "dizzy_until", (long)st->dizzy_until);
+	config_set_int(PET_SECTION, "rhythm_day", st->rhythm_day);
+	config_set_int(PET_SECTION, "rhythm_best", st->rhythm_best);
+	config_set_int(PET_SECTION, "forage_day", st->forage_day);
 }
 
 void pet_set_name(const char *name) {

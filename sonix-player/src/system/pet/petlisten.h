@@ -16,7 +16,8 @@
 //   * a timer callback that arrives late cannot claim more than a few seconds,
 //     because nobody observed the music during the rest of the gap;
 //   * a track that ends on its own, after being heard, completes; one that is
-//     skipped does not;
+//     skipped does not, and the skip is reported so the pet can lose its
+//     patience with a listener who is flicking through the library;
 //   * a pause, a mute or a skip ends the uninterrupted session, though a pause
 //     of a second or two is forgiven because that is what changing track looks
 //     like;
@@ -60,7 +61,9 @@ typedef struct {
 
 typedef struct {
 	int listened_secs;    // audible seconds this tick
+	int session_secs;     // seconds of uninterrupted listening at the end of it
 	bool track_changed;   // a different track (or the first one) was seen
+	bool skipped;         // that change abandoned a track that had been heard
 	bool first_audible;   // this track was just heard for the first time
 	bool album_complete;  // the third track of an album run just finished
 	bool focus_30min;     // thirty uninterrupted minutes just passed

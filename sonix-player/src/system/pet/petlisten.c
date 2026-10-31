@@ -121,6 +121,10 @@ void petlisten_frame(petlisten_t *listen, const petlisten_frame_t *frame, petlis
 	if (changed) {
 		out->track_changed = true;
 		completed = track_completed(listen);
+		// A track that was heard and abandoned: not a completion, and not the
+		// first track of a session either. See PET_SKIP_LIMIT.
+		out->skipped = !completed && listen->track_heard &&
+					   listen->last_duration >= PETLISTEN_MIN_ALBUM_TRACK_SECS;
 		out->album_complete = settle_album_run(listen, completed);
 
 		copy_key(listen->track, key);
@@ -174,4 +178,8 @@ void petlisten_frame(petlisten_t *listen, const petlisten_frame_t *frame, petlis
 	}
 	listen->last_position = frame->position > 0 ? frame->position : 0;
 	listen->last_now = frame->now > 0 ? frame->now : listen->last_now;
+
+	// What the session is now, for a pet that forages: the pause and skip
+	// rules above have already reset it where they should.
+	out->session_secs = listen->session_secs;
 }

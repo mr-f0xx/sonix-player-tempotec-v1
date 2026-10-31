@@ -282,6 +282,61 @@ static void test_an_empty_frame_earns_nothing(void) {
 	assert(result.listened_secs == 0);
 }
 
+// A skip is a track that was heard and left before its end. The pet's patience
+// is measured in these, so the rule has to be exact: a track that ends on its
+// own is not one, a track nobody heard is not one, and a sting is not one.
+static void test_a_skip_is_reported(void) {
+	fresh();
+	petlisten_result_t r = tick(true, 50, "/music/a.flac", "Album", 1, 240, 1);
+	assert(r.track_changed);
+	assert(!r.skipped); // nothing was heard before it
+
+	tick(true, 50, "/music/a.flac", "Album", 30, 240, 1);
+	r = tick(true, 50, "/music/b.flac", "Album", 1, 240, 1);
+	assert(r.track_changed);
+	assert(r.skipped);
+
+	// A track heard to its end is a completion, not a skip.
+	tick(true, 50, "/music/b.flac", "Album", 239, 240, 1);
+	r = tick(true, 50, "/music/c.flac", "Album", 1, 240, 1);
+	assert(r.track_changed);
+	assert(!r.skipped);
+
+	// A track that was only ever seen muted was never heard, so it is not a
+	// skip either: the listener was not flicking through anything.
+	fresh();
+	tick(true, 0, "/music/a.flac", "Album", 20, 240, 1);
+	r = tick(true, 50, "/music/b.flac", "Album", 1, 240, 1);
+	assert(r.track_changed);
+	assert(!r.skipped);
+
+	// And a jingle is too short to have been abandoned.
+	tick(true, 50, "/music/sting.mp3", "Jingles", 2, 12, 1);
+	r = tick(true, 50, "/music/e.flac", "Album", 1, 240, 1);
+	assert(r.track_changed);
+	assert(!r.skipped);
+}
+
+// The session's length is what a Curious pet forages on, so it is reported as
+// well as used: a skip resets it, a completion does not.
+static void test_the_session_is_reported(void) {
+	fresh();
+	tick(true, 50, "/music/a.flac", "Album", 1, 240, 1);
+	petlisten_result_t r = tick(true, 50, "/music/a.flac", "Album", 2, 240, 1);
+	assert(r.session_secs == 2);
+
+	tick(true, 50, "/music/a.flac", "Album", 30, 240, 1);
+	r = tick(true, 50, "/music/b.flac", "Album", 1, 240, 1);
+	assert(r.skipped);
+	assert(r.session_secs == 1); // a skip breaks it: the second of the new track
+
+	r = tick(true, 50, "/music/b.flac", "Album", 2, 240, 1);
+	assert(r.session_secs == 2);
+	tick(true, 50, "/music/b.flac", "Album", 239, 240, 1);
+	r = tick(true, 50, "/music/c.flac", "Album", 1, 240, 1);
+	assert(r.session_secs > 0); // a track ending on its own does not
+}
+
 int main(void) {
 	setenv("TZ", "UTC", 1);
 	tzset();
@@ -297,6 +352,8 @@ int main(void) {
 	test_a_completed_track_does_not_break_the_session();
 	test_night();
 	test_a_live_stream_has_no_album();
+	test_a_skip_is_reported();
+	test_the_session_is_reported();
 	test_an_empty_frame_earns_nothing();
 
 	printf("PASS music pet: audible seconds, album runs, focus and night\n");

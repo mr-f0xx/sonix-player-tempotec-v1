@@ -255,9 +255,21 @@ a self-signed certificate), and HLS.
   themes and streak freezes. A **15-minute daily goal** builds the streak and a
   bought freeze covers one missed day. Achievements for listening late, hearing
   an album through, five genres in a day and half an hour without a pause are
-  worth extra notes. A genre tag nudges how it moves: a slow sway for jazz,
-  ambient or lo-fi, a faster bob for rock, metal and electronic, and a breath no
-  faster than two seconds even then. It never dies, and nothing it does
+  worth extra notes. **The last thirty days give it a character**: a month of
+  pop and dance makes an **Upbeat** pet whose energy fills faster and who turns
+  up a note or two on the floor as the music goes by, a month of jazz and
+  classical makes a **Calm** one with a drifting soundscape on its card, and a
+  month of indie, alternative and metal makes a **Curious** one that finds
+  something -- notes, and now and then a streak freeze -- after forty-five
+  minutes of listening without a break, once a day. Under three days of
+  listening it has no character yet, and the page says nothing. A genre tag also
+  nudges how it moves: a slow sway for jazz, ambient or lo-fi, a faster bob for
+  rock, metal and electronic, and a breath no faster than two seconds even
+  then. **Once a day it offers a tap-along**: sixteen beats of the metronome's
+  tempo, tapped on the glass, worth up to a dozen notes and a freeze for a clean
+  run. And it has a limit on flicking through a library: **more than five
+  skipped tracks in ten minutes** and it is dizzy for fifteen -- still fed by
+  whatever is playing, but earning nothing until it clears. It never dies, and nothing it does
   punishes a player for not listening: forty-eight hours without music is only
   "sleepy", and the first track wakes it. The page is one borderless card: the
   name and stage top left, **hearts and energy top right**, the animal in the

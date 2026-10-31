@@ -663,6 +663,257 @@ static void test_name(void) {
 	assert(strncmp(narrow, "Mélodie", 8) == 0);
 }
 
+// ---------------------------------------------------------------------------
+// The month: families, temperament and what they change
+// ---------------------------------------------------------------------------
+
+static void test_families(void) {
+	assert(pet_family_for_genre(NULL) == PET_FAMILY_OTHER);
+	assert(pet_family_for_genre("") == PET_FAMILY_OTHER);
+	assert(pet_family_for_genre("Rock") == PET_FAMILY_UPBEAT);
+	assert(pet_family_for_genre("Synth-pop") == PET_FAMILY_UPBEAT);
+	assert(pet_family_for_genre("Hip-Hop/Rap") == PET_FAMILY_UPBEAT);
+	assert(pet_family_for_genre("Jazz") == PET_FAMILY_CALM);
+	assert(pet_family_for_genre("Lo-Fi Hip Hop") == PET_FAMILY_CALM);
+	assert(pet_family_for_genre("Modern Classical") == PET_FAMILY_CALM);
+	// The curious ones win over the chart ones: "indie pop" is not pop here.
+	assert(pet_family_for_genre("Indie Pop") == PET_FAMILY_CURIOUS);
+	assert(pet_family_for_genre("Alternative Rock") == PET_FAMILY_CURIOUS);
+	assert(pet_family_for_genre("Post-Rock") == PET_FAMILY_CURIOUS);
+	assert(pet_family_for_genre("Melodic Death Metal") == PET_FAMILY_CURIOUS);
+	assert(pet_family_for_genre("Audiobook") == PET_FAMILY_OTHER);
+}
+
+// A day of one family: note the tracks and let the day turn over.
+static void spend_day(const char *genre) {
+	int events = 0;
+	for (int i = 0; i < 3; i++) {
+		pet_note_track(&st, genre, genre, &events);
+	}
+	next_day();
+}
+
+static void test_temperament(void) {
+	fresh();
+	// A pet on its first evening has no character yet.
+	assert(pet_temperament(&st) == PET_TEMPERAMENT_NONE);
+	assert(strcmp(pet_temperament_tag(PET_TEMPERAMENT_NONE), "pet_temperament_none") == 0);
+
+	spend_day("Rock");
+	assert(pet_temperament(&st) == PET_TEMPERAMENT_NONE); // one day is not a month
+	spend_day("Rock");
+	assert(pet_temperament(&st) == PET_TEMPERAMENT_NONE); // nor two
+	spend_day("Rock");
+	assert(pet_temperament(&st) == PET_TEMPERAMENT_UPBEAT);
+	assert(pet_is_upbeat(&st));
+	assert(!pet_has_soundscape(&st));
+	assert(strcmp(pet_temperament_tag(PET_TEMPERAMENT_UPBEAT), "pet_temperament_upbeat") == 0);
+
+	// Jazz days outnumber the rock ones: the temperament follows the month.
+	spend_day("Jazz");
+	spend_day("Jazz");
+	spend_day("Jazz");
+	spend_day("Jazz");
+	assert(pet_temperament(&st) == PET_TEMPERAMENT_CALM);
+	assert(pet_has_soundscape(&st));
+	assert(!pet_is_upbeat(&st));
+	assert(pet_energy_secs_per_point(&st) == PET_ENERGY_SECS_PER_POINT);
+
+	int days[PET_FAMILY_COUNT];
+	pet_temperament_days(&st, days);
+	assert(days[PET_FAMILY_CALM] == 4);
+	assert(days[PET_FAMILY_UPBEAT] == 3);
+
+	// And a month of indie after that is the curious one, with the soundscape
+	// going away again.
+	for (int i = 0; i < PET_TEMPERAMENT_DAYS; i++) {
+		spend_day("Indie Rock");
+	}
+	assert(pet_temperament(&st) == PET_TEMPERAMENT_CURIOUS);
+	assert(!pet_has_soundscape(&st));
+
+	// A month away empties the ring: a temperament is recent listening or it is
+	// nothing.
+	pet_advance(&st, st.last_seen, st.day + PET_TEMPERAMENT_DAYS + 1, 0, 0);
+	pet_temperament_days(&st, days);
+	for (int f = 1; f < PET_FAMILY_COUNT; f++) {
+		assert(days[f] == 0);
+	}
+	assert(pet_temperament(&st) == PET_TEMPERAMENT_NONE);
+}
+
+static void test_upbeat_energy_and_drops(void) {
+	fresh();
+	spend_day("Rock");
+	spend_day("Rock");
+	spend_day("Rock");
+	assert(pet_is_upbeat(&st));
+
+	// Eight seconds of music is a point of energy for an Upbeat pet and less
+	// than one for anybody else.
+	int energy = st.energy;
+	listen(PET_UPBEAT_ENERGY_SECS_PER_POINT);
+	assert(st.energy == energy + 1);
+
+	// Notes fall on the floor as the credited music crosses its buckets: the
+	// six notes of six minutes of music come with a few more.
+	st.notes = 0;
+	st.note_credit = 0;
+	listen(6 * 60);
+	assert(st.notes >= 6);
+	assert(st.notes <= 20);
+
+	// The same music pays the same again: the roll is a hash, not a die.
+	pet_state_t again = st;
+	fresh();
+	spend_day("Rock");
+	spend_day("Rock");
+	spend_day("Rock");
+	st.notes = 0;
+	st.note_credit = 0;
+	listen(6 * 60);
+	assert(st.notes == again.notes);
+}
+
+static void test_dizzy(void) {
+	fresh();
+	int64_t base = T0 + HOUR;
+
+	// Five skips in ten minutes is a listener flicking through a library; the
+	// sixth is one skip too many.
+	for (int i = 0; i < PET_SKIP_LIMIT; i++) {
+		assert(!pet_skip(&st, base + i * 20));
+	}
+	assert(!pet_dizzy(&st, base + 200));
+	assert(pet_skip(&st, base + 200));
+	assert(pet_dizzy(&st, base + 201));
+	assert(pet_mood(&st, base + 201) == PET_MOOD_DIZZY);
+	assert(strcmp(pet_mood_tag(PET_MOOD_DIZZY), "pet_mood_dizzy") == 0);
+	// Already dizzy: the seventh skip does not report it again.
+	assert(!pet_skip(&st, base + 220));
+
+	// Nothing is credited while dizzy, but the meters still fill: the music is
+	// real, it is the progression that waits.
+	int happy = st.happy;
+	int energy = st.energy;
+	int64_t xp = st.xp_secs;
+	int notes = st.notes;
+	st.last_seen = base + 260; // the tick after the skip, not forty minutes later
+	pet_advance(&st, base + 300, DAY0, 30, 0);
+	assert(st.xp_secs == xp);
+	assert(st.notes == notes);
+	assert(st.happy > happy || st.happy == PET_HAPPY_MAX);
+	assert(st.energy > energy || st.energy == PET_ENERGY_MAX);
+	assert(st.today_secs == 30); // the day's minutes still count
+
+	// Fifteen minutes and it lifts.
+	assert(pet_dizzy(&st, base + 200 + PET_DIZZY_SECS - 1));
+	assert(!pet_dizzy(&st, base + 200 + PET_DIZZY_SECS));
+	pet_advance(&st, base + 200 + PET_DIZZY_SECS, DAY0, 30, 0);
+	assert(st.xp_secs == xp + 30);
+
+	// Skips long past do not add up: the window is ten minutes.
+	fresh();
+	for (int i = 0; i < 10; i++) {
+		assert(!pet_skip(&st, base + i * (PET_SKIP_WINDOW_SECS + 60)));
+	}
+	assert(!pet_dizzy(&st, base + 20000));
+}
+
+static void test_forage(void) {
+	fresh();
+	spend_day("Indie Rock");
+	spend_day("Indie Rock");
+	spend_day("Indie Rock");
+	assert(pet_temperament(&st) == PET_TEMPERAMENT_CURIOUS);
+
+	// Forty-four minutes is not a long session yet.
+	assert(pet_forage(&st, PET_FORAGE_SECS - 1) == 0);
+	int notes = pet_forage(&st, PET_FORAGE_SECS);
+	assert(notes > 0);
+	assert(st.notes >= notes);
+	// Once a day, however long the session runs.
+	assert(pet_forage(&st, PET_FORAGE_SECS + 600) == 0);
+
+	// A different temperament finds nothing, however long it listens.
+	fresh();
+	spend_day("Rock");
+	spend_day("Rock");
+	spend_day("Rock");
+	assert(pet_forage(&st, PET_FORAGE_SECS) == 0);
+	assert(st.notes == 0);
+}
+
+static void test_rhythm(void) {
+	fresh();
+	assert(pet_rhythm_ready(&st));
+
+	int before = st.notes;
+	int notes = pet_rhythm_finish(&st, 75);
+	assert(notes == 2 + 75 / 10);
+	assert(st.notes == before + notes);
+	assert(st.rhythm_best == 75);
+	assert(!pet_rhythm_ready(&st));
+	// A second game the same day pays nothing, and does not lower the best.
+	assert(pet_rhythm_finish(&st, 10) == 0);
+	assert(st.rhythm_best == 75);
+
+	// A clean run leaves a freeze in hand; tomorrow is another game.
+	next_day();
+	assert(pet_rhythm_ready(&st));
+	int freezes = st.freezes;
+	assert(pet_rhythm_finish(&st, 95) > 0);
+	assert(st.freezes == freezes + 1);
+	assert(st.rhythm_best == 95);
+	// The score is clamped rather than trusted.
+	next_day();
+	pet_rhythm_finish(&st, 1000);
+	assert(st.rhythm_best == 100);
+}
+
+static void test_v4_persistence(void) {
+	char dir[] = "/tmp/sonix-pet-test-XXXXXX";
+	assert(mkdtemp(dir));
+	char path[256];
+	snprintf(path, sizeof(path), "%s/device_config.ini", dir);
+	config_init(path);
+
+	fresh();
+	spend_day("Jazz");
+	spend_day("Jazz");
+	spend_day("Jazz");
+	spend_day("Rock");
+	assert(pet_temperament(&st) == PET_TEMPERAMENT_CALM);
+	int64_t base = T0 + HOUR;
+	for (int i = 0; i <= PET_SKIP_LIMIT; i++) {
+		pet_skip(&st, base + i);
+	}
+	assert(pet_dizzy(&st, base + 10));
+	pet_rhythm_finish(&st, 64);
+	pet_forage(&st, PET_FORAGE_SECS);
+	pet_save(&st);
+
+	pet_state_t loaded;
+	pet_load(&loaded, T0, DAY0);
+	assert(memcmp(loaded.genre_history, st.genre_history, PET_TEMPERAMENT_DAYS) == 0);
+	assert(pet_temperament(&loaded) == PET_TEMPERAMENT_CALM);
+	assert(loaded.dizzy_until == st.dizzy_until);
+	assert(loaded.rhythm_day == st.rhythm_day);
+	assert(loaded.rhythm_best == st.rhythm_best);
+	assert(loaded.forage_day == st.forage_day);
+	assert(loaded.notes == st.notes);
+	assert(loaded.freezes == st.freezes);
+
+	// A history written by a build that did not have one is all zeros, and a
+	// corrupt digit is read as "no genre that day" rather than as a family.
+	config_set("pet", "genre_history", "3x3");
+	pet_load(&loaded, T0, DAY0);
+	assert(loaded.genre_history[0] == PET_FAMILY_CURIOUS);
+	assert(loaded.genre_history[1] == PET_FAMILY_OTHER);
+	assert(loaded.genre_history[2] == PET_FAMILY_CURIOUS);
+	assert(pet_temperament(&loaded) == PET_TEMPERAMENT_NONE);
+}
+
 int main(void) {
 	test_day_number();
 	test_defaults();
@@ -686,6 +937,13 @@ int main(void) {
 	test_persistence();
 	test_species();
 	test_name();
+	test_families();
+	test_temperament();
+	test_upbeat_energy_and_drops();
+	test_dizzy();
+	test_forage();
+	test_rhythm();
+	test_v4_persistence();
 
 	printf("PASS music pet: XP ceiling, bonuses, wallet, goals, stages and persistence\n");
 	return 0;

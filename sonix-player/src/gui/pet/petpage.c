@@ -172,6 +172,25 @@ static lv_obj_t *species_chip[PET_SPECIES_COUNT];
 static lv_obj_t *species_chip_label[PET_SPECIES_COUNT];
 static bool customise_visible;
 
+// The month's listening, on the card under the stage.
+static lv_obj_t *temperament_label;
+
+// The Calm soundscape: four motes drifting up while the month says calm.
+static lv_obj_t *motes[4];
+
+// The tap-along, once a day.
+static lv_obj_t *tap_sheet;
+static lv_obj_t *tap_lane;
+static lv_obj_t *tap_note;
+static lv_obj_t *tap_score_label;
+static lv_obj_t *tap_hint_label;
+static lv_timer_t *tap_timer;
+static uint32_t tap_start_ms;
+static uint32_t tap_beat_ms;
+static int tap_next_beat;
+static int tap_points;
+static bool tap_visible;
+
 static lv_obj_t *name_layer;
 static lv_obj_t *name_field;
 static keyboard_t *name_keyboard;
@@ -190,6 +209,8 @@ static void customise_refresh(void);
 static void customise_close_cb(lv_event_t *e);
 static void name_dialog_close(void);
 static void pet_tap_cb(lv_event_t *e);
+static void tap_close(void);
+static void tap_open(void);
 
 // ---------------------------------------------------------------------------
 // The small pieces everything is made of
@@ -270,10 +291,11 @@ static lv_obj_t *corner_button(gui_config_t *cfg, int slot, const lv_image_dsc_t
 	lv_obj_set_style_pad_all(button, 0, 0);
 	lv_obj_add_event_cb(button, cb, LV_EVENT_CLICKED, NULL);
 
-	lv_obj_t *icon = lv_image_create(button);
-	lv_image_set_src(icon, glyph);
+	// The glyph is drawn at the slot's size rather than scaled from its source:
+	// the shell's icons are cut at anything from 14 to 128 pixels, and
+	// settingsrow_scale_corner_icon() assumes the 34 px ones.
+	lv_obj_t *icon = icon_image(button, glyph, settingsrow_corner_button_size(cfg) * 3 / 4);
 	lv_obj_add_style(icon, &theme_style_icon, 0);
-	settingsrow_scale_corner_icon(icon, cfg);
 	lv_obj_center(icon);
 	return button;
 }
@@ -546,13 +568,27 @@ static void paint_creature(void) {
 	place(parts.lid_l, cx - eye_dx - 5, eye_y + 4, 10, 2);
 	place(parts.lid_r, cx + eye_dx - 5, eye_y + 4, 10, 2);
 
-	bool eyes_open = !sleeping;
+	// A dizzy pet has crosses where its eyes were: two bars over each eye, one
+	// each way. Sleeping keeps the single flat lid.
+	bool dizzy = mood == PET_MOOD_DIZZY;
+	bool eyes_open = !sleeping && !dizzy;
 	show(parts.eye_l, eyes_open);
 	show(parts.eye_r, eyes_open);
 	show(parts.glint_l, eyes_open);
 	show(parts.glint_r, eyes_open);
-	show(parts.lid_l, sleeping);
-	show(parts.lid_r, sleeping);
+	show(parts.lid_l, sleeping || dizzy);
+	show(parts.lid_r, sleeping || dizzy);
+	if (dizzy) {
+		place(parts.lid_l, cx - eye_dx - 6, eye_y + 3, 12, 2);
+		place(parts.lid_r, cx + eye_dx - 6, eye_y + 3, 12, 2);
+		lv_obj_set_style_transform_rotation(parts.lid_l, 450, 0);
+		lv_obj_set_style_transform_rotation(parts.lid_r, -450, 0);
+	} else {
+		place(parts.lid_l, cx - eye_dx - 5, eye_y + 4, 10, 2);
+		place(parts.lid_r, cx + eye_dx - 5, eye_y + 4, 10, 2);
+		lv_obj_set_style_transform_rotation(parts.lid_l, 0, 0);
+		lv_obj_set_style_transform_rotation(parts.lid_r, 0, 0);
+	}
 
 	place(parts.cheek_l, cx - body_w * 34 / 100 - 4, eye_y + 11, 9, 4);
 	place(parts.cheek_r, cx + body_w * 34 / 100 - 4, eye_y + 11, 9, 4);
@@ -561,7 +597,7 @@ static void paint_creature(void) {
 
 	bool sad = mood == PET_MOOD_SAD;
 	bool smile = !sad && (mood == PET_MOOD_HAPPY || mood == PET_MOOD_BLISSFUL);
-	bool line = mood == PET_MOOD_OKAY || sleeping;
+	bool line = mood == PET_MOOD_OKAY || sleeping || dizzy;
 
 	place(parts.mouth, cx - 9, eye_y + 12, 18, 12);
 	if (sad) {
@@ -569,7 +605,7 @@ static void paint_creature(void) {
 	} else {
 		lv_arc_set_angles(parts.mouth, 20, 160);
 	}
-	show(parts.mouth, !sleeping && !listening && (smile || sad));
+	show(parts.mouth, !sleeping && !dizzy && !listening && (smile || sad));
 
 	place(parts.mouth_line, cx - 5, eye_y + 18, 10, 2);
 	show(parts.mouth_line, !listening && line);
@@ -670,6 +706,13 @@ static void paint_room(void) {
 	for (int i = 0; i < 3; i++) {
 		show(bubbles[i], fish);
 	}
+
+	// The Calm soundscape: a month of jazz and classical buys drifting motes
+	// over whatever room the pet is in.
+	bool calm = petwatch_has_soundscape();
+	for (int i = 0; i < 4; i++) {
+		show(motes[i], calm);
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -699,6 +742,13 @@ static void paint_words(void) {
 	lv_label_set_text_fmt(energy_value, "%d", st->energy);
 	lv_label_set_text_fmt(notes_value, "%d", st->notes);
 
+	pet_temperament_t temperament = pet_temperament(st);
+	if (temperament == PET_TEMPERAMENT_NONE) {
+		lv_label_set_text(temperament_label, "");
+	} else {
+		lv_label_set_text(temperament_label, tr(pet_temperament_tag(temperament)));
+	}
+
 	lv_label_set_text_fmt(today_label, tr("pet_today"), st->today_secs / 60, PET_DAY_GOAL_SECS / 60);
 	if (st->streak > 0) {
 		lv_label_set_text_fmt(streak_label, tr("pet_streak"), st->streak);
@@ -714,6 +764,8 @@ static void paint_words(void) {
 		} else {
 			lv_label_set_text(status_label, tr("pet_feeding_music"));
 		}
+	} else if (mood == PET_MOOD_DIZZY) {
+		lv_label_set_text(status_label, tr("pet_dizzy_hint"));
 	} else if (mood == PET_MOOD_SLEEPING) {
 		lv_label_set_text(status_label, tr("pet_asleep"));
 	} else {
@@ -756,6 +808,11 @@ static void paint_theme_colors(void) {
 	const lv_color_t note_color = theme()->accent;
 	lv_obj_set_style_image_recolor(note_a, note_color, 0);
 	lv_obj_set_style_image_recolor(note_b, note_color, 0);
+	lv_obj_set_style_text_color(temperament_label,
+								theme_is_monochrome() ? theme()->accent : theme_semantic_color(THEME_SEMANTIC_BLUE), 0);
+	for (int i = 0; i < 4; i++) {
+		lv_obj_set_style_bg_color(motes[i], theme_is_dark() ? lv_color_hex(0xFFFFFF) : theme()->accent, 0);
+	}
 }
 
 static void paint(void) {
@@ -851,6 +908,11 @@ static void start_animations(void) {
 			start_anim(bubbles[i], bubble_exec, 0, -46, 9000 + i * 2400, i * 2600, false);
 		}
 	}
+	if (petwatch_has_soundscape()) {
+		for (int i = 0; i < 4; i++) {
+			start_anim(motes[i], bubble_exec, 0, -34, 11000 + i * 1900, i * 1500, false);
+		}
+	}
 }
 
 static void stop_animations(void) {
@@ -865,6 +927,10 @@ static void stop_animations(void) {
 	for (int i = 0; i < 3; i++) {
 		lv_anim_delete(bubbles[i], bubble_exec);
 		lv_obj_set_style_translate_y(bubbles[i], 0, 0);
+	}
+	for (int i = 0; i < 4; i++) {
+		lv_anim_delete(motes[i], bubble_exec);
+		lv_obj_set_style_translate_y(motes[i], 0, 0);
 	}
 	lv_obj_set_style_translate_y(parts.root, 0, 0);
 	show(note_a, false);
@@ -885,6 +951,267 @@ static void sync_animation(void) {
 	last_listening = listening;
 	last_vibe = vibe;
 	start_animations();
+}
+
+
+// ---------------------------------------------------------------------------
+// The tap-along: sixteen beats, once a day
+// ---------------------------------------------------------------------------
+
+#define TAP_TIMER_MS 40
+#define TAP_TRAVEL_MS 1100 // how long a note takes to fall the lane
+#define TAP_LANE_H 150
+
+static int tap_score(void) { return tap_points * 100 / (PET_RHYTHM_BEATS * 2); }
+
+static void tap_show_score(void) { lv_label_set_text_fmt(tap_score_label, tr("pet_tap_score"), tap_score()); }
+
+static void tap_close(void) {
+	if (tap_timer) {
+		lv_timer_delete(tap_timer);
+		tap_timer = NULL;
+	}
+	if (tap_sheet) {
+		lv_obj_set_hidden(tap_sheet, true);
+	}
+	tap_visible = false;
+}
+
+// Pays for the game, says what it was worth, and puts the sheet away. The
+// score is the share of the sixteen beats hit at all; the notes are the pet's
+// business and the page only says how many arrived.
+static void tap_finish(void) {
+	int score = tap_score();
+	int notes = petwatch_rhythm_finish(score);
+	tap_close();
+	if (notes > 0) {
+		char line[64];
+		snprintf(line, sizeof(line), tr("pet_tap_done"), notes);
+		toast_success(line);
+	} else {
+		toast_plain(tr("pet_tap_played"));
+	}
+	paint();
+}
+
+static void tap_tick_cb(lv_timer_t *timer) {
+	(void)timer;
+	if (!tap_visible) {
+		return;
+	}
+
+	int32_t elapsed = (int32_t)lv_tick_elaps(tap_start_ms);
+
+	// The note for the next beat falls towards the line. Once its moment has
+	// passed it keeps going a little, then waits to be judged.
+	if (tap_next_beat < PET_RHYTHM_BEATS) {
+		int32_t until = (int32_t)((uint32_t)(tap_next_beat + 1) * tap_beat_ms) - elapsed;
+		if (until > TAP_TRAVEL_MS) {
+			until = TAP_TRAVEL_MS;
+		}
+		if (until < -PET_RHYTHM_GOOD_MS) {
+			until = -PET_RHYTHM_GOOD_MS;
+		}
+		int32_t travel = TAP_LANE_H - 34;
+		int32_t y = travel - (until * travel / TAP_TRAVEL_MS);
+		lv_obj_set_y(tap_note, y);
+		lv_obj_set_hidden(tap_note, false);
+	} else {
+		lv_obj_set_hidden(tap_note, true);
+	}
+
+	// A beat nobody tapped in time is a miss, and the game moves on without it.
+	while (tap_next_beat < PET_RHYTHM_BEATS &&
+		   elapsed > (int32_t)((uint32_t)(tap_next_beat + 1) * tap_beat_ms) + PET_RHYTHM_GOOD_MS) {
+		tap_next_beat++;
+		tap_show_score();
+	}
+
+	if (elapsed > (int32_t)((uint32_t)PET_RHYTHM_BEATS * tap_beat_ms) + 700) {
+		tap_finish();
+	}
+}
+
+static void tap_press_cb(lv_event_t *e) {
+	(void)e;
+	if (!tap_visible) {
+		return;
+	}
+
+	int32_t elapsed = (int32_t)lv_tick_elaps(tap_start_ms);
+	while (tap_next_beat < PET_RHYTHM_BEATS &&
+		   elapsed > (int32_t)((uint32_t)(tap_next_beat + 1) * tap_beat_ms) + PET_RHYTHM_GOOD_MS) {
+		tap_next_beat++;
+	}
+	if (tap_next_beat >= PET_RHYTHM_BEATS) {
+		return;
+	}
+
+	int32_t delta = elapsed - (int32_t)((uint32_t)(tap_next_beat + 1) * tap_beat_ms);
+	if (delta < 0) {
+		delta = -delta;
+	}
+	if (delta > PET_RHYTHM_GOOD_MS) {
+		return; // nowhere near a beat: the tap is simply lost
+	}
+
+	tap_points += delta <= PET_RHYTHM_PERFECT_MS ? 2 : 1;
+	tap_next_beat++;
+	tap_show_score();
+}
+
+static void tap_close_cb(lv_event_t *e) {
+	(void)e;
+	tap_close();
+}
+
+static void tap_done_cb(lv_event_t *e) {
+	(void)e;
+	if (!tap_visible) {
+		return;
+	}
+	tap_finish();
+}
+
+static void build_tap(void);
+
+static void tap_open(void) {
+	if (!petwatch_rhythm_ready()) {
+		toast_plain(tr("pet_tap_played"));
+		return;
+	}
+	build_tap();
+	if (!tap_sheet) {
+		return;
+	}
+
+	tap_points = 0;
+	tap_next_beat = 0;
+	tap_show_score();
+	lv_label_set_text(tap_hint_label, tr("pet_tap_hint"));
+	lv_obj_set_y(tap_note, 0);
+	lv_obj_set_hidden(tap_note, false);
+	lv_obj_set_hidden(tap_sheet, false);
+	lv_obj_move_foreground(tap_sheet);
+	tap_visible = true;
+
+	tap_start_ms = lv_tick_get();
+	if (!tap_timer) {
+		tap_timer = lv_timer_create(tap_tick_cb, TAP_TIMER_MS, NULL);
+	}
+}
+
+static void tap_open_cb(lv_event_t *e) {
+	(void)e;
+	if (tap_visible) {
+		tap_close();
+		return;
+	}
+	tap_open();
+}
+
+static void build_tap(void) {
+	if (tap_sheet || !page_cfg) {
+		return;
+	}
+
+	const int pad = page_cfg->padding;
+	const int w = page_cfg->screen_width;
+	const int h = page_cfg->screen_height;
+	const int lane_y = pad + page_cfg->top_bar_height + 60;
+
+	tap_sheet = lv_obj_create(petpage_screen);
+	lv_obj_set_size(tap_sheet, w, h);
+	lv_obj_set_pos(tap_sheet, 0, 0);
+	lv_obj_set_style_pad_all(tap_sheet, 0, 0);
+	lv_obj_set_style_border_width(tap_sheet, 0, 0);
+	lv_obj_add_style(tap_sheet, &theme_style_screen, 0);
+	lv_obj_set_scrollable(tap_sheet, false);
+	lv_obj_set_hidden(tap_sheet, true);
+
+	// The whole sheet is the drum, so a finger anywhere on it counts. It is
+	// created first and everything else sits over it: the labels and the lane
+	// are not clickable, so the press falls through to it.
+	lv_obj_t *drum = lv_btn_create(tap_sheet);
+	lv_obj_set_size(drum, w, h);
+	lv_obj_set_pos(drum, 0, 0);
+	lv_obj_set_style_bg_opa(drum, LV_OPA_TRANSP, 0);
+	lv_obj_set_style_border_width(drum, 0, 0);
+	lv_obj_set_style_shadow_width(drum, 0, 0);
+	lv_obj_set_style_pad_all(drum, 0, 0);
+	lv_obj_add_event_cb(drum, tap_press_cb, LV_EVENT_CLICKED, NULL);
+
+	lv_obj_t *heading = lv_label_create(tap_sheet);
+	lv_label_set_text(heading, tr("pet_tap_game"));
+	lv_obj_add_style(heading, &theme_style_text, 0);
+	lv_obj_set_style_text_font(heading, &font_ui_18, 0);
+	lv_obj_align(heading, LV_ALIGN_TOP_LEFT, pad + 4, pad + page_cfg->top_bar_height + 10);
+
+	lv_obj_t *close = lv_btn_create(tap_sheet);
+	settingsrow_place_corner_button(close, page_cfg, 0);
+	lv_obj_set_style_bg_opa(close, LV_OPA_TRANSP, 0);
+	lv_obj_set_style_border_width(close, 0, 0);
+	lv_obj_set_style_shadow_width(close, 0, 0);
+	lv_obj_set_style_pad_all(close, 0, 0);
+	lv_obj_add_event_cb(close, tap_close_cb, LV_EVENT_CLICKED, NULL);
+	lv_obj_t *close_icon = icon_image(close, &icon_close, settingsrow_corner_button_size(page_cfg) * 3 / 4);
+	lv_obj_add_style(close_icon, &theme_style_icon, 0);
+	lv_obj_center(close_icon);
+
+	tap_hint_label = lv_label_create(tap_sheet);
+	lv_obj_add_style(tap_hint_label, &theme_style_text_dim, 0);
+	lv_obj_set_style_text_font(tap_hint_label, &font_ui_14, 0);
+	lv_label_set_text(tap_hint_label, tr("pet_tap_hint"));
+	lv_obj_align(tap_hint_label, LV_ALIGN_TOP_LEFT, pad + 4, pad + page_cfg->top_bar_height + 34);
+
+	// The lane: a card the note falls through, with a line where the beat is.
+	lv_obj_t *lane = lv_obj_create(tap_sheet);
+	lv_obj_add_style(lane, &theme_style_card, 0);
+	lv_obj_set_size(lane, 96, TAP_LANE_H);
+	lv_obj_align(lane, LV_ALIGN_TOP_MID, 0, lane_y);
+	lv_obj_set_style_radius(lane, 14, 0);
+	lv_obj_set_style_border_width(lane, 0, 0);
+	lv_obj_set_style_shadow_width(lane, 0, 0);
+	lv_obj_set_style_pad_all(lane, 0, 0);
+	lv_obj_set_scrollable(lane, false);
+	tap_lane = lane;
+
+	lv_obj_t *line = bar_piece(lane, theme()->accent, 2);
+	lv_obj_set_size(line, 72, 3);
+	lv_obj_align(line, LV_ALIGN_BOTTOM_MID, 0, -18);
+
+	tap_note = disc(lane, theme()->accent);
+	lv_obj_set_size(tap_note, 16, 16);
+	lv_obj_set_pos(tap_note, 40, 0);
+
+	lv_obj_t *tap_word = lv_label_create(lane);
+	lv_label_set_text(tap_word, tr("pet_tap"));
+	lv_obj_add_style(tap_word, &theme_style_text_dim, 0);
+	lv_obj_set_style_text_font(tap_word, &font_ui_14, 0);
+	lv_obj_align(tap_word, LV_ALIGN_BOTTOM_MID, 0, -2);
+
+	tap_score_label = lv_label_create(tap_sheet);
+	lv_obj_add_style(tap_score_label, &theme_style_text, 0);
+	lv_obj_set_style_text_font(tap_score_label, &font_ui_18, 0);
+	lv_obj_set_width(tap_score_label, w - 2 * pad);
+	lv_obj_set_style_text_align(tap_score_label, LV_TEXT_ALIGN_CENTER, 0);
+	lv_obj_align(tap_score_label, LV_ALIGN_TOP_MID, 0, lane_y + TAP_LANE_H + 8);
+	lv_label_set_text_fmt(tap_score_label, tr("pet_tap_score"), 0);
+
+	lv_obj_t *done = lv_btn_create(tap_sheet);
+	lv_obj_set_size(done, 104, 40);
+	lv_obj_align(done, LV_ALIGN_BOTTOM_MID, 0, -10);
+	lv_obj_set_style_radius(done, 12, 0);
+	lv_obj_set_style_bg_color(done, theme()->accent, 0);
+	lv_obj_set_style_bg_opa(done, LV_OPA_COVER, 0);
+	lv_obj_set_style_border_width(done, 0, 0);
+	lv_obj_set_style_shadow_width(done, 0, 0);
+	lv_obj_add_event_cb(done, tap_done_cb, LV_EVENT_CLICKED, NULL);
+	lv_obj_t *done_label = lv_label_create(done);
+	lv_label_set_text(done_label, tr("ok"));
+	lv_obj_set_style_text_color(done_label, theme_on_accent(), 0);
+	lv_obj_set_style_text_font(done_label, &font_ui_16, 0);
+	lv_obj_center(done_label);
 }
 
 // ---------------------------------------------------------------------------
@@ -1156,10 +1483,8 @@ static void build_customise(void) {
 	lv_obj_set_style_shadow_width(close, 0, 0);
 	lv_obj_set_style_pad_all(close, 0, 0);
 	lv_obj_add_event_cb(close, (lv_event_cb_t)customise_close_cb, LV_EVENT_CLICKED, NULL);
-	lv_obj_t *close_icon = lv_image_create(close);
-	lv_image_set_src(close_icon, &icon_close);
+	lv_obj_t *close_icon = icon_image(close, &icon_close, settingsrow_corner_button_size(page_cfg) * 3 / 4);
 	lv_obj_add_style(close_icon, &theme_style_icon, 0);
-	settingsrow_scale_corner_icon(close_icon, page_cfg);
 	lv_obj_center(close_icon);
 
 	// The name is a row of its own: the one thing here that is typed rather
@@ -1246,10 +1571,8 @@ static void build_customise(void) {
 	lv_obj_set_style_shadow_width(cancel, 0, 0);
 	lv_obj_set_style_pad_all(cancel, 0, 0);
 	lv_obj_add_event_cb(cancel, name_cancel_cb, LV_EVENT_CLICKED, NULL);
-	lv_obj_t *cancel_icon = lv_image_create(cancel);
-	lv_image_set_src(cancel_icon, &icon_close);
+	lv_obj_t *cancel_icon = icon_image(cancel, &icon_close, settingsrow_corner_button_size(page_cfg) * 3 / 4);
 	lv_obj_add_style(cancel_icon, &theme_style_icon, 0);
-	settingsrow_scale_corner_icon(cancel_icon, page_cfg);
 	lv_obj_center(cancel_icon);
 
 	name_field = lv_textarea_create(name_layer);
@@ -1284,7 +1607,13 @@ static void consume_events(void) {
 	}
 
 	int events = petwatch_take_events();
-	if (events & PET_EVENT_STAGE_UP) {
+	if (events & PET_EVENT_DIZZY) {
+		toast_plain(tr("pet_dizzy_toast"));
+	} else if (events & PET_EVENT_FORAGE) {
+		toast_success(tr("pet_forage_toast"));
+	} else if (events & PET_EVENT_DROP) {
+		toast_success(tr("pet_drop_toast"));
+	} else if (events & PET_EVENT_STAGE_UP) {
 		toast_success(tr("pet_stage_toast"));
 	} else if (events & PET_EVENT_GOAL_MET) {
 		toast_success(tr("pet_goal_toast"));
@@ -1312,6 +1641,10 @@ static bool pet_back_guard(void) {
 	}
 	if (customise_visible) {
 		customise_close();
+		return true;
+	}
+	if (tap_visible) {
+		tap_close();
 		return true;
 	}
 	if (wardrobe_visible) {
@@ -1355,6 +1688,7 @@ static void screen_unloaded_cb(lv_event_t *e) {
 	page_visible = false;
 	name_dialog_close();
 	customise_close();
+	tap_close();
 	wardrobe_close();
 	if (page_timer) {
 		lv_timer_delete(page_timer);
@@ -1379,12 +1713,14 @@ static void build(void) {
 
 	lv_obj_add_style(petpage_screen, &theme_style_screen, 0);
 	lv_obj_t *title = settingsrow_title(petpage_screen, page_cfg, "pet");
-	settingsrow_title_corner_slots(title, page_cfg, 2);
+	settingsrow_title_corner_slots(title, page_cfg, 3);
 
-	// Two corner controls: the wardrobe behind the star (slot 0, the outermost)
-	// and the name and the animal behind the pencil.
+	// Three corner controls: the wardrobe behind the star (slot 0, the
+	// outermost), the name and the animal behind the pencil, and the day's
+	// tap-along behind the note.
 	corner_button(page_cfg, 0, &icon_star, wardrobe_open_cb);
 	corner_button(page_cfg, 1, &icon_pencil, customise_open_cb);
+	corner_button(page_cfg, 2, &icon_music_note, tap_open_cb);
 
 	const int pad = page_cfg->padding;
 	const int card_w = page_cfg->screen_width - 2 * pad;
@@ -1450,6 +1786,16 @@ static void build(void) {
 	lv_obj_set_pos(stage_label, 12, 30);
 	lv_label_set_text(stage_label, "");
 
+	// The month's listening, under the stage: one word, or nothing at all
+	// while there are not yet three days to call a character.
+	temperament_label = lv_label_create(habitat);
+	lv_obj_add_style(temperament_label, &theme_style_text_dim, 0);
+	lv_obj_set_style_text_font(temperament_label, &font_ui_14, 0);
+	lv_obj_set_pos(temperament_label, 12, 48);
+	lv_obj_set_width(temperament_label, card_w - PET_HUD_W - 24);
+	lv_label_set_long_mode(temperament_label, LV_LABEL_LONG_DOT);
+	lv_label_set_text(temperament_label, "");
+
 	const int hud_x = card_w - 10 - PET_HUD_W;
 	health_icon = icon_image(habitat, &icon_heart_filled, 12);
 	place(health_icon, hud_x, 11, 12, 12);
@@ -1495,6 +1841,15 @@ static void build(void) {
 	lv_obj_set_width(notes_value, 60);
 	lv_obj_set_pos(notes_value, hud_x + 16, 46);
 	lv_label_set_text(notes_value, "0");
+
+	// The Calm soundscape: four motes drifting up through the card, only for a
+	// pet whose month was jazz and classical.
+	for (int i = 0; i < 4; i++) {
+		motes[i] = disc(habitat, lv_color_white());
+		lv_obj_set_style_bg_opa(motes[i], LV_OPA_40, 0);
+		place(motes[i], 18 + i * (card_w - 60) / 4, habitat_h - 60 - (i % 2) * 24, 5 + (i % 2) * 2, 5 + (i % 2) * 2);
+		show(motes[i], false);
+	}
 
 	// ---- the animal ------------------------------------------------------
 	build_creature();

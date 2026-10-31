@@ -236,6 +236,13 @@ static void tick_cb(lv_timer_t *timer) {
 	listening = result.listened_secs > 0;
 	focus_active = listener.session_secs >= PET_FOCUS_SECS;
 
+	// Too much skipping and the pet stops crediting. It is reported once, on
+	// the skip that tips it over, and PET_EVENT_DIZZY carries it to the page.
+	if (result.skipped && pet_skip(&state, now)) {
+		pending_events |= PET_EVENT_DIZZY;
+		save_now();
+	}
+
 	if (result.track_changed) {
 		copy_text(current_album, sizeof(current_album), album);
 		copy_text(current_genre, sizeof(current_genre), genre);
@@ -262,7 +269,14 @@ static void tick_cb(lv_timer_t *timer) {
 	}
 
 	int events = pet_advance(&state, now, day, result.listened_secs, track_bonus);
-	pending_events |= events & (PET_EVENT_GOAL_MET | PET_EVENT_STAGE_UP);
+	pending_events |= events & (PET_EVENT_GOAL_MET | PET_EVENT_STAGE_UP | PET_EVENT_DROP);
+
+	// A long uninterrupted session turns something up for a Curious pet, once
+	// a day.
+	if (listening && pet_forage(&state, listener.session_secs) > 0) {
+		pending_events |= PET_EVENT_FORAGE;
+		save_now();
+	}
 
 	if (listening) {
 		unsaved_listen_secs += result.listened_secs;
@@ -349,6 +363,20 @@ bool petwatch_pet_now(void) {
 	}
 	save_now();
 	return true;
+}
+
+pet_temperament_t petwatch_temperament(void) { return pet_temperament(&state); }
+
+bool petwatch_has_soundscape(void) { return pet_has_soundscape(&state); }
+
+bool petwatch_rhythm_ready(void) { return pet_rhythm_ready(&state); }
+
+int petwatch_rhythm_finish(int score) {
+	int notes = pet_rhythm_finish(&state, score);
+	if (notes > 0) {
+		save_now();
+	}
+	return notes;
 }
 
 bool petwatch_set_species(pet_species_t species) {

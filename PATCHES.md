@@ -1570,6 +1570,131 @@ two freezes, and leaves the page. `tests/test_pet.c` covers the rest without a
 screen: the species round trip including the corrupt value, the name's trimming,
 its byte cap and its default, and the stages starting at the hatchling.
 
+## The pet, third pass: a character, a game, and a limit
+
+Three things the first two passes did not have. The pet had moods that changed
+with the track, but no *character*; notes came only from minutes listened; and a
+listener flicking through a library earned exactly what a listener sitting
+through an album earned.
+
+### Where a character comes from
+
+The obvious implementation -- "the genre that is playing decides the
+temperament" -- was not used, because it makes the pet flicker: a shuffled
+library would change its character four times a minute and the page would be
+noise. A temperament is a month's habit, so that is what is stored: one entry a
+day, the family that day was mostly spent in, in a ring thirty days long.
+
+```
+[pet] genre_history = 020000000000000000000000000031
+```
+
+Four families, sorted from the tag the way the page's vibe already sorts it
+(sub-strings, case-insensitive), with one order that matters: **calm first**,
+so "lo-fi hip hop" is calm rather than upbeat; **then the curious ones**, so
+"indie pop" and "alternative rock" are exploring rather than chart music; then
+what is meant to be danced to. Anything unrecognised is `OTHER` and counts for
+nothing. With fewer than three days of recognisable listening there is no
+temperament at all: a pet does not have a personality on its first evening, and
+the page draws nothing under the stage until it does. The most days wins; a tie
+goes to the family heard most recently. A month with no listening in it empties
+the ring, so a temperament is recent listening or nothing.
+
+The ring is shifted rather than indexed by day, which is what makes an absence
+work: a device off for three days gets three `OTHER`s in a row, and one off for
+two months gets an empty ring.
+
+### What each character is worth
+
+- **Upbeat** (pop, dance, electronic, rock, hip hop). Energy fills at 8 seconds
+  a point instead of 12, and every two minutes of *credited* music a note or two
+  turns up on the floor, six times in ten. The roll is a hash of the day and the
+  bucket, not a random number generator: the same listening always pays the
+  same, so the suite can predict it and a player cannot farm a bad seed. The day
+  boundary and the daily XP cap come first, so the drops stop where the XP does.
+- **Calm** (jazz, classical, ambient, lo-fi, acoustic, soul). A drifting
+  soundscape: four motes rising through the card over eleven to nineteen
+  seconds. It is a picture, and the documentation says so -- there is no
+  synthesiser in this player, and a "soundscape" that were actually audible
+  would be a second audio path on a MIPS handheld. What the month of jazz buys
+  is the slow, quiet room the pet sits in.
+- **Curious** (indie, alternative, punk, metal, experimental). After
+  forty-five minutes of uninterrupted listening, once a day, it finds something:
+  notes worth twenty to sixty, and one day in three a streak freeze instead --
+  the wardrobe's rarest item, as a find rather than a purchase. The session
+  length is the one `petlisten.c` already measures for the Deep Focus
+  achievement, so a pause, a mute or a skip ends the forage as well.
+
+### The tap-along
+
+Sixteen beats at the metronome's 100 BPM, tapped on the glass, once a day. A
+note falls down a lane towards a line; a tap within 120 ms of the beat is worth
+two points, within 260 ms one, and anything else is lost. The score is the share
+of the thirty-two points the game could pay, and it buys two notes for turning
+up plus one per ten points, a fifth of the score in happiness, a tenth in
+energy, and a streak freeze for 90 or more. The whole sheet is the drum -- the
+label, the lane and the note are all not clickable, so a press anywhere falls
+through to one full-screen button -- because a 240 x 320 panel is not a place to
+ask for precision on a 16 px target.
+
+The timer runs at 40 ms only while the sheet is open, and it is deleted when the
+sheet closes. The note's position is arithmetic on `lv_tick_elaps()`, not an
+LVGL animation, because the game needs to *know* where the note is when a finger
+arrives; a beat nobody tapped is a miss on the same timer.
+
+**Once a day** is `[pet] rhythm_day` compared to the local day, the same rule
+the daily goal uses: it resets at local midnight and not by a timer.
+
+### Skipping, and being dizzy
+
+A skip is a track that was *heard* and abandoned before ninety percent of it,
+and long enough to have been a track at all -- `petlisten.c` now reports it,
+using the same arithmetic that already decides whether an album run continues.
+Skipping is not a crime: five abandoned tracks in ten minutes is a listener
+looking for something. The sixth is a listener flicking, and the pet is dizzy
+for fifteen minutes.
+
+While dizzy, `pet_advance()` credits nothing -- no XP, no notes, no stage, and
+the day's XP cap does not move -- but the meters still fill, because the music
+is real; it is the progression that waits. The face shows crosses for eyes and
+the card says "Too much skipping".
+
+The window is a ring of the last eight skips. It lives in memory and is not
+saved: a reboot is not a way to grind skips, and it is also not a way to dodge
+what you did a minute before switching off. The deadline itself
+(`[pet] dizzy_until`) is saved, so a player who reboots while dizzy comes back
+dizzy.
+
+### What the state grew, and what an old pet loses
+
+`genre_history`, `dizzy_until`, `rhythm_day`, `rhythm_best` and `forage_day`,
+all in `[pet]` and all defaulting to zero. A pet from the previous build has no
+history, which means no temperament for its first three days -- and since a
+temperament is only ever a bonus, nothing is taken away. The day's family tally
+is deliberately *not* persisted: a reboot mid-day costs that day's count, which
+three-day rule cannot notice.
+
+### Tests
+
+`tests/test_pet.c` covers the arithmetic without a screen: the family of a dozen
+real tag strings including the two that must sort towards "curious", the ring
+filling over days, the three-day minimum, the tie that goes to the most recent
+day, a month away emptying it, an Upbeat breakfast of 8-second energy points and
+deterministic drops that pay the same twice, the skip that becomes dizzy on the
+sixth and not before, XP and notes stopping while dizzy while the meters keep
+filling, the fifteen minutes expiring, a skip ten minutes old no longer
+counting, foraging (and not foraging for a non-Curious pet), the tap-along
+paying once a day and never lowering the best score, and the round trip through
+the settings file including a corrupt history digit.
+
+`tests/test_petlisten.c` adds the skip rule itself: a track heard and abandoned
+is a skip, a track that ended is not, a track only ever seen muted is not, a
+sting is not, and the session length is reported for the forager.
+
+`tests/ui/test_tools_pages.c` opens the tap-along from the third corner control,
+checks it is on the panel, presses OK with no beats hit, and checks it paid the
+two notes for turning up and will not pay again today.
+
 ## The charger, with the player off
 
 The stock player comes up on a battery screen when the device was switched off

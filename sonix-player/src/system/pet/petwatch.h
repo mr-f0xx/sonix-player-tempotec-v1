@@ -69,6 +69,18 @@ bool petwatch_focus(void);
 bool petwatch_set_species(pet_species_t species);
 bool petwatch_set_name(const char *name);
 
+// The month's listening, as the page and the game read it: the temperament the
+// last thirty days earned (NONE before there are three days of it), whether
+// that temperament unlocked the drifting soundscape, and whether today's
+// tap-along is still unplayed.
+pet_temperament_t petwatch_temperament(void);
+bool petwatch_has_soundscape(void);
+bool petwatch_rhythm_ready(void);
+
+// Pays for a finished tap-along: the score is 0 to 100, and the return is the
+// notes earned (0 when today has already been paid for). Saves.
+int petwatch_rhythm_finish(int score);
+
 // The wardrobe and the wallet, both of which change the live state: buy an item
 // (notes are checked in pet_buy()), or put an owned outfit/room on. Both write
 // the settings only when they did something.
