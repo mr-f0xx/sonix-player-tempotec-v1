@@ -1369,6 +1369,16 @@ are chosen the same way and are independent of the outfit. A freeze is a stock
 balance beside the star, and the wardrobe shows it again with the price of
 everything not yet bought.
 
+What is bought is drawn, not just recorded. The four outfits are small pieces
+of the same shapes the creature is made of -- a hat with a brim, headphones
+with cups over the ears, a scarf round the neck, a crown with three points --
+placed from the head's own coordinates so they fit every stage, and a hat hides
+the ears and the hatchling's antenna rather than letting them poke through it.
+The rooms are a wash of colour over the habitat card: meadow green, sunset
+orange, night blue. All of it is fixed-colour rather than themed, for the same
+reason the creature is: a hat that changed colour with the theme would stop
+being the hat that was bought.
+
 Achievements are awarded by the watcher, toasted by the page, and worth notes
 of their own: **Night Owl** (a minute of listening between midnight and five),
 **Deep Diver** (three completed tracks of one album without a skip), **Polymath**

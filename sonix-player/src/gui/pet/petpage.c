@@ -48,6 +48,16 @@ lv_obj_t *petpage_screen;
 #define PET_CHEEK lv_color_hex(0xF2A0A1)
 #define PET_TEAR lv_color_hex(0x7FC4E8)
 #define PET_SPOT lv_color_hex(0x5FAF84)
+// The wardrobe's own colours: fixed like the creature's, so a hat is the same
+// hat on every theme.
+#define PET_HAT lv_color_hex(0xE2574C)
+#define PET_PHONE lv_color_hex(0x2F3B52)
+#define PET_SCARF lv_color_hex(0xC2453F)
+#define PET_CROWN lv_color_hex(0xE8C15A)
+// The rooms, as a wash over the habitat card rather than a picture.
+#define PET_ROOM_MEADOW lv_color_hex(0x9FD9B4)
+#define PET_ROOM_SUNSET lv_color_hex(0xF0A868)
+#define PET_ROOM_NIGHT lv_color_hex(0x46598C)
 
 typedef struct {
 	lv_obj_t *root;
@@ -80,6 +90,18 @@ typedef struct {
 	lv_obj_t *tear;
 	lv_obj_t *star;
 	lv_obj_t *zzz;
+
+	// The wardrobe, drawn rather than bought as art: a party hat, headphones,
+	// a scarf and a crown, every one a handful of the same discs and bars.
+	lv_obj_t *hat_cone;
+	lv_obj_t *hat_brim;
+	lv_obj_t *phone_band;
+	lv_obj_t *phone_left;
+	lv_obj_t *phone_right;
+	lv_obj_t *scarf;
+	lv_obj_t *scarf_tail;
+	lv_obj_t *crown_band;
+	lv_obj_t *crown_spike[3];
 } pet_parts_t;
 
 static pet_parts_t parts;
@@ -108,6 +130,7 @@ static lv_obj_t *note_b;
 // of the wardrobe's star. The pet's own card has no room for a fifth line on a
 // 240 px panel, and the number belongs beside the way into the shop anyway.
 static lv_obj_t *balance_label;
+static lv_obj_t *room_layer;
 
 // The wardrobe. Built the first time it is opened -- a player who never looks
 // at it pays nothing -- and a full-page sheet over the pet rather than a screen
@@ -117,6 +140,8 @@ static lv_obj_t *wardrobe_column;
 static lv_obj_t *wardrobe_balance;
 static lv_obj_t *wardrobe_value[PET_ITEM_COUNT];
 static bool wardrobe_visible;
+
+static void paint_room(void);
 
 // What the bobbing animation was last started for, so a change of track's vibe
 // restarts it at the new speed instead of every page tick restarting it.
@@ -253,6 +278,18 @@ static void build_pet(lv_obj_t *parent) {
 	// The hat the last stage wears, and the snore.
 	parts.star = note_image(parts.root, 14);
 	lv_obj_add_style(parts.star, &theme_style_icon, 0);
+
+	parts.hat_cone = bar_piece(parts.root, PET_HAT, 4);
+	parts.hat_brim = bar_piece(parts.root, PET_HAT, 2);
+	parts.phone_band = bar_piece(parts.root, PET_PHONE, 3);
+	parts.phone_left = bar_piece(parts.root, PET_PHONE, 3);
+	parts.phone_right = bar_piece(parts.root, PET_PHONE, 3);
+	parts.scarf = bar_piece(parts.root, PET_SCARF, 3);
+	parts.scarf_tail = bar_piece(parts.root, PET_SCARF, 2);
+	parts.crown_band = bar_piece(parts.root, PET_CROWN, 2);
+	for (int i = 0; i < 3; i++) {
+		parts.crown_spike[i] = bar_piece(parts.root, PET_CROWN, 1);
+	}
 
 	parts.zzz = lv_label_create(parts.root);
 	lv_obj_add_style(parts.zzz, &theme_style_text_dim, 0);
@@ -406,6 +443,48 @@ static void paint_pet(void) {
 
 	place(parts.zzz, 62, 7, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
 	show(parts.zzz, sleeping);
+
+	// The wardrobe. Headwear hides the ears, the hatchling's antenna and the
+	// adult's note, because a hat that a second hat pokes through is not a
+	// hat; the scarf goes round the neck. An egg wears none of it.
+	int wearing = pet_wearing(st);
+	bool hat = !egg && wearing == (int)PET_ITEM_PARTY_HAT;
+	bool phones = !egg && wearing == (int)PET_ITEM_HEADPHONES;
+	bool scarf = !egg && wearing == (int)PET_ITEM_SCARF;
+	bool crown = !egg && wearing == (int)PET_ITEM_CROWN;
+	bool headwear = hat || phones || crown;
+
+	show(parts.ear_l, stage >= PET_STAGE_CHILD && !headwear);
+	show(parts.ear_r, stage >= PET_STAGE_CHILD && !headwear);
+	show(parts.antenna, stage == PET_STAGE_BABY && !headwear);
+	show(parts.antenna_tip, stage == PET_STAGE_BABY && !headwear);
+	show(parts.star, stage == PET_STAGE_ADULT && !headwear);
+
+	place(parts.hat_brim, cx - 13, by - 4, 26, 4);
+	place(parts.hat_cone, cx - 9, by - 17, 18, 14);
+	show(parts.hat_brim, hat);
+	show(parts.hat_cone, hat);
+
+	place(parts.phone_band, cx - 17, by - 7, 34, 5);
+	place(parts.phone_left, cx - 21, by - 2, 6, 16);
+	place(parts.phone_right, cx + 15, by - 2, 6, 16);
+	show(parts.phone_band, phones);
+	show(parts.phone_left, phones);
+	show(parts.phone_right, phones);
+
+	place(parts.scarf, cx - 15, by + body_h - 3, 30, 6);
+	place(parts.scarf_tail, cx + 7, by + body_h + 2, 6, 10);
+	show(parts.scarf, scarf);
+	show(parts.scarf_tail, scarf);
+
+	place(parts.crown_band, cx - 11, by - 7, 22, 4);
+	place(parts.crown_spike[0], cx - 10, by - 12, 5, 6);
+	place(parts.crown_spike[1], cx - 2, by - 13, 5, 7);
+	place(parts.crown_spike[2], cx + 6, by - 12, 5, 6);
+	show(parts.crown_band, crown);
+	for (int i = 0; i < 3; i++) {
+		show(parts.crown_spike[i], crown);
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -493,9 +572,24 @@ static void paint(void) {
 	if (!page_built) {
 		return;
 	}
+	paint_room();
 	paint_pet();
 	paint_stats();
 	paint_theme_colors();
+}
+
+static void paint_room(void) {
+	if (!room_layer) {
+		return;
+	}
+	int room = pet_room(petwatch_state());
+	lv_color_t wash = PET_ROOM_MEADOW;
+	if (room == 1) {
+		wash = PET_ROOM_SUNSET;
+	} else if (room == 2) {
+		wash = PET_ROOM_NIGHT;
+	}
+	lv_obj_set_style_bg_color(room_layer, wash, 0);
 }
 
 // ---------------------------------------------------------------------------
@@ -562,6 +656,8 @@ static void wardrobe_item_cb(lv_event_t *e) {
 	}
 
 	wardrobe_refresh();
+	// A hat bought behind a sheet is still a hat on the pet underneath it.
+	paint_room();
 }
 
 static void build_wardrobe(void) {
@@ -853,6 +949,14 @@ static void build(void) {
 	lv_obj_set_style_shadow_width(habitat, 0, 0);
 	lv_obj_set_style_pad_all(habitat, 0, 0);
 	lv_obj_set_scrollable(habitat, false);
+
+	// The room, as a wash of colour under everything else in the card: the
+	// meadow it is born in, or the sunset or night room bought for it.
+	room_layer = plain(habitat);
+	lv_obj_set_size(room_layer, card_w, PET_HABITAT_H);
+	lv_obj_set_pos(room_layer, 0, 0);
+	lv_obj_set_style_radius(room_layer, bp_pick(12, 18), 0);
+	lv_obj_set_style_bg_opa(room_layer, LV_OPA_20, 0);
 
 	name_label = lv_label_create(habitat);
 	lv_obj_add_style(name_label, &theme_style_text, 0);
