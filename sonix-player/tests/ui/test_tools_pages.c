@@ -504,6 +504,25 @@ static void check_more_page(gui_config_t *cfg, const char *tag) {
 	assert(has_entry(shown, tr("snake")));
 	assert(has_entry(shown, tr("dino")));
 
+	// Dark/Light use full-colour section art, not enlarged toolbar glyphs.
+	// This also runs after theme changes, catching stale icon sources.
+	if (theme_get_kind() == THEME_KIND_DARK || theme_get_kind() == THEME_KIND_LIGHT) {
+		const char *labels[] = {"2048", "snake", "dino"};
+		const lv_image_dsc_t *art[] = {
+			&icon_menu_game_2048, &icon_menu_game_snake, &icon_menu_game_dino,
+		};
+		assert(tiles);
+		for (size_t i = 0; i < sizeof(art) / sizeof(art[0]); i++) {
+			lv_obj_t *entry = entry_with_label(shown, tr(labels[i]));
+			assert(entry);
+			lv_obj_t *image = find_class(entry, &lv_image_class);
+			assert(image && lv_image_get_src(image) == art[i]);
+			assert(art[i]->header.w == icon_menu_calculator.header.w);
+			assert(art[i]->header.h == icon_menu_calculator.header.h);
+		}
+	}
+
+
 	// A tile of a page that does not scroll has to be on the glass, every one
 	// of them: an entry laid out past the foot of a page that cannot be
 	// scrolled is an entry nobody can reach. (The list does scroll, so its
