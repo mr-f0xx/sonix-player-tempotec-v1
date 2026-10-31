@@ -232,6 +232,16 @@ ICONS = [
     ("files-text.svg", "files_text", 32),
     ("files-update.svg", "files_update", 32),
     ("files-gamepad.svg", "files_game", 32),
+    # The three games in the More menu, each with a glyph of its own rather than
+    # the shared gamepad: the dino is the animal the game draws, block for block,
+    # the snake is its body, and 2048 is the board with one merge in it. Same
+    # grid, same line, same single colour, so the theme tints them as it does the
+    # rest. A compact row leaves them 18 px, which is why it is the silhouette
+    # that says which game it is; the tongue and the eye are only there when
+    # there is room for them.
+    ("game-dino.svg", "game_dino", 32),
+    ("game-snake.svg", "game_snake", 32),
+    ("game-2048.svg", "game_2048", 32),
     ("files-book.svg", "files_book", 32),
     # The bin in a file's action menu. Not icon_delete, which despite the name
     # is the keyboard's backspace arrow.

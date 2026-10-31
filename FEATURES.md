@@ -244,13 +244,36 @@ a self-signed certificate), and HLS.
 
 ## Games
 
-> **Flappy Bird** is in the **More** menu. It is played on the glass, it leaves
-> the music alone, and it keeps its best score in the config file, so a record
+> All four are in the **More** menu. They are played on the glass, they leave the
+> music alone, and each one keeps its best score in the config file, so a record
 > survives a reboot.
 
 - **Flappy Bird** - the original art and physics: a tap is a flap, day and night
   trade places every ten points, and the medals are the real ones. The pictures
   live in the resource tree, so they travel inside the image.
+- **2048** - the rules everyone knows, on a board sized to the screen instead of
+  to a phone. A swipe sends every tile to that wall, two of a kind make the next
+  number, and a new tile turns up after each move. Tiles are drawn with steps of
+  the accent's own colour, so the board goes with the theme you picked. The board
+  and the score are stored when you leave the page: a puzzle left half-finished is
+  still there when you come back. One move can be taken back, because a swipe on
+  glass is easily read wrongly, and the game lets you keep going past 2048.
+- **Snake** - nineteen cells across, one apple at a time, and a snake that crawls
+  along the path it has taken instead of jumping from cell to cell. A tap on either
+  half of the board turns a quarter; a swipe says which way you mean. The card it
+  opens with offers the walls too: with them the wall ends the run, without them
+  the far side of the board is the near side.
+- **Dino** - one control. A tap jumps, a finger held down ducks, and a press in the
+  air brings the runner down sooner. Cacti come in ones, twos and threes, the birds
+  at four heights, and every hundred points it turns to night, with a moon in it.
+  The gap between obstacles is always the same distance, so what speeds up is the
+  time you get to see them coming.
+- 2048, Snake and Dino are drawn with the interface's own pieces: they add no art
+  to the image and no space on the card. Each has a glyph of its own in the icon
+  set, so the More menu shows the animal the dino game draws, the body of the
+  snake, and a board with one merge in it - cut on the same 24 grid, with the same
+  line and the same single colour as everything else there, which is what lets the
+  theme tint them the way it tints the gamepad they replaced.
 
 ## Game Boy
 

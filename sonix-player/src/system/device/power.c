@@ -1470,7 +1470,10 @@ static void suspend_if_idle(uint32_t now, bool playing) {
 // A page registers its timer here once and then forgets about it; power.c
 // never looks at what the timer does.
 // ---------------------------------------------------------------------------
-#define STANDBY_TIMERS_MAX 16
+// About fourteen pages register a timer, and the three games add three more when
+// they are first opened. The registry never gives a slot back, so it is sized for
+// every timer that can exist in one run, not for the pages on screen at a time.
+#define STANDBY_TIMERS_MAX 24
 static lv_timer_t *g_standby_timers[STANDBY_TIMERS_MAX];
 // 0 = paused outright while the panel is dark. Anything else = kept running,
 // at that period instead of its own. A timer that only paints can be stopped;
