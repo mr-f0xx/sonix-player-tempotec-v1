@@ -1695,6 +1695,54 @@ sting is not, and the session length is reported for the forager.
 checks it is on the panel, presses OK with no beats hit, and checks it paid the
 two notes for turning up and will not pay again today.
 
+## The pet, drawn again
+
+The first two versions of the creature were pastel blobs: filled circles with no
+line round them, which on a 240 x 320 panel read as one animal with four sets of
+ears. On the real screen, in the light of the room they were photographed in,
+they were worse than the mock-ups suggested -- a pale shape on a dark card, with
+nothing to separate the ears from the head.
+
+The drawing is now the interface's own idiom, the one its icons are cut in: a
+flat fill inside a heavy ink line.
+
+- **Every part with an edge wears a 2 px outline** in the same near-black
+  (`style_outline_width` on the object, so it follows the shape's radius). The
+  eyes and the catchlights do not: a 2 px line on a 4 px glint is a smudge.
+- **Back to front.** Tail, fins, ears and horns are created before the body, so
+  the body's line runs over them and an ear does not wear a stripe where it
+  meets the head.
+- **Four silhouettes, not four colours.** The cat has squares stood on a corner
+  for ears with a pink inner ear; the dog has long floppy ears hanging past the
+  jaw and the widest muzzle; the dragon has cream horns and a spade on its tail;
+  the fish is a pill with a diamond tail fin, a fin on top and one under its
+  belly, and no shadow, because a fish swims.
+- **Bigger.** The root is 140 x 108 instead of 104 x 96 and the hatchling's body
+  78 x 64 instead of 46 x 40: the animal fills the card rather than sitting in
+  the middle of it. The adult is 100 x 82.
+- **The light belly** is no longer outlined -- it is a patch on the body, not an
+  object in front of it -- and the fish has none at all, since a gold fish with
+  a pale belly reads as a puppy.
+
+The aquarium was the other half of the complaint. A coloured wash with a line of
+sand is a background; a tank has furniture:
+
+- a 7 px band of light where the water meets the air, at the top of the card;
+- sand in two tones, a wider, darker strip under a lighter one, with three
+  pebbles and a rock standing in it;
+- three weeds of different heights, one of them a lighter green, each with two
+  leaves, planted clear of the status line's column so the words stay readable;
+- six bubbles instead of three, of three sizes, rising on staggered delays.
+
+The water itself is a 25 % tint rather than the 60 % it was at first: at 60 %
+the card became a pale blue sheet and "Hatchling" disappeared into it. The
+furniture does the work of saying *water*; the tint only has to say *not air*.
+
+The header's three corner controls are also smaller: the glyph is drawn at five
+ninths of the 36 px slot (20 px) instead of three quarters (27 px). A pencil
+that is three quarters of its button looks like it is falling out of the header,
+which is what the photograph showed.
+
 ## The charger, with the player off
 
 The stock player comes up on a battery screen when the device was switched off

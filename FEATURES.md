@@ -280,7 +280,8 @@ a self-signed certificate), and HLS.
   Its state lives in the settings file and survives a reboot; the only cost is
   one callback a second in the interface loop that is already running, and
   nothing at all when the page is not open. The creature is drawn from the
-  interface's own shapes, so it adds no art to the image.
+  interface's own shapes -- a flat fill inside the same heavy ink line the icons
+  use -- and each animal is its own silhouette, so it adds no art to the image.
 
 ## Games
 

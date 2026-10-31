@@ -31,9 +31,9 @@ lv_obj_t *petpage_screen;
 // same page with more air rather than a different one.
 // ---------------------------------------------------------------------------
 
-#define PET_CREATURE_W 104
-#define PET_CREATURE_H 96
-#define PET_BASE_Y 88 // where the animal's feet sit, from the root's top
+#define PET_CREATURE_W 140
+#define PET_CREATURE_H 108
+#define PET_BASE_Y 100 // where the animal's feet sit, from the root's top
 
 // The two meters' column, measured from the card's right edge.
 #define PET_HUD_W 88
@@ -58,9 +58,13 @@ lv_obj_t *petpage_screen;
 #define PET_WATER_MEADOW lv_color_hex(0x3FA9C4)
 #define PET_WATER_SUNSET lv_color_hex(0x4FA6B0)
 #define PET_WATER_NIGHT lv_color_hex(0x2B4C7E)
-#define PET_SAND lv_color_hex(0xE8D3A2)
-#define PET_WEED lv_color_hex(0x4E9E6A)
-#define PET_BUBBLE lv_color_hex(0xD8F1F8)
+#define PET_SAND lv_color_hex(0xEAD7A6)
+#define PET_SAND_DEEP lv_color_hex(0xD8C083)
+#define PET_PEBBLE lv_color_hex(0x9AA7B4)
+#define PET_WEED lv_color_hex(0x3E8F5F)
+#define PET_WEED_LIGHT lv_color_hex(0x66B87F)
+#define PET_BUBBLE lv_color_hex(0xE4F7FC)
+#define PET_BUBBLES 6
 
 typedef struct {
 	lv_obj_t *root;
@@ -149,10 +153,11 @@ static lv_obj_t *streak_label;
 // The aquarium: the sand, two weeds and three slow bubbles, shown only for a
 // fish.
 static lv_obj_t *room_layer;
+static lv_obj_t *surface; // the light band where the water meets the air
 static lv_obj_t *sand;
-static lv_obj_t *weed_l;
-static lv_obj_t *weed_r;
-static lv_obj_t *bubbles[3];
+static lv_obj_t *pebbles[3];
+static lv_obj_t *weeds[3];
+static lv_obj_t *bubbles[PET_BUBBLES];
 
 // The drifting notes, while something is playing.
 static lv_obj_t *note_a;
@@ -294,7 +299,7 @@ static lv_obj_t *corner_button(gui_config_t *cfg, int slot, const lv_image_dsc_t
 	// The glyph is drawn at the slot's size rather than scaled from its source:
 	// the shell's icons are cut at anything from 14 to 128 pixels, and
 	// settingsrow_scale_corner_icon() assumes the 34 px ones.
-	lv_obj_t *icon = icon_image(button, glyph, settingsrow_corner_button_size(cfg) * 3 / 4);
+	lv_obj_t *icon = icon_image(button, glyph, settingsrow_corner_button_size(cfg) * 5 / 9);
 	lv_obj_add_style(icon, &theme_style_icon, 0);
 	lv_obj_center(icon);
 	return button;
@@ -309,7 +314,32 @@ static void card_close_cb(lv_event_t *e) {
 
 // ---------------------------------------------------------------------------
 // Building the animal
+//
+// The four animals are drawn the way the interface's own icons are: a flat
+// fill inside a heavy ink line, cut out of a handful of shapes. Everything is
+// created back to front -- tail and ears first, so the body's line runs over
+// them -- and every part that has an edge wears the same 2 px outline, which is
+// what makes a cat read as a cat at 46 pixels wide.
 // ---------------------------------------------------------------------------
+
+static void inked(lv_obj_t *o, int width) {
+	if (!o) {
+		return;
+	}
+	lv_obj_set_style_outline_width(o, width, 0);
+	lv_obj_set_style_outline_color(o, PET_INK, 0);
+	lv_obj_set_style_outline_opa(o, LV_OPA_COVER, 0);
+	lv_obj_set_style_outline_pad(o, 0, 0);
+}
+
+// A rounded shape whose corner radius is a number: the body, the muzzle, the
+// belly. `disc` is the round one and `bar_piece` the squared one.
+static lv_obj_t *round_piece(lv_obj_t *parent, lv_color_t color) {
+	lv_obj_t *o = plain(parent);
+	lv_obj_set_style_bg_color(o, color, 0);
+	lv_obj_set_style_bg_opa(o, LV_OPA_COVER, 0);
+	return o;
+}
 
 static void build_creature(void) {
 	memset(&parts, 0, sizeof(parts));
@@ -321,61 +351,80 @@ static void build_creature(void) {
 
 	parts.shadow = disc(parts.root, lv_color_black());
 
-	parts.tail = bar_piece(parts.root, PET_INK, 3);
-	parts.tail_tip = disc(parts.root, PET_INK);
-	parts.fin_top = bar_piece(parts.root, PET_INK, 4);
-	parts.fin_side = bar_piece(parts.root, PET_INK, 3);
-	parts.fin_tail = bar_piece(parts.root, PET_INK, 5);
+	// ---- behind the body ----------------------------------------------
+	parts.tail = round_piece(parts.root, PET_INK);
+	parts.tail_tip = round_piece(parts.root, PET_INK);
+	parts.fin_top = round_piece(parts.root, PET_INK);
+	parts.fin_side = round_piece(parts.root, PET_INK);
+	parts.fin_tail = round_piece(parts.root, PET_INK);
+	parts.ear_l = round_piece(parts.root, PET_INK);
+	parts.ear_r = round_piece(parts.root, PET_INK);
+	parts.ear_in_l = round_piece(parts.root, PET_CHEEK);
+	parts.ear_in_r = round_piece(parts.root, PET_CHEEK);
+	parts.horn_l = round_piece(parts.root, PET_INK);
+	parts.horn_r = round_piece(parts.root, PET_INK);
 
-	parts.body = disc(parts.root, PET_INK);
-	parts.belly = disc(parts.root, PET_INK);
+	// ---- the body ------------------------------------------------------
+	parts.body = round_piece(parts.root, PET_INK);
+	parts.belly = round_piece(parts.root, PET_INK);
+	parts.foot_l = round_piece(parts.root, PET_INK);
+	parts.foot_r = round_piece(parts.root, PET_INK);
+	parts.arm_l = round_piece(parts.root, PET_INK);
+	parts.arm_r = round_piece(parts.root, PET_INK);
 
-	parts.ear_l = bar_piece(parts.root, PET_INK, 4);
-	parts.ear_r = bar_piece(parts.root, PET_INK, 4);
-	parts.ear_in_l = bar_piece(parts.root, PET_CHEEK, 3);
-	parts.ear_in_r = bar_piece(parts.root, PET_CHEEK, 3);
-	parts.horn_l = bar_piece(parts.root, PET_INK, 3);
-	parts.horn_r = bar_piece(parts.root, PET_INK, 3);
-
-	parts.foot_l = disc(parts.root, PET_INK);
-	parts.foot_r = disc(parts.root, PET_INK);
-	parts.arm_l = disc(parts.root, PET_INK);
-	parts.arm_r = disc(parts.root, PET_INK);
-
-	parts.muzzle = disc(parts.root, PET_INK);
-	parts.nose = disc(parts.root, PET_INK);
-
-	parts.eye_l = disc(parts.root, PET_INK);
-	parts.eye_r = disc(parts.root, PET_INK);
+	// ---- the face ------------------------------------------------------
+	parts.muzzle = round_piece(parts.root, PET_INK);
+	parts.nose = round_piece(parts.root, PET_INK);
+	parts.eye_l = round_piece(parts.root, PET_INK);
+	parts.eye_r = round_piece(parts.root, PET_INK);
 	parts.glint_l = disc(parts.root, lv_color_white());
 	parts.glint_r = disc(parts.root, lv_color_white());
-	parts.lid_l = bar_piece(parts.root, PET_INK, 1);
-	parts.lid_r = bar_piece(parts.root, PET_INK, 1);
-	parts.cheek_l = disc(parts.root, PET_CHEEK);
-	parts.cheek_r = disc(parts.root, PET_CHEEK);
+	parts.lid_l = round_piece(parts.root, PET_INK);
+	parts.lid_r = round_piece(parts.root, PET_INK);
+	parts.cheek_l = round_piece(parts.root, PET_CHEEK);
+	parts.cheek_r = round_piece(parts.root, PET_CHEEK);
 
 	parts.mouth = mouth_arc(parts.root);
-	parts.mouth_line = bar_piece(parts.root, PET_INK, 1);
-	parts.mouth_open = disc(parts.root, PET_INK);
-	parts.tongue = disc(parts.root, PET_CHEEK);
-	parts.tear = disc(parts.root, PET_TEAR);
+	parts.mouth_line = round_piece(parts.root, PET_INK);
+	parts.mouth_open = round_piece(parts.root, PET_INK);
+	parts.tongue = round_piece(parts.root, PET_CHEEK);
+	parts.tear = round_piece(parts.root, PET_TEAR);
 
 	parts.zzz = lv_label_create(parts.root);
 	lv_obj_add_style(parts.zzz, &theme_style_text_dim, 0);
 	lv_obj_set_style_text_font(parts.zzz, &font_ui_14, 0);
 	lv_label_set_text(parts.zzz, "z z");
 
-	parts.hat_cone = bar_piece(parts.root, PET_HAT, 5);
-	parts.hat_brim = bar_piece(parts.root, PET_HAT, 2);
-	parts.phone_band = bar_piece(parts.root, PET_PHONE, 3);
-	parts.phone_left = bar_piece(parts.root, PET_PHONE, 3);
-	parts.phone_right = bar_piece(parts.root, PET_PHONE, 3);
-	parts.scarf = bar_piece(parts.root, PET_SCARF, 3);
-	parts.scarf_tail = bar_piece(parts.root, PET_SCARF, 2);
-	parts.crown_band = bar_piece(parts.root, PET_CROWN, 2);
+	// ---- the wardrobe ---------------------------------------------------
+	parts.hat_cone = round_piece(parts.root, PET_HAT);
+	parts.hat_brim = round_piece(parts.root, PET_HAT);
+	parts.phone_band = round_piece(parts.root, PET_PHONE);
+	parts.phone_left = round_piece(parts.root, PET_PHONE);
+	parts.phone_right = round_piece(parts.root, PET_PHONE);
+	parts.scarf = round_piece(parts.root, PET_SCARF);
+	parts.scarf_tail = round_piece(parts.root, PET_SCARF);
+	parts.crown_band = round_piece(parts.root, PET_CROWN);
 	for (int i = 0; i < 3; i++) {
-		parts.crown_spike[i] = bar_piece(parts.root, PET_CROWN, 1);
+		parts.crown_spike[i] = round_piece(parts.root, PET_CROWN);
 	}
+
+	// The line every part with an edge wears. Eyes and glints are left alone:
+	// a 2 px outline on a 3 px glint is a smudge.
+	lv_obj_t *const outlined[] = {
+		parts.body, parts.foot_l, parts.foot_r, parts.arm_l, parts.arm_r,
+		parts.ear_l, parts.ear_r, parts.horn_l, parts.horn_r, parts.tail, parts.tail_tip,
+		parts.fin_top, parts.fin_side, parts.fin_tail, parts.muzzle, parts.nose,
+	};
+	for (size_t i = 0; i < sizeof(outlined) / sizeof(outlined[0]); i++) {
+		inked(outlined[i], 2);
+	}
+	for (int i = 0; i < 3; i++) {
+		inked(parts.crown_spike[i], 1);
+	}
+	inked(parts.hat_cone, 2);
+	inked(parts.hat_brim, 2);
+	inked(parts.crown_band, 1);
+	inked(parts.scarf, 1);
 }
 
 // ---------------------------------------------------------------------------
@@ -385,6 +434,12 @@ static void build_creature(void) {
 static void set_color(lv_obj_t *o, lv_color_t color) {
 	if (o) {
 		lv_obj_set_style_bg_color(o, color, 0);
+	}
+}
+
+static void set_radius(lv_obj_t *o, int radius) {
+	if (o) {
+		lv_obj_set_style_radius(o, radius, 0);
 	}
 }
 
@@ -398,208 +453,245 @@ static void paint_creature(void) {
 	pet_mood_t mood = pet_mood(st, petwatch_now());
 	pet_species_t species = pet_species(st);
 	bool sleeping = mood == PET_MOOD_SLEEPING;
+	bool dizzy = mood == PET_MOOD_DIZZY;
 	bool listening = petwatch_listening() && !sleeping;
 	bool fish = species == PET_SPECIES_FISH;
 	bool cat = species == PET_SPECIES_CAT;
 	bool dog = species == PET_SPECIES_DOG;
 	bool dragon = species == PET_SPECIES_DRAGON;
 
-	// One body per stage: the newest animal is round and small, and each stage
-	// after that a little wider. Everything else is placed from these numbers.
-	int body_w = 46;
-	int body_h = 40;
+	// One body per stage, and a wider, flatter one for the fish: a pet is a
+	// silhouette before it is anything else.
+	int body_w = 78;
+	int body_h = 64;
 	switch (stage) {
 	case PET_STAGE_CHILD:
-		body_w = 56;
-		body_h = 46;
+		body_w = 86;
+		body_h = 70;
 		break;
 	case PET_STAGE_TEEN:
-		body_w = 64;
-		body_h = 50;
+		body_w = 94;
+		body_h = 76;
 		break;
 	case PET_STAGE_ADULT:
-		body_w = 72;
-		body_h = 56;
+		body_w = 100;
+		body_h = 82;
 		break;
 	case PET_STAGE_BABY:
 	default:
 		break;
 	}
 	if (fish) {
-		body_h = body_h * 4 / 5; // wider than tall, as a fish is
+		body_w += 14;
+		body_h = body_h * 3 / 4;
 	}
 
-	// The palette: a ginger cat, a tan dog, a green dragon, a gold fish. The
-	// belly is always the light one, the tips the deep one.
-	lv_color_t body = lv_color_hex(0x8FD6B0);
-	lv_color_t deep = lv_color_hex(0x62B78C);
-	lv_color_t belly = lv_color_hex(0xE7F8EE);
+	// The fills. The line around them is the same ink for all four, so the
+	// animals are a set rather than four drawings.
+	lv_color_t fill = lv_color_hex(0x7FCB6A);  // dragon green
+	lv_color_t deep = lv_color_hex(0x5AA84A);
+	lv_color_t light = lv_color_hex(0xD9F0A0);
 	if (cat) {
-		body = lv_color_hex(0xF2B27C);
-		deep = lv_color_hex(0xD98F53);
-		belly = lv_color_hex(0xFBEDDD);
+		fill = lv_color_hex(0xF6C8A0);
+		deep = lv_color_hex(0xE3A778);
+		light = lv_color_hex(0xFFF1E1);
 	} else if (dog) {
-		body = lv_color_hex(0xCBAA82);
-		deep = lv_color_hex(0xAB855B);
-		belly = lv_color_hex(0xF6ECDE);
+		fill = lv_color_hex(0xF2CF6B);
+		deep = lv_color_hex(0xDDB64C);
+		light = lv_color_hex(0xFFF6D5);
 	} else if (fish) {
-		body = lv_color_hex(0xF2B44A);
-		deep = lv_color_hex(0xD3902B);
-		belly = lv_color_hex(0xFBE7C0);
+		fill = lv_color_hex(0xF4B94E);
+		deep = lv_color_hex(0xD99A32);
+		light = lv_color_hex(0xFFEFC2);
 	}
 
-	set_color(parts.body, body);
-	set_color(parts.belly, belly);
+	set_color(parts.body, fill);
+	set_color(parts.belly, light);
 	set_color(parts.foot_l, deep);
 	set_color(parts.foot_r, deep);
-	set_color(parts.arm_l, body);
-	set_color(parts.arm_r, body);
-	set_color(parts.ear_l, body);
-	set_color(parts.ear_r, body);
-	set_color(parts.horn_l, belly);
-	set_color(parts.horn_r, belly);
-	set_color(parts.tail, deep);
-	set_color(parts.tail_tip, deep);
+	set_color(parts.arm_l, fill);
+	set_color(parts.arm_r, fill);
+	set_color(parts.ear_l, fill);
+	set_color(parts.ear_r, fill);
+	set_color(parts.horn_l, light);
+	set_color(parts.horn_r, light);
+	set_color(parts.tail, fill);
+	set_color(parts.tail_tip, fill);
 	set_color(parts.fin_top, deep);
 	set_color(parts.fin_side, deep);
 	set_color(parts.fin_tail, deep);
-	set_color(parts.muzzle, belly);
+	set_color(parts.muzzle, light);
 	set_color(parts.nose, PET_INK);
 
 	const int cx = PET_CREATURE_W / 2;
 	const int bx = cx - body_w / 2;
 	const int by = PET_BASE_Y - body_h;
-	const int eye_y = by + body_h * 34 / 100;
 	const int eye_dx = body_w * 19 / 100;
-	const int eye_w = fish ? 9 : 7;
-	const int eye_h = fish ? 11 : 9;
-	const int head_gap = 14; // how far a hat sits above the body's top
+	const int eye_y = by + body_h * 33 / 100;
+	const int head_gap = 12; // how far a hat sits above the body's top
 
-	// Shadow, always under everything.
-	place(parts.shadow, cx - 19, PET_BASE_Y + 2, 38, 5);
+	// Shadow first, under everything.
+	place(parts.shadow, cx - 20, PET_BASE_Y + 2, 40, 6);
 	lv_obj_set_style_bg_opa(parts.shadow, theme_is_dark() ? LV_OPA_50 : LV_OPA_20, 0);
-	// A fish swims, so there is nothing under it to leave a mark on.
 	show(parts.shadow, !fish);
 
-	// ---- what is behind the body --------------------------------------
-	// The tail curls up from behind the body's bottom corner, so it reads as a
-	// tail rather than as a bar across the chin.
-	// The tail arcs up out of the body's right side, where it can be seen whole:
-	// a stub tucked behind the body reads as an arm.
-	place(parts.tail, bx + body_w - 4, by + body_h - 22, cat ? 20 : 17, 7);
-	lv_obj_set_style_transform_rotation(parts.tail, cat ? -550 : -450, 0);
-	show(parts.tail, (cat || dog || dragon) && !fish);
-
-	place(parts.tail_tip, bx + body_w + 8, by + body_h - 28, 7, 7);
-	show(parts.tail_tip, dragon);
-
-	place(parts.fin_tail, bx - 10, by + body_h / 2 - 10, 16, 20);
-	lv_obj_set_style_transform_rotation(parts.fin_tail, 450, 0);
-	show(parts.fin_tail, fish);
-
-	// ---- the body ------------------------------------------------------
+	set_radius(parts.body, fish ? body_h / 2 : body_h * 42 / 100);
 	place(parts.body, bx, by, body_w, body_h);
-	// A fish's light underside sits low on the body; a land animal's patch is a
-	// belly, so it takes the lower half of a round body.
-	if (fish) {
-		place(parts.belly, cx - body_w * 30 / 100, by + body_h * 60 / 100, body_w * 60 / 100, body_h * 30 / 100);
-	} else {
-		place(parts.belly, cx - body_w * 30 / 100, by + body_h * 54 / 100, body_w * 60 / 100, body_h * 40 / 100);
-	}
+	set_radius(parts.belly, body_h / 7);
+	lv_obj_set_style_bg_opa(parts.belly, (lv_opa_t)(LV_OPA_COVER * 70 / 100), 0);
+	place(parts.belly, cx - body_w * 23 / 100, by + body_h * 72 / 100, body_w * 46 / 100, body_h * 20 / 100);
+	show(parts.belly, !fish);
 
-	place(parts.fin_top, cx - 11, by - 8, 22, 10);
+	// ---- what is behind the body --------------------------------------
+	set_radius(parts.tail, 4);
+	set_radius(parts.tail_tip, 3);
+	set_radius(parts.fin_tail, 5);
+	set_radius(parts.fin_top, 4);
+	set_radius(parts.fin_side, 3);
+	show(parts.tail, cat || dog || dragon);
+	show(parts.tail_tip, dragon);
+	show(parts.fin_tail, fish);
 	show(parts.fin_top, fish);
-	place(parts.fin_side, bx + 8, by + body_h * 56 / 100, 12, 7);
 	show(parts.fin_side, fish);
 
-	// Feet and arms: the fish has neither, and the newest animal has no feet.
-	place(parts.foot_l, cx - 17, by + body_h - 4, 13, 6);
-	place(parts.foot_r, cx + 4, by + body_h - 4, 13, 6);
-	show(parts.foot_l, !fish && stage >= PET_STAGE_CHILD);
-	show(parts.foot_r, !fish && stage >= PET_STAGE_CHILD);
-	place(parts.arm_l, bx - 5, by + body_h * 52 / 100, 9, 15);
-	place(parts.arm_r, bx + body_w - 4, by + body_h * 52 / 100, 9, 15);
-	show(parts.arm_l, !fish);
-	show(parts.arm_r, !fish);
-
-	// ---- ears, horns, whiskers, muzzle ---------------------------------
-	if (dog) {
-		// A dog's ears hang: the same bars, turned the other way and lower.
-		place(parts.ear_l, bx - 7, by + 2, 14, 26);
-		place(parts.ear_r, bx + body_w - 7, by + 2, 14, 26);
-		lv_obj_set_style_transform_rotation(parts.ear_l, -70, 0);
-		lv_obj_set_style_transform_rotation(parts.ear_r, 70, 0);
-	} else {
-		// A cat's ears are triangles in everything but name: short, set wide,
-		// and leaning out of the head.
-		place(parts.ear_l, bx + body_w / 2 - 24, by - 9, 13, 13);
-		place(parts.ear_r, bx + body_w / 2 + 11, by - 9, 13, 13);
-		lv_obj_set_style_transform_rotation(parts.ear_l, -300, 0);
-		lv_obj_set_style_transform_rotation(parts.ear_r, 300, 0);
+	if (fish) {
+		// A tail fin is a diamond off the back, and the fins are what say
+		// "fish" more than the body does.
+		place(parts.fin_tail, bx - 5, by + body_h / 2 - 10, 21, 21);
+		lv_obj_set_style_transform_rotation(parts.fin_tail, 450, 0);
+		place(parts.fin_top, cx - 11, by - 7, 22, 10);
+		lv_obj_set_style_transform_rotation(parts.fin_top, -170, 0);
+		// The second fin hangs under the belly, which is what makes the
+		// silhouette read as a fish rather than as a lozenge.
+		place(parts.fin_side, cx - 8, by + body_h - 3, 18, 9);
+		lv_obj_set_style_transform_rotation(parts.fin_side, 200, 0);
+	} else if (cat) {
+		place(parts.tail, bx + body_w - 4, by + body_h - 24, 20, 7);
+		lv_obj_set_style_transform_rotation(parts.tail, -520, 0);
+	} else if (dog) {
+		place(parts.tail, bx + body_w - 3, by + body_h - 26, 14, 7);
+		lv_obj_set_style_transform_rotation(parts.tail, -750, 0);
+	} else if (dragon) {
+		place(parts.tail, bx + body_w - 3, by + body_h - 20, 24, 8);
+		lv_obj_set_style_transform_rotation(parts.tail, -380, 0);
+		place(parts.tail_tip, bx + body_w + 12, by + body_h - 34, 10, 10);
+		lv_obj_set_style_transform_rotation(parts.tail_tip, 450, 0);
 	}
+
+	// ---- ears, horns ---------------------------------------------------
+	set_radius(parts.ear_l, 3);
+	set_radius(parts.ear_r, 3);
+	set_radius(parts.ear_in_l, 2);
+	set_radius(parts.ear_in_r, 2);
 	show(parts.ear_l, cat || dog);
 	show(parts.ear_r, cat || dog);
-
-	place(parts.ear_in_l, bx + body_w / 2 - 21, by - 6, 3, 7);
-	place(parts.ear_in_r, bx + body_w / 2 + 17, by - 6, 3, 7);
-	lv_obj_set_style_transform_rotation(parts.ear_in_l, -300, 0);
-	lv_obj_set_style_transform_rotation(parts.ear_in_r, 300, 0);
 	show(parts.ear_in_l, cat);
 	show(parts.ear_in_r, cat);
-
-	place(parts.horn_l, bx + 6, by - head_gap - 2, 7, 16);
-	place(parts.horn_r, bx + body_w - 13, by - head_gap - 2, 7, 16);
-	lv_obj_set_style_transform_rotation(parts.horn_l, -140, 0);
-	lv_obj_set_style_transform_rotation(parts.horn_r, 140, 0);
 	show(parts.horn_l, dragon);
 	show(parts.horn_r, dragon);
 
-	place(parts.muzzle, cx - body_w * 18 / 100, by + body_h * 50 / 100, body_w * 36 / 100, body_h * 26 / 100);
+	if (cat) {
+		// Triangles in everything but name: small squares stood on a corner.
+		place(parts.ear_l, bx + 1, by - 12, 15, 15);
+		place(parts.ear_r, bx + body_w - 16, by - 12, 15, 15);
+		lv_obj_set_style_transform_rotation(parts.ear_l, -350, 0);
+		lv_obj_set_style_transform_rotation(parts.ear_r, 350, 0);
+		place(parts.ear_in_l, bx + 5, by - 7, 7, 7);
+		place(parts.ear_in_r, bx + body_w - 12, by - 7, 7, 7);
+		lv_obj_set_style_transform_rotation(parts.ear_in_l, -350, 0);
+		lv_obj_set_style_transform_rotation(parts.ear_in_r, 350, 0);
+	} else if (dog) {
+		// A dog's ears hang: long, soft, and out to the sides.
+		set_radius(parts.ear_l, 7);
+		set_radius(parts.ear_r, 7);
+		place(parts.ear_l, bx - 7, by + 2, 16, 26);
+		place(parts.ear_r, bx + body_w - 9, by + 2, 16, 26);
+		lv_obj_set_style_transform_rotation(parts.ear_l, -120, 0);
+		lv_obj_set_style_transform_rotation(parts.ear_r, 120, 0);
+	}
+
+	set_radius(parts.horn_l, 4);
+	set_radius(parts.horn_r, 4);
+	place(parts.horn_l, bx + 3, by - 15, 8, 18);
+	place(parts.horn_r, bx + body_w - 11, by - 15, 8, 18);
+	lv_obj_set_style_transform_rotation(parts.horn_l, -220, 0);
+	lv_obj_set_style_transform_rotation(parts.horn_r, 220, 0);
+
+	// ---- feet and arms ---------------------------------------------------
+	set_radius(parts.foot_l, 4);
+	set_radius(parts.foot_r, 4);
+	set_radius(parts.arm_l, 4);
+	set_radius(parts.arm_r, 4);
+	bool feet = !fish && stage >= PET_STAGE_CHILD;
+	show(parts.foot_l, feet);
+	show(parts.foot_r, feet);
+	place(parts.foot_l, cx - body_w * 22 / 100 - 7, by + body_h - 6, 14, 9);
+	place(parts.foot_r, cx + body_w * 22 / 100 - 7, by + body_h - 6, 14, 9);
+	show(parts.arm_l, !fish);
+	show(parts.arm_r, !fish);
+	place(parts.arm_l, bx - 5, by + body_h * 52 / 100, 10, 16);
+	place(parts.arm_r, bx + body_w - 5, by + body_h * 52 / 100, 10, 16);
+	lv_obj_set_style_transform_rotation(parts.arm_l, 120, 0);
+	lv_obj_set_style_transform_rotation(parts.arm_r, -120, 0);
+
+	// ---- the face --------------------------------------------------------
+	// A muzzle for the animals that have one, and a nose on the end of it.
+	set_radius(parts.muzzle, 9);
 	show(parts.muzzle, dog || dragon);
-
-	place(parts.nose, cx - 3, by + body_h * 56 / 100, 7, 5);
+	if (dog) {
+		place(parts.muzzle, cx - 13, by + body_h * 48 / 100, 26, 19);
+	} else if (dragon) {
+		place(parts.muzzle, cx - 11, by + body_h * 49 / 100, 22, 16);
+	}
+	set_radius(parts.nose, 3);
 	show(parts.nose, dog || dragon);
+	place(parts.nose, cx - 4, by + body_h * 50 / 100, 8, 6);
 
-	// ---- the face ------------------------------------------------------
+	int eye_w = fish ? 11 : 10;
+	int eye_h = 12;
+	set_radius(parts.eye_l, 5);
+	set_radius(parts.eye_r, 5);
+	bool eyes_open = !sleeping && !dizzy;
 	place(parts.eye_l, cx - eye_dx - eye_w / 2, eye_y, eye_w, eye_h);
 	place(parts.eye_r, cx + eye_dx - eye_w / 2, eye_y, eye_w, eye_h);
-	place(parts.glint_l, cx - eye_dx - eye_w / 2 + 1, eye_y + 1, 3, 3);
-	place(parts.glint_r, cx + eye_dx - eye_w / 2 + 1, eye_y + 1, 3, 3);
-	place(parts.lid_l, cx - eye_dx - 5, eye_y + 4, 10, 2);
-	place(parts.lid_r, cx + eye_dx - 5, eye_y + 4, 10, 2);
+	show(parts.eye_l, eyes_open);
+	show(parts.eye_r, eyes_open);
+	place(parts.glint_l, cx - eye_dx - eye_w / 2 + 2, eye_y + 2, 4, 4);
+	place(parts.glint_r, cx + eye_dx - eye_w / 2 + 2, eye_y + 2, 4, 4);
+	show(parts.glint_l, eyes_open);
+	show(parts.glint_r, eyes_open);
 
 	// A dizzy pet has crosses where its eyes were: two bars over each eye, one
 	// each way. Sleeping keeps the single flat lid.
-	bool dizzy = mood == PET_MOOD_DIZZY;
-	bool eyes_open = !sleeping && !dizzy;
-	show(parts.eye_l, eyes_open);
-	show(parts.eye_r, eyes_open);
-	show(parts.glint_l, eyes_open);
-	show(parts.glint_r, eyes_open);
+	set_radius(parts.lid_l, 1);
+	set_radius(parts.lid_r, 1);
 	show(parts.lid_l, sleeping || dizzy);
 	show(parts.lid_r, sleeping || dizzy);
 	if (dizzy) {
-		place(parts.lid_l, cx - eye_dx - 6, eye_y + 3, 12, 2);
-		place(parts.lid_r, cx + eye_dx - 6, eye_y + 3, 12, 2);
+		place(parts.lid_l, cx - eye_dx - 7, eye_y + 4, 14, 2);
+		place(parts.lid_r, cx + eye_dx - 7, eye_y + 4, 14, 2);
 		lv_obj_set_style_transform_rotation(parts.lid_l, 450, 0);
 		lv_obj_set_style_transform_rotation(parts.lid_r, -450, 0);
 	} else {
-		place(parts.lid_l, cx - eye_dx - 5, eye_y + 4, 10, 2);
-		place(parts.lid_r, cx + eye_dx - 5, eye_y + 4, 10, 2);
+		place(parts.lid_l, cx - eye_dx - 5, eye_y + 5, 10, 2);
+		place(parts.lid_r, cx + eye_dx - 5, eye_y + 5, 10, 2);
 		lv_obj_set_style_transform_rotation(parts.lid_l, 0, 0);
 		lv_obj_set_style_transform_rotation(parts.lid_r, 0, 0);
 	}
 
-	place(parts.cheek_l, cx - body_w * 34 / 100 - 4, eye_y + 11, 9, 4);
-	place(parts.cheek_r, cx + body_w * 34 / 100 - 4, eye_y + 11, 9, 4);
-	lv_obj_set_style_bg_opa(parts.cheek_l, mood == PET_MOOD_BLISSFUL ? LV_OPA_70 : LV_OPA_40, 0);
-	lv_obj_set_style_bg_opa(parts.cheek_r, mood == PET_MOOD_BLISSFUL ? LV_OPA_70 : LV_OPA_40, 0);
+	set_radius(parts.cheek_l, 3);
+	set_radius(parts.cheek_r, 3);
+	place(parts.cheek_l, cx - body_w * 34 / 100 - 4, eye_y + 12, 9, 5);
+	place(parts.cheek_r, cx + body_w * 34 / 100 - 4, eye_y + 12, 9, 5);
+	lv_obj_set_style_bg_opa(parts.cheek_l, mood == PET_MOOD_BLISSFUL ? LV_OPA_80 : LV_OPA_60, 0);
+	lv_obj_set_style_bg_opa(parts.cheek_r, mood == PET_MOOD_BLISSFUL ? LV_OPA_80 : LV_OPA_60, 0);
 
 	bool sad = mood == PET_MOOD_SAD;
 	bool smile = !sad && (mood == PET_MOOD_HAPPY || mood == PET_MOOD_BLISSFUL);
 	bool line = mood == PET_MOOD_OKAY || sleeping || dizzy;
 
-	place(parts.mouth, cx - 9, eye_y + 12, 18, 12);
+	int mouth_y = by + body_h * ((dog || dragon) ? 60 : 57) / 100;
+	place(parts.mouth, cx - 7, mouth_y, 14, 9);
 	if (sad) {
 		lv_arc_set_angles(parts.mouth, 200, 340);
 	} else {
@@ -607,21 +699,25 @@ static void paint_creature(void) {
 	}
 	show(parts.mouth, !sleeping && !dizzy && !listening && (smile || sad));
 
-	place(parts.mouth_line, cx - 5, eye_y + 18, 10, 2);
+	set_radius(parts.mouth_line, 1);
+	place(parts.mouth_line, cx - 5, mouth_y + 3, 10, 2);
 	show(parts.mouth_line, !listening && line);
 
-	place(parts.mouth_open, cx - 4, eye_y + 15, 8, 7);
-	place(parts.tongue, cx - 2, eye_y + 19, 4, 2);
+	set_radius(parts.mouth_open, 4);
+	place(parts.mouth_open, cx - 4, mouth_y, 8, 7);
+	set_radius(parts.tongue, 2);
+	place(parts.tongue, cx - 2, mouth_y + 4, 4, 3);
 	show(parts.mouth_open, listening);
 	show(parts.tongue, listening);
 
-	place(parts.tear, cx - eye_dx - 7, eye_y + 11, 3, 7);
+	set_radius(parts.tear, 2);
+	place(parts.tear, cx - eye_dx - 7, eye_y + 11, 4, 7);
 	show(parts.tear, sad);
 
 	place(parts.zzz, PET_CREATURE_W - 32, 2, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
 	show(parts.zzz, sleeping);
 
-	// ---- the wardrobe --------------------------------------------------
+	// ---- the wardrobe ----------------------------------------------------
 	int wearing = pet_wearing(st);
 	bool hat = wearing == (int)PET_ITEM_PARTY_HAT;
 	bool phones = wearing == (int)PET_ITEM_HEADPHONES;
@@ -638,27 +734,34 @@ static void paint_creature(void) {
 		show(parts.horn_r, false);
 	}
 
-	place(parts.hat_brim, cx - 13, by - head_gap + 10, 26, 4);
-	place(parts.hat_cone, cx - 9, by - head_gap - 4, 18, 14);
+	set_radius(parts.hat_cone, 5);
+	place(parts.hat_brim, cx - 14, by - head_gap + 9, 28, 5);
+	place(parts.hat_cone, cx - 9, by - head_gap - 5, 18, 15);
 	show(parts.hat_brim, hat);
 	show(parts.hat_cone, hat);
 
-	place(parts.phone_band, cx - 17, by - head_gap + 4, 34, 5);
-	place(parts.phone_left, cx - 21, by - head_gap + 9, 6, 16);
-	place(parts.phone_right, cx + 15, by - head_gap + 9, 6, 16);
+	set_radius(parts.phone_band, 3);
+	set_radius(parts.phone_left, 4);
+	set_radius(parts.phone_right, 4);
+	place(parts.phone_band, cx - 18, by - head_gap + 3, 36, 6);
+	place(parts.phone_left, cx - 22, by - head_gap + 8, 7, 17);
+	place(parts.phone_right, cx + 15, by - head_gap + 8, 7, 17);
 	show(parts.phone_band, phones);
 	show(parts.phone_left, phones);
 	show(parts.phone_right, phones);
 
-	place(parts.scarf, cx - 15, by + body_h - 3, 30, 6);
-	place(parts.scarf_tail, cx + 7, by + body_h + 2, 6, 10);
+	set_radius(parts.scarf, 4);
+	set_radius(parts.scarf_tail, 3);
+	place(parts.scarf, cx - 16, by + body_h - 4, 32, 7);
+	place(parts.scarf_tail, cx + 8, by + body_h + 1, 7, 11);
 	show(parts.scarf, scarf);
 	show(parts.scarf_tail, scarf);
 
-	place(parts.crown_band, cx - 11, by - head_gap + 6, 22, 4);
-	place(parts.crown_spike[0], cx - 10, by - head_gap + 1, 5, 6);
-	place(parts.crown_spike[1], cx - 2, by - head_gap, 5, 7);
-	place(parts.crown_spike[2], cx + 6, by - head_gap + 1, 5, 6);
+	set_radius(parts.crown_band, 2);
+	place(parts.crown_band, cx - 12, by - head_gap + 5, 24, 5);
+	place(parts.crown_spike[0], cx - 11, by - head_gap, 6, 7);
+	place(parts.crown_spike[1], cx - 3, by - head_gap - 1, 6, 8);
+	place(parts.crown_spike[2], cx + 5, by - head_gap, 6, 7);
 	show(parts.crown_band, crown);
 	for (int i = 0; i < 3; i++) {
 		show(parts.crown_spike[i], crown);
@@ -688,7 +791,9 @@ static void paint_room(void) {
 			water = PET_WATER_NIGHT;
 		}
 		lv_obj_set_style_bg_color(room_layer, water, 0);
-		lv_obj_set_style_bg_opa(room_layer, LV_OPA_30, 0);
+		lv_obj_set_style_bg_opa(room_layer, (lv_opa_t)(LV_OPA_COVER * 25 / 100), 0);
+		lv_obj_set_style_bg_color(surface, lv_color_white(), 0);
+		lv_obj_set_style_bg_opa(surface, LV_OPA_30, 0);
 	} else {
 		lv_color_t wash = PET_ROOM_MEADOW;
 		if (room == 1) {
@@ -698,12 +803,16 @@ static void paint_room(void) {
 		}
 		lv_obj_set_style_bg_color(room_layer, wash, 0);
 		lv_obj_set_style_bg_opa(room_layer, LV_OPA_20, 0);
+		lv_obj_set_style_bg_opa(surface, LV_OPA_TRANSP, 0);
 	}
 
+	show(surface, fish);
 	show(sand, fish);
-	show(weed_l, fish);
-	show(weed_r, fish);
 	for (int i = 0; i < 3; i++) {
+		show(pebbles[i], fish);
+		show(weeds[i], fish);
+	}
+	for (int i = 0; i < PET_BUBBLES; i++) {
 		show(bubbles[i], fish);
 	}
 
@@ -904,8 +1013,8 @@ static void start_animations(void) {
 	}
 
 	if (pet_species(petwatch_state()) == PET_SPECIES_FISH) {
-		for (int i = 0; i < 3; i++) {
-			start_anim(bubbles[i], bubble_exec, 0, -46, 9000 + i * 2400, i * 2600, false);
+		for (int i = 0; i < PET_BUBBLES; i++) {
+			start_anim(bubbles[i], bubble_exec, 0, -50 - (i % 3) * 8, 8000 + i * 1700, i * 1400, false);
 		}
 	}
 	if (petwatch_has_soundscape()) {
@@ -924,7 +1033,7 @@ static void stop_animations(void) {
 	lv_anim_delete(parts.fin_tail, sway_exec);
 	lv_anim_delete(note_a, note_exec);
 	lv_anim_delete(note_b, note_exec);
-	for (int i = 0; i < 3; i++) {
+	for (int i = 0; i < PET_BUBBLES; i++) {
 		lv_anim_delete(bubbles[i], bubble_exec);
 		lv_obj_set_style_translate_y(bubbles[i], 0, 0);
 	}
@@ -1154,7 +1263,7 @@ static void build_tap(void) {
 	lv_obj_set_style_shadow_width(close, 0, 0);
 	lv_obj_set_style_pad_all(close, 0, 0);
 	lv_obj_add_event_cb(close, tap_close_cb, LV_EVENT_CLICKED, NULL);
-	lv_obj_t *close_icon = icon_image(close, &icon_close, settingsrow_corner_button_size(page_cfg) * 3 / 4);
+	lv_obj_t *close_icon = icon_image(close, &icon_close, settingsrow_corner_button_size(page_cfg) * 5 / 9);
 	lv_obj_add_style(close_icon, &theme_style_icon, 0);
 	lv_obj_center(close_icon);
 
@@ -1483,7 +1592,7 @@ static void build_customise(void) {
 	lv_obj_set_style_shadow_width(close, 0, 0);
 	lv_obj_set_style_pad_all(close, 0, 0);
 	lv_obj_add_event_cb(close, (lv_event_cb_t)customise_close_cb, LV_EVENT_CLICKED, NULL);
-	lv_obj_t *close_icon = icon_image(close, &icon_close, settingsrow_corner_button_size(page_cfg) * 3 / 4);
+	lv_obj_t *close_icon = icon_image(close, &icon_close, settingsrow_corner_button_size(page_cfg) * 5 / 9);
 	lv_obj_add_style(close_icon, &theme_style_icon, 0);
 	lv_obj_center(close_icon);
 
@@ -1571,7 +1680,7 @@ static void build_customise(void) {
 	lv_obj_set_style_shadow_width(cancel, 0, 0);
 	lv_obj_set_style_pad_all(cancel, 0, 0);
 	lv_obj_add_event_cb(cancel, name_cancel_cb, LV_EVENT_CLICKED, NULL);
-	lv_obj_t *cancel_icon = icon_image(cancel, &icon_close, settingsrow_corner_button_size(page_cfg) * 3 / 4);
+	lv_obj_t *cancel_icon = icon_image(cancel, &icon_close, settingsrow_corner_button_size(page_cfg) * 5 / 9);
 	lv_obj_add_style(cancel_icon, &theme_style_icon, 0);
 	lv_obj_center(cancel_icon);
 
@@ -1751,20 +1860,55 @@ static void build(void) {
 	lv_obj_set_style_radius(room_layer, radius, 0);
 	lv_obj_set_style_bg_opa(room_layer, LV_OPA_20, 0);
 
-	// The aquarium: a strip of sand, two weeds and three slow bubbles.
-	sand = bar_piece(habitat, PET_SAND, 6);
-	place(sand, 4, habitat_h - 12, card_w - 8, 10);
-	weed_l = bar_piece(habitat, PET_WEED, 3);
-	place(weed_l, 16, habitat_h - 54, 6, 42);
-	weed_r = bar_piece(habitat, PET_WEED, 3);
-	place(weed_r, card_w - 24, habitat_h - 48, 5, 36);
+	// The aquarium. A fish's card is a tank: light at the surface, sand and
+	// stones on the floor, three weeds of different heights, and six slow
+	// bubbles. Drawn back to front like the animals, with the same ink.
+	surface = bar_piece(habitat, PET_BUBBLE, 4);
+	place(surface, 0, 2, card_w, 7);
+	lv_obj_set_style_bg_opa(surface, LV_OPA_30, 0);
+
+	sand = bar_piece(habitat, PET_SAND, 8);
+	place(sand, 4, habitat_h - 16, card_w - 8, 13);
+	lv_obj_set_style_bg_color(sand, PET_SAND_DEEP, 0);
+	lv_obj_set_style_bg_opa(sand, LV_OPA_COVER, 0);
+	lv_obj_t *sand_top = bar_piece(sand, PET_SAND, 6);
+	place(sand_top, 2, -2, card_w - 12, 8);
+
+	lv_obj_t *rock = round_piece(sand, PET_PEBBLE);
+	place(rock, card_w - 74, -14, 30, 18);
+	lv_obj_set_style_radius(rock, 7, 0);
+	lv_obj_set_style_bg_opa(rock, LV_OPA_COVER, 0);
+
+	pebbles[0] = disc(sand, PET_PEBBLE);
+	place(pebbles[0], 18, -6, 11, 8);
+	pebbles[1] = disc(sand, PET_PEBBLE);
+	place(pebbles[1], 40, -3, 8, 6);
+	pebbles[2] = disc(sand, PET_PEBBLE);
+	place(pebbles[2], card_w - 52, -5, 10, 7);
+
+	// The weeds stand clear of the status line's column, so the words stay
+	// readable over the sand.
+	const int weed_x[3] = {14, 0, 0};
+	const int weed_h[3] = {54, 34, 46};
 	for (int i = 0; i < 3; i++) {
-		bubbles[i] = disc(habitat, PET_BUBBLE);
-		lv_obj_set_style_bg_opa(bubbles[i], LV_OPA_50, 0);
+		int x = i == 0 ? weed_x[0] : (i == 1 ? card_w - 56 : card_w - 26);
+		weeds[i] = bar_piece(habitat, i == 1 ? PET_WEED_LIGHT : PET_WEED, 3);
+		place(weeds[i], x, habitat_h - 18 - weed_h[i], 6, weed_h[i]);
+		// Two leaves, so a weed is a plant rather than a pole.
+		lv_obj_t *leaf = bar_piece(weeds[i], i == 1 ? PET_WEED_LIGHT : PET_WEED, 2);
+		place(leaf, -6, 10, 12, 4);
+		lv_obj_set_style_transform_rotation(leaf, 320, 0);
+		lv_obj_t *leaf2 = bar_piece(weeds[i], i == 1 ? PET_WEED_LIGHT : PET_WEED, 2);
+		place(leaf2, 1, weed_h[i] / 2, 12, 4);
+		lv_obj_set_style_transform_rotation(leaf2, -320, 0);
 	}
-	place(bubbles[0], card_w - 34, habitat_h - 70, 8, 8);
-	place(bubbles[1], card_w - 52, habitat_h - 96, 5, 5);
-	place(bubbles[2], card_w - 22, habitat_h - 118, 6, 6);
+
+	for (int i = 0; i < PET_BUBBLES; i++) {
+		int size = 4 + (i % 3) * 3;
+		bubbles[i] = disc(habitat, PET_BUBBLE);
+		lv_obj_set_style_bg_opa(bubbles[i], LV_OPA_60, 0);
+		place(bubbles[i], card_w - 30 - (i % 4) * 16, habitat_h - 60 - (i % 3) * 30, size, size);
+	}
 
 	// ---- the top of the card -------------------------------------------
 	name_label = lv_label_create(habitat);
@@ -1853,7 +1997,7 @@ static void build(void) {
 
 	// ---- the animal ------------------------------------------------------
 	build_creature();
-	lv_obj_set_pos(parts.root, (card_w - PET_CREATURE_W) / 2, 44);
+	lv_obj_set_pos(parts.root, (card_w - PET_CREATURE_W) / 2, 52);
 
 	// The two notes drift up out of the card's top.
 	note_a = icon_image(habitat, &icon_music_note, 14);
