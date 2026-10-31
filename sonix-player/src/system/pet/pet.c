@@ -1,6 +1,9 @@
 #include "pet.h"
 
+#include <ctype.h>
 #include <limits.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <time.h>
 
@@ -11,16 +14,46 @@
 
 #define PET_SECTION "pet"
 
-// Lifetime seconds of music at which each stage begins. The egg is the first
-// handful of minutes -- long enough to be noticed, short enough that the first
-// album hatches it -- and the last stage is about fifteen hours of listening,
-// which at an hour a day is a fortnight.
+// Lifetime credited seconds of music at which each stage begins. The egg is the
+// first handful of minutes -- long enough to be noticed, short enough that the
+// first album hatches it -- and the last stage is about fifteen hours of
+// listening. At the four-hour daily ceiling that is four full days of music,
+// and at an hour a day a fortnight; an overnight player gains no shortcut.
 static const int64_t STAGE_SECS[PET_STAGE_COUNT] = {
 	0,		// egg
 	5 * 60,		// baby: hatched by the first track or two
 	60 * 60,	// child: about an hour
 	4 * 60 * 60,	// teen: about four hours
 	15 * 60 * 60,	// adult: about fifteen hours
+};
+
+typedef struct {
+	int bit;
+	int notes;
+} achievement_reward_t;
+
+static const achievement_reward_t ACHIEVEMENT_REWARDS[] = {
+	{PET_ACH_NIGHT_OWL, 20},
+	{PET_ACH_DEEP_DIVER, 30},
+	{PET_ACH_POLYMATH, 25},
+	{PET_ACH_FOCUS, 20},
+};
+
+// What the wardrobe costs, in notes. A note is a minute of music, so the first
+// outfit is about two hours of listening and the crown is an indulgence.
+static const int ITEM_PRICES[PET_ITEM_COUNT] = {
+	120, // party hat
+	200, // headphones
+	150, // scarf
+	500, // crown
+	180, // sunset room
+	240, // night room
+	150, // streak freeze
+};
+
+static const char *const ITEM_TAGS[PET_ITEM_COUNT] = {
+	"pet_item_party_hat", "pet_item_headphones", "pet_item_scarf", "pet_item_crown",
+	"pet_item_room_sunset", "pet_item_room_night", "pet_item_streak_freeze",
 };
 
 static int clamp_int(int value, int low, int high) {
@@ -68,6 +101,96 @@ long pet_day_now(int64_t now) {
 	return days_from_civil(local.tm_year + 1900, local.tm_mon + 1, local.tm_mday);
 }
 
+// ---------------------------------------------------------------------------
+// The day's discoveries
+//
+// A genre and an album are remembered by a hash, not by their text: the state
+// has sixteen counters already and the settings file is read by a person, so
+// eight 32-bit numbers written as one short line is a better neighbour than
+// eight more strings. FNV-1a, lowercased and trimmed, which is enough to tell
+// "Rock" from "Jazz" and "rock" from "Rock" being the same.
+// ---------------------------------------------------------------------------
+
+static uint32_t text_hash(const char *text) {
+	if (!text) {
+		return 0;
+	}
+	while (*text && isspace((unsigned char)*text)) {
+		text++;
+	}
+	const char *end = text + strlen(text);
+	while (end > text && isspace((unsigned char)end[-1])) {
+		end--;
+	}
+	uint32_t hash = 2166136261u;
+	for (const char *p = text; p < end; p++) {
+		unsigned char c = (unsigned char)*p;
+		if (c >= 'A' && c <= 'Z') {
+			c = (unsigned char)(c - 'A' + 'a');
+		}
+		hash ^= c;
+		hash *= 16777619u;
+	}
+	return hash;
+}
+
+static bool hash_add(uint32_t *set, int *count, const char *text) {
+	if (!text) {
+		return false;
+	}
+	// An empty tag is not a discovery, and the FNV of "" is not zero, so the
+	// emptiness is checked on the text rather than on the hash.
+	const char *first = text;
+	while (*first && isspace((unsigned char)*first)) {
+		first++;
+	}
+	if (!*first) {
+		return false;
+	}
+	uint32_t hash = text_hash(text);
+	if (hash == 0 || *count >= PET_DAY_KEYS) {
+		return false;
+	}
+	for (int i = 0; i < *count; i++) {
+		if (set[i] == hash) {
+			return false;
+		}
+	}
+	set[(*count)++] = hash;
+	return true;
+}
+
+int pet_note_track(pet_state_t *st, const char *genre, const char *album, int *events) {
+	if (events) {
+		*events = PET_EVENT_NONE;
+	}
+	if (!st) {
+		return 0;
+	}
+
+	bool genre_new = hash_add(st->day_genres, &st->day_genre_count, genre);
+	bool album_new = hash_add(st->day_albums, &st->day_album_count, album);
+	int bonus = (genre_new || album_new) ? PET_DIVERSITY_BONUS_PERCENT : 0;
+
+	// Five genres in a day is Polymath. The award carries its own notes, and
+	// the caller only has to say that it happened.
+	if (genre_new && st->day_genre_count >= 5 && !(st->achievements & PET_ACH_POLYMATH)) {
+		if (pet_award_achievement(st, PET_ACH_POLYMATH) && events) {
+			*events |= PET_EVENT_POLYMATH;
+		}
+	}
+	return bonus;
+}
+
+bool pet_audible_volume(int percent) { return percent >= PET_VOLUME_FLOOR; }
+
+void pet_cheer(pet_state_t *st, int happy_points) {
+	if (!st || happy_points <= 0) {
+		return;
+	}
+	st->happy = clamp_int(st->happy + happy_points, 0, PET_HAPPY_MAX);
+}
+
 void pet_defaults(pet_state_t *st, int64_t now, long day) {
 	if (!st) {
 		return;
@@ -83,9 +206,11 @@ void pet_defaults(pet_state_t *st, int64_t now, long day) {
 	st->day = day;
 	st->happy = 50;
 	st->energy = 80;
+	st->wearing = PET_ITEM_NONE;
+	st->room = 0;
 }
 
-int pet_advance(pet_state_t *st, int64_t now, long day, int listened_secs) {
+int pet_advance(pet_state_t *st, int64_t now, long day, int listened_secs, int bonus_percent) {
 	if (!st) {
 		return PET_EVENT_NONE;
 	}
@@ -95,6 +220,12 @@ int pet_advance(pet_state_t *st, int64_t now, long day, int listened_secs) {
 	if (listened_secs > 3600) {
 		listened_secs = 3600; // a caller cannot claim more than an hour in one go
 	}
+	if (bonus_percent < 0) {
+		bonus_percent = 0;
+	}
+	if (bonus_percent > 100) {
+		bonus_percent = 100;
+	}
 
 	const pet_stage_t stage_before = pet_stage(st);
 	int events = PET_EVENT_NONE;
@@ -103,25 +234,36 @@ int pet_advance(pet_state_t *st, int64_t now, long day, int listened_secs) {
 	//
 	// A day the caller cannot name is not a day: the counters are left alone.
 	// A real day that is not the stored one ends yesterday, which is where the
-	// streak is settled: a goal missed yesterday breaks it, a goal reached
-	// yesterday keeps it.
+	// streak is settled. A goal missed yesterday breaks it -- unless a bought
+	// freeze covers that day, which is what the freeze is for -- and a goal
+	// reached yesterday keeps it.
 	if (day > 0) {
 		if (st->day == 0) {
 			st->day = day;
 		} else if (day > st->day) {
-			// One day later and yesterday's goal was reached: the run goes
-			// on. One day later and it was not, or several days gone at
-			// once: the run ends. A clock moved backwards is neither, and
-			// keeps the run it had.
-			if (day - st->day != 1 || st->goal_day != st->day) {
-				st->streak = 0;
+			// Only the very next day continues a run. A jump of two days is a
+			// day missed in the middle, and one freeze cannot cover a hole it
+			// was not spent on.
+			bool consecutive = day - st->day == 1;
+			bool met = consecutive && st->goal_day == st->day;
+			bool frozen = consecutive && st->freeze_day == st->day;
+
+			if (!met && !frozen) {
+				if (consecutive && st->streak > 0 && st->freezes > 0) {
+					st->freezes--;
+					st->freeze_day = st->day;
+				} else {
+					st->streak = 0;
+				}
 			}
 			st->day = day;
 			st->today_secs = 0;
-		} else {
-			st->day = day;
-			st->today_secs = 0;
+			st->today_xp_secs = 0;
+			st->day_genre_count = 0;
+			st->day_album_count = 0;
 		}
+		// A day behind the stored one is a clock that was changed, not a new
+		// day: the counters stay where they are rather than being wiped.
 	}
 
 	// ---- how much time passed -------------------------------------------
@@ -150,11 +292,36 @@ int pet_advance(pet_state_t *st, int64_t now, long day, int listened_secs) {
 			st->last_music = 1; // "it has heard music", on a clock we cannot trust
 		}
 
-		if (st->xp_secs > INT64_MAX - listened_secs) {
+		// XP and notes stop at the daily ceiling. The meters do not: the music
+		// is real even when the day's progression has already been earned.
+		int remaining = PET_DAILY_XP_SECS - st->today_xp_secs;
+		if (remaining < 0) {
+			remaining = 0;
+		}
+		int base = listened_secs < remaining ? listened_secs : remaining;
+		int extra = 0;
+		if (base > 0 && bonus_percent > 0) {
+			st->bonus_credit += base * bonus_percent;
+			extra = st->bonus_credit / 100;
+			st->bonus_credit %= 100;
+			if (extra > remaining - base) {
+				extra = remaining - base;
+			}
+		}
+		int credited = base + extra;
+		st->today_xp_secs += credited;
+
+		if (st->xp_secs > INT64_MAX - credited) {
 			st->xp_secs = INT64_MAX; // paranoia: never negative from wrapping
 		} else {
-			st->xp_secs += listened_secs;
+			st->xp_secs += credited;
 		}
+		st->note_credit += credited;
+		if (st->note_credit >= 60) {
+			st->notes += st->note_credit / 60;
+			st->note_credit %= 60;
+		}
+
 		st->today_secs += listened_secs;
 		if (st->today_secs > 86400) {
 			st->today_secs = 86400;
@@ -231,7 +398,7 @@ int pet_advance(pet_state_t *st, int64_t now, long day, int listened_secs) {
 
 	// ---- the daily goal --------------------------------------------------
 	if (st->day > 0 && st->today_secs >= PET_DAY_GOAL_SECS && st->goal_day != st->day) {
-		if (st->goal_day == st->day - 1) {
+		if (st->goal_day == st->day - 1 || st->freeze_day == st->day - 1) {
 			st->streak++;
 		} else {
 			st->streak = 1;
@@ -325,14 +492,9 @@ pet_mood_t pet_mood(const pet_state_t *st, int64_t now) {
 		return PET_MOOD_OKAY;
 	}
 
-	// Asleep when neither music nor a finger has come near it for six hours.
-	// A petting wakes it: `last_pet` is as good a "somebody is here" as the
-	// last track.
-	int64_t last_attention = st->last_music;
-	if (st->last_pet > last_attention) {
-		last_attention = st->last_pet;
-	}
-	if (now > 0 && last_attention > 0 && now > last_attention && now - last_attention > PET_SLEEP_AFTER_SECS) {
+	// Two days without music and it sleeps. Petting is welcome but does not
+	// wake it: the page has a line saying what does, and it is a track.
+	if (now > 0 && st->last_music > 0 && now > st->last_music && now - st->last_music > PET_SLEEP_AFTER_SECS) {
 		return PET_MOOD_SLEEPING;
 	}
 
@@ -390,8 +552,207 @@ const char *pet_stage_tag(pet_stage_t stage) {
 }
 
 // ---------------------------------------------------------------------------
+// The wardrobe
+// ---------------------------------------------------------------------------
+
+static bool item_is_room(pet_item_t item) { return item >= PET_ITEM_FIRST_ROOM && item <= PET_ITEM_ROOM_NIGHT; }
+
+int pet_item_price(pet_item_t item) {
+	if ((int)item < 0 || item >= PET_ITEM_COUNT) {
+		return -1;
+	}
+	return ITEM_PRICES[item];
+}
+
+const char *pet_item_tag(pet_item_t item) {
+	if ((int)item < 0 || item >= PET_ITEM_COUNT) {
+		return "pet_item_none";
+	}
+	return ITEM_TAGS[item];
+}
+
+const char *pet_achievement_tag(int achievement) {
+	switch (achievement) {
+	case PET_ACH_NIGHT_OWL:
+		return "pet_ach_night_owl";
+	case PET_ACH_DEEP_DIVER:
+		return "pet_ach_deep_diver";
+	case PET_ACH_POLYMATH:
+		return "pet_ach_polymath";
+	case PET_ACH_FOCUS:
+		return "pet_ach_focus";
+	default:
+		return "pet_ach_locked";
+	}
+}
+
+bool pet_owned(const pet_state_t *st, pet_item_t item) {
+	if (!st || (int)item < 0 || item >= PET_ITEM_COUNT) {
+		return false;
+	}
+	if (item == PET_ITEM_STREAK_FREEZE) {
+		return st->freezes > 0;
+	}
+	return (st->owned & (1 << (int)item)) != 0;
+}
+
+bool pet_wear(pet_state_t *st, pet_item_t item) {
+	if (!st) {
+		return false;
+	}
+	if (item == PET_ITEM_NONE) {
+		st->wearing = PET_ITEM_NONE;
+		return true;
+	}
+	if ((int)item < 0 || item >= PET_ITEM_COUNT || !pet_owned(st, item)) {
+		return false;
+	}
+	if (item == PET_ITEM_STREAK_FREEZE) {
+		return false; // not something a pet can wear
+	}
+	if (item_is_room(item)) {
+		st->room = 1 + ((int)item - (int)PET_ITEM_FIRST_ROOM);
+	} else {
+		st->wearing = (int)item;
+	}
+	return true;
+}
+
+bool pet_buy(pet_state_t *st, pet_item_t item) {
+	if (!st || (int)item < 0 || item >= PET_ITEM_COUNT) {
+		return false;
+	}
+	int price = ITEM_PRICES[item];
+
+	if (item == PET_ITEM_STREAK_FREEZE) {
+		if (st->notes < price || st->freezes >= 999) {
+			return false;
+		}
+		st->notes -= price;
+		st->freezes++;
+		return true;
+	}
+
+	if (st->owned & (1 << (int)item)) {
+		return false; // already in the wardrobe
+	}
+	if (st->notes < price) {
+		return false;
+	}
+	st->notes -= price;
+	st->owned |= 1 << (int)item;
+	pet_wear(st, item); // the thing just bought is the thing being worn
+	return true;
+}
+
+int pet_wearing(const pet_state_t *st) { return st ? st->wearing : -1; }
+
+int pet_room(const pet_state_t *st) { return st ? clamp_int(st->room, 0, 2) : 0; }
+
+int pet_freezes(const pet_state_t *st) { return st ? st->freezes : 0; }
+
+bool pet_has_achievement(const pet_state_t *st, int achievement) { return st && (st->achievements & achievement) != 0; }
+
+bool pet_award_achievement(pet_state_t *st, int achievement) {
+	if (!st) {
+		return false;
+	}
+	for (size_t i = 0; i < sizeof(ACHIEVEMENT_REWARDS) / sizeof(ACHIEVEMENT_REWARDS[0]); i++) {
+		if (ACHIEVEMENT_REWARDS[i].bit != achievement) {
+			continue;
+		}
+		if (st->achievements & achievement) {
+			return false;
+		}
+		st->achievements |= achievement;
+		st->notes += ACHIEVEMENT_REWARDS[i].notes;
+		return true;
+	}
+	return false;
+}
+
+// ---------------------------------------------------------------------------
+// The vibe a genre gives the page
+// ---------------------------------------------------------------------------
+
+static bool contains_word(const char *text, const char *word) { return strstr(text, word) != NULL; }
+
+pet_vibe_t pet_vibe_for_genre(const char *genre) {
+	if (!genre || !genre[0]) {
+		return PET_VIBE_NEUTRAL;
+	}
+
+	char lower[64];
+	size_t used = 0;
+	for (const char *p = genre; *p && used < sizeof(lower) - 1; p++) {
+		lower[used++] = (char)tolower((unsigned char)*p);
+	}
+	lower[used] = '\0';
+
+	// Calm first: "lo-fi hip hop" is calm, though "hip hop" alone is not.
+	static const char *const calm[] = {
+		"ambient", "lo-fi", "lofi", "chill", "classical", "acoustic", "folk", "jazz", "blues",
+		"soul",    "downtempo", "new age", "piano", "bossa", "sleep", "meditation", "ballad",
+	};
+	for (size_t i = 0; i < sizeof(calm) / sizeof(calm[0]); i++) {
+		if (contains_word(lower, calm[i])) {
+			return PET_VIBE_CALM;
+		}
+	}
+
+	static const char *const energetic[] = {
+		"electronic", "dance",  "edm",       "house",   "techno",    "trance", "drum",  "dnb",
+		"rock",       "metal",  "punk",      "hardcore", "hip-hop",  "hip hop", "rap",   "breakbeat",
+		"synthwave",  "industrial", "disco", "funk",    "ska",       "dubstep", "bass",  "gabber",
+	};
+	for (size_t i = 0; i < sizeof(energetic) / sizeof(energetic[0]); i++) {
+		if (contains_word(lower, energetic[i])) {
+			return PET_VIBE_ENERGETIC;
+		}
+	}
+	return PET_VIBE_NEUTRAL;
+}
+
+// ---------------------------------------------------------------------------
 // The configuration
 // ---------------------------------------------------------------------------
+
+// A day's hashes, as one short line: "123,456,789". Empty when there are none.
+static void save_hashes(const char *key, const uint32_t *set, int count) {
+	char text[128];
+	size_t used = 0;
+	text[0] = '\0';
+	for (int i = 0; i < count && i < PET_DAY_KEYS; i++) {
+		int wrote = snprintf(text + used, sizeof(text) - used, "%s%u", i ? "," : "", (unsigned)set[i]);
+		if (wrote < 0 || (size_t)wrote >= sizeof(text) - used) {
+			break;
+		}
+		used += (size_t)wrote;
+	}
+	config_set(PET_SECTION, key, text);
+}
+
+static void load_hashes(const char *key, uint32_t *set, int *count) {
+	*count = 0;
+	const char *text = config_get(PET_SECTION, key, "");
+	while (*text && *count < PET_DAY_KEYS) {
+		while (*text == ' ') {
+			text++;
+		}
+		char *end = NULL;
+		unsigned long value = strtoul(text, &end, 10);
+		if (end == text || value == 0 || value > UINT32_MAX) {
+			break;
+		}
+		set[(*count)++] = (uint32_t)value;
+		text = end;
+		if (*text == ',') {
+			text++;
+		} else if (*text && *text != ' ') {
+			break;
+		}
+	}
+}
 
 void pet_load(pet_state_t *st, int64_t now, long day) {
 	if (!st) {
@@ -414,15 +775,27 @@ void pet_load(pet_state_t *st, int64_t now, long day) {
 	st->xp_secs = (int64_t)config_get_int(PET_SECTION, "xp_secs", 0);
 	st->day = config_get_int(PET_SECTION, "day", 0);
 	st->today_secs = (int)config_get_int(PET_SECTION, "today_secs", 0);
+	st->today_xp_secs = (int)config_get_int(PET_SECTION, "today_xp_secs", 0);
 	st->happy = (int)config_get_int(PET_SECTION, "happy", 50);
 	st->energy = (int)config_get_int(PET_SECTION, "energy", 80);
 	st->streak = (int)config_get_int(PET_SECTION, "streak", 0);
 	st->goal_day = config_get_int(PET_SECTION, "goal_day", 0);
+	st->freeze_day = config_get_int(PET_SECTION, "freeze_day", 0);
+	st->notes = (int)config_get_int(PET_SECTION, "notes", 0);
+	st->note_credit = (int)config_get_int(PET_SECTION, "note_credit", 0);
+	st->bonus_credit = (int)config_get_int(PET_SECTION, "bonus_credit", 0);
+	st->achievements = (int)config_get_int(PET_SECTION, "achievements", 0);
+	st->owned = (int)config_get_int(PET_SECTION, "owned", 0);
+	st->wearing = (int)config_get_int(PET_SECTION, "wearing", PET_ITEM_NONE);
+	st->room = (int)config_get_int(PET_SECTION, "room", 0);
+	st->freezes = (int)config_get_int(PET_SECTION, "freezes", 0);
 	st->happy_credit = (int)config_get_int(PET_SECTION, "happy_credit", 0);
 	st->energy_credit = (int)config_get_int(PET_SECTION, "energy_credit", 0);
 	st->idle_happy_credit = (int)config_get_int(PET_SECTION, "idle_happy_credit", 0);
 	st->idle_energy_credit = (int)config_get_int(PET_SECTION, "idle_energy_credit", 0);
 	st->pets = (int)config_get_int(PET_SECTION, "pets", 0);
+	load_hashes("day_genres", st->day_genres, &st->day_genre_count);
+	load_hashes("day_albums", st->day_albums, &st->day_album_count);
 
 	// A hand edit, a half-written file or a state from a much older build is
 	// brought back inside the ranges this arithmetic assumes.
@@ -430,19 +803,35 @@ void pet_load(pet_state_t *st, int64_t now, long day) {
 		st->xp_secs = 0;
 	}
 	st->today_secs = clamp_int(st->today_secs, 0, 86400);
+	st->today_xp_secs = clamp_int(st->today_xp_secs, 0, PET_DAILY_XP_SECS);
 	st->happy = clamp_int(st->happy, 0, PET_HAPPY_MAX);
 	st->energy = clamp_int(st->energy, 0, PET_ENERGY_MAX);
 	st->streak = clamp_int(st->streak, 0, 100000);
+	st->notes = clamp_int(st->notes, 0, INT_MAX);
+	st->note_credit = clamp_int(st->note_credit, 0, 59);
+	st->bonus_credit = clamp_int(st->bonus_credit, 0, 99);
 	st->happy_credit = clamp_int(st->happy_credit, 0, PET_HAPPY_SECS_PER_POINT);
 	st->energy_credit = clamp_int(st->energy_credit, 0, PET_ENERGY_SECS_PER_POINT);
 	st->idle_happy_credit = clamp_int(st->idle_happy_credit, 0, PET_IDLE_HAPPY_SECS_PER_POINT);
 	st->idle_energy_credit = clamp_int(st->idle_energy_credit, 0, PET_IDLE_ENERGY_SECS_PER_POINT);
+	st->freezes = clamp_int(st->freezes, 0, 999);
 	st->pets = clamp_int(st->pets, 0, INT_MAX);
+
+	// Only the achievements and the things this build knows how to sell; a
+	// bit from a newer build would otherwise be a wardrobe entry nobody can
+	// see. Consumables are not owned, so their bit means nothing here.
+	st->achievements &= PET_ACH_NIGHT_OWL | PET_ACH_DEEP_DIVER | PET_ACH_POLYMATH | PET_ACH_FOCUS;
+	st->owned &= (1 << PET_ITEM_PARTY_HAT) | (1 << PET_ITEM_HEADPHONES) | (1 << PET_ITEM_SCARF) |
+				 (1 << PET_ITEM_CROWN) | (1 << PET_ITEM_ROOM_SUNSET) | (1 << PET_ITEM_ROOM_NIGHT);
+
 	if (st->day < 0) {
 		st->day = 0;
 	}
 	if (st->goal_day < 0) {
 		st->goal_day = 0;
+	}
+	if (st->freeze_day < 0) {
+		st->freeze_day = 0;
 	}
 	if (st->last_seen <= 0) {
 		st->last_seen = now;
@@ -453,6 +842,18 @@ void pet_load(pet_state_t *st, int64_t now, long day) {
 	if (st->last_pet < 0) {
 		st->last_pet = 0;
 	}
+	if (st->wearing < 0 || st->wearing > PET_ITEM_LAST_OUTFIT || !(st->owned & (1 << st->wearing))) {
+		st->wearing = PET_ITEM_NONE;
+	}
+	if (st->room < 0 || st->room > 2) {
+		st->room = 0;
+	}
+	if (st->room == 1 && !(st->owned & (1 << PET_ITEM_ROOM_SUNSET))) {
+		st->room = 0;
+	}
+	if (st->room == 2 && !(st->owned & (1 << PET_ITEM_ROOM_NIGHT))) {
+		st->room = 0;
+	}
 }
 
 void pet_save(const pet_state_t *st) {
@@ -460,66 +861,67 @@ void pet_save(const pet_state_t *st) {
 		return;
 	}
 
-	// config_set_int() leaves the file alone when the value is what is already
-	// there, so this can be called as often as a page likes: the write happens
-	// only for the fields that moved.
-	config_set_int(PET_SECTION, "adopted", (long)clamp_i64(st->adopted, 0, LONG_MAX));
-	config_set_int(PET_SECTION, "last_seen", (long)clamp_i64(st->last_seen, 0, LONG_MAX));
-	config_set_int(PET_SECTION, "last_music", (long)clamp_i64(st->last_music, 0, LONG_MAX));
-	config_set_int(PET_SECTION, "last_pet", (long)clamp_i64(st->last_pet, 0, LONG_MAX));
-	config_set_int(PET_SECTION, "xp_secs", (long)clamp_i64(st->xp_secs, 0, LONG_MAX));
+	config_set_int(PET_SECTION, "adopted", (long)st->adopted);
+	config_set_int(PET_SECTION, "last_seen", (long)st->last_seen);
+	config_set_int(PET_SECTION, "last_music", (long)st->last_music);
+	config_set_int(PET_SECTION, "last_pet", (long)st->last_pet);
+	config_set_int(PET_SECTION, "xp_secs", (long)st->xp_secs);
 	config_set_int(PET_SECTION, "day", st->day);
 	config_set_int(PET_SECTION, "today_secs", st->today_secs);
+	config_set_int(PET_SECTION, "today_xp_secs", st->today_xp_secs);
 	config_set_int(PET_SECTION, "happy", st->happy);
 	config_set_int(PET_SECTION, "energy", st->energy);
 	config_set_int(PET_SECTION, "streak", st->streak);
 	config_set_int(PET_SECTION, "goal_day", st->goal_day);
+	config_set_int(PET_SECTION, "freeze_day", st->freeze_day);
+	config_set_int(PET_SECTION, "notes", st->notes);
+	config_set_int(PET_SECTION, "note_credit", st->note_credit);
+	config_set_int(PET_SECTION, "bonus_credit", st->bonus_credit);
+	config_set_int(PET_SECTION, "achievements", st->achievements);
+	config_set_int(PET_SECTION, "owned", st->owned);
+	config_set_int(PET_SECTION, "wearing", st->wearing);
+	config_set_int(PET_SECTION, "room", st->room);
+	config_set_int(PET_SECTION, "freezes", st->freezes);
 	config_set_int(PET_SECTION, "happy_credit", st->happy_credit);
 	config_set_int(PET_SECTION, "energy_credit", st->energy_credit);
 	config_set_int(PET_SECTION, "idle_happy_credit", st->idle_happy_credit);
 	config_set_int(PET_SECTION, "idle_energy_credit", st->idle_energy_credit);
 	config_set_int(PET_SECTION, "pets", st->pets);
-
-	config_save();
+	save_hashes("day_genres", st->day_genres, st->day_genre_count);
+	save_hashes("day_albums", st->day_albums, st->day_album_count);
 }
 
 void pet_name(char *out, size_t out_size) {
 	if (!out || out_size == 0) {
 		return;
 	}
+	const char *stored = config_get(PET_SECTION, "name", "Momo");
 
-	const char *name = config_get(PET_SECTION, "name", "Momo");
-	while (*name == ' ' || *name == '\t') {
-		name++;
+	const char *start = stored;
+	while (*start && isspace((unsigned char)*start)) {
+		start++;
+	}
+	const char *end = start + strlen(start);
+	while (end > start && isspace((unsigned char)end[-1])) {
+		end--;
 	}
 
-	size_t len = strlen(name);
-	while (len > 0 && (name[len - 1] == ' ' || name[len - 1] == '\t' || name[len - 1] == '\r' || name[len - 1] == '\n')) {
-		len--;
+	size_t length = (size_t)(end - start);
+	if (length == 0) {
+		const char *fallback = "Momo";
+		length = strlen(fallback);
+		start = fallback;
 	}
 
-	// The page draws the name on one line and clips it, but a clip in the
-	// middle of a UTF-8 sequence is a missing glyph. Back off to a character
-	// boundary before the buffer ends.
-	size_t max = 24;
-	if (max > out_size - 1) {
-		max = out_size - 1;
-	}
-	if (len > max) {
-		len = max;
-		while (len > 0 && ((unsigned char)name[len] & 0xC0) == 0x80) {
-			len--;
+	// The page has room for a short name. Cut at a UTF-8 boundary so a
+	// two-byte character is either whole or absent, never half drawn.
+	size_t limit = out_size - 1;
+	if (length > limit) {
+		length = limit;
+		while (length > 0 && ((unsigned char)start[length] & 0xC0) == 0x80) {
+			length--;
 		}
 	}
-
-	if (len == 0) {
-		name = "Momo";
-		len = strlen(name);
-		if (len > out_size - 1) {
-			len = out_size - 1;
-		}
-	}
-
-	memcpy(out, name, len);
-	out[len] = '\0';
+	memcpy(out, start, length);
+	out[length] = '\0';
 }

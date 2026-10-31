@@ -1,9 +1,10 @@
 // The music pet's arithmetic, with no screen and no audio.
 //
 // The creature on the page is a drawing; what can be wrong quietly is how the
-// mood moves with the listening, how it falls when the player is idle, when the
-// goal counts and when the pet grows. All of that is pet.c, plain integers, and
-// this is where it is driven second by second.
+// mood moves with the listening, what a minute is worth, how it falls when the
+// player is idle, when the goal counts, when the pet grows and what the wallet
+// can buy. All of that is pet.c, plain integers, and this is where it is driven
+// second by second.
 
 #include <assert.h>
 #include <stdio.h>
@@ -27,20 +28,35 @@ static void fresh(void) { pet_defaults(&st, T0, DAY0); }
 
 // Long listens go through the same one-hour ceiling a tick has: pet_advance()
 // is a second-by-second call, and a caller cannot claim a whole day at once.
-static void listen(int seconds) {
+// When the day's XP is exhausted the test moves the calendar to midnight, the
+// way a real player would have to wait for it.
+static void feed(int seconds, int bonus_percent) {
 	while (seconds > 0) {
+		int room = PET_DAILY_XP_SECS - st.today_xp_secs;
+		if (room <= 0) {
+			pet_advance(&st, st.last_seen, st.day + 1, 0, 0);
+			continue;
+		}
 		int chunk = seconds > 3600 ? 3600 : seconds;
-		pet_advance(&st, st.last_seen + 1, st.day, chunk);
+		if (chunk > room) {
+			chunk = room;
+		}
+		pet_advance(&st, st.last_seen + 1, st.day, chunk, bonus_percent);
 		seconds -= chunk;
 	}
 }
 
+static void listen(int seconds) { feed(seconds, 0); }
+
 static void one_second(int seconds) {
 	// The ordinary tick: one second of music, with the clock moving with it.
 	for (int i = 0; i < seconds; i++) {
-		pet_advance(&st, st.last_seen + 1, st.day, 1);
+		pet_advance(&st, st.last_seen + 1, st.day, 1, 0);
 	}
 }
+
+// A tick at midnight, without pretending any time passed.
+static void next_day(void) { pet_advance(&st, st.last_seen, st.day + 1, 0, 0); }
 
 static void test_defaults(void) {
 	fresh();
@@ -51,7 +67,16 @@ static void test_defaults(void) {
 	assert(st.energy == 80);
 	assert(st.xp_secs == 0);
 	assert(st.today_secs == 0);
+	assert(st.today_xp_secs == 0);
+	assert(st.notes == 0);
+	assert(st.freezes == 0);
+	assert(st.achievements == 0);
+	assert(st.owned == 0);
+	assert(st.wearing == -1);
+	assert(st.room == 0);
 	assert(st.day == DAY0);
+	assert(st.day_genre_count == 0);
+	assert(st.day_album_count == 0);
 	assert(pet_stage(&st) == PET_STAGE_EGG);
 	assert(pet_hearts(&st) == 3); // 50 percent, rounded
 	assert(pet_mood(&st, T0) == PET_MOOD_HAPPY);
@@ -66,22 +91,24 @@ static void test_music_fills_the_meters(void) {
 	assert(st.happy == 50);
 	assert(st.energy == 81);
 	assert(st.xp_secs == 19);
+	assert(st.note_credit == 19);
 
 	one_second(1);
 	assert(st.happy == 51); // the twentieth second
 	assert(st.xp_secs == 20);
 
 	// A long listen: happiness at one point per twenty seconds, energy at one
-	// per twelve (and capped at a hundred).
+	// per twelve (and capped at a hundred). Ten minutes is ten notes.
 	fresh();
-	pet_advance(&st, T0, DAY0, 600);
+	pet_advance(&st, T0, DAY0, 600, 0);
 	assert(st.happy == 80);
 	assert(st.energy == 100);
 	assert(pet_hearts(&st) == 4);
+	assert(st.notes == 10);
 
 	// Nothing goes past a hundred however long the album is.
 	fresh();
-	pet_advance(&st, T0, DAY0, 3000);
+	pet_advance(&st, T0, DAY0, 3000, 0);
 	assert(st.happy == PET_HAPPY_MAX);
 	assert(st.energy == PET_ENERGY_MAX);
 	assert(pet_hearts(&st) == 5);
@@ -89,11 +116,11 @@ static void test_music_fills_the_meters(void) {
 
 static void test_idleness_costs(void) {
 	fresh();
-	pet_advance(&st, T0 + 1800, DAY0, 0);
+	pet_advance(&st, T0 + 1800, DAY0, 0, 0);
 	assert(st.happy == 49);
 	assert(st.energy == 77); // three ten-minute steps
 
-	pet_advance(&st, T0 + 1800 + 600, DAY0, 0);
+	pet_advance(&st, T0 + 1800 + 600, DAY0, 0, 0);
 	assert(st.happy == 49);
 	assert(st.energy == 76);
 
@@ -103,7 +130,7 @@ static void test_idleness_costs(void) {
 	fresh();
 	one_second(20);
 	int happy_after_track = st.happy;
-	pet_advance(&st, st.last_seen + 3600, DAY0, 1);
+	pet_advance(&st, st.last_seen + 3600, DAY0, 1, 0);
 	assert(st.happy == happy_after_track - 1); // 3599 idle seconds pay one point
 	assert(st.xp_secs == 21);
 }
@@ -112,7 +139,7 @@ static void test_offline_time_is_capped(void) {
 	fresh();
 	// A month away is a week of decay, not a month of it: the cap is what
 	// keeps a clock set years ahead from rolling the arithmetic over.
-	pet_advance(&st, T0 + 30 * DAY, DAY0 + 30, 0);
+	pet_advance(&st, T0 + 30 * DAY, DAY0 + 30, 0, 0);
 	assert(st.happy == 0);
 	assert(st.energy == 0);
 	assert(st.last_seen == T0 + 30 * DAY);
@@ -125,7 +152,7 @@ static void test_a_backwards_clock_is_harmless(void) {
 	int energy = st.energy;
 	int64_t xp = st.xp_secs;
 
-	pet_advance(&st, T0 - 5000, DAY0, 0);
+	pet_advance(&st, T0 - 5000, DAY0, 0, 0);
 	assert(st.happy == happy);
 	assert(st.energy == energy);
 	assert(st.xp_secs == xp);
@@ -135,34 +162,69 @@ static void test_a_backwards_clock_is_harmless(void) {
 static void test_the_daily_goal_and_the_streak(void) {
 	fresh();
 
-	int events = pet_advance(&st, T0, DAY0, PET_DAY_GOAL_SECS);
+	int events = pet_advance(&st, T0, DAY0, PET_DAY_GOAL_SECS, 0);
 	assert(events & PET_EVENT_GOAL_MET);
 	assert(st.goal_day == DAY0);
 	assert(st.streak == 1);
 	assert(pet_goal_met_today(&st));
 
 	// The same day does not count twice.
-	events = pet_advance(&st, st.last_seen + 1, DAY0, 1);
+	events = pet_advance(&st, st.last_seen + 1, DAY0, 1, 0);
 	assert(!(events & PET_EVENT_GOAL_MET));
 	assert(st.streak == 1);
 
 	// The next day starts empty, and yesterday's streak is still alive.
-	pet_advance(&st, st.last_seen + 60, DAY0 + 1, 0);
+	pet_advance(&st, st.last_seen + 60, DAY0 + 1, 0, 0);
 	assert(st.today_secs == 0);
 	assert(st.streak == 1);
 	assert(!pet_goal_met_today(&st));
 
 	// Reaching it again continues the streak.
-	events = pet_advance(&st, st.last_seen + 60, DAY0 + 1, PET_DAY_GOAL_SECS);
+	events = pet_advance(&st, st.last_seen + 60, DAY0 + 1, PET_DAY_GOAL_SECS, 0);
 	assert(events & PET_EVENT_GOAL_MET);
 	assert(st.streak == 2);
 
 	// A day skipped breaks it, and the day after that starts again at one.
-	pet_advance(&st, st.last_seen + 60, DAY0 + 3, 0);
+	pet_advance(&st, st.last_seen + 60, DAY0 + 3, 0, 0);
 	assert(st.streak == 0);
-	events = pet_advance(&st, st.last_seen + 60, DAY0 + 3, PET_DAY_GOAL_SECS);
+	events = pet_advance(&st, st.last_seen + 60, DAY0 + 3, PET_DAY_GOAL_SECS, 0);
 	assert(events & PET_EVENT_GOAL_MET);
 	assert(st.streak == 1);
+}
+
+static void test_a_freeze_covers_a_missed_day(void) {
+	fresh();
+
+	pet_advance(&st, T0, DAY0, PET_DAY_GOAL_SECS, 0);
+	assert(st.streak == 1);
+	st.freezes = 2;
+
+	// Yesterday was met: nothing is spent.
+	next_day();
+	assert(st.streak == 1);
+	assert(st.freezes == 2);
+
+	// Yesterday was missed and there is a freeze: it covers the day, and the
+	// run stays where it was.
+	next_day();
+	assert(st.streak == 1);
+	assert(st.freezes == 1);
+	assert(st.freeze_day == DAY0 + 1);
+
+	// Meeting today's goal after a frozen day continues the run.
+	pet_advance(&st, st.last_seen + 60, DAY0 + 2, PET_DAY_GOAL_SECS, 0);
+	assert(st.streak == 2);
+	assert(st.goal_day == DAY0 + 2);
+
+	// Another missed day spends the last freeze and keeps the run; the one
+	// after it, with none left, ends it.
+	pet_advance(&st, st.last_seen + 60, DAY0 + 3, 0, 0);
+	assert(st.streak == 2);
+	pet_advance(&st, st.last_seen + 60, DAY0 + 4, 0, 0);
+	assert(st.streak == 2);
+	assert(st.freezes == 0);
+	pet_advance(&st, st.last_seen + 60, DAY0 + 5, 0, 0);
+	assert(st.streak == 0);
 }
 
 static void test_growth(void) {
@@ -189,10 +251,194 @@ static void test_growth(void) {
 
 	// The stage-up is reported once, at the crossing.
 	fresh();
-	int events = pet_advance(&st, T0, DAY0, 5 * 60);
+	int events = pet_advance(&st, T0, DAY0, 5 * 60, 0);
 	assert(events & PET_EVENT_STAGE_UP);
-	events = pet_advance(&st, st.last_seen + 1, DAY0, 1);
+	events = pet_advance(&st, st.last_seen + 1, DAY0, 1, 0);
 	assert(!(events & PET_EVENT_STAGE_UP));
+}
+
+static void test_the_daily_xp_ceiling(void) {
+	fresh();
+
+	// Five hours of music in one day: four are credited, and the fifth feeds
+	// the meters and the goal but buys nothing.
+	for (int hour = 0; hour < 5; hour++) {
+		pet_advance(&st, T0, DAY0, HOUR, 0);
+	}
+	assert(st.xp_secs == PET_DAILY_XP_SECS);
+	assert(st.today_xp_secs == PET_DAILY_XP_SECS);
+	assert(st.today_secs == 5 * HOUR);
+	assert(st.notes == PET_DAILY_XP_SECS / 60);
+	assert(pet_goal_met_today(&st));
+
+	// The ceiling is the day's, not the pet's: tomorrow starts again.
+	next_day();
+	assert(st.today_xp_secs == 0);
+	pet_advance(&st, st.last_seen, st.day, HOUR, 0);
+	assert(st.xp_secs == PET_DAILY_XP_SECS + HOUR);
+	assert(st.today_xp_secs == HOUR);
+	assert(st.notes == PET_DAILY_XP_SECS / 60 + 60);
+}
+
+static void test_diversity_bonus(void) {
+	fresh();
+	int events = -1;
+
+	// A new album and a new genre: the first track of a day is worth 20%.
+	assert(pet_note_track(&st, "Rock", "Album A", &events) == PET_DIVERSITY_BONUS_PERCENT);
+	assert(events == PET_EVENT_NONE);
+	assert(st.day_genre_count == 1);
+	assert(st.day_album_count == 1);
+
+	// The same record again is not a discovery.
+	assert(pet_note_track(&st, "Rock", "Album A", &events) == 0);
+
+	// A new record of the same genre is.
+	assert(pet_note_track(&st, "Rock", "Album B", &events) == PET_DIVERSITY_BONUS_PERCENT);
+
+	// And a new genre on a record already heard is.
+	assert(pet_note_track(&st, "Jazz", "Album A", &events) == PET_DIVERSITY_BONUS_PERCENT);
+
+	// Case and surrounding space do not make a new genre.
+	assert(pet_note_track(&st, "  rock ", "Album C", &events) ==
+		   PET_DIVERSITY_BONUS_PERCENT); // the album is new; the genre is not
+	assert(st.day_genre_count == 2);
+
+	// A live stream has neither, and teaches nothing.
+	assert(pet_note_track(&st, "", "", &events) == 0);
+
+	// The bonus is paid on the credited seconds: ten minutes is twelve.
+	fresh();
+	pet_advance(&st, T0, DAY0, 600, PET_DIVERSITY_BONUS_PERCENT);
+	assert(st.xp_secs == 720);
+	assert(st.today_xp_secs == 720);
+	assert(st.notes == 12);
+
+	// The fraction carries between ticks rather than being rounded away.
+	fresh();
+	for (int i = 0; i < 5; i++) {
+		pet_advance(&st, st.last_seen + 1, DAY0, 1, PET_DIVERSITY_BONUS_PERCENT);
+	}
+	assert(st.xp_secs == 6); // five fifths of a bonus second arrived
+
+	// Tomorrow, the same record is new again.
+	fresh();
+	pet_note_track(&st, "Rock", "Album A", &events);
+	next_day();
+	assert(st.day_genre_count == 0);
+	assert(st.day_album_count == 0);
+	assert(pet_note_track(&st, "Rock", "Album A", &events) == PET_DIVERSITY_BONUS_PERCENT);
+}
+
+static void test_polymath(void) {
+	fresh();
+	static const char *const genres[] = {"Rock", "Jazz", "Ambient", "Electronic"};
+	for (size_t i = 0; i < sizeof(genres) / sizeof(genres[0]); i++) {
+		int events = PET_EVENT_NONE;
+		assert(pet_note_track(&st, genres[i], genres[i], &events) == PET_DIVERSITY_BONUS_PERCENT);
+		assert(!(events & PET_EVENT_POLYMATH));
+	}
+	assert(!pet_has_achievement(&st, PET_ACH_POLYMATH));
+
+	int notes_before = st.notes;
+	int events = PET_EVENT_NONE;
+	assert(pet_note_track(&st, "Folk", "E", &events) == PET_DIVERSITY_BONUS_PERCENT);
+	assert(events & PET_EVENT_POLYMATH);
+	assert(pet_has_achievement(&st, PET_ACH_POLYMATH));
+	assert(st.notes == notes_before + 25);
+
+	// The fifth genre of another day is five genres again, but the award was
+	// already earned: it pays once.
+	next_day();
+	notes_before = st.notes;
+	for (int i = 0; i < 5; i++) {
+		char genre[16];
+		snprintf(genre, sizeof(genre), "Genre%d", i);
+		pet_note_track(&st, genre, genre, &events);
+	}
+	assert(st.notes == notes_before);
+}
+
+static void test_wallet_and_wardrobe(void) {
+	fresh();
+	st.notes = 100;
+	assert(!pet_buy(&st, PET_ITEM_PARTY_HAT)); // 120, too dear
+	assert(st.notes == 100);
+	assert(!pet_owned(&st, PET_ITEM_PARTY_HAT));
+
+	st.notes = 500;
+	assert(pet_buy(&st, PET_ITEM_PARTY_HAT));
+	assert(st.notes == 380);
+	assert(pet_owned(&st, PET_ITEM_PARTY_HAT));
+	assert(pet_wearing(&st) == PET_ITEM_PARTY_HAT); // bought is worn
+
+	// Buying it again is not a second sale.
+	assert(!pet_buy(&st, PET_ITEM_PARTY_HAT));
+	assert(st.notes == 380);
+
+	// It can come off and go back on without spending anything.
+	assert(pet_wear(&st, PET_ITEM_NONE));
+	assert(pet_wearing(&st) == -1);
+	assert(pet_wear(&st, PET_ITEM_PARTY_HAT));
+	assert(st.notes == 380);
+
+	// Rooms are bought and chosen the same way, and are separate from the
+	// outfit.
+	assert(pet_buy(&st, PET_ITEM_ROOM_SUNSET));
+	assert(st.notes == 200);
+	assert(pet_room(&st) == 1);
+	assert(pet_wearing(&st) == PET_ITEM_PARTY_HAT);
+	assert(!pet_buy(&st, PET_ITEM_ROOM_NIGHT)); // 240, and only 200 is left
+	assert(pet_room(&st) == 1);
+	assert(st.notes == 200);
+	assert(pet_buy(&st, PET_ITEM_STREAK_FREEZE));
+	assert(pet_freezes(&st) == 1);
+	assert(st.notes == 50);
+	assert(!pet_wear(&st, PET_ITEM_STREAK_FREEZE)); // food for the streak, not a hat
+
+	// The prices and tags the wardrobe draws.
+	assert(pet_item_price(PET_ITEM_CROWN) == 500);
+	assert(strcmp(pet_item_tag(PET_ITEM_CROWN), "pet_item_crown") == 0);
+	assert(pet_item_price(PET_ITEM_COUNT) == -1);
+}
+
+static void test_achievements(void) {
+	fresh();
+	int notes = st.notes;
+	assert(pet_award_achievement(&st, PET_ACH_FOCUS));
+	assert(pet_has_achievement(&st, PET_ACH_FOCUS));
+	assert(st.notes == notes + 20);
+	assert(!pet_award_achievement(&st, PET_ACH_FOCUS)); // once
+	assert(st.notes == notes + 20);
+	assert(!pet_award_achievement(&st, 1 << 20)); // not one of ours
+	assert(strcmp(pet_achievement_tag(PET_ACH_NIGHT_OWL), "pet_ach_night_owl") == 0);
+}
+
+static void test_cheer(void) {
+	fresh();
+	st.happy = 50;
+
+	// Half an hour without a pause is worth a lift of its own; a record heard
+	// through is worth a smaller one.
+	pet_cheer(&st, PET_FOCUS_HAPPY_BONUS);
+	assert(st.happy == 60);
+	pet_cheer(&st, PET_ALBUM_HAPPY_BONUS);
+	assert(st.happy == 66);
+
+	// The meter still stops at a hundred, and a cheer is never a loss.
+	st.happy = 98;
+	pet_cheer(&st, PET_ALBUM_HAPPY_BONUS);
+	assert(st.happy == PET_HAPPY_MAX);
+	pet_cheer(&st, 0);
+	pet_cheer(&st, -5);
+	assert(st.happy == PET_HAPPY_MAX);
+}
+
+static void test_volume_floor(void) {
+	assert(!pet_audible_volume(0));
+	assert(!pet_audible_volume(PET_VOLUME_FLOOR - 1));
+	assert(pet_audible_volume(PET_VOLUME_FLOOR));
+	assert(pet_audible_volume(100));
 }
 
 static void test_mood(void) {
@@ -206,14 +452,18 @@ static void test_mood(void) {
 	st.happy = 10;
 	assert(pet_mood(&st, T0) == PET_MOOD_SAD);
 
-	// Six hours without music or a finger: asleep. The mood does not say
-	// "sad" for a creature that is only resting.
-	assert(pet_mood(&st, T0 + 6 * HOUR - 1) == PET_MOOD_SAD);
-	assert(pet_mood(&st, T0 + 6 * HOUR + 1) == PET_MOOD_SLEEPING);
+	// Two days without music: asleep. It does not say "sad" for a creature
+	// that is only resting, and six hours is not neglect.
+	assert(pet_mood(&st, T0 + 6 * HOUR) == PET_MOOD_SAD);
+	assert(pet_mood(&st, T0 + PET_SLEEP_AFTER_SECS - 1) == PET_MOOD_SAD);
+	assert(pet_mood(&st, T0 + PET_SLEEP_AFTER_SECS + 1) == PET_MOOD_SLEEPING);
 
-	// A petting wakes it.
-	assert(pet_pet(&st, T0 + 6 * HOUR + 2));
-	assert(pet_mood(&st, T0 + 6 * HOUR + 3) == PET_MOOD_SAD);
+	// A pat is welcome, but it does not wake the pet: only music does.
+	assert(pet_pet(&st, T0 + PET_SLEEP_AFTER_SECS + 2));
+	assert(pet_mood(&st, T0 + PET_SLEEP_AFTER_SECS + 3) == PET_MOOD_SLEEPING);
+
+	pet_advance(&st, T0 + PET_SLEEP_AFTER_SECS + 10, DAY0 + 2, 1, 0);
+	assert(pet_mood(&st, T0 + PET_SLEEP_AFTER_SECS + 11) == PET_MOOD_SAD);
 }
 
 static void test_petting(void) {
@@ -242,6 +492,19 @@ static void test_petting(void) {
 	assert(pet_pet(&st, T0)); // stored last_pet is ahead of this
 }
 
+static void test_vibe(void) {
+	assert(pet_vibe_for_genre(NULL) == PET_VIBE_NEUTRAL);
+	assert(pet_vibe_for_genre("") == PET_VIBE_NEUTRAL);
+	assert(pet_vibe_for_genre("Pop") == PET_VIBE_NEUTRAL);
+	assert(pet_vibe_for_genre("Rock") == PET_VIBE_ENERGETIC);
+	assert(pet_vibe_for_genre("Melodic Death Metal") == PET_VIBE_ENERGETIC);
+	assert(pet_vibe_for_genre("Electronic") == PET_VIBE_ENERGETIC);
+	assert(pet_vibe_for_genre("Lo-Fi Hip Hop") == PET_VIBE_CALM);
+	assert(pet_vibe_for_genre("Jazz") == PET_VIBE_CALM);
+	assert(pet_vibe_for_genre("Ambient") == PET_VIBE_CALM);
+	assert(pet_vibe_for_genre("  CLASSICAL ") == PET_VIBE_CALM);
+}
+
 static void test_day_number(void) {
 	setenv("TZ", "UTC", 1);
 	tzset();
@@ -264,9 +527,22 @@ static void test_persistence(void) {
 	st.energy = 41;
 	st.xp_secs = 4321;
 	st.today_secs = 321;
+	st.today_xp_secs = 654;
 	st.streak = 4;
 	st.goal_day = DAY0 - 1;
+	st.freeze_day = DAY0 - 2;
 	st.pets = 9;
+	st.notes = 123;
+	st.note_credit = 17;
+	st.bonus_credit = 42;
+	st.freezes = 2;
+	st.achievements = PET_ACH_FOCUS | PET_ACH_NIGHT_OWL;
+	st.owned = (1 << PET_ITEM_PARTY_HAT) | (1 << PET_ITEM_ROOM_NIGHT);
+	st.wearing = PET_ITEM_PARTY_HAT;
+	st.room = 2;
+	int events = 0;
+	pet_note_track(&st, "Jazz", "Kind of Blue", &events);
+	pet_note_track(&st, "Rock", "Abbey Road", &events);
 	pet_save(&st);
 
 	pet_state_t loaded;
@@ -276,10 +552,29 @@ static void test_persistence(void) {
 	assert(loaded.energy == st.energy);
 	assert(loaded.xp_secs == st.xp_secs);
 	assert(loaded.today_secs == st.today_secs);
+	assert(loaded.today_xp_secs == st.today_xp_secs);
 	assert(loaded.streak == st.streak);
 	assert(loaded.goal_day == st.goal_day);
+	assert(loaded.freeze_day == st.freeze_day);
 	assert(loaded.pets == st.pets);
+	assert(loaded.notes == st.notes);
+	assert(loaded.note_credit == st.note_credit);
+	assert(loaded.bonus_credit == st.bonus_credit);
+	assert(loaded.freezes == st.freezes);
+	assert(loaded.achievements == st.achievements);
+	assert(loaded.owned == st.owned);
+	assert(loaded.wearing == st.wearing);
+	assert(loaded.room == st.room);
 	assert(loaded.day == DAY0);
+	assert(loaded.day_genre_count == 2);
+	assert(loaded.day_album_count == 2);
+	assert(loaded.day_genres[0] == st.day_genres[0]);
+	assert(loaded.day_genres[1] == st.day_genres[1]);
+	assert(loaded.day_albums[0] == st.day_albums[0]);
+	assert(loaded.day_albums[1] == st.day_albums[1]);
+
+	// The discovery survives: the same record is not new after a reboot.
+	assert(pet_note_track(&loaded, "Jazz", "Kind of Blue", &events) == 0);
 
 	// A file that has never held a pet gives a new one, and writes it.
 	char path2[256];
@@ -288,17 +583,27 @@ static void test_persistence(void) {
 	pet_load(&loaded, T0, DAY0);
 	assert(loaded.adopted == T0);
 	assert(loaded.happy == 50);
+	assert(loaded.wearing == -1);
 	assert(config_get_int("pet", "happy", -1) == 50);
+	assert(config_get_int("pet", "notes", -1) == 0);
 
 	// A hand-edited file beyond the ranges is brought back inside them.
 	config_set_int("pet", "happy", 9999);
 	config_set_int("pet", "energy", -20);
 	config_set_int("pet", "xp_secs", -5);
+	config_set_int("pet", "today_xp_secs", 999999);
+	config_set_int("pet", "notes", -50);
+	config_set_int("pet", "wearing", PET_ITEM_CROWN); // not owned
+	config_set_int("pet", "room", 2);		  // not owned either
 	pet_load(&loaded, T0, DAY0);
 	assert(loaded.adopted == T0); // unchanged by the clamps below
 	assert(loaded.happy == PET_HAPPY_MAX);
 	assert(loaded.energy == 0);
 	assert(loaded.xp_secs == 0);
+	assert(loaded.today_xp_secs == PET_DAILY_XP_SECS);
+	assert(loaded.notes == 0);
+	assert(loaded.wearing == -1);
+	assert(loaded.room == 0);
 }
 
 static void test_name(void) {
@@ -319,15 +624,17 @@ static void test_name(void) {
 
 	// A long name is cut at a character boundary, never inside a UTF-8
 	// sequence: the last byte of the result is not a continuation byte.
+	// The page hands it a 25-byte buffer, so the cut is at 24.
+	char narrow[25];
 	config_set("pet", "name", "Mélodieeeeeeeeeeeeeeeeeeeeeeeeeeeeee");
-	pet_name(out, sizeof(out));
-	assert(strlen(out) <= 24);
-	for (size_t i = 0; out[i]; i++) {
-		if (((unsigned char)out[i] & 0xC0) == 0x80) {
+	pet_name(narrow, sizeof(narrow));
+	assert(strlen(narrow) <= 24);
+	for (size_t i = 0; narrow[i]; i++) {
+		if (((unsigned char)narrow[i] & 0xC0) == 0x80) {
 			assert(i > 0);
 		}
 	}
-	assert(strncmp(out, "Mélodie", 8) == 0);
+	assert(strncmp(narrow, "Mélodie", 8) == 0);
 }
 
 int main(void) {
@@ -338,12 +645,21 @@ int main(void) {
 	test_offline_time_is_capped();
 	test_a_backwards_clock_is_harmless();
 	test_the_daily_goal_and_the_streak();
+	test_a_freeze_covers_a_missed_day();
 	test_growth();
+	test_the_daily_xp_ceiling();
+	test_diversity_bonus();
+	test_polymath();
+	test_wallet_and_wardrobe();
+	test_achievements();
+	test_cheer();
+	test_volume_floor();
 	test_mood();
 	test_petting();
+	test_vibe();
 	test_persistence();
 	test_name();
 
-	printf("PASS music pet: metres, decay, goal, streak, stages and persistence\n");
+	printf("PASS music pet: XP ceiling, bonuses, wallet, goals, stages and persistence\n");
 	return 0;
 }

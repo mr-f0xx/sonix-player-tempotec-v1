@@ -176,6 +176,11 @@ void petwatch_track_title(char *out, size_t out_size) {
 }
 bool petwatch_pet_now(void) { return pet_pet(&pet_state, petwatch_now()); }
 int petwatch_take_events(void) { return 0; }
+int petwatch_take_achievement(void) { return 0; }
+pet_vibe_t petwatch_vibe(void) { return PET_VIBE_NEUTRAL; }
+bool petwatch_focus(void) { return false; }
+bool petwatch_buy(pet_item_t item) { return pet_buy(&pet_state, item); }
+bool petwatch_wear(pet_item_t item) { return pet_wear(&pet_state, item); }
 void petwatch_flush(void) {}
 
 /* A timer parked for the screen's dark half; there is no power manager here. */
@@ -876,6 +881,9 @@ static void choose_beats(lv_obj_t *page, int beats) {
  * is inside the panel, the words are translated, and the button really pets
  * the creature rather than only moving a picture. */
 static void check_pet_page(gui_config_t *cfg, const char *tag) {
+	// Three notes are not pocket change: they are enough to dress the pet and
+	// leave something in the wallet, which is what the wardrobe is for.
+	pet_state.notes = 500;
 	petpage_open();
 	assert(lv_screen_active() == petpage_screen);
 	lv_obj_update_layout(petpage_screen);
@@ -887,6 +895,8 @@ static void check_pet_page(gui_config_t *cfg, const char *tag) {
 	assert(find_label(petpage_screen, name));
 	assert(find_label(petpage_screen, tr("pet_energy")));
 	assert(find_label(petpage_screen, tr("pet_pet")));
+	// The balance sits in the title row, beside the way into the wardrobe.
+	assert(find_label(petpage_screen, "500"));
 	// Nothing is playing in this suite, so the line under the creature says
 	// what to do about it.
 	assert(find_label(petpage_screen, tr("pet_feed_me")));
@@ -894,6 +904,43 @@ static void check_pet_page(gui_config_t *cfg, const char *tag) {
 	int pets = pet_state.pets;
 	press_key(petpage_screen, tr("pet_pet"));
 	assert(pet_state.pets == pets + 1);
+
+	// The wardrobe: the first button in the page's own tree is the star in the
+	// corner (the back chevron lives on the shell's layer, not here).
+	lv_obj_t *wardrobe_button = find_class(petpage_screen, &lv_button_class);
+	assert(wardrobe_button);
+	lv_obj_send_event(wardrobe_button, LV_EVENT_CLICKED, NULL);
+	lv_obj_update_layout(petpage_screen);
+
+	lv_obj_t *wardrobe_title = find_label(petpage_screen, tr("pet_wardrobe"));
+	assert(wardrobe_title);
+	assert(lv_obj_is_visible(wardrobe_title));
+	assert(find_label(petpage_screen, tr("pet_notes_balance")));
+
+	char wardrobe_tag[64];
+	snprintf(wardrobe_tag, sizeof(wardrobe_tag), "%s-wardrobe", tag);
+	check_within_panel(petpage_screen, cfg, "Pet wardrobe");
+	dump_snapshot(petpage_screen, wardrobe_tag);
+
+	// A hat costs 120 of the 500: bought, and worn without a second tap.
+	press_key(petpage_screen, tr("pet_item_party_hat"));
+	assert(pet_state.notes == 380);
+	assert(pet_owned(&pet_state, PET_ITEM_PARTY_HAT));
+	assert(pet_wearing(&pet_state) == (int)PET_ITEM_PARTY_HAT);
+	assert(find_label(petpage_screen, tr("pet_wearing_now")));
+
+	// A freeze is a stock, not a garment: it can be bought twice, and it is
+	// never worn.
+	press_key(petpage_screen, tr("pet_item_streak_freeze"));
+	assert(pet_freezes(&pet_state) == 1);
+	press_key(petpage_screen, tr("pet_item_streak_freeze"));
+	assert(pet_freezes(&pet_state) == 2);
+	assert(pet_wearing(&pet_state) == (int)PET_ITEM_PARTY_HAT);
+
+	// The star closes what it opened, and the page is the pet again.
+	lv_obj_send_event(wardrobe_button, LV_EVENT_CLICKED, NULL);
+	lv_obj_update_layout(petpage_screen);
+	assert(!lv_obj_is_visible(wardrobe_title));
 
 	// Leaving gives the timer and the animations back: the page is a still
 	// picture again, and the state has been written out.

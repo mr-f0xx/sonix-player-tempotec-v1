@@ -242,16 +242,24 @@ a self-signed certificate), and HLS.
   remembered across visits and across a reboot; leaving the page stops the
   click, because the page is the only place it can be stopped from.
 
-- **Pet** - a small creature fed by the music: happiness and energy rise while
-  something is playing -- local files, streams, internet radio or a phone over
-  Bluetooth -- and fall while the player is quiet. It grows through five stages
-  over about fifteen hours of listening, sleeps after six hours without music,
-  and is petted by a tap, once a minute. A **20-minute daily goal** builds a
-  streak, and the hearts, the energy bar and the day's count are drawn on the
-  page. Its state lives in the settings file and survives a reboot; the only
-  cost is one callback a second in the interface loop that is already running,
-  and nothing at all when the page is not open. The creature is drawn from the
-  interface's own shapes, so it adds no art to the image.
+- **Pet** - a small creature fed by the music it can actually be heard by: a
+  local track, a stream, internet radio or a phone over Bluetooth, at a volume
+  at or above 10 percent. It grows through five stages, keeps a daily streak,
+  earns **Musical Notes** for the minutes it heard and spends them in a
+  wardrobe on hats, headphones, a scarf, a crown, two room themes and streak
+  freezes. A **15-minute daily goal** builds the streak and a bought freeze
+  covers one missed day. Achievements for listening late, hearing an album
+  through, five genres in a day and half an hour without a pause are worth
+  extra notes. A genre tag nudges how it moves: a slow sway for jazz, ambient
+  or lo-fi, a faster bob for rock, metal and electronic. It never dies, and
+  nothing it does punishes a player for not listening: forty-eight hours
+  without music is only "sleepy", and the first track wakes it. The page shows
+  the stage, the mood, the hearts, the energy, the day's minutes, the streak
+  and the wallet; a star in the corner opens the wardrobe. Its state lives in
+  the settings file and survives a reboot; the only cost is one callback a
+  second in the interface loop that is already running, and nothing at all
+  when the page is not open. The creature is drawn from the interface's own
+  shapes, so it adds no art to the image.
 
 ## Games
 

@@ -1271,70 +1271,148 @@ repeating it.
 
 ## A pet that eats music
 
-The More menu gained a small creature whose mood is the listening: play, and it
-gets happier and livelier; leave the player quiet, and both drift down. It grows
-through five stages -- egg, hatchling, sprout, companion, maestro -- over about
-fifteen hours of music, and it is petted by tapping it, which it likes once a
-minute.
+The More menu has a small creature whose mood is the listening: play, and it
+gets happier and livelier; leave the player quiet, and both drift down. It
+grows through five stages, keeps a daily streak, pays in **Musical Notes** for
+the minutes it heard, and spends them on a wardrobe.
+
+Version 2 is about a harder question than the first one: what should a second
+of the player's day be worth? The first version paid for any second with the
+status at PLAYING, which meant a muted file, a volume nobody could hear and an
+album left looping overnight all fed the pet just as well as a record actually
+listened to. The second version pays for listening that happened, and stops
+paying at the point where more of it stops meaning anything.
+
+### What a second is worth
+
+`petlisten.c` turns one observation of the player into the few facts the pet
+cares about, and it owns every rule about what counts:
+
+- **Audible** means the player is producing music *and* the output is at or
+  above `PET_VOLUME_FLOOR` (10 percent). The percentage read is the effective
+  one -- `device_state_get_volume_percent()`, the same number the volume
+  overlay shows -- so a hardware attenuation, a Bluetooth sink or the line-out
+  lock cannot make a quiet player look loud. Muted is zero, and zero is not
+  listening.
+- **Late callbacks are capped at five seconds.** The interface thread can sleep
+  through a file being opened or a big cover being decoded; a gap of a minute
+  is not a minute of proven listening, and paying for it would make the timer
+  itself the exploit.
+- **A track that ends by itself completes** -- heard to 90 percent, and at
+  least 30 seconds long -- while one that is skipped does not. Three completed
+  tracks of the same album in a row are an album run.
+- **Focus** is thirty minutes of uninterrupted audible listening. A pause, a
+  mute or a skip ends it; one or two seconds of a stopped player between tracks
+  is forgiven, because that is what changing track looks like and an album is
+  heard across those gaps. It is worth a lift of the heart meter on top of the
+  music that earned it, as is a record heard through.
+- **Night** is midnight to five, in the player's own time zone.
+
+Nothing in `petlisten.c` draws, reads the config or asks for the time: the
+caller passes `now`, which is what lets `tests/test_petlisten.c` drive the
+rules frame by frame with no audio hardware.
+
+### The day: a ceiling, and a bonus for something new
+
+A minute of credited listening is a minute of XP. The day holds at most four
+hours of it (`PET_DAILY_XP_SECS`), and that number is the whole anti-farming
+answer: an album on repeat all evening is worth exactly as much as the first
+four hours, and a muted player or one left playing to an empty room is worth
+nothing at all. Past the ceiling the meters still move -- the music is real --
+and the daily goal still counts; only progression and notes stop.
+
+A track from an album or a genre the pet has not heard today pays 20 percent
+more. It is small on purpose: it rewards the listener who puts on something new
+without making a diverse library a requirement. The day's genres and albums are
+kept as eight 32-bit hashes each (FNV-1a of the trimmed, lowercased tag) rather
+than as text, because the settings file is read by people and two short lines
+of numbers are cheaper neighbours than sixteen strings.
+
+The daily goal is fifteen minutes, counted at local midnight. Meeting it
+continues a streak. A day missed ends it -- unless a **streak freeze** covers
+that day, which is what the freeze is for; one freeze covers exactly one day,
+and only the day right after the last one.
+
+### Mood without a punishment
+
+The pet gets sleepy after forty-eight hours without music. Sleepy is not dead
+and not "sad": the eyes close, the "z z" appears, and the page says so. A pat
+is welcome but does not wake it -- only a track does. There is no death, no
+decay into an unusable page, and no way to lose the pet; a player who puts the
+device away for a month comes back to a sleepy creature that wakes on the first
+song.
+
+Happiness rises a point per twenty seconds of music and falls one per thirty
+minutes of silence; energy rises one per twelve seconds and falls one per ten
+minutes. A pet with no energy left earns happiness at half rate until music
+feeds it again, which is the only thing hunger changes.
+
+### Notes, the wardrobe and the achievements
+
+A credited minute is a note, capped with the XP at 240 a day, and achievements
+pay a bonus on top. The wardrobe is a sheet over the pet page, opened by the
+star in the title corner, with the balance as its first row:
+
+| item | notes | what it is |
+|---|---|---|
+| Party hat | 120 | an outfit |
+| Headphones | 200 | an outfit |
+| Scarf | 150 | an outfit |
+| Crown | 500 | the long-term purchase |
+| Sunset room | 180 | a room theme behind the creature |
+| Night room | 240 | the second room theme |
+| Streak freeze | 150 | one missed day, forgiven |
+
+Buying an outfit puts it on, and tapping an owned one puts it back on; rooms
+are chosen the same way and are independent of the outfit. A freeze is a stock
+-- bought every time, never worn, and shown as a count. The page shows the
+balance beside the star, and the wardrobe shows it again with the price of
+everything not yet bought.
+
+Achievements are awarded by the watcher, toasted by the page, and worth notes
+of their own: **Night Owl** (a minute of listening between midnight and five),
+**Deep Diver** (three completed tracks of one album without a skip), **Polymath**
+(five genres in a day) and **Deep Focus** (the thirty uninterrupted minutes).
+The last two also lift the heart meter by ten and six points, which is what
+makes a long sitting -- or an album end to end -- feel different from the same
+half hour of skipping.
 
 ### Where it lives, and what it does not cost
 
 There is no daemon and no thread. `petwatch.c` owns one `lv_timer` at 1 Hz,
 created at startup beside the status bar's own timers; the interface thread is
 already awake several times a second, so the pet adds one callback to a loop
-that is running anyway, and the callback is a few comparisons and a `time()`
-when nothing is playing. The page's repaint is a second timer, and that one
-exists only while the page is on the glass: it is created on
-`LV_EVENT_SCREEN_LOADED`, deleted on `LV_EVENT_SCREEN_UNLOADED`, and registered
-with `power_pause_in_standby()` so a dark screen costs nothing.
+that is running anyway. The page's repaint is a second timer, and that one
+exists only while the page is on the glass.
 
-The watcher is deliberately *not* registered with `power_pause_in_standby()`.
-Most listening happens with the panel off, and a paused watcher would credit
+The watcher is deliberately *not* registered with `power_pause_in_standby()`:
+most listening happens with the panel off, and a paused watcher would credit
 none of it. It reads the same predicate the rest of the player uses for "music
-is coming out": `audio_get_status() == AUDIO_STATUS_PLAYING`, or
-`radio_is_playing()`, or `btreceiver_is_streaming()` -- so local files, streams,
-internet radio and a phone over Bluetooth all feed the pet.
+is coming out" -- local files and streams through `audio_get_status()`, the
+radio through `radio_is_playing()`, a phone through
+`btreceiver_is_streaming()` -- and the tags through
+`device_state_loaded_metadata()`, which is documented as no copy and no sysfs.
 
-The tick credits at most five seconds to a late callback. The interface thread
-can be busy opening a file or decoding for longer than a second, and a gap of
-thirty seconds is not thirty seconds of proven listening; the rest is handed to
-`pet_advance()` as idle time, which is the truthful reading of a gap nobody
-observed.
+The state is written after two minutes of music, on a goal, a stage or an
+achievement, once per track (a discovery changes the day's hashes), when the
+page is left, after a purchase, and in `power_shutdown()` -- never once a
+second.
 
-### The arithmetic is plain C, and tested without a screen
+### Tested without a screen, and without audio
 
 `pet.c` knows nothing about LVGL, audio or the config store: it is given `now`,
-the local day and how many seconds of music were heard since the last call, and
-it returns a set of events. That is what makes it testable, and `tests/test_pet.c`
-does exactly that -- the feeds, the decay, the seven-day offline ceiling, a clock
-moved backwards, the daily goal and its streak, all five stages, all five moods
-including the sleep after six hours without music or a pat, the petting cooldown,
-and the round trip through `device_config.ini`.
-
-The numbers, chosen so that a normal day moves the creature and a weekend away
-does not destroy it:
-
-- **Happiness** gains a point per 20 seconds of music -- a three-minute track is
-  nine points -- and loses one per 30 minutes of silence. A pet with no energy
-  left earns happiness at half rate until the music has fed it again, which is
-  the only thing hunger changes: the pet is slower to cheer up, never punished.
-- **Energy** gains a point per 12 seconds of music and loses one per 10 minutes
-  idle. It is the meter that makes the creature look tired before it looks sad.
-- **The day** is 20 minutes of music, counted afresh at local midnight. Meeting
-  it continues a streak if yesterday's was met and restarts it at one if not;
-  jumping several days at once ends the run, because no day in between was ever
-  met. A clock moved backwards keeps the run and restarts the day's count rather
-  than calling it a broken streak.
-- **Stages** arrive at 0 seconds, 5 minutes, 1 hour, 4 hours and 15 hours of
-  cumulative music. Growth is announced once, from an event, not by comparing
-  stages on every repaint.
-
-The state is sixteen integers and a name in `[pet]` in the settings file. It is
-written after two minutes of music, on a goal or a stage, when the page is left,
-when the creature is petted, and in `power_shutdown()` -- never once a second.
-`config_set_*` already ignores a value that has not changed, and
-`config_store_save()` writes only a dirty store, so a long listen settles into a
-few small writes and a paused player writes nothing at all.
+the local day, the seconds heard and the track's bonus, and returns events.
+`tests/test_pet.c` drives that second by second -- the feeds and the decay, the
+daily ceiling and the next day's reset, the discovery bonus and the fraction it
+carries between ticks, all five stages, all five moods including the sleep
+after forty-eight hours, the goal and the freeze-assisted streak, the wallet,
+the wardrobe, the achievements, the volume floor, and the round trip through
+`device_config.ini`. `tests/test_petlisten.c` does the same for the rules: the
+floor, the late-callback cap, a completed album, a skip that starts the run
+over, short tracks, focus, and the night window. `tests/ui/test_tools_pages.c`
+opens the page on both panels, checks that nothing leaves the glass, that the
+words are translated, that the button pets, and that the wardrobe sells a hat
+and a freeze and closes again; the strings are in all eleven language files.
 
 ### The clock that has never been set
 
@@ -1342,39 +1420,38 @@ A player whose clock is still at the epoch adopts the pet at the epoch, and the
 first real `time()` after setup would look like fifty-six years of neglect. The
 watcher remembers whether `clock_is_set()` was true at startup; when it becomes
 true for the first time, every timestamp the pet holds is moved by the same
-amount, so its age and its listening survive and only the calendar changes. The
-same shift is done at boot when the clock is already true but the stored
-timestamps are still from before 2020 -- the case where the setup screen ran
-while the player was off.
+amount. The same shift is done at boot when the clock is already true but the
+stored timestamps are still from before 2020.
 
-### Drawn from the pieces that were already there
+### Upgrading from the first pet, and what is not here yet
 
-The creature adds no art to the image. It is a handful of LVGL objects -- discs,
-rounded bars, one arc for the mouth -- with a body size per stage, and it is
-re-placed rather than rebuilt when it grows. The palette is fixed and pastel
-(`#8FD6B0` and friends) because a pet that changed colour with the theme would
-stop being the same creature; the hearts, the energy bar, the note icon and the
-button still follow the theme, including the monochrome one. Mood changes which
-eyes, lids, mouth, cheeks and tears are shown, adds the "z z" of sleep, and
-starts the gentle bob and the drifting note only while music is playing and the
-creature is awake.
+The state grew, in the same `[pet]` section, and an existing pet keeps
+everything that made it what it was: its adoption time, XP (and so its stage),
+happiness, energy, streak and day count are read unchanged, and the new keys --
+notes, wardrobe, achievements, the day's discovery hashes -- fall back to zero.
+The one visible difference on the first day is the goal: fifteen minutes
+instead of twenty.
 
-The page is built the first time it is opened, the way the calculator's is, so
-boot pays nothing for a feature nobody has opened. `tests/ui/test_tools_pages.c`
-opens it, checks that everything it draws is on the 240 x 320 panel, that the
-words are translated, and that the button really pets the creature; the strings
-are in all eleven language files.
+What is not in this version, and should be said plainly:
 
-### What to expect, honestly
+- **Genre-gated unlocks** (ten hours of jazz for the fedora, synthwave for a
+  room) are not implemented. It needs per-genre listening hours kept in the
+  settings file, and genre tags on a card are frequently empty or spelled three
+  ways; a gate that never opens because the tags said "Jazz/Fusion" is worse
+  than an honest price in notes.
+- **Per-player skin and visualizer cosmetics** are not here either; the player
+  skins are their own subsystem.
+- **BPM** is not in the tag set this firmware reads, so the mood animation is
+  driven by the genre's words rather than by tempo.
+- **Listening outside the player** -- another app, another device -- is
+  invisible to it, by construction.
 
-The pet is a spinner for listening, not a session log: it never looks at which
-track, only that one is playing. A song left looping for an hour feeds it for an
-hour. With the panel off it keeps counting, which is the point, at the cost of
-one wake-up a second that the audio pipeline has already paid for. Leaving the
-player off for a week comes back to a sad, tired creature -- that is the seven-day
-ceiling, not a bug -- and an unset clock is forgiven once. And it is a hobby:
-nothing here touches the audio path, the library, or the shape of the settings
-file beyond its own section.
+What to expect, honestly: the pet is a spinner for listening, and the ceiling
+means it is a four-hour-a-day spinner. A song left looping all night buys
+nothing after four hours, which is the point. With the panel off it keeps
+counting, at the cost of one wake-up a second the audio pipeline has already
+paid for. And it is a hobby: nothing here touches the audio path, the library,
+or the shape of the settings file beyond its own section.
 
 ## The charger, with the player off
 

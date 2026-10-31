@@ -139,6 +139,18 @@ $(BUILD)/test_pet: $(PET_SRC) $(ROOT)/src/system/pet/pet.h $(ROOT)/src/system/co
 	@mkdir -p $(BUILD)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ $(PET_SRC) $(LDFLAGS) $(LDLIBS)
 
+# The listening rules: audible seconds, album runs, focus and night, still with
+# no audio hardware. pet.c comes along for the volume floor and the constants.
+PETLISTEN_SRC = test_petlisten.c $(ROOT)/src/system/pet/petlisten.c $(ROOT)/src/system/pet/pet.c \
+	$(ROOT)/src/system/core/config.c
+.PHONY: petlisten
+petlisten: $(BUILD)/test_petlisten
+	$(BUILD)/test_petlisten
+
+$(BUILD)/test_petlisten: $(PETLISTEN_SRC) $(ROOT)/src/system/pet/petlisten.h $(ROOT)/src/system/pet/pet.h
+	@mkdir -p $(BUILD)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ $(PETLISTEN_SRC) $(LDFLAGS) $(LDLIBS)
+
 NOTES_SRC = test_notes.c $(ROOT)/src/system/notes/notesstore.c $(ROOT)/src/system/text/textfile.c
 .PHONY: notes
 notes: $(BUILD)/test_notes

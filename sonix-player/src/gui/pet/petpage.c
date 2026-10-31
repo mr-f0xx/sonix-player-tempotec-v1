@@ -1,5 +1,6 @@
 #include "petpage.h"
 
+#include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -102,6 +103,24 @@ static lv_obj_t *pet_button;
 static lv_obj_t *pet_button_label;
 static lv_obj_t *note_a;
 static lv_obj_t *note_b;
+
+// The balance in the title row: a small note glyph and the number, to the left
+// of the wardrobe's star. The pet's own card has no room for a fifth line on a
+// 240 px panel, and the number belongs beside the way into the shop anyway.
+static lv_obj_t *balance_label;
+
+// The wardrobe. Built the first time it is opened -- a player who never looks
+// at it pays nothing -- and a full-page sheet over the pet rather than a screen
+// of its own, so the shell's back chevron closes it first (see pet_back_guard).
+static lv_obj_t *wardrobe_screen;
+static lv_obj_t *wardrobe_column;
+static lv_obj_t *wardrobe_balance;
+static lv_obj_t *wardrobe_value[PET_ITEM_COUNT];
+static bool wardrobe_visible;
+
+// What the bobbing animation was last started for, so a change of track's vibe
+// restarts it at the new speed instead of every page tick restarting it.
+static int last_vibe = -1;
 
 // ---------------------------------------------------------------------------
 // The small pieces the creature is made of
@@ -419,6 +438,7 @@ static void paint_stats(void) {
 	}
 
 	lv_bar_set_value(energy_bar, st->energy, LV_ANIM_OFF);
+	lv_label_set_text_fmt(balance_label, "%d", st->notes);
 	lv_label_set_text_fmt(today_label, tr("pet_today"), st->today_secs / 60, PET_DAY_GOAL_SECS / 60);
 	if (st->streak > 0) {
 		lv_label_set_text_fmt(streak_label, tr("pet_streak"), st->streak);
@@ -479,6 +499,142 @@ static void paint(void) {
 }
 
 // ---------------------------------------------------------------------------
+// The wardrobe
+// ---------------------------------------------------------------------------
+
+static bool item_is_on(const pet_state_t *st, int item) {
+	if (item == PET_ITEM_STREAK_FREEZE) {
+		return false; // a freeze is a stock, not something being worn
+	}
+	if (item >= (int)PET_ITEM_FIRST_ROOM) {
+		return pet_room(st) == 1 + (item - (int)PET_ITEM_FIRST_ROOM);
+	}
+	return pet_wearing(st) == item;
+}
+
+static void wardrobe_refresh(void) {
+	if (!wardrobe_screen) {
+		return;
+	}
+	const pet_state_t *st = petwatch_state();
+	lv_label_set_text_fmt(wardrobe_balance, "%d", st->notes);
+	if (balance_label) {
+		lv_label_set_text_fmt(balance_label, "%d", st->notes);
+	}
+
+	for (int i = 0; i < PET_ITEM_COUNT; i++) {
+		if (!wardrobe_value[i]) {
+			continue;
+		}
+		if (i == PET_ITEM_STREAK_FREEZE && pet_freezes(st) > 0) {
+			lv_label_set_text_fmt(wardrobe_value[i], tr("pet_freezes"), pet_freezes(st));
+		} else if (item_is_on(st, i)) {
+			lv_label_set_text(wardrobe_value[i], tr("pet_wearing_now"));
+		} else if (pet_owned(st, (pet_item_t)i)) {
+			lv_label_set_text(wardrobe_value[i], tr("pet_owned"));
+		} else {
+			lv_label_set_text_fmt(wardrobe_value[i], tr("pet_price"), pet_item_price((pet_item_t)i));
+		}
+	}
+}
+
+static void wardrobe_item_cb(lv_event_t *e) {
+	pet_item_t item = (pet_item_t)(intptr_t)lv_event_get_user_data(e);
+	const pet_state_t *st = petwatch_state();
+
+	if (item == PET_ITEM_STREAK_FREEZE) {
+		// Stackable, so it is bought every time rather than worn.
+		if (petwatch_buy(item)) {
+			toast_success(tr("pet_bought"));
+		} else {
+			toast_plain(tr("pet_not_enough"));
+		}
+	} else if (pet_owned(st, item)) {
+		if (item_is_on(st, item)) {
+			toast_plain(tr("pet_already_worn"));
+		} else if (petwatch_wear(item)) {
+			toast_plain(tr("pet_worn"));
+		}
+	} else if (petwatch_buy(item)) {
+		toast_success(tr("pet_bought"));
+	} else {
+		toast_plain(tr("pet_not_enough"));
+	}
+
+	wardrobe_refresh();
+}
+
+static void build_wardrobe(void) {
+	if (wardrobe_screen || !page_cfg) {
+		return;
+	}
+
+	wardrobe_screen = lv_obj_create(petpage_screen);
+	lv_obj_set_size(wardrobe_screen, page_cfg->screen_width, page_cfg->screen_height);
+	lv_obj_set_pos(wardrobe_screen, 0, 0);
+	lv_obj_set_style_pad_all(wardrobe_screen, 0, 0);
+	lv_obj_set_scrollable(wardrobe_screen, false);
+	lv_obj_set_hidden(wardrobe_screen, true);
+
+	wardrobe_column = settingsrow_page(wardrobe_screen, page_cfg, "pet_wardrobe");
+	settingsrow_add(wardrobe_column, "pet_notes_balance", &wardrobe_balance, NULL, NULL);
+
+	for (int i = 0; i < PET_ITEM_COUNT; i++) {
+		pet_item_t item = (pet_item_t)i;
+		lv_obj_t *row = settingsrow_add(wardrobe_column, pet_item_tag(item), &wardrobe_value[i],
+										wardrobe_item_cb, (void *)(intptr_t)i);
+		if (item == PET_ITEM_STREAK_FREEZE || item >= PET_ITEM_FIRST_ROOM) {
+			// The freezes and the room themes are the two halves of the shop
+			// that are not clothes; a caption says what they are for.
+			settingsrow_add_caption(row, item == PET_ITEM_STREAK_FREEZE ? tr("pet_freeze_note") : tr("pet_room_note"));
+		}
+	}
+
+	wardrobe_refresh();
+}
+
+static void wardrobe_close(void);
+
+static void wardrobe_open_cb(lv_event_t *e) {
+	(void)e;
+	if (!page_built) {
+		return;
+	}
+	if (wardrobe_visible) {
+		// The star is a door that closes behind you: a second press puts the
+		// wardrobe away, which saves a trip to the corner of the screen.
+		wardrobe_close();
+		return;
+	}
+	build_wardrobe();
+	if (!wardrobe_screen) {
+		return;
+	}
+	wardrobe_refresh();
+	lv_obj_set_hidden(wardrobe_screen, false);
+	lv_obj_move_foreground(wardrobe_screen);
+	wardrobe_visible = true;
+}
+
+static void wardrobe_close(void) {
+	if (!wardrobe_screen) {
+		return;
+	}
+	lv_obj_set_hidden(wardrobe_screen, true);
+	wardrobe_visible = false;
+}
+
+// The shell's back chevron: while the wardrobe is up, back closes it rather
+// than leaving the pet. False hands the press back to the chevron.
+static bool pet_back_guard(void) {
+	if (!wardrobe_visible) {
+		return false;
+	}
+	wardrobe_close();
+	return true;
+}
+
+// ---------------------------------------------------------------------------
 // The animation: a bob and two drifting notes, only while there is music
 // ---------------------------------------------------------------------------
 
@@ -505,14 +661,29 @@ static void start_anim_for(lv_obj_t *obj, lv_anim_exec_xcb_t exec, int32_t from,
 	lv_anim_start(&a);
 }
 
+// How the creature moves follows the vibe of what it is hearing: a slow sway
+// for the calm genres, a faster bob for the loud ones. It is the same drawing,
+// and the difference is read in the speed rather than in a new animation the
+// V1's frame budget would notice.
+static int bob_height(void) {
+	pet_vibe_t vibe = petwatch_vibe();
+	return vibe == PET_VIBE_ENERGETIC ? 5 : (vibe == PET_VIBE_CALM ? 2 : 3);
+}
+
+static uint32_t bob_duration(void) {
+	pet_vibe_t vibe = petwatch_vibe();
+	return vibe == PET_VIBE_ENERGETIC ? (uint32_t)520 : (vibe == PET_VIBE_CALM ? (uint32_t)1500 : (uint32_t)900);
+}
+
 static void start_bobbing(void) {
 	if (bobbing || !page_built) {
 		return;
 	}
 	bobbing = true;
-	start_anim_for(parts.root, bob_exec, 0, 3, 900, 0);
-	start_anim_for(note_a, note_exec, 0, 34, 1400, 0);
-	start_anim_for(note_b, note_exec, 0, 30, 1800, 500);
+	uint32_t duration = bob_duration();
+	start_anim_for(parts.root, bob_exec, 0, bob_height(), duration, 0);
+	start_anim_for(note_a, note_exec, 0, 34, duration * 3 / 2, 0);
+	start_anim_for(note_b, note_exec, 0, 30, duration * 2, duration / 2);
 }
 
 static void stop_bobbing(void) {
@@ -535,9 +706,19 @@ static void sync_animation(void) {
 	show(note_a, listening);
 	show(note_b, listening);
 	if (listening) {
+		// A new track of a different vibe restarts the bob at its own speed.
+		int vibe = (int)petwatch_vibe();
+		if (bobbing && vibe != last_vibe) {
+			stop_bobbing();
+		}
+		last_vibe = vibe;
 		start_bobbing();
 	} else {
+		last_vibe = -1;
 		stop_bobbing();
+	}
+	if (wardrobe_visible) {
+		wardrobe_refresh();
 	}
 }
 
@@ -546,6 +727,14 @@ static void sync_animation(void) {
 // ---------------------------------------------------------------------------
 
 static void consume_events(void) {
+	int achievement = petwatch_take_achievement();
+	if (achievement != 0) {
+		// The achievement's own name, after the word that says what it is.
+		char line[72];
+		snprintf(line, sizeof(line), "%s: %s", tr("pet_achievement"), tr(pet_achievement_tag(achievement)));
+		toast_success(line);
+	}
+
 	int events = petwatch_take_events();
 	if (events & PET_EVENT_STAGE_UP) {
 		toast_success(tr("pet_stage_toast"));
@@ -591,6 +780,7 @@ static void screen_loaded_cb(lv_event_t *e) {
 static void screen_unloaded_cb(lv_event_t *e) {
 	(void)e;
 	page_visible = false;
+	wardrobe_close();
 	if (page_timer) {
 		lv_timer_delete(page_timer);
 		page_timer = NULL;
@@ -614,7 +804,41 @@ static void build(void) {
 
 	lv_obj_add_style(petpage_screen, &theme_style_screen, 0);
 	lv_obj_t *title = settingsrow_title(petpage_screen, page_cfg, "pet");
-	settingsrow_title_corner_slots(title, page_cfg, 0);
+	settingsrow_title_corner_slots(title, page_cfg, 1);
+
+	// The wardrobe's way in, and the notes beside it: the same 36 px corner
+	// control every other page puts there.
+	lv_obj_t *wardrobe_button = lv_btn_create(petpage_screen);
+	settingsrow_place_corner_button(wardrobe_button, page_cfg, 0);
+	lv_obj_set_style_bg_opa(wardrobe_button, LV_OPA_TRANSP, 0);
+	lv_obj_set_style_border_width(wardrobe_button, 0, 0);
+	lv_obj_set_style_shadow_width(wardrobe_button, 0, 0);
+	lv_obj_set_style_pad_all(wardrobe_button, 0, 0);
+	lv_obj_add_event_cb(wardrobe_button, wardrobe_open_cb, LV_EVENT_CLICKED, NULL);
+
+	lv_obj_t *star = lv_image_create(wardrobe_button);
+	lv_image_set_src(star, &icon_star);
+	lv_obj_add_style(star, &theme_style_icon, 0);
+	settingsrow_scale_corner_icon(star, page_cfg);
+	lv_obj_center(star);
+
+	lv_obj_t *balance = plain(petpage_screen);
+	lv_obj_set_size(balance, LV_SIZE_CONTENT, 20);
+	lv_obj_set_flex_flow(balance, LV_FLEX_FLOW_ROW);
+	lv_obj_set_flex_align(balance, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+	lv_obj_set_style_pad_gap(balance, 2, 0);
+	lv_obj_align(balance, LV_ALIGN_TOP_RIGHT,
+				 -(page_cfg->padding + settingsrow_corner_button_size(page_cfg) +
+				   settingsrow_corner_button_gap(page_cfg) + 2),
+				 page_cfg->padding + page_cfg->top_bar_height + 9);
+
+	lv_obj_t *balance_icon = note_image(balance, 14);
+	lv_obj_add_style(balance_icon, &theme_style_icon, 0);
+
+	balance_label = lv_label_create(balance);
+	lv_obj_add_style(balance_label, &theme_style_text_dim, 0);
+	lv_obj_set_style_text_font(balance_label, &font_ui_14, 0);
+	lv_label_set_text(balance_label, "0");
 
 	const int pad = page_cfg->padding;
 	const int card_w = page_cfg->screen_width - 2 * pad;
@@ -760,6 +984,9 @@ static void build(void) {
 void petpage_init(gui_config_t *cfg) {
 	page_cfg = cfg;
 	theme_register_refresh(theme_change_cb);
+	// The wardrobe is a sheet over this page, so the chevron has to close it
+	// before it can close the pet.
+	switcher_set_back_guard(petpage_screen, pet_back_guard);
 }
 
 void petpage_open(void) {

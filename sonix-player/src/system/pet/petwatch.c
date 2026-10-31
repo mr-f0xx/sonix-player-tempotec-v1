@@ -1,5 +1,7 @@
 #include "petwatch.h"
 
+#include "petlisten.h"
+
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
@@ -24,12 +26,6 @@
 // anyway.
 #define PET_SAVE_LISTEN_SECS 120
 
-// A timer that arrives this late was not a second of listening: the interface
-// thread was busy decoding, opening a file, or the device was suspended. The
-// tick credits at most this much to the session and lets pet_advance() treat
-// the rest as idle time.
-#define PET_TICK_MAX_CREDIT 5
-
 // Timestamps from before this are from a clock that had never been set. If the
 // setup happened while the player was off, the first boot afterwards sees a
 // true clock beside those timestamps and has to forgive them just the same.
@@ -37,13 +33,21 @@
 
 static pet_state_t state;
 static lv_timer_t *tick_timer;
+static petlisten_t listener;
 
-static int64_t tick_now;
 static bool listening;
+static bool focus_active;
 static bool clock_was_set;
 static char track_title[128];
+static char current_album[256];
+static char current_genre[128];
+static int track_bonus;
+static bool note_pending;
 static int unsaved_listen_secs;
 static int pending_events;
+static int pending_achievement;
+static int64_t night_secs;
+static pet_vibe_t current_vibe = PET_VIBE_NEUTRAL;
 
 static bool playback_is_music(void) {
 	// Local files and streams: audio.c is the source of truth for those.
@@ -71,8 +75,12 @@ static void copy_text(char *out, size_t out_size, const char *text) {
 // title, a station's name, or nothing when the source is a phone (which does
 // not tell this player what it is sending). Cheap enough for once a second:
 // device_state_loaded_metadata() is documented as no copy and no sysfs.
-static void take_track_title(bool radio_playing) {
+static void take_track_title(bool radio_playing, bool phone_streaming) {
 	track_title[0] = '\0';
+
+	if (phone_streaming) {
+		return; // the phone names its own music, not this player
+	}
 
 	if (radio_playing) {
 		radio_now_t now;
@@ -96,6 +104,42 @@ static void take_track_title(bool radio_playing) {
 		// everywhere else for a track without them.
 		const char *slash = strrchr(file, '/');
 		copy_text(track_title, sizeof(track_title), slash ? slash + 1 : file);
+	}
+}
+
+// The key an album is recognised by. The tag when there is one; otherwise the
+// folder, which is what a record without tags looks like on a card. A live
+// stream has neither, and so has no album runs.
+static void album_key_for(const song_metadata_t *meta, const char *file, char *out, size_t out_size) {
+	out[0] = '\0';
+	if (meta && meta->album[0]) {
+		copy_text(out, out_size, meta->album);
+		return;
+	}
+	if (!file || !file[0]) {
+		return;
+	}
+	const char *slash = strrchr(file, '/');
+	if (!slash || slash == file) {
+		return;
+	}
+	size_t length = (size_t)(slash - file);
+	if (length >= out_size) {
+		length = out_size - 1;
+	}
+	memcpy(out, file, length);
+	out[length] = '\0';
+}
+
+static void save_now(void) {
+	pet_save(&state);
+	unsaved_listen_secs = 0;
+}
+
+static void award(int achievement) {
+	if (pet_award_achievement(&state, achievement)) {
+		pending_achievement = achievement;
+		save_now();
 	}
 }
 
@@ -147,35 +191,109 @@ static void tick_cb(lv_timer_t *timer) {
 	adopt_clock_if_it_was_set(now);
 
 	bool radio_playing = radio_is_playing();
+	bool phone_streaming = btreceiver_is_streaming();
+	bool live = radio_playing || phone_streaming;
 	bool playing = playback_is_music();
-	listening = playing;
-	take_track_title(radio_playing);
+	int volume = device_state_get_volume_percent();
 
-	int listened = 0;
-	if (playing) {
-		// The first tick has no predecessor, and a tick that arrives late
-		// cannot be certain the music was playing for all of the gap.
-		int64_t gap = (tick_now > 0 && now > tick_now) ? now - tick_now : 1;
-		if (gap < 1) {
-			gap = 1;
-		}
-		if (gap > PET_TICK_MAX_CREDIT) {
-			gap = PET_TICK_MAX_CREDIT;
-		}
-		listened = (int)gap;
+	double position = 0;
+	double duration = 0;
+	audio_get_progress(&position, &duration);
+
+	const char *file = NULL;
+	const song_metadata_t *meta = device_state_loaded_metadata(&file);
+	if (!file) {
+		file = "";
 	}
 
-	int events = pet_advance(&state, now, day, listened);
-	pending_events |= events;
+	take_track_title(radio_playing, phone_streaming);
 
-	tick_now = now;
-
-	if (listened > 0) {
-		unsaved_listen_secs += listened;
-		if (unsaved_listen_secs >= PET_SAVE_LISTEN_SECS || (events & (PET_EVENT_GOAL_MET | PET_EVENT_STAGE_UP))) {
-			pet_save(&state);
-			unsaved_listen_secs = 0;
+	char album[256];
+	album[0] = '\0';
+	char genre[128];
+	genre[0] = '\0';
+	if (!live) {
+		album_key_for(meta, file, album, sizeof(album));
+		if (meta) {
+			copy_text(genre, sizeof(genre), meta->genre);
 		}
+	}
+
+	petlisten_frame_t frame = {
+		.playing = playing,
+		.volume_percent = volume,
+		.file = live ? "" : file,
+		.album = album,
+		.genre = genre,
+		.position = live ? 0 : position,
+		.duration = live ? 0 : duration,
+		.now = now,
+	};
+	petlisten_result_t result;
+	petlisten_frame(&listener, &frame, &result);
+
+	listening = result.listened_secs > 0;
+	focus_active = listener.session_secs >= PET_FOCUS_SECS;
+
+	if (result.track_changed) {
+		copy_text(current_album, sizeof(current_album), album);
+		copy_text(current_genre, sizeof(current_genre), genre);
+		current_vibe = pet_vibe_for_genre(current_genre);
+		note_pending = true;
+		track_bonus = 0;
+	}
+
+	if (!listening) {
+		// The track was changed while paused or muted: it is not a discovery
+		// and it earns nothing. It stays pending until a second is heard.
+		night_secs = 0;
+	}
+
+	bool noted = false;
+	if (listening && note_pending) {
+		int track_events = PET_EVENT_NONE;
+		track_bonus = pet_note_track(&state, current_genre, current_album, &track_events);
+		note_pending = false;
+		noted = true;
+		if (track_events & PET_EVENT_POLYMATH) {
+			pending_achievement = PET_ACH_POLYMATH;
+		}
+	}
+
+	int events = pet_advance(&state, now, day, result.listened_secs, track_bonus);
+	pending_events |= events & (PET_EVENT_GOAL_MET | PET_EVENT_STAGE_UP);
+
+	if (listening) {
+		unsaved_listen_secs += result.listened_secs;
+
+		if (result.night && !pet_has_achievement(&state, PET_ACH_NIGHT_OWL)) {
+			night_secs += result.listened_secs;
+			if (night_secs >= PET_NIGHT_OWL_SECS) {
+				award(PET_ACH_NIGHT_OWL);
+			}
+		} else if (!result.night) {
+			night_secs = 0;
+		}
+	}
+
+	int cheered = 0;
+	if (result.focus_30min) {
+		award(PET_ACH_FOCUS);
+		pet_cheer(&state, PET_FOCUS_HAPPY_BONUS);
+		cheered = 1;
+	}
+	if (result.album_complete) {
+		award(PET_ACH_DEEP_DIVER);
+		pet_cheer(&state, PET_ALBUM_HAPPY_BONUS);
+		cheered = 1;
+	}
+	if (cheered) {
+		save_now();
+	}
+
+	if (unsaved_listen_secs >= PET_SAVE_LISTEN_SECS || (events & (PET_EVENT_GOAL_MET | PET_EVENT_STAGE_UP)) ||
+		noted) {
+		save_now();
 	}
 }
 
@@ -198,10 +316,11 @@ void petwatch_init(void) {
 	// comes back two days hungrier, which is exactly what the stored
 	// last_seen is for; the first tick would do it too, but doing it here
 	// means the page opens on the truth rather than one second behind it.
-	pet_advance(&state, now, day, 0);
+	pet_advance(&state, now, day, 0, 0);
 
-	tick_now = now;
-	listening = playback_is_music();
+	petlisten_init(&listener, now);
+	note_pending = false;
+	unsaved_listen_secs = 0;
 
 	tick_timer = lv_timer_create(tick_cb, PET_TICK_MS, NULL);
 	if (tick_timer) {
@@ -218,13 +337,32 @@ const pet_state_t *petwatch_state(void) { return &state; }
 
 bool petwatch_listening(void) { return listening; }
 
+bool petwatch_focus(void) { return focus_active; }
+
+pet_vibe_t petwatch_vibe(void) { return current_vibe; }
+
 bool petwatch_pet_now(void) {
 	int64_t now = (int64_t)time(NULL);
 	if (!pet_pet(&state, now)) {
 		return false;
 	}
-	pet_save(&state);
-	unsaved_listen_secs = 0;
+	save_now();
+	return true;
+}
+
+bool petwatch_buy(pet_item_t item) {
+	if (!pet_buy(&state, item)) {
+		return false;
+	}
+	save_now();
+	return true;
+}
+
+bool petwatch_wear(pet_item_t item) {
+	if (!pet_wear(&state, item)) {
+		return false;
+	}
+	save_now();
 	return true;
 }
 
@@ -234,9 +372,14 @@ int petwatch_take_events(void) {
 	return events;
 }
 
+int petwatch_take_achievement(void) {
+	int achievement = pending_achievement;
+	pending_achievement = 0;
+	return achievement;
+}
+
 void petwatch_flush(void) {
-	pet_save(&state);
-	unsaved_listen_secs = 0;
+	save_now();
 }
 
 void petwatch_track_title(char *out, size_t out_size) {
