@@ -254,12 +254,15 @@ build_image() {
 	say ""
 
 	# Capture the vendor release version before applying the Sonix overlay.
-	# Use the product section, not the schema version, dates or library versions.
-	BASE_BUILD="$(python3 "$SCRIPT_DIR/extract_base_build.py" "$SQUASH_DIR/usr/resource/config.json")"
+	# A known official package is named by its v1.upt SHA-256 -- the 1.3
+	# archive's own product metadata still says 1.2 -- anything else falls
+	# back to the product section of the stock config.json, not the schema
+	# version, dates or library versions.
+	BASE_BUILD="$(python3 "$SCRIPT_DIR/stock_release.py" "$SOURCE_UPT" "$SQUASH_DIR/usr/resource/config.json")"
 	if [ -n "$BASE_BUILD" ]; then
 		say "    TempoTec base version = $BASE_BUILD"
 	else
-		warn "stock config has no unambiguous TempoTec V1 release version; About will show a dash"
+		warn "no known release package and no unambiguous product version; About will show a dash"
 	fi
 
 	# ==========================================================================
