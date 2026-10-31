@@ -164,9 +164,9 @@ static const grid_entry_t MORE_ENTRIES[] = {
 	// picks up where its board was left, and the other two agree with the best
 	// score on the card. Each has a drawing of what it is about, so the picture
 	// says which game it is before the caption does.
-	{"2048", &icon_game_2048, NULL, game2048_open},
-	{"snake", &icon_game_snake, NULL, snake_open},
-	{"dino", &icon_game_dino, NULL, dino_open},
+	{"2048", &icon_menu_game_2048, NULL, game2048_open},
+	{"snake", &icon_menu_game_snake, NULL, snake_open},
+	{"dino", &icon_menu_game_dino, NULL, dino_open},
 	// Both of these are actions rather than screens for the file
 	// manager's reason: the calculator repaints its display from the sum
 	// it was left holding, and the notes shelf reads the card.
