@@ -1743,6 +1743,119 @@ ninths of the 36 px slot (20 px) instead of three quarters (27 px). A pencil
 that is three quarters of its button looks like it is falling out of the header,
 which is what the photograph showed.
 
+## The pet, on a 240 MHz budget
+
+The page was correct before this pass and busier than it needed to be. What
+follows is what was changed, and the two items from the same list that were
+turned down, with the arithmetic that turned them down.
+
+### Two frames, not an interpolation
+
+There is no `lv_anim` left in `petpage.c`. The animal has two frames -- breathe
+in, breathe out -- and the page's own one-second timer swaps them: the root moves
+two pixels (three while music plays), the tail leans one way and then the other,
+the two notes trade places and opacity, and the equalizer swaps its bar heights.
+The bubbles and the calm soundscape's motes are the same idea as arithmetic: a
+running offset, each on its own phase, wrapped off the top edge where nothing can
+be seen of them. That is twelve integer fields written into a dozen objects once
+a second, and no renderer work at all between ticks.
+
+The tail is the one part that has to know its resting angle to lean from it, so
+the angles live next to the species that own them rather than in the animation.
+
+### Conditional redraws
+
+`paint()` is now the rare path -- page load, theme change, a new animal, a hat --
+and the one-second path is `paint_values()`. It keeps a small `shown_t` of what
+is on the glass and compares:
+
+| what | redrawn when |
+|---|---|
+| the animal, the room, the theme's colours | its stage, mood, species, hat or room changed |
+| the two bars and their numbers | the number changed |
+| the wallet | the number changed |
+| "Today x of 15 min", the streak | the number changed |
+| the status line | the text it would say is different |
+| the note/bars in the status line | listening started or stopped |
+
+The stage name, the name and the temperament word are written once. Nothing in
+the timer calls `lv_label_set_text` with a string that is already there, and
+nothing rebuilds the fifty objects the animal is made of because a clock moved.
+
+### Flat, as it already was
+
+The card has no shadow (`shadow_width` 0), no gradient and no gradient stop: one
+`bg_color` at one opacity, one radius, and the water is the same flat fill in a
+different colour. The outline on each part of the animal is style, not
+rasterisation of a vector path. Nothing was added here; it is stated because the
+question is fair.
+
+### The equalizer
+
+The status line's still note is replaced, while music plays, by three 3 px bars
+in two frames (`{4, 9, 6}` and `{9, 5, 10}` pixels) in the same green. Four
+objects, one timer tick, no visualiser: the point is feedback, and at this size
+a bar chart is the whole story.
+
+### The wallet, aligned
+
+`♪ 500` used to sit left-justified under the two meters with a stray digit
+wrapping below it. It is now right-aligned with `50` and `80`, in the same
+column, one line high, and the meters gave up four pixels of bar to make room.
+
+### Turned down: a pre-baked indexed sprite sheet
+
+This is the one item on the list that was not done, and it was measured rather
+than argued about. The animal is 48 LVGL objects -- a disc and a rounded bar each
+-- which is about 6 KB of RAM for the whole pet and no flash at all.
+
+A sprite sheet that replaced it would need, at the tile size this panel uses
+(96 x 96 for an adult, 64 x 64 for a hatchling), a separate picture for every
+species and stage and both frames: four species x four stages x two frames = 32
+tiles, and then the wardrobe multiplies it -- a party hat, headphones, a scarf
+and a crown each change the head, so the honest count is 5 x 32 = 160 tiles.
+At one byte per pixel that is 160 x 6 KB = **about 1 MB of flash**, against 6 KB
+of RAM for the objects, in an image that is already carrying its fonts and icons.
+The renderer would also gain nothing: an image and a rounded rectangle are both
+one blit into the same draw buffer, and the objects are redrawn only when the
+animal changes, which the cache above made rare.
+
+What a sprite sheet *would* buy is detail -- outlines that curve, a face that is
+drawn rather than composed. If that is what is wanted, it is an art problem with
+an art budget, not an optimisation, and it should be decided as one.
+
+### Turned down: sampling the player every 10-30 seconds
+
+The watcher already does no polling of its own: it is one LVGL timer at 1 Hz
+reading the player's cached state -- the same predicate the rest of the
+interface uses for "music is coming out" -- and doing about forty integer
+operations with it.
+
+Sampling less often would break rules the pet is built on rather than save
+anything worth measuring. `petlisten.c` refuses to credit a callback that slept
+through the music for more than `PETLISTEN_MAX_CREDIT` (five seconds), precisely
+so a suspended player cannot claim an hour; a ten-second tick would be refused
+by that rule or force it to be broken. The five-minute focus, the thirty-second
+"did the track end or was it skipped" question and the daily goal are all
+measured in seconds.
+
+The page's timer, which *did* have work worth removing, is paused in standby
+(`power_pause_in_standby`) and deleted when the page is unloaded. The watcher's
+timer deliberately is not: it has to hear the music that is playing with the
+panel off.
+
+### Turned down: a page-level dim after fifteen seconds
+
+The shell already owns the screen's brightness: it has a screensaver, an
+auto-off, and it pauses timers in standby. A second dimmer inside the pet's page
+would fight the first one -- two things setting the same backlight, on timers
+that do not know about each other -- and the pet page's own CPU use is already
+zero while the panel is asleep, because its timer is paused there and its frames
+stop when the page is unloaded.
+
+What *is* here is the quiet part: with the page open and nothing playing, the
+animal breathes twice a minute and nothing else moves.
+
 ## The charger, with the player off
 
 The stock player comes up on a battery screen when the device was switched off

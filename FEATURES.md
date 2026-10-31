@@ -282,6 +282,10 @@ a self-signed certificate), and HLS.
   nothing at all when the page is not open. The creature is drawn from the
   interface's own shapes -- a flat fill inside the same heavy ink line the icons
   use -- and each animal is its own silhouette, so it adds no art to the image.
+  It moves in two frames rather than in an interpolation, and the page redraws
+  only what changed: a meter that has not moved is not touched between one
+  second and the next. While music plays, the line at the foot of the card says
+  what it is feeding on beside a three-bar equalizer.
 
 ## Games
 

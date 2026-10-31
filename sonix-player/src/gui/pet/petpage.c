@@ -130,13 +130,14 @@ static pet_parts_t parts;
 static gui_config_t *page_cfg;
 static bool page_built;
 static bool page_visible;
-static bool animating;
 static lv_timer_t *page_timer;
 
 static lv_obj_t *habitat;
 static lv_obj_t *name_label;
 static lv_obj_t *stage_label;
-static lv_obj_t *status_icon;
+static lv_obj_t *status_icon; // the still note, when nothing is playing
+static lv_obj_t *eq_bar[3];    // the three bars that are the equalizer
+static int eq_bottom;
 static lv_obj_t *status_label;
 static lv_obj_t *health_icon;
 static lv_obj_t *energy_icon;
@@ -200,8 +201,7 @@ static lv_obj_t *name_layer;
 static lv_obj_t *name_field;
 static keyboard_t *name_keyboard;
 
-static int last_vibe = -1;
-static bool last_listening;
+
 
 // Forward: the timer and the unload path close sheets whose builders are
 // further down the file.
@@ -537,10 +537,11 @@ static void paint_creature(void) {
 
 	set_radius(parts.body, fish ? body_h / 2 : body_h * 42 / 100);
 	place(parts.body, bx, by, body_w, body_h);
+	// The body is one flat fill, as the reference art is. A lighter belly on a
+	// round animal reads as a second muzzle, whatever colour it is.
 	set_radius(parts.belly, body_h / 7);
-	lv_obj_set_style_bg_opa(parts.belly, (lv_opa_t)(LV_OPA_COVER * 70 / 100), 0);
 	place(parts.belly, cx - body_w * 23 / 100, by + body_h * 72 / 100, body_w * 46 / 100, body_h * 20 / 100);
-	show(parts.belly, !fish);
+	show(parts.belly, false);
 
 	// ---- what is behind the body --------------------------------------
 	set_radius(parts.tail, 4);
@@ -828,6 +829,26 @@ static void paint_room(void) {
 // The words and the meters
 // ---------------------------------------------------------------------------
 
+static void paint_theme_colors(void);
+
+// What the page last drew, so the one-second timer can leave alone everything
+// that has not changed. The meters move a point every twelve to twenty seconds
+// and the strings less often than that; the alternative is rebuilding fifty
+// objects a second for arithmetic that mostly says "the same".
+typedef struct {
+	bool valid;
+	int happy, energy, notes, today_secs, streak;
+	pet_stage_t stage;
+	pet_mood_t mood;
+	bool listening;
+	bool calm;
+	pet_temperament_t temperament;
+	char status[192];
+	int species, room, wearing;
+} shown_t;
+
+static shown_t shown;
+
 static void paint_words(void) {
 	if (!page_built) {
 		return;
@@ -837,49 +858,97 @@ static void paint_words(void) {
 	int64_t now = petwatch_now();
 	pet_stage_t stage = pet_stage(st);
 	pet_mood_t mood = pet_mood(st, now);
+	bool listening = petwatch_listening();
 
-	char name[40];
-	pet_name(name, sizeof(name));
-	lv_label_set_text(name_label, name);
-	// The stage, not the mood: two words would not fit beside the meters, and
-	// the face is already saying how it feels.
-	lv_label_set_text(stage_label, tr(pet_stage_tag(stage)));
+	// The words that only change when the animal does.
+	if (!shown.valid || shown.stage != stage) {
+		// The stage, not the mood: two words would not fit beside the meters,
+		// and the face is already saying how it feels.
+		lv_label_set_text(stage_label, tr(pet_stage_tag(stage)));
+		shown.stage = stage;
+	}
 
-	lv_bar_set_value(health_bar, st->happy, LV_ANIM_OFF);
-	lv_bar_set_value(energy_bar, st->energy, LV_ANIM_OFF);
-	lv_label_set_text_fmt(health_value, "%d", st->happy);
-	lv_label_set_text_fmt(energy_value, "%d", st->energy);
-	lv_label_set_text_fmt(notes_value, "%d", st->notes);
+	if (!shown.valid) {
+		char name[40];
+		pet_name(name, sizeof(name));
+		lv_label_set_text(name_label, name);
+	}
 
+	// The month's listening, under the stage: one word, or nothing at all while
+	// there are not yet three days to call a character.
 	pet_temperament_t temperament = pet_temperament(st);
-	if (temperament == PET_TEMPERAMENT_NONE) {
-		lv_label_set_text(temperament_label, "");
-	} else {
-		lv_label_set_text(temperament_label, tr(pet_temperament_tag(temperament)));
+	if (!shown.valid || shown.calm != pet_has_soundscape(st) || shown.temperament != temperament) {
+		if (temperament == PET_TEMPERAMENT_NONE) {
+			lv_label_set_text(temperament_label, "");
+		} else {
+			lv_label_set_text(temperament_label, tr(pet_temperament_tag(temperament)));
+		}
+		shown.temperament = temperament;
 	}
 
-	lv_label_set_text_fmt(today_label, tr("pet_today"), st->today_secs / 60, PET_DAY_GOAL_SECS / 60);
-	if (st->streak > 0) {
-		lv_label_set_text_fmt(streak_label, tr("pet_streak"), st->streak);
-	} else {
-		lv_label_set_text(streak_label, tr("pet_streak_none"));
+	// The two meters, and the wallet under them. A bar is only set when its
+	// number moved, which is what keeps the card's canvas still.
+	if (!shown.valid || shown.happy != st->happy) {
+		lv_bar_set_value(health_bar, st->happy, LV_ANIM_OFF);
+		lv_label_set_text_fmt(health_value, "%d", st->happy);
+		shown.happy = st->happy;
+	}
+	if (!shown.valid || shown.energy != st->energy) {
+		lv_bar_set_value(energy_bar, st->energy, LV_ANIM_OFF);
+		lv_label_set_text_fmt(energy_value, "%d", st->energy);
+		shown.energy = st->energy;
+	}
+	if (!shown.valid || shown.notes != st->notes) {
+		lv_label_set_text_fmt(notes_value, "%d", st->notes);
+		shown.notes = st->notes;
 	}
 
+	// The two lines under the card.
+	if (!shown.valid || shown.today_secs != st->today_secs) {
+		lv_label_set_text_fmt(today_label, tr("pet_today"), st->today_secs / 60, PET_DAY_GOAL_SECS / 60);
+		shown.today_secs = st->today_secs;
+	}
+	if (!shown.valid || shown.streak != st->streak) {
+		if (st->streak > 0) {
+			lv_label_set_text_fmt(streak_label, tr("pet_streak"), st->streak);
+		} else {
+			lv_label_set_text(streak_label, tr("pet_streak_none"));
+		}
+		shown.streak = st->streak;
+	}
+
+	// The line's picture: a still note when nothing is playing, three bars that
+	// the frame timer swaps while something is.
+	if (!shown.valid || shown.listening != listening) {
+		lv_obj_set_hidden(status_icon, listening);
+		for (int i = 0; i < 3; i++) {
+			show(eq_bar[i], listening);
+		}
+	}
+
+	// The status line changes with the track, so it is built and compared
+	// rather than rebuilt: a track's title arriving is one label write.
 	char title[128];
 	petwatch_track_title(title, sizeof(title));
-	if (petwatch_listening()) {
+	char line[192];
+	if (listening) {
 		if (title[0]) {
-			lv_label_set_text_fmt(status_label, tr("pet_feeding"), title);
+			snprintf(line, sizeof(line), tr("pet_feeding"), title);
 		} else {
-			lv_label_set_text(status_label, tr("pet_feeding_music"));
+			snprintf(line, sizeof(line), "%s", tr("pet_feeding_music"));
 		}
 	} else if (mood == PET_MOOD_DIZZY) {
-		lv_label_set_text(status_label, tr("pet_dizzy_hint"));
+		snprintf(line, sizeof(line), "%s", tr("pet_dizzy_hint"));
 	} else if (mood == PET_MOOD_SLEEPING) {
-		lv_label_set_text(status_label, tr("pet_asleep"));
+		snprintf(line, sizeof(line), "%s", tr("pet_asleep"));
 	} else {
-		lv_label_set_text(status_label, tr("pet_feed_me"));
+		snprintf(line, sizeof(line), "%s", tr("pet_feed_me"));
 	}
+	if (!shown.valid || strcmp(line, shown.status) != 0) {
+		lv_label_set_text(status_label, line);
+		snprintf(shown.status, sizeof(shown.status), "%s", line);
+	}
+	shown.listening = listening;
 
 	if (wardrobe_visible) {
 		wardrobe_refresh();
@@ -887,6 +956,34 @@ static void paint_words(void) {
 	if (customise_visible) {
 		customise_refresh();
 	}
+}
+
+// The page's one-second work: only what changed. The animal is drawn again when
+// it has a different face, a different hat, a different room -- not because a
+// clock moved.
+static void paint_values(void) {
+	if (!page_built) {
+		return;
+	}
+
+	const pet_state_t *st = petwatch_state();
+	bool animal = !shown.valid || shown.stage != pet_stage(st) || shown.mood != pet_mood(st, petwatch_now()) ||
+				  shown.listening != petwatch_listening() || shown.calm != pet_has_soundscape(st) ||
+				  shown.species != (int)pet_species(st) || shown.wearing != pet_wearing(st) ||
+				  shown.room != pet_room(st);
+
+	if (animal) {
+		paint_room();
+		paint_creature();
+		paint_theme_colors();
+		shown.species = (int)pet_species(st);
+		shown.wearing = pet_wearing(st);
+		shown.room = pet_room(st);
+		shown.calm = pet_has_soundscape(st);
+		shown.mood = pet_mood(st, petwatch_now());
+	}
+	paint_words();
+	shown.valid = true;
 }
 
 static void paint_theme_colors(void) {
@@ -911,8 +1008,11 @@ static void paint_theme_colors(void) {
 	lv_obj_set_style_text_color(today_label, dim, 0);
 	lv_obj_set_style_text_color(streak_label, dim, 0);
 
-	lv_obj_set_style_image_recolor(status_icon,
-								   theme_is_monochrome() ? theme()->accent : theme_semantic_color(THEME_SEMANTIC_GREEN), 0);
+	const lv_color_t playing = theme_is_monochrome() ? theme()->accent : theme_semantic_color(THEME_SEMANTIC_GREEN);
+	lv_obj_set_style_image_recolor(status_icon, playing, 0);
+	for (int i = 0; i < 3; i++) {
+		lv_obj_set_style_bg_color(eq_bar[i], playing, 0);
+	}
 
 	const lv_color_t note_color = theme()->accent;
 	lv_obj_set_style_image_recolor(note_a, note_color, 0);
@@ -928,6 +1028,7 @@ static void paint(void) {
 	if (!page_built) {
 		return;
 	}
+	shown.valid = false;
 	paint_room();
 	paint_creature();
 	paint_words();
@@ -935,133 +1036,130 @@ static void paint(void) {
 }
 
 // ---------------------------------------------------------------------------
-// The animation: slow, and slower still when nothing is playing
+// The animation: two frames, one timer
+//
+// The animal is not interpolated. It has two frames -- a breath in and a breath
+// out -- and the page's own one-second timer swaps them: the root moves two
+// pixels, the tail leans one way and then the other, the notes drift and the
+// bubbles rise. Nothing here runs at more than 1 Hz, nothing asks LVGL to
+// interpolate, and the whole thing is a dozen integer fields written into a
+// dozen objects once a second. On a 240 x 320 panel that is the difference
+// between a smooth animation the processor cannot afford and one it can.
 // ---------------------------------------------------------------------------
 
-static void bob_exec(void *var, int32_t value) { lv_obj_set_style_translate_y((lv_obj_t *)var, value, 0); }
+static bool animating;
+static int frame;       // which of the two frames is up
+static int bubble_step; // how far the tank's bubbles have risen
+static int mote_step;   // and the calm soundscape's motes
 
-static void sway_exec(void *var, int32_t value) { lv_obj_set_style_transform_rotation((lv_obj_t *)var, value, 0); }
+// Where each bubble and mote started, so the rise is a running offset rather
+// than a fixed animation per object.
+static int bubble_home[PET_BUBBLES];
+static int mote_home[4];
 
-static void note_exec(void *var, int32_t value) {
-	lv_obj_t *o = (lv_obj_t *)var;
-	lv_obj_set_style_translate_y(o, value, 0);
-	lv_obj_set_style_opa(o, (lv_opa_t)(LV_OPA_20 + value * 2), 0);
-}
-
-static void bubble_exec(void *var, int32_t value) { lv_obj_set_style_translate_y((lv_obj_t *)var, value, 0); }
-
-static void start_anim(lv_obj_t *obj, lv_anim_exec_xcb_t exec, int32_t from, int32_t to, uint32_t duration,
-					   uint32_t delay, bool back) {
-	if (!obj) {
+static void apply_frame(void) {
+	if (!page_built) {
 		return;
 	}
-	lv_anim_t a;
-	lv_anim_init(&a);
-	lv_anim_set_var(&a, obj);
-	lv_anim_set_exec_cb(&a, exec);
-	lv_anim_set_values(&a, from, to);
-	lv_anim_set_duration(&a, duration);
-	lv_anim_set_playback_duration(&a, back ? duration : 0);
-	lv_anim_set_repeat_count(&a, LV_ANIM_REPEAT_INFINITE);
-	lv_anim_set_delay(&a, delay);
-	lv_anim_set_path_cb(&a, lv_anim_path_ease_in_out);
-	lv_anim_start(&a);
+
+	const pet_species_t species = pet_species(petwatch_state());
+	const bool listening = petwatch_listening();
+
+	// The breath: two pixels, three when something is playing.
+	lv_obj_set_style_translate_y(parts.root, frame ? (listening ? 3 : 2) : 0, 0);
+
+	// The tail -- or the fin a fish swims with -- leans with it.
+	lv_obj_t *sway = species == PET_SPECIES_FISH ? parts.fin_tail : parts.tail;
+	int base = -380;
+	if (species == PET_SPECIES_FISH) {
+		base = 450;
+	} else if (species == PET_SPECIES_CAT) {
+		base = -520;
+	} else if (species == PET_SPECIES_DOG) {
+		base = -750;
+	}
+	lv_obj_set_style_transform_rotation(sway, base + (frame ? 90 : -90), 0);
+
+	// The two notes drift while something is playing: one rises as the other
+	// fades, which is all the movement two stills can suggest.
+	if (listening) {
+		lv_obj_set_style_translate_y(note_a, frame ? 8 : 22, 0);
+		lv_obj_set_style_opa(note_a, frame ? LV_OPA_40 : LV_OPA_COVER, 0);
+		lv_obj_set_style_translate_y(note_b, frame ? 20 : 6, 0);
+		lv_obj_set_style_opa(note_b, frame ? LV_OPA_COVER : LV_OPA_40, 0);
+	}
+
+	// The equalizer: three bars; the two frames are the two bars of a beat.
+	if (listening) {
+		static const uint8_t heights[2][3] = {{4, 9, 6}, {9, 5, 10}};
+		for (int i = 0; i < 3; i++) {
+			int h = heights[frame][i];
+			lv_obj_set_height(eq_bar[i], h);
+			lv_obj_set_y(eq_bar[i], eq_bottom - h);
+		}
+	}
+
+	// The tank's bubbles rise a few pixels a second, each on its own phase, and
+	// wrap round off the top edge where nothing can be seen of them.
+	for (int i = 0; i < PET_BUBBLES; i++) {
+		int span = bubble_home[i] + 12;
+		int risen = (bubble_step + i * 17) % (span > 0 ? span : 1);
+		lv_obj_set_y(bubbles[i], bubble_home[i] - risen);
+	}
+	for (int i = 0; i < 4; i++) {
+		int span = mote_home[i] + 12;
+		int risen = (mote_step + i * 23) % (span > 0 ? span : 1);
+		lv_obj_set_y(motes[i], mote_home[i] - risen);
+	}
 }
 
 static void start_animations(void) {
-	if (!page_built || animating) {
+	if (!page_built) {
 		return;
 	}
 	animating = true;
-
-	// The hardware this runs on is slow, and the pet is meant to look it: a
-	// breath takes five seconds when nothing is playing, and even the fastest
-	// it moves is slower than a person's breathing.
-	bool listening = petwatch_listening();
-	uint32_t breath = 2600;
-	int32_t rise = 2;
-	if (listening) {
-		switch (petwatch_vibe()) {
-		case PET_VIBE_ENERGETIC:
-			breath = 1100;
-			rise = 3;
-			break;
-		case PET_VIBE_CALM:
-			breath = 1900;
-			break;
-		case PET_VIBE_NEUTRAL:
-		default:
-			breath = 1500;
-			break;
-		}
-	}
-	start_anim(parts.root, bob_exec, 0, rise, breath, 0, true);
-
-	// The tail, or the fin, sways the whole time: eight seconds one way, and
-	// eight the other.
-	lv_obj_t *sway = pet_species(petwatch_state()) == PET_SPECIES_FISH ? parts.fin_tail : parts.tail;
-	start_anim(sway, sway_exec, -70, 70, 4000, 0, true);
-
-	if (listening) {
-		show(note_a, true);
-		show(note_b, true);
-		start_anim(note_a, note_exec, 0, 26, 4200, 0, true);
-		start_anim(note_b, note_exec, 0, 22, 5200, 900, true);
-	} else {
-		show(note_a, false);
-		show(note_b, false);
-	}
-
-	if (pet_species(petwatch_state()) == PET_SPECIES_FISH) {
-		for (int i = 0; i < PET_BUBBLES; i++) {
-			start_anim(bubbles[i], bubble_exec, 0, -50 - (i % 3) * 8, 8000 + i * 1700, i * 1400, false);
-		}
-	}
-	if (petwatch_has_soundscape()) {
-		for (int i = 0; i < 4; i++) {
-			start_anim(motes[i], bubble_exec, 0, -34, 11000 + i * 1900, i * 1500, false);
-		}
-	}
+	frame = 0;
+	apply_frame();
 }
 
 static void stop_animations(void) {
 	if (!page_built) {
 		return;
 	}
-	lv_anim_delete(parts.root, bob_exec);
-	lv_anim_delete(parts.tail, sway_exec);
-	lv_anim_delete(parts.fin_tail, sway_exec);
-	lv_anim_delete(note_a, note_exec);
-	lv_anim_delete(note_b, note_exec);
-	for (int i = 0; i < PET_BUBBLES; i++) {
-		lv_anim_delete(bubbles[i], bubble_exec);
-		lv_obj_set_style_translate_y(bubbles[i], 0, 0);
-	}
-	for (int i = 0; i < 4; i++) {
-		lv_anim_delete(motes[i], bubble_exec);
-		lv_obj_set_style_translate_y(motes[i], 0, 0);
-	}
+	animating = false;
 	lv_obj_set_style_translate_y(parts.root, 0, 0);
 	show(note_a, false);
 	show(note_b, false);
-	animating = false;
-	last_vibe = -1;
+	bubble_step = 0;
+	mote_step = 0;
 }
 
 static void sync_animation(void) {
 	if (!page_visible || !page_built) {
 		return;
 	}
-	bool listening = petwatch_listening() && pet_mood(petwatch_state(), petwatch_now()) != PET_MOOD_SLEEPING;
-	int vibe = (int)petwatch_vibe();
-	if (animating && (listening != last_listening || (listening && vibe != last_vibe))) {
-		stop_animations();
+	if (!animating) {
+		start_animations();
 	}
-	last_listening = listening;
-	last_vibe = vibe;
-	start_animations();
+	apply_frame();
 }
 
+// One second of the page's life: the next frame, and whatever the listening did
+// to it. Called from the page timer, which stops when the page is left and is
+// paused in standby.
+static void advance_frame(void) {
+	if (!page_built || !animating) {
+		return;
+	}
+	frame ^= 1;
+	if (frame == 0) {
+		bubble_step++;
+		if (mote_step < 4096) {
+			mote_step += 1;
+		}
+	}
+	apply_frame();
+}
 
 // ---------------------------------------------------------------------------
 // The tap-along: sixteen beats, once a day
@@ -1769,8 +1867,8 @@ static void page_timer_cb(lv_timer_t *timer) {
 		return;
 	}
 	consume_events();
-	paint();
-	sync_animation();
+	paint_values();
+	advance_frame();
 }
 
 static void screen_loaded_cb(lv_event_t *e) {
@@ -1907,7 +2005,8 @@ static void build(void) {
 		int size = 4 + (i % 3) * 3;
 		bubbles[i] = disc(habitat, PET_BUBBLE);
 		lv_obj_set_style_bg_opa(bubbles[i], LV_OPA_60, 0);
-		place(bubbles[i], card_w - 30 - (i % 4) * 16, habitat_h - 60 - (i % 3) * 30, size, size);
+		bubble_home[i] = habitat_h - 60 - (i % 3) * 30;
+		place(bubbles[i], card_w - 30 - (i % 4) * 16, bubble_home[i], size, size);
 	}
 
 	// ---- the top of the card -------------------------------------------
@@ -1944,7 +2043,7 @@ static void build(void) {
 	health_icon = icon_image(habitat, &icon_heart_filled, 12);
 	place(health_icon, hud_x, 11, 12, 12);
 	health_bar = lv_bar_create(habitat);
-	lv_obj_set_size(health_bar, 44, 6);
+	lv_obj_set_size(health_bar, 40, 6);
 	lv_obj_set_pos(health_bar, hud_x + 16, 14);
 	lv_bar_set_range(health_bar, 0, PET_HAPPY_MAX);
 	lv_bar_set_value(health_bar, 0, LV_ANIM_OFF);
@@ -1954,15 +2053,16 @@ static void build(void) {
 	health_value = lv_label_create(habitat);
 	lv_obj_add_style(health_value, &theme_style_text_dim, 0);
 	lv_obj_set_style_text_font(health_value, &font_ui_14, 0);
-	lv_obj_set_width(health_value, 24);
+	lv_obj_set_width(health_value, 28);
+	lv_obj_set_height(health_value, lv_font_get_line_height(&font_ui_14));
 	lv_obj_set_style_text_align(health_value, LV_TEXT_ALIGN_RIGHT, 0);
-	lv_obj_set_pos(health_value, hud_x + 64, 7);
+	lv_obj_set_pos(health_value, hud_x + 60, 7);
 	lv_label_set_text(health_value, "0");
 
 	energy_icon = icon_image(habitat, &icon_zap, 12);
 	place(energy_icon, hud_x, 29, 12, 12);
 	energy_bar = lv_bar_create(habitat);
-	lv_obj_set_size(energy_bar, 44, 6);
+	lv_obj_set_size(energy_bar, 40, 6);
 	lv_obj_set_pos(energy_bar, hud_x + 16, 32);
 	lv_bar_set_range(energy_bar, 0, PET_ENERGY_MAX);
 	lv_bar_set_value(energy_bar, 0, LV_ANIM_OFF);
@@ -1972,9 +2072,10 @@ static void build(void) {
 	energy_value = lv_label_create(habitat);
 	lv_obj_add_style(energy_value, &theme_style_text_dim, 0);
 	lv_obj_set_style_text_font(energy_value, &font_ui_14, 0);
-	lv_obj_set_width(energy_value, 24);
+	lv_obj_set_width(energy_value, 28);
+	lv_obj_set_height(energy_value, lv_font_get_line_height(&font_ui_14));
 	lv_obj_set_style_text_align(energy_value, LV_TEXT_ALIGN_RIGHT, 0);
-	lv_obj_set_pos(energy_value, hud_x + 64, 25);
+	lv_obj_set_pos(energy_value, hud_x + 60, 25);
 	lv_label_set_text(energy_value, "0");
 
 	notes_icon = icon_image(habitat, &icon_music_note, 12);
@@ -1982,8 +2083,10 @@ static void build(void) {
 	notes_value = lv_label_create(habitat);
 	lv_obj_add_style(notes_value, &theme_style_text_dim, 0);
 	lv_obj_set_style_text_font(notes_value, &font_ui_14, 0);
-	lv_obj_set_width(notes_value, 60);
-	lv_obj_set_pos(notes_value, hud_x + 16, 46);
+	lv_obj_set_width(notes_value, 28);
+	lv_obj_set_height(notes_value, lv_font_get_line_height(&font_ui_14));
+	lv_obj_set_style_text_align(notes_value, LV_TEXT_ALIGN_RIGHT, 0);
+	lv_obj_set_pos(notes_value, hud_x + 60, 46);
 	lv_label_set_text(notes_value, "0");
 
 	// The Calm soundscape: four motes drifting up through the card, only for a
@@ -1991,7 +2094,8 @@ static void build(void) {
 	for (int i = 0; i < 4; i++) {
 		motes[i] = disc(habitat, lv_color_white());
 		lv_obj_set_style_bg_opa(motes[i], LV_OPA_40, 0);
-		place(motes[i], 18 + i * (card_w - 60) / 4, habitat_h - 60 - (i % 2) * 24, 5 + (i % 2) * 2, 5 + (i % 2) * 2);
+		mote_home[i] = habitat_h - 60 - (i % 2) * 24;
+		place(motes[i], 18 + i * (card_w - 60) / 4, mote_home[i], 5 + (i % 2) * 2, 5 + (i % 2) * 2);
 		show(motes[i], false);
 	}
 
@@ -2010,8 +2114,17 @@ static void build(void) {
 	show(note_b, false);
 
 	// ---- what it is feeding on ------------------------------------------
+	// The status line's picture: a still note when nothing is playing, and
+	// three bars that swap on the frame timer while something is.
 	status_icon = icon_image(habitat, &icon_music_note, 12);
 	place(status_icon, 12, habitat_h - 28, 12, 12);
+
+	eq_bottom = habitat_h - 21;
+	for (int i = 0; i < 3; i++) {
+		eq_bar[i] = bar_piece(habitat, lv_color_white(), 1);
+		place(eq_bar[i], 12 + i * 5, eq_bottom - 4, 3, 4);
+		show(eq_bar[i], false);
+	}
 
 	status_label = lv_label_create(habitat);
 	lv_obj_add_style(status_label, &theme_style_text_dim, 0);
