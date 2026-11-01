@@ -1990,6 +1990,16 @@ square on now, a bar and four knobs, and a bone. `PET_SCENE_PARTS` went to 24 to
 hold the extra pieces; six more objects that are never all drawn costs less than
 the wrong shape in the corner does.
 
+### The fish that stayed behind
+
+A fish is one drawn shape, and that shape is placed only while the pet *is* a
+fish -- but it was never hidden when it stopped being one. The object kept the
+last box it had been given and the triangles still in it, so a player who was a
+fish and changed their mind found an orange sliver of it jammed in behind the
+new animal's head, looking like a bag hung off its shoulder. One `show()` fixes
+it. Every other part of the animal is shown or hidden by species on every
+paint; this one was added with the shape and missed the rule.
+
 ### The fish
 
 The fish was one long oval with a fan stuck on the end. The fins were right; the

@@ -124,8 +124,6 @@ typedef struct {
 	lv_obj_t *jowl_l; // the dog's hanging ears, which are rounded, not drawn
 	lv_obj_t *jowl_r;
 	lv_obj_t *whisker[4]; // the cat's
-	lv_obj_t *ear_in_l;
-	lv_obj_t *ear_in_r;
 
 	// Faces: a muzzle for the dog, a nose on the end of it; a gill for the fish.
 	lv_obj_t *muzzle;
@@ -715,6 +713,11 @@ static void paint_creature(void) {
 	set_radius(parts.body, trunk_h * 44 / 100);
 	place(parts.body, bx, trunk_top, trunk_w, trunk_h);
 	show(parts.body, !fish);
+	// And the fish's own body is shown only for the fish. It is placed inside
+	// `if (fish)` below, so it keeps the last box and the last triangles it was
+	// given: without this, a player who was a fish and changed their mind keeps
+	// a fish-shaped patch half behind the new animal's head.
+	show(parts.fish_body, fish);
 
 	int fish_w = 0; // the fish body's own box, for the face that goes on it
 	int fish_h = 0;
@@ -1012,8 +1015,6 @@ static void paint_creature(void) {
 	if (headwear) {
 		show(parts.ear_l, false);
 		show(parts.ear_r, false);
-		show(parts.ear_in_l, false);
-		show(parts.ear_in_r, false);
 	}
 
 	// Hats sit on the head, which for the fish is the whole animal -- and high
