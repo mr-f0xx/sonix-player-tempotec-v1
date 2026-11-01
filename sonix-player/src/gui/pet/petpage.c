@@ -23,13 +23,21 @@ lv_obj_t *petpage_screen;
 
 // A part made of triangles rather than of a styled rectangle: the typedef is
 // up here because the parts are, the drawing itself is further down.
-#define PET_SHAPE_TRIS 8
+//
+// A shape can also carry one closed outline, drawn as a run of joined lines
+// after the fills. That is how the fish's body is drawn: a dozen straight
+// sides are round enough for a fish, but twelve triangles wearing twelve ink
+// lines are a web, so the body is filled in triangles and outlined once.
+#define PET_SHAPE_TRIS 12
+#define PET_SHAPE_LINE 16
 
 typedef struct {
 	lv_obj_t *obj;
 	int count;
 	int16_t p[PET_SHAPE_TRIS][3][2];
 	lv_color_t color[PET_SHAPE_TRIS];
+	int line_count;
+	int16_t line[PET_SHAPE_LINE][2];
 } pet_shape_t;
 
 // ---------------------------------------------------------------------------
@@ -103,7 +111,6 @@ typedef struct {
 	// A fish's fins: a forked tail behind, a dorsal on top, a pectoral under
 	// the belly.
 	lv_obj_t *fin_top;
-	lv_obj_t *fin_side;
 	lv_obj_t *fin_tail;
 
 	// The trunk and the head. The head is drawn after the trunk, so its ink
@@ -227,7 +234,6 @@ static pet_shape_t shape_ear_r;
 static pet_shape_t shape_fish_body;
 static pet_shape_t shape_fin_tail;
 static pet_shape_t shape_fin_top;
-static pet_shape_t shape_fin_side;
 static pet_shape_t shape_plant; // three leaves standing out of the cat's pot
 
 // What each animal has behind it, and whose it is. Built once with the page,
@@ -382,6 +388,34 @@ static void shape_draw_cb(lv_event_t *e) {
 		}
 		lv_draw_triangle(layer, &dsc);
 	}
+
+	// The outline, if this shape is a polygon: one line per side, each with a
+	// round cap so the corners close up. Nothing is allocated for it -- a
+	// polyline dsc would copy its points into LVGL's heap on every draw.
+	for (int i = 0; i < shape->line_count; i++) {
+		const int j = (i + 1) % shape->line_count;
+		lv_draw_line_dsc_t dsc;
+		lv_draw_line_dsc_init(&dsc);
+		dsc.color = PET_INK;
+		dsc.opa = LV_OPA_COVER;
+		dsc.width = 2;
+		dsc.round_start = 1;
+		dsc.round_end = 1;
+		dsc.p1.x = coords.x1 + shape->line[i][0];
+		dsc.p1.y = coords.y1 + shape->line[i][1];
+		dsc.p2.x = coords.x1 + shape->line[j][0];
+		dsc.p2.y = coords.y1 + shape->line[j][1];
+		lv_draw_line(layer, &dsc);
+	}
+}
+
+// One corner of the outline that goes round a shape.
+static void shape_line(pet_shape_t *s, int x, int y) {
+	if (s->line_count < PET_SHAPE_LINE) {
+		s->line[s->line_count][0] = (int16_t)x;
+		s->line[s->line_count][1] = (int16_t)y;
+		s->line_count++;
+	}
 }
 
 static lv_obj_t *shape_create(lv_obj_t *parent, pet_shape_t *shape) {
@@ -391,7 +425,10 @@ static lv_obj_t *shape_create(lv_obj_t *parent, pet_shape_t *shape) {
 	return shape->obj;
 }
 
-static void shape_reset(pet_shape_t *s) { s->count = 0; }
+static void shape_reset(pet_shape_t *s) {
+	s->count = 0;
+	s->line_count = 0;
+}
 
 // One triangle, scaled about its own middle: `pct` under 100 shrinks it, over
 // 100 grows it. The ink line is the same triangle at 118 per cent, drawn first.
@@ -510,7 +547,6 @@ static void build_creature(void) {
 
 	// ---- behind the trunk ----------------------------------------------
 	parts.fin_top = shape_create(parts.root, &shape_fin_top);
-	parts.fin_side = shape_create(parts.root, &shape_fin_side);
 	parts.fin_tail = shape_create(parts.root, &shape_fin_tail);
 	parts.ear_l = shape_create(parts.root, &shape_ear_l);
 	parts.ear_r = shape_create(parts.root, &shape_ear_r);
@@ -659,10 +695,14 @@ static void paint_creature(void) {
 	int trunk_w = fish ? body_w + 10 : body_w;
 	int trunk_h = fish ? body_h * 78 / 100 : body_h * 58 / 100;
 	int trunk_top = fish ? PET_BASE_Y - 6 - trunk_h : PET_BASE_Y - trunk_h;
-	// The dog's head is the widest: a dog is a head with a dog on it.
-	int head_w = fish ? trunk_w : body_w * (dog ? 90 : 84) / 100;
+	// The dog's head is the widest: a dog is a head with a dog on it. Both
+	// heads are three quarters of the body rather than nine tenths: at the
+	// size they were it was a head with a little animal under it.
+	int head_w = fish ? trunk_w : body_w * (dog ? 82 : 76) / 100;
 	int head_h = fish ? trunk_h : head_w;
-	int head_bottom = fish ? PET_BASE_Y - 6 : trunk_top + head_h * 40 / 100;
+	// Sitting a little deeper on the trunk, so that a smaller head still
+	// meets the shoulders rather than resting on top of them.
+	int head_bottom = fish ? PET_BASE_Y - 6 : trunk_top + head_h * 44 / 100;
 	int head_top = head_bottom - head_h;
 
 	// The fills. The line around them is the same ink for all three, so the
@@ -707,8 +747,8 @@ static void paint_creature(void) {
 	// ---- the trunk -------------------------------------------------------
 	//
 	// The three animals that stand are a round trunk with the head drawn over
-	// it. A fish is one shape: a tall oval that comes to a snout in front and
-	// a narrow peduncle behind, with the tail behind that. A plain oval with
+	// it. A fish is one shape: an oval that comes to a snout in front and a
+	// narrow peduncle behind, with the tail behind that. A plain oval with
 	// fins stuck to it reads as a blob, whatever is drawn on it.
 	set_radius(parts.body, trunk_h * 44 / 100);
 	place(parts.body, bx, trunk_top, trunk_w, trunk_h);
@@ -723,40 +763,44 @@ static void paint_creature(void) {
 	int fish_h = 0;
 	int fish_y = 0;
 	if (fish) {
-		fish_w = trunk_w * 80 / 100;
-		fish_h = trunk_h + 6;
+		// Longer than it is tall: a body as wide as it is high is a ball with a
+		// tail on it, whatever the fins say.
+		fish_w = trunk_w * 90 / 100;
+		fish_h = trunk_h + 4;
 		fish_y = trunk_top - 4;
 		const int w = fish_w;
 		const int h = fish_h;
-		// Three triangles fanning out of the snout: the back, the peduncle
-		// and the belly. Every ink edge goes down first and every fill over
-		// them afterwards, so the two seams inside the hull are covered by
-		// the fill beside them and what is left is one outline round the
-		// whole animal rather than three triangles in a bag.
-		//
-		// Four triangles out of the snout's top corner. A flat snout in
-		// front, the back laid over the top, the narrow peduncle behind and
-		// the belly hanging under: a hexagon, which is as close to the oval
-		// a fish is as four straight lines will come.
-		static const int16_t hull[4][6] = {
-			{3, 34, 34, 3, 100, 34}, // snout, back, peduncle top
-			{3, 34, 100, 34, 100, 66}, // snout, peduncle top, peduncle end
-			{3, 34, 100, 66, 34, 97}, // snout, peduncle end, belly
-			{3, 34, 34, 97, 3, 62}, // snout, belly, snout's bottom corner
+		// The hull, as the corners on the way round from the snout's top: an
+		// oval with a flat snout in front and a narrow peduncle behind. Six
+		// corners read as a kite and eight as an octagon; a fish is round, and
+		// round takes more than a dozen.
+		static const int16_t hull[14][2] = {
+			{2, 38}, {8, 20}, {22, 6}, {40, 2}, {60, 6}, {80, 20}, {94, 40},
+			{94, 60}, {80, 80}, {60, 94}, {40, 98}, {22, 94}, {8, 80}, {2, 62},
 		};
-		shape_reset(&shape_fish_body);
-		for (int i = 0; i < 4; i++) {
-			const int16_t *t = hull[i];
-			shape_push(&shape_fish_body, PET_INK, 124, 0, 0, t[0] * w / 100 - 4, t[1] * h / 100,
-					   t[2] * w / 100 - 4, t[3] * h / 100, t[4] * w / 100 - 4, t[5] * h / 100);
+		const int n = 14;
+		int xs[14];
+		int ys[14];
+		for (int i = 0; i < n; i++) {
+			xs[i] = hull[i][0] * w / 100 - 4;
+			ys[i] = hull[i][1] * h / 100;
 		}
-		// The fills are a few per cent larger than their triangles: drawn at
-		// exactly their size, the anti-aliasing along a shared edge lets the
-		// ink under it through as a hairline, which is a seam across the fish.
-		for (int i = 0; i < 4; i++) {
-			const int16_t *t = hull[i];
-			shape_push(&shape_fish_body, fill, 106, 0, 0, t[0] * w / 100 - 4, t[1] * h / 100,
-					   t[2] * w / 100 - 4, t[3] * h / 100, t[4] * w / 100 - 4, t[5] * h / 100);
+		shape_reset(&shape_fish_body);
+		// Filled in a fan from the snout, and each triangle reaches two corners
+		// on rather than one: neighbours then lap over each other by a whole
+		// slice instead of meeting along an edge. Two triangles of the same
+		// flat colour that only touch show the water between them as a
+		// hairline -- that is the seam that made the last fish look drawn in
+		// pieces -- and an overlap has no edge to show. No ink is needed under
+		// them: the outline is one line round the lot.
+		for (int i = 1; i + 2 < n; i++) {
+			shape_push(&shape_fish_body, fill, 100, 0, 0, xs[0], ys[0], xs[i], ys[i], xs[i + 2], ys[i + 2]);
+		}
+		// One outline round the whole of it, rather than twelve ink
+		// triangles: the line is the same 2 px ink every other part wears,
+		// whatever the number of corners under it.
+		for (int i = 0; i < n; i++) {
+			shape_line(&shape_fish_body, xs[i], ys[i]);
 		}
 		shape_place(&shape_fish_body, bx, fish_y, fish_w + 4, fish_h);
 	}
@@ -776,15 +820,13 @@ static void paint_creature(void) {
 	// dog, and only the fish has a tail -- a fish is drawn side on.
 	show(parts.fin_tail, fish);
 	show(parts.fin_top, fish);
-	show(parts.fin_side, fish);
 
 	if (fish) {
-		// A forked tail on the peduncle, a dorsal fin on the spine and a
-		// small pectoral one under the belly: three fins, and the body
-		// between them is the fish.
+		// A forked tail on the peduncle and a dorsal fin on the spine: two
+		// fins, and the body between them is the fish.
 		const int tail_w = trunk_w * 34 / 100;
 		const int tail_h = trunk_h * 64 / 100;
-		const int tail_x = bx + fish_w - 10;
+		const int tail_x = bx + fish_w - 18; // the hub goes under the body
 		const int tail_y = fish_y + (fish_h - tail_h) / 2;
 		// Two lobes with a notch between them: one triangle would be a fan
 		// and read as a fin, two are a tail. The inks go down first, as on
@@ -808,19 +850,11 @@ static void paint_creature(void) {
 
 		// The dorsal fin stands out of the back and sinks into it: its base
 		// is inside the body, which is drawn over it.
-		const int top_w = fish_w * 44 / 100;
+		const int top_w = fish_w * 42 / 100;
 		const int top_h = fish_h * 52 / 100;
 		shape_reset(&shape_fin_top);
 		shape_triangle(&shape_fin_top, deep, 4, top_h - 2, top_w * 44 / 100, 3, top_w - 3, top_h - 6);
-		shape_place(&shape_fin_top, bx + fish_w * 26 / 100, fish_y + fish_h * 32 / 100 - top_h, top_w, top_h);
-
-		// The pectoral fin: a leaf under the belly with its root inside the
-		// body, which is drawn over it.
-		const int pec_w = fish_w * 26 / 100;
-		const int pec_h = fish_h * 24 / 100;
-		shape_reset(&shape_fin_side);
-		shape_triangle(&shape_fin_side, deep, 2, 2, pec_w - 3, 3, pec_w * 30 / 100, pec_h - 2);
-		shape_place(&shape_fin_side, bx + fish_w * 32 / 100, fish_y + fish_h * 84 / 100, pec_w, pec_h);
+		shape_place(&shape_fin_top, bx + fish_w * 40 / 100, fish_y + fish_h * 30 / 100 - top_h, top_w, top_h);
 	}
 
 	// ---- ears ------------------------------------------------------------
@@ -889,8 +923,8 @@ static void paint_creature(void) {
 	// curve at the end of the snout. Everything else on this page is seen
 	// from the front, so the face is placed off the body box rather than off
 	// the middle of the card.
-	const int mouth_cx = fish ? bx + fish_w * 16 / 100 : cx;
-	const int eye_l_x = fish ? bx + fish_w * 34 / 100 - eye_w / 2 : cx - eye_dx - eye_w / 2;
+	const int mouth_cx = fish ? bx + fish_w * 12 / 100 : cx;
+	const int eye_l_x = fish ? bx + fish_w * 30 / 100 - eye_w / 2 : cx - eye_dx - eye_w / 2;
 	const int eye_r_x = cx + eye_dx - eye_w / 2;
 	const int eye_ly = fish ? fish_y + fish_h * 30 / 100 : eye_y;
 
@@ -914,7 +948,7 @@ static void paint_creature(void) {
 	// The gill: two thirds of a circle, bowing forward behind the head.
 	show(parts.gill, fish);
 	if (fish) {
-		place(parts.gill, bx + fish_w * 50 / 100, fish_y + fish_h * 22 / 100, 14, 23);
+		place(parts.gill, bx + fish_w * 46 / 100, fish_y + fish_h * 21 / 100, 14, 23);
 		lv_arc_set_angles(parts.gill, 90, 270);
 	}
 

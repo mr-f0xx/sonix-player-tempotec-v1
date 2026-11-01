@@ -2053,6 +2053,44 @@ for a fin that meets a body -- the join is hidden -- and wrong for a fin that wa
 placed entirely inside it. Both stick out now, and the gill was moved into the
 face group, because a gill drawn before the body is a gill nobody sees.
 
+### A head that was most of the animal
+
+The cat's head was 84 per cent of the width of its body and the dog's 90, so at
+every stage the animal was a head with a little of itself hanging under it --
+worst at the adult, where the head is 92 pixels across on a 110 pixel body. The
+cat's is 76 now and the dog's 82, and both sit four per cent deeper on the
+trunk, so that a smaller head still meets the shoulders instead of resting on
+them. Everything on the face -- the eyes, the nose, the mouth, the muzzle, how
+far the whiskers reach -- is a percentage of the head's width, so the face came
+down with it and is the same face. The hat does not: it is a fixed brim and a
+fixed cone, and it still sits on the crown.
+
+### A rounder fish
+
+The fish's body was four triangles fanned out of the snout: a hexagon, and it
+looked like one. A shape can carry an outline now. `pet_shape_t` holds a run of
+corners beside its triangles, and the draw callback joins them with the same
+two-pixel ink every other part wears; the hull is fourteen corners, which at
+this size is an oval. A line does not care how many corners it has, so a dozen
+sides cost what four did.
+
+Filling fourteen corners with triangles brought the old seam problem back, and
+the six per cent enlargement only ever worked for triangles as chunky as those
+four were: a fan out of the snout is thin wedges, half a pixel of anti-aliasing
+along each, and the water came through between them as hairlines. Each fill now
+reaches two corners on instead of one, so neighbours lap over each other by a
+whole wedge and there is no shared edge left to show -- two triangles of the
+same flat colour that only touch leave a line, and two that overlap leave
+nothing. No ink is needed under them either: the outline is one line round the
+lot, drawn after the fills.
+
+The body is longer than it is tall now -- 90 per cent of the trunk's width and
+four pixels more than its height -- rather than as wide as it was high, which is
+a ball with a tail on it however many fins are stuck to it, and the tail's hub
+moved under the peduncle. The pectoral fin is gone: a fin on the side of a fish,
+seen from the side, is a triangle drawn on its belly, and it read as exactly
+that. The forked tail, the dorsal, the gill and the one eye say fish without it.
+
 ## The charger, with the player off
 
 The stock player comes up on a battery screen when the device was switched off
