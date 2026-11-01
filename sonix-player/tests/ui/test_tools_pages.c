@@ -463,7 +463,7 @@ static void check_strings(const char *language_dir) {
 		"pet_streak_none", "pet_feeding", "pet_feeding_music", "pet_feed_me",
 		"pet_asleep", "pet_pet", "pet_purr", "pet_cooldown", "pet_goal_toast",
 		"pet_stage_toast", "pet_customise", "pet_choose_pet", "pet_species",
-		"pet_species_cat", "pet_species_dog", "pet_species_dragon", "pet_species_fish",
+		"pet_species_cat", "pet_species_dog", "pet_species_fish",
 		"pet_mood_dizzy", "pet_temperament_none", "pet_temperament_upbeat",
 		"pet_temperament_calm", "pet_temperament_curious", "pet_dizzy_hint",
 		"pet_dizzy_toast", "pet_drop_toast", "pet_forage_toast", "pet_tap_game",
@@ -972,14 +972,13 @@ static void check_pet_page(gui_config_t *cfg, const char *tag) {
 	snprintf(chooser_tag, sizeof(chooser_tag), "%s-chooser", tag);
 	dump_snapshot(petpage_screen, chooser_tag);
 
-	// The chooser is the first thing a new pet shows: the four animals, and the
-	// name it will answer to.
+	// The chooser is the first thing a new pet shows: the three animals, and
+	// the name it will answer to.
 	lv_obj_t *chooser_title = find_label(petpage_screen, tr("pet_customise"));
 	assert(chooser_title);
 	assert(lv_obj_is_visible(chooser_title));
 	assert(find_label(petpage_screen, tr("pet_species_cat")));
 	assert(find_label(petpage_screen, tr("pet_species_dog")));
-	assert(find_label(petpage_screen, tr("pet_species_dragon")));
 	assert(find_label(petpage_screen, tr("pet_species_fish")));
 	assert(find_label(petpage_screen, tr("name")));
 

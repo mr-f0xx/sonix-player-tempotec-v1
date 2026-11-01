@@ -606,10 +606,26 @@ static void test_persistence(void) {
 	assert(loaded.room == 0);
 	assert(loaded.species == PET_SPECIES_NONE);
 
-	// A species that is not one of the four is not a species.
+	// A species that is not one of the three is not a species.
 	config_set_int("pet", "species", 99);
 	pet_load(&loaded, T0, DAY0);
 	assert(pet_species(&loaded) == PET_SPECIES_NONE);
+
+	// The dragon used to be third and the fish fourth. An old file still says
+	// so, and the numbers are stored: three is a dragon, so its owner gets the
+	// cat rather than a fish, and four is still a fish.
+	config_set_int("pet", "state_version", 1); // a file written before this build
+	config_set_int("pet", "species", 3);
+	pet_load(&loaded, T0, DAY0);
+	assert(pet_species(&loaded) == PET_SPECIES_CAT);
+	config_set_int("pet", "species", 4);
+	pet_load(&loaded, T0, DAY0);
+	assert(pet_species(&loaded) == PET_SPECIES_FISH);
+	// And a file this build wrote is read as written.
+	config_set_int("pet", "state_version", 2);
+	config_set_int("pet", "species", 3);
+	pet_load(&loaded, T0, DAY0);
+	assert(pet_species(&loaded) == PET_SPECIES_FISH);
 }
 
 static void test_species(void) {
@@ -622,8 +638,6 @@ static void test_species(void) {
 	assert(pet_species(&st) == PET_SPECIES_CAT);
 	assert(pet_set_species(&st, PET_SPECIES_DOG));
 	assert(pet_species(&st) == PET_SPECIES_DOG);
-	assert(pet_set_species(&st, PET_SPECIES_DRAGON));
-	assert(pet_species(&st) == PET_SPECIES_DRAGON);
 	assert(pet_set_species(&st, PET_SPECIES_FISH));
 	assert(pet_species(&st) == PET_SPECIES_FISH);
 

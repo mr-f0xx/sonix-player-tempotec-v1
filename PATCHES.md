@@ -1940,6 +1940,68 @@ stop when the page is unloaded.
 What *is* here is the quiet part: with the page open and nothing playing, the
 animal breathes twice a minute and nothing else moves.
 
+## The pet, three of it
+
+Three corrections to the animals above: a grey cat, no dragon, and a fish that
+reads as a fish.
+
+### The dragon, and the number it left behind
+
+The species was an `int` in the settings file and the dragon was third of four,
+so deleting it is not a matter of deleting a case from a `switch`: the enum
+would renumber the fish onto three, and every owner who had a dragon would find
+a goldfish in its tank the next time the page opened. Nothing in a version-1
+file says which build wrote it.
+
+The file has a shape version now. `pet_save()` writes `state_version = 2`;
+`pet_load()` reads the old numbers only when the key is missing or older than
+two -- three was a dragon, four was a fish -- and a dragon's owner is offered the
+cat rather than a fish. The test sets the key to 1 by hand and asserts all three
+readings, because this is the one part of the change with no way back.
+
+### Grey
+
+The cat was cream, the dog sandy yellow and the fish gold: three warm fills in a
+row, told apart by their ears alone. The cat is grey now -- `0xC3C7CC` with
+`0xA2A7AE` for the paws and `0xE6E9EC` for anything pale -- which is a colour
+nothing else in the set has, and the pink nose and ears still do the rest.
+
+It also cost the cat its tail. The tail was two turned bars that did not meet,
+and cream on cream had hidden the seam; grey showed it as a stick floating by the
+shoulder. A turned bar is rasterised through a layer the size of its own box, so
+a tail long enough to read is a tail that comes out clipped. Rather than ship
+two thirds of a tail, the two animals that sit facing you have none -- the dog's
+stays, behind the shoulder, where it is a bump and not a promise.
+
+### The fish
+
+The fish was one long oval with a fan stuck on the end. The fins were right; the
+body was not a fish.
+
+It is one drawn shape now, four triangles fanned out of the snout: a flat face
+in front, the back laid over the top, a narrow peduncle behind, the belly
+hanging under. Hexagonal, which is as close to the oval a fish is as four
+straight lines come. It has a forked tail on the peduncle -- two lobes and a
+notch, where a single triangle was a fan -- a dorsal fin standing out of its
+back, a pectoral under its belly, a gill behind its head, and the profile's one
+eye. `lv_arc` draws the gill: an arc is the one curve in this page that is not a
+rounded rectangle.
+
+Two drawing bugs came with it, both worth writing down.
+
+**The fills are drawn larger than their triangles.** With the fill at exactly
+the size of its ink outline, the anti-aliasing along a shared edge is about half
+a pixel of each, and the ink underneath came through as a hairline across the
+body: three triangles in a bag, not a fish. The fills are pushed at 106 per cent
+and the seams are gone. The ink still sits at 124 per cent, so the outline
+survives.
+
+**Everything drawn before the body is under it.** The dorsal fin and the
+pectoral had been created with the other parts behind the trunk, which is right
+for a fin that meets a body -- the join is hidden -- and wrong for a fin that was
+placed entirely inside it. Both stick out now, and the gill was moved into the
+face group, because a gill drawn before the body is a gill nobody sees.
+
 ## The charger, with the player off
 
 The stock player comes up on a battery screen when the device was switched off

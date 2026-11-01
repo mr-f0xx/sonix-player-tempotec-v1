@@ -194,7 +194,6 @@ typedef enum {
 	PET_SPECIES_NONE = 0,
 	PET_SPECIES_CAT,
 	PET_SPECIES_DOG,
-	PET_SPECIES_DRAGON,
 	PET_SPECIES_FISH,
 	PET_SPECIES_COUNT,
 } pet_species_t;
@@ -415,7 +414,7 @@ pet_mood_t pet_mood(const pet_state_t *st, int64_t now);
 // The animal, or PET_SPECIES_NONE before one has been chosen.
 pet_species_t pet_species(const pet_state_t *st);
 
-// Chooses or changes it. False for anything that is not one of the four.
+// Chooses or changes it. False for anything that is not one of the three.
 bool pet_set_species(pet_state_t *st, pet_species_t species);
 
 // The species' translation tag, for the chooser.

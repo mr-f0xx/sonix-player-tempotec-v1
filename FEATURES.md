@@ -245,7 +245,7 @@ a self-signed certificate), and HLS.
 - **Pet** - a small creature fed by the music it can actually be heard by: a
   local track, a stream, internet radio or a phone over Bluetooth, at a volume
   at or above 10 percent. The first time the page opens it asks which animal to
-  raise -- **cat, dog, dragon or fish** -- and what to call it; the name can be
+  raise -- **a grey cat, a sandy dog or a goldfish** -- and what to call it; the name can be
   changed whenever you like from the pencil in the corner. There is no egg: the
   animal you choose is the animal from the first minute, and it grows through
   four stages (hatchling, child, teen, adult). A fish lives in an aquarium --
@@ -286,10 +286,9 @@ a self-signed certificate), and HLS.
   only what changed: a meter that has not moved is not touched between one
   second and the next. While music plays, the line at the foot of the card says
   what it is feeding on beside a three-bar equalizer. Each animal has a shape of
-  its own -- a cat's ears and whiskers, a dog's hanging ears and snout, a
-  dragon's horns, crest and wings, a fish's fan -- and a few flat things of its
-  own behind it: a rug and a plant, a fence and a bone, a pair of mountains, or
-  the tank the fish swims in.
+  its own -- a cat's ears and whiskers, a dog's hanging ears and snout, a fish's
+  forked tail, dorsal fin and gill -- and a few flat things of its own behind
+  it: a rug and a plant, a fence and a bone, or the tank the fish swims in.
 
 ## Games
 

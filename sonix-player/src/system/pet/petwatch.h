@@ -63,7 +63,7 @@ pet_vibe_t petwatch_vibe(void);
 // awarded by the watcher.
 bool petwatch_focus(void);
 
-// The owner's choices. `species` is one of the four animals, or NONE to clear
+// The owner's choices. `species` is one of the three animals, or NONE to clear
 // it (which puts the chooser back); the name is written straight to the
 // settings, trimmed, and an empty one restores the default. Both save.
 bool petwatch_set_species(pet_species_t species);

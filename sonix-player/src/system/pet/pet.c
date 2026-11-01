@@ -614,8 +614,6 @@ const char *pet_species_tag(pet_species_t species) {
 		return "pet_species_cat";
 	case PET_SPECIES_DOG:
 		return "pet_species_dog";
-	case PET_SPECIES_DRAGON:
-		return "pet_species_dragon";
 	case PET_SPECIES_FISH:
 		return "pet_species_fish";
 	case PET_SPECIES_NONE:
@@ -1170,6 +1168,17 @@ void pet_load(pet_state_t *st, int64_t now, long day) {
 	st->idle_energy_credit = (int)config_get_int(PET_SECTION, "idle_energy_credit", 0);
 	st->pets = (int)config_get_int(PET_SECTION, "pets", 0);
 	st->species = (int)config_get_int(PET_SECTION, "species", PET_SPECIES_NONE);
+	// The file's shape has a version now. Before it, there were four animals
+	// and the dragon came third; the numbers are stored, so removing the
+	// dragon would quietly turn its owner into a fish. A version-1 file is
+	// read with the old numbers: three was a dragon and four was a fish.
+	if (config_get_int(PET_SECTION, "state_version", 1) < 2) {
+		if (st->species == 3) {
+			st->species = PET_SPECIES_CAT;
+		} else if (st->species == 4) {
+			st->species = PET_SPECIES_FISH;
+		}
+	}
 	load_hashes("day_genres", st->day_genres, &st->day_genre_count);
 	load_hashes("day_albums", st->day_albums, &st->day_album_count);
 	load_history(st->genre_history);
@@ -1245,6 +1254,8 @@ void pet_save(const pet_state_t *st) {
 		return;
 	}
 
+	// Two: the dragon is gone and the fish took its number.
+	config_set_int(PET_SECTION, "state_version", 2);
 	config_set_int(PET_SECTION, "adopted", (long)st->adopted);
 	config_set_int(PET_SECTION, "last_seen", (long)st->last_seen);
 	config_set_int(PET_SECTION, "last_music", (long)st->last_music);

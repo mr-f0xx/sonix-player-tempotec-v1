@@ -23,7 +23,7 @@ lv_obj_t *petpage_screen;
 
 // A part made of triangles rather than of a styled rectangle: the typedef is
 // up here because the parts are, the drawing itself is further down.
-#define PET_SHAPE_TRIS 6
+#define PET_SHAPE_TRIS 8
 
 typedef struct {
 	lv_obj_t *obj;
@@ -94,22 +94,18 @@ typedef struct {
 #define PET_GRASS_DEEP lv_color_hex(0x559353)
 #define PET_FENCE lv_color_hex(0xBFA680)
 #define PET_BONE lv_color_hex(0xE2D3AF)
-#define PET_PEAK lv_color_hex(0x63798E)
-#define PET_PEAK_DEEP lv_color_hex(0x47596B)
-#define PET_EMBER lv_color_hex(0xE2803C)
 
 typedef struct {
 	lv_obj_t *root;
 	lv_obj_t *shadow;
 
-	// Behind the trunk: the wings a dragon spreads and the tail the three
-	// legged animals wag. A cat's tail is two pieces so that it can curl.
-	lv_obj_t *wing_l;
-	lv_obj_t *wing_r;
+	// Behind the trunk: the dog's wagging tail, and the second piece a cat's
+	// would be cut from if a turned bar did not lose its end.
 	lv_obj_t *tail;
 	lv_obj_t *tail_tip;
 
-	// A fish's fins: a fan at the back, one on top, one under the belly.
+	// A fish's fins: a forked tail behind, a dorsal on top, a pectoral under
+	// the belly.
 	lv_obj_t *fin_top;
 	lv_obj_t *fin_side;
 	lv_obj_t *fin_tail;
@@ -118,6 +114,7 @@ typedef struct {
 	// line cuts across the shoulders -- that seam is most of what makes an
 	// animal read as a head on a body rather than as one round potato.
 	lv_obj_t *body;
+	lv_obj_t *fish_body; // a fish's own shape, from snout to peduncle
 	lv_obj_t *belly;
 	lv_obj_t *head;
 	lv_obj_t *foot_l;
@@ -125,7 +122,7 @@ typedef struct {
 	lv_obj_t *arm_l;
 	lv_obj_t *arm_r;
 
-	// Heads: pointed ears, floppy ones, horns, and the dragon's crest.
+	// Heads: pointed ears and floppy ones.
 	lv_obj_t *ear_l;
 	lv_obj_t *ear_r;
 	lv_obj_t *jowl_l; // the dog's hanging ears, which are rounded, not drawn
@@ -133,11 +130,8 @@ typedef struct {
 	lv_obj_t *whisker[4]; // the cat's
 	lv_obj_t *ear_in_l;
 	lv_obj_t *ear_in_r;
-	lv_obj_t *horn_l;
-	lv_obj_t *horn_r;
-	lv_obj_t *spike[3];
 
-	// Faces: a muzzle for the dog and the dragon, a nose on the end of it.
+	// Faces: a muzzle for the dog, a nose on the end of it; a gill for the fish.
 	lv_obj_t *muzzle;
 	lv_obj_t *nose;
 
@@ -151,6 +145,7 @@ typedef struct {
 	lv_obj_t *lid_v_r;
 	lv_obj_t *cheek_l;
 	lv_obj_t *cheek_r;
+	lv_obj_t *gill;
 	lv_obj_t *mouth;
 	lv_obj_t *mouth_line;
 	lv_obj_t *mouth_open;
@@ -158,8 +153,8 @@ typedef struct {
 	lv_obj_t *tear;
 	lv_obj_t *zzz;
 
-	// What the wardrobe sells. Headwear hides the ears, the horns and the
-	// little "z z", because two hats on one head is not a hat.
+	// What the wardrobe sells. Headwear hides the ears and the little "z z",
+	// because two hats on one head is not a hat.
 	lv_obj_t *hat_cone;
 	lv_obj_t *hat_brim;
 	lv_obj_t *phone_band;
@@ -230,23 +225,19 @@ static lv_obj_t *temperament_label;
 // The Calm soundscape: four motes drifting up while the month says calm.
 static lv_obj_t *motes[4];
 
-// The pointed parts: the cat's ears, the dragon's horns, crest and wings, and
-// the two fins a fish is made of.
+// The pointed parts: the cat's ears and the three fins and the body a fish is
+// made of. A fish has no head object -- it is one shape, snout to peduncle,
+// with the tail behind it.
 static pet_shape_t shape_ear_l;
 static pet_shape_t shape_ear_r;
-static pet_shape_t shape_horn_l;
-static pet_shape_t shape_horn_r;
-static pet_shape_t shape_spike[3];
-static pet_shape_t shape_wing_l;
-static pet_shape_t shape_wing_r;
+static pet_shape_t shape_fish_body;
 static pet_shape_t shape_fin_tail;
 static pet_shape_t shape_fin_top;
-static pet_shape_t shape_peak_l;
-static pet_shape_t shape_peak_r;
+static pet_shape_t shape_fin_side;
 
 // What each animal has behind it, and whose it is. Built once with the page,
 // shown and hidden by species -- no rebuilding when the pet changes.
-#define PET_SCENE_PARTS 24
+#define PET_SCENE_PARTS 18
 
 typedef struct {
 	lv_obj_t *obj;
@@ -257,7 +248,7 @@ static scene_part_t scene[PET_SCENE_PARTS];
 static int scene_count;
 
 // The card's own measurements, kept so the animal can be put on the floor line
-// the four homes are drawn on rather than wherever a container happens to lay
+// the homes are drawn on rather than wherever a container happens to lay
 // it out.
 static int card_w_px;
 static int card_h_px;
@@ -471,7 +462,7 @@ static void card_close_cb(lv_event_t *e) {
 // ---------------------------------------------------------------------------
 // Building the animal
 //
-// The four animals are drawn the way the interface's own icons are: a flat
+// The animals are drawn the way the interface's own icons are: a flat
 // fill inside a heavy ink line, cut out of a handful of shapes. Everything is
 // created back to front -- tail and ears first, so the body's line runs over
 // them -- and every part that has an edge wears the same 2 px outline, which is
@@ -523,12 +514,10 @@ static void build_creature(void) {
 	parts.shadow = disc(parts.root, lv_color_black());
 
 	// ---- behind the trunk ----------------------------------------------
-	parts.wing_l = shape_create(parts.root, &shape_wing_l);
-	parts.wing_r = shape_create(parts.root, &shape_wing_r);
 	parts.tail = round_piece(parts.root, PET_INK);
 	parts.tail_tip = round_piece(parts.root, PET_INK);
 	parts.fin_top = shape_create(parts.root, &shape_fin_top);
-	parts.fin_side = round_piece(parts.root, PET_INK);
+	parts.fin_side = shape_create(parts.root, &shape_fin_side);
 	parts.fin_tail = shape_create(parts.root, &shape_fin_tail);
 	parts.ear_l = shape_create(parts.root, &shape_ear_l);
 	parts.ear_r = shape_create(parts.root, &shape_ear_r);
@@ -537,14 +526,9 @@ static void build_creature(void) {
 	for (int i = 0; i < 4; i++) {
 		parts.whisker[i] = round_piece(parts.root, PET_INK);
 	}
-	parts.horn_l = shape_create(parts.root, &shape_horn_l);
-	parts.horn_r = shape_create(parts.root, &shape_horn_r);
-	for (int i = 0; i < 3; i++) {
-		parts.spike[i] = shape_create(parts.root, &shape_spike[i]);
-	}
-
 	// ---- the trunk -----------------------------------------------------
 	parts.body = round_piece(parts.root, PET_INK);
+	parts.fish_body = shape_create(parts.root, &shape_fish_body);
 	parts.belly = round_piece(parts.root, PET_INK);
 	parts.foot_l = round_piece(parts.root, PET_INK);
 	parts.foot_r = round_piece(parts.root, PET_INK);
@@ -557,6 +541,7 @@ static void build_creature(void) {
 	// ---- the face ------------------------------------------------------
 	parts.muzzle = round_piece(parts.root, PET_INK);
 	parts.nose = round_piece(parts.root, PET_INK);
+	parts.gill = mouth_arc(parts.root); // over the fish's body, not under it
 	parts.eye_l = round_piece(parts.root, PET_INK);
 	parts.eye_r = round_piece(parts.root, PET_INK);
 	parts.glint_l = disc(parts.root, lv_color_white());
@@ -600,10 +585,9 @@ static void build_creature(void) {
 	for (size_t i = 0; i < sizeof(outlined) / sizeof(outlined[0]); i++) {
 		inked(outlined[i], 2);
 	}
-	// Everything that gets turned: the ears, the horns, the crest, the wings,
-	// the tails and the fins.
+	// Everything that gets turned: the ears, the tails and the fins.
 	lv_obj_t *const bordered_parts[] = {
-		parts.tail, parts.tail_tip, parts.fin_side, parts.arm_l, parts.arm_r,
+		parts.tail, parts.tail_tip, parts.arm_l, parts.arm_r,
 		parts.jowl_l, parts.jowl_r, parts.whisker[0], parts.whisker[1], parts.whisker[2], parts.whisker[3],
 	};
 	for (size_t i = 0; i < sizeof(bordered_parts) / sizeof(bordered_parts[0]); i++) {
@@ -649,7 +633,6 @@ static void paint_creature(void) {
 	bool fish = species == PET_SPECIES_FISH;
 	bool cat = species == PET_SPECIES_CAT;
 	bool dog = species == PET_SPECIES_DOG;
-	bool dragon = species == PET_SPECIES_DRAGON;
 
 	// One animal per stage: a hatchling is small and round, an adult is the
 	// same animal with room to stand up in.
@@ -683,24 +666,20 @@ static void paint_creature(void) {
 	int trunk_w = fish ? body_w + 10 : body_w;
 	int trunk_h = fish ? body_h * 78 / 100 : body_h * 58 / 100;
 	int trunk_top = fish ? PET_BASE_Y - 6 - trunk_h : PET_BASE_Y - trunk_h;
-	// The dog's head is the widest and the dragon's the narrowest: a dog is a
-	// head with a dog on it, and a dragon needs the room beside its head for
-	// its horns.
-	int head_w = fish ? trunk_w : body_w * (dog ? 90 : (dragon ? 78 : 84)) / 100;
+	// The dog's head is the widest: a dog is a head with a dog on it.
+	int head_w = fish ? trunk_w : body_w * (dog ? 90 : 84) / 100;
 	int head_h = fish ? trunk_h : head_w;
 	int head_bottom = fish ? PET_BASE_Y - 6 : trunk_top + head_h * 40 / 100;
 	int head_top = head_bottom - head_h;
 
-	// The fills. The line around them is the same ink for all four, so the
-	// animals are a set rather than four drawings.
-	lv_color_t fill = lv_color_hex(0x7FCB6A); // dragon green
-	lv_color_t deep = lv_color_hex(0x5AA84A);
-	lv_color_t light = lv_color_hex(0xD9F0A0);
-	if (cat) {
-		fill = lv_color_hex(0xF6C8A0);
-		deep = lv_color_hex(0xE3A778);
-		light = lv_color_hex(0xFFF1E1);
-	} else if (dog) {
+	// The fills. The line around them is the same ink for all three, so the
+	// animals are a set rather than three drawings. The cat is grey and the
+	// dog is a sandy yellow, so the two are told apart by colour alone even
+	// before the ears are read.
+	lv_color_t fill = lv_color_hex(0xC3C7CC); // the cat's grey
+	lv_color_t deep = lv_color_hex(0xA2A7AE);
+	lv_color_t light = lv_color_hex(0xE6E9EC);
+	if (dog) {
 		fill = lv_color_hex(0xF2CF6B);
 		deep = lv_color_hex(0xDDB64C);
 		light = lv_color_hex(0xFFF6D5);
@@ -719,8 +698,7 @@ static void paint_creature(void) {
 	set_color(parts.arm_r, fill);
 	set_color(parts.tail, fill);
 	set_color(parts.tail_tip, fill);
-	set_color(parts.fin_side, deep);
-	set_color(parts.muzzle, dragon ? deep : light);
+	set_color(parts.muzzle, light);
 	set_color(parts.nose, cat ? PET_CHEEK : PET_INK);
 
 	const int cx = PET_CREATURE_W / 2;
@@ -736,8 +714,56 @@ static void paint_creature(void) {
 	show(parts.shadow, !fish);
 
 	// ---- the trunk -------------------------------------------------------
-	set_radius(parts.body, fish ? trunk_h / 2 : trunk_h * 44 / 100);
+	//
+	// The three animals that stand are a round trunk with the head drawn over
+	// it. A fish is one shape: a tall oval that comes to a snout in front and
+	// a narrow peduncle behind, with the tail behind that. A plain oval with
+	// fins stuck to it reads as a blob, whatever is drawn on it.
+	set_radius(parts.body, trunk_h * 44 / 100);
 	place(parts.body, bx, trunk_top, trunk_w, trunk_h);
+	show(parts.body, !fish);
+
+	int fish_w = 0; // the fish body's own box, for the face that goes on it
+	int fish_h = 0;
+	int fish_y = 0;
+	if (fish) {
+		fish_w = trunk_w * 80 / 100;
+		fish_h = trunk_h + 6;
+		fish_y = trunk_top - 4;
+		const int w = fish_w;
+		const int h = fish_h;
+		// Three triangles fanning out of the snout: the back, the peduncle
+		// and the belly. Every ink edge goes down first and every fill over
+		// them afterwards, so the two seams inside the hull are covered by
+		// the fill beside them and what is left is one outline round the
+		// whole animal rather than three triangles in a bag.
+		//
+		// Four triangles out of the snout's top corner. A flat snout in
+		// front, the back laid over the top, the narrow peduncle behind and
+		// the belly hanging under: a hexagon, which is as close to the oval
+		// a fish is as four straight lines will come.
+		static const int16_t hull[4][6] = {
+			{3, 34, 34, 3, 100, 34}, // snout, back, peduncle top
+			{3, 34, 100, 34, 100, 66}, // snout, peduncle top, peduncle end
+			{3, 34, 100, 66, 34, 97}, // snout, peduncle end, belly
+			{3, 34, 34, 97, 3, 62}, // snout, belly, snout's bottom corner
+		};
+		shape_reset(&shape_fish_body);
+		for (int i = 0; i < 4; i++) {
+			const int16_t *t = hull[i];
+			shape_push(&shape_fish_body, PET_INK, 124, 0, 0, t[0] * w / 100 - 4, t[1] * h / 100,
+					   t[2] * w / 100 - 4, t[3] * h / 100, t[4] * w / 100 - 4, t[5] * h / 100);
+		}
+		// The fills are a few per cent larger than their triangles: drawn at
+		// exactly their size, the anti-aliasing along a shared edge lets the
+		// ink under it through as a hairline, which is a seam across the fish.
+		for (int i = 0; i < 4; i++) {
+			const int16_t *t = hull[i];
+			shape_push(&shape_fish_body, fill, 106, 0, 0, t[0] * w / 100 - 4, t[1] * h / 100,
+					   t[2] * w / 100 - 4, t[3] * h / 100, t[4] * w / 100 - 4, t[5] * h / 100);
+		}
+		shape_place(&shape_fish_body, bx, fish_y, fish_w + 4, fish_h);
+	}
 	// The body is one flat fill, as the reference art is. A lighter belly on a
 	// round animal reads as a second muzzle, whatever colour it is.
 	set_radius(parts.belly, trunk_h / 7);
@@ -749,80 +775,68 @@ static void paint_creature(void) {
 	set_radius(parts.tail_tip, 3);
 	set_radius(parts.fin_tail, 5);
 	set_radius(parts.fin_top, 4);
-	set_radius(parts.fin_side, 3);
-	show(parts.tail, cat || dog || dragon);
-	show(parts.tail_tip, cat || dragon);
+	// No tail on the two that sit facing you: it would be behind them, and a
+	// tail beside the hip is a stick once it is turned -- a turned bar is
+	// clipped to its own box. The ears and the whiskers are the cat.
+	show(parts.tail, dog);
+	show(parts.tail_tip, false);
 	show(parts.fin_tail, fish);
 	show(parts.fin_top, fish);
 	show(parts.fin_side, fish);
 
 	if (fish) {
-		// A fan at the back and a fin over the spine: a lozenge with three
-		// fins is a fish, and nothing else is.
+		// A forked tail on the peduncle, a dorsal fin on the spine and a
+		// small pectoral one under the belly: three fins, and the body
+		// between them is the fish.
 		const int tail_w = trunk_w * 34 / 100;
-		const int tail_h = trunk_h * 62 / 100;
+		const int tail_h = trunk_h * 64 / 100;
+		const int tail_x = bx + fish_w - 10;
+		const int tail_y = fish_y + (fish_h - tail_h) / 2;
+		// Two lobes with a notch between them: one triangle would be a fan
+		// and read as a fin, two are a tail. The inks go down first, as on
+		// the hull, so the join between them is one line and not a cross.
+		static const int16_t fork[2][6] = {
+			{6, 50, 100, 2, 44, 50},
+			{6, 50, 44, 50, 100, 98},
+		};
 		shape_reset(&shape_fin_tail);
-		shape_triangle(&shape_fin_tail, deep, 5, tail_h / 2, tail_w - 5, 6, tail_w - 9, tail_h - 6);
-		shape_place(&shape_fin_tail, bx + trunk_w - 4, trunk_top + trunk_h / 2 - tail_h / 2, tail_w, tail_h);
+		for (int i = 0; i < 2; i++) {
+			const int16_t *t = fork[i];
+			shape_push(&shape_fin_tail, PET_INK, 124, 0, 0, t[0] * tail_w / 100, t[1] * tail_h / 100,
+					   t[2] * tail_w / 100, t[3] * tail_h / 100, t[4] * tail_w / 100, t[5] * tail_h / 100);
+		}
+		for (int i = 0; i < 2; i++) {
+			const int16_t *t = fork[i];
+			shape_push(&shape_fin_tail, deep, 100, 0, 0, t[0] * tail_w / 100, t[1] * tail_h / 100,
+					   t[2] * tail_w / 100, t[3] * tail_h / 100, t[4] * tail_w / 100, t[5] * tail_h / 100);
+		}
+		shape_place(&shape_fin_tail, tail_x, tail_y, tail_w, tail_h);
 
-		const int top_w = trunk_w * 32 / 100;
-		const int top_h = trunk_h * 34 / 100;
+		// The dorsal fin stands out of the back and sinks into it: its base
+		// is inside the body, which is drawn over it.
+		const int top_w = fish_w * 44 / 100;
+		const int top_h = fish_h * 52 / 100;
 		shape_reset(&shape_fin_top);
-		shape_triangle(&shape_fin_top, deep, 5, top_h - 4, top_w * 42 / 100, 5, top_w - 5, top_h - 8);
-		shape_place(&shape_fin_top, cx - top_w / 2, trunk_top - top_h * 62 / 100, top_w, top_h);
+		shape_triangle(&shape_fin_top, deep, 4, top_h - 2, top_w * 44 / 100, 3, top_w - 3, top_h - 6);
+		shape_place(&shape_fin_top, bx + fish_w * 26 / 100, fish_y + fish_h * 32 / 100 - top_h, top_w, top_h);
 
-		set_radius(parts.fin_side, 5);
-		place(parts.fin_side, cx - 8, trunk_top + trunk_h - 7, 22, 11);
-		lv_obj_set_style_transform_rotation(parts.fin_side, 160, 0);
-	} else if (cat) {
-		// Two lengths of tail: out and up from the hip, then hooked over at
-		// the top. It stands clear of the body, so it is read as a tail.
-		place(parts.tail, bx + trunk_w - 10, PET_BASE_Y - 26, 9, 30);
-		lv_obj_set_style_transform_rotation(parts.tail, -300, 0);
-		place(parts.tail_tip, bx + trunk_w + 6, PET_BASE_Y - 52, 18, 9);
-		lv_obj_set_style_transform_rotation(parts.tail_tip, -250, 0);
+		// The pectoral fin: a leaf under the belly with its root inside the
+		// body, which is drawn over it.
+		const int pec_w = fish_w * 26 / 100;
+		const int pec_h = fish_h * 24 / 100;
+		shape_reset(&shape_fin_side);
+		shape_triangle(&shape_fin_side, deep, 2, 2, pec_w - 3, 3, pec_w * 30 / 100, pec_h - 2);
+		shape_place(&shape_fin_side, bx + fish_w * 32 / 100, fish_y + fish_h * 84 / 100, pec_w, pec_h);
 	} else if (dog) {
 		place(parts.tail, bx + trunk_w - 3, trunk_top + trunk_h * 26 / 100, 12, 22);
 		lv_obj_set_style_transform_rotation(parts.tail, -350, 0);
-	} else if (dragon) {
-		place(parts.tail, bx + trunk_w - 4, trunk_top + trunk_h * 66 / 100, 22, 9);
-		lv_obj_set_style_transform_rotation(parts.tail, -330, 0);
-		place(parts.tail_tip, bx + trunk_w + 8, trunk_top + trunk_h * 52 / 100, 13, 13);
-		lv_obj_set_style_transform_rotation(parts.tail_tip, 450, 0);
 	}
 
-	// ---- wings ----------------------------------------------------------
-	// A long triangle off each shoulder, its base behind the body: what
-	// stands out is a wing.
-	show(parts.wing_l, dragon);
-	show(parts.wing_r, dragon);
-	if (dragon) {
-		// Two triangles a side, so the trailing edge has a notch in it: a
-		// wing is a fan, and a fan with one pleat missing is a wing.
-		// Beside the head rather than beside the trunk, which at the adult
-		// size is all there is room for: they stand up behind the shoulders,
-		// and the head's own line is drawn over the part that overlaps it.
-		const int wing_w = 32;
-		const int wing_h = head_h * 74 / 100;
-		const int wing_y = head_top + head_h * 10 / 100;
-		shape_reset(&shape_wing_l);
-		shape_triangle(&shape_wing_l, deep, wing_w * 42 / 100, 3, 2, wing_h * 84 / 100, wing_w - 3, wing_h - 3);
-		shape_place(&shape_wing_l, 4, wing_y, wing_w, wing_h);
-		shape_reset(&shape_wing_r);
-		shape_triangle(&shape_wing_r, deep, wing_w * 58 / 100, 3, wing_w - 2, wing_h * 84 / 100, 2, wing_h - 3);
-		shape_place(&shape_wing_r, PET_CREATURE_W - wing_w - 4, wing_y, wing_w, wing_h);
-	}
-
-	// ---- ears, horns, crest ---------------------------------------------
+	// ---- ears ------------------------------------------------------------
 	show(parts.ear_l, cat);
 	show(parts.ear_r, cat);
 	show(parts.jowl_l, dog);
 	show(parts.jowl_r, dog);
-	show(parts.horn_l, dragon);
-	show(parts.horn_r, dragon);
-	for (int i = 0; i < 3; i++) {
-		show(parts.spike[i], dragon);
-	}
 
 	if (cat) {
 		// Ears, leaning out of the top of the head: a triangle with a pink
@@ -855,32 +869,6 @@ static void paint_creature(void) {
 		lv_obj_set_style_transform_rotation(parts.jowl_r, -130, 0);
 	}
 
-	if (dragon) {
-		// Two horns swept out and back, and a crest of three spikes between
-		// them. A dragon is a thing with points on it.
-		const int horn_w = head_w * 20 / 100;
-		const int horn_h = head_h * 40 / 100;
-		const int horn_y = head_top - horn_h * 68 / 100;
-		shape_reset(&shape_horn_l);
-		shape_triangle(&shape_horn_l, light, horn_w - 4, horn_h - 6, 4, horn_h - 4, 4, 5);
-		shape_place(&shape_horn_l, cx - head_w * 30 / 100 - horn_w / 2, horn_y, horn_w, horn_h);
-		shape_reset(&shape_horn_r);
-		shape_triangle(&shape_horn_r, light, 4, horn_h - 6, horn_w - 4, horn_h - 4, horn_w - 4, 5);
-		shape_place(&shape_horn_r, cx + head_w * 30 / 100 - horn_w / 2, horn_y, horn_w, horn_h);
-
-		const int spike_w = head_w * 26 / 100;
-		const int spike_h = head_h * 30 / 100;
-		const int spike_x[3] = {0, 24, -24};
-		const int spike_y[3] = {0, 7, 7};
-		for (int i = 0; i < 3; i++) {
-			int sx = cx + head_w * spike_x[i] / 100 - spike_w / 2;
-			int sy = head_top + head_h * spike_y[i] / 100 - spike_h * 62 / 100;
-			shape_reset(&shape_spike[i]);
-			shape_triangle(&shape_spike[i], light, spike_w / 2, spike_h - 5, 4, spike_h - 4, spike_w - 4, spike_h - 4);
-			shape_place(&shape_spike[i], sx, sy, spike_w, spike_h);
-		}
-	}
-
 	// ---- feet and arms ---------------------------------------------------
 	set_radius(parts.foot_l, 4);
 	set_radius(parts.foot_r, 4);
@@ -904,64 +892,81 @@ static void paint_creature(void) {
 	show(parts.head, !fish);
 
 	// ---- the face --------------------------------------------------------
-	// A muzzle for the animals that have one, with a nose on the end of it.
-	// The cat's is a small blob with a pink nose, the dog's is wide and soft,
-	// the dragon's is a short snout with two nostrils' worth of nose.
-	int muzzle_w = dog ? 34 : (dragon ? head_w * 52 / 100 : 26);
-	int muzzle_h = dog ? 26 : (dragon ? head_h * 24 / 100 : 18);
-	int muzzle_y = head_top + head_h * (dog ? 52 : (dragon ? 62 : 56)) / 100;
+	//
+	// The fish is seen from the side: its snout is at the front of its own
+	// shape, it has one eye and a gill behind it, and the mouth is a small
+	// curve at the end of the snout. Everything else on this page is seen
+	// from the front, so the face is placed off the body box rather than off
+	// the middle of the card.
+	const int mouth_cx = fish ? bx + fish_w * 16 / 100 : cx;
+	const int eye_l_x = fish ? bx + fish_w * 34 / 100 - eye_w / 2 : cx - eye_dx - eye_w / 2;
+	const int eye_r_x = cx + eye_dx - eye_w / 2;
+	const int eye_ly = fish ? fish_y + fish_h * 30 / 100 : eye_y;
+
+	// A muzzle for the dog, with a nose on the end of it.
+	int muzzle_w = dog ? 34 : 26;
+	int muzzle_h = dog ? 26 : 18;
+	int muzzle_y = head_top + head_h * (dog ? 52 : 56) / 100;
 	set_radius(parts.muzzle, dog ? muzzle_h / 2 : 7);
-	show(parts.muzzle, dog || dragon);
+	show(parts.muzzle, dog);
 	place(parts.muzzle, cx - muzzle_w / 2, muzzle_y, muzzle_w, muzzle_h);
 
 	set_radius(parts.nose, dog ? 4 : 2);
-	show(parts.nose, true);
+	show(parts.nose, !fish);
 	if (dog) {
 		place(parts.nose, cx - 6, muzzle_y + 5, 12, 8);
-	} else if (dragon) {
-		// A long muzzle with a flat nose on the end rather than a dog's blob.
-		place(parts.nose, cx - 5, muzzle_y + 3, 10, 4);
 	} else {
 		// The cat: a small pink nose, above a mouth that is all curve.
 		place(parts.nose, cx - 4, head_top + head_h * 54 / 100, 8, 6);
 	}
 
+	// The gill: two thirds of a circle, bowing forward behind the head.
+	show(parts.gill, fish);
+	if (fish) {
+		place(parts.gill, bx + fish_w * 50 / 100, fish_y + fish_h * 22 / 100, 14, 23);
+		lv_arc_set_angles(parts.gill, 90, 270);
+	}
+
 	set_radius(parts.eye_l, 5);
 	set_radius(parts.eye_r, 5);
 	bool eyes_open = !sleeping && !dizzy;
-	place(parts.eye_l, cx - eye_dx - eye_w / 2, eye_y, eye_w, eye_h);
-	place(parts.eye_r, cx + eye_dx - eye_w / 2, eye_y, eye_w, eye_h);
+	place(parts.eye_l, eye_l_x, eye_ly, eye_w, eye_h);
+	place(parts.eye_r, eye_r_x, eye_y, eye_w, eye_h);
 	show(parts.eye_l, eyes_open);
-	show(parts.eye_r, eyes_open);
-	place(parts.glint_l, cx - eye_dx - eye_w / 2 + 2, eye_y + 2, 4, 4);
-	place(parts.glint_r, cx + eye_dx - eye_w / 2 + 2, eye_y + 2, 4, 4);
+	show(parts.eye_r, eyes_open && !fish);
+	place(parts.glint_l, eye_l_x + 2, eye_ly + 2, 4, 4);
+	place(parts.glint_r, eye_r_x + 2, eye_y + 2, 4, 4);
 	show(parts.glint_l, eyes_open);
-	show(parts.glint_r, eyes_open);
+	show(parts.glint_r, eyes_open && !fish);
 
 	// A dizzy pet has crosses where its eyes were: two bars over each eye, one
 	// each way. Sleeping keeps the single flat lid.
 	set_radius(parts.lid_l, 1);
 	set_radius(parts.lid_r, 1);
 	show(parts.lid_l, sleeping || dizzy);
-	show(parts.lid_r, sleeping || dizzy);
+	show(parts.lid_r, (sleeping || dizzy) && !fish);
 	// A turned bar is clipped to its own box, so a dizzy pet's cross is drawn
 	// from two bars that are not turned at all.
 	show(parts.lid_v_l, dizzy);
-	show(parts.lid_v_r, dizzy);
+	show(parts.lid_v_r, dizzy && !fish);
 	if (dizzy) {
-		place(parts.lid_l, cx - eye_dx - 6, eye_y + 5, 12, 2);
-		place(parts.lid_r, cx + eye_dx - 6, eye_y + 5, 12, 2);
-		place(parts.lid_v_l, cx - eye_dx - 1, eye_y, 2, 12);
-		place(parts.lid_v_r, cx + eye_dx - 1, eye_y, 2, 12);
+		place(parts.lid_l, eye_l_x + eye_w / 2 - 6, eye_ly + 5, 12, 2);
+		place(parts.lid_r, eye_r_x + eye_w / 2 - 6, eye_y + 5, 12, 2);
+		place(parts.lid_v_l, eye_l_x + eye_w / 2 - 1, eye_ly, 2, 12);
+		place(parts.lid_v_r, eye_r_x + eye_w / 2 - 1, eye_y, 2, 12);
 	} else {
-		place(parts.lid_l, cx - eye_dx - 5, eye_y + 5, 10, 2);
-		place(parts.lid_r, cx + eye_dx - 5, eye_y + 5, 10, 2);
+		place(parts.lid_l, eye_l_x + 1, eye_ly + 5, 10, 2);
+		place(parts.lid_r, eye_r_x + 1, eye_y + 5, 10, 2);
 	}
 
 	set_radius(parts.cheek_l, 3);
 	set_radius(parts.cheek_r, 3);
 	place(parts.cheek_l, cx - head_w * 32 / 100 - 4, eye_y + 13, 9, 5);
 	place(parts.cheek_r, cx + head_w * 32 / 100 - 4, eye_y + 13, 9, 5);
+	// A fish seen from the side has one cheek at most, and it has a gill
+	// there instead.
+	show(parts.cheek_l, !fish);
+	show(parts.cheek_r, !fish);
 	lv_obj_set_style_bg_opa(parts.cheek_l, mood == PET_MOOD_BLISSFUL ? LV_OPA_80 : LV_OPA_60, 0);
 	lv_obj_set_style_bg_opa(parts.cheek_r, mood == PET_MOOD_BLISSFUL ? LV_OPA_80 : LV_OPA_60, 0);
 
@@ -969,8 +974,8 @@ static void paint_creature(void) {
 	bool smile = !sad && (mood == PET_MOOD_HAPPY || mood == PET_MOOD_BLISSFUL);
 	bool line = mood == PET_MOOD_OKAY || sleeping || dizzy;
 
-	int mouth_y = (dog || dragon) ? muzzle_y + muzzle_h - 9 : head_top + head_h * 66 / 100;
-	place(parts.mouth, cx - 7, mouth_y, 14, 9);
+	int mouth_y = fish ? fish_y + fish_h * 50 / 100 : (dog ? muzzle_y + muzzle_h - 9 : head_top + head_h * 66 / 100);
+	place(parts.mouth, mouth_cx - 7, mouth_y, 14, 9);
 	if (sad) {
 		lv_arc_set_angles(parts.mouth, 200, 340);
 	} else {
@@ -979,13 +984,13 @@ static void paint_creature(void) {
 	show(parts.mouth, !sleeping && !dizzy && !listening && (smile || sad));
 
 	set_radius(parts.mouth_line, 1);
-	place(parts.mouth_line, cx - 5, mouth_y + 3, 10, 2);
+	place(parts.mouth_line, mouth_cx - 5, mouth_y + 3, 10, 2);
 	show(parts.mouth_line, !listening && line);
 
 	set_radius(parts.mouth_open, 4);
-	place(parts.mouth_open, cx - 4, mouth_y, 8, 7);
+	place(parts.mouth_open, mouth_cx - 4, mouth_y, 8, 7);
 	set_radius(parts.tongue, 2);
-	place(parts.tongue, cx - 2, mouth_y + 4, 4, 3);
+	place(parts.tongue, mouth_cx - 2, mouth_y + 4, 4, 3);
 	show(parts.mouth_open, listening);
 	show(parts.tongue, listening);
 
@@ -1002,7 +1007,7 @@ static void paint_creature(void) {
 	}
 
 	set_radius(parts.tear, 2);
-	place(parts.tear, cx - eye_dx - 7, eye_y + 11, 4, 7);
+	place(parts.tear, eye_l_x - 1, eye_ly + 11, 4, 7);
 	show(parts.tear, sad);
 
 	place(parts.zzz, PET_CREATURE_W - 32, 2, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
@@ -1021,15 +1026,11 @@ static void paint_creature(void) {
 		show(parts.ear_r, false);
 		show(parts.ear_in_l, false);
 		show(parts.ear_in_r, false);
-		show(parts.horn_l, false);
-		show(parts.horn_r, false);
-		for (int i = 0; i < 3; i++) {
-			show(parts.spike[i], false);
-		}
 	}
 
-	// Hats sit on the head, which for the fish is the whole animal.
-	const int hat_y = head_top;
+	// Hats sit on the head, which for the fish is the whole animal -- and high
+	// enough to clear the dorsal fin.
+	const int hat_y = fish ? fish_y - 6 : head_top;
 
 	set_radius(parts.hat_cone, 5);
 	place(parts.hat_brim, cx - 14, hat_y - 3, 28, 5);
@@ -1071,11 +1072,10 @@ static void paint_creature(void) {
 // The four homes
 //
 // One wash of the pet's chosen room was not enough: a cat on a green card and a
-// dragon on a green card are the same card. Each animal now has three or four
-// flat things of its own behind it -- a rug and a plant, a fence and a bone, a
-// pair of mountains -- drawn from the same shapes as the animal, in colours of
-// their own, and shown or hidden by species. Fourteen objects for all four, and
-// only the ones that belong to the current animal are ever drawn.
+// dog on a green card are the same card. Each animal now has flat things of its
+// own behind it -- a rug and a plant, a fence and a bone, a tank -- drawn from
+// the same shapes as the animal, in colours of their own, and shown or hidden
+// by species. Only the ones that belong to the current animal are ever drawn.
 // ---------------------------------------------------------------------------
 
 static lv_obj_t *scene_register(lv_obj_t *o, pet_species_t species) {
@@ -1135,22 +1135,6 @@ static void build_scenes(int card_w, int card_h) {
 	scene_rect(habitat, PET_SPECIES_DOG, PET_BONE, LV_RADIUS_CIRCLE, card_w - 56, floor_y - 26, 8, 8);
 	scene_rect(habitat, PET_SPECIES_DOG, PET_BONE, LV_RADIUS_CIRCLE, card_w - 37, floor_y - 24, 8, 8);
 
-	// ---- the dragon's mountain ------------------------------------------
-	// Two peaks behind it, a strip of rock, and two embers of something
-	// burning in it.
-	scene_rect(habitat, PET_SPECIES_DRAGON, PET_PEAK_DEEP, 3, 0, floor_y, card_w, floor_h);
-	const int peak_w = card_w * 42 / 100;
-	const int peak_h = card_h * 24 / 100;
-	scene_register(shape_create(habitat, &shape_peak_l), PET_SPECIES_DRAGON);
-	scene_register(shape_create(habitat, &shape_peak_r), PET_SPECIES_DRAGON);
-	shape_reset(&shape_peak_l);
-	shape_triangle(&shape_peak_l, PET_PEAK, peak_w * 46 / 100, 2, 2, peak_h - 2, peak_w - 3, peak_h - 2);
-	shape_place(&shape_peak_l, -4, floor_y - peak_h, peak_w, peak_h);
-	shape_reset(&shape_peak_r);
-	shape_triangle(&shape_peak_r, PET_PEAK, peak_w * 56 / 100, 2, peak_w - 3, peak_h - 2, 2, peak_h - 5);
-	shape_place(&shape_peak_r, card_w - peak_w + 4, floor_y - peak_h * 84 / 100, peak_w, peak_h);
-	scene_rect(habitat, PET_SPECIES_DRAGON, PET_EMBER, LV_RADIUS_CIRCLE, cx - 62, floor_y - 6, 4, 4);
-	scene_rect(habitat, PET_SPECIES_DRAGON, PET_EMBER, LV_RADIUS_CIRCLE, cx + 58, floor_y - 10, 3, 3);
 }
 
 // ---------------------------------------------------------------------------
@@ -1458,23 +1442,17 @@ static void apply_frame(void) {
 	// The breath: two pixels, three when something is playing.
 	lv_obj_set_style_translate_y(parts.root, frame ? (listening ? 3 : 2) : 0, 0);
 
-	// The tail -- or the fin a fish swims with -- leans with it.
+	// The tail -- or the fin a fish swims with -- leans with it. A fish's tail
+	// is drawn square on, so it is only a few degrees either side of still.
 	lv_obj_t *sway = species == PET_SPECIES_FISH ? parts.fin_tail : parts.tail;
-	int base = -330; // the dragon's
-	if (species == PET_SPECIES_FISH) {
-		base = 450;
-	} else if (species == PET_SPECIES_CAT) {
-		base = -300;
-	} else if (species == PET_SPECIES_DOG) {
-		base = -350;
+	const bool fish = species == PET_SPECIES_FISH;
+	int base = -350; // the dog's
+	int swing = 90;
+	if (fish) {
+		base = 0;
+		swing = 45;
 	}
-	lv_obj_set_style_transform_rotation(sway, base + (frame ? 90 : -90), 0);
-
-	// A dragon's wings, if it has them: a few degrees either side of still.
-	if (species == PET_SPECIES_DRAGON) {
-		lv_obj_set_style_transform_rotation(parts.wing_l, 450 + (frame ? 40 : 0), 0);
-		lv_obj_set_style_transform_rotation(parts.wing_r, 450 - (frame ? 40 : 0), 0);
-	}
+	lv_obj_set_style_transform_rotation(sway, base + (frame ? swing : -swing), 0);
 
 	// The two notes drift while something is playing: one rises as the other
 	// fades, which is all the movement two stills can suggest.
@@ -2125,18 +2103,23 @@ static void build_customise(void) {
 	lv_obj_set_style_text_font(pick, &font_ui_14, 0);
 	lv_obj_set_pos(pick, pad + 4, y + 58);
 
-	// Four tiles: two rows of two, wide enough for the longest name in any
-	// language ("Дракон") at the small size.
+	// One tile per animal: the cat and the dog side by side, and the fish
+	// across the row under them. Three names at 16 px fit that in every
+	// language the player speaks, the longest being "Poisson".
 	int chip_y = y + 80;
 	int gap = 8;
 	int chip_w = (card_w - gap) / 2;
 	int chip_h = 46;
+	const int pick_count = PET_SPECIES_COUNT - 1;
 	for (int i = 1; i < PET_SPECIES_COUNT; i++) {
+		// An odd number of animals leaves the last one a row of its own, so
+		// it takes the whole width rather than sitting in half of it.
+		const bool alone = (pick_count % 2 == 1) && i == PET_SPECIES_COUNT - 1;
 		int col = (i - 1) % 2;
 		int row = (i - 1) / 2;
 		lv_obj_t *chip = lv_btn_create(customise_screen);
-		lv_obj_set_size(chip, chip_w, chip_h);
-		lv_obj_set_pos(chip, pad + col * (chip_w + gap), chip_y + row * (chip_h + gap));
+		lv_obj_set_size(chip, alone ? card_w : chip_w, chip_h);
+		lv_obj_set_pos(chip, pad + (alone ? 0 : col * (chip_w + gap)), chip_y + row * (chip_h + gap));
 		lv_obj_set_style_radius(chip, 12, 0);
 		lv_obj_set_style_shadow_width(chip, 0, 0);
 		lv_obj_set_style_border_width(chip, 0, 0);
