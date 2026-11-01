@@ -311,6 +311,17 @@ a self-signed certificate), and HLS.
 
 - **Power** - standby, LED behaviour, automatic power-off from thirty seconds to
   six hours, and a charge limit from 80 to 100 %.
+- **The screen, while music plays over Bluetooth** - the screen comes back
+  instantly and silently in that one case. Powering the panel up is what the
+  board notices: the unblank resets the glass, brings its rails back up and
+  re-initialises it, and a stream that is being encoded for a pair of headphones,
+  or decoded from a phone, is heard to stutter over it. So with a Bluetooth
+  stream playing, the screen going dark takes the backlight to zero and leaves
+  the panel powered, holding its last frame, and the wake is only the light
+  coming back. Nothing playing, nothing held: the panel goes down for real a few
+  seconds after the music stops, and before any standby. It costs a few tens of
+  milliwatts while a stream lasts, and `[screen] panel_hold = 0` in
+  `device_config.ini` turns it off for a card that would rather have them.
 - **Battery** - the last few percent are managed rather than run out. At **5 %**
   the player warns: a red card, held for eight seconds, and the panel is brought
   back up first if it was dark, because a warning nobody sees is not one. That
