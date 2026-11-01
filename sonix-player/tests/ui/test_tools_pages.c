@@ -27,6 +27,8 @@
 #include "src/gui/nowplaying/cover.h"
 #include "src/gui/notes/noteeditor.h"
 #include "src/gui/notes/notes.h"
+#include "src/gui/tagmanager/tagmanager.h"
+#include "src/system/library/metadata.h"
 #include "src/gui/pet/petpage.h"
 #include "src/gui/shell/settingsrow.h"
 #include "src/gui/shell/gridpage.h"
@@ -265,6 +267,13 @@ bool cover_load_image_file(const char *path, int box_w, int box_h, cover_fit_t f
 	out->dsc.data_size = (uint32_t)(w * h * 2);
 	out->dsc.data = pixels;
 	return true;
+}
+
+bool cover_load_for_file(const char *path, int w, int h, cover_fit_t fit, cover_image_t *out) {
+    (void)path; (void)w; (void)h; (void)fit; (void)out; return false;
+}
+void metadata_read(const char *path, song_metadata_t *out) {
+    (void)path; memset(out, 0, sizeof(*out)); strcpy(out->title,"Test title");
 }
 
 void cover_free(cover_image_t *img) {
@@ -621,6 +630,7 @@ static void check_more_page(gui_config_t *cfg, const char *tag) {
 	assert(has_entry(shown, tr("dac")));
 	assert(has_entry(shown, tr("books")));
 	assert(has_entry(shown, tr("file_explorer")));
+	assert(has_entry(shown, "Tag Manager"));
 	assert(has_entry(shown, tr("flappy_bird")));
 	assert(has_entry(shown, tr("metronome")));
 	assert(has_entry(shown, tr("pet")));
@@ -1822,6 +1832,7 @@ int main(int argc, char **argv) {
 	calculator_init(&cfg);
 	noteeditor_init(&cfg);
 	notes_init(&cfg);
+	tagmanager_init(&cfg);
 	metronome_init(&cfg);
 	pet_defaults(&pet_state, petwatch_now(), pet_day_now(petwatch_now()));
 	petpage_init(&cfg);
@@ -1859,6 +1870,30 @@ int main(int argc, char **argv) {
 	}
 	theme_set_kind(THEME_KIND_DARK);
 	check_more_audiobooks_option(&cfg);
+
+    // Open the new card browser, select a FLAC, and bring up the editor at
+    // the V1's native size. The writer has separate byte-level tests.
+    char tagpath[1400]; snprintf(tagpath,sizeof(tagpath),"%s/test.flac",card);
+    FILE *tagfile=fopen(tagpath,"wb"); assert(tagfile);
+    const unsigned char flac_header[42]={'f','L','a','C',0x80,0,0,34};
+    assert(fwrite(flac_header,1,sizeof(flac_header),tagfile)==sizeof(flac_header));
+    assert(fputs("audio",tagfile)>=0); assert(!fclose(tagfile));
+    tagmanager_open(); lv_obj_t *tagpage=lv_screen_active(); lv_obj_update_layout(tagpage);
+    check_within_panel(tagpage,&cfg,"Tag Manager browser");
+    lv_obj_t *filelabel=find_label(tagpage,"test.flac"); assert(filelabel);
+    lv_obj_send_event(lv_obj_get_parent(filelabel),LV_EVENT_CLICKED,NULL);
+    lv_obj_update_layout(tagpage); assert(find_label(tagpage,"Title: Test title"));
+    lv_obj_t *track=find_label(tagpage,"Track number"); assert(track);
+    lv_obj_send_event(lv_obj_get_parent(track),LV_EVENT_CLICKED,NULL);
+    lv_obj_update_layout(tagpage); assert(find_label(tagpage,"Save"));
+    check_within_panel(tagpage,&cfg,"Tag Manager editor");
+    lv_obj_t *input=find_class(tagpage,&lv_textarea_class); assert(input);
+    lv_textarea_set_text(input,"3/12");
+    lv_obj_send_event(lv_obj_get_parent(find_label(tagpage,"Save")),LV_EVENT_CLICKED,NULL);
+    tagfile=fopen(tagpath,"rb"); assert(tagfile); char bytes[256];
+    size_t len=fread(bytes,1,sizeof(bytes),tagfile); fclose(tagfile);
+    bool found=false; for(size_t i=0;i+16<=len;i++) if(!memcmp(bytes+i,"TRACKNUMBER=3/12",16)) found=true;
+    assert(found); unlink(tagpath);
 
 	check_calculator_page(&cfg, bp_is_tempotec_v1() ? "v1-calculator" : "hiby-calculator");
 	check_metronome_page(&cfg, bp_is_tempotec_v1() ? "v1-metronome" : "hiby-metronome");

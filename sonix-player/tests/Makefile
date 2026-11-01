@@ -399,6 +399,7 @@ TOOLS_SRC = $(ROOT)/tests/ui/test_tools_pages.c \
             $(ROOT)/src/gui/games/games.c $(ROOT)/src/gui/games/snake.c \
             $(ROOT)/src/gui/games/game2048.c $(ROOT)/src/gui/games/dino.c \
             $(ROOT)/src/gui/notes/notes.c $(ROOT)/src/gui/notes/noteeditor.c \
+            $(ROOT)/src/gui/tagmanager/tagmanager.c $(ROOT)/src/system/tagmanager/tagwrite.c \
             $(ROOT)/src/gui/metronome/metronome.c \
             $(ROOT)/src/gui/pet/petpage.c $(ROOT)/src/gui/pet/peticon.c \
             $(ROOT)/src/system/pet/pet.c \
@@ -532,3 +533,8 @@ basebuild: $(BUILD)/test_sysinfo
 $(BUILD)/test_sysinfo: test_sysinfo.c $(ROOT)/src/system/device/sysinfo.c $(ROOT)/src/system/device/sysinfo.h
 	@mkdir -p $(BUILD)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -DHOST_BUILD -o $@ test_sysinfo.c $(ROOT)/src/system/device/sysinfo.c $(LDFLAGS) $(LDLIBS)
+
+# Lossless metadata rewrites and malformed input safety.
+.PHONY: tagwrite
+tagwrite:
+	python3 test_tagwrite.py
