@@ -2117,6 +2117,74 @@ to its widest at the level of the eyes and comes back to a rounded tip at the
 jaw. The face is built after the ears, so the cheeks and the muzzle are drawn
 over them and nothing is covered.
 
+### The tank's weeds
+
+The tank had three weeds and every one of them was a rounded rectangle turned at
+an angle -- a leaf that was a stick, for the reason the dog's ears were: a turned
+object is rasterised through a layer the size of its own box, and its ends come
+out cut. A tank with three sticks in the sand is a tank with three sticks in it.
+
+They are drawn now, with the same machinery as the fish's body and the dog's
+ears: corners, filled in triangles, and no ink. Ink is what makes the animals
+read as characters, but a two-pixel outline round a blade five pixels wide is
+the whole blade, so the foliage is the one thing in the scene drawn in flat
+colour alone, and its two greens are what give it an edge.
+
+Two kinds of plant, and the two between them furnish four corners:
+
+- **A clump of grass**: four ribbons out of one root. A ribbon is six corners --
+  a three-joint spine, widened by three pixels at the bottom to two at the top
+  and closed with a blunt tip -- swayed along its length, the four at four
+  angles, in two greens. The clump is normalised into its own box once it is
+  built, so the same table can be put down anywhere on the sand.
+- **A leafy plant**: one tapered stem with four oval leaves on it, one side then
+  the other, at 22, 46, 70 and 90 per cent of its height, in the dark green and
+  the light one by turns. Leaves are six corners each, which is an oval at this
+  size.
+
+Both are one shape object apiece, twelve to fifteen triangles, built when the
+tank is built and never touched again: the one-second animation moves the
+creature's root, not the scenery. `PET_SHAPE_TRIS` went to twelve and back to
+sixteen while these were being drawn, which is the whole budget they use.
+
+Star-shaped is the constraint to remember when drawing them. `shape_fan()`
+fills from corner zero, so a blade that sways one way and then the other --
+a concave outline -- breaks into floating pieces, which is how the first set of
+fronds came out as bushes hovering over the sand. Every blade here is monotonic
+from its first corner.
+
+### A face for each mood
+
+Six moods and, until now, three faces between them: blissful and happy were the
+same fourteen-by-nine smile, okay, sleeping and dizzy the same straight line,
+and the sad face was the only one an owner could name without reading the
+hearts. The listening face -- an eight-by-seven mouth with a tongue in it -- was
+there, and it read as a nose.
+
+They are six faces now, and each of the three that carry a meaning is built from
+more than its mouth:
+
+- **Happy** is the round eye and the smile it always had.
+- **Blissful** shuts its eyes: two arcs, high in the middle, drawn with the ink
+  arc the gill and the mouth already use. It is the top of the scale, and the one
+  face with no eye in it at all, so it cannot be mistaken for the one below.
+- **Sad** wears brows. A frown alone is a mouth; two short bars, each high at the
+  middle of the face, are what make the mouth a frown. They are drawn as a
+  polygon rather than turned for the usual reason, and there is one of them on a
+  fish, which has one eye. The tear moved under the outer corner of the eye,
+  where a tear leaves from, and grew a little.
+- **Listening** keeps its open mouth -- the tongue is what makes it a mouth
+  singing rather than a hole -- and gained a pair of notes in the air beside its
+  head: a six-corner disc for each note head, a stem and a flag. A fish has its
+  tail on that side, so its notes float above its snout.
+
+The notes are the answer to the mouth that read as a nose. A nose sits between
+the eyes, and these are not between the eyes; they are the one thing on the page
+that is only there while music is going in, so the mouth beside them is singing.
+
+Two arcs and two more shapes, all hidden when the mood is not theirs. Nothing
+here is drawn per frame: the page still does one memo of the clock a second.
+
 ## The charger, with the player off
 
 The stock player comes up on a battery screen when the device was switched off

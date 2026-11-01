@@ -288,7 +288,12 @@ a self-signed certificate), and HLS.
   what it is feeding on beside a three-bar equalizer. Each animal has a shape of
   its own -- a cat's ears and whiskers, a dog's hanging ears and snout, a fish's
   forked tail, dorsal fin and gill -- and a few flat things of its own behind
-  it: a rug and a plant, a fence and a bone, or the tank the fish swims in.
+  it: a rug and a plant, a fence and a bone, or the tank the fish swims in,
+  furnished down to the weeds -- a fan of grass and a leafy plant on each side
+  of the sand. The face carries the mood too: round eyes and a smile when it is
+  happy, eyes shut in a smile at the top of it, brows and a tear when it is sad,
+  and, while music is playing, an open mouth and a pair of notes in the air
+  beside its head.
 
 ## Games
 

@@ -28,7 +28,7 @@ lv_obj_t *petpage_screen;
 // after the fills. That is how the fish's body is drawn: a dozen straight
 // sides are round enough for a fish, but twelve triangles wearing twelve ink
 // lines are a web, so the body is filled in triangles and outlined once.
-#define PET_SHAPE_TRIS 12
+#define PET_SHAPE_TRIS 16
 #define PET_SHAPE_LINE 16
 
 typedef struct {
@@ -89,6 +89,7 @@ typedef struct {
 #define PET_WEED_LIGHT lv_color_hex(0x66B87F)
 #define PET_BUBBLE lv_color_hex(0xE4F7FC)
 #define PET_BUBBLES 6
+#define PET_WEEDS 4
 
 // The four homes, in the same fixed colours as the animals: a cat's rug is not
 // going to be Tokyo Night's blue. The two ground bands are the same place and
@@ -151,8 +152,12 @@ typedef struct {
 	lv_obj_t *mouth_line;
 	lv_obj_t *mouth_open;
 	lv_obj_t *tongue;
+	lv_obj_t *eye_arc_l; // a blissful pet's eyes, shut in a smile
+	lv_obj_t *eye_arc_r;
 	lv_obj_t *tear;
 	lv_obj_t *zzz;
+	lv_obj_t *brow; // the two bars over a sad pet's eyes
+	lv_obj_t *note; // the pair that floats over a listening one
 
 	// What the wardrobe sells. Headwear hides the ears and the little "z z",
 	// because two hats on one head is not a hat.
@@ -193,13 +198,13 @@ static lv_obj_t *card_close_icon;
 static lv_obj_t *today_label;
 static lv_obj_t *streak_label;
 
-// The aquarium: the sand, two weeds and three slow bubbles, shown only for a
+// The aquarium: the sand, four weeds and six slow bubbles, shown only for a
 // fish.
 static lv_obj_t *room_layer;
 static lv_obj_t *surface; // the light band where the water meets the air
 static lv_obj_t *sand;
 static lv_obj_t *pebbles[3];
-static lv_obj_t *weeds[3];
+static lv_obj_t *weeds[PET_WEEDS];
 static lv_obj_t *bubbles[PET_BUBBLES];
 
 // The drifting notes, while something is playing.
@@ -237,6 +242,9 @@ static pet_shape_t shape_fin_top;
 static pet_shape_t shape_jowl_l; // the dog's hanging ears
 static pet_shape_t shape_jowl_r;
 static pet_shape_t shape_plant; // three leaves standing out of the cat's pot
+static pet_shape_t shape_weed[PET_WEEDS]; // the tank's weeds, blade and fronds
+static pet_shape_t shape_brow; // a sad pet's brows
+static pet_shape_t shape_note; // and a listening one's notes
 
 // What each animal has behind it, and whose it is. Built once with the page,
 // shown and hidden by species -- no rebuilding when the pet changes.
@@ -344,7 +352,7 @@ static lv_obj_t *icon_image(lv_obj_t *parent, const lv_image_dsc_t *source, int 
 
 // One arc is both a smile and a frown: LVGL draws the indicator clockwise from
 // the first angle, so the bottom half is a smile and the top half is the frown.
-static lv_obj_t *mouth_arc(lv_obj_t *parent) {
+static lv_obj_t *ink_arc(lv_obj_t *parent) {
 	lv_obj_t *a = lv_arc_create(parent);
 	lv_obj_remove_style(a, NULL, LV_PART_KNOB);
 	lv_obj_set_clickable(a, false);
@@ -474,11 +482,15 @@ static void shape_place(pet_shape_t *s, int x, int y, int w, int h) {
 // only touch leave a hairline of what is behind them, which is what made the
 // first fish look drawn in pieces. The outline is one line round the lot, so
 // the number of corners costs nothing.
-static void shape_polygon(pet_shape_t *s, lv_color_t color, const int *xs, const int *ys, int n) {
-	shape_reset(s);
+static void shape_fan(pet_shape_t *s, lv_color_t color, const int *xs, const int *ys, int n) {
 	for (int i = 1; i + 2 < n && s->count < PET_SHAPE_TRIS; i++) {
 		shape_push(s, color, 100, 0, 0, xs[0], ys[0], xs[i], ys[i], xs[i + 2], ys[i + 2]);
 	}
+}
+
+static void shape_polygon(pet_shape_t *s, lv_color_t color, const int *xs, const int *ys, int n) {
+	shape_reset(s);
+	shape_fan(s, color, xs, ys, n);
 	for (int i = 0; i < n; i++) {
 		shape_line(s, xs[i], ys[i]);
 	}
@@ -519,6 +531,205 @@ static void draw_jowls(int cx, int head_w, int head_h, int head_top, lv_color_t 
 		shape_polygon(shape, fill, xs, ys, n);
 		shape_place(shape, x, y, w, h);
 	}
+}
+
+// One blade of weed: a ribbon that sways as it rises, wide at the sand and
+// narrow at the tip. `phase` swaps the sway for the other direction, so two
+// blades out of the same clump lean away from each other instead of lying on
+// top of one another.
+static int ribbon_corners(int *xs, int *ys, int base_x, int base_y, int height, int lean, bool phase) {
+	enum { JOINTS = 3 };
+	// The sway only ever goes one way: a blade that curls back over its own
+	// root is not star-shaped from its first corner, and the fan that fills a
+	// shape cannot fill it -- the top of the blade comes out with a notch in it.
+	static const int sway_a[JOINTS] = {0, 2, 5};
+	static const int sway_b[JOINTS] = {0, -2, -5};
+	static const int half[JOINTS] = {3, 3, 2};
+	int cx[JOINTS];
+	int cy[JOINTS];
+	for (int i = 0; i < JOINTS; i++) {
+		const int sway = phase ? sway_b[i] : sway_a[i];
+		cx[i] = base_x + lean * i / (JOINTS - 1) + sway;
+		cy[i] = base_y - height * i / (JOINTS - 1);
+	}
+	int n = 0;
+	for (int i = 0; i < JOINTS; i++) {
+		xs[n] = cx[i] - half[i];
+		ys[n] = cy[i];
+		n++;
+	}
+	// A blunt cap rather than a point: a strand of weed has a rounded end, and
+	// a point makes it a leaf.
+	xs[n] = cx[JOINTS - 1];
+	ys[n] = cy[JOINTS - 1] - half[JOINTS - 1];
+	n++;
+	for (int i = JOINTS - 2; i > 0; i--) {
+		xs[n] = cx[i] + half[i];
+		ys[n] = cy[i];
+		n++;
+	}
+	return n;
+}
+
+// A clump of weed for the tank: three ribbons of different heights swaying
+// away from each other, in the tank's two greens. One ribbon is a leaf; three
+// out of one root is a plant.
+//
+// The tank used to have three straight bars with two turned bars for leaves,
+// and a turned bar is rasterised through a layer the size of its own box, so
+// the leaves were cut away to nothing and what was left was a pole. This is
+// drawn instead, without ink: it is water behind the fish, not an object in
+// front of it.
+static void weed_clump(pet_shape_t *s, lv_color_t dark, lv_color_t light, int base_x, int base_y, int height,
+					   int lean) {
+	enum { BLADES = 4, PTS = 8 };
+	static const struct {
+		int height;  // per cent of the clump's
+		int lean;    // and of its lean
+		int dx;      // the root of this blade, along the sand
+		bool phase;  // which way it sways
+		bool light;  // which green
+	} blade[BLADES] = {
+		{100, 100, 0, false, false},
+		{84, 45, 4, true, true},
+		{70, -55, 7, false, true},
+		{58, -95, 10, true, false},
+	};
+	int px[BLADES][PTS];
+	int py[BLADES][PTS];
+	int corners[BLADES];
+	int min_x = base_x;
+	int max_x = base_x;
+	int min_y = base_y;
+	int max_y = base_y;
+	for (int b = 0; b < BLADES; b++) {
+		corners[b] = ribbon_corners(px[b], py[b], base_x + blade[b].dx, base_y, height * blade[b].height / 100,
+									lean * blade[b].lean / 100, blade[b].phase);
+		for (int i = 0; i < corners[b]; i++) {
+			min_x = LV_MIN(min_x, px[b][i]);
+			max_x = LV_MAX(max_x, px[b][i]);
+			min_y = LV_MIN(min_y, py[b][i]);
+			max_y = LV_MAX(max_y, py[b][i]);
+		}
+	}
+
+	// The drawing is placed by its own corner, so the points go in relative to
+	// it: absolute points would land wherever the clump is, twice over.
+	shape_reset(s);
+	for (int b = 0; b < BLADES; b++) {
+		for (int i = 0; i < corners[b]; i++) {
+			px[b][i] -= min_x;
+			py[b][i] -= min_y;
+		}
+		shape_fan(s, blade[b].light ? light : dark, px[b], py[b], corners[b]);
+	}
+	shape_place(s, min_x, min_y, max_x - min_x + 1, max_y - min_y + 2);
+}
+
+// The tank's other plant: one stem with rounded leaves alternating up it, which
+// is what an aquarium plant looks like when it is not a blade of grass. The
+// leaves are six-cornered ovals: the fan that fills a shape needs a corner
+// inside every triangle it makes, so a leaf cannot be a four-sided diamond.
+static void weed_leafy(pet_shape_t *s, lv_color_t dark, lv_color_t light, int base_x, int base_y, int height,
+					   int lean) {
+	enum { LEAVES = 4, CORNERS = 6 };
+	static const int at[LEAVES] = {22, 46, 70, 90}; // per cent of the height
+	int stem_x[3];
+	int stem_y[3];
+	int leaf_x[LEAVES][CORNERS];
+	int leaf_y[LEAVES][CORNERS];
+	int min_x = base_x;
+	int max_x = base_x;
+	int min_y = base_y;
+	int max_y = base_y;
+	for (int i = 0; i < 3; i++) {
+		const int t = i * 100 / 2;
+		stem_x[i] = base_x + lean * t * t / 10000;
+		stem_y[i] = base_y - height * t / 100;
+	}
+	for (int l = 0; l < LEAVES; l++) {
+		const int side = (l & 1) ? -1 : 1;
+		const int t = at[l];
+		const int cx = base_x + lean * t * t / 10000 + side * 2;
+		const int cy = base_y - height * t / 100;
+		// A leaf that leans up and out, so it grows rather than hangs.
+		const int xs[CORNERS] = {cx, cx + side * 4, cx + side * 9, cx + side * 12, cx + side * 8, cx + side * 2};
+		const int ys[CORNERS] = {cy + 1, cy - 5, cy - 7, cy - 4, cy + 1, cy + 3};
+		for (int i = 0; i < CORNERS; i++) {
+			leaf_x[l][i] = xs[i];
+			leaf_y[l][i] = ys[i];
+			min_x = LV_MIN(min_x, xs[i]);
+			max_x = LV_MAX(max_x, xs[i]);
+			min_y = LV_MIN(min_y, ys[i]);
+			max_y = LV_MAX(max_y, ys[i]);
+		}
+	}
+
+	shape_reset(s);
+	int local_x[CORNERS];
+	int local_y[CORNERS];
+	// The stem first: a thin taper from the sand to the top leaf.
+	const int sx[CORNERS] = {stem_x[0] - 1, stem_x[1] - 1, stem_x[2], stem_x[2], stem_x[1] + 1, stem_x[0] + 1};
+	const int sy[CORNERS] = {stem_y[0], stem_y[1], stem_y[2], stem_y[2], stem_y[1], stem_y[0]};
+	for (int i = 0; i < CORNERS; i++) {
+		local_x[i] = sx[i] - min_x;
+		local_y[i] = sy[i] - min_y;
+	}
+	shape_fan(s, dark, local_x, local_y, CORNERS);
+	for (int l = 0; l < LEAVES; l++) {
+		for (int i = 0; i < CORNERS; i++) {
+			local_x[i] = leaf_x[l][i] - min_x;
+			local_y[i] = leaf_y[l][i] - min_y;
+		}
+		shape_fan(s, (l & 1) ? light : dark, local_x, local_y, CORNERS);
+	}
+	shape_place(s, min_x, min_y, max_x - min_x + 1, max_y - min_y + 1);
+}
+
+// A sad pet's brows: two short bars, each turned up at the middle. The frown
+// alone is a mouth, and a mouth on its own reads as a mouth; the brows are what
+// make the face sad. Drawn rather than turned, because a turned bar is
+// rasterised through a layer the size of its own box and comes out cut off.
+static void draw_brows(int eye_l_x, int eye_r_x, int eye_w, int y, bool both) {
+	const int w = eye_w + 2;
+	const int x0 = eye_l_x - 1;
+	const int right = (eye_r_x - 1) - x0; // where the second brow starts, inside the box
+	shape_reset(&shape_brow);
+	// The left brow rises to the right, the right one rises to the left: both
+	// are high at the middle of the face.
+	shape_push(&shape_brow, PET_INK, 100, 0, 0, 0, 4, w, 0, w, 3);
+	shape_push(&shape_brow, PET_INK, 100, 0, 0, 0, 4, w, 3, 0, 6);
+	if (both) {
+		shape_push(&shape_brow, PET_INK, 100, 0, 0, right, 0, right + w, 4, right + w, 6);
+		shape_push(&shape_brow, PET_INK, 100, 0, 0, right, 0, right + w, 6, right, 3);
+	}
+	shape_place(&shape_brow, x0, y, (both ? right + w : w) + 1, 7);
+}
+
+// A pair of notes over a listening pet's head. The open mouth says it is
+// singing along; these say what it is singing along to, and they are the one
+// thing on the whole page that is only there while music is going in.
+static void draw_notes(int x, int y) {
+	enum { W = 24, H = 20 };
+	static const int16_t disc[6][2] = {{-2, 0}, {-1, -2}, {1, -2}, {2, 0}, {1, 2}, {-1, 2}};
+	shape_reset(&shape_note);
+	for (int i = 0; i < 2; i++) {
+		const int head_x = i ? 15 : 4;
+		const int head_y = i ? 13 : 18;
+		const int top = head_y - 13;
+		int xs[6];
+		int ys[6];
+		for (int k = 0; k < 6; k++) {
+			xs[k] = head_x + disc[k][0];
+			ys[k] = head_y + disc[k][1];
+		}
+		shape_fan(&shape_note, PET_INK, xs, ys, 6);
+		// The stem, and the flag that makes it a note rather than a bubble.
+		shape_push(&shape_note, PET_INK, 100, 0, 0, head_x + 1, head_y - 2, head_x + 3, head_y - 2, head_x + 3, top);
+		shape_push(&shape_note, PET_INK, 100, 0, 0, head_x + 1, head_y - 2, head_x + 3, top, head_x + 1, top);
+		shape_push(&shape_note, PET_INK, 100, 0, 0, head_x + 2, top, head_x + 8, top + 3, head_x + 2, top + 5);
+	}
+	shape_place(&shape_note, x, y, W, H);
 }
 
 static lv_obj_t *corner_button(gui_config_t *cfg, int slot, const lv_image_dsc_t *glyph, lv_event_cb_t cb) {
@@ -624,13 +835,16 @@ static void build_creature(void) {
 	// the head leaves over, and it reads as a hood.
 	parts.jowl_l = shape_create(parts.root, &shape_jowl_l);
 	parts.jowl_r = shape_create(parts.root, &shape_jowl_r);
+	parts.brow = shape_create(parts.root, &shape_brow);
 
 	// ---- the face ------------------------------------------------------
 	parts.muzzle = round_piece(parts.root, PET_INK);
 	parts.nose = round_piece(parts.root, PET_INK);
-	parts.gill = mouth_arc(parts.root); // over the fish's body, not under it
+	parts.gill = ink_arc(parts.root); // over the fish's body, not under it
 	parts.eye_l = round_piece(parts.root, PET_INK);
 	parts.eye_r = round_piece(parts.root, PET_INK);
+	parts.eye_arc_l = ink_arc(parts.root);
+	parts.eye_arc_r = ink_arc(parts.root);
 	parts.glint_l = disc(parts.root, lv_color_white());
 	parts.glint_r = disc(parts.root, lv_color_white());
 	parts.lid_l = round_piece(parts.root, PET_INK);
@@ -640,11 +854,12 @@ static void build_creature(void) {
 	parts.cheek_l = round_piece(parts.root, PET_CHEEK);
 	parts.cheek_r = round_piece(parts.root, PET_CHEEK);
 
-	parts.mouth = mouth_arc(parts.root);
+	parts.mouth = ink_arc(parts.root);
 	parts.mouth_line = round_piece(parts.root, PET_INK);
 	parts.mouth_open = round_piece(parts.root, PET_INK);
 	parts.tongue = round_piece(parts.root, PET_CHEEK);
 	parts.tear = round_piece(parts.root, PET_TEAR);
+	parts.note = shape_create(parts.root, &shape_note);
 
 	parts.zzz = lv_label_create(parts.root);
 	lv_obj_add_style(parts.zzz, &theme_style_text_dim, 0);
@@ -991,11 +1206,25 @@ static void paint_creature(void) {
 
 	set_radius(parts.eye_l, 5);
 	set_radius(parts.eye_r, 5);
-	bool eyes_open = !sleeping && !dizzy;
+	// A pet at the top of its happiness shuts its eyes in a smile, which is the
+	// one thing that tells blissful from happy: every other mood shows the same
+	// round eye, so a closed one says the mood without a word.
+	const bool blissful = mood == PET_MOOD_BLISSFUL;
+	bool eyes_open = !sleeping && !dizzy && !blissful;
 	place(parts.eye_l, eye_l_x, eye_ly, eye_w, eye_h);
 	place(parts.eye_r, eye_r_x, eye_y, eye_w, eye_h);
 	show(parts.eye_l, eyes_open);
 	show(parts.eye_r, eyes_open && !fish);
+	show(parts.eye_arc_l, blissful && !sleeping && !dizzy);
+	show(parts.eye_arc_r, blissful && !sleeping && !dizzy && !fish);
+	if (blissful) {
+		place(parts.eye_arc_l, eye_l_x - 1, eye_ly + 1, eye_w + 2, 8);
+		lv_arc_set_angles(parts.eye_arc_l, 200, 340);
+		if (!fish) {
+			place(parts.eye_arc_r, eye_r_x - 1, eye_y + 1, eye_w + 2, 8);
+			lv_arc_set_angles(parts.eye_arc_r, 200, 340);
+		}
+	}
 	place(parts.glint_l, eye_l_x + 2, eye_ly + 2, 4, 4);
 	place(parts.glint_r, eye_r_x + 2, eye_y + 2, 4, 4);
 	show(parts.glint_l, eyes_open);
@@ -1069,8 +1298,21 @@ static void paint_creature(void) {
 	}
 
 	set_radius(parts.tear, 2);
-	place(parts.tear, eye_l_x - 1, eye_ly + 11, 4, 7);
+	place(parts.tear, eye_l_x - 3, eye_ly + eye_h + 1, 5, 9);
 	show(parts.tear, sad);
+
+	// A sad face wears its brows, and a listening one has music over its head.
+	show(parts.brow, sad);
+	if (sad) {
+		draw_brows(eye_l_x, eye_r_x, eye_w, eye_ly - 6, !fish);
+	}
+	show(parts.note, listening);
+	if (listening) {
+		// Beside the head, in the air: high enough to be out of the meters'
+		// column and low enough to be out of the counters above it. A fish has
+		// its tail on that side, so its notes go in front of its snout.
+		draw_notes(fish ? bx + 2 : cx + head_w / 2 + 2, fish ? fish_y - 22 : head_top + 6);
+	}
 
 	place(parts.zzz, PET_CREATURE_W - 32, 2, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
 	show(parts.zzz, sleeping);
@@ -1273,6 +1515,8 @@ static void paint_room(void) {
 	show(sand, fish);
 	for (int i = 0; i < 3; i++) {
 		show(pebbles[i], fish);
+	}
+	for (int i = 0; i < PET_WEEDS; i++) {
 		show(weeds[i], fish);
 	}
 	for (int i = 0; i < PET_BUBBLES; i++) {
@@ -2464,20 +2708,28 @@ static void build(void) {
 	place(pebbles[2], card_w - 52, -5, 10, 7);
 
 	// The weeds stand clear of the status line's column, so the words stay
-	// readable over the sand.
-	const int weed_x[3] = {14, 0, 0};
-	const int weed_h[3] = {54, 34, 46};
-	for (int i = 0; i < 3; i++) {
-		int x = i == 0 ? weed_x[0] : (i == 1 ? card_w - 56 : card_w - 26);
-		weeds[i] = bar_piece(habitat, i == 1 ? PET_WEED_LIGHT : PET_WEED, 3);
-		place(weeds[i], x, habitat_h - 18 - weed_h[i], 6, weed_h[i]);
-		// Two leaves, so a weed is a plant rather than a pole.
-		lv_obj_t *leaf = bar_piece(weeds[i], i == 1 ? PET_WEED_LIGHT : PET_WEED, 2);
-		place(leaf, -6, 10, 12, 4);
-		lv_obj_set_style_transform_rotation(leaf, 320, 0);
-		lv_obj_t *leaf2 = bar_piece(weeds[i], i == 1 ? PET_WEED_LIGHT : PET_WEED, 2);
-		place(leaf2, 1, weed_h[i] / 2, 12, 4);
-		lv_obj_set_style_transform_rotation(leaf2, -320, 0);
+	// readable over the sand: two on the left of the fish and two on the
+	// right, of different heights and both greens, each leaning its own way.
+	// Their roots are a couple of pixels into the sand.
+	static const struct {
+		int x;
+		int h;
+		int lean;
+		bool leafy; // a bush of leaves rather than a fan of blades
+	} weed_at[PET_WEEDS] = {
+		{14, 56, 12, false},
+		{36, 36, 7, true},
+		{-66, 50, 9, false},
+		{-36, 32, 5, true},
+	};
+	for (int i = 0; i < PET_WEEDS; i++) {
+		const int x = weed_at[i].x > 0 ? weed_at[i].x : card_w + weed_at[i].x;
+		weeds[i] = shape_create(habitat, &shape_weed[i]);
+		if (weed_at[i].leafy) {
+			weed_leafy(&shape_weed[i], PET_WEED, PET_WEED_LIGHT, x, habitat_h - 16, weed_at[i].h, weed_at[i].lean);
+		} else {
+			weed_clump(&shape_weed[i], PET_WEED, PET_WEED_LIGHT, x, habitat_h - 16, weed_at[i].h, weed_at[i].lean);
+		}
 	}
 
 	build_scenes(card_w, habitat_h);
