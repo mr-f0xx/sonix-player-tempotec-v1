@@ -175,8 +175,8 @@
 #define PET_DROP_KINDS 4
 #define PET_DROP_PENDING_MAX 3
 
-// What a find is. Flat colours on the page: a bone, a cassette, a sticker and
-// a record, which is what a music player would find on its own floor.
+// What a find is. The first (legacy bone) slot is drawn as a music note; its
+// enum value stays unchanged so existing shelf counts remain compatible.
 typedef enum {
 	PET_DROP_BONE = 0,
 	PET_DROP_CASSETTE,

@@ -16,6 +16,7 @@
 #include "src/system/device/power.h"
 #include "src/system/image/art_shrink.h"
 #include "src/system/library/albumart.h"
+#include "src/system/tagmanager/tagwrite.h"
 #include "src/system/streaming/podcastcache.h"
 #include "src/system/streaming/subsonicstream.h"
 
@@ -471,10 +472,30 @@ static void test_1000_cover_cache_and_loader(const char *dir) {
 	assert(async_id != 0 && async_id == cover_source_id(track_path));
 }
 
+// The written front cover is found by the real embedded-art reader and
+// decoded by the same GUI cover path used on the player.
+static void test_tagwriter_covers(const char *dir) {
+    char path[512]; size_t len=0; uint8_t *jpg=make_test_jpeg(64,64,180,40,120,1,&len); assert(jpg);
+    for(int mp3=0;mp3<2;mp3++) {
+        snprintf(path,sizeof(path),"%s/written.%s",dir,mp3?"mp3":"flac");
+        buf_t f={0};
+        if(mp3) { buf_put(&f,"ID3\x03\x00\x00",6); buf_syncsafe32(&f,0); buf_put(&f,"\xff\xfb\x90\x00",4); }
+        else { buf_put(&f,"fLaC",4); buf_u8(&f,0x80); buf_be24(&f,34); uint8_t info[34]={0}; buf_put(&f,info,34); buf_put(&f,"audio",5); }
+        write_file_bytes(path,f.data,f.len); free(f.data);
+        assert(tagwrite_cover(path,jpg,len,64,64)==TAGWRITE_OK);
+        albumart_t art; assert(albumart_load_candidate(path,0,&art));
+        assert(art.size==len && !memcmp(art.data,jpg,len)); albumart_free(&art);
+        cover_image_t img; assert(cover_load_for_file(path,48,48,COVER_FIT_CONTAIN,&img));
+        assert(img.pixels); cover_free(&img);
+    }
+    free(jpg);
+}
+
 int main(void) {
 	char dir[] = "/tmp/sonix-covers-test-XXXXXX";
 	assert(mkdtemp(dir) != NULL);
 
+	test_tagwriter_covers(dir);
 	test_oversized_mapped_covers(dir);
 	test_sigbus_card_removal_guard(dir);
 	test_ogg_and_wv_embedded_covers(dir);

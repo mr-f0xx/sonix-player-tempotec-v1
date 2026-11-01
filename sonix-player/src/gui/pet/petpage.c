@@ -119,7 +119,6 @@ typedef struct {
 #define PET_GRASS lv_color_hex(0x6FAE6A)
 #define PET_GRASS_DEEP lv_color_hex(0x559353)
 #define PET_FENCE lv_color_hex(0xBFA680)
-#define PET_BONE lv_color_hex(0xE2D3AF)
 
 typedef struct {
 	lv_obj_t *root;
@@ -931,7 +930,7 @@ static lv_obj_t *round_piece(lv_obj_t *parent, lv_color_t color) {
 // ---------------------------------------------------------------------------
 // What the floor turns up
 //
-// Four things, drawn flat out of the same shapes as the animal, at whatever size
+// Four finds, drawn flat out of the same shapes as the animal, at whatever size
 // the caller has room for: fourteen pixels in the corner of the card, twenty in
 // a cell of the shelf. The fractions are of that size, so one drawing does both.
 // ---------------------------------------------------------------------------
@@ -950,13 +949,11 @@ static lv_obj_t *drop_icon(lv_obj_t *parent, int kind, int size) {
 
 	switch (kind) {
 	case PET_DROP_BONE: {
-		// A shaft with a knob at each end, twice over: four knobs and a bone.
-		drop_piece(box, lv_color_white(), 3, 8, 14, 4, size, false);
-		for (int end = 0; end < 2; end++) {
-			for (int side = 0; side < 2; side++) {
-				drop_piece(box, lv_color_white(), end ? 13 : 1, side ? 9 : 4, 6, 6, size, true);
-			}
-		}
+		// Keep the saved collectible slot, but give every species a music
+		// note instead of the white bone, both on the floor and on the shelf.
+		drop_piece(box, PET_GOLD, 8, 3, 3, 11, size, false);
+		drop_piece(box, PET_GOLD, 8, 3, 8, 3, size, false);
+		drop_piece(box, PET_GOLD, 4, 12, 7, 5, size, true);
 		break;
 	}
 	case PET_DROP_CASSETTE: {
@@ -1714,7 +1711,7 @@ static void paint_creature(void) {
 //
 // One wash of the pet's chosen room was not enough: a cat on a green card and a
 // dog on a green card are the same card. Each animal now has flat things of its
-// own behind it -- a rug and a plant, a fence and a bone, a tank -- drawn from
+// own behind it -- a rug and a plant, a fence, a tank -- drawn from
 // the same shapes as the animal, in colours of their own, and shown or hidden
 // by species. Only the ones that belong to the current animal are ever drawn.
 // ---------------------------------------------------------------------------
@@ -1785,24 +1782,13 @@ static void build_scenes(int card_w, int card_h) {
 	lv_obj_set_style_transform_rotation(thread, 250, 0);
 
 	// ---- the dog's yard -------------------------------------------------
-	// Grass along the bottom, a picket fence at the side, a bone in it.
+	// Grass along the bottom and a picket fence at the side.
 	scene_rect(habitat, PET_SPECIES_DOG, PET_GRASS, 3, 0, floor_y, card_w, floor_h);
 	scene_rect(habitat, PET_SPECIES_DOG, PET_GRASS_DEEP, 2, 0, floor_y, card_w, 4);
 	for (int i = 0; i < 4; i++) {
 		scene_rect(habitat, PET_SPECIES_DOG, PET_FENCE, 2, 6 + i * 11, floor_y - 36, 8, 34);
 	}
 	scene_rect(habitat, PET_SPECIES_DOG, PET_FENCE, 2, 5, floor_y - 22, 44, 4);
-	// A bone lying on the grass: the bar and the four knobs that make it a bone.
-	// The bar used to be turned with its two knobs left straight, so the ends
-	// did not meet it and it read as a pale squiggle.
-	const int bone_x = card_w - 52;
-	const int bone_y = floor_y - 14;
-	scene_rect(habitat, PET_SPECIES_DOG, PET_BONE, 3, bone_x, bone_y, 20, 7);
-	for (int i = 0; i < 2; i++) {
-		const int end_x = i ? bone_x + 13 : bone_x - 5;
-		scene_rect(habitat, PET_SPECIES_DOG, PET_BONE, LV_RADIUS_CIRCLE, end_x, bone_y - 4, 11, 11);
-		scene_rect(habitat, PET_SPECIES_DOG, PET_BONE, LV_RADIUS_CIRCLE, end_x, bone_y + 1, 11, 11);
-	}
 
 }
 

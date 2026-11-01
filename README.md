@@ -188,7 +188,7 @@ Showcase of **OLED** appearance: true black backgrounds with white as the accent
 </table>
 
 
-**Tag Manager:** Open More → Tag Manager to view FLAC/MP3 tags and cover art, and edit track numbers or genres on the V1. See the [usage and safety notes](docs/tag-manager.md).
+**Tag Manager:** Open More → Tag Manager to view FLAC/MP3 tags and cover art, and edit track titles, artists, track numbers or genres, and search for cover art over Wi-Fi on the V1. See the [usage and safety notes](docs/tag-manager.md).
 
 ## Contents
 

@@ -1,6 +1,7 @@
 #define _POSIX_C_SOURCE 200809L
 #include "tagwrite.h"
 #include <ctype.h>
+#include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -11,6 +12,14 @@
 
 // Bound untrusted metadata allocations on a memory-constrained player.
 #define LIMIT (16u * 1024u * 1024u)
+#define COVER_LIMIT (2u * 1024u * 1024u)
+typedef struct {
+	tagwrite_field_t field;
+	const char *value;
+	const uint8_t *image;
+	size_t image_size;
+	int width, height;
+} edit_t;
 typedef struct {
 	unsigned char *p;
 	size_t n, cap;
@@ -54,9 +63,9 @@ static void syncput(unsigned char *p, uint32_t n) {
 }
 static int readn(FILE *f, void *p, size_t n) { return fread(p, 1, n, f) == n; }
 static int valid_value(tagwrite_field_t field, const char *v) {
-	if (!v || !*v || strlen(v) > 127 || strchr(v, '\n') || strchr(v, '\r'))
+	if (!v || !*v || strlen(v) > ((field == TAGWRITE_TITLE || field == TAGWRITE_ARTIST) ? 255u : 127u) || strchr(v, '\n') || strchr(v, '\r'))
 		return 0;
-	if (field == TAGWRITE_GENRE)
+	if (field == TAGWRITE_GENRE || field == TAGWRITE_TITLE || field == TAGWRITE_ARTIST)
 		return 1;
 	if (field != TAGWRITE_TRACK)
 		return 0;
@@ -83,16 +92,98 @@ static int valid_value(tagwrite_field_t field, const char *v) {
 	}
 	return !*p;
 }
-// ID3v2.3 text encoding 0 is Latin-1; restrict input to ASCII rather than
-// writing invalid UTF-8 into a Latin-1 frame. v2.4 accepts UTF-8.
-static int mp3(FILE *in, buf *out, tagwrite_field_t field, const char *value) {
+// UTF-8 to ID3v2.3 UTF-16LE with BOM. Reject invalid or overlong sequences.
+static int utf16(const char *s, buf *out) {
+	const unsigned char *p = (const unsigned char *)s;
+	unsigned char bom[2] = {0xff, 0xfe};
+	if (!add(out, bom, 2))
+		return 0;
+	while (*p) {
+		uint32_t c;
+		int n;
+		if (*p < 0x80) {
+			c = *p;
+			n = 1;
+		} else if (*p >= 0xc2 && *p <= 0xdf) {
+			c = *p & 31;
+			n = 2;
+		} else if (*p >= 0xe0 && *p <= 0xef) {
+			c = *p & 15;
+			n = 3;
+		} else if (*p >= 0xf0 && *p <= 0xf4) {
+			c = *p & 7;
+			n = 4;
+		} else
+			return 0;
+		for (int i = 1; i < n; i++) {
+			if (!p[i] || (p[i] & 0xc0) != 0x80)
+				return 0;
+			c = (c << 6) | (p[i] & 63);
+		}
+		if ((n == 3 && c < 0x800) || (n == 4 && c < 0x10000) || c > 0x10ffff || (c >= 0xd800 && c <= 0xdfff))
+			return 0;
+		unsigned char b[4];
+		size_t len = 2;
+		if (c > 0xffff) {
+			c -= 0x10000;
+			uint32_t a = 0xd800 + (c >> 10), d = 0xdc00 + (c & 1023);
+			b[0] = a;
+			b[1] = a >> 8;
+			b[2] = d;
+			b[3] = d >> 8;
+			len = 4;
+		} else {
+			b[0] = c;
+			b[1] = c >> 8;
+		}
+		if (!add(out, b, len))
+			return 0;
+		p += n;
+	}
+	return 1;
+}
+static const char *id3_id(tagwrite_field_t field) {
+	switch (field) {
+	case TAGWRITE_TRACK:
+		return "TRCK";
+	case TAGWRITE_GENRE:
+		return "TCON";
+	case TAGWRITE_TITLE:
+		return "TIT2";
+	case TAGWRITE_ARTIST:
+		return "TPE1";
+	}
+	return NULL;
+}
+static const char *vorbis_key(tagwrite_field_t field) {
+	switch (field) {
+	case TAGWRITE_TRACK:
+		return "TRACKNUMBER";
+	case TAGWRITE_GENRE:
+		return "GENRE";
+	case TAGWRITE_TITLE:
+		return "TITLE";
+	case TAGWRITE_ARTIST:
+		return "ARTIST";
+	}
+	return NULL;
+}
+// Return picture type, or -1 for malformed APIC. Other pictures stay intact.
+static int apic_type(const unsigned char *p, size_t n) {
+	if (n < 4 || p[0] > 3)
+		return -1;
+	size_t i = 1;
+	while (i < n && p[i])
+		i++;
+	if (i + 1 >= n)
+		return -1;
+	return p[i + 1];
+}
+static int mp3(FILE *in, buf *out, const edit_t *edit) {
 	unsigned char h[10];
 	if (!readn(in, h, 10) || memcmp(h, "ID3", 3) || (h[3] != 3 && h[3] != 4) || h[4] || h[5] || !syncok(h + 6))
 		return 0;
-	if (h[3] == 3)
-		for (const unsigned char *p = (const unsigned char *)value; *p; p++)
-			if (*p >= 128)
-				return 0;
+
 	uint32_t size = syncget(h + 6);
 	if (size > LIMIT)
 		return 0;
@@ -105,7 +196,7 @@ static int mp3(FILE *in, buf *out, tagwrite_field_t field, const char *value) {
 	}
 	buf frames = {0};
 	size_t pos = 0;
-	const char *id = field == TAGWRITE_TRACK ? "TRCK" : "TCON";
+	const char *id = edit->image ? "APIC" : id3_id(edit->field);
 	int ok = 1, offsets = 0;
 	while (pos < size) {
 		if (tag[pos] == 0) {
@@ -133,35 +224,60 @@ static int mp3(FILE *in, buf *out, tagwrite_field_t field, const char *value) {
 			offsets = 1;
 		// Do not discard an encrypted, compressed, grouped, or otherwise
 		// flagged target frame. Unknown frames are retained byte-for-byte.
-		if (!memcmp(f, id, 4)) {
-			if (f[8] || f[9]) {
+		int replace = !memcmp(f, id, 4);
+		if (replace && (f[8] || f[9])) {
+			ok = 0;
+			break;
+		}
+		if (replace && edit->image) {
+			int type = apic_type(f + 10, n);
+			if (type < 0) {
 				ok = 0;
 				break;
 			}
-		} else if (!add(&frames, f, 10 + n)) {
+			replace = (type == 3);
+		}
+		if (!replace && !add(&frames, f, 10 + n)) {
 			ok = 0;
 			break;
 		}
 		pos += 10 + n;
 	}
 	free(tag);
-	// Do not leave a competing consecutive ID3 tag behind.
-	unsigned char next[3];
-	size_t peek = fread(next, 1, 3, in);
-	if (ferror(in) || (peek == 3 && !memcmp(next, "ID3", 3)))
+	// Do not edit a competing ID3 tag or a different container behind this
+	// ID3 prefix (FLAC can carry both ID3 and native metadata). Editing the
+	// prefix alone would leave the actual tags and artwork unchanged.
+	unsigned char next[4];
+	size_t peek = fread(next, 1, sizeof(next), in);
+	if (ferror(in) || (peek >= 3 && !memcmp(next, "ID3", 3)) || (peek == 4 && (!memcmp(next, "fLaC", 4) || !memcmp(next, "RIFF", 4) || !memcmp(next, "FORM", 4) || !memcmp(next, "OggS", 4))))
 		ok = 0;
 	if (fseeko(in, -(off_t)peek, SEEK_CUR))
 		ok = 0;
-	size_t n = strlen(value) + 1;
+	buf payload = {0};
+	if (edit->image) {
+		const unsigned char pic_header[] = {0, 'i', 'm', 'a', 'g', 'e', '/', 'j', 'p', 'e', 'g', 0, 3, 0};
+		ok = ok && add(&payload, pic_header, sizeof(pic_header)) && add(&payload, edit->image, edit->image_size);
+	} else {
+		bool ascii = true;
+		for (const unsigned char *p = (const unsigned char *)edit->value; *p; p++)
+			if (*p >= 128)
+				ascii = false;
+		unsigned char enc = h[3] == 4 ? 3 : (ascii ? 0 : 1);
+		ok = ok && add(&payload, &enc, 1);
+		if (ok && enc == 1)
+			ok = utf16(edit->value, &payload);
+		else if (ok)
+			ok = add(&payload, edit->value, strlen(edit->value));
+	}
 	unsigned char fh[10] = {0};
 	memcpy(fh, id, 4);
 	if (h[3] == 4)
-		syncput(fh + 4, n);
+		syncput(fh + 4, payload.n);
 	else
-		putbe(fh + 4, n);
-	unsigned char enc = h[3] == 4 ? 3 : 0;
+		putbe(fh + 4, payload.n);
 	if (ok)
-		ok = add(&frames, fh, 10) && add(&frames, &enc, 1) && add(&frames, value, n - 1);
+		ok = add(&frames, fh, 10) && add(&frames, payload.p, payload.n);
+	free(payload.p);
 	// Keep the audio at the same offset whenever the original padding permits.
 	// If it cannot, reject known frames that can carry absolute file offsets.
 	if (ok && frames.n > size && offsets)
@@ -200,7 +316,7 @@ static int comments(const unsigned char *p, size_t n, buf *out, tagwrite_field_t
 	unsigned char zero[4] = {0};
 	if (!add(out, zero, 4))
 		return 0;
-	const char *key = field == TAGWRITE_TRACK ? "TRACKNUMBER" : "GENRE";
+	const char *key = vorbis_key(field);
 	size_t kl = strlen(key);
 	uint32_t kept = 0;
 	for (uint32_t i = 0; i < count; i++) {
@@ -228,7 +344,7 @@ static int comments(const unsigned char *p, size_t n, buf *out, tagwrite_field_t
 	putle(out->p + countpos, kept + 1);
 	return 1;
 }
-static int flac(FILE *in, buf *out, tagwrite_field_t field, const char *v) {
+static int flac(FILE *in, buf *out, const edit_t *edit) {
 	unsigned char magic[4];
 	if (!readn(in, magic, 4) || memcmp(magic, "fLaC", 4) || !add(out, magic, 4))
 		return 0;
@@ -250,12 +366,44 @@ static int flac(FILE *in, buf *out, tagwrite_field_t field, const char *v) {
 			return 0;
 		}
 		int ok = 1;
-		if (type == 4) {
+		if (edit->image) {
+			// Retain non-front pictures; a malformed PICTURE block is unsafe.
+			if (type == 6 && n < 4)
+				ok = 0;
+			int drop = type == 6 && n >= 4 && be(p) == 3;
+			if (last)
+				h[0] &= 0x7f;
+			if (ok && !drop)
+				ok = add(out, h, 4) && add(out, p, n);
+			if (ok && last) {
+				buf pic = {0};
+				unsigned char num[4];
+				putbe(num, 3);
+				ok = add(&pic, num, 4);
+				putbe(num, 10);
+				ok = ok && add(&pic, num, 4) && add(&pic, "image/jpeg", 10);
+				putbe(num, 0);
+				ok = ok && add(&pic, num, 4);
+				putbe(num, edit->width);
+				ok = ok && add(&pic, num, 4);
+				putbe(num, edit->height);
+				ok = ok && add(&pic, num, 4);
+				putbe(num, 24);
+				ok = ok && add(&pic, num, 4);
+				putbe(num, 0);
+				ok = ok && add(&pic, num, 4);
+				putbe(num, edit->image_size);
+				ok = ok && add(&pic, num, 4) && add(&pic, edit->image, edit->image_size);
+				unsigned char ph[4] = {0x86, pic.n >> 16, pic.n >> 8, pic.n};
+				ok = ok && pic.n <= 0xffffff && add(out, ph, 4) && add(out, pic.p, pic.n);
+				free(pic.p);
+			}
+		} else if (type == 4) {
 			buf b = {0};
 			if (seen++)
 				ok = 0;
 			else
-				ok = comments(p, n, &b, field, v);
+				ok = comments(p, n, &b, edit->field, edit->value);
 			if (ok && b.n <= 0xffffff) {
 				h[1] = b.n >> 16;
 				h[2] = b.n >> 8;
@@ -268,7 +416,7 @@ static int flac(FILE *in, buf *out, tagwrite_field_t field, const char *v) {
 			// Preserve STREAMINFO as the first block; append the new last block.
 			unsigned char base[8] = {0};
 			buf b = {0};
-			ok = comments(base, 8, &b, field, v);
+			ok = comments(base, 8, &b, edit->field, edit->value);
 			unsigned char ch[4] = {0x84, (unsigned char)(b.n >> 16), (unsigned char)(b.n >> 8), (unsigned char)b.n};
 			h[0] &= 0x7f;
 			if (ok)
@@ -282,11 +430,9 @@ static int flac(FILE *in, buf *out, tagwrite_field_t field, const char *v) {
 			return 0;
 		index++;
 	}
-	return seen;
+	return edit->image ? 1 : seen;
 }
-tagwrite_result_t tagwrite_set(const char *path, tagwrite_field_t field, const char *value) {
-	if (!path || !valid_value(field, value))
-		return TAGWRITE_INVALID;
+static tagwrite_result_t write_edit(const char *path, const edit_t *edit) {
 	struct stat before, current;
 	if (lstat(path, &before) || !S_ISREG(before.st_mode) || before.st_nlink != 1 || !(before.st_mode & 0222) || access(path, W_OK) || before.st_uid != geteuid())
 		return TAGWRITE_IO;
@@ -302,7 +448,7 @@ tagwrite_result_t tagwrite_set(const char *path, tagwrite_field_t field, const c
 	int got = readn(in, magic, 4);
 	rewind(in);
 	buf header = {0};
-	int ok = got && (!memcmp(magic, "fLaC", 4) ? flac(in, &header, field, value) : !memcmp(magic, "ID3", 3) ? mp3(in, &header, field, value) : 0);
+	int ok = got && (!memcmp(magic, "fLaC", 4) ? flac(in, &header, edit) : !memcmp(magic, "ID3", 3) ? mp3(in, &header, edit) : 0);
 	if (!ok) {
 		free(header.p);
 		fclose(in);
@@ -349,4 +495,23 @@ tagwrite_result_t tagwrite_set(const char *path, tagwrite_field_t field, const c
 		unlink(tmp);
 	free(tmp);
 	return ok ? TAGWRITE_OK : TAGWRITE_IO;
+}
+
+tagwrite_result_t tagwrite_set(const char *path, tagwrite_field_t field, const char *value) {
+	if (!path || !valid_value(field, value))
+		return TAGWRITE_INVALID;
+	// Validate UTF-8 even for FLAC and ID3v2.4 before writing it.
+	buf check = {0};
+	int valid = utf16(value, &check);
+	free(check.p);
+	if (!valid)
+		return TAGWRITE_INVALID;
+	edit_t edit = {.field = field, .value = value};
+	return write_edit(path, &edit);
+}
+tagwrite_result_t tagwrite_cover(const char *path, const uint8_t *jpeg, size_t size, int width, int height) {
+	if (!path || !jpeg || size < 4 || size > COVER_LIMIT || jpeg[0] != 0xff || jpeg[1] != 0xd8 || jpeg[size - 2] != 0xff || jpeg[size - 1] != 0xd9 || width <= 0 || height <= 0 || width > 4096 || height > 4096)
+		return TAGWRITE_INVALID;
+	edit_t edit = {.image = jpeg, .image_size = size, .width = width, .height = height};
+	return write_edit(path, &edit);
 }

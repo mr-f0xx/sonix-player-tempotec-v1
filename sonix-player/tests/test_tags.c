@@ -15,6 +15,7 @@
 #include "src/system/decode/wavpackdec.h"
 #include "src/system/library/cue.h"
 #include "src/system/library/metadata.h"
+#include "src/system/tagmanager/tagwrite.h"
 #include "src/system/library/oggtags.h"
 #include "src/system/library/vorbischap.h"
 #include "src/system/streaming/subsonicstream.h"
@@ -748,10 +749,31 @@ static void test_vorbischap_and_containers(const char *dir) {
 	assert(strcmp(meta.date, "2017-03-29") == 0);
 }
 
+// Exercise the actual writer with the player's real readers and decoder.
+static void test_tagwriter_roundtrip(const char *dir) {
+    char path[512]; song_metadata_t meta; buf_t data={0}, frames={0};
+    snprintf(path,sizeof(path),"%s/edit.mp3",dir);
+    append_id3v2_text_frame(&frames,3,"TIT2",0,"Old",3,false);
+    wrap_id3v2_tag(&data,3,0,&frames); buf_put(&data,"\xff\xfb\x90\x00",4);
+    write_fixture(path,data.data,data.len); free(data.data); free(frames.data);
+    assert(tagwrite_set(path,TAGWRITE_TITLE,"Été 🎵")==TAGWRITE_OK);
+    assert(tagwrite_set(path,TAGWRITE_ARTIST,"Björk")==TAGWRITE_OK);
+    metadata_read(path,&meta); assert(!strcmp(meta.title,"Été 🎵")); assert(!strcmp(meta.artist,"Björk"));
+    snprintf(path,sizeof(path),"%s/edit.flac",dir); buf_t flac={0};
+    const char *tags[]={"TITLE=Old","ARTIST=Old"}; append_flac_stream(&flac,tags,2);
+    write_fixture(path,flac.data,flac.len); free(flac.data);
+    assert(tagwrite_set(path,TAGWRITE_TITLE,"Été 🎵")==TAGWRITE_OK);
+    assert(tagwrite_set(path,TAGWRITE_ARTIST,"Björk")==TAGWRITE_OK);
+    metadata_read(path,&meta); assert(!strcmp(meta.title,"Été 🎵")); assert(!strcmp(meta.artist,"Björk"));
+    decoder_t *decoder=decoder_open(path,DECODE_FORMAT_FLAC); assert(decoder);
+    short pcm[16]; assert(decoder_read_pcm_frames_s16(decoder,16,pcm)==16); decoder_close(decoder);
+}
+
 int main(void) {
 	char dir[] = "/tmp/sonix-tags-test-XXXXXX";
 	assert(mkdtemp(dir) != NULL);
 
+	test_tagwriter_roundtrip(dir);
 	test_flac_with_id3_header(dir);
 	test_broken_id3v2_tags(dir);
 	test_wrong_extensions_and_cue(dir);

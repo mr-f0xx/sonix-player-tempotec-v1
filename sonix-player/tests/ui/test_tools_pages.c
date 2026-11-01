@@ -29,6 +29,7 @@
 #include "src/gui/notes/notes.h"
 #include "src/gui/tagmanager/tagmanager.h"
 #include "src/system/library/metadata.h"
+#include "src/system/tagmanager/artsearch.h"
 #include "src/gui/pet/petpage.h"
 #include "src/gui/shell/settingsrow.h"
 #include "src/gui/shell/gridpage.h"
@@ -108,7 +109,9 @@ void gui_notify_popup(const char *text) {
 	fprintf(stderr, "popup: %s\n", text ? text : "");
 	assert(!"unexpected popup");
 }
+static const char *expected_error;
 void toast_error(const char *text) {
+    if(expected_error && text && !strcmp(expected_error,text)) { expected_error=NULL; return; }
 	fprintf(stderr, "error: %s\n", text ? text : "");
 	assert(!"unexpected error toast");
 }
@@ -225,7 +228,8 @@ bool clock_is_set(void) { return true; }
 void power_pause_in_standby(lv_timer_t *timer) { (void)timer; }
 void switcher_attach_back_gesture(lv_obj_t *obj) { (void)obj; }
 bool switcher_back_drag_active(void) { return false; }
-void switcher_set_back_guard(lv_obj_t *screen, bool (*handler)(void)) { (void)screen; (void)handler; }
+static bool (*last_back_guard)(void);
+void switcher_set_back_guard(lv_obj_t *screen, bool (*handler)(void)) { (void)screen; last_back_guard=handler; }
 void switcher_set_back_guard_peek(lv_obj_t *screen, bool (*peek)(void)) { (void)screen; (void)peek; }
 /* Counted rather than ignored: the two file viewers must not take the
  * player-sheet swipe (see the check after pictureview_init). */
@@ -276,6 +280,21 @@ void metadata_read(const char *path, song_metadata_t *out) {
     (void)path; memset(out, 0, sizeof(*out)); strcpy(out->title,"Test title");
 }
 
+bool artsearch_find(const char *query, artsearch_result_t *results, int *count) {
+    assert(query && *query); memset(results,0,sizeof(*results));
+    strcpy(results[0].album,"Test album"); strcpy(results[0].artist,"Test artist"); strcpy(results[0].url,"https://example.invalid/test.jpg"); *count=1; return true;
+}
+bool artsearch_download(const char *url, uint8_t **data, size_t *size, int *width, int *height) {
+    (void)url; static const uint8_t jpeg[]={0xff,0xd8,1,2,3,0xff,0xd9};
+    *data=malloc(sizeof(jpeg)); assert(*data); memcpy(*data,jpeg,sizeof(jpeg)); *size=sizeof(jpeg); *width=32; *height=32; return true;
+}
+bool cover_load_image_memory(const void *data, size_t size, int w, int h, cover_fit_t fit, cover_image_t *out) {
+    (void)data; (void)size; (void)w; (void)h; (void)fit;
+    memset(out,0,sizeof(*out)); out->pixels=calloc(32*32*2,1); assert(out->pixels);
+    out->dsc.header.magic=LV_IMAGE_HEADER_MAGIC; out->dsc.header.cf=LV_COLOR_FORMAT_RGB565;
+    out->dsc.header.w=32; out->dsc.header.h=32; out->dsc.header.stride=64;
+    out->dsc.data=out->pixels; out->dsc.data_size=32*32*2; return true;
+}
 void cover_free(cover_image_t *img) {
 	if (!img) {
 		return;
@@ -1871,29 +1890,70 @@ int main(int argc, char **argv) {
 	theme_set_kind(THEME_KIND_DARK);
 	check_more_audiobooks_option(&cfg);
 
-    // Open the new card browser, select a FLAC, and bring up the editor at
-    // the V1's native size. The writer has separate byte-level tests.
-    char tagpath[1400]; snprintf(tagpath,sizeof(tagpath),"%s/test.flac",card);
+    // Music is the only browser root; unrelated card folders are not shown.
+    char musicdir[1200]; snprintf(musicdir,sizeof(musicdir),"%s/Music",card); assert(!mkdir(musicdir,0755));
+    char subdir[1400], linkpath[1400]; snprintf(subdir,sizeof(subdir),"%s/Nested",musicdir); assert(!mkdir(subdir,0755));
+    snprintf(linkpath,sizeof(linkpath),"%s/Escape",musicdir); assert(!symlink(card,linkpath));
+    char tagpath[1400]; snprintf(tagpath,sizeof(tagpath),"%s/test.flac",musicdir);
     FILE *tagfile=fopen(tagpath,"wb"); assert(tagfile);
     const unsigned char flac_header[42]={'f','L','a','C',0x80,0,0,34};
     assert(fwrite(flac_header,1,sizeof(flac_header),tagfile)==sizeof(flac_header));
     assert(fputs("audio",tagfile)>=0); assert(!fclose(tagfile));
     tagmanager_open(); lv_obj_t *tagpage=lv_screen_active(); lv_obj_update_layout(tagpage);
     check_within_panel(tagpage,&cfg,"Tag Manager browser");
+    assert(!find_label(tagpage,"Notes")); assert(!find_label(tagpage,"Folder")); assert(!find_label(tagpage,"Escape"));
+    assert(last_back_guard && !last_back_guard()); // cannot leave Music for card root
+    lv_obj_t *nested=find_label(tagpage,"Nested"); assert(nested);
+    lv_obj_send_event(lv_obj_get_parent(nested),LV_EVENT_CLICKED,NULL);
+    assert(find_label(tagpage,"No folders or FLAC / MP3 files")); assert(last_back_guard());
     lv_obj_t *filelabel=find_label(tagpage,"test.flac"); assert(filelabel);
     lv_obj_send_event(lv_obj_get_parent(filelabel),LV_EVENT_CLICKED,NULL);
     lv_obj_update_layout(tagpage); assert(find_label(tagpage,"Title: Test title"));
-    lv_obj_t *track=find_label(tagpage,"Track number"); assert(track);
+    lv_obj_t *track=find_label(tagpage,"Edit track number"); assert(track);
     lv_obj_send_event(lv_obj_get_parent(track),LV_EVENT_CLICKED,NULL);
-    lv_obj_update_layout(tagpage); assert(find_label(tagpage,"Save"));
+    lv_obj_update_layout(tagpage); assert(find_label(tagpage,"OK"));
     check_within_panel(tagpage,&cfg,"Tag Manager editor");
     lv_obj_t *input=find_class(tagpage,&lv_textarea_class); assert(input);
     lv_textarea_set_text(input,"3/12");
-    lv_obj_send_event(lv_obj_get_parent(find_label(tagpage,"Save")),LV_EVENT_CLICKED,NULL);
-    tagfile=fopen(tagpath,"rb"); assert(tagfile); char bytes[256];
+    lv_obj_send_event(lv_obj_get_parent(find_label(tagpage,"OK")),LV_EVENT_CLICKED,NULL);
+    tagfile=fopen(tagpath,"rb"); assert(tagfile); char bytes[512];
     size_t len=fread(bytes,1,sizeof(bytes),tagfile); fclose(tagfile);
     bool found=false; for(size_t i=0;i+16<=len;i++) if(!memcmp(bytes+i,"TRACKNUMBER=3/12",16)) found=true;
-    assert(found); unlink(tagpath);
+    assert(found);
+    // The artist and title rows really open their respective editors.
+    lv_obj_t *title_row=find_label(tagpage,"Edit title"); assert(title_row);
+    lv_obj_send_event(lv_obj_get_parent(title_row),LV_EVENT_CLICKED,NULL);
+    lv_textarea_set_text(input,"New title"); lv_obj_send_event(lv_obj_get_parent(find_label(tagpage,"OK")),LV_EVENT_CLICKED,NULL);
+    lv_obj_t *artist_row=find_label(tagpage,"Edit artist"); assert(artist_row);
+    lv_obj_send_event(lv_obj_get_parent(artist_row),LV_EVENT_CLICKED,NULL);
+    lv_textarea_set_text(input,"New artist");
+    char sidecar[1450]; snprintf(sidecar,sizeof(sidecar),"%s.tags",tagpath);
+    FILE *sc=fopen(sidecar,"wb"); assert(sc); assert(fputs("artist=Cached artist\n",sc)>=0); assert(!fclose(sc));
+    expected_error="Track has a tag override file";
+    lv_obj_send_event(lv_obj_get_parent(find_label(tagpage,"OK")),LV_EVENT_CLICKED,NULL); assert(!expected_error);
+    assert(!unlink(sidecar));
+    lv_obj_send_event(lv_obj_get_parent(find_label(tagpage,"OK")),LV_EVENT_CLICKED,NULL);
+    tagfile=fopen(tagpath,"rb"); assert(tagfile); len=fread(bytes,1,sizeof(bytes),tagfile); fclose(tagfile);
+    bool title_found=false, artist_found=false;
+    for(size_t i=0;i<len;i++) { if(i+15<=len && !memcmp(bytes+i,"TITLE=New title",15)) title_found=true; if(i+17<=len && !memcmp(bytes+i,"ARTIST=New artist",17)) artist_found=true; }
+    assert(title_found && artist_found);
+    // Mocked network results: search, preview, and explicitly apply.
+    lv_obj_t *search=find_label(tagpage,"Find cover art"); assert(search);
+    lv_obj_send_event(lv_obj_get_parent(search),LV_EVENT_CLICKED,NULL);
+    lv_textarea_set_text(input,"Test artist Test album");
+    lv_obj_send_event(lv_obj_get_parent(find_label(tagpage,"OK")),LV_EVENT_CLICKED,NULL);
+    for(int i=0;i<200 && !find_label(tagpage,"Test artist — Test album");i++) { usleep(1000); lv_tick_inc(100); lv_timer_handler(); }
+    lv_obj_t *result=find_label(tagpage,"Test artist — Test album"); assert(result);
+    lv_obj_send_event(lv_obj_get_parent(result),LV_EVENT_CLICKED,NULL);
+    for(int i=0;i<200 && !find_label(tagpage,"Use this cover");i++) { usleep(1000); lv_tick_inc(100); lv_timer_handler(); }
+    lv_obj_t *apply=find_label(tagpage,"Use this cover"); assert(apply); lv_obj_update_layout(tagpage);
+    check_within_panel(tagpage,&cfg,"Tag Manager cover preview");
+    lv_obj_send_event(lv_obj_get_parent(apply),LV_EVENT_CLICKED,NULL);
+    for(int i=0;i<200 && !find_label(tagpage,"Find cover art");i++) { usleep(1000); lv_tick_inc(100); lv_timer_handler(); }
+    assert(find_label(tagpage,"Find cover art"));
+    tagfile=fopen(tagpath,"rb"); assert(tagfile); len=fread(bytes,1,sizeof(bytes),tagfile); fclose(tagfile);
+    found=false; for(size_t i=0;i+10<=len;i++) if(!memcmp(bytes+i,"image/jpeg",10)) found=true;
+    assert(found); unlink(tagpath); unlink(linkpath); rmdir(subdir); rmdir(musicdir);
 
 	check_calculator_page(&cfg, bp_is_tempotec_v1() ? "v1-calculator" : "hiby-calculator");
 	check_metronome_page(&cfg, bp_is_tempotec_v1() ? "v1-metronome" : "hiby-metronome");
