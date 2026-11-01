@@ -127,6 +127,30 @@ $(BUILD)/test_calculator: $(CALC_SRC) $(ROOT)/src/gui/calculator/calcmodel.h
 	@mkdir -p $(BUILD)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ $(CALC_SRC) $(LDFLAGS) $(LDLIBS)
 
+# The music pet's arithmetic: how the mood moves with the listening, what
+# idleness costs, when the goal counts, when the creature grows, and that its
+# whole state survives in device_config.ini. Plain C, no LVGL and no audio.
+PET_SRC = test_pet.c $(ROOT)/src/system/pet/pet.c $(ROOT)/src/system/core/config.c
+.PHONY: pet
+pet: $(BUILD)/test_pet
+	$(BUILD)/test_pet
+
+$(BUILD)/test_pet: $(PET_SRC) $(ROOT)/src/system/pet/pet.h $(ROOT)/src/system/core/config.h
+	@mkdir -p $(BUILD)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ $(PET_SRC) $(LDFLAGS) $(LDLIBS)
+
+# The listening rules: audible seconds, album runs, focus and night, still with
+# no audio hardware. pet.c comes along for the volume floor and the constants.
+PETLISTEN_SRC = test_petlisten.c $(ROOT)/src/system/pet/petlisten.c $(ROOT)/src/system/pet/pet.c \
+	$(ROOT)/src/system/core/config.c
+.PHONY: petlisten
+petlisten: $(BUILD)/test_petlisten
+	$(BUILD)/test_petlisten
+
+$(BUILD)/test_petlisten: $(PETLISTEN_SRC) $(ROOT)/src/system/pet/petlisten.h $(ROOT)/src/system/pet/pet.h
+	@mkdir -p $(BUILD)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ $(PETLISTEN_SRC) $(LDFLAGS) $(LDLIBS)
+
 NOTES_SRC = test_notes.c $(ROOT)/src/system/notes/notesstore.c $(ROOT)/src/system/text/textfile.c
 .PHONY: notes
 notes: $(BUILD)/test_notes
@@ -376,6 +400,8 @@ TOOLS_SRC = $(ROOT)/tests/ui/test_tools_pages.c \
             $(ROOT)/src/gui/games/game2048.c $(ROOT)/src/gui/games/dino.c \
             $(ROOT)/src/gui/notes/notes.c $(ROOT)/src/gui/notes/noteeditor.c \
             $(ROOT)/src/gui/metronome/metronome.c \
+            $(ROOT)/src/gui/pet/petpage.c $(ROOT)/src/gui/pet/peticon.c \
+            $(ROOT)/src/system/pet/pet.c \
             $(ROOT)/src/system/notes/notesstore.c $(ROOT)/src/system/text/textfile.c \
             $(ROOT)/src/gui/library/textview.c $(ROOT)/src/gui/library/pictureview.c \
             $(ROOT)/src/gui/shell/morepage.c $(ROOT)/src/gui/shell/gridpage.c \

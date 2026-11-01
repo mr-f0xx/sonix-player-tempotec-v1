@@ -1269,7 +1269,980 @@ of the layout code (`gridpage_set_layout`, `gridpage_build`,
 `gridpage_replace_entries`), which now share the one predicate instead of
 repeating it.
 
-## The charger, with the player off
+## A pet that eats music
+
+The More menu has a small creature whose mood is the listening: play, and it
+gets happier and livelier; leave the player quiet, and both drift down. It
+grows through five stages, keeps a daily streak, pays in **Musical Notes** for
+the minutes it heard, and spends them on a wardrobe.
+
+Version 2 is about a harder question than the first one: what should a second
+of the player's day be worth? The first version paid for any second with the
+status at PLAYING, which meant a muted file, a volume nobody could hear and an
+album left looping overnight all fed the pet just as well as a record actually
+listened to. The second version pays for listening that happened, and stops
+paying at the point where more of it stops meaning anything.
+
+### What a second is worth
+
+`petlisten.c` turns one observation of the player into the few facts the pet
+cares about, and it owns every rule about what counts:
+
+- **Audible** means the player is producing music *and* the output is at or
+  above `PET_VOLUME_FLOOR` (10 percent). The percentage read is the effective
+  one -- `device_state_get_volume_percent()`, the same number the volume
+  overlay shows -- so a hardware attenuation, a Bluetooth sink or the line-out
+  lock cannot make a quiet player look loud. Muted is zero, and zero is not
+  listening.
+- **Late callbacks are capped at five seconds.** The interface thread can sleep
+  through a file being opened or a big cover being decoded; a gap of a minute
+  is not a minute of proven listening, and paying for it would make the timer
+  itself the exploit.
+- **A track that ends by itself completes** -- heard to 90 percent, and at
+  least 30 seconds long -- while one that is skipped does not. Three completed
+  tracks of the same album in a row are an album run.
+- **Focus** is thirty minutes of uninterrupted audible listening. A pause, a
+  mute or a skip ends it; one or two seconds of a stopped player between tracks
+  is forgiven, because that is what changing track looks like and an album is
+  heard across those gaps. It is worth a lift of the heart meter on top of the
+  music that earned it, as is a record heard through.
+- **Night** is midnight to five, in the player's own time zone.
+
+Nothing in `petlisten.c` draws, reads the config or asks for the time: the
+caller passes `now`, which is what lets `tests/test_petlisten.c` drive the
+rules frame by frame with no audio hardware.
+
+### The day: a ceiling, and a bonus for something new
+
+A minute of credited listening is a minute of XP. The day holds at most four
+hours of it (`PET_DAILY_XP_SECS`), and that number is the whole anti-farming
+answer: an album on repeat all evening is worth exactly as much as the first
+four hours, and a muted player or one left playing to an empty room is worth
+nothing at all. Past the ceiling the meters still move -- the music is real --
+and the daily goal still counts; only progression and notes stop.
+
+A track from an album or a genre the pet has not heard today pays 20 percent
+more. It is small on purpose: it rewards the listener who puts on something new
+without making a diverse library a requirement. The day's genres and albums are
+kept as eight 32-bit hashes each (FNV-1a of the trimmed, lowercased tag) rather
+than as text, because the settings file is read by people and two short lines
+of numbers are cheaper neighbours than sixteen strings.
+
+The daily goal is fifteen minutes, counted at local midnight. Meeting it
+continues a streak. A day missed ends it -- unless a **streak freeze** covers
+that day, which is what the freeze is for; one freeze covers exactly one day,
+and only the day right after the last one.
+
+### Mood without a punishment
+
+The pet gets sleepy after forty-eight hours without music. Sleepy is not dead
+and not "sad": the eyes close, the "z z" appears, and the page says so. A pat
+is welcome but does not wake it -- only a track does. There is no death, no
+decay into an unusable page, and no way to lose the pet; a player who puts the
+device away for a month comes back to a sleepy creature that wakes on the first
+song.
+
+Happiness rises a point per twenty seconds of music and falls one per thirty
+minutes of silence; energy rises one per twelve seconds and falls one per ten
+minutes. A pet with no energy left earns happiness at half rate until music
+feeds it again, which is the only thing hunger changes.
+
+### Notes, the wardrobe and the achievements
+
+A credited minute is a note, capped with the XP at 240 a day, and achievements
+pay a bonus on top. The wardrobe is a sheet over the pet page, opened by the
+star in the title corner, with the balance as its first row:
+
+| item | notes | what it is |
+|---|---|---|
+| Party hat | 120 | an outfit |
+| Headphones | 200 | an outfit |
+| Scarf | 150 | an outfit |
+| Crown | 500 | the long-term purchase |
+| Sunset room | 180 | a room theme behind the creature |
+| Night room | 240 | the second room theme |
+| Streak freeze | 150 | one missed day, forgiven |
+
+Buying an outfit puts it on, and tapping an owned one puts it back on; rooms
+are chosen the same way and are independent of the outfit. A freeze is a stock
+-- bought every time, never worn, and shown as a count. The page shows the
+balance beside the star, and the wardrobe shows it again with the price of
+everything not yet bought.
+
+What is bought is drawn, not just recorded. The four outfits are small pieces
+of the same shapes the creature is made of -- a hat with a brim, headphones
+with cups over the ears, a scarf round the neck, a crown with three points --
+placed from the head's own coordinates so they fit every stage, and a hat hides
+the ears and the hatchling's antenna rather than letting them poke through it.
+The rooms are a wash of colour over the habitat card: meadow green, sunset
+orange, night blue. All of it is fixed-colour rather than themed, for the same
+reason the creature is: a hat that changed colour with the theme would stop
+being the hat that was bought.
+
+Achievements are awarded by the watcher, toasted by the page, and worth notes
+of their own: **Night Owl** (a minute of listening between midnight and five),
+**Deep Diver** (three completed tracks of one album without a skip), **Polymath**
+(five genres in a day) and **Deep Focus** (the thirty uninterrupted minutes).
+The last two also lift the heart meter by ten and six points, which is what
+makes a long sitting -- or an album end to end -- feel different from the same
+half hour of skipping.
+
+### Where it lives, and what it does not cost
+
+There is no daemon and no thread. `petwatch.c` owns one `lv_timer` at 1 Hz,
+created at startup beside the status bar's own timers; the interface thread is
+already awake several times a second, so the pet adds one callback to a loop
+that is running anyway. The page's repaint is a second timer, and that one
+exists only while the page is on the glass.
+
+The watcher is deliberately *not* registered with `power_pause_in_standby()`:
+most listening happens with the panel off, and a paused watcher would credit
+none of it. It reads the same predicate the rest of the player uses for "music
+is coming out" -- local files and streams through `audio_get_status()`, the
+radio through `radio_is_playing()`, a phone through
+`btreceiver_is_streaming()` -- and the tags through
+`device_state_loaded_metadata()`, which is documented as no copy and no sysfs.
+
+The state is written after two minutes of music, on a goal, a stage or an
+achievement, once per track (a discovery changes the day's hashes), when the
+page is left, after a purchase, and in `power_shutdown()` -- never once a
+second.
+
+### Tested without a screen, and without audio
+
+`pet.c` knows nothing about LVGL, audio or the config store: it is given `now`,
+the local day, the seconds heard and the track's bonus, and returns events.
+`tests/test_pet.c` drives that second by second -- the feeds and the decay, the
+daily ceiling and the next day's reset, the discovery bonus and the fraction it
+carries between ticks, all five stages, all five moods including the sleep
+after forty-eight hours, the goal and the freeze-assisted streak, the wallet,
+the wardrobe, the achievements, the volume floor, and the round trip through
+`device_config.ini`. `tests/test_petlisten.c` does the same for the rules: the
+floor, the late-callback cap, a completed album, a skip that starts the run
+over, short tracks, focus, and the night window. `tests/ui/test_tools_pages.c`
+opens the page on both panels, checks that nothing leaves the glass, that the
+words are translated, that the button pets, and that the wardrobe sells a hat
+and a freeze and closes again; the strings are in all eleven language files.
+
+### The clock that has never been set
+
+A player whose clock is still at the epoch adopts the pet at the epoch, and the
+first real `time()` after setup would look like fifty-six years of neglect. The
+watcher remembers whether `clock_is_set()` was true at startup; when it becomes
+true for the first time, every timestamp the pet holds is moved by the same
+amount. The same shift is done at boot when the clock is already true but the
+stored timestamps are still from before 2020.
+
+### Upgrading from the first pet, and what is not here yet
+
+The state grew, in the same `[pet]` section, and an existing pet keeps
+everything that made it what it was: its adoption time, XP (and so its stage),
+happiness, energy, streak and day count are read unchanged, and the new keys --
+notes, wardrobe, achievements, the day's discovery hashes -- fall back to zero.
+The one visible difference on the first day is the goal: fifteen minutes
+instead of twenty.
+
+What is not in this version, and should be said plainly:
+
+- **Genre-gated unlocks** (ten hours of jazz for the fedora, synthwave for a
+  room) are not implemented. It needs per-genre listening hours kept in the
+  settings file, and genre tags on a card are frequently empty or spelled three
+  ways; a gate that never opens because the tags said "Jazz/Fusion" is worse
+  than an honest price in notes.
+- **Per-player skin and visualizer cosmetics** are not here either; the player
+  skins are their own subsystem.
+- **BPM** is not in the tag set this firmware reads, so the mood animation is
+  driven by the genre's words rather than by tempo.
+- **Listening outside the player** -- another app, another device -- is
+  invisible to it, by construction.
+
+What to expect, honestly: the pet is a spinner for listening, and the ceiling
+means it is a four-hour-a-day spinner. A song left looping all night buys
+nothing after four hours, which is the point. With the panel off it keeps
+counting, at the cost of one wake-up a second the audio pipeline has already
+paid for. And it is a hobby: nothing here touches the audio path, the library,
+or the shape of the settings file beyond its own section.
+
+## The pet, second pass: your animal, your name
+
+The first pet was a fixed creature called Momo, in an egg for its first half
+hour, drawn on a page of outlined cards. Three of those were the user's first
+three remarks: they wanted to pick the animal, they wanted to name it, and they
+wanted no white borders. The fourth was that the page had to *fit* the 240x320
+panel rather than be squeezed onto it.
+
+### The egg, gone
+
+The egg stage was the pet's first thirty minutes and nothing else: an oval that
+could be neither patted nor fed differently, followed by a "hatching" that the
+player could not miss and could not cause. It also made one store of the
+creature's age say two things -- "no animal yet" and "an animal, but new" -- and
+the page had to draw both. It is gone: `PET_STAGE_BABY` is the first stage, the
+chosen animal is the animal from the first minute, and the stages that remain
+are hatchling, child, teen and adult. The clock the rest of it runs on is
+unchanged (30 minutes, 4 hours, 15 hours), and a pet that was an egg when it
+saved comes back as a hatchling, which is where it would have been anyway.
+
+### Cat, dog, dragon, fish
+
+`pet_species_t` is stored as `[pet] species`, rejected when it is `NONE` or out
+of range (an out-of-range value is reset to `NONE`, so a corrupt file asks the
+question again rather than inventing an animal), and never inferred: a pet with
+no species opens on the chooser. The four animals are the same body with
+different parts drawn on it -- pointed ears, a tail that curls, a muzzle, horns,
+fins -- so they cost the image nothing and every stage, item and mood works for
+all four. Only the fish changes the scene: it swims in water rather than sitting
+in a room, so the wash over the card becomes the teal of the aquarium and the
+sand, the weeds and three slow bubbles come out; the room themes tint the water
+instead of the air. Its shadow is removed, because a fish swims.
+
+The names are the animal's, in the language files: `pet_species_cat`, `_dog`,
+`_dragon`, `_fish`. `pet_species_tag()` maps the enum to them, and `NONE` maps
+to `pet_species`, which no screen shows -- the chooser is what a species-less
+pet sees.
+
+### A name you choose
+
+`pet_set_name()` trims the string, cuts it to 24 bytes on a UTF-8 boundary
+rather than through a character, and falls back to "Momo" if nothing is left.
+The name lives in `[pet] name` and is written by `petwatch_set_name()`, which
+also saves. `pet_name()` is the reader, and it never returns an empty string.
+The keyboard is the same one the AirPods and the Wi-Fi pages use, in its own
+layer over the chooser: enter accepts and closes, the corner X cancels, and the
+hardware back closes the keyboard before it closes the sheet.
+
+### The page, measured against the panel
+
+The habitat is one card, no border, radius 14 on this board (22 on the 480-wide
+ones), sized `screen_width - 2 * padding` by whatever is left of the panel after
+the title and the two footer lines. On the V1 that is 220x202, and everything in
+it is placed from those two numbers:
+
+| where | what |
+|---|---|
+| top left | the name (20 px), the stage under it (14 px, dim) |
+| top right | a heart and a bar and its number, a bolt and a bar and its number, the wallet of notes under them |
+| middle | the animal, 104x96, pat it by touching it |
+| bottom left | a music note and the track it is feeding on, one ellipsized line |
+| bottom right | an X that leaves the page |
+
+The stage line says the stage and not the mood, because "Hatchling - Happy"
+does not fit in the 108 px between the name's column and the meters, and the
+face is already saying how it feels. The two footer lines under the card carry
+the day's minutes and the streak. Nothing is outlined: the meters are bars on
+the card's own colour, the corner controls are glyphs, and the only shape with
+an edge is the animal.
+
+The animal is built from the shell's own primitives -- discs, rounded bars and
+arcs -- and placed from the body's size, one body per stage (46x40 as a
+hatchling, 72x56 as an adult, a fifth shorter for a fish). The wardrobe's
+headwear hides the ears and the horns, because two hats on one head is a hat and
+a mistake.
+
+### Slow on purpose
+
+The animation is one bob per breath of the root, one sway of the tail (or the
+fish's tail fin), and, while music is playing, two notes drifting up with the
+bubbles in the aquarium. The durations are chosen for a processor that draws
+this panel at a handful of frames a second: a breath is 2.6 seconds with nothing
+playing and 1.1 to 1.9 with music, the tail takes eight seconds to go and come
+back, the notes take four or five, the bubbles nine to fourteen. Nothing uses a
+spring or an overshoot path; everything eases in and out. The animations are
+started when the page is loaded and deleted when it is unloaded, and restarting
+them is what a change of vibe or of species does.
+
+### The chooser, and the test that opens it
+
+The chooser is a sheet over the page rather than a page of its own: the title,
+the name as a row that opens the keyboard, and four tiles in two rows of two --
+wide enough for the longest animal name in any of the eleven languages
+("Дракон"). The chosen tile is the lit one, in the accent colour, instead of a
+word saying "selected". The pencil opens it, the pencil closes it, the X closes
+it, and the chevron closes the keyboard, then the sheet, then the page.
+
+`tests/ui/test_tools_pages.c` opens the page with no species at all: the
+chooser is up, its four animals and its name row are there, and the page it
+covers has not moved. It picks the cat, checks the sheet is gone and the page is
+220x202 inside the panel, taps the animal itself (there is no button any more)
+and checks that `pets` went up by one, opens the chooser with the pencil and
+closes it with the same, then opens the wardrobe with the star, buys a hat and
+two freezes, and leaves the page. `tests/test_pet.c` covers the rest without a
+screen: the species round trip including the corrupt value, the name's trimming,
+its byte cap and its default, and the stages starting at the hatchling.
+
+## The pet, third pass: a character, a game, and a limit
+
+Three things the first two passes did not have. The pet had moods that changed
+with the track, but no *character*; notes came only from minutes listened; and a
+listener flicking through a library earned exactly what a listener sitting
+through an album earned.
+
+### Where a character comes from
+
+The obvious implementation -- "the genre that is playing decides the
+temperament" -- was not used, because it makes the pet flicker: a shuffled
+library would change its character four times a minute and the page would be
+noise. A temperament is a month's habit, so that is what is stored: one entry a
+day, the family that day was mostly spent in, in a ring thirty days long.
+
+```
+[pet] genre_history = 020000000000000000000000000031
+```
+
+Four families, sorted from the tag the way the page's vibe already sorts it
+(sub-strings, case-insensitive), with one order that matters: **calm first**,
+so "lo-fi hip hop" is calm rather than upbeat; **then the curious ones**, so
+"indie pop" and "alternative rock" are exploring rather than chart music; then
+what is meant to be danced to. Anything unrecognised is `OTHER` and counts for
+nothing. With fewer than three days of recognisable listening there is no
+temperament at all: a pet does not have a personality on its first evening, and
+the page draws nothing under the stage until it does. The most days wins; a tie
+goes to the family heard most recently. A month with no listening in it empties
+the ring, so a temperament is recent listening or nothing.
+
+The ring is shifted rather than indexed by day, which is what makes an absence
+work: a device off for three days gets three `OTHER`s in a row, and one off for
+two months gets an empty ring.
+
+### What each character is worth
+
+- **Upbeat** (pop, dance, electronic, rock, hip hop). Energy fills at 8 seconds
+  a point instead of 12, and every two minutes of *credited* music a note or two
+  turns up on the floor, six times in ten. The roll is a hash of the day and the
+  bucket, not a random number generator: the same listening always pays the
+  same, so the suite can predict it and a player cannot farm a bad seed. The day
+  boundary and the daily XP cap come first, so the drops stop where the XP does.
+- **Calm** (jazz, classical, ambient, lo-fi, acoustic, soul). A drifting
+  soundscape: four motes rising through the card over eleven to nineteen
+  seconds. It is a picture, and the documentation says so -- there is no
+  synthesiser in this player, and a "soundscape" that were actually audible
+  would be a second audio path on a MIPS handheld. What the month of jazz buys
+  is the slow, quiet room the pet sits in.
+- **Curious** (indie, alternative, punk, metal, experimental). After
+  forty-five minutes of uninterrupted listening, once a day, it finds something:
+  notes worth twenty to sixty, and one day in three a streak freeze instead --
+  the wardrobe's rarest item, as a find rather than a purchase. The session
+  length is the one `petlisten.c` already measures for the Deep Focus
+  achievement, so a pause, a mute or a skip ends the forage as well.
+
+### The tap-along
+
+Sixteen beats at the metronome's 100 BPM, tapped on the glass, once a day. A
+note falls down a lane towards a line; a tap within 120 ms of the beat is worth
+two points, within 260 ms one, and anything else is lost. The score is the share
+of the thirty-two points the game could pay, and it buys two notes for turning
+up plus one per ten points, a fifth of the score in happiness, a tenth in
+energy, and a streak freeze for 90 or more. The whole sheet is the drum -- the
+label, the lane and the note are all not clickable, so a press anywhere falls
+through to one full-screen button -- because a 240 x 320 panel is not a place to
+ask for precision on a 16 px target.
+
+The timer runs at 40 ms only while the sheet is open, and it is deleted when the
+sheet closes. The note's position is arithmetic on `lv_tick_elaps()`, not an
+LVGL animation, because the game needs to *know* where the note is when a finger
+arrives; a beat nobody tapped is a miss on the same timer.
+
+**Once a day** is `[pet] rhythm_day` compared to the local day, the same rule
+the daily goal uses: it resets at local midnight and not by a timer.
+
+### Skipping, and being dizzy
+
+A skip is a track that was *heard* and abandoned before ninety percent of it,
+and long enough to have been a track at all -- `petlisten.c` now reports it,
+using the same arithmetic that already decides whether an album run continues.
+Skipping is not a crime: five abandoned tracks in ten minutes is a listener
+looking for something. The sixth is a listener flicking, and the pet is dizzy
+for fifteen minutes.
+
+While dizzy, `pet_advance()` credits nothing -- no XP, no notes, no stage, and
+the day's XP cap does not move -- but the meters still fill, because the music
+is real; it is the progression that waits. The face shows crosses for eyes and
+the card says "Too much skipping".
+
+The window is a ring of the last eight skips. It lives in memory and is not
+saved: a reboot is not a way to grind skips, and it is also not a way to dodge
+what you did a minute before switching off. The deadline itself
+(`[pet] dizzy_until`) is saved, so a player who reboots while dizzy comes back
+dizzy.
+
+### What the state grew, and what an old pet loses
+
+`genre_history`, `dizzy_until`, `rhythm_day`, `rhythm_best` and `forage_day`,
+all in `[pet]` and all defaulting to zero. A pet from the previous build has no
+history, which means no temperament for its first three days -- and since a
+temperament is only ever a bonus, nothing is taken away. The day's family tally
+is deliberately *not* persisted: a reboot mid-day costs that day's count, which
+three-day rule cannot notice.
+
+### Tests
+
+`tests/test_pet.c` covers the arithmetic without a screen: the family of a dozen
+real tag strings including the two that must sort towards "curious", the ring
+filling over days, the three-day minimum, the tie that goes to the most recent
+day, a month away emptying it, an Upbeat breakfast of 8-second energy points and
+deterministic drops that pay the same twice, the skip that becomes dizzy on the
+sixth and not before, XP and notes stopping while dizzy while the meters keep
+filling, the fifteen minutes expiring, a skip ten minutes old no longer
+counting, foraging (and not foraging for a non-Curious pet), the tap-along
+paying once a day and never lowering the best score, and the round trip through
+the settings file including a corrupt history digit.
+
+`tests/test_petlisten.c` adds the skip rule itself: a track heard and abandoned
+is a skip, a track that ended is not, a track only ever seen muted is not, a
+sting is not, and the session length is reported for the forager.
+
+`tests/ui/test_tools_pages.c` opens the tap-along from the third corner control,
+checks it is on the panel, presses OK with no beats hit, and checks it paid the
+two notes for turning up and will not pay again today.
+
+## The pet, drawn again
+
+The first two versions of the creature were pastel blobs: filled circles with no
+line round them, which on a 240 x 320 panel read as one animal with four sets of
+ears. On the real screen, in the light of the room they were photographed in,
+they were worse than the mock-ups suggested -- a pale shape on a dark card, with
+nothing to separate the ears from the head.
+
+The drawing is now the interface's own idiom, the one its icons are cut in: a
+flat fill inside a heavy ink line.
+
+- **Every part with an edge wears a 2 px outline** in the same near-black
+  (`style_outline_width` on the object, so it follows the shape's radius). The
+  eyes and the catchlights do not: a 2 px line on a 4 px glint is a smudge.
+- **Back to front.** Tail, fins, ears and horns are created before the body, so
+  the body's line runs over them and an ear does not wear a stripe where it
+  meets the head.
+- **Four silhouettes, not four colours.** The cat has squares stood on a corner
+  for ears with a pink inner ear; the dog has long floppy ears hanging past the
+  jaw and the widest muzzle; the dragon has cream horns and a spade on its tail;
+  the fish is a pill with a diamond tail fin, a fin on top and one under its
+  belly, and no shadow, because a fish swims.
+- **Bigger.** The root is 140 x 108 instead of 104 x 96 and the hatchling's body
+  78 x 64 instead of 46 x 40: the animal fills the card rather than sitting in
+  the middle of it. The adult is 100 x 82.
+- **The light belly** is no longer outlined -- it is a patch on the body, not an
+  object in front of it -- and the fish has none at all, since a gold fish with
+  a pale belly reads as a puppy.
+
+The aquarium was the other half of the complaint. A coloured wash with a line of
+sand is a background; a tank has furniture:
+
+- a 7 px band of light where the water meets the air, at the top of the card;
+- sand in two tones, a wider, darker strip under a lighter one, with three
+  pebbles and a rock standing in it;
+- three weeds of different heights, one of them a lighter green, each with two
+  leaves, planted clear of the status line's column so the words stay readable;
+- six bubbles instead of three, of three sizes, rising on staggered delays.
+
+The water itself is a 25 % tint rather than the 60 % it was at first: at 60 %
+the card became a pale blue sheet and "Hatchling" disappeared into it. The
+furniture does the work of saying *water*; the tint only has to say *not air*.
+
+The header's three corner controls are also smaller: the glyph is drawn at five
+ninths of the 36 px slot (20 px) instead of three quarters (27 px). A pencil
+that is three quarters of its button looks like it is falling out of the header,
+which is what the photograph showed.
+
+## The pet, drawn as itself
+
+The four animals were one animal with four sets of attachments. A round body,
+two ears bolted to the top corners, a tail: a cat was a potato with a hat on, and
+so was a dragon. This pass is about the silhouette, and about giving each of
+them somewhere to live.
+
+### A head on a body
+
+Every animal is two masses now: a trunk -- the round bottom it sits on and the
+shoulders its paws hang from -- and a head, drawn over it. The head is most of
+the animal, the way a small animal is, and the ink line around it cuts across
+the shoulders. That seam is what makes it read as a head on a body rather than
+as one potato, and it cost nothing: the parts were always separate objects.
+
+The fish has no such seam. It is one long body with the head on the front of it,
+the way a fish is, and its fins do the rest.
+
+### The shapes a rectangle cannot be
+
+Two things went wrong before this pass, and both of them had the same cause.
+
+A **turned object loses its outline**. LVGL draws a rotated widget through a
+temporary layer the size of the widget's own box, and the outline -- which is
+drawn *outside* the box -- is clipped away by it. Every ear, tail and fin in
+this page is turned, so every one of them was drawn without a line: soft, dim,
+and not part of the set. They now wear a border instead, which is drawn inside
+the box and survives the turn.
+
+A **turned object loses its corners**, for the same reason. A square turned
+forty-five degrees comes out as an octagon, which is why the old ears read as
+rounded blobs however they were placed. So the four shapes that have to be
+pointed are not rectangles at all: they are drawn. `petpage.c` has a small
+shape type -- a box, up to six triangles in it, and a colour each -- and a
+DRAW_MAIN callback that hands them to `lv_draw_triangle()`: the ink triangle
+first, grown about its middle by a quarter, the fill on top. The cat's ears
+(and the pink inside them), the dragon's horns, its crest and its wings, the
+fish's fan and its dorsal fin, and the two mountains behind the dragon are all
+triangles.
+
+It costs nothing at rest: nothing is allocated while the page is up, nothing is
+animated, and a shape is only drawn when the animal has changed -- which the
+cached redraw from the previous pass already made rare.
+
+### Four animals, four faces
+
+What each of them is made of now, beyond the head and the trunk:
+
+| | ears | face | behind | tail |
+|---|---|---|---|---|
+| cat | two triangles leaning out, pink inside | small pink nose, two whiskers a side | a tail hooked up behind the hip | two lengths, curling |
+| dog | hanging bars, out in the air to the jaw | wide soft muzzle, a black nose | a short tail, up | one bar |
+| dragon | two swept horns and a three-spike crest | a long deep-green muzzle, flat nose | wings behind the shoulders | a bar ending in a spade |
+| fish | none | two eyes on the front of the body | a fan, a dorsal fin, a belly fin | the fan itself |
+
+The whiskers lie flat on purpose: a two-pixel bar turned forty degrees is
+clipped down to two rows and disappears.
+
+### Four homes
+
+A cat on a green card and a dragon on a green card were the same card. Each
+animal now has three or four flat things of its own behind it, in colours that
+do not follow the theme -- a pet's rug is not going to be Tokyo Night's blue --
+built once with the page and shown or hidden by species:
+
+- **cat**: a rug, a plant in a corner, a ball of yarn with a thread coming off it.
+- **dog**: grass along the bottom, a picket fence, a bone.
+- **dragon**: two peaks, a strip of rock, two embers.
+- **fish**: the tank it already had.
+
+Eighteen objects for all four together; only the ones belonging to the current
+animal are ever drawn. The light theme needed three of the older colours
+darkened -- the sand, the fence and the bone -- because cream on a white card is
+not a fence.
+
+### The box grew a hat's height
+
+The root the animal is built in is taller than the animal by the height of a
+party hat (126 px for a hundred-pixel animal), and the root is now placed from
+the feet rather than wherever its container laid it out: the animal stands on the
+same floor line the four homes are drawn on, and a hat has somewhere to go. A
+child cannot be drawn outside its parent, and LVGL's overflow flag does not help
+here -- it extends a parent by its draw extension, and a plain box has none.
+
+## The pet, on a 240 MHz budget
+
+The page was correct before this pass and busier than it needed to be. What
+follows is what was changed, and the two items from the same list that were
+turned down, with the arithmetic that turned them down.
+
+### Two frames, not an interpolation
+
+There is no `lv_anim` left in `petpage.c`. The animal has two frames -- breathe
+in, breathe out -- and the page's own one-second timer swaps them: the root moves
+two pixels (three while music plays), the tail leans one way and then the other,
+the two notes trade places and opacity, and the equalizer swaps its bar heights.
+The bubbles and the calm soundscape's motes are the same idea as arithmetic: a
+running offset, each on its own phase, wrapped off the top edge where nothing can
+be seen of them. That is twelve integer fields written into a dozen objects once
+a second, and no renderer work at all between ticks.
+
+The tail is the one part that has to know its resting angle to lean from it, so
+the angles live next to the species that own them rather than in the animation.
+
+### Conditional redraws
+
+`paint()` is now the rare path -- page load, theme change, a new animal, a hat --
+and the one-second path is `paint_values()`. It keeps a small `shown_t` of what
+is on the glass and compares:
+
+| what | redrawn when |
+|---|---|
+| the animal, the room, the theme's colours | its stage, mood, species, hat or room changed |
+| the two bars and their numbers | the number changed |
+| the wallet | the number changed |
+| "Today x of 15 min", the streak | the number changed |
+| the status line | the text it would say is different |
+| the note/bars in the status line | listening started or stopped |
+
+The stage name, the name and the temperament word are written once. Nothing in
+the timer calls `lv_label_set_text` with a string that is already there, and
+nothing rebuilds the fifty objects the animal is made of because a clock moved.
+
+### Flat, as it already was
+
+The card has no shadow (`shadow_width` 0), no gradient and no gradient stop: one
+`bg_color` at one opacity, one radius, and the water is the same flat fill in a
+different colour. The outline on each part of the animal is style, not
+rasterisation of a vector path. Nothing was added here; it is stated because the
+question is fair.
+
+### The equalizer
+
+The status line's still note is replaced, while music plays, by three 3 px bars
+in two frames (`{4, 9, 6}` and `{9, 5, 10}` pixels) in the same green. Four
+objects, one timer tick, no visualiser: the point is feedback, and at this size
+a bar chart is the whole story.
+
+### The wallet, aligned
+
+`♪ 500` used to sit left-justified under the two meters with a stray digit
+wrapping below it. It is now right-aligned with `50` and `80`, in the same
+column, one line high, and the meters gave up four pixels of bar to make room.
+
+### Turned down: a pre-baked indexed sprite sheet
+
+This is the one item on the list that was not done, and it was measured rather
+than argued about. The animal is 48 LVGL objects -- a disc and a rounded bar each
+-- which is about 6 KB of RAM for the whole pet and no flash at all.
+
+A sprite sheet that replaced it would need, at the tile size this panel uses
+(96 x 96 for an adult, 64 x 64 for a hatchling), a separate picture for every
+species and stage and both frames: four species x four stages x two frames = 32
+tiles, and then the wardrobe multiplies it -- a party hat, headphones, a scarf
+and a crown each change the head, so the honest count is 5 x 32 = 160 tiles.
+At one byte per pixel that is 160 x 6 KB = **about 1 MB of flash**, against 6 KB
+of RAM for the objects, in an image that is already carrying its fonts and icons.
+The renderer would also gain nothing: an image and a rounded rectangle are both
+one blit into the same draw buffer, and the objects are redrawn only when the
+animal changes, which the cache above made rare.
+
+What a sprite sheet *would* buy is detail -- outlines that curve, a face that is
+drawn rather than composed. If that is what is wanted, it is an art problem with
+an art budget, not an optimisation, and it should be decided as one.
+
+### Turned down: sampling the player every 10-30 seconds
+
+The watcher already does no polling of its own: it is one LVGL timer at 1 Hz
+reading the player's cached state -- the same predicate the rest of the
+interface uses for "music is coming out" -- and doing about forty integer
+operations with it.
+
+Sampling less often would break rules the pet is built on rather than save
+anything worth measuring. `petlisten.c` refuses to credit a callback that slept
+through the music for more than `PETLISTEN_MAX_CREDIT` (five seconds), precisely
+so a suspended player cannot claim an hour; a ten-second tick would be refused
+by that rule or force it to be broken. The five-minute focus, the thirty-second
+"did the track end or was it skipped" question and the daily goal are all
+measured in seconds.
+
+The page's timer, which *did* have work worth removing, is paused in standby
+(`power_pause_in_standby`) and deleted when the page is unloaded. The watcher's
+timer deliberately is not: it has to hear the music that is playing with the
+panel off.
+
+### Turned down: a page-level dim after fifteen seconds
+
+The shell already owns the screen's brightness: it has a screensaver, an
+auto-off, and it pauses timers in standby. A second dimmer inside the pet's page
+would fight the first one -- two things setting the same backlight, on timers
+that do not know about each other -- and the pet page's own CPU use is already
+zero while the panel is asleep, because its timer is paused there and its frames
+stop when the page is unloaded.
+
+What *is* here is the quiet part: with the page open and nothing playing, the
+animal breathes twice a minute and nothing else moves.
+
+## The pet, three of it
+
+Three corrections to the animals above: a grey cat, no dragon, and a fish that
+reads as a fish.
+
+### The dragon, and the number it left behind
+
+The species was an `int` in the settings file and the dragon was third of four,
+so deleting it is not a matter of deleting a case from a `switch`: the enum
+would renumber the fish onto three, and every owner who had a dragon would find
+a goldfish in its tank the next time the page opened. Nothing in a version-1
+file says which build wrote it.
+
+The file has a shape version now. `pet_save()` writes `state_version = 2`;
+`pet_load()` reads the old numbers only when the key is missing or older than
+two -- three was a dragon, four was a fish -- and a dragon's owner is offered the
+cat rather than a fish. The test sets the key to 1 by hand and asserts all three
+readings, because this is the one part of the change with no way back.
+
+### Grey
+
+The cat was cream, the dog sandy yellow and the fish gold: three warm fills in a
+row, told apart by their ears alone. The cat is grey now -- `0xC3C7CC` with
+`0xA2A7AE` for the paws and `0xE6E9EC` for anything pale -- which is a colour
+nothing else in the set has, and the pink nose and ears still do the rest.
+
+It also cost both animals their tails. A cat's was two turned bars that did not
+meet, and cream on cream had hidden the seam; grey showed it as a stick
+floating by the shoulder. The dog's was one turned bar hanging off its hip,
+drawn through a layer the size of its own box and coming out with a cut edge --
+which is what was read as an artifact on its right. A tail behind an animal
+facing you is invisible, and a tail beside it is a turned bar, so neither has
+one now. The cat is its ears, whiskers and nose; the dog its ears and snout; the
+fish keeps its tail, because a fish is drawn side on and a tail is what makes it
+one.
+
+### What was in the corners
+
+The cat's plant was a round mass with two turned bars standing on top of it: the
+bars lost their ends to their own boxes, and the two of them read as ears. It is
+a potted plant now -- pot, a mass of leaves, and three leaves drawn as triangles
+standing out of the top of the mass, overlapping so the notches between them
+stay shallow.
+
+The dog's bone was a turned bar with its two knobs left straight, so the ends
+did not meet it and it read as a pale squiggle lying in the grass. It is drawn
+square on now, a bar and four knobs, and a bone. `PET_SCENE_PARTS` went to 24 to
+hold the extra pieces; six more objects that are never all drawn costs less than
+the wrong shape in the corner does.
+
+### The sheet headings and the back button
+
+The back button is not part of a page. It lives in the shell, is drawn above
+every numbered screen, and sits at the top left on the same line the page
+titles use. A sheet -- the chooser, the tap-along, the name editor -- is a
+full-screen object, so it covers the page's title row but *not* that button;
+anything it puts in the corner is written over. The three hand-built headings
+went in at the page's own padding, and the chevron landed on the first word:
+"‹ur pet".
+
+`settingsrow_title()` had always computed the right place, but as a number
+inside one function. It is two functions now -- `settingsrow_header_text_left()`
+and `_top()` -- used by both the page titles and the sheets, so there is one
+definition of where a heading starts and every heading in the interface starts
+there. `test_tools_pages` asserts the chooser's heading begins to the right of
+the corner button's box, which is the bug in one line.
+
+### The plant's line
+
+The cat's pot, its mass of leaves and the middle of the leaf fan were placed one
+at a time, and had drifted two pixels apart from each other: a plant that leans.
+All three are placed from one `plant_cx` now, and the leaves are mirrored about
+the middle of their box.
+
+### The fish that stayed behind
+
+A fish is one drawn shape, and that shape is placed only while the pet *is* a
+fish -- but it was never hidden when it stopped being one. The object kept the
+last box it had been given and the triangles still in it, so a player who was a
+fish and changed their mind found an orange sliver of it jammed in behind the
+new animal's head, looking like a bag hung off its shoulder. One `show()` fixes
+it. Every other part of the animal is shown or hidden by species on every
+paint; this one was added with the shape and missed the rule.
+
+### The fish
+
+The fish was one long oval with a fan stuck on the end. The fins were right; the
+body was not a fish.
+
+It is one drawn shape now, four triangles fanned out of the snout: a flat face
+in front, the back laid over the top, a narrow peduncle behind, the belly
+hanging under. Hexagonal, which is as close to the oval a fish is as four
+straight lines come. It has a forked tail on the peduncle -- two lobes and a
+notch, where a single triangle was a fan -- a dorsal fin standing out of its
+back, a pectoral under its belly, a gill behind its head, and the profile's one
+eye. `lv_arc` draws the gill: an arc is the one curve in this page that is not a
+rounded rectangle.
+
+Two drawing bugs came with it, both worth writing down.
+
+**The fills are drawn larger than their triangles.** With the fill at exactly
+the size of its ink outline, the anti-aliasing along a shared edge is about half
+a pixel of each, and the ink underneath came through as a hairline across the
+body: three triangles in a bag, not a fish. The fills are pushed at 106 per cent
+and the seams are gone. The ink still sits at 124 per cent, so the outline
+survives.
+
+**Everything drawn before the body is under it.** The dorsal fin and the
+pectoral had been created with the other parts behind the trunk, which is right
+for a fin that meets a body -- the join is hidden -- and wrong for a fin that was
+placed entirely inside it. Both stick out now, and the gill was moved into the
+face group, because a gill drawn before the body is a gill nobody sees.
+
+### A head that was most of the animal
+
+The cat's head was 84 per cent of the width of its body and the dog's 90, so at
+every stage the animal was a head with a little of itself hanging under it --
+worst at the adult, where the head is 92 pixels across on a 110 pixel body. The
+cat's is 76 now and the dog's 82, and both sit four per cent deeper on the
+trunk, so that a smaller head still meets the shoulders instead of resting on
+them. Everything on the face -- the eyes, the nose, the mouth, the muzzle, how
+far the whiskers reach -- is a percentage of the head's width, so the face came
+down with it and is the same face. The hat does not: it is a fixed brim and a
+fixed cone, and it still sits on the crown.
+
+### A rounder fish
+
+The fish's body was four triangles fanned out of the snout: a hexagon, and it
+looked like one. A shape can carry an outline now. `pet_shape_t` holds a run of
+corners beside its triangles, and the draw callback joins them with the same
+two-pixel ink every other part wears; the hull is fourteen corners, which at
+this size is an oval. A line does not care how many corners it has, so a dozen
+sides cost what four did.
+
+Filling fourteen corners with triangles brought the old seam problem back, and
+the six per cent enlargement only ever worked for triangles as chunky as those
+four were: a fan out of the snout is thin wedges, half a pixel of anti-aliasing
+along each, and the water came through between them as hairlines. Each fill now
+reaches two corners on instead of one, so neighbours lap over each other by a
+whole wedge and there is no shared edge left to show -- two triangles of the
+same flat colour that only touch leave a line, and two that overlap leave
+nothing. No ink is needed under them either: the outline is one line round the
+lot, drawn after the fills.
+
+The body is longer than it is tall now -- 90 per cent of the trunk's width and
+four pixels more than its height -- rather than as wide as it was high, which is
+a ball with a tail on it however many fins are stuck to it, and the tail's hub
+moved under the peduncle. The pectoral fin is gone: a fin on the side of a fish,
+seen from the side, is a triangle drawn on its belly, and it read as exactly
+that. The forked tail, the dorsal, the gill and the one eye say fish without it.
+
+### The dog's ears
+
+Five passes at the same pair of ears, which between them say more about this
+page than the ears do. They have to be flat -- one fill inside the same ink
+outline everything else wears -- and the dog is the same colour as its head, so
+the only thing that separates an ear from the head is a line, and the only thing
+that separates an ear from hair is its silhouette.
+
+- **Over the head**: each flap's top edge crossed the crown and its inner edge
+  ran down the side of the face. Two of those on a round head are a bob haircut
+  with a parting, and that is what it looked like.
+- **Beside the head**: pushed out until the ear only touched it at the top edge,
+  the ear hung in the air, and an ear that is not on the head is not a dog's ear.
+- **With a big pale inside**: the cream of the muzzle pulled in from the lobe's
+  own corners. It reached down beside the muzzle and the dog grew a beard.
+- **Standing up at the corners, tall**: the first pair that changed the head's
+  outline, and the right idea -- and tall and narrow with it, so the dog was a
+  rabbit.
+
+What is there now is the last one, corrected: **short, wide and rounded**, out of
+each top corner, leaning outward, twelve per cent of a head above the crown and
+a quarter of its height down through it. Short and wide is the whole difference
+between a dog's ear and a rabbit's.
+
+Two details make them sit right. They are drawn **before** the head, so the
+head's own line closes them at the root: an ear with its top edge out in the air
+leaves a step in the silhouette, and a baseline drawn across the dome is a cut.
+And each carries a **small pale inside** -- the cat's trick, a colour inside the
+outline that only an ear has -- at the size these ears have room for it, a fifth
+of the ear's width in from its edge.
+
+The table is in head units: x from the middle of the head in per cents of half
+its width, so a hundred is the edge of the head, and y from the top in per cents
+of its height, negative above it. Read that way it says what the ear is, and it
+scales with the animal. The box it used to live in sat a fixed eight pixels out
+from the head, which at the hatchling -- whose head is sixty-four across -- was a
+quarter of a head out in the air.
+
+## The pet, and the small things it does
+
+The animal was already a page with a face, a mood and two meters. What it was
+missing was the ordinary half of a toy: a reason to press a button that has
+nothing to do with it, and something to find when you come back.
+
+### The keys that never reached the interface
+
+`handle_key_press()` in `system.c` applied a volume step and told the interface
+what the level was; nothing else ever saw the key. So a volume press could not
+be answered by anything on screen. `gui_key_t` has `GUI_KEY_VOL_UP` and
+`GUI_KEY_VOL_DOWN` now, posted from `apply_volume_step()` beside the step
+itself -- which covers the side buttons, the cable remote, the headphone remote
+and the mapped keys, because all of them go through that one function.
+
+`key_async_cb()` answers them at the top, before the Game Boy, the book, the USB
+DAC or the receiver can claim the press, and returns: a volume key is not a
+transport key and the step has already been taken. Next and Previous were
+announced all along, so the page only had to be told after them.
+
+### A reaction is a shift and a rotation
+
+There is no third timer. The page already flips between two frames every second;
+a reaction is two more numbers on the same object -- a vertical or horizontal
+shift, or the left arm's angle -- applied in `apply_frame()` and expired by the
+one-second page timer three seconds later. A jump is up five pixels on the first
+frame and two on the second; a duck is the same downwards; a lean is four to the
+right or the left; a wave turns the arm up fifty degrees.
+
+A tap picks one of three from the clock: `petwatch_now() % 3`. A coin flip is
+enough to make a tap a surprise and it costs no state to remember.
+
+### The click that a hold leaves behind
+
+LVGL reports a hold's release as `LV_EVENT_CLICKED` as well as `RELEASED`, so
+the tap handler would have run at the end of every Petting Mode and petted the
+animal a second time. It is swallowed for two seconds -- `swallow_until` -- and
+the easter egg on the version row documents the same trap.
+
+Petting Mode itself is a meter of three hearts, one every six hundred
+milliseconds, and the third pays. It is on the only new timer the page grew,
+and the timer deletes itself when the finger is gone. The bonus is
+`PET_HOLD_HAPPY_GAIN` (6) and it is once a day, kept as `hold_day` in the state:
+a heart that refills by holding a finger down is not worth six points.
+
+### What the genre puts on it
+
+`pet_vibe_for_genre()` already read the tags for how the animal moves; the same
+reading now says what it wears, in `pet_genre_look()` and with the same
+first-match order, so "lo-fi hip hop" gets the cup rather than the chain. Four
+accessories, flat, one at a time: shades for the electronic family, gold at the
+neck for hip hop, studs for rock, a cup on the floor for the calm ones. A scarf
+owns the neck and wins.
+
+The first drawing of the chain put it at the scarf's own height, which on an
+animal that is mostly head is across its muzzle: a gold moustache. There is no
+neck to speak of, so both the chain and the collar sit on the chest at
+`head_bottom - 1`, just under the chin.
+
+The volume is worn on the face instead: past eighty per cent the eyes and their
+glint go wide, between twenty and forty the pet rests under a heavy lid. Neither
+is a mood -- sad, asleep and dizzy keep the faces they had, because a mood is the
+state's and a volume is the player's.
+
+### The box
+
+One sheet, opened from a small chest that sits in the corner of the card all
+day, with a gold latch when there is something in it. Three features share it,
+and all three are un-farmable by tapping:
+
+- **The fortune**, once a day. `pet_fortune()` draws one of six from the day
+  itself, so it is the same line all day and a different one at midnight and
+  asking twice costs nothing. Answering it -- "I did it" -- pays fifty notes
+  once a day. The pet cannot check whether an album from before 2000 was played,
+  which is the point: a fortune is an invitation, not a task.
+- **The note game**, once an hour. Six notes cross one line at a fixed speed,
+  about nine seconds in all; five notes for turning up and one more for each
+  note caught. The note is a position on a 30 ms timer and a hit is a distance
+  from the middle of the lane. No FFT, no audio, nothing to measure.
+- **The finds.** Every half hour of music that was actually credited turns
+  something up, counted in `pet_drop_add()` from the seconds `petlisten` has
+  already decided were heard. Three at most: with the box full the listening
+  stops counting, so a week away comes back as a box and not a heap. The four
+  kinds come round in turn rather than at random, because a shelf with one of
+  each on it is worth looking at and the order costs no state. A find is saved
+  at once rather than on the two-minute throttle: it is the kind of thing a
+  player switches the device off to go and look at.
+
+A find appears on the floor beside the animal and is tapped into the shelf --
+the input is the item, not a button. The floor cue and the box are the two
+things on the card that are tapped rather than the animal, and neither is a
+fourth corner control: the title row already carries three, and a fourth would
+have been the smallest thing on the page.
+
+### The hour and the month
+
+`clock_is_set()` decides whether the card trusts the clock at all: with no time
+set, the card stays as it was. With it, `localtime_r()` gives an hour and a
+month, and after eight in the evening a wash of forty per cent black goes over
+the card -- *under* the animal, so the pet stays as bright as it was and only
+the room goes dark -- a moon comes up where the sun was, and a small lamp stands
+at the far end of the floor. The moon is an arc, not a disc: a disc with a bite
+taken out of it needs a second disc the colour of whatever is behind it, and
+what is behind it changes with the room.
+
+The month decides what falls: rain in spring, leaves in autumn, snow in winter,
+nothing in summer, five small things each on its own phase, moved by the frame
+the page already draws. The page asks for the hour every second and
+`paint_clock()` answers from what it last drew unless the hour, the month or the
+animal has changed -- so a card with nothing falling costs nothing at all.
+
+Fourteen new strings, in eleven languages.
+
+## The charger, with the player off## The charger, with the player off
 
 The stock player comes up on a battery screen when the device was switched off
 and a cable is plugged in: the charger powers the board, and the thing the user

@@ -27,6 +27,8 @@
 #include "src/gui/nowplaying/cover.h"
 #include "src/gui/notes/noteeditor.h"
 #include "src/gui/notes/notes.h"
+#include "src/gui/pet/petpage.h"
+#include "src/gui/shell/settingsrow.h"
 #include "src/gui/shell/gridpage.h"
 #include "src/system/playback/device_state.h"
 #include "src/gui/shell/icons.h"
@@ -37,6 +39,8 @@
 #include "src/system/core/lang.h"
 #include "src/system/input/kblayout.h"
 #include "src/system/notes/notesstore.h"
+#include "src/system/pet/pet.h"
+#include "src/system/pet/petwatch.h"
 #include "src/system/text/textfile.h"
 
 /* ---- the parts of the shell these pages lean on, substituted ------------- */
@@ -156,6 +160,64 @@ void metronomeclick_stop(void) { click_started = false; }
 bool metronomeclick_failed(void) { return click_failed; }
 unsigned metronomeclick_beats(void) { return click_written; }
 int metronomeclick_beat_index(void) { return click_last; }
+
+/* The music pet's watcher: the page asks it four things, and the arithmetic
+ * under it is the real pet.c (linked below). What is substituted is the
+ * listening -- there is no audio engine in this suite -- so the pet is a
+ * creature that has heard music and is being looked at. */
+static pet_state_t pet_state;
+static bool pet_listening;
+static int pet_volume = 60; // what the page thinks the player is turned up to
+static pet_genre_look_t pet_look; // and the accessory the tags are asking for
+
+const pet_state_t *petwatch_state(void) { return &pet_state; }
+bool petwatch_listening(void) { return pet_listening; }
+// The test's clock, in UTC: noon on 15 July 2025, which is a summer afternoon
+// and therefore a sunlit card. Time-dependent things are driven from here.
+static int64_t pet_now = 1752580800;
+int64_t petwatch_now(void) { return pet_now; }
+void petwatch_track_title(char *out, size_t out_size) {
+	if (out && out_size) {
+		snprintf(out, out_size, "%s", "Test track");
+	}
+}
+bool petwatch_pet_now(void) { return pet_pet(&pet_state, petwatch_now()); }
+bool petwatch_hold(void) { return pet_hold(&pet_state); }
+int petwatch_volume(void) { return pet_volume; }
+petwatch_box_t petwatch_box(void) {
+	petwatch_box_t box = {0};
+	box.fortune_id = pet_fortune(&pet_state, pet_day_now(petwatch_now()));
+	box.fortune_ready = pet_state.fortune_paid != pet_state.fortune_day;
+	box.drops = pet_state.drop_pending;
+	box.treats_ready = pet_treat_ready(&pet_state, petwatch_now());
+	for (int i = 0; i < PET_DROP_COUNT; i++) {
+		box.found[i] = pet_state.found[i];
+	}
+	return box;
+}
+int petwatch_drop_take(void) { return pet_drop_take(&pet_state); }
+bool petwatch_fortune_pay(void) { return pet_fortune_pay(&pet_state, pet_day_now(petwatch_now())); }
+int petwatch_treat_finish(int hits) { return pet_treat_finish(&pet_state, petwatch_now(), hits); }
+pet_genre_look_t petwatch_look(void) { return pet_look; }
+int petwatch_take_events(void) { return 0; }
+int petwatch_take_achievement(void) { return 0; }
+pet_vibe_t petwatch_vibe(void) { return PET_VIBE_NEUTRAL; }
+bool petwatch_focus(void) { return false; }
+bool petwatch_buy(pet_item_t item) { return pet_buy(&pet_state, item); }
+bool petwatch_wear(pet_item_t item) { return pet_wear(&pet_state, item); }
+bool petwatch_set_species(pet_species_t species) { return pet_set_species(&pet_state, species); }
+bool petwatch_set_name(const char *name) {
+	pet_set_name(name);
+	return true;
+}
+pet_temperament_t petwatch_temperament(void) { return pet_temperament(&pet_state); }
+bool petwatch_has_soundscape(void) { return pet_has_soundscape(&pet_state); }
+bool petwatch_rhythm_ready(void) { return pet_rhythm_ready(&pet_state); }
+int petwatch_rhythm_finish(int score) { return pet_rhythm_finish(&pet_state, score); }
+void petwatch_flush(void) {}
+
+/* The clock is set, because this suite's whole day is a fixed second. */
+bool clock_is_set(void) { return true; }
 
 /* A timer parked for the screen's dark half; there is no power manager here. */
 void power_pause_in_standby(lv_timer_t *timer) { (void)timer; }
@@ -294,6 +356,36 @@ static lv_obj_t *entry_with_label(lv_obj_t *container, const char *label) {
 }
 
 /* Presses what a finger would press to reach `text`: the button carrying it. */
+/* The same search, but only through what is actually on the glass: the sheets
+ * over the pet page each have their own OK, and the hidden ones must not be
+ * pressed. */
+static lv_obj_t *find_visible_label(lv_obj_t *obj, const char *text) {
+	if (!obj || lv_obj_is_hidden(obj)) {
+		return NULL;
+	}
+	if (lv_obj_check_type(obj, &lv_label_class) && strcmp(lv_label_get_text(obj), text) == 0) {
+		return obj;
+	}
+	for (uint32_t i = 0; i < lv_obj_get_child_count(obj); i++) {
+		lv_obj_t *found = find_visible_label(lv_obj_get_child(obj, (int32_t)i), text);
+		if (found) {
+			return found;
+		}
+	}
+	return NULL;
+}
+
+static void press_visible_key(lv_obj_t *root, const char *text) {
+	lv_obj_t *label = find_visible_label(root, text);
+	assert(label);
+	lv_obj_t *key = lv_obj_get_parent(label);
+	while (key && !lv_obj_check_type(key, &lv_button_class)) {
+		key = lv_obj_get_parent(key);
+	}
+	assert(key);
+	lv_obj_send_event(key, LV_EVENT_CLICKED, NULL);
+}
+
 static void press_key(lv_obj_t *root, const char *text) {
 	lv_obj_t *label = find_label(root, text);
 	assert(label);
@@ -333,6 +425,22 @@ static void check_within_panel_in(lv_obj_t *obj, gui_config_t *cfg, const char *
 	for (uint32_t i = 0; i < lv_obj_get_child_count(obj); i++) {
 		check_within_panel_in(lv_obj_get_child(obj, i), cfg, what, scrolls);
 	}
+}
+
+// The shell's back button is drawn above every screen, in the top left corner
+// in a corner button's box. A screen-sized sheet covers the page's own title
+// row but not that button, so a sheet's heading has to start to the right of it
+// -- otherwise the chevron lands on the first word and a player reads "ur pet".
+static void check_clear_of_back_button(lv_obj_t *label, gui_config_t *cfg, const char *what) {
+	assert(label);
+	lv_area_t area;
+	lv_obj_get_coords(label, &area);
+	const int button_right = cfg->padding + settingsrow_corner_button_size(cfg);
+	if (area.x1 < button_right) {
+		printf("FAIL %s: heading starts at x %d, the back button ends at %d\n", what, (int)area.x1,
+			   button_right);
+	}
+	assert(area.x1 >= button_right);
 }
 
 static void check_within_panel(lv_obj_t *obj, gui_config_t *cfg, const char *what) {
@@ -392,6 +500,23 @@ static void check_strings(const char *language_dir) {
 		"musicsettings_rearrange_main_page",
 		"metronome", "metronome_bpm", "metronome_beats", "metronome_start",
 		"metronome_stop", "metronome_tap", "metronome_no_audio",
+		"pet", "pet_mood_sleeping", "pet_mood_sad", "pet_mood_okay", "pet_mood_happy",
+		"pet_mood_blissful", "pet_stage_egg", "pet_stage_baby", "pet_stage_child",
+		"pet_stage_teen", "pet_stage_adult", "pet_energy", "pet_today", "pet_streak",
+		"pet_streak_none", "pet_feeding", "pet_feeding_music", "pet_feed_me",
+		"pet_asleep", "pet_pet", "pet_purr", "pet_cooldown", "pet_goal_toast",
+		"pet_stage_toast", "pet_customise", "pet_choose_pet", "pet_species",
+		"pet_species_cat", "pet_species_dog", "pet_species_fish",
+		"pet_mood_dizzy", "pet_temperament_none", "pet_temperament_upbeat",
+		"pet_temperament_calm", "pet_temperament_curious", "pet_dizzy_hint",
+		"pet_dizzy_toast", "pet_drop_toast", "pet_forage_toast", "pet_tap_game",
+		"pet_tap_hint", "pet_tap", "pet_tap_score", "pet_tap_done", "pet_tap_played",
+		"pet_wardrobe", "pet_notes_balance", "pet_wearing_now", "pet_owned", "pet_price",
+		"pet_item_party_hat", "pet_item_headphones", "pet_item_scarf", "pet_item_crown",
+		"pet_item_room_sunset", "pet_item_room_night", "pet_item_streak_freeze",
+		"pet_achievement", "pet_ach_night_owl", "pet_ach_locked",
+		"pet_freezes", "pet_bought", "pet_not_enough", "pet_worn", "pet_already_worn",
+		"pet_freeze_note", "pet_room_note", "pet_item_none",
 	};
 	DIR *dir = opendir(language_dir);
 	assert(dir);
@@ -498,6 +623,7 @@ static void check_more_page(gui_config_t *cfg, const char *tag) {
 	assert(has_entry(shown, tr("file_explorer")));
 	assert(has_entry(shown, tr("flappy_bird")));
 	assert(has_entry(shown, tr("metronome")));
+	assert(has_entry(shown, tr("pet")));
 	// The three games are on the page too, after Flappy Bird, which they sit
 	// beside: they are the rows the More menu gained back.
 	assert(has_entry(shown, tr("2048")));
@@ -861,6 +987,401 @@ static lv_obj_t *beat_choice(lv_obj_t *page, int beats) {
 
 static void choose_beats(lv_obj_t *page, int beats) {
 	lv_obj_send_event(lv_obj_get_parent(beat_choice(page, beats)), LV_EVENT_CLICKED, NULL);
+}
+
+/* The pet: its page is built the first time it is opened, everything it draws
+ * is inside the panel, the words are translated, and the button really pets
+ * the creature rather than only moving a picture. */
+/* The page's two corner controls, outer first: the wardrobe's star and the
+ * pencil. They carry icons rather than words, so they are found by the place
+ * they are drawn in. */
+static void find_corner_buttons(lv_obj_t *screen, lv_obj_t **outer, lv_obj_t **inner, lv_obj_t **third) {
+	*outer = NULL;
+	*inner = NULL;
+	if (third) {
+		*third = NULL;
+	}
+	for (uint32_t i = 0; i < lv_obj_get_child_count(screen); i++) {
+		lv_obj_t *child = lv_obj_get_child(screen, (int32_t)i);
+		if (!lv_obj_check_type(child, &lv_button_class)) {
+			continue;
+		}
+		lv_area_t area;
+		lv_obj_get_coords(child, &area);
+		if (area.y1 > 80) {
+			continue; // not a corner control
+		}
+		if (!*outer) {
+			*outer = child;
+		} else if (!*inner) {
+			*inner = child;
+		} else if (third && !*third) {
+			*third = child;
+		}
+	}
+}
+
+static void check_pet_page(gui_config_t *cfg, const char *tag) {
+	// A pet nobody has chosen yet opens on the chooser, with three notes in the
+	// wallet: enough to dress it and leave something for the wardrobe.
+	pet_state.notes = 500;
+	pet_state.species = PET_SPECIES_NONE;
+	petpage_open();
+	assert(lv_screen_active() == petpage_screen);
+	lv_obj_update_layout(petpage_screen);
+	check_within_panel(petpage_screen, cfg, "Pet chooser");
+	char chooser_tag[64];
+	snprintf(chooser_tag, sizeof(chooser_tag), "%s-chooser", tag);
+	dump_snapshot(petpage_screen, chooser_tag);
+
+	// The chooser is the first thing a new pet shows: the three animals, and
+	// the name it will answer to.
+	lv_obj_t *chooser_title = find_label(petpage_screen, tr("pet_customise"));
+	assert(chooser_title);
+	assert(lv_obj_is_visible(chooser_title));
+	check_clear_of_back_button(chooser_title, cfg, "Pet chooser heading");
+	assert(find_label(petpage_screen, tr("pet_species_cat")));
+	assert(find_label(petpage_screen, tr("pet_species_dog")));
+	assert(find_label(petpage_screen, tr("pet_species_fish")));
+	assert(find_label(petpage_screen, tr("name")));
+
+	// Choosing one closes the sheet and the page is that animal.
+	press_key(petpage_screen, tr("pet_species_cat"));
+	assert(pet_species(&pet_state) == PET_SPECIES_CAT);
+	assert(!lv_obj_is_visible(chooser_title));
+	lv_obj_update_layout(petpage_screen);
+	check_within_panel(petpage_screen, cfg, "Pet");
+	dump_snapshot(petpage_screen, tag);
+
+	char name[40];
+	pet_name(name, sizeof(name));
+	assert(find_label(petpage_screen, name));
+	// The two meters sit in the card's top right corner, as numbers as well as
+	// bars, and the wallet is under them.
+	assert(find_label(petpage_screen, "500"));
+	assert(find_label(petpage_screen, "50")); // the happiness it starts with
+	assert(find_label(petpage_screen, "80")); // and the energy
+	assert(find_label(petpage_screen, tr("pet_feed_me")));
+
+	// The dog, for its ears. They are the one part of the drawing that has been
+	// argued about more than any other, and the suite only ever looked at the
+	// cat -- so a pair of ears could go back to being a bear's and nothing
+	// would notice.
+	pet_state.species = PET_SPECIES_DOG;
+	petpage_open();
+	assert(pet_species(&pet_state) == PET_SPECIES_DOG);
+	lv_obj_update_layout(petpage_screen);
+	check_within_panel(petpage_screen, cfg, "Pet (dog)");
+	char dog_tag[64];
+	snprintf(dog_tag, sizeof(dog_tag), "%s-dog", tag);
+	dump_snapshot(petpage_screen, dog_tag);
+	pet_state.species = PET_SPECIES_CAT;
+	petpage_open();
+	lv_obj_update_layout(petpage_screen);
+
+	// A pat is a tap on the animal, not a button at the foot of the page.
+	int pets = pet_state.pets;
+	lv_obj_t *creature = petpage_creature();
+	assert(creature);
+	lv_obj_send_event(creature, LV_EVENT_CLICKED, NULL);
+	assert(pet_state.pets == pets + 1);
+
+	// A tap on the glass is a press and a release, and a finger on this panel
+	// takes about half a second over it -- long enough for LVGL to call the
+	// press a long one and start the Petting Mode meter. It is still a tap:
+	// the animal is petted, and the click is not thrown away by a meter that
+	// never filled. (The suite used to send CLICKED straight at the animal,
+	// which is exactly why it did not notice this.)
+	pet_state.last_pet = 0;
+	int slow_pets = pet_state.pets;
+	lv_obj_send_event(creature, LV_EVENT_PRESSED, NULL);
+	lv_obj_send_event(creature, LV_EVENT_LONG_PRESSED, NULL);
+	lv_tick_inc(300);
+	lv_timer_handler();
+	lv_obj_send_event(creature, LV_EVENT_RELEASED, NULL);
+	lv_obj_send_event(creature, LV_EVENT_CLICKED, NULL);
+	assert(pet_state.pets == slow_pets + 1);
+	assert(pet_state.hold_day == 0); // a slow tap is not a groom
+
+	// And the pat is answered: one of three tiny reactions, picked from the
+	// clock. The clock here is fixed at a second that divides by three, so it
+	// is always the heart -- and the heart is a picture over the head, not a
+	// speech bubble and not a page of its own.
+	lv_obj_update_layout(petpage_screen);
+	char pat_tag[64];
+	snprintf(pat_tag, sizeof(pat_tag), "%s-pat", tag);
+	check_within_panel(petpage_screen, cfg, "Pet pat");
+	dump_snapshot(petpage_screen, pat_tag);
+
+	// Petting Mode: the finger stays down and the meter fills a heart at a
+	// time; the third heart pays the day's groom, once.
+	pet_state.hold_day = 0;
+	const int happy_before_hold = pet_state.happy;
+	lv_obj_send_event(creature, LV_EVENT_LONG_PRESSED, NULL);
+	lv_tick_inc(600);
+	lv_timer_handler();
+	lv_obj_update_layout(petpage_screen);
+	char hold_tag[64];
+	snprintf(hold_tag, sizeof(hold_tag), "%s-hold", tag);
+	dump_snapshot(petpage_screen, hold_tag);
+	assert(pet_state.hold_day == 0); // one heart of three
+	for (int i = 0; i < 3; i++) {
+		lv_tick_inc(600);
+		lv_timer_handler();
+	}
+	assert(pet_state.hold_day != 0);
+	assert(pet_state.happy > happy_before_hold);
+
+	// The release of a hold arrives as a click as well. It is not a second pat,
+	// and it must not be: the hand that held the animal is the same hand that
+	// lets go of it.
+	pets = pet_state.pets;
+	lv_obj_send_event(creature, LV_EVENT_RELEASED, NULL);
+	lv_obj_send_event(creature, LV_EVENT_CLICKED, NULL);
+	assert(pet_state.pets == pets);
+
+	// The volume keys never reached the interface before; now they do, and the
+	// animal answers them without leaving the page. A jump for a step up.
+	petpage_poke(PET_POKE_VOLUME_UP);
+	lv_tick_inc(1100); // the second frame of the same jump
+	lv_timer_handler();
+	lv_obj_update_layout(petpage_screen);
+	check_within_panel(petpage_screen, cfg, "Pet volume up");
+	char jump_tag[64];
+	snprintf(jump_tag, sizeof(jump_tag), "%s-jump", tag);
+	dump_snapshot(petpage_screen, jump_tag);
+	petpage_poke(PET_POKE_VOLUME_DOWN);
+	lv_obj_update_layout(petpage_screen);
+	char duck_tag[64];
+	snprintf(duck_tag, sizeof(duck_tag), "%s-duck", tag);
+	dump_snapshot(petpage_screen, duck_tag);
+	// It is a pose, not a permanent state: a few seconds later the animal is
+	// breathing again on its own.
+	lv_tick_inc(1100);
+	lv_timer_handler();
+	lv_tick_inc(1100);
+	lv_timer_handler();
+	lv_tick_inc(1100);
+	lv_timer_handler();
+	check_within_panel(petpage_screen, cfg, "Pet after the reaction");
+
+	// The genre's accessory. One thing, from the tags, and only while there is
+	// music: shades for the electronic family, gold at the neck for hip hop,
+	// studs for rock, and a cup on the floor for the calm ones. Which one is
+	// pet_genre_look()'s business and is tested with the other rules; here it
+	// is the drawing that is looked at.
+	pet_listening = true;
+	static const struct {
+		pet_genre_look_t look;
+		const char *tag;
+	} looks[] = {
+		{PET_LOOK_SHADES, "shades"},
+		{PET_LOOK_CHAIN, "chain"},
+		{PET_LOOK_COLLAR, "collar"},
+		{PET_LOOK_CUP, "cup"},
+	};
+	for (size_t i = 0; i < sizeof(looks) / sizeof(looks[0]); i++) {
+		pet_look = looks[i].look;
+		petpage_open();
+		lv_obj_update_layout(petpage_screen);
+		check_within_panel(petpage_screen, cfg, "Pet accessory");
+		char look_tag[64];
+		snprintf(look_tag, sizeof(look_tag), "%s-%s", tag, looks[i].tag);
+		dump_snapshot(petpage_screen, look_tag);
+	}
+	pet_look = PET_LOOK_NONE;
+
+	// And the volume, worn on the face: past eighty the eyes are wide open,
+	// between twenty and forty the pet rests with a heavy lid. Neither is a
+	// mood of its own -- the mood is where it always was.
+	pet_volume = 90;
+	petpage_open();
+	lv_obj_update_layout(petpage_screen);
+	char hyped_tag[64];
+	snprintf(hyped_tag, sizeof(hyped_tag), "%s-hyped", tag);
+	dump_snapshot(petpage_screen, hyped_tag);
+	pet_volume = 30;
+	petpage_open();
+	lv_obj_update_layout(petpage_screen);
+	char resting_tag[64];
+	snprintf(resting_tag, sizeof(resting_tag), "%s-resting", tag);
+	dump_snapshot(petpage_screen, resting_tag);
+	pet_volume = 60;
+	pet_listening = false;
+	petpage_open();
+	lv_obj_update_layout(petpage_screen);
+
+	// The box on the floor: the day's fortune, the shelf, and the hour's game.
+	pet_state.fortune_day = pet_day_now(petwatch_now());
+	pet_state.fortune_paid = 0;
+	pet_state.drop_pending = 1;
+	for (int i = 0; i < PET_DROP_COUNT; i++) {
+		pet_state.found[i] = 0;
+	}
+	pet_state.treat_hour = 0;
+	petpage_open();
+	lv_obj_update_layout(petpage_screen);
+
+	// What the floor looks like with something on it.
+	char find_tag[64];
+	snprintf(find_tag, sizeof(find_tag), "%s-find", tag);
+	dump_snapshot(petpage_screen, find_tag);
+
+	lv_obj_t *box = petpage_box();
+	assert(box);
+	assert(!lv_obj_is_hidden(box));
+	lv_obj_send_event(box, LV_EVENT_CLICKED, NULL);
+	lv_obj_update_layout(petpage_screen);
+	lv_obj_t *box_title = find_label(petpage_screen, tr("pet_box"));
+	assert(box_title);
+	assert(lv_obj_is_visible(box_title));
+	assert(find_label(petpage_screen, tr("pet_box_shelf")));
+	assert(find_label(petpage_screen, tr("pet_box_play")));
+	check_within_panel(petpage_screen, cfg, "Pet box");
+	char box_tag[64];
+	snprintf(box_tag, sizeof(box_tag), "%s-box", tag);
+	dump_snapshot(petpage_screen, box_tag);
+
+	// Answering the fortune pays fifty notes, once.
+	int boxed_notes = pet_state.notes;
+	press_visible_key(petpage_screen, tr("pet_box_done"));
+	assert(pet_state.notes == boxed_notes + PET_FORTUNE_NOTES);
+	assert(pet_state.fortune_paid == pet_state.fortune_day);
+	lv_obj_update_layout(petpage_screen);
+	assert(find_label(petpage_screen, tr("pet_box_answered")));
+
+	// The find is on the floor beside the animal, and a tap puts it on the
+	// shelf: that is the whole inventory.
+	lv_obj_send_event(box, LV_EVENT_CLICKED, NULL); // the box closes itself
+	lv_obj_update_layout(petpage_screen);
+	assert(!lv_obj_is_visible(box_title));
+	lv_obj_t *find = petpage_find();
+	assert(find);
+	assert(!lv_obj_is_hidden(find));
+	lv_obj_send_event(find, LV_EVENT_CLICKED, NULL);
+	assert(pet_state.drop_pending == 0);
+	assert(pet_state.found[PET_DROP_BONE] == 1);
+	lv_obj_update_layout(petpage_screen);
+	assert(lv_obj_is_hidden(find));
+
+	// The hour's game: six notes cross the line, and turning up is worth five
+	// even with none of them caught. It takes about nine seconds.
+	lv_obj_send_event(box, LV_EVENT_CLICKED, NULL);
+	lv_obj_update_layout(petpage_screen);
+	press_visible_key(petpage_screen, tr("pet_box_play"));
+	int game_notes = pet_state.notes;
+	// A second of the game, so the snapshot has a note in the lane.
+	for (int i = 0; i < 24; i++) {
+		lv_tick_inc(30);
+		lv_timer_handler();
+	}
+	lv_obj_update_layout(petpage_screen);
+	char game_tag[64];
+	snprintf(game_tag, sizeof(game_tag), "%s-game", tag);
+	dump_snapshot(petpage_screen, game_tag);
+	for (int i = 0; i < 460; i++) { // 460 * 30 ms, a bit more than the game
+		lv_tick_inc(30);
+		lv_timer_handler();
+	}
+	assert(pet_state.notes == game_notes + PET_TREAT_MIN_NOTES);
+	assert(pet_treat_ready(&pet_state, petwatch_now()) == false);
+	lv_obj_update_layout(petpage_screen);
+	assert(find_label(petpage_screen, tr("pet_box_hour")));
+	lv_obj_send_event(box, LV_EVENT_CLICKED, NULL);
+	lv_obj_update_layout(petpage_screen);
+	assert(!lv_obj_is_visible(box_title));
+
+	// The card knows the hour and the month: the same animal at midnight in
+	// October, with the lamp lit, a moon up and the autumn leaves coming down.
+	pet_now = 1761868800; // 2025-10-31, 00:00 UTC
+	petpage_open();
+	lv_obj_update_layout(petpage_screen);
+	check_within_panel(petpage_screen, cfg, "Pet at night");
+	char night_tag[64];
+	snprintf(night_tag, sizeof(night_tag), "%s-night", tag);
+	dump_snapshot(petpage_screen, night_tag);
+	// And in April, with a cloud up and the rain coming down.
+	pet_now = 1744286400; // 2025-04-10, 12:00 UTC
+	petpage_open();
+	lv_obj_update_layout(petpage_screen);
+	char spring_tag[64];
+	snprintf(spring_tag, sizeof(spring_tag), "%s-spring", tag);
+	dump_snapshot(petpage_screen, spring_tag);
+	pet_now = 1752580800; // back to the summer afternoon
+	petpage_open();
+	lv_obj_update_layout(petpage_screen);
+
+	// The pencil brings the chooser back; the pencil closes it again.
+	lv_obj_t *star = NULL;
+	lv_obj_t *pencil = NULL;
+	lv_obj_t *notebutton = NULL;
+	find_corner_buttons(petpage_screen, &star, &pencil, &notebutton);
+	assert(star && pencil && notebutton);
+	lv_obj_send_event(pencil, LV_EVENT_CLICKED, NULL);
+	lv_obj_update_layout(petpage_screen);
+	assert(lv_obj_is_visible(chooser_title));
+	lv_obj_send_event(pencil, LV_EVENT_CLICKED, NULL);
+	lv_obj_update_layout(petpage_screen);
+	assert(!lv_obj_is_visible(chooser_title));
+
+	// The wardrobe: a hat costs 120 of the 500, bought and worn without a
+	// second tap. The wallet is put back to 500 first: the fortune and the
+	// game above have paid into it, and this is a test of a price.
+	pet_state.notes = 500;
+	lv_obj_send_event(star, LV_EVENT_CLICKED, NULL);
+	lv_obj_update_layout(petpage_screen);
+	lv_obj_t *wardrobe_title = find_label(petpage_screen, tr("pet_wardrobe"));
+	assert(wardrobe_title);
+	assert(lv_obj_is_visible(wardrobe_title));
+	assert(find_label(petpage_screen, tr("pet_notes_balance")));
+
+	char wardrobe_tag[64];
+	snprintf(wardrobe_tag, sizeof(wardrobe_tag), "%s-wardrobe", tag);
+	check_within_panel(petpage_screen, cfg, "Pet wardrobe");
+	dump_snapshot(petpage_screen, wardrobe_tag);
+
+	press_key(petpage_screen, tr("pet_item_party_hat"));
+	assert(pet_state.notes == 380);
+	assert(pet_owned(&pet_state, PET_ITEM_PARTY_HAT));
+	assert(pet_wearing(&pet_state) == (int)PET_ITEM_PARTY_HAT);
+	assert(find_label(petpage_screen, tr("pet_wearing_now")));
+
+	// A freeze is a stock, not a garment: it can be bought twice, and it is
+	// never worn.
+	press_key(petpage_screen, tr("pet_item_streak_freeze"));
+	assert(pet_freezes(&pet_state) == 1);
+	press_key(petpage_screen, tr("pet_item_streak_freeze"));
+	assert(pet_freezes(&pet_state) == 2);
+	assert(pet_wearing(&pet_state) == (int)PET_ITEM_PARTY_HAT);
+
+	// The star closes what it opened, and the page is the pet again.
+	lv_obj_send_event(star, LV_EVENT_CLICKED, NULL);
+	lv_obj_update_layout(petpage_screen);
+	assert(!lv_obj_is_visible(wardrobe_title));
+
+	// The day's tap-along: the note in the corner opens it, and finishing pays
+	// whatever the score was worth -- two notes for turning up.
+	assert(pet_rhythm_ready(&pet_state));
+	int before_game = pet_state.notes;
+	lv_obj_send_event(notebutton, LV_EVENT_CLICKED, NULL);
+	lv_obj_update_layout(petpage_screen);
+	lv_obj_t *tap_title = find_label(petpage_screen, tr("pet_tap_game"));
+	assert(tap_title);
+	assert(lv_obj_is_visible(tap_title));
+	check_within_panel(petpage_screen, cfg, "Pet tap-along");
+	char tap_tag[64];
+	snprintf(tap_tag, sizeof(tap_tag), "%s-tap", tag);
+	dump_snapshot(petpage_screen, tap_tag);
+
+	press_visible_key(petpage_screen, tr("ok"));
+	lv_obj_update_layout(petpage_screen);
+	assert(!lv_obj_is_visible(tap_title));
+	assert(pet_state.notes == before_game + 2);
+	assert(!pet_rhythm_ready(&pet_state));
+
+	// Leaving gives the timer and the animations back: the page is a still
+	// picture again, and the state has been written out.
+	lv_screen_load(morepage_screen);
 }
 
 static void check_metronome_page(gui_config_t *cfg, const char *tag) {
@@ -1231,6 +1752,11 @@ static lv_obj_t *find_image_button(lv_obj_t *obj, const lv_image_dsc_t *glyph) {
 int main(int argc, char **argv) {
 	assert(argc == 2);
 
+	/* On the clock's terms: the suite's fixed second is read in UTC, so the
+	 * hour and the month a snapshot shows do not depend on where it runs. */
+	setenv("TZ", "UTC", 1);
+	tzset();
+
 	/* The card, as a folder the test owns and throws away. */
 	char card[] = "/tmp/sonix-tools-test-XXXXXX";
 	assert(mkdtemp(card));
@@ -1263,6 +1789,7 @@ int main(int argc, char **argv) {
 	calculator_screen = lv_obj_create(NULL);
 	notes_screen = lv_obj_create(NULL);
 	metronome_screen = lv_obj_create(NULL);
+	petpage_screen = lv_obj_create(NULL);
 	noteeditor_screen = lv_obj_create(NULL);
 
 	/* The notes the card already has, put there the way a computer would
@@ -1296,6 +1823,8 @@ int main(int argc, char **argv) {
 	noteeditor_init(&cfg);
 	notes_init(&cfg);
 	metronome_init(&cfg);
+	pet_defaults(&pet_state, petwatch_now(), pet_day_now(petwatch_now()));
+	petpage_init(&cfg);
 	morepage_init(&cfg);
 	player_drag_attaches = 0; // counting from here: only the viewers are built below
 	textview_init(&cfg); // the notes shelf shows a long note through it
@@ -1333,6 +1862,7 @@ int main(int argc, char **argv) {
 
 	check_calculator_page(&cfg, bp_is_tempotec_v1() ? "v1-calculator" : "hiby-calculator");
 	check_metronome_page(&cfg, bp_is_tempotec_v1() ? "v1-metronome" : "hiby-metronome");
+	check_pet_page(&cfg, bp_is_tempotec_v1() ? "v1-pet" : "hiby-pet");
 	check_notes_page(&cfg, dir, bp_is_tempotec_v1() ? "v1-notes" : "hiby-notes",
 					 bp_is_tempotec_v1() ? "v1-note-editor" : "hiby-note-editor",
 					 bp_is_tempotec_v1() ? "v1-note-editor-writing" : "hiby-note-editor-writing",
@@ -1340,6 +1870,6 @@ int main(int argc, char **argv) {
 					 bp_is_tempotec_v1() ? "v1-note-long" : "hiby-note-long");
 
 	lv_deinit();
-	printf("PASS calculator, notes and metronome pages (%s)\n", bp_is_tempotec_v1() ? "240x320" : "480x720");
+	printf("PASS calculator, notes, metronome and pet pages (%s)\n", bp_is_tempotec_v1() ? "240x320" : "480x720");
 	return 0;
 }

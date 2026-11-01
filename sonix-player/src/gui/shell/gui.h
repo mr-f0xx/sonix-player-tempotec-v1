@@ -112,6 +112,12 @@ typedef enum {
 	GUI_KEY_PLAY_PAUSE,
 	GUI_KEY_NEXT,
 	GUI_KEY_PREV,
+	// The volume keys never travelled through here before: system.c applied the
+	// step itself. They are passed along now as well, for the one thing that
+	// wants to know they happened -- the pet, which ducks when the level comes
+	// down and jumps when it goes up. Nothing else listens for them.
+	GUI_KEY_VOL_UP,
+	GUI_KEY_VOL_DOWN,
 } gui_key_t;
 
 void gui_notify_key(gui_key_t key);

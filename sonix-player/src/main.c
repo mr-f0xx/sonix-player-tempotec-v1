@@ -62,6 +62,7 @@
 #include "src/system/listenbrainz/listenbrainz.h"
 #include "src/system/library/library.h"
 #include "src/system/core/logging.h"
+#include "src/system/pet/petwatch.h"
 #include "src/system/playback/playlist.h"
 #include "src/system/library/playlists.h"
 #include "src/system/device/power.h"
@@ -2049,6 +2050,13 @@ int main(int argc, char **argv) {
 	}
 
 	lv_tick_set_cb(custom_tick_get);
+
+	// The music pet's one-second watcher. It is started here, before the
+	// interface is built, so the pet has already heard the offline time since
+	// the last session when its page is first opened -- and so it goes on
+	// counting while that page is not on screen, which is most of the time.
+	// It is one more LVGL timer on the interface thread, not a process.
+	petwatch_init();
 
 #ifdef HOST_BUILD
 	printf("Initializing Host Build (SDL2 simulation)...\n");

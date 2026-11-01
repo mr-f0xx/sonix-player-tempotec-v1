@@ -16,6 +16,13 @@
 // the same place.
 lv_obj_t *settingsrow_title(lv_obj_t *screen, gui_config_t *cfg, const char *text);
 
+// Where that heading starts. A screen-sized sheet of its own -- one that covers
+// the page's title row but not the shell's back button, which is drawn above
+// every screen -- has to put its heading in the same place, or the chevron
+// lands on top of the first word.
+int settingsrow_header_text_left(gui_config_t *cfg);
+int settingsrow_header_text_top(gui_config_t *cfg);
+
 // How far down a page's content has to start to clear the heading and the
 // corner buttons.
 int settingsrow_content_top(gui_config_t *cfg);

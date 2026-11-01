@@ -199,10 +199,10 @@ a self-signed certificate), and HLS.
 
 ## Tools
 
-> **Calculator**, **Notes** and **Metronome** are in the **More** menu, under
-> the file manager. All three are drawn for the panel they are on: on the
-> 240x320 V1 the twenty keys stay a finger's width, and each page -- display,
-> keypad and labels -- fits without scrolling.
+> **Calculator**, **Notes**, **Metronome** and **Pet** are in the **More**
+> menu, under the file manager. All four are drawn for the panel they are on:
+> on the 240x320 V1 the twenty keys stay a finger's width, and each page --
+> display, keypad and labels -- fits without scrolling.
 
 - **Calculator** - a display and the twenty keys of an ordinary pocket
   calculator: the four operations, sign, percent, backspace and clear. The sum
@@ -249,6 +249,77 @@ a self-signed certificate), and HLS.
   glass cannot drift from what is in the ear. The tempo and the bar are
   remembered across visits and across a reboot; leaving the page stops the
   click, because the page is the only place it can be stopped from.
+
+- **Pet** - a small creature fed by the music it can actually be heard by: a
+  local track, a stream, internet radio or a phone over Bluetooth, at a volume
+  at or above 10 percent. The first time the page opens it asks which animal to
+  raise -- **a grey cat, a sandy dog or a goldfish** -- and what to call it; the name can be
+  changed whenever you like from the pencil in the corner. There is no egg: the
+  animal you choose is the animal from the first minute, and it grows through
+  four stages (hatchling, child, teen, adult). A fish lives in an aquarium --
+  water, sand, weeds and slow bubbles -- instead of the room the others sit in.
+  It keeps a daily streak, earns **Musical Notes** for the minutes it heard and
+  spends them in a wardrobe on hats, headphones, a scarf, a crown, two room
+  themes and streak freezes. A **15-minute daily goal** builds the streak and a
+  bought freeze covers one missed day. Achievements for listening late, hearing
+  an album through, five genres in a day and half an hour without a pause are
+  worth extra notes. **The last thirty days give it a character**: a month of
+  pop and dance makes an **Upbeat** pet whose energy fills faster and who turns
+  up a note or two on the floor as the music goes by, a month of jazz and
+  classical makes a **Calm** one with a drifting soundscape on its card, and a
+  month of indie, alternative and metal makes a **Curious** one that finds
+  something -- notes, and now and then a streak freeze -- after forty-five
+  minutes of listening without a break, once a day. Under three days of
+  listening it has no character yet, and the page says nothing. A genre tag also
+  nudges how it moves: a slow sway for jazz, ambient or lo-fi, a faster bob for
+  rock, metal and electronic, and a breath no faster than two seconds even
+  then. **Once a day it offers a tap-along**: sixteen beats of the metronome's
+  tempo, tapped on the glass, worth up to a dozen notes and a freeze for a clean
+  run. And it has a limit on flicking through a library: **more than five
+  skipped tracks in ten minutes** and it is dizzy for fifteen -- still fed by
+  whatever is playing, but earning nothing until it clears. It never dies, and nothing it does
+  punishes a player for not listening: forty-eight hours without music is only
+  "sleepy", and the first track wakes it. The page is one borderless card: the
+  name and stage top left, **hearts and energy top right**, the animal in the
+  middle -- **pat it by touching it** -- the track it is feeding on along the
+  bottom, a close corner bottom right, and the day's minutes and the streak in
+  two lines under the card. A pencil opens the name and the animal, a star the
+  wardrobe; both are sheets over the page, and the chevron closes them in turn.
+  Its state lives in the settings file and survives a reboot; the only cost is
+  one callback a second in the interface loop that is already running, and
+  nothing at all when the page is not open. The creature is drawn from the
+  interface's own shapes -- a flat fill inside the same heavy ink line the icons
+  use -- and each animal is its own silhouette, so it adds no art to the image.
+  It moves in two frames rather than in an interpolation, and the page redraws
+  only what changed: a meter that has not moved is not touched between one
+  second and the next. While music plays, the line at the foot of the card says
+  what it is feeding on beside a three-bar equalizer. Each animal has a shape of
+  its own -- a cat's ears and whiskers, a dog's rounded ears and snout, a fish's
+  forked tail, dorsal fin and gill -- and a few flat things of its own behind
+  it: a rug and a plant, a fence and a bone, or the tank the fish swims in,
+  furnished down to the weeds -- a fan of grass and a leafy plant on each side
+  of the sand. The face carries the mood too: round eyes and a smile when it is
+  happy, eyes shut in a smile at the top of it, brows and a tear when it is sad,
+  and, while music is playing, an open mouth and a pair of notes in the air
+  beside its head. **It answers the keys as well as the glass**: a step up on
+  the volume and it jumps, a step down and it ducks, Previous and Next and it
+  leans the way they go, and a tap picks one of three tiny reactions -- a heart,
+  a hop or a wave -- on the pat's own cooldown. **Hold a finger on it for two
+  seconds** and three hearts fill under it; the third pays the day's groom,
+  once a day. A genre tag dresses it for the track it is hearing -- shades for
+  the electronic family, a gold chain for hip hop, a studded collar for rock, a
+  cup on the floor for the calm ones -- and the volume shows on its face, wide
+  eyes past eighty per cent and a heavy-lidded rest between twenty and forty.
+  **A box sits in the corner of the card**: in it are the day's fortune, one of
+  six drawn from the date and worth fifty notes once it has been carried out; an
+  hourly note game -- one note crossing one line, six times, five notes for
+  turning up and one for each note caught; and the shelf, where what the
+  listening turns up goes: every half hour of audible music finds a bone, a
+  cassette, a sticker or a record on the floor, and a tap puts it on the shelf,
+  three at most. The card also knows what time it is: a sun on it by day, and
+  after eight in the evening a darker card, a moon and a small lamp, with the
+  month deciding what falls through the air -- rain in spring, leaves in autumn,
+  snow in winter, nothing in summer.
 
 ## Games
 

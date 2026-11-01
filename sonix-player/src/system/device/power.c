@@ -22,6 +22,7 @@
 #include "src/system/audio/headset.h"
 #include "src/system/library/audiobookdb.h"
 #include "src/system/device/clock.h"
+#include "src/system/pet/petwatch.h"
 #include "src/system/playback/device_state.h"
 #include "src/system/remote/dlna.h"
 #include "src/system/remote/sonixlink.h"
@@ -1194,6 +1195,11 @@ void power_shutdown(void) {
 	// position seeked to while paused, which changes no state at all, would
 	// never be written.
 	device_state_remember_flush();
+
+	// The pet's last couple of minutes of music, for the same reason: its
+	// watcher writes every two minutes while something plays, and a clean
+	// shutdown should not be the one that drops the difference.
+	petwatch_flush();
 
 	// Dark the panel immediately, then fade/close audio before the kernel takes
 	// power away from the output stage. In particular, the HBC3000 is parked on
