@@ -31,6 +31,7 @@
 #include "src/system/library/metadata.h"
 #include "src/system/tagmanager/artsearch.h"
 #include "src/gui/pet/petpage.h"
+#include "src/gui/pet/peticon.h"
 #include "src/gui/shell/settingsrow.h"
 #include "src/gui/shell/gridpage.h"
 #include "src/system/playback/device_state.h"
@@ -328,6 +329,22 @@ static lv_obj_t *find_class(lv_obj_t *obj, const lv_obj_class_t *type) {
 		lv_obj_t *found = find_class(lv_obj_get_child(obj, i), type);
 		if (found) {
 			return found;
+		}
+	}
+	return NULL;
+}
+
+/* The picture that names an entry, rather than the chevron that every row
+ * carries. A leading icon is added after the row's label and chevron, so the
+ * last image child is the destination's own glyph. */
+static const lv_image_dsc_t *entry_icon_source(lv_obj_t *entry) {
+	if (!entry) {
+		return NULL;
+	}
+	for (int32_t i = (int32_t)lv_obj_get_child_count(entry) - 1; i >= 0; i--) {
+		lv_obj_t *child = lv_obj_get_child(entry, i);
+		if (child && lv_obj_check_type(child, &lv_image_class)) {
+			return lv_image_get_src(child);
 		}
 	}
 	return NULL;
@@ -662,9 +679,10 @@ static void check_more_page(gui_config_t *cfg, const char *tag) {
 	// Dark/Light use full-colour section art, not enlarged toolbar glyphs.
 	// This also runs after theme changes, catching stale icon sources.
 	if (theme_get_kind() == THEME_KIND_DARK || theme_get_kind() == THEME_KIND_LIGHT) {
-		const char *labels[] = {"2048", "snake", "dino"};
+		const char *labels[] = {"2048", "snake", "dino", "Tag Manager", "pet"};
 		const lv_image_dsc_t *art[] = {
 			&icon_menu_game_2048, &icon_menu_game_snake, &icon_menu_game_dino,
+			&icon_menu_tag_manager, &icon_menu_pet,
 		};
 		assert(tiles);
 		for (size_t i = 0; i < sizeof(art) / sizeof(art[0]); i++) {
@@ -675,8 +693,31 @@ static void check_more_page(gui_config_t *cfg, const char *tag) {
 			assert(art[i]->header.w == icon_menu_calculator.header.w);
 			assert(art[i]->header.h == icon_menu_calculator.header.h);
 		}
+		// Neither new tile may be a second copy of the File Manager's folder,
+		// even if the art is later rerendered with the same palette.
+		assert(icon_menu_tag_manager.data_size == icon_menu_file_explorer.data_size);
+		assert(icon_menu_pet.data_size == icon_menu_file_explorer.data_size);
+		assert(memcmp(icon_menu_tag_manager.data, icon_menu_file_explorer.data,
+					  icon_menu_tag_manager.data_size) != 0);
+		assert(memcmp(icon_menu_pet.data, icon_menu_file_explorer.data,
+					  icon_menu_pet.data_size) != 0);
 	}
 
+	// The two destinations also have to stay apart in the compact list and on
+	// the wide panel's function-glyph grid: no theme may fall back to the
+	// coloured File Manager art under a tint.
+	lv_obj_t *tag_entry = entry_with_label(shown, "Tag Manager");
+	lv_obj_t *file_entry = entry_with_label(shown, tr("file_explorer"));
+	assert(tag_entry && file_entry);
+	const lv_image_dsc_t *tag_source = entry_icon_source(tag_entry);
+	const lv_image_dsc_t *file_source = entry_icon_source(file_entry);
+	assert(tag_source && file_source && tag_source != file_source);
+	if (theme_uses_function_glyphs()) {
+		assert(tag_source == &icon_tag_manager);
+		assert(file_source == &icon_folder);
+		lv_obj_t *pet_entry = entry_with_label(shown, tr("pet"));
+		assert(pet_entry && entry_icon_source(pet_entry) == &icon_pet);
+	}
 
 	// A tile of a page that does not scroll has to be on the glass, every one
 	// of them: an entry laid out past the foot of a page that cannot be

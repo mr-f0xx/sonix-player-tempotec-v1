@@ -7,6 +7,7 @@
 #include "src/gui/nowplaying/coverflow.h"
 #include "src/gui/board_profile.h"
 #include "src/gui/fonts/fonts.h"
+#include "src/gui/pet/peticon.h"
 #include "src/gui/nowplaying/player.h"
 #include "src/gui/shell/icons.h"
 #include "src/gui/shell/settingsrow.h"
@@ -248,12 +249,14 @@ static bool gridpage_tokyo_icon(const char *label, const lv_image_dsc_t **icon, 
 		{"gearboy", &icon_files_game, THEME_SEMANTIC_GREEN},
 		{"books", &icon_files_book, THEME_SEMANTIC_AMBER},
 		{"file_explorer", &icon_folder, THEME_SEMANTIC_BLUE},
+		{"Tag Manager", &icon_tag_manager, THEME_SEMANTIC_CYAN},
 		{"flappy_bird", &icon_bird, THEME_SEMANTIC_PURPLE},
 		{"2048", &icon_game_2048, THEME_SEMANTIC_BLUE},
 		{"snake", &icon_game_snake, THEME_SEMANTIC_GREEN},
 		{"dino", &icon_game_dino, THEME_SEMANTIC_AMBER},
 		{"calculator", &icon_calculator, THEME_SEMANTIC_CYAN},
 		{"notes", &icon_notes, THEME_SEMANTIC_PURPLE},
+		{"pet", &icon_pet, THEME_SEMANTIC_PURPLE},
 	};
 
 	if (!label || !icon || !tone) {

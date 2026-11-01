@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
+  <defs>
+    <mask id="pet-face">
+      <rect width="32" height="32" fill="#fff"/>
+      <ellipse cx="12.4" cy="17.5" rx="2" ry="2.3" fill="#000"/>
+      <ellipse cx="19.6" cy="17.5" rx="2" ry="2.3" fill="#000"/>
+      <ellipse cx="16" cy="21.9" rx="1.9" ry="1.5" fill="#000"/>
+      <ellipse cx="10.4" cy="27" rx="3" ry="2.4" fill="#000"/>
+      <ellipse cx="21.6" cy="27" rx="3" ry="2.4" fill="#000"/>
+      <rect x="12.4" y="25.4" width="7.2" height="4" fill="#000"/>
+    </mask>
+  </defs>
+  <g fill="currentColor" mask="url(#pet-face)">
+    <ellipse cx="9.2" cy="9" rx="4" ry="4.6"/>
+    <ellipse cx="22.8" cy="9" rx="4" ry="4.6"/>
+    <ellipse cx="16" cy="18.4" rx="11.6" ry="10"/>
+  </g>
+</svg>
