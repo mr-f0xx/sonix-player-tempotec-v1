@@ -534,6 +534,20 @@ int pet_rhythm_finish(pet_state_t *st, int score);
 // Metal"): the words are matched, not the whole string.
 pet_vibe_t pet_vibe_for_genre(const char *genre);
 
+// The one thing the animal wears for a genre. The vibe above is how it moves;
+// this is what it puts on, and it is deliberately one accessory and not a
+// costume: a pair of shades, a chain, a studded collar, or a cup on the floor.
+// NONE for the genres that have no costume -- and for no genre at all.
+typedef enum {
+	PET_LOOK_NONE = 0,
+	PET_LOOK_SHADES, // synthwave, electronic, house: two flat lenses
+	PET_LOOK_CHAIN,  // hip hop, rap, boom bap: gold, round the neck
+	PET_LOOK_COLLAR, // rock, metal, punk: studs
+	PET_LOOK_CUP,    // ambient, lo-fi, jazz: something warm on the floor
+} pet_genre_look_t;
+
+pet_genre_look_t pet_genre_look(const char *genre);
+
 // Local days since the epoch, for a wall clock the caller has already decided
 // to trust. The day changes at local midnight; the time zone is the system's,
 // so a player carried across one keeps its own idea of "today".

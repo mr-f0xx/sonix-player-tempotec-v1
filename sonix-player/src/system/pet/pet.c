@@ -760,6 +760,62 @@ bool pet_award_achievement(pet_state_t *st, int achievement) {
 
 static bool contains_word(const char *text, const char *word) { return strstr(text, word) != NULL; }
 
+pet_genre_look_t pet_genre_look(const char *genre) {
+	if (!genre || !genre[0]) {
+		return PET_LOOK_NONE;
+	}
+
+	char lower[64];
+	size_t used = 0;
+	for (const char *p = genre; *p && used < sizeof(lower) - 1; p++) {
+		lower[used++] = (char)tolower((unsigned char)*p);
+	}
+	lower[used] = '\0';
+
+	// The same order as the vibe: what a tag says last wins nothing, so the
+	// calm families are asked first. "Lo-Fi Hip Hop" gets the cup, not the
+	// chain, which is also the way the vibe above reads it.
+	static const char *const cup[] = {
+		"ambient", "lo-fi",    "lofi",  "chill", "downtempo", "sleep", "meditation",
+		"new age", "classical", "piano", "acoustic", "folk",     "jazz",  "blues",
+		"soul",    "bossa",    "ballad",
+	};
+	for (size_t i = 0; i < sizeof(cup) / sizeof(cup[0]); i++) {
+		if (contains_word(lower, cup[i])) {
+			return PET_LOOK_CUP;
+		}
+	}
+
+	static const char *const chain[] = {
+		"hip-hop", "hip hop", "rap", "trap", "grime", "boom bap", "boom-bap", "drill", "phonk",
+	};
+	for (size_t i = 0; i < sizeof(chain) / sizeof(chain[0]); i++) {
+		if (contains_word(lower, chain[i])) {
+			return PET_LOOK_CHAIN;
+		}
+	}
+
+	static const char *const collar[] = {
+		"rock", "metal", "punk", "hardcore", "grunge", "screamo", "emo", "industrial", "gabber",
+	};
+	for (size_t i = 0; i < sizeof(collar) / sizeof(collar[0]); i++) {
+		if (contains_word(lower, collar[i])) {
+			return PET_LOOK_COLLAR;
+		}
+	}
+
+	static const char *const shades[] = {
+		"electronic", "edm",   "house",     "techno", "trance", "synth", "wave",    "dance",
+		"dubstep",    "dnb",   "drum",      "breakbeat", "disco", "funk", "bass",    "idm",
+	};
+	for (size_t i = 0; i < sizeof(shades) / sizeof(shades[0]); i++) {
+		if (contains_word(lower, shades[i])) {
+			return PET_LOOK_SHADES;
+		}
+	}
+	return PET_LOOK_NONE;
+}
+
 pet_vibe_t pet_vibe_for_genre(const char *genre) {
 	if (!genre || !genre[0]) {
 		return PET_VIBE_NEUTRAL;

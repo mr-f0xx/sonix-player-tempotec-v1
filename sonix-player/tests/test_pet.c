@@ -525,6 +525,30 @@ static void test_holding(void) {
 	assert(st.happy == 100);
 }
 
+// The accessory a genre asks for: one thing, and only for the genres that own
+// one. "Lo-Fi Hip Hop" is the cup, because the calm families are asked first --
+// the same order the vibe is read in.
+static void test_genre_look(void) {
+	assert(pet_genre_look(NULL) == PET_LOOK_NONE);
+	assert(pet_genre_look("") == PET_LOOK_NONE);
+	assert(pet_genre_look("Pop") == PET_LOOK_NONE);
+	assert(pet_genre_look("Synthwave") == PET_LOOK_SHADES);
+	assert(pet_genre_look("Electronic") == PET_LOOK_SHADES);
+	assert(pet_genre_look("Deep House") == PET_LOOK_SHADES);
+	assert(pet_genre_look("Hip-Hop") == PET_LOOK_CHAIN);
+	assert(pet_genre_look("Boom Bap") == PET_LOOK_CHAIN);
+	assert(pet_genre_look("Trap") == PET_LOOK_CHAIN);
+	assert(pet_genre_look("Rock") == PET_LOOK_COLLAR);
+	assert(pet_genre_look("Melodic Death Metal") == PET_LOOK_COLLAR);
+	assert(pet_genre_look("Ambient") == PET_LOOK_CUP);
+	assert(pet_genre_look("Lo-Fi Hip Hop") == PET_LOOK_CUP);
+	assert(pet_genre_look("Jazz") == PET_LOOK_CUP);
+
+	// Case and padding are the tags' business, not the pet's.
+	assert(pet_genre_look("SYNTHWAVE") == PET_LOOK_SHADES);
+	assert(pet_genre_look("  rock  ") == PET_LOOK_COLLAR);
+}
+
 static void test_vibe(void) {
 	assert(pet_vibe_for_genre(NULL) == PET_VIBE_NEUTRAL);
 	assert(pet_vibe_for_genre("") == PET_VIBE_NEUTRAL);
@@ -986,6 +1010,7 @@ int main(void) {
 	test_petting();
 	test_holding();
 	test_vibe();
+	test_genre_look();
 	test_persistence();
 	test_species();
 	test_name();

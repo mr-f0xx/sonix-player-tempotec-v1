@@ -166,6 +166,8 @@ int metronomeclick_beat_index(void) { return click_last; }
  * creature that has heard music and is being looked at. */
 static pet_state_t pet_state;
 static bool pet_listening;
+static int pet_volume = 60; // what the page thinks the player is turned up to
+static pet_genre_look_t pet_look; // and the accessory the tags are asking for
 
 const pet_state_t *petwatch_state(void) { return &pet_state; }
 bool petwatch_listening(void) { return pet_listening; }
@@ -177,6 +179,8 @@ void petwatch_track_title(char *out, size_t out_size) {
 }
 bool petwatch_pet_now(void) { return pet_pet(&pet_state, petwatch_now()); }
 bool petwatch_hold(void) { return pet_hold(&pet_state); }
+int petwatch_volume(void) { return pet_volume; }
+pet_genre_look_t petwatch_look(void) { return pet_look; }
 int petwatch_take_events(void) { return 0; }
 int petwatch_take_achievement(void) { return 0; }
 pet_vibe_t petwatch_vibe(void) { return PET_VIBE_NEUTRAL; }
@@ -1087,6 +1091,52 @@ static void check_pet_page(gui_config_t *cfg, const char *tag) {
 	lv_tick_inc(1100);
 	lv_timer_handler();
 	check_within_panel(petpage_screen, cfg, "Pet after the reaction");
+
+	// The genre's accessory. One thing, from the tags, and only while there is
+	// music: shades for the electronic family, gold at the neck for hip hop,
+	// studs for rock, and a cup on the floor for the calm ones. Which one is
+	// pet_genre_look()'s business and is tested with the other rules; here it
+	// is the drawing that is looked at.
+	pet_listening = true;
+	static const struct {
+		pet_genre_look_t look;
+		const char *tag;
+	} looks[] = {
+		{PET_LOOK_SHADES, "shades"},
+		{PET_LOOK_CHAIN, "chain"},
+		{PET_LOOK_COLLAR, "collar"},
+		{PET_LOOK_CUP, "cup"},
+	};
+	for (size_t i = 0; i < sizeof(looks) / sizeof(looks[0]); i++) {
+		pet_look = looks[i].look;
+		petpage_open();
+		lv_obj_update_layout(petpage_screen);
+		check_within_panel(petpage_screen, cfg, "Pet accessory");
+		char look_tag[64];
+		snprintf(look_tag, sizeof(look_tag), "%s-%s", tag, looks[i].tag);
+		dump_snapshot(petpage_screen, look_tag);
+	}
+	pet_look = PET_LOOK_NONE;
+
+	// And the volume, worn on the face: past eighty the eyes are wide open,
+	// between twenty and forty the pet rests with a heavy lid. Neither is a
+	// mood of its own -- the mood is where it always was.
+	pet_volume = 90;
+	petpage_open();
+	lv_obj_update_layout(petpage_screen);
+	char hyped_tag[64];
+	snprintf(hyped_tag, sizeof(hyped_tag), "%s-hyped", tag);
+	dump_snapshot(petpage_screen, hyped_tag);
+	pet_volume = 30;
+	petpage_open();
+	lv_obj_update_layout(petpage_screen);
+	char resting_tag[64];
+	snprintf(resting_tag, sizeof(resting_tag), "%s-resting", tag);
+	dump_snapshot(petpage_screen, resting_tag);
+	pet_volume = 60;
+	pet_listening = false;
+	petpage_open();
+	lv_obj_update_layout(petpage_screen);
 
 	// The pencil brings the chooser back; the pencil closes it again.
 	lv_obj_t *star = NULL;

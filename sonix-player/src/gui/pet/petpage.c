@@ -74,6 +74,14 @@ typedef struct {
 #define PET_PHONE lv_color_hex(0x2F3B52)
 #define PET_SCARF lv_color_hex(0xC2453F)
 #define PET_CROWN lv_color_hex(0xE8C15A)
+// What the genres ask for. One colour each, flat, as everything else here is:
+// the shades are near-black, the chain is the crown's gold, a stud is a pale
+// grey and the cup is cream with coffee in it.
+#define PET_SHADE lv_color_hex(0x22282C)
+#define PET_GOLD lv_color_hex(0xE8C15A)
+#define PET_STUD lv_color_hex(0xC9CCD1)
+#define PET_CUP lv_color_hex(0xF7F2E4)
+#define PET_COFFEE lv_color_hex(0x6B4A32)
 
 // The rooms, as a wash over the card, and the water of the aquarium.
 #define PET_ROOM_MEADOW lv_color_hex(0x9FD9B4)
@@ -172,6 +180,21 @@ typedef struct {
 	lv_obj_t *scarf_tail;
 	lv_obj_t *crown_band;
 	lv_obj_t *crown_spike[3];
+
+	// The genre's accessory: shades over the eyes, a chain or a studded collar
+	// at the neck, a cup on the floor. One of them at a time, and never over a
+	// garment that owns the same place.
+	lv_obj_t *shade_l;
+	lv_obj_t *shade_r;
+	lv_obj_t *shade_bridge;
+	lv_obj_t *shade_glint;
+	lv_obj_t *chain;
+	lv_obj_t *chain_pendant;
+	lv_obj_t *collar;
+	lv_obj_t *collar_stud[3];
+	lv_obj_t *cup;
+	lv_obj_t *cup_coffee;
+	lv_obj_t *cup_handle;
 
 	// The little hearts: one that pops over a tapped head, and the three that
 	// fill up under a held finger.
@@ -996,6 +1019,24 @@ static void build_creature(void) {
 	inked(parts.hat_brim, 2);
 	inked(parts.crown_band, 1);
 	inked(parts.scarf, 1);
+	inked(parts.cup, 1);
+	inked(parts.cup_handle, 1);
+
+	// The genre's accessory. The shades are over the face, so they come after
+	// the eyes; the rest go at the neck and on the floor.
+	parts.shade_l = round_piece(parts.root, PET_SHADE);
+	parts.shade_r = round_piece(parts.root, PET_SHADE);
+	parts.shade_bridge = round_piece(parts.root, PET_SHADE);
+	parts.shade_glint = round_piece(parts.root, lv_color_white());
+	parts.chain = round_piece(parts.root, PET_GOLD);
+	parts.chain_pendant = round_piece(parts.root, PET_GOLD);
+	parts.collar = round_piece(parts.root, PET_SHADE);
+	for (int i = 0; i < 3; i++) {
+		parts.collar_stud[i] = round_piece(parts.root, PET_STUD);
+	}
+	parts.cup = round_piece(parts.root, PET_CUP);
+	parts.cup_coffee = round_piece(parts.root, PET_COFFEE);
+	parts.cup_handle = round_piece(parts.root, PET_CUP);
 
 	// Last, so they are over everything: one heart that pops over a tapped
 	// head, three small ones that fill the Petting Mode meter. It is the same
@@ -1338,12 +1379,26 @@ static void paint_creature(void) {
 	show(parts.glint_l, eyes_open);
 	show(parts.glint_r, eyes_open && !fish);
 
+	// The volume is worn on the face. Past eighty per cent the eyes go wide
+	// and the glint with them; between twenty and forty the pet rests, with a
+	// heavy lid over each eye -- not asleep, and not the blissful smile either.
+	const int volume = petwatch_volume();
+	const bool hyped = listening && !sleeping && !dizzy && !blissful && volume > 80;
+	const bool resting = listening && !sleeping && !dizzy && !blissful && mood != PET_MOOD_SAD && volume >= 20 && volume <= 40;
+	if (hyped) {
+		place(parts.eye_l, eye_l_x - 2, eye_ly - 2, eye_w + 4, eye_h + 4);
+		place(parts.eye_r, eye_r_x - 2, eye_y - 2, eye_w + 4, eye_h + 4);
+		place(parts.glint_l, eye_l_x, eye_ly, 5, 5);
+		place(parts.glint_r, eye_r_x, eye_y, 5, 5);
+	}
+
+
 	// A dizzy pet has crosses where its eyes were: two bars over each eye, one
 	// each way. Sleeping keeps the single flat lid.
 	set_radius(parts.lid_l, 1);
 	set_radius(parts.lid_r, 1);
-	show(parts.lid_l, sleeping || dizzy);
-	show(parts.lid_r, (sleeping || dizzy) && !fish);
+	show(parts.lid_l, sleeping || dizzy || resting);
+	show(parts.lid_r, (sleeping || dizzy || resting) && !fish);
 	// A turned bar is clipped to its own box, so a dizzy pet's cross is drawn
 	// from two bars that are not turned at all.
 	show(parts.lid_v_l, dizzy);
@@ -1353,6 +1408,9 @@ static void paint_creature(void) {
 		place(parts.lid_r, eye_r_x + eye_w / 2 - 6, eye_y + 5, 12, 2);
 		place(parts.lid_v_l, eye_l_x + eye_w / 2 - 1, eye_ly, 2, 12);
 		place(parts.lid_v_r, eye_r_x + eye_w / 2 - 1, eye_y, 2, 12);
+	} else if (resting) {
+		place(parts.lid_l, eye_l_x + 1, eye_ly + 1, 10, 3);
+		place(parts.lid_r, eye_r_x + 1, eye_y + 1, 10, 3);
 	} else {
 		place(parts.lid_l, eye_l_x + 1, eye_ly + 5, 10, 2);
 		place(parts.lid_r, eye_r_x + 1, eye_y + 5, 10, 2);
@@ -1371,7 +1429,7 @@ static void paint_creature(void) {
 
 	bool sad = mood == PET_MOOD_SAD;
 	bool smile = !sad && (mood == PET_MOOD_HAPPY || mood == PET_MOOD_BLISSFUL);
-	bool line = mood == PET_MOOD_OKAY || sleeping || dizzy;
+	bool line = mood == PET_MOOD_OKAY || sleeping || dizzy || resting;
 
 	int mouth_y = fish ? fish_y + fish_h * 50 / 100 : (dog ? muzzle_y + muzzle_h - 9 : head_top + head_h * 66 / 100);
 	place(parts.mouth, mouth_cx - 7, mouth_y, 14, 9);
@@ -1380,7 +1438,7 @@ static void paint_creature(void) {
 	} else {
 		lv_arc_set_angles(parts.mouth, 20, 160);
 	}
-	show(parts.mouth, !sleeping && !dizzy && !listening && (smile || sad));
+	show(parts.mouth, !sleeping && !dizzy && !listening && !resting && (smile || sad));
 
 	set_radius(parts.mouth_line, 1);
 	place(parts.mouth_line, mouth_cx - 5, mouth_y + 3, 10, 2);
@@ -1476,6 +1534,61 @@ static void paint_creature(void) {
 	for (int i = 0; i < 3; i++) {
 		show(parts.crown_spike[i], crown);
 	}
+
+	// ---- the genre's accessory -------------------------------------------
+	//
+	// One thing at a time, and only while there is music to have a genre from.
+	// A scarf owns the neck, so the chain and the collar give way to it; the
+	// shades sit under a hat, which is what sunglasses do.
+	const pet_genre_look_t look = petwatch_look();
+	const bool shades = look == PET_LOOK_SHADES;
+	const bool chain = look == PET_LOOK_CHAIN && !scarf && !fish;
+	const bool collar = look == PET_LOOK_COLLAR && !scarf && !fish;
+	const bool cup = look == PET_LOOK_CUP && !fish;
+
+	set_radius(parts.shade_l, 3);
+	set_radius(parts.shade_r, 3);
+	set_radius(parts.shade_bridge, 1);
+	place(parts.shade_l, eye_l_x - 2, eye_ly - 1, eye_w + 4, eye_h);
+	place(parts.shade_r, eye_r_x - 2, eye_y - 1, eye_w + 4, eye_h);
+	place(parts.shade_bridge, cx - eye_dx + 1, eye_y + 1, (eye_dx - 1) * 2, 2);
+	place(parts.shade_glint, eye_l_x + 1, eye_ly + 1, 3, 2);
+	show(parts.shade_l, shades);
+	show(parts.shade_r, shades && !fish);
+	show(parts.shade_bridge, shades && !fish);
+	show(parts.shade_glint, shades && !fish);
+
+	// There is no neck to speak of on an animal that is mostly head, so a chain
+	// or a collar sits on the chest, just under the chin. Any higher and it is
+	// a moustache.
+	const int chest_y = head_bottom - 1;
+	set_radius(parts.chain, 2);
+	set_radius(parts.chain_pendant, 2);
+	place(parts.chain, cx - 13, chest_y, 26, 3);
+	place(parts.chain_pendant, cx - 2, chest_y + 3, 5, 5);
+	show(parts.chain, chain);
+	show(parts.chain_pendant, chain);
+
+	set_radius(parts.collar, 2);
+	place(parts.collar, cx - 14, chest_y, 28, 5);
+	show(parts.collar, collar);
+	for (int i = 0; i < 3; i++) {
+		set_radius(parts.collar_stud[i], 1);
+		place(parts.collar_stud[i], cx - 9 + i * 8, chest_y + 3, 3, 4);
+		show(parts.collar_stud[i], collar);
+	}
+
+	// The cup is on the floor beside the pet, where a cup would be.
+	set_radius(parts.cup, 3);
+	set_radius(parts.cup_coffee, 2);
+	set_radius(parts.cup_handle, 2);
+	const int cup_x = cx + trunk_w * 30 / 100;
+	place(parts.cup, cup_x, PET_BASE_Y - 13, 13, 13);
+	place(parts.cup_coffee, cup_x + 2, PET_BASE_Y - 10, 9, 3);
+	place(parts.cup_handle, cup_x + 13, PET_BASE_Y - 10, 5, 6);
+	show(parts.cup, cup);
+	show(parts.cup_coffee, cup);
+	show(parts.cup_handle, cup);
 
 	// The hearts float over the head, wherever the head has got to this stage.
 	// Whether they can be seen is the reaction's business, not the paint's.

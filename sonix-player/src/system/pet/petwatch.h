@@ -62,6 +62,15 @@ int petwatch_take_achievement(void);
 // animation to. NEUTRAL when nothing is playing or the tags say nothing.
 pet_vibe_t petwatch_vibe(void);
 
+// What the genre of that track asks the animal to put on: shades, a chain, a
+// studded collar or a cup. NONE when the tags say nothing or the genre has no
+// costume of its own.
+pet_genre_look_t petwatch_look(void);
+
+// The player's volume, as the last tick read it. The page wears it: a turned
+// up level has wide eyes, a quiet one rests.
+int petwatch_volume(void);
+
 // True while the current listening session has passed PET_FOCUS_SECS without a
 // pause, a mute or a skip. The page uses it for its line; the achievement is
 // awarded by the watcher.

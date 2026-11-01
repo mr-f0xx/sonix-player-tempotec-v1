@@ -42,6 +42,7 @@ static bool clock_was_set;
 static char track_title[128];
 static char current_album[256];
 static char current_genre[128];
+static int current_volume = 100; // what the last tick heard the player set to
 static int track_bonus;
 static bool note_pending;
 static int unsaved_listen_secs;
@@ -196,6 +197,7 @@ static void tick_cb(lv_timer_t *timer) {
 	bool live = radio_playing || phone_streaming;
 	bool playing = playback_is_music();
 	int volume = device_state_get_volume_percent();
+	current_volume = volume;
 
 	double position = 0;
 	double duration = 0;
@@ -355,6 +357,10 @@ bool petwatch_listening(void) { return listening; }
 bool petwatch_focus(void) { return focus_active; }
 
 pet_vibe_t petwatch_vibe(void) { return current_vibe; }
+
+pet_genre_look_t petwatch_look(void) { return pet_genre_look(current_genre); }
+
+int petwatch_volume(void) { return current_volume; }
 
 bool petwatch_pet_now(void) {
 	int64_t now = (int64_t)time(NULL);
