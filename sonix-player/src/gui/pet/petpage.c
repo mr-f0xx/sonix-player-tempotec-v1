@@ -507,29 +507,56 @@ static void shape_polygon(pet_shape_t *s, lv_color_t color, const int *xs, const
 // side of the head. The inner edge is a line down the head, and the face is
 // drawn after it, so the cheeks are not covered.
 static void draw_jowls(int cx, int head_w, int head_h, int head_top, lv_color_t fill) {
-	static const int16_t ear[10][2] = {
-		{88, 2}, {58, 10}, {26, 20}, {0, 46}, {6, 70},
-		{30, 90}, {58, 100}, {86, 90}, {98, 50}, {98, 20},
+	// The ear in head units: x from the middle of the head in per cents of
+	// half its width -- so a hundred is the edge of the head -- and y from the
+	// top of the head in per cents of its height. Written that way the table
+	// says what the ear is: a flap whose top edge rests on the side of the
+	// head, a quarter of the way down, and whose rest hangs off it, out past
+	// the edge and down to the jaw. The crown is left bare. It was not, and
+	// two ears with their top edges over the crown and their inner edges down
+	// the middle of the head are not ears: they are a bob with a parting.
+	static const int16_t ear[12][2] = {
+		{-62, 30}, {-80, 24}, {-100, 28}, {-112, 42}, {-114, 60}, {-108, 76},
+		{-96, 90}, {-82, 97}, {-72, 90}, {-66, 74}, {-62, 54}, {-60, 40},
 	};
-	const int n = 10;
-	const int w = head_w * 34 / 100; // of which eight pixels are out in the air
-	const int h = head_h * 80 / 100; // and down to the jaw
-	const int y = head_top + head_h * 8 / 100;
+	const int n = 12;
+	int min_x = 0;
+	int max_x = 0;
+	int min_y = 0;
+	int max_y = 0;
+	for (int i = 0; i < n; i++) {
+		if (ear[i][0] < min_x) {
+			min_x = ear[i][0];
+		}
+		if (ear[i][0] > max_x) {
+			max_x = ear[i][0];
+		}
+		if (ear[i][1] < min_y) {
+			min_y = ear[i][1];
+		}
+		if (ear[i][1] > max_y) {
+			max_y = ear[i][1];
+		}
+	}
+	const int w = (max_x - min_x) * head_w / 200;
+	const int h = (max_y - min_y) * head_h / 100;
+	const int left = cx + min_x * head_w / 200;
+	const int top = head_top + min_y * head_h / 100;
 	int xs[PET_SHAPE_LINE];
 	int ys[PET_SHAPE_LINE];
 	for (int side = 0; side < 2; side++) {
-		const int x = side ? cx + head_w / 2 + 8 - w : cx - head_w / 2 - 8;
 		// The corners are relative to the shape's own box: the draw callback
 		// adds the box's corner, so absolute page positions would land
 		// wherever the ear happens to be twice.
 		for (int i = 0; i < n; i++) {
-			const int px = ear[i][0] * w / 100;
+			const int px = (ear[i][0] - min_x) * head_w / 200;
+			const int py = (ear[i][1] - min_y) * head_h / 100;
 			xs[i] = side ? w - 1 - px : px;
-			ys[i] = ear[i][1] * h / 100;
+			ys[i] = py;
 		}
 		pet_shape_t *shape = side ? &shape_jowl_r : &shape_jowl_l;
 		shape_polygon(shape, fill, xs, ys, n);
-		shape_place(shape, x, y, w, h);
+		shape_place(shape, side ? 2 * cx - left - w : left, top, w, h);
 	}
 }
 

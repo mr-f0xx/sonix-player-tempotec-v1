@@ -2185,7 +2185,32 @@ that is only there while music is going in, so the mouth beside them is singing.
 Two arcs and two more shapes, all hidden when the mood is not theirs. Nothing
 here is drawn per frame: the page still does one memo of the clock a second.
 
-## The charger, with the player off
+### The dog's ears, half on the head
+
+The ears of the pass before were drawn over the head from the crown down: each
+flap's top edge crossed the top of the head near the middle of it, and from
+there its inner edge ran the rest of the way down the head's side. Two of those
+on a round head is a bob haircut with a parting, and that is what it looked
+like -- on the device, and in the snapshot that was taken of the adult.
+
+An ear is a flap that rests on the head and hangs *off* it. The top edge now
+crosses the head's outline a quarter of the way down, and everything below that
+is out in the air: past the head's edge, down beside the jaw, over the shoulder.
+The crown between the two is left bare and round, because that bare crown is
+what says the head is a head and not a face in a hood.
+
+The table is written in head units rather than in per cents of a box: x from the
+middle of the head in per cents of half its width, so a hundred is the edge of
+the head, and y from the top in per cents of its height. Read that way it says
+what the ear is -- its top rests on the head at a quarter of its height, its
+widest point is out at a hundred and fourteen, its tip hangs to ninety-seven --
+instead of where its box happens to sit. The old box sat a fixed eight pixels
+out from the head, and eight pixels is not a size: at the hatchling, whose head
+is sixty-four across, the ears were a quarter of the head out in the air, and at
+the adult, less than a tenth. Which is the half of the problem the snapshot of a
+hatchling showed first.
+
+## The charger, with the player off## The charger, with the player off
 
 The stock player comes up on a battery screen when the device was switched off
 and a cable is plugged in: the charger powers the board, and the thing the user
