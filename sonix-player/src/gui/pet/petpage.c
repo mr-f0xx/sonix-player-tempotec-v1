@@ -2163,6 +2163,13 @@ static void apply_frame(void) {
 	}
 	lv_obj_set_style_translate_x(parts.root, dx, 0);
 	lv_obj_set_style_translate_y(parts.root, dy, 0);
+	// The box and the find stand on the floor of the room, not on the animal:
+	// when it jumps, the furniture stays where it is. A child's own translate
+	// adds to its parent's, so cancelling it is exact.
+	lv_obj_set_style_translate_x(parts.box, -dx, 0);
+	lv_obj_set_style_translate_y(parts.box, -dy, 0);
+	lv_obj_set_style_translate_x(parts.find, -dx, 0);
+	lv_obj_set_style_translate_y(parts.find, -dy, 0);
 	if (species != PET_SPECIES_FISH) {
 		lv_obj_set_style_transform_rotation(parts.arm_l, 60 + arm, 0);
 	}
