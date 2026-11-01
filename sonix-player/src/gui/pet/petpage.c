@@ -252,7 +252,8 @@ static int64_t reaction_until;
 static bool holding;
 static int hold_step;
 static lv_timer_t *hold_timer;
-static int64_t swallow_until; // a hold's release also reports a click
+static int64_t swallow_until; // a completed hold also reports a click
+static bool hold_paid;       // the meter filled: the release is not a tap
 
 static lv_obj_t *habitat;
 static lv_obj_t *night_wash;    // the card, after eight in the evening
@@ -2241,6 +2242,7 @@ static void stop_animations(void) {
 	animating = false;
 	reaction = REACT_NONE;
 	holding = false;
+	hold_paid = false;
 	hide_hold_meter();
 	show(parts.heart, false);
 	lv_obj_set_style_translate_x(parts.root, 0, 0);
@@ -3456,8 +3458,11 @@ static void hold_timer_cb(lv_timer_t *timer) {
 		return;
 	}
 
-	// The meter is full.
+	// The meter is full. A hold that paid is not also a tap, and the click its
+	// release reports is thrown away by pet_hold_cb(); a hold that has not
+	// filled is a slow tap, and it still pets the animal.
 	holding = false;
+	hold_paid = true;
 	if (hold_timer) {
 		lv_timer_delete(hold_timer);
 		hold_timer = NULL;
@@ -3479,7 +3484,10 @@ static void pet_hold_cb(lv_event_t *e) {
 		if (holding || switcher_back_drag_active()) {
 			return;
 		}
+		// The meter shows from the first moment, because the hand that is
+		// holding needs to see that holding is doing something.
 		holding = true;
+		hold_paid = false;
 		hold_step = 0;
 		hide_hold_meter();
 		show(parts.hold_heart[0], true); // the first heart is the press itself
@@ -3490,10 +3498,18 @@ static void pet_hold_cb(lv_event_t *e) {
 		return;
 	}
 
-	// A hold's release is also reported as a click, and the click must not be
-	// mistaken for a tap: the easter egg on the version row knows the same trap.
+	// LVGL reports a hold's release as a click as well, so a hold that *paid*
+	// would be counted twice. Only that one is swallowed: LVGL calls a press
+	// long after 400 ms, which is what an ordinary tap on the glass lasts, and
+	// swallowing every long press is a page where tapping the animal does
+	// nothing at all.
 	if (code == LV_EVENT_RELEASED) {
-		swallow_until = petwatch_now() + 2;
+		if (hold_paid) {
+			swallow_until = petwatch_now() + 2;
+			hold_paid = false;
+		}
+	} else {
+		hold_paid = false; // PRESS_LOST: no click follows, nothing to swallow
 	}
 	if (holding) {
 		holding = false;

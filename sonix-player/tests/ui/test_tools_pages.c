@@ -1051,6 +1051,23 @@ static void check_pet_page(gui_config_t *cfg, const char *tag) {
 	lv_obj_send_event(creature, LV_EVENT_CLICKED, NULL);
 	assert(pet_state.pets == pets + 1);
 
+	// A tap on the glass is a press and a release, and a finger on this panel
+	// takes about half a second over it -- long enough for LVGL to call the
+	// press a long one and start the Petting Mode meter. It is still a tap:
+	// the animal is petted, and the click is not thrown away by a meter that
+	// never filled. (The suite used to send CLICKED straight at the animal,
+	// which is exactly why it did not notice this.)
+	pet_state.last_pet = 0;
+	int slow_pets = pet_state.pets;
+	lv_obj_send_event(creature, LV_EVENT_PRESSED, NULL);
+	lv_obj_send_event(creature, LV_EVENT_LONG_PRESSED, NULL);
+	lv_tick_inc(300);
+	lv_timer_handler();
+	lv_obj_send_event(creature, LV_EVENT_RELEASED, NULL);
+	lv_obj_send_event(creature, LV_EVENT_CLICKED, NULL);
+	assert(pet_state.pets == slow_pets + 1);
+	assert(pet_state.hold_day == 0); // a slow tap is not a groom
+
 	// And the pat is answered: one of three tiny reactions, picked from the
 	// clock. The clock here is fixed at a second that divides by three, so it
 	// is always the heart -- and the heart is a picture over the head, not a
