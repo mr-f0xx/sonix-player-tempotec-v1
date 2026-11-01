@@ -365,6 +365,14 @@ bool petwatch_pet_now(void) {
 	return true;
 }
 
+bool petwatch_hold(void) {
+	if (!pet_hold(&state)) {
+		return false;
+	}
+	save_now();
+	return true;
+}
+
 pet_temperament_t petwatch_temperament(void) { return pet_temperament(&state); }
 
 bool petwatch_has_soundscape(void) { return pet_has_soundscape(&state); }

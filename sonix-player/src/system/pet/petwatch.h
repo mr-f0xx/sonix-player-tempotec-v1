@@ -44,6 +44,10 @@ bool petwatch_listening(void);
 // the next tick. False when the pet has had enough for the minute.
 bool petwatch_pet_now(void);
 
+// The finger stayed down: the once-a-day groom. True when it was paid, false
+// when today's already has been.
+bool petwatch_hold(void);
+
 // PET_EVENT_* bits collected since the last call, cleared by it. The page takes
 // them when it is shown, so a goal reached with the page closed is still worth
 // a toast the next time it is opened.

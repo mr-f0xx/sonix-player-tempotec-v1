@@ -172,6 +172,11 @@ typedef struct {
 	lv_obj_t *scarf_tail;
 	lv_obj_t *crown_band;
 	lv_obj_t *crown_spike[3];
+
+	// The little hearts: one that pops over a tapped head, and the three that
+	// fill up under a held finger.
+	lv_obj_t *heart;
+	lv_obj_t *hold_heart[3];
 } pet_parts_t;
 
 static pet_parts_t parts;
@@ -180,6 +185,33 @@ static gui_config_t *page_cfg;
 static bool page_built;
 static bool page_visible;
 static lv_timer_t *page_timer;
+
+// The tiny answer to a button or a finger: the animal jumps, ducks, leans or
+// waves for a couple of seconds, then goes back to breathing. A single value
+// says which, and a single deadline says until when, because only one at a
+// time can be seen anyway.
+enum {
+	REACT_NONE = 0,
+	REACT_JUMP,
+	REACT_DUCK,
+	REACT_LEAN_L,
+	REACT_LEAN_R,
+	REACT_HEART,
+	REACT_HOP,
+	REACT_WAVE,
+};
+#define PET_REACTION_SECS 3
+static int reaction;
+static int64_t reaction_until;
+
+// Petting Mode: the finger stayed down, and a heart meter fills in three steps
+// of six hundred milliseconds. The last one pays the day's groom.
+#define PET_HOLD_STEPS 3
+#define PET_HOLD_STEP_MS 600
+static bool holding;
+static int hold_step;
+static lv_timer_t *hold_timer;
+static int64_t swallow_until; // a hold's release also reports a click
 
 static lv_obj_t *habitat;
 static lv_obj_t *name_label;
@@ -298,6 +330,10 @@ static void customise_refresh(void);
 static void customise_close_cb(lv_event_t *e);
 static void name_dialog_close(void);
 static void pet_tap_cb(lv_event_t *e);
+static void pet_hold_cb(lv_event_t *e);
+static void start_reaction(int what);
+static void end_reaction(void);
+static void hide_hold_meter(void);
 static void tap_close(void);
 static void tap_open(void);
 
@@ -860,6 +896,9 @@ static void build_creature(void) {
 	lv_obj_set_pos(parts.root, (card_w_px - PET_CREATURE_W) / 2, card_h_px - 42 - PET_BASE_Y + 2);
 	lv_obj_set_clickable(parts.root, true);
 	lv_obj_add_event_cb(parts.root, pet_tap_cb, LV_EVENT_CLICKED, NULL);
+	lv_obj_add_event_cb(parts.root, pet_hold_cb, LV_EVENT_LONG_PRESSED, NULL);
+	lv_obj_add_event_cb(parts.root, pet_hold_cb, LV_EVENT_RELEASED, NULL);
+	lv_obj_add_event_cb(parts.root, pet_hold_cb, LV_EVENT_PRESS_LOST, NULL);
 
 	parts.shadow = disc(parts.root, lv_color_black());
 
@@ -957,6 +996,18 @@ static void build_creature(void) {
 	inked(parts.hat_brim, 2);
 	inked(parts.crown_band, 1);
 	inked(parts.scarf, 1);
+
+	// Last, so they are over everything: one heart that pops over a tapped
+	// head, three small ones that fill the Petting Mode meter. It is the same
+	// heart the health row wears, which is the point -- a heart means a heart.
+	parts.heart = icon_image(parts.root, &icon_heart_filled, 16);
+	lv_obj_set_style_image_recolor(parts.heart, PET_CHEEK, 0);
+	show(parts.heart, false);
+	for (int i = 0; i < 3; i++) {
+		parts.hold_heart[i] = icon_image(parts.root, &icon_heart_filled, 10);
+		lv_obj_set_style_image_recolor(parts.hold_heart[i], PET_CHEEK, 0);
+		show(parts.hold_heart[i], false);
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -1425,6 +1476,13 @@ static void paint_creature(void) {
 	for (int i = 0; i < 3; i++) {
 		show(parts.crown_spike[i], crown);
 	}
+
+	// The hearts float over the head, wherever the head has got to this stage.
+	// Whether they can be seen is the reaction's business, not the paint's.
+	place(parts.heart, cx - 8, head_top - 20, 16, 16);
+	for (int i = 0; i < 3; i++) {
+		place(parts.hold_heart[i], cx - 17 + i * 12, head_top - 16, 10, 10);
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -1829,7 +1887,39 @@ static void apply_frame(void) {
 	const bool listening = petwatch_listening();
 
 	// The breath: two pixels, three when something is playing.
-	lv_obj_set_style_translate_y(parts.root, frame ? (listening ? 3 : 2) : 0, 0);
+	int dy = frame ? (listening ? 3 : 2) : 0;
+	int dx = 0;
+	int arm = 0; // degrees added to the left arm, times ten
+	switch (reaction) {
+	case REACT_JUMP:
+		dy -= frame ? 10 : 6;
+		break;
+	case REACT_DUCK:
+		dy += frame ? 6 : 4;
+		break;
+	case REACT_HOP:
+		dy -= frame ? 8 : 1;
+		break;
+	case REACT_HEART:
+		dy -= frame ? 2 : 0;
+		break;
+	case REACT_LEAN_L:
+		dx = frame ? -4 : -2;
+		break;
+	case REACT_LEAN_R:
+		dx = frame ? 4 : 2;
+		break;
+	case REACT_WAVE:
+		arm = frame ? -50 : 0;
+		break;
+	default:
+		break;
+	}
+	lv_obj_set_style_translate_x(parts.root, dx, 0);
+	lv_obj_set_style_translate_y(parts.root, dy, 0);
+	if (species != PET_SPECIES_FISH) {
+		lv_obj_set_style_transform_rotation(parts.arm_l, 60 + arm, 0);
+	}
 
 	// The fish's tail leans with the breath. Nothing else sways: the other two
 	// are drawn facing you, and the tail was the one part of them that showed
@@ -1885,6 +1975,11 @@ static void stop_animations(void) {
 		return;
 	}
 	animating = false;
+	reaction = REACT_NONE;
+	holding = false;
+	hide_hold_meter();
+	show(parts.heart, false);
+	lv_obj_set_style_translate_x(parts.root, 0, 0);
 	lv_obj_set_style_translate_y(parts.root, 0, 0);
 	show(note_a, false);
 	show(note_b, false);
@@ -2605,17 +2700,154 @@ static void consume_events(void) {
 	}
 }
 
+// ---------------------------------------------------------------------------
+// The tiny reactions
+//
+// A button or a finger is answered by the animal itself, for a few seconds: a
+// jump when the volume goes up, a duck when it comes down, a lean for the next
+// track, a heart or a wave for a tap. It is two numbers on one object -- a
+// shift and a rotation -- so a reaction costs what a breath costs, and the
+// one-second frame that already runs draws it. Nothing is timed with a new
+// timer except the Petting Mode meter, which needs to fill faster than that.
+// ---------------------------------------------------------------------------
+
+static void start_reaction(int what) {
+	if (!page_built) {
+		return;
+	}
+	reaction = what;
+	reaction_until = petwatch_now() + PET_REACTION_SECS;
+	show(parts.heart, what == REACT_HEART);
+	paint(); // the hearts are placed against the head as it is now
+	apply_frame();
+}
+
+static void end_reaction(void) {
+	if (reaction == REACT_NONE) {
+		return;
+	}
+	reaction = REACT_NONE;
+	show(parts.heart, false);
+	apply_frame();
+}
+
+static void hide_hold_meter(void) {
+	for (int i = 0; i < 3; i++) {
+		show(parts.hold_heart[i], false);
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Petting Mode
+//
+// A two-second hold is a fuss, not a tap: the meter fills a heart at a time,
+// and when it is full the day's groom is paid -- once a day, because a heart
+// that refills by holding a finger down is not worth six points.
+// ---------------------------------------------------------------------------
+
+static void hold_timer_cb(lv_timer_t *timer) {
+	(void)timer;
+	if (!holding) {
+		if (hold_timer) {
+			lv_timer_delete(hold_timer);
+			hold_timer = NULL;
+		}
+		return;
+	}
+	if (hold_step < PET_HOLD_STEPS) {
+		show(parts.hold_heart[hold_step], true);
+		hold_step++;
+		return;
+	}
+
+	// The meter is full.
+	holding = false;
+	if (hold_timer) {
+		lv_timer_delete(hold_timer);
+		hold_timer = NULL;
+	}
+	hide_hold_meter();
+	if (petwatch_hold()) {
+		toast_plain(tr("pet_purr"));
+		start_reaction(REACT_HEART);
+	} else {
+		toast_plain(tr("pet_cooldown"));
+		start_reaction(REACT_HOP);
+	}
+	paint_values();
+}
+
+static void pet_hold_cb(lv_event_t *e) {
+	const lv_event_code_t code = lv_event_get_code(e);
+	if (code == LV_EVENT_LONG_PRESSED) {
+		if (holding || switcher_back_drag_active()) {
+			return;
+		}
+		holding = true;
+		hold_step = 0;
+		hide_hold_meter();
+		show(parts.hold_heart[0], true); // the first heart is the press itself
+		hold_step = 1;
+		if (!hold_timer) {
+			hold_timer = lv_timer_create(hold_timer_cb, PET_HOLD_STEP_MS, NULL);
+		}
+		return;
+	}
+
+	// A hold's release is also reported as a click, and the click must not be
+	// mistaken for a tap: the easter egg on the version row knows the same trap.
+	if (code == LV_EVENT_RELEASED) {
+		swallow_until = petwatch_now() + 2;
+	}
+	if (holding) {
+		holding = false;
+		hide_hold_meter();
+	}
+}
+
+// The hardware side of the same trick: a volume or a track key, wherever it was
+// pressed, is passed in from the shell and answered here. Both keys keep doing
+// their proper job -- this only adds a face to them.
+void petpage_poke(pet_poke_t what) {
+	if (!page_visible || !page_built) {
+		return;
+	}
+	switch (what) {
+	case PET_POKE_VOLUME_UP:
+		start_reaction(REACT_JUMP);
+		break;
+	case PET_POKE_VOLUME_DOWN:
+		start_reaction(REACT_DUCK);
+		break;
+	case PET_POKE_NEXT:
+		start_reaction(REACT_LEAN_R);
+		break;
+	case PET_POKE_PREV:
+		start_reaction(REACT_LEAN_L);
+		break;
+	default:
+		break;
+	}
+}
+
 static void pet_tap_cb(lv_event_t *e) {
 	(void)e;
 	if (switcher_back_drag_active()) {
 		return;
+	}
+	if (petwatch_now() <= swallow_until) {
+		return; // the click that closed a hold
 	}
 	if (petwatch_pet_now()) {
 		toast_plain(tr("pet_purr"));
 	} else {
 		toast_plain(tr("pet_cooldown"));
 	}
-	paint();
+
+	// One of three tiny answers, picked by the clock. A coin flip is enough to
+	// make a tap a surprise, and it costs no state to remember.
+	static const int picks[3] = {REACT_HEART, REACT_HOP, REACT_WAVE};
+	start_reaction(picks[(int)(petwatch_now() % 3)]);
 }
 
 // The shell's back chevron closes whatever sheet is on top before it leaves.
@@ -2647,6 +2879,9 @@ static void page_timer_cb(lv_timer_t *timer) {
 	consume_events();
 	paint_values();
 	advance_frame();
+	if (reaction != REACT_NONE && petwatch_now() >= reaction_until) {
+		end_reaction();
+	}
 }
 
 static void screen_loaded_cb(lv_event_t *e) {

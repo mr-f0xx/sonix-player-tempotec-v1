@@ -32,4 +32,17 @@ void petpage_open(void);
 // that gives it a pat. Null until the page has been built.
 lv_obj_t *petpage_creature(void);
 
+// The keys a page cannot see. Volume and track keys are handled by the system
+// layer, not by the interface, so the system layer tells the pet that one was
+// pressed and the pet answers with a jump, a duck or a lean. A no-op when the
+// page is not on screen: nothing is drawn that nobody is looking at.
+typedef enum {
+	PET_POKE_VOLUME_UP = 0,
+	PET_POKE_VOLUME_DOWN,
+	PET_POKE_NEXT,
+	PET_POKE_PREV,
+} pet_poke_t;
+
+void petpage_poke(pet_poke_t what);
+
 #endif /* GUI_PET_PETPAGE_H */

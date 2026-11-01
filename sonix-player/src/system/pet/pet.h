@@ -87,6 +87,11 @@
 #define PET_PET_HAPPY_GAIN 4
 #define PET_PET_ENERGY_GAIN 2
 
+// A held finger is not a tap: two seconds down is a grooming, and it is worth
+// more than the tap it starts with -- once a day, so that holding the dog is
+// not a way to fill the meter without any music.
+#define PET_HOLD_HAPPY_GAIN 6
+
 // The most offline time one advance will account for. Longer than this and the
 // extra is dropped: a clock set years ahead, or a device in a drawer, should
 // not roll the arithmetic over.
@@ -368,6 +373,9 @@ typedef struct {
 	long rhythm_day;
 	int rhythm_best;
 
+	// The day the held-pat bonus was last paid. Once a day: see pet_hold().
+	long hold_day;
+
 	// The day a Curious pet last found something while foraging.
 	long forage_day;
 
@@ -406,6 +414,11 @@ void pet_cheer(pet_state_t *st, int happy_points);
 // the petting counted. Petting does not wake a sleeping pet -- only music does
 // -- but it is still welcome.
 bool pet_pet(pet_state_t *st, int64_t now);
+
+// A finger held on the animal, which is a groom rather than a tap: worth
+// PET_HOLD_HAPPY_GAIN, and once a day -- false, and nothing paid, on a second
+// hold the same day. The day is the state's own, which pet_advance() keeps.
+bool pet_hold(pet_state_t *st);
 
 // What the face and the label say. Sleeping outranks every mood, because a
 // creature with its eyes shut is not sad, it is asleep.

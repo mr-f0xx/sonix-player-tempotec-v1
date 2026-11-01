@@ -176,6 +176,7 @@ void petwatch_track_title(char *out, size_t out_size) {
 	}
 }
 bool petwatch_pet_now(void) { return pet_pet(&pet_state, petwatch_now()); }
+bool petwatch_hold(void) { return pet_hold(&pet_state); }
 int petwatch_take_events(void) { return 0; }
 int petwatch_take_achievement(void) { return 0; }
 pet_vibe_t petwatch_vibe(void) { return PET_VIBE_NEUTRAL; }
@@ -1024,6 +1025,68 @@ static void check_pet_page(gui_config_t *cfg, const char *tag) {
 	assert(creature);
 	lv_obj_send_event(creature, LV_EVENT_CLICKED, NULL);
 	assert(pet_state.pets == pets + 1);
+
+	// And the pat is answered: one of three tiny reactions, picked from the
+	// clock. The clock here is fixed at a second that divides by three, so it
+	// is always the heart -- and the heart is a picture over the head, not a
+	// speech bubble and not a page of its own.
+	lv_obj_update_layout(petpage_screen);
+	char pat_tag[64];
+	snprintf(pat_tag, sizeof(pat_tag), "%s-pat", tag);
+	check_within_panel(petpage_screen, cfg, "Pet pat");
+	dump_snapshot(petpage_screen, pat_tag);
+
+	// Petting Mode: the finger stays down and the meter fills a heart at a
+	// time; the third heart pays the day's groom, once.
+	pet_state.hold_day = 0;
+	const int happy_before_hold = pet_state.happy;
+	lv_obj_send_event(creature, LV_EVENT_LONG_PRESSED, NULL);
+	lv_tick_inc(600);
+	lv_timer_handler();
+	lv_obj_update_layout(petpage_screen);
+	char hold_tag[64];
+	snprintf(hold_tag, sizeof(hold_tag), "%s-hold", tag);
+	dump_snapshot(petpage_screen, hold_tag);
+	assert(pet_state.hold_day == 0); // one heart of three
+	for (int i = 0; i < 3; i++) {
+		lv_tick_inc(600);
+		lv_timer_handler();
+	}
+	assert(pet_state.hold_day != 0);
+	assert(pet_state.happy > happy_before_hold);
+
+	// The release of a hold arrives as a click as well. It is not a second pat,
+	// and it must not be: the hand that held the animal is the same hand that
+	// lets go of it.
+	pets = pet_state.pets;
+	lv_obj_send_event(creature, LV_EVENT_RELEASED, NULL);
+	lv_obj_send_event(creature, LV_EVENT_CLICKED, NULL);
+	assert(pet_state.pets == pets);
+
+	// The volume keys never reached the interface before; now they do, and the
+	// animal answers them without leaving the page. A jump for a step up.
+	petpage_poke(PET_POKE_VOLUME_UP);
+	lv_tick_inc(1100); // the second frame of the same jump
+	lv_timer_handler();
+	lv_obj_update_layout(petpage_screen);
+	check_within_panel(petpage_screen, cfg, "Pet volume up");
+	char jump_tag[64];
+	snprintf(jump_tag, sizeof(jump_tag), "%s-jump", tag);
+	dump_snapshot(petpage_screen, jump_tag);
+	petpage_poke(PET_POKE_VOLUME_DOWN);
+	lv_obj_update_layout(petpage_screen);
+	char duck_tag[64];
+	snprintf(duck_tag, sizeof(duck_tag), "%s-duck", tag);
+	dump_snapshot(petpage_screen, duck_tag);
+	// It is a pose, not a permanent state: a few seconds later the animal is
+	// breathing again on its own.
+	lv_tick_inc(1100);
+	lv_timer_handler();
+	lv_tick_inc(1100);
+	lv_timer_handler();
+	lv_tick_inc(1100);
+	lv_timer_handler();
+	check_within_panel(petpage_screen, cfg, "Pet after the reaction");
 
 	// The pencil brings the chooser back; the pencil closes it again.
 	lv_obj_t *star = NULL;

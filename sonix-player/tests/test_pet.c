@@ -490,6 +490,41 @@ static void test_petting(void) {
 	assert(pet_pet(&st, T0)); // stored last_pet is ahead of this
 }
 
+// Petting Mode: the hold pays the day's groom, and only that day's.
+static void test_holding(void) {
+	fresh();
+	st.day = pet_day_now(T0);
+	int happy = st.happy;
+	assert(pet_hold(&st));
+	assert(st.happy == happy + PET_HOLD_HAPPY_GAIN);
+	assert(st.hold_day == st.day);
+
+	// A second hold the same day is worth nothing at all -- not a smaller
+	// helping, nothing -- and a tap between them does not reopen it.
+	assert(!pet_hold(&st));
+	assert(st.happy == happy + PET_HOLD_HAPPY_GAIN);
+	assert(pet_pet(&st, T0 + 1000));
+	assert(!pet_hold(&st));
+
+	// The next day is a new groom.
+	st.day++;
+	happy = st.happy;
+	assert(pet_hold(&st));
+	assert(st.happy == happy + PET_HOLD_HAPPY_GAIN);
+
+	// And a pet with no day at all is a pet that has not been read yet.
+	pet_state_t blank = st;
+	blank.day = 0;
+	assert(!pet_hold(&blank));
+	assert(!pet_hold(NULL));
+
+	// Nothing goes past a hundred.
+	st.day++;
+	st.happy = 99;
+	assert(pet_hold(&st));
+	assert(st.happy == 100);
+}
+
 static void test_vibe(void) {
 	assert(pet_vibe_for_genre(NULL) == PET_VIBE_NEUTRAL);
 	assert(pet_vibe_for_genre("") == PET_VIBE_NEUTRAL);
@@ -905,6 +940,7 @@ static void test_v4_persistence(void) {
 	assert(pet_dizzy(&st, base + 10));
 	pet_rhythm_finish(&st, 64);
 	pet_forage(&st, PET_FORAGE_SECS);
+	pet_hold(&st);
 	pet_save(&st);
 
 	pet_state_t loaded;
@@ -915,6 +951,7 @@ static void test_v4_persistence(void) {
 	assert(loaded.rhythm_day == st.rhythm_day);
 	assert(loaded.rhythm_best == st.rhythm_best);
 	assert(loaded.forage_day == st.forage_day);
+	assert(loaded.hold_day == st.hold_day);
 	assert(loaded.notes == st.notes);
 	assert(loaded.freezes == st.freezes);
 
@@ -947,6 +984,7 @@ int main(void) {
 	test_volume_floor();
 	test_mood();
 	test_petting();
+	test_holding();
 	test_vibe();
 	test_persistence();
 	test_species();

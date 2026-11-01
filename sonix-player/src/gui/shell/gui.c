@@ -531,6 +531,14 @@ static void modal_init(gui_config_t *cfg) {
 static void key_async_cb(void *user_data) {
 	gui_key_t key = (gui_key_t)(uintptr_t)user_data;
 
+	// The volume keys are not transport keys and belong to no page: the step
+	// itself was already taken in system.c. They are here only so the pet can
+	// answer them, and they stop here whatever the device is doing.
+	if (key == GUI_KEY_VOL_UP || key == GUI_KEY_VOL_DOWN) {
+		petpage_poke(key == GUI_KEY_VOL_UP ? PET_POKE_VOLUME_UP : PET_POKE_VOLUME_DOWN);
+		return;
+	}
+
 	// While a Game Boy is open the device's Play/Pause and skip keys are
 	// Start/Select inputs, not music transport commands.
 	if (gearboyplay_handle_key(key)) {
@@ -581,10 +589,15 @@ static void key_async_cb(void *user_data) {
 		break;
 	case GUI_KEY_NEXT:
 		player_key_next();
+		petpage_poke(PET_POKE_NEXT);
 		break;
 	case GUI_KEY_PREV:
 		player_key_prev();
+		petpage_poke(PET_POKE_PREV);
 		break;
+	case GUI_KEY_VOL_UP:
+	case GUI_KEY_VOL_DOWN:
+		break; // answered at the top, before anything could claim them
 	}
 }
 

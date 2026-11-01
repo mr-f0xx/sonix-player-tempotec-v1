@@ -188,6 +188,18 @@ int pet_note_track(pet_state_t *st, const char *genre, const char *album, int *e
 
 bool pet_audible_volume(int percent) { return percent >= PET_VOLUME_FLOOR; }
 
+bool pet_hold(pet_state_t *st) {
+	if (!st) {
+		return false;
+	}
+	if (st->day <= 0 || st->hold_day == st->day) {
+		return false;
+	}
+	st->hold_day = st->day;
+	st->happy = clamp_int(st->happy + PET_HOLD_HAPPY_GAIN, 0, PET_HAPPY_MAX);
+	return true;
+}
+
 void pet_cheer(pet_state_t *st, int happy_points) {
 	if (!st || happy_points <= 0) {
 		return;
@@ -1186,6 +1198,7 @@ void pet_load(pet_state_t *st, int64_t now, long day) {
 	st->rhythm_day = config_get_int(PET_SECTION, "rhythm_day", 0);
 	st->rhythm_best = (int)config_get_int(PET_SECTION, "rhythm_best", 0);
 	st->forage_day = config_get_int(PET_SECTION, "forage_day", 0);
+	st->hold_day = config_get_int(PET_SECTION, "hold_day", 0);
 
 	// A hand edit, a half-written file or a state from a much older build is
 	// brought back inside the ranges this arithmetic assumes.
@@ -1290,6 +1303,7 @@ void pet_save(const pet_state_t *st) {
 	config_set_int(PET_SECTION, "rhythm_day", st->rhythm_day);
 	config_set_int(PET_SECTION, "rhythm_best", st->rhythm_best);
 	config_set_int(PET_SECTION, "forage_day", st->forage_day);
+	config_set_int(PET_SECTION, "hold_day", st->hold_day);
 }
 
 void pet_set_name(const char *name) {

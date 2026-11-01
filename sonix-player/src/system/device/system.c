@@ -1221,6 +1221,13 @@ static uint32_t now_ms(void) {
 static void apply_volume_step(int code) {
 	device_state_change_volume_percent(code == KEY_VOLUMEUP ? VOLUME_STEP_PERCENT : -VOLUME_STEP_PERCENT);
 	gui_notify_volume(device_state_get_volume_percent());
+
+	// And the same press, to whatever wants to see it. The pet is the only
+	// listener: it jumps when the level climbs and ducks when it falls, which
+	// is a two-frame change on a page that is already repainting. Posted, like
+	// the transport keys, so a page is never drawn from this thread, and a
+	// no-op whenever the pet is not on screen.
+	gui_notify_key(code == KEY_VOLUMEUP ? GUI_KEY_VOL_UP : GUI_KEY_VOL_DOWN);
 }
 
 // ---------------------------------------------------------------------------
