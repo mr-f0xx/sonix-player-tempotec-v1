@@ -581,6 +581,9 @@ static void key_async_cb(void *user_data) {
 			return;
 		}
 		break;
+	case GUI_KEY_VOL_UP:
+	case GUI_KEY_VOL_DOWN:
+		break; // answered and returned at the top of this function
 	}
 
 	switch (key) {

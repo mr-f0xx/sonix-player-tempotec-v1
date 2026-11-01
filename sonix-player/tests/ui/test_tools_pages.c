@@ -172,7 +172,10 @@ static pet_genre_look_t pet_look; // and the accessory the tags are asking for
 
 const pet_state_t *petwatch_state(void) { return &pet_state; }
 bool petwatch_listening(void) { return pet_listening; }
-int64_t petwatch_now(void) { return 1761868800; } // 2025-10-31, the day the test adopts
+// The test's clock, in UTC: noon on 15 July 2025, which is a summer afternoon
+// and therefore a sunlit card. Time-dependent things are driven from here.
+static int64_t pet_now = 1752580800;
+int64_t petwatch_now(void) { return pet_now; }
 void petwatch_track_title(char *out, size_t out_size) {
 	if (out && out_size) {
 		snprintf(out, out_size, "%s", "Test track");
@@ -212,6 +215,9 @@ bool petwatch_has_soundscape(void) { return pet_has_soundscape(&pet_state); }
 bool petwatch_rhythm_ready(void) { return pet_rhythm_ready(&pet_state); }
 int petwatch_rhythm_finish(int score) { return pet_rhythm_finish(&pet_state, score); }
 void petwatch_flush(void) {}
+
+/* The clock is set, because this suite's whole day is a fixed second. */
+bool clock_is_set(void) { return true; }
 
 /* A timer parked for the screen's dark half; there is no power manager here. */
 void power_pause_in_standby(lv_timer_t *timer) { (void)timer; }
@@ -1233,6 +1239,26 @@ static void check_pet_page(gui_config_t *cfg, const char *tag) {
 	lv_obj_update_layout(petpage_screen);
 	assert(!lv_obj_is_visible(box_title));
 
+	// The card knows the hour and the month: the same animal at midnight in
+	// October, with the lamp lit, a moon up and the autumn leaves coming down.
+	pet_now = 1761868800; // 2025-10-31, 00:00 UTC
+	petpage_open();
+	lv_obj_update_layout(petpage_screen);
+	check_within_panel(petpage_screen, cfg, "Pet at night");
+	char night_tag[64];
+	snprintf(night_tag, sizeof(night_tag), "%s-night", tag);
+	dump_snapshot(petpage_screen, night_tag);
+	// And in April, with a cloud up and the rain coming down.
+	pet_now = 1744286400; // 2025-04-10, 12:00 UTC
+	petpage_open();
+	lv_obj_update_layout(petpage_screen);
+	char spring_tag[64];
+	snprintf(spring_tag, sizeof(spring_tag), "%s-spring", tag);
+	dump_snapshot(petpage_screen, spring_tag);
+	pet_now = 1752580800; // back to the summer afternoon
+	petpage_open();
+	lv_obj_update_layout(petpage_screen);
+
 	// The pencil brings the chooser back; the pencil closes it again.
 	lv_obj_t *star = NULL;
 	lv_obj_t *pencil = NULL;
@@ -1673,6 +1699,11 @@ static lv_obj_t *find_image_button(lv_obj_t *obj, const lv_image_dsc_t *glyph) {
 
 int main(int argc, char **argv) {
 	assert(argc == 2);
+
+	/* On the clock's terms: the suite's fixed second is read in UTC, so the
+	 * hour and the month a snapshot shows do not depend on where it runs. */
+	setenv("TZ", "UTC", 1);
+	tzset();
 
 	/* The card, as a folder the test owns and throws away. */
 	char card[] = "/tmp/sonix-tools-test-XXXXXX";

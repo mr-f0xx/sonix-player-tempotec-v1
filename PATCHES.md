@@ -2129,6 +2129,119 @@ scales with the animal. The box it used to live in sat a fixed eight pixels out
 from the head, which at the hatchling -- whose head is sixty-four across -- was a
 quarter of a head out in the air.
 
+## The pet, and the small things it does
+
+The animal was already a page with a face, a mood and two meters. What it was
+missing was the ordinary half of a toy: a reason to press a button that has
+nothing to do with it, and something to find when you come back.
+
+### The keys that never reached the interface
+
+`handle_key_press()` in `system.c` applied a volume step and told the interface
+what the level was; nothing else ever saw the key. So a volume press could not
+be answered by anything on screen. `gui_key_t` has `GUI_KEY_VOL_UP` and
+`GUI_KEY_VOL_DOWN` now, posted from `apply_volume_step()` beside the step
+itself -- which covers the side buttons, the cable remote, the headphone remote
+and the mapped keys, because all of them go through that one function.
+
+`key_async_cb()` answers them at the top, before the Game Boy, the book, the USB
+DAC or the receiver can claim the press, and returns: a volume key is not a
+transport key and the step has already been taken. Next and Previous were
+announced all along, so the page only had to be told after them.
+
+### A reaction is a shift and a rotation
+
+There is no third timer. The page already flips between two frames every second;
+a reaction is two more numbers on the same object -- a vertical or horizontal
+shift, or the left arm's angle -- applied in `apply_frame()` and expired by the
+one-second page timer three seconds later. A jump is up five pixels on the first
+frame and two on the second; a duck is the same downwards; a lean is four to the
+right or the left; a wave turns the arm up fifty degrees.
+
+A tap picks one of three from the clock: `petwatch_now() % 3`. A coin flip is
+enough to make a tap a surprise and it costs no state to remember.
+
+### The click that a hold leaves behind
+
+LVGL reports a hold's release as `LV_EVENT_CLICKED` as well as `RELEASED`, so
+the tap handler would have run at the end of every Petting Mode and petted the
+animal a second time. It is swallowed for two seconds -- `swallow_until` -- and
+the easter egg on the version row documents the same trap.
+
+Petting Mode itself is a meter of three hearts, one every six hundred
+milliseconds, and the third pays. It is on the only new timer the page grew,
+and the timer deletes itself when the finger is gone. The bonus is
+`PET_HOLD_HAPPY_GAIN` (6) and it is once a day, kept as `hold_day` in the state:
+a heart that refills by holding a finger down is not worth six points.
+
+### What the genre puts on it
+
+`pet_vibe_for_genre()` already read the tags for how the animal moves; the same
+reading now says what it wears, in `pet_genre_look()` and with the same
+first-match order, so "lo-fi hip hop" gets the cup rather than the chain. Four
+accessories, flat, one at a time: shades for the electronic family, gold at the
+neck for hip hop, studs for rock, a cup on the floor for the calm ones. A scarf
+owns the neck and wins.
+
+The first drawing of the chain put it at the scarf's own height, which on an
+animal that is mostly head is across its muzzle: a gold moustache. There is no
+neck to speak of, so both the chain and the collar sit on the chest at
+`head_bottom - 1`, just under the chin.
+
+The volume is worn on the face instead: past eighty per cent the eyes and their
+glint go wide, between twenty and forty the pet rests under a heavy lid. Neither
+is a mood -- sad, asleep and dizzy keep the faces they had, because a mood is the
+state's and a volume is the player's.
+
+### The box
+
+One sheet, opened from a small chest that sits in the corner of the card all
+day, with a gold latch when there is something in it. Three features share it,
+and all three are un-farmable by tapping:
+
+- **The fortune**, once a day. `pet_fortune()` draws one of six from the day
+  itself, so it is the same line all day and a different one at midnight and
+  asking twice costs nothing. Answering it -- "I did it" -- pays fifty notes
+  once a day. The pet cannot check whether an album from before 2000 was played,
+  which is the point: a fortune is an invitation, not a task.
+- **The note game**, once an hour. Six notes cross one line at a fixed speed,
+  about nine seconds in all; five notes for turning up and one more for each
+  note caught. The note is a position on a 30 ms timer and a hit is a distance
+  from the middle of the lane. No FFT, no audio, nothing to measure.
+- **The finds.** Every half hour of music that was actually credited turns
+  something up, counted in `pet_drop_add()` from the seconds `petlisten` has
+  already decided were heard. Three at most: with the box full the listening
+  stops counting, so a week away comes back as a box and not a heap. The four
+  kinds come round in turn rather than at random, because a shelf with one of
+  each on it is worth looking at and the order costs no state. A find is saved
+  at once rather than on the two-minute throttle: it is the kind of thing a
+  player switches the device off to go and look at.
+
+A find appears on the floor beside the animal and is tapped into the shelf --
+the input is the item, not a button. The floor cue and the box are the two
+things on the card that are tapped rather than the animal, and neither is a
+fourth corner control: the title row already carries three, and a fourth would
+have been the smallest thing on the page.
+
+### The hour and the month
+
+`clock_is_set()` decides whether the card trusts the clock at all: with no time
+set, the card stays as it was. With it, `localtime_r()` gives an hour and a
+month, and after eight in the evening a wash of forty per cent black goes over
+the card -- *under* the animal, so the pet stays as bright as it was and only
+the room goes dark -- a moon comes up where the sun was, and a small lamp stands
+at the far end of the floor. The moon is an arc, not a disc: a disc with a bite
+taken out of it needs a second disc the colour of whatever is behind it, and
+what is behind it changes with the room.
+
+The month decides what falls: rain in spring, leaves in autumn, snow in winter,
+nothing in summer, five small things each on its own phase, moved by the frame
+the page already draws. The page asks for the hour every second and
+`paint_clock()` answers from what it last drew unless the hour, the month or the
+animal has changed -- so a card with nothing falling costs nothing at all.
+
+Fourteen new strings, in eleven languages.
+
 ## The charger, with the player off## The charger, with the player off
 
 The stock player comes up on a battery screen when the device was switched off

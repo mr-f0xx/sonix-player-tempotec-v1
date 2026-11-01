@@ -459,6 +459,9 @@ bool gearboyplay_handle_key(gui_key_t key) {
 	case GUI_KEY_PREV:
 		media_key_tap(GB_KEY_SELECT);
 		break;
+	case GUI_KEY_VOL_UP:
+	case GUI_KEY_VOL_DOWN:
+		break; // the volume keys are not inputs of a Game Boy
 	}
 	return true;
 }

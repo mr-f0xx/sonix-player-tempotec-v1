@@ -15,6 +15,7 @@
 #include "src/gui/shell/theme.h"
 #include "src/gui/shell/toast.h"
 #include "src/system/core/lang.h"
+#include "src/system/device/clock.h"
 #include "src/system/device/power.h"
 #include "src/system/pet/pet.h"
 #include "src/system/pet/petwatch.h"
@@ -82,6 +83,14 @@ typedef struct {
 #define PET_STUD lv_color_hex(0xC9CCD1)
 #define PET_CUP lv_color_hex(0xF7F2E4)
 #define PET_COFFEE lv_color_hex(0x6B4A32)
+// The sky and the weather: a cream moon, the lamp's warm shade, and the three
+// things a month can make fall.
+#define PET_MOON lv_color_hex(0xF3EBC8)
+#define PET_LAMP lv_color_hex(0xF7E3A1)
+#define PET_LEAF lv_color_hex(0xD9822B)
+#define PET_SNOW lv_color_hex(0xF4F8FB)
+#define PET_RAIN lv_color_hex(0x8FC0E8)
+#define PET_CLOUD lv_color_hex(0xCDD8E4)
 
 // The rooms, as a wash over the card, and the water of the aquarium.
 #define PET_ROOM_MEADOW lv_color_hex(0x9FD9B4)
@@ -246,6 +255,17 @@ static lv_timer_t *hold_timer;
 static int64_t swallow_until; // a hold's release also reports a click
 
 static lv_obj_t *habitat;
+static lv_obj_t *night_wash;    // the card, after eight in the evening
+static lv_obj_t *sky_sun;
+static lv_obj_t *sky_moon;
+static lv_obj_t *sky_cloud[4]; // a cloud is three lobes and the bar under them
+static lv_obj_t *lamp_post;
+static lv_obj_t *lamp_shade;
+#define PET_FLAKES 5
+static lv_obj_t *flake[PET_FLAKES];
+static int flake_home_x[PET_FLAKES];
+static int flake_step;
+static bool clock_layer_built;
 static lv_obj_t *name_label;
 static lv_obj_t *stage_label;
 static lv_obj_t *status_icon; // the still note, when nothing is playing
@@ -354,6 +374,8 @@ static keyboard_t *name_keyboard;
 // Forward: the timer and the unload path close sheets whose builders are
 // further down the file.
 static void consume_events(void);
+static void paint_clock(void);
+static void wardrobe_open_cb(lv_event_t *e);
 static void wardrobe_refresh(void);
 static void wardrobe_close(void);
 static void customise_open(void);
@@ -2074,6 +2096,7 @@ static void paint(void) {
 	}
 	shown.valid = false;
 	paint_room();
+	paint_clock();
 	paint_creature();
 	paint_words();
 	paint_theme_colors();
@@ -2170,6 +2193,17 @@ static void apply_frame(void) {
 		}
 	}
 
+	// What the month drops: five small things falling slowly, each on its own
+	// phase, wrapping round at the bottom of the card. Nothing moves unless the
+	// season has something to drop, and a still thing costs nothing.
+	if (clock_layer_built && !lv_obj_is_hidden(flake[0])) {
+		const int span = card_h_px - 104;
+		for (int i = 0; i < PET_FLAKES; i++) {
+			const int drop = span > 0 ? (flake_step + i * span / PET_FLAKES) % span : 0;
+			lv_obj_set_pos(flake[i], flake_home_x[i] + (drop / 12) % 9 - 4, 54 + drop);
+		}
+	}
+
 	// The tank's bubbles rise a few pixels a second, each on its own phase, and
 	// wrap round off the top edge where nothing can be seen of them.
 	for (int i = 0; i < PET_BUBBLES; i++) {
@@ -2229,6 +2263,7 @@ static void advance_frame(void) {
 	}
 	frame ^= 1;
 	if (frame == 0) {
+		flake_step++;
 		bubble_step++;
 		if (mote_step < 4096) {
 			mote_step += 1;
@@ -3535,6 +3570,7 @@ static void page_timer_cb(lv_timer_t *timer) {
 		return;
 	}
 	consume_events();
+	paint_clock();
 	paint_values();
 	advance_frame();
 	if (reaction != REACT_NONE && petwatch_now() >= reaction_until) {
@@ -3583,6 +3619,159 @@ static void theme_change_cb(void) { paint(); }
 // ---------------------------------------------------------------------------
 // The page
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// The hour and the month
+//
+// The card knows what time it is, because the player does: after eight in the
+// evening it goes dark, a moon comes up where the sun was, and a small lamp
+// stands on the floor. The month decides what falls through the air -- rain in
+// spring, leaves in autumn, snow in winter, nothing in summer.
+//
+// None of this is a timer of its own. The sun and the moon are shown or hidden
+// when the hour changes, and the five things falling are moved by the frame
+// the page already draws. A card with nothing falling costs nothing at all.
+// ---------------------------------------------------------------------------
+
+static lv_obj_t *build_flake(void) {
+	lv_obj_t *o = bar_piece(habitat, PET_SNOW, 2);
+	lv_obj_set_size(o, 4, 4);
+	show(o, false);
+	return o;
+}
+
+static void build_clock(int card_w, int card_h) {
+	if (clock_layer_built) {
+		return;
+	}
+	clock_layer_built = true;
+
+	// The dark goes in first, under the sun and the lamp: it is a wash of the
+	// card, not of the animal, which stays as bright as it was.
+	night_wash = plain(habitat);
+	lv_obj_set_size(night_wash, card_w, card_h);
+	lv_obj_set_pos(night_wash, 0, 0);
+	lv_obj_set_style_bg_color(night_wash, lv_color_black(), 0);
+	lv_obj_set_style_bg_opa(night_wash, LV_OPA_40, 0);
+	lv_obj_set_style_radius(night_wash, bp_pick(14, 22), 0);
+	show(night_wash, false);
+
+	// A warm sun, not the interface's own icon: the card is a picture and the
+	// icon set is a set of glyphs.
+	sky_sun = icon_image(habitat, &icon_sun, 18);
+	lv_obj_set_style_image_recolor(sky_sun, lv_color_hex(0xF2C14E), 0);
+	place(sky_sun, card_w - 44, 64, 18, 18);
+
+	// The moon is an arc, not a disc: a disc with a bite taken out needs a
+	// second disc the colour of whatever is behind it, and the card changes
+	// colour with the room.
+	sky_moon = lv_arc_create(habitat);
+	lv_obj_set_size(sky_moon, 20, 20);
+	lv_obj_set_pos(sky_moon, card_w - 45, 63);
+	lv_arc_set_angles(sky_moon, 60, 300);
+	lv_obj_set_style_arc_opa(sky_moon, LV_OPA_TRANSP, LV_PART_MAIN);
+	lv_obj_set_style_arc_width(sky_moon, 7, LV_PART_INDICATOR);
+	lv_obj_set_style_arc_color(sky_moon, PET_MOON, LV_PART_INDICATOR);
+	lv_obj_set_style_arc_opa(sky_moon, LV_OPA_COVER, LV_PART_INDICATOR);
+	show(sky_moon, false);
+
+	// A cloud for the spring: three lobes over one flat bar, in the same pale
+	// grey as the pebbles, under the sun and to the left of it.
+	static const int lobe[3][3] = {{-2, 3, 8}, {5, 0, 11}, {13, 4, 7}};
+	for (int i = 0; i < 3; i++) {
+		sky_cloud[i] = disc(habitat, PET_CLOUD);
+		place(sky_cloud[i], card_w - 100 + lobe[i][0], 66 + lobe[i][1], lobe[i][2], lobe[i][2]);
+		show(sky_cloud[i], false);
+	}
+	sky_cloud[3] = bar_piece(habitat, PET_CLOUD, 3);
+	place(sky_cloud[3], card_w - 102, 74, 32, 8);
+	show(sky_cloud[3], false);
+
+	// The lamp: a warm shade on a thin post, at the far end of the floor where
+	// nothing else stands.
+	const int floor_y = card_h - 42;
+	const int lamp_x = card_w - 11;
+	lamp_shade = bar_piece(habitat, PET_LAMP, 3);
+	place(lamp_shade, lamp_x - 8, floor_y - 27, 16, 8);
+	lamp_post = bar_piece(habitat, PET_PEBBLE, 1);
+	place(lamp_post, lamp_x - 1, floor_y - 19, 2, 15);
+	show(lamp_shade, false);
+	show(lamp_post, false);
+
+	for (int i = 0; i < PET_FLAKES; i++) {
+		flake[i] = build_flake();
+		flake_home_x[i] = 16 + i * (card_w - 32) / (PET_FLAKES - 1);
+	}
+}
+
+static int shown_hour = -1;
+static int shown_month = -1;
+static int shown_species = -1;
+static int shown_known = -1;
+
+static void paint_clock(void) {
+	if (!page_built || !clock_layer_built) {
+		return;
+	}
+
+	const time_t now = (time_t)petwatch_now();
+	struct tm tm;
+	int hour = 12;
+	int month = 7;
+	if (localtime_r(&now, &tm)) {
+		hour = tm.tm_hour;
+		month = tm.tm_mon + 1;
+	}
+
+	const int known = clock_is_set() ? 1 : 0;
+	const pet_species_t species = pet_species(petwatch_state());
+	// Nothing changes but a handful of times a day; the page asks every second,
+	// so it answers from what it already drew until the answer is different.
+	if (hour == shown_hour && month == shown_month && (int)species == shown_species && known == shown_known) {
+		return;
+	}
+	shown_hour = hour;
+	shown_month = month;
+	shown_species = (int)species;
+	shown_known = known;
+
+	const bool night = known && (hour >= 20 || hour < 7);
+	const bool room = species != PET_SPECIES_NONE && species != PET_SPECIES_FISH;
+
+	show(night_wash, night);
+	show(sky_sun, known && !night && room);
+	show(sky_moon, night && room);
+	show(lamp_shade, night && room);
+	show(lamp_post, night && room);
+
+	// What falls through the air, by month: rain in spring, leaves in autumn,
+	// snow in winter. Summer has nothing falling -- the sun is the season.
+	int falling = 0; // 1 rain, 2 leaf, 3 snow
+	if (month == 12 || month <= 2) {
+		falling = 3;
+	} else if (month >= 3 && month <= 5) {
+		falling = 1;
+	} else if (month >= 9 && month <= 11) {
+		falling = 2;
+	}
+	for (int i = 0; i < 4; i++) {
+		show(sky_cloud[i], falling == 1 && !night && room);
+	}
+
+	for (int i = 0; i < PET_FLAKES; i++) {
+		show(flake[i], falling != 0 && room);
+		if (falling == 1) {
+			set_color(flake[i], PET_RAIN);
+			lv_obj_set_size(flake[i], 2, 6);
+		} else if (falling == 2) {
+			set_color(flake[i], PET_LEAF);
+			lv_obj_set_size(flake[i], 7, 4);
+		} else {
+			set_color(flake[i], PET_SNOW);
+			lv_obj_set_size(flake[i], 4, 4);
+		}
+	}
+}
 
 static void build(void) {
 	if (!page_cfg || page_built) {
@@ -3683,6 +3872,7 @@ static void build(void) {
 	}
 
 	build_scenes(card_w, habitat_h);
+	build_clock(card_w, habitat_h);
 
 	for (int i = 0; i < PET_BUBBLES; i++) {
 		int size = 4 + (i % 3) * 3;

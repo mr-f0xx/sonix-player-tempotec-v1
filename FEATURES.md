@@ -293,7 +293,25 @@ a self-signed certificate), and HLS.
   of the sand. The face carries the mood too: round eyes and a smile when it is
   happy, eyes shut in a smile at the top of it, brows and a tear when it is sad,
   and, while music is playing, an open mouth and a pair of notes in the air
-  beside its head.
+  beside its head. **It answers the keys as well as the glass**: a step up on
+  the volume and it jumps, a step down and it ducks, Previous and Next and it
+  leans the way they go, and a tap picks one of three tiny reactions -- a heart,
+  a hop or a wave -- on the pat's own cooldown. **Hold a finger on it for two
+  seconds** and three hearts fill under it; the third pays the day's groom,
+  once a day. A genre tag dresses it for the track it is hearing -- shades for
+  the electronic family, a gold chain for hip hop, a studded collar for rock, a
+  cup on the floor for the calm ones -- and the volume shows on its face, wide
+  eyes past eighty per cent and a heavy-lidded rest between twenty and forty.
+  **A box sits in the corner of the card**: in it are the day's fortune, one of
+  six drawn from the date and worth fifty notes once it has been carried out; an
+  hourly note game -- one note crossing one line, six times, five notes for
+  turning up and one for each note caught; and the shelf, where what the
+  listening turns up goes: every half hour of audible music finds a bone, a
+  cassette, a sticker or a record on the floor, and a tap puts it on the shelf,
+  three at most. The card also knows what time it is: a sun on it by day, and
+  after eight in the evening a darker card, a moon and a small lamp, with the
+  month deciding what falls through the air -- rain in spring, leaves in autumn,
+  snow in winter, nothing in summer.
 
 ## Games
 
