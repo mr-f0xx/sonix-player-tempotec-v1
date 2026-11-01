@@ -67,6 +67,31 @@ pet_vibe_t petwatch_vibe(void);
 // costume of its own.
 pet_genre_look_t petwatch_look(void);
 
+// The box on the floor, in one read: which fortune today has, whether it has
+// been answered, how many finds are waiting to be picked up, what the shelf
+// already holds, and whether this hour's treat game is still unplayed. One
+// struct because the page asks all of it at once, for the cue on the card and
+// for the sheet that opens from it.
+typedef struct {
+	bool fortune_ready;
+	int fortune_id;
+	int drops;
+	int found[PET_DROP_COUNT];
+	bool treats_ready;
+} petwatch_box_t;
+
+petwatch_box_t petwatch_box(void);
+
+// Takes one find out of the box and onto the shelf: the kind, or -1.
+int petwatch_drop_take(void);
+
+// Says the day's fortune was carried out. True when the fifty notes were paid.
+bool petwatch_fortune_pay(void);
+
+// The hour's treat game, for the number of notes tapped on the line (0 to 2).
+// The notes it paid, 0 when the hour has been used.
+int petwatch_treat_finish(int hits);
+
 // The player's volume, as the last tick read it. The page wears it: a turned
 // up level has wide eyes, a quiet one rests.
 int petwatch_volume(void);

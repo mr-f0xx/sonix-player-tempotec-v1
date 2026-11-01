@@ -549,6 +549,89 @@ static void test_genre_look(void) {
 	assert(pet_genre_look("  rock  ") == PET_LOOK_COLLAR);
 }
 
+// The box on the floor: a fortune a day, a game an hour, a find every half
+// hour of music -- and no way to farm any of the three.
+static void test_the_box(void) {
+	fresh();
+	const long day = pet_day_now(T0);
+	st.day = day;
+
+	// The fortune is the day's: asking twice gives the same line, and the days
+	// do not all give the same one.
+	const int first = pet_fortune(&st, day);
+	assert(first >= 0 && first < PET_FORTUNE_COUNT);
+	assert(pet_fortune(&st, day) == first);
+	bool differs = false;
+	for (long d = day + 1; d < day + 31; d++) {
+		int id = pet_fortune(&st, d);
+		assert(id >= 0 && id < PET_FORTUNE_COUNT);
+		if (id != first) {
+			differs = true;
+		}
+	}
+	assert(differs);
+
+	// Answering it pays fifty notes, once a day, and a day with no clock at all
+	// pays nothing.
+	int notes = st.notes;
+	st.fortune_paid = 0;
+	assert(!pet_fortune_pay(&st, 0));
+	assert(pet_fortune_pay(&st, day));
+	assert(st.notes == notes + PET_FORTUNE_NOTES);
+	assert(!pet_fortune_pay(&st, day));
+	assert(st.notes == notes + PET_FORTUNE_NOTES);
+	assert(pet_fortune_pay(&st, day + 1));
+
+	// Half an hour of music turns something up.
+	st.drop_secs = 0;
+	st.drop_pending = 0;
+	for (int i = 0; i < PET_DROP_COUNT; i++) {
+		st.found[i] = 0;
+	}
+	assert(!pet_drop_add(&st, PET_DROP_SECS - 1));
+	assert(pet_drop_add(&st, 1));
+	assert(st.drop_pending == 1);
+
+	// The box holds three, and with the box full the listening stops counting:
+	// a week away is a box, not a heap.
+	assert(pet_drop_add(&st, PET_DROP_SECS * 4));
+	assert(st.drop_pending == PET_DROP_PENDING_MAX);
+	assert(!pet_drop_add(&st, PET_DROP_SECS));
+	assert(st.drop_pending == PET_DROP_PENDING_MAX);
+
+	// Taking one out puts it on the shelf, and the four kinds come round in
+	// turn rather than at random, so a small shelf has one of each on it.
+	int kinds = 0;
+	for (int i = 0; i < PET_DROP_PENDING_MAX; i++) {
+		int kind = pet_drop_take(&st);
+		assert(kind >= 0 && kind < PET_DROP_COUNT);
+		kinds |= 1 << kind;
+	}
+	assert(pet_drop_take(&st) == -1);
+	assert(kinds == (1 << PET_DROP_PENDING_MAX) - 1);
+	assert(st.found[PET_DROP_BONE] == 1);
+
+	// The treat game: one an hour, worth five, seven or ten -- and the hour
+	// that has been played is spent.
+	st.treat_hour = 0;
+	st.notes = 0;
+	assert(pet_treat_ready(&st, T0));
+	assert(pet_treat_finish(&st, T0, 0) == PET_TREAT_MIN_NOTES);
+	assert(pet_treat_finish(&st, T0, 2) == 0);
+	assert(st.notes == PET_TREAT_MIN_NOTES);
+	assert(!pet_treat_ready(&st, T0 + 60));
+	assert(pet_treat_ready(&st, T0 + PET_TREAT_PERIOD_SECS));
+	assert(pet_treat_finish(&st, T0 + PET_TREAT_PERIOD_SECS, 1) == PET_TREAT_MIN_NOTES + 1);
+	assert(pet_treat_finish(&st, T0 + 2 * PET_TREAT_PERIOD_SECS, 2) == PET_TREAT_MIN_NOTES + 2);
+	// Six notes is the most a game has, and ten the most it pays.
+	assert(pet_treat_finish(&st, T0 + 3 * PET_TREAT_PERIOD_SECS, 6) == PET_TREAT_MAX_NOTES);
+	assert(pet_treat_finish(&st, T0 + 4 * PET_TREAT_PERIOD_SECS, 99) == PET_TREAT_MAX_NOTES);
+
+	// A clock that has not been set is not an hour that can be spent.
+	assert(!pet_treat_ready(&st, 0));
+	assert(pet_treat_finish(&st, 0, 2) == 0);
+}
+
 static void test_vibe(void) {
 	assert(pet_vibe_for_genre(NULL) == PET_VIBE_NEUTRAL);
 	assert(pet_vibe_for_genre("") == PET_VIBE_NEUTRAL);
@@ -965,6 +1048,11 @@ static void test_v4_persistence(void) {
 	pet_rhythm_finish(&st, 64);
 	pet_forage(&st, PET_FORAGE_SECS);
 	pet_hold(&st);
+	pet_fortune(&st, pet_day_now(T0));
+	pet_fortune_pay(&st, pet_day_now(T0));
+	pet_drop_add(&st, PET_DROP_SECS);
+	pet_drop_take(&st);
+	pet_treat_finish(&st, base, 2);
 	pet_save(&st);
 
 	pet_state_t loaded;
@@ -976,6 +1064,13 @@ static void test_v4_persistence(void) {
 	assert(loaded.rhythm_best == st.rhythm_best);
 	assert(loaded.forage_day == st.forage_day);
 	assert(loaded.hold_day == st.hold_day);
+	assert(loaded.fortune_id == st.fortune_id);
+	assert(loaded.fortune_paid == st.fortune_paid);
+	assert(loaded.drop_pending == st.drop_pending);
+	assert(loaded.treat_hour == st.treat_hour);
+	for (int i = 0; i < PET_DROP_COUNT; i++) {
+		assert(loaded.found[i] == st.found[i]);
+	}
 	assert(loaded.notes == st.notes);
 	assert(loaded.freezes == st.freezes);
 
@@ -1009,6 +1104,7 @@ int main(void) {
 	test_mood();
 	test_petting();
 	test_holding();
+	test_the_box();
 	test_vibe();
 	test_genre_look();
 	test_persistence();

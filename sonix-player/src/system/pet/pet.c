@@ -188,6 +188,94 @@ int pet_note_track(pet_state_t *st, const char *genre, const char *album, int *e
 
 bool pet_audible_volume(int percent) { return percent >= PET_VOLUME_FLOOR; }
 
+// ---- the box --------------------------------------------------------------
+
+int pet_fortune(pet_state_t *st, long day) {
+	if (!st) {
+		return 0;
+	}
+	if (day > 0 && st->fortune_day != day) {
+		// A new day is a new line, drawn from the day itself: the same day
+		// always gives the same fortune, which is what makes it a fortune and
+		// not a slot machine.
+		st->fortune_day = day;
+		uint32_t roll = (uint32_t)day * 2246822519u ^ 0x85EBCA6Bu;
+		st->fortune_id = (int)(roll % (uint32_t)PET_FORTUNE_COUNT);
+	}
+	if (st->fortune_id < 0 || st->fortune_id >= PET_FORTUNE_COUNT) {
+		st->fortune_id = 0;
+	}
+	return st->fortune_id;
+}
+
+bool pet_fortune_pay(pet_state_t *st, long day) {
+	if (!st || day <= 0 || st->fortune_paid == day) {
+		return false;
+	}
+	st->fortune_paid = day;
+	st->notes = clamp_int(st->notes + PET_FORTUNE_NOTES, 0, INT_MAX);
+	return true;
+}
+
+bool pet_drop_add(pet_state_t *st, int listened_secs) {
+	if (!st || listened_secs <= 0) {
+		return false;
+	}
+	// A long second -- a tick that slept, a page that was busy -- is still
+	// worth what it says, so the loop takes every half hour it holds.
+	st->drop_secs = clamp_int(st->drop_secs + listened_secs, 0, PET_DROP_SECS * PET_DROP_PENDING_MAX * 4);
+
+	bool found = false;
+	while (st->drop_secs >= PET_DROP_SECS && st->drop_pending < PET_DROP_PENDING_MAX) {
+		st->drop_secs -= PET_DROP_SECS;
+		st->drop_pending++;
+		found = true;
+	}
+
+	// A box, not a pile: three finds at most. With the box full the listening
+	// stops counting, so a week away does not come back as a heap of bones.
+	if (st->drop_pending >= PET_DROP_PENDING_MAX) {
+		st->drop_secs = PET_DROP_SECS - 1;
+	}
+	return found;
+}
+
+int pet_drop_take(pet_state_t *st) {
+	if (!st || st->drop_pending <= 0) {
+		return -1;
+	}
+	// The four come round in turn rather than at random: a shelf with one of
+	// everything on it is worth looking at, and the order costs no state.
+	int total = 0;
+	for (int i = 0; i < PET_DROP_COUNT; i++) {
+		total += st->found[i] > 0 ? st->found[i] : 0;
+	}
+	const int kind = total % PET_DROP_COUNT;
+	st->found[kind] = clamp_int(st->found[kind] + 1, 0, 999);
+	st->drop_pending--;
+	return kind;
+}
+
+bool pet_treat_ready(const pet_state_t *st, int64_t now) {
+	if (!st || now <= 0) {
+		return false;
+	}
+	return st->treat_hour != (long)(now / PET_TREAT_PERIOD_SECS);
+}
+
+int pet_treat_finish(pet_state_t *st, int64_t now, int hits) {
+	if (!pet_treat_ready(st, now)) {
+		return 0;
+	}
+	st->treat_hour = (long)(now / PET_TREAT_PERIOD_SECS);
+	// Five for turning up, one for every note caught, ten at the top: six
+	// notes in a game, so a perfect game is the maximum and a hopeless one is
+	// still worth the price of the tap.
+	const int notes = PET_TREAT_MIN_NOTES + clamp_int(hits, 0, PET_TREAT_MAX_NOTES - PET_TREAT_MIN_NOTES);
+	st->notes = clamp_int(st->notes + notes, 0, INT_MAX);
+	return notes;
+}
+
 bool pet_hold(pet_state_t *st) {
 	if (!st) {
 		return false;
@@ -1255,6 +1343,17 @@ void pet_load(pet_state_t *st, int64_t now, long day) {
 	st->rhythm_best = (int)config_get_int(PET_SECTION, "rhythm_best", 0);
 	st->forage_day = config_get_int(PET_SECTION, "forage_day", 0);
 	st->hold_day = config_get_int(PET_SECTION, "hold_day", 0);
+	st->fortune_day = config_get_int(PET_SECTION, "fortune_day", 0);
+	st->fortune_id = config_get_int(PET_SECTION, "fortune_id", 0);
+	st->fortune_paid = config_get_int(PET_SECTION, "fortune_paid", 0);
+	st->drop_secs = config_get_int(PET_SECTION, "drop_secs", 0);
+	st->drop_pending = config_get_int(PET_SECTION, "drop_pending", 0);
+	st->treat_hour = config_get_int(PET_SECTION, "treat_hour", 0);
+	for (int i = 0; i < PET_DROP_COUNT; i++) {
+		char key[24];
+		snprintf(key, sizeof(key), "found_%d", i);
+		st->found[i] = config_get_int(PET_SECTION, key, 0);
+	}
 
 	// A hand edit, a half-written file or a state from a much older build is
 	// brought back inside the ranges this arithmetic assumes.
@@ -1360,6 +1459,17 @@ void pet_save(const pet_state_t *st) {
 	config_set_int(PET_SECTION, "rhythm_best", st->rhythm_best);
 	config_set_int(PET_SECTION, "forage_day", st->forage_day);
 	config_set_int(PET_SECTION, "hold_day", st->hold_day);
+	config_set_int(PET_SECTION, "fortune_day", st->fortune_day);
+	config_set_int(PET_SECTION, "fortune_id", st->fortune_id);
+	config_set_int(PET_SECTION, "fortune_paid", st->fortune_paid);
+	config_set_int(PET_SECTION, "drop_secs", st->drop_secs);
+	config_set_int(PET_SECTION, "drop_pending", st->drop_pending);
+	config_set_int(PET_SECTION, "treat_hour", st->treat_hour);
+	for (int i = 0; i < PET_DROP_COUNT; i++) {
+		char key[24];
+		snprintf(key, sizeof(key), "found_%d", i);
+		config_set_int(PET_SECTION, key, st->found[i]);
+	}
 }
 
 void pet_set_name(const char *name) {

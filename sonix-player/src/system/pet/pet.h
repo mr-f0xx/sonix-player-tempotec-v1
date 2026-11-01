@@ -159,6 +159,32 @@
 #define PET_FORAGE_SECS (45 * 60)
 #define PET_FORAGE_CHANCE 3 // one day in three
 
+// ---- the box on the floor ------------------------------------------------
+//
+// Three little things, and one rule between them: none of them can be farmed
+// by tapping. A fortune is drawn once a day and paid for once a day; the treat
+// game is one game an hour; a find costs half an hour of music that was
+// actually heard, and the box holds three of them at most, so a player who was
+// away for a week comes back to a box and not to a pile.
+#define PET_FORTUNE_NOTES 50 // what a fortune is worth once it has been carried out
+#define PET_FORTUNE_COUNT 6  // how many lines there are
+#define PET_TREAT_PERIOD_SECS 3600
+#define PET_TREAT_MIN_NOTES 5
+#define PET_TREAT_MAX_NOTES 10
+#define PET_DROP_SECS (30 * 60) // of audible music, per find
+#define PET_DROP_KINDS 4
+#define PET_DROP_PENDING_MAX 3
+
+// What a find is. Flat colours on the page: a bone, a cassette, a sticker and
+// a record, which is what a music player would find on its own floor.
+typedef enum {
+	PET_DROP_BONE = 0,
+	PET_DROP_CASSETTE,
+	PET_DROP_STICKER,
+	PET_DROP_VINYL,
+	PET_DROP_COUNT, // == PET_DROP_KINDS
+} pet_drop_t;
+
 // ---- being skipped at ----------------------------------------------------
 //
 // Skipping is not a crime, but flicking through a library is not listening.
@@ -245,6 +271,7 @@ typedef enum {
 	PET_EVENT_DROP = 1 << 3,      // an Upbeat pet found notes on the floor
 	PET_EVENT_DIZZY = 1 << 4,     // too much skipping: the pet is dizzy now
 	PET_EVENT_FORAGE = 1 << 5,    // a Curious pet found something on a long session
+	PET_EVENT_FIND = 1 << 6,      // half an hour of music turned something up
 } pet_event_t;
 
 // Achievements are permanent, a bit each. The notes they pay are one-off.
@@ -378,6 +405,23 @@ typedef struct {
 
 	// The day a Curious pet last found something while foraging.
 	long forage_day;
+
+	// The box on the floor. `fortune_day`/`fortune_id` are today's line and
+	// `fortune_paid` is the day it was answered, which is what makes the fifty
+	// notes once a day rather than once a tap. `drop_secs` is the listening
+	// that has gone towards the next find, `drop_pending` the finds waiting to
+	// be picked up, and `found[]` the shelf they end up on.
+	long fortune_day;
+	int fortune_id;
+	long fortune_paid;
+	int drop_secs;
+	int drop_pending;
+	int found[PET_DROP_COUNT]; // how many of each are on the shelf
+
+	// The hour the treat game was last played, counted in hours of the clock,
+	// so the game is one per hour and a clock that jumps back an hour buys no
+	// more than the hour it is in.
+	long treat_hour;
 
 	int pets; // how many times it has been petted, for the sake of a number
 } pet_state_t;
@@ -528,6 +572,30 @@ int pet_forage(pet_state_t *st, int session_secs);
 // freeze in hand. False/0 when today has already been paid for.
 bool pet_rhythm_ready(const pet_state_t *st);
 int pet_rhythm_finish(pet_state_t *st, int score);
+
+// ---- the box --------------------------------------------------------------
+//
+// The fortune is drawn from the day the first time it is asked for, so it is
+// the same line all day and a different one at midnight, and it costs nothing
+// to ask twice. Answering it -- the one thing the pet cannot check, which is
+// the point, since a fortune is an invitation and not a task -- pays
+// PET_FORTUNE_NOTES once a day.
+int pet_fortune(pet_state_t *st, long day);
+bool pet_fortune_pay(pet_state_t *st, long day);
+
+// The listening that has gone towards the next find, added up. True when this
+// call turned something up; the page says so and the box gets an item.
+bool pet_drop_add(pet_state_t *st, int listened_secs);
+
+// Out of the box and onto the shelf: the kind taken, or -1 when the box is
+// empty.
+int pet_drop_take(pet_state_t *st);
+
+// The treat game, once an hour: `hits` is how many notes were tapped on the
+// line. Five notes for playing, one more each note caught, ten at the top.
+// Returns the notes it paid, 0 when the hour has been used already.
+bool pet_treat_ready(const pet_state_t *st, int64_t now);
+int pet_treat_finish(pet_state_t *st, int64_t now, int hits);
 
 // The genre's mood, for the page's animation. Case-insensitive, and tolerant of
 // the sub-genres taggers actually write ("Lo-Fi Hip Hop", "Melodic Death

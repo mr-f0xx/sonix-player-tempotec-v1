@@ -196,6 +196,15 @@ typedef struct {
 	lv_obj_t *cup_coffee;
 	lv_obj_t *cup_handle;
 
+	// The box on the floor, and whatever it has turned up: a tap on the box
+	// opens the sheet, a tap on a find puts it on the shelf.
+	lv_obj_t *box;
+	lv_obj_t *box_base;
+	lv_obj_t *box_lid;
+	lv_obj_t *box_latch;
+	lv_obj_t *find;
+	lv_obj_t *find_icon[PET_DROP_KINDS];
+
 	// The little hearts: one that pops over a tapped head, and the three that
 	// fill up under a held finger.
 	lv_obj_t *heart;
@@ -355,6 +364,10 @@ static void name_dialog_close(void);
 static void pet_tap_cb(lv_event_t *e);
 static void pet_hold_cb(lv_event_t *e);
 static void start_reaction(int what);
+static void box_open_cb(lv_event_t *e);
+static void find_take_cb(lv_event_t *e);
+static void box_close(void);
+static void treat_close(void);
 static void end_reaction(void);
 static void hide_hold_meter(void);
 static void tap_close(void);
@@ -911,6 +924,60 @@ static lv_obj_t *round_piece(lv_obj_t *parent, lv_color_t color) {
 	return o;
 }
 
+// ---------------------------------------------------------------------------
+// What the floor turns up
+//
+// Four things, drawn flat out of the same shapes as the animal, at whatever size
+// the caller has room for: fourteen pixels in the corner of the card, twenty in
+// a cell of the shelf. The fractions are of that size, so one drawing does both.
+// ---------------------------------------------------------------------------
+
+static lv_obj_t *drop_piece(lv_obj_t *parent, lv_color_t color, int x, int y, int w, int h, int size, bool round) {
+	lv_obj_t *o = round_piece(parent, color);
+	lv_obj_set_size(o, w * size / 20, h * size / 20);
+	lv_obj_set_pos(o, x * size / 20, y * size / 20);
+	lv_obj_set_style_radius(o, round ? LV_RADIUS_CIRCLE : 2, 0);
+	return o;
+}
+
+static lv_obj_t *drop_icon(lv_obj_t *parent, int kind, int size) {
+	lv_obj_t *box = plain(parent);
+	lv_obj_set_size(box, size, size);
+
+	switch (kind) {
+	case PET_DROP_BONE: {
+		// A shaft with a knob at each end, twice over: four knobs and a bone.
+		drop_piece(box, lv_color_white(), 3, 8, 14, 4, size, false);
+		for (int end = 0; end < 2; end++) {
+			for (int side = 0; side < 2; side++) {
+				drop_piece(box, lv_color_white(), end ? 13 : 1, side ? 9 : 4, 6, 6, size, true);
+			}
+		}
+		break;
+	}
+	case PET_DROP_CASSETTE: {
+		drop_piece(box, lv_color_hex(0x5A6470), 2, 5, 16, 10, size, false);
+		drop_piece(box, lv_color_hex(0xEDEFF2), 4, 7, 12, 3, size, false);
+		drop_piece(box, lv_color_hex(0xEDEFF2), 6, 11, 3, 3, size, true);
+		drop_piece(box, lv_color_hex(0xEDEFF2), 11, 11, 3, 3, size, true);
+		break;
+	}
+	case PET_DROP_STICKER: {
+		drop_piece(box, PET_CROWN, 2, 2, 16, 16, size, true);
+		drop_piece(box, PET_HAT, 7, 7, 6, 6, size, true);
+		break;
+	}
+	case PET_DROP_VINYL:
+	default: {
+		drop_piece(box, PET_SHADE, 2, 2, 16, 16, size, true);
+		drop_piece(box, PET_GOLD, 7, 7, 6, 6, size, true);
+		drop_piece(box, lv_color_black(), 9, 9, 2, 2, size, true);
+		break;
+	}
+	}
+	return box;
+}
+
 static void build_creature(void) {
 	memset(&parts, 0, sizeof(parts));
 
@@ -924,6 +991,21 @@ static void build_creature(void) {
 	lv_obj_add_event_cb(parts.root, pet_hold_cb, LV_EVENT_PRESS_LOST, NULL);
 
 	parts.shadow = disc(parts.root, lv_color_black());
+
+	// The box and the find are on the floor of the room, not on the animal, so
+	// they are made before it and never move with it.
+	parts.box = plain(parts.root);
+	lv_obj_set_clickable(parts.box, true);
+	lv_obj_add_event_cb(parts.box, box_open_cb, LV_EVENT_CLICKED, NULL);
+	parts.box_base = round_piece(parts.box, PET_HAT);
+	parts.box_lid = round_piece(parts.box, PET_HAT);
+	parts.box_latch = round_piece(parts.box, PET_GOLD);
+	parts.find = plain(parts.root);
+	lv_obj_set_clickable(parts.find, true);
+	lv_obj_add_event_cb(parts.find, find_take_cb, LV_EVENT_CLICKED, NULL);
+	for (int i = 0; i < PET_DROP_KINDS; i++) {
+		parts.find_icon[i] = drop_icon(parts.find, i, 16);
+	}
 
 	// ---- behind the trunk ----------------------------------------------
 	parts.fin_top = shape_create(parts.root, &shape_fin_top);
@@ -1589,6 +1671,34 @@ static void paint_creature(void) {
 	show(parts.cup, cup);
 	show(parts.cup_coffee, cup);
 	show(parts.cup_handle, cup);
+
+	// ---- the box on the floor --------------------------------------------
+	//
+	// It lives in the corner of the card all day and its latch is gold when
+	// there is something in it: today's fortune, an hour's game, or what the
+	// listening turned up.
+	const petwatch_box_t box = petwatch_box();
+	const int box_x = 4;
+	const int find_x = PET_CREATURE_W - 22;
+	set_radius(parts.box_base, 2);
+	set_radius(parts.box_lid, 2);
+	set_radius(parts.box_latch, 1);
+	place(parts.box, box_x, PET_BASE_Y - 16, 18, 17);
+	place(parts.box_base, 0, 5, 16, 11);
+	place(parts.box_lid, 0, 0, 18, 7);
+	place(parts.box_latch, 6, 4, 4, 5);
+	set_color(parts.box_latch, (box.fortune_ready || box.drops > 0 || box.treats_ready) ? PET_GOLD : PET_PEBBLE);
+
+	int shelf_total = 0;
+	for (int i = 0; i < PET_DROP_COUNT; i++) {
+		shelf_total += box.found[i];
+	}
+	const int pending_kind = shelf_total % PET_DROP_KINDS;
+	place(parts.find, find_x, PET_BASE_Y - 16, 16, 16);
+	show(parts.find, box.drops > 0);
+	for (int i = 0; i < PET_DROP_KINDS; i++) {
+		show(parts.find_icon[i], box.drops > 0 && i == pending_kind);
+	}
 
 	// The hearts float over the head, wherever the head has got to this stage.
 	// Whether they can be seen is the reaction's business, not the paint's.
@@ -2389,6 +2499,437 @@ static void build_tap(void) {
 }
 
 // ---------------------------------------------------------------------------
+// The box
+//
+// One sheet, opened from the box on the floor, and everything the watching
+// turns up goes through it: the day's fortune (a line to keep or to ignore,
+// worth fifty notes when it has been carried out), the shelf of what the
+// listening found, and the hour's note game.
+//
+// Nothing here is a new timer except the game. A find is counted in pet.c from
+// the seconds the watcher has already credited, so being away does not stop it
+// and being away does not multiply it: the box holds three.
+// ---------------------------------------------------------------------------
+
+#define SHELF_CELL 44
+#define SHELF_COUNT PET_DROP_KINDS
+
+static lv_obj_t *box_sheet;
+static lv_obj_t *box_fortune_label;
+static lv_obj_t *box_done_button;
+static lv_obj_t *box_done_label;
+static lv_obj_t *box_plus_label;
+static lv_obj_t *box_shelf_icon[SHELF_COUNT];
+static lv_obj_t *box_shelf_count[SHELF_COUNT];
+static lv_obj_t *box_game_label;
+static bool box_visible;
+
+static lv_timer_t *treat_timer;
+static lv_obj_t *treat_sheet;
+static lv_obj_t *treat_lane;
+static lv_obj_t *treat_note;
+static lv_obj_t *treat_zone;
+static bool treat_visible;
+static int treat_lane_w;
+static int treat_pass;
+static int treat_hits;
+static bool treat_hit_this;
+static int32_t treat_start_ms;
+
+#define TREAT_NOTES 6      // notes to hit in one game: about nine seconds
+#define TREAT_PASS_MS 1400 // how long one note takes to cross the lane
+#define TREAT_TIMER_MS 30
+#define TREAT_ZONE_PX 26 // half the width of the window a hit is inside
+
+static void box_refresh(void) {
+	if (!box_sheet) {
+		return;
+	}
+	const petwatch_box_t box = petwatch_box();
+
+	char key[32];
+	snprintf(key, sizeof(key), "pet_fortune_%d", box.fortune_id % PET_FORTUNE_COUNT + 1);
+	lv_label_set_text(box_fortune_label, tr(key));
+
+	// Answered is not the same as not yet asked: the day's line stays on the
+	// card after it has been paid for, and says so.
+	show(box_done_button, box.fortune_ready);
+	show(box_plus_label, true);
+	lv_label_set_text(box_plus_label, box.fortune_ready ? "+50" : tr("pet_box_answered"));
+
+	for (int i = 0; i < SHELF_COUNT; i++) {
+		show(box_shelf_icon[i], true);
+		lv_label_set_text_fmt(box_shelf_count[i], "%d", box.found[i]);
+	}
+	lv_label_set_text(box_game_label, box.treats_ready ? tr("pet_box_play") : tr("pet_box_hour"));
+}
+
+static void box_close(void) {
+	if (box_sheet) {
+		lv_obj_set_hidden(box_sheet, true);
+	}
+	box_visible = false;
+	treat_close();
+}
+
+static void box_close_cb(lv_event_t *e) {
+	(void)e;
+	box_close();
+}
+
+static void box_done_cb(lv_event_t *e) {
+	(void)e;
+	if (!petwatch_fortune_pay()) {
+		toast_plain(tr("pet_tap_played")); // already answered today
+	} else {
+		char line[64];
+		snprintf(line, sizeof(line), tr("pet_tap_done"), PET_FORTUNE_NOTES);
+		toast_success(line);
+	}
+	box_refresh();
+	paint();
+}
+
+// ---- the note game -------------------------------------------------------
+
+static void treat_close(void) {
+	if (treat_timer) {
+		lv_timer_delete(treat_timer);
+		treat_timer = NULL;
+	}
+	if (treat_sheet) {
+		lv_obj_set_hidden(treat_sheet, true);
+	}
+	treat_visible = false;
+}
+
+static void treat_finish(void) {
+	const int hits = treat_hits;
+	treat_close();
+	const int notes = petwatch_treat_finish(hits);
+	if (notes > 0) {
+		char line[64];
+		snprintf(line, sizeof(line), tr("pet_tap_done"), notes);
+		toast_success(line);
+	} else {
+		toast_plain(tr("pet_tap_played"));
+	}
+	if (box_visible) {
+		box_refresh();
+	}
+	paint();
+}
+
+static void treat_tick_cb(lv_timer_t *timer) {
+	(void)timer;
+	if (!treat_visible) {
+		return;
+	}
+	const int32_t elapsed = (int32_t)lv_tick_elaps(treat_start_ms);
+	const int pass = elapsed / TREAT_PASS_MS;
+	if (pass != treat_pass) {
+		treat_pass = pass;
+		treat_hit_this = false;
+	}
+	if (pass >= TREAT_NOTES) {
+		treat_finish();
+		return;
+	}
+	const int32_t into = elapsed % TREAT_PASS_MS;
+	const int span = treat_lane_w - 16;
+	lv_obj_set_x(treat_note, (int32_t)into * span / TREAT_PASS_MS);
+}
+
+static void treat_press_cb(lv_event_t *e) {
+	(void)e;
+	if (!treat_visible || treat_hit_this) {
+		return;
+	}
+	const int centre = lv_obj_get_x(treat_note) + 8;
+	const int target = treat_lane_w / 2;
+	if (centre < target - TREAT_ZONE_PX || centre > target + TREAT_ZONE_PX) {
+		return;
+	}
+	treat_hit_this = true;
+	treat_hits++;
+	set_color(treat_note, PET_GOLD);
+}
+
+static void treat_open_cb(lv_event_t *e) {
+	(void)e;
+	if (!petwatch_box().treats_ready) {
+		toast_plain(tr("pet_box_hour"));
+		return;
+	}
+
+	if (!treat_sheet) {
+		return;
+	}
+	treat_pass = 0;
+	treat_hits = 0;
+	treat_hit_this = false;
+	set_color(treat_note, theme()->accent);
+	lv_obj_set_x(treat_note, 0);
+	lv_obj_set_hidden(treat_sheet, false);
+	lv_obj_move_foreground(treat_sheet);
+	treat_visible = true;
+	treat_start_ms = lv_tick_get();
+	if (!treat_timer) {
+		treat_timer = lv_timer_create(treat_tick_cb, TREAT_TIMER_MS, NULL);
+	}
+}
+
+static void build_treat(void) {
+	if (treat_sheet || !page_cfg) {
+		return;
+	}
+	const int pad = page_cfg->padding;
+	const int w = page_cfg->screen_width;
+	const int h = page_cfg->screen_height;
+
+	treat_sheet = lv_obj_create(petpage_screen);
+	lv_obj_set_size(treat_sheet, w, h);
+	lv_obj_set_pos(treat_sheet, 0, 0);
+	lv_obj_set_style_pad_all(treat_sheet, 0, 0);
+	lv_obj_set_style_border_width(treat_sheet, 0, 0);
+	lv_obj_add_style(treat_sheet, &theme_style_screen, 0);
+	lv_obj_set_scrollable(treat_sheet, false);
+	lv_obj_set_hidden(treat_sheet, true);
+
+	// The whole sheet is the drum: a note has to be caught with the hand that
+	// is already there.
+	lv_obj_t *drum = lv_btn_create(treat_sheet);
+	lv_obj_set_size(drum, w, h);
+	lv_obj_set_pos(drum, 0, 0);
+	lv_obj_set_style_bg_opa(drum, LV_OPA_TRANSP, 0);
+	lv_obj_set_style_border_width(drum, 0, 0);
+	lv_obj_set_style_shadow_width(drum, 0, 0);
+	lv_obj_set_style_pad_all(drum, 0, 0);
+	lv_obj_add_event_cb(drum, treat_press_cb, LV_EVENT_CLICKED, NULL);
+
+	lv_obj_t *heading = lv_label_create(treat_sheet);
+	lv_label_set_text(heading, tr("pet_box_game"));
+	lv_obj_add_style(heading, &theme_style_text, 0);
+	lv_obj_set_style_text_font(heading, &font_ui_18, 0);
+	place_sheet_heading(heading);
+
+	lv_obj_t *close = lv_btn_create(treat_sheet);
+	settingsrow_place_corner_button(close, page_cfg, 0);
+	lv_obj_set_style_bg_opa(close, LV_OPA_TRANSP, 0);
+	lv_obj_set_style_border_width(close, 0, 0);
+	lv_obj_set_style_shadow_width(close, 0, 0);
+	lv_obj_set_style_pad_all(close, 0, 0);
+	lv_obj_add_event_cb(close, (lv_event_cb_t)box_close_cb, LV_EVENT_CLICKED, NULL);
+	lv_obj_t *close_icon = icon_image(close, &icon_close, settingsrow_corner_button_size(page_cfg) * 5 / 9);
+	lv_obj_add_style(close_icon, &theme_style_icon, 0);
+	lv_obj_center(close_icon);
+
+	lv_obj_t *hint = lv_label_create(treat_sheet);
+	lv_obj_add_style(hint, &theme_style_text_dim, 0);
+	lv_obj_set_style_text_font(hint, &font_ui_14, 0);
+	lv_label_set_text(hint, tr("pet_box_game_hint"));
+	lv_obj_set_width(hint, w - 2 * pad - 8);
+	lv_label_set_long_mode(hint, LV_LABEL_LONG_WRAP);
+	lv_obj_align(hint, LV_ALIGN_TOP_LEFT, pad + 4, settingsrow_header_text_top(page_cfg) + 34);
+
+	// The lane runs left to right, and the window the note has to cross sits
+	// in the middle of it: one line, one note, one hand.
+	const int lane_y = pad + page_cfg->top_bar_height + 96;
+	const int lane_h = 72;
+	treat_lane_w = w - 2 * pad - 16;
+	treat_lane = lv_obj_create(treat_sheet);
+	lv_obj_add_style(treat_lane, &theme_style_card, 0);
+	lv_obj_set_size(treat_lane, treat_lane_w, lane_h);
+	lv_obj_align(treat_lane, LV_ALIGN_TOP_MID, 0, lane_y);
+	lv_obj_set_style_radius(treat_lane, 14, 0);
+	lv_obj_set_style_border_width(treat_lane, 0, 0);
+	lv_obj_set_style_shadow_width(treat_lane, 0, 0);
+	lv_obj_set_style_pad_all(treat_lane, 0, 0);
+	lv_obj_set_scrollable(treat_lane, false);
+
+	treat_zone = bar_piece(treat_lane, theme()->accent, 4);
+	lv_obj_set_size(treat_zone, TREAT_ZONE_PX * 2, lane_h - 20);
+	lv_obj_align(treat_zone, LV_ALIGN_LEFT_MID, treat_lane_w / 2 - TREAT_ZONE_PX, 0);
+	lv_obj_set_style_bg_opa(treat_zone, LV_OPA_30, 0);
+
+	lv_obj_t *line = bar_piece(treat_lane, theme()->accent, 1);
+	lv_obj_set_size(line, treat_lane_w - 16, 2);
+	lv_obj_align(line, LV_ALIGN_BOTTOM_MID, 0, -10);
+
+	treat_note = disc(treat_lane, theme()->accent);
+	lv_obj_set_size(treat_note, 16, 16);
+	lv_obj_align(treat_note, LV_ALIGN_CENTER, 0, 0);
+	lv_obj_set_x(treat_note, 0);
+}
+
+static void build_box(void) {
+	if (box_sheet || !page_cfg) {
+		return;
+	}
+	const int pad = page_cfg->padding;
+	const int w = page_cfg->screen_width;
+	const int h = page_cfg->screen_height;
+
+	box_sheet = lv_obj_create(petpage_screen);
+	lv_obj_set_size(box_sheet, w, h);
+	lv_obj_set_pos(box_sheet, 0, 0);
+	lv_obj_set_style_pad_all(box_sheet, 0, 0);
+	lv_obj_set_style_border_width(box_sheet, 0, 0);
+	lv_obj_add_style(box_sheet, &theme_style_screen, 0);
+	lv_obj_set_scrollable(box_sheet, false);
+	lv_obj_set_hidden(box_sheet, true);
+
+	lv_obj_t *heading = lv_label_create(box_sheet);
+	lv_label_set_text(heading, tr("pet_box"));
+	lv_obj_add_style(heading, &theme_style_text, 0);
+	lv_obj_set_style_text_font(heading, &font_ui_18, 0);
+	place_sheet_heading(heading);
+
+	lv_obj_t *close = lv_btn_create(box_sheet);
+	settingsrow_place_corner_button(close, page_cfg, 0);
+	lv_obj_set_style_bg_opa(close, LV_OPA_TRANSP, 0);
+	lv_obj_set_style_border_width(close, 0, 0);
+	lv_obj_set_style_shadow_width(close, 0, 0);
+	lv_obj_set_style_pad_all(close, 0, 0);
+	lv_obj_add_event_cb(close, box_close_cb, LV_EVENT_CLICKED, NULL);
+	lv_obj_t *close_icon = icon_image(close, &icon_close, settingsrow_corner_button_size(page_cfg) * 5 / 9);
+	lv_obj_add_style(close_icon, &theme_style_icon, 0);
+	lv_obj_center(close_icon);
+
+	// The fortune, on a card of its own: it is the only long sentence on the
+	// page and it should look like something to read rather than a setting.
+	int y = settingsrow_header_text_top(page_cfg) + 40;
+	lv_obj_t *card = lv_obj_create(box_sheet);
+	lv_obj_add_style(card, &theme_style_card, 0);
+	lv_obj_set_size(card, w - 2 * pad, 62);
+	lv_obj_align(card, LV_ALIGN_TOP_MID, 0, y);
+	lv_obj_set_style_radius(card, 12, 0);
+	lv_obj_set_style_border_width(card, 0, 0);
+	lv_obj_set_style_shadow_width(card, 0, 0);
+	lv_obj_set_style_pad_all(card, 8, 0);
+	lv_obj_set_scrollable(card, false);
+
+	box_fortune_label = lv_label_create(card);
+	lv_obj_add_style(box_fortune_label, &theme_style_text, 0);
+	lv_obj_set_style_text_font(box_fortune_label, &font_ui_14, 0);
+	lv_obj_set_width(box_fortune_label, w - 2 * pad - 16);
+	lv_label_set_long_mode(box_fortune_label, LV_LABEL_LONG_WRAP);
+	lv_obj_set_pos(box_fortune_label, 0, 0);
+	lv_label_set_text(box_fortune_label, "");
+
+	// The answer, and what it pays.
+	y += 70;
+	box_done_button = lv_btn_create(box_sheet);
+	lv_obj_set_size(box_done_button, 128, 34);
+	lv_obj_set_pos(box_done_button, pad, y);
+	lv_obj_set_style_radius(box_done_button, 10, 0);
+	lv_obj_set_style_bg_color(box_done_button, theme()->accent, 0);
+	lv_obj_set_style_bg_opa(box_done_button, LV_OPA_COVER, 0);
+	lv_obj_set_style_border_width(box_done_button, 0, 0);
+	lv_obj_set_style_shadow_width(box_done_button, 0, 0);
+	lv_obj_add_event_cb(box_done_button, box_done_cb, LV_EVENT_CLICKED, NULL);
+	box_done_label = lv_label_create(box_done_button);
+	lv_label_set_text(box_done_label, tr("pet_box_done"));
+	lv_obj_set_style_text_color(box_done_label, theme_on_accent(), 0);
+	lv_obj_set_style_text_font(box_done_label, &font_ui_14, 0);
+	lv_obj_center(box_done_label);
+
+	box_plus_label = lv_label_create(box_sheet);
+	lv_obj_add_style(box_plus_label, &theme_style_text_dim, 0);
+	lv_obj_set_style_text_font(box_plus_label, &font_ui_14, 0);
+	lv_obj_set_pos(box_plus_label, pad + 136, y + 8);
+	lv_label_set_text(box_plus_label, "");
+
+	// The shelf: one cell a kind, a picture and a number in it.
+	y += 48;
+	lv_obj_t *shelf = lv_label_create(box_sheet);
+	lv_obj_add_style(shelf, &theme_style_text_dim, 0);
+	lv_obj_set_style_text_font(shelf, &font_ui_14, 0);
+	lv_obj_set_pos(shelf, pad, y);
+	lv_label_set_text(shelf, tr("pet_box_shelf"));
+
+	y += 22;
+	const int gap = 6;
+	const int total = SHELF_COUNT * SHELF_CELL + (SHELF_COUNT - 1) * gap;
+	int x = (w - total) / 2;
+	for (int i = 0; i < SHELF_COUNT; i++) {
+		lv_obj_t *cell = lv_obj_create(box_sheet);
+		lv_obj_add_style(cell, &theme_style_card, 0);
+		lv_obj_set_size(cell, SHELF_CELL, SHELF_CELL);
+		lv_obj_set_pos(cell, x, y);
+		lv_obj_set_style_radius(cell, 10, 0);
+		lv_obj_set_style_border_width(cell, 0, 0);
+		lv_obj_set_style_shadow_width(cell, 0, 0);
+		lv_obj_set_style_pad_all(cell, 0, 0);
+		lv_obj_set_scrollable(cell, false);
+		box_shelf_icon[i] = drop_icon(cell, i, 22);
+		lv_obj_align(box_shelf_icon[i], LV_ALIGN_TOP_MID, 0, 6);
+		box_shelf_count[i] = lv_label_create(cell);
+		lv_obj_add_style(box_shelf_count[i], &theme_style_text_dim, 0);
+		lv_obj_set_style_text_font(box_shelf_count[i], &font_ui_14, 0);
+		lv_label_set_text(box_shelf_count[i], "0");
+		lv_obj_align(box_shelf_count[i], LV_ALIGN_BOTTOM_MID, 0, -4);
+		x += SHELF_CELL + gap;
+	}
+
+	// The hour's game, at the foot of the sheet.
+	y += SHELF_CELL + 16;
+	lv_obj_t *game = lv_btn_create(box_sheet);
+	lv_obj_set_size(game, w - 2 * pad, 36);
+	lv_obj_set_pos(game, pad, y);
+	lv_obj_set_style_radius(game, 10, 0);
+	lv_obj_set_style_bg_color(game, theme()->surface_pressed, 0);
+	lv_obj_set_style_bg_opa(game, LV_OPA_COVER, 0);
+	lv_obj_set_style_border_width(game, 0, 0);
+	lv_obj_set_style_shadow_width(game, 0, 0);
+	lv_obj_add_event_cb(game, treat_open_cb, LV_EVENT_CLICKED, NULL);
+	box_game_label = lv_label_create(game);
+	lv_obj_add_style(box_game_label, &theme_style_text, 0);
+	lv_obj_set_style_text_font(box_game_label, &font_ui_14, 0);
+	lv_obj_center(box_game_label);
+
+	build_treat();
+}
+
+static void box_open(void) {
+	build_box();
+	if (!box_sheet) {
+		return;
+	}
+	box_refresh();
+	lv_obj_set_hidden(box_sheet, false);
+	lv_obj_move_foreground(box_sheet);
+	box_visible = true;
+}
+
+static void box_open_cb(lv_event_t *e) {
+	(void)e;
+	if (switcher_back_drag_active()) {
+		return;
+	}
+	if (box_visible) {
+		box_close();
+		return;
+	}
+	box_open();
+}
+
+static void find_take_cb(lv_event_t *e) {
+	(void)e;
+	if (switcher_back_drag_active() || box_visible) {
+		return;
+	}
+	if (petwatch_drop_take() < 0) {
+		return;
+	}
+	toast_success(tr("pet_forage_toast"));
+	if (box_visible) {
+		box_refresh();
+	}
+	paint();
+}
+
+// ---------------------------------------------------------------------------
 // The wardrobe
 // ---------------------------------------------------------------------------
 
@@ -2917,6 +3458,10 @@ static void pet_hold_cb(lv_event_t *e) {
 		hide_hold_meter();
 	}
 }
+
+lv_obj_t *petpage_box(void) { return page_built ? parts.box : NULL; }
+
+lv_obj_t *petpage_find(void) { return page_built ? parts.find : NULL; }
 
 // The hardware side of the same trick: a volume or a track key, wherever it was
 // pressed, is passed in from the shell and answered here. Both keys keep doing

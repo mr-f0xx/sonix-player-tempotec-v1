@@ -238,6 +238,14 @@ static void tick_cb(lv_timer_t *timer) {
 	listening = result.listened_secs > 0;
 	focus_active = listener.session_secs >= PET_FOCUS_SECS;
 
+	// Half an hour of music turns something up on the floor. It is saved at
+	// once rather than with the next throttle: a find is the kind of thing a
+	// player switches the device off to go and look at.
+	if (result.listened_secs > 0 && pet_drop_add(&state, result.listened_secs)) {
+		pending_events |= PET_EVENT_FIND;
+		save_now();
+	}
+
 	// Too much skipping and the pet stops crediting. It is reported once, on
 	// the skip that tips it over, and PET_EVENT_DIZZY carries it to the page.
 	if (result.skipped && pet_skip(&state, now)) {
@@ -361,6 +369,52 @@ pet_vibe_t petwatch_vibe(void) { return current_vibe; }
 pet_genre_look_t petwatch_look(void) { return pet_genre_look(current_genre); }
 
 int petwatch_volume(void) { return current_volume; }
+
+// ---- the box --------------------------------------------------------------
+
+petwatch_box_t petwatch_box(void) {
+	int64_t now = (int64_t)time(NULL);
+	petwatch_box_t box = {
+		.drops = state.drop_pending,
+		.treats_ready = pet_treat_ready(&state, now),
+	};
+
+	const int id = pet_fortune(&state, pet_day_now(now));
+	box.fortune_id = id;
+	box.fortune_ready = state.fortune_paid != state.fortune_day;
+
+	for (int i = 0; i < PET_DROP_COUNT; i++) {
+		box.found[i] = state.found[i];
+	}
+	return box;
+}
+
+int petwatch_drop_take(void) {
+	const int kind = pet_drop_take(&state);
+	if (kind < 0) {
+		return -1;
+	}
+	save_now();
+	return kind;
+}
+
+bool petwatch_fortune_pay(void) {
+	int64_t now = (int64_t)time(NULL);
+	if (!pet_fortune_pay(&state, pet_day_now(now))) {
+		return false;
+	}
+	save_now();
+	return true;
+}
+
+int petwatch_treat_finish(int hits) {
+	int64_t now = (int64_t)time(NULL);
+	const int notes = pet_treat_finish(&state, now, hits);
+	if (notes > 0) {
+		save_now();
+	}
+	return notes;
+}
 
 bool petwatch_pet_now(void) {
 	int64_t now = (int64_t)time(NULL);

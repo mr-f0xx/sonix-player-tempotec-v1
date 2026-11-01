@@ -40,6 +40,7 @@
 #include "src/system/input/kblayout.h"
 #include "src/system/notes/notesstore.h"
 #include "src/system/pet/pet.h"
+#include "src/system/pet/petwatch.h"
 #include "src/system/text/textfile.h"
 
 /* ---- the parts of the shell these pages lean on, substituted ------------- */
@@ -180,6 +181,20 @@ void petwatch_track_title(char *out, size_t out_size) {
 bool petwatch_pet_now(void) { return pet_pet(&pet_state, petwatch_now()); }
 bool petwatch_hold(void) { return pet_hold(&pet_state); }
 int petwatch_volume(void) { return pet_volume; }
+petwatch_box_t petwatch_box(void) {
+	petwatch_box_t box = {0};
+	box.fortune_id = pet_fortune(&pet_state, pet_day_now(petwatch_now()));
+	box.fortune_ready = pet_state.fortune_paid != pet_state.fortune_day;
+	box.drops = pet_state.drop_pending;
+	box.treats_ready = pet_treat_ready(&pet_state, petwatch_now());
+	for (int i = 0; i < PET_DROP_COUNT; i++) {
+		box.found[i] = pet_state.found[i];
+	}
+	return box;
+}
+int petwatch_drop_take(void) { return pet_drop_take(&pet_state); }
+bool petwatch_fortune_pay(void) { return pet_fortune_pay(&pet_state, pet_day_now(petwatch_now())); }
+int petwatch_treat_finish(int hits) { return pet_treat_finish(&pet_state, petwatch_now(), hits); }
 pet_genre_look_t petwatch_look(void) { return pet_look; }
 int petwatch_take_events(void) { return 0; }
 int petwatch_take_achievement(void) { return 0; }
@@ -1138,6 +1153,86 @@ static void check_pet_page(gui_config_t *cfg, const char *tag) {
 	petpage_open();
 	lv_obj_update_layout(petpage_screen);
 
+	// The box on the floor: the day's fortune, the shelf, and the hour's game.
+	pet_state.fortune_day = pet_day_now(petwatch_now());
+	pet_state.fortune_paid = 0;
+	pet_state.drop_pending = 1;
+	for (int i = 0; i < PET_DROP_COUNT; i++) {
+		pet_state.found[i] = 0;
+	}
+	pet_state.treat_hour = 0;
+	petpage_open();
+	lv_obj_update_layout(petpage_screen);
+
+	// What the floor looks like with something on it.
+	char find_tag[64];
+	snprintf(find_tag, sizeof(find_tag), "%s-find", tag);
+	dump_snapshot(petpage_screen, find_tag);
+
+	lv_obj_t *box = petpage_box();
+	assert(box);
+	assert(!lv_obj_is_hidden(box));
+	lv_obj_send_event(box, LV_EVENT_CLICKED, NULL);
+	lv_obj_update_layout(petpage_screen);
+	lv_obj_t *box_title = find_label(petpage_screen, tr("pet_box"));
+	assert(box_title);
+	assert(lv_obj_is_visible(box_title));
+	assert(find_label(petpage_screen, tr("pet_box_shelf")));
+	assert(find_label(petpage_screen, tr("pet_box_play")));
+	check_within_panel(petpage_screen, cfg, "Pet box");
+	char box_tag[64];
+	snprintf(box_tag, sizeof(box_tag), "%s-box", tag);
+	dump_snapshot(petpage_screen, box_tag);
+
+	// Answering the fortune pays fifty notes, once.
+	int boxed_notes = pet_state.notes;
+	press_visible_key(petpage_screen, tr("pet_box_done"));
+	assert(pet_state.notes == boxed_notes + PET_FORTUNE_NOTES);
+	assert(pet_state.fortune_paid == pet_state.fortune_day);
+	lv_obj_update_layout(petpage_screen);
+	assert(find_label(petpage_screen, tr("pet_box_answered")));
+
+	// The find is on the floor beside the animal, and a tap puts it on the
+	// shelf: that is the whole inventory.
+	lv_obj_send_event(box, LV_EVENT_CLICKED, NULL); // the box closes itself
+	lv_obj_update_layout(petpage_screen);
+	assert(!lv_obj_is_visible(box_title));
+	lv_obj_t *find = petpage_find();
+	assert(find);
+	assert(!lv_obj_is_hidden(find));
+	lv_obj_send_event(find, LV_EVENT_CLICKED, NULL);
+	assert(pet_state.drop_pending == 0);
+	assert(pet_state.found[PET_DROP_BONE] == 1);
+	lv_obj_update_layout(petpage_screen);
+	assert(lv_obj_is_hidden(find));
+
+	// The hour's game: six notes cross the line, and turning up is worth five
+	// even with none of them caught. It takes about nine seconds.
+	lv_obj_send_event(box, LV_EVENT_CLICKED, NULL);
+	lv_obj_update_layout(petpage_screen);
+	press_visible_key(petpage_screen, tr("pet_box_play"));
+	int game_notes = pet_state.notes;
+	// A second of the game, so the snapshot has a note in the lane.
+	for (int i = 0; i < 24; i++) {
+		lv_tick_inc(30);
+		lv_timer_handler();
+	}
+	lv_obj_update_layout(petpage_screen);
+	char game_tag[64];
+	snprintf(game_tag, sizeof(game_tag), "%s-game", tag);
+	dump_snapshot(petpage_screen, game_tag);
+	for (int i = 0; i < 460; i++) { // 460 * 30 ms, a bit more than the game
+		lv_tick_inc(30);
+		lv_timer_handler();
+	}
+	assert(pet_state.notes == game_notes + PET_TREAT_MIN_NOTES);
+	assert(pet_treat_ready(&pet_state, petwatch_now()) == false);
+	lv_obj_update_layout(petpage_screen);
+	assert(find_label(petpage_screen, tr("pet_box_hour")));
+	lv_obj_send_event(box, LV_EVENT_CLICKED, NULL);
+	lv_obj_update_layout(petpage_screen);
+	assert(!lv_obj_is_visible(box_title));
+
 	// The pencil brings the chooser back; the pencil closes it again.
 	lv_obj_t *star = NULL;
 	lv_obj_t *pencil = NULL;
@@ -1152,7 +1247,9 @@ static void check_pet_page(gui_config_t *cfg, const char *tag) {
 	assert(!lv_obj_is_visible(chooser_title));
 
 	// The wardrobe: a hat costs 120 of the 500, bought and worn without a
-	// second tap.
+	// second tap. The wallet is put back to 500 first: the fortune and the
+	// game above have paid into it, and this is a test of a price.
+	pet_state.notes = 500;
 	lv_obj_send_event(star, LV_EVENT_CLICKED, NULL);
 	lv_obj_update_layout(petpage_screen);
 	lv_obj_t *wardrobe_title = find_label(petpage_screen, tr("pet_wardrobe"));

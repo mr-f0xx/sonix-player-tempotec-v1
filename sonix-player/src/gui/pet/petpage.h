@@ -32,6 +32,12 @@ void petpage_open(void);
 // that gives it a pat. Null until the page has been built.
 lv_obj_t *petpage_creature(void);
 
+// The box on the floor, and whatever it has turned up beside it. Both are on
+// the animal's own card and both are tapped in place; null until the page has
+// been built.
+lv_obj_t *petpage_box(void);
+lv_obj_t *petpage_find(void);
+
 // The keys a page cannot see. Volume and track keys are handled by the system
 // layer, not by the interface, so the system layer tells the pet that one was
 // pressed and the pet answers with a jump, a duck or a lean. A no-op when the
