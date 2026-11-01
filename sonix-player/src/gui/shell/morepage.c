@@ -80,8 +80,10 @@ static bool more_tokyo_icon(const char *label, const lv_image_dsc_t **icon, them
 		*icon = &icon_calculator;
 		*tone = THEME_SEMANTIC_CYAN;
 	} else if (strcmp(label, "Tag Manager") == 0) {
-		*icon = &icon_folder;
-		*tone = THEME_SEMANTIC_BLUE;
+		// Editing metadata, not opening another folder: the pencil keeps this
+		// row distinct from File Manager in the compact list too.
+		*icon = &icon_tag_manager;
+		*tone = THEME_SEMANTIC_CYAN;
 	} else if (strcmp(label, "notes") == 0) {
 		*icon = &icon_notes;
 		*tone = THEME_SEMANTIC_PURPLE;
@@ -166,7 +168,9 @@ static const grid_entry_t MORE_ENTRIES[] = {
 	// when the page is entered, so a card that changed under the player
 	// shows what is on it now.
 	{"file_explorer", &icon_menu_file_explorer, NULL, filespage_open},
-	{"Tag Manager", &icon_menu_file_explorer, NULL, tagmanager_open},
+	// Its own tile: two destinations that share a picture look like one
+	// destination typed twice, and the tag editor does not browse folders.
+	{"Tag Manager", &icon_menu_tag_manager, NULL, tagmanager_open},
 	// An action: the artwork is read from the resource tree on the way in.
 	{"flappy_bird", &icon_menu_flappy_bird, NULL, flappybird_open},
 	// The three games take the same route as Flappy Bird: an action rather than
@@ -190,8 +194,9 @@ static const grid_entry_t MORE_ENTRIES[] = {
 	// first time it is opened, so a player who never visits it pays nothing for
 	// it. What it knows about the music comes from a one-second tick that runs
 	// whether or not the page is up (petwatch.c), which is why it is not simply
-	// a screen with a timer of its own.
-	{"pet", &icon_pet, NULL, petpage_open},
+	// a screen with a timer of its own. Dark/Light show its own coloured tile;
+	// the white shape in peticon.h belongs to the function-glyph themes.
+	{"pet", &icon_menu_pet, NULL, petpage_open},
 };
 
 #define MORE_ENTRIES_MAX 13

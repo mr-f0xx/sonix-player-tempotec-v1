@@ -3,9 +3,11 @@
 
 The More menu's glyphs are generated from assets/icons by tools/svg_to_lvgl.py,
 which needs cairo and rewrites the 26 MB icons.c for a single new picture. The
-pet is one 32 px shape, so it is drawn here instead and written to its own small
-file: same ARGB8888 white-with-alpha form as the rest of the icon set, so the
-theme tints it with lv_obj_set_style_image_recolor() like every other glyph.
+pet is one shape, so its compact-list glyph is drawn here instead and written to
+its own small file: same ARGB8888 white-with-alpha form as the rest of the icon
+set, so the theme tints it with lv_obj_set_style_image_recolor() like every
+other glyph. Dark/Light instead show the coloured tile made from pet.svg by
+tools/make_more_tiles.py and embedded as icon_menu_pet.
 
     pip install pillow
     python3 tools/pet_icon.py
