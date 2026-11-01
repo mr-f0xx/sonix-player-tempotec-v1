@@ -129,7 +129,7 @@ typedef struct {
 	// Heads: pointed ears and floppy ones.
 	lv_obj_t *ear_l;
 	lv_obj_t *ear_r;
-	lv_obj_t *jowl_l; // the dog's hanging ears, drawn: a flap on the head
+	lv_obj_t *jowl_l; // the dog's ears, drawn: a rounded ear at each corner
 	lv_obj_t *jowl_r;
 	lv_obj_t *whisker[4]; // the cat's
 
@@ -156,8 +156,6 @@ typedef struct {
 	lv_obj_t *eye_arc_r;
 	lv_obj_t *tear;
 	lv_obj_t *zzz;
-	lv_obj_t *jowl_in_l; // the pale inside of the dog's ears
-	lv_obj_t *jowl_in_r;
 	lv_obj_t *brow; // the two bars over a sad pet's eyes
 	lv_obj_t *note; // the pair that floats over a listening one
 
@@ -241,10 +239,8 @@ static pet_shape_t shape_ear_r;
 static pet_shape_t shape_fish_body;
 static pet_shape_t shape_fin_tail;
 static pet_shape_t shape_fin_top;
-static pet_shape_t shape_jowl_l; // the dog's hanging ears
+static pet_shape_t shape_jowl_l; // the dog's ears, one table mirrored
 static pet_shape_t shape_jowl_r;
-static pet_shape_t shape_jowl_in_l; // and the pale inside of each
-static pet_shape_t shape_jowl_in_r;
 static pet_shape_t shape_plant; // three leaves standing out of the cat's pot
 static pet_shape_t shape_weed[PET_WEEDS]; // the tank's weeds, blade and fronds
 static pet_shape_t shape_brow; // a sad pet's brows
@@ -500,28 +496,27 @@ static void shape_polygon(pet_shape_t *s, lv_color_t color, const int *xs, const
 	}
 }
 
-// A dog's two hanging ears, one table mirrored: the corners are percentages of
-// the ear's own box, so they follow the head through the stages.
-//
-// The first corner is where the ear meets the crown, and it is on the head's
-// own outline: an ear drawn with its top out in the air leaves a step in the
-// silhouette, which is what the turned rectangles had. From there the ear's
-// outer edge swells to its widest at the level of the eyes and comes back to a
-// rounded tip at the jaw -- a flap that hangs, rather than a bean stuck to the
-// side of the head. The inner edge is a line down the head, and the face is
-// drawn after it, so the cheeks are not covered.
-static void draw_jowls(int cx, int head_w, int head_h, int head_top, lv_color_t fill,
-		       lv_color_t pale) {
+// A dog's two ears, one table mirrored. They stand out of the top corners of
+// the head, rounded and leaning outward, and they are drawn before it: the
+// head's own line closes them at the root and the dome stays whole. Every other
+// way of doing it was tried -- hanging over the head from the crown, which is a
+// bob haircut; hanging beside it, off the head, which is not an ear either; and
+// a pale inside to say *ear*, which at this size is a mane. Ears that break the
+// head's outline at the top cannot be mistaken for hair, and that is what the
+// cat's triangles have been saying all along.
+static void draw_jowls(int cx, int head_w, int head_h, int head_top, lv_color_t fill) {
 	// The ear in head units: x from the middle of the head in per cents of
 	// half its width -- so a hundred is the edge of the head -- and y from the
-	// top of the head in per cents of its height. Written that way the table
-	// says what the ear is: it starts on the head's outline a tenth of the way
-	// down from the crown, covers the side of the head down to the jaw, and
-	// reaches out to a hundred and twenty-four at its middle, which is a
-	// quarter of a head's width out in the air.
+	// top of the head in per cents of its height, negative above it. Written
+	// that way the table says what the ear is: a rounded ear standing out of
+	// the top corner of the head, its root well inside the crown so the head's
+	// line closes it, its tip eighteen per cent of a head above the crown and
+	// just past the head's edge, its root a little below the crown on the side.
+	// The halves are percentages of the head's width, so the ear grows with
+	// the animal instead of stepping away from it.
 	static const int16_t ear[12][2] = {
-		{-62, 10}, {-88, 14}, {-110, 26}, {-122, 44}, {-124, 62}, {-116, 80},
-		{-102, 94}, {-84, 100}, {-72, 90}, {-70, 72}, {-72, 50}, {-76, 30},
+		{-28, 24}, {-32, 0}, {-42, -16}, {-62, -26}, {-86, -28}, {-102, -16},
+		{-110, 4}, {-106, 22}, {-92, 34}, {-68, 40}, {-48, 34}, {-36, 30},
 	};
 	const int n = 12;
 	int min_x = 0;
@@ -561,23 +556,6 @@ static void draw_jowls(int cx, int head_w, int head_h, int head_top, lv_color_t 
 		pet_shape_t *shape = side ? &shape_jowl_r : &shape_jowl_l;
 		shape_polygon(shape, fill, xs, ys, n);
 		shape_place(shape, side ? 2 * cx - left - w : left, top, w, h);
-
-		// The pale inside: the same corners pulled in towards the middle of
-		// the ear and a little up it, so the ear keeps a rim of its own
-		// colour all the way round. No ink -- an inner ear is a colour, not an
-		// edge. The cat's ears say the same thing in pink.
-		for (int i = 0; i < n; i++) {
-			const int px = (ear[i][0] - min_x) * head_w / 200;
-			const int py = (ear[i][1] - min_y) * head_h / 100;
-			const int ix = w / 2 + (px - w / 2) * 62 / 100;
-			const int iy = h / 2 + (py - h / 2) * 62 / 100 - h * 6 / 100;
-			xs[i] = side ? w - 1 - ix : ix;
-			ys[i] = iy;
-		}
-		pet_shape_t *inner = side ? &shape_jowl_in_r : &shape_jowl_in_l;
-		shape_reset(inner);
-		shape_fan(inner, pale, xs, ys, n);
-		shape_place(inner, side ? 2 * cx - left - w : left, top, w, h);
 	}
 }
 
@@ -877,17 +855,13 @@ static void build_creature(void) {
 	parts.arm_r = round_piece(parts.root, PET_INK);
 
 	// ---- the head, over the shoulders ----------------------------------
-	parts.head = round_piece(parts.root, PET_INK);
-	// A dog's ears hang on the sides of its head, so they are drawn over it --
-	// and each one carries the pale inner face of an ear. That pale shape is
-	// what tells an ear from hair: a lobe of the animal's own colour laid down
-	// a round head is the same ink line whether it is an ear or a bob, and no
-	// outline will settle it. The cat's ears say it with a pink triangle; the
-	// dog's say it with the cream of its muzzle.
+	// A dog's ears stand out of the top corners of its head, so they are drawn
+	// before it and the head's own line closes them at the base -- the way the
+	// cat's ears are joined to it, and for the same reason: a baseline drawn
+	// across the dome is a cut, and the dome's own line is not.
 	parts.jowl_l = shape_create(parts.root, &shape_jowl_l);
 	parts.jowl_r = shape_create(parts.root, &shape_jowl_r);
-	parts.jowl_in_l = shape_create(parts.root, &shape_jowl_in_l);
-	parts.jowl_in_r = shape_create(parts.root, &shape_jowl_in_r);
+	parts.head = round_piece(parts.root, PET_INK);
 	parts.brow = shape_create(parts.root, &shape_brow);
 
 	// ---- the face ------------------------------------------------------
@@ -1172,8 +1146,6 @@ static void paint_creature(void) {
 	show(parts.ear_r, cat);
 	show(parts.jowl_l, dog);
 	show(parts.jowl_r, dog);
-	show(parts.jowl_in_l, dog);
-	show(parts.jowl_in_r, dog);
 
 	if (cat) {
 		// Ears, leaning out of the top of the head: a triangle with a pink
@@ -1198,7 +1170,7 @@ static void paint_creature(void) {
 		// rounded at the tip, all the way down to the jaw. Drawn rather than
 		// styled -- a rounded rectangle is a bean whatever it is turned by,
 		// and a turned one is cut off at the corners by its own layer.
-		draw_jowls(cx, head_w, head_h, head_top, fill, light);
+		draw_jowls(cx, head_w, head_h, head_top, fill);
 	}
 
 	// ---- feet and arms ---------------------------------------------------

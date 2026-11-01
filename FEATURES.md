@@ -286,7 +286,7 @@ a self-signed certificate), and HLS.
   only what changed: a meter that has not moved is not touched between one
   second and the next. While music plays, the line at the foot of the card says
   what it is feeding on beside a three-bar equalizer. Each animal has a shape of
-  its own -- a cat's ears and whiskers, a dog's hanging ears and snout, a fish's
+  its own -- a cat's ears and whiskers, a dog's rounded ears and snout, a fish's
   forked tail, dorsal fin and gill -- and a few flat things of its own behind
   it: a rug and a plant, a fence and a bone, or the tank the fish swims in,
   furnished down to the weeds -- a fan of grass and a leafy plant on each side

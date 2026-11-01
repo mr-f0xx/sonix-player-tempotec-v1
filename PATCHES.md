@@ -2093,132 +2093,39 @@ that. The forked tail, the dorsal, the gill and the one eye say fish without it.
 
 ### The dog's ears
 
-The dog's ears were a rounded rectangle, twenty-one by thirty-eight, turned
-thirteen degrees and dropped at a quarter of the way down the head. Three
-things were wrong with it and the first is a rule of this page: **a turned
-object is rasterised through a layer the size of its own box**, so its corners
-came out cut flat. The second is that a rectangle beside a round head is a bean
-whatever the angle -- there is no silhouette in it that says *ear*. The third
-is that it began at the level of the eyes, so it hung off the cheek rather than
-off the crown.
+Four passes at the same pair of ears, which between them say more about the page
+than the ears do. They have to be flat -- one fill inside the same ink outline
+everything else wears -- and the dog is the same colour as its head, so the only
+thing that separates an ear from the head is a line, and the only thing that
+separates an ear from hair is its silhouette.
 
-The ears are drawn now, with the same machinery as the fish's body: a polygon
-of corners filled in triangles and outlined once. `shape_polygon()` was taken
-out of the fish's body and both use it, so there is one way to draw a shape with
-more sides than a triangle has.
+- **Over the head** (the first pass): each flap's top edge crossed the crown and
+  its inner edge ran down the side of the face. Two of those on a round head are
+  a bob haircut with a parting, and that is what it looked like.
+- **Beside the head**: pushed out until the ear only touched it at the top edge,
+  the ear hung in the air, and an ear that is not on the head is not a dog's ear.
+- **With a pale inside**: the cream of the muzzle, pulled in from the lobe's own
+  corners, to say *ear* the way the cat's pink triangle does. It is a good idea
+  at a bigger size and a mane at this one; the pale reached down beside the
+  muzzle and the dog grew a beard.
+- **Standing up at the corners** (what is there now): a rounded ear out of each
+  top corner of the head, leaning outward, eighteen per cent of a head above the
+  crown and a little past the head's edge.
 
-They are also drawn *on* the head rather than behind it. Behind it, a flap
-beside a round head can only ever be the crescent the head leaves over, and at
-every size that was tried it read as a hood. On the head, the ear is the whole
-flap, its inner edge is a line down the head, and the first corner of the table
-sits on the head's own outline -- start it out in the air and the silhouette has
-a step in it, which is what the rectangles did. From there the outer edge swells
-to its widest at the level of the eyes and comes back to a rounded tip at the
-jaw. The face is built after the ears, so the cheeks and the muzzle are drawn
-over them and nothing is covered.
+The last one is the only one that changes the head's *outline*, and that is the
+whole point: an ear that breaks the silhouette at the top cannot be read as
+hair, whatever else is true of it. The cat has never had this trouble for
+exactly that reason.
 
-### The tank's weeds
-
-The tank had three weeds and every one of them was a rounded rectangle turned at
-an angle -- a leaf that was a stick, for the reason the dog's ears were: a turned
-object is rasterised through a layer the size of its own box, and its ends come
-out cut. A tank with three sticks in the sand is a tank with three sticks in it.
-
-They are drawn now, with the same machinery as the fish's body and the dog's
-ears: corners, filled in triangles, and no ink. Ink is what makes the animals
-read as characters, but a two-pixel outline round a blade five pixels wide is
-the whole blade, so the foliage is the one thing in the scene drawn in flat
-colour alone, and its two greens are what give it an edge.
-
-Two kinds of plant, and the two between them furnish four corners:
-
-- **A clump of grass**: four ribbons out of one root. A ribbon is six corners --
-  a three-joint spine, widened by three pixels at the bottom to two at the top
-  and closed with a blunt tip -- swayed along its length, the four at four
-  angles, in two greens. The clump is normalised into its own box once it is
-  built, so the same table can be put down anywhere on the sand.
-- **A leafy plant**: one tapered stem with four oval leaves on it, one side then
-  the other, at 22, 46, 70 and 90 per cent of its height, in the dark green and
-  the light one by turns. Leaves are six corners each, which is an oval at this
-  size.
-
-Both are one shape object apiece, twelve to fifteen triangles, built when the
-tank is built and never touched again: the one-second animation moves the
-creature's root, not the scenery. `PET_SHAPE_TRIS` went to twelve and back to
-sixteen while these were being drawn, which is the whole budget they use.
-
-Star-shaped is the constraint to remember when drawing them. `shape_fan()`
-fills from corner zero, so a blade that sways one way and then the other --
-a concave outline -- breaks into floating pieces, which is how the first set of
-fronds came out as bushes hovering over the sand. Every blade here is monotonic
-from its first corner.
-
-### A face for each mood
-
-Six moods and, until now, three faces between them: blissful and happy were the
-same fourteen-by-nine smile, okay, sleeping and dizzy the same straight line,
-and the sad face was the only one an owner could name without reading the
-hearts. The listening face -- an eight-by-seven mouth with a tongue in it -- was
-there, and it read as a nose.
-
-They are six faces now, and each of the three that carry a meaning is built from
-more than its mouth:
-
-- **Happy** is the round eye and the smile it always had.
-- **Blissful** shuts its eyes: two arcs, high in the middle, drawn with the ink
-  arc the gill and the mouth already use. It is the top of the scale, and the one
-  face with no eye in it at all, so it cannot be mistaken for the one below.
-- **Sad** wears brows. A frown alone is a mouth; two short bars, each high at the
-  middle of the face, are what make the mouth a frown. They are drawn as a
-  polygon rather than turned for the usual reason, and there is one of them on a
-  fish, which has one eye. The tear moved under the outer corner of the eye,
-  where a tear leaves from, and grew a little.
-- **Listening** keeps its open mouth -- the tongue is what makes it a mouth
-  singing rather than a hole -- and gained a pair of notes in the air beside its
-  head: a six-corner disc for each note head, a stem and a flag. A fish has its
-  tail on that side, so its notes float above its snout.
-
-The notes are the answer to the mouth that read as a nose. A nose sits between
-the eyes, and these are not between the eyes; they are the one thing on the page
-that is only there while music is going in, so the mouth beside them is singing.
-
-Two arcs and two more shapes, all hidden when the mood is not theirs. Nothing
-here is drawn per frame: the page still does one memo of the clock a second.
-
-### The dog's ears
-
-Three passes at the same pair of ears, because the first two were wrong in
-opposite directions.
-
-The ears of the pass before hung from the crown down over the head: each flap's
-top edge crossed the top of the head near the middle of it, and from there its
-inner edge ran the rest of the way down the head's side. Two of those on a round
-head is a bob haircut with a parting, and that is what it looked like -- on the
-device, and in the snapshot that was taken of the adult.
-
-The next pass overcorrected. Pushed out until it only touched the head at its
-top edge, the ear hung in the air beside the face, and an ear that is not on the
-head is not a dog's ear either.
-
-What the third pass is: the lobe lies on the side of the head again -- it starts
-on the head's outline a tenth of the way down from the crown, covers the side of
-the head down to the jaw, and reaches a quarter of a head's width out into the
-air -- and it carries **the pale inside of an ear**, the cream of the muzzle,
-pulled in from the lobe's own corners. That pale shape is what settles it. A
-lobe of the animal's own colour laid over a round head is the same ink line
-whether it is an ear or a bob, and no outline will ever say which; the cat has
-never had this trouble because its ears are triangles with a pink inside. The
-dog's ears are now the same idea: an outline, and a colour inside it that only
-an ear has.
-
-The table is written in head units rather than in per cents of a box: x from the
-middle of the head in per cents of half its width, so a hundred is the edge of
-the head, and y from the top in per cents of its height. Read that way it says
-what the ear is -- it starts at ten, covers the side to seventy-two, reaches a
-hundred and twenty-four at its middle, hangs to a hundred at the jaw -- instead
-of where its box happens to sit. The old box sat a fixed eight pixels out from
-the head, and eight pixels is not a size: at the hatchling, whose head is
-sixty-four across, that was a quarter of the head out in the air.
+They are drawn before the head, so the head's own line closes them at the root
+-- an ear with its top edge out in the air leaves a step in the silhouette, and
+a baseline drawn across the dome is a cut. And the table is in head units: x
+from the middle of the head in per cents of half its width, so a hundred is the
+edge of the head, and y from the top in per cents of its height, negative above
+it. Read that way it says what the ear is, and it scales with the animal: the
+box it used to live in sat a fixed eight pixels out from the head, which at the
+hatchling -- whose head is sixty-four across -- was a quarter of a head out in
+the air.
 
 ## The charger, with the player off## The charger, with the player off
 
