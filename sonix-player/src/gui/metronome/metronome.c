@@ -46,6 +46,8 @@ static lv_obj_t *start_label;
 static lv_obj_t *start_btn;
 static lv_obj_t *tap_btn;
 static lv_obj_t *beat_btns[BEATS_MAX];
+static lv_obj_t *tempo_card;
+static lv_obj_t *beats_card;
 
 static int bpm = 120;
 static int beats = 4;
@@ -78,8 +80,7 @@ static bool gesture_not_tap(void) {
 //
 // The colours here are hand-set rather than taken from a shared style, because
 // the same objects are painted differently as the state changes: a lit dot
-// against an unlit one, the start button as the accent while it is running and
-// as a quiet surface while it is not. They are all written in one place, called
+// against an unlit one, the start button as the accent in both transport states. They are all written in one place, called
 // when the state changes and again after a theme switch.
 // ---------------------------------------------------------------------------
 
@@ -95,6 +96,9 @@ static void paint_dots(void) {
 		bool lit = i == lit_beat;
 		lv_obj_set_style_bg_color(dot, lit ? theme()->accent : theme()->text_secondary, 0);
 		lv_obj_set_style_bg_opa(dot, lit ? LV_OPA_COVER : LV_OPA_30, 0);
+		// A small ring makes the accented first beat recognizable at rest.
+		lv_obj_set_style_border_color(dot, theme()->accent, 0);
+		lv_obj_set_style_border_opa(dot, i == 0 && !lit ? LV_OPA_60 : LV_OPA_TRANSP, 0);
 	}
 }
 
@@ -117,10 +121,10 @@ static void paint_transport(void) {
 	if (!start_btn) {
 		return;
 	}
-	// Running, the start button is the accent: the one thing on the page that
-	// is doing anything. Stopped, it is a quiet surface like the tap beside it.
-	lv_obj_set_style_bg_color(start_btn, running ? theme()->accent : theme()->surface_pressed, 0);
-	lv_obj_set_style_text_color(start_label, running ? theme_on_accent() : theme()->text_primary, 0);
+	// Keep the primary action prominent in both states, so Start is easy to
+	// find and Stop remains easy to reach while practicing.
+	lv_obj_set_style_bg_color(start_btn, theme()->accent, 0);
+	lv_obj_set_style_text_color(start_label, theme_on_accent(), 0);
 	lv_obj_set_style_bg_color(tap_btn, theme()->surface_pressed, 0);
 	lv_obj_set_style_text_color(lv_obj_get_child(tap_btn, 0), theme()->text_primary, 0);
 }
@@ -133,6 +137,10 @@ static void paint(void) {
 	paint_dots();
 	paint_beats();
 	paint_transport();
+	// Subtle outlines give the two sections definition even on OLED and light
+	// palettes, without hard-coding a color for any particular theme.
+	lv_obj_set_style_border_color(tempo_card, theme()->accent, 0);
+	lv_obj_set_style_border_color(beats_card, theme()->text_secondary, 0);
 	if (slider) {
 		lv_obj_set_style_bg_color(slider, theme()->accent, LV_PART_INDICATOR);
 		theme_apply_slider_knob(slider);
@@ -372,7 +380,8 @@ static lv_obj_t *make_card(lv_obj_t *parent, int pad, int pad_row) {
 	lv_obj_set_height(card, LV_SIZE_CONTENT);
 	lv_obj_add_style(card, &theme_style_card, 0);
 	lv_obj_set_style_radius(card, bp_tile_radius(), 0);
-	lv_obj_set_style_border_width(card, 0, 0);
+	lv_obj_set_style_border_width(card, 1, 0);
+	lv_obj_set_style_border_opa(card, LV_OPA_20, 0);
 	lv_obj_set_style_shadow_width(card, 0, 0);
 	lv_obj_set_style_pad_all(card, pad, 0);
 	lv_obj_set_style_pad_row(card, pad_row, 0);
@@ -431,8 +440,9 @@ static lv_obj_t *make_pill(lv_obj_t *parent, const char *text, lv_event_cb_t cb,
 
 static void build_tempo_card(lv_obj_t *parent, int pad, int pad_row, int gap) {
 	lv_obj_t *card = make_card(parent, pad, pad_row);
+	tempo_card = card;
 
-	lv_obj_t *readout = make_row(card, bp_pick(40, 66), pad_row);
+	lv_obj_t *readout = make_row(card, bp_pick(40, 82), pad_row);
 	lv_obj_set_flex_align(readout, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 
 	// The number with its unit beside it, the two sharing a baseline.
@@ -450,7 +460,7 @@ static void build_tempo_card(lv_obj_t *parent, int pad, int pad_row, int gap) {
 	bpm_label = lv_label_create(number_group);
 	lv_label_set_text_fmt(bpm_label, "%d", bpm);
 	lv_obj_add_style(bpm_label, &theme_style_text, 0);
-	lv_obj_set_style_text_font(bpm_label, &font_ui_36_bold, 0);
+	lv_obj_set_style_text_font(bpm_label, bp_is_tempotec_v1() ? &font_ui_36_bold : &font_ui_64_bold, 0);
 
 	lv_obj_t *unit = lv_label_create(number_group);
 	lv_label_set_text(unit, tr("metronome_bpm"));
@@ -473,7 +483,7 @@ static void build_tempo_card(lv_obj_t *parent, int pad, int pad_row, int gap) {
 		int side = i == 0 ? first_dot_size : dot_size;
 		lv_obj_set_size(dot, side, side);
 		lv_obj_set_style_radius(dot, LV_RADIUS_CIRCLE, 0);
-		lv_obj_set_style_border_width(dot, 0, 0);
+		lv_obj_set_style_border_width(dot, i == 0 ? 1 : 0, 0);
 		lv_obj_set_style_shadow_width(dot, 0, 0);
 		lv_obj_set_style_pad_all(dot, 0, 0);
 		lv_obj_set_scrollable(dot, false);
@@ -520,11 +530,12 @@ static void build_tempo_card(lv_obj_t *parent, int pad, int pad_row, int gap) {
 
 static void build_beats_card(lv_obj_t *parent, int pad, int pad_row) {
 	lv_obj_t *card = make_card(parent, pad, pad_row);
+	beats_card = card;
 
 	lv_obj_t *name = lv_label_create(card);
 	lv_label_set_text(name, tr("metronome_beats"));
 	lv_obj_add_style(name, &theme_style_text, 0);
-	lv_obj_set_style_text_font(name, &font_ui_24, 0);
+	lv_obj_set_style_text_font(name, &font_ui_20_bold, 0);
 	lv_obj_set_style_pad_bottom(name, bp_pick(2, 6), 0);
 
 	// One to seven, as one row of seven: the bar is a choice out of a short and

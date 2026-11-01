@@ -53,7 +53,7 @@ lv_obj_t *dacpage_screen, *gearboypage_screen;
 lv_font_t font_ui_14, font_ui_16, font_ui_18, font_ui_20, font_ui_20_bold;
 lv_font_t font_ui_22, font_ui_22_bold, font_ui_24, font_ui_24_bold;
 lv_font_t font_ui_26, font_ui_28, font_ui_32;
-lv_font_t font_ui_36_bold; // the calculator's symbol keys, and Gearboy's letters
+lv_font_t font_ui_36_bold, font_ui_64_bold;
 static void (*font_callbacks[16])(void);
 static int font_callback_count;
 static int text_size = FONTS_TEXT_NORMAL;
@@ -70,7 +70,7 @@ static void init_fonts(void) {
 	// The one size the interface draws a step larger than the text around it:
 	// a second metric, so the calculator's symbol keys can be checked to be
 	// drawn bigger than its digits rather than merely differently styled.
-	lv_font_t *large[] = {&font_ui_36_bold};
+	lv_font_t *large[] = {&font_ui_36_bold, &font_ui_64_bold};
 	for (size_t i = 0; i < sizeof(large) / sizeof(large[0]); i++) {
 		*large[i] = lv_font_montserrat_20;
 	}
