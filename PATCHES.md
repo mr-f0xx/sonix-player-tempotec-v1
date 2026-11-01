@@ -1545,3 +1545,38 @@ The log says which of the two wakes a card took — `power: screen on
 when the hold goes in. A held wake is that one repaint and a fade against the
 quarter second the blanked one spends holding a dark panel through its own
 power-up, which is the difference the listener hears.
+
+## Two PEQ profiles and the Control Centre quick switch
+
+Issue #187 asks for different corrections for wired IEMs and Bluetooth earbuds
+without replacing one curve every time the headphones change. PEQ now has two
+persistent profiles. The PEQ page selects either one; the numbered Control
+Centre button cycles between them, and a long press opens the PEQ page. The
+button's fill follows the selected profile's own enable state. It appends to
+the existing button list: an empty grid place is used as-is, while a full grid
+keeps the new control in Settings → More → Control centre until room is made.
+No saved button order is rewritten on upgrade.
+
+Each profile owns all ten bands, preamp and the PEQ enable switch. The active
+settings stay in `[peq]`, with `profile = 1` or `2`; the other curve lives in
+its own numbered `[peq_profile_*]` section. An existing `[peq]` becomes Profile
+1 without a boot-time write, and Profile 2 starts flat and off. Switching
+archives the outgoing curve under its own number before publishing the other,
+so restarting from either profile preserves both. Older builds can still read
+the last active curve from `[peq]`. APO preset files remain shared, but import,
+export and reset operate on the selected profile; switching never enables PEQ
+on the user's behalf. Graphic EQ and MSEB are unchanged.
+
+The audio path takes a coherent profile snapshot under a short mutex, outside
+disk I/O. It uses a try-lock and retains the previous coefficients for a buffer
+when an edit is in progress, rather than blocking playback. The settings table
+has room for the inactive profile's 52 additional keys. Both PEQ screens
+refresh after a quick switch, including an open band editor. The two new
+translation keys are present in all eleven shipped languages.
+
+Host coverage: `make -C sonix-player/tests eq` checks profile persistence from
+either slot, independent enable/preamp/bands, scoped presets/reset, legacy
+upgrade and actual PCM processing. `make -C sonix-player/tests peq-ui` checks
+the real page in eleven languages and five themes at 240×320; `quickpanel-layout`
+checks the production layout migration and moves. Both are included in `ui`.
+These host tests do not replace an on-device listening and touch check.

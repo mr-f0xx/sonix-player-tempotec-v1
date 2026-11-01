@@ -16,8 +16,9 @@
 // written as literals in the source, plus band0..9 for the equaliser and v0..9
 // for MSEB, is about 146 fixed entries. The only thing that would grow on top
 // of that is the EPUB reader, which stores one entry per book opened and has a
-// file of its own (see below), so 384 leaves room to spare.
-#define CONFIG_MAX_ENTRIES 384
+// file of its own (see below). PEQ keeps another 52 keys for its inactive
+// profile, so 448 leaves room for both without dropping settings.
+#define CONFIG_MAX_ENTRIES 448
 
 // The reader's own file. Its entries are one per book ever opened, so it grows
 // with the shelf rather than with the player, which is the whole reason it is

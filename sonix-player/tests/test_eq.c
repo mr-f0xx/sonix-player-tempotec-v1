@@ -13,6 +13,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <sys/stat.h>
 
 #include "src/system/audio/eq.h"
 #include "src/system/core/config.h"
@@ -226,6 +227,163 @@ static void test_mono_station_widening(void) {
 	all_off();
 }
 
+// Two headphones, two complete curves. A switch must carry the enable state
+// and preamp as well as the bands; neither profile may edit the other one.
+static void set_profile_curve(int frequency, int gain, int preamp, bool enabled) {
+	peq_reset();
+	peq_band_t b;
+	peq_get_band(0, &b);
+	b.on = true;
+	b.type = PEQ_TYPE_LOWSHELF;
+	b.freq = frequency;
+	b.gain_tenths = gain;
+	b.q_cent = 71;
+	peq_set_band(0, &b);
+	peq_set_preamp(preamp);
+	peq_set_enabled(enabled);
+}
+
+static void check_profile_curve(int frequency, int gain, int preamp, bool enabled) {
+	peq_band_t b;
+	peq_get_band(0, &b);
+	CHECK(b.on);
+	CHECK(b.type == PEQ_TYPE_LOWSHELF);
+	CHECK(b.freq == frequency);
+	CHECK(b.gain_tenths == gain);
+	CHECK(b.q_cent == 71);
+	CHECK(peq_get_preamp() == preamp);
+	CHECK(peq_get_enabled() == enabled);
+	for (int i = 1; i < PEQ_BANDS; i++) {
+		peq_get_band(i, &b);
+		CHECK(!b.on);
+	}
+}
+
+static void test_peq_profiles(const char *dir) {
+	all_off();
+	CHECK(peq_get_profile() == 1);
+	CHECK(!peq_select_profile(0));
+	CHECK(!peq_select_profile(PEQ_PROFILE_COUNT + 1));
+	CHECK(!peq_select_profile(1));
+	set_profile_curve(105, 65, -62, true);
+	CHECK(peq_next_profile() == 2);
+	CHECK(!peq_get_enabled());
+	CHECK(peq_get_preamp() == 0);
+	for (int i = 0; i < PEQ_BANDS; i++) {
+		peq_band_t b;
+		peq_get_band(i, &b);
+		CHECK(!b.on);
+	}
+	set_profile_curve(300, -45, -20, false);
+	CHECK(peq_next_profile() == 1);
+	check_profile_curve(105, 65, -62, true);
+
+	// A preset load and a full reset are scoped to the selected slot.
+	char preset_dir[512];
+	snprintf(preset_dir, sizeof(preset_dir), "%s/PEQ", dir);
+	mkdir(preset_dir, 0777);
+	char path[700];
+	snprintf(path, sizeof(path), "%s/curve.txt", preset_dir);
+	FILE *f = fopen(path, "w");
+	CHECK(f != NULL);
+	if (f) {
+		fputs("Preamp: -3.5 dB\nFilter 1: ON PK Fc 1000 Hz Gain 4.0 dB Q 0.70\n", f);
+		fclose(f);
+	}
+	peq_presets_set_dir(dir);
+	int ignored = -1;
+	CHECK(peq_preset_load("curve", &ignored));
+	CHECK(ignored == 0);
+	CHECK(peq_get_enabled()); // importing does not change the enable state
+	CHECK(peq_get_preamp() == -35);
+	peq_band_t imported;
+	peq_get_band(0, &imported);
+	CHECK(imported.on && imported.freq == 1000 && imported.gain_tenths == 40);
+	CHECK(peq_preset_save("exported"));
+	CHECK(config_save());
+	peq_reset();
+	CHECK(peq_get_preamp() == 0);
+	CHECK(peq_next_profile() == 2);
+	check_profile_curve(300, -45, -20, false);
+
+	// Restart on Profile 2, then once more on Profile 1. The legacy [peq]
+	// section remains the active mirror, not a third, divergent profile.
+	char config_path[512];
+	snprintf(config_path, sizeof(config_path), "%s/device_config.ini", dir);
+	config_init(config_path);
+	eq_init();
+	CHECK(peq_get_profile() == 2);
+	check_profile_curve(300, -45, -20, false);
+	CHECK(peq_next_profile() == 1);
+	CHECK(peq_get_enabled());
+	CHECK(peq_get_preamp() == 0);
+	peq_get_band(0, &imported);
+	CHECK(!imported.on);
+	CHECK(peq_preset_load("exported", NULL));
+	CHECK(config_save());
+	config_init(config_path);
+	eq_init();
+	CHECK(peq_get_profile() == 1);
+	CHECK(peq_get_preamp() == -35);
+	peq_get_band(0, &imported);
+	CHECK(imported.on && imported.freq == 1000 && imported.gain_tenths == 40);
+
+	// The actual PCM path, including a switch from enabled to disabled.
+	set_profile_curve(100, 120, -120, true);
+	peq_select_profile(2);
+	set_profile_curve(800, -100, 30, true);
+	int profile_two_response = peq_response_tenths(1000, RATE);
+	short original[FRAMES * 2], first[FRAMES * 2], second[FRAMES * 2];
+	fill_sine(original, FRAMES, RATE, 1000, AMP);
+	memcpy(first, original, sizeof(first));
+	eq_process(first, FRAMES, 2, RATE);
+	peq_select_profile(1);
+	memcpy(second, original, sizeof(second));
+	eq_process(second, FRAMES, 2, RATE);
+	CHECK(memcmp(first, second, sizeof(first)) != 0);
+	CHECK(memcmp(second, original, sizeof(second)) != 0);
+	peq_set_enabled(false);
+	memcpy(second, original, sizeof(second));
+	eq_process(second, FRAMES, 2, RATE);
+	CHECK(memcmp(second, original, sizeof(second)) == 0);
+	peq_select_profile(2);
+	CHECK(peq_get_enabled());
+	memcpy(second, original, sizeof(second));
+	eq_process(second, FRAMES, 2, RATE);
+	CHECK(memcmp(second, original, sizeof(second)) != 0);
+	// Filter history and the intentional preamp glide belong to the running
+	// chain, so two visits need not produce identical transients. The settled
+	// response must return to the same curve, not the other profile's curve.
+	CHECK(peq_response_tenths(1000, RATE) == profile_two_response);
+	all_off();
+}
+
+static void test_legacy_peq_upgrade(const char *dir) {
+	char path[512];
+	snprintf(path, sizeof(path), "%s/legacy.ini", dir);
+	FILE *f = fopen(path, "w");
+	CHECK(f != NULL);
+	if (!f) {
+		return;
+	}
+	fputs("[peq]\nenabled=1\npreamp=-42\nb0_on=1\nb0_type=1\nb0_freq=105\nb0_gain=65\nb0_q=71\n"
+		  "[eq]\nenabled=1\nband0=3\n[mseb]\nenabled=1\nv0=20\n", f);
+	fclose(f);
+	config_init(path);
+	eq_init();
+	CHECK(peq_get_profile() == 1);
+	check_profile_curve(105, 65, -42, true);
+	CHECK(eq_get_enabled() && eq_get_band(0) == 3);
+	CHECK(mseb_get_enabled() && mseb_get_value(0) == 20);
+	peq_select_profile(2);
+	CHECK(!peq_get_enabled());
+	CHECK(eq_get_enabled() && eq_get_band(0) == 3);
+	CHECK(mseb_get_enabled() && mseb_get_value(0) == 20);
+	peq_select_profile(1);
+	check_profile_curve(105, 65, -42, true);
+	all_off();
+}
+
 int main(void) {
 	char dir[] = "/tmp/sonix-eq-test-XXXXXX";
 	if (!mkdtemp(dir)) {
@@ -245,11 +403,13 @@ int main(void) {
 	test_mseb_changes_samples();
 	test_radio_rates();
 	test_mono_station_widening();
+	test_peq_profiles(dir);
+	test_legacy_peq_upgrade(dir);
 
 	if (failures) {
 		fprintf(stderr, "%d check(s) failed\n", failures);
 		return 1;
 	}
-	printf("eq: graphic EQ, PEQ and MSEB all run on stereo PCM, including radio rates and mono stations\n");
+	printf("eq: PCM, radio rates, mono, persistent PEQ profiles, scoped presets/reset and legacy upgrade passed\n");
 	return 0;
 }
