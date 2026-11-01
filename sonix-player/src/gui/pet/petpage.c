@@ -4012,10 +4012,13 @@ static void build(void) {
 	// ---- what it is feeding on ------------------------------------------
 	// The status line's picture: a still note when nothing is playing, and
 	// three bars that swap on the frame timer while something is.
+	// The status row sits a little under the floor line. It used to begin one
+	// pixel below it, which on the device -- where the grass is the same colour
+	// the words are dimmed against -- read as words standing on the grass.
 	status_icon = icon_image(habitat, &icon_music_note, 12);
-	place(status_icon, 12, habitat_h - 28, 12, 12);
+	place(status_icon, 12, habitat_h - 23, 12, 12);
 
-	eq_bottom = habitat_h - 21;
+	eq_bottom = habitat_h - 16;
 	for (int i = 0; i < 3; i++) {
 		eq_bar[i] = bar_piece(habitat, lv_color_white(), 1);
 		place(eq_bar[i], 12 + i * 5, eq_bottom - 4, 3, 4);
@@ -4025,7 +4028,7 @@ static void build(void) {
 	status_label = lv_label_create(habitat);
 	lv_obj_add_style(status_label, &theme_style_text_dim, 0);
 	lv_obj_set_style_text_font(status_label, &font_ui_14, 0);
-	lv_obj_set_pos(status_label, 28, habitat_h - 31);
+	lv_obj_set_pos(status_label, 28, habitat_h - 26);
 	lv_obj_set_width(status_label, card_w - 74);
 	lv_obj_set_height(status_label, lv_font_get_line_height(&font_ui_14));
 	lv_label_set_long_mode(status_label, LV_LABEL_LONG_DOT);
