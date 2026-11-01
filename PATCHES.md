@@ -1966,12 +1966,29 @@ row, told apart by their ears alone. The cat is grey now -- `0xC3C7CC` with
 `0xA2A7AE` for the paws and `0xE6E9EC` for anything pale -- which is a colour
 nothing else in the set has, and the pink nose and ears still do the rest.
 
-It also cost the cat its tail. The tail was two turned bars that did not meet,
-and cream on cream had hidden the seam; grey showed it as a stick floating by the
-shoulder. A turned bar is rasterised through a layer the size of its own box, so
-a tail long enough to read is a tail that comes out clipped. Rather than ship
-two thirds of a tail, the two animals that sit facing you have none -- the dog's
-stays, behind the shoulder, where it is a bump and not a promise.
+It also cost both animals their tails. A cat's was two turned bars that did not
+meet, and cream on cream had hidden the seam; grey showed it as a stick
+floating by the shoulder. The dog's was one turned bar hanging off its hip,
+drawn through a layer the size of its own box and coming out with a cut edge --
+which is what was read as an artifact on its right. A tail behind an animal
+facing you is invisible, and a tail beside it is a turned bar, so neither has
+one now. The cat is its ears, whiskers and nose; the dog its ears and snout; the
+fish keeps its tail, because a fish is drawn side on and a tail is what makes it
+one.
+
+### What was in the corners
+
+The cat's plant was a round mass with two turned bars standing on top of it: the
+bars lost their ends to their own boxes, and the two of them read as ears. It is
+a potted plant now -- pot, a mass of leaves, and three leaves drawn as triangles
+standing out of the top of the mass, overlapping so the notches between them
+stay shallow.
+
+The dog's bone was a turned bar with its two knobs left straight, so the ends
+did not meet it and it read as a pale squiggle lying in the grass. It is drawn
+square on now, a bar and four knobs, and a bone. `PET_SCENE_PARTS` went to 24 to
+hold the extra pieces; six more objects that are never all drawn costs less than
+the wrong shape in the corner does.
 
 ### The fish
 

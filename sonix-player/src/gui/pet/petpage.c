@@ -99,10 +99,6 @@ typedef struct {
 	lv_obj_t *root;
 	lv_obj_t *shadow;
 
-	// Behind the trunk: the dog's wagging tail, and the second piece a cat's
-	// would be cut from if a turned bar did not lose its end.
-	lv_obj_t *tail;
-	lv_obj_t *tail_tip;
 
 	// A fish's fins: a forked tail behind, a dorsal on top, a pectoral under
 	// the belly.
@@ -234,10 +230,11 @@ static pet_shape_t shape_fish_body;
 static pet_shape_t shape_fin_tail;
 static pet_shape_t shape_fin_top;
 static pet_shape_t shape_fin_side;
+static pet_shape_t shape_plant; // three leaves standing out of the cat's pot
 
 // What each animal has behind it, and whose it is. Built once with the page,
 // shown and hidden by species -- no rebuilding when the pet changes.
-#define PET_SCENE_PARTS 18
+#define PET_SCENE_PARTS 24
 
 typedef struct {
 	lv_obj_t *obj;
@@ -514,8 +511,6 @@ static void build_creature(void) {
 	parts.shadow = disc(parts.root, lv_color_black());
 
 	// ---- behind the trunk ----------------------------------------------
-	parts.tail = round_piece(parts.root, PET_INK);
-	parts.tail_tip = round_piece(parts.root, PET_INK);
 	parts.fin_top = shape_create(parts.root, &shape_fin_top);
 	parts.fin_side = shape_create(parts.root, &shape_fin_side);
 	parts.fin_tail = shape_create(parts.root, &shape_fin_tail);
@@ -585,9 +580,9 @@ static void build_creature(void) {
 	for (size_t i = 0; i < sizeof(outlined) / sizeof(outlined[0]); i++) {
 		inked(outlined[i], 2);
 	}
-	// Everything that gets turned: the ears, the tails and the fins.
+	// Everything that gets turned: the ears, the arms and the fins.
 	lv_obj_t *const bordered_parts[] = {
-		parts.tail, parts.tail_tip, parts.arm_l, parts.arm_r,
+		parts.arm_l, parts.arm_r,
 		parts.jowl_l, parts.jowl_r, parts.whisker[0], parts.whisker[1], parts.whisker[2], parts.whisker[3],
 	};
 	for (size_t i = 0; i < sizeof(bordered_parts) / sizeof(bordered_parts[0]); i++) {
@@ -696,8 +691,6 @@ static void paint_creature(void) {
 	set_color(parts.foot_r, deep);
 	set_color(parts.arm_l, fill);
 	set_color(parts.arm_r, fill);
-	set_color(parts.tail, fill);
-	set_color(parts.tail_tip, fill);
 	set_color(parts.muzzle, light);
 	set_color(parts.nose, cat ? PET_CHEEK : PET_INK);
 
@@ -771,15 +764,13 @@ static void paint_creature(void) {
 	show(parts.belly, false);
 
 	// ---- what is behind the trunk ---------------------------------------
-	set_radius(parts.tail, 4);
-	set_radius(parts.tail_tip, 3);
 	set_radius(parts.fin_tail, 5);
 	set_radius(parts.fin_top, 4);
-	// No tail on the two that sit facing you: it would be behind them, and a
-	// tail beside the hip is a stick once it is turned -- a turned bar is
-	// clipped to its own box. The ears and the whiskers are the cat.
-	show(parts.tail, dog);
-	show(parts.tail_tip, false);
+	// There is no tail on the two that sit facing you. A tail behind them is
+	// invisible, and one beside the hip is a turned bar, which LVGL rasters
+	// through a layer the size of the bar's own box: it comes out clipped, a
+	// stick. The ears and the whiskers are the cat, the ears and the snout the
+	// dog, and only the fish has a tail -- a fish is drawn side on.
 	show(parts.fin_tail, fish);
 	show(parts.fin_top, fish);
 	show(parts.fin_side, fish);
@@ -827,9 +818,6 @@ static void paint_creature(void) {
 		shape_reset(&shape_fin_side);
 		shape_triangle(&shape_fin_side, deep, 2, 2, pec_w - 3, 3, pec_w * 30 / 100, pec_h - 2);
 		shape_place(&shape_fin_side, bx + fish_w * 32 / 100, fish_y + fish_h * 84 / 100, pec_w, pec_h);
-	} else if (dog) {
-		place(parts.tail, bx + trunk_w - 3, trunk_top + trunk_h * 26 / 100, 12, 22);
-		lv_obj_set_style_transform_rotation(parts.tail, -350, 0);
 	}
 
 	// ---- ears ------------------------------------------------------------
@@ -1111,12 +1099,24 @@ static void build_scenes(int card_w, int card_h) {
 	// A rug under it, a plant in the corner, a ball of yarn it is not
 	// supposed to have.
 	scene_rect(habitat, PET_SPECIES_CAT, PET_CAT_RUG, 7, cx - 60, floor_y - 5, 120, 16);
-	scene_rect(habitat, PET_SPECIES_CAT, PET_CAT_POT, 3, 14, floor_y - 22, 18, 14);
-	// A bush rather than a pot with sticks in it: a body and two leaves.
-	scene_rect(habitat, PET_SPECIES_CAT, PET_PLANT, 8, 11, floor_y - 40, 24, 20);
-	for (int i = 0; i < 2; i++) {
-		lv_obj_t *leaf = scene_rect(habitat, PET_SPECIES_CAT, PET_PLANT, 3, 11 + i * 11, floor_y - 52, 6, 18);
-		lv_obj_set_style_transform_rotation(leaf, i ? -340 : 340, 0);
+	// A potted plant: a pot, a rounded mass of leaves over it, and three leaves
+	// standing out of the top of the mass. The leaves are drawn as triangles
+	// rather than turned bars -- a turned bar is rastered through a layer the
+	// size of its own box and came out a stick -- and lobes set on top of one
+	// round mass read as a pair of ears.
+	scene_rect(habitat, PET_SPECIES_CAT, PET_CAT_POT, 3, 12, floor_y - 13, 18, 13);
+	scene_rect(habitat, PET_SPECIES_CAT, PET_PLANT, 9, 10, floor_y - 32, 26, 20);
+	scene_register(shape_create(habitat, &shape_plant), PET_SPECIES_CAT);
+	{
+		const int leaf_w = 34;
+		const int leaf_h = 26;
+		shape_reset(&shape_plant);
+		// Fill only: the scene is flat and wears no outline. The leaves overlap
+		// each other, so the notches between them are shallow.
+		shape_push(&shape_plant, PET_PLANT, 100, 0, 0, 4, leaf_h - 2, 16, leaf_h - 6, 5, 5);
+		shape_push(&shape_plant, PET_PLANT, 100, 0, 0, 12, leaf_h, 21, leaf_h, 16, 2);
+		shape_push(&shape_plant, PET_PLANT, 100, 0, 0, leaf_w - 4, leaf_h - 2, leaf_w - 5, 5, 18, leaf_h - 6);
+		shape_place(&shape_plant, 6, floor_y - 47, leaf_w, leaf_h);
 	}
 	scene_rect(habitat, PET_SPECIES_CAT, PET_YARN, LV_RADIUS_CIRCLE, card_w - 36, floor_y - 24, 15, 15);
 	lv_obj_t *thread = scene_rect(habitat, PET_SPECIES_CAT, PET_YARN, 1, card_w - 50, floor_y - 14, 16, 2);
@@ -1130,10 +1130,17 @@ static void build_scenes(int card_w, int card_h) {
 		scene_rect(habitat, PET_SPECIES_DOG, PET_FENCE, 2, 6 + i * 11, floor_y - 36, 8, 34);
 	}
 	scene_rect(habitat, PET_SPECIES_DOG, PET_FENCE, 2, 5, floor_y - 22, 44, 4);
-	lv_obj_t *bone = scene_rect(habitat, PET_SPECIES_DOG, PET_BONE, 4, card_w - 54, floor_y - 22, 22, 7);
-	lv_obj_set_style_transform_rotation(bone, -200, 0);
-	scene_rect(habitat, PET_SPECIES_DOG, PET_BONE, LV_RADIUS_CIRCLE, card_w - 56, floor_y - 26, 8, 8);
-	scene_rect(habitat, PET_SPECIES_DOG, PET_BONE, LV_RADIUS_CIRCLE, card_w - 37, floor_y - 24, 8, 8);
+	// A bone lying on the grass: the bar and the four knobs that make it a bone.
+	// The bar used to be turned with its two knobs left straight, so the ends
+	// did not meet it and it read as a pale squiggle.
+	const int bone_x = card_w - 52;
+	const int bone_y = floor_y - 14;
+	scene_rect(habitat, PET_SPECIES_DOG, PET_BONE, 3, bone_x, bone_y, 20, 7);
+	for (int i = 0; i < 2; i++) {
+		const int end_x = i ? bone_x + 13 : bone_x - 5;
+		scene_rect(habitat, PET_SPECIES_DOG, PET_BONE, LV_RADIUS_CIRCLE, end_x, bone_y - 4, 11, 11);
+		scene_rect(habitat, PET_SPECIES_DOG, PET_BONE, LV_RADIUS_CIRCLE, end_x, bone_y + 1, 11, 11);
+	}
 
 }
 
@@ -1442,17 +1449,12 @@ static void apply_frame(void) {
 	// The breath: two pixels, three when something is playing.
 	lv_obj_set_style_translate_y(parts.root, frame ? (listening ? 3 : 2) : 0, 0);
 
-	// The tail -- or the fin a fish swims with -- leans with it. A fish's tail
-	// is drawn square on, so it is only a few degrees either side of still.
-	lv_obj_t *sway = species == PET_SPECIES_FISH ? parts.fin_tail : parts.tail;
-	const bool fish = species == PET_SPECIES_FISH;
-	int base = -350; // the dog's
-	int swing = 90;
-	if (fish) {
-		base = 0;
-		swing = 45;
+	// The fish's tail leans with the breath. Nothing else sways: the other two
+	// are drawn facing you, and the tail was the one part of them that showed
+	// the seam of a turned bar.
+	if (species == PET_SPECIES_FISH) {
+		lv_obj_set_style_transform_rotation(parts.fin_tail, frame ? 45 : -45, 0);
 	}
-	lv_obj_set_style_transform_rotation(sway, base + (frame ? swing : -swing), 0);
 
 	// The two notes drift while something is playing: one rises as the other
 	// fades, which is all the movement two stills can suggest.
