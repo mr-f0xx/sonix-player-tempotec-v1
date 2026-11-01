@@ -2093,39 +2093,41 @@ that. The forked tail, the dorsal, the gill and the one eye say fish without it.
 
 ### The dog's ears
 
-Four passes at the same pair of ears, which between them say more about the page
-than the ears do. They have to be flat -- one fill inside the same ink outline
-everything else wears -- and the dog is the same colour as its head, so the only
-thing that separates an ear from the head is a line, and the only thing that
-separates an ear from hair is its silhouette.
+Five passes at the same pair of ears, which between them say more about this
+page than the ears do. They have to be flat -- one fill inside the same ink
+outline everything else wears -- and the dog is the same colour as its head, so
+the only thing that separates an ear from the head is a line, and the only thing
+that separates an ear from hair is its silhouette.
 
-- **Over the head** (the first pass): each flap's top edge crossed the crown and
-  its inner edge ran down the side of the face. Two of those on a round head are
-  a bob haircut with a parting, and that is what it looked like.
+- **Over the head**: each flap's top edge crossed the crown and its inner edge
+  ran down the side of the face. Two of those on a round head are a bob haircut
+  with a parting, and that is what it looked like.
 - **Beside the head**: pushed out until the ear only touched it at the top edge,
   the ear hung in the air, and an ear that is not on the head is not a dog's ear.
-- **With a pale inside**: the cream of the muzzle, pulled in from the lobe's own
-  corners, to say *ear* the way the cat's pink triangle does. It is a good idea
-  at a bigger size and a mane at this one; the pale reached down beside the
-  muzzle and the dog grew a beard.
-- **Standing up at the corners** (what is there now): a rounded ear out of each
-  top corner of the head, leaning outward, eighteen per cent of a head above the
-  crown and a little past the head's edge.
+- **With a big pale inside**: the cream of the muzzle pulled in from the lobe's
+  own corners. It reached down beside the muzzle and the dog grew a beard.
+- **Standing up at the corners, tall**: the first pair that changed the head's
+  outline, and the right idea -- and tall and narrow with it, so the dog was a
+  rabbit.
 
-The last one is the only one that changes the head's *outline*, and that is the
-whole point: an ear that breaks the silhouette at the top cannot be read as
-hair, whatever else is true of it. The cat has never had this trouble for
-exactly that reason.
+What is there now is the last one, corrected: **short, wide and rounded**, out of
+each top corner, leaning outward, twelve per cent of a head above the crown and
+a quarter of its height down through it. Short and wide is the whole difference
+between a dog's ear and a rabbit's.
 
-They are drawn before the head, so the head's own line closes them at the root
--- an ear with its top edge out in the air leaves a step in the silhouette, and
-a baseline drawn across the dome is a cut. And the table is in head units: x
-from the middle of the head in per cents of half its width, so a hundred is the
-edge of the head, and y from the top in per cents of its height, negative above
-it. Read that way it says what the ear is, and it scales with the animal: the
-box it used to live in sat a fixed eight pixels out from the head, which at the
-hatchling -- whose head is sixty-four across -- was a quarter of a head out in
-the air.
+Two details make them sit right. They are drawn **before** the head, so the
+head's own line closes them at the root: an ear with its top edge out in the air
+leaves a step in the silhouette, and a baseline drawn across the dome is a cut.
+And each carries a **small pale inside** -- the cat's trick, a colour inside the
+outline that only an ear has -- at the size these ears have room for it, a fifth
+of the ear's width in from its edge.
+
+The table is in head units: x from the middle of the head in per cents of half
+its width, so a hundred is the edge of the head, and y from the top in per cents
+of its height, negative above it. Read that way it says what the ear is, and it
+scales with the animal. The box it used to live in sat a fixed eight pixels out
+from the head, which at the hatchling -- whose head is sixty-four across -- was a
+quarter of a head out in the air.
 
 ## The charger, with the player off## The charger, with the player off
 
