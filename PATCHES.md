@@ -2091,6 +2091,32 @@ moved under the peduncle. The pectoral fin is gone: a fin on the side of a fish,
 seen from the side, is a triangle drawn on its belly, and it read as exactly
 that. The forked tail, the dorsal, the gill and the one eye say fish without it.
 
+### The dog's ears
+
+The dog's ears were a rounded rectangle, twenty-one by thirty-eight, turned
+thirteen degrees and dropped at a quarter of the way down the head. Three
+things were wrong with it and the first is a rule of this page: **a turned
+object is rasterised through a layer the size of its own box**, so its corners
+came out cut flat. The second is that a rectangle beside a round head is a bean
+whatever the angle -- there is no silhouette in it that says *ear*. The third
+is that it began at the level of the eyes, so it hung off the cheek rather than
+off the crown.
+
+The ears are drawn now, with the same machinery as the fish's body: a polygon
+of corners filled in triangles and outlined once. `shape_polygon()` was taken
+out of the fish's body and both use it, so there is one way to draw a shape with
+more sides than a triangle has.
+
+They are also drawn *on* the head rather than behind it. Behind it, a flap
+beside a round head can only ever be the crescent the head leaves over, and at
+every size that was tried it read as a hood. On the head, the ear is the whole
+flap, its inner edge is a line down the head, and the first corner of the table
+sits on the head's own outline -- start it out in the air and the silhouette has
+a step in it, which is what the rectangles did. From there the outer edge swells
+to its widest at the level of the eyes and comes back to a rounded tip at the
+jaw. The face is built after the ears, so the cheeks and the muzzle are drawn
+over them and nothing is covered.
+
 ## The charger, with the player off
 
 The stock player comes up on a battery screen when the device was switched off

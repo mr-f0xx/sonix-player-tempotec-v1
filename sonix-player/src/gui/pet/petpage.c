@@ -128,7 +128,7 @@ typedef struct {
 	// Heads: pointed ears and floppy ones.
 	lv_obj_t *ear_l;
 	lv_obj_t *ear_r;
-	lv_obj_t *jowl_l; // the dog's hanging ears, which are rounded, not drawn
+	lv_obj_t *jowl_l; // the dog's hanging ears, drawn: a flap on the head
 	lv_obj_t *jowl_r;
 	lv_obj_t *whisker[4]; // the cat's
 
@@ -234,6 +234,8 @@ static pet_shape_t shape_ear_r;
 static pet_shape_t shape_fish_body;
 static pet_shape_t shape_fin_tail;
 static pet_shape_t shape_fin_top;
+static pet_shape_t shape_jowl_l; // the dog's hanging ears
+static pet_shape_t shape_jowl_r;
 static pet_shape_t shape_plant; // three leaves standing out of the cat's pot
 
 // What each animal has behind it, and whose it is. Built once with the page,
@@ -466,6 +468,59 @@ static void shape_place(pet_shape_t *s, int x, int y, int w, int h) {
 	lv_obj_invalidate(s->obj);
 }
 
+// A whole polygon: filled in triangles, then outlined once. The triangles of
+// the fan each reach two corners on rather than one, so neighbours lap over
+// each other instead of sharing an edge -- two of the same flat colour that
+// only touch leave a hairline of what is behind them, which is what made the
+// first fish look drawn in pieces. The outline is one line round the lot, so
+// the number of corners costs nothing.
+static void shape_polygon(pet_shape_t *s, lv_color_t color, const int *xs, const int *ys, int n) {
+	shape_reset(s);
+	for (int i = 1; i + 2 < n && s->count < PET_SHAPE_TRIS; i++) {
+		shape_push(s, color, 100, 0, 0, xs[0], ys[0], xs[i], ys[i], xs[i + 2], ys[i + 2]);
+	}
+	for (int i = 0; i < n; i++) {
+		shape_line(s, xs[i], ys[i]);
+	}
+}
+
+// A dog's two hanging ears, one table mirrored: the corners are percentages of
+// the ear's own box, so they follow the head through the stages.
+//
+// The first corner is where the ear meets the crown, and it is on the head's
+// own outline: an ear drawn with its top out in the air leaves a step in the
+// silhouette, which is what the turned rectangles had. From there the ear's
+// outer edge swells to its widest at the level of the eyes and comes back to a
+// rounded tip at the jaw -- a flap that hangs, rather than a bean stuck to the
+// side of the head. The inner edge is a line down the head, and the face is
+// drawn after it, so the cheeks are not covered.
+static void draw_jowls(int cx, int head_w, int head_h, int head_top, lv_color_t fill) {
+	static const int16_t ear[10][2] = {
+		{88, 2}, {58, 10}, {26, 20}, {0, 46}, {6, 70},
+		{30, 90}, {58, 100}, {86, 90}, {98, 50}, {98, 20},
+	};
+	const int n = 10;
+	const int w = head_w * 34 / 100; // of which eight pixels are out in the air
+	const int h = head_h * 80 / 100; // and down to the jaw
+	const int y = head_top + head_h * 8 / 100;
+	int xs[PET_SHAPE_LINE];
+	int ys[PET_SHAPE_LINE];
+	for (int side = 0; side < 2; side++) {
+		const int x = side ? cx + head_w / 2 + 8 - w : cx - head_w / 2 - 8;
+		// The corners are relative to the shape's own box: the draw callback
+		// adds the box's corner, so absolute page positions would land
+		// wherever the ear happens to be twice.
+		for (int i = 0; i < n; i++) {
+			const int px = ear[i][0] * w / 100;
+			xs[i] = side ? w - 1 - px : px;
+			ys[i] = ear[i][1] * h / 100;
+		}
+		pet_shape_t *shape = side ? &shape_jowl_r : &shape_jowl_l;
+		shape_polygon(shape, fill, xs, ys, n);
+		shape_place(shape, x, y, w, h);
+	}
+}
+
 static lv_obj_t *corner_button(gui_config_t *cfg, int slot, const lv_image_dsc_t *glyph, lv_event_cb_t cb) {
 	lv_obj_t *button = lv_btn_create(petpage_screen);
 	settingsrow_place_corner_button(button, cfg, slot);
@@ -550,8 +605,6 @@ static void build_creature(void) {
 	parts.fin_tail = shape_create(parts.root, &shape_fin_tail);
 	parts.ear_l = shape_create(parts.root, &shape_ear_l);
 	parts.ear_r = shape_create(parts.root, &shape_ear_r);
-	parts.jowl_l = round_piece(parts.root, PET_INK);
-	parts.jowl_r = round_piece(parts.root, PET_INK);
 	for (int i = 0; i < 4; i++) {
 		parts.whisker[i] = round_piece(parts.root, PET_INK);
 	}
@@ -566,6 +619,11 @@ static void build_creature(void) {
 
 	// ---- the head, over the shoulders ----------------------------------
 	parts.head = round_piece(parts.root, PET_INK);
+	// A dog's ears hang down the side of the head, so they go on top of it:
+	// drawn behind, a flap beside a round head can only be a crescent of what
+	// the head leaves over, and it reads as a hood.
+	parts.jowl_l = shape_create(parts.root, &shape_jowl_l);
+	parts.jowl_r = shape_create(parts.root, &shape_jowl_r);
 
 	// ---- the face ------------------------------------------------------
 	parts.muzzle = round_piece(parts.root, PET_INK);
@@ -617,7 +675,7 @@ static void build_creature(void) {
 	// Everything that gets turned: the ears, the arms and the fins.
 	lv_obj_t *const bordered_parts[] = {
 		parts.arm_l, parts.arm_r,
-		parts.jowl_l, parts.jowl_r, parts.whisker[0], parts.whisker[1], parts.whisker[2], parts.whisker[3],
+		parts.whisker[0], parts.whisker[1], parts.whisker[2], parts.whisker[3],
 	};
 	for (size_t i = 0; i < sizeof(bordered_parts) / sizeof(bordered_parts[0]); i++) {
 		bordered(bordered_parts[i], 2);
@@ -785,23 +843,7 @@ static void paint_creature(void) {
 			xs[i] = hull[i][0] * w / 100 - 4;
 			ys[i] = hull[i][1] * h / 100;
 		}
-		shape_reset(&shape_fish_body);
-		// Filled in a fan from the snout, and each triangle reaches two corners
-		// on rather than one: neighbours then lap over each other by a whole
-		// slice instead of meeting along an edge. Two triangles of the same
-		// flat colour that only touch show the water between them as a
-		// hairline -- that is the seam that made the last fish look drawn in
-		// pieces -- and an overlap has no edge to show. No ink is needed under
-		// them: the outline is one line round the lot.
-		for (int i = 1; i + 2 < n; i++) {
-			shape_push(&shape_fish_body, fill, 100, 0, 0, xs[0], ys[0], xs[i], ys[i], xs[i + 2], ys[i + 2]);
-		}
-		// One outline round the whole of it, rather than twelve ink
-		// triangles: the line is the same 2 px ink every other part wears,
-		// whatever the number of corners under it.
-		for (int i = 0; i < n; i++) {
-			shape_line(&shape_fish_body, xs[i], ys[i]);
-		}
+		shape_polygon(&shape_fish_body, fill, xs, ys, n);
 		shape_place(&shape_fish_body, bx, fish_y, fish_w + 4, fish_h);
 	}
 	// The body is one flat fill, as the reference art is. A lighter belly on a
@@ -882,16 +924,11 @@ static void paint_creature(void) {
 		shape_push(&shape_ear_r, PET_CHEEK, 52, 0, 4, 5, ear_h - 7, ear_w - 5, ear_h - 5, ear_w * 66 / 100, 6);
 		shape_place(&shape_ear_r, ear_r_x, ear_y, ear_w, ear_h);
 	} else if (dog) {
-		// A dog's ears hang: long, soft, out in the air beside the head, all
-		// the way down to the jaw.
-		set_color(parts.jowl_l, fill);
-		set_color(parts.jowl_r, fill);
-		set_radius(parts.jowl_l, 9);
-		set_radius(parts.jowl_r, 9);
-		place(parts.jowl_l, cx - head_w / 2 - 13, head_top + head_h * 24 / 100, 21, 38);
-		place(parts.jowl_r, cx + head_w / 2 - 8, head_top + head_h * 24 / 100, 21, 38);
-		lv_obj_set_style_transform_rotation(parts.jowl_l, 130, 0);
-		lv_obj_set_style_transform_rotation(parts.jowl_r, -130, 0);
+		// A dog's ears hang: soft, wide at the shoulder of the head and
+		// rounded at the tip, all the way down to the jaw. Drawn rather than
+		// styled -- a rounded rectangle is a bean whatever it is turned by,
+		// and a turned one is cut off at the corners by its own layer.
+		draw_jowls(cx, head_w, head_h, head_top, fill);
 	}
 
 	// ---- feet and arms ---------------------------------------------------
