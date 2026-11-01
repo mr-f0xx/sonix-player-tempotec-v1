@@ -285,7 +285,11 @@ a self-signed certificate), and HLS.
   It moves in two frames rather than in an interpolation, and the page redraws
   only what changed: a meter that has not moved is not touched between one
   second and the next. While music plays, the line at the foot of the card says
-  what it is feeding on beside a three-bar equalizer.
+  what it is feeding on beside a three-bar equalizer. Each animal has a shape of
+  its own -- a cat's ears and whiskers, a dog's hanging ears and snout, a
+  dragon's horns, crest and wings, a fish's fan -- and a few flat things of its
+  own behind it: a rug and a plant, a fence and a bone, a pair of mountains, or
+  the tank the fish swims in.
 
 ## Games
 

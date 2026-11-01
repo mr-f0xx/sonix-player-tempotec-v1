@@ -1743,6 +1743,90 @@ ninths of the 36 px slot (20 px) instead of three quarters (27 px). A pencil
 that is three quarters of its button looks like it is falling out of the header,
 which is what the photograph showed.
 
+## The pet, drawn as itself
+
+The four animals were one animal with four sets of attachments. A round body,
+two ears bolted to the top corners, a tail: a cat was a potato with a hat on, and
+so was a dragon. This pass is about the silhouette, and about giving each of
+them somewhere to live.
+
+### A head on a body
+
+Every animal is two masses now: a trunk -- the round bottom it sits on and the
+shoulders its paws hang from -- and a head, drawn over it. The head is most of
+the animal, the way a small animal is, and the ink line around it cuts across
+the shoulders. That seam is what makes it read as a head on a body rather than
+as one potato, and it cost nothing: the parts were always separate objects.
+
+The fish has no such seam. It is one long body with the head on the front of it,
+the way a fish is, and its fins do the rest.
+
+### The shapes a rectangle cannot be
+
+Two things went wrong before this pass, and both of them had the same cause.
+
+A **turned object loses its outline**. LVGL draws a rotated widget through a
+temporary layer the size of the widget's own box, and the outline -- which is
+drawn *outside* the box -- is clipped away by it. Every ear, tail and fin in
+this page is turned, so every one of them was drawn without a line: soft, dim,
+and not part of the set. They now wear a border instead, which is drawn inside
+the box and survives the turn.
+
+A **turned object loses its corners**, for the same reason. A square turned
+forty-five degrees comes out as an octagon, which is why the old ears read as
+rounded blobs however they were placed. So the four shapes that have to be
+pointed are not rectangles at all: they are drawn. `petpage.c` has a small
+shape type -- a box, up to six triangles in it, and a colour each -- and a
+DRAW_MAIN callback that hands them to `lv_draw_triangle()`: the ink triangle
+first, grown about its middle by a quarter, the fill on top. The cat's ears
+(and the pink inside them), the dragon's horns, its crest and its wings, the
+fish's fan and its dorsal fin, and the two mountains behind the dragon are all
+triangles.
+
+It costs nothing at rest: nothing is allocated while the page is up, nothing is
+animated, and a shape is only drawn when the animal has changed -- which the
+cached redraw from the previous pass already made rare.
+
+### Four animals, four faces
+
+What each of them is made of now, beyond the head and the trunk:
+
+| | ears | face | behind | tail |
+|---|---|---|---|---|
+| cat | two triangles leaning out, pink inside | small pink nose, two whiskers a side | a tail hooked up behind the hip | two lengths, curling |
+| dog | hanging bars, out in the air to the jaw | wide soft muzzle, a black nose | a short tail, up | one bar |
+| dragon | two swept horns and a three-spike crest | a long deep-green muzzle, flat nose | wings behind the shoulders | a bar ending in a spade |
+| fish | none | two eyes on the front of the body | a fan, a dorsal fin, a belly fin | the fan itself |
+
+The whiskers lie flat on purpose: a two-pixel bar turned forty degrees is
+clipped down to two rows and disappears.
+
+### Four homes
+
+A cat on a green card and a dragon on a green card were the same card. Each
+animal now has three or four flat things of its own behind it, in colours that
+do not follow the theme -- a pet's rug is not going to be Tokyo Night's blue --
+built once with the page and shown or hidden by species:
+
+- **cat**: a rug, a plant in a corner, a ball of yarn with a thread coming off it.
+- **dog**: grass along the bottom, a picket fence, a bone.
+- **dragon**: two peaks, a strip of rock, two embers.
+- **fish**: the tank it already had.
+
+Eighteen objects for all four together; only the ones belonging to the current
+animal are ever drawn. The light theme needed three of the older colours
+darkened -- the sand, the fence and the bone -- because cream on a white card is
+not a fence.
+
+### The box grew a hat's height
+
+The root the animal is built in is taller than the animal by the height of a
+party hat (126 px for a hundred-pixel animal), and the root is now placed from
+the feet rather than wherever its container laid it out: the animal stands on the
+same floor line the four homes are drawn on, and a hat has somewhere to go. A
+child cannot be drawn outside its parent, and LVGL's overflow flag does not help
+here -- it extends a parent by its draw extension, and a plain box has none.
+
 ## The pet, on a 240 MHz budget
 
 The page was correct before this pass and busier than it needed to be. What
