@@ -1044,6 +1044,22 @@ static void check_pet_page(gui_config_t *cfg, const char *tag) {
 	assert(find_label(petpage_screen, "80")); // and the energy
 	assert(find_label(petpage_screen, tr("pet_feed_me")));
 
+	// The dog, for its ears. They are the one part of the drawing that has been
+	// argued about more than any other, and the suite only ever looked at the
+	// cat -- so a pair of ears could go back to being a bear's and nothing
+	// would notice.
+	pet_state.species = PET_SPECIES_DOG;
+	petpage_open();
+	assert(pet_species(&pet_state) == PET_SPECIES_DOG);
+	lv_obj_update_layout(petpage_screen);
+	check_within_panel(petpage_screen, cfg, "Pet (dog)");
+	char dog_tag[64];
+	snprintf(dog_tag, sizeof(dog_tag), "%s-dog", tag);
+	dump_snapshot(petpage_screen, dog_tag);
+	pet_state.species = PET_SPECIES_CAT;
+	petpage_open();
+	lv_obj_update_layout(petpage_screen);
+
 	// A pat is a tap on the animal, not a button at the foot of the page.
 	int pets = pet_state.pets;
 	lv_obj_t *creature = petpage_creature();
