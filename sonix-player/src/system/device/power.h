@@ -12,6 +12,12 @@
 //     playing while the screen is off.
 //   - After screen_off_timeout_ms with no user input the screen turns off on
 //     its own (even while music is playing).
+//   - While a Bluetooth stream is playing, "screen off" is the backlight at
+//     zero and nothing else: the panel is left unblanked, holding its last
+//     frame, because its power-up is what the stream is heard to stutter over
+//     and its power-down is not. The panel goes down for real a few seconds
+//     after the music stops, and before any suspend. [screen] panel_hold = 0
+//     in device_config.ini turns it off; see panel_hold_wanted() in power.c.
 //   - Suspend-to-RAM. The stock standby executes `mem` 60 s after the screen
 //     goes dark, but only after a real, awaited STOP of the audio pipeline
 //     (command 0x203, wait for state 2, then `echo mem`). That sequence is
@@ -117,6 +123,12 @@ bool power_screen_is_on(void);
 // cannot succeed while the panel is dark -- see display_wake_begin(). False
 // when the platform has no blank control, because then the panel is never
 // blanked at all.
+//
+// Also false while the screen is dark with a Bluetooth stream playing: in that
+// case the backlight is taken to zero and the panel is deliberately left
+// unblanked, because the panel's power-up is what a stream over the air is
+// heard to stutter over. See the note over panel_hold_wanted() in power.c and
+// `[screen] panel_hold` in device_config.ini.
 bool power_panel_is_blanked(void);
 
 // --- Activity notifications (thread-safe; call from any thread) ---

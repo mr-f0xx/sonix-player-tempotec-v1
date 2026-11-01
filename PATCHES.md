@@ -1465,3 +1465,83 @@ podcast and Subsonic signatures), the track-menu actions, path-backed media-list
 subtitles, dynamic-title realignment, the shared row-duration formatter, cache
 cleanup at startup and card removal, and the new translation keys in every
 language file. It also adds the `lang.h` include `streamkeep.c` needs for `tr()`.
+
+## The screen coming back on, and the music over Bluetooth
+
+Issue #188: with music playing over Bluetooth — headphones fed from here or a
+phone streaming to here — pressing the power button to light the screen up is
+heard as a short interruption, a stutter or a crackle, every time. Nothing about
+the way the player *stops* the screen does it; only the way it *starts* it.
+
+### What is actually in that moment
+
+Waking the panel is not a neutral act on this board. `power_screen_on()` writes
+`0` to the framebuffer's blank node, and the driver behind that node does not
+merely light a backlight: it resets the panel, brings its VCC and VCCIO back up
+at the PMIC, re-initialises the glass (the 120 ms of sleep-out delays that
+`WAKE_PANEL_SETTLE_MS` exists to wait out) and re-arms the scan-out. Everything
+on the board shares that moment. It is where the CS43198's stale volume register
+came from — the distortion of issue #167, patched for by rewriting the volume at
+the end of the wake — and it is where the Bluetooth module's link is disturbed:
+a stream being encoded for a pair of headphones (A2DP source) loses packets on
+the way out, a stream being decoded from a phone (A2DP sink) loses them on the
+way in, and both are heard as the same thing. The power-*down* is reported to do
+neither. A rail going away is quiet; a rail coming back up is not, and that
+asymmetry is exactly what the two reports say.
+
+Worth saying, because it was looked at first and is not it: the Wi-Fi radio.
+`wifi_wanted()` deliberately counts a connected pair of Bluetooth headphones, so
+the radio is never parked out from under a live link and `unpark_radios()` has
+nothing to bring up at a wake. Also not it: the volume. The wake's
+`set_volume_percent()` is deduplicated on the Bluetooth side before it reaches
+bluealsa, so no AVRCP write goes out on a level that has not moved.
+
+### The fix: the panel's power state follows the stream
+
+While a Bluetooth stream is playing, the screen going dark no longer powers the
+panel down. The backlight is taken to a true zero — which is the whole of what
+the user sees — and the panel is left unblanked with its last frame still being
+scanned out to the glass. The wake is then the backlight coming back up over a
+frame that never left it: no reset, no panel power-up, no settle window, no
+`FBIOPUT_VSCREENINFO` on a display that is still running, and nothing at all
+happening to a rail or a radio at the moment the button is pressed.
+
+Three details make it a state and not a hack:
+
+- **It follows the stream, not the backlight.** The state is re-read on every
+  power tick (`panel_hold_tick()`): if a stream starts behind a panel that was
+  already blanked — resuming from the headphones with the screen dark, which is
+  the same bug one press later — the panel is brought up then and there, behind
+  a backlight at zero, so that the wake the user is about to ask for does not
+  have to. If the music stops (a pause, the end of the album, the headphones
+  walking away) the panel is powered down for real again, `PANEL_HOLD_QUIET_MS`
+  (4 s) later, so a track change, a skip or the gap between two gapless tracks
+  is not a power cycle.
+- **The wake skips the parts that exist for a blanked panel.** A held panel was
+  never reset and never lost a frame, so `power_screen_on()` repaints once — the
+  page underneath may have changed while nobody was watching — waits a single
+  scan-out rather than the two the blanked path waits for, and fades up. The
+  white-flash machinery is not merely unnecessary there, it would be wrong: it
+  re-arms a mode that was never torn down.
+- **It is a trade, made on purpose.** An unblanked panel, its controller and a
+  touch controller that stays awake behind it cost a few tens of milliwatts that
+  a blanked one would not — for as long as the stream lasts, and not one tick
+  longer. A card that would rather have the milliwatts than the steady stream
+  sets `[screen] panel_hold = 0` in `device_config.ini` and gets the old
+  behaviour back, stutter and all. The suspend path puts a held panel down
+  before it writes `mem` regardless, so nothing about standby changes.
+
+One smaller thing rides along: the wake no longer rewrites the CS43198's volume
+when the sound is leaving over the air. There is no register of the DAC's in that
+path at all — it is the one output with nothing to put back — and the call ends
+in a write to bluealsa's PCM object, through the same daemon that is encoding the
+track, which is the last thing a wake should be doing while the music plays. The
+Bluetooth *receiver* is not that case: there the DAC is playing, and the rewrite
+stays exactly where it was.
+
+The log says which of the two wakes a card took — `power: screen on
+(brightness=…, wake …ms)` with `, panel kept` appended for the held one, and a
+`power: screen off with the panel kept powered for the Bluetooth stream` line
+when the hold goes in. A held wake is that one repaint and a fade against the
+quarter second the blanked one spends holding a dark panel through its own
+power-up, which is the difference the listener hears.

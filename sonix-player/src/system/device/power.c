@@ -290,6 +290,17 @@ static void backlight_hold(void) {
 	}
 }
 
+// A true zero, whatever [screen] wake_hold_level says. Used by the two halves
+// of a held panel: one that is left unblanked must not be looked at through
+// anything at all, and a hold level restored for a board that needs its floor
+// back is a level a *wake* is allowed to be seen at, not a dark screen.
+static void backlight_black(void) {
+	g_hw_brightness = 0;
+	if (g_cfg.brightness_path) {
+		write_long_to_file(g_cfg.brightness_path, 0);
+	}
+}
+
 // Re-asserts the hold every WAKE_HOLD_STEP_MS for `ms` in total. Used for the
 // windows the panel spends doing something of its own -- its init after the
 // unblank above all -- during which the kernel may write the backlight itself.
@@ -401,6 +412,89 @@ static void screen_power(bool on) {
 // What screen_power() last wrote. Asked by the display, which must not attempt
 // a page flip on a panel that is still blanked (see display_wake_begin).
 bool power_panel_is_blanked(void) { return g_panel_blanked; }
+
+// ---------------------------------------------------------------------------
+// The panel's power-up, and what it does to a Bluetooth stream
+//
+// Waking the panel is not a neutral act on this board, and the unblank is the
+// half of it that is not. Writing 0 to the blank node does not merely light a
+// backlight: the display driver resets the panel, brings its VCC and VCCIO back
+// up at the PMIC, re-initialises the glass and re-arms the scan-out (which is
+// what WAKE_PANEL_SETTLE_MS exists to wait out). Everything on the board sees
+// that. The CS43198 comes out of it with a stale volume register -- the
+// distortion of issue #167, patched for by rewriting the volume at the end of
+// the wake -- and the Bluetooth module comes out of it with its link disturbed,
+// which is what a stream being encoded for a pair of headphones (A2DP source)
+// or decoded from a phone (A2DP sink) is heard to stutter over, in either
+// direction, at the one moment the user presses the power button. The
+// power-*down* is reported to do neither: a rail going away is quiet, a rail
+// coming back up is not, and that asymmetry is exactly what the reports say.
+//
+// So while a Bluetooth stream is playing, the screen going dark no longer
+// powers the panel down. The backlight goes to zero -- which is the whole of
+// what the user sees -- and the panel is left unblanked with its last frame
+// still being scanned out to the glass. The wake is then the backlight coming
+// back up over a frame that never left it: no reset, no panel power-up, no
+// settle window, no second repaint for a panel that might not be listening.
+// Nothing at all happens to the rail, the link, or the DAC at the moment the
+// user presses the button, so there is nothing left to hear.
+//
+// It is a trade and it is made on purpose. An unblanked panel, its controller
+// and a touch controller that stays awake behind it cost a few tens of
+// milliwatts that a blanked one would not -- but only for as long as the stream
+// lasts. As soon as the music stops (a pause, the end of the album, the
+// headphones walking away) the panel is powered down for real on the next tick,
+// PANEL_HOLD_QUIET_MS later so that a track change, a skip or the gap between
+// two gapless tracks is not a power cycle. Nothing playing, nothing held. A
+// card that would rather have the milliwatts than the steady stream sets
+// `panel_hold = 0` under [screen], and gets the old behaviour back.
+// ---------------------------------------------------------------------------
+
+#define PANEL_HOLD_QUIET_MS 4000
+
+static bool g_panel_held;                    // screen dark, panel deliberately left unblanked
+static bool g_panel_hold_enabled = true;     // [screen] panel_hold
+static bool g_bt_was_sounding;               // a stream has played since the panel went dark
+static uint32_t g_bt_quiet_at;               // tick when it last stopped sounding
+
+// Whether sound is going out over the air, in either direction: this player's
+// own track being encoded for a pair of headphones, or a phone's stream being
+// decoded here and handed to the DAC. Both live on the link the panel's
+// power-up disturbs, which is why both are here.
+static bool bluetooth_stream_playing(void) {
+	if (btreceiver_is_streaming()) {
+		return true;
+	}
+	return audio_get_status() == AUDIO_STATUS_PLAYING && audio_output_is_bluetooth();
+}
+
+// Whether the panel has to stay powered at `now`: the stream is playing, or
+// stopped too recently for a power cycle to be worth making (see the note).
+static bool panel_hold_wanted(uint32_t now) {
+	if (!g_cfg.blank_path || !g_panel_hold_enabled) {
+		g_bt_was_sounding = false;
+		return false;
+	}
+	if (bluetooth_stream_playing()) {
+		g_bt_was_sounding = true;
+		g_bt_quiet_at = 0;
+		return true;
+	}
+	if (!g_bt_was_sounding) {
+		// Nothing has played since the panel went dark, so there is nothing to
+		// protect: the usual blank is the honest answer and the usual wake is
+		// the cheap one.
+		return false;
+	}
+	if (g_bt_quiet_at == 0) {
+		g_bt_quiet_at = now ? now : 1; // 0 means "sounding", never "now"
+	}
+	if (since(g_bt_quiet_at, now) >= PANEL_HOLD_QUIET_MS) {
+		g_bt_was_sounding = false;
+		return false;
+	}
+	return true;
+}
 
 // Enable/disable every LVGL input device (i.e. the touchscreen). Physical
 // buttons live in their own threads and are unaffected, so volume/power keys
@@ -1164,6 +1258,17 @@ static void suspend_to_ram(void) {
 	printf("power: mem: starting the sequence (screen off for %u s)\n",
 		   (unsigned)((lv_tick_get() - g_screen_off_at) / 1000));
 
+	// A panel held up for a Bluetooth stream goes down before the sleep. It has
+	// normally been put down already -- the stream had to stop for the suspend
+	// to be allowed, and the tick follows the stream -- but a sleep that falls
+	// inside the hold's grace period would otherwise leave the display powered
+	// with its rail up for the whole suspend.
+	if (g_panel_held) {
+		g_panel_held = false;
+		screen_power(false);
+		backlight_black();
+	}
+
 	// 1. The freeze: a real stop, waited on until the track context is gone --
 	//    play_file() returned, decoder and FILE* closed, gapless empty, PCM
 	//    closed. Quiescing the ALSA objects is not enough: a paused track keeps
@@ -1589,7 +1694,18 @@ void power_screen_off(void) {
 	set_indevs_enabled(false); // no touch events into LVGL while the panel is down
 	panel_touch_flush();
 	fade_to(BRIGHTNESS_MIN);   // smooth dim down
-	screen_power(false);
+
+	// The panel goes down with the screen, unless a Bluetooth stream is playing
+	// (see the note over panel_hold_wanted(): it is the panel's power-up, not
+	// its power-down, that a waking user hears). The backlight is taken to zero
+	// either way, and that is all of the screen going dark the user sees.
+	if (panel_hold_wanted(g_screen_off_at)) {
+		g_panel_held = true;
+		printf("power: screen off with the panel kept powered for the Bluetooth stream\n");
+	} else {
+		g_panel_held = false;
+		screen_power(false);
+	}
 
 	// And left at the hold level rather than at the fade's floor: the
 	// backlight driver restores the level it held before the blank when the
@@ -1598,7 +1714,15 @@ void power_screen_off(void) {
 	// the driver restores, which is half of what keeps the wake free of the
 	// white reset frame (see WAKE_HOLD_LEVEL_DEFAULT). The user's level is not
 	// lost: the wake's fade ends at g_cfg.brightness.
-	backlight_hold();
+	//
+	// A held panel gets a true zero instead: it is still powered and still
+	// holding a picture, so a hold level meant for a blanked panel would be a
+	// dark screen someone can just make out.
+	if (g_panel_held) {
+		backlight_black();
+	} else {
+		backlight_hold();
+	}
 
 	// With the panel dark, draw what the next wake should open on straight
 	// into the framebuffer. Unblanking presents whatever the framebuffer
@@ -1652,17 +1776,61 @@ void power_screen_off(void) {
 
 // Paints the whole interface into the framebuffer once: every layer made
 // dirty, then an explicit refresh -- which draws even while the refresh timer
-// is paused -- inside the display's own wake kick, the one that puts the video
-// mode and the scan-out back after a blank (see display_wake_begin).
-static void wake_repaint(void) {
-	display_wake_begin(g_disp);
+// is paused. No wake kick of its own, because a panel that has been blanked
+// needs one and a panel that has not is left alone: see wake_repaint() below.
+static void repaint_now(void) {
 	lv_obj_t *scr = lv_screen_active();
 	if (scr) {
 		lv_obj_invalidate(scr);
 	}
 	lv_obj_invalidate(lv_layer_top());
 	lv_refr_now(g_disp);
+}
+
+// The same, inside the display's own wake kick, the one that puts the video
+// mode and the scan-out back after a blank (see display_wake_begin).
+static void wake_repaint(void) {
+	display_wake_begin(g_disp);
+	repaint_now();
 	display_wake_end(g_disp);
+}
+
+// The panel up, the screen still dark and staying dark: a stream started
+// behind a blanked panel, which is the state a user resumes from the
+// headphones in a pocket. Done here rather than at the wake because the wake is
+// the one moment the panel's power-up must not land on -- see the note over
+// panel_hold_wanted().
+//
+// The frame is pushed after the unblank, and its being lost is acceptable in a
+// way it is not at a wake: nothing is visible behind a backlight at zero, and
+// the wake that follows repaints anyway. That is also why there is no settle
+// window here -- it would only delay the start of the music.
+static void panel_up_in_the_dark(void) {
+	screen_power(true);
+	wake_repaint();
+	backlight_black(); // an unblank may leave the PWM where the driver had it
+	g_panel_held = true;
+	printf("power: the panel is kept powered while the Bluetooth stream plays\n");
+}
+
+// Keeps the panel's power state following the stream while the screen is dark:
+// up while something is playing (however it got started), and put back down
+// once nothing is, so the milliwatts are only spent for as long as the stream
+// lasts. Called from the power tick; the screen-off and the wake own the state
+// while the screen is up.
+static void panel_hold_tick(uint32_t now) {
+	if (g_screen_on) {
+		return;
+	}
+	bool wanted = panel_hold_wanted(now);
+	if (wanted && !g_panel_held) {
+		panel_up_in_the_dark();
+	} else if (!wanted && g_panel_held) {
+		g_panel_held = false;
+		screen_power(false);
+		backlight_black();
+		printf("power: nothing is playing over Bluetooth; the panel is powered down again\n");
+	}
 }
 
 void power_screen_on(void) {
@@ -1672,6 +1840,9 @@ void power_screen_on(void) {
 	}
 	g_screen_on = true;
 	uint32_t wake_started = monotonic_ms();
+	// Read once, at the top: the branch below clears it, and the log line at
+	// the end has to be able to say which wake this was.
+	const bool panel_was_held = g_panel_held;
 
 	// And disarms the automatic-shutdown RTC alarm: there is a user. The
 	// shutdown timer goes back to zero here and stays there until the screen is
@@ -1717,7 +1888,15 @@ void power_screen_on(void) {
 	// at the end, so the panel may be white and the controller may still be
 	// waking up: what matters is that the level comes back over the *picture*,
 	// never over the panel's reset white (see WAKE_PANEL_SETTLE_MS).
-	backlight_hold();
+	//
+	// A held panel is dark at a true zero and stays there: its hold level is
+	// the one a blanked panel is allowed to be *looked at through*, and this
+	// one is holding a picture the whole time.
+	if (panel_was_held) {
+		backlight_black();
+	} else {
+		backlight_hold();
+	}
 
 	// Resume the timers first, so the one frame we draw below has the right
 	// time, battery, playback position and audio-output state.
@@ -1740,31 +1919,49 @@ void power_screen_on(void) {
 	// controller's scan-out. Keep the backlight held down through that init;
 	// unlike an ordinary refresh, the frame has to be pushed after the panel
 	// is listening or the SLCD silently loses it.
-	screen_power(true);
+	//
+	// A panel that was never blanked needs none of that, and must not be given
+	// it: see the note over panel_hold_wanted(). Its glass still holds the frame
+	// the screen went dark on, so the wake is one repaint -- the page underneath
+	// may have changed while nobody was watching -- and then the light.
+	if (panel_was_held) {
+		g_panel_held = false;
+		// No wake kick: the mode and the scan-out were never torn down, and
+		// re-arming them on a panel that is still running is a change to the
+		// timing of a live display for no reason.
+		repaint_now();
+		// One scan-out, so the level comes up over the frame just drawn rather
+		// than over the one it replaced. One and not the blanked path's two:
+		// this panel never stopped scanning, and nothing was reset to be waited
+		// out.
+		(void)display_wait_vsync(1);
+	} else {
+		screen_power(true);
 
-	// Say so if the unblank lit the backlight on its way through. The read is
-	// taken before the hold below overwrites it, and it is the one part of the
-	// wake that cannot be seen from the outside: a level restored here is what
-	// a white flash under the protection used to be.
-	if (g_cfg.brightness_path) {
-		long lit = read_long_from_file(g_cfg.brightness_path);
-		if (lit > g_wake_hold_level) {
-			printf("power: wake: the unblank left the backlight at %ld (hold %ld)\n", lit, g_wake_hold_level);
+		// Say so if the unblank lit the backlight on its way through. The read is
+		// taken before the hold below overwrites it, and it is the one part of the
+		// wake that cannot be seen from the outside: a level restored here is what
+		// a white flash under the protection used to be.
+		if (g_cfg.brightness_path) {
+			long lit = read_long_from_file(g_cfg.brightness_path);
+			if (lit > g_wake_hold_level) {
+				printf("power: wake: the unblank left the backlight at %ld (hold %ld)\n", lit, g_wake_hold_level);
+			}
 		}
-	}
 
-	// The hold again at once -- then leave the panel dark through its full
-	// init window and a small safety margin. Drawing once, after that window,
-	// avoids spending two full-screen renders on the single-core audio path
-	// while still ensuring the SLCD gets a frame after it is ready.
-	if (g_cfg.blank_path) {
-		backlight_hold_for(WAKE_PANEL_SETTLE_MS + WAKE_PANEL_MARGIN_MS);
-	}
-	wake_repaint();
+		// The hold again at once -- then leave the panel dark through its full
+		// init window and a small safety margin. Drawing once, after that window,
+		// avoids spending two full-screen renders on the single-core audio path
+		// while still ensuring the SLCD gets a frame after it is ready.
+		if (g_cfg.blank_path) {
+			backlight_hold_for(WAKE_PANEL_SETTLE_MS + WAKE_PANEL_MARGIN_MS);
+		}
+		wake_repaint();
 
-	// Hold at zero until the controller has carried the fresh frame out to
-	// the panel -- the moment before this is when the reset white could show.
-	backlight_hold_until_panel_shows();
+		// Hold at zero until the controller has carried the fresh frame out to
+		// the panel -- the moment before this is when the reset white could show.
+		backlight_hold_until_panel_shows();
+	}
 	panel_touch_flush();
 	set_indevs_enabled(true);
 	indev_timers_set_paused(false);
@@ -1779,12 +1976,22 @@ void power_screen_on(void) {
 	// playing. Rewrite the DAC volume so the codec output is certain to
 	// match the level the user chose. Harmless if nothing changed: the
 	// write is idempotent.
-	set_volume_percent(get_volume_percent());
+	//
+	// Skipped while the sound is going out over the air: the CS43198 is not in
+	// that path at all, so there is no register of its to put back, and the call
+	// is not free of the stream's side either -- it ends in a write to bluealsa's
+	// PCM object, through the same daemon that is encoding the track, which is
+	// the one thing a wake must not do while the music plays. The Bluetooth
+	// receiver is not this case: there the DAC is playing, and the rewrite is
+	// exactly what it is for.
+	if (!audio_output_is_bluetooth()) {
+		set_volume_percent(get_volume_percent());
+	}
 
 	led_set_standby(false);
 
-	fprintf(stderr, "power: screen on (brightness=%ld, wake %ums)\n", g_cfg.brightness,
-			(unsigned)(monotonic_ms() - wake_started));
+	fprintf(stderr, "power: screen on (brightness=%ld, wake %ums%s)\n", g_cfg.brightness,
+			(unsigned)(monotonic_ms() - wake_started), panel_was_held ? ", panel kept" : "");
 }
 
 void power_toggle_screen(void) {
@@ -1996,6 +2203,13 @@ static void power_timer_cb(lv_timer_t *timer) {
 	//         sleep: at one percent this does not return.
 	battery_guard_tick();
 
+	// 4a-bis-1. the panel, when a Bluetooth stream is what it is being held for:
+	//           up while something plays, back down once nothing does. Both
+	//           halves happen behind a dark screen, so neither is visible --
+	//           what they buy is that the power-up does not land on the stream,
+	//           and the milliwatts are only spent while it lasts.
+	panel_hold_tick(now);
+
 	// 4a-bis-2. the radios, a minute after the screen goes dark
 	park_radios_if_idle(now);
 
@@ -2181,6 +2395,12 @@ void power_init(const power_config_t *cfg, lv_display_t *disp) {
 		mem_secs = 15; // any lower risks the device sleeping under the fingers
 	}
 	g_mem_after_ms = (uint32_t)mem_secs * 1000u;
+
+	// The panel's power state follows a Bluetooth stream while the screen is
+	// dark; see the note over panel_hold_wanted(). On by default, and the only
+	// thing here that costs battery rather than saving it, so it is a switch:
+	// [screen] panel_hold = 0 gets the old behaviour (and the stutter back).
+	g_panel_hold_enabled = config_get_int("screen", "panel_hold", 1) != 0;
 
 	// The radios go down on their own clock, not the Standby toggle's: they are
 	// worth switching off whether or not the SoC is going to sleep.
