@@ -2185,30 +2185,40 @@ that is only there while music is going in, so the mouth beside them is singing.
 Two arcs and two more shapes, all hidden when the mood is not theirs. Nothing
 here is drawn per frame: the page still does one memo of the clock a second.
 
-### The dog's ears, half on the head
+### The dog's ears
 
-The ears of the pass before were drawn over the head from the crown down: each
-flap's top edge crossed the top of the head near the middle of it, and from
-there its inner edge ran the rest of the way down the head's side. Two of those
-on a round head is a bob haircut with a parting, and that is what it looked
-like -- on the device, and in the snapshot that was taken of the adult.
+Three passes at the same pair of ears, because the first two were wrong in
+opposite directions.
 
-An ear is a flap that rests on the head and hangs *off* it. The top edge now
-crosses the head's outline a quarter of the way down, and everything below that
-is out in the air: past the head's edge, down beside the jaw, over the shoulder.
-The crown between the two is left bare and round, because that bare crown is
-what says the head is a head and not a face in a hood.
+The ears of the pass before hung from the crown down over the head: each flap's
+top edge crossed the top of the head near the middle of it, and from there its
+inner edge ran the rest of the way down the head's side. Two of those on a round
+head is a bob haircut with a parting, and that is what it looked like -- on the
+device, and in the snapshot that was taken of the adult.
+
+The next pass overcorrected. Pushed out until it only touched the head at its
+top edge, the ear hung in the air beside the face, and an ear that is not on the
+head is not a dog's ear either.
+
+What the third pass is: the lobe lies on the side of the head again -- it starts
+on the head's outline a tenth of the way down from the crown, covers the side of
+the head down to the jaw, and reaches a quarter of a head's width out into the
+air -- and it carries **the pale inside of an ear**, the cream of the muzzle,
+pulled in from the lobe's own corners. That pale shape is what settles it. A
+lobe of the animal's own colour laid over a round head is the same ink line
+whether it is an ear or a bob, and no outline will ever say which; the cat has
+never had this trouble because its ears are triangles with a pink inside. The
+dog's ears are now the same idea: an outline, and a colour inside it that only
+an ear has.
 
 The table is written in head units rather than in per cents of a box: x from the
 middle of the head in per cents of half its width, so a hundred is the edge of
 the head, and y from the top in per cents of its height. Read that way it says
-what the ear is -- its top rests on the head at a quarter of its height, its
-widest point is out at a hundred and fourteen, its tip hangs to ninety-seven --
-instead of where its box happens to sit. The old box sat a fixed eight pixels
-out from the head, and eight pixels is not a size: at the hatchling, whose head
-is sixty-four across, the ears were a quarter of the head out in the air, and at
-the adult, less than a tenth. Which is the half of the problem the snapshot of a
-hatchling showed first.
+what the ear is -- it starts at ten, covers the side to seventy-two, reaches a
+hundred and twenty-four at its middle, hangs to a hundred at the jaw -- instead
+of where its box happens to sit. The old box sat a fixed eight pixels out from
+the head, and eight pixels is not a size: at the hatchling, whose head is
+sixty-four across, that was a quarter of the head out in the air.
 
 ## The charger, with the player off## The charger, with the player off
 
