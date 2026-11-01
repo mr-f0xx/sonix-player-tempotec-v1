@@ -1105,19 +1105,28 @@ static void build_scenes(int card_w, int card_h) {
 	// rather than turned bars -- a turned bar is rastered through a layer the
 	// size of its own box and came out a stick -- and lobes set on top of one
 	// round mass read as a pair of ears.
-	scene_rect(habitat, PET_SPECIES_CAT, PET_CAT_POT, 3, 12, floor_y - 13, 18, 13);
-	scene_rect(habitat, PET_SPECIES_CAT, PET_PLANT, 9, 10, floor_y - 32, 26, 20);
+	//
+	// Everything here is centred on one line: the pot under the leaves, the
+	// mass over the pot and the middle of the leaf fan. Placed one at a time
+	// they drifted apart by a couple of pixels each, which on a plant this
+	// small is a plant that leans.
+	const int plant_cx = 23;
+	scene_rect(habitat, PET_SPECIES_CAT, PET_CAT_POT, 3, plant_cx - 9, floor_y - 13, 18, 13);
+	scene_rect(habitat, PET_SPECIES_CAT, PET_PLANT, 9, plant_cx - 13, floor_y - 32, 26, 20);
 	scene_register(shape_create(habitat, &shape_plant), PET_SPECIES_CAT);
 	{
 		const int leaf_w = 34;
 		const int leaf_h = 26;
 		shape_reset(&shape_plant);
-		// Fill only: the scene is flat and wears no outline. The leaves overlap
-		// each other, so the notches between them are shallow.
+		// Fill only: the scene is flat and wears no outline. The leaves are
+		// mirrored about the middle of the box, and they overlap each other so
+		// the notches between them stay shallow.
 		shape_push(&shape_plant, PET_PLANT, 100, 0, 0, 4, leaf_h - 2, 16, leaf_h - 6, 5, 5);
-		shape_push(&shape_plant, PET_PLANT, 100, 0, 0, 12, leaf_h, 21, leaf_h, 16, 2);
-		shape_push(&shape_plant, PET_PLANT, 100, 0, 0, leaf_w - 4, leaf_h - 2, leaf_w - 5, 5, 18, leaf_h - 6);
-		shape_place(&shape_plant, 6, floor_y - 47, leaf_w, leaf_h);
+		shape_push(&shape_plant, PET_PLANT, 100, 0, 0, leaf_w / 2 - 4, leaf_h, leaf_w / 2 + 4, leaf_h, leaf_w / 2, 1);
+		shape_push(&shape_plant, PET_PLANT, 100, 0, 0, leaf_w - 4, leaf_h - 2, leaf_w - 5, 5, leaf_w - 16, leaf_h - 6);
+		// The fan's own middle is leaf_w / 2, so the box goes where that lands on
+		// the pot's centre.
+		shape_place(&shape_plant, plant_cx - leaf_w / 2, floor_y - 47, leaf_w, leaf_h);
 	}
 	scene_rect(habitat, PET_SPECIES_CAT, PET_YARN, LV_RADIUS_CIRCLE, card_w - 36, floor_y - 24, 15, 15);
 	lv_obj_t *thread = scene_rect(habitat, PET_SPECIES_CAT, PET_YARN, 1, card_w - 50, floor_y - 14, 16, 2);
@@ -1658,6 +1667,7 @@ static void tap_done_cb(lv_event_t *e) {
 }
 
 static void build_tap(void);
+static void place_sheet_heading(lv_obj_t *label);
 
 static void tap_open(void) {
 	if (!petwatch_rhythm_ready()) {
@@ -1729,7 +1739,7 @@ static void build_tap(void) {
 	lv_label_set_text(heading, tr("pet_tap_game"));
 	lv_obj_add_style(heading, &theme_style_text, 0);
 	lv_obj_set_style_text_font(heading, &font_ui_18, 0);
-	lv_obj_align(heading, LV_ALIGN_TOP_LEFT, pad + 4, pad + page_cfg->top_bar_height + 10);
+	place_sheet_heading(heading);
 
 	lv_obj_t *close = lv_btn_create(tap_sheet);
 	settingsrow_place_corner_button(close, page_cfg, 0);
@@ -1746,7 +1756,7 @@ static void build_tap(void) {
 	lv_obj_add_style(tap_hint_label, &theme_style_text_dim, 0);
 	lv_obj_set_style_text_font(tap_hint_label, &font_ui_14, 0);
 	lv_label_set_text(tap_hint_label, tr("pet_tap_hint"));
-	lv_obj_align(tap_hint_label, LV_ALIGN_TOP_LEFT, pad + 4, pad + page_cfg->top_bar_height + 34);
+	lv_obj_align(tap_hint_label, LV_ALIGN_TOP_LEFT, pad + 4, settingsrow_header_text_top(page_cfg) + 32);
 
 	// The lane: a card the note falls through, with a line where the beat is.
 	lv_obj_t *lane = lv_obj_create(tap_sheet);
@@ -2037,6 +2047,20 @@ static void customise_open_cb(lv_event_t *e) {
 	customise_open();
 }
 
+// The heading of a sheet. A sheet fills the screen and covers the page's own
+// title row -- but not the shell's back button, which is drawn above every
+// screen. Its heading therefore starts where the page titles start, beside the
+// chevron on the chevron's line, or the first word reads as "‹ur pet".
+static void place_sheet_heading(lv_obj_t *label) {
+	const int left = settingsrow_header_text_left(page_cfg);
+	const int button = settingsrow_corner_button_size(page_cfg);
+	const int air = page_cfg->screen_width < 320 ? 6 : 14;
+	lv_label_set_long_mode(label, LV_LABEL_LONG_DOT);
+	lv_obj_set_width(label, page_cfg->screen_width - left - page_cfg->padding - button - air);
+	lv_obj_set_height(label, lv_font_get_line_height(lv_obj_get_style_text_font(label, LV_PART_MAIN)));
+	lv_obj_align(label, LV_ALIGN_TOP_LEFT, left, settingsrow_header_text_top(page_cfg));
+}
+
 static void build_customise(void) {
 	if (customise_screen || !page_cfg) {
 		return;
@@ -2058,7 +2082,7 @@ static void build_customise(void) {
 	lv_label_set_text(heading, tr("pet_customise"));
 	lv_obj_add_style(heading, &theme_style_text, 0);
 	lv_obj_set_style_text_font(heading, &font_ui_18, 0);
-	lv_obj_align(heading, LV_ALIGN_TOP_LEFT, pad + 4, pad + page_cfg->top_bar_height + 10);
+	place_sheet_heading(heading);
 
 	lv_obj_t *close = lv_btn_create(customise_screen);
 	settingsrow_place_corner_button(close, page_cfg, 0);
@@ -2151,7 +2175,7 @@ static void build_customise(void) {
 	lv_label_set_text(name_heading, tr("name"));
 	lv_obj_add_style(name_heading, &theme_style_text, 0);
 	lv_obj_set_style_text_font(name_heading, &font_ui_18, 0);
-	lv_obj_align(name_heading, LV_ALIGN_TOP_LEFT, pad + 4, pad + page_cfg->top_bar_height + 10);
+	place_sheet_heading(name_heading);
 
 	lv_obj_t *cancel = lv_btn_create(name_layer);
 	settingsrow_place_corner_button(cancel, page_cfg, 0);

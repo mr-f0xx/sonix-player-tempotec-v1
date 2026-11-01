@@ -1990,6 +1990,30 @@ square on now, a bar and four knobs, and a bone. `PET_SCENE_PARTS` went to 24 to
 hold the extra pieces; six more objects that are never all drawn costs less than
 the wrong shape in the corner does.
 
+### The sheet headings and the back button
+
+The back button is not part of a page. It lives in the shell, is drawn above
+every numbered screen, and sits at the top left on the same line the page
+titles use. A sheet -- the chooser, the tap-along, the name editor -- is a
+full-screen object, so it covers the page's title row but *not* that button;
+anything it puts in the corner is written over. The three hand-built headings
+went in at the page's own padding, and the chevron landed on the first word:
+"‹ur pet".
+
+`settingsrow_title()` had always computed the right place, but as a number
+inside one function. It is two functions now -- `settingsrow_header_text_left()`
+and `_top()` -- used by both the page titles and the sheets, so there is one
+definition of where a heading starts and every heading in the interface starts
+there. `test_tools_pages` asserts the chooser's heading begins to the right of
+the corner button's box, which is the bug in one line.
+
+### The plant's line
+
+The cat's pot, its mass of leaves and the middle of the leaf fan were placed one
+at a time, and had drifted two pixels apart from each other: a plant that leans.
+All three are placed from one `plant_cx` now, and the leaves are mirrored about
+the middle of their box.
+
 ### The fish that stayed behind
 
 A fish is one drawn shape, and that shape is placed only while the pet *is* a

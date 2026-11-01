@@ -28,6 +28,7 @@
 #include "src/gui/notes/noteeditor.h"
 #include "src/gui/notes/notes.h"
 #include "src/gui/pet/petpage.h"
+#include "src/gui/shell/settingsrow.h"
 #include "src/gui/shell/gridpage.h"
 #include "src/system/playback/device_state.h"
 #include "src/gui/shell/icons.h"
@@ -398,6 +399,22 @@ static void check_within_panel_in(lv_obj_t *obj, gui_config_t *cfg, const char *
 	for (uint32_t i = 0; i < lv_obj_get_child_count(obj); i++) {
 		check_within_panel_in(lv_obj_get_child(obj, i), cfg, what, scrolls);
 	}
+}
+
+// The shell's back button is drawn above every screen, in the top left corner
+// in a corner button's box. A screen-sized sheet covers the page's own title
+// row but not that button, so a sheet's heading has to start to the right of it
+// -- otherwise the chevron lands on the first word and a player reads "ur pet".
+static void check_clear_of_back_button(lv_obj_t *label, gui_config_t *cfg, const char *what) {
+	assert(label);
+	lv_area_t area;
+	lv_obj_get_coords(label, &area);
+	const int button_right = cfg->padding + settingsrow_corner_button_size(cfg);
+	if (area.x1 < button_right) {
+		printf("FAIL %s: heading starts at x %d, the back button ends at %d\n", what, (int)area.x1,
+			   button_right);
+	}
+	assert(area.x1 >= button_right);
 }
 
 static void check_within_panel(lv_obj_t *obj, gui_config_t *cfg, const char *what) {
@@ -977,6 +994,7 @@ static void check_pet_page(gui_config_t *cfg, const char *tag) {
 	lv_obj_t *chooser_title = find_label(petpage_screen, tr("pet_customise"));
 	assert(chooser_title);
 	assert(lv_obj_is_visible(chooser_title));
+	check_clear_of_back_button(chooser_title, cfg, "Pet chooser heading");
 	assert(find_label(petpage_screen, tr("pet_species_cat")));
 	assert(find_label(petpage_screen, tr("pet_species_dog")));
 	assert(find_label(petpage_screen, tr("pet_species_fish")));
