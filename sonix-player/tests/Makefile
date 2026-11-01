@@ -329,6 +329,20 @@ UI_SRC = $(ROOT)/tests/ui/test_main_menu.c $(ROOT)/src/gui/shell/main_menu.c \
          $(ROOT)/src/gui/board_profile.c \
          $(ROOT)/src/system/core/config.c $(ROOT)/src/system/core/lang.c
 UI_LVGL_SRC = $(shell find $(ROOT)/lvgl/src -name '*.c' 2>/dev/null)
+UI_LVGL_OBJ = $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(UI_LVGL_SRC))
+# Control Centre layout migration: the production parser and saved lists,
+# without constructing the unrelated radio/streaming services.
+.PHONY: quickpanel-layout
+quickpanel-layout: $(BUILD)/test_quickpanel_layout
+	$(BUILD)/test_quickpanel_layout
+
+$(BUILD)/test_quickpanel_layout: test_quickpanel_layout.c $(ROOT)/src/gui/shell/quickpanel.c \
+                                $(ROOT)/src/gui/shell/quickpanel.h $(ROOT)/src/system/core/config.c $(UI_LVGL_OBJ)
+	@mkdir -p $(BUILD)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -I$(ROOT)/lvgl \
+		-DLV_CONF_PATH='"$(abspath ui/lv_conf.h)"' -o $@ test_quickpanel_layout.c \
+		$(ROOT)/src/system/core/config.c $(UI_LVGL_OBJ) $(LDFLAGS) $(LDLIBS)
+
 UI_OBJ = $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(UI_SRC)) \
          $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(UI_LVGL_SRC))
 UI_CPPFLAGS = $(CPPFLAGS) -I$(ROOT)/lvgl -DLV_CONF_PATH='"$(abspath ui/lv_conf.h)"'
@@ -410,8 +424,25 @@ GAMES_SRC = $(ROOT)/tests/ui/test_games.c \
 GAMES_OBJ = $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(GAMES_SRC)) \
             $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(UI_LVGL_SRC))
 
+# PEQ profile selection on the real page and DSP engine, with the shell and
+# network AutoEq browser stubbed. No audio device or network is needed.
+PEQPAGE_SRC = $(ROOT)/tests/ui/test_peq_profiles.c $(ROOT)/src/gui/audio/peqpage.c \
+              $(ROOT)/src/system/audio/eq.c $(ROOT)/src/gui/shell/settingsrow.c \
+              $(ROOT)/src/gui/shell/theme.c $(ROOT)/src/gui/shell/icons.c \
+              $(ROOT)/src/gui/board_profile.c $(ROOT)/src/system/core/config.c \
+              $(ROOT)/src/system/core/lang.c
+PEQPAGE_OBJ = $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(PEQPAGE_SRC)) \
+              $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(UI_LVGL_SRC))
+
+.PHONY: ui peq-ui
+peq-ui: $(BUILD)/test_peq_profiles
+	$(BUILD)/test_peq_profiles ../../sonix-packer/assets/V1/usr/resource/sonix/language
+
+$(BUILD)/test_peq_profiles: $(PEQPAGE_OBJ)
+	$(CC) -o $@ $^ $(LDFLAGS) $(LDLIBS)
+
 .PHONY: ui
-ui: $(BUILD)/test_main_menu $(BUILD)/test_screensaver $(BUILD)/test_tools_pages $(BUILD)/test_wifi_pages $(BUILD)/test_chargescreen $(BUILD)/test_lyricsearch $(BUILD)/test_games
+ui: $(BUILD)/test_main_menu $(BUILD)/test_screensaver $(BUILD)/test_tools_pages $(BUILD)/test_wifi_pages $(BUILD)/test_chargescreen $(BUILD)/test_lyricsearch $(BUILD)/test_games $(BUILD)/test_peq_profiles $(BUILD)/test_quickpanel_layout
 	$(BUILD)/test_main_menu ../../sonix-packer/assets/V1/usr/resource/sonix/language
 	$(BUILD)/test_main_menu ../../sonix-packer/assets/V1/usr/resource/sonix/language saved
 	$(BUILD)/test_screensaver ../../sonix-packer/assets/V1/usr/resource/sonix/language
@@ -421,6 +452,8 @@ ui: $(BUILD)/test_main_menu $(BUILD)/test_screensaver $(BUILD)/test_tools_pages 
 	$(BUILD)/test_chargescreen ../../sonix-packer/assets/V1/usr/resource/sonix/language
 	$(BUILD)/test_lyricsearch ../../sonix-packer/assets/V1/usr/resource/sonix/language
 	$(BUILD)/test_games ../../sonix-packer/assets/V1/usr/resource/sonix/language
+	$(BUILD)/test_peq_profiles ../../sonix-packer/assets/V1/usr/resource/sonix/language
+	$(BUILD)/test_quickpanel_layout
 
 $(BUILD)/test_main_menu: $(UI_OBJ)
 	$(CC) -o $@ $^ $(LDFLAGS) $(LDLIBS)
@@ -452,7 +485,7 @@ $(BUILD)/ui/lvgl/%.o: $(ROOT)/lvgl/%.c ui/lv_conf.h $(ROOT)/lv_conf.h
 	@mkdir -p $(dir $@)
 	$(CC) $(UI_CPPFLAGS) $(filter-out -Werror,$(UI_CFLAGS)) -c $< -o $@
 
--include $(sort $(UI_OBJ:.o=.d) $(SAVER_OBJ:.o=.d) $(WIFIPAGE_OBJ:.o=.d) $(LYRICSEARCH_OBJ:.o=.d) $(GAMES_OBJ:.o=.d))
+-include $(sort $(PEQPAGE_OBJ:.o=.d) $(UI_OBJ:.o=.d) $(SAVER_OBJ:.o=.d) $(WIFIPAGE_OBJ:.o=.d) $(LYRICSEARCH_OBJ:.o=.d) $(GAMES_OBJ:.o=.d))
 
 # Smart Mix track-count limits and traversal, with a memory-only graph fixture.
 GENIUS_SRC = test_genius.c $(ROOT)/src/system/library/genius.c

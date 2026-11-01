@@ -72,6 +72,7 @@ extern const int eq_band_freq[EQ_BANDS];
 // almost all 10-band) without the page turning into a list half a minute long
 // to scroll.
 #define PEQ_BANDS 10
+#define PEQ_PROFILE_COUNT 2
 
 #define PEQ_FREQ_MIN 20
 #define PEQ_FREQ_MAX 20000
@@ -109,7 +110,16 @@ typedef struct {
 	int q_cent;		 // hundredths
 } peq_band_t;
 
-void peq_set_enabled(bool enabled); // saved to config
+// Two independent, persistent profiles, numbered 1 and 2. Each owns its
+// enable switch, preamp and all ten bands. The existing [peq] settings become
+// Profile 1 on upgrade; the other starts flat and off. Importing, saving or
+// resetting a preset affects only the selected profile. Switching does not
+// turn PEQ on: each profile remembers its own enable state.
+int peq_get_profile(void);
+bool peq_select_profile(int profile); // false for an invalid or already selected profile
+int peq_next_profile(void);           // cycles 1 -> 2 -> 1, returns the selected profile
+
+void peq_set_enabled(bool enabled); // saved to the selected profile
 bool peq_get_enabled(void);
 
 void peq_get_band(int index, peq_band_t *out);

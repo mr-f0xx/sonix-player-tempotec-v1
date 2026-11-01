@@ -31,6 +31,7 @@
 #include "src/system/net/wifitransfer.h"
 #include "src/gui/shell/switcher.h"
 #include "src/gui/shell/topbar.h"
+#include "src/gui/shell/toast.h"
 #include "src/gui/wireless/wifisettings.h"
 #include "src/system/remote/airplay.h"
 #include "src/system/audio/alsa-controls.h"
@@ -122,6 +123,7 @@ static lv_obj_t *airplay_btn;
 static lv_obj_t *lineout_btn;
 static lv_obj_t *sonixlink_btn;
 static lv_obj_t *peq_btn;
+static lv_obj_t *peq_profile_btn;
 static lv_obj_t *dlna_btn;
 static lv_obj_t *sleep_music_btn;
 static lv_obj_t *sleep_audiobook_btn;
@@ -162,6 +164,7 @@ static const char *const button_key[QP_BTN_COUNT] = {
 	[QP_BTN_SLEEP_PODCAST] = "sleep_podcast",
 	[QP_BTN_WIFI_TRANSFER] = "wifi_transfer",
 	[QP_BTN_GAPLESS] = "gapless",
+	[QP_BTN_PEQ_PROFILE] = "peq_profile",
 };
 
 static const char *const button_tag[QP_BTN_COUNT] = {
@@ -181,6 +184,7 @@ static const char *const button_tag[QP_BTN_COUNT] = {
 	[QP_BTN_SLEEP_PODCAST] = "quickpanel_sleep_podcast",
 	[QP_BTN_WIFI_TRANSFER] = "wifitransfer_title",
 	[QP_BTN_GAPLESS] = "musicsettings_gapless_playback",
+	[QP_BTN_PEQ_PROFILE] = "peq_profile",
 };
 
 static uint8_t slots[QP_SLOT_COUNT];  // the grid, QP_BTN_NONE where it is empty
@@ -1452,9 +1456,10 @@ static void order_load(void) {
 		}
 		// Crossfade, which the migration below is taking out on purpose, and the
 		// buttons that arrive into a panel already holding eight: DLNA, the three
-		// sleep timers, Wi-Fi transfer and gapless. Appending them would change a
-		// panel nobody asked to change, so they wait among the unused ones, where
-		// the settings page shows them.
+		// sleep timers, Wi-Fi transfer and gapless. The PEQ profile switch also
+		// appends without moving an existing button, but takes an empty place
+		// only when the grid has one. A full grid leaves it in Settings, where
+		// the user can make room; an upgrade never rearranges chosen controls.
 		bool waits = i == QP_BTN_DLNA || i == QP_BTN_SLEEP_MUSIC || i == QP_BTN_SLEEP_AUDIOBOOK ||
 					 i == QP_BTN_SLEEP_PODCAST || i == QP_BTN_WIFI_TRANSFER || i == QP_BTN_GAPLESS;
 		if ((saved_version < 2 && i == QP_BTN_FADE) || waits) {
@@ -1563,6 +1568,8 @@ static lv_obj_t *button_widget(quickpanel_button_t which) {
 		return sonixlink_btn;
 	case QP_BTN_PEQ:
 		return peq_btn;
+	case QP_BTN_PEQ_PROFILE:
+		return peq_profile_btn;
 	case QP_BTN_DLNA:
 		return dlna_btn;
 	case QP_BTN_SLEEP_MUSIC:
@@ -1776,6 +1783,7 @@ const lv_image_dsc_t *quickpanel_button_icon(quickpanel_button_t button) {
 	case QP_BTN_SONIXLINK:
 		return &icon_sonixlink_quick;
 	case QP_BTN_PEQ:
+	case QP_BTN_PEQ_PROFILE:
 		return &icon_peq_quick;
 	case QP_BTN_DLNA:
 		return &icon_dlna_quick;
@@ -1897,6 +1905,12 @@ static void refresh_audio_buttons(void) {
 	circle_button_set_on(sonixlink_btn, sonixlink_get_enabled());
 	circle_button_set_on(dlna_btn, dlna_get_enabled());
 	circle_button_set_on(peq_btn, peq_get_enabled());
+	circle_button_set_on(peq_profile_btn, peq_get_enabled());
+	if (peq_profile_btn) {
+		lv_obj_t *number = lv_obj_get_child(peq_profile_btn, 1);
+		lv_label_set_text_fmt(number, "%d", peq_get_profile());
+		lv_obj_set_style_text_color(number, peq_get_enabled() ? theme_on_accent() : theme()->text_primary, 0);
+	}
 	circle_button_set_on(sleep_music_btn, sleep_timer_armed(SLEEPTIMER_MUSIC));
 	circle_button_set_on(sleep_audiobook_btn, sleep_timer_armed(SLEEPTIMER_AUDIOBOOK));
 	circle_button_set_on(sleep_podcast_btn, sleep_timer_armed(SLEEPTIMER_PODCAST));
@@ -2249,6 +2263,22 @@ static void peq_clicked_cb(lv_event_t *e) {
 	toggled();
 }
 
+// The numbered PEQ control changes the whole profile, not the enable switch.
+// The number is always visible; its fill follows the selected profile's own
+// enable state. A hold opens the PEQ page without changing profiles.
+static void peq_profile_clicked_cb(lv_event_t *e) {
+	(void)e;
+	if (long_press_consumed) {
+		long_press_consumed = false;
+		return;
+	}
+	int profile = peq_next_profile();
+	toggled();
+	char message[64];
+	snprintf(message, sizeof(message), tr("peq_profile_name"), profile);
+	toast_plain(message);
+}
+
 // Gapless, the switch on the playback options page: a tap flips it, a hold
 // opens that page. Looked up at the press, like the sleep timer's page.
 static void gapless_clicked_cb(lv_event_t *e) {
@@ -2511,6 +2541,16 @@ void quickpanel_init(gui_config_t *cfg) {
 	peq_btn = make_circle_button(row, &icon_peq_quick);
 	lv_obj_add_event_cb(peq_btn, peq_clicked_cb, LV_EVENT_CLICKED, NULL);
 	lv_obj_add_event_cb(peq_btn, open_page_cb, LV_EVENT_LONG_PRESSED, peqpage_screen());
+
+	peq_profile_btn = make_circle_button(row, &icon_peq_quick);
+	lv_obj_t *profile_icon = lv_obj_get_child(peq_profile_btn, 0);
+	lv_image_set_scale(profile_icon, qp_compact ? 112 : 192);
+	lv_obj_align(profile_icon, LV_ALIGN_TOP_MID, 0, qp_compact ? 3 : 10);
+	lv_obj_t *profile_number = lv_label_create(peq_profile_btn);
+	lv_obj_set_style_text_font(profile_number, qp_compact ? &font_ui_14 : &font_ui_24, 0);
+	lv_obj_align(profile_number, LV_ALIGN_BOTTOM_MID, 0, qp_compact ? -2 : -8);
+	lv_obj_add_event_cb(peq_profile_btn, peq_profile_clicked_cb, LV_EVENT_CLICKED, NULL);
+	lv_obj_add_event_cb(peq_profile_btn, open_page_cb, LV_EVENT_LONG_PRESSED, peqpage_screen());
 
 	dlna_btn = make_circle_button(row, &icon_dlna_quick);
 	lv_obj_add_event_cb(dlna_btn, dlna_clicked_cb, LV_EVENT_CLICKED, NULL);

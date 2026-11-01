@@ -3,6 +3,7 @@
 #include <dirent.h>
 #include <errno.h>
 #include <math.h>
+#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -32,12 +33,25 @@ static volatile int eq_enabled;
 static volatile int mseb_value[MSEB_BANDS];
 
 // PEQ. The bands are not `volatile`: they are structs, and a volatile struct is
-// not an atomic access in C, only slower code. The module's usual rule applies:
-// the audio thread may read one mid-update, and the next buffer reads it whole,
-// because settings_version is the last thing the UI thread bumps.
+// not an atomic access in C, only slower code. Unlike the scalar controls,
+// PEQ is copied as a whole under peq_snapshot_mutex so a profile switch cannot
+// mix two curves. The audio thread never waits for that lock.
 static peq_band_t peq_bands[PEQ_BANDS];
 static volatile int peq_enabled;
 static volatile int peq_preamp_tenths;
+
+typedef struct {
+	bool enabled;
+	int preamp;
+	peq_band_t bands[PEQ_BANDS];
+} peq_profile_t;
+
+static int peq_profile = 1;
+static peq_profile_t peq_inactive;
+// Protects in-memory PEQ snapshots and the profile swap. Disk I/O stays
+// outside it. The audio thread tries the lock rather than waiting on the UI:
+// if an edit is in progress it keeps the previous coefficients for one buffer.
+static pthread_mutex_t peq_snapshot_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 // How far the sliders may travel. The stock player's own sliders run to 20;
 // the wider settings are for anyone who wants to push a characteristic past
@@ -193,50 +207,96 @@ static void peq_key(char *out, size_t size, int index, const char *what) {
 }
 
 // Into the config, not yet onto the card.
-static void peq_store_band(int index) {
-	const peq_band_t *b = &peq_bands[index];
+static void peq_store_band_in(const char *section, int index, const peq_band_t *b) {
 	char key[24];
-
 	peq_key(key, sizeof(key), index, "on");
-	config_set_int("peq", key, b->on ? 1 : 0);
+	config_set_int(section, key, b->on ? 1 : 0);
 	peq_key(key, sizeof(key), index, "type");
-	config_set_int("peq", key, b->type);
+	config_set_int(section, key, b->type);
 	peq_key(key, sizeof(key), index, "freq");
-	config_set_int("peq", key, b->freq);
+	config_set_int(section, key, b->freq);
 	peq_key(key, sizeof(key), index, "gain");
-	config_set_int("peq", key, b->gain_tenths);
+	config_set_int(section, key, b->gain_tenths);
 	peq_key(key, sizeof(key), index, "q");
-	config_set_int("peq", key, b->q_cent);
+	config_set_int(section, key, b->q_cent);
 }
+
+static void peq_store_band(int index) { peq_store_band_in("peq", index, &peq_bands[index]); }
 
 static void peq_save_band(int index) {
 	peq_store_band(index);
 	config_save();
 }
 
-static void peq_load(void) {
-	peq_enabled = (int)config_get_int("peq", "enabled", 0);
-	peq_preamp_tenths =
-		clamp_int((int)config_get_int("peq", "preamp", 0), PEQ_PREAMP_MIN_TENTHS, PEQ_PREAMP_MAX_TENTHS);
+static peq_band_t peq_default_band(int index) {
+	peq_band_t b = {
+		.on = false,
+		.type = PEQ_TYPE_PEAK,
+		.freq = PEQ_DEFAULT_FREQ[index],
+		.gain_tenths = 0,
+		.q_cent = PEQ_Q_DEFAULT,
+	};
+	return b;
+}
 
+static void peq_profile_section(int profile, char *out, size_t size) {
+	snprintf(out, size, "peq_profile_%d", profile);
+}
+
+static void peq_read_profile(const char *section, peq_profile_t *out) {
+	out->enabled = config_get_bool(section, "enabled", false);
+	out->preamp = clamp_int((int)config_get_int(section, "preamp", 0), PEQ_PREAMP_MIN_TENTHS,
+							PEQ_PREAMP_MAX_TENTHS);
 	for (int i = 0; i < PEQ_BANDS; i++) {
 		char key[24];
-		peq_band_t b;
-
+		peq_band_t b = peq_default_band(i);
 		peq_key(key, sizeof(key), i, "on");
-		b.on = config_get_int("peq", key, 0) != 0;
+		b.on = config_get_bool(section, key, false);
 		peq_key(key, sizeof(key), i, "type");
-		b.type = (int)config_get_int("peq", key, PEQ_TYPE_PEAK);
+		b.type = (int)config_get_int(section, key, b.type);
 		peq_key(key, sizeof(key), i, "freq");
-		b.freq = (int)config_get_int("peq", key, PEQ_DEFAULT_FREQ[i]);
+		b.freq = (int)config_get_int(section, key, b.freq);
 		peq_key(key, sizeof(key), i, "gain");
-		b.gain_tenths = (int)config_get_int("peq", key, 0);
+		b.gain_tenths = (int)config_get_int(section, key, b.gain_tenths);
 		peq_key(key, sizeof(key), i, "q");
-		b.q_cent = (int)config_get_int("peq", key, PEQ_Q_DEFAULT);
-
+		b.q_cent = (int)config_get_int(section, key, b.q_cent);
 		peq_clamp_band(&b);
-		peq_bands[i] = b;
+		out->bands[i] = b;
 	}
+}
+
+static void peq_write_profile(const char *section, const peq_profile_t *profile) {
+	config_set_int(section, "enabled", profile->enabled ? 1 : 0);
+	config_set_int(section, "preamp", profile->preamp);
+	for (int i = 0; i < PEQ_BANDS; i++) {
+		peq_store_band_in(section, i, &profile->bands[i]);
+	}
+}
+
+static peq_profile_t peq_snapshot(void) {
+	peq_profile_t out = {.enabled = peq_enabled != 0, .preamp = peq_preamp_tenths};
+	memcpy(out.bands, peq_bands, sizeof(out.bands));
+	return out;
+}
+
+// Caller holds peq_snapshot_mutex. No disk access under the lock.
+static void peq_publish(const peq_profile_t *profile) {
+	peq_enabled = profile->enabled ? 1 : 0;
+	peq_preamp_tenths = profile->preamp;
+	memcpy(peq_bands, profile->bands, sizeof(peq_bands));
+	settings_version++;
+}
+
+static void peq_load(void) {
+	peq_profile = config_get_int("peq", "profile", 1) == 2 ? 2 : 1;
+	peq_profile_t active;
+	peq_read_profile("peq", &active);
+	peq_publish(&active);
+	char section[24];
+	peq_profile_section(PEQ_PROFILE_COUNT + 1 - peq_profile, section, sizeof(section));
+	peq_read_profile(section, &peq_inactive);
+	// No migration write on boot. [peq] remains the active profile, so existing
+	// settings survive and an older build still reads the last selected curve.
 }
 
 void eq_init(void) {
@@ -521,9 +581,43 @@ void eq_reset(void) {
 // PEQ: what the UI touches
 // ---------------------------------------------------------------------------
 
+int peq_get_profile(void) { return peq_profile; }
+
+bool peq_select_profile(int profile) {
+	if (profile < 1 || profile > PEQ_PROFILE_COUNT || profile == peq_profile) {
+		return false;
+	}
+	// The inactive section always describes the other slot, whichever number
+	// is active. Keep [peq] as the active mirror for backwards compatibility.
+	char section[24];
+	// Archive the outgoing slot under its OWN number. On the next boot the
+	// active curve is in [peq], and the other number must already name the
+	// matching inactive curve even if the user never switches back.
+	peq_profile_section(peq_profile, section, sizeof(section));
+	pthread_mutex_lock(&peq_snapshot_mutex);
+	peq_profile_t previous = peq_snapshot();
+	peq_write_profile(section, &previous);
+	peq_publish(&peq_inactive);
+	peq_write_profile("peq", &peq_inactive);
+	peq_inactive = previous;
+	peq_profile = profile;
+	config_set_int("peq", "profile", profile);
+	pthread_mutex_unlock(&peq_snapshot_mutex);
+	config_save();
+	return true;
+}
+
+int peq_next_profile(void) {
+	int next = PEQ_PROFILE_COUNT + 1 - peq_profile;
+	peq_select_profile(next);
+	return peq_profile;
+}
+
 void peq_set_enabled(bool enabled) {
+	pthread_mutex_lock(&peq_snapshot_mutex);
 	peq_enabled = enabled ? 1 : 0;
 	settings_version++;
+	pthread_mutex_unlock(&peq_snapshot_mutex);
 	config_set_int("peq", "enabled", peq_enabled);
 	config_save();
 }
@@ -538,30 +632,33 @@ void peq_get_band(int index, peq_band_t *out) {
 		memset(out, 0, sizeof(*out));
 		return;
 	}
+	pthread_mutex_lock(&peq_snapshot_mutex);
 	*out = peq_bands[index];
+	pthread_mutex_unlock(&peq_snapshot_mutex);
 }
 
 void peq_set_band(int index, const peq_band_t *band) {
 	if (!band || index < 0 || index >= PEQ_BANDS) {
 		return;
 	}
-
 	peq_band_t next = *band;
 	peq_clamp_band(&next);
+	pthread_mutex_lock(&peq_snapshot_mutex);
 	peq_bands[index] = next;
-
-	// Version bumped after the value: it is what the audio thread watches to
-	// know there is something new to read.
 	settings_version++;
+	pthread_mutex_unlock(&peq_snapshot_mutex);
 	peq_save_band(index);
 }
 
 int peq_get_preamp(void) { return peq_preamp_tenths; }
 
 void peq_set_preamp(int tenths) {
-	peq_preamp_tenths = clamp_int(tenths, PEQ_PREAMP_MIN_TENTHS, PEQ_PREAMP_MAX_TENTHS);
+	int next = clamp_int(tenths, PEQ_PREAMP_MIN_TENTHS, PEQ_PREAMP_MAX_TENTHS);
+	pthread_mutex_lock(&peq_snapshot_mutex);
+	peq_preamp_tenths = next;
 	settings_version++;
-	config_set_int("peq", "preamp", peq_preamp_tenths);
+	pthread_mutex_unlock(&peq_snapshot_mutex);
+	config_set_int("peq", "preamp", next);
 	config_save();
 }
 
@@ -591,18 +688,6 @@ void peq_set_preamp(int tenths) {
 // ---------------------------------------------------------------------------
 
 static char peq_legacy_dir[512];
-
-// A band reset to its defaults, without touching the live chain.
-static peq_band_t peq_default_band(int index) {
-	peq_band_t b = {
-		.on = false,
-		.type = PEQ_TYPE_PEAK,
-		.freq = PEQ_DEFAULT_FREQ[index],
-		.gain_tenths = 0,
-		.q_cent = PEQ_Q_DEFAULT,
-	};
-	return b;
-}
 
 // "-6.2", "0.0", "3.5" from tenths, without printf's %f: the decimal point
 // is always a point, whatever the locale, because that is what APO reads.
@@ -946,16 +1031,18 @@ bool peq_preset_load(const char *name, int *ignored) {
 		return false;
 	}
 
-	// Into the chain and the config together, with one write to the card at
-	// the end rather than one per band.
+	// Publish the whole imported chain together, retaining this profile's
+	// enable state. Persist afterwards, with one write rather than one per band.
+	pthread_mutex_lock(&peq_snapshot_mutex);
+	memcpy(peq_bands, bands, sizeof(peq_bands));
+	peq_preamp_tenths = preamp;
+	settings_version++;
+	pthread_mutex_unlock(&peq_snapshot_mutex);
 	for (int i = 0; i < PEQ_BANDS; i++) {
-		peq_bands[i] = bands[i];
 		peq_store_band(i);
 	}
-	peq_preamp_tenths = preamp;
-	config_set_int("peq", "preamp", peq_preamp_tenths);
+	config_set_int("peq", "preamp", preamp);
 	config_save();
-	settings_version++;
 
 	if (ignored) {
 		*ignored = dropped;
@@ -1021,17 +1108,26 @@ void peq_reset_band(int index) {
 	if (index < 0 || index >= PEQ_BANDS) {
 		return;
 	}
-	peq_bands[index] = peq_default_band(index);
-	peq_save_band(index);
+	peq_band_t next = peq_default_band(index);
+	pthread_mutex_lock(&peq_snapshot_mutex);
+	peq_bands[index] = next;
 	settings_version++;
+	pthread_mutex_unlock(&peq_snapshot_mutex);
+	peq_save_band(index);
 }
 
 void peq_reset(void) {
+	// Reset the selected profile as one change, not eleven audible steps and
+	// eleven card writes. The other profile is untouched.
+	peq_profile_t next = {.enabled = peq_get_enabled(), .preamp = 0};
 	for (int i = 0; i < PEQ_BANDS; i++) {
-		peq_reset_band(i);
+		next.bands[i] = peq_default_band(i);
 	}
-	peq_set_preamp(0);
-	settings_version++;
+	pthread_mutex_lock(&peq_snapshot_mutex);
+	peq_publish(&next);
+	pthread_mutex_unlock(&peq_snapshot_mutex);
+	peq_write_profile("peq", &next);
+	config_save();
 }
 
 
@@ -1562,7 +1658,9 @@ static float mseb_auto_preamp_db(int rate) {
 	return p;
 }
 
-static void filters_rebuild(int rate) {
+static void filters_rebuild(int rate, const peq_profile_t *peq) {
+	const bool peq_on = peq->enabled;
+	const int peq_preamp = peq->preamp;
 	bool rate_changed = rate != built_rate;
 	double max_boost = 0;
 	int active = 0;
@@ -1592,9 +1690,9 @@ static void filters_rebuild(int rate) {
 	// not shift every other filter, which is what made the chain crackle when
 	// it changed shape under the fingers.
 	for (int i = 0; i < PEQ_BANDS; i++) {
-		const peq_band_t *b = &peq_bands[i];
+		const peq_band_t *b = &peq->bands[i];
 		int slot = PEQ_SLOT0 + i;
-		bool live = peq_enabled && b->on;
+		bool live = peq_on && b->on;
 		int type = peq_filter_type(b->type);
 
 		// Low-pass and high-pass have no gain to zero, so they are switched off
@@ -1628,7 +1726,7 @@ static void filters_rebuild(int rate) {
 	// anywhere else. So the headroom only takes what a negative preamp has not
 	// already taken; a positive preamp, which guards nothing, is applied on top
 	// of the full headroom.
-	double manual = peq_enabled ? (double)peq_preamp_tenths / 10.0 : 0.0;
+	double manual = peq_on ? (double)peq_preamp / 10.0 : 0.0;
 	pregain_target = (float)pow(10.0, headroom_db(max_boost, manual) / 20.0);
 	if (rate_changed) {
 		pregain = pregain_target;
@@ -1862,7 +1960,18 @@ static bool process_prepare(int frame_count, int channels, int sample_rate) {
 		return false; // only mono/stereo hardware here
 	}
 	if (built_version != settings_version || built_rate != sample_rate) {
-		filters_rebuild(sample_rate);
+		peq_profile_t peq;
+		bool have_snapshot = pthread_mutex_trylock(&peq_snapshot_mutex) == 0;
+		if (have_snapshot) {
+			peq = peq_snapshot();
+			pthread_mutex_unlock(&peq_snapshot_mutex);
+		}
+		// Never block audio on a UI edit or an SD-card write. A busy lock
+		// leaves the previous coefficients in place; the next buffer retries.
+		// On the very first buffer the chain is still unity, not a torn profile.
+		if (have_snapshot) {
+			filters_rebuild(sample_rate, &peq);
+		}
 	}
 	return true;
 }

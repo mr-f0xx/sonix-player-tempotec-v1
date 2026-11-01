@@ -473,6 +473,7 @@ static void build_band_page(gui_config_t *cfg) {
 // ---------------------------------------------------------------------------
 
 static lv_obj_t *enable_switch;
+static lv_obj_t *profile_pills[PEQ_PROFILE_COUNT];
 static lv_obj_t *reset_btn;
 static lv_obj_t *autoeq_btn;
 static lv_timer_t *autoeq_timer;
@@ -668,6 +669,30 @@ static void autoeq_timer_cb(lv_timer_t *timer) {
 	autoeq_btn_refresh();
 }
 
+static void screen_loaded_cb(lv_event_t *e);
+
+static void refresh_profiles(void) {
+	for (int i = 0; i < PEQ_PROFILE_COUNT; i++) {
+		// The number is formatted into a translated label, so the language
+		// switch cannot retranslate it from a tag alone.
+		char label[64];
+		snprintf(label, sizeof(label), tr("peq_profile_name"), i + 1);
+		lv_label_set_text(lv_obj_get_child(profile_pills[i], 0), label);
+		settingsrow_pill_active(profile_pills[i], peq_get_profile() == i + 1);
+	}
+}
+
+static void profile_clicked_cb(lv_event_t *e) {
+	if (switcher_back_drag_active()) {
+		return;
+	}
+	if (peq_select_profile((int)(intptr_t)lv_event_get_user_data(e))) {
+		// A profile owns its enable state too. Refresh everything, including
+		// an open band editor underneath the control centre.
+		screen_loaded_cb(NULL);
+	}
+}
+
 static void screen_loaded_cb(lv_event_t *e) {
 	(void)e;
 
@@ -682,10 +707,12 @@ static void screen_loaded_cb(lv_event_t *e) {
 		}
 	}
 
+	refresh_profiles();
 	apply_enabled(peq_get_enabled());
 	refresh_main_rows();
 	refresh_preamp();
 	graph_refresh();
+	band_page_refresh();
 
 	autoeq_btn_refresh();
 	if (autoeq_timer) {
@@ -704,6 +731,7 @@ static void reload_after_preset(void) {
 
 static void refresh_theme(void) {
 	graph_paint_theme();
+	refresh_profiles();
 	if (editing >= 0) {
 		peq_band_t b;
 		peq_get_band(editing, &b);
@@ -731,6 +759,15 @@ void peqpage_init(gui_config_t *cfg) {
 
 	peqsettings_set_reload_cb(reload_after_preset);
 	peqautoeq_set_reload_cb(reload_after_preset);
+
+	lv_obj_t *profile_row;
+	settingsrow_pills(container, "peq_profile", &profile_row);
+	for (int i = 0; i < PEQ_PROFILE_COUNT; i++) {
+		char label[64];
+		snprintf(label, sizeof(label), tr("peq_profile_name"), i + 1);
+		profile_pills[i] = settingsrow_pill_text(profile_row, label, i + 1, profile_clicked_cb);
+	}
+	refresh_profiles();
 
 	settingsrow_toggle(container, "on", &enable_switch, enable_cb);
 	if (peq_get_enabled()) {
@@ -772,6 +809,7 @@ void peqpage_init(gui_config_t *cfg) {
 	// The same reading when the control centre switches the equaliser with the
 	// page open under it.
 	lv_obj_add_event_cb(main_screen, screen_loaded_cb, LV_EVENT_REFRESH, NULL);
+	lv_obj_add_event_cb(band_screen, screen_loaded_cb, LV_EVENT_REFRESH, NULL);
 	switcher_attach_back_gesture(main_screen);
 	theme_register_refresh(refresh_theme);
 }

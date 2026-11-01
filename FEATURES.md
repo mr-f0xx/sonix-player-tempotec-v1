@@ -26,7 +26,15 @@
   response, computed from the coefficients that are running. Presets are
   Equalizer APO files in the `PEQ` folder of the card: the `ParametricEQ.txt`
   that AutoEq publishes for your headphones loads as it is, and a preset saved
-  on the player opens in APO.
+  on the player opens in APO. Two persistent PEQ profiles keep separate bands,
+  preamp and on/off states for two pairs of headphones. Select Profile 1 or 2
+  on the PEQ page; importing, saving or resetting affects only that profile.
+  The numbered **PEQ profile** button in Control Centre switches between them
+  without leaving playback. It is added after the existing buttons: use the
+  expand handle if it is below the first eight, or Settings → More → Control
+  centre to make room for it on a full panel. A long press opens the PEQ page.
+  Existing PEQ settings become Profile 1; Profile 2 starts flat and off. Switching is manual and
+  preserves each profile's on/off state, rather than enabling EQ automatically.
 - **MSEB** - HiBy's MageSound tuning, matched to the stock player: 10
   characteristics driven by 13 filters, with the slider travel selectable
   between 20, 40 and 100.
