@@ -12,6 +12,7 @@ make -C sonix-player/tests quickpanel-layout
 make -C sonix-player/tests calculator
 make -C sonix-player/tests notes
 make -C sonix-player/tests tagwrite
+make -C sonix-player/tests artsearch
 make -C sonix-player/tests tagdate
 make -C sonix-player/tests genius
 make -C sonix-player/tests mostplayed
@@ -23,7 +24,7 @@ The non-UI suites require only a C compiler, Make and Python 3 (plus standard pt
 
 `run_subsonic_tests.py` starts a temporary threaded localhost HTTP server plus three HTTPS servers carrying the certificates in `tls_fixtures.py`, runs the C binary with a private temporary config directory, verifies its requests, then shuts down. All account values are synthetic. Build products live in ignored `.build/`; response/PCM fixtures are generated in memory rather than added to Git, and the three test certificates are pasted into that Python file rather than downloaded.
 
-The `tagwrite` suite checks FLAC and ID3 rewrites, artwork/audio preservation, validation and refusal of unsafe layouts. The aggregate `ui` suite exercises the Tag Manager browser and editor at the V1 resolution.
+The `tagwrite` suite checks FLAC and ID3 rewrites, artwork/audio preservation, validation and refusal of unsafe layouts. The `artsearch` suite uses a mocked network to test catalog parsing, URL validation and download limits. The aggregate `ui` suite exercises the Tag Manager browser, editor and cover selection at the V1 resolution with a mocked service.
 
 ## Coverage
 
@@ -251,8 +252,7 @@ file, and a file too long for the editor.
 
 ## The dates tags carry
 
-`make -C sonix-player/tests tagwrite
-make -C sonix-player/tests tagdate` checks the reader of date-tag text
+`make -C sonix-player/tests tagdate` checks the reader of date-tag text
 (`src/system/library/tagdate.c`), which the podcast lists order episodes and
 write "12 March 2026" from. Every shape the taggers write is read: a bare
 year, a year and a month, the ISO date with dashes or slashes, the compact

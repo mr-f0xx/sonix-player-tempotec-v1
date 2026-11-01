@@ -230,6 +230,7 @@ TAGS_DECODE_SRC = $(ROOT)/src/system/decode/decode.c \
                   $(ROOT)/src/system/decode/growfile.c \
                   $(ROOT)/src/system/streaming/streambridge.c
 TAGS_SRC = test_tags.c \
+           $(ROOT)/src/system/tagmanager/tagwrite.c \
            $(ROOT)/src/system/library/metadata.c \
            $(ROOT)/src/system/library/oggtags.c \
            $(ROOT)/src/system/library/vorbischap.c \
@@ -252,6 +253,7 @@ $(BUILD)/test_tags: $(TAGS_SRC) $(TAGS_DECODE_SRC) \
 # SD-card mmap artwork (>8 MB), SIGBUS card-removal recovery, streaming Ogg and
 # APEv2 embedded covers, 1000-row JPEG player_covers cache and id_worker.
 COVERS_SRC = test_covers.c \
+             $(ROOT)/src/system/tagmanager/tagwrite.c \
              $(ROOT)/src/system/library/albumart.c \
              $(ROOT)/src/system/library/oggtags.c \
              $(ROOT)/src/system/library/cue.c \
@@ -538,3 +540,11 @@ $(BUILD)/test_sysinfo: test_sysinfo.c $(ROOT)/src/system/device/sysinfo.c $(ROOT
 .PHONY: tagwrite
 tagwrite:
 	python3 test_tagwrite.py
+
+.PHONY: artsearch
+artsearch: $(BUILD)/test_artsearch
+	$(BUILD)/test_artsearch
+
+$(BUILD)/test_artsearch: test_artsearch.c $(ROOT)/src/system/tagmanager/artsearch.c $(ROOT)/src/system/core/json.c $(ROOT)/src/system/library/jpeginfo.c
+	@mkdir -p $(BUILD)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ $^ $(LDFLAGS) $(LDLIBS)
