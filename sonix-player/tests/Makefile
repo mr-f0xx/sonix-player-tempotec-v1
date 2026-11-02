@@ -102,6 +102,20 @@ $(BUILD)/test_eq: $(EQ_SRC) $(ROOT)/src/system/audio/eq.h $(ROOT)/src/system/cor
 	@mkdir -p $(BUILD)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ $(EQ_SRC) $(LDFLAGS) $(LDLIBS)
 
+# USB DAC PCM uses the same DSP chain while the DSD stream remains untouched.
+# The test includes usbdac.c to exercise its real format gate without building
+# the gadget or opening an audio device.
+.PHONY: usbdac-eq
+usbdac-eq: $(BUILD)/test_usbdac_eq
+	$(BUILD)/test_usbdac_eq
+
+$(BUILD)/test_usbdac_eq: test_usbdac_eq.c $(ROOT)/src/system/audio/usbdac.c \
+                         $(ROOT)/src/system/audio/eq.c $(ROOT)/src/system/audio/eq.h \
+                         $(ROOT)/src/system/core/config.c $(ROOT)/src/system/core/config.h
+	@mkdir -p $(BUILD)
+	$(CC) $(CPPFLAGS) -Istubs $(CFLAGS) -o $@ test_usbdac_eq.c \
+		$(ROOT)/src/system/audio/eq.c $(ROOT)/src/system/core/config.c $(LDFLAGS) $(LDLIBS)
+
 # The Wi-Fi worker's hidden-network join: the real wifi.c against a fake
 # wpa_cli on PATH (see test_wifi.c). Plain C, no LVGL and no radio.
 WIFI_SRC = test_wifi.c $(ROOT)/src/system/net/wifi.c

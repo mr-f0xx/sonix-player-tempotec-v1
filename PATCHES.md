@@ -2553,3 +2553,23 @@ upgrade and actual PCM processing. `make -C sonix-player/tests peq-ui` checks
 the real page in eleven languages and five themes at 240×320; `quickpanel-layout`
 checks the production layout migration and moves. Both are included in `ui`.
 These host tests do not replace an on-device listening and touch check.
+
+## USB DAC controls in the Control Centre
+
+Issue #209 asks to restore access to the audio controls while the player is a
+USB DAC. The Control Centre can now be pulled over DAC mode. Its now-playing
+card becomes a DAC status card (waiting/starting, or the host's PCM/DSD rate)
+and hides the local transport, so a play tap cannot start a second audio
+source over the USB stream. The regular quick controls remain available,
+including graphic EQ, MSEB, PEQ/profile, gain and line-out; the DAC page's own
+back guard still asks before leaving DAC mode. Cover Flow remains unavailable
+while the DAC owns the page.
+
+The USB audio thread now runs incoming 32-bit PCM through the same live EQ
+engine as decoded tracks, so the existing GEQ, PEQ and MSEB toggles change what
+is sent to the internal DAC. Native DSD is not PCM and bypasses the filters
+byte-for-byte. `make -C sonix-player/tests usbdac-eq` checks the production
+format gate against the DSP engine, including the DSD no-op; the quickpanel
+layout suite also checks that DAC no longer blocks the Control Centre while
+file-transfer and Bluetooth-receiver modes remain blocked. The tests do not
+replace an on-device touch and listening check.

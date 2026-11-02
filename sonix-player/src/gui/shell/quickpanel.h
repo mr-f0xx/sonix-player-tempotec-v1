@@ -29,8 +29,9 @@ void quickpanel_open(void);
 bool quickpanel_volume_slider(void);
 void quickpanel_set_volume_slider(bool on);
 
-// True while something else owns the device (USB DAC mode, Wi-Fi transfer, a
-// Bluetooth receiver) and the sheets must stay shut.
+// True while a Wi-Fi transfer or Bluetooth receiver owns the screen and the
+// sheets must stay shut. USB DAC mode permits the Control Centre; it replaces
+// the local transport card with DAC status while the host owns the audio.
 bool quickpanel_blocked(void);
 void quickpanel_close(void);
 bool quickpanel_is_open(void);

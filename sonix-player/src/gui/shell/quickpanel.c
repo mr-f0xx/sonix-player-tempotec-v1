@@ -304,6 +304,7 @@ static lv_obj_t *np_prev_icon;
 static lv_obj_t *np_next_icon;
 static lv_obj_t *np_star_btn;
 static lv_obj_t *np_repeat_btn;
+static lv_obj_t *np_transport;
 static lv_obj_t *np_star_icon;
 static lv_timer_t *poll_timer;
 
@@ -346,7 +347,53 @@ static void refresh_repeat_icon(void) {
 	lv_obj_set_style_image_recolor_opa(np_repeat_icon, LV_OPA_COVER, 0);
 }
 
+static bool dac_mode_owns_output(void) {
+	usbdac_state_t state;
+	usbdac_get_state(&state);
+	return state.active || state.starting;
+}
+
+static void refresh_dac_card(const usbdac_state_t *state) {
+	lv_obj_set_clickable(np_title, false);
+	lv_obj_set_clickable(np_artist, false);
+	lv_obj_set_hidden(np_transport, true);
+	scrolltext_set(np_title, tr("dac"));
+
+	if (state->error[0]) {
+		scrolltext_set(np_artist, state->error);
+	} else if (state->starting) {
+		scrolltext_set(np_artist, tr("dac_turning_on_2"));
+	} else if (!state->streaming) {
+		scrolltext_set(np_artist, tr("dac_waiting"));
+	} else {
+		char format[64];
+		char text[192];
+		if (state->dsd) {
+			snprintf(format, sizeof(format), "DSD  %d Hz", state->sample_rate);
+		} else if (state->sample_rate % 1000 == 0) {
+			snprintf(format, sizeof(format), "%d kHz", state->sample_rate / 1000);
+		} else {
+			snprintf(format, sizeof(format), "%.1f kHz", state->sample_rate / 1000.0);
+		}
+		snprintf(text, sizeof(text), "%s · %s", format, tr("dac_playing"));
+		scrolltext_set(np_artist, text);
+	}
+}
+
 static void refresh_now_playing_card(void) {
+	usbdac_state_t dac_state;
+	usbdac_get_state(&dac_state);
+	if (dac_state.active || dac_state.starting) {
+		refresh_dac_card(&dac_state);
+		return;
+	}
+
+	// When DAC mode is off, restore the normal card and its route into Now
+	// Playing, including the transport again after DAC mode ends.
+	lv_obj_set_clickable(np_title, true);
+	lv_obj_set_clickable(np_artist, true);
+	lv_obj_set_hidden(np_transport, false);
+
 	device_state_t state;
 	device_state_get(&state);
 
@@ -833,16 +880,16 @@ static void panel_prepare(void) {
 	topbar_bring_to_front();
 }
 
-// While the device is acting as a USB sound card, a Wi-Fi file server or a
-// Bluetooth receiver it is not playing anything, and those pages are meant to
-// stay in front, so the control centre would show transport buttons for a
-// transport that is not running. It refuses to open instead.
+// A USB DAC is still a useful place for the Control Centre: its transport card
+// becomes DAC status instead, and EQ, gain, output and level controls remain
+// live. A Wi-Fi file server or Bluetooth receiver still owns the screen, so the
+// sheet stays shut for those modes.
 bool quickpanel_blocked(void) {
 	// The transfer answers with the switch rather than with the server: killing
 	// thttpd takes a moment and the answer about the process is cached on top of
 	// that, so asking the process left the control centre refusing to open for
 	// seconds after the page said the transfer was off.
-	return usbdac_is_active() || wifitransfer_get_enabled() || btreceiver_is_active();
+	return wifitransfer_get_enabled() || btreceiver_is_active();
 }
 
 void quickpanel_open(void) {
@@ -1209,6 +1256,9 @@ static void level_released_cb(lv_event_t *e) {
 
 static void play_cb(lv_event_t *e) {
 	(void)e;
+	if (dac_mode_owns_output()) {
+		return; // never start local playback over the USB DAC stream
+	}
 	player_key_play_pause();
 	refresh_now_playing_card();
 }
@@ -1218,12 +1268,18 @@ static void play_cb(lv_event_t *e) {
 // changing episode, which stays with the physical side keys.
 static void next_cb(lv_event_t *e) {
 	(void)e;
+	if (dac_mode_owns_output()) {
+		return;
+	}
 	player_screen_next();
 	refresh_now_playing_card();
 }
 
 static void prev_cb(lv_event_t *e) {
 	(void)e;
+	if (dac_mode_owns_output()) {
+		return;
+	}
 	player_screen_prev();
 	refresh_now_playing_card();
 }
@@ -1244,6 +1300,9 @@ static void prev_cb(lv_event_t *e) {
 // no Now Playing to show, only an empty player over the page.
 static void np_open_player_cb(lv_event_t *e) {
 	(void)e;
+	if (dac_mode_owns_output()) {
+		return;
+	}
 	device_state_t state;
 	device_state_get(&state);
 	if (!state.live && !state.current_file[0]) {
@@ -2716,7 +2775,8 @@ void quickpanel_init(gui_config_t *cfg) {
 	scrolltext_apply(np_artist);
 	make_np_open_line(np_artist);
 
-	lv_obj_t *transport = lv_obj_create(np_card);
+	np_transport = lv_obj_create(np_card);
+	lv_obj_t *transport = np_transport;
 	lv_obj_set_size(transport, lv_pct(100), qp_compact ? 52 : 96);
 	lv_obj_set_style_bg_opa(transport, 0, 0);
 	lv_obj_set_style_border_width(transport, 0, 0);

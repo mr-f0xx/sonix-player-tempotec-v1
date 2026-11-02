@@ -10,6 +10,16 @@
 
 #include "../src/gui/shell/quickpanel.c"
 
+// Mode answers used by quickpanel_blocked(). DAC mode deliberately does not
+// block the Control Centre any more; the other device-owning modes still do.
+static bool dac_active;
+static bool transfer_enabled;
+static bool receiver_active;
+
+bool usbdac_is_active(void) { return dac_active; }
+bool wifitransfer_get_enabled(void) { return transfer_enabled; }
+bool btreceiver_is_active(void) { return receiver_active; }
+
 // LVGL's configured default font; no widgets are created in this suite.
 lv_font_t font_ui_14;
 
@@ -41,6 +51,26 @@ static void check_partition(void) {
 		seen[b] = true;
 	}
 }
+
+static void test_quickpanel_mode_gating(void) {
+	dac_active = true;
+	transfer_enabled = false;
+	receiver_active = false;
+	assert(usbdac_is_active());
+	assert(!quickpanel_blocked());
+
+	dac_active = false;
+	transfer_enabled = true;
+	assert(quickpanel_blocked());
+
+	transfer_enabled = false;
+	receiver_active = true;
+	assert(quickpanel_blocked());
+
+	receiver_active = false;
+	assert(!quickpanel_blocked());
+}
+
 int main(void) {
 	lv_init();
 	char dir[] = "/tmp/sonix-qp-layout-XXXXXX";
@@ -48,6 +78,7 @@ int main(void) {
 	char path[512];
 	snprintf(path, sizeof(path), "%s/config.ini", dir);
 	config_init(path);
+	test_quickpanel_mode_gating();
 
 	// A fresh config still uses the old eight-place migration. Appending a
 	// control must not push an existing default out of those eight places;
@@ -100,6 +131,6 @@ int main(void) {
 	assert(quickpanel_in_use_at(7) == QP_BTN_PEQ_PROFILE);
 	assert(quickpanel_in_use_count() == QP_SLOT_COUNT);
 	check_partition();
-	printf("quickpanel: new PEQ profile control, saved layouts, full grid and visible-slot migration passed\n");
+	printf("quickpanel: DAC-mode access, saved layouts, full grid and visible-slot migration passed\n");
 	return 0;
 }

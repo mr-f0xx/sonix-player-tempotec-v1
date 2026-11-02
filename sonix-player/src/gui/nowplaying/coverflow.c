@@ -23,6 +23,7 @@
 #include "src/system/library/library.h"
 #include "src/system/playback/playlist.h"
 #include "src/system/core/utils.h"
+#include "src/system/audio/usbdac.h"
 
 // ---------------------------------------------------------------------------
 // The crate
@@ -1705,12 +1706,14 @@ static void sheet_drag_end(void) {
 
 // Whether the sheet can come down at all.
 //
-// The two sheets do not stack: the control centre is the other one, and the
-// pages that own the device -- USB DAC, a file transfer, a Bluetooth receiver
-// -- are meant to stay in front of both. The setting is the last word: without
-// it there is no cover database and no carousel to bring down.
+// The two sheets do not stack. The DAC page still owns the output while its
+// Control Centre exception is open, so Cover Flow stays unavailable there; a
+// file transfer and a Bluetooth receiver keep their existing ownership too.
+// The setting is the last word: without it there is no cover database and no
+// carousel to bring down.
 static bool sheet_may_open(void) {
-	return sheet && !sheet_open && coverflow_enabled() && !quickpanel_is_open() && !quickpanel_blocked();
+	return sheet && !sheet_open && coverflow_enabled() && !quickpanel_is_open() && !quickpanel_blocked() &&
+		   !usbdac_is_active();
 }
 
 bool coverflow_is_open(void) { return sheet_open || sheet_dragging; }
