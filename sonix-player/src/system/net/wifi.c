@@ -78,6 +78,27 @@ static bool g_poll_slow;
 
 void wifi_set_status_poll_slow(bool slow) { g_poll_slow = slow; }
 
+// A Bluetooth stream is up. The radio and the Bluetooth module share an
+// antenna on this board, and an associated Wi-Fi link is the one that crackles
+// the music: with the radio on but not joined the stream is clean, joined it is
+// not (seen on the V1 with the radio on but not associated, and again with it
+// off: no drop-outs). Nothing here can stop the
+// link's own traffic, but the traffic this file adds on top of it can go:
+//
+//   - the status poll drops to the standby period whatever the screen is
+//     doing, so the player stops forking `wpa_cli` -- a copy of the whole
+//     player's page tables, on one core, beside the thread feeding the encoder
+//     -- every two seconds;
+//   - `signal_poll` is not asked at all. It is the one query that makes the
+//     driver go and read the link's statistics from the chip while it is
+//     associated, and it is only there to move the signal bars. The bars keep
+//     the last reading until the stream ends.
+//
+// Set from the power tick, which already knows when a stream is up.
+static volatile bool g_bt_streaming;
+
+void wifi_set_bluetooth_streaming(bool streaming) { g_bt_streaming = streaming; }
+
 // A DHCP attempt is not retried more often than this, so an access point that
 // hands out no lease does not turn into a fork loop.
 #define DHCP_RETRY_MS 20000
@@ -1328,13 +1349,24 @@ static void poll_status(void) {
 	ssid_unescape(status.ssid); // wpa_supplicant escapes this one too
 	status_field(buf, "ip_address", status.ip, sizeof(status.ip));
 	status_field(buf, "address", status.mac, sizeof(status.mac));
+	if (status.state == WIFI_STATE_CONNECTED) {
+		char freq[16];
+		if (status_field(buf, "freq", freq, sizeof(freq))) {
+			status.freq_mhz = atoi(freq);
+		}
+	}
 
 	if (status.state == WIFI_STATE_CONNECTED) {
+		static int last_signal;
 		char signal_buf[512];
 		char rssi[16];
-		if (wpa1("signal_poll", signal_buf, sizeof(signal_buf)) == 0 &&
-			status_field(signal_buf, "RSSI", rssi, sizeof(rssi))) {
+		if (g_bt_streaming) {
+			// Not while music goes out over Bluetooth: see g_bt_streaming.
+			status.signal = last_signal;
+		} else if (wpa1("signal_poll", signal_buf, sizeof(signal_buf)) == 0 &&
+				   status_field(signal_buf, "RSSI", rssi, sizeof(rssi))) {
 			status.signal = atoi(rssi);
+			last_signal = status.signal;
 		}
 		status.bars = status.signal ? bars_for(status.signal) : 3;
 
@@ -1394,6 +1426,11 @@ static void post_job(const job_t *job) {
 	pthread_mutex_unlock(&lock);
 }
 
+// How long the worker sleeps between two status reads.
+static uint32_t status_poll_period_ms(void) {
+	return (power_screen_is_on() && !g_poll_slow && !g_bt_streaming) ? STATUS_POLL_MS : STATUS_POLL_STANDBY_MS;
+}
+
 static void *wifi_worker(void *arg) {
 	(void)arg;
 	thread_be_background("wifi");
@@ -1412,8 +1449,7 @@ static void *wifi_worker(void *arg) {
 			// tv_sec: a two-second poll is 2,000,000,000 ns, and adding that
 			// straight to tv_nsec overflows a 32-bit long.
 			struct timespec deadline;
-			deadline_in_ms(&deadline, !g_enabled ? IDLE_WAIT_MS
-												 : (power_screen_is_on() ? STATUS_POLL_MS : STATUS_POLL_STANDBY_MS));
+			deadline_in_ms(&deadline, !g_enabled ? IDLE_WAIT_MS : status_poll_period_ms());
 			pthread_cond_timedwait(&wake, &lock, &deadline);
 			have_job = take_job(&job);
 		}
@@ -1468,8 +1504,7 @@ static void *wifi_worker(void *arg) {
 			continue;
 		}
 
-		uint32_t poll_period =
-			(power_screen_is_on() && !g_poll_slow) ? STATUS_POLL_MS : STATUS_POLL_STANDBY_MS;
+		uint32_t poll_period = status_poll_period_ms();
 		if (enabled && (uint32_t)(now_ms() - last_poll) >= poll_period) {
 			last_poll = now_ms();
 			poll_status();

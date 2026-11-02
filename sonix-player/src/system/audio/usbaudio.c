@@ -39,6 +39,22 @@
 // connects a beat late rather than not at all.
 #define HANDOVER_SECS 3
 
+// The same wait when nothing at all has enumerated on the host bus -- not an
+// audio device, not any device. That is not a phone being plain: it is also
+// what a bus-powered dongle looks like for the first seconds after this port
+// raised VBUS for it. The dongle has to come out of reset, bring its codec up
+// and answer the first reset from the controller, and only then does an entry
+// appear under /sys/bus/usb/devices. A self-powered DAC (an RME, a desktop
+// unit with its own supply) is already running when the cable goes in and is
+// on the bus within a second, which is why those were found and a JCally
+// dongle was not: three seconds later the port was written to sink, the
+// dongle's power went away with the host role, and the cable had to be pulled
+// to try again. Something that has enumerated and is not audio keeps the short
+// wait above; only the silent port gets this longer one, so a phone that has
+// put its device side to sleep is handed the host role a few seconds later
+// than it was, and nothing else about it changes.
+#define POWERUP_SECS 10
+
 // And how long the port must stay empty before dual role is offered again.
 // Changing port_type while something is attached makes the kernel drop the
 // connection and negotiate afresh, so the partner disappears for a moment after
@@ -715,6 +731,84 @@ static void tcs1421_trace(void) {
 			otg_id_untrusted ? " (not trusted)" : "", vbus, bus);
 }
 
+// Whether this player is the host end of the cable right now, supplying the
+// port's power: the Type-C power role reads "source", or on the R1 the ID line
+// says host. A computer or a charger that powers this player leaves it the sink
+// and the device, and then there is no peripheral that needs time to start.
+static bool port_is_host_side(void) {
+	if (port_kind() == PORT_TCS1421) {
+		return !otg_id_untrusted && otg_id_says_host();
+	}
+	FILE *f = fopen("/sys/class/typec/port0/power_role", "r");
+	if (!f) {
+		return false;
+	}
+	char line[48] = {0};
+	bool source = fgets(line, sizeof(line), f) && strstr(line, "[source]") != NULL;
+	fclose(f);
+	return source;
+}
+
+// One line of the state of the port and of whatever is on the host bus, for
+// the log: written when something attaches and when it is given up on, which is
+// the pair of moments that says why a device was or was not taken.
+static void read_attr_line(const char *path, char *out, size_t out_size) {
+	out[0] = '\0';
+	FILE *f = fopen(path, "r");
+	if (!f) {
+		return;
+	}
+	if (fgets(out, (int)out_size, f)) {
+		out[strcspn(out, "\r\n")] = '\0';
+	}
+	fclose(f);
+}
+
+static void log_port_state(const char *why) {
+	char power_role[48], data_role[48], port_type[48];
+	read_attr_line("/sys/class/typec/port0/power_role", power_role, sizeof(power_role));
+	read_attr_line("/sys/class/typec/port0/data_role", data_role, sizeof(data_role));
+	read_attr_line(TYPEC_PORT_TYPE, port_type, sizeof(port_type));
+	fprintf(stderr, "usbaudio: %s: port_type '%s', power_role '%s', data_role '%s', partner %s\n", why, port_type,
+			power_role, data_role, partner_present() ? "yes" : "no");
+
+	DIR *dir = opendir("/sys/bus/usb/devices");
+	if (!dir) {
+		return;
+	}
+	int count = 0;
+	struct dirent *de;
+	while ((de = readdir(dir)) != NULL) {
+		const char *name = de->d_name;
+		if (name[0] < '0' || name[0] > '9' || !strchr(name, '-') || strchr(name, ':')) {
+			continue;
+		}
+		char path[192], vid[16], pid[16], product[64], speed[16];
+		snprintf(path, sizeof(path), "/sys/bus/usb/devices/%s/idVendor", name);
+		read_attr_line(path, vid, sizeof(vid));
+		snprintf(path, sizeof(path), "/sys/bus/usb/devices/%s/idProduct", name);
+		read_attr_line(path, pid, sizeof(pid));
+		snprintf(path, sizeof(path), "/sys/bus/usb/devices/%s/product", name);
+		read_attr_line(path, product, sizeof(product));
+		snprintf(path, sizeof(path), "/sys/bus/usb/devices/%s/speed", name);
+		read_attr_line(path, speed, sizeof(speed));
+		fprintf(stderr, "usbaudio:   bus device %s %s:%s '%s' %s Mb/s\n", name, vid, pid, product, speed);
+		count++;
+	}
+	closedir(dir);
+	if (count == 0) {
+		fprintf(stderr, "usbaudio:   nothing has enumerated on the host bus\n");
+	}
+}
+
+// True from the moment something attaches until it is a sound card, or has been
+// given up on. usb.c asks (through usbaudio_handover_pending()) before it
+// writes "sink" for its own reasons, so that rebuilding the storage gadget
+// cannot take the host role away from a dongle that is still starting up.
+static bool handover_pending;
+
+bool usbaudio_handover_pending(void) { return handover_pending; }
+
 static void arbitrate_port(bool audio_present) {
 	static time_t attached_at;	// when the current non-audio partner appeared
 	static time_t empty_at;		// when the port last became empty
@@ -723,6 +817,8 @@ static void arbitrate_port(bool audio_present) {
 	if (port_kind() == PORT_TCS1421) {
 		tcs1421_trace();
 	}
+
+	handover_pending = false;
 
 	if (audio_present) {
 		attached_at = 0;
@@ -733,6 +829,9 @@ static void arbitrate_port(bool audio_present) {
 
 	if (partner_present()) {
 		empty_at = 0;
+		// Only while this player is the one supplying the port's power: that is
+		// the only case in which the other end can be a dongle waiting on it.
+		handover_pending = port_is_host_side();
 		// Something that is a USB audio device -- or is becoming one -- is
 		// given as long as the probe takes. Its interfaces are on the bus
 		// before snd-usb-audio has built the sound card, and on this hardware
@@ -747,8 +846,17 @@ static void arbitrate_port(bool audio_present) {
 		}
 		if (attached_at == 0) {
 			attached_at = now;
-		} else if (now - attached_at >= HANDOVER_SECS) {
-			port_become_sink();
+			log_port_state("something attached");
+		} else {
+			// A silent bus is given the longer wait -- see POWERUP_SECS -- but
+			// only when this player is the one feeding the port. Against a
+			// computer or a charger there is nothing powered up on the far end.
+			time_t limit = (!host_bus_has_device() && port_is_host_side()) ? POWERUP_SECS : HANDOVER_SECS;
+			if (now - attached_at >= limit) {
+				log_port_state("giving the port to the other end");
+				handover_pending = false;
+				port_become_sink();
+			}
 		}
 		return;
 	}

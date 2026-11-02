@@ -43,6 +43,12 @@ bool usbaudio_ensure_dual(void);
 // watches the headphone jacks.
 void usbaudio_poll(void);
 
+// Whether something has just attached to the port and has not yet turned into a
+// sound card or been given up on. Anything else about to write the port's role
+// should wait while this is true: a bus-powered dongle spends its first seconds
+// being powered up by the host role that a "sink" write would take away.
+bool usbaudio_handover_pending(void);
+
 // Whether the sound is going out over the port right now.
 bool usbaudio_active(void);
 

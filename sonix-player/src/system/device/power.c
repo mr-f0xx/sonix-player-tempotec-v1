@@ -40,6 +40,7 @@
 #include "src/system/lastfm/lastfm.h"
 #include "src/system/listenbrainz/listenbrainz.h"
 #include "src/system/bluetooth/bluetooth.h"
+#include "src/system/bluetooth/btafh.h"
 #include "src/system/bluetooth/btreceiver.h"
 #include "src/system/core/config.h"
 #include "src/system/core/logging.h"
@@ -959,6 +960,44 @@ static bool wifi_wanted(void) {
 // so that a pause somebody is about to undo does not cost a reassociation.
 static uint32_t g_wifi_idle_since;
 static uint32_t g_bt_idle_since;
+
+// Keeps Bluetooth's hop set off the Wi-Fi link's channel while a Bluetooth
+// stream is up and the radio is joined (see btafh.h). Sent when the wanted
+// state changes, and again every fifteen seconds while it is a restriction: the
+// controller forgets it when the stack restarts, which the player does whenever
+// receiver mode is switched or the radio is cycled.
+#define AFH_RESEND_MS 15000
+#define AFH_RETRY_MS 1000
+
+static void bt_afh_follow_wifi(uint32_t now) {
+	static int sent_freq;
+	static uint32_t last_try;
+	int want = 0;
+
+	if (bluetooth_audio_active()) {
+		wifi_status_t st;
+		wifi_get_status(&st);
+		if (st.state == WIFI_STATE_CONNECTED) {
+			want = st.freq_mhz;
+		}
+	}
+	if (want == 0 && sent_freq == 0) {
+		return;
+	}
+	uint32_t waited = since(last_try, now);
+	if (want == sent_freq && waited < AFH_RESEND_MS) {
+		return;
+	}
+	if (waited < AFH_RETRY_MS) {
+		return;
+	}
+	last_try = now;
+	if (btafh_apply_for_wifi(want) || want == 0) {
+		// Clearing is not retried: with nothing streaming there may be no
+		// controller to clear it on, and a restarted one has forgotten it.
+		sent_freq = want;
+	}
+}
 
 static void park_radios_if_idle(uint32_t now) {
 	// Held at now for as long as there is a reason to keep them, so `since`
@@ -2214,6 +2253,11 @@ static void power_timer_cb(lv_timer_t *timer) {
 	//           what they buy is that the power-up does not land on the stream,
 	//           and the milliwatts are only spent while it lasts.
 	panel_hold_tick(now);
+
+	// 4a-bis-1b. the Wi-Fi worker told whether a Bluetooth stream is up, so its
+	//            polling stays out of the stream's way (see wifi.c).
+	wifi_set_bluetooth_streaming(bluetooth_audio_active());
+	bt_afh_follow_wifi(now);
 
 	// 4a-bis-2. the radios, a minute after the screen goes dark
 	park_radios_if_idle(now);

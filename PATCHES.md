@@ -2573,3 +2573,76 @@ format gate against the DSP engine, including the DSD no-op; the quickpanel
 layout suite also checks that DAC no longer blocks the Control Centre while
 file-transfer and Bluetooth-receiver modes remain blocked. The tests do not
 replace an on-device touch and listening check.
+
+## Bluetooth drop-outs with Wi-Fi joined, and a USB-C DAC that was never found
+
+Two reports from one test session on a V1. Neither could be reproduced here --
+there is no board in this environment -- and the log that goes with them was not
+attached, so both changes below are reasoned from the code and the description,
+and both need a listening / plug-in check on the device.
+
+### Bluetooth stutters only while Wi-Fi is *associated*
+
+The session: Wi-Fi joined and Bluetooth streaming, drop-outs; Wi-Fi on but not
+joined, clean; Wi-Fi off, clean. The lock-screen blip in the same session is
+issue #188, already handled by the held panel.
+
+What the Bluetooth log of that session (14:56-15:08) shows: the player was the
+**receiver** (an iPad streaming AAC 44.1 kHz to it, player is the piconet master),
+and the loss is on the air, upstream of anything the player does with the audio.
+`bluealsa: Missing RTP packets` appears ten times in the two minutes with Wi-Fi
+joined (14:59:27-15:01:28), and not once in the two clean stretches that follow
+(15:01:45-15:03:06, 15:03:19-15:05:00). The events do not fall on a two-second
+beat, so the status poll is not what drops them. The controller is a Broadcom
+BCM4343A1 -- the same chip carries the Wi-Fi radio, with one antenna -- and it
+reports that it supports Set AFH Host Channel Classification.
+
+So the change that matters is `btafh.c`: while an A2DP link is up and Wi-Fi is
+joined on a 2.4 GHz channel, the power tick (`bt_afh_follow_wifi()`) sends that
+HCI command so the Bluetooth channels under the access point's channel (centre
++-12 MHz, `freq=` from `wpa_cli status`) are left out of the hop set. It is
+resent every fifteen seconds while in force (a stack restart makes the controller
+forget it) and cleared when the link or the Wi-Fi join goes. A 5 GHz network or an
+unknown channel masks nothing. Only the piconet master can classify channels: if
+the far end is the master the controller answers "command disallowed" and nothing
+changes -- the Command Complete for it is in the next Bluetooth log. `make -C
+sonix-player/tests btafh` checks the map.
+
+Alongside it, the smaller change from the first pass stays: with an A2DP link up
+the Wi-Fi worker polls at the standby period whatever the screen is doing and does
+not ask for `signal_poll` (the driver reading the link from the chip, only to move
+the bars). It removes the player's own traffic from the link and cannot hurt;
+`make -C sonix-player/tests wifi` checks it. The log does not show it to be the
+cause.
+
+Neither is verified on a board. Check: stream from the phone with Wi-Fi joined and
+count `Missing RTP packets` in a Bluetooth log over a couple of minutes against the
+same song with Wi-Fi off; the log also carries the `bluetooth: AFH:` line and the
+controller's reply to the command.
+
+### USB-C: the JCally dongle is not found, the RME ADI-2 DAC is
+
+Both are class-compliant and the JCally works with the stock firmware on the same
+kernel, so the card appears when the cable is left alone: what differs is how
+long each takes to appear. The RME has its own supply and is on the bus within a
+second of the cable going in. The JCally is powered *from* the port: the host
+role has to come up, VBUS has to rise, and the dongle then boots before the first
+USB reset. `arbitrate_port()` gave anything attached that was not yet a sound
+card `HANDOVER_SECS` (3 s) before writing `sink` -- the answer for a phone that
+will never become one -- and writing `sink` removes the host role, and with it
+the dongle's power, until the cable is pulled.
+
+- When nothing at all has enumerated on the host bus *and this player is the one
+  supplying the port* (Type-C `power_role` is `[source]`; on the R1 the ID line
+  reads host) the wait is `POWERUP_SECS` (10 s). Something that has enumerated
+  and is not audio, or a computer or charger powering the player, keeps the 3 s.
+  A phone that never enumerates is handed the host role up to seven seconds later
+  than before.
+- `usb.c` no longer writes `sink` for its own gadget rebuilds while that wait is
+  running (`usbaudio_handover_pending()`).
+- The log now says what the port looked like when something attached and when
+  the port was given up on: `usbaudio: something attached: port_type ...,
+  power_role ..., data_role ...` followed by every device on the host bus with
+  its vendor:product, name and speed. If a JCally still is not found, that block
+  and the `kernel:` lines around it say whether it enumerated, whether it got
+  as far as an audio interface, and whether `snd-usb-audio` then refused it.
