@@ -698,17 +698,17 @@ static void row_clicked_cb(lv_event_t *e) {
 // closed, and by then the list may have been rebuilt underneath it.
 // ---------------------------------------------------------------------------
 
-static char menu_uuid[40];
+static radio_station_t menu_station;
 static char menu_name[RADIO_NAME_MAX];
 
 static void remove_confirmed(void *user) {
 	(void)user;
-	if (!menu_uuid[0]) {
+	if (!menu_station.uuid[0] && !menu_station.url[0]) {
 		return;
 	}
 
-	radio_fav_remove(menu_uuid);
-	menu_uuid[0] = '\0';
+	radio_fav_remove_station(&menu_station);
+	memset(&menu_station, 0, sizeof(menu_station));
 
 	if (list_mode == LIST_FAVOURITES) {
 		list_reload_stored();
@@ -722,7 +722,7 @@ static void remove_confirmed(void *user) {
 
 static void menu_remove_action(void *user) {
 	(void)user;
-	if (!menu_uuid[0]) {
+	if (!menu_station.uuid[0] && !menu_station.url[0]) {
 		return;
 	}
 	confirm_show("remove_from_favourites", menu_name, "remove", remove_confirmed, NULL);
@@ -743,7 +743,7 @@ static void menu_btn_cb(lv_event_t *e) {
 		return;
 	}
 
-	snprintf(menu_uuid, sizeof(menu_uuid), "%s", stations[index].uuid);
+	menu_station = stations[index];
 	snprintf(menu_name, sizeof(menu_name), "%s", stations[index].name);
 
 	static const popover_item_t items[] = {

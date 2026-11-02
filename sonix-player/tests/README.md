@@ -16,6 +16,8 @@ make -C sonix-player/tests artsearch
 make -C sonix-player/tests tagdate
 make -C sonix-player/tests genius
 make -C sonix-player/tests mostplayed
+make -C sonix-player/tests radio-store
+make -C sonix-player/tests led-rate
 make -C sonix-player/tests aamlayout
 make -C sonix-player/tests extractkeys
 ```
@@ -263,6 +265,23 @@ no date in it -- including a day-first date, which this reader will not guess
 at -- comes back empty. The fuller of two dates wins whatever order they
 arrive in, and each date resolves to one moment for sorting with the parts it
 left out settled on the first of January, and of the month.
+
+## Radio favourites and recents
+
+`make -C sonix-player/tests radio-store` includes the real radio module and
+SQLite store, with a temporary card directory. It checks that URL-only stations
+can be added, found, removed and reopened as favourites without exposing the
+synthetic storage key as a station UUID; that a repeated URL replaces its
+Recently Played row; that the ten-row limit and newest-first order hold; that a
+clean card gets its `.local` directory; and that replacing `radio.db` causes the
+open store to be reopened.
+
+## Playback LED sample-rate bands
+
+`make -C sonix-player/tests led-rate` checks the stock PCM bands at and around
+48 kHz and 192 kHz, along with the corresponding yellow, aqua and orange LED
+patterns. It also checks that a 176.4 kHz DoP carrier stays in the PCM band
+unless DSD is identified, and that DSD maps to white.
 
 ## Most played, against the real database
 

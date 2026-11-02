@@ -131,8 +131,12 @@ void radio_store_reopen_if_replaced(void);
 int radio_fav_count(void);
 bool radio_fav_get(int index, radio_station_t *out);
 bool radio_fav_contains(const char *uuid);
+// These station-aware variants also work when `uuid` is empty (for example
+// built-in curated stations): their stream URL is used as the stable store key.
+bool radio_fav_contains_station(const radio_station_t *station);
 void radio_fav_add(const radio_station_t *station);
 void radio_fav_remove(const char *uuid);
+void radio_fav_remove_station(const radio_station_t *station);
 
 // Why a station cannot be played here, or NULL when it can. The text is meant
 // to be shown to the user as it is.

@@ -818,6 +818,26 @@ static const char *const STORE_SCHEMA[] = {
 	"CREATE INDEX IF NOT EXISTS RECENT_PLAYED ON RECENT(played DESC)",
 };
 
+// Directory stations have UUIDs. Curated and user-supplied streams do not,
+// so their URL is the only stable identity available to the on-card store.
+// The prefix keeps a URL key distinct from a real UUID in the same column.
+#define RADIO_STORE_URL_KEY_PREFIX "url:"
+
+static bool station_store_key(const radio_station_t *station, char *out, size_t out_size) {
+	if (!station || !out || out_size == 0) {
+		return false;
+	}
+	if (station->uuid[0]) {
+		int n = snprintf(out, out_size, "%s", station->uuid);
+		return n >= 0 && (size_t)n < out_size;
+	}
+	if (!station->url[0]) {
+		return false;
+	}
+	int n = snprintf(out, out_size, "%s%s", RADIO_STORE_URL_KEY_PREFIX, station->url);
+	return n >= 0 && (size_t)n < out_size;
+}
+
 static bool store_exec(const char *sql) {
 	if (!store) {
 		return false;
@@ -851,8 +871,29 @@ bool radio_store_open(const char *sd_root) {
 		return false;
 	}
 
+	// Do not depend on another subsystem (usually the logger) having happened
+	// to create .local first. The radio database is also used on a clean card
+	// before anything has written a cache or log there.
+	char dir[512];
+	int dir_len = snprintf(dir, sizeof(dir), "%s/.local", sd_root);
+	if (dir_len < 0 || (size_t)dir_len >= sizeof(dir)) {
+		fprintf(stderr, "radio: card path is too long for the database directory\n");
+		pthread_mutex_unlock(&store_lock);
+		return false;
+	}
+	if (mkdir(dir, 0777) != 0 && errno != EEXIST) {
+		fprintf(stderr, "radio: cannot create %s: %s\n", dir, strerror(errno));
+		pthread_mutex_unlock(&store_lock);
+		return false;
+	}
+
 	char path[512];
-	snprintf(path, sizeof(path), "%s/.local/radio.db", sd_root);
+	int path_len = snprintf(path, sizeof(path), "%s/.local/radio.db", sd_root);
+	if (path_len < 0 || (size_t)path_len >= sizeof(path)) {
+		fprintf(stderr, "radio: card path is too long for radio.db\n");
+		pthread_mutex_unlock(&store_lock);
+		return false;
+	}
 
 	if (sqlite3_open(path, &store) != SQLITE_OK) {
 		fprintf(stderr, "radio: cannot open %s: %s\n", path, sqlite3_errmsg(store));
@@ -912,7 +953,8 @@ static void station_from_row(sqlite3_stmt *stmt, radio_station_t *out) {
 	memset(out, 0, sizeof(*out));
 
 	const char *text;
-	if ((text = (const char *)sqlite3_column_text(stmt, 0))) {
+	if ((text = (const char *)sqlite3_column_text(stmt, 0)) &&
+		strncmp(text, RADIO_STORE_URL_KEY_PREFIX, strlen(RADIO_STORE_URL_KEY_PREFIX)) != 0) {
 		snprintf(out->uuid, sizeof(out->uuid), "%s", text);
 	}
 	if ((text = (const char *)sqlite3_column_text(stmt, 1))) {
@@ -938,7 +980,8 @@ static void station_from_row(sqlite3_stmt *stmt, radio_station_t *out) {
 
 // INSERT OR REPLACE into whichever table, with `stamp` in the last column.
 static void store_put(const char *table, const char *stamp_column, const radio_station_t *s) {
-	if (!store || !s || !s->uuid[0]) {
+	char key[RADIO_URL_MAX + sizeof(RADIO_STORE_URL_KEY_PREFIX)];
+	if (!store || !station_store_key(s, key, sizeof(key))) {
 		return;
 	}
 
@@ -953,7 +996,7 @@ static void store_put(const char *table, const char *stamp_column, const radio_s
 		return;
 	}
 
-	sqlite3_bind_text(stmt, 1, s->uuid, -1, SQLITE_TRANSIENT);
+	sqlite3_bind_text(stmt, 1, key, -1, SQLITE_TRANSIENT);
 	sqlite3_bind_text(stmt, 2, s->name, -1, SQLITE_TRANSIENT);
 	sqlite3_bind_text(stmt, 3, s->url, -1, SQLITE_TRANSIENT);
 	sqlite3_bind_text(stmt, 4, s->favicon, -1, SQLITE_TRANSIENT);
@@ -1040,6 +1083,25 @@ bool radio_fav_contains(const char *uuid) {
 	return found;
 }
 
+bool radio_fav_contains_station(const radio_station_t *station) {
+	char key[RADIO_URL_MAX + sizeof(RADIO_STORE_URL_KEY_PREFIX)];
+	if (!station_store_key(station, key, sizeof(key))) {
+		return false;
+	}
+
+	pthread_mutex_lock(&store_lock);
+	bool found = false;
+	sqlite3_stmt *stmt = NULL;
+	if (store && sqlite3_prepare_v2(store, "SELECT 1 FROM FAVOURITES WHERE uuid=?", -1, &stmt, NULL) ==
+					 SQLITE_OK) {
+		sqlite3_bind_text(stmt, 1, key, -1, SQLITE_TRANSIENT);
+		found = sqlite3_step(stmt) == SQLITE_ROW;
+		sqlite3_finalize(stmt);
+	}
+	pthread_mutex_unlock(&store_lock);
+	return found;
+}
+
 void radio_fav_add(const radio_station_t *station) {
 	pthread_mutex_lock(&store_lock);
 	store_put("FAVOURITES", "added", station);
@@ -1056,6 +1118,23 @@ void radio_fav_remove(const char *uuid) {
 	if (store && sqlite3_prepare_v2(store, "DELETE FROM FAVOURITES WHERE uuid=?", -1, &stmt, NULL) ==
 					 SQLITE_OK) {
 		sqlite3_bind_text(stmt, 1, uuid, -1, SQLITE_TRANSIENT);
+		sqlite3_step(stmt);
+		sqlite3_finalize(stmt);
+	}
+	pthread_mutex_unlock(&store_lock);
+}
+
+void radio_fav_remove_station(const radio_station_t *station) {
+	char key[RADIO_URL_MAX + sizeof(RADIO_STORE_URL_KEY_PREFIX)];
+	if (!station_store_key(station, key, sizeof(key))) {
+		return;
+	}
+
+	pthread_mutex_lock(&store_lock);
+	sqlite3_stmt *stmt = NULL;
+	if (store && sqlite3_prepare_v2(store, "DELETE FROM FAVOURITES WHERE uuid=?", -1, &stmt, NULL) ==
+					 SQLITE_OK) {
+		sqlite3_bind_text(stmt, 1, key, -1, SQLITE_TRANSIENT);
 		sqlite3_step(stmt);
 		sqlite3_finalize(stmt);
 	}

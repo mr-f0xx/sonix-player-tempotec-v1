@@ -295,6 +295,27 @@ $(BUILD)/drflac_impl.o: $(ROOT)/src/system/decode/dr_flac.h
 sanitize-radioflac:
 	$(MAKE) BUILD=.build/sanitize CFLAGS='-O1 -g -std=gnu11 -Wall -Wextra -Werror -D_FILE_OFFSET_BITS=64 -ffunction-sections -fdata-sections -fno-omit-frame-pointer -fsanitize=address,undefined' LDFLAGS='-Wl,--gc-sections -fsanitize=address,undefined' radioflac
 
+# Radio favourites and recents against the real store and SQLite, including
+# URL-only stations and reopening after the database is replaced.
+.PHONY: radio-store
+radio-store: $(BUILD)/test_radio_store
+	$(BUILD)/test_radio_store
+
+$(BUILD)/test_radio_store: test_radio_store.c $(ROOT)/src/system/streaming/radio.c \
+                           $(ROOT)/src/system/streaming/radio.h $(BUILD)/sqlite3_impl.o
+	@mkdir -p $(BUILD)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -Wno-format-truncation -o $@ test_radio_store.c $(BUILD)/sqlite3_impl.o $(LDFLAGS) $(LDLIBS)
+
+# The playback LED's stock PCM sample-rate bands and their color/pattern map.
+.PHONY: led-rate
+led-rate: $(BUILD)/test_led_rate
+	$(BUILD)/test_led_rate
+
+$(BUILD)/test_led_rate: test_led_rate.c $(ROOT)/src/system/device/led.c \
+                        $(ROOT)/src/system/device/led.h
+	@mkdir -p $(BUILD)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ test_led_rate.c $(LDFLAGS) $(LDLIBS)
+
 # The Most played list against the real library database: the play upsert
 # device_state.c runs at track start, the handle the page opens, and the
 # streaming reader the queue is built from. The card is a temporary directory

@@ -1952,12 +1952,6 @@ static bool lyrics_available(void) {
 // The page is up, or on its way in or out under a finger.
 static bool lyrics_on_screen(void) { return lyrics_pane && !lv_obj_is_hidden(lyrics_pane); }
 
-// Words being read are not an idle screen: while the lyrics are up on an open
-// player, the idle timer does not blank the panel under them. Asked again
-// wherever either half changes; the hold itself ignores a call that changes
-// nothing.
-static void lyrics_screen_hold_update(void) { power_hold_screen_for_view(sheet_open && lyrics_on_screen()); }
-
 // The words of the file playing are known before any swipe: on a track with
 // none the swipe asks to download them, and the page goes away by itself on
 // one.
@@ -2283,7 +2277,6 @@ static void lyrics_progress_apply(int32_t progress) {
 		lv_obj_set_hidden(lyrics_pane, false);
 		lv_obj_move_foreground(lyrics_pane);
 	}
-	lyrics_screen_hold_update();
 	lv_obj_set_x(lyrics_pane, lyrics_pane_x + travel * (LYRICS_FULL - progress) / LYRICS_FULL);
 	if (rest || !lyrics_look_on) {
 		lyrics_look(!rest);
@@ -5317,7 +5310,7 @@ static void update_fav_button(void) {
 	long tidal_id = 0;
 	long long feed_id = 0;
 	if (radio_current_station(&station)) {
-		starred = radio_fav_contains(station.uuid);
+		starred = radio_fav_contains_station(&station);
 	} else if (podcast_current_feed(&feed_id, NULL)) {
 		// On a podcast the star does not mark a liked track: it follows the
 		// podcast, so it turns up in the followed list without searching. The
@@ -5423,8 +5416,8 @@ static void fav_btn_event_cb(lv_event_t *e) {
 
 	radio_station_t station;
 	if (radio_current_station(&station)) {
-		if (radio_fav_contains(station.uuid)) {
-			radio_fav_remove(station.uuid);
+		if (radio_fav_contains_station(&station)) {
+			radio_fav_remove_station(&station);
 		} else {
 			radio_fav_add(&station);
 		}
@@ -5845,19 +5838,9 @@ static void update_progress(void) {
 	update_format_label(&state); // the rate/bits settle shortly after the start
 
 	// The status LED follows playback promptly from here (the battery poll
-	// only comes round once a minute). Only writes when the colour changes.
-	// A podcast lights purple instead of the sample-rate colour.
-	bool live_lossy = true;
-	int live_bits = 0;
-	if (state.live) {
-		radio_now_t now;
-		radio_get_now(&now);
-		live_lossy = now.bits == 0;
-		live_bits = now.bits;
-	}
+	// only comes round once a minute). Its PCM colour follows the sample-rate
+	// band; podcasts and DSD retain their dedicated colours.
 	led_update_playback(state.status == AUDIO_STATUS_PLAYING, state.stream_sample_rate,
-						state.live ? live_lossy : audio_stream_is_lossy(),
-						state.live ? live_bits : audio_get_stream_bits(),
 						!state.live && podcastcache_is_episode(state.current_file),
 						!state.live && audio_get_dsd_multiple() > 0);
 
@@ -6526,7 +6509,6 @@ void player_sheet_open(bool animate) {
 	}
 	sheet_open = true;
 	back_btn_player_mode(true);
-	lyrics_screen_hold_update();
 
 	// Explicitly the bottom-most thing on the top layer: it covers the page it
 	// slides over, while the status bar and the floating back button stay drawn
@@ -6567,7 +6549,6 @@ void player_sheet_close(bool animate) {
 	sheet_open = false;
 	back_btn_player_ink_inset(0); // the chevron back in the middle of its slot
 	back_btn_player_mode(false);
-	lyrics_screen_hold_update();
 	topbar_set_hidden(false);
 	// The tab does not travel with the page: coming back to a player with a
 	// panel hanging open is not what leaving it looked like.

@@ -853,6 +853,7 @@ static void card_databases_detach(void) {
 	library_close();
 	audiobookdb_close();
 	geniusdb_close();
+	radio_store_close();
 	printf("storage: card databases closed for removal\n");
 }
 
@@ -875,6 +876,16 @@ static void card_databases_attach(const char *root) {
 	audiobookdb_open(path);
 	snprintf(path, sizeof(path), "%.*s/.local/genius.db", room, root);
 	geniusdb_open(path);
+
+	// Radio favourites and recents follow the card across a hot swap too. If
+	// the replacement is read-only, keep them usable for this session in /tmp,
+	// just as the startup path does.
+	const char *radio_root = root;
+	if (!storage_sd_writable()) {
+		radio_root = "/tmp";
+		mkdir("/tmp/.local", 0755);
+	}
+	radio_store_open(radio_root);
 
 	// The card may have been written somewhere else while it was out: looked
 	// over in the background, as soon as the index is open.
