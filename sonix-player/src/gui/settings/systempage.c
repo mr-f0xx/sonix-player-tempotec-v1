@@ -402,7 +402,7 @@ static void build_sysinfo_page(gui_config_t *cfg) {
 	const char *os = sysinfo_os_version();
 	const char *build = sysinfo_build_version();
 	char os_display[128];
-	// The V1 release channel is stored as "beta" in system-info.json.
+	// The V1 release channel is stored in system-info.json.
 	snprintf(os_display, sizeof(os_display), "%s", os);
 	lv_label_set_text(os_value, os_display[0] ? os_display : "\xE2\x80\x94"); // em dash
 	easteregg_attach(os_row);
