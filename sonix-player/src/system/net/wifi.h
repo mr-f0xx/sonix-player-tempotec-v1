@@ -108,6 +108,12 @@ bool wifi_interface_address(char *out, size_t size);
 // transfer's throughput. Costs a few seconds of lag on the signal bars.
 void wifi_set_status_poll_slow(bool slow);
 
+// Tells the worker a Bluetooth stream is up. While it is, the status poll is
+// kept at the slow period and the RSSI query is skipped: an associated radio
+// shares the antenna with the Bluetooth module, and the player's own polling
+// should not be added to what that already does to the stream.
+void wifi_set_bluetooth_streaming(bool streaming);
+
 // Kicks a scan. Results land in the list a few seconds later; the page watches
 // wifi_networks_serial() to know when to redraw.
 void wifi_scan_start(void);

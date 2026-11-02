@@ -289,6 +289,28 @@ int main(void) {
 	log = slurp(log_path);
 	assert(log_find(log, "add_network") < 0 && log_find(log, "set_network") < 0 && log_find(log, "select_network") < 0);
 
+	/* A job ends in a status read, and an associated radio is asked for its
+	 * signal then. While a Bluetooth stream is up that question is not asked --
+	 * it makes the driver read the link from the chip, on an antenna the stream
+	 * shares -- and it is asked again once the stream ends. */
+	wifi_set_bluetooth_streaming(false);
+	clear_log();
+	wifi_connect("VisibleNet", NULL);
+	assert(wait_op(ssid, sizeof(ssid)) == WIFI_OP_OK);
+	nanosleep(&settle, NULL);
+	log = slurp(log_path);
+	assert(log_find(log, "status|") >= 0 && log_find(log, "signal_poll") >= 0);
+
+	wifi_set_bluetooth_streaming(true);
+	clear_log();
+	wifi_connect("VisibleNet", NULL);
+	assert(wait_op(ssid, sizeof(ssid)) == WIFI_OP_OK);
+	nanosleep(&settle, NULL);
+	log = slurp(log_path);
+	assert(log_find(log, "status|") >= 0);
+	assert(log_find(log, "signal_poll") < 0);
+	wifi_set_bluetooth_streaming(false);
+
 	printf("PASS wifi join (scan_ssid for hidden networks only; a saved network the scan "
 		   "reports as open gets key_mgmt=NONE, a secured or out-of-range one keeps its entry)\n");
 	return 0;

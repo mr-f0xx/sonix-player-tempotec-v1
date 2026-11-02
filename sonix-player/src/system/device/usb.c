@@ -262,6 +262,13 @@ static void typec_force_sink(void) {
 		return;
 	}
 
+	// Nor while something that may be a DAC is still coming up on the port: a
+	// dongle powered from this port spends its first seconds starting, and a
+	// sink write now takes its power away with the host role.
+	if (usbaudio_handover_pending()) {
+		return;
+	}
+
 	for (int port = 0; port < 4; port++) {
 		char path[64];
 		snprintf(path, sizeof(path), "/sys/class/typec/port%d/port_type", port);

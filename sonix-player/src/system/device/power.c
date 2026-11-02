@@ -2215,6 +2215,10 @@ static void power_timer_cb(lv_timer_t *timer) {
 	//           and the milliwatts are only spent while it lasts.
 	panel_hold_tick(now);
 
+	// 4a-bis-1b. the Wi-Fi worker told whether a Bluetooth stream is up, so its
+	//            polling stays out of the stream's way (see wifi.c).
+	wifi_set_bluetooth_streaming(bluetooth_audio_active());
+
 	// 4a-bis-2. the radios, a minute after the screen goes dark
 	park_radios_if_idle(now);
 

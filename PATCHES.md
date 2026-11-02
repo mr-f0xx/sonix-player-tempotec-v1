@@ -2573,3 +2573,63 @@ format gate against the DSP engine, including the DSD no-op; the quickpanel
 layout suite also checks that DAC no longer blocks the Control Centre while
 file-transfer and Bluetooth-receiver modes remain blocked. The tests do not
 replace an on-device touch and listening check.
+
+## Bluetooth drop-outs with Wi-Fi joined, and a USB-C DAC that was never found
+
+Two reports from one test session on a V1. Neither could be reproduced here --
+there is no board in this environment -- and the log that goes with them was not
+attached, so both changes below are reasoned from the code and the description,
+and both need a listening / plug-in check on the device.
+
+### Bluetooth stutters only while Wi-Fi is *associated*
+
+The session: Wi-Fi joined and Bluetooth streaming, drop-outs; Wi-Fi on but not
+joined, clean; Wi-Fi off, clean. The lock-screen blip in the same session is
+issue #188, already handled by the held panel.
+
+The radio and the Bluetooth module share an antenna, and an associated link is
+traffic the player cannot switch off. What the player *adds* to it can go, and
+there are two such things that exist only while the link is up:
+
+- the status poll, a `wpa_cli` fork every two seconds with the screen on -- and
+  a fork copies the player's page tables on a single core, next to the thread
+  that feeds the encoder;
+- `wpa_cli signal_poll`, which only runs while associated and makes the driver
+  read the link's statistics from the chip, purely to move the signal bars.
+
+While an A2DP link is up (`bluetooth_audio_active()`, copied to the Wi-Fi worker
+from the power tick through `wifi_set_bluetooth_streaming()`), the poll runs at
+the standby period whatever the screen is doing, and `signal_poll` is not asked;
+the bars keep their last reading until the stream ends. `make -C sonix-player/tests wifi`
+checks that `signal_poll` is asked normally and not asked while streaming.
+
+If the drop-outs survive this, they are the radios themselves and the next thing
+to try is a 5 GHz access point or a driver-level coexistence setting, neither of
+which is in this tree.
+
+### USB-C: the JCally dongle is not found, the RME ADI-2 DAC is
+
+Both are class-compliant and the JCally works with the stock firmware on the same
+kernel, so the card appears when the cable is left alone: what differs is how
+long each takes to appear. The RME has its own supply and is on the bus within a
+second of the cable going in. The JCally is powered *from* the port: the host
+role has to come up, VBUS has to rise, and the dongle then boots before the first
+USB reset. `arbitrate_port()` gave anything attached that was not yet a sound
+card `HANDOVER_SECS` (3 s) before writing `sink` -- the answer for a phone that
+will never become one -- and writing `sink` removes the host role, and with it
+the dongle's power, until the cable is pulled.
+
+- When nothing at all has enumerated on the host bus *and this player is the one
+  supplying the port* (Type-C `power_role` is `[source]`; on the R1 the ID line
+  reads host) the wait is `POWERUP_SECS` (10 s). Something that has enumerated
+  and is not audio, or a computer or charger powering the player, keeps the 3 s.
+  A phone that never enumerates is handed the host role up to seven seconds later
+  than before.
+- `usb.c` no longer writes `sink` for its own gadget rebuilds while that wait is
+  running (`usbaudio_handover_pending()`).
+- The log now says what the port looked like when something attached and when
+  the port was given up on: `usbaudio: something attached: port_type ...,
+  power_role ..., data_role ...` followed by every device on the host bus with
+  its vendor:product, name and speed. If a JCally still is not found, that block
+  and the `kernel:` lines around it say whether it enumerated, whether it got
+  as far as an audio interface, and whether `snd-usb-audio` then refused it.
