@@ -3,6 +3,7 @@
 #include "usbdac.h"
 
 #include "src/system/audio/audio.h"
+#include "src/system/audio/eq.h"
 #include "src/system/core/config.h"
 #include "src/system/core/lang.h"
 #include "src/system/device/power.h"
@@ -455,6 +456,15 @@ static bool wait_for_node(void) {
 	return access(UAC_NODE, F_OK) == 0;
 }
 
+// The USB host supplies PCM, so it needs the same software equaliser as a
+// decoded track. DSD is a bitstream, not PCM: passing those words through the
+// filters would corrupt it, so it stays byte-for-byte untouched.
+static void process_usb_dac_audio(int32_t *frames, int frame_count, int sample_rate, bool dsd) {
+	if (!dsd) {
+		eq_process_s32(frames, frame_count, 2, sample_rate);
+	}
+}
+
 static void *audio_main(void *arg) {
 	(void)arg;
 
@@ -579,7 +589,11 @@ static void *audio_main(void *arg) {
 
 		// Eight bytes to a frame, and audio_external_write() counts frames.
 		if (output_open) {
-			audio_external_write(buffer, (int)(got / 8));
+			int frame_count = (int)(got / 8);
+			if (frame_count > 0) {
+				process_usb_dac_audio((int32_t *)buffer, frame_count, fmt.rate, dsd);
+				audio_external_write(buffer, frame_count);
+			}
 		}
 	}
 

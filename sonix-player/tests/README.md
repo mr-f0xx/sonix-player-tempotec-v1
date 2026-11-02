@@ -7,6 +7,7 @@ make -C sonix-player/tests test
 make -C sonix-player/tests sanitize
 make -C sonix-player/tests swvolume
 make -C sonix-player/tests eq
+make -C sonix-player/tests usbdac-eq
 make -C sonix-player/tests peq-ui
 make -C sonix-player/tests quickpanel-layout
 make -C sonix-player/tests calculator
@@ -88,6 +89,12 @@ including their enable states and preamps; scoped preset import/export/reset;
 legacy `[peq]` migration; and unchanged graphic EQ/MSEB when PEQ changes.
 The config store is a temporary file; nothing else is stubbed.
 
+`make -C sonix-player/tests usbdac-eq` includes the production USB DAC input
+handler and links the real DSP engine. It checks that signed 32-bit PCM changes
+with GEQ, PEQ or MSEB enabled, off-state PCM is unchanged, and DSD words remain
+bit-for-bit intact with all three effects enabled. It builds no gadget and
+opens no ALSA device.
+
 `make -C sonix-player/tests peq-ui` links the real PEQ page and DSP engine to
 LVGL's headless renderer. It checks the profile pills at 240×320 in all eleven
 languages and five themes, selection and back-drag guarding, refresh of an open
@@ -96,11 +103,12 @@ AutoEq browser are stubbed.
 
 `make -C sonix-player/tests quickpanel-layout` uses the production Control
 Centre list parser, accessors and move operations with headless LVGL. It checks
-that the new PEQ profile control does not displace existing defaults, fills an
-empty place in a saved v4 layout, waits in Settings when the grid is full, and
-keeps every control when moved into the first eight and reloaded. Unrelated
-playback/radio handlers are removed by linker section GC; no sheet is built.
-The full `ui` target includes both PEQ-related suites.
+that DAC mode no longer blocks the sheet while Wi-Fi transfer and Bluetooth
+receiver mode still do, and that the PEQ profile control does not displace
+existing defaults, fills an empty place in a saved v4 layout, waits in Settings
+when the grid is full, and survives a move into the first eight and a reload.
+Unrelated playback/radio handlers are removed by linker section GC; no sheet is
+built. The full `ui` target includes both PEQ-related suites.
 
 ## Wi-Fi hidden networks
 

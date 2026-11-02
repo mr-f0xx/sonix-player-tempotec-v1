@@ -55,7 +55,10 @@
   compensation from 0 to 6 dB.
 - **Line out** - drives the jack at a fixed level for an amplifier, refuses
   volume changes while on, and puts your level back on the way out.
-- **USB DAC** - the player becomes a USB sound card, 32 kHz to 384 kHz.
+- **USB DAC** - the player becomes a USB sound card, 32 kHz to 384 kHz. The
+  Control Centre remains available for EQ, PEQ, MSEB, gain and output controls;
+  the graphic EQ, PEQ and MSEB process incoming PCM, while DSD passes through
+  untouched.
 - **USB audio out** - a DAC or USB-C headphones driven with the player as host.
 - **In-line remote** - the three-button cable remote: one click play/pause, two
   next, three previous.
