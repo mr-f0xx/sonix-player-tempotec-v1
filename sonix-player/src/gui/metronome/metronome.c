@@ -138,8 +138,10 @@ static void paint(void) {
 	paint_beats();
 	paint_transport();
 	// Subtle outlines give the two sections definition even on OLED and light
-	// palettes, without hard-coding a color for any particular theme.
-	lv_obj_set_style_border_color(tempo_card, theme()->accent, 0);
+	// palettes. Both cards wear the same quiet outline: an accent border
+	// competes with the accent-coloured Start button and looks loud on the
+	// bright palettes, so neither card wears one.
+	lv_obj_set_style_border_color(tempo_card, theme()->text_secondary, 0);
 	lv_obj_set_style_border_color(beats_card, theme()->text_secondary, 0);
 	if (slider) {
 		lv_obj_set_style_bg_color(slider, theme()->accent, LV_PART_INDICATOR);
@@ -425,6 +427,8 @@ static lv_obj_t *make_pill(lv_obj_t *parent, const char *text, lv_event_cb_t cb,
 	// ones beside it.
 	lv_obj_set_style_min_width(btn, 0, 0);
 	lv_obj_add_event_cb(btn, cb, LV_EVENT_CLICKED, user_data);
+	// A pill under a finger answers like every other button in the interface.
+	lv_obj_add_style(btn, &theme_style_card_pressed, LV_STATE_PRESSED);
 
 	lv_obj_t *label = lv_label_create(btn);
 	lv_label_set_text(label, text);
