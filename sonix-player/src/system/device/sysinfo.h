@@ -18,7 +18,7 @@
 //     {
 //         "device-name": "TempoTec V1",
 //         "dac-info": "Dual Cirrus Logic CS43131",
-//         "OS_version": "beta",
+//         "OS_version": "stable",
 //         "Build_version": "182",
 //         "base_build_version": "1.2",
 //         "ota-repo": "mr-f0xx/sonix-player-tempotec-v1"

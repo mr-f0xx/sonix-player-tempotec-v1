@@ -63,7 +63,7 @@ class BaseBuildTest(unittest.TestCase):
                 data = json.loads(info.read_text())
                 self.assertEqual(data["base_build_version"], stamp)
                 self.assertEqual(data["build_version"], "")
-                self.assertEqual(data["OS_version"], "beta")
+                self.assertEqual(data["OS_version"], "stable")
 
 
 class StockReleaseTest(unittest.TestCase):
