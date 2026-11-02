@@ -128,6 +128,15 @@ $(BUILD)/test_wifi: $(WIFI_SRC) $(ROOT)/src/system/net/wifi.h \
 	@mkdir -p $(BUILD)
 	$(CC) $(CPPFLAGS) -Istubs $(CFLAGS) -o $@ test_wifi.c $(ROOT)/src/system/net/wifi.c $(LDFLAGS) $(LDLIBS)
 
+# The AFH map that keeps Bluetooth's hopping off the Wi-Fi channel. Plain C.
+.PHONY: btafh
+btafh: $(BUILD)/test_btafh
+	$(BUILD)/test_btafh
+
+$(BUILD)/test_btafh: test_btafh.c $(ROOT)/src/system/bluetooth/btafh.c $(ROOT)/src/system/bluetooth/btafh.h
+	@mkdir -p $(BUILD)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ test_btafh.c $(ROOT)/src/system/bluetooth/btafh.c $(LDFLAGS) $(LDLIBS)
+
 # The Calculator page's arithmetic and the notes folder's rules: the two new
 # pages' plain-C halves, with no LVGL and no screen. The calculator model and
 # the notes store (with the shared text layer under it) are linked as they are

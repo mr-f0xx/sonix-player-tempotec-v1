@@ -84,7 +84,7 @@ static const char FAKE_WPA_CLI[] =
 	"    if [ -f \"$FAKE_WPA_SAVED\" ]; then printf '0\\tSavedHidden\\tany\\t[CURRENT]\\n'\n"
 	"    else printf 'network id\\tssid\\tbssid\\tflags\\n'; fi;;\n"
 	"  add_network) printf '0\\n';;\n"
-	"  status) printf 'wpa_state=COMPLETED\\nssid=Whatever\\nip_address=192.168.1.50\\naddress=aa:bb:cc:dd:ee:ff\\n';;\n"
+	"  status) printf 'wpa_state=COMPLETED\\nssid=Whatever\\nfreq=2437\\nip_address=192.168.1.50\\naddress=aa:bb:cc:dd:ee:ff\\n';;\n"
 	"  signal_poll) printf 'RSSI=-52\\n';;\n"
 	"  scan_results)\n"
 	"    printf 'bssid / frequency / signal / flags / ssid\\n'\n"

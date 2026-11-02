@@ -48,6 +48,7 @@ typedef struct {
 	char mac[24];
 	int signal; // dBm of the live link, 0 when unknown
 	int bars;	// 0..3
+	int freq_mhz; // the channel of the live link, 0 when unknown
 } wifi_status_t;
 
 // What the last operation the user asked for is doing. The pages show a

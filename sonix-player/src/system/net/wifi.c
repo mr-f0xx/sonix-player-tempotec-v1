@@ -1349,6 +1349,12 @@ static void poll_status(void) {
 	ssid_unescape(status.ssid); // wpa_supplicant escapes this one too
 	status_field(buf, "ip_address", status.ip, sizeof(status.ip));
 	status_field(buf, "address", status.mac, sizeof(status.mac));
+	if (status.state == WIFI_STATE_CONNECTED) {
+		char freq[16];
+		if (status_field(buf, "freq", freq, sizeof(freq))) {
+			status.freq_mhz = atoi(freq);
+		}
+	}
 
 	if (status.state == WIFI_STATE_CONNECTED) {
 		static int last_signal;

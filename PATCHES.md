@@ -2587,25 +2587,38 @@ The session: Wi-Fi joined and Bluetooth streaming, drop-outs; Wi-Fi on but not
 joined, clean; Wi-Fi off, clean. The lock-screen blip in the same session is
 issue #188, already handled by the held panel.
 
-The radio and the Bluetooth module share an antenna, and an associated link is
-traffic the player cannot switch off. What the player *adds* to it can go, and
-there are two such things that exist only while the link is up:
+What the Bluetooth log of that session (14:56-15:08) shows: the player was the
+**receiver** (an iPad streaming AAC 44.1 kHz to it, player is the piconet master),
+and the loss is on the air, upstream of anything the player does with the audio.
+`bluealsa: Missing RTP packets` appears ten times in the two minutes with Wi-Fi
+joined (14:59:27-15:01:28), and not once in the two clean stretches that follow
+(15:01:45-15:03:06, 15:03:19-15:05:00). The events do not fall on a two-second
+beat, so the status poll is not what drops them. The controller is a Broadcom
+BCM4343A1 -- the same chip carries the Wi-Fi radio, with one antenna -- and it
+reports that it supports Set AFH Host Channel Classification.
 
-- the status poll, a `wpa_cli` fork every two seconds with the screen on -- and
-  a fork copies the player's page tables on a single core, next to the thread
-  that feeds the encoder;
-- `wpa_cli signal_poll`, which only runs while associated and makes the driver
-  read the link's statistics from the chip, purely to move the signal bars.
+So the change that matters is `btafh.c`: while an A2DP link is up and Wi-Fi is
+joined on a 2.4 GHz channel, the power tick (`bt_afh_follow_wifi()`) sends that
+HCI command so the Bluetooth channels under the access point's channel (centre
++-12 MHz, `freq=` from `wpa_cli status`) are left out of the hop set. It is
+resent every fifteen seconds while in force (a stack restart makes the controller
+forget it) and cleared when the link or the Wi-Fi join goes. A 5 GHz network or an
+unknown channel masks nothing. Only the piconet master can classify channels: if
+the far end is the master the controller answers "command disallowed" and nothing
+changes -- the Command Complete for it is in the next Bluetooth log. `make -C
+sonix-player/tests btafh` checks the map.
 
-While an A2DP link is up (`bluetooth_audio_active()`, copied to the Wi-Fi worker
-from the power tick through `wifi_set_bluetooth_streaming()`), the poll runs at
-the standby period whatever the screen is doing, and `signal_poll` is not asked;
-the bars keep their last reading until the stream ends. `make -C sonix-player/tests wifi`
-checks that `signal_poll` is asked normally and not asked while streaming.
+Alongside it, the smaller change from the first pass stays: with an A2DP link up
+the Wi-Fi worker polls at the standby period whatever the screen is doing and does
+not ask for `signal_poll` (the driver reading the link from the chip, only to move
+the bars). It removes the player's own traffic from the link and cannot hurt;
+`make -C sonix-player/tests wifi` checks it. The log does not show it to be the
+cause.
 
-If the drop-outs survive this, they are the radios themselves and the next thing
-to try is a 5 GHz access point or a driver-level coexistence setting, neither of
-which is in this tree.
+Neither is verified on a board. Check: stream from the phone with Wi-Fi joined and
+count `Missing RTP packets` in a Bluetooth log over a couple of minutes against the
+same song with Wi-Fi off; the log also carries the `bluetooth: AFH:` line and the
+controller's reply to the command.
 
 ### USB-C: the JCally dongle is not found, the RME ADI-2 DAC is
 
