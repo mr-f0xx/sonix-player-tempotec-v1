@@ -167,13 +167,28 @@ static void gain_toggle_cb(lv_event_t *e) {
 
 // ---------------------------------------------------------------------------
 // MSEB: the stock player's MageSound tuning (see eq.c for the engine and the
-// mapping); nine character sliders, -10..+10 around flat.
+// mapping); ten character sliders around flat.
 // ---------------------------------------------------------------------------
 
 static lv_obj_t *mseb_screen;
 static lv_obj_t *mseb_enable_switch;
 static lv_obj_t *mseb_sliders[MSEB_BANDS];
 static lv_obj_t *mseb_values[MSEB_BANDS];
+
+// Negative and positive ends, in the same order as mseb_band_name. The
+// vocal and instrument treble controls affect sibilance/brightness.
+static const char *const mseb_ends[MSEB_BANDS][2] = {
+	{"mseb_cool_bright", "mseb_warm_dark"},
+	{"mseb_light", "mseb_deep"},
+	{"mseb_fast", "mseb_thumpy"},
+	{"mseb_crisp", "mseb_thick"},
+	{"mseb_recessed", "mseb_forward"},
+	{"mseb_detoxed", "mseb_intoxicating"},
+	{"mseb_soft", "mseb_crisp"},
+	{"mseb_soft", "mseb_crisp"},
+	{"mseb_soft", "mseb_crisp"},
+	{"mseb_soft", "mseb_crisp"},
+};
 
 static lv_obj_t *mseb_reset_btn;
 static lv_obj_t *eq_reset_btn;
@@ -224,6 +239,46 @@ static void mseb_slider_cb(lv_event_t *e) {
 	int value = (int)lv_slider_get_value(mseb_sliders[band]);
 	mseb_set_value(band, value);
 	lv_label_set_text_fmt(mseb_values[band], "%+d", value);
+}
+
+// LVGL counts short clicks even after a slider drag, and its click streak is
+// shared across objects. Require two stationary taps on the same knob too.
+static lv_point_t mseb_press_point;
+static bool mseb_tap_moved;
+static int mseb_last_tap_band = -1;
+static bool mseb_double_tap_valid;
+
+static void mseb_tap_cb(lv_event_t *e) {
+	int band = (int)(intptr_t)lv_event_get_user_data(e);
+	lv_event_code_t code = lv_event_get_code(e);
+	lv_indev_t *indev = lv_indev_active();
+	if (!indev || band < 0 || band >= MSEB_BANDS || !mseb_sliders[band] ||
+		lv_obj_has_state(mseb_sliders[band], LV_STATE_DISABLED)) {
+		return;
+	}
+	if (code == LV_EVENT_PRESSED) {
+		lv_indev_get_point(indev, &mseb_press_point);
+		mseb_tap_moved = false;
+	} else if (code == LV_EVENT_PRESSING || code == LV_EVENT_RELEASED) {
+		lv_point_t point;
+		lv_indev_get_point(indev, &point);
+		int dx = point.x - mseb_press_point.x, dy = point.y - mseb_press_point.y;
+		if (dx * dx + dy * dy > 64) {
+			mseb_tap_moved = true;
+			mseb_last_tap_band = -1;
+		}
+	} else if (code == LV_EVENT_PRESS_LOST) {
+		mseb_last_tap_band = -1;
+	} else if (code == LV_EVENT_SHORT_CLICKED) {
+		mseb_double_tap_valid = !mseb_tap_moved && mseb_last_tap_band == band;
+		mseb_last_tap_band = mseb_tap_moved ? -1 : band;
+	} else if (code == LV_EVENT_DOUBLE_CLICKED && mseb_double_tap_valid) {
+		lv_slider_set_value(mseb_sliders[band], 0, LV_ANIM_OFF);
+		mseb_set_value(band, 0);
+		lv_label_set_text_fmt(mseb_values[band], "%+d", 0);
+		mseb_save();
+		mseb_last_tap_band = -1;
+	}
 }
 
 static void mseb_released_cb(lv_event_t *e) {
@@ -864,7 +919,7 @@ static void build_mseb_page(gui_config_t *cfg) {
 	for (int i = 0; i < MSEB_BANDS; i++) {
 		lv_obj_t *card = lv_obj_create(container);
 		lv_obj_set_width(card, lv_pct(100));
-		lv_obj_set_height(card, bp_pick(70, 104));
+		lv_obj_set_height(card, bp_pick(100, 138));
 		lv_obj_add_style(card, &theme_style_card, 0);
 		lv_obj_set_style_radius(card, bp_pick(bp_tile_radius(), 12), 0);
 		lv_obj_set_style_border_width(card, 0, 0);
@@ -889,7 +944,7 @@ static void build_mseb_page(gui_config_t *cfg) {
 		lv_obj_t *slider = lv_slider_create(card);
 		lv_obj_set_width(slider, bp_pick(lv_pct(92), lv_pct(96)));
 		lv_obj_set_height(slider, 10);
-		lv_obj_align(slider, LV_ALIGN_BOTTOM_MID, 0, bp_pick(-6, -10));
+		lv_obj_align(slider, LV_ALIGN_BOTTOM_MID, 0, bp_pick(-27, -34));
 		lv_slider_set_range(slider, -mseb_get_range(), mseb_get_range());
 		// MSEB sliders are bipolar: zero sits in the middle and the coloured
 		// bar grows from there, forwards for positives and backwards for
@@ -921,6 +976,24 @@ static void build_mseb_page(gui_config_t *cfg) {
 		lv_obj_set_ext_click_area(slider, 18);
 		lv_obj_add_event_cb(slider, mseb_slider_cb, LV_EVENT_VALUE_CHANGED, (void *)(intptr_t)i);
 		lv_obj_add_event_cb(slider, mseb_released_cb, LV_EVENT_RELEASED, NULL);
+		lv_obj_add_event_cb(slider, mseb_tap_cb, LV_EVENT_PRESSED, (void *)(intptr_t)i);
+		lv_obj_add_event_cb(slider, mseb_tap_cb, LV_EVENT_PRESSING, (void *)(intptr_t)i);
+		lv_obj_add_event_cb(slider, mseb_tap_cb, LV_EVENT_RELEASED, (void *)(intptr_t)i);
+		lv_obj_add_event_cb(slider, mseb_tap_cb, LV_EVENT_PRESS_LOST, (void *)(intptr_t)i);
+		lv_obj_add_event_cb(slider, mseb_tap_cb, LV_EVENT_SHORT_CLICKED, (void *)(intptr_t)i);
+		lv_obj_add_event_cb(slider, mseb_tap_cb, LV_EVENT_DOUBLE_CLICKED, (void *)(intptr_t)i);
+
+		// Keep the ends below the track and out of the knob's drag area.
+		for (int end = 0; end < 2; end++) {
+			lv_obj_t *hint = lv_label_create(card);
+			lv_label_set_text(hint, tr(mseb_ends[i][end]));
+			lv_obj_set_width(hint, lv_pct(49));
+			lv_label_set_long_mode(hint, LV_LABEL_LONG_CLIP);
+			lv_obj_set_style_text_align(hint, end == 0 ? LV_TEXT_ALIGN_LEFT : LV_TEXT_ALIGN_RIGHT, 0);
+			lv_obj_add_style(hint, &theme_style_text_dim, 0);
+			lv_obj_set_style_text_font(hint, bp_is_tempotec_v1() ? &font_ui_14 : &font_ui_18, 0);
+			lv_obj_align(hint, end == 0 ? LV_ALIGN_BOTTOM_LEFT : LV_ALIGN_BOTTOM_RIGHT, 0, 0);
+		}
 
 		mseb_sliders[i] = slider;
 	}
