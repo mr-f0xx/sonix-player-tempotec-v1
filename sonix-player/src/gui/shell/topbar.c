@@ -781,7 +781,6 @@ static void timer_update_cb(lv_timer_t *timer) {
 	// is what nobody is standing over -- the playback colour, Wi-Fi transfer,
 	// DAC mode.
 	led_update_playback(state.status == AUDIO_STATUS_PLAYING, state.stream_sample_rate,
-						audio_stream_is_lossy(), audio_get_stream_bits(),
 						!state.live && podcastcache_is_episode(state.current_file),
 						!state.live && audio_get_dsd_multiple() > 0);
 	// Wi-Fi transfer takes the same route: its pattern stays lit, screen off

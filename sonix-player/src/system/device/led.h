@@ -40,12 +40,12 @@
 //
 //   charging red > charged green > playback colour > idle aqua
 //
-// The playback colour is the quality tier, not the bare sample rate, so an MP3
-// and a FLAC of the same rate differ:
+// The playback colour follows the stock sample-rate bands, regardless of the
+// codec or bit depth:
 //
-//   lossy (mp3, aac, ogg, opus)  yellow
-//   CD (lossless, 16-bit <=48k)  aqua
-//   Hi-Fi (lossless above that)  orange
+//   PCM at or below 48 kHz       yellow
+//   PCM above 48 up to 192 kHz   aqua
+//   PCM above 192 kHz            orange
 //   DSD                          white
 //
 // The R1 has no RGB controller: leds_pwm_add.ko registers two plain LEDs,
@@ -84,14 +84,12 @@ void led_set_charging(bool charging);
 void led_set_on_charger(bool present);
 
 // Picks the state for what is playing (shown when not charging). `playing`
-// false or rate 0 falls back to the idle aqua. The colour is the quality tier
-// -- lossy, CD, Hi-Fi or DSD -- so an MP3 and a FLAC of the same rate differ:
-// `lossy` is audio_stream_is_lossy(), `bits` the source depth (0 while unknown)
-// and `dsd` true for a DSD source. A DSD file goes to the DAC over DoP, at a
-// PCM carrier rate of 176.4 kHz and up that would otherwise read as hi-res PCM.
-// `podcast` true paints the purple instead. Cheap to call repeatedly: only
-// writes on change.
-void led_update_playback(bool playing, int sample_rate, bool lossy, int bits, bool podcast, bool dsd);
+// false or rate 0 falls back to the idle aqua. PCM colour follows the stock
+// rate bands: <=48 kHz yellow, >48 through 192 kHz aqua, >192 kHz orange.
+// `dsd` true paints a DSD source white, regardless of its DoP carrier rate;
+// `podcast` true paints purple instead. Cheap to call repeatedly: only writes
+// on change.
+void led_update_playback(bool playing, int sample_rate, bool podcast, bool dsd);
 
 // Wi-Fi transfer active: a blinking blue. Stays lit with the screen off, since
 // it indicates the server is running, and overrides the darken-in-standby
