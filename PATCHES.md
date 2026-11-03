@@ -1465,6 +1465,12 @@ or the shape of the settings file beyond its own section.
 
 ## The pet, second pass: your animal, your name
 
+> **Superseded.** The three animals, the chooser that picked between them and
+> everything that drew them -- this pass, *drawn again*, *drawn as itself*,
+> *three of it* and the animal parts of *on a 240 MHz budget* -- were replaced by
+> one Pikachu; see *The pet, one Pikachu* below. They stay as the record of how
+> the first animals were built, and why.
+
 The first pet was a fixed creature called Momo, in an egg for its first half
 hour, drawn on a page of outlined cards. Three of those were the user's first
 three remarks: they wanted to pick the animal, they wanted to name it, and they
@@ -1908,6 +1914,9 @@ What a sprite sheet *would* buy is detail -- outlines that curve, a face that is
 drawn rather than composed. If that is what is wanted, it is an art problem with
 an art budget, not an optimisation, and it should be decided as one.
 
+> **Revisited.** With one animal the multiplication above is gone: see *What it
+> costs* under *The pet, one Pikachu*.
+
 ### Turned down: sampling the player every 10-30 seconds
 
 The watcher already does no polling of its own: it is one LVGL timer at 1 Hz
@@ -1958,6 +1967,9 @@ The file has a shape version now. `pet_save()` writes `state_version = 2`;
 two -- three was a dragon, four was a fish -- and a dragon's owner is offered the
 cat rather than a fish. The test sets the key to 1 by hand and asserts all three
 readings, because this is the one part of the change with no way back.
+
+> Since removed along with the species itself: nothing reads or writes
+> `state_version` or `species` any more (see *One animal, so no species*).
 
 ### Grey
 
@@ -2241,6 +2253,220 @@ the page already draws. The page asks for the hour every second and
 animal has changed -- so a card with nothing falling costs nothing at all.
 
 Fourteen new strings, in eleven languages.
+
+## The pet, one Pikachu
+
+The pet was a choice of three animals, each assembled out of discs, bars and
+triangles. It is one animal now, and that animal is a Pikachu, drawn as the pixel
+art it was taken from: a front-facing figure on a 37 x 40 grid in six colours,
+with a zig-zag tail on the left and a tall black-tipped ear at the top right. The
+cat, the dog and the fish, the chooser that picked between them, the aquarium, the
+cat's room, the dog's yard and every shape they were built from are gone. In their
+place the card behind the animal is a small Pokémon-style route -- sky, hills,
+trees, tall grass and a Poké Ball -- and the More menu's tile is the Pikachu's head.
+
+### The picture, exactly
+
+`src/gui/pet/pikachu.c` holds the picture as forty rows of thirty-seven letters --
+`K` ink, `Y` yellow, `O` orange, `R` red, `N` brown, `W` white, `_` nothing -- read
+off the source image cell by cell and checked against it pixel for pixel. It has
+one yellow and six colours in all (`pikachu.h`: ink `252923`, yellow `F4D601`,
+orange `F5901B`, red `F40202`, brown `82440A`, white `F4FBF3`). The background and
+the eight cells of gap in the tail are transparent, so the card shows through
+them, and the only white in it is the glint in each eye.
+
+The preprocessor expands the letters at compile time into two ARGB8888 arrays:
+`pikachu_2x` (74 x 80, two pixels a cell) and `pikachu_3x` (111 x 120, three),
+23,680 and 53,280 bytes -- 76,960 together, in read-only data and nothing in RAM.
+A hatchling is drawn from the first and everybody else from the second, so the
+same picture starts small and round and has room to stand up in later.
+
+It is two arrays, rather than one that is scaled, because LVGL's own scaler is not
+exact and exactness is the whole of pixel art. Measured: asked for double the size
+of the 37 x 40 picture it produced 73 x 78, and for triple, 109 x 117, resampled
+between the pixels in both. The page never scales the picture: it sets one of the
+two as an image and the image is blitted 1:1. `check_pet_picture()` in the page
+test holds the page to that. It compares every solid pixel of the real render, at
+both sizes, with the array it was made from, so a scaler creeping back in -- even
+one that asks for 250/256 -- fails the suite.
+
+### What is over it
+
+The face is the picture's and stays the picture's. What the pet feels and what it
+wears are cells drawn on the same grid by one more object, a plain child of the
+root with a draw callback (`gear_draw_cb`). A *stamp* is a few strings of letters
+in the picture's alphabet and the wardrobe's; a run of one letter is one
+`lv_draw_rect`; and the cells are as big as the picture's, two or three pixels, so
+a stamp lands on the picture the way a sticker lands on graph paper. Nothing is
+rotated, scaled or smoothed. What is stamped is decided when the animal is painted
+and the callback only draws that list. A stamp can have a second place on the
+animation's other frame, which is how the stars shift and the small heart floats.
+
+| state | drawn |
+|---|---|
+| asleep | shut eyes -- a black line with yellow above and below, which is the one mood that changes the picture itself, the glints going with the eyes -- and a "z z" over the ear |
+| sad | a blue sweat drop at the temple |
+| dizzy | three gold stars between the ears; two drift and one sits in the notch beside the far ear, clear of the wallet's note in the corner of the card |
+| blissful | a big heart and a small one that floats |
+| wardrobe | party hat, crown, headphones or scarf, one at a time |
+| genre | shades, a chain with a pendant, a studded collar, or a cup of coffee on the floor |
+
+The scarf owns the neck, so a chain or a collar gives way to it, and the shades sit
+under a hat. The hearts that pop over a tapped head and fill under a held finger are
+the shell's own heart, recoloured to the picture's red.
+
+The crown is seven cells wide where the hat is nine. At the grown size the wallet's
+note, in the corner of the card, stands over the right of the gap between the ears,
+and a crown nine wide covered a quarter of it; the third dizzy star sits in the notch
+beside the far ear for the same reason.
+
+Dropped on purpose: the volume faces (wide eyes past eighty per cent, a heavy lid
+between twenty and forty), the open mouth while listening, and the brows. Each is
+a different face, and the face is the thing that is meant to be exactly the
+picture. Listening still shows in the notes that drift up beside the animal and in
+the equalizer under it. `petwatch_volume()`, which only the volume faces read, went
+with them, and there is no arm to wave with, so the wave reaction shakes the
+animal a few pixels from side to side.
+
+### One animal, so no species
+
+`pet_species_t`, `pet_species()`, `pet_set_species()`, `pet_species_tag()`,
+`petwatch_set_species()` and the `[pet] species` key are gone, with the chooser's
+tiles and caption, the sheet that opened by itself on a pet nobody had chosen, and
+five language keys in all eleven language files (`pet_species`, `pet_species_cat`,
+`_dog`, `_fish` and `pet_choose_pet`). The sheet behind the pencil is the name row
+and nothing else, and the page opens straight onto the pet. The default name is
+now Pikachu rather than Momo -- one constant, `PET_DEFAULT_NAME` in `pet.h`, used
+by `pet_name()`, `pet_set_name()` and the page's first label -- and a name someone
+has already given their pet, Momo included, is theirs and stays.
+
+Nothing reads or writes `species` or `state_version` any more: the first said which
+animal and the second said how to renumber it. A settings file from an older build
+keeps both lines untouched -- the store keeps every key it loads and writes them
+back, in a table with room for three times what is used -- so a player who goes
+back to an older firmware finds its animal where it left it.
+
+The cat's rug, plant and yarn, the fish's tank, the dog's yard -- grass along the
+foot of the card, a darker strip under it and a picket fence at the side -- and the
+colours they used (`PET_WATER_*`, `PET_SAND*`, `PET_PEBBLE`, `PET_WEED*`,
+`PET_BUBBLE*`, `PET_CAT_*`, `PET_PLANT`, `PET_YARN`, `PET_GRASS*`, `PET_FENCE`,
+`PET_INK`, `PET_CHEEK`) are gone, and so is `PET_SCENE_PARTS`, the table of two
+dozen loose shapes the three of them were kept in. The first find was still called
+a bone in the code: `PET_DROP_BONE` is `PET_DROP_NOTE` now, as it has been drawn
+for a while, and its value is unchanged, so a shelf already filled keeps its count.
+
+### The route behind it
+
+The card behind the animal is a piece of a Pokémon game's overworld, in the same
+flat pixel style as the animal: a sky that comes up out of the card, two ranges of
+hills, a round tree and a pine, a field in three bands with tufts and three flowers,
+tall grass in front of it, and a platform under the feet where the shadow lies. It
+is **one object** (`scenery`, with a draw callback), 37 rows of three-pixel cells
+from the animal's line down to the line of words, drawn from the same kind of
+stamps as the overlay -- the cells are the picture's own size, so the route's
+pixels and the animal's are the same pixels. What the yard needed a dozen shapes
+for is one callback and some tables.
+
+What it shows is decided in one place, `scene_refresh()`, from three facts: the
+room worn, the hour, and the month.
+
+| when | sky | in it |
+|---|---|---|
+| a day from June to February | blue, four bands | a sun, two clouds |
+| the sunset room | violet to orange | a low orange sun, behind the hills |
+| after eight in the evening, or the night room | navy | a moon, stars (two of them twinkle) and, from eight to seven by the clock, a lit lamp |
+| March to May, by day | grey | a rain cloud, no sun, and the rain falling |
+
+The hills, the ground and the trees take a tint of the light they are in -- navy at
+night, orange at sunset, grey in the rain -- while the sun, the moon, the stars and
+the lamp keep their own colours, so a lamp is lit and a moon is bright. The dark of
+the evening is a wash under the scenery, over the card the name and the words are
+on, not over the route and not over the animal. The top six rows of the route fade
+from the card's own colour into the sky, which is why the same page sits as well on
+the Light theme's white card as on the black one and on Tokyo Night's blue.
+
+The tests read it back off the screen: a cell of sky, of the sun, of the grass and of
+the platform by day; a dark sky, a moon, no sun and a warm lamp at night; a grey sky
+and no sun in the rain; both rooms; and the same cells under the other four themes.
+Each of the three scenes has a snapshot (`-night`, `-spring`, `-sunset`), and so
+does each theme (`-light`, `-tokyo`, `-amber`, `-oled`).
+
+A redraw of any part of the band -- the animal's two frames, a falling flake --
+queues the whole route again: about three hundred small rectangles, whether or not
+the dirty area touches them, because a draw callback cannot see the dirty area
+(`lv_layer_t`'s clip is private) and so cannot skip what lies outside it; the
+renderer clips each one. That is negligible on the host and has not been measured
+on the device.
+
+### The Poké Ball
+
+The box in the corner is a Poké Ball now, on the grass in the same place: seven
+cells wide, a red top, a black band and a button. It is the same button -- a tap
+opens the fortune, the tap-along and the shelf -- and it says what the box said by
+colour: the button is white, and it is gold with a three-cell sparkle while
+something is in it, which is today's fortune not yet carried out, a find on the
+floor or the hour's game still to play. The find that turns up beside it is
+unchanged.
+
+### The More menu's tile
+
+The tile had a generic pet glyph. It is a Pikachu's head now, drawn by
+`tools/pet_icon.py` in the picture's own six colours (`assets/icons/pet.svg`) and put
+on the violet tile that Dark and Light show by `tools/make_more_tiles.py`, a little
+larger on it than a line glyph would be because the ears would be lost otherwise.
+The same drawing, as one white shape with the face cut out of it, is `icon_pet` in
+`peticon.c`, for the themes that show function glyphs. `icon_menu_pet_data` in
+`icons.c` was replaced in place -- `svg_to_lvgl.py` needs cairo and would rewrite the
+whole file for one picture -- with the new tile resampled to 112 pixels the way the
+old array was made from the old tile (checked: the old array equals that resample of
+the old `pet.png`). `screenshots/more.png` is a photograph of a device and still
+shows the old glyph.
+
+### What it costs
+
+| | before | after |
+|---|---|---|
+| the animal | 48 objects, about 6 KB of RAM | 4 objects: the picture, the overlay, the shadow and the sleeper's "z z" |
+| `petpage.c`, object code (with the route) | 60.8 KB | 38.4 KB |
+| `petpage.c`, static RAM | 6.8 KB | 3.5 KB |
+| `petpage.c`, source | 4,055 lines | 3,388 lines |
+| the pictures | none | 76,960 bytes of read-only data |
+
+(Host `-O2` build of the one file; the arm code is denser and the pictures are not.)
+Still one callback a second and two frames, no `lv_anim`, and nothing redrawn that
+has not changed.
+
+The earlier entry that turned down a pre-baked sprite sheet -- about a megabyte,
+for four species x four stages x two frames x five wardrobe states -- is made moot
+rather than contradicted. With one species the multiplication is gone: the stage is
+a size, the two frames are the root's own movement, and the wardrobe is drawn over
+the picture instead of being baked into it. What is baked is two pictures, and
+that is 75 KB.
+
+### Tests
+
+`test_tools_pages` no longer opens a chooser. The page opens onto the pet, the name
+sheet is hidden until the pencil is pressed, and `check_pet_picture()` holds the
+render to the stored picture at both sizes, under all five themes. Every mood, garment and accessory has a
+snapshot (`-sleeping`, `-sad`, `-dizzy`, `-blissful`, `-hat`, `-crown`, `-phones`,
+`-scarf`, `-scarf-chain`, `-adult` and `-name`, beside the ones that were there) and
+one cell that only it paints is read back off the screen by its place in the grid,
+so a stamp that drifts off the grid, or never appears, fails. `test_pet` loses its
+species tests and the migration's.
+
+All of the moods, garments and accessories are done twice, once as a hatchling and
+once as an adult (`-adult-sleeping`, `-adult-crown` and so on), because the grown
+animal is the one that reaches the wallet's note. The note's pixels are the only
+light grey in a window above the head, so the test records them from the plain
+adult and asserts that every mood and garment leaves each one as it was. (Put the
+nine-wide crown back and it stops there.)
+
+### What did not change
+
+Everything else about the pet -- what feeds it, the meters, the notes and the
+wardrobe's prices, the fortune, the tap-along and the shelf behind the ball, and the
+dizzy rule -- is as it was. The other More tiles' pictures, which is the rest of
+`icons.c`, are untouched, and so is `petlisten.c`.
 
 ## The charger, with the player off## The charger, with the player off
 

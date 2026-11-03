@@ -6,8 +6,12 @@ drawings use the same turned-back-tile stack as the metronome and the games, so
 the newest More destinations sit with the older ones instead of showing a bare
 white glyph or borrowing the File Manager's folder.
 
-The monochrome glyphs for function-glyph themes stay separate: icon_pet is in
-peticon.c, and icon_tag_manager is the pencil glyph in icons.c.
+The pet's glyph is not white like the others': it is the Pikachu's head in its
+own colours, drawn by tools/pet_icon.py into assets/icons/pet.svg, and it is a
+little larger on its tile than a line glyph is, because the ears would
+otherwise be lost. The monochrome glyphs for function-glyph themes stay
+separate: icon_pet is in peticon.c (from the same drawing), and
+icon_tag_manager is the pencil glyph in icons.c.
 """
 from pathlib import Path
 import sys
@@ -25,6 +29,11 @@ PALETTES = {
     "tag-manager": ((37, 145, 156), (124, 223, 220), (55, 181, 188)),
 }
 
+# How much of the front tile's side the glyph takes, where it is not the usual
+# 72 per cent: a head with two long ears wants room to stand up in.
+GLYPH_SHARES = {"pet": 0.86}
+DEFAULT_SHARE = tile.GLYPH_SHARE
+
 
 def main():
     for name, (back, top, bottom) in PALETTES.items():
@@ -33,6 +42,7 @@ def main():
         tile.FRONT_BOTTOM = bottom
         tile.SHADOW_COLOR = tuple(c // 4 for c in back) + (95,)
         tile.STROKE = 2.2
+        tile.GLYPH_SHARE = GLYPH_SHARES.get(name, DEFAULT_SHARE)
         tile.main(str(ICONS / f"{name}.svg"), str(ICONS / f"{name}.png"))
 
 

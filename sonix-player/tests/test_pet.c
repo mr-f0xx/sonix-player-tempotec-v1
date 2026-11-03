@@ -78,7 +78,6 @@ static void test_defaults(void) {
 	assert(st.day_genre_count == 0);
 	assert(st.day_album_count == 0);
 	assert(pet_stage(&st) == PET_STAGE_BABY);
-	assert(pet_species(&st) == PET_SPECIES_NONE);
 	assert(pet_hearts(&st) == 3); // 50 percent, rounded
 	assert(pet_mood(&st, T0) == PET_MOOD_HAPPY);
 }
@@ -609,7 +608,7 @@ static void test_the_box(void) {
 	}
 	assert(pet_drop_take(&st) == -1);
 	assert(kinds == (1 << PET_DROP_PENDING_MAX) - 1);
-	assert(st.found[PET_DROP_BONE] == 1);
+	assert(st.found[PET_DROP_NOTE] == 1);
 
 	// The treat game: one an hour, worth five, seven or ten -- and the hour
 	// that has been played is spent.
@@ -680,7 +679,6 @@ static void test_persistence(void) {
 	st.owned = (1 << PET_ITEM_PARTY_HAT) | (1 << PET_ITEM_ROOM_NIGHT);
 	st.wearing = PET_ITEM_PARTY_HAT;
 	st.room = 2;
-	st.species = PET_SPECIES_FISH;
 	int events = 0;
 	pet_note_track(&st, "Jazz", "Kind of Blue", &events);
 	pet_note_track(&st, "Rock", "Abbey Road", &events);
@@ -706,7 +704,6 @@ static void test_persistence(void) {
 	assert(loaded.owned == st.owned);
 	assert(loaded.wearing == st.wearing);
 	assert(loaded.room == st.room);
-	assert(loaded.species == PET_SPECIES_FISH);
 	assert(loaded.day == DAY0);
 	assert(loaded.day_genre_count == 2);
 	assert(loaded.day_album_count == 2);
@@ -746,46 +743,6 @@ static void test_persistence(void) {
 	assert(loaded.notes == 0);
 	assert(loaded.wearing == -1);
 	assert(loaded.room == 0);
-	assert(loaded.species == PET_SPECIES_NONE);
-
-	// A species that is not one of the three is not a species.
-	config_set_int("pet", "species", 99);
-	pet_load(&loaded, T0, DAY0);
-	assert(pet_species(&loaded) == PET_SPECIES_NONE);
-
-	// The dragon used to be third and the fish fourth. An old file still says
-	// so, and the numbers are stored: three is a dragon, so its owner gets the
-	// cat rather than a fish, and four is still a fish.
-	config_set_int("pet", "state_version", 1); // a file written before this build
-	config_set_int("pet", "species", 3);
-	pet_load(&loaded, T0, DAY0);
-	assert(pet_species(&loaded) == PET_SPECIES_CAT);
-	config_set_int("pet", "species", 4);
-	pet_load(&loaded, T0, DAY0);
-	assert(pet_species(&loaded) == PET_SPECIES_FISH);
-	// And a file this build wrote is read as written.
-	config_set_int("pet", "state_version", 2);
-	config_set_int("pet", "species", 3);
-	pet_load(&loaded, T0, DAY0);
-	assert(pet_species(&loaded) == PET_SPECIES_FISH);
-}
-
-static void test_species(void) {
-	fresh();
-	assert(pet_species(&st) == PET_SPECIES_NONE);
-	assert(!pet_set_species(&st, PET_SPECIES_NONE));
-	assert(!pet_set_species(&st, PET_SPECIES_COUNT));
-
-	assert(pet_set_species(&st, PET_SPECIES_CAT));
-	assert(pet_species(&st) == PET_SPECIES_CAT);
-	assert(pet_set_species(&st, PET_SPECIES_DOG));
-	assert(pet_species(&st) == PET_SPECIES_DOG);
-	assert(pet_set_species(&st, PET_SPECIES_FISH));
-	assert(pet_species(&st) == PET_SPECIES_FISH);
-
-	assert(strcmp(pet_species_tag(PET_SPECIES_CAT), "pet_species_cat") == 0);
-	assert(strcmp(pet_species_tag(PET_SPECIES_FISH), "pet_species_fish") == 0);
-	assert(strcmp(pet_species_tag(PET_SPECIES_NONE), "pet_species") == 0);
 }
 
 static void test_name(void) {
@@ -802,7 +759,7 @@ static void test_name(void) {
 
 	config_set("pet", "name", "");
 	pet_name(out, sizeof(out));
-	assert(strcmp(out, "Momo") == 0); // an empty name is no name
+	assert(strcmp(out, PET_DEFAULT_NAME) == 0); // an empty name is no name
 
 	// A long name is cut at a character boundary, never inside a UTF-8
 	// sequence: the last byte of the result is not a continuation byte.
@@ -1108,7 +1065,6 @@ int main(void) {
 	test_vibe();
 	test_genre_look();
 	test_persistence();
-	test_species();
 	test_name();
 	test_families();
 	test_temperament();
