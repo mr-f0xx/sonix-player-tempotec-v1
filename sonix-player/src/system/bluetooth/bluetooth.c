@@ -2307,6 +2307,34 @@ static bool reconnect_should_stop(const char *mac) {
 	return user_waiting;
 }
 
+// Whether the adapter is powered, and if it is not, power it back on and wait
+// for bluez to say so. The 15:14 log has the controller reset and closed about
+// eight seconds after the stack came up (New Settings 0x0ad4: Powered clear),
+// with nothing on this side asking for it; the three reconnect attempts that
+// followed were all refused "NotReady" -- this side, not the headphones -- and
+// nothing ever turned the adapter back on. Only the reconnect path looks at
+// Powered, so it is the one that has to put it right.
+static bool ensure_adapter_powered(void) {
+	bool on = false;
+	if (!btstack_get_powered(&on)) {
+		return false; // bluez is not answering; the connect that follows says why
+	}
+	if (on) {
+		return true;
+	}
+	fprintf(stderr, "bluetooth: the adapter is not powered; powering it back on\n");
+	btstack_set_powered(true);
+	for (int waited = 0; waited < 5000; waited += 250) {
+		sleep_ms(250);
+		if (btstack_get_powered(&on) && on) {
+			fprintf(stderr, "bluetooth: the adapter is powered again after %d ms\n", waited + 250);
+			return true;
+		}
+	}
+	fprintf(stderr, "bluetooth: the adapter did not power on\n");
+	return false;
+}
+
 static void reconnect_last(void) {
 	char mac[BT_MAC_MAX];
 	snprintf(mac, sizeof(mac), "%s", config_get("wireless", BT_LAST_DEVICE_KEY, ""));
@@ -2349,6 +2377,13 @@ static void reconnect_last(void) {
 		return;
 	}
 
+	// The adapter has to be on before anything below can happen, the grace
+	// included: headphones cannot come back to a radio that is off.
+	if (!ensure_adapter_powered()) {
+		fprintf(stderr, "bluetooth: not going back to %s with the adapter off\n", mac);
+		return;
+	}
+
 	// First, a moment to come back by themselves -- which is what headphones do
 	// the instant the adapter is powered. Waiting costs nothing when they do not
 	// come back, and when they do it is the difference between a working link
@@ -2379,6 +2414,12 @@ static void reconnect_last(void) {
 		// connect_device() took seconds, and this is the last moment before a
 		// command goes out that could tear down somebody else's link.
 		if (reconnect_should_stop(mac)) {
+			return;
+		}
+		// Looked at again before every attempt: a reset during the grace or the
+		// previous attempt leaves the adapter off, and a connect to an adapter
+		// that is off is refused "NotReady" every time.
+		if (!ensure_adapter_powered()) {
 			return;
 		}
 		fprintf(stderr, "bluetooth: going back to %s (attempt %d)\n", mac, attempt);
