@@ -10,6 +10,7 @@
 #include "src/gui/board_profile.h"
 #include "src/gui/fonts/fonts.h"
 #include "src/gui/shell/gestures.h"
+#include "src/gui/shell/edge_lock.h"
 #include "src/gui/shell/gui.h"
 #include "src/gui/shell/icons.h"
 #include "src/gui/settings/musicsettings.h"
@@ -1104,9 +1105,9 @@ static void panel_drag_cb(lv_event_t *e) {
 // bottom, because such a strip would be an object of the interface sitting over
 // the last few pixels of every page and taking the taps that land there -- a
 // list's last row, the player's transport, a key of the keyboard. The device
-// sees every press and every release whatever is under the finger, so nothing is
-// taken from anybody, and the panel only starts to move once the finger has
-// travelled upwards.
+// sees every press whatever is under the finger. While its direction is
+// undecided, the pressed object cannot scroll itself or its ancestors. A tap or
+// a different swipe is handed back; an upward pull belongs to the sheet alone.
 //
 // Two rules keep it out of the way. The press has to land within QP_EDGE_H of
 // the bottom edge, and it has to land on the PAGE: the top layer carries the
@@ -1120,6 +1121,7 @@ static lv_point_t edge_start;
 static bool edge_armed;   // the press landed in the band: watch what it does
 static bool edge_engaged; // the pull has been handed to the sheet
 static lv_timer_t *edge_timer;
+static edge_lock_t edge_lock;
 
 static bool edge_may_open(void) {
 	// One sheet at a time, and never over a page that owns the device.
@@ -1148,12 +1150,32 @@ static void edge_poll_cb(lv_timer_t *timer) {
 	lv_indev_get_point(edge_indev, &p);
 	int dy = p.y - edge_start.y;
 	int dx = p.x - edge_start.x;
+
+	// Once claimed, LVGL waits for release instead of dispatching this press to
+	// the page. The timer still sees the last point and the actual release.
+	if (edge_engaged && lv_indev_get_state(edge_indev) == LV_INDEV_STATE_RELEASED) {
+		edge_armed = false;
+		edge_engaged = false;
+		lv_timer_pause(edge_timer);
+		edge_lock_release(&edge_lock);
+		quickpanel_drag_update(dy);
+		quickpanel_drag_end();
+		return;
+	}
 	if (!edge_engaged) {
 		int adx = dx < 0 ? -dx : dx;
 		if (dy > -QP_EDGE_COMMIT_PX || -dy <= adx) {
-			return; // not a pull yet, or a sideways one
+			// Clearly not the upward edge gesture: give scrolling back without
+			// waiting for release. Small movements remain eligible for a pull.
+			if (adx >= QP_EDGE_COMMIT_PX || dy >= QP_EDGE_COMMIT_PX) {
+				edge_armed = false;
+				lv_timer_pause(edge_timer);
+				edge_lock_release(&edge_lock);
+			}
+			return;
 		}
 		edge_engaged = true;
+		lv_indev_wait_release(edge_indev);
 		quickpanel_drag_begin();
 	}
 	quickpanel_drag_update(dy);
@@ -1179,6 +1201,7 @@ static void edge_indev_cb(lv_event_t *e) {
 		edge_armed = gestures_stock() && edge_may_open() && p.y >= panel_h - QP_EDGE_H &&
 					 edge_on_page((lv_obj_t *)lv_event_get_param(e));
 		if (edge_armed) {
+			edge_lock_acquire(&edge_lock, (lv_obj_t *)lv_event_get_param(e));
 			lv_timer_resume(edge_timer);
 		}
 		return;
@@ -1193,6 +1216,7 @@ static void edge_indev_cb(lv_event_t *e) {
 
 	edge_armed = false;
 	lv_timer_pause(edge_timer);
+	edge_lock_release(&edge_lock);
 
 	if (edge_engaged) {
 		edge_engaged = false;
@@ -1212,6 +1236,8 @@ static void edge_indev_cb(lv_event_t *e) {
 	int dx = p.x - edge_start.x;
 	int adx = dx < 0 ? -dx : dx;
 	if (code == LV_EVENT_RELEASED && dy <= -QP_EDGE_FLICK_PX && -dy > adx) {
+		// This release belongs to the flick, not to a button underneath it.
+		lv_indev_reset(indev, NULL);
 		quickpanel_open();
 	}
 }

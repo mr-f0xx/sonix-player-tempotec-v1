@@ -401,6 +401,17 @@ UI_SRC = $(ROOT)/tests/ui/test_main_menu.c $(ROOT)/src/gui/shell/main_menu.c \
          $(ROOT)/src/system/core/config.c $(ROOT)/src/system/core/lang.c
 UI_LVGL_SRC = $(shell find $(ROOT)/lvgl/src -name '*.c' 2>/dev/null)
 UI_LVGL_OBJ = $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(UI_LVGL_SRC))
+# Stock edge presses must not scroll the page beneath the sheet.
+.PHONY: edge-lock
+edge-lock: $(BUILD)/test_edge_lock
+	$(BUILD)/test_edge_lock
+
+$(BUILD)/test_edge_lock: test_edge_lock.c $(ROOT)/src/gui/shell/edge_lock.h $(UI_LVGL_OBJ)
+	@mkdir -p $(BUILD)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -I$(ROOT)/lvgl \
+		-DLV_CONF_PATH='"$(abspath ui/lv_conf.h)"' -o $@ test_edge_lock.c \
+		$(UI_LVGL_OBJ) $(LDFLAGS) $(LDLIBS)
+
 # Control Centre layout migration: the production parser and saved lists,
 # without constructing the unrelated radio/streaming services.
 .PHONY: quickpanel-layout
@@ -408,7 +419,8 @@ quickpanel-layout: $(BUILD)/test_quickpanel_layout
 	$(BUILD)/test_quickpanel_layout
 
 $(BUILD)/test_quickpanel_layout: test_quickpanel_layout.c $(ROOT)/src/gui/shell/quickpanel.c \
-                                $(ROOT)/src/gui/shell/quickpanel.h $(ROOT)/src/system/core/config.c $(UI_LVGL_OBJ)
+                                $(ROOT)/src/gui/shell/quickpanel.h $(ROOT)/src/gui/shell/edge_lock.h \
+                                $(ROOT)/src/system/core/config.c $(UI_LVGL_OBJ)
 	@mkdir -p $(BUILD)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -I$(ROOT)/lvgl \
 		-DLV_CONF_PATH='"$(abspath ui/lv_conf.h)"' -o $@ test_quickpanel_layout.c \
