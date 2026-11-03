@@ -10,6 +10,7 @@ make -C sonix-player/tests eq
 make -C sonix-player/tests usbdac-eq
 make -C sonix-player/tests peq-ui
 make -C sonix-player/tests quickpanel-layout
+make -C sonix-player/tests edge-lock
 make -C sonix-player/tests calculator
 make -C sonix-player/tests notes
 make -C sonix-player/tests tagwrite
@@ -23,7 +24,7 @@ make -C sonix-player/tests aamlayout
 make -C sonix-player/tests extractkeys
 ```
 
-The non-UI suites require only a C compiler, Make and Python 3 (plus standard pthread/dl/math libraries). The `peq-ui`, `quickpanel-layout` and aggregate `ui` targets also need the LVGL 9.6.0 checkout described below. None requires ALSA, SDL, a MIPS toolchain, a music server, a real account, or downloaded audio.
+The non-UI suites require only a C compiler, Make and Python 3 (plus standard pthread/dl/math libraries). The `peq-ui`, `quickpanel-layout`, `edge-lock` and aggregate `ui` targets also need the LVGL 9.6.0 checkout described below. None requires ALSA, SDL, a MIPS toolchain, a music server, a real account, or downloaded audio.
 
 `run_subsonic_tests.py` starts a temporary threaded localhost HTTP server plus three HTTPS servers carrying the certificates in `tls_fixtures.py`, runs the C binary with a private temporary config directory, verifies its requests, then shuts down. All account values are synthetic. Build products live in ignored `.build/`; response/PCM fixtures are generated in memory rather than added to Git, and the three test certificates are pasted into that Python file rather than downloaded.
 
