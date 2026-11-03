@@ -2646,3 +2646,27 @@ the dongle's power, until the cable is pulled.
   its vendor:product, name and speed. If a JCally still is not found, that block
   and the `kernel:` lines around it say whether it enumerated, whether it got
   as far as an audio interface, and whether `snd-usb-audio` then refused it.
+
+## Bluetooth reconnect after the adapter was left powered off
+
+A bug-report log (`bluetooth-neu.log`, TempoTec V1) shows the controller being
+reset and powered off about eight seconds after the stack comes up, with nothing
+on the player's side asking for it (`New Settings: 0x0ad4`, Powered clear). The
+reconnect to the last headphones then ran three times and was refused each time
+with `org.bluez.Error.NotReady` -- this side, not the headphones -- and nothing
+turned the adapter back on. The headphones were not the problem in that session.
+
+`reconnect_last()` now checks `Powered` through `ensure_adapter_powered()` before
+the grace period and before every attempt, and powers the adapter back on (waiting
+up to five seconds for bluez to confirm) when it is off. The log says which of
+the three happened: `the adapter is not powered; powering it back on`, then
+`the adapter is powered again after N ms`, or `the adapter did not power on`.
+
+The cause of the power-off itself is not in this tree: the log does not say which
+process sent it. The stock `S80_bt_init` runs alongside the player's bring-up
+(`bluetooth: the stock bring-up is running`), and that is the first place to look
+if it comes back. This does not touch the separate "Host is down" / page-timeout
+failures to the headphones, which are the headphones not answering.
+
+Needs an on-device check: power the player on with the headphones on and off,
+and confirm the reconnect either lands or logs one of the three lines above.
