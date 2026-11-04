@@ -1,14 +1,12 @@
 ![Sonix Player for TempoTec Variations V1 with the Tokyo Night main menu](screenshots/readme-banner.png)
 
-This repository is a community port of the original **[Sonix Player](https://github.com/Jepl4r/sonix-player)** project by **[Jepl4r](https://github.com/Jepl4r)** — a replacement music player for the HiBy R3 Pro II and HiBy R1 — to the **TempoTec Variations V1**. The player and the firmware packer come from that project; this fork adds the V1 board profile, the V1 packaging path and the V1 documentation. The HiBy builds that upstream carries are not part of this fork: one tree, one board, one image. See [Credits](#credits).
+This repository is a community port of the original **[Sonix Player](https://github.com/Jepl4r/sonix-player)** project by **[Jepl4r](https://github.com/Jepl4r)** — a replacement music player for the **TempoTec Variations V1**. The player and the firmware packer come from that project; this fork adds the V1 board profile, the V1 packaging path and the V1 documentation. The HiBy builds that upstream carries are not part of this fork: one tree, one board, one image. See [Credits](#credits).
 
 The firmware builder starts with an official V1 update package, replaces the stock music player and its interface with Sonix, then repackages the update as `v1.upt`.
 
 **Settings → System → About → TempoTec base version** shows only the official
 firmware release version (for example, `1.2` or `1.3`), read automatically from
-the stock firmware's product configuration during packaging. No date or time is
-shown. This is separate from the Sonix build number; older images or missing
-version metadata show a dash.
+the stock firmware's product configuration during packaging.
 
 
 This is not an official TempoTec or HiBy release. **The port has been tested on physical TempoTec Variations V1 hardware and works perfectly on the tested device.** It targets the **TempoTec Variations V1 only**; compatibility with the V1-A or other players in the Variations family is not established.
@@ -173,7 +171,7 @@ Showcase of **OLED** appearance: true black backgrounds with white as the accent
     </td>
     <td align="center">
       <a href="screenshots/oled/now-playing.png"><img src="screenshots/oled/now-playing.png" width="180" alt="OLED now playing: Gold BBS'S by The Alchemist &amp; Conway The Machine"></a>
-      <br><sub><b>Now Playing — Gold BBS'S (LULU)</b></sub>
+      <br><sub><b>Now Playing</b></sub>
     </td>
     <td align="center">
       <a href="screenshots/oled/file-browser.png"><img src="screenshots/oled/file-browser.png" width="180" alt="OLED file browser"></a>
