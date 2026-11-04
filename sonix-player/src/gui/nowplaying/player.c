@@ -5710,12 +5710,14 @@ static void speed_btn_event_cb(lv_event_t *e) {
 // recolouring them is what marks the mode as active or not.
 static void update_repeat_button(void) {
 	// Active playback modes use the reference's dark orange, or explicitly
-	// the sleeve's colour while cover tint is on. Shuffle/repeat when inactive
-	// has its own deep-brown role rather than the artist color.
+	// the sleeve's colour while cover tint is on. The inactive glyph follows
+	// the sleeve too; otherwise it keeps its own muted palette role.
 	lv_color_t active = cover_tint && album_tone ? cover_mark() : chrome_accent();
-	lv_color_t inactive = (theme_is_monochrome() || theme_is_tokyo_night())
-							  ? theme_player_chrome_color(THEME_PLAYER_CHROME_SHUFFLE_IDLE)
-							  : lv_color_make(100, 100, 100);
+	lv_color_t inactive = cover_tint && album_tone
+		? cover_mark()
+		: (theme_is_monochrome() || theme_is_tokyo_night())
+			? theme_player_chrome_color(THEME_PLAYER_CHROME_SHUFFLE_IDLE)
+			: lv_color_make(100, 100, 100);
 
 	const lv_image_dsc_t *icon;
 	lv_color_t color;
