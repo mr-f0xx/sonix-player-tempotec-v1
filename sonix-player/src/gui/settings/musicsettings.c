@@ -417,6 +417,11 @@ static void soundfield_slider_cb(lv_event_t *e) {
 	soundfield_set_value_label(soundfield_get_width());
 }
 
+static void soundfield_loaded_cb(lv_event_t *e) {
+	(void)e;
+	soundfield_refresh();
+}
+
 static void build_soundfield_page(gui_config_t *cfg) {
 	soundfield_screen = lv_obj_create(NULL);
 	lv_obj_t *container = settingsrow_page(soundfield_screen, cfg, "musicsettings_soundfield");
@@ -435,6 +440,8 @@ static void build_soundfield_page(gui_config_t *cfg) {
 	lv_label_set_text(note, tr("musicsettings_soundstage_note"));
 
 	soundfield_refresh();
+	// The control centre has a button for it: read again whenever the page comes up.
+	lv_obj_add_event_cb(soundfield_screen, soundfield_loaded_cb, LV_EVENT_SCREEN_LOADED, NULL);
 	switcher_attach_back_gesture(soundfield_screen);
 }
 
@@ -523,6 +530,11 @@ static void crossfeed_reset_cb(lv_event_t *e) {
 	crossfeed_refresh();
 }
 
+static void crossfeed_loaded_cb(lv_event_t *e) {
+	(void)e;
+	crossfeed_refresh();
+}
+
 static void build_crossfeed_page(gui_config_t *cfg) {
 	crossfeed_screen = lv_obj_create(NULL);
 	lv_obj_t *container = settingsrow_page(crossfeed_screen, cfg, "musicsettings_crossfeed");
@@ -547,6 +559,7 @@ static void build_crossfeed_page(gui_config_t *cfg) {
 						LV_ANIM_OFF);
 
 	crossfeed_refresh();
+	lv_obj_add_event_cb(crossfeed_screen, crossfeed_loaded_cb, LV_EVENT_SCREEN_LOADED, NULL);
 	switcher_attach_back_gesture(crossfeed_screen);
 }
 
@@ -1220,6 +1233,9 @@ lv_obj_t *musicsettings_fade_screen(void) { return fade_screen; }
 
 static lv_obj_t *playback_screen;
 lv_obj_t *musicsettings_playback_screen(void) { return playback_screen; }
+lv_obj_t *musicsettings_soundfield_screen(void) { return soundfield_screen; }
+lv_obj_t *musicsettings_crossfeed_screen(void) { return crossfeed_screen; }
+
 
 bool musicsettings_fade_enabled(void) { return config_get_bool("audio", "fade", false); }
 
@@ -2605,6 +2621,15 @@ static void playback_loaded_cb(lv_event_t *e) {
 	(void)e;
 	settingsrow_duration_set_minutes(&sleep_row, sleeptimer_minutes(SLEEPTIMER_MUSIC));
 	sleep_refresh();
+	// ReplayGain and mono have buttons in the control centre too.
+	rg_refresh();
+	if (mono_switch) {
+		if (mono_get_enabled()) {
+			lv_obj_add_state(mono_switch, LV_STATE_CHECKED);
+		} else {
+			lv_obj_remove_state(mono_switch, LV_STATE_CHECKED);
+		}
+	}
 }
 
 static void build_playback_page(gui_config_t *cfg) {
