@@ -605,6 +605,7 @@ static bool cue_parse_wav(const char *wav_path, cue_sheet_t *out) {
 	for (int i = 0; i < tracks; i++) {
 		cue_track_t *t = &out->tracks[i];
 		t->number = i + 1;
+		copy_bounded(t->audio_path, sizeof(t->audio_path), wav_path);
 
 		int mark = implicit_first ? i - 1 : i;
 		t->begin_ms = (mark < 0) ? 0 : marks[mark].frame * 1000ull / rate;
@@ -638,8 +639,8 @@ bool cue_parse(const char *cue_path, cue_sheet_t *out) {
 		return false;
 	}
 
-	char file_field[CUE_LINE_MAX];
-	file_field[0] = '\0';
+	char file_field[CUE_LINE_MAX] = "";
+	char active_audio[512] = "";
 	bool have_file = false;
 
 	// A track only counts once an INDEX 01 has placed it; TRACK on its own is
@@ -697,13 +698,16 @@ bool cue_parse(const char *cue_path, cue_sheet_t *out) {
 		if (strcmp(command, "REM") == 0) {
 			parse_rem(args, out);
 		} else if (strcmp(command, "FILE") == 0) {
-			// One file per sheet is what a CD rip looks like. A second FILE
-			// means every offset after it is measured from a different zero,
-			// so parsing stops and what is already correct is kept.
-			if (have_file) {
-				break;
-			}
+			// Each FILE resets INDEX offsets for the following TRACKs. Resolve
+			// it here so a multi-file sheet never points every track at file one.
 			read_value(args, file_field, sizeof(file_field), true);
+			if (!resolve_audio(cue_path, file_field, active_audio, sizeof(active_audio))) {
+				fclose(f);
+				return false;
+			}
+			if (!have_file) {
+				copy_bounded(out->audio_path, sizeof(out->audio_path), active_audio);
+			}
 			have_file = true;
 		} else if (strcmp(command, "TITLE") == 0) {
 			if (current >= 0) {
@@ -740,8 +744,12 @@ bool cue_parse(const char *cue_path, cue_sheet_t *out) {
 				continue; // a sheet claiming hundreds of tracks: keep the first 99
 			}
 
+			if (!have_file) {
+				continue;
+			}
 			current = count++;
 			out->tracks[current].number = (int)value;
+			copy_bounded(out->tracks[current].audio_path, sizeof(out->tracks[current].audio_path), active_audio);
 		} else if (strcmp(command, "INDEX") == 0) {
 			if (current < 0) {
 				continue;
@@ -792,13 +800,48 @@ bool cue_parse(const char *cue_path, cue_sheet_t *out) {
 		// The last track runs to the end of the file, and so does any track a
 		// scrambled sheet placed after the one that follows it.
 		out->tracks[i].end_ms = 0;
-		if (i + 1 < kept && out->tracks[i + 1].begin_ms > out->tracks[i].begin_ms) {
+		if (i + 1 < kept && strcmp(out->tracks[i].audio_path, out->tracks[i + 1].audio_path) == 0 &&
+			out->tracks[i + 1].begin_ms > out->tracks[i].begin_ms) {
 			out->tracks[i].end_ms = out->tracks[i + 1].begin_ms;
 		}
 	}
 
-	if (!resolve_audio(cue_path, file_field, out->audio_path, sizeof(out->audio_path))) {
-		return false; // the sheet describes a file that is not on the card
+	// A FILE name is a useful title only when it describes one song, not
+	// when several tracks share a disc image. Explicit TRACK TITLE always wins.
+	for (int i = 0; i < kept; i++) {
+		cue_track_t *t = &out->tracks[i];
+		if (t->title[0]) {
+			continue;
+		}
+		bool shared = false;
+		for (int j = 0; j < kept; j++) {
+			if (i != j && strcmp(t->audio_path, out->tracks[j].audio_path) == 0) {
+				shared = true;
+				break;
+			}
+		}
+		if (shared) {
+			continue;
+		}
+		const char *name = basename_of(t->audio_path);
+		const char *dot = strrchr(name, '.');
+		size_t length = dot ? (size_t)(dot - name) : strlen(name);
+		// A matching numeric prefix is redundant with the TRACK number shown
+		// in the browser. Leave unrelated numbers in song titles untouched.
+		char *end;
+		long prefix = strtol(name, &end, 10);
+		if (end > name && prefix == t->number && (*end == '.' || *end == '-' || *end == ' ')) {
+			const char *rest = skip_ws(end + (*end != ' '));
+			if (*rest && (size_t)(rest - name) < length) {
+				length -= (size_t)(rest - name);
+				name = rest;
+			}
+		}
+		if (length >= sizeof(t->title)) {
+			length = sizeof(t->title) - 1;
+		}
+		memcpy(t->title, name, length);
+		t->title[length] = '\0';
 	}
 	return true;
 }

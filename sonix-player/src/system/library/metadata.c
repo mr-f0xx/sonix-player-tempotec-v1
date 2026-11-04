@@ -2475,7 +2475,7 @@ static bool read_cue_metadata(const char *filepath, song_metadata_t *out) {
 		return false;
 	}
 
-	// A sheet is thirty-five kilobytes, and tags are read from threads that
+	// A sheet is about eighty kilobytes, and tags are read from threads that
 	// already carry deep call stacks.
 	cue_sheet_t *cue = malloc(sizeof(*cue));
 	if (!cue) {

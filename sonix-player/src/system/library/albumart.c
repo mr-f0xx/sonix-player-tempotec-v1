@@ -1174,17 +1174,19 @@ bool albumart_load_candidate(const char *filepath, int index, albumart_t *out) {
 	// A track of a CUE sheet has no artwork of its own: the picture belongs to
 	// the file the sheet cuts up, or sits in the folder beside it.
 	//
-	// The sheet is on the heap, not the stack: cue_sheet_t is 35 KB, the
+	// The sheet is on the heap, not the stack: cue_sheet_t is 80 KB, the
 	// compiler would reserve it on entry whether or not this branch is taken,
-	// and this function recurses -- 70 KB of loader-thread stack for a case
+	// and this function recurses -- more than 160 KB of loader-thread stack for a case
 	// that fires only on a `.cue?track=` path.
 	char sheet_path[512];
-	if (cue_split_path(filepath, sheet_path, sizeof(sheet_path)) > 0) {
+	int cue_track = cue_split_path(filepath, sheet_path, sizeof(sheet_path));
+	if (cue_track > 0) {
 		cue_sheet_t *cue = malloc(sizeof(*cue));
 		if (!cue) {
 			return false;
 		}
-		bool ok = cue_parse(sheet_path, cue) && albumart_load_candidate(cue->audio_path, index, out);
+		bool ok = cue_parse(sheet_path, cue) && cue_track <= cue->track_count &&
+			albumart_load_candidate(cue->tracks[cue_track - 1].audio_path, index, out);
 		free(cue);
 		return ok;
 	}

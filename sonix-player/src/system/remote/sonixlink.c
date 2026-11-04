@@ -2059,7 +2059,7 @@ static int browse_cmp(const void *a, const void *b) {
 	return strcasecmp(ea->file, eb->file);
 }
 
-#define BROWSE_CLAIMS 32
+#define BROWSE_CLAIMS 256
 
 static void browse_read(const char *path, browse_list_t *out) {
 	DIR *dir = opendir(path);
@@ -2092,9 +2092,12 @@ static void browse_read(const char *path, browse_list_t *out) {
 			}
 			browse_add(out, label, file, false);
 		}
-		const char *slash = strrchr(sheet->audio_path, '/');
-		if (claim_count < BROWSE_CLAIMS) {
-			snprintf(claims[claim_count++], 256, "%.255s", slash ? slash + 1 : sheet->audio_path);
+		for (int t = 0; t < sheet->track_count && claim_count < BROWSE_CLAIMS; t++) {
+			const char *audio = sheet->tracks[t].audio_path;
+			const char *slash = strrchr(audio, '/');
+			if (slash && (size_t)(slash - audio) == strlen(path) && strncmp(audio, path, strlen(path)) == 0) {
+				snprintf(claims[claim_count++], 256, "%.255s", slash + 1);
+			}
 		}
 	}
 	free(sheet);
