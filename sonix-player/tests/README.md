@@ -8,6 +8,12 @@ make -C sonix-player/tests sanitize
 make -C sonix-player/tests swvolume
 make -C sonix-player/tests eq
 make -C sonix-player/tests usbdac-eq
+make -C sonix-player/tests usbhost
+make -C sonix-player/tests readfile
+make -C sonix-player/tests bluetooth
+make -C sonix-player/tests btafh
+make -C sonix-player/tests wifi
+make -C sonix-player/tests basebuild
 make -C sonix-player/tests peq-ui
 make -C sonix-player/tests quickpanel-layout
 make -C sonix-player/tests edge-lock
@@ -46,6 +52,50 @@ Checks include:
 - cancellation during HTTP header setup, a stalled body, and reader starvation, followed by generation-safe reuse;
 - nonmutating playlist next-track look-ahead across repeat/shuffle/ordered modes;
 - exclusive decoder leases, both handoff/teardown orders, failed pre-cache retry suppression, repeat-one starting at byte zero, account-change invalidation with an outstanding lease, metadata lookup and unsupported raw codecs.
+
+## Bluetooth startup, receive links and coexistence
+
+`make -C sonix-player/tests bluetooth btafh wifi basebuild` needs no Bluetooth
+hardware. The Bluetooth test compiles the production decisions with fake
+process/controller state: it checks both A2DP directions, stock-init wait and
+cancellation, shell-invoked init detection, refusal to duplicate a live UART
+transport, and the serialized cleanup/switch-on queue. It also checks that a
+missing ALSA template is created without replacing an existing one (the separate
+per-device rewrite still runs when a sink connects). The real
+D-Bus signal cache is driven with a late simulated signal to check that a close
+clears incoming and outgoing PCMs, transport state and media state.
+
+The AFH tests check channel maps and timing for link/frequency changes, retry of
+failed sends and clears, radio parks, refreshes and timer wrap. Fake HCI syscalls check the
+actual command packet, its hci0 binding and socket/bind/short-write failures.
+The Wi-Fi test covers the associated Wi-Fi worker, and `basebuild` uses the
+packer's tar-merge method against a fake stock init hook. The tests cannot prove
+that the radio accepts or uses the classification, that a stock script behaves
+the same on every firmware revision, or that receiver packet loss is fixed.
+
+## USB host arbitration and storage safety
+
+`make -C sonix-player/tests usbhost` exercises the production host-trial state
+machine against private fake sysfs files. It checks unsupported/ambiguous PHYs,
+manual start and cancel, timeout, slow ALSA probing, audio disappearance,
+failed PHY/Type-C restoration and retry, directory-sync failures, a stale or
+corrupt journal, and crash recovery. A separate fixture confirms that the
+first-start stock-data cleanup preserves the journal. The USB ownership fixture
+checks unknown or connected UDCs, idle unknown gadgets, ADB/DAC/storage
+conflicts and parking/rebinding the one known storage gadget. The arbitration
+fixture checks missing OTG-ID plus ambiguous VBUS, a live USB card, a pending
+audio interface and the active trial.
+
+The storage fixtures mock normal unmounts, mount tables, block claims, a FUSE
+process holding a raw fd, LUN writes and service restoration. They verify that
+failed handover is rolled back and an unverified LUN is never remounted. The
+fixtures do not power a real port, exercise a kernel gadget or prove safety on a
+real V1: test the full connection and card-export workflow on hardware.
+
+`make -C sonix-player/tests readfile` tests the shared file reader with empty
+and larger regular files, real procfs, a non-seekable pipe and a read error.
+The USB sysfs/configfs consumers rely on this reader; actual V1 attributes are
+not modeled by this test.
 
 ## Album Art Max's rows
 

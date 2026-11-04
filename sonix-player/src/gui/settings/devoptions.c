@@ -1,16 +1,19 @@
 #include "devoptions.h"
 
 #include <stdio.h>
+#include <string.h>
 
 #include "lvgl/lvgl.h"
 
 #include "src/gui/fonts/fonts.h"
 #include "src/gui/settings/processespage.h"
 #include "src/gui/shell/settingsrow.h"
+#include "src/gui/shell/confirm.h"
 #include "src/gui/shell/switcher.h"
 #include "src/gui/shell/theme.h"
 #include "src/system/bluetooth/btlog.h"
 #include "src/system/device/adb.h"
+#include "src/system/audio/usbhostprobe.h"
 #include "src/system/core/lang.h"
 #include "src/system/library/library.h"
 #include "src/system/core/logging.h"
@@ -20,6 +23,8 @@
 lv_obj_t *devoptions_screen;
 
 static lv_obj_t *adb_switch;
+static lv_obj_t *usbhost_row;
+static lv_obj_t *usbhost_note;
 static lv_obj_t *log_switch;
 static lv_obj_t *db_log_switch;
 static lv_obj_t *log_name_label; // rises to make room for the path when logging
@@ -119,13 +124,14 @@ static lv_obj_t *add_path_label(lv_obj_t *card) {
 
 // A note under a card rather than a subtitle inside it: a sentence about when
 // to use the switch, too long to sit on the row without crowding the name.
-static void add_note(lv_obj_t *container, const char *key) {
+static lv_obj_t *add_note(lv_obj_t *container, const char *key) {
 	lv_obj_t *note = lv_label_create(container);
 	lv_label_set_long_mode(note, LV_LABEL_LONG_WRAP);
 	lv_obj_set_width(note, lv_pct(100));
 	lv_obj_add_style(note, &theme_style_text_dim, 0);
 	lv_obj_set_style_text_font(note, &font_ui_22, 0);
 	lv_label_set_text(note, tr(key));
+	return note;
 }
 
 static void adb_toggled_cb(lv_event_t *e) {
@@ -134,6 +140,40 @@ static void adb_toggled_cb(lv_event_t *e) {
 	adb_pending = true;
 	adb_asked_at = lv_tick_get();
 	adb_set_enabled(adb_wanted);
+}
+
+static void update_usbhost_row(void) {
+	if (!usbhost_row) return;
+	lv_obj_t *label = settingsrow_name_label(usbhost_row);
+	const char *text = tr(usbhostprobe_active() ? "usbhost_stop" : "usbhost_try");
+	if (label && strcmp(lv_label_get_text(label), text) != 0) lv_label_set_text(label, text);
+	if (usbhost_note) {
+		const char *note = tr(usbhostprobe_restore_pending() ? "usbhost_restore_failed" : "usbhost_note");
+		if (strcmp(lv_label_get_text(usbhost_note), note) != 0) lv_label_set_text(usbhost_note, note);
+	}
+}
+
+static void usbhost_confirmed(void *user) {
+	(void)user;
+	usbhost_probe_result_t result = usbhostprobe_begin();
+	const char *message = result == USBHOST_PROBE_STARTED ? "usbhost_started" :
+		result == USBHOST_PROBE_BUSY ? "usbhost_busy" :
+		result == USBHOST_PROBE_UNSUPPORTED ? "usbhost_unsupported" :
+		usbhostprobe_active() ? "usbhost_restore_failed" : "usbhost_failed";
+	if (strcmp(message, "usbhost_restore_failed") == 0) gui_notify_popup_long(message);
+	else gui_notify_popup(message);
+	update_usbhost_row();
+}
+
+static void usbhost_clicked_cb(lv_event_t *e) {
+	(void)e;
+	if (usbhostprobe_active()) {
+		if (usbhostprobe_cancel()) gui_notify_popup("usbhost_restored");
+		else gui_notify_popup_long("usbhost_restore_failed");
+		update_usbhost_row();
+		return;
+	}
+	confirm_show("usbhost_confirm_title", "usbhost_confirm", "ok", usbhost_confirmed, NULL);
 }
 
 static void log_toggled_cb(lv_event_t *e) {
@@ -156,11 +196,13 @@ static void db_log_toggled_cb(lv_event_t *e) {
 static void adb_poll_cb(lv_timer_t *timer) {
 	(void)timer;
 	update_adb_row();
+	update_usbhost_row();
 }
 
 static void screen_loaded_cb(lv_event_t *e) {
 	(void)e;
 	update_adb_row();
+	update_usbhost_row();
 	update_log_row();
 	update_bt_log_row(); // the card may have come or gone since
 	lv_timer_resume(adb_poll_timer);
@@ -175,6 +217,11 @@ void devoptions_init(gui_config_t *cfg) {
 	lv_obj_t *container = settingsrow_page(devoptions_screen, cfg, "developer_options");
 
 	settingsrow_toggle(container, "devoptions_adb", &adb_switch, adb_toggled_cb);
+
+	// Explicit opt-in only: a silent USB port cannot be distinguished from a
+	// charger by VBUS, so never force host mode in the automatic poll.
+	usbhost_row = settingsrow_action(container, "usbhost_try", usbhost_clicked_cb, NULL);
+	usbhost_note = add_note(container, "usbhost_note");
 
 	lv_obj_t *log_card = settingsrow_toggle(container, "devoptions_log_to_microsd", &log_switch, log_toggled_cb);
 	log_name_label = lv_obj_get_child(log_card, 0);
@@ -221,6 +268,7 @@ void devoptions_init(gui_config_t *cfg) {
 	settingsrow_add(container, "processes", NULL, switch_screen_cb, processespage_screen);
 
 	update_adb_row();
+	update_usbhost_row();
 	update_log_row();
 	update_bt_log_row();
 

@@ -24,6 +24,15 @@ CORE = $(ROOT)/src/system/streaming/subsonic.c \
 test: $(BUILD)/test_subsonic
 	python3 run_subsonic_tests.py $(BUILD)/test_subsonic
 
+# Pseudo-files (procfs/configfs) can have zero size or reject seeking.
+.PHONY: readfile
+readfile: $(BUILD)/test_read_file_content
+	$(BUILD)/test_read_file_content
+
+$(BUILD)/test_read_file_content: test_read_file_content.c $(ROOT)/src/system/core/utils.c $(ROOT)/src/system/core/utils.h
+	@mkdir -p $(BUILD)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ test_read_file_content.c $(ROOT)/src/system/core/utils.c $(LDFLAGS) $(LDLIBS)
+
 # The stock-firmware credential extractor and its ini/seal round-trips. Plain
 # Python, no compiler: the fixtures reproduce hiby_player's string layout.
 extractkeys:
@@ -102,6 +111,47 @@ $(BUILD)/test_eq: $(EQ_SRC) $(ROOT)/src/system/audio/eq.h $(ROOT)/src/system/cor
 	@mkdir -p $(BUILD)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ $(EQ_SRC) $(LDFLAGS) $(LDLIBS)
 
+# The explicit V1 external-DAC host trial against a private fake sysfs tree.
+# Exercises the real role writes, bounded wait, rollback and crash recovery.
+.PHONY: usbhost
+usbhost: $(BUILD)/test_usbhostprobe $(BUILD)/test_usbhost_reset $(BUILD)/test_usb_ownership $(BUILD)/test_usbexport $(BUILD)/test_usb_storage $(BUILD)/test_usbaudio_arbitration
+	$(BUILD)/test_usbhostprobe
+	$(BUILD)/test_usbhost_reset
+	$(BUILD)/test_usb_ownership
+	$(BUILD)/test_usbexport
+	$(BUILD)/test_usb_storage
+	$(BUILD)/test_usbaudio_arbitration
+
+$(BUILD)/test_usbhost_reset: test_usbhost_reset.c $(ROOT)/src/system/device/factoryreset.c \
+                             $(ROOT)/src/system/audio/usbhostprobe.h
+	@mkdir -p $(BUILD)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ test_usbhost_reset.c $(LDFLAGS) $(LDLIBS)
+
+$(BUILD)/test_usbaudio_arbitration: test_usbaudio_arbitration.c $(ROOT)/src/system/audio/usbaudio.c \
+                                   stubs/lvgl/lvgl.h stubs/alsa/asoundlib.h
+	@mkdir -p $(BUILD)
+	$(CC) $(CPPFLAGS) -Istubs $(CFLAGS) -o $@ test_usbaudio_arbitration.c $(LDFLAGS) $(LDLIBS)
+
+$(BUILD)/test_usb_storage: test_usb_storage.c $(ROOT)/src/system/device/usb.c \
+                           $(ROOT)/src/system/device/usbexport.h stubs/lvgl/lvgl.h
+	@mkdir -p $(BUILD)
+	$(CC) $(CPPFLAGS) -Istubs $(CFLAGS) -o $@ test_usb_storage.c $(LDFLAGS) $(LDLIBS)
+
+$(BUILD)/test_usbexport: test_usbexport.c $(ROOT)/src/system/device/usbexport.c \
+                         $(ROOT)/src/system/device/usbexport.h
+	@mkdir -p $(BUILD)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ test_usbexport.c $(LDFLAGS) $(LDLIBS)
+
+$(BUILD)/test_usb_ownership: test_usb_ownership.c $(ROOT)/src/system/device/usb.c \
+                             $(ROOT)/src/system/device/usb.h stubs/lvgl/lvgl.h
+	@mkdir -p $(BUILD)
+	$(CC) $(CPPFLAGS) -Istubs $(CFLAGS) -o $@ test_usb_ownership.c $(LDFLAGS) $(LDLIBS)
+
+$(BUILD)/test_usbhostprobe: test_usbhostprobe.c $(ROOT)/src/system/audio/usbhostprobe.c \
+                            $(ROOT)/src/system/audio/usbhostprobe.h $(ROOT)/src/system/device/usb.h
+	@mkdir -p $(BUILD)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ test_usbhostprobe.c $(LDFLAGS) $(LDLIBS)
+
 # USB DAC PCM uses the same DSP chain while the DSD stream remains untouched.
 # The test includes usbdac.c to exercise its real format gate without building
 # the gadget or opening an audio device.
@@ -128,14 +178,38 @@ $(BUILD)/test_wifi: $(WIFI_SRC) $(ROOT)/src/system/net/wifi.h \
 	@mkdir -p $(BUILD)
 	$(CC) $(CPPFLAGS) -Istubs $(CFLAGS) -o $@ test_wifi.c $(ROOT)/src/system/net/wifi.c $(LDFLAGS) $(LDLIBS)
 
-# The AFH map that keeps Bluetooth's hopping off the Wi-Fi channel. Plain C.
+# Bluetooth's real A2DP-direction decision, startup wait policy and D-Bus
+# signal cache, with fake controller/process state. No radio or ALSA required.
+.PHONY: bluetooth
+bluetooth: $(BUILD)/test_bluetooth $(BUILD)/test_btstack
+	$(BUILD)/test_bluetooth
+	$(BUILD)/test_btstack
+
+$(BUILD)/test_bluetooth: test_bluetooth.c $(ROOT)/src/system/bluetooth/bluetooth.c \
+                         $(ROOT)/src/system/bluetooth/bluetooth.h $(ROOT)/src/system/bluetooth/btafh.c \
+                         $(ROOT)/src/system/bluetooth/btafh.h
+	@mkdir -p $(BUILD)
+	$(CC) $(CPPFLAGS) -Istubs $(CFLAGS) -o $@ test_bluetooth.c $(ROOT)/src/system/bluetooth/btafh.c $(LDFLAGS) $(LDLIBS)
+
+$(BUILD)/test_btstack: test_btstack.c $(ROOT)/src/system/bluetooth/btstack.c \
+                       $(ROOT)/src/system/bluetooth/btstack.h $(ROOT)/src/system/bluetooth/dbuslite.h
+	@mkdir -p $(BUILD)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ test_btstack.c $(LDFLAGS) $(LDLIBS)
+
+# The AFH map, follow policy and actual HCI packet, using fake sockets.
 .PHONY: btafh
-btafh: $(BUILD)/test_btafh
+btafh: $(BUILD)/test_btafh $(BUILD)/test_btafh_socket
 	$(BUILD)/test_btafh
+	$(BUILD)/test_btafh_socket
 
 $(BUILD)/test_btafh: test_btafh.c $(ROOT)/src/system/bluetooth/btafh.c $(ROOT)/src/system/bluetooth/btafh.h
 	@mkdir -p $(BUILD)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ test_btafh.c $(ROOT)/src/system/bluetooth/btafh.c $(LDFLAGS) $(LDLIBS)
+
+$(BUILD)/test_btafh_socket: test_btafh_socket.c $(ROOT)/src/system/bluetooth/btafh.c \
+                            $(ROOT)/src/system/bluetooth/btafh.h
+	@mkdir -p $(BUILD)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ test_btafh_socket.c $(LDFLAGS) $(LDLIBS)
 
 # The Calculator page's arithmetic and the notes folder's rules: the two new
 # pages' plain-C halves, with no LVGL and no screen. The calculator model and

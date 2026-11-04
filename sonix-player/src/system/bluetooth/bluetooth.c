@@ -106,6 +106,7 @@
 typedef enum {
 	JOB_NONE = 0,
 	JOB_POWER, // arg_int: 1 on, 0 park off, -1 deliberate off
+	JOB_BOOT_CLEANUP, // retire a stock stack, serialized with JOB_POWER
 	JOB_SCAN,
 	JOB_SCAN_STOP,
 	JOB_REFRESH,
@@ -228,6 +229,7 @@ static int g_rx_codec_count;
 static char g_rx_codec_selected[BT_CODEC_MAX];
 
 static void post_job(const job_t *job);
+static bool bluetooth_still_wanted(void);
 
 // ---------------------------------------------------------------------------
 // small helpers
@@ -425,6 +427,56 @@ static bool comm_matches(const char *comm, const char *name) {
 	return strncmp(comm, name, len) == 0 && comm[len] == '\0';
 }
 
+// An older boot hook may launch `sh /usr/bin/bt_init` explicitly. In that case
+// /proc/PID/comm says "sh", not "bt_init"; inspect only a shell's first command
+// argument so that a script merely mentioning bt_init is not mistaken for it.
+static bool shell_invokes_bt_init(const char *cmdline, size_t size) {
+	const char *p = cmdline;
+	const char *end = cmdline + size;
+	const char *nul = memchr(p, '\0', (size_t)(end - p));
+	if (!nul) {
+		return false;
+	}
+	const char *base = strrchr(p, '/');
+	bool busybox = strcmp(base ? base + 1 : p, "busybox") == 0;
+	p = nul + 1; // skip the interpreter itself
+	while (p < end) {
+		nul = memchr(p, '\0', (size_t)(end - p));
+		if (!nul) {
+			return false; // a truncated argument cannot establish a match
+		}
+		if (busybox && strcmp(p, "sh") == 0) {
+			busybox = false;
+		} else if (*p != '-') {
+			// A `sh -c` command may merely mention the script as part of a
+			// longer command. Match a script argument, not arbitrary text.
+			if (strpbrk(p, " \t\r\n")) {
+				return false;
+			}
+			base = strrchr(p, '/');
+			return strcmp(base ? base + 1 : p, "bt_init") == 0;
+		}
+		p = nul + 1;
+	}
+	return false;
+}
+
+static bool shell_running_bt_init(const char *pid, const char *comm) {
+	if (strcmp(comm, "sh") != 0 && strcmp(comm, "ash") != 0 && strcmp(comm, "dash") != 0 &&
+		strcmp(comm, "bash") != 0 && strcmp(comm, "busybox") != 0) {
+		return false;
+	}
+	char path[320], cmdline[4096];
+	snprintf(path, sizeof(path), "/proc/%s/cmdline", pid);
+	FILE *f = fopen(path, "r");
+	if (!f) {
+		return false;
+	}
+	size_t got = fread(cmdline, 1, sizeof(cmdline), f);
+	fclose(f);
+	return shell_invokes_bt_init(cmdline, got);
+}
+
 // Walks /proc calling `visit` for every live process whose comm is `name`.
 static void for_each_process(const char *name, void (*visit)(pid_t pid, void *user), void *user) {
 	DIR *proc = opendir("/proc");
@@ -446,7 +498,11 @@ static void for_each_process(const char *name, void (*visit)(pid_t pid, void *us
 			comm[strcspn(comm, "\r\n")] = '\0';
 		}
 		fclose(f);
-		if (!comm_matches(comm, name) || process_is_zombie(de->d_name)) {
+		bool matches = comm_matches(comm, name);
+		if (!matches && strcmp(name, "bt_init") == 0) {
+			matches = shell_running_bt_init(de->d_name, comm);
+		}
+		if (!matches || process_is_zombie(de->d_name)) {
 			continue;
 		}
 		visit((pid_t)strtol(de->d_name, NULL, 10), user);
@@ -740,27 +796,75 @@ static void ensure_dbus(void) {
 	fprintf(stderr, "bluetooth: dbus-daemon %s\n", process_running("dbus-daemon") ? "started" : "did NOT start");
 }
 
-// The firmware's own bring-up, if it is still in flight, is waited for and not
-// raced. /etc/init.d/S80_bt_init runs /usr/bin/bt_init in the BACKGROUND at
-// every boot, and a player that reaches this point inside that window finds hci0
-// not answering yet and would start a SECOND brcm_patchram_plus on /dev/ttyS0.
-// Two processes driving one HCI transport is not a state anything recovers from
-// by reconnecting.
+// Older firmware can start /usr/bin/bt_init in the background. hci0 appearing
+// is NOT the end of that script: it can still start another bluetoothd or
+// switch the adapter back off afterwards. Wait for the script itself before
+// taking over, including before starting D-Bus. A deadline is a failure, not
+// permission to run two owners against the same UART.
 //
-// The delivered firmware disables that script, but a device flashed with the
-// stock init, or one where the file was restored, must not be broken by it.
-static void wait_out_stock_bringup(void) {
-	if (!process_running("brcm_patchram_plus") && !process_running("bt_init")) {
-		return;
-	}
-	fprintf(stderr, "bluetooth: the stock bring-up is running; waiting for it instead of doubling it\n");
-	for (int waited = 0; waited < WAIT_STOCK_BRINGUP_MS; waited += 200) {
-		if (hci_up()) {
-			return;
+// These callbacks let the wait policy be exercised without hardware; the real
+// operations below still run only on the Bluetooth worker.
+typedef struct {
+	bool (*running)(const char *name);
+	bool (*ready)(void);
+	bool (*keep_waiting)(void);
+	void (*sleep)(int ms);
+} bt_startup_checks_t;
+
+typedef enum {
+	BT_TRANSPORT_READY,
+	BT_TRANSPORT_START,
+	BT_TRANSPORT_BUSY,
+	BT_TRANSPORT_CANCELLED,
+} bt_transport_wait_t;
+
+static bool wait_out_stock_bringup(const bt_startup_checks_t *checks, int timeout_ms) {
+	bool announced = false;
+	for (int waited = 0;; waited += 200) {
+		if (!checks->keep_waiting()) {
+			return false;
 		}
-		sleep_ms(200);
+		if (!checks->running("bt_init")) {
+			return true;
+		}
+		if (!announced) {
+			fprintf(stderr, "bluetooth: waiting for the stock bt_init to finish\n");
+			announced = true;
+		}
+		if (waited >= timeout_ms) {
+			fprintf(stderr, "bluetooth: stock bt_init is still running; not taking over\n");
+			return false;
+		}
+		checks->sleep(200);
 	}
 }
+
+// brcm_patchram_plus normally stays alive for the lifetime of the transport.
+// If it is already present but hci0 is not ready, wait for it: starting a
+// second copy on the same tty would corrupt both. Only start our own after the
+// existing process has actually exited, not merely because a deadline expired.
+static bt_transport_wait_t wait_existing_transport(const bt_startup_checks_t *checks, int timeout_ms) {
+	for (int waited = 0;; waited += 100) {
+		if (!checks->keep_waiting()) {
+			return BT_TRANSPORT_CANCELLED;
+		}
+		if (checks->ready()) {
+			return BT_TRANSPORT_READY;
+		}
+		if (!checks->running("brcm_patchram_plus")) {
+			return BT_TRANSPORT_START;
+		}
+		if (waited >= timeout_ms) {
+			return BT_TRANSPORT_BUSY;
+		}
+		checks->sleep(100);
+	}
+}
+
+static bool bluetooth_not_wanted(void) { return !bluetooth_still_wanted(); }
+
+static const bt_startup_checks_t startup_checks = {process_running, hci_up, bluetooth_still_wanted, sleep_ms};
+static const bt_startup_checks_t cleanup_checks = {process_running, hci_up, bluetooth_not_wanted, sleep_ms};
 
 static void firmware_name(char *out, size_t size) {
 	char vendor[32];
@@ -902,14 +1006,27 @@ static bool device_address(char *out, size_t size) {
 }
 
 static bool ensure_transport(void) {
+	if (!bluetooth_still_wanted()) {
+		return false;
+	}
 	if (hci_up()) {
 		return true;
 	}
 
 	write_file(BT_RFKILL, "1");
-	wait_out_stock_bringup();
-	if (hci_up()) {
+	if (process_running("brcm_patchram_plus")) {
+		fprintf(stderr, "bluetooth: waiting for the existing HCI transport\n");
+	}
+	bt_transport_wait_t transport = wait_existing_transport(&startup_checks, WAIT_STOCK_BRINGUP_MS);
+	if (transport == BT_TRANSPORT_READY) {
 		return true;
+	}
+	if (transport == BT_TRANSPORT_BUSY) {
+		fprintf(stderr, "bluetooth: HCI transport is still busy; not starting another on the UART\n");
+		return false;
+	}
+	if (transport == BT_TRANSPORT_CANCELLED) {
+		return false;
 	}
 
 	char address[64];
@@ -937,6 +1054,15 @@ static bool ensure_transport(void) {
 		address,
 		NULL,
 	};
+	// An old init script could have started while the address was being read.
+	// Do not put another process on the UART if it did.
+	if (!bluetooth_still_wanted()) {
+		return false;
+	}
+	if (process_running("bt_init") || process_running("brcm_patchram_plus")) {
+		fprintf(stderr, "bluetooth: another bring-up started; leaving the UART alone\n");
+		return false;
+	}
 	fprintf(stderr, "bluetooth: loading %s over %s\n", firmware, BT_TRANSPORT_TTY);
 	if (!spawn_daemon(BT_TRANSPORT_BIN, argv)) {
 		return false;
@@ -944,6 +1070,9 @@ static bool ensure_transport(void) {
 
 	uint32_t began = now_ms();
 	for (int waited = 0; waited < WAIT_TRANSPORT_MS; waited += 100) {
+		if (!bluetooth_still_wanted()) {
+			return false;
+		}
 		if (hci_up()) {
 			fprintf(stderr, "bluetooth: hci0 up after %u ms\n", now_ms() - began);
 			return true;
@@ -963,7 +1092,7 @@ static bool ensure_bluetoothd(void) {
 		stop_process("bt-agent");
 	}
 
-	if (!process_running("bluetoothd")) {
+	if (!btstack_service_ready("org.bluez") && !process_running("bluetoothd")) {
 		// -E is the experimental interface and -C the SDP compatibility one. Both
 		// are what the firmware starts it with.
 		//
@@ -1490,10 +1619,61 @@ static bool name_is_just_address(const char *name, const char *mac) {
 // quality settings from.
 #define BT_ALSA_CONF "/usr/data/alsa.conf"
 
+// The stock bt_init creates this template on first boot. New firmware no longer
+// runs that script, so supply the same defaults when the first sink connects.
+// O_EXCL preserves an existing (possibly user-edited) config, including one
+// created by older firmware. A failed write must not leave a partial template.
+static bool ensure_alsa_conf_template(const char *path) {
+	static const char defaults[] = "pcm.bt_alsa_sink {\n"
+								 "    type plug\n"
+								 "    slave {\n"
+								 "        pcm {\n"
+								 "            type bluealsa\n"
+								 "            device XX:XX:XX:XX:XX:XX\n"
+								 "            profile \"a2dp\"\n"
+								 "            codec \"ldac\"\n"
+								 "            ldac_eqmid \"LDAC_ABR\"\n"
+								 "            uat_eqmid \"UAT_600\"\n"
+								 "        }\n"
+								 "    }\n"
+								 "}\n";
+	int fd = open(path, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0644);
+	if (fd < 0) {
+		if (errno == EEXIST) {
+			return true;
+		}
+		fprintf(stderr, "bluetooth: could not create %s: %s\n", path, strerror(errno));
+		return false;
+	}
+
+	size_t used = 0;
+	while (used < sizeof(defaults) - 1) {
+		ssize_t n = write(fd, defaults + used, sizeof(defaults) - 1 - used);
+		if (n < 0 && errno == EINTR) {
+			continue;
+		}
+		if (n <= 0) {
+			break;
+		}
+		used += (size_t)n;
+	}
+	bool complete = used == sizeof(defaults) - 1;
+	if (close(fd) != 0) {
+		complete = false;
+	}
+	if (!complete) {
+		unlink(path);
+		fprintf(stderr, "bluetooth: could not finish %s\n", path);
+		return false;
+	}
+	fprintf(stderr, "bluetooth: created the default %s\n", path);
+	return true;
+}
+
 static void rewrite_alsa_conf(const char *mac) {
 	char before[4096];
-	if (!slurp(BT_ALSA_CONF, before, sizeof(before))) {
-		return; // no template on this firmware; nothing to keep in step
+	if (!ensure_alsa_conf_template(BT_ALSA_CONF) || !slurp(BT_ALSA_CONF, before, sizeof(before))) {
+		return;
 	}
 
 	char after[4096];
@@ -2452,6 +2632,9 @@ static void on_bus_change(void);
 static bool bring_stack_up(void) {
 	uint32_t began = now_ms();
 
+	if (!wait_out_stock_bringup(&startup_checks, WAIT_STOCK_BRINGUP_MS)) {
+		return false;
+	}
 	ensure_dbus();
 
 	// Before bluetoothd, not after: it opens the node when a pair of headphones
@@ -2600,7 +2783,8 @@ static void bring_stack_down(bool deliberate) {
 	}
 }
 
-void bluetooth_power_down_stack(void) {
+// Worker only: this must not race a JOB_POWER bringing the same stack up.
+static void power_down_boot_stack(void) {
 	if (!process_running("bluetoothd") && !process_running("bluealsa") &&
 		!process_running("brcm_patchram_plus")) {
 		return; // nothing was started: nothing to put down
@@ -2617,6 +2801,14 @@ void bluetooth_power_down_stack(void) {
 		write_file(BT_RFKILL, "0");
 	}
 	fprintf(stderr, "bluetooth: the boot-time stack is down, about %ld KB back\n", freed);
+}
+
+void bluetooth_power_down_stack(void) {
+	if (!worker_running) {
+		return;
+	}
+	job_t job = {.type = JOB_BOOT_CLEANUP};
+	post_job(&job);
 }
 
 static void do_power(bool on, bool deliberate) {
@@ -3014,7 +3206,9 @@ int bluetooth_receiver_codecs(char out[][BT_CODEC_MAX], int max, char *selected,
 	pthread_mutex_lock(&lock);
 	int count = g_rx_codec_count < max ? g_rx_codec_count : max;
 	for (int i = 0; i < count; i++) {
-		snprintf(out[i], BT_CODEC_MAX, "%s", g_rx_codecs[i]);
+		size_t length = strnlen(g_rx_codecs[i], BT_CODEC_MAX - 1);
+		memcpy(out[i], g_rx_codecs[i], length);
+		out[i][length] = '\0';
 	}
 	if (selected && selected_size > 0) {
 		snprintf(selected, (size_t)selected_size, "%s", g_rx_codec_selected);
@@ -3420,6 +3614,15 @@ static void *bluetooth_worker(void *arg) {
 				pthread_mutex_lock(&lock);
 				g_busy = false;
 				pthread_mutex_unlock(&lock);
+				break;
+
+			case JOB_BOOT_CLEANUP:
+				// A switch-on may have arrived after this job was queued. If it
+				// arrives during teardown, JOB_POWER runs only afterwards.
+				if (wait_out_stock_bringup(&cleanup_checks, WAIT_STOCK_BRINGUP_MS) &&
+					!bluetooth_still_wanted()) {
+					power_down_boot_stack();
+				}
 				break;
 
 			case JOB_SCAN:
@@ -4009,6 +4212,18 @@ bool bluetooth_audio_active(void) {
 	bool active = g_enabled && g_a2dp_connected;
 	pthread_mutex_unlock(&lock);
 	return active;
+}
+
+bool bluetooth_a2dp_link_active(void) {
+	pthread_mutex_lock(&lock);
+	bool enabled = g_enabled;
+	bool output = g_a2dp_connected;
+	pthread_mutex_unlock(&lock);
+
+	// The receiving PCM is kept in btstack's signal cache, not in
+	// g_a2dp_connected (which controls the local player's output routing).
+	// Ignore a stale cache while the radio is being switched off.
+	return enabled && (output || btstack_audio_source(NULL, 0));
 }
 
 bool bluetooth_device_audio_connected(const char *mac) {

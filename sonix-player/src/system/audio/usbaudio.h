@@ -7,29 +7,16 @@
 // Audio out of the USB-C port: a DAC or a pair of USB-C headphones, driven as
 // a USB Audio Class device with this player as the host.
 //
-// The port comes up as a sink and a device, and in that state it never sees a
-// peripheral at all -- no Type-C partner, no role change, nothing on the bus.
-// One write changes that:
-//
-//     echo dual > /sys/class/typec/port0/port_type
-//
-// With that, the port toggles its CC pull-ups instead of only ever offering
-// Rd, sees the headphones, becomes source and host, and the kernel enumerates
-// them. Writing "host" to data_role is refused -- a role swap is not something
-// userspace declares -- and is not needed: the port swaps by itself once it is
-// allowed to be dual.
-//
-// So the whole feature is: allow dual role at startup, watch for a sound card
-// that belongs to the USB bus, and point playback at it while it is there.
-//
-// The R1 has no Type-C class: its port is a TCS1421, switched between
-// "NormalDRP" and "Sink" through /sys/devices/platform/tcs1421/tcs1421_cfg.
-// The same rules apply to it, through that attribute (see the .c).
+// Watch for a USB sound card and route playback to it. When the connector is
+// known to be empty, allow its automatic dual-role mode. A live V1 can expose
+// TCS1421 settings without a usable OTG-ID signal; VBUS alone cannot tell a
+// charger/computer from an unenumerated DAC, and dual role is not proof that
+// this board will supply or enumerate one. See the explicit opt-in host trial
+// in usbhostprobe.h for diagnostic retries on supported firmware.
 
-// Allows the port to take a peripheral. Returns whether the write was accepted.
-// Safe when the port is already dual, and harmless where the attribute does not
-// exist. Charging and the USB DAC mode are unaffected: a charger and a PC both
-// present as sources, so the port still settles as sink and device with them.
+// Restore dual-role mode only when the port appears empty. Returns whether it
+// was already set or the request succeeded; false also means the port is in
+// use, unknown, or no supported role attribute is available.
 bool usbaudio_init(void);
 
 // The same write, made again whenever the port is found not to be dual. The

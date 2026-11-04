@@ -10,7 +10,8 @@
 // that runs at boot. See factoryreset.c for why, and for the non-obvious reason
 // it is the only safe way to do it.
 //
-// Does not return: it reboots.
+// Reboots on success. Returns without erasing when a USB host override cannot
+// be safely restored (and in the host build).
 void factoryreset_run(void);
 
 // Whether the rootfs component that does the erasing is actually present. When

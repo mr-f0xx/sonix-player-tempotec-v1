@@ -4,6 +4,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <pthread.h>
+#include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -211,7 +212,9 @@ static bool udc_controller_name(char *out, size_t size) {
 		if (entry->d_name[0] == '.') {
 			continue;
 		}
-		snprintf(out, size, "%s", entry->d_name);
+		size_t len = strlen(entry->d_name);
+		if (len >= size) break; // never bind a silently truncated controller name
+		memcpy(out, entry->d_name, len + 1);
 		found = true;
 		break;
 	}
@@ -410,7 +413,10 @@ static bool adb_apply(bool enabled) {
 	// One USB controller, one gadget at a time: hand it over before adbd
 	// starts, take it back once adbd is gone (see usb.h).
 	if (enabled) {
-		usb_gadget_yield_to_adb();
+		if (!usb_gadget_yield_to_adb()) {
+			pthread_mutex_unlock(&apply_lock);
+			return false;
+		}
 
 		bool started = configfs_is_ours() ? adb_gadget_start()	  // the firmware's script would refuse; see above
 										  : run_script(adb_script(), "start");
@@ -449,9 +455,9 @@ static void *adb_apply_thread(void *arg) {
 
 // The switch, as last set: read by usb.c's watcher thread, which must not go
 // through the config (it is not made for two threads).
-static volatile bool wanted;
+static atomic_bool wanted;
 
-bool adb_switched_on(void) { return wanted; }
+bool adb_switched_on(void) { return atomic_load(&wanted); }
 
 bool adb_set_enabled(bool enabled) {
 	wanted = enabled;
@@ -478,7 +484,10 @@ void adb_apply_saved_state(void) {
 	}
 
 	printf("adb: enabled in the settings, starting it\n");
-	usb_gadget_yield_to_adb(); // no-op this early (the gadget comes up later)
+	if (!usb_gadget_yield_to_adb()) {
+		fprintf(stderr, "adb: USB controller or storage could not be safely released; start refused\n");
+		return;
+	}
 	if (configfs_is_ours()) {
 		adb_gadget_start();
 	} else {

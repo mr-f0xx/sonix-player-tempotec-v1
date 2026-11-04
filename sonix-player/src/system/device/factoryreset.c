@@ -4,6 +4,7 @@
 #include "factoryreset.h"
 
 #include "src/system/audio/audio.h"
+#include "src/system/audio/usbhostprobe.h"
 #include "src/system/core/config.h"
 #include "src/system/library/audiobookdb.h"
 #include "src/system/device/clock.h"
@@ -151,6 +152,12 @@ void factoryreset_run(void) {
 	printf("factoryreset: (build host) would delete %s and %s, write the note and reboot\n", CONFIG_FILE,
 		   EBOOK_CONFIG_FILE);
 #else
+	// Stock recovery erases /data, including the host-trial journal. Do not
+	// proceed until the forced role is safely restored and journal removed.
+	if (!usbhostprobe_cancel()) {
+		fprintf(stderr, "factoryreset: USB role could not be restored; reset refused\n");
+		return;
+	}
 	printf("factoryreset: starting the reset\n");
 
 	if (!factoryreset_supported()) {
@@ -245,6 +252,7 @@ static const char *const KEEP[] = {
 	"bt_macaddr.txt",
 	"device_config.ini",
 	"device_config.ini.tmp",
+	USBHOST_JOURNAL_NAME, // recovery must still see an interrupted host trial
 	"ebook_config.ini",
 	"ebook_config.ini.tmp",
 	"tidal_session.ini",

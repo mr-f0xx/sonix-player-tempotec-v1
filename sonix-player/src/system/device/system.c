@@ -29,6 +29,7 @@
 #include "src/system/bluetooth/btplayer.h"
 #include "src/system/audio/audio.h"
 #include "src/system/audio/alsa-controls.h"
+#include "src/system/audio/usbhostprobe.h"
 #include "src/system/playback/device_state.h"
 #include "src/system/library/audiobookdb.h"
 #include "src/system/audio/eq.h"
@@ -949,6 +950,17 @@ static storage_config_t *g_storage_cfg;
 static system_runtime_t *g_runtime;
 static bool card_released; // under card_lock: set for the power-off, never cleared
 
+bool storage_usb_begin(void) {
+	pthread_mutex_lock(&card_lock);
+	if (card_released) {
+		pthread_mutex_unlock(&card_lock);
+		return false;
+	}
+	return true;
+}
+
+void storage_usb_end(void) { pthread_mutex_unlock(&card_lock); }
+
 void storage_recheck_card(void) {
 	if (!g_storage_cfg || !g_storage_cfg->manage_mount || getenv("SONIX_NO_MOUNT")) {
 		return;
@@ -961,7 +973,7 @@ void storage_recheck_card(void) {
 
 	pthread_mutex_lock(&card_lock);
 
-	if (card_released || (sd_root[0] && is_mounted(sd_root) && mount_is_alive(sd_root))) {
+	if (card_released || usb_storage_active() || (sd_root[0] && is_mounted(sd_root) && mount_is_alive(sd_root))) {
 		pthread_mutex_unlock(&card_lock); // nothing to do, the common case
 		return;
 	}
@@ -1018,6 +1030,12 @@ static void log_open_on_card(void) {
 }
 
 void storage_release_for_shutdown(void) {
+	// This common exit path also runs for reboot and firmware recovery. End a
+	// manual USB host override while the process can still retry or leave its
+	// persistent recovery journal intact, even when no SD card is configured.
+	if (!usbhostprobe_cancel()) {
+		fprintf(stderr, "usbhost: could not restore the port before shutdown; keep computers and chargers disconnected\n");
+	}
 	if (!g_storage_cfg || !g_storage_cfg->manage_mount) {
 		return;
 	}
@@ -1033,6 +1051,11 @@ void storage_release_for_shutdown(void) {
 	}
 
 	card_databases_detach(); // playback, the log, the library and audiobook databases
+	// The card lifecycle may already be detached even though logging was
+	// reopened independently. Always release these idempotent handles before
+	// attempting the unmount, including in that case.
+	logging_suspend_for_usb();
+	btlog_card_release();
 	cover_set_cache_dir(NULL); // the thumbnail cache moves to /tmp
 	radio_store_close();
 	sync();
@@ -1048,13 +1071,28 @@ void storage_release_for_shutdown(void) {
 			printf("storage: card busy (%s), remounted read-only for the power-off\n", strerror(busy));
 		} else {
 			int err = errno;
-			// Still writable, so the log goes back onto it and says why.
-			logging_resume_after_usb();
+			// Inspect *before* resuming the log. Reopening it first itself adds
+			// descriptors 1, 2 and active_stream on the card, falsely blaming
+			// the logger for the failure. These lines go to the temporary log and
+			// are copied to the card when logging resumes below.
 			fprintf(stderr, "storage: the card could not be released for the power-off: unmount %s, read-only %s\n",
 					strerror(busy), strerror(err));
 			log_open_on_card();
-			fflush(stderr);
+			logging_resume_after_usb();
+			logging_flush();
 			sync();
+			// Writing the diagnostics reopened the log on the card. Release it
+			// again before a final attempt, rather than leaving that descriptor
+			// to make init's later unmount fail as well.
+			logging_suspend_for_usb();
+			sync();
+			if (umount(sd_root) == 0) {
+				fprintf(stderr, "storage: card unmounted on the final power-off attempt\n");
+			} else if (mount(NULL, sd_root, NULL, MS_REMOUNT | MS_RDONLY, NULL) == 0) {
+				fprintf(stderr, "storage: card remounted read-only on the final power-off attempt\n");
+			} else {
+				fprintf(stderr, "storage: final power-off release still failed: %s\n", strerror(errno));
+			}
 		}
 	}
 
@@ -1093,7 +1131,7 @@ void *sd_hotplug_thread(void *arg) {
 	char buf[4096 + 1]; // +1 is for null terminator
 
 	while (1) {
-		int len = recv(sock, buf, sizeof(buf), 0);
+		int len = recv(sock, buf, sizeof(buf) - 1, 0);
 		if (len <= 0) {
 			continue;
 		}
@@ -1104,7 +1142,7 @@ void *sd_hotplug_thread(void *arg) {
 			if (strstr(buf, "add@")) {
 				printf("SD Card Inserted\n");
 				pthread_mutex_lock(&card_lock);
-				if (card_released) {
+				if (card_released || usb_storage_active()) {
 					pthread_mutex_unlock(&card_lock);
 					continue;
 				}
@@ -1135,6 +1173,10 @@ void *sd_hotplug_thread(void *arg) {
 			if (strstr(buf, "remove@")) {
 				printf("SD Card Removed\n");
 				pthread_mutex_lock(&card_lock);
+				if (card_released || usb_storage_active()) {
+					pthread_mutex_unlock(&card_lock);
+					continue;
+				}
 				bool was_attached = card_attached;
 				card_databases_detach();
 				unmount_sd(storage_cfg);

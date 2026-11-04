@@ -33,6 +33,7 @@
 #include "src/system/audio/alsa-controls.h"
 #include "src/system/playback/sleeptimer.h"
 #include "src/system/audio/usbaudio.h"
+#include "src/system/audio/usbhostprobe.h"
 #include "src/system/audio/audio.h"
 #include "src/system/library/audiobookdb.h"
 #include "src/system/bluetooth/bluetooth.h"
@@ -156,16 +157,6 @@ static void restore_track_timer_cb(lv_timer_t *timer) {
 	lv_timer_delete(timer);
 	restore_saved_track();
 }
-
-#ifndef HOST_BUILD
-// Powering the Bluetooth radio down waits for three daemons to take their
-// SIGTERM, so it happens off the interface thread. See the call site.
-static void *bluetooth_off_thread(void *arg) {
-	(void)arg;
-	power_bluetooth_off();
-	return NULL;
-}
-#endif
 
 static void sigint_handler(int sig) {
 	(void)sig;
@@ -1998,6 +1989,9 @@ int main(int argc, char **argv) {
 	// On by default: an unset key means a new install, and a saved 0 stays off.
 	audio_set_gapless(config_get_int("audio", "gapless", 1) != 0);
 	clock_init();
+	// A forced host trial may have been interrupted by a player restart. Its
+	// PHY override must be recovered before ADB (or any gadget) can start.
+	usbhostprobe_recover();
 	adb_apply_saved_state();
 	// The buttons on the headset cable: the kernel module starts disabled and
 	// only remembers what was last written to it, so the configured state has
@@ -2472,17 +2466,14 @@ int main(int argc, char **argv) {
 	// Bluetooth off. A firmware whose /etc/init.d/S80_bt_init has not been
 	// replaced powers the radio up at every boot -- rfkill on, patchram,
 	// bluetoothd, bluealsa -- and with the switch off nothing in this player
-	// talks to it, so it is current spent on nothing. Done on a thread of its
-	// own because it waits for the daemons to go, and the interface must not
-	// stall for it.
+	// talks to it, so it is current spent on nothing. The cleanup is queued on
+	// the Bluetooth worker, which keeps a switch-on from racing the teardown and
+	// keeps the interface responsive while the daemons stop.
 	//
 	// Not when Bluetooth is switched on in Wireless: the stack that is already
-	// up is the one bluetooth_init() is about to want.
+	// up is the one bluetooth_init() wants.
 	if (config_get_int("power", "bluetooth_off", 1) && !config_get_int("wireless", "bluetooth", 0)) {
-		pthread_t bt_thread;
-		if (pthread_create(&bt_thread, NULL, bluetooth_off_thread, NULL) == 0) {
-			pthread_detach(bt_thread);
-		}
+		power_bluetooth_off();
 	}
 #endif
 

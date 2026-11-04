@@ -10,6 +10,7 @@
 #include "src/gui/board_profile.h"
 #include "src/gui/shell/theme.h"
 #include "src/system/core/lang.h"
+#include "src/system/audio/usbhostprobe.h"
 #include "src/system/device/firmware.h"
 #include "src/system/device/ota.h"
 #include "src/system/device/power.h"
@@ -550,8 +551,13 @@ static void show_release(void) {
 
 static void install_cb(lv_timer_t *timer) {
 	(void)timer;
+	if (!usbhostprobe_cancel()) {
+		close_card();
+		gui_notify_popup_long("usbhost_restore_failed");
+		return;
+	}
 	firmware_update_start();
-	// Returns only on the host build.
+	// Returns on the host build or if a safety check refuses the update.
 	close_card();
 }
 
@@ -652,6 +658,10 @@ static void sd_run(void *unused) {
 		return;
 	}
 	printf("firmware: update file %s\n", path);
+	if (!usbhostprobe_cancel()) {
+		gui_notify_popup_long("usbhost_restore_failed");
+		return;
+	}
 	firmware_update_start();
 }
 

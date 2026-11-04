@@ -10,6 +10,7 @@
 #include <unistd.h>
 
 #include "src/system/audio/audio.h"
+#include "src/system/audio/usbhostprobe.h"
 #include "src/system/device/clock.h"
 #include "src/system/device/led.h"
 #include "src/system/core/config.h"
@@ -106,6 +107,12 @@ void firmware_update_start(void) {
 #ifdef HOST_BUILD
 	printf("firmware: (host build) would arm recovery and reboot\n");
 #else
+	// Recovery or another firmware may not know how to clear our host
+	// override. Never hand control to it while restoration is outstanding.
+	if (!usbhostprobe_cancel()) {
+		fprintf(stderr, "firmware: USB role could not be restored; update refused\n");
+		return;
+	}
 	printf("firmware: arming recovery\n");
 
 	// The screen fades out the way the power key puts it out, first: what

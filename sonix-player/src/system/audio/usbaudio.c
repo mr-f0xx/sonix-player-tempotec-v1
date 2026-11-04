@@ -3,35 +3,50 @@
 #include "src/system/audio/audio.h"
 #include "src/system/audio/alsa-controls.h"
 #include "src/system/audio/swvolume.h"
+#include "src/system/audio/usbhostprobe.h"
 #include "src/system/core/config.h"
 #include "src/system/bluetooth/bluetooth.h"
 #include "src/system/device/usb.h"
+#include "src/gui/shell/gui.h"
 
 #include <alsa/asoundlib.h>
 #include <dirent.h>
 #include <limits.h>
+#include <stdatomic.h>
+#include <stdlib.h>
 #include <unistd.h>
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
 
+#ifndef TYPEC_PORT_TYPE
 #define TYPEC_PORT_TYPE "/sys/class/typec/port0/port_type"
+#endif
+#ifndef TYPEC_PARTNER
 #define TYPEC_PARTNER "/sys/class/typec/port0-partner"
+#endif
 #define SOUND_CLASS "/sys/class/sound"
+#ifndef USB_AUDIO_BUS
+#define USB_AUDIO_BUS "/sys/bus/usb/devices"
+#endif
 
 // The R1 has no Type-C class. Its CC controller is a TCS1421 set by two GPIOs,
 // and the platform driver takes the mode by name through one attribute and
 // reads the current one back: "Sink", "Source", "StrongDRP" or "NormalDRP".
 // NormalDRP is what the driver starts in, and what the stock player uses as
 // long as its "USB working mode" is left alone; it writes Sink for DAC mode.
+#ifndef TCS1421_CFG
 #define TCS1421_CFG "/sys/devices/platform/tcs1421/tcs1421_cfg"
+#endif
 #define TCS1421_DUAL "NormalDRP"
 #define TCS1421_SINK "Sink"
 
-// And no partner node either. What the R1 does have is the ID line the
-// controller hands to the SoC's OTG block: 0 while this player is the host end
-// of the cable. The stock player reads the same node.
+// Some firmware exposes the OTG ID here, with 0 meaning host. The stock V1
+// 1.3 kernel instead uses dwc2_new and does not expose this old node. Absence
+// is *unknown*, not a device/sink role or evidence of an empty connector.
+#ifndef DWC2_OTG_ID
 #define DWC2_OTG_ID "/sys/devices/platform/jz-dwc2/dwc2/otg_id"
+#endif
 
 // How long something may sit on the port without turning into a sound card
 // before it is taken for a host. Enumerating a USB audio device takes well
@@ -39,20 +54,11 @@
 // connects a beat late rather than not at all.
 #define HANDOVER_SECS 3
 
-// The same wait when nothing at all has enumerated on the host bus -- not an
-// audio device, not any device. That is not a phone being plain: it is also
-// what a bus-powered dongle looks like for the first seconds after this port
-// raised VBUS for it. The dongle has to come out of reset, bring its codec up
-// and answer the first reset from the controller, and only then does an entry
-// appear under /sys/bus/usb/devices. A self-powered DAC (an RME, a desktop
-// unit with its own supply) is already running when the cable goes in and is
-// on the bus within a second, which is why those were found and a JCally
-// dongle was not: three seconds later the port was written to sink, the
-// dongle's power went away with the host role, and the cable had to be pulled
-// to try again. Something that has enumerated and is not audio keeps the short
-// wait above; only the silent port gets this longer one, so a phone that has
-// put its device side to sleep is handed the host role a few seconds later
-// than it was, and nothing else about it changes.
+// A bus-powered dongle can need longer before its first enumeration. Give a
+// silent bus more time only when a host-side signal is actually available.
+// Silence alone does not identify a DAC, establish the role, or prove that a
+// previous sink write interrupted it. An enumerated non-audio device keeps the
+// short wait above.
 #define POWERUP_SECS 10
 
 // And how long the port must stay empty before dual role is offered again.
@@ -66,7 +72,7 @@
 // mean what this file thinks it means.
 #define ID_SETTLE_SECS 3
 
-static int active_card = -1;			// the USB card in use, -1 when none
+static atomic_int active_card = -1;		// the USB card in use, -1 when none
 static char active_name[64];			// its id, for the interface
 static char volume_control[64];			// the control the level is written to
 static long volume_min, volume_max;
@@ -153,7 +159,7 @@ static bool port_is_dual(void) {
 // (see partner_present()), and a phone that has won the host role from then on
 // is charged and never shown the card.
 static bool host_bus_has_device(void) {
-	DIR *dir = opendir("/sys/bus/usb/devices");
+	DIR *dir = opendir(USB_AUDIO_BUS);
 	if (!dir) {
 		return false;
 	}
@@ -178,7 +184,7 @@ static bool host_bus_has_device(void) {
 // difference is seconds a slow probe can need and a handover must not be
 // allowed to take away.
 static bool bus_has_audio_device(void) {
-	DIR *dir = opendir("/sys/bus/usb/devices");
+	DIR *dir = opendir(USB_AUDIO_BUS);
 	if (!dir) {
 		return false;
 	}
@@ -188,9 +194,9 @@ static bool bus_has_audio_device(void) {
 		if (!strchr(de->d_name, ':')) {
 			continue; // the device's own entry says nothing of its classes
 		}
-		char path[160];
+		char path[PATH_MAX];
 		char line[16];
-		snprintf(path, sizeof(path), "/sys/bus/usb/devices/%s/bInterfaceClass", de->d_name);
+		snprintf(path, sizeof(path), "%s/%s/bInterfaceClass", USB_AUDIO_BUS, de->d_name);
 		FILE *f = fopen(path, "r");
 		if (!f) {
 			continue;
@@ -319,6 +325,7 @@ static void port_become_sink(void) {
 // unbound as the cable comes and goes. Checking and rewriting costs one read a
 // second and a write only when the answer is wrong.
 bool usbaudio_ensure_dual(void) {
+	if (usbhostprobe_active()) return false; // the explicit host trial owns the role
 	if (port_is_dual()) {
 		return true;
 	}
@@ -344,8 +351,13 @@ bool usbaudio_ensure_dual(void) {
 // the same failure as doing it later, and here there is no reason to: whatever
 // is on the port arrived before this player did.
 bool usbaudio_init(void) {
-	if (partner_present()) {
-		fprintf(stderr, "usbaudio: something is already on the port at startup; leaving the role alone\n");
+	usbhostprobe_recover(); // also called before ADB starts; safe to repeat
+	if (usbhostprobe_active()) return false;
+	// On TCS1421, a PC or charger can make VBUS present without a readable
+	// OTG-ID or a host-bus device. partner_present() alone misses that case
+	// and would change the role under an already-connected source at boot.
+	if (!port_empty()) {
+		fprintf(stderr, "usbaudio: the port may already be in use at startup; leaving the role alone\n");
 		return false;
 	}
 	return usbaudio_ensure_dual();
@@ -702,9 +714,11 @@ void usbaudio_apply_volume(int percent) {
 // The R1 runs the same rules on its TCS1421. A computer's USB-C port is often
 // dual-role as well, and against one the R1 can come out the host end: then
 // the cable neither charges it nor shows anything to the computer.
-// What the R1's port looks like, written to the log each time it changes: the
-// TCS1421 mode, the ID line, VBUS and the host bus. The four together are what
-// says why a cable did or did not end up where it should.
+static void read_attr_line(const char *path, char *out, size_t out_size);
+static void log_port_state(const char *why);
+
+// These are observations, not a way to identify an unenumerated accessory:
+// an unreadable ID and VBUS do not establish either the power or data role.
 static void tcs1421_trace(void) {
 	char mode[32];
 	tcs1421_mode(mode, sizeof(mode));
@@ -717,27 +731,41 @@ static void tcs1421_trace(void) {
 	}
 	int vbus = usb_vbus_present() ? 1 : 0;
 	int bus = host_bus_has_device() ? 1 : 0;
+	int audio = bus_has_audio_device() ? 1 : 0;
 
 	static char said_mode[32];
-	static int said_id = -2, said_vbus = -1, said_bus = -1;
-	if (strcmp(mode, said_mode) == 0 && id == said_id && vbus == said_vbus && bus == said_bus) {
+	static int said_id = -2, said_vbus = -1, said_bus = -1, said_audio = -1;
+	if (strcmp(mode, said_mode) == 0 && id == said_id && vbus == said_vbus && bus == said_bus && audio == said_audio) {
 		return;
 	}
 	snprintf(said_mode, sizeof(said_mode), "%s", mode);
 	said_id = id;
 	said_vbus = vbus;
 	said_bus = bus;
-	fprintf(stderr, "usbaudio: port %s, otg_id %d%s, vbus %d, device on the host bus %d\n", mode[0] ? mode : "?", id,
-			otg_id_untrusted ? " (not trusted)" : "", vbus, bus);
+	said_audio = audio;
+	fprintf(stderr, "usbaudio: port %s, otg_id %d%s, vbus %d, device on the host bus %d, audio interface %d\n",
+			mode[0] ? mode : "?", id, otg_id_untrusted ? " (not trusted)" : "", vbus, bus, audio);
+	if (id < 0) {
+		static bool said_missing;
+		if (!said_missing) {
+			said_missing = true;
+			fprintf(stderr, "usbaudio: %s is missing, unreadable or invalid; the USB data role is unknown\n", DWC2_OTG_ID);
+		}
+		if (vbus && !bus) {
+			// This was the state in the V1 JCally report. Do not infer that a
+			// DAC, a charger or a PC is attached and do not change role on it.
+			log_port_state("VBUS changed, but no host device has enumerated");
+		}
+	}
 }
 
-// Whether this player is the host end of the cable right now, supplying the
-// port's power: the Type-C power role reads "source", or on the R1 the ID line
-// says host. A computer or a charger that powers this player leaves it the sink
-// and the device, and then there is no peripheral that needs time to start.
+// Evidence that this controller is hosting a USB device. The TCS1421 ID node
+// is absent on some V1 kernels, but an enumerated peripheral on its host bus
+// is still positive evidence even without that node. This is a *data-role*
+// indication, not proof of who supplies VBUS.
 static bool port_is_host_side(void) {
 	if (port_kind() == PORT_TCS1421) {
-		return !otg_id_untrusted && otg_id_says_host();
+		return host_bus_has_device() || (!otg_id_untrusted && otg_id_says_host());
 	}
 	FILE *f = fopen("/sys/class/typec/port0/power_role", "r");
 	if (!f) {
@@ -765,15 +793,21 @@ static void read_attr_line(const char *path, char *out, size_t out_size) {
 }
 
 static void log_port_state(const char *why) {
-	char power_role[48], data_role[48], port_type[48];
+	char power_role[48], data_role[48], port_type[48], udc_state[48];
 	read_attr_line("/sys/class/typec/port0/power_role", power_role, sizeof(power_role));
 	read_attr_line("/sys/class/typec/port0/data_role", data_role, sizeof(data_role));
 	read_attr_line(TYPEC_PORT_TYPE, port_type, sizeof(port_type));
-	fprintf(stderr, "usbaudio: %s: port_type '%s', power_role '%s', data_role '%s', partner %s\n", why, port_type,
-			power_role, data_role, partner_present() ? "yes" : "no");
+	read_attr_line("/sys/class/udc/13500000.otg_new/state", udc_state, sizeof(udc_state));
+	if (port_kind() == PORT_TCS1421) {
+		tcs1421_mode(port_type, sizeof(port_type));
+	}
+	fprintf(stderr, "usbaudio: %s: port '%s', power_role '%s', data_role '%s', UDC state '%s', partner detected %s\n",
+			why, port_type[0] ? port_type : "?", power_role[0] ? power_role : "?",
+			data_role[0] ? data_role : "?", udc_state[0] ? udc_state : "?", partner_present() ? "yes" : "no");
 
-	DIR *dir = opendir("/sys/bus/usb/devices");
+	DIR *dir = opendir(USB_AUDIO_BUS);
 	if (!dir) {
+		fprintf(stderr, "usbaudio:   USB host bus directory is unavailable\n");
 		return;
 	}
 	int count = 0;
@@ -783,14 +817,14 @@ static void log_port_state(const char *why) {
 		if (name[0] < '0' || name[0] > '9' || !strchr(name, '-') || strchr(name, ':')) {
 			continue;
 		}
-		char path[192], vid[16], pid[16], product[64], speed[16];
-		snprintf(path, sizeof(path), "/sys/bus/usb/devices/%s/idVendor", name);
+		char path[PATH_MAX], vid[16], pid[16], product[64], speed[16];
+		snprintf(path, sizeof(path), "%s/%s/idVendor", USB_AUDIO_BUS, name);
 		read_attr_line(path, vid, sizeof(vid));
-		snprintf(path, sizeof(path), "/sys/bus/usb/devices/%s/idProduct", name);
+		snprintf(path, sizeof(path), "%s/%s/idProduct", USB_AUDIO_BUS, name);
 		read_attr_line(path, pid, sizeof(pid));
-		snprintf(path, sizeof(path), "/sys/bus/usb/devices/%s/product", name);
+		snprintf(path, sizeof(path), "%s/%s/product", USB_AUDIO_BUS, name);
 		read_attr_line(path, product, sizeof(product));
-		snprintf(path, sizeof(path), "/sys/bus/usb/devices/%s/speed", name);
+		snprintf(path, sizeof(path), "%s/%s/speed", USB_AUDIO_BUS, name);
 		read_attr_line(path, speed, sizeof(speed));
 		fprintf(stderr, "usbaudio:   bus device %s %s:%s '%s' %s Mb/s\n", name, vid, pid, product, speed);
 		count++;
@@ -805,9 +839,9 @@ static void log_port_state(const char *why) {
 // given up on. usb.c asks (through usbaudio_handover_pending()) before it
 // writes "sink" for its own reasons, so that rebuilding the storage gadget
 // cannot take the host role away from a dongle that is still starting up.
-static bool handover_pending;
+static atomic_bool handover_pending;
 
-bool usbaudio_handover_pending(void) { return handover_pending; }
+bool usbaudio_handover_pending(void) { return atomic_load(&handover_pending); }
 
 static void arbitrate_port(bool audio_present) {
 	static time_t attached_at;	// when the current non-audio partner appeared
@@ -818,12 +852,22 @@ static void arbitrate_port(bool audio_present) {
 		tcs1421_trace();
 	}
 
-	handover_pending = false;
+	if (usbhostprobe_active()) {
+		// Its explicit Source/host request must not be replaced by NormalDRP
+		// or sink while the trial or a failed restoration owns the port.
+		handover_pending = true;
+		attached_at = empty_at = 0;
+		return;
+	}
 
 	if (audio_present) {
 		attached_at = 0;
 		empty_at = 0;
-		usbaudio_ensure_dual();
+		// The card can be present even while Bluetooth owns the playback
+		// route. Protect the host controller from gadget housekeeping then too.
+		handover_pending = true;
+		// A role write can tear down a working host device. Leave the
+		// current mode alone until that audio card has actually gone away.
 		return;
 	}
 
@@ -841,6 +885,7 @@ static void arbitrate_port(bool audio_present) {
 		// seen would then be a matter of timing -- of luck. The three
 		// seconds are for things that are plainly not sound cards.
 		if (bus_has_audio_device()) {
+			handover_pending = true;
 			attached_at = 0;
 			return;
 		}
@@ -861,6 +906,7 @@ static void arbitrate_port(bool audio_present) {
 		return;
 	}
 
+	handover_pending = false;
 	attached_at = 0;
 	if (!port_empty()) {
 		empty_at = 0;
@@ -890,6 +936,21 @@ void usbaudio_poll(void) {
 	// the arbitration is about the socket, not about where the sound goes.
 	static int empty_polls;
 	int card = find_usb_card();
+	if (usbhostprobe_active()) {
+		usbhost_probe_event_t event = usbhostprobe_poll(card >= 0, bus_has_audio_device());
+		if (event == USBHOST_EVENT_CARD) {
+			log_port_state("external host trial: audio card appeared");
+			gui_notify_popup("usbhost_card_found");
+		} else if (event == USBHOST_EVENT_TIMEOUT) {
+			log_port_state("external host trial timed out");
+			gui_notify_popup("usbhost_not_found");
+		} else if (event == USBHOST_EVENT_RESTORE_FAILED) {
+			log_port_state("external host trial: role restore failed");
+			gui_notify_popup_long("usbhost_restore_failed");
+		} else if (event == USBHOST_EVENT_RESTORED) {
+			gui_notify_popup("usbhost_restored");
+		}
+	}
 	if (card >= 0) {
 		empty_polls = 0;
 	} else if (active_card >= 0 && empty_polls < CARD_GRACE_POLLS) {

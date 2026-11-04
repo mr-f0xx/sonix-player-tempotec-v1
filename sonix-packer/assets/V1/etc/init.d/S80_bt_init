@@ -1,0 +1,5 @@
+#!/bin/sh
+# Sonix starts and stops Bluetooth itself, according to the user's switch.
+# The stock background bt_init races it for the UART and can power hci0 off
+# after Sonix has already started. Keep the init hook harmless on all actions.
+exit 0

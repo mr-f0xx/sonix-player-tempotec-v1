@@ -47,6 +47,8 @@ int gui_post_wake_fd(void);
 void gui_post_service(void);
 
 void gui_notify_popup(const char *text);
+// A longer, dismissible notice for safety warnings that need time to read.
+void gui_notify_popup_long(const char *text);
 
 // The warning the battery guard gives at five percent (batteryguard.h): the red
 // card, held longer than a toast because it is the last thing the player says

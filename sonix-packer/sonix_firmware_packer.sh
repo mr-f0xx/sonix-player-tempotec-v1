@@ -25,10 +25,10 @@
 #
 # assets/V1/ is the complete overlay. It carries the model-independent Sonix
 # resource and web trees, the V1's own system-info.json, the boot screens and
-# its fonts, and deliberately nothing kernel-facing: the stock touch, audio,
-# boot and init files of the official firmware stay in place. That is why the
-# TempoTec V1 update is a small overlay on a real TempoTec image rather than a
-# port of another player's rootfs.
+# its fonts. It leaves the stock touch, audio and boot drivers in place, but
+# replaces S80_bt_init with a no-op: Sonix owns Bluetooth startup itself and
+# the stock background script would race it. The TempoTec V1 update remains a
+# small overlay on a real TempoTec image rather than another player's rootfs.
 #
 # No questions asked: run it and it does the lot.
 #
