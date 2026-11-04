@@ -1,6 +1,6 @@
 ![Sonix Player for TempoTec Variations V1 cycling through the Tokyo Night, Amber on Black and OLED main menus](screenshots/readme-banner.gif)
 
-This repository is a community port of the original **[Sonix Player](https://github.com/Jepl4r/sonix-player)** project by **[Jepl4r](https://github.com/Jepl4r)**
+This repository is a community port of the original **[Sonix Player](https://github.com/Jepl4r/sonix-player)** project by **[Jepl4r](https://github.com/Jepl4r)** for the Tempotec Variations V1. (It's currently not working on stock firmware 1.3, be patient since the firmware is not publicly released yet.)
 
 The firmware builder starts with an official V1 update package, replaces the stock music player and its interface with Sonix, then repackages the update as `v1.upt`.
 
