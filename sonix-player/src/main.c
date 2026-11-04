@@ -26,6 +26,7 @@
 #include "src/gui/shell/gui.h"
 #include "src/gui/shell/chargescreen.h"
 #include "src/gui/nowplaying/player.h"
+#include "src/gui/settings/language.h"
 #include "src/gui/settings/powersettings.h"
 #include "src/gui/settings/settings.h"
 #include "src/system/device/adb.h"
@@ -59,6 +60,7 @@
 #include "src/system/streaming/podcastsubs.h"
 #include "src/system/streaming/tidalcache.h"
 #include "src/system/streaming/streamkeys.h"
+#include "src/system/addons/addons.h"
 #include "src/system/lastfm/lastfm.h"
 #include "src/system/listenbrainz/listenbrainz.h"
 #include "src/system/library/library.h"
@@ -2010,13 +2012,22 @@ int main(int argc, char **argv) {
 	// The streaming services' application keys, and Qobuz with them. Before
 	// the GUI builds its pages, because the Qobuz page is drawn one way or
 	// the other depending on whether the keys are there.
+	// The Plugins switches are read here, before the scrobblers start. gui_init()
+	// seeds them too, but that is after this point; seeding is idempotent.
+	addons_seed(language_needed());
 	streamkeys_init();
 	qobuz_init();
 	tidal_init();
-	lastfm_init();
+	// A module switched off in Settings -> Plugins is never started, so it
+	// neither scrobbles nor holds the network open.
+	if (addons_enabled("lastfm")) {
+		lastfm_init();
+	}
 	// ListenBrainz needs no application keys: its account is a user token
 	// pasted in its settings page, and the module starts with or without it.
-	listenbrainz_init();
+	if (addons_enabled("listenbrainz")) {
+		listenbrainz_init();
+	}
 
 	lv_init();
 
@@ -2281,7 +2292,9 @@ int main(int argc, char **argv) {
 	if (streamkeys_load_card(card_root)) {
 		qobuz_init();
 		tidal_init();
-		lastfm_init();
+		if (addons_enabled("lastfm")) {
+			lastfm_init();
+		}
 	}
 
 	qobuzcache_set_root(card_root && card_root[0] ? card_root : gui_cfg.sd_root_path);
