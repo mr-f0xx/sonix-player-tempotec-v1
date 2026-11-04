@@ -225,7 +225,7 @@ jobs:
           COMPATIBILITY: ${{ steps.stock.outputs.compatibility }}
           BUILT_SHA: ${{ steps.source.outputs.sha }}
           BUILT_REF: ${{ github.ref_type }} ${{ inputs.build_ref || github.ref_name }}
-          BUILD_KIND: ${{ (github.ref_type == 'tag' || inputs.publish_release_tag != '') && 'release image' || 'test build, not published to a release' }}
+          BUILD_KIND: ${{ (github.ref_type == 'tag' || inputs.publish_release_tag != '') && 'release image' || 'CI build, not published to a release' }}
         run: |
           set -euo pipefail
           out="$RUNNER_TEMP/sonix-tempotec-v1"
