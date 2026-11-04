@@ -8,7 +8,7 @@ The firmware builder starts with an official V1 update package, replaces the sto
 
 ## Previews
 
-Interface previews of the stock UI of Sonix, rendered at the V1's native 240 × 320 resolution. Click any picture to open it full size. (This is not the default font neither the color)
+Showcase of the default theme. Click any picture to open it full size. (This is not the default font neither the color)
 
 <table>
   <tr>
@@ -137,7 +137,7 @@ Showcase of **Amber** appearance: fiery orange accents on a pure black backgroun
 
 ### OLED theme
 
-Showcase of **OLED** appearance: true black backgrounds with white as the accent, on the same V1 layouts as Tokyo Night and Amber. Nothing is filled grey: cards, rows and buttons are as black as the page, and Now Playing sets the sleeve on black instead of on a blurred copy of it. The main menu leaves out the title and tagline, so its six tiles start right under the status bar. Rendered by the host simulator with the V1 profile.
+Showcase of **OLED** appearance: true black backgrounds with white as the accent, on the same V1 layouts as Tokyo Night and Amber.
 
 <table>
   <tr>
