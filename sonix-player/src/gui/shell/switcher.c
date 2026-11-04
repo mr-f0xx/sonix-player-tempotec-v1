@@ -30,6 +30,8 @@ static lv_obj_t *back_btn_icon;
 // artwork backdrop (see back_btn_over_cover / back_btn_player_mode).
 static bool chevron_in_player;
 static bool chevron_over_cover;
+static bool chevron_cover_tint;
+static lv_color_t chevron_tint_color;
 
 // How much of the chevron shows over the player's artwork (LV_OPA_COVER = all).
 #define CHEVRON_OVER_COVER_OPA LV_OPA_60
@@ -719,7 +721,11 @@ static void chevron_apply_color(void) {
 	if (!back_btn_icon) {
 		return;
 	}
-	if (theme_is_monochrome()) {
+	if (chevron_in_player && chevron_cover_tint) {
+		lv_obj_set_style_image_recolor(back_btn_icon, chevron_tint_color, 0);
+		lv_obj_set_style_image_recolor_opa(back_btn_icon, LV_OPA_COVER, 0);
+		lv_obj_remove_local_style_prop(back_btn_icon, LV_STYLE_IMAGE_OPA, 0);
+	} else if (theme_is_monochrome()) {
 		lv_obj_set_style_image_recolor(back_btn_icon,
 									   theme_player_chrome_color(THEME_PLAYER_CHROME_CHEVRON), 0);
 		lv_obj_set_style_image_recolor_opa(back_btn_icon, LV_OPA_COVER, 0);
@@ -738,6 +744,12 @@ static void chevron_apply_color(void) {
 
 void back_btn_over_cover(bool over_cover) {
 	chevron_over_cover = over_cover;
+	chevron_apply_color();
+}
+
+void back_btn_cover_tint(bool enabled, lv_color_t color) {
+	chevron_cover_tint = enabled;
+	chevron_tint_color = color;
 	chevron_apply_color();
 }
 

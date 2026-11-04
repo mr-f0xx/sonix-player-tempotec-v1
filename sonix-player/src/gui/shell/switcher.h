@@ -45,6 +45,11 @@ void back_btn_player_mode(bool in_player);
 // always-dark artwork backdrop, so it goes white regardless of the theme.
 void back_btn_over_cover(bool over_cover);
 
+// The player's optional cover tint also owns the chevron. `enabled` is false
+// when there is no artwork or the option is off, which restores the ordinary
+// player/theme colour rules above.
+void back_btn_cover_tint(bool enabled, lv_color_t color);
+
 // Horizontal offset for the chevron, so it can ride whatever is being
 // dragged (the player sheet's slide uses it; the page swipe-back does its
 // own). 0 puts it back in place.
