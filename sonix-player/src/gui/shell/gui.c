@@ -121,7 +121,7 @@ static lv_timer_t *popup_timer;
 #define POPUP_MS 3000
 // A low battery is not a notice: it is the last thing the player says before it
 // goes, and the screen it wakes up for is worth more than three seconds.
-#define POPUP_MS_LOW_BATTERY 8000
+#define POPUP_MS_WARNING 8000
 
 // ---------------------------------------------------------------------------
 // gui_post: the bridge from any thread onto the GUI thread.
@@ -353,6 +353,7 @@ static void popup_notify(const char *text, const lv_image_dsc_t *icon, lv_color_
 }
 
 void gui_notify_popup(const char *text) { popup_notify(text, NULL, lv_color_black(), POPUP_MS); }
+void gui_notify_popup_long(const char *text) { popup_notify(text, NULL, lv_color_black(), POPUP_MS_WARNING); }
 
 bool gui_card_available(void) {
 	if (usb_storage_active()) {
@@ -374,7 +375,7 @@ void gui_notify_battery_low(void) {
 	// the player is being woken up for it. The caller has already brought the
 	// panel back (see battery_guard_tick() in power.c): a warning over a dark
 	// screen is a warning nobody gets.
-	popup_notify("battery_low_warning", &icon_circle_alert, lv_color_make(0xe0, 0x1b, 0x24), POPUP_MS_LOW_BATTERY);
+	popup_notify("battery_low_warning", &icon_circle_alert, lv_color_make(0xe0, 0x1b, 0x24), POPUP_MS_WARNING);
 }
 
 // ---------------------------------------------------------------------------

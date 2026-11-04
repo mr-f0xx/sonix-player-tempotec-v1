@@ -131,12 +131,10 @@ void bluetooth_forget(const char *mac);
 // The outcome of the last action the user asked for, reported once.
 bt_op_t bluetooth_take_op_result(char *name_out, int name_size);
 
-// Puts the radio and its daemons down, in order, without opening or touching
-// the system bus. For the one moment that needs it: the boot of a player whose
-// Bluetooth switch is off, on a firmware whose init script started the whole
-// stack anyway. The firmware's own bt_suspend cannot be used for this -- it
-// ends with `killall dbus-daemon`, and the bus it would take away is the one
-// this player's media controls and volume bridge live on.
+// Queues cleanup of a stock boot-time stack when Bluetooth is switched off.
+// The Bluetooth worker serializes it with switch-on, waits for any stock init
+// script to finish, and stops the radio and daemons without touching the bus.
+// The firmware's bt_suspend cannot be used: it kills dbus-daemon as well.
 void bluetooth_power_down_stack(void);
 
 // ---------------------------------------------------------------------------
@@ -165,6 +163,13 @@ void bluetooth_power_down_stack(void);
 // output, and a toggle that leaves the music in the jack while they are
 // connected only confuses.
 bool bluetooth_audio_active(void);
+
+// An A2DP PCM in either direction: headphones receiving from this player OR
+// a phone sending to its receiver. Unlike bluetooth_audio_active(), this is
+// for radio coexistence, not deciding where the player's own audio should go.
+// A configured but paused link still counts. Safe and cheap from any thread.
+bool bluetooth_a2dp_link_active(void);
+
 // Whether this particular paired device owns the A2DP sink PCM. Connected is
 // only the BlueZ ACL link and can remain up after its audio profile has dropped.
 bool bluetooth_device_audio_connected(const char *mac);

@@ -43,6 +43,29 @@ class BaseBuildTest(unittest.TestCase):
                          [self.product(), self.product()]):
             self.assertEqual(module.extract_base_build(json.dumps(products)), "")
 
+    def test_bluetooth_init_overlay(self):
+        # Use the packer's actual tar-merge method against a fake stock rootfs.
+        # The old hook would launch bt_init on every boot and race Sonix.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "rootfs"
+            init = root / "etc/init.d/S80_bt_init"
+            init.parent.mkdir(parents=True)
+            marker = root / "stock-started"
+            init.write_text(f"#!/bin/sh\nprintf started > '{marker}'\n")
+            init.chmod(0o755)
+            source = PACKER / "assets/V1"
+            archive = Path(tmp) / "overlay.tar"
+            subprocess.run(["tar", "cf", str(archive), "."], cwd=source, check=True)
+            subprocess.run(["tar", "xf", str(archive)], cwd=root, check=True)
+            # The packer explicitly normalizes the init hook's execute bit.
+            init.chmod(0o755)
+            for action in ("start", "stop", "restart"):
+                subprocess.run([str(init), action], check=True)
+            self.assertFalse(marker.exists())
+            self.assertEqual(init.read_text(), (source / "etc/init.d/S80_bt_init").read_text())
+            packer = (PACKER / "sonix_firmware_packer.sh").read_text()
+            self.assertIn("etc/init.d/S80_bt_init", packer)
+
     def test_actual_packer_substitution(self):
         script = (PACKER / "sonix_firmware_packer.sh").read_text()
         line = next(line for line in script.splitlines()

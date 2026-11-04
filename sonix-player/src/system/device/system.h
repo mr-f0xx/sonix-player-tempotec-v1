@@ -109,8 +109,15 @@ void storage_card_files_recheck(void);
 // under the export) and hardening each of them one at a time has not worked.
 void storage_recheck_card(void);
 
-// Before the machine is powered off or rebooted: playback stops, everything
-// kept open on the card is closed, and the card is unmounted, or remounted
+// USB takes this lock while marking its card export active, so a supervisor or
+// hotplug operation already in flight cannot mount underneath the transition.
+// False means shutdown has already released the card; no unlock is needed.
+bool storage_usb_begin(void);
+void storage_usb_end(void);
+
+// Before the machine is powered off or rebooted: an experimental USB host
+// override is restored if possible, playback stops, everything kept open on
+// the card is closed, and the card is unmounted, or remounted
 // read-only when something still holds it. From then on nothing mounts it
 // again. init's own `umount -a -r` runs while this process is alive and finds
 // the card busy, which leaves FAT and exFAT with their volume-dirty flag set.

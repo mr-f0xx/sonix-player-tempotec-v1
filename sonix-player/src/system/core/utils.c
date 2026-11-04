@@ -4,6 +4,7 @@
 #include <malloc.h>
 #include "utils.h"
 
+#include <errno.h>
 #include <signal.h>
 #include <stdbool.h>
 #include <stddef.h>
@@ -56,26 +57,57 @@ uint64_t utils_isqrt64(uint64_t v) {
 
 char *read_file_content(const char *filename) {
 	FILE *file = fopen(filename, "rb");
-	if (file == NULL) {
-		return NULL;
-	}
+	if (!file) return NULL;
 
-	fseek(file, 0, SEEK_END);
-	long filesize = ftell(file);
-	fseek(file, 0, SEEK_SET);
-
-	char *content = (char *)malloc(filesize + 1); // +1 for the null terminator
-	if (content == NULL) {
+	// procfs and configfs attributes do not necessarily have a meaningful
+	// seekable size. Read to EOF instead of treating a failed SEEK_END or a
+	// reported size of zero as an empty file.
+	size_t capacity = 4096, length = 0;
+	char *content = malloc(capacity + 1);
+	if (!content) {
+		int error = errno;
 		fclose(file);
+		errno = error;
 		return NULL;
 	}
-
-	// Terminate at what was actually read, which can be short of filesize.
-	size_t bytes_read = fread(content, 1, filesize, file);
-	content[bytes_read] = '\0';
-
-	fclose(file);
-
+	for (;;) {
+		errno = 0;
+		length += fread(content + length, 1, capacity - length, file);
+		if (ferror(file)) {
+			int error = errno ? errno : EIO;
+			free(content);
+			fclose(file);
+			errno = error;
+			return NULL;
+		}
+		if (feof(file)) break;
+		if (length == capacity) {
+			if (capacity > (SIZE_MAX - 1) / 2) {
+				free(content);
+				fclose(file);
+				errno = EOVERFLOW;
+				return NULL;
+			}
+			size_t next = capacity * 2;
+			char *larger = realloc(content, next + 1);
+			if (!larger) {
+				int error = errno;
+				free(content);
+				fclose(file);
+				errno = error;
+				return NULL;
+			}
+			content = larger;
+			capacity = next;
+		}
+	}
+	content[length] = '\0';
+	if (fclose(file) != 0) {
+		int error = errno;
+		free(content);
+		errno = error;
+		return NULL;
+	}
 	return content;
 }
 

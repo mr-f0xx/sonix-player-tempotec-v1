@@ -17,6 +17,97 @@ static int good(const uint8_t *map) {
 	return count;
 }
 
+static int sends;
+static int last_freq;
+static bool fail_send;
+
+static bool fake_apply(int freq) {
+	sends++;
+	last_freq = freq;
+	return !fail_send;
+}
+
+static void test_follow(void) {
+	btafh_follow_t follow = {0};
+	sends = 0;
+	fail_send = false;
+
+	/* No A2DP, no known frequency, and 5 GHz must not apply a restriction. */
+	btafh_follow_wifi(&follow, 0, true, false, 2437, fake_apply);
+	btafh_follow_wifi(&follow, 1, true, true, 0, fake_apply);
+	btafh_follow_wifi(&follow, 2, true, true, 5180, fake_apply);
+	assert(sends == 0);
+
+	/* A connected link sends immediately; unchanged state refreshes after
+	 * fifteen seconds so a reset controller gets the restriction back. */
+	btafh_follow_wifi(&follow, 100, true, true, 2437, fake_apply);
+	assert(sends == 1 && last_freq == 2437 && follow.sent_freq == 2437);
+	btafh_follow_wifi(&follow, 15099, true, true, 2437, fake_apply);
+	assert(sends == 1);
+	btafh_follow_wifi(&follow, 15100, true, true, 2437, fake_apply);
+	assert(sends == 2 && last_freq == 2437);
+
+	/* Roaming sends the new target immediately, even inside the retry period.
+	 * Failure leaves the old map recorded and retries the new one at 1 s. */
+	fail_send = true;
+	btafh_follow_wifi(&follow, 15110, true, true, 2412, fake_apply);
+	assert(sends == 3 && last_freq == 2412 && follow.sent_freq == 2437);
+	btafh_follow_wifi(&follow, 16109, true, true, 2412, fake_apply);
+	assert(sends == 3);
+	fail_send = false;
+	btafh_follow_wifi(&follow, 16110, true, true, 2412, fake_apply);
+	assert(sends == 4 && follow.sent_freq == 2412);
+
+	/* Losing the incoming or outgoing link clears the map. In particular a
+	 * failed clear must not be recorded as success while the controller lives. */
+	fail_send = true;
+	btafh_follow_wifi(&follow, 16120, true, false, 2412, fake_apply);
+	assert(sends == 5 && last_freq == 0 && follow.sent_freq == 2412);
+	btafh_follow_wifi(&follow, 17119, true, false, 2412, fake_apply);
+	assert(sends == 5);
+	fail_send = false;
+	btafh_follow_wifi(&follow, 17120, true, false, 2412, fake_apply);
+	assert(sends == 6 && last_freq == 0 && follow.sent_freq == 0);
+	btafh_follow_wifi(&follow, 50000, true, false, 2412, fake_apply);
+	assert(sends == 6);
+
+	/* A 5 GHz roam also clears. Off pauses sends but remembers the old map:
+	 * a transient park may not reset it. On re-enable the same restriction is
+	 * reasserted even inside the 15 s refresh window. */
+	btafh_follow_wifi(&follow, 50001, true, true, 2437, fake_apply);
+	btafh_follow_wifi(&follow, 50002, true, true, 5180, fake_apply);
+	assert(sends == 8 && last_freq == 0);
+	btafh_follow_wifi(&follow, 50003, true, true, 2437, fake_apply);
+	btafh_follow_wifi(&follow, 50004, false, true, 2437, fake_apply);
+	assert(sends == 9 && follow.sent_freq == 2437 && follow.needs_refresh && !follow.attempted);
+	btafh_follow_wifi(&follow, 50005, true, true, 2437, fake_apply);
+	assert(sends == 10 && last_freq == 2437 && !follow.needs_refresh);
+
+	/* If it comes back with no link, clear the potentially retained map; a
+	 * failed clear is retried and only success forgets the restriction. */
+	btafh_follow_wifi(&follow, 50006, false, true, 2437, fake_apply);
+	fail_send = true;
+	btafh_follow_wifi(&follow, 50007, true, false, 2437, fake_apply);
+	assert(sends == 11 && last_freq == 0 && follow.sent_freq == 2437);
+	btafh_follow_wifi(&follow, 51006, true, false, 2437, fake_apply);
+	assert(sends == 11);
+	fail_send = false;
+	btafh_follow_wifi(&follow, 51007, true, false, 2437, fake_apply);
+	assert(sends == 12 && last_freq == 0 && follow.sent_freq == 0 && !follow.needs_refresh);
+	btafh_follow_wifi(&follow, 51008, false, false, 0, fake_apply);
+	btafh_follow_wifi(&follow, 51009, true, false, 0, fake_apply);
+	assert(sends == 12);
+
+	/* Unsigned elapsed time still works over the millisecond counter wrap. */
+	memset(&follow, 0, sizeof(follow));
+	sends = 0;
+	btafh_follow_wifi(&follow, UINT32_MAX - 500, true, true, 2437, fake_apply);
+	btafh_follow_wifi(&follow, 14498, true, true, 2437, fake_apply);
+	assert(sends == 1);
+	btafh_follow_wifi(&follow, 14499, true, true, 2437, fake_apply);
+	assert(sends == 2);
+}
+
 int main(void) {
 	uint8_t map[10];
 
@@ -42,6 +133,7 @@ int main(void) {
 		assert(masked == 0 && good(map) == 79);
 	}
 
-	printf("PASS btafh (a 2.4 GHz channel masks the Bluetooth channels under it and no others)\n");
+	test_follow();
+	printf("PASS btafh (channel map, link changes, retries, clears, refresh and clock wrap)\n");
 	return 0;
 }

@@ -25,6 +25,8 @@
 uint32_t utils_isqrt32(uint32_t v);
 uint64_t utils_isqrt64(uint64_t v);
 
+// Read through EOF without requiring a seekable file (procfs/configfs can
+// report size zero). Returns allocated, NUL-terminated data, or NULL on error.
 char *read_file_content(const char *filename);
 bool file_matches(const char *filename, const char *expected);
 

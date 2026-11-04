@@ -624,7 +624,10 @@ static void *start_main(void *arg) {
 	// Tell usb.c to keep off the controller first: its watcher thread reacts to
 	// the cable being in by rebuilding the mass-storage gadget, which would
 	// land straight on top of this one.
-	usb_set_dac_mode(true);
+	if (!usb_set_dac_mode(true)) {
+		set_error(tr("usbdac_usb_busy"));
+		goto failed;
+	}
 
 	if (!gadget_build()) {
 		usb_set_dac_mode(false);

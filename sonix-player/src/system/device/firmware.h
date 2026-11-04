@@ -44,7 +44,8 @@ const char *firmware_update_stem(void);
 // accepted, "update.upt" included.
 bool firmware_update_file_find(char *out, size_t out_size);
 
-// Arms recovery and reboots into it. Does not return on the device.
+// Arms recovery and reboots into it. Returns without updating if an active
+// USB host override cannot be restored, and on the host build.
 //
 // Stops playback and flushes the filesystems first: the card is about to be
 // read by the recovery kernel, and an unflushed write on it is how a good

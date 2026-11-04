@@ -94,10 +94,15 @@ void wifi_set_status_poll_slow(bool slow) { g_poll_slow = slow; }
 //     associated, and it is only there to move the signal bars. The bars keep
 //     the last reading until the stream ends.
 //
-// Set from the power tick, which already knows when a stream is up.
-static volatile bool g_bt_streaming;
+// Set on the power-tick thread and read on the Wi-Fi worker. Volatile alone
+// would not synchronize those threads.
+static bool g_bt_streaming;
 
-void wifi_set_bluetooth_streaming(bool streaming) { g_bt_streaming = streaming; }
+void wifi_set_bluetooth_streaming(bool streaming) {
+	__atomic_store_n(&g_bt_streaming, streaming, __ATOMIC_RELAXED);
+}
+
+static bool bluetooth_streaming(void) { return __atomic_load_n(&g_bt_streaming, __ATOMIC_RELAXED); }
 
 // A DHCP attempt is not retried more often than this, so an access point that
 // hands out no lease does not turn into a fork loop.
@@ -1360,8 +1365,8 @@ static void poll_status(void) {
 		static int last_signal;
 		char signal_buf[512];
 		char rssi[16];
-		if (g_bt_streaming) {
-			// Not while music goes out over Bluetooth: see g_bt_streaming.
+		if (bluetooth_streaming()) {
+			// Not while either direction of A2DP is linked: see g_bt_streaming.
 			status.signal = last_signal;
 		} else if (wpa1("signal_poll", signal_buf, sizeof(signal_buf)) == 0 &&
 				   status_field(signal_buf, "RSSI", rssi, sizeof(rssi))) {
@@ -1428,7 +1433,7 @@ static void post_job(const job_t *job) {
 
 // How long the worker sleeps between two status reads.
 static uint32_t status_poll_period_ms(void) {
-	return (power_screen_is_on() && !g_poll_slow && !g_bt_streaming) ? STATUS_POLL_MS : STATUS_POLL_STANDBY_MS;
+	return (power_screen_is_on() && !g_poll_slow && !bluetooth_streaming()) ? STATUS_POLL_MS : STATUS_POLL_STANDBY_MS;
 }
 
 static void *wifi_worker(void *arg) {

@@ -51,6 +51,17 @@ int btafh_map_for_wifi(int wifi_freq_mhz, uint8_t map[10]) {
 	return masked;
 }
 
+// A failed socket/bind/write is retried by the follower. Report the first
+// failure (and a changed error) without printing the same line every second.
+static unsigned last_hci_error;
+
+static void report_hci_error(unsigned stage, const char *action, int error) {
+	unsigned signature = (stage << 16) | ((unsigned)error & 0xffffu);
+	if (__atomic_exchange_n(&last_hci_error, signature, __ATOMIC_RELAXED) != signature) {
+		fprintf(stderr, "bluetooth: AFH %s failed (%s); will retry\n", action, strerror(error));
+	}
+}
+
 bool btafh_apply_for_wifi(int wifi_freq_mhz) {
 	uint8_t packet[4 + 10];
 	uint8_t map[10];
@@ -58,14 +69,17 @@ bool btafh_apply_for_wifi(int wifi_freq_mhz) {
 
 	int fd = socket(BT_AF_BLUETOOTH, SOCK_RAW, BT_PROTO_HCI);
 	if (fd < 0) {
-		return false; // no Bluetooth in this kernel
+		report_hci_error(1, "socket", errno);
+		return false;
 	}
 	(void)fcntl(fd, F_SETFD, FD_CLOEXEC);
 
 	struct bt_sockaddr_hci addr = {BT_AF_BLUETOOTH, 0, BT_HCI_CHANNEL_RAW};
 	if (bind(fd, (struct sockaddr *)&addr, sizeof(addr)) != 0) {
+		int kept = errno;
 		close(fd);
-		return false; // hci0 is not up
+		report_hci_error(2, "bind", kept);
+		return false;
 	}
 
 	packet[0] = BT_HCI_COMMAND_PKT;
@@ -75,18 +89,65 @@ bool btafh_apply_for_wifi(int wifi_freq_mhz) {
 	memcpy(packet + 4, map, 10);
 
 	ssize_t wrote = write(fd, packet, sizeof(packet));
-	int kept = errno;
+	int kept = wrote < 0 ? errno : EIO; // a short write may leave errno unchanged
 	close(fd);
 
 	if (wrote != (ssize_t)sizeof(packet)) {
-		fprintf(stderr, "bluetooth: AFH classification not sent (%s)\n", strerror(kept));
+		report_hci_error(3, "write", kept);
 		return false;
 	}
+	__atomic_store_n(&last_hci_error, 0, __ATOMIC_RELAXED);
+	// A successful write is not the controller's acceptance. In particular,
+	// the other end may be the piconet master. btmon records the actual HCI
+	// Command Complete; do not claim that the hop set has changed here.
 	if (masked) {
-		fprintf(stderr, "bluetooth: AFH: %d channels under Wi-Fi at %d MHz left out of the hop set\n", masked,
-				wifi_freq_mhz);
+		fprintf(stderr, "bluetooth: AFH: requested avoidance of %d channels under Wi-Fi at %d MHz; "
+						"check HCI Command Complete\n", masked, wifi_freq_mhz);
 	} else {
-		fprintf(stderr, "bluetooth: AFH: every channel allowed again\n");
+		fprintf(stderr, "bluetooth: AFH: requested all channels; check HCI Command Complete\n");
 	}
 	return true;
+}
+
+#define AFH_RESEND_MS 15000u
+#define AFH_RETRY_MS 1000u
+
+void btafh_follow_wifi(btafh_follow_t *state, uint32_t now_ms, bool bluetooth_enabled, bool a2dp_link,
+					  int wifi_freq_mhz, bool (*apply)(int)) {
+	if (!state || !apply) {
+		return;
+	}
+	if (!bluetooth_enabled) {
+		// A transient radio park may leave the transport alive, so do not
+		// assume its classification was reset. Avoid writes while off, but
+		// clear or reassert any restriction immediately after it comes back.
+		state->needs_refresh = state->sent_freq != 0;
+		state->attempted = false;
+		return;
+	}
+
+	// A 5 GHz or unknown Wi-Fi channel needs the unrestricted map, just like
+	// a disconnected link. Keep only frequencies which actually mask bits.
+	int want = a2dp_link && wifi_freq_mhz >= 2400 && wifi_freq_mhz <= 2500 ? wifi_freq_mhz : 0;
+	if (want == 0 && state->sent_freq == 0) {
+		return;
+	}
+	if (want == state->sent_freq && !state->needs_refresh &&
+		(uint32_t)(now_ms - state->last_success_ms) < AFH_RESEND_MS) {
+		return;
+	}
+	// A changed target, including a clear, is sent immediately. Retries for
+	// the same target are bounded so a failed HCI write cannot spin the UI.
+	if (state->attempted && want == state->attempted_freq &&
+		(uint32_t)(now_ms - state->last_try_ms) < AFH_RETRY_MS) {
+		return;
+	}
+	state->attempted = true;
+	state->attempted_freq = want;
+	state->last_try_ms = now_ms;
+	if (apply(want)) {
+		state->sent_freq = want;
+		state->last_success_ms = now_ms;
+		state->needs_refresh = false;
+	}
 }

@@ -2916,7 +2916,8 @@ issue #188, already handled by the held panel.
 
 What the Bluetooth log of that session (14:56-15:08) shows: the player was the
 **receiver** (an iPad streaming AAC 44.1 kHz to it, player is the piconet master),
-and the loss is on the air, upstream of anything the player does with the audio.
+and the loss is upstream of the player's decoded-audio path. The RTP warnings
+alone do not distinguish RF loss from controller, UART, or host loss.
 `bluealsa: Missing RTP packets` appears ten times in the two minutes with Wi-Fi
 joined (14:59:27-15:01:28), and not once in the two clean stretches that follow
 (15:01:45-15:03:06, 15:03:19-15:05:00). The events do not fall on a two-second
@@ -2926,14 +2927,13 @@ reports that it supports Set AFH Host Channel Classification.
 
 So the change that matters is `btafh.c`: while an A2DP link is up and Wi-Fi is
 joined on a 2.4 GHz channel, the power tick (`bt_afh_follow_wifi()`) sends that
-HCI command so the Bluetooth channels under the access point's channel (centre
-+-12 MHz, `freq=` from `wpa_cli status`) are left out of the hop set. It is
-resent every fifteen seconds while in force (a stack restart makes the controller
-forget it) and cleared when the link or the Wi-Fi join goes. A 5 GHz network or an
-unknown channel masks nothing. Only the piconet master can classify channels: if
-the far end is the master the controller answers "command disallowed" and nothing
-changes -- the Command Complete for it is in the next Bluetooth log. `make -C
-sonix-player/tests btafh` checks the map.
+HCI command requesting that Bluetooth channels under the access point's channel
+(centre +-12 MHz, `freq=` from `wpa_cli status`) be avoided. It is resent every
+fifteen seconds while in force and cleared when the link or the Wi-Fi join goes.
+A 5 GHz network or an unknown channel masks nothing. A successful write only
+sends the request; check the controller's Command Complete in the Bluetooth log.
+The piconet master controls the hop set, and controller support and role affect
+whether the request is used. `make -C sonix-player/tests btafh` checks the map.
 
 Alongside it, the smaller change from the first pass stays: with an A2DP link up
 the Wi-Fi worker polls at the standby period whatever the screen is doing and does
@@ -2947,32 +2947,81 @@ count `Missing RTP packets` in a Bluetooth log over a couple of minutes against 
 same song with Wi-Fi off; the log also carries the `bluetooth: AFH:` line and the
 controller's reply to the command.
 
-### USB-C: the JCally dongle is not found, the RME ADI-2 DAC is
+### USB-C: a JCally did not enumerate on the TempoTec V1
 
-Both are class-compliant and the JCally works with the stock firmware on the same
-kernel, so the card appears when the cable is left alone: what differs is how
-long each takes to appear. The RME has its own supply and is on the bus within a
-second of the cable going in. The JCally is powered *from* the port: the host
-role has to come up, VBUS has to rise, and the dongle then boots before the first
-USB reset. `arbitrate_port()` gave anything attached that was not yet a sound
-card `HANDOVER_SECS` (3 s) before writing `sink` -- the answer for a phone that
-will never become one -- and writing `sink` removes the host role, and with it
-the dongle's power, until the cable is pulled.
+The `0311-sonix_player-neu.log` report does **not** establish the earlier theory
+that a three-second sink write cut off a slow JCally. At 23:52:47-48 it reports
+`NormalDRP`, `otg_id -1`, VBUS present, and no device on the host bus. There is
+no USB VID/PID, ALSA USB card, `snd-usb-audio` error or logged sink write for
+that attempt. VBUS is also raised by a charger or computer; it identifies
+neither the accessory nor the data role. The cause of the missing enumeration
+and whether another DAC works on this exact build remain unproven.
 
-- When nothing at all has enumerated on the host bus *and this player is the one
-  supplying the port* (Type-C `power_role` is `[source]`; on the R1 the ID line
-  reads host) the wait is `POWERUP_SECS` (10 s). Something that has enumerated
-  and is not audio, or a computer or charger powering the player, keeps the 3 s.
-  A phone that never enumerates is handed the host role up to seven seconds later
-  than before.
-- `usb.c` no longer writes `sink` for its own gadget rebuilds while that wait is
-  running (`usbaudio_handover_pending()`).
-- The log now says what the port looked like when something attached and when
-  the port was given up on: `usbaudio: something attached: port_type ...,
-  power_role ..., data_role ...` followed by every device on the host bus with
-  its vendor:product, name and speed. If a JCally still is not found, that block
-  and the `kernel:` lines around it say whether it enumerated, whether it got
-  as far as an audio interface, and whether `snd-usb-audio` then refused it.
+The V1 1.3 kernel bundled in the repository was inspected, not the running
+kernel on the reporting device. It exposes a PHY `sw_switch_hsotg` control with
+`host`, `device` and `none` commands and uses `dwc2_new`; the old `jz-dwc2`
+`otg_id` path is not present in that image. The live sysfs path, role behavior,
+and electrical effect still need hardware confirmation. Related R1 drivers
+are not evidence of what the V1 actually does.
+
+- Automatic arbitration treats an unreadable ID as unknown, avoids a startup
+  role change when VBUS/port use is ambiguous, protects an enumerated audio
+  interface or card even when Bluetooth owns playback, and logs ID, TCS mode,
+  VBUS, UDC state and enumerated host devices. It does **not** force host/source
+  merely because VBUS is high. A detected USB sound card is not reset by
+  reasserting dual mode.
+- Developer options offers **Try external USB DAC**, an experimental, explicit
+  opt-in. It requests TCS `Source` and the compatible x1600 PHY's `host` mode;
+  this is a diagnostic attempt, **not a proven JCally fix**. Connect **only**
+  a confirmed bus-powered DAC: unplug computers and chargers and turn ADB off.
+  Never plug a computer or charger into the port while the trial is active. The
+  action is refused for unsupported/ambiguous PHYs, an unknown or connected UDC,
+  ADB, DAC mode, storage export or another owner. Only the player's own idle,
+  disconnected storage gadget is parked and later rebound.
+- If no ALSA USB card appears, the previous TCS setting and PHY automatic mode
+  are restored after 20 seconds (45 seconds if an audio interface was seen).
+  A detected card keeps the override until unplugged; the same menu action
+  changes to **Stop USB DAC host** for manual cancellation. A failed restore
+  retains the controller reservation and retries; no Sonix gadget is allowed to
+  claim it meanwhile. A strictly validated journal on `/usr/data` records the
+  previous setting before any override and is synced with its parent directory.
+  Recovery runs before Sonix starts ADB, after player crashes or reboots; stock
+  init scripts may nevertheless claim the port earlier, in which case recovery
+  waits rather than disturbing them. Invalid journals or failed restoration
+  fail closed; keep computers and chargers disconnected until the port is
+  reported restored. Shutdown attempts restoration, and factory reset/firmware
+  update are refused if the role remains unresolved. Recovery relies on the
+  settings partition being mounted when Sonix starts; V1 mount order, filesystem
+  durability and power-cycle behavior still need hardware verification.
+- Storage export independently no longer sends a mounted or lazily-detached
+  card to a PC. It requires a matching visible mount, a normal unmount, an
+  exclusive block claim and no remaining raw-device fd (including a FUSE
+  daemon). On failure it restores services or lets the card supervisor recover,
+  and waits for a cable replug rather than repeatedly interrupting playback.
+  A LUN must be verified empty before remounting. ADB keeps the card mounted;
+  the old stale-ADB composite fallback is not used. External privileged programs
+  could still bypass these process-local checks; actual gadget, card and FUSE
+  behavior on V1 must be tested.
+- Shutdown now checks for open card descriptors before reopening its suspended
+  log. The earlier log listed the log fds only *after* reopening the log, so it
+  did not prove the cause of the busy unmount. The warning that mentioned an
+  MP2731 charger is now generic: V1 has a separate AXP2101 charging path.
+- The log's `input: registered devices` section was blank. The shared file
+  reader assumed everything supports seeking to a meaningful end, which fails
+  for procfs and some configfs files. It now reads to EOF and treats read errors
+  as errors, also making USB gadget-attribute reads more reliable.
+- `geniusbuild: result 3, 4096 tracks` is the existing intentional Smart Mix
+  input limit, not proof of out-of-memory. Supporting this 26k-track library
+  requires a separate bounded large-library design; this patch does not change
+  that limit. The logged Bluetooth underruns predate the separate coexistence
+  changes and still need on-device verification.
+
+Host tests: `make -C sonix-player/tests usbhost readfile`, using private mocked
+sysfs, mount/claim and LUN fixtures, and real non-seekable procfs/pipe reads,
+plus the regular regression suites. These do not model the V1's electrical
+behavior, kernel driver timing, real card export or
+USB enumeration. Test on hardware with a known-good USB-C OTG adapter and a new
+full log including the `usbaudio:`, `usbhost:` and `kernel:` lines.
 
 ## Bluetooth reconnect after the adapter was left powered off
 
@@ -2989,14 +3038,67 @@ up to five seconds for bluez to confirm) when it is off. The log says which of
 the three happened: `the adapter is not powered; powering it back on`, then
 `the adapter is powered again after N ms`, or `the adapter did not power on`.
 
-The cause of the power-off itself is not in this tree: the log does not say which
-process sent it. The stock `S80_bt_init` runs alongside the player's bring-up
-(`bluetooth: the stock bring-up is running`), and that is the first place to look
-if it comes back. This does not touch the separate "Host is down" / page-timeout
-failures to the headphones, which are the headphones not answering.
+The log does not identify the process which sent the power-off. Inspection of
+the bundled V1 1.3 image now shows that the stock `bt_init` explicitly sets the
+adapter Powered Off near the end of its background run, making it a plausible
+source; the log alone does not prove it. The startup changes below prevent that
+script racing Sonix in newly packed firmware. This does not touch the separate
+"Host is down" / page-timeout failures to the headphones, which are the
+headphones not answering.
 
 Needs an on-device check: power the player on with the headphones on and off,
 and confirm the reconnect either lands or logs one of the three lines above.
+
+## Bluetooth receiver coexistence and startup ownership
+
+The later V1 log (`0311-bluetooth-neu.log`) has 17 BlueALSA missing-RTP
+warnings (23 packets in total) during received audio, and no Set AFH Host
+Channel Classification command. It also shows two `bluetoothd` launches, one
+refused the D-Bus name, followed by an adapter power-off and a `NotReady`
+reconnect. The RTP warnings locate loss before local DAC output, but do not
+identify whether RF, the controller, UART or host is responsible. The log alone
+does not prove that Wi-Fi was joined or that AFH would cure the loss.
+
+- `bluetooth_a2dp_link_active()` counts either a headphone PCM or an incoming
+  receiver PCM, including paused links. It drives Wi-Fi polling, radio parking
+  and the AFH follower. The existing `bluetooth_audio_active()` remains
+  output-only, so a phone sending audio cannot redirect local playback to a
+  nonexistent headphone. The cross-thread Wi-Fi streaming flag is atomic.
+- The follower retries failed restrictions **and clears**, refreshes a sent
+  restriction every 15 seconds, and reasserts or clears it after a radio park
+  rather than assuming a reset. It logs requests, not claimed controller
+  acceptance. Change-only diagnostics record whether Wi-Fi is associated and
+  its frequency (not the SSID); repeated HCI errors are suppressed.
+- Closing the D-Bus connection now clears both PCM directions, transport and
+  media state after the reader has stopped, preventing a late signal or a
+  previous receiver link from being resurrected after a stack restart.
+- Startup waits for a running stock `bt_init` to finish, including when a shell
+  invoked it, and will not start a second patchram while an existing one is
+  still alive. A switch-off can cancel the waits. Boot-time teardown shares the
+  Bluetooth worker with power jobs, so a quick switch-on cannot be torn down by
+  a separate cleanup thread.
+- Newly packed V1 firmware overlays `S80_bt_init` with a no-op. In the bundled
+  V1 1.3 stock image that hook only launches `bt_init` on start and `bt_done` on
+  stop; the separate S30 D-Bus init and the original binaries are preserved.
+  The stock initializer also creates `/usr/data/alsa.conf`: Sonix now creates
+  the same default when needed without replacing an existing template; the
+  existing per-device rewrite is unchanged. Stock `bt_init`'s `/tmp/bt_init_ok`
+  marker and legacy HiByLink SDP record are not
+  created by the replacement; Sonix uses its own Bluetooth stack and SonixLink.
+  Other stock revisions and any external consumers of those artifacts need an
+  on-device check.
+
+Host tests: `make -C sonix-player/tests bluetooth btafh wifi basebuild` and
+address/undefined-behavior-sanitized versions of Bluetooth, AFH and Wi-Fi. The
+actual V1 1.3 archive's init scripts were also checked against the tar overlay;
+MIPS32r2 cross-compilation of the changed translation units succeeded with an
+independent Clang-based toolchain. This is not a complete linked firmware build.
+
+**Still needs hardware:** test cold boot with Bluetooth on and off, rapid toggles,
+headphone and phone-receiver connections, reconnect after sleep, and Wi-Fi
+joined versus off with the same source. In `btmon`, inspect Command Complete for
+Set AFH Host Channel Classification and compare loss counts; even an accepted
+command does not by itself prove a changed hop set or an audible improvement.
 
 ## A happier music pet
 

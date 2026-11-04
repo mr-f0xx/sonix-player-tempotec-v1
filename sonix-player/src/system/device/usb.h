@@ -34,15 +34,27 @@ bool usb_storage_active(void);
 // controller at all. Without this the watcher sees a cable, rebuilds the
 // mass-storage gadget over the audio one, and the computer both loses the
 // audio stream and gains a microSD it should not have.
-void usb_set_dac_mode(bool on);
+// Returns false if an external-host override or exported card could not be
+// safely returned to the player.
+bool usb_set_dac_mode(bool on);
 bool usb_dac_mode(void);
+
+// Internal coordination for the explicit external USB-audio host trial.
+// Reserve only when no gadget data session, storage, DAC mode or ADB is in
+// use. A recovery reservation blocks gadgets until the old role is restored.
+bool usb_external_host_reserve(void);
+void usb_external_host_release(void);
+void usb_external_host_block_recovery(void);
+bool usb_external_host_reserved(void);
+// A restore must not overwrite an unknown/connected gadget or active ADB.
+bool usb_external_host_restore_safe(void);
 
 // Coordination with ADB, whose init script needs the one USB controller for
 // its own gadget: yield unbinds the storage gadget before adbd starts, reclaim
 // rebuilds and rebinds it after adbd stops (its stop script tears the whole
 // configfs down). Both take a card handed to the host back first. Called by
 // adb.c around the init scripts.
-void usb_gadget_yield_to_adb(void);
+bool usb_gadget_yield_to_adb(void);
 void usb_gadget_reclaim_from_adb(void);
 
 // True while a cable is supplying VBUS (a PC or a charger). Read straight

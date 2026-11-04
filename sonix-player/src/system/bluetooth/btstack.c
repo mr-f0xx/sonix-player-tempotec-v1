@@ -798,15 +798,33 @@ bool btstack_open(void) {
 	return true;
 }
 
+// Under lock. A closed bus cannot vouch for either PCM direction or any of
+// the transport states it last announced. Wake serial-based consumers when a
+// transport disappears, so an old "active" state cannot survive a reconnect.
+static void clear_audio_cache(void) {
+	pcm_count = 0;
+	rx_count = 0;
+	if (transport_count) {
+		transport_count = 0;
+		transport_serial++;
+	}
+}
+
 void btstack_close(void) {
 	pthread_mutex_lock(&lock);
 	dbus_conn_t *c = conn;
 	conn = NULL;
-	pcm_count = 0;
+	clear_audio_cache();
 	pthread_mutex_unlock(&lock);
 	if (c) {
+		// Join the reader before the final clear: a signal already being
+		// dispatched could otherwise put an old PCM back after we emptied it.
 		dbus_disconnect(c);
 	}
+	pthread_mutex_lock(&lock);
+	clear_audio_cache();
+	pthread_mutex_unlock(&lock);
+	btstack_forget_media();
 }
 
 bool btstack_alive(void) {
@@ -885,10 +903,6 @@ static bool set_u32_property_ms(const char *path, const char *interface, const c
 		fprintf(stderr, "btstack: %s = %u refused: %s\n", name, value, err[0] ? err : "no reply");
 	}
 	return ok;
-}
-
-static bool set_u32_property(const char *path, const char *interface, const char *name, uint32_t value) {
-	return set_u32_property_ms(path, interface, name, value, CALL_MS, true);
 }
 
 static bool get_bool_property(const char *path, const char *interface, const char *name, bool *out) {

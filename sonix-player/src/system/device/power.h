@@ -239,11 +239,9 @@ void power_set_screen_off_timeout(uint32_t ms);
 // exist there.
 void power_set_standby_enabled(bool enabled);
 
-// Powers the Bluetooth radio and its daemons down, in order, through
-// bluetooth_power_down_stack(). The stock init script starts the whole stack at
-// every boot -- rfkill on, patchram, bluetoothd, bluealsa -- and with the
-// Bluetooth switch off that is pure drain.
-// Called once at startup, and only when the config says Bluetooth is off.
+// Queues cleanup of a stock boot-time Bluetooth stack on the Bluetooth worker.
+// Called once at startup only when the config says Bluetooth is off; a later
+// switch-on is serialized with the cleanup rather than racing it.
 void power_bluetooth_off(void);
 
 // Whether this module has switched a radio off for idleness (it switches it

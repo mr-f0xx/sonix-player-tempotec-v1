@@ -1,15 +1,15 @@
 #ifndef SONIX_TEST_STUB_LVGL_H
 #define SONIX_TEST_STUB_LVGL_H
 
-/* The smallest lvgl/lvgl.h that lets a plain-C test compile a player file
- * whose header mentions LVGL only in passing: wifi.c includes power.h for
- * power_screen_is_on(), and power.h names lv_display_t and lv_timer_t in
- * prototypes for display work the Wi-Fi worker never calls. Both are only
- * ever pointed at there, so two incomplete types are the whole contract.
- *
- * Only the wifi test target puts this directory on its include path; the
- * player and the UI tests use the real LVGL. */
+/* Minimal declarations for plain-C tests of workers that include GUI
+ * headers but never manipulate LVGL. Wi-Fi and USB ownership/storage tests
+ * put this directory on their include path; the player and UI tests always
+ * use real LVGL. */
 typedef struct lv_display lv_display_t;
 typedef struct lv_timer lv_timer_t;
+typedef struct lv_obj lv_obj_t;
+/* USB ownership tests include GUI declarations but do not manipulate LVGL. */
+typedef struct { unsigned char dummy; } lv_color_t;
+typedef struct { unsigned char dummy; } lv_image_dsc_t;
 
 #endif /* SONIX_TEST_STUB_LVGL_H */
