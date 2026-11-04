@@ -231,8 +231,8 @@ This fork builds on the upstream [Sonix Player](https://github.com/Jepl4r/sonix-
 - **Dual Scrobbler Suite** (Last.fm & ListenBrainz) — Native background scrobbling for both services with independent toggles, token-based setup, and offline queue caching when disconnected from Wi-Fi.
 - **Over-The-Air (OTA) Updates** - Check for and download new releases directly over Wi-Fi from GitHub Releases with one click in Settings → System → Firmware update.
 - **SmartMix Playlist**  - Generate similar tracks, tag based playlists!
-- Editable control centre
-- Many more improvements!
+- **Editable control centre**
+- **Many more improvements!**
 ### Shared with Sonix Player
 
 - **Music**: a local library with a file browser, albums, artists, genres, playlists, favourites and most played, plus gapless playback, fades, ReplayGain and sleep timers.
