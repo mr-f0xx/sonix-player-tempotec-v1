@@ -1763,6 +1763,11 @@ static void cover_tint_cb(lv_event_t *e) {
 	player_cover_tint_set(lv_obj_has_state(lv_event_get_target(e), LV_STATE_CHECKED));
 }
 
+// Replace the format line with the tagged year in custom player layouts.
+static void recording_year_cb(lv_event_t *e) {
+	player_recording_year_set(lv_obj_has_state(lv_event_get_target(e), LV_STATE_CHECKED));
+}
+
 // Where Album Art Max puts its scrub bar: along the foot of the sleeve, or up
 // its left edge. Only the arrangement above can answer for it, so this stores
 // the setting and lets the page move the bar if it is the one on screen.
@@ -2511,6 +2516,12 @@ static void build_display_page(gui_config_t *cfg) {
 
 	layout_refresh();
 	theme_register_refresh(layout_refresh);
+
+	// Standard keeps its format line; custom layouts can show the tagged year.
+	lv_obj_t *recording_year_switch;
+	settingsrow_toggle(container, "musicsettings_recording_year", &recording_year_switch, recording_year_cb);
+	option_note(container, "musicsettings_recording_year_note");
+	lv_obj_set_state(recording_year_switch, LV_STATE_CHECKED, player_recording_year_get());
 
 	// Album Art Max's own sub-setting. Under the pills and not on its own page:
 	// it is one arrangement's business, and there is nothing else to say. It is

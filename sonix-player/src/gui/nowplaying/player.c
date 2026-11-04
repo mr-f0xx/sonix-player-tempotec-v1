@@ -424,6 +424,7 @@ static int aam_status_h;
 // And where its scrub bar stands: along the foot of the picture (false) or up
 // its left edge (true). The second is the concept's "Leftie".
 static bool aam_leftie;
+static bool show_recording_year; // replace the format line only in non-standard layouts
 
 // The pieces Album Art Max owns. Declared here with the rest of the arrangement
 // state rather than beside the functions that build them, because the theme's
@@ -5476,8 +5477,12 @@ static void update_format_label(const device_state_t *state) {
 	// The mark beside it in Studio, which is the same question asked of the
 	// stream rather than of the library. Here because this is where the format
 	// line is worked out, and the two say one thing between them.
+	bool year_visible = show_recording_year && layout_choice != PLAYER_LAYOUT_STANDARD &&
+		(layout_wave_now || layout_studio_now || layout_immersive_now || layout_poster_now || layout_aam_now) &&
+		!state->live && state->metadata.year > 0 && state->current_file[0] &&
+		!podcastcache_is_episode(state->current_file);
 	if (layout_studio_now && studio_quality_icon) {
-		const lv_image_dsc_t *mark = studio_quality_mark(state);
+		const lv_image_dsc_t *mark = year_visible ? NULL : studio_quality_mark(state);
 		if (mark) {
 			lv_image_set_src(studio_quality_icon, mark);
 			lv_obj_set_hidden(studio_quality_icon, false);
@@ -5487,6 +5492,10 @@ static void update_format_label(const device_state_t *state) {
 	}
 
 	if (!format_label) {
+		return;
+	}
+	if (year_visible) {
+		lv_label_set_text_fmt(format_label, "%d", state->metadata.year);
 		return;
 	}
 
@@ -6310,6 +6319,21 @@ void player_layout_set(player_layout_t layout) {
 	device_state_t state;
 	device_state_get(&state);
 	update_layout(&state);
+	update_format_label(&state);
+}
+
+bool player_recording_year_get(void) { return show_recording_year; }
+
+void player_recording_year_set(bool enabled) {
+	if (show_recording_year == enabled) {
+		return;
+	}
+	show_recording_year = enabled;
+	config_set_bool("screen", "player_recording_year", enabled);
+	config_save();
+	device_state_t state;
+	device_state_get(&state);
+	update_format_label(&state);
 }
 
 bool player_aam_leftie_get(void) { return aam_leftie; }
@@ -7801,6 +7825,7 @@ void player_init(gui_config_t *cfg) {
 	// off unless it was switched on.
 	cover_tint = config_get_bool("screen", "player_cover_tint", false);
 	aam_leftie = config_get_bool("screen", "player_aam_leftie", false);
+	show_recording_year = config_get_bool("screen", "player_recording_year", false);
 	int saved = (int)config_get_int("screen", "player_layout_alt", 0);
 	layout_choice = (saved == (int)PLAYER_LAYOUT_ALTERNATIVE)  ? PLAYER_LAYOUT_ALTERNATIVE
 						: (saved == (int)PLAYER_LAYOUT_STUDIO)	   ? PLAYER_LAYOUT_STUDIO
