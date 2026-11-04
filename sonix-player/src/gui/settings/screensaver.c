@@ -43,6 +43,9 @@ static lv_timer_t *clock_timer;
 static bool enabled;
 static bool visualizer_selected;
 static lv_obj_t *spectrum, *spectrum_segments[VISUALIZER_BANDS][24];
+static lv_obj_t *spectrum_rail; // the baseline the Neon bars rise from
+static lv_obj_t *idle_note;		// the note shown in the field when nothing plays
+static bool spectrum_idle;		// whether the spectrum is showing that note
 static lv_timer_t *spectrum_timer;
 // Fixed-point bar heights, and the last rendered segment count.
 static int spectrum_level[VISUALIZER_BANDS], spectrum_height[VISUALIZER_BANDS];
@@ -247,6 +250,8 @@ static void refresh_content(void);
 static void spectrum_reset(void);
 static void led_build(void);
 static void spectrum_apply_backdrop(void);
+static void spectrum_apply_idle(bool idle);
+static bool spectrum_music_playing(void);
 screensaver_source_t screensaver_source(void) { return source; }
 bool screensaver_get_visualizer(void) { return visualizer_selected; }
 void screensaver_set_visualizer(bool on) {
@@ -662,6 +667,11 @@ static void screensaver_refresh_theme(void) {
 	if (chevron_icon) {
 		lv_obj_set_style_image_recolor(chevron_icon, ink_chevron, 0);
 	}
+	if (idle_note) {
+		// The note shown while nothing plays wears the accent, like the rail
+		// it replaces.
+		lv_obj_set_style_image_recolor(idle_note, theme()->accent, 0);
+	}
 
 	// A theme can change while this is on screen. Reapply the source-specific
 	// field immediately, so a blurred frame never survives into a palette that
@@ -824,6 +834,7 @@ static void refresh_content(void) {
 		set_page_backdrop(NULL);
 		lv_obj_set_style_bg_color(saver, lv_color_black(), 0);
 		spectrum_apply_backdrop();
+		spectrum_apply_idle(!spectrum_music_playing());
 		set_strip_height(DEFAULT_STRIP_H);
 		lv_obj_set_style_bg_image_src(info_strip, NULL, 0);
 		lv_obj_set_style_bg_opa(info_strip, LV_OPA_TRANSP, 0);
@@ -1102,9 +1113,10 @@ static void spectrum_apply_backdrop(void) {
 	}
 	// The LED grid is one layer so it can be swapped for Neon's whole: its
 	// segments are never hidden one by one, only recoloured between lit and
-	// the dark red of an unlit slot.
+	// the dark red of an unlit slot. It goes with the rest of the bars when
+	// nothing is playing, leaving the field to the note.
 	if (led_built) {
-		lv_obj_set_hidden(led_layer, !led_now());
+		lv_obj_set_hidden(led_layer, !led_now() || spectrum_idle);
 	}
 }
 
@@ -1170,6 +1182,10 @@ static void led_build(void) {
 	}
 
 	led_layer = lv_obj_create(spectrum);
+	// Right after the rail and Neon's bars, before the idle note, so the
+	// spectrum's first children keep their places whatever order the two
+	// grids were built in.
+	lv_obj_move_to_index(led_layer, 1 + VISUALIZER_BANDS * 24);
 	lv_obj_set_size(led_layer, screen_w, area_h);
 	lv_obj_set_pos(led_layer, 0, 0);
 	lv_obj_set_style_bg_opa(led_layer, LV_OPA_TRANSP, 0);
@@ -1315,9 +1331,37 @@ static void spectrum_tick_led(void) {
 // The visual shape stays the same: only the heights ease toward the latest
 // measurements. Analyse at 10 Hz and animate at 20 Hz, so the extra frames
 // cost just a few integer operations and only changed segments are invalidated.
+// Whether music is actually playing right now. Paused and stopped both count
+// as not playing, and both leave the spectrum with nothing to show.
+static bool spectrum_music_playing(void) {
+	device_state_t state;
+	device_state_get(&state);
+	return state.status == AUDIO_STATUS_PLAYING;
+}
+
+// No music playing (stopped or paused): the rail goes and a note in the
+// accent takes its place, centred in the field -- an idle screensaver reads
+// as "nothing playing" rather than as a flat line at level zero. The rail
+// comes back with the music.
+static void spectrum_apply_idle(bool idle) {
+	if (!spectrum || idle == spectrum_idle) {
+		return;
+	}
+	if (idle) {
+		spectrum_reset(); // the bars drop at once rather than decaying under the note
+	}
+	spectrum_idle = idle;
+	lv_obj_set_hidden(spectrum_rail, idle);
+	lv_obj_set_hidden(idle_note, !idle);
+	if (led_built) {
+		lv_obj_set_hidden(led_layer, idle || !led_now());
+	}
+}
+
 static void spectrum_tick(lv_timer_t *timer) {
     (void)timer;
     if (!screensaver_is_visible() || !spectrum_now() || !power_screen_is_on()) return;
+	spectrum_apply_idle(!spectrum_music_playing());
     if ((spectrum_frame++ & 1u) == 0) {
         if (led_now()) visualizer_led_levels(led_target);
         else visualizer_levels(spectrum_target);
@@ -1365,6 +1409,14 @@ static void spectrum_reset(void) {
         }
     }
     spectrum_frame = 0;
+    // Back to the at-rest drawing: rail up, note away.
+    spectrum_idle = false;
+    if (spectrum_rail) {
+        lv_obj_set_hidden(spectrum_rail, false);
+    }
+    if (idle_note) {
+        lv_obj_set_hidden(idle_note, true);
+    }
 }
 
 void screensaver_init(gui_config_t *cfg) {
@@ -1546,14 +1598,14 @@ void screensaver_init(gui_config_t *cfg) {
 	int step = (rail_y - screen_h / 12) / 24;
 	if (step < 2) step = 2;
 	int cell = (screen_w - 2 * margin) / VISUALIZER_BANDS;
-	lv_obj_t *rail = lv_obj_create(spectrum);
-	lv_obj_set_pos(rail, margin, rail_y);
-	lv_obj_set_size(rail, screen_w - 2 * margin, rail_h);
-	lv_obj_add_style(rail, &theme_style_accent_bg, 0);
-	lv_obj_set_style_bg_opa(rail, LV_OPA_COVER, 0);
-	lv_obj_set_style_border_width(rail, 0, 0);
-	lv_obj_set_style_radius(rail, 0, 0);
-	lv_obj_set_clickable(rail, false);
+	spectrum_rail = lv_obj_create(spectrum);
+	lv_obj_set_pos(spectrum_rail, margin, rail_y);
+	lv_obj_set_size(spectrum_rail, screen_w - 2 * margin, rail_h);
+	lv_obj_add_style(spectrum_rail, &theme_style_accent_bg, 0);
+	lv_obj_set_style_bg_opa(spectrum_rail, LV_OPA_COVER, 0);
+	lv_obj_set_style_border_width(spectrum_rail, 0, 0);
+	lv_obj_set_style_radius(spectrum_rail, 0, 0);
+	lv_obj_set_clickable(spectrum_rail, false);
 	for (int b = 0; b < VISUALIZER_BANDS; b++) for (int y = 0; y < 24; y++) {
 		lv_obj_t *segment = lv_obj_create(spectrum);
 		spectrum_segments[b][y] = segment;
@@ -1574,6 +1626,23 @@ void screensaver_init(gui_config_t *cfg) {
 	if (viz_style == SCREENSAVER_VIZ_STYLE_LED) {
 		led_build();
 	}
+	// Nothing playing: a note in the accent, centred in the field where the
+	// rail would otherwise be the only thing standing (see spectrum_apply_idle).
+	// The same glyph the player shows for a track with no artwork, at half the
+	// spectrum area's height, recolored with the accent in screensaver_refresh_theme.
+	// Made last, after the LED grid, so the rail, bars and grid keep their
+	// places as the spectrum's first children.
+	idle_note = lv_image_create(spectrum);
+	lv_image_set_src(idle_note, &icon_music_note);
+	int note_side = spectrum_h / 2;
+	if (note_side < 48) {
+		note_side = 48;
+	}
+	lv_image_set_scale(idle_note, (uint32_t)(LV_SCALE_NONE * note_side / 128));
+	lv_obj_set_style_image_recolor_opa(idle_note, LV_OPA_COVER, 0);
+	lv_obj_center(idle_note);
+	lv_obj_set_clickable(idle_note, false);
+	lv_obj_set_hidden(idle_note, true);
 
 	// One second, not ten: the clock only needs a minute's resolution, but the
 	// same tick is what notices a track change, and a screensaver that shows
