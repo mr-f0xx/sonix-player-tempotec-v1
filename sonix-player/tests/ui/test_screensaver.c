@@ -31,6 +31,7 @@
 #include "src/system/audio/visualizer.h"
 #include <math.h>
 #include "src/gui/shell/settingsrow.h"
+#include "src/gui/shell/icons.h"
 #include "src/gui/shell/theme.h"
 #include "src/system/core/config.h"
 #include "src/system/core/lang.h"
@@ -1004,12 +1005,17 @@ int main(int argc, char **argv) {
 	/* Visualizer replaces the album, not the clock, and responds to PCM. */
 	screensaver_set_visualizer(true);
 	assert(config_init(config) && config_get_bool("screen", "screensaver_visualizer", false));
+	state.status = AUDIO_STATUS_PLAYING; // music is on while the bars are fed below
 	go_dark();
 	wake();
 	lv_obj_t *spectrum = lv_obj_get_child(saver_obj(), 3);
 	assert(!lv_obj_is_hidden(spectrum));
 	assert(lv_obj_is_hidden(cover_box()));
 	assert(!lv_obj_is_hidden(info_strip()));
+	lv_obj_t *rail = lv_obj_get_child(spectrum, 0);
+	lv_obj_t *idle_note = lv_obj_get_child(spectrum, 1 + VISUALIZER_BANDS * 24); // last before the LED grid
+	assert(!lv_obj_is_hidden(rail));
+	assert(lv_obj_is_hidden(idle_note));
 	// All bars and the rail follow both built-in palettes and a chosen accent,
 	// including changes while the screensaver is already visible.
 	for (int kind = 0; kind < THEME_KIND_COUNT; kind++) {
@@ -1045,6 +1051,28 @@ int main(int argc, char **argv) {
 	int falling_height = spectrum_bar_height(spectrum, 4);
 	assert(falling_height > 0 && falling_height < rising_height);
 
+	/* Nothing playing: the rail goes and a note in the accent takes its
+	 * place in the field, and the rail comes back when the music does. */
+	state.status = AUDIO_STATUS_STOPPED;
+	pump(100);
+	dump_snapshot("idle-note"); // the accent note where the rail was
+	assert(lv_obj_is_hidden(rail));
+	assert(!lv_obj_is_hidden(idle_note));
+	assert(lv_color_eq(lv_obj_get_style_image_recolor(idle_note, 0), theme()->accent));
+	assert(lv_image_get_src(idle_note) == &icon_music_note);
+	state.status = AUDIO_STATUS_PLAYING;
+	pump(100);
+	assert(!lv_obj_is_hidden(rail));
+	assert(lv_obj_is_hidden(idle_note));
+	state.status = AUDIO_STATUS_PAUSED; // paused is not playing either
+	pump(100);
+	assert(lv_obj_is_hidden(rail));
+	assert(!lv_obj_is_hidden(idle_note));
+	state.status = AUDIO_STATUS_PLAYING;
+	pump(100);
+	assert(!lv_obj_is_hidden(rail));
+	assert(lv_obj_is_hidden(idle_note));
+
 	/* The whole scale, not just one tone: equal energy at every band centre
 	 * lights every bar -- the bass end included, which used to rest empty
 	 * while the treble sat high on its noise floor. And with equal energy
@@ -1066,7 +1094,7 @@ int main(int argc, char **argv) {
 	 * lit palette over their dark-red ghosts, a glow behind every lit
 	 * stack, caps over the peaks -- and every bar answers music at its own
 	 * centre, bass end included. */
-	assert((int)lv_obj_get_child_count(spectrum) == 1 + VISUALIZER_BANDS * 24); // no grid until LED is wanted
+	assert((int)lv_obj_get_child_count(spectrum) == 2 + VISUALIZER_BANDS * 24); // rail, bars, idle note; no grid until LED is wanted
 	screensaver_set_visualizer_style(SCREENSAVER_VIZ_STYLE_LED);
 	assert(screensaver_visualizer_style() == SCREENSAVER_VIZ_STYLE_LED);
 	assert(config_init(config) &&
@@ -1078,7 +1106,7 @@ int main(int argc, char **argv) {
 	// Neon's grid is untouched underneath: the rail, then its eight bars,
 	// then the one layer the analyzer's whole grid lives in.
 	assert(lv_color_eq(lv_obj_get_style_bg_color(lv_obj_get_child(spectrum, 0), 0), theme()->accent));
-	assert((int)lv_obj_get_child_count(spectrum) == 1 + VISUALIZER_BANDS * 24 + 1);
+	assert((int)lv_obj_get_child_count(spectrum) == 2 + VISUALIZER_BANDS * 24 + 1); // rail, bars, idle note, then the LED grid
 	lv_obj_t *layer = led_layer_of(spectrum);
 	assert(!lv_obj_is_hidden(layer));
 	assert((int)lv_obj_get_child_count(layer) ==
