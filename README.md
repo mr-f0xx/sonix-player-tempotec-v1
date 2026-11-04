@@ -224,21 +224,32 @@ The player UI is built with LVGL 9.6 and adapted for the V1's small display. The
 
 ## Features
 
-The project includes a local music library and file browser, album artwork, playlists, lyrics, audiobooks, DSP controls, an EPUB reader, and a Gearboy Game Boy / Game Boy Color emulator. The player also contains code for streaming and network features such as Bluetooth audio, AirPlay, DLNA and Wi-Fi file transfer.
+This fork builds on the upstream [Sonix Player](https://github.com/Jepl4r/sonix-player) for the V1. The items below are **new in this fork**; everything else is shared with upstream. The complete list is in [FEATURES.md](FEATURES.md).
 
-Local audio decoder inputs include WAV, FLAC, MP3, Ogg Vorbis, Opus, M4A/M4B/MP4, AAC, ALAC, WavPack, APE, AIFF/AIFC, CAF and DSD (DSF/DFF) files. DSP features include a 10-band graphic equalizer, parametric EQ, MSEB, crossfeed, channel balance and ReplayGain. The graphic EQ, PEQ and MSEB also run on internet radio stations and USB DAC PCM (incoming DSD passes through untouched). The Control Centre stays available in USB DAC mode for EQ, gain and output controls. PEQ has two independent profiles for different headphones, with a numbered quick-switch button in Control Centre; see [Audio features](FEATURES.md#audio).
+### New in this fork
 
-The interface font is a setting (Settings → Appearance → Font): MiSans, Neon 80s and Roboto, plus any `.ttf`/`.otf` file put in the `Fonts` folder on the card. Whatever a face is missing — Cyrillic, Greek, Hangul, kanji, Arabic — is drawn by MiSans behind it, so the whole interface stays legible in every language. The added family is under the SIL Open Font License; see [`sonix-player/assets/fonts/FONT-LICENSES.txt`](sonix-player/assets/fonts/FONT-LICENSES.txt) for the copyright notices and the exact files.
+- **Music pet** - a Pikachu that grows from the music you hear. See [Music pet](#music-pet).
+- **Calculator, Notes, Metronome** - a pocket calculator, text notes from the card, and a metronome with tap tempo, all under More.
+- **2048, Snake and Dino** - three small games under More, sized for the V1 panel.
+- **Tag Manager** - view and edit FLAC and MP3 tags and cover art, and search for covers over Wi-Fi. See the [usage and safety notes](docs/tag-manager.md).
+- **Subsonic / Gonic** - stream from your own server. See [Subsonic / Gonic](#subsonic--gonic).
+- **V1 themes** - **Tokyo Night**, **Amber on Black** and **OLED**, designed for the V1 panel, beside Dark and Light. Make your own with a [custom colour theme](docs/custom-themes.md).
+- **Boot screens** - Retrospace (the default), Space, Travelling in space, Stock, or your own picture.
+- **Player layouts** - **Immersive**, **Poster** and **Album Art Max**, beside Standard, Waveform and Alternative.
+- **Interface fonts** - choose MiSans, Neon 80s or Roboto, or any `.ttf`/`.otf` in the card's `Fonts` folder. Missing glyphs fall back to MiSans, so every language stays readable.
 
-Custom colour themes are supported too: copy the [editable template](sonix-player/examples/custom-theme.ini) to `Themes/custom.ini` at the root of the SD card, change its hex colours, and select **Custom** under Settings → Appearance → Theme. See the [custom-theme guide](docs/custom-themes.md) for the format, reload behaviour and limitations.
+### Shared with Sonix Player
 
-The boot screen is a setting too (Settings → Appearance → Boot screen): **Retrospace**, the default, **Space**, **Travelling in space**, **Stock**, the firmware's own light and dark pictures, or **Custom** — a JPEG or PNG of your own from the `Bootlogo` folder at the root of the card, chosen from the list under **Custom picture**. It is scaled to fill the panel and cropped where it overflows, and copied into the player, so it boots even with the card out. The choice cannot live in the config — the script that draws the logo runs before any filesystem holding a config is mounted — so it is written to the same flash marker the theme uses, and appears from the next power-on.
+- **Music**: a local library with a file browser, albums, artists, genres, playlists, favourites and most played, plus gapless playback, fades, ReplayGain and sleep timers.
+- **Sound**: a 10-band graphic EQ, parametric EQ, AutoEq, MSEB, crossfeed, DSD and a DAC page.
+- **Lyrics**: read from the file or fetched from LRCLIB.
+- **Streaming and podcasts**: Tidal, Qobuz, internet radio, Last.fm, and podcasts with downloads.
+- **Audiobooks and e-books**: chapters, bookmarks and speed control, plus an EPUB reader.
+- **Wireless**: Wi-Fi, Bluetooth headphones and speakers, a Bluetooth receiver, AirPlay, DLNA, Wi-Fi file transfer and SonixLink.
+- **Tools and games**: a file manager, a Game Boy / Game Boy Color emulator, and Flappy Bird.
+- **Screen and power**: rounded corners, brightness, a screensaver, standby, a low-battery warning and a battery screen when off.
 
-Rounded screen corners are optional (Settings → Appearance → Rounded corners), off by default. On the V1 the arc is 16 px, sized to the 2" 240×320 panel's glass.
-
-The battery is looked after at both ends. At **5 %** the player says so — a red card, and the panel comes back up for it if it was dark — and at **1 %** it switches itself off the ordinary way, position written and card unmounted, instead of letting the cell drop out from under it; below 10 % it also stays out of standby, because a sleeping player cannot watch its own gauge. A player that was **switched off and is then put on a charger** comes up on a battery screen instead of the library: the level, the percentage and what the charger is doing, going dark after ten seconds, with a **press** of the power button to bring it back and a **hold** to start the player after all.
-
-See [FEATURES.md](FEATURES.md) for a longer feature list. Streaming services also require valid credentials and may depend on third-party service availability.
+Local audio decoder inputs include WAV, FLAC, MP3, Ogg Vorbis, Opus, M4A/M4B/MP4, AAC, ALAC, WavPack, APE, AIFF/AIFC, CAF and DSD (DSF/DFF). Streaming services require valid credentials and may depend on third-party availability.
 
 ## Music pet
 
