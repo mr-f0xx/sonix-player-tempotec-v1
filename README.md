@@ -245,7 +245,7 @@ See [FEATURES.md](FEATURES.md) for a longer feature list. Streaming services als
 Open **More → Pet** to meet a small Pikachu that is fed by the music you listen to.
 
 <p align="center">
-  <img src="screenshots/pet.png" width="240" alt="Pet page on the V1: Pikachu named Pikachu, hatchling stage, with its meters and a daily listening goal">
+  <img src="screenshots/pet.png" width="240" alt="Pet page on the V1: Pikachu named Pikachu, sprout stage, with its meters, Musical Notes, daily listening goal and streak">
 </p>
 
 How it works:
