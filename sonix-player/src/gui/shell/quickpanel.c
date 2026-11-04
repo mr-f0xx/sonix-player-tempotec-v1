@@ -14,6 +14,8 @@
 #include "src/gui/shell/gui.h"
 #include "src/gui/shell/icons.h"
 #include "src/gui/settings/musicsettings.h"
+#include "src/gui/settings/powersettings.h"
+#include "src/gui/shell/powermenu.h"
 #include "src/gui/audio/peqpage.h"
 #include "src/gui/library/audiobooks.h"
 #include "src/gui/nowplaying/player.h"
@@ -43,6 +45,9 @@
 #include "src/system/addons/addons.h"
 #include "src/system/library/library.h"
 #include "src/system/audio/eq.h"
+#include "src/system/audio/replaygain.h"
+#include "src/system/device/led.h"
+#include "src/system/device/system.h"
 #include "src/system/playback/playlist.h"
 #include "src/system/playback/sleeptimer.h"
 #include "src/system/device/power.h"
@@ -61,7 +66,7 @@
 // Four round quick controls to a line. Four at 88 px plus their gaps is 394,
 // against the roughly 400 px the card leaves inside its padding, so a fifth
 // does not fit however tight the gap gets: the extra controls wrap onto a
-// second line rather than shrinking.
+// second line rather than shrinking. Two lines of four are a page.
 #define CIRCLE_BUTTON_SIZE 88
 #define CIRCLE_BUTTON_GAP 14
 #define QP_BUTTONS_PER_LINE 4
@@ -79,7 +84,7 @@
 #define CARD_TOP_GAP 12 // between the status bar and the first card
 #define CARD_GAP 16	   // between the two cards
 #define CARD_ROW_GAP 12 // between the blocks inside the controls card
-#define HANDLE_ROOM 24	// added under the slider when the card has a handle
+#define DOTS_ROOM 24	// added under the slider when the card has more than one page
 #define LEVEL_ROW_H 44
 
 // Runtime copies: the V1 still shows four controls per line, but at a size a
@@ -96,7 +101,7 @@ static int hint_strip_h = HINT_STRIP_H;
 static int card_top_gap = CARD_TOP_GAP;
 static int card_gap = CARD_GAP;
 static int card_row_gap = CARD_ROW_GAP;
-static int handle_room = HANDLE_ROOM;
+static int dots_room = DOTS_ROOM;
 static int level_row_h = LEVEL_ROW_H;
 // Whether that row's slider sets the output volume rather than the panel
 // brightness ([quickpanel] volume_slider, off by default). Read into this once at
@@ -132,6 +137,8 @@ static lv_obj_t *sleep_audiobook_btn;
 static lv_obj_t *sleep_podcast_btn;
 static lv_obj_t *wifi_transfer_btn;
 static lv_obj_t *gapless_btn;
+static lv_obj_t *airplane_btn, *crossfeed_btn, *soundfield_btn, *replaygain_btn, *mono_btn;
+static lv_obj_t *keylock_btn, *led_btn, *rotate_btn, *screen_off_btn, *power_btn;
 
 // ---------------------------------------------------------------------------
 // Which buttons the panel carries, and where
@@ -167,6 +174,16 @@ static const char *const button_key[QP_BTN_COUNT] = {
 	[QP_BTN_WIFI_TRANSFER] = "wifi_transfer",
 	[QP_BTN_GAPLESS] = "gapless",
 	[QP_BTN_PEQ_PROFILE] = "peq_profile",
+	[QP_BTN_AIRPLANE] = "airplane",
+	[QP_BTN_CROSSFEED] = "crossfeed",
+	[QP_BTN_SOUNDFIELD] = "soundfield",
+	[QP_BTN_REPLAYGAIN] = "replaygain",
+	[QP_BTN_MONO] = "mono",
+	[QP_BTN_KEYLOCK] = "keylock",
+	[QP_BTN_LED] = "led",
+	[QP_BTN_ROTATE] = "rotate",
+	[QP_BTN_SCREEN_OFF] = "screen_off",
+	[QP_BTN_POWER] = "power",
 };
 
 static const char *const button_tag[QP_BTN_COUNT] = {
@@ -187,6 +204,16 @@ static const char *const button_tag[QP_BTN_COUNT] = {
 	[QP_BTN_WIFI_TRANSFER] = "wifitransfer_title",
 	[QP_BTN_GAPLESS] = "musicsettings_gapless_playback",
 	[QP_BTN_PEQ_PROFILE] = "peq_profile",
+	[QP_BTN_AIRPLANE] = "quickpanel_airplane_mode",
+	[QP_BTN_CROSSFEED] = "musicsettings_crossfeed",
+	[QP_BTN_SOUNDFIELD] = "musicsettings_soundfield",
+	[QP_BTN_REPLAYGAIN] = "musicsettings_replay_gain",
+	[QP_BTN_MONO] = "musicsettings_mono_audio",
+	[QP_BTN_KEYLOCK] = "quickpanel_key_lock",
+	[QP_BTN_LED] = "power_led_on",
+	[QP_BTN_ROTATE] = "settings_rotate_screen",
+	[QP_BTN_SCREEN_OFF] = "power_screen_off",
+	[QP_BTN_POWER] = "quickpanel_power_menu",
 };
 
 static uint8_t slots[QP_SLOT_COUNT];  // the grid, QP_BTN_NONE where it is empty
@@ -245,48 +272,54 @@ static int parked_y(void) { return gestures_stock() ? panel_h : -panel_h; }
 #define QP_EDGE_POLL_MS 12
 
 // ---------------------------------------------------------------------------
-// The stretch of the controls card
+// The pages of the controls card
 //
-// The card shows the first QP_SLOT_VISIBLE buttons. When the panel holds more,
-// the card is a little taller, a handle sits under the slider, and a tap on
-// that handle stretches the card downwards, over the now-playing card:
-// the slider moves down with the edge and the buttons past the eighth open up
-// between the first two lines and the slider, as further lines of the same
-// grid. The now-playing card fades as the controls card covers it, and is taken
-// out altogether once it is covered, so a tap under the stretched card cannot
-// reach its transport.
+// The panel holds up to QP_SLOT_COUNT round buttons, QP_SLOT_VISIBLE to a page.
+// The first page is the card as it has always been -- two lines of four. When
+// the panel holds more than one page's worth, the card becomes a row of pages
+// that is swiped sideways, one page to a swipe, with a pair of dots under the
+// slider saying which page is showing. A tap on the dots turns the page too,
+// for a thumb that would rather not swipe. The slider and the now-playing card
+// do not move: only the buttons do.
 //
-// Which of the two ways it opens depends on the arrangement (see gestures.h). In
-// the classic one the sheet came down from the top and left upwards, so a drag
-// downwards on the card was free and stretched it; the handle was what folded
-// what a drag had stretched. In the stock arrangement the sheet rises from the
-// bottom and leaves by that same downward drag, so the direction is spoken for
-// and the handle is the whole story: one tap to unfold, one tap to fold.
+// The sheet always comes in on the first page, as Android's does, so the
+// buttons that were put there are the ones under the thumb every time.
+//
+// The page is a plain LVGL scroll with a snap and no momentum: the finger moves
+// the row, and on release it settles on the nearer page. Presses bubble up to
+// the sheet as everywhere else, so a drag that is clearly vertical still
+// carries the whole sheet away (see panel_drag_cb) -- the direction the first
+// few pixels travel decides which of the two it is.
 // ---------------------------------------------------------------------------
 
 static lv_obj_t *controls_card;
 static lv_obj_t *np_card;
-static lv_obj_t *quick_row;	   // the first QP_SLOT_VISIBLE buttons
-static lv_obj_t *extra_clip;	   // the window the stretch opens, under the first lines
-static lv_obj_t *extra_row;	   // the rest, inside that window
-static lv_obj_t *level_row;	   // moved down by the stretch
-static lv_obj_t *expand_handle; // the line under the slider, and a tap target
-static lv_obj_t *expand_pill;
+static lv_obj_t *pages_view;				// the window the pages slide in
+static lv_obj_t *page_row[QP_PAGE_COUNT]; // a page: QP_SLOT_VISIBLE buttons, two lines of four
+static lv_obj_t *level_row;
+
+// Edit mode: the tiles are rearranged in place (see the note over edit_set).
+static bool edit_mode;
+static int edit_sel = QP_BTN_NONE; // the tile that has been picked up, or none
+static lv_obj_t *edit_overlay;	   // catches the taps over the pages while editing
+static lv_obj_t *edit_done;		   // takes the slider's place while editing
+static void edit_set(bool on);
+static lv_obj_t *page_dots; // the strip under the slider, and a tap target
+static lv_obj_t *page_dot[QP_PAGE_COUNT];
 static lv_obj_t *grabber; // the line the sheet is dragged out by
-static int card_h_rest;		   // controls card height with nothing past the eighth
+static int card_h_rest;		   // controls card height with a single page
 static int card_top;		   // the controls card's top, in the arrangement in force
 static int card_top_classic; // ... and in each of the two
 static int card_top_stock;
 static int bar_clear;        // where the status bar ends, inside the sheet's padding
 static int placed_scheme = -1; // the arrangement the cards and grabber are placed for
-static int card_h_base;		   // the controls card's height at rest, handle room included
-static int expand_full;		   // how far the card stretches; 0 when nothing is past the eighth
-static int expand_h;		   // how far it is stretched now
-static int expand_from;		   // where a drag found it (classic arrangement)
-static uint32_t expand_begin_ms;
+static int card_h_base;		   // the controls card's height at rest, dots room included
+static int page_w;			   // the width of a page, which is the width the card has inside its padding
+static int pages_used = 1;	   // pages that hold at least one button
+static int page_now;		   // the page showing
 
 // Set once a press has moved the sheet, so the click that ends the same press
-// does not also fold the card from its handle.
+// does not also turn the page from its dots.
 static bool press_dragged;
 
 // The now-playing card's widgets.
@@ -632,84 +665,60 @@ static void panel_slide_to(int y, bool animate) {
 }
 
 // ---------------------------------------------------------------------------
-// Stretching the controls card (see the note over controls_card)
+// Turning the page (see the note over controls_card)
 // ---------------------------------------------------------------------------
 
-static void expand_set(int h) {
-	if (!controls_card) {
-		return;
+static void page_dots_refresh(void) {
+	for (int i = 0; i < QP_PAGE_COUNT; i++) {
+		if (!page_dot[i]) {
+			continue;
+		}
+		lv_obj_set_style_bg_color(page_dot[i], theme()->text_primary, 0);
+		lv_obj_set_style_bg_opa(page_dot[i], i == page_now ? LV_OPA_COVER : LV_OPA_30, 0);
+		lv_obj_set_hidden(page_dot[i], i >= pages_used);
 	}
-	if (h > expand_full) {
-		h = expand_full;
-	}
-	if (h < 0) {
-		h = 0;
-	}
-	expand_h = h;
-	lv_obj_set_height(controls_card, card_h_base + h);
-	lv_obj_set_height(extra_clip, h);
-	lv_obj_set_style_translate_y(level_row, h, 0);
-
-	// In proportion to the stretch: the second block comes in as the card
-	// uncovers it, and the card underneath goes out as it is covered.
-	lv_opa_t shown = expand_full > 0 ? (lv_opa_t)(LV_OPA_COVER * h / expand_full) : LV_OPA_TRANSP;
-	lv_obj_set_hidden(extra_clip, h == 0);
-	lv_obj_set_style_opa(extra_row, shown, 0);
-	lv_obj_set_hidden(np_card, expand_full > 0 && h >= expand_full);
-	lv_obj_set_style_opa(np_card, (lv_opa_t)(LV_OPA_COVER - shown), 0);
 }
 
-static void expand_anim_cb(void *obj, int32_t v) {
-	(void)obj;
-	expand_set((int)v);
-}
-
-static void expand_to(int h, bool animate) {
-	if (!controls_card) {
-		return;
+static void page_show(int page, bool animate) {
+	if (page >= pages_used) {
+		page = pages_used - 1;
 	}
-	lv_anim_delete(controls_card, expand_anim_cb);
-	if (!animate) {
-		expand_set(h);
-		return;
+	if (page < 0) {
+		page = 0;
 	}
-	lv_anim_t a;
-	lv_anim_init(&a);
-	lv_anim_set_var(&a, controls_card);
-	lv_anim_set_exec_cb(&a, expand_anim_cb);
-	lv_anim_set_values(&a, expand_h, h);
-	lv_anim_set_duration(&a, PANEL_ANIM_MS);
-	lv_anim_set_path_cb(&a, lv_anim_path_ease_out);
-	lv_anim_start(&a);
-}
-
-static void expand_drag_begin(void) {
-	lv_anim_delete(controls_card, expand_anim_cb);
-	expand_from = expand_h;
-	expand_begin_ms = lv_tick_get();
-}
-
-static void expand_drag_update(int dy) { expand_set(expand_from + dy); }
-
-// Past halfway it stays stretched, short of it it folds back; a flick goes the
-// way it was flicked, as the sheet's own drag does.
-static void expand_drag_end(void) {
-	int travel = expand_h - expand_from;
-	bool open = expand_h * 2 > expand_full;
-	uint32_t elapsed = lv_tick_elaps(expand_begin_ms);
-	int distance = travel > 0 ? travel : -travel;
-	if (elapsed > 0 && distance >= FLICK_MIN_PX && (distance * 1000) / (int)elapsed >= FLICK_SPEED_PX_S) {
-		open = travel > 0;
+	page_now = page;
+	if (pages_view) {
+		lv_obj_scroll_to_x(pages_view, page * page_w, animate ? LV_ANIM_ON : LV_ANIM_OFF);
 	}
-	expand_to(open ? expand_full : 0, true);
+	page_dots_refresh();
 }
 
-static void expand_handle_clicked_cb(lv_event_t *e) {
+// The finger is moving the row, or it has just settled: the dots follow the
+// page that is nearer.
+static void pages_scrolled_cb(lv_event_t *e) {
 	(void)e;
-	if (press_dragged) {
+	if (!pages_view || page_w <= 0) {
 		return;
 	}
-	expand_to(expand_h > 0 ? 0 : expand_full, true);
+	int page = (lv_obj_get_scroll_x(pages_view) + page_w / 2) / page_w;
+	if (page >= pages_used) {
+		page = pages_used - 1;
+	}
+	if (page < 0) {
+		page = 0;
+	}
+	if (page != page_now) {
+		page_now = page;
+		page_dots_refresh();
+	}
+}
+
+static void page_dots_clicked_cb(lv_event_t *e) {
+	(void)e;
+	if (press_dragged || pages_used < 2) {
+		return;
+	}
+	page_show((page_now + 1) % pages_used, true);
 }
 
 // Puts the cards and the grabber where the arrangement in force wants them.
@@ -860,11 +869,10 @@ static void panel_prepare(void) {
 
 	place_sheet();
 
-	// The sheet always comes in folded, as Android's does.
-	expand_to(0, false);
-	if (expand_pill) {
-		lv_obj_set_style_bg_color(expand_pill, theme()->text_primary, 0);
-	}
+	// The sheet always comes in on its first page, as Android's does, and never
+	// in edit mode.
+	edit_set(false);
+	page_show(0, false);
 
 	lv_obj_set_hidden(veil, false);
 	lv_obj_move_foreground(veil);
@@ -1002,16 +1010,15 @@ static void veil_clicked_cb(lv_event_t *e) {
 // the classic arrangement, downwards in the stock one. Either way it follows the
 // finger and stays wherever it is let go of.
 //
-// In the classic arrangement a drag the other way (back towards the status bar,
-// downwards) has a second meaning, as it always had: it stretches the controls
-// card over the now-playing one and uncovers the buttons past the eighth. In the
-// stock arrangement that direction is the sheet's own way out, so it is not free
-// to give away, and the extra lines are reached with a tap on the handle under
-// the slider (see expand_handle_clicked_cb).
+// Only a drag that is more vertical than horizontal counts. The controls card is
+// a row of pages that is swiped sideways, and a thumb that starts a swipe on a
+// button always drifts a little up or down on the way; that drift must not take
+// the whole sheet with it. The row itself is scrolled by LVGL, which claims the
+// press once it has travelled sideways far enough.
 static void panel_drag_cb(lv_event_t *e) {
 	static lv_point_t start;
 	static bool tracking;
-	static enum { DRAG_NONE, DRAG_SHEET, DRAG_CARD } engaged;
+	static enum { DRAG_NONE, DRAG_SHEET } engaged;
 
 	lv_indev_t *indev = lv_indev_active();
 	if (!indev) {
@@ -1040,41 +1047,28 @@ static void panel_drag_cb(lv_event_t *e) {
 
 	if (code == LV_EVENT_PRESSING) {
 		if (engaged == DRAG_NONE) {
-			if (gestures_stock()) {
-				// Up from the bottom, so down is the way out and nothing else.
-				if (dy < 8) {
-					return; // not a drag yet
-				}
-				engaged = DRAG_SHEET;
-			} else if (dy <= -8) {
-				// Down from the top: up is the way out, unless the card is
-				// stretched and this folds it first.
-				engaged = expand_h > 0 ? DRAG_CARD : DRAG_SHEET;
-			} else if (dy >= 8 && expand_full > 0 && expand_h < expand_full) {
-				engaged = DRAG_CARD;
-			} else {
-				return; // not a drag yet, or a drag down with nothing to uncover
+			if (lv_indev_get_scroll_obj(indev)) {
+				return; // the finger is already turning the page
 			}
+			int adx = p.x - start.x;
+			if (adx < 0) {
+				adx = -adx;
+			}
+			int close_dir = gestures_stock() ? 1 : -1; // the dy that puts the sheet away
+			if (dy * close_dir < 8 || dy * close_dir <= adx) {
+				return; // not a drag yet, or one the wrong way, or a sideways swipe
+			}
+			engaged = DRAG_SHEET;
 			press_dragged = true;
-			if (engaged == DRAG_CARD) {
-				expand_drag_begin();
-			} else {
-				quickpanel_drag_begin();
-			}
+			quickpanel_drag_begin();
 		}
-		if (engaged == DRAG_CARD) {
-			expand_drag_update(dy);
-		} else {
-			quickpanel_drag_update(dy);
-		}
+		quickpanel_drag_update(dy);
 		return;
 	}
 
 	if (code == LV_EVENT_RELEASED || code == LV_EVENT_PRESS_LOST) {
 		tracking = false;
-		if (engaged == DRAG_CARD) {
-			expand_drag_end();
-		} else if (engaged == DRAG_SHEET) {
+		if (engaged == DRAG_SHEET) {
 			quickpanel_drag_end();
 		} else {
 			// A flick quick enough to be over between two reads of the touch
@@ -1447,11 +1441,15 @@ static void star_cb(lv_event_t *e) {
 // What an empty place in the grid is written as.
 #define QP_SLOT_EMPTY_KEY "-"
 
-// A list is written as two keys of at most eight names each -- `order` and
-// `order_more`, `hidden` and `hidden_more` -- because a setting holds 127
-// characters and sixteen names do not fit in them. Eight of the longest do,
-// with room to spare.
+// A list is written as keys of at most eight names each -- `order` and
+// `order_more`, `hidden`, `hidden_more`, `hidden_more2` and `hidden_more3` --
+// because a setting holds 127 characters and sixteen names do not fit in them.
+// Eight of the longest do, with room to spare. The grid needs two keys, and the
+// buttons left out of it as many as there are buttons: four cover thirty-two.
 #define QP_LIST_SPLIT 8
+#define QP_HIDDEN_KEYS 4
+
+static const char *const hidden_key_name[QP_HIDDEN_KEYS] = {"hidden", "hidden_more", "hidden_more2", "hidden_more3"};
 
 // Reads one comma-separated list of button names into `out`, keeping only names
 // that are still buttons and dropping the ones already taken by an earlier
@@ -1520,6 +1518,14 @@ static void order_load(void) {
 
 	bool placed[QP_BTN_COUNT] = {false};
 
+	// A config that has never carried a layout at all -- a fresh install, or a
+	// player whose owner has not once opened Settings > More > Control centre --
+	// has chosen nothing, so there is nothing to protect: it gets the built-in
+	// panel, with the second page filled in.
+	bool pristine = !config_get("quickpanel", "layout", NULL) && !config_get("quickpanel", "order", NULL) &&
+					!config_get("quickpanel", "order_more", NULL) && !config_get("quickpanel", "hidden", NULL) &&
+					!config_get("quickpanel", "hidden_more", NULL);
+
 	// Long enough for a saved grid of empty places plus every button the file
 	// never mentioned, which is the worst a hand-edited file can produce.
 	uint8_t line[QP_SLOT_COUNT + QP_BTN_COUNT];
@@ -1528,9 +1534,11 @@ static void order_load(void) {
 		line_n += parse_list(config_get("quickpanel", "order_more", ""), line + line_n,
 							 (uint8_t)(QP_SLOT_COUNT - line_n), placed);
 	}
-	hidden_n = parse_list(config_get("quickpanel", "hidden", ""), hidden, QP_BTN_COUNT, placed);
-	hidden_n += parse_list(config_get("quickpanel", "hidden_more", ""), hidden + hidden_n,
-						   (uint8_t)(QP_BTN_COUNT - hidden_n), placed);
+	hidden_n = 0;
+	for (int k = 0; k < QP_HIDDEN_KEYS; k++) {
+		hidden_n += parse_list(config_get("quickpanel", hidden_key_name[k], ""), hidden + hidden_n,
+							   (uint8_t)(QP_BTN_COUNT - hidden_n), placed);
+	}
 
 	// Anything the file did not mention: a fresh install, or a button that did
 	// not exist when it was written. It goes into the panel, because a control
@@ -1546,8 +1554,13 @@ static void order_load(void) {
 		// appends without moving an existing button, but takes an empty place
 		// only when the grid has one. A full grid leaves it in Settings, where
 		// the user can make room; an upgrade never rearranges chosen controls.
+		//
+		// The second page's toggles wait as well, for the same reason: a saved
+		// panel is somebody's arrangement, and ten new buttons are not to be
+		// poured into its empty places unasked.
 		bool waits = i == QP_BTN_DLNA || i == QP_BTN_SLEEP_MUSIC || i == QP_BTN_SLEEP_AUDIOBOOK ||
-					 i == QP_BTN_SLEEP_PODCAST || i == QP_BTN_WIFI_TRANSFER || i == QP_BTN_GAPLESS;
+					 i == QP_BTN_SLEEP_PODCAST || i == QP_BTN_WIFI_TRANSFER || i == QP_BTN_GAPLESS ||
+					 i >= QP_BTN_AIRPLANE;
 		if ((saved_version < 2 && i == QP_BTN_FADE) || waits) {
 			hidden[hidden_n++] = (uint8_t)i;
 		} else {
@@ -1576,6 +1589,32 @@ static void order_load(void) {
 			}
 			break;
 		}
+	}
+
+	if (pristine) {
+		// The panel as it ships: the first page is the eight buttons it has
+		// always opened with, in the order it always had them, and the second
+		// holds the parametric equaliser and the toggles of the second page.
+		// Everything else waits in Settings.
+		static const uint8_t shipped[QP_SLOT_COUNT] = {
+			QP_BTN_WIFI,		QP_BTN_BLUETOOTH,	QP_BTN_AIRPLAY,   QP_BTN_MSEB,	QP_BTN_EQ,	   QP_BTN_GAIN,
+			QP_BTN_LINEOUT,	QP_BTN_SONIXLINK,	QP_BTN_PEQ,		  QP_BTN_AIRPLANE, QP_BTN_CROSSFEED, QP_BTN_REPLAYGAIN,
+			QP_BTN_MONO,		QP_BTN_KEYLOCK,	QP_BTN_SCREEN_OFF, QP_BTN_POWER,
+		};
+		bool taken[QP_BTN_COUNT] = {false};
+		line_n = 0;
+		hidden_n = 0;
+		for (int i = 0; i < QP_SLOT_COUNT; i++) {
+			line[line_n++] = shipped[i];
+			taken[shipped[i]] = true;
+		}
+		for (int i = 0; i < QP_BTN_COUNT; i++) {
+			if (!taken[i]) {
+				hidden[hidden_n++] = (uint8_t)i;
+			}
+		}
+		saved_version = QP_LAYOUT_VERSION;
+		grid = QP_SLOT_COUNT;
 	}
 
 	// Into the grid. From version 3 on the list already carries the empty
@@ -1624,9 +1663,11 @@ static void order_save(void) {
 	write_list("order", slots, head);
 	write_list("order_more", slots + head, last - head);
 
-	head = hidden_n < QP_LIST_SPLIT ? hidden_n : QP_LIST_SPLIT;
-	write_list("hidden", hidden, head);
-	write_list("hidden_more", hidden + head, hidden_n - head);
+	for (int k = 0, from = 0; k < QP_HIDDEN_KEYS; k++, from += QP_LIST_SPLIT) {
+		int n = hidden_n - from;
+		n = n < 0 ? 0 : n > QP_LIST_SPLIT ? QP_LIST_SPLIT : n;
+		write_list(hidden_key_name[k], hidden + from, n);
+	}
 
 	config_set_int("quickpanel", "layout", QP_LAYOUT_VERSION);
 	config_save();
@@ -1668,19 +1709,82 @@ static lv_obj_t *button_widget(quickpanel_button_t which) {
 		return wifi_transfer_btn;
 	case QP_BTN_GAPLESS:
 		return gapless_btn;
+	case QP_BTN_AIRPLANE:
+		return airplane_btn;
+	case QP_BTN_CROSSFEED:
+		return crossfeed_btn;
+	case QP_BTN_SOUNDFIELD:
+		return soundfield_btn;
+	case QP_BTN_REPLAYGAIN:
+		return replaygain_btn;
+	case QP_BTN_MONO:
+		return mono_btn;
+	case QP_BTN_KEYLOCK:
+		return keylock_btn;
+	case QP_BTN_LED:
+		return led_btn;
+	case QP_BTN_ROTATE:
+		return rotate_btn;
+	case QP_BTN_SCREEN_OFF:
+		return screen_off_btn;
+	case QP_BTN_POWER:
+		return power_btn;
 	default:
 		return NULL;
 	}
 }
 
-// Puts the widgets in the grid's order: the first QP_SLOT_VISIBLE into the
-// card's own rows, the rest into the block the stretch uncovers. Both are
-// wrapping flexes, so a child's index is its position on screen and nothing
-// has to be rebuilt; a hidden child is skipped by the flex layout, so an empty
-// place in the grid is simply a button the panel does not draw, and the row
-// closes up behind it.
+// Whether the button has anything to switch. A module that is off in Plugins
+// has no button, whatever the layout says: the layout keeps its place for it
+// and the panel closes up round the gap.
+static bool button_available(quickpanel_button_t which) {
+	switch (which) {
+	case QP_BTN_MSEB:
+		return addons_enabled("mseb");
+	case QP_BTN_EQ:
+		return addons_enabled("eq");
+	case QP_BTN_PEQ:
+	case QP_BTN_PEQ_PROFILE:
+		return addons_enabled("peq");
+	case QP_BTN_CROSSFEED:
+		return addons_enabled("crossfeed");
+	case QP_BTN_SOUNDFIELD:
+		return addons_enabled("soundfield");
+	case QP_BTN_MONO:
+		return addons_enabled("mono");
+	default:
+		return true;
+	}
+}
+
+// Edit mode's look: a ring round every tile, and a heavier, fully opaque one
+// round the tile that has been picked up. A ring and not a movement, so nothing
+// shifts under a finger; and on every tile, because that is what says the panel
+// is not a row of switches at the moment.
+static void edit_style_refresh(void) {
+	for (int b = 0; b < QP_BTN_COUNT; b++) {
+		lv_obj_t *w = button_widget((quickpanel_button_t)b);
+		if (!w) {
+			continue;
+		}
+		bool sel = edit_mode && b == edit_sel;
+		int thin = qp_compact ? 1 : 2;
+		lv_obj_set_style_outline_width(w, !edit_mode ? 0 : sel ? thin + 2 : thin, 0);
+		lv_obj_set_style_outline_pad(w, 1, 0);
+		lv_obj_set_style_outline_color(w, theme()->accent, 0);
+		lv_obj_set_style_outline_opa(w, sel ? LV_OPA_COVER : LV_OPA_40, 0);
+	}
+}
+
+// Puts the widgets in the grid's order: QP_SLOT_VISIBLE to a page, page by page.
+// Every page is a wrapping flex, so a child's index is its position on screen and
+// nothing has to be rebuilt; a hidden child is skipped by the flex layout, so an
+// empty place in the grid is simply a button the panel does not draw, and the
+// page closes up behind it. A button whose module is switched off in Plugins has
+// no place either, and the buttons after it move up into the room it leaves.
 static void order_apply(void) {
 	int at = 0;
+	int on_page[QP_PAGE_COUNT] = {0};
 	for (int i = 0; i < QP_SLOT_COUNT; i++) {
 		if (slots[i] >= QP_BTN_COUNT) {
 			continue;
@@ -1689,13 +1793,17 @@ static void order_apply(void) {
 		if (!btn) {
 			continue;
 		}
-		bool first = at < QP_SLOT_VISIBLE;
-		lv_obj_t *home = first ? quick_row : extra_row;
+		if (!button_available((quickpanel_button_t)slots[i])) {
+			lv_obj_set_hidden(btn, true);
+			continue;
+		}
+		int page = at / QP_SLOT_VISIBLE;
+		lv_obj_t *home = page_row[page];
 		if (lv_obj_get_parent(btn) != home) {
 			lv_obj_set_parent(btn, home);
 		}
 		lv_obj_set_hidden(btn, false);
-		lv_obj_move_to_index(btn, first ? at : at - QP_SLOT_VISIBLE);
+		lv_obj_move_to_index(btn, on_page[page]++);
 		at++;
 	}
 	for (int i = 0; i < hidden_n; i++) {
@@ -1705,23 +1813,27 @@ static void order_apply(void) {
 		}
 	}
 
-	// How far the card stretches: a line and the gap above it for each line of
-	// the second block, the same pitch as the lines above.
-	int extra = at > QP_SLOT_VISIBLE ? at - QP_SLOT_VISIBLE : 0;
-	int lines = (extra + qp_buttons_per_line - 1) / qp_buttons_per_line;
-	expand_full = lines * (circle_button_size + circle_button_gap);
+	pages_used = at > QP_SLOT_VISIBLE ? (at + QP_SLOT_VISIBLE - 1) / QP_SLOT_VISIBLE : 1;
+	if (pages_used > QP_PAGE_COUNT) {
+		pages_used = QP_PAGE_COUNT;
+	}
 
-	// With a handle to show the card takes handle_room from the now-playing
-	// card, which has height to spare under its transport; without one both
-	// stay as they always were.
+	// With more than one page the card takes dots_room from the now-playing card
+	// for the dots, which has height to spare under its transport; with one page
+	// both stay as they always were.
 	if (controls_card) {
-		int room = expand_full ? handle_room : 0;
+		int room = pages_used > 1 ? dots_room : 0;
 		card_h_base = card_h_rest + room;
+		lv_obj_set_height(controls_card, card_h_base);
 		lv_obj_set_y(np_card, card_top + card_h_base + card_gap);
 		lv_obj_set_height(np_card, np_card_h_rest - room);
-		lv_obj_set_hidden(expand_handle, expand_full == 0);
+		lv_obj_set_hidden(page_dots, pages_used < 2);
+		// A single page has nothing to slide to; a stray sideways drag on it
+		// must not shift the buttons off-centre.
+		lv_obj_set_scrollable(pages_view, pages_used >= 2);
 	}
-	expand_to(0, false);
+	page_show(page_now, false);
+	edit_style_refresh();
 }
 
 int quickpanel_hidden_count(void) {
@@ -1841,6 +1953,170 @@ void quickpanel_move_hidden(quickpanel_button_t button, int position) {
 	layout_changed();
 }
 
+// ---------------------------------------------------------------------------
+// Edit mode
+//
+// Settings > More > Control centre is the place to choose *which* buttons the
+// panel carries; this is the quick way to say *where*. A long press on the card
+// where there is no button -- the margins, the gaps between the buttons, the
+// dots -- puts the tiles in edit mode: each one gets a ring, and the slider's
+// row turns into a Done button. A tap picks a tile up; a tap on another tile
+// swaps the two, wherever they are, so a tile can cross to the other page by
+// trading places with one there. A second tap on the picked-up tile puts it
+// down again, and so does a tap on nothing. Every swap is saved at once, the
+// same way the settings page saves its moves.
+//
+// Taps and not a drag: a tile cannot be carried across a page that is itself
+// swiped, with one thumb, on a 240 px card -- and a swap needs no drop target
+// to aim for. The pages are still turned by a swipe or by the dots while
+// editing, which is why a transparent sheet lies over them: it takes the taps
+// off the buttons without a line of change to their own handlers, and turns the
+// swipe into a page itself.
+//
+// The sheet never comes in edit mode: panel_prepare() always starts without it.
+// ---------------------------------------------------------------------------
+
+static quickpanel_button_t edit_tile_at(const lv_point_t *p) {
+	if (!page_row[page_now]) {
+		return QP_BTN_NONE;
+	}
+	for (uint32_t i = 0; i < lv_obj_get_child_count(page_row[page_now]); i++) {
+		lv_obj_t *child = lv_obj_get_child(page_row[page_now], (int32_t)i);
+		if (lv_obj_is_hidden(child)) {
+			continue;
+		}
+		lv_area_t a;
+		lv_obj_get_coords(child, &a);
+		if (p->x < a.x1 || p->x > a.x2 || p->y < a.y1 || p->y > a.y2) {
+			continue;
+		}
+		for (int b = 0; b < QP_BTN_COUNT; b++) {
+			if (button_widget((quickpanel_button_t)b) == child) {
+				return (quickpanel_button_t)b;
+			}
+		}
+	}
+	return QP_BTN_NONE;
+}
+
+// A tap while editing: `tile` is what it landed on, or QP_BTN_NONE.
+static void edit_tap(quickpanel_button_t tile) {
+	order_load();
+	if ((int)tile >= QP_BTN_COUNT || (int)tile == edit_sel) {
+		// Nothing, or the tile already picked up: put it down.
+		edit_sel = QP_BTN_NONE;
+		edit_style_refresh();
+		return;
+	}
+	if (edit_sel >= QP_BTN_COUNT) {
+		edit_sel = tile;
+		edit_style_refresh();
+		return;
+	}
+	int a = -1, b = -1;
+	for (int i = 0; i < QP_SLOT_COUNT; i++) {
+		a = slots[i] == edit_sel ? i : a;
+		b = slots[i] == tile ? i : b;
+	}
+	edit_sel = QP_BTN_NONE;
+	if (a < 0 || b < 0) {
+		edit_style_refresh();
+		return;
+	}
+	uint8_t held = slots[a];
+	slots[a] = slots[b];
+	slots[b] = held;
+	layout_changed();
+}
+
+// The sheet over the pages: a tap is a tap on a tile, a sideways swipe turns
+// the page, and a vertical one belongs to the sheet and is left to bubble to it.
+static void edit_overlay_cb(lv_event_t *e) {
+	static lv_point_t start;
+	lv_indev_t *indev = lv_indev_active();
+	if (!indev) {
+		return;
+	}
+	lv_event_code_t code = lv_event_get_code(e);
+	lv_point_t p;
+	lv_indev_get_point(indev, &p);
+	if (code == LV_EVENT_PRESSED) {
+		start = p;
+		return;
+	}
+	if (code != LV_EVENT_RELEASED || press_dragged) {
+		return;
+	}
+	int dx = p.x - start.x;
+	int dy = p.y - start.y;
+	int adx = dx < 0 ? -dx : dx;
+	int ady = dy < 0 ? -dy : dy;
+	if (adx >= 30 && adx > ady) {
+		page_show(page_now + (dx < 0 ? 1 : -1), true);
+		return;
+	}
+	if (adx > 12 || ady > 12) {
+		return; // a drag that was not a swipe, and not a tap either
+	}
+	edit_tap(edit_tile_at(&p));
+}
+
+static void edit_done_cb(lv_event_t *e) {
+	(void)e;
+	edit_set(false);
+}
+
+static void edit_set(bool on) {
+	if (on == edit_mode) {
+		return;
+	}
+	edit_mode = on;
+	edit_sel = QP_BTN_NONE;
+	if (controls_card && edit_done && level_row && pages_view) {
+		if (on) {
+			lv_obj_update_layout(controls_card);
+			edit_overlay = lv_obj_create(controls_card);
+			lv_obj_set_ignore_layout(edit_overlay, true);
+			lv_obj_set_pos(edit_overlay, lv_obj_get_x(pages_view), lv_obj_get_y(pages_view));
+			lv_obj_set_size(edit_overlay, lv_obj_get_width(pages_view), lv_obj_get_height(pages_view));
+			lv_obj_set_style_bg_opa(edit_overlay, LV_OPA_TRANSP, 0);
+			lv_obj_set_style_border_width(edit_overlay, 0, 0);
+			lv_obj_set_style_shadow_width(edit_overlay, 0, 0);
+			lv_obj_set_style_radius(edit_overlay, 0, 0);
+			lv_obj_set_style_pad_all(edit_overlay, 0, 0);
+			lv_obj_set_scrollable(edit_overlay, false);
+			lv_obj_set_event_bubble(edit_overlay, true);
+			lv_obj_add_event_cb(edit_overlay, edit_overlay_cb, LV_EVENT_PRESSED, NULL);
+			lv_obj_add_event_cb(edit_overlay, edit_overlay_cb, LV_EVENT_RELEASED, NULL);
+			// The colours follow the theme in force now, not the one at startup.
+			lv_obj_set_style_bg_color(edit_done, theme()->accent, 0);
+			lv_obj_set_style_text_color(lv_obj_get_child(edit_done, 0), theme_on_accent(), 0);
+		} else if (edit_overlay) {
+			lv_obj_delete(edit_overlay);
+			edit_overlay = NULL;
+		}
+		lv_obj_set_hidden(level_row, on);
+		lv_obj_set_hidden(edit_done, !on);
+	}
+	edit_style_refresh();
+}
+
+// The long press that starts it: on the card itself, the pages, a page's empty
+// ground or the dots -- not on a button, whose long press opens its page.
+static void edit_enter_cb(lv_event_t *e) {
+	if (edit_mode || press_dragged || quickpanel_blocked()) {
+		return;
+	}
+	lv_obj_t *t = lv_event_get_target_obj(e);
+	bool ground = t == controls_card || t == pages_view || t == page_dots;
+	for (int i = 0; i < QP_PAGE_COUNT; i++) {
+		ground = ground || t == page_row[i];
+	}
+	if (ground) {
+		edit_set(true);
+	}
+}
+
 const char *quickpanel_button_tag(quickpanel_button_t button) {
 	if (button < 0 || button >= QP_BTN_COUNT) {
 		return "";
@@ -1883,6 +2159,26 @@ const lv_image_dsc_t *quickpanel_button_icon(quickpanel_button_t button) {
 		return &icon_wifi_transfer_quick;
 	case QP_BTN_GAPLESS:
 		return &icon_gapless_on_quick;
+	case QP_BTN_AIRPLANE:
+		return &icon_airplane_quick;
+	case QP_BTN_CROSSFEED:
+		return &icon_crossfeed_quick;
+	case QP_BTN_SOUNDFIELD:
+		return &icon_soundfield_quick;
+	case QP_BTN_REPLAYGAIN:
+		return &icon_replaygain_quick;
+	case QP_BTN_MONO:
+		return &icon_mono_quick;
+	case QP_BTN_KEYLOCK:
+		return &icon_keylock_quick;
+	case QP_BTN_LED:
+		return &icon_led_quick;
+	case QP_BTN_ROTATE:
+		return &icon_rotate_quick;
+	case QP_BTN_SCREEN_OFF:
+		return &icon_screen_off_quick;
+	case QP_BTN_POWER:
+		return &icon_power_menu_quick;
 	default:
 		return &icon_wifi;
 	}
@@ -1979,6 +2275,9 @@ static void circle_button_set_on(lv_obj_t *btn, bool on) {
 // chosen. See the note over the handlers.
 static bool sleep_timer_armed(sleeptimer_kind_t kind);
 
+// Whether airplane mode is in force. See the note over its handler.
+static bool airplane_active(void);
+
 // Repaints every round control from the state it switches, so the panel shows
 // the truth even when the setting was changed somewhere else.
 static void refresh_audio_buttons(void) {
@@ -2022,6 +2321,17 @@ static void refresh_audio_buttons(void) {
 		}
 	}
 	circle_button_set_on(gapless_btn, gapless);
+
+	// The second page.
+	circle_button_set_on(airplane_btn, airplane_active());
+	circle_button_set_on(crossfeed_btn, crossfeed_get_enabled());
+	circle_button_set_on(soundfield_btn, soundfield_get_enabled());
+	circle_button_set_on(replaygain_btn, replaygain_mode() != REPLAYGAIN_OFF);
+	circle_button_set_on(mono_btn, mono_get_enabled());
+	circle_button_set_on(keylock_btn, config_get_bool("power", "lock_keys_screen_off", false));
+	circle_button_set_on(led_btn, config_get_bool("power", "led_on", true));
+	circle_button_set_on(rotate_btn, display_get_rotated());
+	// Screen off and the power menu are not switches: they are never lit.
 }
 
 // After a button has switched something: the circles repaint, and the page
@@ -2392,6 +2702,216 @@ static void gain_clicked_cb(lv_event_t *e) {
 	toggled();
 }
 
+// ---------------------------------------------------------------------------
+// The second page
+//
+// The same contract as the first: a tap switches, a hold opens the page where
+// the setting lives, and a hold that opened a page must not also switch.
+// ---------------------------------------------------------------------------
+
+// Airplane mode: Wi-Fi and Bluetooth off together, and back as they were.
+//
+// It is not a setting of its own, only a way of switching two others at once, so
+// the button is lit while it is *true* -- the mode was asked for and both radios
+// are still off. Turning either one back on from its own button (or from
+// Settings) ends the mode without anybody having to say so, and the next tap
+// starts it again instead of "restoring" what nobody switched off.
+//
+// What was on when the mode began is written down, so the way out puts back
+// exactly that: a player that went into airplane mode with Bluetooth alone on
+// comes out of it with Bluetooth alone on. Stored in the config because the
+// radios' own state persists across a restart, and so must the memory of it.
+static bool airplane_active(void) {
+	return config_get_bool("quickpanel", "airplane", false) && !wifi_get_enabled() && !bluetooth_get_enabled();
+}
+
+static void airplane_clicked_cb(lv_event_t *e) {
+	(void)e;
+	if (long_press_consumed) {
+		long_press_consumed = false;
+		return;
+	}
+
+	if (airplane_active()) {
+		bool wifi_was = config_get_bool("quickpanel", "airplane_wifi", false);
+		bool bt_was = config_get_bool("quickpanel", "airplane_bt", false);
+		config_set_bool("quickpanel", "airplane", false);
+		config_save();
+		if (wifi_was && wifi_available()) {
+			wifi_set_enabled(true);
+		}
+		if (bt_was && bluetooth_available()) {
+			bluetooth_set_enabled(true);
+		}
+	} else {
+		config_set_bool("quickpanel", "airplane_wifi", wifi_get_enabled());
+		config_set_bool("quickpanel", "airplane_bt", bluetooth_get_enabled());
+		config_set_bool("quickpanel", "airplane", true);
+		config_save();
+		if (wifi_get_enabled()) {
+			wifi_set_enabled(false);
+		}
+		if (bluetooth_get_enabled()) {
+			bluetooth_set_enabled(false);
+		}
+	}
+	toggled();
+	topbar_refresh_radios();
+}
+
+// The pages of the audio effects and of the power settings, looked up at the
+// press: not every one of them exists when the buttons are made.
+static void second_page_hold_cb(lv_event_t *e) {
+	quickpanel_button_t which = (quickpanel_button_t)(intptr_t)lv_event_get_user_data(e);
+	lv_obj_t *screen = NULL;
+	switch (which) {
+	case QP_BTN_CROSSFEED:
+		screen = musicsettings_crossfeed_screen();
+		break;
+	case QP_BTN_SOUNDFIELD:
+		screen = musicsettings_soundfield_screen();
+		break;
+	case QP_BTN_REPLAYGAIN:
+	case QP_BTN_MONO:
+		screen = musicsettings_playback_screen();
+		break;
+	case QP_BTN_KEYLOCK:
+	case QP_BTN_LED:
+		screen = powersettings_screen;
+		break;
+	default:
+		break;
+	}
+	open_page(screen);
+}
+
+static void crossfeed_clicked_cb(lv_event_t *e) {
+	(void)e;
+	if (long_press_consumed) {
+		long_press_consumed = false;
+		return;
+	}
+	crossfeed_set_enabled(!crossfeed_get_enabled());
+	toggled();
+}
+
+static void soundfield_clicked_cb(lv_event_t *e) {
+	(void)e;
+	if (long_press_consumed) {
+		long_press_consumed = false;
+		return;
+	}
+	soundfield_set_enabled(!soundfield_get_enabled());
+	toggled();
+}
+
+static void mono_clicked_cb(lv_event_t *e) {
+	(void)e;
+	if (long_press_consumed) {
+		long_press_consumed = false;
+		return;
+	}
+	mono_set_enabled(!mono_get_enabled());
+	toggled();
+}
+
+// Off, or back to whichever mode was last chosen -- track gain when none ever
+// was -- exactly as the switch on the playback page does it. The track already
+// loaded is measured again at once, or the switch would do nothing until the
+// next song.
+static void replaygain_clicked_cb(lv_event_t *e) {
+	(void)e;
+	if (long_press_consumed) {
+		long_press_consumed = false;
+		return;
+	}
+	if (replaygain_mode() != REPLAYGAIN_OFF) {
+		replaygain_set_mode(REPLAYGAIN_OFF);
+	} else {
+		long last = config_get_int("audio", "replaygain_last", REPLAYGAIN_TRACK);
+		if (last < REPLAYGAIN_TRACK || last > REPLAYGAIN_TRACK_WHEN_SHUFFLED) {
+			last = REPLAYGAIN_TRACK;
+		}
+		replaygain_set_mode((replaygain_mode_t)last);
+	}
+	device_state_t state;
+	device_state_get(&state);
+	replaygain_load(&state.metadata);
+	toggled();
+}
+
+// Locking the keys while the screen is off, so a player in a pocket does not
+// skip tracks by itself. The power page's own switch writes the same two things.
+static void keylock_clicked_cb(lv_event_t *e) {
+	(void)e;
+	if (long_press_consumed) {
+		long_press_consumed = false;
+		return;
+	}
+	config_set_bool("power", "lock_keys_screen_off", !config_get_bool("power", "lock_keys_screen_off", false));
+	config_save();
+	powersettings_apply();
+	toggled();
+}
+
+static void led_clicked_cb(lv_event_t *e) {
+	(void)e;
+	if (long_press_consumed) {
+		long_press_consumed = false;
+		return;
+	}
+	config_set_bool("power", "led_on", !config_get_bool("power", "led_on", true));
+	config_save();
+	powersettings_apply();
+	toggled();
+}
+
+// The picture turned through 180 degrees, the touch panel with it. Where the
+// display cannot do it the button says so and changes nothing, rather than
+// saving a setting that does nothing.
+static void rotate_clicked_cb(lv_event_t *e) {
+	(void)e;
+	if (long_press_consumed) {
+		long_press_consumed = false;
+		return;
+	}
+	if (!display_rotation_supported()) {
+		gui_notify_popup("settings_rotation_unavailable");
+		return;
+	}
+	bool on = !display_get_rotated();
+	display_set_rotated(on);
+	config_set_int("screen", "rotate_180", on ? 1 : 0);
+	config_save();
+	toggled();
+}
+
+// Not a switch: the screen goes to sleep, as it does on the power key. Music
+// plays on. The sheet is put away first so that it is not what the screen wakes
+// to.
+static void screen_off_clicked_cb(lv_event_t *e) {
+	(void)e;
+	if (long_press_consumed) {
+		long_press_consumed = false;
+		return;
+	}
+	quickpanel_close();
+	power_screen_off();
+}
+
+// Not a switch either: the menu a held power key brings up, with Power off and
+// Reboot. Put in front of the page, as a confirmation is, and not under the
+// sheet.
+static void power_menu_clicked_cb(lv_event_t *e) {
+	(void)e;
+	if (long_press_consumed) {
+		long_press_consumed = false;
+		return;
+	}
+	quickpanel_close();
+	powermenu_show();
+}
+
 static void open_page(lv_obj_t *screen) {
 	long_press_consumed = true;
 	quickpanel_close();
@@ -2465,7 +2985,7 @@ void quickpanel_init(gui_config_t *cfg) {
 	card_top_gap = qp_compact ? 4 : CARD_TOP_GAP;
 	card_gap = qp_compact ? 6 : CARD_GAP;
 	card_row_gap = qp_compact ? 4 : CARD_ROW_GAP;
-	handle_room = qp_compact ? 6 : HANDLE_ROOM;
+	dots_room = qp_compact ? 6 : DOTS_ROOM;
 	level_row_h = qp_compact ? 24 : LEVEL_ROW_H;
 	panel_pad_top = cfg->padding + (qp_compact ? 2 : 8);
 	panel_pad_bottom = qp_compact ? 4 : PANEL_PAD_BOTTOM;
@@ -2552,26 +3072,51 @@ void quickpanel_init(gui_config_t *cfg) {
 	// what the user asked it to be (see level_sync). The buttons take the height
 	// above it and their rows are centred in it, so a single row of four sits
 	// midway between the top of the card and the slider. A fixed height and not
-	// a share of the card, so the slider stays where it is while the card
-	// stretches.
+	// a share of the card, so the slider stays where it is whichever page
+	// is showing.
 	lv_obj_set_flex_align(controls_card, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 	lv_obj_set_style_pad_gap(controls_card, card_row_gap, 0);
 	int row_h = controls_h - 2 * card_padding - level_row_h - card_row_gap;
 
-	lv_obj_t *row = lv_obj_create(controls_card);
-	quick_row = row;
-	// Wraps to a second line past four buttons; the third flex argument below
-	// centres the lines inside the height.
-	lv_obj_set_size(row, lv_pct(100), row_h);
-	lv_obj_set_style_bg_opa(row, 0, 0);
-	lv_obj_set_style_border_width(row, 0, 0);
-	lv_obj_set_style_pad_all(row, 0, 0);
-	lv_obj_set_style_pad_gap(row, circle_button_gap, 0);
-	lv_obj_set_scrollable(row, false);
-	lv_obj_set_event_bubble(row, true);
-	lv_obj_set_style_pad_row(row, circle_button_gap, 0);
-	lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW_WRAP);
-	lv_obj_set_flex_align(row, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+	// The pages: a window the width of the card's inside, with the pages side by
+	// side in it and a snap that holds it on one of them. Each page is a wrapping
+	// flex of four to a line, whose lines are centred in the height, so a single
+	// line of four sits midway between the top of the card and the slider.
+	page_w = card_w - 2 * card_padding;
+	pages_view = lv_obj_create(controls_card);
+	lv_obj_set_size(pages_view, page_w, row_h);
+	lv_obj_set_style_bg_opa(pages_view, 0, 0);
+	lv_obj_set_style_border_width(pages_view, 0, 0);
+	lv_obj_set_style_pad_all(pages_view, 0, 0);
+	lv_obj_set_style_pad_gap(pages_view, 0, 0);
+	lv_obj_set_event_bubble(pages_view, true);
+	lv_obj_set_flex_flow(pages_view, LV_FLEX_FLOW_ROW);
+	lv_obj_set_flex_align(pages_view, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
+	lv_obj_set_scroll_dir(pages_view, LV_DIR_HOR);
+	lv_obj_set_scroll_snap_x(pages_view, LV_SCROLL_SNAP_START);
+	lv_obj_set_scrollbar_mode(pages_view, LV_SCROLLBAR_MODE_OFF);
+	lv_obj_set_scroll_elastic(pages_view, false);
+	lv_obj_set_scroll_momentum(pages_view, false);
+	lv_obj_set_scroll_one(pages_view, true);
+	lv_obj_add_event_cb(pages_view, pages_scrolled_cb, LV_EVENT_SCROLL, NULL);
+	lv_obj_add_event_cb(pages_view, pages_scrolled_cb, LV_EVENT_SCROLL_END, NULL);
+
+	for (int i = 0; i < QP_PAGE_COUNT; i++) {
+		lv_obj_t *page = lv_obj_create(pages_view);
+		page_row[i] = page;
+		lv_obj_set_size(page, page_w, row_h);
+		lv_obj_set_style_bg_opa(page, 0, 0);
+		lv_obj_set_style_border_width(page, 0, 0);
+		lv_obj_set_style_pad_all(page, 0, 0);
+		lv_obj_set_style_pad_gap(page, circle_button_gap, 0);
+		lv_obj_set_scrollable(page, false);
+		lv_obj_set_event_bubble(page, true);
+		lv_obj_set_style_pad_row(page, circle_button_gap, 0);
+		lv_obj_set_flex_flow(page, LV_FLEX_FLOW_ROW_WRAP);
+		lv_obj_set_flex_align(page, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+	}
+	// Every button is made on the first page and moved to its own by order_apply().
+	lv_obj_t *row = page_row[0];
 
 	// The radios: a tap switches them, a hold opens their page, the same contract
 	// MSEB and the equalizer use.
@@ -2671,6 +3216,44 @@ void quickpanel_init(gui_config_t *cfg) {
 	lv_obj_add_event_cb(gapless_btn, gapless_clicked_cb, LV_EVENT_CLICKED, NULL);
 	lv_obj_add_event_cb(gapless_btn, gapless_page_cb, LV_EVENT_LONG_PRESSED, NULL);
 
+	// The second page's buttons. Where there is a page behind a setting, a hold
+	// opens it; screen off, the power menu, rotation and airplane mode have none.
+	airplane_btn = make_circle_button(row, &icon_airplane_quick);
+	lv_obj_add_event_cb(airplane_btn, airplane_clicked_cb, LV_EVENT_CLICKED, NULL);
+
+	crossfeed_btn = make_circle_button(row, &icon_crossfeed_quick);
+	lv_obj_add_event_cb(crossfeed_btn, crossfeed_clicked_cb, LV_EVENT_CLICKED, NULL);
+	lv_obj_add_event_cb(crossfeed_btn, second_page_hold_cb, LV_EVENT_LONG_PRESSED, (void *)(intptr_t)QP_BTN_CROSSFEED);
+
+	soundfield_btn = make_circle_button(row, &icon_soundfield_quick);
+	lv_obj_add_event_cb(soundfield_btn, soundfield_clicked_cb, LV_EVENT_CLICKED, NULL);
+	lv_obj_add_event_cb(soundfield_btn, second_page_hold_cb, LV_EVENT_LONG_PRESSED, (void *)(intptr_t)QP_BTN_SOUNDFIELD);
+
+	replaygain_btn = make_circle_button(row, &icon_replaygain_quick);
+	lv_obj_add_event_cb(replaygain_btn, replaygain_clicked_cb, LV_EVENT_CLICKED, NULL);
+	lv_obj_add_event_cb(replaygain_btn, second_page_hold_cb, LV_EVENT_LONG_PRESSED, (void *)(intptr_t)QP_BTN_REPLAYGAIN);
+
+	mono_btn = make_circle_button(row, &icon_mono_quick);
+	lv_obj_add_event_cb(mono_btn, mono_clicked_cb, LV_EVENT_CLICKED, NULL);
+	lv_obj_add_event_cb(mono_btn, second_page_hold_cb, LV_EVENT_LONG_PRESSED, (void *)(intptr_t)QP_BTN_MONO);
+
+	keylock_btn = make_circle_button(row, &icon_keylock_quick);
+	lv_obj_add_event_cb(keylock_btn, keylock_clicked_cb, LV_EVENT_CLICKED, NULL);
+	lv_obj_add_event_cb(keylock_btn, second_page_hold_cb, LV_EVENT_LONG_PRESSED, (void *)(intptr_t)QP_BTN_KEYLOCK);
+
+	led_btn = make_circle_button(row, &icon_led_quick);
+	lv_obj_add_event_cb(led_btn, led_clicked_cb, LV_EVENT_CLICKED, NULL);
+	lv_obj_add_event_cb(led_btn, second_page_hold_cb, LV_EVENT_LONG_PRESSED, (void *)(intptr_t)QP_BTN_LED);
+
+	rotate_btn = make_circle_button(row, &icon_rotate_quick);
+	lv_obj_add_event_cb(rotate_btn, rotate_clicked_cb, LV_EVENT_CLICKED, NULL);
+
+	screen_off_btn = make_circle_button(row, &icon_screen_off_quick);
+	lv_obj_add_event_cb(screen_off_btn, screen_off_clicked_cb, LV_EVENT_CLICKED, NULL);
+
+	power_btn = make_circle_button(row, &icon_power_menu_quick);
+	lv_obj_add_event_cb(power_btn, power_menu_clicked_cb, LV_EVENT_CLICKED, NULL);
+
 	level_row = lv_obj_create(controls_card);
 	lv_obj_set_size(level_row, lv_pct(100), level_row_h);
 	lv_obj_set_style_bg_opa(level_row, 0, 0);
@@ -2717,61 +3300,51 @@ void quickpanel_init(gui_config_t *cfg) {
 	lv_obj_add_event_cb(level_slider, level_changed_cb, LV_EVENT_VALUE_CHANGED, NULL);
 	lv_obj_add_event_cb(level_slider, level_released_cb, LV_EVENT_RELEASED, NULL);
 
-	// The buttons past the eighth. A window outside the flex, starting where the
-	// first two lines end, opens as tall as the stretch while the slider moves
-	// down by as much; the buttons sit in it one gap down, so they read as
-	// further lines of the grid above. The window clips them, so the stretch is
-	// what uncovers them.
-	int first_lines = QP_SLOT_VISIBLE / qp_buttons_per_line;
-	int first_h = first_lines * circle_button_size + (first_lines - 1) * circle_button_gap;
-	extra_clip = lv_obj_create(controls_card);
-	lv_obj_remove_style_all(extra_clip);
-	lv_obj_set_ignore_layout(extra_clip, true);
-	lv_obj_set_size(extra_clip, lv_pct(100), 0);
-	lv_obj_set_pos(extra_clip, 0, (row_h + first_h) / 2); // the grid's lines are centred in the row
-	lv_obj_set_scrollable(extra_clip, false);
-	lv_obj_set_event_bubble(extra_clip, true);
-	lv_obj_set_hidden(extra_clip, true);
+	// The dots: a short row of them in the band under the slider -- the room the
+	// card gains for them and the card's bottom padding. The dots are what is
+	// seen; the strip round them, the whole band high, is what a tap finds, and a
+	// tap turns to the next page. Presses bubble on to the sheet, so a drag
+	// starting on it is the same drag as anywhere else.
+	page_dots = lv_obj_create(controls_card);
+	lv_obj_set_ignore_layout(page_dots, true);
+	lv_obj_set_size(page_dots, 120, dots_room + card_padding);
+	lv_obj_align(page_dots, LV_ALIGN_BOTTOM_MID, 0, card_padding);
+	lv_obj_set_style_bg_opa(page_dots, LV_OPA_TRANSP, 0);
+	lv_obj_set_style_border_width(page_dots, 0, 0);
+	lv_obj_set_style_shadow_width(page_dots, 0, 0);
+	lv_obj_set_style_pad_all(page_dots, 0, 0);
+	lv_obj_set_style_pad_column(page_dots, qp_compact ? 6 : 10, 0);
+	lv_obj_set_scrollable(page_dots, false);
+	lv_obj_set_event_bubble(page_dots, true);
+	lv_obj_set_flex_flow(page_dots, LV_FLEX_FLOW_ROW);
+	lv_obj_set_flex_align(page_dots, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+	lv_obj_add_event_cb(page_dots, page_dots_clicked_cb, LV_EVENT_CLICKED, NULL);
 
-	extra_row = lv_obj_create(extra_clip);
-	lv_obj_set_size(extra_row, lv_pct(100), LV_SIZE_CONTENT);
-	lv_obj_set_pos(extra_row, 0, circle_button_gap);
-	lv_obj_set_style_bg_opa(extra_row, 0, 0);
-	lv_obj_set_style_border_width(extra_row, 0, 0);
-	lv_obj_set_style_pad_all(extra_row, 0, 0);
-	lv_obj_set_style_pad_gap(extra_row, circle_button_gap, 0);
-	lv_obj_set_scrollable(extra_row, false);
-	lv_obj_set_event_bubble(extra_row, true);
-	lv_obj_set_flex_flow(extra_row, LV_FLEX_FLOW_ROW_WRAP);
-	lv_obj_set_flex_align(extra_row, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+	for (int i = 0; i < QP_PAGE_COUNT; i++) {
+		page_dot[i] = lv_obj_create(page_dots);
+		int dot = qp_compact ? 5 : 8;
+		lv_obj_set_size(page_dot[i], dot, dot);
+		lv_obj_set_style_radius(page_dot[i], LV_RADIUS_CIRCLE, 0);
+		lv_obj_set_style_border_width(page_dot[i], 0, 0);
+		lv_obj_set_style_shadow_width(page_dot[i], 0, 0);
+		lv_obj_set_style_pad_all(page_dot[i], 0, 0);
+		lv_obj_set_clickable(page_dot[i], false);
+	}
 
-	// The handle: a short line in the band under the slider -- the room the
-	// card gains for it and the card's bottom padding -- which travels down
-	// with the edge as the card stretches. The line is what is seen; the strip
-	// round it, the whole band high, is what a tap finds, and a tap folds or
-	// stretches the card. Presses bubble on to the sheet, so a drag starting on
-	// it is the same drag as anywhere else.
-	expand_handle = lv_obj_create(controls_card);
-	lv_obj_set_ignore_layout(expand_handle, true);
-	lv_obj_set_size(expand_handle, 160, handle_room + card_padding);
-	lv_obj_align(expand_handle, LV_ALIGN_BOTTOM_MID, 0, card_padding);
-	lv_obj_set_style_bg_opa(expand_handle, LV_OPA_TRANSP, 0);
-	lv_obj_set_style_border_width(expand_handle, 0, 0);
-	lv_obj_set_style_shadow_width(expand_handle, 0, 0);
-	lv_obj_set_style_pad_all(expand_handle, 0, 0);
-	lv_obj_set_scrollable(expand_handle, false);
-	lv_obj_set_event_bubble(expand_handle, true);
-	lv_obj_add_event_cb(expand_handle, expand_handle_clicked_cb, LV_EVENT_CLICKED, NULL);
-
-	expand_pill = lv_obj_create(expand_handle);
-	lv_obj_set_size(expand_pill, 36, 5);
-	lv_obj_center(expand_pill);
-	lv_obj_set_style_radius(expand_pill, LV_RADIUS_CIRCLE, 0);
-	lv_obj_set_style_bg_color(expand_pill, theme()->text_primary, 0);
-	lv_obj_set_style_bg_opa(expand_pill, LV_OPA_40, 0);
-	lv_obj_set_style_border_width(expand_pill, 0, 0);
-	lv_obj_set_style_shadow_width(expand_pill, 0, 0);
-	lv_obj_set_clickable(expand_pill, false);
+	// Edit mode (see the note over edit_set): the long press that starts it, and
+	// the Done button that stands where the slider does while it lasts.
+	lv_obj_add_event_cb(controls_card, edit_enter_cb, LV_EVENT_LONG_PRESSED, NULL);
+	edit_done = lv_btn_create(controls_card);
+	lv_obj_set_size(edit_done, lv_pct(60), level_row_h);
+	lv_obj_set_style_radius(edit_done, LV_RADIUS_CIRCLE, 0);
+	lv_obj_set_style_shadow_width(edit_done, 0, 0);
+	lv_obj_set_event_bubble(edit_done, true);
+	lv_obj_add_event_cb(edit_done, edit_done_cb, LV_EVENT_CLICKED, NULL);
+	lv_obj_t *done_label = lv_label_create(edit_done);
+	lv_label_set_text(done_label, tr("done"));
+	lv_obj_set_style_text_font(done_label, qp_compact ? &font_ui_14 : &font_ui_24, 0);
+	lv_obj_center(done_label);
+	lv_obj_set_hidden(edit_done, true);
 
 	// --- Second card: what is playing, and its transport. ---
 	np_card = make_card(panel, card_w, now_playing_h, card_top + controls_h + card_gap);
@@ -2908,12 +3481,8 @@ void quickpanel_init(gui_config_t *cfg) {
 	lv_obj_set_style_image_opa(hint, LV_OPA_60, 0);
 	lv_obj_center(hint);
 
-	// The controls card in front of the now-playing one, which it covers when
-	// stretched.
-	lv_obj_move_to_index(controls_card, lv_obj_get_index(np_card));
-
 	// Built in the order above, then arranged into the user's -- see
-	// Settings > More > Control centre. Last, once both rows and the handle
+	// Settings > More > Control centre. Last, once the pages and the dots
 	// exist to arrange.
 	order_load();
 	order_apply();

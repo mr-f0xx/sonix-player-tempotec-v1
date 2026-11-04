@@ -220,6 +220,18 @@ ICONS = [
     # the gap itself -- the two halves apart while off, closed up while on.
     ("gapless-on-quick.svg", "gapless_on_quick", 46),
     ("gapless-off-quick.svg", "gapless_off_quick", 46),
+    # The control centre's second page: one glyph per toggle, each of them a
+    # plain line drawing the circle recolours.
+    ("airplane-quick.svg", "airplane_quick", 46),
+    ("crossfeed-quick.svg", "crossfeed_quick", 46),
+    ("soundfield-quick.svg", "soundfield_quick", 46),
+    ("replaygain-quick.svg", "replaygain_quick", 46),
+    ("mono-quick.svg", "mono_quick", 46),
+    ("keylock-quick.svg", "keylock_quick", 46),
+    ("led-quick.svg", "led_quick", 46),
+    ("rotate-quick.svg", "rotate_quick", 46),
+    ("screen-off-quick.svg", "screen_off_quick", 46),
+    ("power-menu-quick.svg", "power_menu_quick", 46),
     # File types, in the file manager and on the web page: one glyph per
     # family, at the size of the folder beside them.
     ("files-music.svg", "files_music", 32),

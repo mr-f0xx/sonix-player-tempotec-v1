@@ -300,6 +300,13 @@ static void standby_toggled_cb(lv_event_t *e) {
 	refresh_labels();
 }
 
+// The control centre switches the LED and the key lock from outside, so the
+// switches are read again each time the page comes up.
+static void power_loaded_cb(lv_event_t *e) {
+	(void)e;
+	refresh_labels();
+}
+
 void powersettings_init(gui_config_t *cfg) {
 	lv_obj_t *container = settingsrow_page(powersettings_screen, cfg, "power");
 
@@ -396,4 +403,5 @@ void powersettings_init(gui_config_t *cfg) {
 	// standby option, which lives in led.c rather than power.c.
 	powersettings_apply();
 	refresh_labels();
+	lv_obj_add_event_cb(powersettings_screen, power_loaded_cb, LV_EVENT_SCREEN_LOADED, NULL);
 }

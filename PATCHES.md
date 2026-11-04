@@ -1135,9 +1135,10 @@ the one after that would use them back again:
 * the control centre parks below the bottom edge in the stock arrangement and
   above the top edge in the classic one, keeps its grabber under the status bar
   in the first and at the foot of the sheet in the second, and gives the drag the
-  one free direction it has — the extra button rows are stretched out by a drag
-  in the classic arrangement, where downwards is free, and by a tap on the handle
-  under the brightness slider in the stock one, where downwards is the way out;
+  one free direction it has — a drag that is mostly vertical and towards the edge
+  the sheet came from carries it away in both arrangements, and the extra buttons
+  are on a second page that is swiped sideways, so no direction has to be shared
+  with them (see "The control centre's second page");
 * Cover Flow parks above the top edge in the stock arrangement and below the
   bottom edge in the classic one, with its grip at the foot of the sheet in the
   first and under the status bar in the second, and the row is laid out around
@@ -1160,6 +1161,99 @@ sheet the arrangement puts at the top — the control centre in the classic one,
 Cover Flow in the stock one — because hiding the bar must not take the gesture
 away with it. The reader and the two games hide it behind a full-screen picture
 instead, and they keep their own presses.
+
+## The control centre's second page
+
+The control centre has held sixteen buttons for some time, but only eight were
+visible: the other eight were behind a stretch of the card that was pulled down
+over the now-playing card (classic gestures) or unfolded with a handle (stock
+gestures). That was a gesture borrowed from the way the sheet itself moves, and
+it was a different gesture in each arrangement. It is replaced by what a reader
+of a phone's home screen already knows: **two pages, side by side, swiped
+sideways**.
+
+`pages_view` is a window the width of the card's inside and `row_h` high, with
+`LV_SCROLL_SNAP_START`, `scroll_one`, no elasticity and no momentum, so one flick
+is one page and a page cannot be left half-turned. It holds `QP_PAGE_COUNT`
+(`QP_SLOT_COUNT / QP_SLOT_VISIBLE`, so two) wrapping flexes of four to a line --
+the very flex the single row used to be -- and `order_apply()` puts the in-use
+slot *i* on page *i / 8*. The brightness (or volume) row stays where it is under
+the pages. With nothing past the eighth place, scrolling is switched off and the
+panel looks and behaves exactly as before; with something there, the card grows
+by `DOTS_ROOM` at the expense of the now-playing card's height and a pair of dots
+appears under the slider. The dots are what is shown and the strip round them is
+what a tap finds: it turns to the next page. `panel_prepare()` always opens on the
+first page.
+
+The sheet's own drag has a rule of its own to keep from fighting the swipe: it
+engages only when the finger has moved eight pixels towards the close direction
+*and* further vertically than horizontally, and not at all once LVGL has claimed
+the press for the page row. A thumb that starts a sideways swipe on a button and
+drifts upwards on the way no longer takes the whole sheet with it.
+
+### Ten new buttons
+
+The second page is for things that were wanted with the player in the hand and
+were several taps deep in Settings. All reuse the setting's own API, so nothing
+is duplicated: **airplane** (see below), **crossfeed**, **soundfield**, **mono**
+(`*_set_enabled()`, the same as the audio pages), **replaygain** (off, or the
+mode last saved in `[audio] replaygain_last`, and the track already loaded is
+measured again at once as the playback page does), **keylock** and **led**
+(`[power] lock_keys_screen_off` / `led_on` through `powersettings_apply()`),
+**rotate** (`display_set_rotated()` and `[screen] rotate_180`, with the
+"unavailable" popup where the display cannot do it), **screen_off** and **power**
+(the sheet goes away, then `power_screen_off()` / `powermenu_show()`).
+
+Airplane mode is not a setting of its own, only two others switched at once, so
+it is lit while it is *true*: `[quickpanel] airplane` is set **and** both radios
+are off. Switching either radio back on from anywhere ends it without anyone
+having to say so. The way into it writes down what was on in
+`airplane_wifi`/`airplane_bt`, and the way out restores exactly that.
+
+A long press on a toggle with a page of its own opens it (`second_page_hold_cb`
+looks the page up at the press, since not every page exists when the buttons are
+built). The Soundfield, Crossfeed, playback and power pages now read their
+switches again when they come up, because the control centre changes the same
+settings from outside; `musicsettings_soundfield_screen()` and
+`musicsettings_crossfeed_screen()` are the two new accessors.
+
+### Edit mode
+
+A long press on the controls card where there is no button (`edit_enter_cb`
+checks the event's target: the card, `pages_view`, a page or the dots; a button's
+own long press still opens its page) calls `edit_set(true)`. Every tile gets an
+outline, the picked-up one a heavier one, and the level row is swapped for a Done
+button of the same height, so nothing moves. A transparent `edit_overlay` is laid
+over `pages_view`: it takes the taps off the tiles without touching their
+handlers, hit-tests the current page's children itself (`edit_tile_at`), and turns
+a sideways swipe into a page turn since the page row can no longer be scrolled
+through it. `edit_tap()` picks a tile up, or swaps it with the picked-up one in
+`slots[]` and goes through `layout_changed()`, which saves and re-applies like the
+settings page's moves. Swaps were chosen over a drag because the lists are kept
+compact and a swap needs no drop target. `panel_prepare()` always leaves edit
+mode, so the sheet never opens in it. The swap logic is covered in
+`test_quickpanel_layout.c`; the overlay and the long press need a device.
+
+### Layout and migration
+
+The ten buttons are appended to the enum after `QP_BTN_PEQ_PROFILE`; their keys
+(`airplane`, `crossfeed`, `soundfield`, `replaygain`, `mono`, `keylock`, `led`,
+`rotate`, `screen_off`, `power`) are what is saved and are never to be renamed.
+A **saved** layout is never rearranged: the ten join the list of buttons waiting
+in Settings, like the sleep timers did. A config that has never carried a layout
+at all gets the panel as it ships: page one is the eight it has always opened
+with and page two is the PEQ, airplane, crossfeed, ReplayGain, mono, key lock,
+screen off and power buttons, with the remaining buttons in "not in use".
+
+With 27 buttons the list of buttons left out can hold more than the two keys
+(`hidden`, `hidden_more`) allow, so `hidden_more2` and `hidden_more3` carry the
+rest, eight names to a key as before (a setting is 127 characters). Older builds
+read the first two and ignore the others, which loses nothing they knew of.
+
+`order_apply()` also gained `button_available()`: a button whose module is off in
+Plugins (MSEB, EQ, PEQ, Mono, Soundfield, Crossfeed) is hidden and the page
+closes up round it. Before, `order_apply()` un-hid every button in the grid, which
+undid the hiding done when the buttons were built.
 
 ## The control centre's slider, as brightness or as volume
 

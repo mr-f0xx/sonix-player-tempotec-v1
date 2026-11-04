@@ -6,7 +6,8 @@
 #include "lvgl/lvgl.h"
 
 // The control centre: a sheet with the wifi and bluetooth buttons (tap to
-// toggle, long press to open the page), the transport controls and the slider
+// toggle, long press to open the page) on a first page and more toggles on a
+// second one a swipe away, the transport controls and the slider
 // under them -- the panel brightness, or the volume if that is what the user
 // asked it to be (see quickpanel_volume_slider). A swipe back towards the edge
 // carries it out again, and a tap outside puts it away the short way.
@@ -51,10 +52,11 @@ void quickpanel_drag_end(void);
 // ---------------------------------------------------------------------------
 // Which round buttons the panel carries, and where
 //
-// The panel holds up to sixteen, in a grid of sixteen places. A place can also
-// be empty: the panel simply draws one button fewer. The card shows the first
-// eight; past them a handle appears under the slider, and dragging the sheet
-// down stretches the card over the now-playing one to show the rest.
+// The panel holds up to sixteen, in a grid of sixteen places that is two pages
+// of eight. A place can also be empty: the panel simply draws one button fewer.
+// The card shows the first page; when the second holds anything, a pair of dots
+// appears under the slider and the card is swiped sideways -- or the dots are
+// tapped -- to turn to it.
 //
 // Both the grid and the buttons left out of it live in [quickpanel] as lists of
 // names -- `order`, with "-" for an empty place, and `hidden`. Names and not
@@ -64,7 +66,8 @@ void quickpanel_drag_end(void);
 // ---------------------------------------------------------------------------
 
 #define QP_SLOT_COUNT 16
-#define QP_SLOT_VISIBLE 8 // the ones the card shows before it is stretched
+#define QP_SLOT_VISIBLE 8 // the ones a page shows
+#define QP_PAGE_COUNT (QP_SLOT_COUNT / QP_SLOT_VISIBLE)
 
 typedef enum {
 	QP_BTN_WIFI = 0,
@@ -88,6 +91,18 @@ typedef enum {
 	QP_BTN_WIFI_TRANSFER,
 	QP_BTN_GAPLESS,
 	QP_BTN_PEQ_PROFILE,
+	// The second page's toggles: things that were only to be had by going into
+	// Settings, and are wanted with the player in the hand.
+	QP_BTN_AIRPLANE,   // Wi-Fi and Bluetooth off together, and back as they were
+	QP_BTN_CROSSFEED,  // headphone crossfeed
+	QP_BTN_SOUNDFIELD, // stereo widening
+	QP_BTN_REPLAYGAIN, // ReplayGain off / the mode last used
+	QP_BTN_MONO,	   // both channels as one
+	QP_BTN_KEYLOCK,	   // lock the keys when the screen is off
+	QP_BTN_LED,		   // the LED master switch
+	QP_BTN_ROTATE,	   // the picture turned through 180 degrees
+	QP_BTN_SCREEN_OFF, // not a switch: puts the screen to sleep
+	QP_BTN_POWER,	   // not a switch either: the power menu
 	QP_BTN_COUNT,
 	QP_BTN_NONE = QP_BTN_COUNT, // an empty place in the grid
 } quickpanel_button_t;

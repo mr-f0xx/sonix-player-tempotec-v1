@@ -42,6 +42,9 @@ lv_obj_t *musicsettings_fade_screen(void);
 // The playback options page, which holds the music sleep timer: what the
 // control centre's sleep button for music opens on a long press.
 lv_obj_t *musicsettings_playback_screen(void);
+// Null while the module is off in Plugins, which builds neither page.
+lv_obj_t *musicsettings_soundfield_screen(void);
+lv_obj_t *musicsettings_crossfeed_screen(void);
 bool musicsettings_fade_enabled(void);
 void musicsettings_set_fade_enabled(bool enabled);
 
