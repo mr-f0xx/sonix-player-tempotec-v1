@@ -301,10 +301,10 @@ a self-signed certificate), and HLS.
   what it is feeding on beside a three-bar equalizer. It stands on a route --
   a sky that comes up out of the card, hills, a round tree and a pine, tall
   grass and flowers, a platform under its feet -- and its face is the
-  picture's own, except when it is fed. **While music plays it is surprised**:
-  its eyes go round and wide, its mouth opens on a pink tongue and shuts again
-  as it chews, it steps from side to side and sparks fly off its cheeks. (A
-  scarf, a chain or a collar is over its chin, so there the mouth stays small.)
+  picture's own, except when it is fed. **While music plays it smiles**:
+  its eyes go round and bright, its mouth opens on a pink tongue, it steps from
+  side to side and sparks fly off its cheeks. (A scarf or collar is over its
+  chin, so there the smile stays small.)
   The rest of the time the mood is something added beside the picture: eyes
   shut and a little "z z" when it is asleep, a blue sweat drop when it is sad,
   three gold stars when it is dizzy, hearts over it when it is blissful, and,
@@ -316,8 +316,8 @@ a self-signed certificate), and HLS.
   picture's own black is as light as the card there. **It
   answers the keys as well as the glass**: a step up on
   the volume and it jumps, a step down and it ducks, Previous and Next and it
-  leans the way they go, and a tap picks one of three tiny reactions -- a heart,
-  a hop or a shake -- on the pat's own cooldown. **Hold a finger on it for two
+  leans the way they go, and a tap makes it hop with a bobbing heart, even
+  during the pat's reward cooldown. **Hold a finger on it for two
   seconds** and three hearts fill under it; the third pays the day's groom,
   once a day. A genre tag dresses it for the track it is hearing -- mirror
   shades for the electronic family, a gold chain for hip hop, a studded collar

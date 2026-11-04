@@ -457,17 +457,11 @@ STAMP(stamp_shine, 3,
       "WWW",
       ".W.");
 
-// A chain, ink and gold links so it shows on yellow fur, and its pendant, which
-// covers the little orange patch on the chest.
+// Gold links at the neck. No dark-ringed pendant: it looked like a hole.
 STAMP(stamp_chain, 18,
       "KgK............KgK",
       "...KgKg....gKgK...",
-      ".......gKKg.......");
-STAMP(stamp_chain_pendant, 4,
-      ".KK.",
-      "KggK",
-      "KggK",
-      ".KK.");
+      ".......gggg.......");
 
 // A studded collar.
 STAMP(stamp_collar, 19,
@@ -497,19 +491,17 @@ STAMP(stamp_gasp_lid, 5,
       "YYYYY",
       "KKKKK",
       ".YYY.");
-// The mouth. The picture's own is two rows (the little w under the nose), and a
-// yellow cell at each end of the first row hides the ends of it. The wide one is
-// the surprise, the narrow one is a mouthful, and the two take turns.
-STAMP(stamp_gasp_mouth, 8,
-      "Y.KKKK.Y",
-      ".KmmmmK.",
-      ".KTTTTK.",
-      ".KTTTTK.",
-      "..KKKK..");
-STAMP(stamp_chew_mouth, 8,
-      "Y.KKKK.Y",
-      ".KTTTTK.",
-      "..KKKK..");
+// A happy, open smile with raised corners and a pink tongue, like the
+// reference. A compact smile fits above a scarf or collar without a stray lip.
+STAMP(stamp_happy_mouth, 8,
+      "KYYKKYYK",
+      "YKKmmKKY",
+      "YYKmmKYY",
+      "YYKTTKYY",
+      "YYYKKYYY");
+STAMP(stamp_happy_mouth_small, 8,
+      "KYYKKYYK",
+      "YKKTTKKY");
 
 // The electricity at the cheeks of a pet that is feeding: a bolt, then a spark.
 STAMP(stamp_bolt, 3,
@@ -910,16 +902,11 @@ static void paint_creature(void) {
 
 	// ---- his face --------------------------------------------------------
 	//
-	// The face is the picture's, and it stays the picture's -- except when he is
-	// fed. While music is playing and he is awake he is surprised, the way a
-	// pet is by a mouthful: his eyes go round and wide, his mouth opens on a pink
-	// tongue and shuts again as he chews, and sparks fly off his cheeks. Shades
-	// are over the eyes whatever they are doing, so with shades the mouth is all
-	// there is to see. A scarf, a collar or a chain is over the chin, so there the
-	// mouth is only as big as the picture's own, and does not chew.
+	// An awake listener smiles; shades still cover the eyes and a compact
+	// smile stays clear of neckwear. Sleep keeps the picture's sleeping face.
 	const pet_genre_look_t look = petwatch_look();
 	const bool shades = look == PET_LOOK_SHADES;
-	const bool neck = pet_wearing(st) == (int)PET_ITEM_SCARF || look == PET_LOOK_CHAIN || look == PET_LOOK_COLLAR;
+	const bool neck = pet_wearing(st) == (int)PET_ITEM_SCARF || look == PET_LOOK_COLLAR;
 	const bool feeding = petwatch_listening() && mood != PET_MOOD_SLEEPING;
 	feeding_now = feeding;
 
@@ -934,10 +921,9 @@ static void paint_creature(void) {
 			gear_add(&stamp_gasp_eye, 24, 11);
 		}
 		if (neck) {
-			gear_add(&stamp_chew_mouth, 18, 18);
+			gear_add(&stamp_happy_mouth_small, 18, 18);
 		} else {
-			gear_add_on(&stamp_gasp_mouth, 18, 18, GEAR_FIRST);
-			gear_add_on(&stamp_chew_mouth, 18, 18, GEAR_SECOND);
+			gear_add(&stamp_happy_mouth, 18, 18);
 		}
 		// A spark on each side, a bolt that is a spark on the other frame, over the
 		// sky beside the head and the tail. The sweat drop of a sad pet has the
@@ -1009,8 +995,7 @@ static void paint_creature(void) {
 	if (shades) {
 		gear_add(&stamp_shades, 13, 11);
 	} else if (look == PET_LOOK_CHAIN && !scarf) {
-		gear_add(&stamp_chain, 13, 20);
-		gear_add(&stamp_chain_pendant, 20, 23);
+		gear_add(&stamp_chain, 13, 23);
 	} else if (look == PET_LOOK_COLLAR && !scarf) {
 		gear_add(&stamp_collar, 12, 20);
 	} else if (look == PET_LOOK_CUP) {
@@ -1575,6 +1560,7 @@ typedef struct {
 	pet_temperament_t temperament;
 	char status[192];
 	int room, wearing;
+	pet_genre_look_t look;
 } shown_t;
 
 static shown_t shown;
@@ -1699,13 +1685,14 @@ static void paint_values(void) {
 	const pet_state_t *st = petwatch_state();
 	bool animal = !shown.valid || shown.stage != pet_stage(st) || shown.mood != pet_mood(st, petwatch_now()) ||
 				  shown.listening != petwatch_listening() || shown.calm != pet_has_soundscape(st) ||
-				  shown.wearing != pet_wearing(st) || shown.room != pet_room(st);
+				  shown.wearing != pet_wearing(st) || shown.room != pet_room(st) || shown.look != petwatch_look();
 
 	if (animal) {
 		paint_room();
 		paint_creature();
 		paint_theme_colors();
 		shown.wearing = pet_wearing(st);
+		shown.look = petwatch_look();
 		shown.room = pet_room(st);
 		shown.calm = pet_has_soundscape(st);
 		shown.mood = pet_mood(st, petwatch_now());
@@ -1771,7 +1758,7 @@ static void paint(void) {
 // The animal is not interpolated. It has two frames -- a breath in and a breath
 // out -- and the page's own one-second timer swaps them: the root moves two
 // pixels (and, while he is feeding, steps from side to side), the stars turn and
-// the hearts float, the sparks and the mouth change, the notes drift and the
+// the hearts float, the sparks change, the notes drift and the
 // motes rise. Nothing here runs at more than 1 Hz but a blink, nothing asks LVGL
 // to interpolate, and the whole thing is a dozen integer fields written into a
 // dozen objects once a second. On a 240 x 320 panel that is the difference
@@ -1807,7 +1794,7 @@ static void apply_frame(void) {
 		dy -= frame ? 8 : 1;
 		break;
 	case REACT_HEART:
-		dy -= frame ? 2 : 0;
+		dy -= frame ? 5 : 1;
 		break;
 	case REACT_LEAN_L:
 		dx = frame ? -4 : -2;
@@ -1830,6 +1817,8 @@ static void apply_frame(void) {
 	lv_obj_set_style_translate_y(parts.root, dy, 0);
 	// A jump has a shadow under it: it stays on the floor while he is above it.
 	lv_obj_set_style_translate_y(parts.shadow, dy < 0 ? -dy : 0, 0);
+	// The heart bobs independently of the little hop.
+	lv_obj_set_style_translate_y(parts.heart, frame ? 4 : 0, 0);
 	// The ball and the find stand on the floor of the room, not on the animal:
 	// when it jumps, the furniture stays where it is. A child's own translate
 	// adds to its parent's, so cancelling it is exact.
@@ -1847,6 +1836,9 @@ static void apply_frame(void) {
 		}
 	}
 
+	// Notes are behind the animal, and visible only while music is audible.
+	show(note_a, listening);
+	show(note_b, listening);
 	// The two notes drift while something is playing: one rises as the other
 	// fades, which is all the movement two stills can suggest.
 	if (listening) {
@@ -3002,8 +2994,7 @@ static void consume_events(void) {
 //
 // A button or a finger is answered by the animal itself, for a few seconds: a
 // jump when the volume goes up, a duck when it comes down, a lean for the next
-// track, a heart or a wave for a tap. It is two numbers on one object -- a
-// shift and a rotation -- so a reaction costs what a breath costs, and the
+// track, and a bobbing heart for a tap. A reaction costs what a breath costs, and the
 // one-second frame that already runs draws it. Nothing is timed with a new
 // timer except the Petting Mode meter, which needs to fill faster than that.
 // ---------------------------------------------------------------------------
@@ -3149,13 +3140,8 @@ static void hold_timer_cb(lv_timer_t *timer) {
 		hold_timer = NULL;
 	}
 	hide_hold_meter();
-	if (petwatch_hold()) {
-		toast_plain(tr("pet_purr"));
-		start_reaction(REACT_HEART);
-	} else {
-		toast_plain(tr("pet_cooldown"));
-		start_reaction(REACT_HOP);
-	}
+	(void)petwatch_hold();
+	start_reaction(REACT_HEART);
 	paint_values();
 }
 
@@ -3237,16 +3223,9 @@ static void pet_tap_cb(lv_event_t *e) {
 	if (petwatch_now() <= swallow_until) {
 		return; // the click that closed a hold
 	}
-	if (petwatch_pet_now()) {
-		toast_plain(tr("pet_purr"));
-	} else {
-		toast_plain(tr("pet_cooldown"));
-	}
-
-	// One of three tiny answers, picked by the clock. A coin flip is enough to
-	// make a tap a surprise, and it costs no state to remember.
-	static const int picks[3] = {REACT_HEART, REACT_HOP, REACT_WAVE};
-	start_reaction(picks[(int)(petwatch_now() % 3)]);
+	// Keep the reward and its cooldown, but always give a visible response.
+	(void)petwatch_pet_now();
+	start_reaction(REACT_HEART);
 }
 
 // The shell's back chevron closes whatever sheet is on top before it leaves.
@@ -3569,20 +3548,18 @@ static void build(void) {
 		show(motes[i], false);
 	}
 
+	// Notes sit in the scenery, behind the animal, and drift only during playback.
+	note_a = icon_image(habitat, &icon_music_note, 14);
+	place(note_a, 20, 86, 14, 14);
+	note_b = icon_image(habitat, &icon_music_note, 12);
+	place(note_b, card_w - 32, 100, 12, 12);
+	show(note_a, false);
+	show(note_b, false);
+
 	// ---- the animal ------------------------------------------------------
 	build_creature();
 	// Feet on the floor line, a little into the grass: PET_BASE_Y down from here.
 	lv_obj_set_pos(parts.root, (card_w - PET_CREATURE_W) / 2, 50);
-
-	// The two notes drift up out of the card's top.
-	note_a = icon_image(habitat, &icon_music_note, 14);
-	place(note_a, 26, 64, 14, 14);
-	note_b = icon_image(habitat, &icon_music_note, 12);
-	place(note_b, card_w - 34, 78, 12, 12);
-	lv_obj_set_style_opa(note_a, LV_OPA_TRANSP, 0);
-	lv_obj_set_style_opa(note_b, LV_OPA_TRANSP, 0);
-	show(note_a, false);
-	show(note_b, false);
 
 	// ---- what it is feeding on ------------------------------------------
 	// The status line's picture: a still note when nothing is playing, and

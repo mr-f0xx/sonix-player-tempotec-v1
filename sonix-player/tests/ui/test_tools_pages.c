@@ -117,7 +117,8 @@ void toast_error(const char *text) {
 	fprintf(stderr, "error: %s\n", text ? text : "");
 	assert(!"unexpected error toast");
 }
-void toast_plain(const char *text) { (void)text; }
+static int plain_toasts;
+void toast_plain(const char *text) { (void)text; plain_toasts++; }
 void toast_success(const char *text) { (void)text; }
 void topbar_set_battery_percent(bool shown) { (void)shown; }
 void topbar_set_clock_position(int pos) { (void)pos; }
@@ -731,34 +732,39 @@ static void pet_wait_for_blink(void) {
 #define PET_SPARK_YELLOW 0xFFF27A
 #define PET_LENS_FRAME 0x22282C
 
-/* The face of a pet that is feeding, in whichever of the two frames it is on:
- * wide round eyes with a glint each (or, in shades, the frame of the lens where
- * the wide eye ends), and a mouth that is open wide on one frame and narrow on
- * the other -- or narrow on both, under a scarf, a collar or a chain. Returns
- * whether the mouth was wide. */
-static bool check_feeding_face(const pet_view_t *view, bool shades, bool narrow_only) {
+/* Feeding is a smile on both animation frames, with a short version above
+ * neckwear. The eyes can instead be covered by shades. */
+static void check_feeding_face(const pet_view_t *view, bool shades, bool neck) {
 	if (shades) {
 		assert(pet_view_cell(view, 19, 13) == PET_LENS_FRAME);
 		assert(pet_view_cell(view, 24, 13) == PET_LENS_FRAME);
 	} else {
-		assert(pet_view_cell(view, 19, 13) == PIKACHU_INK);	  /* the edge of a wide eye */
-		assert(pet_view_cell(view, 24, 13) == PIKACHU_INK);	  /* and of the other */
-		assert(pet_view_cell(view, 16, 12) == PIKACHU_WHITE); /* a glint at the top left of each */
+		assert(pet_view_cell(view, 19, 13) == PIKACHU_INK);
+		assert(pet_view_cell(view, 24, 13) == PIKACHU_INK);
+		assert(pet_view_cell(view, 16, 12) == PIKACHU_WHITE);
 		assert(pet_view_cell(view, 25, 12) == PIKACHU_WHITE);
-		assert(pet_view_cell(view, 17, 11) == PIKACHU_INK); /* and the eye is round: a row above the old one */
 	}
-	const bool wide = pet_view_cell(view, 21, 19) == PET_MOUTH_DARK;
-	if (wide) {
-		assert(!narrow_only);
-		assert(pet_view_cell(view, 21, 21) == PET_TONGUE_PINK); /* the tongue, two rows down */
-		assert(pet_view_cell(view, 21, 22) == PIKACHU_INK);		/* and the lip under it */
-	} else {
-		assert(pet_view_cell(view, 21, 19) == PET_TONGUE_PINK); /* the narrow mouth is all tongue */
-		if (!narrow_only) {
-			assert(pet_view_cell(view, 21, 21) == PIKACHU_YELLOW); /* and is gone two rows down */
-		}
+	assert(pet_view_cell(view, 18, 18) == PIKACHU_INK); /* raised corners */
+	assert(pet_view_cell(view, 25, 18) == PIKACHU_INK);
+	assert(pet_view_cell(view, 21, 19) == (neck ? PET_TONGUE_PINK : PET_MOUTH_DARK));
+	if (!neck) {
+		assert(pet_view_cell(view, 21, 21) == PET_TONGUE_PINK);
+		assert(pet_view_cell(view, 21, 22) == PIKACHU_INK);
 	}
-	return wide;
+}
+
+/* Find the two background notes by their home positions, not the wallet or
+ * status-line note. */
+static lv_obj_t *pet_background_note(int y) {
+	lv_obj_t *habitat = lv_obj_get_parent(petpage_creature());
+	for (uint32_t i = 0; i < lv_obj_get_child_count(habitat); i++) {
+		lv_obj_t *child = lv_obj_get_child(habitat, i);
+		if (lv_obj_has_class(child, &lv_image_class) && lv_image_get_src(child) == &icon_music_note &&
+			lv_obj_get_width(child) == (y == 86 ? 14 : 12) &&
+			lv_obj_get_y(child) >= y && lv_obj_get_y(child) <= y + 22) return child;
+	}
+	assert(!"background note missing");
+	return NULL;
 }
 
 /* Opens the page afresh, checks it fits the panel and takes a snapshot of it
@@ -1587,10 +1593,22 @@ static void check_pet_page(gui_config_t *cfg, const char *tag) {
 
 	// A pat is a tap on the animal, not a button at the foot of the page.
 	int pets = pet_state.pets;
+	int toasts_before_pet = plain_toasts;
 	lv_obj_t *creature = petpage_creature();
 	assert(creature);
 	lv_obj_send_event(creature, LV_EVENT_CLICKED, NULL);
 	assert(pet_state.pets == pets + 1);
+	assert(plain_toasts == toasts_before_pet);
+	// The heart icon is the feedback, even when another tap is on cooldown.
+	lv_obj_t *pet_heart = NULL;
+	for (uint32_t i = 0; i < lv_obj_get_child_count(creature); i++) {
+		lv_obj_t *child = lv_obj_get_child(creature, i);
+		if (lv_obj_has_class(child, &lv_image_class) && lv_image_get_src(child) == &icon_heart_filled &&
+			lv_obj_get_width(child) == 16) pet_heart = child;
+	}
+	assert(pet_heart && !lv_obj_is_hidden(pet_heart));
+	lv_obj_send_event(creature, LV_EVENT_CLICKED, NULL);
+	assert(plain_toasts == toasts_before_pet && !lv_obj_is_hidden(pet_heart));
 
 	// A tap on the glass is a press and a release, and a finger on this panel
 	// takes about half a second over it -- long enough for LVGL to call the
@@ -1609,15 +1627,19 @@ static void check_pet_page(gui_config_t *cfg, const char *tag) {
 	assert(pet_state.pets == slow_pets + 1);
 	assert(pet_state.hold_day == 0); // a slow tap is not a groom
 
-	// And the pat is answered: one of three tiny reactions, picked from the
-	// clock. The clock here is fixed at a second that divides by three, so it
-	// is always the heart -- and the heart is a picture over the head, not a
-	// speech bubble and not a page of its own.
+	// Every pat is answered by a heart above the head, not a toast.
 	lv_obj_update_layout(petpage_screen);
 	char pat_tag[64];
 	snprintf(pat_tag, sizeof(pat_tag), "%s-pat", tag);
 	check_within_panel(petpage_screen, cfg, "Pet pat");
 	dump_snapshot(petpage_screen, pat_tag);
+	int heart_y = lv_obj_get_style_translate_y(pet_heart, 0);
+	pet_second();
+	assert(!lv_obj_is_hidden(pet_heart));
+	assert(lv_obj_get_style_translate_y(pet_heart, 0) != heart_y);
+	pet_now += PET_TEST_REACTION_SECS;
+	pet_second();
+	assert(lv_obj_is_hidden(pet_heart));
 
 	// Petting Mode: the finger stays down and the meter fills a heart at a
 	// time; the third heart pays the day's groom, once.
@@ -1637,6 +1659,8 @@ static void check_pet_page(gui_config_t *cfg, const char *tag) {
 	}
 	assert(pet_state.hold_day != 0);
 	assert(pet_state.happy > happy_before_hold);
+	assert(plain_toasts == toasts_before_pet);
+	assert(!lv_obj_is_hidden(pet_heart));
 
 	// The release of a hold arrives as a click as well. It is not a second pat,
 	// and it must not be: the hand that held the animal is the same hand that
@@ -1684,7 +1708,7 @@ static void check_pet_page(gui_config_t *cfg, const char *tag) {
 		uint32_t colour; // and the colour it paints it
 	} looks[] = {
 		{PET_LOOK_SHADES, "shades", 15, 13, 0x16305A}, // the dark blue of a lens
-		{PET_LOOK_CHAIN, "chain", 21, 24, 0xE8C15A},   // the pendant
+		{PET_LOOK_CHAIN, "chain", 14, 23, 0xE8C15A},   // a gold link
 		{PET_LOOK_COLLAR, "collar", 21, 20, 0x22282C}, // the band
 		{PET_LOOK_CUP, "cup", 4, 36, 0xF7F2E4},		   // the cup, on the floor
 	};
@@ -1692,6 +1716,10 @@ static void check_pet_page(gui_config_t *cfg, const char *tag) {
 		pet_look = looks[i].look;
 		view = shoot_pet(cfg, tag, looks[i].tag);
 		assert(pet_view_cell(&view, looks[i].col, looks[i].row) == looks[i].colour);
+		if (looks[i].look == PET_LOOK_CHAIN) {
+			assert(pet_view_cell(&view, 21, 23) == PIKACHU_ORANGE);
+			assert(pet_view_cell(&view, 20, 24) == PIKACHU_YELLOW);
+		}
 		pet_view_free(&view);
 	}
 	// The same four on the grown animal. The page's own notes drift up beside the
@@ -1704,23 +1732,51 @@ static void check_pet_page(gui_config_t *cfg, const char *tag) {
 		view = shoot_pet(cfg, tag, suffix);
 		assert(view.k == 3);
 		assert(pet_view_cell(&view, looks[i].col, looks[i].row) == looks[i].colour);
+		if (looks[i].look == PET_LOOK_CHAIN) {
+			assert(pet_view_cell(&view, 21, 23) == PIKACHU_ORANGE);
+			assert(pet_view_cell(&view, 20, 24) == PIKACHU_YELLOW);
+		}
 		pet_view_free(&view);
 	}
 	pet_state.xp_secs = 0;
 	pet_look = PET_LOOK_NONE;
 
-	// A pet that is fed is surprised. While music is audible and he is awake his
-	// eyes go wide and round, with a glint each, and his mouth opens on a pink
-	// tongue and shuts again, a frame later, as he chews; sparks fly off his
+	// A fed, awake pet smiles with bright eyes and a pink tongue on both frames;
+	// sparks fly off his
 	// cheeks, a bolt on one frame and a spark on the other; and he dances, a step
 	// to each side. A cell is read back for each, at the size that has room for
 	// all of it.
 	pet_state.xp_secs = 15 * 60 * 60;
+	pet_listening = false;
+	petpage_open();
+	lv_obj_t *note_a = pet_background_note(86), *note_b = pet_background_note(100);
+	assert(lv_obj_is_hidden(note_a) && lv_obj_is_hidden(note_b));
 	pet_listening = true;
 	pet_look = PET_LOOK_NONE;
+	pet_second(); // playback starts while the page is open
+	assert(!lv_obj_is_hidden(note_a) && !lv_obj_is_hidden(note_b));
+	// Changing genre on the next track updates the accessory without reopening.
+	pet_look = PET_LOOK_CHAIN;
+	pet_second();
+	view = pet_view_take();
+	check_feeding_face(&view, false, false);
+	assert(pet_view_cell(&view, 14, 23) == 0xE8C15A);
+	pet_view_free(&view);
+	pet_look = PET_LOOK_NONE;
+	pet_second();
+	view = pet_view_take();
+	assert(pet_view_cell(&view, 14, 23) == PIKACHU_YELLOW);
+	pet_view_free(&view);
+	int note_y = lv_obj_get_style_translate_y(note_a, 0);
+	pet_second();
+	assert(lv_obj_get_style_translate_y(note_a, 0) != note_y);
+	pet_listening = false;
+	pet_second();
+	assert(lv_obj_is_hidden(note_a) && lv_obj_is_hidden(note_b));
+	pet_listening = true;
 	view = shoot_pet(cfg, tag, "adult-feeding");
 	assert(view.k == 3);
-	const bool first_wide = check_feeding_face(&view, false, false);
+	check_feeding_face(&view, false, false);
 	assert(pet_view_cell(&view, 6, 14) == PET_SPARK_YELLOW);  // a spark on the left, whichever frame
 	assert(pet_view_cell(&view, 35, 14) == PET_SPARK_YELLOW); // and on the right
 	const uint32_t bolt_left = pet_view_cell(&view, 7, 11);	  // the top of the left bolt: one frame only
@@ -1729,7 +1785,7 @@ static void check_pet_page(gui_config_t *cfg, const char *tag) {
 	pet_view_free(&view);
 	pet_second(); // the other frame
 	view = pet_view_take();
-	assert(check_feeding_face(&view, false, false) != first_wide); // the mouth took its turn
+	check_feeding_face(&view, false, false); // still smiling on the other frame
 	assert(pet_view_cell(&view, 6, 14) == PET_SPARK_YELLOW);
 	assert(pet_view_cell(&view, 35, 14) == PET_SPARK_YELLOW);
 	assert((pet_view_cell(&view, 7, 11) == PET_SPARK_YELLOW) != (bolt_left == PET_SPARK_YELLOW)); // and so did the sparks
@@ -1789,13 +1845,16 @@ static void check_pet_page(gui_config_t *cfg, const char *tag) {
 	check_feeding_face(&view, true, false);
 	pet_view_free(&view);
 
-	// A scarf, a collar and a chain are over the chin: the mouth under them is the
-	// narrow one on both frames, so there is never a lip floating under a collar.
+	// A scarf and a collar get a compact smile above the neckwear.
+	// The chain sits below the full smile.
+	pet_look = PET_LOOK_CHAIN;
+	view = shoot_pet(cfg, tag, "adult-chain-smile");
+	check_feeding_face(&view, false, false);
+	pet_view_free(&view);
 	static const struct {
 		pet_genre_look_t look;
 		pet_item_t wearing;
 	} chins[] = {
-		{PET_LOOK_CHAIN, PET_ITEM_NONE},
 		{PET_LOOK_COLLAR, PET_ITEM_NONE},
 		{PET_LOOK_NONE, PET_ITEM_SCARF},
 	};
@@ -1804,7 +1863,7 @@ static void check_pet_page(gui_config_t *cfg, const char *tag) {
 		pet_state.wearing = chins[i].wearing;
 		for (int frame = 0; frame < 2; frame++) {
 			view = shoot_pet(cfg, tag, "adult-chin");
-			assert(!check_feeding_face(&view, false, true));
+			check_feeding_face(&view, false, true);
 			pet_view_free(&view);
 			pet_second();
 		}

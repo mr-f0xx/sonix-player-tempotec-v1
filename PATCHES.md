@@ -2997,3 +2997,22 @@ failures to the headphones, which are the headphones not answering.
 
 Needs an on-device check: power the player on with the headphones on and off,
 and confirm the reconnect either lands or logs one of the three lines above.
+
+## A happier music pet
+
+The dark ring on Pikachu's chest was the hip-hop chain's pendant, not a hole in
+his sprite. The pendant is gone; the chain is lower and ends in gold links, so
+it no longer interrupts the face or resembles a hole. The accessory now also
+updates when the track's genre changes without leaving the page.
+
+An awake pet listening to music now has an open, upturned smile and a pink
+tongue instead of the surprised chewing face. A scarf or collar gets a compact
+smile above the neckwear; sleep and shades still work as before. The two music
+notes were created but never shown: they now appear behind the pet when music
+is audible and disappear when it stops, drifting on the existing frame timer.
+
+A tap or completed hold now gives a small hop and bobbing heart instead of a
+text toast, including during the reward cooldown. The existing petting and
+once-daily grooming rules are unchanged. The headless page test checks the
+smile, pendant-free chain, playback transitions, and the visual petting
+feedback on the V1 renderer; the appearance should also be checked on device.
