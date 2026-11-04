@@ -2016,8 +2016,12 @@ int main(int argc, char **argv) {
 	// seeds them too, but that is after this point; seeding is idempotent.
 	addons_seed(language_needed());
 	streamkeys_init();
-	qobuz_init();
-	tidal_init();
+	if (addons_enabled("qobuz")) {
+		qobuz_init();
+	}
+	if (addons_enabled("tidal")) {
+		tidal_init();
+	}
 	// A module switched off in Settings -> Plugins is never started, so it
 	// neither scrobbles nor holds the network open.
 	if (addons_enabled("lastfm")) {
@@ -2290,8 +2294,12 @@ int main(int argc, char **argv) {
 	// answer. Both are still before gui_init(), and the pages are built after
 	// it, so the Qobuz page is drawn the one way or the other on first sight.
 	if (streamkeys_load_card(card_root)) {
-		qobuz_init();
-		tidal_init();
+		if (addons_enabled("qobuz")) {
+			qobuz_init();
+		}
+		if (addons_enabled("tidal")) {
+			tidal_init();
+		}
 		if (addons_enabled("lastfm")) {
 			lastfm_init();
 		}
