@@ -51,8 +51,7 @@ Showcase of the default theme. Click any picture to open it full size. (This is 
 
 ### Tokyo Night theme
 
-Showcase of **Tokyo Night** appearance: a blue-black palette with function-matched icons, chosen in Settings → Appearance → Theme. It is available on the V1 alongside Dark and Light.
-
+Showcase of **Tokyo Night** appearance: a blue-black palette with function-matched icons.
 <table>
   <tr>
     <td align="center">
