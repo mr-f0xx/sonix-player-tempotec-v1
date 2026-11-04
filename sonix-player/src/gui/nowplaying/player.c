@@ -1223,16 +1223,17 @@ static void set_over_cover(bool on) {
 			}
 		}
 	}
-	// The cover-tint option owns the artist and format/year line too. Apply
-	// this after the ordinary over-cover and palette rules so every route into
-	// this function (new artwork, layout change, or theme change) agrees.
+	// The cover-tint option owns the artist, format/year and queue-position
+	// lines too. Apply this after the ordinary over-cover and palette rules so
+	// every route into this function (new artwork, layout change, or theme
+	// change) agrees.
 	if (cover_tint && album_tone) {
 		lv_color_t ink = aam_accent();
-		if (song_artist_label) {
-			lv_obj_set_style_text_color(song_artist_label, ink, 0);
-		}
-		if (format_label) {
-			lv_obj_set_style_text_color(format_label, ink, 0);
+		lv_obj_t *const tinted[] = {song_artist_label, format_label, queue_position_label};
+		for (size_t i = 0; i < sizeof(tinted) / sizeof(tinted[0]); i++) {
+			if (tinted[i]) {
+				lv_obj_set_style_text_color(tinted[i], ink, 0);
+			}
 		}
 	}
 
@@ -1264,6 +1265,13 @@ static void set_over_cover(bool on) {
 	if (play_btn_icon) {
 		lv_obj_set_style_image_recolor(play_btn_icon, chrome_accent(), 0);
 		lv_obj_set_style_image_recolor_opa(play_btn_icon, LV_OPA_COVER, 0);
+	}
+
+	// Repeat/shuffle is repainted here as well as by the transport painter:
+	// this is the common path for a newly decoded sleeve and a palette change,
+	// so the mode glyph cannot be left behind in the theme accent.
+	if (repeat_btn_icon) {
+		update_repeat_button();
 	}
 
 	// The floating chevron parks over the artwork's top-left corner.
