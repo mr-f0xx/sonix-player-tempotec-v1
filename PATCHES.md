@@ -1217,6 +1217,23 @@ switches again when they come up, because the control centre changes the same
 settings from outside; `musicsettings_soundfield_screen()` and
 `musicsettings_crossfeed_screen()` are the two new accessors.
 
+### Edit mode
+
+A long press on the controls card where there is no button (`edit_enter_cb`
+checks the event's target: the card, `pages_view`, a page or the dots; a button's
+own long press still opens its page) calls `edit_set(true)`. Every tile gets an
+outline, the picked-up one a heavier one, and the level row is swapped for a Done
+button of the same height, so nothing moves. A transparent `edit_overlay` is laid
+over `pages_view`: it takes the taps off the tiles without touching their
+handlers, hit-tests the current page's children itself (`edit_tile_at`), and turns
+a sideways swipe into a page turn since the page row can no longer be scrolled
+through it. `edit_tap()` picks a tile up, or swaps it with the picked-up one in
+`slots[]` and goes through `layout_changed()`, which saves and re-applies like the
+settings page's moves. Swaps were chosen over a drag because the lists are kept
+compact and a swap needs no drop target. `panel_prepare()` always leaves edit
+mode, so the sheet never opens in it. The swap logic is covered in
+`test_quickpanel_layout.c`; the overlay and the long press need a device.
+
 ### Layout and migration
 
 The ten buttons are appended to the enum after `QP_BTN_PEQ_PROFILE`; their keys

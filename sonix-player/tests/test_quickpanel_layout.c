@@ -180,6 +180,36 @@ int main(void) {
 	assert(quickpanel_in_use_count() == QP_SLOT_COUNT);
 	check_partition();
 
+	// Edit mode: a tap picks a tile up, a tap on another swaps the two (here
+	// across the pages), a tap on the picked-up one or on nothing puts it down,
+	// and a swap is saved. The first run of this section starts from the shipped
+	// panel again.
+	remove(path);
+	config_init(path);
+	reset_layout();
+	assert(quickpanel_in_use_at(0) == QP_BTN_WIFI && quickpanel_in_use_at(15) == QP_BTN_POWER);
+	edit_mode = true;
+	edit_sel = QP_BTN_NONE;
+	edit_tap(QP_BTN_WIFI);
+	assert(edit_sel == QP_BTN_WIFI);
+	edit_tap(QP_BTN_WIFI);
+	assert(edit_sel == QP_BTN_NONE);
+	edit_tap(QP_BTN_WIFI);
+	edit_tap(QP_BTN_NONE);
+	assert(edit_sel == QP_BTN_NONE && quickpanel_in_use_at(0) == QP_BTN_WIFI);
+	edit_tap(QP_BTN_WIFI);
+	edit_tap(QP_BTN_POWER);
+	assert(edit_sel == QP_BTN_NONE);
+	assert(quickpanel_in_use_at(0) == QP_BTN_POWER && quickpanel_in_use_at(15) == QP_BTN_WIFI);
+	assert(quickpanel_in_use_count() == QP_SLOT_COUNT);
+	check_partition();
+	assert(config_save());
+	config_init(path);
+	reset_layout();
+	assert(quickpanel_in_use_at(0) == QP_BTN_POWER && quickpanel_in_use_at(15) == QP_BTN_WIFI);
+	check_partition();
+	edit_mode = false;
+
 	// More buttons left out than two keys can hold: they are carried by the
 	// further hidden keys and none is lost over a save and a boot.
 	config_set("quickpanel", "order", "wifi,-,-,-,-,-,-,-");

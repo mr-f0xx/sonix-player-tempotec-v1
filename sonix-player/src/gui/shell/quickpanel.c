@@ -297,6 +297,13 @@ static lv_obj_t *np_card;
 static lv_obj_t *pages_view;				// the window the pages slide in
 static lv_obj_t *page_row[QP_PAGE_COUNT]; // a page: QP_SLOT_VISIBLE buttons, two lines of four
 static lv_obj_t *level_row;
+
+// Edit mode: the tiles are rearranged in place (see the note over edit_set).
+static bool edit_mode;
+static int edit_sel = QP_BTN_NONE; // the tile that has been picked up, or none
+static lv_obj_t *edit_overlay;	   // catches the taps over the pages while editing
+static lv_obj_t *edit_done;		   // takes the slider's place while editing
+static void edit_set(bool on);
 static lv_obj_t *page_dots; // the strip under the slider, and a tap target
 static lv_obj_t *page_dot[QP_PAGE_COUNT];
 static lv_obj_t *grabber; // the line the sheet is dragged out by
@@ -862,7 +869,9 @@ static void panel_prepare(void) {
 
 	place_sheet();
 
-	// The sheet always comes in on its first page, as Android's does.
+	// The sheet always comes in on its first page, as Android's does, and never
+	// in edit mode.
+	edit_set(false);
 	page_show(0, false);
 
 	lv_obj_set_hidden(veil, false);
@@ -1748,6 +1757,25 @@ static bool button_available(quickpanel_button_t which) {
 	}
 }
 
+// Edit mode's look: a ring round every tile, and a heavier, fully opaque one
+// round the tile that has been picked up. A ring and not a movement, so nothing
+// shifts under a finger; and on every tile, because that is what says the panel
+// is not a row of switches at the moment.
+static void edit_style_refresh(void) {
+	for (int b = 0; b < QP_BTN_COUNT; b++) {
+		lv_obj_t *w = button_widget((quickpanel_button_t)b);
+		if (!w) {
+			continue;
+		}
+		bool sel = edit_mode && b == edit_sel;
+		int thin = qp_compact ? 1 : 2;
+		lv_obj_set_style_outline_width(w, !edit_mode ? 0 : sel ? thin + 2 : thin, 0);
+		lv_obj_set_style_outline_pad(w, 1, 0);
+		lv_obj_set_style_outline_color(w, theme()->accent, 0);
+		lv_obj_set_style_outline_opa(w, sel ? LV_OPA_COVER : LV_OPA_40, 0);
+	}
+}
+
 // Puts the widgets in the grid's order: QP_SLOT_VISIBLE to a page, page by page.
 // Every page is a wrapping flex, so a child's index is its position on screen and
 // nothing has to be rebuilt; a hidden child is skipped by the flex layout, so an
@@ -1805,6 +1833,7 @@ static void order_apply(void) {
 		lv_obj_set_scrollable(pages_view, pages_used >= 2);
 	}
 	page_show(page_now, false);
+	edit_style_refresh();
 }
 
 int quickpanel_hidden_count(void) {
@@ -1922,6 +1951,170 @@ void quickpanel_move_hidden(quickpanel_button_t button, int position) {
 	hidden_remove(button);
 	hidden_insert(button, position);
 	layout_changed();
+}
+
+// ---------------------------------------------------------------------------
+// Edit mode
+//
+// Settings > More > Control centre is the place to choose *which* buttons the
+// panel carries; this is the quick way to say *where*. A long press on the card
+// where there is no button -- the margins, the gaps between the buttons, the
+// dots -- puts the tiles in edit mode: each one gets a ring, and the slider's
+// row turns into a Done button. A tap picks a tile up; a tap on another tile
+// swaps the two, wherever they are, so a tile can cross to the other page by
+// trading places with one there. A second tap on the picked-up tile puts it
+// down again, and so does a tap on nothing. Every swap is saved at once, the
+// same way the settings page saves its moves.
+//
+// Taps and not a drag: a tile cannot be carried across a page that is itself
+// swiped, with one thumb, on a 240 px card -- and a swap needs no drop target
+// to aim for. The pages are still turned by a swipe or by the dots while
+// editing, which is why a transparent sheet lies over them: it takes the taps
+// off the buttons without a line of change to their own handlers, and turns the
+// swipe into a page itself.
+//
+// The sheet never comes in edit mode: panel_prepare() always starts without it.
+// ---------------------------------------------------------------------------
+
+static quickpanel_button_t edit_tile_at(const lv_point_t *p) {
+	if (!page_row[page_now]) {
+		return QP_BTN_NONE;
+	}
+	for (uint32_t i = 0; i < lv_obj_get_child_count(page_row[page_now]); i++) {
+		lv_obj_t *child = lv_obj_get_child(page_row[page_now], (int32_t)i);
+		if (lv_obj_is_hidden(child)) {
+			continue;
+		}
+		lv_area_t a;
+		lv_obj_get_coords(child, &a);
+		if (p->x < a.x1 || p->x > a.x2 || p->y < a.y1 || p->y > a.y2) {
+			continue;
+		}
+		for (int b = 0; b < QP_BTN_COUNT; b++) {
+			if (button_widget((quickpanel_button_t)b) == child) {
+				return (quickpanel_button_t)b;
+			}
+		}
+	}
+	return QP_BTN_NONE;
+}
+
+// A tap while editing: `tile` is what it landed on, or QP_BTN_NONE.
+static void edit_tap(quickpanel_button_t tile) {
+	order_load();
+	if ((int)tile >= QP_BTN_COUNT || (int)tile == edit_sel) {
+		// Nothing, or the tile already picked up: put it down.
+		edit_sel = QP_BTN_NONE;
+		edit_style_refresh();
+		return;
+	}
+	if (edit_sel >= QP_BTN_COUNT) {
+		edit_sel = tile;
+		edit_style_refresh();
+		return;
+	}
+	int a = -1, b = -1;
+	for (int i = 0; i < QP_SLOT_COUNT; i++) {
+		a = slots[i] == edit_sel ? i : a;
+		b = slots[i] == tile ? i : b;
+	}
+	edit_sel = QP_BTN_NONE;
+	if (a < 0 || b < 0) {
+		edit_style_refresh();
+		return;
+	}
+	uint8_t held = slots[a];
+	slots[a] = slots[b];
+	slots[b] = held;
+	layout_changed();
+}
+
+// The sheet over the pages: a tap is a tap on a tile, a sideways swipe turns
+// the page, and a vertical one belongs to the sheet and is left to bubble to it.
+static void edit_overlay_cb(lv_event_t *e) {
+	static lv_point_t start;
+	lv_indev_t *indev = lv_indev_active();
+	if (!indev) {
+		return;
+	}
+	lv_event_code_t code = lv_event_get_code(e);
+	lv_point_t p;
+	lv_indev_get_point(indev, &p);
+	if (code == LV_EVENT_PRESSED) {
+		start = p;
+		return;
+	}
+	if (code != LV_EVENT_RELEASED || press_dragged) {
+		return;
+	}
+	int dx = p.x - start.x;
+	int dy = p.y - start.y;
+	int adx = dx < 0 ? -dx : dx;
+	int ady = dy < 0 ? -dy : dy;
+	if (adx >= 30 && adx > ady) {
+		page_show(page_now + (dx < 0 ? 1 : -1), true);
+		return;
+	}
+	if (adx > 12 || ady > 12) {
+		return; // a drag that was not a swipe, and not a tap either
+	}
+	edit_tap(edit_tile_at(&p));
+}
+
+static void edit_done_cb(lv_event_t *e) {
+	(void)e;
+	edit_set(false);
+}
+
+static void edit_set(bool on) {
+	if (on == edit_mode) {
+		return;
+	}
+	edit_mode = on;
+	edit_sel = QP_BTN_NONE;
+	if (controls_card && edit_done && level_row && pages_view) {
+		if (on) {
+			lv_obj_update_layout(controls_card);
+			edit_overlay = lv_obj_create(controls_card);
+			lv_obj_set_ignore_layout(edit_overlay, true);
+			lv_obj_set_pos(edit_overlay, lv_obj_get_x(pages_view), lv_obj_get_y(pages_view));
+			lv_obj_set_size(edit_overlay, lv_obj_get_width(pages_view), lv_obj_get_height(pages_view));
+			lv_obj_set_style_bg_opa(edit_overlay, LV_OPA_TRANSP, 0);
+			lv_obj_set_style_border_width(edit_overlay, 0, 0);
+			lv_obj_set_style_shadow_width(edit_overlay, 0, 0);
+			lv_obj_set_style_radius(edit_overlay, 0, 0);
+			lv_obj_set_style_pad_all(edit_overlay, 0, 0);
+			lv_obj_set_scrollable(edit_overlay, false);
+			lv_obj_set_event_bubble(edit_overlay, true);
+			lv_obj_add_event_cb(edit_overlay, edit_overlay_cb, LV_EVENT_PRESSED, NULL);
+			lv_obj_add_event_cb(edit_overlay, edit_overlay_cb, LV_EVENT_RELEASED, NULL);
+			// The colours follow the theme in force now, not the one at startup.
+			lv_obj_set_style_bg_color(edit_done, theme()->accent, 0);
+			lv_obj_set_style_text_color(lv_obj_get_child(edit_done, 0), theme_on_accent(), 0);
+		} else if (edit_overlay) {
+			lv_obj_delete(edit_overlay);
+			edit_overlay = NULL;
+		}
+		lv_obj_set_hidden(level_row, on);
+		lv_obj_set_hidden(edit_done, !on);
+	}
+	edit_style_refresh();
+}
+
+// The long press that starts it: on the card itself, the pages, a page's empty
+// ground or the dots -- not on a button, whose long press opens its page.
+static void edit_enter_cb(lv_event_t *e) {
+	if (edit_mode || press_dragged || quickpanel_blocked()) {
+		return;
+	}
+	lv_obj_t *t = lv_event_get_target_obj(e);
+	bool ground = t == controls_card || t == pages_view || t == page_dots;
+	for (int i = 0; i < QP_PAGE_COUNT; i++) {
+		ground = ground || t == page_row[i];
+	}
+	if (ground) {
+		edit_set(true);
+	}
 }
 
 const char *quickpanel_button_tag(quickpanel_button_t button) {
@@ -3137,6 +3330,21 @@ void quickpanel_init(gui_config_t *cfg) {
 		lv_obj_set_style_pad_all(page_dot[i], 0, 0);
 		lv_obj_set_clickable(page_dot[i], false);
 	}
+
+	// Edit mode (see the note over edit_set): the long press that starts it, and
+	// the Done button that stands where the slider does while it lasts.
+	lv_obj_add_event_cb(controls_card, edit_enter_cb, LV_EVENT_LONG_PRESSED, NULL);
+	edit_done = lv_btn_create(controls_card);
+	lv_obj_set_size(edit_done, lv_pct(60), level_row_h);
+	lv_obj_set_style_radius(edit_done, LV_RADIUS_CIRCLE, 0);
+	lv_obj_set_style_shadow_width(edit_done, 0, 0);
+	lv_obj_set_event_bubble(edit_done, true);
+	lv_obj_add_event_cb(edit_done, edit_done_cb, LV_EVENT_CLICKED, NULL);
+	lv_obj_t *done_label = lv_label_create(edit_done);
+	lv_label_set_text(done_label, tr("done"));
+	lv_obj_set_style_text_font(done_label, qp_compact ? &font_ui_14 : &font_ui_24, 0);
+	lv_obj_center(done_label);
+	lv_obj_set_hidden(edit_done, true);
 
 	// --- Second card: what is playing, and its transport. ---
 	np_card = make_card(panel, card_w, now_playing_h, card_top + controls_h + card_gap);
