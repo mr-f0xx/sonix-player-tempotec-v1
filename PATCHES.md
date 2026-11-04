@@ -3171,7 +3171,7 @@ base differs only by the stock differences and the stamped
   outside the rootfs to be byte-identical to the stock update's, and
   `ota_update.in` to differ only in the rootfs size and MD5. The workflow runs
   it on every image. The build report names the stock version, its SHA-256
-  and the marker, and says whether the image is a test build or a release.
+  and the marker, and says whether the image is a CI build or a release.
 - Bluetooth finds the radio's rfkill switch by name, as 1.3's `bt_init` does
   (`get_rfkill_index "bluetooth" "0"`), instead of always writing `rfkill0`. The
   lowest-numbered switch whose name contains "bluetooth" wins, and `rfkill0`
@@ -3182,8 +3182,7 @@ Locally, the 1.3 OTA was prepared from its pieces, verified (kernel SHA-256
 `a598b189…f6230`, product version 1.3, marker present), packed with a stand-in
 player binary, and the result verified with `--sonix-v1 --stock`.
 
-**Still needs hardware:** this is a test build. Flash it on a V1 running stock
-1.3 (and, if possible, on one still on 1.2), and check that the update is
-accepted, that it boots to Sonix, and that Bluetooth, Wi-Fi, USB and the boot
-screens work. Also check that the official 1.3 `v1.upt` restores the stock
-firmware afterwards.
+**Confirmed on hardware:** the image built on 1.3 was flashed on a V1 running
+stock firmware 1.3 and works, so images built on the 1.3 OTA are no longer
+test builds. This is the base of release 1.5.0. Keep the official 1.3 `v1.upt`
+and its checksum for recovery all the same.
