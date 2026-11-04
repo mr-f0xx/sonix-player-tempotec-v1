@@ -18,6 +18,7 @@
 #include "src/gui/shell/toast.h"
 #include "src/system/device/power.h"
 #include "src/system/bluetooth/airpods.h"
+#include "src/system/addons/addons.h"
 #include "src/system/audio/alsa-controls.h"
 #include "src/system/audio/audio.h"
 #include "src/system/bluetooth/bluetooth.h"
@@ -258,7 +259,7 @@ static void airpods_row_cb(lv_event_t *e) {
 
 static void refresh_airpods_row(void) {
 	airpods_state_t state;
-	bool present = airpods_get(&state);
+	bool present = addons_enabled("airpods") && airpods_get(&state);
 
 	if (present) {
 		lv_obj_set_hidden(airpods_row, false);

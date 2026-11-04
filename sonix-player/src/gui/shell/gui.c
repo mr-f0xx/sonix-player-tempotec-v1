@@ -97,6 +97,8 @@
 #include "src/system/device/power.h"
 #include "src/system/device/clock.h"
 #include "src/system/core/config.h"
+#include "src/system/addons/addons.h"
+#include "src/gui/settings/plugins.h"
 
 #include "lvgl/lvgl.h"
 #include "lvgl/src/display/lv_display_private.h"
@@ -643,7 +645,19 @@ static void power_off_async_cb(void *unused) {
 void gui_notify_power_off(void) { gui_post(power_off_async_cb, NULL); }
 
 
+static void plugins_hint_cb(lv_timer_t *timer) {
+	(void)timer;
+	config_set_bool("system", "plugins_notice_shown", true);
+	config_save();
+	confirm_notice("plugins_first_run_title", "plugins_first_run_hint");
+}
+
 void gui_init(gui_config_t *cfg) {
+	// The Plugins switches are read before any page is built. A fresh install
+	// (no language chosen yet) gets the lean default set; an existing device
+	// keeps every module it already had. See addons.h.
+	addons_seed(language_needed());
+
 	// The card's fonts, before any page is built: a UI font stored as
 	// "card:<file>" is only resolvable once the storage has found the card,
 	// which main.c has done by now. See fonts_set_card_root().
@@ -733,7 +747,9 @@ void gui_init(gui_config_t *cfg) {
 	main_menu_init(cfg);
 
 	music_init(cfg);
-	coverflow_init(cfg);
+	if (addons_enabled("coverflow")) {
+		coverflow_init(cfg);
+	}
 
 	// wireless section: the two radio pages first, so the section's tiles
 	// have somewhere to point and the control centre's round buttons have a
@@ -743,7 +759,9 @@ void gui_init(gui_config_t *cfg) {
 	airplay_page_init(cfg);		 // likewise
 	dlna_page_init(cfg);		 // likewise: its "no Wi-Fi" row points there too
 	sonixlink_page_init(cfg);	 // likewise
-	airpodspage_init(cfg);		 // before btaudio: its AirPods row points at this page
+	if (addons_enabled("airpods")) {
+		airpodspage_init(cfg);		 // before btaudio: its AirPods row points at this page
+	}
 	btaudio_init(cfg);			 // before btsettings: its gear points at this page
 	btreceiverpage_init(cfg);	 // likewise, for the button beside the gear
 	btsettings_init(cfg);
@@ -752,35 +770,59 @@ void gui_init(gui_config_t *cfg) {
 	// streaming section: three services that are not implemented yet, so the
 	// page exists and is walkable but its tiles say so when tapped.
 	// radio before the section, so its tile has somewhere to point.
-	radiopage_init(cfg);
+	if (addons_enabled("radio")) {
+		radiopage_init(cfg);
+	}
 	dacpage_init(cfg);
 	// After dacpage: the More section points at its pages.
-	gearboyplay_init(cfg);  // before the list: one of its rows leads here
-	gearboysettings_init(cfg); // before the page: its gear opens this
-	gearboypage_init(cfg);
-	flappybird_init(cfg);
+	if (addons_enabled("gearboy")) {
+		gearboyplay_init(cfg);  // before the list: one of its rows leads here
+		gearboysettings_init(cfg); // before the page: its gear opens this
+		gearboypage_init(cfg);
+	}
+	if (addons_enabled("flappy")) {
+		flappybird_init(cfg);
+	}
 	// The three games in src/gui/games only keep the config here: each builds its
 	// page the first time it is opened, so a game nobody opens costs nothing at
 	// start-up. See the comment above each game's build function.
-	game2048_init(cfg);
-	snake_init(cfg);
-	dino_init(cfg);
+	if (addons_enabled("game2048")) {
+		game2048_init(cfg);
+	}
+	if (addons_enabled("snake")) {
+		snake_init(cfg);
+	}
+	if (addons_enabled("dino")) {
+		dino_init(cfg);
+	}
 	// before morepage: the books tile opens the shelf, and the shelf opens the
 	// reader.
-	ebookreader_init(cfg);
-	// before ebookpage: its corner button opens the bookmarks
-	ebookmarkspage_init(cfg);
-	ebooksettings_init(cfg); // likewise: the other corner button opens this
-	ebookpage_init(cfg);
+	if (addons_enabled("ebook")) {
+		ebookreader_init(cfg);
+		// before ebookpage: its corner button opens the bookmarks
+		ebookmarkspage_init(cfg);
+		ebooksettings_init(cfg); // likewise: the other corner button opens this
+		ebookpage_init(cfg);
+	}
 	// Before morepage: the More menu points at both of them.
-	calculator_init(cfg);
+	if (addons_enabled("calculator")) {
+		calculator_init(cfg);
+	}
 	// Also before morepage: its tile opens the pet. The page itself is built
 	// on the first visit, so a player who never looks at it pays nothing.
-	petpage_init(cfg);
-	noteeditor_init(cfg); // before notes: a row of the shelf opens it
-	notes_init(cfg);
-	tagmanager_init(cfg);
-	metronome_init(cfg); // before morepage: its tile opens it
+	if (addons_enabled("pet")) {
+		petpage_init(cfg);
+	}
+	if (addons_enabled("notes")) {
+		noteeditor_init(cfg); // before notes: a row of the shelf opens it
+		notes_init(cfg);
+	}
+	if (addons_enabled("tagmanager")) {
+		tagmanager_init(cfg);
+	}
+	if (addons_enabled("metronome")) {
+		metronome_init(cfg); // before morepage: its tile opens it
+	}
 	morepage_init(cfg);
 	textview_init(cfg); // before filespage: a text file tapped there opens here
 	pictureview_init(cfg); // likewise, for JPEG and PNG pictures
@@ -797,6 +839,7 @@ void gui_init(gui_config_t *cfg) {
 	remap_init(cfg);
 	ccsettings_init(cfg);
 	kblayoutpage_init(cfg); // the keyboard-language row on the same page
+	plugins_init(cfg); // before settings: its row opens this page
 	settings_init(cfg);
 	devoptions_init(cfg);
 	processespage_init(cfg); // the processes page the devoptions entry opens
@@ -806,10 +849,18 @@ void gui_init(gui_config_t *cfg) {
 	bootpicpage_init(cfg); // after appearance: its Custom pill opens this page
 	language_init(cfg);
 	libraryscan_init(cfg);
-	msebsettings_init(cfg); // before musicsettings: the MSEB page hangs its gear off it
-	eqsettings_init(cfg);	// and the equalizer page hangs its own off this
-	peqsettings_init(cfg); // the parametric page hangs its preset screen off the gear
-	peqautoeq_init(cfg);  // the waveform entry on that page searches AutoEq profiles
+	if (addons_enabled("mseb")) {
+		msebsettings_init(cfg); // before musicsettings: the MSEB page hangs its gear off it
+	}
+	if (addons_enabled("eq")) {
+		eqsettings_init(cfg);	// and the equalizer page hangs its own off this
+	}
+	if (addons_enabled("peq")) {
+		peqsettings_init(cfg); // the parametric page hangs its preset screen off the gear
+	}
+	if (addons_enabled("autoeq")) {
+		peqautoeq_init(cfg);  // the waveform entry on that page searches AutoEq profiles
+	}
 	musicsettings_init(cfg);
 	search_init(cfg);
 	medialist_init(cfg);
@@ -817,7 +868,9 @@ void gui_init(gui_config_t *cfg) {
 	audiobookextras_init(cfg); // the bookmarks and summary pages
 	audiobooks_init(cfg);
 	chapters_init(cfg);
-	lyricsearch_init(cfg);
+	if (addons_enabled("lyrics")) {
+		lyricsearch_init(cfg);
+	}
 	trackmenu_init(cfg);
 
 	// The leftward swipe that pulls the player in works on the browsing pages
@@ -865,6 +918,15 @@ void gui_init(gui_config_t *cfg) {
 	powersettings_init(cfg);
 	confirm_init(cfg);
 	toast_init(cfg);
+
+	// The first-run plugins hint: once, on a fresh install only (addons_seed
+	// clears the flag only then). A second after start, so it lands on the main
+	// menu rather than in the middle of the boot. The flag is written before the
+	// card is shown, so a restart during it does not show it again.
+	if (!config_get_bool("system", "plugins_notice_shown", true)) {
+		lv_timer_t *hint = lv_timer_create(plugins_hint_cb, 1000, NULL);
+		lv_timer_set_repeat_count(hint, 1);
+	}
 
 	// The screensaver is drawn both when the panel goes dark (so the wake opens
 	// on it rather than on the page) and when it lights up again; and the

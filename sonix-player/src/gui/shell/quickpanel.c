@@ -40,6 +40,7 @@
 #include "src/system/core/config.h"
 #include "src/system/playback/device_state.h"
 #include "src/system/core/lang.h"
+#include "src/system/addons/addons.h"
 #include "src/system/library/library.h"
 #include "src/system/audio/eq.h"
 #include "src/system/playback/playlist.h"
@@ -2594,10 +2595,12 @@ void quickpanel_init(gui_config_t *cfg) {
 	mseb_btn = make_circle_button(row, &icon_mseb);
 	lv_obj_add_event_cb(mseb_btn, mseb_clicked_cb, LV_EVENT_CLICKED, NULL);
 	lv_obj_add_event_cb(mseb_btn, open_page_cb, LV_EVENT_LONG_PRESSED, musicsettings_mseb_screen());
+	lv_obj_set_hidden(mseb_btn, !addons_enabled("mseb")); // a module off has no button
 
 	eq_btn = make_circle_button(row, &icon_equalizer);
 	lv_obj_add_event_cb(eq_btn, eq_clicked_cb, LV_EVENT_CLICKED, NULL);
 	lv_obj_add_event_cb(eq_btn, open_page_cb, LV_EVENT_LONG_PRESSED, musicsettings_eq_screen());
+	lv_obj_set_hidden(eq_btn, !addons_enabled("eq"));
 
 	// Crossfade, same contract: tap switches it, hold opens its page.
 	fade_btn = make_circle_button(row, &icon_fade_track);
@@ -2626,6 +2629,7 @@ void quickpanel_init(gui_config_t *cfg) {
 	peq_btn = make_circle_button(row, &icon_peq_quick);
 	lv_obj_add_event_cb(peq_btn, peq_clicked_cb, LV_EVENT_CLICKED, NULL);
 	lv_obj_add_event_cb(peq_btn, open_page_cb, LV_EVENT_LONG_PRESSED, peqpage_screen());
+	lv_obj_set_hidden(peq_btn, !addons_enabled("peq"));
 
 	peq_profile_btn = make_circle_button(row, &icon_peq_quick);
 	lv_obj_t *profile_icon = lv_obj_get_child(peq_profile_btn, 0);
@@ -2636,6 +2640,7 @@ void quickpanel_init(gui_config_t *cfg) {
 	lv_obj_align(profile_number, LV_ALIGN_BOTTOM_MID, 0, qp_compact ? -2 : -8);
 	lv_obj_add_event_cb(peq_profile_btn, peq_profile_clicked_cb, LV_EVENT_CLICKED, NULL);
 	lv_obj_add_event_cb(peq_profile_btn, open_page_cb, LV_EVENT_LONG_PRESSED, peqpage_screen());
+	lv_obj_set_hidden(peq_profile_btn, !addons_enabled("peq"));
 
 	dlna_btn = make_circle_button(row, &icon_dlna_quick);
 	lv_obj_add_event_cb(dlna_btn, dlna_clicked_cb, LV_EVENT_CLICKED, NULL);

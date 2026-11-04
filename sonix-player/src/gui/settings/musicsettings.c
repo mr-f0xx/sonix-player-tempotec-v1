@@ -29,6 +29,7 @@
 #include "src/gui/shell/topbar.h"
 #include "src/system/device/sysinfo.h"
 #include "src/system/playback/sleeptimer.h"
+#include "src/system/addons/addons.h"
 #include "src/system/audio/audio.h"
 #include "src/system/bluetooth/bluetooth.h"
 #include "src/system/audio/eq.h"
@@ -1286,15 +1287,22 @@ void musicsettings_set_mseb_enabled(bool enabled) {
 // and a grey one on an enabled fade is not a nuance, it is a lie.
 static lv_obj_t *eq_row, *peq_row, *mseb_row, *soundfield_row, *crossfeed_row, *fade_row, *balance_row, *vlimit_row;
 
+// A row whose module is off was never built, so there is no row to paint.
+static void chevron_if(lv_obj_t *row, bool active) {
+	if (row) {
+		settingsrow_chevron_active(row, active);
+	}
+}
+
 static void refresh_active_chevrons(void) {
-	settingsrow_chevron_active(eq_row, eq_get_enabled());
-	settingsrow_chevron_active(peq_row, peq_get_enabled());
-	settingsrow_chevron_active(mseb_row, mseb_get_enabled());
-	settingsrow_chevron_active(soundfield_row, soundfield_get_enabled());
-	settingsrow_chevron_active(crossfeed_row, crossfeed_get_enabled());
+	chevron_if(eq_row, eq_get_enabled());
+	chevron_if(peq_row, peq_get_enabled());
+	chevron_if(mseb_row, mseb_get_enabled());
+	chevron_if(soundfield_row, soundfield_get_enabled());
+	chevron_if(crossfeed_row, crossfeed_get_enabled());
 	settingsrow_chevron_active(fade_row, musicsettings_fade_enabled());
-	settingsrow_chevron_active(balance_row, balance_get_enabled());
-	settingsrow_chevron_active(vlimit_row, volume_limit_enabled());
+	chevron_if(balance_row, balance_get_enabled());
+	chevron_if(vlimit_row, volume_limit_enabled());
 }
 
 static void screen_loaded_cb(lv_event_t *e) {
@@ -2471,10 +2479,12 @@ static void build_display_page(gui_config_t *cfg) {
 	// not a replacement for the list, and the covers it draws are decoded at a
 	// size the lists never ask for -- so switching it on fills the thumbnail
 	// database with rather bigger pictures the first time it is flicked through.
-	settingsrow_toggle(container, "cover_flow", &coverflow_switch, coverflow_cb);
-	option_note(container, "cover_flow_note");
-	if (coverflow_enabled()) {
-		lv_obj_add_state(coverflow_switch, LV_STATE_CHECKED);
+	if (addons_enabled("coverflow")) {
+		settingsrow_toggle(container, "cover_flow", &coverflow_switch, coverflow_cb);
+		option_note(container, "cover_flow_note");
+		if (coverflow_enabled()) {
+			lv_obj_add_state(coverflow_switch, LV_STATE_CHECKED);
+		}
 	}
 
 	// How the now-playing page is arranged.
@@ -2617,9 +2627,11 @@ static void build_playback_page(gui_config_t *cfg) {
 	fade_row = settingsrow_add(container, "fade", NULL, switch_screen_cb, fade_screen);
 
 	// Both channels as one, for a single earbud or one ear.
-	settingsrow_toggle(container, "musicsettings_mono_audio", &mono_switch, mono_cb);
-	if (mono_get_enabled()) {
-		lv_obj_add_state(mono_switch, LV_STATE_CHECKED);
+	if (addons_enabled("mono")) {
+		settingsrow_toggle(container, "musicsettings_mono_audio", &mono_switch, mono_cb);
+		if (mono_get_enabled()) {
+			lv_obj_add_state(mono_switch, LV_STATE_CHECKED);
+		}
 	}
 
 	// Which of the two shuffles "Play in random order" starts. The mode button
@@ -2697,38 +2709,56 @@ void musicsettings_init(gui_config_t *cfg) {
 	settingsrow_add(container, "musicsettings_display_options", NULL, switch_screen_cb, display_screen);
 	settingsrow_add(container, "musicsettings_library", NULL, switch_screen_cb, library_screen);
 
-	lastfmsettings_init(cfg);
-	settingsrow_add(container, "lastfm", NULL, switch_screen_cb, lastfmsettings_screen());
+	if (addons_enabled("lastfm")) {
+		lastfmsettings_init(cfg);
+		settingsrow_add(container, "lastfm", NULL, switch_screen_cb, lastfmsettings_screen());
+	}
 
-	listenbrainzsettings_init(cfg);
-	settingsrow_add(container, "listenbrainz", NULL, switch_screen_cb, listenbrainzsettings_screen());
+	if (addons_enabled("listenbrainz")) {
+		listenbrainzsettings_init(cfg);
+		settingsrow_add(container, "listenbrainz", NULL, switch_screen_cb, listenbrainzsettings_screen());
+	}
 
-	build_eq_page(cfg);
-	eq_row = settingsrow_add(container, "equaliser", NULL, switch_screen_cb, eq_screen);
+	if (addons_enabled("eq")) {
+		build_eq_page(cfg);
+		eq_row = settingsrow_add(container, "equaliser", NULL, switch_screen_cb, eq_screen);
+	}
 
 	// PEQ right below: the same thing said more precisely, so whoever comes
 	// looking for the equaliser finds the slider one first and the parametric
 	// one next to it.
-	peqpage_init(cfg);
-	peq_row = settingsrow_add(container, "peq", NULL, switch_screen_cb, peqpage_screen());
+	if (addons_enabled("peq")) {
+		peqpage_init(cfg);
+		peq_row = settingsrow_add(container, "peq", NULL, switch_screen_cb, peqpage_screen());
+	}
 
-	build_mseb_page(cfg);
-	mseb_row = settingsrow_add(container, "mseb", NULL, switch_screen_cb, mseb_screen);
+	if (addons_enabled("mseb")) {
+		build_mseb_page(cfg);
+		mseb_row = settingsrow_add(container, "mseb", NULL, switch_screen_cb, mseb_screen);
+	}
 
-	build_soundfield_page(cfg);
-	soundfield_row = settingsrow_add(container, "musicsettings_soundfield", NULL, switch_screen_cb, soundfield_screen);
+	if (addons_enabled("soundfield")) {
+		build_soundfield_page(cfg);
+		soundfield_row = settingsrow_add(container, "musicsettings_soundfield", NULL, switch_screen_cb, soundfield_screen);
+	}
 
 	// Crossfeed sits next to soundfield because they are relatives: one widens
 	// the stereo image, the other pulls it back inside the head. Anyone looking
 	// for one wants to see the other.
-	build_crossfeed_page(cfg);
-	crossfeed_row = settingsrow_add(container, "musicsettings_crossfeed", NULL, switch_screen_cb, crossfeed_screen);
+	if (addons_enabled("crossfeed")) {
+		build_crossfeed_page(cfg);
+		crossfeed_row = settingsrow_add(container, "musicsettings_crossfeed", NULL, switch_screen_cb, crossfeed_screen);
+	}
 
-	build_balance_page(cfg);
-	balance_row = settingsrow_add(container, "musicsettings_channel_balance", NULL, switch_screen_cb, balance_screen);
+	if (addons_enabled("channel_balance")) {
+		build_balance_page(cfg);
+		balance_row = settingsrow_add(container, "musicsettings_channel_balance", NULL, switch_screen_cb, balance_screen);
+	}
 
-	build_volume_limit_page(cfg);
-	vlimit_row = settingsrow_add(container, "musicsettings_volume_limit", NULL, switch_screen_cb, vlimit_screen);
+	if (addons_enabled("volume_limit")) {
+		build_volume_limit_page(cfg);
+		vlimit_row = settingsrow_add(container, "musicsettings_volume_limit", NULL, switch_screen_cb, vlimit_screen);
+	}
 
 	// The gain step: off = low gain (the stock default), on = +6 dB.
 	settingsrow_toggle(container, "musicsettings_high_gain", &gain_switch, gain_toggle_cb);

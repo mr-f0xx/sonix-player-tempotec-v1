@@ -15,6 +15,7 @@
 #include "src/gui/shell/theme.h"
 #include "src/system/audio/eq.h"
 #include "src/system/core/lang.h"
+#include "src/system/addons/addons.h"
 
 // ---------------------------------------------------------------------------
 // Parametric equaliser
@@ -754,6 +755,7 @@ void peqpage_init(gui_config_t *cfg) {
 	reset_btn = corner_button(main_screen, cfg, 0, &icon_reset, reset_cb);
 	corner_button(main_screen, cfg, 1, &icon_music_settings, open_settings_cb);
 	autoeq_btn = corner_button(main_screen, cfg, 2, &icon_audio_waveform, open_autoeq_cb);
+	lv_obj_set_hidden(autoeq_btn, !addons_enabled("autoeq")); // its page is not built when off
 	autoeq_timer = lv_timer_create(autoeq_timer_cb, 1000, NULL);
 	lv_timer_pause(autoeq_timer);
 

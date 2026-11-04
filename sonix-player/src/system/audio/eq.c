@@ -13,6 +13,7 @@
 #include <unistd.h>
 
 #include "src/system/core/config.h"
+#include "src/system/addons/addons.h"
 
 // The classic ISO octave centres every 10-band graphic EQ uses (and the ten
 // bands the stock player's geq carries).
@@ -300,7 +301,10 @@ static void peq_load(void) {
 }
 
 void eq_init(void) {
-	eq_enabled = (int)config_get_int("eq", "enabled", 0);
+	// A module switched off in Plugins is not built, so its effect must be gone
+	// too. The setting itself is kept: switching it back on is what "back to
+	// normal" means, and it comes back exactly as it was left.
+	eq_enabled = addons_enabled("eq") && (int)config_get_int("eq", "enabled", 0);
 	for (int i = 0; i < EQ_BANDS; i++) {
 		char key[16];
 		snprintf(key, sizeof(key), "band%d", i);
@@ -313,14 +317,14 @@ void eq_init(void) {
 		}
 		band_gain_db[i] = (int)g;
 	}
-	sf_enabled = (int)config_get_int("soundfield", "enabled", 0);
+	sf_enabled = addons_enabled("soundfield") && (int)config_get_int("soundfield", "enabled", 0);
 	sf_width = clamp_width((int)config_get_int("soundfield", "width", SOUNDFIELD_WIDTH_DEFAULT));
 
-	bal_enabled = (int)config_get_int("balance", "enabled", 0);
-	mono_enabled = config_get_int("audio", "mono", 0) ? 1 : 0;
+	bal_enabled = addons_enabled("channel_balance") && (int)config_get_int("balance", "enabled", 0);
+	mono_enabled = addons_enabled("mono") && config_get_int("audio", "mono", 0) ? 1 : 0;
 	balance_set_gains(clamp_balance((int)config_get_int("balance", "value", BALANCE_CENTRE)));
 
-	cf_enabled = (int)config_get_int("crossfeed", "enabled", 0);
+	cf_enabled = addons_enabled("crossfeed") && (int)config_get_int("crossfeed", "enabled", 0);
 	cf_level = clamp_step((int)config_get_int("crossfeed", "level", CROSSFEED_LEVEL_DEFAULT), CROSSFEED_LEVEL_MIN,
 						  CROSSFEED_LEVEL_MAX, CROSSFEED_LEVEL_STEP);
 	cf_cutoff = clamp_step((int)config_get_int("crossfeed", "cutoff", CROSSFEED_CUTOFF_DEFAULT), CROSSFEED_CUTOFF_MIN,
@@ -330,7 +334,7 @@ void eq_init(void) {
 	cf_ready_rate = 0;
 	crossfeed_reset();
 
-	mseb_enabled = (int)config_get_int("mseb", "enabled", 0);
+	mseb_enabled = addons_enabled("mseb") && (int)config_get_int("mseb", "enabled", 0);
 	mseb_range = (int)config_get_int("mseb", "range", MSEB_RANGE_DEFAULT);
 	if (mseb_range != 20 && mseb_range != 40 && mseb_range != 100) {
 		mseb_range = MSEB_RANGE_DEFAULT;
@@ -349,6 +353,9 @@ void eq_init(void) {
 	}
 
 	peq_load();
+	if (!addons_enabled("peq")) {
+		peq_enabled = 0;
+	}
 
 	settings_version++;
 }

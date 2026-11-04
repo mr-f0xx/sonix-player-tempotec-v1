@@ -3,6 +3,7 @@
 #include "src/system/audio/audio.h"
 #include "src/system/bluetooth/bluetooth.h"
 #include "src/system/core/config.h"
+#include "src/system/addons/addons.h"
 #include "src/system/audio/swvolume.h"
 #include "src/system/audio/usbaudio.h"
 #include "src/system/core/utils.h"
@@ -1012,7 +1013,7 @@ static void limit_load(void) {
 		return;
 	}
 	limit_loaded = true;
-	limit_on = config_get_int("audio", "volume_limit", 0) != 0;
+	limit_on = addons_enabled("volume_limit") && config_get_int("audio", "volume_limit", 0) != 0;
 	for (int i = 0; i < VOLUME_OUTPUT_COUNT; i++) {
 		if (LIMIT_KEYS[i]) {
 			limit_level[i] = limit_clamp_value((int)config_get_int("audio", LIMIT_KEYS[i], 100));

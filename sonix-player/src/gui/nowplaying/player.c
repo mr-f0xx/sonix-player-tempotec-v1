@@ -14,6 +14,7 @@
 #include "src/gui/nowplaying/cover.h"
 #include "src/gui/nowplaying/coverloader.h"
 #include "src/gui/nowplaying/lyricsearch.h"
+#include "src/system/addons/addons.h"
 #include "src/gui/library/medialist.h"
 #include "src/gui/fonts/fonts.h"
 #include "src/gui/board_profile.h"
@@ -2437,7 +2438,7 @@ static void lyrics_commit(bool on) {
 	lyrics_wanted = on;
 	device_state_t state;
 	device_state_get(&state);
-	lyrics_allowed = on && playing_local_file(&state);
+	lyrics_allowed = addons_enabled("lyrics") && on && playing_local_file(&state);
 	lyrics_now = lyrics_allowed && lyrics_has_words();
 	if (lyrics_now) {
 		lyrics_slide_to(LYRICS_FULL);
@@ -4508,7 +4509,7 @@ static void update_layout(const device_state_t *state) {
 	layout_aam_now = aam;
 	layout_alt_now = alt;
 	layout_wave_now = wave;
-	lyrics_allowed = lyrics;
+	lyrics_allowed = addons_enabled("lyrics") && lyrics;
 	// Up only with words for this very file; while they are still being read,
 	// as they were, so a track change does not take the page down and up again.
 	bool same_file = strcmp(state->current_file, lyrics_path) == 0;
