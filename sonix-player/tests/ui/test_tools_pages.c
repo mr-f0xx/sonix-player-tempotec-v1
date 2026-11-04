@@ -567,11 +567,12 @@ static uint32_t pet_view_cell(const pet_view_t *view, int col, int row) {
 	return pet_view_pixel(view, view->at.x1 + col * view->k + view->k / 2, view->at.y1 + row * view->k + view->k / 2);
 }
 
-/* The black tip of the far ear stands above the sky, on the card, and on a dark
- * card black is the colour of nothing. So at the size that reaches up there, on
- * a dark theme, its cells are drawn in a grey (and are black in the picture):
- * these are the cells, and the grey. */
-#define PET_TIP_GREY 0x858B88
+/* The black tip of the far ear stands above the sky, on the card, and the
+ * picture's black is about as light as a dark card, so the ear looked cut off.
+ * At the size that reaches up there, on a dark theme, its cells are drawn in
+ * true black, which is darker than the card (and are the picture's black in the
+ * picture): these are the cells, and the black. */
+#define PET_TIP_BLACK 0x000000
 static bool pet_tip_cell(int col, int row) {
 	static const char *const tip[] = {"......##", "....####", "..######", ".#...###", "#....##."};
 	return col >= 29 && col < 37 && row >= 0 && row < 5 && tip[row][col - 29] == '#';
@@ -597,7 +598,7 @@ static void check_pet_picture(const pet_view_t *view, const lv_image_dsc_t *pict
 			if (view->k == 3 && pet_tip_cell(x / 3, y / 3)) {
 				assert(want == PIKACHU_INK); /* the tip is black in the picture */
 				if (theme_is_dark()) {
-					want = PET_TIP_GREY;
+					want = PET_TIP_BLACK;
 				}
 			}
 			const uint32_t got = pet_view_pixel(view, view->at.x1 + x, view->at.y1 + y);

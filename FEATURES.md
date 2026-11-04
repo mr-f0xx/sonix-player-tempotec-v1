@@ -312,7 +312,8 @@ a self-signed certificate), and HLS.
   between its breaths as well**: it blinks every few seconds, and when nobody
   is touching it, it hops, leans or shakes of its own accord every ten seconds
   or so. On a dark card the black tip of its far ear, which stands above the
-  sky, is drawn in grey, because black is the colour of nothing there. **It
+  sky, is drawn in true black, a shade darker than the card, because the
+  picture's own black is as light as the card there. **It
   answers the keys as well as the glass**: a step up on
   the volume and it jumps, a step down and it ducks, Previous and Next and it
   leans the way they go, and a tap picks one of three tiny reactions -- a heart,

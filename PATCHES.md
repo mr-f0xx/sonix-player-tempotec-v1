@@ -2314,7 +2314,7 @@ chews and the sparks take turns.
 | fed (music is audible, awake) | the surprised face: round, wide eyes with a glint each, a mouth open on a pink tongue and a narrower one in turn, a spark and a bolt either side that swap places |
 | wardrobe | party hat, crown, headphones or scarf, one at a time |
 | genre | mirror shades, a chain with a pendant, a studded collar, or a cup of coffee on the floor |
-| a dark card | the black tip of the far ear, which stands above the sky, in grey |
+| a dark card | the black tip of the far ear, which stands above the sky, in true black |
 
 The scarf owns the neck, so a chain or a collar gives way to it, and the shades sit
 under a hat. The hearts that pop over a tapped head and fill under a held finger are
@@ -2370,16 +2370,24 @@ Shades cannot blink, so when a blink is due the glint grows a cross.
 
 ### The far ear
 
-The black tip of the far ear stands above the sky, on the card itself, and on a dark
-card black is the colour of nothing: the ear ended in the air. On the dark themes
-the tip's nineteen cells are drawn again over the picture's own, in a grey
-(`PET_TIP`); on Light they stay the picture's black, and the hatchling, whose ear is
-inside the sky, has none. `check_pet_picture()`, which holds the render to the stored
-array, knows about it: every solid pixel is the array's, except on those cells, where
-it asks for the grey. Other tips were drawn and thrown out: a cloud behind it, which
-kept the ink black but looked like a white flag and ran into a four- or five-digit
-wallet value in the corner of the card; and rings and halos of other colours round
-the black tip, which were looked at and liked less than the grey.
+The black tip of the far ear stands above the sky, on the card itself. The picture's
+black is `#252923`, a dark grey, and a dark card is about as light as that (OLED's
+black with the Meadow room's wash over it is `#1F2B23`): the tip could not be seen
+and the ear ended in the air. On the dark themes the tip's nineteen cells are drawn
+again over the picture's own, in true black (`PET_TIP`, `#000000`), which is darker
+than the card on every theme and room, though only just on OLED in the Night room,
+where the card is about `#0D111B`; on Light they stay the picture's black, and the
+hatchling, whose ear is inside the sky, has none. `check_pet_picture()`, which holds
+the render to the stored array, knows about it: every solid pixel is the array's,
+except on those cells, where it asks for the black.
+
+The first try was a light grey (`#858B88`): it could be seen, but it read as a grey
+ear and not a black tip. Other tips were drawn and thrown out: a cloud behind it,
+which kept the ink black but looked like a white flag and ran into a four- or
+five-digit wallet value in the corner of the card; and rings and halos of other
+colours round the black tip, which read as a hollow outline. A one-pixel light edge
+round a black tip would hold up on the darkest card; it was left off because the
+plain black is cleaner.
 
 ### Alive between the breaths
 
@@ -2512,7 +2520,7 @@ shows the old glyph.
 | the pictures | none | 76,960 bytes of read-only data |
 
 (Host `-O2` build of the one file; the arm code is denser and the pictures are not.
-The surprised face, the shades, the grey ear tip, the blink and the fidget are 3.6 KB
+The surprised face, the shades, the ear tip, the blink and the fidget are 3.6 KB
 of that code and 0.6 KB of the RAM.) Still one callback a second and two frames, no
 `lv_anim`, and nothing redrawn that has not changed -- but for the blink, one timer
 of 140 milliseconds every few seconds.

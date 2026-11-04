@@ -84,9 +84,11 @@ lv_obj_t *petpage_screen;
 #define PET_MOUTH lv_color_hex(0x5A1C14)
 #define PET_TONGUE lv_color_hex(0xF0877A)
 #define PET_SPARK lv_color_hex(0xFFF27A)
-// The black tip of the far ear is above the sky, on the card, and on a dark
-// card black is the colour of nothing: there it is drawn in this grey.
-#define PET_TIP lv_color_hex(0x858B88)
+// The black tip of the far ear is above the sky, on the card. The picture's black
+// (252923, a dark grey) is as light as a dark card, so there the tip was not to be
+// seen and the ear looked cut off; it is drawn in true black, which is darker than
+// the card on every theme.
+#define PET_TIP lv_color_hex(0x000000)
 // The three things a month can make fall: they are over the scenery, so they
 // are pale enough to be seen on the sky, the grass and the dark card alike.
 #define PET_LEAF lv_color_hex(0xD9822B)
@@ -353,7 +355,7 @@ typedef struct {
 // The letters are the picture's own (K ink, Y yellow, O orange, R red, N brown,
 // W white) and the wardrobe's: r hat, g gold, p phones, s scarf, c shades and
 // collar, l and L the lenses, b tear, t stud and glint, C cup, E coffee, m and T
-// the inside of an open mouth and the tongue, z a spark and q the lit tip of an ear.
+// the inside of an open mouth and the tongue, z a spark and q the tip of an ear.
 // A sleeping pet's eyes: lids over the open ones, one dark line each (the
 // only place the picture itself is changed).
 STAMP(stamp_eyes_shut, 4,
@@ -521,8 +523,8 @@ STAMP(stamp_spark, 3,
       "zzz",
       ".z.");
 
-// The tip of the far ear, over the picture's own: ink cells in the grey that
-// shows on a dark card. It is the one place the picture is above the sky.
+// The tip of the far ear, over the picture's own: ink cells in the true black
+// that shows on a dark card. It is the one place the picture is above the sky.
 STAMP(stamp_tip, 8,
       "......qq",
       "....qqqq",
