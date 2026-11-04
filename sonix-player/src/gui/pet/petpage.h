@@ -8,16 +8,17 @@
 // The pet, from the More menu.
 //
 // The creature is one picture, a Pikachu (pikachu.c), put on the card at its own
-// size and never scaled. Its mood and what it wears are a few cells drawn over
-// that picture on the picture's own grid; the two meters and the notes are the
-// interface's own pieces. What moves it is the listening, and the arithmetic
+// size and never scaled. Its mood, what it wears and the surprised face it makes
+// while it is fed are a few cells drawn over that picture on the picture's own
+// grid; the two meters and the notes are the interface's own pieces. What moves it is the listening, and the arithmetic
 // behind that is in src/system/pet/pet.c; the once-a-second reading of the
 // playback state is petwatch.c. This file only draws what those two answer.
 //
 // Nothing is built at start-up: petpage_init() remembers the panel, and the
 // first visit draws the page. The page's one-second timer exists only while it
 // is on screen, and the creature's slow breathing runs while the page is up --
-// faster, never fast, while something is playing.
+// faster, never fast, while something is playing, when it also steps from side
+// to side. It blinks every few seconds and fidgets now and then.
 
 extern lv_obj_t *petpage_screen;
 
@@ -36,6 +37,10 @@ lv_obj_t *petpage_creature(void);
 // has been built.
 lv_obj_t *petpage_box(void);
 lv_obj_t *petpage_find(void);
+
+// Whether his eyes are shut this moment: a blink lasts a tenth of a second, so
+// the tests have to ask. False until the page has been built.
+bool petpage_blinking(void);
 
 // The route behind the animal, one object drawn in three-pixel cells from its
 // own top left corner. The tests read the sky, the ground and the sun back off

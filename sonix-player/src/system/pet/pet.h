@@ -585,7 +585,7 @@ pet_vibe_t pet_vibe_for_genre(const char *genre);
 // NONE for the genres that have no costume -- and for no genre at all.
 typedef enum {
 	PET_LOOK_NONE = 0,
-	PET_LOOK_SHADES, // synthwave, electronic, house: two flat lenses
+	PET_LOOK_SHADES, // synthwave, electronic, house: mirror shades
 	PET_LOOK_CHAIN,  // hip hop, rap, boom bap: gold, round the neck
 	PET_LOOK_COLLAR, // rock, metal, punk: studs
 	PET_LOOK_CUP,    // ambient, lo-fi, jazz: something warm on the floor

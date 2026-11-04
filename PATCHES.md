@@ -2292,7 +2292,8 @@ one that asks for 250/256 -- fails the suite.
 
 ### What is over it
 
-The face is the picture's and stays the picture's. What the pet feels and what it
+The face is the picture's and stays the picture's, except while the pet is being
+fed (*Fed, he is surprised*, below). What the pet feels and what it
 wears are cells drawn on the same grid by one more object, a plain child of the
 root with a draw callback (`gear_draw_cb`). A *stamp* is a few strings of letters
 in the picture's alphabet and the wardrobe's; a run of one letter is one
@@ -2300,7 +2301,9 @@ in the picture's alphabet and the wardrobe's; a run of one letter is one
 a stamp lands on the picture the way a sticker lands on graph paper. Nothing is
 rotated, scaled or smoothed. What is stamped is decided when the animal is painted
 and the callback only draws that list. A stamp can have a second place on the
-animation's other frame, which is how the stars shift and the small heart floats.
+animation's other frame, which is how the stars shift and the small heart floats,
+and it can be there on one frame and gone on the other, which is how the mouth
+chews and the sparks take turns.
 
 | state | drawn |
 |---|---|
@@ -2308,8 +2311,10 @@ animation's other frame, which is how the stars shift and the small heart floats
 | sad | a blue sweat drop at the temple |
 | dizzy | three gold stars between the ears; two drift and one sits in the notch beside the far ear, clear of the wallet's note in the corner of the card |
 | blissful | a big heart and a small one that floats |
+| fed (music is audible, awake) | the surprised face: round, wide eyes with a glint each, a mouth open on a pink tongue and a narrower one in turn, a spark and a bolt either side that swap places |
 | wardrobe | party hat, crown, headphones or scarf, one at a time |
-| genre | shades, a chain with a pendant, a studded collar, or a cup of coffee on the floor |
+| genre | mirror shades, a chain with a pendant, a studded collar, or a cup of coffee on the floor |
+| a dark card | the black tip of the far ear, which stands above the sky, in grey |
 
 The scarf owns the neck, so a chain or a collar gives way to it, and the shades sit
 under a hat. The hearts that pop over a tapped head and fill under a held finger are
@@ -2321,12 +2326,86 @@ and a crown nine wide covered a quarter of it; the third dizzy star sits in the 
 beside the far ear for the same reason.
 
 Dropped on purpose: the volume faces (wide eyes past eighty per cent, a heavy lid
-between twenty and forty), the open mouth while listening, and the brows. Each is
-a different face, and the face is the thing that is meant to be exactly the
-picture. Listening still shows in the notes that drift up beside the animal and in
-the equalizer under it. `petwatch_volume()`, which only the volume faces read, went
-with them, and there is no arm to wave with, so the wave reaction shakes the
-animal a few pixels from side to side.
+between twenty and forty) and the brows. Each is a different face, and the face is
+the thing that is meant to be exactly the picture. `petwatch_volume()`, which only
+the volume faces read, went with them, and there is no arm to wave with, so the wave
+reaction shakes the animal a few pixels from side to side. Listening shows in the
+notes that drift up beside the animal, in the equalizer under it and, since the
+pet is fed by it, in the face (next).
+
+### Fed, he is surprised
+
+"Fed" is the page's own word for music being audible -- `petwatch_listening()`, the
+reason the line at the foot of the card says *Feeding on ...*. The Poké Ball, the
+note game and the taps are not feeding. While it is so and the pet is awake,
+`paint_creature()` stamps the surprised Pikachu of the meme over the picture:
+
+- two eyes, five cells square and round, over the picture's own, with a white glint
+  at the top left of each;
+- a mouth at (18, 18) that hides the picture's own (a yellow cell at each end of its
+  first row covers the ends of it) and opens on a pink tongue: wide, with a dark red
+  inside, on one frame; narrow, with the tongue and a lip, on the other. They take
+  turns, so he chews. No cell of a mouth is on row 23, where the chest's orange is;
+- a spark and a bolt of electricity either side of the animal, in the sky beside the
+  head and the tail, which swap on the two frames. A sad pet has the right side
+  for its sweat drop, so it has only the left;
+- the root steps two pixels to one side on one frame and to the other on the next
+  (`apply_frame()`): a dance, on top of the breath. A reaction under way owns the
+  root instead, and a jump leaves its shadow on the floor.
+
+A scarf, a chain or a collar is over the chin, and would hide the lower rows of the
+wide mouth, so those pets get the narrow one on both frames. Shades are drawn
+after the face and cover the eyes whatever the eyes are doing, so with shades the
+mouth and the sparks are all there is to see. A sleeper is not fed: its eyes are
+shut, and it keeps them shut.
+
+### The shades
+
+The shades are one stamp, `stamp_shades`, seventeen cells wide: two mirror lenses --
+a dark blue, with the sky's blue under a white glint that runs from the top right
+to the bottom left -- in a black frame, the bridge between them, and an arm to
+each side that reaches the outline of the head. They are big enough to cover the
+eyes of every face the pet can have, so no eye shows round the edge of a lens.
+Shades cannot blink, so when a blink is due the glint grows a cross.
+
+### The far ear
+
+The black tip of the far ear stands above the sky, on the card itself, and on a dark
+card black is the colour of nothing: the ear ended in the air. On the dark themes
+the tip's nineteen cells are drawn again over the picture's own, in a grey
+(`PET_TIP`); on Light they stay the picture's black, and the hatchling, whose ear is
+inside the sky, has none. `check_pet_picture()`, which holds the render to the stored
+array, knows about it: every solid pixel is the array's, except on those cells, where
+it asks for the grey. Other tips were drawn and thrown out: a cloud behind it, which
+kept the ink black but looked like a white flag and ran into a four- or five-digit
+wallet value in the corner of the card; and rings and halos of other colours round
+the black tip, which were looked at and liked less than the grey.
+
+### Alive between the breaths
+
+Two things happen that nobody asked for, both on the page's own tick
+(`life_tick()`, called from `advance_frame()`), with a small linear generator for
+the dice, seeded the same way each time so the tests can count on it:
+
+- **A blink**, every three to six seconds: a line where each eye was, no glint --
+  the wide eyes of a feeding pet shut the same way, and shades glint instead -- for
+  140 milliseconds. That is quicker than the tick, so the blink has a one-shot
+  timer of its own, made when the lids go down and gone when they come up (and
+  deleted with the rest of the page's animation when the page is left). A sleeper
+  does not blink.
+- **A fidget**, every eight to fourteen seconds, when nothing else is asking for
+  him -- awake, not fed, no reaction under way, no finger down and no sheet open: a
+  hop, a lean to one side or a shake, for two seconds. They are the reactions the
+  keys and the taps start, started by the animal.
+
+Together with the dance, that is the whole of it. Nothing runs more than once a
+second but the blink, which redraws one object the size of the picture twice every
+few seconds.
+
+`petpage_blinking()` is there for the tests, since a blink lasts a tenth of a
+second. `SONIX_PAGE_FILM=<prefix>` makes `test_tools_pages` write a film of the
+grown animal -- fed in shades, fed bare, and left alone for forty seconds -- as one
+PPM every tenth of a second; nothing is asserted on it.
 
 ### One animal, so no species
 
@@ -2427,14 +2506,16 @@ shows the old glyph.
 | | before | after |
 |---|---|---|
 | the animal | 48 objects, about 6 KB of RAM | 4 objects: the picture, the overlay, the shadow and the sleeper's "z z" |
-| `petpage.c`, object code (with the route) | 60.8 KB | 38.4 KB |
-| `petpage.c`, static RAM | 6.8 KB | 3.5 KB |
-| `petpage.c`, source | 4,055 lines | 3,388 lines |
+| `petpage.c`, object code (with the route) | 60.8 KB | 42.1 KB |
+| `petpage.c`, static RAM | 6.8 KB | 4.1 KB |
+| `petpage.c`, source | 4,055 lines | 3,661 lines |
 | the pictures | none | 76,960 bytes of read-only data |
 
-(Host `-O2` build of the one file; the arm code is denser and the pictures are not.)
-Still one callback a second and two frames, no `lv_anim`, and nothing redrawn that
-has not changed.
+(Host `-O2` build of the one file; the arm code is denser and the pictures are not.
+The surprised face, the shades, the grey ear tip, the blink and the fidget are 3.6 KB
+of that code and 0.6 KB of the RAM.) Still one callback a second and two frames, no
+`lv_anim`, and nothing redrawn that has not changed -- but for the blink, one timer
+of 140 milliseconds every few seconds.
 
 The earlier entry that turned down a pre-baked sprite sheet -- about a megabyte,
 for four species x four stages x two frames x five wardrobe states -- is made moot
@@ -2453,6 +2534,18 @@ snapshot (`-sleeping`, `-sad`, `-dizzy`, `-blissful`, `-hat`, `-crown`, `-phones
 one cell that only it paints is read back off the screen by its place in the grid,
 so a stamp that drifts off the grid, or never appears, fails. `test_pet` loses its
 species tests and the migration's.
+
+The surprised face, the dance, the blink and the fidget are read back the same way,
+with the page run a second at a time (`pet_second()`). The feeding face is asserted
+on both frames -- the two mouths, the sparks swapping, the glints and the edges of
+the eyes -- bare, in shades, in a scarf, a chain and a collar (the narrow mouth) and
+asleep (no face at all). The dance must be two pixels either way and alternate;
+the shadow must stay on the floor in a jump; a blink must come within ten seconds in
+each of the three kinds of eyes and be over two hundred milliseconds later; and a
+fidget must come, between four and twenty-four seconds of it in a minute. Move the
+tip a cell, take the neck rule out, stop the blink or the dance, or shift a lid by one
+cell, and the page test stops. `pet_view_take()` lets the layout catch up with a
+step before it reads where the picture is.
 
 All of the moods, garments and accessories are done twice, once as a hatchling and
 once as an adult (`-adult-sleeping`, `-adult-crown` and so on), because the grown

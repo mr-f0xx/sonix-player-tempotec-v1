@@ -301,18 +301,26 @@ a self-signed certificate), and HLS.
   what it is feeding on beside a three-bar equalizer. It stands on a route --
   a sky that comes up out of the card, hills, a round tree and a pine, tall
   grass and flowers, a platform under its feet -- and its face is the
-  picture's own: the mood is something added beside it. Eyes shut and a little
-  "z z" when it is asleep, a blue sweat drop when it is sad, three gold stars
-  when it is dizzy, hearts over it when it is blissful, and, while music is
-  playing, a pair of notes in the air beside it. **It answers the keys as well
-  as the glass**: a step up on
+  picture's own, except when it is fed. **While music plays it is surprised**:
+  its eyes go round and wide, its mouth opens on a pink tongue and shuts again
+  as it chews, it steps from side to side and sparks fly off its cheeks. (A
+  scarf, a chain or a collar is over its chin, so there the mouth stays small.)
+  The rest of the time the mood is something added beside the picture: eyes
+  shut and a little "z z" when it is asleep, a blue sweat drop when it is sad,
+  three gold stars when it is dizzy, hearts over it when it is blissful, and,
+  while music is playing, a pair of notes in the air beside it. **It is alive
+  between its breaths as well**: it blinks every few seconds, and when nobody
+  is touching it, it hops, leans or shakes of its own accord every ten seconds
+  or so. On a dark card the black tip of its far ear, which stands above the
+  sky, is drawn in grey, because black is the colour of nothing there. **It
+  answers the keys as well as the glass**: a step up on
   the volume and it jumps, a step down and it ducks, Previous and Next and it
   leans the way they go, and a tap picks one of three tiny reactions -- a heart,
   a hop or a shake -- on the pat's own cooldown. **Hold a finger on it for two
   seconds** and three hearts fill under it; the third pays the day's groom,
-  once a day. A genre tag dresses it for the track it is hearing -- shades for
-  the electronic family, a gold chain for hip hop, a studded collar for rock, a
-  cup on the floor for the calm ones. What the wardrobe has put on it -- a party
+  once a day. A genre tag dresses it for the track it is hearing -- mirror
+  shades for the electronic family, a gold chain for hip hop, a studded collar
+  for rock, a cup on the floor for the calm ones. What the wardrobe has put on it -- a party
   hat, a crown, headphones or a scarf -- is drawn over the picture the same way,
   one thing at a time.
   **A Poké Ball sits in the corner**: in it are the day's fortune, one of

@@ -76,6 +76,17 @@ lv_obj_t *petpage_screen;
 #define PET_STUD lv_color_hex(0xC9CCD1)
 #define PET_CUP lv_color_hex(0xF7F2E4)
 #define PET_COFFEE lv_color_hex(0x6B4A32)
+// The lenses of the shades are a mirror: a dark blue with the sky's blue in the
+// lower half of it. A pet that is feeding has its mouth open, which is a dark red
+// with a pink tongue in it, and sparks of electricity at its cheeks.
+#define PET_LENS_DARK lv_color_hex(0x16305A)
+#define PET_LENS_LIGHT lv_color_hex(0x2E67AE)
+#define PET_MOUTH lv_color_hex(0x5A1C14)
+#define PET_TONGUE lv_color_hex(0xF0877A)
+#define PET_SPARK lv_color_hex(0xFFF27A)
+// The black tip of the far ear is above the sky, on the card, and on a dark
+// card black is the colour of nothing: there it is drawn in this grey.
+#define PET_TIP lv_color_hex(0x858B88)
 // The three things a month can make fall: they are over the scenery, so they
 // are pale enough to be seen on the sky, the grass and the dark card alike.
 #define PET_LEAF lv_color_hex(0xD9822B)
@@ -136,6 +147,14 @@ enum {
 #define PET_REACTION_SECS 3
 static int reaction;
 static int64_t reaction_until;
+
+// A little life between the breaths (see "A little life"): the seconds until his
+// next blink and until he next moves of his own accord, the dice they are
+// drawn with, and the blink's timer while his eyes are shut.
+static int blink_wait;
+static int fidget_wait;
+static uint32_t dice = 20260;
+static lv_timer_t *blink_timer;
 
 // Petting Mode: the finger stayed down, and a heart meter fills in three steps
 // of six hundred milliseconds. The last one pays the day's groom.
@@ -238,6 +257,8 @@ static void name_dialog_close(void);
 static void pet_tap_cb(lv_event_t *e);
 static void pet_hold_cb(lv_event_t *e);
 static void start_reaction(int what);
+static void life_tick(void);
+static void blink_stop(void);
 static void box_open_cb(lv_event_t *e);
 static void ball_draw_cb(lv_event_t *e);
 static void find_take_cb(lv_event_t *e);
@@ -331,7 +352,8 @@ typedef struct {
 
 // The letters are the picture's own (K ink, Y yellow, O orange, R red, N brown,
 // W white) and the wardrobe's: r hat, g gold, p phones, s scarf, c shades and
-// collar, b tear, t stud and glint, C cup, E coffee.
+// collar, l and L the lenses, b tear, t stud and glint, C cup, E coffee, m and T
+// the inside of an open mouth and the tongue, z a spark and q the lit tip of an ear.
 // A sleeping pet's eyes: lids over the open ones, one dark line each (the
 // only place the picture itself is changed).
 STAMP(stamp_eyes_shut, 4,
@@ -417,14 +439,21 @@ STAMP(stamp_scarf, 19,
       ".............ssss..",
       "..............ss...");
 
-// Shades: two lenses and the bridge between them. Each lens has a glint.
-STAMP(stamp_lens, 6,
-      ".cccc.",
-      "ctcccc",
-      "cccccc",
-      ".cccc.");
-STAMP(stamp_bridge, 4,
-      "cccc");
+// Shades, in one piece: two mirror lenses -- dark blue, with a lighter blue under
+// a white glint that runs from the top right corner to the bottom left one --
+// in a black frame, the bridge between them and an arm to each side that reaches
+// the head's outline. The lenses are big enough to cover the eyes of every face.
+STAMP(stamp_shades, 17,
+      ".cccccc....cccccc",
+      "ccllWlccccccllWlc",
+      ".clWllc....clWllc",
+      ".cWLLLc....cWLLLc",
+      "..cccc......cccc.");
+// The glint of a lens when it catches the light: the white cell grows a cross.
+STAMP(stamp_shine, 3,
+      ".W.",
+      "WWW",
+      ".W.");
 
 // A chain, ink and gold links so it shows on yellow fur, and its pendant, which
 // covers the little orange patch on the chest.
@@ -450,9 +479,77 @@ STAMP(stamp_cup, 6,
       "ECCCEE",
       "ECCCE.",
       ".EEE..");
+
+// The face of a pet that is feeding: eyes round and wide, a glint at the top left
+// of each -- they cover the picture's own -- and a mouth open on a pink tongue.
+STAMP(stamp_gasp_eye, 5,
+      ".KKK.",
+      "KWKKK",
+      "KKKKK",
+      "KKKKK",
+      ".KKK.");
+// The same eyes shut, for a blink.
+STAMP(stamp_gasp_lid, 5,
+      ".YYY.",
+      "YYYYY",
+      "YYYYY",
+      "KKKKK",
+      ".YYY.");
+// The mouth. The picture's own is two rows (the little w under the nose), and a
+// yellow cell at each end of the first row hides the ends of it. The wide one is
+// the surprise, the narrow one is a mouthful, and the two take turns.
+STAMP(stamp_gasp_mouth, 8,
+      "Y.KKKK.Y",
+      ".KmmmmK.",
+      ".KTTTTK.",
+      ".KTTTTK.",
+      "..KKKK..");
+STAMP(stamp_chew_mouth, 8,
+      "Y.KKKK.Y",
+      ".KTTTTK.",
+      "..KKKK..");
+
+// The electricity at the cheeks of a pet that is feeding: a bolt, then a spark.
+STAMP(stamp_bolt, 3,
+      "..z",
+      ".z.",
+      "zzz",
+      ".z.",
+      "z..");
+STAMP(stamp_spark, 3,
+      ".z.",
+      "zzz",
+      ".z.");
+
+// The tip of the far ear, over the picture's own: ink cells in the grey that
+// shows on a dark card. It is the one place the picture is above the sky.
+STAMP(stamp_tip, 8,
+      "......qq",
+      "....qqqq",
+      "..qqqqqq",
+      ".q...qqq",
+      "q....qq.");
 // clang-format on
 
-#define GEAR_MAX 10 // a mood's stamps, a garment's and a genre's, at the most
+#define GEAR_MAX 20 // a face's stamps, a mood's, a garment's and a genre's, at the most
+
+// Which of the two frames a stamp is drawn on.
+enum {
+	GEAR_ALWAYS = 0,
+	GEAR_FIRST,
+	GEAR_SECOND,
+};
+
+// What the eyes are, so a blink knows what to shut: nothing (they are shut
+// already), the picture's own, the wide eyes of a feeding pet, or the lenses of
+// a pair of shades, which cannot shut and glint instead.
+enum {
+	GEAR_EYES_NONE = 0,
+	GEAR_EYES_PLAIN,
+	GEAR_EYES_WIDE,
+	GEAR_EYES_SHADED,
+	GEAR_EYES_KINDS,
+};
 
 typedef struct {
 	const stamp_t *stamp;
@@ -460,6 +557,7 @@ typedef struct {
 	int8_t row;
 	int8_t dcol; // and how far it has moved on the animation's other frame
 	int8_t drow;
+	uint8_t when; // GEAR_ALWAYS, or the one frame it is drawn on
 } gear_item_t;
 
 static struct {
@@ -468,24 +566,39 @@ static struct {
 	int k;      // pixels a cell is drawn at: 2 for a hatchling, 3 for the rest
 	bool moves; // some stamp has a second place, so the other frame redraws it
 	bool other; // the animation is on its second frame
+	int eyes;   // GEAR_EYES_*
+	bool lids;  // a blink: the eyes are shut, or the lenses are bright
 } gear;
+
+// Whether the animal as it was last drawn is feeding -- music is audible and he is
+// awake -- which is what dances, and what changes his face.
+static bool feeding_now;
 
 static void gear_clear(int k) {
 	gear.count = 0;
 	gear.k = k;
 	gear.moves = false;
+	gear.eyes = GEAR_EYES_PLAIN;
 }
 
 static void gear_add(const stamp_t *stamp, int col, int row) {
 	if (gear.count < GEAR_MAX) {
-		gear.item[gear.count++] = (gear_item_t){stamp, (int8_t)col, (int8_t)row, 0, 0};
+		gear.item[gear.count++] = (gear_item_t){stamp, (int8_t)col, (int8_t)row, 0, 0, GEAR_ALWAYS};
 	}
 }
 
 // One that is somewhere else on the other frame: it moves by (dcol, drow) cells.
 static void gear_add_moving(const stamp_t *stamp, int col, int row, int dcol, int drow) {
 	if (gear.count < GEAR_MAX) {
-		gear.item[gear.count++] = (gear_item_t){stamp, (int8_t)col, (int8_t)row, (int8_t)dcol, (int8_t)drow};
+		gear.item[gear.count++] = (gear_item_t){stamp, (int8_t)col, (int8_t)row, (int8_t)dcol, (int8_t)drow, GEAR_ALWAYS};
+		gear.moves = true;
+	}
+}
+
+// One that is there on one of the frames and gone on the other.
+static void gear_add_on(const stamp_t *stamp, int col, int row, int when) {
+	if (gear.count < GEAR_MAX) {
+		gear.item[gear.count++] = (gear_item_t){stamp, (int8_t)col, (int8_t)row, 0, 0, (uint8_t)when};
 		gear.moves = true;
 	}
 }
@@ -522,6 +635,18 @@ static lv_color_t stamp_color(char letter) {
 		return PET_CUP;
 	case 'E':
 		return PET_COFFEE;
+	case 'l':
+		return PET_LENS_DARK;
+	case 'L':
+		return PET_LENS_LIGHT;
+	case 'm':
+		return PET_MOUTH;
+	case 'T':
+		return PET_TONGUE;
+	case 'z':
+		return PET_SPARK;
+	case 'q':
+		return PET_TIP;
 	default:
 		return lv_color_hex(0xFF00FF); // a letter nobody drew: loud on purpose
 	}
@@ -564,9 +689,31 @@ static void gear_draw_cb(lv_event_t *e) {
 	const int k = gear.k;
 	for (int i = 0; i < gear.count; i++) {
 		const gear_item_t *item = &gear.item[i];
+		if ((item->when == GEAR_FIRST && gear.other) || (item->when == GEAR_SECOND && !gear.other)) {
+			continue;
+		}
 		const int col = item->col + (gear.other ? item->dcol : 0);
 		const int row = item->row + (gear.other ? item->drow : 0);
 		stamp_draw(layer, &rect, item->stamp, box.x1 + col * k, box.y1 + row * k, k, stamp_color);
+	}
+
+	// A blink is over all of it, so it is drawn last: a lid on each of the eyes
+	// there are, and a cross of light on each lens when there are shades, which
+	// are what is over the eyes then.
+	if (gear.lids && gear.eyes > GEAR_EYES_NONE && gear.eyes < GEAR_EYES_KINDS) {
+		static const struct {
+			const stamp_t *lid;
+			int8_t left; // the cell of the left one's top left corner, and the right one's
+			int8_t right;
+			int8_t row;
+		} lids[GEAR_EYES_KINDS] = {
+			[GEAR_EYES_PLAIN] = {&stamp_eyes_shut, 15, 25, 12},
+			[GEAR_EYES_WIDE] = {&stamp_gasp_lid, 15, 24, 11},
+			[GEAR_EYES_SHADED] = {&stamp_shine, 16, 26, 11},
+		};
+		const stamp_t *lid = lids[gear.eyes].lid;
+		stamp_draw(layer, &rect, lid, box.x1 + lids[gear.eyes].left * k, box.y1 + lids[gear.eyes].row * k, k, stamp_color);
+		stamp_draw(layer, &rect, lid, box.x1 + lids[gear.eyes].right * k, box.y1 + lids[gear.eyes].row * k, k, stamp_color);
 	}
 }
 
@@ -759,14 +906,52 @@ static void paint_creature(void) {
 	place(parts.shadow, sx + 11 * k, PET_BASE_Y - 1, 21 * k, k + 2);
 	lv_obj_set_style_bg_opa(parts.shadow, theme_is_dark() ? (lv_opa_t)(LV_OPA_COVER * 35 / 100) : LV_OPA_20, 0);
 
+	// ---- his face --------------------------------------------------------
+	//
+	// The face is the picture's, and it stays the picture's -- except when he is
+	// fed. While music is playing and he is awake he is surprised, the way a
+	// pet is by a mouthful: his eyes go round and wide, his mouth opens on a pink
+	// tongue and shuts again as he chews, and sparks fly off his cheeks. Shades
+	// are over the eyes whatever they are doing, so with shades the mouth is all
+	// there is to see. A scarf, a collar or a chain is over the chin, so there the
+	// mouth is only as big as the picture's own, and does not chew.
+	const pet_genre_look_t look = petwatch_look();
+	const bool shades = look == PET_LOOK_SHADES;
+	const bool neck = pet_wearing(st) == (int)PET_ITEM_SCARF || look == PET_LOOK_CHAIN || look == PET_LOOK_COLLAR;
+	const bool feeding = petwatch_listening() && mood != PET_MOOD_SLEEPING;
+	feeding_now = feeding;
+
+	gear_clear(k);
+	gear.eyes = mood == PET_MOOD_SLEEPING ? GEAR_EYES_NONE : shades ? GEAR_EYES_SHADED : feeding ? GEAR_EYES_WIDE : GEAR_EYES_PLAIN;
+	if (k == 3 && theme_is_dark()) {
+		gear_add(&stamp_tip, 29, 0);
+	}
+	if (feeding) {
+		if (!shades) {
+			gear_add(&stamp_gasp_eye, 15, 11);
+			gear_add(&stamp_gasp_eye, 24, 11);
+		}
+		if (neck) {
+			gear_add(&stamp_chew_mouth, 18, 18);
+		} else {
+			gear_add_on(&stamp_gasp_mouth, 18, 18, GEAR_FIRST);
+			gear_add_on(&stamp_chew_mouth, 18, 18, GEAR_SECOND);
+		}
+		// A spark on each side, a bolt that is a spark on the other frame, over the
+		// sky beside the head and the tail. The sweat drop of a sad pet has the
+		// right side.
+		gear_add_on(&stamp_spark, 5, 13, GEAR_FIRST);
+		gear_add_on(&stamp_bolt, 5, 11, GEAR_SECOND);
+		if (mood != PET_MOOD_SAD) {
+			gear_add_on(&stamp_bolt, 34, 12, GEAR_FIRST);
+			gear_add_on(&stamp_spark, 34, 14, GEAR_SECOND);
+		}
+	}
+
 	// ---- what he feels ---------------------------------------------------
 	//
-	// The face is the picture's and stays the picture's, so a mood is something
-	// added next to it: a sweat drop, stars, hearts. Only a sleeper changes the
-	// picture, by shutting its eyes. A happy animal and an indifferent one are
-	// the same picture, and so is one that is listening -- the notes drifting
-	// over the card and the bars under it say that.
-	gear_clear(k);
+	// A mood is something added next to the face: a sweat drop, stars, hearts.
+	// Only a sleeper changes the picture, by shutting its eyes.
 	switch (mood) {
 	case PET_MOOD_SLEEPING:
 		gear_add(&stamp_eyes_shut, 15, 12);
@@ -819,11 +1004,8 @@ static void paint_creature(void) {
 	// One thing at a time, and only while there is music to have a genre from.
 	// A scarf owns the neck, so the chain and the collar give way to it; the
 	// shades sit under a hat, which is what sunglasses do.
-	const pet_genre_look_t look = petwatch_look();
-	if (look == PET_LOOK_SHADES) {
-		gear_add(&stamp_lens, 14, 12);
-		gear_add(&stamp_lens, 24, 12);
-		gear_add(&stamp_bridge, 20, 13);
+	if (shades) {
+		gear_add(&stamp_shades, 13, 11);
 	} else if (look == PET_LOOK_CHAIN && !scarf) {
 		gear_add(&stamp_chain, 13, 20);
 		gear_add(&stamp_chain_pendant, 20, 23);
@@ -1586,9 +1768,10 @@ static void paint(void) {
 //
 // The animal is not interpolated. It has two frames -- a breath in and a breath
 // out -- and the page's own one-second timer swaps them: the root moves two
-// pixels, the stars turn and the hearts float, the notes drift and the motes
-// rise. Nothing here runs at more than 1 Hz, nothing asks LVGL to
-// interpolate, and the whole thing is a dozen integer fields written into a
+// pixels (and, while he is feeding, steps from side to side), the stars turn and
+// the hearts float, the sparks and the mouth change, the notes drift and the
+// motes rise. Nothing here runs at more than 1 Hz but a blink, nothing asks LVGL
+// to interpolate, and the whole thing is a dozen integer fields written into a
 // dozen objects once a second. On a 240 x 320 panel that is the difference
 // between a smooth animation the processor cannot afford and one it can.
 // ---------------------------------------------------------------------------
@@ -1636,8 +1819,15 @@ static void apply_frame(void) {
 	default:
 		break;
 	}
+	// Fed, he dances: a step to each side on top of the breath, unless a finger or
+	// a key has just asked for something else.
+	if (feeding_now && reaction == REACT_NONE) {
+		dx = frame ? 2 : -2;
+	}
 	lv_obj_set_style_translate_x(parts.root, dx, 0);
 	lv_obj_set_style_translate_y(parts.root, dy, 0);
+	// A jump has a shadow under it: it stays on the floor while he is above it.
+	lv_obj_set_style_translate_y(parts.shadow, dy < 0 ? -dy : 0, 0);
 	// The ball and the find stand on the floor of the room, not on the animal:
 	// when it jumps, the furniture stays where it is. A child's own translate
 	// adds to its parent's, so cancelling it is exact.
@@ -1700,6 +1890,8 @@ static void start_animations(void) {
 	}
 	animating = true;
 	frame = 0;
+	blink_wait = 3;
+	fidget_wait = 9;
 	apply_frame();
 }
 
@@ -1709,6 +1901,7 @@ static void stop_animations(void) {
 	}
 	animating = false;
 	reaction = REACT_NONE;
+	blink_stop();
 	holding = false;
 	hold_paid = false;
 	hide_hold_meter();
@@ -1745,6 +1938,7 @@ static void advance_frame(void) {
 		}
 	}
 	apply_frame();
+	life_tick();
 }
 
 // ---------------------------------------------------------------------------
@@ -2812,16 +3006,18 @@ static void consume_events(void) {
 // timer except the Petting Mode meter, which needs to fill faster than that.
 // ---------------------------------------------------------------------------
 
-static void start_reaction(int what) {
+static void start_reaction_for(int what, int secs) {
 	if (!page_built) {
 		return;
 	}
 	reaction = what;
-	reaction_until = petwatch_now() + PET_REACTION_SECS;
+	reaction_until = petwatch_now() + secs;
 	show(parts.heart, what == REACT_HEART);
 	paint(); // the hearts are placed against the head as it is now
 	apply_frame();
 }
+
+static void start_reaction(int what) { start_reaction_for(what, PET_REACTION_SECS); }
 
 static void end_reaction(void) {
 	if (reaction == REACT_NONE) {
@@ -2831,6 +3027,86 @@ static void end_reaction(void) {
 	show(parts.heart, false);
 	apply_frame();
 }
+
+// ---------------------------------------------------------------------------
+// A little life
+//
+// Between the two breaths he does a few things nobody asked for. He blinks every
+// three to six seconds. When nobody is touching the page he fidgets every eight
+// to fourteen -- a hop, a lean to one side, a shake -- for two seconds. And while
+// he is feeding he dances (see apply_frame()). The dice are one small generator
+// and the seconds are the page's own tick, so nothing here asks the clock for
+// more than the page already does.
+//
+// The blink is the one thing quicker than the tick: it lasts a hundred and forty
+// milliseconds, so it has a timer of its own, made when the eyes shut and gone
+// when they open.
+// ---------------------------------------------------------------------------
+
+#define PET_BLINK_MS 140
+#define PET_FIDGET_SECS 2
+
+static int roll(int sides) {
+	dice = dice * 1664525u + 1013904223u;
+	return (int)((dice >> 16) % (uint32_t)sides);
+}
+
+static void blink_end_cb(lv_timer_t *timer) {
+	(void)timer;
+	blink_timer = NULL; // a one-shot: LVGL deletes it when this returns
+	if (page_built && gear.lids) {
+		gear.lids = false;
+		lv_obj_invalidate(parts.gear);
+	}
+}
+
+static void blink_stop(void) {
+	if (blink_timer) {
+		lv_timer_delete(blink_timer);
+		blink_timer = NULL;
+	}
+	gear.lids = false;
+}
+
+static void blink_start(void) {
+	if (!page_built || blink_timer || gear.eyes == GEAR_EYES_NONE) {
+		return; // a sleeper's eyes are shut already
+	}
+	blink_timer = lv_timer_create(blink_end_cb, PET_BLINK_MS, NULL);
+	if (!blink_timer) {
+		return; // no memory for it: no blink, rather than eyes that stay shut
+	}
+	lv_timer_set_repeat_count(blink_timer, 1);
+	gear.lids = true;
+	lv_obj_invalidate(parts.gear);
+}
+
+// He fidgets only when nobody is looking for anything else of him: awake, not
+// feeding (that is dance enough), no reaction under way, no finger down and no
+// sheet open over the card.
+static bool fidget_free(void) {
+	const bool sheet = box_visible || treat_visible || tap_visible || wardrobe_visible || customise_visible || (name_layer && !lv_obj_is_hidden(name_layer));
+	return reaction == REACT_NONE && !holding && !feeding_now && gear.eyes != GEAR_EYES_NONE && !sheet;
+}
+
+static void life_tick(void) {
+	if (!page_built) {
+		return;
+	}
+	if (--blink_wait <= 0) {
+		blink_start();
+		blink_wait = 3 + roll(4);
+	}
+	if (--fidget_wait <= 0) {
+		fidget_wait = 8 + roll(7);
+		if (fidget_free()) {
+			static const int moves[4] = {REACT_HOP, REACT_LEAN_L, REACT_LEAN_R, REACT_WAVE};
+			start_reaction_for(moves[roll(4)], PET_FIDGET_SECS);
+		}
+	}
+}
+
+bool petpage_blinking(void) { return page_built && gear.lids; }
 
 static void hide_hold_meter(void) {
 	for (int i = 0; i < 3; i++) {
