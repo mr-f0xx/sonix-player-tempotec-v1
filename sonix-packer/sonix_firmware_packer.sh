@@ -18,6 +18,14 @@
 #   v1.upt                     community firmware; see README before flashing
 #   v1_md5.txt                 its checksum, in TempoTec's own wording
 #
+# The stock update is the frame and only its rootfs is replaced. The kernel
+# chunks and their MD5 chain, ota_config.in, the ota_v0.ok marker and -- from
+# the V1 1.3 stock update on -- ota_v0/ota_compatibility.in go back exactly as
+# TempoTec shipped them, and ota_update.in keeps the stock layout with only the
+# rootfs size and MD5 rewritten. The kernel is never rebuilt or swapped: the
+# 1.3 kernel knows an SPI NAND chip (Zbit ZB35Q01CYIG) the 1.2 kernel does not,
+# so an image for a unit that came with 1.3 has to carry the 1.3 kernel.
+#
 # One player, one image. This fork of Sonix Player targets the TempoTec
 # Variations V1 and nothing else: the HiBy R1 and R3 Pro II builds the
 # upstream project carries are not part of this tree, and there is no board
@@ -237,6 +245,22 @@ build_image() {
 	7z x "$SOURCE_UPT" -o"$WORK_DIR" -y > /dev/null
 
 	[ -d "$OTA_DIR" ] || die "there is no ota_v0 folder inside the .upt: not a firmware of this kind."
+	[ -f "$OTA_DIR/ota_update.in" ] || die "there is no ota_v0/ota_update.in inside the .upt."
+
+	# The V1 1.3 stock update carries compatibility=<tag> in a file of its own
+	# beside ota_update.in; earlier ones have none. Nothing in the rootfs or the
+	# kernel reads it, so whatever does read it sits outside this image -- which
+	# is reason enough to hand it on untouched. It is checked again just before
+	# the image is written.
+	COMPAT_FILE="$OTA_DIR/ota_compatibility.in"
+	COMPAT_MD5=""
+	if [ -f "$COMPAT_FILE" ]; then
+		COMPAT_MD5="$(get_md5 "$COMPAT_FILE")"
+		COMPATIBILITY="$(tr -d '\r' < "$COMPAT_FILE" | sed -n 's/^compatibility=//p' | head -n 1)"
+		say "    compatibility marker: ${COMPATIBILITY:-unreadable} (kept as is)"
+	else
+		say "    no compatibility marker (stock updates before 1.3 have none)"
+	fi
 
 	say "    Joining the rootfs chunks..."
 	( cd "$OTA_DIR" && cat rootfs.squashfs.* ) > "$MERGED_SQUASHFS"
@@ -785,27 +809,38 @@ if [ \"\$boot_sel\" = \"logo:4\" ]; then boot_waited=0; while [ \$boot_waited -l
 	say "    rootfs.squashfs: $SIZE bytes, md5 $ORIGINAL_SUM"
 
 	step "[$MODEL_NAME] updating ota_update.in"
-	# The kernel is not touched, so its two lines are carried over exactly as they
-	# were: recomputing them from a file this script never writes would be a way of
+	# The kernel is not touched, so its two lines stay exactly as they were:
+	# recomputing them from a file this script never writes would be a way of
 	# getting them wrong.
 	X_SIZE="$(grep -A 3 'img_name=xImage' "$OTA_DIR/ota_update.in" | grep 'img_size' | cut -d= -f2 | tr -d '\r ')"
 	X_MD5="$(grep -A 3 'img_name=xImage' "$OTA_DIR/ota_update.in" | grep 'img_md5' | cut -d= -f2 | tr -d '\r ')"
 
 	[ -n "$X_SIZE" ] && [ -n "$X_MD5" ] || die "cannot read the kernel entry from ota_update.in."
 
-	cat > "$OTA_DIR/ota_update.in" <<-EOF
-	ota_version=0
-
-	img_type=kernel
-	img_name=xImage
-	img_size=$X_SIZE
-	img_md5=$X_MD5
-
-	img_type=rootfs
-	img_name=rootfs.squashfs
-	img_size=$SIZE
-	img_md5=$ORIGINAL_SUM
-	EOF
+	# Nor is anything else in the file: the version line, the kernel entry, the
+	# order, the blank lines -- the stock file ends on an empty line -- and the
+	# line endings are the stock file's. The rootfs entry's size and MD5 are
+	# the only two values written, in place, so the file reads exactly like the
+	# one TempoTec's own update carries.
+	UPDATE_IN="$OTA_DIR/ota_update.in"
+	if ! awk -v size="$SIZE" -v md5="$ORIGINAL_SUM" '
+		{
+			line = $0
+			cr = sub(/\r$/, "", line) ? "\r" : ""
+			eq = index(line, "=")
+			key = eq ? substr(line, 1, eq - 1) : line
+			if (key == "img_name") rootfs = (substr(line, eq + 1) == "rootfs.squashfs")
+			if (rootfs && key == "img_size") { print "img_size=" size cr; sizes++; next }
+			if (rootfs && key == "img_md5") { print "img_md5=" md5 cr; sums++; next }
+			print
+		}
+		END { if (sizes != 1 || sums != 1) exit 3 }
+	' "$UPDATE_IN" > "$UPDATE_IN.packer.tmp"; then
+		rm -f "$UPDATE_IN.packer.tmp"
+		die "ota_update.in has no single rootfs.squashfs entry with a size and an MD5."
+	fi
+	mv "$UPDATE_IN.packer.tmp" "$UPDATE_IN"
+	grep -q "^img_md5=$ORIGINAL_SUM" "$UPDATE_IN" || die "ota_update.in was not updated."
 
 	step "[$MODEL_NAME] splitting into chunks and building the md5 chain"
 	split -b 524288 -a 4 "$ROOTFS_NEW" "$OTA_DIR/temp_chunk_"
@@ -835,6 +870,11 @@ if [ \"\$boot_sel\" = \"logo:4\" ]; then boot_waited=0; while [ \$boot_waited -l
 	say "${YELLOW}###   FIRMWARE IMAGE        ###${NC}"
 	say "${YELLOW}###############################${NC}"
 	say ""
+
+	if [ -n "$COMPAT_MD5" ]; then
+		[ -f "$COMPAT_FILE" ] && [ "$(get_md5 "$COMPAT_FILE")" = "$COMPAT_MD5" ] ||
+			die "the stock ota_compatibility.in did not survive the repack."
+	fi
 
 	step "[$MODEL_NAME] writing $(basename "$OUTPUT_UPT")"
 	rm -f "$OUTPUT_UPT"
