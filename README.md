@@ -4,14 +4,6 @@ This repository is a community port of the original **[Sonix Player](https://git
 
 The firmware builder starts with an official V1 update package, replaces the stock music player and its interface with Sonix, then repackages the update as `v1.upt`.
 
-**Settings → System → About → TempoTec base version** shows only the official
-firmware release version (for example, `1.2` or `1.3`), read automatically from
-the stock firmware's product configuration during packaging.
-
-
-This is not an official TempoTec or HiBy release. **The port has been tested on physical TempoTec Variations V1 hardware and works perfectly on the tested device.** It targets the **TempoTec Variations V1 only**; compatibility with the V1-A or other players in the Variations family is not established.
-
-
 ## Previews
 
 Interface previews of the stock UI of Sonix, rendered at the V1's native 240 × 320 resolution. Click any picture to open it full size. (This is not the default font neither the color)
