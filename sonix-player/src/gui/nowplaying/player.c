@@ -445,13 +445,12 @@ static lv_obj_t *aam_menu_bar[3];
 
 static uint32_t album_tone; // the sleeve's colour, 0 when there is no sleeve
 
-// Whether the play/pause glyph and the played stretch of the progress bar
-// take that colour in every arrangement, and not only in the alternative
-// one. A setting of its own (Music > Display options), off unless it was
-// switched on: the page then follows the record instead of the theme, which
-// is a matter of taste and not a thing to visit on everybody. The two skip
-// glyphs are no part of it -- they are drawn in set_over_cover(), which this
-// never reaches, and keep the colour they have always had.
+// Whether the playback controls and the track's secondary details take that
+// colour in every arrangement, and not only in the alternative one. A setting
+// of its own (Music > Display options), off unless it was switched on: the page
+// then follows the record instead of the theme, which is a matter of taste and
+// not a thing to visit on everybody. The two skip glyphs are no part of it --
+// they are drawn in set_over_cover() and keep the colour they have always had.
 static bool cover_tint;
 
 static lv_obj_t *song_text_obj; // the title and artist, wherever they live now
@@ -1224,6 +1223,18 @@ static void set_over_cover(bool on) {
 			}
 		}
 	}
+	// The cover-tint option owns the artist and format/year line too. Apply
+	// this after the ordinary over-cover and palette rules so every route into
+	// this function (new artwork, layout change, or theme change) agrees.
+	if (cover_tint && album_tone) {
+		lv_color_t ink = aam_accent();
+		if (song_artist_label) {
+			lv_obj_set_style_text_color(song_artist_label, ink, 0);
+		}
+		if (format_label) {
+			lv_obj_set_style_text_color(format_label, ink, 0);
+		}
+	}
 
 	for (size_t i = 0; i < sizeof(icon_objs) / sizeof(icon_objs[0]); i++) {
 		if (!icon_objs[i]) {
@@ -1359,9 +1370,8 @@ static lv_color_t chrome_accent(void) {
 // drawn in. Its own answer and not chrome_accent()'s: the two have never been
 // the same colour on every palette -- Tokyo Night's bar keeps the theme
 // accent while its play glyph wears the deck's violet -- so the cover tint
-// needs a way to take the bar over that leaves that alone. The knob's white
-// ring and the unplayed stretch are set when the page is built and when the
-// theme changes, and are no part of this either way.
+// needs a way to take the bar over that leaves that alone. The unplayed
+// stretch follows the same tint at its usual translucent strength.
 static lv_color_t progress_tint(void) {
 	// Album Art Max is the record's page and not the theme's: there the sleeve's
 	// colour is the design, whether or not the cover tint is switched on for the
@@ -1385,6 +1395,17 @@ static void paint_progress_tint(void) {
 	lv_color_t tint = progress_tint();
 	lv_obj_set_style_bg_color(progress_slider, tint, LV_PART_INDICATOR);
 	lv_obj_set_style_bg_color(progress_slider, tint, LV_PART_KNOB);
+	if (!layout_aam_now && !layout_wave_now) {
+		bool tinted_rest = cover_tint && album_tone;
+		lv_color_t rest = tinted_rest ? tint
+			: theme_is_monochrome()
+				? theme_player_chrome_color(THEME_PLAYER_CHROME_PROGRESS_REST)
+				: lv_color_white();
+		lv_obj_set_style_bg_color(progress_slider, rest, LV_PART_MAIN);
+		lv_obj_set_style_bg_opa(progress_slider,
+			tinted_rest ? LV_OPA_30 : theme_is_monochrome() ? LV_OPA_COVER : LV_OPA_30,
+			LV_PART_MAIN);
+	}
 	if (layout_aam_now) {
 		// Album Art Max's band is read as a stretch of colour rather than as a
 		// line: the played part starts a step lighter at the first second and
@@ -1443,6 +1464,8 @@ static void paint_overflow_tint(void) {
 // glyph, the repeat/shuffle mode and the played stretch of the progress bar.
 // The ellipsis with them, whenever the accent is the sleeve's.
 static void paint_transport_tint(void) {
+	bool tinted = cover_tint && album_tone;
+	back_btn_cover_tint(tinted, tinted ? cover_mark() : theme()->accent);
 	if (play_btn_icon) {
 		lv_obj_set_style_image_recolor(play_btn_icon, chrome_accent(), 0);
 		lv_obj_set_style_image_recolor_opa(play_btn_icon, LV_OPA_COVER, 0);
@@ -5347,7 +5370,11 @@ static void update_fav_button(void) {
 	// competing with the cream title and playback accent; OLED's in its muted
 	// grey, for the same reason.
 	lv_color_t favorite_color;
-	if (layout_aam_now) {
+	if (cover_tint && album_tone) {
+		// The explicit cover-tint option wins over the palette and favourite
+		// yellow alike, in both the outline and filled states.
+		favorite_color = cover_mark();
+	} else if (layout_aam_now) {
 		// The sleeve's colour, as everything else on that page is: the star sits
 		// between two other marks drawn in it, and a grey one among them would
 		// read as the button being unavailable.
@@ -5674,9 +5701,10 @@ static void speed_btn_event_cb(lv_event_t *e) {
 // The icons are the white ARGB bitmaps generated from assets/icons/*.svg;
 // recolouring them is what marks the mode as active or not.
 static void update_repeat_button(void) {
-	// Active playback modes use the reference's dark orange. Shuffle/repeat
-	// when inactive has its own deep-brown role rather than the artist color.
-	lv_color_t active = chrome_accent();
+	// Active playback modes use the reference's dark orange, or explicitly
+	// the sleeve's colour while cover tint is on. Shuffle/repeat when inactive
+	// has its own deep-brown role rather than the artist color.
+	lv_color_t active = cover_tint && album_tone ? cover_mark() : chrome_accent();
 	lv_color_t inactive = (theme_is_monochrome() || theme_is_tokyo_night())
 							  ? theme_player_chrome_color(THEME_PLAYER_CHROME_SHUFFLE_IDLE)
 							  : lv_color_make(100, 100, 100);
@@ -6370,8 +6398,10 @@ void player_cover_tint_set(bool enabled) {
 
 	// The sleeve's colour is already at hand for whatever is on screen, so
 	// the switch shows at once, in the middle of a track: no cover is decoded
-	// again and nothing is laid out again. The glyphs and the bar are simply
-	// repainted in the other colour -- the sleeve's, or back to the theme's.
+	// again and nothing is laid out again. Repaint every owner of a local
+	// colour, both into the sleeve's palette and back into the theme's.
+	set_over_cover(chrome_over_cover);
+	update_fav_button();
 	paint_transport_tint();
 }
 
