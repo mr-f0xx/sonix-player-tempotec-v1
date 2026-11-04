@@ -3118,3 +3118,72 @@ text toast, including during the reward cooldown. The existing petting and
 once-daily grooming rules are unchanged. The headless page test checks the
 smile, pendant-free chain, playback transitions, and the visual petting
 feedback on the V1 renderer; the appearance should also be checked on device.
+
+## Built on the real stock firmware 1.3
+
+The stock image the build used until now was committed as "1.3" but was not:
+its `usr/resource/config.json` says product version 1.2, and its kernel is the
+earlier build. The official V1 1.3 OTA is now in `sonix-packer/firmware-input`
+as `v1.zip.part1` + `v1.zip.part2`, two byte-split pieces of one zip, and every
+build starts from it. Hashes and preparation steps are in
+[the firmware input README](sonix-packer/firmware-input/README.md).
+
+What 1.3 changes, from a file-by-file comparison of the two stock images:
+
+- **A compatibility marker.** `ota_v0/ota_compatibility.in`
+  (`compatibility=tempotec_v1_x1600_auto`) sits beside `ota_update.in`. The
+  earlier package has no such file. Nothing in the 1.3 rootfs or kernel reads
+  it, so whatever checks it sits outside the update. This is probably the
+  recovery/updater on units shipped with 1.3, but that cannot be inspected
+  from the OTA. An image built on the 1.2 package lacks the marker, which is
+  one plausible reason it did not work on 1.3.
+- **The kernel.** `#120` of 13 October 2026. Compared with the 1.2 kernel, the
+  only functional addition found is one more SPI NAND chip (Zbit
+  `ZB35Q01CYIG`). A unit built with that chip needs the 1.3 kernel, the second
+  plausible reason. The partition table comes from u-boot, not the kernel.
+- **The rootfs.** Rebuilt drivers, busybox, `sys_server`, `dmrd` (QPlay 3) and
+  the Bluetooth, USB and Wi-Fi scripts. The new script logic is gated on AIC8800
+  radios and the HiBy R1 (`/run/aic_*_power_gate`, `/run/r1_wireless_type`),
+  so it stays inactive on the Broadcom-based V1. Unchanged: the launcher
+  (`hiby_player.sh`), `S92_03_start_music_player`, `S11jpeg_display_shell`
+  (the boot-screen patch lands at the same line 16, report identical),
+  `S80_bt_init`, the LED script, `etc/ota_bin` and the recovery scripts.
+  `bluealsa`'s options and codecs are identical. Every `sys_server` command and
+  ALSA control Sonix uses is still there.
+
+The packer needed no change to install Sonix on 1.3. A local build on each
+base differs only by the stock differences and the stamped
+`base_build_version`. Changes made to build on the 1.3 base:
+
+- `prepare_v1_stock.sh` joins split archives: `NAME.part1, NAME.part2, ...` and
+  `NAME.001, NAME.002, ...`, in numeric order. A gap in the numbering is an
+  error rather than a silently short archive, and a folder walk opens each set
+  once. It prints the prepared `v1.upt`'s SHA-256.
+- The packer keeps every file of the stock package except the rootfs: the
+  kernel chunks and their chain, `ota_config.in`, `ota_v0.ok` and the
+  compatibility marker. It says which marker it carries over and checks the
+  marker is unchanged before writing the image. In `ota_update.in` only the
+  rootfs entry's size and MD5 are rewritten in place. The stock file's layout,
+  including the empty line it ends on (missing from the previous retyped
+  heredoc), is kept as is.
+- `verify_upt.sh` reports the OTA config, the compatibility marker and the
+  TempoTec product version. `--stock STOCK.upt` requires every package file
+  outside the rootfs to be byte-identical to the stock update's, and
+  `ota_update.in` to differ only in the rootfs size and MD5. The workflow runs
+  it on every image. The build report names the stock version, its SHA-256
+  and the marker, and says whether the image is a test build or a release.
+- Bluetooth finds the radio's rfkill switch by name, as 1.3's `bt_init` does
+  (`get_rfkill_index "bluetooth" "0"`), instead of always writing `rfkill0`. The
+  lowest-numbered switch whose name contains "bluetooth" wins, and `rfkill0`
+  is the fallback, so a V1 whose switch is `rfkill0` behaves exactly as before.
+
+Host tests: `make -C sonix-player/tests bluetooth basebuild stock-prepare`.
+Locally, the 1.3 OTA was prepared from its pieces, verified (kernel SHA-256
+`a598b189…f6230`, product version 1.3, marker present), packed with a stand-in
+player binary, and the result verified with `--sonix-v1 --stock`.
+
+**Still needs hardware:** this is a test build. Flash it on a V1 running stock
+1.3 (and, if possible, on one still on 1.2), and check that the update is
+accepted, that it boots to Sonix, and that Bluetooth, Wi-Fi, USB and the boot
+screens work. Also check that the official 1.3 `v1.upt` restores the stock
+firmware afterwards.

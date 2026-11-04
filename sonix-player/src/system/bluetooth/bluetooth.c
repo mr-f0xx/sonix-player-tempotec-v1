@@ -44,7 +44,7 @@
 #define BT_FIRMWARE_AW "BCM4343A1_001.002.009.0122.0538.hcd" // chipvendor 0x81
 #define BT_FIRMWARE_AP "BCM4343A1_001.002.009.1010.1030.hcd" // anything else
 #define BT_CHIPVENDOR "/sys/devices/platform/md_ingenic,mmc.0/mmc_host/mmc0/mmc0:0001/mmc0:0001:2/chipvendor"
-#define BT_RFKILL "/sys/class/rfkill/rfkill0/state"
+#define BT_RFKILL_CLASS "/sys/class/rfkill"
 
 #define BLUETOOTHD_BIN "/usr/libexec/bluetooth/bluetoothd"
 #define BLUEALSA_BIN "/usr/bin/bluealsa"
@@ -255,6 +255,56 @@ static bool write_file(const char *path, const char *text) {
 	ssize_t written = write(fd, text, strlen(text));
 	close(fd);
 	return written == (ssize_t)strlen(text);
+}
+
+// The radio's power switch, found by name the way the V1 1.3 firmware's own
+// scripts find it (bt_init: get_rfkill_index "bluetooth" "0"): the
+// lowest-numbered rfkill whose name says bluetooth, in any case, and rfkill0
+// -- where every earlier firmware wrote without looking -- when none does. By
+// name and not by type: the hci0 switch the kernel adds once a controller is
+// attached is of type bluetooth too, and switching that one parks the HCI
+// device rather than the chip. CLASS_DIR is a parameter for the host tests.
+static void rfkill_state_path(const char *class_dir, char *out, size_t size) {
+	long best = -1;
+	DIR *dir = opendir(class_dir);
+	if (dir) {
+		struct dirent *entry;
+		while ((entry = readdir(dir)) != NULL) {
+			const char *digits = entry->d_name + 6;
+			if (strncmp(entry->d_name, "rfkill", 6) != 0 || !isdigit((unsigned char)*digits)) {
+				continue;
+			}
+			char *end;
+			long index = strtol(digits, &end, 10);
+			if (*end != '\0' || index < 0 || (best >= 0 && index >= best)) {
+				continue;
+			}
+			char path[320];
+			char name[64];
+			snprintf(path, sizeof(path), "%s/%s/name", class_dir, entry->d_name);
+			if (!slurp(path, name, sizeof(name))) {
+				continue;
+			}
+			for (char *c = name; *c; c++) {
+				*c = (char)tolower((unsigned char)*c);
+			}
+			if (strstr(name, "bluetooth")) {
+				best = index;
+			}
+		}
+		closedir(dir);
+	}
+	snprintf(out, size, "%s/rfkill%ld/state", class_dir, best >= 0 ? best : 0L);
+}
+
+static void switch_radio(bool on) {
+	char path[320];
+	rfkill_state_path(BT_RFKILL_CLASS, path, sizeof(path));
+	if (write_file(path, on ? "1" : "0")) {
+		fprintf(stderr, "bluetooth: radio switch %s set %s\n", path, on ? "on" : "off");
+	} else {
+		fprintf(stderr, "bluetooth: could not set the radio switch %s %s\n", path, on ? "on" : "off");
+	}
 }
 
 // Copies a fixed-width field into another. By length rather than with %s: the
@@ -1013,7 +1063,7 @@ static bool ensure_transport(void) {
 		return true;
 	}
 
-	write_file(BT_RFKILL, "1");
+	switch_radio(true);
 	if (process_running("brcm_patchram_plus")) {
 		fprintf(stderr, "bluetooth: waiting for the existing HCI transport\n");
 	}
@@ -2775,7 +2825,7 @@ static void bring_stack_down(bool deliberate) {
 	if (deliberate) {
 		hci_down();
 		if (stop_process("brcm_patchram_plus")) {
-			write_file(BT_RFKILL, "0");
+			switch_radio(false);
 			fprintf(stderr, "bluetooth: radio off and the UART released\n");
 		} else {
 			fprintf(stderr, "bluetooth: brcm_patchram_plus is still running\n");
@@ -2798,7 +2848,7 @@ static void power_down_boot_stack(void) {
 	stop_process("bt-agent");
 	hci_down();
 	if (stop_process("brcm_patchram_plus")) {
-		write_file(BT_RFKILL, "0");
+		switch_radio(false);
 	}
 	fprintf(stderr, "bluetooth: the boot-time stack is down, about %ld KB back\n", freed);
 }

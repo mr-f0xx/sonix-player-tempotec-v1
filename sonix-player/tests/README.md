@@ -14,6 +14,7 @@ make -C sonix-player/tests bluetooth
 make -C sonix-player/tests btafh
 make -C sonix-player/tests wifi
 make -C sonix-player/tests basebuild
+make -C sonix-player/tests stock-prepare
 make -C sonix-player/tests peq-ui
 make -C sonix-player/tests quickpanel-layout
 make -C sonix-player/tests edge-lock
@@ -68,8 +69,14 @@ clears incoming and outgoing PCMs, transport state and media state.
 The AFH tests check channel maps and timing for link/frequency changes, retry of
 failed sends and clears, radio parks, refreshes and timer wrap. Fake HCI syscalls check the
 actual command packet, its hci0 binding and socket/bind/short-write failures.
-The Wi-Fi test covers the associated Wi-Fi worker, and `basebuild` uses the
-packer's tar-merge method against a fake stock init hook. The tests cannot prove
+The Bluetooth test also finds the radio's rfkill switch by name in a fake
+sysfs tree, the way the V1 1.3 firmware's `bt_init` does, falling back to
+`rfkill0`. The Wi-Fi test covers the associated Wi-Fi worker, and `basebuild`
+uses the packer's tar-merge method against a fake stock init hook.
+`stock-prepare` wraps a stand-in update the way the bundled 1.3 OTA is
+committed (byte-split zip pieces, numbered volumes, a folder) and checks that
+`prepare_v1_stock.sh` hands back exactly that file and refuses a set with a
+piece missing; it needs 7z and is skipped without it. The tests cannot prove
 that the radio accepts or uses the classification, that a stock script behaves
 the same on every firmware revision, or that receiver packet loss is fixed.
 

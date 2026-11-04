@@ -666,6 +666,13 @@ basebuild: $(BUILD)/test_sysinfo
 	python3 test_base_build.py
 	$(BUILD)/test_sysinfo
 
+# prepare_v1_stock.sh finding v1.upt in a split archive (v1.zip.part1 + .part2,
+# NAME.001 + NAME.002), a folder, a plain archive or a bare v1.upt, and refusing
+# a set with a piece missing. Plain Python plus 7z; skipped without 7z.
+.PHONY: stock-prepare
+stock-prepare:
+	python3 test_stock_prepare.py
+
 $(BUILD)/test_sysinfo: test_sysinfo.c $(ROOT)/src/system/device/sysinfo.c $(ROOT)/src/system/device/sysinfo.h
 	@mkdir -p $(BUILD)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -DHOST_BUILD -o $@ test_sysinfo.c $(ROOT)/src/system/device/sysinfo.c $(LDFLAGS) $(LDLIBS)

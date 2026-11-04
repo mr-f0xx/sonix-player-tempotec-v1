@@ -2,10 +2,16 @@
 # Structural validation for a HiByOS/TempoTec UPT. This cannot prove hardware
 # compatibility, but it catches corrupt ISO output, broken chunk/hash chains,
 # changed kernels, and a missing Sonix install before an artifact is published.
+#
+# --stock STOCK.upt compares the image with the stock update it was made from:
+# every file of the package except the rootfs payload -- the OTA config, the
+# compatibility marker newer stock packages carry, the kernel chunks and their
+# chain, the done-marker -- must be byte-for-byte the stock file, and
+# ota_update.in may differ only in the rootfs size and MD5.
 set -euo pipefail
 
 usage() {
-	echo "Usage: verify_upt.sh IMAGE.upt [--sonix-v1] [--kernel-sha256 HASH]" >&2
+	echo "Usage: verify_upt.sh IMAGE.upt [--sonix-v1] [--kernel-sha256 HASH] [--stock STOCK.upt]" >&2
 	exit 2
 }
 
@@ -14,6 +20,7 @@ UPT="$1"
 shift
 EXPECT_SONIX=false
 EXPECTED_KERNEL=""
+STOCK_UPT=""
 while [ "$#" -gt 0 ]; do
 	case "$1" in
 		--sonix-v1) EXPECT_SONIX=true ;;
@@ -22,16 +29,26 @@ while [ "$#" -gt 0 ]; do
 			[ "$#" -gt 0 ] || usage
 			EXPECTED_KERNEL="$1"
 			;;
+		--stock)
+			shift
+			[ "$#" -gt 0 ] || usage
+			STOCK_UPT="$1"
+			;;
 		*) usage ;;
 	esac
 	shift
 done
 
-for tool in 7z md5sum sha256sum awk sed grep find sort unsquashfs; do
+for tool in 7z md5sum sha256sum awk sed grep find sort cmp unsquashfs; do
 	command -v "$tool" >/dev/null 2>&1 || { echo "Error: $tool is required." >&2; exit 1; }
 done
 [ -f "$UPT" ] || { echo "Error: $UPT does not exist." >&2; exit 1; }
 UPT="$(cd "$(dirname "$UPT")" && pwd)/$(basename "$UPT")"
+if [ -n "$STOCK_UPT" ]; then
+	[ -f "$STOCK_UPT" ] || { echo "Error: $STOCK_UPT does not exist." >&2; exit 1; }
+	STOCK_UPT="$(cd "$(dirname "$STOCK_UPT")" && pwd)/$(basename "$STOCK_UPT")"
+fi
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 WORK="$(mktemp -d "${TMPDIR:-/tmp}/sonix-verify-upt.XXXXXX")"
 cleanup() { rm -rf "$WORK"; }
@@ -114,6 +131,80 @@ if [ -n "$EXPECTED_KERNEL" ] && [ "$KERNEL_SHA256" != "$EXPECTED_KERNEL" ]; then
 	exit 1
 fi
 printf 'Kernel SHA-256: %s\n' "$KERNEL_SHA256"
+
+# The OTA config at the root and, from the V1 1.3 stock package on, a
+# compatibility marker beside ota_update.in (compatibility=<tag>). Nothing in
+# the rootfs or the kernel reads the marker; it is there for whatever accepts
+# the update, so it is reported, checked for shape, and -- with --stock --
+# required to be the stock package's own file.
+if [ -f "$WORK/iso/ota_config.in" ]; then
+	printf 'OTA config: %s\n' "$(tr -d '\r' < "$WORK/iso/ota_config.in" | sed '/^$/d' | paste -sd ' ' -)"
+fi
+COMPAT_FILE="$OTA/ota_compatibility.in"
+if [ -f "$COMPAT_FILE" ]; then
+	COMPATIBILITY="$(tr -d '\r' < "$COMPAT_FILE" | sed -n 's/^compatibility=//p' | head -n 1)"
+	[[ "$COMPATIBILITY" =~ ^[A-Za-z0-9._-]+$ ]] || {
+		echo "Error: ota_v0/ota_compatibility.in carries no usable compatibility= line." >&2; exit 1;
+	}
+	printf 'Compatibility: %s\n' "$COMPATIBILITY"
+else
+	printf 'Compatibility: none (no ota_v0/ota_compatibility.in; packages before V1 1.3 have none)\n'
+fi
+
+# The firmware's own idea of its version, from the product entry of the stock
+# usr/resource/config.json, which the packer leaves in place.
+if command -v python3 >/dev/null 2>&1 && [ -f "$SCRIPT_DIR/extract_base_build.py" ]; then
+	if unsquashfs -cat "$WORK/rootfs.squashfs" usr/resource/config.json > "$WORK/config.json" 2>/dev/null; then
+		PRODUCT_VERSION="$(python3 "$SCRIPT_DIR/extract_base_build.py" "$WORK/config.json")"
+		printf 'TempoTec product version: %s\n' "${PRODUCT_VERSION:-unknown}"
+	else
+		printf 'TempoTec product version: unknown (no usr/resource/config.json)\n'
+	fi
+fi
+
+if [ -n "$STOCK_UPT" ]; then
+	7z x "$STOCK_UPT" -o"$WORK/stock" -y >/dev/null
+	[ -f "$WORK/stock/ota_v0/ota_update.in" ] || {
+		echo "Error: $STOCK_UPT has no ota_v0/ota_update.in." >&2; exit 1;
+	}
+	# Every file but the rootfs payload, which is the one part allowed to change.
+	package_files() {
+		(cd "$1" && find . -type f -print | sed 's|^\./||' | LC_ALL=C sort) |
+			grep -vE '^ota_v0/(rootfs\.squashfs\.[0-9]{4}\.[0-9a-fA-F]{32}|ota_md5_rootfs\.squashfs\.[0-9a-fA-F]{32}|ota_update\.in)$' || true
+	}
+	package_files "$WORK/stock" > "$WORK/stock.files"
+	package_files "$WORK/iso" > "$WORK/image.files"
+	if ! cmp -s "$WORK/stock.files" "$WORK/image.files"; then
+		echo "Error: the package files outside the rootfs differ from the stock update:" >&2
+		diff "$WORK/stock.files" "$WORK/image.files" | sed -n 's/^</  only in stock:/p; s/^>/  only in image:/p' >&2
+		exit 1
+	fi
+	while IFS= read -r file; do
+		cmp -s "$WORK/stock/$file" "$WORK/iso/$file" || {
+			echo "Error: $file differs from the stock update's." >&2; exit 1;
+		}
+	done < "$WORK/stock.files"
+
+	# The rootfs block's size and MD5 are the only values the packer writes;
+	# the version line, the kernel block, the order and the blank lines are the
+	# stock file's.
+	normalize_update() {
+		tr -d '\r' < "$1" | awk -F= '
+			$1 == "img_name" { rootfs = ($2 == "rootfs.squashfs") }
+			rootfs && ($1 == "img_size" || $1 == "img_md5") { print $1 "=<rootfs>"; next }
+			{ print }
+		'
+	}
+	normalize_update "$WORK/stock/ota_v0/ota_update.in" > "$WORK/stock.update"
+	normalize_update "$OTA/ota_update.in" > "$WORK/image.update"
+	if ! cmp -s "$WORK/stock.update" "$WORK/image.update"; then
+		echo "Error: ota_update.in differs from the stock layout beyond the rootfs size and MD5:" >&2
+		diff "$WORK/stock.update" "$WORK/image.update" >&2 || true
+		exit 1
+	fi
+	printf 'Verified against stock %s: %s package files byte-identical, ota_update.in differs only in the rootfs size and MD5.\n' \
+		"$(basename "$STOCK_UPT")" "$(wc -l < "$WORK/stock.files" | tr -d ' ')"
+fi
 
 if $EXPECT_SONIX; then
 	LISTING="$WORK/rootfs.list"

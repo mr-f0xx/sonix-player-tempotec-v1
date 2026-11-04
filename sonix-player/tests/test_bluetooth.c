@@ -229,6 +229,66 @@ static void test_alsa_template(void) {
 	assert(!ensure_alsa_conf_template(path)); /* missing parent is a failure */
 }
 
+static void make_rfkill(const char *root, const char *entry, const char *name) {
+	char path[256];
+	snprintf(path, sizeof(path), "%s/%s", root, entry);
+	assert(mkdir(path, 0755) == 0);
+	snprintf(path, sizeof(path), "%s/%s/name", root, entry);
+	FILE *f = fopen(path, "w");
+	assert(f && fputs(name, f) >= 0 && fclose(f) == 0);
+}
+
+static void drop_rfkill(const char *root, const char *entry) {
+	char path[256];
+	snprintf(path, sizeof(path), "%s/%s/name", root, entry);
+	assert(unlink(path) == 0);
+	snprintf(path, sizeof(path), "%s/%s", root, entry);
+	assert(rmdir(path) == 0);
+}
+
+static bool switch_is(const char *root, const char *entry) {
+	char path[320], expected[320];
+	rfkill_state_path(root, path, sizeof(path));
+	snprintf(expected, sizeof(expected), "%s/%s/state", root, entry);
+	return strcmp(path, expected) == 0;
+}
+
+static void test_rfkill_lookup(void) {
+	char dir[] = "/tmp/sonix-bt-rfkill-XXXXXX";
+	assert(mkdtemp(dir));
+
+	/* No switch at all, or none named for Bluetooth: rfkill0, where every
+	 * firmware before 1.3 had the radio and where its bt_init falls back. */
+	assert(switch_is(dir, "rfkill0"));
+	make_rfkill(dir, "rfkill0", "phy0\n");
+	assert(switch_is(dir, "rfkill0"));
+
+	/* The radio's own switch is found by name, wherever it was numbered;
+	 * hci0's switch is of type bluetooth too, but is not the radio. */
+	make_rfkill(dir, "rfkill1", "hci0\n");
+	make_rfkill(dir, "rfkill2", "bluetooth\n");
+	assert(switch_is(dir, "rfkill2"));
+
+	/* The lowest number wins; the match is case-insensitive, by numbers and
+	 * not by name order (rfkill10 sorts before rfkill2). */
+	make_rfkill(dir, "rfkill10", "BT_Bluetooth\n");
+	assert(switch_is(dir, "rfkill2"));
+	drop_rfkill(dir, "rfkill2");
+	assert(switch_is(dir, "rfkill10"));
+
+	/* Names that only look like a switch are not one. */
+	make_rfkill(dir, "rfkillx", "bluetooth\n");
+	make_rfkill(dir, "rfkill3x", "bluetooth\n");
+	assert(switch_is(dir, "rfkill10"));
+
+	drop_rfkill(dir, "rfkill0");
+	drop_rfkill(dir, "rfkill1");
+	drop_rfkill(dir, "rfkill10");
+	drop_rfkill(dir, "rfkillx");
+	drop_rfkill(dir, "rfkill3x");
+	assert(rmdir(dir) == 0);
+}
+
 static void test_boot_cleanup_queue(void) {
 	worker_running = true;
 	g_enabled = false;
@@ -261,7 +321,8 @@ int main(void) {
 	test_startup_waits();
 	test_process_matching();
 	test_alsa_template();
+	test_rfkill_lookup();
 	test_boot_cleanup_queue();
-	printf("PASS bluetooth (A2DP directions, startup, ALSA template and boot cleanup)\n");
+	printf("PASS bluetooth (A2DP directions, startup, ALSA template, radio switch and boot cleanup)\n");
 	return 0;
 }
