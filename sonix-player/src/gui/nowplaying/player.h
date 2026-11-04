@@ -81,6 +81,11 @@ typedef enum {
 	PLAYER_LAYOUT_ALBUM_ART_MAX = 5, // the sleeve over the screen, the media controls traded for it
 } player_layout_t;
 
+// In custom layouts, replace the format line with the tagged recording year
+// when one is available. Standard and tracks without a year keep their format.
+bool player_recording_year_get(void);
+void player_recording_year_set(bool enabled);
+
 player_layout_t player_layout_get(void);
 void player_layout_set(player_layout_t layout);
 
