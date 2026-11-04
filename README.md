@@ -195,6 +195,7 @@ Showcase of **OLED** appearance: true black backgrounds with white as the accent
   - [Tokyo Night theme](#tokyo-night-theme)
   - [Ember theme](#ember-theme)
   - [OLED theme](#oled-theme)
+- [Music pet](#music-pet)
 - [Build a firmware image](#build-a-firmware-image)
 - [Install or restore firmware](#install-or-restore-firmware)
 - [Streaming credentials](#streaming-credentials)
@@ -238,6 +239,27 @@ Rounded screen corners are optional (Settings → Appearance → Rounded corners
 The battery is looked after at both ends. At **5 %** the player says so — a red card, and the panel comes back up for it if it was dark — and at **1 %** it switches itself off the ordinary way, position written and card unmounted, instead of letting the cell drop out from under it; below 10 % it also stays out of standby, because a sleeping player cannot watch its own gauge. A player that was **switched off and is then put on a charger** comes up on a battery screen instead of the library: the level, the percentage and what the charger is doing, going dark after ten seconds, with a **press** of the power button to bring it back and a **hold** to start the player after all.
 
 See [FEATURES.md](FEATURES.md) for a longer feature list. Streaming services also require valid credentials and may depend on third-party service availability.
+
+## Music pet
+
+Open **More → Pet** to meet a small Pikachu that is fed by the music you listen to.
+
+<p align="center">
+  <img src="screenshots/pet.png" width="240" alt="Pet page on the V1: Pikachu named Pikachu, sprout stage, with its meters, Musical Notes, daily listening goal and streak">
+</p>
+
+How it works:
+
+- **Feeding:** the pet grows from listening to something it can actually hear: a local track, a stream, internet radio, or a phone over Bluetooth, at a volume of 10 % or more. Paused or silent playback feeds nothing.
+- **Stages:** there is no egg. Pikachu is there from the first minute and grows through four stages: hatchling, child, teen and adult.
+- **Meters:** the card shows a heart meter for the pet's mood, an energy meter, and its Musical Notes total. Below them, a line says whether it is hearing music.
+- **Daily goal and streak:** a 15-minute daily goal builds a streak. A bought streak freeze covers one missed day.
+- **Musical Notes:** the pet earns notes for the minutes it hears, plus bonuses for listening late, finishing an album, five genres in a day, and half an hour without a pause. Spend them in the wardrobe on hats, headphones, a scarf, a crown, room themes and streak freezes.
+- **Character:** after about a month of listening, the genres you play give it a character. Pop and dance make it Upbeat, jazz and classical make it Calm, and indie, alternative and metal make it Curious.
+- **Tap-along:** once a day it offers a sixteen-beat tap-along using the metronome.
+- **Naming:** it starts as Pikachu. Use the pencil in the corner to rename it.
+
+The full rules are in [FEATURES.md](FEATURES.md).
 
 ## Install or restore firmware
 
