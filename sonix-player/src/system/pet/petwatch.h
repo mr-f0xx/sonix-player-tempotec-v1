@@ -92,19 +92,13 @@ bool petwatch_fortune_pay(void);
 // The notes it paid, 0 when the hour has been used.
 int petwatch_treat_finish(int hits);
 
-// The player's volume, as the last tick read it. The page wears it: a turned
-// up level has wide eyes, a quiet one rests.
-int petwatch_volume(void);
-
 // True while the current listening session has passed PET_FOCUS_SECS without a
 // pause, a mute or a skip. The page uses it for its line; the achievement is
 // awarded by the watcher.
 bool petwatch_focus(void);
 
-// The owner's choices. `species` is one of the three animals, or NONE to clear
-// it (which puts the chooser back); the name is written straight to the
-// settings, trimmed, and an empty one restores the default. Both save.
-bool petwatch_set_species(pet_species_t species);
+// The owner's choice: the name is written straight to the settings, trimmed,
+// and an empty one restores the default.
 bool petwatch_set_name(const char *name);
 
 // The month's listening, as the page and the game read it: the temperament the

@@ -32,6 +32,7 @@
 #include "src/system/tagmanager/artsearch.h"
 #include "src/gui/pet/petpage.h"
 #include "src/gui/pet/peticon.h"
+#include "src/gui/pet/pikachu.h"
 #include "src/gui/shell/settingsrow.h"
 #include "src/gui/shell/gridpage.h"
 #include "src/system/playback/device_state.h"
@@ -173,7 +174,6 @@ int metronomeclick_beat_index(void) { return click_last; }
  * creature that has heard music and is being looked at. */
 static pet_state_t pet_state;
 static bool pet_listening;
-static int pet_volume = 60; // what the page thinks the player is turned up to
 static pet_genre_look_t pet_look; // and the accessory the tags are asking for
 
 const pet_state_t *petwatch_state(void) { return &pet_state; }
@@ -189,7 +189,6 @@ void petwatch_track_title(char *out, size_t out_size) {
 }
 bool petwatch_pet_now(void) { return pet_pet(&pet_state, petwatch_now()); }
 bool petwatch_hold(void) { return pet_hold(&pet_state); }
-int petwatch_volume(void) { return pet_volume; }
 petwatch_box_t petwatch_box(void) {
 	petwatch_box_t box = {0};
 	box.fortune_id = pet_fortune(&pet_state, pet_day_now(petwatch_now()));
@@ -211,7 +210,6 @@ pet_vibe_t petwatch_vibe(void) { return PET_VIBE_NEUTRAL; }
 bool petwatch_focus(void) { return false; }
 bool petwatch_buy(pet_item_t item) { return pet_buy(&pet_state, item); }
 bool petwatch_wear(pet_item_t item) { return pet_wear(&pet_state, item); }
-bool petwatch_set_species(pet_species_t species) { return pet_set_species(&pet_state, species); }
 bool petwatch_set_name(const char *name) {
 	pet_set_name(name);
 	return true;
@@ -492,8 +490,7 @@ static void check_within_panel(lv_obj_t *obj, gui_config_t *cfg, const char *wha
 	check_within_panel_in(obj, cfg, what, false);
 }
 
-static void dump_snapshot(lv_obj_t *screen, const char *tag) {
-	const char *prefix = getenv("SONIX_PAGE_SNAPSHOTS");
+static void dump_snapshot_to(const char *prefix, lv_obj_t *screen, const char *tag) {
 	if (!prefix || !prefix[0]) {
 		return;
 	}
@@ -514,6 +511,304 @@ static void dump_snapshot(lv_obj_t *screen, const char *tag) {
 	}
 	assert(fclose(file) == 0);
 	lv_draw_buf_destroy(shot);
+}
+
+static void dump_snapshot(lv_obj_t *screen, const char *tag) { dump_snapshot_to(getenv("SONIX_PAGE_SNAPSHOTS"), screen, tag); }
+
+/* ---- the pet's picture, read back off the screen -------------------------- */
+
+/* The animal is one picture drawn 1:1, and what he wears and feels is cells of
+ * the same grid drawn over it -- so the screen can be asked about all of it:
+ * where the picture is, how big a cell came out, and what colour a given cell
+ * is. */
+typedef struct {
+	lv_draw_buf_t *shot; /* the whole screen, as it is now */
+	lv_area_t at;		 /* where the picture is on it */
+	int k;				 /* pixels a cell is drawn at */
+} pet_view_t;
+
+static pet_view_t pet_view_take(void) {
+	lv_obj_t *creature = petpage_creature();
+	assert(creature);
+	/* A step he has just taken moves the picture: where it is is read after the
+	 * layout has caught up with it, not before. */
+	lv_obj_update_layout(petpage_screen);
+	pet_view_t view = {0};
+	for (uint32_t i = 0; i < lv_obj_get_child_count(creature) && !view.k; i++) {
+		lv_obj_t *child = lv_obj_get_child(creature, i);
+		if (!lv_obj_has_class(child, &lv_image_class)) {
+			continue;
+		}
+		const void *src = lv_image_get_src(child);
+		view.k = src == &pikachu_2x ? 2 : src == &pikachu_3x ? 3 : 0;
+		if (view.k) {
+			lv_obj_get_coords(child, &view.at);
+		}
+	}
+	assert(view.k); /* the picture is on the page */
+	view.shot = lv_snapshot_take(petpage_screen, LV_COLOR_FORMAT_RGB888);
+	assert(view.shot);
+	return view;
+}
+
+static void pet_view_free(pet_view_t *view) {
+	lv_draw_buf_destroy(view->shot);
+	view->shot = NULL;
+}
+
+static uint32_t pet_view_pixel(const pet_view_t *view, int x, int y) {
+	assert(x >= 0 && y >= 0 && x < (int)view->shot->header.w && y < (int)view->shot->header.h);
+	const uint8_t *px = view->shot->data + (size_t)y * view->shot->header.stride + (size_t)x * 3;
+	return (uint32_t)px[2] << 16 | (uint32_t)px[1] << 8 | px[0]; /* stored blue first */
+}
+
+/* One cell of the picture, read from its middle. */
+static uint32_t pet_view_cell(const pet_view_t *view, int col, int row) {
+	return pet_view_pixel(view, view->at.x1 + col * view->k + view->k / 2, view->at.y1 + row * view->k + view->k / 2);
+}
+
+/* The black tip of the far ear stands above the sky, on the card, and the
+ * picture's black is about as light as a dark card, so the ear looked cut off.
+ * At the size that reaches up there, on a dark theme, its cells are drawn in
+ * true black, which is darker than the card (and are the picture's black in the
+ * picture): these are the cells, and the black. */
+#define PET_TIP_BLACK 0x000000
+static bool pet_tip_cell(int col, int row) {
+	static const char *const tip[] = {"......##", "....####", "..######", ".#...###", "#....##."};
+	return col >= 29 && col < 37 && row >= 0 && row < 5 && tip[row][col - 29] == '#';
+}
+
+/* Every pixel the picture says is solid is on the screen in exactly its colour:
+ * not near it, not blended with a neighbour, not a pixel to one side. LVGL's own
+ * scaler fails all three, which is why the picture is stored at the two sizes
+ * it is drawn at and is never scaled at run time. */
+static void check_pet_picture(const pet_view_t *view, const lv_image_dsc_t *picture) {
+	const int w = (int)picture->header.w;
+	const int h = (int)picture->header.h;
+	assert(view->at.x2 - view->at.x1 + 1 == w);
+	assert(view->at.y2 - view->at.y1 + 1 == h);
+	int solid = 0;
+	for (int y = 0; y < h; y++) {
+		for (int x = 0; x < w; x++) {
+			const uint8_t *px = picture->data + (size_t)y * picture->header.stride + (size_t)x * 4; /* B G R A */
+			if (px[3] != 0xFF) {
+				continue; /* see-through: the card shows */
+			}
+			uint32_t want = (uint32_t)px[2] << 16 | (uint32_t)px[1] << 8 | px[0];
+			if (view->k == 3 && pet_tip_cell(x / 3, y / 3)) {
+				assert(want == PIKACHU_INK); /* the tip is black in the picture */
+				if (theme_is_dark()) {
+					want = PET_TIP_BLACK;
+				}
+			}
+			const uint32_t got = pet_view_pixel(view, view->at.x1 + x, view->at.y1 + y);
+			if (got != want) {
+				printf("FAIL pet picture %dx%d: pixel (%d,%d) is %06X, the picture says %06X\n", w, h, x, y,
+					   (unsigned)got, (unsigned)want);
+			}
+			assert(got == want);
+			solid++;
+		}
+	}
+	assert(solid > 1000); /* there was a picture to compare */
+}
+
+/* The wallet's note stands in the card's top corner, and once the animal is
+ * grown its head reaches up under it: over the right of the gap between the
+ * ears. Its pixels are the only light grey in a window above the head, so they
+ * can be found without knowing where the page put it, and then looked for again
+ * under every mood and garment. */
+#define PET_NOTE_MAX 96
+typedef struct {
+	int n;
+	int x[PET_NOTE_MAX], y[PET_NOTE_MAX];
+	uint32_t rgb[PET_NOTE_MAX];
+} pet_note_t;
+
+static bool pet_is_light_grey(uint32_t rgb) {
+	const int r = (int)(rgb >> 16 & 255), g = (int)(rgb >> 8 & 255), b = (int)(rgb & 255);
+	return r > 110 && (r > g ? r - g : g - r) < 30 && (g > b ? g - b : b - g) < 30;
+}
+
+static pet_note_t pet_note_find(const pet_view_t *view) {
+	pet_note_t note = {0};
+	const int k = view->k;
+	for (int y = view->at.y1 - 2 * k; y < view->at.y1 + 4 * k; y++) {
+		for (int x = view->at.x1 + 22 * k; x < view->at.x1 + 30 * k; x++) {
+			const uint32_t rgb = pet_view_pixel(view, x, y);
+			if (pet_is_light_grey(rgb)) {
+				assert(note.n < PET_NOTE_MAX);
+				note.x[note.n] = x;
+				note.y[note.n] = y;
+				note.rgb[note.n] = rgb;
+				note.n++;
+			}
+		}
+	}
+	assert(note.n >= 20); /* the note is up there */
+	return note;
+}
+
+static void pet_note_whole(const pet_view_t *view, const pet_note_t *note, const char *what) {
+	for (int i = 0; i < note->n; i++) {
+		const uint32_t got = pet_view_pixel(view, note->x[i], note->y[i]);
+		if (got != note->rgb[i]) {
+			printf("FAIL %s covers the wallet's note: pixel (%d,%d) is %06X, was %06X\n", what, note->x[i], note->y[i],
+				   (unsigned)got, (unsigned)note->rgb[i]);
+		}
+		assert(got == note->rgb[i]);
+	}
+}
+
+/* ---- the route behind the animal, read back off the screen ----------------- */
+
+/* The scenery is drawn in three-pixel cells from its own corner, so what it is
+ * showing -- a sun, a moon, a lamp, a grey sky -- can be asked of the cell each
+ * stands on. A negative column counts from the right edge, as the page's own do. */
+static uint32_t pet_scene_cell(const pet_view_t *view, int col, int row) {
+	lv_obj_t *scenery = petpage_scenery();
+	assert(scenery);
+	lv_area_t at;
+	lv_obj_get_coords(scenery, &at);
+	const int cols = (lv_obj_get_width(scenery) + 2) / 3;
+	return pet_view_pixel(view, at.x1 + (col < 0 ? cols + col : col) * 3 + 1, at.y1 + row * 3 + 1);
+}
+
+/* One cell of the Poke Ball, read from its middle. The ball is seven cells of
+ * ball under three rows that have room for a sparkle at its shoulder. */
+static uint32_t pet_ball_cell(const pet_view_t *view, int col, int row) {
+	lv_obj_t *ball = petpage_box();
+	assert(ball);
+	lv_area_t at;
+	lv_obj_get_coords(ball, &at);
+	return pet_view_pixel(view, at.x1 + col * 3 + 1, at.y1 + row * 3 + 1);
+}
+
+static int pet_luma(uint32_t rgb) {
+	return (int)((rgb >> 16 & 255) * 30 + (rgb >> 8 & 255) * 59 + (rgb & 255) * 11) / 100;
+}
+
+#define PET_TEST_REACTION_SECS 4 /* longer than any reaction lasts */
+
+/* One second of the page's life: the pet clock moves on, the page's timer fires,
+ * and a blink it started is let out again, so that what the screen shows is the
+ * open eyes of that second. */
+static void pet_second(void) {
+	pet_now++;
+	lv_tick_inc(1000);
+	lv_timer_handler();
+	if (petpage_blinking()) {
+		lv_tick_inc(200);
+		lv_timer_handler();
+	}
+	assert(!petpage_blinking());
+}
+
+/* Lets whatever he is doing of his own accord come to an end: a fidget is over
+ * after two seconds, and he is breathing again where he stands. (The next one is
+ * ten seconds off, so a few seconds are enough.) */
+static void pet_settle(void) {
+	pet_now += PET_TEST_REACTION_SECS;
+	pet_second();
+	lv_obj_t *creature = petpage_creature();
+	assert(lv_obj_get_style_translate_x(creature, 0) == 0 || petpage_blinking());
+}
+
+/* Lets the page run in tenths of a second until his eyes shut. */
+static void pet_wait_for_blink(void) {
+	bool blinked = false;
+	for (int tenth = 0; tenth < 100 && !blinked; tenth++) {
+		pet_now += tenth % 10 == 9;
+		lv_tick_inc(100);
+		lv_timer_handler();
+		blinked = petpage_blinking();
+	}
+	assert(blinked);
+}
+
+#define PET_MOUTH_DARK 0x5A1C14
+#define PET_TONGUE_PINK 0xF0877A
+#define PET_SPARK_YELLOW 0xFFF27A
+#define PET_LENS_FRAME 0x22282C
+
+/* The face of a pet that is feeding, in whichever of the two frames it is on:
+ * wide round eyes with a glint each (or, in shades, the frame of the lens where
+ * the wide eye ends), and a mouth that is open wide on one frame and narrow on
+ * the other -- or narrow on both, under a scarf, a collar or a chain. Returns
+ * whether the mouth was wide. */
+static bool check_feeding_face(const pet_view_t *view, bool shades, bool narrow_only) {
+	if (shades) {
+		assert(pet_view_cell(view, 19, 13) == PET_LENS_FRAME);
+		assert(pet_view_cell(view, 24, 13) == PET_LENS_FRAME);
+	} else {
+		assert(pet_view_cell(view, 19, 13) == PIKACHU_INK);	  /* the edge of a wide eye */
+		assert(pet_view_cell(view, 24, 13) == PIKACHU_INK);	  /* and of the other */
+		assert(pet_view_cell(view, 16, 12) == PIKACHU_WHITE); /* a glint at the top left of each */
+		assert(pet_view_cell(view, 25, 12) == PIKACHU_WHITE);
+		assert(pet_view_cell(view, 17, 11) == PIKACHU_INK); /* and the eye is round: a row above the old one */
+	}
+	const bool wide = pet_view_cell(view, 21, 19) == PET_MOUTH_DARK;
+	if (wide) {
+		assert(!narrow_only);
+		assert(pet_view_cell(view, 21, 21) == PET_TONGUE_PINK); /* the tongue, two rows down */
+		assert(pet_view_cell(view, 21, 22) == PIKACHU_INK);		/* and the lip under it */
+	} else {
+		assert(pet_view_cell(view, 21, 19) == PET_TONGUE_PINK); /* the narrow mouth is all tongue */
+		if (!narrow_only) {
+			assert(pet_view_cell(view, 21, 21) == PIKACHU_YELLOW); /* and is gone two rows down */
+		}
+	}
+	return wide;
+}
+
+/* Opens the page afresh, checks it fits the panel and takes a snapshot of it
+ * under `tag-suffix`; the caller reads cells off the view and frees it. */
+static pet_view_t shoot_pet(gui_config_t *cfg, const char *tag, const char *suffix) {
+	petpage_open();
+	lv_obj_update_layout(petpage_screen);
+	check_within_panel(petpage_screen, cfg, suffix);
+	char name[96];
+	snprintf(name, sizeof(name), "%s-%s", tag, suffix);
+	dump_snapshot(petpage_screen, name);
+	return pet_view_take();
+}
+
+/* The same page with the animal grown, which is the size that stands tallest on
+ * the card and reaches up out of the sky: a snapshot of it under whatever sky
+ * the caller has set up. */
+static void dump_grown(const char *tag, const char *suffix) {
+	char name[96];
+	snprintf(name, sizeof(name), "%s-adult-%s", tag, suffix);
+	pet_state.xp_secs = 15 * 60 * 60;
+	petpage_open();
+	lv_obj_update_layout(petpage_screen);
+	dump_snapshot(petpage_screen, name);
+	pet_state.xp_secs = 0;
+	petpage_open();
+	lv_obj_update_layout(petpage_screen);
+}
+
+/* A film of the animal, for whoever wants to see him move rather than read his
+ * cells. With SONIX_PAGE_FILM=<prefix> the page runs for `seconds` of its own
+ * time (the pet clock goes on a second at a time with it) and the screen is
+ * written out every tenth of a second, as <prefix>-<what>-NNN.ppm. Nothing is
+ * asserted here: the cells are read by the other tests. */
+static void film_pet(const char *what, int seconds) {
+	const char *prefix = getenv("SONIX_PAGE_FILM");
+	if (!prefix || !prefix[0]) {
+		return;
+	}
+	for (int step = 0; step < seconds * 10; step++) {
+		lv_tick_inc(100);
+		if (step % 10 == 9) {
+			pet_now++;
+		}
+		lv_timer_handler();
+		lv_obj_update_layout(petpage_screen);
+		char name[96];
+		snprintf(name, sizeof(name), "%s-%03d", what, step);
+		dump_snapshot_to(prefix, petpage_screen, name);
+	}
 }
 
 /* ---- reading back what a page writes ------------------------------------- */
@@ -550,8 +845,7 @@ static void check_strings(const char *language_dir) {
 		"pet_stage_teen", "pet_stage_adult", "pet_energy", "pet_today", "pet_streak",
 		"pet_streak_none", "pet_feeding", "pet_feeding_music", "pet_feed_me",
 		"pet_asleep", "pet_pet", "pet_purr", "pet_cooldown", "pet_goal_toast",
-		"pet_stage_toast", "pet_customise", "pet_choose_pet", "pet_species",
-		"pet_species_cat", "pet_species_dog", "pet_species_fish",
+		"pet_stage_toast", "pet_customise",
 		"pet_mood_dizzy", "pet_temperament_none", "pet_temperament_upbeat",
 		"pet_temperament_calm", "pet_temperament_curious", "pet_dizzy_hint",
 		"pet_dizzy_toast", "pet_drop_toast", "pet_forage_toast", "pet_tap_game",
@@ -762,6 +1056,18 @@ static void check_more_page(gui_config_t *cfg, const char *tag) {
 	if (tiles && entries > 9) {
 		assert(scrolls);
 	}
+
+	// The pet's own entry is below the fold on both shapes, so a second
+	// snapshot has it in view; the page goes back to the top afterwards.
+	lv_obj_t *pet_row = entry_with_label(shown, tr("pet"));
+	assert(pet_row);
+	lv_obj_scroll_to_view(pet_row, LV_ANIM_OFF);
+	lv_obj_update_layout(morepage_screen);
+	char pet_tag[96];
+	snprintf(pet_tag, sizeof(pet_tag), "%s-pet", tag);
+	dump_snapshot(morepage_screen, pet_tag);
+	lv_obj_scroll_to_y(shown, 0, LV_ANIM_OFF);
+	lv_obj_update_layout(morepage_screen);
 }
 
 /* The two libraries share one slot on the home screen. When Books takes it,
@@ -1092,36 +1398,21 @@ static void find_corner_buttons(lv_obj_t *screen, lv_obj_t **outer, lv_obj_t **i
 }
 
 static void check_pet_page(gui_config_t *cfg, const char *tag) {
-	// A pet nobody has chosen yet opens on the chooser, with three notes in the
-	// wallet: enough to dress it and leave something for the wardrobe.
+	// There is one pet, and it is there from the first minute: nothing stands in
+	// front of it, and the wallet holds enough to dress it and leave something
+	// for the wardrobe.
 	pet_state.notes = 500;
-	pet_state.species = PET_SPECIES_NONE;
 	petpage_open();
 	assert(lv_screen_active() == petpage_screen);
 	lv_obj_update_layout(petpage_screen);
-	check_within_panel(petpage_screen, cfg, "Pet chooser");
-	char chooser_tag[64];
-	snprintf(chooser_tag, sizeof(chooser_tag), "%s-chooser", tag);
-	dump_snapshot(petpage_screen, chooser_tag);
-
-	// The chooser is the first thing a new pet shows: the three animals, and
-	// the name it will answer to.
-	lv_obj_t *chooser_title = find_label(petpage_screen, tr("pet_customise"));
-	assert(chooser_title);
-	assert(lv_obj_is_visible(chooser_title));
-	check_clear_of_back_button(chooser_title, cfg, "Pet chooser heading");
-	assert(find_label(petpage_screen, tr("pet_species_cat")));
-	assert(find_label(petpage_screen, tr("pet_species_dog")));
-	assert(find_label(petpage_screen, tr("pet_species_fish")));
-	assert(find_label(petpage_screen, tr("name")));
-
-	// Choosing one closes the sheet and the page is that animal.
-	press_key(petpage_screen, tr("pet_species_cat"));
-	assert(pet_species(&pet_state) == PET_SPECIES_CAT);
-	assert(!lv_obj_is_visible(chooser_title));
-	lv_obj_update_layout(petpage_screen);
 	check_within_panel(petpage_screen, cfg, "Pet");
 	dump_snapshot(petpage_screen, tag);
+
+	// The sheet with its name is behind the pencil, not in front of the page.
+	lv_obj_t *sheet_title = find_label(petpage_screen, tr("pet_customise"));
+	assert(sheet_title);
+	assert(!lv_obj_is_visible(sheet_title));
+	assert(find_label(petpage_screen, tr("name")));
 
 	char name[40];
 	pet_name(name, sizeof(name));
@@ -1133,19 +1424,164 @@ static void check_pet_page(gui_config_t *cfg, const char *tag) {
 	assert(find_label(petpage_screen, "80")); // and the energy
 	assert(find_label(petpage_screen, tr("pet_feed_me")));
 
-	// The dog, for its ears. They are the one part of the drawing that has been
-	// argued about more than any other, and the suite only ever looked at the
-	// cat -- so a pair of ears could go back to being a bear's and nothing
-	// would notice.
-	pet_state.species = PET_SPECIES_DOG;
-	petpage_open();
-	assert(pet_species(&pet_state) == PET_SPECIES_DOG);
-	lv_obj_update_layout(petpage_screen);
-	check_within_panel(petpage_screen, cfg, "Pet (dog)");
-	char dog_tag[64];
-	snprintf(dog_tag, sizeof(dog_tag), "%s-dog", tag);
-	dump_snapshot(petpage_screen, dog_tag);
-	pet_state.species = PET_SPECIES_CAT;
+	// The picture is on the page exactly as it is stored: a hatchling at two
+	// pixels a cell, and a grown pet at three.
+	pet_view_t view = pet_view_take();
+	assert(view.k == 2);
+	check_pet_picture(&view, &pikachu_2x);
+
+	// The route behind it, on a summer afternoon in the meadow: a blue sky with
+	// the sun in it, mown grass, the platform under the feet, and the Poke Ball
+	// with a gold button and a sparkle because today's fortune is waiting in it.
+	assert(pet_scene_cell(&view, 40, 7) == 0x3F8FE6);  // the top band of the sky
+	assert(pet_scene_cell(&view, -14, 8) == 0xFFD93D); // the sun
+	assert(pet_scene_cell(&view, 0, 21) == 0x7BCB57);  // the first row of grass
+	assert(pet_scene_cell(&view, 27, 33) == 0xB6EC86); // the platform
+	assert(pet_ball_cell(&view, 2, 4) == 0xE5352B);	   // the red of the ball
+	assert(pet_ball_cell(&view, 3, 6) == 0xE8C15A);	   // its button, gold
+	assert(pet_ball_cell(&view, 7, 1) == 0xE8C15A);	   // and the sparkle
+	pet_view_free(&view);
+	pet_state.xp_secs = 15 * 60 * 60; // fifteen hours of music: an adult
+	view = shoot_pet(cfg, tag, "adult");
+	assert(view.k == 3);
+	check_pet_picture(&view, &pikachu_3x);
+	const pet_note_t note = pet_note_find(&view); /* with nothing on, to be looked for again */
+	pet_view_free(&view);
+	pet_state.xp_secs = 0;
+
+	// The same page under the other four themes: it still fits the panel, the
+	// animal is the same six colours on a card of any colour, and the route
+	// behind it is the same route -- it is in colours of its own.
+	for (int kind = 0; kind < THEME_KIND_COUNT; kind++) {
+		if (kind == THEME_KIND_DARK) {
+			continue;
+		}
+		theme_set_kind((theme_kind_t)kind);
+		view = shoot_pet(cfg, tag, theme_tag());
+		assert(view.k == 2);
+		check_pet_picture(&view, &pikachu_2x);
+		assert(pet_scene_cell(&view, 40, 7) == 0x3F8FE6);
+		assert(pet_scene_cell(&view, 0, 21) == 0x7BCB57);
+		pet_view_free(&view);
+
+		// And grown up, which is the size that stands tallest on the card.
+		pet_state.xp_secs = 15 * 60 * 60;
+		char grown[32];
+		snprintf(grown, sizeof(grown), "adult-%s", theme_tag());
+		view = shoot_pet(cfg, tag, grown);
+		assert(view.k == 3);
+		check_pet_picture(&view, &pikachu_3x);
+		pet_view_free(&view);
+		pet_state.xp_secs = 0;
+	}
+	theme_set_kind(THEME_KIND_DARK);
+
+	// What it feels is a few cells drawn over the picture -- a sweat drop, stars,
+	// hearts -- and the picture is not redrawn. Only a sleeper changes it, by
+	// shutting its eyes. One cell that nothing else paints is read back for each,
+	// so a stamp that drifts off the grid, or never appears, fails here.
+	const int64_t last_music = pet_state.last_music;
+	pet_state.last_music = pet_now - 3 * 24 * 3600; // three days of silence
+	view = shoot_pet(cfg, tag, "sleeping");
+	assert(pet_view_cell(&view, 16, 14) == PIKACHU_INK);	// the line of a shut eye
+	assert(pet_view_cell(&view, 26, 14) == PIKACHU_INK);	// and the other
+	assert(pet_view_cell(&view, 17, 13) == PIKACHU_YELLOW); // where the glint was
+	pet_view_free(&view);
+	pet_state.last_music = last_music;
+
+	pet_state.happy = 10;
+	view = shoot_pet(cfg, tag, "sad");
+	assert(pet_view_cell(&view, 34, 13) == 0x7FC4E8); // the drop on the temple
+	pet_view_free(&view);
+
+	pet_state.happy = 50;
+	pet_state.dizzy_until = pet_now + 600;
+	view = shoot_pet(cfg, tag, "dizzy");
+	assert(pet_view_cell(&view, 15, 2) == 0xE8C15A); // the middle of the first star
+	pet_view_free(&view);
+	pet_state.dizzy_until = 0;
+
+	pet_state.happy = 90;
+	view = shoot_pet(cfg, tag, "blissful");
+	assert(pet_view_cell(&view, 11, 1) == PIKACHU_RED); // the big heart
+	pet_view_free(&view);
+	pet_state.happy = 50;
+
+	// The same four at the biggest size, where the picture reaches the wallet's
+	// note: each is on the same cell of the grid, and none of them covers the note.
+	pet_state.xp_secs = 15 * 60 * 60;
+	pet_state.last_music = pet_now - 3 * 24 * 3600;
+	view = shoot_pet(cfg, tag, "adult-sleeping");
+	assert(view.k == 3);
+	assert(pet_view_cell(&view, 16, 14) == PIKACHU_INK);
+	pet_note_whole(&view, &note, "the shut eyes");
+	pet_view_free(&view);
+	pet_state.last_music = last_music;
+
+	pet_state.happy = 10;
+	view = shoot_pet(cfg, tag, "adult-sad");
+	assert(pet_view_cell(&view, 34, 13) == 0x7FC4E8);
+	pet_note_whole(&view, &note, "the sweat drop");
+	pet_view_free(&view);
+
+	pet_state.happy = 50;
+	pet_state.dizzy_until = pet_now + 600;
+	view = shoot_pet(cfg, tag, "adult-dizzy");
+	assert(pet_view_cell(&view, 15, 2) == 0xE8C15A);
+	pet_note_whole(&view, &note, "the stars");
+	pet_view_free(&view);
+	pet_state.dizzy_until = 0;
+
+	pet_state.happy = 90;
+	view = shoot_pet(cfg, tag, "adult-blissful");
+	assert(pet_view_cell(&view, 11, 1) == PIKACHU_RED);
+	pet_note_whole(&view, &note, "the hearts");
+	pet_view_free(&view);
+	pet_state.happy = 50;
+	pet_state.xp_secs = 0;
+
+	// What it wears: one thing at a time, put on by the wardrobe and drawn over
+	// the picture as well.
+	static const struct {
+		pet_item_t item;
+		const char *tag;
+		int col, row;
+		uint32_t colour;
+	} worn[] = {
+		{PET_ITEM_PARTY_HAT, "hat", 21, 5, 0xE2574C},
+		{PET_ITEM_CROWN, "crown", 21, 4, 0xE8C15A},
+		{PET_ITEM_HEADPHONES, "phones", 21, 7, 0x2F3B52},
+		{PET_ITEM_SCARF, "scarf", 21, 20, 0xC2453F},
+	};
+	for (size_t i = 0; i < sizeof(worn) / sizeof(worn[0]); i++) {
+		pet_state.wearing = worn[i].item;
+		view = shoot_pet(cfg, tag, worn[i].tag);
+		assert(pet_view_cell(&view, worn[i].col, worn[i].row) == worn[i].colour);
+		pet_view_free(&view);
+	}
+	// And at the biggest size: a crown nine cells wide once stood on the note.
+	pet_state.xp_secs = 15 * 60 * 60;
+	for (size_t i = 0; i < sizeof(worn) / sizeof(worn[0]); i++) {
+		char suffix[32];
+		snprintf(suffix, sizeof(suffix), "adult-%s", worn[i].tag);
+		pet_state.wearing = worn[i].item;
+		view = shoot_pet(cfg, tag, suffix);
+		assert(view.k == 3);
+		assert(pet_view_cell(&view, worn[i].col, worn[i].row) == worn[i].colour);
+		pet_note_whole(&view, &note, worn[i].tag);
+		pet_view_free(&view);
+	}
+	pet_state.xp_secs = 0;
+	// The scarf owns the neck: a genre's chain has no business over it.
+	pet_listening = true;
+	pet_look = PET_LOOK_CHAIN;
+	view = shoot_pet(cfg, tag, "scarf-chain");
+	assert(pet_view_cell(&view, 21, 20) == 0xC2453F);
+	assert(pet_view_cell(&view, 21, 24) != 0xE8C15A);
+	pet_view_free(&view);
+	pet_look = PET_LOOK_NONE;
+	pet_listening = false;
+	pet_state.wearing = PET_ITEM_NONE;
 	petpage_open();
 	lv_obj_update_layout(petpage_screen);
 
@@ -1244,39 +1680,225 @@ static void check_pet_page(gui_config_t *cfg, const char *tag) {
 	static const struct {
 		pet_genre_look_t look;
 		const char *tag;
+		int col, row;	 // a cell of the picture that only this accessory paints
+		uint32_t colour; // and the colour it paints it
 	} looks[] = {
-		{PET_LOOK_SHADES, "shades"},
-		{PET_LOOK_CHAIN, "chain"},
-		{PET_LOOK_COLLAR, "collar"},
-		{PET_LOOK_CUP, "cup"},
+		{PET_LOOK_SHADES, "shades", 15, 13, 0x16305A}, // the dark blue of a lens
+		{PET_LOOK_CHAIN, "chain", 21, 24, 0xE8C15A},   // the pendant
+		{PET_LOOK_COLLAR, "collar", 21, 20, 0x22282C}, // the band
+		{PET_LOOK_CUP, "cup", 4, 36, 0xF7F2E4},		   // the cup, on the floor
 	};
 	for (size_t i = 0; i < sizeof(looks) / sizeof(looks[0]); i++) {
 		pet_look = looks[i].look;
-		petpage_open();
-		lv_obj_update_layout(petpage_screen);
-		check_within_panel(petpage_screen, cfg, "Pet accessory");
-		char look_tag[64];
-		snprintf(look_tag, sizeof(look_tag), "%s-%s", tag, looks[i].tag);
-		dump_snapshot(petpage_screen, look_tag);
+		view = shoot_pet(cfg, tag, looks[i].tag);
+		assert(pet_view_cell(&view, looks[i].col, looks[i].row) == looks[i].colour);
+		pet_view_free(&view);
 	}
+	// The same four on the grown animal. The page's own notes drift up beside the
+	// head while music plays, so the wallet's note is not asked about here.
+	pet_state.xp_secs = 15 * 60 * 60;
+	for (size_t i = 0; i < sizeof(looks) / sizeof(looks[0]); i++) {
+		char suffix[32];
+		snprintf(suffix, sizeof(suffix), "adult-%s", looks[i].tag);
+		pet_look = looks[i].look;
+		view = shoot_pet(cfg, tag, suffix);
+		assert(view.k == 3);
+		assert(pet_view_cell(&view, looks[i].col, looks[i].row) == looks[i].colour);
+		pet_view_free(&view);
+	}
+	pet_state.xp_secs = 0;
 	pet_look = PET_LOOK_NONE;
 
-	// And the volume, worn on the face: past eighty the eyes are wide open,
-	// between twenty and forty the pet rests with a heavy lid. Neither is a
-	// mood of its own -- the mood is where it always was.
-	pet_volume = 90;
+	// A pet that is fed is surprised. While music is audible and he is awake his
+	// eyes go wide and round, with a glint each, and his mouth opens on a pink
+	// tongue and shuts again, a frame later, as he chews; sparks fly off his
+	// cheeks, a bolt on one frame and a spark on the other; and he dances, a step
+	// to each side. A cell is read back for each, at the size that has room for
+	// all of it.
+	pet_state.xp_secs = 15 * 60 * 60;
+	pet_listening = true;
+	pet_look = PET_LOOK_NONE;
+	view = shoot_pet(cfg, tag, "adult-feeding");
+	assert(view.k == 3);
+	const bool first_wide = check_feeding_face(&view, false, false);
+	assert(pet_view_cell(&view, 6, 14) == PET_SPARK_YELLOW);  // a spark on the left, whichever frame
+	assert(pet_view_cell(&view, 35, 14) == PET_SPARK_YELLOW); // and on the right
+	const uint32_t bolt_left = pet_view_cell(&view, 7, 11);	  // the top of the left bolt: one frame only
+	const uint32_t bolt_right = pet_view_cell(&view, 36, 12); // and of the right one: the other
+	assert((bolt_left == PET_SPARK_YELLOW) != (bolt_right == PET_SPARK_YELLOW));
+	pet_view_free(&view);
+	pet_second(); // the other frame
+	view = pet_view_take();
+	assert(check_feeding_face(&view, false, false) != first_wide); // the mouth took its turn
+	assert(pet_view_cell(&view, 6, 14) == PET_SPARK_YELLOW);
+	assert(pet_view_cell(&view, 35, 14) == PET_SPARK_YELLOW);
+	assert((pet_view_cell(&view, 7, 11) == PET_SPARK_YELLOW) != (bolt_left == PET_SPARK_YELLOW)); // and so did the sparks
+	pet_view_free(&view);
+
+	// The dance is a step to each side on top of the breath, and he does nothing
+	// else of his own accord while it lasts. A pat is answered all the same.
+	pet_now += PET_TEST_REACTION_SECS; // any old reaction is over
+	pet_second();
+	lv_obj_t *dancer = petpage_creature();
+	int step = lv_obj_get_style_translate_x(dancer, 0);
+	for (int i = 0; i < 30; i++) {
+		pet_second();
+		const int next = lv_obj_get_style_translate_x(dancer, 0);
+		assert(next == -2 || next == 2);
+		assert(next != step);
+		step = next;
+	}
+
+	// A jump has a shadow under it: the shadow stays on the floor while he is
+	// in the air, and goes down with him when he breathes out.
+	lv_obj_t *shadow = lv_obj_get_child(dancer, 0); // the first thing the animal is made of
+	petpage_poke(PET_POKE_VOLUME_UP);
+	assert(lv_obj_get_style_translate_y(dancer, 0) < 0);
+	assert(lv_obj_get_style_translate_y(shadow, 0) == -lv_obj_get_style_translate_y(dancer, 0));
+	pet_now += PET_TEST_REACTION_SECS;
+	pet_second();
+	assert(lv_obj_get_style_translate_y(dancer, 0) >= 0);
+	assert(lv_obj_get_style_translate_y(shadow, 0) == 0);
+
+	// Not while he sleeps, though: a sleeper's eyes stay shut and its mouth is the
+	// picture's own, whatever is playing.
+	const int64_t fed_last_music = pet_state.last_music;
+	pet_state.last_music = pet_now - 3 * 24 * 3600;
+	view = shoot_pet(cfg, tag, "adult-asleep-feeding");
+	assert(pet_view_cell(&view, 16, 14) == PIKACHU_INK);
+	assert(pet_view_cell(&view, 19, 13) == PIKACHU_YELLOW);
+	assert(pet_view_cell(&view, 21, 19) == PIKACHU_YELLOW);
+	pet_view_free(&view);
+	pet_state.last_music = fed_last_music;
+
+	// Shades are over the eyes whatever the eyes are doing, so he feeds in them
+	// with his mouth: the lenses are a dark blue over a lighter one under a white
+	// glint, in a black frame with an arm to each side, and every cell of the wide
+	// eyes is under them.
+	pet_look = PET_LOOK_SHADES;
+	view = shoot_pet(cfg, tag, "adult-shades-feeding");
+	assert(pet_view_cell(&view, 13, 12) == PET_LENS_FRAME); // an arm
+	assert(pet_view_cell(&view, 14, 13) == PET_LENS_FRAME); // the frame
+	assert(pet_view_cell(&view, 15, 13) == 0x16305A);		// the dark of the lens
+	assert(pet_view_cell(&view, 17, 12) == PIKACHU_WHITE);	// the glint, from the top right
+	assert(pet_view_cell(&view, 15, 14) == PIKACHU_WHITE);	// to the bottom left
+	assert(pet_view_cell(&view, 17, 14) == 0x2E67AE);		// and the lighter lens under it
+	assert(pet_view_cell(&view, 27, 12) == PIKACHU_WHITE);	// the other lens, the same
+	assert(pet_view_cell(&view, 20, 12) == PET_LENS_FRAME); // the bridge
+	assert(pet_view_cell(&view, 26, 14) == 0x2E67AE);
+	check_feeding_face(&view, true, false);
+	pet_view_free(&view);
+
+	// A scarf, a collar and a chain are over the chin: the mouth under them is the
+	// narrow one on both frames, so there is never a lip floating under a collar.
+	static const struct {
+		pet_genre_look_t look;
+		pet_item_t wearing;
+	} chins[] = {
+		{PET_LOOK_CHAIN, PET_ITEM_NONE},
+		{PET_LOOK_COLLAR, PET_ITEM_NONE},
+		{PET_LOOK_NONE, PET_ITEM_SCARF},
+	};
+	for (size_t i = 0; i < sizeof(chins) / sizeof(chins[0]); i++) {
+		pet_look = chins[i].look;
+		pet_state.wearing = chins[i].wearing;
+		for (int frame = 0; frame < 2; frame++) {
+			view = shoot_pet(cfg, tag, "adult-chin");
+			assert(!check_feeding_face(&view, false, true));
+			pet_view_free(&view);
+			pet_second();
+		}
+	}
+	pet_state.wearing = PET_ITEM_NONE;
+	pet_look = PET_LOOK_NONE;
+
+	// He blinks. Every few seconds the eyes shut for a tenth of a second: a line
+	// where each was, and no glint. The wide eyes of a feeding pet shut the same
+	// way, and in shades there are no eyes to shut, so the lenses glint instead.
+	pet_listening = false;
 	petpage_open();
-	lv_obj_update_layout(petpage_screen);
-	char hyped_tag[64];
-	snprintf(hyped_tag, sizeof(hyped_tag), "%s-hyped", tag);
-	dump_snapshot(petpage_screen, hyped_tag);
-	pet_volume = 30;
+	pet_wait_for_blink();
+	view = pet_view_take();
+	assert(pet_view_cell(&view, 16, 14) == PIKACHU_INK);
+	assert(pet_view_cell(&view, 17, 13) == PIKACHU_YELLOW);
+	assert(pet_view_cell(&view, 25, 13) == PIKACHU_YELLOW); // the other eye is shut as well
+	assert(pet_view_cell(&view, 27, 13) == PIKACHU_YELLOW);
+	assert(pet_view_cell(&view, 26, 14) == PIKACHU_INK);
+	pet_view_free(&view);
+	lv_tick_inc(200);
+	lv_timer_handler();
+	assert(!petpage_blinking());
+	view = pet_view_take();
+	assert(pet_view_cell(&view, 17, 13) == PIKACHU_WHITE); // open again, with its glint
+	pet_view_free(&view);
+
+	pet_listening = true;
 	petpage_open();
-	lv_obj_update_layout(petpage_screen);
-	char resting_tag[64];
-	snprintf(resting_tag, sizeof(resting_tag), "%s-resting", tag);
-	dump_snapshot(petpage_screen, resting_tag);
-	pet_volume = 60;
+	pet_wait_for_blink();
+	view = pet_view_take();
+	assert(pet_view_cell(&view, 17, 11) == PIKACHU_YELLOW); // the top of a wide eye is gone
+	assert(pet_view_cell(&view, 19, 13) == PIKACHU_YELLOW);
+	assert(pet_view_cell(&view, 19, 14) == PIKACHU_INK); // and there is a line, five cells wide
+	assert(pet_view_cell(&view, 24, 13) == PIKACHU_YELLOW);
+	assert(pet_view_cell(&view, 24, 14) == PIKACHU_INK);
+	assert(pet_view_cell(&view, 28, 14) == PIKACHU_INK);
+	pet_view_free(&view);
+	lv_tick_inc(200);
+	lv_timer_handler();
+	view = pet_view_take();
+	assert(pet_view_cell(&view, 19, 13) == PIKACHU_INK); // wide open again
+	pet_view_free(&view);
+
+	pet_look = PET_LOOK_SHADES;
+	petpage_open();
+	pet_wait_for_blink();
+	view = pet_view_take();
+	assert(pet_view_cell(&view, 18, 12) == PIKACHU_WHITE); // the glint has a cross
+	assert(pet_view_cell(&view, 28, 12) == PIKACHU_WHITE);
+	pet_view_free(&view);
+	lv_tick_inc(200);
+	lv_timer_handler();
+	view = pet_view_take();
+	assert(pet_view_cell(&view, 18, 12) == 0x16305A); // and has not any more
+	pet_view_free(&view);
+	pet_look = PET_LOOK_NONE;
+
+	// And when nobody is touching him he fidgets, every ten seconds or so, for two:
+	// a hop, a lean, a shake -- never while he is feeding, and always over again.
+	pet_listening = false;
+	petpage_open();
+	pet_now += PET_TEST_REACTION_SECS;
+	pet_second();
+	int fidgeting = 0;
+	for (int i = 0; i < 60; i++) {
+		pet_second();
+		if (lv_obj_get_style_translate_x(dancer, 0) != 0 || lv_obj_get_style_translate_y(dancer, 0) < 0) {
+			fidgeting++;
+		}
+	}
+	assert(fidgeting >= 4 && fidgeting <= 24);
+	pet_settle(); // he is standing still again, not half way through a hop
+	pet_state.xp_secs = 0;
+	pet_listening = false;
+	petpage_open();
+
+	// A film of the grown animal, when one is asked for: feeding in shades,
+	// feeding bare, and left alone long enough to blink and to fidget.
+	if (getenv("SONIX_PAGE_FILM")) {
+		pet_state.xp_secs = 15 * 60 * 60;
+		pet_listening = true;
+		pet_look = PET_LOOK_SHADES;
+		petpage_open();
+		film_pet("shades", 14);
+		pet_look = PET_LOOK_NONE;
+		petpage_open();
+		film_pet("feeding", 14);
+		pet_listening = false;
+		petpage_open();
+		film_pet("idle", 40);
+		pet_state.xp_secs = 0;
+	}
+
 	pet_listening = false;
 	petpage_open();
 	lv_obj_update_layout(petpage_screen);
@@ -1330,7 +1952,7 @@ static void check_pet_page(gui_config_t *cfg, const char *tag) {
 	assert(!lv_obj_is_hidden(find));
 	lv_obj_send_event(find, LV_EVENT_CLICKED, NULL);
 	assert(pet_state.drop_pending == 0);
-	assert(pet_state.found[PET_DROP_BONE] == 1);
+	assert(pet_state.found[PET_DROP_NOTE] == 1);
 	lv_obj_update_layout(petpage_screen);
 	assert(lv_obj_is_hidden(find));
 
@@ -1361,6 +1983,19 @@ static void check_pet_page(gui_config_t *cfg, const char *tag) {
 	lv_obj_update_layout(petpage_screen);
 	assert(!lv_obj_is_visible(box_title));
 
+	// With nothing left in the ball its button is white again, and the sparkle
+	// is gone.
+	petpage_open();
+	lv_obj_update_layout(petpage_screen);
+	char idle_tag[64];
+	snprintf(idle_tag, sizeof(idle_tag), "%s-idle", tag);
+	dump_snapshot(petpage_screen, idle_tag);
+	view = pet_view_take();
+	assert(pet_ball_cell(&view, 2, 4) == 0xE5352B);
+	assert(pet_ball_cell(&view, 3, 6) == PIKACHU_WHITE);
+	assert(pet_ball_cell(&view, 7, 1) != 0xE8C15A);
+	pet_view_free(&view);
+
 	// The card knows the hour and the month: the same animal at midnight in
 	// October, with the lamp lit, a moon up and the autumn leaves coming down.
 	pet_now = 1761868800; // 2025-10-31, 00:00 UTC
@@ -1370,18 +2005,57 @@ static void check_pet_page(gui_config_t *cfg, const char *tag) {
 	char night_tag[64];
 	snprintf(night_tag, sizeof(night_tag), "%s-night", tag);
 	dump_snapshot(petpage_screen, night_tag);
-	// And in April, with a cloud up and the rain coming down.
+	dump_grown(tag, "night");
+	view = pet_view_take();
+	assert(pet_luma(pet_scene_cell(&view, 40, 7)) < 60);  // a dark sky
+	assert(pet_luma(pet_scene_cell(&view, 60, 9)) > 100); // with a moon in it
+	assert(pet_luma(pet_scene_cell(&view, -12, 8)) < 60); // where the sun's edge was, nothing
+	const uint32_t lamp = pet_scene_cell(&view, -16, 26);
+	assert((lamp >> 16 & 255) > 0x70 && (lamp >> 16 & 255) > (lamp & 255) + 0x20); // a lit, warm shade
+	pet_view_free(&view);
+	// And in April, with a cloud up and the rain coming down: the sky goes
+	// grey, and the sun is not in it.
 	pet_now = 1744286400; // 2025-04-10, 12:00 UTC
 	petpage_open();
 	lv_obj_update_layout(petpage_screen);
 	char spring_tag[64];
 	snprintf(spring_tag, sizeof(spring_tag), "%s-spring", tag);
 	dump_snapshot(petpage_screen, spring_tag);
+	dump_grown(tag, "spring");
+	view = pet_view_take();
+	assert(pet_scene_cell(&view, 40, 11) == 0x869EBF);
+	assert(pet_scene_cell(&view, -12, 8) == 0x6C84A8);
+	pet_view_free(&view);
 	pet_now = 1752580800; // back to the summer afternoon
+
+	// The two rooms are skies of their own. The sunset room has a low orange sun
+	// in a violet and orange sky; the night room is night by day -- a moon, the
+	// stars, no lamp, since the clock still says afternoon.
+	pet_state.room = 1;
+	petpage_open();
+	lv_obj_update_layout(petpage_screen);
+	char sunset_tag[64];
+	snprintf(sunset_tag, sizeof(sunset_tag), "%s-sunset", tag);
+	dump_snapshot(petpage_screen, sunset_tag);
+	dump_grown(tag, "sunset");
+	view = pet_view_take();
+	assert(pet_scene_cell(&view, 40, 11) == 0xB0508C);
+	assert(pet_scene_cell(&view, -14, 16) == 0xFF9A3C);
+	pet_view_free(&view);
+	pet_state.room = 2;
+	petpage_open();
+	lv_obj_update_layout(petpage_screen);
+	dump_grown(tag, "nightroom");
+	view = pet_view_take();
+	assert(pet_scene_cell(&view, 40, 7) == 0x081029);
+	assert(pet_scene_cell(&view, 60, 9) == 0xF5EFC9);
+	assert(pet_scene_cell(&view, -16, 26) != 0xFFE9A0);
+	pet_view_free(&view);
+	pet_state.room = 0;
 	petpage_open();
 	lv_obj_update_layout(petpage_screen);
 
-	// The pencil brings the chooser back; the pencil closes it again.
+	// The pencil opens the sheet with the name; the pencil closes it again.
 	lv_obj_t *star = NULL;
 	lv_obj_t *pencil = NULL;
 	lv_obj_t *notebutton = NULL;
@@ -1389,10 +2063,15 @@ static void check_pet_page(gui_config_t *cfg, const char *tag) {
 	assert(star && pencil && notebutton);
 	lv_obj_send_event(pencil, LV_EVENT_CLICKED, NULL);
 	lv_obj_update_layout(petpage_screen);
-	assert(lv_obj_is_visible(chooser_title));
+	assert(lv_obj_is_visible(sheet_title));
+	check_within_panel(petpage_screen, cfg, "Pet name sheet");
+	check_clear_of_back_button(sheet_title, cfg, "Pet name sheet heading");
+	char sheet_tag[64];
+	snprintf(sheet_tag, sizeof(sheet_tag), "%s-name", tag);
+	dump_snapshot(petpage_screen, sheet_tag);
 	lv_obj_send_event(pencil, LV_EVENT_CLICKED, NULL);
 	lv_obj_update_layout(petpage_screen);
-	assert(!lv_obj_is_visible(chooser_title));
+	assert(!lv_obj_is_visible(sheet_title));
 
 	// The wardrobe: a hat costs 120 of the 500, bought and worn without a
 	// second tap. The wallet is put back to 500 first: the fortune and the

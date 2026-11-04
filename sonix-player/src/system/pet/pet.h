@@ -88,7 +88,7 @@
 #define PET_PET_ENERGY_GAIN 2
 
 // A held finger is not a tap: two seconds down is a grooming, and it is worth
-// more than the tap it starts with -- once a day, so that holding the dog is
+// more than the tap it starts with -- once a day, so that holding the pet is
 // not a way to fill the meter without any music.
 #define PET_HOLD_HAPPY_GAIN 6
 
@@ -175,10 +175,10 @@
 #define PET_DROP_KINDS 4
 #define PET_DROP_PENDING_MAX 3
 
-// What a find is. The first (legacy bone) slot is drawn as a music note; its
-// enum value stays unchanged so existing shelf counts remain compatible.
+// What a find is. The first is a gold music note; its value is the one it has
+// always had, so a shelf that was saved with something on it still reads right.
 typedef enum {
-	PET_DROP_BONE = 0,
+	PET_DROP_NOTE = 0,
 	PET_DROP_CASSETTE,
 	PET_DROP_STICKER,
 	PET_DROP_VINYL,
@@ -210,7 +210,7 @@ typedef enum {
 #define PET_RHYTHM_GOOD_MS 260
 
 // Four stages of one animal: it arrives small and grows with the listening.
-// There is no egg -- the pet the owner chose is the pet they get.
+// There is no egg -- the pet is there from the first minute.
 typedef enum {
 	PET_STAGE_BABY = 0,
 	PET_STAGE_CHILD,
@@ -218,16 +218,6 @@ typedef enum {
 	PET_STAGE_ADULT,
 	PET_STAGE_COUNT,
 } pet_stage_t;
-
-// What the owner chose to live with. NONE is a pet that has not been chosen
-// yet: the page puts up the chooser before it draws anything.
-typedef enum {
-	PET_SPECIES_NONE = 0,
-	PET_SPECIES_CAT,
-	PET_SPECIES_DOG,
-	PET_SPECIES_FISH,
-	PET_SPECIES_COUNT,
-} pet_species_t;
 
 typedef enum {
 	PET_MOOD_SLEEPING = 0,
@@ -372,10 +362,6 @@ typedef struct {
 	int idle_happy_credit;
 	int idle_energy_credit;
 
-	// PET_SPECIES_*, chosen once and changeable: a fish lives in an aquarium,
-	// the rest in a room.
-	int species;
-
 	// The last thirty days, oldest first, each entry a PET_FAMILY_*: the
 	// family that day was mostly spent in. This is what the temperament is
 	// read from.
@@ -467,15 +453,6 @@ bool pet_hold(pet_state_t *st);
 // What the face and the label say. Sleeping outranks every mood, because a
 // creature with its eyes shut is not sad, it is asleep.
 pet_mood_t pet_mood(const pet_state_t *st, int64_t now);
-
-// The animal, or PET_SPECIES_NONE before one has been chosen.
-pet_species_t pet_species(const pet_state_t *st);
-
-// Chooses or changes it. False for anything that is not one of the three.
-bool pet_set_species(pet_state_t *st, pet_species_t species);
-
-// The species' translation tag, for the chooser.
-const char *pet_species_tag(pet_species_t species);
 
 // Writes the name into the settings, trimmed and cut at a character boundary.
 // An empty name puts the default back.
@@ -608,7 +585,7 @@ pet_vibe_t pet_vibe_for_genre(const char *genre);
 // NONE for the genres that have no costume -- and for no genre at all.
 typedef enum {
 	PET_LOOK_NONE = 0,
-	PET_LOOK_SHADES, // synthwave, electronic, house: two flat lenses
+	PET_LOOK_SHADES, // synthwave, electronic, house: mirror shades
 	PET_LOOK_CHAIN,  // hip hop, rap, boom bap: gold, round the neck
 	PET_LOOK_COLLAR, // rock, metal, punk: studs
 	PET_LOOK_CUP,    // ambient, lo-fi, jazz: something warm on the floor
@@ -630,9 +607,13 @@ long pet_day_now(int64_t now);
 void pet_load(pet_state_t *st, int64_t now, long day);
 void pet_save(const pet_state_t *st);
 
-// The name on the page, from [pet] name of the configuration. "Momo" when it
-// has never been given one. `out` is always NUL-terminated; a name longer than
-// the page can draw is cut, and one with leading or trailing space is trimmed.
+// What the pet is called until it has been given a name.
+#define PET_DEFAULT_NAME "Pikachu"
+
+// The name on the page, from [pet] name of the configuration. PET_DEFAULT_NAME
+// when it has never been given one. `out` is always NUL-terminated; a name
+// longer than the page can draw is cut, and one with leading or trailing space
+// is trimmed.
 void pet_name(char *out, size_t out_size);
 
 #endif /* SYSTEM_PET_PET_H */

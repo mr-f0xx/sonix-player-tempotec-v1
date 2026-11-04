@@ -233,7 +233,7 @@ bool pet_drop_add(pet_state_t *st, int listened_secs) {
 	}
 
 	// A box, not a pile: three finds at most. With the box full the listening
-	// stops counting, so a week away does not come back as a heap of bones.
+	// stops counting, so a week away does not come back as a heap of finds.
 	if (st->drop_pending >= PET_DROP_PENDING_MAX) {
 		st->drop_secs = PET_DROP_SECS - 1;
 	}
@@ -312,7 +312,6 @@ void pet_defaults(pet_state_t *st, int64_t now, long day) {
 	st->energy = 80;
 	st->wearing = PET_ITEM_NONE;
 	st->room = 0;
-	st->species = PET_SPECIES_NONE;
 }
 
 // Defined with the month's listening, below; the day rollover in pet_advance()
@@ -686,39 +685,6 @@ const char *pet_stage_tag(pet_stage_t stage) {
 	case PET_STAGE_BABY:
 	default:
 		return "pet_stage_baby";
-	}
-}
-
-// ---------------------------------------------------------------------------
-// The animal
-// ---------------------------------------------------------------------------
-
-pet_species_t pet_species(const pet_state_t *st) {
-	if (!st || st->species < 1 || st->species >= PET_SPECIES_COUNT) {
-		return PET_SPECIES_NONE;
-	}
-	return (pet_species_t)st->species;
-}
-
-bool pet_set_species(pet_state_t *st, pet_species_t species) {
-	if (!st || species <= PET_SPECIES_NONE || species >= PET_SPECIES_COUNT) {
-		return false;
-	}
-	st->species = (int)species;
-	return true;
-}
-
-const char *pet_species_tag(pet_species_t species) {
-	switch (species) {
-	case PET_SPECIES_CAT:
-		return "pet_species_cat";
-	case PET_SPECIES_DOG:
-		return "pet_species_dog";
-	case PET_SPECIES_FISH:
-		return "pet_species_fish";
-	case PET_SPECIES_NONE:
-	default:
-		return "pet_species";
 	}
 }
 
@@ -1323,18 +1289,6 @@ void pet_load(pet_state_t *st, int64_t now, long day) {
 	st->idle_happy_credit = (int)config_get_int(PET_SECTION, "idle_happy_credit", 0);
 	st->idle_energy_credit = (int)config_get_int(PET_SECTION, "idle_energy_credit", 0);
 	st->pets = (int)config_get_int(PET_SECTION, "pets", 0);
-	st->species = (int)config_get_int(PET_SECTION, "species", PET_SPECIES_NONE);
-	// The file's shape has a version now. Before it, there were four animals
-	// and the dragon came third; the numbers are stored, so removing the
-	// dragon would quietly turn its owner into a fish. A version-1 file is
-	// read with the old numbers: three was a dragon and four was a fish.
-	if (config_get_int(PET_SECTION, "state_version", 1) < 2) {
-		if (st->species == 3) {
-			st->species = PET_SPECIES_CAT;
-		} else if (st->species == 4) {
-			st->species = PET_SPECIES_FISH;
-		}
-	}
 	load_hashes("day_genres", st->day_genres, &st->day_genre_count);
 	load_hashes("day_albums", st->day_albums, &st->day_album_count);
 	load_history(st->genre_history);
@@ -1374,9 +1328,6 @@ void pet_load(pet_state_t *st, int64_t now, long day) {
 	st->idle_energy_credit = clamp_int(st->idle_energy_credit, 0, PET_IDLE_ENERGY_SECS_PER_POINT);
 	st->freezes = clamp_int(st->freezes, 0, 999);
 	st->pets = clamp_int(st->pets, 0, INT_MAX);
-	if (st->species < 0 || st->species >= PET_SPECIES_COUNT) {
-		st->species = PET_SPECIES_NONE; // unknowable: ask again
-	}
 
 	// Only the achievements and the things this build knows how to sell; a
 	// bit from a newer build would otherwise be a wardrobe entry nobody can
@@ -1422,8 +1373,6 @@ void pet_save(const pet_state_t *st) {
 		return;
 	}
 
-	// Two: the dragon is gone and the fish took its number.
-	config_set_int(PET_SECTION, "state_version", 2);
 	config_set_int(PET_SECTION, "adopted", (long)st->adopted);
 	config_set_int(PET_SECTION, "last_seen", (long)st->last_seen);
 	config_set_int(PET_SECTION, "last_music", (long)st->last_music);
@@ -1450,7 +1399,6 @@ void pet_save(const pet_state_t *st) {
 	config_set_int(PET_SECTION, "idle_happy_credit", st->idle_happy_credit);
 	config_set_int(PET_SECTION, "idle_energy_credit", st->idle_energy_credit);
 	config_set_int(PET_SECTION, "pets", st->pets);
-	config_set_int(PET_SECTION, "species", st->species);
 	save_hashes("day_genres", st->day_genres, st->day_genre_count);
 	save_hashes("day_albums", st->day_albums, st->day_album_count);
 	save_history(st->genre_history);
@@ -1496,7 +1444,7 @@ void pet_set_name(const char *name) {
 	memcpy(clean, start, length);
 	clean[length] = '\0';
 	if (length == 0) {
-		snprintf(clean, sizeof(clean), "Momo"); // an empty name is no name
+		snprintf(clean, sizeof(clean), "%s", PET_DEFAULT_NAME); // an empty name is no name
 	}
 	config_set(PET_SECTION, "name", clean);
 }
@@ -1505,7 +1453,7 @@ void pet_name(char *out, size_t out_size) {
 	if (!out || out_size == 0) {
 		return;
 	}
-	const char *stored = config_get(PET_SECTION, "name", "Momo");
+	const char *stored = config_get(PET_SECTION, "name", PET_DEFAULT_NAME);
 
 	const char *start = stored;
 	while (*start && isspace((unsigned char)*start)) {
@@ -1518,7 +1466,7 @@ void pet_name(char *out, size_t out_size) {
 
 	size_t length = (size_t)(end - start);
 	if (length == 0) {
-		const char *fallback = "Momo";
+		const char *fallback = PET_DEFAULT_NAME;
 		length = strlen(fallback);
 		start = fallback;
 	}

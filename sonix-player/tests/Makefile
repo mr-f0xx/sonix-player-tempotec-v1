@@ -460,7 +460,7 @@ TOOLS_SRC = $(ROOT)/tests/ui/test_tools_pages.c \
             $(ROOT)/src/gui/notes/notes.c $(ROOT)/src/gui/notes/noteeditor.c \
             $(ROOT)/src/gui/tagmanager/tagmanager.c $(ROOT)/src/system/tagmanager/tagwrite.c \
             $(ROOT)/src/gui/metronome/metronome.c \
-            $(ROOT)/src/gui/pet/petpage.c $(ROOT)/src/gui/pet/peticon.c \
+            $(ROOT)/src/gui/pet/petpage.c $(ROOT)/src/gui/pet/peticon.c $(ROOT)/src/gui/pet/pikachu.c \
             $(ROOT)/src/system/pet/pet.c \
             $(ROOT)/src/system/notes/notesstore.c $(ROOT)/src/system/text/textfile.c \
             $(ROOT)/src/gui/library/textview.c $(ROOT)/src/gui/library/pictureview.c \
