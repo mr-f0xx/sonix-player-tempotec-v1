@@ -55,12 +55,12 @@ static void section_heading(lv_obj_t *list, const char *key) {
 }
 
 // The page's explanatory line, under the headings that need one.
-static void section_note(lv_obj_t *list, const char *key) {
+static void section_note(lv_obj_t *list, const char *key, int font_size) {
 	lv_obj_t *label = lv_label_create(list);
 	lv_label_set_text(label, tr(key));
 	lv_label_set_long_mode(label, LV_LABEL_LONG_WRAP);
 	lv_obj_add_style(label, &theme_style_text_dim, 0);
-	lv_obj_set_style_text_font(label, &font_ui_14, 0);
+	lv_obj_set_style_text_font(label, font_size == 22 ? &font_ui_22 : &font_ui_14, 0);
 	lv_obj_set_width(label, lv_pct(100));
 	lv_obj_set_style_pad_left(label, 6, 0);
 	lv_obj_set_style_pad_bottom(label, 6, 0);
@@ -71,7 +71,7 @@ void plugins_init(gui_config_t *cfg) {
 	lv_obj_add_style(plugins_screen, &theme_style_screen, 0);
 	lv_obj_t *list = settingsrow_page(plugins_screen, cfg, "plugins");
 
-	section_note(list, "plugins_note");
+	section_note(list, "plugins_note", 14);
 
 	// One heading per group of modules, taken from the module list itself: the
 	// page never has to know which id belongs where, so a module added to
@@ -87,8 +87,11 @@ void plugins_init(gui_config_t *cfg) {
 			section_heading(list, section);
 		}
 		lv_obj_t *sw = NULL;
-		lv_obj_t *row = settingsrow_toggle(list, addon->label, &sw, addon_switch_cb);
-		settingsrow_add_caption(row, addon->note);
+		// A toggle card carries no caption of its own (the fork's rows do not
+		// resize one), so the module's note sits under the card, as the other
+		// toggle pages do with their notes.
+		settingsrow_toggle(list, addon->label, &sw, addon_switch_cb);
+		section_note(list, addon->note, 22);
 		if (!sw) {
 			continue;
 		}
