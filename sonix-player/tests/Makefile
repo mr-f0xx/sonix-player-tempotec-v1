@@ -102,7 +102,7 @@ $(BUILD)/test_swvolume: $(SWVOL_SRC) $(ROOT)/src/system/audio/swvolume.h \
 
 # The graphic EQ, PEQ and MSEB on stereo PCM -- the same eq_process() radio
 # stations go through. Plain C, no ALSA and no LVGL.
-EQ_SRC = test_eq.c $(ROOT)/src/system/audio/eq.c $(ROOT)/src/system/core/config.c
+EQ_SRC = test_eq.c $(ROOT)/src/system/audio/eq.c $(ROOT)/src/system/core/config.c $(ROOT)/src/system/addons/addons.c
 .PHONY: eq
 eq: $(BUILD)/test_eq
 	$(BUILD)/test_eq
@@ -164,7 +164,7 @@ $(BUILD)/test_usbdac_eq: test_usbdac_eq.c $(ROOT)/src/system/audio/usbdac.c \
                          $(ROOT)/src/system/core/config.c $(ROOT)/src/system/core/config.h
 	@mkdir -p $(BUILD)
 	$(CC) $(CPPFLAGS) -Istubs $(CFLAGS) -o $@ test_usbdac_eq.c \
-		$(ROOT)/src/system/audio/eq.c $(ROOT)/src/system/core/config.c $(LDFLAGS) $(LDLIBS)
+		$(ROOT)/src/system/audio/eq.c $(ROOT)/src/system/core/config.c $(ROOT)/src/system/addons/addons.c $(LDFLAGS) $(LDLIBS)
 
 # The Wi-Fi worker's hidden-network join: the real wifi.c against a fake
 # wpa_cli on PATH (see test_wifi.c). Plain C, no LVGL and no radio.
@@ -471,6 +471,7 @@ UI_SRC = $(ROOT)/tests/ui/test_main_menu.c $(ROOT)/src/gui/shell/main_menu.c \
          $(ROOT)/src/gui/shell/theme.c \
          $(ROOT)/src/gui/shell/icons.c $(ROOT)/src/gui/shell/main_menu_icons.c \
          $(ROOT)/src/gui/shell/gestures.c \
+         $(ROOT)/src/system/addons/addons.c \
          $(ROOT)/src/gui/board_profile.c \
          $(ROOT)/src/system/core/config.c $(ROOT)/src/system/core/lang.c
 UI_LVGL_SRC = $(shell find $(ROOT)/lvgl/src -name '*.c' 2>/dev/null)
@@ -498,7 +499,7 @@ $(BUILD)/test_quickpanel_layout: test_quickpanel_layout.c $(ROOT)/src/gui/shell/
 	@mkdir -p $(BUILD)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -I$(ROOT)/lvgl \
 		-DLV_CONF_PATH='"$(abspath ui/lv_conf.h)"' -o $@ test_quickpanel_layout.c \
-		$(ROOT)/src/system/core/config.c $(UI_LVGL_OBJ) $(LDFLAGS) $(LDLIBS)
+		$(ROOT)/src/system/core/config.c $(ROOT)/src/system/addons/addons.c $(UI_LVGL_OBJ) $(LDFLAGS) $(LDLIBS)
 
 UI_OBJ = $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(UI_SRC)) \
          $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(UI_LVGL_SRC))
@@ -539,6 +540,7 @@ TOOLS_SRC = $(ROOT)/tests/ui/test_tools_pages.c \
             $(ROOT)/src/system/notes/notesstore.c $(ROOT)/src/system/text/textfile.c \
             $(ROOT)/src/gui/library/textview.c $(ROOT)/src/gui/library/pictureview.c \
             $(ROOT)/src/gui/shell/morepage.c $(ROOT)/src/gui/shell/gridpage.c \
+            $(ROOT)/src/system/addons/addons.c \
             $(ROOT)/src/gui/shell/settingsrow.c $(ROOT)/src/gui/shell/keyboard.c \
             $(ROOT)/src/gui/shell/popover.c $(ROOT)/src/system/input/kblayout.c \
             $(ROOT)/src/gui/shell/theme.c $(ROOT)/src/gui/shell/icons.c \
@@ -587,7 +589,8 @@ GAMES_OBJ = $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(GAMES_SRC)) \
 # PEQ profile selection on the real page and DSP engine, with the shell and
 # network AutoEq browser stubbed. No audio device or network is needed.
 PEQPAGE_SRC = $(ROOT)/tests/ui/test_peq_profiles.c $(ROOT)/src/gui/audio/peqpage.c \
-              $(ROOT)/src/system/audio/eq.c $(ROOT)/src/gui/shell/settingsrow.c \
+              $(ROOT)/src/system/audio/eq.c $(ROOT)/src/system/addons/addons.c \
+              $(ROOT)/src/gui/shell/settingsrow.c \
               $(ROOT)/src/gui/shell/theme.c $(ROOT)/src/gui/shell/icons.c \
               $(ROOT)/src/gui/board_profile.c $(ROOT)/src/system/core/config.c \
               $(ROOT)/src/system/core/lang.c

@@ -40,6 +40,7 @@
 #include "src/gui/shell/keyboard.h"
 #include "src/gui/shell/morepage.h"
 #include "src/gui/shell/theme.h"
+#include "src/system/addons/addons.h"
 #include "src/system/core/config.h"
 #include "src/system/core/lang.h"
 #include "src/system/input/kblayout.h"
@@ -2572,6 +2573,8 @@ int main(int argc, char **argv) {
 	snprintf(config, sizeof(config), "%s/device_config.ini", card);
 	config_init(config);
 	config_set("ui", "language", "English");
+	/* As gui_init does on a device that is already set up: every module on. */
+	addons_seed(false);
 	lang_init(argv[1]);
 	check_strings(argv[1]);
 

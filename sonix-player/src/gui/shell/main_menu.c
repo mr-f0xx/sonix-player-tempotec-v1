@@ -23,6 +23,7 @@
 #include "src/gui/shell/theme.h"
 #include "src/gui/streaming/streaming.h"
 #include "src/gui/wireless/wireless.h"
+#include "src/system/addons/addons.h"
 #include "src/system/core/config.h"
 #include "src/system/core/lang.h"
 #include "src/system/playback/device_state.h"
@@ -134,7 +135,10 @@ static bool home_header_shown(void) { return !theme_is_oled(); }
 bool main_menu_icons_only(void) { return config_get_bool("ui", "main_menu_icons_only", false); }
 
 // Whether the EPUB shelf (Books) takes the Audiobooks slot on the home screen.
-bool main_menu_books(void) { return config_get_bool("ui", "home_books", false); }
+// Only while the books module is on: with it switched off the shelf was never
+// built, so the slot goes back to Audiobooks rather than opening a blank page.
+// The stored choice is kept, and comes back with the module.
+bool main_menu_books(void) { return addons_enabled("ebook") && config_get_bool("ui", "home_books", false); }
 bool main_menu_browse(void) { return config_get_bool("ui", "home_browse", false); }
 
 static void set_home_books(bool enabled) {

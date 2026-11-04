@@ -18,6 +18,7 @@
 #include "src/gui/shell/theme.h"
 #include "src/gui/shell/topbar.h"
 #include "src/system/core/config.h"
+#include "src/system/addons/addons.h"
 #include "src/system/playback/device_state.h"
 #include "src/system/core/lang.h"
 #include "src/system/library/library.h"
@@ -271,7 +272,11 @@ static bool shortcut_taken;
 // the setting
 // ---------------------------------------------------------------------------
 
+// Off with its Plugins switch: the sheet is not built and nothing asks for it.
 bool coverflow_enabled(void) {
+	if (!addons_enabled("coverflow")) {
+		return false;
+	}
 	if (!enabled_loaded) {
 		enabled_loaded = true;
 		enabled = config_get_int("library", "coverflow", 0) != 0;

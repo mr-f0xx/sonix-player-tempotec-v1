@@ -31,6 +31,7 @@
 #include "src/gui/shell/morepage.h"
 #include "src/gui/shell/settingsrow.h"
 #include "src/gui/shell/switcher.h"
+#include "src/system/addons/addons.h"
 #include "src/gui/shell/theme.h"
 #include "src/gui/shell/toast.h"
 #include "src/gui/shell/topbar.h"
@@ -499,6 +500,8 @@ int main(int argc, char **argv) {
 	lv_display_create(cfg.screen_width, cfg.screen_height);
 	theme_init();
 	check_custom_theme();
+	// As gui_init does on a device that is already set up: every module on.
+	addons_seed(false);
 	music_screen = lv_obj_create(NULL);
 	streaming_screen = lv_obj_create(NULL);
 	wireless_screen = lv_obj_create(NULL);

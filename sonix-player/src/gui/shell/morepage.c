@@ -27,6 +27,7 @@
 #include "src/gui/shell/settingsrow.h"
 #include "src/gui/shell/switcher.h"
 #include "src/gui/shell/theme.h"
+#include "src/system/addons/addons.h"
 
 lv_obj_t *morepage_screen;
 
@@ -209,12 +210,37 @@ static const grid_entry_t MORE_ENTRIES[] = {
 // this page offers Books, exactly as it always has, and with it on Books has
 // moved up to the home screen and this entry becomes the Audiobooks section
 // instead. The place, the count and the page's shape are the same either way.
+// Which Plugins switch a More entry belongs to, by the label it is built with.
+// An entry whose switch is off is not offered at all: the page it opens was
+// never built (see gui.c), so the tile would lead to an empty screen.
+static const char *more_addon_of(const char *label) {
+	if (!label) {
+		return NULL;
+	}
+	if (strcmp(label, "gearboy") == 0) return "gearboy";
+	if (strcmp(label, "books") == 0) return "ebook";
+	if (strcmp(label, "Tag Manager") == 0) return "tagmanager";
+	if (strcmp(label, "flappy_bird") == 0) return "flappy";
+	if (strcmp(label, "2048") == 0) return "game2048";
+	if (strcmp(label, "snake") == 0) return "snake";
+	if (strcmp(label, "dino") == 0) return "dino";
+	if (strcmp(label, "calculator") == 0) return "calculator";
+	if (strcmp(label, "notes") == 0) return "notes";
+	if (strcmp(label, "metronome") == 0) return "metronome";
+	if (strcmp(label, "pet") == 0) return "pet";
+	return NULL;
+}
+
 static int more_entries_build(grid_entry_t *out, int max) {
 	int count = 0;
 	bool books_on_home = main_menu_books();
 	int base_count = (int)(sizeof(MORE_ENTRIES) / sizeof(MORE_ENTRIES[0]));
 
 	for (int i = 0; i < base_count && count < max; i++) {
+		const char *addon = more_addon_of(MORE_ENTRIES[i].label);
+		if (addon && !addons_enabled(addon)) {
+			continue;
+		}
 		out[count] = MORE_ENTRIES[i];
 		if (books_on_home && strcmp(MORE_ENTRIES[i].label, "books") == 0) {
 			out[count].label = "audiobooks";
