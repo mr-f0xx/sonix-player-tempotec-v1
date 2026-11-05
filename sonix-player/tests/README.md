@@ -17,6 +17,8 @@ make -C sonix-player/tests basebuild
 make -C sonix-player/tests stock-prepare
 make -C sonix-player/tests peq-ui
 make -C sonix-player/tests quickpanel-layout
+make -C sonix-player/tests corners
+make -C sonix-player/tests playbutton
 make -C sonix-player/tests edge-lock
 make -C sonix-player/tests calculator
 make -C sonix-player/tests notes
@@ -31,7 +33,7 @@ make -C sonix-player/tests aamlayout
 make -C sonix-player/tests extractkeys
 ```
 
-The non-UI suites require only a C compiler, Make and Python 3 (plus standard pthread/dl/math libraries). The `peq-ui`, `quickpanel-layout`, `edge-lock` and aggregate `ui` targets also need the LVGL 9.6.0 checkout described below. None requires ALSA, SDL, a MIPS toolchain, a music server, a real account, or downloaded audio.
+The non-UI suites require only a C compiler, Make and Python 3 (plus standard pthread/dl/math libraries). The `peq-ui`, `quickpanel-layout`, `corners`, `playbutton`, `edge-lock` and aggregate `ui` targets also need the LVGL 9.6.0 checkout described below. None requires ALSA, SDL, a MIPS toolchain, a music server, a real account, or downloaded audio.
 
 `run_subsonic_tests.py` starts a temporary threaded localhost HTTP server plus three HTTPS servers carrying the certificates in `tls_fixtures.py`, runs the C binary with a private temporary config directory, verifies its requests, then shuts down. All account values are synthetic. Build products live in ignored `.build/`; response/PCM fixtures are generated in memory rather than added to Git, and the three test certificates are pasted into that Python file rather than downloaded.
 
@@ -225,7 +227,9 @@ It checks the default and saved **Main menu icons only** setting on both panel
 sizes, all five themes, exact icon sizes and centering, glow-free icon-only
 tiles, unchanged secondary-menu tiles, restoration of the labeled layout and
 its decorative glows, real switch callbacks and config save/reload,
-theme/accent/tint/font changes, hidden-label translation, and the six tile
+the rounded-corners switch and its radius slider (hidden while the corners are
+off, one stop per step, the value beside it, the choice kept across off and
+on), theme/accent/tint/font changes, hidden-label translation, and the six tile
 destinations. The V1 language tree is used. Icon-only images must have
 native-size sources and no scaling transform, including after font-metric
 reflows. Actual LVGL snapshots verify pixel-for-pixel alpha edges, theme tints
@@ -244,6 +248,73 @@ software renderer. To regenerate the main-menu-only native art, see
 `tools/main_menu_icons.py`; Python image tools are not required to build or
 run the player/tests. The host-build workflow runs this suite as well. These
 checks do not replace visual and touch testing on a physical V1.
+
+## Rounded screen corners and their radius
+
+`make -C sonix-player/tests corners` links the real corner masks
+(`src/gui/shell/corners.c`), the board profile and the configuration store to
+LVGL's software renderer. The display is a plain framebuffer in DIRECT mode,
+which redraws only what was invalidated -- the way the panel is driven -- so a
+corner that was not repainted after the arc moved is still there to be found.
+It checks:
+
+- the arc starts at the board's own 16 px, the corners are off by default, and a
+  radius written into `device_config.ini` by hand is pulled into the slider's
+  2..20 px range rather than refused;
+- at every stop of the Appearance slider (2, 4 ... 20 px) the four corners are
+  one arc mirrored: black outside it, white inside, a blend only in the pixels
+  the edge crosses, and not a pixel touched anywhere else on the panel;
+- moving the arc while the corners are on screen -- smaller, larger, through
+  every stop, or while they were switched off -- leaves nothing of the old one
+  behind: the framebuffer after the update is identical to a full redraw;
+- the radius is kept in the config, read back after a restart, and a config that
+  never had one gives the board's arc.
+
+The slider on the Appearance page itself (hidden while the corners are off, the
+number beside it, the choice written down) is part of the main-menu suite above.
+
+## The play/pause button's two looks
+
+`make -C sonix-player/tests playbutton` runs the real `playbutton_paint()`
+(`src/gui/nowplaying/playbutton.c`) on a button built the way `player_init()`
+builds it, with the real themes, accents and glyph bitmaps, and reads the result
+back pixel by pixel from an LVGL snapshot. `player.c` itself is far too large to
+build off the device; what it hands the button is stood in for -- a page of one
+colour for the sleeve, and the accent as `chrome_accent()` chooses it. The
+**Legacy play button** switch under Music > Display options chooses the look.
+
+- Plain, the default, is the glyph alone at its own size on a button with no
+  body, at both the 44 px compact size and the 84 px one.
+- Legacy is a solid circle as big as the button and nothing past its rim, with
+  the glyph (play, pause and stop alike) scaled to come in from the rim at 44 px
+  and kept at its own size on a larger button, and centred: to within a pixel
+  once scaled, two at full size, where the play triangle's own bitmap sits a
+  pixel and a half off its box's middle.
+- A finger on either look darkens the glyph, and on the legacy one the disc as
+  well; letting go restores exactly what was there. Switching the look off and
+  on again, with the glyph changing in between, leaves no disc behind and brings
+  the same button back.
+- The glyph can be told from the disc under all five palettes, all twelve
+  accents and both discs the original player used (white over artwork or in a
+  dark palette, the palette's pressed surface on the light page): measured with
+  WCAG's contrast ratio on sRGB's own curve, never under 2.4:1, where the module
+  decides on a cheaper approximation of it. The accent keeps the original look
+  wherever it reads on the disc -- the default blue does, in the Light theme
+  with or without a sleeve -- and where it would wash out (a yellow, lime or
+  green accent, Tokyo Night's violet, OLED's white on white) the disc takes the
+  accent and the glyph turns black. Amber on Black and OLED always fill the disc
+  with their colour. A table of the looks anyone will see is checked as pixels,
+  and 600 arbitrary colours (custom palettes, a sleeve's tint) are held to the
+  same floor.
+- Both new texts exist in all eleven language files.
+
+Set `SONIX_PLAYBUTTON_SNAPSHOTS` to an output prefix to also write
+`<prefix>sheet.ppm`, the button in both looks under every palette and a spread of
+accents, for example:
+
+```sh
+SONIX_PLAYBUTTON_SNAPSHOTS=.build/playbutton- make -C sonix-player/tests playbutton
+```
 
 ## Headless screensaver artwork tests
 

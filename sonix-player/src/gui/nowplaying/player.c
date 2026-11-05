@@ -14,6 +14,7 @@
 #include "src/gui/nowplaying/cover.h"
 #include "src/gui/nowplaying/coverloader.h"
 #include "src/gui/nowplaying/lyricsearch.h"
+#include "src/gui/nowplaying/playbutton.h"
 #include "src/system/addons/addons.h"
 #include "src/gui/library/medialist.h"
 #include "src/gui/fonts/fonts.h"
@@ -453,6 +454,13 @@ static uint32_t album_tone; // the sleeve's colour, 0 when there is no sleeve
 // they are drawn in set_over_cover() and keep the colour they have always had.
 static bool cover_tint;
 
+// Whether the play/pause button sits on a filled disc, as the original player
+// drew it, rather than being a bare glyph like previous and next. Its own
+// setting (Music > Display options, "Legacy play button"), off unless it was
+// switched on. What the disc is made of is playbutton.c's business; this only
+// says which look is up and repaints when anything it depends on moves.
+static bool play_legacy;
+
 static lv_obj_t *song_text_obj; // the title and artist, wherever they live now
 static lv_obj_t *song_side_obj; // the star and the format, likewise
 static void align_title_with_star(void);
@@ -891,13 +899,32 @@ static sleeptimer_kind_t sleeptimer_kind_playing(void) {
 	return SLEEPTIMER_MUSIC;
 }
 
+// The play/pause button, in whichever look is chosen: the glyph in the accent,
+// and under it, with the legacy look on, the disc. The original player's disc
+// was white over artwork and in the dark palettes, and the palette's pressed
+// surface in the light one when there is no cover to stand out against;
+// playbutton.c turns it into the accent where those would not read.
+//
+// Poster's deck stands on its own ground and not on the sleeve (see
+// set_over_cover), so it is only "over artwork" in the other arrangements.
+//
+// Every path that can move one of the colours ends up here -- a new sleeve, a
+// new palette, the cover tint, the legacy switch itself -- and it is cheap
+// enough to run whenever the glyph is set.
+static void paint_play_button(void) {
+	if (!play_btn || !play_btn_icon) {
+		return;
+	}
+	bool over_artwork = chrome_over_cover && !layout_poster_now;
+	playbutton_paint(play_btn, play_btn_icon, play_legacy, chrome_accent(), over_artwork || theme()->dark);
+}
+
 static void apply_playback_status(audio_status_t status) {
 	bool playing = (status == AUDIO_STATUS_PLAYING);
 
-	// The glyph is the accent colour, always: play and pause are the same
-	// control in two states. Only the disc under it changes (see
-	// set_over_cover): white over artwork and in the dark theme, dark in the
-	// light theme when there is no cover to stand out against.
+	// The glyph is the accent colour: play and pause are the same control in
+	// two states, and only the glyph changes between them. Under it there is
+	// nothing, or -- with the legacy look on -- the disc (see paint_play_button).
 	//
 	// On a live stream there is no pause -- stopping and starting again does
 	// not resume, it reconnects -- so the button says stop while it is on.
@@ -905,8 +932,7 @@ static void apply_playback_status(audio_status_t status) {
 	// it opens a fresh connection to the same one.
 	lv_image_set_src(play_btn_icon,
 					 live_mode ? (playing ? &icon_stop : &icon_play) : (playing ? &icon_pause : &icon_play));
-	lv_obj_set_style_image_recolor(play_btn_icon, chrome_accent(), 0);
-	lv_obj_set_style_image_recolor_opa(play_btn_icon, LV_OPA_COVER, 0);
+	paint_play_button();
 
 	// Keep polling either way, just less often when nothing is playing. The
 	// timer must never be paused here: a track change is briefly reported as
@@ -1262,10 +1288,7 @@ static void set_over_cover(bool on) {
 		}
 	}
 
-	if (play_btn_icon) {
-		lv_obj_set_style_image_recolor(play_btn_icon, chrome_accent(), 0);
-		lv_obj_set_style_image_recolor_opa(play_btn_icon, LV_OPA_COVER, 0);
-	}
+	paint_play_button(); // the glyph, and the disc under it where there is one
 
 	// Repeat/shuffle is repainted here as well as by the transport painter:
 	// this is the common path for a newly decoded sleeve and a palette change,
@@ -1474,10 +1497,7 @@ static void paint_overflow_tint(void) {
 static void paint_transport_tint(void) {
 	bool tinted = cover_tint && album_tone;
 	back_btn_cover_tint(tinted, tinted ? cover_mark() : theme()->accent);
-	if (play_btn_icon) {
-		lv_obj_set_style_image_recolor(play_btn_icon, chrome_accent(), 0);
-		lv_obj_set_style_image_recolor_opa(play_btn_icon, LV_OPA_COVER, 0);
-	}
+	paint_play_button();
 	if (repeat_btn_icon) {
 		update_repeat_button();
 	}
@@ -6415,6 +6435,21 @@ void player_cover_tint_set(bool enabled) {
 	paint_transport_tint();
 }
 
+bool player_legacy_play_get(void) { return play_legacy; }
+
+void player_legacy_play_set(bool enabled) {
+	if (enabled == play_legacy) {
+		return;
+	}
+	play_legacy = enabled;
+	config_set_bool("screen", "player_legacy_play", enabled);
+	config_save();
+
+	// One button, repainted where it stands: the page is not laid out again and
+	// the colours it needs are the ones already worked out for the sleeve.
+	paint_play_button();
+}
+
 void player_output_unplugged(const char *what) {
 	if (audio_get_status() != AUDIO_STATUS_PLAYING) {
 		return;
@@ -7492,7 +7527,9 @@ void player_init(gui_config_t *cfg) {
 	lv_obj_add_event_cb(prev_btn, prev_btn_event_cb, LV_EVENT_CLICKED, NULL);
 	lv_obj_set_style_opa(prev_btn, LV_OPA_40, LV_STATE_DISABLED); // see apply_connecting()
 
-	// Play/pause: a plain glyph like prev/next, with the same generous hit target.
+	// Play/pause: a plain glyph like prev/next, with the same generous hit target
+	// -- or, with the legacy look on, the glyph on a disc as wide as the button
+	// (paint_play_button()).
 	play_btn = lv_btn_create(player_controls_buttons);
 	lv_obj_set_size(play_btn, compact ? COMPACT_PLAY_BTN : 84, compact ? COMPACT_PLAY_BTN : 84);
 	lv_obj_set_style_bg_opa(play_btn, LV_OPA_TRANSP, 0);
@@ -7864,6 +7901,8 @@ void player_init(gui_config_t *cfg) {
 	// exists -- and whether the controls follow the sleeve's colour, which is
 	// off unless it was switched on.
 	cover_tint = config_get_bool("screen", "player_cover_tint", false);
+	play_legacy = config_get_bool("screen", "player_legacy_play", false);
+	paint_play_button(); // the button was built before the setting was read
 	aam_leftie = config_get_bool("screen", "player_aam_leftie", false);
 	show_recording_year = config_get_bool("screen", "player_recording_year", false);
 	int saved = (int)config_get_int("screen", "player_layout_alt", 0);

@@ -23,7 +23,9 @@ font faces to compact raster sizes; and gives shared headers, settings rows,
 grids and status icons compact geometry.
 
 Rounded screen corners, the optional black quarter-circles on the system layer
-in Settings → Appearance, use **16 px** on this board (`bp_screen_corner_radius()`).
+in Settings → Appearance, start at **16 px** on this board
+(`bp_screen_corner_radius()`); a slider under the switch moves them from 2 to
+20 px ([A choice of corners](#a-choice-of-corners-and-the-original-play-button)).
 The mask the helpers were originally written beside is 28 px on a 480-wide
 panel; 28 px here would swallow the 24 px status bar, and 14 px (half of 28 by
 pixel count) undershoots the 2" IPS, whose visible corner is about 2 mm. The masks are A8, built the first time
@@ -3280,3 +3282,91 @@ player binary, and the result verified with `--sonix-v1 --stock`.
 stock firmware 1.3 and works, so images built on the 1.3 OTA are no longer
 test builds. This is the base of release 1.5.0. Keep the official 1.3 `v1.upt`
 and its checksum for recovery all the same.
+
+## A choice of corners, and the original play button
+
+Two small additions to Settings. Neither changes anything until it is chosen.
+
+**How round the screen corners are.** *Rounded corners* in Settings → Appearance
+had one arc, the 16 px of `bp_screen_corner_radius()`, sized to the 2" panel's
+glass. The V1's shell reads squarer than that in the hand, so the card now has
+a slider under the switch while the corners are on: 2 to 20 px in steps of 2
+(`CORNERS_RADIUS_MIN`, `_MAX` and `_STEP` in `corners.h`), with the radius as
+`N px` under the name. It is the toggle-and-slider card the timed options
+already use (`settingsrow_toggle_slider()`), and it stands at 16 px until
+something else is chosen, so anybody who already had the corners on sees
+exactly the corners they had. The top stop stays under the 24 px status bar: an
+arc taller than the bar would start to cut into its clock and battery.
+
+The radius is kept in the config alone (`ui/corner_radius`) and asked for each
+time it is wanted, so there is no second copy to fall out of step with it. A
+number written by hand is pulled into range and a key that was never written
+gives the board's arc. Moving the slider draws the four A8 masks again at the
+new size in the buffers they already have. The image descriptors are therefore
+the same pointers LVGL already holds, so each is dropped from the image cache
+(`lv_image_cache_drop()`, which `lvgl.h` no longer pulls in) and each corner
+has its source set again: that is what makes the object take the new size, and
+repaint the old area, which is the larger one when the arc has shrunk. While the
+corners are off the new radius is only remembered; the masks are redrawn when
+they are next turned on.
+`make -C sonix-player/tests corners` draws every stop into a framebuffer driven
+the way the panel is (only what was invalidated is redrawn) and holds each
+update to a full redraw, and `tests/ui/test_main_menu.c` drives the slider
+itself.
+
+**The original play button.** The player this port started from drew play and
+pause as a glyph on a filled disc, as big as the button. This fork had taken the
+disc away and left the bare glyph in the accent, like previous and next beside
+it. **Settings → Music → Display options → Legacy play button**
+(`screen/player_legacy_play`, off by default) puts the disc back.
+
+The drawing is `playbutton_paint()` in `src/gui/nowplaying/playbutton.c`, split
+out of `player.c` -- which is far too large to build without a device -- so that
+it can be drawn and measured on its own. `player.c`'s `paint_play_button()` calls
+it from every path that can move one of its colours: the glyph changing, a new
+sleeve, a new palette, the cover tint and the switch itself. Plain is exactly
+what it was: no body, the glyph at its own size, the accent. Legacy makes the
+button a circle (`LV_RADIUS_CIRCLE`) and scales the glyph to 55 % of the
+button's width, never above the size it was drawn at: the bitmaps are drawn for
+a button with nothing behind them, and at 40 px in a 44 px disc the triangle's
+corners would touch the rim. Pressing darkens the disc and the glyph through
+LVGL's own button theme; nothing of the button's own is added to that.
+
+The disc is the original's: white over artwork and in the dark palettes, and the
+palette's pressed surface in the light one when there is no sleeve behind it to
+stand out against. Poster's deck stands on its own ground and not on the sleeve,
+so there it counts as no sleeve. The glyph stays the accent for as long as it
+can be told from the disc, and that is a measured rule, not a list. Contrast is
+worked out on relative luminance with the gamma taken as 2 (it needs no libm,
+and chooses between two colours about as well as sRGB's own curve does, a little
+pessimistically):
+
+- the accent keeps the original look while it holds **2.5:1** on the disc. The
+  original shipped the default blue on the light theme's grey disc at 2.8, so a
+  floor of 3 would have changed the one case everybody has, and made the button
+  look different with and without a sleeve;
+- below that -- yellow, lime, green and cyan accents, Tokyo Night's violet,
+  OLED's white on a white disc -- the disc takes the accent, and the glyph is
+  white on it while that holds **3:1** (blue, pink, brown, Amber's colour) and
+  black where it does not, which on such a disc is 7:1 or better. That is not
+  what `theme_on_accent()` gives labels on accent fills (white on all but the
+  palest): a label can lean on its words, this glyph is all that tells play from
+  pause;
+- Amber on Black and OLED, whose point is one colour, always fill the disc with
+  it: a white disc in the middle of the page would be a second.
+
+Measured with the exact sRGB curve, the worst glyph/disc pair over every accent
+preset in every palette is 2.65:1, and over 600,000 random accents the worst is
+2.42:1 (a hot magenta on the light grey disc); once the disc has become the
+accent, it is never under 3:1.
+`make -C sonix-player/tests playbutton` runs the real function on a real button
+and reads pixels back: the disc round and nothing past its rim, the glyph
+centred and clear of it, plain and legacy alike, the press, switching back and
+forth with no disc left behind, every palette and accent held to the contrast
+above, and the two new texts in all eleven language files.
+`SONIX_PLAYBUTTON_SNAPSHOTS=<prefix>` also writes a contact sheet of the looks.
+
+**Readings to check.** "Legacy" here means the filled circle behind the glyph
+that the original player drew, and the corner choice rounds the screen's own
+corners, not the cards and tiles inside it. Both are written down so that a
+different reading can be asked for. Neither has been seen on the glass.
