@@ -98,6 +98,12 @@ void wifi_set_status_poll_slow(bool slow) { g_poll_slow = slow; }
 // would not synchronize those threads.
 static bool g_bt_streaming;
 
+// Guarded by lock. The user can override this automatic receiver policy by
+// explicitly operating Wi-Fi; the override lasts until receiver mode closes.
+static bool g_receiver_active, g_receiver_idle, g_receiver_override, g_receiver_dirty;
+// Worker-owned: only reconnect a link that this policy actually disconnected.
+static bool g_receiver_disconnected, g_receiver_attempted;
+
 void wifi_set_bluetooth_streaming(bool streaming) {
 	__atomic_store_n(&g_bt_streaming, streaming, __ATOMIC_RELAXED);
 }
@@ -158,6 +164,31 @@ static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t wake = PTHREAD_COND_INITIALIZER;
 static pthread_t worker;
 static bool worker_running;
+
+void wifi_set_receiver_priority(bool active, bool network_idle) {
+	pthread_mutex_lock(&lock);
+	bool old_target = g_receiver_active && g_receiver_idle && !g_receiver_override;
+	bool was_active = g_receiver_active;
+	if (!active) {
+		g_receiver_override = false;
+	}
+	g_receiver_active = active;
+	g_receiver_idle = network_idle;
+	bool target = active && network_idle && !g_receiver_override;
+	if (old_target != target || (was_active && !active)) {
+		g_receiver_dirty = true;
+		pthread_cond_signal(&wake);
+	}
+	pthread_mutex_unlock(&lock);
+}
+
+static void receiver_user_override(void) {
+	pthread_mutex_lock(&lock);
+	g_receiver_override = true;
+	g_receiver_dirty = true;
+	pthread_cond_signal(&wake);
+	pthread_mutex_unlock(&lock);
+}
 
 static job_t queue[JOB_QUEUE_LEN];
 static int queue_head, queue_count;
@@ -1407,6 +1438,51 @@ static void poll_status(void) {
 	}
 }
 
+// Keep the Wi-Fi switch and saved networks untouched. wpa_supplicant's
+// disconnect holds off reassociation until reconnect; unlike WIFI:OFF this
+// does not reset the shared SDIO chip while Bluetooth audio is arriving.
+// This runs only on the Wi-Fi worker, never on the real-time capture thread.
+static void receiver_coexistence(void) {
+	pthread_mutex_lock(&lock);
+	bool wanted = g_receiver_active && g_receiver_idle && !g_receiver_override && g_enabled;
+	bool enabled = g_enabled;
+	pthread_mutex_unlock(&lock);
+
+	if (!wanted) {
+		g_receiver_attempted = false;
+		if (g_receiver_disconnected) {
+			if (enabled) {
+				char reply[64];
+				if (wpa1("reconnect", reply, sizeof(reply)) != 0 || !wpa_ok(reply)) {
+					fprintf(stderr, "wifi: receiver coexistence: reconnect failed; will retry\n");
+					return;
+				}
+				fprintf(stderr, "wifi: receiver coexistence: reconnecting Wi-Fi\n");
+			}
+			g_receiver_disconnected = false;
+		}
+		return;
+	}
+	if (g_receiver_disconnected || g_receiver_attempted) {
+		return;
+	}
+	// Do not disconnect a radio which was never joined. A later association
+	// can still be caught after the next status poll.
+	char status[2048], state[32], reply[64];
+	read_status(status, sizeof(status));
+	if (!status_field(status, "wpa_state", state, sizeof(state)) || strcmp(state, "COMPLETED") != 0) {
+		return;
+	}
+	g_receiver_attempted = true;
+	if (wpa1("disconnect", reply, sizeof(reply)) != 0 || !wpa_ok(reply)) {
+		fprintf(stderr, "wifi: receiver coexistence: disconnect failed\n");
+		return;
+	}
+	g_receiver_disconnected = true;
+	fprintf(stderr, "wifi: receiver coexistence: Wi-Fi disconnected for Bluetooth receiver\n");
+	poll_status();
+}
+
 // ---------------------------------------------------------------------------
 // worker loop
 // ---------------------------------------------------------------------------
@@ -1448,7 +1524,7 @@ static void *wifi_worker(void *arg) {
 
 		pthread_mutex_lock(&lock);
 		have_job = take_job(&job);
-		if (!have_job) {
+		if (!have_job && !g_receiver_dirty) {
 			// Wait for work, but wake often enough to keep the status fresh while
 			// the radio is on. deadline_in_ms() carries the millisecond into
 			// tv_sec: a two-second poll is 2,000,000,000 ns, and adding that
@@ -1459,11 +1535,15 @@ static void *wifi_worker(void *arg) {
 			have_job = take_job(&job);
 		}
 		bool enabled = g_enabled;
+		g_receiver_dirty = false;
 		pthread_mutex_unlock(&lock);
 
 		if (have_job) {
 			switch (job.type) {
 			case JOB_POWER:
+				if (!job.arg_int) {
+					g_receiver_disconnected = false;
+				}
 				do_power(job.arg_int != 0);
 				pthread_mutex_lock(&lock);
 				g_power_busy = false;
@@ -1488,11 +1568,13 @@ static void *wifi_worker(void *arg) {
 				break;
 
 			case JOB_CONNECT:
+				g_receiver_disconnected = false;
 				do_connect(job.arg_a, job.arg_b, job.hidden);
 				poll_status();
 				break;
 
 			case JOB_DISCONNECT:
+				g_receiver_disconnected = false;
 				do_disconnect();
 				poll_status();
 				break;
@@ -1506,13 +1588,16 @@ static void *wifi_worker(void *arg) {
 			default:
 				break;
 			}
+			receiver_coexistence();
 			continue;
 		}
 
+		receiver_coexistence();
 		uint32_t poll_period = status_poll_period_ms();
 		if (enabled && (uint32_t)(now_ms() - last_poll) >= poll_period) {
 			last_poll = now_ms();
 			poll_status();
+			receiver_coexistence();
 		}
 	}
 
@@ -1584,7 +1669,10 @@ static void set_enabled(bool on, bool remember) {
 	post_job(&job);
 }
 
-void wifi_set_enabled(bool on) { set_enabled(on, true); }
+void wifi_set_enabled(bool on) {
+	receiver_user_override();
+	set_enabled(on, true);
+}
 
 // The idle park. Same radio, but the setting is left alone: a park written to
 // the config comes back after a reboot as "the user switched Wi-Fi off", with
@@ -1646,6 +1734,7 @@ void wifi_get_status(wifi_status_t *out) {
 }
 
 void wifi_scan_start(void) {
+	receiver_user_override();
 	pthread_mutex_lock(&lock);
 	bool skip = g_scanning || !g_enabled;
 	if (!skip) {
@@ -1687,6 +1776,7 @@ int wifi_get_networks(wifi_network_t *out, int max) {
 }
 
 static void queue_connect(const char *ssid, const char *psk, bool hidden) {
+	receiver_user_override();
 	if (!ssid || !ssid[0]) {
 		return;
 	}
@@ -1704,6 +1794,7 @@ void wifi_connect(const char *ssid, const char *psk) { queue_connect(ssid, psk, 
 void wifi_connect_hidden(const char *ssid, const char *psk) { queue_connect(ssid, psk, true); }
 
 void wifi_disconnect(void) {
+	receiver_user_override();
 	// Reported like the other two: leaving a network is something the user
 	// asked for and wants told about.
 	set_opkind(WIFI_OPKIND_DISCONNECT);
@@ -1714,6 +1805,7 @@ void wifi_disconnect(void) {
 }
 
 void wifi_forget(const char *ssid) {
+	receiver_user_override();
 	if (!ssid || !ssid[0]) {
 		return;
 	}

@@ -84,8 +84,11 @@ static const char FAKE_WPA_CLI[] =
 	"    if [ -f \"$FAKE_WPA_SAVED\" ]; then printf '0\\tSavedHidden\\tany\\t[CURRENT]\\n'\n"
 	"    else printf 'network id\\tssid\\tbssid\\tflags\\n'; fi;;\n"
 	"  add_network) printf '0\\n';;\n"
-	"  status) printf 'wpa_state=COMPLETED\\nssid=Whatever\\nfreq=2437\\nip_address=192.168.1.50\\naddress=aa:bb:cc:dd:ee:ff\\n';;\n"
+	"  status) if [ -f \"$FAKE_WPA_LINK\" ]; then printf 'wpa_state=DISCONNECTED\\n';\n"
+	"    else printf 'wpa_state=COMPLETED\\nssid=Whatever\\nfreq=2437\\nip_address=192.168.1.50\\naddress=aa:bb:cc:dd:ee:ff\\n'; fi;;\n"
 	"  signal_poll) printf 'RSSI=-52\\n';;\n"
+	"  disconnect) touch \"$FAKE_WPA_LINK\"; printf 'OK\\n';;\n"
+	"  reconnect|select_network) rm -f \"$FAKE_WPA_LINK\"; printf 'OK\\n';;\n"
 	"  scan_results)\n"
 	"    printf 'bssid / frequency / signal / flags / ssid\\n'\n"
 	"    if [ -n \"$FAKE_WPA_SCAN_SSID\" ]; then\n"
@@ -157,6 +160,18 @@ static int log_find(const char *log, const char *needle) {
 	}
 }
 
+/* Receiver-priority work is asynchronous; wait for its actual supplicant call. */
+static void wait_command(const char *command) {
+	for (int i = 0; i < 1000; i++) {
+		if (log_find(slurp(log_path), command) >= 0) {
+			return;
+		}
+		struct timespec nap = {.tv_nsec = 10 * 1000 * 1000};
+		nanosleep(&nap, NULL);
+	}
+	assert(!"Wi-Fi receiver coexistence command never arrived");
+}
+
 /* Waits for the worker to land the last request, and returns its verdict. */
 static wifi_op_t wait_op(char *ssid_out, size_t ssid_size) {
 	for (int i = 0; i < 1500; i++) {
@@ -184,6 +199,9 @@ int main(void) {
 	assert(setenv("PATH", path_env, 1) == 0);
 	assert(setenv("FAKE_WPA_LOG", log_path, 1) == 0);
 	assert(setenv("FAKE_WPA_SAVED", saved_path, 1) == 0);
+	char link_path[512];
+	snprintf(link_path, sizeof(link_path), "%s/link-off", dir);
+	assert(setenv("FAKE_WPA_LINK", link_path, 1) == 0);
 	clear_log();
 
 	wifi_init();
@@ -310,6 +328,56 @@ int main(void) {
 	assert(log_find(log, "status|") >= 0);
 	assert(log_find(log, "signal_poll") < 0);
 	wifi_set_bluetooth_streaming(false);
+
+	/* A connected but otherwise idle Wi-Fi link competes with Bluetooth
+	 * reception. Disassociate without touching the user switch or credentials,
+	 * then reconnect only our own link. A network service blocks the policy.
+	 * Explicit user disconnection must never be undone on receiver exit. */
+	wifi_set_enabled_transient(true);
+	while (wifi_busy() || wifi_scan_running()) {
+		struct timespec nap = {.tv_nsec = 10 * 1000 * 1000};
+		nanosleep(&nap, NULL);
+	}
+	clear_log();
+	wifi_set_receiver_priority(false, true); // end the prior user-initiated join
+	wifi_set_receiver_priority(true, false);
+	struct timespec settle_coex = {.tv_nsec = 100 * 1000 * 1000};
+	nanosleep(&settle_coex, NULL);
+	assert(log_find(slurp(log_path), "disconnect|") < 0);
+	wifi_set_receiver_priority(true, true);
+	wait_command("disconnect|");
+	assert(wifi_get_enabled());
+	clear_log();
+	wifi_set_receiver_priority(true, true);
+	nanosleep(&settle_coex, NULL);
+	assert(log_find(slurp(log_path), "disconnect|") < 0);
+	wifi_set_receiver_priority(true, false);
+	wait_command("reconnect|");
+	clear_log();
+	wifi_set_receiver_priority(true, true);
+	wait_command("disconnect|");
+	clear_log();
+	wifi_disconnect();
+	assert(wait_op(ssid, sizeof(ssid)) == WIFI_OP_OK);
+	wifi_set_receiver_priority(false, true);
+	nanosleep(&settle_coex, NULL);
+	assert(log_find(slurp(log_path), "reconnect|") < 0);
+	assert(wifi_get_enabled());
+
+	/* A new session without an association needs no synthetic reconnect.
+	 * A user-initiated join during a session is left alone thereafter. */
+	clear_log();
+	wifi_set_receiver_priority(true, true);
+	nanosleep(&settle_coex, NULL);
+	assert(log_find(slurp(log_path), "disconnect|") < 0);
+	assert(log_find(slurp(log_path), "reconnect|") < 0);
+	wifi_connect("VisibleNet", NULL);
+	assert(wait_op(ssid, sizeof(ssid)) == WIFI_OP_OK);
+	clear_log();
+	wifi_set_receiver_priority(true, true);
+	nanosleep(&settle_coex, NULL);
+	assert(log_find(slurp(log_path), "disconnect|") < 0);
+	wifi_set_receiver_priority(false, true);
 
 	printf("PASS wifi join (scan_ssid for hidden networks only; a saved network the scan "
 		   "reports as open gets key_mgmt=NONE, a secured or out-of-range one keeps its entry)\n");
