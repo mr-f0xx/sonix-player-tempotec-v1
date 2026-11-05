@@ -1,6 +1,7 @@
 #include "main_menu.h"
 
 #include <stdint.h>
+#include <stdio.h>
 #include <string.h>
 
 #include "lvgl/lvgl.h"
@@ -22,6 +23,8 @@
 #include "src/gui/shell/switcher.h"
 #include "src/gui/shell/theme.h"
 #include "src/gui/streaming/streaming.h"
+#include "src/system/streaming/podcast.h"
+#include "src/system/streaming/podcastcache.h"
 #include "src/gui/wireless/wireless.h"
 #include "src/system/addons/addons.h"
 #include "src/system/core/config.h"
@@ -317,7 +320,40 @@ static void main_menu_refresh_now_playing(void) {
 			const char *file = strrchr(state.current_file, '/');
 			title = file ? file + 1 : state.current_file;
 		}
-		if (state.metadata.artist[0]) {
+		// A podcast's line names the show and its author rather than the
+		// episode's artist tag, which holds only the show: the sidecar written
+		// with the download is what knows the creator, and the player already
+		// reads it for its own star.
+		char podcast_artist[256] = "";
+		if (!state.live && state.current_file[0] && podcastcache_is_episode(state.current_file)) {
+			podcast_feed_t feed;
+			if (player_current_podcast_feed(NULL, &feed)) {
+				if (feed.author[0] && feed.title[0] && strcmp(feed.author, feed.title) != 0) {
+					snprintf(podcast_artist, sizeof(podcast_artist), "%.120s - %.128s", feed.author, feed.title);
+				} else if (feed.author[0]) {
+					snprintf(podcast_artist, sizeof(podcast_artist), "%s", feed.author);
+				} else if (feed.title[0]) {
+					snprintf(podcast_artist, sizeof(podcast_artist), "%s", feed.title);
+				}
+			}
+			if (!podcast_artist[0]) {
+				char author[128] = "";
+				char feed_title[128] = "";
+				podcastcache_tag(state.current_file, "feed_author", author, sizeof(author));
+				podcastcache_tag(state.current_file, "artist", feed_title, sizeof(feed_title));
+				if (author[0] && feed_title[0] && strcmp(author, feed_title) != 0) {
+					snprintf(podcast_artist, sizeof(podcast_artist), "%.120s - %.120s", author, feed_title);
+				} else if (author[0]) {
+					snprintf(podcast_artist, sizeof(podcast_artist), "%s", author);
+				} else if (feed_title[0]) {
+					snprintf(podcast_artist, sizeof(podcast_artist), "%s", feed_title);
+				}
+			}
+		}
+
+		if (podcast_artist[0]) {
+			artist = podcast_artist;
+		} else if (state.metadata.artist[0]) {
 			artist = state.metadata.artist;
 		}
 

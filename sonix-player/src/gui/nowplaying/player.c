@@ -52,6 +52,9 @@
 #include "src/system/streaming/podcast.h"
 #include "src/system/streaming/podcastcache.h"
 #include "src/system/streaming/podcastsubs.h"
+#include "src/system/streaming/podcastplayed.h"
+#include "src/gui/streaming/podcastpage.h"
+#include "src/gui/streaming/podcastsaved.h"
 #include "src/system/streaming/qobuzcache.h"
 #include "src/system/streaming/subsonicstream.h"
 #include "src/system/streaming/qobuzsync.h"
@@ -5140,6 +5143,8 @@ static void player_refresh_theme(void) {
 
 static void update_qobuz_badge(void);
 
+static bool podcast_current_feed(long long *id_out, podcast_feed_t *feed_out);
+
 // Refreshes the now-playing info (title + artist) from the current
 // device state and resets the per-track length cache. Used both when the user
 // picks a file and when playback auto-advances to a new track.
@@ -5194,8 +5199,38 @@ static void refresh_now_playing(void) {
 	scrolltext_set(song_title_label, state.metadata.title[0] ? state.metadata.title : (slash ? slash + 1 : file));
 	aam_strip_fit(); // the strip shares its row by what the two names now say
 
-	// Whose name goes under the title: see metadata_shown_artist().
-	const char *artist = metadata_shown_artist(&state.metadata);
+	// Whose name goes under the title: a podcast episode names its show's
+	// author and its show, not the artist tag -- which holds only the show,
+	// because that is what the queue, the lists and the sleep timer want
+	// there. The author lives in the sidecar alone, so it is read from there;
+	// an episode copied to the card by hand has no sidecar and keeps the tag.
+	char podcast_artist[256] = "";
+	if (!state.live && podcastcache_is_episode(state.current_file)) {
+		podcast_feed_t feed;
+		if (podcast_current_feed(NULL, &feed)) {
+			if (feed.author[0] && feed.title[0] && strcmp(feed.author, feed.title) != 0) {
+				snprintf(podcast_artist, sizeof(podcast_artist), "%.120s - %.128s", feed.author, feed.title);
+			} else if (feed.author[0]) {
+				snprintf(podcast_artist, sizeof(podcast_artist), "%s", feed.author);
+			} else if (feed.title[0]) {
+				snprintf(podcast_artist, sizeof(podcast_artist), "%s", feed.title);
+			}
+		}
+		if (!podcast_artist[0]) {
+			char author[128] = "";
+			char feed_title[128] = "";
+			podcastcache_tag(state.current_file, "feed_author", author, sizeof(author));
+			podcastcache_tag(state.current_file, "artist", feed_title, sizeof(feed_title));
+			if (author[0] && feed_title[0] && strcmp(author, feed_title) != 0) {
+				snprintf(podcast_artist, sizeof(podcast_artist), "%.120s - %.120s", author, feed_title);
+			} else if (author[0]) {
+				snprintf(podcast_artist, sizeof(podcast_artist), "%s", author);
+			} else if (feed_title[0]) {
+				snprintf(podcast_artist, sizeof(podcast_artist), "%s", feed_title);
+			}
+		}
+	}
+	const char *artist = podcast_artist[0] ? podcast_artist : metadata_shown_artist(&state.metadata);
 	scrolltext_set(song_artist_label, artist);
 	lyrics_head_sync();
 	alt_pills_sync();
@@ -5580,14 +5615,10 @@ static void update_format_label(const device_state_t *state) {
 		return;
 	}
 
-	// Nothing on a podcast. "16/44.1 MP3" is true and useless: an episode is
-	// not chosen for its audio quality, there is no better version to buy, and
-	// the number takes the line under the title without saying anything worth
-	// knowing.
-	if (podcastcache_is_episode(state->current_file)) {
-		lv_label_set_text(format_label, "");
-		return;
-	}
+	// A podcast episode is measured like anything else: an episode arrives at
+	// whatever rate and bitrate the publisher chose, and the two say whether
+	// the download is the one the show puts out or a smaller one. The line is
+	// the same one a track gets, so nothing extra is read to draw it.
 
 	const char *dot = strrchr(state->current_file, '.');
 	char kind[8] = "";
@@ -5793,6 +5824,23 @@ static void handle_track_finished(void) {
 	// for, which is what makes this the cheaper half of the audiobook's version.
 	char path[512];
 	audio_get_current_file(path, sizeof(path));
+
+	// Heard to the end: that is what marks an episode listened, and it is the
+	// only place that can be sure -- a stop or a skip is not an ending, and
+	// audio.c's completion only fires when the file itself ran out. Marked
+	// before the early return below, so an episode that ends under "Stop at end
+	// of episode" is counted as heard too.
+	if (podcastcache_is_episode(path)) {
+		long long episode = podcastcache_episode_id(path);
+		podcastplayed_set(episode, true);
+		// The lists that carry the mark are behind this sheet, not unloaded:
+		// closing it reloads no screen, so the rows are told now. Each does
+		// nothing unless it is the list on screen, and only rebinds the row
+		// that shows this episode.
+		podcastpage_episode_heard(episode);
+		podcastsaved_episode_heard(episode);
+	}
+
 	if (podcast_stop_at_episode_end() && podcastcache_is_episode(path)) {
 		fprintf(stderr, "player: end of the episode; not starting the next\n");
 		refresh_now_playing();
@@ -6457,6 +6505,23 @@ void player_output_unplugged(const char *what) {
 	printf("player: %s unplugged; pausing\n", what ? what : "the output");
 	audio_pause();
 	apply_playback_status(AUDIO_STATUS_PAUSED);
+}
+
+// Pause what is playing before a stream is handed over to the decoder.
+//
+// A station is stopped rather than paused: it has no position to come back to,
+// and leaving it open while the next thing loads leaves two audio paths open.
+// The status is applied here so the transport and the title update at once,
+// instead of showing "playing" over a stream that is still loading.
+void player_pause_for_loading(void) {
+	if (radio_is_active()) {
+		radio_stop();
+		player_refresh_now_playing();
+	}
+	if (audio_get_status() == AUDIO_STATUS_PLAYING) {
+		audio_pause();
+		apply_playback_status(AUDIO_STATUS_PAUSED);
+	}
 }
 
 // A pause and not a stop, and for the same reason as the one above: the point

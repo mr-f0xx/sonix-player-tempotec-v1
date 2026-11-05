@@ -131,6 +131,11 @@ void player_aam_leftie_set(bool enabled);
 // that went away was the one in use; this only acts on the decision.
 void player_output_unplugged(const char *what);
 
+// Pauses whatever is playing before a new stream is loaded (stopping the radio
+// outright). Podcasts, Tidal and Qobuz call it when their rows
+// start loading, so the transport shows paused rather than playing.
+void player_pause_for_loading(void);
+
 // ---------------------------------------------------------------------------
 // The player as a sheet
 //

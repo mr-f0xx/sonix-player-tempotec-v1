@@ -27,6 +27,7 @@ make -C sonix-player/tests artsearch
 make -C sonix-player/tests tagdate
 make -C sonix-player/tests genius
 make -C sonix-player/tests mostplayed
+make -C sonix-player/tests podcastplayed
 make -C sonix-player/tests radio-store
 make -C sonix-player/tests led-rate
 make -C sonix-player/tests aamlayout
@@ -437,6 +438,15 @@ a reboot). It is a regression suite for a handle that answered zero rows over a
 table with plays in it: the row-id pass named a `sortkey` column that
 `PLAY_COUNTS` has never had, so the statement failed to prepare and the page
 showed its "nothing to show" note whatever was counted.
+
+## Heard podcast episodes, against the real database
+
+`make -C sonix-player/tests podcastplayed` checks the store behind the podcast
+lists' tick and dimming, against a real `podcast.db` in a temporary card: the
+marks themselves, the sorted set the lookup binary-searches, what survives a
+restart, and a card whose database is deleted under the player. `utils.c`'s file
+identity is the only stubbed helper -- its contract, that deleted or replaced
+counts as changed, is reproduced with `stat()`.
 
 ## Headless calculator and notes page tests
 

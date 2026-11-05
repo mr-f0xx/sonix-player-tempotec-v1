@@ -14,15 +14,16 @@
 // asking a slot for something new abandons what it was waiting for, which is
 // exactly what scrolling does.
 //
-// Downloaded images stay on the card in `.local/qobuz-art`, named by the MD5 of
-// the URL, so looking at the same list a second time downloads nothing. That
-// directory is not cleared along with the cached tracks -- it is tens of
-// kilobytes in total, and refetching every time would waste far more than the
-// space it occupies.
+// Downloaded images stay on the card in `.local/<service>-cache` (e.g.
+// `.local/tidal-cache`, `.local/ytmusic-cache`, `.local/podcast-cache`,
+// `.local/qobuz-cache`), named by the MD5 of the URL, so looking at the same
+// list a second time downloads nothing. That cache is kept across visits and
+// restarts to avoid re-downloading and save CPU power, and can be cleared via
+// the Optimizer when desired.
 //
-// Tidal uses this too, despite the filename: nothing in here knows about Qobuz.
-// A URL goes in, an image comes out, and the name it is stored under is the MD5
-// of that URL, so two services cannot collide even deliberately.
+// Shared by Tidal, YouTube Music, Podcasts and Qobuz: nothing in here is
+// service-specific. A URL goes in, an image comes out, and the name it is stored
+// under is the MD5 of that URL inside the service's designated cache folder.
 
 // How many list rows may have a cover in flight: the rows that fit on screen,
 // plus margin for scrolling.
@@ -49,7 +50,13 @@ void qobuzart_set_root(const char *sd_root);
 
 // Requests the cover at `url`, square, `size` pixels, for `slot`. Returns
 // immediately. Any earlier request on this slot is abandoned.
-void qobuzart_request(const void *owner, int slot, const char *url, int size);
+// Requests the cover at `url`, square, `size` pixels, for `slot`.
+// `folder` specifies which cache folder under .local/ to keep the image in
+// (e.g. "tidal-cache", "ytmusic-cache", "podcast-cache", "qobuz-cache").
+void qobuzart_request(const void *owner, const char *folder, int slot, const char *url, int size);
+
+// Clears cached artwork files (.img) inside the given cache folder.
+void qobuzart_clear_folder(const char *folder);
 
 // Forgets the slot: anything in flight is abandoned and anything ready is
 // freed. Does nothing when the slots are owned by someone else.

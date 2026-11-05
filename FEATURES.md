@@ -117,7 +117,25 @@
 - **Podcasts** - the Podcast Index catalogue: search, trending, follow up to 100
 shows kept on the device. Downloaded episodes land in the card's `Podcast`
 folder, which also takes podcasts copied there by hand — see
-[Podcasts on the card](#podcasts-on-the-card).
+[Podcasts on the card](#podcasts-on-the-card). The followed list is ordered by
+how much of each podcast has been listened to on this device, most first, with
+A–Z and Z–A beside it under Podcast settings → Order; the chart and a podcast's
+episodes are kept on the card, so a tab opens on the names it showed last time.
+A row's menu has **Select**: tick several podcasts and follow or unfollow them
+as a group from the corner.
+- **Episodes heard and unheard** - an episode played to its end is ticked and
+dimmed in the list, kept in `podcast.db` by episode id, so it reads the same
+whether it was streamed or downloaded. A long press marks one heard (or heard
+and-not) by hand, for what was finished somewhere else or marked by mistake.
+The order button in the heading turns an episode list round: newest first, or
+oldest first, remembered in the config and shared with the card's list.
+- **The chart follows a region** - the catalogue filters its trending chart by
+language and offers no country filter, so the language chosen under Podcast
+settings → Trending region is what "trending where I am" means here: the
+interface's own language unless another is picked, for a listener who wants the
+podcasts of a place they are not. The choice is the one shared list the radio
+and the other services write, and a chart with nothing in it falls back to
+English rather than emptying the page.
 - **Radio** - the radio-browser.info directory by language, country or genre,
 plus search, favourites, recently played, and **My stations** read from a
 `radio.txt` you write yourself in the card root. MP3, AAC and FLAC (native,
@@ -170,6 +188,11 @@ a self-signed certificate), and HLS.
   the artwork embedded in the episode files' own tags.
 - **Played as podcasts** - the now-playing page marks an episode from this
   folder as a podcast, with its own skip buttons and sleep timer.
+- **Heard marks and order here too** - a downloaded episode carries the same
+  tick and the same dimming as the streamed one, and the long press marks it
+  heard or unheard. A file copied onto the card by hand has no catalogue id, so
+  it offers only Delete. The heading's order button turns this list round, and
+  the setting is the one the online episode list uses.
 
 ## Audiobooks
 
