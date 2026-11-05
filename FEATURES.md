@@ -123,9 +123,9 @@ A–Z and Z–A beside it under Podcast settings → Order; the chart and a podc
 episodes are kept on the card, so a tab opens on the names it showed last time.
 A row's menu has **Select**: tick several podcasts and follow or unfollow them
 as a group from the corner.
-- **Episodes heard and unheard** - an episode played to its end is ticked and
-dimmed in the list, kept in `podcast.db` by episode id, so it reads the same
-whether it was streamed or downloaded. A long press marks one heard (or heard
+- **Episodes heard and unheard** - an episode played to its end wears a ticked
+badge on its cover in the list and its text steps back, kept in `podcast.db` by
+episode id, so it reads the same whether it was streamed or downloaded. A long press marks one heard (or heard
 and-not) by hand, for what was finished somewhere else or marked by mistake.
 The order button in the heading turns an episode list round: newest first, or
 oldest first, remembered in the config and shared with the card's list.

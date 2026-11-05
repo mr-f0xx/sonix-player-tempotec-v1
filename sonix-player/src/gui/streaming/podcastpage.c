@@ -279,7 +279,19 @@ static void build_busy_layer(void) {
 // services cannot tread on each other even by accident (see qobuzart.h).
 // ---------------------------------------------------------------------------
 
-#define ROW_THUMB bp_pick(36, 60)
+// The cover on a row, and how much of the row the text may have.
+//
+// These are the Music list's proportions rather than the ones this page was
+// drawn with: a 32 px cover on a 46 px row, 5 px of padding and 5 px between
+// the cover and the words. The two lines a row carries are the title and the
+// date, and on a 240 px panel every pixel taken by the picture and the gaps is
+// a pixel the title does not get -- at the old sizes an episode's name was cut
+// at about ten characters.
+//
+// The tick of a heard episode is worn on the cover rather than given a column
+// of its own between the text and the dots, for the same reason: that column
+// was 32 px of the row, and it said one bit.
+#define ROW_THUMB bp_pick(32, 60)
 
 static lv_obj_t *list_container;
 static lv_obj_t *list_title;
@@ -317,9 +329,22 @@ static int list_count;
 // Everything ABOUT an entry -- its cover, whether that cover failed, which row
 // lent it -- stays indexed by the entry, not by the widget. The widget is only
 // what draws it this second.
-#define ROW_HEIGHT bp_pick(50, 88)
-#define ROW_GAP bp_pick(6, 12)
+#define ROW_HEIGHT bp_pick(46, 88)
+#define ROW_GAP bp_pick(5, 12)
 #define ROW_PITCH (ROW_HEIGHT + ROW_GAP)
+// The row's own padding, and the column the dots or the selection tick stand
+// in. The two marks are the same width on purpose: a row that grows a tick
+// when selection starts must not move the text under the finger that started
+// it.
+#define ROW_PAD_H bp_pick(5, 16)
+#define ROW_PAD_COL bp_pick(5, 8)
+#define ROW_MARK_W bp_pick(24, 44)
+// The disc a heard episode wears in the corner of its cover, and how far inside
+// that corner it sits. Fully on the picture, not straddling its edge: the gap
+// between the cover and the words is 5 px, and a badge pulled over the corner
+// would land on the first letter of the title.
+#define HEARD_BADGE bp_pick(20, 30)
+#define HEARD_INSET bp_pick(1, 3)
 // The two lines of a row, at the sizes the Tidal tab settled on for this panel
 // -- the row is the same thing on both pages, and two lines of 22/18 on a
 // 240-px screen leave room for two rows where three and a half would fit.
@@ -1063,9 +1088,9 @@ static void build_rows(int width) {
 		lv_obj_set_style_radius(row->button, bp_pick(10, 12), 0);
 		lv_obj_set_style_border_width(row->button, 0, 0);
 		lv_obj_set_style_shadow_width(row->button, 0, 0);
-		lv_obj_set_style_pad_hor(row->button, bp_pick(6, 16), 0);
+		lv_obj_set_style_pad_hor(row->button, ROW_PAD_H, 0);
 		lv_obj_set_style_pad_ver(row->button, 0, 0);
-		lv_obj_set_style_pad_column(row->button, bp_pick(6, 8), 0);
+		lv_obj_set_style_pad_column(row->button, ROW_PAD_COL, 0);
 		lv_obj_set_scrollable(row->button, false);
 		lv_obj_set_hidden(row->button, true);
 		lv_obj_set_flex_flow(row->button, LV_FLEX_FLOW_ROW);
@@ -1113,25 +1138,56 @@ static void build_rows(int width) {
 		lv_obj_add_style(row->detail, &theme_style_text_dim, 0);
 		lv_obj_set_style_text_font(row->detail, ROW_DETAIL_FONT, 0);
 
-		// The tick of an episode that has been heard. Between the text and the
-		// three dots, because a podcast row shows no dots and an episode row
-		// shows no dots either: whichever list this row is bound to, the tick
-		// has the end of the row to itself.
-		row->heard = lv_image_create(row->button);
-		lv_obj_set_size(row->heard, 32, 32);
-		lv_image_set_src(row->heard, &icon_check);
-		lv_obj_add_style(row->heard, &theme_style_icon, 0);
-		// Half strength, and only the opacity: the colour is the theme's own
-		// and follows a theme change, which a colour taken here would not.
-		lv_obj_set_style_image_recolor_opa(row->heard, LV_OPA_50, 0);
-		lv_image_set_scale(row->heard, 156); // 36 px source -> about 22 px
-		lv_obj_set_event_bubble(row->heard, true);
+		// The tick of an episode that has been heard, worn on the cover.
+		//
+		// It used to stand in a column of its own between the text and the
+		// dots, which cost the title 32 px of a 240 px row -- and it is the
+		// episode titles that cannot spare them. Hung on the picture instead
+		// it costs nothing: it is out of the layout (IGNORE_LAYOUT) and
+		// overlaps the bottom right corner of the cover by a couple of pixels.
+		//
+		// The disc behind it is the card's own colour and the tick is the
+		// theme's icon ink, both taken from the theme's styles rather than from
+		// colours read here, so a theme change repaints the badge with the rest
+		// of the page. Over artwork the disc reads as a punched-out hole with
+		// the tick in it.
+		row->heard = lv_obj_create(row->button);
+		lv_obj_remove_style_all(row->heard);
+		lv_obj_add_style(row->heard, &theme_style_card, 0);
+		lv_obj_set_size(row->heard, HEARD_BADGE, HEARD_BADGE);
+		lv_obj_set_style_radius(row->heard, LV_RADIUS_CIRCLE, 0);
+		lv_obj_set_style_bg_opa(row->heard, LV_OPA_COVER, 0);
+		lv_obj_set_style_border_width(row->heard, 0, 0);
+		lv_obj_set_style_shadow_width(row->heard, 0, 0);
+		lv_obj_set_style_pad_all(row->heard, 0, 0);
+		lv_obj_set_scrollable(row->heard, false);
+		lv_obj_set_ignore_layout(row->heard, true);
+		// Out of the layout, and not a tap target: the row underneath plays the
+		// episode, and a finger that lands on the corner of the cover still
+		// means the row.
+		lv_obj_set_clickable(row->heard, false);
+		// Hung from the row's content box, which starts where the cover does:
+		// the cover is the first thing in it and is centred in the row's
+		// height, so its bottom right corner is at (ROW_THUMB, top + ROW_THUMB)
+		// and the badge is placed one inset inside that. LV_ALIGN_LEFT_MID
+		// takes the object's own left edge for x and its middle for y.
+		lv_obj_align(row->heard, LV_ALIGN_LEFT_MID,
+					 ROW_THUMB - HEARD_BADGE - HEARD_INSET,
+					 (ROW_HEIGHT - ROW_THUMB) / 2 + ROW_THUMB - HEARD_INSET - HEARD_BADGE / 2 -
+							 ROW_HEIGHT / 2);
 		lv_obj_set_hidden(row->heard, true);
+
+		lv_obj_t *heard_tick = lv_image_create(row->heard);
+		lv_image_set_src(heard_tick, &icon_check);
+		lv_obj_add_style(heard_tick, &theme_style_icon, 0);
+		lv_obj_set_style_image_recolor_opa(heard_tick, LV_OPA_COVER, 0);
+		lv_image_set_scale(heard_tick, (uint32_t)(LV_SCALE_NONE * bp_pick(14, 20) / 36));
+		lv_obj_center(heard_tick);
 
 		// The selection mark, at the same end of the row as the tick and the
 		// dots: it is the last thing a finger passes on its way off the row.
 		row->check = lv_image_create(row->button);
-		lv_obj_set_size(row->check, 32, 32);
+		lv_obj_set_size(row->check, ROW_MARK_W, ROW_MARK_W);
 		// The plain tick the file browser puts on a chosen row: the circled one
 		// this used to show was a 36 px ring around its own tick, and at 22 px
 		// the two ran into each other and read as a smudge.
@@ -1143,7 +1199,7 @@ static void build_rows(int width) {
 		lv_obj_set_hidden(row->check, true);
 
 		row->menu_btn = lv_btn_create(row->button);
-		lv_obj_set_size(row->menu_btn, bp_pick(30, 44), bp_pick(30, 44));
+		lv_obj_set_size(row->menu_btn, ROW_MARK_W, ROW_MARK_W);
 		lv_obj_set_style_bg_opa(row->menu_btn, LV_OPA_TRANSP, 0);
 		lv_obj_set_style_border_width(row->menu_btn, 0, 0);
 		lv_obj_set_style_shadow_width(row->menu_btn, 0, 0);
