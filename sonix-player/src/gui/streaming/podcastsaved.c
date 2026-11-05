@@ -32,8 +32,24 @@
 #include "src/system/streaming/podcastdl.h"
 #include "src/system/streaming/podcastplayed.h"
 
-#define SAVED_ROW_HEIGHT bp_pick(60, 88)
-#define SAVED_THUMB bp_pick(44, 60)
+// The row's measurements, the online podcast list's and the Music list's: a
+// 32 px cover on a 44 px row, 5 px of padding and 5 px between the cover and
+// the words, and the same pair of faces. This page was drawn with a 44 px cover on a 60 px row in
+// font_ui_22 over font_ui_18, which is the largest row in the interface -- on a
+// podcast kept on the card the name is the whole point of the row, and every
+// pixel the picture and the gaps take is one the name does not get.
+#define SAVED_ROW_HEIGHT bp_pick(44, 88)
+#define SAVED_THUMB bp_pick(32, 60)
+#define SAVED_PAD_H bp_pick(5, 16)
+#define SAVED_PAD_COL bp_pick(5, 12)
+// The column the dots and the selection tick stand in, one width so that a row
+// growing a tick when selection starts does not move the text.
+#define SAVED_MARK_W bp_pick(24, 34)
+// The disc a heard episode wears in the corner of its cover.
+#define SAVED_BADGE bp_pick(20, 30)
+#define SAVED_BADGE_INSET bp_pick(1, 3)
+#define SAVED_TITLE_FONT (bp_is_tempotec_v1() ? &font_ui_18 : &font_ui_22)
+#define SAVED_DETAIL_FONT (bp_is_tempotec_v1() ? &font_ui_14 : &font_ui_18)
 #define SAVED_MAX_SHOWS 128
 #define SAVED_MAX_EPISODES 400
 
@@ -333,7 +349,7 @@ static void paint_thumb(lv_obj_t *thumb, const cover_image_t *image) {
 		lv_obj_remove_style(thumb, &theme_style_icon, 0);
 		lv_obj_set_style_image_recolor_opa(thumb, LV_OPA_TRANSP, 0);
 		lv_image_set_src(thumb, &image->dsc);
-		lv_obj_set_style_radius(thumb, 8, 0);
+		lv_obj_set_style_radius(thumb, bp_pick(6, 8), 0);
 		lv_obj_set_style_clip_corner(thumb, true, 0);
 		return;
 	}
@@ -353,9 +369,9 @@ static lv_obj_t *make_row(lv_obj_t *parent, const cover_image_t *image, const ch
 	lv_obj_set_style_radius(row, bp_pick(10, 12), 0);
 	lv_obj_set_style_border_width(row, 0, 0);
 	lv_obj_set_style_shadow_width(row, 0, 0);
-	lv_obj_set_style_pad_hor(row, bp_pick(8, 16), 0);
+	lv_obj_set_style_pad_hor(row, SAVED_PAD_H, 0);
 	lv_obj_set_style_pad_ver(row, 0, 0);
-	lv_obj_set_style_pad_column(row, bp_pick(8, 12), 0);
+	lv_obj_set_style_pad_column(row, SAVED_PAD_COL, 0);
 	lv_obj_set_scrollable(row, false);
 	lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
 	lv_obj_set_flex_align(row, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
@@ -375,7 +391,7 @@ static lv_obj_t *make_row(lv_obj_t *parent, const cover_image_t *image, const ch
 	lv_obj_remove_style_all(texts);
 	lv_obj_set_flex_grow(texts, 1);
 	lv_obj_set_height(texts, LV_SIZE_CONTENT);
-	lv_obj_set_style_pad_row(texts, 6, 0);
+	lv_obj_set_style_pad_row(texts, bp_pick(2, 6), 0);
 	lv_obj_set_scrollable(texts, false);
 	lv_obj_set_event_bubble(texts, true);
 	lv_obj_set_flex_flow(texts, LV_FLEX_FLOW_COLUMN);
@@ -384,9 +400,9 @@ static lv_obj_t *make_row(lv_obj_t *parent, const cover_image_t *image, const ch
 	lv_label_set_text(name, title);
 	lv_label_set_long_mode(name, LV_LABEL_LONG_DOT);
 	lv_obj_set_width(name, lv_pct(100));
-	lv_obj_set_height(name, lv_font_get_line_height(&font_ui_22));
+	lv_obj_set_height(name, lv_font_get_line_height(SAVED_TITLE_FONT));
 	lv_obj_add_style(name, &theme_style_text, 0);
-	lv_obj_set_style_text_font(name, &font_ui_22, 0);
+	lv_obj_set_style_text_font(name, SAVED_TITLE_FONT, 0);
 
 	lv_obj_t *sub = NULL;
 	if (detail && detail[0]) {
@@ -394,28 +410,46 @@ static lv_obj_t *make_row(lv_obj_t *parent, const cover_image_t *image, const ch
 		lv_label_set_text(sub, detail);
 		lv_label_set_long_mode(sub, LV_LABEL_LONG_DOT);
 		lv_obj_set_width(sub, lv_pct(100));
-		lv_obj_set_height(sub, lv_font_get_line_height(&font_ui_18));
+		lv_obj_set_height(sub, lv_font_get_line_height(SAVED_DETAIL_FONT));
 		lv_obj_add_style(sub, &theme_style_text_dim, 0);
-		lv_obj_set_style_text_font(sub, &font_ui_18, 0);
+		lv_obj_set_style_text_font(sub, SAVED_DETAIL_FONT, 0);
 	}
 
 	// An episode heard to its end wears the tick the online list gives it, and
 	// its two lines go dim: the same mark on both lists, so a podcast heard
 	// halfway through the day reads the same whether it is on the card or not.
-	// While rows are being chosen the tick says "this one" instead, in the
-	// accent colour the whole interface uses for a decision.
-	bool chosen = selecting && index >= 0 && index < episode_count && sel_chosen[index];
-	if (chosen || heard) {
-		lv_obj_t *tick = lv_image_create(row);
-		lv_obj_set_size(tick, bp_pick(22, 30), bp_pick(22, 30));
-		lv_image_set_src(tick, &icon_check);
-		lv_obj_add_style(tick, &theme_style_icon, 0);
-		lv_obj_set_event_bubble(tick, true);
-		if (chosen) {
-			lv_obj_set_style_image_recolor(tick, theme()->accent, 0);
-			lv_obj_set_style_image_recolor_opa(tick, LV_OPA_COVER, 0);
-		}
-		if (heard && !selecting) {
+	//
+	// The tick is worn on the cover, out of the layout and one inset inside the
+	// picture's bottom right corner -- a disc in the card's colour with the
+	// tick in the theme's icon ink, both from the theme's styles. In a column
+	// of its own it cost the title the mark and the gap before it, and on this
+	// page the same 32 px now buy the whole of a name that used to be cut short.
+	if (heard) {
+		lv_obj_t *badge = lv_obj_create(row);
+		lv_obj_remove_style_all(badge);
+		lv_obj_add_style(badge, &theme_style_card, 0);
+		lv_obj_set_size(badge, SAVED_BADGE, SAVED_BADGE);
+		lv_obj_set_style_radius(badge, LV_RADIUS_CIRCLE, 0);
+		lv_obj_set_style_bg_opa(badge, LV_OPA_COVER, 0);
+		lv_obj_set_style_border_width(badge, 0, 0);
+		lv_obj_set_style_shadow_width(badge, 0, 0);
+		lv_obj_set_style_pad_all(badge, 0, 0);
+		lv_obj_set_scrollable(badge, false);
+		lv_obj_set_ignore_layout(badge, true);
+		// Not a tap target: the row underneath plays the episode, and a finger
+		// that lands on the corner of the cover still means the row.
+		lv_obj_set_clickable(badge, false);
+		lv_obj_align(badge, LV_ALIGN_LEFT_MID, SAVED_THUMB - SAVED_BADGE - SAVED_BADGE_INSET,
+					 (SAVED_ROW_HEIGHT - SAVED_THUMB) / 2 + SAVED_THUMB - SAVED_BADGE_INSET -
+							 SAVED_BADGE / 2 - SAVED_ROW_HEIGHT / 2);
+		lv_obj_t *badge_tick = lv_image_create(badge);
+		lv_image_set_src(badge_tick, &icon_check);
+		lv_obj_add_style(badge_tick, &theme_style_icon, 0);
+		lv_obj_set_style_image_recolor_opa(badge_tick, LV_OPA_COVER, 0);
+		lv_image_set_scale(badge_tick, (uint32_t)(LV_SCALE_NONE * bp_pick(14, 20) / 36));
+		lv_obj_center(badge_tick);
+
+		if (!selecting) {
 			lv_obj_set_style_text_opa(name, LV_OPA_50, 0);
 			if (sub) {
 				lv_obj_set_style_text_opa(sub, LV_OPA_50, 0);
@@ -423,12 +457,28 @@ static lv_obj_t *make_row(lv_obj_t *parent, const cover_image_t *image, const ch
 		}
 	}
 
+	// While rows are being chosen the tick at the end says "this one" instead,
+	// in the accent colour the whole interface uses for a decision. It stands
+	// in the dots' column, which the dots leave for it, and is the same width:
+	// the text does not move under the finger that started the selection.
+	bool chosen = selecting && index >= 0 && index < episode_count && sel_chosen[index];
+	if (chosen) {
+		lv_obj_t *tick = lv_image_create(row);
+		lv_obj_set_size(tick, SAVED_MARK_W, SAVED_MARK_W);
+		lv_image_set_src(tick, &icon_check);
+		lv_obj_add_style(tick, &theme_style_icon, 0);
+		lv_obj_set_style_image_recolor(tick, theme()->accent, 0);
+		lv_obj_set_style_image_recolor_opa(tick, LV_OPA_COVER, 0);
+		lv_image_set_scale(tick, (uint32_t)(LV_SCALE_NONE * 20 / 36));
+		lv_obj_set_event_bubble(tick, true);
+	}
+
 	// The three dots, where Tidal's rows keep theirs: the row's tap plays the
 	// episode, and what a tap cannot do lives behind them. They go away while a
 	// selection is being made, as every row menu does.
 	if (menu_cb) {
 		lv_obj_t *dots = lv_btn_create(row);
-		lv_obj_set_size(dots, bp_pick(26, 34), bp_pick(28, 34));
+		lv_obj_set_size(dots, SAVED_MARK_W, SAVED_MARK_W);
 		lv_obj_set_style_bg_opa(dots, LV_OPA_TRANSP, 0);
 		lv_obj_set_style_border_width(dots, 0, 0);
 		lv_obj_set_style_shadow_width(dots, 0, 0);
@@ -438,7 +488,7 @@ static lv_obj_t *make_row(lv_obj_t *parent, const cover_image_t *image, const ch
 		lv_obj_t *dots_icon = lv_image_create(dots);
 		lv_image_set_src(dots_icon, &icon_ellipsis_vertical);
 		lv_obj_add_style(dots_icon, &theme_style_icon, 0);
-		lv_image_set_scale(dots_icon, (uint32_t)(LV_SCALE_NONE * 22 / 36));
+		lv_image_set_scale(dots_icon, (uint32_t)(LV_SCALE_NONE * 20 / 36));
 		lv_obj_center(dots_icon);
 		lv_obj_set_hidden(dots, selecting);
 	}

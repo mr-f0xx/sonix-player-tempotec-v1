@@ -329,7 +329,9 @@ static int list_count;
 // Everything ABOUT an entry -- its cover, whether that cover failed, which row
 // lent it -- stays indexed by the entry, not by the widget. The widget is only
 // what draws it this second.
-#define ROW_HEIGHT bp_pick(46, 88)
+// 44 and a 5 px gap, which is the Music list's pitch: five rows of a 248 px
+// viewport at 49, where 46 would have shown four and a sliver.
+#define ROW_HEIGHT bp_pick(44, 88)
 #define ROW_GAP bp_pick(5, 12)
 #define ROW_PITCH (ROW_HEIGHT + ROW_GAP)
 // The row's own padding, and the column the dots or the selection tick stand
