@@ -227,6 +227,7 @@ This fork builds on the upstream [Sonix Player](https://github.com/Jepl4r/sonix-
 - **V1 themes** - **Tokyo Night**, **Amber on Black** and **OLED**, designed for the V1 panel, beside Dark and Light. Make your own with a [custom colour theme](docs/custom-themes.md).
 - **Boot screens** - Retrospace (the default), Space, Travelling in space, Stock, or your own picture.
 - **Player layouts** - **Immersive**, **Poster** and **Album Art Max**, beside Standard, Waveform and Alternative.
+- **Legacy play button and corner roundness** - the original round disc behind play and pause, as an option under Settings → Music → Display options; and a slider for how round the screen corners are, from a hint of a corner (2 px) up to 20 px, for a V1 that looks boxier than its 16 px default.
 - **Interface fonts** - choose MiSans, Neon 80s or Roboto, or any `.ttf`/`.otf` in the card's `Fonts` folder. Missing glyphs fall back to MiSans, so every language stays readable.
 - **Dual Scrobbler Suite** (Last.fm & ListenBrainz) — Native background scrobbling for both services with independent toggles, token-based setup, and offline queue caching when disconnected from Wi-Fi.
 - **Over-The-Air (OTA) Updates** - Check for and download new releases directly over Wi-Fi from GitHub Releases with one click in Settings → System → Firmware update.
@@ -242,7 +243,7 @@ This fork builds on the upstream [Sonix Player](https://github.com/Jepl4r/sonix-
 - **Audiobooks and e-books**: chapters, bookmarks and speed control, plus an EPUB reader.
 - **Wireless**: Wi-Fi, Bluetooth headphones and speakers, a Bluetooth receiver, AirPlay, DLNA, Wi-Fi file transfer and SonixLink.
 - **Tools and games**: a file manager, a Game Boy / Game Boy Color emulator, and Flappy Bird.
-- **Screen and power**: rounded corners, brightness, a screensaver, standby, a low-battery warning and a battery screen when off.
+- **Screen and power**: rounded corners (with a choice of how round), brightness, a screensaver, standby, a low-battery warning and a battery screen when off.
 
 Local audio decoder inputs include WAV, FLAC, MP3, Ogg Vorbis, Opus, M4A/M4B/MP4, AAC, ALAC, WavPack, APE, AIFF/AIFC, CAF and DSD (DSF/DFF). Streaming services require valid credentials and may depend on third-party availability.
 

@@ -1779,6 +1779,12 @@ static void cover_tint_cb(lv_event_t *e) {
 	player_cover_tint_set(lv_obj_has_state(lv_event_get_target(e), LV_STATE_CHECKED));
 }
 
+// The play/pause button on a filled disc, as the original player drew it
+// ("legacy"). Stored and repainted by the player, like the tint above.
+static lv_obj_t *legacy_play_switch;
+
+static void legacy_play_cb(lv_event_t *e) { player_legacy_play_set(lv_obj_has_state(lv_event_get_target(e), LV_STATE_CHECKED)); }
+
 // Replace the format line with the tagged year in custom player layouts.
 static void recording_year_cb(lv_event_t *e) {
 	player_recording_year_set(lv_obj_has_state(lv_event_get_target(e), LV_STATE_CHECKED));
@@ -2567,6 +2573,14 @@ static void build_display_page(gui_config_t *cfg) {
 	if (player_cover_tint_get()) {
 		lv_obj_add_state(cover_tint_switch, LV_STATE_CHECKED);
 	}
+
+	// The play/pause button on a disc instead of a bare glyph, the way the
+	// original player drew it. A look and nothing more: it moves nothing, takes
+	// the same room as the button it replaces, and follows the cover tint's
+	// colour when that is on.
+	settingsrow_toggle(container, "musicsettings_legacy_play", &legacy_play_switch, legacy_play_cb);
+	option_note(container, "musicsettings_legacy_play_note");
+	lv_obj_set_state(legacy_play_switch, LV_STATE_CHECKED, player_legacy_play_get());
 
 	// Whether a start with a remembered track lands on the now-playing page
 	// rather than on the home screen. Read once, at startup (main.c).
