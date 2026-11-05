@@ -3952,8 +3952,19 @@ static int region_index_of(const char *code) {
 
 // A built-in region names itself in its own language -- Polski, not Polish --
 // and arrives from region.h already final; the rest are translation keys.
+// The row's wording comes from the shared list rather than from the entry's
+// two fields read here: `label` is a language's own name, written in itself and
+// never translated, except for the one entry that carries a tag for the
+// language files instead. Reading that pair the wrong way round -- which the
+// fork this page came from does -- prints "region_worldwide" on the first row
+// of the picker, the tag rather than the word.
+//
+// The buffer is one per call and every caller copies what it is given before
+// the next row is asked for.
 static const char *region_row_label(int i) {
-	return region_rows[i].translated ? region_rows[i].label : tr(region_rows[i].label);
+	static char label[64];
+	region_entry_label(&region_rows[i], label, sizeof(label));
+	return label;
 }
 
 static void region_rows_rebuild(void) {
