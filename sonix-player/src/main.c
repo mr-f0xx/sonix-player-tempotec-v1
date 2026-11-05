@@ -58,6 +58,7 @@
 #include "src/system/streaming/qobuzcache.h"
 #include "src/system/streaming/podcastcache.h"
 #include "src/system/streaming/podcastsubs.h"
+#include "src/system/streaming/podcastplayed.h"
 #include "src/system/streaming/tidalcache.h"
 #include "src/system/streaming/streamkeys.h"
 #include "src/system/addons/addons.h"
@@ -2314,6 +2315,9 @@ int main(int argc, char **argv) {
 	tidalcache_clear(); // remove leftovers from a crash or power loss
 	podcastcache_set_root(card_root && card_root[0] ? card_root : gui_cfg.sd_root_path);
 	podcastsubs_set_root(card_root && card_root[0] ? card_root : gui_cfg.sd_root_path);
+	// Which episodes were heard. The marks live in podcast.db beside the
+	// followed podcasts, so they are handed the same card.
+	podcastplayed_set_root(card_root && card_root[0] ? card_root : gui_cfg.sd_root_path);
 	// And where a track arriving over DLNA lands: same card, same reason.
 	dlna_set_root(card_root && card_root[0] ? card_root : gui_cfg.sd_root_path);
 	// And where the emulator looks for Games/GB and Games/GBC. Unlike the

@@ -19,6 +19,7 @@
 #include "src/gui/nowplaying/coverflow.h"
 #include "src/gui/shell/gestures.h"
 #include "src/gui/nowplaying/player.h"
+#include "src/system/streaming/podcast.h"
 #include "src/gui/settings/appearance.h"
 #include "src/gui/settings/bootpicpage.h"
 #include "src/gui/settings/musicsettings.h"
@@ -238,6 +239,21 @@ bool coverflow_drag_active(void) { return false; }
 bool coverflow_is_open(void) { return false; }
 
 void player_refresh_now_playing(void) {}
+// The podcast behind the playing file: nothing on this menu is a podcast
+// episode, so the mini-player's line falls back to the artist tag as it does
+// for a track, and the two lookups behind that answer nothing.
+bool player_current_podcast_feed(long long *id_out, podcast_feed_t *feed_out) {
+	(void)id_out; (void)feed_out;
+	return false;
+}
+bool podcastcache_is_episode(const char *path) { (void)path; return false; }
+bool podcastcache_tag(const char *path, const char *key, char *out, size_t size) {
+	(void)path; (void)key;
+	if (out && size) {
+		out[0] = '\0';
+	}
+	return false;
+}
 void player_sheet_open(bool animated) { (void)animated; }
 void medialist_open(const char *title, library_list_t kind, library_filter_t filter, const char *value) {
 	(void)title; (void)kind; (void)filter; (void)value;

@@ -4,11 +4,16 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <time.h>
 #include <malloc.h>
 
+#include "src/gui/board_profile.h"
+#include "src/gui/settings/screensaver.h"
 #include "src/gui/fonts/fonts.h"
+#include "src/system/addons/addons.h"
 #include "src/system/playback/sleeptimer.h"
+#include "src/gui/shell/gui.h"
 #include "src/gui/shell/icons.h"
 #include "src/gui/shell/keyboard.h"
 #include "src/gui/nowplaying/player.h"
@@ -16,6 +21,7 @@
 #include "src/gui/shell/toast.h"
 #include "src/gui/streaming/podcastsaved.h"
 #include "src/gui/streaming/qobuzart.h"
+#include "src/system/streaming/listcache.h"
 #include "src/gui/shell/settingsrow.h"
 #include "src/gui/shell/spinner.h"
 #include "src/gui/shell/switcher.h"
@@ -23,11 +29,14 @@
 #include "src/gui/wireless/wifisettings.h"
 #include "src/system/decode/growfile.h"
 #include "src/system/playback/device_state.h"
+#include "src/system/core/config.h"
 #include "src/system/core/lang.h"
+#include "src/system/core/region.h"
 #include "src/system/playback/playlist.h"
 #include "src/system/streaming/podcast.h"
 #include "src/system/streaming/podcastcache.h"
 #include "src/system/streaming/podcastdl.h"
+#include "src/system/streaming/podcastplayed.h"
 #include "src/system/streaming/podcastsubs.h"
 #include "src/system/streaming/streamturn.h"
 #include "src/system/device/power.h"
@@ -93,6 +102,11 @@ static lv_obj_t *busy_label;
 static lv_obj_t *search_btn;
 static lv_obj_t *settings_btn;
 static lv_obj_t *saved_btn; // the downloaded podcasts, which need no network
+static lv_obj_t *order_btn; // newest / oldest first, on an episode list
+// The corner while rows are being chosen: the action for this kind of list, and
+// the way out of the mode.
+static lv_obj_t *sel_confirm_btn;
+static lv_obj_t *sel_close_btn;
 
 // The two pills at the top -- "My podcasts" and "Trending" -- and the row that
 // holds them. Shown only while one of the two lists they name is underneath: on
@@ -144,7 +158,10 @@ static bool worker_started;
 // The results. Two arrays and not one because a podcast and an episode do not
 // share fields, and merging them into a single struct would leave half the
 // fields empty in every row.
-static podcast_feed_t result_feeds[PODCAST_MAX_HELD];
+// Feeds (shows) arrive only through search, the charts and the followed list,
+// each capped at PODCAST_FEEDS_MAX; only the episodes of one podcast run to
+// the catalogue maximum, and they live in result_episodes below.
+static podcast_feed_t result_feeds[PODCAST_FEEDS_MAX];
 static podcast_episode_t result_episodes[PODCAST_MAX_HELD];
 static int result_count;
 static int result_from; // from which row the on-screen list is (re)drawn
@@ -210,7 +227,9 @@ static void busy_show_text(bool with_text) {
 		}
 	}
 	lv_obj_set_hidden(busy_layer, false);
-	lv_obj_move_foreground(busy_layer);
+	if (!screensaver_is_visible()) {
+		lv_obj_move_foreground(busy_layer);
+	}
 }
 
 // Waiting for a list: the spinner says enough, and the list being replaced is
@@ -224,7 +243,7 @@ static void busy_hide(void) {
 }
 
 static void build_busy_layer(void) {
-	busy_layer = lv_obj_create(lv_layer_sys());
+	busy_layer = lv_obj_create(lv_layer_top());
 	lv_obj_set_size(busy_layer, lv_pct(100), lv_pct(100));
 	lv_obj_set_pos(busy_layer, 0, 0);
 	lv_obj_set_style_bg_color(busy_layer, lv_color_black(), 0);
@@ -232,6 +251,7 @@ static void build_busy_layer(void) {
 	lv_obj_set_style_border_width(busy_layer, 0, 0);
 	lv_obj_set_style_radius(busy_layer, 0, 0);
 	lv_obj_set_scrollable(busy_layer, false);
+	lv_obj_set_clickable(busy_layer, true);
 	lv_obj_set_hidden(busy_layer, true);
 	lv_obj_set_flex_flow(busy_layer, LV_FLEX_FLOW_COLUMN);
 	lv_obj_set_flex_align(busy_layer, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
@@ -259,7 +279,19 @@ static void build_busy_layer(void) {
 // services cannot tread on each other even by accident (see qobuzart.h).
 // ---------------------------------------------------------------------------
 
-#define ROW_THUMB 60
+// The cover on a row, and how much of the row the text may have.
+//
+// These are the Music list's proportions rather than the ones this page was
+// drawn with: a 32 px cover on a 46 px row, 5 px of padding and 5 px between
+// the cover and the words. The two lines a row carries are the title and the
+// date, and on a 240 px panel every pixel taken by the picture and the gaps is
+// a pixel the title does not get -- at the old sizes an episode's name was cut
+// at about ten characters.
+//
+// The tick of a heard episode is worn on the cover rather than given a column
+// of its own between the text and the dots, for the same reason: that column
+// was 32 px of the row, and it said one bit.
+#define ROW_THUMB bp_pick(32, 60)
 
 static lv_obj_t *list_container;
 static lv_obj_t *list_title;
@@ -297,9 +329,29 @@ static int list_count;
 // Everything ABOUT an entry -- its cover, whether that cover failed, which row
 // lent it -- stays indexed by the entry, not by the widget. The widget is only
 // what draws it this second.
-#define ROW_HEIGHT 88
-#define ROW_GAP 12
+// 44 and a 5 px gap, which is the Music list's pitch: five rows of a 248 px
+// viewport at 49, where 46 would have shown four and a sliver.
+#define ROW_HEIGHT bp_pick(44, 88)
+#define ROW_GAP bp_pick(5, 12)
 #define ROW_PITCH (ROW_HEIGHT + ROW_GAP)
+// The row's own padding, and the column the dots or the selection tick stand
+// in. The two marks are the same width on purpose: a row that grows a tick
+// when selection starts must not move the text under the finger that started
+// it.
+#define ROW_PAD_H bp_pick(5, 16)
+#define ROW_PAD_COL bp_pick(5, 8)
+#define ROW_MARK_W bp_pick(24, 44)
+// The disc a heard episode wears in the corner of its cover, and how far inside
+// that corner it sits. Fully on the picture, not straddling its edge: the gap
+// between the cover and the words is 5 px, and a badge pulled over the corner
+// would land on the first letter of the title.
+#define HEARD_BADGE bp_pick(20, 30)
+#define HEARD_INSET bp_pick(1, 3)
+// The two lines of a row, at the sizes the Tidal tab settled on for this panel
+// -- the row is the same thing on both pages, and two lines of 22/18 on a
+// 240-px screen leave room for two rows where three and a half would fit.
+#define ROW_TITLE_FONT (bp_is_tempotec_v1() ? &font_ui_18 : &font_ui_22)
+#define ROW_DETAIL_FONT (bp_is_tempotec_v1() ? &font_ui_14 : &font_ui_18)
 #define ROW_POOL 12
 
 typedef struct {
@@ -308,6 +360,13 @@ typedef struct {
 	lv_obj_t *title;
 	lv_obj_t *detail;
 	lv_obj_t *menu_btn;
+	// The tick an episode that has been heard wears. Built on every row and
+	// shown only on the episode list, like the three dots above it.
+	lv_obj_t *heard;
+	// The mark of a chosen row in selection mode. Its own glyph rather than the
+	// heard tick's: the two can be on the same row, and one of them means "this
+	// one is already dealt with" while the other means "this one is picked".
+	lv_obj_t *check;
 	// The entry drawn on it: -1 for a row with nothing to show, and -2 for one
 	// that must be redrawn even though its number has not changed -- the list
 	// reloaded underneath it to the same length.
@@ -551,13 +610,216 @@ static void art_request_visible(void) {
 
 		slot_owner[free_slot] = row;
 		art_wake();
-		qobuzart_request(&podcast_art_owner, free_slot, row_cover_url[row], ROW_THUMB);
+		qobuzart_request(&podcast_art_owner, "podcast-cache", free_slot, row_cover_url[row], ROW_THUMB);
 	}
 }
 
 static void maybe_load_more(void);
 static void row_detail(int index, char *out, size_t size);
 static bool kind_has_row_menu(job_kind_t kind);
+
+// ---------------------------------------------------------------------------
+// which order the episodes are shown in
+//
+// The catalogue answers newest first and the Saved page sorts by date the same
+// way. Oldest first is the same list backwards -- nothing is re-queried, and
+// the queue built from a tap still walks towards older episodes, whichever way
+// the list is drawn (see JOB_PLAY).
+//
+// Kept in the config rather than in this page: the Saved list of downloaded
+// episodes reads it too.
+// ---------------------------------------------------------------------------
+
+bool podcastpage_episodes_newest_first(void) {
+	return config_get_int("podcast", "newest_first", 1) != 0;
+}
+
+void podcastpage_set_episodes_newest_first(bool newest) {
+	config_set_int("podcast", "newest_first", newest ? 1 : 0);
+	config_save();
+}
+
+// ---------------------------------------------------------------------------
+// which order the followed podcasts are shown in
+//
+// Most listened first is the default: the podcasts somebody keeps up with are
+// the ones at the top of the list, rather than whichever was followed most
+// recently -- which is what the list used to say and what a list of a hundred
+// subscriptions cannot answer at a glance.
+//
+// "Listened" is counted per podcast (podcastsubs_count_play), not read off the
+// heard marks, because those are keyed by episode and cannot say which podcast
+// an episode belonged to. A count is also the only thing that ranks a podcast
+// somebody listens to ten minutes of every day above one they tried once and
+// finished.
+// ---------------------------------------------------------------------------
+
+podcast_sort_t podcastpage_subs_sort(void) {
+	int order = config_get_int("podcast", "subs_sort", (int)PODCAST_SORT_PLAYED);
+	if (order < PODCAST_SORT_PLAYED || order > PODCAST_SORT_ZA) {
+		order = PODCAST_SORT_PLAYED;
+	}
+	return (podcast_sort_t)order;
+}
+
+void podcastpage_set_subs_sort(podcast_sort_t order) {
+	if (order < PODCAST_SORT_PLAYED || order > PODCAST_SORT_ZA) {
+		order = PODCAST_SORT_PLAYED;
+	}
+	config_set_int("podcast", "subs_sort", (int)order);
+	config_save();
+}
+
+// Two subscriptions, in the order the setting asks for. Counts come from the
+// list already in memory, so this costs nothing per comparison.
+static int compare_feeds(const podcast_feed_t *a, const podcast_feed_t *b, podcast_sort_t order) {
+	if (order == PODCAST_SORT_PLAYED) {
+		int played_a = podcastsubs_plays(a->id);
+		int played_b = podcastsubs_plays(b->id);
+		if (played_a != played_b) {
+			return played_b - played_a; // most listened first
+		}
+	} else if (order == PODCAST_SORT_ZA) {
+		return -strcasecmp(a->title, b->title);
+	} else {
+		return strcasecmp(a->title, b->title);
+	}
+	// Level on plays: the alphabet decides, so the order is never arbitrary.
+	return strcasecmp(a->title, b->title);
+}
+
+// Insertion sort: a hundred entries at most, and the list is almost always
+// already in this order from the last time it was drawn.
+static void sort_feeds(podcast_feed_t *list, int n) {
+	podcast_sort_t order = podcastpage_subs_sort();
+	for (int i = 1; i < n; i++) {
+		podcast_feed_t feed = list[i];
+		int j = i - 1;
+		while (j >= 0 && compare_feeds(&list[j], &feed, order) > 0) {
+			list[j + 1] = list[j];
+			j--;
+		}
+		list[j + 1] = feed;
+	}
+}
+
+// The followed list as the setting wants it: read from the card, put in order.
+static int load_followed(podcast_feed_t *out, int max) {
+	int n = podcastsubs_list(out, max);
+	sort_feeds(out, n);
+	return n;
+}
+
+static void reverse_episodes(podcast_episode_t *list, int n) {
+	for (int i = 0, j = n - 1; i < j; i++, j--) {
+		podcast_episode_t swap = list[i];
+		list[i] = list[j];
+		list[j] = swap;
+	}
+}
+
+// ---------------------------------------------------------------------------
+// choosing several rows at once
+//
+// The same mode the file browser and the track lists have: a long press (here,
+// through the row's own menu) starts it, a tap then chooses a row or lets it
+// go, letting go of the last one ends it, and the corner trades its buttons for
+// the ones that act on what is chosen.
+//
+// What can be done in bulk is what can be done to one row, with the exceptions
+// the section already has: a download is one at a time by design (podcastdl.h
+// runs a single thread for the whole device), so a selection of episodes offers
+// the heard mark instead -- the chore people actually have, clearing a backlog.
+// ---------------------------------------------------------------------------
+
+// The row an episode's long press was opened on. Declared here because the
+// selection's own entry point -- the menu's "Select" -- is written before the
+// download card that owns the variable.
+static int dl_row;
+
+static bool selecting;
+// One flag per entry of the list on screen, or NULL when nothing is chosen.
+// Allocated when the mode starts and freed when it ends: the list can be fifty
+// entries or six hundred, and the array is dead outside the mode.
+static unsigned char *chosen;
+static int chosen_count;
+
+static void refresh_corner_buttons(void);
+static void paint_selection_actions(void);
+
+static void row_update_selection(row_t *row) {
+	if (!row->check) {
+		return;
+	}
+	bool on = selecting && chosen && row->index >= 0 && row->index < list_count && chosen[row->index];
+	if (row->menu_btn) {
+		lv_obj_set_hidden(row->menu_btn, selecting || !kind_has_row_menu(list_kind));
+	}
+	if (on) {
+		lv_obj_set_style_image_recolor(row->check, theme()->accent, 0);
+		lv_obj_set_hidden(row->check, false);
+	} else {
+		lv_obj_set_hidden(row->check, true);
+	}
+}
+
+static void rows_update_selection(void) {
+	for (int i = 0; i < ROW_POOL; i++) {
+		row_update_selection(&rows[i]);
+	}
+}
+
+static void selection_stop(void) {
+	if (!selecting) {
+		return;
+	}
+	selecting = false;
+	free(chosen);
+	chosen = NULL;
+	chosen_count = 0;
+	refresh_corner_buttons();
+	rows_update_selection();
+}
+
+static bool selection_start(void) {
+	if (selecting) {
+		return true;
+	}
+	if (list_count <= 0) {
+		return false;
+	}
+	chosen = calloc((size_t)list_count, 1);
+	if (!chosen) {
+		return false;
+	}
+	selecting = true;
+	chosen_count = 0;
+	refresh_corner_buttons();
+	rows_update_selection();
+	return true;
+}
+
+// Chooses the entry, or lets it go. Letting go of the last one leaves the mode.
+static void selection_toggle(int index) {
+	if (!selecting || !chosen || index < 0 || index >= list_count) {
+		return;
+	}
+	chosen[index] = !chosen[index];
+	if (chosen[index]) {
+		chosen_count++;
+	} else if (--chosen_count == 0) {
+		selection_stop();
+		return;
+	}
+	for (int i = 0; i < ROW_POOL; i++) {
+		if (rows[i].index == index) {
+			row_update_selection(&rows[i]);
+		}
+	}
+	// The corner's tick is disabled until something is chosen, so it has to be
+	// told when the first row goes in and when the last one comes out.
+	paint_selection_actions();
+}
 
 // Puts entry `index` on one pooled widget, or hides it when there is no entry.
 // Nothing is created here: the widgets were built once and only ever change
@@ -603,16 +865,24 @@ static void row_bind(row_t *row, int index) {
 		lv_obj_set_hidden(row->detail, true);
 	}
 
-	// The three dots belong to a podcast, not to an episode, and the same pool
-	// serves both: built on every row, shown on the lists that have something
-	// to put in it.
+	// The same pooled button serves both kinds of list: feed rows offer
+	// follow/unfollow, and episode rows offer heard state and download.
 	if (kind_has_row_menu(list_kind)) {
 		lv_obj_set_hidden(row->menu_btn, false);
 	} else {
 		lv_obj_set_hidden(row->menu_btn, true);
 	}
 
+	// Heard: the tick says so, and the text steps back so a list of them reads
+	// as a list of what is left. Only episodes can be heard, so the rows of a
+	// podcast list are never dimmed by this.
+	bool heard = list_kind == JOB_EPISODES && podcastplayed_get(result_episodes[index].id);
+	lv_obj_set_hidden(row->heard, !heard);
+	lv_obj_set_style_text_opa(row->title, heard ? LV_OPA_50 : LV_OPA_COVER, 0);
+	lv_obj_set_style_text_opa(row->detail, heard ? LV_OPA_50 : LV_OPA_COVER, 0);
+
 	paint_thumb(row->thumb, index);
+	row_update_selection(row);
 }
 
 // Slides the pool to wherever the list has been scrolled to.
@@ -650,6 +920,36 @@ static void list_scrolled_cb(lv_event_t *e) {
 	(void)e;
 	window_update();
 	maybe_load_more();
+}
+
+// One entry changed under the rows -- heard, or heard-and-not: bind the row
+// that is showing it again, and only that one. The other eleven keep theirs.
+static void refresh_row(int index) {
+	if (index < 0) {
+		return;
+	}
+	for (int i = 0; i < ROW_POOL; i++) {
+		if (rows[i].index == index) {
+			rows[i].index = -2;
+		}
+	}
+	window_update();
+}
+
+void podcastpage_episode_heard(long long episode_id) {
+	// Only the list that draws the mark, and only while it is the one on
+	// screen: coming back to a list binds every row again, so a page that is
+	// not showing needs nothing done to it.
+	if (episode_id <= 0 || !list_container || list_kind != JOB_EPISODES ||
+		lv_screen_active() != list_screen) {
+		return;
+	}
+	for (int i = 0; i < list_count; i++) {
+		if (result_episodes[i].id == episode_id) {
+			refresh_row(i);
+			return;
+		}
+	}
 }
 
 static void art_forget_rows(void) {
@@ -731,6 +1031,12 @@ static void list_loaded_cb(lv_event_t *e) {
 	// Whatever was given back while the page was away is asked for again. Free
 	// when nothing was dropped: every row still holding its picture is skipped.
 	art_wake();
+	// Every row is bound again, not only the ones whose number moved: an
+	// episode played while the player was up has become one heard, and coming
+	// back to the list has to show that. Twelve binds are nothing.
+	for (int i = 0; i < ROW_POOL; i++) {
+		rows[i].index = -2;
+	}
 	window_update();
 }
 
@@ -746,15 +1052,28 @@ static void list_unloaded_cb(lv_event_t *e) {
 // the rows
 // ---------------------------------------------------------------------------
 
-// The three-dot menu only makes sense on a podcast: that is where following it
-// is chosen. An episode has nothing to offer that tapping it does not do
-// already.
+// The three-dot menu carries the single-row actions for feeds and episodes.
 static bool kind_has_row_menu(job_kind_t kind) {
-	return kind == JOB_SEARCH || kind == JOB_TRENDING || kind == JOB_FOLLOWED;
+	return kind == JOB_SEARCH || kind == JOB_TRENDING || kind == JOB_FOLLOWED || kind == JOB_EPISODES;
 }
 
 static void row_menu_cb(lv_event_t *e);
+static void episode_menu_cb(lv_event_t *e);
 static void row_long_cb(lv_event_t *e);
+
+// One pooled button serves both kinds of list, so it needs one callback that
+// knows which kind is on screen. It used to carry the episode menu only: on a
+// list of podcasts the dots were drawn, lit, and did nothing at all.
+static void row_menu_dispatch_cb(lv_event_t *e) {
+	if (!kind_has_row_menu(list_kind)) {
+		return;
+	}
+	if (list_kind == JOB_EPISODES) {
+		episode_menu_cb(e);
+	} else {
+		row_menu_cb(e);
+	}
+}
 
 // The twelve rows, built once. Everything that can differ between one entry and
 // the next is created here and shown or hidden at bind time: a recycled widget
@@ -768,12 +1087,12 @@ static void build_rows(int width) {
 		lv_obj_set_x(row->button, 0);
 		lv_obj_add_style(row->button, &theme_style_card, 0);
 		lv_obj_add_style(row->button, &theme_style_card_pressed, LV_STATE_PRESSED);
-		lv_obj_set_style_radius(row->button, 12, 0);
+		lv_obj_set_style_radius(row->button, bp_pick(10, 12), 0);
 		lv_obj_set_style_border_width(row->button, 0, 0);
 		lv_obj_set_style_shadow_width(row->button, 0, 0);
-		lv_obj_set_style_pad_hor(row->button, 16, 0);
+		lv_obj_set_style_pad_hor(row->button, ROW_PAD_H, 0);
 		lv_obj_set_style_pad_ver(row->button, 0, 0);
-		lv_obj_set_style_pad_column(row->button, 8, 0);
+		lv_obj_set_style_pad_column(row->button, ROW_PAD_COL, 0);
 		lv_obj_set_scrollable(row->button, false);
 		lv_obj_set_hidden(row->button, true);
 		lv_obj_set_flex_flow(row->button, LV_FLEX_FLOW_ROW);
@@ -801,7 +1120,7 @@ static void build_rows(int width) {
 		lv_obj_set_style_bg_opa(texts, 0, 0);
 		lv_obj_set_style_border_width(texts, 0, 0);
 		lv_obj_set_style_pad_all(texts, 0, 0);
-		lv_obj_set_style_pad_row(texts, 6, 0);
+		lv_obj_set_style_pad_row(texts, bp_pick(2, 6), 0);
 		lv_obj_set_scrollable(texts, false);
 		lv_obj_set_event_bubble(texts, true);
 		lv_obj_set_flex_flow(texts, LV_FLEX_FLOW_COLUMN);
@@ -810,30 +1129,95 @@ static void build_rows(int width) {
 		row->title = lv_label_create(texts);
 		lv_label_set_long_mode(row->title, LV_LABEL_LONG_DOT);
 		lv_obj_set_width(row->title, lv_pct(100));
-		lv_obj_set_height(row->title, lv_font_get_line_height(&font_ui_22));
+		lv_obj_set_height(row->title, lv_font_get_line_height(ROW_TITLE_FONT));
 		lv_obj_add_style(row->title, &theme_style_text, 0);
-		lv_obj_set_style_text_font(row->title, &font_ui_22, 0);
+		lv_obj_set_style_text_font(row->title, ROW_TITLE_FONT, 0);
 
 		row->detail = lv_label_create(texts);
 		lv_label_set_long_mode(row->detail, LV_LABEL_LONG_DOT);
 		lv_obj_set_width(row->detail, lv_pct(100));
-		lv_obj_set_height(row->detail, lv_font_get_line_height(&font_ui_18));
+		lv_obj_set_height(row->detail, lv_font_get_line_height(ROW_DETAIL_FONT));
 		lv_obj_add_style(row->detail, &theme_style_text_dim, 0);
-		lv_obj_set_style_text_font(row->detail, &font_ui_18, 0);
+		lv_obj_set_style_text_font(row->detail, ROW_DETAIL_FONT, 0);
+
+		// The tick of an episode that has been heard, worn on the cover.
+		//
+		// It used to stand in a column of its own between the text and the
+		// dots, which cost the title 32 px of a 240 px row -- and it is the
+		// episode titles that cannot spare them. Hung on the picture instead
+		// it costs nothing: it is out of the layout (IGNORE_LAYOUT) and
+		// overlaps the bottom right corner of the cover by a couple of pixels.
+		//
+		// The disc behind it is the card's own colour and the tick is the
+		// theme's icon ink, both taken from the theme's styles rather than from
+		// colours read here, so a theme change repaints the badge with the rest
+		// of the page. Over artwork the disc reads as a punched-out hole with
+		// the tick in it.
+		row->heard = lv_obj_create(row->button);
+		lv_obj_remove_style_all(row->heard);
+		lv_obj_add_style(row->heard, &theme_style_card, 0);
+		lv_obj_set_size(row->heard, HEARD_BADGE, HEARD_BADGE);
+		lv_obj_set_style_radius(row->heard, LV_RADIUS_CIRCLE, 0);
+		lv_obj_set_style_bg_opa(row->heard, LV_OPA_COVER, 0);
+		lv_obj_set_style_border_width(row->heard, 0, 0);
+		lv_obj_set_style_shadow_width(row->heard, 0, 0);
+		lv_obj_set_style_pad_all(row->heard, 0, 0);
+		lv_obj_set_scrollable(row->heard, false);
+		lv_obj_set_ignore_layout(row->heard, true);
+		// Out of the layout, and not a tap target: the row underneath plays the
+		// episode, and a finger that lands on the corner of the cover still
+		// means the row.
+		lv_obj_set_clickable(row->heard, false);
+		// Hung from the row's content box, which starts where the cover does:
+		// the cover is the first thing in it and is centred in the row's
+		// height, so its bottom right corner is at (ROW_THUMB, top + ROW_THUMB)
+		// and the badge is placed one inset inside that. LV_ALIGN_LEFT_MID
+		// takes the object's own left edge for x and its middle for y.
+		lv_obj_align(row->heard, LV_ALIGN_LEFT_MID,
+					 ROW_THUMB - HEARD_BADGE - HEARD_INSET,
+					 (ROW_HEIGHT - ROW_THUMB) / 2 + ROW_THUMB - HEARD_INSET - HEARD_BADGE / 2 -
+							 ROW_HEIGHT / 2);
+		lv_obj_set_hidden(row->heard, true);
+
+		lv_obj_t *heard_tick = lv_image_create(row->heard);
+		lv_image_set_src(heard_tick, &icon_check);
+		lv_obj_add_style(heard_tick, &theme_style_icon, 0);
+		lv_obj_set_style_image_recolor_opa(heard_tick, LV_OPA_COVER, 0);
+		lv_image_set_scale(heard_tick, (uint32_t)(LV_SCALE_NONE * bp_pick(14, 20) / 36));
+		lv_obj_center(heard_tick);
+
+		// The selection mark, at the same end of the row as the tick and the
+		// dots: it is the last thing a finger passes on its way off the row.
+		row->check = lv_image_create(row->button);
+		lv_obj_set_size(row->check, ROW_MARK_W, ROW_MARK_W);
+		// The plain tick the file browser puts on a chosen row: the circled one
+		// this used to show was a 36 px ring around its own tick, and at 22 px
+		// the two ran into each other and read as a smudge.
+		lv_image_set_src(row->check, &icon_check);
+		lv_obj_add_style(row->check, &theme_style_icon, 0);
+		lv_obj_set_style_image_recolor_opa(row->check, LV_OPA_COVER, 0);
+		lv_image_set_scale(row->check, 156); // 36 px source -> about 22 px
+		lv_obj_set_event_bubble(row->check, true);
+		lv_obj_set_hidden(row->check, true);
 
 		row->menu_btn = lv_btn_create(row->button);
-		lv_obj_set_size(row->menu_btn, 44, 44);
+		lv_obj_set_size(row->menu_btn, ROW_MARK_W, ROW_MARK_W);
 		lv_obj_set_style_bg_opa(row->menu_btn, LV_OPA_TRANSP, 0);
 		lv_obj_set_style_border_width(row->menu_btn, 0, 0);
 		lv_obj_set_style_shadow_width(row->menu_btn, 0, 0);
 		lv_obj_set_style_pad_all(row->menu_btn, 0, 0);
 		lv_obj_set_hidden(row->menu_btn, true);
-		lv_obj_add_event_cb(row->menu_btn, row_menu_cb, LV_EVENT_CLICKED, NULL);
+		// Two dots are a narrow target inside a row that plays something when
+		// it is tapped: the grace around the button is what keeps a tap that
+		// lands a pixel off from turning into an episode starting.
+		lv_obj_set_ext_click_area(row->menu_btn, bp_pick(7, 10));
+		lv_obj_add_event_cb(row->menu_btn, row_menu_dispatch_cb, LV_EVENT_CLICKED, NULL);
 
 		lv_obj_t *dots = lv_image_create(row->menu_btn);
 		lv_image_set_src(dots, &icon_ellipsis_vertical);
 		lv_obj_add_style(dots, &theme_style_icon, 0);
 		lv_obj_set_style_image_recolor_opa(dots, LV_OPA_COVER, 0);
+		lv_image_set_scale(dots, (uint32_t)(LV_SCALE_NONE * 20 / 36));
 		lv_obj_center(dots);
 
 		row->index = -1;
@@ -931,12 +1315,30 @@ static void row_detail(int index, char *out, size_t size) {
 // destroyed either way -- the list is only as long as the body object says it
 // is, and the pool slides over it.
 static void fill_list(int from) {
+	list_kind = result_kind;
+	list_count = result_count;
+
+	// The flags describe a list that is being replaced: entry 3 of this one is
+	// not entry 3 of the next. A list that merely grows keeps them.
+	if (from == 0 && selecting) {
+		selection_stop();
+	}
+
+	// Oldest first puts a new page at the FRONT: the episodes a longer answer
+	// added are the older ones. The rows were drawn from the end of the array
+	// before, so the whole pool is bound again -- and the view is moved down by
+	// as many rows as went in above it, or the reader would be thrown back to
+	// the beginning of the list they had scrolled through.
+	int prepended = 0;
+	if (from > 0 && list_kind == JOB_EPISODES && !podcastpage_episodes_newest_first()) {
+		prepended = list_count - from;
+		from = 0;
+	}
+	int was_scrolled = prepended > 0 ? (int)lv_obj_get_scroll_y(list_container) : 0;
+
 	if (from == 0) {
 		art_forget_rows();
 	}
-
-	list_kind = result_kind;
-	list_count = result_count;
 	if (list_kind == JOB_EPISODES) {
 		snprintf(list_feed_title, sizeof(list_feed_title), "%s", result_title);
 	}
@@ -961,6 +1363,10 @@ static void fill_list(int from) {
 		lv_obj_scroll_to_y(list_container, 0, LV_ANIM_OFF);
 	}
 	window_update();
+	if (prepended > 0) {
+		lv_obj_scroll_to_y(list_container, was_scrolled + prepended * ROW_PITCH, LV_ANIM_OFF);
+		window_update();
+	}
 
 	// The pills only on the two lists they name. The title says "Podcasts"
 	// there, because the lit pill already says which of the two is on screen;
@@ -982,6 +1388,7 @@ static void fill_list(int from) {
 	paint_pill(pill_trending, list_kind == JOB_TRENDING);
 	if (list_title) {
 		lv_label_set_text(list_title, home_view ? tr("podcasts") : result_title);
+		settingsrow_title_realign(list_title);
 	}
 
 	if (list_count == 0) {
@@ -1158,6 +1565,9 @@ static void run_ex(const job_t *job, bool root) {
 	// The veil DOES cover the wait before an episode starts, and it stays up
 	// until job_done_cb takes it down, which is the moment playback has really
 	// begun -- a timed toast would leave before the download it is about.
+	if (job->kind == JOB_PLAY) {
+		player_pause_for_loading();
+	}
 	if (job->kind != JOB_FOLLOWED) {
 		busy_show_text(job->kind == JOB_PLAY);
 	}
@@ -1172,6 +1582,11 @@ static void run(const job_t *job) { run_ex(job, false); }
 // deliberately stays off), and the rows already there stay usable meanwhile.
 static void maybe_load_more(void) {
 	if (page_loading || !page_more) {
+		return;
+	}
+	// A page arriving would rewrite the arrays the chosen rows are numbered
+	// against, under the selection.
+	if (selecting) {
 		return;
 	}
 	if (lv_screen_active() != list_screen || !have_current_list || !job_is_list(current_list_job.kind) ||
@@ -1287,6 +1702,7 @@ static bool podcastpage_prepare_track(char *path, size_t path_size) {
 	// advances by itself onto another missing episode.
 	podcastcache_set_network_wanted(true);
 	waiting_for_episode = true;
+	player_pause_for_loading();
 	device_state_stop();
 	prefetch_urgent(path);
 	gui_post(downloading_note_async, NULL);
@@ -1335,8 +1751,10 @@ static bool fetch_episode(const podcast_episode_t *e, char *out, size_t size) {
 	if (!podcastcache_start(e->id, e->enclosure, e->mime, e->duration_secs, out, size)) {
 		return false;
 	}
-	podcastcache_write_sidecars(e->id, e->mime, e->title, e->feed_title[0] ? e->feed_title : NULL, e->feed_id,
-								browsing_author, browsing_image[0] ? browsing_image : e->image, e->image, true);
+	const char *ftitle = e->feed_title[0] ? e->feed_title : (list_feed_title[0] ? list_feed_title : NULL);
+	const char *fauthor = browsing_author[0] ? browsing_author : NULL;
+	podcastcache_write_sidecars(e->id, e->mime, e->title, ftitle, e->feed_id,
+								fauthor, browsing_image[0] ? browsing_image : e->image, e->image, true);
 	return true;
 }
 
@@ -1480,6 +1898,34 @@ static void job_done_cb(void *user) {
 // the thread
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// the lists kept on the card
+//
+// The chart and a podcast's episodes were fetched again every time the tab was
+// opened -- a request, a spinner and the same names as last time. The first
+// page of each is written to the card and read back, so opening a tab shows its
+// rows at once; the catalogue is asked again only when the file is older than
+// six hours or the list is continued (the next page is always a request). Six
+// hours rather than minutes: a podcast's back catalogue does not change within a
+// listening session, and a feed that has published something new can wait for
+// the next visit after the file ages out rather than costing every visit the
+// whole download again.
+// ---------------------------------------------------------------------------
+
+#define PODCAST_CACHE_TTL_SECS (6 * 60 * 60)
+
+static void podcast_cache_key(const job_t *job, char *out, size_t size) {
+	out[0] = '\0';
+	if (job->kind == JOB_TRENDING) {
+		// One file per region: the chart of a language somebody chose is a
+		// different list from another's, and reading the wrong one back would
+		// show a chart the settings page says is not the one being drawn.
+		snprintf(out, size, "%s", podcast_trending_cache_key());
+	} else if (job->kind == JOB_EPISODES && job->id > 0) {
+		snprintf(out, size, "pod_feed_%lld", job->id);
+	}
+}
+
 static void *worker_main(void *arg) {
 	(void)arg;
 	thread_be_background("podcast worker");
@@ -1515,6 +1961,11 @@ static void *worker_main(void *arg) {
 
 		result_error[0] = '\0';
 
+		// The order this answer is put in, read once: the rows that land on
+		// screen are drawn by the same rule, and a toggle mid-request must not
+		// leave half the list one way and half the other.
+		bool newest_first = podcastpage_episodes_newest_first();
+
 		// Playback does not clear the list, and that is not a detail: what is
 		// playing is an episode of THIS list, and the list stays on screen with
 		// its tappable rows. Cleared, a second tap on another episode finds
@@ -1537,6 +1988,11 @@ static void *worker_main(void *arg) {
 		bool grow = job.more;
 		int kept = result_count;
 
+		// What this answer is, before anything is read for it. The reset comes
+		// HERE and not after the card has been asked: the cached list is an
+		// answer too, and zeroing the count behind it left every list read from
+		// the card at zero -- a tab that showed its rows once and said there was
+		// nothing to show on the next visit.
 		if (job.kind != JOB_PLAY && !grow) {
 			result_count = 0;
 			snprintf(result_title, sizeof(result_title), "%s", job.text);
@@ -1544,6 +2000,43 @@ static void *worker_main(void *arg) {
 		if (job.kind != JOB_PLAY) {
 			result_from = grow ? kept : 0;
 			result_want = want;
+		}
+
+		// A first page that is still young is read from the card instead of
+		// from the catalogue: the chart and a podcast's episodes do not change
+		// between two looks at the same tab, and on a slow connection that is
+		// the difference between a tab and a wait for the same names.
+		char cache_key[64];
+		podcast_cache_key(&job, cache_key, sizeof(cache_key));
+		bool from_cache = false;
+		if (!grow && job.kind != JOB_PLAY && cache_key[0]) {
+			int age = listcache_age(cache_key);
+			if (age >= 0 && age <= PODCAST_CACHE_TTL_SECS) {
+				int cached = job.kind == JOB_TRENDING
+								 ? listcache_load(cache_key, result_feeds, sizeof(result_feeds[0]), want)
+								 : listcache_load(cache_key, result_episodes, sizeof(result_episodes[0]), want);
+				if (cached > 0) {
+					from_cache = true;
+					result_count = cached;
+					// The file holds the first page and nothing else, so "was the
+					// answer full?" is answered with the limit that was asked for:
+					// the next page is a request, and scrolling to the bottom of a
+					// cached list has to be able to make it.
+					result_raw = want;
+					if (job.kind == JOB_EPISODES) {
+						if (!newest_first) {
+							reverse_episodes(result_episodes, cached);
+						}
+						// Playback looks its episodes up here, so a list read
+						// from the card has to fill it too -- and say it holds
+						// only the first page, so the downloader asks for the
+						// rest when the queue reaches them.
+						memcpy(queued_episodes, result_episodes, sizeof(result_episodes[0]) * (size_t)cached);
+						queued_count = cached;
+						queued_complete = false;
+					}
+				}
+			}
 		}
 
 		switch (job.kind) {
@@ -1559,23 +2052,42 @@ static void *worker_main(void *arg) {
 		}
 
 		case JOB_TRENDING: {
+			if (from_cache) {
+				break;
+			}
 			int n = podcast_trending(result_feeds, want);
 			if (n < 0) {
 				snprintf(result_error, sizeof(result_error), "%s", podcast_last_error());
 			} else {
 				result_count = n;
 				result_raw = podcast_last_raw_count();
+				if (n > 0) {
+					listcache_save(cache_key, result_feeds, sizeof(result_feeds[0]), n);
+				}
 			}
 			break;
 		}
 
 		case JOB_EPISODES: {
+			if (from_cache) {
+				break;
+			}
 			int n = podcast_episodes(job.id, result_episodes, want);
 			if (n < 0) {
 				snprintf(result_error, sizeof(result_error), "%s", podcast_last_error());
 			} else {
 				result_count = n;
 				result_raw = podcast_last_raw_count();
+				// Written as the catalogue sent it, newest first, and reversed
+				// on the way out of the file the same way it is here: the order
+				// on the card must not depend on the setting in force when it
+				// was written.
+				if (n > 0) {
+					listcache_save(cache_key, result_episodes, sizeof(result_episodes[0]), n);
+				}
+				if (!newest_first) {
+					reverse_episodes(result_episodes, n);
+				}
 				// The episodes that just arrived become the ones the downloader
 				// can look up: this is where it takes the address from when the
 				// queue reaches one that is not there yet.
@@ -1590,7 +2102,7 @@ static void *worker_main(void *arg) {
 
 		case JOB_FOLLOWED:
 			// No network: the list is on the card, all of it at once.
-			result_count = podcastsubs_list(result_feeds, PODCAST_MAX_HELD);
+			result_count = load_followed(result_feeds, PODCAST_MAX_HELD);
 			result_raw = result_count;
 			break;
 
@@ -1618,6 +2130,9 @@ static void *worker_main(void *arg) {
 				long long wanted_id = queued_episodes[index].id;
 				long long feed = queued_episodes[index].feed_id;
 				int n = podcast_episodes(feed, result_episodes, PODCAST_EPISODES_STEP);
+				if (n > 0 && !newest_first) {
+					reverse_episodes(result_episodes, n);
+				}
 				if (n > queued_count) {
 					memcpy(queued_episodes, result_episodes, sizeof(result_episodes[0]) * (size_t)n);
 					queued_count = n;
@@ -1642,6 +2157,13 @@ static void *worker_main(void *arg) {
 				}
 			}
 
+			// The subscription this episode belongs to has been listened to once
+			// more, which is what "most listened" sorts by. Counted here, at the
+			// start, and not when the episode reaches its end: a podcast is
+			// listened to in pieces, and the piece somebody keeps coming back to
+			// is the one that ranks.
+			podcastsubs_count_play(queued_episodes[index].feed_id);
+
 			// Drop whatever was coming down: this is the user's order, not a
 			// fetch ahead.
 			streamturn_abandon_all();
@@ -1653,13 +2175,18 @@ static void *worker_main(void *arg) {
 				break;
 			}
 
-			// The queue: this episode and the ones AFTER it in the list, that is,
-			// going back in time. The others are not downloaded now -- they come
-			// down when their turn arrives (see podcastpage_prepare_track).
+			// The queue: this episode and the ones AFTER it in time, that is, going
+			// back. Which way that is in the array depends on the order the list is
+			// drawn in -- newest first walks up the array, oldest first walks down
+			// it -- and the tapped one comes first either way.
+			//
+			// The others are not downloaded now: they come down when their turn
+			// arrives (see podcastpage_prepare_track).
 			static char paths[PODCAST_QUEUE_MAX][512];
 			static const char *path_ptr[PODCAST_QUEUE_MAX];
 			int count = 0;
-			for (int i = index; i < queued_count && count < PODCAST_QUEUE_MAX; i++) {
+			int step = newest_first ? 1 : -1;
+			for (int i = index; i >= 0 && i < queued_count && count < PODCAST_QUEUE_MAX; i += step) {
 				if (i == index) {
 					snprintf(paths[count], sizeof(paths[0]), "%s", path);
 				} else if (!podcastcache_find(queued_episodes[i].id, paths[count], sizeof(paths[0]))) {
@@ -1674,9 +2201,11 @@ static void *worker_main(void *arg) {
 					// image to download, and it is fetched when the episode's
 					// turn comes.
 					const podcast_episode_t *q = &queued_episodes[i];
+					const char *ftitle = q->feed_title[0] ? q->feed_title : (list_feed_title[0] ? list_feed_title : NULL);
+					const char *fauthor = browsing_author[0] ? browsing_author : NULL;
 					podcastcache_write_sidecars(q->id, q->mime, q->title,
-												q->feed_title[0] ? q->feed_title : NULL, q->feed_id,
-												browsing_author, browsing_image, q->image, false);
+												ftitle, q->feed_id,
+												fauthor, browsing_image, q->image, false);
 				}
 				path_ptr[count] = paths[count];
 				count++;
@@ -1730,6 +2259,14 @@ static void row_clicked_cb(lv_event_t *e) {
 		return;
 	}
 
+	// In selection mode a tap picks the row and nothing else: opening a podcast
+	// or starting an episode would be a different thing from what the tick
+	// said, and the list is being used as a set for a moment.
+	if (selecting) {
+		selection_toggle(index);
+		return;
+	}
+
 	job_t job = {0};
 	if (list_kind == JOB_EPISODES) {
 		// No toast: a timed one would leave while the download it is about
@@ -1757,7 +2294,7 @@ static void row_clicked_cb(lv_event_t *e) {
 }
 
 // ---------------------------------------------------------------------------
-// the three-dot menu: follow, or stop
+// the three-dot menus: follow a feed, or act on an episode
 // ---------------------------------------------------------------------------
 
 static int menu_row_index;
@@ -1765,6 +2302,12 @@ static int menu_row_index;
 static void follow_cb(void *user) {
 	(void)user;
 	if (menu_row_index < 0 || menu_row_index >= list_count) {
+		return;
+	}
+	// Already followed: the menu says Unfollow in that case, so this is a tap
+	// that raced a follow made elsewhere. Nothing to write, and no second
+	// "now following" notice over a podcast that was already there.
+	if (podcastsubs_is_followed(result_feeds[menu_row_index].id)) {
 		return;
 	}
 	podcastsubs_follow(&result_feeds[menu_row_index]);
@@ -1783,25 +2326,45 @@ static void unfollow_cb(void *user) {
 	// leaving it there would mean a list that is no longer true.
 	if (list_kind == JOB_FOLLOWED) {
 		result_kind = JOB_FOLLOWED;
-		result_count = podcastsubs_list(result_feeds, PODCAST_MAX_HELD);
+		result_count = load_followed(result_feeds, PODCAST_MAX_HELD);
 		fill_list(0);
 	}
 }
 
+static void download_cb(void *user);
+static void mark_heard_cb(void *user);
+static void mark_not_heard_cb(void *user);
+
+// Starts the selection with this row already chosen. The row is read from
+// whichever variable the menu that called this belongs to: the feed menu keeps
+// its row in menu_row_index, an episode's long press in dl_row.
 static void row_menu_cb(lv_event_t *e) {
+	lv_event_stop_bubbling(e);
 	menu_row_index = menu_index_of(lv_event_get_current_target(e));
 	if (menu_row_index < 0 || menu_row_index >= list_count) {
 		return;
 	}
 
-	// Two one-entry tables instead of one label picked with a ternary: the tool
-	// that collects the strings to translate reads popover_item_t INITIALISERS,
-	// not assignments.
-	static const popover_item_t FOLLOW[] = {{"podcast_follow", follow_cb, NULL}};
-	static const popover_item_t UNFOLLOW[] = {{"podcast_unfollow", unfollow_cb, NULL}};
+	static const popover_item_t FOLLOW[] = {{"podcast_follow", follow_cb, NULL, false}};
+	static const popover_item_t UNFOLLOW[] = {{"podcast_unfollow", unfollow_cb, NULL, false}};
 
 	bool followed = podcastsubs_is_followed(result_feeds[menu_row_index].id);
 	popover_show(lv_event_get_current_target(e), followed ? UNFOLLOW : FOLLOW, 1);
+}
+
+static void episode_menu_cb(lv_event_t *e) {
+	lv_event_stop_bubbling(e);
+	int index = menu_index_of(lv_event_get_current_target(e));
+	if (index < 0 || index >= list_count || list_kind != JOB_EPISODES) {
+		return;
+	}
+	dl_row = index;
+	static const popover_item_t NOT_HEARD[] = {{"podcast_mark_listened", mark_heard_cb, NULL, false},
+												 {"podcast_download", download_cb, NULL, false}};
+	static const popover_item_t HEARD[] = {{"podcast_mark_not_listened", mark_not_heard_cb, NULL, false},
+									   {"podcast_download", download_cb, NULL, false}};
+	bool heard = podcastplayed_get(result_episodes[index].id);
+	popover_show(lv_event_get_current_target(e), heard ? HEARD : NOT_HEARD, 2);
 }
 
 // ---------------------------------------------------------------------------
@@ -1816,6 +2379,13 @@ static lv_obj_t *dl_bar;
 static lv_obj_t *dl_amount;
 static lv_timer_t *dl_timer;
 static int dl_row = -1;
+static int bulk_dl_rows[PODCAST_MAX_HELD];
+static int bulk_dl_count;
+static int bulk_dl_at;
+static bool bulk_dl_active;
+static bool bulk_dl_failed;
+
+static void bulk_download_next(void);
 
 static void dl_close(void) {
 	lv_timer_pause(dl_timer);
@@ -1847,7 +2417,12 @@ static void dl_poll_cb(lv_timer_t *timer) {
 	}
 	dl_close();
 	podcastdl_acknowledge();
-	if (state == PODCASTDL_DONE) {
+	if (bulk_dl_active) {
+		if (state != PODCASTDL_DONE) {
+			bulk_dl_failed = true;
+		}
+		bulk_download_next();
+	} else if (state == PODCASTDL_DONE) {
 		toast_success(tr("podcast_download_done"));
 	} else if (state == PODCASTDL_FAILED) {
 		toast_error(tr("podcast_download_failed"));
@@ -1856,6 +2431,8 @@ static void dl_poll_cb(lv_timer_t *timer) {
 
 static void dl_cancel_cb(lv_event_t *e) {
 	(void)e;
+	bulk_dl_active = false;
+	bulk_dl_count = 0;
 	podcastdl_cancel();
 	lv_label_set_text(dl_amount, tr("podcast_download_cancelling"));
 }
@@ -1925,19 +2502,17 @@ static void dl_build(gui_config_t *cfg) {
 	lv_timer_pause(dl_timer);
 }
 
-static void download_cb(void *user) {
-	(void)user;
-	if (dl_row < 0 || dl_row >= list_count || list_kind != JOB_EPISODES) {
-		return;
+static bool download_start(int index) {
+	if (index < 0 || index >= list_count || list_kind != JOB_EPISODES) {
+		return false;
 	}
-	const podcast_episode_t *episode = &result_episodes[dl_row];
+	dl_row = index;
+	const podcast_episode_t *episode = &result_episodes[index];
 	if (podcastdl_exists(episode, list_feed_title)) {
-		toast_plain(tr("podcast_already_downloaded"));
-		return;
+		return false;
 	}
 	if (!podcastdl_start(episode, list_feed_title, browsing_author, browsing_image)) {
-		toast_error(tr("podcast_download_failed"));
-		return;
+		return false;
 	}
 
 	// Theme colours are read at every opening: the card is built once.
@@ -1945,29 +2520,86 @@ static void download_cb(void *user) {
 	lv_label_set_text(dl_name, episode->title);
 	dl_paint(0, 0);
 	lv_obj_set_hidden(dl_veil, false);
-	lv_obj_move_foreground(dl_veil);
+	if (!screensaver_is_visible()) {
+		lv_obj_move_foreground(dl_veil);
+	}
 	power_hold_screen_on(true);
 	lv_timer_reset(dl_timer);
 	lv_timer_resume(dl_timer);
+	return true;
 }
 
-// An episode: the long press offers to keep it on the card.
+static void download_cb(void *user) {
+	(void)user;
+	if (dl_row < 0 || dl_row >= list_count || list_kind != JOB_EPISODES) {
+		return;
+	}
+	if (!download_start(dl_row)) {
+		toast_plain(tr("podcast_already_downloaded"));
+	}
+}
+
+static void bulk_download_next(void) {
+	while (bulk_dl_active && bulk_dl_at < bulk_dl_count) {
+		int index = bulk_dl_rows[bulk_dl_at++];
+		if (podcastdl_exists(&result_episodes[index], list_feed_title)) {
+			continue;
+		}
+		if (download_start(index)) {
+			return;
+		}
+		bulk_dl_failed = true;
+	}
+	if (bulk_dl_active) {
+		bulk_dl_active = false;
+		if (bulk_dl_failed) {
+			toast_error(tr("podcast_download_failed"));
+		} else {
+			toast_success(tr("podcast_download_done"));
+		}
+	}
+}
+
+// The tick, set or taken away by hand. A menu that says "Mark as listened" is
+// the only way to retire an episode one has already heard somewhere else -- or
+// to put one back that was marked by mistake.
+static void mark_heard_cb(void *user) {
+	(void)user;
+	if (dl_row < 0 || dl_row >= list_count || list_kind != JOB_EPISODES) {
+		return;
+	}
+	podcastplayed_set(result_episodes[dl_row].id, true);
+	refresh_row(dl_row);
+}
+
+static void mark_not_heard_cb(void *user) {
+	(void)user;
+	if (dl_row < 0 || dl_row >= list_count || list_kind != JOB_EPISODES) {
+		return;
+	}
+	podcastplayed_set(result_episodes[dl_row].id, false);
+	refresh_row(dl_row);
+}
+
 static void row_long_cb(lv_event_t *e) {
-	if (list_kind != JOB_EPISODES || switcher_back_drag_active() || player_sheet_drag_active()) {
+	if (switcher_back_drag_active() || player_sheet_drag_active()) {
 		return;
 	}
-	dl_row = row_index_of(lv_event_get_current_target(e));
-	if (dl_row < 0 || dl_row >= list_count) {
+
+	int index = row_index_of(lv_event_get_current_target(e));
+	if (index < 0 || index >= list_count) {
 		return;
 	}
-	// The lift that ends this press would otherwise arrive as a click and
-	// start the episode.
 	lv_indev_t *indev = lv_indev_active();
 	if (indev) {
 		lv_indev_wait_release(indev);
 	}
-	static const popover_item_t ITEMS[] = {{"podcast_download", download_cb, NULL}};
-	popover_show(lv_event_get_current_target(e), ITEMS, 1);
+	if (!selection_start()) {
+		return;
+	}
+	if (!chosen[index]) {
+		selection_toggle(index);
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -2012,34 +2644,263 @@ static void paint_pill(lv_obj_t *btn, bool on) {
 	}
 	lv_obj_set_style_bg_color(btn, on ? theme()->accent : theme()->surface_pressed, 0);
 	lv_obj_set_style_text_color(lv_obj_get_child(btn, 0), on ? theme_on_accent() : theme()->text_primary, 0);
+	lv_obj_set_style_radius(btn, LV_RADIUS_CIRCLE, 0);
+}
+
+// The order button wears the order the list is in: the same two glyphs the
+// track lists use for their date sorting.
+static void paint_order_button(void) {
+	if (!order_btn) {
+		return;
+	}
+	lv_obj_t *icon = lv_obj_get_child(order_btn, 0);
+	if (icon) {
+		lv_image_set_src(icon, podcastpage_episodes_newest_first() ? &icon_sort_date_new : &icon_sort_date_old);
+		settingsrow_scale_corner_icon(icon, g_cfg);
+	}
+}
+
+// Turning a list round: the same episodes, the other way. The array the rows
+// read and the copy a tap walks (queued_episodes) both go, so the queue still
+// runs towards the older episodes whichever way they are drawn.
+static void order_cb(lv_event_t *e) {
+	(void)e;
+	if (switcher_back_drag_active() || player_sheet_drag_active()) {
+		return;
+	}
+	podcastpage_set_episodes_newest_first(!podcastpage_episodes_newest_first());
+	if (list_kind == JOB_EPISODES && result_count > 0) {
+		reverse_episodes(result_episodes, result_count);
+		reverse_episodes(queued_episodes, queued_count);
+		fill_list(0);
+	}
+	paint_order_button();
 }
 
 // The corner buttons' visibility has a single owner, because two owners of one
 // flag means whichever runs last wins. The magnifier needs the keys, a network
 // and a home view (the two pills). The gear and the downloads need none of
 // that and stay up over the notices too: the podcast settings apply to the
-// downloaded episodes as well. From the edge: gear, downloads, magnifier.
+// downloaded episodes as well. The order belongs to the episodes view alone.
+//
+// Slots are handed out from the right to whatever is showing, rather than fixed
+// at build time: the order button and the magnifier never share a list, so
+// leaving a hole between them would be a hole in the heading's width.
+// Every chosen podcast is already followed, so the sheet offers Unfollow and
+// not Follow. False for an episode selection, which has nothing to follow.
+static bool chosen_all_followed(void) {
+	if (!selecting || !chosen || list_kind == JOB_EPISODES) {
+		return false;
+	}
+	bool any = false;
+	for (int i = 0; i < list_count && !any; i++) {
+		any = chosen[i] != 0;
+	}
+	if (!any) {
+		return false;
+	}
+	for (int i = 0; i < list_count; i++) {
+		if (chosen[i] && !podcastsubs_is_followed(result_feeds[i].id)) {
+			return false;
+		}
+	}
+	return true;
+}
+
+// The corner's tick is enabled only while something is chosen: a sheet that
+// cannot act on anything should not open.
+static void paint_selection_actions(void) {
+	if (!sel_confirm_btn) {
+		return;
+	}
+	if (!selecting || chosen_count <= 0) {
+		lv_obj_add_state(sel_confirm_btn, LV_STATE_DISABLED);
+	} else {
+		lv_obj_remove_state(sel_confirm_btn, LV_STATE_DISABLED);
+	}
+}
+
+// Follow all of it, or leave all of it. The sheet has already said which, from
+// the same question (chosen_all_followed), so the two cannot disagree.
+static void bulk_follow_apply(void *user) {
+	(void)user;
+	if (!selecting || !chosen || list_kind == JOB_EPISODES) {
+		return;
+	}
+	bool remove_followed = chosen_all_followed();
+	bool changed = false;
+	for (int i = 0; i < list_count; i++) {
+		if (!chosen[i]) {
+			continue;
+		}
+		bool followed = podcastsubs_is_followed(result_feeds[i].id);
+		if (remove_followed && followed) {
+			podcastsubs_unfollow(result_feeds[i].id);
+			changed = true;
+		} else if (!remove_followed && !followed) {
+			podcastsubs_follow(&result_feeds[i]);
+			changed = true;
+		}
+	}
+	if (changed) {
+		toast_plain(tr(remove_followed ? "podcast_no_longer_following" : "podcast_now_following"));
+	}
+	bool was_followed_list = list_kind == JOB_FOLLOWED;
+	selection_stop();
+	if (was_followed_list) {
+		result_kind = JOB_FOLLOWED;
+		result_count = load_followed(result_feeds, PODCAST_MAX_HELD);
+		fill_list(0);
+	}
+}
+
+// The tick for every chosen episode, or away from all of them. One write per
+// episode: the heard set is a database row each and the mark must survive a
+// power cut right after the tap.
+static void bulk_mark_heard_cb(void *user) {
+	(void)user;
+	if (!selecting || !chosen || list_kind != JOB_EPISODES) {
+		return;
+	}
+	for (int i = 0; i < list_count; i++) {
+		if (!chosen[i]) {
+			continue;
+		}
+		podcastplayed_set(result_episodes[i].id, true);
+	}
+	selection_stop();
+	for (int i = 0; i < ROW_POOL; i++) {
+		if (rows[i].index >= 0) {
+			refresh_row(rows[i].index);
+		}
+	}
+}
+
+static void bulk_mark_unheard_cb(void *user) {
+	(void)user;
+	if (!selecting || !chosen || list_kind != JOB_EPISODES) {
+		return;
+	}
+	for (int i = 0; i < list_count; i++) {
+		if (chosen[i]) {
+			podcastplayed_set(result_episodes[i].id, false);
+		}
+	}
+	selection_stop();
+	for (int i = 0; i < ROW_POOL; i++) {
+		if (rows[i].index >= 0) {
+			refresh_row(rows[i].index);
+		}
+	}
+}
+
+static void bulk_download_selected_cb(void *user) {
+	(void)user;
+	if (!selecting || !chosen || list_kind != JOB_EPISODES || bulk_dl_active) {
+		return;
+	}
+	bulk_dl_count = 0;
+	for (int i = 0; i < list_count && bulk_dl_count < PODCAST_MAX_HELD; i++) {
+		if (chosen[i]) {
+			bulk_dl_rows[bulk_dl_count++] = i;
+		}
+	}
+	selection_stop();
+	if (bulk_dl_count == 0) {
+		return;
+	}
+	bulk_dl_at = 0;
+	bulk_dl_failed = false;
+	bulk_dl_active = true;
+	bulk_download_next();
+}
+
+static void bulk_episode_sheet(lv_obj_t *anchor) {
+	if (!selecting || !chosen || list_kind != JOB_EPISODES) {
+		return;
+	}
+	bool has_heard = false;
+	bool has_unheard = false;
+	for (int i = 0; i < list_count; i++) {
+		if (chosen[i]) {
+			if (podcastplayed_get(result_episodes[i].id)) {
+				has_heard = true;
+			} else {
+				has_unheard = true;
+			}
+		}
+	}
+	popover_item_t actions[3];
+	int count = 0;
+	if (has_unheard) {
+		actions[count++] = (popover_item_t){"podcast_mark_listened", bulk_mark_heard_cb, NULL, false};
+	}
+	if (has_heard) {
+		actions[count++] = (popover_item_t){"podcast_mark_not_listened", bulk_mark_unheard_cb, NULL, false};
+	}
+	actions[count++] = (popover_item_t){"podcast_download", bulk_download_selected_cb, NULL, false};
+	popover_show(anchor, actions, count);
+}
+
+// The tick in the corner: the same sheet the episode corner used to open
+// directly, and for a selection of podcasts the one action that list has --
+// follow, or unfollow when every chosen row is already in My Podcasts.
+static void bulk_sheet_cb(lv_event_t *e) {
+	lv_event_stop_bubbling(e);
+	if (!selecting || !chosen || chosen_count <= 0) {
+		return;
+	}
+	lv_obj_t *anchor = lv_event_get_current_target(e);
+	if (list_kind == JOB_EPISODES) {
+		bulk_episode_sheet(anchor);
+		return;
+	}
+	popover_item_t action;
+	memset(&action, 0, sizeof(action));
+	bool unfollow = chosen_all_followed();
+	action.label = unfollow ? "podcast_unfollow" : "podcast_follow";
+	action.action = bulk_follow_apply;
+	popover_show(anchor, &action, 1);
+}
+
+static void bulk_close_cb(lv_event_t *e) {
+	(void)e;
+	selection_stop();
+}
+
 static void refresh_corner_buttons(void) {
 	bool home_view = list_kind == JOB_FOLLOWED || list_kind == JOB_TRENDING || list_kind == JOB_NONE;
 	bool online = podcast_configured() && network_up();
 	bool search = online && home_view;
 	bool local = home_view || !online;
-	if (list_title && g_cfg) {
-		// The heading gets the width the buttons are not using.
-		settingsrow_title_corner_slots(list_title, g_cfg, (search ? 1 : 0) + (local ? 2 : 0));
-	}
-	lv_obj_t *const buttons[] = {search_btn, settings_btn, saved_btn};
-	const bool shown[] = {search, local, local};
-	for (int i = 0; i < 3; i++) {
+	bool order = list_kind == JOB_EPISODES;
+
+	// While rows are being chosen the corner belongs to the choice: the tick that
+	// confirms it and the way out, the same pair on both kinds of list.
+	lv_obj_t *const buttons[] = {settings_btn, saved_btn, search_btn, order_btn, sel_confirm_btn, sel_close_btn};
+	const bool shown[] = {local && !selecting, local && !selecting, search && !selecting, order && !selecting,
+						  selecting, selecting};
+	int slots = 0;
+	for (int i = 0; i < 6; i++) {
 		if (!buttons[i]) {
 			continue;
 		}
 		if (shown[i]) {
+			if (g_cfg) {
+				settingsrow_place_corner_button(buttons[i], g_cfg, slots);
+			}
+			slots++;
 			lv_obj_set_hidden(buttons[i], false);
 		} else {
 			lv_obj_set_hidden(buttons[i], true);
 		}
 	}
+	if (list_title && g_cfg) {
+		// The heading gets the width the buttons are not using.
+		settingsrow_title_corner_slots(list_title, g_cfg, slots);
+	}
+	paint_order_button();
+	paint_selection_actions();
 }
 
 // The pill colours are set by hand, so a theme change does not touch them on
@@ -2144,7 +3005,11 @@ static void build_page(gui_config_t *cfg) {
 	lv_obj_set_style_text_align(list_empty, LV_TEXT_ALIGN_CENTER, 0);
 	lv_obj_add_style(list_empty, &theme_style_text_dim, 0);
 	lv_obj_set_style_text_font(list_empty, &font_ui_24, 0);
-	lv_obj_align(list_empty, LV_ALIGN_TOP_MID, 0, content_top + 140);
+	// Centred on the panel, with the position left to LVGL. A fixed offset below
+	// the heading put a two-line notice low enough to read as a footnote, and on
+	// the V1's 320 px it sat against the bottom edge -- which is not what
+	// "nothing here yet" should look like.
+	lv_obj_align(list_empty, LV_ALIGN_CENTER, 0, 0);
 	lv_obj_set_hidden(list_empty, true);
 
 	// The same spot, for when the section cannot work at all.
@@ -2186,6 +3051,108 @@ static void build_page(gui_config_t *cfg) {
 static lv_obj_t *search_field;
 static lv_obj_t *search_clear_btn;
 static keyboard_t *search_keyboard;
+static lv_obj_t *search_history_list;
+static lv_obj_t *search_history_empty;
+
+// The last few queries, newest first -- Tidal's history, in the podcast
+// section's own part of the configuration file. Eight, because a history is
+// for picking up a search from the day before and not for keeping a log.
+#define SEARCH_HISTORY_MAX 8
+#define SEARCH_HISTORY_LEN 96
+#define SEARCH_HISTORY_FONT (bp_is_tempotec_v1() ? &font_ui_18 : &font_ui_24)
+
+static char history_terms[SEARCH_HISTORY_MAX][SEARCH_HISTORY_LEN];
+static int history_count;
+static bool history_loaded;
+
+static void search_history_rebuild(void);
+
+// Rebuilding deletes the rows, and one of them may be the widget whose tap
+// asked for it: the work is queued, so it runs after the event has returned.
+static void search_history_rebuild_async(void *user) {
+	(void)user;
+	search_history_rebuild();
+}
+
+static void history_load(void) {
+	if (history_loaded) {
+		return;
+	}
+	history_loaded = true;
+	history_count = 0;
+
+	int stored = (int)config_get_int("podcast", "search_history_count", 0);
+	if (stored < 0) {
+		stored = 0;
+	}
+	if (stored > SEARCH_HISTORY_MAX) {
+		stored = SEARCH_HISTORY_MAX;
+	}
+	for (int i = 0; i < stored; i++) {
+		char key[24];
+		snprintf(key, sizeof(key), "search_history_%d", i);
+		const char *term = config_get("podcast", key, "");
+		if (term && term[0]) {
+			snprintf(history_terms[history_count], SEARCH_HISTORY_LEN, "%s", term);
+			history_count++;
+		}
+	}
+}
+
+static void history_save(void) {
+	config_set_int("podcast", "search_history_count", history_count);
+	// Past the end the keys are emptied rather than left where they were: a
+	// cleared history that a later read finds again is worse than none.
+	for (int i = 0; i < SEARCH_HISTORY_MAX; i++) {
+		char key[24];
+		snprintf(key, sizeof(key), "search_history_%d", i);
+		config_set("podcast", key, i < history_count ? history_terms[i] : "");
+	}
+	config_save();
+}
+
+// Puts the term on top, once: a search already in the list moves up instead of
+// filling it with the same word repeated.
+static void history_remember(const char *term) {
+	history_load();
+	while (term && *term == ' ') {
+		term++;
+	}
+	if (!term || !*term) {
+		return;
+	}
+
+	char kept[SEARCH_HISTORY_MAX][SEARCH_HISTORY_LEN];
+	int kept_count = 0;
+	for (int i = 0; i < history_count && kept_count < SEARCH_HISTORY_MAX - 1; i++) {
+		if (strcmp(history_terms[i], term) == 0) {
+			continue;
+		}
+		snprintf(kept[kept_count], SEARCH_HISTORY_LEN, "%s", history_terms[i]);
+		kept_count++;
+	}
+	snprintf(history_terms[0], SEARCH_HISTORY_LEN, "%s", term);
+	for (int i = 0; i < kept_count; i++) {
+		snprintf(history_terms[i + 1], SEARCH_HISTORY_LEN, "%s", kept[i]);
+	}
+	history_count = kept_count + 1;
+	history_save();
+}
+
+// Typing needs the keyboard, and the keyboard and the history cannot both be on
+// the V1's screen: one replaces the other, as on Tidal's search page.
+static void search_keyboard_show(bool visible) {
+	if (!search_keyboard) {
+		return;
+	}
+	keyboard_set_visible(search_keyboard, visible);
+	if (visible) {
+		lv_obj_set_hidden(search_history_list, true);
+		lv_obj_set_hidden(search_history_empty, true);
+	} else {
+		search_history_rebuild();
+	}
+}
 
 static void refresh_search_clear(void) {
 	if (!search_clear_btn) {
@@ -2219,10 +3186,123 @@ static void search_accept_cb(lv_event_t *e) {
 	if (!text || !text[0]) {
 		return;
 	}
+	history_remember(text);
 	job_t job = {0};
 	job.kind = JOB_SEARCH;
 	snprintf(job.text, sizeof(job.text), "%s", text);
+	// The results get the whole page, as on Tidal: the keyboard would
+	// otherwise stay up over a list nobody asked to see with it.
+	search_keyboard_show(false);
 	run(&job);
+}
+
+// Tapping the field brings the keyboard, and the history steps aside for it.
+static void search_field_clicked_cb(lv_event_t *e) {
+	(void)e;
+	if (switcher_back_drag_active()) {
+		return;
+	}
+	search_keyboard_show(true);
+	lv_obj_add_state(search_field, LV_STATE_FOCUSED);
+	lv_obj_send_event(search_field, LV_EVENT_FOCUSED, NULL);
+}
+
+// One row of the history: the query, and an x to forget just that one.
+static void history_forget_cb(lv_event_t *e) {
+	lv_event_stop_bubbling(e);
+	if (switcher_back_drag_active() || player_sheet_drag_active()) {
+		return;
+	}
+	int index = (int)(intptr_t)lv_event_get_user_data(e);
+	if (index < 0 || index >= history_count) {
+		return;
+	}
+	for (int i = index; i + 1 < history_count; i++) {
+		snprintf(history_terms[i], SEARCH_HISTORY_LEN, "%s", history_terms[i + 1]);
+	}
+	history_count--;
+	history_save();
+	gui_post(search_history_rebuild_async, NULL);
+}
+
+static void history_pick_cb(lv_event_t *e) {
+	if (switcher_back_drag_active() || player_sheet_drag_active()) {
+		return;
+	}
+	int index = (int)(intptr_t)lv_event_get_user_data(e);
+	if (index < 0 || index >= history_count) {
+		return;
+	}
+	lv_textarea_set_text(search_field, history_terms[index]);
+	refresh_search_clear();
+	search_accept_cb(e);
+}
+
+// Draws the history, in place of the keyboard while nothing is being typed.
+static void search_history_rebuild(void) {
+	if (!search_history_list) {
+		return;
+	}
+	history_load();
+	lv_obj_clean(search_history_list);
+
+	bool any = history_count > 0;
+	lv_obj_set_hidden(search_history_list, !any);
+	if (search_history_empty) {
+		lv_obj_set_hidden(search_history_empty, any);
+	}
+	if (!any) {
+		return;
+	}
+
+	for (int i = 0; i < history_count; i++) {
+		lv_obj_t *row = lv_btn_create(search_history_list);
+		lv_obj_set_width(row, lv_pct(100));
+		lv_obj_set_height(row, bp_pick(40, 68));
+		lv_obj_add_style(row, &theme_style_card, 0);
+		lv_obj_add_style(row, &theme_style_card_pressed, LV_STATE_PRESSED);
+		lv_obj_set_style_radius(row, bp_pick(10, 12), 0);
+		lv_obj_set_style_border_width(row, 0, 0);
+		lv_obj_set_style_shadow_width(row, 0, 0);
+		lv_obj_set_style_pad_hor(row, bp_pick(8, 20), 0);
+		lv_obj_set_style_pad_column(row, bp_pick(4, 10), 0);
+		lv_obj_set_scrollable(row, false);
+		lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
+		lv_obj_set_flex_align(row, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+		lv_obj_add_event_cb(row, history_pick_cb, LV_EVENT_CLICKED, (void *)(intptr_t)i);
+
+		lv_obj_t *label = lv_label_create(row);
+		lv_label_set_text(label, history_terms[i]);
+		lv_obj_add_style(label, &theme_style_text, 0);
+		lv_obj_set_style_text_font(label, SEARCH_HISTORY_FONT, 0);
+		lv_obj_set_flex_grow(label, 1);
+		lv_label_set_long_mode(label, LV_LABEL_LONG_DOT);
+		lv_obj_set_height(label, lv_font_get_line_height(SEARCH_HISTORY_FONT));
+
+		lv_obj_t *x = lv_btn_create(row);
+		lv_obj_set_size(x, bp_pick(30, 44), bp_pick(30, 44));
+		lv_obj_set_style_bg_opa(x, LV_OPA_TRANSP, 0);
+		lv_obj_set_style_border_width(x, 0, 0);
+		lv_obj_set_style_shadow_width(x, 0, 0);
+		lv_obj_set_style_pad_all(x, 0, 0);
+		lv_obj_add_event_cb(x, history_forget_cb, LV_EVENT_CLICKED, (void *)(intptr_t)i);
+
+		lv_obj_t *glyph = lv_image_create(x);
+		lv_image_set_src(glyph, &icon_clear);
+		lv_obj_add_style(glyph, &theme_style_icon, 0);
+		lv_obj_set_style_image_opa(glyph, LV_OPA_60, 0);
+		lv_obj_center(glyph);
+	}
+}
+
+static void search_loaded_cb(lv_event_t *e) {
+	(void)e;
+	refresh_search_clear();
+	// Back from the results, the keyboard that was sent away stays away and the
+	// history takes the space it left.
+	if (!keyboard_is_visible(search_keyboard)) {
+		search_history_rebuild();
+	}
 }
 
 // Copied line for line from Tidal's, deliberately: search in this player has
@@ -2230,8 +3310,14 @@ static void search_accept_cb(lv_event_t *e) {
 // shared regular/compact keyboard below. A page that invents another is
 // instantly not of this house.
 static void build_search_page(gui_config_t *cfg) {
+	const bool compact = cfg->screen_width < 320;
+	const int field_h = compact ? 44 : 62;
+	const int gap = compact ? 6 : 10;
+	const int clear_side = compact ? 40 : 56;
+
 	search_screen = lv_obj_create(NULL);
 	lv_obj_add_style(search_screen, &theme_style_screen, 0);
+	lv_obj_add_event_cb(search_screen, search_loaded_cb, LV_EVENT_SCREEN_LOADED, NULL);
 
 	settingsrow_title(search_screen, cfg, "podcast_search_for_a_podcast");
 	int top = settingsrow_content_top(cfg);
@@ -2239,23 +3325,26 @@ static void build_search_page(gui_config_t *cfg) {
 	search_field = lv_textarea_create(search_screen);
 	lv_textarea_set_one_line(search_field, true);
 	lv_textarea_set_placeholder_text(search_field, tr("podcast_name"));
-	lv_obj_set_size(search_field, cfg->screen_width - 2 * cfg->padding, 62);
+	lv_obj_set_size(search_field, cfg->screen_width - 2 * cfg->padding, field_h);
 	lv_obj_set_scrollbar_mode(search_field, LV_SCROLLBAR_MODE_OFF);
 	lv_obj_align(search_field, LV_ALIGN_TOP_LEFT, cfg->padding, top);
 	lv_obj_add_style(search_field, &theme_style_card, 0);
-	lv_obj_set_style_radius(search_field, 12, 0);
+	lv_obj_set_style_radius(search_field, compact ? 10 : 12, 0);
 	lv_obj_set_style_border_width(search_field, 0, 0);
 	lv_obj_set_style_shadow_width(search_field, 0, 0);
-	lv_obj_set_style_pad_all(search_field, 14, 0);
-	lv_obj_set_style_text_font(search_field, &font_ui_24, 0);
+	lv_obj_set_style_pad_all(search_field, compact ? 8 : 14, 0);
+	lv_obj_set_style_text_font(search_field, compact ? &font_ui_18 : &font_ui_24, 0);
 	keyboard_style_caret(search_field);
 	lv_obj_add_event_cb(search_field, search_field_changed_cb, LV_EVENT_VALUE_CHANGED, NULL);
+	// Tapping it brings the keyboard, and the history steps aside for it.
+	lv_obj_add_event_cb(search_field, search_field_clicked_cb, LV_EVENT_CLICKED, NULL);
 
 	// The x on the field's right edge: clears the query with one tap. Hidden
 	// while the field is empty.
 	search_clear_btn = lv_btn_create(search_screen);
-	lv_obj_set_size(search_clear_btn, 56, 56);
-	lv_obj_align(search_clear_btn, LV_ALIGN_TOP_RIGHT, -cfg->padding - 4, top + (62 - 56) / 2);
+	lv_obj_set_size(search_clear_btn, clear_side, clear_side);
+	lv_obj_align(search_clear_btn, LV_ALIGN_TOP_RIGHT, -cfg->padding - (compact ? 0 : 4),
+				 top + (field_h - clear_side) / 2);
 	lv_obj_set_style_bg_opa(search_clear_btn, LV_OPA_TRANSP, 0);
 	lv_obj_set_style_shadow_width(search_clear_btn, 0, 0);
 	lv_obj_set_style_border_width(search_clear_btn, 0, 0);
@@ -2270,12 +3359,49 @@ static void build_search_page(gui_config_t *cfg) {
 	lv_obj_center(search_clear_icon);
 
 	// Room for it, so a long query does not run underneath.
-	lv_obj_set_style_pad_right(search_field, 60, 0);
+	lv_obj_set_style_pad_right(search_field, compact ? 42 : 60, 0);
 
 	// No search-type pills, unlike Qobuz and Tidal: there the search runs over
 	// tracks, albums and artists, here there is one thing only to search for.
+	// Their place under the field is taken by the history.
+	const int history_top = top + field_h + gap;
+	int history_h = cfg->screen_height - history_top - cfg->padding;
+	if (history_h < 40) {
+		history_h = 40;
+	}
+
+	search_history_list = lv_obj_create(search_screen);
+	lv_obj_set_size(search_history_list, cfg->screen_width - 2 * cfg->padding, history_h);
+	lv_obj_align(search_history_list, LV_ALIGN_TOP_LEFT, cfg->padding, history_top);
+	lv_obj_set_style_bg_opa(search_history_list, LV_OPA_TRANSP, 0);
+	lv_obj_set_style_border_width(search_history_list, 0, 0);
+	lv_obj_set_style_radius(search_history_list, 0, 0);
+	lv_obj_set_style_pad_all(search_history_list, 0, 0);
+	lv_obj_set_style_pad_gap(search_history_list, compact ? 4 : 8, 0);
+	lv_obj_set_scroll_dir(search_history_list, LV_DIR_VER);
+	lv_obj_set_scrollbar_mode(search_history_list, LV_SCROLLBAR_MODE_AUTO);
+	lv_obj_set_event_bubble(search_history_list, true);
+	lv_obj_set_flex_flow(search_history_list, LV_FLEX_FLOW_COLUMN);
+	lv_obj_set_flex_align(search_history_list, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
+
+	search_history_empty = lv_label_create(search_screen);
+	lv_label_set_text(search_history_empty, tr("no_searches_yet"));
+	lv_obj_add_style(search_history_empty, &theme_style_text_dim, 0);
+	lv_obj_set_style_text_font(search_history_empty, &font_ui_18, 0);
+	lv_obj_set_width(search_history_empty, cfg->screen_width - 2 * cfg->padding);
+	lv_label_set_long_mode(search_history_empty, LV_LABEL_LONG_WRAP);
+	// Level with where the first history row would be, not a gap under the
+	// field: with nothing searched yet this label is the whole history.
+	lv_obj_align(search_history_empty, LV_ALIGN_TOP_LEFT, cfg->padding, history_top + 2);
+	lv_obj_set_hidden(search_history_empty, true);
+
 	search_keyboard =
-		keyboard_create(search_screen, cfg->screen_width, cfg->screen_width < 320 ? 144 : 316, search_field, NULL, "ok", search_accept_cb, NULL);
+		keyboard_create(search_screen, cfg->screen_width, compact ? 144 : 316, search_field, NULL, "ok", search_accept_cb, NULL);
+
+	// The history is what the page opens on; the keyboard arrives with the
+	// first tap in the field.
+	search_keyboard_show(false);
+
 	switcher_attach_back_gesture(search_screen);
 }
 
@@ -2303,7 +3429,7 @@ static bool show_followed_now(void) {
 
 	result_error[0] = '\0';
 	result_kind = JOB_FOLLOWED;
-	result_count = podcastsubs_list(result_feeds, PODCAST_MAX_HELD);
+	result_count = load_followed(result_feeds, PODCAST_MAX_HELD);
 	snprintf(result_title, sizeof(result_title), "%s", tr("podcast_my_podcasts"));
 	fill_list(0);
 
@@ -2348,6 +3474,14 @@ static void pill_clicked_cb(lv_event_t *e) {
 
 static void open_search_cb(lv_event_t *e) {
 	(void)e;
+	lv_textarea_set_text(search_field, "");
+	keyboard_reset(search_keyboard);
+	refresh_search_clear();
+	// The history first, unless there is none to show: then the keyboard is
+	// what the page opens on, and the first tap has something to do -- the same
+	// rule as Tidal's search page.
+	history_load();
+	search_keyboard_show(history_count == 0);
 	switch_screen(search_screen);
 }
 
@@ -2477,6 +3611,11 @@ static bool refresh_notes(void) {
 	return true;
 }
 
+// A region was chosen, so the chart on screen is the old region's. Re-entering
+// the section asks for the new one instead of leaving the old list under a pill
+// that now means somewhere else.
+static bool trending_stale;
+
 static void refresh_page_state(void) {
 	if (!refresh_notes()) {
 		return;
@@ -2494,11 +3633,41 @@ static void refresh_page_state(void) {
 	// elsewhere.
 	if (current_list_job.kind == JOB_FOLLOWED) {
 		run_home_view(JOB_FOLLOWED);
+		return;
 	}
+
+	if (current_list_job.kind == JOB_TRENDING && trending_stale) {
+		trending_stale = false;
+		run_home_view(JOB_TRENDING);
+	}
+}
+
+// Where the podcast page keeps its things: the picture cache, the list cache,
+// the podcasts' own database. All of it lives on the card, and the card can be
+// inserted after the player starts -- a root that was empty at startup used to
+// stay empty for the session, which is why the covers were downloaded again at
+// every visit. Read again (and only again: these setters reopen a database)
+// whenever the card behind them has changed.
+static char podcast_root[256];
+
+static void podcast_roots_use(const char *root) {
+	if (!root) {
+		root = "";
+	}
+	if (strcmp(podcast_root, root) == 0) {
+		return;
+	}
+	snprintf(podcast_root, sizeof(podcast_root), "%s", root);
+	qobuzart_set_root(root);
+	listcache_set_root(root);
+	podcastcache_set_root(root);
+	podcastsubs_set_root(root);
+	podcastplayed_set_root(root);
 }
 
 static void page_loaded_cb(lv_event_t *e) {
 	(void)e;
+	podcast_roots_use(storage_sd_root());
 	refresh_page_state();
 }
 
@@ -2575,8 +3744,10 @@ static void pick_skip_forward_cb(lv_event_t *e) {
 
 static lv_obj_t *make_skip_choice(lv_obj_t *parent, const char *text, int seconds, lv_event_cb_t cb) {
 	lv_obj_t *btn = lv_btn_create(parent);
-	lv_obj_set_size(btn, LV_SIZE_CONTENT, 64);
-	lv_obj_set_style_pad_hor(btn, 22, 0);
+	// Two cards of three pills, and the V1's 320 px has to hold both without a
+	// scrollbar: the pills are sized to the panel there.
+	lv_obj_set_size(btn, LV_SIZE_CONTENT, bp_pick(44, 64));
+	lv_obj_set_style_pad_hor(btn, bp_pick(14, 22), 0);
 	lv_obj_set_style_radius(btn, LV_RADIUS_CIRCLE, 0);
 	lv_obj_set_style_shadow_width(btn, 0, 0);
 	lv_obj_set_style_border_width(btn, 0, 0);
@@ -2596,11 +3767,11 @@ static lv_obj_t *make_skip_card(lv_obj_t *parent, const char *title) {
 	lv_obj_set_width(card, lv_pct(100));
 	lv_obj_set_height(card, LV_SIZE_CONTENT);
 	lv_obj_add_style(card, &theme_style_card, 0);
-	lv_obj_set_style_radius(card, 12, 0);
+	lv_obj_set_style_radius(card, bp_pick(10, 12), 0);
 	lv_obj_set_style_border_width(card, 0, 0);
 	lv_obj_set_style_shadow_width(card, 0, 0);
-	lv_obj_set_style_pad_all(card, 20, 0);
-	lv_obj_set_style_pad_gap(card, 18, 0);
+	lv_obj_set_style_pad_all(card, bp_pick(10, 20), 0);
+	lv_obj_set_style_pad_gap(card, bp_pick(8, 18), 0);
 	lv_obj_set_scrollable(card, false);
 	lv_obj_set_event_bubble(card, true);
 	lv_obj_set_flex_flow(card, LV_FLEX_FLOW_COLUMN);
@@ -2656,10 +3827,209 @@ static void build_controls_page(gui_config_t *cfg) {
 	switcher_attach_back_gesture(controls_screen);
 }
 
+// The order the followed list is drawn in. Three pills, like the skip amounts:
+// the choice is a property of the reader and it is made once, so it belongs on
+// the settings page rather than in a corner of the list -- where the V1's
+// heading has room for three buttons and no room for a fourth.
+static lv_obj_t *order_choice[3];
+
+static void refresh_order_buttons(void) {
+	podcast_sort_t order = podcastpage_subs_sort();
+	for (int i = 0; i < 3; i++) {
+		paint_pill(order_choice[i], (int)order == i);
+	}
+}
+
+static void pick_order_cb(lv_event_t *e) {
+	if (switcher_back_drag_active()) {
+		return;
+	}
+	podcastpage_set_subs_sort((podcast_sort_t)(intptr_t)lv_event_get_user_data(e));
+	refresh_order_buttons();
+	// The list itself is sorted on the way back: entering the section re-reads
+	// it (list_loaded_cb), and reading it is what puts it in this order.
+}
+
+// The three order pills, and they are the same pills every other settings page
+// uses. They were their own thing -- taller, with a bigger face and their own
+// paddings -- which on a page of shared cards read as one card drawn by
+// somebody else. The shared pill passes its value as the event's user data,
+// which is what the old callback read.
+// The text is a translation key, so it has to go through settingsrow_pill(),
+// which translates it -- settingsrow_pill_text() is the variant for literal
+// labels ("MP3", "320", "feat.") and would leave the tags on screen.
+static lv_obj_t *make_order_pill(lv_obj_t *parent, const char *text, podcast_sort_t order) {
+	return settingsrow_pill(parent, text, (int)order, pick_order_cb);
+}
+
+// The card the three pills sit in. The row wraps, unlike the skip amounts':
+// three pills at the V1's sizes are wider than its 200 usable pixels, and a row
+// that could not wrap would push the last one off the card.
+static void build_order_card(lv_obj_t *parent) {
+	lv_obj_t *card = lv_obj_create(parent);
+	lv_obj_set_width(card, lv_pct(100));
+	lv_obj_set_height(card, LV_SIZE_CONTENT);
+	lv_obj_add_style(card, &theme_style_card, 0);
+	lv_obj_set_style_radius(card, 12, 0);
+	lv_obj_set_style_border_width(card, 0, 0);
+	lv_obj_set_style_shadow_width(card, 0, 0);
+	lv_obj_set_style_pad_all(card, 20, 0);
+	lv_obj_set_style_pad_gap(card, bp_pick(8, 18), 0);
+	lv_obj_set_scrollable(card, false);
+	lv_obj_set_event_bubble(card, true);
+	lv_obj_set_flex_flow(card, LV_FLEX_FLOW_COLUMN);
+	lv_obj_set_flex_align(card, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
+
+	lv_obj_t *name = lv_label_create(card);
+	lv_label_set_text(name, tr("podcast_order"));
+	lv_obj_add_style(name, &theme_style_text, 0);
+	lv_obj_set_style_text_font(name, &font_ui_24, 0);
+
+	lv_obj_t *row = lv_obj_create(card);
+	lv_obj_set_size(row, lv_pct(100), LV_SIZE_CONTENT);
+	lv_obj_set_style_bg_opa(row, 0, 0);
+	lv_obj_set_style_border_width(row, 0, 0);
+	lv_obj_set_style_pad_all(row, 0, 0);
+	lv_obj_set_style_pad_gap(row, bp_pick(6, 14), 0);
+	lv_obj_set_style_pad_row(row, bp_pick(6, 14), 0);
+	lv_obj_set_scrollable(row, false);
+	lv_obj_set_event_bubble(row, true);
+	lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW_WRAP);
+	lv_obj_set_flex_align(row, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+
+	order_choice[PODCAST_SORT_PLAYED] = make_order_pill(row, "podcast_order_played", PODCAST_SORT_PLAYED);
+	order_choice[PODCAST_SORT_AZ] = make_order_pill(row, "podcast_order_az", PODCAST_SORT_AZ);
+	order_choice[PODCAST_SORT_ZA] = make_order_pill(row, "podcast_order_za", PODCAST_SORT_ZA);
+}
+
+// ---------------------------------------------------------------------------
+// where the chart comes from
+//
+// The catalogue's trending list takes one filter that means "somewhere": a
+// language. There is no country parameter to ask for -- that was checked against
+// its documentation rather than assumed -- so the region offered here is its
+// language, with Worldwide first: every region page in the player -- this one,
+// Radio, YouTube Music and the sort order here -- writes the same shared choice
+// in system/core/region.h, and reads it back from it, so there is one list and
+// one default instead of five copies. Choosing one changes which chart the
+// Trending pill shows, and the copy on the card is dropped with it.
+// ---------------------------------------------------------------------------
+
+// The shared list, read here on every rebuild rather than cached: the choice
+// may have been made on another page of the same session.
+static region_t region_rows[REGION_LIST_MAX];
+static int region_count;
+
+static lv_obj_t *region_screen;
+static lv_obj_t *region_container;
+static lv_obj_t *region_value; // the row on the settings page, showing the choice
+
+// A row's value keeps the box it was given when the row was first laid out; a
+// language chosen later is drawn inside that box. Anchoring the label to the
+// right edge after every change is what keeps "Polski" against the row's edge
+// instead of leaving it at the left of a box sized for a longer name.
+static void region_value_set(const char *label) {
+	if (!region_value) {
+		return;
+	}
+	lv_label_set_text(region_value, label);
+	lv_obj_set_style_text_align(region_value, LV_TEXT_ALIGN_RIGHT, 0);
+	lv_obj_align(region_value, LV_ALIGN_RIGHT_MID, 0, 0);
+}
+
+static void region_pick_cb(lv_event_t *e);
+
+// The row whose language this is. Nobody's choice reads as the first row,
+// which region.h keeps as Worldwide.
+static int region_index_of(const char *code) {
+	for (int i = 0; i < region_count; i++) {
+		if (strcmp(region_rows[i].language, code ? code : "") == 0) {
+			return i;
+		}
+	}
+	return 0;
+}
+
+// A built-in region names itself in its own language -- Polski, not Polish --
+// and arrives from region.h already final; the rest are translation keys.
+// The row's wording comes from the shared list rather than from the entry's
+// two fields read here: `label` is a language's own name, written in itself and
+// never translated, except for the one entry that carries a tag for the
+// language files instead. Reading that pair the wrong way round -- which the
+// fork this page came from does -- prints "region_worldwide" on the first row
+// of the picker, the tag rather than the word.
+//
+// The buffer is one per call and every caller copies what it is given before
+// the next row is asked for.
+static const char *region_row_label(int i) {
+	static char label[64];
+	region_entry_label(&region_rows[i], label, sizeof(label));
+	return label;
+}
+
+static void region_rows_rebuild(void) {
+	if (!region_container) {
+		return;
+	}
+	int keep_scroll = (int)lv_obj_get_scroll_y(region_container);
+	lv_obj_clean(region_container);
+
+	region_count = region_list(region_rows, REGION_LIST_MAX);
+	int active = region_index_of(podcast_trending_lang());
+	for (int i = 0; i < region_count; i++) {
+		lv_obj_t *value = NULL;
+		lv_obj_t *row = settingsrow_add(region_container, region_row_label(i), &value, region_pick_cb,
+										(void *)(intptr_t)i);
+		if (i == active) {
+			// The chosen one, and only it: a tick says which row the chart is
+			// coming from without a second word on every row.
+			settingsrow_add_icon(row, &icon_check, THEME_SEMANTIC_GREEN);
+		}
+	}
+	lv_obj_update_layout(region_container);
+	lv_obj_scroll_to_y(region_container, keep_scroll, LV_ANIM_OFF);
+}
+
+static void region_pick_cb(lv_event_t *e) {
+	if (switcher_back_drag_active()) {
+		return;
+	}
+	int index = (int)(intptr_t)lv_event_get_user_data(e);
+	if (index < 0 || index >= region_count) {
+		return;
+	}
+	// The shared choice, so Radio, YouTube Music and the sort order here all
+	// move together; the podcast chart drops its copy with it.
+	podcast_set_trending_lang(region_rows[index].language);
+	listcache_drop(podcast_trending_cache_key());
+	trending_stale = true;
+	region_value_set(region_row_label(index));
+	region_rows_rebuild();
+}
+
+static void region_loaded_cb(lv_event_t *e) {
+	(void)e;
+	region_rows_rebuild();
+}
+
+static void open_region_cb(lv_event_t *e) {
+	(void)e;
+	switch_screen(region_screen);
+}
+
+static void build_region_page(gui_config_t *cfg) {
+	region_screen = lv_obj_create(NULL);
+	region_container = settingsrow_page(region_screen, cfg, "podcast_region");
+	lv_obj_add_event_cb(region_screen, region_loaded_cb, LV_EVENT_SCREEN_LOADED, NULL);
+	switcher_attach_back_gesture(region_screen);
+}
+
 static lv_obj_t *stop_episode_switch;
 static settingsrow_duration_t sleep_row;
 
 static void refresh_settings_rows(void) {
+	region_count = region_list(region_rows, REGION_LIST_MAX);
+	region_value_set(region_row_label(region_index_of(podcast_trending_lang())));
 	if (stop_episode_switch) {
 		if (podcast_stop_at_episode_end()) {
 			lv_obj_add_state(stop_episode_switch, LV_STATE_CHECKED);
@@ -2677,6 +4047,7 @@ static void refresh_settings_rows(void) {
 static void settings_rows_loaded_cb(lv_event_t *e) {
 	(void)e;
 	refresh_settings_rows();
+	refresh_order_buttons();
 }
 
 static void stop_episode_cb(lv_event_t *e) {
@@ -2696,19 +4067,27 @@ static void sleep_wheel_cb(lv_event_t *e) {
 
 static void build_settings_page(gui_config_t *cfg) {
 	build_controls_page(cfg);
+	build_region_page(cfg);
 
 	settings_screen = lv_obj_create(NULL);
 	lv_obj_t *container = settingsrow_page(settings_screen, cfg, "podcast_settings");
 
 	settingsrow_add(container, "change_controls", NULL, switch_screen_cb, controls_screen);
+	settingsrow_add(container, "podcast_region", &region_value, open_region_cb, NULL);
+	build_order_card(container);
 	settingsrow_toggle(container, "podcast_stop_at_end_of_episode", &stop_episode_switch, stop_episode_cb);
 	// Its own, and not the music one: a stretch set for falling asleep to a
-	// podcast should not be counting down over an album the next morning.
-	settingsrow_toggle_duration(container, "sleep_timer", sleep_toggle_cb, sleep_wheel_cb, &sleep_row);
+	// podcast should not be counting down over an album the next morning. The
+	// module switched off in Plugins takes the row away from every page.
+	if (addons_enabled("sleep_timer")) {
+		settingsrow_toggle_duration(container, "sleep_timer", sleep_toggle_cb, sleep_wheel_cb, &sleep_row);
+	}
 	settingsrow_duration_set_minutes(&sleep_row, sleeptimer_minutes(SLEEPTIMER_PODCAST));
 
 	refresh_settings_rows();
+	refresh_order_buttons();
 	theme_register_refresh(refresh_settings_rows);
+	theme_register_refresh(refresh_order_buttons);
 	lv_obj_add_event_cb(settings_screen, settings_rows_loaded_cb, LV_EVENT_SCREEN_LOADED, NULL);
 	// And when the control centre switches the timer with the page under it.
 	lv_obj_add_event_cb(settings_screen, settings_rows_loaded_cb, LV_EVENT_REFRESH, NULL);
@@ -2806,8 +4185,18 @@ void podcastpage_init(gui_config_t *cfg) {
 	// Slots are counted from the edge leftwards: the gear against it, the
 	// downloads beside it, the magnifier last.
 	settings_btn = corner_button(cfg, 0, &icon_music_settings, open_settings_cb);
-	saved_btn = corner_button(cfg, 1, &icon_podcast_downloaded, open_saved_cb);
+	saved_btn = corner_button(cfg, 1, &icon_import, open_saved_cb);
 	search_btn = corner_button(cfg, 2, &icon_search, open_search_cb);
+	// Its slot is decided by refresh_corner_buttons() on every list, since it
+	// is the only button that shares its list with nothing.
+	order_btn = corner_button(cfg, 3, &icon_sort_date_new, order_cb);
+	// The tick confirms the selection and opens the sheet of what can be done
+	// with it; the x abandons it. The plain check and not the circled one: at
+	// the corner's size the ring fills the button and reads as a stray disc.
+	sel_close_btn = corner_button(cfg, 0, &icon_close, bulk_close_cb);
+	sel_confirm_btn = corner_button(cfg, 1, &icon_check, bulk_sheet_cb);
+	lv_obj_set_hidden(sel_confirm_btn, true);
+	lv_obj_set_hidden(sel_close_btn, true);
 
 	build_search_page(cfg);
 	build_settings_page(cfg);
@@ -2825,10 +4214,7 @@ void podcastpage_init(gui_config_t *cfg) {
 	lv_timer_pause(art_drop_timer);
 	art_timer = lv_timer_create(art_poll_cb, 120, NULL);
 	lv_timer_pause(art_timer);
-	qobuzart_set_root(storage_sd_root());
-
-	podcastcache_set_root(storage_sd_root());
-	podcastsubs_set_root(storage_sd_root());
+	podcast_roots_use(storage_sd_root());
 
 	// Notices only: the first list is asked for by the page when it really
 	// opens, not at player startup -- at startup the card may not have been read

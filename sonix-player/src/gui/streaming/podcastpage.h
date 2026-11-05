@@ -26,4 +26,32 @@ bool podcastpage_open_feed(long long feed_id, const char *title);
 // control centre's sleep button for podcasts opens on a long press.
 lv_obj_t *podcastpage_settings_screen(void);
 
+// An episode was marked heard, or unmarked, by something other than this list --
+// the player, when one ran to its end. The row showing it is bound again and
+// only that row: the list sits behind the player's sheet rather than being
+// unloaded, so no screen-load will come to redraw it, and the tick has to be
+// there by the time the sheet goes away. Does nothing when this list is not the
+// one on screen (entering it rebinds every row anyway).
+void podcastpage_episode_heard(long long episode_id);
+
+// Which way round episode lists run. The catalogue answers newest first; oldest
+// first is the same list read backwards. Kept in the config because the Saved
+// page's list of downloaded episodes follows the same setting: the order is a
+// property of the reader, not of one screen.
+bool podcastpage_episodes_newest_first(void);
+void podcastpage_set_episodes_newest_first(bool newest);
+
+// How the followed podcasts are ordered. Most listened first is the default and
+// the one the list was asked for: the podcasts somebody keeps up with are the
+// ones at the top, rather than whichever was followed most recently. The other
+// two are the alphabet, either way round.
+typedef enum {
+	PODCAST_SORT_PLAYED, // most episodes started first
+	PODCAST_SORT_AZ,
+	PODCAST_SORT_ZA,
+} podcast_sort_t;
+
+podcast_sort_t podcastpage_subs_sort(void);
+void podcastpage_set_subs_sort(podcast_sort_t order);
+
 #endif /* PODCASTPAGE_H */
