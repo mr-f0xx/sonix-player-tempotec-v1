@@ -115,6 +115,13 @@ void wifi_set_status_poll_slow(bool slow);
 // should not be added to what that already does to the stream.
 void wifi_set_bluetooth_streaming(bool streaming);
 
+// On the shared 2.4 GHz radio, an associated Wi-Fi link can starve incoming
+// Bluetooth audio even after AFH succeeds. While receiver mode is open, allow
+// the Wi-Fi worker to temporarily disassociate an otherwise idle connection.
+// It reconnects only a link it disconnected itself. Network use and explicit
+// Wi-Fi operations take precedence; the user's Wi-Fi switch stays on.
+void wifi_set_receiver_priority(bool receiver_active, bool network_idle);
+
 // Kicks a scan. Results land in the list a few seconds later; the page watches
 // wifi_networks_serial() to know when to redraw.
 void wifi_scan_start(void);

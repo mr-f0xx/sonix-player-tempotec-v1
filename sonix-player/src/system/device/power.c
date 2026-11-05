@@ -2262,6 +2262,12 @@ static void power_timer_cb(lv_timer_t *timer) {
 	// incoming receiver link as well as outgoing headphone audio. Keep the
 	// output-only bluetooth_audio_active() contract for routing callers.
 	bool a2dp_link = bluetooth_a2dp_link_active();
+	// Prefer reliable incoming audio when Wi-Fi is only idly associated. The
+	// Wi-Fi worker disassociates without powering down the shared chip, and
+	// restores only its own association when the receiver mode closes. Keep
+	// Wi-Fi for actual network services and user-requested operations.
+	wifi_set_receiver_priority(btreceiver_is_active(),
+		config_get_int("bluetooth", "receiver_wifi_priority", 1) != 0 && !wifi_in_use());
 	wifi_set_bluetooth_streaming(a2dp_link);
 	bt_afh_follow_wifi(now, a2dp_link);
 
