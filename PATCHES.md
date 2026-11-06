@@ -3406,3 +3406,32 @@ writes are debounced and flushed when leaving the page or shutting down. Folder
 reads remain asynchronous, and the saved offset is clamped when a listing has
 shrunk. `make -C sonix-player/tests browserstate` checks persistence and path
 fallbacks. The reboot and scroll behavior still needs checking on a V1.
+
+## Bluetooth RX: PCM width, stalled capture and AVRCP state
+
+A Lenovo Legion Tab was reported to play LDAC, AAC, SBC and aptX in RX mode,
+while aptX HD was badly corrupted. The old receiver opened every input except
+32-bit as S16, but allocated and passed 24-bit data to the DAC when BlueALSA
+reported 24 bits. The client now asks the ALSA BlueALSA plug for left-aligned
+S32 for either 24-bit BlueALSA representation and passes four-byte samples to
+the external audio path; 16-bit remains widened as before. This needs listening
+on the V1: the host test stubs the plug, not the firmware's ALSA conversion.
+
+The capture handle is nonblocking, with one bounded poll and a sleep for
+spurious readiness instead of a potentially unbounded ALSA wait at FIFO
+priority. Stop and rapid re-entry serialize ownership on the worker rather than
+on the interface. These changes address plausible RX freeze/recovery paths, but
+are not a diagnosis of the reported long-session lockup or of a Galaxy Fold 8
+connection dropping after roughly 30 seconds. A Mac M4 was also reported to
+work with AAC but not SBC; the exact cause of that failure is not yet known.
+
+The receiver now uses request tickets for fresh PCM information, coalesces
+queued reads, and keeps metadata revisions separate from stream-format replies.
+AVRCP metadata is tied to the current source, cleared on invalidation and
+protected against an older in-flight D-Bus reply. The RX page compares each
+change counter and flag separately, so two changes cannot cancel in a sum.
+`make -C sonix-player/tests bluetooth` exercises the actual capture session with
+fake ALSA, queue/ticket logic, and D-Bus metadata signals. It cannot substitute
+for a V1, BlueALSA and the reported senders. A Bluetooth log taken immediately
+after each separate failure is needed to distinguish link-level disconnects,
+codec negotiation and RX-worker failures.

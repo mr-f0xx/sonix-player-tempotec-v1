@@ -220,6 +220,7 @@ static int g_pending_volume = -1; // coalesces a held volume key into one write
 // loop, neither of which may block on D-Bus.
 static bt_stream_t g_rx_stream;
 static unsigned g_rx_serial; // moves every time the worker reads the line above
+static unsigned g_rx_requested, g_rx_answered;
 
 // The codecs the sending device offers, read on the worker with the rest of the
 // receiver's state and read here from the cache. The receiver page's codec menu
@@ -232,6 +233,7 @@ static int g_rx_codec_count;
 static char g_rx_codec_selected[BT_CODEC_MAX];
 
 static void post_job(const job_t *job);
+static bool queue_has(job_type_t type);
 static bool bluetooth_still_wanted(void);
 
 // ---------------------------------------------------------------------------
@@ -3197,30 +3199,21 @@ static void do_set_receiver_codec(const char *codec) {
 }
 
 static void do_read_receiver(void) {
+	pthread_mutex_lock(&lock);
+	unsigned requested = g_rx_requested;
+	pthread_mutex_unlock(&lock);
 	char mac[BT_MAC_MAX];
 	btstack_stream_t info;
 	bool sending = btstack_audio_source(mac, sizeof(mac));
 	bool have = sending && btstack_stream_info(mac, true, &info);
-
-	char codecs[BT_MAX_CODECS][BT_CODEC_MAX];
-	char selected[BT_CODEC_MAX] = "";
-	int codec_count = 0;
-	if (sending) {
-		codec_count = btstack_codecs_dir(mac, true, codecs, BT_MAX_CODECS, selected, sizeof(selected));
+	char current[BT_MAC_MAX];
+	if (sending && (!btstack_audio_source(current, sizeof(current)) || strcasecmp(mac, current) != 0)) {
+		have = false;
+		sending = false;
 	}
 
-	// What the sender is doing, read outright: bluez announces every later
-	// change, but nothing has been announced yet at the moment the link comes
-	// up, and that is exactly when the first key can arrive.
-	//
-	// Asked of the device rather than of the stream: a transport that is
-	// momentarily unreadable is not a device that stopped playing.
-	if (sending) {
-		btstack_refresh_media_status(mac);
-	} else {
-		btstack_forget_media();
-	}
-
+	// Publish the PCM answer before the slower codec and AVRCP queries. The
+	// real-time capture thread needs this promptly to open the right format.
 	pthread_mutex_lock(&lock);
 	if (have) {
 		snprintf(g_rx_stream.codec, sizeof(g_rx_stream.codec), "%s", info.codec);
@@ -3230,12 +3223,29 @@ static void do_read_receiver(void) {
 	} else {
 		memset(&g_rx_stream, 0, sizeof(g_rx_stream));
 	}
+	g_rx_serial++;
+	g_rx_answered = requested;
+	g_serial++;
+	pthread_mutex_unlock(&lock);
+
+	char codecs[BT_MAX_CODECS][BT_CODEC_MAX];
+	char selected[BT_CODEC_MAX] = "";
+	int codec_count = 0;
+	if (sending) {
+		codec_count = btstack_codecs_dir(mac, true, codecs, BT_MAX_CODECS, selected, sizeof(selected));
+		btstack_refresh_media_status(mac);
+		if (!btstack_audio_source(current, sizeof(current)) || strcasecmp(mac, current) != 0) {
+			codec_count = 0;
+			selected[0] = '\0';
+		}
+	}
+
+	pthread_mutex_lock(&lock);
 	g_rx_codec_count = codec_count;
 	for (int i = 0; i < codec_count; i++) {
 		snprintf(g_rx_codecs[i], BT_CODEC_MAX, "%s", codecs[i]);
 	}
 	snprintf(g_rx_codec_selected, sizeof(g_rx_codec_selected), "%s", selected);
-	g_rx_serial++;
 	g_serial++;
 	pthread_mutex_unlock(&lock);
 }
@@ -3336,14 +3346,35 @@ unsigned bluetooth_receiver_stream_serial(void) {
 	pthread_mutex_lock(&lock);
 	unsigned now = g_rx_serial;
 	pthread_mutex_unlock(&lock);
-	// The metadata moves on its own, announced by the sender rather than
-	// noticed here, so it carries its own counter into this one.
-	return now + btstack_media_serial();
+	return now;
 }
 
-void bluetooth_refresh_receiver(void) {
-	job_t job = {.type = JOB_RX_INFO};
-	post_job(&job);
+unsigned bluetooth_receiver_track_serial(void) { return btstack_media_serial(); }
+
+unsigned bluetooth_refresh_receiver(void) {
+	pthread_mutex_lock(&lock);
+	bool queued = queue_has(JOB_RX_INFO);
+	if (!queued && queue_count < JOB_QUEUE_LEN) {
+		job_t job = {.type = JOB_RX_INFO};
+		queue[(queue_head + queue_count) % JOB_QUEUE_LEN] = job;
+		queue_count++;
+		pthread_cond_signal(&wake);
+		queued = true;
+	}
+	unsigned ticket = 0;
+	if (queued) {
+		if (++g_rx_requested == 0) ++g_rx_requested;
+		ticket = g_rx_requested;
+	}
+	pthread_mutex_unlock(&lock);
+	return ticket;
+}
+
+unsigned bluetooth_receiver_answered(void) {
+	pthread_mutex_lock(&lock);
+	unsigned answer = g_rx_answered;
+	pthread_mutex_unlock(&lock);
+	return answer;
 }
 
 void bluetooth_receiver_command(const char *member) {
@@ -3469,7 +3500,7 @@ static bool queue_has(job_type_t type) {
 
 static void post_job(const job_t *job) {
 	pthread_mutex_lock(&lock);
-	bool duplicate = job->type == JOB_REFRESH && queue_has(JOB_REFRESH);
+	bool duplicate = (job->type == JOB_REFRESH || job->type == JOB_RX_INFO) && queue_has(job->type);
 	bool queued = duplicate || queue_count < JOB_QUEUE_LEN;
 	if (!duplicate && queued) {
 		queue[(queue_head + queue_count) % JOB_QUEUE_LEN] = *job;

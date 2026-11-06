@@ -248,14 +248,12 @@ unsigned btstack_media_serial(void);
 // no signal has been sent yet. On the Bluetooth worker, like everything else
 // here.
 //
-// What it reads replaces the cache; what it fails to read leaves the cache
-// alone. The player object is looked up on every call and the reads can be
-// refused while a link is renegotiating, and a failure there says nothing about
-// what the device is playing.
+// Only successful replies for the current sender replace the cache, and only
+// if a newer signal has not arrived during the call. A refused read does not
+// erase metadata while a link is renegotiating.
 void btstack_refresh_media_status(const char *address);
 
-// Empties both caches. For the sender going away: nothing is streaming, so the
-// last track is not what is playing.
+// Empties both caches on bus shutdown. Sender changes clear them separately.
 void btstack_forget_media(void);
 
 // Records a status without asking anyone. For the instant after a command is
