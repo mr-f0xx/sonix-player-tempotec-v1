@@ -1107,6 +1107,23 @@ bool btstack_set_alias(const char *alias) {
 	return dbus_call_send(c, CALL_MS, NULL, 0);
 }
 
+// Audio discovery is classic BR/EDR inquiry, not an LE advertisement scan.
+// Ask for that transport explicitly so a dual-mode controller does not spend
+// the search interleaving LE (phone keys and tracking tags) with inquiry.
+// Deliberately no UUID or RSSI filter: a car may answer inquiry before its
+// A2DP SDP record arrives, and must still get a row while its name resolves.
+// The filter belongs to this D-Bus client, not to other BlueZ clients.
+static bool discovery_filter(dbus_conn_t *c, bool classic, char *err, size_t err_size) {
+	dbus_writer_t *w = dbus_call_begin(c, BLUEZ_SERVICE, BLUEZ_ADAPTER_PATH, BLUEZ_ADAPTER_IFACE, "SetDiscoveryFilter", "a{sv}");
+	dbus_array_t filter;
+	dbus_w_array_begin(w, "{sv}", &filter);
+	if (classic) {
+		dbus_w_dict_string(w, "Transport", "bredr");
+	}
+	dbus_w_array_end(w, &filter);
+	return dbus_call_send(c, CALL_MS, err, err_size);
+}
+
 bool btstack_discovery(bool on) {
 	pthread_mutex_lock(&lock);
 	dbus_conn_t *c = conn;
@@ -1114,22 +1131,27 @@ bool btstack_discovery(bool on) {
 	if (!c) {
 		return false;
 	}
+	char err[DBUS_NAME_MAX] = "";
+	if (on && !discovery_filter(c, true, err, sizeof(err))) {
+		// BlueZ 5.54 on the V1 supports this. Keep a fallback for an older
+		// daemon, but do not hide a real refusal (NotReady, InvalidArguments
+		// or a timeout) behind an unfiltered scan that claims success.
+		if (!strstr(err, "UnknownMethod") && !strstr(err, "NotSupported")) {
+			fprintf(stderr, "btstack: BR/EDR discovery filter refused: %s\n", err[0] ? err : "no reply");
+			return false;
+		}
+		fprintf(stderr, "btstack: no BR/EDR discovery filter (%s); using the adapter's default transport\n", err);
+	}
 	dbus_call_begin(c, BLUEZ_SERVICE, BLUEZ_ADAPTER_PATH, BLUEZ_ADAPTER_IFACE, on ? "StartDiscovery" : "StopDiscovery",
 					"");
-	char err[DBUS_NAME_MAX];
 	if (dbus_call_send(c, CALL_MS, err, sizeof(err))) {
 		return true;
 	}
-	// Already discovering, or already stopped. Both mean the caller has what it
-	// asked for, and treating them as failures is how a scan button that works
-	// reports an error.
-	// NotReady counts for stopping only: stopping a discovery on an adapter
-	// that is already down is what was asked for, while starting one on an
-	// adapter that is not up yet is exactly the failure the caller has to retry.
-	if (strstr(err, "InProgress") || strstr(err, "NotAuthorized") || strstr(err, "Failed") ||
-		(!on && strstr(err, "NotReady"))) {
-		// Not an error, and not worth the alarming channel: the log had this
-		// line at every scan stop on a healthy device.
+	// Our own client already discovering is success. A generic Failed on
+	// StartDiscovery is not: the controller may have refused inquiry, and a
+	// successful return here would leave the UI searching an idle radio.
+	// NotReady/Failed while stopping mean there is no active inquiry to stop.
+	if ((on && strstr(err, "InProgress")) || (!on && (strstr(err, "Failed") || strstr(err, "NotReady")))) {
 		printf("btstack: discovery %s: %s (already in the wanted state)\n", on ? "on" : "off", err);
 		return true;
 	}
