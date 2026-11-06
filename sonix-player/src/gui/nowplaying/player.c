@@ -1763,6 +1763,20 @@ static int menu_height;
 // the light a player's chrome has always wanted to be read in.
 #define IMMERSIVE_FROST_PCT 55
 
+// How far above the deck the frost reaches, frosting the foot of the sleeve
+// along with the band. The band used to start exactly at the deck's top row,
+// so the title and the star sat flush against the cutout between the
+// photograph and the glass. Reaching a bit over the sleeve's foot instead
+// gives the names a margin of ground between them and the cutout, which is
+// where a deck's first row wants its headroom anyway.
+#define IMMERSIVE_FROST_OVERHEAD 12
+
+// The height of Immersive's frosted band: the deck's own rows, plus the reach
+// above them (see IMMERSIVE_FROST_OVERHEAD). The band is cut from the foot of
+// the sleeve's crop and decoded to exactly this height, so the reach is rows
+// of the photograph itself, blurred, rather than the band stretched.
+static int immersive_frost_height(void) { return menu_height + IMMERSIVE_FROST_OVERHEAD; }
+
 static lv_obj_t *immersive_blur; // the frosted foot the deck stands on
 static bool immersive_up;
 // Where the controls' block sat among the page's children before this
@@ -3431,11 +3445,11 @@ static void immersive_blur_apply(void) {
 	lv_image_set_src(immersive_blur, have ? &current_backdrop.dsc : NULL);
 	lv_obj_set_hidden(immersive_blur, !have);
 	if (have) {
-		// The deck's own rectangle: as wide as the page, as tall as the
-		// arrangement's rows, at the foot of the screen. Resized here rather
-		// than where the geometry moves, so a band on hand follows a deck that
-		// grew or shrank without waiting for the next track.
-		lv_obj_set_size(immersive_blur, cover_box_w, menu_height);
+		// The deck's own rectangle, plus the reach above it: as wide as the
+		// page, at the foot of the screen. Resized here rather than where the
+		// geometry moves, so a band on hand follows a deck that grew or shrank
+		// without waiting for the next track.
+		lv_obj_set_size(immersive_blur, cover_box_w, immersive_frost_height());
 		lv_obj_align(immersive_blur, LV_ALIGN_BOTTOM_MID, 0, 0);
 	}
 }
@@ -3483,8 +3497,8 @@ static void immersive_put(void) {
 	if (player_menu) {
 		lv_obj_move_foreground(player_menu);
 	}
-	// The frosted foot, at the deck's new rectangle: up if a band is on hand,
-	// down until the worker brings one.
+	// The frosted foot, reaching over the sleeve's foot above the deck: up if
+	// a band is on hand, down until the worker brings one.
 	immersive_blur_apply();
 
 	// The picture or the note: cover_show() is the one place that knows which.
@@ -4822,14 +4836,19 @@ static void reload_cover(const char *filepath) {
 		// at two thirds of it, and that resampling is the interface's core
 		// being spent again and again on an answer that never changes. In
 		// Immersive the box is the space above the deck, so the picture comes
-		// back cropped to fill it and is drawn at one pixel to one. In Poster the box is the square
+		// back cropped to fill it and is drawn at one pixel to one -- and the
+		// band behind the deck is asked for taller than the deck itself, to
+		// reach over the sleeve's foot (see immersive_frost_height()). In
+		// Poster the box is the square
 		// of the screen's width -- poster_put() has already put the frame at
 		// that size -- so the whole picture comes back and is drawn at one
 		// pixel to one, held at the top of the panel.
 		int cover_w, cover_h;
 		cover_request_size(&cover_w, &cover_h);
 		coverloader_request_player(filepath, cover_w, cover_h, backdrop_w,
-								   backdrop_is_full ? backdrop_studio_h : backdrop_h);
+								   backdrop_is_full ? backdrop_studio_h
+											   : backdrop_is_band ? immersive_frost_height()
+															  : backdrop_h);
 		cover_request_outstanding = true;
 
 		// The collector rides on the progress timer too; make sure it is
@@ -7798,13 +7817,13 @@ void player_init(gui_config_t *cfg) {
 	lv_obj_set_hidden(poster_fade, true);
 
 	// Immersive's frosted foot: the image object the blurred band lands in,
-	// parked at the foot of the full panel at the size of the deck, below
-	// the sleeve and the words' page. COVER and not STRETCH: between the
-	// change of arrangement and the
-	// band that follows it, the picture on hand is still the old shape, and
-	// stretching that is a visibly squashed sleeve.
+	// parked at the foot of the full panel, reaching over the sleeve's foot
+	// by IMMERSIVE_FROST_OVERHEAD above the deck it stands under, below the
+	// words' page. COVER and not STRETCH: between the change of arrangement
+	// and the band that follows it, the picture on hand is still the old
+	// shape, and stretching that is a visibly squashed sleeve.
 	immersive_blur = lv_image_create(cover_panel);
-	lv_obj_set_size(immersive_blur, cover_box_w, menu_height);
+	lv_obj_set_size(immersive_blur, cover_box_w, immersive_frost_height());
 	lv_obj_align(immersive_blur, LV_ALIGN_BOTTOM_MID, 0, 0);
 	lv_image_set_inner_align(immersive_blur, LV_IMAGE_ALIGN_COVER);
 	lv_obj_set_clickable(immersive_blur, false);
