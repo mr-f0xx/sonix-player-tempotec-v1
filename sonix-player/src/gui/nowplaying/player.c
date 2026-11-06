@@ -15,6 +15,7 @@
 #include "src/gui/nowplaying/coverloader.h"
 #include "src/gui/nowplaying/lyricsearch.h"
 #include "src/gui/nowplaying/playbutton.h"
+#include "src/gui/nowplaying/playerdeck.h"
 #include "src/system/addons/addons.h"
 #include "src/gui/library/medialist.h"
 #include "src/gui/fonts/fonts.h"
@@ -185,10 +186,6 @@ static int polls_since_stop = POLLS_FAST_AFTER_STOP;
 // corner buttons of the transport row need: they are pinned to the row's ends,
 // wider than the glyphs inside them, and no extra inset is asked for on top.
 #define COMPACT_DECK_SIDE 12
-#define COMPACT_DECK_PAD_TOP 4
-#define COMPACT_DECK_PAD_BOTTOM 4
-#define COMPACT_DECK_GAP 4
-#define COMPACT_DECK_SLACK 2 // Large text draws a size up; keep the last row on screen
 #define COMPACT_FAV_BTN_H 26
 // The favourite marker's scale out of 256, from its 32 px source: the star at
 // 26 px on the V1's deck and at its native size on the wide panels, and the
@@ -202,7 +199,6 @@ static int polls_since_stop = POLLS_FAST_AFTER_STOP;
 // nothing to the deck's own colour over this many pixels of the picture's
 // bottom, so the two grounds meet without a line between them (poster_fade).
 #define POSTER_FADE_HEIGHT 36
-#define COMPACT_PLAY_BTN 44
 #define COMPACT_SKIP_BTN 42
 // The repeat/speed and ellipsis buttons at the ends of that row. The centred
 // transport is 42+8+44+8+42 = 144 wide, leaving 36 px of the 216 px row on
@@ -217,8 +213,6 @@ static int polls_since_stop = POLLS_FAST_AFTER_STOP;
 #define COMPACT_SLEEVE_SIDE_MARGIN 10
 // The Waveform sleeve starts near the chevron and leaves space for its deck.
 #define COMPACT_SLEEVE_TOP 28
-#define COMPACT_WAVE_DECK_PAD_TOP 8
-#define COMPACT_WAVE_DECK_GAP 7
 
 // Raise the track-info row as a unit so the title and artist keep a little
 // extra room from the progress bar without shifting the controls below it.
@@ -328,7 +322,6 @@ static player_art_shape_t art_shape;
 // smaller circle of the accent colour. The ring is a wide white border over an
 // accent-coloured body rather than a second object, so it costs nothing and
 // follows the knob on its own.
-#define PROGRESS_TRACK_HEIGHT 10 // as thick as every other slider
 #define PROGRESS_KNOB_GROW 9	 // how far the knob grows past the track
 #define PROGRESS_KNOB_RING 5
 
@@ -337,7 +330,6 @@ static player_art_shape_t art_shape;
 // this size a hairline is one pixel of a colour that is half background, and
 // the whole thing reads as noise.
 #define WAVE_HEIGHT 64
-#define COMPACT_WAVE_HEIGHT 36 // the V1's deck, where the shape stands in the bar's row
 #define WAVE_BAR_GAP 3
 #define WAVE_MIN_BAR 3	  // a silent column is still a mark, not a hole
 #define WAVE_PAST_OPA 255 // the part already played
@@ -466,6 +458,7 @@ static bool cover_tint;
 // says which look is up and repaints when anything it depends on moves.
 static bool play_legacy;
 
+static lv_obj_t *song_info_obj; // the entire info row, removed from flex for Waveform
 static lv_obj_t *song_text_obj; // the title and artist, wherever they live now
 static lv_obj_t *song_side_obj; // the star and the format, likewise
 static void align_title_with_star(void);
@@ -4368,8 +4361,10 @@ static void apply_layout(void) {
 	// Before the pill room is worked out below, which is measured from the
 	// sleeve.
 	player_apply_geometry(was_immersive || was_poster || was_aam);
+	player_deck_show_info(song_info_obj, layout_alt_now);
 	if (bp_is_tempotec_v1()) {
 		lv_obj_set_style_pad_top(player_menu, layout_alt_now ? COMPACT_WAVE_DECK_PAD_TOP : COMPACT_DECK_PAD_TOP, 0);
+		lv_obj_set_style_pad_bottom(player_menu, player_deck_bottom_padding(layout_alt_now), 0);
 		lv_obj_set_style_pad_gap(player_menu, layout_alt_now ? COMPACT_WAVE_DECK_GAP : COMPACT_DECK_GAP, 0);
 	}
 
@@ -6969,23 +6964,11 @@ static void compact_place_sleeve(void) {
 // see player_apply_geometry().
 static int compact_deck_height(bool alternative) {
 	int clock_h = LV_MAX(lv_font_get_line_height(bp_time_font()), lv_font_get_line_height(bp_queue_label_font()));
-	int first;
-	if (alternative) {
-		first = COMPACT_WAVE_HEIGHT;
-	} else {
-		// The first row is the taller of the two names stacked (no row gap
-		// between them on this board) and the star over the format; the bar
-		// rides beneath them.
-		int title_h = lv_font_get_line_height(bp_title_font());
-		int artist_h = lv_font_get_line_height(bp_artist_font());
-		int format_h = lv_font_get_line_height(bp_format_label_font());
-		int info_h = LV_MAX(title_h + artist_h, COMPACT_FAV_BTN_H + format_h);
-		first = info_h + COMPACT_DECK_GAP + PROGRESS_TRACK_HEIGHT;
-	}
-	int pad_top = alternative ? COMPACT_WAVE_DECK_PAD_TOP : COMPACT_DECK_PAD_TOP;
-	int gap = alternative ? COMPACT_WAVE_DECK_GAP : COMPACT_DECK_GAP;
-	return pad_top + first + gap + clock_h + gap + COMPACT_PLAY_BTN +
-		   COMPACT_DECK_PAD_BOTTOM + COMPACT_DECK_SLACK;
+	int title_h = lv_font_get_line_height(bp_title_font());
+	int artist_h = lv_font_get_line_height(bp_artist_font());
+	int format_h = lv_font_get_line_height(bp_format_label_font());
+	int info_h = LV_MAX(title_h + artist_h, COMPACT_FAV_BTN_H + format_h);
+	return player_deck_compact_height(alternative, info_h, clock_h);
 }
 
 // The mark that stands in for artwork when a track has none is drawn at
@@ -7279,6 +7262,7 @@ void player_init(gui_config_t *cfg) {
 
 	// Track info: the text on the left, the star and the format on the right.
 	lv_obj_t *song_info = lv_obj_create(player_menu);
+	song_info_obj = song_info;
 	lv_obj_set_size(song_info, lv_pct(100), LV_SIZE_CONTENT);
 	lv_obj_set_style_bg_opa(song_info, 0, 0);
 	lv_obj_set_style_border_width(song_info, 0, 0);
