@@ -152,6 +152,9 @@ a self-signed certificate), and HLS.
 - **Bluetooth out** - the whole stack is brought up by the player rather than by
   the firmware's scripts. Pair, connect, forget; the codec list comes from what
   the connected device announces and the best is chosen at each connection.
+  When LDAC is offered, **LDAC Auto** selects adaptive bitrate (rather than the
+  fixed 660 or 990 modes); the encoder adjusts to the link. Changing the LDAC
+  mode restarts the Bluetooth audio service and briefly interrupts playback.
   Paired devices can be renamed locally or restored to their original name; the
   remote device itself is not changed.
 - **AirPods** - battery per earbud and for the case, model detection, and noise

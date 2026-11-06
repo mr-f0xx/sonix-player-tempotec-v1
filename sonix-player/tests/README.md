@@ -73,8 +73,10 @@ hardware. The Bluetooth test compiles the production decisions with fake
 process/controller state: it checks both A2DP directions, stock-init wait and
 cancellation, shell-invoked init detection, refusal to duplicate a live UART
 transport, and the serialized cleanup/switch-on queue. It also checks that a
-missing ALSA template is created without replacing an existing one (the separate
-per-device rewrite still runs when a sink connects). The real
+missing ALSA template is created without replacing an existing one, and that
+selecting adaptive LDAC is saved, queued and updates a legacy fixed-rate ALSA
+setting on the per-device rewrite. These checks cannot verify the encoder or
+link adaptation without the firmware's BlueALSA and real hardware. The real
 D-Bus signal cache is driven with a late simulated signal to check that a close
 clears incoming and outgoing PCMs, transport state and media state.
 

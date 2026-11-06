@@ -1432,6 +1432,23 @@ static bool bluealsa_matches_profile(bool want_sink) {
 	return want_sink ? (found.has_sink && !found.has_source) : (found.has_source && !found.has_sink);
 }
 
+// The firmware's patched BlueALSA reads LDAC_ABR from alsa.conf; builds that
+// advertise --ldac-abr can use the daemon flag as well. Never pass an unsupported
+// flag: BlueALSA would fail to start instead of offering audio at all.
+static void format_ldac_option(char *out, size_t size, const char *quality, bool has_abr, bool has_quality) {
+	if (!size) {
+		return;
+	}
+	out[0] = '\0';
+	if (strcmp(quality, "abr") == 0) {
+		if (has_abr) {
+			snprintf(out, size, "--ldac-abr");
+		}
+	} else if (has_quality) {
+		snprintf(out, size, "--ldac-quality=%s", quality);
+	}
+}
+
 static bool ensure_bluealsa(void) {
 	// Before the daemon, not after: the help text comes from running the binary
 	// with -h, not from the bus, and the -c arguments below are built out of it.
@@ -1520,13 +1537,10 @@ static bool ensure_bluealsa(void) {
 		// link -- 990 kbps into a pocket is 990 kbps of dropouts.
 		char ldac[48] = {0};
 		const char *quality = bluetooth_ldac_quality();
-		if (strcmp(quality, "abr") == 0) {
-			if (bluealsa_knows_option("--ldac-abr")) {
-				snprintf(ldac, sizeof(ldac), "--ldac-abr");
-			}
-		} else if (bluealsa_knows_option("--ldac-quality")) {
-			snprintf(ldac, sizeof(ldac), "--ldac-quality=%s", quality);
-		}
+		bool adaptive = strcmp(quality, "abr") == 0;
+		format_ldac_option(ldac, sizeof(ldac), quality,
+						   adaptive && bluealsa_knows_option("--ldac-abr"),
+						   !adaptive && bluealsa_knows_option("--ldac-quality"));
 		if (ldac[0]) {
 			fprintf(stderr, "bluetooth: LDAC %s\n", ldac);
 		}
@@ -1744,10 +1758,11 @@ static bool ensure_alsa_conf_template(const char *path) {
 	return true;
 }
 
-static void rewrite_alsa_conf(const char *mac) {
+static void rewrite_alsa_conf_file(const char *path, const char *mac, const char *quality) {
 	char before[4096];
-	if (!ensure_alsa_conf_template(BT_ALSA_CONF) || !slurp(BT_ALSA_CONF, before, sizeof(before))) {
-		return;
+	if (!ensure_alsa_conf_template(path) || !slurp(path, before, sizeof(before)) ||
+		strlen(before) == sizeof(before) - 1) {
+		return; // Do not rewrite a possibly truncated configuration.
 	}
 
 	char after[4096];
@@ -1758,7 +1773,19 @@ static void rewrite_alsa_conf(const char *mac) {
 		char rewritten[256];
 		const char *emit = line;
 
-		if (strncmp(line, "pcm.", 4) == 0) {
+		// The stock BlueALSA also reads LDAC quality from this file. A file
+		// left by stock firmware may still say a fixed rate even when Sonix's
+		// saved choice is adaptive. Change only that setting, not UAT or other
+		// user settings; the fixed modes continue to use the daemon options.
+		const char *key = line;
+		while (*key == ' ' || *key == '\t') {
+			key++;
+		}
+		if (strcmp(quality, "abr") == 0 && strncmp(key, "ldac_eqmid", 10) == 0 &&
+			(key[10] == ' ' || key[10] == '\t')) {
+			snprintf(rewritten, sizeof(rewritten), "%.*sldac_eqmid \"LDAC_ABR\"", (int)(key - line), line);
+			emit = rewritten;
+		} else if (strncmp(line, "pcm.", 4) == 0) {
 			snprintf(rewritten, sizeof(rewritten), "pcm.bluealsa:DEV=%s {", mac);
 			emit = rewritten;
 		} else {
@@ -1777,12 +1804,16 @@ static void rewrite_alsa_conf(const char *mac) {
 		used += (size_t)written;
 	}
 
-	FILE *f = fopen(BT_ALSA_CONF, "w");
+	FILE *f = fopen(path, "w");
 	if (!f) {
 		return;
 	}
 	fwrite(after, 1, used, f);
 	fclose(f);
+}
+
+static void rewrite_alsa_conf(const char *mac) {
+	rewrite_alsa_conf_file(BT_ALSA_CONF, mac, bluetooth_ldac_quality());
 }
 
 // The bluealsa PCM object is the truth for "is there anything to write to", and
@@ -3832,6 +3863,14 @@ static void *bluetooth_worker(void *arg) {
 				break;
 
 			case JOB_LDAC_QUALITY:
+				// Update the stock configuration before restarting, even if the
+				// existing PCM never disappears from our connection cache.
+				if (strcmp(bluetooth_ldac_quality(), "abr") == 0) {
+					char mac[BT_MAC_MAX];
+					if (connected_mac(mac, sizeof(mac))) {
+						rewrite_alsa_conf(mac);
+					}
+				}
 				if (process_running("bluealsa")) {
 					char why[48];
 					snprintf(why, sizeof(why), "LDAC %s", bluetooth_ldac_quality());

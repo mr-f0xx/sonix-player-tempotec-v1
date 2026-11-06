@@ -155,7 +155,7 @@ static void build_codec_rows(char mine[][BT_CODEC_MAX], int count) {
 			static const struct {
 				const char *suffix;
 				const char *quality;
-			} LDAC_MODES[] = {{" 990", "high"}, {" 660", "standard"}, {"", "abr"}};
+			} LDAC_MODES[] = {{" 990", "high"}, {" 660", "standard"}, {" Auto", "abr"}};
 			for (size_t m = 0; m < sizeof(LDAC_MODES) / sizeof(LDAC_MODES[0]) && codec_row_count < CODEC_ROWS; m++) {
 				codec_row_t *row = &codec_rows[codec_row_count++];
 				snprintf(row->label, sizeof(row->label), "LDAC%s", LDAC_MODES[m].suffix);
