@@ -1741,6 +1741,7 @@ static lv_obj_t *layout_alternative_pill;
 static lv_obj_t *layout_studio_pill;
 static lv_obj_t *layout_immersive_pill;
 static lv_obj_t *layout_poster_pill;
+static lv_obj_t *layout_vinyl_pill;
 static lv_obj_t *layout_aam_pill; // only built on the V1, the panel it is measured for
 // Album Art Max's own row: the band along the foot of the sleeve or up its left
 // edge. Shown only while that arrangement is the chosen one, and only where it
@@ -1770,6 +1771,7 @@ static void layout_refresh(void) {
 	settingsrow_pill_active(layout_studio_pill, chosen == PLAYER_LAYOUT_STUDIO);
 	settingsrow_pill_active(layout_immersive_pill, chosen == PLAYER_LAYOUT_IMMERSIVE);
 	settingsrow_pill_active(layout_poster_pill, chosen == PLAYER_LAYOUT_POSTER);
+	if (layout_vinyl_pill) settingsrow_pill_active(layout_vinyl_pill, chosen == PLAYER_LAYOUT_VINYL);
 	if (layout_aam_pill) {
 		settingsrow_pill_active(layout_aam_pill, chosen == PLAYER_LAYOUT_ALBUM_ART_MAX);
 	}
@@ -2546,6 +2548,8 @@ static void build_display_page(gui_config_t *cfg) {
 	// quietly ignored -- a layout that does nothing when chosen reads as a
 	// broken page, not as a limitation.
 	if (bp_is_tempotec_v1()) {
+		layout_vinyl_pill = settingsrow_pill(layout_pills, "musicsettings_layout_vinyl",
+											 PLAYER_LAYOUT_VINYL, layout_pick_cb);
 		layout_aam_pill = settingsrow_pill(layout_pills, "musicsettings_layout_aam",
 										   PLAYER_LAYOUT_ALBUM_ART_MAX, layout_pick_cb);
 	}

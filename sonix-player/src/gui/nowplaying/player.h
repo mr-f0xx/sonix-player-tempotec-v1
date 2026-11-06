@@ -44,6 +44,10 @@ bool player_queue_position(int *position, int *count);
 // drawn on a blurred reflection below. Poster scales the sleeve to the width of
 // the screen and puts the deck below it on its own ground.
 //
+// Vinyl frames the sleeve with a thin rounded border and lets a static black
+// record peek out below it. The compact deck keeps the names, seek bar and
+// transport, but omits the clock row to reserve room for the record.
+//
 // Album Art Max -- AAM -- trades the media controls for the artwork, which is
 // the whole of it: the sleeve at the width of the screen, the format and the
 // three buttons in a row under the status bar, the artist and the album in the
@@ -79,6 +83,7 @@ typedef enum {
 	PLAYER_LAYOUT_IMMERSIVE = 3, // the sleeve above a reflected controls deck
 	PLAYER_LAYOUT_POSTER = 4,	 // the sleeve at the width of the screen, whole from side to side, the deck below it
 	PLAYER_LAYOUT_ALBUM_ART_MAX = 5, // the sleeve over the screen, the media controls traded for it
+	PLAYER_LAYOUT_VINYL = 6, // rounded sleeve over a static record, compact deck below
 } player_layout_t;
 
 // In custom layouts, replace the format line with the tagged recording year

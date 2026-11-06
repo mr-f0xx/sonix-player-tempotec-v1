@@ -226,7 +226,7 @@ This fork builds on the upstream [Sonix Player](https://github.com/Jepl4r/sonix-
 - **Subsonic / Gonic** - stream from your own server. See [Subsonic / Gonic](#subsonic--gonic).
 - **V1 themes** - **Tokyo Night**, **Amber on Black** and **OLED**, designed for the V1 panel, beside Dark and Light. Make your own with a [custom colour theme](docs/custom-themes.md).
 - **Boot screens** - Retrospace (the default), Space, Travelling in space, Stock, or your own picture.
-- **Player layouts** - **Immersive**, **Poster** and **Album Art Max**, beside Standard, Waveform and Alternative.
+- **Player layouts** - **Immersive**, **Poster**, **Album Art Max** and **Vinyl**, beside Standard, Waveform and Alternative. See [`previews/vinyl-layout/`](previews/vinyl-layout/) for an interactive, exact-size Vinyl concept.
 - **Legacy play button and corner roundness** - the original round disc behind play and pause, as an option under Settings → Music → Display options; and a slider for how round the screen corners are, from a hint of a corner (2 px) up to 20 px, for a V1 that looks boxier than its 16 px default.
 - **Interface fonts** - choose MiSans, Neon 80s or Roboto, or any `.ttf`/`.otf` in the card's `Fonts` folder. Missing glyphs fall back to MiSans, so every language stays readable.
 - **Dual Scrobbler Suite** (Last.fm & ListenBrainz) — Native background scrobbling for both services with independent toggles, token-based setup, and offline queue caching when disconnected from Wi-Fi.
