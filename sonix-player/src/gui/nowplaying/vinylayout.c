@@ -63,6 +63,32 @@ vinyl_box_t vinyl_layout_box(int screen_w, int screen_h, int deck_h) {
 	return b;
 }
 
+void vinyl_ground_apply(lv_obj_t *sheet, lv_obj_t *deck, lv_obj_t *backdrop) {
+	if (sheet) {
+		lv_obj_set_style_bg_color(sheet, lv_color_black(), 0);
+		lv_obj_set_style_bg_opa(sheet, LV_OPA_COVER, 0);
+		lv_obj_set_style_bg_grad_dir(sheet, LV_GRAD_DIR_NONE, 0);
+		lv_obj_set_style_bg_image_opa(sheet, LV_OPA_TRANSP, 0);
+	}
+	if (deck) {
+		lv_obj_set_style_bg_opa(deck, LV_OPA_TRANSP, 0);
+		lv_obj_set_style_bg_image_opa(deck, LV_OPA_TRANSP, 0);
+	}
+	if (backdrop)
+		lv_obj_set_hidden(backdrop, true);
+}
+
+void vinyl_place_sleeve(lv_obj_t *panel, lv_obj_t *sleeve, const vinyl_box_t *b, int screen_w) {
+	if (!panel || !sleeve || !b)
+		return;
+	if (screen_w < 1)
+		screen_w = 1;
+	lv_obj_set_size(panel, screen_w, b->deck_y);
+	lv_obj_align(panel, LV_ALIGN_TOP_LEFT, 0, 0);
+	lv_obj_set_size(sleeve, b->art_side, b->art_side);
+	lv_obj_align(sleeve, LV_ALIGN_TOP_LEFT, b->art_x, b->art_y);
+}
+
 static lv_obj_t *plain_circle(lv_obj_t *parent) {
 	lv_obj_t *obj = lv_obj_create(parent);
 	lv_obj_remove_style_all(obj);
@@ -105,7 +131,7 @@ void vinyl_record_apply(vinyl_record_t *r, const vinyl_box_t *b, lv_color_t rim)
 		return;
 	int d = b->record_d;
 	lv_obj_set_size(r->disc, d, d);
-	lv_obj_set_pos(r->disc, b->record_x, b->record_y);
+	lv_obj_align(r->disc, LV_ALIGN_TOP_LEFT, b->record_x, b->record_y);
 	lv_obj_set_style_border_color(r->disc, rim, 0);
 	for (int i = 0; i < 3; i++) {
 		int gd = d - d * (12 + i * 10) / 100;

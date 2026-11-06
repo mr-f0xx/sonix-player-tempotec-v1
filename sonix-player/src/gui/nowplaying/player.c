@@ -1737,7 +1737,7 @@ static void full_backdrop_apply(void) {
 	if (!backdrop_full || !studio_bg || layout_studio_now || lyrics_look_on) {
 		return;
 	}
-	bool have = backdrop_blur_wanted() && current_backdrop.pixels != NULL && backdrop_is_full;
+	bool have = !layout_vinyl_now && backdrop_blur_wanted() && current_backdrop.pixels != NULL && backdrop_is_full;
 	lv_image_set_src(studio_bg, have ? &current_backdrop.dsc : NULL);
 	lv_obj_set_hidden(studio_bg, !have);
 	if (have) {
@@ -6970,6 +6970,8 @@ static void vinyl_paint(void) {
 	if (!vinyl_record.disc || !cover_art_group) return;
 	lv_color_t rim = lv_color_white();
 	vinyl_box_t b = vinyl_box();
+	if (cover_panel)
+		vinyl_place_sleeve(cover_panel, cover_art_group, &b, (int)lv_obj_get_width(player_screen));
 	vinyl_record_apply(&vinyl_record, &b, rim);
 	lv_obj_set_style_border_width(cover_art_group, VINYL_ART_BORDER, 0);
 	lv_obj_set_style_border_color(cover_art_group, rim, 0);
@@ -6990,13 +6992,8 @@ static void vinyl_put(void) {
 	cover_box_h = b.deck_y;
 	cover_art_w = cover_art_h = b.art_side;
 	lv_obj_set_size(player_menu, cover_box_w, menu_height);
-	lv_obj_set_size(cover_panel, cover_box_w, cover_box_h);
-	lv_obj_set_size(cover_art_group, b.art_side, b.art_side);
-	lv_obj_set_pos(cover_art_group, b.art_x, b.art_y);
-	lv_obj_set_style_bg_color(player_screen, lv_color_black(), 0);
-	lv_obj_set_style_bg_opa(player_screen, LV_OPA_COVER, 0);
-	lv_obj_set_style_bg_opa(player_menu, LV_OPA_TRANSP, 0);
-	lv_obj_set_style_bg_image_opa(player_menu, LV_OPA_TRANSP, 0);
+	vinyl_place_sleeve(cover_panel, cover_art_group, &b, (int)lv_obj_get_width(player_screen));
+	vinyl_ground_apply(player_screen, player_menu, studio_bg);
 	if (below_slider_obj) lv_obj_set_hidden(below_slider_obj, true);
 	vinyl_paint();
 	placeholder_rescale();
@@ -7019,6 +7016,8 @@ static bool vinyl_take_back(void) {
 	if (player_screen) {
 		lv_obj_remove_local_style_prop(player_screen, LV_STYLE_BG_COLOR, 0);
 		lv_obj_remove_local_style_prop(player_screen, LV_STYLE_BG_OPA, 0);
+		lv_obj_remove_local_style_prop(player_screen, LV_STYLE_BG_GRAD_DIR, 0);
+		lv_obj_remove_local_style_prop(player_screen, LV_STYLE_BG_IMAGE_OPA, 0);
 	}
 	if (below_slider_obj) lv_obj_set_hidden(below_slider_obj, live_mode && !live_custom_nav);
 	return was;
@@ -7049,7 +7048,7 @@ static void compact_place_sleeve(void) {
 	int top = layout_poster_now ? 0 : compact_sleeve_top();
 	if (layout_vinyl_now) {
 		vinyl_box_t b = vinyl_box();
-		lv_obj_set_pos(cover_art_group, b.art_x, b.art_y);
+		vinyl_place_sleeve(cover_panel, cover_art_group, &b, (int)lv_obj_get_width(player_screen));
 		return;
 	}
 	if (layout_alt_now) {
@@ -7199,7 +7198,7 @@ static void player_apply_geometry(bool force) {
 
 	int want_menu = layout_vinyl_now ? (int)lv_obj_get_height(player_screen) - vinyl_box().deck_y
 									 : compact_deck_height(layout_alt_now);
-	if (want_menu == menu_height && !force) {
+	if (want_menu == menu_height && !force && !layout_vinyl_now) {
 		return; // the arrangement did not change the deck
 	}
 	menu_height = want_menu;

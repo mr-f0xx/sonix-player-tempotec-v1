@@ -61,6 +61,19 @@ typedef struct {
 	lv_obj_t *shine;
 } vinyl_record_t;
 
+/* Place the real player's nested cover panel and sleeve from sheet-relative
+ * coordinates. The explicit TOP_LEFT anchors matter: the standard layout leaves
+ * the sleeve aligned TOP_MID, and a bare set_pos() would add art_x to that
+ * centred anchor a second time. The panel stays full-width at the sheet origin;
+ * only the sleeve is inset. */
+void vinyl_place_sleeve(lv_obj_t *panel, lv_obj_t *sleeve, const vinyl_box_t *box, int screen_w);
+
+/* The reference sheet is black, not the selected theme's tinted page or the
+ * standard layout's blurred cover. The deck stays transparent over it, and any
+ * standard-layout backdrop is taken down. Lyrics may still raise their own
+ * temporary backdrop while the words are on screen. */
+void vinyl_ground_apply(lv_obj_t *sheet, lv_obj_t *deck, lv_obj_t *backdrop);
+
 /* Build once, then move/paint on layout or theme changes. No timers, canvas,
  * image buffer or per-frame allocation. The sleeve is a later sibling and
  * hides the top of the record, including most of its centre label. The

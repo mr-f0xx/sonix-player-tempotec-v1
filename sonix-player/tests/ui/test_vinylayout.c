@@ -62,6 +62,56 @@ static void check_pressing_mark(const vinyl_record_t *record, const vinyl_box_t 
 	assert(rotated.x1 >= disc.x1 && rotated.x2 <= disc.x2);
 }
 
+static void check_nested_placement(lv_obj_t *panel, lv_obj_t *sleeve, vinyl_record_t *record, const vinyl_box_t *b, int screen_w) {
+	/* Seed the anchors the standard layout leaves behind. A bare set_pos()
+	 * on a TOP_MID sleeve adds art_x to the centred anchor a second time:
+	 * the sleeve drifts right while the record stays put. */
+	lv_obj_align(panel, LV_ALIGN_TOP_MID, 37, 12);
+	lv_obj_align(sleeve, LV_ALIGN_CENTER, 13, -7);
+	vinyl_place_sleeve(panel, sleeve, b, screen_w);
+	vinyl_record_apply(record, b, lv_color_white());
+	lv_obj_move_background(record->disc);
+	lv_obj_update_layout(panel);
+	lv_area_t sleeve_area, disc_area;
+	lv_obj_get_coords(sleeve, &sleeve_area);
+	lv_obj_get_coords(record->disc, &disc_area);
+	assert(lv_obj_get_x(panel) == 0);
+	assert(lv_obj_get_y(panel) == 0);
+	assert(lv_obj_get_width(panel) == screen_w);
+	assert(lv_obj_get_height(panel) == b->deck_y);
+	assert(lv_obj_get_x(sleeve) == b->art_x);
+	assert(lv_obj_get_y(sleeve) == b->art_y);
+	assert(sleeve_area.x1 == b->art_x);
+	assert(sleeve_area.y1 == b->art_y);
+	assert(disc_area.x1 == b->record_x);
+	assert(disc_area.y1 == b->record_y);
+	assert(sleeve_area.x1 + sleeve_area.x2 == disc_area.x1 + disc_area.x2);
+	assert(lv_obj_get_index(record->disc) < lv_obj_get_index(panel));
+	check_pressing_mark(record, b, sleeve);
+
+	/* A return through the standard compact placer must not reintroduce the
+	 * centred anchor, and the lyrics travel must move sleeve and record as
+	 * one pair rather than separating them. */
+	lv_obj_align(sleeve, LV_ALIGN_TOP_MID, 0, 22);
+	vinyl_place_sleeve(panel, sleeve, b, screen_w);
+	lv_obj_set_style_translate_x(sleeve, -40, 0);
+	lv_obj_set_style_translate_x(record->disc, -40, 0);
+	lv_obj_update_layout(panel);
+	lv_obj_get_coords(sleeve, &sleeve_area);
+	lv_obj_get_coords(record->disc, &disc_area);
+	assert(sleeve_area.x1 == b->art_x - 40);
+	assert(sleeve_area.x1 + sleeve_area.x2 == disc_area.x1 + disc_area.x2);
+	lv_obj_remove_local_style_prop(sleeve, LV_STYLE_TRANSLATE_X, 0);
+	lv_obj_remove_local_style_prop(record->disc, LV_STYLE_TRANSLATE_X, 0);
+	vinyl_place_sleeve(panel, sleeve, b, screen_w);
+	vinyl_record_apply(record, b, lv_color_white());
+	lv_obj_update_layout(panel);
+	lv_obj_get_coords(sleeve, &sleeve_area);
+	lv_obj_get_coords(record->disc, &disc_area);
+	assert(sleeve_area.x1 == b->art_x);
+	assert(sleeve_area.x1 + sleeve_area.x2 == disc_area.x1 + disc_area.x2);
+}
+
 int main(void) {
 	for (int info = 24; info <= 52; info += 4)
 		check_box(240, 320, info);
@@ -74,13 +124,44 @@ int main(void) {
 	lv_display_t *display = lv_display_create(240, 320);
 	static uint8_t buffer[240 * 320 * 4];
 	lv_display_set_buffers(display, buffer, NULL, sizeof(buffer), LV_DISPLAY_RENDER_MODE_DIRECT);
+	lv_display_set_color_format(display, LV_COLOR_FORMAT_XRGB8888);
 	lv_obj_t *screen = lv_screen_active();
 	lv_obj_set_style_bg_color(screen, lv_color_black(), 0);
 	lv_obj_set_style_pad_all(screen, 0, 0);
 
-	vinyl_record_t record;
-	vinyl_record_build(&record, screen);
-	lv_obj_t *sleeve = lv_obj_create(screen);
+	/* A tinted theme (Tokyo Night's navy, say) must not show through the
+	 * Vinyl sheet, and the standard layout's blurred cover must be taken
+	 * down. The deck stays transparent over the black ground. */
+	lv_style_t themed;
+	lv_style_init(&themed);
+	lv_style_set_bg_color(&themed, lv_color_hex(0x1a1b26));
+	lv_style_set_bg_opa(&themed, LV_OPA_COVER);
+	lv_obj_add_style(screen, &themed, 0);
+	lv_obj_t *deck = lv_obj_create(screen);
+	lv_obj_remove_style_all(deck);
+	lv_obj_set_size(deck, 240, 110);
+	lv_obj_set_pos(deck, 0, 210);
+	lv_obj_set_style_bg_color(deck, lv_color_hex(0x1a1b26), 0);
+	lv_obj_set_style_bg_opa(deck, LV_OPA_COVER, 0);
+	lv_obj_t *backdrop = lv_obj_create(screen);
+	lv_obj_set_size(backdrop, 240, 320);
+	vinyl_ground_apply(screen, deck, backdrop);
+	lv_refr_now(display);
+	assert(lv_color_eq(lv_obj_get_style_bg_color(screen, 0), lv_color_black()));
+	assert(lv_obj_get_style_bg_opa(screen, 0) == LV_OPA_COVER);
+	assert(lv_obj_get_style_bg_opa(deck, 0) == LV_OPA_TRANSP);
+	assert(lv_obj_is_hidden(backdrop));
+	assert((*(uint32_t *)buffer & 0x00FFFFFFu) == 0x000000u);
+	lv_obj_delete(backdrop);
+	lv_obj_delete(deck);
+	lv_obj_remove_style(screen, &themed, 0);
+
+	/* The production sleeve is nested in a full-width cover panel, not
+	 * placed straight on the sheet. */
+	lv_obj_t *panel = lv_obj_create(screen);
+	lv_obj_remove_style_all(panel);
+	lv_obj_set_style_bg_opa(panel, LV_OPA_TRANSP, 0);
+	lv_obj_t *sleeve = lv_obj_create(panel);
 	lv_obj_remove_style_all(sleeve);
 	lv_obj_set_style_bg_color(sleeve, lv_color_make(80, 100, 140), 0);
 	lv_obj_set_style_bg_opa(sleeve, LV_OPA_COVER, 0);
@@ -90,31 +171,25 @@ int main(void) {
 	lv_obj_set_style_clip_corner(sleeve, true, 0);
 	lv_obj_set_scrollable(sleeve, false);
 	lv_obj_set_clickable(sleeve, false);
+	/* The record is a sheet-level sibling behind the cover panel, exactly as
+	 * player_init() builds it; the sleeve lives inside the panel. */
+	vinyl_record_t record;
+	vinyl_record_build(&record, screen);
 
 	for (int info = 24; info <= 52; info += 4) {
 		vinyl_box_t b = vinyl_layout_box(240, 320, vinyl_deck_height(info));
-		for (int pass = 0; pass < 3; pass++) {
-			vinyl_record_apply(&record, &b, lv_color_white());
-			lv_obj_set_size(sleeve, b.art_side, b.art_side);
-			lv_obj_set_pos(sleeve, b.art_x, b.art_y);
-			lv_obj_move_background(record.disc);
-			lv_obj_update_layout(screen);
-			assert(lv_obj_get_index(record.disc) < lv_obj_get_index(sleeve));
-			assert(lv_obj_get_width(record.disc) == b.record_d);
-			assert(lv_obj_get_height(sleeve) == b.art_side);
-			check_pressing_mark(&record, &b, sleeve);
-			assert(!lv_obj_is_hidden(record.disc));
-			lv_obj_set_hidden(record.disc, true);
-			assert(lv_obj_is_hidden(record.disc));
-		}
+		for (int pass = 0; pass < 3; pass++)
+			check_nested_placement(panel, sleeve, &record, &b, 240);
 	}
+	assert(!lv_obj_is_hidden(record.disc));
+	lv_obj_set_hidden(record.disc, true);
+	assert(lv_obj_is_hidden(record.disc));
+	lv_obj_set_hidden(record.disc, false);
+
+	/* The 360x640 concept is geometry-only here: the native display is
+	 * 240x320, and a wider panel is not a firmware path. */
 	vinyl_box_t b = vinyl_layout_box(360, 640, vinyl_deck_height(34));
-	vinyl_record_apply(&record, &b, lv_color_white());
-	lv_obj_set_size(sleeve, b.art_side, b.art_side);
-	lv_obj_set_pos(sleeve, b.art_x, b.art_y);
-	lv_obj_update_layout(screen);
-	check_pressing_mark(&record, &b, sleeve);
-	lv_refr_now(display);
-	puts("PASS vinyl layout (V1, eight text metrics, reference-slanted pressing mark, no deck/info/seek/transport overlap, tiny-screen fallback, repeated apply/take-back and sleeve-over-record layering)");
+	check_nested_placement(panel, sleeve, &record, &b, 360);
+	puts("PASS vinyl layout (V1, eight text metrics, reference-slanted pressing mark, no deck/info/seek/transport overlap, tiny-screen fallback, repeated apply/take-back, nested-panel alignment and black ground)");
 	return 0;
 }
