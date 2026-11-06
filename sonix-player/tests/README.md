@@ -43,7 +43,7 @@ The non-UI suites require only a C compiler, Make and Python 3 (plus standard pt
 
 The `waveform-overlay` UI test checks that both scrolling text pills stay clear of the smaller favourite button, across artwork shapes, font sizes and missing-artist metadata.
 
-The `vinylayout` UI test checks the Vinyl sleeve/record arithmetic at 240×320 across text sizes, the reference-slanted pressing mark in the exposed lower-right arc, the visible even-diameter 2 px grooves, the tiny-screen fallback, a no-overlap guarantee against the whole deck (including transparent info/seek rows), repeated apply/take-back and sleeve-over-record layering on the real LVGL renderer. It does not link the player's audio/network shell.
+The `vinylayout` UI test checks the Vinyl sleeve/record arithmetic at 240×320 across text sizes, the reference-slanted pressing mark in the exposed lower-right arc, the visible even-diameter 2 px grooves, the larger centre label peeking below the sleeve, the tiny-screen fallback, a no-overlap guarantee against the whole deck (including transparent info/seek rows), repeated apply/take-back and sleeve-over-record layering on the real LVGL renderer. It does not link the player's audio/network shell.
 
 The `playerdeck` UI test exercises the V1 deck's real LVGL flex layout while switching between Standard and Waveform, including large font metrics and the fallback when waveform allocation fails. It checks row spacing and that every playback button stays clear of the bottom edge.
 

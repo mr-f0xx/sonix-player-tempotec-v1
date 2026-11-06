@@ -86,6 +86,26 @@ static void check_grooves(const vinyl_record_t *record, const vinyl_box_t *b) {
 	}
 }
 
+static void check_center_label(const vinyl_record_t *record, const vinyl_box_t *b, const lv_obj_t *sleeve) {
+	lv_area_t disc, label, cover;
+	lv_obj_get_coords(record->disc, &disc);
+	lv_obj_get_coords(record->label, &label);
+	lv_obj_get_coords(sleeve, &cover);
+	int expected = b->record_d * VINYL_LABEL_PERCENT / 100;
+	expected &= ~1;
+	if (expected < VINYL_ART_BORDER * 2)
+		expected = VINYL_ART_BORDER * 2;
+	assert(!lv_obj_is_hidden(record->label));
+	assert(lv_obj_get_width(record->label) == expected);
+	assert(lv_obj_get_height(record->label) == expected);
+	assert(lv_obj_get_style_border_width(record->label, 0) == VINYL_ART_BORDER);
+	assert(lv_color_eq(lv_obj_get_style_border_color(record->label, 0), lv_color_white()));
+	assert(label.x1 + label.x2 == disc.x1 + disc.x2);
+	assert(label.y1 + label.y2 == disc.y1 + disc.y2);
+	/* The centre label must actually peek below the sleeve as a semicircle. */
+	assert(label.y2 > cover.y2);
+}
+
 static void check_nested_placement(lv_obj_t *panel, lv_obj_t *sleeve, vinyl_record_t *record, const vinyl_box_t *b, int screen_w) {
 	/* Seed the anchors the standard layout leaves behind. A bare set_pos()
 	 * on a TOP_MID sleeve adds art_x to the centred anchor a second time:
@@ -113,6 +133,7 @@ static void check_nested_placement(lv_obj_t *panel, lv_obj_t *sleeve, vinyl_reco
 	assert(lv_obj_get_index(record->disc) < lv_obj_get_index(panel));
 	check_pressing_mark(record, b, sleeve);
 	check_grooves(record, b);
+	check_center_label(record, b, sleeve);
 
 	/* A return through the standard compact placer must not reintroduce the
 	 * centred anchor, and the lyrics travel must move sleeve and record as
@@ -215,6 +236,6 @@ int main(void) {
 	 * 240x320, and a wider panel is not a firmware path. */
 	vinyl_box_t b = vinyl_layout_box(360, 640, vinyl_deck_height(34));
 	check_nested_placement(panel, sleeve, &record, &b, 360);
-	puts("PASS vinyl layout (V1, eight text metrics, reference-slanted pressing mark, no deck/info/seek/transport overlap, tiny-screen fallback, repeated apply/take-back, nested-panel alignment, visible clean grooves and black ground)");
+	puts("PASS vinyl layout (V1, eight text metrics, reference-slanted pressing mark, no deck/info/seek/transport overlap, tiny-screen fallback, repeated apply/take-back, nested-panel alignment, visible clean grooves, larger centre label and black ground)");
 	return 0;
 }

@@ -48,7 +48,10 @@ function renderGeometry() {
     gd &= ~1; if (gd < 4) gd = 4;
     g.style.width = `${gd}px`; g.style.height = `${gd}px`;
   });
-  const label = Math.floor(b.d * .28);
+  // Centre label: the white semicircle just below the sleeve. Mirrors
+  // VINYL_LABEL_PERCENT; even diameter keeps the 2 px border crisp.
+  let label = Math.floor(b.d * .34);
+  label &= ~1; if (label < 4) label = 4;
   Object.assign(document.querySelector('.record-label').style, { width: `${label}px`, height: `${label}px` });
   // Reference pressing mark: a thin rounded stroke leaning down-right in the
   // exposed lower arc. Percentages mirror VINYL_MARK_* in vinylayout.h; the
@@ -135,7 +138,7 @@ $('exportBtn').onclick = async () => {
   circle(b.recordX, b.recordY, b.d, '#000', '#fff');
   const grooveColors = ['#5a5a5a', '#4a4a4a', '#3a3a3a'];
   [0, 1, 2].forEach(i => { let gd = b.d - Math.floor(b.d * (12 + i * 10) / 100); gd &= ~1; if (gd < 4) gd = 4; circle(b.recordX + (b.d - gd) / 2, b.recordY + (b.d - gd) / 2, gd, null, grooveColors[i], 2); });
-  const ld = Math.floor(b.d * .28); circle(b.recordX + (b.d - ld) / 2, b.recordY + (b.d - ld) / 2, ld, '#000', '#fff');
+  let ld = Math.floor(b.d * .34); ld &= ~1; if (ld < 4) ld = 4; circle(b.recordX + (b.d - ld) / 2, b.recordY + (b.d - ld) / 2, ld, '#000', '#fff');
   const markW = Math.max(1, Math.round(b.d / 173)), markH = Math.max(2, Math.floor(b.d * .18));
   const markX1 = Math.floor(b.d * .56), markY1 = Math.floor(b.d * .71), markDx = Math.max(1, Math.floor(b.d * .05));
   ctx.save(); ctx.translate(b.recordX + 2 + markX1 + Math.floor(markDx / 2) - Math.floor(markW / 2) + markW / 2, b.recordY + 2 + markY1 + markH / 2);

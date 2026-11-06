@@ -26,6 +26,11 @@
 #define VINYL_GROOVE_FIRST_PERCENT 12
 #define VINYL_GROOVE_STEP_PERCENT 10
 
+/* The centre label is the small white semicircle that peeks out just below the
+ * sleeve. Keep it large enough to read as the record's centre, not a stray
+ * nick on the rim; an even diameter keeps its 2 px border crisp. */
+#define VINYL_LABEL_PERCENT 34
+
 /* The reference pressing mark: a thin rounded stroke leaning down-right.
  * Endpoints are percentages of the record diameter, measured from the supplied
  * 460x608 mockup (record ~346 px, stroke ~65 px at ~15 degrees from vertical).

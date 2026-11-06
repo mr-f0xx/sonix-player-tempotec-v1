@@ -145,10 +145,14 @@ void vinyl_record_apply(vinyl_record_t *r, const vinyl_box_t *b, lv_color_t rim)
 		lv_obj_center(r->grooves[i]);
 		lv_obj_set_hidden(r->grooves[i], gd >= d);
 	}
-	int ld = d * 28 / 100;
+	int ld = d * VINYL_LABEL_PERCENT / 100;
+	ld &= ~1;
+	if (ld < VINYL_ART_BORDER * 2)
+		ld = VINYL_ART_BORDER * 2;
 	lv_obj_set_size(r->label, ld, ld);
 	lv_obj_center(r->label);
 	lv_obj_set_style_border_color(r->label, rim, 0);
+	lv_obj_set_hidden(r->label, ld >= d);
 	/* The reference's small pressing mark: a thin rounded stroke leaning
 	 * down to the right, in the exposed lower arc. A rotated rounded object
 	 * keeps LV_USE_LINE off in the firmware build and needs no persistent
