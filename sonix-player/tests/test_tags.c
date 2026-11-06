@@ -678,6 +678,56 @@ static void test_wrong_extensions_and_cue(const char *dir) {
 	char cue_track_path[540];
 	cue_virtual_path(disc_cue, 1, cue_track_path, sizeof(cue_track_path));
 	assert(decode_detect_format(cue_track_path) == DECODE_FORMAT_FLAC);
+
+	// Issue #229: one FILE per song, no per-track TITLE. The first FILE
+	// must not swallow the rest, and each virtual track must resolve to its
+	// own file (including non-ASCII filenames).
+	char first_flac[512], second_flac[512];
+	snprintf(first_flac, sizeof(first_flac), "%s/01. War Of The Gods.flac", dir);
+	buf_t first = {0};
+	append_flac_stream(&first, NULL, 0);
+	write_fixture(first_flac, first.data, first.len);
+	free(first.data);
+	snprintf(second_flac, sizeof(second_flac), "%s/02. Töck's Taunt.flac", dir);
+	buf_t second = {0};
+	append_flac_stream(&second, NULL, 0);
+	write_fixture(second_flac, second.data, second.len);
+	free(second.data);
+	const char *multi =
+		"PERFORMER \"Amon Amarth\"\n"
+		"TITLE \"Surtur Rising\"\n"
+		"FILE \"01. War Of The Gods.flac\" WAVE\n"
+		"  TRACK 01 AUDIO\n"
+		"    INDEX 01 00:00:00\n"
+		"FILE \"02. Töck's Taunt.flac\" WAVE\n"
+		"  TRACK 02 AUDIO\n"
+		"    INDEX 01 00:00:00\n";
+	write_fixture(disc_cue, (const uint8_t *)multi, strlen(multi));
+	assert(cue_parse(disc_cue, &sheet));
+	assert(sheet.track_count == 2);
+	assert(strcmp(sheet.tracks[0].audio_path, first_flac) == 0);
+	assert(strcmp(sheet.tracks[1].audio_path, second_flac) == 0);
+	assert(strcmp(sheet.tracks[0].title, "War Of The Gods") == 0);
+	assert(strcmp(sheet.tracks[1].title, "Töck's Taunt") == 0);
+	assert(sheet.tracks[0].end_ms == 0); // next FILE begins at zero again
+	cue_virtual_path(disc_cue, 2, cue_track_path, sizeof(cue_track_path));
+	assert(decode_detect_format(cue_track_path) == DECODE_FORMAT_FLAC);
+	metadata_read(cue_track_path, &meta);
+	assert(strcmp(meta.title, "Töck's Taunt") == 0);
+	assert(strcmp(meta.album, "Surtur Rising") == 0);
+
+	// Explicit titles still win; a disc image shared by multiple tracks
+	// never acquires the image's filename as every song's title.
+	const char *one_file =
+		"FILE \"disc.flac\" WAVE\n"
+		" TRACK 01 AUDIO\n INDEX 01 00:00:00\n"
+		" TRACK 02 AUDIO\n TITLE \"The Real Name\"\n INDEX 01 01:20:00\n";
+	write_fixture(disc_cue, (const uint8_t *)one_file, strlen(one_file));
+	assert(cue_parse(disc_cue, &sheet));
+	assert(sheet.track_count == 2);
+	assert(sheet.tracks[0].title[0] == '\0');
+	assert(strcmp(sheet.tracks[1].title, "The Real Name") == 0);
+	assert(sheet.tracks[0].end_ms == 80000);
 }
 
 // ---------------------------------------------------------------------------

@@ -82,7 +82,7 @@
 // How many big audio files a folder's cue sheets may claim between them. One
 // sheet per album is the normal case; a handful covers a folder holding several
 // discs of one set.
-#define CUE_CLAIM_MAX 8
+#define CUE_CLAIM_MAX 256
 
 // Upper bound on entries read from one directory. Each costs eight bytes plus
 // its name, so this can be generous; it exists only so that a pathological
@@ -142,7 +142,7 @@ typedef struct {
 	size_t pool_capacity;
 } listing_t;
 
-// A parsed cue sheet is some thirty-five kilobytes, far too much for the
+// A parsed cue sheet is about eighty kilobytes, far too much for the
 // reader thread's stack, and a folder can hold several. One buffer is allocated
 // when the browser starts and reused for every sheet of every folder.
 static cue_sheet_t *cue_sheets;
@@ -1188,10 +1188,12 @@ static bool list_directory(const char *path, listing_t *out, cue_sheet_t *sheets
 
 			// Only the name: the second pass compares names, and a sheet whose
 			// audio lives in another folder claims nothing here.
-			const char *slash = strrchr(sheets->audio_path, '/');
-			if (claim_count < CUE_CLAIM_MAX) {
-				snprintf(claims[claim_count], sizeof(claims[0]), "%s", slash ? slash + 1 : sheets->audio_path);
-				claim_count++;
+			for (int t = 0; t < sheets->track_count && claim_count < CUE_CLAIM_MAX; t++) {
+				const char *audio = sheets->tracks[t].audio_path;
+				const char *slash = strrchr(audio, '/');
+				if (slash && (size_t)(slash - audio) == strlen(path) && strncmp(audio, path, strlen(path)) == 0) {
+					snprintf(claims[claim_count++], sizeof(claims[0]), "%s", slash + 1);
+				}
 			}
 		}
 		rewinddir(dir);
@@ -1616,7 +1618,7 @@ void browser_init(gui_config_t *cfg) {
 	init_list_styles();
 
 	// Once, and kept: a folder with a sheet in it is read on the reader thread,
-	// and thirty-five kilobytes is not something to take from a thread stack or
+	// and about eighty kilobytes is not something to take from a thread stack or
 	// to allocate and free on every folder. A failure here is not fatal -- the
 	// browser goes back to listing the one long file, which is where it was.
 	cue_sheets = malloc(sizeof(*cue_sheets));

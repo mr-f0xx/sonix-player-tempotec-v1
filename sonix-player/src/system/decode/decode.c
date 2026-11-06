@@ -597,17 +597,18 @@ decode_format_t decode_detect_format(const char *filepath) {
 	// A track of a CUE sheet is named by the sheet; what decides the format is
 	// the audio file the sheet points at.
 	char sheet[512];
-	if (cue_split_path(filepath, sheet, sizeof(sheet)) > 0) {
-		// Thirty-five kilobytes, and this function calls itself once.
+	int track = cue_split_path(filepath, sheet, sizeof(sheet));
+	if (track > 0) {
+		// About eighty kilobytes, and this function calls itself once.
 		cue_sheet_t *cue = malloc(sizeof(*cue));
 		if (!cue) {
 			return DECODE_FORMAT_UNKNOWN;
 		}
-		if (!cue_parse(sheet, cue)) {
+		if (!cue_parse(sheet, cue) || track > cue->track_count) {
 			free(cue);
 			return DECODE_FORMAT_UNKNOWN;
 		}
-		decode_format_t inner = decode_detect_format(cue->audio_path);
+		decode_format_t inner = decode_detect_format(cue->tracks[track - 1].audio_path);
 		free(cue);
 		// A disc ripped to one .wav is the common case, and plain WAV has its
 		// own path in audio.c rather than a decoder. That path plays a file
@@ -1656,7 +1657,7 @@ static decoder_t *decoder_open_file(const char *filepath, decode_format_t format
 // A track of a CUE sheet: open the file the sheet points at, then narrow the
 // decoder to that track's stretch of it.
 static decoder_t *decoder_open_cue(const char *sheet_path, int track, decode_format_t format) {
-	// Thirty-five kilobytes, on the playback thread's stack and below a decoder
+	// About eighty kilobytes, on the playback thread's stack and below a decoder
 	// open that has its own buffers: the sheet lives on the heap, and only
 	// long enough to read the three things wanted from it.
 	cue_sheet_t *cue = malloc(sizeof(*cue));
@@ -1670,7 +1671,7 @@ static decoder_t *decoder_open_cue(const char *sheet_path, int track, decode_for
 	uint64_t begin_ms = cue->tracks[track - 1].begin_ms;
 	uint64_t end_ms = cue->tracks[track - 1].end_ms;
 	char audio_path[sizeof(cue->audio_path)];
-	snprintf(audio_path, sizeof(audio_path), "%s", cue->audio_path);
+	snprintf(audio_path, sizeof(audio_path), "%s", cue->tracks[track - 1].audio_path);
 	free(cue);
 
 	decoder_t *dec = decoder_open_file(audio_path, format);

@@ -4292,7 +4292,7 @@ static void scan_indexed(const char *path, const char *name, const song_metadata
 // a track: it is the container the sheet cuts up. The list is reset for each
 // directory and only consulted inside it, which is safe because the walk
 // finishes a directory's files before descending (see scan_directory).
-#define CUE_CLAIMED_MAX 16
+#define CUE_CLAIMED_MAX 256
 static char cue_claimed[CUE_CLAIMED_MAX][512];
 static int cue_claimed_count;
 
@@ -4430,7 +4430,7 @@ static bool folder_unchanged(const char *path, const folder_sig_t *sig) {
 // Returns false when the sheet is unusable, and the caller then treats it as
 // an ordinary file it cannot index.
 static bool scan_cue_sheet(const char *path, const struct stat *st) {
-	// A sheet is thirty-five kilobytes. This runs several frames deep in a
+	// A sheet is about eighty kilobytes. This runs several frames deep in a
 	// directory walk, on the scan thread, so it goes on the heap.
 	cue_sheet_t *cue = malloc(sizeof(*cue));
 	if (!cue) {
@@ -4469,8 +4469,17 @@ static bool scan_cue_sheet(const char *path, const struct stat *st) {
 		scan_indexed(vpath, tags.title, &tags, st);
 	}
 
-	if (cue->track_count > 0) {
-		cue_claim(cue->audio_path);
+	for (int i = 0; i < cue->track_count; i++) {
+		bool first = true;
+		for (int j = 0; j < i; j++) {
+			if (strcmp(cue->tracks[i].audio_path, cue->tracks[j].audio_path) == 0) {
+				first = false;
+				break;
+			}
+		}
+		if (first) {
+			cue_claim(cue->tracks[i].audio_path);
+		}
 	}
 	if (cue_is_sheet(path) && cue->track_count > 0) {
 		pthread_mutex_lock(&db_lock);
@@ -5099,6 +5108,18 @@ static bool update_compare(const char *path, bool own_files, const namelist_t *f
 		if (audio[0] && !namelist_add(&claimed, audio)) {
 			rows_complete = false;
 		}
+		cue_sheet_t *multi = malloc(sizeof(*multi));
+		if (multi && cue_parse(sheet, multi)) {
+			for (int t = 0; t < multi->track_count; t++) {
+				const char *extra = multi->tracks[t].audio_path;
+				if (!namelist_has(&claimed, extra) && !namelist_add(&claimed, extra)) {
+					rows_complete = false;
+				}
+			}
+		} else if (!multi) {
+			rows_complete = false;
+		}
+		free(multi);
 	}
 
 	for (int i = 0; i < files->count && rows_complete && !scan_cancel; i++) {
