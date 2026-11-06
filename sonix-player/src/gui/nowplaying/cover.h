@@ -133,11 +133,9 @@ void cover_set_backdrop_light(bool light);
 void cover_set_backdrop_upright(bool upright);
 
 // Whether the blurred backdrop is the BOTTOM band of the picture rather than a
-// crop of its middle: what a blurred block that sits ON the photograph wants,
-// where a band from the middle would frost pixels that are not underneath it.
-// The band is cut from the foot of the crop the cover itself was made at, so
-// its colours continue the picture above it. Takes effect the next time a
-// backdrop is built.
+// crop of its middle. The band is cut from the foot of the visible cover
+// crop and flipped vertically to reflect it under the sleeve. Takes effect
+// the next time a backdrop is built.
 void cover_set_backdrop_from_bottom(bool from_bottom);
 
 // How much of its own light a frosted band keeps, in per cent, 100 being the

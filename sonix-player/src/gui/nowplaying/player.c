@@ -15,6 +15,8 @@
 #include "src/gui/nowplaying/coverloader.h"
 #include "src/gui/nowplaying/lyricsearch.h"
 #include "src/gui/nowplaying/playbutton.h"
+#include "src/gui/nowplaying/playerdeck.h"
+#include "src/gui/nowplaying/waveformoverlay.h"
 #include "src/system/addons/addons.h"
 #include "src/gui/library/medialist.h"
 #include "src/gui/fonts/fonts.h"
@@ -185,10 +187,6 @@ static int polls_since_stop = POLLS_FAST_AFTER_STOP;
 // corner buttons of the transport row need: they are pinned to the row's ends,
 // wider than the glyphs inside them, and no extra inset is asked for on top.
 #define COMPACT_DECK_SIDE 12
-#define COMPACT_DECK_PAD_TOP 4
-#define COMPACT_DECK_PAD_BOTTOM 4
-#define COMPACT_DECK_GAP 4
-#define COMPACT_DECK_SLACK 2 // Large text draws a size up; keep the last row on screen
 #define COMPACT_FAV_BTN_H 26
 // The favourite marker's scale out of 256, from its 32 px source: the star at
 // 26 px on the V1's deck and at its native size on the wide panels, and the
@@ -202,7 +200,6 @@ static int polls_since_stop = POLLS_FAST_AFTER_STOP;
 // nothing to the deck's own colour over this many pixels of the picture's
 // bottom, so the two grounds meet without a line between them (poster_fade).
 #define POSTER_FADE_HEIGHT 36
-#define COMPACT_PLAY_BTN 44
 #define COMPACT_SKIP_BTN 42
 // The repeat/speed and ellipsis buttons at the ends of that row. The centred
 // transport is 42+8+44+8+42 = 144 wide, leaving 36 px of the 216 px row on
@@ -210,14 +207,13 @@ static int polls_since_stop = POLLS_FAST_AFTER_STOP;
 // 6 px inside the transport's own box and its glyph would touch the skip
 // glyph beside it. 36 keeps each corner at its edge, clear of the group.
 #define COMPACT_CORNER_BTN 36
-#define COMPACT_SLEEVE_MARGIN 2
+#define COMPACT_SLEEVE_MARGIN 8
 #define COMPACT_STANDARD_SLEEVE_MARGIN 14
 // The visible stroke begins 8 px below the top of its 36 px touch slot.
 #define COMPACT_CHEVRON_INSET_TOP 8
 #define COMPACT_SLEEVE_SIDE_MARGIN 10
-// The alternative sleeve stays below the chevron row: it can grow much
-// wider than the standard sleeve because its names live on the artwork.
-#define COMPACT_SLEEVE_TOP 42
+// The Waveform sleeve starts near the chevron and leaves space for its deck.
+#define COMPACT_SLEEVE_TOP 28
 
 // Raise the track-info row as a unit so the title and artist keep a little
 // extra room from the progress bar without shifting the controls below it.
@@ -299,6 +295,7 @@ static int cover_art_w, cover_art_h;   // the visible sleeve, inset on compact p
 // the sleeve's shape the geometry itself does not carry, which is why
 // Immersive, whose picture reaches the bezel, sets it aside and puts it back.
 static int sleeve_radius;
+static player_art_shape_t art_shape;
 
 // ---------------------------------------------------------------------------
 // The arrangements
@@ -326,7 +323,6 @@ static int sleeve_radius;
 // smaller circle of the accent colour. The ring is a wide white border over an
 // accent-coloured body rather than a second object, so it costs nothing and
 // follows the knob on its own.
-#define PROGRESS_TRACK_HEIGHT 10 // as thick as every other slider
 #define PROGRESS_KNOB_GROW 9	 // how far the knob grows past the track
 #define PROGRESS_KNOB_RING 5
 
@@ -335,7 +331,6 @@ static int sleeve_radius;
 // this size a hairline is one pixel of a colour that is half background, and
 // the whole thing reads as noise.
 #define WAVE_HEIGHT 64
-#define COMPACT_WAVE_HEIGHT 36 // the V1's deck, where the shape stands in the bar's row
 #define WAVE_BAR_GAP 3
 #define WAVE_MIN_BAR 3	  // a silent column is still a mark, not a hole
 #define WAVE_PAST_OPA 255 // the part already played
@@ -464,6 +459,7 @@ static bool cover_tint;
 // says which look is up and repaints when anything it depends on moves.
 static bool play_legacy;
 
+static lv_obj_t *song_info_obj; // the entire info row, removed from flex for Waveform
 static lv_obj_t *song_text_obj; // the title and artist, wherever they live now
 static lv_obj_t *song_side_obj; // the star and the format, likewise
 static void align_title_with_star(void);
@@ -505,7 +501,7 @@ static bool backdrop_full;
 static bool backdrop_is_full;
 static lv_style_t compact_clear_style; // the two surfaces the full blur shows through
 
-// Immersive draws the sleeve at the shape of the whole screen rather than at
+// Immersive draws the sleeve at the shape above the deck rather than at
 // the square the other arrangements keep, so the picture on hand is the wrong
 // shape the moment the setting changes -- the same problem the blurred copy
 // has between the deck's shape and the screen's. `cover_shape_immersive` says
@@ -526,9 +522,8 @@ static bool cover_shape_poster;
 static bool cover_shape_aam;
 
 // Immersive asks for the blurred copy as the FOOT of the photograph, at the
-// size of the deck, rather than as the whole screen: it stands over the part
-// of the picture it frosts, so the artwork stays there to be seen through it
-// instead of under a second, screen-sized blur. `backdrop_is_band` is the
+// size of the deck, rather than as the whole screen: it reflects the visible
+// crop into the space below the sleeve. `backdrop_is_band` is the
 // shape the picture on hand was made at, as the two above are.
 static bool backdrop_is_band;
 
@@ -906,7 +901,8 @@ static sleeptimer_kind_t sleeptimer_kind_playing(void) {
 // and under it, with the legacy look on, the disc. The original player's disc
 // was white over artwork and in the dark palettes, and the palette's pressed
 // surface in the light one when there is no cover to stand out against;
-// playbutton.c turns it into the accent where those would not read.
+// playbutton.c keeps it white for an album tint; for theme accents it
+// adjusts the colours where those would not read.
 //
 // Poster's deck stands on its own ground and not on the sleeve (see
 // set_over_cover), so it is only "over artwork" in the other arrangements.
@@ -919,7 +915,12 @@ static void paint_play_button(void) {
 		return;
 	}
 	bool over_artwork = chrome_over_cover && !layout_poster_now;
-	playbutton_paint(play_btn, play_btn_icon, play_legacy, chrome_accent(), over_artwork || theme()->dark);
+	// Waveform also uses the sleeve's colour without the explicit tint switch,
+	// except in palettes which intentionally override it in chrome_accent().
+	bool album_tinted = album_tone && (cover_tint ||
+		(layout_wave_now && !theme_is_monochrome() && !theme_is_tokyo_night()));
+	playbutton_paint(play_btn, play_btn_icon, play_legacy, chrome_accent(), over_artwork || theme()->dark,
+					 album_tinted);
 }
 
 static void apply_playback_status(audio_status_t status) {
@@ -1745,40 +1746,10 @@ static int studio_cover_size;
 static int menu_height;
 
 // ---------------------------------------------------------------------------
-// Immersive: the sleeve from edge to edge
-//
-// The picture the page has already decoded, asked for at the shape of the
-// screen rather than at the square every other arrangement shows it in, and
-// cropped to fill it: a cover is square and the screen is not, so what the crop
-// takes is the two sides. Nothing else is laid out any differently -- the
-// title, the favourite button, the format, the bar, the clocks and the transport
-// stay exactly where the standard arrangement keeps them -- but the ground under
-// them is the artwork, which reaches the bezel on all four sides with square
-// corners.
-//
-// The photograph above the controls is left at its own brightness: it is there
-// to be looked at, and a veil over it is a veil over the thing the arrangement
-// exists for. What the chrome is read on is the frost alone -- the foot of the
-// picture, blurred and kept at most of its own light, asked for at the size of
-// the deck and cut out of the very crop the picture above it was made from, so
-// its colours continue the photograph and the artwork is seen through it,
-// softly. The band is frosted glass rather than a panel: the names, the bar,
-// the clocks and the transport stand on the picture itself, softened, and the
-// chevron and the source marks take their chance over the sharp part of it in
-// white, as they do over every sleeve in this player. A flat black scrim over
-// the whole screen was the first dressing here, and gradients were tried
-// before it -- a ramp's ends are a step in the alpha's slope, and on this panel
-// each of them draws a visible line across the photograph -- but both are
-// darkening a picture that the deck's frost already carries the chrome on.
-//
-// The frost is a child of the artwork's own frame rather than of the page, for
-// two reasons: the source marks are children of that frame and are brought to
-// the front of it when they appear, so they keep their own colour over the
-// band instead of being blurred with the picture; and the frame is what the
-// words' page slides out from under, so the frost travels with the sleeve
-// rather than staying behind to fog the page it uncovers. Where the band meets
-// the sharp picture above it is the one edge on the screen, and it is the edge
-// of the frost.
+// Immersive: the sleeve fills the space above the deck, centre-cropped to
+// that rectangle. Below it the deck sits on a blurred vertical reflection of
+// the bottom of the same crop. The panel spans both regions so lyrics can
+// slide across the sleeve without changing the transport's position.
 // ---------------------------------------------------------------------------
 
 // How much of its own light the frost keeps, in per cent of the photograph.
@@ -2438,9 +2409,7 @@ static void lyrics_layout(void) {
 	if (layout_aam_now) {
 		h -= AAM_BAR_H; // the band's own row, at the foot of the picture
 	} else if (layout_immersive_now) {
-		// The whole screen is the picture and the controls stand on its foot,
-		// as in the standard arrangement: the words fill what is above them
-		// rather than running under them.
+		// The panel spans the screen; the words stop above the controls.
 		h -= menu_height;
 	} else if (layout_studio_now) {
 		pane_y = top;
@@ -3452,14 +3421,8 @@ static void immersive_deck_clear(void) {
 	lv_obj_set_style_bg_image_opa(player_menu, LV_OPA_TRANSP, 0);
 }
 
-// The frosted foot of the arrangement, up or down: the blurred band the worker
-// made for the deck's own rectangle, shown at exactly that rectangle -- the
-// foot of the screen -- over the picture and under the controls. It wants
-// three things at once to be there: the arrangement in force, a band-shaped
-// blur on hand, and no words' page up over it (the words bring Studio's own
-// blur and the two would be two frosts on one screen). Anything less and the
-// chrome stands on the sharp picture itself, or on the page's own colour when
-// there is no picture at all.
+// Show the reflected band under the deck only while Immersive is active and
+// its backdrop has arrived. The lyrics view supplies its own full-screen blur.
 static void immersive_blur_apply(void) {
 	if (!immersive_blur) {
 		return;
@@ -3477,14 +3440,14 @@ static void immersive_blur_apply(void) {
 	}
 }
 
-// The sleeve over the whole screen, with the controls on the frost over it.
+// The sleeve above the controls, with a reflected band under the deck.
 static void immersive_put(void) {
 	if (!cover_art_group) {
 		return;
 	}
 	int screen_w = (int)lv_obj_get_width(player_screen);
 	int screen_h = (int)lv_obj_get_height(player_screen);
-	if (screen_w <= 0 || screen_h <= 0) {
+	if (screen_w <= 0 || screen_h <= menu_height) {
 		return;
 	}
 
@@ -3500,15 +3463,13 @@ static void immersive_put(void) {
 
 	immersive_up = true;
 
-	// The panel and the frame it holds run the whole screen, so the picture is
-	// drawn at one pixel to one of the size it was asked for at (see
-	// reload_cover). Square corners: rounded ones would leave four arcs of page
-	// colour inside the bezel the picture is meant to reach.
+	// The panel spans the screen, but the artwork occupies only the space
+	// above the deck. Its centre crop is decoded at exactly that size.
 	cover_box_h = screen_h;
 	lv_obj_set_size(cover_panel, screen_w, screen_h);
 	lv_obj_set_style_bg_opa(cover_panel, LV_OPA_TRANSP, 0);
 	cover_art_w = screen_w;
-	cover_art_h = screen_h;
+	cover_art_h = screen_h - menu_height;
 	lv_obj_set_size(cover_art_group, cover_art_w, cover_art_h);
 	lv_obj_set_pos(cover_art_group, 0, 0);
 	lv_obj_set_style_radius(cover_art_group, 0, 0);
@@ -4367,6 +4328,22 @@ static void aam_build(void) {
 	}
 }
 
+// Edge-to-edge arrangements deliberately keep square corners. The waveform
+// overlays sit outside a circular image rather than being clipped by it.
+static void apply_art_shape(void) {
+	int radius = art_shape == PLAYER_ART_SQUARE ? 0 :
+		art_shape == PLAYER_ART_VINYL ? LV_RADIUS_CIRCLE : sleeve_radius;
+	bool edge = layout_immersive_now || layout_poster_now || layout_aam_now;
+	if (cover_art_group) {
+		lv_obj_set_style_radius(cover_art_group, edge ? 0 : radius, 0);
+		// Do not clip Waveform's pills at the edge of a circular sleeve.
+		lv_obj_set_style_clip_corner(cover_art_group, !(layout_alt_now && art_shape == PLAYER_ART_VINYL), 0);
+	}
+	if (cover_img) lv_obj_set_style_radius(cover_img, edge ? 0 : radius, 0);
+	if (studio_cover) lv_obj_set_style_radius(studio_cover, radius, 0);
+	if (studio_empty) lv_obj_set_style_radius(studio_empty, radius, 0);
+}
+
 static void apply_layout(void) {
 	if (!alt_title_pill || !song_text_obj) {
 		return;
@@ -4385,6 +4362,12 @@ static void apply_layout(void) {
 	// Before the pill room is worked out below, which is measured from the
 	// sleeve.
 	player_apply_geometry(was_immersive || was_poster || was_aam);
+	player_deck_show_info(song_info_obj, layout_alt_now);
+	if (bp_is_tempotec_v1()) {
+		lv_obj_set_style_pad_top(player_menu, layout_alt_now ? COMPACT_WAVE_DECK_PAD_TOP : COMPACT_DECK_PAD_TOP, 0);
+		lv_obj_set_style_pad_bottom(player_menu, player_deck_bottom_padding(layout_alt_now), 0);
+		lv_obj_set_style_pad_gap(player_menu, layout_alt_now ? COMPACT_WAVE_DECK_GAP : COMPACT_DECK_GAP, 0);
+	}
 
 	if (layout_alt_now) {
 		// A pill each, and not one pill with two lines in it: the title and the
@@ -4392,32 +4375,20 @@ static void apply_layout(void) {
 		// pads the shorter one out to the length of the longer, and each has to
 		// be able to scroll on its own.
 		//
-		// The labels are a percentage of their parent in the standard layout,
-		// and a percentage of a parent that is itself sized by its contents is
-		// nothing at all. Here they size themselves -- so each pill ends where
-		// its own text ends -- up to what is left of the sleeve once the
-		// margins are taken off. The two rows keep different limits: the title
-		// is the top row, clear of the star's disc, and may run the whole way
-		// across; the artist sits in the disc's own row and has to stop short
-		// of it. That is a short name's width on both, and only a long one
-		// still goes around.
-		int title_room = cover_art_w - 2 * alt_pad - 2 * alt_pill_pad_h - bp_pick(4, 12);
-		int artist_room = cover_art_w - 2 * alt_pad - alt_fav_size - 2 * alt_pill_pad_h - bp_pick(4, 12);
-		if (title_room < 40) {
-			title_room = 40;
-		}
-		if (artist_room < 40) {
-			artist_room = 40;
-		}
+		// Both pills reserve space beside the disc: its upper edge can reach
+		// the title with larger fonts, and without an artist the title drops
+		// into the bottom row. Long labels continue to scroll in their boxes.
+		int text_room = waveform_pill_text_room(cover_art_w, alt_pad, alt_fav_size, alt_pill_pad_h,
+												 bp_pick(4, 12));
 		if (song_title_label) {
 			lv_obj_set_parent(song_title_label, alt_title_pill);
 			lv_obj_set_width(song_title_label, LV_SIZE_CONTENT);
-			lv_obj_set_style_max_width(song_title_label, title_room, 0);
+			lv_obj_set_style_max_width(song_title_label, text_room, 0);
 		}
 		if (song_artist_label) {
 			lv_obj_set_parent(song_artist_label, alt_artist_pill);
 			lv_obj_set_width(song_artist_label, LV_SIZE_CONTENT);
-			lv_obj_set_style_max_width(song_artist_label, artist_room, 0);
+			lv_obj_set_style_max_width(song_artist_label, text_room, 0);
 		}
 
 		if (fav_btn_obj && alt_fav_circle) {
@@ -4505,6 +4476,7 @@ static void apply_layout(void) {
 		// opacity hides the blur behind it.
 		full_backdrop_apply();
 	}
+	apply_art_shape();
 	align_title_with_star(); // the title may have just left its row, or come back to it
 
 	placeholder_place();
@@ -4552,6 +4524,7 @@ static void update_layout(const device_state_t *state) {
 	bool aam = layout_choice == PLAYER_LAYOUT_ALBUM_ART_MAX && bp_is_tempotec_v1();
 	bool wave = layout_choice == PLAYER_LAYOUT_ALTERNATIVE && local;
 	bool alt = wave;
+	bool alt_changed = alt != layout_alt_now;
 
 	if (studio == layout_studio_now && immersive == layout_immersive_now && poster == layout_poster_now &&
 		aam == layout_aam_now && alt == layout_alt_now && wave == layout_wave_now &&
@@ -4582,7 +4555,7 @@ static void update_layout(const device_state_t *state) {
 	// wrong shape and the picture is asked for again. Only on a change of
 	// arrangement, which is a setting the user has just touched.
 	if ((studio != backdrop_is_studio || immersive != cover_shape_immersive || poster != cover_shape_poster ||
-		 aam != cover_shape_aam) &&
+		 aam != cover_shape_aam || alt_changed) &&
 		cover_shown_path[0]) {
 		reload_cover(cover_shown_path);
 	}
@@ -4836,9 +4809,8 @@ static void reload_cover(const char *filepath) {
 		cover_shape_immersive = layout_immersive_now;
 		cover_shape_poster = layout_poster_now;
 		cover_shape_aam = layout_aam_now;
-		// The band faces the way the picture does, like every blur that is
-		// looked at rather than looked through, and it is cut from the foot of
-		// the photograph -- the part of it the deck stands over.
+		// The reflected band is cut from the foot of the visible crop.
+		// Full-screen backgrounds in other layouts remain upright.
 		cover_set_backdrop_upright(backdrop_is_full || backdrop_is_band);
 		cover_set_backdrop_from_bottom(backdrop_is_band);
 
@@ -4849,9 +4821,8 @@ static void reload_cover(const char *filepath) {
 		// Studio the picture is decoded at the width of the screen and shown
 		// at two thirds of it, and that resampling is the interface's core
 		// being spent again and again on an answer that never changes. In
-		// Immersive the box IS the screen -- immersive_put() has already put
-		// the panel at that shape -- so the picture comes back cropped to fill
-		// it and is drawn at one pixel to one. In Poster the box is the square
+		// Immersive the box is the space above the deck, so the picture comes
+		// back cropped to fill it and is drawn at one pixel to one. In Poster the box is the square
 		// of the screen's width -- poster_put() has already put the frame at
 		// that size -- so the whole picture comes back and is drawn at one
 		// pixel to one, held at the top of the panel.
@@ -4976,9 +4947,8 @@ static void apply_cover_result(void) {
 			current_backdrop = new_backdrop;
 			current_backdrop.dsc.data = current_backdrop.pixels;
 			if (backdrop_is_band) {
-				// Immersive's frost: the band stands over the picture itself,
-				// at the foot of the screen under the deck, rather than behind
-				// a page or a block (immersive_blur_apply).
+				// Immersive's reflected band stands below the picture,
+				// at the foot of the screen under the deck.
 				immersive_blur_apply();
 			} else if (backdrop_full) {
 				// The screen-sized copy goes behind the whole page; the deck
@@ -5473,7 +5443,9 @@ static void update_fav_button(void) {
 	lv_image_set_scale(fav_btn_icon, layout_aam_now ? AAM_STAR_SCALE
 											: layout_poster_now
 												? bp_pick(POSTER_HEART_SCALE, POSTER_HEART_SCALE_WIDE)
-												: bp_pick(FAV_STAR_SCALE, FAV_STAR_SCALE_WIDE));
+												: layout_alt_now && bp_is_tempotec_v1()
+													? WAVEFORM_FAV_COMPACT_SCALE
+													: bp_pick(FAV_STAR_SCALE, FAV_STAR_SCALE_WIDE));
 	lv_obj_set_style_image_recolor(fav_btn_icon, favorite_color, 0);
 	lv_obj_set_style_image_recolor_opa(fav_btn_icon, LV_OPA_COVER, 0);
 }
@@ -6428,6 +6400,16 @@ void player_layout_set(player_layout_t layout) {
 	update_format_label(&state);
 }
 
+player_art_shape_t player_art_shape_get(void) { return art_shape; }
+
+void player_art_shape_set(player_art_shape_t shape) {
+	if (shape < PLAYER_ART_ROUNDED || shape > PLAYER_ART_VINYL || shape == art_shape) return;
+	art_shape = shape;
+	config_set_int("screen", "player_art_shape", (int)shape);
+	config_save();
+	apply_art_shape();
+}
+
 bool player_recording_year_get(void) { return show_recording_year; }
 
 void player_recording_year_set(bool enabled) {
@@ -6953,7 +6935,12 @@ static int compact_sleeve_side(void) {
 // the top of the panel instead: the sleeve reaches the bezel there, and the
 // deck stands in front of its foot.
 static void compact_place_sleeve(void) {
-	lv_obj_align(cover_art_group, LV_ALIGN_TOP_MID, 0, layout_poster_now ? 0 : compact_sleeve_top());
+	int top = layout_poster_now ? 0 : compact_sleeve_top();
+	if (layout_alt_now) {
+		int extra = cover_box_h - top - COMPACT_SLEEVE_MARGIN - cover_art_h;
+		if (extra > 0) top += extra / 2;
+	}
+	lv_obj_align(cover_art_group, LV_ALIGN_TOP_MID, 0, top);
 }
 
 // The height of the V1's deck for the arrangement on show: its rows at the
@@ -6968,21 +6955,11 @@ static void compact_place_sleeve(void) {
 // see player_apply_geometry().
 static int compact_deck_height(bool alternative) {
 	int clock_h = LV_MAX(lv_font_get_line_height(bp_time_font()), lv_font_get_line_height(bp_queue_label_font()));
-	int first;
-	if (alternative) {
-		first = COMPACT_WAVE_HEIGHT;
-	} else {
-		// The first row is the taller of the two names stacked (no row gap
-		// between them on this board) and the star over the format; the bar
-		// rides beneath them.
-		int title_h = lv_font_get_line_height(bp_title_font());
-		int artist_h = lv_font_get_line_height(bp_artist_font());
-		int format_h = lv_font_get_line_height(bp_format_label_font());
-		int info_h = LV_MAX(title_h + artist_h, COMPACT_FAV_BTN_H + format_h);
-		first = info_h + COMPACT_DECK_GAP + PROGRESS_TRACK_HEIGHT;
-	}
-	return COMPACT_DECK_PAD_TOP + first + COMPACT_DECK_GAP + clock_h + COMPACT_DECK_GAP + COMPACT_PLAY_BTN +
-		   COMPACT_DECK_PAD_BOTTOM + COMPACT_DECK_SLACK;
+	int title_h = lv_font_get_line_height(bp_title_font());
+	int artist_h = lv_font_get_line_height(bp_artist_font());
+	int format_h = lv_font_get_line_height(bp_format_label_font());
+	int info_h = LV_MAX(title_h + artist_h, COMPACT_FAV_BTN_H + format_h);
+	return player_deck_compact_height(alternative, info_h, clock_h);
 }
 
 // The mark that stands in for artwork when a track has none is drawn at
@@ -7035,10 +7012,14 @@ static void placeholder_place(void) {
 		int pills = lv_font_get_line_height(bp_title_font()) + lv_font_get_line_height(bp_artist_font()) +
 				4 * alt_pill_pad_v + 6;
 		dy = -(pills + alt_pad) / 2;
+		if (bp_is_tempotec_v1()) {
+			int top = compact_sleeve_top();
+			int extra = cover_box_h - top - COMPACT_SLEEVE_MARGIN - cover_art_h;
+			if (extra > 0) top += extra / 2;
+			dy += top + cover_art_h / 2 - cover_box_h / 2;
+		}
 	} else if (layout_immersive_now) {
-		// The picture is the whole screen and the controls stand on its foot,
-		// so the middle of the picture is under them: what the mark is centred
-		// in is the part of it that is left.
+		// The panel spans the screen; centre the mark in the space above the deck.
 		dy = -menu_height / 2;
 	} else if (layout_poster_now) {
 		// The sleeve is the panel's own width held at its top, so what can be
@@ -7212,7 +7193,7 @@ void player_init(gui_config_t *cfg) {
 	cover_art_h = cover_box_h;
 	sleeve_radius = compact ? 14 : 18;
 	alt_pad = compact ? 6 : ALT_PAD;
-	alt_fav_size = compact ? 36 : ALT_FAV_SIZE;
+	alt_fav_size = compact ? WAVEFORM_FAV_COMPACT_SIZE : ALT_FAV_SIZE;
 	alt_pill_pad_h = compact ? 10 : ALT_PILL_PAD_H;
 	alt_pill_pad_v = compact ? 5 : ALT_PILL_PAD_V;
 	if (compact) {
@@ -7272,6 +7253,7 @@ void player_init(gui_config_t *cfg) {
 
 	// Track info: the text on the left, the star and the format on the right.
 	lv_obj_t *song_info = lv_obj_create(player_menu);
+	song_info_obj = song_info;
 	lv_obj_set_size(song_info, lv_pct(100), LV_SIZE_CONTENT);
 	lv_obj_set_style_bg_opa(song_info, 0, 0);
 	lv_obj_set_style_border_width(song_info, 0, 0);
@@ -7816,14 +7798,12 @@ void player_init(gui_config_t *cfg) {
 	lv_obj_set_hidden(poster_fade, true);
 
 	// Immersive's frosted foot: the image object the blurred band lands in,
-	// parked at the foot of the artwork's frame at the size of the deck. A
-	// child of the frame, so drawn over the picture and under the source marks,
-	// which are brought to the front of this same frame when they appear; and
-	// made before the words' page -- a child of the panel, below -- so under
-	// that. COVER and not STRETCH: between the change of arrangement and the
+	// parked at the foot of the full panel at the size of the deck, below
+	// the sleeve and the words' page. COVER and not STRETCH: between the
+	// change of arrangement and the
 	// band that follows it, the picture on hand is still the old shape, and
 	// stretching that is a visibly squashed sleeve.
-	immersive_blur = lv_image_create(cover_art_group);
+	immersive_blur = lv_image_create(cover_panel);
 	lv_obj_set_size(immersive_blur, cover_box_w, menu_height);
 	lv_obj_align(immersive_blur, LV_ALIGN_BOTTOM_MID, 0, 0);
 	lv_image_set_inner_align(immersive_blur, LV_IMAGE_ALIGN_COVER);
@@ -7965,6 +7945,9 @@ void player_init(gui_config_t *cfg) {
 	// Whichever arrangement was left selected, now that every widget it moves
 	// exists -- and whether the controls follow the sleeve's colour, which is
 	// off unless it was switched on.
+	int saved_shape = (int)config_get_int("screen", "player_art_shape", PLAYER_ART_ROUNDED);
+	art_shape = saved_shape >= PLAYER_ART_ROUNDED && saved_shape <= PLAYER_ART_VINYL
+		? (player_art_shape_t)saved_shape : PLAYER_ART_ROUNDED;
 	cover_tint = config_get_bool("screen", "player_cover_tint", false);
 	play_legacy = config_get_bool("screen", "player_legacy_play", false);
 	paint_play_button(); // the button was built before the setting was read

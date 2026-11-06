@@ -786,13 +786,9 @@ static bool make_backdrop(const raw_image_t *src, int box_w, int box_h, bool fro
 	// dimmed and tinted by its own numbers below.
 	bool band = from_bottom && over_h > 0;
 
-	// Flip while shrinking, so the stretch back up only has to interpolate and
-	// no separate flip pass is needed. Not for a bottom band: that one stands
-	// in for the pixels underneath it and has to face the same way. Nor when
-	// the backdrop is the whole screen with the sleeve shown over it, where the
-	// two are plainly the same picture and one of them being upside down is the
-	// only thing anybody sees.
-	bool flip = !from_bottom && !backdrop_upright;
+	// Reflect the lower part of the visible sleeve into the deck. Full-screen
+	// backdrops remain upright; ordinary deck backdrops can also be flipped.
+	bool flip = from_bottom || !backdrop_upright;
 	uint8_t *small = resample_rgb(src, &crop, small_w, small_h, flip);
 	if (!small)
 		return false;

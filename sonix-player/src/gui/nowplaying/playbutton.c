@@ -54,16 +54,18 @@ static uint32_t glyph_scale(lv_obj_t *button) {
 	return want > 0 && want < native ? (uint32_t)(LV_SCALE_NONE * want / native) : LV_SCALE_NONE;
 }
 
-void playbutton_paint(lv_obj_t *button, lv_obj_t *glyph, bool legacy, lv_color_t accent, bool white_disc) {
+void playbutton_paint(lv_obj_t *button, lv_obj_t *glyph, bool legacy, lv_color_t accent, bool white_disc,
+					  bool album_tinted) {
 	lv_color_t ink = accent;
 
 	if (legacy) {
-		lv_color_t disc = white_disc ? lv_color_white() : theme()->surface_pressed;
-		// The accent on that disc is the original look. Where it would not read
+		lv_color_t disc = (white_disc || album_tinted) ? lv_color_white() : theme()->surface_pressed;
+		// Album tint always keeps the white disc and the actual album-coloured
+		// glyph. For theme accents, where the glyph would not read
 		// -- or where the palette draws everything in one hue and a white disc
 		// would be a second -- the disc is the accent and the glyph is white on
 		// it, or black where white would not read there either.
-		if (theme_is_monochrome() || !contrast_at_least(disc, accent, GLYPH_ON_DISC_TENTHS)) {
+		if (!album_tinted && (theme_is_monochrome() || !contrast_at_least(disc, accent, GLYPH_ON_DISC_TENTHS))) {
 			disc = accent;
 			ink = contrast_at_least(disc, lv_color_white(), WHITE_INK_TENTHS) ? lv_color_white() : lv_color_black();
 		}

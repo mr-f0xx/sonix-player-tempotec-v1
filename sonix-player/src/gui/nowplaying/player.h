@@ -40,8 +40,8 @@ bool player_queue_position(int *position, int *count);
 // track, all of it drawn in the sleeve's own colour. Studio centres the sleeve
 // with the title across the top and the format under it, over a blurred copy of
 // the same artwork filling the screen. Immersive asks for the artwork at the
-// shape of the screen and crops it to fill it edge to edge, with the controls
-// drawn on a fade over its lower part. Poster scales the sleeve to the width of
+// space above the deck and centre-crops it to fill that area, with controls
+// drawn on a blurred reflection below. Poster scales the sleeve to the width of
 // the screen and puts the deck below it on its own ground.
 //
 // Album Art Max -- AAM -- trades the media controls for the artwork, which is
@@ -76,7 +76,7 @@ typedef enum {
 	PLAYER_LAYOUT_STANDARD = 0,
 	PLAYER_LAYOUT_ALTERNATIVE = 1,
 	PLAYER_LAYOUT_STUDIO = 2,
-	PLAYER_LAYOUT_IMMERSIVE = 3, // the sleeve from edge to edge, the controls on a fade over it
+	PLAYER_LAYOUT_IMMERSIVE = 3, // the sleeve above a reflected controls deck
 	PLAYER_LAYOUT_POSTER = 4,	 // the sleeve at the width of the screen, whole from side to side, the deck below it
 	PLAYER_LAYOUT_ALBUM_ART_MAX = 5, // the sleeve over the screen, the media controls traded for it
 } player_layout_t;
@@ -97,6 +97,15 @@ void player_layout_set(player_layout_t layout);
 // switch lives beside the layout pills in Music > Display options. Changing
 // it only repaints: the colour is the one already worked out from the
 // artwork on screen, so nothing is decoded and playback is untouched.
+// Shape of the inset artwork in Standard, Waveform and Alternative.
+typedef enum {
+	PLAYER_ART_ROUNDED = 0,
+	PLAYER_ART_SQUARE,
+	PLAYER_ART_VINYL,
+} player_art_shape_t;
+player_art_shape_t player_art_shape_get(void);
+void player_art_shape_set(player_art_shape_t shape);
+
 bool player_cover_tint_get(void);
 void player_cover_tint_set(bool enabled);
 
