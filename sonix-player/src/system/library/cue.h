@@ -5,10 +5,10 @@
 #include <stddef.h>
 #include <stdint.h>
 
-// A CD ripped as one long file plus a .cue sheet: the sheet says where each
-// track starts inside that file. Without this the library shows one hour-long
-// entry per album, so the scanner reads the sheet and the decoder seeks to the
-// offsets it reports.
+// A CD ripped as one long file or as one file per track plus a .cue sheet:
+// the sheet says where each track starts inside its FILE. Without this the
+// library shows a disc image as one hour-long entry per album, so the scanner
+// reads the sheet and the decoder seeks to the offsets it reports.
 //
 //   REM GENRE Rock
 //   REM DATE 1973
@@ -32,13 +32,14 @@
 typedef struct {
 	int number;			// the TRACK number as written
 	char title[160];
+	char audio_path[512];	// the FILE containing this track (may differ from the next one)
 	char performer[160];
 	uint64_t begin_ms;	// from INDEX 01 (INDEX 00 is the pre-gap: ignore it)
 	uint64_t end_ms;	// where the next track starts; 0 on the last track
 } cue_track_t;
 
 typedef struct {
-	char audio_path[512];	// absolute path of the file FILE points at
+	char audio_path[512];	// first FILE path (legacy sheet-level users)
 	char album[160];		// the sheet's TITLE
 	char performer[160];	// the sheet's PERFORMER
 	char genre[96];			// from REM GENRE, empty if absent

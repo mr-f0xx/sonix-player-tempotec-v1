@@ -3375,3 +3375,17 @@ above, and the two new texts in all eleven language files.
 that the original player drew, and the corner choice rounds the screen's own
 corners, not the cards and tiles inside it. Both are written down so that a
 different reading can be asked for. Neither has been seen on the glass.
+## Multi-file CUE sheets (issue #229)
+
+A sheet with `FILE "01. Song.flac" WAVE / TRACK 01 / INDEX 01 00:00:00`
+followed by a second `FILE` is valid. Sonix formerly stopped parsing at the
+second `FILE` and displayed `01` when that first track lacked its own `TITLE`.
+It now resolves each track's own audio file, resets the playback window at file
+boundaries, and uses a one-track-per-file filename (minus a matching numeric
+prefix and extension) as the title when no track title is supplied. Explicit
+track titles take precedence; multi-track single-file images keep their previous
+number fallback. The scanner, folder browser, queue, remote browse, format
+detection and artwork lookup use the corresponding file and suppress duplicate
+raw audio rows. `make -C sonix-player/tests tags` covers a multi-file UTF-8
+fixture, metadata lookup, format detection and the single-file boundary case.
+An on-device rescan and playback check is still needed.
