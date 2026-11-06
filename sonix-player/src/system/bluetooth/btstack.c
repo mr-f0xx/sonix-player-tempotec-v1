@@ -76,6 +76,33 @@ static unsigned transport_serial;
 static char media_status[32];
 static btstack_track_t media_track;
 static unsigned media_track_serial;
+static unsigned media_track_revision;
+static unsigned media_status_revision;
+static char media_owner[BT_ADDR_MAX];
+
+static bool address_from_path(const char *path, char *out, size_t size);
+
+// Under lock, bind AVRCP state to the selected RX device rather than whichever
+// of several BlueZ MediaPlayer objects happened to announce last.
+static void media_sync_owner_locked(void) {
+	const char *owner = rx_count ? rx_addr[0] : "";
+	if (strcasecmp(owner, media_owner) == 0) return;
+	snprintf(media_owner, sizeof(media_owner), "%s", owner);
+	memset(&media_track, 0, sizeof(media_track));
+	media_status[0] = '\0';
+	media_track_serial++;
+	media_track_revision++;
+	media_status_revision++;
+}
+
+static bool media_path_is_current(const char *path) {
+	char address[BT_ADDR_MAX];
+	if (!address_from_path(path, address, sizeof(address))) return false;
+	pthread_mutex_lock(&lock);
+	bool current = media_owner[0] && strcasecmp(address, media_owner) == 0;
+	pthread_mutex_unlock(&lock);
+	return current;
+}
 
 // One a{sv} of AVRCP track metadata into `out`. Every key the player does not
 // use is stepped over by signature, the way the device properties are read.
@@ -114,6 +141,39 @@ static void store_track(const btstack_track_t *fresh) {
 	if (memcmp(&media_track, fresh, sizeof(media_track)) != 0) {
 		media_track = *fresh;
 		media_track_serial++;
+	}
+	pthread_mutex_unlock(&lock);
+}
+
+static void store_status_locked(const char *status) {
+	if (strcmp(media_status, status) != 0) {
+		snprintf(media_status, sizeof(media_status), "%s", status);
+	}
+}
+
+// Called for a signal, including repeated values. Advancing the revisions
+// makes any older Get reply harmless even if the value did not itself change.
+static void media_signal_track(const char *path, const btstack_track_t *track) {
+	char address[BT_ADDR_MAX];
+	if (!address_from_path(path, address, sizeof(address))) return;
+	pthread_mutex_lock(&lock);
+	if (media_owner[0] && strcasecmp(media_owner, address) == 0) {
+		media_track_revision++;
+		if (memcmp(&media_track, track, sizeof(media_track)) != 0) {
+			media_track = *track;
+			media_track_serial++;
+		}
+	}
+	pthread_mutex_unlock(&lock);
+}
+
+static void media_signal_status(const char *path, const char *status) {
+	char address[BT_ADDR_MAX];
+	if (!address_from_path(path, address, sizeof(address))) return;
+	pthread_mutex_lock(&lock);
+	if (media_owner[0] && strcasecmp(media_owner, address) == 0) {
+		media_status_revision++;
+		store_status_locked(status);
 	}
 	pthread_mutex_unlock(&lock);
 }
@@ -189,6 +249,7 @@ static bool address_from_path(const char *path, char *out, size_t size) {
 		return false;
 	}
 	at += 5;
+	if (strlen(at) < 17) return false;
 	char address[BT_ADDR_MAX];
 	size_t used = 0;
 	for (int i = 0; i < 17; i++) {
@@ -486,6 +547,7 @@ static void on_signal(dbus_conn_t *c, const dbus_msg_t *m, void *user) {
 		} else if (path_is_a2dp_source(path) && address_from_path(path, address, sizeof(address))) {
 			pthread_mutex_lock(&lock);
 			pcm_add(rx_addr, &rx_count, address);
+			media_sync_owner_locked();
 			pthread_mutex_unlock(&lock);
 			fprintf(stderr, "btstack: %s is streaming to this device\n", address);
 		}
@@ -499,6 +561,23 @@ static void on_signal(dbus_conn_t *c, const dbus_msg_t *m, void *user) {
 		char path[OBJECT_PATH_MAX];
 		if (!dbus_r_string(&r, path, sizeof(path))) {
 			return;
+		}
+		// The AVRCP player can disappear while the A2DP PCM stays up (for
+		// example when the sender switches apps). Its old title is no longer
+		// evidence of what is playing.
+		if (strstr(path, "/player") && media_path_is_current(path)) {
+			dbus_array_iter_t removed;
+			if (dbus_r_array_begin(&r, "s", &removed)) {
+				while (dbus_r_array_more(&r, &removed)) {
+					char iface[DBUS_NAME_MAX];
+					if (!dbus_r_string(&r, iface, sizeof(iface))) break;
+					if (strcmp(iface, BLUEZ_MEDIA_PLAYER_IFACE) == 0) {
+						btstack_track_t empty = {0};
+						media_signal_track(path, &empty);
+						media_signal_status(path, "");
+					}
+				}
+			}
 		}
 		if (path_is_transport(path)) {
 			pthread_mutex_lock(&lock);
@@ -516,6 +595,7 @@ static void on_signal(dbus_conn_t *c, const dbus_msg_t *m, void *user) {
 		} else if (path_is_a2dp_source(path) && address_from_path(path, address, sizeof(address))) {
 			pthread_mutex_lock(&lock);
 			pcm_remove(rx_addr, &rx_count, address);
+			media_sync_owner_locked();
 			pthread_mutex_unlock(&lock);
 			fprintf(stderr, "btstack: %s has stopped streaming to this device\n", address);
 		}
@@ -568,7 +648,7 @@ static void on_signal(dbus_conn_t *c, const dbus_msg_t *m, void *user) {
 		// changes, whichever end caused the change -- a tap here, the space bar
 		// over there, or the track ending -- so it is never stale by more than
 		// the signal's own flight time.
-		if (strcmp(iface, BLUEZ_MEDIA_PLAYER_IFACE) == 0) {
+		if (strcmp(iface, BLUEZ_MEDIA_PLAYER_IFACE) == 0 && media_path_is_current(m->path)) {
 			dbus_array_iter_t props;
 			if (dbus_r_array_begin(&r, "{sv}", &props)) {
 				while (dbus_r_array_more(&r, &props)) {
@@ -579,9 +659,7 @@ static void on_signal(dbus_conn_t *c, const dbus_msg_t *m, void *user) {
 					if (strcmp(key, "Status") == 0 && strcmp(sig, "s") == 0) {
 						char status[32];
 						if (dbus_r_string(&r, status, sizeof(status))) {
-							pthread_mutex_lock(&lock);
-							snprintf(media_status, sizeof(media_status), "%s", status);
-							pthread_mutex_unlock(&lock);
+							media_signal_status(m->path, status);
 							fprintf(stderr, "btstack: the remote player is %s\n", status);
 						}
 					} else if (strcmp(key, "Track") == 0 && strcmp(sig, "a{sv}") == 0) {
@@ -591,9 +669,24 @@ static void on_signal(dbus_conn_t *c, const dbus_msg_t *m, void *user) {
 						btstack_track_t fresh;
 						memset(&fresh, 0, sizeof(fresh));
 						read_track_props(&r, &fresh);
-						store_track(&fresh);
+						if (!r.bad) media_signal_track(m->path, &fresh);
 					} else if (!dbus_r_skip(&r, sig)) {
 						break;
+					}
+				}
+			}
+			// BlueZ can invalidate Track or Status instead of sending a new
+			// value. Do not display the previous song indefinitely in that case.
+			dbus_array_iter_t invalidated;
+			if (dbus_r_array_begin(&r, "s", &invalidated)) {
+				while (dbus_r_array_more(&r, &invalidated)) {
+					char key[64];
+					if (!dbus_r_string(&r, key, sizeof(key))) break;
+					if (strcmp(key, "Track") == 0) {
+						btstack_track_t empty = {0};
+						media_signal_track(m->path, &empty);
+					} else if (strcmp(key, "Status") == 0) {
+						media_signal_status(m->path, "");
 					}
 				}
 			}
@@ -804,6 +897,7 @@ bool btstack_open(void) {
 static void clear_audio_cache(void) {
 	pcm_count = 0;
 	rx_count = 0;
+	media_sync_owner_locked();
 	if (transport_count) {
 		transport_count = 0;
 		transport_serial++;
@@ -1296,6 +1390,7 @@ void btstack_refresh_audio(void) {
 		pthread_mutex_lock(&lock);
 		pcm_count = 0;
 		rx_count = 0;
+		media_sync_owner_locked();
 		pthread_mutex_unlock(&lock);
 		return;
 	}
@@ -1334,6 +1429,7 @@ void btstack_refresh_audio(void) {
 	for (int i = 0; i < count_rx; i++) {
 		snprintf(rx_addr[i], BT_ADDR_MAX, "%s", found_rx[i]);
 	}
+	media_sync_owner_locked();
 	pthread_mutex_unlock(&lock);
 }
 
@@ -1671,6 +1767,23 @@ static bool player_property(dbus_conn_t *c, const char *path, const char *name, 
 	return dbus_r_signature(out, sig, sizeof(sig)) && strcmp(sig, expect) == 0;
 }
 
+// Apply a Get only if no newer signal (even an identical one) or sender
+// switch occurred while it was in flight.
+static void apply_media_reply(const char *address, const btstack_track_t *track, bool answered_track,
+                              unsigned track_before, const char *status, bool answered_status,
+                              unsigned status_before) {
+	pthread_mutex_lock(&lock);
+	if (strcasecmp(media_owner, address) == 0) {
+		if (answered_track && media_track_revision == track_before &&
+		    memcmp(&media_track, track, sizeof(*track)) != 0) {
+			media_track = *track;
+			media_track_serial++;
+		}
+		if (answered_status && media_status_revision == status_before) store_status_locked(status);
+	}
+	pthread_mutex_unlock(&lock);
+}
+
 void btstack_refresh_media_status(const char *address) {
 	pthread_mutex_lock(&lock);
 	dbus_conn_t *c = conn;
@@ -1690,6 +1803,13 @@ void btstack_refresh_media_status(const char *address) {
 		return;
 	}
 
+	pthread_mutex_lock(&lock);
+	unsigned track_before = media_track_revision;
+	unsigned status_before = media_status_revision;
+	bool current = strcasecmp(media_owner, address) == 0;
+	pthread_mutex_unlock(&lock);
+	if (!current) return;
+
 	char status[32] = "";
 	btstack_track_t track;
 	bool answered_status = false;
@@ -1706,7 +1826,7 @@ void btstack_refresh_media_status(const char *address) {
 	// with it, and the page would sit empty until the next track.
 	if (player_property(c, path, "Track", "a{sv}", &r)) {
 		read_track_props(&r, &track);
-		answered_track = true;
+		answered_track = !r.bad;
 	}
 
 	if (!answered_status && !answered_track) {
@@ -1714,20 +1834,7 @@ void btstack_refresh_media_status(const char *address) {
 		return;
 	}
 
-	// Only an answer replaces a cache. A Get can be refused while the link is
-	// renegotiating, and that says nothing about what the device is playing;
-	// writing an empty track through on it wipes what the announcement delivered
-	// a moment earlier. What empties the caches is the sender going away, which
-	// btstack_forget_media() is for.
-	if (answered_track) {
-		store_track(&track);
-	}
-
-	if (answered_status) {
-		pthread_mutex_lock(&lock);
-		snprintf(media_status, sizeof(media_status), "%s", status);
-		pthread_mutex_unlock(&lock);
-	}
+	apply_media_reply(address, &track, answered_track, track_before, status, answered_status, status_before);
 }
 
 void btstack_forget_media(void) {
@@ -1739,13 +1846,14 @@ void btstack_forget_media(void) {
 	store_track(&empty);
 
 	pthread_mutex_lock(&lock);
-	media_status[0] = '\0';
+	store_status_locked("");
 	pthread_mutex_unlock(&lock);
 }
 
 void btstack_note_media_status(const char *status) {
 	pthread_mutex_lock(&lock);
-	snprintf(media_status, sizeof(media_status), "%s", status ? status : "");
+	media_status_revision++;
+	store_status_locked(status ? status : "");
 	pthread_mutex_unlock(&lock);
 }
 

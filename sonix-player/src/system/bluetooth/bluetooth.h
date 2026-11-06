@@ -274,13 +274,12 @@ bool bluetooth_receiver_device(char *mac_out, int mac_size, char *name_out, int 
 // the A2DP stream state is: the question costs a D-Bus round trip and the
 // thread that wants the answer is a capture loop that must not wait.
 //
-// The serial is what makes the two usable together. Copying the cache says
-// nothing about WHEN it was filled, and after a codec change the difference
-// matters more than the contents: reading it straight after asking gives back
-// the format of the transport that has just been torn down, which opens a PCM
-// that will never carry a frame. Read the serial before asking and wait for it
-// to move, and the answer is one that came after the question.
-void bluetooth_refresh_receiver(void);
+// The returned nonzero ticket identifies this request. A cached answer is
+// fresh only after bluetooth_receiver_answered() reaches that ticket. This
+// excludes an older query already in flight when the request was made. Zero
+// means the work queue was full; the caller must not trust the old cache.
+unsigned bluetooth_refresh_receiver(void);
+unsigned bluetooth_receiver_answered(void);
 bool bluetooth_receiver_stream(bt_stream_t *out);
 
 // The title, artist and album the other end is playing.
@@ -304,7 +303,10 @@ bool bluetooth_receiver_track(bt_track_t *out);
 // Moves the incoming stream onto another of them. The link is renegotiated, so
 // the audio stops for a moment and comes back on the new codec.
 void bluetooth_receiver_set_codec(const char *codec);
+// Advances only when the worker has read stream information; metadata cannot
+// make an old codec/rate look like a fresh response.
 unsigned bluetooth_receiver_stream_serial(void);
+unsigned bluetooth_receiver_track_serial(void);
 
 // An AVRCP transport command sent to that device: "Play", "Pause", "Next" or
 // "Previous". Queued on the worker and returns at once.

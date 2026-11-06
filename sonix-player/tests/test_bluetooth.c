@@ -551,7 +551,35 @@ static void test_rx_discoverability_and_phone_pairing(void) {
 	g_receiver_profile = false;
 }
 
+static void test_rx_request_queue(void) {
+	pthread_mutex_lock(&lock);
+	queue_head = queue_count = 0;
+	g_rx_requested = g_rx_answered = 0;
+	pthread_mutex_unlock(&lock);
+	unsigned first = bluetooth_refresh_receiver();
+	unsigned second = bluetooth_refresh_receiver();
+	assert(first && second != first && queue_count == 1);
+	job_t job;
+	pthread_mutex_lock(&lock);
+	assert(take_job(&job) && job.type == JOB_RX_INFO);
+	pthread_mutex_unlock(&lock);
+	// An in-flight older response cannot satisfy the newer request.
+	g_rx_answered = first;
+	assert(bluetooth_receiver_answered() != second);
+	unsigned third = bluetooth_refresh_receiver();
+	assert(third != second && queue_count == 1);
+	pthread_mutex_lock(&lock);
+	queue_head = 0; queue_count = JOB_QUEUE_LEN;
+	for (int i = 0; i < JOB_QUEUE_LEN; i++) queue[i].type = JOB_MEDIA;
+	pthread_mutex_unlock(&lock);
+	assert(bluetooth_refresh_receiver() == 0);
+	pthread_mutex_lock(&lock);
+	queue_count = 0;
+	pthread_mutex_unlock(&lock);
+}
+
 int main(void) {
+	test_rx_request_queue();
 	test_a2dp_directions();
 	test_startup_waits();
 	test_process_matching();

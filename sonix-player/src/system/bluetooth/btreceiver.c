@@ -9,6 +9,8 @@
 #include "src/system/core/utils.h"
 
 #include <alsa/asoundlib.h>
+#include <errno.h>
+#include <poll.h>
 #include <pthread.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -75,6 +77,9 @@ static int output_ms(void) {
 #define SILENCE_MS 900
 
 static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
+// A replacement session may start while the detached old worker is closing.
+// Only one may own the shared external PCM; never wait for this on the GUI.
+static pthread_mutex_t capture_owner = PTHREAD_MUTEX_INITIALIZER;
 static pthread_t thread;
 static bool running;
 
@@ -95,11 +100,13 @@ static void touch(void) { serial++; }
 // Under `lock`.
 static bool sounding(void) { return last_frame_ms != 0 && (now_ms() - last_frame_ms) < SILENCE_MS; }
 
-static void set_error(const char *text) {
+static void set_error(unsigned session, const char *text) {
 	pthread_mutex_lock(&lock);
-	snprintf(state.error, sizeof(state.error), "%s", text ? text : "");
-	last_frame_ms = 0;
-	touch();
+	if (running && session == session_id) {
+		snprintf(state.error, sizeof(state.error), "%s", text ? text : "");
+		last_frame_ms = 0;
+		touch();
+	}
 	pthread_mutex_unlock(&lock);
 }
 
@@ -145,19 +152,19 @@ unsigned btreceiver_serial(void) {
 // than a mode that never starts. True when bluealsa actually answered AFTER
 // being asked; false when the numbers below are a guess.
 //
-// The serial is what makes "after" mean anything. Reading the cache straight
-// after asking returns whatever was already in it, and at a codec change that is
-// the format of the transport that has just been torn down. A PCM opened on
-// those numbers does not fail: it succeeds and then never carries a frame.
-static bool read_stream_info(bt_stream_t *out, unsigned *serial_out) {
-	memset(out, 0, sizeof(*out));
-	unsigned before = bluetooth_receiver_stream_serial();
-	bluetooth_refresh_receiver();
+// The ticket excludes an earlier query already in flight: a cached answer from
+// the transport just torn down can open successfully but never carry a frame.
+static bool session_live(unsigned session);
 
-	for (int waited = 0; waited < INFO_WAIT_MS; waited += INFO_POLL_MS) {
+static bool read_stream_info(bt_stream_t *out, unsigned *serial_out, unsigned session) {
+	memset(out, 0, sizeof(*out));
+	unsigned ticket = bluetooth_refresh_receiver();
+
+	for (int waited = 0; waited < INFO_WAIT_MS && session_live(session); waited += INFO_POLL_MS) {
 		usleep(INFO_POLL_MS * 1000);
 		unsigned answered = bluetooth_receiver_stream_serial();
-		if (answered != before && bluetooth_receiver_stream(out) && out->rate > 0) {
+		unsigned completed = bluetooth_receiver_answered();
+		if (ticket && (int32_t)(completed - ticket) >= 0 && bluetooth_receiver_stream(out) && out->rate > 0) {
 			if (serial_out) {
 				*serial_out = answered;
 			}
@@ -176,8 +183,12 @@ static bool read_stream_info(bt_stream_t *out, unsigned *serial_out) {
 	return false;
 }
 
-static void publish_format(const char *device, const bt_stream_t *info) {
+static void publish_format(unsigned session, const char *device, const bt_stream_t *info) {
 	pthread_mutex_lock(&lock);
+	if (!running || session != session_id) {
+		pthread_mutex_unlock(&lock);
+		return;
+	}
 	snprintf(state.device, sizeof(state.device), "%s", device ? device : "");
 	snprintf(state.codec, sizeof(state.codec), "%s", info->codec);
 	state.sample_rate = info->rate;
@@ -206,6 +217,13 @@ static snd_pcm_t *open_capture(const char *mac, unsigned rate, unsigned channels
 		return NULL;
 	}
 
+	// The plugin is a `plug`: request an explicit client format. BlueALSA's
+	// 24-bit formats may be packed or in four-byte containers; asking ALSA to
+	// convert either to left-aligned S32 avoids assuming their physical width.
+	if (bits != 16 && bits != 32) {
+		snd_pcm_close(pcm);
+		return NULL;
+	}
 	snd_pcm_format_t format = (bits == 32) ? SND_PCM_FORMAT_S32_LE : SND_PCM_FORMAT_S16_LE;
 	err = snd_pcm_set_params(pcm, format, SND_PCM_ACCESS_RW_INTERLEAVED, (unsigned)channels, (unsigned)rate,
 							 0, // no resampling: the rate is the sender's and has to stay it
@@ -215,7 +233,45 @@ static snd_pcm_t *open_capture(const char *mac, unsigned rate, unsigned channels
 		snd_pcm_close(pcm);
 		return NULL;
 	}
+	// Never block in ALSA's bluealsa plugin on this SCHED_FIFO thread. A
+	// disconnected or idle source can otherwise trap the reader indefinitely
+	// (or spin on a control fd), starving the interface and preventing stop.
+	err = snd_pcm_nonblock(pcm, 1);
+	if (err < 0) {
+		fprintf(stderr, "btreceiver: capture nonblocking mode refused: %s\n", snd_strerror(err));
+		snd_pcm_close(pcm);
+		return NULL;
+	}
 	return pcm;
+}
+
+#define CAPTURE_WAIT_MS 100
+#define CAPTURE_POLL_FDS_MAX 8
+
+// One bounded poll, rather than snd_pcm_wait() which can spin indefinitely on
+// a bluealsa control fd even when no audio is ready. Match the TX-side fix.
+static int wait_capture(snd_pcm_t *pcm) {
+	struct pollfd fds[CAPTURE_POLL_FDS_MAX];
+	int count = snd_pcm_poll_descriptors_count(pcm);
+	if (count <= 0 || count > CAPTURE_POLL_FDS_MAX) {
+		usleep(5000);
+		return 0;
+	}
+	count = snd_pcm_poll_descriptors(pcm, fds, (unsigned)count);
+	if (count <= 0 || count > CAPTURE_POLL_FDS_MAX) {
+		usleep(5000);
+		return 0;
+	}
+	int ready = poll(fds, (nfds_t)count, CAPTURE_WAIT_MS);
+	if (ready < 0) return errno == EINTR ? 0 : -errno;
+	if (!ready) return 0;
+	unsigned short events = 0;
+	int err = snd_pcm_poll_descriptors_revents(pcm, fds, (unsigned)count, &events);
+	if (err < 0) return err;
+	if (events & (POLLERR | POLLHUP | POLLNVAL)) return -EIO;
+	if (events & POLLIN) return 1;
+	usleep(5000);
+	return 0;
 }
 
 // How often the loop asks bluealsa what it is decoding, to notice a change the
@@ -254,18 +310,31 @@ static session_t capture_session(const char *mac, const char *name, bool may_gue
 
 	bt_stream_t info;
 	unsigned info_serial = 0;
-	bool told = read_stream_info(&info, &info_serial);
+	bool told = read_stream_info(&info, &info_serial, session);
+	if (!session_live(session)) return SESSION_OVER;
 	if (!told && !may_guess) {
 		return SESSION_NO_PCM;
 	}
 	unsigned rate = info.rate ? info.rate : FALLBACK_RATE;
 	unsigned channels = info.channels ? info.channels : FALLBACK_CHANNELS;
 	unsigned in_bits = info.bits ? info.bits : FALLBACK_BITS;
-	publish_format(name, &info);
+	if (in_bits != 16 && in_bits != 24 && in_bits != 32) {
+		fprintf(stderr, "btreceiver: unsupported %u-bit capture format\n", in_bits);
+		return SESSION_NO_PCM;
+	}
+	// 24-bit source samples are requested from the ALSA plug as S32_LE.
+	// The output receives that actual representation, not the source's bit
+	// depth; using 24 to size S16 capture data corrupts frames and channels.
+	unsigned capture_bits = in_bits == 24 ? 32 : in_bits;
+	publish_format(session, name, &info);
 
-	snd_pcm_t *pcm = open_capture(mac, rate, channels, in_bits);
+	snd_pcm_t *pcm = open_capture(mac, rate, channels, capture_bits);
 	if (!pcm) {
 		return SESSION_NO_PCM;
+	}
+	if (!session_live(session)) {
+		snd_pcm_close(pcm);
+		return SESSION_OVER;
 	}
 
 	// The output, and the same widening the AirPlay receiver needs: this DAC
@@ -275,21 +344,27 @@ static session_t capture_session(const char *mac, const char *name, bool may_gue
 	bool widen = false;
 	bool opened = false;
 	int buffer_ms = output_ms();
-	if (in_bits == 16) {
+	if (capture_bits == 16) {
 		opened = audio_external_begin_latency((int)rate, (int)channels, 32, buffer_ms);
 		widen = opened;
 	}
 	if (!opened) {
-		opened = audio_external_begin_latency((int)rate, (int)channels, (int)in_bits, buffer_ms);
+		opened = audio_external_begin_latency((int)rate, (int)channels, (int)capture_bits, buffer_ms);
 	}
 	if (!opened) {
 		fprintf(stderr, "btreceiver: the output would not take %u Hz %u bit\n", rate, in_bits);
-		set_error(tr("btreceiver_output_refused"));
+		set_error(session, tr("btreceiver_output_refused"));
 		snd_pcm_close(pcm);
 		return SESSION_OVER;
 	}
 
-	size_t in_frame = (size_t)channels * (in_bits / 8);
+	if (!session_live(session)) {
+		audio_external_end();
+		snd_pcm_close(pcm);
+		return SESSION_OVER;
+	}
+
+	size_t in_frame = (size_t)channels * (capture_bits / 8);
 	void *chunk = malloc(CHUNK_FRAMES * in_frame);
 	int32_t *wide = widen ? malloc(CHUNK_FRAMES * (size_t)channels * sizeof(int32_t)) : NULL;
 	if (!chunk || (widen && !wide)) {
@@ -297,7 +372,7 @@ static session_t capture_session(const char *mac, const char *name, bool may_gue
 		free(wide);
 		audio_external_end();
 		snd_pcm_close(pcm);
-		set_error(tr("btreceiver_not_enough_memory"));
+		set_error(session, tr("btreceiver_not_enough_memory"));
 		return SESSION_OVER;
 	}
 
@@ -305,7 +380,7 @@ static session_t capture_session(const char *mac, const char *name, bool may_gue
 			channels, in_bits);
 
 	// The PCM is open: whatever the last attempt complained about is over.
-	set_error(NULL);
+	set_error(session, NULL);
 
 	bool again = false;
 	bool heard = false;
@@ -358,13 +433,21 @@ static session_t capture_session(const char *mac, const char *name, bool may_gue
 		}
 
 		snd_pcm_sframes_t got = snd_pcm_readi(pcm, chunk, CHUNK_FRAMES);
+		if (got == -EAGAIN || got == 0) {
+			int ready = wait_capture(pcm);
+			if (ready > 0) usleep(1000); // a lying readiness cannot spin FIFO
+			if (ready >= 0) continue;
+			got = ready;
+		}
 		if (got < 0) {
 			// An overrun or a suspend is recoverable and common: the sender
 			// pauses between tracks and nothing arrives for a moment.
 			if (snd_pcm_recover(pcm, (int)got, 1) == 0 && ++empty < EMPTY_RECOVERIES) {
 				pthread_mutex_lock(&lock);
-				last_frame_ms = 0;
-				touch();
+				if (running && session == session_id) {
+					last_frame_ms = 0;
+					touch();
+				}
 				pthread_mutex_unlock(&lock);
 				continue;
 			}
@@ -375,13 +458,15 @@ static session_t capture_session(const char *mac, const char *name, bool may_gue
 			again = true;
 			break;
 		}
-		if (got == 0) {
-			continue;
-		}
+		if (!session_live(session)) break;
 		empty = 0;
 		heard = true;
 
 		pthread_mutex_lock(&lock);
+		if (!running || session != session_id) {
+			pthread_mutex_unlock(&lock);
+			break;
+		}
 		bool was = sounding();
 		last_frame_ms = now_ms();
 		if (!was) {
@@ -504,6 +589,11 @@ static void *capture_worker(void *arg) {
 	// The number this visit to the mode was given. Anything this thread does to
 	// the shared state is conditional on it still being the current one.
 	const unsigned session = (unsigned)(uintptr_t)arg;
+	pthread_mutex_lock(&capture_owner);
+	if (!session_live(session)) {
+		pthread_mutex_unlock(&capture_owner);
+		return NULL;
+	}
 	// Not background: this thread IS the playback path while the mode is on, and
 	// a capture PCM that is not drained on time overruns, which is heard as
 	// stuttering rather than as a delay. SCHED_IDLE yields to anything else on
@@ -530,7 +620,7 @@ static void *capture_worker(void *arg) {
 	char mac[BT_MAC_MAX];
 	char name[BT_NAME_MAX];
 	if (!still_there(mac, sizeof(mac), name, sizeof(name))) {
-		set_error(tr("btreceiver_nothing_streaming"));
+		set_error(session, tr("btreceiver_nothing_streaming"));
 		goto done;
 	}
 
@@ -556,7 +646,7 @@ static void *capture_worker(void *arg) {
 	for (;;) {
 		reopen_t what = reopen_decision(blind, blind ? now_ms() - blind_since : 0, guessed);
 		if (what == REOPEN_GIVE_UP) {
-			set_error(tr("btreceiver_stream_failed"));
+			set_error(session, tr("btreceiver_stream_failed"));
 			if (!still_there(mac, sizeof(mac), name, sizeof(name))) {
 				fprintf(stderr, "btreceiver: nothing to open in %d ms; the mode is over\n", REOPEN_WAIT_MS);
 				break;
@@ -593,8 +683,10 @@ static void *capture_worker(void *arg) {
 
 		pthread_mutex_lock(&lock);
 		bool go = running && session == session_id;
-		last_frame_ms = 0;
-		touch();
+		if (go) {
+			last_frame_ms = 0;
+			touch();
+		}
 		pthread_mutex_unlock(&lock);
 		if (!go) {
 			break;
@@ -639,6 +731,7 @@ done:
 	}
 	pthread_mutex_unlock(&lock);
 	fprintf(stderr, "btreceiver: the capture thread has finished\n");
+	pthread_mutex_unlock(&capture_owner);
 	return NULL;
 }
 
