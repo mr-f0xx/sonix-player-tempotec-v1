@@ -9,6 +9,8 @@
 #include <limits.h>
 
 static bool source_pcm;
+static char saved_quality[32];
+static int config_saves;
 
 void config_set_int(const char *section, const char *key, long value) {
 	(void)section;
@@ -17,18 +19,19 @@ void config_set_int(const char *section, const char *key, long value) {
 }
 
 const char *config_get(const char *section, const char *key, const char *fallback) {
-	(void)section;
-	(void)key;
+	if (strcmp(section, "wireless") == 0 && strcmp(key, "bt_ldac_quality") == 0 && saved_quality[0]) {
+		return saved_quality;
+	}
 	return fallback;
 }
 
 void config_set(const char *section, const char *key, const char *value) {
-	(void)section;
-	(void)key;
-	(void)value;
+	if (strcmp(section, "wireless") == 0 && strcmp(key, "bt_ldac_quality") == 0) {
+		snprintf(saved_quality, sizeof(saved_quality), "%s", value);
+	}
 }
 
-bool config_save(void) { return true; }
+bool config_save(void) { config_saves++; return true; }
 
 void audio_set_output_device(const char *pcm) { (void)pcm; }
 
@@ -241,6 +244,48 @@ static void test_alsa_template(void) {
 	assert(unlink(path) == 0);
 	assert(rmdir(dir) == 0);
 	assert(!ensure_alsa_conf_template(path)); /* missing parent is a failure */
+}
+
+static void test_ldac_auto(void) {
+	char option[48];
+	format_ldac_option(option, sizeof(option), "abr", true, true);
+	assert(strcmp(option, "--ldac-abr") == 0);
+	format_ldac_option(option, sizeof(option), "abr", false, true);
+	assert(option[0] == '\0');
+	format_ldac_option(option, sizeof(option), "standard", true, true);
+	assert(strcmp(option, "--ldac-quality=standard") == 0);
+	format_ldac_option(option, sizeof(option), "standard", true, false);
+	assert(option[0] == '\0');
+	assert(strcmp(bluetooth_ldac_quality(), "abr") == 0);
+	snprintf(saved_quality, sizeof(saved_quality), "invalid");
+	assert(strcmp(bluetooth_ldac_quality(), "abr") == 0);
+	snprintf(saved_quality, sizeof(saved_quality), "standard");
+	queue_head = queue_count = 0;
+	config_saves = 0;
+	bluetooth_set_ldac_quality("abr");
+	assert(strcmp(bluetooth_ldac_quality(), "abr") == 0 && config_saves == 1);
+	assert(queue_count == 1 && queue[queue_head].type == JOB_LDAC_QUALITY);
+	bluetooth_set_ldac_quality("abr");
+	bluetooth_set_ldac_quality("invalid");
+	assert(queue_count == 1 && config_saves == 1);
+	queue_head = queue_count = 0;
+	saved_quality[0] = '\0';
+
+	char dir[] = "/tmp/sonix-bt-ldac-XXXXXX";
+	assert(mkdtemp(dir));
+	char path[128], text[4096];
+	snprintf(path, sizeof(path), "%s/alsa.conf", dir);
+	FILE *f = fopen(path, "w");
+	assert(f && fputs("pcm.bt_alsa_sink {\n    device XX:XX:XX:XX:XX:XX\n"
+					 "    ldac_eqmid \"LDAC_660\"\n    uat_eqmid \"UAT_600\"\n}\n", f) >= 0 && fclose(f) == 0);
+	rewrite_alsa_conf_file(path, "11:22:33:44:55:66", "standard");
+	assert(slurp(path, text, sizeof(text)) && strstr(text, "ldac_eqmid \"LDAC_660\""));
+	rewrite_alsa_conf_file(path, "11:22:33:44:55:66", "abr");
+	assert(slurp(path, text, sizeof(text)));
+	assert(strstr(text, "pcm.bluealsa:DEV=11:22:33:44:55:66 {"));
+	assert(strstr(text, "device 11:22:33:44:55:66"));
+	assert(strstr(text, "ldac_eqmid \"LDAC_ABR\"") && strstr(text, "uat_eqmid \"UAT_600\""));
+	assert(unlink(path) == 0 && rmdir(dir) == 0);
 }
 
 static void make_rfkill(const char *root, const char *entry, const char *name) {
@@ -556,6 +601,7 @@ int main(void) {
 	test_startup_waits();
 	test_process_matching();
 	test_alsa_template();
+	test_ldac_auto();
 	test_rfkill_lookup();
 	test_boot_cleanup_queue();
 	test_rx_discoverability_and_phone_pairing();
