@@ -2,7 +2,7 @@
 
 This repository is a community port of the original **[Sonix Player](https://github.com/Jepl4r/sonix-player)** project by **[Jepl4r](https://github.com/Jepl4r)** for the Tempotec Variations V1. 
 
-The firmware builder starts with an official V1 update package, replaces the stock music player and its interface with Sonix, then repackages the update as `v1.upt`.
+The firmware builder starts with an official V1 1.3 update package, replaces the stock music player and its interface with Sonix, then repackages the update as `v1.upt`.
 
 ## Previews
 
@@ -226,13 +226,14 @@ This fork builds on the upstream [Sonix Player](https://github.com/Jepl4r/sonix-
 - **Subsonic / Gonic** - stream from your own server. See [Subsonic / Gonic](#subsonic--gonic).
 - **V1 themes** - **Tokyo Night**, **Amber on Black** and **OLED**, designed for the V1 panel, beside Dark and Light. Make your own with a [custom colour theme](docs/custom-themes.md).
 - **Boot screens** - Retrospace (the default), Space, Travelling in space, Stock, or your own picture.
-- **Player layouts** - **Immersive**, **Poster** and **Album Art Max**, beside Standard, Waveform and Alternative.
+- **Player layouts** - **Immersive**, **Poster**, **Album Art Max** and **Vinyl**, beside Standard, Waveform and Alternative. See [`previews/vinyl-layout/`](previews/vinyl-layout/) for an interactive, exact-size Vinyl concept.
+- **Legacy play button and corner roundness** - the original round disc behind play and pause, as an option under Settings → Music → Display options; and a slider for how round the screen corners are, from a hint of a corner (2 px) up to 20 px, for a V1 that looks boxier than its 16 px default.
 - **Interface fonts** - choose MiSans, Neon 80s or Roboto, or any `.ttf`/`.otf` in the card's `Fonts` folder. Missing glyphs fall back to MiSans, so every language stays readable.
 - **Dual Scrobbler Suite** (Last.fm & ListenBrainz) — Native background scrobbling for both services with independent toggles, token-based setup, and offline queue caching when disconnected from Wi-Fi.
 - **Over-The-Air (OTA) Updates** - Check for and download new releases directly over Wi-Fi from GitHub Releases with one click in Settings → System → Firmware update.
 - **SmartMix Playlist**  - Generate similar tracks, tag based playlists!
-- Editable control centre
-- Many more improvements!
+- **Editable control centre**
+- **Many more improvements!**
 ### Shared with Sonix Player
 
 - **Music**: a local library with a file browser, albums, artists, genres, playlists, favourites and most played, plus gapless playback, fades, ReplayGain and sleep timers.
@@ -242,7 +243,7 @@ This fork builds on the upstream [Sonix Player](https://github.com/Jepl4r/sonix-
 - **Audiobooks and e-books**: chapters, bookmarks and speed control, plus an EPUB reader.
 - **Wireless**: Wi-Fi, Bluetooth headphones and speakers, a Bluetooth receiver, AirPlay, DLNA, Wi-Fi file transfer and SonixLink.
 - **Tools and games**: a file manager, a Game Boy / Game Boy Color emulator, and Flappy Bird.
-- **Screen and power**: rounded corners, brightness, a screensaver, standby, a low-battery warning and a battery screen when off.
+- **Screen and power**: rounded corners (with a choice of how round), brightness, a screensaver, standby, a low-battery warning and a battery screen when off.
 
 Local audio decoder inputs include WAV, FLAC, MP3, Ogg Vorbis, Opus, M4A/M4B/MP4, AAC, ALAC, WavPack, APE, AIFF/AIFC, CAF and DSD (DSF/DFF). Streaming services require valid credentials and may depend on third-party availability.
 
@@ -306,17 +307,23 @@ api_secret =
 
 ListenBrainz is the one scrobbler that needs no credentials in the image: its account is a personal user token, requested on listenbrainz.org/settings and pasted into the player's Settings → Music → ListenBrainz. Only the token is kept on the device. Scrobbling to Last.fm and to ListenBrainz are independent and can run side by side.
 
-#### Qobuz without keys of your own
+#### Qobuz and Tidal without keys of your own
 
-Qobuz does not issue application credentials for personal or open-source clients, which is why the stock V1 firmware works out of the box: its `hiby_player` carries HiBy's own `app_id`/`app_secret` internally. Sonix already speaks that exact authentication flow; it only lacks the credential pair, which belongs to HiBy and is neither committed nor shipped in published images.
+Qobuz does not issue application credentials for personal or open-source clients, and self-serve apps created on `developer.tidal.com` are OpenAPI v2 keys that lack Tidal's v1 **Limited Input Device** (`device_code`) grant and unencrypted stream entitlements — attempting to sign in with a `developer.tidal.com` key fails with `"Client is not a Limited Input Device client."`
 
-When you build an image **for your own device** from the official stock firmware, the packer can extract that pair from the stock binary and install it automatically — no `streaming-keys.ini` on the card:
+The stock V1 firmware works out of the box because its `usr/bin/hiby_player` carries HiBy's partner Qobuz `app_id`/`app_secret` and Tidal Limited Input Device `client_id`/`client_secret` internally. Sonix speaks those exact authentication flows; it only omits the credential pairs, which belong to HiBy and are neither committed nor shipped in published images.
+
+When you build an image **for your own device** from the official stock firmware, or generate a `streaming-keys.ini` for your microSD card, `sonix-player/tools/extract_streamkeys.py` extracts **both `[qobuz]` and `[tidal]`** from the stock binary:
 
 ```sh
+# Extract [qobuz] and [tidal] into streaming-keys.ini for your microSD card:
+python3 sonix-player/tools/extract_streamkeys.py path/to/hiby_player -o streaming-keys.ini
+
+# Or embed them directly while packing a private firmware image:
 SONIX_EMBED_STOCK_KEYS=1 ./sonix_firmware_packer.sh
 ```
 
-With a `streaming-keys.key` present the credentials are sealed into `streaming-keys.bin`; without one they ship as a plain, player-readable `streaming-keys.ini`. The extractor only runs on this explicit opt-in, masks values in its output, and leaves Tidal on the manual path (its secret is assembled at run time in the stock binary and cannot be scanned out). **An image built this way carries a third party's API credentials: keep it private, never upload it to a release.** The standalone tool (`sonix-player/tools/extract_streamkeys.py`, with `--check` and `--list-candidates`) and the full investigation, including what was traced in the stock binary, are documented in [docs/qobuz-stock-firmware.md](docs/qobuz-stock-firmware.md).
+With a `streaming-keys.key` present the credentials are sealed into `streaming-keys.bin`; without one they ship as a plain, player-readable `streaming-keys.ini`. The extractor only runs on explicit opt-in and masks values in its output. (For read-only partner device keys such as the stock V1 Tidal pair, Sonix also automatically falls back from `r_usr w_usr` to `r_usr` during device authorization.) **An image built this way carries a third party's API credentials: keep it private, never upload it to a release.** The standalone tool (`sonix-player/tools/extract_streamkeys.py`, with `--check`, `--service`, and `--list-candidates`) and technical details are documented in [docs/qobuz-stock-firmware.md](docs/qobuz-stock-firmware.md).
 
 ### Your own server with a self-signed certificate
 

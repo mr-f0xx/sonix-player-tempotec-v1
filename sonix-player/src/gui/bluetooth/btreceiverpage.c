@@ -64,13 +64,20 @@ static void refresh(void) {
 	}
 
 	if (!st.active) {
-		// Asked now, not remembered. The name the mode last ran with belongs to
-		// the mode: with nothing streaming here it is the name of a phone that
-		// has gone, and showing it would read as one that is arriving.
-		lv_label_set_text(device_label, has_current_name ? current_name : "");
-		lv_label_set_text(format_label, "");
-		lv_label_set_text(status_label,
-						  has_current_name ? tr("btreceiver_connecting") : tr("btreceiver_no_source_note"));
+		// Asked now, not remembered. Show the RX mode badge and the adapter's
+		// visible name explicitly so users can tell at a glance that the player
+		// is in RX mode and ready to be found from a phone.
+		lv_label_set_text(format_label, tr("bt_mode_rx_badge"));
+		if (!bluetooth_get_enabled() || bluetooth_busy()) {
+			lv_label_set_text(device_label, "");
+			lv_label_set_text(status_label, bluetooth_get_enabled() ? tr("turning_on") : tr("bt_bluetooth_off"));
+		} else if (has_current_name) {
+			lv_label_set_text(device_label, current_name);
+			lv_label_set_text(status_label, tr("btreceiver_connecting"));
+		} else {
+			lv_label_set_text_fmt(device_label, tr("bt_visible_as"), bluetooth_local_name());
+			lv_label_set_text(status_label, tr("btreceiver_no_source_note"));
+		}
 		return;
 	}
 
@@ -156,7 +163,7 @@ static void poll_cb(lv_timer_t *timer) {
 	// rather than by anything here, and it is carried in the receiver's stream
 	// serial: without it a track change on the phone would not redraw the page.
 	unsigned now = btreceiver_serial() + bluetooth_devices_serial() + bluetooth_receiver_stream_serial() +
-				   (st.streaming ? 1u : 0u);
+				   (st.streaming ? 1u : 0u) + (bluetooth_busy() ? 2u : 0u) + (bluetooth_get_enabled() ? 4u : 0u);
 	if (now == last_serial) {
 		return;
 	}
@@ -253,8 +260,12 @@ static bool back_guard(void) {
 static void loaded_cb(lv_event_t *e) {
 	(void)e;
 	// The A2DP sink exists only while this page is open (bluetooth.h): a phone
-	// connects to it from here on.
+	// connects to it from here on, and bring-up starts straight into sink mode
+	// when entered while the radio was off.
 	bluetooth_set_receiver_profile(true);
+	if (!bluetooth_get_enabled() && bluetooth_available()) {
+		bluetooth_set_enabled(true);
+	}
 	last_serial = (unsigned)-1;
 	// Arriving is the switch: there is nothing else this page does, so a toggle
 	// on it would only repeat what opening it already said.

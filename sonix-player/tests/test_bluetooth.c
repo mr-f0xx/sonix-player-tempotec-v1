@@ -16,7 +16,21 @@ void config_set_int(const char *section, const char *key, long value) {
 	(void)value;
 }
 
+const char *config_get(const char *section, const char *key, const char *fallback) {
+	(void)section;
+	(void)key;
+	return fallback;
+}
+
+void config_set(const char *section, const char *key, const char *value) {
+	(void)section;
+	(void)key;
+	(void)value;
+}
+
 bool config_save(void) { return true; }
+
+void audio_set_output_device(const char *pcm) { (void)pcm; }
 
 bool btstack_audio_source(char *address_out, size_t size) {
 	if (address_out && size) {
@@ -316,6 +330,227 @@ static void test_boot_cleanup_queue(void) {
 	worker_running = false;
 }
 
+static btstack_device_t fake_devs[4];
+static int fake_dev_count;
+static int trust_calls;
+static char last_trusted_mac[BT_MAC_MAX];
+static int connect_calls;
+static char connected_order[4][BT_MAC_MAX];
+
+int btstack_devices(btstack_device_t *out, int max_out) {
+	int n = fake_dev_count < max_out ? fake_dev_count : max_out;
+	for (int i = 0; i < n; i++) {
+		out[i] = fake_devs[i];
+	}
+	return n;
+}
+
+bool btstack_device_connected(const char *address, bool *out) {
+	for (int i = 0; i < fake_dev_count; i++) {
+		if (strcasecmp(fake_devs[i].address, address) == 0) {
+			if (out) {
+				*out = fake_devs[i].connected;
+			}
+			return true;
+		}
+	}
+	return false;
+}
+
+bool btstack_trust(const char *address, bool trusted) {
+	trust_calls++;
+	snprintf(last_trusted_mac, sizeof(last_trusted_mac), "%s", address);
+	for (int i = 0; i < fake_dev_count; i++) {
+		if (strcasecmp(fake_devs[i].address, address) == 0) {
+			fake_devs[i].trusted = trusted;
+		}
+	}
+	return true;
+}
+
+bool btstack_pair_why(const char *address, int timeout_ms, char *err_out, size_t err_size) {
+	(void)timeout_ms;
+	if (err_out && err_size) {
+		err_out[0] = '\0';
+	}
+	for (int i = 0; i < fake_dev_count; i++) {
+		if (strcasecmp(fake_devs[i].address, address) == 0) {
+			fake_devs[i].paired = true;
+			return true;
+		}
+	}
+	return false;
+}
+
+bool btstack_cancel_pairing(const char *address) {
+	(void)address;
+	return true;
+}
+
+bool btstack_discovery(bool on) {
+	(void)on;
+	return true;
+}
+
+bool btstack_connect(const char *address, int timeout_ms, char *err_out, size_t err_size) {
+	(void)timeout_ms;
+	if (err_out && err_size) {
+		err_out[0] = '\0';
+	}
+	if (connect_calls < 4) {
+		snprintf(connected_order[connect_calls], BT_MAC_MAX, "%s", address);
+	}
+	connect_calls++;
+	for (int i = 0; i < fake_dev_count; i++) {
+		if (strcasecmp(fake_devs[i].address, address) == 0) {
+			fake_devs[i].connected = true;
+			return true;
+		}
+	}
+	return false;
+}
+
+bool btstack_connect_a2dp(const char *address, int timeout_ms) {
+	(void)address;
+	(void)timeout_ms;
+	return true;
+}
+
+bool btstack_connect_a2dp_source(const char *address, int timeout_ms) {
+	return btstack_connect_a2dp_source_why(address, timeout_ms, NULL, 0);
+}
+
+bool btstack_connect_a2dp_source_why(const char *address, int timeout_ms, char *err_out, size_t err_size) {
+	(void)timeout_ms;
+	if (err_out && err_size) {
+		err_out[0] = '\0';
+	}
+	if (connect_calls < 4) {
+		snprintf(connected_order[connect_calls], BT_MAC_MAX, "%s", address);
+	}
+	connect_calls++;
+	for (int i = 0; i < fake_dev_count; i++) {
+		if (strcasecmp(fake_devs[i].address, address) == 0) {
+			fake_devs[i].connected = true;
+			source_pcm = true;
+			return true;
+		}
+	}
+	return false;
+}
+
+bool btstack_disconnect(const char *address) {
+	for (int i = 0; i < fake_dev_count; i++) {
+		if (strcasecmp(fake_devs[i].address, address) == 0) {
+			fake_devs[i].connected = false;
+			return true;
+		}
+	}
+	return false;
+}
+
+bool btstack_audio_sink(char *address_out, size_t size) {
+	if (address_out && size) {
+		address_out[0] = '\0';
+	}
+	return false;
+}
+
+int btstack_codecs(const char *address, char out[][BT_CODEC_NAME_MAX], int max, char *selected, size_t selected_size) {
+	(void)address;
+	(void)out;
+	(void)max;
+	if (selected && selected_size) {
+		selected[0] = '\0';
+	}
+	return 0;
+}
+
+bool btstack_select_codec(const char *address, const char *codec) {
+	(void)address;
+	(void)codec;
+	return false;
+}
+
+bool btstack_stream_info(const char *address, bool receiving, btstack_stream_t *out) {
+	(void)address;
+	(void)receiving;
+	if (out) {
+		memset(out, 0, sizeof(*out));
+	}
+	return false;
+}
+
+bool btreceiver_is_active(void) { return false; }
+bool sonixlink_bt_is_peer(const char *mac) {
+	(void)mac;
+	return false;
+}
+
+static void test_rx_discoverability_and_phone_pairing(void) {
+	/* TX mode stays hidden unless explicitly requested (e.g. SonixLink); RX
+	 * mode is always discoverable, even if a TX page later clears its flag. */
+	g_receiver_profile = false;
+	g_discoverable = false;
+	assert(!bluetooth_receiver_profile());
+	assert(!effective_discoverable());
+
+	g_discoverable = true;
+	assert(effective_discoverable());
+
+	g_receiver_profile = true;
+	g_discoverable = false;
+	assert(bluetooth_receiver_profile());
+	assert(effective_discoverable());
+
+	/* Incoming phone pairings arrive with paired=true, trusted=false:
+	 * refresh_devices() must mark them trusted so subsequent phone-initiated
+	 * A2DP connections are accepted by BlueZ without authorization refusal. */
+	memset(fake_devs, 0, sizeof(fake_devs));
+	fake_dev_count = 2;
+	snprintf(fake_devs[0].address, sizeof(fake_devs[0].address), "11:22:33:44:55:66");
+	snprintf(fake_devs[0].name, sizeof(fake_devs[0].name), "Older Tablet");
+	fake_devs[0].paired = true;
+	fake_devs[0].trusted = true;
+	fake_devs[0].audio_source = true;
+
+	snprintf(fake_devs[1].address, sizeof(fake_devs[1].address), "AA:BB:CC:DD:EE:FF");
+	snprintf(fake_devs[1].name, sizeof(fake_devs[1].name), "Galaxy Z Fold");
+	fake_devs[1].paired = true;
+	fake_devs[1].trusted = false;
+	fake_devs[1].audio_source = true;
+
+	trust_calls = 0;
+	source_pcm = false;
+	g_enabled = true;
+	refresh_devices();
+	assert(trust_calls == 1);
+	assert(strcmp(last_trusted_mac, "AA:BB:CC:DD:EE:FF") == 0);
+	assert(fake_devs[1].trusted);
+
+	/* Tapping an audio-source phone from the TX page trusts and remembers it,
+	 * defers A2DP Connect until RX mode's AudioSink profile is up, and then
+	 * invite_sources() connects that preferred phone first. */
+	g_receiver_profile = false;
+	connect_calls = 0;
+	g_preferred_source[0] = '\0';
+	bool deferred = false;
+	assert(pair_and_connect("AA:BB:CC:DD:EE:FF", &deferred));
+	assert(deferred);
+	assert(connect_calls == 0);
+	assert(strcmp(g_preferred_source, "AA:BB:CC:DD:EE:FF") == 0);
+
+	g_receiver_profile = true;
+	invite_sources();
+	assert(connect_calls == 1);
+	assert(strcmp(connected_order[0], "AA:BB:CC:DD:EE:FF") == 0);
+	assert(g_preferred_source[0] == '\0');
+
+	source_pcm = false;
+	g_enabled = false;
+	g_receiver_profile = false;
+}
+
 int main(void) {
 	test_a2dp_directions();
 	test_startup_waits();
@@ -323,6 +558,7 @@ int main(void) {
 	test_alsa_template();
 	test_rfkill_lookup();
 	test_boot_cleanup_queue();
-	printf("PASS bluetooth (A2DP directions, startup, ALSA template, radio switch and boot cleanup)\n");
+	test_rx_discoverability_and_phone_pairing();
+	printf("PASS bluetooth (A2DP directions, RX profile/pairing, startup, ALSA template, radio switch and boot cleanup)\n");
 	return 0;
 }

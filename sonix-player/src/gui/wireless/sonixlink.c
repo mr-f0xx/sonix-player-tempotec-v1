@@ -738,6 +738,7 @@ static void toggle_changed_cb(lv_event_t *e) {
 	}
 
 	sonixlink_set_enabled(on);
+	bluetooth_set_discoverable(on);
 	if (on) {
 		// The app asks for the state the moment it connects, so the service
 		// must not be holding a stale picture when it does.
@@ -756,6 +757,7 @@ static void switched_elsewhere_cb(lv_event_t *e) {
 	} else {
 		lv_obj_remove_state(toggle, LV_STATE_CHECKED);
 	}
+	bluetooth_set_discoverable(sonixlink_get_enabled());
 	refresh();
 }
 
@@ -767,6 +769,7 @@ static void screen_loaded_cb(lv_event_t *e) {
 	} else {
 		lv_obj_remove_state(toggle, LV_STATE_CHECKED);
 	}
+	bluetooth_set_discoverable(sonixlink_get_enabled());
 
 	refresh();
 	lv_timer_resume(page_timer);
@@ -777,6 +780,7 @@ static void screen_loaded_cb(lv_event_t *e) {
 // switch owns that state, the page is only where it lives.
 static void screen_unloaded_cb(lv_event_t *e) {
 	(void)e;
+	bluetooth_set_discoverable(false);
 	lv_timer_pause(page_timer);
 }
 

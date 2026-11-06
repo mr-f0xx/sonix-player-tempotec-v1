@@ -19,6 +19,7 @@
 #include "src/gui/nowplaying/coverflow.h"
 #include "src/gui/shell/gestures.h"
 #include "src/gui/nowplaying/player.h"
+#include "src/system/streaming/podcast.h"
 #include "src/gui/settings/appearance.h"
 #include "src/gui/settings/bootpicpage.h"
 #include "src/gui/settings/musicsettings.h"
@@ -238,6 +239,21 @@ bool coverflow_drag_active(void) { return false; }
 bool coverflow_is_open(void) { return false; }
 
 void player_refresh_now_playing(void) {}
+// The podcast behind the playing file: nothing on this menu is a podcast
+// episode, so the mini-player's line falls back to the artist tag as it does
+// for a track, and the two lookups behind that answer nothing.
+bool player_current_podcast_feed(long long *id_out, podcast_feed_t *feed_out) {
+	(void)id_out; (void)feed_out;
+	return false;
+}
+bool podcastcache_is_episode(const char *path) { (void)path; return false; }
+bool podcastcache_tag(const char *path, const char *key, char *out, size_t size) {
+	(void)path; (void)key;
+	if (out && size) {
+		out[0] = '\0';
+	}
+	return false;
+}
 void player_sheet_open(bool animated) { (void)animated; }
 void medialist_open(const char *title, library_list_t kind, library_filter_t filter, const char *value) {
 	(void)title; (void)kind; (void)filter; (void)value;
@@ -302,6 +318,23 @@ static lv_obj_t *find_label(lv_obj_t *obj, const char *text) {
 		}
 	}
 	return NULL;
+}
+
+/* The last label in the tree that says this, for a word a page uses twice:
+ * "Custom" is both a theme on the Appearance page and, further down it, a boot
+ * screen, and find_label() answers with the first. */
+static lv_obj_t *find_label_last(lv_obj_t *obj, const char *text) {
+	lv_obj_t *found = NULL;
+	if (lv_obj_check_type(obj, &lv_label_class) && strcmp(lv_label_get_text(obj), text) == 0) {
+		found = obj;
+	}
+	for (uint32_t i = 0; i < lv_obj_get_child_count(obj); i++) {
+		lv_obj_t *deeper = find_label_last(lv_obj_get_child(obj, i), text);
+		if (deeper) {
+			found = deeper;
+		}
+	}
+	return found;
 }
 
 /* Optional real-renderer diagnostics, kept out of Git. No display driver or
@@ -573,12 +606,57 @@ int main(int argc, char **argv) {
 	assert(!corners_enabled());
 	lv_obj_t *corners_label = find_label(appearance_screen, tr("appearance_rounded_corners"));
 	assert(corners_label);
-	lv_obj_t *corners_toggle = child_of_type(lv_obj_get_parent(corners_label), &lv_switch_class);
+	lv_obj_t *corners_card = lv_obj_get_parent(corners_label);
+	lv_obj_t *corners_toggle = child_of_type(corners_card, &lv_switch_class);
+	lv_obj_t *corners_slider = child_of_type(corners_card, &lv_slider_class);
 	assert(!lv_obj_has_state(corners_toggle, LV_STATE_CHECKED));
+	/* Off, there is nothing to size: the card is an ordinary toggle row. */
+	assert(lv_obj_is_hidden(corners_slider));
 	lv_obj_set_state(corners_toggle, LV_STATE_CHECKED, true);
 	lv_obj_send_event(corners_toggle, LV_EVENT_VALUE_CHANGED, NULL);
 	assert(corners_enabled());
 	assert(config_get_int("ui", "rounded_corners", 0) == 1);
+
+	/* On, the slider opens, standing at the arc that was always there. */
+	assert(!lv_obj_is_hidden(corners_slider));
+	assert(corners_radius() == bp_screen_corner_radius());
+	assert(lv_slider_get_value(corners_slider) == (corners_radius() - CORNERS_RADIUS_MIN) / CORNERS_RADIUS_STEP);
+	char corners_value[16];
+	snprintf(corners_value, sizeof(corners_value), "%d px", bp_screen_corner_radius());
+	assert(find_label(corners_card, corners_value));
+
+	/* Every stop: the arc follows the slider, the number beside it says so,
+	 * and the choice is written down -- without ever switching them off. */
+	for (int radius = CORNERS_RADIUS_MIN; radius <= CORNERS_RADIUS_MAX; radius += CORNERS_RADIUS_STEP) {
+		lv_slider_set_value(corners_slider, (radius - CORNERS_RADIUS_MIN) / CORNERS_RADIUS_STEP, LV_ANIM_OFF);
+		lv_obj_send_event(corners_slider, LV_EVENT_VALUE_CHANGED, NULL);
+		assert(corners_radius() == radius);
+		assert(config_get_int("ui", "corner_radius", -1) == radius);
+		snprintf(corners_value, sizeof(corners_value), "%d px", radius);
+		assert(find_label(corners_card, corners_value));
+		assert(corners_enabled());
+	}
+
+	/* Off puts the slider away but keeps the arc: back on, they come back as
+	 * they were left rather than as 16 again. */
+	lv_slider_set_value(corners_slider, 3, LV_ANIM_OFF);
+	lv_obj_send_event(corners_slider, LV_EVENT_VALUE_CHANGED, NULL);
+	assert(corners_radius() == CORNERS_RADIUS_MIN + 3 * CORNERS_RADIUS_STEP);
+	lv_obj_set_state(corners_toggle, LV_STATE_CHECKED, false);
+	lv_obj_send_event(corners_toggle, LV_EVENT_VALUE_CHANGED, NULL);
+	assert(!corners_enabled());
+	assert(config_get_int("ui", "rounded_corners", 0) == 0);
+	assert(lv_obj_is_hidden(corners_slider));
+	assert(corners_radius() == CORNERS_RADIUS_MIN + 3 * CORNERS_RADIUS_STEP);
+	lv_obj_set_state(corners_toggle, LV_STATE_CHECKED, true);
+	lv_obj_send_event(corners_toggle, LV_EVENT_VALUE_CHANGED, NULL);
+	assert(corners_enabled() && !lv_obj_is_hidden(corners_slider));
+	assert(corners_radius() == CORNERS_RADIUS_MIN + 3 * CORNERS_RADIUS_STEP);
+
+	/* Leave them as the rest of the test found them: 16 px, off. */
+	lv_slider_set_value(corners_slider, (bp_screen_corner_radius() - CORNERS_RADIUS_MIN) / CORNERS_RADIUS_STEP, LV_ANIM_OFF);
+	lv_obj_send_event(corners_slider, LV_EVENT_VALUE_CHANGED, NULL);
+	assert(corners_radius() == bp_screen_corner_radius());
 	lv_obj_set_state(corners_toggle, LV_STATE_CHECKED, false);
 	lv_obj_send_event(corners_toggle, LV_EVENT_VALUE_CHANGED, NULL);
 	assert(!corners_enabled());
@@ -588,7 +666,7 @@ int main(int argc, char **argv) {
 
 	/* Custom with no picture behind it is a request to go and pick one, not a
 	 * choice: the page opens instead of the marker being written. */
-	lv_obj_t *custom_pill = find_label(appearance_screen, tr("appearance_boot_custom"));
+	lv_obj_t *custom_pill = find_label_last(appearance_screen, tr("appearance_boot_custom"));
 	assert(custom_pill);
 	lv_obj_send_event(lv_obj_get_parent(custom_pill), LV_EVENT_CLICKED, NULL);
 	assert(lv_screen_active() == bootpicpage_screen);

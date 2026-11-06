@@ -581,7 +581,7 @@ static void art_request_visible(void) {
 
 		slot_owner[free_slot] = row;
 		art_wake();
-		qobuzart_request(&qobuz_art_owner, free_slot, row_cover_url[row], ROW_THUMB);
+		qobuzart_request(&qobuz_art_owner, "qobuz-cache", free_slot, row_cover_url[row], ROW_THUMB);
 	}
 }
 

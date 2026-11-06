@@ -40,9 +40,13 @@ bool player_queue_position(int *position, int *count);
 // track, all of it drawn in the sleeve's own colour. Studio centres the sleeve
 // with the title across the top and the format under it, over a blurred copy of
 // the same artwork filling the screen. Immersive asks for the artwork at the
-// shape of the screen and crops it to fill it edge to edge, with the controls
-// drawn on a fade over its lower part. Poster scales the sleeve to the width of
+// space above the deck and centre-crops it to fill that area, with controls
+// drawn on a blurred reflection below. Poster scales the sleeve to the width of
 // the screen and puts the deck below it on its own ground.
+//
+// Vinyl frames the sleeve with a thin rounded border and lets a static black
+// record peek out below it. The compact deck keeps the names, seek bar and
+// transport, but omits the clock row to reserve room for the record.
 //
 // Album Art Max -- AAM -- trades the media controls for the artwork, which is
 // the whole of it: the sleeve at the width of the screen, the format and the
@@ -76,9 +80,10 @@ typedef enum {
 	PLAYER_LAYOUT_STANDARD = 0,
 	PLAYER_LAYOUT_ALTERNATIVE = 1,
 	PLAYER_LAYOUT_STUDIO = 2,
-	PLAYER_LAYOUT_IMMERSIVE = 3, // the sleeve from edge to edge, the controls on a fade over it
+	PLAYER_LAYOUT_IMMERSIVE = 3, // the sleeve above a reflected controls deck
 	PLAYER_LAYOUT_POSTER = 4,	 // the sleeve at the width of the screen, whole from side to side, the deck below it
 	PLAYER_LAYOUT_ALBUM_ART_MAX = 5, // the sleeve over the screen, the media controls traded for it
+	PLAYER_LAYOUT_VINYL = 6, // rounded sleeve over a static record, compact deck below
 } player_layout_t;
 
 // In custom layouts, replace the format line with the tagged recording year
@@ -97,8 +102,26 @@ void player_layout_set(player_layout_t layout);
 // switch lives beside the layout pills in Music > Display options. Changing
 // it only repaints: the colour is the one already worked out from the
 // artwork on screen, so nothing is decoded and playback is untouched.
+// Shape of the inset artwork in Standard, Waveform and Alternative.
+typedef enum {
+	PLAYER_ART_ROUNDED = 0,
+	PLAYER_ART_SQUARE,
+	PLAYER_ART_VINYL,
+} player_art_shape_t;
+player_art_shape_t player_art_shape_get(void);
+void player_art_shape_set(player_art_shape_t shape);
+
 bool player_cover_tint_get(void);
 void player_cover_tint_set(bool enabled);
+
+// Whether the play/pause button sits on a filled disc, as it did in the
+// original player ("legacy"), instead of being a bare glyph like previous and
+// next. Off by default; the switch is in Music > Display options, under the
+// cover tint it shares a colour with. In every arrangement that has the
+// button -- Album Art Max trades it away. Changing it only repaints that one
+// button, in place. See playbutton.h for the disc itself.
+bool player_legacy_play_get(void);
+void player_legacy_play_set(bool enabled);
 
 // Where AAM's scrub bar stands: along the foot of the artwork (false, the
 // default) or up its left edge (true, the "Leftie" of the concept). It is
@@ -121,6 +144,11 @@ void player_aam_leftie_set(bool enabled);
 // for the log and is not shown to anyone. Callers decide whether the output
 // that went away was the one in use; this only acts on the decision.
 void player_output_unplugged(const char *what);
+
+// Pauses whatever is playing before a new stream is loaded (stopping the radio
+// outright). Podcasts, Tidal and Qobuz call it when their rows
+// start loading, so the transport shows paused rather than playing.
+void player_pause_for_loading(void);
 
 // ---------------------------------------------------------------------------
 // The player as a sheet

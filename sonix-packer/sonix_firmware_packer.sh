@@ -287,17 +287,19 @@ build_image() {
 	fi
 
 	# ==========================================================================
-	# 1b. The stock player's own Qobuz credentials (opt in)
+	# 1b. The stock player's own Qobuz and Tidal credentials (opt in)
 	# ==========================================================================
 	#
 	# Qobuz issues no application credentials for personal or open-source
-	# clients, and the pair this device uses is HiBy's: plain C strings inside
-	# usr/bin/hiby_player. They are not in git and a published image must not
-	# carry them, so this only runs on SONIX_EMBED_STOCK_KEYS=1. The extractor
-	# reads the binary while it is still unpacked -- step 2 removes it -- and
-	# the result lands where the player looks at startup, which makes a private
-	# image behave like the stock firmware: sign in with a Qobuz account and
-	# nothing to copy to the card. Values are masked in the output.
+	# clients, and Tidal's self-serve developer.tidal.com portal only issues
+	# OpenAPI v2 keys that lack the v1 Limited Input Device (device_code) grant.
+	# The pairs this device uses are HiBy's inside usr/bin/hiby_player. They are
+	# not in git and a published image must not carry them, so this only runs on
+	# SONIX_EMBED_STOCK_KEYS=1. The extractor reads the binary while it is still
+	# unpacked -- step 2 removes it -- and the result lands where the player
+	# looks at startup, which makes a private image behave like the stock
+	# firmware: sign in with a Qobuz or Tidal account and nothing to copy to the
+	# card. Values are masked in the output.
 	#
 	# A sealing key (streaming-keys.key, from a player build) gives a sealed
 	# streaming-keys.bin; without one a plain streaming-keys.ini is shipped,
@@ -305,7 +307,7 @@ build_image() {
 	# a third party's API credentials and must not be redistributed.
 	EMBEDDED_PLAIN_KEYS=0
 	if [ "${SONIX_EMBED_STOCK_KEYS:-}" = "1" ]; then
-		step "[$MODEL_NAME] extracting the stock Qobuz credentials"
+		step "[$MODEL_NAME] extracting the stock Qobuz and Tidal credentials"
 		command -v python3 >/dev/null 2>&1 || die "SONIX_EMBED_STOCK_KEYS=1 needs python3."
 		EXTRACT_TOOL="$SCRIPT_DIR/../sonix-player/tools/extract_streamkeys.py"
 		[ -f "$EXTRACT_TOOL" ] || die "cannot find $EXTRACT_TOOL"
@@ -329,16 +331,16 @@ build_image() {
 				--bin-out "$COMPONENTS_DIR/streaming-keys.bin"; then
 				say "    streaming-keys.bin sealed from the stock binary"
 			else
-				warn "the stock credentials could not be extracted: Qobuz stays off"
+				warn "the stock credentials could not be extracted: Qobuz and Tidal stay off"
 				warn "run the extractor with --list-candidates, or use a card-side streaming-keys.ini"
 			fi
 		elif python3 "$EXTRACT_TOOL" "$SQUASH_DIR/$STOCK_PLAYER" -o "$EXTRACTED_INI"; then
 			cp -f "$EXTRACTED_INI" "$COMPONENTS_DIR/streaming-keys.ini"
 			EMBEDDED_PLAIN_KEYS=1
-			warn "no streaming-keys.key found: Qobuz credentials ship in the clear as streaming-keys.ini"
+			warn "no streaming-keys.key found: Qobuz and Tidal credentials ship in the clear as streaming-keys.ini"
 			warn "this image now carries HiBy's API credentials -- do not redistribute it"
 		else
-			warn "the stock credentials could not be extracted: Qobuz stays off"
+			warn "the stock credentials could not be extracted: Qobuz and Tidal stay off"
 			warn "run the extractor with --list-candidates, or use a card-side streaming-keys.ini"
 		fi
 		say ""

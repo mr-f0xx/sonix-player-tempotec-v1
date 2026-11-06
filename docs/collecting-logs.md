@@ -106,3 +106,25 @@ adb shell "SONIX_FULL_LOG=1     sh /tmp/sonix-bugreport.sh"    # whole logs, not
 - Library logs name the files on your card.
 - If the file is big, gzip it. Bigger is better than truncated — a tail cut in
   the wrong place removes the lines that matter.
+
+### Bluetooth receiver drop-outs with Wi-Fi associated
+
+On the V1, Bluetooth and 2.4 GHz Wi-Fi share the radio. A successful AFH
+channel-classification command does not guarantee that incoming A2DP packets
+will arrive in time. If the Bluetooth receiver is open and Wi-Fi is only
+idly associated, Sonix temporarily **disconnects the Wi-Fi association**
+(`wpa_cli disconnect`) and reconnects it when receiver mode closes. It does
+not turn off the shared chip, change the saved network or change the Wi-Fi
+switch. A network service the player tracks (streaming, transfers, servers, downloads)
+keeps Wi-Fi connected instead; deliberately using the Wi-Fi controls during
+receiver mode also overrides this protection until the mode closes. Other
+network clients, such as an SSH connection, are not tracked and will be
+interrupted while the association is suspended.
+
+To keep Wi-Fi associated even in Bluetooth receiver mode, put
+`receiver_wifi_priority = 0` in the `[bluetooth]` section of
+`/usr/data/device_config.ini` and restart the player. If audio still drops out with
+this protection, compare the `bluealsa: Missing RTP packets` and
+`audio: the external source ran dry` lines in a Bluetooth/player log from
+before and after, with the same source and placement. The policy is not a
+radio-firmware repair and has not been validated on a physical V1 here.

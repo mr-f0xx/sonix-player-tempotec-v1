@@ -18,4 +18,11 @@ void podcastsaved_init(gui_config_t *cfg);
 // The list of podcasts. Read from the card every time it is shown.
 extern lv_obj_t *podcastsaved_screen;
 
+// An episode was marked heard, or unmarked, by something other than this list --
+// the player, when one ran to its end. The rows are redrawn with the mark when
+// this is the list on screen behind the player's sheet; another list reads the
+// mark when it is next opened. The same shape as
+// podcastpage_episode_heard(), because the two lists show the same mark.
+void podcastsaved_episode_heard(long long episode_id);
+
 #endif /* PODCASTSAVED_H */

@@ -430,6 +430,20 @@ $(BUILD)/test_mostplayed: $(MOSTPLAYED_SRC) $(BUILD)/sqlite3_impl.o \
 	@mkdir -p $(BUILD)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ $(MOSTPLAYED_SRC) $(BUILD)/sqlite3_impl.o $(LDFLAGS) $(LDLIBS)
 
+# Heard podcast episodes against the real podcast.db: the marks themselves, the
+# sorted set the binary search reads, what survives a restart, and a card whose
+# database is deleted under the player. The card is a temporary directory; the
+# only stub is utils.c's file identity, which is reproduced with stat().
+.PHONY: podcastplayed
+podcastplayed: $(BUILD)/test_podcastplayed
+	$(BUILD)/test_podcastplayed
+
+$(BUILD)/test_podcastplayed: test_podcastplayed.c $(ROOT)/src/system/streaming/podcastplayed.c \
+                             $(ROOT)/src/system/streaming/podcastplayed.h $(BUILD)/sqlite3_impl.o
+	@mkdir -p $(BUILD)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ test_podcastplayed.c \
+		$(ROOT)/src/system/streaming/podcastplayed.c $(BUILD)/sqlite3_impl.o $(LDFLAGS) $(LDLIBS)
+
 # The vendored SQLite amalgamation keeps its own warnings to itself: third-
 # party code, built separately (and quietly) so the suite around it keeps
 # -Werror.
@@ -597,7 +611,67 @@ PEQPAGE_SRC = $(ROOT)/tests/ui/test_peq_profiles.c $(ROOT)/src/gui/audio/peqpage
 PEQPAGE_OBJ = $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(PEQPAGE_SRC)) \
               $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(UI_LVGL_SRC))
 
-.PHONY: ui peq-ui
+# The rounded screen corners and their radius: the real masks drawn into a
+# framebuffer the way the panel is driven (only what was invalidated is redrawn),
+# so a corner that was not repainted when the arc moved is still there to find.
+CORNERS_SRC = $(ROOT)/tests/ui/test_corners.c $(ROOT)/src/gui/shell/corners.c \
+              $(ROOT)/src/gui/board_profile.c $(ROOT)/src/system/core/config.c
+CORNERS_OBJ = $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(CORNERS_SRC)) \
+              $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(UI_LVGL_SRC))
+
+# The V1 player deck's real flex layout, including switching to and from Waveform.
+PLAYERDECK_SRC = $(ROOT)/tests/ui/test_playerdeck.c
+PLAYERDECK_OBJ = $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(PLAYERDECK_SRC)) \
+                 $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(UI_LVGL_SRC))
+
+.PHONY: playerdeck
+playerdeck: $(BUILD)/test_playerdeck
+	$(BUILD)/test_playerdeck
+
+$(BUILD)/test_playerdeck: $(PLAYERDECK_OBJ)
+	$(CC) -o $@ $^ $(LDFLAGS) $(LDLIBS)
+
+# Vinyl sleeve/record geometry and real LVGL layering, without the audio shell.
+VINYLLAYOUT_SRC = $(ROOT)/tests/ui/test_vinylayout.c $(ROOT)/src/gui/nowplaying/vinylayout.c
+VINYLLAYOUT_OBJ = $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(VINYLLAYOUT_SRC)) \
+                  $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(UI_LVGL_SRC))
+
+.PHONY: vinylayout
+vinylayout: $(BUILD)/test_vinylayout
+	$(BUILD)/test_vinylayout
+
+$(BUILD)/test_vinylayout: $(VINYLLAYOUT_OBJ)
+	$(CC) -o $@ $^ $(LDFLAGS) $(LDLIBS)
+
+# Waveform artwork pills and favourite, including long scrolling labels.
+WAVEOVERLAY_SRC = $(ROOT)/tests/ui/test_waveform_overlay.c $(ROOT)/src/gui/shell/scrolltext.c
+WAVEOVERLAY_OBJ = $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(WAVEOVERLAY_SRC)) \
+                  $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(UI_LVGL_SRC))
+
+.PHONY: waveform-overlay
+waveform-overlay: $(BUILD)/test_waveform_overlay
+	$(BUILD)/test_waveform_overlay
+
+$(BUILD)/test_waveform_overlay: $(WAVEOVERLAY_OBJ)
+	$(CC) -o $@ $^ $(LDFLAGS) $(LDLIBS)
+
+# The now-playing page's play/pause button in its plain and legacy looks: the
+# real disc drawn on a stand-in for the sleeve under every palette and accent.
+# The player around it is not built; see src/gui/nowplaying/playbutton.h.
+PLAYBUTTON_SRC = $(ROOT)/tests/ui/test_playbutton.c $(ROOT)/src/gui/nowplaying/playbutton.c \
+                 $(ROOT)/src/gui/shell/theme.c $(ROOT)/src/gui/shell/icons.c \
+                 $(ROOT)/src/gui/board_profile.c $(ROOT)/src/system/core/config.c \
+                 $(ROOT)/src/system/core/lang.c
+PLAYBUTTON_OBJ = $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(PLAYBUTTON_SRC)) \
+                 $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(UI_LVGL_SRC))
+
+.PHONY: ui peq-ui corners playbutton
+corners: $(BUILD)/test_corners
+	$(BUILD)/test_corners
+
+playbutton: $(BUILD)/test_playbutton
+	$(BUILD)/test_playbutton ../../sonix-packer/assets/V1/usr/resource/sonix/language
+
 peq-ui: $(BUILD)/test_peq_profiles
 	$(BUILD)/test_peq_profiles ../../sonix-packer/assets/V1/usr/resource/sonix/language
 
@@ -605,7 +679,7 @@ $(BUILD)/test_peq_profiles: $(PEQPAGE_OBJ)
 	$(CC) -o $@ $^ $(LDFLAGS) $(LDLIBS)
 
 .PHONY: ui
-ui: $(BUILD)/test_main_menu $(BUILD)/test_screensaver $(BUILD)/test_tools_pages $(BUILD)/test_wifi_pages $(BUILD)/test_chargescreen $(BUILD)/test_lyricsearch $(BUILD)/test_games $(BUILD)/test_peq_profiles $(BUILD)/test_quickpanel_layout
+ui: $(BUILD)/test_main_menu $(BUILD)/test_screensaver $(BUILD)/test_tools_pages $(BUILD)/test_wifi_pages $(BUILD)/test_chargescreen $(BUILD)/test_lyricsearch $(BUILD)/test_games $(BUILD)/test_peq_profiles $(BUILD)/test_quickpanel_layout $(BUILD)/test_corners $(BUILD)/test_playbutton $(BUILD)/test_playerdeck $(BUILD)/test_vinylayout $(BUILD)/test_waveform_overlay
 	$(BUILD)/test_main_menu ../../sonix-packer/assets/V1/usr/resource/sonix/language
 	$(BUILD)/test_main_menu ../../sonix-packer/assets/V1/usr/resource/sonix/language saved
 	$(BUILD)/test_screensaver ../../sonix-packer/assets/V1/usr/resource/sonix/language
@@ -617,6 +691,11 @@ ui: $(BUILD)/test_main_menu $(BUILD)/test_screensaver $(BUILD)/test_tools_pages 
 	$(BUILD)/test_games ../../sonix-packer/assets/V1/usr/resource/sonix/language
 	$(BUILD)/test_peq_profiles ../../sonix-packer/assets/V1/usr/resource/sonix/language
 	$(BUILD)/test_quickpanel_layout
+	$(BUILD)/test_corners
+	$(BUILD)/test_playbutton ../../sonix-packer/assets/V1/usr/resource/sonix/language
+	$(BUILD)/test_playerdeck
+	$(BUILD)/test_vinylayout
+	$(BUILD)/test_waveform_overlay
 
 $(BUILD)/test_main_menu: $(UI_OBJ)
 	$(CC) -o $@ $^ $(LDFLAGS) $(LDLIBS)
@@ -639,6 +718,12 @@ $(BUILD)/test_lyricsearch: $(LYRICSEARCH_OBJ)
 $(BUILD)/test_games: $(GAMES_OBJ)
 	$(CC) -o $@ $^ $(LDFLAGS) $(LDLIBS)
 
+$(BUILD)/test_corners: $(CORNERS_OBJ)
+	$(CC) -o $@ $^ $(LDFLAGS) $(LDLIBS)
+
+$(BUILD)/test_playbutton: $(PLAYBUTTON_OBJ)
+	$(CC) -o $@ $^ $(LDFLAGS) $(LDLIBS)
+
 $(BUILD)/ui/%.o: $(ROOT)/%.c ui/lv_conf.h $(ROOT)/lv_conf.h
 	@mkdir -p $(dir $@)
 	$(CC) $(UI_CPPFLAGS) $(UI_CFLAGS) -c $< -o $@
@@ -648,7 +733,7 @@ $(BUILD)/ui/lvgl/%.o: $(ROOT)/lvgl/%.c ui/lv_conf.h $(ROOT)/lv_conf.h
 	@mkdir -p $(dir $@)
 	$(CC) $(UI_CPPFLAGS) $(filter-out -Werror,$(UI_CFLAGS)) -c $< -o $@
 
--include $(sort $(PEQPAGE_OBJ:.o=.d) $(UI_OBJ:.o=.d) $(SAVER_OBJ:.o=.d) $(WIFIPAGE_OBJ:.o=.d) $(LYRICSEARCH_OBJ:.o=.d) $(GAMES_OBJ:.o=.d))
+-include $(sort $(PEQPAGE_OBJ:.o=.d) $(UI_OBJ:.o=.d) $(SAVER_OBJ:.o=.d) $(WIFIPAGE_OBJ:.o=.d) $(LYRICSEARCH_OBJ:.o=.d) $(GAMES_OBJ:.o=.d) $(CORNERS_OBJ:.o=.d) $(PLAYBUTTON_OBJ:.o=.d) $(PLAYERDECK_OBJ:.o=.d) $(VINYLLAYOUT_OBJ:.o=.d) $(WAVEOVERLAY_OBJ:.o=.d))
 
 # Smart Mix track-count limits and traversal, with a memory-only graph fixture.
 GENIUS_SRC = test_genius.c $(ROOT)/src/system/library/genius.c
@@ -689,3 +774,12 @@ artsearch: $(BUILD)/test_artsearch
 $(BUILD)/test_artsearch: test_artsearch.c $(ROOT)/src/system/tagmanager/artsearch.c $(ROOT)/src/system/core/json.c $(ROOT)/src/system/library/jpeginfo.c
 	@mkdir -p $(BUILD)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ $^ $(LDFLAGS) $(LDLIBS)
+
+.PHONY: tidal
+tidal: $(BUILD)/test_tidal_login
+	$(BUILD)/test_tidal_login
+
+$(BUILD)/test_tidal_login: test_tidal_login.c $(ROOT)/src/system/streaming/tidal.c $(ROOT)/src/system/core/base64.c $(ROOT)/src/system/core/json.c
+	@mkdir -p $(BUILD)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ $^ $(LDFLAGS) $(LDLIBS)
+

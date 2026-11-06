@@ -39,6 +39,9 @@ static lv_obj_t *main_menu_browse_toggle;
 static lv_obj_t *stock_gestures_toggle;
 static lv_obj_t *battery_percent_toggle;
 static lv_obj_t *rounded_corners_toggle;
+static lv_obj_t *rounded_corners_card; // the toggle and, while it is on, the slider under it
+static lv_obj_t *corner_radius_value;
+static lv_obj_t *corner_radius_slider;
 static lv_obj_t *text_size_pill[FONTS_TEXT_COUNT]; // normal / large / small
 static lv_obj_t *theme_palette_card;
 static lv_obj_t *theme_palette_title;
@@ -56,9 +59,29 @@ static void battery_percent_cb(lv_event_t *e) {
 	config_save();
 }
 
+// The slider stops on every CORNERS_RADIUS_STEP pixels from CORNERS_RADIUS_MIN to
+// CORNERS_RADIUS_MAX, and its position is an index into those, as on the other
+// stepped sliders.
+#define CORNER_STEPS ((CORNERS_RADIUS_MAX - CORNERS_RADIUS_MIN) / CORNERS_RADIUS_STEP + 1)
+
+// The stop nearest a radius. A value written into the config by hand can fall
+// between two stops; the number beside the slider still says what is drawn.
+static int corner_step_of(int radius) { return (radius - CORNERS_RADIUS_MIN + CORNERS_RADIUS_STEP / 2) / CORNERS_RADIUS_STEP; }
+
+static void corner_radius_show(void) { lv_label_set_text_fmt(corner_radius_value, "%d px", corners_radius()); }
+
 static void rounded_corners_cb(lv_event_t *e) {
 	(void)e;
-	corners_set_enabled(lv_obj_has_state(rounded_corners_toggle, LV_STATE_CHECKED));
+	bool on = lv_obj_has_state(rounded_corners_toggle, LV_STATE_CHECKED);
+	corners_set_enabled(on);
+	// How far they round only means something while they are on.
+	settingsrow_toggle_slider_expanded(rounded_corners_card, on);
+}
+
+static void corner_radius_cb(lv_event_t *e) {
+	(void)e;
+	corners_set_radius(CORNERS_RADIUS_MIN + (int)lv_slider_get_value(corner_radius_slider) * CORNERS_RADIUS_STEP);
+	corner_radius_show();
 }
 
 // The accent's hue spread over the backgrounds and cards. theme_set_dynamic_tint
@@ -884,12 +907,15 @@ void appearance_init(gui_config_t *cfg) {
 		lv_obj_add_state(battery_percent_toggle, LV_STATE_CHECKED);
 	}
 
-	// Rounds off the four corners of the screen, over every page and overlay.
-	// The arc is 16 px on the V1, sized to the 2" panel's glass.
-	settingsrow_toggle(container, "appearance_rounded_corners", &rounded_corners_toggle, rounded_corners_cb);
-	if (corners_enabled()) {
-		lv_obj_add_state(rounded_corners_toggle, LV_STATE_CHECKED);
-	}
+	// Rounds off the four corners of the screen, over every page and overlay,
+	// and how far: the slider is under the switch while they are on. It starts
+	// at 16 px, sized to the 2" panel's glass, and goes down to a hint of a
+	// corner for a shell that reads squarer than that.
+	rounded_corners_card = settingsrow_toggle_slider(container, "appearance_rounded_corners", CORNER_STEPS, &rounded_corners_toggle, &corner_radius_value, &corner_radius_slider, rounded_corners_cb, corner_radius_cb);
+	lv_slider_set_value(corner_radius_slider, corner_step_of(corners_radius()), LV_ANIM_OFF);
+	lv_obj_set_state(rounded_corners_toggle, LV_STATE_CHECKED, corners_enabled());
+	corner_radius_show();
+	settingsrow_toggle_slider_expanded(rounded_corners_card, corners_enabled());
 
 	font_pills_rebuild();
 

@@ -12,6 +12,7 @@
 #include "src/gui/fonts/fonts.h"
 #include "src/gui/shell/icons.h"
 #include "src/gui/nowplaying/player.h"
+#include "src/system/streaming/podcast.h"
 #include "src/gui/shell/scrolltext.h"
 #include "src/gui/shell/theme.h"
 #include "src/system/device/clock.h"
@@ -812,7 +813,16 @@ static void refresh_content(void) {
 		const char *slash = strrchr(state.current_file, '/');
 		scrolltext_set(title_label, state.metadata.title[0] ? state.metadata.title
 															: (slash ? slash + 1 : state.current_file));
-		const char *artist = metadata_shown_artist(&state.metadata);
+		// A podcast episode has the show's own name in its artist field, because
+		// that is the line the player and the queue want under the episode. Here
+		// the line names the podcast's author instead, which only the sidecar
+		// knows -- and the player already reads it for its own star. Anything
+		// else, or an episode from a hand-copied file with no sidecar, keeps the
+		// artist the tags give.
+		podcast_feed_t feed;
+		const char *artist = player_current_podcast_feed(NULL, &feed) && feed.author[0]
+								? feed.author
+								: metadata_shown_artist(&state.metadata);
 		scrolltext_set(artist_label, artist);
 	} else {
 		scrolltext_set(title_label, "");

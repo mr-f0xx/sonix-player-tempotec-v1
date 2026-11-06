@@ -1722,11 +1722,26 @@ static void coverflow_cb(lv_event_t *e) {
 // The page owns the setting; this stores it and asks the page to decide again.
 // ---------------------------------------------------------------------------
 
+static lv_obj_t *art_shape_pills[3];
+
+static void art_shape_refresh(void) {
+	for (int i = 0; i < 3; i++) {
+		if (art_shape_pills[i]) settingsrow_pill_active(art_shape_pills[i], player_art_shape_get() == (player_art_shape_t)i);
+	}
+}
+
+static void art_shape_pick_cb(lv_event_t *e) {
+	if (player_sheet_drag_active() || switcher_back_drag_active()) return;
+	player_art_shape_set((player_art_shape_t)(intptr_t)lv_event_get_user_data(e));
+	art_shape_refresh();
+}
+
 static lv_obj_t *layout_standard_pill;
 static lv_obj_t *layout_alternative_pill;
 static lv_obj_t *layout_studio_pill;
 static lv_obj_t *layout_immersive_pill;
 static lv_obj_t *layout_poster_pill;
+static lv_obj_t *layout_vinyl_pill;
 static lv_obj_t *layout_aam_pill; // only built on the V1, the panel it is measured for
 // Album Art Max's own row: the band along the foot of the sleeve or up its left
 // edge. Shown only while that arrangement is the chosen one, and only where it
@@ -1756,6 +1771,7 @@ static void layout_refresh(void) {
 	settingsrow_pill_active(layout_studio_pill, chosen == PLAYER_LAYOUT_STUDIO);
 	settingsrow_pill_active(layout_immersive_pill, chosen == PLAYER_LAYOUT_IMMERSIVE);
 	settingsrow_pill_active(layout_poster_pill, chosen == PLAYER_LAYOUT_POSTER);
+	if (layout_vinyl_pill) settingsrow_pill_active(layout_vinyl_pill, chosen == PLAYER_LAYOUT_VINYL);
 	if (layout_aam_pill) {
 		settingsrow_pill_active(layout_aam_pill, chosen == PLAYER_LAYOUT_ALBUM_ART_MAX);
 	}
@@ -1778,6 +1794,12 @@ static lv_obj_t *cover_tint_switch;
 static void cover_tint_cb(lv_event_t *e) {
 	player_cover_tint_set(lv_obj_has_state(lv_event_get_target(e), LV_STATE_CHECKED));
 }
+
+// The play/pause button on a filled disc, as the original player drew it
+// ("legacy"). Stored and repainted by the player, like the tint above.
+static lv_obj_t *legacy_play_switch;
+
+static void legacy_play_cb(lv_event_t *e) { player_legacy_play_set(lv_obj_has_state(lv_event_get_target(e), LV_STATE_CHECKED)); }
 
 // Replace the format line with the tagged year in custom player layouts.
 static void recording_year_cb(lv_event_t *e) {
@@ -2526,12 +2548,24 @@ static void build_display_page(gui_config_t *cfg) {
 	// quietly ignored -- a layout that does nothing when chosen reads as a
 	// broken page, not as a limitation.
 	if (bp_is_tempotec_v1()) {
+		layout_vinyl_pill = settingsrow_pill(layout_pills, "musicsettings_layout_vinyl",
+											 PLAYER_LAYOUT_VINYL, layout_pick_cb);
 		layout_aam_pill = settingsrow_pill(layout_pills, "musicsettings_layout_aam",
 										   PLAYER_LAYOUT_ALBUM_ART_MAX, layout_pick_cb);
 	}
 
 	layout_refresh();
 	theme_register_refresh(layout_refresh);
+
+	// Inset sleeves can be square, softly rounded, or circular like a record.
+	lv_obj_t *art_pills = NULL;
+	settingsrow_pills(container, "musicsettings_art_shape", &art_pills);
+	art_shape_pills[PLAYER_ART_ROUNDED] = settingsrow_pill(art_pills, "musicsettings_art_rounded", PLAYER_ART_ROUNDED, art_shape_pick_cb);
+	art_shape_pills[PLAYER_ART_SQUARE] = settingsrow_pill(art_pills, "musicsettings_art_square", PLAYER_ART_SQUARE, art_shape_pick_cb);
+	art_shape_pills[PLAYER_ART_VINYL] = settingsrow_pill(art_pills, "musicsettings_art_vinyl", PLAYER_ART_VINYL, art_shape_pick_cb);
+	option_note(container, "musicsettings_art_shape_note");
+	art_shape_refresh();
+	theme_register_refresh(art_shape_refresh);
 
 	// Standard keeps its format line; custom layouts can show the tagged year.
 	lv_obj_t *recording_year_switch;
@@ -2567,6 +2601,14 @@ static void build_display_page(gui_config_t *cfg) {
 	if (player_cover_tint_get()) {
 		lv_obj_add_state(cover_tint_switch, LV_STATE_CHECKED);
 	}
+
+	// The play/pause button on a disc instead of a bare glyph, the way the
+	// original player drew it. A look and nothing more: it moves nothing, takes
+	// the same room as the button it replaces, and follows the cover tint's
+	// colour when that is on.
+	settingsrow_toggle(container, "musicsettings_legacy_play", &legacy_play_switch, legacy_play_cb);
+	option_note(container, "musicsettings_legacy_play_note");
+	lv_obj_set_state(legacy_play_switch, LV_STATE_CHECKED, player_legacy_play_get());
 
 	// Whether a start with a remembered track lands on the now-playing page
 	// rather than on the home screen. Read once, at startup (main.c).

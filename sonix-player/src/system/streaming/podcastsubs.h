@@ -44,4 +44,14 @@ bool podcastsubs_is_followed(long long feed_id);
 void podcastsubs_follow(const podcast_feed_t *feed);
 void podcastsubs_unfollow(long long feed_id);
 
+// How many of the podcast's episodes have been started on this device, and the
+// note that one has. The count is a row in the same database, so it survives a
+// restart, and it is what "most listened" sorts by: the alternative -- counting
+// the episodes marked heard -- cannot tell one podcast from another, because
+// PODCAST_PLAYED stores episode ids and nothing else. Counting starts, not
+// finishes, so a podcast somebody listens to for ten minutes a day still ranks
+// above one they tried once.
+void podcastsubs_count_play(long long feed_id);
+int podcastsubs_plays(long long feed_id);
+
 #endif /* PODCASTSUBS_H */

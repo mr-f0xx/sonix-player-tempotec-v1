@@ -30,6 +30,10 @@ static char db_path[512];
 static char legacy_path[512];
 static podcast_feed_t subs[PODCASTSUBS_MAX];
 static int subs_count;
+// How many episodes of each subscription have been started on this device, in
+// the same order as `subs`. A counter rather than a timestamp: the clock is not
+// trustworthy here (see `save`), and "most listened" only needs the order.
+static int plays[PODCASTSUBS_MAX];
 // Which file the list in memory was last read from or written to.
 static file_identity_t db_identity;
 
@@ -41,6 +45,16 @@ static bool exec(sqlite3 *db, const char *sql) {
 		return false;
 	}
 	return true;
+}
+
+// Runs SQL whose failure is expected -- a column that is already there. The
+// ordinary exec() reports every error, which for a migration would mean a line
+// of noise at every start.
+static void exec_quiet(sqlite3 *db, const char *sql) {
+	char *error = NULL;
+	if (sqlite3_exec(db, sql, NULL, NULL, &error) != SQLITE_OK) {
+		sqlite3_free(error);
+	}
 }
 
 static sqlite3 *open_db(void) {
@@ -65,7 +79,10 @@ static sqlite3 *open_db(void) {
 	exec(db, "PRAGMA cache_size=-64");
 	exec(db, "CREATE TABLE IF NOT EXISTS PODCAST_SUBS("
 			 "id INTEGER PRIMARY KEY, title TEXT, author TEXT, image TEXT,"
-			 "followed_at INTEGER DEFAULT 0)");
+			 "followed_at INTEGER DEFAULT 0, plays INTEGER DEFAULT 0)");
+	// Databases written before the play counter existed: the column is added
+	// once, and the ALTER fails harmlessly on every start after that.
+	exec_quiet(db, "ALTER TABLE PODCAST_SUBS ADD COLUMN plays INTEGER DEFAULT 0");
 	return db;
 }
 
@@ -85,8 +102,10 @@ static void save(void) {
 	exec(db, "DELETE FROM PODCAST_SUBS");
 
 	sqlite3_stmt *stmt = NULL;
-	if (sqlite3_prepare_v2(db, "INSERT INTO PODCAST_SUBS(id,title,author,image,followed_at) VALUES(?,?,?,?,?)", -1,
-						   &stmt, NULL) == SQLITE_OK) {
+	if (sqlite3_prepare_v2(db,
+						   "INSERT INTO PODCAST_SUBS(id,title,author,image,followed_at,plays) "
+						   "VALUES(?,?,?,?,?,?)",
+						   -1, &stmt, NULL) == SQLITE_OK) {
 		for (int i = 0; i < subs_count; i++) {
 			sqlite3_bind_int64(stmt, 1, (sqlite3_int64)subs[i].id);
 			sqlite3_bind_text(stmt, 2, subs[i].title, -1, SQLITE_STATIC);
@@ -95,6 +114,7 @@ static void save(void) {
 			// The array order is the order: the first entry is the most recently
 			// followed and takes the highest number.
 			sqlite3_bind_int(stmt, 5, subs_count - i);
+			sqlite3_bind_int(stmt, 6, plays[i]);
 			if (sqlite3_step(stmt) != SQLITE_DONE) {
 				fprintf(stderr, "podcastsubs: insert failed: %s\n", sqlite3_errmsg(db));
 			}
@@ -114,8 +134,8 @@ static void load(void) {
 		return;
 	}
 	sqlite3_stmt *stmt = NULL;
-	if (sqlite3_prepare_v2(db, "SELECT id,title,author,image FROM PODCAST_SUBS ORDER BY followed_at DESC", -1, &stmt,
-						   NULL) == SQLITE_OK) {
+	if (sqlite3_prepare_v2(db, "SELECT id,title,author,image,plays FROM PODCAST_SUBS ORDER BY followed_at DESC",
+						   -1, &stmt, NULL) == SQLITE_OK) {
 		while (subs_count < PODCASTSUBS_MAX && sqlite3_step(stmt) == SQLITE_ROW) {
 			podcast_feed_t feed = {0};
 			feed.id = (long long)sqlite3_column_int64(stmt, 0);
@@ -128,6 +148,10 @@ static void load(void) {
 			snprintf(feed.title, sizeof(feed.title), "%s", title ? title : "");
 			snprintf(feed.author, sizeof(feed.author), "%s", author ? author : "");
 			snprintf(feed.image, sizeof(feed.image), "%s", image ? image : "");
+			plays[subs_count] = sqlite3_column_int(stmt, 4);
+			if (plays[subs_count] < 0) {
+				plays[subs_count] = 0;
+			}
 			subs[subs_count++] = feed;
 		}
 		sqlite3_finalize(stmt);
@@ -278,6 +302,7 @@ void podcastsubs_follow(const podcast_feed_t *feed) {
 	for (int i = 0; i < subs_count; i++) {
 		if (subs[i].id == feed->id) {
 			memmove(&subs[1], &subs[0], sizeof(subs[0]) * (size_t)i);
+			memmove(&plays[1], &plays[0], sizeof(plays[0]) * (size_t)i);
 			subs[0] = *feed;
 			save();
 			return;
@@ -290,6 +315,8 @@ void podcastsubs_follow(const podcast_feed_t *feed) {
 		subs_count = PODCASTSUBS_MAX - 1;
 	}
 	memmove(&subs[1], &subs[0], sizeof(subs[0]) * (size_t)subs_count);
+	memmove(&plays[1], &plays[0], sizeof(plays[0]) * (size_t)subs_count);
+	plays[0] = 0;
 	subs[0] = *feed;
 	subs_count++;
 	save();
@@ -301,8 +328,37 @@ void podcastsubs_unfollow(long long feed_id) {
 			continue;
 		}
 		memmove(&subs[i], &subs[i + 1], sizeof(subs[0]) * (size_t)(subs_count - i - 1));
+		memmove(&plays[i], &plays[i + 1], sizeof(plays[0]) * (size_t)(subs_count - i - 1));
 		subs_count--;
 		save();
 		return;
 	}
+}
+
+void podcastsubs_count_play(long long feed_id) {
+	if (feed_id <= 0 || subs_count == 0) {
+		return;
+	}
+	for (int i = 0; i < subs_count; i++) {
+		if (subs[i].id != feed_id) {
+			continue;
+		}
+		if (plays[i] < 1000000) {
+			plays[i]++;
+		}
+		save();
+		return;
+	}
+}
+
+int podcastsubs_plays(long long feed_id) {
+	if (feed_id <= 0) {
+		return 0;
+	}
+	for (int i = 0; i < subs_count; i++) {
+		if (subs[i].id == feed_id) {
+			return plays[i];
+		}
+	}
+	return 0;
 }

@@ -7,12 +7,12 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <unistd.h>
 
 #include "src/system/net/http.h"
 #include "src/system/core/md5.h"
 #include "src/system/core/utils.h"
 
-#define ART_DIR ".local/qobuz-art"
 #define ART_TIMEOUT_SECS 15
 // Four megabytes, matching the player's own cover loader
 // (podcastcache_write_sidecars). The two limits have to agree: podcasts
@@ -21,6 +21,7 @@
 #define ART_MAX_BYTES (4 * 1024 * 1024)
 
 typedef struct {
+	char folder[32];
 	char url[QOBUZART_URL_MAX];
 	int size;
 
@@ -34,51 +35,186 @@ typedef struct {
 } slot_t;
 
 static slot_t slots[QOBUZART_SLOTS];
-static char art_dir[512];
+static char sd_root_dir[512];
 
 static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t wakeup = PTHREAD_COND_INITIALIZER;
 static bool started;
 
+// ---------------------------------------------------------------------------
+// the images already decoded
+//
+// The slots move from page to page, and a page that rebuilds its list -- Tidal
+// does on every open -- gives its pictures back with it. Without this, the same
+// twenty covers were read from the card, decoded and scaled again at every
+// visit, one after another on one core, which is the grey square and the beat
+// before the artwork that a tab switch showed.
+//
+// Kept by address and size, because the two pages draw the same cover at
+// different sizes and the smaller one is not the larger one. The budget is in
+// bytes rather than entries: a 36-pixel row costs 2.5 kB and a 60-pixel one
+// 7 kB, so the count that fits depends on the page.
+// ---------------------------------------------------------------------------
+
+#define ART_CACHE_BUDGET (512 * 1024)
+#define ART_CACHE_ENTRIES 96
+
+typedef struct {
+	char url[QOBUZART_URL_MAX];
+	int size;
+	cover_image_t image;
+	uint32_t used; // the last time it was asked for, for the least-recently-used drop
+} art_decoded_t;
+
+static art_decoded_t decoded[ART_CACHE_ENTRIES];
+static size_t decoded_bytes;
+static uint32_t decoded_tick;
+
+static size_t image_bytes(const cover_image_t *image) { return image && image->pixels ? (size_t)image->dsc.data_size : 0; }
+
+// All three of these are called with the lock held.
+
+static int cache_find_locked(const char *url, int size) {
+	if (!url || !url[0]) {
+		return -1;
+	}
+	for (int i = 0; i < ART_CACHE_ENTRIES; i++) {
+		if (decoded[i].image.pixels && decoded[i].size == size && strcmp(decoded[i].url, url) == 0) {
+			decoded[i].used = ++decoded_tick;
+			return i;
+		}
+	}
+	return -1;
+}
+
+static void cache_drop_locked(int index) {
+	if (index < 0 || index >= ART_CACHE_ENTRIES) {
+		return;
+	}
+	decoded_bytes -= image_bytes(&decoded[index].image);
+	cover_free(&decoded[index].image);
+	decoded[index].url[0] = '\0';
+	decoded[index].size = 0;
+	decoded[index].used = 0;
+}
+
+// A copy, not the cached picture itself: the caller owns what it is given and
+// frees it when its row goes away, and two rows sharing one buffer would free
+// it twice.
+static bool cache_copy_locked(int index, cover_image_t *out) {
+	size_t bytes = image_bytes(&decoded[index].image);
+	if (!out || bytes == 0) {
+		return false;
+	}
+	uint8_t *pixels = malloc(bytes);
+	if (!pixels) {
+		return false;
+	}
+	memcpy(pixels, decoded[index].image.pixels, bytes);
+	*out = decoded[index].image;
+	out->pixels = pixels;
+	out->dsc.data = pixels;
+	return true;
+}
+
+static void cache_put_locked(const char *url, int size, const cover_image_t *image) {
+	size_t bytes = image_bytes(image);
+	if (!url || !url[0] || size <= 0 || bytes == 0 || bytes > ART_CACHE_BUDGET) {
+		return;
+	}
+
+	int same = cache_find_locked(url, size);
+	if (same >= 0) {
+		cache_drop_locked(same);
+	}
+
+	// Make room by dropping the picture nobody has asked for in the longest
+	// time. One that is in use elsewhere is not a candidate: the pages hold
+	// their own copies, so a drop here cannot pull a picture off a row.
+	while (decoded_bytes + bytes > ART_CACHE_BUDGET) {
+		int victim = -1;
+		uint32_t oldest = UINT32_MAX;
+		for (int i = 0; i < ART_CACHE_ENTRIES; i++) {
+			if (decoded[i].image.pixels && decoded[i].used < oldest) {
+				oldest = decoded[i].used;
+				victim = i;
+			}
+		}
+		if (victim < 0) {
+			return;
+		}
+		cache_drop_locked(victim);
+	}
+
+	uint8_t *pixels = malloc(bytes);
+	if (!pixels) {
+		return;
+	}
+	memcpy(pixels, image->pixels, bytes);
+
+	for (int i = 0; i < ART_CACHE_ENTRIES; i++) {
+		if (decoded[i].image.pixels) {
+			continue;
+		}
+		snprintf(decoded[i].url, sizeof(decoded[i].url), "%s", url);
+		decoded[i].size = size;
+		decoded[i].image = *image;
+		decoded[i].image.pixels = pixels;
+		decoded[i].image.dsc.data = pixels;
+		decoded[i].used = ++decoded_tick;
+		decoded_bytes += bytes;
+		return;
+	}
+	free(pixels);
+}
+
 void qobuzart_set_root(const char *sd_root) {
 	pthread_mutex_lock(&lock);
 	if (!sd_root || !*sd_root) {
-		art_dir[0] = '\0';
+		sd_root_dir[0] = '\0';
 	} else {
-		snprintf(art_dir, sizeof(art_dir), "%s/%s", sd_root, ART_DIR);
+		snprintf(sd_root_dir, sizeof(sd_root_dir), "%s", sd_root);
 	}
 	pthread_mutex_unlock(&lock);
+
+	if (sd_root && sd_root[0]) {
+		char legacy[512];
+		snprintf(legacy, sizeof(legacy), "%s/.local/qobuz-art", sd_root);
+		rmdir(legacy);
+	}
 }
 
-// The cache file is named after the MD5 of the URL. The name inside the URL is
-// no good: Qobuz reuses it across the different sizes of the same album, and a
-// URL fragment is not a valid file name.
-static bool art_path(const char *url, char *out, size_t size) {
+// The cache file is named after the MD5 of the URL inside the designated service cache folder.
+static bool art_path(const char *folder, const char *url, char *out, size_t size) {
 	pthread_mutex_lock(&lock);
-	bool have_dir = art_dir[0] != '\0';
-	char dir[512];
-	snprintf(dir, sizeof(dir), "%s", art_dir);
+	bool have_root = sd_root_dir[0] != '\0';
+	char root[512];
+	snprintf(root, sizeof(root), "%s", sd_root_dir);
 	pthread_mutex_unlock(&lock);
 
-	if (!have_dir || !url || !url[0]) {
+	if (!have_root || !url || !url[0]) {
 		out[0] = '\0';
 		return false;
 	}
 
 	char hash[MD5_HEX_LEN];
 	md5_hex(url, strlen(url), hash);
-	snprintf(out, size, "%.400s/%.32s.img", dir, hash);
+	const char *f = (folder && folder[0]) ? folder : "qobuz-cache";
+	snprintf(out, size, "%s/.local/%s/%.32s.img", root, f, hash);
 	return true;
 }
 
-static bool ensure_dir(void) {
-	pthread_mutex_lock(&lock);
-	char dir[512];
-	snprintf(dir, sizeof(dir), "%s", art_dir);
-	pthread_mutex_unlock(&lock);
-	if (!dir[0]) {
+static bool ensure_dir(const char *file_path) {
+	if (!file_path || !file_path[0]) {
 		return false;
 	}
+	char dir[512];
+	snprintf(dir, sizeof(dir), "%s", file_path);
+	char *slash = strrchr(dir, '/');
+	if (!slash) {
+		return false;
+	}
+	*slash = '\0';
 
 	for (char *p = dir + 1; *p; p++) {
 		if (*p != '/') {
@@ -91,15 +227,37 @@ static bool ensure_dir(void) {
 	return mkdir(dir, 0777) == 0 || errno == EEXIST;
 }
 
-// Downloads unless already cached. Written to a temporary and renamed: a
-// half-written image -- power loss, network drop -- would otherwise stay there
-// forever, rejected by the decoder on every load.
-static bool fetch(const char *url, const char *path) {
+// Downloads unless already cached. Written to a temporary and renamed.
+static bool fetch(const char *folder, const char *url, const char *path) {
+	(void)folder;
 	struct stat st;
 	if (stat(path, &st) == 0 && st.st_size > 0) {
 		return true;
 	}
-	if (!ensure_dir()) {
+
+	// Automatic migration: check if it already exists in legacy .local/qobuz-art/
+	pthread_mutex_lock(&lock);
+	char root[512];
+	snprintf(root, sizeof(root), "%s", sd_root_dir);
+	pthread_mutex_unlock(&lock);
+
+	if (root[0]) {
+		char hash[MD5_HEX_LEN];
+		md5_hex(url, strlen(url), hash);
+		char legacy[600];
+		snprintf(legacy, sizeof(legacy), "%s/.local/qobuz-art/%.32s.img", root, hash);
+		if (stat(legacy, &st) == 0 && st.st_size > 0) {
+			ensure_dir(path);
+			if (rename(legacy, path) == 0) {
+				char legacy_dir[512];
+				snprintf(legacy_dir, sizeof(legacy_dir), "%s/.local/qobuz-art", root);
+				rmdir(legacy_dir);
+				return true;
+			}
+		}
+	}
+
+	if (!ensure_dir(path)) {
 		return false;
 	}
 
@@ -160,6 +318,8 @@ static void *worker_main(void *arg) {
 		}
 
 		slot_t *slot = &slots[index];
+		char folder[32];
+		snprintf(folder, sizeof(folder), "%s", slot->folder);
 		char url[QOBUZART_URL_MAX];
 		memcpy(url, slot->url, sizeof(url));
 		int size = slot->size;
@@ -173,7 +333,7 @@ static void *worker_main(void *arg) {
 		cover_image_t image;
 		memset(&image, 0, sizeof(image));
 		bool found = false;
-		if (art_path(url, path, sizeof(path)) && fetch(url, path)) {
+		if (art_path(folder, url, path, sizeof(path)) && fetch(folder, url, path)) {
 			found = cover_load_image_file(path, size, size, COVER_FIT_COVER, &image);
 			if (!found) {
 				// Downloaded but undecodable is a different fault from never
@@ -184,6 +344,12 @@ static void *worker_main(void *arg) {
 
 		pthread_mutex_lock(&lock);
 		slot->running = false;
+		if (found) {
+			// Kept before the slot decides: an image nobody is waiting for any
+			// more -- the list scrolled on -- is exactly the one that will be
+			// asked for again.
+			cache_put_locked(url, size, &image);
+		}
 		if (slot->generation != generation) {
 			// The slot was reused for something else while the fetch ran (the
 			// list scrolled), so nobody wants this image any more.
@@ -248,7 +414,7 @@ static void take_pool_locked(const void *owner) {
 	pool_owner = owner;
 }
 
-void qobuzart_request(const void *owner, int slot_index, const char *url, int size) {
+void qobuzart_request(const void *owner, const char *folder, int slot_index, const char *url, int size) {
 	if (slot_index < 0 || slot_index >= QOBUZART_SLOTS || !url || !url[0] || size <= 0) {
 		return;
 	}
@@ -259,17 +425,32 @@ void qobuzart_request(const void *owner, int slot_index, const char *url, int si
 
 	slot_t *slot = &slots[slot_index];
 	// Skip the fetch only if the same image is ready and still held here.
-	//
-	// Still held matters: qobuzart_take() hands the image over and the slot
-	// stops owning it, so without the found check reopening the same list would
-	// drop the request as already done with nothing left to hand over, and the
-	// rows would stay grey.
 	if (slot->done && slot->found && slot->size == size && strcmp(slot->url, url) == 0) {
 		pthread_mutex_unlock(&lock);
 		return;
 	}
 
+	// Decoded on an earlier visit: hand out a copy now, and leave the worker
+	// reading nothing.
+	int cached = cache_find_locked(url, size);
+	if (cached >= 0) {
+		reset_locked(slot);
+		snprintf(slot->folder, sizeof(slot->folder), "%s", folder ? folder : "qobuz-cache");
+		snprintf(slot->url, sizeof(slot->url), "%s", url);
+		slot->size = size;
+		if (cache_copy_locked(cached, &slot->image)) {
+			slot->done = true;
+			slot->found = true;
+		} else {
+			slot->pending = true; // out of memory: the worker decodes it again
+			pthread_cond_signal(&wakeup);
+		}
+		pthread_mutex_unlock(&lock);
+		return;
+	}
+
 	reset_locked(slot);
+	snprintf(slot->folder, sizeof(slot->folder), "%s", folder ? folder : "qobuz-cache");
 	snprintf(slot->url, sizeof(slot->url), "%s", url);
 	slot->size = size;
 	slot->pending = true;
@@ -331,20 +512,26 @@ bool qobuzart_take(const void *owner, int slot_index, cover_image_t *out, bool *
 	return found;
 }
 
-void qobuzart_clear(void) {
+void qobuzart_clear_folder(const char *folder) {
 	pthread_mutex_lock(&lock);
-	char dir[512];
-	snprintf(dir, sizeof(dir), "%s", art_dir);
+	char root[512];
+	snprintf(root, sizeof(root), "%s", sd_root_dir);
 	for (int i = 0; i < QOBUZART_SLOTS; i++) {
 		reset_locked(&slots[i]);
 		slots[i].url[0] = '\0';
 	}
+	for (int i = 0; i < ART_CACHE_ENTRIES; i++) {
+		cache_drop_locked(i);
+	}
+	decoded_bytes = 0;
 	pool_owner = NULL;
 	pthread_mutex_unlock(&lock);
 
-	if (!dir[0]) {
+	if (!root[0]) {
 		return;
 	}
+	char dir[600];
+	snprintf(dir, sizeof(dir), "%s/.local/%s", root, (folder && folder[0]) ? folder : "qobuz-cache");
 	DIR *d = opendir(dir);
 	if (!d) {
 		return;
@@ -354,10 +541,18 @@ void qobuzart_clear(void) {
 		if (e->d_name[0] == '.') {
 			continue;
 		}
+		char *dot = strrchr(e->d_name, '.');
+		if (!dot || strcmp(dot, ".img") != 0) {
+			continue;
+		}
 		char path[640];
 		if ((size_t)snprintf(path, sizeof(path), "%s/%s", dir, e->d_name) < sizeof(path)) {
 			remove(path);
 		}
 	}
 	closedir(d);
+}
+
+void qobuzart_clear(void) {
+	qobuzart_clear_folder("qobuz-cache");
 }
