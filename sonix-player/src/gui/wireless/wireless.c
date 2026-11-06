@@ -72,8 +72,23 @@ static void bluetooth_connected_detail(char *out, size_t size) {
 	}
 	out[0] = '\0';
 
+	if (bluetooth_receiver_profile()) {
+		char rx_name[BT_NAME_MAX] = "";
+		if (bluetooth_receiver_device(NULL, 0, rx_name, sizeof(rx_name)) && rx_name[0]) {
+			snprintf(out, size, "RX · %s", rx_name);
+		} else {
+			snprintf(out, size, "RX");
+		}
+		return;
+	}
+
 	bt_device_t devices[BT_MAX_DEVICES];
 	size_t used = 0;
+	int prefix = snprintf(out, size, "TX · ");
+	if (prefix > 0 && (size_t)prefix < size) {
+		used = (size_t)prefix;
+	}
+	size_t base_used = used;
 	bool full = false;
 	for (int list = 0; list < 2; list++) {
 		int count = list == 0 ? bluetooth_get_paired(devices, BT_MAX_DEVICES)
@@ -87,9 +102,10 @@ static void bluetooth_connected_detail(char *out, size_t size) {
 			const char *name = devices[i].name[0] ? devices[i].name : devices[i].mac;
 			int written;
 			if (audio) {
-				written = snprintf(out + used, size - used, "%s%s (%s)", used ? " · " : "", name, tr("in_use"));
+				written = snprintf(out + used, size - used, "%s%s (%s)", used > base_used ? " · " : "", name,
+								   tr("in_use"));
 			} else {
-				written = snprintf(out + used, size - used, "%s%s", used ? " · " : "", name);
+				written = snprintf(out + used, size - used, "%s%s", used > base_used ? " · " : "", name);
 			}
 			if (written < 0 || (size_t)written >= size - used) {
 				out[size - 1] = '\0';
@@ -103,8 +119,8 @@ static void bluetooth_connected_detail(char *out, size_t size) {
 		}
 	}
 
-	if (!used) {
-		snprintf(out, size, "%s", tr("on"));
+	if (used == base_used) {
+		snprintf(out + used, size - used, "%s", tr("on"));
 	}
 }
 

@@ -761,3 +761,12 @@ artsearch: $(BUILD)/test_artsearch
 $(BUILD)/test_artsearch: test_artsearch.c $(ROOT)/src/system/tagmanager/artsearch.c $(ROOT)/src/system/core/json.c $(ROOT)/src/system/library/jpeginfo.c
 	@mkdir -p $(BUILD)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ $^ $(LDFLAGS) $(LDLIBS)
+
+.PHONY: tidal
+tidal: $(BUILD)/test_tidal_login
+	$(BUILD)/test_tidal_login
+
+$(BUILD)/test_tidal_login: test_tidal_login.c $(ROOT)/src/system/streaming/tidal.c $(ROOT)/src/system/core/base64.c $(ROOT)/src/system/core/json.c
+	@mkdir -p $(BUILD)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ $^ $(LDFLAGS) $(LDLIBS)
+

@@ -260,5 +260,142 @@ class MainTests(unittest.TestCase):
         self.assertFalse(os.path.exists(bin_out))
 
 
+TIDAL_CLIENT_ID = b"zX9yV8wU7tS6rQ5p"
+TIDAL_TOKEN_DECOY = b"mN4bV3cX2zL1kJ0h"
+TIDAL_CLIENT_SECRET = b"AbCdEfGhIjKlMnOpQrStUvWxYz0123456789+/AbCdE="
+
+
+def _mips_lui(rt, imm):
+    import struct
+    return struct.pack("<I", (0x0F << 26) | (rt << 16) | (imm & 0xFFFF))
+
+
+def _mips_addiu(rt, rs, simm):
+    import struct
+    return struct.pack("<I", (0x09 << 26) | (rs << 21) | (rt << 16) | (simm & 0xFFFF))
+
+
+def _mips_sb(rt, simm, rs):
+    import struct
+    return struct.pack("<I", (0x28 << 26) | (rs << 21) | (rt << 16) | (simm & 0xFFFF))
+
+
+def _emit_assembled_token(token, bss_hi, bss_lo, trailing_va=None):
+    """Builds the exact GCC MIPS32 LE sequence seen in hiby_player:
+    lui $a2, bss_hi; addiu $v0, $a2, bss_lo; sb ch0, bss_lo($a2); sb ch1..N, 1..N($v0)
+    followed by optional `lui $a1, hi; addiu $a1, $a1, lo` loading a .rodata string.
+    """
+    code = bytearray()
+    code += _mips_addiu(7, 0, token[0])
+    code += _mips_lui(6, bss_hi)
+    code += _mips_addiu(2, 6, bss_lo)
+    code += _mips_sb(7, bss_lo, 6)
+    for idx, ch in enumerate(token[1:], start=1):
+        code += _mips_addiu(3, 0, ch)
+        code += _mips_sb(3, idx, 2)
+    code += _mips_sb(0, len(token), 2)
+    if trailing_va is not None:
+        hi = (trailing_va + 0x8000) >> 16
+        lo = trailing_va - (hi << 16)
+        code += _mips_lui(5, hi)
+        code += _mips_addiu(5, 5, lo)
+    return bytes(code)
+
+
+def realistic_mips_elf_with_tidal():
+    """Minimal 32-bit LE ELF with one PT_LOAD mapping code + .rodata at vaddr 0x400000."""
+    import struct
+
+    vbase = 0x00400000
+    hdr_size = 52 + 32  # ELF32_Ehdr + 1 * ELF32_Phdr
+    rodata_off = 0x400
+
+    rodata = bytearray()
+
+    def add_cstr(s):
+        off = len(rodata)
+        rodata.extend(s + b"\x00")
+        while len(rodata) % 4:
+            rodata.append(0)
+        return vbase + rodata_off + off
+
+    va_client_id_lbl = add_cstr(b"client_id")
+    va_tidal_db_lbl = add_cstr(b"%s/tidal.db")
+    add_cstr(b"urn:ietf:params:oauth:grant-type:device_code")
+    add_cstr(TIDAL_CLIENT_SECRET)
+    add_cstr(b"https://auth.tidal.com/v1/oauth2/device_authorization")
+    add_cstr(b"https://auth.tidal.com/v1/oauth2/token")
+    for s in [ANCHORS[0], ANCHORS[5], APP_ID, ANCHORS[1], ANCHORS[2], APP_SECRET]:
+        add_cstr(s)
+
+    code = bytearray()
+    # Decoy legacy x-tidal-token assembled first (references %s/tidal.db, NOT client_id)
+    code += _emit_assembled_token(TIDAL_TOKEN_DECOY, 0x009F, 0x7DF0, va_tidal_db_lbl)
+    code += b"\x00" * 64
+    # Real OAuth2 client_id assembled right before loading "client_id"
+    code += _emit_assembled_token(TIDAL_CLIENT_ID, 0x009F, 0x7E08, va_client_id_lbl)
+
+    assert hdr_size + len(code) <= rodata_off
+    payload = bytearray(b"\x00" * rodata_off)
+    payload[hdr_size:hdr_size + len(code)] = code
+    payload.extend(rodata)
+
+    ehdr = bytearray(52)
+    ehdr[0:4] = b"\x7fELF"
+    ehdr[4] = 1  # ELFCLASS32
+    ehdr[5] = 1  # ELFDATA2LSB
+    ehdr[6] = 1
+    struct.pack_into("<HHIIIIIHHHHHH", ehdr, 16,
+                     2, 8, 1, vbase + hdr_size, 52, 0, 0, 52, 32, 1, 0, 0, 0)
+    phdr = struct.pack("<8I", 1, 0, vbase, vbase, len(payload), len(payload), 5, 0x1000)
+    payload[0:52] = ehdr
+    payload[52:84] = phdr
+    return bytes(payload)
+
+
+class TidalExtractTests(unittest.TestCase):
+    def test_extracts_mips_assembled_client_id_and_ignores_decoy_token(self):
+        buf = realistic_mips_elf_with_tidal()
+        cid, csec = ex.extract_tidal(buf)
+        self.assertEqual(cid, TIDAL_CLIENT_ID.decode())
+        self.assertEqual(csec, TIDAL_CLIENT_SECRET.decode())
+
+    def test_default_all_writes_both_qobuz_and_tidal_masked_on_stdout(self):
+        import io
+        import contextlib
+        with tempfile.TemporaryDirectory() as tmp:
+            bpath = os.path.join(tmp, "hiby_player")
+            ipath = os.path.join(tmp, "streaming-keys.ini")
+            with open(bpath, "wb") as f:
+                f.write(realistic_mips_elf_with_tidal())
+            captured = io.StringIO()
+            with contextlib.redirect_stdout(captured):
+                rc = ex.main([bpath, "-o", ipath])
+            self.assertEqual(rc, 0)
+            out_log = captured.getvalue()
+            self.assertNotIn(TIDAL_CLIENT_ID.decode(), out_log)
+            self.assertNotIn(TIDAL_CLIENT_SECRET.decode(), out_log)
+            with open(ipath, encoding="utf-8") as f:
+                sections, _ = ex._parse_ini(f.read())
+            self.assertEqual(sections["qobuz"]["app_id"], APP_ID.decode())
+            self.assertEqual(sections["tidal"]["client_id"], TIDAL_CLIENT_ID.decode())
+            self.assertEqual(sections["tidal"]["client_secret"], TIDAL_CLIENT_SECRET.decode())
+
+    def test_service_tidal_preserves_existing_qobuz_and_other_sections(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            bpath = os.path.join(tmp, "hiby_player")
+            ipath = os.path.join(tmp, "streaming-keys.ini")
+            with open(bpath, "wb") as f:
+                f.write(realistic_mips_elf_with_tidal())
+            with open(ipath, "w", encoding="utf-8") as f:
+                f.write("[qobuz]\napp_id = keep_id\napp_secret = keep_sec\n")
+            rc = ex.main([bpath, "--service", "tidal", "-o", ipath])
+            self.assertEqual(rc, 0)
+            with open(ipath, encoding="utf-8") as f:
+                sections, _ = ex._parse_ini(f.read())
+            self.assertEqual(sections["qobuz"]["app_id"], "keep_id")
+            self.assertEqual(sections["tidal"]["client_id"], TIDAL_CLIENT_ID.decode())
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

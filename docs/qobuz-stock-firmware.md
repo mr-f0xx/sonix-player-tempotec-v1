@@ -137,13 +137,23 @@ anchor-less cases, and cover the seal/open round trip.
 - **Private builds only.** An image produced with `SONIX_EMBED_STOCK_KEYS=1`
   carries HiBy's API credentials, sealed or not. Do not upload it to a release
   or share it; the default CI workflow leaves the flag off for this reason.
-- **Tidal is not covered.** Its secret is assembled byte by byte at run time
-  and never appears as a string, so there is nothing for a string scan to find.
-  Tidal stays on the manual `streaming-keys.ini` path. Podcast Index and
-  Last.fm use this project's own freely requested keys and are unaffected.
-- **The heuristic can age.** It relies on the documented string layout. If a
+- **Tidal is now extracted too.** Self-serve `developer.tidal.com` keys only
+  speak Tidal's OpenAPI v2 and fail device login with `"Client is not a Limited
+  Input Device client."` In the stock V1 `hiby_player`, Tidal's 44-character
+  base64 `client_secret` sits in `.rodata` next to the OAuth2 device-code
+  strings while the 16-character OAuth2 `client_id` is assembled byte-by-byte
+  via MIPS32 immediate `sb` stores right before loading the `"client_id"` form
+  parameter (distinct from a separate 16-character legacy `x-tidal-token`).
+  `extract_streamkeys.py` reconstructs and disambiguates that `client_id` and
+  writes both `[qobuz]` and `[tidal]` (or either alone with `--service`).
+  During login, `tidal.c` also automatically falls back from scope
+  `"r_usr w_usr"` to `"r_usr"` when a read-only device key rejects `w_usr`.
+  Podcast Index and Last.fm use freely requested keys and are unaffected.
+- **The heuristic can age.** It relies on the documented binary layout. If a
   future stock binary changes it, extraction fails loudly rather than guessing;
-  `--list-candidates` plus the manual flags, or the card file, keep a path open.
+  `--list-candidates` plus the manual flags (`--app-id`/`--app-secret` and
+  `--tidal-client-id`/`--tidal-client-secret`), or the card file, keep a path
+  open.
 - **Qobuz can rotate or revoke.** Nothing here makes the borrowed pair
   permanent. The stock firmware would break in the same event; the mechanism
   does not depend on any endpoint Sonix controls.
