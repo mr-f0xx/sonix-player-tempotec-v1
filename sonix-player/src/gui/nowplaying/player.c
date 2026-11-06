@@ -907,7 +907,8 @@ static sleeptimer_kind_t sleeptimer_kind_playing(void) {
 // and under it, with the legacy look on, the disc. The original player's disc
 // was white over artwork and in the dark palettes, and the palette's pressed
 // surface in the light one when there is no cover to stand out against;
-// playbutton.c turns it into the accent where those would not read.
+// playbutton.c keeps it white for an album tint; for theme accents it
+// adjusts the colours where those would not read.
 //
 // Poster's deck stands on its own ground and not on the sleeve (see
 // set_over_cover), so it is only "over artwork" in the other arrangements.
@@ -920,7 +921,12 @@ static void paint_play_button(void) {
 		return;
 	}
 	bool over_artwork = chrome_over_cover && !layout_poster_now;
-	playbutton_paint(play_btn, play_btn_icon, play_legacy, chrome_accent(), over_artwork || theme()->dark);
+	// Waveform also uses the sleeve's colour without the explicit tint switch,
+	// except in palettes which intentionally override it in chrome_accent().
+	bool album_tinted = album_tone && (cover_tint ||
+		(layout_wave_now && !theme_is_monochrome() && !theme_is_tokyo_night()));
+	playbutton_paint(play_btn, play_btn_icon, play_legacy, chrome_accent(), over_artwork || theme()->dark,
+					 album_tinted);
 }
 
 static void apply_playback_status(audio_status_t status) {

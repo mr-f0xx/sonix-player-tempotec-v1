@@ -7,8 +7,9 @@
  * glyph sits clear of the rim and in the middle of it, whether a finger on the
  * button shows, and -- the reason the legacy look is more than a circle --
  * whether the glyph can be told from the disc under every palette and accent
- * the player can be in. OLED's white on a white disc and a yellow accent on one
- * are the two that make the difference. So the button is built the way
+ * the player can be in when using theme accents. OLED's white on a white disc
+ * and a yellow accent on one are the two that make the difference. Album
+ * tints instead keep their exact hue on a white disc, including pale hues. So the button is built the way
  * player_init() builds it, painted, and read back pixel by pixel from a
  * snapshot of the page behind it.
  *
@@ -282,7 +283,7 @@ static void test_plain_look(void) {
 			snprintf(what, sizeof(what), "plain %s, %d px", GLYPH_NAMES[g], SIDES[s]);
 			fixture_t f = make_fixture(SIDES[s], 0x303030);
 			lv_image_set_src(f.glyph, GLYPHS[g]);
-			playbutton_paint(f.button, f.glyph, false, blue(), true);
+			playbutton_paint(f.button, f.glyph, false, blue(), true, false);
 
 			CHECK(lv_obj_get_style_bg_opa(f.button, LV_PART_MAIN) == LV_OPA_TRANSP, "%s: it has a body", what);
 			CHECK(lv_image_get_scale(f.glyph) == LV_SCALE_NONE, "%s: the glyph is scaled", what);
@@ -304,7 +305,7 @@ static void test_legacy_look(void) {
 			snprintf(what, sizeof(what), "legacy %s, %d px", GLYPH_NAMES[g], SIDES[s]);
 			fixture_t f = make_fixture(SIDES[s], 0x303030);
 			lv_image_set_src(f.glyph, GLYPHS[g]);
-			playbutton_paint(f.button, f.glyph, true, blue(), true);
+			playbutton_paint(f.button, f.glyph, true, blue(), true, false);
 
 			CHECK(lv_obj_get_style_radius(f.button, LV_PART_MAIN) == LV_RADIUS_CIRCLE, "%s: not a circle", what);
 			CHECK(lv_obj_get_style_bg_opa(f.button, LV_PART_MAIN) == LV_OPA_COVER, "%s: the disc is not solid", what);
@@ -364,7 +365,7 @@ static void test_pressed(void) {
 		char what[64];
 		snprintf(what, sizeof(what), "%s look pressed", legacy ? "legacy" : "plain");
 		fixture_t f = make_fixture(COMPACT_SIDE, 0x303030);
-		playbutton_paint(f.button, f.glyph, legacy, blue(), true);
+		playbutton_paint(f.button, f.glyph, legacy, blue(), true, false);
 
 		lv_draw_buf_t *rest = shoot(&f);
 		int gx = 0, gy = 0;
@@ -403,12 +404,12 @@ static void test_switching(void) {
 		for (int g = 0; g < GLYPH_COUNT; g++) {
 			lv_image_set_src(f.glyph, GLYPHS[g]);
 
-			playbutton_paint(f.button, f.glyph, true, blue(), true);
+			playbutton_paint(f.button, f.glyph, true, blue(), true, false);
 			lv_draw_buf_t *shot = shoot(&f);
 			check_disc(&f, shot, WHITE, rgb(blue()), "switched on");
 			lv_draw_buf_destroy(shot);
 
-			playbutton_paint(f.button, f.glyph, false, blue(), true);
+			playbutton_paint(f.button, f.glyph, false, blue(), true, false);
 			shot = shoot(&f);
 			check_bare(&f, shot, rgb(blue()), "switched off");
 			/* The disc is gone as a pixel as well as a style. */
@@ -479,7 +480,7 @@ static void test_promises(void) {
 		uint32_t want_disc = p->disc == 0xFFFFFFFFu ? accent : p->disc;
 
 		fixture_t f = make_fixture(COMPACT_SIDE, 0x303030);
-		playbutton_paint(f.button, f.glyph, true, player_accent(), white_disc_for(p->over_cover));
+		playbutton_paint(f.button, f.glyph, true, player_accent(), white_disc_for(p->over_cover), false);
 		look_t l = painted(&f);
 		CHECK(l.disc == want_disc && l.ink == p->ink, "%s: disc %06x and glyph %06x, expected %06x and %06x", p->name, l.disc, l.ink, want_disc, p->ink);
 
@@ -513,7 +514,7 @@ static double test_every_palette_and_accent(int *combinations) {
 				snprintf(what, sizeof(what), "palette %d, accent %d, %s", kind, preset, over ? "over a sleeve" : "no sleeve");
 
 				fixture_t f = make_fixture(COMPACT_SIDE, 0x303030);
-				playbutton_paint(f.button, f.glyph, true, player_accent(), white);
+				playbutton_paint(f.button, f.glyph, true, player_accent(), white, false);
 				look_t l = painted(&f);
 
 				double c = contrast(l.disc, l.ink);
@@ -538,7 +539,7 @@ static double test_every_palette_and_accent(int *combinations) {
 				}
 
 				/* The plain look is the accent, bare, however it was left. */
-				playbutton_paint(f.button, f.glyph, false, player_accent(), white);
+				playbutton_paint(f.button, f.glyph, false, player_accent(), white, false);
 				look_t plain = painted(&f);
 				CHECK(plain.ink == accent && lv_obj_get_style_bg_opa(f.button, LV_PART_MAIN) == LV_OPA_TRANSP, "%s: the plain look is not the bare accent", what);
 
@@ -562,13 +563,45 @@ static void test_any_accent(void) {
 		for (int light = 0; light < 2; light++) {
 			theme_set_kind(light ? THEME_KIND_LIGHT : THEME_KIND_DARK);
 			bool white = light ? (i & 1) != 0 : true;
-			playbutton_paint(f.button, f.glyph, true, lv_color_hex(accent), white);
+			playbutton_paint(f.button, f.glyph, true, lv_color_hex(accent), white, false);
 			look_t l = painted(&f);
 			double c = contrast(l.disc, l.ink);
 			CHECK(c >= READABLE, "accent %06x (%s, %s disc): glyph %06x on disc %06x is %.2f:1", accent, light ? "Light" : "Dark", white ? "white" : "grey", l.ink, l.disc, c);
 		}
 	}
 	theme_set_kind(THEME_KIND_DARK);
+	free_fixture(&f);
+}
+
+/* Album colours deliberately keep their hue on a white legacy disc, even
+ * when a pale hue would otherwise trigger the theme contrast fallback. */
+static void test_album_tint(void) {
+	static const uint32_t colours[] = {0xAD78D0, 0xEEDB80, 0x2070B0};
+	fixture_t f = make_fixture(COMPACT_SIDE, 0x303030);
+	for (int kind = 0; kind < THEME_KIND_COUNT; kind++) {
+		theme_set_kind((theme_kind_t)kind);
+		for (size_t i = 0; i < sizeof(colours) / sizeof(colours[0]); i++) {
+			for (int g = 0; g < GLYPH_COUNT; g++) {
+				lv_image_set_src(f.glyph, GLYPHS[g]);
+				// Also pass a non-white theme disc: album tint overrides it.
+				playbutton_paint(f.button, f.glyph, true, lv_color_hex(colours[i]), false, true);
+				look_t l = painted(&f);
+				CHECK(l.disc == WHITE && l.ink == colours[i],
+					  "album tint %06x, palette %d: disc %06x glyph %06x", colours[i], kind, l.disc, l.ink);
+				lv_draw_buf_t *shot = shoot(&f);
+				check_disc(&f, shot, WHITE, colours[i], "album tint");
+				lv_draw_buf_destroy(shot);
+			}
+		}
+	}
+	// Turning legacy off leaves a bare album-coloured glyph.
+	playbutton_paint(f.button, f.glyph, false, lv_color_hex(colours[0]), true, true);
+	CHECK(painted(&f).ink == colours[0] && lv_obj_get_style_bg_opa(f.button, LV_PART_MAIN) == LV_OPA_TRANSP,
+		  "album tint in plain look is not a bare glyph");
+	// Once tint is gone, theme-only contrast rules still apply.
+	theme_set_kind(THEME_KIND_DARK);
+	playbutton_paint(f.button, f.glyph, true, lv_color_hex(colours[1]), true, false);
+	CHECK(painted(&f).disc == colours[1] && painted(&f).ink == BLACK, "theme fallback did not return");
 	free_fixture(&f);
 }
 
@@ -639,7 +672,7 @@ static void sheet_button(lv_obj_t *row, int col, const lv_image_dsc_t *glyph, bo
 	lv_obj_t *image = lv_image_create(button);
 	lv_image_set_src(image, glyph);
 	lv_obj_center(image);
-	playbutton_paint(button, image, legacy, accent, white);
+	playbutton_paint(button, image, legacy, accent, white, false);
 	if (pressed) {
 		lv_obj_add_state(button, LV_STATE_PRESSED);
 	}
@@ -757,6 +790,7 @@ int main(int argc, char **argv) {
 	int combinations = 0;
 	double lowest = test_every_palette_and_accent(&combinations);
 	test_any_accent();
+	test_album_tint();
 	test_strings(argv[1]);
 
 	const char *snapshots = getenv("SONIX_PLAYBUTTON_SNAPSHOTS");
@@ -764,6 +798,6 @@ int main(int argc, char **argv) {
 		write_sheet(snapshots);
 	}
 
-	printf("PASS playbutton (%d palette/accent/disc combinations, glyph never under %.2f:1 on its disc)\n", combinations, lowest);
+	printf("PASS playbutton (%d theme palette/accent/disc combinations, glyph never under %.2f:1 on its disc; album tint tested separately)\n", combinations, lowest);
 	return 0;
 }
