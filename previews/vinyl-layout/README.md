@@ -14,7 +14,9 @@ scale changes only the browser magnification. **Save PNG** exports the screen
 at the selected canvas's exact pixel dimensions.
 
 The demo transport, seek bar, favourite, repeat and missing-art fallback are
-interactive but play no audio. The record is intentionally static, with its small pressing mark matching the reference: a thin rounded stroke leaning down to the right in the exposed lower arc. The exposed arc ends above the deck with a clear gap; it does not overlap the names, seek bar or transport. The album
+interactive but play no audio. The record is intentionally static, with clean
+2 px concentric grooves in lifted greys so the exposed lower semicircle reads
+clearly at the V1's native resolution, and with its small pressing mark matching the reference: a thin rounded stroke leaning down to the right in the exposed lower arc. The exposed arc ends above the deck with a clear gap; it does not overlap the names, seek bar or transport. The album
 photograph is cropped from the user's reference for demonstration only and is
 not shipped as a firmware asset.
 

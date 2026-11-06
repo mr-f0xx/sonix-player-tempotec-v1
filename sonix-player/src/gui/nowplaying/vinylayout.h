@@ -18,6 +18,14 @@
 #define VINYL_RECESS_PERCENT 10
 #define VINYL_PEEK_PERCENT (VINYL_RECORD_PERCENT / 2 - VINYL_RECESS_PERCENT)
 
+/* The exposed lower arc reads as a clean pressing, not a faint dotted target:
+ * three native-resolution rings, lifted neutral greys and an even diameter so
+ * the 2 px stroke lands on whole pixels. No bitmap is scaled onto the panel. */
+#define VINYL_GROOVE_COUNT 3
+#define VINYL_GROOVE_WIDTH 2
+#define VINYL_GROOVE_FIRST_PERCENT 12
+#define VINYL_GROOVE_STEP_PERCENT 10
+
 /* The reference pressing mark: a thin rounded stroke leaning down-right.
  * Endpoints are percentages of the record diameter, measured from the supplied
  * 460x608 mockup (record ~346 px, stroke ~65 px at ~15 degrees from vertical).
@@ -56,7 +64,7 @@ vinyl_box_t vinyl_layout_box(int screen_w, int screen_h, int deck_h);
 
 typedef struct {
 	lv_obj_t *disc;
-	lv_obj_t *grooves[3];
+	lv_obj_t *grooves[VINYL_GROOVE_COUNT];
 	lv_obj_t *label;
 	lv_obj_t *shine;
 } vinyl_record_t;

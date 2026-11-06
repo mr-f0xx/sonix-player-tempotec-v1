@@ -107,11 +107,14 @@ void vinyl_record_build(vinyl_record_t *r, lv_obj_t *parent) {
 	lv_obj_set_style_bg_opa(r->disc, LV_OPA_COVER, 0);
 	lv_obj_set_style_border_width(r->disc, VINYL_ART_BORDER, 0);
 	lv_obj_set_style_border_opa(r->disc, LV_OPA_COVER, 0);
-	/* Quiet concentric grooves, not a bright target pattern. */
-	for (int i = 0; i < 3; i++) {
+	/* Clean HD-style grooves: a 2 px native stroke in lifted greys, bright
+	 * enough to read on the V1's RGB565 panel without becoming a target. The
+	 * outer ring is strongest and the inner rings step down for depth. */
+	static const uint32_t groove_rgb[VINYL_GROOVE_COUNT] = {0x5a5a5a, 0x4a4a4a, 0x3a3a3a};
+	for (int i = 0; i < VINYL_GROOVE_COUNT; i++) {
 		r->grooves[i] = plain_circle(r->disc);
-		lv_obj_set_style_border_width(r->grooves[i], 1, 0);
-		lv_obj_set_style_border_color(r->grooves[i], lv_color_make(38, 38, 38), 0);
+		lv_obj_set_style_border_width(r->grooves[i], VINYL_GROOVE_WIDTH, 0);
+		lv_obj_set_style_border_color(r->grooves[i], lv_color_hex(groove_rgb[i]), 0);
 		lv_obj_set_style_border_opa(r->grooves[i], LV_OPA_COVER, 0);
 	}
 	r->label = plain_circle(r->disc);
@@ -133,10 +136,14 @@ void vinyl_record_apply(vinyl_record_t *r, const vinyl_box_t *b, lv_color_t rim)
 	lv_obj_set_size(r->disc, d, d);
 	lv_obj_align(r->disc, LV_ALIGN_TOP_LEFT, b->record_x, b->record_y);
 	lv_obj_set_style_border_color(r->disc, rim, 0);
-	for (int i = 0; i < 3; i++) {
-		int gd = d - d * (12 + i * 10) / 100;
+	for (int i = 0; i < VINYL_GROOVE_COUNT; i++) {
+		int gd = d - d * (VINYL_GROOVE_FIRST_PERCENT + i * VINYL_GROOVE_STEP_PERCENT) / 100;
+		gd &= ~1; /* whole-pixel centring keeps the ring crisp, not dotted */
+		if (gd < VINYL_GROOVE_WIDTH * 2)
+			gd = VINYL_GROOVE_WIDTH * 2;
 		lv_obj_set_size(r->grooves[i], gd, gd);
 		lv_obj_center(r->grooves[i]);
+		lv_obj_set_hidden(r->grooves[i], gd >= d);
 	}
 	int ld = d * 28 / 100;
 	lv_obj_set_size(r->label, ld, ld);

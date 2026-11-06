@@ -62,6 +62,30 @@ static void check_pressing_mark(const vinyl_record_t *record, const vinyl_box_t 
 	assert(rotated.x1 >= disc.x1 && rotated.x2 <= disc.x2);
 }
 
+static void check_grooves(const vinyl_record_t *record, const vinyl_box_t *b) {
+	lv_area_t disc;
+	lv_obj_get_coords(record->disc, &disc);
+	for (int i = 0; i < VINYL_GROOVE_COUNT; i++) {
+		lv_obj_t *g = record->grooves[i];
+		assert(!lv_obj_is_hidden(g));
+		assert(lv_obj_get_style_border_width(g, 0) == VINYL_GROOVE_WIDTH);
+		assert(lv_obj_get_style_border_opa(g, 0) == LV_OPA_COVER);
+		/* Lifted above the old 0x26 grey so the exposed semicircle reads on
+		 * the V1, but still far below the white rim. */
+		assert(lv_color_brightness(lv_obj_get_style_border_color(g, 0)) >= 0x30);
+		int expected = b->record_d - b->record_d * (VINYL_GROOVE_FIRST_PERCENT + i * VINYL_GROOVE_STEP_PERCENT) / 100;
+		expected &= ~1;
+		if (expected < VINYL_GROOVE_WIDTH * 2)
+			expected = VINYL_GROOVE_WIDTH * 2;
+		assert(lv_obj_get_width(g) == expected);
+		assert(lv_obj_get_height(g) == expected);
+		lv_area_t ga;
+		lv_obj_get_coords(g, &ga);
+		assert(ga.x1 + ga.x2 == disc.x1 + disc.x2);
+		assert(ga.y1 + ga.y2 == disc.y1 + disc.y2);
+	}
+}
+
 static void check_nested_placement(lv_obj_t *panel, lv_obj_t *sleeve, vinyl_record_t *record, const vinyl_box_t *b, int screen_w) {
 	/* Seed the anchors the standard layout leaves behind. A bare set_pos()
 	 * on a TOP_MID sleeve adds art_x to the centred anchor a second time:
@@ -88,6 +112,7 @@ static void check_nested_placement(lv_obj_t *panel, lv_obj_t *sleeve, vinyl_reco
 	assert(sleeve_area.x1 + sleeve_area.x2 == disc_area.x1 + disc_area.x2);
 	assert(lv_obj_get_index(record->disc) < lv_obj_get_index(panel));
 	check_pressing_mark(record, b, sleeve);
+	check_grooves(record, b);
 
 	/* A return through the standard compact placer must not reintroduce the
 	 * centred anchor, and the lyrics travel must move sleeve and record as
@@ -190,6 +215,6 @@ int main(void) {
 	 * 240x320, and a wider panel is not a firmware path. */
 	vinyl_box_t b = vinyl_layout_box(360, 640, vinyl_deck_height(34));
 	check_nested_placement(panel, sleeve, &record, &b, 360);
-	puts("PASS vinyl layout (V1, eight text metrics, reference-slanted pressing mark, no deck/info/seek/transport overlap, tiny-screen fallback, repeated apply/take-back, nested-panel alignment and black ground)");
+	puts("PASS vinyl layout (V1, eight text metrics, reference-slanted pressing mark, no deck/info/seek/transport overlap, tiny-screen fallback, repeated apply/take-back, nested-panel alignment, visible clean grooves and black ground)");
 	return 0;
 }

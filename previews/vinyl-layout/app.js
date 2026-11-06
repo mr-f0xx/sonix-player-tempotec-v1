@@ -40,9 +40,12 @@ function renderGeometry() {
   setBox($('sleeve'), b.artX, b.artY, b.side, b.side);
   setBox($('record'), b.recordX, b.recordY, b.d, b.d);
   $('deck').style.top = `${b.deckY}px`;
-  [0.88, 0.78, 0.68].forEach((ratio, i) => {
+  // Clean native-resolution grooves: even diameters and a 2 px lifted stroke,
+  // mirroring VINYL_GROOVE_* in vinylayout.h. No bitmap texture is scaled.
+  [0, 1, 2].forEach((i) => {
     const g = document.querySelector(`.g${i + 1}`);
-    const gd = b.d - Math.floor(b.d * (12 + i * 10) / 100);
+    let gd = b.d - Math.floor(b.d * (12 + i * 10) / 100);
+    gd &= ~1; if (gd < 4) gd = 4;
     g.style.width = `${gd}px`; g.style.height = `${gd}px`;
   });
   const label = Math.floor(b.d * .28);
@@ -130,7 +133,8 @@ $('exportBtn').onclick = async () => {
     if (stroke) { ctx.strokeStyle = stroke; ctx.lineWidth = lw; ctx.stroke(); }
   };
   circle(b.recordX, b.recordY, b.d, '#000', '#fff');
-  [0, 1, 2].forEach(i => { const gd = b.d - Math.floor(b.d * (12 + i * 10) / 100); circle(b.recordX + (b.d - gd) / 2, b.recordY + (b.d - gd) / 2, gd, null, '#262626', 1); });
+  const grooveColors = ['#5a5a5a', '#4a4a4a', '#3a3a3a'];
+  [0, 1, 2].forEach(i => { let gd = b.d - Math.floor(b.d * (12 + i * 10) / 100); gd &= ~1; if (gd < 4) gd = 4; circle(b.recordX + (b.d - gd) / 2, b.recordY + (b.d - gd) / 2, gd, null, grooveColors[i], 2); });
   const ld = Math.floor(b.d * .28); circle(b.recordX + (b.d - ld) / 2, b.recordY + (b.d - ld) / 2, ld, '#000', '#fff');
   const markW = Math.max(1, Math.round(b.d / 173)), markH = Math.max(2, Math.floor(b.d * .18));
   const markX1 = Math.floor(b.d * .56), markY1 = Math.floor(b.d * .71), markDx = Math.max(1, Math.floor(b.d * .05));
