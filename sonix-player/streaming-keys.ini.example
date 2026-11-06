@@ -1,3 +1,13 @@
+# Copy to the root of the microSD card as streaming-keys.ini (never commit it).
+#
+# Note on [tidal]: Sonix uses Tidal's v1 OAuth2 Device Authorization flow
+# (link.tidal.com) and unencrypted v1 FLAC/AAC streams, matching the stock V1
+# firmware. Self-serve apps created on developer.tidal.com are OpenAPI v2 keys
+# that lack the Limited Input Device grant and fail with:
+#   "Client is not a Limited Input Device client."
+# Run `python3 sonix-player/tools/extract_streamkeys.py <unpacked-rootfs>` to
+# extract the working [qobuz] and [tidal] pairs from your stock V1 firmware.
+
 [qobuz]
 app_id = 
 app_secret = 
@@ -5,6 +15,9 @@ app_secret =
 [tidal]
 client_id = 
 client_secret = 
+# Optional override; when omitted, Sonix tries "r_usr w_usr" and automatically
+# falls back to "r_usr" for read-only device keys such as the stock V1 pair.
+# scope = r_usr w_usr
 
 [podcast]
 api_key = 

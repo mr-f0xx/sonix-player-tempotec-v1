@@ -31,6 +31,7 @@
 // Configurable because keys change and so do the scopes they grant: a new key
 // that needs others takes one line in device_config.ini instead of a rebuild.
 #define TIDAL_SCOPE_DEFAULT "r_usr w_usr"
+#define TIDAL_SCOPE_READONLY "r_usr"
 
 // How large a cover is requested.
 //
@@ -98,6 +99,7 @@ static char client_secret[128];
 // requests: device_authorization and token must ask for the same scopes, and
 // two hand-written copies meant one of them would eventually be changed alone.
 static char scope_encoded[128];
+static bool scope_custom;
 static int cover_px = TIDAL_COVER_PX_DEFAULT;
 
 // Tidal's tokens are JWTs: six hundred to twelve hundred characters each, not
@@ -302,7 +304,10 @@ void tidal_init(void) {
 	// Spaces become %20 here, once. Writing them as '+' in the form would be
 	// shorter and wrong: the '+' would itself be percent-encoded and end up
 	// inside the scope name.
-	http_url_encode(config_get("tidal", "scope", TIDAL_SCOPE_DEFAULT), scope_encoded, sizeof(scope_encoded));
+	const char *configured_scope = config_get("tidal", "scope", "");
+	scope_custom = configured_scope && configured_scope[0] != '\0';
+	http_url_encode(scope_custom ? configured_scope : TIDAL_SCOPE_DEFAULT, scope_encoded,
+					sizeof(scope_encoded));
 
 	cover_px = (int)config_get_int("tidal", "cover_size", TIDAL_COVER_PX_DEFAULT);
 	// Only the sizes the CDN really serves: any other is a 403 on every cover.
@@ -746,8 +751,35 @@ bool tidal_login_begin(tidal_login_t *out) {
 		return false;
 	}
 
+	// Stock HiByOS Tidal device credentials grant only r_usr (not w_usr).
+	// When no explicit [tidal] scope override was configured and Tidal refuses
+	// r_usr w_usr for scope reasons, fall back to r_usr automatically and keep
+	// scope_encoded aligned for the subsequent token poll.
+	if (status == 400 && !scope_custom && strcmp(scope_encoded, TIDAL_SCOPE_READONLY) != 0) {
+		int err_root = json_root(&doc);
+		char err_code[64] = "";
+		char err_desc[200] = "";
+		json_obj_str(&doc, err_root, "error", err_code, sizeof(err_code));
+		json_obj_str(&doc, err_root, "error_description", err_desc, sizeof(err_desc));
+		if (strcmp(err_code, "invalid_scope") == 0 || strstr(err_desc, "scope") != NULL ||
+			strstr(err_desc, "Scope") != NULL) {
+			api_done(body, &doc);
+			body = NULL;
+			http_url_encode(TIDAL_SCOPE_READONLY, scope_encoded, sizeof(scope_encoded));
+			printf("tidal: w_usr scope not permitted for this client_id; retrying with %s\n",
+				   TIDAL_SCOPE_READONLY);
+			snprintf(form, sizeof(form), "client_id=%s&scope=%s", client_id, scope_encoded);
+			if (!auth_post("device_authorization", form, &body, &doc, &status)) {
+				return false;
+			}
+		}
+	}
+
 	if (status != 200) {
 		note_api_error(&doc, status);
+		if (strstr(last_error, "Limited Input Device") != NULL) {
+			set_error("%s", tr("tidal_not_device_client"));
+		}
 		api_done(body, &doc);
 		return false;
 	}

@@ -23,6 +23,7 @@
 #include "src/gui/shell/topbar.h"
 #include "src/system/bluetooth/bluetooth.h"
 #include "src/system/core/lang.h"
+#include "src/system/remote/sonixlink.h"
 
 lv_obj_t *btsettings_screen;
 
@@ -32,6 +33,7 @@ lv_obj_t *btsettings_screen;
 static bool compact_rows;
 static lv_obj_t *bt_switch;
 static lv_obj_t *status_label;
+static lv_obj_t *rx_mode_row;
 static lv_obj_t *paired_label;
 static lv_obj_t *paired_list;
 static lv_obj_t *found_label;
@@ -105,14 +107,28 @@ static void pairing_watch_stop(void) {
 	pairing_mac[0] = '\0';
 }
 
-// An ACL link alone is not an audio connection. Check both directions so a
-// headphone stream and a phone streaming into the receiver are reported alike.
-static bool pairing_device_audio_connected(void) {
-	if (bluetooth_device_audio_connected(pairing_mac)) {
+static bool any_audio_connected(const char *mac) {
+	if (bluetooth_device_audio_connected(mac)) {
 		return true;
 	}
 	char source[BT_MAC_MAX];
-	return bluetooth_receiver_device(source, sizeof(source), NULL, 0) && strcasecmp(source, pairing_mac) == 0;
+	return bluetooth_receiver_device(source, sizeof(source), NULL, 0) && strcasecmp(source, mac) == 0;
+}
+
+// An ACL link alone is not an audio connection. Check both directions so a
+// headphone stream and a phone streaming into the receiver are reported alike.
+static bool pairing_device_audio_connected(void) { return any_audio_connected(pairing_mac); }
+
+static void open_receiver_mode(void) {
+	if (bluetooth_audio_active()) {
+		gui_notify_popup("bt_disconnect_headphones_first");
+		return;
+	}
+	if (!bluetooth_get_enabled() && bluetooth_available()) {
+		bluetooth_set_receiver_profile(true);
+		bluetooth_set_enabled(true);
+	}
+	switch_screen(btreceiverpage_screen);
 }
 
 static void pairing_watch_cb(lv_timer_t *timer) {
@@ -128,6 +144,12 @@ static void pairing_watch_cb(lv_timer_t *timer) {
 	if (result == BT_OP_FAILED) {
 		pairing_watch_stop();
 		gui_notify_popup("bt_pairing_failed");
+		return;
+	}
+	if (result == BT_OP_NEEDS_RECEIVER || result == BT_OP_PAIRED) {
+		pairing_watch_stop();
+		topbar_refresh_radios();
+		open_receiver_mode();
 		return;
 	}
 	if (result == BT_OP_OK) {
@@ -183,10 +205,18 @@ static void refresh_status_label(void) {
 		return;
 	}
 
-	// Once the radio is up the lists already say which devices exist and which
-	// one is connected, so this line only reports the local visible name.
+	// This screen manages the TX (audio output) profile; advertising as
+	// discoverable here without an A2DP sink lets phones pair into a profile-less
+	// dead end. State the active TX role explicitly and only mention visibility
+	// when SonixLink remote control is exposing its RFCOMM service.
 	if (bluetooth_get_enabled()) {
-		lv_label_set_text_fmt(status_label, tr("bt_visible_as"), bluetooth_local_name());
+		if (sonixlink_get_enabled()) {
+			char visible[BT_NAME_MAX + 64];
+			snprintf(visible, sizeof(visible), tr("bt_visible_as"), bluetooth_local_name());
+			lv_label_set_text_fmt(status_label, "%s · %s", tr("bt_mode_tx_status"), visible);
+		} else {
+			lv_label_set_text(status_label, tr("bt_mode_tx_status"));
+		}
 	} else {
 		lv_label_set_text(status_label, tr("bt_bluetooth_off"));
 	}
@@ -333,7 +363,7 @@ static void paired_row_clicked_cb(lv_event_t *e) {
 	remember_mac(mac);
 
 	bool connected = lv_obj_get_user_data(row) != NULL; // BlueZ ACL link
-	bool audio_connected = bluetooth_device_audio_connected(mac);
+	bool audio_connected = any_audio_connected(mac);
 	if (connected || audio_connected) {
 		// The Connect entry on this menu requests A2DP even if its ACL link is
 		// already up; users do not need to cycle Bluetooth to recover audio.
@@ -352,7 +382,7 @@ static void paired_row_long_pressed_cb(lv_event_t *e) {
 	}
 	remember_mac(mac);
 	bool connected = lv_obj_get_user_data(row) != NULL;
-	bool audio_connected = bluetooth_device_audio_connected(mac);
+	bool audio_connected = any_audio_connected(mac);
 	show_device_menu(row, connected || audio_connected, audio_connected);
 }
 
@@ -370,7 +400,7 @@ static void row_menu_clicked_cb(lv_event_t *e) {
 	// a profile-disconnected device still offers Connect.
 	lv_obj_t *row = lv_obj_get_parent(button);
 	bool connected = row && lv_obj_get_user_data(row) != NULL;
-	bool audio_connected = bluetooth_device_audio_connected(mac);
+	bool audio_connected = any_audio_connected(mac);
 	show_device_menu(button, connected || audio_connected, audio_connected);
 }
 
@@ -409,7 +439,7 @@ static void add_row(lv_obj_t *parent, const bt_device_t *device, bool paired_sec
 		return;
 	}
 
-	bool audio_connected = paired_section && bluetooth_device_audio_connected(device->mac);
+	bool audio_connected = paired_section && any_audio_connected(device->mac);
 	bool connected = device->connected || audio_connected;
 
 	lv_obj_t *row = lv_btn_create(parent);
@@ -611,17 +641,10 @@ static bool radio_ready(void) {
 // than left for an empty page to imply.
 static void receiver_clicked_cb(lv_event_t *e) {
 	(void)e;
-	if (!radio_ready()) {
+	if (switcher_back_drag_active() || !bluetooth_available() || bluetooth_busy()) {
 		return;
 	}
-	// With headphones on the other end this device is the source, and receiver
-	// mode is the opposite arrangement: the output is already taken and there is
-	// nothing for a phone to stream into, so the page is not opened at all.
-	if (bluetooth_audio_active()) {
-		gui_notify_popup("bt_disconnect_headphones_first");
-		return;
-	}
-	switch_screen(btreceiverpage_screen);
+	open_receiver_mode();
 }
 
 static void scan_clicked_cb(lv_event_t *e) {
@@ -661,21 +684,38 @@ static void poll_cb(lv_timer_t *timer) {
 
 	// Scan button: disabled while the stack is still loading, faded while a
 	// sweep is running (tapping it then stops the sweep), solid otherwise.
+	// Receiver mode can also start from off, so it only disables without
+	// hardware or while a power transition is already running.
 	bool ready = radio_ready();
-	if (scan_btn && receiver_btn) {
+	bool can_rx = bluetooth_available() && !bluetooth_busy();
+	if (scan_btn) {
 		if (ready) {
 			lv_obj_remove_state(scan_btn, LV_STATE_DISABLED);
-			lv_obj_remove_state(receiver_btn, LV_STATE_DISABLED);
 		} else {
 			lv_obj_add_state(scan_btn, LV_STATE_DISABLED);
+		}
+	}
+	if (receiver_btn) {
+		if (can_rx) {
+			lv_obj_remove_state(receiver_btn, LV_STATE_DISABLED);
+		} else {
 			lv_obj_add_state(receiver_btn, LV_STATE_DISABLED);
+		}
+	}
+	if (rx_mode_row) {
+		lv_obj_set_hidden(rx_mode_row, !bluetooth_available());
+		if (can_rx) {
+			lv_obj_remove_state(rx_mode_row, LV_STATE_DISABLED);
+		} else {
+			lv_obj_add_state(rx_mode_row, LV_STATE_DISABLED);
 		}
 	}
 	if (scan_icon) {
 		lv_obj_set_style_image_opa(
 			scan_icon, !ready ? LV_OPA_20 : (bluetooth_scan_running() ? LV_OPA_50 : LV_OPA_COVER), 0);
-		lv_obj_set_style_image_opa(
-			receiver_icon, !ready ? LV_OPA_20 : (bluetooth_scan_running() ? LV_OPA_50 : LV_OPA_COVER), 0);
+	}
+	if (receiver_icon) {
+		lv_obj_set_style_image_opa(receiver_icon, !can_rx ? LV_OPA_20 : LV_OPA_COVER, 0);
 	}
 
 	// While a pairing is in flight its own watcher owns the result: consuming
@@ -712,6 +752,12 @@ static void poll_cb(lv_timer_t *timer) {
 		toast_success("bt_device_paired");
 		topbar_refresh_radios();
 		break;
+	case BT_OP_NEEDS_RECEIVER:
+		last_action = ACTION_NONE;
+		last_action_mac[0] = '\0';
+		topbar_refresh_radios();
+		open_receiver_mode();
+		break;
 	case BT_OP_FAILED:
 		last_action = ACTION_NONE;
 		last_action_mac[0] = '\0';
@@ -737,10 +783,10 @@ static void screen_loaded_cb(lv_event_t *e) {
 	lv_timer_resume(poll_timer);
 	lv_timer_ready(poll_timer);
 	bluetooth_refresh();
-	// Visible to other devices only from here. Searching and being searched for
-	// are the two halves of the same page: without this a phone looking for the
-	// player finds nothing, whatever it does.
-	bluetooth_set_discoverable(true);
+	// Only advertise here when SonixLink exposes its RFCOMM control service;
+	// audio receiver discoverability belongs exclusively to btreceiverpage so
+	// phones never discover and bond the player without an A2DP sink endpoint.
+	bluetooth_set_discoverable(sonixlink_get_enabled());
 }
 
 static void screen_unloaded_cb(lv_event_t *e) {
@@ -870,6 +916,8 @@ void btsettings_init(gui_config_t *cfg) {
 	lv_obj_set_style_text_font(status_label, &font_ui_20, 0);
 	lv_obj_set_style_pad_hor(status_label, 4, 0);
 	lv_label_set_long_mode(status_label, LV_LABEL_LONG_WRAP);
+
+	rx_mode_row = settingsrow_add(container, "bt_receiver_mode_row", NULL, receiver_clicked_cb, NULL);
 
 	paired_list = make_section(container, "bt_paired_devices", &paired_label);
 	found_list = make_section(container, "bt_other_devices", &found_label);
