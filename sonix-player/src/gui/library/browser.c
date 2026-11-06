@@ -1,4 +1,5 @@
 #include "browser.h"
+#include "browserstate.h"
 
 #include <dirent.h>
 #include <errno.h>
@@ -31,6 +32,8 @@
 #include "src/system/playback/device_state.h"
 #include "src/gui/shell/toast.h"
 #include "src/system/playback/playlist.h"
+#include "src/system/core/config.h"
+#include "src/system/library/library.h"
 #include "src/system/core/lang.h"
 #include "src/system/core/utils.h"
 
@@ -450,10 +453,53 @@ static void window_update(void) {
 	}
 }
 
+// Do not save the initial root listing or a programmatic scroll as user
+// navigation. In particular, a card that mounts late must not erase its state.
+static bool browser_started;
+static bool listing_loaded;
+static bool suppress_scroll_save;
+static bool save_after_listing;
+static bool browser_state_dirty;
+static lv_timer_t *state_timer;
+
+static bool state_file_path(char *out, size_t size) {
+	const char *path = config_path();
+	if (!path) return false;
+	int n = snprintf(out, size, "%s.browser", path);
+	return n >= 0 && (size_t)n < size;
+}
+
+static void save_browser_state(void) {
+	if (!browser_state_dirty || !listing_loaded) return;
+	char file[1024];
+	if (state_file_path(file, sizeof(file)) &&
+	    browser_state_save(file, current_path, lv_obj_get_scroll_y(file_list))) {
+		browser_state_dirty = false;
+	}
+}
+
+static void state_timer_cb(lv_timer_t *timer) {
+	save_browser_state();
+	lv_timer_pause(timer);
+}
+
+static void browser_user_navigation(void) {
+	// Flush the old folder before changing current_path.
+	save_browser_state();
+	save_after_listing = true;
+}
+
 static void list_scroll_cb(lv_event_t *e) {
 	(void)e;
 
 	window_update();
+
+	if (browser_started && listing_loaded && !suppress_scroll_save && state_timer &&
+	    lv_screen_active() == browser_screen) {
+		browser_state_dirty = true;
+		lv_timer_reset(state_timer);
+		lv_timer_resume(state_timer);
+	}
 
 	if (thumb_timer) {
 		lv_timer_resume(thumb_timer);
@@ -885,6 +931,7 @@ static void sel_close_cb(lv_event_t *e) {
 
 static void screen_unloaded_cb(lv_event_t *e) {
 	(void)e;
+	save_browser_state();
 	selection_stop();
 }
 
@@ -913,6 +960,7 @@ static void entry_clicked_cb(lv_event_t *e) {
 			scroll_stack[scroll_stack_len++] = lv_obj_get_scroll_y(file_list);
 		}
 		pending_scroll = -1;
+		browser_user_navigation();
 		browser_open_dir(full_path);
 	} else {
 		player_play_file(full_path);
@@ -957,6 +1005,9 @@ static void update_corner_buttons(void) {
 
 static void root_button_cb(lv_event_t *e) {
 	(void)e;
+	browser_user_navigation();
+	scroll_stack_len = 0;
+	pending_scroll = -1;
 	browser_open_dir(root_path);
 }
 
@@ -1012,37 +1063,32 @@ static void shuffle_button_cb(lv_event_t *e) {
 
 void browser_open_dir_public(const char *path) { browser_open_dir(path); }
 
-// The home screen's Browse tile starts on the card's Music folder, where the
-// V1's music conventionally lives, rather than on the card root. A card laid
-// out another way (artist folders straight at the root, say) still gets the
-// browser, on its root -- which is where the tile opened before.
-//
-// Only the path is set here. Switching the page in makes browser_refresh()
-// read it, on the reader thread; reading it here as well would list the same
-// folder twice on the way in, and that pause is the one the reader thread
-// exists to hide.
-void browser_start_in_music_folder(void) {
-	char start[sizeof(current_path)];
-	snprintf(start, sizeof(start), "%s/Music", root_path);
-
-	// Case-blind on the card (FAT and exFAT resolve "music" here too), and one
-	// stat rather than a listing of the root to find out.
-	struct stat st;
-	if (stat(start, &st) != 0 || !S_ISDIR(st.st_mode)) {
-		snprintf(start, sizeof(start), "%s", root_path);
-	}
-
-	if (strcmp(start, current_path) == 0) {
-		return;
-	}
-	strncpy(current_path, start, sizeof(current_path) - 1);
-	current_path[sizeof(current_path) - 1] = '\0';
-}
+// Shared by the power-off and restart paths on the UI thread.
+void browser_state_flush(void) { save_browser_state(); }
 
 void browser_refresh(void) {
-	if (current_path[0]) {
-		browser_open_dir(current_path);
+	if (!browser_started) {
+		char saved[sizeof(current_path)] = "", track[sizeof(current_path)] = "";
+		char file[1024], chosen[sizeof(current_path)];
+		int scroll = 0, saved_scroll = 0;
+		if (state_file_path(file, sizeof(file)))
+			browser_state_load(file, saved, sizeof(saved), &saved_scroll);
+		if (config_get_int("player", "remember_track", 0)) {
+			char virtual_path[sizeof(track)];
+			double pos;
+			if (library_playback_state_load(virtual_path, sizeof(virtual_path), &pos))
+				cue_split_path(virtual_path, track, sizeof(track));
+		}
+		if (browser_state_choose(root_path, saved, saved_scroll, track, chosen, sizeof(chosen), &scroll)) {
+			snprintf(current_path, sizeof(current_path), "%s", chosen);
+			pending_scroll = scroll;
+		}
+		browser_started = true;
+	} else if (listing_loaded) {
+		save_browser_state();
+		pending_scroll = lv_obj_get_scroll_y(file_list);
 	}
+	if (current_path[0]) browser_open_dir(current_path);
 }
 
 // Whether the chevron/swipe would walk up a folder rather than leave the
@@ -1073,6 +1119,7 @@ bool browser_go_up(void) {
 	// Going up: restore where this level was left, if it was remembered.
 	pending_scroll = scroll_stack_len > 0 ? scroll_stack[--scroll_stack_len] : -1;
 
+	browser_user_navigation();
 	browser_open_dir(parent);
 	return true;
 }
@@ -1381,6 +1428,7 @@ static void reader_start(void) {
 }
 
 static void browser_open_dir(const char *path) {
+	listing_loaded = false;
 	// The chosen rows are entries of the listing about to go.
 	selection_stop();
 
@@ -1479,7 +1527,17 @@ static void adopt_listing(void) {
 	if (target_scroll > max_scroll) {
 		target_scroll = max_scroll > 0 ? max_scroll : 0;
 	}
+	suppress_scroll_save = true;
 	lv_obj_scroll_to_y(file_list, target_scroll, LV_ANIM_OFF);
+	suppress_scroll_save = false;
+	listing_loaded = !failed;
+	if (save_after_listing) {
+		save_after_listing = false;
+		if (listing_loaded) {
+			browser_state_dirty = true;
+			save_browser_state();
+		}
+	}
 
 	if (failed) {
 		set_message("browser_open_failed");
@@ -1715,6 +1773,8 @@ void browser_init(gui_config_t *cfg) {
 
 	thumb_timer = lv_timer_create(thumb_timer_cb, THUMB_TICK_PERIOD_MS, NULL);
 	lv_timer_pause(thumb_timer);
+	state_timer = lv_timer_create(state_timer_cb, 1000, NULL);
+	lv_timer_pause(state_timer);
 
 	// The page paints two of its colours by hand, so it asks for them again
 	// when the theme or the accent changes.

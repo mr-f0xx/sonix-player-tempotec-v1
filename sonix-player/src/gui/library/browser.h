@@ -27,10 +27,8 @@ void browser_refresh(void);
 bool browser_go_up(void);
 bool browser_can_go_up(void); // true when the chevron/swipe walks up a folder instead of leaving
 
-// Where the home screen's Browse tile lands: the card's Music folder when
-// there is one, and the card root when there is not. Call it just before
-// switching to browser_screen; the page reads the folder as it loads.
-void browser_start_in_music_folder(void);
+// Flush a pending scroll before a normal power-off or restart (UI thread).
+void browser_state_flush(void);
 
 // Opens a directory directly. Only the soak test uses this; the player itself
 // navigates through the rows and the back button.

@@ -166,9 +166,6 @@ void main_menu_set_browse(bool enabled) {
 
 static void open_home_music(void) {
 	if (main_menu_browse()) {
-		// Straight into the card's Music folder, rather than the card root the
-		// Browse tile used to show.
-		browser_start_in_music_folder();
 		switch_screen(browser_screen);
 	} else {
 		switch_screen(music_screen);
