@@ -3389,3 +3389,20 @@ detection and artwork lookup use the corresponding file and suppress duplicate
 raw audio rows. `make -C sonix-player/tests tags` covers a multi-file UTF-8
 fixture, metadata lookup, format detection and the single-file boundary case.
 An on-device rescan and playback check is still needed.
+
+## Remember the folder browser
+
+The file browser remembers its last visited folder and scroll position across a
+restart, independently of the playing queue. On first use, with no usable saved
+folder, it tries the remembered local track's folder when Remember track is on,
+then Music, then the card root. CUE virtual paths are resolved to their sheet's
+folder. The home Browse tile and the Music page share the same position.
+
+A separate atomic state file beside device_config.ini holds a full-length path,
+including names the INI format cannot represent. Saved paths are checked against
+the mounted card, including symlinks; a missing card or deleted folder cannot
+send the browser outside the card or overwrite the saved position at boot. Scroll
+writes are debounced and flushed when leaving the page or shutting down. Folder
+reads remain asynchronous, and the saved offset is clamped when a listing has
+shrunk. `make -C sonix-player/tests browserstate` checks persistence and path
+fallbacks. The reboot and scroll behavior still needs checking on a V1.

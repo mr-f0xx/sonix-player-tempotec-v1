@@ -783,3 +783,11 @@ $(BUILD)/test_tidal_login: test_tidal_login.c $(ROOT)/src/system/streaming/tidal
 	@mkdir -p $(BUILD)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ $^ $(LDFLAGS) $(LDLIBS)
 
+
+.PHONY: browserstate
+browserstate: $(BUILD)/test_browserstate
+	$(BUILD)/test_browserstate
+
+$(BUILD)/test_browserstate: test_browserstate.c $(ROOT)/src/gui/library/browserstate.c $(ROOT)/src/gui/library/browserstate.h
+	@mkdir -p $(BUILD)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ test_browserstate.c $(ROOT)/src/gui/library/browserstate.c $(LDFLAGS) $(LDLIBS)

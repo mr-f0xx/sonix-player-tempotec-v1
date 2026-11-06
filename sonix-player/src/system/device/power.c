@@ -10,6 +10,7 @@
 
 #include "src/system/audio/waveform.h"
 #include "src/system/device/ota.h"
+#include "src/gui/library/browser.h"
 #include "src/system/device/system.h"
 #include "src/system/core/panel.h"
 
@@ -1236,6 +1237,7 @@ void power_shutdown(void) {
 	// position seeked to while paused, which changes no state at all, would
 	// never be written.
 	device_state_remember_flush();
+	browser_state_flush();
 
 	// The pet's last couple of minutes of music, for the same reason: its
 	// watcher writes every two minutes while something plays, and a clean

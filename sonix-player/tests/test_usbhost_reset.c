@@ -17,16 +17,17 @@ static void touch_file(const char *path) {
 int main(void) {
 	char root[] = "/tmp/sonix-reset-keep-XXXXXX";
 	assert(mkdtemp(root));
-	char journal[256], config[256], stock[256];
+	char journal[256], config[256], browser[256], stock[256];
 	assert(snprintf(journal, sizeof(journal), "%s/%s", root, USBHOST_JOURNAL_NAME) < (int)sizeof(journal));
 	assert(snprintf(config, sizeof(config), "%s/device_config.ini", root) < (int)sizeof(config));
+	assert(snprintf(browser, sizeof(browser), "%s/device_config.ini.browser", root) < (int)sizeof(browser));
 	assert(snprintf(stock, sizeof(stock), "%s/menu_cfg", root) < (int)sizeof(stock));
-	touch_file(journal); touch_file(config); touch_file(stock);
+	touch_file(journal); touch_file(config); touch_file(browser); touch_file(stock);
 	assert(kept(USBHOST_JOURNAL_NAME));
 	clear_folder(root);
-	assert(access(journal, F_OK) == 0 && access(config, F_OK) == 0);
+	assert(access(journal, F_OK) == 0 && access(config, F_OK) == 0 && access(browser, F_OK) == 0);
 	assert(access(stock, F_OK) != 0);
-	assert(unlink(journal) == 0 && unlink(config) == 0 && rmdir(root) == 0);
+	assert(unlink(journal) == 0 && unlink(config) == 0 && unlink(browser) == 0 && rmdir(root) == 0);
 	puts("PASS USB host journal survives first-start stock-data cleanup");
 	return 0;
 }

@@ -224,8 +224,6 @@ void topbar_set_battery_percent(bool shown) { (void)shown; }
 void topbar_set_clock_position(int pos) { (void)pos; }
 void switch_screen(lv_obj_t *screen) { lv_screen_load(screen); }
 void switch_screen_cb(lv_event_t *e) { switch_screen(lv_event_get_user_data(e)); }
-static bool browser_music_started;
-void browser_start_in_music_folder(void) { browser_music_started = true; }
 void ebookpage_open(void) { switch_screen(ebookpage_screen); }
 void switcher_attach_back_gesture(lv_obj_t *obj) { (void)obj; }
 bool switcher_back_drag_active(void) { return false; }
@@ -594,7 +592,6 @@ int main(int argc, char **argv) {
 	assert(main_menu_browse());
 	assert(find_label(lv_obj_get_child(grid, 0), tr("music_browse")));
 	lv_obj_send_event(lv_obj_get_child(grid, 0), LV_EVENT_CLICKED, NULL);
-	assert(browser_music_started);
 	assert(lv_screen_active() == browser_screen);
 	lv_screen_load(main_menu_screen);
 	lv_obj_set_state(browse_toggle, LV_STATE_CHECKED, false);

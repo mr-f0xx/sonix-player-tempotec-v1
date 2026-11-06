@@ -1,4 +1,5 @@
 #include "powermenu.h"
+#include "src/gui/library/browser.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -121,6 +122,7 @@ static void do_power_off(void) {
 static void do_reboot(void) {
 	printf("power: rebooting\n");
 	device_state_remember_flush();
+	browser_state_flush();
 	power_screen_off();
 	// The status LED, faded out like the power-off path: the screen is already
 	// dark, so this is the last thing the device says before it restarts.
