@@ -16,6 +16,7 @@
 #include "src/gui/nowplaying/lyricsearch.h"
 #include "src/gui/nowplaying/playbutton.h"
 #include "src/gui/nowplaying/playerdeck.h"
+#include "src/gui/nowplaying/vinylayout.h"
 #include "src/gui/nowplaying/waveformoverlay.h"
 #include "src/system/addons/addons.h"
 #include "src/gui/library/medialist.h"
@@ -103,6 +104,9 @@ static lv_color_t aam_accent(void);
 // The strip's two names share their row by what they say: called from the track
 // change and from the queue position, both of which sit above its definition.
 static void aam_strip_fit(void);
+static void vinyl_paint(void);
+static void vinyl_put(void);
+static bool vinyl_take_back(void);
 static lv_obj_t *progress_slider;
 // The compact slider leaves room for its oversized endpoint knob and shadow.
 // Zero means use the original percentage width on the HiBy panels.
@@ -410,6 +414,8 @@ static bool layout_studio_now;	  // likewise for the third arrangement
 static bool layout_immersive_now; // and for the fourth: the sleeve from edge to edge
 static bool layout_poster_now;	  // and for the fifth: the sleeve at the width of the screen, the deck on its own ground
 static bool layout_aam_now;		  // and for the sixth: the sleeve over the page, the media controls traded for it
+static bool layout_vinyl_now;
+static vinyl_record_t vinyl_record;
 // The shape of the track and the sleeve's colour: up with the alternative
 // layout, and kept when the words are shown over it.
 static bool layout_wave_now;
@@ -520,6 +526,7 @@ static bool cover_shape_poster;
 // is not a square in either of its two shapes. `cover_shape_aam` says whether
 // the picture on hand was made for it.
 static bool cover_shape_aam;
+static bool cover_shape_vinyl;
 
 // Immersive asks for the blurred copy as the FOOT of the photograph, at the
 // size of the deck, rather than as the whole screen: it reflects the visible
@@ -531,7 +538,7 @@ static bool backdrop_is_band;
 // blurred sleeve through it, so on this board the screen-sized blur is not
 // wanted while Poster is in force: the sleeve itself covers everything above
 // the deck, and the deck covers the rest.
-static bool backdrop_fills_screen(void) { return layout_studio_now || (backdrop_full && !layout_poster_now); }
+static bool backdrop_fills_screen(void) { return layout_studio_now || (backdrop_full && !layout_poster_now && !layout_vinyl_now); }
 
 static double current_total_length = 0; // cached from the last device_state snapshot, so slider math works between polls
 static char progress_label_text[32];
@@ -615,7 +622,7 @@ static void apply_live_mode(bool live) {
 	// The row under the bar stays for a station from a list, for its place in
 	// the list and nothing else.
 	if (below_slider_obj) {
-		if (live && !custom_nav) {
+		if (layout_vinyl_now || (live && !custom_nav)) {
 			lv_obj_set_hidden(below_slider_obj, true);
 		} else {
 			lv_obj_set_hidden(below_slider_obj, false);
@@ -914,7 +921,7 @@ static void paint_play_button(void) {
 	if (!play_btn || !play_btn_icon) {
 		return;
 	}
-	bool over_artwork = chrome_over_cover && !layout_poster_now;
+	bool over_artwork = layout_vinyl_now || (chrome_over_cover && !layout_poster_now);
 	// Waveform also uses the sleeve's colour without the explicit tint switch,
 	// except in palettes which intentionally override it in chrome_accent().
 	bool album_tinted = album_tone && (cover_tint ||
@@ -1195,7 +1202,7 @@ static void set_over_cover(bool on) {
 	// sleeve, so the chrome on it keeps the theme's colours whatever is
 	// playing; the chevron still parks over the artwork, which reaches the top
 	// of the screen in that arrangement.
-	bool over = on && !layout_poster_now;
+	bool over = layout_vinyl_now || (on && !layout_poster_now);
 
 	// Amber on Black and OLED: the deck's own role colours, over artwork or not.
 	bool mono = theme_is_monochrome();
@@ -1730,7 +1737,7 @@ static void full_backdrop_apply(void) {
 	if (!backdrop_full || !studio_bg || layout_studio_now || lyrics_look_on) {
 		return;
 	}
-	bool have = backdrop_blur_wanted() && current_backdrop.pixels != NULL && backdrop_is_full;
+	bool have = !layout_vinyl_now && backdrop_blur_wanted() && current_backdrop.pixels != NULL && backdrop_is_full;
 	lv_image_set_src(studio_bg, have ? &current_backdrop.dsc : NULL);
 	lv_obj_set_hidden(studio_bg, !have);
 	if (have) {
@@ -2335,6 +2342,7 @@ static void lyrics_progress_apply(int32_t progress) {
 	// sibling at the same centre point.
 	lyrics_shift(cover_art_group, away);
 	lyrics_shift(cover_placeholder_icon, away);
+	if (layout_vinyl_now) lyrics_shift(vinyl_record.disc, away);
 	if (!layout_alt_now) {
 		return; // the names stay in their row below the sleeve
 	}
@@ -4347,6 +4355,10 @@ static void aam_build(void) {
 static void apply_art_shape(void) {
 	int radius = art_shape == PLAYER_ART_SQUARE ? 0 :
 		art_shape == PLAYER_ART_VINYL ? LV_RADIUS_CIRCLE : sleeve_radius;
+	if (layout_vinyl_now) {
+		vinyl_paint();
+		return;
+	}
 	bool edge = layout_immersive_now || layout_poster_now || layout_aam_now;
 	if (cover_art_group) {
 		lv_obj_set_style_radius(cover_art_group, edge ? 0 : radius, 0);
@@ -4370,12 +4382,13 @@ static void apply_layout(void) {
 	bool was_immersive = immersive_take_back();
 	bool was_poster = poster_take_back();
 	bool was_aam = aam_take_back();
+	bool was_vinyl = vinyl_take_back();
 
 	// The panel split follows the arrangement (the alternative one leaves the
 	// names on the sleeve, so its deck is shorter and the sleeve taller).
 	// Before the pill room is worked out below, which is measured from the
 	// sleeve.
-	player_apply_geometry(was_immersive || was_poster || was_aam);
+	player_apply_geometry(was_immersive || was_poster || was_aam || was_vinyl);
 	player_deck_show_info(song_info_obj, layout_alt_now);
 	if (bp_is_tempotec_v1()) {
 		lv_obj_set_style_pad_top(player_menu, layout_alt_now ? COMPACT_WAVE_DECK_PAD_TOP : COMPACT_DECK_PAD_TOP, 0);
@@ -4482,6 +4495,7 @@ static void apply_layout(void) {
 		if (layout_poster_now) {
 			poster_put(); // which places the words' page with it
 		}
+		if (layout_vinyl_now) vinyl_put();
 		lyrics_layout();
 		// studio_take_back() took the V1's blur down with Studio's, and Poster
 		// wants it down as well: its deck is opaque ground and the sleeve
@@ -4531,6 +4545,7 @@ static void update_layout(const device_state_t *state) {
 	bool studio = layout_choice == PLAYER_LAYOUT_STUDIO;
 	bool immersive = layout_choice == PLAYER_LAYOUT_IMMERSIVE;
 	bool poster = layout_choice == PLAYER_LAYOUT_POSTER;
+	bool vinyl = layout_choice == PLAYER_LAYOUT_VINYL && bp_is_tempotec_v1();
 	// Album Art Max is measured for the 240x320 panel, and every number in it
 	// is one of that panel's. On the wide boards the choice is remembered but
 	// the page keeps the standard arrangement -- the same way Waveform falls
@@ -4541,7 +4556,7 @@ static void update_layout(const device_state_t *state) {
 	bool alt_changed = alt != layout_alt_now;
 
 	if (studio == layout_studio_now && immersive == layout_immersive_now && poster == layout_poster_now &&
-		aam == layout_aam_now && alt == layout_alt_now && wave == layout_wave_now &&
+		aam == layout_aam_now && vinyl == layout_vinyl_now && alt == layout_alt_now && wave == layout_wave_now &&
 		lyrics == lyrics_allowed && alt_title_pill) {
 		return;
 	}
@@ -4549,6 +4564,7 @@ static void update_layout(const device_state_t *state) {
 	layout_immersive_now = immersive;
 	layout_poster_now = poster;
 	layout_aam_now = aam;
+	layout_vinyl_now = vinyl;
 	layout_alt_now = alt;
 	layout_wave_now = wave;
 	lyrics_allowed = addons_enabled("lyrics") && lyrics;
@@ -4569,7 +4585,7 @@ static void update_layout(const device_state_t *state) {
 	// wrong shape and the picture is asked for again. Only on a change of
 	// arrangement, which is a setting the user has just touched.
 	if ((studio != backdrop_is_studio || immersive != cover_shape_immersive || poster != cover_shape_poster ||
-		 aam != cover_shape_aam || alt_changed) &&
+		 aam != cover_shape_aam || vinyl != cover_shape_vinyl || alt_changed) &&
 		cover_shown_path[0]) {
 		reload_cover(cover_shown_path);
 	}
@@ -4744,6 +4760,12 @@ static void wave_refresh(const char *path, double position) {
 static void cover_request_size(int *w, int *h) {
 	*w = layout_studio_now ? studio_cover_geometry(NULL) : cover_art_w;
 	*h = layout_studio_now ? *w : cover_art_h;
+	if (layout_vinyl_now) {
+		*w -= 2 * VINYL_ART_BORDER;
+		*h -= 2 * VINYL_ART_BORDER;
+		if (*w < 1) *w = 1;
+		if (*h < 1) *h = 1;
+	}
 }
 
 // The next track's cover, made and kept in the cache while this one plays, so
@@ -4823,6 +4845,7 @@ static void reload_cover(const char *filepath) {
 		cover_shape_immersive = layout_immersive_now;
 		cover_shape_poster = layout_poster_now;
 		cover_shape_aam = layout_aam_now;
+		cover_shape_vinyl = layout_vinyl_now;
 		// The reflected band is cut from the foot of the visible crop.
 		// Full-screen backgrounds in other layouts remain upright.
 		cover_set_backdrop_upright(backdrop_is_full || backdrop_is_band);
@@ -5098,6 +5121,7 @@ static void player_refresh_theme(void) {
 		lv_obj_set_style_bg_color(cover_art_group, theme()->cover_bg, 0);
 	}
 	poster_fade_paint(); // the deck's ground may have moved with the palette
+	if (layout_vinyl_now) vinyl_paint();
 	lv_obj_set_style_image_recolor(cover_placeholder_icon, theme()->text_secondary, 0);
 	// The backdrop over a loaded cover is always the dark treatment -- same
 	// look in both themes; only the no-cover panel follows the theme.
@@ -6933,8 +6957,74 @@ void player_sheet_attach_drag(lv_obj_t *obj, bool opening) {
 // The standard sleeve starts at the visible top of the back chevron, not
 // below its touch slot. Derive it from the shell's player position so moving
 // the chevron cannot leave the artwork on a different top line.
+static vinyl_box_t vinyl_box(void) {
+	int title_h = lv_font_get_line_height(bp_title_font());
+	int artist_h = lv_font_get_line_height(bp_artist_font());
+	int format_h = lv_font_get_line_height(bp_format_label_font());
+	int info_h = LV_MAX(title_h + artist_h, COMPACT_FAV_BTN_H + format_h);
+	return vinyl_layout_box((int)lv_obj_get_width(player_screen),
+						 (int)lv_obj_get_height(player_screen), vinyl_deck_height(info_h));
+}
+
+static void vinyl_paint(void) {
+	if (!vinyl_record.disc || !cover_art_group) return;
+	lv_color_t rim = lv_color_white();
+	vinyl_box_t b = vinyl_box();
+	if (cover_panel)
+		vinyl_place_sleeve(cover_panel, cover_art_group, &b, (int)lv_obj_get_width(player_screen));
+	vinyl_record_apply(&vinyl_record, &b, rim);
+	lv_obj_set_style_border_width(cover_art_group, VINYL_ART_BORDER, 0);
+	lv_obj_set_style_border_color(cover_art_group, rim, 0);
+	lv_obj_set_style_border_opa(cover_art_group, LV_OPA_COVER, 0);
+	lv_obj_set_style_radius(cover_art_group, VINYL_ART_RADIUS, 0);
+	lv_obj_set_style_radius(cover_img, VINYL_ART_RADIUS - VINYL_ART_BORDER, 0);
+	lv_obj_set_style_clip_corner(cover_art_group, true, 0);
+	/* The record is a sheet-level object so the sleeve can hide its top, but
+	 * its exposed arc ends above the deck. It never reaches the names, seek
+	 * bar or transport; keep it behind the sleeve for the tucked-in look. */
+	lv_obj_move_background(vinyl_record.disc);
+}
+
+static void vinyl_put(void) {
+	if (!cover_panel || !player_menu) return;
+	vinyl_box_t b = vinyl_box();
+	menu_height = (int)lv_obj_get_height(player_screen) - b.deck_y;
+	cover_box_h = b.deck_y;
+	cover_art_w = cover_art_h = b.art_side;
+	lv_obj_set_size(player_menu, cover_box_w, menu_height);
+	vinyl_place_sleeve(cover_panel, cover_art_group, &b, (int)lv_obj_get_width(player_screen));
+	vinyl_ground_apply(player_screen, player_menu, studio_bg);
+	if (below_slider_obj) lv_obj_set_hidden(below_slider_obj, true);
+	vinyl_paint();
+	placeholder_rescale();
+	placeholder_place();
+}
+
+static bool vinyl_take_back(void) {
+	if (!vinyl_record.disc) return false;
+	bool was = !lv_obj_is_hidden(vinyl_record.disc);
+	lv_obj_set_hidden(vinyl_record.disc, true);
+	if (cover_art_group) {
+		lv_obj_set_style_border_width(cover_art_group, 0, 0);
+		lv_obj_set_style_radius(cover_art_group, sleeve_radius, 0);
+	}
+	if (cover_img) lv_obj_set_style_radius(cover_img, sleeve_radius, 0);
+	if (player_menu) {
+		lv_obj_remove_local_style_prop(player_menu, LV_STYLE_BG_OPA, 0);
+		lv_obj_remove_local_style_prop(player_menu, LV_STYLE_BG_IMAGE_OPA, 0);
+	}
+	if (player_screen) {
+		lv_obj_remove_local_style_prop(player_screen, LV_STYLE_BG_COLOR, 0);
+		lv_obj_remove_local_style_prop(player_screen, LV_STYLE_BG_OPA, 0);
+		lv_obj_remove_local_style_prop(player_screen, LV_STYLE_BG_GRAD_DIR, 0);
+		lv_obj_remove_local_style_prop(player_screen, LV_STYLE_BG_IMAGE_OPA, 0);
+	}
+	if (below_slider_obj) lv_obj_set_hidden(below_slider_obj, live_mode && !live_custom_nav);
+	return was;
+}
+
 static int compact_sleeve_top(void) {
-	return layout_alt_now ? COMPACT_SLEEVE_TOP
+	return layout_vinyl_now ? VINYL_TOP : layout_alt_now ? COMPACT_SLEEVE_TOP
 						  : back_btn_centre_y() - bp_header_button_size() / 2 + COMPACT_CHEVRON_INSET_TOP;
 }
 
@@ -6942,6 +7032,7 @@ static int compact_sleeve_top(void) {
 // Raising the standard sleeve gives it a modest size increase while reserving
 // real breathing room above the names, rather than spending it all on artwork.
 static int compact_sleeve_side(void) {
+	if (layout_vinyl_now) return vinyl_box().art_side;
 	int bottom = layout_alt_now ? COMPACT_SLEEVE_MARGIN : COMPACT_STANDARD_SLEEVE_MARGIN;
 	int side = LV_MIN(cover_box_w - 2 * COMPACT_SLEEVE_SIDE_MARGIN, cover_box_h - compact_sleeve_top() - bottom);
 	if (side < 64) {
@@ -6955,6 +7046,11 @@ static int compact_sleeve_side(void) {
 // deck stands in front of its foot.
 static void compact_place_sleeve(void) {
 	int top = layout_poster_now ? 0 : compact_sleeve_top();
+	if (layout_vinyl_now) {
+		vinyl_box_t b = vinyl_box();
+		vinyl_place_sleeve(cover_panel, cover_art_group, &b, (int)lv_obj_get_width(player_screen));
+		return;
+	}
 	if (layout_alt_now) {
 		int extra = cover_box_h - top - COMPACT_SLEEVE_MARGIN - cover_art_h;
 		if (extra > 0) top += extra / 2;
@@ -7100,8 +7196,9 @@ static void player_apply_geometry(bool force) {
 		return;
 	}
 
-	int want_menu = compact_deck_height(layout_alt_now);
-	if (want_menu == menu_height && !force) {
+	int want_menu = layout_vinyl_now ? (int)lv_obj_get_height(player_screen) - vinyl_box().deck_y
+									 : compact_deck_height(layout_alt_now);
+	if (want_menu == menu_height && !force && !layout_vinyl_now) {
 		return; // the arrangement did not change the deck
 	}
 	menu_height = want_menu;
@@ -7652,6 +7749,9 @@ void player_init(gui_config_t *cfg) {
 		lv_obj_add_style(cover_panel, &compact_clear_style, 0);
 	}
 
+	vinyl_record_build(&vinyl_record, player_screen);
+	lv_obj_set_hidden(vinyl_record.disc, true);
+
 	// A transparent frame exactly the size of the sleeve. Its rounded clip
 	// keeps both the artwork and its overlays inside the same soft corners; the
 	// full panel remains the hit target for swipes and the lyrics gesture.
@@ -7978,6 +8078,7 @@ void player_init(gui_config_t *cfg) {
 						: (saved == (int)PLAYER_LAYOUT_IMMERSIVE) ? PLAYER_LAYOUT_IMMERSIVE
 						: (saved == (int)PLAYER_LAYOUT_POSTER)	   ? PLAYER_LAYOUT_POSTER
 						: (saved == (int)PLAYER_LAYOUT_ALBUM_ART_MAX) ? PLAYER_LAYOUT_ALBUM_ART_MAX
+						: (saved == (int)PLAYER_LAYOUT_VINYL) ? PLAYER_LAYOUT_VINYL
 																  : PLAYER_LAYOUT_STANDARD;
 	// apply_layout() below puts the standard one up first: none of the others
 	// is in force until it says so.
@@ -7986,6 +8087,7 @@ void player_init(gui_config_t *cfg) {
 	layout_immersive_now = false;
 	layout_poster_now = false;
 	layout_aam_now = false;
+	layout_vinyl_now = false;
 	apply_layout();
 
 	theme_register_refresh(player_refresh_theme);
