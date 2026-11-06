@@ -1722,6 +1722,20 @@ static void coverflow_cb(lv_event_t *e) {
 // The page owns the setting; this stores it and asks the page to decide again.
 // ---------------------------------------------------------------------------
 
+static lv_obj_t *art_shape_pills[3];
+
+static void art_shape_refresh(void) {
+	for (int i = 0; i < 3; i++) {
+		if (art_shape_pills[i]) settingsrow_pill_active(art_shape_pills[i], player_art_shape_get() == (player_art_shape_t)i);
+	}
+}
+
+static void art_shape_pick_cb(lv_event_t *e) {
+	if (player_sheet_drag_active() || switcher_back_drag_active()) return;
+	player_art_shape_set((player_art_shape_t)(intptr_t)lv_event_get_user_data(e));
+	art_shape_refresh();
+}
+
 static lv_obj_t *layout_standard_pill;
 static lv_obj_t *layout_alternative_pill;
 static lv_obj_t *layout_studio_pill;
@@ -2538,6 +2552,16 @@ static void build_display_page(gui_config_t *cfg) {
 
 	layout_refresh();
 	theme_register_refresh(layout_refresh);
+
+	// Inset sleeves can be square, softly rounded, or circular like a record.
+	lv_obj_t *art_pills = NULL;
+	settingsrow_pills(container, "musicsettings_art_shape", &art_pills);
+	art_shape_pills[PLAYER_ART_ROUNDED] = settingsrow_pill(art_pills, "musicsettings_art_rounded", PLAYER_ART_ROUNDED, art_shape_pick_cb);
+	art_shape_pills[PLAYER_ART_SQUARE] = settingsrow_pill(art_pills, "musicsettings_art_square", PLAYER_ART_SQUARE, art_shape_pick_cb);
+	art_shape_pills[PLAYER_ART_VINYL] = settingsrow_pill(art_pills, "musicsettings_art_vinyl", PLAYER_ART_VINYL, art_shape_pick_cb);
+	option_note(container, "musicsettings_art_shape_note");
+	art_shape_refresh();
+	theme_register_refresh(art_shape_refresh);
 
 	// Standard keeps its format line; custom layouts can show the tagged year.
 	lv_obj_t *recording_year_switch;

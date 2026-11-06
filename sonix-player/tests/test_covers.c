@@ -491,6 +491,47 @@ static void test_tagwriter_covers(const char *dir) {
     free(jpg);
 }
 
+// A vertically graded sleeve makes the reflection's orientation observable,
+// including when the visible cover is cropped to a non-square rectangle.
+static void test_immersive_reflection(const char *dir) {
+	char folder[512], art_path[540], track[540];
+	snprintf(folder, sizeof(folder), "%s/reflection", dir);
+	assert(mkdir(folder, 0755) == 0);
+	snprintf(art_path, sizeof(art_path), "%s/cover.jpg", folder);
+	snprintf(track, sizeof(track), "%s/song.flac", folder);
+	uint8_t rgb[96 * 96 * 3];
+	for (int y = 0; y < 96; y++) {
+		for (int x = 0; x < 96; x++) {
+			size_t i = ((size_t)y * 96 + x) * 3;
+			rgb[i] = rgb[i + 1] = rgb[i + 2] = (uint8_t)(y * 255 / 95);
+		}
+	}
+	size_t len = 0;
+	uint8_t *jpg = art_encode_jpeg(rgb, 96, 96, 95, &len);
+	assert(jpg);
+	write_file_bytes(art_path, jpg, len);
+	free(jpg);
+	write_file_bytes(track, (const uint8_t *)"fLaC", 4);
+	cover_set_backdrop_light(false);
+	cover_set_backdrop_upright(true);
+	cover_set_backdrop_from_bottom(true);
+	cover_set_backdrop_band_brightness(100);
+	cover_image_t cover, band;
+	assert(cover_load_player_images(track, 120, 80, &cover, 120, 32, &band));
+	assert(cover.dsc.header.w == 120 && cover.dsc.header.h == 80);
+	assert(band.dsc.header.w == 120 && band.dsc.header.h == 32);
+	const uint16_t *px = (const uint16_t *)band.pixels;
+	// Red in RGB565: near the seam comes from lower (brighter) artwork.
+	int top = (px[4 * 120 + 60] >> 11) & 31;
+	int bottom = (px[27 * 120 + 60] >> 11) & 31;
+	assert(top > bottom + 1);
+	cover_free(&cover);
+	cover_free(&band);
+	cover_set_backdrop_from_bottom(false);
+	cover_set_backdrop_upright(false);
+	cover_set_backdrop_band_brightness(0);
+}
+
 int main(void) {
 	char dir[] = "/tmp/sonix-covers-test-XXXXXX";
 	assert(mkdtemp(dir) != NULL);
@@ -499,6 +540,7 @@ int main(void) {
 	test_oversized_mapped_covers(dir);
 	test_sigbus_card_removal_guard(dir);
 	test_ogg_and_wv_embedded_covers(dir);
+	test_immersive_reflection(dir);
 	test_1000_cover_cache_and_loader(dir);
 
 	char cmd[600];
