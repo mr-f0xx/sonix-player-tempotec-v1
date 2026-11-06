@@ -125,11 +125,16 @@ pulled away from the pixel's own grey by `BACKDROP_BAND_SAT_PCT`, 140 -- sees
 to it that the hue survives the dim: a dark ground of some colour, which is
 what light type has always wanted here, and not a light ground of none.
 The band is asked for
-at the deck's own rectangle (240 wide by `compact_deck_height()` tall) and cut
+at the deck's own rectangle with a reach above it (240 wide by
+`compact_deck_height()` plus `IMMERSIVE_FROST_OVERHEAD`, 12, tall) and cut
 out of the very crop the screen-sized picture was made from -- `make_backdrop()`
 takes the band from the foot of that crop rather than from a crop of the band's
 own aspect, because a blur whose colours come from pixels that are not on the
-screen meets the photograph above it as a seam of the wrong colour. The band is
+screen meets the photograph above it as a seam of the wrong colour. Those
+twelve pixels above the deck frost the sleeve's own foot along with the band,
+so the first row of the deck is not flush against the frost's edge: the
+photograph itself, blurred, a reach rather than a stretch of the band. The
+band is
 an image object of the artwork's frame, built before the words' page: over the
 picture, under the source marks, under the deck, under the sheet the lyrics
 slide in on. It is frosted glass and not a panel -- the artwork stays where it
