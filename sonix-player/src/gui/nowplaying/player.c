@@ -16,6 +16,7 @@
 #include "src/gui/nowplaying/lyricsearch.h"
 #include "src/gui/nowplaying/playbutton.h"
 #include "src/gui/nowplaying/playerdeck.h"
+#include "src/gui/nowplaying/waveformoverlay.h"
 #include "src/system/addons/addons.h"
 #include "src/gui/library/medialist.h"
 #include "src/gui/fonts/fonts.h"
@@ -4374,32 +4375,20 @@ static void apply_layout(void) {
 		// pads the shorter one out to the length of the longer, and each has to
 		// be able to scroll on its own.
 		//
-		// The labels are a percentage of their parent in the standard layout,
-		// and a percentage of a parent that is itself sized by its contents is
-		// nothing at all. Here they size themselves -- so each pill ends where
-		// its own text ends -- up to what is left of the sleeve once the
-		// margins are taken off. The two rows keep different limits: the title
-		// is the top row, clear of the star's disc, and may run the whole way
-		// across; the artist sits in the disc's own row and has to stop short
-		// of it. That is a short name's width on both, and only a long one
-		// still goes around.
-		int title_room = cover_art_w - 2 * alt_pad - 2 * alt_pill_pad_h - bp_pick(4, 12);
-		int artist_room = cover_art_w - 2 * alt_pad - alt_fav_size - 2 * alt_pill_pad_h - bp_pick(4, 12);
-		if (title_room < 40) {
-			title_room = 40;
-		}
-		if (artist_room < 40) {
-			artist_room = 40;
-		}
+		// Both pills reserve space beside the disc: its upper edge can reach
+		// the title with larger fonts, and without an artist the title drops
+		// into the bottom row. Long labels continue to scroll in their boxes.
+		int text_room = waveform_pill_text_room(cover_art_w, alt_pad, alt_fav_size, alt_pill_pad_h,
+												 bp_pick(4, 12));
 		if (song_title_label) {
 			lv_obj_set_parent(song_title_label, alt_title_pill);
 			lv_obj_set_width(song_title_label, LV_SIZE_CONTENT);
-			lv_obj_set_style_max_width(song_title_label, title_room, 0);
+			lv_obj_set_style_max_width(song_title_label, text_room, 0);
 		}
 		if (song_artist_label) {
 			lv_obj_set_parent(song_artist_label, alt_artist_pill);
 			lv_obj_set_width(song_artist_label, LV_SIZE_CONTENT);
-			lv_obj_set_style_max_width(song_artist_label, artist_room, 0);
+			lv_obj_set_style_max_width(song_artist_label, text_room, 0);
 		}
 
 		if (fav_btn_obj && alt_fav_circle) {
@@ -5454,7 +5443,9 @@ static void update_fav_button(void) {
 	lv_image_set_scale(fav_btn_icon, layout_aam_now ? AAM_STAR_SCALE
 											: layout_poster_now
 												? bp_pick(POSTER_HEART_SCALE, POSTER_HEART_SCALE_WIDE)
-												: bp_pick(FAV_STAR_SCALE, FAV_STAR_SCALE_WIDE));
+												: layout_alt_now && bp_is_tempotec_v1()
+													? WAVEFORM_FAV_COMPACT_SCALE
+													: bp_pick(FAV_STAR_SCALE, FAV_STAR_SCALE_WIDE));
 	lv_obj_set_style_image_recolor(fav_btn_icon, favorite_color, 0);
 	lv_obj_set_style_image_recolor_opa(fav_btn_icon, LV_OPA_COVER, 0);
 }
@@ -7202,7 +7193,7 @@ void player_init(gui_config_t *cfg) {
 	cover_art_h = cover_box_h;
 	sleeve_radius = compact ? 14 : 18;
 	alt_pad = compact ? 6 : ALT_PAD;
-	alt_fav_size = compact ? 36 : ALT_FAV_SIZE;
+	alt_fav_size = compact ? WAVEFORM_FAV_COMPACT_SIZE : ALT_FAV_SIZE;
 	alt_pill_pad_h = compact ? 10 : ALT_PILL_PAD_H;
 	alt_pill_pad_v = compact ? 5 : ALT_PILL_PAD_V;
 	if (compact) {
