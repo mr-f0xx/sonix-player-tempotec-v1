@@ -3081,6 +3081,61 @@ release, with the config and the probe replaced) and the held-mode half of
 `test_usbhostprobe` (no timeout, no unplug release), on top of the existing
 suites. Neither models the electrical behaviour of the socket.
 
+### On the V1: recognised at once, then silent after about ninety seconds
+
+The first board report of the setting. Both dongles behaved the same way: the
+ESR was found immediately and played for about a minute and a half, then the
+sound stopped with the player still playing and the top bar still showing the
+USB-C glyph; unplugging and replugging it brought it back for another minute and
+a half; the JCally did the same. Swapping one dongle for the other took about
+ten seconds to be noticed, and a few times a dongle was not found at all.
+
+So the role acquisition works -- the part this change was for. What fails
+afterwards is everything downstream of it, and the three things below are the
+ones this repository can actually point at. There is no board here: each is
+reasoned from the code, and the log line added last is what tells them apart on
+the next run.
+
+- **The held role is now checked, not just written.** `Source` on the TCS1421 is
+  a request to the controller's own state machine, not a setting that stays: the
+  driver re-runs its role decision on every attach and detach, and the role it
+  started in is `NormalDRP`. Two bad reads a second apart -- nothing on the host
+  bus *and* the attribute not reading `Source` -- write both controls again, no
+  more often than every five seconds. A device enumerated on the bus is proof
+  the far end is alive whatever the attribute says, and is never rewritten under.
+- **A USB device is no longer "played" out of the jack.** `open_pcm_device()`
+  falls back to `default` -- the CS43198 -- when the device it was asked for
+  will not open, which is right for headphones that walked out of range and
+  wrong for a dongle the player is itself the host of: the sound goes into a
+  socket nobody is listening to while the interface keeps the USB-C glyph up,
+  which is exactly the shape of the report. The fallback is now Bluetooth's
+  alone. The USB side gets ten seconds of retries instead of two -- a dongle
+  that has just re-enumerated needs seconds, not milliseconds, before its card
+  is back -- and a track that still cannot open says so and stops rather than
+  playing somewhere else.
+- **The wake no longer rewrites the volume chain under a live USB stream.**
+  `power_screen_on()` re-applies the volume for the CS43198's benefit after every
+  blank. That call is the whole chain, and on the USB route it ends in the
+  dongle's own control; the CS43198 is not in that path at all and a dongle on
+  the bus was never blanked. It is skipped while the USB card is the output.
+- **A second dongle is a second device.** Both land on the lowest free card
+  number, usually card 1, so the number stayed put across a swap and the new
+  device kept the old one's name and level. The poll now reads the bus name the
+  card hangs off (`1-1`) and routes again when that has moved.
+- **The health line says what the stream is doing.** Once per `HEALTH_PERIOD_MS`
+  (10 s) per track it now carries the PCM's state and how much is still queued:
+  `stream RUNNING with 4096 frames queued (92 ms)`. A RUNNING stream whose queue
+  does not go down is a device being handed frames it is not consuming; a
+  PREPARED one never started. That single clause is what separates a dead dongle
+  from a stalled decoder on the next log.
+
+`make -C sonix-player/tests usbhost` covers the first, the fourth and the
+`read_card_bus()` half of the fourth: `test_usbhostprobe` drives the rewrite on
+its slower beat and the "device on the bus is never rewritten" rule, and
+`test_usbaudio_arbitration` resolves a card's device link both ways. The audio
+fallback and the wake are compile-checked only -- there is no ALSA here and the
+host simulator cannot be linked without it.
+
 ## Bluetooth drop-outs with Wi-Fi joined, and a USB-C DAC that was never found
 
 Two reports from one test session on a V1. Neither could be reproduced here --

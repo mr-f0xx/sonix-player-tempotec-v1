@@ -67,8 +67,13 @@
   is switched off. **A computer or a charger must not be connected while
   it is on.** ADB, DAC mode and card sharing take the port over from it and
   give it back afterwards, and it is given back automatically before a
-  suspend. The older twenty-second **Try external USB DAC** trial is still
-  there, underneath it, for a one-off test that leaves no setting behind.
+  suspend. The port's role is also read back every second while it is held
+  and written again if the controller has returned to its own default, which
+  it does on its own after an attach or a detach. A dongle that goes quiet is
+  never routed around: the track waits for it rather than being played to the
+  built-in DAC. The older twenty-second **Try external USB DAC** trial is
+  still there, underneath it, for a one-off test that leaves no setting
+  behind.
 - **In-line remote** - the three-button cable remote: one click play/pause, two
   next, three previous.
 

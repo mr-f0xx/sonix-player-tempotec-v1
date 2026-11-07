@@ -40,6 +40,13 @@
 #define USBHOST_RETRY_SECONDS 1
 #define USBHOST_MAGIC "sonix-usb-host-probe-v1\n"
 
+// Where the devices on the host bus are looked for, by the held-role check
+// below. Overridable for the same reason as the two paths above: the tests run
+// against a directory of their own.
+#ifndef USBHOST_USB_BUS
+#define USBHOST_USB_BUS "/sys/bus/usb/devices"
+#endif
+
 #define STR_(x) #x
 #define STR(x) STR_(x)
 
@@ -50,6 +57,11 @@ static struct {
 	// Held rather than tried: the role stays forced for as long as the user
 	// asks for, instead of the diagnostic window in begin().
 	bool held;
+	// A held role is checked as well as written -- see keep_role_locked().
+	long long checked_at;	 // when both controls were last read back
+	int checks;		 // consecutive reads that found them wrong
+	long long rewritten_at;	 // the last rewrite of both
+	int rewrites;		 // rewrites since the setting last took the port
 	long long started, absent_since, retry_at;
 	char role[32];
 	char phy[PATH_MAX];
@@ -74,6 +86,27 @@ static bool read_line(const char *path, char *out, size_t size) {
 
 static bool saved_role_valid(const char *role) {
 	return strcmp(role, "NormalDRP") == 0 || strcmp(role, "StrongDRP") == 0 || strcmp(role, "Sink") == 0;
+}
+
+// Whether something is on the host bus: a device under the controller's own
+// directory, "1-1" or "1-1.2", and not an interface ("1-1:1.0") and not the
+// root hub ("usb1").
+//
+// This is the only positive evidence the port has that the far end survived a
+// role write. The Type-C mode can be written and read back as "Source" with
+// nothing attached at all; a device sitting on the bus cannot.
+static bool host_bus_has_device(void) {
+	DIR *dir = opendir(USBHOST_USB_BUS);
+	if (!dir) return false;
+	bool found = false;
+	struct dirent *de;
+	while (!found && (de = readdir(dir)) != NULL) {
+		const char *name = de->d_name;
+		if (name[0] < '0' || name[0] > '9' || !strchr(name, '-') || strchr(name, ':')) continue;
+		found = true;
+	}
+	closedir(dir);
+	return found;
 }
 
 static bool write_attr(const char *path, const char *value) {
@@ -264,6 +297,83 @@ static bool request_host_locked(const char *why) {
 	return true;
 }
 
+// How often a held role is read back, and how many reads in a row have to find
+// it wrong before it is written again.
+//
+// A write to the TCS1421 is a request to the controller's own state machine, not
+// a setting that stays. The driver re-runs its role decision on every attach and
+// detach, from the mode it started in (NormalDRP), and whatever is written to
+// the attribute does not survive that -- the port is then dual while the SoC is
+// still meant to be the host, which is a combination nothing here asked for and
+// nothing recovers from on its own. Two consecutive bad reads a second apart is
+// the threshold: one is a port in the middle of a role transition, two is a
+// port that has decided.
+#define ROLE_CHECK_SECONDS 1
+#define ROLE_CHECK_MISSES 2
+// And how soon after a rewrite the port may be rewritten again if that did not
+// take either. A re-enumerating dongle comes back within a few seconds; this is
+// the space between attempts, not the attempt's own timeout.
+#define ROLE_REWRITE_SECONDS 5
+
+// Reads the two controls back and writes them again when they are not what was
+// asked for. Caller holds probe.lock. Returns whether the role was written
+// again, which is the only thing the poll has to know.
+static bool keep_role_locked(long long now) {
+	if (now < 0) return false;
+	if (probe.checked_at && now - probe.checked_at < ROLE_CHECK_SECONDS) return false;
+	probe.checked_at = now;
+
+	char mode[32];
+	bool mode_ok = read_line(USBHOST_TCS_CFG, mode, sizeof(mode)) && strcmp(mode, "Source") == 0;
+	// A bus device is the answer the kernel gives to "is the far end still
+	// there": with one enumerated, the controller's role is doing its job
+	// whatever the attribute says, and the Type-C mode is a value the driver
+	// is entitled to report in its own terms. Without one, the attribute is all
+	// there is, and both controls have to say host.
+	if (host_bus_has_device()) {
+		probe.checks = 0;
+		return false;
+	}
+	if (mode_ok) {
+		probe.checks = 0;
+		return false;
+	}
+
+	if (++probe.checks < ROLE_CHECK_MISSES) return false;
+	probe.checks = 0;
+	if (probe.rewritten_at && now - probe.rewritten_at < ROLE_REWRITE_SECONDS) return false;
+	probe.rewritten_at = now;
+
+	// The Type-C mode first, as on the way in. The PHY override is written
+	// again with it: whether it was the mode or the override that went, the
+	// pair is what the far end needs, and a PHY already in host is not harmed
+	// by being told so again.
+	bool ok = write_role("Source");
+	if (ok) {
+		probe.phy_cleared = false;
+		ok = write_attr(probe.phy, "host");
+	}
+	probe.rewrites++;
+	if (!ok) {
+		fprintf(stderr, "usbhost: the port did not take Source again; the next attempt is in %d s\n",
+				ROLE_REWRITE_SECONDS);
+		return false;
+	}
+	// Said on the first one and then once a minute, because an empty port is
+	// rewritten on this same 5-second beat for as long as the setting is on --
+	// that is the setting working, not a fault, and a line per attempt would
+	// bury whatever the log was opened for. A device that keeps dropping off
+	// the bus reads differently: it is the same line, one a minute.
+	if (probe.rewrites == 1 || probe.rewrites % 12 == 0) {
+		char was[32];
+		snprintf(was, sizeof(was), "%s", mode[0] ? mode : "?");
+		fprintf(stderr, "usbhost: the port had gone back to %s with no device on the bus; Source and PHY host "
+						"written again (rewrite %d)\n",
+				was, probe.rewrites);
+	}
+	return true;
+}
+
 // Shared by the timed trial and the held mode. `held` is the whole difference:
 // a held role has no deadline, and a DAC that goes away does not take it down
 // either (see usbhostprobe_poll()).
@@ -295,6 +405,10 @@ static usbhost_probe_result_t begin_locked(bool held, const char *why) {
 	probe.started = now;
 	probe.absent_since = -1;
 	probe.retry_at = 0;
+	probe.checked_at = 0;
+	probe.checks = 0;
+	probe.rewritten_at = 0;
+	probe.rewrites = 0;
 	probe.had_card = probe.saw_interface = probe.stopping = probe.reported_failure = false;
 	probe.held = held;
 	probe.role_restored = false;
@@ -371,6 +485,12 @@ usbhost_probe_event_t usbhostprobe_poll(bool audio_card, bool audio_interface) {
 			probe.absent_since = now;
 			fprintf(stderr, "usbhost: the audio device is no longer on the bus; the port stays host\n");
 		}
+		// And the one write a held role cannot do without: keeping itself
+		// written. The driver re-decides the port's role on its own, and the
+		// role it decides is the one it started in -- NormalDRP -- so a held
+		// Source is not a setting, it is a state the far end has to agree to
+		// every time the port changes. See keep_role_locked().
+		keep_role_locked(now);
 	} else if (probe.had_card) {
 		// A momentary USB re-enumeration must not tear down a working DAC.
 		if (audio_interface) probe.absent_since = -1;

@@ -26,7 +26,9 @@
 #ifndef TYPEC_PARTNER
 #define TYPEC_PARTNER "/sys/class/typec/port0-partner"
 #endif
+#ifndef SOUND_CLASS
 #define SOUND_CLASS "/sys/class/sound"
+#endif
 #ifndef USB_AUDIO_BUS
 #define USB_AUDIO_BUS "/sys/bus/usb/devices"
 #endif
@@ -74,6 +76,7 @@
 #define ID_SETTLE_SECS 3
 
 static atomic_int active_card = -1;		// the USB card in use, -1 when none
+static char usb_bus[32];			// the bus device that card is on, "1-1"
 static char active_name[64];			// its id, for the interface
 static char volume_control[64];			// the control the level is written to
 static long volume_min, volume_max;
@@ -374,7 +377,7 @@ static void card_device_path(int n, char *out, size_t out_size) {
 	char resolved[PATH_MAX];
 
 	out[0] = '\0';
-	snprintf(link, sizeof(link), SOUND_CLASS "/card%d/device", n);
+	snprintf(link, sizeof(link), "%s/card%d/device", SOUND_CLASS, n);
 	if (realpath(link, resolved)) {
 		snprintf(out, out_size, "%s", resolved);
 	}
@@ -391,7 +394,7 @@ static bool card_is_usb(int n) {
 	char link[PATH_MAX];
 	char resolved[PATH_MAX];
 
-	snprintf(link, sizeof(link), SOUND_CLASS "/card%d/device/subsystem", n);
+	snprintf(link, sizeof(link), "%s/card%d/device/subsystem", SOUND_CLASS, n);
 	if (realpath(link, resolved)) {
 		size_t len = strlen(resolved);
 		if (len >= 4 && strcmp(resolved + len - 4, "/usb") == 0) {
@@ -432,8 +435,8 @@ static int find_usb_card(void) {
 }
 
 static void read_card_id(int card, char *out, size_t out_size) {
-	char path[128];
-	snprintf(path, sizeof(path), SOUND_CLASS "/card%d/id", card);
+	char path[PATH_MAX];
+	snprintf(path, sizeof(path), "%s/card%d/id", SOUND_CLASS, card);
 
 	out[0] = '\0';
 	FILE *f = fopen(path, "r");
@@ -444,6 +447,64 @@ static void read_card_id(int card, char *out, size_t out_size) {
 		out[strcspn(out, "\r\n")] = '\0';
 	}
 	fclose(f);
+}
+
+// The bus name of the device behind card `n` -- "1-1", the directory the
+// kernel made for it under the controller -- or "" when it cannot be resolved.
+//
+// This is what tells one dongle from another. The card number does not: a
+// dongle unplugged and another plugged in both land on the lowest free number,
+// usually card 1, so the number stays the same across a swap and the interface
+// goes on describing the old device by name until something else happens to
+// change. Read off the card's own device link, which points along the bus:
+// card1/device is ../../../1-1:1.0, and its parent is the device.
+static void read_card_bus(int card, char *out, size_t out_size) {
+	char link[PATH_MAX];
+	char resolved[PATH_MAX];
+
+	out[0] = '\0';
+	// The card's own device node, which is the thing that does not exist when
+	// there is no such card. Its target is what is resolved below, and a link
+	// planted there (a test's, or a udev rule's) is followed like any other.
+	snprintf(link, sizeof(link), "%s/card%d/device", SOUND_CLASS, card);
+	if (access(link, F_OK) != 0 || !realpath(link, resolved)) {
+		return;
+	}
+	// Resolved it is .../usb1/1-1/1-1:1.0: the last part is an interface and
+	// its parent the device. A device link that does not end in one (a driver
+	// that points the card straight at the device) already says it.
+	//
+	// Walked part by part rather than by editing the string in place: what is
+	// wanted is the two last parts either way, and the loop says that plainly.
+	const char *parts[4] = {NULL, NULL, NULL, NULL};
+	const char *at = resolved;
+	while (*at) {
+		while (*at == '/') {
+			at++;
+		}
+		if (!*at) {
+			break;
+		}
+		parts[0] = parts[1];
+		parts[1] = parts[2];
+		parts[2] = parts[3];
+		parts[3] = at;
+		while (*at && *at != '/') {
+			at++;
+		}
+	}
+	if (!parts[2]) {
+		return;
+	}
+	// The last part is the interface when it carries one ("1-1:1.0"), and the
+	// device otherwise.
+	const char *name = strchr(parts[3], ':') ? parts[2] : parts[3];
+	size_t len = strcspn(name, "/");
+	if (len >= out_size) {
+		len = out_size - 1;
+	}
+	memcpy(out, name, len);
+	out[len] = '\0';
 }
 
 // The device's own playback volume, whatever it decided to call it.
@@ -461,7 +522,7 @@ static void read_card_id(int card, char *out, size_t out_size) {
 static void find_volume_control(int card) {
 	snd_ctl_t *ctl;
 	snd_ctl_elem_list_t *list;
-	char name[32];
+	char name[PATH_MAX];
 
 	volume_control[0] = '\0';
 	volume_min = volume_max = 0;
@@ -987,6 +1048,26 @@ void usbaudio_poll(void) {
 	}
 	arbitrate_port(card >= 0);
 
+	// A different device on the same card number is a different output: one
+	// dongle out, another in. The number is the lowest free one either way, so
+	// it stays put across a swap, and everything below is keyed on it. Read
+	// the bus name the card hangs off and route again when that has moved --
+	// otherwise the second dongle is driven through the first one's device
+	// name, level and control, which is a stream that opens and plays to
+	// something that is no longer there.
+	char bus[32];
+	if (card >= 0) {
+		read_card_bus(card, bus, sizeof(bus));
+		if (usb_bus[0] && bus[0] && strcmp(bus, usb_bus) != 0) {
+			fprintf(stderr, "usbaudio: card%d now hangs off %s, not %s; the device was replaced\n", card, bus,
+					usb_bus);
+			active_card = -1; // route it again, and take its own name and level
+		}
+		if (bus[0]) {
+			snprintf(usb_bus, sizeof(usb_bus), "%s", bus);
+		}
+	}
+
 	// Bluetooth wins outright over where playback goes. Both would be pointing
 	// it somewhere, and the one the listener is wearing is the one that was
 	// chosen deliberately; fighting over audio_set_output_device() from two
@@ -1021,6 +1102,7 @@ void usbaudio_poll(void) {
 		audio_set_output_device(pcm);
 	} else {
 		active_name[0] = '\0';
+		usb_bus[0] = '\0';
 		volume_control[0] = '\0';
 		swvolume_clear_usb_gain();
 		fprintf(stderr, "usbaudio: the port is empty again; playback goes back to the jacks\n");

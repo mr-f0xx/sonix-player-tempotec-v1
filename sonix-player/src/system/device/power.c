@@ -2053,7 +2053,15 @@ void power_screen_on(void) {
 	// the one thing a wake must not do while the music plays. The Bluetooth
 	// receiver is not this case: there the DAC is playing, and the rewrite is
 	// exactly what it is for.
-	if (!audio_output_is_bluetooth()) {
+	//
+	// And skipped over the USB-C port, for a reason of its own: that call is
+	// the whole volume chain for whatever the sound is leaving through, and
+	// the USB device's own control is at the end of it. It rewrites the
+	// CS43198 -- which is not in that path -- and then re-parks the dongle's
+	// control, and both writes land in the middle of a live stream. The CS43198
+	// has a register worth putting back after a blank; a dongle on the USB bus
+	// was never blanked, never lost its power, and has nothing to restore.
+	if (!audio_output_is_bluetooth() && !usbaudio_active()) {
 		set_volume_percent(get_volume_percent());
 	}
 

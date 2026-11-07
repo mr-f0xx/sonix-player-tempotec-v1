@@ -887,6 +887,15 @@ bool audio_get_gapless(void) { return gapless_enabled; }
 #define USB_BUFFER_MAX_BYTES (512u * 1024u)
 #define PCM_NOMEM_HALVINGS 3
 
+// How long an open of a USB card is retried: 200 x 50 ms, ten seconds.
+//
+// A dongle re-enumerates on its own -- out of its own power saving, or because
+// the port's role was written again -- and snd-usb-audio then needs seconds,
+// not milliseconds, before the card behind the new device node is there to be
+// opened. This is the budget of that window, not of a teardown race; the
+// teardown race it also covers was the two seconds this used to allow.
+#define USB_OPEN_USB_BUDGET 200
+
 // How much audio one turn of the decode loop handles.
 //
 // Not the same question as how deep the card's buffer is, and it has to be
@@ -1364,6 +1373,13 @@ static snd_pcm_t *open_pcm_device_now(int channels, int sample_rate, int bits_pe
 	// need a few hundred milliseconds.
 	bool bluetooth = strncmp(device, "bluealsa", 8) == 0;
 
+	// A card named by number is a USB one: the built-in DAC is "default" and
+	// Bluetooth is "bluealsa...". A dongle is the one output here that can be
+	// unplugged, re-enumerated or re-powered under a live stream, and it is
+	// also the one whose failure must not be answered by playing somewhere
+	// else -- see the fallback below.
+	bool usb_route = strncmp(device, "plughw:", 7) == 0 || strncmp(device, "hw:", 3) == 0;
+
 	// A bluealsa name is worth opening only while there is something on the
 	// other end of it. When there is not, opening it is at best two seconds of
 	// retries per track and at worst a wait inside the plugin, which talks to
@@ -1413,7 +1429,14 @@ static snd_pcm_t *open_pcm_device_now(int channels, int sample_rate, int bits_pe
 
 	int err = -EBUSY;
 	int attempts = 0;
-	int budget = (bluetooth && bluetooth_audio_active()) ? 160 : 40; // eight seconds, or two
+	// A dongle that has just been re-enumerated answers ENODEV/ENXIO/EIO for as
+	// long as it takes snd-usb-audio to build the card behind it again, which
+	// on this board is not a moment: the same device came back on the bus after
+	// a re-enumeration and its card appeared a few seconds later. Two seconds
+	// of patience is right for a driver tearing down the previous stream and
+	// far too little for that, and the cost of giving up is a track played to
+	// nobody (see the fallback below).
+	int budget = (bluetooth && bluetooth_audio_active()) ? 160 : (usb_route ? USB_OPEN_USB_BUDGET : 40);
 	for (; attempts < budget; attempts++) {
 		err = convert_to ? open_bluetooth_at_rate(&pcm_handle, device, convert_to, mode)
 						 : snd_pcm_open(&pcm_handle, device, SND_PCM_STREAM_PLAYBACK, mode);
@@ -1421,6 +1444,7 @@ static snd_pcm_t *open_pcm_device_now(int channels, int sample_rate, int bits_pe
 			break;
 		}
 		bool transient = (err == -EBUSY || err == -EAGAIN) ||
+						 (usb_route && (err == -ENODEV || err == -ENXIO || err == -EIO || err == -ETIMEDOUT)) ||
 						 (bluetooth && (err == -ENODEV || err == -EIO || err == -ETIMEDOUT || err == -ECONNREFUSED));
 		if (!transient) {
 			break; // a real error, not a teardown race: no point retrying
@@ -1431,7 +1455,19 @@ static snd_pcm_t *open_pcm_device_now(int channels, int sample_rate, int bits_pe
 	// Headphones that walked out of range take their PCM with them, and a
 	// track that refuses to start is a worse outcome than one coming out of
 	// the wrong hole. Fall back to the jack, and say so in the log.
-	if (err < 0 && strcmp(device, AUDIO_DEFAULT_PCM) != 0) {
+	//
+	// Never off a USB device, though. Bluetooth is a link that can be gone for
+	// good -- the headphones left the room -- and the jack is then the useful
+	// answer. A dongle on the USB-C port is not that: the player made itself
+	// the host of that port, it is still supplying it, and a DAC that has gone
+	// quiet for a few seconds is one that is coming back. Falling back to the
+	// CS43198 for it is sound played into a socket nobody is listening to,
+	// while the interface keeps the USB-C glyph up because the card is still
+	// there. The track is better off failing here -- pcm_write_recover() and
+	// retry_track_once() rebuild the device, and the next track open takes the
+	// longer budget above -- than being played somewhere the user cannot hear
+	// it.
+	if (err < 0 && strcmp(device, AUDIO_DEFAULT_PCM) != 0 && !usb_route) {
 		fprintf(stderr, "audio: '%s' would not open (%s); falling back to " AUDIO_DEFAULT_PCM "\n", device,
 				snd_strerror(err));
 		err = snd_pcm_open(&pcm_handle, AUDIO_DEFAULT_PCM, SND_PCM_STREAM_PLAYBACK, 0);
@@ -1445,6 +1481,10 @@ static snd_pcm_t *open_pcm_device_now(int channels, int sample_rate, int bits_pe
 		if (err >= 0 && bluetooth && !bluetooth_audio_active()) {
 			audio_set_output_device(NULL);
 		}
+	} else if (err < 0 && usb_route) {
+		fprintf(stderr, "audio: '%s' would not open (%s after %d attempts); the track waits for it rather than "
+						"playing to the jack\n",
+				device, snd_strerror(err), attempts);
 	}
 
 	if (err < 0) {
@@ -1901,7 +1941,16 @@ static int health_permille(int64_t ns, long span_ms) { return (int)(ns / 1000 / 
 
 // Called after every write. A window stretched by a pause says nothing about
 // playing, so it is restarted instead of reported.
-static void health_tick(health_t *h, int rate, int out_rate, int bits) {
+//
+// `pcm` travels with the report because of the one question this line has to
+// answer when a listener says "it plays but there is no sound": is the card
+// taking the frames or is the stream stuck in a hole? The state and what is
+// still queued say which. A RUNNING stream whose queue is not going down is a
+// device handed frames it is not consuming -- a dongle that has gone to sleep,
+// or a role that has been taken away -- while a PREPARED one never started at
+// all. Neither is visible from the write's return value, which is what makes
+// this line the one to read.
+static void health_tick(health_t *h, snd_pcm_t *pcm, int rate, int out_rate, int bits) {
 	long now = log_ms();
 	long span = now - h->at_ms;
 	if (span < HEALTH_PERIOD_MS) {
@@ -1917,11 +1966,26 @@ static void health_tick(health_t *h, int rate, int out_rate, int bits) {
 		if (out_rate != rate) {
 			snprintf(to, sizeof(to), " (%d Hz out)", out_rate);
 		}
+		char stream[96] = "";
+		if (pcm) {
+			snd_pcm_sframes_t queued = 0;
+			snd_pcm_state_t state = snd_pcm_state(pcm);
+			if (snd_pcm_delay(pcm, &queued) < 0) {
+				queued = -1;
+			}
+			if (queued < 0) {
+				snprintf(stream, sizeof(stream), ", stream %s", snd_pcm_state_name(state));
+			} else {
+				snprintf(stream, sizeof(stream), ", stream %s with %ld frames queued (%ld ms)",
+						snd_pcm_state_name(state), (long)queued,
+						rate > 0 ? (long)(queued * 1000 / rate) : 0L);
+			}
+		}
 		fprintf(stderr,
 				"audio[%ld]: %ld s at %d Hz%s / %d bit: playback thread %d.%d%% of the core (read+decode %d.%d%%, "
-				"effects %d.%d%%, ALSA write %d.%d%%), %u write recoveries, MemAvailable %ld kB\n",
+				"effects %d.%d%%, ALSA write %d.%d%%), %u write recoveries, MemAvailable %ld kB%s\n",
 				now, span / 1000, rate, to, bits, all / 10, all % 10, rd / 10, rd % 10, fx / 10, fx % 10, wr / 10,
-				wr % 10, write_recoveries - h->recoveries, mem_available_kb());
+				wr % 10, write_recoveries - h->recoveries, mem_available_kb(), stream);
 
 		long long total = 0, idle = 0;
 		if (h->sys_total >= 0 && system_ticks(&total, &idle) && total > h->sys_total) {
@@ -2970,7 +3034,7 @@ static void play_wav_file(const char *filepath) {
 		bt_start_probe_note(pcm_handle, written, info.sample_rate);
 
 		bytes_played += (int64_t)written * src_frame_bytes;
-		health_tick(&health, info.sample_rate, info.sample_rate, info.bits_per_sample);
+		health_tick(&health, pcm_handle, info.sample_rate, info.sample_rate, info.bits_per_sample);
 		host_pace(written, info.sample_rate);
 		pthread_mutex_lock(&audio_mutex);
 		report_position((double)bytes_played / bytes_per_sec);
@@ -3796,7 +3860,7 @@ static void play_decoded_file(const char *filepath, decode_format_t format) {
 		if (frames_read > 0) {
 			bytes_played += (int64_t)((double)written * frame_bytes * (double)input_frames / (double)frames_read);
 		}
-		health_tick(&health, sample_rate, out_rate, source_bits);
+		health_tick(&health, pcm_handle, sample_rate, out_rate, source_bits);
 		host_pace(written, out_rate);
 		pthread_mutex_lock(&audio_mutex);
 		report_position((double)bytes_played / bytes_per_sec);
