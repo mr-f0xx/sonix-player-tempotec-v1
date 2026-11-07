@@ -446,7 +446,14 @@ static void *server_main(void *arg) {
 		}
 
 		// MODE_NORMAL endpoint routing:
-		if (strncmp(req, "GET /api.json/0.2/album/get?", 28) == 0) {
+        if (strncmp(req, "GET /api.json/0.2/genre/list?", 29) == 0) {
+            const char *reply = "{\"genres\":{\"items\":[{\"id\":12,\"name\":\"Jazz\"}]}}";
+            send_http(cfd, 200, NULL, reply, strlen(reply));
+        } else if (strstr(req, "/album/getFeatured?") && strstr(req, "genre_ids=12")) {
+            assert(strstr(req, "type=new-releases") && strstr(req, "offset=50"));
+            const char *reply = "{\"albums\":{\"items\":[{\"id\":\"jazz1\",\"title\":\"Jazz Album\"}]}}";
+            send_http(cfd, 200, NULL, reply, strlen(reply));
+        } else if (strncmp(req, "GET /api.json/0.2/album/get?", 28) == 0) {
 			const char *reply = "{\"id\":\"album-1\",\"title\":\"Record\","
 				"\"artist\":{\"name\":\"Album Artist\"},\"release_date_original\":\"2021-05-01\","
 				"\"image\":{\"large\":\"https://example.test/cover\"},"
@@ -597,6 +604,11 @@ int main(void) {
 	assert(qobuz_user_playlists(0, pls, 8) == 1);
 	assert(pls[0].id == 99 && strcmp(pls[0].name, "My Mix") == 0);
 
+    qobuz_genre_t genres[2];
+    assert(qobuz_genres(0, genres, 2) == 1 && genres[0].id == 12 && !strcmp(genres[0].name, "Jazz"));
+    qobuz_album_t genre_albums[2];
+    assert(qobuz_genre_new_releases(12, 50, genre_albums, 2) == 1);
+    assert(!strcmp(genre_albums[0].title, "Jazz Album"));
 	qobuz_track_t album_tracks[2];
 	assert(qobuz_album_tracks("album-1", 0, album_tracks, 2) == 1);
 	assert(!strcmp(album_tracks[0].album, "Record"));

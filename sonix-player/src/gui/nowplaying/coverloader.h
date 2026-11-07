@@ -24,7 +24,9 @@
 // takes 36..59 -- its twelve track hits and twelve album hits; the audiobook
 // list takes 60..71 for its twelve rows; one artist's records take 72..83; and the
 // album carousel takes 84..89 -- so the pools never trample each other's requests.
-#define COVERLOADER_SLOTS 90
+#define COVERLOADER_SLOTS 100
+#define COVERLOADER_QOBUZ_DOWNLOAD_BASE 90
+#define COVERLOADER_QOBUZ_DOWNLOAD_COUNT 10
 #define COVERLOADER_SEARCH_BASE 36
 #define COVERLOADER_SEARCH_COUNT 24
 #define COVERLOADER_AUDIOBOOKS_BASE 60

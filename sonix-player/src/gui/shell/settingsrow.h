@@ -65,6 +65,8 @@ lv_obj_t *settingsrow_add(lv_obj_t *parent, const char *name, lv_obj_t **value_o
 // Adds a leading, function-matched glyph in every appearance that uses them.
 // Dark and Light keep the original text-and-chevron row layout.
 void settingsrow_add_icon(lv_obj_t *row, const lv_image_dsc_t *source, theme_semantic_t tone);
+// Always visible in the current theme accent, including Dark and Light.
+void settingsrow_add_accent_icon(lv_obj_t *row, const lv_image_dsc_t *source);
 
 // Optional description for a section row. Themes with function glyphs on the
 // compact V1 wrap it across as many as three lines and centre the name and

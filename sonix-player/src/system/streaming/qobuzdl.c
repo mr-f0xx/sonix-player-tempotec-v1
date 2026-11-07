@@ -6,6 +6,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -55,8 +56,8 @@ static bool folder(const char *root, char *out, size_t size) {
     return true;
 }
 
-// Keep every track in the same album directory, including compilations where
-// each track has a different performer. The id prevents same-name collisions.
+// A hidden album-id marker disambiguates identical album names without putting
+// the opaque Qobuz id in the visible folder name. Never merge different albums.
 static bool album_folder(request_t *job, const qobuz_track_t *track) {
     if (job->album_dir[0]) return true;
     char base[768], artist[80], album[100], ident[48], fallback[40], year[16];
@@ -67,19 +68,31 @@ static bool album_folder(request_t *job, const qobuz_track_t *track) {
     snprintf(fallback, sizeof(fallback), "%ld", track->id);
     podcastdl_safe_name(job->album_id[0] ? job->album_id : track->album_id, fallback, ident, sizeof(ident));
     podcastdl_safe_name(track->released, "Unknown year", year, sizeof(year));
-    if (snprintf(job->album_dir, sizeof(job->album_dir), "%s/%s - %s (%s) [%s]",
-                 base, artist, album, year, ident) >= (int)sizeof(job->album_dir)) {
-        job->album_dir[0] = 0;
-        return false;
-    }
-    if (mkdir(job->album_dir, 0755)) {
-        struct stat st;
-        if (stat(job->album_dir, &st) || !S_ISDIR(st.st_mode)) {
-            job->album_dir[0] = 0;
-            return false;
+    for (int n = 1; n <= 100; n++) {
+        char name[256], marker[560];
+        if (n == 1) snprintf(name, sizeof(name), "%s - %s (%s)", artist, album, year);
+        else snprintf(name, sizeof(name), "%s - %s (%s) (%d)", artist, album, year, n);
+        if (snprintf(job->album_dir, sizeof(job->album_dir), "%s/%s", base, name) >= (int)sizeof(job->album_dir)) break;
+        snprintf(marker, sizeof(marker), "%s/.qobuz-album-id", job->album_dir);
+        if (mkdir(job->album_dir, 0755) == 0) {
+            FILE *f = fopen(marker, "w");
+            if (!f) { rmdir(job->album_dir); break; }
+            bool ok = fprintf(f, "%s\n", ident) > 0;
+            if (fclose(f)) ok = false;
+            if (!ok) { remove(marker); rmdir(job->album_dir); break; }
+            return true;
         }
+        struct stat st;
+        if (stat(job->album_dir, &st) || !S_ISDIR(st.st_mode)) continue;
+        FILE *f = fopen(marker, "r");
+        if (!f) continue; // an unrelated or old folder; leave it untouched
+        char saved[48];
+        bool matches = fgets(saved, sizeof(saved), f) != NULL;
+        fclose(f);
+        if (matches) { saved[strcspn(saved, "\r\n")] = 0; if (!strcmp(saved, ident)) return true; }
     }
-    return true;
+    job->album_dir[0] = 0;
+    return false;
 }
 
 // Cover files are bounded and written atomically; an HTML error or interrupted
@@ -150,8 +163,32 @@ static bool download(request_t *job, const qobuz_track_t *track) {
     // Playback and the library accept paths of at most 511 bytes.
     char path[512], part[528], tags[528], tagpart[544];
     if (!album_folder(job, track)) return false;
-    const char *suffix = mp3 ? ".mp3" : actual == QOBUZ_FORMAT_CD ? ".flac" : "-hires.flac";
-    if (snprintf(path, sizeof(path), "%s/%ld%s", job->album_dir, track->id, suffix) >= (int)sizeof(path)) return false;
+    const char *suffix = mp3 ? ".mp3" : actual == QOBUZ_FORMAT_CD ? ".flac" : " (Hi-Res).flac";
+    char artist[80], title[120], stem[210];
+    podcastdl_safe_name(track->artist, "Unknown artist", artist, sizeof(artist));
+    podcastdl_safe_name(track->title, "Unknown title", title, sizeof(title));
+    snprintf(stem, sizeof(stem), "%s - %s", artist, title);
+    // Track ids live in the sidecar, not in the user-visible filename. If two
+    // distinct tracks have the same name, disambiguate without overwriting.
+    bool found_slot = false;
+    for (int n = 1; n <= 100; n++) {
+        int written = n == 1 ? snprintf(path, sizeof(path), "%s/%s%s", job->album_dir, stem, suffix) :
+            snprintf(path, sizeof(path), "%s/%s (%d)%s", job->album_dir, stem, n, suffix);
+        if (written >= (int)sizeof(path)) return false;
+        struct stat st;
+        if (stat(path, &st)) { found_slot = true; break; }
+        char sidecar[528], line[128];
+        snprintf(sidecar, sizeof(sidecar), "%s.tags", path);
+        FILE *f = fopen(sidecar, "r");
+        bool matches = false;
+        if (f) {
+            while (fgets(line, sizeof(line), f))
+                if (!strncmp(line, "qobuz_id=", 9) && strtol(line + 9, NULL, 10) == track->id) matches = true;
+            fclose(f);
+        }
+        if (matches) { found_slot = true; break; }
+    }
+    if (!found_slot) return false;
     if (!job->cover_attempted) {
         job->cover_attempted = true;
         job->cover_failed = !fetch_cover(job, job->album_dir, track->cover);
@@ -201,7 +238,7 @@ static bool download(request_t *job, const qobuz_track_t *track) {
             tag_value(f, "album", track->album);
             tag_value(f, "album_artist", track->album_artist);
             tag_value(f, "year", track->released);
-            fprintf(f, "track=%d\ndisc=%d\n", track->track_number, track->disc_number);
+            fprintf(f, "track=%d\ndisc=%d\nqobuz_id=%ld\n", track->track_number, track->disc_number, track->id);
             if (fclose(f)) ok = false;
         }
     }
@@ -307,9 +344,8 @@ static void scan_history(const char *dir, qobuzdl_entry_t *entries, int max, int
             continue;
         }
         if (!S_ISREG(st.st_mode) || !st.st_size) continue;
-        char *end;
-        long id = strtol(de->d_name, &end, 10);
-        if (id <= 0 || (strcmp(end, ".mp3") && strcmp(end, ".flac") && strcmp(end, "-hires.flac"))) continue;
+        const char *ext = strrchr(de->d_name, '.');
+        if (!ext || (strcasecmp(ext, ".mp3") && strcasecmp(ext, ".flac"))) continue;
         qobuzdl_entry_t entry = {0};
         snprintf(entry.path, sizeof(entry.path), "%s", full);
         entry.modified = (long long)st.st_mtime;
@@ -324,7 +360,7 @@ static void scan_history(const char *dir, qobuzdl_entry_t *entries, int max, int
             }
             fclose(f);
         }
-        if (!entry.title[0]) snprintf(entry.title, sizeof(entry.title), "%ld", id);
+        if (!entry.title[0]) snprintf(entry.title, sizeof(entry.title), "%.190s", de->d_name);
         if (*count < max) entries[(*count)++] = entry;
         else {
             int oldest = 0;

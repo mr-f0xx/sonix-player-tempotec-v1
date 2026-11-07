@@ -108,9 +108,9 @@ int main(void) {
     wait_done();
     assert(pages == 2 && calls == 52 && cover_requests == 1);
     char path[768];
-    snprintf(path, sizeof(path), "%s/Music/Qobuz Downloads/Album Artist - Album (2020) [album]/cover.jpg", root);
+    snprintf(path, sizeof(path), "%s/Music/Qobuz Downloads/Album Artist - Album (2020)/cover.jpg", root);
     assert(!access(path, F_OK));
-    snprintf(path, sizeof(path), "%s/Music/Qobuz Downloads/Album Artist - Album (2020) [album]/1.flac.tags", root);
+    snprintf(path, sizeof(path), "%s/Music/Qobuz Downloads/Album Artist - Album (2020)/Artist - Track 1.flac.tags", root);
     FILE *tags = fopen(path, "r"); assert(tags);
     char contents[512] = {0}; assert(fread(contents, 1, sizeof(contents)-1, tags) > 0); fclose(tags);
     assert(strstr(contents, "title=Track 1\n") && strstr(contents, "album_artist=Album Artist\n") &&
@@ -132,7 +132,7 @@ int main(void) {
     pthread_mutex_lock(&pause_lock); block_body = 0; pthread_cond_broadcast(&pause_cond); pthread_mutex_unlock(&pause_lock);
     wait_done();
     assert(qobuzdl_history(entries, 100) == 52);
-    snprintf(path, sizeof(path), "%s/Music/Qobuz Downloads/Unknown artist - Unknown album (Unknown year) [100]/100.mp3.part", root);
+    snprintf(path, sizeof(path), "%s/Music/Qobuz Downloads/Unknown artist - Unknown album (Unknown year)/Unknown artist - Song.mp3.part", root);
     assert(access(path, F_OK));
     fail_body = 0;
     assert(qobuzdl_track(&track, QOBUZ_FORMAT_MP3));
@@ -147,7 +147,7 @@ int main(void) {
     assert(qobuzdl_track(&unavailable, QOBUZ_FORMAT_CD));
     wait_done();
     assert(qobuzdl_history(entries, 100) == 53);
-    snprintf(path, sizeof(path), "%s/Music/Qobuz Downloads/Unknown artist - Unknown album (Unknown year) [100]/100.mp3", root);
+    snprintf(path, sizeof(path), "%s/Music/Qobuz Downloads/Unknown artist - Unknown album (Unknown year)/Unknown artist - Song.mp3", root);
     assert(!access(path, F_OK));
     // Both FLAC qualities can coexist and appear in history.
     assert(qobuzdl_track(&track, QOBUZ_FORMAT_CD));
@@ -156,9 +156,9 @@ int main(void) {
     assert(qobuzdl_track(&track, QOBUZ_FORMAT_HIRES192));
     wait_done();
     assert(last_requested_format == QOBUZ_FORMAT_HIRES192);
-    snprintf(path, sizeof(path), "%s/Music/Qobuz Downloads/Unknown artist - Unknown album (Unknown year) [100]/100.flac", root);
+    snprintf(path, sizeof(path), "%s/Music/Qobuz Downloads/Unknown artist - Unknown album (Unknown year)/Unknown artist - Song.flac", root);
     assert(!access(path, F_OK));
-    snprintf(path, sizeof(path), "%s/Music/Qobuz Downloads/Unknown artist - Unknown album (Unknown year) [100]/100-hires.flac", root);
+    snprintf(path, sizeof(path), "%s/Music/Qobuz Downloads/Unknown artist - Unknown album (Unknown year)/Unknown artist - Song (Hi-Res).flac", root);
     assert(!access(path, F_OK));
     assert(qobuzdl_history(entries, 100) == 55);
     // If Qobuz falls back to CD quality, do not mislabel it as hi-res.
@@ -167,9 +167,9 @@ int main(void) {
     assert(qobuzdl_track(&fallback, QOBUZ_FORMAT_HIRES192));
     wait_done();
     forced_format = 0;
-    snprintf(path, sizeof(path), "%s/Music/Qobuz Downloads/Unknown artist - Unknown album (Unknown year) [101]/101.flac", root);
+    snprintf(path, sizeof(path), "%s/Music/Qobuz Downloads/Unknown artist - Unknown album (Unknown year) (2)/Unknown artist - Unknown title.flac", root);
     assert(!access(path, F_OK));
-    snprintf(path, sizeof(path), "%s/Music/Qobuz Downloads/Unknown artist - Unknown album (Unknown year) [101]/101-hires.flac", root);
+    snprintf(path, sizeof(path), "%s/Music/Qobuz Downloads/Unknown artist - Unknown album (Unknown year) (2)/Unknown artist - Unknown title (Hi-Res).flac", root);
     assert(access(path, F_OK));
     assert(qobuzdl_history(entries, 100) == 56);
     // Files downloaded by the previous flat layout remain visible.
@@ -179,8 +179,24 @@ int main(void) {
     assert(qobuzdl_album("album", QOBUZ_FORMAT_HIRES192));
     wait_done();
     assert(last_requested_format == QOBUZ_FORMAT_HIRES192);
-    snprintf(path, sizeof(path), "%s/Music/Qobuz Downloads/Album Artist - Album (2020) [album]/1-hires.flac", root);
+    snprintf(path, sizeof(path), "%s/Music/Qobuz Downloads/Album Artist - Album (2020)/Artist - Track 1 (Hi-Res).flac", root);
     assert(!access(path, F_OK));
+    // Different Qobuz ids with the same display name never overwrite each other.
+    qobuz_track_t same_name = {.id = 999, .streamable = true};
+    snprintf(same_name.title, sizeof(same_name.title), "Track 1");
+    snprintf(same_name.artist, sizeof(same_name.artist), "Artist");
+    snprintf(same_name.album, sizeof(same_name.album), "Album");
+    snprintf(same_name.album_artist, sizeof(same_name.album_artist), "Album Artist");
+    snprintf(same_name.album_id, sizeof(same_name.album_id), "album");
+    snprintf(same_name.released, sizeof(same_name.released), "2020");
+    assert(qobuzdl_track(&same_name, QOBUZ_FORMAT_CD));
+    wait_done();
+    snprintf(path, sizeof(path), "%s/Music/Qobuz Downloads/Album Artist - Album (2020)/Artist - Track 1 (2).flac", root);
+    assert(!access(path, F_OK));
+    assert(qobuzdl_track(&same_name, QOBUZ_FORMAT_CD));
+    wait_done();
+    snprintf(path, sizeof(path), "%s/Music/Qobuz Downloads/Album Artist - Album (2020)/Artist - Track 1 (3).flac", root);
+    assert(access(path, F_OK));
     assert(!qobuzdl_track(&track, -1));
     free(entries);
     puts("test_qobuzdl: all assertions passed");

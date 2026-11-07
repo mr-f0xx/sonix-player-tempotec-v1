@@ -11,6 +11,9 @@
 #include "src/gui/shell/icons.h"
 #include "src/gui/shell/keyboard.h"
 #include "src/gui/nowplaying/player.h"
+#include "src/gui/nowplaying/coverloader.h"
+#include "src/gui/library/browser.h"
+#include "src/gui/board_profile.h"
 #include "src/gui/shell/popover.h"
 #include "src/gui/streaming/qobuzart.h"
 #include "src/gui/streaming/stockkeys_ui.h"
@@ -80,6 +83,7 @@ typedef enum {
 	JOB_FAV_ALBUMS,
 	JOB_USER_PLAYLISTS,
 	JOB_FEATURED,
+	JOB_GENRES,
 	JOB_PLAY,
 } job_kind_t;
 
@@ -107,6 +111,7 @@ static unsigned job_serial;
 // reading (it reads inside the async, which runs after the worker is done).
 static qobuz_track_t result_tracks[QOBUZ_MAX_HELD];
 static qobuz_album_t result_albums[QOBUZ_MAX_HELD];
+static qobuz_genre_t result_genres[QOBUZ_MAX_HELD];
 static qobuz_artist_t result_artists[QOBUZ_MAX_HELD];
 static qobuz_playlist_t result_playlists[QOBUZ_MAX_HELD];
 static int result_count;
@@ -849,6 +854,9 @@ static void fill_list(int from) {
 			make_row(a->title, detail, a->cover, false, i);
 			break;
 		}
+        case JOB_GENRES:
+            make_row(result_genres[i].name, "", NULL, false, i);
+            break;
 		case JOB_SEARCH_ARTISTS: {
 			const qobuz_artist_t *a = &result_artists[i];
 			snprintf(detail, sizeof(detail), "%d album", a->album_count);
@@ -1620,9 +1628,14 @@ static void *worker_main(void *arg) {
 			snprintf(result_title, sizeof(result_title), "%s", tr("my_playlists"));
 			break;
 		case JOB_FEATURED:
-			n = qobuz_featured_albums("new-releases", off, result_albums + off, want);
-			snprintf(result_title, sizeof(result_title), "%s", tr("new_releases"));
-			break;
+            n = job.id ? qobuz_genre_new_releases(job.id, off, result_albums + off, want) :
+                         qobuz_featured_albums("new-releases", off, result_albums + off, want);
+            snprintf(result_title, sizeof(result_title), "%.150s", job.id ? job.text : tr("new_releases"));
+            break;
+        case JOB_GENRES:
+            n = qobuz_genres(off, result_genres + off, want);
+            snprintf(result_title, sizeof(result_title), "%s", "New releases by genre");
+            break;
 
 		case JOB_PLAY:
 			do_play(job.index);
@@ -1781,6 +1794,13 @@ static void row_clicked_cb(lv_event_t *e) {
 	job_t job = {0};
 
 	switch (list_kind) {
+    case JOB_GENRES:
+        if (result_genres[index].id <= 0) return;
+        job.kind = JOB_FEATURED;
+        job.id = result_genres[index].id;
+        snprintf(job.text, sizeof(job.text), "%s", result_genres[index].name);
+        run(&job, "loading");
+        return;
 	case JOB_SEARCH_TRACKS:
 	case JOB_ALBUM_TRACKS:
 	case JOB_PLAYLIST_TRACKS:
@@ -2152,27 +2172,35 @@ static lv_obj_t *corner_button(gui_config_t *cfg, int slot, const lv_image_dsc_t
 // ---------------------------------------------------------------------------
 
 static lv_obj_t *qsettings_screen;
-static lv_obj_t *quality_pills[4];
+static lv_obj_t *quality_value;
 
 static void quality_refresh(void) {
-	int current = qobuz_get_format();
-	for (int i = 0; i < 4; i++) {
-		if (!quality_pills[i]) {
-			continue;
-		}
-		bool on = QUALITY_VALUES[i] == current;
-		lv_obj_set_style_bg_color(quality_pills[i], on ? theme()->accent : theme()->surface_pressed, 0);
-		lv_obj_set_style_text_color(lv_obj_get_child(quality_pills[i], 0), on ? theme_on_accent() : theme()->text_primary,
-									0);
-	}
+    if (!quality_value) return;
+    int current = qobuz_get_format();
+    for (int i = 0; i < 4; i++) {
+        if (QUALITY_VALUES[i] == current) {
+            static const char *const compact[] = {"MP3 320", "FLAC 16/44.1", "FLAC 24/96", "FLAC 24/192"};
+            lv_label_set_text(quality_value, compact[i]);
+            return;
+        }
+    }
 }
 
-static void quality_pick_cb(lv_event_t *e) {
-	if (switcher_back_drag_active()) {
-		return;
-	}
-	qobuz_set_format((int)(intptr_t)lv_event_get_user_data(e));
-	quality_refresh();
+static void quality_pick(void *user) {
+    qobuz_set_format((int)(intptr_t)user);
+    quality_refresh();
+}
+
+static void quality_open(lv_event_t *e) {
+    if (switcher_back_drag_active()) return;
+    popover_item_t items[4] = {0};
+    for (int i = 0; i < 4; i++) {
+        items[i].label = QUALITY_NAMES[i];
+        items[i].action = quality_pick;
+        items[i].user = (void *)(intptr_t)QUALITY_VALUES[i];
+        items[i].checked = qobuz_get_format() == QUALITY_VALUES[i];
+    }
+    popover_show(lv_event_get_current_target(e), items, 4);
 }
 
 static void do_logout(void *user) {
@@ -2209,57 +2237,8 @@ static void build_settings_page(gui_config_t *cfg) {
 	qsettings_screen = lv_obj_create(NULL);
 	lv_obj_t *container = settingsrow_page(qsettings_screen, cfg, "qobuz_settings");
 
-	// Quality: a card with the name on top and the four pills below, exactly
-	// like "DSD output" or "Replay gain" on the Music page.
-	lv_obj_t *card = lv_obj_create(container);
-	lv_obj_set_width(card, lv_pct(100));
-	lv_obj_set_height(card, LV_SIZE_CONTENT);
-	lv_obj_add_style(card, &theme_style_card, 0);
-	lv_obj_set_style_radius(card, 12, 0);
-	lv_obj_set_style_border_width(card, 0, 0);
-	lv_obj_set_style_shadow_width(card, 0, 0);
-	lv_obj_set_style_pad_all(card, 20, 0);
-	lv_obj_set_style_pad_row(card, 18, 0);
-	lv_obj_set_scrollable(card, false);
-	lv_obj_set_event_bubble(card, true);
-	lv_obj_set_flex_flow(card, LV_FLEX_FLOW_COLUMN);
-	lv_obj_set_flex_align(card, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
-
-	lv_obj_t *name = lv_label_create(card);
-	lv_label_set_text(name, tr("audio_quality"));
-	lv_obj_add_style(name, &theme_style_text, 0);
-	lv_obj_set_style_text_font(name, &font_ui_24, 0);
-
-	lv_obj_t *pills = lv_obj_create(card);
-	lv_obj_set_size(pills, lv_pct(100), LV_SIZE_CONTENT);
-	lv_obj_set_style_bg_opa(pills, 0, 0);
-	lv_obj_set_style_border_width(pills, 0, 0);
-	lv_obj_set_style_pad_all(pills, 0, 0);
-	lv_obj_set_style_pad_gap(pills, 12, 0);
-	lv_obj_set_scrollable(pills, false);
-	lv_obj_set_event_bubble(pills, true);
-	lv_obj_set_flex_flow(pills, LV_FLEX_FLOW_ROW_WRAP);
-	lv_obj_set_flex_align(pills, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_START);
-
-	for (int i = 0; i < 4; i++) {
-		lv_obj_t *btn = lv_btn_create(pills);
-		lv_obj_set_size(btn, LV_SIZE_CONTENT, 56);
-		lv_obj_set_style_pad_hor(btn, 22, 0);
-		lv_obj_set_style_radius(btn, LV_RADIUS_CIRCLE, 0);
-		lv_obj_set_style_shadow_width(btn, 0, 0);
-		lv_obj_set_style_border_width(btn, 0, 0);
-		lv_obj_add_event_cb(btn, quality_pick_cb, LV_EVENT_CLICKED, (void *)(intptr_t)QUALITY_VALUES[i]);
-
-		// Nearly symbols, but not quite: the decimal separator is
-		// locale-dependent ("FLAC 16/44.1" in English), so these go through
-		// tr() like everything else.
-		lv_obj_t *label = lv_label_create(btn);
-		lv_label_set_text(label, tr(QUALITY_NAMES[i]));
-		lv_obj_set_style_text_font(label, &font_ui_22, 0);
-		lv_obj_center(label);
-
-		quality_pills[i] = btn;
-	}
+    settingsrow_add(container, "audio_quality", &quality_value, quality_open, NULL);
+    lv_obj_set_style_text_font(quality_value, &font_ui_18, 0);
 
 	settingsrow_action(container, "leave", logout_cb, NULL);
 
@@ -2334,10 +2313,16 @@ static void rebuild_home(void) {
 
 	// No "Search" row: it is the magnifier in the corner, where it sits on
 	// every other searchable page.
-	settingsrow_add(home_container, "favourite_tracks", NULL, simple_job_cb, (void *)(intptr_t)JOB_FAV_TRACKS);
-	settingsrow_add(home_container, "favourite_albums", NULL, simple_job_cb, (void *)(intptr_t)JOB_FAV_ALBUMS);
-	settingsrow_add(home_container, "my_playlists", NULL, simple_job_cb, (void *)(intptr_t)JOB_USER_PLAYLISTS);
-	settingsrow_add(home_container, "new_releases", NULL, simple_job_cb, (void *)(intptr_t)JOB_FEATURED);
+    lv_obj_t *row = settingsrow_add(home_container, "favourite_tracks", NULL, simple_job_cb, (void *)(intptr_t)JOB_FAV_TRACKS);
+    settingsrow_add_accent_icon(row, &icon_star);
+    row = settingsrow_add(home_container, "favourite_albums", NULL, simple_job_cb, (void *)(intptr_t)JOB_FAV_ALBUMS);
+    settingsrow_add_accent_icon(row, &icon_album);
+    row = settingsrow_add(home_container, "my_playlists", NULL, simple_job_cb, (void *)(intptr_t)JOB_USER_PLAYLISTS);
+    settingsrow_add_accent_icon(row, &icon_list_music);
+    row = settingsrow_add(home_container, "new_releases", NULL, simple_job_cb, (void *)(intptr_t)JOB_FEATURED);
+    settingsrow_add_accent_icon(row, &icon_sort_date_new);
+    row = settingsrow_add(home_container, "New releases by genre", NULL, simple_job_cb, (void *)(intptr_t)JOB_GENRES);
+    settingsrow_add_accent_icon(row, &icon_genre);
 
 	update_corner_buttons();
 }
@@ -2363,6 +2348,16 @@ static lv_obj_t *dl_history_screen;
 static lv_obj_t *dl_history_container;
 static qobuzdl_entry_t dl_entries[DL_HISTORY_LIMIT];
 static int dl_entry_count;
+typedef struct {
+    char folder[768]; // empty for a legacy loose track
+    int entry;
+    lv_obj_t *thumb;
+    cover_image_t cover;
+} download_row_t;
+static download_row_t dl_rows[DL_HISTORY_LIMIT];
+static int dl_row_count;
+static int dl_cover_next;
+static int dl_cover_slot[COVERLOADER_QOBUZ_DOWNLOAD_COUNT];
 static bool dl_was_busy;
 static lv_obj_t *dl_progress_bar;
 static lv_obj_t *dl_progress_title;
@@ -2422,14 +2417,48 @@ static void dl_progress_build(void) {
 
 static void dl_history_play(lv_event_t *e) {
     int index = (int)(intptr_t)lv_event_get_user_data(e);
-    if (index < 0 || index >= dl_entry_count) return;
-    const char *paths[1] = {dl_entries[index].path};
-    device_state_play_list_ordered(paths, 1, 0);
-    switch_screen(player_screen);
+    if (index < 0 || index >= dl_row_count || switcher_back_drag_active()) return;
+    download_row_t *row = &dl_rows[index];
+    if (row->folder[0]) {
+        browser_open_dir_public(row->folder);
+        switch_screen(browser_screen);
+    } else {
+        const char *paths[1] = {dl_entries[row->entry].path};
+        device_state_play_list_ordered(paths, 1, 0);
+        switch_screen(player_screen);
+    }
+}
+
+static void dl_cover_schedule(int slot) {
+    if (dl_cover_next >= dl_row_count) { dl_cover_slot[slot] = -1; return; }
+    int index = dl_cover_next++;
+    dl_cover_slot[slot] = index;
+    coverloader_request(COVERLOADER_QOBUZ_DOWNLOAD_BASE + slot,
+                        dl_entries[dl_rows[index].entry].path, bp_pick(36, 60));
+}
+
+static void dl_cover_poll(void) {
+    for (int i = 0; i < COVERLOADER_QOBUZ_DOWNLOAD_COUNT; i++) {
+        int index = dl_cover_slot[i];
+        if (index < 0 || index >= dl_row_count) continue;
+        bool finished = false;
+        bool found = coverloader_take(COVERLOADER_QOBUZ_DOWNLOAD_BASE + i, &dl_rows[index].cover, &finished);
+        if (!finished) continue;
+        if (found && dl_rows[index].thumb) {
+            lv_obj_remove_style(dl_rows[index].thumb, &theme_style_icon, 0);
+            lv_obj_set_style_image_recolor_opa(dl_rows[index].thumb, LV_OPA_TRANSP, 0);
+            lv_image_set_src(dl_rows[index].thumb, &dl_rows[index].cover.dsc);
+        }
+        dl_cover_schedule(i);
+    }
 }
 
 static void dl_history_refresh(void) {
+    for (int i = 0; i < COVERLOADER_QOBUZ_DOWNLOAD_COUNT; i++) coverloader_release(COVERLOADER_QOBUZ_DOWNLOAD_BASE + i);
     lv_obj_clean(dl_history_container);
+    for (int i = 0; i < dl_row_count; i++) cover_free(&dl_rows[i].cover);
+    memset(dl_rows, 0, sizeof(dl_rows));
+    dl_row_count = dl_cover_next = 0;
     dl_progress_bar = dl_progress_title = dl_progress_amount = NULL;
     dl_entry_count = qobuzdl_history(dl_entries, DL_HISTORY_LIMIT);
     dl_was_busy = qobuzdl_busy();
@@ -2440,19 +2469,61 @@ static void dl_history_refresh(void) {
         dl_progress_paint(&p);
     }
     if (!dl_entry_count) settingsrow_add(dl_history_container, "No completed downloads", NULL, NULL, NULL);
+    char base[768];
+    snprintf(base, sizeof(base), "%s/Music/Qobuz Downloads", storage_sd_root() ? storage_sd_root() : "");
     for (int i = 0; i < dl_entry_count; i++) {
-        lv_obj_t *row = settingsrow_add(dl_history_container, "", NULL, dl_history_play, (void *)(intptr_t)i);
-        char title[360];
-        const char *path = dl_entries[i].path;
-        const char *filename = strrchr(path, '/');
-        filename = filename ? filename + 1 : path;
-        const char *format = strstr(filename, "-hires.flac") ? "Hi-res FLAC" :
-                             strstr(filename, ".flac") ? "FLAC" : "MP3";
-        snprintf(title, sizeof(title), "%.180s%s%.100s [%s]", dl_entries[i].title,
-                 dl_entries[i].artist[0] ? " - " : "", dl_entries[i].artist, format);
-        lv_label_set_text(settingsrow_name_label(row), title);
-        settingsrow_name_lines(row, 2);
+        char folder[768];
+        snprintf(folder, sizeof(folder), "%s", dl_entries[i].path);
+        char *slash = strrchr(folder, '/');
+        if (!slash) continue;
+        *slash = 0;
+        bool album = strcmp(folder, base) != 0;
+        bool seen = false;
+        if (album) for (int j = 0; j < dl_row_count; j++)
+            if (!strcmp(dl_rows[j].folder, folder)) { seen = true; break; }
+        if (seen) continue;
+        int index = dl_row_count++;
+        download_row_t *d = &dl_rows[index];
+        d->entry = i;
+        if (album) snprintf(d->folder, sizeof(d->folder), "%s", folder);
+        lv_obj_t *row = lv_btn_create(dl_history_container);
+        lv_obj_set_size(row, lv_pct(100), bp_pick(48, 88));
+        lv_obj_add_style(row, &theme_style_card, 0);
+        lv_obj_add_style(row, &theme_style_card_pressed, LV_STATE_PRESSED);
+        lv_obj_set_style_pad_hor(row, bp_pick(6, 14), 0);
+        lv_obj_set_style_pad_column(row, 8, 0);
+        lv_obj_set_style_border_width(row, 0, 0);
+        lv_obj_set_style_shadow_width(row, 0, 0);
+        lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
+        lv_obj_set_flex_align(row, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+        lv_obj_set_event_bubble(row, true);
+        lv_obj_add_event_cb(row, dl_history_play, LV_EVENT_CLICKED, (void *)(intptr_t)index);
+        d->thumb = lv_image_create(row);
+        lv_obj_set_size(d->thumb, bp_pick(36, 60), bp_pick(36, 60));
+        lv_image_set_inner_align(d->thumb, LV_IMAGE_ALIGN_CENTER);
+        lv_image_set_src(d->thumb, album ? &icon_album : &icon_music2);
+        lv_obj_add_style(d->thumb, &theme_style_icon, 0);
+        lv_obj_set_style_image_recolor_opa(d->thumb, LV_OPA_COVER, 0);
+        char title[384];
+        if (album) {
+            const char *name = strrchr(folder, '/');
+            snprintf(title, sizeof(title), "%.383s", name ? name + 1 : folder);
+            // Old album folders carried the Qobuz id after the year.
+            char *suffix = strrchr(title, '[');
+            size_t len = strlen(title);
+            if (suffix && suffix > title && suffix[-1] == ' ' && len && title[len-1] == ']' && suffix >= title+2 && suffix[-2] == ')') suffix[-1] = 0;
+        } else snprintf(title, sizeof(title), "%.128s%s%.199s", dl_entries[i].artist,
+                        dl_entries[i].artist[0] ? " - " : "", dl_entries[i].title);
+        lv_obj_t *label = lv_label_create(row);
+        lv_label_set_text(label, title);
+        lv_label_set_long_mode(label, LV_LABEL_LONG_DOT);
+        lv_obj_set_flex_grow(label, 1);
+        lv_obj_set_style_max_height(label, 2 * lv_font_get_line_height(&font_ui_20), 0);
+        lv_obj_add_style(label, &theme_style_text, 0);
+        lv_obj_set_style_text_font(label, &font_ui_20, 0);
     }
+    coverloader_start();
+    for (int i = 0; i < COVERLOADER_QOBUZ_DOWNLOAD_COUNT; i++) dl_cover_schedule(i);
 }
 
 static void dl_history_tick(lv_timer_t *timer) {
@@ -2462,6 +2533,7 @@ static void dl_history_tick(lv_timer_t *timer) {
     qobuzdl_progress(&p);
     if (dl_was_busy != p.running) dl_history_refresh();
     else if (p.running) dl_progress_paint(&p);
+    dl_cover_poll();
 }
 
 static void open_dl_history_cb(lv_event_t *e) {

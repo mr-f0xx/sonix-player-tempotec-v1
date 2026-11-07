@@ -877,6 +877,39 @@ int qobuz_featured_albums(const char *type, int offset, qobuz_album_t *out, int 
 	return count;
 }
 
+int qobuz_genres(int offset, qobuz_genre_t *out, int max) {
+    if (!out || max <= 0 || offset < 0) return 0;
+    char url[768];
+    snprintf(url, sizeof(url), "%s/genre/list?app_id=%s&limit=%d&offset=%d", base_url, app_id, max, offset);
+    char *body = NULL;
+    json_doc_t doc;
+    if (!api_call(url, NULL, &body, &doc)) return -1;
+    int items = json_path(&doc, json_root(&doc), "genres.items");
+    int n = json_len(&doc, items);
+    if (n < 0) n = 0;
+    if (n > max) n = max;
+    for (int i = 0; i < n; i++) {
+        int obj = json_at(&doc, items, i);
+        out[i].id = json_obj_long(&doc, obj, "id", 0);
+        json_obj_str(&doc, obj, "name", out[i].name, sizeof(out[i].name));
+    }
+    api_done(body, &doc);
+    return n;
+}
+
+int qobuz_genre_new_releases(long genre_id, int offset, qobuz_album_t *out, int max) {
+    if (!out || genre_id <= 0 || offset < 0 || max <= 0) return 0;
+    char url[768];
+    snprintf(url, sizeof(url), "%s/album/getFeatured?app_id=%s&type=new-releases-full&genre_ids=%ld&limit=%d&offset=%d",
+             base_url, app_id, genre_id, max, offset);
+    char *body = NULL;
+    json_doc_t doc;
+    if (!api_call(url, NULL, &body, &doc)) return -1;
+    int count = read_items(&doc, json_get(&doc, json_root(&doc), "albums"), album_reader, out, max);
+    api_done(body, &doc);
+    return count;
+}
+
 // ---------------------------------------------------------------------------
 // the signature
 //
