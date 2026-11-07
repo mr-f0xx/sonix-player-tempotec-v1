@@ -495,6 +495,21 @@ $(BUILD)/test_mostplayed: $(MOSTPLAYED_SRC) $(BUILD)/sqlite3_impl.o \
 	@mkdir -p $(BUILD)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ $(MOSTPLAYED_SRC) $(BUILD)/sqlite3_impl.o $(LDFLAGS) $(LDLIBS)
 
+# The boot-time playback record: ordinary and CUE-virtual paths, the saved album
+# queue across a real database reopen, and no automatic card worker with Detect
+# changes off. Real library, CUE parser and SQLite; unrelated codecs are stubbed.
+PLAYBACKSTATE_SRC = test_playbackstate.c $(ROOT)/src/system/library/library.c \
+                    $(ROOT)/src/system/library/cue.c $(ROOT)/src/system/core/config.c \
+                    $(ROOT)/src/system/core/utils.c
+.PHONY: playback-state
+playback-state: $(BUILD)/test_playbackstate
+	$(BUILD)/test_playbackstate
+
+$(BUILD)/test_playbackstate: $(PLAYBACKSTATE_SRC) $(BUILD)/sqlite3_impl.o \
+                             $(ROOT)/src/system/library/library.h $(ROOT)/src/system/library/cue.h
+	@mkdir -p $(BUILD)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ $(PLAYBACKSTATE_SRC) $(BUILD)/sqlite3_impl.o $(LDFLAGS) $(LDLIBS)
+
 # Heard podcast episodes against the real podcast.db: the marks themselves, the
 # sorted set the binary search reads, what survives a restart, and a card whose
 # database is deleted under the player. The card is a temporary directory; the

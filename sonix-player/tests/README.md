@@ -30,6 +30,7 @@ make -C sonix-player/tests artsearch
 make -C sonix-player/tests tagdate
 make -C sonix-player/tests genius
 make -C sonix-player/tests mostplayed
+make -C sonix-player/tests playback-state
 make -C sonix-player/tests podcastplayed
 make -C sonix-player/tests radio-store
 make -C sonix-player/tests led-rate
@@ -455,6 +456,17 @@ a reboot). It is a regression suite for a handle that answered zero rows over a
 table with plays in it: the row-id pass named a `sortkey` column that
 `PLAY_COUNTS` has never had, so the statement failed to prepare and the page
 showed its "nothing to show" note whatever was counted.
+
+## Boot-time playback state and automatic card checks
+
+`make -C sonix-player/tests playback-state` links the real library, CUE parser
+and SQLite. It checks that a saved `album.cue?track=3` is validated through its
+real sheet rather than rejected as a missing filename, and that the track
+position, ordered queue and album name survive closing and reopening the
+database. With an indexed track and **Detect changes** explicitly off, it also
+checks that `library_card_returned()` starts no worker and emits no update
+notification. Unrelated codec and Smart Mix entry points are stubbed; no audio
+or card scan is needed.
 
 ## Heard podcast episodes, against the real database
 

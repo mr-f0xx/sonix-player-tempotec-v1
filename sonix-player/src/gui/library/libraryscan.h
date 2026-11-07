@@ -11,6 +11,10 @@ extern lv_obj_t *libraryscan_screen;
 
 void libraryscan_init(gui_config_t *cfg);
 
+// Schedules the automatic card check after the boot-time track restore has
+// finished. With Detect changes off, the check itself starts no work.
+void libraryscan_boot_check_schedule(void);
+
 // Opening the page starts a scan. Called by the switcher when the page is
 // loaded, so nothing else has to remember to kick it off.
 void libraryscan_begin(void);
