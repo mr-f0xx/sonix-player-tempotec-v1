@@ -3674,3 +3674,30 @@ answer could not rebuild the page under itself either.
 reported once and only once, and that `BT_OP_BUSY` is not consumed. Reverting
 the one-line fix makes that check fail. A V1 with a Bluetooth transmitter should
 still confirm the round trip on hardware.
+
+## Home footer's "No track loaded" line sitting off-centre
+
+The compact home screens (Tokyo Night, Amber on Black, OLED) end in a strip that
+shows the note glyph and the current track. With nothing loaded that glyph is a
+quaver and the line beside it reads *No track loaded*, and that line was drawn
+visibly higher than the glyph -- on the OLED theme it looked like it was riding
+the top edge of the card.
+
+The strip's text column reserves two lines: the title and, under it, the
+artist. Both lines are ordinary labels stacked in a centring column, so the
+column is 2 x line height whether or not anything fills its second half. With
+no track loaded the artist line was empty but still occupied its 16 px, which
+pushed the single placeholder line a full half line above the column's centre
+-- 7 px above the middle of the glyph beside it.
+
+The column now collapses to one line while no track is loaded, so the
+placeholder is centred on the glyph. A loaded track is untouched: two lines,
+title over artist, exactly where they were. The strip is sized from the line height of the
+text itself, so the collapsed column follows a custom face or the Large text
+setting without a second rule.
+
+`make -C sonix-player/tests ui` gains a check on the compact footer for every
+theme that has one: the placeholder must be within half a line of the glyph's
+centre, a playing track must still stack title over artist, dropping back to
+nothing must restore the centred placeholder, and a text-size change must not
+leave it stacked again. Reverting the fix aborts that check.

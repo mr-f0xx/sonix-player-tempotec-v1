@@ -289,6 +289,30 @@ static void main_menu_layout_tokyo_home(bool force) {
 	main_menu_refresh_tiles();
 }
 
+// The strip reserves two lines for a playing track: title over artist. With
+// nothing loaded there is no second line to draw, but the empty object still
+// took its share of the centred column and pushed the single placeholder line
+// half a line above the note/play glyph beside it. Collapse the column to one
+// line in that case so the placeholder sits level with the icon; a loaded
+// track keeps the two-line column it always had.
+static void main_menu_layout_strip_text(bool loaded) {
+	if (!mini_player_copy || !mini_player_title || !mini_player_subtitle) {
+		return;
+	}
+	int line_height = lv_font_get_line_height(&font_ui_14);
+	int copy_height = loaded ? line_height * 2 : line_height;
+	// This runs on the strip's one-second refresh, so only touch the layout
+	// when the placeholder/playing switch or the text size actually moved it.
+	if (lv_obj_get_height(mini_player_copy) == copy_height &&
+			lv_obj_is_hidden(mini_player_subtitle) == !loaded) {
+		return;
+	}
+	lv_obj_set_hidden(mini_player_subtitle, !loaded);
+	lv_obj_set_height(mini_player_copy, copy_height);
+	lv_obj_set_height(mini_player_title, line_height);
+	lv_obj_update_layout(mini_player);
+}
+
 // The mini-player shows the live title and artist only. LVGL owns its label
 // text after lv_label_set_text(), so the metadata may safely come from this
 // local state snapshot; one-line dot mode clips long text without overlap.
@@ -374,6 +398,7 @@ static void main_menu_refresh_now_playing(void) {
 	}
 	set_label_if_changed(mini_player_title, title ? title : "");
 	set_label_if_changed(mini_player_subtitle, artist);
+	main_menu_layout_strip_text(loaded);
 }
 
 static void mini_player_timer_cb(lv_timer_t *timer) {
