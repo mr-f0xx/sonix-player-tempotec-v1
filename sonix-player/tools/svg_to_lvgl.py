@@ -492,6 +492,12 @@ COLOR_ICONS = [
     ("qobuz-badge.png", "qobuz_badge", 52),
     ("tidal-badge.png", "tidal_badge", 52),
     ("podcast-badge.png", "podcast_badge", 52),
+
+    # The official Hi-Res Audio artwork supplied for the optional badge design.
+    # Keep its gold/black colours; 34 px stays close to the text badge and
+    # clear of the source marks. It is embedded like the other colour artwork,
+    # so the player does not depend on a PNG decoder or a resource file.
+    ("hi-res-audio.png", "hires_audio", (34, 34)),
 ]
 
 
@@ -514,14 +520,19 @@ def render(svg_path, size):
 
 
 def render_color(path, size):
-    """PNG or SVG -> list of BGRA bytes with the original colours kept."""
+    """PNG or SVG -> BGRA bytes with the original colours kept.
+
+    A side gives a square; an explicit (width, height) also supports artwork
+    whose proportions are not square.
+    """
+    target = size if isinstance(size, tuple) else (size, size)
     if path.lower().endswith(".svg"):
-        png = cairosvg.svg2png(url=path, output_width=size, output_height=size)
+        png = cairosvg.svg2png(url=path, output_width=target[0], output_height=target[1])
         img = Image.open(io.BytesIO(png)).convert("RGBA")
     else:
         img = Image.open(path).convert("RGBA")
-    if img.size != (size, size):
-        img = img.resize((size, size), Image.LANCZOS)
+    if img.size != target:
+        img = img.resize(target, Image.LANCZOS)
 
     raw = img.tobytes()  # RGBA, 4 bytes per pixel
     out = bytearray()

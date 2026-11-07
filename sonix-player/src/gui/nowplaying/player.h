@@ -2,6 +2,7 @@
 #define PLAYER_H
 
 #include "src/gui/shell/gui.h"
+#include "src/gui/nowplaying/hiresbadge.h"
 #include "src/system/library/library.h"
 #include "src/system/streaming/podcast.h" // podcast_feed_t
 
@@ -100,6 +101,11 @@ typedef enum {
 } player_hires_position_t;
 player_hires_position_t player_hires_position_get(player_layout_t layout);
 void player_hires_position_set(player_layout_t layout, player_hires_position_t position);
+
+// One design across all layouts. Defaults to the original two-line text;
+// changing it does not turn a badge on or move it to another corner.
+hiresbadge_style_t player_hires_style_get(void);
+void player_hires_style_set(hiresbadge_style_t style);
 
 player_layout_t player_layout_get(void);
 void player_layout_set(player_layout_t layout);

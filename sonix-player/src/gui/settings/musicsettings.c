@@ -1737,6 +1737,7 @@ static void art_shape_pick_cb(lv_event_t *e) {
 }
 
 static lv_obj_t *hires_pills[3];
+static lv_obj_t *hires_style_pills[HIRESBADGE_STYLE_COUNT];
 static lv_obj_t *hires_card;
 
 static void hires_refresh(void) {
@@ -1746,11 +1747,21 @@ static void hires_refresh(void) {
 	for (int i = 0; i < 3; i++) {
 		if (hires_pills[i]) settingsrow_pill_active(hires_pills[i], pos == (player_hires_position_t)i);
 	}
+	hiresbadge_style_t style = player_hires_style_get();
+	for (int i = 0; i < HIRESBADGE_STYLE_COUNT; i++) {
+		if (hires_style_pills[i]) settingsrow_pill_active(hires_style_pills[i], style == (hiresbadge_style_t)i);
+	}
 }
 
 static void hires_pick_cb(lv_event_t *e) {
 	if (player_sheet_drag_active() || switcher_back_drag_active()) return;
 	player_hires_position_set(player_layout_get(), (player_hires_position_t)(intptr_t)lv_event_get_user_data(e));
+	hires_refresh();
+}
+
+static void hires_style_pick_cb(lv_event_t *e) {
+	if (player_sheet_drag_active() || switcher_back_drag_active()) return;
+	player_hires_style_set((hiresbadge_style_t)(intptr_t)lv_event_get_user_data(e));
 	hires_refresh();
 }
 
@@ -2582,7 +2593,16 @@ static void build_display_page(gui_config_t *cfg) {
 	hires_pills[PLAYER_HIRES_OFF] = settingsrow_pill(hires_row, "musicsettings_hires_off", PLAYER_HIRES_OFF, hires_pick_cb);
 	hires_pills[PLAYER_HIRES_RIGHT] = settingsrow_pill(hires_row, "musicsettings_hires_right", PLAYER_HIRES_RIGHT, hires_pick_cb);
 	hires_pills[PLAYER_HIRES_LEFT] = settingsrow_pill(hires_row, "musicsettings_hires_left", PLAYER_HIRES_LEFT, hires_pick_cb);
-	option_note(container, "musicsettings_hires_note");
+	option_note(hires_card, "musicsettings_hires_note");
+	// The design is global, unlike the corner/visibility pills above. Keep it
+	// in the same card so Album Art Max hides the whole badge section together.
+	lv_obj_t *hires_style_row = NULL;
+	lv_obj_t *hires_style_group = settingsrow_pills_group(hires_card, "musicsettings_hires_style", &hires_style_row);
+	hires_style_pills[HIRESBADGE_TWO_LINE] = settingsrow_pill(hires_style_row, "musicsettings_hires_two_line", HIRESBADGE_TWO_LINE, hires_style_pick_cb);
+	hires_style_pills[HIRESBADGE_ONE_LINE] = settingsrow_pill(hires_style_row, "musicsettings_hires_one_line", HIRESBADGE_ONE_LINE, hires_style_pick_cb);
+	hires_style_pills[HIRESBADGE_INITIALS] = settingsrow_pill_text(hires_style_row, "HR", HIRESBADGE_INITIALS, hires_style_pick_cb);
+	hires_style_pills[HIRESBADGE_LOGO] = settingsrow_pill(hires_style_row, "musicsettings_hires_logo", HIRESBADGE_LOGO, hires_style_pick_cb);
+	option_note(hires_style_group, "musicsettings_hires_style_note");
 	hires_refresh();
 	theme_register_refresh(hires_refresh);
 

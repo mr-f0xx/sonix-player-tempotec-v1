@@ -710,6 +710,19 @@ waveform-overlay: $(BUILD)/test_waveform_overlay
 $(BUILD)/test_waveform_overlay: $(WAVEOVERLAY_OBJ)
 	$(CC) -o $@ $^ $(LDFLAGS) $(LDLIBS)
 
+# The four hi-res artwork badge designs, including the embedded official logo.
+HIRESBADGE_UI_SRC = $(ROOT)/tests/ui/test_hiresbadge.c $(ROOT)/src/gui/nowplaying/hiresbadgeview.c \
+                    $(ROOT)/src/gui/shell/icons.c
+HIRESBADGE_UI_OBJ = $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(HIRESBADGE_UI_SRC)) \
+                    $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(UI_LVGL_SRC))
+
+.PHONY: hiresbadge-ui
+hiresbadge-ui: $(BUILD)/test_hiresbadge_ui
+	$(BUILD)/test_hiresbadge_ui
+
+$(BUILD)/test_hiresbadge_ui: $(HIRESBADGE_UI_OBJ)
+	$(CC) -o $@ $^ $(LDFLAGS) $(LDLIBS)
+
 # The now-playing page's play/pause button in its plain and legacy looks: the
 # real disc drawn on a stand-in for the sleeve under every palette and accent.
 # The player around it is not built; see src/gui/nowplaying/playbutton.h.
@@ -757,7 +770,7 @@ $(BUILD)/test_stockkeys_ui: $(ROOT)/build_gen/streamkeys_key.h $(STOCKKEYS_UI_OB
 	$(CC) -o $@ $(STOCKKEYS_UI_OBJ) $(LDFLAGS) $(LDLIBS)
 
 .PHONY: ui
-ui: $(BUILD)/test_main_menu $(BUILD)/test_screensaver $(BUILD)/test_tools_pages $(BUILD)/test_wifi_pages $(BUILD)/test_chargescreen $(BUILD)/test_lyricsearch $(BUILD)/test_games $(BUILD)/test_peq_profiles $(BUILD)/test_quickpanel_layout $(BUILD)/test_corners $(BUILD)/test_playbutton $(BUILD)/test_playerdeck $(BUILD)/test_vinylayout $(BUILD)/test_waveform_overlay $(BUILD)/test_stockkeys_ui
+ui: $(BUILD)/test_main_menu $(BUILD)/test_screensaver $(BUILD)/test_tools_pages $(BUILD)/test_wifi_pages $(BUILD)/test_chargescreen $(BUILD)/test_lyricsearch $(BUILD)/test_games $(BUILD)/test_peq_profiles $(BUILD)/test_quickpanel_layout $(BUILD)/test_corners $(BUILD)/test_playbutton $(BUILD)/test_playerdeck $(BUILD)/test_vinylayout $(BUILD)/test_waveform_overlay $(BUILD)/test_hiresbadge_ui $(BUILD)/test_stockkeys_ui
 	$(BUILD)/test_main_menu ../../sonix-packer/assets/V1/usr/resource/sonix/language
 	$(BUILD)/test_main_menu ../../sonix-packer/assets/V1/usr/resource/sonix/language saved
 	$(BUILD)/test_screensaver ../../sonix-packer/assets/V1/usr/resource/sonix/language
@@ -774,6 +787,7 @@ ui: $(BUILD)/test_main_menu $(BUILD)/test_screensaver $(BUILD)/test_tools_pages 
 	$(BUILD)/test_playerdeck
 	$(BUILD)/test_vinylayout
 	$(BUILD)/test_waveform_overlay
+	$(BUILD)/test_hiresbadge_ui
 	$(BUILD)/test_stockkeys_ui ../../sonix-packer/assets/V1/usr/resource/sonix/language
 
 $(BUILD)/test_main_menu: $(UI_OBJ)
@@ -812,7 +826,7 @@ $(BUILD)/ui/lvgl/%.o: $(ROOT)/lvgl/%.c ui/lv_conf.h $(ROOT)/lv_conf.h
 	@mkdir -p $(dir $@)
 	$(CC) $(UI_CPPFLAGS) $(filter-out -Werror,$(UI_CFLAGS)) -c $< -o $@
 
--include $(sort $(PEQPAGE_OBJ:.o=.d) $(UI_OBJ:.o=.d) $(SAVER_OBJ:.o=.d) $(WIFIPAGE_OBJ:.o=.d) $(LYRICSEARCH_OBJ:.o=.d) $(GAMES_OBJ:.o=.d) $(CORNERS_OBJ:.o=.d) $(PLAYBUTTON_OBJ:.o=.d) $(PLAYERDECK_OBJ:.o=.d) $(VINYLLAYOUT_OBJ:.o=.d) $(WAVEOVERLAY_OBJ:.o=.d) $(STOCKKEYS_UI_OBJ:.o=.d))
+-include $(sort $(PEQPAGE_OBJ:.o=.d) $(UI_OBJ:.o=.d) $(SAVER_OBJ:.o=.d) $(WIFIPAGE_OBJ:.o=.d) $(LYRICSEARCH_OBJ:.o=.d) $(GAMES_OBJ:.o=.d) $(CORNERS_OBJ:.o=.d) $(PLAYBUTTON_OBJ:.o=.d) $(PLAYERDECK_OBJ:.o=.d) $(VINYLLAYOUT_OBJ:.o=.d) $(WAVEOVERLAY_OBJ:.o=.d) $(HIRESBADGE_UI_OBJ:.o=.d) $(STOCKKEYS_UI_OBJ:.o=.d))
 
 # Smart Mix track-count limits and traversal, with a memory-only graph fixture.
 GENIUS_SRC = test_genius.c $(ROOT)/src/system/library/genius.c
