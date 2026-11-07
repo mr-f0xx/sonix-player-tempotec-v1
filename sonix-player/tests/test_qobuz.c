@@ -447,8 +447,22 @@ static void *server_main(void *arg) {
 
 		// MODE_NORMAL endpoint routing:
         if (strncmp(req, "GET /api.json/0.2/genre/list?", 29) == 0) {
-            const char *reply = "{\"genres\":{\"items\":[{\"id\":12,\"name\":\"Jazz\"}]}}";
-            send_http(cfd, 200, NULL, reply, strlen(reply));
+            if (strstr(req, "parent_id=94") && strstr(req, "offset=0")) {
+                char reply[4096];
+                size_t pos = (size_t)snprintf(reply, sizeof(reply), "{\"genres\":{\"items\":[");
+                for (int i = 0; i < 50; i++) {
+                    pos += (size_t)snprintf(reply + pos, sizeof(reply) - pos,
+                                            "%s{\"id\":%d,\"name\":\"Other\",\"slug\":\"other\"}", i ? "," : "", i + 1);
+                }
+                snprintf(reply + pos, sizeof(reply) - pos, "]}}");
+                send_http(cfd, 200, NULL, reply, strlen(reply));
+            } else {
+                const char *reply = strstr(req, "parent_id=94")
+                    ? "{\"genres\":{\"items\":[{\"id\":4242,\"name\":\"Reggae traduit\",\"slug\":\"reggae\"}]}}"
+                    : "{\"genres\":{\"items\":[{\"id\":12,\"name\":\"Jazz\"}]}}";
+                if (strstr(req, "parent_id=94")) assert(strstr(req, "offset=50"));
+                send_http(cfd, 200, NULL, reply, strlen(reply));
+            }
         } else if (strstr(req, "/album/getFeatured?") && strstr(req, "genre_ids=12")) {
             assert(strstr(req, "type=new-releases") && strstr(req, "offset=50"));
             const char *reply = "{\"albums\":{\"items\":[{\"id\":\"jazz1\",\"title\":\"Jazz Album\"}]}}";
@@ -606,6 +620,8 @@ int main(void) {
 
     qobuz_genre_t genres[2];
     assert(qobuz_genres(0, genres, 2) == 1 && genres[0].id == 12 && !strcmp(genres[0].name, "Jazz"));
+    qobuz_genre_t reggae;
+    assert(qobuz_reggae_genre(&reggae) == 1 && reggae.id == 4242 && !strcmp(reggae.name, "Reggae traduit"));
     qobuz_album_t genre_albums[2];
     assert(qobuz_genre_new_releases(12, 50, genre_albums, 2) == 1);
     assert(!strcmp(genre_albums[0].title, "Jazz Album"));

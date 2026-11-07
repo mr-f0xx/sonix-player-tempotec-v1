@@ -161,6 +161,8 @@ int qobuz_featured_albums(const char *type, int offset, qobuz_album_t *out, int 
 
 typedef struct { long id; char name[QOBUZ_NAME_MAX]; } qobuz_genre_t;
 int qobuz_genres(int offset, qobuz_genre_t *out, int max);
+// Resolve the Reggae child of World by Qobuz slug, preserving its localized name.
+int qobuz_reggae_genre(qobuz_genre_t *out);
 int qobuz_genre_new_releases(long genre_id, int offset, qobuz_album_t *out, int max);
 
 // The signed URL of a track's audio file. `mime` may be NULL.

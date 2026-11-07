@@ -16,6 +16,8 @@
 #include "src/gui/board_profile.h"
 #include "src/gui/shell/popover.h"
 #include "src/gui/streaming/qobuzart.h"
+#include "src/gui/streaming/qobuzgenregrid.h"
+#include "src/gui/streaming/qobuzgenreorder.h"
 #include "src/gui/streaming/stockkeys_ui.h"
 #include "src/gui/shell/settingsrow.h"
 #include "src/gui/shell/spinner.h"
@@ -112,6 +114,11 @@ static unsigned job_serial;
 static qobuz_track_t result_tracks[QOBUZ_MAX_HELD];
 static qobuz_album_t result_albums[QOBUZ_MAX_HELD];
 static qobuz_genre_t result_genres[QOBUZ_MAX_HELD];
+// Root genres are fetched and ranked as a whole; UI pages are slices of this
+// cache so a preferred genre on a later API page can still appear first.
+static qobuz_genre_t ordered_genres[QOBUZ_MAX_HELD];
+static int ordered_genre_count;
+static long ordered_reggae_id;
 static qobuz_artist_t result_artists[QOBUZ_MAX_HELD];
 static qobuz_playlist_t result_playlists[QOBUZ_MAX_HELD];
 static int result_count;
@@ -194,6 +201,7 @@ static void build_busy_layer(void) {
 // ---------------------------------------------------------------------------
 
 static lv_obj_t *list_container;
+static int genre_content_width;
 static lv_obj_t *list_title;
 static lv_obj_t *list_empty;
 
@@ -820,6 +828,7 @@ static void fill_list(int from) {
 	if (from == 0) {
 		art_forget_rows();
 		lv_obj_clean(list_container);
+		qobuzgenre_grid_layout(list_container, result_kind == JOB_GENRES);
 	}
 	list_kind = result_kind;
 
@@ -855,7 +864,8 @@ static void fill_list(int from) {
 			break;
 		}
         case JOB_GENRES:
-            make_row(result_genres[i].name, "", NULL, false, i);
+            qobuzgenre_grid_add(list_container, genre_content_width, result_genres[i].id,
+                                result_genres[i].name, i, ordered_reggae_id, row_clicked_cb);
             break;
 		case JOB_SEARCH_ARTISTS: {
 			const qobuz_artist_t *a = &result_artists[i];
@@ -1633,8 +1643,18 @@ static void *worker_main(void *arg) {
             snprintf(result_title, sizeof(result_title), "%.150s", job.id ? job.text : tr("new_releases"));
             break;
         case JOB_GENRES:
-            n = qobuz_genres(off, result_genres + off, want);
-            snprintf(result_title, sizeof(result_title), "%s", "New releases by genre");
+            if (off == 0) {
+                ordered_genre_count = qobuzgenre_load_ordered(ordered_genres, QOBUZ_MAX_HELD, &ordered_reggae_id);
+            }
+            if (ordered_genre_count < 0) {
+                n = -1;
+            } else {
+                n = ordered_genre_count - off;
+                if (n < 0) n = 0;
+                if (n > want) n = want;
+                memcpy(result_genres + off, ordered_genres + off, (size_t)n * sizeof(*result_genres));
+            }
+            snprintf(result_title, sizeof(result_title), "%s", tr("genre"));
             break;
 
 		case JOB_PLAY:
@@ -2557,7 +2577,12 @@ static void home_loaded_cb(lv_event_t *e) {
 
 // ---------------------------------------------------------------------------
 
+static void genre_theme_refresh(void) {
+	if (list_kind == JOB_GENRES) qobuzgenre_grid_refresh(list_container);
+}
+
 static void build_list_page(gui_config_t *cfg) {
+	genre_content_width = (int)cfg->screen_width - 2 * cfg->padding;
 	list_screen = lv_obj_create(NULL);
 	lv_obj_add_event_cb(list_screen, list_loaded_cb, LV_EVENT_SCREEN_LOADED, NULL);
 	lv_obj_add_event_cb(list_screen, list_unloaded_cb, LV_EVENT_SCREEN_UNLOADED, NULL);
@@ -2602,6 +2627,7 @@ void qobuzpage_init(gui_config_t *cfg) {
     lv_timer_create(dl_history_tick, 1000, NULL);
 
 	build_list_page(cfg);
+	theme_register_refresh(genre_theme_refresh);
 	build_search_page(cfg);
 	build_settings_page(cfg);
 	build_login_page(cfg);
