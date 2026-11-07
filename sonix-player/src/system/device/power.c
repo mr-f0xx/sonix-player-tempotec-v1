@@ -182,11 +182,6 @@ static uint32_t since(uint32_t mark, uint32_t now) {
 #define FADE_STEP 6
 #define FADE_STEP_DELAY_US 12000
 
-// The ramp back up at a wake, over a picture that is already drawn: a few
-// steps, so the screen is there almost at once and still does not snap on.
-#define WAKE_FADE_STEPS 4
-#define WAKE_FADE_STEP_DELAY_US 8000
-
 // --- Module state (owned by the LVGL/main thread unless noted) ---
 static power_config_t g_cfg;
 static lv_display_t *g_disp;
@@ -375,17 +370,6 @@ static void fade_to(long target) {
 		backlight_write(next);
 		if (g_hw_brightness != target) {
 			usleep(FADE_STEP_DELAY_US);
-		}
-	}
-}
-
-// The same ramp in WAKE_FADE_STEPS even steps.
-static void fade_up_quickly(long target) {
-	long from = g_hw_brightness < 0 ? BRIGHTNESS_MIN : g_hw_brightness;
-	for (int i = 1; i <= WAKE_FADE_STEPS; i++) {
-		backlight_write(from + (target - from) * i / WAKE_FADE_STEPS);
-		if (i < WAKE_FADE_STEPS) {
-			usleep(WAKE_FADE_STEP_DELAY_US);
 		}
 	}
 }
@@ -1783,7 +1767,7 @@ void power_screen_off(void) {
 	// at through*. Left at a true zero the panel comes back invisible whatever
 	// the driver restores, which is half of what keeps the wake free of the
 	// white reset frame (see WAKE_HOLD_LEVEL_DEFAULT). The user's level is not
-	// lost: the wake's fade ends at g_cfg.brightness.
+	// lost: the wake restores g_cfg.brightness.
 	//
 	// A held panel gets a true zero instead: it is still powered and still
 	// holding a picture, so a hold level meant for a blanked panel would be a
@@ -1926,12 +1910,6 @@ void power_screen_on(void) {
 	g_mem_blocked_this_dark = false;
 	g_mem_instant_wakes = 0;
 
-	// Whatever the screen coming back is for, the radios are probably part of
-	// it. Asked for first, because associating and rebuilding a Bluetooth
-	// stack take seconds, and they may as well be the seconds the panel spends
-	// waking up.
-	unpark_radios();
-
 	// The level the screen comes back at is the one the user chose, however dim.
 	// No too-dim floor is applied here: that guess belongs at init, where the
 	// stored level is adopted from the panel (see power_init). Applied here it
@@ -1954,8 +1932,8 @@ void power_screen_on(void) {
 	// --- The wake, in the order this panel needs it -----------------------
 	//
 	// The backlight goes down first and stays down until the picture has
-	// reached the glass. Nothing below is meant to be visible before the fade
-	// at the end, so the panel may be white and the controller may still be
+	// reached the glass. Nothing below is meant to be visible before the backlight
+	// is restored, so the panel may be white and the controller may still be
 	// waking up: what matters is that the level comes back over the *picture*,
 	// never over the panel's reset white (see WAKE_PANEL_SETTLE_MS).
 	//
@@ -2032,13 +2010,21 @@ void power_screen_on(void) {
 		// the panel -- the moment before this is when the reset white could show.
 		backlight_hold_until_panel_shows();
 	}
+	// The picture is on the glass. Restore brightness in one write rather than
+	// adding a visible fade to every wake. Do not shorten the guarded panel
+	// initialization above: that would expose its white reset frame.
+	backlight_write(g_cfg.brightness);
+	fprintf(stderr, "power: wake visible after %ums%s\n",
+			(unsigned)(monotonic_ms() - wake_started), panel_was_held ? " (panel kept)" : "");
+
 	panel_touch_flush();
 	set_indevs_enabled(true);
 	indev_timers_set_paused(false);
-
-	// The picture is on the glass: bring the user's level back over it.
-	fade_up_quickly(g_cfg.brightness);
 	lv_display_trigger_activity(g_disp);
+
+	// Radio restoration can involve slow hardware work and does not belong
+	// between the power press and the first visible frame.
+	unpark_radios();
 
 	// The panel blank/unblank cycle can disturb shared clock or power
 	// domains and leave the CS43198's volume register stale, which is
