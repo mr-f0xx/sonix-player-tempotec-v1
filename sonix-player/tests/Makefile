@@ -870,3 +870,11 @@ browserstate: $(BUILD)/test_browserstate
 $(BUILD)/test_browserstate: test_browserstate.c $(ROOT)/src/gui/library/browserstate.c $(ROOT)/src/gui/library/browserstate.h
 	@mkdir -p $(BUILD)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ test_browserstate.c $(ROOT)/src/gui/library/browserstate.c $(LDFLAGS) $(LDLIBS)
+
+.PHONY: hiresbadge
+hiresbadge: $(BUILD)/test_hiresbadge
+	$(BUILD)/test_hiresbadge
+
+$(BUILD)/test_hiresbadge: test_hiresbadge.c $(ROOT)/src/gui/nowplaying/hiresbadge.h
+	@mkdir -p $(BUILD)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ test_hiresbadge.c

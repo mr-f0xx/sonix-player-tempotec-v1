@@ -17,6 +17,15 @@
 #define COMPACT_PLAY_BTN 44
 #define PROGRESS_TRACK_HEIGHT 10
 
+// Immersive's glass is unchanged; move the whole deck three pixels into its
+// existing 12 px overhead, balancing that headroom against the lower inset.
+#define IMMERSIVE_FROST_OVERHEAD 12
+#define IMMERSIVE_DECK_LIFT 3
+
+static inline void player_deck_place(lv_obj_t *deck, bool immersive) {
+	if (deck) lv_obj_align(deck, LV_ALIGN_BOTTOM_MID, 0, immersive ? -IMMERSIVE_DECK_LIFT : 0);
+}
+
 static inline int player_deck_bottom_padding(bool waveform) {
 	return waveform ? COMPACT_WAVE_DECK_PAD_BOTTOM : COMPACT_DECK_PAD_BOTTOM;
 }

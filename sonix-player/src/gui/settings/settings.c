@@ -62,6 +62,7 @@ static lv_obj_t *othersettings_screen;
 static lv_obj_t *brightness_slider;
 static lv_obj_t *brightness_value;
 static lv_obj_t *cc_volume_switch; // what the control centre's slider is for
+static lv_obj_t *cc_both_switch;
 static lv_obj_t *screen_off_value;
 static lv_obj_t *screen_off_slider;
 static lv_obj_t *doubletap_switch;
@@ -267,6 +268,15 @@ static void cc_volume_toggled_cb(lv_event_t *e) {
 	quickpanel_set_volume_slider(lv_obj_has_state(cc_volume_switch, LV_STATE_CHECKED));
 }
 
+static void cc_both_toggled_cb(lv_event_t *e) {
+	(void)e;
+	bool on = lv_obj_has_state(cc_both_switch, LV_STATE_CHECKED);
+	quickpanel_set_both_sliders(on);
+	// Keep the previous single-slider choice, but make clear it only applies
+	// when the second slider is off.
+	if (cc_volume_switch) lv_obj_set_state(cc_volume_switch, LV_STATE_DISABLED, on);
+}
+
 // The panel's real range is only known after power_init() has run, which is
 // after the GUI is built -- so the slider syncs itself every time the page
 // comes up.
@@ -371,6 +381,16 @@ static void build_screen_page(gui_config_t *cfg) {
 	lv_obj_add_style(cc_volume_note, &theme_style_text_dim, 0);
 	lv_obj_set_style_text_font(cc_volume_note, &font_ui_22, 0);
 	lv_label_set_text(cc_volume_note, tr("settings_cc_volume_note"));
+
+	settingsrow_toggle(container, "settings_cc_both", &cc_both_switch, cc_both_toggled_cb);
+	lv_obj_set_state(cc_both_switch, LV_STATE_CHECKED, quickpanel_both_sliders());
+	lv_obj_set_state(cc_volume_switch, LV_STATE_DISABLED, quickpanel_both_sliders());
+	lv_obj_t *cc_both_note = lv_label_create(container);
+	lv_label_set_long_mode(cc_both_note, LV_LABEL_LONG_WRAP);
+	lv_obj_set_width(cc_both_note, lv_pct(100));
+	lv_obj_add_style(cc_both_note, &theme_style_text_dim, 0);
+	lv_obj_set_style_text_font(cc_both_note, &font_ui_22, 0);
+	lv_label_set_text(cc_both_note, tr("settings_cc_both_note"));
 
 	// How long the panel waits before it goes dark. Straight under the
 	// brightness: both are about the panel, and the one that switches it off is

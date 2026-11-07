@@ -26,6 +26,29 @@ const theme_palette_t *theme(void) {
 	return &palette;
 }
 
+// The real slider callbacks, with device IO replaced by observable state.
+static int test_volume = 35, volume_writes, volume_saves, bar_volume;
+static long test_brightness = 60;
+static int brightness_writes;
+int get_volume_percent(void) { return test_volume; }
+void set_volume_percent(int v) { test_volume = v > 80 ? 80 : v; volume_writes++; }
+void volume_profile_persist(void) { volume_saves++; }
+void topbar_refresh_volume(int v) { bar_volume = v; }
+long power_get_min_brightness(void) { return 5; }
+long power_get_max_brightness(void) { return 100; }
+long power_get_brightness(void) { return test_brightness; }
+void power_set_brightness(long v) { test_brightness = v; brightness_writes++; }
+void theme_apply_slider_knob(lv_obj_t *slider) { (void)slider; }
+void usbdac_get_state(usbdac_state_t *out) { memset(out, 0, sizeof(*out)); out->active = dac_active; }
+lv_style_t theme_style_icon;
+static const uint8_t icon_pixels[32 * 32 * 4];
+#define TEST_ICON { .header = { .magic = LV_IMAGE_HEADER_MAGIC, .cf = LV_COLOR_FORMAT_ARGB8888, \
+	.w = 32, .h = 32, .stride = 32 * 4 }, .data_size = sizeof(icon_pixels), .data = icon_pixels }
+const lv_image_dsc_t icon_sun = TEST_ICON;
+const lv_image_dsc_t icon_volume_mute = TEST_ICON;
+const lv_image_dsc_t icon_volume_low = TEST_ICON;
+const lv_image_dsc_t icon_volume_high = TEST_ICON;
+
 // LVGL's configured default font; no widgets are created in this suite.
 lv_font_t font_ui_14;
 
@@ -77,6 +100,128 @@ static void test_quickpanel_mode_gating(void) {
 	assert(!quickpanel_blocked());
 }
 
+// Exercise production layout and real LVGL hit-testing on the 240x320 panel.
+static void test_level_rows(const char *path) {
+	lv_display_t *display = lv_display_create(240, 320);
+	lv_obj_t *screen = lv_display_get_screen_active(display);
+	lv_obj_set_style_pad_all(screen, 0, 0);
+	qp_compact = true;
+	circle_button_size = 44; circle_button_gap = 4;
+	card_padding = 6; card_row_gap = 4; card_gap = 6;
+	level_row_h = 24; dots_room = 6; normal_page_h = 114;
+	card_h_rest = 154; np_card_h_rest = 104; card_top = 28;
+	pages_used = 2; edit_mode = false;
+	controls_card = lv_obj_create(screen);
+	lv_obj_set_size(controls_card, 228, card_h_rest);
+	lv_obj_set_pos(controls_card, 6, card_top);
+	lv_obj_set_style_pad_all(controls_card, card_padding, 0);
+	lv_obj_set_style_pad_gap(controls_card, card_row_gap, 0);
+	lv_obj_set_style_border_width(controls_card, 0, 0);
+	lv_obj_set_flex_flow(controls_card, LV_FLEX_FLOW_COLUMN);
+	lv_obj_set_flex_align(controls_card, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+	pages_view = lv_obj_create(controls_card);
+	lv_obj_set_size(pages_view, 216, normal_page_h);
+	lv_obj_set_style_pad_all(pages_view, 0, 0);
+	lv_obj_set_style_border_width(pages_view, 0, 0);
+	for (int i = 0; i < QP_PAGE_COUNT; i++) {
+		page_row[i] = lv_obj_create(pages_view);
+		lv_obj_set_size(page_row[i], 216, normal_page_h);
+	}
+	level_row = make_level_row(&level_icon, &level_slider);
+	volume_row = make_level_row(&volume_icon, &volume_slider);
+	page_dots = lv_obj_create(controls_card);
+	lv_obj_set_ignore_layout(page_dots, true);
+	lv_obj_set_size(page_dots, 120, dots_room + card_padding);
+	lv_obj_align(page_dots, LV_ALIGN_BOTTOM_MID, 0, card_padding);
+	np_card = lv_obj_create(screen);
+	lv_obj_set_style_pad_all(np_card, card_padding, 0);
+	lv_obj_set_style_border_width(np_card, 0, 0);
+	lv_obj_set_size(np_card, 228, np_card_h_rest);
+	np_title = lv_obj_create(np_card); np_artist = lv_obj_create(np_card);
+	np_transport = lv_obj_create(np_card);
+	lv_obj_set_size(np_transport, 200, 52);
+
+	config_set_bool("quickpanel", "volume_slider", true);
+	assert(!quickpanel_both_sliders());
+	quickpanel_set_both_sliders(true);
+	lv_obj_update_layout(screen);
+	assert(!level_is_volume && level_both && !lv_obj_is_hidden(volume_row));
+	assert(lv_obj_is_hidden(np_title) && lv_obj_is_hidden(np_artist));
+	assert(lv_obj_get_height(level_row) == 40 && lv_obj_get_height(volume_row) == 40);
+	assert(lv_obj_get_height(pages_view) >= 2 * circle_button_size + circle_button_gap);
+	assert(lv_obj_get_height(np_card) >= 44 + 2 * card_padding && lv_obj_get_height(np_transport) == 44);
+	lv_area_t a, b, card, np;
+	lv_obj_get_coords(level_row, &a); lv_obj_get_coords(volume_row, &b);
+	lv_obj_get_coords(controls_card, &card); lv_obj_get_coords(np_card, &np);
+	assert(a.y2 < b.y1 && b.y2 <= card.y2 && card.y2 < np.y1 && np.y2 < 320);
+	assert(lv_obj_get_width(level_slider) >= 120 && lv_obj_get_width(volume_slider) >= 120);
+	// The centre of each 40-pixel row must actually hit that rail, including
+	// points well above and below the visible 10-pixel track.
+	for (int i = 0; i < 2; i++) {
+		lv_obj_t *slider = i ? volume_slider : level_slider;
+		lv_area_t row = i ? b : a, rail;
+		lv_obj_get_coords(slider, &rail);
+		for (int y = row.y1 + 2; y <= row.y2 - 2; y++) {
+			lv_point_t pt = {.x = (rail.x1 + rail.x2) / 2, .y = y};
+			assert(lv_indev_search_obj(screen, &pt) == slider);
+		}
+	}
+	lv_slider_set_value(level_slider, 42, LV_ANIM_OFF);
+	lv_obj_send_event(level_slider, LV_EVENT_VALUE_CHANGED, NULL);
+	assert(test_brightness == 42 && brightness_writes == 1 && volume_writes == 0);
+	lv_obj_send_event(level_slider, LV_EVENT_RELEASED, NULL);
+	assert(config_get_int("screen", "brightness", 0) == 42);
+	lv_slider_set_value(volume_slider, 95, LV_ANIM_OFF);
+	lv_obj_send_event(volume_slider, LV_EVENT_VALUE_CHANGED, NULL);
+	assert(test_volume == 80 && lv_slider_get_value(volume_slider) == 80 && bar_volume == 80);
+	lv_obj_send_event(volume_slider, LV_EVENT_RELEASED, NULL);
+	assert(volume_saves == 1);
+	test_volume = 25; level_follow();
+	assert(lv_slider_get_value(volume_slider) == 25);
+	// Polls and reopen syncs never pull either knob away during a drag.
+	lv_obj_add_state(volume_slider, LV_STATE_PRESSED);
+	lv_slider_set_value(volume_slider, 55, LV_ANIM_OFF);
+	level_follow(); level_sync();
+	assert(lv_slider_get_value(volume_slider) == 55);
+	lv_obj_remove_state(volume_slider, LV_STATE_PRESSED);
+	lv_obj_add_state(level_slider, LV_STATE_PRESSED);
+	lv_slider_set_value(level_slider, 73, LV_ANIM_OFF);
+	level_sync(); assert(lv_slider_get_value(level_slider) == 73);
+	lv_obj_remove_state(level_slider, LV_STATE_PRESSED);
+	assert(config_save()); config_init(path);
+	assert(quickpanel_both_sliders() && quickpanel_volume_slider());
+	// One and two pages, and each gesture scheme, retain the same two rails.
+	for (int pages = 1; pages <= 2; pages++) {
+		for (int top = 20; top <= 44; top += 24) {
+			pages_used = pages; card_top = top; level_layout();
+			lv_obj_set_y(controls_card, top);
+			lv_obj_update_layout(screen);
+			lv_obj_get_coords(volume_row, &b); lv_obj_get_coords(np_card, &np);
+			assert(b.y2 < np.y1 && np.y2 < 320 && lv_obj_get_height(np_card) >= 56);
+		}
+	}
+	pages_used = 2; card_top = 28; lv_obj_set_y(controls_card, card_top);
+	edit_mode = true; level_layout(); assert(lv_obj_is_hidden(volume_row));
+	edit_mode = false; level_layout(); assert(!lv_obj_is_hidden(volume_row));
+	quickpanel_set_both_sliders(false);
+	lv_obj_update_layout(screen);
+	assert(level_is_volume && lv_obj_is_hidden(volume_row));
+	assert(!lv_obj_is_hidden(np_title) && !lv_obj_is_hidden(np_artist));
+	assert(lv_obj_get_height(pages_view) == normal_page_h);
+	assert(lv_obj_get_height(np_card) == np_card_h_rest - dots_room);
+	assert(lv_obj_get_height(np_transport) == 52);
+	// DAC mode needs its status text even when the compact transport is gone.
+	dac_active = true; quickpanel_set_both_sliders(true);
+	assert(!lv_obj_is_hidden(np_title) && !lv_obj_is_hidden(np_artist));
+	dac_active = false; quickpanel_set_both_sliders(false);
+	lv_display_delete(display);
+	controls_card = np_card = pages_view = level_row = volume_row = NULL;
+	level_slider = volume_slider = level_icon = volume_icon = NULL;
+	np_title = np_artist = np_transport = page_dots = NULL;
+	for (int i = 0; i < QP_PAGE_COUNT; i++) page_row[i] = NULL;
+	config_set_bool("quickpanel", "volume_slider", false);
+}
+
 int main(void) {
 	lv_init();
 	char dir[] = "/tmp/sonix-qp-layout-XXXXXX";
@@ -85,6 +230,7 @@ int main(void) {
 	snprintf(path, sizeof(path), "%s/config.ini", dir);
 	config_init(path);
 	test_quickpanel_mode_gating();
+	test_level_rows(path);
 
 	// A config that has never carried a layout gets the panel as it ships: the
 	// eight buttons the first page has always had, in their old order, and a
