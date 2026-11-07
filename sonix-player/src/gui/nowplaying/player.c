@@ -8116,12 +8116,12 @@ void player_init(gui_config_t *cfg) {
 	lv_label_set_text(hires_badge, "HI-\nRES");
 	lv_obj_set_style_text_font(hires_badge, &font_ui_14, 0);
 	lv_obj_set_style_text_color(hires_badge, lv_color_black(), 0);
-	lv_obj_set_style_text_line_space(hires_badge, -3, 0);
+	lv_obj_set_style_text_line_space(hires_badge, -4, 0);
 	lv_obj_set_style_bg_color(hires_badge, lv_color_white(), 0);
 	lv_obj_set_style_bg_opa(hires_badge, LV_OPA_COVER, 0);
 	lv_obj_set_style_radius(hires_badge, 3, 0);
-	lv_obj_set_style_pad_hor(hires_badge, 4, 0);
-	lv_obj_set_style_pad_ver(hires_badge, 2, 0);
+	lv_obj_set_style_pad_hor(hires_badge, 3, 0);
+	lv_obj_set_style_pad_ver(hires_badge, 1, 0);
 	lv_obj_set_clickable(hires_badge, false);
 	lv_obj_set_hidden(hires_badge, true);
 
