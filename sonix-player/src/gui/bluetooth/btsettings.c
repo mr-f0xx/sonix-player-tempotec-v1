@@ -120,6 +120,9 @@ static bool any_audio_connected(const char *mac) {
 static bool pairing_device_audio_connected(void) { return any_audio_connected(pairing_mac); }
 
 static void open_receiver_mode(void) {
+	if (lv_screen_active() == btreceiverpage_screen) {
+		return; // already there; switching again would only rebuild the page
+	}
 	if (bluetooth_audio_active()) {
 		gui_notify_popup("bt_disconnect_headphones_first");
 		return;
