@@ -159,7 +159,7 @@ int qobuz_user_playlists(int offset, qobuz_playlist_t *out, int max);
 // "editor-picks", "best-sellers", "press-awards", "most-streamed").
 int qobuz_featured_albums(const char *type, int offset, qobuz_album_t *out, int max);
 
-typedef struct { long id; char name[QOBUZ_NAME_MAX]; } qobuz_genre_t;
+typedef struct { long id; char name[QOBUZ_NAME_MAX]; char slug[128]; } qobuz_genre_t;
 int qobuz_genres(int offset, qobuz_genre_t *out, int max);
 // Resolve the Reggae child of World by Qobuz slug, preserving its localized name.
 int qobuz_reggae_genre(qobuz_genre_t *out);

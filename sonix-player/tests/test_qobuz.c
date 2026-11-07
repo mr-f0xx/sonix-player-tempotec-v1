@@ -458,8 +458,8 @@ static void *server_main(void *arg) {
                 send_http(cfd, 200, NULL, reply, strlen(reply));
             } else {
                 const char *reply = strstr(req, "parent_id=94")
-                    ? "{\"genres\":{\"items\":[{\"id\":4242,\"name\":\"Reggae traduit\",\"slug\":\"reggae\"}]}}"
-                    : "{\"genres\":{\"items\":[{\"id\":12,\"name\":\"Jazz\"}]}}";
+                    ? "{\"genres\":{\"items\":[{\"id\":4242,\"name\":\"Reggae traduit\",\"slug\":\"musiques-du-monde/reggae\"}]}}"
+                    : "{\"genres\":{\"items\":[{\"id\":12,\"name\":\"Jazz\",\"slug\":\"jazz\"}]}}";
                 if (strstr(req, "parent_id=94")) assert(strstr(req, "offset=50"));
                 send_http(cfd, 200, NULL, reply, strlen(reply));
             }
@@ -620,6 +620,7 @@ int main(void) {
 
     qobuz_genre_t genres[2];
     assert(qobuz_genres(0, genres, 2) == 1 && genres[0].id == 12 && !strcmp(genres[0].name, "Jazz"));
+    assert(!strcmp(genres[0].slug, "jazz"));
     qobuz_genre_t reggae;
     assert(qobuz_reggae_genre(&reggae) == 1 && reggae.id == 4242 && !strcmp(reggae.name, "Reggae traduit"));
     qobuz_album_t genre_albums[2];

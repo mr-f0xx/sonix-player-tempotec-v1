@@ -5,7 +5,7 @@
 
 static qobuz_genre_t source[80];
 static int source_count, fail_root, reggae_status;
-static qobuz_genre_t reggae = {777, "Reggae"};
+static qobuz_genre_t reggae = {.id = 777, .name = "Reggae", .slug = "reggae"};
 int qobuz_genres(int offset, qobuz_genre_t *out, int max) {
     if (fail_root) return -1;
     int n = source_count - offset;
@@ -51,6 +51,16 @@ int main(void) {
     strcpy(source[0].name, "Unknown 0");
     n = qobuzgenre_load_ordered(out, 100, &reggae_id);
     assert(n == 56 && reggae_id == 0); // keep browsing if the child lookup fails
+    // Children is filtered by its stable slug even when the name is localized.
+    // Blues is promoted even when Qobuz lists it only beneath a parent.
+    source[50].id = 3000;
+    source[1].id = 3001;
+    strcpy(source[1].name, "Pour les petits");
+    strcpy(source[1].slug, "diction-litterature/enfants");
+    reggae_status = 1;
+    n = qobuzgenre_load_ordered(out, 100, &reggae_id);
+    assert(n == 57 && out[4].id == 3 && out[5].id == 777);
+    for (int i = 0; i < n; i++) assert(out[i].id != 3001);
     fail_root = 1;
     assert(qobuzgenre_load_ordered(out, 100, &reggae_id) == -1);
     puts("PASS Qobuz genre ordering, cross-page promotion and fallback");

@@ -8,7 +8,7 @@
 #include "src/gui/shell/icons.h"
 #include "src/gui/shell/theme.h"
 
-#define GENRE_GAP 6
+#define GENRE_GAP 4
 
 // Qobuz returns localised names, so choose glyphs by stable API ids instead
 // of matching English text. Unknown/new genres still get a music glyph.
@@ -45,14 +45,14 @@ lv_obj_t *qobuzgenre_grid_add(lv_obj_t *container, int content_width, long genre
     int width = (content_width - GENRE_GAP) / 2;
     if (width < 1) width = 1;
     lv_obj_t *tile = lv_btn_create(container);
-    lv_obj_set_size(tile, width, bp_pick(92, 150));
+    lv_obj_set_size(tile, width, bp_pick(74, 150));
     lv_obj_add_style(tile, &theme_style_card, 0);
     lv_obj_add_style(tile, &theme_style_card_pressed, LV_STATE_PRESSED);
     lv_obj_set_style_radius(tile, bp_tile_radius(), 0);
     lv_obj_set_style_border_width(tile, 0, 0);
     lv_obj_set_style_shadow_width(tile, 0, 0);
-    lv_obj_set_style_pad_all(tile, bp_pick(6, 12), 0);
-    lv_obj_set_style_pad_row(tile, bp_pick(4, 8), 0);
+    lv_obj_set_style_pad_all(tile, bp_pick(4, 12), 0);
+    lv_obj_set_style_pad_row(tile, bp_pick(2, 8), 0);
     lv_obj_set_scrollable(tile, false);
     lv_obj_set_event_bubble(tile, true);
     lv_obj_set_flex_flow(tile, LV_FLEX_FLOW_COLUMN);
@@ -74,9 +74,11 @@ lv_obj_t *qobuzgenre_grid_add(lv_obj_t *container, int content_width, long genre
     lv_label_set_text(label, name ? name : "");
     lv_label_set_long_mode(label, LV_LABEL_LONG_DOT);
     lv_obj_set_width(label, lv_pct(100));
-    lv_obj_set_height(label, 2 * lv_font_get_line_height(&font_ui_18));
+    int label_height = 2 * lv_font_get_line_height(&font_ui_14);
+    int available = bp_pick(32, 70);
+    lv_obj_set_height(label, label_height < available ? label_height : available);
     lv_obj_add_style(label, &theme_style_text, 0);
-    lv_obj_set_style_text_font(label, &font_ui_18, 0);
+    lv_obj_set_style_text_font(label, &font_ui_14, 0);
     lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_event_bubble(label, true);
     return tile;

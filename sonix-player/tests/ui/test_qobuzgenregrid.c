@@ -37,6 +37,7 @@ int main(void) {
     lv_obj_set_size(list, 240, 248);
     lv_obj_set_style_pad_all(list, 0, 0);
     lv_obj_set_style_pad_hor(list, 6, 0);
+    lv_obj_set_style_pad_bottom(list, 6, 0);
     lv_obj_set_style_border_width(list, 0, 0);
     qobuzgenre_grid_layout(list, true);
     const long ids[] = {112, 80, 10, 133, 64};
@@ -46,7 +47,7 @@ int main(void) {
 
     lv_obj_t *a = lv_obj_get_child(list, 0), *b = lv_obj_get_child(list, 1);
     lv_obj_t *c = lv_obj_get_child(list, 2), *d = lv_obj_get_child(list, 3);
-    assert(lv_obj_get_width(a) == 111 && lv_obj_get_height(a) == 92);
+    assert(lv_obj_get_width(a) == 112 && lv_obj_get_height(a) == 74);
     assert(lv_obj_get_x(a) < lv_obj_get_x(b) && lv_obj_get_y(a) == lv_obj_get_y(b));
     assert(lv_obj_get_y(c) > lv_obj_get_y(a) && lv_obj_get_y(c) == lv_obj_get_y(d));
     assert(lv_obj_get_x(a) == lv_obj_get_x(c) && lv_obj_get_x(b) == lv_obj_get_x(d));
@@ -72,13 +73,15 @@ int main(void) {
     assert(lv_color_eq(lv_obj_get_style_image_recolor(lv_obj_get_child(fifth, 0), 0), palette.accent));
 
     // A long localised genre name is confined even with larger font metrics.
-    font_ui_18 = lv_font_montserrat_20;
+    font_ui_14 = lv_font_montserrat_20;
     lv_obj_t *long_tile = qobuzgenre_grid_add(list, 228, 59,
         "Very long translated genre and subgenre name", 5, 1234, click_cb);
     lv_obj_update_layout(screen);
     lv_obj_t *label = lv_obj_get_child(long_tile, 1);
     assert(lv_obj_get_width(label) <= lv_obj_get_content_width(long_tile));
     assert(lv_obj_get_height(label) <= lv_obj_get_content_height(long_tile) - 32);
+    assert(lv_obj_get_y(fifth) == lv_obj_get_y(long_tile));
+    assert(lv_obj_get_y(long_tile) + lv_obj_get_height(long_tile) <= lv_obj_get_content_height(list));
 
     lv_obj_clean(list);
     qobuzgenre_grid_layout(list, false);
