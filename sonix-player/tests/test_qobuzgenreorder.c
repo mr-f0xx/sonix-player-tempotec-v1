@@ -25,13 +25,13 @@ int main(void) {
         source[i].id = 1000 + i;
         snprintf(source[i].name, sizeof(source[i].name), "Unknown %d", i);
     }
-    source[50].id = 3; source[51].id = 64; source[52].id = 80;
+    source[50].id = 902; strcpy(source[50].slug, "blues-country-folk"); source[51].id = 64; source[52].id = 80;
     source[53].id = 127; source[54].id = 133; source[55].id = 112;
     strcpy(source[54].name, "Rap localise");
     reggae_status = 1;
     qobuz_genre_t out[100]; long reggae_id = 0;
     int n = qobuzgenre_load_ordered(out, 100, &reggae_id);
-    const long expected[] = {133, 127, 80, 64, 3, 777, 112, 1000, 1001};
+    const long expected[] = {133, 127, 80, 64, 902, 777, 112, 1000, 1001};
     assert(n == 57 && reggae_id == 777);
     for (unsigned i = 0; i < sizeof(expected)/sizeof(expected[0]); i++) assert(out[i].id == expected[i]);
     assert(!strcmp(out[0].name, "Rap localise"));
@@ -52,18 +52,19 @@ int main(void) {
     n = qobuzgenre_load_ordered(out, 100, &reggae_id);
     assert(n == 56 && reggae_id == 0); // keep browsing if the child lookup fails
     // Children is filtered by its stable slug even when the name is localized.
-    // Blues is promoted even when Qobuz lists it only beneath a parent.
+    // Do not invent the parent (or the non-working Blues child) when absent.
     source[50].id = 3000;
+    source[50].slug[0] = '\0';
     source[1].id = 3001;
     strcpy(source[1].name, "Pour les petits");
     strcpy(source[1].slug, "diction-litterature/enfants");
     reggae_status = 1;
     n = qobuzgenre_load_ordered(out, 100, &reggae_id);
-    assert(n == 57 && out[4].id == 3 && out[5].id == 777);
-    for (int i = 0; i < n; i++) assert(out[i].id != 3001);
-    // Localized root categories are removed without hiding their individual
-    // children, or changing the ordering of the remaining genres.
-    source_count = 6;
+    assert(n == 56 && out[4].id == 777 && out[5].id == 112);
+    for (int i = 0; i < n; i++) assert(out[i].id != 3001 && out[i].id != 3);
+    // Keep the API's parent ID, not a fabricated Blues child; the other
+    // requested exclusions and the individual Country/Folk entries remain.
+    source_count = 7;
     memset(source, 0, sizeof(source));
     source[0] = (qobuz_genre_t){.id = 91, .name = "Films", .slug = "localized"};
     source[1] = (qobuz_genre_t){.id = 901, .name = "French songs", .slug = "chanson-francaise"};
@@ -71,9 +72,11 @@ int main(void) {
     source[3] = (qobuz_genre_t){.id = 4, .name = "Country"};
     source[4] = (qobuz_genre_t){.id = 5, .name = "Folk"};
     source[5] = (qobuz_genre_t){.id = 112, .name = "Pop/Rock"};
+    source[6] = (qobuz_genre_t){.id = 3, .name = "Blues"};
     reggae_status = 0;
     n = qobuzgenre_load_ordered(out, 100, &reggae_id);
-    assert(n == 4 && out[0].id == 3 && out[1].id == 112 && out[2].id == 5 && out[3].id == 4);
+    assert(n == 4 && out[0].id == 902 && out[1].id == 112 && out[2].id == 5 && out[3].id == 4);
+    assert(!strcmp(out[0].name, "Blues/Country/Folk"));
     fail_root = 1;
     assert(qobuzgenre_load_ordered(out, 100, &reggae_id) == -1);
     puts("PASS Qobuz genre ordering, cross-page promotion and fallback");
