@@ -12,6 +12,7 @@
 #include "src/gui/nowplaying/chapters.h"
 #include "src/gui/nowplaying/aamlayout.h"
 #include "src/gui/nowplaying/cover.h"
+#include "src/gui/nowplaying/hiresbadge.h"
 #include "src/gui/nowplaying/coverloader.h"
 #include "src/gui/nowplaying/lyricsearch.h"
 #include "src/gui/nowplaying/playbutton.h"
@@ -77,6 +78,7 @@ static lv_obj_t *play_btn;
 static lv_obj_t *play_btn_icon;
 static lv_obj_t *song_title_label;
 static lv_obj_t *song_artist_label;
+static lv_obj_t *hires_badge;
 static lv_obj_t *format_label; // "16/44.1 FLAC", right of the artist line
 static lv_obj_t *fav_btn_obj;  // the button it sits on, hidden on a book
 static lv_obj_t *controls_row; // transport row: where the ellipsis lives, and the favourite button in Studio
@@ -1776,7 +1778,6 @@ static int menu_height;
 // photograph and the glass. Reaching a bit over the sleeve's foot instead
 // gives the names a margin of ground between them and the cutout, which is
 // where a deck's first row wants its headroom anyway.
-#define IMMERSIVE_FROST_OVERHEAD 12
 
 // The height of Immersive's frosted band: the deck's own rows, plus the reach
 // above them (see IMMERSIVE_FROST_OVERHEAD). The band is cut from the foot of
@@ -3503,6 +3504,9 @@ static void immersive_put(void) {
 	// over the controls it is the ground for. Where it was is written down
 	// above, on the way in.
 	if (player_menu) {
+		// Keep the frost and crop fixed, but lift all its controls together a
+		// few pixels into the overhead so the glass has balanced top/bottom space.
+		player_deck_place(player_menu, true);
 		lv_obj_move_foreground(player_menu);
 	}
 	// The frosted foot, reaching over the sleeve's foot above the deck: up if
@@ -3535,6 +3539,7 @@ static bool immersive_take_back(void) {
 
 	lv_obj_remove_local_style_prop(cover_panel, LV_STYLE_BG_OPA, 0);
 	if (player_menu) {
+		player_deck_place(player_menu, false);
 		lv_obj_remove_local_style_prop(player_menu, LV_STYLE_BG_OPA, 0);
 		lv_obj_remove_local_style_prop(player_menu, LV_STYLE_BG_IMAGE_OPA, 0);
 		// Back where the page was built with it: the block is a child of the
@@ -5577,8 +5582,62 @@ static void fav_btn_event_cb(lv_event_t *e) {
 	update_fav_button();
 }
 
+// Use the actual arrangement, not the selected one: Waveform may fall back
+// to Standard for a stream, and its badge should follow the visible layout.
+static player_layout_t hires_current_layout(void) {
+	if (layout_aam_now) return PLAYER_LAYOUT_ALBUM_ART_MAX;
+	if (layout_studio_now) return PLAYER_LAYOUT_STUDIO;
+	if (layout_immersive_now) return PLAYER_LAYOUT_IMMERSIVE;
+	if (layout_poster_now) return PLAYER_LAYOUT_POSTER;
+	if (layout_vinyl_now) return PLAYER_LAYOUT_VINYL;
+	if (layout_wave_now) return PLAYER_LAYOUT_ALTERNATIVE;
+	return PLAYER_LAYOUT_STANDARD;
+}
+
+static void update_hires_badge(const device_state_t *state) {
+	if (!hires_badge) return;
+	player_layout_t layout = hires_current_layout();
+	player_hires_position_t pos = player_hires_position_get(layout);
+	bool hi = false;
+	if (state->live) {
+		radio_now_t now;
+		radio_get_now(&now);
+		hi = hiresbadge_qualifies(now.playing && (strcmp(now.codec, "FLAC") == 0 || strcmp(now.codec, "Ogg FLAC") == 0),
+			false, now.bits, now.sample_rate, false);
+	} else if (state->current_file[0] && !podcastcache_is_episode(state->current_file)) {
+		airplay_state_t air;
+		airplay_get_state(&air);
+		hi = hiresbadge_qualifies(!air.playing && !btreceiver_is_active(), audio_stream_is_lossy(),
+			audio_get_stream_bits(), state->stream_sample_rate, audio_get_dsd_multiple() > 0);
+	}
+	if (!hi || pos == PLAYER_HIRES_OFF || layout == PLAYER_LAYOUT_ALBUM_ART_MAX) {
+		lv_obj_set_hidden(hires_badge, true);
+		return;
+	}
+
+	// Studio draws a separate sleeve; everywhere else the badge travels with
+	// the clipped artwork. Leave room for the source mark in the right corner.
+	lv_obj_t *parent = layout_studio_now
+		? (lv_obj_is_hidden(studio_cover) ? studio_empty : studio_cover) : cover_art_group;
+	if (lv_obj_get_parent(hires_badge) != parent) lv_obj_set_parent(hires_badge, parent);
+	int inset = BADGE_INSET;
+	if ((layout_alt_now || layout_studio_now || layout == PLAYER_LAYOUT_STANDARD) && art_shape == PLAYER_ART_VINYL) {
+		int circular_inset = (layout_studio_now ? studio_cover_size : cover_art_w) / 5;
+		if (circular_inset > inset) inset = circular_inset;
+	}
+	bool source = state->live || current_qobuz_track() != 0 || current_tidal_track() != 0;
+	// Keep both marks out of the same corner. Moving down can collide with
+	// Waveform's star or title on a small sleeve, so use the other corner.
+	if (pos == PLAYER_HIRES_RIGHT && source) pos = PLAYER_HIRES_LEFT;
+	lv_obj_align(hires_badge, pos == PLAYER_HIRES_LEFT ? LV_ALIGN_TOP_LEFT : LV_ALIGN_TOP_RIGHT,
+		pos == PLAYER_HIRES_LEFT ? inset : -inset, inset);
+	lv_obj_set_hidden(hires_badge, false);
+	lv_obj_move_foreground(hires_badge);
+}
+
 // The format line, the way the stock player writes it: "16/44.1 FLAC".
 static void update_format_label(const device_state_t *state) {
+	update_hires_badge(state);
 	// The mark beside it in Studio, which is the same question asked of the
 	// stream rather than of the library. Here because this is where the format
 	// line is worked out, and the two say one thing between them.
@@ -6424,6 +6483,27 @@ void player_play_file(const char *filepath) {
 // again. The button glyph is corrected here rather than left to the next poll
 // because half a second of a pause button over a paused track reads as a
 // control that did not take.
+player_hires_position_t player_hires_position_get(player_layout_t layout) {
+	if (layout < PLAYER_LAYOUT_STANDARD || layout > PLAYER_LAYOUT_VINYL) return PLAYER_HIRES_OFF;
+	char key[32];
+	snprintf(key, sizeof(key), "player_hires_%d", (int)layout);
+	int position = (int)config_get_int("screen", key, PLAYER_HIRES_OFF);
+	return position >= PLAYER_HIRES_OFF && position <= PLAYER_HIRES_LEFT
+		? (player_hires_position_t)position : PLAYER_HIRES_OFF;
+}
+
+void player_hires_position_set(player_layout_t layout, player_hires_position_t position) {
+	if (layout < PLAYER_LAYOUT_STANDARD || layout > PLAYER_LAYOUT_VINYL ||
+		position < PLAYER_HIRES_OFF || position > PLAYER_HIRES_LEFT) return;
+	char key[32];
+	snprintf(key, sizeof(key), "player_hires_%d", (int)layout);
+	config_set_int("screen", key, position);
+	config_save();
+	device_state_t state;
+	device_state_get(&state);
+	update_hires_badge(&state);
+}
+
 player_layout_t player_layout_get(void) { return layout_choice; }
 
 void player_layout_set(player_layout_t layout) {
@@ -8029,6 +8109,21 @@ void player_init(gui_config_t *cfg) {
 	// which is how the track lists draw them, and a recolour to the text colour
 	// flattens all four into the same grey glyph.
 	studio_quality_icon = lv_image_create(studio_quality);
+
+	// Compact, high-contrast mark like the reference, legible on any sleeve.
+	// It is a label, not a control: gestures still reach the artwork below.
+	hires_badge = lv_label_create(cover_art_group);
+	lv_label_set_text(hires_badge, "HI-\nRES");
+	lv_obj_set_style_text_font(hires_badge, &font_ui_14, 0);
+	lv_obj_set_style_text_color(hires_badge, lv_color_black(), 0);
+	lv_obj_set_style_text_line_space(hires_badge, -3, 0);
+	lv_obj_set_style_bg_color(hires_badge, lv_color_white(), 0);
+	lv_obj_set_style_bg_opa(hires_badge, LV_OPA_COVER, 0);
+	lv_obj_set_style_radius(hires_badge, 3, 0);
+	lv_obj_set_style_pad_hor(hires_badge, 4, 0);
+	lv_obj_set_style_pad_ver(hires_badge, 2, 0);
+	lv_obj_set_clickable(hires_badge, false);
+	lv_obj_set_hidden(hires_badge, true);
 
 	lyrics_build();
 

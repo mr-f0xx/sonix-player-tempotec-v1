@@ -47,6 +47,8 @@ static void exercise(int line_height) {
 
 	lv_obj_t *info = transparent(deck);
 	lv_obj_set_size(info, lv_pct(100), LV_SIZE_CONTENT);
+	// The real track-info row is lifted independently of the deck.
+	lv_obj_set_style_translate_y(info, -4, 0);
 	lv_obj_set_flex_flow(info, LV_FLEX_FLOW_ROW);
 	lv_obj_t *names = transparent(info);
 	lv_obj_set_size(names, 100, LV_SIZE_CONTENT);
@@ -140,6 +142,24 @@ static void exercise(int line_height) {
 		}
 		assert(bottom_y(repeat) <= SCREEN_H - 1 - player_deck_bottom_padding(waveform));
 		assert(bottom_y(more) <= SCREEN_H - 1 - player_deck_bottom_padding(waveform));
+		if (!waveform) {
+			// Immersive moves the whole deck, not the frost or the spacing
+			// between rows. Switching back must restore the original position.
+			int info_y = top_y(info), slider_y = top_y(slider);
+			int clocks_y = top_y(clocks), controls_y = top_y(controls);
+			int frost_top = SCREEN_H - h - IMMERSIVE_FROST_OVERHEAD;
+			player_deck_place(deck, true);
+			lv_obj_update_layout(screen);
+			assert(top_y(info) == info_y - IMMERSIVE_DECK_LIFT);
+			assert(top_y(slider) == slider_y - IMMERSIVE_DECK_LIFT);
+			assert(top_y(clocks) == clocks_y - IMMERSIVE_DECK_LIFT);
+			assert(top_y(controls) == controls_y - IMMERSIVE_DECK_LIFT);
+			assert(top_y(info) - frost_top == SCREEN_H - 1 - bottom_y(buttons[1]));
+			player_deck_place(deck, false);
+			lv_obj_update_layout(screen);
+			assert(top_y(info) == info_y && top_y(slider) == slider_y);
+			assert(top_y(clocks) == clocks_y && top_y(controls) == controls_y);
+		}
 	}
 	lv_obj_delete(screen);
 }

@@ -536,3 +536,10 @@ packer's JSON substitution and loading the separate `base_build_version` field
 without confusing it with Sonix's build number. The C test checks older/missing
 metadata and clearing cached values. No stock firmware, LVGL or cross-compiler
 is required.
+
+`make -C sonix-player/tests hiresbadge` checks the hi-res badge's quality
+threshold, unknown stream metadata, lossy exclusion and DSD handling.
+
+`make -C sonix-player/tests quickpanel-layout` also exercises the optional
+V1 dual-slider layout using LVGL hit-testing, both gesture positions, page
+counts, DAC status, persistence, volume limits and separate slider callbacks.

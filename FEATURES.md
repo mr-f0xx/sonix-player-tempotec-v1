@@ -504,3 +504,21 @@ a self-signed certificate), and HLS.
 - **Developer options** - unlocked by tapping the build number: ADB, log to the
   card, database log, disabling the software volume attenuation, and a page of
   running processes and memory.
+
+### Hi-res artwork badge
+
+Music > Display options offers an optional HI-RES badge on the now-playing
+artwork. Choose Off, Top right or Top left separately for each player layout;
+it is off by default. It appears for lossless audio above 16-bit or 48 kHz,
+and for DSD, once the stream's format is known. Lossy audio and podcasts do
+not show it. When a source badge occupies the right corner, the hi-res badge
+uses the left corner instead. Album Art Max reserves its corners for text and
+has no badge. Waveform's Standard fallback uses the Standard setting.
+
+### Both control-centre sliders
+
+Settings > Screen > Both sliders shows separate brightness and volume rails in
+the control centre. The setting is off by default; turning it off restores the
+previous choice of which single slider to use. On the V1, the quick buttons and
+playback controls remain accessible while the track text is hidden to make room
+for two full-width, finger-sized targets. USB DAC status remains visible.

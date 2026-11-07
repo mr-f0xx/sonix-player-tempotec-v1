@@ -9,7 +9,7 @@
 // toggle, long press to open the page) on a first page and more toggles on a
 // second one a swipe away, the transport controls and the slider
 // under them -- the panel brightness, or the volume if that is what the user
-// asked it to be (see quickpanel_volume_slider). A swipe back towards the edge
+// asked it to be (see quickpanel_volume_slider), or both when enabled. A swipe back towards the edge
 // carries it out again, and a tap outside puts it away the short way.
 //
 // Which edge is the setting in gestures.h. By default it comes down from the
@@ -29,6 +29,12 @@ void quickpanel_open(void);
 // restart; Settings > Screen carries the switch.
 bool quickpanel_volume_slider(void);
 void quickpanel_set_volume_slider(bool on);
+
+// Show separate brightness and volume sliders. On the V1 this makes room by
+// replacing the now-playing text with a compact transport; USB DAC status is
+// still shown. Off restores the single-slider choice above.
+bool quickpanel_both_sliders(void);
+void quickpanel_set_both_sliders(bool on);
 
 // True while a Wi-Fi transfer or Bluetooth receiver owns the screen and the
 // sheets must stay shut. USB DAC mode permits the Control Centre; it replaces

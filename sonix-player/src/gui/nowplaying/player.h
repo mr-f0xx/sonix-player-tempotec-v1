@@ -91,6 +91,16 @@ typedef enum {
 bool player_recording_year_get(void);
 void player_recording_year_set(bool enabled);
 
+// A separate artwork badge placement is remembered for each chosen layout.
+// Album Art Max reserves both corners for text and does not show the badge.
+typedef enum {
+	PLAYER_HIRES_OFF = 0,
+	PLAYER_HIRES_RIGHT,
+	PLAYER_HIRES_LEFT,
+} player_hires_position_t;
+player_hires_position_t player_hires_position_get(player_layout_t layout);
+void player_hires_position_set(player_layout_t layout, player_hires_position_t position);
+
 player_layout_t player_layout_get(void);
 void player_layout_set(player_layout_t layout);
 
