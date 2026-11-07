@@ -15,11 +15,12 @@ LDFLAGS += -Wl,--gc-sections
 CORE = $(ROOT)/src/system/streaming/subsonic.c \
        $(ROOT)/src/system/streaming/streambridge.c \
        $(ROOT)/src/system/streaming/subsonicstream.c \
+       $(ROOT)/src/system/image/png_scaled.c \
        $(ROOT)/src/system/net/http.c $(ROOT)/src/system/net/tls.c \
        $(ROOT)/src/system/core/json.c $(ROOT)/src/system/core/md5.c \
        $(ROOT)/src/system/core/config.c $(ROOT)/src/system/playback/playlist.c
 
-.PHONY: test sanitize clean extractkeys
+.PHONY: test sanitize clean extractkeys qobuz
 
 test: $(BUILD)/test_subsonic
 	python3 run_subsonic_tests.py $(BUILD)/test_subsonic
@@ -35,8 +36,47 @@ $(BUILD)/test_read_file_content: test_read_file_content.c $(ROOT)/src/system/cor
 
 # The stock-firmware credential extractor and its ini/seal round-trips. Plain
 # Python, no compiler: the fixtures reproduce hiby_player's string layout.
-extractkeys:
+extractkeys: $(BUILD)/test_stockkeys
 	python3 test_extract_streamkeys.py
+	$(BUILD)/test_stockkeys
+
+$(ROOT)/build_gen/streamkeys_key.h:
+	@mkdir -p $(dir $@)
+	@printf '// Generated for host tests.\n#define STREAMKEYS_KEY_LEN 0\n' > $@
+
+STOCKKEYS_SRC = test_stockkeys.c \
+                $(ROOT)/src/system/streaming/stockkeys.c \
+                $(ROOT)/src/system/streaming/streamkeys.c \
+                $(ROOT)/src/system/image/png_scaled.c \
+                $(ROOT)/src/system/net/http.c \
+                $(ROOT)/src/system/net/tls.c \
+                $(ROOT)/src/system/core/config.c \
+                $(ROOT)/src/system/core/sha1.c \
+                $(ROOT)/src/system/core/sha256.c \
+                $(ROOT)/src/system/core/utils.c
+
+$(BUILD)/test_stockkeys: $(STOCKKEYS_SRC) $(ROOT)/build_gen/streamkeys_key.h \
+                         $(ROOT)/src/system/streaming/stockkeys.h $(ROOT)/src/system/streaming/streamkeys.h
+	@mkdir -p $(BUILD)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -DHOST_BUILD -o $@ $(STOCKKEYS_SRC) $(LDFLAGS) $(LDLIBS)
+
+QOBUZ_SRC = test_qobuz.c \
+            $(ROOT)/src/system/streaming/qobuz.c \
+            $(ROOT)/src/system/streaming/streamkeys.c \
+            $(ROOT)/src/system/image/png_scaled.c \
+            $(ROOT)/src/system/net/http.c \
+            $(ROOT)/src/system/net/tls.c \
+            $(ROOT)/src/system/core/json.c \
+            $(ROOT)/src/system/core/md5.c \
+            $(ROOT)/src/system/core/config.c \
+            $(ROOT)/src/system/core/sha256.c
+
+qobuz: $(BUILD)/test_qobuz
+	$(BUILD)/test_qobuz
+
+$(BUILD)/test_qobuz: $(QOBUZ_SRC) $(ROOT)/build_gen/streamkeys_key.h $(ROOT)/src/system/streaming/qobuz.h
+	@mkdir -p $(BUILD)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -DHOST_BUILD -o $@ $(QOBUZ_SRC) $(LDFLAGS) $(LDLIBS)
 
 $(BUILD)/test_subsonic: test_subsonic.c support.c $(CORE) $(shell find $(ROOT)/src/system -name '*.h')
 	@mkdir -p $(BUILD)
@@ -181,11 +221,12 @@ $(BUILD)/test_wifi: $(WIFI_SRC) $(ROOT)/src/system/net/wifi.h \
 # Bluetooth's real A2DP-direction decision, startup wait policy and D-Bus
 # signal cache, with fake controller/process state. No radio or ALSA required.
 .PHONY: bluetooth
-bluetooth: $(BUILD)/test_bluetooth $(BUILD)/test_btstack $(BUILD)/test_btreceiver $(BUILD)/test_btmetadata
+bluetooth: $(BUILD)/test_bluetooth $(BUILD)/test_btstack $(BUILD)/test_btreceiver $(BUILD)/test_btmetadata $(BUILD)/test_btdiscovery
 	$(BUILD)/test_bluetooth
 	$(BUILD)/test_btstack
 	$(BUILD)/test_btreceiver
 	$(BUILD)/test_btmetadata
+	$(BUILD)/test_btdiscovery
 
 $(BUILD)/test_bluetooth: test_bluetooth.c $(ROOT)/src/system/bluetooth/bluetooth.c \
                          $(ROOT)/src/system/bluetooth/bluetooth.h $(ROOT)/src/system/bluetooth/btafh.c \
@@ -205,6 +246,10 @@ $(BUILD)/test_btreceiver: test_btreceiver.c $(ROOT)/src/system/bluetooth/btrecei
 $(BUILD)/test_btmetadata: test_btmetadata.c $(ROOT)/src/system/bluetooth/btstack.c $(ROOT)/src/system/bluetooth/dbuslite.c
 	@mkdir -p $(BUILD)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ test_btmetadata.c $(LDFLAGS) $(LDLIBS)
+
+$(BUILD)/test_btdiscovery: test_btdiscovery.c $(ROOT)/src/system/bluetooth/btstack.c $(ROOT)/src/system/bluetooth/dbuslite.c
+	@mkdir -p $(BUILD)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ test_btdiscovery.c $(LDFLAGS) $(LDLIBS)
 
 # The AFH map, follow policy and actual HCI packet, using fake sockets.
 .PHONY: btafh
@@ -675,7 +720,24 @@ PLAYBUTTON_SRC = $(ROOT)/tests/ui/test_playbutton.c $(ROOT)/src/gui/nowplaying/p
 PLAYBUTTON_OBJ = $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(PLAYBUTTON_SRC)) \
                  $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(UI_LVGL_SRC))
 
-.PHONY: ui peq-ui corners playbutton
+STOCKKEYS_UI_SRC = $(ROOT)/tests/ui/test_stockkeys_ui.c \
+                   $(ROOT)/src/gui/streaming/stockkeys_ui.c \
+                   $(ROOT)/src/system/streaming/stockkeys.c \
+                   $(ROOT)/src/system/streaming/streamkeys.c \
+                   $(ROOT)/src/system/image/png_scaled.c \
+                   $(ROOT)/src/system/addons/addons.c \
+                   $(ROOT)/src/system/core/sha256.c \
+                   $(ROOT)/src/system/core/utils.c \
+                   $(ROOT)/src/gui/shell/settingsrow.c \
+                   $(ROOT)/src/gui/shell/theme.c \
+                   $(ROOT)/src/gui/shell/icons.c \
+                   $(ROOT)/src/gui/board_profile.c \
+                   $(ROOT)/src/system/core/config.c \
+                   $(ROOT)/src/system/core/lang.c
+STOCKKEYS_UI_OBJ = $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(STOCKKEYS_UI_SRC)) \
+                   $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(UI_LVGL_SRC))
+
+.PHONY: ui peq-ui corners playbutton stockkeys-ui
 corners: $(BUILD)/test_corners
 	$(BUILD)/test_corners
 
@@ -685,11 +747,17 @@ playbutton: $(BUILD)/test_playbutton
 peq-ui: $(BUILD)/test_peq_profiles
 	$(BUILD)/test_peq_profiles ../../sonix-packer/assets/V1/usr/resource/sonix/language
 
+stockkeys-ui: $(BUILD)/test_stockkeys_ui
+	$(BUILD)/test_stockkeys_ui ../../sonix-packer/assets/V1/usr/resource/sonix/language
+
 $(BUILD)/test_peq_profiles: $(PEQPAGE_OBJ)
 	$(CC) -o $@ $^ $(LDFLAGS) $(LDLIBS)
 
+$(BUILD)/test_stockkeys_ui: $(ROOT)/build_gen/streamkeys_key.h $(STOCKKEYS_UI_OBJ)
+	$(CC) -o $@ $(STOCKKEYS_UI_OBJ) $(LDFLAGS) $(LDLIBS)
+
 .PHONY: ui
-ui: $(BUILD)/test_main_menu $(BUILD)/test_screensaver $(BUILD)/test_tools_pages $(BUILD)/test_wifi_pages $(BUILD)/test_chargescreen $(BUILD)/test_lyricsearch $(BUILD)/test_games $(BUILD)/test_peq_profiles $(BUILD)/test_quickpanel_layout $(BUILD)/test_corners $(BUILD)/test_playbutton $(BUILD)/test_playerdeck $(BUILD)/test_vinylayout $(BUILD)/test_waveform_overlay
+ui: $(BUILD)/test_main_menu $(BUILD)/test_screensaver $(BUILD)/test_tools_pages $(BUILD)/test_wifi_pages $(BUILD)/test_chargescreen $(BUILD)/test_lyricsearch $(BUILD)/test_games $(BUILD)/test_peq_profiles $(BUILD)/test_quickpanel_layout $(BUILD)/test_corners $(BUILD)/test_playbutton $(BUILD)/test_playerdeck $(BUILD)/test_vinylayout $(BUILD)/test_waveform_overlay $(BUILD)/test_stockkeys_ui
 	$(BUILD)/test_main_menu ../../sonix-packer/assets/V1/usr/resource/sonix/language
 	$(BUILD)/test_main_menu ../../sonix-packer/assets/V1/usr/resource/sonix/language saved
 	$(BUILD)/test_screensaver ../../sonix-packer/assets/V1/usr/resource/sonix/language
@@ -706,6 +774,7 @@ ui: $(BUILD)/test_main_menu $(BUILD)/test_screensaver $(BUILD)/test_tools_pages 
 	$(BUILD)/test_playerdeck
 	$(BUILD)/test_vinylayout
 	$(BUILD)/test_waveform_overlay
+	$(BUILD)/test_stockkeys_ui ../../sonix-packer/assets/V1/usr/resource/sonix/language
 
 $(BUILD)/test_main_menu: $(UI_OBJ)
 	$(CC) -o $@ $^ $(LDFLAGS) $(LDLIBS)
@@ -743,7 +812,7 @@ $(BUILD)/ui/lvgl/%.o: $(ROOT)/lvgl/%.c ui/lv_conf.h $(ROOT)/lv_conf.h
 	@mkdir -p $(dir $@)
 	$(CC) $(UI_CPPFLAGS) $(filter-out -Werror,$(UI_CFLAGS)) -c $< -o $@
 
--include $(sort $(PEQPAGE_OBJ:.o=.d) $(UI_OBJ:.o=.d) $(SAVER_OBJ:.o=.d) $(WIFIPAGE_OBJ:.o=.d) $(LYRICSEARCH_OBJ:.o=.d) $(GAMES_OBJ:.o=.d) $(CORNERS_OBJ:.o=.d) $(PLAYBUTTON_OBJ:.o=.d) $(PLAYERDECK_OBJ:.o=.d) $(VINYLLAYOUT_OBJ:.o=.d) $(WAVEOVERLAY_OBJ:.o=.d))
+-include $(sort $(PEQPAGE_OBJ:.o=.d) $(UI_OBJ:.o=.d) $(SAVER_OBJ:.o=.d) $(WIFIPAGE_OBJ:.o=.d) $(LYRICSEARCH_OBJ:.o=.d) $(GAMES_OBJ:.o=.d) $(CORNERS_OBJ:.o=.d) $(PLAYBUTTON_OBJ:.o=.d) $(PLAYERDECK_OBJ:.o=.d) $(VINYLLAYOUT_OBJ:.o=.d) $(WAVEOVERLAY_OBJ:.o=.d) $(STOCKKEYS_UI_OBJ:.o=.d))
 
 # Smart Mix track-count limits and traversal, with a memory-only graph fixture.
 GENIUS_SRC = test_genius.c $(ROOT)/src/system/library/genius.c

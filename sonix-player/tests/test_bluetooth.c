@@ -335,6 +335,10 @@ static int fake_dev_count;
 static int trust_calls;
 static char last_trusted_mac[BT_MAC_MAX];
 static int connect_calls;
+static bool fake_visible;
+static int discovery_starts, discovery_stops, visibility_writes;
+static bool discovery_result = true;
+static bool cancel_on_start;
 static char connected_order[4][BT_MAC_MAX];
 
 int btstack_devices(btstack_device_t *out, int max_out) {
@@ -388,7 +392,23 @@ bool btstack_cancel_pairing(const char *address) {
 }
 
 bool btstack_discovery(bool on) {
-	(void)on;
+	if (on) {
+		discovery_starts++;
+		assert(fake_visible); // the pairing window precedes inquiry
+		if (cancel_on_start) {
+			pthread_mutex_lock(&lock);
+			g_scanning = false;
+			pthread_mutex_unlock(&lock);
+		}
+		return discovery_result;
+	}
+	discovery_stops++;
+	return true;
+}
+
+bool btstack_set_discoverable(bool on) {
+	fake_visible = on;
+	visibility_writes++;
 	return true;
 }
 
@@ -472,6 +492,12 @@ bool btstack_select_codec(const char *address, const char *codec) {
 	return false;
 }
 
+bool btstack_audio_info(const char *address, char *out, size_t size) {
+	(void)address;
+	if (out && size) out[0] = '\0';
+	return false;
+}
+
 bool btstack_stream_info(const char *address, bool receiving, btstack_stream_t *out) {
 	(void)address;
 	(void)receiving;
@@ -488,8 +514,8 @@ bool sonixlink_bt_is_peer(const char *mac) {
 }
 
 static void test_rx_discoverability_and_phone_pairing(void) {
-	/* TX mode stays hidden unless explicitly requested (e.g. SonixLink); RX
-	 * mode is always discoverable, even if a TX page later clears its flag. */
+	/* Idle TX stays hidden unless explicitly requested (e.g. SonixLink). A
+	 * scan opens a temporary pairing window; RX is always discoverable. */
 	g_receiver_profile = false;
 	g_discoverable = false;
 	assert(!bluetooth_receiver_profile());
@@ -497,6 +523,11 @@ static void test_rx_discoverability_and_phone_pairing(void) {
 
 	g_discoverable = true;
 	assert(effective_discoverable());
+	g_discoverable = false;
+	g_scanning = true;
+	assert(effective_discoverable());
+	g_scanning = false;
+	assert(!effective_discoverable());
 
 	g_receiver_profile = true;
 	g_discoverable = false;
@@ -551,6 +582,86 @@ static void test_rx_discoverability_and_phone_pairing(void) {
 	g_receiver_profile = false;
 }
 
+static void test_scan_pairing_window(void) {
+	assert(SCAN_SECONDS == 30);
+	g_enabled = true;
+	g_receiver_profile = false;
+	g_discoverable = false;
+	g_scanning = true;
+	unsigned generation = ++g_scan_generation;
+	queue_head = queue_count = 0;
+	fake_visible = false;
+	discovery_starts = discovery_stops = visibility_writes = 0;
+	discovery_result = true;
+	cancel_on_start = true;
+	do_scan(generation);
+	assert(discovery_starts == 1 && discovery_stops == 1);
+	assert(!g_scanning && !fake_visible && visibility_writes == 2);
+
+	// SonixLink owns visibility independently; a scan must not revoke it.
+	g_discoverable = true;
+	g_scanning = true;
+	generation = ++g_scan_generation;
+	discovery_starts = discovery_stops = visibility_writes = 0;
+	do_scan(generation);
+	assert(!g_scanning && fake_visible && discovery_stops == 1);
+
+	// A queued pairing interrupts inquiry rather than waiting thirty seconds.
+	g_scanning = true;
+	generation = ++g_scan_generation;
+	queue[0].type = JOB_PAIR;
+	queue_count = 1;
+	discovery_starts = discovery_stops = 0;
+	do_scan(generation);
+	assert(discovery_starts == 0 && discovery_stops == 1 && !g_scanning);
+	queue_count = 0;
+
+	// A stop from an older page cannot cancel the current request.
+	g_scanning = true;
+	generation = ++g_scan_generation;
+	discovery_stops = visibility_writes = 0;
+	do_scan_stop(generation - 1);
+	assert(g_scanning && discovery_stops == 0 && visibility_writes == 0);
+	do_scan_stop(generation);
+	assert(!g_scanning && fake_visible && discovery_stops == 1);
+
+	// All three start attempts failing must still close the pairing window.
+	g_discoverable = false;
+	g_scanning = true;
+	generation = ++g_scan_generation;
+	discovery_result = false;
+	cancel_on_start = false;
+	discovery_starts = discovery_stops = 0;
+	do_scan(generation);
+	assert(discovery_starts == SCAN_START_TRIES && discovery_stops == 1);
+	assert(!g_scanning && !fake_visible);
+
+	// A full queue must not leave the UI searching with no worker job to finish.
+	worker_running = true;
+	g_enabled = true;
+	g_busy = false;
+	queue_count = JOB_QUEUE_LEN;
+	for (int i = 0; i < JOB_QUEUE_LEN; i++) queue[i].type = JOB_MEDIA;
+	bluetooth_scan_start();
+	assert(!g_scanning);
+	queue_count = 0;
+	worker_running = false;
+
+	// RX visibility survives both a scan and a TX page clearing its own flag.
+	g_receiver_profile = true;
+	g_scanning = true;
+	generation = ++g_scan_generation;
+	discovery_result = true;
+	cancel_on_start = true;
+	do_scan(generation);
+	assert(fake_visible && !g_scanning);
+	g_discoverable = false;
+	assert(effective_discoverable());
+	g_receiver_profile = false;
+	g_enabled = false;
+	fake_visible = false;
+}
+
 static void test_rx_request_queue(void) {
 	pthread_mutex_lock(&lock);
 	queue_head = queue_count = 0;
@@ -587,6 +698,7 @@ int main(void) {
 	test_rfkill_lookup();
 	test_boot_cleanup_queue();
 	test_rx_discoverability_and_phone_pairing();
-	printf("PASS bluetooth (A2DP directions, RX profile/pairing, startup, ALSA template, radio switch and boot cleanup)\n");
+	test_scan_pairing_window();
+	printf("PASS bluetooth (A2DP directions, RX profile/pairing, scan visibility, startup, ALSA template, radio switch and boot cleanup)\n");
 	return 0;
 }

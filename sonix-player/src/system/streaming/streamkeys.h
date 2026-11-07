@@ -69,9 +69,19 @@
 #define STREAMKEYS_PATH SONIX_RESOURCE_DIR "/components/streaming-keys.bin"
 #define STREAMKEYS_PLAIN_PATH SONIX_RESOURCE_DIR "/components/streaming-keys.ini"
 
+#ifdef HOST_BUILD
+#define STREAMKEYS_DATA_DEFAULT_PATH "usr/data/streaming-keys.ini"
+#else
+#define STREAMKEYS_DATA_DEFAULT_PATH "/usr/data/streaming-keys.ini"
+#endif
+
 // The two names looked for at the card's root, in this order.
 #define STREAMKEYS_CARD_BIN "streaming-keys.bin"
 #define STREAMKEYS_CARD_INI "streaming-keys.ini"
+
+// Writable internal-storage path for credentials extracted on the device
+// (/usr/data/streaming-keys.ini on target; SONIX_STREAMKEYS_DATA overrides it).
+const char *streamkeys_data_path(void);
 
 // Reads the file. Call once at startup, after config_init(). A missing file is
 // not an error.
@@ -82,13 +92,25 @@ void streamkeys_init(void);
 // streamkeys_init() has run -- nothing mounts the card before the player does,
 // so at startup there is nothing to read there yet.
 //
-// Only a firmware that found no keys of its own is affected: one that ships a
-// sealed streaming-keys.bin keeps it, and a card cannot quietly replace what
-// the image says. That is what makes this safe to leave in a release.
+// Only a firmware that found no keys of its own in the rootfs is affected: one
+// that ships a sealed streaming-keys.bin keeps it, and a card cannot quietly
+// replace what the image says. When /usr/data/streaming-keys.ini holds keys
+// extracted on-device, the card can still supply [podcast] or [lastfm] (or
+// updated pairs).
 //
-// True when keys are now held that were not held before, which is the caller's
-// signal to hand them to the services that read them at their own startup.
+// True when keys are now held that were not held (or differed) before, which is
+// the caller's signal to hand them to the services that read them at startup.
 bool streamkeys_load_card(const char *card_root);
+
+// Re-reads /usr/data/streaming-keys.ini and the microSD card so credentials
+// extracted at run time take effect immediately without a restart.
+bool streamkeys_reload(const char *card_root);
+
+// Atomically writes extracted [qobuz] and [tidal] pairs to /usr/data/streaming-keys.ini
+// and (when card_root is non-empty) <card_root>/streaming-keys.ini, preserving
+// any existing [podcast] or [lastfm] entries. True if at least one write succeeded.
+bool streamkeys_write_extracted(const char *qobuz_id, const char *qobuz_sec, const char *tidal_id,
+								const char *tidal_sec, const char *card_root);
 
 // NULL when absent. The pointers stay valid for the life of the program.
 const char *streamkeys_qobuz_app_id(void);

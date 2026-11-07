@@ -153,7 +153,13 @@ a self-signed certificate), and HLS.
   the firmware's scripts. Pair, connect, forget; the codec list comes from what
   the connected device announces and the best is chosen at each connection.
   Paired devices can be renamed locally or restored to their original name; the
-  remote device itself is not changed.
+  remote device itself is not changed. Search runs for up to 30 seconds using
+  classic Bluetooth inquiry, without hiding devices that have not announced
+  their audio services yet. During the search the player is also discoverable,
+  so a car head unit can initiate pairing; stopping the search restores the
+  previous visibility setting. For Tesla, start Search on the player, then use
+  **Bluetooth → Add New Device → Start Search** in the car. Car interoperability
+  still needs validation on the actual vehicle.
 - **AirPods** - battery per earbud and for the case, model detection, and noise
   control: off, cancellation, transparency, adaptive.
 - **Bluetooth in** - a phone or laptop connects and the player becomes its

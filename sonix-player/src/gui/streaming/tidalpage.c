@@ -18,6 +18,7 @@
 #include "src/gui/nowplaying/player.h"
 #include "src/gui/shell/popover.h"
 #include "src/gui/streaming/qobuzart.h"
+#include "src/gui/streaming/stockkeys_ui.h"
 #include "src/gui/shell/settingsrow.h"
 #include "src/gui/shell/spinner.h"
 #include "src/gui/shell/switcher.h"
@@ -4803,12 +4804,7 @@ static void rebuild_home(void) {
 
 	if (!tidal_configured()) {
 		update_corner_buttons();
-		lv_obj_t *note = lv_label_create(home_container);
-		lv_label_set_long_mode(note, LV_LABEL_LONG_WRAP);
-		lv_obj_set_width(note, lv_pct(100));
-		lv_obj_add_style(note, &theme_style_text_dim, 0);
-		lv_obj_set_style_text_font(note, &font_ui_20, 0);
-		lv_label_set_text(note, tr("api_keys_unavailable"));
+		stockkeys_ui_populate_missing(home_container, rebuild_home);
 		return;
 	}
 

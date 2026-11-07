@@ -2,6 +2,7 @@
 
 #include "http.h"
 
+#include "src/system/image/miniz/miniz_tinfl.h"
 #include "src/system/net/tls.h"
 #include "src/system/core/lang.h"
 
@@ -38,11 +39,14 @@
 // clock, a missing certificate bundle -- because the point is a message worth
 // putting on the screen, not a log line.
 
+#define HTTP_URL_PATH_MAX 8192
+#define HTTP_URL_MAX (HTTP_URL_PATH_MAX + 600)
+
 static __thread char last_error[192];
 
 // URL of the last hop of this thread's last successful request; see
 // http_last_final_url() in http.h.
-static __thread char last_final_url[2600];
+static __thread char last_final_url[HTTP_URL_MAX];
 
 const char *http_last_final_url(void) { return last_final_url; }
 
@@ -67,7 +71,7 @@ const char *http_last_error(void) {
 
 typedef struct {
 	char host[256];
-	char path[2048]; // always starts with '/'
+	char path[HTTP_URL_PATH_MAX]; // always starts with '/'
 	int port;
 	bool secure; // https://
 } url_t;
@@ -407,6 +411,7 @@ static bool conn_open(conn_t *c, const url_t *u, int timeout_secs, char *err, si
 static int read_headers(conn_t *c, char *headers, size_t headers_size, char *body, size_t body_size,
 						int *body_len) {
 	size_t used = 0;
+	bool found = false;
 	*body_len = 0;
 
 	while (used + 1 < headers_size) {
@@ -439,7 +444,49 @@ static int read_headers(conn_t *c, char *headers, size_t headers_size, char *bod
 		memcpy(body, headers + header_len, extra);
 		*body_len = (int)extra;
 		headers[header_len] = '\0';
+		found = true;
 		break;
+	}
+
+	// If a CDN or reverse proxy sent more than HTTP_HEADER_BUFFER bytes of
+	// Set-Cookie / CSP headers, drain up to the blank line so leftover header
+	// lines never spill into the response body.
+	if (!found && used > 0) {
+		char w0 = used >= 3 ? headers[used - 3] : '\0';
+		char w1 = used >= 2 ? headers[used - 2] : '\0';
+		char w2 = headers[used - 1];
+		size_t drained = 0;
+		char drain[4096];
+
+		while (!found && drained < 64 * 1024) {
+			int n = conn_read(c, drain, sizeof(drain));
+			if (n <= 0) {
+				return -1;
+			}
+			drained += (size_t)n;
+			for (int i = 0; i < n; i++) {
+				char ch = drain[i];
+				if ((w0 == '\r' && w1 == '\n' && w2 == '\r' && ch == '\n') || (w2 == '\n' && ch == '\n')) {
+					size_t extra = (size_t)(n - (i + 1));
+					if (extra > body_size) {
+						return -1;
+					}
+					if (extra > 0) {
+						memcpy(body, drain + i + 1, extra);
+					}
+					*body_len = (int)extra;
+					found = true;
+					break;
+				}
+				w0 = w1;
+				w1 = w2;
+				w2 = ch;
+			}
+		}
+	}
+
+	if (!found) {
+		return -1;
 	}
 
 	// "HTTP/1.1 200 OK", or shoutcast's own "ICY 200 OK".
@@ -687,6 +734,175 @@ static void host_header_value(const url_t *u, char *out, size_t size) {
 	}
 }
 
+static bool inflate_stream_into_body(const uint8_t *src, size_t src_len, size_t *consumed_out, body_t *out, int flags) {
+	tinfl_decompressor *decomp = malloc(sizeof(*decomp));
+	uint8_t *dict = malloc(TINFL_LZ_DICT_SIZE);
+	if (!decomp || !dict) {
+		free(decomp);
+		free(dict);
+		return false;
+	}
+
+	tinfl_init(decomp);
+	size_t in_pos = 0;
+	size_t dict_ofs = 0;
+	bool ok = false;
+
+	for (;;) {
+		size_t in_bytes = src_len - in_pos;
+		size_t out_bytes = TINFL_LZ_DICT_SIZE - dict_ofs;
+		tinfl_status st =
+			tinfl_decompress(decomp, src + in_pos, &in_bytes, dict, dict + dict_ofs, &out_bytes, (mz_uint32)flags);
+		in_pos += in_bytes;
+
+		if (out_bytes > 0 && !body_append(out, (const char *)(dict + dict_ofs), out_bytes)) {
+			// Deliberate cap at caller's `limit` (same contract as read_length).
+			ok = true;
+			break;
+		}
+		dict_ofs = (dict_ofs + out_bytes) & (TINFL_LZ_DICT_SIZE - 1);
+
+		if (st == TINFL_STATUS_DONE) {
+			ok = true;
+			break;
+		}
+		if (st <= TINFL_STATUS_DONE || (in_bytes == 0 && out_bytes == 0)) {
+			ok = false;
+			break;
+		}
+	}
+
+	free(dict);
+	free(decomp);
+	if (consumed_out) {
+		*consumed_out = in_pos;
+	}
+	return ok;
+}
+
+static bool has_encoding_token(const char *value, const char *token) {
+	size_t tlen = strlen(token);
+	const char *p = value;
+	while (p && *p) {
+		while (*p == ' ' || *p == '\t' || *p == ',') {
+			p++;
+		}
+		size_t span = strcspn(p, ", \t\r\n");
+		if (span == tlen && strncasecmp(p, token, tlen) == 0) {
+			return true;
+		}
+		p += span;
+	}
+	return false;
+}
+
+// Transparently inflates Content-Encoding: gzip / x-gzip / deflate in place,
+// bounded by `b->limit`. Returns false on a corrupt compressed stream.
+static bool decode_content_encoding(const char *content_enc, body_t *b) {
+	if (!content_enc || !content_enc[0] || !b || !b->data || b->used == 0) {
+		return true;
+	}
+
+	bool is_gzip = has_encoding_token(content_enc, "gzip") || has_encoding_token(content_enc, "x-gzip");
+	bool is_deflate = !is_gzip && has_encoding_token(content_enc, "deflate");
+	if (!is_gzip && !is_deflate) {
+		return true;
+	}
+
+	const uint8_t *src = (const uint8_t *)b->data;
+	size_t raw_len = b->used;
+	body_t decoded = {.limit = b->limit};
+
+	if (is_gzip) {
+		size_t pos = 0;
+		while (pos < raw_len) {
+			if (raw_len - pos < 18 || src[pos] != 0x1f || src[pos + 1] != 0x8b || src[pos + 2] != 0x08) {
+				free(decoded.data);
+				return false;
+			}
+			uint8_t flg = src[pos + 3];
+			pos += 10;
+
+			if (flg & 0x04) { // FEXTRA
+				if (raw_len - pos < 2) {
+					free(decoded.data);
+					return false;
+				}
+				size_t xlen = (size_t)src[pos] | ((size_t)src[pos + 1] << 8);
+				pos += 2;
+				if (raw_len - pos < xlen) {
+					free(decoded.data);
+					return false;
+				}
+				pos += xlen;
+			}
+			if (flg & 0x08) { // FNAME
+				const uint8_t *nul = memchr(src + pos, 0, raw_len - pos);
+				if (!nul) {
+					free(decoded.data);
+					return false;
+				}
+				pos = (size_t)(nul - src) + 1;
+			}
+			if (flg & 0x10) { // FCOMMENT
+				const uint8_t *nul = memchr(src + pos, 0, raw_len - pos);
+				if (!nul) {
+					free(decoded.data);
+					return false;
+				}
+				pos = (size_t)(nul - src) + 1;
+			}
+			if (flg & 0x02) { // FHCRC
+				if (raw_len - pos < 2) {
+					free(decoded.data);
+					return false;
+				}
+				pos += 2;
+			}
+
+			size_t consumed = 0;
+			if (!inflate_stream_into_body(src + pos, raw_len - pos, &consumed, &decoded, 0)) {
+				free(decoded.data);
+				return false;
+			}
+			if (decoded.limit > 0 && decoded.used >= decoded.limit) {
+				break;
+			}
+			pos += consumed;
+			if (raw_len - pos < 8) {
+				free(decoded.data);
+				return false;
+			}
+			pos += 8; // CRC32 + ISIZE
+		}
+	} else {
+		// HTTP "deflate" means RFC 1950 zlib, though some servers emit raw
+		// RFC 1951 deflate; accept both.
+		size_t consumed = 0;
+		if (!inflate_stream_into_body(src, raw_len, &consumed, &decoded, TINFL_FLAG_PARSE_ZLIB_HEADER)) {
+			decoded.used = 0;
+			if (!inflate_stream_into_body(src, raw_len, &consumed, &decoded, 0)) {
+				free(decoded.data);
+				return false;
+			}
+		}
+	}
+
+	if (!decoded.data) {
+		decoded.data = calloc(1, 1);
+		if (!decoded.data) {
+			return false;
+		}
+		decoded.cap = 0;
+		decoded.used = 0;
+	}
+	decoded.data[decoded.used] = '\0';
+
+	free(b->data);
+	*b = decoded;
+	return true;
+}
+
 // One request/response, no redirect handling. `location` is filled when the
 // status is a redirect.
 static bool get_once(const url_t *u, const http_req_t *req, char **out, size_t *out_len, size_t limit,
@@ -726,24 +942,31 @@ static bool get_once(const url_t *u, const http_req_t *req, char **out, size_t *
 				 body_len);
 	}
 
-	char request[4096];
-	int n = snprintf(request, sizeof(request),
+	size_t extra_len = extra_headers ? strlen(extra_headers) : 0;
+	size_t req_cap = strlen(u->path) + extra_len + 1024;
+	char *request = malloc(req_cap);
+	if (!request) {
+		conn_close(&conn);
+		return false;
+	}
+	int n = snprintf(request, req_cap,
 					 "%s %s HTTP/1.0\r\n"
 					 "Host: %s\r\n"
 					 "User-Agent: " HTTP_USER_AGENT "\r\n"
 					 "Accept: */*\r\n"
-					 "Accept-Encoding: identity\r\n"
+					 "Accept-Encoding: %s\r\n"
 					 "Connection: close\r\n"
 					 "%s"
 					 "%s"
 					 "\r\n",
-					 method, u->path, host_header, body_headers, extra_headers ? extra_headers : "");
+					 method, u->path, host_header, req->accept_gzip ? "gzip, deflate" : "identity", body_headers,
+					 extra_headers ? extra_headers : "");
 	// Compare the length against the buffer, not just against zero: snprintf
 	// truncates but returns what it would have written, so an over-long
-	// request would put bytes from past the end of the stack on the wire. It
-	// fits with room today; this check keeps it fitting when someone adds a
-	// longer header.
-	if (n <= 0 || (size_t)n >= sizeof(request) || !conn_write_all(&conn, request, (size_t)n)) {
+	// request would put bytes from past the end of the buffer on the wire.
+	bool wrote = n > 0 && (size_t)n < req_cap && conn_write_all(&conn, request, (size_t)n);
+	free(request);
+	if (!wrote) {
 		conn_close(&conn);
 		return false;
 	}
@@ -784,7 +1007,16 @@ static bool get_once(const url_t *u, const http_req_t *req, char **out, size_t *
 		return false;
 	}
 
-	body_t body = {.limit = limit};
+	char content_enc[64] = "";
+	bool compressed = header_value(headers, "Content-Encoding", content_enc, sizeof(content_enc)) &&
+					  (has_encoding_token(content_enc, "gzip") || has_encoding_token(content_enc, "x-gzip") ||
+					   has_encoding_token(content_enc, "deflate"));
+
+	size_t wire_limit = limit;
+	if (compressed && wire_limit > 0 && wire_limit < 8 * 1024 * 1024) {
+		wire_limit = 8 * 1024 * 1024;
+	}
+	body_t body = {.limit = wire_limit};
 
 	char encoding[64];
 	bool chunked = header_value(headers, "Transfer-Encoding", encoding, sizeof(encoding)) &&
@@ -818,7 +1050,19 @@ static bool get_once(const url_t *u, const http_req_t *req, char **out, size_t *
 
 	conn_close(&conn);
 
-	if (!body.data) {
+	if (compressed && body.data && body.used > 0) {
+		body.limit = limit;
+		if (!decode_content_encoding(content_enc, &body)) {
+			fprintf(stderr, "http: %s%.*s -> corrupt %s body\n", u->host, (int)strcspn(u->path, "?"), u->path,
+					content_enc);
+			free(body.data);
+			return false;
+		}
+	}
+
+	if (!body.data || (body.used == 0 && !req->allow_empty_body)) {
+		free(body.data);
+		body.data = NULL;
 		// An empty 200 is not an answer to anything asked here, except for
 		// callers that allow it: those get an allocated empty string rather
 		// than NULL, so the caller always free()s exactly once.
@@ -867,8 +1111,11 @@ bool http_request(const char *url, const http_req_t *req, char **out, size_t *ou
 
 	clear_last_error();
 
-	char current[2600];
-	snprintf(current, sizeof(current), "%s", url);
+	char current[HTTP_URL_MAX];
+	if (snprintf(current, sizeof(current), "%s", url) >= (int)sizeof(current)) {
+		set_last_error(tr("http_bad_address"), url);
+		return false;
+	}
 
 	// The request changes hop by hop: after a redirect that changes the
 	// method, what gets re-sent is a GET with no body.
@@ -886,7 +1133,7 @@ bool http_request(const char *url, const http_req_t *req, char **out, size_t *ou
 		}
 
 		int status = 0;
-		char location[2048] = "";
+		char location[HTTP_URL_PATH_MAX] = "";
 		char err[192] = "";
 		bool ok = get_once(&u, &hop_req, out, out_len, limit, timeout_secs, &status, location, sizeof(location), err,
 						   sizeof(err));

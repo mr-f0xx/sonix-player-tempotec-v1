@@ -205,15 +205,16 @@ static void refresh_status_label(void) {
 		return;
 	}
 
-	// This screen manages the TX (audio output) profile; advertising as
-	// discoverable here without an A2DP sink lets phones pair into a profile-less
-	// dead end. State the active TX role explicitly and only mention visibility
-	// when SonixLink remote control is exposing its RFCOMM service.
+	// Searching is a two-way pairing window: the player answers inquiry while
+	// it looks for headphones or a car. Say so, rather than leaving the user
+	// wondering which side should press Search first. Outside a scan, only
+	// SonixLink's explicit visibility request is advertised on this screen.
 	if (bluetooth_get_enabled()) {
-		if (sonixlink_get_enabled()) {
+		if (bluetooth_scan_running() || sonixlink_get_enabled()) {
 			char visible[BT_NAME_MAX + 64];
 			snprintf(visible, sizeof(visible), tr("bt_visible_as"), bluetooth_local_name());
-			lv_label_set_text_fmt(status_label, "%s · %s", tr("bt_mode_tx_status"), visible);
+			lv_label_set_text_fmt(status_label, "%s · %s",
+								  bluetooth_scan_running() ? tr("searching") : tr("bt_mode_tx_status"), visible);
 		} else {
 			lv_label_set_text(status_label, tr("bt_mode_tx_status"));
 		}

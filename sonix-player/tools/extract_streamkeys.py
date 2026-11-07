@@ -25,8 +25,11 @@ and nothing the tool writes belongs in git: streaming-keys.ini and
 streaming-keys.bin are both ignored. Do not publish an image that carries the
 result; the credentials belong to HiBy, not this project.
 
+    python3 tools/extract_streamkeys.py                         # uses bundled stock 1.3 archive
+    python3 tools/extract_streamkeys.py path/to/v1.upt          # unpacks ISO + SquashFS + LZO in pure Python
+    python3 tools/extract_streamkeys.py path/to/v1.zip          # or v1.zip.part1
     python3 tools/extract_streamkeys.py path/to/hiby_player
-    python3 tools/extract_streamkeys.py unpacked/rootfs        # finds usr/bin/hiby_player
+    python3 tools/extract_streamkeys.py unpacked/rootfs         # finds usr/bin/hiby_player
     python3 tools/extract_streamkeys.py --check unpacked/rootfs
     python3 tools/extract_streamkeys.py --list-candidates hiby_player
 
@@ -40,13 +43,22 @@ be forced explicitly.
 """
 
 import argparse
+import hashlib
+import io
+import lzma
 import os
 import re
 import struct
 import sys
+import zipfile
+import zlib
 
 PLAYER_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+REPO_ROOT = os.path.dirname(PLAYER_ROOT)
 DEFAULT_INI = os.path.join(PLAYER_ROOT, "streaming-keys.ini")
+DEFAULT_STOCK_INPUT = os.path.join(
+    REPO_ROOT, "sonix-packer", "firmware-input", "v1.zip.part1"
+)
 STOCK_PLAYER_REL = os.path.join("usr", "bin", "hiby_player")
 
 # A string this short is noise in a five-megabyte binary; every value we look
@@ -487,6 +499,551 @@ def find_binary(path):
         "stock rootfs or at the binary itself.")
 
 
+# ---------------------------------------------------------------------------
+# Direct stock-archive unpacking (no 7z or unsquashfs needed)
+# ---------------------------------------------------------------------------
+
+_SPLIT_PART_RE = re.compile(r"^(?P<stem>.+)\.(?:(?P<part>part)(?P<pnum>\d+)|(?P<vnum>\d{3,}))$", re.IGNORECASE)
+
+
+def lzo1x_decompress(src, max_out=131072):
+    """Pure-Python LZO1X safe block decompressor (for SquashFS compression=3)."""
+    out = bytearray()
+    ip = 0
+    end = len(src)
+    if end == 0:
+        return bytes(out)
+
+    def need(n):
+        if ip + n > end:
+            raise ExtractError("corrupt LZO1X stream (truncated input)")
+
+    def copy_lits(cnt):
+        nonlocal ip
+        need(cnt)
+        if len(out) + cnt > max_out:
+            raise ExtractError("corrupt LZO1X stream (output overflow)")
+        out.extend(src[ip:ip + cnt])
+        ip += cnt
+
+    def copy_match(m_pos, m_len):
+        if m_pos < 0 or m_pos >= len(out):
+            raise ExtractError("corrupt LZO1X stream (invalid lookbehind)")
+        if len(out) + m_len > max_out:
+            raise ExtractError("corrupt LZO1X stream (output overflow)")
+        dist = len(out) - m_pos
+        if dist >= m_len:
+            out.extend(out[m_pos:m_pos + m_len])
+        else:
+            for _ in range(m_len):
+                out.append(out[m_pos])
+                m_pos += 1
+
+    enter_match = False
+    need(1)
+    t = src[ip]
+    ip += 1
+    if t > 17:
+        t -= 17
+        copy_lits(t)
+        need(1)
+        t = src[ip]
+        ip += 1
+        if t < 4 or t >= 16:
+            enter_match = True
+        else:
+            t_next = t & 3
+            need(1)
+            m_pos = len(out) - 0x0801 - (t >> 2) - (src[ip] << 2)
+            ip += 1
+            copy_match(m_pos, 3)
+            if t_next:
+                copy_lits(t_next)
+                need(1)
+                t = src[ip]
+                ip += 1
+                enter_match = True
+            else:
+                need(1)
+                t = src[ip]
+                ip += 1
+
+    while True:
+        if not enter_match and t < 16:
+            if t == 0:
+                while True:
+                    need(1)
+                    b = src[ip]
+                    ip += 1
+                    if b != 0:
+                        t += 15 + b
+                        break
+                    t += 255
+            copy_lits(t + 3)
+            need(1)
+            t = src[ip]
+            ip += 1
+            if t < 16:
+                t_next = t & 3
+                need(1)
+                m_pos = len(out) - 0x0801 - (t >> 2) - (src[ip] << 2)
+                ip += 1
+                copy_match(m_pos, 3)
+                if t_next == 0:
+                    need(1)
+                    t = src[ip]
+                    ip += 1
+                    continue
+                copy_lits(t_next)
+                need(1)
+                t = src[ip]
+                ip += 1
+        enter_match = False
+
+        while True:
+            if t >= 64:
+                t_next = t & 3
+                need(1)
+                m_pos = len(out) - 1 - ((t >> 2) & 7) - (src[ip] << 3)
+                ip += 1
+                m_len = (t >> 5) + 1
+            elif t >= 32:
+                m_len = t & 31
+                if m_len == 0:
+                    while True:
+                        need(1)
+                        b = src[ip]
+                        ip += 1
+                        if b != 0:
+                            m_len += 31 + b
+                            break
+                        m_len += 255
+                m_len += 2
+                need(2)
+                v = src[ip] | (src[ip + 1] << 8)
+                ip += 2
+                m_pos = len(out) - 1 - (v >> 2)
+                t_next = v & 3
+            elif t >= 16:
+                m_off = (t & 8) << 11
+                m_len = t & 7
+                if m_len == 0:
+                    while True:
+                        need(1)
+                        b = src[ip]
+                        ip += 1
+                        if b != 0:
+                            m_len += 7 + b
+                            break
+                        m_len += 255
+                m_len += 2
+                need(2)
+                v = src[ip] | (src[ip + 1] << 8)
+                ip += 2
+                m_off += v >> 2
+                if m_off == 0:
+                    return bytes(out)
+                m_pos = len(out) - m_off - 0x4000
+                t_next = v & 3
+            else:
+                t_next = t & 3
+                need(1)
+                m_pos = len(out) - 1 - (t >> 2) - (src[ip] << 2)
+                ip += 1
+                m_len = 2
+
+            copy_match(m_pos, m_len)
+            if t_next == 0:
+                need(1)
+                t = src[ip]
+                ip += 1
+                break
+            copy_lits(t_next)
+            need(1)
+            t = src[ip]
+            ip += 1
+
+
+def _sqfs_decompress_block(raw, compression, max_out):
+    if compression == 1:  # gzip / zlib
+        return zlib.decompress(raw, 15, max_out)
+    if compression == 2 or compression == 4:  # lzma / xz
+        return lzma.decompress(raw)
+    if compression == 3:  # lzo
+        return lzo1x_decompress(raw, max_out)
+    raise ExtractError(f"unsupported SquashFS compression id {compression}")
+
+
+def extract_from_squashfs_bytes(sq, rel_path="usr/bin/hiby_player"):
+    """Extracts `rel_path` out of a SquashFS 4.0 image held in `sq`."""
+    if len(sq) < 96 or sq[:4] != b"hsqs":
+        raise ExtractError("not a SquashFS 4.0 little-endian image")
+    (
+        _magic, _inodes, _mtime, block_size, _frags, compression, _blog, _flags, _nids,
+        s_major, s_minor, root_inode, _bytes_used, _id_tbl, _xattr_tbl,
+        inode_tbl, dir_tbl, frag_tbl, _lookup_tbl,
+    ) = struct.unpack_from("<4sIIIIHHHHHHQQQQQQQQ", sq, 0)
+    if (s_major, s_minor) != (4, 0) or block_size < 4096 or block_size > (1 << 20):
+        raise ExtractError(f"unsupported SquashFS version {s_major}.{s_minor}")
+
+    meta_cache = {}
+
+    def read_meta(base, block_off, inner_off, length):
+        out = bytearray()
+        cur = base + block_off
+        off = inner_off
+        while len(out) < length:
+            if cur not in meta_cache:
+                if cur + 2 > len(sq):
+                    raise ExtractError("truncated SquashFS metadata block")
+                hdr, = struct.unpack_from("<H", sq, cur)
+                clen = hdr & 0x7FFF
+                if clen == 0 or cur + 2 + clen > len(sq):
+                    raise ExtractError("corrupt SquashFS metadata length")
+                raw = sq[cur + 2:cur + 2 + clen]
+                blk = raw if (hdr & 0x8000) else _sqfs_decompress_block(raw, compression, 8192)
+                meta_cache[cur] = (blk, cur + 2 + clen)
+            blk, nxt = meta_cache[cur]
+            if off >= len(blk):
+                off -= len(blk)
+                cur = nxt
+                continue
+            take = min(length - len(out), len(blk) - off)
+            out.extend(blk[off:off + take])
+            off = 0
+            cur = nxt
+        return bytes(out)
+
+    def lookup_entry(dir_ref, name):
+        boff = (dir_ref >> 16) & 0xFFFFFFFF
+        ioff = dir_ref & 0xFFFF
+        itype, = struct.unpack_from("<H", read_meta(inode_tbl, boff, ioff, 16), 0)
+        if itype == 1:
+            ibuf = read_meta(inode_tbl, boff, ioff, 32)
+            dblk, _nlink, fsize, doff, _parent = struct.unpack_from("<IIHHI", ibuf, 16)
+        elif itype == 8:
+            ibuf = read_meta(inode_tbl, boff, ioff, 40)
+            _nlink, fsize, dblk, _parent, _icnt, doff, _xattr = struct.unpack_from("<IIIIHHI", ibuf, 16)
+        else:
+            raise ExtractError(f"expected directory inode while walking {rel_path}, got type {itype}")
+        total = max(0, fsize - 3)
+        dbuf = read_meta(dir_tbl, dblk, doff, total)
+        pos = 0
+        while pos < len(dbuf):
+            if pos + 12 > len(dbuf):
+                raise ExtractError("truncated SquashFS directory header")
+            count, start_block, _inum = struct.unpack_from("<III", dbuf, pos)
+            pos += 12
+            for _ in range(count + 1):
+                if pos + 8 > len(dbuf):
+                    raise ExtractError("truncated SquashFS directory entry")
+                eoff, _ediff, _etype, esize = struct.unpack_from("<HhHH", dbuf, pos)
+                pos += 8
+                ename = dbuf[pos:pos + esize + 1].decode("utf-8", "replace")
+                pos += esize + 1
+                if ename == name:
+                    return (start_block << 16) | eoff
+        return None
+
+    parts = [p for p in rel_path.replace("\\", "/").split("/") if p]
+    ref = root_inode
+    for part in parts:
+        nxt = lookup_entry(ref, part)
+        if nxt is None:
+            raise ExtractError(
+                f"no {rel_path} in SquashFS rootfs (is this a Sonix image rather than stock firmware?)"
+            )
+        ref = nxt
+
+    boff = (ref >> 16) & 0xFFFFFFFF
+    ioff = ref & 0xFFFF
+    itype, = struct.unpack_from("<H", read_meta(inode_tbl, boff, ioff, 16), 0)
+    if itype == 2:
+        ibuf = read_meta(inode_tbl, boff, ioff, 32)
+        blocks_start, frag_idx, block_off, file_size = struct.unpack_from("<IIII", ibuf, 16)
+        hdr_sz = 32
+    elif itype == 9:
+        ibuf = read_meta(inode_tbl, boff, ioff, 56)
+        blocks_start, file_size, _sparse, _nlink, frag_idx, block_off, _xattr = struct.unpack_from(
+            "<QQIIIII", ibuf, 16
+        )
+        hdr_sz = 56
+    else:
+        raise ExtractError(f"{rel_path} is not a regular file in SquashFS (inode type {itype})")
+
+    if file_size > 32 * 1024 * 1024:
+        raise ExtractError(f"{rel_path} in SquashFS is unexpectedly large ({file_size} bytes)")
+
+    nfull = file_size // block_size if frag_idx != 0xFFFFFFFF else (file_size + block_size - 1) // block_size
+    bsizes = struct.unpack_from(f"<{nfull}I", read_meta(inode_tbl, boff, ioff + hdr_sz, nfull * 4), 0) if nfull else ()
+
+    out = bytearray()
+    cur_d = blocks_start
+    for bsz in bsizes:
+        if bsz == 0:
+            out.extend(b"\x00" * block_size)
+        else:
+            uncomp = bool(bsz & (1 << 24))
+            clen = bsz & 0xFFFFFF
+            if cur_d + clen > len(sq):
+                raise ExtractError("truncated SquashFS file block")
+            raw = sq[cur_d:cur_d + clen]
+            cur_d += clen
+            blk = raw if uncomp else _sqfs_decompress_block(raw, compression, block_size)
+            out.extend(blk)
+
+    if frag_idx != 0xFFFFFFFF:
+        rem = file_size - len(out)
+        frag_ptr_off = frag_tbl + (frag_idx // 512) * 8
+        if frag_ptr_off + 8 > len(sq):
+            raise ExtractError("truncated SquashFS fragment table")
+        frag_blk_pos, = struct.unpack_from("<Q", sq, frag_ptr_off)
+        fentry = read_meta(0, frag_blk_pos, (frag_idx % 512) * 16, 16)
+        fstart, fsize, _ = struct.unpack_from("<QII", fentry, 0)
+        uncomp = bool(fsize & (1 << 24))
+        clen = fsize & 0xFFFFFF
+        if fstart + clen > len(sq):
+            raise ExtractError("truncated SquashFS fragment data")
+        raw = sq[fstart:fstart + clen]
+        fblk = raw if uncomp else _sqfs_decompress_block(raw, compression, block_size)
+        if block_off + rem > len(fblk):
+            raise ExtractError("corrupt SquashFS fragment slice")
+        out.extend(fblk[block_off:block_off + rem])
+
+    return bytes(out[:file_size])
+
+
+def _looks_like_iso9660(buf):
+    return len(buf) >= 17 * 2048 and buf[16 * 2048 + 1:16 * 2048 + 6] == b"CD001"
+
+
+def extract_squashfs_from_upt_bytes(upt):
+    """Reconstructs ota_v0/rootfs.squashfs from a HiByOS .upt ISO 9660 image."""
+    if not _looks_like_iso9660(upt):
+        raise ExtractError("not a valid .upt ISO 9660 firmware image")
+
+    # Prefer Joliet SVD (type 2, UCS-2BE long names) so rootfs.squashfs.0000.<md5>
+    # keeps its full name; fall back to Primary Volume Descriptor (type 1).
+    chosen_vd = None
+    joliet = False
+    for sec in range(16, 32):
+        off = sec * 2048
+        if off + 2048 > len(upt) or upt[off + 1:off + 6] != b"CD001":
+            break
+        vtype = upt[off]
+        if vtype == 255:
+            break
+        if vtype == 2:
+            chosen_vd = upt[off:off + 2048]
+            joliet = True
+            break
+        if vtype == 1 and chosen_vd is None:
+            chosen_vd = upt[off:off + 2048]
+
+    if chosen_vd is None:
+        raise ExtractError("ISO 9660 image has no usable volume descriptor")
+
+    def read_dir(lba, length):
+        start = lba * 2048
+        if start + length > len(upt):
+            raise ExtractError("truncated ISO 9660 directory extent")
+        buf = upt[start:start + length]
+        pos = 0
+        entries = []
+        while pos < len(buf):
+            rlen = buf[pos]
+            if rlen == 0:
+                pos = ((pos // 2048) + 1) * 2048
+                continue
+            if pos + rlen > len(buf) or rlen < 34:
+                raise ExtractError("corrupt ISO 9660 directory record")
+            rec = buf[pos:pos + rlen]
+            elba, = struct.unpack_from("<I", rec, 2)
+            elen, = struct.unpack_from("<I", rec, 10)
+            flags = rec[25]
+            nlen = rec[32]
+            raw_name = rec[33:33 + nlen]
+            if raw_name not in (b"\x00", b"\x01"):
+                if joliet:
+                    name = raw_name.decode("utf-16-be", "replace")
+                else:
+                    name = raw_name.decode("ascii", "replace")
+                name = name.split(";", 1)[0]
+                entries.append((name, elba, elen, bool(flags & 2)))
+            pos += rlen
+        return entries
+
+    rlba, = struct.unpack_from("<I", chosen_vd, 158)
+    rlen, = struct.unpack_from("<I", chosen_vd, 166)
+    ota_dir = None
+    for name, lba, ln, is_dir in read_dir(rlba, rlen):
+        if is_dir and name.lower() == "ota_v0":
+            ota_dir = (lba, ln)
+            break
+    if ota_dir is None:
+        raise ExtractError("ISO 9660 image has no ota_v0 directory (not a HiByOS .upt)")
+
+    sub = read_dir(*ota_dir)
+    chunks = []
+    expected_md5 = None
+    expected_size = None
+    for name, lba, ln, is_dir in sub:
+        if is_dir:
+            continue
+        low = name.lower()
+        if low == "ota_update.in":
+            raw = upt[lba * 2048:lba * 2048 + ln].decode("utf-8", "replace")
+            in_rootfs = False
+            for line in raw.splitlines():
+                line = line.strip()
+                if line.startswith("img_name="):
+                    in_rootfs = line.split("=", 1)[1].strip() == "rootfs.squashfs"
+                elif in_rootfs and line.startswith("img_size="):
+                    try:
+                        expected_size = int(line.split("=", 1)[1].strip())
+                    except ValueError:
+                        pass
+                elif in_rootfs and line.startswith("img_md5="):
+                    expected_md5 = line.split("=", 1)[1].strip().lower()
+        elif low.startswith("rootfs.squashfs."):
+            rest = name[len("rootfs.squashfs."):]
+            num_str = rest.split(".", 1)[0]
+            if num_str.isdigit():
+                chunks.append((int(num_str), name, lba, ln))
+
+    if not chunks:
+        raise ExtractError("ota_v0 has no rootfs.squashfs.* chunks")
+    chunks.sort(key=lambda item: item[0])
+    for idx, (num, _cname, lba, ln) in enumerate(chunks):
+        if num != idx:
+            raise ExtractError(f"missing rootfs.squashfs chunk {idx:04d} (saw {num:04d})")
+        if lba * 2048 + ln > len(upt):
+            raise ExtractError(f"truncated chunk {_cname} in .upt")
+
+    sq = b"".join(upt[lba * 2048:lba * 2048 + ln] for _num, _cname, lba, ln in chunks)
+    if expected_size is not None and len(sq) != expected_size:
+        raise ExtractError(
+            f"reconstructed rootfs.squashfs is {len(sq)} bytes, ota_update.in says {expected_size}"
+        )
+    if expected_md5:
+        got_md5 = hashlib.md5(sq).hexdigest().lower()
+        if got_md5 != expected_md5:
+            raise ExtractError(
+                f"reconstructed rootfs.squashfs MD5 {got_md5} != ota_update.in {expected_md5}"
+            )
+    return sq
+
+
+def _join_split_pieces(path):
+    """If `path` is NAME.part1 / NAME.001, joins all sibling pieces in order."""
+    base = os.path.basename(path)
+    m = _SPLIT_PART_RE.match(base)
+    if not m:
+        return None
+    stem = m.group("stem")
+    is_part = m.group("part") is not None
+    parent = os.path.dirname(os.path.abspath(path))
+    found = []
+    for entry in os.listdir(parent):
+        full = os.path.join(parent, entry)
+        if not os.path.isfile(full):
+            continue
+        em = _SPLIT_PART_RE.match(entry)
+        if not em or em.group("stem") != stem:
+            continue
+        if (em.group("part") is not None) != is_part:
+            continue
+        num = int(em.group("pnum") if is_part else em.group("vnum"))
+        found.append((num, full))
+    if not found:
+        return None
+    found.sort(key=lambda item: item[0])
+    expected = found[0][0]
+    pieces = []
+    for num, full in found:
+        if num != expected:
+            raise ExtractError(
+                f"split archive {stem} is missing piece {expected} before {os.path.basename(full)}"
+            )
+        with open(full, "rb") as handle:
+            pieces.append(handle.read())
+        expected += 1
+    return stem, b"".join(pieces)
+
+
+def _unpack_blob_to_player(blob, label):
+    """Unwraps ZIP -> .upt -> SquashFS -> hiby_player bytes from an in-memory blob."""
+    if blob[:4] == b"PK\x03\x04":
+        try:
+            with zipfile.ZipFile(io.BytesIO(blob)) as zf:
+                names = [n for n in zf.namelist() if not n.endswith("/")]
+                for name in names:
+                    if os.path.basename(name) == "hiby_player":
+                        return f"{label}:{name}", zf.read(name)
+                for name in names:
+                    if name.lower().endswith(".upt"):
+                        return _unpack_blob_to_player(zf.read(name), f"{label}:{name}")
+                for name in names:
+                    if "squashfs" in name.lower():
+                        return _unpack_blob_to_player(zf.read(name), f"{label}:{name}")
+        except zipfile.BadZipFile as exc:
+            raise ExtractError(f"{label}: invalid ZIP archive ({exc})") from exc
+        raise ExtractError(f"{label}: ZIP archive contains neither v1.upt nor hiby_player")
+
+    if _looks_like_iso9660(blob):
+        sq = extract_squashfs_from_upt_bytes(blob)
+        return f"{label}:usr/bin/hiby_player", extract_from_squashfs_bytes(sq)
+
+    if blob[:4] == b"hsqs":
+        return f"{label}:usr/bin/hiby_player", extract_from_squashfs_bytes(blob)
+
+    return label, blob
+
+
+def load_player_bytes(path=None):
+    """Resolves `path` (ELF, unpacked rootfs, .upt, .squashfs, .zip, or .part1) to (source_label, bytes)."""
+    if path is None:
+        if os.path.isfile(DEFAULT_STOCK_INPUT):
+            path = DEFAULT_STOCK_INPUT
+        else:
+            raise ExtractError(
+                "no input path given and bundled stock firmware was not found at "
+                f"{DEFAULT_STOCK_INPUT}"
+            )
+
+    if os.path.isdir(path):
+        # First try an already-unpacked rootfs directory.
+        try:
+            binary = find_binary(path)
+            with open(binary, "rb") as handle:
+                return binary, handle.read()
+        except ExtractError:
+            pass
+        # Otherwise look for a stock archive (.upt, .zip, .part1) inside the folder.
+        for entry in sorted(os.listdir(path)):
+            low = entry.lower()
+            full = os.path.join(path, entry)
+            if os.path.isfile(full) and (
+                low.endswith(".upt") or low.endswith(".zip") or low.endswith(".part1") or low.endswith(".001")
+            ):
+                return load_player_bytes(full)
+        raise ExtractError(
+            f"no usr/bin/hiby_player or stock firmware archive (.upt/.zip) under {path}."
+        )
+
+    if not os.path.isfile(path):
+        raise ExtractError(f"{path} is neither a file nor a directory")
+
+    joined = _join_split_pieces(path)
+    if joined is not None:
+        stem, raw = joined
+        return _unpack_blob_to_player(raw, os.path.join(os.path.dirname(path), stem))
+
+    with open(path, "rb") as handle:
+        raw = handle.read()
+    return _unpack_blob_to_player(raw, path)
+
+
 def _parse_ini(text):
     sections = {}
     order = []
@@ -557,8 +1114,19 @@ def _seal(plain, key_path, bin_out):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(
-        description="Extract Qobuz and Tidal credentials from a stock HiByOS player binary.")
-    parser.add_argument("path", help="hiby_player binary, or an unpacked rootfs directory")
+        description=(
+            "Extract Qobuz and Tidal credentials from a stock HiByOS player binary, "
+            "unpacked rootfs, .upt image, .squashfs, or .zip/.part1 archive."
+        ))
+    parser.add_argument(
+        "path",
+        nargs="?",
+        default=None,
+        help=(
+            "hiby_player binary, unpacked rootfs, .upt, .squashfs, or .zip/.part1 "
+            "(default: bundled sonix-packer/firmware-input/v1.zip.part1)"
+        ),
+    )
     parser.add_argument("-o", "--out", default=DEFAULT_INI,
                         help="streaming-keys.ini to write (default: %(default)s)")
     parser.add_argument("--service", choices=("all", "qobuz", "tidal"), default="all",
@@ -581,9 +1149,7 @@ def main(argv=None):
     args = parser.parse_args(argv)
 
     try:
-        binary = find_binary(args.path)
-        with open(binary, "rb") as handle:
-            data = handle.read()
+        binary, data = load_player_bytes(args.path)
 
         if args.list_candidates:
             print(list_candidates(data))
