@@ -61,6 +61,19 @@ int main(void) {
     n = qobuzgenre_load_ordered(out, 100, &reggae_id);
     assert(n == 57 && out[4].id == 3 && out[5].id == 777);
     for (int i = 0; i < n; i++) assert(out[i].id != 3001);
+    // Localized root categories are removed without hiding their individual
+    // children, or changing the ordering of the remaining genres.
+    source_count = 6;
+    memset(source, 0, sizeof(source));
+    source[0] = (qobuz_genre_t){.id = 91, .name = "Films", .slug = "localized"};
+    source[1] = (qobuz_genre_t){.id = 901, .name = "French songs", .slug = "chanson-francaise"};
+    source[2] = (qobuz_genre_t){.id = 902, .name = "Blues/Country/Folk"};
+    source[3] = (qobuz_genre_t){.id = 4, .name = "Country"};
+    source[4] = (qobuz_genre_t){.id = 5, .name = "Folk"};
+    source[5] = (qobuz_genre_t){.id = 112, .name = "Pop/Rock"};
+    reggae_status = 0;
+    n = qobuzgenre_load_ordered(out, 100, &reggae_id);
+    assert(n == 4 && out[0].id == 3 && out[1].id == 112 && out[2].id == 5 && out[3].id == 4);
     fail_root = 1;
     assert(qobuzgenre_load_ordered(out, 100, &reggae_id) == -1);
     puts("PASS Qobuz genre ordering, cross-page promotion and fallback");

@@ -21,6 +21,7 @@ extern const lv_image_dsc_t icon_folder;
 extern const lv_image_dsc_t icon_folder_corner;
 extern const lv_image_dsc_t icon_folder_root;
 extern const lv_image_dsc_t icon_file;
+extern const lv_image_dsc_t icon_system_info;
 extern const lv_image_dsc_t icon_music_settings;
 extern const lv_image_dsc_t icon_download;
 extern const lv_image_dsc_t icon_book_finished;

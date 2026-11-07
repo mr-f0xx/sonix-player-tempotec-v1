@@ -19,7 +19,6 @@ static int rank_genre(long id, long reggae_id) {
         149, // Latin
         94,  // World
         10,  // Classical
-        91,  // Soundtracks
         59,  // Humour/Spoken Word
     };
     for (unsigned i = 0; i < sizeof(order) / sizeof(order[0]); i++) {
@@ -51,7 +50,21 @@ int qobuzgenre_load_ordered(qobuz_genre_t *out, int max, long *reggae_id) {
                         !strcasecmp(out[i].name, "children") ||
                         !strcasecmp(out[i].name, "enfants") ||
                         !strcasecmp(out[i].name, "children's music");
-        if (!children) out[kept++] = out[i];
+        // Hide only the three broad categories, not their useful individual
+        // children (in particular Blues, Country and Folk). IDs are preferred
+        // where known; slugs and names cover localized/older API responses.
+        bool hidden = out[i].id == 91 ||
+                      !strcasecmp(leaf, "bandes-originales") ||
+                      !strcasecmp(leaf, "soundtracks") ||
+                      !strcasecmp(leaf, "chanson-francaise") ||
+                      !strcasecmp(leaf, "french-chanson") ||
+                      !strcasecmp(leaf, "blues-country-folk") ||
+                      !strcasecmp(out[i].name, "Bandes originales") ||
+                      !strcasecmp(out[i].name, "Soundtracks") ||
+                      !strcasecmp(out[i].name, "Chanson française") ||
+                      !strcasecmp(out[i].name, "Chanson francaise") ||
+                      !strcasecmp(out[i].name, "Blues/Country/Folk");
+        if (!children && !hidden) out[kept++] = out[i];
     }
     count = kept;
 
