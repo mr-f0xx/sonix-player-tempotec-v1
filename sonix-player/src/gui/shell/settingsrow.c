@@ -363,6 +363,7 @@ typedef struct {
 	lv_obj_t *row;
 	lv_obj_t *icon;
 	theme_semantic_t tone;
+	bool accent;
 } settingsrow_leading_icon_t;
 
 typedef struct {
@@ -385,6 +386,12 @@ static lv_obj_t *settingsrow_leading_icon(lv_obj_t *row) {
 		}
 	}
 	return NULL;
+}
+
+static bool settingsrow_icon_is_accent(lv_obj_t *row) {
+    for (int i = 0; i < leading_icon_count; i++)
+        if (leading_icons[i].row == row) return leading_icons[i].accent;
+    return false;
 }
 
 static lv_obj_t *settingsrow_caption(lv_obj_t *row) {
@@ -452,7 +459,7 @@ static void fit_row(lv_obj_t *row) {
 	// one of those themes is enabled, so Dark and Light keep their label
 	// position.
 	lv_obj_t *leading = settingsrow_leading_icon(row);
-	int32_t leading_width = theme_uses_function_glyphs() && leading ? lv_obj_get_width(leading) + ROW_LABEL_GAP : 0;
+	int32_t leading_width = (theme_uses_function_glyphs() || settingsrow_icon_is_accent(row)) && leading ? lv_obj_get_width(leading) + ROW_LABEL_GAP : 0;
 	avail -= leading_width;
 
 	lv_obj_t *caption = settingsrow_caption(row);
@@ -633,13 +640,14 @@ static void settingsrow_refresh_theme(void) {
 			continue;
 		}
 		settingsrow_update_edges(row, flat_rows);
-		lv_obj_set_hidden(icon, !function_glyphs);
+		bool accent = leading_icons[i].accent;
+		lv_obj_set_hidden(icon, !function_glyphs && !accent);
 		lv_obj_t *label = lv_obj_get_child(row, 0);
 		if (label && lv_obj_check_type(label, &lv_label_class)) {
 			lv_obj_set_style_text_font(label, &font_ui_24, 0);
 		}
-		if (function_glyphs) {
-			lv_obj_set_style_image_recolor(icon, theme_semantic_color(leading_icons[i].tone), 0);
+		if (function_glyphs || accent) {
+			lv_obj_set_style_image_recolor(icon, accent ? theme()->accent : theme_semantic_color(leading_icons[i].tone), 0);
 			lv_obj_set_style_image_recolor_opa(icon, LV_OPA_COVER, 0);
 		} else {
 			lv_obj_remove_local_style_prop(icon, LV_STYLE_IMAGE_RECOLOR, 0);
@@ -1088,6 +1096,17 @@ void settingsrow_add_icon(lv_obj_t *row, const lv_image_dsc_t *source, theme_sem
 	lv_obj_add_event_cb(row, settingsrow_icon_row_deleted_cb, LV_EVENT_DELETE, NULL);
 	settingsrow_register_refresh();
 	settingsrow_refresh_theme();
+}
+
+void settingsrow_add_accent_icon(lv_obj_t *row, const lv_image_dsc_t *source) {
+    settingsrow_add_icon(row, source, THEME_SEMANTIC_BLUE);
+    for (int i = 0; i < leading_icon_count; i++) {
+        if (leading_icons[i].row == row) {
+            leading_icons[i].accent = true;
+            settingsrow_refresh_theme();
+            break;
+        }
+    }
 }
 
 static void settingsrow_caption_row_deleted_cb(lv_event_t *e) {

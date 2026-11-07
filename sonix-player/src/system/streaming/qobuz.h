@@ -70,9 +70,13 @@ typedef struct {
 	char artist[QOBUZ_NAME_MAX];
 	char album[QOBUZ_TITLE_MAX];
 	char album_id[40]; // to reopen the album the track comes from
+	char album_artist[QOBUZ_NAME_MAX];
+	char released[16]; // album release year
+	int album_track_count;
 	char cover[QOBUZ_URL_MAX];
 	int duration;			   // seconds
 	int track_number;
+	int disc_number;
 	bool hires;
 	bool streamable; // false = present but not playable on this subscription
 	int bit_depth;
@@ -155,11 +159,20 @@ int qobuz_user_playlists(int offset, qobuz_playlist_t *out, int max);
 // "editor-picks", "best-sellers", "press-awards", "most-streamed").
 int qobuz_featured_albums(const char *type, int offset, qobuz_album_t *out, int max);
 
+typedef struct { long id; char name[QOBUZ_NAME_MAX]; } qobuz_genre_t;
+int qobuz_genres(int offset, qobuz_genre_t *out, int max);
+int qobuz_genre_new_releases(long genre_id, int offset, qobuz_album_t *out, int max);
+
 // The signed URL of a track's audio file. `mime` may be NULL.
 //
 // The URL is valid for a few minutes and must not be stored: request it every
 // time the track is played.
 bool qobuz_track_url(long track_id, char *url, size_t url_size, char *mime, size_t mime_size, int *format_out);
+
+// Request a specific quality without changing the streaming setting. The actual
+// format returned by Qobuz can be lower depending on the subscription.
+bool qobuz_track_url_for_format(long track_id, int requested_format, char *url, size_t url_size, char *mime,
+								 size_t mime_size, int *format_out);
 
 // ---------------------------------------------------------------------------
 // Writing to the account

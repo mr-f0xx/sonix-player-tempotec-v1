@@ -446,7 +446,21 @@ static void *server_main(void *arg) {
 		}
 
 		// MODE_NORMAL endpoint routing:
-		if (strncmp(req, "GET /api.json/0.2/favorite/getUserFavorites?", 44) == 0) {
+        if (strncmp(req, "GET /api.json/0.2/genre/list?", 29) == 0) {
+            const char *reply = "{\"genres\":{\"items\":[{\"id\":12,\"name\":\"Jazz\"}]}}";
+            send_http(cfd, 200, NULL, reply, strlen(reply));
+        } else if (strstr(req, "/album/getFeatured?") && strstr(req, "genre_ids=12")) {
+            assert(strstr(req, "type=new-releases") && strstr(req, "offset=50"));
+            const char *reply = "{\"albums\":{\"items\":[{\"id\":\"jazz1\",\"title\":\"Jazz Album\"}]}}";
+            send_http(cfd, 200, NULL, reply, strlen(reply));
+        } else if (strncmp(req, "GET /api.json/0.2/album/get?", 28) == 0) {
+			const char *reply = "{\"id\":\"album-1\",\"title\":\"Record\","
+				"\"artist\":{\"name\":\"Album Artist\"},\"release_date_original\":\"2021-05-01\","
+				"\"image\":{\"large\":\"https://example.test/cover\"},"
+				"\"tracks\":{\"items\":[{\"id\":777,\"title\":\"Song\",\"track_number\":2,\"media_number\":1,"
+				"\"performer\":{\"name\":\"Performer\"}}]}}";
+			send_http(cfd, 200, NULL, reply, strlen(reply));
+		} else if (strncmp(req, "GET /api.json/0.2/favorite/getUserFavorites?", 44) == 0) {
 			// Verify paged qobuz_favorite_track_ids never asks for > 50 at once.
 			const char *lim_p = strstr(req, "limit=");
 			const char *off_p = strstr(req, "offset=");
@@ -480,12 +494,13 @@ static void *server_main(void *arg) {
 			assert(strstr(req, needle) != NULL);
 
 			if (strncmp(req, "GET /api.json/0.2/track/getFileUrl?", 35) == 0) {
-				assert(strstr(req, "&format_id=27") != NULL);
+				assert(strstr(req, "&format_id=27") != NULL || strstr(req, "&format_id=5") != NULL ||
+					   strstr(req, "&format_id=6") != NULL);
 				assert(strstr(req, "&intent=stream") != NULL);
 				assert(strstr(req, "&track_id=777") != NULL);
-				const char *reply =
-					"{\"url\":\"https://streaming-qobuz-std.akamaized.net/file.flac\","
-					"\"mime_type\":\"audio/flac\",\"format_id\":27}";
+				const char *reply = strstr(req, "&format_id=5")
+					? "{\"url\":\"https://streaming-qobuz-std.akamaized.net/file.mp3\",\"mime_type\":\"audio/mpeg\",\"format_id\":5}"
+					: "{\"url\":\"https://streaming-qobuz-std.akamaized.net/file.flac\",\"mime_type\":\"audio/flac\"}";
 				send_http(cfd, 200, NULL, reply, strlen(reply));
 			} else {
 				const char *reply = "{\"id\":4242,\"status\":\"success\"}";
@@ -589,6 +604,20 @@ int main(void) {
 	assert(qobuz_user_playlists(0, pls, 8) == 1);
 	assert(pls[0].id == 99 && strcmp(pls[0].name, "My Mix") == 0);
 
+    qobuz_genre_t genres[2];
+    assert(qobuz_genres(0, genres, 2) == 1 && genres[0].id == 12 && !strcmp(genres[0].name, "Jazz"));
+    qobuz_album_t genre_albums[2];
+    assert(qobuz_genre_new_releases(12, 50, genre_albums, 2) == 1);
+    assert(!strcmp(genre_albums[0].title, "Jazz Album"));
+	qobuz_track_t album_tracks[2];
+	assert(qobuz_album_tracks("album-1", 0, album_tracks, 2) == 1);
+	assert(!strcmp(album_tracks[0].album, "Record"));
+	assert(!strcmp(album_tracks[0].artist, "Performer"));
+	assert(!strcmp(album_tracks[0].album_artist, "Album Artist"));
+	assert(!strcmp(album_tracks[0].released, "2021"));
+	assert(!strcmp(album_tracks[0].cover, "https://example.test/cover"));
+	assert(album_tracks[0].album_track_count == 1 && album_tracks[0].track_number == 2 && album_tracks[0].disc_number == 1);
+
 	assert(qobuz_favorite_add_track(12345));
 	long created_pl = 0;
 	assert(qobuz_playlist_create("Road Trip", &created_pl) && created_pl == 4242);
@@ -600,6 +629,16 @@ int main(void) {
 	assert(qobuz_track_url(777, stream_url, sizeof(stream_url), mime, sizeof(mime), &fmt));
 	assert(strcmp(stream_url, "https://streaming-qobuz-std.akamaized.net/file.flac") == 0);
 	assert(strcmp(mime, "audio/flac") == 0 && fmt == 27);
+
+	// A one-off choice must not alter the quality used for normal playback.
+	assert(qobuz_track_url_for_format(777, QOBUZ_FORMAT_MP3, stream_url, sizeof(stream_url), mime, sizeof(mime), &fmt));
+	assert(strcmp(mime, "audio/mpeg") == 0 && fmt == QOBUZ_FORMAT_MP3);
+	assert(qobuz_get_format() == QOBUZ_FORMAT_HIRES192);
+	assert(qobuz_track_url_for_format(777, QOBUZ_FORMAT_CD, stream_url, sizeof(stream_url), mime, sizeof(mime), &fmt));
+	assert(strcmp(mime, "audio/flac") == 0 && fmt == QOBUZ_FORMAT_CD);
+	assert(!qobuz_track_url_for_format(777, -1, stream_url, sizeof(stream_url), mime, sizeof(mime), &fmt));
+	assert(stream_url[0] == '\0');
+
 
 	// 3. Paged qobuz_favorite_track_ids(ids, 120) fetches 3 pages of <=50 items.
 	long fav_ids[120];

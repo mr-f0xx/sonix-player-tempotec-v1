@@ -58,6 +58,7 @@ ICONS = [
     ("folder-root.svg", "folder_root", 34), # browser corner: back to the card root
     ("file.svg", "file", 32),
     ("music-settings.svg", "music_settings", 34),
+    ("download.svg", "download", 34),
     ("book-finished.svg", "book_finished", 34),  # the Audiobooks page's corner: the finished books
     ("audio-waveform.svg", "audio_waveform", 34),
     # AutoEq search corner: download the headphone index again.

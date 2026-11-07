@@ -34,6 +34,7 @@
 #include "src/system/playback/playlist.h"
 #include "src/system/core/config.h"
 #include "src/system/library/library.h"
+#include "src/system/device/system.h"
 #include "src/system/core/lang.h"
 #include "src/system/core/utils.h"
 
@@ -1176,6 +1177,43 @@ static uint32_t ready_seq;
 
 static bool is_playable_file(const char *name);
 
+// Old Qobuz downloads were named after numeric service ids. Show their
+// existing sidecar metadata without moving files or breaking library paths.
+static bool qobuz_browse_label(const char *dir, const char *file, bool is_dir, char *out, size_t size) {
+    char base[768];
+    if (!storage_sd_root() || snprintf(base, sizeof(base), "%s/Music/Qobuz Downloads", storage_sd_root()) >= (int)sizeof(base)) return false;
+    size_t n = strlen(base);
+    if (strncmp(dir, base, n) || (dir[n] && dir[n] != '/')) return false;
+    if (is_dir) {
+        const char *suffix = strrchr(file, '[');
+        size_t len = strlen(file);
+        if (!suffix || suffix == file || suffix[-1] != ' ' || len < 2 || file[len-1] != ']') return false;
+        size_t prefix = (size_t)(suffix - file - 1);
+        if (!prefix || file[prefix-1] != ')') return false;
+        snprintf(out, size, "%.*s", (int)prefix, file);
+        return true;
+    }
+    // Only legacy numeric filenames need an alternate label. Modern downloads
+    // already have descriptive names and should keep their extension in Browse.
+    const char *p = file;
+    while (*p >= '0' && *p <= '9') p++;
+    if (p == file || (strcmp(p, ".mp3") && strcmp(p, ".flac") && strcmp(p, "-hires.flac"))) return false;
+    char tags[1600], line[512], title[200] = "", artist[128] = "";
+    if (snprintf(tags, sizeof(tags), "%s/%s.tags", dir, file) >= (int)sizeof(tags)) return false;
+    FILE *f = fopen(tags, "r");
+    if (!f) return false;
+    while (fgets(line, sizeof(line), f)) {
+        line[strcspn(line, "\r\n")] = 0;
+        if (!strncmp(line, "title=", 6)) snprintf(title, sizeof(title), "%.199s", line + 6);
+        else if (!strncmp(line, "artist=", 7)) snprintf(artist, sizeof(artist), "%.127s", line + 7);
+    }
+    fclose(f);
+    if (!title[0]) return false;
+    snprintf(out, size, "%s%s%s", artist, artist[0] ? " - " : "", title);
+    return true;
+}
+
+
 // Reads one directory into `out`, sorted: its folders and what can be played
 // in it, as the browser lists them. `sheets` is a buffer for parsing its cue
 // sheets (NULL leaves them unsplit) and `claims` room for CUE_CLAIM_MAX names.
@@ -1300,7 +1338,9 @@ static bool list_directory(const char *path, listing_t *out, cue_sheet_t *sheets
 			continue;
 		}
 
-		if (!listing_add(out, de->d_name, NULL, is_dir)) {
+        char display[384];
+        bool renamed = qobuz_browse_label(path, de->d_name, is_dir, display, sizeof(display));
+		if (!listing_add(out, renamed ? display : de->d_name, renamed ? de->d_name : NULL, is_dir)) {
 			fprintf(stderr, "browser: out of memory at %zu entries\n", out->count);
 			break;
 		}

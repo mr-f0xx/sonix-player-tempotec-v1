@@ -566,6 +566,7 @@ static void read_track(const json_doc_t *doc, int obj, const qobuz_album_t *albu
 	json_obj_str(doc, obj, "title", t->title, sizeof(t->title));
 	t->duration = (int)json_obj_long(doc, obj, "duration", 0);
 	t->track_number = (int)json_obj_long(doc, obj, "track_number", 0);
+	t->disc_number = (int)json_obj_long(doc, obj, "media_number", 0);
 	t->hires = json_obj_bool(doc, obj, "hires", false);
 	t->streamable = json_obj_bool(doc, obj, "streamable", true);
 	t->bit_depth = (int)json_obj_long(doc, obj, "maximum_bit_depth", 0);
@@ -582,24 +583,20 @@ static void read_track(const json_doc_t *doc, int obj, const qobuz_album_t *albu
 	}
 
 	int album = json_get(doc, obj, "album");
+	qobuz_album_t embedded;
+	const qobuz_album_t *info = album_hint;
 	if (album >= 0) {
-		json_obj_str(doc, album, "title", t->album, sizeof(t->album));
-		// The album id, not just the title: it is what lets "Show album" reopen
-		// the right one -- more than one album is called "Greatest Hits".
-		json_obj_str(doc, album, "id", t->album_id, sizeof(t->album_id));
-		read_cover(doc, json_get(doc, album, "image"), t->cover, sizeof(t->cover));
-		if (!t->artist[0]) {
-			json_obj_str(doc, json_get(doc, album, "artist"), "name", t->artist, sizeof(t->artist));
-		}
-	} else if (album_hint) {
-		// Inside /album/get tracks do not repeat the album: it is the one asked
-		// for.
-		snprintf(t->album, sizeof(t->album), "%s", album_hint->title);
-		snprintf(t->album_id, sizeof(t->album_id), "%s", album_hint->id_text);
-		snprintf(t->cover, sizeof(t->cover), "%s", album_hint->cover);
-		if (!t->artist[0]) {
-			snprintf(t->artist, sizeof(t->artist), "%s", album_hint->artist);
-		}
+		read_album(doc, album, &embedded);
+		info = &embedded;
+	}
+	if (info) {
+		snprintf(t->album, sizeof(t->album), "%s", info->title);
+		snprintf(t->album_id, sizeof(t->album_id), "%s", info->id_text);
+		snprintf(t->cover, sizeof(t->cover), "%s", info->cover);
+		snprintf(t->album_artist, sizeof(t->album_artist), "%s", info->artist);
+		snprintf(t->released, sizeof(t->released), "%s", info->released);
+		t->album_track_count = info->track_count;
+		if (!t->artist[0]) snprintf(t->artist, sizeof(t->artist), "%s", info->artist);
 	}
 }
 
@@ -740,7 +737,8 @@ int qobuz_album_tracks(const char *album_id, int offset, qobuz_track_t *out, int
 	// skipping the first `offset`; from the outside this endpoint then behaves
 	// like the ones that really paginate.
 	int items = json_path(&doc, root, "tracks.items");
-	int count = json_len(&doc, items) - offset;
+	int total = json_len(&doc, items);
+	int count = total - offset;
 	if (count < 0) {
 		count = 0;
 	}
@@ -749,6 +747,7 @@ int qobuz_album_tracks(const char *album_id, int offset, qobuz_track_t *out, int
 	}
 	for (int i = 0; i < count; i++) {
 		read_track(&doc, json_at(&doc, items, offset + i), &album, &out[i]);
+		out[i].album_track_count = total;
 	}
 
 	api_done(body, &doc);
@@ -878,6 +877,39 @@ int qobuz_featured_albums(const char *type, int offset, qobuz_album_t *out, int 
 	return count;
 }
 
+int qobuz_genres(int offset, qobuz_genre_t *out, int max) {
+    if (!out || max <= 0 || offset < 0) return 0;
+    char url[768];
+    snprintf(url, sizeof(url), "%s/genre/list?app_id=%s&limit=%d&offset=%d", base_url, app_id, max, offset);
+    char *body = NULL;
+    json_doc_t doc;
+    if (!api_call(url, NULL, &body, &doc)) return -1;
+    int items = json_path(&doc, json_root(&doc), "genres.items");
+    int n = json_len(&doc, items);
+    if (n < 0) n = 0;
+    if (n > max) n = max;
+    for (int i = 0; i < n; i++) {
+        int obj = json_at(&doc, items, i);
+        out[i].id = json_obj_long(&doc, obj, "id", 0);
+        json_obj_str(&doc, obj, "name", out[i].name, sizeof(out[i].name));
+    }
+    api_done(body, &doc);
+    return n;
+}
+
+int qobuz_genre_new_releases(long genre_id, int offset, qobuz_album_t *out, int max) {
+    if (!out || genre_id <= 0 || offset < 0 || max <= 0) return 0;
+    char url[768];
+    snprintf(url, sizeof(url), "%s/album/getFeatured?app_id=%s&type=new-releases-full&genre_ids=%ld&limit=%d&offset=%d",
+             base_url, app_id, genre_id, max, offset);
+    char *body = NULL;
+    json_doc_t doc;
+    if (!api_call(url, NULL, &body, &doc)) return -1;
+    int count = read_items(&doc, json_get(&doc, json_root(&doc), "albums"), album_reader, out, max);
+    api_done(body, &doc);
+    return count;
+}
+
 // ---------------------------------------------------------------------------
 // the signature
 //
@@ -964,7 +996,8 @@ static char *encoded_auth_token_alloc(void) {
 	return encoded;
 }
 
-bool qobuz_track_url(long track_id, char *url_out, size_t url_size, char *mime, size_t mime_size, int *format_out) {
+bool qobuz_track_url_for_format(long track_id, int requested_format, char *url_out, size_t url_size, char *mime,
+								 size_t mime_size, int *format_out) {
 	clear_error();
 
 	if (!url_out || url_size == 0) {
@@ -973,6 +1006,12 @@ bool qobuz_track_url(long track_id, char *url_out, size_t url_size, char *mime, 
 	url_out[0] = '\0';
 	if (mime && mime_size) {
 		mime[0] = '\0';
+	}
+
+	if (requested_format != QOBUZ_FORMAT_MP3 && requested_format != QOBUZ_FORMAT_CD &&
+		requested_format != QOBUZ_FORMAT_HIRES96 && requested_format != QOBUZ_FORMAT_HIRES192) {
+		set_error("Invalid Qobuz format");
+		return false;
 	}
 
 	if (!qobuz_logged_in()) {
@@ -990,7 +1029,7 @@ bool qobuz_track_url(long track_id, char *url_out, size_t url_size, char *mime, 
 	qobuz_param_t params[3];
 	int count = 0;
 	snprintf(params[count].key, sizeof(params[0].key), "%s", "format_id");
-	snprintf(params[count].value, sizeof(params[0].value), "%d", format_id);
+	snprintf(params[count].value, sizeof(params[0].value), "%d", requested_format);
 	count++;
 	snprintf(params[count].key, sizeof(params[0].key), "%s", "intent");
 	snprintf(params[count].value, sizeof(params[0].value), "%s", "stream");
@@ -1038,7 +1077,7 @@ bool qobuz_track_url(long track_id, char *url_out, size_t url_size, char *mime, 
 		json_obj_str(&doc, root, "mime_type", mime, mime_size);
 	}
 	if (format_out) {
-		*format_out = (int)json_obj_long(&doc, root, "format_id", format_id);
+		*format_out = (int)json_obj_long(&doc, root, "format_id", requested_format);
 	}
 
 	// A track that exists but is not covered by this subscription comes back as
@@ -1052,6 +1091,10 @@ bool qobuz_track_url(long track_id, char *url_out, size_t url_size, char *mime, 
 
 	api_done(body, &doc);
 	return ok;
+}
+
+bool qobuz_track_url(long track_id, char *url_out, size_t url_size, char *mime, size_t mime_size, int *format_out) {
+	return qobuz_track_url_for_format(track_id, qobuz_get_format(), url_out, url_size, mime, mime_size, format_out);
 }
 
 // ---------------------------------------------------------------------------

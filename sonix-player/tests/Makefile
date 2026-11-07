@@ -78,6 +78,16 @@ $(BUILD)/test_qobuz: $(QOBUZ_SRC) $(ROOT)/build_gen/streamkeys_key.h $(ROOT)/src
 	@mkdir -p $(BUILD)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -DHOST_BUILD -o $@ $(QOBUZ_SRC) $(LDFLAGS) $(LDLIBS)
 
+# Download worker with fake Qobuz and HTTP transport. Requires the same LVGL
+# headers as the player (run make in the parent directory to fetch them).
+.PHONY: qobuzdl
+qobuzdl: $(BUILD)/test_qobuzdl
+	$(BUILD)/test_qobuzdl
+
+$(BUILD)/test_qobuzdl: test_qobuzdl.c $(ROOT)/src/system/streaming/qobuzdl.c $(ROOT)/src/system/streaming/qobuzdl.h
+	@mkdir -p $(BUILD)
+	$(CC) $(CPPFLAGS) -I$(ROOT)/lvgl $(CFLAGS) -Wno-error=format-truncation -DLV_CONF_INCLUDE_SIMPLE=1 -DHOST_BUILD -o $@ test_qobuzdl.c $(ROOT)/src/system/streaming/qobuzdl.c $(ROOT)/src/system/streaming/podcastdl.c $(LDFLAGS) $(LDLIBS)
+
 $(BUILD)/test_subsonic: test_subsonic.c support.c $(CORE) $(shell find $(ROOT)/src/system -name '*.h')
 	@mkdir -p $(BUILD)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ test_subsonic.c support.c $(CORE) $(LDFLAGS) $(LDLIBS)
