@@ -394,9 +394,6 @@ typedef enum {
 	SCAN_FULL,
 	SCAN_UPDATE,
 	SCAN_REORGANIZE,
-	// No card walk: build or refresh the Smart Mix graph for the index that
-	// is already there.
-	SCAN_GENIUS,
 } scan_mode_t;
 static volatile scan_mode_t scan_mode;
 
@@ -6108,7 +6105,6 @@ static void *scan_thread_func(void *arg) {
 		}
 		break;
 	case SCAN_REORGANIZE:
-	case SCAN_GENIUS:
 		break;
 	}
 
@@ -6135,8 +6131,7 @@ static void *scan_thread_func(void *arg) {
 		}
 		if (!again) {
 			// Once the index itself is settled, build or refresh the Smart
-			// Mix graph as the scan's last phase, including a graph-only run
-			// on an already-scanned library.
+			// Mix graph as the scan's last phase.
 			if (!wanted && (!attempted || done) && !genius_attempted && !scan_cancel && !scan_db_failed) {
 				genius_attempted = true;
 				pthread_mutex_unlock(&rules_lock);
@@ -6165,7 +6160,7 @@ static void *scan_thread_func(void *arg) {
 }
 
 static bool scan_launch(const char *root, scan_mode_t mode) {
-	if (!db || scan_running || ((!root || !root[0]) && mode != SCAN_REORGANIZE && mode != SCAN_GENIUS)) {
+	if (!db || scan_running || ((!root || !root[0]) && mode != SCAN_REORGANIZE)) {
 		return false;
 	}
 
@@ -6184,7 +6179,7 @@ static bool scan_launch(const char *root, scan_mode_t mode) {
 	phase_started = now_ms();
 	pthread_mutex_unlock(&scan_progress_lock);
 	scan_running = true;
-	set_scan_folder(mode == SCAN_REORGANIZE || mode == SCAN_GENIUS ? "" : root);
+	set_scan_folder(mode == SCAN_REORGANIZE ? "" : root);
 	set_scan_file("");
 
 	// Off by default: a line per file is a write to the card per file, which
@@ -6272,21 +6267,16 @@ void library_set_detect_changes(bool on) {
 void library_set_update_listener(library_update_listener_t listener) { update_listener = listener; }
 
 bool library_card_returned(const char *root) {
-	if (!library_is_open() || scan_running) {
+	// This entry point is for automatic work only. With Detect changes off,
+	// returning to the card must not start a change check, index maintenance
+	// or a graph-only Smart Mix run. Manual scans and reorganization have
+	// their own entry points and remain available.
+	if (!library_is_open() || scan_running || !library_detect_changes()) {
 		return false;
 	}
 	// A card filed under other settings -- changed while it was out, or a
-	// run stopped halfway -- is filed again: on its own, or after Detect
-	// changes.
+	// run stopped halfway -- is filed again after Detect changes.
 	bool unfiled = !organized_as_set();
-	if (!library_detect_changes()) {
-		if (unfiled) {
-			return library_organize_check();
-		}
-		// An already-scanned library can acquire or refresh Smart Mix with
-		// no card walk, including when automatic change detection is off.
-		return library_track_count() > 0 && scan_launch(root, SCAN_GENIUS);
-	}
 	if (library_track_count() == 0) {
 		printf("library: detect changes: nothing indexed yet, a scan builds the library\n");
 		return false;
@@ -7304,6 +7294,19 @@ bool library_playback_state_load(char *path_out, size_t path_size, double *posit
 	}
 	pthread_mutex_unlock(&db_lock);
 	return found;
+}
+
+bool library_playback_track_readable(const char *path) {
+	if (!path || !path[0]) {
+		return false;
+	}
+
+	// A CUE track is a virtual path ("album.cue?track=3"), not a file that
+	// access() can open. Validate the sheet it belongs to; the decoder parses
+	// the sheet again and resolves the track's audio when playback is restored.
+	char physical_path[512];
+	cue_split_path(path, physical_path, sizeof(physical_path));
+	return physical_path[0] && access(physical_path, R_OK) == 0;
 }
 
 // ---------------------------------------------------------------------------

@@ -214,8 +214,8 @@ void libraryscan_begin(void) {
 	lv_obj_set_hidden(cancel_button, false);
 	lv_obj_set_hidden(background_button, false);
 
-	// Opening a running job attaches, including a graph-only run on an
-	// existing index. Returning to this page must never wipe/restart the scan.
+	// Opening a running job attaches to it. Returning to this page must never
+	// wipe/restart the scan.
 	if (!library_scan_running() && !library_scan_start(sd_root)) {
 		// Nothing to scan (no card, or a scan is somehow already going).
 		lv_label_set_text(count_label, "");
@@ -774,22 +774,35 @@ static void update_listener(library_update_event_t event, int added, int removed
 	}
 }
 
-// How long after startup the card is looked over: past the first screen and
-// the track being restored, which want the card first.
+// How long after the boot-time restore the card is looked over. The timer is
+// created by main only after that restore has run (or was not requested), not
+// while the pages are still being built: on a slow boot two independently
+// created timers could otherwise make the library check run first.
 #define BOOT_CHECK_DELAY_MS 5000
 
+static lv_timer_t *boot_check_timer;
+
 // What library_card_returned() does for a card that comes back: Detect changes
-// when it is on, and the index filed again if it was filed under other
-// settings. A card mounted only after startup goes through it when it is
-// attached instead (storage), and finds the library closed here.
+// when it is on, and no automatic work when it is off. A card mounted only
+// after startup goes through it when it is attached instead (storage), and
+// finds the library closed here.
 static void boot_check_cb(lv_timer_t *timer) {
 	(void)timer;
+	boot_check_timer = NULL;
 	// A library scanned before Detect changes came on by itself gets it the
 	// same way, unless it was set either way since.
 	if (!library_detect_changes_chosen() && library_is_open() && library_track_count() > 0) {
 		library_set_detect_changes(true);
 	}
 	library_card_returned(sd_root);
+}
+
+void libraryscan_boot_check_schedule(void) {
+	if (boot_check_timer) {
+		return;
+	}
+	boot_check_timer = lv_timer_create(boot_check_cb, BOOT_CHECK_DELAY_MS, NULL);
+	lv_timer_set_repeat_count(boot_check_timer, 1);
 }
 
 void libraryscan_init(gui_config_t *cfg) {
@@ -932,8 +945,4 @@ void libraryscan_init(gui_config_t *cfg) {
 	// No interface work while the device is in standby; the busy guard in
 	// power.c is what keeps the scan itself alive with the panel dark.
 	power_pause_in_standby(poll_timer);
-
-	// The card may have been written while the player was off.
-	lv_timer_t *boot_check = lv_timer_create(boot_check_cb, BOOT_CHECK_DELAY_MS, NULL);
-	lv_timer_set_repeat_count(boot_check, 1);
 }
