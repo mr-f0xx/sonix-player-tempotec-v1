@@ -154,13 +154,14 @@ $(BUILD)/test_eq: $(EQ_SRC) $(ROOT)/src/system/audio/eq.h $(ROOT)/src/system/cor
 # The explicit V1 external-DAC host trial against a private fake sysfs tree.
 # Exercises the real role writes, bounded wait, rollback and crash recovery.
 .PHONY: usbhost
-usbhost: $(BUILD)/test_usbhostprobe $(BUILD)/test_usbhost_reset $(BUILD)/test_usb_ownership $(BUILD)/test_usbexport $(BUILD)/test_usb_storage $(BUILD)/test_usbaudio_arbitration $(BUILD)/test_usbhostmode
+usbhost: $(BUILD)/test_usbhostprobe $(BUILD)/test_usbhost_reset $(BUILD)/test_usb_ownership $(BUILD)/test_usbexport $(BUILD)/test_usb_storage $(BUILD)/test_usbaudio_arbitration $(BUILD)/test_usbaudio_volume $(BUILD)/test_usbhostmode
 	$(BUILD)/test_usbhostprobe
 	$(BUILD)/test_usbhost_reset
 	$(BUILD)/test_usb_ownership
 	$(BUILD)/test_usbexport
 	$(BUILD)/test_usb_storage
 	$(BUILD)/test_usbaudio_arbitration
+	$(BUILD)/test_usbaudio_volume
 	$(BUILD)/test_usbhostmode
 
 # The external USB DAC setting: the hold around the role trial, its retry after
@@ -180,6 +181,15 @@ $(BUILD)/test_usbaudio_arbitration: test_usbaudio_arbitration.c $(ROOT)/src/syst
                                    stubs/lvgl/lvgl.h stubs/alsa/asoundlib.h
 	@mkdir -p $(BUILD)
 	$(CC) $(CPPFLAGS) -Istubs $(CFLAGS) -o $@ test_usbaudio_arbitration.c $(LDFLAGS) $(LDLIBS)
+
+# Where the level physically happens on a USB DAC: the device's own control by
+# default, the samples the remainder, and the samples the whole of it when the
+# control cannot be believed or will not move. The mixer is a fake table; the
+# shape matching, the split arithmetic and the read-back are the real ones.
+$(BUILD)/test_usbaudio_volume: test_usbaudio_volume.c $(ROOT)/src/system/audio/usbaudio.c \
+                               stubs/lvgl/lvgl.h stubs/alsa/asoundlib.h
+	@mkdir -p $(BUILD)
+	$(CC) $(CPPFLAGS) -Istubs $(CFLAGS) -o $@ test_usbaudio_volume.c $(LDFLAGS) $(LDLIBS)
 
 $(BUILD)/test_usb_storage: test_usb_storage.c $(ROOT)/src/system/device/usb.c \
                            $(ROOT)/src/system/device/usbexport.h stubs/lvgl/lvgl.h

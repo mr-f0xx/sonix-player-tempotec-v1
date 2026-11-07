@@ -638,17 +638,33 @@ static void find_volume_control(int card) {
 //
 // How the level is split between the device and the samples:
 //
-//   * no volume control: all of it on the samples (swvolume.c);
-//   * by default, the device's control is held at its 0 dB step (at its top
-//     when it has no dB scale) and all of the level goes on the samples. It is
-//     what a phone does. A dongle's own control can be coarser than it
-//     declares -- a whole run of indices landing on one step -- or stop well
-//     above silence, and neither can be seen from here. What the device claims
-//     its 0 dB step is worth is not believed either way: a descriptor that
-//     lies about gain must not cancel the software attenuation;
-//   * with [usb] hardware_volume = 1 and a dB scale, the control takes the
-//     nearest step at or above the target and the samples the difference, so
-//     a coarse or shallow control still moves smoothly all the way down.
+//   * no volume control, or a scale that cannot be believed: all of it on the
+//     samples (swvolume.c);
+//   * by default and with a dB scale, the control takes the nearest step at or
+//     above the target and the samples take the difference, so a coarse or
+//     shallow control still moves smoothly all the way down;
+//   * with [usb] hardware_volume = 0, the control is held at its 0 dB step (at
+//     its top when it has no dB scale) and all of the level goes on the
+//     samples, which is what a phone does.
+//
+// The default is the first of those two because the second one hisses. A
+// dongle's own attenuator is inside the same chip as its output amplifier: turn
+// the music down there and the amplifier's own noise floor comes down with it.
+// Turn the *samples* down instead -- which is what pinning the control at 0 dB
+// does -- and the music is quieter while the amplifier still runs at full gain,
+// so what comes out of the jack has the music 20-odd dB closer to the hiss. The
+// difference is not subtle on a sensitive pair of IEMs, and it was reported
+// exactly as it behaves: a quiet hiss under the music on both dongles, worse on
+// the louder one, absent on a phone (which turns the dongle down) and absent on
+// the stock firmware (which does too).
+//
+// Nor is the control always the coarser of the two. "PCM Playback Volume" is
+// 1 dB per step here, and the samples carry whatever fraction is left, so the
+// level still moves in the player's own fine steps -- the split does not cost
+// resolution, it only decides where the attenuation physically happens. What it
+// does cost is that a descriptor can lie about its own scale, which is why the
+// scale is still checked below and the whole strategy falls back to the samples
+// when it cannot be believed or when a write does not take.
 //
 // The value written is read back. A driver is allowed to round it; sitting at
 // the top of its range after being asked for well below is a control that does
@@ -672,7 +688,11 @@ void usbaudio_apply_volume(int percent) {
 		return;
 	}
 
-	bool hardware = volume_has_db && config_get_int("usb", "hardware_volume", 0);
+	// The device's own control by default -- see the note above about hiss --
+	// and the samples instead when somebody asks for the older behaviour. Only
+	// ever with a dB scale, because without one "the nearest step at or above
+	// the target" has no meaning and the control can only go to its top.
+	bool hardware = volume_has_db && config_get_int("usb", "hardware_volume", 1);
 	long value = volume_max;
 	long hw_db = 0;
 	if (mute) {
@@ -740,11 +760,31 @@ void usbaudio_apply_volume(int percent) {
 	// Asked for something below the top and still sitting at the top. The slack
 	// is never zero: on a control with only a few steps, max - 0 would read as
 	// "stuck" the moment the level really is the maximum.
+	//
+	// And it is a fraction of the range rather than a fixed number of steps,
+	// because the size of a step is the device's business. A 0..50 control's
+	// slack of two is 2 dB and cannot be reached by a write that was honoured
+	// -- the driver rounds to a step, not by a fifth of the range. A 0..10
+	// control's two is 20 dB, and a write asking for index 9 of 10 lands on 9,
+	// which is inside the dead band: the control would be judged to have done
+	// nothing at the exact moment it did what it was told, and a device with a
+	// short scale -- a headset's, usually -- would be dropped back to the
+	// samples and start hissing again. So the slack is capped well below one
+	// step and the rounding case is left to the check below.
 	long slack = (volume_max - volume_min) / 20;
 	if (slack < 1) {
 		slack = 1;
 	}
-	bool stuck = value <= volume_max - slack && back >= volume_max - slack;
+	if (slack > (volume_max - volume_min) / 4) {
+		slack = (volume_max - volume_min) / 4;
+	}
+	if (slack < 1) {
+		slack = 1;
+	}
+	// Still at the top after being asked for something well below *and* not the
+	// value that was asked for: a driver may round, and a rounded answer is an
+	// answer. `value` is what was requested, `back` what the control reads now.
+	bool stuck = value <= volume_max - slack && back >= volume_max - slack && back != value && value < back;
 	if (wrote < 0 || stuck) {
 		fprintf(stderr,
 				"usbaudio: '%s' did not take %d%% (asked %ld, reads %ld); the level goes to the samples "

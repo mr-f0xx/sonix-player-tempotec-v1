@@ -71,9 +71,12 @@
   and written again if the controller has returned to its own default, which
   it does on its own after an attach or a detach. A dongle that goes quiet is
   never routed around: the track waits for it rather than being played to the
-  built-in DAC. The older twenty-second **Try external USB DAC** trial is
-  still there, underneath it, for a one-off test that leaves no setting
-  behind.
+  built-in DAC, and switching the Bluetooth radio off does not take the route
+  back either. The dongle's own volume control does most of the attenuation
+  rather than being left at full gain with the samples turned down, which is
+  what keeps a sensitive pair of IEMs free of background hiss. The older
+  twenty-second **Try external USB DAC** trial is still there, underneath it,
+  for a one-off test that leaves no setting behind.
 - **In-line remote** - the three-button cable remote: one click play/pause, two
   next, three previous.
 

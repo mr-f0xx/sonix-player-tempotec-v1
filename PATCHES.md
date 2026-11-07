@@ -3136,6 +3136,76 @@ its slower beat and the "device on the bus is never rewritten" rule, and
 fallback and the wake are compile-checked only -- there is no ALSA here and the
 host simulator cannot be linked without it.
 
+### On the V1: the ninety seconds, and a hiss under the music
+
+The log from that report (`sonix_player-neu.log`) has both answers in it, and
+neither is where the guesses above were pointing.
+
+**The ninety seconds is Bluetooth being parked.** The sequence is in the log
+five times, to the tenth of a second:
+
+```
+13:31:13.577 power: screen off after 30037 ms without input (timeout 30000 ms)
+13:32:13.442 power: parking Bluetooth after 60115 ms unused
+13:32:13.485 audio[N]: the output moves from 'plughw:3,0' to 'default'
+13:32:14.092 volume: usb-c -> 3.5 mm, 47%
+```
+
+Thirty seconds to a dark screen, a minute more before the radio is parked, and
+300 milliseconds after `park_bluetooth_now()` -> `bluetooth_set_enabled_transient(false)`
+-> `bring_stack_down()` -> `apply_output_routing()` the output was set to
+`default` -- the CS43198 -- because there was no A2DP sink. A dongle on the
+USB-C port lost the route the moment a radio it had nothing to do with was
+switched off. The player reopens the PCM on a route change and on the next
+track, so the music moved to the jack while the USB-C glyph stayed up, and
+`usbaudio_poll()` saw `active_card` still set and did nothing to correct it.
+That is why it looked like a dead dongle rather than a re-route.
+
+It is not a role problem at all, which is why re-writing `Source` and extending
+the open budget last time did not help. `apply_output_routing()` now leaves a
+`plughw:`/`hw:` route alone when it has no sink to point at: `usbaudio.c` owns
+that route and clears it when the port empties. A bluealsa route is still
+cleared, because that daemon is going away under it.
+
+**The hiss is where the level is applied.** Both dongles are quiet but not
+silent with no music, the louder one is worse, and neither a phone nor the
+stock firmware does it. That is the signature of the player holding the device's
+own mixer at 0 dB and turning the *samples* down instead: the music drops 21.5 dB
+at the log's 57% while the dongle's output amplifier still runs at full gain, so
+the music ends up that much closer to the amplifier's own noise floor. A phone
+turns the dongle's control down; the stock firmware does too. Nothing is broken
+in the dongle, and a quieter-output device hisses less for exactly this reason.
+
+`[usb] hardware_volume` now defaults to **1**: the device's control takes the
+nearest step at or above the target and the samples take the remainder, so the
+level still moves in the player's own fine steps while the attenuation happens
+where the noise floor is. On the log's `PCM Playback Volume` (0..50 over
+-50.00..0.00 dB, so 1 dB a step) index 57% puts -21.0 dB on the control and
+-0.5 dB on the samples, against 0 dB and -21.5 dB before: the same loudness at
+the ear and 21 dB less hiss.
+
+Setting `hardware_volume = 0` gets the old behaviour back, which is still the
+right answer for a device whose own control is worse than its noise floor. The
+guard rails stay: a scale that cannot be believed, a control that reads back
+unchanged, or a write that fails all fall back to the samples carrying the whole
+level, as before.
+
+One bug fell out of testing the split. The "asked for something below the top
+and it is still at the top" check used a dead band of a twentieth of the range,
+which on a short control (0..10 over 10 dB) is two whole steps -- so a write that
+landed exactly where it was told was judged to have done nothing and the control
+was given up. A headset with a coarse control would have been pushed back onto
+the samples and started hissing again. The dead band is now capped at a quarter
+of the range and also requires the read-back to differ from what was asked for.
+
+Tests: `test_usbaudio_volume` (new, in `make usbhost`) covers the split against
+a fake mixer -- the device taking the level, a coarse control still moving
+smoothly, a lying dB descriptor, a control that will not move, the old default
+on request, no control at all, and mute. `test_bluetooth` gains the routing case:
+a `plughw:` and an `hw:` route both survive a radio teardown, the jack is still
+taken back, a bluealsa route is still cleared, and a sink being connected still
+wins. Both were checked to fail against the old code before the fix.
+
 ## Bluetooth drop-outs with Wi-Fi joined, and a USB-C DAC that was never found
 
 Two reports from one test session on a V1. Neither could be reproduced here --

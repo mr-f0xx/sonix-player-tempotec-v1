@@ -1659,9 +1659,42 @@ static char codec_auto_done[BT_MAC_MAX]; // worker only
 // whatever is connected while there is an A2DP sink, the jack otherwise. Called
 // whenever either of those two things can have changed. The name is picked up at
 // the next PCM open; nothing here interrupts a running stream.
+//
+// "The jack otherwise" is the jack, and not whatever else happens to be
+// plugged in. This function has two callers and neither of them knows about the
+// USB-C port: one is a device connecting or dropping off the A2DP link, the
+// other is the radio being taken down -- by the idle park, by the switch, or by
+// the shutdown path. Handing the player NULL in both cases means the next PCM
+// open is `default`, which is the CS43198, and it does that whether or not a
+// dongle is on the USB-C port being driven by usbaudio.c.
+//
+// That is a sound that moves under a running stream. The player reopens on
+// route changes and on the next track, so the music comes back out of the jack
+// while the DAC out on the cable is still the thing the user plugged in and the
+// interface still draws the USB-C glyph for it. On the V1 it is the answer to
+// "why did the dongle go quiet after a minute and a half": the screen blanks
+// thirty seconds after the last touch, Bluetooth is parked a minute after
+// *that*, and the teardown calls this -- about ninety seconds after somebody
+// last pressed a button with a track playing. usbaudio.c's poll then saw
+// active_card still set and did nothing, which is why it looked like a dead
+// dongle rather than a re-route.
+//
+// So a card on the USB-C port is left alone. It is not this function's to give
+// away: usbaudio.c owns that route and clears it when the port empties. Only a
+// route that is not a bluealsa one is a route that has to move -- a jack, or
+// the default, both of which this call does own.
 static void apply_output_routing(void) {
+	char current[160];
+	audio_get_output_device(current, sizeof(current));
+	bool on_usb_card = strncmp(current, "plughw:", 7) == 0 || strncmp(current, "hw:", 3) == 0;
+
 	char pcm[128];
 	bluetooth_output_pcm(pcm, (int)sizeof(pcm));
+	if (!pcm[0] && on_usb_card) {
+		// Nothing to play over the air, and the sound is already leaving by a
+		// route this does not own.
+		return;
+	}
 	audio_set_output_device(pcm[0] ? pcm : NULL);
 }
 
