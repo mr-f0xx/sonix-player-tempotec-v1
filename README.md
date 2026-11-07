@@ -313,17 +313,26 @@ Qobuz does not issue application credentials for personal or open-source clients
 
 The stock V1 firmware works out of the box because its `usr/bin/hiby_player` carries HiBy's partner Qobuz `app_id`/`app_secret` and Tidal Limited Input Device `client_id`/`client_secret` internally. Sonix speaks those exact authentication flows; it only omits the credential pairs, which belong to HiBy and are neither committed nor shipped in published images.
 
-When you build an image **for your own device** from the official stock firmware, or generate a `streaming-keys.ini` for your microSD card, `sonix-player/tools/extract_streamkeys.py` extracts **both `[qobuz]` and `[tidal]`** from the stock binary:
+There are three ways to set them up locally from the official stock firmware:
+
+1. **Directly on the player (no PC required):** Open **Streaming → Tidal** or **Streaming → Qobuz** and tap **Set up from stock firmware**. The player checks the microSD card first (for `v1_stock.upt`, `v1_original.upt`, `v1.upt`, `v1.zip`, `v1.zip.part1`+`.part2`, `rootfs.squashfs`, or `hiby_player`, at the card root or inside `stock/` or `firmware/`) and otherwise streams and unpacks the official TempoTec V1 stock 1.3 archive over Wi-Fi. Extracted `[qobuz]` and `[tidal]` keys are saved to both `/usr/data/streaming-keys.ini` and `<sd_root>/streaming-keys.ini` (preserving any `[podcast]` or `[lastfm]` entries) and both services unlock immediately without restarting.
+2. **Standalone pure-Python CLI (no `7z` or `unsquashfs` needed):** `sonix-player/tools/extract_streamkeys.py` reads `.upt`, `.zip`, `.zip.part1`, `.squashfs`, an unpacked rootfs, or `hiby_player` directly using only the Python standard library (defaulting to the bundled `sonix-packer/firmware-input/v1.zip.part1` when no path is passed):
 
 ```sh
-# Extract [qobuz] and [tidal] into streaming-keys.ini for your microSD card:
-python3 sonix-player/tools/extract_streamkeys.py path/to/hiby_player -o streaming-keys.ini
+# Extract [qobuz] and [tidal] directly from the bundled stock 1.3 split archive:
+python3 sonix-player/tools/extract_streamkeys.py -o streaming-keys.ini
 
-# Or embed them directly while packing a private firmware image:
+# Or pass any stock .upt / .zip / .squashfs / hiby_player path:
+python3 sonix-player/tools/extract_streamkeys.py path/to/v1.upt -o streaming-keys.ini
+```
+
+3. **At firmware pack time (private builds only):**
+
+```sh
 SONIX_EMBED_STOCK_KEYS=1 ./sonix_firmware_packer.sh
 ```
 
-With a `streaming-keys.key` present the credentials are sealed into `streaming-keys.bin`; without one they ship as a plain, player-readable `streaming-keys.ini`. The extractor only runs on explicit opt-in and masks values in its output. (For read-only partner device keys such as the stock V1 Tidal pair, Sonix also automatically falls back from `r_usr w_usr` to `r_usr` during device authorization.) **An image built this way carries a third party's API credentials: keep it private, never upload it to a release.** The standalone tool (`sonix-player/tools/extract_streamkeys.py`, with `--check`, `--service`, and `--list-candidates`) and technical details are documented in [docs/qobuz-stock-firmware.md](docs/qobuz-stock-firmware.md).
+With a `streaming-keys.key` present the credentials are sealed into `streaming-keys.bin`; without one they ship as a plain, player-readable `streaming-keys.ini`. The extractor only runs on explicit opt-in and masks values in its output. (For read-only partner device keys such as the stock V1 Tidal pair, Sonix also automatically falls back from `r_usr w_usr` to `r_usr` during device authorization.) **An image built with `SONIX_EMBED_STOCK_KEYS=1` carries a third party's API credentials: keep it private, never upload it to a release.** Full details are documented in [docs/qobuz-stock-firmware.md](docs/qobuz-stock-firmware.md).
 
 ### Your own server with a self-signed certificate
 

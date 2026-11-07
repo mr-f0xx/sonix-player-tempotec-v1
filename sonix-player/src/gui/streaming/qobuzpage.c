@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <malloc.h>
+#include <unistd.h>
 
 #include "src/gui/shell/confirm.h"
 #include "src/gui/fonts/fonts.h"
@@ -12,6 +13,7 @@
 #include "src/gui/nowplaying/player.h"
 #include "src/gui/shell/popover.h"
 #include "src/gui/streaming/qobuzart.h"
+#include "src/gui/streaming/stockkeys_ui.h"
 #include "src/gui/shell/settingsrow.h"
 #include "src/gui/shell/spinner.h"
 #include "src/gui/shell/switcher.h"
@@ -858,6 +860,9 @@ static void job_done_cb(void *user) {
 	busy_hide();
 
 	if (result_error[0]) {
+		if (!qobuz_logged_in() && result_kind != JOB_LOGIN) {
+			rebuild_home();
+		}
 		gui_notify_popup(result_error);
 		page_loading = false;
 		return;
@@ -2267,12 +2272,7 @@ static void rebuild_home(void) {
 
 	if (!qobuz_configured()) {
 		update_corner_buttons();
-		lv_obj_t *note = lv_label_create(home_container);
-		lv_label_set_long_mode(note, LV_LABEL_LONG_WRAP);
-		lv_obj_set_width(note, lv_pct(100));
-		lv_obj_add_style(note, &theme_style_text_dim, 0);
-		lv_obj_set_style_text_font(note, &font_ui_20, 0);
-		lv_label_set_text(note, tr("api_keys_unavailable"));
+		stockkeys_ui_populate_missing(home_container, rebuild_home);
 		return;
 	}
 

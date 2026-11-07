@@ -10,11 +10,11 @@ firmware's player binary. The only thing Sonix does not carry is the
 open-source repository (or in a downloadable image) is something this project
 deliberately does not do.
 
-What is now possible instead: the firmware packer can extract that pair from
-the official firmware **on the machine that builds the image**, from the
-stock file the builder already has to provide, and install it so Qobuz works
-with nothing to copy to the card. Nothing is downloaded, nothing enters git,
-and the feature is opt-in.
+What is now possible instead: credentials can be extracted locally from the
+official stock firmware **either directly on the player** (from a stock archive
+on the microSD card or downloaded over Wi-Fi on demand) **or on a computer**
+(via the pure-Python `extract_streamkeys.py` CLI or opt-in at firmware pack
+time). Nothing enters git and public release builds stay completely keyless.
 
 ## What the official firmware actually is
 
@@ -78,17 +78,48 @@ and token-only storage. The wire protocol Qobuz sees is otherwise the same.
   `streaming-keys` design (external file, sealed in private builds, absent
   from published images) exists for exactly this reason.
 
-## The solution: extract at pack time, opt in
+## The solution: local extraction on-device or on host
+
+### 1. Directly on the player (no computer required)
+
+When Qobuz or Tidal is opened on a keyless build, the page offers **Set up from
+stock firmware** (`src/system/streaming/stockkeys.c` and
+`src/gui/streaming/stockkeys_ui.c`):
+
+- **Offline from microSD:** If a stock firmware package sits on the card
+  (`v1_stock.upt`, `v1_original.upt`, `v1.upt`, `v1.zip`, `v1.zip.part1`+`.part2`,
+  `rootfs.squashfs`, or `hiby_player`, at the card root or in `stock/` or
+  `firmware/`), the player unpacks the ISO 9660 `.upt` and LZO1X/zlib SquashFS
+  4.0 image directly in C and extracts both `[qobuz]` and `[tidal]`. Explicit
+  stock filenames (`hiby_player`, `rootfs.squashfs`, `v1_stock.upt`,
+  `v1_original.upt`, `v1_stock.zip`, `v1.zip.part1`, or `stock/*`) are also
+  picked up automatically at boot.
+- **One-tap over Wi-Fi:** If no stock file is on the card and Wi-Fi is
+  connected, the player streams and inflates the official stock 1.3 split
+  archive (`sonix-packer/firmware-input/v1.zip.part1` + `.part2`) over HTTPS
+  into a temporary scratch file on the microSD card (or `/usr/data` when >= 48
+  MB is free), extracts `/usr/bin/hiby_player`, and deletes the temporary file.
+- **Dual persistence, zero reboot:** Extracted credentials are written
+  atomically to both `/usr/data/streaming-keys.ini` (so they survive swapping
+  microSD cards, and are cleared on factory reset) and
+  `<sd_root>/streaming-keys.ini` when a writable card is mounted, preserving
+  any existing `[podcast]` or `[lastfm]` sections. Both Qobuz and Tidal reload
+  immediately into their **Sign in** screens without restarting.
+
+### 2. Standalone pure-Python CLI (`extract_streamkeys.py`)
 
 `sonix-player/tools/extract_streamkeys.py` reads the credentials out of a
-stock `hiby_player` (or an unpacked rootfs containing it) by locating the
-Qobuz anchor strings — `qobuz.com/api.json`, `device_manufacturer_id`,
-`trackgetFileUrl`, `request_sig`, `X-App-Id` — and choosing the standalone
-numeric `app_id` and 32-character `app_secret` nearest them. It never guesses
-silently: an ambiguous binary makes it stop and list the candidates so the
-pair can be forced explicitly. Values are masked in its output.
+stock `.upt`, `.zip`, `.zip.part1` (+ `.part2`), `.squashfs`, unpacked rootfs
+directory, or `hiby_player` ELF using **only the Python 3 standard library**
+(with built-in ISO 9660 Joliet, SquashFS 4.0, and LZO1X/zlib readers — neither
+`7z` nor `unsquashfs` is required). It locates the Qobuz anchor strings —
+`qobuz.com/api.json`, `device_manufacturer_id`, `trackgetFileUrl`,
+`request_sig`, `X-App-Id` — and the Tidal OAuth2 anchors + MIPS32 stack-built
+`client_id`. It never guesses silently: an ambiguous binary makes it stop and
+list the candidates so the pair can be forced explicitly. Values are masked in
+its output.
 
-### One-command use through the packer
+### 3. One-command use through the packer (private builds)
 
 ```sh
 SONIX_EMBED_STOCK_KEYS=1 ./sonix_firmware_packer.sh
@@ -104,33 +135,34 @@ packer runs the extractor and places the result in
   anyway, with a loud warning that the image now contains readable
   credentials.
 
-The resulting image behaves like the stock firmware for Qobuz: sign in with
-the account, no card-side file, no manual keys. The existing card fallback
-(`streaming-keys.ini` at the microSD root) is unchanged, and builds without the
-flag remain keyless exactly as before.
+The resulting image behaves like the stock firmware for Qobuz and Tidal: sign in
+with your account, no card-side file, no manual keys. Builds without the flag
+remain keyless for public distribution.
 
-### Standalone use
+### Standalone CLI examples
 
 ```sh
-# Write sonix-player/streaming-keys.ini (merged with anything already there)
-python3 sonix-player/tools/extract_streamkeys.py path/to/hiby_player
+# Default input: bundled sonix-packer/firmware-input/v1.zip.part1 (+ .part2)
+python3 sonix-player/tools/extract_streamkeys.py -o streaming-keys.ini
 
-# Or point at an unpacked stock rootfs
-python3 sonix-player/tools/extract_streamkeys.py squashfs-root
+# Or pass a .upt, .zip, .squashfs, unpacked rootfs, or hiby_player directly
+python3 sonix-player/tools/extract_streamkeys.py path/to/v1.upt -o streaming-keys.ini
 
 # Inspect what was found without writing anything
-python3 sonix-player/tools/extract_streamkeys.py --check squashfs-root
-python3 sonix-player/tools/extract_streamkeys.py --list-candidates hiby_player
+python3 sonix-player/tools/extract_streamkeys.py --check
+python3 sonix-player/tools/extract_streamkeys.py --list-candidates path/to/v1.upt
 
 # Force a pair if a future binary defeats the heuristic
-python3 sonix-player/tools/extract_streamkeys.py hiby_player \
+python3 sonix-player/tools/extract_streamkeys.py path/to/hiby_player \
     --app-id 123456789 --app-secret 0123456789abcdef0123456789abcdef
 ```
 
-The tests in `sonix-player/tests/test_extract_streamkeys.py` (run with
-`make -C sonix-player/tests extractkeys`) drive the heuristic against
-fixtures reproducing the stock binary's string layout, including ambiguous and
-anchor-less cases, and cover the seal/open round trip.
+The Python and C tests in `sonix-player/tests/test_extract_streamkeys.py`,
+`sonix-player/tests/test_stockkeys.c`, and
+`sonix-player/tests/ui/test_stockkeys_ui.c` (run with
+`make -C sonix-player/tests extractkeys stockkeys-ui`) exercise both the
+synthetic ELF/archive fixtures and end-to-end extraction from the bundled stock
+1.3 split archive.
 
 ## Rules and limitations
 
