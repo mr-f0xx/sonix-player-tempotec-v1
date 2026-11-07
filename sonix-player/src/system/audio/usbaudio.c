@@ -3,6 +3,7 @@
 #include "src/system/audio/audio.h"
 #include "src/system/audio/alsa-controls.h"
 #include "src/system/audio/swvolume.h"
+#include "src/system/audio/usbhostmode.h"
 #include "src/system/audio/usbhostprobe.h"
 #include "src/system/core/config.h"
 #include "src/system/bluetooth/bluetooth.h"
@@ -935,18 +936,42 @@ void usbaudio_poll(void) {
 	// Who owns the port comes first, and is asked whatever playback is doing:
 	// the arbitration is about the socket, not about where the sound goes.
 	static int empty_polls;
+
+	// The external USB DAC setting before anything else on the port: it decides
+	// whether the controller is a host at all, which everything below reads.
+	// Two of its four outcomes are impossible to reach from here without it --
+	// a setting switched off while the role is held, and a reservation taken
+	// away by ADB, DAC mode or a storage export.
+	usbhostmode_tick();
+
 	int card = find_usb_card();
 	if (usbhostprobe_active()) {
 		usbhost_probe_event_t event = usbhostprobe_poll(card >= 0, bus_has_audio_device());
-		if (event == USBHOST_EVENT_CARD) {
+		// The held role is quiet by design: a DAC that is plugged in, unplugged
+		// and plugged in again is the same setting doing its job, and a popup
+		// for each of those would be reading the log out loud. Only the two
+		// answers that leave the port in a state somebody has to know about are
+		// said out loud -- a role that would not go back, and the one-off note
+		// that the first card was found.
+		if (usbhostprobe_held()) {
+			if (event == USBHOST_EVENT_CARD) {
+				log_port_state("external USB DAC: audio card appeared");
+			} else if (event == USBHOST_EVENT_RESTORE_FAILED) {
+				log_port_state("external USB DAC: role restore failed");
+				gui_notify_popup_long("usbhost_restore_failed");
+			}
+			usbhostmode_event(event);
+		} else if (event == USBHOST_EVENT_CARD) {
 			log_port_state("external host trial: audio card appeared");
 			gui_notify_popup("usbhost_card_found");
 		} else if (event == USBHOST_EVENT_TIMEOUT) {
 			log_port_state("external host trial timed out");
 			gui_notify_popup("usbhost_not_found");
 		} else if (event == USBHOST_EVENT_RESTORE_FAILED) {
+			// The one the setting cares about too: the port is still forced.
 			log_port_state("external host trial: role restore failed");
 			gui_notify_popup_long("usbhost_restore_failed");
+			usbhostmode_event(event);
 		} else if (event == USBHOST_EVENT_RESTORED) {
 			gui_notify_popup("usbhost_restored");
 		}
