@@ -84,6 +84,7 @@ adb shell "SONIX_FULL_LOG=1     sh /tmp/sonix-bugreport.sh"    # whole logs, not
 | Touch: dead zones, ghost taps, scrolling | The bundle's input section (`/proc/bus/input/devices`, `/dev/input`). For a stock-vs-patched driver question, see [PATCHES.md](../PATCHES.md). |
 | Wi-Fi, DLNA, AirPlay, Wi-Fi file transfer | The bundle's network section. It prints `wpa_cli status` and the network list — no PSKs. Say which access point band and what the other end is. |
 | Audio glitches, wrong output, DAC | The bundle's audio section (`/proc/asound`, mixer). Add the Bluetooth log if it happens over Bluetooth. |
+| A USB-C DAC, dongle or headphones the player does not see | Whether **Developer options → External USB DAC** was on, the maker and model of the dongle, and the start of the player log, which prints the setting's state as `usbhost: startup: ...`. The log also carries `usbaudio:` port lines and, for a DAC that does enumerate, the card it became. |
 | Battery, charging, standby, power-off | The player log around the event, with the time you plugged or unplugged it. |
 
 ## Always write down, next to the log

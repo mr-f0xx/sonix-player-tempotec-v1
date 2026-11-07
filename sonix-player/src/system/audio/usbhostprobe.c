@@ -40,10 +40,16 @@
 #define USBHOST_RETRY_SECONDS 1
 #define USBHOST_MAGIC "sonix-usb-host-probe-v1\n"
 
+#define STR_(x) #x
+#define STR(x) STR_(x)
+
 static struct {
 	pthread_mutex_t lock;
 	atomic_bool active, stopping;
 	bool had_card, saw_interface, phy_cleared, role_restored, reported_failure;
+	// Held rather than tried: the role stays forced for as long as the user
+	// asks for, instead of the diagnostic window in begin().
+	bool held;
 	long long started, absent_since, retry_at;
 	char role[32];
 	char phy[PATH_MAX];
@@ -241,7 +247,27 @@ static bool restore_locked(void) {
 	return true;
 }
 
-usbhost_probe_result_t usbhostprobe_begin(void) {
+static bool request_host_locked(const char *why) {
+	// Advertise a source on the Type-C controller before asking the SoC to be
+	// a host. A successful write is a request, not proof of enumeration.
+	bool requested = write_role("Source");
+	if (requested) {
+		probe.phy_cleared = false; // even a short/failed write may have taken
+		requested = write_attr(probe.phy, "host");
+	}
+	if (!requested) {
+		fprintf(stderr, "usbhost: could not request host mode; restoring the previous role\n");
+		if (!restore_locked()) fprintf(stderr, "usbhost: restoration failed; the controller remains reserved for retry\n");
+		return false;
+	}
+	fprintf(stderr, "usbhost: %s; Type-C Source and PHY host requested (%s)\n", why, probe.phy);
+	return true;
+}
+
+// Shared by the timed trial and the held mode. `held` is the whole difference:
+// a held role has no deadline, and a DAC that goes away does not take it down
+// either (see usbhostprobe_poll()).
+static usbhost_probe_result_t begin_locked(bool held, const char *why) {
 	pthread_mutex_lock(&probe.lock);
 	if (atomic_load(&probe.active)) {
 		pthread_mutex_unlock(&probe.lock);
@@ -270,27 +296,32 @@ usbhost_probe_result_t usbhostprobe_begin(void) {
 	probe.absent_since = -1;
 	probe.retry_at = 0;
 	probe.had_card = probe.saw_interface = probe.stopping = probe.reported_failure = false;
+	probe.held = held;
 	probe.role_restored = false;
 	probe.phy_cleared = true; // the PHY has not been touched yet
 	atomic_store(&probe.active, true);
 
-	// Advertise a source on the Type-C controller before asking the SoC to be
-	// a host. A successful write is a request, not proof of enumeration.
-	bool requested = write_role("Source");
-	if (requested) {
-		probe.phy_cleared = false; // even a short/failed write may have taken
-		requested = write_attr(probe.phy, "host");
-	}
-	if (!requested) {
-		fprintf(stderr, "usbhost: could not request host mode; restoring the previous role\n");
-		if (!restore_locked()) fprintf(stderr, "usbhost: restoration failed; the controller remains reserved for retry\n");
+	if (!request_host_locked(why)) {
 		pthread_mutex_unlock(&probe.lock);
 		return USBHOST_PROBE_FAILED;
 	}
-	fprintf(stderr, "usbhost: user requested a %d-second external DAC trial; Type-C Source and PHY host requested (%s)\n",
-		USBHOST_TRIAL_SECONDS, probe.phy);
 	pthread_mutex_unlock(&probe.lock);
 	return USBHOST_PROBE_STARTED;
+}
+
+usbhost_probe_result_t usbhostprobe_begin(void) {
+	return begin_locked(false, "user requested a " STR(USBHOST_TRIAL_SECONDS) "-second external DAC trial");
+}
+
+usbhost_probe_result_t usbhostprobe_begin_held(void) {
+	return begin_locked(true, "external USB DAC mode requested: the port is held as host until it is switched off");
+}
+
+bool usbhostprobe_held(void) {
+	pthread_mutex_lock(&probe.lock);
+	bool held = atomic_load(&probe.active) && probe.held && !atomic_load(&probe.stopping);
+	pthread_mutex_unlock(&probe.lock);
+	return held;
 }
 
 bool usbhostprobe_cancel(void) {
@@ -329,6 +360,16 @@ usbhost_probe_event_t usbhostprobe_poll(bool audio_card, bool audio_interface) {
 			probe.had_card = true;
 			fprintf(stderr, "usbhost: an ALSA USB card appeared during the trial\n");
 			event = USBHOST_EVENT_CARD;
+		}
+	} else if (probe.held) {
+		// A held role has no deadline and no unplug rule: it stays forced until
+		// the user ends it, or until another owner of the controller ends it
+		// through usbhostmode_tick().
+		// A dongle that re-enumerates, or is plugged into the next morning,
+		// finds the port still supplying it -- which is the whole point.
+		if (probe.had_card && !audio_interface && probe.absent_since < 0) {
+			probe.absent_since = now;
+			fprintf(stderr, "usbhost: the audio device is no longer on the bus; the port stays host\n");
 		}
 	} else if (probe.had_card) {
 		// A momentary USB re-enumeration must not tear down a working DAC.

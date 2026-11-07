@@ -3016,6 +3016,71 @@ layout suite also checks that DAC no longer blocks the Control Centre while
 file-transfer and Bluetooth-receiver modes remain blocked. The tests do not
 replace an on-device touch and listening check.
 
+## External USB DACs that only worked in the trial
+
+Two USB-C dongles were reported against a V1: a JCally and, later, an ESR. Both
+did nothing on the port; both worked at once when developer options ran **Try
+external USB DAC**. That is the whole of the evidence, and it is enough -- two
+unrelated devices, one behaviour, one workaround that changes exactly two
+writes.
+
+The reason is the role rather than the code. `arbitrate_port()` leaves the
+TCS1421 in `NormalDRP` while the port is empty, which is what lets a phone be
+handed the card and is what the stock player does by default. A USB-C sound
+card does not ask for the host role on the CC lines -- it simply waits to be
+enumerated -- so with the port dual and nothing acting as source, the far end
+is never supplied and never appears. Forcing `Source` on the TCS1421 and `host`
+on the x1600 PHY supplies it, which is exactly what the trial does.
+
+So the trial's writes are now available as a setting, not as a twenty-second
+diagnosis:
+
+- **Developer options → External USB DAC** switches on `[usb] host_dac` in
+  `device_config.ini`. While it is on, `usbhostmode.c` asks
+  `usbhostprobe_begin_held()` for the port: the same journal, the same
+  Source/host writes, the same refusal when ADB, DAC mode, an export, a
+  connected UDC or an unknown PHY is in the way -- with **no deadline and no
+  unplug rule**. A dongle that re-enumerates, or is plugged in the next
+  morning, finds the port still supplying it. Only the switch ends it.
+- The row says which of those it is: *held*, *waiting for the controller*,
+  *busy* (kept, retried every three seconds), or *unsupported* (this kernel
+  exposes no role that may be forced -- not retried, since nothing about it can
+  change while the player runs). "Switched on" and "a DAC is being driven" are
+  different sentences, and the second only comes from an ALSA card.
+- ADB, DAC mode, a storage export, suspend, shutdown, a firmware update and a
+  factory reset release the port through `usbhostmode_release()`. ADB, DAC mode
+  and shutdown keep the setting, so the port returns to holding a DAC when they
+  are finished; a firmware update and a factory reset clear it, because neither
+  the recovery they boot into nor the firmware after them would know it
+  inherited a forced role. A failed release is reported and nothing else is
+  allowed the controller.
+- A reservation taken away by someone else (`usb_external_host_yielded()`) is
+  how the held role learns that ADB or DAC mode needs the port: a held role has
+  no second chance to notice, unlike the trial, which re-checks every second.
+- `[power] standby_mem` no longer waits for it: with no cable on the port the
+  role is given back on the way into the suspend and taken again after the
+  wake, rather than keeping a player in a pocket awake all night or blocking the
+  sleep behind a permanently "in use" controller.
+- The twenty-second trial stays, one row below, and refuses while the setting
+  holds the port.
+
+The old note about the trial posed one condition that fits these two reports
+badly: "connect **only** a confirmed bus-powered DAC; a charger or computer must
+not be on the port". That stays -- `Source` is a promise to supply 5 V made
+before anything is identified -- and it is why this remains a setting somebody
+switches on rather than something the poll does by itself.
+
+Not verified here: no board is in this environment. The reasoning is from the
+V1 1.3 kernel in this repository (`sw_switch_hsotg` on the x1600 PHY, the
+`tcs1421_add.ko` module and its four role names) and from the two reports. What
+still needs a device: that the role survives a played track, a standby and a
+reboot; that a DAC re-enumerates after a suspend with the setting on; and what
+the port does when a charger is plugged in while it is held. `make -C
+sonix-player/tests usbhost` now runs `test_usbhostmode` (hold, yield, retry and
+release, with the config and the probe replaced) and the held-mode half of
+`test_usbhostprobe` (no timeout, no unplug release), on top of the existing
+suites. Neither models the electrical behaviour of the socket.
+
 ## Bluetooth drop-outs with Wi-Fi joined, and a USB-C DAC that was never found
 
 Two reports from one test session on a V1. Neither could be reproduced here --

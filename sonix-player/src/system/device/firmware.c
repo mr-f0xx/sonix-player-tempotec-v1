@@ -10,6 +10,7 @@
 #include <unistd.h>
 
 #include "src/system/audio/audio.h"
+#include "src/system/audio/usbhostmode.h"
 #include "src/system/audio/usbhostprobe.h"
 #include "src/system/device/clock.h"
 #include "src/system/device/led.h"
@@ -108,8 +109,10 @@ void firmware_update_start(void) {
 	printf("firmware: (host build) would arm recovery and reboot\n");
 #else
 	// Recovery or another firmware may not know how to clear our host
-	// override. Never hand control to it while restoration is outstanding.
-	if (!usbhostprobe_cancel()) {
+	// override. Never hand control to it while restoration is outstanding, and
+	// clear the setting: it describes a port the new firmware will not know it
+	// inherited.
+	if (!usbhostmode_release(true)) {
 		fprintf(stderr, "firmware: USB role could not be restored; update refused\n");
 		return;
 	}

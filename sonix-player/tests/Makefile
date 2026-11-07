@@ -154,13 +154,22 @@ $(BUILD)/test_eq: $(EQ_SRC) $(ROOT)/src/system/audio/eq.h $(ROOT)/src/system/cor
 # The explicit V1 external-DAC host trial against a private fake sysfs tree.
 # Exercises the real role writes, bounded wait, rollback and crash recovery.
 .PHONY: usbhost
-usbhost: $(BUILD)/test_usbhostprobe $(BUILD)/test_usbhost_reset $(BUILD)/test_usb_ownership $(BUILD)/test_usbexport $(BUILD)/test_usb_storage $(BUILD)/test_usbaudio_arbitration
+usbhost: $(BUILD)/test_usbhostprobe $(BUILD)/test_usbhost_reset $(BUILD)/test_usb_ownership $(BUILD)/test_usbexport $(BUILD)/test_usb_storage $(BUILD)/test_usbaudio_arbitration $(BUILD)/test_usbhostmode
 	$(BUILD)/test_usbhostprobe
 	$(BUILD)/test_usbhost_reset
 	$(BUILD)/test_usb_ownership
 	$(BUILD)/test_usbexport
 	$(BUILD)/test_usb_storage
 	$(BUILD)/test_usbaudio_arbitration
+	$(BUILD)/test_usbhostmode
+
+# The external USB DAC setting: the hold around the role trial, its retry after
+# another owner of the controller, and what the row is told. The sysfs writes
+# are test_usbhostprobe's; this one replaces them and the config.
+$(BUILD)/test_usbhostmode: test_usbhostmode.c $(ROOT)/src/system/audio/usbhostmode.c \
+                           $(ROOT)/src/system/audio/usbhostmode.h $(ROOT)/src/system/audio/usbhostprobe.h
+	@mkdir -p $(BUILD)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ test_usbhostmode.c $(LDFLAGS) $(LDLIBS)
 
 $(BUILD)/test_usbhost_reset: test_usbhost_reset.c $(ROOT)/src/system/device/factoryreset.c \
                              $(ROOT)/src/system/audio/usbhostprobe.h

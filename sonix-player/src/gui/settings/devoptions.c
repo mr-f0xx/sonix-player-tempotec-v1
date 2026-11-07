@@ -13,6 +13,7 @@
 #include "src/gui/shell/theme.h"
 #include "src/system/bluetooth/btlog.h"
 #include "src/system/device/adb.h"
+#include "src/system/audio/usbhostmode.h"
 #include "src/system/audio/usbhostprobe.h"
 #include "src/system/core/lang.h"
 #include "src/system/library/library.h"
@@ -23,8 +24,15 @@
 lv_obj_t *devoptions_screen;
 
 static lv_obj_t *adb_switch;
-static lv_obj_t *usbhost_row;
+static lv_obj_t *usbhost_row;   // the setting's row: switch on the right
+static lv_obj_t *usbhost_switch;
 static lv_obj_t *usbhost_note;
+static lv_obj_t *usbhost_status; // what the setting is doing, under the switch
+static lv_obj_t *usbhost_trial_row; // the timed trial, for a one-off test
+// Whether the confirmation is on screen, so the row does not show as on while
+// nothing has been agreed to yet.
+static bool usbhost_confirming;
+static void usbhost_confirmed(void *user);
 static lv_obj_t *log_switch;
 static lv_obj_t *db_log_switch;
 static lv_obj_t *log_name_label; // rises to make room for the path when logging
@@ -144,17 +152,107 @@ static void adb_toggled_cb(lv_event_t *e) {
 
 static void update_usbhost_row(void) {
 	if (!usbhost_row) return;
-	lv_obj_t *label = settingsrow_name_label(usbhost_row);
-	const char *text = tr(usbhostprobe_active() ? "usbhost_stop" : "usbhost_try");
-	if (label && strcmp(lv_label_get_text(label), text) != 0) lv_label_set_text(label, text);
+
+	// The switch is the setting; the trial is a one-shot action under it. What
+	// the row says is the setting's own state, because that is the thing that
+	// survives a reboot and the thing a bug report needs.
+	bool wanted = usbhostmode_wanted();
+	if (wanted && !usbhost_confirming) lv_obj_add_state(usbhost_switch, LV_STATE_CHECKED);
+	else lv_obj_remove_state(usbhost_switch, LV_STATE_CHECKED);
+
 	if (usbhost_note) {
-		const char *note = tr(usbhostprobe_restore_pending() ? "usbhost_restore_failed" : "usbhost_note");
+		// While the port is held, the note is what that means rather than the
+		// warning about the trial: the user has already accepted that.
+		const char *key = usbhostprobe_restore_pending() ? "usbhost_restore_failed" :
+			usbhostmode_active() ? "usbhost_note_held" :
+			usbhostmode_retrying() ? "usbhost_note_retrying" : "usbhost_note";
+		const char *note = tr(key);
 		if (strcmp(lv_label_get_text(usbhost_note), note) != 0) lv_label_set_text(usbhost_note, note);
 	}
+
+	if (usbhost_trial_row) {
+		// The trial cannot run while the setting above is holding the port --
+		// it would only answer "busy". Dimmed rather than removed: it is the
+		// one thing to reach for when the setting does not fix a dongle, and
+		// it comes back the moment the switch goes off.
+		if (usbhostmode_wanted()) lv_obj_add_state(usbhost_trial_row, LV_STATE_DISABLED);
+		else lv_obj_remove_state(usbhost_trial_row, LV_STATE_DISABLED);
+	}
+
+	if (usbhost_status) {
+		// The last thing the setting did, said in the row instead of only in
+		// the log: whether a DAC is actually being driven is the difference
+		// between "switched on" and "working", and it is not visible anywhere
+		// else in the interface.
+		const char *key = usbhostmode_status_key();
+		// On and holding with nothing on the port still owes an explanation:
+		// the switch says what was asked for, and this is what is happening.
+		if (!key[0] && wanted) key = "usbhost_held_idle";
+		const char *text = key[0] ? tr(key) : "";
+		if (strcmp(lv_label_get_text(usbhost_status), text) != 0) lv_label_set_text(usbhost_status, text);
+	}
+}
+
+static void usbhost_confirm_closed(void *user) {
+	(void)user;
+	// Cancelled: the switch goes back to the setting, which never moved.
+	usbhost_confirming = false;
+	update_usbhost_row();
+}
+
+static void usbhost_toggled_cb(lv_event_t *e) {
+	(void)e;
+	if (!usbhost_confirming && lv_obj_has_state(usbhost_switch, LV_STATE_CHECKED)) {
+		// The warning is not a formality: the port starts supplying 5 V before
+		// anything on it has been identified, and a PC or a charger on the
+		// other end of a forced Source is what the trial's confirmation has
+		// always been about.
+		usbhost_confirming = true;
+		confirm_show_with_cancel("usbhost_confirm_title", "usbhost_confirm", "ok", usbhost_confirmed, NULL,
+								 NULL, usbhost_confirm_closed, NULL);
+		return;
+	}
+	if (usbhost_confirming) {
+		return; // the confirmation decides; a tap on the row does not
+	}
+	if (!usbhostmode_release(true)) {
+		gui_notify_popup_long("usbhost_restore_failed");
+	} else {
+		gui_notify_popup("usbhost_restored");
+	}
+	update_usbhost_row();
 }
 
 static void usbhost_confirmed(void *user) {
 	(void)user;
+	// Setting it writes the config; the poll takes the port on its next pass,
+	// a quarter of a second away. Starting it here as well would have two
+	// places asking, and the second one would race the first -- but the answer
+	// is wanted immediately, so ask once and let the poll take over.
+	usbhost_confirming = false;
+	usbhostmode_set_wanted(true);
+	usbhostmode_tick();
+	update_usbhost_row();
+
+	const char *key = usbhostmode_status_key();
+	if (strcmp(key, "usbhost_unsupported") == 0) gui_notify_popup("usbhost_unsupported");
+	else if (strcmp(key, "usbhost_failed") == 0) gui_notify_popup("usbhost_failed");
+	else if (strcmp(key, "usbhost_busy") == 0) gui_notify_popup("usbhost_busy");
+	else gui_notify_popup("usbhost_started");
+}
+
+static void usbhost_trial_clicked_cb(lv_event_t *e) {
+	(void)e;
+	if (usbhostprobe_active() && !usbhostprobe_held()) {
+		if (usbhostprobe_cancel()) gui_notify_popup("usbhost_restored");
+		else gui_notify_popup_long("usbhost_restore_failed");
+		update_usbhost_row();
+		return;
+	}
+	// The timed trial, kept for what it is good at: a dongle that needs no
+	// setting, or a build whose role attribute only appears to work this way.
+	// It refuses while the setting above holds the port, which is the point --
+	// there is nothing left for it to prove.
 	usbhost_probe_result_t result = usbhostprobe_begin();
 	const char *message = result == USBHOST_PROBE_STARTED ? "usbhost_started" :
 		result == USBHOST_PROBE_BUSY ? "usbhost_busy" :
@@ -163,17 +261,6 @@ static void usbhost_confirmed(void *user) {
 	if (strcmp(message, "usbhost_restore_failed") == 0) gui_notify_popup_long(message);
 	else gui_notify_popup(message);
 	update_usbhost_row();
-}
-
-static void usbhost_clicked_cb(lv_event_t *e) {
-	(void)e;
-	if (usbhostprobe_active()) {
-		if (usbhostprobe_cancel()) gui_notify_popup("usbhost_restored");
-		else gui_notify_popup_long("usbhost_restore_failed");
-		update_usbhost_row();
-		return;
-	}
-	confirm_show("usbhost_confirm_title", "usbhost_confirm", "ok", usbhost_confirmed, NULL);
 }
 
 static void log_toggled_cb(lv_event_t *e) {
@@ -219,9 +306,16 @@ void devoptions_init(gui_config_t *cfg) {
 	settingsrow_toggle(container, "devoptions_adb", &adb_switch, adb_toggled_cb);
 
 	// Explicit opt-in only: a silent USB port cannot be distinguished from a
-	// charger by VBUS, so never force host mode in the automatic poll.
-	usbhost_row = settingsrow_action(container, "usbhost_try", usbhost_clicked_cb, NULL);
+	// charger by VBUS, so host mode is never forced by the automatic poll --
+	// it is switched on here, and stays on because the user asked for it.
+	usbhost_row = settingsrow_toggle(container, "usbhost_mode", &usbhost_switch, usbhost_toggled_cb);
 	usbhost_note = add_note(container, "usbhost_note");
+	usbhost_status = add_note(container, "usbhost_held_idle");
+
+	// The timed trial, underneath: what this setting grew out of. Still the
+	// right tool for a dongle the setting does not fix, because it changes
+	// nothing that survives a reboot.
+	usbhost_trial_row = settingsrow_action(container, "usbhost_try", usbhost_trial_clicked_cb, NULL);
 
 	lv_obj_t *log_card = settingsrow_toggle(container, "devoptions_log_to_microsd", &log_switch, log_toggled_cb);
 	log_name_label = lv_obj_get_child(log_card, 0);

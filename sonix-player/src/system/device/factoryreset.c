@@ -4,6 +4,7 @@
 #include "factoryreset.h"
 
 #include "src/system/audio/audio.h"
+#include "src/system/audio/usbhostmode.h"
 #include "src/system/audio/usbhostprobe.h"
 #include "src/system/core/config.h"
 #include "src/system/library/audiobookdb.h"
@@ -153,9 +154,10 @@ void factoryreset_run(void) {
 	printf("factoryreset: (build host) would delete %s and %s, write the note and reboot\n", CONFIG_FILE,
 		   EBOOK_CONFIG_FILE);
 #else
-	// Stock recovery erases /data, including the host-trial journal. Do not
-	// proceed until the forced role is safely restored and journal removed.
-	if (!usbhostprobe_cancel()) {
+	// Stock recovery erases /data, including the host journal, and takes the
+	// USB host setting with it. Do not proceed until the forced role is safely
+	// restored and the journal removed.
+	if (!usbhostmode_release(true)) {
 		fprintf(stderr, "factoryreset: USB role could not be restored; reset refused\n");
 		return;
 	}

@@ -273,6 +273,45 @@ int main(void) {
 		assert(!reserved && access(test_journal, F_OK) != 0);
 	}
 
+	// A held role (the external USB DAC setting) is the same writes with no
+	// deadline: it does not time out, and a DAC that goes away -- or was never
+	// plugged in -- does not take the port back either. Only the user does.
+	put(test_cfg, "NormalDRP\n");
+	assert(usbhostprobe_begin_held() == USBHOST_PROBE_STARTED);
+	assert(usbhostprobe_active() && usbhostprobe_held() && reserved && access(test_journal, F_OK) == 0);
+	expect(test_cfg, "Source\n");
+	expect(test_phy, "host\n");
+	fake_now += USBHOST_TRIAL_SECONDS + USBHOST_AUDIO_PROBE_SECONDS;
+	assert(usbhostprobe_poll(false, false) == USBHOST_EVENT_NONE);
+	assert(usbhostprobe_active() && usbhostprobe_held() && reserved);
+	assert(usbhostprobe_poll(true, true) == USBHOST_EVENT_CARD);
+	assert(usbhostprobe_poll(true, true) == USBHOST_EVENT_NONE);
+	// Unplugged and gone for longer than the trial would allow, then plugged
+	// back in: the port was host throughout, which is the whole point.
+	fake_now += USBHOST_UNPLUG_SECONDS * 10;
+	assert(usbhostprobe_poll(false, false) == USBHOST_EVENT_NONE);
+	assert(usbhostprobe_active() && usbhostprobe_held());
+	assert(usbhostprobe_poll(true, true) == USBHOST_EVENT_NONE);
+	expect(test_cfg, "Source\n");
+	expect(test_phy, "host\n");
+	// Switched off: given back exactly like the trial, journal and all.
+	assert(usbhostprobe_cancel());
+	assert(!usbhostprobe_active() && !usbhostprobe_held() && !reserved && access(test_journal, F_OK) != 0);
+	expect(test_cfg, "NormalDRP\n");
+	expect(test_phy, "none\n");
+
+	// A held role that could not be restored is still a role that must go back
+	// before anything else may have the controller.
+	assert(usbhostprobe_begin_held() == USBHOST_PROBE_STARTED);
+	fail_phy_writes = -1;
+	assert(!usbhostprobe_cancel());
+	assert(usbhostprobe_active() && usbhostprobe_restore_pending() && reserved);
+	fail_phy_writes = 0;
+	fake_now++;
+	assert(usbhostprobe_poll(false, false) == USBHOST_EVENT_RESTORED);
+	expect(test_cfg, "NormalDRP\n");
+	expect(test_phy, "none\n");
+
 	// The journal recovers an interrupted trial before any gadget may bind.
 	put(test_cfg, "NormalDRP\n");
 	assert(usbhostprobe_begin() == USBHOST_PROBE_STARTED);
@@ -329,6 +368,6 @@ int main(void) {
 	assert(rmdir(test_platform) == 0);
 	assert(unlink(test_cfg) == 0);
 	assert(rmdir(root) == 0);
-	puts("PASS usbhostprobe (guarded role trial, timeout, rollback and crash recovery)");
+	puts("PASS usbhostprobe (guarded role trial and held mode, timeout, rollback and crash recovery)");
 	return 0;
 }

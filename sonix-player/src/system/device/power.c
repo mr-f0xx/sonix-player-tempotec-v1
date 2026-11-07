@@ -48,6 +48,7 @@
 #include "src/system/device/usb.h"
 #include "src/system/audio/usbdac.h"
 #include "src/system/audio/usbaudio.h"
+#include "src/system/audio/usbhostmode.h"
 #include "src/system/audio/usbhostprobe.h"
 #include "src/system/gearboy/gearboy.h"
 #include "src/system/device/led.h"
@@ -1565,6 +1566,24 @@ static void suspend_if_idle(uint32_t now, bool playing) {
 		mem_skip("the charger is plugged in");
 		return;
 	}
+	// A forced host role is not a reason to stay awake. The external USB DAC
+	// setting makes the port the host for as long as it is switched on, which
+	// is for ever -- and the cable has just answered that nothing is plugged
+	// in, so there is no DAC to cut. A role left forced with the SoC asleep
+	// would also be one the resume could not account for, so it is given back
+	// here, on the way into the sleep; the setting is untouched and the port
+	// is taken again a second after the wake. This has to come before the
+	// "controller in use" test below, which it would otherwise trip.
+	if (usbhostmode_active() && !usb_vbus_present()) {
+		usbhostmode_release(false);
+		if (usbhostprobe_active()) {
+			// Restoration could not be confirmed: do not sleep on an override
+			// that may not survive it.
+			mem_skip("the USB host role could not be given back");
+			return;
+		}
+	}
+
 	// And what the cable is carrying: the card exported over USB, or a computer
 	// feeding the DAC, both of which the suspend would cut. Below the cable
 	// itself now, and kept because a host can hold the port without VBUS.
