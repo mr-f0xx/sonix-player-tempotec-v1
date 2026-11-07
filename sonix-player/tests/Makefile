@@ -86,7 +86,7 @@ qobuzdl: $(BUILD)/test_qobuzdl
 
 $(BUILD)/test_qobuzdl: test_qobuzdl.c $(ROOT)/src/system/streaming/qobuzdl.c $(ROOT)/src/system/streaming/qobuzdl.h
 	@mkdir -p $(BUILD)
-	$(CC) $(CPPFLAGS) -I$(ROOT)/lvgl $(CFLAGS) -DLV_CONF_INCLUDE_SIMPLE=1 -DHOST_BUILD -o $@ test_qobuzdl.c $(ROOT)/src/system/streaming/qobuzdl.c $(LDFLAGS) $(LDLIBS)
+	$(CC) $(CPPFLAGS) -I$(ROOT)/lvgl $(CFLAGS) -Wno-error=format-truncation -DLV_CONF_INCLUDE_SIMPLE=1 -DHOST_BUILD -o $@ test_qobuzdl.c $(ROOT)/src/system/streaming/qobuzdl.c $(ROOT)/src/system/streaming/podcastdl.c $(LDFLAGS) $(LDLIBS)
 
 $(BUILD)/test_subsonic: test_subsonic.c support.c $(CORE) $(shell find $(ROOT)/src/system -name '*.h')
 	@mkdir -p $(BUILD)

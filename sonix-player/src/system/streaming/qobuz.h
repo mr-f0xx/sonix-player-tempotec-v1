@@ -70,9 +70,13 @@ typedef struct {
 	char artist[QOBUZ_NAME_MAX];
 	char album[QOBUZ_TITLE_MAX];
 	char album_id[40]; // to reopen the album the track comes from
+	char album_artist[QOBUZ_NAME_MAX];
+	char released[16]; // album release year
+	int album_track_count;
 	char cover[QOBUZ_URL_MAX];
 	int duration;			   // seconds
 	int track_number;
+	int disc_number;
 	bool hires;
 	bool streamable; // false = present but not playable on this subscription
 	int bit_depth;

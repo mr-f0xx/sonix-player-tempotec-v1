@@ -378,6 +378,8 @@ static void ask_playlist_delete(void *user) {
 	confirm_show("delete_the_playlist", message, "delete", do_playlist_delete, NULL);
 }
 
+static void open_dl_history_cb(lv_event_t *e);
+
 // The selection is copied by the downloader before the list can change.
 static void download_row(void *user) {
     int format = (int)(intptr_t)user;
@@ -388,7 +390,8 @@ static void download_row(void *user) {
         started = qobuzdl_track(&result_tracks[menu_index], format);
     else if (kind == ROW_MENU_ALBUM_ADD || kind == ROW_MENU_ALBUM_REMOVE)
         started = qobuzdl_album(result_albums[menu_index].id_text, format);
-    toast_plain(started ? "Qobuz download started" : "Cannot start download (busy, no writable card, or signed out)");
+    if (started) open_dl_history_cb(NULL);
+    else toast_plain("Cannot start download (busy, no writable card, or signed out)");
 }
 
 static void row_menu_cb(lv_event_t *e) {
@@ -438,15 +441,17 @@ static void row_menu_cb(lv_event_t *e) {
 		return;
 	}
 
-	popover_item_t items[3] = {item};
+	popover_item_t items[4] = {item};
     row_menu_t kind = row_menu_kind(list_kind);
     int count = 1;
     if (kind == ROW_MENU_TRACK_ADD || kind == ROW_MENU_TRACK_REMOVE ||
         kind == ROW_MENU_ALBUM_ADD || kind == ROW_MENU_ALBUM_REMOVE) {
         items[count++] = (popover_item_t){.label = "Download MP3", .action = download_row,
                                          .user = (void *)(intptr_t)QOBUZ_FORMAT_MP3, .verbatim = true};
-        items[count++] = (popover_item_t){.label = "Download FLAC", .action = download_row,
+        items[count++] = (popover_item_t){.label = "Download FLAC 16-bit", .action = download_row,
                                          .user = (void *)(intptr_t)QOBUZ_FORMAT_CD, .verbatim = true};
+        items[count++] = (popover_item_t){.label = "Download FLAC 24-bit (up to 192 kHz)", .action = download_row,
+                                         .user = (void *)(intptr_t)QOBUZ_FORMAT_HIRES192, .verbatim = true};
     }
     popover_show(lv_event_get_current_target(e), items, count);
 }
@@ -2359,6 +2364,61 @@ static lv_obj_t *dl_history_container;
 static qobuzdl_entry_t dl_entries[DL_HISTORY_LIMIT];
 static int dl_entry_count;
 static bool dl_was_busy;
+static lv_obj_t *dl_progress_bar;
+static lv_obj_t *dl_progress_title;
+static lv_obj_t *dl_progress_amount;
+
+static void dl_progress_paint(const qobuzdl_progress_t *p) {
+    if (!dl_progress_bar) return;
+    lv_label_set_text(dl_progress_title, p->title[0] ? p->title : "Preparing download");
+    int track_percent = p->bytes_total ? (int)(100.0 * (double)p->bytes_done / (double)p->bytes_total) : -1;
+    if (track_percent > 100) track_percent = 100;
+    int percent = track_percent;
+    if (p->album && p->total_tracks > 0) {
+        double fraction = track_percent >= 0 ? track_percent / 100.0 : 0;
+        percent = (int)(100.0 * (p->completed_tracks + fraction) / p->total_tracks);
+        if (percent > 100) percent = 100;
+        lv_label_set_text_fmt(dl_progress_amount, "Album %d%% (estimate) · %d / %d%s", percent,
+                              p->completed_tracks, p->total_tracks, p->failed_tracks ? " (some failed)" : "");
+    } else if (track_percent >= 0) {
+        if (p->album) lv_label_set_text_fmt(dl_progress_amount, "Track %d · %d%%", p->completed_tracks + 1, track_percent);
+        else lv_label_set_text_fmt(dl_progress_amount, "%d%%", track_percent);
+    } else {
+        if (p->album) lv_label_set_text_fmt(dl_progress_amount, "Track %d · size unknown", p->completed_tracks + 1);
+        else lv_label_set_text(dl_progress_amount, "Preparing or size unknown");
+    }
+    lv_bar_set_value(dl_progress_bar, percent < 0 ? 0 : percent, LV_ANIM_OFF);
+}
+
+static void dl_progress_build(void) {
+    lv_obj_t *card = lv_obj_create(dl_history_container);
+    lv_obj_set_width(card, lv_pct(100));
+    lv_obj_set_height(card, LV_SIZE_CONTENT);
+    lv_obj_add_style(card, &theme_style_card, 0);
+    lv_obj_set_style_pad_all(card, 12, 0);
+    lv_obj_set_style_pad_row(card, 8, 0);
+    lv_obj_set_scrollable(card, false);
+    lv_obj_set_flex_flow(card, LV_FLEX_FLOW_COLUMN);
+    dl_progress_title = lv_label_create(card);
+    lv_obj_set_width(dl_progress_title, lv_pct(100));
+    lv_label_set_long_mode(dl_progress_title, LV_LABEL_LONG_DOT);
+    lv_obj_add_style(dl_progress_title, &theme_style_text, 0);
+    lv_obj_set_style_text_font(dl_progress_title, &font_ui_20, 0);
+    dl_progress_bar = lv_bar_create(card);
+    lv_obj_set_size(dl_progress_bar, lv_pct(100), 12);
+    lv_bar_set_range(dl_progress_bar, 0, 100);
+    lv_obj_set_style_bg_color(dl_progress_bar, theme()->surface_pressed, LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(dl_progress_bar, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(dl_progress_bar, theme()->accent, LV_PART_INDICATOR);
+    lv_obj_set_style_radius(dl_progress_bar, LV_RADIUS_CIRCLE, LV_PART_MAIN);
+    lv_obj_set_style_radius(dl_progress_bar, LV_RADIUS_CIRCLE, LV_PART_INDICATOR);
+    dl_progress_amount = lv_label_create(card);
+    lv_obj_set_width(dl_progress_amount, lv_pct(100));
+    lv_label_set_long_mode(dl_progress_amount, LV_LABEL_LONG_WRAP);
+    lv_obj_add_style(dl_progress_amount, &theme_style_text_dim, 0);
+    lv_obj_set_style_text_font(dl_progress_amount, &font_ui_18, 0);
+}
+
 
 static void dl_history_play(lv_event_t *e) {
     int index = (int)(intptr_t)lv_event_get_user_data(e);
@@ -2370,15 +2430,26 @@ static void dl_history_play(lv_event_t *e) {
 
 static void dl_history_refresh(void) {
     lv_obj_clean(dl_history_container);
+    dl_progress_bar = dl_progress_title = dl_progress_amount = NULL;
     dl_entry_count = qobuzdl_history(dl_entries, DL_HISTORY_LIMIT);
     dl_was_busy = qobuzdl_busy();
-    if (dl_was_busy) settingsrow_add(dl_history_container, "Download in progress", NULL, NULL, NULL);
+    if (dl_was_busy) {
+        qobuzdl_progress_t p;
+        dl_progress_build();
+        qobuzdl_progress(&p);
+        dl_progress_paint(&p);
+    }
     if (!dl_entry_count) settingsrow_add(dl_history_container, "No completed downloads", NULL, NULL, NULL);
     for (int i = 0; i < dl_entry_count; i++) {
         lv_obj_t *row = settingsrow_add(dl_history_container, "", NULL, dl_history_play, (void *)(intptr_t)i);
         char title[360];
-        snprintf(title, sizeof(title), "%s%s%s", dl_entries[i].title,
-                 dl_entries[i].artist[0] ? " - " : "", dl_entries[i].artist);
+        const char *path = dl_entries[i].path;
+        const char *filename = strrchr(path, '/');
+        filename = filename ? filename + 1 : path;
+        const char *format = strstr(filename, "-hires.flac") ? "Hi-res FLAC" :
+                             strstr(filename, ".flac") ? "FLAC" : "MP3";
+        snprintf(title, sizeof(title), "%.180s%s%.100s [%s]", dl_entries[i].title,
+                 dl_entries[i].artist[0] ? " - " : "", dl_entries[i].artist, format);
         lv_label_set_text(settingsrow_name_label(row), title);
         settingsrow_name_lines(row, 2);
     }
@@ -2386,7 +2457,11 @@ static void dl_history_refresh(void) {
 
 static void dl_history_tick(lv_timer_t *timer) {
     (void)timer;
-    if (lv_screen_active() == dl_history_screen && dl_was_busy && !qobuzdl_busy()) dl_history_refresh();
+    if (lv_screen_active() != dl_history_screen) return;
+    qobuzdl_progress_t p;
+    qobuzdl_progress(&p);
+    if (dl_was_busy != p.running) dl_history_refresh();
+    else if (p.running) dl_progress_paint(&p);
 }
 
 static void open_dl_history_cb(lv_event_t *e) {
@@ -2446,7 +2521,7 @@ void qobuzpage_init(gui_config_t *cfg) {
 	settingsrow_title_corner_slots(settingsrow_page_title(qobuz_screen), cfg, 3);
 	settings_btn = corner_button(cfg, 0, &icon_music_settings, open_settings_cb);
 	search_btn = corner_button(cfg, 1, &icon_search, open_search_cb);
-    corner_button(cfg, 2, &icon_podcast_downloaded, open_dl_history_cb);
+    corner_button(cfg, 2, &icon_download, open_dl_history_cb);
     dl_history_screen = lv_obj_create(NULL);
     dl_history_container = settingsrow_page(dl_history_screen, cfg, "Download history");
     switcher_attach_back_gesture(dl_history_screen);

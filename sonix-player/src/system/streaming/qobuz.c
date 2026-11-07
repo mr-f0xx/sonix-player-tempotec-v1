@@ -566,6 +566,7 @@ static void read_track(const json_doc_t *doc, int obj, const qobuz_album_t *albu
 	json_obj_str(doc, obj, "title", t->title, sizeof(t->title));
 	t->duration = (int)json_obj_long(doc, obj, "duration", 0);
 	t->track_number = (int)json_obj_long(doc, obj, "track_number", 0);
+	t->disc_number = (int)json_obj_long(doc, obj, "media_number", 0);
 	t->hires = json_obj_bool(doc, obj, "hires", false);
 	t->streamable = json_obj_bool(doc, obj, "streamable", true);
 	t->bit_depth = (int)json_obj_long(doc, obj, "maximum_bit_depth", 0);
@@ -582,24 +583,20 @@ static void read_track(const json_doc_t *doc, int obj, const qobuz_album_t *albu
 	}
 
 	int album = json_get(doc, obj, "album");
+	qobuz_album_t embedded;
+	const qobuz_album_t *info = album_hint;
 	if (album >= 0) {
-		json_obj_str(doc, album, "title", t->album, sizeof(t->album));
-		// The album id, not just the title: it is what lets "Show album" reopen
-		// the right one -- more than one album is called "Greatest Hits".
-		json_obj_str(doc, album, "id", t->album_id, sizeof(t->album_id));
-		read_cover(doc, json_get(doc, album, "image"), t->cover, sizeof(t->cover));
-		if (!t->artist[0]) {
-			json_obj_str(doc, json_get(doc, album, "artist"), "name", t->artist, sizeof(t->artist));
-		}
-	} else if (album_hint) {
-		// Inside /album/get tracks do not repeat the album: it is the one asked
-		// for.
-		snprintf(t->album, sizeof(t->album), "%s", album_hint->title);
-		snprintf(t->album_id, sizeof(t->album_id), "%s", album_hint->id_text);
-		snprintf(t->cover, sizeof(t->cover), "%s", album_hint->cover);
-		if (!t->artist[0]) {
-			snprintf(t->artist, sizeof(t->artist), "%s", album_hint->artist);
-		}
+		read_album(doc, album, &embedded);
+		info = &embedded;
+	}
+	if (info) {
+		snprintf(t->album, sizeof(t->album), "%s", info->title);
+		snprintf(t->album_id, sizeof(t->album_id), "%s", info->id_text);
+		snprintf(t->cover, sizeof(t->cover), "%s", info->cover);
+		snprintf(t->album_artist, sizeof(t->album_artist), "%s", info->artist);
+		snprintf(t->released, sizeof(t->released), "%s", info->released);
+		t->album_track_count = info->track_count;
+		if (!t->artist[0]) snprintf(t->artist, sizeof(t->artist), "%s", info->artist);
 	}
 }
 
@@ -740,7 +737,8 @@ int qobuz_album_tracks(const char *album_id, int offset, qobuz_track_t *out, int
 	// skipping the first `offset`; from the outside this endpoint then behaves
 	// like the ones that really paginate.
 	int items = json_path(&doc, root, "tracks.items");
-	int count = json_len(&doc, items) - offset;
+	int total = json_len(&doc, items);
+	int count = total - offset;
 	if (count < 0) {
 		count = 0;
 	}
@@ -749,6 +747,7 @@ int qobuz_album_tracks(const char *album_id, int offset, qobuz_track_t *out, int
 	}
 	for (int i = 0; i < count; i++) {
 		read_track(&doc, json_at(&doc, items, offset + i), &album, &out[i]);
+		out[i].album_track_count = total;
 	}
 
 	api_done(body, &doc);

@@ -446,7 +446,14 @@ static void *server_main(void *arg) {
 		}
 
 		// MODE_NORMAL endpoint routing:
-		if (strncmp(req, "GET /api.json/0.2/favorite/getUserFavorites?", 44) == 0) {
+		if (strncmp(req, "GET /api.json/0.2/album/get?", 28) == 0) {
+			const char *reply = "{\"id\":\"album-1\",\"title\":\"Record\","
+				"\"artist\":{\"name\":\"Album Artist\"},\"release_date_original\":\"2021-05-01\","
+				"\"image\":{\"large\":\"https://example.test/cover\"},"
+				"\"tracks\":{\"items\":[{\"id\":777,\"title\":\"Song\",\"track_number\":2,\"media_number\":1,"
+				"\"performer\":{\"name\":\"Performer\"}}]}}";
+			send_http(cfd, 200, NULL, reply, strlen(reply));
+		} else if (strncmp(req, "GET /api.json/0.2/favorite/getUserFavorites?", 44) == 0) {
 			// Verify paged qobuz_favorite_track_ids never asks for > 50 at once.
 			const char *lim_p = strstr(req, "limit=");
 			const char *off_p = strstr(req, "offset=");
@@ -589,6 +596,15 @@ int main(void) {
 	qobuz_playlist_t pls[8];
 	assert(qobuz_user_playlists(0, pls, 8) == 1);
 	assert(pls[0].id == 99 && strcmp(pls[0].name, "My Mix") == 0);
+
+	qobuz_track_t album_tracks[2];
+	assert(qobuz_album_tracks("album-1", 0, album_tracks, 2) == 1);
+	assert(!strcmp(album_tracks[0].album, "Record"));
+	assert(!strcmp(album_tracks[0].artist, "Performer"));
+	assert(!strcmp(album_tracks[0].album_artist, "Album Artist"));
+	assert(!strcmp(album_tracks[0].released, "2021"));
+	assert(!strcmp(album_tracks[0].cover, "https://example.test/cover"));
+	assert(album_tracks[0].album_track_count == 1 && album_tracks[0].track_number == 2 && album_tracks[0].disc_number == 1);
 
 	assert(qobuz_favorite_add_track(12345));
 	long created_pl = 0;
