@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <time.h>
 
 #include "src/system/core/config.h"
@@ -892,9 +893,47 @@ int qobuz_genres(int offset, qobuz_genre_t *out, int max) {
         int obj = json_at(&doc, items, i);
         out[i].id = json_obj_long(&doc, obj, "id", 0);
         json_obj_str(&doc, obj, "name", out[i].name, sizeof(out[i].name));
+        out[i].slug[0] = '\0';
+        json_obj_str(&doc, obj, "slug", out[i].slug, sizeof(out[i].slug));
     }
     api_done(body, &doc);
     return n;
+}
+
+// Reggae is a child of the World root in Qobuz's genre tree, so it does not
+// necessarily appear in the root list. Resolve its actual id by the stable
+// slug (not a translated display name), and never invent a filter id.
+int qobuz_reggae_genre(qobuz_genre_t *out) {
+    if (!out) return 0;
+    for (int offset = 0; offset < 200; offset += 50) {
+        char url[768];
+        snprintf(url, sizeof(url), "%s/genre/list?app_id=%s&parent_id=94&limit=50&offset=%d",
+                 base_url, app_id, offset);
+        char *body = NULL;
+        json_doc_t doc;
+        if (!api_call(url, NULL, &body, &doc)) return -1;
+        int items = json_path(&doc, json_root(&doc), "genres.items");
+        int n = json_len(&doc, items);
+        if (n < 0) n = 0;
+        for (int i = 0; i < n; i++) {
+            int obj = json_at(&doc, items, i);
+            char slug[128] = "", name[QOBUZ_NAME_MAX] = "";
+            json_obj_str(&doc, obj, "slug", slug, sizeof(slug));
+            json_obj_str(&doc, obj, "name", name, sizeof(name));
+            const char *leaf = strrchr(slug, '/');
+            leaf = leaf ? leaf + 1 : slug;
+            if (!strcasecmp(leaf, "reggae") || (!slug[0] && !strcasecmp(name, "reggae"))) {
+                out->id = json_obj_long(&doc, obj, "id", 0);
+                snprintf(out->name, sizeof(out->name), "%s", name);
+                snprintf(out->slug, sizeof(out->slug), "%s", slug);
+                api_done(body, &doc);
+                return out->id > 0 ? 1 : 0;
+            }
+        }
+        api_done(body, &doc);
+        if (n < 50) break;
+    }
+    return 0;
 }
 
 int qobuz_genre_new_releases(long genre_id, int offset, qobuz_album_t *out, int max) {
