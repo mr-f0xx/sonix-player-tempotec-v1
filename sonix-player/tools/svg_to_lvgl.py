@@ -411,6 +411,11 @@ ICONS = [
     ("most-played.svg", "most_played", 32),
     # The corner button on the lyrics sheet that looks up words on LRCLIB.
     ("lyrics-search.svg", "lyrics_search", 32),
+    # Settings sections that used to share the vertical ellipsis. A plug says
+    # optional modules; a grid of tiles says everything else behind More. White
+    # outlines, so every appearance tints them with its own semantic colour.
+    ("settings-plugins.svg", "settings_plugins", 30),
+    ("settings-more.svg", "settings_more", 30),
 ]
 
 # Main menu and section tiles, which keep their own colours and are therefore

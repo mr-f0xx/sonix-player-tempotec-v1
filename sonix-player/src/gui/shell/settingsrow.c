@@ -349,8 +349,9 @@ static void fit_row_label(lv_obj_t *label, int32_t width) {
 #define ROW_LABEL_GAP 12
 // The most leading icons alive at once. Twenty-five of them are built to
 // stay: eight on the Settings page (Developer options is the last of them),
-// seven on Subsonic's home and server pages, and five apiece on the Tokyo
-// Night Streaming and More lists, which the V1 builds alongside the grids.
+// seven on Subsonic's home and server pages, and five apiece on the
+// function-glyph Streaming and More lists, which the V1 builds alongside
+// the grids.
 // On top of those, a Subsonic browse page lists up to two hundred rows and
 // puts an icon on every one, so anything short of 225 leaves part of that
 // page plain -- at 24 it was the Developer options row, the twenty-fifth
@@ -395,6 +396,27 @@ static lv_obj_t *settingsrow_caption(lv_obj_t *row) {
 	return NULL;
 }
 
+// How tall a wrapped description really is, capped at the three lines a row
+// has room for. Reserving all three for a one-line caption left short rows
+// top-heavy: the name and description sat above the middle while the icon and
+// chevron stayed centred on the card. Measuring the text lets the whole stack
+// move down instead.
+static int32_t caption_wrapped_height(lv_obj_t *caption, int32_t width) {
+	int32_t line_h = lv_font_get_line_height(&font_ui_14);
+	const char *text = caption ? lv_label_get_text(caption) : NULL;
+	if (!text || !text[0] || width <= 0) {
+		return line_h;
+	}
+
+	lv_point_t size;
+	lv_text_get_size(&size, text, &font_ui_14,
+					 lv_obj_get_style_text_letter_space(caption, LV_PART_MAIN), 0, width,
+					 LV_TEXT_FLAG_NONE);
+	// Explicit MIN/MAX rather than LV_CLAMP: its argument order has changed
+	// across the LVGL versions this tree has been built against.
+	return LV_MAX(line_h, LV_MIN(size.y, 3 * line_h));
+}
+
 static void settingsrow_register_refresh(void) {
 	if (!settingsrow_refresh_registered) {
 		theme_register_refresh(settingsrow_refresh_theme);
@@ -424,10 +446,11 @@ static void fit_row(lv_obj_t *row) {
 		avail -= lv_obj_get_width(right) + ROW_LABEL_GAP;
 	}
 
-	// Tokyo Night's optional leading glyph is appended after the normal row
-	// children, preserving the existing name/value/chevron child indices used
-	// throughout the settings UI. Its width is reserved only while the theme is
-	// enabled, so Dark and Light retain their original label position.
+	// The function-glyph themes' optional leading icon is appended after the
+	// normal row children, preserving the existing name/value/chevron child
+	// indices used throughout the settings UI. Its width is reserved only while
+	// one of those themes is enabled, so Dark and Light keep their label
+	// position.
 	lv_obj_t *leading = settingsrow_leading_icon(row);
 	int32_t leading_width = theme_uses_function_glyphs() && leading ? lv_obj_get_width(leading) + ROW_LABEL_GAP : 0;
 	avail -= leading_width;
@@ -438,21 +461,41 @@ static void fit_row(lv_obj_t *row) {
 		lv_obj_set_hidden(caption, !captioned);
 	}
 	if (captioned) {
-		// Translated descriptions can exceed a single V1 line. Give them three
-		// wrapped lines and let the page scroll rather than clipping the text.
-		lv_obj_set_height(row, 76);
+		// Translated descriptions can exceed a single V1 line. Give them up to
+		// three wrapped lines, but only as many as the words actually use, and
+		// centre the name-plus-description stack on the row. A short caption
+		// such as "Remote · controls" then lines up with the icon and chevron
+		// instead of sitting high above them.
+		int32_t text_width = LV_MAX(1, avail);
+		int32_t name_h = lv_font_get_line_height(&font_ui_18);
+		int32_t caption_h = caption_wrapped_height(caption, text_width);
+		int32_t stack_h = name_h + 7 + caption_h;
+
+		// Keep the usual three-line card, but grow it if a theme's button
+		// padding leaves less content height than the words need. Compute the
+		// wanted height from the row's padding so the style/size-changed event
+		// caused by changing it cannot put it back and fire forever.
+		int32_t row_h = lv_obj_get_height(row);
+		int32_t row_pad = LV_MAX(0, row_h - lv_obj_get_content_height(row));
+		int32_t wanted_h = LV_MAX(76, stack_h + 8 + row_pad);
+		if (row_h != wanted_h) {
+			lv_obj_set_height(row, wanted_h);
+		}
+		int32_t content_h = lv_obj_get_content_height(row);
+		int32_t top = LV_MAX(4, (content_h - stack_h) / 2);
+
 		lv_obj_set_style_text_font(label, &font_ui_18, 0);
 		lv_label_set_long_mode(label, LV_LABEL_LONG_DOT);
 		lv_obj_set_style_text_line_space(label, 0, 0);
-		lv_obj_set_width(label, LV_MAX(1, avail));
-		lv_obj_set_height(label, lv_font_get_line_height(&font_ui_18));
-		lv_obj_align(label, LV_ALIGN_TOP_LEFT, leading_width, 4);
+		lv_obj_set_width(label, text_width);
+		lv_obj_set_height(label, name_h);
+		lv_obj_align(label, LV_ALIGN_TOP_LEFT, leading_width, top);
 
 		lv_label_set_long_mode(caption, LV_LABEL_LONG_WRAP);
 		lv_obj_set_style_text_line_space(caption, 0, 0);
-		lv_obj_set_width(caption, LV_MAX(1, avail));
-		lv_obj_set_height(caption, 3 * lv_font_get_line_height(&font_ui_14));
-		lv_obj_align(caption, LV_ALIGN_TOP_LEFT, leading_width, lv_font_get_line_height(&font_ui_18) + 7);
+		lv_obj_set_width(caption, text_width);
+		lv_obj_set_height(caption, caption_h);
+		lv_obj_align(caption, LV_ALIGN_TOP_LEFT, leading_width, top + name_h + 7);
 		return;
 	}
 
@@ -581,8 +624,8 @@ static void settingsrow_refresh_theme(void) {
 		theme_apply_slider_knob(built_sliders[i]);
 	}
 
-	bool tokyo = theme_uses_function_glyphs();
-	bool flat_rows = compact_rows() && tokyo;
+	bool function_glyphs = theme_uses_function_glyphs();
+	bool flat_rows = compact_rows() && function_glyphs;
 	for (int i = 0; i < leading_icon_count; i++) {
 		lv_obj_t *row = leading_icons[i].row;
 		lv_obj_t *icon = leading_icons[i].icon;
@@ -590,12 +633,12 @@ static void settingsrow_refresh_theme(void) {
 			continue;
 		}
 		settingsrow_update_edges(row, flat_rows);
-		lv_obj_set_hidden(icon, !tokyo);
+		lv_obj_set_hidden(icon, !function_glyphs);
 		lv_obj_t *label = lv_obj_get_child(row, 0);
 		if (label && lv_obj_check_type(label, &lv_label_class)) {
 			lv_obj_set_style_text_font(label, &font_ui_24, 0);
 		}
-		if (tokyo) {
+		if (function_glyphs) {
 			lv_obj_set_style_image_recolor(icon, theme_semantic_color(leading_icons[i].tone), 0);
 			lv_obj_set_style_image_recolor_opa(icon, LV_OPA_COVER, 0);
 		} else {

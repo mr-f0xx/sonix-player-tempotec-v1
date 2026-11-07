@@ -639,12 +639,15 @@ void settings_init(gui_config_t *cfg) {
 	language_bind_menu_row(language_row);
 
 	// The optional modules, switched in Plugins. Above More: what the player
-	// carries is a bigger decision than how the rest of it is arranged.
+	// carries is a bigger decision than how the rest of it is arranged. Each
+	// section has its own glyph -- a plug for modules, a tile grid for More --
+	// rather than the vertical ellipsis they used to share. Both are white
+	// outlines, so every theme tints them with its own semantic colour.
 	lv_obj_t *plugins_row = settingsrow_add(container, "plugins", NULL, switch_screen_cb, plugins_screen);
-	settingsrow_add_icon(plugins_row, &icon_ellipsis_vertical, THEME_SEMANTIC_PURPLE);
+	settingsrow_add_icon(plugins_row, &icon_settings_plugins, THEME_SEMANTIC_PURPLE);
 	settingsrow_add_caption(plugins_row, "settings_plugins_detail");
 	lv_obj_t *more_row = settingsrow_add(container, "more", NULL, switch_screen_cb, othersettings_screen);
-	settingsrow_add_icon(more_row, &icon_ellipsis_vertical, THEME_SEMANTIC_GREEN);
+	settingsrow_add_icon(more_row, &icon_settings_more, THEME_SEMANTIC_GREEN);
 	settingsrow_add_caption(more_row, "settings_more_detail");
 	lv_obj_t *system_row = settingsrow_add(container, "system", NULL, switch_screen_cb, systempage_screen);
 	settingsrow_add_icon(system_row, &icon_music_settings, THEME_SEMANTIC_MUTED);

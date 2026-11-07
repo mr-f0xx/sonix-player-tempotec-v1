@@ -287,5 +287,7 @@ extern const lv_image_dsc_t icon_podcast_badge;
 extern const lv_image_dsc_t icon_hires_audio;
 extern const lv_image_dsc_t icon_metronome;
 extern const lv_image_dsc_t icon_menu_metronome;
+extern const lv_image_dsc_t icon_settings_plugins;
+extern const lv_image_dsc_t icon_settings_more;
 
 #endif // ICONS_H
