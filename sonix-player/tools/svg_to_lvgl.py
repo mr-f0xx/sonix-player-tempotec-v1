@@ -494,10 +494,10 @@ COLOR_ICONS = [
     ("podcast-badge.png", "podcast_badge", 52),
 
     # The official Hi-Res Audio artwork supplied for the optional badge design.
-    # Keep its gold/black colours; 44 px fits beside the source marks without
-    # covering a small sleeve. It is embedded like the other colour artwork,
+    # Keep its gold/black colours; 36 px stays close to the text badge and
+    # clear of the source marks. It is embedded like the other colour artwork,
     # so the player does not depend on a PNG decoder or a resource file.
-    ("hi-res-audio.png", "hires_audio", (44, 44)),
+    ("hi-res-audio.png", "hires_audio", (36, 36)),
 ]
 
 

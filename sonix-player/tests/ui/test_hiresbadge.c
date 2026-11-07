@@ -43,8 +43,8 @@ static void check_logo_pixels(lv_obj_t *art, const hiresbadge_view_t *view) {
 	lv_obj_get_coords(view->box, &badge);
 	// Gold in the upper field and black in the lower panel: the official mark
 	// must not inherit a theme tint or the text badge's white plate.
-	assert(close_to(pixel_at(shot, badge.x1 + 22, badge.y1 + 3), 0xfad27c, 12));
-	assert(close_to(pixel_at(shot, badge.x1 + 3, badge.y1 + 30), 0x000000, 12));
+	assert(close_to(pixel_at(shot, badge.x1 + 18, badge.y1 + 2), 0xfad27e, 12));
+	assert(close_to(pixel_at(shot, badge.x1 + 2, badge.y1 + 25), 0x000000, 12));
 	lv_draw_buf_destroy(shot);
 }
 
@@ -81,7 +81,7 @@ static void exercise(int width, const lv_font_t *font, bool right) {
 			assert(lv_obj_is_hidden(view.label));
 			assert(!lv_obj_is_hidden(view.image));
 			assert(lv_image_get_src(view.image) == &icon_hires_audio);
-			assert(lv_obj_get_width(view.image) == 44 && lv_obj_get_height(view.image) == 44);
+			assert(lv_obj_get_width(view.image) == 36 && lv_obj_get_height(view.image) == 36);
 			assert(lv_obj_get_style_image_recolor_opa(view.image, 0) == LV_OPA_TRANSP);
 			check_logo_pixels(art, &view);
 		} else {
