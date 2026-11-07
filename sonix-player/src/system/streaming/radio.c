@@ -2716,7 +2716,22 @@ static bool play_one_connection(const char *url, unsigned mine, char *redirect, 
 	redirect[0] = '\0';
 
 	http_stream_t stream;
+
+	// Publish this stream before the connection is made rather than after the
+	// headers have arrived: read_headers() can block waiting for a server that
+	// never finishes its header block, and transport_stop() must be able to
+	// shut the socket down and wake that read while it is still happening.
+	// Cleared again below if the connection fails or the play is superseded.
+	pthread_mutex_lock(&stream_lock);
+	live_stream = &stream;
+	pthread_mutex_unlock(&stream_lock);
+
 	if (!http_stream_open(&stream, url, 10)) {
+		pthread_mutex_lock(&stream_lock);
+		if (live_stream == &stream) {
+			live_stream = NULL;
+		}
+		pthread_mutex_unlock(&stream_lock);
 		return false;
 	}
 
@@ -2724,8 +2739,9 @@ static bool play_one_connection(const char *url, unsigned mine, char *redirect, 
 	// bring the reads below back at once. Cleared again before this returns.
 	pthread_mutex_lock(&stream_lock);
 	if (!still_mine(mine)) {
-		// Stopped while the connection was being made: let go of it here
-		// rather than start playing something nobody is waiting for.
+		if (live_stream == &stream) {
+			live_stream = NULL;
+		}
 		pthread_mutex_unlock(&stream_lock);
 		http_stream_close(&stream);
 		return true;
