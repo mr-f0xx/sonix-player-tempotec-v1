@@ -78,6 +78,14 @@ per-device rewrite still runs when a sink connects). The real
 D-Bus signal cache is driven with a late simulated signal to check that a close
 clears incoming and outgoing PCMs, transport state and media state.
 
+The discovery fixture marshals the real `SetDiscoveryFilter` D-Bus body and
+checks `Transport="bredr"` with no UUID/RSSI restriction, the order before
+`StartDiscovery`, compatibility fallback for an unsupported filter, and refusal
+of a real start failure. Lifecycle checks cover the temporary pairing window,
+restoration of SonixLink/RX visibility, failed starts, queued user work and stale
+stop requests. These host tests do not establish Tesla interoperability; verify
+both discovery directions and audio on the vehicle after installing the build.
+
 The AFH tests check channel maps and timing for link/frequency changes, retry of
 failed sends and clears, radio parks, refreshes and timer wrap. Fake HCI syscalls check the
 actual command packet, its hci0 binding and socket/bind/short-write failures.

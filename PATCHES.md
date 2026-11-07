@@ -6,6 +6,20 @@
 | Touchscreen multitouch, R1 | `tools/cst8xx_multitouch_patch.py` | the panel reports two fingers, the driver lets one out |
 
 
+## Bluetooth TX discovery and car pairing
+
+The V1 Bluetooth search now requests classic BR/EDR inquiry explicitly through
+BlueZ 5.54's per-client discovery filter, with no UUID or RSSI gate. It runs for
+up to 30 seconds and makes the player discoverable during that window, then
+restores RX/SonixLink visibility. Stop, pairing and mode changes interrupt the
+search; stale completions cannot cancel a newer request. Unsupported discovery
+filters fall back to the adapter default, while real start failures are reported.
+
+Hardware validation pending: on the Tesla, start the player's Search, then open
+**Bluetooth → Add New Device → Start Search**. Confirm each device appears on the
+other, pairing completes, and playback works. Also recheck headphones and RX
+mode. Host marshalling/lifecycle tests are not a radio interoperability test.
+
 ## TempoTec V1 240×320 interface profile
 
 The build of this fork is the TempoTec V1 profile. There is no runtime choice

@@ -150,6 +150,7 @@ static int queue_head, queue_count;
 static bool g_enabled;
 static bool g_busy;
 static bool g_scanning;
+static unsigned g_scan_generation; // a finished scan must not cancel a newer request
 static bool g_discoverable; // what the Bluetooth list page asked for, last
 // Source MAC explicitly tapped by the user in TX mode before switching to the
 // receiver page; tried ahead of any other bonded phones and ignores backoff.
@@ -232,9 +233,11 @@ static char g_rx_codecs[BT_MAX_CODECS][BT_CODEC_MAX];
 static int g_rx_codec_count;
 static char g_rx_codec_selected[BT_CODEC_MAX];
 
-static void post_job(const job_t *job);
+static bool post_job(const job_t *job);
 static bool queue_has(job_type_t type);
 static bool bluetooth_still_wanted(void);
+static bool user_job_waiting(void);
+static bool user_job_waiting_locked(void);
 
 // ---------------------------------------------------------------------------
 // small helpers
@@ -1383,12 +1386,14 @@ bool bluetooth_receiver_profile(void) {
 
 static bool receiver_profile_wanted(void) { return bluetooth_receiver_profile(); }
 
-// Receiver mode must always be discoverable once its A2DP sink is up so phones
-// can find the player; outside receiver mode, discoverability follows whatever
-// page explicitly asked for it (e.g. SonixLink).
+// A scan is also a pairing window: answer the car's inquiry while looking
+// for one. Keep the page/SonixLink request separate so ending a scan restores
+// that owner rather than clearing it.
+// RX is discoverable once its A2DP sink is up. Otherwise visibility follows
+// the active scan or the page's explicit request (e.g. SonixLink).
 static bool effective_discoverable(void) {
 	pthread_mutex_lock(&lock);
-	bool visible = g_receiver_profile || g_discoverable;
+	bool visible = g_receiver_profile || g_discoverable || g_scanning;
 	pthread_mutex_unlock(&lock);
 	return visible;
 }
@@ -2045,81 +2050,88 @@ static void refresh_devices(void) {
 	refresh_audio_state();
 }
 
-// How long a discovery runs when the user presses search. Ten seconds, as the
-// firmware's `bt-adapter -d` does, except that the list fills as devices arrive
-// rather than all at once at the end.
-#define SCAN_SECONDS 10
-
-// How many times a refused discovery is asked for again, and how long between.
-// NotReady is what bluez answers while the controller is coming back from a
-// reset, and the log has three of them inside a second at 23:13:49 with the
-// chip down under bluealsa at the same moment ("Couldn't get HCI version:
-// Network is down"). Retried, the search starts a little late instead of
-// failing under the user's finger.
+// Three inquiry opportunities rather than one ten-second pass. A car can take
+// several seconds to enter inquiry and resolve names. No UUID/RSSI gate here:
+// it must still get a row before its audio services arrive.
+#define SCAN_SECONDS 30
+#define SCAN_POLL_MS 100
 #define SCAN_START_TRIES 3
 #define SCAN_START_WAIT_MS 400
 
-static void do_scan(void) {
-	bool started = false;
-	for (int attempt = 0; attempt < SCAN_START_TRIES && !started; attempt++) {
-		if (attempt) {
-			sleep_ms(SCAN_START_WAIT_MS);
-			pthread_mutex_lock(&lock);
-			bool abandon = !g_enabled;
-			if (abandon) {
-				g_scanning = false;
-			}
-			pthread_mutex_unlock(&lock);
-			if (abandon) {
-				return;
-			}
-		}
-		started = btstack_discovery(true);
-	}
-	if (!started) {
-		// Said here as well as at the end, because this is the branch a user with
-		// no radio takes: with no line here their log carries nothing about the
-		// search, which reads as a search that ran and found nothing.
-		fprintf(stderr, "bluetooth: the search could not be started; bluez did not take the discovery\n");
-		pthread_mutex_lock(&lock);
-		g_scanning = false;
-		pthread_mutex_unlock(&lock);
-		return;
-	}
+static bool scan_active(unsigned generation) {
+	pthread_mutex_lock(&lock);
+	bool active = g_enabled && g_scanning && generation == g_scan_generation && !user_job_waiting_locked();
+	pthread_mutex_unlock(&lock);
+	return active;
+}
 
-	for (int second = 0; second < SCAN_SECONDS; second++) {
-		sleep_ms(1000);
-		pthread_mutex_lock(&lock);
-		bool abandon = !g_enabled || !g_scanning;
-		pthread_mutex_unlock(&lock);
-		if (abandon) {
-			break;
-		}
-		// Every second, so the list grows in front of the user instead of
-		// appearing when the sweep is over.
-		refresh_devices();
-	}
-
+static void scan_finished(unsigned generation) {
 	btstack_discovery(false);
 	pthread_mutex_lock(&lock);
-	g_scanning = false;
+	if (generation == g_scan_generation) {
+		g_scanning = false;
+		g_serial++;
+	}
 	pthread_mutex_unlock(&lock);
+	btstack_set_discoverable(effective_discoverable());
 	refresh_devices();
+}
 
-	// One line per search, so that "it does not find my headphones" has an
-	// answer: this says whether bluez saw anything at all and how much of it the
-	// list decided not to show.
+static void do_scan(unsigned generation) {
+	if (!scan_active(generation)) {
+		scan_finished(generation);
+		return;
+	}
+	bool started = false;
+	for (int attempt = 0; attempt < SCAN_START_TRIES && scan_active(generation); attempt++) {
+		if (attempt) {
+			sleep_ms(SCAN_START_WAIT_MS);
+			if (!scan_active(generation)) {
+				break;
+			}
+		}
+		// Inquiry and page scan are independent. Advertise before searching so
+		// either side can initiate, including a head unit whose Bluetooth page
+		// was opened first. Visibility is restored by scan_finished().
+		btstack_set_discoverable(effective_discoverable());
+		started = btstack_discovery(true);
+		if (started) {
+			break;
+		}
+		fprintf(stderr, "bluetooth: scan start attempt %d refused\n", attempt + 1);
+	}
+	if (!started) {
+		fprintf(stderr, "bluetooth: the search could not be started; bluez did not take the discovery\n");
+		scan_finished(generation);
+		return;
+	}
+	for (int elapsed = 0; elapsed < SCAN_SECONDS * 1000 && scan_active(generation); elapsed += SCAN_POLL_MS) {
+		sleep_ms(SCAN_POLL_MS);
+		if (elapsed % 1000 == 0) {
+			refresh_devices();
+		}
+	}
+	scan_finished(generation);
 	pthread_mutex_lock(&lock);
 	fprintf(stderr, "bluetooth: scan over, bluez holds %d devices, %d paired, %d in the list, %d nameless and dropped\n",
 			g_seen_count, g_paired_count, g_found_count, g_hidden_count);
 	pthread_mutex_unlock(&lock);
 }
 
-static void do_scan_stop(void) {
+static void do_scan_stop(unsigned generation) {
 	pthread_mutex_lock(&lock);
-	g_scanning = false;
+	bool current = generation == g_scan_generation;
+	if (current) {
+		g_scanning = false;
+		g_serial++;
+	}
 	pthread_mutex_unlock(&lock);
+	if (!current) {
+		return; // a stale Stop button must not hide a newer scan
+	}
 	btstack_discovery(false);
+	btstack_set_discoverable(effective_discoverable());
+	refresh_devices();
 }
 
 // ---------------------------------------------------------------------------
@@ -2246,9 +2258,8 @@ static bool other_connected_sink(const char *except, char *out, size_t size) {
 
 // Whether the user has asked for something since the job that is running now:
 // a search, a pairing, a connection, a disconnection, a device forgotten.
-static bool user_job_waiting(void) {
+static bool user_job_waiting_locked(void) {
 	bool waiting = false;
-	pthread_mutex_lock(&lock);
 	for (int i = 0; i < queue_count && !waiting; i++) {
 		switch (queue[(queue_head + i) % JOB_QUEUE_LEN].type) {
 		case JOB_SCAN:
@@ -2256,12 +2267,19 @@ static bool user_job_waiting(void) {
 		case JOB_CONNECT:
 		case JOB_DISCONNECT:
 		case JOB_FORGET:
+		case JOB_RECEIVER_PROFILE:
 			waiting = true;
 			break;
 		default:
 			break;
 		}
 	}
+	return waiting;
+}
+
+static bool user_job_waiting(void) {
+	pthread_mutex_lock(&lock);
+	bool waiting = user_job_waiting_locked();
 	pthread_mutex_unlock(&lock);
 	return waiting;
 }
@@ -3498,7 +3516,7 @@ static bool queue_has(job_type_t type) {
 	return false;
 }
 
-static void post_job(const job_t *job) {
+static bool post_job(const job_t *job) {
 	pthread_mutex_lock(&lock);
 	bool duplicate = (job->type == JOB_REFRESH || job->type == JOB_RX_INFO) && queue_has(job->type);
 	bool queued = duplicate || queue_count < JOB_QUEUE_LEN;
@@ -3512,6 +3530,7 @@ static void post_job(const job_t *job) {
 	if (!queued) {
 		fprintf(stderr, "bluetooth: job queue full (%d); dropping a job of type %d\n", JOB_QUEUE_LEN, (int)job->type);
 	}
+	return queued;
 }
 
 // Stops bluealsa and starts it again with the current options, then asks the
@@ -3774,11 +3793,11 @@ static void *bluetooth_worker(void *arg) {
 				break;
 
 			case JOB_SCAN:
-				do_scan();
+				do_scan((unsigned)job.arg_int);
 				break;
 
 			case JOB_SCAN_STOP:
-				do_scan_stop();
+				do_scan_stop((unsigned)job.arg_int);
 				break;
 
 			case JOB_REFRESH:
@@ -4068,6 +4087,7 @@ static void set_enabled(bool on, bool remember) {
 		g_state = BT_STATE_OFF;
 		g_found_count = 0;
 		g_scanning = false;
+		g_scan_generation++;
 		g_serial++;
 
 		// Everything queued concerns a radio that is going off, and whatever the
@@ -4286,8 +4306,10 @@ void bluetooth_scan_start(void) {
 	if (!skip && last_start_ms != 0 && (int32_t)(now_ms() - last_start_ms) < SCAN_RESTART_MS) {
 		skip = true;
 	}
+	unsigned generation = 0;
 	if (!skip) {
 		g_scanning = true;
+		generation = ++g_scan_generation;
 		last_start_ms = now_ms();
 	}
 	pthread_mutex_unlock(&lock);
@@ -4296,12 +4318,24 @@ void bluetooth_scan_start(void) {
 		return;
 	}
 
-	job_t job = {.type = JOB_SCAN};
-	post_job(&job);
+	job_t job = {.type = JOB_SCAN, .arg_int = (int)generation};
+	if (!post_job(&job)) {
+		pthread_mutex_lock(&lock);
+		if (generation == g_scan_generation) {
+			g_scanning = false;
+			g_serial++;
+		}
+		pthread_mutex_unlock(&lock);
+	}
 }
 
 void bluetooth_scan_stop(void) {
-	job_t job = {.type = JOB_SCAN_STOP};
+	pthread_mutex_lock(&lock);
+	g_scanning = false;
+	unsigned generation = ++g_scan_generation;
+	g_serial++;
+	pthread_mutex_unlock(&lock);
+	job_t job = {.type = JOB_SCAN_STOP, .arg_int = (int)generation};
 	post_job(&job);
 }
 
