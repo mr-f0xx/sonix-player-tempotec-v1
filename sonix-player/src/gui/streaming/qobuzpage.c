@@ -26,6 +26,7 @@
 #include "src/system/playback/playlist.h"
 #include "src/system/streaming/qobuz.h"
 #include "src/system/streaming/qobuzcache.h"
+#include "src/system/streaming/qobuzdl.h"
 #include "src/system/streaming/streamturn.h"
 #include "src/system/streaming/qobuzsync.h"
 #include "src/system/device/system.h"
@@ -377,6 +378,19 @@ static void ask_playlist_delete(void *user) {
 	confirm_show("delete_the_playlist", message, "delete", do_playlist_delete, NULL);
 }
 
+// The selection is copied by the downloader before the list can change.
+static void download_row(void *user) {
+    int format = (int)(intptr_t)user;
+    if (menu_index < 0 || menu_index >= result_count) return;
+    row_menu_t kind = row_menu_kind(list_kind);
+    bool started = false;
+    if (kind == ROW_MENU_TRACK_ADD || kind == ROW_MENU_TRACK_REMOVE)
+        started = qobuzdl_track(&result_tracks[menu_index], format);
+    else if (kind == ROW_MENU_ALBUM_ADD || kind == ROW_MENU_ALBUM_REMOVE)
+        started = qobuzdl_album(result_albums[menu_index].id_text, format);
+    toast_plain(started ? "Qobuz download started" : "Cannot start download (busy, no writable card, or signed out)");
+}
+
 static void row_menu_cb(lv_event_t *e) {
 	lv_event_stop_bubbling(e); // the tap belongs to the menu, not to the row
 	if (switcher_back_drag_active() || player_sheet_drag_active()) {
@@ -424,7 +438,17 @@ static void row_menu_cb(lv_event_t *e) {
 		return;
 	}
 
-	popover_show(lv_event_get_current_target(e), &item, 1);
+	popover_item_t items[3] = {item};
+    row_menu_t kind = row_menu_kind(list_kind);
+    int count = 1;
+    if (kind == ROW_MENU_TRACK_ADD || kind == ROW_MENU_TRACK_REMOVE ||
+        kind == ROW_MENU_ALBUM_ADD || kind == ROW_MENU_ALBUM_REMOVE) {
+        items[count++] = (popover_item_t){.label = "Download MP3", .action = download_row,
+                                         .user = (void *)(intptr_t)QOBUZ_FORMAT_MP3, .verbatim = true};
+        items[count++] = (popover_item_t){.label = "Download FLAC", .action = download_row,
+                                         .user = (void *)(intptr_t)QOBUZ_FORMAT_CD, .verbatim = true};
+    }
+    popover_show(lv_event_get_current_target(e), items, count);
 }
 
 // Side of a row thumbnail, in pixels.
@@ -2327,6 +2351,50 @@ bool qobuzpage_open_album(const char *album_id, const char *title) {
 	return true;
 }
 
+// History is derived from completed files, so it survives restarts and never
+// points at failed or cache-evicted downloads. It is available without Wi-Fi.
+#define DL_HISTORY_LIMIT 100
+static lv_obj_t *dl_history_screen;
+static lv_obj_t *dl_history_container;
+static qobuzdl_entry_t dl_entries[DL_HISTORY_LIMIT];
+static int dl_entry_count;
+static bool dl_was_busy;
+
+static void dl_history_play(lv_event_t *e) {
+    int index = (int)(intptr_t)lv_event_get_user_data(e);
+    if (index < 0 || index >= dl_entry_count) return;
+    const char *paths[1] = {dl_entries[index].path};
+    device_state_play_list_ordered(paths, 1, 0);
+    switch_screen(player_screen);
+}
+
+static void dl_history_refresh(void) {
+    lv_obj_clean(dl_history_container);
+    dl_entry_count = qobuzdl_history(dl_entries, DL_HISTORY_LIMIT);
+    dl_was_busy = qobuzdl_busy();
+    if (dl_was_busy) settingsrow_add(dl_history_container, "Download in progress", NULL, NULL, NULL);
+    if (!dl_entry_count) settingsrow_add(dl_history_container, "No completed downloads", NULL, NULL, NULL);
+    for (int i = 0; i < dl_entry_count; i++) {
+        lv_obj_t *row = settingsrow_add(dl_history_container, "", NULL, dl_history_play, (void *)(intptr_t)i);
+        char title[360];
+        snprintf(title, sizeof(title), "%s%s%s", dl_entries[i].title,
+                 dl_entries[i].artist[0] ? " - " : "", dl_entries[i].artist);
+        lv_label_set_text(settingsrow_name_label(row), title);
+        settingsrow_name_lines(row, 2);
+    }
+}
+
+static void dl_history_tick(lv_timer_t *timer) {
+    (void)timer;
+    if (lv_screen_active() == dl_history_screen && dl_was_busy && !qobuzdl_busy()) dl_history_refresh();
+}
+
+static void open_dl_history_cb(lv_event_t *e) {
+    (void)e;
+    dl_history_refresh();
+    switch_screen(dl_history_screen);
+}
+
 static void home_loaded_cb(lv_event_t *e) {
 	(void)e;
 	// The card may have been inserted or removed since the page was built, and
@@ -2373,11 +2441,18 @@ void qobuzpage_init(gui_config_t *cfg) {
 	qobuz_screen = lv_obj_create(NULL);
 	home_container = settingsrow_page(qobuz_screen, cfg, "qobuz");
 
-	// Two buttons top right, like the Music gear: settings and search. The title
+	// Three buttons top right: settings, search and downloads. The title
 	// must be told the corner is taken, otherwise its text runs under them.
-	settingsrow_title_corner_slots(settingsrow_page_title(qobuz_screen), cfg, 2);
+	settingsrow_title_corner_slots(settingsrow_page_title(qobuz_screen), cfg, 3);
 	settings_btn = corner_button(cfg, 0, &icon_music_settings, open_settings_cb);
 	search_btn = corner_button(cfg, 1, &icon_search, open_search_cb);
+    corner_button(cfg, 2, &icon_podcast_downloaded, open_dl_history_cb);
+    dl_history_screen = lv_obj_create(NULL);
+    dl_history_container = settingsrow_page(dl_history_screen, cfg, "Download history");
+    switcher_attach_back_gesture(dl_history_screen);
+    player_sheet_attach_drag(dl_history_screen, true);
+    player_sheet_attach_drag(dl_history_container, true);
+    lv_timer_create(dl_history_tick, 1000, NULL);
 
 	build_list_page(cfg);
 	build_search_page(cfg);

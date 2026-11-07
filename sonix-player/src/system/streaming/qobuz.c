@@ -964,7 +964,8 @@ static char *encoded_auth_token_alloc(void) {
 	return encoded;
 }
 
-bool qobuz_track_url(long track_id, char *url_out, size_t url_size, char *mime, size_t mime_size, int *format_out) {
+bool qobuz_track_url_for_format(long track_id, int requested_format, char *url_out, size_t url_size, char *mime,
+								 size_t mime_size, int *format_out) {
 	clear_error();
 
 	if (!url_out || url_size == 0) {
@@ -973,6 +974,12 @@ bool qobuz_track_url(long track_id, char *url_out, size_t url_size, char *mime, 
 	url_out[0] = '\0';
 	if (mime && mime_size) {
 		mime[0] = '\0';
+	}
+
+	if (requested_format != QOBUZ_FORMAT_MP3 && requested_format != QOBUZ_FORMAT_CD &&
+		requested_format != QOBUZ_FORMAT_HIRES96 && requested_format != QOBUZ_FORMAT_HIRES192) {
+		set_error("Invalid Qobuz format");
+		return false;
 	}
 
 	if (!qobuz_logged_in()) {
@@ -990,7 +997,7 @@ bool qobuz_track_url(long track_id, char *url_out, size_t url_size, char *mime, 
 	qobuz_param_t params[3];
 	int count = 0;
 	snprintf(params[count].key, sizeof(params[0].key), "%s", "format_id");
-	snprintf(params[count].value, sizeof(params[0].value), "%d", format_id);
+	snprintf(params[count].value, sizeof(params[0].value), "%d", requested_format);
 	count++;
 	snprintf(params[count].key, sizeof(params[0].key), "%s", "intent");
 	snprintf(params[count].value, sizeof(params[0].value), "%s", "stream");
@@ -1038,7 +1045,7 @@ bool qobuz_track_url(long track_id, char *url_out, size_t url_size, char *mime, 
 		json_obj_str(&doc, root, "mime_type", mime, mime_size);
 	}
 	if (format_out) {
-		*format_out = (int)json_obj_long(&doc, root, "format_id", format_id);
+		*format_out = (int)json_obj_long(&doc, root, "format_id", requested_format);
 	}
 
 	// A track that exists but is not covered by this subscription comes back as
@@ -1052,6 +1059,10 @@ bool qobuz_track_url(long track_id, char *url_out, size_t url_size, char *mime, 
 
 	api_done(body, &doc);
 	return ok;
+}
+
+bool qobuz_track_url(long track_id, char *url_out, size_t url_size, char *mime, size_t mime_size, int *format_out) {
+	return qobuz_track_url_for_format(track_id, qobuz_get_format(), url_out, url_size, mime, mime_size, format_out);
 }
 
 // ---------------------------------------------------------------------------
