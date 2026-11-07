@@ -515,11 +515,15 @@ a self-signed certificate), and HLS.
 
 Music > Display options offers an optional HI-RES badge on the now-playing
 artwork. Choose Off, Top right or Top left separately for each player layout;
-it is off by default. It appears for lossless audio above 16-bit or 48 kHz,
-and for DSD, once the stream's format is known. Lossy audio and podcasts do
-not show it. When a source badge occupies the right corner, the hi-res badge
-uses the left corner instead. Album Art Max reserves its corners for text and
-has no badge. Waveform's Standard fallback uses the Standard setting.
+it is off by default. A shared Badge design choice offers the original
+two-line HI-RES text (the default), one-line HI-RES, HR, or the official
+gold-and-black Hi-Res Audio logo. Changing the design does not change which
+layouts show the badge or where they put it. It appears for lossless audio
+above 16-bit or 48 kHz, and for DSD, once the stream's format is known. Lossy
+audio and podcasts do not show it. When a source badge occupies the right
+corner, the hi-res badge uses the left corner instead. Album Art Max reserves
+its corners for text and has no badge. Waveform's Standard fallback uses the
+Standard setting.
 
 ### Both control-centre sliders
 

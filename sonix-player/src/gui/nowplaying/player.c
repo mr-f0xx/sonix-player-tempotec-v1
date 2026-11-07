@@ -13,6 +13,7 @@
 #include "src/gui/nowplaying/aamlayout.h"
 #include "src/gui/nowplaying/cover.h"
 #include "src/gui/nowplaying/hiresbadge.h"
+#include "src/gui/nowplaying/hiresbadgeview.h"
 #include "src/gui/nowplaying/coverloader.h"
 #include "src/gui/nowplaying/lyricsearch.h"
 #include "src/gui/nowplaying/playbutton.h"
@@ -78,7 +79,8 @@ static lv_obj_t *play_btn;
 static lv_obj_t *play_btn_icon;
 static lv_obj_t *song_title_label;
 static lv_obj_t *song_artist_label;
-static lv_obj_t *hires_badge;
+static hiresbadge_view_t hires_badge;
+static hiresbadge_style_t hires_style = HIRESBADGE_TWO_LINE;
 static lv_obj_t *format_label; // "16/44.1 FLAC", right of the artist line
 static lv_obj_t *fav_btn_obj;  // the button it sits on, hidden on a book
 static lv_obj_t *controls_row; // transport row: where the ellipsis lives, and the favourite button in Studio
@@ -5595,7 +5597,7 @@ static player_layout_t hires_current_layout(void) {
 }
 
 static void update_hires_badge(const device_state_t *state) {
-	if (!hires_badge) return;
+	if (!hires_badge.box) return;
 	player_layout_t layout = hires_current_layout();
 	player_hires_position_t pos = player_hires_position_get(layout);
 	bool hi = false;
@@ -5611,7 +5613,7 @@ static void update_hires_badge(const device_state_t *state) {
 			audio_get_stream_bits(), state->stream_sample_rate, audio_get_dsd_multiple() > 0);
 	}
 	if (!hi || pos == PLAYER_HIRES_OFF || layout == PLAYER_LAYOUT_ALBUM_ART_MAX) {
-		lv_obj_set_hidden(hires_badge, true);
+		lv_obj_set_hidden(hires_badge.box, true);
 		return;
 	}
 
@@ -5619,7 +5621,7 @@ static void update_hires_badge(const device_state_t *state) {
 	// the clipped artwork. Leave room for the source mark in the right corner.
 	lv_obj_t *parent = layout_studio_now
 		? (lv_obj_is_hidden(studio_cover) ? studio_empty : studio_cover) : cover_art_group;
-	if (lv_obj_get_parent(hires_badge) != parent) lv_obj_set_parent(hires_badge, parent);
+	if (lv_obj_get_parent(hires_badge.box) != parent) lv_obj_set_parent(hires_badge.box, parent);
 	int inset = BADGE_INSET;
 	if ((layout_alt_now || layout_studio_now || layout == PLAYER_LAYOUT_STANDARD) && art_shape == PLAYER_ART_VINYL) {
 		int circular_inset = (layout_studio_now ? studio_cover_size : cover_art_w) / 5;
@@ -5629,10 +5631,10 @@ static void update_hires_badge(const device_state_t *state) {
 	// Keep both marks out of the same corner. Moving down can collide with
 	// Waveform's star or title on a small sleeve, so use the other corner.
 	if (pos == PLAYER_HIRES_RIGHT && source) pos = PLAYER_HIRES_LEFT;
-	lv_obj_align(hires_badge, pos == PLAYER_HIRES_LEFT ? LV_ALIGN_TOP_LEFT : LV_ALIGN_TOP_RIGHT,
+	lv_obj_align(hires_badge.box, pos == PLAYER_HIRES_LEFT ? LV_ALIGN_TOP_LEFT : LV_ALIGN_TOP_RIGHT,
 		pos == PLAYER_HIRES_LEFT ? inset : -inset, inset);
-	lv_obj_set_hidden(hires_badge, false);
-	lv_obj_move_foreground(hires_badge);
+	lv_obj_set_hidden(hires_badge.box, false);
+	lv_obj_move_foreground(hires_badge.box);
 }
 
 // The format line, the way the stock player writes it: "16/44.1 FLAC".
@@ -6499,6 +6501,21 @@ void player_hires_position_set(player_layout_t layout, player_hires_position_t p
 	snprintf(key, sizeof(key), "player_hires_%d", (int)layout);
 	config_set_int("screen", key, position);
 	config_save();
+	device_state_t state;
+	device_state_get(&state);
+	update_hires_badge(&state);
+}
+
+hiresbadge_style_t player_hires_style_get(void) {
+	return hiresbadge_style_from_int((int)config_get_int("screen", "player_hires_style", HIRESBADGE_TWO_LINE));
+}
+
+void player_hires_style_set(hiresbadge_style_t style) {
+	if (style < HIRESBADGE_TWO_LINE || style >= HIRESBADGE_STYLE_COUNT) return;
+	config_set_int("screen", "player_hires_style", style);
+	config_save();
+	hires_style = style;
+	if (hires_badge.box) hiresbadge_apply(&hires_badge, style);
 	device_state_t state;
 	device_state_get(&state);
 	update_hires_badge(&state);
@@ -8110,20 +8127,9 @@ void player_init(gui_config_t *cfg) {
 	// flattens all four into the same grey glyph.
 	studio_quality_icon = lv_image_create(studio_quality);
 
-	// Compact, high-contrast mark like the reference, legible on any sleeve.
-	// It is a label, not a control: gestures still reach the artwork below.
-	hires_badge = lv_label_create(cover_art_group);
-	lv_label_set_text(hires_badge, "HI-\nRES");
-	lv_obj_set_style_text_font(hires_badge, &font_ui_14, 0);
-	lv_obj_set_style_text_color(hires_badge, lv_color_black(), 0);
-	lv_obj_set_style_text_line_space(hires_badge, -4, 0);
-	lv_obj_set_style_bg_color(hires_badge, lv_color_white(), 0);
-	lv_obj_set_style_bg_opa(hires_badge, LV_OPA_COVER, 0);
-	lv_obj_set_style_radius(hires_badge, 3, 0);
-	lv_obj_set_style_pad_hor(hires_badge, 3, 0);
-	lv_obj_set_style_pad_ver(hires_badge, 1, 0);
-	lv_obj_set_clickable(hires_badge, false);
-	lv_obj_set_hidden(hires_badge, true);
+	hiresbadge_build(&hires_badge, cover_art_group);
+	hires_style = player_hires_style_get();
+	hiresbadge_apply(&hires_badge, hires_style);
 
 	lyrics_build();
 
