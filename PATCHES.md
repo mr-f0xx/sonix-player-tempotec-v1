@@ -3449,3 +3449,38 @@ fake ALSA, queue/ticket logic, and D-Bus metadata signals. It cannot substitute
 for a V1, BlueALSA and the reported senders. A Bluetooth log taken immediately
 after each separate failure is needed to distinguish link-level disconnects,
 codec negotiation and RX-worker failures.
+
+## Bluetooth RX mode that could not be left (issue #245)
+
+Pairing a Bluetooth *transmitter* from the Bluetooth page under **Paired
+Devices** puts the player into RX mode automatically, which is intended. Leaving
+that mode did not work: the confirmation came up, the player stayed on the RX
+screen, and only a reboot got out of it.
+
+The cause was in how the Bluetooth page learns the outcome of an action. That
+outcome is reported by `bluetooth_take_op_result()`, which hands a finished
+answer out exactly once so the page can act on it and move on. Four answers end
+an action -- `BT_OP_OK`, `BT_OP_PAIRED`, `BT_OP_NEEDS_RECEIVER` and
+`BT_OP_FAILED` -- but only three were being cleared. `BT_OP_NEEDS_RECEIVER`,
+the answer that says "this device connects as an A2DP source, so receiver mode
+has to come first", was handed out and left set.
+
+So after the page opened RX mode for it, the same answer was still armed. RX
+mode's own page does not poll it, so nothing acted on it while the mode was up.
+On the way out the Bluetooth page is loaded again, and its first poll runs
+immediately (`lv_timer_ready()`): it read the same stale answer and called
+`open_receiver_mode()` -- pushing the player straight back into RX mode, every
+half second, whatever the user confirmed. Connecting to a transmitter from
+inside the RX page instead asked with the receiver already wanted, which answers
+`BT_OP_OK` and *was* consumed, which is why that path always worked.
+
+`BT_OP_NEEDS_RECEIVER` is now consumed like the other three. `BT_OP_BUSY` stays
+unconsumed on purpose: it marks work still in flight rather than an answer, and
+the page relies on it staying until the real result is posted. The page also
+refuses to re-open RX mode when it is already on that screen, so a repeated
+answer could not rebuild the page under itself either.
+
+`make -C sonix-player/tests bluetooth` checks that every terminal answer is
+reported once and only once, and that `BT_OP_BUSY` is not consumed. Reverting
+the one-line fix makes that check fail. A V1 with a Bluetooth transmitter should
+still confirm the round trip on hardware.

@@ -4665,7 +4665,15 @@ bt_op_t bluetooth_take_op_result(char *name_out, int name_size) {
 	if (name_out && name_size > 0) {
 		snprintf(name_out, (size_t)name_size, "%s", g_op_name);
 	}
-	if (op == BT_OP_OK || op == BT_OP_PAIRED || op == BT_OP_FAILED) {
+	// Every answer that ends an action is handed out once. NEEDS_RECEIVER is
+	// one of them: it says the connect cannot happen in TX mode and has been
+	// deferred to the receiver, and the page acts on it by opening receiver
+	// mode. Leaving it set -- it was the one terminal answer missing here --
+	// meant the flag outlived the switch it caused: the Bluetooth page came
+	// back after leaving RX, its first poll read the same still-armed answer
+	// and opened receiver mode again, so the mode could never be left. BUSY is
+	// deliberately not cleared: it marks work still in flight, not an answer.
+	if (op == BT_OP_OK || op == BT_OP_PAIRED || op == BT_OP_NEEDS_RECEIVER || op == BT_OP_FAILED) {
 		g_op = BT_OP_IDLE;
 	}
 	pthread_mutex_unlock(&lock);

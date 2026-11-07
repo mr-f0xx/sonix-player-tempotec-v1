@@ -582,6 +582,40 @@ static void test_rx_discoverability_and_phone_pairing(void) {
 	g_receiver_profile = false;
 }
 
+static void test_op_result_is_reported_once(void) {
+	/* A page asks "what came of the last action?" until it gets an answer.
+	 * Every terminal answer has to be handed out exactly once: an answer left
+	 * set is indistinguishable from the action still in flight, and the page
+	 * acts on it again -- which is what happened to NEEDS_RECEIVER. It stayed
+	 * armed after the receiver was opened for it, so the Bluetooth page's first
+	 * poll on the way back out opened receiver mode a second time, and RX mode
+	 * could not be left at all (issue #245). */
+	bt_op_t answers[] = {BT_OP_OK, BT_OP_PAIRED, BT_OP_NEEDS_RECEIVER, BT_OP_FAILED};
+	for (size_t i = 0; i < sizeof(answers) / sizeof(answers[0]); i++) {
+		set_op(answers[i], "Some Device");
+		char name[BT_NAME_MAX] = "";
+		assert(bluetooth_take_op_result(name, sizeof(name)) == answers[i]);
+		assert(strcmp(name, "Some Device") == 0);
+		/* Spent: the next look finds nothing to act on. */
+		assert(bluetooth_take_op_result(NULL, 0) == BT_OP_IDLE);
+	}
+
+	/* BUSY is not an answer but a marker for work still running, so it stays
+	 * until the job posts its real result. */
+	set_op(BT_OP_BUSY, NULL);
+	assert(bluetooth_take_op_result(NULL, 0) == BT_OP_BUSY);
+	assert(bluetooth_take_op_result(NULL, 0) == BT_OP_BUSY);
+	set_op(BT_OP_OK, "Some Device");
+	assert(bluetooth_take_op_result(NULL, 0) == BT_OP_OK);
+	assert(bluetooth_take_op_result(NULL, 0) == BT_OP_IDLE);
+
+	/* A pairing that defers to the receiver, acted on once, does not come
+	 * back: the second look must not re-open RX mode. */
+	set_op(BT_OP_NEEDS_RECEIVER, "Galaxy Z Fold");
+	assert(bluetooth_take_op_result(NULL, 0) == BT_OP_NEEDS_RECEIVER);
+	assert(bluetooth_take_op_result(NULL, 0) != BT_OP_NEEDS_RECEIVER);
+}
+
 static void test_scan_pairing_window(void) {
 	assert(SCAN_SECONDS == 30);
 	g_enabled = true;
@@ -698,6 +732,7 @@ int main(void) {
 	test_rfkill_lookup();
 	test_boot_cleanup_queue();
 	test_rx_discoverability_and_phone_pairing();
+	test_op_result_is_reported_once();
 	test_scan_pairing_window();
 	printf("PASS bluetooth (A2DP directions, RX profile/pairing, scan visibility, startup, ALSA template, radio switch and boot cleanup)\n");
 	return 0;
