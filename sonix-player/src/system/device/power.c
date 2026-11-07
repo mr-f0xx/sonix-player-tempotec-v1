@@ -49,6 +49,7 @@
 #include "src/system/device/usb.h"
 #include "src/system/audio/usbdac.h"
 #include "src/system/audio/usbaudio.h"
+#include "src/system/audio/usbhostmode.h"
 #include "src/system/audio/usbhostprobe.h"
 #include "src/system/gearboy/gearboy.h"
 #include "src/system/device/led.h"
@@ -1566,6 +1567,24 @@ static void suspend_if_idle(uint32_t now, bool playing) {
 		mem_skip("the charger is plugged in");
 		return;
 	}
+	// A forced host role is not a reason to stay awake. The external USB DAC
+	// setting makes the port the host for as long as it is switched on, which
+	// is for ever -- and the cable has just answered that nothing is plugged
+	// in, so there is no DAC to cut. A role left forced with the SoC asleep
+	// would also be one the resume could not account for, so it is given back
+	// here, on the way into the sleep; the setting is untouched and the port
+	// is taken again a second after the wake. This has to come before the
+	// "controller in use" test below, which it would otherwise trip.
+	if (usbhostmode_active() && !usb_vbus_present()) {
+		usbhostmode_release(false);
+		if (usbhostprobe_active()) {
+			// Restoration could not be confirmed: do not sleep on an override
+			// that may not survive it.
+			mem_skip("the USB host role could not be given back");
+			return;
+		}
+	}
+
 	// And what the cable is carrying: the card exported over USB, or a computer
 	// feeding the DAC, both of which the suspend would cut. Below the cable
 	// itself now, and kept because a host can hold the port without VBUS.
@@ -2035,7 +2054,15 @@ void power_screen_on(void) {
 	// the one thing a wake must not do while the music plays. The Bluetooth
 	// receiver is not this case: there the DAC is playing, and the rewrite is
 	// exactly what it is for.
-	if (!audio_output_is_bluetooth()) {
+	//
+	// And skipped over the USB-C port, for a reason of its own: that call is
+	// the whole volume chain for whatever the sound is leaving through, and
+	// the USB device's own control is at the end of it. It rewrites the
+	// CS43198 -- which is not in that path -- and then re-parks the dongle's
+	// control, and both writes land in the middle of a live stream. The CS43198
+	// has a register worth putting back after a blank; a dongle on the USB bus
+	// was never blanked, never lost its power, and has nothing to restore.
+	if (!audio_output_is_bluetooth() && !usbaudio_active()) {
 		set_volume_percent(get_volume_percent());
 	}
 

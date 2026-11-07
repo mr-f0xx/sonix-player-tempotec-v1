@@ -3016,6 +3016,196 @@ layout suite also checks that DAC no longer blocks the Control Centre while
 file-transfer and Bluetooth-receiver modes remain blocked. The tests do not
 replace an on-device touch and listening check.
 
+## External USB DACs that only worked in the trial
+
+Two USB-C dongles were reported against a V1: a JCally and, later, an ESR. Both
+did nothing on the port; both worked at once when developer options ran **Try
+external USB DAC**. That is the whole of the evidence, and it is enough -- two
+unrelated devices, one behaviour, one workaround that changes exactly two
+writes.
+
+The reason is the role rather than the code. `arbitrate_port()` leaves the
+TCS1421 in `NormalDRP` while the port is empty, which is what lets a phone be
+handed the card and is what the stock player does by default. A USB-C sound
+card does not ask for the host role on the CC lines -- it simply waits to be
+enumerated -- so with the port dual and nothing acting as source, the far end
+is never supplied and never appears. Forcing `Source` on the TCS1421 and `host`
+on the x1600 PHY supplies it, which is exactly what the trial does.
+
+So the trial's writes are now available as a setting, not as a twenty-second
+diagnosis:
+
+- **Developer options → External USB DAC** switches on `[usb] host_dac` in
+  `device_config.ini`. While it is on, `usbhostmode.c` asks
+  `usbhostprobe_begin_held()` for the port: the same journal, the same
+  Source/host writes, the same refusal when ADB, DAC mode, an export, a
+  connected UDC or an unknown PHY is in the way -- with **no deadline and no
+  unplug rule**. A dongle that re-enumerates, or is plugged in the next
+  morning, finds the port still supplying it. Only the switch ends it.
+- The row says which of those it is: *held*, *waiting for the controller*,
+  *busy* (kept, retried every three seconds), or *unsupported* (this kernel
+  exposes no role that may be forced -- not retried, since nothing about it can
+  change while the player runs). "Switched on" and "a DAC is being driven" are
+  different sentences, and the second only comes from an ALSA card.
+- ADB, DAC mode, a storage export, suspend, shutdown, a firmware update and a
+  factory reset release the port through `usbhostmode_release()`. ADB, DAC mode
+  and shutdown keep the setting, so the port returns to holding a DAC when they
+  are finished; a firmware update and a factory reset clear it, because neither
+  the recovery they boot into nor the firmware after them would know it
+  inherited a forced role. A failed release is reported and nothing else is
+  allowed the controller.
+- A reservation taken away by someone else (`usb_external_host_yielded()`) is
+  how the held role learns that ADB or DAC mode needs the port: a held role has
+  no second chance to notice, unlike the trial, which re-checks every second.
+- `[power] standby_mem` no longer waits for it: with no cable on the port the
+  role is given back on the way into the suspend and taken again after the
+  wake, rather than keeping a player in a pocket awake all night or blocking the
+  sleep behind a permanently "in use" controller.
+- The twenty-second trial stays, one row below, and refuses while the setting
+  holds the port.
+
+The old note about the trial posed one condition that fits these two reports
+badly: "connect **only** a confirmed bus-powered DAC; a charger or computer must
+not be on the port". That stays -- `Source` is a promise to supply 5 V made
+before anything is identified -- and it is why this remains a setting somebody
+switches on rather than something the poll does by itself.
+
+Not verified here: no board is in this environment. The reasoning is from the
+V1 1.3 kernel in this repository (`sw_switch_hsotg` on the x1600 PHY, the
+`tcs1421_add.ko` module and its four role names) and from the two reports. What
+still needs a device: that the role survives a played track, a standby and a
+reboot; that a DAC re-enumerates after a suspend with the setting on; and what
+the port does when a charger is plugged in while it is held. `make -C
+sonix-player/tests usbhost` now runs `test_usbhostmode` (hold, yield, retry and
+release, with the config and the probe replaced) and the held-mode half of
+`test_usbhostprobe` (no timeout, no unplug release), on top of the existing
+suites. Neither models the electrical behaviour of the socket.
+
+### On the V1: recognised at once, then silent after about ninety seconds
+
+The first board report of the setting. Both dongles behaved the same way: the
+ESR was found immediately and played for about a minute and a half, then the
+sound stopped with the player still playing and the top bar still showing the
+USB-C glyph; unplugging and replugging it brought it back for another minute and
+a half; the JCally did the same. Swapping one dongle for the other took about
+ten seconds to be noticed, and a few times a dongle was not found at all.
+
+So the role acquisition works -- the part this change was for. What fails
+afterwards is everything downstream of it, and the three things below are the
+ones this repository can actually point at. There is no board here: each is
+reasoned from the code, and the log line added last is what tells them apart on
+the next run.
+
+- **The held role is now checked, not just written.** `Source` on the TCS1421 is
+  a request to the controller's own state machine, not a setting that stays: the
+  driver re-runs its role decision on every attach and detach, and the role it
+  started in is `NormalDRP`. Two bad reads a second apart -- nothing on the host
+  bus *and* the attribute not reading `Source` -- write both controls again, no
+  more often than every five seconds. A device enumerated on the bus is proof
+  the far end is alive whatever the attribute says, and is never rewritten under.
+- **A USB device is no longer "played" out of the jack.** `open_pcm_device()`
+  falls back to `default` -- the CS43198 -- when the device it was asked for
+  will not open, which is right for headphones that walked out of range and
+  wrong for a dongle the player is itself the host of: the sound goes into a
+  socket nobody is listening to while the interface keeps the USB-C glyph up,
+  which is exactly the shape of the report. The fallback is now Bluetooth's
+  alone. The USB side gets ten seconds of retries instead of two -- a dongle
+  that has just re-enumerated needs seconds, not milliseconds, before its card
+  is back -- and a track that still cannot open says so and stops rather than
+  playing somewhere else.
+- **The wake no longer rewrites the volume chain under a live USB stream.**
+  `power_screen_on()` re-applies the volume for the CS43198's benefit after every
+  blank. That call is the whole chain, and on the USB route it ends in the
+  dongle's own control; the CS43198 is not in that path at all and a dongle on
+  the bus was never blanked. It is skipped while the USB card is the output.
+- **A second dongle is a second device.** Both land on the lowest free card
+  number, usually card 1, so the number stayed put across a swap and the new
+  device kept the old one's name and level. The poll now reads the bus name the
+  card hangs off (`1-1`) and routes again when that has moved.
+- **The health line says what the stream is doing.** Once per `HEALTH_PERIOD_MS`
+  (10 s) per track it now carries the PCM's state and how much is still queued:
+  `stream RUNNING with 4096 frames queued (92 ms)`. A RUNNING stream whose queue
+  does not go down is a device being handed frames it is not consuming; a
+  PREPARED one never started. That single clause is what separates a dead dongle
+  from a stalled decoder on the next log.
+
+`make -C sonix-player/tests usbhost` covers the first, the fourth and the
+`read_card_bus()` half of the fourth: `test_usbhostprobe` drives the rewrite on
+its slower beat and the "device on the bus is never rewritten" rule, and
+`test_usbaudio_arbitration` resolves a card's device link both ways. The audio
+fallback and the wake are compile-checked only -- there is no ALSA here and the
+host simulator cannot be linked without it.
+
+### On the V1: the ninety seconds, and a hiss under the music
+
+The log from that report (`sonix_player-neu.log`) has both answers in it, and
+neither is where the guesses above were pointing.
+
+**The ninety seconds is Bluetooth being parked.** The sequence is in the log
+five times, to the tenth of a second:
+
+```
+13:31:13.577 power: screen off after 30037 ms without input (timeout 30000 ms)
+13:32:13.442 power: parking Bluetooth after 60115 ms unused
+13:32:13.485 audio[N]: the output moves from 'plughw:3,0' to 'default'
+13:32:14.092 volume: usb-c -> 3.5 mm, 47%
+```
+
+Thirty seconds to a dark screen, a minute more before the radio is parked, and
+300 milliseconds after `park_bluetooth_now()` -> `bluetooth_set_enabled_transient(false)`
+-> `bring_stack_down()` -> `apply_output_routing()` the output was set to
+`default` -- the CS43198 -- because there was no A2DP sink. A dongle on the
+USB-C port lost the route the moment a radio it had nothing to do with was
+switched off. The player reopens the PCM on a route change and on the next
+track, so the music moved to the jack while the USB-C glyph stayed up, and
+`usbaudio_poll()` saw `active_card` still set and did nothing to correct it.
+That is why it looked like a dead dongle rather than a re-route.
+
+It is not a role problem at all, which is why re-writing `Source` and extending
+the open budget last time did not help. `apply_output_routing()` now leaves a
+`plughw:`/`hw:` route alone when it has no sink to point at: `usbaudio.c` owns
+that route and clears it when the port empties. A bluealsa route is still
+cleared, because that daemon is going away under it.
+
+**The hiss is where the level is applied.** Both dongles are quiet but not
+silent with no music, the louder one is worse, and neither a phone nor the
+stock firmware does it. That is the signature of the player holding the device's
+own mixer at 0 dB and turning the *samples* down instead: the music drops 21.5 dB
+at the log's 57% while the dongle's output amplifier still runs at full gain, so
+the music ends up that much closer to the amplifier's own noise floor. A phone
+turns the dongle's control down; the stock firmware does too. Nothing is broken
+in the dongle, and a quieter-output device hisses less for exactly this reason.
+
+`[usb] hardware_volume` now defaults to **1**: the device's control takes the
+nearest step at or above the target and the samples take the remainder, so the
+level still moves in the player's own fine steps while the attenuation happens
+where the noise floor is. On the log's `PCM Playback Volume` (0..50 over
+-50.00..0.00 dB, so 1 dB a step) index 57% puts -21.0 dB on the control and
+-0.5 dB on the samples, against 0 dB and -21.5 dB before: the same loudness at
+the ear and 21 dB less hiss.
+
+Setting `hardware_volume = 0` gets the old behaviour back, which is still the
+right answer for a device whose own control is worse than its noise floor. The
+guard rails stay: a scale that cannot be believed, a control that reads back
+unchanged, or a write that fails all fall back to the samples carrying the whole
+level, as before.
+
+One bug fell out of testing the split. The "asked for something below the top
+and it is still at the top" check used a dead band of a twentieth of the range,
+which on a short control (0..10 over 10 dB) is two whole steps -- so a write that
+landed exactly where it was told was judged to have done nothing and the control
+was given up. A headset with a coarse control would have been pushed back onto
+the samples and started hissing again. The dead band is now capped at a quarter
+of the range and also requires the read-back to differ from what was asked for.
+
+Tests: `test_usbaudio_volume` (new, in `make usbhost`) covers the split against
+a fake mixer -- the device taking the level, a coarse control still moving
+smoothly, a lying dB descriptor, a control that will not move, the old default
+on request, no control at all, and mute. `test_bluetooth` gains the routing case:
+a `plughw:` and an `hw:` route both survive a radio teardown, the jack is still
+taken back, a bluealsa route is still cleared, and a sink being connected still
+wins. Both were checked to fail against the old code before the fix.
+
 ## Bluetooth drop-outs with Wi-Fi joined, and a USB-C DAC that was never found
 
 Two reports from one test session on a V1. Neither could be reproduced here --

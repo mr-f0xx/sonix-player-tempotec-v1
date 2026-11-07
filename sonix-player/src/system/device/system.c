@@ -29,6 +29,7 @@
 #include "src/system/bluetooth/btplayer.h"
 #include "src/system/audio/audio.h"
 #include "src/system/audio/alsa-controls.h"
+#include "src/system/audio/usbhostmode.h"
 #include "src/system/audio/usbhostprobe.h"
 #include "src/system/playback/device_state.h"
 #include "src/system/library/audiobookdb.h"
@@ -1036,7 +1037,10 @@ void storage_release_for_shutdown(void) {
 	// This common exit path also runs for reboot and firmware recovery. End a
 	// manual USB host override while the process can still retry or leave its
 	// persistent recovery journal intact, even when no SD card is configured.
-	if (!usbhostprobe_cancel()) {
+	// The external USB DAC setting stays as it was left -- the player is
+	// expected to come back with the port held again -- but the port itself is
+	// given back now.
+	if (!usbhostmode_release(false)) {
 		fprintf(stderr, "usbhost: could not restore the port before shutdown; keep computers and chargers disconnected\n");
 	}
 	if (!g_storage_cfg || !g_storage_cfg->manage_mount) {

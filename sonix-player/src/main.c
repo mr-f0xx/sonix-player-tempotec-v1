@@ -35,6 +35,7 @@
 #include "src/system/audio/alsa-controls.h"
 #include "src/system/playback/sleeptimer.h"
 #include "src/system/audio/usbaudio.h"
+#include "src/system/audio/usbhostmode.h"
 #include "src/system/audio/usbhostprobe.h"
 #include "src/system/audio/audio.h"
 #include "src/system/library/audiobookdb.h"
@@ -2382,6 +2383,10 @@ int main(int argc, char **argv) {
 	// lands on it rather than on a CS43198 nobody is listening to.
 	usbaudio_init();
 	usbaudio_poll();
+	// What the external USB DAC setting was left as, in the log's own words:
+	// whether the port is held as host is the first thing to check in a bug
+	// report about a dongle that did or did not play.
+	usbhostmode_log_state("startup");
 
 	// "Remember volume": the saved levels replace audio_init's default. Every
 	// output's, not only the one in use, because which output is in force at

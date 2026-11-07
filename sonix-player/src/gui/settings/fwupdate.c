@@ -10,6 +10,7 @@
 #include "src/gui/board_profile.h"
 #include "src/gui/shell/theme.h"
 #include "src/system/core/lang.h"
+#include "src/system/audio/usbhostmode.h"
 #include "src/system/audio/usbhostprobe.h"
 #include "src/system/device/firmware.h"
 #include "src/system/device/ota.h"
@@ -551,7 +552,10 @@ static void show_release(void) {
 
 static void install_cb(lv_timer_t *timer) {
 	(void)timer;
-	if (!usbhostprobe_cancel()) {
+	// A firmware update must not start while the USB port is being forced to
+	// supply a DAC: the recovery the update boots into knows nothing about that
+	// override, and the setting does not exist over there. Released and cleared.
+	if (!usbhostmode_release(true)) {
 		close_card();
 		gui_notify_popup_long("usbhost_restore_failed");
 		return;
@@ -658,7 +662,7 @@ static void sd_run(void *unused) {
 		return;
 	}
 	printf("firmware: update file %s\n", path);
-	if (!usbhostprobe_cancel()) {
+	if (!usbhostmode_release(true)) {
 		gui_notify_popup_long("usbhost_restore_failed");
 		return;
 	}

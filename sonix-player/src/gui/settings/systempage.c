@@ -18,6 +18,7 @@
 #include "src/system/core/config.h"
 #include "src/system/device/factoryreset.h"
 #include "src/system/audio/headset.h"
+#include "src/system/audio/usbhostmode.h"
 #include "src/system/audio/usbhostprobe.h"
 #include "src/system/core/lang.h"
 #include "src/system/device/power.h"
@@ -77,8 +78,10 @@ static void firmware_clicked_cb(lv_event_t *e) {
 
 static void factory_second_confirmed(void *user) {
 	(void)user;
-	// The stock reset removes the recovery journal with the rest of /data.
-	if (!usbhostprobe_cancel()) {
+	// The stock reset removes the recovery journal with the rest of /data, and
+	// the settings file with the USB host setting in it: both are cleared here
+	// so that the port is not left forced with nothing left to describe why.
+	if (!usbhostmode_release(true)) {
 		gui_notify_popup_long("usbhost_restore_failed");
 		return;
 	}

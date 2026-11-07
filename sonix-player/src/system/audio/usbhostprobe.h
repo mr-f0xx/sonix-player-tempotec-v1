@@ -27,6 +27,26 @@ typedef enum {
 } usbhost_probe_event_t;
 
 usbhost_probe_result_t usbhostprobe_begin(void);
+
+// The same request, made to last.
+//
+// A USB-C sound card presents nothing on the CC lines that this port reads as
+// a request for the host role, so on the dual-role setting the controller
+// never supplies the far end and the card never enumerates. Two different
+// dongles -- a JCally and an ESR -- were each invisible until the trial above
+// forced Source/host, and each worked perfectly once it had. So the same
+// writes are kept for as long as something is worth playing to, with no
+// diagnostic time limit: only a charger, a computer or a phone on the port,
+// another owner (ADB, DAC mode, storage) or the user ends it.
+//
+// Still explicit: it is reached through the setting in developer options, and
+// it is the same privilege as the trial -- this player is the one supplying
+// the port's power.
+usbhost_probe_result_t usbhostprobe_begin_held(void);
+
+// True while the role is held rather than being tried.
+bool usbhostprobe_held(void);
+
 usbhost_probe_event_t usbhostprobe_poll(bool audio_card, bool audio_interface);
 // True only once both the PHY override and the original Type-C mode are back.
 // If restoration fails, ownership is retained and the poll retries it.

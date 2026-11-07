@@ -30,7 +30,21 @@ void config_set(const char *section, const char *key, const char *value) {
 
 bool config_save(void) { return true; }
 
-void audio_set_output_device(const char *pcm) { (void)pcm; }
+// What apply_output_routing() asked the player to play on. The routing is the
+// point of the case below: a radio being parked drives the same call a
+// headphone connection does, and what it hands over is what the next PCM open
+// will use.
+static char routed_to[128] = "default";
+
+void audio_set_output_device(const char *pcm) {
+	snprintf(routed_to, sizeof(routed_to), "%s", (pcm && pcm[0]) ? pcm : "default");
+}
+
+void audio_get_output_device(char *out, size_t size) {
+	if (out && size) {
+		snprintf(out, size, "%s", routed_to);
+	}
+}
 
 bool btstack_audio_source(char *address_out, size_t size) {
 	if (address_out && size) {
@@ -723,6 +737,65 @@ static void test_rx_request_queue(void) {
 	pthread_mutex_unlock(&lock);
 }
 
+/* A route on the USB-C port is not apply_output_routing()'s to give away.
+ *
+ * This is the V1 report's "stops after about ninety seconds": the screen blanks
+ * thirty seconds after the last touch, Bluetooth is parked a minute after that,
+ * and the teardown calls this with nothing to play over the air. Handing the
+ * player NULL puts the next PCM open back on the CS43198 -- the jack -- while
+ * the dongle is still on the cable and usbaudio.c still has it routed. The
+ * sound comes back out of the player instead of the headphones.
+ */
+static void test_usb_route_survives_a_radio_teardown(void) {
+	pthread_mutex_lock(&lock);
+	g_enabled = true;
+	g_a2dp_connected = false; /* no sink: the teardown's own state */
+	g_a2dp_mac[0] = '\0';
+	pthread_mutex_unlock(&lock);
+	source_pcm = false;
+
+	/* A card on the port stays exactly where it is. */
+	snprintf(routed_to, sizeof(routed_to), "plughw:3,0");
+	apply_output_routing();
+	assert(strcmp(routed_to, "plughw:3,0") == 0);
+
+	/* hw: names the same device without the plug. */
+	snprintf(routed_to, sizeof(routed_to), "hw:3,0");
+	apply_output_routing();
+	assert(strcmp(routed_to, "hw:3,0") == 0);
+
+	/* The jack is this call's to take, and the teardown still takes it: with
+	 * no sink the route is "default", which is the CS43198 and the right answer
+	 * when the sound was coming out of it anyway. */
+	snprintf(routed_to, sizeof(routed_to), "default");
+	apply_output_routing();
+	assert(strcmp(routed_to, "default") == 0);
+
+	/* And a bluealsa route is cleared, because the daemon is going away under
+	 * it: the sound must not stay pointed at a PCM that is about to be
+	 * killed. This is the case the reset exists for. */
+	snprintf(routed_to, sizeof(routed_to), "bluealsa:DEV=20:04:84:3A:6C:FE,PROFILE=a2dp");
+	apply_output_routing();
+	assert(strcmp(routed_to, "default") == 0);
+
+	/* A sink being connected still wins over the USB card: that is a
+	 * deliberate choice by the listener, made after the cable went in. */
+	pthread_mutex_lock(&lock);
+	g_enabled = true;
+	g_a2dp_connected = true;
+	snprintf(g_a2dp_mac, sizeof(g_a2dp_mac), "20:04:84:3A:6C:FE");
+	pthread_mutex_unlock(&lock);
+	snprintf(routed_to, sizeof(routed_to), "plughw:3,0");
+	apply_output_routing();
+	assert(strcmp(routed_to, "bluealsa:DEV=20:04:84:3A:6C:FE,PROFILE=a2dp") == 0);
+
+	pthread_mutex_lock(&lock);
+	g_a2dp_connected = false;
+	g_a2dp_mac[0] = '\0';
+	pthread_mutex_unlock(&lock);
+	snprintf(routed_to, sizeof(routed_to), "default");
+}
+
 int main(void) {
 	test_rx_request_queue();
 	test_a2dp_directions();
@@ -734,6 +807,7 @@ int main(void) {
 	test_rx_discoverability_and_phone_pairing();
 	test_op_result_is_reported_once();
 	test_scan_pairing_window();
+	test_usb_route_survives_a_radio_teardown();
 	printf("PASS bluetooth (A2DP directions, RX profile/pairing, scan visibility, startup, ALSA template, radio switch and boot cleanup)\n");
 	return 0;
 }

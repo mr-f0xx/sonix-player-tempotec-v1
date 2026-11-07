@@ -9,6 +9,7 @@
 #include <unistd.h>
 
 static char fake_typec[256], fake_partner[256], fake_tcs[256], fake_id[256], fake_bus[256];
+static char fake_sound[256];
 static bool fake_vbus, fake_probe;
 static time_t fake_now = 100;
 static time_t fake_time(time_t *out) { if (out) *out = fake_now; return fake_now; }
@@ -18,6 +19,8 @@ static time_t fake_time(time_t *out) { if (out) *out = fake_now; return fake_now
 #define TCS1421_CFG fake_tcs
 #define DWC2_OTG_ID fake_id
 #define USB_AUDIO_BUS fake_bus
+#undef SOUND_CLASS
+#define SOUND_CLASS fake_sound
 #define time fake_time
 #include "../src/system/audio/usbaudio.c"
 #undef time
@@ -44,7 +47,9 @@ int main(void) {
 	pathcat(fake_tcs, sizeof(fake_tcs), root, "/tcs");
 	pathcat(fake_id, sizeof(fake_id), root, "/id-missing");
 	pathcat(fake_bus, sizeof(fake_bus), root, "/bus");
+	pathcat(fake_sound, sizeof(fake_sound), root, "/sound");
 	assert(mkdir(fake_bus, 0700) == 0);
+	assert(mkdir(fake_sound, 0700) == 0);
 	put(fake_tcs, "Sink\n");
 
 	// The reported log state: VBUS with no readable ID and no device is
@@ -95,7 +100,37 @@ int main(void) {
 	assert(usbaudio_handover_pending());
 
 	assert(unlink(cls) == 0 && rmdir(iface) == 0 && rmdir(device) == 0);
-	assert(unlink(fake_tcs) == 0 && rmdir(fake_bus) == 0 && rmdir(root) == 0);
+
+	// A card's bus name is the device behind it, not the interface: card1's
+	// device link resolves to .../usb1/1-1/1-1:1.0 and the dongle is "1-1".
+	// This is what tells two dongles apart when both land on the same card
+	// number -- one out, the other in.
+	char card1[256], card1_link[256], card1_dev[256];
+	char usb1[256], dev1[256], iface1[256];
+	pathcat(usb1, sizeof(usb1), fake_bus, "/usb1");
+	pathcat(dev1, sizeof(dev1), usb1, "/1-1");
+	pathcat(iface1, sizeof(iface1), dev1, "/1-1:1.0");
+	assert(mkdir(usb1, 0700) == 0 && mkdir(dev1, 0700) == 0 && mkdir(iface1, 0700) == 0);
+	// First the interface, as the kernel's link for a sound card points at it,
+	// then the device itself, for a card that hangs straight off one.
+	char *one_device[2] = {"/1-1:1.0", ""}; // the interface, then the device itself
+	for (int i = 0; i < 2; i++) {
+		pathcat(card1, sizeof(card1), fake_sound, "/card1");
+		assert(mkdir(card1, 0700) == 0);
+		pathcat(card1_dev, sizeof(card1_dev), dev1, one_device[i]);
+		pathcat(card1_link, sizeof(card1_link), card1, "/device");
+		assert(symlink(card1_dev, card1_link) == 0);
+		char bus[32];
+		read_card_bus(1, bus, sizeof(bus));
+		assert(strcmp(bus, "1-1") == 0); // the interface and the device alike
+		assert(unlink(card1_link) == 0 && rmdir(card1) == 0);
+	}
+	char empty[32];
+	read_card_bus(1, empty, sizeof(empty));
+	assert(empty[0] == '\0'); // no card, no name
+	assert(rmdir(iface1) == 0 && rmdir(dev1) == 0 && rmdir(usb1) == 0);
+
+	assert(unlink(fake_tcs) == 0 && rmdir(fake_bus) == 0 && rmdir(fake_sound) == 0 && rmdir(root) == 0);
 	puts("PASS USB audio arbitration (unknown ID, VBUS, active card and host trial)");
 	return 0;
 }

@@ -27,6 +27,7 @@
 #include "src/system/bluetooth/btlog.h"
 #include "src/system/device/sysserver.h"
 #include "src/system/audio/usbaudio.h"
+#include "src/system/audio/usbhostmode.h"
 #include "src/system/audio/usbhostprobe.h"
 #include "src/system/core/utils.h"
 #include "src/system/streaming/radio.h"
@@ -217,8 +218,11 @@ bool usb_set_dac_mode(bool on) {
 		dac_owns_usb = true;
 		// The gadget must not take a controller whose forced host override
 		// could not be cleared. Cancellation serializes against a trial that
-		// is starting at the same time.
-		if (!usbhostprobe_cancel()) {
+		// is starting at the same time. The external USB DAC setting is
+		// released but kept: this player is being a sound card now, and when
+		// DAC mode is switched off the port goes back to driving a DAC of its
+		// own if that is how it was left.
+		if (!usbhostmode_release(false)) {
 			dac_owns_usb = false;
 			suppress_popups = false;
 			return false;
@@ -688,7 +692,9 @@ static bool gadget_rebind(void) {
 // the player (see the watcher), and unbinding under an exported medium left it
 // unmounted here and gone from the host, until the cable was pulled.
 bool usb_gadget_yield_to_adb(void) {
-	if (!usbhostprobe_cancel()) {
+	// Kept, not cleared: ADB is a thing the user switched on for a moment, and
+	// the port goes back to holding a DAC when it is switched off again.
+	if (!usbhostmode_release(false)) {
 		fprintf(stderr, "usb: cannot start ADB while the host override is awaiting restoration\n");
 		return false;
 	}

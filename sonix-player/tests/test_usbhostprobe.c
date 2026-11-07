@@ -10,7 +10,7 @@
 #include <time.h>
 #include <unistd.h>
 
-static char test_cfg[256], test_platform[256], test_journal[256], test_phy[256];
+static char test_cfg[256], test_platform[256], test_journal[256], test_phy[256], test_bus[256];
 static long long fake_now;
 static int fail_phy_writes;
 static bool fail_tcs_write, fail_directory_sync;
@@ -47,6 +47,7 @@ static FILE *fake_fopen(const char *path, const char *mode) {
 
 #define USBHOST_TCS_CFG test_cfg
 #define USBHOST_PLATFORM_DEVICES test_platform
+#define USBHOST_USB_BUS test_bus
 #define USBHOST_JOURNAL test_journal
 #define clock_gettime fake_clock_gettime
 #define fopen fake_fopen
@@ -79,6 +80,17 @@ static void put_bytes(const char *path, const void *data, size_t n) {
 	assert(fclose(f) == 0);
 }
 static void put(const char *path, const char *text) { put_bytes(path, text, strlen(text)); }
+// A device on the host bus, or its absence: the directory entry the kernel
+// makes for an enumerated device, and nothing else (no interface suffix).
+static void plug_bus_device(bool present) {
+	char dev[256];
+	pathcat(dev, sizeof(dev), test_bus, "/1-1");
+	if (present) {
+		if (mkdir(dev, 0700) != 0) assert(errno == EEXIST);
+	} else if (rmdir(dev) != 0) {
+		assert(errno == ENOENT);
+	}
+}
 static void expect(const char *path, const char *text) {
 	char out[256];
 	FILE *f = fopen(path, "r");
@@ -106,7 +118,9 @@ int main(void) {
 	pathcat(test_cfg, sizeof(test_cfg), root, "/tcs_cfg");
 	pathcat(test_platform, sizeof(test_platform), root, "/platform");
 	pathcat(test_journal, sizeof(test_journal), root, "/journal");
+	pathcat(test_bus, sizeof(test_bus), root, "/bus");
 	make_dir(test_platform);
+	make_dir(test_bus);
 	put(test_cfg, "NormalDRP\n");
 
 	// A missing journal directory is not proof that the journal is absent.
@@ -273,6 +287,98 @@ int main(void) {
 		assert(!reserved && access(test_journal, F_OK) != 0);
 	}
 
+	// A held role (the external USB DAC setting) is the same writes with no
+	// deadline: it does not time out, and a DAC that goes away -- or was never
+	// plugged in -- does not take the port back either. Only the user does.
+	put(test_cfg, "NormalDRP\n");
+	assert(usbhostprobe_begin_held() == USBHOST_PROBE_STARTED);
+	assert(usbhostprobe_active() && usbhostprobe_held() && reserved && access(test_journal, F_OK) == 0);
+	expect(test_cfg, "Source\n");
+	expect(test_phy, "host\n");
+	fake_now += USBHOST_TRIAL_SECONDS + USBHOST_AUDIO_PROBE_SECONDS;
+	assert(usbhostprobe_poll(false, false) == USBHOST_EVENT_NONE);
+	assert(usbhostprobe_active() && usbhostprobe_held() && reserved);
+	assert(usbhostprobe_poll(true, true) == USBHOST_EVENT_CARD);
+	assert(usbhostprobe_poll(true, true) == USBHOST_EVENT_NONE);
+	// Unplugged and gone for longer than the trial would allow, then plugged
+	// back in: the port was host throughout, which is the whole point.
+	fake_now += USBHOST_UNPLUG_SECONDS * 10;
+	assert(usbhostprobe_poll(false, false) == USBHOST_EVENT_NONE);
+	assert(usbhostprobe_active() && usbhostprobe_held());
+	assert(usbhostprobe_poll(true, true) == USBHOST_EVENT_NONE);
+	expect(test_cfg, "Source\n");
+	expect(test_phy, "host\n");
+	// The role is checked while it is held, and written again when the
+	// controller has gone back to its own default with nothing on the bus --
+	// which is what this port does on its own after an attach or a detach.
+	plug_bus_device(false);
+	put(test_cfg, "NormalDRP\n");
+	probe.checked_at = 0;
+	probe.checks = 0;
+	probe.rewritten_at = 0;
+	assert(usbhostprobe_poll(false, false) == USBHOST_EVENT_NONE);
+	expect(test_cfg, "NormalDRP\n"); // one bad read is a transition, not a port
+	fake_now += ROLE_CHECK_SECONDS;
+	assert(usbhostprobe_poll(false, false) == USBHOST_EVENT_NONE);
+	expect(test_cfg, "Source\n");
+	expect(test_phy, "host\n");
+	assert(probe.rewrites == 1);
+	// And not once per second after that: a port that keeps refusing is
+	// written again on the slower beat, so a wrong role is not a sysfs write
+	// and a log line every tick for the rest of the night.
+	put(test_cfg, "NormalDRP\n");
+	probe.checked_at = 0;
+	probe.checks = 0;
+	fake_now += ROLE_CHECK_SECONDS;
+	assert(usbhostprobe_poll(false, false) == USBHOST_EVENT_NONE);
+	fake_now += ROLE_CHECK_SECONDS;
+	assert(usbhostprobe_poll(false, false) == USBHOST_EVENT_NONE);
+	expect(test_cfg, "NormalDRP\n"); // held off until ROLE_REWRITE_SECONDS
+	fake_now += ROLE_REWRITE_SECONDS;
+	probe.checked_at = 0;
+	probe.checks = 0;
+	assert(usbhostprobe_poll(false, false) == USBHOST_EVENT_NONE);
+	fake_now += ROLE_CHECK_SECONDS;
+	assert(usbhostprobe_poll(false, false) == USBHOST_EVENT_NONE);
+	expect(test_cfg, "Source\n");
+	assert(probe.rewrites == 2);
+
+	// A device on the bus is the port doing its job, whatever the Type-C
+	// attribute reports: the driver is entitled to describe its own role and
+	// the far end is the answer that matters. Rewriting Source under a live
+	// dongle would be the one write that takes its session down.
+	plug_bus_device(true);
+	put(test_cfg, "NormalDRP\n");
+	probe.checked_at = 0;
+	probe.checks = 0;
+	probe.rewritten_at = 0;
+	for (int i = 0; i < 5; i++) {
+		fake_now += ROLE_CHECK_SECONDS;
+		assert(usbhostprobe_poll(true, true) == USBHOST_EVENT_NONE);
+	}
+	expect(test_cfg, "NormalDRP\n");
+	assert(probe.rewrites == 2);
+	plug_bus_device(false);
+
+	// Switched off: given back exactly like the trial, journal and all.
+	put(test_cfg, "Source\n");
+	assert(usbhostprobe_cancel());
+	assert(!usbhostprobe_active() && !usbhostprobe_held() && !reserved && access(test_journal, F_OK) != 0);
+	expect(test_cfg, "NormalDRP\n");
+	expect(test_phy, "none\n");
+
+	// A held role that could not be restored is still a role that must go back
+	// before anything else may have the controller.
+	assert(usbhostprobe_begin_held() == USBHOST_PROBE_STARTED);
+	fail_phy_writes = -1;
+	assert(!usbhostprobe_cancel());
+	assert(usbhostprobe_active() && usbhostprobe_restore_pending() && reserved);
+	fail_phy_writes = 0;
+	fake_now++;
+	assert(usbhostprobe_poll(false, false) == USBHOST_EVENT_RESTORED);
+	expect(test_cfg, "NormalDRP\n");
+	expect(test_phy, "none\n");
+
 	// The journal recovers an interrupted trial before any gadget may bind.
 	put(test_cfg, "NormalDRP\n");
 	assert(usbhostprobe_begin() == USBHOST_PROBE_STARTED);
@@ -328,7 +434,8 @@ int main(void) {
 	assert(rmdir(dev) == 0);
 	assert(rmdir(test_platform) == 0);
 	assert(unlink(test_cfg) == 0);
+	assert(rmdir(test_bus) == 0);
 	assert(rmdir(root) == 0);
-	puts("PASS usbhostprobe (guarded role trial, timeout, rollback and crash recovery)");
+	puts("PASS usbhostprobe (guarded role trial and held mode, timeout, rollback and crash recovery)");
 	return 0;
 }

@@ -60,6 +60,23 @@
   the graphic EQ, PEQ and MSEB process incoming PCM, while DSD passes through
   untouched.
 - **USB audio out** - a DAC or USB-C headphones driven with the player as host.
+- **External USB DAC** - a switch under Developer options that keeps the
+  USB-C port supplying power and acting as host, for a dongle that the
+  default dual-role setting never brings up. It is what made a JCally and
+  an ESR dongle work on a TempoTec V1; it stays on across reboots until it
+  is switched off. **A computer or a charger must not be connected while
+  it is on.** ADB, DAC mode and card sharing take the port over from it and
+  give it back afterwards, and it is given back automatically before a
+  suspend. The port's role is also read back every second while it is held
+  and written again if the controller has returned to its own default, which
+  it does on its own after an attach or a detach. A dongle that goes quiet is
+  never routed around: the track waits for it rather than being played to the
+  built-in DAC, and switching the Bluetooth radio off does not take the route
+  back either. The dongle's own volume control does most of the attenuation
+  rather than being left at full gain with the samples turned down, which is
+  what keeps a sensitive pair of IEMs free of background hiss. The older
+  twenty-second **Try external USB DAC** trial is still there, underneath it,
+  for a one-off test that leaves no setting behind.
 - **In-line remote** - the three-button cable remote: one click play/pause, two
   next, three previous.
 
@@ -507,9 +524,10 @@ a self-signed certificate), and HLS.
   the card.
 - **System** - device, DAC, serial number, card space, OS version, firmware
   update from a `.upt` on the card, and factory reset.
-- **Developer options** - unlocked by tapping the build number: ADB, log to the
-  card, database log, disabling the software volume attenuation, and a page of
-  running processes and memory.
+- **Developer options** - unlocked by tapping the build number: ADB, **External
+  USB DAC** (see *USB audio out* above) with the timed trial under it, log to
+  the card, database log, disabling the software volume attenuation, and a
+  page of running processes and memory.
 
 ### Hi-res artwork badge
 
