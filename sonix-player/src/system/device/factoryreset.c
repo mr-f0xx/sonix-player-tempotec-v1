@@ -87,6 +87,7 @@
 // is not a reset -- and because a file nobody deletes is a file that outlives
 // the thing that made it.
 #define EBOOK_CONFIG_FILE "/usr/data/ebook_config.ini"
+#define STREAMKEYS_DATA_FILE "/usr/data/streaming-keys.ini"
 
 // The two functions below serve only the real procedure, which the host build
 // does not have; without this guard the compiler reports them as defined but
@@ -197,7 +198,9 @@ void factoryreset_run(void) {
 	unmount_card();
 
 	// This player's configuration goes now, without waiting for the reboot.
-	static const char *const OURS[] = {CONFIG_FILE, CONFIG_FILE ".browser", CONFIG_FILE ".browser.tmp", EBOOK_CONFIG_FILE};
+	static const char *const OURS[] = {
+		CONFIG_FILE, CONFIG_FILE ".browser", CONFIG_FILE ".browser.tmp", EBOOK_CONFIG_FILE, STREAMKEYS_DATA_FILE,
+	};
 	for (size_t i = 0; i < sizeof(OURS) / sizeof(OURS[0]); i++) {
 		if (unlink(OURS[i]) == 0) {
 			printf("factoryreset: %s deleted\n", OURS[i]);
@@ -257,6 +260,8 @@ static const char *const KEEP[] = {
 	USBHOST_JOURNAL_NAME, // recovery must still see an interrupted host trial
 	"ebook_config.ini",
 	"ebook_config.ini.tmp",
+	"streaming-keys.ini",
+	"streaming-keys.ini.tmp",
 	"tidal_session.ini",
 	"lastfm.session",
 	"listenbrainz.token",

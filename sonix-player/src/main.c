@@ -60,6 +60,7 @@
 #include "src/system/streaming/podcastsubs.h"
 #include "src/system/streaming/podcastplayed.h"
 #include "src/system/streaming/tidalcache.h"
+#include "src/system/streaming/stockkeys.h"
 #include "src/system/streaming/streamkeys.h"
 #include "src/system/addons/addons.h"
 #include "src/system/lastfm/lastfm.h"
@@ -2294,7 +2295,11 @@ int main(int argc, char **argv) {
 	// already happened: they are told again only when the card changed the
 	// answer. Both are still before gui_init(), and the pages are built after
 	// it, so the Qobuz page is drawn the one way or the other on first sight.
-	if (streamkeys_load_card(card_root)) {
+	bool card_changed_keys = streamkeys_load_card(card_root);
+	if (stockkeys_try_boot_card(card_root)) {
+		card_changed_keys = true;
+	}
+	if (card_changed_keys) {
 		if (addons_enabled("qobuz")) {
 			qobuz_init();
 		}

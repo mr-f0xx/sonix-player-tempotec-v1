@@ -397,5 +397,60 @@ class TidalExtractTests(unittest.TestCase):
             self.assertEqual(sections["tidal"]["client_id"], TIDAL_CLIENT_ID.decode())
 
 
+class StockArchiveTests(unittest.TestCase):
+    def test_zip_archive_with_hiby_player_unpacks_directly(self):
+        import zipfile
+        with tempfile.TemporaryDirectory() as tmp:
+            zpath = os.path.join(tmp, "v1.zip")
+            ipath = os.path.join(tmp, "streaming-keys.ini")
+            with zipfile.ZipFile(zpath, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+                zf.writestr("usr/bin/hiby_player", realistic_mips_elf_with_tidal())
+            rc = ex.main([zpath, "-o", ipath])
+            self.assertEqual(rc, 0)
+            with open(ipath, encoding="utf-8") as f:
+                sections, _ = ex._parse_ini(f.read())
+            self.assertEqual(sections["qobuz"]["app_id"], APP_ID.decode())
+            self.assertEqual(sections["tidal"]["client_id"], TIDAL_CLIENT_ID.decode())
+
+    def test_split_part1_and_part2_joins_and_rejects_gaps(self):
+        import zipfile
+        import io
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+            zf.writestr("usr/bin/hiby_player", realistic_mips_elf_with_tidal())
+        raw = buf.getvalue()
+        mid = len(raw) // 2
+        with tempfile.TemporaryDirectory() as tmp:
+            p1 = os.path.join(tmp, "v1.zip.part1")
+            p2 = os.path.join(tmp, "v1.zip.part2")
+            p3 = os.path.join(tmp, "v1.zip.part3")
+            ipath = os.path.join(tmp, "streaming-keys.ini")
+            with open(p1, "wb") as f:
+                f.write(raw[:mid])
+            with open(p2, "wb") as f:
+                f.write(raw[mid:])
+            self.assertEqual(ex.main([p1, "-o", ipath]), 0)
+            # Remove part2 while creating part3 to verify gap detection.
+            os.unlink(p2)
+            with open(p3, "wb") as f:
+                f.write(b"x")
+            self.assertEqual(ex.main([p1, "--check"]), 1)
+
+    @unittest.skipUnless(
+        os.path.isfile(ex.DEFAULT_STOCK_INPUT),
+        "bundled TempoTec V1 1.3 stock firmware archive not present",
+    )
+    def test_default_bundled_stock_13_end_to_end_check(self):
+        import io
+        import contextlib
+        captured = io.StringIO()
+        with contextlib.redirect_stdout(captured):
+            rc = ex.main(["--check"])
+        self.assertEqual(rc, 0)
+        out = captured.getvalue()
+        self.assertIn("qobuz app_id:", out)
+        self.assertIn("tidal client_id:", out)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
