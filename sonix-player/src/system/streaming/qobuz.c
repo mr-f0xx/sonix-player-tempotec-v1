@@ -1,5 +1,6 @@
 #include "qobuz.h"
 
+#include <pthread.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -17,18 +18,35 @@
 // exercises the whole flow without a subscription (see tools/fake_qobuz.py).
 #define QOBUZ_BASE_DEFAULT "https://www.qobuz.com/api.json/0.2"
 
-// How long a reply is waited for, and how much of one is held in memory. A
-// hundred-track album stays under 400 KB; the cap keeps a runaway response from
-// becoming a memory problem.
-#define QOBUZ_TIMEOUT_SECS 15
-#define QOBUZ_BODY_LIMIT (2 * 1024 * 1024)
+// How long a reply is waited for, and how much decompressed JSON is held in
+// memory. A 50-track favourites or search page embeds full album metadata
+// (including editorial HTML descriptions and performer credits) on every item
+// and can run past two megabytes uncompressed.
+#define QOBUZ_TIMEOUT_SECS 20
+#define QOBUZ_BODY_LIMIT (6 * 1024 * 1024)
+
+// Qobuz session tokens are JWTs / long signed tokens well past the 128-byte
+// value limit of device_config.ini and the old 256-byte buffer, so they live in
+// their own session file like Tidal's (see qobuz_session.ini below).
+#define QOBUZ_TOKEN_MAX 4096
+#define QOBUZ_REQ_URL_MAX (QOBUZ_TOKEN_MAX * 3 + 1024)
+#define QOBUZ_FAVORITES_PAGE 50
+#define QOBUZ_SESSION_FILE "qobuz_session.ini"
+
+// Legacy device_config.ini entries are capped at CONFIG_VALUE_LEN (128), i.e.
+// 127 characters before NUL: any legacy token of that length was truncated.
+#define QOBUZ_LEGACY_CONFIG_MAX 127
 
 static char base_url[256];
 static char app_id[64];
 static char app_secret[128];
-static char auth_token[256];
+static char auth_token[QOBUZ_TOKEN_MAX];
 static char display_name[QOBUZ_NAME_MAX];
 static int format_id = QOBUZ_FORMAT_HIRES192;
+
+// Serialises session mutations and header construction across the UI worker,
+// qobuzsync, and track-URL fetches on the cache worker.
+static pthread_mutex_t api_lock = PTHREAD_MUTEX_INITIALIZER;
 
 // Per-thread like http_last_error(), and for the same reason: more than one
 // worker can have a request in flight, and they must not overwrite each other's
@@ -51,10 +69,101 @@ static void set_error(const char *fmt, ...) {
 static void clear_error(void) { last_error[0] = '\0'; }
 
 // ---------------------------------------------------------------------------
-// session
+// session file (alongside device_config.ini, unconstrained by its 128 B cap)
 // ---------------------------------------------------------------------------
 
+static void session_path(char *out, size_t size) {
+	out[0] = '\0';
+	const char *cfg = config_path();
+	if (!cfg || !cfg[0]) {
+		return;
+	}
+	const char *slash = strrchr(cfg, '/');
+	if (slash) {
+		snprintf(out, size, "%.*s/%s", (int)(slash - cfg), cfg, QOBUZ_SESSION_FILE);
+	} else {
+		snprintf(out, size, "%s", QOBUZ_SESSION_FILE);
+	}
+}
+
+static void save_session(void) {
+	char path[600];
+	session_path(path, sizeof(path));
+	if (!path[0]) {
+		return;
+	}
+
+	char tmp[640];
+	snprintf(tmp, sizeof(tmp), "%s.tmp", path);
+
+	FILE *f = fopen(tmp, "w");
+	if (!f) {
+		fprintf(stderr, "qobuz: cannot save the session to %s\n", tmp);
+		return;
+	}
+	fprintf(f, "token=%s\n", auth_token);
+	fprintf(f, "user=%s\n", display_name);
+	bool ok = fclose(f) == 0;
+
+	if (!ok || rename(tmp, path) != 0) {
+		fprintf(stderr, "qobuz: the session was not saved\n");
+		remove(tmp);
+	}
+}
+
+static void load_session(void) {
+	char path[600];
+	session_path(path, sizeof(path));
+	if (!path[0]) {
+		return;
+	}
+
+	FILE *f = fopen(path, "r");
+	if (!f) {
+		return;
+	}
+
+	static char line[QOBUZ_TOKEN_MAX + 256];
+	while (fgets(line, sizeof(line), f)) {
+		char *nl = strchr(line, '\n');
+		if (nl) {
+			*nl = '\0';
+		}
+		char *cr = strchr(line, '\r');
+		if (cr) {
+			*cr = '\0';
+		}
+		char *eq = strchr(line, '=');
+		if (!eq) {
+			continue;
+		}
+		*eq = '\0';
+		const char *key = line;
+		const char *value = eq + 1;
+
+		if (strcmp(key, "token") == 0) {
+			snprintf(auth_token, sizeof(auth_token), "%s", value);
+		} else if (strcmp(key, "user") == 0) {
+			snprintf(display_name, sizeof(display_name), "%s", value);
+		}
+	}
+	fclose(f);
+}
+
+static void drop_session_locked(void) {
+	auth_token[0] = '\0';
+	display_name[0] = '\0';
+	save_session();
+	if (config_get("qobuz", "token", NULL) || config_get("qobuz", "user", NULL)) {
+		config_set("qobuz", "token", "");
+		config_set("qobuz", "user", "");
+		config_save();
+	}
+}
+
 void qobuz_init(void) {
+	pthread_mutex_lock(&api_lock);
+
 	snprintf(base_url, sizeof(base_url), "%s", config_get("qobuz", "base_url", QOBUZ_BASE_DEFAULT));
 
 	const char *id = streamkeys_qobuz_app_id();
@@ -62,10 +171,30 @@ void qobuz_init(void) {
 	snprintf(app_id, sizeof(app_id), "%s", id ? id : "");
 	snprintf(app_secret, sizeof(app_secret), "%s", secret ? secret : "");
 
-	// The token only, never the password: when it expires it is asked for once,
-	// and meanwhile nothing on disk is worth an account login.
-	snprintf(auth_token, sizeof(auth_token), "%s", config_get("qobuz", "token", ""));
-	snprintf(display_name, sizeof(display_name), "%s", config_get("qobuz", "user", ""));
+	auth_token[0] = '\0';
+	display_name[0] = '\0';
+	load_session();
+
+	// Migrate or discard any session previously written to device_config.ini:
+	// config.c truncates values at 127 characters, which cuts JWT tokens short.
+	const char *legacy_token = config_get("qobuz", "token", NULL);
+	const char *legacy_user = config_get("qobuz", "user", NULL);
+	if (legacy_user && legacy_user[0] && !display_name[0]) {
+		snprintf(display_name, sizeof(display_name), "%s", legacy_user);
+	}
+	if (legacy_token && legacy_token[0]) {
+		if (!auth_token[0]) {
+			if (strlen(legacy_token) < QOBUZ_LEGACY_CONFIG_MAX) {
+				snprintf(auth_token, sizeof(auth_token), "%s", legacy_token);
+				save_session();
+			} else {
+				printf("qobuz: found a truncated legacy token in device_config.ini, dropping it\n");
+			}
+		}
+		config_set("qobuz", "token", "");
+		config_set("qobuz", "user", "");
+		config_save();
+	}
 
 	format_id = (int)config_get_int("qobuz", "format", QOBUZ_FORMAT_HIRES192);
 	if (format_id != QOBUZ_FORMAT_MP3 && format_id != QOBUZ_FORMAT_CD && format_id != QOBUZ_FORMAT_HIRES96 &&
@@ -73,8 +202,12 @@ void qobuz_init(void) {
 		format_id = QOBUZ_FORMAT_HIRES192;
 	}
 
-	printf("qobuz: %s, %s\n", qobuz_configured() ? "configured" : "no application keys",
-		   auth_token[0] ? "saved session" : "no session");
+	bool configured = app_id[0] && app_secret[0];
+	bool logged_in = auth_token[0] != '\0';
+	pthread_mutex_unlock(&api_lock);
+
+	printf("qobuz: %s, %s\n", configured ? "configured" : "no application keys",
+		   logged_in ? "saved session" : "no session");
 }
 
 bool qobuz_configured(void) { return app_id[0] && app_secret[0]; }
@@ -94,11 +227,9 @@ void qobuz_set_format(int wanted) {
 }
 
 void qobuz_logout(void) {
-	auth_token[0] = '\0';
-	display_name[0] = '\0';
-	config_set("qobuz", "token", "");
-	config_set("qobuz", "user", "");
-	config_save();
+	pthread_mutex_lock(&api_lock);
+	drop_session_locked();
+	pthread_mutex_unlock(&api_lock);
 	printf("qobuz: session closed\n");
 }
 
@@ -109,33 +240,63 @@ void qobuz_logout(void) {
 // The common headers: X-App-Id always, the token when there is one. Qobuz takes
 // the token in the query too, but in a header it stays out of the logs of the
 // proxies along the way.
-static void build_headers(char *out, size_t size, const char *extra) {
+static bool build_headers(char *out, size_t size, const char *token, const char *extra) {
 	int n = snprintf(out, size, "X-App-Id: %s\r\n", app_id);
-	if (auth_token[0] && n > 0 && (size_t)n < size) {
-		n += snprintf(out + n, size - (size_t)n, "X-User-Auth-Token: %s\r\n", auth_token);
+	if (n <= 0 || (size_t)n >= size) {
+		return false;
 	}
-	if (extra && n > 0 && (size_t)n < size) {
-		snprintf(out + n, size - (size_t)n, "%s", extra);
+	if (token && token[0]) {
+		int add = snprintf(out + n, size - (size_t)n, "X-User-Auth-Token: %s\r\n", token);
+		if (add <= 0 || (size_t)n + (size_t)add >= size) {
+			return false;
+		}
+		n += add;
 	}
+	if (extra && extra[0]) {
+		int add = snprintf(out + n, size - (size_t)n, "%s", extra);
+		if (add < 0 || (size_t)n + (size_t)add >= size) {
+			return false;
+		}
+	}
+	return true;
 }
 
 // Qobuz reports an error as {"status":"error","message":"...","code":401}. The
 // message is written for a human and beats anything invented here.
 static bool note_api_error(const json_doc_t *doc, int status) {
-	int root = json_root(doc);
-	char message[200] = "";
-	if (json_obj_str(doc, root, "message", message, sizeof(message)) && message[0]) {
-		set_error("%s", message);
-		return true;
+	if (doc) {
+		int root = json_root(doc);
+		char message[200] = "";
+		if (json_obj_str(doc, root, "message", message, sizeof(message)) && message[0]) {
+			set_error("%s", message);
+			return true;
+		}
 	}
 	set_error(tr("qobuz_answered_with"), status);
 	return true;
 }
 
-// Makes the request, parses the reply, and fills last_error on failure. On
-// success the caller must free *body only after it is done with *doc: the
-// document points into the text instead of copying it.
-static bool api_call(const char *url, const char *extra_headers, char **body, json_doc_t *doc) {
+static const char *skip_utf8_bom(const char *s) {
+	if (s && (unsigned char)s[0] == 0xEF && (unsigned char)s[1] == 0xBB && (unsigned char)s[2] == 0xBF) {
+		return s + 3;
+	}
+	return s;
+}
+
+static void log_unreadable_reply(const char *url, int status, size_t len, const char *body) {
+	int path_span = url ? (int)strcspn(url, "?") : 0;
+	char preview[96];
+	size_t p = 0;
+	for (size_t i = 0; body && body[i] && i < 80 && p + 1 < sizeof(preview); i++) {
+		unsigned char c = (unsigned char)body[i];
+		preview[p++] = (c >= 32 && c < 127) ? (char)c : '.';
+	}
+	preview[p] = '\0';
+	fprintf(stderr, "qobuz: unreadable reply from %.*s (status %d, %zu bytes, head=\"%s\")\n", path_span,
+			url ? url : "?", status, len, preview);
+}
+
+static bool api_call_ex(const char *url, const char *extra_headers, bool send_auth, char **body, json_doc_t *doc) {
 	clear_error();
 
 	if (!qobuz_configured()) {
@@ -143,29 +304,78 @@ static bool api_call(const char *url, const char *extra_headers, char **body, js
 		return false;
 	}
 
-	char headers[768];
-	build_headers(headers, sizeof(headers), extra_headers);
+	size_t hdr_cap = QOBUZ_TOKEN_MAX + (extra_headers ? strlen(extra_headers) : 0) + 256;
+	char *headers = malloc(hdr_cap);
+	if (!headers) {
+		set_error("%s", tr("qobuz_no_reply"));
+		return false;
+	}
+
+	pthread_mutex_lock(&api_lock);
+	bool had_token = send_auth && auth_token[0] != '\0';
+	bool hdr_ok = build_headers(headers, hdr_cap, send_auth ? auth_token : NULL, extra_headers);
+	pthread_mutex_unlock(&api_lock);
+
+	if (!hdr_ok) {
+		free(headers);
+		set_error("%s", tr("qobuz_no_reply"));
+		return false;
+	}
+
+	http_req_t req = {
+		.extra_headers = headers,
+		.want_error_body = true,
+		.allow_empty_body = true,
+		.accept_gzip = true,
+	};
 
 	int status = 0;
 	size_t len = 0;
-	if (!http_get_ex(url, headers, true, body, &len, QOBUZ_BODY_LIMIT, QOBUZ_TIMEOUT_SECS, &status)) {
+	bool fetched = http_request(url, &req, body, &len, QOBUZ_BODY_LIMIT + 1, QOBUZ_TIMEOUT_SECS, &status);
+	free(headers);
+
+	if (!fetched) {
 		const char *why = http_last_error();
 		set_error("%s", why && why[0] ? why : tr("qobuz_no_reply"));
 		return false;
 	}
 
-	if (!json_parse(*body, doc)) {
+	if (len > QOBUZ_BODY_LIMIT) {
+		int path_span = (int)strcspn(url, "?");
+		fprintf(stderr, "qobuz: reply from %.*s exceeded %d bytes\n", path_span, url, QOBUZ_BODY_LIMIT);
 		free(*body);
 		*body = NULL;
 		set_error("%s", tr("qobuz_unreadable_qobuz_reply"));
 		return false;
 	}
 
+	const char *json_text = skip_utf8_bom(*body);
+	bool parsed = json_text && json_text[0] != '\0' && json_parse(json_text, doc);
+
 	if (status != 200) {
-		note_api_error(doc, status);
-		json_free(doc);
+		if (had_token && status == 401) {
+			pthread_mutex_lock(&api_lock);
+			printf("qobuz: session token rejected with 401, closing session\n");
+			drop_session_locked();
+			pthread_mutex_unlock(&api_lock);
+		}
+		if (parsed) {
+			note_api_error(doc, status);
+			json_free(doc);
+		} else {
+			log_unreadable_reply(url, status, len, *body);
+			note_api_error(NULL, status);
+		}
 		free(*body);
 		*body = NULL;
+		return false;
+	}
+
+	if (!parsed) {
+		log_unreadable_reply(url, status, len, *body);
+		free(*body);
+		*body = NULL;
+		set_error("%s", tr("qobuz_unreadable_qobuz_reply"));
 		return false;
 	}
 
@@ -173,7 +383,14 @@ static bool api_call(const char *url, const char *extra_headers, char **body, js
 	char state[32] = "";
 	json_obj_str(doc, json_root(doc), "status", state, sizeof(state));
 	if (strcmp(state, "error") == 0) {
-		note_api_error(doc, status);
+		long code = json_obj_long(doc, json_root(doc), "code", 0);
+		if (had_token && code == 401) {
+			pthread_mutex_lock(&api_lock);
+			printf("qobuz: session token rejected with code 401, closing session\n");
+			drop_session_locked();
+			pthread_mutex_unlock(&api_lock);
+		}
+		note_api_error(doc, status > 0 ? status : (int)code);
 		json_free(doc);
 		free(*body);
 		*body = NULL;
@@ -181,6 +398,13 @@ static bool api_call(const char *url, const char *extra_headers, char **body, js
 	}
 
 	return true;
+}
+
+// Makes the request, parses the reply, and fills last_error on failure. On
+// success the caller must free *body only after it is done with *doc: the
+// document points into the text instead of copying it.
+static bool api_call(const char *url, const char *extra_headers, char **body, json_doc_t *doc) {
+	return api_call_ex(url, extra_headers, true, body, doc);
 }
 
 static void api_done(char *body, json_doc_t *doc) {
@@ -215,27 +439,28 @@ bool qobuz_login(const char *username, const char *password) {
 	// device_manufacturer_id carries the app_secret: that is what the original
 	// sends, not a typo -- its code at 0x00784bd0 does exactly this.
 	char extra[768];
-	snprintf(extra, sizeof(extra), "username: %s\r\npassword: %s\r\ndevice_manufacturer_id: %s\r\n", username,
-			 password, app_secret);
-
-	// No token during login: an old one, if any, has nothing to do with it.
-	char saved[sizeof(auth_token)];
-	snprintf(saved, sizeof(saved), "%s", auth_token);
-	auth_token[0] = '\0';
+	int extra_len = snprintf(extra, sizeof(extra), "username: %s\r\npassword: %s\r\ndevice_manufacturer_id: %s\r\n",
+							 username, password, app_secret);
+	if (extra_len <= 0 || (size_t)extra_len >= sizeof(extra)) {
+		set_error("%s", tr("credentials_required"));
+		return false;
+	}
 
 	char *body = NULL;
 	json_doc_t doc;
-	if (!api_call(url, extra, &body, &doc)) {
-		snprintf(auth_token, sizeof(auth_token), "%s", saved);
+	if (!api_call_ex(url, extra, false, &body, &doc)) {
 		return false;
 	}
 
 	int root = json_root(&doc);
-	char token[sizeof(auth_token)] = "";
-	json_obj_str(&doc, root, "user_auth_token", token, sizeof(token));
-	if (!token[0]) {
+	static char token_scratch[QOBUZ_TOKEN_MAX];
+	pthread_mutex_lock(&api_lock);
+	token_scratch[0] = '\0';
+	bool got_token = json_str_exact(&doc, json_get(&doc, root, "user_auth_token"), token_scratch, sizeof(token_scratch)) &&
+					 token_scratch[0] != '\0';
+	if (!got_token) {
+		pthread_mutex_unlock(&api_lock);
 		api_done(body, &doc);
-		snprintf(auth_token, sizeof(auth_token), "%s", saved);
 		set_error("%s", tr("qobuz_gave_no_session_token"));
 		return false;
 	}
@@ -255,13 +480,18 @@ bool qobuz_login(const char *username, const char *password) {
 		snprintf(name, sizeof(name), "%s", username);
 	}
 
-	api_done(body, &doc);
-
-	snprintf(auth_token, sizeof(auth_token), "%s", token);
+	snprintf(auth_token, sizeof(auth_token), "%s", token_scratch);
+	token_scratch[0] = '\0';
 	snprintf(display_name, sizeof(display_name), "%s", name);
-	config_set("qobuz", "token", auth_token);
-	config_set("qobuz", "user", display_name);
-	config_save();
+	save_session();
+	if (config_get("qobuz", "token", NULL) || config_get("qobuz", "user", NULL)) {
+		config_set("qobuz", "token", "");
+		config_set("qobuz", "user", "");
+		config_save();
+	}
+	pthread_mutex_unlock(&api_lock);
+
+	api_done(body, &doc);
 
 	printf("qobuz: logged in as %s\n", display_name);
 	return true;
@@ -715,6 +945,25 @@ static void sign_request(const char *object, const char *method, qobuz_param_t *
 // cannot redo the sum.
 // ---------------------------------------------------------------------------
 
+// Percent-encoded copy of `auth_token` for query-string endpoints, allocated on
+// the heap so a 4 KB JWT never sits on a worker stack or gets truncated at
+// 255 characters, and '+' / '/' / '=' in base64 tokens are preserved verbatim.
+static char *encoded_auth_token_alloc(void) {
+	size_t cap = QOBUZ_TOKEN_MAX * 3 + 1;
+	char *encoded = malloc(cap);
+	if (!encoded) {
+		return NULL;
+	}
+	pthread_mutex_lock(&api_lock);
+	http_url_encode(auth_token, encoded, cap);
+	pthread_mutex_unlock(&api_lock);
+	if (!encoded[0]) {
+		free(encoded);
+		return NULL;
+	}
+	return encoded;
+}
+
 bool qobuz_track_url(long track_id, char *url_out, size_t url_size, char *mime, size_t mime_size, int *format_out) {
 	clear_error();
 
@@ -753,16 +1002,33 @@ bool qobuz_track_url(long track_id, char *url_out, size_t url_size, char *mime, 
 	char signature[MD5_HEX_LEN];
 	sign_request("track", "getFileUrl", params, count, now, signature);
 
-	char url[1024];
-	int n = snprintf(url, sizeof(url), "%s/track/getFileUrl?app_id=%s&user_auth_token=%s&request_sig=%s&request_ts=%ld",
-					 base_url, app_id, auth_token, signature, now);
-	for (int i = 0; i < count && n > 0 && (size_t)n < sizeof(url); i++) {
-		n += snprintf(url + n, sizeof(url) - (size_t)n, "&%s=%s", params[i].key, params[i].value);
+	char *tok_enc = encoded_auth_token_alloc();
+	char *url = malloc(QOBUZ_REQ_URL_MAX);
+	if (!tok_enc || !url) {
+		free(tok_enc);
+		free(url);
+		set_error("%s", tr("qobuz_no_reply"));
+		return false;
+	}
+
+	int n = snprintf(url, QOBUZ_REQ_URL_MAX,
+					 "%s/track/getFileUrl?app_id=%s&user_auth_token=%s&request_sig=%s&request_ts=%ld", base_url, app_id,
+					 tok_enc, signature, now);
+	free(tok_enc);
+	for (int i = 0; i < count && n > 0 && (size_t)n < QOBUZ_REQ_URL_MAX; i++) {
+		n += snprintf(url + n, QOBUZ_REQ_URL_MAX - (size_t)n, "&%s=%s", params[i].key, params[i].value);
+	}
+	if (n <= 0 || (size_t)n >= QOBUZ_REQ_URL_MAX) {
+		free(url);
+		set_error("%s", tr("qobuz_no_reply"));
+		return false;
 	}
 
 	char *body = NULL;
 	json_doc_t doc;
-	if (!api_call(url, NULL, &body, &doc)) {
+	bool called = api_call(url, NULL, &body, &doc);
+	free(url);
+	if (!called) {
 		return false;
 	}
 
@@ -823,13 +1089,28 @@ static bool favorite_write(const char *action, const char *kind, const char *ids
 	char encoded[128];
 	http_url_encode(ids, encoded, sizeof(encoded));
 
-	char url[1024];
-	snprintf(url, sizeof(url), "%.256s/favorite/%s?app_id=%.63s&%.16s=%.127s&user_auth_token=%.255s", base_url, action,
-			 app_id, kind, encoded, auth_token);
+	char *tok_enc = encoded_auth_token_alloc();
+	char *url = malloc(QOBUZ_REQ_URL_MAX);
+	if (!tok_enc || !url) {
+		free(tok_enc);
+		free(url);
+		set_error("%s", tr("qobuz_no_reply"));
+		return false;
+	}
+	int n = snprintf(url, QOBUZ_REQ_URL_MAX, "%.256s/favorite/%s?app_id=%.63s&%.16s=%.127s&user_auth_token=%s",
+					 base_url, action, app_id, kind, encoded, tok_enc);
+	free(tok_enc);
+	if (n <= 0 || (size_t)n >= QOBUZ_REQ_URL_MAX) {
+		free(url);
+		set_error("%s", tr("qobuz_no_reply"));
+		return false;
+	}
 
 	char *body = NULL;
 	json_doc_t doc;
-	if (!api_call(url, NULL, &body, &doc)) {
+	bool ok = api_call(url, NULL, &body, &doc);
+	free(url);
+	if (!ok) {
 		return false;
 	}
 	api_done(body, &doc);
@@ -859,13 +1140,28 @@ bool qobuz_playlist_delete(long playlist_id) {
 		return false;
 	}
 
-	char url[1024];
-	snprintf(url, sizeof(url), "%.256s/playlist/delete?app_id=%.63s&playlist_id=%ld&user_auth_token=%.255s", base_url,
-			 app_id, playlist_id, auth_token);
+	char *tok_enc = encoded_auth_token_alloc();
+	char *url = malloc(QOBUZ_REQ_URL_MAX);
+	if (!tok_enc || !url) {
+		free(tok_enc);
+		free(url);
+		set_error("%s", tr("qobuz_no_reply"));
+		return false;
+	}
+	int n = snprintf(url, QOBUZ_REQ_URL_MAX, "%.256s/playlist/delete?app_id=%.63s&playlist_id=%ld&user_auth_token=%s",
+					 base_url, app_id, playlist_id, tok_enc);
+	free(tok_enc);
+	if (n <= 0 || (size_t)n >= QOBUZ_REQ_URL_MAX) {
+		free(url);
+		set_error("%s", tr("qobuz_no_reply"));
+		return false;
+	}
 
 	char *body = NULL;
 	json_doc_t doc;
-	if (!api_call(url, NULL, &body, &doc)) {
+	bool ok = api_call(url, NULL, &body, &doc);
+	free(url);
+	if (!ok) {
 		return false;
 	}
 	api_done(body, &doc);
@@ -881,32 +1177,41 @@ int qobuz_favorite_track_ids(long *out, int max) {
 		return -1;
 	}
 
-	// The favourites list, for the ids alone. The largest page the API grants in
-	// one go is asked for: this only decides whether the star is filled or
-	// empty, and doing it per track would mean a request on every song change.
-	char url[1024];
-	snprintf(url, sizeof(url),
-			 "%.256s/favorite/getUserFavorites?app_id=%.63s&type=tracks&limit=%d&offset=0&user_auth_token=%.255s",
-			 base_url, app_id, max, auth_token);
-
-	char *body = NULL;
-	json_doc_t doc;
-	if (!api_call(url, NULL, &body, &doc)) {
-		return -1;
-	}
-
+	// Page 50 tracks at a time rather than asking for 500 in one go: each track
+	// carries its whole album object, and 500 of them at once is several
+	// megabytes of JSON on a 64 MB device.
 	int count = 0;
-	int tracks = json_get(&doc, json_root(&doc), "tracks");
-	int items = json_get(&doc, tracks, "items");
-	int total = json_len(&doc, items);
-	for (int i = 0; i < total && count < max; i++) {
-		long id = json_obj_long(&doc, json_at(&doc, items, i), "id", 0);
-		if (id > 0) {
-			out[count++] = id;
+	for (int offset = 0; count < max; offset += QOBUZ_FAVORITES_PAGE) {
+		int ask = max - count;
+		if (ask > QOBUZ_FAVORITES_PAGE) {
+			ask = QOBUZ_FAVORITES_PAGE;
+		}
+
+		char url[768];
+		snprintf(url, sizeof(url), "%.256s/favorite/getUserFavorites?app_id=%.63s&type=tracks&limit=%d&offset=%d",
+				 base_url, app_id, ask, offset);
+
+		char *body = NULL;
+		json_doc_t doc;
+		if (!api_call(url, NULL, &body, &doc)) {
+			return count > 0 ? count : -1;
+		}
+
+		int tracks = json_get(&doc, json_root(&doc), "tracks");
+		int items = json_get(&doc, tracks, "items");
+		int got = json_len(&doc, items);
+		for (int i = 0; i < got && count < max; i++) {
+			long id = json_obj_long(&doc, json_at(&doc, items, i), "id", 0);
+			if (id > 0) {
+				out[count++] = id;
+			}
+		}
+
+		api_done(body, &doc);
+		if (got < ask) {
+			break;
 		}
 	}
-
-	api_done(body, &doc);
 	return count;
 }
 
@@ -923,15 +1228,30 @@ bool qobuz_playlist_create(const char *name, long *out_id) {
 	char encoded[256];
 	http_url_encode(name, encoded, sizeof(encoded));
 
-	char url[1024];
-	snprintf(url, sizeof(url),
-			 "%.256s/playlist/create?app_id=%.63s&user_auth_token=%.255s&name=%.255s"
-			 "&is_public=false&is_collaborative=false",
-			 base_url, app_id, auth_token, encoded);
+	char *tok_enc = encoded_auth_token_alloc();
+	char *url = malloc(QOBUZ_REQ_URL_MAX);
+	if (!tok_enc || !url) {
+		free(tok_enc);
+		free(url);
+		set_error("%s", tr("qobuz_no_reply"));
+		return false;
+	}
+	int n = snprintf(url, QOBUZ_REQ_URL_MAX,
+					 "%.256s/playlist/create?app_id=%.63s&user_auth_token=%s&name=%.255s"
+					 "&is_public=false&is_collaborative=false",
+					 base_url, app_id, tok_enc, encoded);
+	free(tok_enc);
+	if (n <= 0 || (size_t)n >= QOBUZ_REQ_URL_MAX) {
+		free(url);
+		set_error("%s", tr("qobuz_no_reply"));
+		return false;
+	}
 
 	char *body = NULL;
 	json_doc_t doc;
-	if (!api_call(url, NULL, &body, &doc)) {
+	bool ok = api_call(url, NULL, &body, &doc);
+	free(url);
+	if (!ok) {
 		return false;
 	}
 
@@ -954,14 +1274,29 @@ bool qobuz_playlist_add_track(long playlist_id, long track_id) {
 		return false;
 	}
 
-	char url[1024];
-	snprintf(url, sizeof(url),
-			 "%.256s/playlist/addTracks?app_id=%.63s&playlist_id=%ld&track_ids=%ld&user_auth_token=%.255s", base_url,
-			 app_id, playlist_id, track_id, auth_token);
+	char *tok_enc = encoded_auth_token_alloc();
+	char *url = malloc(QOBUZ_REQ_URL_MAX);
+	if (!tok_enc || !url) {
+		free(tok_enc);
+		free(url);
+		set_error("%s", tr("qobuz_no_reply"));
+		return false;
+	}
+	int n = snprintf(url, QOBUZ_REQ_URL_MAX,
+					 "%.256s/playlist/addTracks?app_id=%.63s&playlist_id=%ld&track_ids=%ld&user_auth_token=%s",
+					 base_url, app_id, playlist_id, track_id, tok_enc);
+	free(tok_enc);
+	if (n <= 0 || (size_t)n >= QOBUZ_REQ_URL_MAX) {
+		free(url);
+		set_error("%s", tr("qobuz_no_reply"));
+		return false;
+	}
 
 	char *body = NULL;
 	json_doc_t doc;
-	if (!api_call(url, NULL, &body, &doc)) {
+	bool ok = api_call(url, NULL, &body, &doc);
+	free(url);
+	if (!ok) {
 		return false;
 	}
 	api_done(body, &doc);

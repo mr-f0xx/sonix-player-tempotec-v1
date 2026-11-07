@@ -199,7 +199,13 @@ void factoryreset_run(void) {
 
 	// This player's configuration goes now, without waiting for the reboot.
 	static const char *const OURS[] = {
-		CONFIG_FILE, CONFIG_FILE ".browser", CONFIG_FILE ".browser.tmp", EBOOK_CONFIG_FILE, STREAMKEYS_DATA_FILE,
+		CONFIG_FILE,
+		CONFIG_FILE ".browser",
+		CONFIG_FILE ".browser.tmp",
+		EBOOK_CONFIG_FILE,
+		STREAMKEYS_DATA_FILE,
+		"/usr/data/qobuz_session.ini",
+		"/usr/data/tidal_session.ini",
 	};
 	for (size_t i = 0; i < sizeof(OURS) / sizeof(OURS[0]); i++) {
 		if (unlink(OURS[i]) == 0) {
@@ -262,7 +268,10 @@ static const char *const KEEP[] = {
 	"ebook_config.ini.tmp",
 	"streaming-keys.ini",
 	"streaming-keys.ini.tmp",
+	"qobuz_session.ini",
+	"qobuz_session.ini.tmp",
 	"tidal_session.ini",
+	"tidal_session.ini.tmp",
 	"lastfm.session",
 	"listenbrainz.token",
 };

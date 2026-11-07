@@ -15,11 +15,12 @@ LDFLAGS += -Wl,--gc-sections
 CORE = $(ROOT)/src/system/streaming/subsonic.c \
        $(ROOT)/src/system/streaming/streambridge.c \
        $(ROOT)/src/system/streaming/subsonicstream.c \
+       $(ROOT)/src/system/image/png_scaled.c \
        $(ROOT)/src/system/net/http.c $(ROOT)/src/system/net/tls.c \
        $(ROOT)/src/system/core/json.c $(ROOT)/src/system/core/md5.c \
        $(ROOT)/src/system/core/config.c $(ROOT)/src/system/playback/playlist.c
 
-.PHONY: test sanitize clean extractkeys
+.PHONY: test sanitize clean extractkeys qobuz
 
 test: $(BUILD)/test_subsonic
 	python3 run_subsonic_tests.py $(BUILD)/test_subsonic
@@ -58,6 +59,24 @@ $(BUILD)/test_stockkeys: $(STOCKKEYS_SRC) $(ROOT)/build_gen/streamkeys_key.h \
                          $(ROOT)/src/system/streaming/stockkeys.h $(ROOT)/src/system/streaming/streamkeys.h
 	@mkdir -p $(BUILD)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -DHOST_BUILD -o $@ $(STOCKKEYS_SRC) $(LDFLAGS) $(LDLIBS)
+
+QOBUZ_SRC = test_qobuz.c \
+            $(ROOT)/src/system/streaming/qobuz.c \
+            $(ROOT)/src/system/streaming/streamkeys.c \
+            $(ROOT)/src/system/image/png_scaled.c \
+            $(ROOT)/src/system/net/http.c \
+            $(ROOT)/src/system/net/tls.c \
+            $(ROOT)/src/system/core/json.c \
+            $(ROOT)/src/system/core/md5.c \
+            $(ROOT)/src/system/core/config.c \
+            $(ROOT)/src/system/core/sha256.c
+
+qobuz: $(BUILD)/test_qobuz
+	$(BUILD)/test_qobuz
+
+$(BUILD)/test_qobuz: $(QOBUZ_SRC) $(ROOT)/build_gen/streamkeys_key.h $(ROOT)/src/system/streaming/qobuz.h
+	@mkdir -p $(BUILD)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -DHOST_BUILD -o $@ $(QOBUZ_SRC) $(LDFLAGS) $(LDLIBS)
 
 $(BUILD)/test_subsonic: test_subsonic.c support.c $(CORE) $(shell find $(ROOT)/src/system -name '*.h')
 	@mkdir -p $(BUILD)

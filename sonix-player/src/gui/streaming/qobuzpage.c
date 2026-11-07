@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <malloc.h>
+#include <unistd.h>
 
 #include "src/gui/shell/confirm.h"
 #include "src/gui/fonts/fonts.h"
@@ -859,6 +860,9 @@ static void job_done_cb(void *user) {
 	busy_hide();
 
 	if (result_error[0]) {
+		if (!qobuz_logged_in() && result_kind != JOB_LOGIN) {
+			rebuild_home();
+		}
 		gui_notify_popup(result_error);
 		page_loading = false;
 		return;

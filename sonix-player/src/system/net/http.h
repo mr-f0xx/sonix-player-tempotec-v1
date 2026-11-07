@@ -114,6 +114,12 @@ typedef struct {
 	// from HTTPS down to plaintext HTTP. Defaults false for legacy radio URLs.
 	bool no_https_downgrade;
 
+	// Advertise Accept-Encoding: gzip, deflate instead of identity. Large API
+	// JSON lists compress 10-15x over Wi-Fi; http_request() inflates gzip and
+	// deflate replies either way so a proxy that compresses uninvited still
+	// works.
+	bool accept_gzip;
+
 } http_req_t;
 
 // Like http_get_ex(), but with the method and body chosen by the caller.
