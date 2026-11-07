@@ -4,13 +4,13 @@
 
 // Stable IDs for Qobuz's root genres. Unknown genres retain their original
 // API order after the curated ones, regardless of the language of their names.
-static int rank_genre(long id, long reggae_id) {
+static int rank_genre(const qobuz_genre_t *genre, long reggae_id) {
     static const long order[] = {
         133, // Hip-Hop/Rap
         127, // Soul/Funk/R&B
         80,  // Jazz
         64,  // Electronic
-        3,   // Blues
+        -1,  // Blues/Country/Folk (resolved from the root list)
         0,   // Reggae (resolved from Qobuz's World children)
         112, // Pop/Rock
         116, // Metal
@@ -19,12 +19,12 @@ static int rank_genre(long id, long reggae_id) {
         149, // Latin
         94,  // World
         10,  // Classical
-        91,  // Soundtracks
         59,  // Humour/Spoken Word
     };
     for (unsigned i = 0; i < sizeof(order) / sizeof(order[0]); i++) {
+        if (order[i] == -1 && qobuzgenre_is_blues_parent(genre->name, genre->slug)) return (int)i;
         long candidate = order[i] ? order[i] : reggae_id;
-        if (candidate > 0 && candidate == id) return (int)i;
+        if (candidate > 0 && candidate == genre->id) return (int)i;
     }
     return (int)(sizeof(order) / sizeof(order[0]));
 }
@@ -51,27 +51,21 @@ int qobuzgenre_load_ordered(qobuz_genre_t *out, int max, long *reggae_id) {
                         !strcasecmp(out[i].name, "children") ||
                         !strcasecmp(out[i].name, "enfants") ||
                         !strcasecmp(out[i].name, "children's music");
-        if (!children) out[kept++] = out[i];
+        // Blues alone does not return releases in this view. Keep its real
+        // root parent from the API instead, with its original filter ID.
+        bool hidden = out[i].id == 3 || out[i].id == 91 ||
+                      !strcasecmp(leaf, "bandes-originales") ||
+                      !strcasecmp(leaf, "soundtracks") ||
+                      !strcasecmp(leaf, "chanson-francaise") ||
+                      !strcasecmp(leaf, "french-chanson") ||
+                      !strcasecmp(out[i].name, "Bandes originales") ||
+                      !strcasecmp(out[i].name, "Soundtracks") ||
+                      !strcasecmp(out[i].name, "Chanson française") ||
+                      !strcasecmp(out[i].name, "Chanson francaise");
+        if (!children && !hidden) out[kept++] = out[i];
     }
     count = kept;
 
-    // Blues (Qobuz genre id 3) is often nested under Blues/Country/Folk,
-    // rather than included in genre/list's root page. Keep it accessible as a
-    // direct filter, just as the separately resolved Reggae genre is.
-    bool have_blues = false;
-    for (int i = 0; i < count; i++) if (out[i].id == 3) have_blues = true;
-    if (!have_blues) {
-        qobuz_genre_t blues = {.id = 3, .name = "Blues", .slug = "blues"};
-        if (count == max) {
-            int drop = 0;
-            for (int i = 1; i < count; i++) {
-                if (rank_genre(out[i].id, 0) >= rank_genre(out[drop].id, 0)) drop = i;
-            }
-            for (int i = drop; i + 1 < count; i++) out[i] = out[i + 1];
-            count--;
-        }
-        out[count++] = blues;
-    }
     qobuz_genre_t reggae;
     // An unavailable/absent subgenre should not hide the rest of the list.
     if (qobuz_reggae_genre(&reggae) == 1 && reggae.id > 0) {
@@ -85,7 +79,7 @@ int qobuzgenre_load_ordered(qobuz_genre_t *out, int max, long *reggae_id) {
                 // genre that happened to occur at the end of the API list.
                 int drop = 0;
                 for (int i = 1; i < count; i++) {
-                    if (rank_genre(out[i].id, *reggae_id) >= rank_genre(out[drop].id, *reggae_id)) drop = i;
+                    if (rank_genre(&out[i], *reggae_id) >= rank_genre(&out[drop], *reggae_id)) drop = i;
                 }
                 for (int i = drop; i + 1 < count; i++) out[i] = out[i + 1];
                 out[count - 1] = reggae;
@@ -105,8 +99,8 @@ int qobuzgenre_load_ordered(qobuz_genre_t *out, int max, long *reggae_id) {
     // entries (including unknown ones) stay in Qobuz's order.
     for (int i = 1; i < count; i++) {
         qobuz_genre_t item = out[i];
-        int rank = rank_genre(item.id, *reggae_id), j = i;
-        while (j > 0 && rank_genre(out[j - 1].id, *reggae_id) > rank) {
+        int rank = rank_genre(&item, *reggae_id), j = i;
+        while (j > 0 && rank_genre(&out[j - 1], *reggae_id) > rank) {
             out[j] = out[j - 1];
             j--;
         }

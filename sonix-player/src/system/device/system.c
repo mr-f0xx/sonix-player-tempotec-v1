@@ -1354,6 +1354,8 @@ static pthread_mutex_t combo_lock = PTHREAD_MUTEX_INITIALIZER;
 static bool combo_up_held;
 static bool combo_down_held;
 static bool combo_power_held;
+// Preserve dark-screen eligibility if power wakes the screen before volume down.
+static bool combo_power_dark_lock;
 static bool combo_fired;
 
 static bool combo_key(int code) { return code == KEY_VOLUMEUP || code == KEY_VOLUMEDOWN || code == KEY_POWER; }
@@ -1386,12 +1388,13 @@ static bool combo_press(int code) {
 		combo_down_held = true;
 	} else {
 		combo_power_held = true;
+		combo_power_dark_lock = lock;
 	}
 	if (combo_power_held && !combo_fired) {
 		if (combo_up_held && screenshot) {
 			combo_fired = true;
 			fire_screenshot = true;
-		} else if (combo_down_held && lock) {
+		} else if (combo_down_held && (lock || combo_power_dark_lock)) {
 			combo_fired = true;
 			fire_lock = true;
 		}
@@ -1423,6 +1426,7 @@ static bool combo_release(int code) {
 		combo_down_held = false;
 	} else {
 		combo_power_held = false;
+		combo_power_dark_lock = false;
 	}
 	bool consumed = combo_fired;
 	// Rearm only with all of them back up: releasing one and pressing it again
@@ -1898,15 +1902,8 @@ static void *input_thread_func(void *arg) {
 			if (ev.code == KEY_POWER) {
 				power_wake_started_on_press = false;
 				if (!combo && !power_screen_is_on()) {
-					// Leave the chord window alone when either power+volume
-					// gesture is armed. In particular, key-lock is intentionally
-					// available while the screen is dark.
-					bool chord_armed = !info->headset &&
-								   (screenshot_enabled() || key_lock_gesture_armed());
-					if (!chord_armed) {
-						power_wake_started_on_press = true;
-						power_notify_power_button();
-					}
+					power_wake_started_on_press = true;
+					power_notify_power_button();
 				}
 			}
 

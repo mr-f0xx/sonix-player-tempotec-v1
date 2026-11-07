@@ -3,6 +3,7 @@
 #include <stdint.h>
 
 #include "qobuzgenre_icons.h"
+#include "qobuzgenreorder.h"
 #include "src/gui/board_profile.h"
 #include "src/gui/fonts/fonts.h"
 #include "src/gui/shell/icons.h"
@@ -41,7 +42,7 @@ void qobuzgenre_grid_layout(lv_obj_t *container, bool grid) {
 }
 
 lv_obj_t *qobuzgenre_grid_add(lv_obj_t *container, int content_width, long genre_id,
-                              const char *name, int index, long reggae_id, lv_event_cb_t clicked) {
+                              const char *name, const char *slug, int index, long reggae_id, lv_event_cb_t clicked) {
     int width = (content_width - GENRE_GAP) / 2;
     if (width < 1) width = 1;
     lv_obj_t *tile = lv_btn_create(container);
@@ -60,7 +61,8 @@ lv_obj_t *qobuzgenre_grid_add(lv_obj_t *container, int content_width, long genre
     lv_obj_add_event_cb(tile, clicked, LV_EVENT_CLICKED, (void *)(intptr_t)index);
 
     lv_obj_t *icon = lv_image_create(tile);
-    const lv_image_dsc_t *source = qobuzgenre_icon(genre_id, reggae_id);
+    const lv_image_dsc_t *source = qobuzgenre_is_blues_parent(name, slug)
+        ? &qobuz_genre_blues : qobuzgenre_icon(genre_id, reggae_id);
     lv_image_set_src(icon, source);
     lv_obj_set_size(icon, 32, 32);
     lv_image_set_inner_align(icon, LV_IMAGE_ALIGN_CENTER);

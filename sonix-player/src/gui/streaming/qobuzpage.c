@@ -865,7 +865,7 @@ static void fill_list(int from) {
 		}
         case JOB_GENRES:
             qobuzgenre_grid_add(list_container, genre_content_width, result_genres[i].id,
-                                result_genres[i].name, i, ordered_reggae_id, row_clicked_cb);
+                                result_genres[i].name, result_genres[i].slug, i, ordered_reggae_id, row_clicked_cb);
             break;
 		case JOB_SEARCH_ARTISTS: {
 			const qobuz_artist_t *a = &result_artists[i];

@@ -42,7 +42,7 @@ int main(void) {
     qobuzgenre_grid_layout(list, true);
     const long ids[] = {112, 80, 10, 133, 64};
     const char *names[] = {"Pop/Rock", "Jazz", "Classique", "Hip-Hop/Rap", "Electronic"};
-    for (int i = 0; i < 4; i++) qobuzgenre_grid_add(list, 228, ids[i], names[i], i, 1234, click_cb);
+    for (int i = 0; i < 4; i++) qobuzgenre_grid_add(list, 228, ids[i], names[i], "", i, 1234, click_cb);
     lv_obj_update_layout(screen);
 
     lv_obj_t *a = lv_obj_get_child(list, 0), *b = lv_obj_get_child(list, 1);
@@ -61,7 +61,7 @@ int main(void) {
     assert(clicked == 2);
 
     // Appending a later page retains the first four and their click indices.
-    qobuzgenre_grid_add(list, 228, ids[4], names[4], 4, 1234, click_cb);
+    qobuzgenre_grid_add(list, 228, ids[4], names[4], "", 4, 1234, click_cb);
     lv_obj_update_layout(screen);
     assert(lv_obj_get_child_count(list) == 5);
     lv_obj_t *fifth = lv_obj_get_child(list, 4);
@@ -75,7 +75,7 @@ int main(void) {
     // A long localised genre name is confined even with larger font metrics.
     font_ui_14 = lv_font_montserrat_20;
     lv_obj_t *long_tile = qobuzgenre_grid_add(list, 228, 59,
-        "Very long translated genre and subgenre name", 5, 1234, click_cb);
+        "Very long translated genre and subgenre name", "", 5, 1234, click_cb);
     lv_obj_update_layout(screen);
     lv_obj_t *label = lv_obj_get_child(long_tile, 1);
     assert(lv_obj_get_width(label) <= lv_obj_get_content_width(long_tile));
@@ -83,6 +83,12 @@ int main(void) {
     assert(lv_obj_get_y(fifth) == lv_obj_get_y(long_tile));
     assert(lv_obj_get_y(long_tile) + lv_obj_get_height(long_tile) <= lv_obj_get_content_height(list));
 
+    lv_obj_clean(list);
+    lv_obj_t *blues = qobuzgenre_grid_add(list, 228, 902, "Localized name",
+                                         "blues-country-folk", 0, 1234, click_cb);
+    assert(lv_image_get_src(lv_obj_get_child(blues, 0)) == &qobuz_genre_blues);
+    lv_obj_send_event(blues, LV_EVENT_CLICKED, NULL);
+    assert(clicked == 0);
     lv_obj_clean(list);
     qobuzgenre_grid_layout(list, false);
     lv_obj_t *row1 = lv_obj_create(list), *row2 = lv_obj_create(list);

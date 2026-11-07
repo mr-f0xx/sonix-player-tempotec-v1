@@ -13,6 +13,7 @@
 #include "src/gui/settings/fwupdate.h"
 #include "src/gui/settings/settings.h"
 #include "src/gui/shell/settingsrow.h"
+#include "src/gui/shell/icons.h"
 #include "src/gui/shell/switcher.h"
 #include "src/gui/shell/theme.h"
 #include "src/system/core/config.h"
@@ -466,10 +467,13 @@ void systempage_init(gui_config_t *cfg) {
 
 	lv_obj_t *container = settingsrow_page(systempage_screen, cfg, "system");
 
-	settingsrow_add(container, "system_about", NULL, switch_screen_cb, sysinfo_screen);
+	lv_obj_t *row = settingsrow_add(container, "system_about", NULL, switch_screen_cb, sysinfo_screen);
+	settingsrow_add_accent_icon(row, &icon_system_info);
 	// Actions, not pages: settingsrow_action leaves off the chevron.
-	settingsrow_action(container, "system_update_firmware", firmware_clicked_cb, NULL);
-	settingsrow_action(container, "system_factory_reset", factory_clicked_cb, NULL);
+	row = settingsrow_action(container, "system_update_firmware", firmware_clicked_cb, NULL);
+	settingsrow_add_accent_icon(row, &icon_download);
+	row = settingsrow_action(container, "system_factory_reset", factory_clicked_cb, NULL);
+	settingsrow_add_accent_icon(row, &icon_reset);
 
 	switcher_attach_back_gesture(systempage_screen);
 }
