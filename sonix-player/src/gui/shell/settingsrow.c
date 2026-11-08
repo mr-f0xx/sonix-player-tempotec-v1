@@ -1146,10 +1146,21 @@ void settingsrow_toggle_pills_add_accent_icon(lv_obj_t *card, const lv_image_dsc
 		return;
 	}
 
+	// Match ordinary accent-icon rows: the title starts one ROW_LABEL_GAP after
+	// the glyph, not one flex gap after it. The smaller header gap left this
+	// title several pixels to the left of High gain, Filters and NOS.
+	lv_obj_set_style_pad_column(header, ROW_LABEL_GAP, 0);
+
+	// With the pills hidden this is an ordinary toggle row. Give the title the
+	// same minimum content height as that row so the flex track centres a
+	// wrapped title on the same midline as the single-line titles above and
+	// below it. Longer translations can still grow the track and the card.
+	int pad = compact_rows() ? 8 : 20;
+	lv_obj_set_style_min_height(lv_obj_get_child(header, 1), row_height() - 2 * pad, 0);
+
 	// Keep the option pills aligned with the title, rather than the card's
 	// icon column.
-	int gap = compact_rows() ? 6 : 12;
-	lv_obj_set_style_pad_left(pills, lv_obj_get_width(icon) + gap, 0);
+	lv_obj_set_style_pad_left(pills, lv_obj_get_width(icon) + ROW_LABEL_GAP, 0);
 }
 
 static void settingsrow_caption_row_deleted_cb(lv_event_t *e) {
