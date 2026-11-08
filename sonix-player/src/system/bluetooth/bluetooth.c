@@ -3362,6 +3362,24 @@ int bluetooth_receiver_sending(unsigned *serial_out) {
 	return btstack_transport_sending(mac, serial_out);
 }
 
+// Whether a device that could be the receiver's sender is still connected.
+//
+// Deliberately not "is a PCM published", which is the question the whole rest
+// of this section answers: the two part company exactly while a sender is
+// rebuilding its transport for a codec change, and that gap is what the
+// receiver has to survive. The device itself stays connected throughout, is
+// what bluez keeps saying, and is the only evidence that there is still
+// something to wait for.
+bool bluetooth_receiver_peer_connected(void) {
+	bool connected = false;
+	pthread_mutex_lock(&lock);
+	for (int i = 0; i < g_paired_count && !connected; i++) {
+		connected = g_paired[i].connected && !sonixlink_bt_is_peer(g_paired[i].mac);
+	}
+	pthread_mutex_unlock(&lock);
+	return connected;
+}
+
 bool bluetooth_receiver_stream(bt_stream_t *out) {
 	if (!out) {
 		return false;
@@ -3765,6 +3783,170 @@ static void invite_sources(void) {
 	}
 }
 
+// ---------------------------------------------------------------------------
+// A sink that is linked without its A2DP profile
+//
+// The same invitation as above, in the direction the player sends in, and for
+// the opposite failure. A car is what this exists for: the user picks the
+// player on the car's screen, the car opens the ACL, AVRCP comes up -- the
+// track, the artist and the play state all show on its display -- and the A2DP
+// transport underneath is never configured, because bluez only opens the audio
+// profile by itself when THIS end asked for the connection. Connecting from the
+// player's own list goes through connect_device_ex(), which asks for the
+// profile explicitly; a connection the car started goes through nothing at all.
+//
+// The result is the report exactly: pairing works, metadata appears, and the
+// music carries on coming out of the 3.5 mm socket without a single error in
+// the log -- because from bluez's side nothing has failed. There is simply no
+// audio profile on a link that already exists.
+//
+// So a paired, connected device that advertises an A2DP Sink -- or is an audio
+// device by class of device, which is known before its SDP record is -- and has
+// no PCM of its own is asked for the profile directly. Once per link, after a
+// grace period, never while the user has an action queued, and never while
+// another sink is already playing.
+#define SINK_INVITE_MAX 8
+#define SINK_INVITE_GRACE_MS 3000
+#define SINK_INVITE_TIMEOUT_MS 8000
+
+static struct {
+	char mac[BT_MAC_MAX];
+	uint32_t linked_since;
+	bool asked;
+} sink_invites[SINK_INVITE_MAX];
+
+// When the next invitation is due, 0 when none is waiting. The worker reads it
+// to shorten its sleep: the poll is fifteen seconds apart, and making a car
+// wait that long for the stream it should have had at once is not the point.
+static uint32_t sink_invite_due; // worker only
+
+static void sink_invite_forget(const char *mac) {
+	for (int i = 0; i < SINK_INVITE_MAX; i++) {
+		if (mac && sink_invites[i].mac[0] && strcasecmp(sink_invites[i].mac, mac) != 0) {
+			continue;
+		}
+		sink_invites[i].mac[0] = '\0';
+		sink_invites[i].asked = false;
+		sink_invites[i].linked_since = 0;
+	}
+}
+
+static void invite_sinks(void) {
+	// Only in the sending direction. As a receiver bluealsa carries no A2DP
+	// source profile at all, and asking bluez for one this end does not
+	// register is a request that can only fail.
+	if (receiver_profile_wanted() || !bluetooth_get_enabled()) {
+		sink_invite_due = 0;
+		return;
+	}
+	if (user_job_waiting()) {
+		return; // the user is connecting, disconnecting or pairing something
+	}
+
+	char playing[BT_MAC_MAX];
+	if (btstack_audio_sink(playing, sizeof(playing))) {
+		sink_invite_forget(NULL); // something is playing: nothing to ask for
+		sink_invite_due = 0;
+		return;
+	}
+
+	// Cheap first. The cached list is the one the interface draws and it has
+	// just been refreshed; when it says nothing is connected there is nothing
+	// to invite, and the fuller list -- the one that carries the A2DP roles and
+	// costs a GetManagedObjects -- is not worth asking for. That leaves the one
+	// state this is about: a device linked, and no sound going to it.
+	bool any_connected = false;
+	pthread_mutex_lock(&lock);
+	for (int i = 0; i < g_paired_count && !any_connected; i++) {
+		any_connected = g_paired[i].connected && !sonixlink_bt_is_peer(g_paired[i].mac);
+	}
+	pthread_mutex_unlock(&lock);
+	if (!any_connected) {
+		sink_invite_forget(NULL);
+		sink_invite_due = 0;
+		return;
+	}
+
+	btstack_device_t devices[BT_MAX_DEVICES];
+	int count = btstack_devices(devices, BT_MAX_DEVICES);
+	uint32_t now = now_ms();
+
+	// Entries whose device has gone are dropped, so a link that comes back is
+	// asked again rather than being remembered as already asked.
+	for (int i = 0; i < SINK_INVITE_MAX; i++) {
+		if (!sink_invites[i].mac[0]) {
+			continue;
+		}
+		bool present = false;
+		for (int d = 0; d < count && !present; d++) {
+			present = devices[d].connected && strcasecmp(devices[d].address, sink_invites[i].mac) == 0;
+		}
+		if (!present) {
+			sink_invites[i].mac[0] = '\0';
+			sink_invites[i].asked = false;
+		}
+	}
+
+	sink_invite_due = 0;
+	for (int i = 0; i < count; i++) {
+		const btstack_device_t *dev = &devices[i];
+		if (!dev->connected || !dev->paired) {
+			continue;
+		}
+		// A phone, a computer or anything else advertising an A2DP Source is
+		// the receiver's business, not this direction's, and so is SonixLink.
+		if (dev->audio_source || sonixlink_bt_is_peer(dev->address)) {
+			continue;
+		}
+		if (!dev->audio_sink && cod_major(dev) != COD_MAJOR_AUDIO) {
+			continue;
+		}
+
+		int slot = -1;
+		for (int s = 0; s < SINK_INVITE_MAX && slot < 0; s++) {
+			if (sink_invites[s].mac[0] && strcasecmp(sink_invites[s].mac, dev->address) == 0) {
+				slot = s;
+			}
+		}
+		for (int s = 0; s < SINK_INVITE_MAX && slot < 0; s++) {
+			if (!sink_invites[s].mac[0]) {
+				slot = s;
+			}
+		}
+		if (slot < 0) {
+			continue;
+		}
+		if (!sink_invites[slot].mac[0]) {
+			copy_field(sink_invites[slot].mac, sizeof(sink_invites[slot].mac), dev->address,
+					   sizeof(dev->address));
+			sink_invites[slot].linked_since = now;
+			sink_invites[slot].asked = false;
+		}
+		if (sink_invites[slot].asked) {
+			continue;
+		}
+		uint32_t linked_for = now - sink_invites[slot].linked_since;
+		if (linked_for < SINK_INVITE_GRACE_MS) {
+			sink_invite_due = sink_invites[slot].linked_since + SINK_INVITE_GRACE_MS;
+			continue;
+		}
+
+		fprintf(stderr, "bluetooth: %s is linked with no A2DP profile (%d ms); asking for it\n", dev->address,
+				(int)linked_for);
+		sink_invites[slot].asked = true;
+		if (!btstack_connect_a2dp(dev->address, SINK_INVITE_TIMEOUT_MS)) {
+			fprintf(stderr, "bluetooth: the A2DP profile was refused; leaving %s to connect it by itself\n",
+					dev->address);
+			continue;
+		}
+		if (wait_for_a2dp(dev->address, A2DP_CONFIRM_MS)) {
+			fprintf(stderr, "bluetooth: audio on %s came up\n", dev->address);
+			return;
+		}
+		fprintf(stderr, "bluetooth: the A2DP profile on %s was accepted but no PCM appeared yet\n", dev->address);
+	}
+}
+
 static void *bluetooth_worker(void *arg) {
 	(void)arg;
 	thread_be_background("bluetooth");
@@ -3792,6 +3974,18 @@ static void *bluetooth_worker(void *arg) {
 			// give it.
 			if (a2dp_missing_since != 0 && wait_ms > 500) {
 				wait_ms = 500;
+			}
+			// And a sink that is linked without its audio profile: the
+			// invitation is due within SINK_INVITE_GRACE_MS of the link, and
+			// the poll above is fifteen seconds away, so sleep exactly until
+			// then rather than out the whole period.
+			if (sink_invite_due != 0) {
+				int32_t left = (int32_t)(sink_invite_due - now_ms());
+				if (left <= 0) {
+					wait_ms = 1;
+				} else if (wait_ms > (uint32_t)left + 50) {
+					wait_ms = (uint32_t)left + 50;
+				}
 			}
 			struct timespec deadline;
 			deadline_in_ms(&deadline, wait_ms);
@@ -3863,6 +4057,10 @@ static void *bluetooth_worker(void *arg) {
 
 			case JOB_REFRESH:
 				refresh_devices();
+				// Nobody is waiting on a refresh: it is bluez announcing
+				// something, or the backstop below. A device that has just
+				// connected and has no audio profile gets asked for one here.
+				invite_sinks();
 				break;
 
 			case JOB_PAIR: {
@@ -4064,6 +4262,15 @@ static void *bluetooth_worker(void *arg) {
 			continue;
 		}
 
+		// The invitation to a linked sink that has come due between two polls.
+		// The wait above shortened itself to land here, so this is where the
+		// grace period set in invite_sinks() actually runs out.
+		if (enabled && sink_invite_due != 0 && (int32_t)(now_ms() - sink_invite_due) >= 0) {
+			refresh_devices();
+			invite_sinks();
+			continue;
+		}
+
 		// The backstop. bluez says what changed the moment it happens, so this
 		// only catches what a lost signal or a dropped connection would have
 		// hidden -- including the connection itself having gone.
@@ -4079,6 +4286,7 @@ static void *bluetooth_worker(void *arg) {
 				}
 			}
 			refresh_devices();
+			invite_sinks();
 		}
 	}
 

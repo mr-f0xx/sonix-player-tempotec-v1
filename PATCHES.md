@@ -3776,3 +3776,77 @@ the Wi-Fi page and Calculator/Notes/Metronome/Pet UI suites still pass
 (`make -C sonix-player/tests .build/test_wifi_pages .build/test_tools_pages`;
 the wifi pages target currently needs `-Wno-error=missing-field-initializers`
 because `wifisettings.c` lags `popover_item_t` by one field).
+
+## Bluetooth TX routing, a receiver that survives a codec change, and the indicator that disagreed with itself (issue #265)
+
+Three of the things in that report are code, and each had a mechanism behind it
+that the log would only have shown as a symptom.
+
+**The car that gets the metadata and not the sound.** A sink publishing its
+bluealsa PCM calls `apply_output_routing()`, which moves the ALSA device name
+from the jack to `bluealsa:DEV=…`. The playback loops re-read that name only
+when they open a track: the check they run every 32 buffers watched
+`alsa_output_key()` — the 3.5 mm/4.4 mm route inside the codec — and not the
+name. So a track that was already playing when the sink appeared carried on
+going to the 3.5 mm socket until it ended or was skipped, while the interface,
+the volume curve and the car (which had the AVRCP metadata, since that is a
+different profile and comes up on its own) all said Bluetooth. Re-seating the
+IEMs did not help either, and that is the tell: that moves the route, and the
+route was not what was wrong.
+
+Both loops now compare the device name too, and reroute when either has moved
+(`output_moved()` in `audio.c`). The name the track last acted on is kept, so a
+device that has already been tried and refused is not retried every 32 buffers.
+
+**The car that never got a PCM at all.** A connection the *player* starts goes
+through `connect_device_ex()`, which asks for the A2DP profile by name when the
+ACL is up and no audio is. A connection the *car* starts — the user picks the V1
+on its screen — goes through nothing at all: bluez raises the ACL, AVRCP comes
+up, and the audio profile is only opened if this end asks. From bluez's side
+nothing has failed, so the log is silent and the sound stays in the jack. The
+worker now notices a paired, connected device that advertises an A2DP Sink (or
+is an audio device by class) with no PCM of its own, and asks for the profile
+once per link, three seconds after the link, with the polling shortened so it
+does not wait the fifteen-second backstop out (`invite_sinks()`). Never while
+the user has an action queued, never while a sink is already playing, and never
+in receiver mode, where bluealsa carries no source profile to ask with.
+
+**The receiver that only came back after being restarted.** A phone changing
+codec tears its transport down and builds the next one; bluealsa publishes no
+PCM at all in between, while the device stays connected and playing throughout.
+The capture loop treated "no PCM" as "nothing will work", so after a few seconds
+it either ended the mode or parked itself waiting for a *stream change* — an
+event that does not exist when there is no transport to change. Switching the
+MacBook from AAC to SBC and back therefore left the mode silent until it was
+switched off and on again.
+
+The loop now asks whether the *device* is still connected
+(`bluetooth_receiver_peer_connected()`) and keeps trying while it is, a few
+seconds apart, instead of waiting for an event: the PCM coming back is enough of
+a change, and the retry finds it. A sender that has actually gone still ends the
+mode, as before.
+
+**The codec indicator that said two things at once.** The page's codec line was
+published when a capture session opened; the tick in its codec menu is a
+separate read of bluealsa's own `Codec` property, refreshed every second. After
+a change the menu said AAC (bluealsa had moved) while the line above it still
+said SBC (the session had not reopened yet). The new answer is published the
+moment the watch sees it, before the reopen, so both follow bluealsa.
+
+Tests: `make -C sonix-player/tests bluetooth` covers the sink invitation (grace,
+once per link, not for a source-only phone, not in receiver mode, not during a
+user action), the session surviving a codec change with the new codec published
+before the reopen, and waiting for a PCM that is gone while the device is not.
+The routing change is a two-line predicate behind `output_moved()`; the loops
+around it need the ALSA hardware, so it is checked by reading rather than by a
+host test.
+
+Hardware validation pending: with a car, confirm the audio starts coming out of
+it without a track change and without a second connect from the player, and that
+the log carries `bluetooth: … is linked with no A2DP profile` when the car
+connected on its own. For RX, switch a MacBook between AAC and SBC three or four
+times: the mode must stay up, and `btreceiver: nothing to open … still linked,
+so trying again` is the line to look for if it does not. Nothing here touches
+the transmitter-specific stutter (SBC/aptX on a Fold 8, aptX from a SafeFly) or
+the reboots; those still need the logs from the report, which this sandbox
+could not fetch from the issue's attachments.

@@ -2385,6 +2385,30 @@ static snd_pcm_sframes_t pcm_write_recover(snd_pcm_t **pcm, const void *buf, snd
 
 
 
+// Has the output moved under a running stream?
+//
+// Two things decide where a track goes, and both can change while it plays. One
+// is the codec's route (alsa_output_key(), the 3.5 mm and 4.4 mm sockets), which
+// is what a plug going in or out changes. The other is the ALSA device name
+// (audio_set_output_device()), which is what Bluetooth changes: a sink
+// publishing its PCM routes the player there, and the link dropping routes it
+// back to the jack.
+//
+// The loops below watched the route only, which is the older half of it, and
+// the missing half is what the report describes: enable Bluetooth TX, pair with
+// a car, press play, and the car gets the metadata -- AVRCP is a different
+// profile and comes up on its own -- while the music stays in the 3.5 mm socket
+// until the track ends or is skipped, because a stream that is already open is
+// never told the name underneath it changed. Unplugging the IEMs did not help
+// either: that moves the route, and the route was not what was wrong.
+//
+// `at_open` is what the caller last acted on, so a device that has already been
+// tried and refused is not retried every 32 buffers -- that would be a click
+// every half second rather than a track playing somewhere.
+static bool output_moved(int now_route, const char *now_device, int route_at_open, const char *device_at_open) {
+	return now_route != route_at_open || strcmp(now_device, device_at_open) != 0;
+}
+
 // Mid-track jack change (headphones in/out while playing): the stock engine
 // sets a reinit flag and its device layer reopens on the new route; this is
 // the same move between two writes -- the only moment no stream is live, so
@@ -2691,6 +2715,11 @@ static void play_wav_file(const char *filepath) {
 	bool gap_unmuted = false;
 	int route_check = 0;
 	int track_route = alsa_output_key(); // the output auto_set_output just applied
+	// The ALSA name this track was opened on: the jack, a bluealsa PCM, a USB
+	// card. Watched beside the route, because the route does not move when
+	// Bluetooth takes the sound (see output_moved()).
+	char track_device[sizeof(output_pcm)];
+	audio_get_output_device(track_device, sizeof(track_device));
 
 	while (1) {
 		loop_turns++;
@@ -2889,12 +2918,17 @@ static void play_wav_file(const char *filepath) {
 		}
 		pthread_mutex_unlock(&audio_mutex);
 
-		// Every ~32 buffers: has the jack changed?
+		// Every ~32 buffers: has the output moved?
 		if (++route_check >= 32) {
 			route_check = 0;
 			int now_route = alsa_output_key();
-			if (now_route != track_route) {
+			char now_device[sizeof(output_pcm)];
+			audio_get_output_device(now_device, sizeof(now_device));
+			if (output_moved(now_route, now_device, track_route, track_device)) {
+				fprintf(stderr, "audio[%ld]: the output moved to '%s'; moving the track with it\n", log_ms(),
+						now_device);
 				track_route = now_route;
+				snprintf(track_device, sizeof(track_device), "%s", now_device);
 				if (!pcm_reroute(&pcm_handle, info.channels, info.sample_rate, info.out_bits,
 								 &period_size)) {
 					fprintf(stderr, "Audio: reroute failed\n");
@@ -3340,6 +3374,11 @@ static void play_decoded_file(const char *filepath, decode_format_t format) {
 	bool gap_unmuted = false;
 	int route_check = 0;
 	int track_route = alsa_output_key(); // the output auto_set_output just applied
+	// The ALSA name this track was opened on: the jack, a bluealsa PCM, a USB
+	// card. Watched beside the route, because the route does not move when
+	// Bluetooth takes the sound (see output_moved()).
+	char track_device[sizeof(output_pcm)];
+	audio_get_output_device(track_device, sizeof(track_device));
 
 	// The time stretcher. Only on the 16-bit path: what it is for is
 	// audiobooks, which are AAC and so always 16-bit, and a hi-res FLAC has no
@@ -3592,12 +3631,17 @@ static void play_decoded_file(const char *filepath, decode_format_t format) {
 		}
 		pthread_mutex_unlock(&audio_mutex);
 
-		// Every ~32 buffers: has the jack changed?
+		// Every ~32 buffers: has the output moved?
 		if (++route_check >= 32) {
 			route_check = 0;
 			int now_route = alsa_output_key();
-			if (now_route != track_route) {
+			char now_device[sizeof(output_pcm)];
+			audio_get_output_device(now_device, sizeof(now_device));
+			if (output_moved(now_route, now_device, track_route, track_device)) {
+				fprintf(stderr, "audio[%ld]: the output moved to '%s'; moving the track with it\n", log_ms(),
+						now_device);
 				track_route = now_route;
+				snprintf(track_device, sizeof(track_device), "%s", now_device);
 				if (!pcm_reroute(&pcm_handle, channels, out_rate, out_bits, &period_size)) {
 					fprintf(stderr, "Audio: reroute failed\n");
 					pthread_mutex_lock(&audio_mutex);
