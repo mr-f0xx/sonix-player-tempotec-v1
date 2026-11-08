@@ -74,9 +74,12 @@
   built-in DAC, and switching the Bluetooth radio off does not take the route
   back either. The dongle's own volume control does most of the attenuation
   rather than being left at full gain with the samples turned down, which is
-  what keeps a sensitive pair of IEMs free of background hiss. The older
-  twenty-second **Try external USB DAC** trial is still there, underneath it,
-  for a one-off test that leaves no setting behind.
+  what keeps a sensitive pair of IEMs free of background hiss -- and how far
+  down that control really works is measured as the dongle is picked up, so the
+  knob stays smooth and audible all the way to zero instead of going dead where
+  the dongle's output stops following. The older twenty-second **Try external
+  USB DAC** trial is still there, underneath it, for a one-off test that leaves
+  no setting behind.
 - **In-line remote** - the three-button cable remote: one click play/pause, two
   next, three previous.
 
