@@ -81,4 +81,8 @@ void wifitransfer_address(char *out, int size);
 // cadence. Does nothing when the feature is off.
 void wifitransfer_watchdog(void);
 
+// Stops the server and removes its /data/mnt/sd_0 bind mount synchronously
+// before the card is unmounted for USB export, hotplug removal or power-off.
+void wifitransfer_release_card(void);
+
 #endif /* WIFITRANSFER_H */

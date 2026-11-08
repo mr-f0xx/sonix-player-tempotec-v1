@@ -57,7 +57,13 @@ int sysserver_mount(const char *device, const char *mountpoint) {
 	mount_calls++; set_mount(true); return 0;
 }
 void device_state_note_storage_gone(void) {}
+void wifitransfer_release_card(void) { closes++; }
 void audio_stop(void) { stop_calls++; }
+void audio_stop_and_wait(int timeout_ms) { assert(timeout_ms > 0); stop_calls++; }
+void waveform_set_cache_dir(const char *path) { if (path) opens++; else closes++; }
+void sonixlink_set_thumbs_path(const char *path) { if (path) opens++; else closes++; }
+void sonixlink_set_db_path(const char *path) { assert(path && path[0]); opens++; }
+void sonixlink_set_card_root(const char *path) { assert(path && path[0]); opens++; }
 void library_close(void) { closes++; }
 void audiobookdb_close(void) { closes++; }
 void geniusdb_close(void) { closes++; }
@@ -118,7 +124,7 @@ int main(void) {
 	reset();
 	assert(!storage_export());
 	assert(!storage_active && export_mode == EXPORT_NONE && export_claim_fd == -1);
-	assert(stop_calls == 1 && closes == 7 && opens == 7 && mount_calls == 0);
+	assert(stop_calls == 1 && closes == 10 && opens == 11 && mount_calls == 0);
 	assert(begin_calls == end_calls);
 	expect(fake_lun, "\n");
 
@@ -126,7 +132,7 @@ int main(void) {
 	// reopen rather than exporting an unclaimed or still-open device.
 	reset(); claim_unmounts = true;
 	assert(!storage_export());
-	assert(!storage_active && mount_calls == 1 && opens == 7);
+	assert(!storage_active && mount_calls == 1 && opens == 11);
 	expect(fake_lun, "\n");
 
 	// ADB requested while unmounting wins before the LUN write.
@@ -143,7 +149,7 @@ int main(void) {
 	assert(mount_calls == 0 && opens == 0);
 	fail_lun_write = false;
 	assert(storage_restore());
-	assert(!storage_active && export_claim_fd == -1 && mount_calls == 1 && opens == 7);
+	assert(!storage_active && export_claim_fd == -1 && mount_calls == 1 && opens == 11);
 	expect(fake_lun, "\n");
 
 	// A successful export holds the claim until the verified LUN removal.
@@ -156,7 +162,7 @@ int main(void) {
 	assert(storage_active && export_claim_fd >= 0 && mount_calls == 0);
 	fail_lun_write = false;
 	assert(storage_restore());
-	assert(!storage_active && export_claim_fd == -1 && mount_calls == 1 && opens == 7);
+	assert(!storage_active && export_claim_fd == -1 && mount_calls == 1 && opens == 11);
 	assert(begin_calls == end_calls);
 	expect(fake_lun, "\n");
 

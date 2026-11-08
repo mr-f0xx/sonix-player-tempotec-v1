@@ -4450,8 +4450,16 @@ void audio_stop(void) {
 	seek_request = false;
 	seek_target_secs = -1.0;
 	track_completed = false; // deliberate stop is not a natural completion
+	pthread_cond_broadcast(&audio_cond);
 	pthread_mutex_unlock(&audio_mutex);
 	subsonicstream_cancel();
+}
+
+void audio_stop_and_wait(int timeout_ms) {
+	audio_stop();
+	for (int waited = 0; waited < timeout_ms && playback_context_active; waited += 20) {
+		usleep(20 * 1000);
+	}
 }
 
 audio_status_t audio_get_status(void) {

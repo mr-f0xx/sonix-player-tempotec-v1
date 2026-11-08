@@ -98,7 +98,7 @@ bool logging_to_sd(void) { return config_get_bool("system", "log_to_sd", false);
 // tmpfs, unlinked at once so it has a name for nobody. NULL when tmpfs will
 // not take it, and the caller then falls back to /dev/null.
 static FILE *open_held(const char *path) {
-	FILE *file = fopen(path, "w+");
+	FILE *file = fopen(path, "w+e");
 	if (!file) {
 		return NULL;
 	}
@@ -551,7 +551,7 @@ void logging_init(void) {
 
 	const char *override = getenv("SONIX_LOG");
 	if (override && override[0]) {
-		FILE *file = fopen(override, "w");
+		FILE *file = fopen(override, "we");
 		if (file && redirect_to(file)) {
 			on_sd = true;
 			snprintf(sd_log_path, sizeof(sd_log_path), "%s", override);
@@ -592,7 +592,7 @@ static bool open_sd_log(void) {
 		return false;
 	}
 
-	FILE *file = fopen(sd_log_path, "a");
+	FILE *file = fopen(sd_log_path, "ae");
 	if (!file) {
 		return false;
 	}
@@ -614,7 +614,7 @@ static bool open_sd_log(void) {
 static void open_null_log(void) {
 	flush_early(NULL);
 
-	FILE *sink = fopen("/dev/null", "w");
+	FILE *sink = fopen("/dev/null", "we");
 	if (sink) {
 		if (redirect_to(sink)) {
 			usb_stream = NULL; // redirect_to has just closed it
@@ -703,7 +703,7 @@ static void logging_resume_after_usb_locked(void) {
 		return;
 	}
 
-	FILE *file = sd_log_path[0] ? fopen(sd_log_path, "a") : NULL;
+	FILE *file = sd_log_path[0] ? fopen(sd_log_path, "ae") : NULL;
 	if (file) {
 		// The held lines go in before the redirect, because draining closes
 		// the stream stdout is still pointing at.
@@ -1056,7 +1056,7 @@ static const char *const KEPT_SIGNS[] = {
 // The whole file, NUL-terminated, up to KEPT_BYTES_MAX; *size is its length.
 // /proc files report a size of 0, so this reads rather than stats.
 static char *slurp(const char *path, size_t *size) {
-	FILE *f = fopen(path, "rb");
+	FILE *f = fopen(path, "rbe");
 	if (!f) {
 		return NULL;
 	}

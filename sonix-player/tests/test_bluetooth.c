@@ -796,6 +796,90 @@ static void test_usb_route_survives_a_radio_teardown(void) {
 	snprintf(routed_to, sizeof(routed_to), "default");
 }
 
+/* Spawned Bluetooth daemons outlive card unmounts during USB mass-storage
+ * export. Verify that neither an on-card stdout/stderr log nor an open track
+ * descriptor nor an on-card working directory is inherited by the daemon. */
+static void test_spawn_daemon_releases_card_descriptors(void) {
+	char root[] = "/tmp/sonix-bt-daemon-XXXXXX";
+	assert(mkdtemp(root));
+
+	char card_dir[256], log_file[512], track_file[512];
+	char report_file[512], script_file[512], orig_cwd[PATH_MAX];
+	assert(getcwd(orig_cwd, sizeof(orig_cwd)) != NULL);
+	snprintf(card_dir, sizeof(card_dir), "%s/mnt_sd_0", root);
+	snprintf(log_file, sizeof(log_file), "%s/sonix_player.log", card_dir);
+	snprintf(track_file, sizeof(track_file), "%s/track.flac", card_dir);
+	snprintf(report_file, sizeof(report_file), "%s/report.txt", root);
+	snprintf(script_file, sizeof(script_file), "%s/fake_daemon.sh", root);
+	assert(mkdir(card_dir, 0700) == 0);
+
+	FILE *script = fopen(script_file, "w");
+	assert(script != NULL);
+	fprintf(script,
+			"#!/bin/sh\n"
+			"me=$$\n"
+			"info=$(\n"
+			"  printf 'cwd=%%s\\n' \"$(pwd)\"\n"
+			"  for fd in /proc/$me/fd/*; do\n"
+			"    n=$(basename \"$fd\")\n"
+			"    target=$(readlink \"$fd\" 2>/dev/null || true)\n"
+			"    printf 'fd_%%s=%%s\\n' \"$n\" \"$target\"\n"
+			"  done\n"
+			")\n"
+			"printf '%%s\\n' \"$info\" > '%s.tmp'\n"
+			"mv '%s.tmp' '%s'\n",
+			report_file, report_file, report_file);
+	assert(fclose(script) == 0);
+	assert(chmod(script_file, 0755) == 0);
+
+	FILE *sd_log = fopen(log_file, "a+");
+	assert(sd_log != NULL);
+	FILE *track = fopen(track_file, "w+"); // deliberately without O_CLOEXEC
+	assert(track != NULL);
+
+	int saved_out = dup(STDOUT_FILENO);
+	int saved_err = dup(STDERR_FILENO);
+	assert(saved_out >= 0 && saved_err >= 0);
+	assert(fcntl(saved_out, F_SETFD, FD_CLOEXEC) == 0);
+	assert(fcntl(saved_err, F_SETFD, FD_CLOEXEC) == 0);
+
+	// Mirror logging_attach_sd(): descriptors 1 and 2 point straight at the card.
+	assert(dup2(fileno(sd_log), STDOUT_FILENO) >= 0);
+	assert(dup2(fileno(sd_log), STDERR_FILENO) >= 0);
+	assert(chdir(card_dir) == 0);
+
+	char *argv[] = {script_file, NULL};
+	bool ok = spawn_daemon(script_file, argv);
+
+	assert(chdir(orig_cwd) == 0);
+	assert(dup2(saved_out, STDOUT_FILENO) >= 0);
+	assert(dup2(saved_err, STDERR_FILENO) >= 0);
+	close(saved_out);
+	close(saved_err);
+	fclose(track);
+	fclose(sd_log);
+	assert(ok);
+
+	for (int waited = 0; waited < 2000 && access(report_file, F_OK) != 0; waited += 20) {
+		usleep(20 * 1000);
+	}
+
+	char report[2048];
+	assert(slurp(report_file, report, sizeof(report)));
+	assert(strstr(report, "cwd=/\n") != NULL);
+	assert(strstr(report, "fd_0=/dev/null\n") != NULL);
+	assert(strstr(report, "fd_1=/dev/null\n") != NULL);
+	assert(strstr(report, "fd_2=/dev/null\n") != NULL);
+	assert(strstr(report, card_dir) == NULL);
+
+	unlink(report_file);
+	unlink(script_file);
+	unlink(track_file);
+	unlink(log_file);
+	rmdir(card_dir);
+	rmdir(root);
+}
+
 int main(void) {
 	test_rx_request_queue();
 	test_a2dp_directions();
@@ -808,6 +892,7 @@ int main(void) {
 	test_op_result_is_reported_once();
 	test_scan_pairing_window();
 	test_usb_route_survives_a_radio_teardown();
-	printf("PASS bluetooth (A2DP directions, RX profile/pairing, scan visibility, startup, ALSA template, radio switch and boot cleanup)\n");
+	test_spawn_daemon_releases_card_descriptors();
+	printf("PASS bluetooth (A2DP directions, RX profile/pairing, scan visibility, startup, ALSA template, radio switch, boot cleanup and daemon fd isolation)\n");
 	return 0;
 }

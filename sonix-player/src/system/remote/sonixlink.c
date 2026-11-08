@@ -334,10 +334,22 @@ void sonixlink_set_card_root(const char *path) {
 	pthread_mutex_unlock(&lock);
 }
 
+static pthread_mutex_t thumbs_db_lock = PTHREAD_MUTEX_INITIALIZER;
+static sqlite3 *thumbs_db;
+static char thumbs_db_path[600];
+
 void sonixlink_set_thumbs_path(const char *path) {
 	pthread_mutex_lock(&lock);
 	snprintf(thumbs_path, sizeof(thumbs_path), "%s", path ? path : "");
 	pthread_mutex_unlock(&lock);
+
+	pthread_mutex_lock(&thumbs_db_lock);
+	if (thumbs_db && (!path || !path[0] || strcmp(thumbs_db_path, path) != 0)) {
+		sqlite3_close(thumbs_db);
+		thumbs_db = NULL;
+		thumbs_db_path[0] = '\0';
+	}
+	pthread_mutex_unlock(&thumbs_db_lock);
 }
 
 bool sonixlink_get_enabled(void) {
@@ -1537,16 +1549,18 @@ static void route_covers(client_t *c) {
 
 #define THUMBS_PER_ASK 64
 
-// Worker thread only.
-static sqlite3 *thumbs_db;
-static char thumbs_db_path[600];
-
-static sqlite3 *thumbs_open(void) {
+// Caller holds thumbs_db_lock.
+static sqlite3 *thumbs_open_locked(void) {
 	char path[sizeof(thumbs_path)];
 	pthread_mutex_lock(&lock);
 	snprintf(path, sizeof(path), "%s", thumbs_path);
 	pthread_mutex_unlock(&lock);
 	if (!path[0]) {
+		if (thumbs_db) {
+			sqlite3_close(thumbs_db);
+			thumbs_db = NULL;
+			thumbs_db_path[0] = '\0';
+		}
 		return NULL;
 	}
 	if (thumbs_db && strcmp(thumbs_db_path, path) == 0) {
@@ -1570,10 +1584,11 @@ static sqlite3 *thumbs_open(void) {
 }
 
 // A statement failed: the file may have been replaced under the connection.
-static void thumbs_forget(void) {
+static void thumbs_forget_locked(void) {
 	if (thumbs_db) {
 		sqlite3_close(thumbs_db);
 		thumbs_db = NULL;
+		thumbs_db_path[0] = '\0';
 	}
 }
 
@@ -1601,15 +1616,18 @@ static void buf_u32(buf_t *b, uint32_t v) {
 }
 
 static void route_thumbkeys(client_t *c) {
-	sqlite3 *db = thumbs_open();
+	pthread_mutex_lock(&thumbs_db_lock);
+	sqlite3 *db = thumbs_open_locked();
 	if (!db) {
+		pthread_mutex_unlock(&thumbs_db_lock);
 		reply_status(c, "404 Not Found", "no thumbnails yet");
 		return;
 	}
 	sqlite3_stmt *st = NULL;
 	if (sqlite3_prepare_v2(db, "SELECT key FROM thumbs", -1, &st, NULL) != SQLITE_OK) {
 		sqlite3_finalize(st);
-		thumbs_forget();
+		thumbs_forget_locked();
+		pthread_mutex_unlock(&thumbs_db_lock);
 		reply_status(c, "500 Internal Server Error", "cannot read the thumbnails");
 		return;
 	}
@@ -1637,6 +1655,7 @@ static void route_thumbkeys(client_t *c) {
 		buf_add(&body, bytes, 8);
 	}
 	sqlite3_finalize(st);
+	pthread_mutex_unlock(&thumbs_db_lock);
 	if (body.failed) {
 		buf_free(&body);
 		reply_status(c, "500 Internal Server Error", "out of memory");
@@ -1652,15 +1671,18 @@ static void route_thumbs(client_t *c, const char *query) {
 		reply_status(c, "400 Bad Request", "no keys");
 		return;
 	}
-	sqlite3 *db = thumbs_open();
+	pthread_mutex_lock(&thumbs_db_lock);
+	sqlite3 *db = thumbs_open_locked();
 	if (!db) {
+		pthread_mutex_unlock(&thumbs_db_lock);
 		reply_status(c, "404 Not Found", "no thumbnails yet");
 		return;
 	}
 	sqlite3_stmt *st = NULL;
 	if (sqlite3_prepare_v2(db, "SELECT w,h,pixels FROM thumbs WHERE key=?", -1, &st, NULL) != SQLITE_OK) {
 		sqlite3_finalize(st);
-		thumbs_forget();
+		thumbs_forget_locked();
+		pthread_mutex_unlock(&thumbs_db_lock);
 		reply_status(c, "500 Internal Server Error", "cannot read the thumbnails");
 		return;
 	}
@@ -1693,6 +1715,7 @@ static void route_thumbs(client_t *c, const char *query) {
 		}
 	}
 	sqlite3_finalize(st);
+	pthread_mutex_unlock(&thumbs_db_lock);
 	if (body.failed) {
 		buf_free(&body);
 		reply_status(c, "500 Internal Server Error", "out of memory");

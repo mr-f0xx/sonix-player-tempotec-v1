@@ -103,6 +103,24 @@ static bool process_running(const char *name) {
 
 bool adb_is_running(void) { return process_running("adbd"); }
 
+static void detach_adb_child(long open_max) {
+	if (chdir("/") != 0) {
+		_exit(126);
+	}
+	int devnull = open("/dev/null", O_RDWR);
+	if (devnull >= 0) {
+		dup2(devnull, STDIN_FILENO);
+		dup2(devnull, STDOUT_FILENO);
+		dup2(devnull, STDERR_FILENO);
+		if (devnull > STDERR_FILENO) {
+			close(devnull);
+		}
+	}
+	for (int fd = 3; fd < (int)open_max; fd++) {
+		close(fd);
+	}
+}
+
 // Runs "<script> start|stop" in a child. fork+exec rather than system(): it
 // keeps the shell out of it and, more to the point, the child is reaped here
 // instead of becoming a zombie for the rest of the session.
@@ -112,6 +130,11 @@ static bool run_script(const char *script, const char *action) {
 		return false;
 	}
 
+	long open_max = sysconf(_SC_OPEN_MAX);
+	if (open_max < 64 || open_max > 4096) {
+		open_max = 4096;
+	}
+
 	pid_t pid = fork();
 	if (pid < 0) {
 		perror("adb: fork");
@@ -119,6 +142,7 @@ static bool run_script(const char *script, const char *action) {
 	}
 
 	if (pid == 0) {
+		detach_adb_child(open_max);
 		execl("/bin/sh", "sh", script, action, (char *)NULL);
 		_exit(127); // exec failed; nothing here is worth reporting up
 	}
@@ -316,6 +340,11 @@ static bool adb_gadget_start(void) {
 	// setsid() goes in the middle child, so adbd ends up in a session it does
 	// not lead: it outlives the player and takes none of its signals, and
 	// cannot pick up a controlling terminal either.
+	long open_max = sysconf(_SC_OPEN_MAX);
+	if (open_max < 64 || open_max > 4096) {
+		open_max = 4096;
+	}
+
 	pid_t pid = fork();
 	if (pid < 0) {
 		perror("adb: fork");
@@ -324,6 +353,7 @@ static bool adb_gadget_start(void) {
 	if (pid == 0) {
 		setsid();
 		if (fork() == 0) {
+			detach_adb_child(open_max);
 			execl("/usr/bin/adbd", "adbd", (char *)NULL);
 			execlp("adbd", "adbd", (char *)NULL);
 			_exit(127);

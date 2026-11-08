@@ -31,10 +31,13 @@
 #include "src/system/audio/alsa-controls.h"
 #include "src/system/audio/usbhostmode.h"
 #include "src/system/audio/usbhostprobe.h"
+#include "src/system/audio/waveform.h"
 #include "src/system/playback/device_state.h"
 #include "src/system/library/audiobookdb.h"
 #include "src/system/audio/eq.h"
+#include "src/system/net/wifitransfer.h"
 #include "src/system/remote/dlna.h"
+#include "src/system/remote/sonixlink.h"
 #include "src/system/gearboy/gbdb.h"
 #include "src/system/input/hookclicks.h"
 #include "src/system/input/keymap.h"
@@ -604,11 +607,31 @@ static int mount_ntfs_rw(const char *device, const char *mount_point) {
 			continue;
 		}
 
+		long open_max = sysconf(_SC_OPEN_MAX);
+		if (open_max < 64 || open_max > 4096) {
+			open_max = 4096;
+		}
+
 		pid_t pid = fork();
 		if (pid < 0) {
 			return -1;
 		}
 		if (pid == 0) {
+			if (chdir("/") != 0) {
+				_exit(126);
+			}
+			int devnull = open("/dev/null", O_RDWR);
+			if (devnull >= 0) {
+				dup2(devnull, STDIN_FILENO);
+				dup2(devnull, STDOUT_FILENO);
+				dup2(devnull, STDERR_FILENO);
+				if (devnull > STDERR_FILENO) {
+					close(devnull);
+				}
+			}
+			for (int fd = 3; fd < (int)open_max; fd++) {
+				close(fd);
+			}
 			// big_writes and the default uid/gid: the player is the only user of
 			// this card, and the helper otherwise leaves everything owned by
 			// whoever mounted it.
@@ -838,6 +861,7 @@ static void card_databases_detach(void) {
 	// already running from writing to the bare mount point: after the unmount
 	// that is a directory on the player's own UBIFS, which is precisely the
 	// storage the cache must not fill.
+	wifitransfer_release_card();
 	tidalcache_set_root(NULL);
 
 	// Playback first. The playback thread keeps the track's descriptor open for
@@ -849,7 +873,9 @@ static void card_databases_detach(void) {
 	// Where the track was, first of all: the stop below is what the next press
 	// of play would otherwise read as "the track ended, start it again".
 	device_state_note_storage_gone();
-	audio_stop();
+	audio_stop_and_wait(2000);
+	waveform_set_cache_dir(NULL);
+	sonixlink_set_thumbs_path(NULL);
 
 	logging_suspend_for_usb(); // closes the on-card log file
 	btlog_card_release();
@@ -875,10 +901,14 @@ static void card_databases_attach(const char *root) {
 	const int room = (int)sizeof(path) - 32;
 	snprintf(path, sizeof(path), "%.*s/.local/library.db", room, root);
 	library_open(path);
+	sonixlink_set_db_path(path);
 	snprintf(path, sizeof(path), "%.*s/.local/audiobooks.db", room, root);
 	audiobookdb_open(path);
 	snprintf(path, sizeof(path), "%.*s/.local/genius.db", room, root);
 	geniusdb_open(path);
+	snprintf(path, sizeof(path), "%.*s/.local/thumbs", room, root);
+	sonixlink_set_thumbs_path(path);
+	sonixlink_set_card_root(root);
 
 	// Radio favourites and recents follow the card across a hot swap too. If
 	// the replacement is read-only, keep them usable for this session in /tmp,
@@ -902,6 +932,7 @@ static void card_databases_attach(const char *root) {
 	screensaver_set_card_root(root);
 	bootpic_set_root(root);
 	cover_set_cache_dir(root);
+	waveform_set_cache_dir(root);
 	eq_presets_set_dir(root);
 	peq_presets_set_dir(root);
 	mseb_presets_set_dir(root);
@@ -1004,8 +1035,41 @@ void storage_recheck_card(void) {
 	pthread_mutex_unlock(&card_lock);
 }
 
-// Every descriptor of this process that points into the card, for the log
-// when the card cannot be released.
+// Every descriptor or working directory across /proc that points into the
+// card, for the log when the card cannot be released. Scanning only /proc/self
+// misses inherited descriptors held by background daemons.
+static bool proc_decimal(const char *s) {
+	if (!*s) {
+		return false;
+	}
+	for (; *s; s++) {
+		if (*s < '0' || *s > '9') {
+			return false;
+		}
+	}
+	return true;
+}
+
+static bool path_under_card(const char *target, const char *root, size_t root_len) {
+	return strncmp(target, root, root_len) == 0 && (target[root_len] == '/' || target[root_len] == '\0');
+}
+
+static void read_proc_comm(const char *pid, char *out, size_t out_size) {
+	out[0] = '\0';
+	char path[320];
+	if ((size_t)snprintf(path, sizeof(path), "/proc/%s/comm", pid) >= sizeof(path)) {
+		return;
+	}
+	FILE *f = fopen(path, "re");
+	if (!f) {
+		return;
+	}
+	if (fgets(out, (int)out_size, f)) {
+		out[strcspn(out, "\r\n")] = '\0';
+	}
+	fclose(f);
+}
+
 static void log_open_on_card(void) {
 	char root[PATH_MAX];
 	if (!realpath(sd_root, root)) {
@@ -1013,24 +1077,59 @@ static void log_open_on_card(void) {
 	}
 	size_t root_len = strlen(root);
 
-	DIR *dir = opendir("/proc/self/fd");
-	if (!dir) {
+	DIR *proc = opendir("/proc");
+	if (!proc) {
 		return;
 	}
-	struct dirent *de;
-	while ((de = readdir(dir)) != NULL) {
-		char link[16 + sizeof(de->d_name)], target[PATH_MAX];
-		snprintf(link, sizeof(link), "/proc/self/fd/%s", de->d_name);
-		ssize_t n = readlink(link, target, sizeof(target) - 1);
-		if (n <= 0) {
+	struct dirent *pe;
+	while ((pe = readdir(proc)) != NULL) {
+		if (!proc_decimal(pe->d_name)) {
 			continue;
 		}
-		target[n] = '\0';
-		if (strncmp(target, root, root_len) == 0 && (target[root_len] == '/' || target[root_len] == '\0')) {
-			fprintf(stderr, "storage:   still open on the card: %s (fd %s)\n", target, de->d_name);
+		char comm[64];
+		read_proc_comm(pe->d_name, comm, sizeof(comm));
+
+		char link[600], target[PATH_MAX];
+		if ((size_t)snprintf(link, sizeof(link), "/proc/%s/cwd", pe->d_name) < sizeof(link)) {
+			ssize_t n = readlink(link, target, sizeof(target) - 1);
+			if (n > 0) {
+				target[n] = '\0';
+				if (path_under_card(target, root, root_len)) {
+					fprintf(stderr, "storage:   still open on the card: %s (pid %s %s, cwd)\n", target, pe->d_name,
+							comm[0] ? comm : "?");
+				}
+			}
 		}
+
+		char fd_dir[320];
+		if ((size_t)snprintf(fd_dir, sizeof(fd_dir), "/proc/%s/fd", pe->d_name) >= sizeof(fd_dir)) {
+			continue;
+		}
+		DIR *dir = opendir(fd_dir);
+		if (!dir) {
+			continue;
+		}
+		struct dirent *de;
+		while ((de = readdir(dir)) != NULL) {
+			if (!proc_decimal(de->d_name)) {
+				continue;
+			}
+			if ((size_t)snprintf(link, sizeof(link), "%s/%s", fd_dir, de->d_name) >= sizeof(link)) {
+				continue;
+			}
+			ssize_t n = readlink(link, target, sizeof(target) - 1);
+			if (n <= 0) {
+				continue;
+			}
+			target[n] = '\0';
+			if (path_under_card(target, root, root_len)) {
+				fprintf(stderr, "storage:   still open on the card: %s (pid %s %s, fd %s)\n", target, pe->d_name,
+						comm[0] ? comm : "?", de->d_name);
+			}
+		}
+		closedir(dir);
 	}
-	closedir(dir);
+	closedir(proc);
 }
 
 void storage_release_for_shutdown(void) {
@@ -1061,6 +1160,9 @@ void storage_release_for_shutdown(void) {
 	// The card lifecycle may already be detached even though logging was
 	// reopened independently. Always release these idempotent handles before
 	// attempting the unmount, including in that case.
+	wifitransfer_release_card();
+	waveform_set_cache_dir(NULL);
+	sonixlink_set_thumbs_path(NULL);
 	logging_suspend_for_usb();
 	btlog_card_release();
 	cover_set_cache_dir(NULL); // the thumbnail cache moves to /tmp

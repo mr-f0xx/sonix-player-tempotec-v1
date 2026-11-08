@@ -77,6 +77,11 @@ static char saved_path[512];
 
 static const char FAKE_WPA_CLI[] =
 	"#!/bin/sh\n"
+	"if [ -n \"$FAKE_LEAK_FD\" ]; then\n"
+	"  if [ \"$PWD\" != \"/\" ]; then echo \"LEAK_CWD=$PWD\" >> \"$FAKE_WPA_LOG\"; exit 99; fi\n"
+	"  if [ -e \"/proc/$$/fd/$FAKE_LEAK_FD\" ]; then echo \"LEAK_FD=$FAKE_LEAK_FD\" >> \"$FAKE_WPA_LOG\"; exit 98; fi\n"
+	"  if [ \"$(readlink /proc/$$/fd/2)\" != \"/dev/null\" ]; then echo \"LEAK_STDERR=$(readlink /proc/$$/fd/2)\" >> \"$FAKE_WPA_LOG\"; exit 97; fi\n"
+	"fi\n"
 	"printf '%s|' \"$@\" >> \"$FAKE_WPA_LOG\"; printf '\\n' >> \"$FAKE_WPA_LOG\"\n"
 	"shift 2\n" // -i wlan0
 	"case \"$1\" in\n"
@@ -378,6 +383,20 @@ int main(void) {
 	nanosleep(&settle_coex, NULL);
 	assert(log_find(slurp(log_path), "disconnect|") < 0);
 	wifi_set_receiver_priority(false, true);
+
+	/* Open a non-CLOEXEC card-like descriptor and ensure run_argv() does not
+	 * leak it into Wi-Fi child processes (such as wpa_supplicant -B / udhcpc). */
+	FILE *card_leak = fopen(log_path, "r");
+	assert(card_leak != NULL);
+	char fd_buf[16];
+	snprintf(fd_buf, sizeof(fd_buf), "%d", fileno(card_leak));
+	assert(setenv("FAKE_LEAK_FD", fd_buf, 1) == 0);
+	clear_log();
+	wifi_connect("VisibleNet", NULL);
+	assert(wait_op(ssid, sizeof(ssid)) == WIFI_OP_OK);
+	assert(log_find(slurp(log_path), "LEAK_") < 0);
+	unsetenv("FAKE_LEAK_FD");
+	fclose(card_leak);
 
 	printf("PASS wifi join (scan_ssid for hidden networks only; a saved network the scan "
 		   "reports as open gets key_mgmt=NONE, a secured or out-of-range one keeps its entry)\n");

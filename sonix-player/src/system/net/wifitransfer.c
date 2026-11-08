@@ -4,6 +4,7 @@
 
 #include <dirent.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <pthread.h>
 #include <stdio.h>
 #include <string.h>
@@ -70,12 +71,32 @@ static bool g_card_bound;
 // fork+exec, never a shell: nothing here takes a string from the user, but the
 // habit is what keeps it that way.
 static int run(const char *path, char *const argv[]) {
+	long open_max = sysconf(_SC_OPEN_MAX);
+	if (open_max < 64 || open_max > 4096) {
+		open_max = 4096;
+	}
+
 	pid_t pid = fork();
 	if (pid < 0) {
 		perror("wifitransfer: fork");
 		return -1;
 	}
 	if (pid == 0) {
+		if (chdir("/") != 0) {
+			_exit(126);
+		}
+		int devnull = open("/dev/null", O_RDWR);
+		if (devnull >= 0) {
+			dup2(devnull, STDIN_FILENO);
+			dup2(devnull, STDOUT_FILENO);
+			dup2(devnull, STDERR_FILENO);
+			if (devnull > STDERR_FILENO) {
+				close(devnull);
+			}
+		}
+		for (int fd = 3; fd < (int)open_max; fd++) {
+			close(fd);
+		}
 		execv(path, argv);
 		_exit(127);
 	}
@@ -701,6 +722,17 @@ void wifitransfer_set_enabled(bool on) {
 }
 
 bool wifitransfer_get_enabled(void) { return g_enabled; }
+
+void wifitransfer_release_card(void) {
+	pthread_mutex_lock(&lock);
+	bool active = g_enabled || g_card_bound;
+	g_enabled = false;
+	if (active) {
+		running_cache_generation++;
+		stop_server();
+	}
+	pthread_mutex_unlock(&lock);
+}
 
 // Whether the server is up.
 //
