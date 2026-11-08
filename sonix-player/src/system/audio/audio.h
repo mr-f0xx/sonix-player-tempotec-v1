@@ -236,6 +236,10 @@ bool audio_external_begin(int sample_rate, int channels, int bits);
 // as its metronome -- writing one frame's samples to a blocking PCM lets ALSA
 // keep the pace of 59.73 frames per second.
 bool audio_external_begin_latency(int sample_rate, int channels, int bits, int buffer_ms);
+// Writes interleaved frames without modifying the caller's buffer. If the USB
+// output's volume relies on software attenuation, it is applied to a private
+// copy here so external sources (including Bluetooth RX) follow the same level
+// as decoded tracks.
 int audio_external_write(const void *frames, int count);
 void audio_external_end(void);
 

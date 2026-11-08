@@ -4619,6 +4619,11 @@ void audio_get_output_device(char *out, size_t out_size) {
 // stock firmware does exactly the same thing, feeding them into the same output
 // chain local playback uses.
 //
+// External sources bypass the decode loop where local playback applies its
+// software-volume remainder. Prepare a volume-adjusted copy here when the USB
+// output needs software attenuation; otherwise the USB device gets only its
+// hardware setting (or no setting at all) and every nonzero level sounds alike.
+//
 // This is deliberately NOT part of the playback thread: that thread's whole
 // shape is "open a file, decode it, write it", and there is no file here. It is
 // the device, opened by the same open_pcm_device() so the routing, the retries
@@ -4829,16 +4834,32 @@ int audio_external_write(const void *frames, int count) {
 		return 0;
 	}
 
+	// Keep the USB software-volume path in force for externally received audio
+	// too (notably Bluetooth RX). The helper returns the input unchanged when
+	// hardware attenuation is doing all the work, and otherwise gives us a
+	// private scaled copy so callers retain their original PCM.
+	static bool volume_prepare_warned;
+	const void *volume_frames = swvolume_external_prepare(frames, count, external_channels, external_bits);
+	if (!volume_frames) {
+		if (!volume_prepare_warned) {
+			volume_prepare_warned = true;
+			fprintf(stderr, "audio: could not prepare software-volume PCM; dropping this external chunk\n");
+		}
+		pthread_mutex_unlock(&external_lock);
+		return 0;
+	}
+	volume_prepare_warned = false;
+
 	int written = 0;
 	long last_progress_ms = log_ms();
 	while (written < count) {
-		const void *chunk = (const char *)frames + (size_t)written * external_frame_bytes;
+		const void *chunk = (const char *)volume_frames + (size_t)written * external_frame_bytes;
 		if (pcm_takes_s24(external_pcm, external_bits)) {
 			chunk = s24_from_s32(&external_s24, chunk, (size_t)(count - written) * (size_t)external_channels);
 		}
 		snd_pcm_sframes_t got = chunk ? snd_pcm_writei(external_pcm, chunk, (snd_pcm_uframes_t)(count - written)) : -ENOMEM;
 		if (got > 0) {
-			visualizer_feed((const char *)frames + (size_t)written * external_frame_bytes, (int)got, external_channels, external_bits, external_rate);
+			visualizer_feed((const char *)volume_frames + (size_t)written * external_frame_bytes, (int)got, external_channels, external_bits, external_rate);
 			written += (int)got;
 			last_progress_ms = log_ms();
 			continue;

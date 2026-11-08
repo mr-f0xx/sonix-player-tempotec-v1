@@ -155,7 +155,10 @@ exact, a deeply attenuated stream must stay quiet, clean and in range (rounded
 and dithered, not truncated into grit), and the scaling must apply only while
 the sound is leaving over the USB-C port. The three routing answers (Bluetooth,
 a card on the port, that card's volume control) are stubbed; the curve, the
-coefficients and the scaling are the real ones.
+coefficients and the scaling are the real ones. The external PCM preparation
+check also verifies that USB software attenuation is applied to a private copy
+(including mute and packed 24-bit/unsigned 8-bit formats), while Bluetooth
+output, the internal DAC and unity gain leave the input unchanged.
 
 ## Equaliser on PCM, including radio
 

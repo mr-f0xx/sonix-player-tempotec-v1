@@ -72,4 +72,13 @@ void swvolume_apply_s16(short *samples, int count);
 void swvolume_apply_s24_3le(unsigned char *samples, int count);
 void swvolume_apply_s32(int32_t *samples, int count);
 
+// Prepare frames for audio_external_write(): when software attenuation is in
+// circuit, this copies the caller's PCM into reusable scratch and applies the
+// correct format-specific scaler. Otherwise it returns `frames` unchanged.
+// `frame_count` counts frames and `channels` determines the interleaved sample
+// count. The caller must serialize calls and consume the returned data before
+// the next call; NULL means invalid geometry or that the scratch could not be
+// allocated. The input buffer is never modified.
+const void *swvolume_external_prepare(const void *frames, int frame_count, int channels, int bits);
+
 #endif /* SWVOLUME_H */

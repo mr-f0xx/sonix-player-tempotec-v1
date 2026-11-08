@@ -3,8 +3,10 @@
 #include "src/system/audio/audio.h"
 #include "src/system/audio/usbaudio.h"
 
+#include <limits.h>
 #include <math.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 // SW/HDB, the one software curve the R3 Pro II's ot_devices.json defines, in
@@ -315,4 +317,77 @@ void swvolume_apply_s32(int32_t *samples, int count) {
 	for (int i = 0; i < count; i++) {
 		samples[i] = swvolume_scale(samples[i], gain, false);
 	}
+}
+
+// audio_external_write() accepts a const input buffer because most of its
+// callers still need their frames after handing them over. Retain one copy for
+// the occasional route where software attenuation is required, rather than
+// changing that contract or allocating a new block for every audio chunk.
+static unsigned char *external_scratch;
+static size_t external_scratch_capacity;
+
+const void *swvolume_external_prepare(const void *frames, int frame_count, int channels, int bits) {
+	if (frame_count <= 0) {
+		return frames;
+	}
+	if (!frames || channels <= 0) {
+		return NULL;
+	}
+
+	size_t bytes_per_sample;
+	switch (bits) {
+	case 8:
+		bytes_per_sample = 1;
+		break;
+	case 16:
+		bytes_per_sample = 2;
+		break;
+	case 24:
+		bytes_per_sample = 3;
+		break;
+	case 32:
+		bytes_per_sample = 4;
+		break;
+	default:
+		return NULL;
+	}
+
+	if ((size_t)channels > SIZE_MAX / bytes_per_sample || frame_count > INT_MAX / channels) {
+		return NULL;
+	}
+	size_t frame_bytes = (size_t)channels * bytes_per_sample;
+	if ((size_t)frame_count > SIZE_MAX / frame_bytes) {
+		return NULL;
+	}
+	size_t bytes = (size_t)frame_count * frame_bytes;
+	if (!swvolume_active()) {
+		return frames;
+	}
+
+	if (bytes > external_scratch_capacity) {
+		unsigned char *grown = realloc(external_scratch, bytes);
+		if (!grown) {
+			return NULL;
+		}
+		external_scratch = grown;
+		external_scratch_capacity = bytes;
+	}
+	memcpy(external_scratch, frames, bytes);
+
+	int samples = frame_count * channels;
+	switch (bits) {
+	case 8:
+		swvolume_apply_u8(external_scratch, samples);
+		break;
+	case 16:
+		swvolume_apply_s16((short *)external_scratch, samples);
+		break;
+	case 24:
+		swvolume_apply_s24_3le(external_scratch, samples);
+		break;
+	case 32:
+		swvolume_apply_s32((int32_t *)external_scratch, samples);
+		break;
+	}
+	return external_scratch;
 }
