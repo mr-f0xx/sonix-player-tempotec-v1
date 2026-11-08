@@ -182,17 +182,89 @@ static void test_active_only_on_the_usb_route(void) {
 	short s = 1000;
 	swvolume_apply_s16(&s, 1);
 	CHECK(s == 1000);
+	const short bt_frames[2] = {1000, -1000};
+	CHECK(swvolume_external_prepare(bt_frames, 1, 2, 16) == bt_frames);
 	stub_bluetooth_active = false;
 
 	stub_usbaudio_active = false;
 	CHECK(!swvolume_active());
 	swvolume_apply_s16(&s, 1);
 	CHECK(s == 1000);
+	CHECK(swvolume_external_prepare(bt_frames, 1, 2, 16) == bt_frames);
 	stub_usbaudio_active = true;
 
 	CHECK(swvolume_active()); // -6 dB on the port: the gain is in force
 	swvolume_set_usb_gain(0, false);
 	CHECK(!swvolume_active()); // unity: nothing to apply
+}
+
+static void test_external_frames_get_the_software_volume(void) {
+	// RX, AirPlay and other external sources write around the local decode
+	// loop. The USB software remainder must still be applied to a private copy
+	// so retrying/writing those frames cannot mutate the source's buffer.
+	const int32_t input[4] = {16384, -16384, 8192, -8192};
+	const int32_t original[4] = {16384, -16384, 8192, -8192};
+	swvolume_set_usb_gain(-600, false);
+	const int32_t *output = swvolume_external_prepare(input, 2, 2, 32);
+	CHECK(output != NULL && output != input);
+	if (output) {
+		for (int i = 0; i < 4; i++) {
+			int64_t magnitude = output[i] < 0 ? -(int64_t)output[i] : output[i];
+			int64_t expected = i < 2 ? 8211 : 4106;
+			CHECK(magnitude > expected - 100 && magnitude < expected + 100);
+		}
+	}
+	CHECK(memcmp(input, original, sizeof(input)) == 0);
+
+	// At unity there is no reason to copy or scale. At mute, external PCM is
+	// explicitly silenced even if its USB control can only reach a quiet floor.
+	swvolume_set_usb_gain(0, false);
+	CHECK(swvolume_external_prepare(input, 2, 2, 32) == input);
+	swvolume_set_usb_gain(-12000, true);
+	output = swvolume_external_prepare(input, 2, 2, 32);
+	CHECK(output != NULL && output != input);
+	if (output) {
+		CHECK(output[0] == 0 && output[1] == 0 && output[2] == 0 && output[3] == 0);
+	}
+	CHECK(memcmp(input, original, sizeof(input)) == 0);
+}
+
+static void test_external_copy_respects_pcm_width(void) {
+	// 24-bit packed PCM has no fourth padding byte. Scale both samples while
+	// leaving the caller's six bytes untouched, and check unsigned 8-bit uses
+	// its midpoint as silence rather than zero.
+	unsigned char packed[6] = {0x00, 0x00, 0x40, 0x00, 0x00, 0xC0};
+	unsigned char before[sizeof(packed)];
+	memcpy(before, packed, sizeof(packed));
+	swvolume_set_usb_gain(-600, false);
+	const unsigned char *packed_out = swvolume_external_prepare(packed, 1, 2, 24);
+	CHECK(packed_out != NULL && packed_out != packed);
+	if (packed_out) {
+		CHECK(packed_out[2] < 0x40); // positive sample was attenuated
+		CHECK(packed_out[5] > 0xC0); // negative sample moved toward zero
+	}
+	CHECK(memcmp(packed, before, sizeof(packed)) == 0);
+
+	short s16[2] = {16000, -16000};
+	const short s16_before[2] = {16000, -16000};
+	const short *s16_out = swvolume_external_prepare(s16, 1, 2, 16);
+	CHECK(s16_out != NULL && s16_out != s16);
+	if (s16_out) {
+		CHECK(s16_out[0] > 7900 && s16_out[0] < 8100);
+		CHECK(s16_out[1] < -7900 && s16_out[1] > -8100);
+	}
+	CHECK(memcmp(s16, s16_before, sizeof(s16)) == 0);
+
+	unsigned char u8[2] = {0, 255};
+	const unsigned char *u8_out = swvolume_external_prepare(u8, 1, 2, 8);
+	CHECK(u8_out != NULL && u8_out != u8);
+	if (u8_out) {
+		CHECK(u8_out[0] > 60 && u8_out[0] < 68);
+		CHECK(u8_out[1] > 188 && u8_out[1] < 196);
+	}
+	CHECK(u8[0] == 0 && u8[1] == 255);
+
+	CHECK(swvolume_external_prepare(u8, 1, 2, 20) == NULL);
 }
 
 static void test_index_curve_matches_its_own_coefficients(void) {
@@ -219,6 +291,8 @@ int main(void) {
 	test_s32_rounds_and_keeps_depth();
 	test_s24_3le_stays_inside_the_three_bytes();
 	test_active_only_on_the_usb_route();
+	test_external_frames_get_the_software_volume();
+	test_external_copy_respects_pcm_width();
 	test_index_curve_matches_its_own_coefficients();
 
 	if (failures) {
