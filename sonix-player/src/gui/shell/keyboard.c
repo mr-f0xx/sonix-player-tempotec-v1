@@ -283,10 +283,9 @@ static void kb_apply_layout(keyboard_t *kb) {
 		lv_obj_set_hidden(kb->letter_btn[i], true);
 	}
 
-	// Shift and delete bracket the bottom row, whatever the re-parenting above
-	// left them behind.
+	// Shift brackets the letter rows whatever the re-parenting above left it
+	// behind.
 	lv_obj_move_to_index(kb->shift_btn, 0);
-	lv_obj_move_to_index(kb->delete_btn, (int32_t)lv_obj_get_child_count(kb->rows[2]) - 1);
 
 	kb_refresh_caps(kb);
 }
@@ -1058,11 +1057,6 @@ keyboard_t *keyboard_create(lv_obj_t *parent, int width, int height, lv_obj_t *f
 		lv_obj_add_event_cb(kb->letter_btn[index], kb_variants_cb, LV_EVENT_PRESS_LOST, &kb->refs[index]);
 	}
 
-	kb->delete_btn = kb_make_key(kb->rows[2], key_w + 14, kb_delete_cb, kb);
-	kb_key_icon(kb->delete_btn, &icon_delete);
-	// Holding delete keeps deleting.
-	lv_obj_add_event_cb(kb->delete_btn, kb_delete_cb, LV_EVENT_LONG_PRESSED_REPEAT, kb);
-
 	lv_obj_t *row4 = kb_make_row(kb->qwerty, row_h);
 	lv_obj_t *mode = kb_make_key(row4, wide_key_w, kb_mode_cb, kb);
 	kb->mode_label = kb_key_label(mode);
@@ -1070,6 +1064,13 @@ keyboard_t *keyboard_create(lv_obj_t *parent, int width, int height, lv_obj_t *f
 	lv_obj_add_event_cb(mode, kb_layouts_cb, LV_EVENT_LONG_PRESSED, kb);
 	lv_obj_t *space = kb_make_key(row4, 0, kb_space_cb, kb); // grows
 	kb_key_icon(space, &icon_space);
+	// Backspace lives on the bottom row, next to the accept key it pairs
+	// with, sharing the row with the space bar: a far bigger target on the
+	// tiny panel than the end key of the letter row was.
+	kb->delete_btn = kb_make_key(row4, 0, kb_delete_cb, kb);
+	kb_key_icon(kb->delete_btn, &icon_delete);
+	// Holding delete keeps deleting.
+	lv_obj_add_event_cb(kb->delete_btn, kb_delete_cb, LV_EVENT_LONG_PRESSED_REPEAT, kb);
 	kb->accept_btn = kb_make_key(row4, wide_key_w, on_accept, user);
 	lv_obj_set_style_bg_color(kb->accept_btn, theme()->accent, 0);
 	if (accept_icon) {
@@ -1121,9 +1122,11 @@ keyboard_t *keyboard_create(lv_obj_t *parent, int width, int height, lv_obj_t *f
 	kb->t9_shift_icon = kb_key_icon(kb->t9_shift_btn, &icon_shift);
 	// Space exists in both modes; the 0 stays on the 9 key's cycle, where the
 	// number table puts it.
+	// Space and backspace share the middle of the row, the same split as the
+	// QWERTY panel.
 	lv_obj_t *t9_space = kb_make_key(t9_row4, 0, kb_t9_space_cb, kb); // grows
 	kb_key_icon(t9_space, &icon_space);
-	lv_obj_t *t9_del = kb_make_key(t9_row4, key_w + 14, kb_delete_cb, kb);
+	lv_obj_t *t9_del = kb_make_key(t9_row4, 0, kb_delete_cb, kb);
 	kb_key_icon(t9_del, &icon_delete);
 	lv_obj_add_event_cb(t9_del, kb_delete_cb, LV_EVENT_LONG_PRESSED_REPEAT, kb);
 	kb->t9_accept_btn = kb_make_key(t9_row4, wide_key_w, on_accept, user);

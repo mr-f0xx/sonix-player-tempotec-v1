@@ -3728,7 +3728,6 @@ answer could not rebuild the page under itself either.
 reported once and only once, and that `BT_OP_BUSY` is not consumed. Reverting
 the one-line fix makes that check fail. A V1 with a Bluetooth transmitter should
 still confirm the round trip on hardware.
-
 ## Home footer's "No track loaded" line sitting off-centre
 
 The compact home screens (Tokyo Night, Amber on Black, OLED) end in a strip that
@@ -3755,3 +3754,25 @@ theme that has one: the placeholder must be within half a line of the glyph's
 centre, a playing track must still stack title over artist, dropping back to
 nothing must restore the centred placeholder, and a text-size change must not
 leave it stacked again. Reverting the fix aborts that check.
+
+## The on-screen keyboard's backspace moves into the thumb arc
+
+The delete key sat at the far end of the letter row, above and to the right of
+the accept key. On a 240 px panel that is the smallest key on the least
+convenient edge: ~31 px wide, reached diagonally rather than by the resting
+thumb.
+
+Backspace now lives on the bottom row, immediately left of the accept key on
+both panels. It shares the row with the space bar, one flex share each (~59 px
+on the V1's compact tray), so the key that corrects a mistyped letter is also
+the widest key on the board after the space bar itself, and it sits in the same
+corner pair as the accept key it is used alongside. The letter row above it
+loses nothing: the letters flex wider into the freed space. The T9 keypad gets
+the same treatment -- its backspace grew from 31 px to share the space bar's
+flex share beside the accept key. The hold-to-repeat behaviour is unchanged.
+
+Both panels were rendered at 240x320 through the off-screen LVGL renderer, and
+the Wi-Fi page and Calculator/Notes/Metronome/Pet UI suites still pass
+(`make -C sonix-player/tests .build/test_wifi_pages .build/test_tools_pages`;
+the wifi pages target currently needs `-Wno-error=missing-field-initializers`
+because `wifisettings.c` lags `popover_item_t` by one field).
