@@ -2835,6 +2835,15 @@ static void musicsettings_loaded_cb(lv_event_t *e) {
 	rg_refresh();
 }
 
+// Every destination in the Music settings menu gets a persistent, theme-accent
+// glyph, so the section markers remain visible in Dark and Light too.
+static lv_obj_t *musicsettings_section_row(lv_obj_t *container, const char *name, lv_obj_t *screen,
+											   const lv_image_dsc_t *icon) {
+	lv_obj_t *row = settingsrow_add(container, name, NULL, switch_screen_cb, screen);
+	settingsrow_add_accent_icon(row, icon);
+	return row;
+}
+
 void musicsettings_init(gui_config_t *cfg) {
 	lv_obj_t *container = settingsrow_page(musicsettings_screen, cfg, "music");
 
@@ -2844,28 +2853,28 @@ void musicsettings_init(gui_config_t *cfg) {
 	// DAC's own switches at the end.
 	artistexceptions_init(cfg, organize_touched);
 	build_scan_page(cfg);
-	settingsrow_add(container, "musicsettings_scan_options", NULL, switch_screen_cb, scan_screen);
+	musicsettings_section_row(container, "musicsettings_scan_options", scan_screen, &icon_library_checking);
 
 	build_playback_page(cfg);
-	settingsrow_add(container, "musicsettings_playback_options", NULL, switch_screen_cb, playback_screen);
+	musicsettings_section_row(container, "musicsettings_playback_options", playback_screen, &icon_play_status);
 
 	build_display_page(cfg);
-	settingsrow_add(container, "musicsettings_display_options", NULL, switch_screen_cb, display_screen);
-	settingsrow_add(container, "musicsettings_library", NULL, switch_screen_cb, library_screen);
+	musicsettings_section_row(container, "musicsettings_display_options", display_screen, &icon_monitor);
+	musicsettings_section_row(container, "musicsettings_library", library_screen, &icon_list_music);
 
 	if (addons_enabled("lastfm")) {
 		lastfmsettings_init(cfg);
-		settingsrow_add(container, "lastfm", NULL, switch_screen_cb, lastfmsettings_screen());
+		musicsettings_section_row(container, "lastfm", lastfmsettings_screen(), &icon_music2);
 	}
 
 	if (addons_enabled("listenbrainz")) {
 		listenbrainzsettings_init(cfg);
-		settingsrow_add(container, "listenbrainz", NULL, switch_screen_cb, listenbrainzsettings_screen());
+		musicsettings_section_row(container, "listenbrainz", listenbrainzsettings_screen(), &icon_sort_played);
 	}
 
 	if (addons_enabled("eq")) {
 		build_eq_page(cfg);
-		eq_row = settingsrow_add(container, "equaliser", NULL, switch_screen_cb, eq_screen);
+		eq_row = musicsettings_section_row(container, "equaliser", eq_screen, &icon_equalizer);
 	}
 
 	// PEQ right below: the same thing said more precisely, so whoever comes
@@ -2873,17 +2882,18 @@ void musicsettings_init(gui_config_t *cfg) {
 	// one next to it.
 	if (addons_enabled("peq")) {
 		peqpage_init(cfg);
-		peq_row = settingsrow_add(container, "peq", NULL, switch_screen_cb, peqpage_screen());
+		peq_row = musicsettings_section_row(container, "peq", peqpage_screen(), &icon_peq_quick);
 	}
 
 	if (addons_enabled("mseb")) {
 		build_mseb_page(cfg);
-		mseb_row = settingsrow_add(container, "mseb", NULL, switch_screen_cb, mseb_screen);
+		mseb_row = musicsettings_section_row(container, "mseb", mseb_screen, &icon_mseb);
 	}
 
 	if (addons_enabled("soundfield")) {
 		build_soundfield_page(cfg);
-		soundfield_row = settingsrow_add(container, "musicsettings_soundfield", NULL, switch_screen_cb, soundfield_screen);
+		soundfield_row = musicsettings_section_row(container, "musicsettings_soundfield", soundfield_screen,
+												   &icon_soundfield_quick);
 	}
 
 	// Crossfeed sits next to soundfield because they are relatives: one widens
@@ -2891,21 +2901,25 @@ void musicsettings_init(gui_config_t *cfg) {
 	// for one wants to see the other.
 	if (addons_enabled("crossfeed")) {
 		build_crossfeed_page(cfg);
-		crossfeed_row = settingsrow_add(container, "musicsettings_crossfeed", NULL, switch_screen_cb, crossfeed_screen);
+		crossfeed_row = musicsettings_section_row(container, "musicsettings_crossfeed", crossfeed_screen,
+												  &icon_crossfeed_quick);
 	}
 
 	if (addons_enabled("channel_balance")) {
 		build_balance_page(cfg);
-		balance_row = settingsrow_add(container, "musicsettings_channel_balance", NULL, switch_screen_cb, balance_screen);
+		balance_row = musicsettings_section_row(container, "musicsettings_channel_balance", balance_screen,
+												 &icon_lineout);
 	}
 
 	if (addons_enabled("volume_limit")) {
 		build_volume_limit_page(cfg);
-		vlimit_row = settingsrow_add(container, "musicsettings_volume_limit", NULL, switch_screen_cb, vlimit_screen);
+		vlimit_row = musicsettings_section_row(container, "musicsettings_volume_limit", vlimit_screen,
+											   &icon_volume_low);
 	}
 
 	// The gain step: off = low gain (the stock default), on = +6 dB.
-	settingsrow_toggle(container, "musicsettings_high_gain", &gain_switch, gain_toggle_cb);
+	lv_obj_t *gain_row = settingsrow_toggle(container, "musicsettings_high_gain", &gain_switch, gain_toggle_cb);
+	settingsrow_add_accent_icon(gain_row, &icon_high_gain);
 	if (config_get_int("audio", "high_gain", 0)) {
 		lv_obj_add_state(gain_switch, LV_STATE_CHECKED);
 	}
@@ -2918,8 +2932,9 @@ void musicsettings_init(gui_config_t *cfg) {
 	// what the audio side holds, so a load after it would leave the switch off
 	// with the compensation on.
 	alsa_set_dsd_gain_index((int)config_get_int("audio", "dsd_gain", 0));
-	settingsrow_toggle_pills(container, "musicsettings_dsd_gain", dsd_gain_toggle_cb, &dsd_gain_switch,
-							 &dsd_gain_pills);
+	lv_obj_t *dsd_gain_card = settingsrow_toggle_pills(container, "musicsettings_dsd_gain", dsd_gain_toggle_cb,
+													 &dsd_gain_switch, &dsd_gain_pills);
+	settingsrow_toggle_pills_add_accent_icon(dsd_gain_card, &icon_quality_dsd);
 	for (int i = 0; i < DSD_GAIN_MAX_DB; i++) {
 		char text[16];
 		snprintf(text, sizeof(text), "+%d dB", i + 1);
@@ -2928,18 +2943,20 @@ void musicsettings_init(gui_config_t *cfg) {
 	dsd_gain_refresh();
 
 	build_filter_page(cfg);
-	settingsrow_add(container, "musicsettings_filters", NULL, switch_screen_cb, dacfilter_screen);
+	musicsettings_section_row(container, "musicsettings_filters", dacfilter_screen, &icon_audio_waveform);
 
 	// Non-oversampling off and dynamic-range enhancement on by default, like the
 	// stock player. The R1's CS43131 driver has neither: no rows there, and
 	// alsa-controls.c keeps both off.
 	if (!alsa_board_is_cs43131()) {
-		settingsrow_toggle(container, "musicsettings_nos", &nos_switch, nos_toggle_cb);
+		lv_obj_t *nos_row = settingsrow_toggle(container, "musicsettings_nos", &nos_switch, nos_toggle_cb);
+		settingsrow_add_accent_icon(nos_row, &icon_audio_waveform);
 		if (config_get_int("audio", "dac_nos", 0)) {
 			lv_obj_add_state(nos_switch, LV_STATE_CHECKED);
 		}
 
-		settingsrow_toggle(container, "musicsettings_dac_dre", &dre_switch, dre_toggle_cb);
+		lv_obj_t *dre_row = settingsrow_toggle(container, "musicsettings_dac_dre", &dre_switch, dre_toggle_cb);
+		settingsrow_add_accent_icon(dre_row, &icon_replaygain_quick);
 		if (config_get_int("audio", "dac_dre", 1)) {
 			lv_obj_add_state(dre_switch, LV_STATE_CHECKED);
 		}
