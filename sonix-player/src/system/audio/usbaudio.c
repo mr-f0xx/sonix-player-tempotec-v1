@@ -666,9 +666,199 @@ static void find_volume_control(int card) {
 // scale is still checked below and the whole strategy falls back to the samples
 // when it cannot be believed or when a write does not take.
 //
+// Only part of the control's range is used, though, and that is the second
+// lesson from the same hardware. A dongle's volume control usually goes mute
+// long before the bottom of the range its descriptor declares: the ESR reports
+// 0..148 over -74.00..0.00 dB, and everything past about -43 dB is silence, not
+// quieter music. Handing it the whole level therefore gives a volume knob with
+// a long dead stretch at the bottom -- reported as "nothing at all until 29%,
+// and then it starts", which is exactly where -43 dB is on the player's own
+// index law. So the control is taken as far down as it will actually go and no
+// further: it is walked a decibel at a time, read back at every step, and the
+// point where it stops following is where the level stops being its business
+// and the samples take over. Nothing has to be heard to find it, and it is true
+// of the device in front of us whatever its descriptor claims. Only a device
+// whose control cannot be measured at all falls back on a fixed share.
+//
 // The value written is read back. A driver is allowed to round it; sitting at
 // the top of its range after being asked for well below is a control that does
 // nothing, and then it is given up and the samples take the whole level.
+//
+// ---------------------------------------------------------------------------
+// The share used when the control cannot be measured: a third of its declared
+// range, and no more than 30 dB. Enough that the amplifier is working well
+// below full gain -- which is what the hiss fix is for -- and little enough
+// that the level is still coming out of the samples long before any dongle's
+// control gives up. Everything past it is smooth because the samples are, and
+// the samples do not go mute.
+#define USB_CTL_SHARE_DIV 3
+#define USB_CTL_SHARE_MAX_DB 3000
+
+// Where the control actually stops following, in hundredths of a dB below its
+// own 0 dB step. Measured, not declared; see probe_control_floor().
+static long usb_ctl_floor_db = LONG_MIN;
+
+// How far a control is walked down while its floor is being found, how fine the
+// steps are, and how many consecutive steps have to come back unfollowed before
+// an edge is believed.
+//
+// The whole declared range, because that is the point: a device's mute point is
+// somewhere in the part of it the descriptor is most optimistic about, and the
+// ESR's is at -43 dB of a 74 dB span -- past any fixed guess this file could
+// make. The walk stops early once the edge is found, and a control that never
+// gives up costs at most a couple of hundred USB control transfers, once, as the
+// device is taken over.
+#define USB_CTL_PROBE_STEP_DB 100
+#define USB_CTL_PROBE_STEPS 256
+#define USB_CTL_PROBE_MISSES 3
+
+static long control_share_db(void);
+
+// Walks the control down from its 0 dB step and reports where it stops
+// following: the value read back either stops changing or jumps to the bottom
+// of the range even though the request was nowhere near it.
+//
+// This is the only way to know. snd_usb_audio publishes whatever range the
+// descriptor gave it, and a dongle is free to declare a generous one and mute
+// the analogue output a third of the way down -- the ESR does exactly that. The
+// walk is a handful of USB control transfers, once per card, before the stream
+// is opened (usbaudio_poll() runs it as the device is taken over), so it costs
+// nothing anybody can hear.
+//
+// Leaves usb_ctl_floor_db at LONG_MIN when the control never stops following,
+// which is the good case: the share below is then the only limit and the whole
+// of it is usable.
+static void probe_control_floor(int card) {
+	usb_ctl_floor_db = LONG_MIN;
+	if (!volume_control[0] || !volume_has_db || volume_max <= volume_min) {
+		return;
+	}
+
+	snd_ctl_t *ctl;
+	char name[32];
+	snprintf(name, sizeof(name), "hw:%d", card);
+	if (snd_ctl_open(&ctl, name, 0) < 0) {
+		return;
+	}
+
+	snd_ctl_elem_id_t *id;
+	snd_ctl_elem_value_t *elem;
+	snd_ctl_elem_value_t *check;
+	snd_ctl_elem_id_alloca(&id);
+	snd_ctl_elem_value_alloca(&elem);
+	snd_ctl_elem_value_alloca(&check);
+	snd_ctl_elem_id_set_interface(id, SND_CTL_ELEM_IFACE_MIXER);
+	snd_ctl_elem_id_set_name(id, volume_control);
+	snd_ctl_elem_value_set_id(elem, id);
+	snd_ctl_elem_value_set_id(check, id);
+
+	long top = volume_max;
+	long last_followed_db = LONG_MIN;
+	int misses = 0;
+	long floor_db = LONG_MIN;
+
+	// Down the range a decibel at a time, and no further than the range goes.
+	for (int step = 1; step <= USB_CTL_PROBE_STEPS; step++) {
+		long db = -(long)step * USB_CTL_PROBE_STEP_DB;
+		long value = top;
+		if (snd_tlv_convert_from_dB(volume_tlv, volume_min, volume_max, db, &value, 1) < 0) {
+			break;
+		}
+		if (value < volume_min) {
+			value = volume_min;
+		}
+		if (value > volume_max) {
+			value = volume_max;
+		}
+		if (value == top) {
+			continue; // this control has no step here yet
+		}
+		for (unsigned int c = 0; c < volume_count; c++) {
+			snd_ctl_elem_value_set_integer(elem, c, value);
+		}
+		if (snd_ctl_elem_write(ctl, elem) < 0) {
+			break;
+		}
+
+		long back = value;
+		if (snd_ctl_elem_read(ctl, check) >= 0) {
+			back = snd_ctl_elem_value_get_integer(check, 0);
+		}
+		// A read that does not follow, or one that has fallen all the way to
+		// the bottom while far from it: both are the control giving up.
+		bool followed = back == value;
+		if (!followed) {
+			if (++misses >= USB_CTL_PROBE_MISSES) {
+				floor_db = last_followed_db;
+				break;
+			}
+		} else {
+			misses = 0;
+			last_followed_db = db;
+		}
+		// The bottom of the range is the end of the walk whether or not an edge
+		// was found: past it there is nothing left to ask for, and a control
+		// that followed all the way down has no floor to speak of.
+		if (value <= volume_min) {
+			if (misses == 0) {
+				floor_db = LONG_MIN;
+			}
+			break;
+		}
+	}
+
+	// Put it back before anything is played through it.
+	for (unsigned int c = 0; c < volume_count; c++) {
+		snd_ctl_elem_value_set_integer(elem, c, top);
+	}
+	snd_ctl_elem_write(ctl, elem);
+	snd_ctl_close(ctl);
+
+	usb_ctl_floor_db = floor_db;
+	if (floor_db != LONG_MIN) {
+		fprintf(stderr, "usbaudio: '%s' stops following below %.1f dB; past that the samples do the work\n",
+				volume_control, floor_db / 100.0);
+	} else {
+		fprintf(stderr, "usbaudio: '%s' still follows its whole range; the top third of it is used\n",
+				volume_control);
+	}
+}
+
+// How much attenuation the control may be trusted with, as a negative number of
+// hundredths of a dB, never positive and never zero.
+//
+// The measured floor when there is one, because every decibel the control takes
+// is a decibel the amplifier's own noise floor comes down with -- that is what
+// the whole split is for. The decibel of margin is so that rounding inside the
+// driver can never land the request on the step that stopped following.
+//
+// Without a measurement -- a control with no dB scale, or a probe that could not
+// open the card -- it falls back to the top third of the declared range, capped
+// at USB_CTL_SHARE_MAX_DB. That is a guess, and a deliberately shallow one: too
+// much on the samples costs hiss, too much on an unmeasurable control costs a
+// dead stretch at the bottom of the knob, and the second is the worse of the
+// two.
+static long control_share_db(void) {
+	if (usb_ctl_floor_db != LONG_MIN) {
+		long share = usb_ctl_floor_db + 100;
+		return share > -100 ? -100 : share;
+	}
+
+	long span = volume_max - volume_min;
+	long share = 0;
+	if (span > 0 && volume_has_db) {
+		long db_span = 0;
+		if (snd_tlv_convert_to_dB(volume_tlv, volume_min, volume_max, volume_min, &db_span) == 0 &&
+			db_span < 0 && db_span > -60000) {
+			share = db_span / USB_CTL_SHARE_DIV;
+			if (share > -USB_CTL_SHARE_MAX_DB) {
+				share = -USB_CTL_SHARE_MAX_DB;
+			}
+		}
+	}
+	return share > -100 ? -100 : share;
+}
+
 void usbaudio_apply_volume(int percent) {
 	if (active_card < 0) {
 		swvolume_clear_usb_gain();
@@ -698,7 +888,14 @@ void usbaudio_apply_volume(int percent) {
 	if (mute) {
 		value = volume_min;
 	} else if (volume_has_db) {
-		long want = hardware ? target : 0;
+		// What the control is asked for, never past the share it is trusted
+		// with: past that the samples take it smoothly instead of the level
+		// stopping dead at the control's own mute point.
+		long share = hardware ? control_share_db() : 0;
+		long want = target > share ? target : share;
+		if (!hardware) {
+			want = 0;
+		}
 		if (snd_tlv_convert_from_dB(volume_tlv, volume_min, volume_max, want, &value, hardware ? 1 : -1) < 0) {
 			value = volume_max;
 		}
@@ -1138,12 +1335,21 @@ void usbaudio_poll(void) {
 		// the top of its range. The other order puts a full-scale burst into a
 		// pair of headphones somebody is wearing.
 		find_volume_control(card);
+		// And where that control gives up, before anything is asked of it:
+		// its declared range is the descriptor's opinion, and a dongle's
+		// analogue output commonly goes mute well above the bottom of it. Done
+		// here, on the way in, so the answer is in hand for every volume change
+		// afterwards.
+		probe_control_floor(card);
 		usbaudio_apply_volume(get_volume_percent());
 		audio_set_output_device(pcm);
 	} else {
 		active_name[0] = '\0';
 		usb_bus[0] = '\0';
 		volume_control[0] = '\0';
+		// The next dongle is a different device with a different scale: measure
+		// it rather than inheriting this one's.
+		usb_ctl_floor_db = LONG_MIN;
 		swvolume_clear_usb_gain();
 		fprintf(stderr, "usbaudio: the port is empty again; playback goes back to the jacks\n");
 		audio_set_output_device(NULL);

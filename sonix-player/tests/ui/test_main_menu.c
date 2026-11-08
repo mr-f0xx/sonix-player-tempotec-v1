@@ -204,7 +204,10 @@ bootpic_result_t bootpic_install(const char *name, int panel_w, int panel_h) {
 	}
 	return BOOTPIC_NO_FILE;
 }
-void device_state_get(device_state_t *out) { memset(out, 0, sizeof(*out)); }
+/* What the home footer reads. Empty is "no track loaded"; the footer check
+ * below fills it in to exercise the playing arrangement. */
+static device_state_t strip_state;
+void device_state_get(device_state_t *out) { *out = strip_state; }
 bool gui_card_available(void) { return true; }
 void gui_notify_no_card(void) { assert(!"unexpected missing card"); }
 void audiobooks_open(void) { switch_screen(audiobooks_screen); }
@@ -507,6 +510,51 @@ static void check_metrics(lv_obj_t *tile, tile_metrics_t expected) {
 	assert(now.scale == expected.scale && now.source == expected.source);
 }
 
+/* The home footer draws the note/play glyph, then one line or two. With no
+ * track loaded there is only the placeholder line, and it must sit level with
+ * the glyph beside it, not half a line above it because the empty artist line
+ * still reserved its space. A loaded track keeps title over artist. */
+static void check_strip_text_lines(lv_obj_t *strip, int expected_lines, const char *first_line) {
+	lv_obj_t *icon = NULL, *copy = NULL;
+	for (uint32_t i = 0; i < lv_obj_get_child_count(strip); i++) {
+		lv_obj_t *child = lv_obj_get_child(strip, i);
+		if (lv_obj_is_hidden(child)) {
+			continue; // the halo
+		}
+		if (lv_obj_check_type(child, &lv_image_class)) {
+			icon = child;
+		} else if (lv_obj_get_child_count(child) == 2 &&
+				   lv_obj_check_type(lv_obj_get_child(child, 0), &lv_label_class)) {
+			copy = child;
+		}
+	}
+	assert(icon && copy);
+	lv_label_t *title = (lv_label_t *)lv_obj_get_child(copy, 0);
+	lv_obj_t *subtitle = lv_obj_get_child(copy, 1);
+	assert(strcmp(lv_label_get_text((lv_obj_t *)title), first_line) == 0);
+	lv_obj_update_layout(strip);
+
+	int line_height = (int)lv_font_get_line_height(lv_obj_get_style_text_font((lv_obj_t *)title, 0));
+	assert(lv_obj_get_height(copy) == line_height * expected_lines);
+	if (expected_lines == 1) {
+		/* The second line is out of the layout, and the surviving line is
+		 * centred on the glyph rather than stacked from the top. */
+		assert(lv_obj_is_hidden(subtitle));
+		lv_area_t icon_area, title_area, copy_area;
+		lv_obj_get_coords(icon, &icon_area);
+		lv_obj_get_coords((lv_obj_t *)title, &title_area);
+		lv_obj_get_coords(copy, &copy_area);
+		assert(abs((title_area.y1 + title_area.y2) - (icon_area.y1 + icon_area.y2)) <= line_height / 2);
+		assert(abs((copy_area.y1 + copy_area.y2) - (icon_area.y1 + icon_area.y2)) <= line_height / 2);
+	} else {
+		assert(!lv_obj_is_hidden(subtitle));
+		lv_area_t title_area, subtitle_area;
+		lv_obj_get_coords((lv_obj_t *)title, &title_area);
+		lv_obj_get_coords(subtitle, &subtitle_area);
+		assert(subtitle_area.y1 >= title_area.y2); // stacked, artist under title
+	}
+}
+
 int main(int argc, char **argv) {
 	assert(argc == 2 || argc == 3);
 	bool saved_icons_only = argc == 3;
@@ -547,6 +595,41 @@ int main(int argc, char **argv) {
 	lv_screen_load(main_menu_screen);
 	lv_obj_t *grid = lv_obj_get_child(main_menu_screen, 0);
 	check_grid(grid, saved_icons_only);
+
+	/* The compact home footer (Tokyo Night / Amber / OLED only): the placeholder
+	 * line must be centred on the glyph beside it, and a playing track must keep
+	 * its title-over-artist pair. */
+	lv_obj_t *strip = lv_obj_get_child(main_menu_screen, 3);
+	for (int kind = 0; kind < THEME_KIND_COUNT; kind++) {
+		theme_set_kind((theme_kind_t)kind);
+		lv_obj_update_layout(main_menu_screen);
+		if (lv_obj_is_hidden(strip)) {
+			continue; // Dark and Light have no footer
+		}
+		memset(&strip_state, 0, sizeof(strip_state));
+		lv_obj_send_event(main_menu_screen, LV_EVENT_SCREEN_LOADED, NULL);
+		check_strip_text_lines(strip, 1, tr("player_no_track_loaded"));
+
+		snprintf(strip_state.current_file, sizeof(strip_state.current_file), "/music/a.flac");
+		snprintf(strip_state.metadata.title, sizeof(strip_state.metadata.title), "Good Light");
+		snprintf(strip_state.metadata.artist, sizeof(strip_state.metadata.artist), "Children of Zeus");
+		strip_state.status = AUDIO_STATUS_PLAYING;
+		lv_obj_send_event(main_menu_screen, LV_EVENT_SCREEN_LOADED, NULL);
+		check_strip_text_lines(strip, 2, "Good Light");
+		assert(strcmp(lv_label_get_text(lv_obj_get_child(lv_obj_get_child(strip, 2), 1)),
+					  "Children of Zeus") == 0);
+
+		/* Dropping back to nothing must restore the centred placeholder, and a
+		 * later text-size change must not leave it stacked again. */
+		memset(&strip_state, 0, sizeof(strip_state));
+		lv_obj_send_event(main_menu_screen, LV_EVENT_SCREEN_LOADED, NULL);
+		check_strip_text_lines(strip, 1, tr("player_no_track_loaded"));
+		fonts_set_text_size(FONTS_TEXT_LARGE);
+		check_strip_text_lines(strip, 1, tr("player_no_track_loaded"));
+		fonts_set_text_size(FONTS_TEXT_NORMAL);
+		check_strip_text_lines(strip, 1, tr("player_no_track_loaded"));
+	}
+	theme_set_kind(THEME_KIND_DARK);
 
 	bootpicpage_screen = lv_obj_create(NULL); // the page the boot screen's Custom pill opens
 	bootpicpage_init(&cfg);
