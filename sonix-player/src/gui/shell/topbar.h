@@ -51,6 +51,9 @@ bool topbar_is_hidden(void);
 // the normal themed bar. The caller must detach it before freeing the image.
 void topbar_set_player_frost(const lv_image_dsc_t *image);
 
+// Tint the player bar using a cover colour; disabling restores the theme.
+void topbar_set_player_color(bool enabled, lv_color_t color);
+
 // Draws the bar above everything else on the top layer. Both sheets ask for
 // this on the way in: the control centre covers the whole screen, and the
 // carousel comes down under the bar in the stock arrangement, so the clock,

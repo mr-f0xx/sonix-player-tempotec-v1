@@ -420,6 +420,7 @@ static bool layout_poster_now;	  // and for the fifth: the sleeve at the width o
 static int player_screen_height, player_status_height;
 static bool player_status_bar;
 static bool player_status_frost;
+static bool player_status_color;
 static bool layout_aam_now;		  // and for the sixth: the sleeve over the page, the media controls traded for it
 static int player_content_top(void) {
 	return player_status_bar && !layout_aam_now ? player_status_height : 0;
@@ -465,6 +466,14 @@ static lv_obj_t *aam_menu_glyph;  // three lines, in place of the ellipsis
 static lv_obj_t *aam_menu_bar[3];
 
 static uint32_t album_tone; // the sleeve's colour, 0 when there is no sleeve
+
+// The theme remains the base so its status text stays legible. A missing cover
+// must not keep the colour belonging to the last track.
+static void player_status_color_apply(void) {
+	bool show = sheet_open && (player_status_bar || layout_aam_now) && player_status_color &&
+		current_cover.pixels && album_tone;
+	topbar_set_player_color(show, lv_color_hex(album_tone));
+}
 
 // Whether the playback controls and the track's secondary details take that
 // colour in every arrangement, and not only in the alternative one. A setting
@@ -4543,6 +4552,7 @@ static void apply_layout(void) {
 	if (sheet_open) {
 		topbar_set_hidden(!(layout_aam_now || player_status_bar));
 		player_status_frost_apply();
+		player_status_color_apply();
 		back_btn_player_top_inset(layout_aam_now ? aam_chevron_inset() : player_content_top());
 		// And its stroke, not its button: the glyph is drawn with a third of its
 		// canvas empty on either side, so a chevron whose *button* starts where
@@ -4833,6 +4843,7 @@ static void reload_cover(const char *filepath) {
 	topbar_set_player_frost(NULL); // detach the borrowed image before freeing it
 	cover_free(&current_cover);
 	cover_free(&current_backdrop);
+	player_status_color_apply();
 	full_backdrop_apply(); // nothing to show behind the V1's page until the next one lands
 	immersive_blur_apply(); // and nothing for the frost to be made of, likewise
 
@@ -5034,6 +5045,7 @@ static void apply_cover_result(void) {
 		// repaint after it between the picture landing and the controls
 		// taking its colour.
 		album_tone = cover_dominant_tone(&current_cover);
+		player_status_color_apply();
 
 		// The dark backdrop is up: light chrome, in both themes.
 		set_over_cover(true);
@@ -6556,6 +6568,16 @@ void player_hires_style_set(hiresbadge_style_t style) {
 	update_hires_badge(&state);
 }
 
+bool player_status_color_get(void) { return player_status_color; }
+
+void player_status_color_set(bool enabled) {
+	if (!bp_is_tempotec_v1() || player_status_color == enabled) return;
+	player_status_color = enabled;
+	config_set_bool("screen", "player_status_color", enabled);
+	config_save();
+	player_status_color_apply();
+}
+
 bool player_status_frost_get(void) { return player_status_frost; }
 
 void player_status_frost_set(bool enabled) {
@@ -6873,6 +6895,7 @@ void player_sheet_open(bool animate) {
 	// it for the same reason (see apply_layout).
 	topbar_set_hidden(!(layout_aam_now || player_status_bar));
 	player_status_frost_apply();
+	player_status_color_apply();
 	back_btn_player_top_inset(layout_aam_now ? aam_chevron_inset() : player_content_top());
 	back_btn_player_ink_inset(layout_aam_now ? AAM_HEAD_END_PAD : 0);
 	back_btn_player_mode(true);
@@ -6895,6 +6918,7 @@ void player_sheet_close(bool animate) {
 	bool was_open = sheet_open;
 	sheet_open = false;
 	player_status_frost_apply();
+	player_status_color_apply();
 	back_btn_player_ink_inset(0); // the chevron back in the middle of its slot
 	back_btn_player_mode(false);
 	topbar_set_hidden(false);
@@ -7425,6 +7449,7 @@ void player_init(gui_config_t *cfg) {
 	player_status_height = cfg->top_bar_height;
 	player_status_bar = bp_is_tempotec_v1() && config_get_bool("screen", "player_status_bar", false);
 	player_status_frost = bp_is_tempotec_v1() && config_get_bool("screen", "player_status_frost", false);
+	player_status_color = bp_is_tempotec_v1() && config_get_bool("screen", "player_status_color", false);
 
 	// Geometry first, because everything else hangs off it. The V1 gets a
 	// deck exactly as tall as its four rows need (compact_deck_height()), a

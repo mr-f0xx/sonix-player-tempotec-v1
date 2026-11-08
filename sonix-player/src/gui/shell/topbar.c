@@ -88,6 +88,23 @@ static int battery_icon_size = BATTERY_ICON_SIZE;
 #define FLICK_OPEN_PX 24
 
 static lv_obj_t *top_bar;
+static bool player_color_enabled;
+static lv_color_t player_color;
+
+static void topbar_apply_player_color(void) {
+	if (!top_bar) return;
+	if (player_color_enabled)
+		lv_obj_set_style_bg_color(top_bar, lv_color_mix(player_color, theme()->panel, LV_OPA_30), 0);
+	else
+		lv_obj_remove_local_style_prop(top_bar, LV_STYLE_BG_COLOR, 0);
+}
+
+void topbar_set_player_color(bool enabled, lv_color_t color) {
+	player_color_enabled = enabled;
+	player_color = color;
+	topbar_apply_player_color();
+}
+
 static lv_obj_t *bat_widget;
 static lv_obj_t *bat_fill;
 static lv_obj_t *bat_shell;
@@ -917,6 +934,7 @@ void topbar_set_clock_position(int pos) {
 // hand, which has a light and a dark variant and would otherwise keep the one
 // from before the switch until the next poll.
 static void topbar_refresh_theme(void) {
+	topbar_apply_player_color();
 	last_battery_percent = -2;
 	last_battery_charging = -1;
 	if (jack_timer) {

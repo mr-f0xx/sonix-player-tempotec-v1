@@ -115,6 +115,8 @@ bool player_status_bar_get(void);
 void player_status_bar_set(bool enabled);
 bool player_status_frost_get(void);
 void player_status_frost_set(bool enabled);
+bool player_status_color_get(void);
+void player_status_color_set(bool enabled);
 
 // Whether the play/pause glyph and the played part of the progress bar take
 // the playing sleeve's main colour instead of the theme's accent, in every
