@@ -420,7 +420,6 @@ static bool layout_immersive_now; // and for the fourth: the sleeve from edge to
 static bool layout_poster_now;	  // and for the fifth: the sleeve at the width of the screen, the deck on its own ground
 static int player_screen_height, player_status_height;
 static bool player_status_bar;
-static bool player_status_frost;
 static bool player_status_color;
 static bool layout_aam_now;		  // and for the sixth: the sleeve over the page, the media controls traded for it
 static int player_content_top(void) {
@@ -1749,19 +1748,17 @@ static bool lyrics_look_on;			   // the words have Studio's look up, see lyrics_
 // theirs -- there the artwork is what the arrangement is.
 static bool backdrop_blur_wanted(void) { return !theme_is_oled(); }
 
-// The album-colored option affects icons only, but its bar follows the ground
-// of the chosen player layout. The explicit frost option may independently
-// add the blurred artwork even on layouts with a solid ground.
+// The bar follows the ground of the chosen player layout independently of
+// whether album-colored icons are enabled.
 static void player_status_background_apply(void) {
 	bool visible = sheet_open && (player_status_bar || layout_aam_now);
-	bool match_layout = visible && player_status_color;
-	bool layout_blur = match_layout && statusbarlayout_uses_blur(
+	bool layout_blur = visible && statusbarlayout_uses_blur(
 		layout_poster_now, layout_vinyl_now, layout_studio_now, layout_immersive_now,
 		theme_is_oled(), backdrop_is_full, backdrop_is_band);
-	bool use_blur = visible && current_backdrop.pixels && (player_status_frost || layout_blur);
+	bool use_blur = current_backdrop.pixels && layout_blur;
 	// Vinyl's page is deliberately solid black, independently of the theme;
 	// Poster and the missing-art fallback use the theme's panel style.
-	topbar_set_player_ground(match_layout && layout_vinyl_now, lv_color_black());
+	topbar_set_player_ground(visible && layout_vinyl_now, lv_color_black());
 	topbar_set_player_frost(use_blur ? &current_backdrop.dsc : NULL);
 }
 
@@ -6591,17 +6588,6 @@ void player_status_color_set(bool enabled) {
 	config_set_bool("screen", "player_status_color", enabled);
 	config_save();
 	player_status_color_apply();
-	player_status_background_apply();
-}
-
-bool player_status_frost_get(void) { return player_status_frost; }
-
-void player_status_frost_set(bool enabled) {
-	if (!bp_is_tempotec_v1() || player_status_frost == enabled) return;
-	player_status_frost = enabled;
-	config_set_bool("screen", "player_status_frost", enabled);
-	config_save();
-	player_status_background_apply();
 }
 
 bool player_status_bar_get(void) { return player_status_bar; }
@@ -7464,7 +7450,6 @@ void player_init(gui_config_t *cfg) {
 	player_screen_height = cfg->screen_height;
 	player_status_height = cfg->top_bar_height;
 	player_status_bar = bp_is_tempotec_v1() && config_get_bool("screen", "player_status_bar", false);
-	player_status_frost = bp_is_tempotec_v1() && config_get_bool("screen", "player_status_frost", false);
 	player_status_color = bp_is_tempotec_v1() && config_get_bool("screen", "player_status_color", false);
 
 	// Geometry first, because everything else hangs off it. The V1 gets a

@@ -34,5 +34,12 @@ static inline void statusbarstyle_icon(lv_obj_t *icon, bool enabled, lv_color_t 
 	lv_obj_set_state(icon, LV_STATE_USER_1, enabled);
 }
 
+// Battery level is a filled object rather than an image. Apply the same ink
+// with a state-specific background so ordinary level updates keep running.
+static inline void statusbarstyle_fill(lv_obj_t *fill, bool enabled, lv_color_t color) {
+	if (!fill) return;
+	if (enabled) lv_obj_set_style_bg_color(fill, color, LV_STATE_USER_1);
+	lv_obj_set_state(fill, LV_STATE_USER_1, enabled);
+}
 
 #endif

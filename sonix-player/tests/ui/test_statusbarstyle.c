@@ -67,8 +67,19 @@ int main(void) {
 	assert(lv_color_to_u32(lv_obj_get_style_image_recolor(icon, 0)) == lv_color_to_u32(ink));
 	statusbarstyle_icon(icon, false, ink);
 	assert(lv_color_to_u32(lv_obj_get_style_image_recolor(icon, 0)) == lv_color_to_u32(lv_color_hex(0x0000ff)));
+	// The level fill is an object, not an image: it uses the same album ink,
+	// survives periodic battery updates, and restores the latest status color.
+	lv_obj_t *fill = lv_obj_create(bar);
+	lv_obj_set_hidden(fill, true); // do not cover the bar sample below
+	lv_obj_set_style_bg_color(fill, lv_color_hex(0x00ff00), 0);
+	statusbarstyle_fill(fill, true, ink);
+	assert(lv_color_to_u32(lv_obj_get_style_bg_color(fill, 0)) == lv_color_to_u32(ink));
+	lv_obj_set_style_bg_color(fill, lv_color_hex(0xff0000), 0);
+	assert(lv_color_to_u32(lv_obj_get_style_bg_color(fill, 0)) == lv_color_to_u32(ink));
+	statusbarstyle_fill(fill, false, ink);
+	assert(lv_color_to_u32(lv_obj_get_style_bg_color(fill, 0)) == lv_color_to_u32(lv_color_hex(0xff0000)));
 	// Icon recoloring does not change the bar's theme background, and can be
-	// enabled while the separate frost option is active.
+	// enabled while the layout background uses the blurred artwork.
 	statusbarstyle_icon(icon, true, ink);
 	assert(sample(bar) == plain);
 	statusbarstyle_frost(bar, &blur);

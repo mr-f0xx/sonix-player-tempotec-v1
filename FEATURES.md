@@ -534,16 +534,17 @@ a self-signed certificate), and HLS.
 
 ### Player status bar
 
-On the TempoTec V1, Music > Display options can show the themed status bar
-above the player. The player fits in the remaining space; Album Art Max
-already includes the status bar. The option is off by default. A separate
-Frosted player status bar switch blends the blurred album artwork into its
-themed background; without artwork it falls back to the theme. An independent
-Album-colored status bar switch tints the volume, playback, Wi-Fi, Bluetooth
-and battery icons with the cover’s dominant color, without tinting the background
-or text. The bar follows the layout’s background: its blurred backdrop where
-used, the theme panel for Poster, or black for Vinyl. It can be used with the
-frosted option. Battery warning colors remain visible in the fill.
+On the TempoTec V1, Music > Display options can show a status bar above the
+player. The player fits in the remaining space; Album Art Max already includes
+the status bar. The option is off by default. The bar automatically follows the
+layout’s background: its blurred backdrop where used, the theme panel for
+Poster, or black for Vinyl. If a blurred layout has no artwork, it falls back
+to the theme.
+
+The independent Album-colored status bar switch tints the volume, playback,
+Wi-Fi, Bluetooth and battery icons with the cover’s dominant color. The battery
+fill and charging bolt follow the album color too; turn the option off to
+restore the normal battery status colors.
 
 ### Hi-res artwork badge
 

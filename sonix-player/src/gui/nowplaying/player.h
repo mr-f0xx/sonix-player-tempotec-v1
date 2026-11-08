@@ -113,8 +113,6 @@ void player_layout_set(player_layout_t layout);
 // Optional themed status bar above the V1 player.
 bool player_status_bar_get(void);
 void player_status_bar_set(bool enabled);
-bool player_status_frost_get(void);
-void player_status_frost_set(bool enabled);
 bool player_status_color_get(void);
 void player_status_color_set(bool enabled);
 

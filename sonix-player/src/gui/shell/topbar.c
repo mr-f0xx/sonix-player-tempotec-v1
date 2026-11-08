@@ -123,13 +123,14 @@ static lv_obj_t *bt_icon;   // bluetooth, leftmost of the right-hand group
 static lv_obj_t *wifi_icon; // wifi, between bluetooth and the charge percentage
 static lv_obj_t *container_left;  // volume group (and the clock, when "left")
 static lv_obj_t *container_right; // battery group (and the clock, when "right")
-// Tint only the requested glyphs; leave the themed background, text,
-// signal strength/visibility and the battery warning fill unchanged.
+// Tint the requested glyphs and all parts of the battery icon while leaving
+// the background, text, signal strength, and battery level/visibility intact.
 static void topbar_apply_player_ink(void) {
 	lv_color_t ink = statusbarstyle_ink(player_color, theme()->text_primary);
-	lv_obj_t *icons[] = {vol_icon, play_icon, wifi_icon, bt_icon, bat_shell};
+	lv_obj_t *icons[] = {vol_icon, play_icon, wifi_icon, bt_icon, bat_shell, bat_bolt};
 	for (size_t i = 0; i < sizeof(icons) / sizeof(icons[0]); i++)
 		statusbarstyle_icon(icons[i], player_color_enabled, ink);
+	statusbarstyle_fill(bat_fill, player_color_enabled, ink);
 }
 
 static lv_timer_t *battery_timer;
