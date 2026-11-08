@@ -5647,8 +5647,8 @@ static void update_hires_badge(const device_state_t *state) {
 	}
 	bool source = state->live || current_qobuz_track() != 0 || current_tidal_track() != 0;
 	// The source mark can push a visible right-hand badge into the left corner.
-	bool badge_left = pos == PLAYER_HIRES_LEFT || (hi && pos == PLAYER_HIRES_RIGHT && source);
-	bool back_right = (layout == PLAYER_LAYOUT_IMMERSIVE || layout == PLAYER_LAYOUT_POSTER) && badge_left;
+	bool back_right = hiresbadge_back_right(layout == PLAYER_LAYOUT_IMMERSIVE || layout == PLAYER_LAYOUT_POSTER,
+		hi, pos == PLAYER_HIRES_LEFT, pos == PLAYER_HIRES_RIGHT, source);
 	back_btn_player_right_set(back_right);
 	// The source marks normally occupy the right corner too. Move them below
 	// the button while it is there, and restore them when it returns left.

@@ -35,12 +35,16 @@ make -C sonix-player/tests podcastplayed
 make -C sonix-player/tests radio-store
 make -C sonix-player/tests led-rate
 make -C sonix-player/tests aamlayout
+make -C sonix-player/tests statusbar-ui
 make -C sonix-player/tests extractkeys
 ```
 
 The non-UI suites require only a C compiler, Make and Python 3 (plus standard pthread/dl/math libraries). The `hiresbadge-ui`, `peq-ui`, `quickpanel-layout`, `corners`, `playbutton`, `playerdeck`, `vinylayout`, `waveform-overlay`, `edge-lock` and aggregate `ui` targets also need the LVGL 9.6.0 checkout described below. None requires ALSA, SDL, a MIPS toolchain, a music server, a real account, or downloaded audio.
 
 `run_subsonic_tests.py` starts a temporary threaded localhost HTTP server plus three HTTPS servers carrying the certificates in `tls_fixtures.py`, runs the C binary with a private temporary config directory, verifies its requests, then shuts down. All account values are synthetic. Build products live in ignored `.build/`; response/PCM fixtures are generated in memory rather than added to Git, and the three test certificates are pasted into that Python file rather than downloaded.
+
+The `statusbar-ui` test checks real LVGL rendering of the player status bar tint
+and frosted artwork, their combination, and restoration of the theme.
 
 The `waveform-overlay` UI test checks that both scrolling text pills stay clear of the smaller favourite button, across artwork shapes, font sizes and missing-artist metadata.
 

@@ -35,4 +35,9 @@ static inline bool hiresbadge_qualifies(bool available, bool lossy, int bits, in
 	return available && !lossy && (dsd || (bits > 0 && rate > 0 && (bits > 16 || rate > 48000)));
 }
 
+// A left-corner badge only displaces the chevron when it is actually shown.
+static inline bool hiresbadge_back_right(bool edge_layout, bool qualifies, bool left_position, bool right_position, bool source) {
+	return edge_layout && qualifies && (left_position || (right_position && source));
+}
+
 #endif

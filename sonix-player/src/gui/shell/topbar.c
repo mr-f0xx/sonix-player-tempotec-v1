@@ -16,6 +16,7 @@
 #include "src/gui/nowplaying/player.h"
 #include "src/gui/shell/quickpanel.h"
 #include "src/gui/shell/theme.h"
+#include "src/gui/shell/statusbarstyle.h"
 #include "src/system/remote/airplay.h"
 #include "src/system/audio/alsa-controls.h"
 #include "src/system/audio/audio.h"
@@ -90,13 +91,12 @@ static int battery_icon_size = BATTERY_ICON_SIZE;
 static lv_obj_t *top_bar;
 static bool player_color_enabled;
 static lv_color_t player_color;
+static void topbar_apply_player_ink(void);
 
 static void topbar_apply_player_color(void) {
 	if (!top_bar) return;
-	if (player_color_enabled)
-		lv_obj_set_style_bg_color(top_bar, lv_color_mix(player_color, theme()->panel, LV_OPA_30), 0);
-	else
-		lv_obj_remove_local_style_prop(top_bar, LV_STYLE_BG_COLOR, 0);
+	statusbarstyle_color(top_bar, player_color_enabled, player_color, theme()->panel);
+	topbar_apply_player_ink();
 }
 
 void topbar_set_player_color(bool enabled, lv_color_t color) {
@@ -124,6 +124,17 @@ static lv_obj_t *bt_icon;   // bluetooth, leftmost of the right-hand group
 static lv_obj_t *wifi_icon; // wifi, between bluetooth and the charge percentage
 static lv_obj_t *container_left;  // volume group (and the clock, when "left")
 static lv_obj_t *container_right; // battery group (and the clock, when "right")
+// Tints the requested glyphs and their numeric readouts without changing
+// signal strength/visibility, codec state, or the battery's warning fill.
+static void topbar_apply_player_ink(void) {
+	lv_color_t ink = statusbarstyle_ink(player_color, theme()->text_primary);
+	lv_obj_t *icons[] = {vol_icon, hp_icon, play_icon, wifi_icon, bt_icon, bat_shell};
+	for (size_t i = 0; i < sizeof(icons) / sizeof(icons[0]); i++)
+		statusbarstyle_icon(icons[i], player_color_enabled, ink);
+	statusbarstyle_label(vol_label, player_color_enabled, ink);
+	statusbarstyle_label(bat_label, player_color_enabled, ink);
+}
+
 static lv_timer_t *battery_timer;
 static lv_timer_t *jack_timer;
 static int last_jack_state = -1;
@@ -1364,18 +1375,9 @@ void topbar_bring_to_front(void) {
 	}
 }
 
-// The background is still the theme's panel colour. Blend a restrained amount
-// of the player's already-blurred artwork over it so the theme's normal text
-// and semantic icon colours remain legible in both light and dark themes.
+// Borrowed image is detached by the player before its buffer is freed.
 void topbar_set_player_frost(const lv_image_dsc_t *image) {
-	if (!top_bar) return;
-	if (image) {
-		lv_obj_set_style_bg_image_src(top_bar, image, 0);
-		lv_obj_set_style_bg_image_opa(top_bar, LV_OPA_30, 0);
-	} else {
-		lv_obj_remove_local_style_prop(top_bar, LV_STYLE_BG_IMAGE_SRC, 0);
-		lv_obj_remove_local_style_prop(top_bar, LV_STYLE_BG_IMAGE_OPA, 0);
-	}
+	if (top_bar) statusbarstyle_frost(top_bar, image);
 }
 
 // Shows or hides the whole bar. The player page hides it so the album art can
