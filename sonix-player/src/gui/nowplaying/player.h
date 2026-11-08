@@ -110,6 +110,10 @@ void player_hires_style_set(hiresbadge_style_t style);
 player_layout_t player_layout_get(void);
 void player_layout_set(player_layout_t layout);
 
+// Optional themed status bar above the V1 player.
+bool player_status_bar_get(void);
+void player_status_bar_set(bool enabled);
+
 // Whether the play/pause glyph and the played part of the progress bar take
 // the playing sleeve's main colour instead of the theme's accent, in every
 // arrangement and on every theme (the monochrome palettes too: the switch is

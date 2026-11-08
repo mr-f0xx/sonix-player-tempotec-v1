@@ -532,6 +532,12 @@ a self-signed certificate), and HLS.
   the card, database log, disabling the software volume attenuation, and a
   page of running processes and memory.
 
+### Player status bar
+
+On the TempoTec V1, Music > Display options can show the themed status bar
+above the player. The player fits in the remaining space; Album Art Max
+already includes the status bar. The option is off by default.
+
 ### Hi-res artwork badge
 
 Music > Display options offers an optional HI-RES badge on the now-playing

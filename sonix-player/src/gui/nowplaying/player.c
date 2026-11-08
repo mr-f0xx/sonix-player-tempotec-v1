@@ -417,7 +417,12 @@ static bool layout_alt_now;		  // and whether the current source can use it
 static bool layout_studio_now;	  // likewise for the third arrangement
 static bool layout_immersive_now; // and for the fourth: the sleeve from edge to edge
 static bool layout_poster_now;	  // and for the fifth: the sleeve at the width of the screen, the deck on its own ground
+static int player_screen_height, player_status_height;
+static bool player_status_bar;
 static bool layout_aam_now;		  // and for the sixth: the sleeve over the page, the media controls traded for it
+static int player_content_top(void) {
+	return player_status_bar && !layout_aam_now ? player_status_height : 0;
+}
 static bool layout_vinyl_now;
 static vinyl_record_t vinyl_record;
 // The shape of the track and the sleeve's colour: up with the alternative
@@ -2293,7 +2298,7 @@ static void lyrics_find_sync(bool full) {
 	}
 	// Album Art Max already fills its header row (format, repeat, menu, star);
 	// park the search mark just inside the top-right corner of the lyrics box.
-	int btn_y = layout_aam_now ? lv_obj_get_y(cover_panel) + 2 : back_btn_centre_y() - LYRICS_FIND_BTN / 2;
+	int btn_y = layout_aam_now ? lv_obj_get_y(cover_panel) + 2 : (back_btn_centre_y() - player_content_top()) - LYRICS_FIND_BTN / 2;
 	lv_obj_set_pos(lyrics_find_btn, right - STUDIO_INFO_MARGIN - beside - LYRICS_FIND_BTN, btn_y);
 	lyrics_find_make_room(layout_studio_now ? studio_text_col : layout_alt_now ? lyrics_head_col : NULL);
 	// The ink of the names beside it: white over the blurred sleeve, the
@@ -2407,7 +2412,7 @@ static void lyrics_slide_to(int32_t progress) {
 
 // The head's place: Studio's, between the chevron and the right edge.
 static int lyrics_head_top(void) {
-	int head_top = back_btn_centre_y() - STUDIO_HEAD_H / 2;
+	int head_top = (back_btn_centre_y() - player_content_top()) - STUDIO_HEAD_H / 2;
 	return head_top < 2 ? 2 : head_top;
 }
 
@@ -2420,7 +2425,7 @@ static void lyrics_layout(void) {
 		return;
 	}
 	int head_bottom = lyrics_head_top() + STUDIO_HEAD_H + STUDIO_BADGE_GAP;
-	int top = layout_alt_now || layout_studio_now ? head_bottom : back_btn_centre_y() + 28;
+	int top = layout_alt_now || layout_studio_now ? head_bottom : (back_btn_centre_y() - player_content_top()) + 28;
 	if (layout_aam_now) {
 		// Album Art Max has no head to keep clear of: the words take the
 		// sleeve's whole box, which is the panel here, and the strip under it
@@ -3110,7 +3115,7 @@ static void studio_empty_rescale(void);
 // before the panel has been laid out -- which is where the artwork is ordered
 // at the size this arrangement will draw it.
 static int studio_cover_geometry(int *top_out) {
-	int head_top = back_btn_centre_y() - STUDIO_HEAD_H / 2;
+	int head_top = (back_btn_centre_y() - player_content_top()) - STUDIO_HEAD_H / 2;
 	if (head_top < 2) {
 		head_top = 2;
 	}
@@ -3160,7 +3165,7 @@ static void studio_place(void) {
 	}
 
 	int screen_w = studio_box_w;
-	int head_top = back_btn_centre_y() - STUDIO_HEAD_H / 2;
+	int head_top = (back_btn_centre_y() - player_content_top()) - STUDIO_HEAD_H / 2;
 	if (head_top < 2) {
 		head_top = 2;
 	}
@@ -4395,7 +4400,13 @@ static void apply_layout(void) {
 	// names on the sleeve, so its deck is shorter and the sleeve taller).
 	// Before the pill room is worked out below, which is measured from the
 	// sleeve.
-	player_apply_geometry(was_immersive || was_poster || was_aam || was_vinyl);
+	int content_top = player_content_top();
+	back_btn_player_top_inset(layout_aam_now ? aam_chevron_inset() : content_top);
+	bool resized = lv_obj_get_height(player_screen) != player_screen_height - content_top;
+	lv_obj_set_height(player_screen, player_screen_height - content_top);
+	lv_obj_set_y(player_screen, content_top);
+	lv_obj_update_layout(player_screen);
+	player_apply_geometry(resized || was_immersive || was_poster || was_aam || was_vinyl);
 	player_deck_show_info(song_info_obj, layout_alt_now);
 	if (bp_is_tempotec_v1()) {
 		lv_obj_set_style_pad_top(player_menu, layout_alt_now ? COMPACT_WAVE_DECK_PAD_TOP : COMPACT_DECK_PAD_TOP, 0);
@@ -4523,8 +4534,8 @@ static void apply_layout(void) {
 	// can reach the top edge. Only while the sheet is actually up: the setting
 	// can be changed from a page the player is not on.
 	if (sheet_open) {
-		topbar_set_hidden(!layout_aam_now);
-		back_btn_player_top_inset(layout_aam_now ? aam_chevron_inset() : 0);
+		topbar_set_hidden(!(layout_aam_now || player_status_bar));
+		back_btn_player_top_inset(layout_aam_now ? aam_chevron_inset() : player_content_top());
 		// And its stroke, not its button: the glyph is drawn with a third of its
 		// canvas empty on either side, so a chevron whose *button* starts where
 		// the star's does sits visibly further in. AAM_HEAD_END_PAD is the air
@@ -5612,6 +5623,21 @@ static void update_hires_badge(const device_state_t *state) {
 		hi = hiresbadge_qualifies(!air.playing && !btreceiver_is_active(), audio_stream_is_lossy(),
 			audio_get_stream_bits(), state->stream_sample_rate, audio_get_dsd_multiple() > 0);
 	}
+	bool source = state->live || current_qobuz_track() != 0 || current_tidal_track() != 0;
+	// The source mark can push a visible right-hand badge into the left corner.
+	bool badge_left = pos == PLAYER_HIRES_LEFT || (hi && pos == PLAYER_HIRES_RIGHT && source);
+	bool back_right = (layout == PLAYER_LAYOUT_IMMERSIVE || layout == PLAYER_LAYOUT_POSTER) && badge_left;
+	back_btn_player_right_set(back_right);
+	// The source marks normally occupy the right corner too. Move them below
+	// the button while it is there, and restore them when it returns left.
+	if (!layout_studio_now) {
+		lv_obj_t *const marks[] = {live_badge, qobuz_badge, tidal_badge, podcast_badge};
+		int y = back_right ? (back_btn_centre_y() - player_content_top()) + bp_header_button_size() / 2 + 4 : BADGE_INSET;
+		for (size_t i = 0; i < sizeof(marks) / sizeof(marks[0]); i++) {
+			if (marks[i] && lv_obj_get_parent(marks[i]) == cover_art_group)
+				lv_obj_align(marks[i], LV_ALIGN_TOP_RIGHT, -BADGE_INSET, y);
+		}
+	}
 	if (!hi || pos == PLAYER_HIRES_OFF || layout == PLAYER_LAYOUT_ALBUM_ART_MAX) {
 		lv_obj_set_hidden(hires_badge.box, true);
 		return;
@@ -5627,7 +5653,6 @@ static void update_hires_badge(const device_state_t *state) {
 		int circular_inset = (layout_studio_now ? studio_cover_size : cover_art_w) / 5;
 		if (circular_inset > inset) inset = circular_inset;
 	}
-	bool source = state->live || current_qobuz_track() != 0 || current_tidal_track() != 0;
 	// Keep both marks out of the same corner. Moving down can collide with
 	// Waveform's star or title on a small sleeve, so use the other corner.
 	if (pos == PLAYER_HIRES_RIGHT && source) pos = PLAYER_HIRES_LEFT;
@@ -6521,6 +6546,20 @@ void player_hires_style_set(hiresbadge_style_t style) {
 	update_hires_badge(&state);
 }
 
+bool player_status_bar_get(void) { return player_status_bar; }
+
+void player_status_bar_set(bool enabled) {
+	if (!bp_is_tempotec_v1() || player_status_bar == enabled) return;
+	player_status_bar = enabled;
+	config_set_bool("screen", "player_status_bar", enabled);
+	config_save();
+	apply_layout();
+	if (cover_shown_path[0]) reload_cover(cover_shown_path);
+	device_state_t state;
+	device_state_get(&state);
+	update_format_label(&state);
+}
+
 player_layout_t player_layout_get(void) { return layout_choice; }
 
 void player_layout_set(player_layout_t layout) {
@@ -6812,8 +6851,8 @@ void player_sheet_open(bool animate) {
 	// saying which way the hardware key will go, and its row is where the
 	// chevron and the format line are aligned from. The chevron moves under
 	// it for the same reason (see apply_layout).
-	topbar_set_hidden(!layout_aam_now);
-	back_btn_player_top_inset(layout_aam_now ? aam_chevron_inset() : 0);
+	topbar_set_hidden(!(layout_aam_now || player_status_bar));
+	back_btn_player_top_inset(layout_aam_now ? aam_chevron_inset() : player_content_top());
 	back_btn_player_ink_inset(layout_aam_now ? AAM_HEAD_END_PAD : 0);
 	back_btn_player_mode(true);
 
@@ -7122,7 +7161,7 @@ static bool vinyl_take_back(void) {
 
 static int compact_sleeve_top(void) {
 	return layout_vinyl_now ? VINYL_TOP : layout_alt_now ? COMPACT_SLEEVE_TOP
-						  : back_btn_centre_y() - bp_header_button_size() / 2 + COMPACT_CHEVRON_INSET_TOP;
+						  : (back_btn_centre_y() - player_content_top()) - bp_header_button_size() / 2 + COMPACT_CHEVRON_INSET_TOP;
 }
 
 // As large as fits above the deck, with an even side for whole-pixel centring.
@@ -7359,6 +7398,10 @@ void player_init(gui_config_t *cfg) {
 	lv_obj_set_pos(player_screen, sheet_width, 0);
 	lv_obj_set_hidden(player_screen, true);
 
+
+	player_screen_height = cfg->screen_height;
+	player_status_height = cfg->top_bar_height;
+	player_status_bar = bp_is_tempotec_v1() && config_get_bool("screen", "player_status_bar", false);
 
 	// Geometry first, because everything else hangs off it. The V1 gets a
 	// deck exactly as tall as its four rows need (compact_deck_height()), a
