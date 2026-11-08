@@ -62,6 +62,9 @@ ICONS = [
     ("download.svg", "download", 34),
     ("book-finished.svg", "book_finished", 34),  # the Audiobooks page's corner: the finished books
     ("audio-waveform.svg", "audio_waveform", 34),
+    # NOS holds each sample until the next one: a stepped waveform, not the
+    # smooth waveform beside Filters.
+    ("nos.svg", "nos", 34),
     # AutoEq search corner: download the headphone index again.
     ("autoeq-update.svg", "autoeq_update", 34),
     ("repeat.svg", "repeat_all", 30),

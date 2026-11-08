@@ -2950,7 +2950,7 @@ void musicsettings_init(gui_config_t *cfg) {
 	// alsa-controls.c keeps both off.
 	if (!alsa_board_is_cs43131()) {
 		lv_obj_t *nos_row = settingsrow_toggle(container, "musicsettings_nos", &nos_switch, nos_toggle_cb);
-		settingsrow_add_accent_icon(nos_row, &icon_audio_waveform);
+		settingsrow_add_accent_icon(nos_row, &icon_nos);
 		if (config_get_int("audio", "dac_nos", 0)) {
 			lv_obj_add_state(nos_switch, LV_STATE_CHECKED);
 		}
