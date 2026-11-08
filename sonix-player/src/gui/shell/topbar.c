@@ -95,7 +95,6 @@ static void topbar_apply_player_ink(void);
 
 static void topbar_apply_player_color(void) {
 	if (!top_bar) return;
-	statusbarstyle_color(top_bar, player_color_enabled, player_color, theme()->panel);
 	topbar_apply_player_ink();
 }
 
@@ -124,15 +123,13 @@ static lv_obj_t *bt_icon;   // bluetooth, leftmost of the right-hand group
 static lv_obj_t *wifi_icon; // wifi, between bluetooth and the charge percentage
 static lv_obj_t *container_left;  // volume group (and the clock, when "left")
 static lv_obj_t *container_right; // battery group (and the clock, when "right")
-// Tints the requested glyphs and their numeric readouts without changing
-// signal strength/visibility, codec state, or the battery's warning fill.
+// Tint only the requested glyphs; leave the themed background, text,
+// signal strength/visibility and the battery warning fill unchanged.
 static void topbar_apply_player_ink(void) {
 	lv_color_t ink = statusbarstyle_ink(player_color, theme()->text_primary);
-	lv_obj_t *icons[] = {vol_icon, hp_icon, play_icon, wifi_icon, bt_icon, bat_shell};
+	lv_obj_t *icons[] = {vol_icon, play_icon, wifi_icon, bt_icon, bat_shell};
 	for (size_t i = 0; i < sizeof(icons) / sizeof(icons[0]); i++)
 		statusbarstyle_icon(icons[i], player_color_enabled, ink);
-	statusbarstyle_label(vol_label, player_color_enabled, ink);
-	statusbarstyle_label(bat_label, player_color_enabled, ink);
 }
 
 static lv_timer_t *battery_timer;
@@ -1373,6 +1370,12 @@ void topbar_bring_to_front(void) {
 	if (top_bar) {
 		lv_obj_move_foreground(top_bar);
 	}
+}
+
+void topbar_set_player_ground(bool enabled, lv_color_t color) {
+	if (!top_bar) return;
+	if (enabled) lv_obj_set_style_bg_color(top_bar, color, 0);
+	else lv_obj_remove_local_style_prop(top_bar, LV_STYLE_BG_COLOR, 0);
 }
 
 // Borrowed image is detached by the player before its buffer is freed.

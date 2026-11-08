@@ -14,6 +14,7 @@
 #include "src/gui/nowplaying/cover.h"
 #include "src/gui/nowplaying/hiresbadge.h"
 #include "src/gui/nowplaying/hiresbadgeview.h"
+#include "src/gui/nowplaying/statusbarlayout.h"
 #include "src/gui/nowplaying/coverloader.h"
 #include "src/gui/nowplaying/lyricsearch.h"
 #include "src/gui/nowplaying/playbutton.h"
@@ -425,12 +426,8 @@ static bool layout_aam_now;		  // and for the sixth: the sleeve over the page, t
 static int player_content_top(void) {
 	return player_status_bar && !layout_aam_now ? player_status_height : 0;
 }
-// The shell owns the bar; only lend it the backdrop while the player is up.
-// The image is detached before the artwork worker's old buffer is freed.
-static void player_status_frost_apply(void) {
-	bool show = sheet_open && (player_status_bar || layout_aam_now) && player_status_frost;
-	topbar_set_player_frost(show && current_backdrop.pixels ? &current_backdrop.dsc : NULL);
-}
+// Re-evaluate the shared bar whenever its player background changes.
+static void player_status_background_apply(void);
 static bool layout_vinyl_now;
 static vinyl_record_t vinyl_record;
 // The shape of the track and the sleeve's colour: up with the alternative
@@ -467,8 +464,8 @@ static lv_obj_t *aam_menu_bar[3];
 
 static uint32_t album_tone; // the sleeve's colour, 0 when there is no sleeve
 
-// The theme remains the base so its status text stays legible. A missing cover
-// must not keep the colour belonging to the last track.
+// Only the status icons take this colour. A missing cover must not keep
+// the colour belonging to the last track.
 static void player_status_color_apply(void) {
 	bool show = sheet_open && (player_status_bar || layout_aam_now) && player_status_color &&
 		current_cover.pixels && album_tone;
@@ -1751,6 +1748,23 @@ static bool lyrics_look_on;			   // the words have Studio's look up, see lyrics_
 // words, is a lit background, and the theme has none. Studio and Immersive keep
 // theirs -- there the artwork is what the arrangement is.
 static bool backdrop_blur_wanted(void) { return !theme_is_oled(); }
+
+// The album-colored option affects icons only, but its bar follows the ground
+// of the chosen player layout. The explicit frost option may independently
+// add the blurred artwork even on layouts with a solid ground.
+static void player_status_background_apply(void) {
+	bool visible = sheet_open && (player_status_bar || layout_aam_now);
+	bool match_layout = visible && player_status_color;
+	bool layout_blur = match_layout && statusbarlayout_uses_blur(
+		layout_poster_now, layout_vinyl_now, layout_studio_now, layout_immersive_now,
+		theme_is_oled(), backdrop_is_full, backdrop_is_band);
+	bool use_blur = visible && current_backdrop.pixels && (player_status_frost || layout_blur);
+	// Vinyl's page is deliberately solid black, independently of the theme;
+	// Poster and the missing-art fallback use the theme's panel style.
+	topbar_set_player_ground(match_layout && layout_vinyl_now, lv_color_black());
+	topbar_set_player_frost(use_blur ? &current_backdrop.dsc : NULL);
+}
+
 
 // Puts the V1's screen-sized blur up behind the standard and alternative
 // arrangements, or takes it down, to match whether there is a backdrop on
@@ -4551,7 +4565,7 @@ static void apply_layout(void) {
 	// can be changed from a page the player is not on.
 	if (sheet_open) {
 		topbar_set_hidden(!(layout_aam_now || player_status_bar));
-		player_status_frost_apply();
+		player_status_background_apply();
 		player_status_color_apply();
 		back_btn_player_top_inset(layout_aam_now ? aam_chevron_inset() : player_content_top());
 		// And its stroke, not its button: the glyph is drawn with a third of its
@@ -5026,7 +5040,7 @@ static void apply_cover_result(void) {
 		if (new_backdrop.pixels) {
 			current_backdrop = new_backdrop;
 			current_backdrop.dsc.data = current_backdrop.pixels;
-			player_status_frost_apply();
+			player_status_background_apply();
 			if (backdrop_is_band) {
 				// Immersive's reflected band stands below the picture,
 				// at the foot of the screen under the deck.
@@ -5189,6 +5203,7 @@ static void player_refresh_theme(void) {
 	// The same picture keeps its backdrop as it was, so whether the theme
 	// wants the V1's blur behind the page at all is asked again here.
 	full_backdrop_apply();
+	player_status_background_apply();
 	if (lyrics_pane) {
 		lyrics_look(lyrics_look_on); // the words in the new theme's colours
 	}
@@ -6576,6 +6591,7 @@ void player_status_color_set(bool enabled) {
 	config_set_bool("screen", "player_status_color", enabled);
 	config_save();
 	player_status_color_apply();
+	player_status_background_apply();
 }
 
 bool player_status_frost_get(void) { return player_status_frost; }
@@ -6585,7 +6601,7 @@ void player_status_frost_set(bool enabled) {
 	player_status_frost = enabled;
 	config_set_bool("screen", "player_status_frost", enabled);
 	config_save();
-	player_status_frost_apply();
+	player_status_background_apply();
 }
 
 bool player_status_bar_get(void) { return player_status_bar; }
@@ -6894,7 +6910,7 @@ void player_sheet_open(bool animate) {
 	// chevron and the format line are aligned from. The chevron moves under
 	// it for the same reason (see apply_layout).
 	topbar_set_hidden(!(layout_aam_now || player_status_bar));
-	player_status_frost_apply();
+	player_status_background_apply();
 	player_status_color_apply();
 	back_btn_player_top_inset(layout_aam_now ? aam_chevron_inset() : player_content_top());
 	back_btn_player_ink_inset(layout_aam_now ? AAM_HEAD_END_PAD : 0);
@@ -6917,7 +6933,7 @@ static void sheet_hidden_anim_ready_cb(lv_anim_t *a) {
 void player_sheet_close(bool animate) {
 	bool was_open = sheet_open;
 	sheet_open = false;
-	player_status_frost_apply();
+	player_status_background_apply();
 	player_status_color_apply();
 	back_btn_player_ink_inset(0); // the chevron back in the middle of its slot
 	back_btn_player_mode(false);

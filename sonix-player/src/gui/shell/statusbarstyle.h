@@ -3,15 +3,6 @@
 
 #include "lvgl/lvgl.h"
 
-// Leave enough of the theme's panel for its existing glyph colours to remain
-// legible, but make the artwork colour distinct rather than barely visible.
-static inline void statusbarstyle_color(lv_obj_t *bar, bool enabled, lv_color_t art, lv_color_t panel) {
-	if (enabled)
-		lv_obj_set_style_bg_color(bar, lv_color_mix(art, panel, LV_OPA_50), 0);
-	else
-		lv_obj_remove_local_style_prop(bar, LV_STYLE_BG_COLOR, 0);
-}
-
 // The player already produces a dark, blurred image for its controls. It needs
 // most of its own opacity here: at 30% it was almost indistinguishable from
 // the dark panel behind it. The panel still shows through for readability.
@@ -43,10 +34,5 @@ static inline void statusbarstyle_icon(lv_obj_t *icon, bool enabled, lv_color_t 
 	lv_obj_set_state(icon, LV_STATE_USER_1, enabled);
 }
 
-static inline void statusbarstyle_label(lv_obj_t *label, bool enabled, lv_color_t color) {
-	if (!label) return;
-	if (enabled) lv_obj_set_style_text_color(label, color, LV_STATE_USER_1);
-	lv_obj_set_state(label, LV_STATE_USER_1, enabled);
-}
 
 #endif

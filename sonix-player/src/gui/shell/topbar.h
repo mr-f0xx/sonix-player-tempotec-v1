@@ -51,7 +51,11 @@ bool topbar_is_hidden(void);
 // the normal themed bar. The caller must detach it before freeing the image.
 void topbar_set_player_frost(const lv_image_dsc_t *image);
 
-// Tint the player bar using a cover colour; disabling restores the theme.
+// Optional solid player-layout ground; disabling restores the theme panel.
+void topbar_set_player_ground(bool enabled, lv_color_t color);
+
+// Tint the player status icons using a cover colour; disabling restores their
+// normal status and theme colours without changing the background.
 void topbar_set_player_color(bool enabled, lv_color_t color);
 
 // Draws the bar above everything else on the top layer. Both sheets ask for
