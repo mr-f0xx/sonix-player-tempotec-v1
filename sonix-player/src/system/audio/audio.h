@@ -131,6 +131,10 @@ void audio_resume();
 
 void audio_stop();
 
+// Stops playback and waits up to `timeout_ms` for the playback thread to close
+// its open track descriptor before unmounting the card.
+void audio_stop_and_wait(int timeout_ms);
+
 audio_status_t audio_get_status(void);
 
 // Returns true exactly once if the current track reached its end on its own

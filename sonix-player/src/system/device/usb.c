@@ -29,7 +29,10 @@
 #include "src/system/audio/usbaudio.h"
 #include "src/system/audio/usbhostmode.h"
 #include "src/system/audio/usbhostprobe.h"
+#include "src/system/audio/waveform.h"
 #include "src/system/core/utils.h"
+#include "src/system/net/wifitransfer.h"
+#include "src/system/remote/sonixlink.h"
 #include "src/system/streaming/radio.h"
 #include "src/gui/nowplaying/cover.h"
 
@@ -948,10 +951,15 @@ static bool resume_card(bool host_changed_card) {
 		char db_path[512];
 		snprintf(db_path, sizeof(db_path), "%s/.local/library.db", sd_mount);
 		library_open(db_path);
+		sonixlink_set_db_path(db_path);
 		snprintf(db_path, sizeof(db_path), "%s/.local/audiobooks.db", sd_mount);
 		audiobookdb_open(db_path);
 		snprintf(db_path, sizeof(db_path), "%s/.local/genius.db", sd_mount);
 		geniusdb_open(db_path);
+		snprintf(db_path, sizeof(db_path), "%s/.local/thumbs", sd_mount);
+		sonixlink_set_thumbs_path(db_path);
+		sonixlink_set_card_root(sd_mount);
+		waveform_set_cache_dir(sd_mount);
 		logging_resume_after_usb();
 		btlog_card_attach(sd_mount);
 		cover_set_cache_dir(sd_mount);
@@ -976,8 +984,11 @@ static bool storage_export(void) {
 	storage_active = true; // keep the card supervisor from remounting mid-export
 	storage_usb_end();
 
+	wifitransfer_release_card();
 	device_state_note_storage_gone();
-	audio_stop();
+	audio_stop_and_wait(2000);
+	waveform_set_cache_dir(NULL);
+	sonixlink_set_thumbs_path(NULL);
 	library_close();
 	audiobookdb_close();
 	geniusdb_close();

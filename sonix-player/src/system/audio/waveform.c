@@ -80,6 +80,7 @@ static char cache_path[512];
 
 static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t wake = PTHREAD_COND_INITIALIZER;
+static pthread_cond_t idle = PTHREAD_COND_INITIALIZER;
 static pthread_t worker;
 static bool worker_running;
 static bool screen_on = true;
@@ -173,10 +174,14 @@ static void hot_store(uint64_t key, const uint8_t *bars) {
 // need no lock of their own.
 
 static bool cache_lookup(uint64_t key, uint8_t *out) {
-	if (!cache_path[0]) {
+	char path[sizeof(cache_path)];
+	pthread_mutex_lock(&lock);
+	snprintf(path, sizeof(path), "%s", cache_path);
+	pthread_mutex_unlock(&lock);
+	if (!path[0]) {
 		return false;
 	}
-	FILE *f = fopen(cache_path, "rb");
+	FILE *f = fopen(path, "rb");
 	if (!f) {
 		return false;
 	}
@@ -219,11 +224,15 @@ static bool cache_lookup(uint64_t key, uint8_t *out) {
 // writing a compactor for. It is truncated when that happens, so the rows past
 // the count really are gone rather than merely unreachable.
 static void cache_store(uint64_t key, const uint8_t *bars) {
-	if (!cache_path[0]) {
+	char path[sizeof(cache_path)];
+	pthread_mutex_lock(&lock);
+	snprintf(path, sizeof(path), "%s", cache_path);
+	pthread_mutex_unlock(&lock);
+	if (!path[0]) {
 		return;
 	}
 
-	FILE *f = fopen(cache_path, "r+b");
+	FILE *f = fopen(path, "r+b");
 	wave_header_t header = {WAVE_MAGIC, WAVE_VERSION, 0, WAVEFORM_BARS};
 	if (f) {
 		if (fread(&header, sizeof(header), 1, f) != 1 || header.magic != WAVE_MAGIC ||
@@ -233,7 +242,7 @@ static void cache_store(uint64_t key, const uint8_t *bars) {
 		}
 	}
 	if (!f) {
-		f = fopen(cache_path, "w+b"); // which truncates
+		f = fopen(path, "w+b"); // which truncates
 		if (!f) {
 			return;
 		}
@@ -601,6 +610,7 @@ static void *worker_main(void *arg) {
 
 		pthread_mutex_lock(&lock);
 		computing[0] = '\0';
+		pthread_cond_broadcast(&idle);
 		if (outcome != WAVE_BUILD_CANCELLED && strcmp(wanted, path) == 0) {
 			// Either a shape, or the settled answer that this file has none.
 			// Both are written down, because both mean the question is done
@@ -629,23 +639,44 @@ static void *worker_main(void *arg) {
 // ---------------------------------------------------------------------------
 
 void waveform_set_cache_dir(const char *sd_root) {
-	cache_path[0] = '\0';
 	if (!sd_root || !sd_root[0]) {
+		pthread_mutex_lock(&lock);
+		cache_path[0] = '\0';
+		wanted[0] = '\0';
+		pthread_cond_broadcast(&wake);
+		struct timespec due;
+		clock_gettime(CLOCK_REALTIME, &due);
+		due.tv_sec += 2;
+		while (computing[0] != '\0') {
+			if (pthread_cond_timedwait(&idle, &lock, &due) == ETIMEDOUT) {
+				break;
+			}
+		}
+		pthread_mutex_unlock(&lock);
 		return;
 	}
+
 	char dir[480];
 	snprintf(dir, sizeof(dir), "%s/.local", sd_root);
 	mkdir(dir, 0777); // already there is the usual answer
-	snprintf(cache_path, sizeof(cache_path), "%s/waveform.dat", dir);
 
-	FILE *f = fopen(cache_path, "ab");
+	char candidate[sizeof(cache_path)];
+	snprintf(candidate, sizeof(candidate), "%s/waveform.dat", dir);
+
+	FILE *f = fopen(candidate, "ab");
 	if (!f) {
-		fprintf(stderr, "waveform: '%s' cannot be written (%s); shapes will be computed every time\n", cache_path,
+		fprintf(stderr, "waveform: '%s' cannot be written (%s); shapes will be computed every time\n", candidate,
 				strerror(errno));
+		pthread_mutex_lock(&lock);
 		cache_path[0] = '\0';
+		pthread_mutex_unlock(&lock);
 		return;
 	}
 	fclose(f);
+
+	pthread_mutex_lock(&lock);
+	snprintf(cache_path, sizeof(cache_path), "%s", candidate);
+	pthread_mutex_unlock(&lock);
 }
 
 void waveform_start(void) {

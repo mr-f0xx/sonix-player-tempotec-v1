@@ -644,16 +644,49 @@ static bool stop_process(const char *name) {
 	return !process_running(name);
 }
 
+static long child_open_max(void) {
+	long open_max = sysconf(_SC_OPEN_MAX);
+	if (open_max < 64 || open_max > 4096) {
+		open_max = 4096;
+	}
+	return open_max;
+}
+
+static void child_detach_from_player(long open_max, bool redirect_stdio) {
+	if (chdir("/") != 0) {
+		_exit(126);
+	}
+	int devnull = open("/dev/null", redirect_stdio ? O_RDWR : O_RDONLY);
+	if (devnull >= 0) {
+		dup2(devnull, STDIN_FILENO);
+		if (redirect_stdio) {
+			dup2(devnull, STDOUT_FILENO);
+			dup2(devnull, STDERR_FILENO);
+		}
+		if (devnull > STDERR_FILENO) {
+			close(devnull);
+		}
+	}
+	// Nothing of the player's: an inherited descriptor on the card (the on-card
+	// log on stdout/stderr, or a remembered track opened on another thread)
+	// keeps the mount busy across every USB export and shutdown unmount for as
+	// long as the daemon runs.
+	for (int fd = 3; fd < (int)open_max; fd++) {
+		close(fd);
+	}
+}
+
 // Starts a daemon and lets go of it. The double fork is what keeps it out of
 // this process's children: the player must never have to reap a daemon it is
 // not watching, and a daemon must never die because the player restarted.
 //
-// stdout and stderr are deliberately inherited -- that is how bluealsa's own
-// complaints, and anything else a daemon prints, reach the player's log, which
-// is the only place anybody ever reads them from on this device. bluetoothd
-// prints nothing there: it writes to syslog, which only the Bluetooth log
-// (btlog.h) listens to.
+// Standard descriptors go to /dev/null and every higher descriptor is closed:
+// when card logging is on, descriptors 1 and 2 point at the microSD log, and
+// other threads hold open card files without O_CLOEXEC. Inheriting any of them
+// pins /mnt/sd_0 busy for the life of the Bluetooth stack. With the Bluetooth
+// log enabled, bluetoothd and bluealsa send their diagnostics to syslog.
 static bool spawn_daemon(const char *path, char *const argv[]) {
+	long open_max = child_open_max();
 	pid_t pid = fork();
 	if (pid < 0) {
 		fprintf(stderr, "bluetooth: fork for %s failed: %s\n", path, strerror(errno));
@@ -664,11 +697,7 @@ static bool spawn_daemon(const char *path, char *const argv[]) {
 			_exit(0); // the middle process leaves at once; init adopts the daemon
 		}
 		setsid();
-		int devnull = open("/dev/null", O_RDONLY);
-		if (devnull >= 0) {
-			dup2(devnull, STDIN_FILENO);
-			close(devnull);
-		}
+		child_detach_from_player(open_max, true);
 		execv(path, argv);
 		_exit(127);
 	}
@@ -692,16 +721,13 @@ void bluetooth_daemon_debug_on(void) {
 // argument list of this file's own making -- dbus-uuidgen and modprobe -- never
 // with anything that came off the air.
 static int run_and_wait(const char *path, char *const argv[], int timeout_ms) {
+	long open_max = child_open_max();
 	pid_t pid = fork();
 	if (pid < 0) {
 		return -1;
 	}
 	if (pid == 0) {
-		int devnull = open("/dev/null", O_RDWR);
-		if (devnull >= 0) {
-			dup2(devnull, STDIN_FILENO);
-			close(devnull);
-		}
+		child_detach_from_player(open_max, true);
 		execv(path, argv);
 		_exit(127);
 	}
@@ -1199,6 +1225,7 @@ static const char *bluealsa_help(void) {
 		if (pipe(fds) != 0) {
 			return false;
 		}
+		long open_max = child_open_max();
 		pid_t pid = fork();
 		if (pid < 0) {
 			close(fds[0]);
@@ -1210,6 +1237,7 @@ static const char *bluealsa_help(void) {
 			dup2(fds[1], STDERR_FILENO);
 			close(fds[0]);
 			close(fds[1]);
+			child_detach_from_player(open_max, false);
 			char *argv[3] = {(char *)"bluealsa", (char *)"-h", NULL};
 			execv(BLUEALSA_BIN, argv);
 			_exit(127);

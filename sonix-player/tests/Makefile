@@ -164,7 +164,7 @@ $(BUILD)/test_eq: $(EQ_SRC) $(ROOT)/src/system/audio/eq.h $(ROOT)/src/system/cor
 # The explicit V1 external-DAC host trial against a private fake sysfs tree.
 # Exercises the real role writes, bounded wait, rollback and crash recovery.
 .PHONY: usbhost
-usbhost: $(BUILD)/test_usbhostprobe $(BUILD)/test_usbhost_reset $(BUILD)/test_usb_ownership $(BUILD)/test_usbexport $(BUILD)/test_usb_storage $(BUILD)/test_usbaudio_arbitration $(BUILD)/test_usbaudio_volume $(BUILD)/test_usbhostmode
+usbhost: $(BUILD)/test_usbhostprobe $(BUILD)/test_usbhost_reset $(BUILD)/test_usb_ownership $(BUILD)/test_usbexport $(BUILD)/test_usb_storage $(BUILD)/test_usbaudio_arbitration $(BUILD)/test_usbaudio_volume $(BUILD)/test_usbhostmode $(BUILD)/test_card_release
 	$(BUILD)/test_usbhostprobe
 	$(BUILD)/test_usbhost_reset
 	$(BUILD)/test_usb_ownership
@@ -173,6 +173,13 @@ usbhost: $(BUILD)/test_usbhostprobe $(BUILD)/test_usbhost_reset $(BUILD)/test_us
 	$(BUILD)/test_usbaudio_arbitration
 	$(BUILD)/test_usbaudio_volume
 	$(BUILD)/test_usbhostmode
+	$(BUILD)/test_card_release
+
+CARD_RELEASE_SRC = test_card_release.c $(ROOT)/src/system/core/logging.c $(ROOT)/src/system/audio/waveform.c
+$(BUILD)/test_card_release: $(CARD_RELEASE_SRC) $(ROOT)/src/system/core/logging.h \
+                            $(ROOT)/src/system/audio/waveform.h $(ROOT)/src/system/decode/decode.h
+	@mkdir -p $(BUILD)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ $(CARD_RELEASE_SRC) $(LDFLAGS) $(LDLIBS)
 
 # The external USB DAC setting: the hold around the role trial, its retry after
 # another owner of the controller, and what the row is told. The sysfs writes

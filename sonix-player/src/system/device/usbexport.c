@@ -108,6 +108,63 @@ static bool other_block_fd_open(dev_t device, int skip_fd) {
 	return busy;
 }
 
+static bool path_under_mount(const char *target, const char *root, size_t root_len) {
+	return strncmp(target, root, root_len) == 0 && (target[root_len] == '/' || target[root_len] == '\0');
+}
+
+static void log_mount_holders(const char *mountpoint) {
+	char root[PATH_MAX];
+	if (!realpath(mountpoint, root)) return;
+	size_t root_len = strlen(root);
+	DIR *proc = opendir(USBEXPORT_PROC);
+	if (!proc) return;
+	struct dirent *process;
+	while ((process = readdir(proc)) != NULL) {
+		if (!decimal_name(process->d_name)) continue;
+		char comm[64] = "";
+		char path[PATH_MAX], target[PATH_MAX];
+		int n = snprintf(path, sizeof(path), "%s/%s/comm", USBEXPORT_PROC, process->d_name);
+		if (n > 0 && (size_t)n < sizeof(path)) {
+			FILE *f = fopen(path, "r");
+			if (f) {
+				if (fgets(comm, sizeof(comm), f)) comm[strcspn(comm, "\r\n")] = '\0';
+				fclose(f);
+			}
+		}
+		n = snprintf(path, sizeof(path), "%s/%s/cwd", USBEXPORT_PROC, process->d_name);
+		if (n > 0 && (size_t)n < sizeof(path)) {
+			ssize_t len = readlink(path, target, sizeof(target) - 1);
+			if (len > 0) {
+				target[len] = '\0';
+				if (path_under_mount(target, root, root_len)) {
+					fprintf(stderr, "usb:   busy on %s: %s (pid %s %s, cwd)\n", root, target, process->d_name,
+							comm[0] ? comm : "?");
+				}
+			}
+		}
+		char dirpath[PATH_MAX];
+		n = snprintf(dirpath, sizeof(dirpath), "%s/%s/fd", USBEXPORT_PROC, process->d_name);
+		if (n < 0 || (size_t)n >= sizeof(dirpath)) continue;
+		DIR *fds = opendir(dirpath);
+		if (!fds) continue;
+		struct dirent *fd;
+		while ((fd = readdir(fds)) != NULL) {
+			if (!decimal_name(fd->d_name)) continue;
+			n = snprintf(path, sizeof(path), "%s/%s", dirpath, fd->d_name);
+			if (n < 0 || (size_t)n >= sizeof(path)) continue;
+			ssize_t len = readlink(path, target, sizeof(target) - 1);
+			if (len <= 0) continue;
+			target[len] = '\0';
+			if (path_under_mount(target, root, root_len)) {
+				fprintf(stderr, "usb:   busy on %s: %s (pid %s %s, fd %s)\n", root, target, process->d_name,
+						comm[0] ? comm : "?", fd->d_name);
+			}
+		}
+		closedir(fds);
+	}
+	closedir(proc);
+}
+
 int usbexport_detach_and_claim(const char *device, const char *mountpoint, bool *unmounted) {
 	if (!unmounted) return -1;
 	*unmounted = false;
@@ -123,7 +180,10 @@ int usbexport_detach_and_claim(const char *device, const char *mountpoint, bool 
 		if (umount(mountpoint) == 0) { detached = true; break; }
 		int error = errno;
 		fprintf(stderr, "usb: normal unmount failed: %s\n", strerror(error));
-		if (error != EBUSY || attempt == 2) break;
+		if (error != EBUSY || attempt == 2) {
+			if (error == EBUSY) log_mount_holders(mountpoint);
+			break;
+		}
 		sleep(1);
 	}
 	if (!detached) return -1; // never fall back to a forced or lazy unmount

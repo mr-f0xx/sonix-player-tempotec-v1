@@ -116,8 +116,15 @@ int main(void) {
 	assert(!unmounted && unmount_calls == 0);
 
 	reset(); fail_unmount = true;
+	char comm_file[256], card_link[256], card_target[256];
+	pathcat(comm_file, sizeof(comm_file), pid, "/comm");
+	pathcat(card_link, sizeof(card_link), fds, "/1");
+	pathcat(card_target, sizeof(card_target), test_mountpoint, "/.local/sonix_player.log");
+	put(comm_file, "bluealsa\n");
+	assert(symlink(card_target, card_link) == 0);
 	assert(usbexport_detach_and_claim(test_device, test_mountpoint, &unmounted) < 0);
 	assert(!unmounted && unmount_calls == 3 && open_calls == 0);
+	assert(unlink(card_link) == 0 && unlink(comm_file) == 0);
 	reset(); leave_mount = true;
 	assert(usbexport_detach_and_claim(test_device, test_mountpoint, &unmounted) < 0);
 	assert(unmounted && unmount_calls == 1 && open_calls == 0);

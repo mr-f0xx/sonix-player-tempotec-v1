@@ -233,6 +233,11 @@ static int run_argv(char *const argv[], char *out, size_t out_size) {
 		return -1;
 	}
 
+	long open_max = sysconf(_SC_OPEN_MAX);
+	if (open_max < 64 || open_max > 4096) {
+		open_max = 4096;
+	}
+
 	pid_t pid = fork();
 	if (pid < 0) {
 		close(pipe_fd[0]);
@@ -241,14 +246,25 @@ static int run_argv(char *const argv[], char *out, size_t out_size) {
 	}
 
 	if (pid == 0) {
-		// Child: stdout down the pipe, stderr to the log, nothing on stdin.
+		// Child: stdout down the pipe, stdin/stderr to /dev/null, and no
+		// inherited descriptors or working directory on the card (wpa_supplicant
+		// and udhcpc daemonize from here and outlive individual mounts).
+		if (chdir("/") != 0) {
+			_exit(126);
+		}
 		close(pipe_fd[0]);
 		dup2(pipe_fd[1], STDOUT_FILENO);
 		close(pipe_fd[1]);
-		int devnull = open("/dev/null", O_RDONLY);
+		int devnull = open("/dev/null", O_RDWR);
 		if (devnull >= 0) {
 			dup2(devnull, STDIN_FILENO);
-			close(devnull);
+			dup2(devnull, STDERR_FILENO);
+			if (devnull > STDERR_FILENO) {
+				close(devnull);
+			}
+		}
+		for (int fd = 3; fd < (int)open_max; fd++) {
+			close(fd);
 		}
 		execvp(argv[0], argv);
 		_exit(127);
