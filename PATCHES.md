@@ -3206,6 +3206,60 @@ a `plughw:` and an `hw:` route both survive a radio teardown, the jack is still
 taken back, a bluealsa route is still cleared, and a sink being connected still
 wins. Both were checked to fail against the old code before the fix.
 
+### On the V1: nothing audible below 29%
+
+The third report, after both of the above were on the machine and working: the
+ESR played, the hiss was gone, and the volume knob did nothing at all until it
+reached 29% and then came to life.
+
+That number is the whole diagnosis. Index 29 on the stock curve is -43.0 dB, and
+the ESR's own control -- `PCM Playback Volume`, 0..148 over -74.00..0.00 dB --
+stops following at about -43 dB. Everything the player asked for below that was
+therefore the device's analogue output going mute, not quieter music: a volume
+knob with a 43 dB dead stretch at the bottom, which is most of its travel.
+
+It arrived with the fix for the hiss, and in hindsight it is the same mistake
+from the other side. The hiss was the player not using the control at all; this
+was the player trusting the control's *descriptor* about how far down it goes.
+A dongle is free to declare a generous range and mute the analogue stage a third
+of the way into it, and snd_usb_audio publishes whatever the descriptor says
+without knowing any better.
+
+So the range is measured instead of believed. As the device is taken over --
+`usbaudio_poll()`, before the stream opens -- `probe_control_floor()` walks the
+control down a decibel at a time and reads it back at each step; the point where
+the read-back stops following is where the level stops being the control's
+business, with a decibel of margin so driver rounding cannot land on the step
+that failed. Past that the samples take over, so the knob is smooth and quiet all
+the way to 0 instead of dying at 29%. The walk is a few dozen USB control
+transfers, once, and it puts the control back at the top before anything is
+played through it; a control that follows its whole range costs at most a couple
+of hundred and leaves the measurement empty.
+
+Only when there is no measurement at all -- a control with no dB scale, or a
+probe that could not open the card -- does a fixed share apply: a third of the
+declared range, capped at 30 dB. Deliberately shallow, because too much on the
+samples costs some of the hiss back while too much on an unmeasurable control
+costs a dead stretch at the bottom of the knob, and the second is worse to use.
+
+On the ESR the two fixes now meet where they should: the control does the work
+from 0 to -43 dB (which is where the music actually lives) with the amplifier
+noise floor following it down, and the samples do the last 43 dB where the
+control has nothing left to give. `usbaudio:` says which happened, once per
+device, as the port is taken: `stops following below -43.0 dB; past that the
+samples do the work`, or `still follows its whole range; the top third of it is
+used`.
+
+`test_usbaudio_volume` gains the case, against a fake control that goes mute the
+way the ESR does, and against the *real* volume table rather than a stand-in --
+29% only means anything against that table. It checks that the control is never
+asked past its mute point, that 28% comes out at the level the index asks for
+with the samples carrying the difference, that every step from 40% down to 10%
+is quieter than the one above it and none of them is a mute, that the probe
+leaves the control where it found it, and that a control which never gives up is
+limited to the share instead. Checked to fail against the unprobed code first:
+without the walk, the fake is asked for value 60 of its mute point at 62.
+
 ## Bluetooth drop-outs with Wi-Fi joined, and a USB-C DAC that was never found
 
 Two reports from one test session on a V1. Neither could be reproduced here --
