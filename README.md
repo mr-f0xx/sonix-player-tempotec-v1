@@ -176,7 +176,7 @@ Showcase of **OLED** appearance: true black backgrounds with white as the accent
 </table>
 
 
-**Tag Manager:** Open More → Tag Manager to view FLAC/MP3 tags and cover art, and edit track titles, artists, track numbers or genres, and search for cover art over Wi-Fi on the V1. See the [usage and safety notes](docs/tag-manager.md).
+🏷️ **Tag Manager:** Open More → Tag Manager to view FLAC/MP3 tags and cover art, and edit track titles, artists, track numbers or genres, and search for cover art over Wi-Fi on the V1. See the [usage and safety notes](docs/tag-manager.md).
 
 ## Contents
 
@@ -217,26 +217,36 @@ The player UI is built with LVGL 9.6 and adapted for the V1's small display. The
 
 This fork builds on the upstream [Sonix Player](https://github.com/Jepl4r/sonix-player) for the V1. The items below are **new in this fork**; everything else is shared with upstream. The complete list is in [FEATURES.md](FEATURES.md).
 
-### New in this fork
+### 🌟 New in this fork
 
-- **Music pet** - a Pikachu that grows from the music you hear. See [Music pet](#music-pet).
-- **Calculator, Notes, Metronome** - a pocket calculator, text notes from the card, and a metronome with tap tempo, all under More.
-- **2048, Snake and Dino** - three small games under More, sized for the V1 panel.
-- **Tag Manager** - view and edit FLAC and MP3 tags and cover art, and search for covers over Wi-Fi. See the [usage and safety notes](docs/tag-manager.md).
-- **Subsonic / Gonic** - stream from your own server. See [Subsonic / Gonic](#subsonic--gonic).
-- **One-tap Tidal & Qobuz setup + streaming upgrades** - extract the official V1 stock credentials directly on the player over Wi-Fi or from the microSD card (no PC, developer keys or restart needed). Includes V1-adapted **Tidal** with offline downloads (`Music/Tidal/<artist>/<album>`), a 1 GiB SD playback cache, cached lists, search history, configurable home rows and bulk selection; **Qobuz** up to 24-bit/192 kHz FLAC with full JWT session persistence; **FLAC internet radio**; and upgraded **Podcasts** (heard/unheard tracking, episode ordering and regional charts). See [Streaming: Tidal, Qobuz and credentials](#streaming-tidal-qobuz-and-credentials).
-- **Plugins (`Settings → Plugins`)** - switch optional modules (including Tidal, Qobuz, Podcasts, Radio, tools and games) on or off so unused pages are never built and RAM stays free. See [docs/ADDONS.md](docs/ADDONS.md).
-- **V1 themes** - **Tokyo Night**, **Amber on Black** and **OLED**, designed for the V1 panel, beside Dark and Light. Make your own with a [custom colour theme](docs/custom-themes.md).
-- **Boot screens** - Retrospace (the default), Space, Travelling in space, Stock, or your own picture.
-- **Player layouts** - **Immersive**, **Poster**, **Album Art Max** and **Vinyl**, beside Standard, Waveform and Alternative. See [`previews/vinyl-layout/`](previews/vinyl-layout/) for an interactive, exact-size Vinyl concept.
-- **Legacy play button and corner roundness** - the original round disc behind play and pause, as an option under Settings → Music → Display options; and a slider for how round the screen corners are, from a hint of a corner (2 px) up to 20 px, for a V1 that looks boxier than its 16 px default.
-- **Interface fonts** - choose MiSans, Neon 80s or Roboto, or any `.ttf`/`.otf` in the card's `Fonts` folder. Missing glyphs fall back to MiSans, so every language stays readable.
-- **Dual Scrobbler Suite** (Last.fm & ListenBrainz) — Native background scrobbling for both services with independent toggles, token-based setup, and offline queue caching when disconnected from Wi-Fi.
-- **Over-The-Air (OTA) Updates** - Check for and download new releases directly over Wi-Fi from GitHub Releases with one click in Settings → System → Firmware update.
-- **SmartMix Playlist**  - Generate similar tracks, tag based playlists!
-- **Editable control centre**
-- **Many more improvements!**
-### Shared with Sonix Player
+- 🐾 **Music pet** - a Pikachu that grows from the music you hear. See [Music pet](#music-pet).
+- 🧮 **Calculator, Notes, Metronome** - a pocket calculator, text notes from the card, and a metronome with tap tempo, all under More.
+- 🎮 **2048, Snake and Dino** - three small games under More, sized for the V1 panel.
+- 🏷️ **Tag Manager** - view and edit FLAC and MP3 tags and cover art, and search for covers over Wi-Fi. See the [usage and safety notes](docs/tag-manager.md).
+- 🏠 **Subsonic / Gonic** - stream from your own server. See [Subsonic / Gonic](#subsonic--gonic).
+- 🌊 **One-tap Tidal & Qobuz setup + streaming upgrades** - extract the official V1 stock credentials directly on the player over Wi-Fi or from the microSD card (no PC, developer keys or restart needed). Includes V1-adapted **Tidal** with offline downloads (`Music/Tidal/<artist>/<album>`), a 1 GiB SD playback cache, cached lists, search history, configurable home rows and bulk selection; **Qobuz** up to 24-bit/192 kHz FLAC with full JWT session persistence, plus offline track and album downloads to `Music/Qobuz Downloads`; **FLAC internet radio** with a V1-sized page and Flylo's curated chill-hop picks; and upgraded **Podcasts** (heard/unheard tracking, episode ordering and regional charts). See [Streaming: Tidal, Qobuz and credentials](#streaming-tidal-qobuz-and-credentials).
+- 🧩 **Plugins (`Settings → Plugins`)** - switch optional modules (including Tidal, Qobuz, Podcasts, Radio, tools and games) on or off so unused pages are never built and RAM stays free. See [docs/ADDONS.md](docs/ADDONS.md).
+- 🎨 **V1 themes** - **Tokyo Night**, **Amber on Black** and **OLED**, designed for the V1 panel, beside Dark and Light. Make your own with a [custom colour theme](docs/custom-themes.md).
+- 🚀 **Boot screens** - Retrospace (the default), Space, Travelling in space, Stock, or your own picture.
+- 🖼️ **Player layouts** - **Immersive**, **Poster**, **Album Art Max** and **Vinyl**, beside Standard, Waveform and Alternative. See [FEATURES.md](FEATURES.md#now-playing) for the details of each layout.
+- 🔘 **Legacy play button and corner roundness** - the original round disc behind play and pause, as an option under Settings → Music → Display options; and a slider for how round the screen corners are, from a hint of a corner (2 px) up to 20 px, for a V1 that looks boxier than its 16 px default.
+- 🔤 **Interface fonts** - choose MiSans, Neon 80s or Roboto, or any `.ttf`/`.otf` in the card's `Fonts` folder. Missing glyphs fall back to MiSans, so every language stays readable.
+- 🎚️ **Two PEQ profiles** - separate bands, preamp and on/off states for two pairs of headphones, with one-tap switching from the Control Centre and a long press to open the PEQ page.
+- 🎛️ **Editable control centre** - a second page with ten quick toggles (airplane mode, crossfeed, soundfield, replay gain, mono, key lock, LED, rotate, screen off and the power menu), **edit mode** to swap tiles in place by long press, and an optional **Both sliders** mode under Settings → Screen that shows separate brightness and volume rails.
+- 🏅 **Hi-Res badge** - an optional HI-RES badge on the now-playing artwork, placed top-left or top-right per layout, with four designs: the original two-line text, one line, HR, or the official gold Hi-Res Audio logo. Off by default.
+- 📊 **Dual Scrobbler Suite** (Last.fm & ListenBrainz) - native background scrobbling for both services with independent toggles, token-based setup, and offline queue caching when disconnected from Wi-Fi.
+- 🔄 **Over-The-Air (OTA) Updates** - check for and download new releases directly over Wi-Fi from GitHub Releases with one click in Settings → System → Firmware update.
+- 🎵 **SmartMix Playlist** - generate similar tracks as tag-based playlists, built entirely on the player; nothing leaves the device.
+- 💿 **Multi-file CUE sheets** - a `.cue` can reference several audio files, and the referenced audio file is found by stem even when its extension differs from the `FILE` line. See [FEATURES.md](FEATURES.md#supported-audio-formats).
+- 📁 **Remembered file browser** - Browse reopens the last folder and scroll position after a restart, and can replace the Music tile on the home screen under Settings → Appearance.
+- 🎆 **Screensaver visualizer** - a live spectrum in place of the album art: **Neon** (eight wide segmented bars in the theme's accent colour) or **LED** (a sixteen-bar bench analyzer with glowing segments); the track info and clock stay on screen, and an accent-coloured note stands in when nothing is playing.
+- 🔌 **External USB-C DACs** - a switch under Developer options keeps the USB-C port supplying power and acting as host, so dongles the default dual-role setting never brought up (a JCally, an ESR) work; the dongle's own volume control is measured so the knob stays smooth down to zero, and a silent dongle is never routed around.
+- 📶 **Bluetooth improvements** - classic BR/EDR discovery while searching, with the player discoverable, so a car head unit (like a Tesla) can pair to it; Wi-Fi/Bluetooth coexistence (AFH); the panel stays powered while a Bluetooth stream plays so waking it is silent; and the adapter is re-powered before reconnecting to the last headphones.
+- 🗣️ **Interface languages** - Ukrainian added; Japanese and Russian restored after they were dropped; a selected language that goes missing falls back to English.
+- 🖐️ **Stock gestures** - **Settings → Appearance → Stock gestures** swaps the two sheets to the edges the stock firmware uses: Cover Flow down from the top edge, control centre up from the bottom. Off by default.
+- ✨ **Many more improvements!**
+
+### 🤝 Shared with Sonix Player
 
 - **Music**: a local library with a file browser, albums, artists, genres, playlists, favourites and most played, plus gapless playback, fades, ReplayGain and sleep timers.
 - **Sound**: a 10-band graphic EQ, parametric EQ, AutoEq, MSEB, crossfeed, DSD and a DAC page.
