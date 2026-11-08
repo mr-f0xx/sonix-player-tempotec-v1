@@ -449,15 +449,19 @@ static void fit_row(lv_obj_t *row) {
 	// belongs to the name. The value counts as much as the chevron: a name like
 	// Longer translated names can run into the value beside them at 24 px.
 	lv_obj_t *right = lv_obj_get_child(row, 1);
-	if (right) {
+	// Plain toggle rows reserve the switch using right padding on their label.
+	// Pill-card headers are flex rows and have no such padding, so their switch
+	// still needs an explicit width reservation.
+	bool switch_right = right && lv_obj_check_type(right, &lv_switch_class) &&
+		lv_obj_get_style_pad_right(label, LV_PART_MAIN) > 0;
+	if (right && !switch_right) {
 		avail -= lv_obj_get_width(right) + ROW_LABEL_GAP;
 	}
 
-	// The function-glyph themes' optional leading icon is appended after the
-	// normal row children, preserving the existing name/value/chevron child
-	// indices used throughout the settings UI. Its width is reserved only while
-	// one of those themes is enabled, so Dark and Light keep their label
-	// position.
+	// Leading icons are appended after the normal row children, preserving the
+	// existing name/value/chevron child indices used throughout the settings UI.
+	// Function-glyph icons reserve width only in those themes; accent icons
+	// reserve it everywhere so their labels never run underneath the glyph.
 	lv_obj_t *leading = settingsrow_leading_icon(row);
 	int32_t leading_width = (theme_uses_function_glyphs() || settingsrow_icon_is_accent(row)) && leading ? lv_obj_get_width(leading) + ROW_LABEL_GAP : 0;
 	avail -= leading_width;
@@ -511,6 +515,12 @@ static void fit_row(lv_obj_t *row) {
 		lv_obj_set_style_text_font(label, &font_ui_24, 0);
 	}
 	lv_obj_align(label, LV_ALIGN_LEFT_MID, leading_width, 0);
+	if (switch_right) {
+		// Toggle cards already reserve the switch with right padding on the
+		// label. Keep that reservation and only reduce its width for the glyph.
+		lv_obj_set_width(label, LV_MAX(1, avail));
+		return;
+	}
 	fit_row_label(label, avail);
 }
 
@@ -639,7 +649,11 @@ static void settingsrow_refresh_theme(void) {
 		if (!row || !icon) {
 			continue;
 		}
-		settingsrow_update_edges(row, flat_rows);
+		// Navigation rows are buttons whose flat/boxed treatment changes by
+		// theme. Option cards set their own edge styles and should keep them.
+		if (lv_obj_check_type(row, &lv_button_class)) {
+			settingsrow_update_edges(row, flat_rows);
+		}
 		bool accent = leading_icons[i].accent;
 		lv_obj_set_hidden(icon, !function_glyphs && !accent);
 		lv_obj_t *label = lv_obj_get_child(row, 0);
@@ -1059,9 +1073,10 @@ static void settingsrow_icon_row_deleted_cb(lv_event_t *e) {
 	}
 }
 
-void settingsrow_add_icon(lv_obj_t *row, const lv_image_dsc_t *source, theme_semantic_t tone) {
+static lv_obj_t *settingsrow_add_icon_internal(lv_obj_t *row, const lv_image_dsc_t *source,
+											 theme_semantic_t tone, bool accent, bool flex_leading) {
 	if (!row || !source) {
-		return;
+		return NULL;
 	}
 	if (leading_icon_count >= SETTINGSROW_MAX_LEADING_ICONS) {
 		// An icon turned away here is a miscounted cap above, not something
@@ -1070,7 +1085,7 @@ void settingsrow_add_icon(lv_obj_t *row, const lv_image_dsc_t *source, theme_sem
 		lv_obj_t *name = settingsrow_name_label(row);
 		fprintf(stderr, "settingsrow: no leading-icon slot left for %s\n",
 			name && lv_obj_check_type(name, &lv_label_class) ? lv_label_get_text(name) : "(unnamed row)");
-		return;
+		return NULL;
 	}
 
 	lv_obj_t *icon = lv_image_create(row);
@@ -1090,23 +1105,51 @@ void settingsrow_add_icon(lv_obj_t *row, const lv_image_dsc_t *source, theme_sem
 		lv_image_set_inner_align(icon, LV_IMAGE_ALIGN_CENTER);
 		lv_image_set_scale(icon, (uint32_t)(LV_SCALE_NONE * target_side / max_side));
 	}
-	lv_obj_align(icon, LV_ALIGN_LEFT_MID, 0, 0);
+	if (flex_leading) {
+		lv_obj_move_to_index(icon, 0);
+	} else {
+		lv_obj_align(icon, LV_ALIGN_LEFT_MID, 0, 0);
+	}
 
-	leading_icons[leading_icon_count++] = (settingsrow_leading_icon_t){.row = row, .icon = icon, .tone = tone};
+	leading_icons[leading_icon_count++] = (settingsrow_leading_icon_t){
+		.row = row, .icon = icon, .tone = tone, .accent = accent};
 	lv_obj_add_event_cb(row, settingsrow_icon_row_deleted_cb, LV_EVENT_DELETE, NULL);
 	settingsrow_register_refresh();
 	settingsrow_refresh_theme();
+	return icon;
+}
+
+void settingsrow_add_icon(lv_obj_t *row, const lv_image_dsc_t *source, theme_semantic_t tone) {
+	settingsrow_add_icon_internal(row, source, tone, false, false);
 }
 
 void settingsrow_add_accent_icon(lv_obj_t *row, const lv_image_dsc_t *source) {
-    settingsrow_add_icon(row, source, THEME_SEMANTIC_BLUE);
-    for (int i = 0; i < leading_icon_count; i++) {
-        if (leading_icons[i].row == row) {
-            leading_icons[i].accent = true;
-            settingsrow_refresh_theme();
-            break;
-        }
-    }
+	settingsrow_add_icon_internal(row, source, THEME_SEMANTIC_BLUE, true, false);
+}
+
+void settingsrow_toggle_pills_add_accent_icon(lv_obj_t *card, const lv_image_dsc_t *source) {
+	if (!card || !source || lv_obj_get_child_count(card) < 2) {
+		return;
+	}
+	lv_obj_t *header = lv_obj_get_child(card, 0);
+	lv_obj_t *pills = lv_obj_get_child(card, 1);
+	if (!header || !pills || lv_obj_get_child_count(header) < 2 ||
+		!lv_obj_check_type(lv_obj_get_child(header, 0), &lv_label_class) ||
+		!lv_obj_check_type(lv_obj_get_child(header, 1), &lv_switch_class)) {
+		return;
+	}
+
+	// Insert before the title before refreshing: this header uses flex layout,
+	// unlike the ordinary rows whose label/value children have fixed indices.
+	lv_obj_t *icon = settingsrow_add_icon_internal(header, source, THEME_SEMANTIC_BLUE, true, true);
+	if (!icon) {
+		return;
+	}
+
+	// Keep the option pills aligned with the title, rather than the card's
+	// icon column.
+	int gap = compact_rows() ? 6 : 12;
+	lv_obj_set_style_pad_left(pills, lv_obj_get_width(icon) + gap, 0);
 }
 
 static void settingsrow_caption_row_deleted_cb(lv_event_t *e) {
