@@ -536,7 +536,9 @@ a self-signed certificate), and HLS.
 
 On the TempoTec V1, Music > Display options can show the themed status bar
 above the player. The player fits in the remaining space; Album Art Max
-already includes the status bar. The option is off by default.
+already includes the status bar. The option is off by default. A separate
+Frosted player status bar switch blends the blurred album artwork into its
+themed background; without artwork it falls back to the theme.
 
 ### Hi-res artwork badge
 

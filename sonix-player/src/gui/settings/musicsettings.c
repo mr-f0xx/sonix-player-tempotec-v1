@@ -1816,6 +1816,10 @@ static void layout_pick_cb(lv_event_t *e) {
 	layout_refresh();
 }
 
+static void player_status_frost_cb(lv_event_t *e) {
+	player_status_frost_set(lv_obj_has_state(lv_event_get_target(e), LV_STATE_CHECKED));
+}
+
 static void player_status_bar_cb(lv_event_t *e) {
 	player_status_bar_set(lv_obj_has_state(lv_event_get_target(e), LV_STATE_CHECKED));
 }
@@ -2595,6 +2599,9 @@ static void build_display_page(gui_config_t *cfg) {
 		lv_obj_t *status_switch;
 		settingsrow_toggle(container, "musicsettings_player_status_bar", &status_switch, player_status_bar_cb);
 		lv_obj_set_state(status_switch, LV_STATE_CHECKED, player_status_bar_get());
+		lv_obj_t *frost_switch;
+		settingsrow_toggle(container, "musicsettings_player_status_frost", &frost_switch, player_status_frost_cb);
+		lv_obj_set_state(frost_switch, LV_STATE_CHECKED, player_status_frost_get());
 	}
 
 	// The position belongs to the selected arrangement, not all of them.

@@ -419,9 +419,16 @@ static bool layout_immersive_now; // and for the fourth: the sleeve from edge to
 static bool layout_poster_now;	  // and for the fifth: the sleeve at the width of the screen, the deck on its own ground
 static int player_screen_height, player_status_height;
 static bool player_status_bar;
+static bool player_status_frost;
 static bool layout_aam_now;		  // and for the sixth: the sleeve over the page, the media controls traded for it
 static int player_content_top(void) {
 	return player_status_bar && !layout_aam_now ? player_status_height : 0;
+}
+// The shell owns the bar; only lend it the backdrop while the player is up.
+// The image is detached before the artwork worker's old buffer is freed.
+static void player_status_frost_apply(void) {
+	bool show = sheet_open && (player_status_bar || layout_aam_now) && player_status_frost;
+	topbar_set_player_frost(show && current_backdrop.pixels ? &current_backdrop.dsc : NULL);
 }
 static bool layout_vinyl_now;
 static vinyl_record_t vinyl_record;
@@ -4535,6 +4542,7 @@ static void apply_layout(void) {
 	// can be changed from a page the player is not on.
 	if (sheet_open) {
 		topbar_set_hidden(!(layout_aam_now || player_status_bar));
+		player_status_frost_apply();
 		back_btn_player_top_inset(layout_aam_now ? aam_chevron_inset() : player_content_top());
 		// And its stroke, not its button: the glyph is drawn with a third of its
 		// canvas empty on either side, so a chevron whose *button* starts where
@@ -4822,6 +4830,7 @@ static void reload_cover(const char *filepath) {
 	if (studio_bg && lv_image_get_src(studio_bg) == &current_backdrop.dsc) {
 		lv_image_set_src(studio_bg, NULL); // Studio's, or the V1's, points at the backdrop freed below
 	}
+	topbar_set_player_frost(NULL); // detach the borrowed image before freeing it
 	cover_free(&current_cover);
 	cover_free(&current_backdrop);
 	full_backdrop_apply(); // nothing to show behind the V1's page until the next one lands
@@ -5006,6 +5015,7 @@ static void apply_cover_result(void) {
 		if (new_backdrop.pixels) {
 			current_backdrop = new_backdrop;
 			current_backdrop.dsc.data = current_backdrop.pixels;
+			player_status_frost_apply();
 			if (backdrop_is_band) {
 				// Immersive's reflected band stands below the picture,
 				// at the foot of the screen under the deck.
@@ -6546,6 +6556,16 @@ void player_hires_style_set(hiresbadge_style_t style) {
 	update_hires_badge(&state);
 }
 
+bool player_status_frost_get(void) { return player_status_frost; }
+
+void player_status_frost_set(bool enabled) {
+	if (!bp_is_tempotec_v1() || player_status_frost == enabled) return;
+	player_status_frost = enabled;
+	config_set_bool("screen", "player_status_frost", enabled);
+	config_save();
+	player_status_frost_apply();
+}
+
 bool player_status_bar_get(void) { return player_status_bar; }
 
 void player_status_bar_set(bool enabled) {
@@ -6852,6 +6872,7 @@ void player_sheet_open(bool animate) {
 	// chevron and the format line are aligned from. The chevron moves under
 	// it for the same reason (see apply_layout).
 	topbar_set_hidden(!(layout_aam_now || player_status_bar));
+	player_status_frost_apply();
 	back_btn_player_top_inset(layout_aam_now ? aam_chevron_inset() : player_content_top());
 	back_btn_player_ink_inset(layout_aam_now ? AAM_HEAD_END_PAD : 0);
 	back_btn_player_mode(true);
@@ -6873,6 +6894,7 @@ static void sheet_hidden_anim_ready_cb(lv_anim_t *a) {
 void player_sheet_close(bool animate) {
 	bool was_open = sheet_open;
 	sheet_open = false;
+	player_status_frost_apply();
 	back_btn_player_ink_inset(0); // the chevron back in the middle of its slot
 	back_btn_player_mode(false);
 	topbar_set_hidden(false);
@@ -7402,6 +7424,7 @@ void player_init(gui_config_t *cfg) {
 	player_screen_height = cfg->screen_height;
 	player_status_height = cfg->top_bar_height;
 	player_status_bar = bp_is_tempotec_v1() && config_get_bool("screen", "player_status_bar", false);
+	player_status_frost = bp_is_tempotec_v1() && config_get_bool("screen", "player_status_frost", false);
 
 	// Geometry first, because everything else hangs off it. The V1 gets a
 	// deck exactly as tall as its four rows need (compact_deck_height()), a

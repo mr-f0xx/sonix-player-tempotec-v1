@@ -1346,6 +1346,20 @@ void topbar_bring_to_front(void) {
 	}
 }
 
+// The background is still the theme's panel colour. Blend a restrained amount
+// of the player's already-blurred artwork over it so the theme's normal text
+// and semantic icon colours remain legible in both light and dark themes.
+void topbar_set_player_frost(const lv_image_dsc_t *image) {
+	if (!top_bar) return;
+	if (image) {
+		lv_obj_set_style_bg_image_src(top_bar, image, 0);
+		lv_obj_set_style_bg_image_opa(top_bar, LV_OPA_30, 0);
+	} else {
+		lv_obj_remove_local_style_prop(top_bar, LV_STYLE_BG_IMAGE_SRC, 0);
+		lv_obj_remove_local_style_prop(top_bar, LV_STYLE_BG_IMAGE_OPA, 0);
+	}
+}
+
 // Shows or hides the whole bar. The player page hides it so the album art can
 // start at the very top of the screen.
 void topbar_set_hidden(bool hidden) {
