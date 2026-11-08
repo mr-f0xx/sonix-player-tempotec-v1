@@ -26,6 +26,13 @@ int main(void) {
 	assert(strcmp(hiresbadge_text(HIRESBADGE_ONE_LINE), "HI-RES") == 0);
 	assert(strcmp(hiresbadge_text(HIRESBADGE_INITIALS), "HR") == 0);
 	assert(hiresbadge_text(HIRESBADGE_LOGO) == NULL);
+	assert(!hiresbadge_back_right(true, false, true, false, false));
+	assert(hiresbadge_back_right(true, true, true, false, false));
+	assert(!hiresbadge_back_right(false, true, true, false, false));
+	assert(!hiresbadge_back_right(true, true, false, false, true));
+	assert(!hiresbadge_back_right(true, true, false, true, false));
+	assert(hiresbadge_back_right(true, true, false, true, true));
+	assert(!hiresbadge_back_right(true, false, false, true, true));
 	puts("hi-res badge quality and design checks passed");
 	return 0;
 }

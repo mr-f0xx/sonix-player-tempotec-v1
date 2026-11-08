@@ -41,6 +41,9 @@ void switcher_set_back_guard_peek(lv_obj_t *screen, bool (*peek)(void));
 // artwork's corner, instead of on the (hidden) title row.
 void back_btn_player_mode(bool in_player);
 
+// Choose the player chevron corner without affecting other pages.
+void back_btn_player_right_set(bool right);
+
 // True while the open player shows a loaded cover: the chevron sits on the
 // always-dark artwork backdrop, so it goes white regardless of the theme.
 void back_btn_over_cover(bool over_cover);

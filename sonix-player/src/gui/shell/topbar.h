@@ -47,6 +47,17 @@ void topbar_set_library_check(topbar_library_t state);
 void topbar_set_hidden(bool hidden);
 bool topbar_is_hidden(void);
 
+// Borrow a blurred player artwork image while the player is open; NULL restores
+// the normal themed bar. The caller must detach it before freeing the image.
+void topbar_set_player_frost(const lv_image_dsc_t *image);
+
+// Optional solid player-layout ground; disabling restores the theme panel.
+void topbar_set_player_ground(bool enabled, lv_color_t color);
+
+// Tint the player status icons using a cover colour; disabling restores their
+// normal status and theme colours without changing the background.
+void topbar_set_player_color(bool enabled, lv_color_t color);
+
 // Draws the bar above everything else on the top layer. Both sheets ask for
 // this on the way in: the control centre covers the whole screen, and the
 // carousel comes down under the bar in the stock arrangement, so the clock,

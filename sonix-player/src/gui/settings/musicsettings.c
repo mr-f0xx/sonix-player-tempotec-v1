@@ -1816,6 +1816,14 @@ static void layout_pick_cb(lv_event_t *e) {
 	layout_refresh();
 }
 
+static void player_status_color_cb(lv_event_t *e) {
+	player_status_color_set(lv_obj_has_state(lv_event_get_target(e), LV_STATE_CHECKED));
+}
+
+static void player_status_bar_cb(lv_event_t *e) {
+	player_status_bar_set(lv_obj_has_state(lv_event_get_target(e), LV_STATE_CHECKED));
+}
+
 // The sleeve's colour on the play button and the progress bar, in whichever
 // arrangement is up. The page owns the setting, as for the layout above; this
 // only stores it and lets the repaint it does show behind this page.
@@ -2586,6 +2594,15 @@ static void build_display_page(gui_config_t *cfg) {
 
 	layout_refresh();
 	theme_register_refresh(layout_refresh);
+
+	if (bp_is_tempotec_v1()) {
+		lv_obj_t *status_switch;
+		settingsrow_toggle(container, "musicsettings_player_status_bar", &status_switch, player_status_bar_cb);
+		lv_obj_set_state(status_switch, LV_STATE_CHECKED, player_status_bar_get());
+		lv_obj_t *color_switch;
+		settingsrow_toggle(container, "musicsettings_player_status_color", &color_switch, player_status_color_cb);
+		lv_obj_set_state(color_switch, LV_STATE_CHECKED, player_status_color_get());
+	}
 
 	// The position belongs to the selected arrangement, not all of them.
 	lv_obj_t *hires_row = NULL;

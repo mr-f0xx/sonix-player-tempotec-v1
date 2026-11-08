@@ -50,6 +50,7 @@ static int8_t back_btn_top_bar_height;
 // An arrangement that keeps the status bar (Album Art Max) leaves the chevron
 // no such air: the row is there, and the chevron belongs under it.
 static int8_t back_btn_player_inset;
+static bool back_btn_player_right;
 
 static int back_btn_player_top(void) {
 	return (bp_is_tempotec_v1() ? 4 : BACK_BTN_PLAYER_TOP) + back_btn_player_inset;
@@ -61,7 +62,15 @@ static void place_back_btn(bool below_top_bar) {
 	// the player (below_top_bar false) the status bar is not there to sit
 	// under, so the chevron takes the offset above.
 	int y = back_btn_padding + (below_top_bar ? back_btn_top_bar_height : back_btn_player_top());
-	lv_obj_align(back_btn, LV_ALIGN_TOP_LEFT, back_btn_padding, y);
+	bool right = !below_top_bar && back_btn_player_right;
+	lv_obj_align(back_btn, right ? LV_ALIGN_TOP_RIGHT : LV_ALIGN_TOP_LEFT,
+		right ? -back_btn_padding : back_btn_padding, y);
+}
+
+void back_btn_player_right_set(bool right) {
+	if (back_btn_player_right == right) return;
+	back_btn_player_right = right;
+	if (back_btn && chevron_in_player) place_back_btn(false);
 }
 
 void back_btn_player_top_inset(int inset) {
@@ -321,7 +330,9 @@ static void back_underlay_build(void) {
 		// where there is no status bar, the status bar's height everywhere else.
 		int y = back_btn_padding + (going_to_player ? back_btn_player_top() : back_btn_top_bar_height);
 		int inset = (back_btn_size - 36) / 2;
-		lv_obj_set_pos(chevron, back_btn_padding + inset, y + inset);
+		bool right = going_to_player && back_btn_player_right;
+		lv_obj_align(chevron, right ? LV_ALIGN_TOP_RIGHT : LV_ALIGN_TOP_LEFT,
+			right ? -back_btn_padding - inset : back_btn_padding + inset, y + inset);
 		if (going_to_player && chevron_over_cover) {
 			lv_obj_set_style_image_recolor(chevron, lv_color_white(), 0);
 		} else {
