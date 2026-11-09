@@ -287,7 +287,11 @@ static int wait_capture(snd_pcm_t *pcm) {
 // sender says it is playing. Past that it is not a quiet stream, it is a handle
 // on something that is not there: an open on the wrong transport does not fail,
 // it goes silent.
+// Overridable so a host test does not have to sit out three real seconds per
+// silent session to reach the branch below it.
+#ifndef FIRST_FRAME_MS
 #define FIRST_FRAME_MS 3000
+#endif
 
 typedef enum {
 	SESSION_OVER,	// nothing more to try: the mode ends
@@ -713,6 +717,15 @@ static void *capture_worker(void *arg) {
 			if (silent_runs >= SILENT_RUNS_MAX) {
 				fprintf(stderr, "btreceiver: %d sessions in a row with no audio; leaving the next one alone\n",
 						SILENT_RUNS_MAX);
+				// Three PCMs opened and none of them delivered while the
+				// sender said it was playing: this is not a handle on the
+				// wrong transport, it is a sender whose stream died with the
+				// link and never came back. Reopening will keep finding the
+				// same dead object -- the log from the report has fourteen of
+				// these in a row, ending with the mode switched off by hand.
+				// Ask the sender for a stream instead; that is what the one
+				// recovery in that log did.
+				bluetooth_receiver_ask_to_stream();
 			}
 		}
 		if (result == SESSION_OVER) {

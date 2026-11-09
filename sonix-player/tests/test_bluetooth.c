@@ -451,12 +451,16 @@ static char fake_sink[BT_ADDR_MAX];
 static int a2dp_profile_requests;
 static char a2dp_profile_requested_for[BT_ADDR_MAX];
 static bool a2dp_profile_brings_audio;
+static bool a2dp_profile_refused; // the car's "security block" / "resource busy"
 
 bool btstack_connect_a2dp(const char *address, int timeout_ms) {
 	(void)timeout_ms;
 	a2dp_profile_requests++;
 	snprintf(a2dp_profile_requested_for, sizeof(a2dp_profile_requested_for), "%.*s",
 			 (int)(sizeof(a2dp_profile_requested_for) - 1), address);
+	if (a2dp_profile_refused) {
+		return false;
+	}
 	if (a2dp_profile_brings_audio) {
 		snprintf(fake_sink, sizeof(fake_sink), "%.*s", (int)(sizeof(fake_sink) - 1), address);
 	}
@@ -703,9 +707,88 @@ static void test_linked_sink_is_invited(void) {
 	queue_count = 0;
 	pthread_mutex_unlock(&lock);
 
+	// A refusal is not the end of the link. The Tesla answer to the first ask is
+	// "security block" -- the link is not authenticated yet -- and then
+	// "resource busy" while bluez holds the attempt; asked once, the car stayed
+	// silent until it was reconnected by hand five minutes later.
+	a2dp_profile_requests = 0;
+	a2dp_profile_refused = true;
+	fake_devs[0].connected = true;
+	refresh_devices();
+	invite_sinks();
+	assert(a2dp_profile_requests == 1);
+	// Asked again soon, not immediately: the answer needs a moment to change.
+	assert(sink_invite_due != 0);
+	invite_sinks();
+	assert(a2dp_profile_requests == 1);
+	for (int attempt = 1; attempt < SINK_INVITE_TRIES; attempt++) {
+		sink_invites[0].retry_at = now_ms() - 1;
+		invite_sinks();
+		assert(a2dp_profile_requests == attempt + 1);
+	}
+	// Bounded: a car that keeps refusing is left alone rather than polled
+	// forever, and bluez's own reconnect has the link.
+	assert(sink_invites[0].asked);
+	sink_invites[0].retry_at = now_ms() - 1;
+	invite_sinks();
+	assert(a2dp_profile_requests == SINK_INVITE_TRIES);
+
+	// The next link -- a disconnect and a reconnect -- is asked again.
+	a2dp_profile_refused = false;
+	fake_devs[0].connected = false;
+	refresh_devices();
+	invite_sinks();
+	assert(sink_invites[0].tries == 0);
+	fake_devs[0].connected = true;
+	refresh_devices();
+	invite_sinks();
+	sink_invites[0].linked_since = now_ms() - (SINK_INVITE_GRACE_MS + 1000);
+	invite_sinks();
+	assert(a2dp_profile_requests == SINK_INVITE_TRIES + 1);
+	pthread_mutex_lock(&lock);
+	queue_head = 0;
+	queue_count = 0;
+	pthread_mutex_unlock(&lock);
+
 	a2dp_profile_brings_audio = false;
 	g_enabled = false;
 	fake_dev_count = 0;
+}
+
+// The sender is linked, says it is playing case after case, and delivers
+// nothing: the receiver asks it for a stream. Posting that is all this end can
+// do from the capture thread, and asking twice within one report of silence
+// must not put two invitations in the queue.
+static void test_receiver_stream_invite(void) {
+	pthread_mutex_lock(&lock);
+	queue_head = 0;
+	queue_count = 0;
+	pthread_mutex_unlock(&lock);
+
+	source_pcm = true; // the sender's PCM object is still published
+	bluetooth_receiver_ask_to_stream();
+	bluetooth_receiver_ask_to_stream();
+
+	pthread_mutex_lock(&lock);
+	int queued = queue_count;
+	job_type_t type = queued ? queue[queue_head].type : JOB_NONE;
+	char asked[BT_MAC_MAX] = "";
+	if (queued) {
+		snprintf(asked, sizeof(asked), "%s", queue[queue_head].text);
+	}
+	queue_count = 0;
+	pthread_mutex_unlock(&lock);
+
+	assert(queued == 1);
+	assert(type == JOB_RX_INVITE);
+	assert(strcmp(asked, "20:04:84:3A:6C:FE") == 0);
+
+	// No published PCM means no sender to ask: nothing is queued.
+	source_pcm = false;
+	bluetooth_receiver_ask_to_stream();
+	pthread_mutex_lock(&lock);
+	assert(queue_count == 0);
+	pthread_mutex_unlock(&lock);
 }
 
 static void test_op_result_is_reported_once(void) {
@@ -1003,6 +1086,7 @@ int main(void) {
 	test_rx_discoverability_and_phone_pairing();
 	test_op_result_is_reported_once();
 	test_linked_sink_is_invited();
+	test_receiver_stream_invite();
 	test_scan_pairing_window();
 	test_usb_route_survives_a_radio_teardown();
 	test_spawn_daemon_releases_card_descriptors();

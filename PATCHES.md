@@ -3924,3 +3924,88 @@ What the next report should show, in the log of the run that follows a reboot:
 * `log: the previous run did not shut down and sonix_launch did not record the
   player exiting` — the machine reset. Then the trace needs the kernel: pstore
   or a serial console, neither of which this rootfs has today.
+
+## Bluetooth RX that stayed silent after the stream died, and a car that was asked only once (issue #265)
+
+The second log from the same report is 7.5 MB of `btmon` alongside the player's
+own lines, and it holds two different failures under one heading.
+
+### Receiver mode: the PCM is there, the audio is not
+
+The log has thirty `the stream stopped: No such device` and, in between, the
+thing that actually broke the mode:
+
+```
+12:42:08  Device Disconnected  … reason 3 (Connection terminated by remote host)
+12:42:08  bluetooth: receiver stream: aptX 48000 Hz 2 ch 16 bit   ← still named
+12:42:11  btreceiver: says it is playing and nothing has arrived in 3000 ms;
+          this PCM is not the live one
+12:42:14  … the same, a second and a third time …
+12:42:18  btreceiver: 3 sessions in a row with no audio; leaving the next one alone
+12:42:34  receiver mode off
+```
+
+The three `btreceiver:` lines are a *connection reset by peer* from the sender's
+side (`HCI 0x13`, `reason 3`): the link was torn down, and bluealsa kept the PCM
+object of the transport that had died on it. Opening that object succeeds -- it
+is the same object -- and reading it never delivers a frame, which is what "this
+PCM is not the live one" says. Reopening it cannot help, and the log shows it
+cannot: three attempts, then the watchdog gave up and the mode sat silent until
+it was switched off by hand.
+
+Fourteen seconds earlier the same log has the recovery, and it is the other
+direction of the same call:
+
+1. `bluetooth: asking <MAC> to stream here (reconnecting paired source)`
+2. `Device Connected` → `a2dp_config: selected SEP` → `OPEN request succeeded`
+3. `CONFIGURED -> OPEN -> STREAMING` → `btreceiver: … is sending AAC 44100 Hz`
+
+The invitation is what produces a new stream; nothing this end can open will.
+
+**So a run of silent sessions now asks the sender for one.**
+`bluetooth_receiver_ask_to_stream()` posts a job to the Bluetooth worker, which
+calls the same `try_invite_source(…, true, …)` the receiver's own "stream here"
+button uses -- a `ConnectProfile(A2DPSource)` on the paired device, which makes
+bluez open a fresh SEP on the sender. It is posted once per run of silence (the
+job is deduplicated in the queue), only in receiver mode, and only while the
+device is still linked.
+
+The count is three because that is where the log gives up, not because three is
+special: the first two silent sessions are bluealsa's own reopen after the
+sender moved codec, and answering those with an invitation would fight the
+sender for its stream.
+
+Tests: `test_btreceiver` runs a sender that answers PLAYING with a silent PCM
+and checks that three sessions end in exactly one invitation, three handles
+closed, and nothing written; `test_bluetooth` checks the job that invitation
+posts -- one entry in the queue for two reports of silence, the sender's address
+in it, and nothing at all when there is no published PCM to ask about.
+
+### Sending direction: the Tesla, asked once and refused
+
+The same file has the car case from the earlier section, with the answers
+visible:
+
+```
+12:49:48  Name: Tesla Model Y Orca      ← paired, connected
+12:50:01  bluetooth: asking [MAC] for its A2DP stream by itself
+12:50:01  L2CAP: … Result: Connection refused - security block (0x0003)
+12:50:01  ConnectProfile(A2DP sink) -> org.bluez.Error.Failed: Resource temporarily unavailable
+12:50:08  ConnectProfile(A2DP sink) -> org.bluez.Error.Failed: Device or resource busy
+12:54:56  bluetooth: audio profile on [MAC] came up
+```
+
+Two refusals that are both transient: the AVDTP channel is not reachable until
+the link is authenticated, and bluez is still holding the previous attempt a
+moment later. The invitation was remembered as "asked" whatever came back, so
+one refusal took the rest of that link out of the picture -- and the car stayed
+silent until it was reconnected by hand five minutes later, when bluez's own
+policy reconnect brought the profile up on its own.
+
+**A refused invitation is now retried**, four seconds apart, five times per
+link, with the attempt number in the log. The next link starts again from zero,
+because the refusals belong to the old authentication. Once the profile is up,
+or the bound is reached, the device is left to bluez.
+
+Tests: `test_bluetooth` refuses the profile for a linked car and checks the
+retry spacing, the bound, and that a disconnect and reconnect asks again.

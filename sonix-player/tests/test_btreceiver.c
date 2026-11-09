@@ -1,4 +1,7 @@
 /* Exercise the actual receiver session with a fake nonblocking ALSA plug. */
+// Three silent sessions are what the stream-asking case waits for; 40 ms each
+// is the same branch as 3000 would be, without the wait.
+#define FIRST_FRAME_MS 40
 #include "../src/system/bluetooth/btreceiver.c"
 #include <assert.h>
 
@@ -35,9 +38,14 @@ int snd_pcm_poll_descriptors_revents(snd_pcm_t *p, struct pollfd *fds, unsigned 
 }
 int snd_pcm_recover(snd_pcm_t *p, int err, int silent) { (void)p; (void)err; (void)silent; return -1; }
 const char *snd_strerror(int err) { (void)err; return "fake error"; }
+/* A transport that is there and delivers nothing: what "says it is playing and
+ * nothing has arrived" is about. The read keeps coming back empty. */
+static bool silent_pcm;
+
 snd_pcm_sframes_t snd_pcm_readi(snd_pcm_t *p, void *buf, snd_pcm_uframes_t frames) {
 	assert(p == &fake_pcm && frames == CHUNK_FRAMES);
 	reads++;
+	if (silent_pcm) return -EAGAIN;
 	if (reads == 1) return -EAGAIN; /* exercise bounded wait, not recovery */
 	/* The phone picking another codec: bluealsa reconfigures the transport and
 	 * answers with the new format from then on. */
@@ -63,7 +71,8 @@ unsigned bluetooth_receiver_stream_serial(void) { return fake_serial; }
 unsigned bluetooth_refresh_receiver(void) { return ++fake_serial; }
 unsigned bluetooth_receiver_answered(void) { return ++answer_calls >= answer_after ? fake_serial : fake_serial - 1; }
 bool bluetooth_receiver_stream(bt_stream_t *out) { *out = fake_info; return true; }
-bool bluetooth_receiver_playing(void) { return false; }
+static bool fake_playing;
+bool bluetooth_receiver_playing(void) { return fake_playing; }
 bool audio_external_begin_latency(int rate, int ch, int bits, int latency) {
 	assert(rate == 48000 && ch == 2 && latency > 0); output_bits = bits; return true;
 }
@@ -83,6 +92,23 @@ static int pcm_published_after; // device queries to answer "no" before the PCM 
 static int device_queries;
 
 bool bluetooth_receiver_peer_connected(void) { return peer_connected; }
+
+/* Asked once when a run of silent sessions says the sender's stream is gone. */
+static int stream_asks;
+
+void bluetooth_receiver_ask_to_stream(void) { stream_asks++; }
+
+/* The worker is a thread of the player: these two live there, not here. */
+static int realtime_calls;
+void thread_be_realtime(const char *name, int priority) { (void)name; (void)priority; realtime_calls++; }
+void thread_be_background(const char *name) { (void)name; }
+
+/* Not idle: this sender is streaming, which is why the silence has to be
+ * answered with an invitation rather than with waiting. */
+int bluetooth_receiver_sending(unsigned *serial_out) {
+	(void)serial_out;
+	return 1;
+}
 
 bool bluetooth_receiver_device(char *mac_out, int mac_size, char *name_out, int name_size) {
 	device_queries++;
@@ -187,6 +213,52 @@ static void test_between_transports(void) {
 	pcm_published_after = 0;
 }
 
+/* A sender that says it is playing while nothing arrives, three sessions in a
+ * row: the receiver stops pulling that PCM and asks the sender for a stream.
+ * Another open of the same dead object is what the report's log shows fourteen
+ * times in a row, and it never brings anything. */
+static void test_silent_sender_is_asked_for_a_stream(void) {
+	memset(&fake_info, 0, sizeof(fake_info));
+	strcpy(fake_info.codec, "aptX");
+	fake_info.rate = 48000;
+	fake_info.channels = 2;
+	fake_info.bits = 16;
+	fake_serial = 0;
+	answer_after = answer_calls = 0;
+	device_queries = 0;
+	pcm_published_after = 0;
+	reads = capture_closed = output_closed = writes = 0;
+	fake_playing = true;
+	silent_pcm = true;
+	stream_asks = 0;
+
+	pthread_mutex_lock(&lock);
+	running = true;
+	session_id = 42;
+	memset(&state, 0, sizeof(state));
+	pthread_mutex_unlock(&lock);
+
+	pthread_t worker;
+	assert(pthread_create(&worker, NULL, capture_worker, (void *)(uintptr_t)42) == 0);
+	for (int waited = 0; waited < 400 && stream_asks == 0; waited++) {
+		usleep(10 * 1000);
+	}
+	pthread_mutex_lock(&lock);
+	running = false;
+	pthread_mutex_unlock(&lock);
+	pthread_join(worker, NULL);
+
+	// Asked once for the whole run of silence, not once per session: the answer
+	// is a stream this thread cannot see, and the next session is the one that
+	// finds it.
+	assert(stream_asks == 1);
+	// Three PCMs, each opened and closed, and nothing written to the output.
+	assert(capture_closed == 3 && output_closed == 3 && writes == 0);
+
+	silent_pcm = false;
+	fake_playing = false;
+}
+
 int main(void) {
 	// An old in-flight response must not satisfy the newly issued ticket.
 	pthread_mutex_lock(&lock); running = true; session_id = 7; pthread_mutex_unlock(&lock);
@@ -201,6 +273,7 @@ int main(void) {
 	run_format(32, SND_PCM_FORMAT_S32_LE);
 	test_codec_change_mid_session();
 	test_between_transports();
+	test_silent_sender_is_asked_for_a_stream();
 	int fds[2]; assert(pipe(fds) == 0); assert(write(fds[1], "x", 1) == 1);
 	fake_fd = fds[0]; fake_revents = POLLIN;
 	assert(wait_capture(&fake_pcm) == 1);

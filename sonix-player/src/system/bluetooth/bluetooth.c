@@ -125,6 +125,7 @@ typedef enum {
 	JOB_VOLUME,	   // arg_int: percent, for AVRCP absolute volume
 	JOB_RX_INFO,   // re-read what a device streaming to this one is sending
 	JOB_RX_CODEC,  // text: the codec to move the incoming stream onto
+	JOB_RX_INVITE, // the sender delivers nothing: ask it for a stream again
 	JOB_MEDIA,	   // text: an AVRCP member to send to that device
 } job_type_t;
 
@@ -3380,6 +3381,33 @@ bool bluetooth_receiver_peer_connected(void) {
 	return connected;
 }
 
+// The sender is linked, says it is playing, and no frames arrive: the transport
+// it was on has died and it has never opened another. bluealsa keeps naming a
+// PCM for the dead one, so every open succeeds and every read delivers nothing
+// -- which is what the receiver's first-frame watchdog reports as "says it is
+// playing and nothing has arrived in 3000 ms; this PCM is not the live one".
+//
+// Opening it again cannot help. What does is the invitation receiver mode
+// already uses for a paired source that is linked but silent: asking bluez to
+// connect the other end's A2DP source profile, which makes it negotiate a fresh
+// stream. In the log from the report that is the difference between the 12:41
+// recovery -- invite, CONFIGURED -> OPEN -> STREAMING, audio -- and 12:42, where
+// the transport never came back and the mode had to be switched off and on.
+//
+// Posted, not done here: the invitation waits on D-Bus for up to the connect
+// timeout, and this is called from the capture thread.
+void bluetooth_receiver_ask_to_stream(void) {
+	char mac[BT_MAC_MAX];
+	char name[BT_NAME_MAX];
+	if (!bluetooth_receiver_device(mac, sizeof(mac), name, sizeof(name))) {
+		return;
+	}
+	job_t job = {.type = JOB_RX_INVITE};
+	snprintf(job.text, sizeof(job.text), "%s", mac);
+	fprintf(stderr, "bluetooth: asking %s to open its A2DP stream again; nothing is arriving\n", mac);
+	post_job(&job);
+}
+
 bool bluetooth_receiver_stream(bt_stream_t *out) {
 	if (!out) {
 		return false;
@@ -3597,7 +3625,8 @@ static bool queue_has(job_type_t type) {
 
 static bool post_job(const job_t *job) {
 	pthread_mutex_lock(&lock);
-	bool duplicate = (job->type == JOB_REFRESH || job->type == JOB_RX_INFO) && queue_has(job->type);
+	bool duplicate = (job->type == JOB_REFRESH || job->type == JOB_RX_INFO || job->type == JOB_RX_INVITE) &&
+					 queue_has(job->type);
 	bool queued = duplicate || queue_count < JOB_QUEUE_LEN;
 	if (!duplicate && queued) {
 		queue[(queue_head + queue_count) % JOB_QUEUE_LEN] = *job;
@@ -3802,16 +3831,28 @@ static void invite_sources(void) {
 //
 // So a paired, connected device that advertises an A2DP Sink -- or is an audio
 // device by class of device, which is known before its SDP record is -- and has
-// no PCM of its own is asked for the profile directly. Once per link, after a
-// grace period, never while the user has an action queued, and never while
-// another sink is already playing.
+// no PCM of its own is asked for the profile directly. After a grace period,
+// never while the user has an action queued, and never while another sink is
+// already playing.
+//
+// A link gets more than one ask. The report's Tesla answers the first one with
+// "Connection refused - security block" at the AVDTP PSM -- the profile is only
+// reachable once the link is authenticated, and the connection has just been
+// made -- then twice with "Device or resource busy" while bluez still has the
+// attempt in hand. Asked once, the car stayed silent for the five minutes it
+// took to reconnect it by hand. A refusal is therefore retried a few seconds
+// later, a bounded number of times per link.
 #define SINK_INVITE_MAX 8
 #define SINK_INVITE_GRACE_MS 3000
 #define SINK_INVITE_TIMEOUT_MS 8000
+#define SINK_INVITE_RETRY_MS 4000
+#define SINK_INVITE_TRIES 5
 
 static struct {
 	char mac[BT_MAC_MAX];
 	uint32_t linked_since;
+	uint32_t retry_at; // when a refused invitation may be made again
+	uint8_t tries;
 	bool asked;
 } sink_invites[SINK_INVITE_MAX];
 
@@ -3828,6 +3869,8 @@ static void sink_invite_forget(const char *mac) {
 		sink_invites[i].mac[0] = '\0';
 		sink_invites[i].asked = false;
 		sink_invites[i].linked_since = 0;
+		sink_invites[i].retry_at = 0;
+		sink_invites[i].tries = 0;
 	}
 }
 
@@ -3882,8 +3925,13 @@ static void invite_sinks(void) {
 			present = devices[d].connected && strcasecmp(devices[d].address, sink_invites[i].mac) == 0;
 		}
 		if (!present) {
+			// Gone: the link that comes back is a new one, with a fresh set of
+			// attempts -- the refusals above belong to the old authentication.
 			sink_invites[i].mac[0] = '\0';
 			sink_invites[i].asked = false;
+			sink_invites[i].linked_since = 0;
+			sink_invites[i].retry_at = 0;
+			sink_invites[i].tries = 0;
 		}
 	}
 
@@ -3920,23 +3968,41 @@ static void invite_sinks(void) {
 			copy_field(sink_invites[slot].mac, sizeof(sink_invites[slot].mac), dev->address,
 					   sizeof(dev->address));
 			sink_invites[slot].linked_since = now;
+			sink_invites[slot].retry_at = 0;
+			sink_invites[slot].tries = 0;
 			sink_invites[slot].asked = false;
 		}
 		if (sink_invites[slot].asked) {
 			continue;
 		}
-		uint32_t linked_for = now - sink_invites[slot].linked_since;
-		if (linked_for < SINK_INVITE_GRACE_MS) {
-			sink_invite_due = sink_invites[slot].linked_since + SINK_INVITE_GRACE_MS;
+		uint32_t due = sink_invites[slot].linked_since + SINK_INVITE_GRACE_MS;
+		if ((int32_t)(sink_invites[slot].retry_at - due) > 0) {
+			due = sink_invites[slot].retry_at;
+		}
+		if ((int32_t)(now - due) < 0) {
+			sink_invite_due = due;
 			continue;
 		}
+		uint32_t linked_for = now - sink_invites[slot].linked_since;
 
 		fprintf(stderr, "bluetooth: %s is linked with no A2DP profile (%d ms); asking for it\n", dev->address,
 				(int)linked_for);
 		sink_invites[slot].asked = true;
+		sink_invites[slot].tries++;
 		if (!btstack_connect_a2dp(dev->address, SINK_INVITE_TIMEOUT_MS)) {
-			fprintf(stderr, "bluetooth: the A2DP profile was refused; leaving %s to connect it by itself\n",
-					dev->address);
+			// A refusal is usually transient -- an unauthenticated link, or
+			// bluez still holding the last attempt -- so the next turn of the
+			// worker's poll asks again, a few attempts per link.
+			if (sink_invites[slot].tries < SINK_INVITE_TRIES) {
+				sink_invites[slot].asked = false;
+				sink_invites[slot].retry_at = now + SINK_INVITE_RETRY_MS;
+				sink_invite_due = sink_invites[slot].retry_at;
+				fprintf(stderr, "bluetooth: the A2DP profile was refused; asking %s again in %d ms (attempt %d of %d)\n",
+						dev->address, SINK_INVITE_RETRY_MS, (int)sink_invites[slot].tries, SINK_INVITE_TRIES);
+			} else {
+				fprintf(stderr, "bluetooth: the A2DP profile was refused %d times; leaving %s to connect it by itself\n",
+						SINK_INVITE_TRIES, dev->address);
+			}
 			continue;
 		}
 		if (wait_for_a2dp(dev->address, A2DP_CONFIRM_MS)) {
@@ -4250,6 +4316,17 @@ static void *bluetooth_worker(void *arg) {
 			case JOB_RX_CODEC:
 				do_set_receiver_codec(job.text);
 				break;
+
+			case JOB_RX_INVITE: {
+				// Nothing to invite once the receiver page has been closed: the
+				// A2DP sink is gone with it, and the ConnectProfile would be
+				// refused for lack of a local endpoint.
+				if (bluetooth_receiver_profile()) {
+					bool waited = false;
+					try_invite_source(job.text, true, &waited);
+				}
+				break;
+			}
 
 			case JOB_MEDIA:
 				do_media_command(job.text);
