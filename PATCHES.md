@@ -3850,3 +3850,77 @@ so trying again` is the line to look for if it does not. Nothing here touches
 the transmitter-specific stutter (SBC/aptX on a Fold 8, aptX from a SafeFly) or
 the reboots; those still need the logs from the report, which this sandbox
 could not fetch from the issue's attachments.
+
+### The reboots: what the log says, and making the next one say it
+
+The report attached `sonix_player.log` with 3.1 MB and 25 player starts across
+three builds (`061120261142`, `061120261856`, `081120260452`). Seventeen of those
+starts follow the player's own power-down path — DAC muted for power-off, output
+parked, `clock: writing … before shutdown`, RTC written — or a firmware update
+(`firmware: update file /mnt/sd_0/v1.upt`), which is what a user-initiated
+restart looks like. Eight do not: the log stops in the middle of ordinary work
+and the next line in the file is a new boot.
+
+What those eight have in common:
+
+* No `***` report. That block is written by the player's own fatal-signal
+  handler, so no thread of it took a SIGSEGV, SIGBUS or SIGABRT.
+* No `Oops`, no `Call Trace`, no `Kernel panic` line. The follower on
+  `/dev/kmsg` copies everything at warning level or worse, and would have caught
+  an oops and restarted the device itself (`restart_after_oops()`).
+* No memory pressure. The audio thread reports `MemAvailable` every 10 s and the
+  last one before the 13:00:36 stop is 17 440 kB of 56 936 kB. This is not the
+  out-of-memory killer taking the player.
+* The next boot prints `kernel: nothing kept from before this start (no pstore,
+  no /proc/last_kmsg)` — this kernel keeps nothing across a reset.
+
+So the machine went down underneath the player, and the log has no way left to
+say whether that was a panic (the player sets `kernel.panic=10`, so a panic
+reboots ten seconds later without a trace), a watchdog reset, or the power. That
+is the actual defect the report is about: eight stops in a day, none of them
+attributable.
+
+The two stops on the build the report was filed against are worth naming anyway,
+because both have a shape: the 13:00:36 one came while TIDAL streamed an AAC
+track over A2DP to the Buds2 Pro, 30 s after the Broadcom driver had started
+repeating `dhd_tcpdata_info_get: No more free tdata_psh_info!!`; the 13:01:18 one
+came eight seconds after the Buds2 Pro was back and the output had been moved to
+`bluealsa:DEV=…,PROFILE=a2dp` mid-track. Neither proves anything on its own.
+
+**`sonix_launch` now writes its verdict into the log.** It knew all along —
+`player exited with status N` or `player killed by signal N` — but only to
+stderr, which nothing keeps. It appends that line to
+`/mnt/sd_0/.local/sonix_player.log` (O_WRONLY without O_CREAT, the seek to the
+end checked, `fsync` before the reboot takes the card) so the next run can read
+it.
+
+**The next start says how the last one ended.** Before appending, the player
+reads the tail of its own log and prints one of three verdicts: the player shut
+down; `sonix_launch` recorded an exit (the line is quoted); or neither, in which
+case it says the machine went down under it, and quotes the last line — with
+`[cut off: writing stopped mid-line]` when the log stopped in the middle of one.
+That turns every future report into a one-line answer, and the third case is
+evidence in itself: a signal kill, even SIGKILL from the memory killer, leaves
+the launcher's line behind; only a dead kernel or the power does not.
+
+**The gapless line names what changed.** `gapless: different format
+(2/44100/16 against 2/44100/16), reopening` is what a reader of this log got
+when the output had moved, and it says nothing. It now says `the output device
+changed (… on 'bluealsa:DEV=…' against … on 'default')` or `the format changed`
+as the case is.
+
+Tests: `test_card_release` runs the three endings through a real start of the
+logging path in a child process each and checks what is written. The launcher is
+freestanding MIPS and is compiled for the target only.
+
+What the next report should show, in the log of the run that follows a reboot:
+
+* `log: the previous run ended: sonix_launch: player killed by signal 11,
+  rebooting` — the player died; its own `***` report is above it in the same
+  file, and the addresses in it go through `addr2line` against
+  `sonix_player_debug`.
+* `… killed by signal 9` — SIGKILL, and with `MemAvailable` fine, a kernel-side
+  kill rather than the player's own exit.
+* `log: the previous run did not shut down and sonix_launch did not record the
+  player exiting` — the machine reset. Then the trace needs the kernel: pstore
+  or a serial console, neither of which this rootfs has today.

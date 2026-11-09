@@ -1139,8 +1139,18 @@ static snd_pcm_t *gapless_take(int channels, int rate, int bits, snd_pcm_uframes
 	// exactly what the stock binary never does.
 	if (channels != held_channels || rate != held_rate || bits != held_bits || strcmp(device, held_device) != 0 ||
 		alsa_output_key() != held_route) {
-		fprintf(stderr, "audio[%ld]: gapless: different format (%d/%d/%d against %d/%d/%d), reopening\n", log_ms(), channels,
-				rate, bits, held_channels, held_rate, held_bits);
+		// Which of the five differs, said plainly. The old line printed the two
+		// formats and nothing else, so a reply to a bug report could read
+		// "different format (2/44100/16 against 2/44100/16)" -- true, and no
+		// help at all: it was the output that had moved.
+		const char *what = "output route";
+		if (channels != held_channels || rate != held_rate || bits != held_bits) {
+			what = "format";
+		} else if (strcmp(device, held_device) != 0) {
+			what = "output device";
+		}
+		fprintf(stderr, "audio[%ld]: gapless: the %s changed (%d/%d/%d on '%s' against %d/%d/%d on '%s'), reopening\n",
+				log_ms(), what, channels, rate, bits, device, held_channels, held_rate, held_bits, held_device);
 		gapless_release();
 		return NULL;
 	}
