@@ -330,6 +330,26 @@ void bluetooth_receiver_note_playing(bool playing);
 // of any stream. From a cache, safe on any thread.
 int bluetooth_receiver_sending(unsigned *serial_out);
 
+// Whether a device that could be the receiver's sender is still connected.
+//
+// The question the receiver asks when its PCM has gone. A sender changing codec
+// tears its transport down and builds the next one, and bluealsa publishes
+// nothing at all in between -- but the device is connected throughout, which is
+// what says the stream is coming back rather than the phone having left.
+// Read from the paired-device cache on the Bluetooth thread; safe on any thread.
+bool bluetooth_receiver_peer_connected(void);
+
+// Asks the sender to open its A2DP stream again.
+//
+// For the state the log calls "says it is playing and nothing has arrived": the
+// device is linked, AVRCP answers PLAYING, bluealsa still names a PCM from a
+// transport that has died, and reading that PCM never delivers a frame. Several
+// transmitters tear the whole link down for a codec change and rebuild it
+// without ever re-opening a stream, so nothing but an invitation from this side
+// will produce one. Posted to the Bluetooth worker, which is where the
+// invitation blocks; safe on any thread.
+void bluetooth_receiver_ask_to_stream(void);
+
 // Whether the player's volume and the headphones' are one level or two.
 //
 // On, they are the same: the keys here move the headphones over AVRCP absolute

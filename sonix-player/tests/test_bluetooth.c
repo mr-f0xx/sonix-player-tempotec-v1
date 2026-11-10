@@ -444,9 +444,26 @@ bool btstack_connect(const char *address, int timeout_ms, char *err_out, size_t 
 	return false;
 }
 
+// The A2DP profile asked for by name, which is what a car needs: see
+// invite_sinks(). `a2dp_profile_brings_audio` is the case where the profile
+// request is what puts the PCM on the bus.
+static char fake_sink[BT_ADDR_MAX];
+static int a2dp_profile_requests;
+static char a2dp_profile_requested_for[BT_ADDR_MAX];
+static bool a2dp_profile_brings_audio;
+static bool a2dp_profile_refused; // the car's "security block" / "resource busy"
+
 bool btstack_connect_a2dp(const char *address, int timeout_ms) {
-	(void)address;
 	(void)timeout_ms;
+	a2dp_profile_requests++;
+	snprintf(a2dp_profile_requested_for, sizeof(a2dp_profile_requested_for), "%.*s",
+			 (int)(sizeof(a2dp_profile_requested_for) - 1), address);
+	if (a2dp_profile_refused) {
+		return false;
+	}
+	if (a2dp_profile_brings_audio) {
+		snprintf(fake_sink, sizeof(fake_sink), "%.*s", (int)(sizeof(fake_sink) - 1), address);
+	}
 	return true;
 }
 
@@ -485,9 +502,9 @@ bool btstack_disconnect(const char *address) {
 
 bool btstack_audio_sink(char *address_out, size_t size) {
 	if (address_out && size) {
-		address_out[0] = '\0';
+		snprintf(address_out, size, "%s", fake_sink);
 	}
-	return false;
+	return fake_sink[0] != '\0';
 }
 
 int btstack_codecs(const char *address, char out[][BT_CODEC_NAME_MAX], int max, char *selected, size_t selected_size) {
@@ -594,6 +611,184 @@ static void test_rx_discoverability_and_phone_pairing(void) {
 	source_pcm = false;
 	g_enabled = false;
 	g_receiver_profile = false;
+}
+
+// A sink that is linked with no A2DP profile: the car case. It is asked for
+// the profile by name -- once, after a grace period, and only while nothing is
+// playing -- because bluez does not open the audio profile of a connection the
+// other end started.
+static void test_linked_sink_is_invited(void) {
+	memset(sink_invites, 0, sizeof(sink_invites));
+	sink_invite_due = 0;
+	fake_sink[0] = '\0';
+	a2dp_profile_requests = 0;
+	a2dp_profile_brings_audio = true;
+	source_pcm = false;
+	g_enabled = true;
+	g_receiver_profile = false;
+	pthread_mutex_lock(&lock);
+	queue_head = 0;
+	queue_count = 0;
+	g_paired_count = 0;
+	pthread_mutex_unlock(&lock);
+
+	memset(fake_devs, 0, sizeof(fake_devs));
+	fake_dev_count = 2;
+	// The car: paired, connected, an A2DP sink, and nothing carrying audio.
+	snprintf(fake_devs[0].address, sizeof(fake_devs[0].address), "3C:2E:F9:11:22:33");
+	snprintf(fake_devs[0].name, sizeof(fake_devs[0].name), "Model Y");
+	fake_devs[0].paired = true;
+	fake_devs[0].connected = true;
+	fake_devs[0].audio_sink = true;
+	// A phone that is connected so it can stream here is the other direction's
+	// business and must not be asked for a sink profile.
+	snprintf(fake_devs[1].address, sizeof(fake_devs[1].address), "20:04:84:3A:6C:FE");
+	snprintf(fake_devs[1].name, sizeof(fake_devs[1].name), "Galaxy Z Fold");
+	fake_devs[1].paired = true;
+	fake_devs[1].connected = true;
+	fake_devs[1].audio_source = true;
+
+	// The cached list the interface draws, which is what says whether anything
+	// is linked at all before the fuller one is asked for.
+	refresh_devices();
+
+	// First sighting: only noted, and the worker is told when to look again.
+	invite_sinks();
+	assert(a2dp_profile_requests == 0);
+	assert(sink_invite_due != 0);
+
+	// Once the grace has run out the profile is requested, by name.
+	sink_invites[0].linked_since = now_ms() - (SINK_INVITE_GRACE_MS + 1000);
+	invite_sinks();
+	assert(a2dp_profile_requests == 1);
+	assert(strcmp(a2dp_profile_requested_for, "3C:2E:F9:11:22:33") == 0);
+	assert(sink_invite_due == 0);
+
+	// The PCM came up: the route follows it (refresh_audio_state), and nothing
+	// more is asked for.
+	refresh_devices();
+	assert(g_a2dp_connected);
+	assert(!strcmp(routed_to, "bluealsa:DEV=3C:2E:F9:11:22:33,PROFILE=a2dp"));
+
+	// Asked once per link, even if the PCM is not there after all.
+	fake_sink[0] = '\0';
+	invite_sinks();
+	assert(a2dp_profile_requests == 1);
+
+	// Once the device goes, the next link is asked again.
+	fake_devs[0].connected = false;
+	refresh_devices();
+	invite_sinks();
+	assert(sink_invites[0].mac[0] == '\0');
+	fake_devs[0].connected = true;
+	refresh_devices();
+	invite_sinks();
+	assert(a2dp_profile_requests == 1); // seen for the first time again: grace
+	fake_sink[0] = '\0';
+
+	// Receiver mode carries no A2DP Source profile at all: nothing to ask for.
+	sink_invites[0].linked_since = now_ms() - (SINK_INVITE_GRACE_MS + 1000);
+	g_receiver_profile = true;
+	invite_sinks();
+	assert(a2dp_profile_requests == 1);
+	g_receiver_profile = false;
+
+	// And a user action in flight owns the link on its own.
+	pthread_mutex_lock(&lock);
+	queue_head = 0;
+	queue_count = 1;
+	queue[0].type = JOB_CONNECT;
+	snprintf(queue[0].mac, sizeof(queue[0].mac), "3C:2E:F9:11:22:33");
+	pthread_mutex_unlock(&lock);
+	invite_sinks();
+	assert(a2dp_profile_requests == 1);
+	pthread_mutex_lock(&lock);
+	queue_head = 0;
+	queue_count = 0;
+	pthread_mutex_unlock(&lock);
+
+	// A refusal is not the end of the link. The Tesla answer to the first ask is
+	// "security block" -- the link is not authenticated yet -- and then
+	// "resource busy" while bluez holds the attempt; asked once, the car stayed
+	// silent until it was reconnected by hand five minutes later.
+	a2dp_profile_requests = 0;
+	a2dp_profile_refused = true;
+	fake_devs[0].connected = true;
+	refresh_devices();
+	invite_sinks();
+	assert(a2dp_profile_requests == 1);
+	// Asked again soon, not immediately: the answer needs a moment to change.
+	assert(sink_invite_due != 0);
+	invite_sinks();
+	assert(a2dp_profile_requests == 1);
+	for (int attempt = 1; attempt < SINK_INVITE_TRIES; attempt++) {
+		sink_invites[0].retry_at = now_ms() - 1;
+		invite_sinks();
+		assert(a2dp_profile_requests == attempt + 1);
+	}
+	// Bounded: a car that keeps refusing is left alone rather than polled
+	// forever, and bluez's own reconnect has the link.
+	assert(sink_invites[0].asked);
+	sink_invites[0].retry_at = now_ms() - 1;
+	invite_sinks();
+	assert(a2dp_profile_requests == SINK_INVITE_TRIES);
+
+	// The next link -- a disconnect and a reconnect -- is asked again.
+	a2dp_profile_refused = false;
+	fake_devs[0].connected = false;
+	refresh_devices();
+	invite_sinks();
+	assert(sink_invites[0].tries == 0);
+	fake_devs[0].connected = true;
+	refresh_devices();
+	invite_sinks();
+	sink_invites[0].linked_since = now_ms() - (SINK_INVITE_GRACE_MS + 1000);
+	invite_sinks();
+	assert(a2dp_profile_requests == SINK_INVITE_TRIES + 1);
+	pthread_mutex_lock(&lock);
+	queue_head = 0;
+	queue_count = 0;
+	pthread_mutex_unlock(&lock);
+
+	a2dp_profile_brings_audio = false;
+	g_enabled = false;
+	fake_dev_count = 0;
+}
+
+// The sender is linked, says it is playing case after case, and delivers
+// nothing: the receiver asks it for a stream. Posting that is all this end can
+// do from the capture thread, and asking twice within one report of silence
+// must not put two invitations in the queue.
+static void test_receiver_stream_invite(void) {
+	pthread_mutex_lock(&lock);
+	queue_head = 0;
+	queue_count = 0;
+	pthread_mutex_unlock(&lock);
+
+	source_pcm = true; // the sender's PCM object is still published
+	bluetooth_receiver_ask_to_stream();
+	bluetooth_receiver_ask_to_stream();
+
+	pthread_mutex_lock(&lock);
+	int queued = queue_count;
+	job_type_t type = queued ? queue[queue_head].type : JOB_NONE;
+	char asked[BT_MAC_MAX] = "";
+	if (queued) {
+		snprintf(asked, sizeof(asked), "%s", queue[queue_head].text);
+	}
+	queue_count = 0;
+	pthread_mutex_unlock(&lock);
+
+	assert(queued == 1);
+	assert(type == JOB_RX_INVITE);
+	assert(strcmp(asked, "20:04:84:3A:6C:FE") == 0);
+
+	// No published PCM means no sender to ask: nothing is queued.
+	source_pcm = false;
+	bluetooth_receiver_ask_to_stream();
+	pthread_mutex_lock(&lock);
+	assert(queue_count == 0);
+	pthread_mutex_unlock(&lock);
 }
 
 static void test_op_result_is_reported_once(void) {
@@ -890,9 +1085,11 @@ int main(void) {
 	test_boot_cleanup_queue();
 	test_rx_discoverability_and_phone_pairing();
 	test_op_result_is_reported_once();
+	test_linked_sink_is_invited();
+	test_receiver_stream_invite();
 	test_scan_pairing_window();
 	test_usb_route_survives_a_radio_teardown();
 	test_spawn_daemon_releases_card_descriptors();
-	printf("PASS bluetooth (A2DP directions, RX profile/pairing, scan visibility, startup, ALSA template, radio switch, boot cleanup and daemon fd isolation)\n");
+	printf("PASS bluetooth (A2DP directions, RX profile/pairing, sink profile invitation, scan visibility, startup, ALSA template, radio switch, boot cleanup and daemon fd isolation)\n");
 	return 0;
 }

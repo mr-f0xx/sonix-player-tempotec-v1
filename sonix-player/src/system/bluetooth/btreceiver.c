@@ -287,7 +287,11 @@ static int wait_capture(snd_pcm_t *pcm) {
 // sender says it is playing. Past that it is not a quiet stream, it is a handle
 // on something that is not there: an open on the wrong transport does not fail,
 // it goes silent.
+// Overridable so a host test does not have to sit out three real seconds per
+// silent session to reach the branch below it.
+#ifndef FIRST_FRAME_MS
 #define FIRST_FRAME_MS 3000
+#endif
 
 typedef enum {
 	SESSION_OVER,	// nothing more to try: the mode ends
@@ -414,6 +418,18 @@ static session_t capture_session(const char *mac, const char *name, bool may_gue
 			if (answered != info_serial && bluetooth_receiver_stream(&now) && now.rate > 0 &&
 				(now.rate != rate || now.channels != channels || now.bits != in_bits ||
 				 strcmp(now.codec, info.codec) != 0)) {
+				// Published before the reopen, not after it. The codec line on
+				// the page and the tick in its codec menu are two reads of this
+				// one answer, and leaving this one until the new session opened
+				// is what made them disagree for a moment after every change:
+				// the menu said AAC because bluealsa had already said so, while
+				// the line above still said the codec the old session opened
+				// with. Both now follow bluealsa as soon as it has moved on.
+				bt_stream_t seen = now;
+				if (!seen.codec[0]) {
+					snprintf(seen.codec, sizeof(seen.codec), "%s", info.codec);
+				}
+				publish_format(session, name, &seen);
 				fprintf(stderr, "btreceiver: the sender moved to %s %u Hz %u bit; opening it again\n",
 						now.codec[0] ? now.codec : "?", now.rate, now.bits);
 				again = true;
@@ -568,17 +584,25 @@ static bool wait_while_idle(unsigned session) {
 	return false;
 }
 
-// After a sender that is sending could not be opened: waits for its stream to
-// change -- stop and start again, a codec change -- or for it to go. True when
-// either happened, false when the mode ended.
-static bool wait_for_stream_change(unsigned session) {
-	unsigned at = 0;
-	bluetooth_receiver_sending(&at);
-	while (session_live(session)) {
-		unsigned now = 0;
-		int sending = bluetooth_receiver_sending(&now);
-		if (!btreceiver_available() || (now != at && sending == 1)) {
+// After the sender's PCM has gone: waits for it to come back. True when it is
+// there again, false when there is nothing left to wait for.
+//
+// A codec change is a teardown and a rebuild, and in between bluealsa publishes
+// no PCM for the sender at all while the sender itself is connected and playing
+// throughout. Treating that gap as "the sender has gone" is what used to end the
+// mode -- and once it had ended, only switching the receiver off and on again
+// brought the sound back. What separates the two is the device, not the PCM:
+// bluez still says the phone or computer is connected.
+static bool wait_for_pcm(unsigned session, char *mac, size_t mac_size, char *name, size_t name_size) {
+	for (int waited = 0; session_live(session); waited += SENDER_POLL_MS) {
+		if (still_there(mac, mac_size, name, name_size)) {
 			return true;
+		}
+		if (!bluetooth_receiver_peer_connected()) {
+			return false; // the sender really has gone
+		}
+		if (waited == 0) {
+			fprintf(stderr, "btreceiver: the sender is between transports; waiting for its PCM\n");
 		}
 		usleep(SENDER_POLL_MS * 1000);
 	}
@@ -619,8 +643,11 @@ static void *capture_worker(void *arg) {
 
 	char mac[BT_MAC_MAX];
 	char name[BT_NAME_MAX];
-	if (!still_there(mac, sizeof(mac), name, sizeof(name))) {
-		set_error(session, tr("btreceiver_nothing_streaming"));
+	if (!still_there(mac, sizeof(mac), name, sizeof(name)) &&
+		!wait_for_pcm(session, mac, sizeof(mac), name, sizeof(name))) {
+		if (session_live(session)) {
+			set_error(session, tr("btreceiver_nothing_streaming"));
+		}
 		goto done;
 	}
 
@@ -636,28 +663,42 @@ static void *capture_worker(void *arg) {
 	//
 	// Two things do not use up the window. A sender whose stream is idle has
 	// nothing to open yet, and is waited for. And a sender still connected when
-	// the window runs out keeps the mode on: the error is shown, and the next
-	// change of its stream is the next attempt. Only a sender that has gone ends
-	// the mode.
+	// the window runs out keeps the mode on: the error is shown, and it is tried
+	// again -- a few seconds apart, for as long as the device is linked. Only a
+	// sender that has gone ends the mode.
+	//
+	// The retry is a timer and not an event on purpose. Waiting for the stream
+	// to change was the earlier arrangement, and the change that matters -- a
+	// sender that moved from one codec to another and rebuilt its transport --
+	// does not always produce one this side can see: bluealsa publishes no PCM
+	// while it is between the two, so there is often no transport state to move
+	// at all. A phone left in that state stayed silent until the mode was
+	// switched off and on again, which is exactly what the report described.
 	bool blind = false;
 	bool guessed = false;
+	bool logged = false;
 	uint32_t blind_since = 0;
 	int silent_runs = 0;
 	for (;;) {
 		reopen_t what = reopen_decision(blind, blind ? now_ms() - blind_since : 0, guessed);
 		if (what == REOPEN_GIVE_UP) {
-			set_error(session, tr("btreceiver_stream_failed"));
-			if (!still_there(mac, sizeof(mac), name, sizeof(name))) {
-				fprintf(stderr, "btreceiver: nothing to open in %d ms; the mode is over\n", REOPEN_WAIT_MS);
+			if (!bluetooth_receiver_peer_connected()) {
+				set_error(session, tr("btreceiver_stream_failed"));
+				fprintf(stderr, "btreceiver: nothing to open in %d ms and the sender has gone; the mode is over\n",
+						REOPEN_WAIT_MS);
 				break;
 			}
-			fprintf(stderr, "btreceiver: nothing to open in %d ms; trying again when %s's stream changes\n",
-					REOPEN_WAIT_MS, mac);
-			if (!wait_for_stream_change(session)) {
-				break;
+			if (!logged) {
+				// Said once per episode: this loop is a few seconds apart and
+				// every turn of it redraws the page otherwise.
+				fprintf(stderr, "btreceiver: nothing to open in %d ms; %s is still linked, so trying again\n",
+						REOPEN_WAIT_MS, mac);
+				set_error(session, tr("btreceiver_stream_failed"));
+				logged = true;
 			}
 			blind = false;
 			guessed = false;
+			usleep(REOPEN_POLL_MS * 1000);
 			continue;
 		}
 		guessed = guessed || what == REOPEN_GUESS;
@@ -670,11 +711,21 @@ static void *capture_worker(void *arg) {
 		session_t result = capture_session(mac, name, what == REOPEN_GUESS, watchdog, session, &heard);
 		if (heard) {
 			silent_runs = 0;
+			logged = false;
 		} else if (watchdog && result != SESSION_NO_PCM) {
 			silent_runs++;
 			if (silent_runs >= SILENT_RUNS_MAX) {
 				fprintf(stderr, "btreceiver: %d sessions in a row with no audio; leaving the next one alone\n",
 						SILENT_RUNS_MAX);
+				// Three PCMs opened and none of them delivered while the
+				// sender said it was playing: this is not a handle on the
+				// wrong transport, it is a sender whose stream died with the
+				// link and never came back. Reopening will keep finding the
+				// same dead object -- the log from the report has fourteen of
+				// these in a row, ending with the mode switched off by hand.
+				// Ask the sender for a stream instead; that is what the one
+				// recovery in that log did.
+				bluetooth_receiver_ask_to_stream();
 			}
 		}
 		if (result == SESSION_OVER) {
@@ -697,6 +748,7 @@ static void *capture_worker(void *arg) {
 		if (!nothing_there) {
 			blind = false;
 			guessed = false;
+			logged = false;
 		} else if (bluetooth_receiver_sending(NULL) == 0) {
 			fprintf(stderr, "btreceiver: %s is connected and sending nothing; waiting for it to start\n", mac);
 			if (!wait_while_idle(session)) {

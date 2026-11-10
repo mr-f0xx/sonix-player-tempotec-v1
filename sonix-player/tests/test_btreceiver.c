@@ -1,4 +1,7 @@
 /* Exercise the actual receiver session with a fake nonblocking ALSA plug. */
+// Three silent sessions are what the stream-asking case waits for; 40 ms each
+// is the same branch as 3000 would be, without the wait.
+#define FIRST_FRAME_MS 40
 #include "../src/system/bluetooth/btreceiver.c"
 #include <assert.h>
 
@@ -13,6 +16,8 @@ static int answer_after, answer_calls;
 static int32_t written[4];
 static int fake_fd = -1;
 static unsigned short fake_revents;
+static bool stop_on_write = true;   // the older cases end the session from the write
+static uint32_t change_at_ms;       // the sender moves codec at this moment
 
 int snd_pcm_open(snd_pcm_t **p, const char *name, int stream, int mode) {
 	assert(strstr(name, "PROFILE=a2dp") && stream == SND_PCM_STREAM_CAPTURE && mode == 0);
@@ -33,10 +38,24 @@ int snd_pcm_poll_descriptors_revents(snd_pcm_t *p, struct pollfd *fds, unsigned 
 }
 int snd_pcm_recover(snd_pcm_t *p, int err, int silent) { (void)p; (void)err; (void)silent; return -1; }
 const char *snd_strerror(int err) { (void)err; return "fake error"; }
+/* A transport that is there and delivers nothing: what "says it is playing and
+ * nothing has arrived" is about. The read keeps coming back empty. */
+static bool silent_pcm;
+
 snd_pcm_sframes_t snd_pcm_readi(snd_pcm_t *p, void *buf, snd_pcm_uframes_t frames) {
 	assert(p == &fake_pcm && frames == CHUNK_FRAMES);
 	reads++;
+	if (silent_pcm) return -EAGAIN;
 	if (reads == 1) return -EAGAIN; /* exercise bounded wait, not recovery */
+	/* The phone picking another codec: bluealsa reconfigures the transport and
+	 * answers with the new format from then on. */
+	if (change_at_ms && now_ms() >= change_at_ms) {
+		change_at_ms = 0;
+		strcpy(fake_info.codec, "AAC");
+		fake_info.rate = 44100;
+		fake_serial++;
+	}
+	usleep(2000); /* keep the loop from spinning a core for the whole watch */
 	if (requested_format == SND_PCM_FORMAT_S32_LE) {
 		int32_t sample[4] = {0x12345600, (int32_t)0x80000000u, 0, 0x7fffff00};
 		memcpy(buf, sample, sizeof(sample));
@@ -52,15 +71,55 @@ unsigned bluetooth_receiver_stream_serial(void) { return fake_serial; }
 unsigned bluetooth_refresh_receiver(void) { return ++fake_serial; }
 unsigned bluetooth_receiver_answered(void) { return ++answer_calls >= answer_after ? fake_serial : fake_serial - 1; }
 bool bluetooth_receiver_stream(bt_stream_t *out) { *out = fake_info; return true; }
-bool bluetooth_receiver_playing(void) { return false; }
+static bool fake_playing;
+bool bluetooth_receiver_playing(void) { return fake_playing; }
 bool audio_external_begin_latency(int rate, int ch, int bits, int latency) {
 	assert(rate == 48000 && ch == 2 && latency > 0); output_bits = bits; return true;
 }
 int audio_external_write(const void *data, int frames) {
 	assert(frames == 2 && output_bits == 32);
 	memcpy(written, data, sizeof(written)); writes++;
-	pthread_mutex_lock(&lock); running = false; pthread_mutex_unlock(&lock);
+	if (stop_on_write) {
+		pthread_mutex_lock(&lock); running = false; pthread_mutex_unlock(&lock);
+	}
 	return frames;
+}
+
+/* The sending device, as the two questions btreceiver asks about it: is its PCM
+ * published, and is the device itself still connected. */
+static bool peer_connected = true;
+static int pcm_published_after; // device queries to answer "no" before the PCM is back
+static int device_queries;
+
+bool bluetooth_receiver_peer_connected(void) { return peer_connected; }
+
+/* Asked once when a run of silent sessions says the sender's stream is gone. */
+static int stream_asks;
+
+void bluetooth_receiver_ask_to_stream(void) { stream_asks++; }
+
+/* The worker is a thread of the player: these two live there, not here. */
+static int realtime_calls;
+void thread_be_realtime(const char *name, int priority) { (void)name; (void)priority; realtime_calls++; }
+void thread_be_background(const char *name) { (void)name; }
+
+/* Not idle: this sender is streaming, which is why the silence has to be
+ * answered with an invitation rather than with waiting. */
+int bluetooth_receiver_sending(unsigned *serial_out) {
+	(void)serial_out;
+	return 1;
+}
+
+bool bluetooth_receiver_device(char *mac_out, int mac_size, char *name_out, int name_size) {
+	device_queries++;
+	bool published = device_queries >= (pcm_published_after ? pcm_published_after : 1);
+	if (mac_out && mac_size) {
+		snprintf(mac_out, (size_t)mac_size, "%s", published ? "AA:BB:CC:DD:EE:FF" : "");
+	}
+	if (name_out && name_size) {
+		snprintf(name_out, (size_t)name_size, "%s", published ? "source" : "");
+	}
+	return published;
 }
 void audio_external_end(void) { output_closed++; }
 
@@ -79,6 +138,127 @@ static void run_format(unsigned bits, snd_pcm_format_t expected) {
 	assert(written[3] == (bits == 16 ? 0x7fff0000 : 0x7fffff00));
 }
 
+/* A sender that changes codec publishes nothing for a moment while bluealsa
+ * rebuilds its transport. The session has to (a) notice the new codec as soon
+ * as bluealsa answers with it -- the codec line and the codec menu are two reads
+ * of that one answer and used to disagree -- and (b) come back with a fresh
+ * session rather than being left silent. */
+static void test_codec_change_mid_session(void) {
+	memset(&fake_info, 0, sizeof(fake_info));
+	strcpy(fake_info.codec, "SBC");
+	fake_info.rate = 48000;
+	fake_info.channels = 2;
+	fake_info.bits = 16;
+	requested_format = 0;
+	nonblock_enabled = capture_closed = output_closed = output_bits = writes = reads = 0;
+	pthread_mutex_lock(&lock);
+	running = true;
+	session_id = 21;
+	memset(&state, 0, sizeof(state));
+	pthread_mutex_unlock(&lock);
+
+	stop_on_write = false;
+	change_at_ms = now_ms() + 300; // the watch reads once a second
+	bool heard = false;
+	assert(capture_session("AA:BB:CC:DD:EE:FF", "source", false, true, 21, &heard) == SESSION_AGAIN);
+	assert(heard && capture_closed == 1 && output_closed == 1);
+	// Published before the reopen: the page must not keep saying the old codec.
+	assert(strcmp(state.codec, "AAC") == 0);
+	assert(state.sample_rate == 44100);
+	assert(fake_info.rate == 44100);
+	stop_on_write = true;
+	pthread_mutex_lock(&lock);
+	running = false;
+	pthread_mutex_unlock(&lock);
+}
+
+/* Between two transports: the PCM is gone, the device is not. Waiting is what
+ * keeps the session alive across a codec change; without it the mode ended and
+ * only switching the receiver off and on again brought the sound back. */
+static void test_between_transports(void) {
+	char mac[BT_MAC_MAX] = "";
+	char name[BT_NAME_MAX] = "";
+	pthread_mutex_lock(&lock);
+	running = true;
+	session_id = 31;
+	pthread_mutex_unlock(&lock);
+
+	// There at once: nothing to wait for.
+	peer_connected = true;
+	pcm_published_after = 0;
+	device_queries = 0;
+	assert(wait_for_pcm(31, mac, sizeof(mac), name, sizeof(name)));
+	assert(strcmp(mac, "AA:BB:CC:DD:EE:FF") == 0 && strcmp(name, "source") == 0);
+
+	// Gone for a moment and back: waited for, not given up on.
+	pcm_published_after = 3;
+	device_queries = 0;
+	assert(wait_for_pcm(31, mac, sizeof(mac), name, sizeof(name)));
+	assert(device_queries == 3);
+
+	// Gone, and the device with it: the sender really has left.
+	peer_connected = false;
+	pcm_published_after = 1000;
+	device_queries = 0;
+	assert(!wait_for_pcm(31, mac, sizeof(mac), name, sizeof(name)));
+	assert(device_queries == 1);
+
+	// Leaving the mode is not something to wait through either.
+	peer_connected = true;
+	pthread_mutex_lock(&lock);
+	running = false;
+	pthread_mutex_unlock(&lock);
+	assert(!wait_for_pcm(31, mac, sizeof(mac), name, sizeof(name)));
+	peer_connected = true;
+	pcm_published_after = 0;
+}
+
+/* A sender that says it is playing while nothing arrives, three sessions in a
+ * row: the receiver stops pulling that PCM and asks the sender for a stream.
+ * Another open of the same dead object is what the report's log shows fourteen
+ * times in a row, and it never brings anything. */
+static void test_silent_sender_is_asked_for_a_stream(void) {
+	memset(&fake_info, 0, sizeof(fake_info));
+	strcpy(fake_info.codec, "aptX");
+	fake_info.rate = 48000;
+	fake_info.channels = 2;
+	fake_info.bits = 16;
+	fake_serial = 0;
+	answer_after = answer_calls = 0;
+	device_queries = 0;
+	pcm_published_after = 0;
+	reads = capture_closed = output_closed = writes = 0;
+	fake_playing = true;
+	silent_pcm = true;
+	stream_asks = 0;
+
+	pthread_mutex_lock(&lock);
+	running = true;
+	session_id = 42;
+	memset(&state, 0, sizeof(state));
+	pthread_mutex_unlock(&lock);
+
+	pthread_t worker;
+	assert(pthread_create(&worker, NULL, capture_worker, (void *)(uintptr_t)42) == 0);
+	for (int waited = 0; waited < 400 && stream_asks == 0; waited++) {
+		usleep(10 * 1000);
+	}
+	pthread_mutex_lock(&lock);
+	running = false;
+	pthread_mutex_unlock(&lock);
+	pthread_join(worker, NULL);
+
+	// Asked once for the whole run of silence, not once per session: the answer
+	// is a stream this thread cannot see, and the next session is the one that
+	// finds it.
+	assert(stream_asks == 1);
+	// Three PCMs, each opened and closed, and nothing written to the output.
+	assert(capture_closed == 3 && output_closed == 3 && writes == 0);
+
+	silent_pcm = false;
+	fake_playing = false;
+}
+
 int main(void) {
 	// An old in-flight response must not satisfy the newly issued ticket.
 	pthread_mutex_lock(&lock); running = true; session_id = 7; pthread_mutex_unlock(&lock);
@@ -91,6 +271,9 @@ int main(void) {
 	run_format(16, SND_PCM_FORMAT_S16_LE);
 	run_format(24, SND_PCM_FORMAT_S32_LE);
 	run_format(32, SND_PCM_FORMAT_S32_LE);
+	test_codec_change_mid_session();
+	test_between_transports();
+	test_silent_sender_is_asked_for_a_stream();
 	int fds[2]; assert(pipe(fds) == 0); assert(write(fds[1], "x", 1) == 1);
 	fake_fd = fds[0]; fake_revents = POLLIN;
 	assert(wait_capture(&fake_pcm) == 1);
@@ -104,6 +287,6 @@ int main(void) {
 	test_fail_nonblock = true;
 	assert(!open_capture("AA:BB:CC:DD:EE:FF", 48000, 2, 32));
 	assert(!open_capture("AA:BB:CC:DD:EE:FF", 48000, 2, 8));
-	puts("PASS Bluetooth RX (16/24/32-bit frames, nonblocking reads and cleanup)");
+	puts("PASS Bluetooth RX (16/24/32-bit frames, nonblocking reads, codec change and cleanup)");
 	return 0;
 }
