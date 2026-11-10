@@ -7,12 +7,13 @@
 // The running emulator: a thread producing frames, a framebuffer to look at,
 // eight buttons to press.
 //
-// Pacing comes from the audio, not from a clock. Each emulated frame produces
+// With sound enabled, pacing comes from audio. Each emulated frame produces
 // 738 samples per channel, and writing them to an ALSA PCM opened with a short
 // buffer blocks until the card has consumed them, so the rate is the DAC
 // crystal's -- exactly the Game Boy's 59.73 frames per second -- and video and
 // sound cannot drift apart because one loop produces both. A computed usleep
-// in place of that would slip a frame every few seconds.
+// in place of that would slip a frame every few seconds. When muted, no PCM
+// belongs to the emulator, so a monotonic frame deadline paces it instead.
 //
 // The framebuffer is scaled from the core's 160x144: three times on the
 // 480-wide HiBy panels, and to 240x216 on the TempoTec V1 so the picture fills
@@ -27,8 +28,8 @@
 // (usually the database's). False when the ROM does not load or memory runs
 // out.
 //
-// Stops music playback: a PCM has one writer, and a game over music is not
-// what anyone wants anyway.
+// With game sound enabled, playback is paused while the game owns the PCM.
+// Muted games leave music and the output device alone.
 bool gearboy_start(const char *rom_path, const char *title);
 
 // Stops the game and saves battery-backed RAM. Returns once the thread has
@@ -106,12 +107,15 @@ void gearboy_set_key_overlay(uint16_t mask);
 // that a tap in the middle of the screen freezes the picture instead of
 // letting the game run on behind a menu.
 //
-// Audio is not closed: the PCM stays open and is fed silence, one frame at a
-// time. Closing it would mean reopening on resume, and reopening a PCM here
-// takes half a second; keeping it open and fed is also what paces the loop,
-// which without the audio metronome would have to fall back to usleep.
+// With game sound enabled the PCM stays open and is fed silence. When muted,
+// the game uses a monotonic clock and does not own the output device.
 void gearboy_set_paused(bool paused);
 bool gearboy_paused(void);
+
+// Change game sound without restarting the game. The setting is saved by the
+// UI; the worker performs the audio handoff between frames.
+void gearboy_set_muted(bool muted);
+bool gearboy_muted(void);
 
 // Saves or reloads machine state. Neither call does the work: they post a
 // request that the emulator thread services between frames. The core is not
