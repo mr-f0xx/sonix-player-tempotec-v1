@@ -12,6 +12,7 @@
 #include "src/gui/library/audiobooks.h"
 #include "src/gui/library/libraryscan.h"
 #include "src/gui/shell/main_menu.h"
+#include "src/gui/shell/gestures.h"
 #include "src/gui/library/music.h"
 #include "src/gui/nowplaying/player.h"
 #include "src/gui/shell/theme.h"
@@ -378,6 +379,51 @@ static void back_anim_cancel_done_cb(lv_anim_t *a) {
 
 static bool back_gesture_off;
 
+// A deliberate upward drag returns to the main menu. Keep it recognizably
+// vertical, and yield immediately to LVGL scrolling or the player's sheets.
+#define HOME_SWIPE_COMMIT_PX 72
+#define HOME_SWIPE_EDGE_PX 48
+static bool home_swiping;
+static lv_point_t home_swipe_start;
+
+static void home_swipe_cb(lv_event_t *e) {
+	if (back_gesture_off) return;
+	lv_event_code_t code = lv_event_get_code(e);
+	lv_indev_t *indev = lv_indev_active();
+	if (!indev) return;
+	if (code == LV_EVENT_PRESSED) {
+		if (lv_screen_active() == main_menu_screen || player_sheet_is_open() || back_anim_running) {
+			home_swiping = false;
+			return;
+		}
+		lv_indev_get_point(indev, &home_swipe_start);
+		// In stock-gesture mode the bottom edge belongs to the control centre.
+		if (gestures_stock() && home_swipe_start.y >= lv_display_get_vertical_resolution(NULL) - HOME_SWIPE_EDGE_PX) {
+			home_swiping = false;
+			return;
+		}
+		home_swiping = true;
+		return;
+	}
+	if (!home_swiping) return;
+	lv_point_t p;
+	lv_indev_get_point(indev, &p);
+	int dx = p.x - home_swipe_start.x;
+	int dy = p.y - home_swipe_start.y;
+	if (code == LV_EVENT_PRESSING) {
+		if (lv_indev_get_scroll_obj(indev) || (LV_ABS(dx) > LV_ABS(dy) && LV_ABS(dx) > 16)) {
+			home_swiping = false;
+		}
+		return;
+	}
+	if (code == LV_EVENT_RELEASED || code == LV_EVENT_PRESS_LOST) {
+		home_swiping = false;
+		if (code == LV_EVENT_RELEASED && dy <= -HOME_SWIPE_COMMIT_PX && -dy > LV_ABS(dx) * 1.35f) {
+			switch_screen(main_menu_screen);
+		}
+	}
+}
+
 void back_gesture_blocked(bool blocked) {
 	back_gesture_off = blocked;
 	if (blocked) {
@@ -490,6 +536,10 @@ void switcher_attach_back_gesture(lv_obj_t *obj) {
 	lv_obj_add_event_cb(obj, back_drag_cb, LV_EVENT_PRESSING, NULL);
 	lv_obj_add_event_cb(obj, back_drag_cb, LV_EVENT_RELEASED, NULL);
 	lv_obj_add_event_cb(obj, back_drag_cb, LV_EVENT_PRESS_LOST, NULL);
+	lv_obj_add_event_cb(obj, home_swipe_cb, LV_EVENT_PRESSED, NULL);
+	lv_obj_add_event_cb(obj, home_swipe_cb, LV_EVENT_PRESSING, NULL);
+	lv_obj_add_event_cb(obj, home_swipe_cb, LV_EVENT_RELEASED, NULL);
+	lv_obj_add_event_cb(obj, home_swipe_cb, LV_EVENT_PRESS_LOST, NULL);
 }
 
 void switch_screen(lv_obj_t *target_screen) {
