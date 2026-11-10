@@ -20,6 +20,7 @@
 #include "src/system/core/config.h"
 #include "src/system/core/lang.h"
 #include "src/system/device/power.h"
+#include "src/system/device/backlight.h"
 #include "src/system/device/usb.h"
 
 // ---------------------------------------------------------------------------
@@ -117,19 +118,18 @@ static void write_long_file(const char *path, long value) {
 // floor power.c adopts -- a previous session that ended with the screen off
 // leaves the backlight at zero).
 static long screen_brightness(void) {
-	long wanted = config_get_int("screen", "brightness", -1);
-	if (wanted > 0) {
-		return wanted;
-	}
 	long max = read_long_file(MAX_BRIGHTNESS_PATH);
 	if (max <= 0) {
-		max = 100;
+		max = BACKLIGHT_MAX_DEFAULT;
 	}
-	long current = read_long_file(BRIGHTNESS_PATH);
-	if (current >= 20) {
-		return current;
+	long wanted = config_get_int("screen", "brightness", -1);
+	if (wanted <= 0) {
+		long current = read_long_file(BRIGHTNESS_PATH);
+		wanted = current >= 20 ? current : max;
 	}
-	return max;
+	// This screen runs before power_init(), so it must apply the same guard
+	// itself, including to a saved 100% level and the adopt/fallback paths.
+	return backlight_safe_level(wanted, max);
 }
 
 static void panel_off(void) {
