@@ -6,6 +6,105 @@
 | Touchscreen multitouch, R1 | `tools/cst8xx_multitouch_patch.py` | the panel reports two fingers, the driver lets one out |
 
 
+## Volume shown as the output voltage
+
+**Settings → Screen → Volume as voltage** (`[screen] volume_voltage`) prints the
+level as what the socket puts out (`502mV`) where the status bar and the volume
+pill print the index (`88`). It is off by default, and off, nothing is
+different: the same text at the same label widths, and no extra work on any
+timer.
+
+The figure is arithmetic on a published number, not a measurement:
+`V = Vfs × 10^(dB/20)`. `dB` is the attenuation the DAC has been given for the
+index. The new `alsa_volume_output_db100()` takes it from the same two helpers
+`write_dac_attenuation()` writes the channel controls from: the gain table in
+force and, while a DoP stream is open, the DSD gain compensation, at 0.5 dB a
+raw step, with index 0 the mute. `Vfs` is the most TempoTec publishes for each
+socket, 2 Vrms on 3.5 mm and 4 Vrms on 4.4 mm, **assumed** to be the top of the
+high-gain table. Low gain is that table 6 dB down, so index 100 reads `1.00V`
+there and `2.00V` in high gain. `volumereadout.c` works in integers (forty
+half-dB ratios and a count of decades, no libm) to the nanovolt, and prints
+three significant figures in V, mV or µV: enough for every step of both tables
+to change the text.
+
+So it is the level of a 0 dBFS sine into no load. Music sits below it, and so
+does everything done to the samples: ReplayGain, the PEQ preamp, channel
+balance. How far a DSD recording sits under full scale is not modelled either;
+the reading follows only the compensation the DAC is given for it. A load takes
+the top of the balanced scale down as well: the 215 mW published for 32 Ω is
+2.6 V across it, not 4. The gain tables and the half-dB step are the stock
+firmware's and have not been measured on a V1.
+
+The socket is a setting, two pills under the switch (`[screen]
+volume_voltage_jack`, 3.5 mm unless changed), because the board cannot say
+which is in use: its one switch node reads the same with either socket occupied
+or neither (see the interface profile section below), and the volume profile is
+the 3.5 mm one for both. Over Bluetooth and on a USB-C DAC the level is applied
+at the far end against a full scale the player does not know, so those outputs
+keep the index and the label goes back to the width it had.
+
+A voltage moves with things that are not volume changes: the gain switch, the
+DSD compensation, a DoP track starting or ending, the output changing. The
+first two are settings, and repaint the status bar themselves. For the rest the
+bar works the reading out again on its existing 250 ms jack timer, only while
+the option is on, and repaints when the text differs. The pill takes the form
+in force each time it is shown. Both labels are measured against every reading
+the form can come to (all 255 steps of the DAC's register and the mute, not
+only the two tables), once per change of form, face or text size, so their
+width holds while the level moves. That makes the pill the seventh font-change
+callback on the V1; `fonts.c` holds eight and silently drops any more.
+
+The room it takes, worked out from MiSans's advance widths and the layout code
+and not seen on a panel:
+
+- **Status bar.** The reading is about 50 px wide at 14 px where the number is
+  24, in a left group of 120 px. Volume and the play glyph still clear a
+  centred 24-hour clock, though with both radios on and a three-digit battery
+  percentage that is a fit to within a pixel or two. A 12-hour clock does not
+  fit beside both radios and the percentage, where with the number it just
+  does: the battery side keeps its gap and the clock ends up over the play
+  glyph. Hiding the percentage, 24-hour time or hiding the clock clears it.
+  The Detect changes glyph pushes the clock the same way while it shows, and
+  with the SonixLink glyph as well the row is 130 px, so the last glyph loses
+  about 10 px to the edge of the group.
+- **Volume pill.** The label goes from 28 px to about 56, and the scale from
+  about 110 px to about 82.
+
+`make -C sonix-player/tests volumereadout` compiles the real `alsa-controls.c`
+tables and DSD offsets with `volumereadout.c`. It checks the half-dB table
+against `pow()`, the three-figure text and the edges where rounding gains a
+digit, and the reading at every index of both gain tables on both sockets:
+strictly rising, never the same text twice running. It checks what is in the
+figure (gain, socket, the compensation only on DoP) and what is not (Bluetooth
+and USB-C get the number). It also runs the real `write_dac_attenuation()`
+against a mixer that only records, and requires the reading to be the
+attenuation the two channel controls were left at, for every index, gain, DoP
+state and compensation setting. `make -C sonix-player/tests volume-overlay`
+runs the production `volume_overlay.c` on headless LVGL at 240×320: the index
+at the unchanged 28 px, then all 256 readings per socket on one line at one
+label width with glyph, label and scale inside the pill, the same through the
+slider, the width given back over Bluetooth, and a new measure after a font
+change. Neither suite links `topbar.c` or `settings.c`, so the status bar's
+side and the settings card are not exercised by any host test. The headless
+fonts are Montserrat, which has no micro sign, so the pixel widths above are
+not asserted anywhere. Nothing here measures an output.
+
+**Hardware validation pending:** with a 0 dBFS sine and an RMS meter on an
+unloaded socket, index 100 on 3.5 mm and on 4.4 mm in both gains (expected
+about 1 V and 2 V, 2 V and 4 V), then a few points down the scale (on 3.5 mm in
+low gain, 88, 60 and 44 should be near 502 mV, 100 mV and 39.9 mV). That checks
+the three things assumed: that high gain at 100 is the published maximum, that
+the scale is half a dB a step, and that 4.4 mm is twice 3.5 mm. Then a DoP
+track with DSD gain compensation at 1 to 6, which the reading follows 1 dB a
+step. Line out holds index 100, so it reads `1.00V` or `2.00V` on 3.5 mm by
+gain; that socket moves to another codec route in the mode and its level there
+is unknown. On the panel: the status bar with the option on in each clock
+position, 12- and 24-hour, with both radios and the percentage; the pill over
+the player and the screensaver with a key held and with a finger on the scale;
+a µV reading in each face and text size; the card on Settings → Screen in each
+language; and Bluetooth or a USB-C DAC connected and removed, which should give
+the number and then the voltage back.
+
 ## Waking the screen at 100% brightness (issue #267)
 
 The two follow-up reports on [#267](https://github.com/mr-f0xx/sonix-player-tempotec-v1/issues/267)

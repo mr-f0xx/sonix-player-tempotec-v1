@@ -546,6 +546,20 @@ static long with_dsd_gain(long raw) {
 	return raw;
 }
 
+// What the DAC is given for a volume index right now, as a level: the gain
+// table in force and, while a DoP stream is open, the DSD compensation taken
+// off it. alsa_volume_gain_db100() is the index's place on the curve, which is
+// what the other outputs are matched to; this is what leaves the jacks, which
+// is what a reading of the output has to say. Through with_dsd_gain() rather
+// than a second copy of its arithmetic, so the two cannot come apart.
+long alsa_volume_output_db100(int percent) {
+	long raw = with_dsd_gain(percent_to_raw(percent));
+	if (percent <= 0 || raw >= 255) {
+		return ALSA_VOLUME_MUTE_DB100;
+	}
+	return -raw * 50;
+}
+
 // A temporary digital mute used around an output-route transition, suspend,
 // or power-off. The HBC3000 machine driver mutes its analogue path while it
 // changes sockets; muting the DAC as well prevents its last live samples from

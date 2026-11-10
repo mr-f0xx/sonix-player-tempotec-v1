@@ -6,6 +6,7 @@ Run from the repository root on a Linux host:
 make -C sonix-player/tests test
 make -C sonix-player/tests sanitize
 make -C sonix-player/tests swvolume
+make -C sonix-player/tests volumereadout
 make -C sonix-player/tests eq
 make -C sonix-player/tests usbdac-eq
 make -C sonix-player/tests usbhost
@@ -21,6 +22,7 @@ make -C sonix-player/tests power-display
 make -C sonix-player/tests corners
 make -C sonix-player/tests playbutton
 make -C sonix-player/tests musicsettings-rows
+make -C sonix-player/tests volume-overlay
 make -C sonix-player/tests playerdeck
 make -C sonix-player/tests vinylayout
 make -C sonix-player/tests waveform-overlay
@@ -41,7 +43,7 @@ make -C sonix-player/tests statusbar-ui
 make -C sonix-player/tests extractkeys
 ```
 
-The non-UI suites require only a C compiler, Make and Python 3 (plus standard pthread/dl/math libraries). The `hiresbadge-ui`, `peq-ui`, `quickpanel-layout`, `power-display`, `corners`, `playbutton`, `musicsettings-rows`, `playerdeck`, `vinylayout`, `waveform-overlay`, `edge-lock` and aggregate `ui` targets also need the LVGL 9.6.0 checkout described below. None requires ALSA, SDL, a MIPS toolchain, a music server, a real account, or downloaded audio.
+The non-UI suites require only a C compiler, Make and Python 3 (plus standard pthread/dl/math libraries). The `hiresbadge-ui`, `peq-ui`, `quickpanel-layout`, `power-display`, `corners`, `playbutton`, `musicsettings-rows`, `volume-overlay`, `playerdeck`, `vinylayout`, `waveform-overlay`, `edge-lock` and aggregate `ui` targets also need the LVGL 9.6.0 checkout described below. None requires ALSA, SDL, a MIPS toolchain, a music server, a real account, or downloaded audio.
 
 `run_subsonic_tests.py` starts a temporary threaded localhost HTTP server plus three HTTPS servers carrying the certificates in `tls_fixtures.py`, runs the C binary with a private temporary config directory, verifies its requests, then shuts down. All account values are synthetic. Build products live in ignored `.build/`; response/PCM fixtures are generated in memory rather than added to Git, and the three test certificates are pasted into that Python file rather than downloaded.
 
@@ -600,3 +602,48 @@ the guarded level rather than loop forever.
 This tests the userspace workaround for issue #267, not a physical PWM driver,
 touch gesture, panel, audio link or standby current. Hardware acceptance steps
 and the distinction from the separate battery-drain report are in `PATCHES.md`.
+
+## Volume as voltage
+
+`make -C sonix-player/tests volumereadout` checks the reading that Settings →
+Screen → Volume as voltage puts in the status bar and on the volume pill. It is
+plain C with no LVGL. `alsa-controls.c` is compiled into the test against the
+declarations-only ALSA header in `tests/stubs/`, so the two gain tables, the
+DSD offsets and the output profile are the real ones; its state is set by
+writing its statics, and the config is two integers in memory.
+
+Checks include the half-dB table against `pow()` over the whole of the DAC's
+register, exact decades, and nothing above full scale or below the mute; the
+three-figure text and its unit against the value it was made from, with every
+edge where rounding gains a digit; each index of both gain tables on both
+sockets rising strictly and never printing the same text twice; the gain
+switch as 6.0 dB and the 4.4 mm socket as a factor of two; the DSD compensation
+counted only while a DoP stream is open, and clamped at full scale; the plain
+number over Bluetooth, on USB-C and with the option off; the two settings read
+once and saved when set; and every reading being among the samples a label is
+measured against. One test runs the production `write_dac_attenuation()`
+against a mixer that only records, and requires the reading to be the
+attenuation the two channel controls were left at for every index, gain, DoP
+state and compensation setting.
+
+`make -C sonix-player/tests volume-overlay` uses the LVGL checkout above. It
+runs the production `volume_overlay.c` and `volumereadout.c` at 240×320 with
+the audio side reduced to four functions the test sets. With the option off the
+pill prints the index in the 28 px label it has always had. On, every one of
+the 256 readings of each socket must sit on one line of a label that keeps one
+width, with the glyph, the label and the scale inside the pill and the scale
+still more than half its usual length. The slider must print the same reading
+as the keys. The label must take its old width back over Bluetooth and be
+measured again after a font change.
+
+Both suites were checked by mutation: they fail when the write path and the
+reading are made to disagree, when samples are left out of the measure, when
+the label is one pixel short, and when a change of form or font is not
+measured again.
+
+This tests arithmetic and layout, not an output. The 2 V and 4 V the figure
+starts from are TempoTec's published maximums and no host test can confirm
+them; `PATCHES.md` lists what to check with a meter. `topbar.c` and
+`settings.c` are not linked into either suite, so the status bar's label and
+the settings card are covered by neither. The headless fonts are Montserrat,
+which has no micro sign, so no pixel width other than the 28 px is asserted.

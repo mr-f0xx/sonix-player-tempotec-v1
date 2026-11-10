@@ -847,6 +847,23 @@ musicsettings-rows: $(BUILD)/test_musicsettings_rows
 $(BUILD)/test_musicsettings_rows: $(MUSICROWS_OBJ)
 	$(CC) -o $@ $^ $(LDFLAGS) $(LDLIBS)
 
+# The volume pill with the level read as a voltage: the production overlay and
+# reading on the V1 layout, with the audio side reduced to what the test sets.
+# The label has to hold one width, and one line, over every reading.
+VOLUMEOVERLAY_SRC = $(ROOT)/tests/ui/test_volume_overlay.c \
+                    $(ROOT)/src/gui/shell/volume_overlay.c $(ROOT)/src/gui/shell/volumereadout.c \
+                    $(ROOT)/src/gui/shell/theme.c $(ROOT)/src/gui/shell/icons.c \
+                    $(ROOT)/src/gui/board_profile.c $(ROOT)/src/system/core/config.c
+VOLUMEOVERLAY_OBJ = $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(VOLUMEOVERLAY_SRC)) \
+                    $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(UI_LVGL_SRC))
+
+.PHONY: volume-overlay
+volume-overlay: $(BUILD)/test_volume_overlay
+	$(BUILD)/test_volume_overlay
+
+$(BUILD)/test_volume_overlay: $(VOLUMEOVERLAY_OBJ)
+	$(CC) -o $@ $^ $(LDFLAGS) $(LDLIBS)
+
 STOCKKEYS_UI_SRC = $(ROOT)/tests/ui/test_stockkeys_ui.c \
                    $(ROOT)/src/gui/streaming/stockkeys_ui.c \
                    $(ROOT)/src/system/streaming/stockkeys.c \
@@ -884,7 +901,7 @@ $(BUILD)/test_stockkeys_ui: $(ROOT)/build_gen/streamkeys_key.h $(STOCKKEYS_UI_OB
 	$(CC) -o $@ $(STOCKKEYS_UI_OBJ) $(LDFLAGS) $(LDLIBS)
 
 .PHONY: ui
-ui: $(BUILD)/test_qobuzgenregrid $(BUILD)/test_main_menu $(BUILD)/test_screensaver $(BUILD)/test_tools_pages $(BUILD)/test_wifi_pages $(BUILD)/test_chargescreen $(BUILD)/test_power_display $(BUILD)/test_lyricsearch $(BUILD)/test_games $(BUILD)/test_peq_profiles $(BUILD)/test_quickpanel_layout $(BUILD)/test_corners $(BUILD)/test_playbutton $(BUILD)/test_musicsettings_rows $(BUILD)/test_playerdeck $(BUILD)/test_vinylayout $(BUILD)/test_waveform_overlay $(BUILD)/test_hiresbadge_ui $(BUILD)/test_statusbar_ui $(BUILD)/test_stockkeys_ui
+ui: $(BUILD)/test_qobuzgenregrid $(BUILD)/test_main_menu $(BUILD)/test_screensaver $(BUILD)/test_tools_pages $(BUILD)/test_wifi_pages $(BUILD)/test_chargescreen $(BUILD)/test_power_display $(BUILD)/test_lyricsearch $(BUILD)/test_games $(BUILD)/test_peq_profiles $(BUILD)/test_quickpanel_layout $(BUILD)/test_corners $(BUILD)/test_playbutton $(BUILD)/test_musicsettings_rows $(BUILD)/test_volume_overlay $(BUILD)/test_playerdeck $(BUILD)/test_vinylayout $(BUILD)/test_waveform_overlay $(BUILD)/test_hiresbadge_ui $(BUILD)/test_statusbar_ui $(BUILD)/test_stockkeys_ui
 	$(BUILD)/test_qobuzgenregrid
 	$(BUILD)/test_main_menu ../../sonix-packer/assets/V1/usr/resource/sonix/language
 	$(BUILD)/test_main_menu ../../sonix-packer/assets/V1/usr/resource/sonix/language saved
@@ -901,6 +918,7 @@ ui: $(BUILD)/test_qobuzgenregrid $(BUILD)/test_main_menu $(BUILD)/test_screensav
 	$(BUILD)/test_corners
 	$(BUILD)/test_playbutton ../../sonix-packer/assets/V1/usr/resource/sonix/language
 	$(BUILD)/test_musicsettings_rows ../../sonix-packer/assets/V1/usr/resource/sonix/language
+	$(BUILD)/test_volume_overlay
 	$(BUILD)/test_playerdeck
 	$(BUILD)/test_vinylayout
 	$(BUILD)/test_waveform_overlay
@@ -944,7 +962,7 @@ $(BUILD)/ui/lvgl/%.o: $(ROOT)/lvgl/%.c ui/lv_conf.h $(ROOT)/lv_conf.h
 	@mkdir -p $(dir $@)
 	$(CC) $(UI_CPPFLAGS) $(filter-out -Werror,$(UI_CFLAGS)) -c $< -o $@
 
--include $(sort $(QOBUZGENRE_UI_OBJ:.o=.d) $(PEQPAGE_OBJ:.o=.d) $(UI_OBJ:.o=.d) $(SAVER_OBJ:.o=.d) $(CHARGE_OBJ:.o=.d) $(WIFIPAGE_OBJ:.o=.d) $(LYRICSEARCH_OBJ:.o=.d) $(GAMES_OBJ:.o=.d) $(CORNERS_OBJ:.o=.d) $(PLAYBUTTON_OBJ:.o=.d) $(MUSICROWS_OBJ:.o=.d) $(PLAYERDECK_OBJ:.o=.d) $(VINYLLAYOUT_OBJ:.o=.d) $(WAVEOVERLAY_OBJ:.o=.d) $(HIRESBADGE_UI_OBJ:.o=.d) $(STOCKKEYS_UI_OBJ:.o=.d))
+-include $(sort $(QOBUZGENRE_UI_OBJ:.o=.d) $(PEQPAGE_OBJ:.o=.d) $(UI_OBJ:.o=.d) $(SAVER_OBJ:.o=.d) $(CHARGE_OBJ:.o=.d) $(WIFIPAGE_OBJ:.o=.d) $(LYRICSEARCH_OBJ:.o=.d) $(GAMES_OBJ:.o=.d) $(CORNERS_OBJ:.o=.d) $(PLAYBUTTON_OBJ:.o=.d) $(MUSICROWS_OBJ:.o=.d) $(VOLUMEOVERLAY_OBJ:.o=.d) $(PLAYERDECK_OBJ:.o=.d) $(VINYLLAYOUT_OBJ:.o=.d) $(WAVEOVERLAY_OBJ:.o=.d) $(HIRESBADGE_UI_OBJ:.o=.d) $(STOCKKEYS_UI_OBJ:.o=.d))
 
 # Smart Mix track-count limits and traversal, with a memory-only graph fixture.
 GENIUS_SRC = test_genius.c $(ROOT)/src/system/library/genius.c
@@ -1010,6 +1028,23 @@ hiresbadge: $(BUILD)/test_hiresbadge
 $(BUILD)/test_hiresbadge: test_hiresbadge.c $(ROOT)/src/gui/nowplaying/hiresbadge.h
 	@mkdir -p $(BUILD)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ test_hiresbadge.c
+
+# The volume read as a voltage: the half-dB table, the three-figure text, and
+# the reading at every index of both gain tables. Plain C, no LVGL. The tables
+# and the DSD offsets are the real ones -- alsa-controls.c is compiled into the
+# test against the declarations-only ALSA header. The one routine of it that is
+# run against a mixer, the write of the two channel controls, gets the test's
+# own recording one; the linker drops the rest.
+.PHONY: volumereadout
+volumereadout: $(BUILD)/test_volumereadout
+	$(BUILD)/test_volumereadout
+
+$(BUILD)/test_volumereadout: test_volumereadout.c $(ROOT)/src/gui/shell/volumereadout.c \
+                             $(ROOT)/src/gui/shell/volumereadout.h \
+                             $(ROOT)/src/system/audio/alsa-controls.c $(ROOT)/src/system/audio/alsa-controls.h \
+                             stubs/alsa/asoundlib.h
+	@mkdir -p $(BUILD)
+	$(CC) $(CPPFLAGS) -Istubs $(CFLAGS) -o $@ test_volumereadout.c $(ROOT)/src/gui/shell/volumereadout.c $(LDFLAGS) $(LDLIBS)
 
 # Actual status-bar styles rendered with LVGL, including a large blurred image.
 STATUSBAR_UI_OBJ = $(BUILD)/ui/tests/ui/test_statusbarstyle.o \

@@ -17,6 +17,7 @@
 #include "src/gui/shell/quickpanel.h"
 #include "src/gui/shell/theme.h"
 #include "src/gui/shell/statusbarstyle.h"
+#include "src/gui/shell/volumereadout.h"
 #include "src/system/remote/airplay.h"
 #include "src/system/audio/alsa-controls.h"
 #include "src/system/audio/audio.h"
@@ -300,6 +301,16 @@ static void refresh_status_icon_color(lv_obj_t *icon) {
 // so a measure that came up short would let it grow, never wrap the number onto
 // a second line. The number keeps to the side of the glyph that says what it
 // means; the spare room opens up after it.
+//
+// What "every reading" is belongs to volumereadout.h, because the number is not
+// the only thing this label prints: with Settings > Screen > Volume as voltage
+// on it reads "502mV", and then the widest reading is one of the voltages --
+// about twice the width of "100" in MiSans, which the clock makes room for the
+// way it does for a glyph (place_clock()). The form measured for is kept, so
+// that the label is measured again when the reading changes form and not on
+// every step of the level.
+static int vol_fitted_form = -1; // a volumereadout_form_t; -1 is "not measured"
+
 static void fit_volume_label(void) {
 	if (!vol_label) {
 		return;
@@ -308,9 +319,8 @@ static void fit_volume_label(void) {
 	const lv_font_t *font = lv_obj_get_style_text_font(vol_label, LV_PART_MAIN);
 	int32_t letter_space = lv_obj_get_style_text_letter_space(vol_label, LV_PART_MAIN);
 	int32_t widest = 0;
-	for (int percent = 0; percent <= 100; percent++) {
-		char text[8];
-		snprintf(text, sizeof(text), "%d", percent);
+	char text[VOLUMEREADOUT_TEXT_MAX];
+	for (int i = 0; volumereadout_sample(i, text, sizeof(text)); i++) {
 		lv_point_t size;
 		lv_text_get_size(&size, text, font, letter_space, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
 		if (size.x > widest) {
@@ -318,9 +328,13 @@ static void fit_volume_label(void) {
 		}
 	}
 	lv_obj_set_style_min_width(vol_label, widest, 0);
+	vol_fitted_form = (int)volumereadout_form();
 }
 
-// Volume, as a number with the glyph that matches its level.
+// Volume, as a reading with the glyph that matches its level. The reading is
+// the index unless the user has asked for the voltage (volumereadout.h); the
+// glyph goes by the index either way, since it says where on the scale the
+// level is and not how loud that turns out to be.
 void topbar_refresh_volume(int percent) {
 	if (!vol_label) {
 		return;
@@ -333,7 +347,15 @@ void topbar_refresh_volume(int percent) {
 		percent = 100;
 	}
 
-	lv_label_set_text_fmt(vol_label, "%d", percent);
+	// Number or voltage, and for which socket: when that has changed since
+	// the label was measured, its width is for readings it no longer shows.
+	if ((int)volumereadout_form() != vol_fitted_form) {
+		fit_volume_label();
+	}
+
+	char text[VOLUMEREADOUT_TEXT_MAX];
+	volumereadout_text(percent, text, sizeof(text));
+	lv_label_set_text(vol_label, text);
 
 	// Keep the main-screen volume number white at every level.
 	lv_obj_set_style_text_color(vol_label, lv_color_white(), 0);
@@ -701,6 +723,31 @@ static void refresh_play_icon(const device_state_t *state) {
 	lv_obj_set_hidden(play_icon, false);
 }
 
+// A voltage moves with things the index does not: the gain switch, a DSD track
+// starting or ending (its compensation is in force only while one plays), and
+// the sound going over to Bluetooth or a USB-C DAC, which takes the reading
+// back to the number. None of those is a volume change and none announces
+// itself here, so left to the five-second poll the bar would go on showing,
+// for up to that long, a level that is no longer the one at the socket. The
+// reading is therefore worked out again on the fast timer -- integer
+// arithmetic on values already in memory, no I/O -- and the label repainted
+// only when it comes out different.
+//
+// With the option off the number depends on the index alone, there is nothing
+// here to follow, and nothing is done.
+static void refresh_volume_reading(void) {
+	if (!vol_label || !volumereadout_enabled()) {
+		return;
+	}
+
+	int percent = get_volume_percent();
+	char text[VOLUMEREADOUT_TEXT_MAX];
+	volumereadout_text(percent, text, sizeof(text));
+	if (strcmp(text, lv_label_get_text(vol_label)) != 0) {
+		topbar_refresh_volume(percent);
+	}
+}
+
 // The things noticed with the hands, on their own fast timer: what is in the
 // jacks, what is on the USB-C port, and whether the charger is in. Everything
 // here returns at once when nothing has changed.
@@ -708,6 +755,10 @@ static void jack_timer_cb(lv_timer_t *timer) {
 	(void)timer;
 
 	refresh_headphone_icon(false);
+
+	// After the jacks and the port, which is where a change of output is found
+	// out; before the battery, whose "nothing has moved" returns from here.
+	refresh_volume_reading();
 
 	// The charger, on the same beat and for the same reason as the jacks: it is
 	// something the user just did with their hands, and up to five seconds of a

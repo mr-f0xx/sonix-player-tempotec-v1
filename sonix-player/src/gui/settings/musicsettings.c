@@ -158,12 +158,19 @@ static void nos_toggle_cb(lv_event_t *e) {
 static lv_obj_t *gain_switch;
 static lv_obj_t *album_chain_switch;
 
+// The status bar may be showing the volume as a voltage (volumereadout.h), and
+// that figure moves with the gain and with the DSD compensation while the
+// index stays where it is. The bar would find out for itself within a quarter
+// of a second; told here, it changes with the switch.
+static void volume_reading_moved(void) { topbar_refresh_volume(get_volume_percent()); }
+
 static void gain_toggle_cb(lv_event_t *e) {
 	(void)e;
 	bool on = lv_obj_has_state(gain_switch, LV_STATE_CHECKED);
 	config_set_int("audio", "high_gain", on ? 1 : 0);
 	config_save();
 	set_high_gain(on ? 1 : 0);
+	volume_reading_moved();
 }
 
 // ---------------------------------------------------------------------------
@@ -830,6 +837,7 @@ static void dsd_gain_store(int index) {
 	}
 	config_save();
 	dsd_gain_refresh();
+	volume_reading_moved();
 }
 
 static void dsd_gain_toggle_cb(lv_event_t *e) {
@@ -1261,6 +1269,7 @@ void musicsettings_set_high_gain(bool enabled) {
 	config_set_int("audio", "high_gain", enabled ? 1 : 0);
 	config_save();
 	set_high_gain(enabled ? 1 : 0);
+	volume_reading_moved();
 	if (gain_switch) {
 		if (enabled) {
 			lv_obj_add_state(gain_switch, LV_STATE_CHECKED);

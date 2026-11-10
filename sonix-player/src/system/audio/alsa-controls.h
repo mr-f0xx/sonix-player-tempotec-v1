@@ -93,6 +93,11 @@ long get_volume(void);
 #define ALSA_VOLUME_MUTE_DB100 (-9999999L)
 long alsa_volume_gain_db100(int percent);
 
+// The same for what the jacks are actually given: the DSD gain compensation is
+// in it while a DSD track is streaming, where the curve above leaves it out.
+// For a reading of the output (see src/gui/shell/volumereadout.h).
+long alsa_volume_output_db100(int percent);
+
 // Writes every control again from the values this file last chose, dropping
 // the "only write it when it changes" caches first.
 //
