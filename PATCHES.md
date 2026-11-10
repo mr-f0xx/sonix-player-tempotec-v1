@@ -6,6 +6,148 @@
 | Touchscreen multitouch, R1 | `tools/cst8xx_multitouch_patch.py` | the panel reports two fingers, the driver lets one out |
 
 
+## Issue #265: the silent Teslas, the sudden stops, and log lines that never arrived
+
+Worked from the three logs attached to
+[#265](https://github.com/mr-f0xx/sonix-player-tempotec-v1/issues/265) on Nov 9
+(`sonix_player.log`, `bluetooth.log`, `bluetooth.old.log`; Nov 6 to Nov 9, five
+builds, two cars). No hardware was involved: every fix below is tested on the
+host only, and each paragraph says whether it rests on what the logs show or on
+reasoning from them.
+
+### Bluetooth TX to a car: accepted, and silent
+
+What the logs show, for both cars (`4C:FC:AA:1E:B3:80` on Nov 8,
+`4C:FC:AA:12:D5:CC` on Nov 9), every one of the seven times a stream was made:
+
+1. The car makes the link and opens the A2DP signalling channel itself about
+   250 ms later, then asks for nothing.
+2. bluetoothd logs `set_disconnect_timer() timeout 30` and waits. Upstream bluez
+   5.54 waits one second here; this firmware's build waits thirty. Meanwhile
+   every `ConnectProfile(A2DP sink)` is answered `Device or resource busy`
+   (38 times in the player log).
+3. At second thirty bluez configures the stream on its own. The car lists SBC
+   (44.1/48 kHz) and AAC (8 to 96 kHz); bluez takes bluealsa's AAC endpoint and
+   bluealsa picks the highest common rate: `MPEG-2 AAC LC, 96000 Hz, 220000 bps`.
+4. The car accepts Set Configuration, Open and Start. On Nov 9 it then took more
+   than 120,000 media packets over 23 minutes with its volume at 61/127, and
+   played nothing. Raising the volume on the first car (32 to 69/127) changed
+   nothing either.
+
+Across all the logs AAC at 96 kHz was configured nine times, always for a car,
+always silent; AAC at 48 kHz (Buds2 Pro) plays. Phones send AAC at 44.1 or
+48 kHz only. **Reasoned, not proven:** the car advertises a rate it does not
+play. The logs prove what was sent and that it was accepted, not why it was
+silent.
+
+Two things that do not work, both seen in the log: changing the configuration
+in place (08:21:02 and 08:22:34 on Nov 9: the car refuses the new media channel
+with "security block" and drops the link), and opening AVDTP from this side
+(the first car refused it three times the same way).
+
+What changed:
+
+- **Car mode** (`bluetooth.c`). For a device whose class says hands-free or car
+  audio (both cars: `0x240408`), bluealsa is restarted with
+  `--a2dp-force-audio-cd --codec=-AAC` — SBC at 44.1 kHz and nothing else —
+  three seconds after the link, which is inside bluez's thirty, so the
+  endpoints bluez finds when its timer runs out are the plain ones. A
+  connection made from the player switches before the page goes out. The mode
+  ends twenty seconds after the car has gone, or at once when something that is
+  not a car needs the daemon. A daemon that does not take an option is started
+  again with fewer, down to the ordinary set.
+
+  ```ini
+  [bluetooth]
+  car_mode = auto    ; auto | on (every device) | off
+  car_codec = sbc    ; sbc | aac (AAC stays, at 44.1 kHz)
+  ```
+
+  Not verified on a car. Two assumptions carry it: that this bluetoothd, like
+  upstream, keeps the signalling channel when bluealsa's endpoints are replaced
+  under it, and that the vendor's bluealsa 4.1.1 takes `-AAC` as upstream's
+  does (if not, the fallback leaves AAC at 44.1 kHz). A device with the same
+  class that is not a car gets SBC at 44.1 kHz too; `car_mode = off` undoes it.
+- **No automatic codec change in car mode**: the "ask for the better codec"
+  step is the in-place reconfiguration the car answers by dropping the link.
+- **"Busy" is left to bluez.** #266 asked for the profile five times, four
+  seconds apart; all five fall inside the thirty seconds and cannot succeed.
+  `busy` is now said once and looked at again after 35 s.
+- **A note in the log** whenever any sink comes up with AAC above 48 kHz.
+- **The reconnect no longer pages over a new link** (proven cause). Nov 9
+  08:25:48: `going back to 54:10:4F:B0:AD:4D` (earbuds that were not there)
+  went out while the car had just linked; the car closed its channels and the
+  link was gone at 08:25:53. `reconnect_should_stop()` reads a cached device
+  list that nothing refreshed during the 8 s grace. It is refreshed once a
+  second there, and before every attempt.
+
+### The sudden stops
+
+Of 29 starts in the player log, 20 follow a clean end, five follow a held power
+key, one stops at a suspend, and three stop dead within a second of an A2DP
+stream starting:
+
+| last line | what was starting | next kernel start |
+|---|---|---|
+| Nov 8 13:00:36 | TIDAL track change to the Buds2 Pro, `the track started coming out after 93 ms` | 19.6 s later |
+| Nov 8 13:01:18 | Buds2 Pro back 17 s after that boot, track reloading | 15.2 s later |
+| Nov 9 08:26:25 | the car, AAC 96 kHz, `the track started coming out after 117 ms` | 10.8 s later |
+
+No HCI or UART error precedes any of them, the watchdog thread (which dumps
+after five seconds of a stalled interface) wrote nothing, and the device came
+back by itself after a varying delay: everything stopped, and something in
+hardware reset it. The kernel keeps nothing across the reset, so the cause is
+**not known**. Two explanations fit and the logs cannot tell them apart: a
+real-time thread that stops sleeping on the one core (which also starves the
+card's I/O threads, so the watchdog's lines never land), or a fault in the
+kernel when the stream's traffic starts. The two Nov 8 stops happened on build
+`081120260452`, before #266, with the stream going to earbuds: the car is not
+what they have in common, the start of an A2DP stream is.
+
+What changed, to tell the two apart next time: the player logs the kernel's
+real-time limit (`sched_rt_runtime_us`) at start and, when it is off, sets it
+to 95 % (`[system] rt_throttle = 0` leaves it). With the limit on, a spinning
+real-time thread leaves the rest a twentieth of the core, and the watchdog's
+thread dump reaches the card. If a stop like these happens again with the
+limit on and still no watchdog lines, it is the kernel.
+
+### Log lines that never arrived (proven)
+
+On the device's glibc (2.22) `puts()` and `putchar()` write to libc's own
+stdout object, not to the `stdout` variable `logging.c` points at the card log.
+GCC turns every `printf("text\n")` into `puts()`: 125 call sites, none of which
+appears once in 54,702 lines of log — "Entering main event loop..." among them,
+and the line #266 added to say how the previous run ended. The player is now
+built with `-fno-builtin-printf`; `make -C sonix-player/tests printf-flag`
+fails if the flag goes.
+
+### Bluetooth RX from the Fold 8: measured, not solved
+
+The player's own underrun count per receiver session, summed per build:
+
+| build | Fold 8 SBC 44.1 | Fold 8 aptX 44.1 | Fold 8 LDAC 96 | others, SBC and aptX |
+|---|---|---|---|---|
+| `061120261856` (Nov 6) | not tried | 0 in 67 s | 10 in 3815 s | 1 in 13 s |
+| `081120260452` | 38 in 21 s | 25 in 61 s | 0 in 42 s | 0 in 248 s |
+| `091120260147` | 64 in 28 s | 18 in 115 s | 4 in 972 s | not tried |
+
+So the report is right, and narrow: the Fold 8's two 44.1 kHz low-latency
+codecs, two underruns a second on SBC, on the builds after Nov 6. It is not the
+radio (LDAC from the same phone is clean at several times the bit rate), not
+SBC or aptX as such (three other sources are clean on the same build), and not
+`btreceiver.c`, which did not change between the clean build and the first bad
+one. The Bluetooth trace hides media packets, so their timing cannot be read.
+**Open.** What would settle it: the same test with CI builds of the commits
+between `7dfb2d4` and `2e23b2f`.
+
+### Not touched
+
+- Maximum brightness and waking: fixed by #268 (the section below).
+- MacBook SBC switch, SafeFly aptX, TIDAL track-skip stutter: not analysed.
+
+Tests: `make -C sonix-player/tests bluetooth readfile printf-flag`.
+
+
 ## Waking the screen at 100% brightness (issue #267)
 
 The two follow-up reports on [#267](https://github.com/mr-f0xx/sonix-player-tempotec-v1/issues/267)
