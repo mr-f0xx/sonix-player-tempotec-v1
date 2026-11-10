@@ -42,7 +42,7 @@ typedef struct {
 	// "mem" to the developer's own /sys/power/state.
 	const char *brightness_path;	 // e.g. /sys/class/backlight/backlight_pwm0/brightness
 	const char *max_brightness_path; // e.g. /sys/class/backlight/backlight_pwm0/max_brightness
-	const char *blank_path;			 // e.g. /sys/class/graphics/fb0/blank (screen on/off: 0=on, 1=off)
+	const char *blank_path;			 // e.g. /sys/class/graphics/fb0/blank (0=on, 4=power down)
 	const char *power_state_path;	 // e.g. /sys/power/state ("mem" = suspend to RAM); NULL = never
 
 	// Desired on-screen backlight level in raw backlight units. If <= 0 at
@@ -186,9 +186,11 @@ void power_notify_power_button(void);
 bool power_headset_keys_settling(void);
 
 // --- Runtime configuration (driven by the settings pages) ---
-void power_set_brightness(long value); // raw backlight units, clamped to [0, max]
-long power_get_brightness(void);	   // current on-level
-long power_get_max_brightness(void);   // -1 if unknown
+// User-facing raw units, clamped to [1, max]. The hardware writer avoids the
+// V1 PWM driver's full-duty endpoint without changing a saved 100% setting.
+void power_set_brightness(long value);
+long power_get_brightness(void);	   // requested on-level, not the guarded PWM value
+long power_get_max_brightness(void);   // driver's maximum, or the default if unknown
 long power_get_min_brightness(void);   // dimmest level the sliders offer
 
 // While held, the idle timer never blanks the screen. Used by anything the

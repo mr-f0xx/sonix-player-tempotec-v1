@@ -6,6 +6,47 @@
 | Touchscreen multitouch, R1 | `tools/cst8xx_multitouch_patch.py` | the panel reports two fingers, the driver lets one out |
 
 
+## Waking the screen at 100% brightness (issue #267)
+
+The two follow-up reports on [#267](https://github.com/mr-f0xx/sonix-player-tempotec-v1/issues/267)
+isolate a wake failure to maximum brightness: after screen-off, the backlight
+flashes briefly and goes dark again; reducing brightness even slightly avoids
+it. The power manager previously restored the driver's exact maximum at boot,
+on a live adjustment and at the end of either wake path. The charger-only
+screen had a separate writer with the same endpoint.
+
+A shared hardware-boundary guard now limits nonzero writes to one raw step
+below `max_brightness`, avoiding the stock PWM driver's full-duty,
+constant-output endpoint. On the V1's 0–100 scale, a **100% request writes 99**.
+The UI range and saved setting remain 100; ordinary lower levels are unchanged,
+and a saved maximum is safe without the user navigating a flashing screen to
+change it. Startup adoption/fallback, live changes, normal and Bluetooth-held
+wakes, fades and the charger-only screen all use the guard. A one-level scale
+keeps its sole nonzero level rather than becoming unusable.
+
+Screen-off also always ends at **zero**, even with `[screen] wake_hold_level = 1`:
+that override belongs only to the guarded wake window, not to the entire dark
+spell. Framebuffer powerdown is unchanged, as is the deliberate panel hold
+while Bluetooth audio plays; once that stream stops, the panel still powers
+down after its quiet interval. Panel initialization and repaint/vsync timing
+have not been shortened.
+
+`make -C sonix-player/tests power-display` exercises the production power and
+charging-screen code with fake sysfs/time and real LVGL. It checks every
+brightness write, saved/adopted/fallback maximums, repeated off/on cycles,
+true-zero off with both hold settings, both vsync paths, Bluetooth TX/RX and
+panel-hold transitions, charger-only wakes and the no-device-path simulator.
+It does not exercise the physical PWM or measure current.
+
+**Hardware validation pending:** boot with an existing 100% setting, set 100%
+from both Settings and the control centre, then repeat power-key and timeout
+wakes. Recheck lower brightness, screensaver/double-tap wake, local playback,
+Bluetooth TX/RX and charger-only mode. With no Bluetooth stream the dark screen
+should report brightness `0` and framebuffer blank `4`; a held panel deliberately
+stays unblanked but must still report brightness `0`. The original faint-image
+and overnight battery-drain reports need device/current measurements; these
+host tests alone do not establish their cause or resolution.
+
 ## Bluetooth TX discovery and car pairing
 
 The V1 Bluetooth search now requests classic BR/EDR inquiry explicitly through

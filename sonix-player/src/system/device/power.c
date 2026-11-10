@@ -3,6 +3,7 @@
  */
 
 #include "power.h"
+#include "backlight.h"
 
 // LVGL 9.2 made lv_timer_t opaque. There is a lv_timer_set_period() but no
 // getter, and both places here have to read the period before changing it.
@@ -92,7 +93,6 @@ static uint32_t since(uint32_t mark, uint32_t now) {
 // backlight driver and put the PWM out, but it would leave a black screen on a
 // fully powered panel: turning the screen off is the blank node's job.
 #define BRIGHTNESS_MIN 1
-#define BRIGHTNESS_MAX_DEFAULT 100
 
 // The two blank levels written to the framebuffer node, spelled out here
 // rather than pulled in from linux/fb.h so the host build compiles unchanged.
@@ -249,7 +249,7 @@ static void write_long_to_file(const char *path, long value) {
 	fclose(f);
 }
 
-static long brightness_max(void) { return g_max_brightness > 0 ? g_max_brightness : BRIGHTNESS_MAX_DEFAULT; }
+static long brightness_max(void) { return g_max_brightness > 0 ? g_max_brightness : BACKLIGHT_MAX_DEFAULT; }
 
 // The dimmest level the UI offers: 5% of the panel's range, or 1 if the
 // driver's scale is under 20. Below it the screen is too dim to read
@@ -263,16 +263,13 @@ long power_get_min_brightness(void) {
 	return floor > 0 ? floor : 1;
 }
 
-// Write a backlight level to sysfs, clamped to [BRIGHTNESS_MIN, max]. No-op on
-// the host build (no brightness path), but still tracks the value.
+// Every hardware brightness write goes through the same endpoint guard,
+// including init, live changes and both wake paths. Keep g_cfg.brightness in
+// the user's range; g_hw_brightness tracks the actual, safe PWM level instead.
+// Zero is reserved for screen-off / wake holds, not offered to the user.
+// No-op on the host build (no brightness path), but still tracks the value.
 static void backlight_write(long value) {
-	long max = brightness_max();
-	if (value > max) {
-		value = max;
-	}
-	if (value < BRIGHTNESS_MIN) {
-		value = BRIGHTNESS_MIN;
-	}
+	value = backlight_safe_level(value, brightness_max());
 	g_hw_brightness = value;
 	if (g_cfg.brightness_path) {
 		write_long_to_file(g_cfg.brightness_path, value);
@@ -285,23 +282,12 @@ static uint32_t monotonic_ms(void);
 // (see WAKE_HOLD_LEVEL_DEFAULT), which is darker than anything the user can
 // choose. Written whether or not the tracked value already says so, because
 // the unblank path in the kernel writes the hardware without telling anyone.
-static void backlight_hold(void) {
-	g_hw_brightness = g_wake_hold_level;
-	if (g_cfg.brightness_path) {
-		write_long_to_file(g_cfg.brightness_path, g_wake_hold_level);
-	}
-}
+static void backlight_hold(void) { backlight_write(g_wake_hold_level); }
 
-// A true zero, whatever [screen] wake_hold_level says. Used by the two halves
-// of a held panel: one that is left unblanked must not be looked at through
-// anything at all, and a hold level restored for a board that needs its floor
-// back is a level a *wake* is allowed to be seen at, not a dark screen.
-static void backlight_black(void) {
-	g_hw_brightness = 0;
-	if (g_cfg.brightness_path) {
-		write_long_to_file(g_cfg.brightness_path, 0);
-	}
-}
+// A true zero, whatever [screen] wake_hold_level says. The override applies
+// only during a wake; a dark screen must not retain a dimly visible picture,
+// especially when a Bluetooth stream keeps the panel powered.
+static void backlight_black(void) { backlight_write(0); }
 
 // Re-asserts the hold every WAKE_HOLD_STEP_MS for `ms` in total. Used for the
 // windows the panel spends doing something of its own -- its init after the
@@ -357,6 +343,9 @@ static void backlight_hold_until_panel_shows(void) {
 // stock/Rockbox dim-to-off feel. Blocking, but only for ~200ms during a screen
 // transition (the UI isn't visible mid-transition anyway).
 static void fade_to(long target) {
+	// Compare against the actual PWM target, not an unreachable full-duty
+	// request, or a fade towards 100% could loop forever at max - 1.
+	target = backlight_safe_level(target, brightness_max());
 	if (g_hw_brightness < 0) {
 		backlight_write(target);
 		return;
@@ -1761,22 +1750,11 @@ void power_screen_off(void) {
 		screen_power(false);
 	}
 
-	// And left at the hold level rather than at the fade's floor: the
-	// backlight driver restores the level it held before the blank when the
-	// panel is next unblanked, and the floor is a level the panel is *looked
-	// at through*. Left at a true zero the panel comes back invisible whatever
-	// the driver restores, which is half of what keeps the wake free of the
-	// white reset frame (see WAKE_HOLD_LEVEL_DEFAULT). The user's level is not
-	// lost: the wake restores g_cfg.brightness.
-	//
-	// A held panel gets a true zero instead: it is still powered and still
-	// holding a picture, so a hold level meant for a blanked panel would be a
-	// dark screen someone can just make out.
-	if (g_panel_held) {
-		backlight_black();
-	} else {
-		backlight_hold();
-	}
+	// Off is always a true zero, not the fade's floor or a configured wake
+	// hold. Leave the driver's saved level dark too, so an unblank cannot
+	// restore a visible reset frame. The user's level is retained separately
+	// in g_cfg.brightness and restored through the PWM endpoint guard on wake.
+	backlight_black();
 
 	// With the panel dark, draw what the next wake should open on straight
 	// into the framebuffer. Unblanking presents whatever the framebuffer
@@ -2432,6 +2410,9 @@ void power_init(const power_config_t *cfg, lv_display_t *disp) {
 	// device starts up dimmer than the sliders can be set to.
 	if (g_cfg.brightness < power_get_min_brightness()) {
 		g_cfg.brightness = power_get_min_brightness();
+	}
+	if (g_cfg.brightness > brightness_max()) {
+		g_cfg.brightness = brightness_max();
 	}
 	screen_power(true); // make sure the panel is unblanked (in case a prior run left it off)
 	backlight_write(g_cfg.brightness);

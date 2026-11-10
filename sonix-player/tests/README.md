@@ -17,6 +17,7 @@ make -C sonix-player/tests basebuild
 make -C sonix-player/tests stock-prepare
 make -C sonix-player/tests peq-ui
 make -C sonix-player/tests quickpanel-layout
+make -C sonix-player/tests power-display
 make -C sonix-player/tests corners
 make -C sonix-player/tests playbutton
 make -C sonix-player/tests musicsettings-rows
@@ -40,7 +41,7 @@ make -C sonix-player/tests statusbar-ui
 make -C sonix-player/tests extractkeys
 ```
 
-The non-UI suites require only a C compiler, Make and Python 3 (plus standard pthread/dl/math libraries). The `hiresbadge-ui`, `peq-ui`, `quickpanel-layout`, `corners`, `playbutton`, `musicsettings-rows`, `playerdeck`, `vinylayout`, `waveform-overlay`, `edge-lock` and aggregate `ui` targets also need the LVGL 9.6.0 checkout described below. None requires ALSA, SDL, a MIPS toolchain, a music server, a real account, or downloaded audio.
+The non-UI suites require only a C compiler, Make and Python 3 (plus standard pthread/dl/math libraries). The `hiresbadge-ui`, `peq-ui`, `quickpanel-layout`, `power-display`, `corners`, `playbutton`, `musicsettings-rows`, `playerdeck`, `vinylayout`, `waveform-overlay`, `edge-lock` and aggregate `ui` targets also need the LVGL 9.6.0 checkout described below. None requires ALSA, SDL, a MIPS toolchain, a music server, a real account, or downloaded audio.
 
 `run_subsonic_tests.py` starts a temporary threaded localhost HTTP server plus three HTTPS servers carrying the certificates in `tls_fixtures.py`, runs the C binary with a private temporary config directory, verifies its requests, then shuts down. All account values are synthetic. Build products live in ignored `.build/`; response/PCM fixtures are generated in memory rather than added to Git, and the three test certificates are pasted into that Python file rather than downloaded.
 
@@ -577,3 +578,25 @@ repeated switching, non-interactive badges and moving between sleeves.
 `make -C sonix-player/tests quickpanel-layout` also exercises the optional
 V1 dual-slider layout using LVGL hit-testing, both gesture positions, page
 counts, DAC status, persistence, volume limits and separate slider callbacks.
+
+## Display power and maximum brightness
+
+`make -C sonix-player/tests power-display` uses the LVGL checkout above. It
+compiles the production `power.c` and `chargescreen.c` display transitions with
+an in-memory sysfs fixture and virtual time. The power tick is not dispatched;
+transitions are called explicitly, with audio/radio/clock services stubbed. No
+real sysfs node is opened and no actual sleeps or suspend/shutdown occur.
+
+Checks include saved 100% brightness, adoption of a stock maximum, fallback
+from a dark panel, unknown/invalid maximums, oversized config, unchanged lower
+levels, the user-facing 100% range, and all hardware writes staying below full
+duty while zero stays zero. Repeated normal wakes cover credible and fallback
+vsync, both wake-hold settings, and brightness changes while dark. Other cases
+cover Bluetooth TX/RX held-panel wakes, a stream starting/stopping while dark,
+a platform without a blank node, the simulator's NULL paths and the independent
+charger-only selection/off/wake path. A fade towards maximum must terminate at
+the guarded level rather than loop forever.
+
+This tests the userspace workaround for issue #267, not a physical PWM driver,
+touch gesture, panel, audio link or standby current. Hardware acceptance steps
+and the distinction from the separate battery-drain report are in `PATCHES.md`.
