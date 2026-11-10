@@ -69,4 +69,24 @@ __asm__(".symver log2,log2@GLIBC_2.2");
 
 #endif
 
+// ---------------------------------------------------------------------------
+// printf's format check
+//
+// The player is built with -fno-builtin-printf (the Makefile says why: the
+// compiler must not turn printf into puts). A printf that is not a builtin is,
+// to the compiler, a function like any other, and glibc's header does not say
+// that its first argument is a format string -- so -Wformat stops looking at
+// every printf in the tree. This says it. It is a declaration and not an
+// #include, like everything else here, and it sits outside the guard above
+// because the host build is compiled with the same flag and includes this
+// header for this alone.
+// ---------------------------------------------------------------------------
+#ifdef __cplusplus
+extern "C" {
+#endif
+extern int printf(const char *format, ...) __attribute__((format(printf, 1, 2)));
+#ifdef __cplusplus
+}
+#endif
+
 #endif /* GLIBC_COMPAT_H */

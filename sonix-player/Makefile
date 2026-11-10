@@ -58,7 +58,7 @@ endif
 #                               or offset wider than 32 bits, which an exFAT
 #                               card produces routinely.
 #   -fno-builtin-printf         keeps printf("text\n") a call to printf. The
-#                               compiler otherwise turns it into puts() (and
+#   -fno-builtin-__printf_chk   compiler otherwise turns it into puts() (and
 #                               a one-character printf into putchar()), and on
 #                               the device's glibc 2.22 those two write to
 #                               libc's own stdout object, not to the `stdout`
@@ -66,15 +66,23 @@ endif
 #                               (glibc bug 24051, fixed in 2.29). Every
 #                               constant message was lost that way: 125 call
 #                               sites, among them the verdict on how the
-#                               previous run ended. tests/ `make printf-flag`
-#                               fails if the flag goes.
-CFLAGS = -O3 -g -Wall -fno-builtin-printf -MMD -MP -D_FILE_OFFSET_BITS=64 -I. -I$(LVGL_DIR) -DLV_CONF_INCLUDE_SIMPLE=1 -DGB_CORE=1
+#                               previous run ended. The second flag is the
+#                               same for a toolchain that defines
+#                               _FORTIFY_SOURCE, where printf is __printf_chk
+#                               by the time it is folded. The price is that
+#                               the compiler stops checking printf's format
+#                               string by itself; glibc_compat.h declares the
+#                               format attribute, which puts the check back.
+#                               tests/ `make printf-flag` fails if any of
+#                               this goes.
+CFLAGS = -O3 -g -Wall -fno-builtin-printf -fno-builtin-__printf_chk -MMD -MP -D_FILE_OFFSET_BITS=64 -I. -I$(LVGL_DIR) -DLV_CONF_INCLUDE_SIMPLE=1 -DGB_CORE=1
 # On the host the audio libraries are the system ones (libopusfile-dev,
 # libwavpack-dev); on the target they are the ones this Makefile builds below.
 # opusfile.h includes <opus_multistream.h> unprefixed, so the opus/ directory
 # has to be among the -I in both cases.
 HOST_CFLAGS = $(CFLAGS) -DHOST_BUILD=1 $(shell sdl2-config --cflags) $(shell pkg-config --cflags freetype2) \
-			  $(shell pkg-config --cflags opusfile wavpack)
+			  $(shell pkg-config --cflags opusfile wavpack) \
+			  -include src/system/core/glibc_compat.h
 # -include glibc_compat.h must enter EVERY translation unit of the target
 # build: it carries the .symver lines that keep five maths functions on the
 # names the device's glibc 2.22 knows, and a .symver applies only to its own

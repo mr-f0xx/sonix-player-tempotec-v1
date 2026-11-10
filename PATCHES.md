@@ -118,8 +118,13 @@ stdout object, not to the `stdout` variable `logging.c` points at the card log.
 GCC turns every `printf("text\n")` into `puts()`: 125 call sites, none of which
 appears once in 54,702 lines of log — "Entering main event loop..." among them,
 and the line #266 added to say how the previous run ended. The player is now
-built with `-fno-builtin-printf`; `make -C sonix-player/tests printf-flag`
-fails if the flag goes.
+built with `-fno-builtin-printf -fno-builtin-__printf_chk` (the second for a
+toolchain that fortifies, where the first alone changes nothing). Without the
+builtin the compiler no longer checks `printf` format strings by itself, so
+`glibc_compat.h`, which already enters every unit, declares the format
+attribute and the host build includes it too.
+`make -C sonix-player/tests printf-flag` fails if a flag goes, if the folding
+comes back, or if a wrong format compiles without a warning.
 
 ### Bluetooth RX from the Fold 8: measured, not solved
 
