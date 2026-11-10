@@ -406,6 +406,62 @@ void thread_be_background(const char *name) {
 	}
 }
 
+static bool read_long_file(const char *dir, const char *name, long *out) {
+	char path[256];
+	snprintf(path, sizeof(path), "%s/%s", dir, name);
+	FILE *f = fopen(path, "r");
+	if (!f) {
+		return false;
+	}
+	bool ok = fscanf(f, "%ld", out) == 1;
+	fclose(f);
+	return ok;
+}
+
+long rt_throttle_ensure(const char *dir, bool may_change) {
+	long runtime = 0;
+	long period = 0;
+	if (!read_long_file(dir, "sched_rt_runtime_us", &runtime)) {
+		fprintf(stderr, "sysinfo: real-time limit: %s/sched_rt_runtime_us cannot be read\n", dir);
+		return 0;
+	}
+	if (!read_long_file(dir, "sched_rt_period_us", &period) || period <= 0) {
+		period = 1000000; // the kernel's default, and what the runtime is counted against
+	}
+
+	// Off is -1, and a runtime as long as the period comes to the same thing.
+	bool off = runtime < 0 || runtime >= period;
+	if (!off) {
+		fprintf(stderr, "sysinfo: real-time threads may take %ld of every %ld us\n", runtime, period);
+		return runtime;
+	}
+	if (!may_change) {
+		fprintf(stderr, "sysinfo: real-time threads are not limited (%ld of %ld us), and are left so\n", runtime,
+				period);
+		return -1;
+	}
+
+	long wanted = period / 100 * 95;
+	char path[256];
+	snprintf(path, sizeof(path), "%s/sched_rt_runtime_us", dir);
+	FILE *f = fopen(path, "w");
+	bool written = f && fprintf(f, "%ld\n", wanted) > 0;
+	if (f && fclose(f) != 0) {
+		written = false; // procfs reports a refused value when the write is flushed
+	}
+	long now = runtime;
+	if (!written || !read_long_file(dir, "sched_rt_runtime_us", &now) || now != wanted) {
+		fprintf(stderr, "sysinfo: real-time threads are not limited (%ld of %ld us) and the limit could not be set\n",
+				runtime, period);
+		return -1;
+	}
+	fprintf(stderr,
+			"sysinfo: real-time threads were not limited (%ld of %ld us); now %ld, so one that never sleeps "
+			"leaves the rest a twentieth of the core\n",
+			runtime, period, wanted);
+	return wanted;
+}
+
 void thread_be_realtime(const char *name, int priority) {
 	thread_signal_stack();
 
