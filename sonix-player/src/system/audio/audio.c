@@ -4700,7 +4700,14 @@ bool audio_external_begin(int sample_rate, int channels, int bits) {
 	return audio_external_begin_latency(sample_rate, channels, bits, 0);
 }
 
-bool audio_external_begin_latency(int sample_rate, int channels, int bits, int buffer_ms) {
+bool audio_external_is_active(void) {
+	pthread_mutex_lock(&external_lock);
+	bool active = external_pcm != NULL;
+	pthread_mutex_unlock(&external_lock);
+	return active;
+}
+
+static bool external_begin_latency(int sample_rate, int channels, int bits, int buffer_ms, bool exclusive) {
 	// A PCM held by gapless occupies the DAC. Callers here want to open one of
 	// their own on the same device, and without this they find it busy right
 	// after a track has ended on its own.
@@ -4714,7 +4721,7 @@ bool audio_external_begin_latency(int sample_rate, int channels, int bits, int b
 
 	if (external_pcm) {
 		pthread_mutex_unlock(&external_lock);
-		return true; // already open, and on the same terms
+		return !exclusive; // Legacy callers reuse it; exclusive callers must not share it.
 	}
 
 	// One frame is one sample per channel. 24-bit is the odd one out -- ALSA's
@@ -4741,6 +4748,14 @@ bool audio_external_begin_latency(int sample_rate, int channels, int bits, int b
 
 	pthread_mutex_unlock(&external_lock);
 	return ok;
+}
+
+bool audio_external_begin_latency(int sample_rate, int channels, int bits, int buffer_ms) {
+	return external_begin_latency(sample_rate, channels, bits, buffer_ms, false);
+}
+
+bool audio_external_begin_exclusive_latency(int sample_rate, int channels, int bits, int buffer_ms) {
+	return external_begin_latency(sample_rate, channels, bits, buffer_ms, true);
 }
 
 // Under external_lock. Re-opens when the headphones have moved, and says

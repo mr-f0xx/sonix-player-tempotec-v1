@@ -22,6 +22,7 @@ static lv_obj_t *palette_pills[5];
 static lv_obj_t *shader_pills[4];
 static lv_obj_t *correction_switch;
 static lv_obj_t *bootrom_switch;
+static lv_obj_t *mute_switch;
 
 static const char *const PALETTE_NAMES[5] = {
 	"gearboy_palette_original", "gearboy_palette_sharp", "gearboy_palette_bw", "gearboy_palette_autumn", "gearboy_palette_soft",
@@ -73,6 +74,14 @@ static void correction_toggle_cb(lv_event_t *e) {
 	config_set_int("gearboy", "gbc_correction", lv_obj_has_state(correction_switch, LV_STATE_CHECKED) ? 1 : 0);
 	config_save();
 	gearboy_refresh_video_settings();
+}
+
+static void mute_toggle_cb(lv_event_t *e) {
+	(void)e;
+	bool muted = lv_obj_has_state(mute_switch, LV_STATE_CHECKED);
+	config_set_int("gearboy", "mute", muted ? 1 : 0);
+	config_save();
+	gearboy_set_muted(muted);
 }
 
 static void bootrom_toggle_cb(lv_event_t *e) {
@@ -135,6 +144,12 @@ static lv_obj_t *make_pill_card(lv_obj_t *parent, const char *title_tag) {
 void gearboysettings_init(gui_config_t *cfg) {
 	gearboysettings_screen = lv_obj_create(NULL);
 	lv_obj_t *container = settingsrow_page(gearboysettings_screen, cfg, "gearboy_settings");
+
+	// Available both before starting a game and from its pause menu.
+	settingsrow_toggle(container, "gearboy_mute_sound", &mute_switch, mute_toggle_cb);
+	if (config_get_int("gearboy", "mute", 0) != 0) {
+		lv_obj_add_state(mute_switch, LV_STATE_CHECKED);
+	}
 
 	// Palette: applies to original Game Boy games only, since GBC titles carry
 	// their own colours.

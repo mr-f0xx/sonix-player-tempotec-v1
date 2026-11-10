@@ -32,6 +32,8 @@ void gearboy_set_keys(uint16_t mask) { (void)mask; }
 void gearboy_set_key_overlay(uint16_t mask) { (void)mask; }
 void gearboy_set_paused(bool paused) { (void)paused; }
 bool gearboy_paused(void) { return false; }
+void gearboy_set_muted(bool muted) { (void)muted; }
+bool gearboy_muted(void) { return false; }
 void gearboy_request_savestate(void) {}
 void gearboy_request_loadstate(void) {}
 int gearboy_take_state_result(void) { return 0; }
@@ -62,10 +64,12 @@ int gearboy_frame_h(void) { return stub_height; }
 
 #else
 
+#include <errno.h>
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include <unistd.h>
 
 #include <sys/stat.h>
@@ -144,6 +148,8 @@ static volatile uint32_t frame_count;
 static volatile uint16_t key_mask;
 static volatile uint16_t key_overlay_mask;
 static volatile bool paused_flag;
+// Accessed from the UI and worker threads.
+static bool muted_flag;
 
 // Requests from the in-game menu and their outcome. Plain bools and an int
 // written by one thread and read by the other: neither can observe a half
@@ -271,6 +277,8 @@ uint32_t gearboy_frame_count(void) { return frame_count; }
 void gearboy_set_keys(uint16_t mask) { key_mask = mask; }
 void gearboy_set_key_overlay(uint16_t mask) { key_overlay_mask = mask; }
 bool gearboy_paused(void) { return paused_flag; }
+void gearboy_set_muted(bool muted) { __atomic_store_n(&muted_flag, muted, __ATOMIC_RELEASE); }
+bool gearboy_muted(void) { return __atomic_load_n(&muted_flag, __ATOMIC_ACQUIRE); }
 
 void gearboy_set_paused(bool paused) {
 	if (paused) {
@@ -450,6 +458,30 @@ static void publish_frame(void) {
 	gb_write_index = (gb_write_index + 1) % GB_FRAME_BUFFERS;
 }
 
+// The Game Boy runs at 4194304 clocks / 70224 clocks per frame. An absolute
+// monotonic deadline avoids the drift and busy loop of a fixed per-frame sleep.
+static void pace_silently(struct timespec *deadline) {
+	const long frame_ns = 16742706L;
+	struct timespec now;
+	clock_gettime(CLOCK_MONOTONIC, &now);
+	if (!deadline->tv_sec || now.tv_sec > deadline->tv_sec + 1) *deadline = now;
+	deadline->tv_nsec += frame_ns;
+	if (deadline->tv_nsec >= 1000000000L) {
+		deadline->tv_sec++;
+		deadline->tv_nsec -= 1000000000L;
+	}
+	// nanosleep is in libc on the target's glibc 2.22; clock_nanosleep
+	// would require an additional librt dependency there. Recompute against
+	// the deadline after interruptions, rather than accumulating sleep drift.
+	for (;;) {
+		clock_gettime(CLOCK_MONOTONIC, &now);
+		struct timespec left = {deadline->tv_sec - now.tv_sec, deadline->tv_nsec - now.tv_nsec};
+		if (left.tv_nsec < 0) { left.tv_sec--; left.tv_nsec += 1000000000L; }
+		if (left.tv_sec < 0 || (left.tv_sec == 0 && left.tv_nsec == 0)) break;
+		if (nanosleep(&left, NULL) == 0 || errno != EINTR) break;
+	}
+}
+
 // ---------------------------------------------------------------------------
 // the worker thread
 // ---------------------------------------------------------------------------
@@ -508,15 +540,52 @@ static void *emu_worker(void *unused) {
 
 	printf("gearboy: %s (%s) -- %s\n", title, gb_core_rom_name(core), gb_core_is_color(core) ? "colour" : "DMG");
 
-	// If the PCM does not open the game still runs, silently: a mute game beats
-	// a game that will not start. Without it there is no clock either, so the
-	// loop has to pace itself.
-	bool have_audio = audio_external_begin_latency(SAMPLE_RATE, 2, 16, AUDIO_BUFFER_MS);
-	if (!have_audio) {
-		fprintf(stderr, "gearboy: no audio; playing silently\n");
-	}
+	bool have_audio = false;
+	bool attempted_audio = false;
+	bool resume_music = false;
+	struct timespec deadline = {0};
 
 	while (!stop_flag) {
+		bool muted = __atomic_load_n(&muted_flag, __ATOMIC_ACQUIRE);
+		if (muted && attempted_audio) {
+			if (have_audio) audio_external_end();
+			have_audio = false;
+			attempted_audio = false;
+			deadline.tv_sec = 0;
+			if (resume_music) audio_resume();
+			resume_music = false;
+		} else if (!muted && !attempted_audio) {
+			attempted_audio = true;
+			// Never borrow the shared external PCM from radio, Bluetooth, etc.
+			// Pausing and freezing preserves the track and releases its PCM.
+			if (!audio_external_is_active()) {
+				audio_status_t old_status = audio_get_status();
+				bool was_playing = old_status == AUDIO_STATUS_PLAYING;
+				char old_path[512] = {0};
+				double old_position = 0, old_total = 0;
+				if (old_status != AUDIO_STATUS_STOPPED) {
+					audio_get_current_file(old_path, sizeof(old_path));
+					audio_get_progress(&old_position, &old_total);
+				}
+				if (was_playing) audio_pause();
+				bool clean = audio_suspend_freeze(3000);
+				// A failed freeze has already posted STOP but did not arm the
+				// normal fresh resume. Restore the previous intent explicitly.
+				if (!clean && old_path[0]) {
+					if (was_playing) audio_play_at(old_path, old_position);
+					else audio_play_paused(old_path, old_position);
+				}
+				resume_music = clean && was_playing;
+				if (clean && !stop_flag && !__atomic_load_n(&muted_flag, __ATOMIC_ACQUIRE)) {
+					have_audio = audio_external_begin_exclusive_latency(SAMPLE_RATE, 2, 16, AUDIO_BUFFER_MS);
+				}
+				if (!have_audio && resume_music) {
+					audio_resume();
+					resume_music = false;
+				}
+			}
+			if (!have_audio) fprintf(stderr, "gearboy: no audio; playing silently\n");
+		}
 		// Video settings changed by the page are applied here, between frames,
 		// the only moment the core is idle.
 		if (want_video_settings) {
@@ -553,7 +622,7 @@ static void *emu_worker(void *unused) {
 				memset(audio_buf, 0, (size_t)PAUSE_FRAMES * 2 * sizeof(*audio_buf));
 				audio_external_write(audio_buf, PAUSE_FRAMES);
 			} else {
-				usleep(16000);
+				pace_silently(&deadline);
 			}
 			continue;
 		}
@@ -570,15 +639,15 @@ static void *emu_worker(void *unused) {
 			// what paces everything else.
 			audio_external_write(audio_buf, samples / 2);
 		} else if (!have_audio) {
-			// No PCM, no clock. A flat 16 ms is not the exact 16.743, but with
-			// no sound to stay in step with, nobody hears the difference.
-			usleep(16000);
+			// Muted or unavailable PCM: use the Game Boy's frame rate.
+			pace_silently(&deadline);
 		}
 	}
 
 	if (have_audio) {
 		audio_external_end();
 	}
+	if (resume_music) audio_resume();
 
 	// Flush cartridge RAM before dropping the core, or the player's progress is
 	// lost.
@@ -606,10 +675,6 @@ bool gearboy_start(const char *rom_path_in, const char *title_in) {
 		pthread_join(worker, NULL);
 		thread_live = false;
 	}
-
-	// The PCM takes a single writer, and music under a game is not wanted
-	// anyway: the game brings its own audio.
-	audio_stop();
 
 	if (!screen) {
 		// The size of the picture in use, not the largest one: about 104 KB on
@@ -641,6 +706,7 @@ bool gearboy_start(const char *rom_path_in, const char *title_in) {
 	key_mask = 0;
 	key_overlay_mask = 0;
 	paused_flag = false;
+	gearboy_set_muted(config_get_int("gearboy", "mute", 0) != 0);
 	want_savestate = false;
 	want_loadstate = false;
 	state_result = 0;

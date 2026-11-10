@@ -432,7 +432,10 @@ a self-signed certificate), and HLS.
 - Games show their real cartridge names, matched by CRC32 against the libretro
   databases.
 - Save states, battery RAM, five palettes, shaders and GBC color
-  correction.
+  correction. Mute game sound in Gearboy settings (also accessible from the
+  in-game pause menu) to keep listening to music started before the game. The
+  setting is remembered; enabling game sound pauses the current track, and
+  muting it again or quitting resumes a track that was playing.
 - On the V1 the picture fills the panel width at 240x216 with crisp
   nearest-neighbour scaling, leaving a compact touch D-pad and A/B buttons
   below. The physical Play/Pause button acts as Game Boy Start, and the skip
