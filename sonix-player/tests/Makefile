@@ -593,6 +593,24 @@ sanitize-codecs:
 clean:
 	rm -rf $(BUILD)
 
+# The player's log is the stream logging.c assigns to `stdout`. On the device's
+# glibc (2.22) puts() and putchar() do not write to that variable but to libc's
+# own stdout object, so a printf the compiler folds into either of them never
+# reaches the card. The main Makefile switches that folding off; this checks
+# that the flag is still there and that it still does what it is there for.
+.PHONY: printf-flag
+printf-flag:
+	@mkdir -p $(BUILD)
+	@flags="$$(sed -n 's/^CFLAGS = //p' $(ROOT)/Makefile)"; \
+	case " $$flags " in *" -fno-builtin-printf "*) ;; \
+		*) echo "FAIL the main Makefile's CFLAGS lost -fno-builtin-printf"; exit 1;; esac; \
+	opt="$$(printf '%s\n' $$flags | grep -E '^-(O|f)' | tr '\n' ' ')"; \
+	printf '#include <stdio.h>\nvoid a(void){printf("text\\n");}\nvoid b(const char *s){printf("%%s\\n",s);}\nvoid c(void){printf("x");}\n' \
+		| $(CC) $$opt -x c -c - -o $(BUILD)/printf_flag.o || exit 1; \
+	if nm $(BUILD)/printf_flag.o | grep -E ' U (puts|putchar)$$'; then \
+		echo "FAIL printf is still compiled into puts()/putchar() with: $$opt"; exit 1; fi; \
+	echo "PASS constant printf calls stay printf (flags: $$opt)"
+
 # Optional headless LVGL layout regression tests. Reuse the production config,
 # disabling SDL, FreeType and device drivers; no audio service is linked.
 UI_SRC = $(ROOT)/tests/ui/test_main_menu.c $(ROOT)/src/gui/shell/main_menu.c \

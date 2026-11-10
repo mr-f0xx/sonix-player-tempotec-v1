@@ -1430,6 +1430,7 @@ static bool effective_discoverable(void) {
 typedef struct {
 	bool has_source;
 	bool has_sink;
+	bool car; // started with the car options, see "car mode" below
 } bluealsa_profiles_t;
 
 static void bluealsa_cmdline_scan(const char *args, size_t len, bluealsa_profiles_t *out) {
@@ -1441,6 +1442,9 @@ static void bluealsa_cmdline_scan(const char *args, size_t len, bluealsa_profile
 			out->has_source = true;
 		} else if (strcmp(args + at, "a2dp-sink") == 0) {
 			out->has_sink = true;
+		} else if (strcmp(args + at, "--a2dp-force-audio-cd") == 0 || strcmp(args + at, "--codec=-AAC") == 0 ||
+				   strcmp(args + at, "-AAC") == 0) {
+			out->car = true;
 		}
 	}
 }
@@ -1468,6 +1472,158 @@ static bool bluealsa_matches_profile(bool want_sink) {
 	return want_sink ? (found.has_sink && !found.has_source) : (found.has_source && !found.has_sink);
 }
 
+// ---------------------------------------------------------------------------
+// car mode
+//
+// Issue 265: two Tesla Model Y, both paired, both showing the track and obeying
+// the wheel buttons, and both silent while the music carried on through the
+// jack. The Bluetooth log has the same sequence all seven times a stream was
+// made:
+//
+//   - the car makes the link and opens the A2DP signalling channel itself,
+//     about 250 ms later, and then asks for nothing;
+//   - bluez waits thirty seconds for it (this firmware's bluetoothd; upstream
+//     waits one), and then configures the stream on its own;
+//   - bluez takes the first local endpoint whose codec the car also lists,
+//     which is AAC, and bluealsa answers the car's "AAC, 8 to 96 kHz" with the
+//     highest rate both ends name: MPEG-2 AAC LC at 96000 Hz;
+//   - the car accepts the configuration, the open and the start, takes more
+//     than 120,000 media packets over 23 minutes with its volume at 61 of 127,
+//     and plays none of them.
+//
+// Nothing else in the logs was ever sent AAC above 48 kHz (the Buds2 Pro take
+// 48 kHz and play), and no phone sends it either: 44.1 or 48 kHz is all a car
+// has ever been tested with. That is the reasoning, and it is reasoning: the
+// logs prove what was sent and that it was accepted, not why it was silent.
+//
+// The configuration cannot be changed once it is made. Both attempts to do it
+// in place (08:21:02 and 08:22:34 on Nov 9) ended with the car refusing the
+// new media channel with "security block" and dropping the link. And bluez
+// takes no advice about which endpoint to use. What can be decided from here is
+// which endpoints exist when bluez looks, and that is a daemon option: so for a
+// car, bluealsa is started again in time with the plainest A2DP there is --
+// SBC only, 44.1 kHz only.
+//
+//   [bluetooth]
+//   car_mode = auto    for a device whose class says hands-free or car audio
+//            = on      for every device
+//            = off     never
+//   car_codec = sbc    SBC at 44.1 kHz
+//             = aac    AAC stays on offer, at 44.1 kHz as a phone sends it
+//
+// "In time" is the three seconds invite_sinks() already waits after a link,
+// which is inside bluez's thirty: the restart takes about 0.6 s, the signalling
+// channel the car opened is not affected by it, and what bluez finds when its
+// timer runs out is the new daemon's endpoints. Not earlier than that: the car
+// opens its channel a quarter of a second after the link, and while bluealsa
+// is away there is nothing listening for it.
+// ---------------------------------------------------------------------------
+
+#define COD_MINOR_HANDSFREE 0x02
+#define COD_MINOR_CAR_AUDIO 0x08
+#define CAR_MODE_SETTLE_MS 1500	 // a new daemon's endpoints reach bluez after its bus name
+#define CAR_MODE_LINGER_MS 20000 // a car that drops the link is usually back at once
+
+typedef enum { CAR_MODE_OFF, CAR_MODE_AUTO, CAR_MODE_ON } car_mode_t;
+
+// What the daemon is started with, plainest first. The daemon is a file in the
+// firmware and whether it takes an option is partly found out by trying: one
+// that does not come up is started again a stage further down.
+enum { CAR_STAGE_SBC = 0, CAR_STAGE_CD = 1, CAR_STAGE_NONE = 2 };
+
+static char g_car_mac[BT_MAC_MAX]; // worker only: the car bluealsa is in car mode for
+static uint32_t g_car_gone_since;  // worker only: when that car was first seen unlinked
+static int g_car_stage_floor;	   // worker only: stages this daemon turned out not to take
+
+static car_mode_t car_mode_setting(void) {
+	const char *value = config_get("bluetooth", "car_mode", "auto");
+	if (strcasecmp(value, "off") == 0 || strcmp(value, "0") == 0) {
+		return CAR_MODE_OFF;
+	}
+	if (strcasecmp(value, "on") == 0 || strcmp(value, "1") == 0) {
+		return CAR_MODE_ON;
+	}
+	return CAR_MODE_AUTO;
+}
+
+// Major class Audio/Video with the minor class a car announces: "hands-free"
+// (both Teslas, 0x240408) or "car audio". Headphones, earbuds and speakers
+// have minor classes of their own and are not touched.
+static bool cod_is_car(unsigned cod) {
+	unsigned minor = (cod >> 2) & 0x3f;
+	return ((cod >> 8) & 0x1f) == 0x04 && (minor == COD_MINOR_HANDSFREE || minor == COD_MINOR_CAR_AUDIO);
+}
+
+// The stage the setting asks for, whether or not a car is there.
+static int car_stage_configured(void) {
+	int stage = strcasecmp(config_get("bluetooth", "car_codec", "sbc"), "aac") == 0 ? CAR_STAGE_CD : CAR_STAGE_SBC;
+	return stage < g_car_stage_floor ? g_car_stage_floor : stage;
+}
+
+// The stage bluealsa should be running at now.
+static int car_stage(void) {
+	car_mode_t mode = car_mode_setting();
+	if (receiver_profile_wanted() || mode == CAR_MODE_OFF || (mode == CAR_MODE_AUTO && !g_car_mac[0])) {
+		return CAR_STAGE_NONE;
+	}
+	return car_stage_configured();
+}
+
+// The arguments a stage adds, three at most; returns how many.
+//
+// --a2dp-force-audio-cd makes 44.1 kHz the rate of every codec when the other
+// end has it, which every A2DP sink must. A "-" in front of a codec name takes
+// that codec off the list (bluez-alsa 4.1.1, main.c) and is what removes the
+// AAC endpoints bluez would otherwise pick first.
+static int car_options(int stage, const char *out[3]) {
+	int count = 0;
+	if (stage >= CAR_STAGE_NONE) {
+		return 0;
+	}
+	if (bluealsa_knows_option("--a2dp-force-audio-cd")) {
+		out[count++] = "--a2dp-force-audio-cd";
+	}
+	if (stage == CAR_STAGE_SBC) {
+		if (bluealsa_knows_option("--codec=")) {
+			out[count++] = "--codec=-AAC";
+		} else {
+			out[count++] = "-c";
+			out[count++] = "-AAC";
+		}
+	}
+	return count;
+}
+
+static bool car_mode_possible(void) {
+	const char *options[3];
+	return car_options(car_stage_configured(), options) > 0;
+}
+
+static bool car_mode_applies(const btstack_device_t *dev) {
+	return car_mode_setting() == CAR_MODE_AUTO && cod_is_car(dev->cod) && !dev->audio_source && car_mode_possible();
+}
+
+static bool bluealsa_has_car_options(void) {
+	bluealsa_profiles_t found = {0};
+	for_each_process("bluealsa", profiles_in_cmdline, &found);
+	return found.car;
+}
+
+// Waits for bluealsa's name on the bus and gives up as soon as the process has
+// gone: a daemon that does not know one of its arguments says so and exits at
+// once, and six seconds of waiting for it are six of the thirty there are.
+static bool wait_bluealsa_or_exit(int timeout_ms) {
+	for (int waited = 0; waited < timeout_ms; waited += 500) {
+		if (btstack_wait_service("org.bluealsa", 500)) {
+			return true;
+		}
+		if (!process_running("bluealsa")) {
+			return false;
+		}
+	}
+	return false;
+}
+
 static bool ensure_bluealsa(void) {
 	// Before the daemon, not after: the help text comes from running the binary
 	// with -h, not from the bus, and the -c arguments below are built out of it.
@@ -1483,6 +1639,23 @@ static bool ensure_bluealsa(void) {
 	if (process_running("bluealsa") && !bluealsa_matches_profile(want_sink)) {
 		fprintf(stderr, "bluetooth: bluealsa profile does not match %s mode; starting it again\n",
 				want_sink ? "RX (a2dp-sink)" : "TX (a2dp-source)");
+		stop_process("bluealsa");
+		sleep_ms(300);
+	}
+
+	// The same for car mode: a daemon left from a run that ended with a car
+	// linked would give every pair of headphones SBC at 44.1 kHz, and one left
+	// from before a car was seen would give the car what it does not play.
+	if (want_sink) {
+		g_car_mac[0] = '\0';
+	}
+	int stage = car_stage();
+	const char *car_args[3];
+	int car_count = car_options(stage, car_args);
+	bool started_for_car = false;
+	if (process_running("bluealsa") && bluealsa_has_car_options() != (car_count > 0)) {
+		fprintf(stderr, "bluetooth: bluealsa is running %s the car options; starting it again\n",
+				car_count > 0 ? "without" : "with");
 		stop_process("bluealsa");
 		sleep_ms(300);
 	}
@@ -1570,7 +1743,14 @@ static bool ensure_bluealsa(void) {
 		char codecs[BT_MAX_CODECS][BT_CODEC_MAX];
 		int codec_count = codecs_to_ask_for(codecs, BT_MAX_CODECS);
 
-		char *argv[11 + BT_MAX_CODECS * 2];
+		// A car gets none of the extra codecs: the point of car mode is that
+		// only one configuration is left for bluez to choose.
+		if (car_count > 0) {
+			codec_count = 0;
+			started_for_car = true;
+		}
+
+		char *argv[14 + BT_MAX_CODECS * 2];
 		int at = 0;
 		argv[at++] = (char *)"bluealsa";
 		argv[at++] = (char *)"-p";
@@ -1587,6 +1767,13 @@ static bool ensure_bluealsa(void) {
 		for (int i = 0; i < codec_count; i++) {
 			argv[at++] = (char *)"-c";
 			argv[at++] = codecs[i];
+		}
+		for (int i = 0; i < car_count; i++) {
+			argv[at++] = (char *)car_args[i];
+		}
+		if (car_count > 0) {
+			fprintf(stderr, "bluetooth: car mode: %s at 44.1 kHz and no other codec%s%s\n",
+					stage == CAR_STAGE_SBC ? "SBC" : "SBC and AAC", g_car_mac[0] ? ", for " : "", g_car_mac);
 		}
 		// With the Bluetooth log on, bluealsa's complaints go to syslog so they
 		// land in that log, stamped and in order with bluez's; otherwise they
@@ -1610,7 +1797,20 @@ static bool ensure_bluealsa(void) {
 		fprintf(stderr, "bluetooth: the A2DP transport stays up %d s after the last client\n", keep_alive);
 		spawn_daemon(BLUEALSA_BIN, argv);
 	}
-	if (!btstack_wait_service("org.bluealsa", WAIT_BLUEALSA_MS)) {
+	if (!(started_for_car ? wait_bluealsa_or_exit(WAIT_BLUEALSA_MS)
+						  : btstack_wait_service("org.bluealsa", WAIT_BLUEALSA_MS))) {
+		if (started_for_car) {
+			// Not a reason to be left with no Bluetooth audio at all: the next
+			// stage down asks for less, and the last one is the daemon as it
+			// is started for everything else.
+			g_car_stage_floor = stage + 1;
+			fprintf(stderr, "bluetooth: bluealsa did not come up with the car options; %s\n",
+					g_car_stage_floor < CAR_STAGE_NONE ? "trying with fewer"
+													   : "car mode is not possible with this daemon");
+			stop_process("bluealsa");
+			sleep_ms(300);
+			return ensure_bluealsa();
+		}
 		fprintf(stderr, "bluetooth: bluealsa did not claim org.bluealsa\n");
 		return false;
 	}
@@ -1949,6 +2149,16 @@ static void refresh_audio_state(void) {
 		char path[96];
 		if (btstack_audio_info(mac, path, sizeof(path))) {
 			fprintf(stderr, "bluetooth: bluealsa is encoding %s\n", path);
+		}
+		// The one configuration known to be accepted and not played (issue
+		// 265, both cars). Car mode avoids it for a device whose class says
+		// car; this is for the one whose class says something else.
+		btstack_stream_t stream;
+		if (btstack_stream_info(mac, false, &stream) && strcasecmp(stream.codec, "AAC") == 0 && stream.rate > 48000) {
+			fprintf(stderr,
+					"bluetooth: note: AAC at %u Hz. Phones send AAC at 44.1 or 48 kHz only, and two cars accepted "
+					"this rate and stayed silent. If %s plays nothing, set [bluetooth] car_mode = on\n",
+					stream.rate, mac);
 		}
 
 		// The headphones' rate, before the output is pointed at them. The
@@ -2385,6 +2595,7 @@ static bool connect_was_refused(const char *why) {
 }
 
 static bool connect_device_ex(const char *mac, bool source_only, char *why_out, size_t why_size);
+static void car_mode_before_connect(const char *mac);
 
 // connect_device() with bluez's own words for a refusal, so the caller can tell
 // a device that is switched off from this side not being ready yet.
@@ -2417,6 +2628,10 @@ static bool connect_device_ex(const char *mac, bool source_only, char *why_out, 
 		btstack_disconnect(incumbent);
 		sleep_ms(400);
 	}
+
+	// A car is given the plain configuration it plays, and anything else the
+	// full list back; see "car mode".
+	car_mode_before_connect(mac);
 
 	// A Bluetooth device can keep its ACL connection after its A2DP profile
 	// disappears. In that state there is nothing to "connect" at Device1: the
@@ -2685,6 +2900,38 @@ static bool ensure_adapter_powered(void) {
 	return false;
 }
 
+// First, a moment to come back by themselves -- which is what headphones do
+// the instant the adapter is powered. Waiting costs nothing when they do not
+// come back, and when they do it is the difference between a working link
+// and a link torn down by a command from this side.
+//
+// Returns false when the reconnect is off: they came back, or something else
+// has the radio by now.
+static bool reconnect_grace(const char *mac, int grace_ms) {
+	char sink[BT_MAC_MAX];
+	for (int waited = 0; waited < grace_ms; waited += 250) {
+		if (btstack_audio_sink(sink, sizeof(sink)) && strcasecmp(sink, mac) == 0) {
+			fprintf(stderr, "bluetooth: %s came back on its own after %d ms\n", mac, waited);
+			return false;
+		}
+		// The list reconnect_should_stop() reads is a cache, and nothing else
+		// refreshes it while this function has the worker. Issue 265, Nov 9
+		// 08:25: a car made its link during these eight seconds, the stale
+		// list still said nobody was connected, and the page for the earbuds
+		// went out over the car's first seconds -- the car closed its channels
+		// and the link was gone five seconds later. Once a second is a
+		// GetManagedObjects each; the grace is the moment it matters.
+		if (waited % 1000 == 750) {
+			refresh_devices();
+		}
+		if (reconnect_should_stop(mac)) {
+			return false;
+		}
+		sleep_ms(250);
+	}
+	return true;
+}
+
 static void reconnect_last(void) {
 	char mac[BT_MAC_MAX];
 	snprintf(mac, sizeof(mac), "%s", config_get("wireless", BT_LAST_DEVICE_KEY, ""));
@@ -2734,19 +2981,9 @@ static void reconnect_last(void) {
 		return;
 	}
 
-	// First, a moment to come back by themselves -- which is what headphones do
-	// the instant the adapter is powered. Waiting costs nothing when they do not
-	// come back, and when they do it is the difference between a working link
-	// and a link torn down by a command from this side.
-	for (int waited = 0; waited < SELF_RECONNECT_GRACE_MS; waited += 250) {
-		if (btstack_audio_sink(sink, sizeof(sink)) && strcasecmp(sink, mac) == 0) {
-			fprintf(stderr, "bluetooth: %s came back on its own after %d ms\n", mac, waited);
-			return;
-		}
-		if (reconnect_should_stop(mac)) {
-			return;
-		}
-		sleep_ms(250);
+	// Then a moment to come back by themselves, see reconnect_grace().
+	if (!reconnect_grace(mac, SELF_RECONNECT_GRACE_MS)) {
+		return;
 	}
 
 	// Up to three goes. The first can land while bluealsa has a process but has
@@ -2762,7 +2999,9 @@ static void reconnect_last(void) {
 	for (int attempt = 1; attempt <= 3; attempt++) {
 		// Checked again here and not only between the attempts: the previous
 		// connect_device() took seconds, and this is the last moment before a
-		// command goes out that could tear down somebody else's link.
+		// command goes out that could tear down somebody else's link. With a
+		// list read now, not the one from before the wait.
+		refresh_devices();
 		if (reconnect_should_stop(mac)) {
 			return;
 		}
@@ -2919,6 +3158,8 @@ static void bring_stack_down(bool deliberate) {
 	long freed = process_rss_kb("bluealsa") + process_rss_kb("bluetoothd") + process_rss_kb("bt-agent");
 
 	stop_process("bluealsa");
+	g_car_mac[0] = '\0'; // the next daemon is started for whatever is there then
+	g_car_gone_since = 0;
 
 	// The adapter is powered down while bluetoothd is still there to do it --
 	// which is what tells the controller to stop advertising and to close its
@@ -3646,10 +3887,14 @@ static bool post_job(const job_t *job) {
 // bluealsa's endpoints go and keeps only the link, and opens nothing again by
 // itself when the new daemon registers. Some headphones ask for the stream
 // again, others (a WF-1000XM5) wait, and the sound ends up on the jack.
-static void restart_bluealsa(const char *why) {
+//
+// `resume` is false when the caller knows better than the cached state what
+// should come back: before a connection made from this side, where the cache
+// may still name headphones that have just been disconnected on purpose.
+static void restart_bluealsa_ex(const char *why, bool resume) {
 	pthread_mutex_lock(&lock);
 	char playing[BT_MAC_MAX];
-	copy_field(playing, sizeof(playing), g_a2dp_connected ? g_a2dp_mac : "", sizeof(g_a2dp_mac));
+	copy_field(playing, sizeof(playing), resume && g_a2dp_connected ? g_a2dp_mac : "", sizeof(g_a2dp_mac));
 	pthread_mutex_unlock(&lock);
 
 	fprintf(stderr, "bluetooth: restarting bluealsa: %s\n", why);
@@ -3669,6 +3914,103 @@ static void restart_bluealsa(const char *why) {
 				break;
 			}
 		}
+	}
+}
+
+static void restart_bluealsa(const char *why) { restart_bluealsa_ex(why, true); }
+
+// Car mode, the part that decides. See "car mode" above ensure_bluealsa() for
+// what it is and why; everything here runs on the worker.
+//
+// The restart goes through a pointer so the host tests can count restarts
+// instead of stopping somebody's daemon.
+static void (*car_restart)(const char *why, bool resume) = restart_bluealsa_ex;
+
+// Points car mode at `mac`, or ends it with NULL. bluealsa is restarted only
+// when that changes what it has to be started with; returns whether it was.
+static bool car_mode_set(const char *mac, const char *why, bool resume) {
+	bool had = g_car_mac[0] != '\0';
+	bool want = mac && mac[0];
+	if (want) {
+		snprintf(g_car_mac, sizeof(g_car_mac), "%.*s", (int)(sizeof(g_car_mac) - 1), mac);
+	} else {
+		g_car_mac[0] = '\0';
+	}
+	g_car_gone_since = 0;
+	if (had == want) {
+		return false;
+	}
+	car_restart(why, resume);
+	return true;
+}
+
+static bool car_is_linked(void) {
+	bool linked = false;
+	pthread_mutex_lock(&lock);
+	for (int i = 0; i < g_paired_count && !linked; i++) {
+		linked = g_paired[i].connected && strcasecmp(g_paired[i].mac, g_car_mac) == 0;
+	}
+	pthread_mutex_unlock(&lock);
+	return linked;
+}
+
+// Ends car mode once the car has been gone for a while, so the headphones that
+// connect next are offered every codec again. "A while" because a car that
+// drops the link is usually back within seconds -- the Tesla does exactly that
+// after a refused channel -- and each change of mode is a restart of the
+// daemon. Whatever is playing through the car-mode daemon by then is asked for
+// its stream again, as after any other restart.
+static void car_mode_review(void) {
+	if (!g_car_mac[0]) {
+		return;
+	}
+	if (car_is_linked()) {
+		g_car_gone_since = 0;
+		return;
+	}
+	uint32_t now = now_ms();
+	if (!g_car_gone_since) {
+		g_car_gone_since = now ? now : 1;
+		return;
+	}
+	if ((int32_t)(now - g_car_gone_since) < CAR_MODE_LINGER_MS) {
+		return;
+	}
+	fprintf(stderr, "bluetooth: %s has been gone for %d s; car mode off\n", g_car_mac,
+			(int)(now - g_car_gone_since) / 1000);
+	car_mode_set(NULL, "car mode off", true);
+}
+
+// Before a connection made from this side. Here the stream is configured
+// within a second or two of the link, long before invite_sinks() would look,
+// so the daemon has to be the right one before the page goes out: with the car
+// options for a car, and without them for anything else the user picks while
+// they are still on.
+static void car_mode_before_connect(const char *mac) {
+	if (car_mode_setting() != CAR_MODE_AUTO) {
+		return;
+	}
+	btstack_device_t devices[BT_MAX_DEVICES];
+	int count = btstack_devices(devices, BT_MAX_DEVICES);
+	for (int i = 0; i < count; i++) {
+		if (strcasecmp(devices[i].address, mac) != 0) {
+			continue;
+		}
+		bool restarted = false;
+		if (car_mode_applies(&devices[i])) {
+			if (!g_car_mac[0]) {
+				fprintf(stderr, "bluetooth: %s is a car (class 0x%06x); car mode on before connecting\n", mac,
+						devices[i].cod);
+			}
+			restarted = car_mode_set(mac, "car mode on", false);
+		} else if (g_car_mac[0]) {
+			fprintf(stderr, "bluetooth: %s is not a car; car mode off before connecting\n", mac);
+			restarted = car_mode_set(NULL, "car mode off", false);
+		}
+		if (restarted) {
+			sleep_ms(CAR_MODE_SETTLE_MS);
+		}
+		return;
 	}
 }
 
@@ -3842,11 +4184,31 @@ static void invite_sources(void) {
 // attempt in hand. Asked once, the car stayed silent for the five minutes it
 // took to reconnect it by hand. A refusal is therefore retried a few seconds
 // later, a bounded number of times per link.
+//
+// "Device or resource busy" is not one of those refusals, though, and the
+// second car's log shows what it is: the car had opened the A2DP signalling
+// channel itself a quarter of a second after the link, and bluez was giving it
+// thirty seconds to configure a stream before doing so on its own
+// (set_disconnect_timer() timeout 30 -- this firmware's bluetoothd; upstream
+// waits one second). For those thirty seconds every request for the profile
+// is answered "busy" out of sink_connect(), whatever is asked and however
+// often: all five invitations, four seconds apart, fell inside them and the
+// stream came up at second thirty regardless. So "busy" means bluez has the
+// stream in hand. It is said once and looked at again after bluez has had its
+// thirty seconds, which is only for the case where nothing came of them.
 #define SINK_INVITE_MAX 8
 #define SINK_INVITE_GRACE_MS 3000
 #define SINK_INVITE_TIMEOUT_MS 8000
 #define SINK_INVITE_RETRY_MS 4000
+#define SINK_INVITE_BUSY_MS 35000
 #define SINK_INVITE_TRIES 5
+
+// Whether a refused ConnectProfile was bluez saying it is already connecting
+// that profile: EBUSY out of sink_connect(), or InProgress from the device
+// object when a Connect is still running.
+static bool invite_was_busy(const char *why) {
+	return why && (strstr(why, "resource busy") != NULL || strstr(why, "InProgress") != NULL);
+}
 
 static struct {
 	char mac[BT_MAC_MAX];
@@ -3885,6 +4247,10 @@ static void invite_sinks(void) {
 	if (user_job_waiting()) {
 		return; // the user is connecting, disconnecting or pairing something
 	}
+
+	// Before anything that returns early: a car that has gone leaves bluealsa
+	// in car mode whether or not something else is playing by now.
+	car_mode_review();
 
 	char playing[BT_MAC_MAX];
 	if (btstack_audio_sink(playing, sizeof(playing))) {
@@ -3985,15 +4351,53 @@ static void invite_sinks(void) {
 		}
 		uint32_t linked_for = now - sink_invites[slot].linked_since;
 
+		// The daemon first, while no stream exists yet: bluez configures the
+		// stream with the endpoints it finds when it gets to it, and for a
+		// car those have to be the plain ones (see "car mode"). The other way
+		// round too -- headphones that link while the daemon is still in car
+		// mode for a car that has left get the full list back before they are
+		// asked. With the car still linked the mode stays: one daemon serves
+		// both, and changing it under the car is what must not happen.
+		bool mode_changed = false;
+		if (car_mode_applies(dev)) {
+			if (!g_car_mac[0]) {
+				fprintf(stderr, "bluetooth: %s is a car (class 0x%06x) linked with no stream yet; car mode on\n",
+						dev->address, dev->cod);
+			}
+			mode_changed = car_mode_set(dev->address, "car mode on", false);
+		} else if (g_car_mac[0] && !car_is_linked()) {
+			fprintf(stderr, "bluetooth: %s is gone and %s is not a car; car mode off\n", g_car_mac, dev->address);
+			mode_changed = car_mode_set(NULL, "car mode off", false);
+		}
+		if (mode_changed) {
+			// The new daemon takes its bus name first and registers its
+			// endpoints after; the invitation waits for them. Where bluez is
+			// already holding the stream -- the car that opened the channel
+			// itself -- there is nothing more to do than that restart.
+			sink_invites[slot].retry_at = now_ms() + CAR_MODE_SETTLE_MS;
+			sink_invite_due = sink_invites[slot].retry_at;
+			continue;
+		}
+
 		fprintf(stderr, "bluetooth: %s is linked with no A2DP profile (%d ms); asking for it\n", dev->address,
 				(int)linked_for);
 		sink_invites[slot].asked = true;
 		sink_invites[slot].tries++;
-		if (!btstack_connect_a2dp(dev->address, SINK_INVITE_TIMEOUT_MS)) {
+		char why[160] = "";
+		if (!btstack_connect_a2dp_why(dev->address, SINK_INVITE_TIMEOUT_MS, why, sizeof(why))) {
 			// A refusal is usually transient -- an unauthenticated link, or
 			// bluez still holding the last attempt -- so the next turn of the
 			// worker's poll asks again, a few attempts per link.
-			if (sink_invites[slot].tries < SINK_INVITE_TRIES) {
+			bool busy = invite_was_busy(why);
+			if (busy && sink_invites[slot].tries < SINK_INVITE_TRIES) {
+				sink_invites[slot].asked = false;
+				sink_invites[slot].retry_at = now + SINK_INVITE_BUSY_MS;
+				sink_invite_due = sink_invites[slot].retry_at;
+				fprintf(stderr,
+						"bluetooth: bluez is already bringing the stream to %s up (the device opened the A2DP channel "
+						"and is given 30 s to configure it); not asking again before that, looking in %d s\n",
+						dev->address, SINK_INVITE_BUSY_MS / 1000);
+			} else if (sink_invites[slot].tries < SINK_INVITE_TRIES) {
 				sink_invites[slot].asked = false;
 				sink_invites[slot].retry_at = now + SINK_INVITE_RETRY_MS;
 				sink_invite_due = sink_invites[slot].retry_at;

@@ -57,7 +57,18 @@ endif
 #                               readdir()/stat() fail with EOVERFLOW on an inode
 #                               or offset wider than 32 bits, which an exFAT
 #                               card produces routinely.
-CFLAGS = -O3 -g -Wall -MMD -MP -D_FILE_OFFSET_BITS=64 -I. -I$(LVGL_DIR) -DLV_CONF_INCLUDE_SIMPLE=1 -DGB_CORE=1
+#   -fno-builtin-printf         keeps printf("text\n") a call to printf. The
+#                               compiler otherwise turns it into puts() (and
+#                               a one-character printf into putchar()), and on
+#                               the device's glibc 2.22 those two write to
+#                               libc's own stdout object, not to the `stdout`
+#                               variable logging.c points at the card log
+#                               (glibc bug 24051, fixed in 2.29). Every
+#                               constant message was lost that way: 125 call
+#                               sites, among them the verdict on how the
+#                               previous run ended. tests/ `make printf-flag`
+#                               fails if the flag goes.
+CFLAGS = -O3 -g -Wall -fno-builtin-printf -MMD -MP -D_FILE_OFFSET_BITS=64 -I. -I$(LVGL_DIR) -DLV_CONF_INCLUDE_SIMPLE=1 -DGB_CORE=1
 # On the host the audio libraries are the system ones (libopusfile-dev,
 # libwavpack-dev); on the target they are the ones this Makefile builds below.
 # opusfile.h includes <opus_multistream.h> unprefixed, so the opus/ directory

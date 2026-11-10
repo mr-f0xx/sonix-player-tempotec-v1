@@ -139,6 +139,12 @@ bool btstack_connect(const char *address, int timeout_ms, char *err_out, size_t 
 // Only the headphones' A2DP stream, on a device whose link is already up: what
 // is left to bring back after bluealsa has been restarted under it.
 bool btstack_connect_a2dp(const char *address, int timeout_ms);
+// The same, with the refusal handed back as bluez worded it. The wording is
+// what tells the two refusals apart that need opposite answers: "Device or
+// resource busy" is bluez saying it already has this very stream in hand (the
+// device opened the A2DP channel itself and bluez is giving it time to
+// configure it), where asking again changes nothing until bluez is done.
+bool btstack_connect_a2dp_why(const char *address, int timeout_ms, char *err_out, size_t err_size);
 // The other direction: request a phone or computer's A2DP source profile so it
 // can stream to this device. BlueZ establishes the link if it is not up yet.
 bool btstack_connect_a2dp_source(const char *address, int timeout_ms);

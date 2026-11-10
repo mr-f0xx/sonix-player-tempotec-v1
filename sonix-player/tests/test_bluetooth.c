@@ -16,9 +16,18 @@ void config_set_int(const char *section, const char *key, long value) {
 	(void)value;
 }
 
+// Unset by default, so every case sees the built-in default; the car-mode
+// cases set these two and put them back.
+static const char *fake_car_mode;
+static const char *fake_car_codec;
+
 const char *config_get(const char *section, const char *key, const char *fallback) {
-	(void)section;
-	(void)key;
+	if (strcmp(section, "bluetooth") == 0 && strcmp(key, "car_mode") == 0 && fake_car_mode) {
+		return fake_car_mode;
+	}
+	if (strcmp(section, "bluetooth") == 0 && strcmp(key, "car_codec") == 0 && fake_car_codec) {
+		return fake_car_codec;
+	}
 	return fallback;
 }
 
@@ -29,6 +38,27 @@ void config_set(const char *section, const char *key, const char *value) {
 }
 
 bool config_save(void) { return true; }
+
+// Reachable now that car mode can restart bluealsa: the restart is a pointer
+// whose default is the real one, so what the real one calls has to link. No
+// case runs it -- main() points the restart at a counter before anything else,
+// because the real one stops every process called bluealsa on the machine.
+long config_get_int(const char *section, const char *key, long fallback) {
+	(void)section;
+	(void)key;
+	return fallback;
+}
+bool btstack_wait_service(const char *name, int timeout_ms) {
+	(void)name;
+	(void)timeout_ms;
+	return false;
+}
+bool btstack_bluealsa_version(char *out, size_t size) {
+	(void)out;
+	(void)size;
+	return false;
+}
+bool btlog_enabled(void) { return false; }
 
 // What apply_output_routing() asked the player to play on. The routing is the
 // point of the case below: a radio being parked drives the same call a
@@ -451,20 +481,38 @@ static char fake_sink[BT_ADDR_MAX];
 static int a2dp_profile_requests;
 static char a2dp_profile_requested_for[BT_ADDR_MAX];
 static bool a2dp_profile_brings_audio;
-static bool a2dp_profile_refused; // the car's "security block" / "resource busy"
+static bool a2dp_profile_refused; // the car's "security block"
+static bool a2dp_profile_busy;	  // bluez holding the stream: "Device or resource busy"
 
-bool btstack_connect_a2dp(const char *address, int timeout_ms) {
+bool btstack_connect_a2dp_why(const char *address, int timeout_ms, char *err_out, size_t err_size) {
 	(void)timeout_ms;
+	if (err_out && err_size) {
+		err_out[0] = '\0';
+	}
 	a2dp_profile_requests++;
 	snprintf(a2dp_profile_requested_for, sizeof(a2dp_profile_requested_for), "%.*s",
 			 (int)(sizeof(a2dp_profile_requested_for) - 1), address);
+	if (a2dp_profile_busy) {
+		// The words of the device's bluetoothd, as the player's log has them.
+		if (err_out && err_size) {
+			snprintf(err_out, err_size, "org.bluez.Error.Failed: Device or resource busy");
+		}
+		return false;
+	}
 	if (a2dp_profile_refused) {
+		if (err_out && err_size) {
+			snprintf(err_out, err_size, "org.bluez.Error.Failed: Connection refused - security block");
+		}
 		return false;
 	}
 	if (a2dp_profile_brings_audio) {
 		snprintf(fake_sink, sizeof(fake_sink), "%.*s", (int)(sizeof(fake_sink) - 1), address);
 	}
 	return true;
+}
+
+bool btstack_connect_a2dp(const char *address, int timeout_ms) {
+	return btstack_connect_a2dp_why(address, timeout_ms, NULL, 0);
 }
 
 bool btstack_connect_a2dp_source(const char *address, int timeout_ms) {
@@ -753,6 +801,380 @@ static void test_linked_sink_is_invited(void) {
 	a2dp_profile_brings_audio = false;
 	g_enabled = false;
 	fake_dev_count = 0;
+}
+
+// What the car-mode cases count instead of a restarted daemon.
+static int car_restarts;
+static char car_restart_for[BT_MAC_MAX]; // g_car_mac when the daemon was restarted
+static char car_restart_why[64];
+static bool car_restart_resumed;
+
+static void fake_car_restart(const char *why, bool resume) {
+	car_restarts++;
+	snprintf(car_restart_for, sizeof(car_restart_for), "%s", g_car_mac);
+	snprintf(car_restart_why, sizeof(car_restart_why), "%s", why);
+	car_restart_resumed = resume;
+}
+
+// Two devices nothing is linked to yet: the car of issue 265 with its class,
+// and a pair of earbuds.
+#define TESLA "4C:FC:AA:12:D5:CC"
+#define BUDS "54:10:4F:B0:AD:4D"
+
+static void car_fixture(void) {
+	memset(sink_invites, 0, sizeof(sink_invites));
+	sink_invite_due = 0;
+	fake_sink[0] = '\0';
+	a2dp_profile_requests = 0;
+	a2dp_profile_brings_audio = false;
+	a2dp_profile_refused = false;
+	a2dp_profile_busy = false;
+	source_pcm = false;
+	g_enabled = true;
+	g_receiver_profile = false;
+	pthread_mutex_lock(&lock);
+	queue_head = 0;
+	queue_count = 0;
+	g_paired_count = 0;
+	pthread_mutex_unlock(&lock);
+
+	g_car_mac[0] = '\0';
+	g_car_gone_since = 0;
+	g_car_stage_floor = CAR_STAGE_SBC;
+	car_restart = fake_car_restart;
+	car_restarts = 0;
+	car_restart_for[0] = '\0';
+	fake_car_mode = NULL;
+	fake_car_codec = NULL;
+
+	memset(fake_devs, 0, sizeof(fake_devs));
+	fake_dev_count = 2;
+	snprintf(fake_devs[0].address, sizeof(fake_devs[0].address), TESLA);
+	snprintf(fake_devs[0].name, sizeof(fake_devs[0].name), "Tesla Model Y");
+	fake_devs[0].paired = true;
+	fake_devs[0].audio_sink = true;
+	fake_devs[0].cod = 0x240408; // Audio/Video, hands-free: what both cars announce
+	snprintf(fake_devs[1].address, sizeof(fake_devs[1].address), BUDS);
+	snprintf(fake_devs[1].name, sizeof(fake_devs[1].name), "Buds2 Pro");
+	fake_devs[1].paired = true;
+	fake_devs[1].audio_sink = true;
+	fake_devs[1].cod = 0x240404; // Audio/Video, wearable headset
+	refresh_devices();
+}
+
+static void car_fixture_done(void) {
+	g_car_mac[0] = '\0';
+	g_car_gone_since = 0;
+	fake_car_mode = NULL;
+	fake_car_codec = NULL;
+	a2dp_profile_busy = false;
+	a2dp_profile_refused = false;
+	fake_sink[0] = '\0';
+	memset(sink_invites, 0, sizeof(sink_invites));
+	sink_invite_due = 0;
+	g_enabled = false;
+	fake_dev_count = 0;
+	refresh_devices();
+}
+
+// Issue 265, the second car: bluez answered every one of the five invitations
+// "Device or resource busy" because it was itself waiting, thirty seconds, for
+// the car to configure the channel the car had opened. Asking four seconds
+// apart could not change that; it is left alone until bluez is done.
+static void test_busy_invitation_is_left_to_bluez(void) {
+	assert(invite_was_busy("org.bluez.Error.Failed: Device or resource busy"));
+	assert(invite_was_busy("org.bluez.Error.InProgress: Operation already in progress"));
+	assert(!invite_was_busy("org.bluez.Error.Failed: Connection refused - security block"));
+	assert(!invite_was_busy("org.bluez.Error.Failed: Resource temporarily unavailable"));
+	assert(!invite_was_busy(""));
+	assert(!invite_was_busy(NULL));
+
+	car_fixture();
+	fake_car_mode = "off"; // the invitation alone
+	fake_devs[0].connected = true;
+	refresh_devices();
+	a2dp_profile_busy = true;
+
+	invite_sinks(); // first sighting
+	sink_invites[0].linked_since = now_ms() - (SINK_INVITE_GRACE_MS + 1000);
+	invite_sinks();
+	assert(a2dp_profile_requests == 1);
+	// Not in four seconds: after bluez has had its thirty.
+	uint32_t wait = sink_invites[0].retry_at - now_ms();
+	assert(wait > 30000 && wait <= SINK_INVITE_BUSY_MS);
+	assert(sink_invite_due == sink_invites[0].retry_at);
+	// The ordinary retry moment passes and nothing is asked.
+	sink_invites[0].retry_at -= SINK_INVITE_BUSY_MS - SINK_INVITE_RETRY_MS - 1000;
+	invite_sinks();
+	assert(a2dp_profile_requests == 1);
+
+	// The stream bluez was making arrives: nothing more is asked at all.
+	snprintf(fake_sink, sizeof(fake_sink), TESLA);
+	invite_sinks();
+	assert(a2dp_profile_requests == 1);
+	assert(sink_invites[0].mac[0] == '\0');
+	fake_sink[0] = '\0';
+
+	// Nothing came of it: asked again once the wait is over, and still a
+	// bounded number of times.
+	invite_sinks();
+	sink_invites[0].linked_since = now_ms() - (SINK_INVITE_GRACE_MS + 1000);
+	a2dp_profile_requests = 0;
+	for (int attempt = 0; attempt < SINK_INVITE_TRIES + 2; attempt++) {
+		sink_invites[0].retry_at = now_ms() - 1;
+		invite_sinks();
+	}
+	assert(a2dp_profile_requests == SINK_INVITE_TRIES);
+
+	// A refusal that is not "busy" keeps its short retry.
+	fake_devs[0].connected = false;
+	refresh_devices();
+	invite_sinks();
+	fake_devs[0].connected = true;
+	refresh_devices();
+	a2dp_profile_busy = false;
+	a2dp_profile_refused = true;
+	invite_sinks();
+	sink_invites[0].linked_since = now_ms() - (SINK_INVITE_GRACE_MS + 1000);
+	invite_sinks();
+	wait = sink_invites[0].retry_at - now_ms();
+	assert(wait > 0 && wait <= SINK_INVITE_RETRY_MS);
+
+	car_fixture_done();
+}
+
+// The same morning, 08:25:48: the earbuds were the last device, a car made its
+// link during the wait for them to come back, and the list the wait consulted
+// was the one read before it began. The page for the earbuds went out anyway
+// and the car's link was gone five seconds later.
+static void test_reconnect_grace_sees_a_new_link(void) {
+	car_fixture();
+	connect_calls = 0;
+
+	// Nobody linked: the grace runs out and the reconnect goes on.
+	assert(reconnect_grace(BUDS, 500));
+
+	// The car links a moment into the grace. The cached list does not know.
+	fake_devs[0].connected = true;
+	bool cached = false;
+	pthread_mutex_lock(&lock);
+	for (int i = 0; i < g_paired_count; i++) {
+		cached = cached || g_paired[i].connected;
+	}
+	pthread_mutex_unlock(&lock);
+	assert(!cached);
+	// Within a second it is read again, and the reconnect is off.
+	assert(!reconnect_grace(BUDS, 1500));
+	assert(connect_calls == 0);
+
+	// The earbuds themselves linking is not a reason to stop.
+	fake_devs[0].connected = false;
+	fake_devs[1].connected = true;
+	refresh_devices();
+	assert(reconnect_grace(BUDS, 1250));
+
+	// And coming back with audio ends the wait at once.
+	snprintf(fake_sink, sizeof(fake_sink), BUDS);
+	assert(!reconnect_grace(BUDS, 8000));
+
+	car_fixture_done();
+}
+
+// Car mode: which devices, when the daemon is restarted, and when not.
+static void test_car_mode(void) {
+	// The class. 0x240408 is both cars of the report.
+	assert(cod_is_car(0x240408)); // Audio/Video, hands-free
+	assert(cod_is_car(0x200420)); // Audio/Video, car audio
+	assert(cod_is_car(0x260408));
+	assert(!cod_is_car(0x240404)); // wearable headset
+	assert(!cod_is_car(0x240418)); // headphones
+	assert(!cod_is_car(0x240414)); // loudspeaker
+	assert(!cod_is_car(0x5a020c)); // a phone
+	assert(!cod_is_car(0x5a0208)); // the same minor bits under another major class
+	assert(!cod_is_car(0));
+
+	// A daemon in car mode is told from its command line, so one left over
+	// from another run is not taken for the ordinary one, or the reverse.
+	bluealsa_profiles_t found = {0};
+	const char plain[] = "bluealsa\0-p\0a2dp-source\0--a2dp-volume\0--keep-alive=0\0-c\0aptX\0-c\0LDAC";
+	bluealsa_cmdline_scan(plain, sizeof(plain), &found);
+	assert(found.has_source && !found.has_sink && !found.car);
+	const char car[] = "bluealsa\0-p\0a2dp-source\0--a2dp-volume\0--keep-alive=0\0--a2dp-force-audio-cd\0-c\0-AAC";
+	memset(&found, 0, sizeof(found));
+	bluealsa_cmdline_scan(car, sizeof(car), &found);
+	assert(found.has_source && found.car);
+	const char car_long[] = "bluealsa\0-p\0a2dp-source\0--codec=-AAC";
+	memset(&found, 0, sizeof(found));
+	bluealsa_cmdline_scan(car_long, sizeof(car_long), &found);
+	assert(found.car);
+
+	// The stages: SBC alone by default, AAC kept on request, and never while
+	// this device is the receiver or the mode is off.
+	car_fixture();
+	assert(car_stage() == CAR_STAGE_NONE); // auto, and no car
+	snprintf(g_car_mac, sizeof(g_car_mac), TESLA);
+	assert(car_stage() == CAR_STAGE_SBC);
+	fake_car_codec = "aac";
+	assert(car_stage() == CAR_STAGE_CD);
+	fake_car_codec = NULL;
+	g_car_stage_floor = CAR_STAGE_CD; // the daemon refused "-AAC"
+	assert(car_stage() == CAR_STAGE_CD);
+	g_car_stage_floor = CAR_STAGE_NONE; // and everything else
+	assert(car_stage() == CAR_STAGE_NONE);
+	g_car_stage_floor = CAR_STAGE_SBC;
+	g_receiver_profile = true;
+	assert(car_stage() == CAR_STAGE_NONE);
+	g_receiver_profile = false;
+	fake_car_mode = "off";
+	assert(car_stage() == CAR_STAGE_NONE);
+	g_car_mac[0] = '\0';
+	fake_car_mode = "on"; // every device, car or not
+	assert(car_stage() == CAR_STAGE_SBC);
+	fake_car_mode = NULL;
+	const char *options[3];
+	int count = car_options(CAR_STAGE_SBC, options);
+	assert(count >= 1 && strstr(options[count - 1], "-AAC") != NULL);
+	assert(car_options(CAR_STAGE_NONE, options) == 0);
+
+	// The car links by itself, as both did. Nothing happens at the first
+	// sighting: the car opens its channel a quarter of a second after the
+	// link and bluealsa has to be there to be found.
+	fake_devs[0].connected = true;
+	refresh_devices();
+	a2dp_profile_busy = true; // bluez is waiting for the car, as in the log
+	invite_sinks();
+	assert(car_restarts == 0 && g_car_mac[0] == '\0');
+
+	// At the end of the grace the daemon is restarted for it, once, with
+	// nothing to resume, and before anything is asked of bluez.
+	sink_invites[0].linked_since = now_ms() - (SINK_INVITE_GRACE_MS + 1000);
+	invite_sinks();
+	assert(car_restarts == 1);
+	assert(strcmp(car_restart_for, TESLA) == 0);
+	assert(strcmp(car_restart_why, "car mode on") == 0);
+	assert(!car_restart_resumed);
+	assert(a2dp_profile_requests == 0);
+	assert(sink_invite_due != 0);
+
+	// The invitation follows once the new endpoints are there; "busy" then
+	// leaves the stream to bluez, and the daemon is not touched again.
+	sink_invites[0].retry_at = now_ms() - 1;
+	invite_sinks();
+	assert(a2dp_profile_requests == 1);
+	assert(car_restarts == 1);
+
+	// The stream comes up. Car mode stays for as long as the car does.
+	snprintf(fake_sink, sizeof(fake_sink), TESLA);
+	invite_sinks();
+	assert(car_restarts == 1 && strcmp(g_car_mac, TESLA) == 0);
+
+	// The link drops and comes back, which the Tesla does: no restart.
+	fake_sink[0] = '\0';
+	fake_devs[0].connected = false;
+	refresh_devices();
+	invite_sinks();
+	assert(car_restarts == 1 && g_car_gone_since != 0);
+	fake_devs[0].connected = true;
+	refresh_devices();
+	invite_sinks();
+	assert(car_restarts == 1 && g_car_gone_since == 0);
+	sink_invites[0].linked_since = now_ms() - (SINK_INVITE_GRACE_MS + 1000);
+	invite_sinks();
+	assert(car_restarts == 1); // already in car mode: only the invitation
+
+	// The earbuds link while the car is still there: the mode stays.
+	fake_devs[1].connected = true;
+	refresh_devices();
+	invite_sinks();
+	sink_invites[1].linked_since = now_ms() - (SINK_INVITE_GRACE_MS + 1000);
+	invite_sinks();
+	assert(car_restarts == 1 && strcmp(g_car_mac, TESLA) == 0);
+	fake_devs[1].connected = false;
+
+	// The car leaves for good. Not at once ...
+	fake_devs[0].connected = false;
+	refresh_devices();
+	invite_sinks();
+	assert(car_restarts == 1 && strcmp(g_car_mac, TESLA) == 0);
+	invite_sinks(); // nor at the next look, a moment later
+	assert(car_restarts == 1 && strcmp(g_car_mac, TESLA) == 0);
+	// ... but after the linger the ordinary daemon is back, and whatever was
+	// playing through the old one is asked for its stream again.
+	g_car_gone_since = now_ms() - (CAR_MODE_LINGER_MS + 1000);
+	invite_sinks();
+	assert(car_restarts == 2);
+	assert(car_restart_for[0] == '\0' && g_car_mac[0] == '\0');
+	assert(car_restart_resumed);
+	invite_sinks();
+	assert(car_restarts == 2);
+
+	// Earbuds that link while the mode lingers do not wait for it: they get
+	// the full list before they are asked.
+	car_fixture();
+	snprintf(g_car_mac, sizeof(g_car_mac), TESLA);
+	fake_devs[1].connected = true;
+	refresh_devices();
+	invite_sinks();
+	assert(car_restarts == 0);
+	sink_invites[0].linked_since = now_ms() - (SINK_INVITE_GRACE_MS + 1000);
+	invite_sinks();
+	assert(car_restarts == 1 && g_car_mac[0] == '\0');
+	assert(a2dp_profile_requests == 0);
+	sink_invites[0].retry_at = now_ms() - 1;
+	invite_sinks();
+	assert(a2dp_profile_requests == 1);
+	assert(strcmp(a2dp_profile_requested_for, BUDS) == 0);
+
+	// Earbuds alone never cause a restart.
+	car_fixture();
+	fake_devs[1].connected = true;
+	refresh_devices();
+	invite_sinks();
+	sink_invites[0].linked_since = now_ms() - (SINK_INVITE_GRACE_MS + 1000);
+	invite_sinks();
+	assert(car_restarts == 0 && a2dp_profile_requests == 1);
+
+	// Off is off, and "on" has nothing to switch: the daemon is in car mode
+	// from the start, for everything.
+	for (int pass = 0; pass < 2; pass++) {
+		car_fixture();
+		fake_car_mode = pass == 0 ? "off" : "on";
+		fake_devs[0].connected = true;
+		refresh_devices();
+		invite_sinks();
+		sink_invites[0].linked_since = now_ms() - (SINK_INVITE_GRACE_MS + 1000);
+		invite_sinks();
+		assert(car_restarts == 0 && g_car_mac[0] == '\0');
+		assert(a2dp_profile_requests == 1);
+	}
+
+	// A daemon that takes none of the options: the car is invited like
+	// anything else, without a restart that would change nothing.
+	car_fixture();
+	g_car_stage_floor = CAR_STAGE_NONE;
+	fake_devs[0].connected = true;
+	refresh_devices();
+	invite_sinks();
+	sink_invites[0].linked_since = now_ms() - (SINK_INVITE_GRACE_MS + 1000);
+	invite_sinks();
+	assert(car_restarts == 0 && a2dp_profile_requests == 1);
+
+	// A connection made from here: the mode is right before the page goes
+	// out, in both directions, and a second connect to the same kind of
+	// device restarts nothing.
+	car_fixture();
+	car_mode_before_connect(TESLA);
+	assert(car_restarts == 1 && strcmp(car_restart_for, TESLA) == 0 && !car_restart_resumed);
+	car_mode_before_connect(TESLA);
+	assert(car_restarts == 1);
+	car_mode_before_connect(BUDS);
+	assert(car_restarts == 2 && car_restart_for[0] == '\0' && g_car_mac[0] == '\0');
+	car_mode_before_connect(BUDS);
+	assert(car_restarts == 2);
+	car_mode_before_connect("00:11:22:33:44:55"); // not a device bluez knows
+	assert(car_restarts == 2);
+
+	car_fixture_done();
 }
 
 // The sender is linked, says it is playing case after case, and delivers
@@ -1076,6 +1498,7 @@ static void test_spawn_daemon_releases_card_descriptors(void) {
 }
 
 int main(void) {
+	car_restart = fake_car_restart; // never the real one here, see the stubs at the top
 	test_rx_request_queue();
 	test_a2dp_directions();
 	test_startup_waits();
@@ -1086,6 +1509,9 @@ int main(void) {
 	test_rx_discoverability_and_phone_pairing();
 	test_op_result_is_reported_once();
 	test_linked_sink_is_invited();
+	test_busy_invitation_is_left_to_bluez();
+	test_reconnect_grace_sees_a_new_link();
+	test_car_mode();
 	test_receiver_stream_invite();
 	test_scan_pairing_window();
 	test_usb_route_survives_a_radio_teardown();
