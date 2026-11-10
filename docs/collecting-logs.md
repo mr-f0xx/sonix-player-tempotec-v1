@@ -133,3 +133,68 @@ this protection, compare the `bluealsa: Missing RTP packets` and
 `audio: the external source ran dry` lines in a Bluetooth/player log from
 before and after, with the same source and placement. The policy is not a
 radio-firmware repair and has not been validated on a physical V1 here.
+
+### Bluetooth receiver: stuttering, or a codec that sounds worse than it should
+
+The audio arriving over A2DP is decoded by bluealsa, read by the player, and
+written to the DAC from a buffer of its own (`receiver_jitter_ms`, 150 ms by
+default; see *Bluetooth receiver buffers* below). Two different faults sound
+similar and the log separates them:
+
+- `btreceiver: session over: N frames played, S starved reads, D frames
+  dropped, peak buffer P ms` — printed once when a session ends, and only when
+  something went wrong. **Starved reads** mean the DAC outran the incoming
+  audio: the link, or the player's own scheduling, was late. **Dropped frames**
+  mean the opposite, the phone's clock ahead of the DAC's, which over a 150 ms
+  buffer and a phone at the same nominal rate means a broken rate negotiation
+  rather than jitter.
+- `btreceiver: buffer P ms of C (peak M), N frames in, D dropped` — every ten
+  seconds while receiving. A buffer that sits near its ceiling for a whole
+  session with `D` climbing is the clock case above; one that sits near zero
+  is a link that is not delivering.
+
+For **LDAC quality that rises and falls** rather than breaking up, the phone is
+the one deciding the bit rate, using the only signal it has: whether its
+packets are being taken. The player-side counters above are the same signal
+seen from this end. `--ldac-abr` (the default) is the adaptive mode; to pin the
+rate and take jitter out of the comparison, set **Settings → Wireless → LDAC
+quality** to *High*, *Standard* or *Mobile* and listen again — a fixed rate that
+still fluctuates is a decode or scheduling problem here, and a fixed rate that
+is clean is the adaptive controller doing what the link told it to.
+
+A link that connects and stays **silent** is a different line again:
+`btreceiver: N frames have arrived from <phone> and none of <codec> has reached
+the DAC; moving the link off it`. The receiver waits six seconds for that
+before acting, because a slow start and a decoder that will not run look the
+same that long, and then renegotiates onto another codec the link offers. That
+is the aptX case on some senders (bluez-alsa's aptX decoder spins on a packet it
+cannot decode instead of failing); if it is logged and the sound then comes back
+on a different codec, the codec is the fault, not the radio. If the line is
+followed by `no other codec to move to`, the link offers only the broken one and
+nothing more can be done from this side.
+
+`bluealsa: Dropping PCM frames: PCM overrun` in the Bluetooth log (Settings →
+Developer options → Bluetooth log) is the daemon's side of the same question:
+it means the player did not drain bluealsa's own FIFO in time, which points at
+the player rather than at the link.
+
+### Bluetooth receiver buffers
+
+Everything between the phone and the ear is a config key, and the defaults are
+deliberate rather than wide:
+
+| key | default | what it is |
+|---|---|---|
+| `receiver_capture_ms` | 80 | bluealsa's side: the capture buffer the plugin fills |
+| `receiver_output_ms` | 120 | the DAC's side: the ALSA buffer the player writes into |
+| `receiver_jitter_ms` | 150 | the ring between the phone's clock and the DAC's |
+| `receiver_ring_ms` | 400 | the ring's hard ceiling |
+| `receiver_rt_priority` | 10 | `SCHED_RR` priority of both receiver threads; 0 = none |
+| `io_rt_priority` | 12 | `SCHED_FIFO` priority of bluealsa's decode thread; 0 = none |
+
+All six go in the `[bluetooth]` section of `/usr/data/device_config.ini`. The
+first four are latency: raising them trades a delay in the ear for tolerance of
+a bad link, and for anything with a picture on the phone that trade is a bad
+one past a couple of hundred milliseconds. The last two are a single core's
+scheduling order; the receiver's own thread and bluealsa's decoder should not
+both be able to be behind the interface at the same time.

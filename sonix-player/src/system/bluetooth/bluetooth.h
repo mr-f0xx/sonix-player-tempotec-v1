@@ -303,6 +303,15 @@ bool bluetooth_receiver_track(bt_track_t *out);
 // Moves the incoming stream onto another of them. The link is renegotiated, so
 // the audio stops for a moment and comes back on the new codec.
 void bluetooth_receiver_set_codec(const char *codec);
+
+// The same, for a link that is open and arriving but does not decode: the
+// receiver calls this once when a session has carried no audio at all, so that
+// a decoder which cannot run (bluez-alsa's aptX one spins on a bad packet
+// rather than failing) ends with the link on a codec that does. It waits a
+// bounded time for the worker to finish and returns whether the renegotiation
+// was answered -- the stream is expected to be torn down and rebuilt either
+// way, and the caller reopens it.
+bool bluetooth_receiver_recover_codec(const char *codec);
 // Advances only when the worker has read stream information; metadata cannot
 // make an old codec/rate look like a fresh response.
 unsigned bluetooth_receiver_stream_serial(void);

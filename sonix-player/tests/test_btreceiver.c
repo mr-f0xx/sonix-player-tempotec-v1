@@ -43,7 +43,9 @@ const char *snd_strerror(int err) { (void)err; return "fake error"; }
 static bool silent_pcm;
 
 snd_pcm_sframes_t snd_pcm_readi(snd_pcm_t *p, void *buf, snd_pcm_uframes_t frames) {
-	assert(p == &fake_pcm && frames == CHUNK_FRAMES);
+	// Never more than one chunk is asked for, and never more than the ring has
+	// room for: both are the receiver's own promises to the phone.
+	assert(p == &fake_pcm && frames > 0 && frames <= CHUNK_FRAMES);
 	reads++;
 	if (silent_pcm) return -EAGAIN;
 	if (reads == 1) return -EAGAIN; /* exercise bounded wait, not recovery */
@@ -65,7 +67,36 @@ snd_pcm_sframes_t snd_pcm_readi(snd_pcm_t *p, void *buf, snd_pcm_uframes_t frame
 	}
 	return 2;
 }
-long config_get_int(const char *section, const char *key, long fallback) { (void)section; (void)key; return fallback; }
+// The ring's depth is a config key, and the defaults would have the fake
+// session waiting three seconds for a target a two-frame-per-read fake takes
+// four hundred reads to reach. The floor it allows is what the test asks for.
+long config_get_int(const char *section, const char *key, long fallback) {
+	(void)section;
+	if (strcmp(key, "receiver_jitter_ms") == 0) return 20;
+	if (strcmp(key, "receiver_ring_ms") == 0) return 60;
+	return fallback;
+}
+/* The codec menu, as the receiver reads it: one codec, never the one the link is
+ * stuck on (the caller filters that), so a stuck decoder always has somewhere to
+ * go. The recovery itself is recorded so the test can see it was asked for. */
+static int recoveries;
+static char recovered[BT_CODEC_MAX];
+static bool no_codecs; // a link that offers nothing: nothing to recover onto
+int bluetooth_receiver_codecs(char out[][BT_CODEC_MAX], int max, char *selected, int selected_size) {
+	(void)selected;
+	(void)selected_size;
+	if (max < 1 || no_codecs) return 0;
+	const char *names[] = {"aptX", "AAC"};
+	int count = (int)(sizeof(names) / sizeof(names[0]));
+	if (count > max) count = max;
+	for (int i = 0; i < count; i++) snprintf(out[i], BT_CODEC_MAX, "%s", names[i]);
+	return count;
+}
+bool bluetooth_receiver_recover_codec(const char *codec) {
+	recoveries++;
+	snprintf(recovered, sizeof(recovered), "%s", codec ? codec : "");
+	return true;
+}
 const char *tr(const char *key) { return key; }
 unsigned bluetooth_receiver_stream_serial(void) { return fake_serial; }
 unsigned bluetooth_refresh_receiver(void) { return ++fake_serial; }
@@ -76,9 +107,26 @@ bool bluetooth_receiver_playing(void) { return fake_playing; }
 bool audio_external_begin_latency(int rate, int ch, int bits, int latency) {
 	assert(rate == 48000 && ch == 2 && latency > 0); output_bits = bits; return true;
 }
+// The output thread writes whatever it took out of the ring, which is a chunk
+// rather than one read: what matters here is that the samples arriving are the
+// right ones, in the right order, widened the same way. The first four are kept
+// and the rest counted. Writing any of them stops the session, so the capture
+// side has to notice and the ring has to be played out for this to return.
+static int written_frames;
+static int64_t written_samples;
 int audio_external_write(const void *data, int frames) {
-	assert(frames == 2 && output_bits == 32);
-	memcpy(written, data, sizeof(written)); writes++;
+	assert(output_bits == 32 && frames > 0);
+	if (written_frames < 4) {
+		const int32_t *samples = data;
+		for (int i = 0; i < frames * 2 && written_frames < 4; i++) {
+			written[written_frames++] = samples[i];
+		}
+	}
+	written_samples += frames * 2;
+	writes++;
+	// The sessions that read this as "the user is done" end themselves here;
+	// the ones about a codec change keep producing, so that the change is what
+	// ends them and not the write.
 	if (stop_on_write) {
 		pthread_mutex_lock(&lock); running = false; pthread_mutex_unlock(&lock);
 	}
@@ -128,11 +176,13 @@ static void run_format(unsigned bits, snd_pcm_format_t expected) {
 	strcpy(fake_info.codec, bits == 24 ? "aptX-HD" : "SBC");
 	fake_info.rate = 48000; fake_info.channels = 2; fake_info.bits = bits;
 	requested_format = 0; nonblock_enabled = capture_closed = output_closed = output_bits = writes = reads = 0;
+	written_frames = 0; written_samples = 0;
 	pthread_mutex_lock(&lock); running = true; session_id = 7; pthread_mutex_unlock(&lock);
 	bool heard = false;
 	assert(capture_session("AA:BB:CC:DD:EE:FF", "source", false, true, 7, &heard) == SESSION_OVER);
 	assert(heard && requested_format == expected && requested_rate == 48000 && requested_channels == 2);
-	assert(nonblock_enabled == 1 && reads == 2 && writes == 1 && capture_closed == 1 && output_closed == 1);
+	assert(nonblock_enabled == 1 && reads > 2 && writes >= 1 && capture_closed == 1 && output_closed == 1);
+	assert(written_samples > 0);
 	assert(written[0] == (bits == 16 ? 0x12340000 : 0x12345600));
 	assert(written[1] == (int32_t)0x80000000u && written[2] == 0);
 	assert(written[3] == (bits == 16 ? 0x7fff0000 : 0x7fffff00));
@@ -259,6 +309,41 @@ static void test_silent_sender_is_asked_for_a_stream(void) {
 	fake_playing = false;
 }
 
+// The condition that moves a link off a decoder that will not run: frames have
+// arrived, none has reached the DAC, and it has been long enough.
+static void test_stuck_decoder(void) {
+	uint32_t began = 1000;
+	// Frames arriving and nothing out, after the window: stuck.
+	assert(decoder_stuck(true, 2400, 0, began, began + DECODER_STUCK_MS));
+	// Too early: a slow start is not a stuck decoder.
+	assert(!decoder_stuck(true, 2400, 0, began, began + DECODER_STUCK_MS - 1));
+	// Something reached the DAC: whatever is wrong, it is not this.
+	assert(!decoder_stuck(true, 2400, 64, began, began + DECODER_STUCK_MS * 2));
+	// Nothing has arrived: a silent sender, which the first-frame watchdog and
+	// the AVRCP status own, not this.
+	assert(!decoder_stuck(false, 0, 0, began, began + DECODER_STUCK_MS * 2));
+	assert(!decoder_stuck(true, 0, 0, began, began + DECODER_STUCK_MS * 2));
+}
+
+// A link whose decoder will not run has to be moved to another codec, and never
+// onto the one it is stuck on.
+static void test_next_codec(void) {
+	char out[BT_CODEC_MAX];
+	// The first codec on the link that is not the one it is stuck on.
+	assert(next_codec_offered("aptX", out, sizeof(out)));
+	assert(strcmp(out, "AAC") == 0);
+	assert(next_codec_offered("AAC", out, sizeof(out)));
+	assert(strcmp(out, "aptX") == 0);
+	// A codec the link does not offer at all: the first one it does.
+	assert(next_codec_offered("LDAC", out, sizeof(out)));
+	assert(strcmp(out, "aptX") == 0);
+	// Nothing at all to move to is the caller's "leave the link alone".
+	no_codecs = true;
+	assert(!next_codec_offered("aptX", out, sizeof(out)));
+	assert(out[0] == '\0');
+	no_codecs = false;
+}
+
 int main(void) {
 	// An old in-flight response must not satisfy the newly issued ticket.
 	pthread_mutex_lock(&lock); running = true; session_id = 7; pthread_mutex_unlock(&lock);
@@ -287,6 +372,8 @@ int main(void) {
 	test_fail_nonblock = true;
 	assert(!open_capture("AA:BB:CC:DD:EE:FF", 48000, 2, 32));
 	assert(!open_capture("AA:BB:CC:DD:EE:FF", 48000, 2, 8));
+	test_stuck_decoder();
+	test_next_codec();
 	puts("PASS Bluetooth RX (16/24/32-bit frames, nonblocking reads, codec change and cleanup)");
 	return 0;
 }

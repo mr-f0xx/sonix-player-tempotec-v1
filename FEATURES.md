@@ -184,7 +184,15 @@ a self-signed certificate), and HLS.
   control: off, cancellation, transparency, adaptive.
 - **Bluetooth in** - a phone or laptop connects and the player becomes its
   speaker, decoding through its own DAC. The incoming codec, rate and depth are
-  shown.
+  shown. The decoded audio is buffered by the player before it reaches the DAC,
+  150 ms of it (`[bluetooth] receiver_jitter_ms`), because the phone's audio
+  clock and this device's are not the same clock: without the buffer the two
+  meet inside a 120 ms ALSA buffer and every delivery a few milliseconds late
+  is a stutter in the ear. With LDAC the buffer also protects the bit rate --
+  a sink that is not draining makes the phone think the link has gone bad, and
+  its adaptive rate steps down for a minute before climbing back. The wire is a
+  second thread of its own on the other side of that buffer, so the thread facing
+  the DAC does nothing but copy frames and write them.
 - **AirPlay** - the player appears as an AirPlay target.
 - **DLNA** - the player appears as a renderer.
 - **Wi-Fi** - scan and join the networks in the air, and hidden ones too:
