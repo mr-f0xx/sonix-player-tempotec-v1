@@ -7,6 +7,7 @@
 #include "src/gui/nowplaying/player.h"
 #include "src/gui/settings/screensaver.h"
 #include "src/gui/shell/theme.h"
+#include "src/gui/shell/volumereadout.h"
 #include "src/system/audio/alsa-controls.h"
 
 // GNOME's OSD look: a rounded pill, icon on the left, a slim scale, the number
@@ -33,6 +34,11 @@
 #define COMPACT_SLIDER_HEIGHT 8
 #define OVERLAY_HIDE_MS 1600
 
+// What the label beside the glyph is given for the number: room for "100" at
+// the size each layout prints it.
+#define OVERLAY_LABEL_WIDTH 42
+#define COMPACT_OVERLAY_LABEL_WIDTH 28
+
 // Where the icon changes: silent, quiet, loud.
 #define VOLUME_LOW_PERCENT 1
 #define VOLUME_HIGH_PERCENT 55
@@ -57,6 +63,50 @@ static int shown_percent;
 static void apply_label_color(int percent) {
 	lv_color_t colour = percent > VOLUME_WARN_PERCENT ? VOLUME_WARN_COLOR : theme()->text_primary;
 	lv_obj_set_style_text_color(overlay_label, colour, 0);
+}
+
+// The width the label has for the number, as built, and the form of reading
+// (a volumereadout_form_t) its present width was settled for. -1 is "settle it
+// again", which is also what a change of face or text size leaves behind.
+static int32_t index_label_width;
+static int label_fitted_form = -1;
+
+static void label_fonts_changed(void) { label_fitted_form = -1; }
+
+// The reading beside the glyph: the index, or with Settings > Screen > Volume
+// as voltage on, what the socket is putting out (volumereadout.h).
+//
+// The label is one width for as long as the reading keeps its form, so the
+// scale beside it does not change length under a finger or a held key. For the
+// number that is the width the pill has always given it. A voltage is up to six
+// characters where the number is three, so there the label is as wide as the
+// widest voltage the socket can show in the face in use, and the scale -- which
+// takes whatever the pill has left -- is that much shorter: about a quarter on
+// the V1's strip. Measured when the form changes and not on every step: a held
+// volume key comes through here for each one.
+static void set_reading(int percent) {
+	int form = (int)volumereadout_form();
+	if (form != label_fitted_form) {
+		int32_t width = index_label_width;
+		if (form != VOLUMEREADOUT_FORM_INDEX) {
+			const lv_font_t *font = lv_obj_get_style_text_font(overlay_label, LV_PART_MAIN);
+			int32_t letter_space = lv_obj_get_style_text_letter_space(overlay_label, LV_PART_MAIN);
+			char sample[VOLUMEREADOUT_TEXT_MAX];
+			for (int i = 0; volumereadout_sample(i, sample, sizeof(sample)); i++) {
+				lv_point_t size;
+				lv_text_get_size(&size, sample, font, letter_space, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+				if (size.x > width) {
+					width = size.x;
+				}
+			}
+		}
+		lv_obj_set_width(overlay_label, width);
+		label_fitted_form = form;
+	}
+
+	char text[VOLUMEREADOUT_TEXT_MAX];
+	volumereadout_text(percent, text, sizeof(text));
+	lv_label_set_text(overlay_label, text);
 }
 
 // Everything on the pill whose colour comes from the palette. Called when it is
@@ -120,7 +170,7 @@ static void slider_changed_cb(lv_event_t *e) {
 	lv_slider_set_value(overlay_slider, percent, LV_ANIM_OFF);
 	set_icon_for(percent);
 	shown_percent = percent;
-	lv_label_set_text_fmt(overlay_label, "%d", percent);
+	set_reading(percent);
 	apply_label_color(percent);
 
 	lv_timer_reset(hide_timer);
@@ -159,7 +209,7 @@ void volume_overlay_show(int percent) {
 	if (!lv_obj_has_state(overlay_slider, LV_STATE_PRESSED)) {
 		lv_slider_set_value(overlay_slider, percent, LV_ANIM_OFF);
 	}
-	lv_label_set_text_fmt(overlay_label, "%d", percent);
+	set_reading(percent);
 	apply_label_color(percent);
 
 	lv_obj_set_hidden(veil, false);
@@ -224,8 +274,12 @@ void volume_overlay_init(gui_config_t *cfg) {
 	overlay_label = lv_label_create(overlay);
 	lv_label_set_text(overlay_label, "0");
 	lv_obj_set_style_text_font(overlay_label, compact ? &font_ui_16 : &font_ui_24, 0);
-	lv_obj_set_width(overlay_label, compact ? 28 : 42);
+	index_label_width = compact ? COMPACT_OVERLAY_LABEL_WIDTH : OVERLAY_LABEL_WIDTH;
+	lv_obj_set_width(overlay_label, index_label_width);
 	lv_obj_set_style_text_align(overlay_label, LV_TEXT_ALIGN_CENTER, 0);
+	// A voltage is measured in the face (set_reading()), so another face or
+	// another text size has it measured again.
+	fonts_register_change(label_fonts_changed);
 
 	// The scale: an Adwaita slider (slim trough, accent fill, white knob) that
 	// takes the finger directly.

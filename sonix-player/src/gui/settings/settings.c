@@ -26,6 +26,9 @@
 #include "src/gui/settings/systempage.h"
 #include "src/gui/shell/theme.h"
 #include "src/gui/settings/timeset.h"
+#include "src/gui/shell/topbar.h"
+#include "src/gui/shell/volumereadout.h"
+#include "src/system/audio/alsa-controls.h"
 #include "src/system/core/config.h"
 #include "src/system/audio/headset.h"
 #include "src/system/core/lang.h"
@@ -63,6 +66,12 @@ static lv_obj_t *brightness_slider;
 static lv_obj_t *brightness_value;
 static lv_obj_t *cc_volume_switch; // what the control centre's slider is for
 static lv_obj_t *cc_both_switch;
+// The volume read as a voltage (volumereadout.h): the switch, and under it the
+// socket the figure is for.
+static lv_obj_t *volume_voltage_switch;
+static lv_obj_t *volume_voltage_pills;
+static lv_obj_t *volume_voltage_phones_pill;
+static lv_obj_t *volume_voltage_balanced_pill;
 static lv_obj_t *screen_off_value;
 static lv_obj_t *screen_off_slider;
 static lv_obj_t *doubletap_switch;
@@ -277,6 +286,40 @@ static void cc_both_toggled_cb(lv_event_t *e) {
 	if (cc_volume_switch) lv_obj_set_state(cc_volume_switch, LV_STATE_DISABLED, on);
 }
 
+// Volume as voltage: the switch, the two sockets under it, and which of them
+// is lit. The pills hide with the switch off, as the screensaver's do: which
+// socket means nothing while the reading is the plain number.
+static void volume_voltage_refresh(void) {
+	if (!volume_voltage_switch) {
+		return;
+	}
+	bool on = volumereadout_enabled();
+	lv_obj_set_state(volume_voltage_switch, LV_STATE_CHECKED, on);
+	lv_obj_set_hidden(volume_voltage_pills, !on);
+
+	volumereadout_jack_t jack = volumereadout_jack();
+	settingsrow_pill_active(volume_voltage_phones_pill, jack == VOLUMEREADOUT_JACK_PHONES);
+	settingsrow_pill_active(volume_voltage_balanced_pill, jack == VOLUMEREADOUT_JACK_BALANCED);
+}
+
+// Either of the two repaints the status bar at once. It is in view right above
+// the page, and it is where the user looks to see what the switch just did.
+static void volume_voltage_toggled_cb(lv_event_t *e) {
+	(void)e;
+	volumereadout_set_enabled(lv_obj_has_state(volume_voltage_switch, LV_STATE_CHECKED));
+	volume_voltage_refresh();
+	topbar_refresh_volume(get_volume_percent());
+}
+
+static void volume_voltage_jack_cb(lv_event_t *e) {
+	if (player_sheet_drag_active() || switcher_back_drag_active()) {
+		return;
+	}
+	volumereadout_set_jack((volumereadout_jack_t)(intptr_t)lv_event_get_user_data(e));
+	volume_voltage_refresh();
+	topbar_refresh_volume(get_volume_percent());
+}
+
 // The panel's real range is only known after power_init() has run, which is
 // after the GUI is built -- so the slider syncs itself every time the page
 // comes up.
@@ -392,6 +435,24 @@ static void build_screen_page(gui_config_t *cfg) {
 	lv_obj_set_style_text_font(cc_both_note, &font_ui_22, 0);
 	lv_label_set_text(cc_both_note, tr("settings_cc_both_note"));
 
+	// What the volume is read as, in the status bar and on the volume bar: the
+	// 0-100 it has always been, or what the socket puts out at that level
+	// (volumereadout.h). The pills are the socket, and they are asked because
+	// this board has no way of telling which of the two is in use.
+	settingsrow_toggle_pills(container, "settings_volume_voltage", volume_voltage_toggled_cb, &volume_voltage_switch,
+							 &volume_voltage_pills);
+	volume_voltage_phones_pill = settingsrow_pill(volume_voltage_pills, "settings_volume_voltage_phones",
+												  VOLUMEREADOUT_JACK_PHONES, volume_voltage_jack_cb);
+	volume_voltage_balanced_pill = settingsrow_pill(volume_voltage_pills, "settings_volume_voltage_balanced",
+													VOLUMEREADOUT_JACK_BALANCED, volume_voltage_jack_cb);
+	volume_voltage_refresh();
+	lv_obj_t *volume_voltage_note = lv_label_create(container);
+	lv_label_set_long_mode(volume_voltage_note, LV_LABEL_LONG_WRAP);
+	lv_obj_set_width(volume_voltage_note, lv_pct(100));
+	lv_obj_add_style(volume_voltage_note, &theme_style_text_dim, 0);
+	lv_obj_set_style_text_font(volume_voltage_note, &font_ui_22, 0);
+	lv_label_set_text(volume_voltage_note, tr("settings_volume_voltage_note"));
+
 	// How long the panel waits before it goes dark. Straight under the
 	// brightness: both are about the panel, and the one that switches it off is
 	// the first thing looked for after the one that sets how bright it is.
@@ -457,6 +518,7 @@ static void build_screen_page(gui_config_t *cfg) {
 	theme_register_refresh(refresh_brightness_slider);
 	// The pills carry hand-set colours, so a theme change has to repaint them.
 	theme_register_refresh(screensaver_refresh);
+	theme_register_refresh(volume_voltage_refresh);
 }
 
 // The developer options row is kept in a global because it appears and
