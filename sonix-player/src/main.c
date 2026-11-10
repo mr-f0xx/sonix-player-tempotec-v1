@@ -2542,6 +2542,16 @@ int main(int argc, char **argv) {
 	// nothing wakes it while the queue is empty. With no descriptor (eventfd
 	// not opened) poll() on a negative fd is exactly a timed sleep, and the
 	// bridge timer polls fast in that case.
+	// Before the watchdog, whose report of a real-time thread that never
+	// sleeps can only reach the card if that thread is not allowed the whole
+	// core. Issue 265 has three stops that look exactly like that: everything
+	// dead within a second of a Bluetooth stream starting, no watchdog lines,
+	// and a reset ten to twenty seconds later.
+	//
+	//   [system]
+	//   rt_throttle = 0    leave the kernel's setting as it is found
+	rt_throttle_ensure("/proc/sys/kernel", config_get_int("system", "rt_throttle", 1) != 0);
+
 	watchdog_start();
 
 	printf("Entering main event loop...\n");

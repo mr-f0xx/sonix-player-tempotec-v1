@@ -3356,6 +3356,14 @@ static void do_auto_codec(const char *mac) {
 	}
 	snprintf(codec_auto_done, sizeof(codec_auto_done), "%s", mac);
 
+	// Never in car mode. Asking for another codec is a Close and a new Set
+	// Configuration on a stream that exists, and that is what the Tesla of
+	// issue 265 answered twice by refusing the new media channel ("security
+	// block") and dropping the link. What was configured stands.
+	if (car_stage() != CAR_STAGE_NONE) {
+		return;
+	}
+
 	char codecs[BT_MAX_CODECS][BT_CODEC_MAX];
 	char selected[BT_CODEC_MAX] = "";
 	int count = btstack_codecs(mac, codecs, BT_MAX_CODECS, selected, sizeof(selected));

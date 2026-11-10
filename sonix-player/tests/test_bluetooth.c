@@ -555,19 +555,31 @@ bool btstack_audio_sink(char *address_out, size_t size) {
 	return fake_sink[0] != '\0';
 }
 
+// A sink that came up on SBC and also lists AAC, which is when the player asks
+// for the better one by itself; off by default, where there is nothing to pick.
+static bool fake_offers_aac;
+static int select_codec_calls;
+
 int btstack_codecs(const char *address, char out[][BT_CODEC_NAME_MAX], int max, char *selected, size_t selected_size) {
 	(void)address;
-	(void)out;
-	(void)max;
 	if (selected && selected_size) {
 		selected[0] = '\0';
 	}
-	return 0;
+	if (!fake_offers_aac || max < 2) {
+		return 0;
+	}
+	snprintf(out[0], BT_CODEC_NAME_MAX, "SBC");
+	snprintf(out[1], BT_CODEC_NAME_MAX, "AAC");
+	if (selected && selected_size) {
+		snprintf(selected, selected_size, "SBC");
+	}
+	return 2;
 }
 
 bool btstack_select_codec(const char *address, const char *codec) {
 	(void)address;
 	(void)codec;
+	select_codec_calls++;
 	return false;
 }
 
@@ -1158,6 +1170,22 @@ static void test_car_mode(void) {
 	sink_invites[0].linked_since = now_ms() - (SINK_INVITE_GRACE_MS + 1000);
 	invite_sinks();
 	assert(car_restarts == 0 && a2dp_profile_requests == 1);
+
+	// No codec is asked for by the player in car mode: a new configuration on
+	// a stream that exists is what cost the report's car its link, twice.
+	car_fixture();
+	fake_offers_aac = true;
+	select_codec_calls = 0;
+	codec_auto_done[0] = '\0';
+	do_auto_codec(BUDS);
+	assert(select_codec_calls == 1); // headphones: AAC is asked for over SBC
+	codec_auto_done[0] = '\0';
+	snprintf(g_car_mac, sizeof(g_car_mac), TESLA);
+	fake_car_codec = "aac"; // even with AAC left on offer
+	do_auto_codec(TESLA);
+	assert(select_codec_calls == 1);
+	fake_offers_aac = false;
+	codec_auto_done[0] = '\0';
 
 	// A connection made from here: the mode is right before the page goes
 	// out, in both directions, and a second connect to the same kind of

@@ -85,6 +85,23 @@ void thread_be_low_priority(const char *name);
 // Failing is not fatal; the host build has no privilege for it.
 void thread_be_realtime(const char *name, int priority);
 
+// The kernel's limit on what real-time threads may take of the one core, read
+// from `dir` (/proc/sys/kernel) and logged; when it is switched off and
+// `may_change` allows, switched on at 95 % of the period, which is what Linux
+// ships with.
+//
+// Why it matters here: with the limit off, a SCHED_RR thread that stops
+// sleeping takes everything -- the interface, the card's I/O threads, whatever
+// feeds the hardware watchdog -- and the device stops dead with nothing in the
+// log, because the lines that would say so never reach the card. With it on,
+// the rest gets a twentieth of every second: enough for the watchdog thread's
+// dump to be written and for the device to answer its keys. A thread that
+// sleeps as it should never comes near the limit.
+//
+// Returns the runtime in force afterwards in microseconds, -1 when the limit
+// is off and stays off, 0 when it cannot be read.
+long rt_throttle_ensure(const char *dir, bool may_change);
+
 // Gives the calling thread its own stack for signal handlers to run on, so a
 // stack overflow reaches the crash handler instead of killing the process
 // silently. thread_be_background() already does this; call it directly from a
