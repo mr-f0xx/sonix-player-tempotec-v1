@@ -593,6 +593,37 @@ sanitize-codecs:
 clean:
 	rm -rf $(BUILD)
 
+# The player's log is the stream logging.c assigns to `stdout`. On the device's
+# glibc (2.22) puts() and putchar() do not write to that variable but to libc's
+# own stdout object, so a printf the compiler folds into either of them never
+# reaches the card. The main Makefile switches that folding off; this checks
+# that the flags are still there, that they still do what they are there for --
+# also where the toolchain fortifies, and printf is __printf_chk by then -- and
+# that the format check the flag takes away is put back by glibc_compat.h, in C
+# and, where there is a C++ compiler, in C++.
+.PHONY: printf-flag
+printf-flag:
+	@mkdir -p $(BUILD)
+	@flags="$$(sed -n 's/^CFLAGS = //p' $(ROOT)/Makefile)"; \
+	for want in -fno-builtin-printf -fno-builtin-__printf_chk; do \
+		case " $$flags " in *" $$want "*) ;; \
+			*) echo "FAIL the main Makefile's CFLAGS lost $$want"; exit 1;; esac; done; \
+	opt="$$(printf '%s\n' $$flags | grep -E '^-(O|f)' | tr '\n' ' ')"; \
+	inc="-include $(ROOT)/src/system/core/glibc_compat.h"; \
+	printf '#include <stdio.h>\nvoid a(void){printf("text\\n");}\nvoid b(const char *s){printf("%%s\\n",s);}\nvoid c(void){printf("x");}\n' > $(BUILD)/printf_fold.c; \
+	printf '#include <stdio.h>\nvoid a(void){printf("%%s\\n", 42);}\n' > $(BUILD)/printf_bad.c; \
+	for fortify in "" "-U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=2"; do \
+		for lang in c c++; do \
+			if [ $$lang = c++ ] && ! echo 'int x;' | $(CC) -x c++ -fsyntax-only - 2>/dev/null; then continue; fi; \
+			$(CC) $$opt $$fortify $$inc -x $$lang -c $(BUILD)/printf_fold.c -o $(BUILD)/printf_fold.o || exit 1; \
+			if nm $(BUILD)/printf_fold.o | grep -E ' U (puts|putchar)$$'; then \
+				echo "FAIL printf is still compiled into puts()/putchar() ($$lang, $$opt $$fortify)"; exit 1; fi; \
+			if $(CC) $$opt $$fortify $$inc -Werror=format -x $$lang -c $(BUILD)/printf_bad.c -o $(BUILD)/printf_bad.o 2>/dev/null; then \
+				echo "FAIL a wrong printf format compiles without a word ($$lang, $$opt $$fortify)"; exit 1; fi; \
+		done; \
+	done; \
+	echo "PASS constant printf calls stay printf and formats are still checked (flags: $$opt)"
+
 # Optional headless LVGL layout regression tests. Reuse the production config,
 # disabling SDL, FreeType and device drivers; no audio service is linked.
 UI_SRC = $(ROOT)/tests/ui/test_main_menu.c $(ROOT)/src/gui/shell/main_menu.c \

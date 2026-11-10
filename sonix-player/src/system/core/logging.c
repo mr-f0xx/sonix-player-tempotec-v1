@@ -585,11 +585,154 @@ static void flush_early(FILE *destination) {
 	early_stream = NULL;
 }
 
+// ---------------------------------------------------------------------------
+// How the previous run ended
+//
+// The card's log is append-only and survives the reset, so the end of it is the
+// only record of how the last session stopped -- and a stop that said nothing
+// is itself the answer. Three things end a session:
+//
+//   - the player shuts down and says so on its way out ("... before shutdown");
+//   - the player dies, and sonix_launch appends the exit status or the signal
+//     to this same file before it reboots;
+//   - neither, and the machine went down underneath both of them.
+//
+// The third is what a kernel panic, a watchdog reset and a power event all look
+// like, and on a kernel without pstore it is all that is ever left of one. Said
+// at the next start, a log that simply stops becomes a report that names its
+// own class. The report of this was a log with eight such stops in a day and no
+// way to tell a dead kernel from a dead process in any of them.
+// ---------------------------------------------------------------------------
+#define PREVIOUS_TAIL_BYTES 8192
+#define PREVIOUS_LINE_CHARS 120
+#define LAUNCHER_MARK "sonix_launch: player "
+#define SHUTDOWN_MARK "before shutdown"
+
+typedef struct {
+	bool known;   // there was a log file to read
+	bool cut;     // its last line had no newline: writing stopped mid-line
+	bool shutdown;
+	bool launcher;
+	char launcher_line[PREVIOUS_LINE_CHARS];
+	char last_line[PREVIOUS_LINE_CHARS];
+} previous_end_t;
+
+// Copies `text` into `out`, one line, CR/LF and control characters flattened.
+static void one_line(char *out, size_t len, const char *text) {
+	size_t at = 0;
+	for (; *text && at + 1 < len; text++) {
+		unsigned char c = (unsigned char)*text;
+		out[at++] = (c < 0x20 || c == 0x7f) ? ' ' : (char)c;
+	}
+	out[at] = '\0';
+}
+
+// Reads the tail of the log the next run is about to append to, and decides
+// which of the three endings it shows. Reads rather than keeping a marker
+// beside it: a file that was truncated, or a first start after a card that was
+// swapped, then reports itself instead of lying.
+static void read_previous_end(previous_end_t *prev) {
+	memset(prev, 0, sizeof(*prev));
+	if (!sd_log_path[0]) {
+		return;
+	}
+
+	FILE *file = fopen(sd_log_path, "rbe");
+	if (!file) {
+		return;
+	}
+	if (fseek(file, 0, SEEK_END) != 0) {
+		fclose(file);
+		return;
+	}
+	long size = ftell(file);
+	if (size <= 0) {
+		fclose(file);
+		return;
+	}
+	long from = size > PREVIOUS_TAIL_BYTES ? size - PREVIOUS_TAIL_BYTES : 0;
+	if (fseek(file, from, SEEK_SET) != 0) {
+		fclose(file);
+		return;
+	}
+	char *tail = malloc(PREVIOUS_TAIL_BYTES + 1);
+	if (!tail) {
+		fclose(file);
+		return;
+	}
+	size_t got = fread(tail, 1, PREVIOUS_TAIL_BYTES, file);
+	fclose(file);
+	tail[got] = '\0';
+	if (got == 0) {
+		free(tail);
+		return;
+	}
+
+	prev->known = true;
+	prev->cut = tail[got - 1] != '\n';
+
+	// The window can start in the middle of a line; that fragment is not one.
+	char *text = tail;
+	if (from > 0) {
+		char *newline = strchr(tail, '\n');
+		if (newline) {
+			text = newline + 1;
+		}
+	}
+
+	// Which ending is the last one in the file: the window can hold several
+	// runs, and only the newest says how the last session stopped.
+	for (char *line = strtok(text, "\n"); line; line = strtok(NULL, "\n")) {
+		if (!line[0]) {
+			continue;
+		}
+		one_line(prev->last_line, sizeof(prev->last_line), line);
+		if (strstr(line, LAUNCHER_MARK)) {
+			prev->launcher = true;
+			prev->shutdown = false;
+			one_line(prev->launcher_line, sizeof(prev->launcher_line), line);
+		} else if (strstr(line, SHUTDOWN_MARK)) {
+			prev->shutdown = true;
+			prev->launcher = false;
+		}
+	}
+	free(tail);
+}
+
+static void say_previous_end(const previous_end_t *prev) {
+	if (!prev->known) {
+		return;
+	}
+	if (prev->launcher) {
+		printf("log: the previous run ended: %s\n", prev->launcher_line);
+		return;
+	}
+	if (prev->shutdown) {
+		printf("log: the previous run shut down the way it should\n");
+		return;
+	}
+	printf("log: the previous run did not shut down and sonix_launch did not record the player exiting --\n");
+	printf("log: the machine went down under it (a kernel panic, a watchdog reset or the power), which is\n");
+	printf("log: untraceable here: this kernel keeps nothing across a reset. Its last line was:\n");
+	printf("log:   %s%s\n", prev->last_line, prev->cut ? " [cut off: writing stopped mid-line]" : "");
+}
+
 // Opens the card's log and makes it the destination. Returns false if the card
 // will not take it.
 static bool open_sd_log(void) {
 	if (!sd_log_path[0]) {
 		return false;
+	}
+
+	// Before the append, while the file still holds only the previous run --
+	// and only the first time: a reattach after a USB export reopens the same
+	// file in the middle of this run, where the tail is this run's own.
+	static bool previous_end_read;
+	previous_end_t previous;
+	memset(&previous, 0, sizeof(previous));
+	if (!previous_end_read) {
+		previous_end_read = true;
+		read_previous_end(&previous);
 	}
 
 	FILE *file = fopen(sd_log_path, "ae");
@@ -606,6 +749,7 @@ static bool open_sd_log(void) {
 	on_sd = true;
 
 	printf("log: writing to %s\n", sd_log_path);
+	say_previous_end(&previous);
 	return true;
 }
 

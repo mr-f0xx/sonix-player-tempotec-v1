@@ -11,6 +11,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <sys/wait.h>
 #include <unistd.h>
 
 #include "src/system/audio/waveform.h"
@@ -174,6 +175,68 @@ static int count_card_fds(const char *card_root, bool *non_cloexec_above_2) {
 	return count;
 }
 
+// What the next start says about the end of the last one. Each case makes a
+// card, leaves a log on it, starts logging there in a child of its own (the
+// logging state is one-shot per process) and looks at the lines that were
+// added. `reject` is asserted absent when it is not NULL.
+static void check_previous_end(const char *previous, const char *expect, const char *reject) {
+	int pipe_fds[2];
+	assert(pipe(pipe_fds) == 0);
+	pid_t pid = fork();
+	assert(pid >= 0);
+	if (pid == 0) {
+		close(pipe_fds[0]);
+		char root[] = "/tmp/sonix-previous-XXXXXX";
+		if (!mkdtemp(root)) {
+			_exit(2);
+		}
+		char card[320], folder[360], log_path[420];
+		snprintf(card, sizeof(card), "%s/sd_0", root);
+		snprintf(folder, sizeof(folder), "%s/.local", card);
+		snprintf(log_path, sizeof(log_path), "%s/sonix_player.log", folder);
+		if (mkdir(card, 0700) != 0 || mkdir(folder, 0700) != 0) {
+			_exit(3);
+		}
+		FILE *prev = fopen(log_path, "w");
+		if (!prev) {
+			_exit(4);
+		}
+		fputs(previous, prev);
+		fclose(prev);
+
+		int saved = dup(STDOUT_FILENO);
+		unsetenv("SONIX_LOG");
+		logging_init();
+		logging_attach_sd(card);
+		logging_flush();
+		if (saved >= 0) {
+			fflush(stdout);
+			dup2(saved, STDOUT_FILENO);
+		}
+
+		FILE *lf = fopen(log_path, "r");
+		if (!lf) {
+			_exit(5);
+		}
+		char data[8192];
+		size_t n = fread(data, 1, sizeof(data) - 1, lf);
+		fclose(lf);
+		data[n] = '\0';
+		bool ok = strstr(data, expect) != NULL && (!reject || !strstr(data, reject));
+		if (ok) {
+			write(pipe_fds[1], "1", 1);
+		}
+		_exit(0);
+	}
+	close(pipe_fds[1]);
+	char verdict = 0;
+	ssize_t got = read(pipe_fds[0], &verdict, 1);
+	close(pipe_fds[0]);
+	int status = 0;
+	waitpid(pid, &status, 0);
+	assert(got == 1 && verdict == '1');
+}
+
 int main(void) {
 	char root[] = "/tmp/sonix-cardrelease-XXXXXX";
 	assert(mkdtemp(root) != NULL);
@@ -188,6 +251,18 @@ int main(void) {
 	char zeros[4096] = {0};
 	assert(fwrite(zeros, 1, sizeof(zeros), tf) == sizeof(zeros));
 	assert(fclose(tf) == 0);
+
+	// The three endings a card log can be left with. Each is decided before the
+	// file is appended to, in a process of its own: logging is one-shot.
+	check_previous_end("13:00:35.674 audio[1978313]: starting '/mnt/sd_0/.local/tidal-cache/5113376.flac'\n"
+			   "13:00:36.012 audio[1978651]: the track started coming out after 93 ms (32768 frames written)\n",
+			   "the previous run did not shut down", "shut down the way it should");
+	check_previous_end("12:26:56.979 clock: writing 1794169616 through to the RTC before shutdown\n"
+			   "12:26:56.980 clock: written through to /dev/rtc0\n",
+			   "shut down the way it should", "did not shut down");
+	check_previous_end("13:01:18.816 kernel: <4> [   23.157746] cs43198_dai_prepare pcm\n"
+			   "sonix_launch: player killed by signal 11, rebooting\n",
+			   "sonix_launch: player killed by signal 11", "did not shut down");
 
 	int saved_out = dup(STDOUT_FILENO);
 	int saved_err = dup(STDERR_FILENO);

@@ -74,6 +74,60 @@ static void run(const char *path, char **argv, char **envp) {
 	sys3(__NR_execve, (long)path, (long)argv, (long)envp);
 }
 
+// ---------------------------------------------------------------------------
+// One line in the player's own log
+//
+// A reboot follows every exit, so the log on the card ends wherever this one
+// did -- and until now it could not say whether the player stopped or whether
+// the machine went down under it. Those are different faults with different
+// owners, and in the report this was written for there was no way to tell them
+// apart: eight reboots in a day, every one of them a log that simply stopped.
+//
+// So the verdict is appended to the log the player was writing, and synced
+// before the reboot takes the card. The player has closed it by now; O_WRONLY
+// without O_CREAT, because a card that is not mounted must not have a log
+// invented on the rootfs, and the seek to the end is checked, because an
+// append that lands at offset 0 would eat the whole log.
+// ---------------------------------------------------------------------------
+#define LOG_PATH "/mnt/sd_0/.local/sonix_player.log"
+#define LOG_O_WRONLY 1
+#define LOG_SEEK_END 2
+
+static char log_line[128];
+static int log_line_len;
+
+static void log_append(const char *s) {
+	while (*s && log_line_len < (int)sizeof(log_line) - 1) {
+		log_line[log_line_len++] = *s++;
+	}
+}
+
+static void log_append_num(unsigned v) {
+	char buf[12];
+	int i = sizeof(buf);
+	buf[--i] = 0;
+	do {
+		buf[--i] = (char)('0' + v % 10);
+		v /= 10;
+	} while (v && i > 0);
+	log_append(buf + i);
+}
+
+static void log_to_card(void) {
+	static char path[] = LOG_PATH;
+	log_append("\n");
+
+	long fd = sys3(__NR_open, (long)path, LOG_O_WRONLY, 0);
+	if (fd < 0) {
+		return;
+	}
+	if (sys3(__NR_lseek, fd, 0, LOG_SEEK_END) >= 0) {
+		sys3(__NR_write, fd, (long)log_line, log_line_len);
+		sys3(__NR_fsync, fd, 0, 0);
+	}
+	sys3(__NR_close, fd, 0, 0);
+}
+
 __attribute__((noreturn, used)) void launch_main(long *sp) {
 	int argc = (int)sp[0];
 	char **argv = (char **)(sp + 1);
@@ -101,14 +155,21 @@ __attribute__((noreturn, used)) void launch_main(long *sp) {
 			r = sys4(__NR_wait4, pid, (long)&status, 0, 0);
 		} while (r == -EINTR);
 
+		log_append("sonix_launch: player ");
 		if ((status & 0x7f) == 0) {
 			say("sonix_launch: player exited with status ");
 			say_num((unsigned)(status >> 8) & 0xff);
+			log_append("exited with status ");
+			log_append_num((unsigned)(status >> 8) & 0xff);
 		} else {
 			say("sonix_launch: player killed by signal ");
 			say_num((unsigned)status & 0x7f);
+			log_append("killed by signal ");
+			log_append_num((unsigned)status & 0x7f);
 		}
 		say(", rebooting\n");
+		log_append(", rebooting");
+		log_to_card();
 	}
 
 	long pause[2] = {1, 0}; // struct timespec: one second

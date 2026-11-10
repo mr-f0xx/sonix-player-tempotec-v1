@@ -6,6 +6,153 @@
 | Touchscreen multitouch, R1 | `tools/cst8xx_multitouch_patch.py` | the panel reports two fingers, the driver lets one out |
 
 
+## Issue #265: the silent Teslas, the sudden stops, and log lines that never arrived
+
+Worked from the three logs attached to
+[#265](https://github.com/mr-f0xx/sonix-player-tempotec-v1/issues/265) on Nov 9
+(`sonix_player.log`, `bluetooth.log`, `bluetooth.old.log`; Nov 6 to Nov 9, five
+builds, two cars). No hardware was involved: every fix below is tested on the
+host only, and each paragraph says whether it rests on what the logs show or on
+reasoning from them.
+
+### Bluetooth TX to a car: accepted, and silent
+
+What the logs show, for both cars (`4C:FC:AA:1E:B3:80` on Nov 8,
+`4C:FC:AA:12:D5:CC` on Nov 9), every one of the seven times a stream was made:
+
+1. The car makes the link and opens the A2DP signalling channel itself about
+   250 ms later, then asks for nothing.
+2. bluetoothd logs `set_disconnect_timer() timeout 30` and waits. Upstream bluez
+   5.54 waits one second here; this firmware's build waits thirty. Meanwhile
+   every `ConnectProfile(A2DP sink)` is answered `Device or resource busy`
+   (38 times in the player log).
+3. At second thirty bluez configures the stream on its own. The car lists SBC
+   (44.1/48 kHz) and AAC (8 to 96 kHz); bluez takes bluealsa's AAC endpoint and
+   bluealsa picks the highest common rate: `MPEG-2 AAC LC, 96000 Hz, 220000 bps`.
+4. The car accepts Set Configuration, Open and Start. On Nov 9 it then took more
+   than 120,000 media packets over 23 minutes with its volume at 61/127, and
+   played nothing. Raising the volume on the first car (32 to 69/127) changed
+   nothing either.
+
+Across all the logs AAC at 96 kHz was configured nine times, always for a car,
+always silent; AAC at 48 kHz (Buds2 Pro) plays. Phones send AAC at 44.1 or
+48 kHz only. **Reasoned, not proven:** the car advertises a rate it does not
+play. The logs prove what was sent and that it was accepted, not why it was
+silent.
+
+Two things that do not work, both seen in the log: changing the configuration
+in place (08:21:02 and 08:22:34 on Nov 9: the car refuses the new media channel
+with "security block" and drops the link), and opening AVDTP from this side
+(the first car refused it three times the same way).
+
+What changed:
+
+- **Car mode** (`bluetooth.c`). For a device whose class says hands-free or car
+  audio (both cars: `0x240408`), bluealsa is restarted with
+  `--a2dp-force-audio-cd --codec=-AAC` — SBC at 44.1 kHz and nothing else —
+  three seconds after the link, which is inside bluez's thirty, so the
+  endpoints bluez finds when its timer runs out are the plain ones. A
+  connection made from the player switches before the page goes out. The mode
+  ends twenty seconds after the car has gone, or at once when something that is
+  not a car needs the daemon. A daemon that does not take an option is started
+  again with fewer, down to the ordinary set.
+
+  ```ini
+  [bluetooth]
+  car_mode = auto    ; auto | on (every device) | off
+  car_codec = sbc    ; sbc | aac (AAC stays, at 44.1 kHz)
+  ```
+
+  Not verified on a car. Two assumptions carry it: that this bluetoothd, like
+  upstream, keeps the signalling channel when bluealsa's endpoints are replaced
+  under it, and that the vendor's bluealsa 4.1.1 takes `-AAC` as upstream's
+  does (if not, the fallback leaves AAC at 44.1 kHz). A device with the same
+  class that is not a car gets SBC at 44.1 kHz too; `car_mode = off` undoes it.
+- **No automatic codec change in car mode**: the "ask for the better codec"
+  step is the in-place reconfiguration the car answers by dropping the link.
+- **"Busy" is left to bluez.** #266 asked for the profile five times, four
+  seconds apart; all five fall inside the thirty seconds and cannot succeed.
+  `busy` is now said once and looked at again after 35 s.
+- **A note in the log** whenever any sink comes up with AAC above 48 kHz.
+- **The reconnect no longer pages over a new link** (proven cause). Nov 9
+  08:25:48: `going back to 54:10:4F:B0:AD:4D` (earbuds that were not there)
+  went out while the car had just linked; the car closed its channels and the
+  link was gone at 08:25:53. `reconnect_should_stop()` reads a cached device
+  list that nothing refreshed during the 8 s grace. It is refreshed once a
+  second there, and before every attempt.
+
+### The sudden stops
+
+Of 29 starts in the player log, 20 follow a clean end, five follow a held power
+key, one stops at a suspend, and three stop dead within a second of an A2DP
+stream starting:
+
+| last line | what was starting | next kernel start |
+|---|---|---|
+| Nov 8 13:00:36 | TIDAL track change to the Buds2 Pro, `the track started coming out after 93 ms` | 19.6 s later |
+| Nov 8 13:01:18 | Buds2 Pro back 17 s after that boot, track reloading | 15.2 s later |
+| Nov 9 08:26:25 | the car, AAC 96 kHz, `the track started coming out after 117 ms` | 10.8 s later |
+
+No HCI or UART error precedes any of them, the watchdog thread (which dumps
+after five seconds of a stalled interface) wrote nothing, and the device came
+back by itself after a varying delay: everything stopped, and something in
+hardware reset it. The kernel keeps nothing across the reset, so the cause is
+**not known**. Two explanations fit and the logs cannot tell them apart: a
+real-time thread that stops sleeping on the one core (which also starves the
+card's I/O threads, so the watchdog's lines never land), or a fault in the
+kernel when the stream's traffic starts. The two Nov 8 stops happened on build
+`081120260452`, before #266, with the stream going to earbuds: the car is not
+what they have in common, the start of an A2DP stream is.
+
+What changed, to tell the two apart next time: the player logs the kernel's
+real-time limit (`sched_rt_runtime_us`) at start and, when it is off, sets it
+to 95 % (`[system] rt_throttle = 0` leaves it). With the limit on, a spinning
+real-time thread leaves the rest a twentieth of the core, and the watchdog's
+thread dump reaches the card. If a stop like these happens again with the
+limit on and still no watchdog lines, it is the kernel.
+
+### Log lines that never arrived (proven)
+
+On the device's glibc (2.22) `puts()` and `putchar()` write to libc's own
+stdout object, not to the `stdout` variable `logging.c` points at the card log.
+GCC turns every `printf("text\n")` into `puts()`: 125 call sites, none of which
+appears once in 54,702 lines of log — "Entering main event loop..." among them,
+and the line #266 added to say how the previous run ended. The player is now
+built with `-fno-builtin-printf -fno-builtin-__printf_chk` (the second for a
+toolchain that fortifies, where the first alone changes nothing). Without the
+builtin the compiler no longer checks `printf` format strings by itself, so
+`glibc_compat.h`, which already enters every unit, declares the format
+attribute and the host build includes it too.
+`make -C sonix-player/tests printf-flag` fails if a flag goes, if the folding
+comes back, or if a wrong format compiles without a warning.
+
+### Bluetooth RX from the Fold 8: measured, not solved
+
+The player's own underrun count per receiver session, summed per build:
+
+| build | Fold 8 SBC 44.1 | Fold 8 aptX 44.1 | Fold 8 LDAC 96 | others, SBC and aptX |
+|---|---|---|---|---|
+| `061120261856` (Nov 6) | not tried | 0 in 67 s | 10 in 3815 s | 1 in 13 s |
+| `081120260452` | 38 in 21 s | 25 in 61 s | 0 in 42 s | 0 in 248 s |
+| `091120260147` | 64 in 28 s | 18 in 115 s | 4 in 972 s | not tried |
+
+So the report is right, and narrow: the Fold 8's two 44.1 kHz low-latency
+codecs, two underruns a second on SBC, on the builds after Nov 6. It is not the
+radio (LDAC from the same phone is clean at several times the bit rate), not
+SBC or aptX as such (three other sources are clean on the same build), and not
+`btreceiver.c`, which did not change between the clean build and the first bad
+one. The Bluetooth trace hides media packets, so their timing cannot be read.
+**Open.** What would settle it: the same test with CI builds of the commits
+between `7dfb2d4` and `2e23b2f`.
+
+### Not touched
+
+- Maximum brightness and waking: fixed by #268 (the issue #267 section below).
+- MacBook SBC switch, SafeFly aptX, TIDAL track-skip stutter: not analysed.
+
+Tests: `make -C sonix-player/tests bluetooth readfile printf-flag`.
+
+
 ## Volume shown as the output voltage
 
 **Settings → Screen → Volume as voltage** (`[screen] volume_voltage`) prints the
@@ -3916,3 +4063,236 @@ the Wi-Fi page and Calculator/Notes/Metronome/Pet UI suites still pass
 (`make -C sonix-player/tests .build/test_wifi_pages .build/test_tools_pages`;
 the wifi pages target currently needs `-Wno-error=missing-field-initializers`
 because `wifisettings.c` lags `popover_item_t` by one field).
+
+## Bluetooth TX routing, a receiver that survives a codec change, and the indicator that disagreed with itself (issue #265)
+
+Three of the things in that report are code, and each had a mechanism behind it
+that the log would only have shown as a symptom.
+
+**The car that gets the metadata and not the sound.** A sink publishing its
+bluealsa PCM calls `apply_output_routing()`, which moves the ALSA device name
+from the jack to `bluealsa:DEV=…`. The playback loops re-read that name only
+when they open a track: the check they run every 32 buffers watched
+`alsa_output_key()` — the 3.5 mm/4.4 mm route inside the codec — and not the
+name. So a track that was already playing when the sink appeared carried on
+going to the 3.5 mm socket until it ended or was skipped, while the interface,
+the volume curve and the car (which had the AVRCP metadata, since that is a
+different profile and comes up on its own) all said Bluetooth. Re-seating the
+IEMs did not help either, and that is the tell: that moves the route, and the
+route was not what was wrong.
+
+Both loops now compare the device name too, and reroute when either has moved
+(`output_moved()` in `audio.c`). The name the track last acted on is kept, so a
+device that has already been tried and refused is not retried every 32 buffers.
+
+**The car that never got a PCM at all.** A connection the *player* starts goes
+through `connect_device_ex()`, which asks for the A2DP profile by name when the
+ACL is up and no audio is. A connection the *car* starts — the user picks the V1
+on its screen — goes through nothing at all: bluez raises the ACL, AVRCP comes
+up, and the audio profile is only opened if this end asks. From bluez's side
+nothing has failed, so the log is silent and the sound stays in the jack. The
+worker now notices a paired, connected device that advertises an A2DP Sink (or
+is an audio device by class) with no PCM of its own, and asks for the profile
+once per link, three seconds after the link, with the polling shortened so it
+does not wait the fifteen-second backstop out (`invite_sinks()`). Never while
+the user has an action queued, never while a sink is already playing, and never
+in receiver mode, where bluealsa carries no source profile to ask with.
+
+**The receiver that only came back after being restarted.** A phone changing
+codec tears its transport down and builds the next one; bluealsa publishes no
+PCM at all in between, while the device stays connected and playing throughout.
+The capture loop treated "no PCM" as "nothing will work", so after a few seconds
+it either ended the mode or parked itself waiting for a *stream change* — an
+event that does not exist when there is no transport to change. Switching the
+MacBook from AAC to SBC and back therefore left the mode silent until it was
+switched off and on again.
+
+The loop now asks whether the *device* is still connected
+(`bluetooth_receiver_peer_connected()`) and keeps trying while it is, a few
+seconds apart, instead of waiting for an event: the PCM coming back is enough of
+a change, and the retry finds it. A sender that has actually gone still ends the
+mode, as before.
+
+**The codec indicator that said two things at once.** The page's codec line was
+published when a capture session opened; the tick in its codec menu is a
+separate read of bluealsa's own `Codec` property, refreshed every second. After
+a change the menu said AAC (bluealsa had moved) while the line above it still
+said SBC (the session had not reopened yet). The new answer is published the
+moment the watch sees it, before the reopen, so both follow bluealsa.
+
+Tests: `make -C sonix-player/tests bluetooth` covers the sink invitation (grace,
+once per link, not for a source-only phone, not in receiver mode, not during a
+user action), the session surviving a codec change with the new codec published
+before the reopen, and waiting for a PCM that is gone while the device is not.
+The routing change is a two-line predicate behind `output_moved()`; the loops
+around it need the ALSA hardware, so it is checked by reading rather than by a
+host test.
+
+Hardware validation pending: with a car, confirm the audio starts coming out of
+it without a track change and without a second connect from the player, and that
+the log carries `bluetooth: … is linked with no A2DP profile` when the car
+connected on its own. For RX, switch a MacBook between AAC and SBC three or four
+times: the mode must stay up, and `btreceiver: nothing to open … still linked,
+so trying again` is the line to look for if it does not. Nothing here touches
+the transmitter-specific stutter (SBC/aptX on a Fold 8, aptX from a SafeFly) or
+the reboots; those still need the logs from the report, which this sandbox
+could not fetch from the issue's attachments.
+
+### The reboots: what the log says, and making the next one say it
+
+The report attached `sonix_player.log` with 3.1 MB and 25 player starts across
+three builds (`061120261142`, `061120261856`, `081120260452`). Seventeen of those
+starts follow the player's own power-down path — DAC muted for power-off, output
+parked, `clock: writing … before shutdown`, RTC written — or a firmware update
+(`firmware: update file /mnt/sd_0/v1.upt`), which is what a user-initiated
+restart looks like. Eight do not: the log stops in the middle of ordinary work
+and the next line in the file is a new boot.
+
+What those eight have in common:
+
+* No `***` report. That block is written by the player's own fatal-signal
+  handler, so no thread of it took a SIGSEGV, SIGBUS or SIGABRT.
+* No `Oops`, no `Call Trace`, no `Kernel panic` line. The follower on
+  `/dev/kmsg` copies everything at warning level or worse, and would have caught
+  an oops and restarted the device itself (`restart_after_oops()`).
+* No memory pressure. The audio thread reports `MemAvailable` every 10 s and the
+  last one before the 13:00:36 stop is 17 440 kB of 56 936 kB. This is not the
+  out-of-memory killer taking the player.
+* The next boot prints `kernel: nothing kept from before this start (no pstore,
+  no /proc/last_kmsg)` — this kernel keeps nothing across a reset.
+
+So the machine went down underneath the player, and the log has no way left to
+say whether that was a panic (the player sets `kernel.panic=10`, so a panic
+reboots ten seconds later without a trace), a watchdog reset, or the power. That
+is the actual defect the report is about: eight stops in a day, none of them
+attributable.
+
+The two stops on the build the report was filed against are worth naming anyway,
+because both have a shape: the 13:00:36 one came while TIDAL streamed an AAC
+track over A2DP to the Buds2 Pro, 30 s after the Broadcom driver had started
+repeating `dhd_tcpdata_info_get: No more free tdata_psh_info!!`; the 13:01:18 one
+came eight seconds after the Buds2 Pro was back and the output had been moved to
+`bluealsa:DEV=…,PROFILE=a2dp` mid-track. Neither proves anything on its own.
+
+**`sonix_launch` now writes its verdict into the log.** It knew all along —
+`player exited with status N` or `player killed by signal N` — but only to
+stderr, which nothing keeps. It appends that line to
+`/mnt/sd_0/.local/sonix_player.log` (O_WRONLY without O_CREAT, the seek to the
+end checked, `fsync` before the reboot takes the card) so the next run can read
+it.
+
+**The next start says how the last one ended.** Before appending, the player
+reads the tail of its own log and prints one of three verdicts: the player shut
+down; `sonix_launch` recorded an exit (the line is quoted); or neither, in which
+case it says the machine went down under it, and quotes the last line — with
+`[cut off: writing stopped mid-line]` when the log stopped in the middle of one.
+That turns every future report into a one-line answer, and the third case is
+evidence in itself: a signal kill, even SIGKILL from the memory killer, leaves
+the launcher's line behind; only a dead kernel or the power does not.
+
+**The gapless line names what changed.** `gapless: different format
+(2/44100/16 against 2/44100/16), reopening` is what a reader of this log got
+when the output had moved, and it says nothing. It now says `the output device
+changed (… on 'bluealsa:DEV=…' against … on 'default')` or `the format changed`
+as the case is.
+
+Tests: `test_card_release` runs the three endings through a real start of the
+logging path in a child process each and checks what is written. The launcher is
+freestanding MIPS and is compiled for the target only.
+
+What the next report should show, in the log of the run that follows a reboot:
+
+* `log: the previous run ended: sonix_launch: player killed by signal 11,
+  rebooting` — the player died; its own `***` report is above it in the same
+  file, and the addresses in it go through `addr2line` against
+  `sonix_player_debug`.
+* `… killed by signal 9` — SIGKILL, and with `MemAvailable` fine, a kernel-side
+  kill rather than the player's own exit.
+* `log: the previous run did not shut down and sonix_launch did not record the
+  player exiting` — the machine reset. Then the trace needs the kernel: pstore
+  or a serial console, neither of which this rootfs has today.
+
+## Bluetooth RX that stayed silent after the stream died, and a car that was asked only once (issue #265)
+
+The second log from the same report is 7.5 MB of `btmon` alongside the player's
+own lines, and it holds two different failures under one heading.
+
+### Receiver mode: the PCM is there, the audio is not
+
+The log has thirty `the stream stopped: No such device` and, in between, the
+thing that actually broke the mode:
+
+```
+12:42:08  Device Disconnected  … reason 3 (Connection terminated by remote host)
+12:42:08  bluetooth: receiver stream: aptX 48000 Hz 2 ch 16 bit   ← still named
+12:42:11  btreceiver: says it is playing and nothing has arrived in 3000 ms;
+          this PCM is not the live one
+12:42:14  … the same, a second and a third time …
+12:42:18  btreceiver: 3 sessions in a row with no audio; leaving the next one alone
+12:42:34  receiver mode off
+```
+
+The three `btreceiver:` lines are a *connection reset by peer* from the sender's
+side (`HCI 0x13`, `reason 3`): the link was torn down, and bluealsa kept the PCM
+object of the transport that had died on it. Opening that object succeeds -- it
+is the same object -- and reading it never delivers a frame, which is what "this
+PCM is not the live one" says. Reopening it cannot help, and the log shows it
+cannot: three attempts, then the watchdog gave up and the mode sat silent until
+it was switched off by hand.
+
+Fourteen seconds earlier the same log has the recovery, and it is the other
+direction of the same call:
+
+1. `bluetooth: asking <MAC> to stream here (reconnecting paired source)`
+2. `Device Connected` → `a2dp_config: selected SEP` → `OPEN request succeeded`
+3. `CONFIGURED -> OPEN -> STREAMING` → `btreceiver: … is sending AAC 44100 Hz`
+
+The invitation is what produces a new stream; nothing this end can open will.
+
+**So a run of silent sessions now asks the sender for one.**
+`bluetooth_receiver_ask_to_stream()` posts a job to the Bluetooth worker, which
+calls the same `try_invite_source(…, true, …)` the receiver's own "stream here"
+button uses -- a `ConnectProfile(A2DPSource)` on the paired device, which makes
+bluez open a fresh SEP on the sender. It is posted once per run of silence (the
+job is deduplicated in the queue), only in receiver mode, and only while the
+device is still linked.
+
+The count is three because that is where the log gives up, not because three is
+special: the first two silent sessions are bluealsa's own reopen after the
+sender moved codec, and answering those with an invitation would fight the
+sender for its stream.
+
+Tests: `test_btreceiver` runs a sender that answers PLAYING with a silent PCM
+and checks that three sessions end in exactly one invitation, three handles
+closed, and nothing written; `test_bluetooth` checks the job that invitation
+posts -- one entry in the queue for two reports of silence, the sender's address
+in it, and nothing at all when there is no published PCM to ask about.
+
+### Sending direction: the Tesla, asked once and refused
+
+The same file has the car case from the earlier section, with the answers
+visible:
+
+```
+12:49:48  Name: Tesla Model Y Orca      ← paired, connected
+12:50:01  bluetooth: asking [MAC] for its A2DP stream by itself
+12:50:01  L2CAP: … Result: Connection refused - security block (0x0003)
+12:50:01  ConnectProfile(A2DP sink) -> org.bluez.Error.Failed: Resource temporarily unavailable
+12:50:08  ConnectProfile(A2DP sink) -> org.bluez.Error.Failed: Device or resource busy
+12:54:56  bluetooth: audio profile on [MAC] came up
+```
+
+Two refusals that are both transient: the AVDTP channel is not reachable until
+the link is authenticated, and bluez is still holding the previous attempt a
+moment later. The invitation was remembered as "asked" whatever came back, so
+one refusal took the rest of that link out of the picture -- and the car stayed
+silent until it was reconnected by hand five minutes later, when bluez's own
+policy reconnect brought the profile up on its own.
+
+**A refused invitation is now retried**, four seconds apart, five times per
+link, with the attempt number in the log. The next link starts again from zero,
+because the refusals belong to the old authentication. Once the profile is up,
+or the bound is reached, the device is left to bluez.
+
+Tests: `test_bluetooth` refuses the profile for a linked car and checks the
+retry spacing, the bound, and that a disconnect and reconnect asks again.
