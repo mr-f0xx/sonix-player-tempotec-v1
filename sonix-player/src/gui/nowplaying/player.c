@@ -1376,6 +1376,7 @@ static void set_over_cover(bool on) {
 	back_btn_over_cover(on || layout_sticker_now);
 
 	if (layout_sticker_now) {
+		back_btn_cover_tint(true, lv_color_hex(STICKER_YELLOW_HEX));
 		lv_color_t ink = lv_color_hex(STICKER_INK_DARK_HEX);
 		lv_color_t cyan = lv_color_hex(STICKER_CYAN_HEX);
 		lv_obj_t *const dark_labels[] = {song_title_label, song_artist_label, format_label, queue_position_label};
@@ -1610,8 +1611,12 @@ static void paint_overflow_tint(void) {
 // glyph, the repeat/shuffle mode and the played stretch of the progress bar.
 // The ellipsis with them, whenever the accent is the sleeve's.
 static void paint_transport_tint(void) {
-	bool tinted = !layout_sticker_now && cover_tint && album_tone;
-	back_btn_cover_tint(tinted, tinted ? cover_mark() : theme()->accent);
+	if (layout_sticker_now) {
+		back_btn_cover_tint(true, lv_color_hex(STICKER_YELLOW_HEX));
+	} else {
+		bool tinted = cover_tint && album_tone;
+		back_btn_cover_tint(tinted, tinted ? cover_mark() : theme()->accent);
+	}
 	paint_play_button();
 	if (repeat_btn_icon) {
 		update_repeat_button();
@@ -7666,10 +7671,7 @@ static bool sticker_take_back(void) {
 	if (speed_btn_label)
 		lv_obj_remove_local_style_prop(speed_btn_label, LV_STYLE_TEXT_COLOR, 0);
 	set_over_cover(chrome_over_cover);
-	paint_progress_tint();
-	paint_play_button();
-	paint_overflow_tint();
-	update_repeat_button();
+	paint_transport_tint();
 	update_fav_button();
 	update_queue_position();
 	return true;
