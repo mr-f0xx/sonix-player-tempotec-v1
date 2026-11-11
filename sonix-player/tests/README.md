@@ -37,6 +37,7 @@ make -C sonix-player/tests mostplayed
 make -C sonix-player/tests playback-state
 make -C sonix-player/tests podcastplayed
 make -C sonix-player/tests podcastdir
+make -C sonix-player/tests podcastrss
 make -C sonix-player/tests radio-store
 make -C sonix-player/tests led-rate
 make -C sonix-player/tests aamlayout
@@ -525,6 +526,19 @@ that are easy to get wrong. Checks include:
 - an episode list leads with the show itself, which is not counted as an
   episode, and an episode with no audio is dropped from the count but not from
   the raw one that tells the list whether another page is worth asking for;
+- a show longer than Apple's two-hundred-entry ceiling is listed from its own
+  feed instead: the feed is fetched, its episodes come back newest first, the
+  oldest one is reachable at all, an episode both sources know keeps the id the
+  directory gave it, one only the feed knows gets an id derived from its guid,
+  and that episode then plays when asked for by the id it was listed under;
+- the feed is *not* fetched when it would not help -- a show that has exactly
+  as many episodes as arrived, a page smaller than the ceiling, a lookup whose
+  list is one row short of it, or a show whose row carries no feed address --
+  and is not believed when it is the shorter of the two lists, which is what
+  keeps a show that publishes only trailers from losing the episodes its
+  directory does index;
+- a feed that cannot be read leaves the directory's list untouched and sets no
+  error: an error page where the feed was, a feed host that does not answer;
 - durations arrive in milliseconds and leave in seconds, timestamps in ISO
   8601 and leave as unix time, with or without the time of day;
 - an episode id the player has never seen is not guessed at and costs no
@@ -536,11 +550,52 @@ that are easy to get wrong. Checks include:
 The suite was checked by mutation: it fails when the directory choice is
 forced, when the show row is counted as an episode, when the artwork is left
 at 100 px, when the duration is left in milliseconds, when the chart depth is
-fixed, and when the declared audio type is hardcoded.
+fixed, when the declared audio type is hardcoded, when the feed is read without
+the list having hit the ceiling, when any feed at all is believed over the
+directory's, when the episode-by-id lookup does not fall back to it, and when
+the memory of which show an episode belongs to is too small to reach the start
+of a long list.
 
 This tests the requests and the parsing, not the download or the playback of
 what comes back; those have their own suites and see only the structs, which
 do not know which directory filled them.
+
+## Reading a podcast's own feed
+
+`make -C sonix-player/tests podcastrss` checks the reader behind that
+fallback: `src/system/streaming/podcastrss.c`, on the XML scanner the ebook
+reader already uses (`src/system/ebook/epub_xml.c`). No network, no keys, and
+no directory -- the feed is a string in the test.
+
+It is a scanner rather than a parser with a tree, because the wild is not
+well-formed: the checks are about the disagreement between feeds rather than
+about one conforming document. Three readings are exercised on their own
+before any whole feed is read, since each fails differently --
+
+- `podcastrss_pubdate`: RFC 822 with and without its weekday, with a named or
+  a numeric zone and with no time at all, in lower case, and ISO 8601 instead;
+  and nothing that is not a date, including a two-digit year, which is a guess
+  about a century and sorts worse than no date;
+- `podcastrss_duration_secs`: hours, minutes and seconds, minutes and seconds,
+  a bare number of seconds, the whitespace a feed indents with, and a refusal
+  of `40 minutes` -- a pattern that matches the first number in a field would
+  read that as forty seconds and the row would lie about its length;
+- `podcastrss_guid_id`: stable across calls, different for different guids,
+  positive, and out of the range the directories hand out, because this is the
+  id a downloaded episode is found again by.
+
+Then the walk, against a feed carrying namespaces, CDATA with an entity inside
+it, indentation around a field, an empty element, show notes in HTML, an item
+with no audio and one with no title. Checks include that the channel's own
+title and artwork are not read as an episode's, that the two items that are
+not episodes are counted as seen but not shown, that a guid longer than the
+buffer is cut rather than run off the end of it, that an episode the directory
+numbered keeps that number, that a page smaller than the feed stops reading
+once the page is full, and that a document with no items in it answers -1
+rather than an empty list -- which is what tells the caller to keep the
+directory's list. Finding one episode again by its derived id is checked the
+same way, including the episode with no title, which is still the one that was
+asked for.
 
 ## Headless calculator and notes page tests
 

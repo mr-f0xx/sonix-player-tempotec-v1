@@ -14,6 +14,7 @@
 #include "src/system/core/json.h"
 #include "src/system/core/lang.h"
 #include "src/system/core/sha1.h"
+#include "src/system/streaming/podcastrss.h"
 #include "src/system/streaming/streamkeys.h"
 
 // ---------------------------------------------------------------------------
@@ -485,9 +486,12 @@ static long apple_published(const json_doc_t *doc, int obj) {
 // gone rather than guessing a podcast to look it up in.
 //
 // Bounded, because the player is a long-lived process on a device with little
-// memory to spare. The oldest pairs go first, and an episode step -- a hundred
-// -- fits inside this twice over.
-#define APPLE_FEED_MAP_MAX 256
+// memory to spare, and the bound is the most episodes a list can hold at once
+// (PODCAST_MAX_HELD in the page): everything the reader can see must be
+// playable, and an episode evicted before it is touched would answer "gone"
+// while still on screen. Sixteen bytes a pair, so this costs what one row of
+// the list costs -- beside the rows themselves it is nothing.
+#define APPLE_FEED_MAP_MAX 1024
 
 static struct {
 	long long episode;
@@ -578,7 +582,10 @@ static void read_apple_chart_row(const json_doc_t *doc, int obj, podcast_feed_t 
 	read_artwork(doc, obj, out->image, sizeof(out->image));
 }
 
-typedef enum { APPLE_FEEDS, APPLE_EPISODES, APPLE_CHART } apple_shape_t;
+// Only two shapes reach it now: the episodes of a show are read by
+// apple_episodes(), which walks its own response to decide whether the list
+// came up short and the show's feed has to be asked.
+typedef enum { APPLE_FEEDS, APPLE_CHART } apple_shape_t;
 
 // The path every Apple list shares: fetch, parse, and walk the array at
 // `path`, which is "results" at the root for a search or a lookup and
@@ -612,31 +619,6 @@ static int apple_fetch(const char *url, const char *path, void *out, int max, ap
 			continue;
 		}
 
-		if (shape == APPLE_EPISODES) {
-			// A lookup by show id answers with the show itself first and its
-			// episodes after it. The show is not an episode, and counting it
-			// as one would make a full page look like a page and a half, which
-			// is what tells the list to offer another.
-			char kind[32] = "";
-			json_obj_str(&doc, item, "kind", kind, sizeof(kind));
-			if (strcmp(kind, "podcast-episode") != 0) {
-				continue;
-			}
-			seen++;
-			apple_remember(json_obj_llong(&doc, item, "trackId", 0), json_obj_llong(&doc, item, "collectionId", 0));
-			if (count >= max) {
-				continue;
-			}
-			podcast_episode_t *e = &((podcast_episode_t *)out)[count];
-			read_apple_episode(&doc, item, e);
-			// An episode with no audio is not an episode: showing it would
-			// give a row that does nothing when touched.
-			if (e->id != 0 && e->enclosure[0]) {
-				count++;
-			}
-			continue;
-		}
-
 		seen++;
 		if (count >= max) {
 			continue;
@@ -663,8 +645,11 @@ static int apple_fetch(const char *url, const char *path, void *out, int max, ap
 // would only leave the list offering a page that was never there.
 #define APPLE_SEARCH_MAX 100
 
-// The most episodes one lookup returns, whatever it is asked for. An older
-// episode than these needs the show's own feed, which this does not read.
+// The most episodes one lookup returns, whatever it is asked for. Verified
+// against a show of four hundred: limit=200 and limit=500 both answer with two
+// hundred rows, and there is no offset to ask for the rest with. An older
+// episode than these comes from the show's own feed, which is what
+// apple_episodes() reads when a lookup comes up short.
 #define APPLE_EPISODES_MAX 200
 
 static int apple_search(const char *query, podcast_feed_t *out, int max) {
@@ -721,11 +706,186 @@ static int apple_trending(podcast_feed_t *out, int max) {
 	return n;
 }
 
-static int apple_episodes(long long feed_id, podcast_episode_t *out, int max) {
+// The address of a show's own feed, which is the one source with every episode
+// it has. Every Apple response that describes a show carries it.
+static bool apple_feed_url(long long feed_id, char *out, size_t size) {
 	char url[PODCAST_URL_MAX + 256];
-	snprintf(url, sizeof(url), "%s/lookup?id=%lld&entity=podcastEpisode&limit=%d", apple_base(), feed_id,
-			 max > APPLE_EPISODES_MAX ? APPLE_EPISODES_MAX : max);
-	return apple_fetch(url, "results", out, max, APPLE_EPISODES);
+	snprintf(url, sizeof(url), "%s/lookup?id=%lld&entity=podcast", apple_base(), feed_id);
+	char *body = apple_get(url);
+	if (!body) {
+		return false;
+	}
+	json_doc_t doc;
+	if (!json_parse(body, &doc)) {
+		set_error(tr("podcast_directory_unparsable"));
+		free(body);
+		return false;
+	}
+	out[0] = '\0';
+	json_obj_str(&doc, json_path(&doc, json_root(&doc), "results.0"), "feedUrl", out, size);
+	json_free(&doc);
+	free(body);
+	return out[0] != '\0';
+}
+
+// The show's own feed, fetched. NULL when it could not be read, which is not an
+// error worth showing: the directory's list is still there to fall back on.
+static char *feed_fetch(const char *feed_url) {
+	char headers[96];
+	snprintf(headers, sizeof(headers), "User-Agent: " HTTP_USER_AGENT "\r\n");
+	char *body = NULL;
+	size_t len = 0;
+	int status = 0;
+	if (!http_get_ex(feed_url, headers, false, &body, &len, PODCAST_BODY_MAX, PODCAST_TIMEOUT_SECS, &status)) {
+		free(body);
+		return NULL;
+	}
+	return body;
+}
+
+// The rows of a lookup response that are episodes, newest first, into `out`.
+// The whole array is walked even past `max`, so that the count returned is the
+// number that could be filled and `last_raw_count` is the number the catalogue
+// sent -- and so that every show the response names is remembered, not only the
+// ones that made the page.
+static int apple_episode_rows(json_doc_t *doc, int arr, int len, podcast_episode_t *out, int max) {
+	int count = 0;
+	int seen = 0;
+	for (int i = 0; i < len; i++) {
+		int item = json_at(doc, arr, i);
+		if (item < 0) {
+			continue;
+		}
+		char kind[32] = "";
+		json_obj_str(doc, item, "kind", kind, sizeof(kind));
+		// A lookup by show id answers with the show itself first and its
+		// episodes after it. The show is not an episode, and counting it as one
+		// would make a full page look like a page and a half, which is what
+		// tells the list to offer another.
+		if (strcmp(kind, "podcast-episode") != 0) {
+			continue;
+		}
+		seen++;
+		apple_remember(json_obj_llong(doc, item, "trackId", 0), json_obj_llong(doc, item, "collectionId", 0));
+		if (count >= max) {
+			continue;
+		}
+		podcast_episode_t *e = &out[count];
+		read_apple_episode(doc, item, e);
+		// An episode with no audio is not an episode: showing it would give a
+		// row that does nothing when touched.
+		if (e->id != 0 && e->enclosure[0]) {
+			count++;
+		}
+	}
+	last_raw_count = seen;
+	return count;
+}
+
+static int apple_episodes(long long feed_id, podcast_episode_t *out, int max) {
+	int limit = max > APPLE_EPISODES_MAX ? APPLE_EPISODES_MAX : max;
+	char url[PODCAST_URL_MAX + 256];
+	snprintf(url, sizeof(url), "%s/lookup?id=%lld&entity=podcastEpisode&limit=%d", apple_base(), feed_id, limit);
+
+	char *body = apple_get(url);
+	if (!body) {
+		return -1;
+	}
+	json_doc_t doc;
+	if (!json_parse(body, &doc)) {
+		set_error(tr("podcast_directory_unparsable"));
+		free(body);
+		return -1;
+	}
+
+	int arr = json_get(&doc, json_root(&doc), "results");
+	int len = json_len(&doc, arr);
+
+	// One pass to find out what the response is, before anything is written to
+	// `out`. The reason is the fallback below: if the show's feed turns out to
+	// be the shorter of the two lists, the directory's rows have to still be
+	// there, and parsing the feed over the top of them would have lost them.
+	long long track_count = 0;
+	char feed_url[PODCAST_URL_MAX] = "";
+	char feed_title[PODCAST_TITLE_MAX] = "";
+	int seen = 0;
+
+	// The episodes the directory numbered, so that an item the feed also lists
+	// keeps the id its downloaded file and its heard mark are already keyed on.
+	// Allocated rather than kept in BSS: two hundred pairs is twenty-six
+	// kilobytes, wanted for the length of one call and never again.
+	podcastrss_known_t *known = calloc((size_t)APPLE_EPISODES_MAX, sizeof(*known));
+	int known_count = 0;
+
+	for (int i = 0; i < len; i++) {
+		int item = json_at(&doc, arr, i);
+		if (item < 0) {
+			continue;
+		}
+		char kind[32] = "";
+		json_obj_str(&doc, item, "kind", kind, sizeof(kind));
+		if (strcmp(kind, "podcast-episode") != 0) {
+			track_count = json_obj_llong(&doc, item, "trackCount", 0);
+			json_obj_str(&doc, item, "feedUrl", feed_url, sizeof(feed_url));
+			json_obj_str(&doc, item, "collectionName", feed_title, sizeof(feed_title));
+			continue;
+		}
+		seen++;
+		char guid[PODCASTRSS_GUID_MAX] = "";
+		json_obj_str(&doc, item, "episodeGuid", guid, sizeof(guid));
+		long long id = json_obj_llong(&doc, item, "trackId", 0);
+		if (guid[0] && id != 0 && known && known_count < APPLE_EPISODES_MAX) {
+			snprintf(known[known_count].guid, sizeof(known[known_count].guid), "%s", guid);
+			known[known_count].id = id;
+			known_count++;
+		}
+	}
+
+	// Apple's episode lookup stops at two hundred whatever it is asked for,
+	// with no offset and no larger limit, so on a show of four hundred the
+	// first two hundred are not reachable at all. The show's own count says
+	// when that happened: it is in the row that led the list, and it is bigger
+	// than what arrived.
+	//
+	// Two things have to be true together, and both matter. The list has to
+	// have hit Apple's ceiling, which only a request for two hundred can do --
+	// a page asking for sixty is answered with sixty and says nothing about
+	// what else there is. And the show has to say it has more than arrived.
+	//
+	// Reading the feed on every list would be the wrong fix, and there is a
+	// show that proves it: one whose back catalogue moved behind its own
+	// platform has a directory indexing every episode and a feed of trailers,
+	// so taking the feed there loses nearly all of them. That is checked twice
+	// -- on the count the show reports, here, and on what the feed actually
+	// parses to, below.
+	bool truncated = limit >= APPLE_EPISODES_MAX && seen >= APPLE_EPISODES_MAX;
+	if (truncated && track_count > seen && feed_url[0]) {
+		char *feed_body = feed_fetch(feed_url);
+		if (feed_body) {
+			int items = 0;
+			int from_feed = podcastrss_episodes(feed_body, feed_id, feed_title, known, known_count, out, max, &items);
+			free(feed_body);
+			// Strictly more, and the list keeps growing. A feed with as many
+			// episodes as the directory or fewer is not the fuller source, and
+			// taking it would drop rows the reader has already scrolled past.
+			if (from_feed > seen) {
+				for (int i = 0; i < from_feed; i++) {
+					apple_remember(out[i].id, out[i].feed_id);
+				}
+				last_raw_count = items;
+				json_free(&doc);
+				free(body);
+				free(known);
+				return from_feed;
+			}
+		}
+	}
+
+	int count = apple_episode_rows(&doc, arr, len, out, max);
+	json_free(&doc);
+	free(body);
+	free(known);
+	return count;
 }
 
 static bool apple_feed(long long feed_id, podcast_feed_t *out) {
@@ -811,9 +971,25 @@ static bool apple_episode(long long episode_id, podcast_episode_t *out) {
 
 	json_free(&doc);
 	free(body);
+	if (ok) {
+		return true;
+	}
+
+	// Not in the two hundred Apple lists. On a long show that means older than
+	// they are rather than gone: the list this id came from was the show's own
+	// feed, so the feed is where to look for it. An episode no directory ever
+	// listed has an id derived from its guid, which only the feed can answer.
+	char feed_url[PODCAST_URL_MAX] = "";
+	if (apple_feed_url(feed_id, feed_url, sizeof(feed_url))) {
+		char *feed_body = feed_fetch(feed_url);
+		if (feed_body) {
+			ok = podcastrss_find(feed_body, feed_id, NULL, episode_id, out);
+			free(feed_body);
+		}
+	}
+
 	if (!ok) {
-		// Known show, episode not in its two hundred most recent: the same
-		// answer as a show that does not know it, and the same honest one.
+		// Neither source knows it now: gone, or older than both can reach.
 		set_error(tr("podcast_episode_gone"));
 	}
 	return ok;
