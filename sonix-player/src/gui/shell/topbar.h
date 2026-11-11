@@ -52,9 +52,12 @@ bool topbar_is_hidden(void);
 void topbar_set_player_frost(const lv_image_dsc_t *image);
 
 // Optional solid player-layout ground; disabling restores the theme panel.
-// `force_light_ink` keeps bar text and status glyphs white for layouts with
-// their own fixed dark palette (Sticker), independently of the global theme.
-void topbar_set_player_ground(bool enabled, lv_color_t color, bool force_light_ink);
+void topbar_set_player_ground(bool enabled, lv_color_t color);
+
+// Optional fixed player-layout palette for the bar (Sticker): keeps text white
+// and tints the volume, play/pause, Wi-Fi, Bluetooth and battery glyphs/fill in
+// `accent` independently of the global theme.
+void topbar_set_player_palette(bool enabled, lv_color_t accent);
 
 // Tint the player status icons using a cover colour; disabling restores their
 // normal status and theme colours without changing the background.

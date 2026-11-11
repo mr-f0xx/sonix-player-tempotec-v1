@@ -478,8 +478,8 @@ static uint32_t album_tone; // the sleeve's colour, 0 when there is no sleeve
 // Only the status icons take this colour. A missing cover must not keep
 // the colour belonging to the last track.
 static void player_status_color_apply(void) {
-	bool show = sheet_open && (player_status_bar || layout_aam_now) && player_status_color &&
-		current_cover.pixels && album_tone;
+	bool show = sheet_open && !layout_sticker_now && (player_status_bar || layout_aam_now) &&
+		player_status_color && current_cover.pixels && album_tone;
 	topbar_set_player_color(show, lv_color_hex(album_tone));
 }
 
@@ -1845,7 +1845,8 @@ static void player_status_background_apply(void) {
 	// Sticker uses its deep violet-black ground; Poster and the missing-art
 	// fallback use the theme's panel style.
 	lv_color_t solid = layout_sticker_now ? lv_color_hex(STICKER_BG_HEX) : lv_color_black();
-	topbar_set_player_ground(visible && (layout_vinyl_now || layout_sticker_now), solid, layout_sticker_now);
+	topbar_set_player_ground(visible && (layout_vinyl_now || layout_sticker_now), solid);
+	topbar_set_player_palette(visible && layout_sticker_now, lv_color_hex(STICKER_CYAN_HEX));
 	topbar_set_player_frost(use_blur ? &current_backdrop.dsc : NULL);
 }
 
