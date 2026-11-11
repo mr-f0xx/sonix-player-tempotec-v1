@@ -647,3 +647,13 @@ them; `PATCHES.md` lists what to check with a meter. `topbar.c` and
 `settings.c` are not linked into either suite, so the status bar's label and
 the settings card are covered by neither. The headless fonts are Montserrat,
 which has no micro sign, so no pixel width other than the 28 px is asserted.
+
+## Sticker layout geometry and layering
+
+`make -C sonix-player/tests stickerlayout` links the production
+`stickerlayout.c` against LVGL 9.6 on a 240×320 display and checks
+`sticker_layout_box()` across both full-screen (320 px) and status-bar-visible
+(296 px) heights and all three V1 text sizes, plus widget layering on the cover
+panel (tilted neon frames behind the opaque sleeve, corner pills and discs in
+front without horizontal overlap, and clean hide/restore).
+

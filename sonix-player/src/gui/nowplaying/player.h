@@ -85,6 +85,7 @@ typedef enum {
 	PLAYER_LAYOUT_POSTER = 4,	 // the sleeve at the width of the screen, whole from side to side, the deck below it
 	PLAYER_LAYOUT_ALBUM_ART_MAX = 5, // the sleeve over the screen, the media controls traded for it
 	PLAYER_LAYOUT_VINYL = 6, // rounded sleeve over a static record, compact deck below
+	PLAYER_LAYOUT_STICKER = 7, // neon-framed sleeve with corner badges and tilted tape strips
 } player_layout_t;
 
 // In custom layouts, replace the format line with the tagged recording year

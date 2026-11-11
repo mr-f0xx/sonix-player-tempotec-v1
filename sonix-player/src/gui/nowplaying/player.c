@@ -19,6 +19,7 @@
 #include "src/gui/nowplaying/lyricsearch.h"
 #include "src/gui/nowplaying/playbutton.h"
 #include "src/gui/nowplaying/playerdeck.h"
+#include "src/gui/nowplaying/stickerlayout.h"
 #include "src/gui/nowplaying/vinylayout.h"
 #include "src/gui/nowplaying/waveformoverlay.h"
 #include "src/system/addons/addons.h"
@@ -112,6 +113,12 @@ static void aam_strip_fit(void);
 static void vinyl_paint(void);
 static void vinyl_put(void);
 static bool vinyl_take_back(void);
+static void sticker_paint(void);
+static void sticker_put(void);
+static bool sticker_take_back(void);
+static void sticker_pills_sync(void);
+static void sticker_seek_fit(void);
+static void sticker_album_sync(const device_state_t *state);
 static lv_obj_t *progress_slider;
 // The compact slider leaves room for its oversized endpoint knob and shadow.
 // Zero means use the original percentage width on the HiBy panels.
@@ -429,6 +436,10 @@ static int player_content_top(void) {
 static void player_status_background_apply(void);
 static bool layout_vinyl_now;
 static vinyl_record_t vinyl_record;
+static bool layout_sticker_now;
+static sticker_view_t sticker_view;
+static bool sticker_up;
+static int sticker_slider_index;
 // The shape of the track and the sleeve's colour: up with the alternative
 // layout, and kept when the words are shown over it.
 static bool layout_wave_now;
@@ -548,6 +559,7 @@ static bool cover_shape_poster;
 // the picture on hand was made for it.
 static bool cover_shape_aam;
 static bool cover_shape_vinyl;
+static bool cover_shape_sticker;
 
 // Immersive asks for the blurred copy as the FOOT of the photograph, at the
 // size of the deck, rather than as the whole screen: it reflects the visible
@@ -559,7 +571,7 @@ static bool backdrop_is_band;
 // blurred sleeve through it, so on this board the screen-sized blur is not
 // wanted while Poster is in force: the sleeve itself covers everything above
 // the deck, and the deck covers the rest.
-static bool backdrop_fills_screen(void) { return layout_studio_now || (backdrop_full && !layout_poster_now && !layout_vinyl_now); }
+static bool backdrop_fills_screen(void) { return layout_studio_now || (backdrop_full && !layout_poster_now && !layout_vinyl_now && !layout_sticker_now); }
 
 static double current_total_length = 0; // cached from the last device_state snapshot, so slider math works between polls
 static char progress_label_text[32];
@@ -643,11 +655,14 @@ static void apply_live_mode(bool live) {
 	// The row under the bar stays for a station from a list, for its place in
 	// the list and nothing else.
 	if (below_slider_obj) {
-		if (layout_vinyl_now || (live && !custom_nav)) {
+		if (layout_vinyl_now || layout_sticker_now || (live && !custom_nav)) {
 			lv_obj_set_hidden(below_slider_obj, true);
 		} else {
 			lv_obj_set_hidden(below_slider_obj, false);
 		}
+	}
+	if (layout_sticker_now && sticker_view.seek_row) {
+		lv_obj_set_hidden(sticker_view.seek_row, live);
 	}
 
 	// Album Art Max keeps none of that deck: its row under the bar is outside
@@ -942,6 +957,23 @@ static void paint_play_button(void) {
 	if (!play_btn || !play_btn_icon) {
 		return;
 	}
+	if (layout_sticker_now) {
+		playbutton_paint(play_btn, play_btn_icon, true, lv_color_hex(STICKER_PINK_HEX), true, false);
+		lv_obj_set_style_border_width(play_btn, 2, 0);
+		lv_obj_set_style_border_color(play_btn, lv_color_hex(STICKER_YELLOW_HEX), 0);
+		lv_obj_set_style_border_opa(play_btn, LV_OPA_COVER, 0);
+		lv_obj_set_style_image_recolor(play_btn_icon, lv_color_white(), 0);
+		lv_obj_set_style_image_recolor_opa(play_btn_icon, LV_OPA_COVER, 0);
+		if (sticker_view.play_ring) {
+			int w = (int)lv_obj_get_width(play_btn);
+			int h = (int)lv_obj_get_height(play_btn);
+			if (w > 10 && h > 10)
+				lv_obj_set_size(sticker_view.play_ring, w - 8, h - 8);
+			lv_obj_center(sticker_view.play_ring);
+			lv_obj_set_hidden(sticker_view.play_ring, false);
+		}
+		return;
+	}
 	bool over_artwork = layout_vinyl_now || (chrome_over_cover && !layout_poster_now);
 	// Waveform also uses the sleeve's colour without the explicit tint switch,
 	// except in palettes which intentionally override it in chrome_accent().
@@ -1063,15 +1095,17 @@ static void update_queue_position(void) {
 
 	int count = playlist_count();
 	int index = playlist_current_index();
-	bool worth_saying = count > 1 && index >= 0 && !audiobook_mode && !dlna_owns_playback();
+	bool worth_saying = (layout_sticker_now ? count >= 1 : count > 1) && index >= 0 && !audiobook_mode && !dlna_owns_playback();
 
 	if (!worth_saying) {
 		lv_label_set_text(queue_position_label, "");
 		aam_strip_fit(); // the room it has given back is the names' again
+		sticker_pills_sync();
 		return;
 	}
 	lv_label_set_text_fmt(queue_position_label, "%d/%d", (int)playlist_current_entry() + 1, count);
 	aam_strip_fit();
+	sticker_pills_sync();
 }
 
 // Works out view_start and view_length for playback at `position` in a file
@@ -1141,6 +1175,7 @@ static void set_progress_label(double current_secs, double total_secs) {
 	// Written from here because this is the one place that runs on every poll
 	// and on every track change, which is exactly when the answer can move.
 	update_queue_position();
+	sticker_seek_fit();
 }
 
 // True while a decode is in flight at the worker.
@@ -1211,7 +1246,7 @@ static void cover_show(bool have_cover) {
 	// Only while there is nothing in it -- under a picture it is covered, and
 	// in Studio, which draws its own empty square, it would show through.
 	if (cover_art_group && backdrop_full) {
-		lv_obj_set_style_bg_opa(cover_art_group, !have_cover && !studio ? LV_OPA_COVER : LV_OPA_TRANSP, 0);
+		lv_obj_set_style_bg_opa(cover_art_group, (!have_cover && !studio) || layout_sticker_now ? LV_OPA_COVER : LV_OPA_TRANSP, 0);
 	}
 	poster_fade_apply(); // the melt at the sleeve's foot follows the picture
 }
@@ -1330,7 +1365,28 @@ static void set_over_cover(bool on) {
 	}
 
 	// The floating chevron parks over the artwork's top-left corner.
-	back_btn_over_cover(on);
+	back_btn_over_cover(on || layout_sticker_now);
+
+	if (layout_sticker_now) {
+		lv_color_t ink = lv_color_hex(STICKER_INK_DARK_HEX);
+		lv_color_t cyan = lv_color_hex(STICKER_CYAN_HEX);
+		lv_obj_t *const dark_labels[] = {song_title_label, song_artist_label, format_label, queue_position_label};
+		for (size_t i = 0; i < sizeof(dark_labels) / sizeof(dark_labels[0]); i++) {
+			if (dark_labels[i])
+				lv_obj_set_style_text_color(dark_labels[i], ink, 0);
+		}
+		lv_obj_t *const cyan_labels[] = {elapsed_label, remaining_label, sticker_view.album_label};
+		for (size_t i = 0; i < sizeof(cyan_labels) / sizeof(cyan_labels[0]); i++) {
+			if (cyan_labels[i])
+				lv_obj_set_style_text_color(cyan_labels[i], cyan, 0);
+		}
+		for (size_t i = 0; i < sizeof(icon_objs) / sizeof(icon_objs[0]); i++) {
+			if (icon_objs[i]) {
+				lv_obj_set_style_image_recolor(icon_objs[i], lv_color_white(), 0);
+				lv_obj_set_style_image_recolor_opa(icon_objs[i], LV_OPA_COVER, 0);
+			}
+		}
+	}
 }
 
 // Told before the loaded track's artwork is freed. The screensaver borrows
@@ -1455,6 +1511,19 @@ static void paint_progress_tint(void) {
 	if (!progress_slider) {
 		return;
 	}
+	if (layout_sticker_now) {
+		lv_obj_set_style_bg_color(progress_slider, lv_color_hex(STICKER_TRACK_HEX), LV_PART_MAIN);
+		lv_obj_set_style_bg_opa(progress_slider, LV_OPA_COVER, LV_PART_MAIN);
+		lv_obj_set_style_bg_color(progress_slider, lv_color_hex(STICKER_PINK_HEX), LV_PART_INDICATOR);
+		lv_obj_set_style_bg_opa(progress_slider, LV_OPA_COVER, LV_PART_INDICATOR);
+		lv_obj_set_style_bg_grad_dir(progress_slider, LV_GRAD_DIR_NONE, LV_PART_INDICATOR);
+		lv_obj_set_style_bg_color(progress_slider, lv_color_hex(STICKER_YELLOW_HEX), LV_PART_KNOB);
+		lv_obj_set_style_bg_opa(progress_slider, LV_OPA_COVER, LV_PART_KNOB);
+		lv_obj_set_style_border_width(progress_slider, 0, LV_PART_KNOB);
+		lv_obj_set_style_pad_all(progress_slider, 3, LV_PART_KNOB);
+		lv_obj_set_style_shadow_width(progress_slider, 0, LV_PART_KNOB);
+		return;
+	}
 	lv_color_t tint = progress_tint();
 	lv_obj_set_style_bg_color(progress_slider, tint, LV_PART_INDICATOR);
 	lv_obj_set_style_bg_color(progress_slider, tint, LV_PART_KNOB);
@@ -1501,7 +1570,9 @@ static void paint_overflow_tint(void) {
 		return;
 	}
 	lv_color_t color;
-	if (album_tone && (cover_tint || layout_wave_now)) {
+	if (layout_sticker_now) {
+		color = lv_color_white();
+	} else if (album_tone && (cover_tint || layout_wave_now)) {
 		color = chrome_accent();
 	} else if (theme_is_monochrome() || theme_is_tokyo_night()) {
 		// The deck's own muted role: grey-violet on Tokyo Night, the muted
@@ -1543,6 +1614,7 @@ static void paint_transport_tint(void) {
 // lozenge sitting on the sleeve for no reason, and a stream between titles has
 // no artist for seconds at a time.
 static void alt_pills_sync(void) {
+	sticker_pills_sync();
 	if (!alt_artist_pill || !song_artist_label) {
 		return;
 	}
@@ -1752,13 +1824,15 @@ static bool backdrop_blur_wanted(void) { return !theme_is_oled(); }
 // whether album-colored icons are enabled.
 static void player_status_background_apply(void) {
 	bool visible = sheet_open && (player_status_bar || layout_aam_now);
-	bool layout_blur = visible && statusbarlayout_uses_blur(
+	bool layout_blur = visible && !layout_sticker_now && statusbarlayout_uses_blur(
 		layout_poster_now, layout_vinyl_now, layout_studio_now, layout_immersive_now,
 		theme_is_oled(), backdrop_is_full, backdrop_is_band);
 	bool use_blur = current_backdrop.pixels && layout_blur;
 	// Vinyl's page is deliberately solid black, independently of the theme;
-	// Poster and the missing-art fallback use the theme's panel style.
-	topbar_set_player_ground(visible && layout_vinyl_now, lv_color_black());
+	// Sticker uses its deep violet-black ground; Poster and the missing-art
+	// fallback use the theme's panel style.
+	lv_color_t solid = layout_sticker_now ? lv_color_hex(STICKER_BG_HEX) : lv_color_black();
+	topbar_set_player_ground(visible && (layout_vinyl_now || layout_sticker_now), solid);
 	topbar_set_player_frost(use_blur ? &current_backdrop.dsc : NULL);
 }
 
@@ -1773,7 +1847,7 @@ static void full_backdrop_apply(void) {
 	if (!backdrop_full || !studio_bg || layout_studio_now || lyrics_look_on) {
 		return;
 	}
-	bool have = !layout_vinyl_now && backdrop_blur_wanted() && current_backdrop.pixels != NULL && backdrop_is_full;
+	bool have = !layout_vinyl_now && !layout_sticker_now && backdrop_blur_wanted() && current_backdrop.pixels != NULL && backdrop_is_full;
 	lv_image_set_src(studio_bg, have ? &current_backdrop.dsc : NULL);
 	lv_obj_set_hidden(studio_bg, !have);
 	if (have) {
@@ -2378,6 +2452,15 @@ static void lyrics_progress_apply(int32_t progress) {
 	lyrics_shift(cover_art_group, away);
 	lyrics_shift(cover_placeholder_icon, away);
 	if (layout_vinyl_now) lyrics_shift(vinyl_record.disc, away);
+	if (layout_sticker_now) {
+		lyrics_shift(sticker_view.tilted_cyan, away);
+		lyrics_shift(sticker_view.tilted_pink, away);
+		lyrics_shift(sticker_view.straight_cyan, away);
+		lyrics_shift(sticker_view.queue_pill, away);
+		lyrics_shift(sticker_view.format_pill, away);
+		lyrics_shift(sticker_view.repeat_disc, away);
+		lyrics_shift(sticker_view.fav_disc, away);
+	}
 	if (!layout_alt_now) {
 		return; // the names stay in their row below the sleeve
 	}
@@ -4398,6 +4481,10 @@ static void apply_art_shape(void) {
 		vinyl_paint();
 		return;
 	}
+	if (layout_sticker_now) {
+		sticker_paint();
+		return;
+	}
 	bool edge = layout_immersive_now || layout_poster_now || layout_aam_now;
 	if (cover_art_group) {
 		lv_obj_set_style_radius(cover_art_group, edge ? 0 : radius, 0);
@@ -4422,6 +4509,7 @@ static void apply_layout(void) {
 	bool was_poster = poster_take_back();
 	bool was_aam = aam_take_back();
 	bool was_vinyl = vinyl_take_back();
+	bool was_sticker = sticker_take_back();
 
 	// The panel split follows the arrangement (the alternative one leaves the
 	// names on the sleeve, so its deck is shorter and the sleeve taller).
@@ -4433,7 +4521,7 @@ static void apply_layout(void) {
 	lv_obj_set_height(player_screen, player_screen_height - content_top);
 	lv_obj_set_y(player_screen, content_top);
 	lv_obj_update_layout(player_screen);
-	player_apply_geometry(resized || was_immersive || was_poster || was_aam || was_vinyl);
+	player_apply_geometry(resized || was_immersive || was_poster || was_aam || was_vinyl || was_sticker);
 	player_deck_show_info(song_info_obj, layout_alt_now);
 	if (bp_is_tempotec_v1()) {
 		lv_obj_set_style_pad_top(player_menu, layout_alt_now ? COMPACT_WAVE_DECK_PAD_TOP : COMPACT_DECK_PAD_TOP, 0);
@@ -4541,6 +4629,7 @@ static void apply_layout(void) {
 			poster_put(); // which places the words' page with it
 		}
 		if (layout_vinyl_now) vinyl_put();
+		if (layout_sticker_now) sticker_put();
 		lyrics_layout();
 		// studio_take_back() took the V1's blur down with Studio's, and Poster
 		// wants it down as well: its deck is opaque ground and the sleeve
@@ -4593,6 +4682,7 @@ static void update_layout(const device_state_t *state) {
 	bool immersive = layout_choice == PLAYER_LAYOUT_IMMERSIVE;
 	bool poster = layout_choice == PLAYER_LAYOUT_POSTER;
 	bool vinyl = layout_choice == PLAYER_LAYOUT_VINYL && bp_is_tempotec_v1();
+	bool sticker = layout_choice == PLAYER_LAYOUT_STICKER && bp_is_tempotec_v1();
 	// Album Art Max is measured for the 240x320 panel, and every number in it
 	// is one of that panel's. On the wide boards the choice is remembered but
 	// the page keeps the standard arrangement -- the same way Waveform falls
@@ -4603,7 +4693,8 @@ static void update_layout(const device_state_t *state) {
 	bool alt_changed = alt != layout_alt_now;
 
 	if (studio == layout_studio_now && immersive == layout_immersive_now && poster == layout_poster_now &&
-		aam == layout_aam_now && vinyl == layout_vinyl_now && alt == layout_alt_now && wave == layout_wave_now &&
+		aam == layout_aam_now && vinyl == layout_vinyl_now && sticker == layout_sticker_now &&
+		alt == layout_alt_now && wave == layout_wave_now &&
 		lyrics == lyrics_allowed && alt_title_pill) {
 		return;
 	}
@@ -4612,6 +4703,7 @@ static void update_layout(const device_state_t *state) {
 	layout_poster_now = poster;
 	layout_aam_now = aam;
 	layout_vinyl_now = vinyl;
+	layout_sticker_now = sticker;
 	layout_alt_now = alt;
 	layout_wave_now = wave;
 	lyrics_allowed = addons_enabled("lyrics") && lyrics;
@@ -4632,7 +4724,7 @@ static void update_layout(const device_state_t *state) {
 	// wrong shape and the picture is asked for again. Only on a change of
 	// arrangement, which is a setting the user has just touched.
 	if ((studio != backdrop_is_studio || immersive != cover_shape_immersive || poster != cover_shape_poster ||
-		 aam != cover_shape_aam || vinyl != cover_shape_vinyl || alt_changed) &&
+		 aam != cover_shape_aam || vinyl != cover_shape_vinyl || sticker != cover_shape_sticker || alt_changed) &&
 		cover_shown_path[0]) {
 		reload_cover(cover_shown_path);
 	}
@@ -4807,9 +4899,10 @@ static void wave_refresh(const char *path, double position) {
 static void cover_request_size(int *w, int *h) {
 	*w = layout_studio_now ? studio_cover_geometry(NULL) : cover_art_w;
 	*h = layout_studio_now ? *w : cover_art_h;
-	if (layout_vinyl_now) {
-		*w -= 2 * VINYL_ART_BORDER;
-		*h -= 2 * VINYL_ART_BORDER;
+	if (layout_vinyl_now || layout_sticker_now) {
+		int border = layout_sticker_now ? STICKER_ART_BORDER : VINYL_ART_BORDER;
+		*w -= 2 * border;
+		*h -= 2 * border;
 		if (*w < 1) *w = 1;
 		if (*h < 1) *h = 1;
 	}
@@ -4895,6 +4988,7 @@ static void reload_cover(const char *filepath) {
 		cover_shape_poster = layout_poster_now;
 		cover_shape_aam = layout_aam_now;
 		cover_shape_vinyl = layout_vinyl_now;
+		cover_shape_sticker = layout_sticker_now;
 		// The reflected band is cut from the foot of the visible crop.
 		// Full-screen backgrounds in other layouts remain upright.
 		cover_set_backdrop_upright(backdrop_is_full || backdrop_is_band);
@@ -5173,6 +5267,7 @@ static void player_refresh_theme(void) {
 	}
 	poster_fade_paint(); // the deck's ground may have moved with the palette
 	if (layout_vinyl_now) vinyl_paint();
+	if (layout_sticker_now) sticker_paint();
 	lv_obj_set_style_image_recolor(cover_placeholder_icon, theme()->text_secondary, 0);
 	// The backdrop over a loaded cover is always the dark treatment -- same
 	// look in both themes; only the no-cover panel follows the theme.
@@ -5247,6 +5342,7 @@ static void refresh_now_playing(void) {
 		// two lines as a track, carrying the two things a radio knows.
 		scrolltext_set(song_title_label, state.metadata.title);
 		scrolltext_set(song_artist_label, state.metadata.artist);
+		sticker_album_sync(&state);
 		lyrics_head_sync();
 		alt_pills_sync();
 
@@ -5297,6 +5393,7 @@ static void refresh_now_playing(void) {
 	}
 	const char *artist = podcast_artist[0] ? podcast_artist : metadata_shown_artist(&state.metadata);
 	scrolltext_set(song_artist_label, artist);
+	sticker_album_sync(&state);
 	lyrics_head_sync();
 	alt_pills_sync();
 
@@ -5318,6 +5415,7 @@ static void refresh_now_playing(void) {
 static void refresh_live_texts(const device_state_t *state) {
 	scrolltext_set(song_title_label, state->metadata.title);
 	scrolltext_set(song_artist_label, state->metadata.artist);
+	sticker_album_sync(state);
 	lyrics_head_sync();
 	alt_pills_sync();
 	update_fav_button();
@@ -5498,7 +5596,9 @@ static void update_fav_button(void) {
 	// competing with the cream title and playback accent; OLED's in its muted
 	// grey, for the same reason.
 	lv_color_t favorite_color;
-	if (cover_tint && album_tone) {
+	if (layout_sticker_now) {
+		favorite_color = lv_color_white();
+	} else if (cover_tint && album_tone) {
 		// The explicit cover-tint option wins over the palette and favourite
 		// yellow alike, in both the outline and filled states.
 		favorite_color = cover_mark();
@@ -5521,7 +5621,7 @@ static void update_fav_button(void) {
 	// Album Art Max is one of them: its header has no transport to share the row
 	// with, and the mark that says "this one is mine" is the one thing in it that
 	// is about the record rather than about playing it.
-	const bool heart = layout_immersive_now || layout_poster_now || layout_aam_now;
+	const bool heart = layout_immersive_now || layout_poster_now || layout_aam_now || layout_sticker_now;
 	const lv_image_dsc_t *favorite_icon = heart
 			? (starred ? &icon_heart_filled : &icon_heart_outline)
 			: (starred ? &icon_star_filled : &icon_star);
@@ -5535,7 +5635,8 @@ static void update_fav_button(void) {
 	// Album Art Max draws the star as one of three marks in a row of its own,
 	// all of them AAM_HEAD_GLYPH px, so it takes that size rather than the
 	// deck's here.
-	lv_image_set_scale(fav_btn_icon, layout_aam_now ? AAM_STAR_SCALE
+	lv_image_set_scale(fav_btn_icon, layout_sticker_now ? STICKER_ICON_SCALE
+											: layout_aam_now ? AAM_STAR_SCALE
 											: layout_poster_now
 												? bp_pick(POSTER_HEART_SCALE, POSTER_HEART_SCALE_WIDE)
 												: layout_alt_now && bp_is_tempotec_v1()
@@ -5637,6 +5738,7 @@ static player_layout_t hires_current_layout(void) {
 	if (layout_immersive_now) return PLAYER_LAYOUT_IMMERSIVE;
 	if (layout_poster_now) return PLAYER_LAYOUT_POSTER;
 	if (layout_vinyl_now) return PLAYER_LAYOUT_VINYL;
+	if (layout_sticker_now) return PLAYER_LAYOUT_STICKER;
 	if (layout_wave_now) return PLAYER_LAYOUT_ALTERNATIVE;
 	return PLAYER_LAYOUT_STANDARD;
 }
@@ -5659,8 +5761,9 @@ static void update_hires_badge(const device_state_t *state) {
 	}
 	bool source = state->live || current_qobuz_track() != 0 || current_tidal_track() != 0;
 	// The source mark can push a visible right-hand badge into the left corner.
-	bool back_right = hiresbadge_back_right(layout == PLAYER_LAYOUT_IMMERSIVE || layout == PLAYER_LAYOUT_POSTER,
-		hi, pos == PLAYER_HIRES_LEFT, pos == PLAYER_HIRES_RIGHT, source);
+	bool back_right = layout_sticker_now ||
+		hiresbadge_back_right(layout == PLAYER_LAYOUT_IMMERSIVE || layout == PLAYER_LAYOUT_POSTER,
+			hi, pos == PLAYER_HIRES_LEFT, pos == PLAYER_HIRES_RIGHT, source);
 	back_btn_player_right_set(back_right);
 	// The source marks normally occupy the right corner too. Move them below
 	// the button while it is there, and restore them when it returns left.
@@ -5672,7 +5775,7 @@ static void update_hires_badge(const device_state_t *state) {
 				lv_obj_align(marks[i], LV_ALIGN_TOP_RIGHT, -BADGE_INSET, y);
 		}
 	}
-	if (!hi || pos == PLAYER_HIRES_OFF || layout == PLAYER_LAYOUT_ALBUM_ART_MAX) {
+	if (!hi || pos == PLAYER_HIRES_OFF || layout == PLAYER_LAYOUT_ALBUM_ART_MAX || layout == PLAYER_LAYOUT_STICKER) {
 		lv_obj_set_hidden(hires_badge.box, true);
 		return;
 	}
@@ -5721,6 +5824,7 @@ static void update_format_label(const device_state_t *state) {
 	}
 	if (year_visible) {
 		lv_label_set_text_fmt(format_label, "%d", state->metadata.year);
+		sticker_pills_sync();
 		return;
 	}
 
@@ -5742,11 +5846,13 @@ static void update_format_label(const device_state_t *state) {
 		} else {
 			lv_label_set_text(format_label, "");
 		}
+		sticker_pills_sync();
 		return;
 	}
 
 	if (state->stream_sample_rate <= 0 || !state->current_file[0]) {
 		lv_label_set_text(format_label, "");
+		sticker_pills_sync();
 		return;
 	}
 
@@ -5771,6 +5877,7 @@ static void update_format_label(const device_state_t *state) {
 	int dsd = audio_get_dsd_multiple();
 	if (dsd > 0) {
 		lv_label_set_text_fmt(format_label, "DSD%d", dsd);
+		sticker_pills_sync();
 		return;
 	}
 
@@ -5804,16 +5911,19 @@ static void update_format_label(const device_state_t *state) {
 
 		if (kbps > 0) {
 			lv_label_set_text_fmt(format_label, "%d kbps %s", kbps, name);
+			sticker_pills_sync();
 			return;
 		}
 		// Neither one: the format name alone beats quoting a bit depth the
 		// file does not have.
 		lv_label_set_text(format_label, name);
+		sticker_pills_sync();
 		return;
 	}
 
 	int bits = audio_get_stream_bits();
 	lv_label_set_text_fmt(format_label, "%d/%g %s", bits > 0 ? bits : 16, state->stream_sample_rate / 1000.0, name);
+	sticker_pills_sync();
 }
 
 // The speed setting of what is playing: an episode has its own, apart from the
@@ -5935,9 +6045,14 @@ static void update_repeat_button(void) {
 	lv_image_set_src(repeat_btn_icon, icon);
 	// And at the deck's size everywhere but in Album Art Max, whose header row
 	// carries it beside the star and the menu at one weight.
-	lv_image_set_scale(repeat_btn_icon, layout_aam_now ? AAM_MODE_SCALE : 256);
+	lv_image_set_scale(repeat_btn_icon, layout_sticker_now ? STICKER_ICON_SCALE
+											: layout_aam_now ? AAM_MODE_SCALE : 256);
+	if (layout_sticker_now) {
+		color = lv_color_white();
+	}
 	lv_obj_set_style_image_recolor(repeat_btn_icon, color, 0);
-	lv_obj_set_style_image_recolor_opa(repeat_btn_icon, LV_OPA_COVER, 0);
+	lv_obj_set_style_image_recolor_opa(repeat_btn_icon,
+		(layout_sticker_now && playlist_get_mode() == PLAYBACK_MODE_NORMAL) ? LV_OPA_70 : LV_OPA_COVER, 0);
 }
 
 // Called when the current track finished on its own: advances the folder queue
@@ -6545,7 +6660,7 @@ void player_play_file(const char *filepath) {
 // because half a second of a pause button over a paused track reads as a
 // control that did not take.
 player_hires_position_t player_hires_position_get(player_layout_t layout) {
-	if (layout < PLAYER_LAYOUT_STANDARD || layout > PLAYER_LAYOUT_VINYL) return PLAYER_HIRES_OFF;
+	if (layout < PLAYER_LAYOUT_STANDARD || layout > PLAYER_LAYOUT_STICKER) return PLAYER_HIRES_OFF;
 	char key[32];
 	snprintf(key, sizeof(key), "player_hires_%d", (int)layout);
 	int position = (int)config_get_int("screen", key, PLAYER_HIRES_OFF);
@@ -6554,7 +6669,7 @@ player_hires_position_t player_hires_position_get(player_layout_t layout) {
 }
 
 void player_hires_position_set(player_layout_t layout, player_hires_position_t position) {
-	if (layout < PLAYER_LAYOUT_STANDARD || layout > PLAYER_LAYOUT_VINYL ||
+	if (layout < PLAYER_LAYOUT_STANDARD || layout > PLAYER_LAYOUT_STICKER ||
 		position < PLAYER_HIRES_OFF || position > PLAYER_HIRES_LEFT) return;
 	char key[32];
 	snprintf(key, sizeof(key), "player_hires_%d", (int)layout);
@@ -7207,7 +7322,254 @@ static bool vinyl_take_back(void) {
 	return was;
 }
 
+static sticker_box_t sticker_box(void) {
+	int title_fh = lv_font_get_line_height(bp_title_font());
+	int artist_fh = lv_font_get_line_height(bp_artist_font());
+	int album_fh = lv_font_get_line_height(bp_format_label_font());
+	int time_fh = lv_font_get_line_height(bp_time_font());
+	return sticker_layout_box((int)lv_obj_get_width(player_screen),
+							  (int)lv_obj_get_height(player_screen),
+							  title_fh, artist_fh, album_fh, time_fh);
+}
+
+static void sticker_pills_sync(void) {
+	if (!layout_sticker_now || !sticker_up) return;
+	if (sticker_view.artist_strip && song_artist_label) {
+		const char *t = lv_label_get_text(song_artist_label);
+		lv_obj_set_hidden(sticker_view.artist_strip, !t || !t[0]);
+	}
+	if (sticker_view.queue_pill && queue_position_label) {
+		const char *t = lv_label_get_text(queue_position_label);
+		lv_obj_set_hidden(sticker_view.queue_pill, !t || !t[0]);
+	}
+	if (sticker_view.format_pill && format_label) {
+		const char *t = lv_label_get_text(format_label);
+		lv_obj_set_hidden(sticker_view.format_pill, !t || !t[0]);
+	}
+	if (sticker_view.album_label) {
+		const char *t = lv_label_get_text(sticker_view.album_label);
+		lv_obj_set_hidden(sticker_view.album_label, !t || !t[0]);
+	}
+}
+
+static void sticker_seek_fit(void) {
+	if (!layout_sticker_now || !sticker_up || !sticker_view.seek_row || !progress_slider) return;
+	sticker_box_t b = sticker_box();
+	lv_obj_set_size(progress_slider, b.slider_w, STICKER_SLIDER_H);
+	lv_obj_align(progress_slider, LV_ALIGN_CENTER, 0, 0);
+}
+
+static void sticker_album_sync(const device_state_t *state) {
+	if (!sticker_view.album_label || !state) return;
+	const char *album = state->metadata.album;
+	if (state->live && (!album || !album[0])) {
+		album = state->metadata.genre;
+	}
+	lv_label_set_text(sticker_view.album_label, album ? album : "");
+	sticker_pills_sync();
+}
+
+static void sticker_paint(void) {
+	if (!sticker_view.tilted_cyan || !cover_art_group) return;
+	sticker_box_t b = sticker_box();
+	int screen_w = (int)lv_obj_get_width(player_screen);
+	if (cover_panel)
+		sticker_place_sleeve(cover_panel, cover_art_group, &b, screen_w);
+	sticker_view_apply(&sticker_view, &b, screen_w);
+	lv_obj_set_style_border_width(cover_art_group, STICKER_ART_BORDER, 0);
+	lv_obj_set_style_border_color(cover_art_group, lv_color_hex(STICKER_PINK_HEX), 0);
+	lv_obj_set_style_border_opa(cover_art_group, LV_OPA_COVER, 0);
+	lv_obj_set_style_radius(cover_art_group, STICKER_ART_RADIUS, 0);
+	if (cover_img)
+		lv_obj_set_style_radius(cover_img, STICKER_ART_RADIUS - STICKER_ART_BORDER, 0);
+	lv_obj_set_style_clip_corner(cover_art_group, true, 0);
+	if (sticker_view.album_label)
+		lv_obj_set_style_text_font(sticker_view.album_label, bp_format_label_font(), 0);
+}
+
+static void sticker_put(void) {
+	if (!cover_panel || !player_menu || !sticker_view.tilted_cyan) return;
+	sticker_up = true;
+	sticker_box_t b = sticker_box();
+	int screen_w = (int)lv_obj_get_width(player_screen);
+	menu_height = b.deck_h;
+	cover_box_h = b.deck_y;
+	cover_art_w = cover_art_h = b.art_side;
+	lv_obj_set_size(player_menu, cover_box_w, menu_height);
+	sticker_place_sleeve(cover_panel, cover_art_group, &b, screen_w);
+	sticker_ground_apply(player_screen, player_menu, studio_bg);
+	sticker_view_set_hidden(&sticker_view, false);
+
+	if (song_info_obj) lv_obj_set_hidden(song_info_obj, true);
+	if (below_slider_obj) lv_obj_set_hidden(below_slider_obj, true);
+
+	if (song_title_label && sticker_view.title_strip) {
+		lv_obj_set_parent(song_title_label, sticker_view.title_strip);
+		lv_obj_set_width(song_title_label, b.title_w - 8);
+		lv_obj_set_style_max_width(song_title_label, b.title_w - 8, 0);
+		lv_obj_set_style_text_align(song_title_label, LV_TEXT_ALIGN_CENTER, 0);
+		lv_obj_center(song_title_label);
+	}
+	if (song_artist_label && sticker_view.artist_strip) {
+		lv_obj_set_parent(song_artist_label, sticker_view.artist_strip);
+		lv_obj_set_width(song_artist_label, b.artist_w - 8);
+		lv_obj_set_style_max_width(song_artist_label, b.artist_w - 8, 0);
+		lv_obj_set_style_text_align(song_artist_label, LV_TEXT_ALIGN_CENTER, 0);
+		lv_obj_center(song_artist_label);
+	}
+	if (queue_position_label && sticker_view.queue_pill) {
+		lv_obj_set_parent(queue_position_label, sticker_view.queue_pill);
+		lv_obj_set_width(queue_position_label, LV_SIZE_CONTENT);
+		lv_obj_set_style_max_width(queue_position_label, 72, 0);
+		lv_obj_center(queue_position_label);
+	}
+	if (format_label && sticker_view.format_pill) {
+		lv_obj_set_parent(format_label, sticker_view.format_pill);
+		lv_obj_set_width(format_label, LV_SIZE_CONTENT);
+		lv_obj_set_style_max_width(format_label, 108, 0);
+		lv_obj_set_hidden(format_label, false);
+		lv_obj_center(format_label);
+	}
+	if (repeat_btn_obj && sticker_view.repeat_disc) {
+		lv_obj_set_parent(repeat_btn_obj, sticker_view.repeat_disc);
+		lv_obj_center(repeat_btn_obj);
+	}
+	if (fav_btn_obj && sticker_view.fav_disc) {
+		lv_obj_set_parent(fav_btn_obj, sticker_view.fav_disc);
+		lv_obj_center(fav_btn_obj);
+	}
+	if (sticker_view.seek_row) {
+		if (elapsed_label) {
+			lv_obj_set_parent(elapsed_label, sticker_view.seek_row);
+			lv_obj_align(elapsed_label, LV_ALIGN_LEFT_MID, STICKER_SEEK_PAD_H, 0);
+		}
+		if (remaining_label) {
+			lv_obj_set_parent(remaining_label, sticker_view.seek_row);
+			lv_obj_align(remaining_label, LV_ALIGN_RIGHT_MID, -STICKER_SEEK_PAD_H, 0);
+		}
+		if (progress_slider) {
+			if (lv_obj_get_parent(progress_slider) == player_menu)
+				sticker_slider_index = lv_obj_get_index(progress_slider);
+			lv_obj_set_parent(progress_slider, sticker_view.seek_row);
+			lv_obj_set_size(progress_slider, b.slider_w, STICKER_SLIDER_H);
+			lv_obj_align(progress_slider, LV_ALIGN_CENTER, 0, 0);
+		}
+		lv_obj_set_hidden(sticker_view.seek_row, live_mode);
+	}
+
+	sticker_paint();
+	set_over_cover(chrome_over_cover);
+	paint_progress_tint();
+	paint_play_button();
+	paint_overflow_tint();
+	update_repeat_button();
+	update_fav_button();
+	update_queue_position();
+	sticker_pills_sync();
+	placeholder_rescale();
+	placeholder_place();
+}
+
+static bool sticker_take_back(void) {
+	if (!sticker_up) return false;
+	sticker_up = false;
+	sticker_view_set_hidden(&sticker_view, true);
+
+	if (cover_art_group) {
+		lv_obj_set_style_border_width(cover_art_group, 0, 0);
+		lv_obj_set_style_radius(cover_art_group, sleeve_radius, 0);
+	}
+	if (cover_img) lv_obj_set_style_radius(cover_img, sleeve_radius, 0);
+	if (player_menu) {
+		lv_obj_remove_local_style_prop(player_menu, LV_STYLE_BG_OPA, 0);
+		lv_obj_remove_local_style_prop(player_menu, LV_STYLE_BG_IMAGE_OPA, 0);
+	}
+	if (player_screen) {
+		lv_obj_remove_local_style_prop(player_screen, LV_STYLE_BG_COLOR, 0);
+		lv_obj_remove_local_style_prop(player_screen, LV_STYLE_BG_OPA, 0);
+		lv_obj_remove_local_style_prop(player_screen, LV_STYLE_BG_GRAD_DIR, 0);
+		lv_obj_remove_local_style_prop(player_screen, LV_STYLE_BG_IMAGE_OPA, 0);
+	}
+	if (song_title_label && song_text_obj) {
+		lv_obj_set_parent(song_title_label, song_text_obj);
+		lv_obj_move_to_index(song_title_label, 0);
+		lv_obj_set_width(song_title_label, lv_pct(100));
+		lv_obj_set_style_max_width(song_title_label, LV_COORD_MAX, 0);
+		lv_obj_remove_local_style_prop(song_title_label, LV_STYLE_TEXT_ALIGN, 0);
+		lv_obj_remove_local_style_prop(song_title_label, LV_STYLE_ALIGN, 0);
+	}
+	if (song_artist_label && song_text_obj) {
+		lv_obj_set_parent(song_artist_label, song_text_obj);
+		lv_obj_move_to_index(song_artist_label, 1);
+		lv_obj_set_width(song_artist_label, lv_pct(100));
+		lv_obj_set_style_max_width(song_artist_label, LV_COORD_MAX, 0);
+		lv_obj_remove_local_style_prop(song_artist_label, LV_STYLE_TEXT_ALIGN, 0);
+		lv_obj_remove_local_style_prop(song_artist_label, LV_STYLE_ALIGN, 0);
+	}
+	if (fav_btn_obj && song_side_obj) {
+		lv_obj_set_parent(fav_btn_obj, song_side_obj);
+		lv_obj_move_to_index(fav_btn_obj, 0);
+		lv_obj_remove_local_style_prop(fav_btn_obj, LV_STYLE_ALIGN, 0);
+	}
+	if (format_label && song_side_obj) {
+		lv_obj_set_parent(format_label, song_side_obj);
+		lv_obj_move_to_index(format_label, 1);
+		lv_obj_remove_local_style_prop(format_label, LV_STYLE_WIDTH, 0);
+		lv_obj_remove_local_style_prop(format_label, LV_STYLE_MAX_WIDTH, 0);
+		lv_obj_remove_local_style_prop(format_label, LV_STYLE_ALIGN, 0);
+	}
+	if (repeat_btn_obj && controls_row) {
+		lv_obj_set_parent(repeat_btn_obj, controls_row);
+		lv_obj_move_to_index(repeat_btn_obj, 0);
+		lv_obj_align(repeat_btn_obj, LV_ALIGN_LEFT_MID, 0, 0);
+	}
+	if (below_slider_obj) {
+		if (elapsed_label) {
+			lv_obj_set_parent(elapsed_label, below_slider_obj);
+			lv_obj_move_to_index(elapsed_label, 0);
+			lv_obj_set_align(elapsed_label, LV_ALIGN_LEFT_MID);
+			lv_obj_set_pos(elapsed_label, 0, 0);
+		}
+		if (remaining_label) {
+			lv_obj_set_parent(remaining_label, below_slider_obj);
+			lv_obj_move_to_index(remaining_label, 1);
+			lv_obj_set_align(remaining_label, LV_ALIGN_RIGHT_MID);
+			lv_obj_set_pos(remaining_label, 0, 0);
+		}
+		if (queue_position_label) {
+			lv_obj_set_parent(queue_position_label, below_slider_obj);
+			lv_obj_move_to_index(queue_position_label, 2);
+			lv_obj_remove_local_style_prop(queue_position_label, LV_STYLE_WIDTH, 0);
+			lv_obj_remove_local_style_prop(queue_position_label, LV_STYLE_MAX_WIDTH, 0);
+			lv_obj_set_align(queue_position_label, LV_ALIGN_CENTER);
+			lv_obj_set_pos(queue_position_label, 0, 0);
+		}
+		lv_obj_set_hidden(below_slider_obj, live_mode && !live_custom_nav);
+	}
+	if (progress_slider && player_menu) {
+		lv_obj_set_parent(progress_slider, player_menu);
+		lv_obj_move_to_index(progress_slider, sticker_slider_index);
+		lv_obj_set_size(progress_slider, compact_progress_width > 0 ? compact_progress_width : lv_pct(100),
+						PROGRESS_TRACK_HEIGHT);
+		lv_obj_remove_local_style_prop(progress_slider, LV_STYLE_ALIGN, 0);
+		lv_obj_set_pos(progress_slider, 0, 0);
+		aam_slider_style(false);
+	}
+	if (play_btn) {
+		lv_obj_set_style_border_width(play_btn, 0, 0);
+	}
+	set_over_cover(chrome_over_cover);
+	paint_progress_tint();
+	paint_play_button();
+	paint_overflow_tint();
+	update_repeat_button();
+	update_fav_button();
+	update_queue_position();
+	return true;
+}
+
 static int compact_sleeve_top(void) {
+	if (layout_sticker_now) return sticker_box().art_y;
 	return layout_vinyl_now ? VINYL_TOP : layout_alt_now ? COMPACT_SLEEVE_TOP
 						  : (back_btn_centre_y() - player_content_top()) - bp_header_button_size() / 2 + COMPACT_CHEVRON_INSET_TOP;
 }
@@ -7217,6 +7579,7 @@ static int compact_sleeve_top(void) {
 // real breathing room above the names, rather than spending it all on artwork.
 static int compact_sleeve_side(void) {
 	if (layout_vinyl_now) return vinyl_box().art_side;
+	if (layout_sticker_now) return sticker_box().art_side;
 	int bottom = layout_alt_now ? COMPACT_SLEEVE_MARGIN : COMPACT_STANDARD_SLEEVE_MARGIN;
 	int side = LV_MIN(cover_box_w - 2 * COMPACT_SLEEVE_SIDE_MARGIN, cover_box_h - compact_sleeve_top() - bottom);
 	if (side < 64) {
@@ -7233,6 +7596,11 @@ static void compact_place_sleeve(void) {
 	if (layout_vinyl_now) {
 		vinyl_box_t b = vinyl_box();
 		vinyl_place_sleeve(cover_panel, cover_art_group, &b, (int)lv_obj_get_width(player_screen));
+		return;
+	}
+	if (layout_sticker_now) {
+		sticker_box_t b = sticker_box();
+		sticker_place_sleeve(cover_panel, cover_art_group, &b, (int)lv_obj_get_width(player_screen));
 		return;
 	}
 	if (layout_alt_now) {
@@ -7380,9 +7748,10 @@ static void player_apply_geometry(bool force) {
 		return;
 	}
 
-	int want_menu = layout_vinyl_now ? (int)lv_obj_get_height(player_screen) - vinyl_box().deck_y
+	int want_menu = layout_sticker_now ? sticker_box().deck_h
+									 : layout_vinyl_now ? (int)lv_obj_get_height(player_screen) - vinyl_box().deck_y
 									 : compact_deck_height(layout_alt_now);
-	if (want_menu == menu_height && !force && !layout_vinyl_now) {
+	if (want_menu == menu_height && !force && !layout_vinyl_now && !layout_sticker_now) {
 		return; // the arrangement did not change the deck
 	}
 	menu_height = want_menu;
@@ -8232,6 +8601,7 @@ void player_init(gui_config_t *cfg) {
 	// apply_layout(), so they have to exist before it can run.
 	aam_status_h = compact ? cfg->top_bar_height : 0;
 	aam_build();
+	sticker_view_build(&sticker_view, player_screen, cover_panel, cover_art_group, play_btn);
 
 	// Last, so it is above the artwork: an invisible strip exactly where the
 	// status bar would be, owning the pull-down that brings the sheet in.
@@ -8272,6 +8642,7 @@ void player_init(gui_config_t *cfg) {
 						: (saved == (int)PLAYER_LAYOUT_POSTER)	   ? PLAYER_LAYOUT_POSTER
 						: (saved == (int)PLAYER_LAYOUT_ALBUM_ART_MAX) ? PLAYER_LAYOUT_ALBUM_ART_MAX
 						: (saved == (int)PLAYER_LAYOUT_VINYL) ? PLAYER_LAYOUT_VINYL
+						: (saved == (int)PLAYER_LAYOUT_STICKER) ? PLAYER_LAYOUT_STICKER
 																  : PLAYER_LAYOUT_STANDARD;
 	// apply_layout() below puts the standard one up first: none of the others
 	// is in force until it says so.
@@ -8281,6 +8652,7 @@ void player_init(gui_config_t *cfg) {
 	layout_poster_now = false;
 	layout_aam_now = false;
 	layout_vinyl_now = false;
+	layout_sticker_now = false;
 	apply_layout();
 
 	theme_register_refresh(player_refresh_theme);

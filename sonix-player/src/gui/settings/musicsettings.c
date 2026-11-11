@@ -1751,7 +1751,8 @@ static lv_obj_t *hires_card;
 
 static void hires_refresh(void) {
 	player_layout_t layout = player_layout_get();
-	if (hires_card) lv_obj_set_hidden(hires_card, layout == PLAYER_LAYOUT_ALBUM_ART_MAX);
+	if (hires_card)
+		lv_obj_set_hidden(hires_card, layout == PLAYER_LAYOUT_ALBUM_ART_MAX || layout == PLAYER_LAYOUT_STICKER);
 	player_hires_position_t pos = player_hires_position_get(layout);
 	for (int i = 0; i < 3; i++) {
 		if (hires_pills[i]) settingsrow_pill_active(hires_pills[i], pos == (player_hires_position_t)i);
@@ -1780,6 +1781,7 @@ static lv_obj_t *layout_studio_pill;
 static lv_obj_t *layout_immersive_pill;
 static lv_obj_t *layout_poster_pill;
 static lv_obj_t *layout_vinyl_pill;
+static lv_obj_t *layout_sticker_pill;
 static lv_obj_t *layout_aam_pill; // only built on the V1, the panel it is measured for
 // Album Art Max's own row: the band along the foot of the sleeve or up its left
 // edge. Shown only while that arrangement is the chosen one, and only where it
@@ -1810,6 +1812,7 @@ static void layout_refresh(void) {
 	settingsrow_pill_active(layout_immersive_pill, chosen == PLAYER_LAYOUT_IMMERSIVE);
 	settingsrow_pill_active(layout_poster_pill, chosen == PLAYER_LAYOUT_POSTER);
 	if (layout_vinyl_pill) settingsrow_pill_active(layout_vinyl_pill, chosen == PLAYER_LAYOUT_VINYL);
+	if (layout_sticker_pill) settingsrow_pill_active(layout_sticker_pill, chosen == PLAYER_LAYOUT_STICKER);
 	if (layout_aam_pill) {
 		settingsrow_pill_active(layout_aam_pill, chosen == PLAYER_LAYOUT_ALBUM_ART_MAX);
 	}
@@ -2597,6 +2600,8 @@ static void build_display_page(gui_config_t *cfg) {
 	if (bp_is_tempotec_v1()) {
 		layout_vinyl_pill = settingsrow_pill(layout_pills, "musicsettings_layout_vinyl",
 											 PLAYER_LAYOUT_VINYL, layout_pick_cb);
+		layout_sticker_pill = settingsrow_pill(layout_pills, "musicsettings_layout_sticker",
+											   PLAYER_LAYOUT_STICKER, layout_pick_cb);
 		layout_aam_pill = settingsrow_pill(layout_pills, "musicsettings_layout_aam",
 										   PLAYER_LAYOUT_ALBUM_ART_MAX, layout_pick_cb);
 	}

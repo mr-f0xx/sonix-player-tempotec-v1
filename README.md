@@ -228,7 +228,7 @@ This fork builds on the upstream [Sonix Player](https://github.com/Jepl4r/sonix-
 - 🧩 **Plugins (`Settings → Plugins`)** - switch optional modules (including Tidal, Qobuz, Podcasts, Radio, tools and games) on or off so unused pages are never built and RAM stays free. See [docs/ADDONS.md](docs/ADDONS.md).
 - 🎨 **V1 themes** - **Tokyo Night**, **Amber on Black** and **OLED**, designed for the V1 panel, beside Dark and Light. Make your own with a [custom colour theme](docs/custom-themes.md).
 - 🚀 **Boot screens** - Retrospace (the default), Space, Travelling in space, Stock, or your own picture.
-- 🖼️ **Player layouts** - **Immersive**, **Poster**, **Album Art Max** and **Vinyl**, beside Standard, Waveform and Alternative. See [FEATURES.md](FEATURES.md#now-playing) for the details of each layout.
+- 🖼️ **Player layouts** - **Immersive**, **Poster**, **Album Art Max**, **Vinyl** and **Sticker**, beside Standard, Waveform and Alternative. See [FEATURES.md](FEATURES.md#now-playing) for the details of each layout.
 - 🔘 **Legacy play button and corner roundness** - the original round disc behind play and pause, as an option under Settings → Music → Display options; and a slider for how round the screen corners are, from a hint of a corner (2 px) up to 20 px, for a V1 that looks boxier than its 16 px default.
 - 🔤 **Interface fonts** - choose MiSans, Neon 80s or Roboto, or any `.ttf`/`.otf` in the card's `Fonts` folder. Missing glyphs fall back to MiSans, so every language stays readable.
 - 🎚️ **Two PEQ profiles** - separate bands, preamp and on/off states for two pairs of headphones, with one-tap switching from the Control Centre and a long press to open the PEQ page.
