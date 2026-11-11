@@ -287,7 +287,19 @@ bool btstack_pcm_volume_get(const char *address, bool receiving, int *out);
 bool btstack_pcm_volume_set(const char *address, bool receiving, int volume);
 // Whether bluealsa applies the PCM's Volume locally or forwards it as AVRCP
 // absolute volume to the remote A2DP endpoint.
+//
+// On the receiving PCM this is the difference between a phone's volume that
+// turns the sound down and one that does not: with it off, bluealsa 4.1.1's
+// decoder leaves the samples alone and only silences them at exactly zero.
 bool btstack_pcm_softvolume_set(const char *address, bool receiving, bool enabled);
+// False when there is no such PCM right now (or it does not answer); `out` is
+// then untouched.
+bool btstack_pcm_softvolume_get(const char *address, bool receiving, bool *out);
+
+// A number that changes whenever a receive PCM object appears: a new link, or a
+// codec change building its transport again. The worker compares it with the
+// one it last dealt with to know that the PCM in front of it is a new object.
+unsigned btstack_rx_pcm_generation(void);
 bool btstack_select_codec(const char *address, const char *codec);
 
 // One line describing the audio path bluealsa has actually built: the codec it

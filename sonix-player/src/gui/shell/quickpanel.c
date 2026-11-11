@@ -4,6 +4,7 @@
 #include <string.h>
 
 #include "src/gui/wireless/airplay.h"
+#include "src/gui/bluetooth/btreceiversession.h"
 #include "src/gui/bluetooth/btsettings.h"
 #include "src/gui/nowplaying/coverflow.h"
 #include "src/gui/shell/confirm.h"
@@ -389,6 +390,16 @@ static bool dac_mode_owns_output(void) {
 	return state.active || state.starting;
 }
 
+// A Bluetooth receiver owns the output the same way: what is playing is on the
+// phone, and the local transport must not start a track of the player's own
+// underneath it.
+static bool receiver_owns_output(void) { return btreceiver_is_active(); }
+
+// Either of the two: the card tells the user what the mode is doing instead of
+// what the library last played, and the buttons of the local transport do
+// nothing.
+static bool mode_owns_output(void) { return dac_mode_owns_output() || receiver_owns_output(); }
+
 static void refresh_dac_card(const usbdac_state_t *state) {
 	lv_obj_set_clickable(np_title, false);
 	lv_obj_set_clickable(np_artist, false);
@@ -418,11 +429,98 @@ static void refresh_dac_card(const usbdac_state_t *state) {
 	}
 }
 
-static void refresh_now_playing_card(void) {
+// "aptX 44.1 kHz": what the sender chose, for the card's second line.
+static void receiver_format_text(const btreceiver_state_t *st, char *out, size_t size) {
+	char rate[24] = "";
+	if (st->sample_rate) {
+		if (st->sample_rate % 1000 == 0) {
+			snprintf(rate, sizeof(rate), "%u kHz", st->sample_rate / 1000);
+		} else {
+			snprintf(rate, sizeof(rate), "%.1f kHz", st->sample_rate / 1000.0);
+		}
+	}
+	if (st->codec[0] && rate[0]) {
+		snprintf(out, size, "%s %s", st->codec, rate);
+	} else {
+		snprintf(out, size, "%s", st->codec[0] ? st->codec : rate);
+	}
+}
+
+// What the two lines of the card say while the receiver is on.
+//
+// The first is the track the phone names over AVRCP, or the mode's own name when
+// it names none (a laptop's system audio usually does not); the second is who
+// it is by, or what the stream is doing, with the codec and rate at the end of
+// it -- the one place the sender's choice is visible without leaving the sheet.
+// A problem the receiver is reporting replaces the second line.
+static void receiver_card_text(const btreceiver_state_t *st, bool have_track, const bt_track_t *track, char *title,
+							   size_t title_size, char *line, size_t line_size) {
+	if (st->error[0]) {
+		snprintf(title, title_size, "%s", tr("btreceiver_title"));
+		snprintf(line, line_size, "%s", st->error);
+		return;
+	}
+	const char *lead;
+	if (st->streaming && have_track && track && track->title[0]) {
+		snprintf(title, title_size, "%s", track->title);
+		lead = track->artist[0] ? track->artist : track->album;
+		if (!lead[0]) {
+			lead = tr("btreceiver_playing");
+		}
+	} else {
+		snprintf(title, title_size, "%s", tr("btreceiver_title"));
+		lead = st->streaming ? tr("btreceiver_playing") : tr("btreceiver_waiting");
+	}
+	char format[48];
+	receiver_format_text(st, format, sizeof(format));
+	if (format[0]) {
+		snprintf(line, line_size, "%s · %s", lead, format);
+	} else {
+		snprintf(line, line_size, "%s", lead);
+	}
+}
+
+// The card while a phone or a computer is playing through the player. The same
+// shape as the DAC's: two lines, and no transport -- the side keys already send
+// play, next and previous to the sender over AVRCP, and the buttons here would
+// have to do the same to mean anything.
+static void refresh_receiver_card(const btreceiver_state_t *st) {
+	lv_obj_set_clickable(np_title, false);
+	lv_obj_set_clickable(np_artist, false);
+	lv_obj_set_hidden(np_transport, true);
+	lv_obj_set_hidden(np_title, false);
+	lv_obj_set_hidden(np_artist, false);
+
+	bt_track_t track;
+	bool have_track = st->streaming && bluetooth_receiver_track(&track);
+	char title[sizeof(track.title) + 8];
+	char line[sizeof(track.artist) + sizeof(track.album) + 96];
+	receiver_card_text(st, have_track, have_track ? &track : NULL, title, sizeof(title), line, sizeof(line));
+	scrolltext_set(np_title, title);
+	scrolltext_set(np_artist, line);
+}
+
+// The card of whichever mode owns the output, if one does. True when it was
+// shown, in which case the local player's card is not touched: its track, its
+// transport and its favourite star are about something that is not playing.
+static bool refresh_mode_card(void) {
 	usbdac_state_t dac_state;
 	usbdac_get_state(&dac_state);
 	if (dac_state.active || dac_state.starting) {
 		refresh_dac_card(&dac_state);
+		return true;
+	}
+	btreceiver_state_t receiver_state;
+	btreceiver_get_state(&receiver_state);
+	if (receiver_state.active) {
+		refresh_receiver_card(&receiver_state);
+		return true;
+	}
+	return false;
+}
+
+static void refresh_now_playing_card(void) {
+	if (refresh_mode_card()) {
 		return;
 	}
 
@@ -872,7 +970,7 @@ void quickpanel_set_both_sliders(bool on) {
 	level_layout();
 	level_sync();
 	if (np_title && np_artist) {
-		bool hide = qp_compact && on && !dac_mode_owns_output();
+		bool hide = qp_compact && on && !mode_owns_output();
 		lv_obj_set_hidden(np_title, hide);
 		lv_obj_set_hidden(np_artist, hide);
 	}
@@ -909,16 +1007,20 @@ static void panel_prepare(void) {
 	topbar_bring_to_front();
 }
 
-// A USB DAC is still a useful place for the Control Centre: its transport card
-// becomes DAC status instead, and EQ, gain, output and level controls remain
-// live. A Wi-Fi file server or Bluetooth receiver still owns the screen, so the
-// sheet stays shut for those modes.
+// A USB DAC and a Bluetooth receiver are both still useful places for the
+// Control Centre: the transport card becomes the mode's status instead, and EQ,
+// PEQ, gain, output and level controls remain live -- the receiver's audio goes
+// through the same equaliser a decoded track does (btreceiver.c), which is what
+// makes reaching it from here worth anything. What would take the user off the
+// receiver's page asks first (see open_page()), and Bluetooth and airplane mode,
+// which would end the stream, say so instead. A Wi-Fi file server still owns the
+// screen, so the sheet stays shut for that.
 bool quickpanel_blocked(void) {
 	// The transfer answers with the switch rather than with the server: killing
 	// thttpd takes a moment and the answer about the process is cached on top of
 	// that, so asking the process left the control centre refusing to open for
 	// seconds after the page said the transfer was off.
-	return wifitransfer_get_enabled() || btreceiver_is_active();
+	return wifitransfer_get_enabled();
 }
 
 void quickpanel_open(void) {
@@ -1287,8 +1389,8 @@ static void level_released_cb(lv_event_t *e) {
 
 static void play_cb(lv_event_t *e) {
 	(void)e;
-	if (dac_mode_owns_output()) {
-		return; // never start local playback over the USB DAC stream
+	if (mode_owns_output()) {
+		return; // never start local playback over the USB DAC or Bluetooth stream
 	}
 	player_key_play_pause();
 	refresh_now_playing_card();
@@ -1299,7 +1401,7 @@ static void play_cb(lv_event_t *e) {
 // changing episode, which stays with the physical side keys.
 static void next_cb(lv_event_t *e) {
 	(void)e;
-	if (dac_mode_owns_output()) {
+	if (mode_owns_output()) {
 		return;
 	}
 	player_screen_next();
@@ -1308,7 +1410,7 @@ static void next_cb(lv_event_t *e) {
 
 static void prev_cb(lv_event_t *e) {
 	(void)e;
-	if (dac_mode_owns_output()) {
+	if (mode_owns_output()) {
 		return;
 	}
 	player_screen_prev();
@@ -1331,7 +1433,7 @@ static void prev_cb(lv_event_t *e) {
 // no Now Playing to show, only an empty player over the page.
 static void np_open_player_cb(lv_event_t *e) {
 	(void)e;
-	if (dac_mode_owns_output()) {
+	if (mode_owns_output()) {
 		return;
 	}
 	device_state_t state;
@@ -2399,6 +2501,99 @@ static void lineout_clicked_cb(lv_event_t *e) {
 	confirm_show("quickpanel_line_out", tr("quickpanel_the_volume_will_go_to_100"), "quickpanel_activate", lineout_confirmed, NULL);
 }
 
+// ---------------------------------------------------------------------------
+// The receiver, and what the control centre may do to it
+//
+// The sheet opens over the receiver's page, and almost everything on it is
+// harmless there. Three kinds of thing are not.
+//
+// The equaliser's pages -- EQ, MSEB and PEQ -- are the reason the sheet is
+// allowed here at all: the receiver's audio goes through them (btreceiver.c),
+// so they are where the sound it is playing is set. Opening one takes the user
+// off the receiver's page, which would end the mode in the middle of the song,
+// so the receiver is held for it instead and waits behind it
+// (btreceiversession.h). Back out of the equaliser and it is where it was.
+//
+// Every other page a hold can open is somewhere the receiver cannot follow --
+// the radio settings would pull out what it plays over, a file server would
+// claim the screen -- so those ask the question the page's own back button
+// asks, and go on once the answer is yes. With nothing playing there is
+// nothing to ask: a page waiting for a phone to connect is simply left.
+//
+// And the two switches that would take the radio away from under the stream --
+// Bluetooth, and airplane mode -- are not offered at all while it lasts; they
+// say why. Leaving by the page is the way to switch the radio off.
+// ---------------------------------------------------------------------------
+
+// The user is in the receiver: it is playing, or its page is open waiting for a
+// sender, or it is parked behind one of the equaliser's pages.
+static bool receiver_session(void) { return btreceiver_is_active() || btreceiversession_in_use(); }
+
+// The pages the receiver can wait behind: the ones that set what its audio goes
+// through. Not the others that sit beside them in the sheet -- crossfeed and
+// soundfield are applied to a decoded track and not to a received stream, so a
+// page for them would be a page of settings that do nothing here.
+static bool page_serves_receiver(lv_obj_t *screen) {
+	return screen && (screen == peqpage_screen() || screen == musicsettings_eq_screen() ||
+					  screen == musicsettings_mseb_screen());
+}
+
+typedef void (*after_receiver_t)(void *user);
+static after_receiver_t after_receiver_fn;
+static void *after_receiver_user;
+
+static void after_receiver_run(void *unused) {
+	(void)unused;
+	after_receiver_t fn = after_receiver_fn;
+	void *user = after_receiver_user;
+	after_receiver_fn = NULL;
+	after_receiver_user = NULL;
+	if (fn) {
+		fn(user);
+	}
+}
+
+static void after_receiver_declined(void *unused) {
+	(void)unused;
+	after_receiver_fn = NULL;
+	after_receiver_user = NULL;
+}
+
+static void receiver_leave_confirmed(void *unused) {
+	(void)unused;
+	btreceiversession_end();
+	// One turn of the event loop later, as the receiver page's own leave does
+	// it: this runs from inside the confirmation's handler, and a screen change
+	// made from under a dialog that is still closing is lost.
+	lv_async_call(after_receiver_run, NULL);
+}
+
+// Leaves the receiver on the way to somewhere it cannot follow, then runs
+// `then`. While it is playing that is a question first, and `then` waits for
+// the yes -- and is dropped on a no. With nothing playing the session is ended
+// quietly and `then` runs at once.
+static void leave_receiver_then(after_receiver_t then, void *user) {
+	if (!btreceiver_is_active()) {
+		btreceiversession_end();
+		then(user);
+		return;
+	}
+	after_receiver_fn = then;
+	after_receiver_user = user;
+	quickpanel_close(); // the dialog belongs to the page, not under the sheet
+	confirm_show_with_cancel("btreceiver_leave_confirm", "btreceiver_leave_confirm_note", "leave",
+							 receiver_leave_confirmed, NULL, NULL, after_receiver_declined, NULL);
+}
+
+// The two switches that end the stream. True when the tap was dealt with here.
+static bool radios_held_by_receiver(void) {
+	if (!receiver_session()) {
+		return false;
+	}
+	gui_notify_popup("btreceiver_radios_held");
+	return true;
+}
+
 static void wifi_clicked_cb(lv_event_t *e) {
 	(void)e;
 	if (long_press_consumed) {
@@ -2420,6 +2615,9 @@ static void bt_clicked_cb(lv_event_t *e) {
 		return;
 	}
 	if (!bluetooth_available()) {
+		return;
+	}
+	if (radios_held_by_receiver()) {
 		return;
 	}
 	bluetooth_set_enabled(!bluetooth_get_enabled());
@@ -2619,6 +2817,19 @@ static void dlna_clicked_cb(lv_event_t *e) {
 	toggled();
 }
 
+static void wifi_transfer_start_now(void *unused) {
+	(void)unused;
+	quickpanel_close();
+	bool from_player = player_sheet_is_open();
+	if (from_player) {
+		player_sheet_close(false);
+	}
+	wifitransfer_page_open_started();
+	if (from_player) {
+		switcher_set_player_return(wifitransfer_screen);
+	}
+}
+
 // Wi-Fi transfer. The server lives only as long as its page is open (see
 // gui/wireless/wifitransfer.h), so switching it on opens the page with the
 // server starting; switching it off stops it where it is. Same network gate as
@@ -2644,14 +2855,13 @@ static void wifi_transfer_clicked_cb(lv_event_t *e) {
 	}
 
 	quickpanel_close();
-	bool from_player = player_sheet_is_open();
-	if (from_player) {
-		player_sheet_close(false);
+	// Its page is a page, and the file server claims the screen: the receiver
+	// cannot follow, so leaving it is part of starting the transfer.
+	if (receiver_session()) {
+		leave_receiver_then(wifi_transfer_start_now, NULL);
+		return;
 	}
-	wifitransfer_page_open_started();
-	if (from_player) {
-		switcher_set_player_return(wifitransfer_screen);
-	}
+	wifi_transfer_start_now(NULL);
 }
 
 // The parametric equaliser, same contract as the graphic one beside it: a tap
@@ -2736,6 +2946,11 @@ static void airplane_clicked_cb(lv_event_t *e) {
 	(void)e;
 	if (long_press_consumed) {
 		long_press_consumed = false;
+		return;
+	}
+
+	// Only ever on the way in: with the radios off there is no receiver to hold.
+	if (radios_held_by_receiver()) {
 		return;
 	}
 
@@ -2919,13 +3134,7 @@ static void power_menu_clicked_cb(lv_event_t *e) {
 	powermenu_show();
 }
 
-static void open_page(lv_obj_t *screen) {
-	long_press_consumed = true;
-	quickpanel_close();
-	if (!screen) {
-		return;
-	}
-
+static void open_page_now(lv_obj_t *screen) {
 	// The player is a sheet on the top layer, not a page: with it up, loading a
 	// screen leaves the page behind the sheet, and closing the sheet puts its
 	// own opener back, taking the page away again. So the sheet goes down
@@ -2942,6 +3151,28 @@ static void open_page(lv_obj_t *screen) {
 	if (from_player) {
 		switcher_set_player_return(screen);
 	}
+}
+
+static void open_page_after_receiver(void *screen) { open_page_now((lv_obj_t *)screen); }
+
+static void open_page(lv_obj_t *screen) {
+	long_press_consumed = true;
+	quickpanel_close();
+	if (!screen) {
+		return;
+	}
+	// Every hold on a button that opens a page comes through here, so this is
+	// the one place the receiver has to be dealt with.
+	if (screen != lv_screen_active() && receiver_session()) {
+		if (page_serves_receiver(screen)) {
+			btreceiversession_hold_for(screen);
+			open_page_now(screen);
+		} else {
+			leave_receiver_then(open_page_after_receiver, screen);
+		}
+		return;
+	}
+	open_page_now(screen);
 }
 
 static void open_page_cb(lv_event_t *e) { open_page(lv_event_get_user_data(e)); }

@@ -10,8 +10,8 @@
 
 #include "../src/gui/shell/quickpanel.c"
 
-// Mode answers used by quickpanel_blocked(). DAC mode deliberately does not
-// block the Control Centre any more; the other device-owning modes still do.
+// Mode answers used by quickpanel_blocked(). DAC mode and the Bluetooth receiver
+// deliberately do not block the Control Centre; a Wi-Fi transfer still does.
 static bool dac_active;
 static bool transfer_enabled;
 static bool receiver_active;
@@ -19,6 +19,85 @@ static bool receiver_active;
 bool usbdac_is_active(void) { return dac_active; }
 bool wifitransfer_get_enabled(void) { return transfer_enabled; }
 bool btreceiver_is_active(void) { return receiver_active; }
+
+// What the receiver says about itself, and the track the phone names.
+static btreceiver_state_t receiver_state;
+static bool receiver_has_track;
+static bt_track_t receiver_track;
+void btreceiver_get_state(btreceiver_state_t *out) {
+	*out = receiver_state;
+	out->active = receiver_active;
+}
+bool bluetooth_receiver_track(bt_track_t *out) {
+	if (receiver_has_track) {
+		*out = receiver_track;
+	}
+	return receiver_has_track;
+}
+
+// The receiver's session, as the control centre sees it: whether the user is in
+// it, which page it was asked to wait behind, and how often it was ended.
+static bool session_in_use;
+static lv_obj_t *session_held_for;
+static int session_ends;
+bool btreceiversession_in_use(void) { return session_in_use; }
+void btreceiversession_hold_for(lv_obj_t *screen) { session_held_for = screen; }
+void btreceiversession_end(void) {
+	session_ends++;
+	receiver_active = false;
+	session_in_use = false;
+}
+
+// The pages the receiver can wait behind, and one it cannot.
+static lv_obj_t *peq_stub, *eq_stub, *mseb_stub;
+lv_obj_t *peqpage_screen(void) { return peq_stub; }
+lv_obj_t *musicsettings_eq_screen(void) { return eq_stub; }
+lv_obj_t *musicsettings_mseb_screen(void) { return mseb_stub; }
+const char *tr(const char *key) { return key; }
+
+// The card's two lines, as the card was last told to show them.
+static char card_title[512], card_line[512];
+void scrolltext_set(lv_obj_t *label, const char *text) {
+	char *dest = label == np_title ? card_title : card_line;
+	snprintf(dest, sizeof(card_line), "%s", text); // both are the same size
+}
+
+// The question the control centre asks before leaving the receiver, and the
+// page it was asked for. The dialog is recorded, not drawn; the test answers it.
+static int confirm_calls;
+static const char *confirm_title_seen;
+static void (*confirm_ok)(void *);
+static void *confirm_ok_user;
+static void (*confirm_cancel)(void *);
+static void *confirm_cancel_user;
+void confirm_show_with_cancel(const char *title, const char *message, const char *ok_label, void (*on_ok)(void *user),
+							  void *user, const char *cancel_label, void (*on_cancel)(void *user), void *cancel_user) {
+	(void)message;
+	(void)ok_label;
+	(void)cancel_label;
+	confirm_calls++;
+	confirm_title_seen = title;
+	confirm_ok = on_ok;
+	confirm_ok_user = user;
+	confirm_cancel = on_cancel;
+	confirm_cancel_user = cancel_user;
+}
+static int popups;
+static const char *popup_seen;
+void gui_notify_popup(const char *tag) {
+	popups++;
+	popup_seen = tag;
+}
+static int page_switches;
+static lv_obj_t *page_switched_to;
+void switch_screen(lv_obj_t *target) {
+	page_switches++;
+	page_switched_to = target;
+}
+bool player_sheet_is_open(void) { return false; }
+bool gestures_stock(void) { return false; } // the classic scheme: the sheet parks above
+void player_sheet_close(bool animate) { (void)animate; }
+void switcher_set_player_return(lv_obj_t *screen) { (void)screen; }
 
 // The palette the page dots are coloured from. Nothing is drawn here.
 const theme_palette_t *theme(void) {
@@ -92,10 +171,16 @@ static void test_quickpanel_mode_gating(void) {
 	transfer_enabled = true;
 	assert(quickpanel_blocked());
 
+	// The receiver lets the sheet open over it: PEQ and the rest are the point.
+	// What it must not allow is handled by the guards below, not by a locked
+	// door. A file transfer still owns the screen, receiver or not.
 	transfer_enabled = false;
 	receiver_active = true;
+	assert(!quickpanel_blocked());
+	transfer_enabled = true;
 	assert(quickpanel_blocked());
 
+	transfer_enabled = false;
 	receiver_active = false;
 	assert(!quickpanel_blocked());
 }
@@ -214,12 +299,373 @@ static void test_level_rows(const char *path) {
 	dac_active = true; quickpanel_set_both_sliders(true);
 	assert(!lv_obj_is_hidden(np_title) && !lv_obj_is_hidden(np_artist));
 	dac_active = false; quickpanel_set_both_sliders(false);
+	// ...and so does a Bluetooth receiver, whose card is the same two lines.
+	receiver_active = true; quickpanel_set_both_sliders(true);
+	assert(!lv_obj_is_hidden(np_title) && !lv_obj_is_hidden(np_artist));
+	receiver_active = false; quickpanel_set_both_sliders(false);
 	lv_display_delete(display);
 	controls_card = np_card = pages_view = level_row = volume_row = NULL;
 	level_slider = volume_slider = level_icon = volume_icon = NULL;
 	np_title = np_artist = np_transport = page_dots = NULL;
 	for (int i = 0; i < QP_PAGE_COUNT; i++) page_row[i] = NULL;
 	config_set_bool("quickpanel", "volume_slider", false);
+}
+
+
+// What the receiver's card says: the track the phone names, or the mode's own
+// name; who it is by or what the stream is doing; the codec and rate at the end.
+static void test_receiver_card_text(void) {
+	btreceiver_state_t st = {0};
+	bt_track_t track = {0};
+	char title[200], line[300];
+
+	st.active = true;
+	receiver_card_text(&st, false, NULL, title, sizeof(title), line, sizeof(line));
+	assert(!strcmp(title, "btreceiver_title") && !strcmp(line, "btreceiver_waiting"));
+
+	snprintf(st.codec, sizeof(st.codec), "aptX");
+	st.sample_rate = 44100;
+	receiver_card_text(&st, false, NULL, title, sizeof(title), line, sizeof(line));
+	assert(!strcmp(line, "btreceiver_waiting · aptX 44.1 kHz"));
+
+	st.streaming = true;
+	receiver_card_text(&st, false, NULL, title, sizeof(title), line, sizeof(line));
+	assert(!strcmp(title, "btreceiver_title") && !strcmp(line, "btreceiver_playing · aptX 44.1 kHz"));
+
+	st.sample_rate = 96000;
+	snprintf(st.codec, sizeof(st.codec), "LDAC");
+	receiver_card_text(&st, false, NULL, title, sizeof(title), line, sizeof(line));
+	assert(!strcmp(line, "btreceiver_playing · LDAC 96 kHz"));
+
+	// A track the phone names: its title on the first line, its artist on the second.
+	snprintf(track.title, sizeof(track.title), "Song");
+	snprintf(track.artist, sizeof(track.artist), "Artist");
+	snprintf(track.album, sizeof(track.album), "Album");
+	receiver_card_text(&st, true, &track, title, sizeof(title), line, sizeof(line));
+	assert(!strcmp(title, "Song") && !strcmp(line, "Artist · LDAC 96 kHz"));
+	track.artist[0] = '\0';
+	receiver_card_text(&st, true, &track, title, sizeof(title), line, sizeof(line));
+	assert(!strcmp(line, "Album · LDAC 96 kHz"));
+	track.album[0] = '\0';
+	receiver_card_text(&st, true, &track, title, sizeof(title), line, sizeof(line));
+	assert(!strcmp(title, "Song") && !strcmp(line, "btreceiver_playing · LDAC 96 kHz"));
+
+	// A track that is not being heard is not what the card is about.
+	st.streaming = false;
+	receiver_card_text(&st, true, &track, title, sizeof(title), line, sizeof(line));
+	assert(!strcmp(title, "btreceiver_title") && !strcmp(line, "btreceiver_waiting · LDAC 96 kHz"));
+
+	// Only one half of the format known.
+	st.streaming = true;
+	st.sample_rate = 0;
+	receiver_card_text(&st, false, NULL, title, sizeof(title), line, sizeof(line));
+	assert(!strcmp(line, "btreceiver_playing · LDAC"));
+	st.codec[0] = '\0';
+	st.sample_rate = 48000;
+	receiver_card_text(&st, false, NULL, title, sizeof(title), line, sizeof(line));
+	assert(!strcmp(line, "btreceiver_playing · 48 kHz"));
+	st.sample_rate = 0;
+	receiver_card_text(&st, false, NULL, title, sizeof(title), line, sizeof(line));
+	assert(!strcmp(line, "btreceiver_playing"));
+
+	// A problem replaces the second line, whatever else is known.
+	snprintf(st.error, sizeof(st.error), "The stream could not be opened.");
+	receiver_card_text(&st, true, &track, title, sizeof(title), line, sizeof(line));
+	assert(!strcmp(title, "btreceiver_title") && !strcmp(line, "The stream could not be opened."));
+
+	// Never past the end of what it was given.
+	char tiny_title[8], tiny_line[8];
+	st.error[0] = '\0';
+	snprintf(track.title, sizeof(track.title), "A very long title indeed");
+	snprintf(track.artist, sizeof(track.artist), "An equally long artist name");
+	st.streaming = true;
+	receiver_card_text(&st, true, &track, tiny_title, sizeof(tiny_title), tiny_line, sizeof(tiny_line));
+	assert(strlen(tiny_title) == 7 && strlen(tiny_line) == 7);
+}
+
+// The card itself over a receiver: two lines, no transport, nothing to tap.
+static void test_receiver_card(void) {
+	lv_display_t *display = lv_display_create(240, 320);
+	lv_obj_t *screen = lv_display_get_screen_active(display);
+	np_card = lv_obj_create(screen);
+	np_title = lv_obj_create(np_card);
+	np_artist = lv_obj_create(np_card);
+	np_transport = lv_obj_create(np_card);
+
+	receiver_active = true;
+	memset(&receiver_state, 0, sizeof(receiver_state));
+	snprintf(receiver_state.codec, sizeof(receiver_state.codec), "AAC");
+	receiver_state.sample_rate = 44100;
+	receiver_state.streaming = true;
+	receiver_has_track = true;
+	memset(&receiver_track, 0, sizeof(receiver_track));
+	snprintf(receiver_track.title, sizeof(receiver_track.title), "Song");
+	snprintf(receiver_track.artist, sizeof(receiver_track.artist), "Artist");
+
+	// Hidden and tappable as a local card would leave them: the receiver's card
+	// has to put them right itself.
+	lv_obj_set_hidden(np_title, true);
+	lv_obj_set_hidden(np_artist, true);
+	lv_obj_set_hidden(np_transport, false);
+	lv_obj_set_clickable(np_title, true);
+	lv_obj_set_clickable(np_artist, true);
+	assert(refresh_mode_card());
+	assert(lv_obj_is_hidden(np_transport));
+	assert(!lv_obj_is_hidden(np_title) && !lv_obj_is_hidden(np_artist));
+	assert(!lv_obj_is_clickable(np_title) && !lv_obj_is_clickable(np_artist));
+	assert(!strcmp(card_title, "Song") && !strcmp(card_line, "Artist · AAC 44.1 kHz"));
+
+	// The transport's buttons are local: they do nothing while the receiver is on.
+	assert(mode_owns_output() && receiver_owns_output() && !dac_mode_owns_output());
+
+	// Nothing the phone names: the mode's own name, and what it is doing.
+	receiver_has_track = false;
+	assert(refresh_mode_card());
+	assert(!strcmp(card_title, "btreceiver_title") && !strcmp(card_line, "btreceiver_playing · AAC 44.1 kHz"));
+
+	// The DAC wins when both are somehow claimed: its card is the older one.
+	receiver_has_track = false;
+	dac_active = true;
+	assert(refresh_mode_card());
+	assert(!strcmp(card_title, "dac"));
+	dac_active = false;
+
+	// Neither: the local player's card is left alone for the caller to fill.
+	receiver_active = false;
+	assert(!mode_owns_output());
+	card_title[0] = card_line[0] = '\0';
+	assert(!refresh_mode_card() && card_title[0] == '\0' && card_line[0] == '\0');
+	lv_display_delete(display);
+	np_card = np_title = np_artist = np_transport = NULL;
+}
+
+// Bluetooth and airplane mode end the stream, so over the receiver they say why
+// instead of doing it -- playing, or with the page open waiting for a phone.
+static void test_radios_held_by_receiver(void) {
+	popups = 0;
+	receiver_active = false;
+	session_in_use = false;
+	assert(!radios_held_by_receiver() && popups == 0);
+
+	receiver_active = true;
+	assert(radios_held_by_receiver() && popups == 1);
+	assert(!strcmp(popup_seen, "btreceiver_radios_held"));
+	receiver_active = false;
+
+	// The page open and nothing connected yet: still the receiver's radio.
+	session_in_use = true;
+	assert(radios_held_by_receiver() && popups == 2);
+	session_in_use = false;
+}
+
+static void answer_and_run_async(bool yes) {
+	if (yes) {
+		confirm_ok(confirm_ok_user);
+	} else {
+		confirm_cancel(confirm_cancel_user);
+	}
+	lv_timer_handler(); // the one turn of the event loop the move waits for
+}
+
+static void reset_navigation(void) {
+	page_switches = confirm_calls = session_ends = 0;
+	page_switched_to = NULL;
+	session_held_for = NULL;
+	receiver_active = false;
+	session_in_use = false;
+}
+
+// The equaliser's pages are what the sheet is allowed over the receiver for, so
+// they open without ending it and without asking: the receiver is held for the
+// page, which is how it is still there when the user backs out.
+static void test_open_equaliser_pages_over_receiver(void) {
+	lv_display_t *display = lv_display_create(240, 320);
+	peq_stub = lv_obj_create(NULL);
+	eq_stub = lv_obj_create(NULL);
+	mseb_stub = lv_obj_create(NULL);
+	lv_obj_t *const pages[] = {peq_stub, eq_stub, mseb_stub};
+
+	for (size_t i = 0; i < sizeof(pages) / sizeof(pages[0]); i++) {
+		// Playing.
+		reset_navigation();
+		receiver_active = true;
+		session_in_use = true;
+		open_page(pages[i]);
+		assert(confirm_calls == 0 && session_ends == 0);
+		assert(session_held_for == pages[i]);
+		assert(page_switches == 1 && page_switched_to == pages[i]);
+
+		// Parked already behind another equaliser page: the same again.
+		reset_navigation();
+		receiver_active = true;
+		session_in_use = true;
+		open_page(pages[i]);
+		assert(session_held_for == pages[i] && page_switches == 1 && session_ends == 0);
+
+		// The page open and waiting for a phone: held for too, so the A2DP sink
+		// is still registered when the phone connects while the user is in PEQ.
+		reset_navigation();
+		session_in_use = true;
+		open_page(pages[i]);
+		assert(confirm_calls == 0 && session_ends == 0);
+		assert(session_held_for == pages[i] && page_switches == 1);
+	}
+
+	// No receiver at all: nothing is held, nothing asked, the page opens.
+	reset_navigation();
+	open_page(peq_stub);
+	assert(session_held_for == NULL && confirm_calls == 0 && session_ends == 0);
+	assert(page_switches == 1 && page_switched_to == peq_stub);
+
+	// Already on the page: nothing to hold for and nothing to switch.
+	reset_navigation();
+	receiver_active = true;
+	session_in_use = true;
+	lv_screen_load(peq_stub);
+	open_page(peq_stub);
+	assert(session_held_for == NULL && page_switches == 0 && confirm_calls == 0);
+
+	reset_navigation();
+	lv_display_delete(display);
+	peq_stub = eq_stub = mseb_stub = NULL;
+}
+
+// Every other page is somewhere the receiver cannot follow: playing, that is a
+// question first and the page opens only on yes; with nothing playing the
+// session is ended quietly and the page opens at once.
+static void test_open_other_pages_over_receiver(void) {
+	lv_display_t *display = lv_display_create(240, 320);
+	peq_stub = lv_obj_create(NULL);
+	eq_stub = lv_obj_create(NULL);
+	mseb_stub = lv_obj_create(NULL);
+	lv_obj_t *target = lv_obj_create(NULL);
+
+	// No receiver: straight there, nothing asked, nothing held, nothing ended.
+	reset_navigation();
+	open_page(target);
+	assert(page_switches == 1 && page_switched_to == target);
+	assert(confirm_calls == 0 && session_ends == 0 && session_held_for == NULL);
+
+	// Playing: nothing moves until the user has answered.
+	reset_navigation();
+	receiver_active = true;
+	session_in_use = true;
+	open_page(target);
+	assert(confirm_calls == 1 && !strcmp(confirm_title_seen, "btreceiver_leave_confirm"));
+	assert(page_switches == 0 && session_ends == 0 && receiver_active && session_held_for == NULL);
+	lv_timer_handler();
+	assert(page_switches == 0);
+
+	// Yes: the session ends, then -- a turn of the loop later -- the page opens.
+	answer_and_run_async(true);
+	assert(session_ends == 1 && !receiver_active);
+	assert(page_switches == 1 && page_switched_to == target);
+
+	// No: nothing ends, nothing opens, now or later.
+	reset_navigation();
+	receiver_active = true;
+	session_in_use = true;
+	open_page(target);
+	assert(confirm_calls == 1);
+	answer_and_run_async(false);
+	lv_timer_handler();
+	assert(session_ends == 0 && page_switches == 0 && receiver_active);
+
+	// Asked again after a refusal: the old answer is not left lying about, and a
+	// "yes" can only ever run what it was asked for.
+	assert(after_receiver_fn == NULL);
+	confirm_calls = 0;
+	open_page(target);
+	assert(confirm_calls == 1 && after_receiver_fn != NULL);
+	answer_and_run_async(true);
+	assert(page_switches == 1 && page_switched_to == target && after_receiver_fn == NULL);
+
+	// A "yes" given after the receiver ended on its own still opens the page.
+	reset_navigation();
+	receiver_active = true;
+	session_in_use = true;
+	open_page(target);
+	receiver_active = false;
+	answer_and_run_async(true);
+	assert(page_switches == 1 && page_switched_to == target);
+
+	// Nothing playing but the page open (or parked) waiting for a phone: leaving
+	// is just leaving. The session is ended -- parked, that is what gives the
+	// sink back -- and the page opens, with no question for a silence.
+	reset_navigation();
+	session_in_use = true;
+	open_page(target);
+	assert(confirm_calls == 0 && session_ends == 1);
+	assert(page_switches == 1 && page_switched_to == target && session_held_for == NULL);
+
+	reset_navigation();
+	lv_display_delete(display);
+	peq_stub = eq_stub = mseb_stub = NULL;
+}
+
+// What the file-transfer button does through the same two doors.
+static int then_runs;
+static void then_cb(void *user) {
+	then_runs += user ? *(int *)user : 1;
+}
+
+static void test_leave_receiver_then(void) {
+	lv_display_t *display = lv_display_create(240, 320);
+	int by_two = 2;
+
+	// Playing: held for the answer.
+	reset_navigation();
+	then_runs = 0;
+	receiver_active = true;
+	session_in_use = true;
+	leave_receiver_then(then_cb, &by_two);
+	assert(confirm_calls == 1 && then_runs == 0 && session_ends == 0);
+	answer_and_run_async(true);
+	assert(then_runs == 2 && session_ends == 1);
+
+	// Declined: it never runs.
+	reset_navigation();
+	then_runs = 0;
+	receiver_active = true;
+	session_in_use = true;
+	leave_receiver_then(then_cb, &by_two);
+	answer_and_run_async(false);
+	assert(then_runs == 0 && session_ends == 0);
+
+	// Not playing: ended quietly and run at once.
+	reset_navigation();
+	then_runs = 0;
+	session_in_use = true;
+	leave_receiver_then(then_cb, NULL);
+	assert(confirm_calls == 0 && then_runs == 1 && session_ends == 1);
+
+	reset_navigation();
+	lv_display_delete(display);
+}
+
+// The receiver is a session for the control centre's purposes whenever the user
+// is in it, and only that makes its card, its radios and its pages what they are.
+static void test_receiver_session(void) {
+	receiver_active = false;
+	session_in_use = false;
+	assert(!receiver_session());
+	receiver_active = true;
+	assert(receiver_session());
+	receiver_active = false;
+	session_in_use = true;
+	assert(receiver_session());
+	session_in_use = false;
+
+	// Only three pages are the equaliser's.
+	lv_display_t *display = lv_display_create(240, 320);
+	peq_stub = lv_obj_create(NULL);
+	eq_stub = lv_obj_create(NULL);
+	mseb_stub = lv_obj_create(NULL);
+	lv_obj_t *other = lv_obj_create(NULL);
+	assert(page_serves_receiver(peq_stub) && page_serves_receiver(eq_stub) && page_serves_receiver(mseb_stub));
+	assert(!page_serves_receiver(other) && !page_serves_receiver(NULL));
+	lv_display_delete(display);
+	peq_stub = eq_stub = mseb_stub = NULL;
 }
 
 int main(void) {
@@ -231,6 +677,13 @@ int main(void) {
 	config_init(path);
 	test_quickpanel_mode_gating();
 	test_level_rows(path);
+	test_receiver_card_text();
+	test_receiver_card();
+	test_radios_held_by_receiver();
+	test_receiver_session();
+	test_open_equaliser_pages_over_receiver();
+	test_open_other_pages_over_receiver();
+	test_leave_receiver_then();
 
 	// A config that has never carried a layout gets the panel as it ships: the
 	// eight buttons the first page has always had, in their old order, and a

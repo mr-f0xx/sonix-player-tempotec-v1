@@ -257,12 +257,13 @@ $(BUILD)/test_wifi: $(WIFI_SRC) $(ROOT)/src/system/net/wifi.h \
 # Bluetooth's real A2DP-direction decision, startup wait policy and D-Bus
 # signal cache, with fake controller/process state. No radio or ALSA required.
 .PHONY: bluetooth
-bluetooth: $(BUILD)/test_bluetooth $(BUILD)/test_btstack $(BUILD)/test_btreceiver $(BUILD)/test_btmetadata $(BUILD)/test_btdiscovery
+bluetooth: $(BUILD)/test_bluetooth $(BUILD)/test_btstack $(BUILD)/test_btreceiver $(BUILD)/test_btmetadata $(BUILD)/test_btdiscovery $(BUILD)/test_btpcmvolume
 	$(BUILD)/test_bluetooth
 	$(BUILD)/test_btstack
 	$(BUILD)/test_btreceiver
 	$(BUILD)/test_btmetadata
 	$(BUILD)/test_btdiscovery
+	$(BUILD)/test_btpcmvolume
 
 $(BUILD)/test_bluetooth: test_bluetooth.c $(ROOT)/src/system/bluetooth/bluetooth.c \
                          $(ROOT)/src/system/bluetooth/bluetooth.h $(ROOT)/src/system/bluetooth/btafh.c \
@@ -286,6 +287,10 @@ $(BUILD)/test_btmetadata: test_btmetadata.c $(ROOT)/src/system/bluetooth/btstack
 $(BUILD)/test_btdiscovery: test_btdiscovery.c $(ROOT)/src/system/bluetooth/btstack.c $(ROOT)/src/system/bluetooth/dbuslite.c
 	@mkdir -p $(BUILD)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ test_btdiscovery.c $(LDFLAGS) $(LDLIBS)
+
+$(BUILD)/test_btpcmvolume: test_btpcmvolume.c $(ROOT)/src/system/bluetooth/btstack.c $(ROOT)/src/system/bluetooth/dbuslite.c
+	@mkdir -p $(BUILD)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ test_btpcmvolume.c $(LDFLAGS) $(LDLIBS)
 
 # The AFH map, follow policy and actual HCI packet, using fake sockets.
 .PHONY: btafh
@@ -740,6 +745,20 @@ $(BUILD)/test_quickpanel_layout: test_quickpanel_layout.c $(ROOT)/src/gui/shell/
 		-DLV_CONF_PATH='"$(abspath ui/lv_conf.h)"' -o $@ test_quickpanel_layout.c \
 		$(ROOT)/src/system/core/config.c $(ROOT)/src/system/addons/addons.c $(UI_LVGL_OBJ) $(LDFLAGS) $(LDLIBS)
 
+# The Bluetooth receiver's session on real LVGL screens: it parks behind the
+# equaliser pages the control centre opens, comes back with them, and ends the
+# moment the way back to its page is gone from the back-stack.
+.PHONY: btreceiver-session
+btreceiver-session: $(BUILD)/test_btreceiversession
+	$(BUILD)/test_btreceiversession
+
+$(BUILD)/test_btreceiversession: test_btreceiversession.c $(ROOT)/src/gui/bluetooth/btreceiversession.c \
+                                 $(ROOT)/src/gui/bluetooth/btreceiversession.h $(UI_LVGL_OBJ)
+	@mkdir -p $(BUILD)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -I$(ROOT)/lvgl \
+		-DLV_CONF_PATH='"$(abspath ui/lv_conf.h)"' -o $@ test_btreceiversession.c \
+		$(UI_LVGL_OBJ) $(LDFLAGS) $(LDLIBS)
+
 UI_OBJ = $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(UI_SRC)) \
          $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(UI_LVGL_SRC))
 UI_CPPFLAGS = $(CPPFLAGS) -I$(ROOT)/lvgl -DLV_CONF_PATH='"$(abspath ui/lv_conf.h)"'
@@ -1007,7 +1026,7 @@ $(BUILD)/test_stockkeys_ui: $(ROOT)/build_gen/streamkeys_key.h $(STOCKKEYS_UI_OB
 	$(CC) -o $@ $(STOCKKEYS_UI_OBJ) $(LDFLAGS) $(LDLIBS)
 
 .PHONY: ui
-ui: $(BUILD)/test_qobuzgenregrid $(BUILD)/test_main_menu $(BUILD)/test_screensaver $(BUILD)/test_tools_pages $(BUILD)/test_wifi_pages $(BUILD)/test_chargescreen $(BUILD)/test_power_display $(BUILD)/test_lyricsearch $(BUILD)/test_games $(BUILD)/test_peq_profiles $(BUILD)/test_quickpanel_layout $(BUILD)/test_corners $(BUILD)/test_playbutton $(BUILD)/test_musicsettings_rows $(BUILD)/test_volume_overlay $(BUILD)/test_playerdeck $(BUILD)/test_vinylayout $(BUILD)/test_stickerlayout $(BUILD)/test_waveform_overlay $(BUILD)/test_hiresbadge_ui $(BUILD)/test_statusbar_ui $(BUILD)/test_stockkeys_ui $(BUILD)/test_tidal_pages
+ui: $(BUILD)/test_qobuzgenregrid $(BUILD)/test_main_menu $(BUILD)/test_screensaver $(BUILD)/test_tools_pages $(BUILD)/test_wifi_pages $(BUILD)/test_chargescreen $(BUILD)/test_power_display $(BUILD)/test_lyricsearch $(BUILD)/test_games $(BUILD)/test_peq_profiles $(BUILD)/test_quickpanel_layout $(BUILD)/test_btreceiversession $(BUILD)/test_corners $(BUILD)/test_playbutton $(BUILD)/test_musicsettings_rows $(BUILD)/test_volume_overlay $(BUILD)/test_playerdeck $(BUILD)/test_vinylayout $(BUILD)/test_stickerlayout $(BUILD)/test_waveform_overlay $(BUILD)/test_hiresbadge_ui $(BUILD)/test_statusbar_ui $(BUILD)/test_stockkeys_ui $(BUILD)/test_tidal_pages
 	$(BUILD)/test_qobuzgenregrid
 	$(BUILD)/test_main_menu ../../sonix-packer/assets/V1/usr/resource/sonix/language
 	$(BUILD)/test_main_menu ../../sonix-packer/assets/V1/usr/resource/sonix/language saved
@@ -1021,6 +1040,7 @@ ui: $(BUILD)/test_qobuzgenregrid $(BUILD)/test_main_menu $(BUILD)/test_screensav
 	$(BUILD)/test_games ../../sonix-packer/assets/V1/usr/resource/sonix/language
 	$(BUILD)/test_peq_profiles ../../sonix-packer/assets/V1/usr/resource/sonix/language
 	$(BUILD)/test_quickpanel_layout
+	$(BUILD)/test_btreceiversession
 	$(BUILD)/test_corners
 	$(BUILD)/test_playbutton ../../sonix-packer/assets/V1/usr/resource/sonix/language
 	$(BUILD)/test_musicsettings_rows ../../sonix-packer/assets/V1/usr/resource/sonix/language

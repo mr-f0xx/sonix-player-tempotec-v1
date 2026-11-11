@@ -36,9 +36,11 @@ void quickpanel_set_volume_slider(bool on);
 bool quickpanel_both_sliders(void);
 void quickpanel_set_both_sliders(bool on);
 
-// True while a Wi-Fi transfer or Bluetooth receiver owns the screen and the
-// sheets must stay shut. USB DAC mode permits the Control Centre; it replaces
-// the local transport card with DAC status while the host owns the audio.
+// True while a Wi-Fi transfer owns the screen and the sheets must stay shut.
+// USB DAC mode and the Bluetooth receiver permit the Control Centre; it replaces
+// the local transport card with the mode's status while the other end owns the
+// audio. Cover Flow stays shut over both: an album picked there would start a
+// local track underneath the stream.
 bool quickpanel_blocked(void);
 void quickpanel_close(void);
 bool quickpanel_is_open(void);

@@ -6,6 +6,292 @@
 | Touchscreen multitouch, R1 | `tools/cst8xx_multitouch_patch.py` | the panel reports two fingers, the driver lets one out |
 
 
+## Bluetooth RX: a freeze, the phone's volume, aptX stutter, and the control centre over the receiver
+
+Reported on firmware 1.6.1 (the log writes the build as `111120260719`) with a
+Galaxy Z Fold 8 on Android 17, in receiver mode: **(1)** after connecting,
+disconnecting and switching codecs three or four times, leaving the receiver to
+open PEQ froze the player until it was powered off by force -- not reproduced on
+purpose, and possibly a one-off; **(2)** the phone's volume is right after a
+fresh connection and, after a codec switch made on the V1, sometimes acts like
+an on/off switch; **(3)** aptX still stutters between the two. And a request: the
+swipe-down control centre should work in receiver mode, so that PEQ and the basic
+settings are reachable without leaving it.
+
+Three logs came with the report (`sonix_player.log`, `bluetooth.log`,
+`bluetooth.old.log`); the player's log runs over nine builds, from
+`061120261142` to the one reported. No V1 was involved in the work below.
+Everything was built and run on the host (the production decisions over fakes,
+the panel and the receiver session on LVGL's headless renderer) and nothing was
+run on a device. What the logs show is kept apart from what is inferred below,
+because most of the fixes rest on the second. The numbers in the first part were
+counted again from the logs before this was written; each session is a
+`btreceiver: <mac> is sending <codec> <rate> Hz` line paired with the next
+`external source finished; device handed back (N underruns)`, and its build is
+the one on the `sysinfo` line above it.
+
+### What the logs show
+
+**The freeze.** Both logs stop at the same moment, `08:38:06.730` (Los Angeles
+time, as the first boot writes it), and the next boot says the previous run did
+not shut down, with no pstore and no `last_kmsg`. There is no watchdog dump, no
+oops and no dropped log lines, and the real-time limit was on (`real-time
+threads may take 900000 of every 1000000 us`, in that boot's log). The last
+seconds are a receiver session starting:
+
+    08:38:02.313  PCM open on 'default': 96000 Hz ...   (the phone has not started to play)
+    08:38:02.568  cs43198_dai_prepare pcm
+    08:38:06.335  the remote player is playing
+    08:38:06.360  says it is playing and nothing has arrived in 3000 ms; this PCM is not the live one
+    08:38:06.360  external source finished; device handed back (0 underruns)
+    08:38:06.729  PCM open on 'default': 96000 Hz ...
+    08:38:06.730  is sending LDAC 96000 Hz 2 ch 16 bit        <- last line
+
+The first-frame check took a live stream for a dead one 25 ms after the phone
+said it was playing, because it counted its three seconds from the moment the
+output *opened*, which was four seconds earlier, before the phone had started to
+play. That closed the DAC and opened it again for nothing. It has done so before:
+`this PCM is not the live one` is in the log 26 times, and 14 of them came within
+a second of the phone saying it was playing (13 of them 6 to 56 ms after it; 8 of
+the 14 on the Fold 8, three of those on the reported build's first boot, at
+`08:31:56`, `08:33:06` and here). Each of the other 13 reopens was followed by a
+`cs43198_dai_prepare` 0.10 to 0.84 s after the output opened (0.47 s and 0.56 s
+for the two before this one) and a log that goes on; after this one there is no
+such line, and no line at all. The log writer syncs once a second, so up to a
+second of the end can be missing.
+
+Not shown, and so not known: **what froze the player.** It is the kind of stop
+the "Issue #265" section below records as "The sudden stops": the log ends within
+a second of an A2DP stream starting and an audio output being opened, with no HCI
+or UART error and no watchdog lines. Three are recorded there, all on the
+transmit side. That section lists the two
+explanations that fit, and says that a stop with the real-time limit on and no
+watchdog lines would be the kernel; this one has the limit on. So the likeliest
+place for the cause is below the player -- the kernel, or the hardware, at the
+moment a stream's traffic starts -- and this work does not touch it. What this
+log adds is the premature close and reopen. Whether it tipped this one over is a
+hypothesis, and not a strong one: the three earlier stops had no such reopen
+(the transmit side has no first-frame check), and 13 of the 14 that did were
+followed by a prepare line and a log that goes on. Removing it takes one DAC close and open out of the moment a
+stream starts, which is the most that can be said for it. The report says the
+freeze came while leaving for PEQ, and the log ends on a stream starting;
+leaving the receiver closes the DAC too, and up to a second of the log can be
+missing, so a leave in that last second fits as well, and the log cannot say
+which it was.
+
+**The volume.** On every new receiving stream (a link, or a codec change building
+the transport again -- `08:27:59`, `08:31:50`, `08:35:27`) bluealsa reports the
+volume of the new PCM as 127. The phone then sends `SetAbsoluteVolume` (9 at
+link-up, 111 later) and the V1 answers *Accepted*. Nothing in the player's log
+applies it, and the player never wrote the receive PCM's `SoftVolume` flag.
+
+**aptX.** Underruns the player counted per receiver session. On the Fold 8,
+aptX at 44.1 kHz, per build:
+
+| build | sessions | seconds | underruns |
+|---|---|---|---|
+| (before the first `sysinfo` line in the file) | 1 | 16 | 1 |
+| `061120261856` | 3 | 67 | 0 |
+| `081120260452` | 4 | 61 | 25 |
+| `091120260147` | 3 | 115 | 18 |
+| `101120261647` | 3 | 20 | 14 |
+| `111120260719` (reported) | 3 | 21 | 6 |
+| **all** | **17** | **299** | **64** (12.9 a minute) |
+
+This is the open item the "Issue #265" section below calls "Bluetooth RX from
+the Fold 8: measured, not solved", with two more builds in it. aptX was clean on
+`061120261856` (SBC was not tried there) and not on the next two builds, and SBC
+has since gone clean again (0 in 18 s on `101120261647`, 0 in 34 s on
+`111120260719`, after 38 in 21 s and 64 in 28 s: 108 and 135 a minute) while
+aptX has not. Around those numbers: another phone (`88:9F:...`, on
+`101120261647`) ran dry 25 times in 96 s on aptX 44.1 (15.7 a minute); the Fold
+8's LDAC 41 times in 13,106 s (0.19 a minute, over 3.6 hours) and its AAC not
+once in 189 s; aptX at 48 kHz, which only two other phones used, once in 179 s;
+aptX HD once in 198 s. The Fold 8 never ran aptX at 48 kHz, so the logs cannot
+say whether the cause is the codec, the rate or the phone. Wi-Fi was off during
+every one of the 23 aptX 44.1 sessions (the player's own `WIFI:ON` and
+`WIFI:OFF` commands say so), so coexistence with it is not the explanation. The
+player logs `btlog: Bluetooth log on` at the start of each of the last four
+boots (from `101120261647` on) and not before, and the sessions before it ran
+dry as well, so the trace does not look like the cause; what it costs the single
+core where it ran is not known.
+
+What the trace adds is small. It hides media packets (`btlog.c` keeps out an ACL
+packet that decodes to nothing but its channel and bytes, and says `N data
+packets not shown` on the next line it lets through), so when the audio itself
+arrived cannot be read. What it lets through on an aptX 44.1 link is one
+nine-byte L2CAP packet about every 120 ms (mean 120.0 ms, standard deviation 18
+to 21 ms, longest interval 153 to 228 ms, over three sessions: two of the Fold
+8's on the reported build and the other phone's longest), with eight or nine
+hidden packets before each. That fits audio sent in blocks of 120 ms; it does not show it. Whether the
+underruns follow late blocks is mixed: in the other phone's 39 s session 10 of
+the 14 underruns the log names fall in an interval of 165 ms or more (such
+intervals are 3.8% of its intervals), and in the Fold 8's 13 s session at
+`08:28:14` one of five does (228 ms), the other four falling in ordinary ones.
+Those five are 2.1 to 2.7 s apart, and in the trace around them there is nothing
+but ACL data, apart from the link's own channel set-up 0.2 s before the first.
+
+### What was inferred, and what was changed for it
+
+**Watchdog (the freeze).** `btreceiver.c` now counts the first-frame window from
+when the sender first says it is playing on this PCM, and starts it again if the
+phone pauses. A PCM opened while the phone is paused and left for a minute is not
+a dead one. A stream that really delivers nothing three seconds after "playing" is
+still caught and handed back. This removes the close and reopen the log shows 14
+times, the last one before the stop. It does not prove that it removes the
+freeze, which is probably something else (above).
+`first audio N ms after the output opened` is now logged, so a log that ends
+without it ended before the sound did.
+
+**Volume.** From bluealsa 4.1.1's source (read, not run): the player starts the
+daemon with `--a2dp-volume`, so every transport begins with `SoftVolume` off, and
+in that mode the decoder passes the samples through and only silences them at
+exactly zero (`io_pcm_scale()` in `io.c`). Every position of the phone's slider but
+the bottom one would then play at full scale: an on/off switch, which is what was
+reported. A codec change builds the transport again with the daemon's defaults,
+which would be why it showed after a codec switch. The player now switches
+`SoftVolume` on, from the worker, for every new receive PCM (a counter in
+`btstack.c` tells a new PCM object from one already dealt with) and after every
+codec change made on the receiver page, and says which it found:
+`the phone's volume would only have muted at zero; it is now applied here, level
+111/127 left, 111/127 right` or, when it was on already, `the phone's volume is
+applied here, level ...`. **Reasoned, not observed:** that this is the cause. It
+does not by itself say why a fresh connection felt right; the new line will say
+which mode each link was in, and a log with it on a bad connection is the proof.
+
+**aptX.** For aptX only, the receiver's buffers are deeper: 160 ms in and 360 ms
+out, against 80 and 120 for every other codec (`receiver_aptx_capture_ms`,
+`receiver_aptx_output_ms`; `0` turns each off; a larger plain setting still
+wins). The reasoning: the output starts only on a full buffer (`audio.c` sets the
+start threshold to the buffer's size), so after a start or an underrun a 120 ms
+output has one 120 ms block queued and no margin against the next one coming
+late, and a late block is a gap. At 360 ms it has three queued, a margin of 240
+ms against the latest block seen (the 228 ms interval, 108 ms late). That is a
+plan for lateness, which the trace shows in one session of two; if the underruns
+come from something else (the decoder starved of the CPU, a lump the capture ring
+cannot hold) the buffers help only as far as they absorb it. The price is delay:
+240 ms more at the output, and up to 80 ms more when the capture side backs up,
+which a film shows as late sound. `the capture ring overran (N ...)` is now
+logged too: audio thrown away on the way in is a stutter that a count of output
+underruns does not see. **Reasoned, not observed:** that the buffers cure it, and
+the cause of the regression in the table is not found. The SBC half of it went
+away between builds without anything here being done for it, and the aptX half
+is what the bisect named under Issue #265 would still settle.
+
+**The equaliser.** The receiver's audio did not go through the equaliser at all:
+the graphic EQ, MSEB and PEQ only ever ran on decoded tracks and on the USB DAC,
+so the control centre's switches for them did nothing to a received stream. It
+now runs through `eq_process` and `eq_process_s32`, which return at once when all
+three are off. This is what makes PEQ in receiver mode worth reaching. **Its cost
+on the single core is not measured**, and LDAC at 96 kHz with a PEQ profile on is
+the case to watch.
+
+### The control centre over the receiver
+
+The sheet is a top-layer overlay, so unblocking it needs nothing unloaded. Only a
+file transfer keeps it shut now.
+
+- **Opening it.** With the classic gestures (the default) it is pulled down from
+  the status bar; with the stock gestures (Appearance) it is pulled up from the
+  bottom 16 px, which `edge_may_open()` in `quickpanel.c` allows over the
+  receiver: it refuses only a file transfer, an open Cover Flow, or a sheet
+  already open. In the stock arrangement the status-bar pull belongs to Cover
+  Flow, which stays shut during the receiver, so that pull does nothing there. No
+  test drives either gesture over the receiver: the layout test asks
+  `quickpanel_blocked()` and builds the card, and does not pull the sheet.
+- **The card.** Where the local track and transport would be, it shows the phone's
+  track title (or the page's title when the phone names none) over `artist or
+  album, playing or waiting, codec and rate`; an error replaces the second line.
+  The transport row is not shown and play, next, previous and "open the player"
+  do nothing: the side keys already send AVRCP to the phone, and the card is about
+  a track that is not here. Brightness, volume, the EQ, MSEB and PEQ switches and
+  the other toggles work as everywhere. Crossfeed, soundfield, mono and ReplayGain
+  are on the sheet and do nothing to a received stream, as before for the USB DAC.
+- **Bluetooth and airplane mode** say `btreceiver_radios_held` and do nothing while
+  the receiver is playing, waiting for a phone, or parked: they would take the
+  radio from under the stream. Leaving by the page is the way to switch it off.
+- **Pages.** A long press on **EQ**, **MSEB** or **PEQ** opens its page without
+  ending the receiver and without asking. That is what `btreceiversession.c` is
+  for: the receiver ends when its page is unloaded, deliberately, since the page
+  is the only place the stream can be seen and stopped, so the control centre
+  *holds* it for the page it is about to open and the receiver is *parked* behind
+  that page. A parked receiver is the same receiver: the side keys, sleep timer,
+  power handling and Wi-Fi priority follow the mode and not the page, and the
+  page's poll goes on starting a phone that connects or reconnects while the user
+  is in PEQ. Going back along the chevron or the swipe lands on the receiver page
+  where it was. The parked receiver ends the moment the way back to its page is
+  gone from the back-stack -- the main menu, a jump to another section -- through
+  an observer on the display's screen-load event, and gives the A2DP sink back
+  then, so it never outlives the pages it was parked for. A hold that is not
+  followed by the page it named lapses, and every other way out of the page stops
+  the receiver as it always did.
+- **Every other page** (the radio settings, Bluetooth settings, a file transfer,
+  and so on) is somewhere the receiver cannot follow, so a long press asks the
+  question the page's own back button asks, and goes on only on yes; with nothing
+  playing there is no question. Tapping the file-transfer tile does the same.
+- **Cover Flow and the player sheet** stay shut in receiver mode (an album picked
+  there would start a local track under the stream).
+- **Strings.** `btreceiver_radios_held`, in eleven languages, written without a
+  native reader.
+
+**Not guarded:** the AirPlay and DLNA tiles, which have no guard against any other
+mode either; enabling one needs Wi-Fi, which receiver mode keeps down unless the
+user turns it on, and what the two would do to a stream already holding the DAC
+was not looked at. The crossfeed and soundfield pages are not among the pages the
+receiver waits behind, since their settings do nothing to it.
+
+Tests: `make -C sonix-player/tests bluetooth quickpanel-layout btreceiver-session`.
+`test_btreceiver` runs the capture thread over a fake ALSA: the aptX buffers (and
+that the other codecs keep theirs), the equaliser on 16- and 32-bit frames, an
+overrun and its recovery, and a phone paused past the window and then played,
+where the old logic closes the DAC and the new one does not -- the old logic was
+put back to check that this test fails. `test_bluetooth` and the new
+`test_btpcmvolume` cover the `SoftVolume` read and write over the real D-Bus
+marshalling, a daemon that does not answer or refuses, and the new-PCM counter.
+`quickpanel-layout` runs the production panel code on LVGL: the receiver card in
+all its states, the transport that is neither shown nor answers, the two radio
+tiles, the three equaliser pages held and opened without a question, every other
+page asking and opening only on yes, a refusal leaving nothing behind, and the
+file transfer still blocking. `btreceiver-session` drives the session on real
+LVGL screens (real `lv_screen_load()` event order), with a back-stack kept as
+`switcher.c` keeps it: parking behind PEQ and the Auto EQ page under it,
+coming back, a swipe home ending it and giving the sink back once, a stale hold
+not leaking, and a second `init` adding no second observer. Eight deliberate
+breakages of the panel's receiver logic and nine of the session were tried one
+at a time; each failed an assertion, and the files were put back and the suites
+run green. `switcher.c`, `btreceiverpage.c` and `coverflow.c` are compiled by no
+test; they were only syntax-checked with `-Wall -Wextra`. The `ui` aggregate does
+not finish on GCC 12 because of three files this work does not touch (see
+`sonix-player/tests/README.md`); the individual UI suites do pass.
+
+**Hardware validation pending.** On a V1 with the Fold 8:
+
+- (a) start a receiver session, pause the phone for 10 s or more, play it, and
+  look for no `this PCM is not the live one` within a second of the phone
+  playing, and for `first audio N ms after the output opened`. That shows the
+  early check is gone, not that the freeze is: the log holds it once, among 196
+  external-source sessions over 44 starts, and it looks like the stop Issue #265
+  records, which this does not address. If it comes back, the last lines of both logs are what to
+  send;
+- (b) after a codec switch made on the V1, move the phone's slider in small steps
+  and look for `it is now applied here` in the player log and a gradual change;
+- (c) play aptX 44.1 for ten minutes and compare the session's underruns with the
+  table above, then with `receiver_aptx_*_ms = 0`;
+- (d) with PEQ on, play LDAC 96 kHz and watch the underruns for the equaliser's
+  cost;
+- (e) pull the control centre down in receiver mode, long-press PEQ, change a band
+  while the phone plays, and back out to the receiver page; also with the phone
+  paused, with it dropping out and in while in PEQ, and with a swipe home from
+  PEQ (the stream must end and the phone must not be left linked to a sink);
+- (f) the Bluetooth tile and airplane mode in receiver mode say why;
+- (g) any other long press asks first.
+
+**Not touched:** the freeze's real cause (the stop Issue #265 records, now with
+a receiver in it), the regression behind the table above (the bisect Issue #265
+names), the MacBook and SafeFly reports mentioned further down, and the AirPlay
+and DLNA tiles over a live receiver.
+
+
 ## Tidal: the playlists an account keeps as favourites
 
 "My playlists" on the Tidal page asks `/users/<id>/playlists`, which answers

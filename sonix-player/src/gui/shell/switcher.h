@@ -9,6 +9,12 @@ void screen_history_reset(void); // forget the back-stack (back goes to the menu
 void switch_screen_no_history(lv_obj_t *target_screen); // load without recording
 void switch_screen_return_to(lv_obj_t *target_screen); // discard newer history and load
 
+// True when `screen` is somewhere in the back-stack: the chevron, pressed often
+// enough, lands on it. The current page is not in the stack, only what was left
+// to get here. For a page that has to know whether the way back to it still
+// exists (the Bluetooth receiver, parked behind the equaliser).
+bool switcher_history_contains(lv_obj_t *screen);
+
 // Attach the iOS-style interactive swipe-back to a page surface (a screen or
 // a scrollable list/container that swallows presses): the page follows the
 // finger rightward, showing the previous page underneath.

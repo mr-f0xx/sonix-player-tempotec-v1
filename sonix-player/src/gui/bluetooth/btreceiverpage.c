@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "btreceiversession.h"
 #include "src/gui/shell/confirm.h"
 #include "src/gui/fonts/fonts.h"
 #include "src/gui/shell/icons.h"
@@ -154,10 +155,18 @@ static void start_if_sender(void) {
 
 static void poll_cb(lv_timer_t *timer) {
 	(void)timer;
-	if (lv_screen_active() != btreceiverpage_screen) {
+	// A receiver parked behind the equaliser (btreceiversession.h) is still the
+	// receiver: a phone that connects, or connects again after a drop, while the
+	// user is setting the PEQ has to be started exactly as it would be here, or
+	// it would sit linked to a sink nobody is reading. Only the drawing is for
+	// when the page is actually on screen.
+	if (!btreceiversession_in_use()) {
 		return;
 	}
 	start_if_sender();
+	if (lv_screen_active() != btreceiverpage_screen) {
+		return;
+	}
 	// Compare fields separately: adding counters and flags permits changes in
 	// opposite directions to cancel, leaving old metadata or status on screen.
 	btreceiver_state_t st;
@@ -265,6 +274,10 @@ static bool back_guard(void) {
 
 static void loaded_cb(lv_event_t *e) {
 	(void)e;
+	// Arriving back from a page the receiver was parked behind puts it back
+	// where it was; there is nothing to start, and everything below is safe to
+	// repeat on a receiver that never stopped.
+	btreceiversession_page_loaded();
 	// The A2DP sink exists only while this page is open (bluetooth.h): a phone
 	// connects to it from here on, and bring-up starts straight into sink mode
 	// when entered while the radio was off.
@@ -285,9 +298,10 @@ static void unloaded_cb(lv_event_t *e) {
 	// Every other way out -- the power menu, a notification, a screen change
 	// this page did not ask for -- ends the mode too. The guard above catches
 	// the deliberate ones; this catches the rest, so the device is never left
-	// holding a stream nobody can see.
-	btreceiver_stop();
-	bluetooth_set_receiver_profile(false);
+	// holding a stream nobody can see. The one exception is the control centre
+	// taking the user to the equaliser, and what it is and how it ends is in
+	// btreceiversession.h.
+	btreceiversession_page_unloaded();
 }
 
 void btreceiverpage_init(gui_config_t *cfg) {
@@ -367,6 +381,7 @@ void btreceiverpage_init(gui_config_t *cfg) {
 	lv_label_set_text(status_label, "");
 	status_normal_color = lv_obj_get_style_text_color(status_label, LV_PART_MAIN);
 
+	btreceiversession_init(btreceiverpage_screen);
 	lv_obj_add_event_cb(btreceiverpage_screen, loaded_cb, LV_EVENT_SCREEN_LOADED, NULL);
 	lv_obj_add_event_cb(btreceiverpage_screen, unloaded_cb, LV_EVENT_SCREEN_UNLOADED, NULL);
 	switcher_set_back_guard(btreceiverpage_screen, back_guard);
