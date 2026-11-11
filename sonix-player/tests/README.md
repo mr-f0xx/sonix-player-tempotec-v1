@@ -43,9 +43,11 @@ make -C sonix-player/tests led-rate
 make -C sonix-player/tests aamlayout
 make -C sonix-player/tests statusbar-ui
 make -C sonix-player/tests extractkeys
+make -C sonix-player/tests tidal
+make -C sonix-player/tests tidal-ui
 ```
 
-The non-UI suites require only a C compiler, Make and Python 3 (plus standard pthread/dl/math libraries). The `hiresbadge-ui`, `peq-ui`, `quickpanel-layout`, `power-display`, `corners`, `playbutton`, `musicsettings-rows`, `volume-overlay`, `playerdeck`, `vinylayout`, `waveform-overlay`, `edge-lock` and aggregate `ui` targets also need the LVGL 9.6.0 checkout described below. None requires ALSA, SDL, a MIPS toolchain, a music server, a real account, or downloaded audio.
+The non-UI suites require only a C compiler, Make and Python 3 (plus standard pthread/dl/math libraries). The `hiresbadge-ui`, `peq-ui`, `quickpanel-layout`, `power-display`, `corners`, `playbutton`, `musicsettings-rows`, `volume-overlay`, `playerdeck`, `vinylayout`, `waveform-overlay`, `edge-lock`, `tidal-ui` and aggregate `ui` targets also need the LVGL 9.6.0 checkout described below. None requires ALSA, SDL, a MIPS toolchain, a music server, a real account, or downloaded audio.
 
 `run_subsonic_tests.py` starts a temporary threaded localhost HTTP server plus three HTTPS servers carrying the certificates in `tls_fixtures.py`, runs the C binary with a private temporary config directory, verifies its requests, then shuts down. All account values are synthetic. Build products live in ignored `.build/`; response/PCM fixtures are generated in memory rather than added to Git, and the three test certificates are pasted into that Python file rather than downloaded.
 
@@ -219,6 +221,76 @@ are stubbed; `tests/stubs/` carries the two LVGL typedefs `power.h` needs so
 this stays a plain-C suite. The Wi-Fi page itself -- the "Add hidden network"
 row and the manual-entry page behind it -- is covered by `test_wifi_pages`
 in the headless UI suite below.
+
+## Tidal's favourite playlists
+
+`make -C sonix-player/tests tidal` runs the real Tidal client (`tidal.c`)
+against canned replies; the HTTP layer is the part the test supplies. Beside
+the device-code sign-in (`test_tidal_login`), `test_tidal_favplaylists` signs
+in through those replies and checks the list of playlists an account keeps as
+favourites: that nothing is sent while signed out; the request itself
+(`/users/<id>/favorites/playlists` with the country, paging and ordering
+parameters and the bearer token); the wrapped entries; the three kinds of
+creator -- Tidal's editors, shown as `TIDAL`, an artist by name, and another
+listener with no name at all; square and wide pictures; paging; that the
+account's own playlists are still asked for at `/users/<id>/playlists`; an
+error reported in Tidal's words; and the removal, a `DELETE` on the favourites
+collection and not the deletion of a playlist, including its refusal for want
+of the write scope. Plain C, no LVGL.
+
+`make -C sonix-player/tests tidal-ui`, which the `ui` target also runs, puts
+the page on the real renderer at 240×320. Here the client is what is
+substituted -- an account with one playlist of its own and four favourites,
+which answers at once and writes down what it is asked -- and everything above
+it is real: `tidalpage.c` with its worker thread and its list history,
+`tidalsync.c` writing to the account on a thread of its own, the list cache on
+a scratch card, the shared rows, the popover and the configuration store.
+`test_tidal_pages` runs three times, because the arrangement of the main page
+is read once per process.
+
+With nothing saved, it checks that the main page has the row under "My
+playlists" and that "My playlists" is still the fourth; that the row asks for
+the favourites and not for the account's own playlists; the heading and the
+rows (`TIDAL · 50 tracks`, and `12 tracks` where nobody is named); that a
+second visit is read back from the card; that a favourite opens by its UUID
+and that its tracks, one at a time and as a selection, can be favourited and
+kept on the card but not taken out of it; that back returns to the favourites;
+that the three dots on a favourite offer **Remove from favourites** and
+nothing else, ask by name, send nothing on "no", and on "yes" un-favourite
+that playlist -- never delete it -- then read the list again from Tidal and
+drop the playlist's own rows from the card; that a refusal is shown in Tidal's
+words, as a popup from one row and as a toast from a selection, with the list
+left as it was; that a selection asks too and is sent in the order of the
+page, one at a time; that an emptied list says so; that "My playlists" still
+offers the deletion and its tracks the removal; and that signing out takes the
+account's five lists off the card, so the next account is shown its own.
+
+The `saved` run starts from an arrangement written by a build that did not
+have the row (seven numbers, rearranged, one row hidden): the row appears
+straight under "My playlists", the hidden row stays hidden, the reorder page
+lists all eight, and moving the new row and switching it off are written to
+the configuration under its own number. The `arranged` run reads such an
+arrangement back.
+
+Every language file is required to carry the strings involved, and the three
+that are handed to `snprintf()` as formats to take exactly the one argument
+they are given.
+
+To look at the pages, set `SONIX_PAGE_SNAPSHOTS` to an output prefix:
+
+```sh
+SONIX_PAGE_SNAPSHOTS=.build/page make -C sonix-player/tests tidal-ui
+```
+
+This writes ignored `.build/page-v1-tidal-home.ppm`,
+`-favourite-playlists.ppm`, `-favourite-playlists-menu.ppm` and
+`-home-reorder.ppm`.
+
+Neither suite talks to Tidal, and whether Tidal still answers these requests
+as the canned replies assume is not something they can say. The headless fonts
+are Montserrat, which has no middle dot and none of the player's metrics, so
+no label width is checked. The confirmation card is recorded rather than
+drawn, and taps are sent as events, not through the touch driver.
 
 ## Real codec integration
 

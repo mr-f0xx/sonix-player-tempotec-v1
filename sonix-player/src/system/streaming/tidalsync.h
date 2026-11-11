@@ -61,6 +61,11 @@ void tidalsync_album_favorite(const char *album_id, bool want, tidalsync_done_cb
 
 void tidalsync_playlist_remove(const char *playlist_id, tidalsync_done_cb done, void *user);
 
+// Takes a playlist out of the favourites: one somebody else made, which the
+// account keeps but does not own. Not the function above, which deletes one of
+// the account's own; this one leaves the playlist where it is.
+void tidalsync_playlist_unfavorite(const char *playlist_id, tidalsync_done_cb done, void *user);
+
 // Takes one entry out of a playlist, by the position it has in the playlist
 // (the row's index on the page).
 void tidalsync_playlist_track_remove(const char *playlist_id, int index, tidalsync_done_cb done, void *user);

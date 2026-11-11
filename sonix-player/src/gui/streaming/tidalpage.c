@@ -92,9 +92,15 @@ typedef enum {
 	JOB_ALBUM_TRACKS,
 	JOB_ARTIST_ALBUMS,
 	JOB_PLAYLIST_TRACKS,
+	// The tracks of a playlist the account only keeps as a favourite. The same
+	// request and the same rows as JOB_PLAYLIST_TRACKS, but a kind of its own:
+	// the playlist is somebody else's, nothing can be taken out of it, and the
+	// kind is what the row menu and the selection sheet go by.
+	JOB_FAV_PLAYLIST_TRACKS,
 	JOB_FAV_TRACKS,
 	JOB_FAV_ALBUMS,
 	JOB_FAV_ARTISTS,
+	JOB_FAV_PLAYLISTS,
 	JOB_USER_PLAYLISTS,
 	JOB_FEATURED,
 	JOB_PLAY,
@@ -308,9 +314,10 @@ static void list_nav_drop(void);
 // the per-row menu
 //
 // Not every list has something to offer on a row, and those that do offer
-// different things: search results add to favourites, the favourites list
-// removes, "My playlists" deletes. Three actions, two of them irreversible and
-// therefore behind a confirmation.
+// different things: search results add to favourites, the favourites lists
+// remove (the favourite playlists too: one of those leaves the favourites and
+// is never deleted), "My playlists" deletes. Three actions, two of them
+// irreversible and therefore behind a confirmation.
 // ---------------------------------------------------------------------------
 
 static void run(const job_t *job, const char *waiting_text);
@@ -333,12 +340,18 @@ typedef enum {
 	ROW_MENU_ARTIST_ADD,
 	ROW_MENU_ARTIST_REMOVE,
 	ROW_MENU_PLAYLIST_DELETE,
+	// A playlist that is only a favourite leaves the favourites. It is never
+	// deleted: it is not the account's to delete.
+	ROW_MENU_PLAYLIST_UNFAVORITE,
 } row_menu_t;
 
 static row_menu_t row_menu_kind(job_kind_t kind) {
 	switch (kind) {
 	case JOB_SEARCH_TRACKS:
 	case JOB_ALBUM_TRACKS:
+	// Somebody else's playlist is read-only, like an album: its tracks can be
+	// favourited and kept on the card, and that is all.
+	case JOB_FAV_PLAYLIST_TRACKS:
 		return ROW_MENU_TRACK_ADD;
 	case JOB_PLAYLIST_TRACKS:
 		return ROW_MENU_PLAYLIST_TRACK;
@@ -354,6 +367,8 @@ static row_menu_t row_menu_kind(job_kind_t kind) {
 		return ROW_MENU_ARTIST_ADD;
 	case JOB_FAV_ARTISTS:
 		return ROW_MENU_ARTIST_REMOVE;
+	case JOB_FAV_PLAYLISTS:
+		return ROW_MENU_PLAYLIST_UNFAVORITE;
 	case JOB_USER_PLAYLISTS:
 		return ROW_MENU_PLAYLIST_DELETE;
 	default:
@@ -379,6 +394,7 @@ static void reload_current_list(void) {
 	case JOB_FAV_TRACKS:
 	case JOB_FAV_ALBUMS:
 	case JOB_FAV_ARTISTS:
+	case JOB_FAV_PLAYLISTS:
 	case JOB_USER_PLAYLISTS:
 		run(&job, "loading");
 		break;
@@ -520,6 +536,17 @@ static void do_playlist_delete(void *user) {
 	tidalsync_playlist_remove(result_playlists[menu_index].id, row_sync_done, (void *)(intptr_t)1);
 }
 
+// A favourited playlist leaves the favourites. Nothing is deleted: the playlist
+// is somebody else's and stays where it is.
+static void do_playlist_unfavorite(void *user) {
+	(void)user;
+	if (menu_index < 0 || menu_index >= result_count) {
+		return;
+	}
+	listcache_drop(LISTCACHE_TIDAL_FAV_PLAYLISTS);
+	tidalsync_playlist_unfavorite(result_playlists[menu_index].id, row_sync_done, (void *)(intptr_t)1);
+}
+
 // ---------------------------------------------------------------------------
 // choosing several rows
 //
@@ -615,6 +642,7 @@ typedef enum {
 	BULK_ARTIST_ADD,
 	BULK_ARTIST_REMOVE,
 	BULK_PLAYLIST_DELETE,
+	BULK_PLAYLIST_UNFAVORITE,
 } bulk_kind_t;
 
 static bulk_kind_t bulk_kind_for(job_kind_t kind) {
@@ -635,6 +663,8 @@ static bulk_kind_t bulk_kind_for(job_kind_t kind) {
 		return BULK_ARTIST_REMOVE;
 	case ROW_MENU_PLAYLIST_DELETE:
 		return BULK_PLAYLIST_DELETE;
+	case ROW_MENU_PLAYLIST_UNFAVORITE:
+		return BULK_PLAYLIST_UNFAVORITE;
 	default:
 		return BULK_NONE;
 	}
@@ -917,6 +947,9 @@ static void bulk_finish(void) {
 	case BULK_PLAYLIST_DELETE:
 		listcache_drop(LISTCACHE_TIDAL_PLAYLISTS);
 		break;
+	case BULK_PLAYLIST_UNFAVORITE:
+		listcache_drop(LISTCACHE_TIDAL_FAV_PLAYLISTS);
+		break;
 	default:
 		break;
 	}
@@ -995,6 +1028,9 @@ static void bulk_step(void) {
 	case BULK_PLAYLIST_DELETE:
 		tidalsync_playlist_remove(bulk_playlist_ids[bulk_at], bulk_one_done, NULL);
 		break;
+	case BULK_PLAYLIST_UNFAVORITE:
+		tidalsync_playlist_unfavorite(bulk_playlist_ids[bulk_at], bulk_one_done, NULL);
+		break;
 	default:
 		bulk_finish();
 		break;
@@ -1023,6 +1059,7 @@ static const char *bulk_action_label(bulk_kind_t kind) {
 	case BULK_TRACK_REMOVE:
 	case BULK_ALBUM_REMOVE:
 	case BULK_ARTIST_REMOVE:
+	case BULK_PLAYLIST_UNFAVORITE:
 		return "remove_from_favourites";
 	case BULK_TRACK_DOWNLOAD:
 		return "trackmenu_keep_on_card";
@@ -1085,7 +1122,8 @@ static void bulk_sheet_cb(lv_event_t *e) {
 		items[count].action = bulk_sheet_action;
 		items[count].user = (void *)(intptr_t)kind;
 		count++;
-		if (list_kind == JOB_SEARCH_TRACKS || list_kind == JOB_ALBUM_TRACKS || list_kind == JOB_FAV_TRACKS) {
+		if (list_kind == JOB_SEARCH_TRACKS || list_kind == JOB_ALBUM_TRACKS || list_kind == JOB_FAV_TRACKS ||
+			list_kind == JOB_FAV_PLAYLIST_TRACKS) {
 			items[count].label = "trackmenu_keep_on_card";
 			items[count].action = bulk_sheet_action;
 			items[count].user = (void *)(intptr_t)BULK_TRACK_DOWNLOAD;
@@ -1138,6 +1176,7 @@ static void bulk_begin(bulk_kind_t kind) {
 			}
 			break;
 		case BULK_PLAYLIST_DELETE:
+		case BULK_PLAYLIST_UNFAVORITE:
 			if (result_playlists[i].id[0]) {
 				snprintf(bulk_playlist_ids[bulk_count++], TIDAL_ID_MAX, "%s", result_playlists[i].id);
 			}
@@ -1154,6 +1193,15 @@ static void bulk_begin(bulk_kind_t kind) {
 	}
 	if (bulk_kind == BULK_PLAYLIST_DELETE) {
 		confirm_show("system_are_you_sure", NULL, "delete", bulk_confirmed_cb, NULL);
+		return;
+	}
+	// Asked about as well, where a selection of favourite tracks, albums or
+	// artists is not: those can be searched for and put back, and a playlist
+	// cannot -- nothing in this player favourites one, so what a slip of the
+	// finger takes out stays out until it is favourited again in one of
+	// Tidal's own apps.
+	if (bulk_kind == BULK_PLAYLIST_UNFAVORITE) {
+		confirm_show("remove_from_favourites_2", NULL, "remove", bulk_confirmed_cb, NULL);
 		return;
 	}
 	if (bulk_kind == BULK_TRACK_DOWNLOAD) {
@@ -1254,6 +1302,19 @@ static void ask_playlist_delete(void *user) {
 	snprintf(message, sizeof(message), tr("tidal_delete_playlist_confirm_note"),
 			 result_playlists[menu_index].name);
 	confirm_show("delete_the_playlist", message, "delete", do_playlist_delete, NULL);
+}
+
+// The same question the other three favourites ask, and not the one above: this
+// playlist is not deleted, and the words must not say it is.
+static void ask_playlist_unfavorite(void *user) {
+	(void)user;
+	if (menu_index < 0 || menu_index >= result_count) {
+		return;
+	}
+	char message[TIDAL_TITLE_MAX + 96];
+	snprintf(message, sizeof(message), tr("will_no_longer_be_one_of_your_playlists"),
+			 result_playlists[menu_index].name);
+	confirm_show("remove_from_favourites_2", message, "remove", do_playlist_unfavorite, NULL);
 }
 
 static void download_one_track(void *user) {
@@ -1362,6 +1423,10 @@ static void row_menu_cb(lv_event_t *e) {
 	case ROW_MENU_PLAYLIST_DELETE:
 		items[0].label = "delete_playlist";
 		items[0].action = ask_playlist_delete;
+		break;
+	case ROW_MENU_PLAYLIST_UNFAVORITE:
+		items[0].label = "remove_from_favourites";
+		items[0].action = ask_playlist_unfavorite;
 		break;
 	default:
 		return;
@@ -1784,6 +1849,7 @@ static void fill_list(int from) {
 		case JOB_SEARCH_TRACKS:
 		case JOB_ALBUM_TRACKS:
 		case JOB_PLAYLIST_TRACKS:
+		case JOB_FAV_PLAYLIST_TRACKS:
 		case JOB_FAV_TRACKS: {
 			const tidal_track_t *t = &result_tracks[i];
 			char length[16];
@@ -1815,9 +1881,24 @@ static void fill_list(int from) {
 			make_row(a->name, a->album_count > 0 ? detail : "", a->image, false, i);
 			break;
 		}
+		case JOB_FAV_PLAYLISTS:
 		case JOB_USER_PLAYLISTS: {
 			const tidal_playlist_t *p = &result_playlists[i];
-			snprintf(detail, sizeof(detail), "%s \xC2\xB7 %d", p->owner, p->track_count);
+			// Who made it, where that is known, and how long it is. Among the
+			// favourites it is Tidal's editors or an artist; the account's own
+			// playlists arrive without a name on them, and so does another
+			// user's, and then the length stands alone instead of trailing a
+			// separator with nothing in front of it. Said in words, as the
+			// playlist picker says it: a bare number under a title is a
+			// number of what?
+			char length[48];
+			snprintf(length, sizeof(length), tr(p->track_count == 1 ? "playlist_track_2" : "playlist_tracks"),
+					 p->track_count);
+			if (p->owner[0]) {
+				snprintf(detail, sizeof(detail), "%s \xC2\xB7 %s", p->owner, length);
+			} else {
+				snprintf(detail, sizeof(detail), "%s", length);
+			}
 			make_row(p->name, detail, p->image, false, i);
 			break;
 		}
@@ -1891,7 +1972,9 @@ static void job_done_cb(void *user) {
 	}
 
 	// Which playlist these rows belong to, before the rows exist: the removal
-	// menu reads it.
+	// menu reads it. Only for one of the account's own -- nothing can be taken
+	// out of a favourited playlist, and with this left empty no removal can be
+	// sent for one (see do_playlist_track_remove).
 	if (result_kind == JOB_PLAYLIST_TRACKS) {
 		snprintf(list_playlist_id, sizeof(list_playlist_id), "%s", result_playlist_id);
 	} else {
@@ -2652,6 +2735,9 @@ static void tidal_cache_key(const job_t *job, char *out, size_t size) {
 	case JOB_FAV_ARTISTS:
 		snprintf(out, size, LISTCACHE_TIDAL_FAV_ARTISTS);
 		break;
+	case JOB_FAV_PLAYLISTS:
+		snprintf(out, size, LISTCACHE_TIDAL_FAV_PLAYLISTS);
+		break;
 	case JOB_USER_PLAYLISTS:
 		snprintf(out, size, LISTCACHE_TIDAL_PLAYLISTS);
 		break;
@@ -2662,6 +2748,8 @@ static void tidal_cache_key(const job_t *job, char *out, size_t size) {
 		snprintf(out, size, "tidal_artist_%ld", job->id);
 		break;
 	case JOB_PLAYLIST_TRACKS:
+	case JOB_FAV_PLAYLIST_TRACKS:
+		// One file per playlist, whoever made it: the rows are the same.
 		listcache_tidal_playlist_key(job->id_text, out, size);
 		break;
 	case JOB_FEATURED:
@@ -2685,6 +2773,9 @@ static void tidal_cache_title(const job_t *job) {
 	case JOB_FAV_ARTISTS:
 		snprintf(result_title, sizeof(result_title), "%s", tr("favourite_artists"));
 		break;
+	case JOB_FAV_PLAYLISTS:
+		snprintf(result_title, sizeof(result_title), "%s", tr("favourite_playlists"));
+		break;
 	case JOB_USER_PLAYLISTS:
 		snprintf(result_title, sizeof(result_title), "%s", tr("my_playlists"));
 		break;
@@ -2701,6 +2792,7 @@ static bool tidal_cache_array(job_kind_t kind, void **out, size_t *item_size) {
 	case JOB_FAV_TRACKS:
 	case JOB_ALBUM_TRACKS:
 	case JOB_PLAYLIST_TRACKS:
+	case JOB_FAV_PLAYLIST_TRACKS:
 		*out = result_tracks;
 		*item_size = sizeof(result_tracks[0]);
 		return true;
@@ -2714,6 +2806,7 @@ static bool tidal_cache_array(job_kind_t kind, void **out, size_t *item_size) {
 		*out = result_artists;
 		*item_size = sizeof(result_artists[0]);
 		return true;
+	case JOB_FAV_PLAYLISTS:
 	case JOB_USER_PLAYLISTS:
 		*out = result_playlists;
 		*item_size = sizeof(result_playlists[0]);
@@ -2809,7 +2902,7 @@ static void *worker_main(void *arg) {
 				from_cache = n > 0;
 				if (from_cache) {
 					tidal_cache_title(&job);
-					if (job.kind == JOB_PLAYLIST_TRACKS) {
+					if (job.kind == JOB_PLAYLIST_TRACKS || job.kind == JOB_FAV_PLAYLIST_TRACKS) {
 						snprintf(result_playlist_id, sizeof(result_playlist_id), "%s", job.id_text);
 					}
 				} else {
@@ -2857,8 +2950,10 @@ static void *worker_main(void *arg) {
 			snprintf(result_title, sizeof(result_title), "%.150s", job.text);
 			break;
 		case JOB_PLAYLIST_TRACKS:
+		case JOB_FAV_PLAYLIST_TRACKS:
 			// The only list requested by text rather than by number: Tidal
-			// playlists are named by UUID.
+			// playlists are named by UUID. One request for both kinds -- it
+			// takes any playlist's UUID and does not ask whose it is.
 			n = tidal_playlist_tracks(job.id_text, off, result_tracks + off, want);
 			snprintf(result_title, sizeof(result_title), "%.150s", job.text);
 			snprintf(result_playlist_id, sizeof(result_playlist_id), "%s", job.id_text);
@@ -2875,6 +2970,10 @@ static void *worker_main(void *arg) {
 		case JOB_FAV_ARTISTS:
 			n = tidal_favorite_artists(off, result_artists + off, want);
 			snprintf(result_title, sizeof(result_title), "%s", tr("favourite_artists"));
+			break;
+		case JOB_FAV_PLAYLISTS:
+			n = tidal_favorite_playlists(off, result_playlists + off, want);
+			snprintf(result_title, sizeof(result_title), "%s", tr("favourite_playlists"));
 			break;
 		case JOB_USER_PLAYLISTS:
 			n = tidal_user_playlists(off, result_playlists + off, want);
@@ -3229,6 +3328,7 @@ static void row_clicked_cb(lv_event_t *e) {
 	case JOB_SEARCH_TRACKS:
 	case JOB_ALBUM_TRACKS:
 	case JOB_PLAYLIST_TRACKS:
+	case JOB_FAV_PLAYLIST_TRACKS:
 	case JOB_FAV_TRACKS:
 		job.kind = JOB_PLAY;
 		job.index = index;
@@ -3254,7 +3354,11 @@ static void row_clicked_cb(lv_event_t *e) {
 		return;
 
 	case JOB_USER_PLAYLISTS:
-		job.kind = JOB_PLAYLIST_TRACKS;
+	case JOB_FAV_PLAYLISTS:
+		// The same tracks either way. Which of the two lists the playlist was
+		// opened from says whose it is, and so whether its rows can be taken
+		// out of it.
+		job.kind = list_kind == JOB_FAV_PLAYLISTS ? JOB_FAV_PLAYLIST_TRACKS : JOB_PLAYLIST_TRACKS;
 		snprintf(job.id_text, sizeof(job.id_text), "%s", result_playlists[index].id);
 		snprintf(job.text, sizeof(job.text), "%s", result_playlists[index].name);
 		run(&job, "loading");
@@ -4238,7 +4342,7 @@ static bool featured_hidden[3];
 // ---------------------------------------------------------------------------
 // the rows of the main page
 //
-// Seven of them, and the user decides which are there and in what order. Someone
+// Eight of them, and the user decides which are there and in what order. Someone
 // who never opens the showcases wants them gone; someone who plays the favourite
 // tracks every evening wants them on top. Stored in the configuration as a
 // comma-separated order and a bit mask of the hidden ones.
@@ -4252,8 +4356,23 @@ enum {
 	HOME_NEW,
 	HOME_TOP,
 	HOME_RECOMMENDED,
+	// These numbers are what a saved order and the hidden mask are written in,
+	// so a row the page gains later takes the next one, whatever its place on
+	// the page: that is HOME_DEFAULT_ORDER's to say.
+	HOME_FAV_PLAYLISTS,
 	HOME_ROWS,
 };
+
+// The page as it is before anyone has arranged it. The favourite playlists sit
+// under the account's own: four rows are what the 320-px panel shows before the
+// page is scrolled, "My playlists" is the fourth, and a new row above it would
+// have pushed it out of sight for everyone who is used to finding it there.
+static const int HOME_DEFAULT_ORDER[] = {
+	HOME_FAV_TRACKS, HOME_FAV_ALBUMS, HOME_FAV_ARTISTS, HOME_PLAYLISTS,
+	HOME_FAV_PLAYLISTS, HOME_NEW, HOME_TOP, HOME_RECOMMENDED,
+};
+_Static_assert(sizeof(HOME_DEFAULT_ORDER) / sizeof(HOME_DEFAULT_ORDER[0]) == HOME_ROWS,
+			   "every row of the main page has a place in the default order");
 
 static int home_order[HOME_ROWS];
 static bool home_hidden[HOME_ROWS];
@@ -4269,6 +4388,8 @@ static const char *home_row_name(int row) {
 		return "favourite_artists";
 	case HOME_PLAYLISTS:
 		return "my_playlists";
+	case HOME_FAV_PLAYLISTS:
+		return "favourite_playlists";
 	case HOME_NEW:
 		return FEATURED_NAMES[0];
 	case HOME_TOP:
@@ -4287,10 +4408,10 @@ static void home_layout_load(void) {
 	home_layout_loaded = true;
 
 	// A comma-separated order, as saved. Anything unreadable falls back to the
-	// default order, and a row named by no number is appended: a configuration
+	// default order, and a row named by no number is put in: a configuration
 	// written by an older build (or edited by hand) must not lose a row that
 	// the page has since gained.
-	const char *saved = config_get("tidal", "home_order", "0,1,2,3,4,5,6");
+	const char *saved = config_get("tidal", "home_order", "");
 	bool seen[HOME_ROWS] = {false};
 	int count = 0;
 	for (const char *p = saved; p && *p && count < HOME_ROWS; p++) {
@@ -4304,10 +4425,29 @@ static void home_layout_load(void) {
 		seen[row] = true;
 		home_order[count++] = row;
 	}
-	for (int row = 0; row < HOME_ROWS; row++) {
-		if (!seen[row]) {
-			home_order[count++] = row;
+	// Where a row that was not named goes: straight under the row it follows
+	// on the untouched page, wherever the saved order has put that one (and at
+	// the top, for the row that follows none). Appended instead, it would be
+	// the eighth row, a whole screen down on the V1 and below rows the user
+	// had arranged without it. Walked in the default order, so the row to go
+	// under is always placed by the time it is looked for, and with nothing
+	// saved at all what comes out is the default order itself.
+	for (int at = 0; at < HOME_ROWS; at++) {
+		int row = HOME_DEFAULT_ORDER[at];
+		if (seen[row]) {
+			continue;
 		}
+		int slot = 0;
+		for (int i = 0; at > 0 && i < count; i++) {
+			if (home_order[i] == HOME_DEFAULT_ORDER[at - 1]) {
+				slot = i + 1;
+				break;
+			}
+		}
+		memmove(&home_order[slot + 1], &home_order[slot], (size_t)(count - slot) * sizeof(home_order[0]));
+		home_order[slot] = row;
+		seen[row] = true;
+		count++;
 	}
 
 	long mask = config_get_int("tidal", "home_hidden", 0);
@@ -4440,7 +4580,7 @@ static lv_obj_t *corner_button(gui_config_t *cfg, int slot, const lv_image_dsc_t
 // ---------------------------------------------------------------------------
 // which rows the main page has, and in what order
 //
-// A page of its own rather than a menu: seven rows, each with a switch and two
+// A page of its own rather than a menu: eight rows, each with a switch and two
 // arrows, is more than a popover can say. The arrows move a row one step up or
 // down the list; the switch decides whether the main page shows it at all.
 // ---------------------------------------------------------------------------
@@ -4681,6 +4821,14 @@ static void do_logout(void *user) {
 	// The remembered favourites and playlists belonged to that account; under
 	// another user they would be lies.
 	tidalsync_forget();
+	// So would its lists on the card: the favourites and the playlists are read
+	// back for half a day before Tidal is asked again, which is long enough for
+	// the next account to be shown this one's.
+	listcache_drop(LISTCACHE_TIDAL_FAV_TRACKS);
+	listcache_drop(LISTCACHE_TIDAL_FAV_ALBUMS);
+	listcache_drop(LISTCACHE_TIDAL_FAV_ARTISTS);
+	listcache_drop(LISTCACHE_TIDAL_FAV_PLAYLISTS);
+	listcache_drop(LISTCACHE_TIDAL_PLAYLISTS);
 	// And the tracks downloaded for that account are of no use to anyone.
 	tidalcache_clear();
 	// Not the covers: that directory is shared with Qobuz (see qobuzart.h),
@@ -4862,6 +5010,10 @@ static void rebuild_home(void) {
 		case HOME_PLAYLISTS:
 			settingsrow_add(home_container, "my_playlists", NULL, simple_job_cb,
 							(void *)(intptr_t)JOB_USER_PLAYLISTS);
+			break;
+		case HOME_FAV_PLAYLISTS:
+			settingsrow_add(home_container, "favourite_playlists", NULL, simple_job_cb,
+							(void *)(intptr_t)JOB_FAV_PLAYLISTS);
 			break;
 		case HOME_NEW:
 		case HOME_TOP:

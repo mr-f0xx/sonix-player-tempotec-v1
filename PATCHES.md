@@ -6,6 +6,117 @@
 | Touchscreen multitouch, R1 | `tools/cst8xx_multitouch_patch.py` | the panel reports two fingers, the driver lets one out |
 
 
+## Tidal: the playlists an account keeps as favourites
+
+"My playlists" on the Tidal page asks `/users/<id>/playlists`, which answers
+with the playlists the account made and nothing else. A playlist favourited in
+Tidal's own app -- an editorial one, an artist's, another listener's -- was in
+the account and nowhere in the player. Those are a list of their own on Tidal's
+side, in the favourites collection next to the tracks, the albums and the
+artists, and the Tidal page now has a row for it: **Favourite playlists**,
+under "My playlists".
+
+No hardware and no Tidal account were involved. The request is the one the
+stock firmware's player carries (`%s/users/%d/favorites/playlists?countryCode=%s`
+and `%s/users/%d/favorites/playlists/%s` are in its binary, as
+`tools/extract_streamkeys.py` unpacks it) and the one python-tidal used until
+July 2025 (its commit `5517f38`), when it moved favourite playlists to the v2
+`my-collection/playlists/folders` calls for the sake of folders and batches.
+The issues behind that commit ask for the new calls and do not report the old
+ones failing, and python-tidal still reads the other three favourites lists
+from this same v1 collection. **Reasoned, not observed:** that Tidal still
+answers the v1 list of playlists, and that the list is complete. A playlist
+filed in a folder in Tidal's app is the case to look at; if it is missing,
+`/users/<id>/playlistsAndFavoritePlaylists` and the v2 call are the two places
+to go next.
+
+What changed:
+
+- **The client** (`tidal.c`). `tidal_favorite_playlists()` is a fourth caller
+  of the shared favourites request (`limit`, `offset`, `order=DATE`,
+  `orderDirection=DESC`, entries wrapped as `{"created":..,"item":{..}}`).
+  `tidal_favorite_remove_playlist()` is a `DELETE` on
+  `/users/<id>/favorites/playlists/<uuid>`: the account's link goes, the
+  playlist stays. It is not `tidal_playlist_delete()`, and there is no call to
+  add one, because nothing in the player lists a playlist the account does not
+  already hold. A playlist of type `EDITORIAL` that names no creator is given
+  `TIDAL` as its owner, which is what python-tidal prints for it.
+- **The page** (`tidalpage.c`). A row reads `TIDAL · 50 tracks`; where no
+  creator is named -- which is how python-tidal finds a listener's playlist,
+  the account's own included -- the length stands alone, so "My playlists"
+  reads `7 tracks` where it read ` · 7`. A favourite opens with the same tracks
+  request as one of the account's own but as a kind of its own: its tracks can
+  be played, favourited and kept on the card, one at a time or as a selection,
+  and cannot be taken out of it. The three dots on a favourite, and a selection
+  of them, offer **Remove from favourites** and ask first. (A selection of
+  favourite tracks does not ask; those can be found again by searching, and a
+  playlist cannot.) The list is kept on the card for the same half day as the
+  others, as `tidal_fav_playlists`, and a removal drops it together with the
+  removed playlist's own rows.
+- **The main page's rows.** A saved arrangement is a list of row numbers, so
+  the new row took the next number, 7, whatever its place on the page, and the
+  default order became a table of its own. A row that an older build's
+  arrangement does not name is put straight under the row it follows by
+  default -- "My playlists", wherever the user had moved that -- where it used
+  to be appended at the bottom. The mask of hidden rows needs no migration.
+- **Signing out** (`do_logout()`) now takes the account's five lists off the
+  card. They are read back for twelve hours before Tidal is asked again, so
+  whoever signed in next on the same card was shown the previous account's
+  favourites and playlists. That was already so for the four lists there were.
+- **Strings.** `favourite_playlists` and
+  `will_no_longer_be_one_of_your_playlists` in the eleven languages, written
+  without a native reader. German says `Lieblingsplaylists`:
+  `Lieblings-Wiedergabelisten` is wider than the row at every size its name can
+  step down to.
+
+Removing needs a session that may write. The stock HiByOS keys sign in with
+`r_usr` alone (the scope fallback in `tidal.c`), so with those Tidal is
+expected to refuse it as it refuses the other writes; the refusal is shown in
+Tidal's words and the list is left as it was. Reading is not affected.
+
+Tests: `make -C sonix-player/tests tidal tidal-ui`. `tidal` runs the real
+client against canned replies (`test_tidal_favplaylists.c`): the request and
+its parameters, the wrapped entries, the three kinds of creator, paging, an
+error in Tidal's words, the `DELETE`, and a refusal for want of `w_usr`.
+`tidal-ui` puts the real page, the real `tidalsync.c` and the real list cache
+on LVGL at 240×320 over a recording stand-in for the client
+(`tests/ui/test_tidal_pages.c`), in three runs: nothing saved, an arrangement
+saved by a build without the row, and one saved by this build. It checks the
+row and where it lands, the list and its heading from the network and from the
+card, what the three dots and the selection sheet offer in each of the two
+lists of playlists and inside a playlist from each, that "no" sends nothing,
+that "yes" un-favourites exactly the rows chosen and never deletes one, a
+refusal, the empty list, the reorder page, and the five lists gone from the
+card after a sign-out. Forty-one deliberate breakages of the feature in
+`tidalpage.c` and `tidalsync.c` were tried against it, one at a time.
+Thirty-seven failed a run. The four that passed change nothing a user can see:
+three are cache drops made twice, once by the page and once by `tidalsync.c`,
+and one is a guard no menu reaches.
+
+Neither suite reaches Tidal: the HTTP layer is canned in the first and the
+whole client is substituted in the second. The headless fonts are Montserrat,
+so no label is measured in the faces the player draws with. By those faces'
+advance widths the new row's name fits the 164 px beside the chevron at full
+size in seven languages, steps down in Dutch, Russian and Ukrainian, and in
+Japanese is about 4 px over at the smallest step, as "Favourite artists"
+already is there: into the gap before the chevron, not onto it. The
+confirmation card is recorded, not drawn, and taps are sent as events, not
+through the touch driver.
+
+**Hardware validation pending:** with an account that keeps an editorial
+playlist, an artist's and another listener's as favourites, one of them filed
+in a folder: the row is there, fifth, and its list matches Tidal's app, the
+folder's playlist included; the editorial one says `TIDAL`; each opens, plays
+through and can be kept on the card, and its tracks' menu has no "Remove from
+playlist". **Remove from favourites** on one row and on a selection, with keys
+that may write (the playlist leaves the list here and in the app, and is still
+to be found in Tidal) and with the stock keys (Tidal's refusal on screen, the
+list unchanged). On a player whose Tidal rows had been rearranged before the
+update: the new row sits under "My playlists" and the hidden rows are still
+hidden; then Tidal settings → Home reorder moves it and hides it, across a
+restart. The row's name in each language, Japanese first. And a sign-out
+followed by a second account: its own favourites and playlists, at once.
+
 ## Issue #265: the silent Teslas, the sudden stops, and log lines that never arrived
 
 Worked from the three logs attached to

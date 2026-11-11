@@ -1099,6 +1099,19 @@ static void read_playlist(const json_doc_t *doc, int obj, tidal_playlist_t *p) {
 	p->track_count = (int)json_obj_long(doc, obj, "numberOfTracks", 0);
 	json_obj_str(doc, json_get(doc, obj, "creator"), "name", p->owner, sizeof(p->owner));
 
+	// An artist's playlist names its creator. A user's carries the bare account
+	// number. One made by Tidal's editors says so in its type and has a creator
+	// numbered zero, for which the python-tidal client prints "TIDAL"; so does
+	// this when no name came with it -- the one case where who made the
+	// playlist is known without being sent.
+	if (!p->owner[0]) {
+		char type[24] = "";
+		json_obj_str(doc, obj, "type", type, sizeof(type));
+		if (strcmp(type, "EDITORIAL") == 0) {
+			snprintf(p->owner, sizeof(p->owner), "TIDAL");
+		}
+	}
+
 	// The square image when there is one, otherwise the wide one: the latter
 	// always exists but is 3:2, and gets cropped in a square list row.
 	char image[64] = "";
@@ -1347,6 +1360,17 @@ int tidal_favorite_albums(int offset, tidal_album_t *out, int max) {
 
 int tidal_favorite_artists(int offset, tidal_artist_t *out, int max) {
 	return favorites("artists", offset, artist_reader, out, max);
+}
+
+// The playlists somebody else made and the account keeps. Not a variant of
+// tidal_user_playlists() below: that endpoint answers only with the playlists
+// the account created, so a playlist favourited in Tidal's own app -- an
+// editorial one, an artist's, a friend's -- was in the account and nowhere in
+// this player. They live in the favourites collection, next to the tracks, the
+// albums and the artists, wrapped the same way ({"created":..,"item":{..}}),
+// and it is where the stock firmware's player reads them from too.
+int tidal_favorite_playlists(int offset, tidal_playlist_t *out, int max) {
+	return favorites("playlists", offset, playlist_reader, out, max);
 }
 
 int tidal_user_playlists(int offset, tidal_playlist_t *out, int max) {
@@ -1753,6 +1777,11 @@ bool tidal_favorite_remove_artist(long artist_id) {
 	snprintf(id, sizeof(id), "%ld", artist_id);
 	return favorite_remove("artists", id);
 }
+
+// A playlist leaves the favourites the way everything else does, with its UUID
+// where the others have a number. The playlist is somebody else's and stays as
+// it is; only the account's link to it goes.
+bool tidal_favorite_remove_playlist(const char *playlist_id) { return favorite_remove("playlists", playlist_id); }
 
 int tidal_favorite_track_ids(long *out, int max) {
 	if (!out || max <= 0) {
