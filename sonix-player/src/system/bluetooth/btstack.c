@@ -56,6 +56,13 @@ static int pcm_count;
 static char rx_addr[MAX_PCMS][BT_ADDR_MAX];
 static int rx_count;
 
+// Bumped every time a receive PCM object appears. A codec change tears the
+// transport down and builds a new one, and bluealsa starts the new PCM from its
+// own defaults rather than from what the old one had -- the volume mode among
+// them -- so "a new one is there" is something the worker has to be able to
+// see. Under lock.
+static unsigned rx_generation;
+
 // bluez's A2DP transports and the State each last announced, by object path.
 // Kept per transport rather than per device because a device can have two, one
 // of them an orphan that sits idle next to the live one. Filled from signals
@@ -547,6 +554,7 @@ static void on_signal(dbus_conn_t *c, const dbus_msg_t *m, void *user) {
 		} else if (path_is_a2dp_source(path) && address_from_path(path, address, sizeof(address))) {
 			pthread_mutex_lock(&lock);
 			pcm_add(rx_addr, &rx_count, address);
+			rx_generation++;
 			media_sync_owner_locked();
 			pthread_mutex_unlock(&lock);
 			fprintf(stderr, "btstack: %s is streaming to this device\n", address);
@@ -1457,12 +1465,25 @@ void btstack_refresh_audio(void) {
 	for (int i = 0; i < count; i++) {
 		snprintf(pcm_addr[i], BT_ADDR_MAX, "%s", found[i]);
 	}
+	// A receive PCM that was not there a moment ago, or is another device's, is
+	// a new one however it came to be known: this refresh is the only way the
+	// ones that existed before the bus was joined are ever seen.
+	if (count_rx > 0 && (rx_count == 0 || strcasecmp(rx_addr[0], found_rx[0]) != 0)) {
+		rx_generation++;
+	}
 	rx_count = count_rx;
 	for (int i = 0; i < count_rx; i++) {
 		snprintf(rx_addr[i], BT_ADDR_MAX, "%s", found_rx[i]);
 	}
 	media_sync_owner_locked();
 	pthread_mutex_unlock(&lock);
+}
+
+unsigned btstack_rx_pcm_generation(void) {
+	pthread_mutex_lock(&lock);
+	unsigned now = rx_generation;
+	pthread_mutex_unlock(&lock);
+	return now;
 }
 
 // Whether bluealsa has published a PCM object for this device in this
@@ -2132,6 +2153,38 @@ bool btstack_pcm_volume_set(const char *address, bool receiving, int volume) {
 		fprintf(stderr, "btstack: volume not restored on %s: %s\n", path, err[0] ? err : "no reply");
 	}
 	return ok;
+}
+
+bool btstack_pcm_softvolume_get(const char *address, bool receiving, bool *out) {
+	pthread_mutex_lock(&lock);
+	dbus_conn_t *c = conn;
+	pthread_mutex_unlock(&lock);
+
+	char path[OBJECT_PATH_MAX];
+	if (!c || !out || !pcm_path_dir(address, receiving, path, sizeof(path))) {
+		return false;
+	}
+
+	dbus_writer_t *w = dbus_call_begin(c, BALSA_SERVICE, path, PROPS_IFACE, "Get", "ss");
+	dbus_w_string(w, BALSA_PCM_IFACE);
+	dbus_w_string(w, "SoftVolume");
+
+	// No log line on a miss: the PCM object is simply not there for a moment
+	// while a transport is rebuilt, and the caller asks again.
+	char err[DBUS_NAME_MAX];
+	if (!dbus_call_send(c, CALL_MS, err, sizeof(err))) {
+		return false;
+	}
+
+	dbus_reader_t r;
+	dbus_reply_reader(c, &r);
+	char sig[16];
+	bool value = false;
+	if (!dbus_r_signature(&r, sig, sizeof(sig)) || sig[0] != 'b' || !dbus_r_bool(&r, &value)) {
+		return false;
+	}
+	*out = value;
+	return true;
 }
 
 bool btstack_pcm_softvolume_set(const char *address, bool receiving, bool enabled) {

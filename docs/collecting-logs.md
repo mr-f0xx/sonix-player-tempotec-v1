@@ -133,3 +133,87 @@ this protection, compare the `bluealsa: Missing RTP packets` and
 `audio: the external source ran dry` lines in a Bluetooth/player log from
 before and after, with the same source and placement. The policy is not a
 radio-firmware repair and has not been validated on a physical V1 here.
+
+### Bluetooth receiver: stutter, the phone's volume, and a freeze
+
+These are the lines the receiver writes to `sonix_player.log` (the player's log,
+not `bluetooth.log`) and what each one says about the three things reported on
+firmware 1.6.1. None of them has been seen on a physical V1 yet: what is below
+is what to look for, not what was found.
+
+**Stutter.** The count that matters is `audio: external source finished; device
+handed back (N underruns)` at the end of every receiver session, and the lines
+`audio: the external source ran dry` while it plays. Two more say why:
+
+- `btreceiver: aptX gets deeper buffers than the other codecs: 160 ms in and 360
+  ms out` -- the deeper aptX buffers are in force for this session. aptX is the
+  one codec that gets them; SBC, AAC, LDAC and aptX HD keep the receiver's
+  ordinary 80 ms in and 120 ms out.
+- `btreceiver: the capture ring overran (N since it opened); the output was not
+  taking frames as fast as they arrived` -- audio was thrown away on the way in,
+  which is a stutter that has nothing to do with the output running dry. Said at
+  most every two seconds, so the number is the count to read.
+
+The two buffers are settings in the `[bluetooth]` section of
+`/usr/data/device_config.ini`, restart the player after changing them:
+
+```
+[bluetooth]
+receiver_aptx_capture_ms = 160
+receiver_aptx_output_ms  = 360
+```
+
+`0` turns the extra room off for aptX. Both are a floor: a larger
+`receiver_capture_ms` or `receiver_output_ms` still wins. The price is delay --
+240 ms more at the output, and up to 80 ms more when the capture side backs up
+-- which a film will show as sound arriving late. A log that still shows aptX
+underruns with the deeper buffers is worth sending: it means the arrival of the
+audio is not the whole story.
+
+**The phone's volume.** Every time a new receiving stream appears, a link or a
+codec change that builds it again, the player says whether the phone's volume
+will be applied on this side:
+
+- `bluetooth: RX stream on <mac> (new stream): the phone's volume would only
+  have muted at zero; it is now applied here, level 111/127 left, 111/127 right`
+  -- the stream started in the daemon's native-volume mode, in which the
+  player's decoder only silences at exactly zero, and was switched. A log that
+  has this line on a connection where the volume felt like an on/off switch is
+  the confirmation.
+- `... the phone's volume is applied here, level ...` -- it was already.
+- `... and turning the software volume on failed` / `its volume settings did not
+  answer 5 times; leaving them as bluealsa has them` -- the daemon would not say
+  or would not take it; the stream is left as it was.
+
+The word after the address is `new stream` for a stream the phone's own codec
+change or a reconnection made, and `after the codec change` for one made by the
+codec button on the receiver page.
+
+**A freeze.** The log is written once a second, so the last second before a
+hang can be missing; what is there is still the best evidence. For a hang in
+receiver mode, send both `sonix_player.log` and `bluetooth.log`, and note
+whether the screen was on and what was on it. Two lines bracket the moment a
+stream starts and are the last things to look for:
+
+- `btreceiver: first audio N ms after the output opened` -- the stream got as
+  far as sound. If it is the last line of a log, the hang was after the sound
+  started; if the log ends before it, the hang was while the DAC was being
+  opened.
+- `btreceiver: <mac> says it is playing and nothing has arrived in 3000 ms; this
+  PCM is not the live one` -- the first-frame check handing the DAC back and
+  opening it again. It is counted from the moment the phone says it is playing,
+  and no longer from the moment the output opened; a log with this line within a
+  second of the phone starting to play is the behaviour this build fixed, and
+  means the fix is not running.
+
+**The control centre over the receiver.** Three lines trace the receiver being
+parked behind the equaliser and brought back:
+
+- `btreceiver: staying on behind a page opened from the control centre`
+- `btreceiver: back on the receiver's page`
+- `btreceiver: the way back to the receiver's page is gone; ending the receiver`
+  -- the user went somewhere (the main menu, another section) the chevron
+  cannot lead back from, and the receiver ended there.
+
+A log in which the receiver stops with none of these lines, right after a page
+was opened from the control centre, is a bug worth reporting with the page's name.

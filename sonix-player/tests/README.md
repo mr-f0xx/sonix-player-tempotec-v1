@@ -18,6 +18,7 @@ make -C sonix-player/tests basebuild
 make -C sonix-player/tests stock-prepare
 make -C sonix-player/tests peq-ui
 make -C sonix-player/tests quickpanel-layout
+make -C sonix-player/tests btreceiver-session
 make -C sonix-player/tests power-display
 make -C sonix-player/tests corners
 make -C sonix-player/tests playbutton
@@ -47,7 +48,7 @@ make -C sonix-player/tests tidal
 make -C sonix-player/tests tidal-ui
 ```
 
-The non-UI suites require only a C compiler, Make and Python 3 (plus standard pthread/dl/math libraries). The `hiresbadge-ui`, `peq-ui`, `quickpanel-layout`, `power-display`, `corners`, `playbutton`, `musicsettings-rows`, `volume-overlay`, `playerdeck`, `vinylayout`, `waveform-overlay`, `edge-lock`, `tidal-ui` and aggregate `ui` targets also need the LVGL 9.6.0 checkout described below. None requires ALSA, SDL, a MIPS toolchain, a music server, a real account, or downloaded audio.
+The non-UI suites require only a C compiler, Make and Python 3 (plus standard pthread/dl/math libraries). The `hiresbadge-ui`, `peq-ui`, `quickpanel-layout`, `btreceiver-session`, `power-display`, `corners`, `playbutton`, `musicsettings-rows`, `volume-overlay`, `playerdeck`, `vinylayout`, `waveform-overlay`, `edge-lock`, `tidal-ui` and aggregate `ui` targets also need the LVGL 9.6.0 checkout described below. None requires ALSA, SDL, a MIPS toolchain, a music server, a real account, or downloaded audio.
 
 `run_subsonic_tests.py` starts a temporary threaded localhost HTTP server plus three HTTPS servers carrying the certificates in `tls_fixtures.py`, runs the C binary with a private temporary config directory, verifies its requests, then shuts down. All account values are synthetic. Build products live in ignored `.build/`; response/PCM fixtures are generated in memory rather than added to Git, and the three test certificates are pasted into that Python file rather than downloaded.
 
@@ -114,6 +115,36 @@ committed (byte-split zip pieces, numbered volumes, a folder) and checks that
 piece missing; it needs 7z and is skipped without it. The tests cannot prove
 that the radio accepts or uses the classification, that a stock script behaves
 the same on every firmware revision, or that receiver packet loss is fixed.
+
+### Bluetooth receiver: buffers, equaliser, watchdog and volume
+
+The same `bluetooth` target also holds the receiver's own fixtures, none of which
+touches a radio. `test_btreceiver` runs the real capture thread over a fake ALSA
+and checks the deeper aptX buffers (and that SBC, AAC and LDAC keep the ordinary
+ones, that a larger plain setting still wins, and that `0` turns the extra room
+off), that the equaliser runs on 32-bit frames and, when the output will not
+take 32-bit words, on the 16-bit fallback, that a full capture ring is recovered
+from and the session goes on, and that a
+phone left paused for longer than the first-frame window and then played is not
+taken for a dead stream: the DAC is not closed and opened again, and a stream
+that really never delivers still is. `test_bluetooth` drives the phone's-volume
+logic over fakes for bluealsa's PCM properties: a new receiving PCM gets the
+software volume switched on (and the level and codec-change cases around it,
+including a daemon that does not answer or refuses). `test_btpcmvolume` marshals the real `SoftVolume`
+property read and write on the receive PCM and checks the counter that tells a
+new PCM object from the one already dealt with.
+
+`make -C sonix-player/tests btreceiver-session` runs the receiver's session
+(parking behind the equaliser, coming back, ending when the way back is gone)
+on real LVGL screens, so the order LVGL sends its screen-load and unload events
+in is the real one; only the receiver, the A2DP sink and the back-stack are
+stand-ins. It needs the LVGL checkout, like the other UI targets.
+
+What none of these can show: that the V1's DAC survives a close and reopen at
+any particular moment, that the volume mode really was the cause of the
+on/off feel, that the deeper aptX buffers stop the stutter, what the equaliser
+costs on the single core while a 96 kHz LDAC stream plays, or that nothing else
+on the device reacts badly to a page opened over a live receiver.
 
 ## USB host arbitration and storage safety
 
@@ -199,12 +230,23 @@ AutoEq browser are stubbed.
 
 `make -C sonix-player/tests quickpanel-layout` uses the production Control
 Centre list parser, accessors and move operations with headless LVGL. It checks
-that DAC mode no longer blocks the sheet while Wi-Fi transfer and Bluetooth
-receiver mode still do, and that the PEQ profile control does not displace
+that neither DAC mode nor Bluetooth receiver mode blocks the sheet while a Wi-Fi
+transfer still does; what the card says in receiver mode (the phone's track, the
+codec and rate, an error in place of them) and that the local transport is
+neither shown nor answers; that the Bluetooth and airplane tiles say why they
+refuse while a receiver is playing, waiting for a phone or parked; that EQ, MSEB
+and PEQ open without ending the receiver and ask nothing, that every other page
+asks first and opens only on yes, and that a refused question leaves nothing
+behind; and that the PEQ profile control does not displace
 existing defaults, fills an empty place in a saved v4 layout, waits in Settings
 when the grid is full, and survives a move into the first eight and a reload.
 Unrelated playback/radio handlers are removed by linker section GC; no sheet is
-built. The full `ui` target includes both PEQ-related suites.
+built, and the radio, player and DAC answers are stand-ins. The full `ui` target
+includes both PEQ-related suites and the receiver session. (On GCC 12 the `ui`
+aggregate stops at three files this suite does not touch --
+`tests/ui/test_main_menu.c`, `src/gui/library/music.c` and
+`src/gui/wireless/wifisettings.c` fail `-Werror` -- so run the targets above one
+at a time.)
 
 ## Wi-Fi hidden networks
 

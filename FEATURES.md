@@ -185,7 +185,23 @@ a self-signed certificate), and HLS.
   control: off, cancellation, transparency, adaptive.
 - **Bluetooth in** - a phone or laptop connects and the player becomes its
   speaker, decoding through its own DAC. The incoming codec, rate and depth are
-  shown.
+  shown. The receiving stream's software volume is switched on every
+  time a stream appears, so the phone's volume keys scale the sound on the player
+  instead of only muting it at zero. aptX gets deeper buffers than the other
+  codecs because it is the one that ran dry in the logs
+  (`receiver_aptx_capture_ms`, `receiver_aptx_output_ms` in `[bluetooth]`; 0
+  turns each off). The graphic EQ, MSEB and PEQ process the incoming audio.
+  **The control centre works over the receiver**: pull it down from the status
+  bar (or up from the bottom edge, if Appearance has the stock gestures on) as
+  anywhere else for volume, brightness, EQ, MSEB and PEQ on/off, and the other
+  toggles. Its card shows the phone's track and the codec in place of the local
+  transport; the side keys still go to the phone. A long press on **EQ**,
+  **MSEB** or **PEQ** opens its page *without leaving the receiver*: it keeps
+  playing behind it, and backing out lands on the receiver page again (a swipe
+  home or a jump to another section ends it, as leaving the receiver always
+  has). Bluetooth and airplane mode are not offered while it lasts, and any
+  other long press asks before it leaves, since that would silence the phone.
+  Cover Flow stays shut.
 - **AirPlay** - the player appears as an AirPlay target.
 - **DLNA** - the player appears as a renderer.
 - **Wi-Fi** - scan and join the networks in the air, and hidden ones too:

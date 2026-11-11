@@ -589,14 +589,92 @@ bool btstack_audio_info(const char *address, char *out, size_t size) {
 	return false;
 }
 
+// A receive PCM that is there and says what it is decoding, for the cases that
+// drive the worker's reading of it; off by default.
+static bool fake_stream_have;
+
 bool btstack_stream_info(const char *address, bool receiving, btstack_stream_t *out) {
 	(void)address;
 	(void)receiving;
 	if (out) {
 		memset(out, 0, sizeof(*out));
+		if (fake_stream_have) {
+			snprintf(out->codec, sizeof(out->codec), "aptX");
+			out->rate = 44100;
+			out->channels = 2;
+			out->bits = 16;
+		}
 	}
-	return false;
+	return fake_stream_have;
 }
+
+// The receive PCM's own volume settings, as bluealsa keeps them, and what was
+// done to them in what order.
+static bool fake_pcm_there;
+static bool fake_soft;
+static int fake_volume_word = 0x0909; // 9/127 on both channels, nothing muted
+static unsigned fake_generation;
+static int soft_get_calls, soft_set_calls, vol_set_calls, last_vol_set;
+static int volume_order[8], volume_order_n;
+static bool fake_select_ok = true;
+static bool fake_soft_set_fails;
+
+bool btstack_pcm_softvolume_get(const char *address, bool receiving, bool *out) {
+	(void)address;
+	assert(receiving); // the receive PCM, never the headphones'
+	soft_get_calls++;
+	if (!fake_pcm_there) return false;
+	*out = fake_soft;
+	return true;
+}
+
+bool btstack_pcm_softvolume_set(const char *address, bool receiving, bool on) {
+	(void)address;
+	assert(receiving);
+	soft_set_calls++;
+	volume_order[volume_order_n++ % 8] = 1;
+	if (!fake_pcm_there || fake_soft_set_fails) return false;
+	fake_soft = on;
+	return true;
+}
+
+bool btstack_pcm_volume_get(const char *address, bool receiving, int *out) {
+	(void)address;
+	assert(receiving);
+	if (!fake_pcm_there) return false;
+	*out = fake_volume_word;
+	return true;
+}
+
+bool btstack_pcm_volume_set(const char *address, bool receiving, int volume) {
+	(void)address;
+	assert(receiving);
+	vol_set_calls++;
+	last_vol_set = volume;
+	volume_order[volume_order_n++ % 8] = 2;
+	return fake_pcm_there;
+}
+
+unsigned btstack_rx_pcm_generation(void) { return fake_generation; }
+
+bool btstack_select_codec_dir(const char *address, bool receiving, const char *codec) {
+	(void)address;
+	(void)codec;
+	assert(receiving);
+	return fake_select_ok;
+}
+
+int btstack_codecs_dir(const char *address, bool receiving, char out[][BT_CODEC_NAME_MAX], int max, char *selected,
+					   size_t selected_size) {
+	(void)address;
+	(void)receiving;
+	(void)out;
+	(void)max;
+	if (selected && selected_size) selected[0] = '\0';
+	return 0;
+}
+
+void btstack_refresh_media_status(const char *address) { (void)address; }
 
 bool btreceiver_is_active(void) { return false; }
 bool sonixlink_bt_is_peer(const char *mac) {
@@ -1205,6 +1283,113 @@ static void test_car_mode(void) {
 	car_fixture_done();
 }
 
+// What a phone's volume keys do on this side is one flag on the receive PCM:
+// with it off, bluealsa's decoder only mutes at zero (an on/off switch), with it
+// on it scales by the level (the slider). The flag starts off with the options
+// the player starts the daemon with, and a codec change builds a new PCM that
+// starts from the defaults again, so it is written for every new PCM -- once,
+// and in front of the level that is carried across a change.
+static void volume_fixture_reset(void) {
+	fake_pcm_there = true;
+	fake_soft = false;
+	fake_volume_word = 0x0909;
+	fake_generation = 1;
+	fake_stream_have = true;
+	fake_select_ok = true;
+	fake_soft_set_fails = false;
+	source_pcm = true;
+	soft_get_calls = soft_set_calls = vol_set_calls = last_vol_set = 0;
+	volume_order_n = 0;
+	memset(volume_order, 0, sizeof(volume_order));
+	g_rx_volume_generation = 0;
+	g_rx_volume_misses = 0;
+}
+
+static void volume_fixture_done(void) {
+	fake_stream_have = false;
+	source_pcm = false;
+	fake_pcm_there = false;
+}
+
+static void test_rx_volume_follows_the_phone(void) {
+	// A new link, SoftVolume off: turned on, once. Reading it again for the
+	// same PCM is not another write.
+	volume_fixture_reset();
+	do_read_receiver();
+	assert(fake_soft && soft_set_calls == 1);
+	assert(g_rx_volume_generation == 1);
+	do_read_receiver();
+	do_read_receiver();
+	assert(soft_set_calls == 1 && soft_get_calls == 1);
+
+	// Already on: said, not written.
+	volume_fixture_reset();
+	fake_soft = true;
+	do_read_receiver();
+	assert(fake_soft && soft_set_calls == 0 && g_rx_volume_generation == 1);
+
+	// A codec change on the phone's side builds another PCM: a new generation
+	// that starts from the default again, and is dealt with the same way.
+	fake_soft = false;
+	fake_generation = 2;
+	do_read_receiver();
+	assert(fake_soft && soft_set_calls == 1 && g_rx_volume_generation == 2);
+
+	// Nothing to deal with when there is no receive PCM.
+	volume_fixture_reset();
+	fake_stream_have = false;
+	do_read_receiver();
+	assert(soft_get_calls == 0 && soft_set_calls == 0 && g_rx_volume_generation == 0);
+
+	// The PCM not answering: asked again on the next round, and given up on
+	// after RX_VOLUME_TRIES so a daemon that never answers is not asked for ever.
+	volume_fixture_reset();
+	fake_pcm_there = false;
+	for (int i = 0; i < RX_VOLUME_TRIES - 1; i++) {
+		do_read_receiver();
+		assert(g_rx_volume_generation == 0);
+	}
+	do_read_receiver();
+	assert(g_rx_volume_generation == 1 && g_rx_volume_misses == 0);
+	int asked = soft_get_calls;
+	do_read_receiver();
+	assert(soft_get_calls == asked);
+
+	// The write itself being refused is a miss too, not a success: the PCM
+	// answered about its mode but would not take the change.
+	volume_fixture_reset();
+	fake_soft_set_fails = true;
+	do_read_receiver();
+	assert(!fake_soft && soft_set_calls == 1);
+	assert(g_rx_volume_generation == 0 && g_rx_volume_misses == 1);
+	fake_soft_set_fails = false;
+	do_read_receiver();
+	assert(fake_soft && g_rx_volume_generation == 1 && g_rx_volume_misses == 0);
+
+	// A codec chosen on this side: the mode first, then the level carried over
+	// from the old PCM, in that order, and the generation counted as dealt with
+	// so the next reading does not do it over.
+	volume_fixture_reset();
+	fake_volume_word = 0x2222; // 34/127
+	do_set_receiver_codec("LDAC");
+	assert(fake_soft && soft_set_calls == 1);
+	assert(vol_set_calls == 1 && last_vol_set == 0x2222);
+	assert(volume_order_n == 2 && volume_order[0] == 1 && volume_order[1] == 2);
+	assert(g_rx_volume_generation == 1);
+	int writes_before = soft_set_calls;
+	do_read_receiver();
+	assert(soft_set_calls == writes_before);
+
+	// The codec call refused, on a PCM that has been dealt with already: the
+	// link is as it was, and nothing of its volume is touched.
+	volume_fixture_reset();
+	g_rx_volume_generation = fake_generation;
+	fake_select_ok = false;
+	do_set_receiver_codec("LDAC");
+	assert(soft_set_calls == 0 && vol_set_calls == 0);
+	volume_fixture_done();
+}
+
 // The sender is linked, says it is playing case after case, and delivers
 // nothing: the receiver asks it for a stream. Posting that is all this end can
 // do from the capture thread, and asking twice within one report of silence
@@ -1541,6 +1726,7 @@ int main(void) {
 	test_reconnect_grace_sees_a_new_link();
 	test_car_mode();
 	test_receiver_stream_invite();
+	test_rx_volume_follows_the_phone();
 	test_scan_pairing_window();
 	test_usb_route_survives_a_radio_teardown();
 	test_spawn_daemon_releases_card_descriptors();

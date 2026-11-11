@@ -3495,6 +3495,66 @@ bool bluetooth_receiver_device(char *mac_out, int mac_size, char *name_out, int 
 // state once bluealsa has settled.
 static void do_read_receiver(void);
 
+// The receive PCM generation the volume mode was last dealt with for, and how
+// many times in a row the PCM did not answer about it. Worker thread only.
+#define RX_VOLUME_TRIES 5
+static unsigned g_rx_volume_generation;
+static unsigned g_rx_volume_misses;
+
+// Makes the phone's volume turn the sound down on this side, whatever the new
+// transport started with.
+//
+// What a phone's volume keys do here is bluealsa's to decide, and 4.1.1 decides
+// by one flag on the receive PCM. The player starts the daemon with
+// --a2dp-volume, which makes every transport begin with SoftVolume off ("native
+// volume"); in that mode the decoder passes the samples through untouched and
+// only silences them when the level is exactly zero (io_pcm_scale() in
+// bluealsa's io.c), so every position of the phone's slider but the bottom one
+// plays at full scale: an on/off switch. With SoftVolume on, the decoder scales
+// by the level the phone sent -- the gradual control the phone's slider is
+// meant to be. Nothing else in the player ever wrote the flag for this
+// direction, so which of the two a link got depended on what bluealsa happened
+// to have stored for the device and on a transport being rebuilt by a codec
+// change, which gets the default again.
+//
+// Written whenever it is not already on, for every new receive PCM, and said in
+// the log either way: the logs this was worked from could not say which mode
+// the link had been in, and the next one will.
+//
+// True when the PCM answered, so the caller does not ask again for this one;
+// false when it was not there yet (a transport is rebuilt a moment after the
+// codec call returns) and the next round tries again.
+static bool rx_apply_soft_volume(const char *mac, const char *why) {
+	bool soft = false;
+	if (!btstack_pcm_softvolume_get(mac, true, &soft)) {
+		return false;
+	}
+
+	// The level and its mute bits, for the log. One byte a channel: the top bit
+	// is the mute switch, the other seven the level out of 127.
+	int word = 0;
+	char level[48] = "level unknown";
+	if (btstack_pcm_volume_get(mac, true, &word)) {
+		snprintf(level, sizeof(level), "level %d/127 left, %d/127 right%s", (word >> 8) & 0x7f, word & 0x7f,
+				 ((word >> 8) & 0x80) || (word & 0x80) ? ", muted" : "");
+	}
+
+	if (soft) {
+		fprintf(stderr, "bluetooth: RX stream on %s (%s): the phone's volume is applied here, %s\n", mac, why, level);
+		return true;
+	}
+	if (!btstack_pcm_softvolume_set(mac, true, true)) {
+		fprintf(stderr, "bluetooth: RX stream on %s (%s): the phone's volume would only mute at zero, and turning "
+						"the software volume on failed\n",
+				mac, why);
+		return false;
+	}
+	fprintf(stderr, "bluetooth: RX stream on %s (%s): the phone's volume would only have muted at zero; it is now "
+					"applied here, %s\n",
+			mac, why, level);
+	return true;
+}
+
 static void do_set_receiver_codec(const char *codec) {
 	char mac[BT_MAC_MAX];
 	if (!codec || !codec[0] || !btstack_audio_source(mac, sizeof(mac))) {
@@ -3513,6 +3573,21 @@ static void do_set_receiver_codec(const char *codec) {
 
 	bool done = btstack_select_codec_dir(mac, true, codec);
 	sleep_ms(600);
+
+	if (done) {
+		// The mode first, then the level: the new PCM is a new object with the
+		// daemon's defaults, and a level written into it is only heard if the
+		// decoder is the one applying it. The same single retry as the level's.
+		bool applied = rx_apply_soft_volume(mac, "after the codec change");
+		if (!applied) {
+			sleep_ms(400);
+			applied = rx_apply_soft_volume(mac, "after the codec change");
+		}
+		if (applied) {
+			g_rx_volume_generation = btstack_rx_pcm_generation();
+			g_rx_volume_misses = 0;
+		}
+	}
 
 	if (done && volume >= 0) {
 		// The PCM comes back a moment after the transport does, so one retry
@@ -3556,6 +3631,29 @@ static void do_read_receiver(void) {
 	g_rx_answered = requested;
 	g_serial++;
 	pthread_mutex_unlock(&lock);
+
+	// A receive PCM this has not seen yet -- the first one of a link, or one a
+	// sender's own codec change built -- gets the volume mode set. Asked here,
+	// where every new session of the capture thread already comes through, and
+	// kept apart from the answer above so the capture thread is never made to
+	// wait for it.
+	if (have) {
+		unsigned generation = btstack_rx_pcm_generation();
+		if (generation != g_rx_volume_generation) {
+			if (rx_apply_soft_volume(mac, "new stream")) {
+				g_rx_volume_generation = generation;
+				g_rx_volume_misses = 0;
+			} else if (++g_rx_volume_misses >= RX_VOLUME_TRIES) {
+				// A daemon that never answers about this is not asked for ever:
+				// this runs about once a second for as long as the mode is on.
+				fprintf(stderr, "bluetooth: RX stream on %s: its volume settings did not answer %d times; leaving "
+								"them as bluealsa has them\n",
+						mac, RX_VOLUME_TRIES);
+				g_rx_volume_generation = generation;
+				g_rx_volume_misses = 0;
+			}
+		}
+	}
 
 	char codecs[BT_MAX_CODECS][BT_CODEC_MAX];
 	char selected[BT_CODEC_MAX] = "";

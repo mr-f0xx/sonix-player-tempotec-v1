@@ -166,6 +166,15 @@ static lv_obj_t *history_pop(void) {
 	return screen_history[--screen_history_len];
 }
 
+bool switcher_history_contains(lv_obj_t *screen) {
+	for (int i = 0; i < screen_history_len; i++) {
+		if (screen_history[i] == screen) {
+			return true;
+		}
+	}
+	return false;
+}
+
 static void load_screen(lv_obj_t *target_screen);
 
 // Forgets the whole back-stack: the next chevron press lands on the main
