@@ -1,5 +1,39 @@
 #include "stickerlayout.h"
 
+int sticker_cap_offset_y(const lv_font_t *font) {
+	if (!font)
+		return 0;
+	int line = lv_font_get_line_height(font);
+	lv_font_glyph_dsc_t g;
+	if (lv_font_get_glyph_dsc(font, &g, 'H', 0) && g.box_h > 0) {
+		int cap_top = line - font->base_line - (int)g.box_h - (int)g.ofs_y;
+		return (line - (2 * cap_top + (int)g.box_h)) / 2;
+	}
+	return 0;
+}
+
+void sticker_align_label_cap(lv_obj_t *label, lv_align_t align, int x_ofs) {
+	if (!label)
+		return;
+	const lv_font_t *font = lv_obj_get_style_text_font(label, 0);
+	lv_obj_align(label, align, x_ofs, sticker_cap_offset_y(font));
+}
+
+static int pill_height_for(lv_obj_t *pill) {
+	int h = STICKER_PILL_H;
+	if (pill && lv_obj_get_child_count(pill) > 0) {
+		lv_obj_t *child = lv_obj_get_child(pill, 0);
+		const lv_font_t *font = child ? lv_obj_get_style_text_font(child, 0) : NULL;
+		lv_font_glyph_dsc_t g;
+		if (font && lv_font_get_glyph_dsc(font, &g, 'H', 0) && g.box_h > 0) {
+			int want = (int)g.box_h + 6;
+			if (want > h)
+				h = want;
+		}
+	}
+	return h;
+}
+
 sticker_box_t sticker_layout_box(int screen_w, int screen_h, int title_line_h, int artist_line_h,
 								 int album_line_h, int time_line_h) {
 	sticker_box_t b = {0};
@@ -16,15 +50,33 @@ sticker_box_t sticker_layout_box(int screen_w, int screen_h, int title_line_h, i
 	if (time_line_h < 1)
 		time_line_h = 1;
 
-	b.title_h = title_line_h + 2 * STICKER_TITLE_PAD_V;
-	b.artist_h = artist_line_h + 2 * STICKER_ARTIST_PAD_V;
+	/* CJK UI fonts (MiSans) carry internal vertical leading in line_height
+	 * already; floor the strips at their compact design heights without
+	 * double-padding tall line boxes, while still growing for Large text. */
+	int want_title = title_line_h + 2;
+	b.title_h = want_title > STICKER_TITLE_MIN_H ? want_title : STICKER_TITLE_MIN_H;
+	int want_artist = artist_line_h + 1;
+	b.artist_h = want_artist > STICKER_ARTIST_MIN_H ? want_artist : STICKER_ARTIST_MIN_H;
 	b.album_h = album_line_h;
 	b.seek_h = time_line_h > STICKER_SLIDER_H + 2 * STICKER_KNOB_PAD
 				   ? time_line_h
 				   : STICKER_SLIDER_H + 2 * STICKER_KNOB_PAD;
 
+	int album_lead = album_line_h > 16 ? album_line_h - 16 : 0;
+	if (album_lead > 2)
+		album_lead = 2;
+	int seek_lead = b.seek_h > 16 ? b.seek_h - 16 : 0;
+	if (seek_lead > 2)
+		seek_lead = 2;
+	int album_gap = STICKER_ALBUM_GAP - album_lead;
+	if (album_gap < 1)
+		album_gap = 1;
+	int row_gap = STICKER_ROW_GAP - seek_lead;
+	if (row_gap < 1)
+		row_gap = 1;
+
 	int deck_h = STICKER_DECK_SLACK + b.title_h + STICKER_STRIP_GAP + b.artist_h +
-				 STICKER_ALBUM_GAP + b.album_h + STICKER_ROW_GAP + b.seek_h + STICKER_ROW_GAP +
+				 album_gap + b.album_h + row_gap + b.seek_h + row_gap +
 				 STICKER_PLAY_BTN + STICKER_PAD_BOTTOM;
 	if (deck_h > screen_h - 32)
 		deck_h = screen_h > 32 ? screen_h - 32 : 0;
@@ -45,8 +97,8 @@ sticker_box_t sticker_layout_box(int screen_w, int screen_h, int title_line_h, i
 	b.artist_x = (screen_w - b.artist_w) / 2;
 	b.artist_y = b.title_y + b.title_h + STICKER_STRIP_GAP;
 
-	b.album_y = b.artist_y + b.artist_h + STICKER_ALBUM_GAP;
-	b.seek_y = b.album_y + b.album_h + STICKER_ROW_GAP;
+	b.album_y = b.artist_y + b.artist_h + album_gap;
+	b.seek_y = b.album_y + b.album_h + row_gap;
 	b.slider_w = screen_w - 2 * STICKER_SEEK_SIDE;
 	if (b.slider_w < 16)
 		b.slider_w = screen_w > 16 ? 16 : screen_w;
@@ -55,8 +107,8 @@ sticker_box_t sticker_layout_box(int screen_w, int screen_h, int title_line_h, i
 	if (b.controls_y < 0)
 		b.controls_y = 0;
 
-	/* Reserve room above and below the sleeve for the rotated neon frame and
-	 * corner pills so they never collide with the top edge or the title strip. */
+	/* Reserve room above, below and beside the sleeve for the rotated neon
+	 * frame, corner pills and right-hand back chevron. */
 	int top = STICKER_TOP_MIN;
 	int gap = STICKER_ART_GAP;
 	if (b.deck_y < top + gap + 16) {
@@ -148,12 +200,12 @@ static lv_obj_t *frame_ring(lv_obj_t *parent, uint32_t hex, int radius, int tilt
 
 static lv_obj_t *corner_pill(lv_obj_t *parent, uint32_t hex, int tilt) {
 	lv_obj_t *pill = plain_box(parent);
-	lv_obj_set_size(pill, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+	lv_obj_set_size(pill, LV_SIZE_CONTENT, STICKER_PILL_H);
 	lv_obj_set_style_radius(pill, LV_RADIUS_CIRCLE, 0);
 	lv_obj_set_style_bg_color(pill, lv_color_hex(hex), 0);
 	lv_obj_set_style_bg_opa(pill, LV_OPA_COVER, 0);
 	lv_obj_set_style_pad_hor(pill, 7, 0);
-	lv_obj_set_style_pad_ver(pill, 1, 0);
+	lv_obj_set_style_pad_ver(pill, 0, 0);
 	lv_obj_set_style_transform_pivot_x(pill, lv_pct(50), 0);
 	lv_obj_set_style_transform_pivot_y(pill, lv_pct(50), 0);
 	lv_obj_set_style_transform_rotation(pill, tilt, 0);
@@ -262,6 +314,7 @@ void sticker_view_apply(sticker_view_t *v, const sticker_box_t *b, int screen_w)
 		lv_obj_move_foreground(v->spindle);
 	}
 	if (v->queue_pill) {
+		lv_obj_set_size(v->queue_pill, LV_SIZE_CONTENT, pill_height_for(v->queue_pill));
 		int qx = b->art_x - 24;
 		if (qx < 4)
 			qx = 4;
@@ -272,7 +325,10 @@ void sticker_view_apply(sticker_view_t *v, const sticker_box_t *b, int screen_w)
 		lv_obj_move_foreground(v->queue_pill);
 	}
 	if (v->format_pill) {
+		lv_obj_set_size(v->format_pill, LV_SIZE_CONTENT, pill_height_for(v->format_pill));
 		int right_in = screen_w - (b->art_x + b->art_side + 12);
+		if (screen_w >= 240 && right_in < 38)
+			right_in = 38;
 		if (right_in < 4)
 			right_in = 4;
 		lv_obj_align(v->format_pill, LV_ALIGN_TOP_RIGHT, -right_in, b->art_y + 7);
@@ -300,9 +356,11 @@ void sticker_view_apply(sticker_view_t *v, const sticker_box_t *b, int screen_w)
 		int aw = screen_w - 2 * STICKER_TITLE_MARGIN;
 		if (aw < 1)
 			aw = 1;
+		const lv_font_t *af = lv_obj_get_style_text_font(v->album_label, 0);
 		lv_obj_set_width(v->album_label, aw);
 		lv_obj_set_height(v->album_label, b->album_h);
-		lv_obj_align(v->album_label, LV_ALIGN_TOP_MID, 0, b->deck_y + b->album_y);
+		lv_obj_align(v->album_label, LV_ALIGN_TOP_MID, 0,
+					 b->deck_y + b->album_y + sticker_cap_offset_y(af));
 	}
 	if (v->seek_row) {
 		lv_obj_set_size(v->seek_row, screen_w, b->seek_h);

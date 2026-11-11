@@ -429,14 +429,15 @@ static int player_screen_height, player_status_height;
 static bool player_status_bar;
 static bool player_status_color;
 static bool layout_aam_now;		  // and for the sixth: the sleeve over the page, the media controls traded for it
+static bool layout_sticker_now;
 static int player_content_top(void) {
-	return player_status_bar && !layout_aam_now ? player_status_height : 0;
+	return (player_status_bar || layout_sticker_now) && !layout_aam_now ? player_status_height : 0;
 }
 // Re-evaluate the shared bar whenever its player background changes.
 static void player_status_background_apply(void);
+static void sticker_pills_sync(void);
 static bool layout_vinyl_now;
 static vinyl_record_t vinyl_record;
-static bool layout_sticker_now;
 static sticker_view_t sticker_view;
 static bool sticker_up;
 static int sticker_slider_index;
@@ -477,7 +478,7 @@ static uint32_t album_tone; // the sleeve's colour, 0 when there is no sleeve
 // Only the status icons take this colour. A missing cover must not keep
 // the colour belonging to the last track.
 static void player_status_color_apply(void) {
-	bool show = sheet_open && (player_status_bar || layout_aam_now) && player_status_color &&
+	bool show = sheet_open && (player_status_bar || layout_aam_now || layout_sticker_now) && player_status_color &&
 		current_cover.pixels && album_tone;
 	topbar_set_player_color(show, lv_color_hex(album_tone));
 }
@@ -729,6 +730,7 @@ static void apply_live_mode(bool live) {
 		lv_image_set_src(cover_placeholder_icon, live ? &icon_radio_player
 									: (audiobook_mode ? &icon_book_headphones : &icon_music_note));
 	}
+	sticker_pills_sync();
 }
 
 // Dresses the player for a book or for a track. Cheap and idempotent, like
@@ -833,6 +835,7 @@ static void apply_audiobook_mode(bool book, bool podcast) {
 		const lv_image_dsc_t *mark = book ? &icon_book_headphones : podcast ? &icon_podcast_cover : &icon_music_note;
 		lv_image_set_src(cover_placeholder_icon, mark);
 	}
+	sticker_pills_sync();
 }
 
 // ---------------------------------------------------------------------------
@@ -959,19 +962,24 @@ static void paint_play_button(void) {
 	}
 	if (layout_sticker_now) {
 		playbutton_paint(play_btn, play_btn_icon, true, lv_color_hex(STICKER_PINK_HEX), true, false);
+		lv_obj_set_style_pad_all(play_btn, 0, 0);
+		lv_obj_set_style_bg_color(play_btn, lv_color_hex(STICKER_PINK_HEX), 0);
+		lv_obj_set_style_bg_opa(play_btn, LV_OPA_COVER, 0);
 		lv_obj_set_style_border_width(play_btn, 2, 0);
 		lv_obj_set_style_border_color(play_btn, lv_color_hex(STICKER_YELLOW_HEX), 0);
 		lv_obj_set_style_border_opa(play_btn, LV_OPA_COVER, 0);
 		lv_obj_set_style_image_recolor(play_btn_icon, lv_color_white(), 0);
 		lv_obj_set_style_image_recolor_opa(play_btn_icon, LV_OPA_COVER, 0);
 		if (sticker_view.play_ring) {
-			int w = (int)lv_obj_get_width(play_btn);
-			int h = (int)lv_obj_get_height(play_btn);
-			if (w > 10 && h > 10)
-				lv_obj_set_size(sticker_view.play_ring, w - 8, h - 8);
+			int side = STICKER_PLAY_BTN - 2 * STICKER_PLAY_RING_PAD;
+			if (side < 8)
+				side = 8;
+			lv_obj_set_size(sticker_view.play_ring, side, side);
 			lv_obj_center(sticker_view.play_ring);
 			lv_obj_set_hidden(sticker_view.play_ring, false);
 		}
+		lv_obj_center(play_btn_icon);
+		lv_obj_move_foreground(play_btn_icon);
 		return;
 	}
 	bool over_artwork = layout_vinyl_now || (chrome_over_cover && !layout_poster_now);
@@ -1372,14 +1380,18 @@ static void set_over_cover(bool on) {
 		lv_color_t cyan = lv_color_hex(STICKER_CYAN_HEX);
 		lv_obj_t *const dark_labels[] = {song_title_label, song_artist_label, format_label, queue_position_label};
 		for (size_t i = 0; i < sizeof(dark_labels) / sizeof(dark_labels[0]); i++) {
-			if (dark_labels[i])
+			if (dark_labels[i]) {
 				lv_obj_set_style_text_color(dark_labels[i], ink, 0);
+				lv_obj_set_style_text_opa(dark_labels[i], LV_OPA_COVER, 0);
+			}
 		}
 		lv_obj_t *const cyan_labels[] = {elapsed_label, remaining_label, sticker_view.album_label};
 		for (size_t i = 0; i < sizeof(cyan_labels) / sizeof(cyan_labels[0]); i++) {
 			if (cyan_labels[i])
 				lv_obj_set_style_text_color(cyan_labels[i], cyan, 0);
 		}
+		if (speed_btn_label)
+			lv_obj_set_style_text_color(speed_btn_label, lv_color_white(), 0);
 		for (size_t i = 0; i < sizeof(icon_objs) / sizeof(icon_objs[0]); i++) {
 			if (icon_objs[i]) {
 				lv_obj_set_style_image_recolor(icon_objs[i], lv_color_white(), 0);
@@ -1598,7 +1610,7 @@ static void paint_overflow_tint(void) {
 // glyph, the repeat/shuffle mode and the played stretch of the progress bar.
 // The ellipsis with them, whenever the accent is the sleeve's.
 static void paint_transport_tint(void) {
-	bool tinted = cover_tint && album_tone;
+	bool tinted = !layout_sticker_now && cover_tint && album_tone;
 	back_btn_cover_tint(tinted, tinted ? cover_mark() : theme()->accent);
 	paint_play_button();
 	if (repeat_btn_icon) {
@@ -1823,7 +1835,7 @@ static bool backdrop_blur_wanted(void) { return !theme_is_oled(); }
 // The bar follows the ground of the chosen player layout independently of
 // whether album-colored icons are enabled.
 static void player_status_background_apply(void) {
-	bool visible = sheet_open && (player_status_bar || layout_aam_now);
+	bool visible = sheet_open && (player_status_bar || layout_aam_now || layout_sticker_now);
 	bool layout_blur = visible && !layout_sticker_now && statusbarlayout_uses_blur(
 		layout_poster_now, layout_vinyl_now, layout_studio_now, layout_immersive_now,
 		theme_is_oled(), backdrop_is_full, backdrop_is_band);
@@ -2307,6 +2319,12 @@ static void lyrics_look(bool on) {
 		// or not.
 		if (layout_poster_now) {
 			lv_obj_set_style_bg_opa(player_menu, LV_OPA_COVER, 0);
+		}
+		if (layout_vinyl_now) {
+			vinyl_ground_apply(player_screen, player_menu, studio_bg);
+		}
+		if (layout_sticker_now) {
+			sticker_ground_apply(player_screen, player_menu, studio_bg);
 		}
 	}
 	lyrics_look_on = on;
@@ -4650,7 +4668,7 @@ static void apply_layout(void) {
 	// can reach the top edge. Only while the sheet is actually up: the setting
 	// can be changed from a page the player is not on.
 	if (sheet_open) {
-		topbar_set_hidden(!(layout_aam_now || player_status_bar));
+		topbar_set_hidden(!(layout_aam_now || layout_sticker_now || player_status_bar));
 		player_status_background_apply();
 		player_status_color_apply();
 		back_btn_player_top_inset(layout_aam_now ? aam_chevron_inset() : player_content_top());
@@ -7010,7 +7028,7 @@ void player_sheet_open(bool animate) {
 	// saying which way the hardware key will go, and its row is where the
 	// chevron and the format line are aligned from. The chevron moves under
 	// it for the same reason (see apply_layout).
-	topbar_set_hidden(!(layout_aam_now || player_status_bar));
+	topbar_set_hidden(!(layout_aam_now || layout_sticker_now || player_status_bar));
 	player_status_background_apply();
 	player_status_color_apply();
 	back_btn_player_top_inset(layout_aam_now ? aam_chevron_inset() : player_content_top());
@@ -7350,6 +7368,12 @@ static void sticker_pills_sync(void) {
 		const char *t = lv_label_get_text(sticker_view.album_label);
 		lv_obj_set_hidden(sticker_view.album_label, !t || !t[0]);
 	}
+	if (sticker_view.repeat_disc) {
+		lv_obj_set_hidden(sticker_view.repeat_disc, !repeat_btn_obj || lv_obj_is_hidden(repeat_btn_obj));
+	}
+	if (sticker_view.fav_disc) {
+		lv_obj_set_hidden(sticker_view.fav_disc, !fav_btn_obj || lv_obj_is_hidden(fav_btn_obj));
+	}
 }
 
 static void sticker_seek_fit(void) {
@@ -7357,6 +7381,10 @@ static void sticker_seek_fit(void) {
 	sticker_box_t b = sticker_box();
 	lv_obj_set_size(progress_slider, b.slider_w, STICKER_SLIDER_H);
 	lv_obj_align(progress_slider, LV_ALIGN_CENTER, 0, 0);
+	if (elapsed_label && lv_obj_get_parent(elapsed_label) == sticker_view.seek_row)
+		sticker_align_label_cap(elapsed_label, LV_ALIGN_LEFT_MID, STICKER_SEEK_PAD_H);
+	if (remaining_label && lv_obj_get_parent(remaining_label) == sticker_view.seek_row)
+		sticker_align_label_cap(remaining_label, LV_ALIGN_RIGHT_MID, -STICKER_SEEK_PAD_H);
 }
 
 static void sticker_album_sync(const device_state_t *state) {
@@ -7373,6 +7401,8 @@ static void sticker_paint(void) {
 	if (!sticker_view.tilted_cyan || !cover_art_group) return;
 	sticker_box_t b = sticker_box();
 	int screen_w = (int)lv_obj_get_width(player_screen);
+	if (sticker_view.album_label)
+		lv_obj_set_style_text_font(sticker_view.album_label, bp_format_label_font(), 0);
 	if (cover_panel)
 		sticker_place_sleeve(cover_panel, cover_art_group, &b, screen_w);
 	sticker_view_apply(&sticker_view, &b, screen_w);
@@ -7383,8 +7413,27 @@ static void sticker_paint(void) {
 	if (cover_img)
 		lv_obj_set_style_radius(cover_img, STICKER_ART_RADIUS - STICKER_ART_BORDER, 0);
 	lv_obj_set_style_clip_corner(cover_art_group, true, 0);
-	if (sticker_view.album_label)
-		lv_obj_set_style_text_font(sticker_view.album_label, bp_format_label_font(), 0);
+	if (sticker_up) {
+		int tw = b.title_w - 12;
+		if (tw < 8) tw = 8;
+		int aw = b.artist_w - 12;
+		if (aw < 8) aw = 8;
+		if (song_title_label && lv_obj_get_parent(song_title_label) == sticker_view.title_strip) {
+			lv_obj_set_width(song_title_label, tw);
+			lv_obj_set_style_max_width(song_title_label, tw, 0);
+			sticker_align_label_cap(song_title_label, LV_ALIGN_CENTER, 0);
+		}
+		if (song_artist_label && lv_obj_get_parent(song_artist_label) == sticker_view.artist_strip) {
+			lv_obj_set_width(song_artist_label, aw);
+			lv_obj_set_style_max_width(song_artist_label, aw, 0);
+			sticker_align_label_cap(song_artist_label, LV_ALIGN_CENTER, 0);
+		}
+		if (queue_position_label && lv_obj_get_parent(queue_position_label) == sticker_view.queue_pill)
+			sticker_align_label_cap(queue_position_label, LV_ALIGN_CENTER, 0);
+		if (format_label && lv_obj_get_parent(format_label) == sticker_view.format_pill)
+			sticker_align_label_cap(format_label, LV_ALIGN_CENTER, 0);
+		sticker_seek_fit();
+	}
 }
 
 static void sticker_put(void) {
@@ -7392,43 +7441,68 @@ static void sticker_put(void) {
 	sticker_up = true;
 	sticker_box_t b = sticker_box();
 	int screen_w = (int)lv_obj_get_width(player_screen);
+	const bool compact = bp_is_tempotec_v1();
 	menu_height = b.deck_h;
 	cover_box_h = b.deck_y;
 	cover_art_w = cover_art_h = b.art_side;
 	lv_obj_set_size(player_menu, cover_box_w, menu_height);
+	/* Hold controls_row at the bottom of player_menu rather than letting
+	 * LV_FLEX_ALIGN_START park it behind the tilted title/artist strips. */
+	lv_obj_set_flex_align(player_menu, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+	lv_obj_set_style_pad_top(player_menu, 0, 0);
+	lv_obj_set_style_pad_bottom(player_menu, STICKER_PAD_BOTTOM, 0);
+	lv_obj_set_style_pad_gap(player_menu, 0, 0);
+	if (play_btn) {
+		lv_obj_set_size(play_btn, STICKER_PLAY_BTN, STICKER_PLAY_BTN);
+		if (play_btn_icon) lv_obj_center(play_btn_icon);
+	}
+	if (prev_btn_obj) {
+		lv_obj_set_size(prev_btn_obj, compact ? COMPACT_SKIP_BTN : 76, STICKER_PLAY_BTN);
+		if (prev_icon) lv_obj_center(prev_icon);
+	}
+	if (next_btn_obj) {
+		lv_obj_set_size(next_btn_obj, compact ? COMPACT_SKIP_BTN : 76, STICKER_PLAY_BTN);
+		if (next_icon) lv_obj_center(next_icon);
+	}
+
 	sticker_place_sleeve(cover_panel, cover_art_group, &b, screen_w);
 	sticker_ground_apply(player_screen, player_menu, studio_bg);
 	sticker_view_set_hidden(&sticker_view, false);
 
 	if (song_info_obj) lv_obj_set_hidden(song_info_obj, true);
+	if (wave_box) lv_obj_set_hidden(wave_box, true);
 	if (below_slider_obj) lv_obj_set_hidden(below_slider_obj, true);
 
 	if (song_title_label && sticker_view.title_strip) {
+		int tw = b.title_w - 12;
+		if (tw < 8) tw = 8;
 		lv_obj_set_parent(song_title_label, sticker_view.title_strip);
-		lv_obj_set_width(song_title_label, b.title_w - 8);
-		lv_obj_set_style_max_width(song_title_label, b.title_w - 8, 0);
+		lv_obj_set_width(song_title_label, tw);
+		lv_obj_set_style_max_width(song_title_label, tw, 0);
 		lv_obj_set_style_text_align(song_title_label, LV_TEXT_ALIGN_CENTER, 0);
-		lv_obj_center(song_title_label);
+		sticker_align_label_cap(song_title_label, LV_ALIGN_CENTER, 0);
 	}
 	if (song_artist_label && sticker_view.artist_strip) {
+		int aw = b.artist_w - 12;
+		if (aw < 8) aw = 8;
 		lv_obj_set_parent(song_artist_label, sticker_view.artist_strip);
-		lv_obj_set_width(song_artist_label, b.artist_w - 8);
-		lv_obj_set_style_max_width(song_artist_label, b.artist_w - 8, 0);
+		lv_obj_set_width(song_artist_label, aw);
+		lv_obj_set_style_max_width(song_artist_label, aw, 0);
 		lv_obj_set_style_text_align(song_artist_label, LV_TEXT_ALIGN_CENTER, 0);
-		lv_obj_center(song_artist_label);
+		sticker_align_label_cap(song_artist_label, LV_ALIGN_CENTER, 0);
 	}
 	if (queue_position_label && sticker_view.queue_pill) {
 		lv_obj_set_parent(queue_position_label, sticker_view.queue_pill);
 		lv_obj_set_width(queue_position_label, LV_SIZE_CONTENT);
 		lv_obj_set_style_max_width(queue_position_label, 72, 0);
-		lv_obj_center(queue_position_label);
+		sticker_align_label_cap(queue_position_label, LV_ALIGN_CENTER, 0);
 	}
 	if (format_label && sticker_view.format_pill) {
 		lv_obj_set_parent(format_label, sticker_view.format_pill);
 		lv_obj_set_width(format_label, LV_SIZE_CONTENT);
 		lv_obj_set_style_max_width(format_label, 108, 0);
 		lv_obj_set_hidden(format_label, false);
-		lv_obj_center(format_label);
+		sticker_align_label_cap(format_label, LV_ALIGN_CENTER, 0);
 	}
 	if (repeat_btn_obj && sticker_view.repeat_disc) {
 		lv_obj_set_parent(repeat_btn_obj, sticker_view.repeat_disc);
@@ -7441,11 +7515,11 @@ static void sticker_put(void) {
 	if (sticker_view.seek_row) {
 		if (elapsed_label) {
 			lv_obj_set_parent(elapsed_label, sticker_view.seek_row);
-			lv_obj_align(elapsed_label, LV_ALIGN_LEFT_MID, STICKER_SEEK_PAD_H, 0);
+			sticker_align_label_cap(elapsed_label, LV_ALIGN_LEFT_MID, STICKER_SEEK_PAD_H);
 		}
 		if (remaining_label) {
 			lv_obj_set_parent(remaining_label, sticker_view.seek_row);
-			lv_obj_align(remaining_label, LV_ALIGN_RIGHT_MID, -STICKER_SEEK_PAD_H, 0);
+			sticker_align_label_cap(remaining_label, LV_ALIGN_RIGHT_MID, -STICKER_SEEK_PAD_H);
 		}
 		if (progress_slider) {
 			if (lv_obj_get_parent(progress_slider) == player_menu)
@@ -7474,6 +7548,7 @@ static bool sticker_take_back(void) {
 	if (!sticker_up) return false;
 	sticker_up = false;
 	sticker_view_set_hidden(&sticker_view, true);
+	const bool compact = bp_is_tempotec_v1();
 
 	if (cover_art_group) {
 		lv_obj_set_style_border_width(cover_art_group, 0, 0);
@@ -7483,6 +7558,12 @@ static bool sticker_take_back(void) {
 	if (player_menu) {
 		lv_obj_remove_local_style_prop(player_menu, LV_STYLE_BG_OPA, 0);
 		lv_obj_remove_local_style_prop(player_menu, LV_STYLE_BG_IMAGE_OPA, 0);
+		lv_obj_set_flex_align(player_menu, backdrop_full ? LV_FLEX_ALIGN_START : LV_FLEX_ALIGN_CENTER,
+							  LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+		lv_obj_set_style_pad_ver(player_menu, menu_pad_ver, 0);
+		if (backdrop_full)
+			lv_obj_set_style_pad_bottom(player_menu, COMPACT_DECK_PAD_BOTTOM, 0);
+		lv_obj_set_style_pad_gap(player_menu, menu_gap, 0);
 	}
 	if (player_screen) {
 		lv_obj_remove_local_style_prop(player_screen, LV_STYLE_BG_COLOR, 0);
@@ -7495,6 +7576,8 @@ static bool sticker_take_back(void) {
 		lv_obj_move_to_index(song_title_label, 0);
 		lv_obj_set_width(song_title_label, lv_pct(100));
 		lv_obj_set_style_max_width(song_title_label, LV_COORD_MAX, 0);
+		lv_obj_set_pos(song_title_label, 0, 0);
+		lv_obj_remove_local_style_prop(song_title_label, LV_STYLE_TEXT_OPA, 0);
 		lv_obj_remove_local_style_prop(song_title_label, LV_STYLE_TEXT_ALIGN, 0);
 		lv_obj_remove_local_style_prop(song_title_label, LV_STYLE_ALIGN, 0);
 	}
@@ -7503,17 +7586,22 @@ static bool sticker_take_back(void) {
 		lv_obj_move_to_index(song_artist_label, 1);
 		lv_obj_set_width(song_artist_label, lv_pct(100));
 		lv_obj_set_style_max_width(song_artist_label, LV_COORD_MAX, 0);
+		lv_obj_set_pos(song_artist_label, 0, 0);
+		lv_obj_remove_local_style_prop(song_artist_label, LV_STYLE_TEXT_OPA, 0);
 		lv_obj_remove_local_style_prop(song_artist_label, LV_STYLE_TEXT_ALIGN, 0);
 		lv_obj_remove_local_style_prop(song_artist_label, LV_STYLE_ALIGN, 0);
 	}
 	if (fav_btn_obj && song_side_obj) {
 		lv_obj_set_parent(fav_btn_obj, song_side_obj);
 		lv_obj_move_to_index(fav_btn_obj, 0);
+		lv_obj_set_pos(fav_btn_obj, 0, 0);
 		lv_obj_remove_local_style_prop(fav_btn_obj, LV_STYLE_ALIGN, 0);
 	}
 	if (format_label && song_side_obj) {
 		lv_obj_set_parent(format_label, song_side_obj);
 		lv_obj_move_to_index(format_label, 1);
+		lv_obj_set_pos(format_label, 0, 0);
+		lv_obj_remove_local_style_prop(format_label, LV_STYLE_TEXT_OPA, 0);
 		lv_obj_remove_local_style_prop(format_label, LV_STYLE_WIDTH, 0);
 		lv_obj_remove_local_style_prop(format_label, LV_STYLE_MAX_WIDTH, 0);
 		lv_obj_remove_local_style_prop(format_label, LV_STYLE_ALIGN, 0);
@@ -7539,6 +7627,7 @@ static bool sticker_take_back(void) {
 		if (queue_position_label) {
 			lv_obj_set_parent(queue_position_label, below_slider_obj);
 			lv_obj_move_to_index(queue_position_label, 2);
+			lv_obj_remove_local_style_prop(queue_position_label, LV_STYLE_TEXT_OPA, 0);
 			lv_obj_remove_local_style_prop(queue_position_label, LV_STYLE_WIDTH, 0);
 			lv_obj_remove_local_style_prop(queue_position_label, LV_STYLE_MAX_WIDTH, 0);
 			lv_obj_set_align(queue_position_label, LV_ALIGN_CENTER);
@@ -7556,8 +7645,24 @@ static bool sticker_take_back(void) {
 		aam_slider_style(false);
 	}
 	if (play_btn) {
+		lv_obj_set_size(play_btn, compact ? COMPACT_PLAY_BTN : 84, compact ? COMPACT_PLAY_BTN : 84);
 		lv_obj_set_style_border_width(play_btn, 0, 0);
+		lv_obj_remove_local_style_prop(play_btn, LV_STYLE_PAD_TOP, 0);
+		lv_obj_remove_local_style_prop(play_btn, LV_STYLE_PAD_BOTTOM, 0);
+		lv_obj_remove_local_style_prop(play_btn, LV_STYLE_PAD_LEFT, 0);
+		lv_obj_remove_local_style_prop(play_btn, LV_STYLE_PAD_RIGHT, 0);
+		if (play_btn_icon) lv_obj_center(play_btn_icon);
 	}
+	if (prev_btn_obj) {
+		lv_obj_set_size(prev_btn_obj, compact ? COMPACT_SKIP_BTN : 76, compact ? COMPACT_SKIP_BTN : 76);
+		if (prev_icon) lv_obj_center(prev_icon);
+	}
+	if (next_btn_obj) {
+		lv_obj_set_size(next_btn_obj, compact ? COMPACT_SKIP_BTN : 76, compact ? COMPACT_SKIP_BTN : 76);
+		if (next_icon) lv_obj_center(next_icon);
+	}
+	if (speed_btn_label)
+		lv_obj_remove_local_style_prop(speed_btn_label, LV_STYLE_TEXT_COLOR, 0);
 	set_over_cover(chrome_over_cover);
 	paint_progress_tint();
 	paint_play_button();

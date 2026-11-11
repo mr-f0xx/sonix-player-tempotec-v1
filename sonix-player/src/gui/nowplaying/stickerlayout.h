@@ -15,7 +15,7 @@
 #define STICKER_YELLOW_HEX   0xffe600
 #define STICKER_GOLD_HEX     0xf5d400
 #define STICKER_CYAN_HEX     0x18e0f8
-#define STICKER_TRACK_HEX    0x392950
+#define STICKER_TRACK_HEX    0x2a1b42
 #define STICKER_RING_HEX     0xffdff3
 #define STICKER_INK_DARK_HEX 0x080510
 
@@ -25,6 +25,7 @@
 #define STICKER_FRAME_OUTSET 3
 #define STICKER_SPINDLE_PCT  16
 #define STICKER_CORNER_DISC  24
+#define STICKER_PILL_H       18
 #define STICKER_ICON_SCALE   150
 
 #define STICKER_FRAME_TILT   -60 /* tenths of a degree */
@@ -35,18 +36,18 @@
 
 #define STICKER_TOP_MIN      6
 #define STICKER_ART_GAP      6
-#define STICKER_SIDE_MARGIN  38
+#define STICKER_SIDE_MARGIN  48
 
 #define STICKER_TITLE_MARGIN  6
 #define STICKER_ARTIST_MARGIN 26
-#define STICKER_TITLE_PAD_V   3
-#define STICKER_ARTIST_PAD_V  2
+#define STICKER_TITLE_MIN_H   22
+#define STICKER_ARTIST_MIN_H  20
 #define STICKER_STRIP_RADIUS  2
 #define STICKER_STRIP_GAP     4
 #define STICKER_ALBUM_GAP     3
 
 #define STICKER_SEEK_PAD_H    8
-#define STICKER_SEEK_SIDE     38
+#define STICKER_SEEK_SIDE     44
 #define STICKER_SLIDER_H      5
 #define STICKER_KNOB_PAD      3
 #define STICKER_ROW_GAP       3
@@ -69,6 +70,9 @@ typedef struct {
 
 sticker_box_t sticker_layout_box(int screen_w, int screen_h, int title_line_h, int artist_line_h,
 								 int album_line_h, int time_line_h);
+
+int sticker_cap_offset_y(const lv_font_t *font);
+void sticker_align_label_cap(lv_obj_t *label, lv_align_t align, int x_ofs);
 
 typedef struct {
 	lv_obj_t *tilted_cyan;
