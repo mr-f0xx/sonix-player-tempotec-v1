@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include "src/gui/shell/statusbarstyle.h"
 #include "src/gui/nowplaying/statusbarlayout.h"
+#include "src/gui/nowplaying/stickerlayout.h"
 
 lv_font_t font_ui_14;
 
@@ -39,16 +40,18 @@ int main(void) {
 	lv_obj_add_style(bar, &theme, 0);
 	for (size_t i = 0; i < sizeof(pixels) / sizeof(pixels[0]); i++) pixels[i] = 0xf800;
 	// Standard/Waveform/Album Art Max use the full backdrop except in OLED;
-	// Studio and Immersive keep their blur even in OLED. Poster and Vinyl use
-	// their solid grounds. A not-yet-loaded or mismatched image is not used.
-	assert(statusbarlayout_uses_blur(false, false, false, false, false, true, false));
-	assert(!statusbarlayout_uses_blur(false, false, false, false, true, true, false));
-	assert(statusbarlayout_uses_blur(false, false, true, false, true, true, false));
-	assert(statusbarlayout_uses_blur(false, false, false, true, true, false, true));
-	assert(!statusbarlayout_uses_blur(false, false, false, true, false, true, false));
-	assert(!statusbarlayout_uses_blur(true, false, false, false, false, true, true));
-	assert(!statusbarlayout_uses_blur(false, true, false, false, false, true, true));
-	assert(!statusbarlayout_uses_blur(false, false, false, false, false, false, false));
+	// Studio and Immersive keep their blur even in OLED. Poster, Vinyl and
+	// Sticker use their solid grounds. A not-yet-loaded or mismatched image is
+	// not used.
+	assert(statusbarlayout_uses_blur(false, false, false, false, false, false, true, false));
+	assert(!statusbarlayout_uses_blur(false, false, false, false, false, true, true, false));
+	assert(statusbarlayout_uses_blur(false, false, false, true, false, true, true, false));
+	assert(statusbarlayout_uses_blur(false, false, false, false, true, true, false, true));
+	assert(!statusbarlayout_uses_blur(false, false, false, false, true, false, true, false));
+	assert(!statusbarlayout_uses_blur(true, false, false, false, false, false, true, true));
+	assert(!statusbarlayout_uses_blur(false, true, false, false, false, false, true, true));
+	assert(!statusbarlayout_uses_blur(false, false, true, false, false, false, true, true));
+	assert(!statusbarlayout_uses_blur(false, false, false, false, false, false, false, false));
 	uint32_t plain = sample(bar);
 	statusbarstyle_frost(bar, &blur);
 	uint32_t frosted = sample(bar);
@@ -77,6 +80,17 @@ int main(void) {
 	lv_obj_set_style_bg_color(fill, lv_color_hex(0xff0000), 0);
 	assert(lv_color_to_u32(lv_obj_get_style_bg_color(fill, 0)) == lv_color_to_u32(ink));
 	statusbarstyle_fill(fill, false, ink);
+	assert(lv_color_to_u32(lv_obj_get_style_bg_color(fill, 0)) == lv_color_to_u32(lv_color_hex(0xff0000)));
+	// Sticker layout status bar palette tints icons and battery fill with exact
+	// STICKER_CYAN_HEX (unmixed) and restores normal colors when leaving Sticker.
+	lv_color_t sticker_cyan = lv_color_hex(STICKER_CYAN_HEX);
+	statusbarstyle_icon(icon, true, sticker_cyan);
+	statusbarstyle_fill(fill, true, sticker_cyan);
+	assert(lv_color_to_u32(lv_obj_get_style_image_recolor(icon, 0)) == lv_color_to_u32(sticker_cyan));
+	assert(lv_color_to_u32(lv_obj_get_style_bg_color(fill, 0)) == lv_color_to_u32(sticker_cyan));
+	statusbarstyle_icon(icon, false, sticker_cyan);
+	statusbarstyle_fill(fill, false, sticker_cyan);
+	assert(lv_color_to_u32(lv_obj_get_style_image_recolor(icon, 0)) == lv_color_to_u32(lv_color_hex(0x0000ff)));
 	assert(lv_color_to_u32(lv_obj_get_style_bg_color(fill, 0)) == lv_color_to_u32(lv_color_hex(0xff0000)));
 	// Icon recoloring does not change the bar's theme background, and can be
 	// enabled while the layout background uses the blurred artwork.
