@@ -2340,13 +2340,15 @@ static void lyrics_look(bool on) {
 	// Immersive's frost likewise: down while the words' own blur is up, back
 	// at the foot of the picture when they go.
 	immersive_blur_apply();
-	// The words are white over a blurred sleeve, and in the theme's own
-	// colour over the page's own background where there is no picture.
-	lv_color_t ink = lyrics_backdrop() ? lv_color_white() : theme()->text_primary;
+	// The words are white over a blurred sleeve or a layout with a fixed dark
+	// ground (Vinyl, Sticker), and in the theme's own colour over the page's
+	// own background where there is no picture.
+	bool dark_ground = lyrics_backdrop() != NULL || layout_vinyl_now || layout_sticker_now;
+	lv_color_t ink = dark_ground ? lv_color_white() : theme()->text_primary;
 	lv_obj_set_style_text_color(lyrics_view, ink, 0);
 	lv_obj_set_style_text_color(lyrics_note, ink, 0);
 	lv_obj_set_style_text_color(lyrics_head_title, ink, 0);
-	lv_obj_set_style_text_color(lyrics_head_artist, lyrics_backdrop() ? lv_color_make(200, 200, 200) : theme()->text_secondary, 0);
+	lv_obj_set_style_text_color(lyrics_head_artist, dark_ground ? lv_color_make(200, 200, 200) : theme()->text_secondary, 0);
 	if (lyrics_find_icon) {
 		lv_obj_set_style_image_recolor(lyrics_find_icon, ink, 0);
 	}
@@ -2425,11 +2427,15 @@ static void lyrics_find_sync(bool full) {
 	// Album Art Max already fills its header row (format, repeat, menu, star);
 	// park the search mark just inside the top-right corner of the lyrics box.
 	int btn_y = layout_aam_now ? lv_obj_get_y(cover_panel) + 2 : (back_btn_centre_y() - player_content_top()) - LYRICS_FIND_BTN / 2;
-	lv_obj_set_pos(lyrics_find_btn, right - STUDIO_INFO_MARGIN - beside - LYRICS_FIND_BTN, btn_y);
+	// The Sticker arrangement puts the back chevron on the right, so the
+	// search mark takes the left corner instead of sitting under it.
+	int btn_x = layout_sticker_now ? STUDIO_INFO_MARGIN : right - STUDIO_INFO_MARGIN - beside - LYRICS_FIND_BTN;
+	lv_obj_set_pos(lyrics_find_btn, btn_x, btn_y);
 	lyrics_find_make_room(layout_studio_now ? studio_text_col : layout_alt_now ? lyrics_head_col : NULL);
-	// The ink of the names beside it: white over the blurred sleeve, the
-	// theme's own over the page's background.
-	lv_obj_set_style_image_recolor(lyrics_find_icon, lyrics_backdrop() ? lv_color_white() : theme()->text_primary, 0);
+	// The ink of the names beside it: white over the blurred sleeve or a fixed
+	// dark ground, the theme's own over the page's background.
+	bool dark_ground = lyrics_backdrop() != NULL || layout_vinyl_now || layout_sticker_now;
+	lv_obj_set_style_image_recolor(lyrics_find_icon, dark_ground ? lv_color_white() : theme()->text_primary, 0);
 	lv_obj_set_hidden(lyrics_find_btn, false);
 	lv_obj_move_foreground(lyrics_find_btn);
 }
@@ -2485,6 +2491,7 @@ static void lyrics_progress_apply(int32_t progress) {
 		lyrics_shift(sticker_view.format_pill, away);
 		lyrics_shift(sticker_view.repeat_disc, away);
 		lyrics_shift(sticker_view.fav_disc, away);
+		lyrics_shift(live_badge, away);
 	}
 	if (!layout_alt_now) {
 		return; // the names stay in their row below the sleeve
@@ -5791,10 +5798,13 @@ static void update_hires_badge(const device_state_t *state) {
 			hi, pos == PLAYER_HIRES_LEFT, pos == PLAYER_HIRES_RIGHT, source);
 	back_btn_player_right_set(back_right);
 	// The source marks normally occupy the right corner too. Move them below
-	// the button while it is there, and restore them when it returns left.
+	// the button while it is there on an edge-to-edge sleeve, and restore them
+	// when it returns left; Sticker's inset square sits clear of the chevron.
 	if (!layout_studio_now) {
 		lv_obj_t *const marks[] = {live_badge, qobuz_badge, tidal_badge, podcast_badge};
-		int y = back_right ? (back_btn_centre_y() - player_content_top()) + bp_header_button_size() / 2 + 4 : BADGE_INSET;
+		int y = (back_right && !layout_sticker_now)
+			? (back_btn_centre_y() - player_content_top()) + bp_header_button_size() / 2 + 4
+			: BADGE_INSET;
 		for (size_t i = 0; i < sizeof(marks) / sizeof(marks[0]); i++) {
 			if (marks[i] && lv_obj_get_parent(marks[i]) == cover_art_group)
 				lv_obj_align(marks[i], LV_ALIGN_TOP_RIGHT, -BADGE_INSET, y);
@@ -7439,6 +7449,13 @@ static void sticker_paint(void) {
 			sticker_align_label_cap(queue_position_label, LV_ALIGN_CENTER, 0);
 		if (format_label && lv_obj_get_parent(format_label) == sticker_view.format_pill)
 			sticker_align_label_cap(format_label, LV_ALIGN_CENTER, 0);
+		if (live_badge && cover_panel && lv_obj_get_parent(live_badge) == cover_panel) {
+			int lx = b.art_x - 12;
+			if (lx < 4) lx = 4;
+			lv_obj_align(live_badge, LV_ALIGN_BOTTOM_LEFT, lx,
+						 -(b.deck_y - (b.art_y + b.art_side) + 2));
+			lv_obj_move_foreground(live_badge);
+		}
 		sticker_seek_fit();
 	}
 }
@@ -7537,6 +7554,16 @@ static void sticker_put(void) {
 		}
 		lv_obj_set_hidden(sticker_view.seek_row, live_mode);
 	}
+	// On a stream the repeat disc in the bottom-left corner is gone, while the
+	// top-right corner belongs to the tilted format sticker and the centre to
+	// the spindle and radio mark. Park the red LIVE pill in that free corner
+	// over the sleeve rather than clipped inside it.
+	if (live_badge && cover_panel) {
+		lv_obj_set_parent(live_badge, cover_panel);
+		lv_obj_set_style_pad_hor(live_badge, 8, 0);
+		lv_obj_set_style_pad_ver(live_badge, 3, 0);
+		lv_obj_set_style_radius(live_badge, LV_RADIUS_CIRCLE, 0);
+	}
 
 	sticker_paint();
 	set_over_cover(chrome_over_cover);
@@ -7549,6 +7576,8 @@ static void sticker_put(void) {
 	sticker_pills_sync();
 	placeholder_rescale();
 	placeholder_place();
+	if (live_badge && lv_obj_get_parent(live_badge) == cover_panel)
+		lv_obj_move_foreground(live_badge);
 }
 
 static bool sticker_take_back(void) {
@@ -7556,6 +7585,16 @@ static bool sticker_take_back(void) {
 	sticker_up = false;
 	sticker_view_set_hidden(&sticker_view, true);
 	const bool compact = bp_is_tempotec_v1();
+
+	if (live_badge && cover_art_group && lv_obj_get_parent(live_badge) != cover_art_group) {
+		lv_obj_set_parent(live_badge, cover_art_group);
+		lv_obj_set_style_pad_hor(live_badge, 10, 0);
+		lv_obj_set_style_pad_ver(live_badge, 5, 0);
+		lv_obj_set_style_radius(live_badge, 6, 0);
+		lyrics_shift(live_badge, 0);
+		lv_obj_align(live_badge, LV_ALIGN_TOP_RIGHT, -BADGE_INSET, BADGE_INSET);
+		lv_obj_move_foreground(live_badge);
+	}
 
 	if (cover_art_group) {
 		lv_obj_set_style_border_width(cover_art_group, 0, 0);
