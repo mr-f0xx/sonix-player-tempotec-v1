@@ -4,30 +4,38 @@
 #include <stdbool.h>
 #include <stddef.h>
 
-// Podcast Index, the catalogue behind the Podcasts section.
+// The catalogue behind the Podcasts section, of which there are two to choose
+// from: Podcast Index and Apple's. podcast.c says which, and why; the choice
+// is [podcast] api_base, and with none configured the streaming keys decide --
+// a pair means Podcast Index, no pair means Apple, which needs none. Nothing
+// past this line differs between them, which is the whole point: the pages,
+// the cache and the downloader see one interface either way.
 //
-// Why this and not the RSS feeds directly: a podcast is an RSS feed, and in
-// theory downloading it would be enough. In practice it is not, for two
-// reasons:
+// Why a catalogue at all, and not the RSS feeds directly: a podcast is an RSS
+// feed, and in theory downloading it would be enough. In practice it is not,
+// for two reasons:
 //
 //   * search. Without a catalogue, the only way to find a podcast is to know
 //     its URL by heart and type it on an on-screen keyboard. Nobody does that.
 //   * the format. Podcast RSS is XML with four namespaces on it (itunes:,
 //     podcast:, media:, content:), and the wild contains everything -- feeds
-//     with broken XML, dates in five formats, duplicated tags. This tree has no
-//     XML parser, and writing one that survives the real world is a far bigger
-//     job than it looks.
+//     with broken XML, dates in five formats, duplicated tags. The one XML
+//     parser this tree has is src/system/ebook/epub_xml.c, and it reads the
+//     XHTML and OPF of an ebook that was validated on the way in: it has no
+//     notion of namespaces, no entities beyond the five XML ones and no
+//     recovery from a malformed document, so pointing it at podcast feeds
+//     would mean teaching it all three before it could read one. Both
+//     catalogues here do that job already and answer with normalized JSON,
+//     for which a parser is here.
 //
-// Podcast Index does both jobs: it searches, and it returns already normalized
-// JSON, for which a parser is already here. It is also an open catalogue with
-// no advertising, which in 2026 is not a given.
-//
-// The signature: every request carries three headers -- the key, the time, and
-// the SHA-1 of key+secret+time in hex. The time must be the real one to within
-// a few minutes, and this device loses the clock at every power-off and gets it
-// back from NTP at boot, so without network the time is wrong and the catalogue
-// answers 401. See podcast_last_error(), which recognizes that case and says so
-// plainly instead of leaving "401".
+// The signature, on the Podcast Index side only: every request there carries
+// three headers -- the key, the time, and the SHA-1 of key+secret+time in hex.
+// The time must be the real one to within a few minutes, and this device loses
+// the clock at every power-off and gets it back from NTP at boot, so without
+// network the time is wrong and the catalogue answers 401. See
+// podcast_last_error(), which recognizes that case and says so plainly instead
+// of leaving "401". Apple's requests carry nothing but a User-Agent, so the
+// clock cannot make them fail.
 //
 // Everything in here blocks. Call only from the page's worker thread, never
 // from the UI thread.
@@ -39,14 +47,15 @@
 
 // The ids are 64-bit, and not out of generosity: on this device `long` is
 // 32-bit, and Podcast Index numbers episodes with eleven digits (16795090626
-// and the like). With a 32-bit `long` strtol does not get such a number wrong,
-// it saturates -- every episode collapses onto 2147483647, sharing one cache
-// file and one sidecar row. Feed ids are small and would fit, but they travel
-// with episode ids in too many places to be worth distinguishing.
+// and the like) and Apple with thirteen (1000800977857). With a 32-bit `long`
+// strtol does not get such a number wrong, it saturates -- every episode
+// collapses onto 2147483647, sharing one cache file and one sidecar row. Feed
+// ids are small and would fit, but they travel with episode ids in too many
+// places to be worth distinguishing.
 
 // A podcast: the feed, not an episode.
 typedef struct {
-	long long id; // the Podcast Index id, which is how it is found again
+	long long id; // the catalogue's own id, which is how it is found again
 	char title[PODCAST_TITLE_MAX];
 	char author[PODCAST_AUTHOR_MAX];
 	char image[PODCAST_URL_MAX];
@@ -85,11 +94,17 @@ int podcast_search(const char *query, podcast_feed_t *out, int max);
 int podcast_trending(podcast_feed_t *out, int max);
 
 // The language the chart is asked for: an ISO 639 code, or "" for the
-// interface's own. This is the closest the catalogue has to a region -- its
-// trending endpoint filters by language and offers no country filter -- so it is
-// what "trending where I am" means here: the chart of the language somebody
-// chose to read the player in, or another one deliberately, for a listener who
-// wants the podcasts of a place they are not.
+// interface's own. This is what "trending where I am" means here: the chart of
+// the language somebody chose to read the player in, or another one
+// deliberately, for a listener who wants the podcasts of a place they are not.
+//
+// The choice is one row of the shared region list, which carries a language
+// and a country and never one without the other, and each catalogue asks for
+// the half it understands: Podcast Index filters its chart by language and has
+// no country filter at all, while Apple's chart is a storefront's and takes
+// the country. Same row, same picker, so the answer is the same place either
+// way -- which is why this stays a language even when the request carries the
+// country beside it.
 const char *podcast_trending_lang(void);
 void podcast_set_trending_lang(const char *code);
 

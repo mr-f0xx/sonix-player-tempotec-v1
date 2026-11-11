@@ -563,6 +563,25 @@ $(BUILD)/test_podcastplayed: test_podcastplayed.c $(ROOT)/src/system/streaming/p
 	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ test_podcastplayed.c \
 		$(ROOT)/src/system/streaming/podcastplayed.c $(BUILD)/sqlite3_impl.o $(LDFLAGS) $(LDLIBS)
 
+# The podcast catalogue on both of the directories it can use, which is to say
+# the requests each one builds and the structs each one fills. The real
+# podcast.c, JSON parser, settings, region list and SHA-1 are linked; the
+# network, the streaming keys and the two language functions are stubbed, so
+# nothing reaches Apple or Podcast Index and no key is needed to run it.
+.PHONY: podcastdir
+podcastdir: $(BUILD)/test_podcastdir
+	$(BUILD)/test_podcastdir
+
+$(BUILD)/test_podcastdir: test_podcastdir.c $(ROOT)/src/system/streaming/podcast.c \
+                          $(ROOT)/src/system/streaming/podcast.h \
+                          $(ROOT)/src/system/core/json.c $(ROOT)/src/system/core/config.c \
+                          $(ROOT)/src/system/core/region.c $(ROOT)/src/system/core/sha1.c
+	@mkdir -p $(BUILD)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ test_podcastdir.c \
+		$(ROOT)/src/system/streaming/podcast.c $(ROOT)/src/system/core/json.c \
+		$(ROOT)/src/system/core/config.c $(ROOT)/src/system/core/region.c \
+		$(ROOT)/src/system/core/sha1.c $(LDFLAGS) $(LDLIBS)
+
 # The vendored SQLite amalgamation keeps its own warnings to itself: third-
 # party code, built separately (and quietly) so the suite around it keeps
 # -Werror.

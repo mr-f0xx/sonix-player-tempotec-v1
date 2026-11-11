@@ -316,9 +316,25 @@ Instead, Sonix speaks the exact same authentication flows as the stock TempoTec 
 
 ### Podcasts, Last.fm, ListenBrainz and Radio
 
-- **Internet Radio** and **Subsonic / Gonic** require no API keys.
+- **Internet Radio**, **Subsonic / Gonic** and **Podcasts** require no API keys.
+- **Podcasts** search, chart, play and download from Apple's public podcast directory, which asks for nothing: no signup, no key, no account. It works out of the box on any install, including a published image that ships without keys. Podcast Index remains available for anyone who has a pair -- see below.
 - **ListenBrainz** requires no key in `streaming-keys.ini`: request a personal user token at `listenbrainz.org/settings` and paste it into **Settings → Music → ListenBrainz**. Scrobbling to Last.fm and ListenBrainz are independent and can run side by side.
-- **Podcasts (Podcast Index)** and **Last.fm** use free personal API keys (`podcastindex.org` and `last.fm/api`). Copy `sonix-player/streaming-keys.ini.example` to the root of the microSD card as `streaming-keys.ini` (or edit the `streaming-keys.ini` already created on the card), fill in `[podcast]` and/or `[lastfm]`, and restart the player. Do not commit or share this file.
+- **Last.fm** uses a free personal API key (`last.fm/api`). Copy `sonix-player/streaming-keys.ini.example` to the root of the microSD card as `streaming-keys.ini` (or edit the `streaming-keys.ini` already created on the card), fill in `[lastfm]`, and restart the player. Do not commit or share this file.
+
+#### Podcasts: which directory, and how to choose
+
+Two directories answer the same five calls, and the pages, the cache and the downloader cannot tell them apart. Which one is in force is `[podcast] api_base` in `device_config.ini`:
+
+| `[podcast] api_base` | Directory | Needs |
+| --- | --- | --- |
+| *(absent or empty)* | Podcast Index if `[podcast]` keys are present, otherwise Apple | nothing, when there are no keys |
+| `apple` | Apple | nothing |
+| `https://itunes.apple.com` | Apple | nothing |
+| `https://api.podcastindex.org/api/1.0` | Podcast Index | an `api_key` and `api_secret` |
+
+So an install that already has a Podcast Index pair keeps using it unchanged, and an install without one works rather than reporting missing keys. Podcast Index's own terms do not allow registrations from a free email service, so its pair has to be requested from an address on a domain you control; Apple's directory is what everyone else gets, and needs no request at all.
+
+The differences that show: Apple's search answers with about a hundred results and has no page behind them, its chart comes at 25, 50 or 100 rows, and an episode can only be looked up inside the podcast it belongs to -- so an episode the player has never listed cannot be resolved by its id alone. The chart follows the region picker under **Settings**, which is a storefront for Apple and a language for Podcast Index; the same row carries both.
 
 ```ini
 [qobuz]
@@ -329,6 +345,10 @@ app_secret =
 client_id =
 client_secret =
 
+# Optional: Podcasts works without these, from Apple's keyless directory.
+# Fill them in only to use Podcast Index instead, together with
+# [podcast] api_base = https://api.podcastindex.org/api/1.0 in
+# device_config.ini.
 [podcast]
 api_key =
 api_secret =
