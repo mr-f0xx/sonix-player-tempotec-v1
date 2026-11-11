@@ -52,7 +52,9 @@ bool topbar_is_hidden(void);
 void topbar_set_player_frost(const lv_image_dsc_t *image);
 
 // Optional solid player-layout ground; disabling restores the theme panel.
-void topbar_set_player_ground(bool enabled, lv_color_t color);
+// `force_light_ink` keeps bar text and status glyphs white for layouts with
+// their own fixed dark palette (Sticker), independently of the global theme.
+void topbar_set_player_ground(bool enabled, lv_color_t color, bool force_light_ink);
 
 // Tint the player status icons using a cover colour; disabling restores their
 // normal status and theme colours without changing the background.

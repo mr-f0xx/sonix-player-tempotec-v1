@@ -39,16 +39,18 @@ int main(void) {
 	lv_obj_add_style(bar, &theme, 0);
 	for (size_t i = 0; i < sizeof(pixels) / sizeof(pixels[0]); i++) pixels[i] = 0xf800;
 	// Standard/Waveform/Album Art Max use the full backdrop except in OLED;
-	// Studio and Immersive keep their blur even in OLED. Poster and Vinyl use
-	// their solid grounds. A not-yet-loaded or mismatched image is not used.
-	assert(statusbarlayout_uses_blur(false, false, false, false, false, true, false));
-	assert(!statusbarlayout_uses_blur(false, false, false, false, true, true, false));
-	assert(statusbarlayout_uses_blur(false, false, true, false, true, true, false));
-	assert(statusbarlayout_uses_blur(false, false, false, true, true, false, true));
-	assert(!statusbarlayout_uses_blur(false, false, false, true, false, true, false));
-	assert(!statusbarlayout_uses_blur(true, false, false, false, false, true, true));
-	assert(!statusbarlayout_uses_blur(false, true, false, false, false, true, true));
-	assert(!statusbarlayout_uses_blur(false, false, false, false, false, false, false));
+	// Studio and Immersive keep their blur even in OLED. Poster, Vinyl and
+	// Sticker use their solid grounds. A not-yet-loaded or mismatched image is
+	// not used.
+	assert(statusbarlayout_uses_blur(false, false, false, false, false, false, true, false));
+	assert(!statusbarlayout_uses_blur(false, false, false, false, false, true, true, false));
+	assert(statusbarlayout_uses_blur(false, false, false, true, false, true, true, false));
+	assert(statusbarlayout_uses_blur(false, false, false, false, true, true, false, true));
+	assert(!statusbarlayout_uses_blur(false, false, false, false, true, false, true, false));
+	assert(!statusbarlayout_uses_blur(true, false, false, false, false, false, true, true));
+	assert(!statusbarlayout_uses_blur(false, true, false, false, false, false, true, true));
+	assert(!statusbarlayout_uses_blur(false, false, true, false, false, false, true, true));
+	assert(!statusbarlayout_uses_blur(false, false, false, false, false, false, false, false));
 	uint32_t plain = sample(bar);
 	statusbarstyle_frost(bar, &blur);
 	uint32_t frosted = sample(bar);

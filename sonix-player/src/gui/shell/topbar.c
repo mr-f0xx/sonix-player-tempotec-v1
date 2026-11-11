@@ -92,6 +92,9 @@ static int battery_icon_size = BATTERY_ICON_SIZE;
 static lv_obj_t *top_bar;
 static bool player_color_enabled;
 static lv_color_t player_color;
+static bool player_ground_enabled;
+static bool player_ground_dark;
+static bool player_ground_force_light;
 static void topbar_apply_player_ink(void);
 
 static void topbar_apply_player_color(void) {
@@ -124,20 +127,36 @@ static lv_obj_t *bt_icon;   // bluetooth, leftmost of the right-hand group
 static lv_obj_t *wifi_icon; // wifi, between bluetooth and the charge percentage
 static lv_obj_t *container_left;  // volume group (and the clock, when "left")
 static lv_obj_t *container_right; // battery group (and the clock, when "right")
-// Tint the requested glyphs and all parts of the battery icon while leaving
-// the background, text, signal strength, and battery level/visibility intact.
-static void topbar_apply_player_ink(void) {
-	lv_color_t ink = statusbarstyle_ink(player_color, theme()->text_primary);
-	lv_obj_t *icons[] = {vol_icon, play_icon, wifi_icon, bt_icon, bat_shell, bat_bolt};
-	for (size_t i = 0; i < sizeof(icons) / sizeof(icons[0]); i++)
-		statusbarstyle_icon(icons[i], player_color_enabled, ink);
-	statusbarstyle_fill(bat_fill, player_color_enabled, ink);
-}
-
 static lv_timer_t *battery_timer;
 static lv_timer_t *jack_timer;
 static int last_jack_state = -1;
 static int last_usb_audio_state = -1;
+
+// Tint the requested glyphs and all parts of the battery icon while leaving
+// the background, text, signal strength, and battery level/visibility intact.
+// When a dark player-layout ground (Vinyl/Sticker) overrides a light or themed
+// status bar, keep the text and icons readable on that dark ground too.
+static void topbar_apply_player_ink(void) {
+	bool light_ink = player_ground_enabled &&
+		(player_ground_force_light || (player_ground_dark && !theme()->dark));
+	lv_color_t fg = (player_ground_enabled && player_ground_dark) ? lv_color_white() : theme()->text_primary;
+	bool tint_icons = player_color_enabled || light_ink;
+	lv_color_t ink = player_color_enabled ? statusbarstyle_ink(player_color, fg) : lv_color_white();
+	lv_obj_t *icons[] = {vol_icon, play_icon, wifi_icon, bt_icon, bat_shell, bat_bolt};
+	for (size_t i = 0; i < sizeof(icons) / sizeof(icons[0]); i++)
+		statusbarstyle_icon(icons[i], tint_icons, ink);
+	statusbarstyle_fill(bat_fill, player_color_enabled, ink);
+	lv_obj_t *labels[] = {clock_label, bat_label};
+	for (size_t i = 0; i < sizeof(labels) / sizeof(labels[0]); i++) {
+		if (!labels[i]) continue;
+		if (light_ink)
+			lv_obj_set_style_text_color(labels[i], lv_color_white(), LV_STATE_USER_1);
+		lv_obj_set_state(labels[i], LV_STATE_USER_1, light_ink);
+	}
+	statusbarstyle_icon(hp_icon, light_ink && (last_usb_audio_state || last_jack_state != JACK_BALANCED), lv_color_white());
+	statusbarstyle_icon(library_icon, light_ink, lv_color_white());
+	statusbarstyle_icon(sonixlink_icon, light_ink, lv_color_white());
+}
 
 // The last battery reading painted. Kept here rather than inside the poll so a
 // theme switch can throw it away: the poll only repaints when the reading has
@@ -435,6 +454,7 @@ static void refresh_headphone_icon(bool force) {
 			lv_obj_remove_local_style_prop(hp_icon, LV_STYLE_IMAGE_RECOLOR_OPA, 0);
 		}
 		lv_obj_set_hidden(hp_icon, false);
+		topbar_apply_player_ink();
 		return;
 	}
 	lv_image_set_src(hp_icon, &icon_headphones);
@@ -460,6 +480,7 @@ static void refresh_headphone_icon(bool force) {
 		lv_obj_remove_local_style_prop(hp_icon, LV_STYLE_IMAGE_RECOLOR, 0);
 		lv_obj_remove_local_style_prop(hp_icon, LV_STYLE_IMAGE_RECOLOR_OPA, 0);
 	}
+	topbar_apply_player_ink();
 }
 
 // Called before the wake repaint so a cable removed while the screen was dark
@@ -1424,10 +1445,14 @@ void topbar_bring_to_front(void) {
 	}
 }
 
-void topbar_set_player_ground(bool enabled, lv_color_t color) {
+void topbar_set_player_ground(bool enabled, lv_color_t color, bool force_light_ink) {
 	if (!top_bar) return;
+	player_ground_enabled = enabled;
+	player_ground_dark = enabled && ((color.red * 299 + color.green * 587 + color.blue * 114) / 1000) < 128;
+	player_ground_force_light = enabled && force_light_ink;
 	if (enabled) lv_obj_set_style_bg_color(top_bar, color, 0);
 	else lv_obj_remove_local_style_prop(top_bar, LV_STYLE_BG_COLOR, 0);
+	topbar_apply_player_ink();
 }
 
 // Borrowed image is detached by the player before its buffer is freed.

@@ -431,7 +431,7 @@ static bool player_status_color;
 static bool layout_aam_now;		  // and for the sixth: the sleeve over the page, the media controls traded for it
 static bool layout_sticker_now;
 static int player_content_top(void) {
-	return (player_status_bar || layout_sticker_now) && !layout_aam_now ? player_status_height : 0;
+	return player_status_bar && !layout_aam_now ? player_status_height : 0;
 }
 // Re-evaluate the shared bar whenever its player background changes.
 static void player_status_background_apply(void);
@@ -478,7 +478,7 @@ static uint32_t album_tone; // the sleeve's colour, 0 when there is no sleeve
 // Only the status icons take this colour. A missing cover must not keep
 // the colour belonging to the last track.
 static void player_status_color_apply(void) {
-	bool show = sheet_open && (player_status_bar || layout_aam_now || layout_sticker_now) && player_status_color &&
+	bool show = sheet_open && (player_status_bar || layout_aam_now) && player_status_color &&
 		current_cover.pixels && album_tone;
 	topbar_set_player_color(show, lv_color_hex(album_tone));
 }
@@ -1835,16 +1835,17 @@ static bool backdrop_blur_wanted(void) { return !theme_is_oled(); }
 // The bar follows the ground of the chosen player layout independently of
 // whether album-colored icons are enabled.
 static void player_status_background_apply(void) {
-	bool visible = sheet_open && (player_status_bar || layout_aam_now || layout_sticker_now);
-	bool layout_blur = visible && !layout_sticker_now && statusbarlayout_uses_blur(
-		layout_poster_now, layout_vinyl_now, layout_studio_now, layout_immersive_now,
+	bool visible = sheet_open && (player_status_bar || layout_aam_now);
+	bool layout_blur = visible && statusbarlayout_uses_blur(
+		layout_poster_now, layout_vinyl_now, layout_sticker_now,
+		layout_studio_now, layout_immersive_now,
 		theme_is_oled(), backdrop_is_full, backdrop_is_band);
 	bool use_blur = current_backdrop.pixels && layout_blur;
 	// Vinyl's page is deliberately solid black, independently of the theme;
 	// Sticker uses its deep violet-black ground; Poster and the missing-art
 	// fallback use the theme's panel style.
 	lv_color_t solid = layout_sticker_now ? lv_color_hex(STICKER_BG_HEX) : lv_color_black();
-	topbar_set_player_ground(visible && (layout_vinyl_now || layout_sticker_now), solid);
+	topbar_set_player_ground(visible && (layout_vinyl_now || layout_sticker_now), solid, layout_sticker_now);
 	topbar_set_player_frost(use_blur ? &current_backdrop.dsc : NULL);
 }
 
@@ -4668,7 +4669,7 @@ static void apply_layout(void) {
 	// can reach the top edge. Only while the sheet is actually up: the setting
 	// can be changed from a page the player is not on.
 	if (sheet_open) {
-		topbar_set_hidden(!(layout_aam_now || layout_sticker_now || player_status_bar));
+		topbar_set_hidden(!(layout_aam_now || player_status_bar));
 		player_status_background_apply();
 		player_status_color_apply();
 		back_btn_player_top_inset(layout_aam_now ? aam_chevron_inset() : player_content_top());
@@ -7028,7 +7029,7 @@ void player_sheet_open(bool animate) {
 	// saying which way the hardware key will go, and its row is where the
 	// chevron and the format line are aligned from. The chevron moves under
 	// it for the same reason (see apply_layout).
-	topbar_set_hidden(!(layout_aam_now || layout_sticker_now || player_status_bar));
+	topbar_set_hidden(!(layout_aam_now || player_status_bar));
 	player_status_background_apply();
 	player_status_color_apply();
 	back_btn_player_top_inset(layout_aam_now ? aam_chevron_inset() : player_content_top());
