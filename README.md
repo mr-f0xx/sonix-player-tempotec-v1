@@ -336,6 +336,8 @@ So an install that already has a Podcast Index pair keeps using it unchanged, an
 
 The differences that show: Apple's search answers with about a hundred results and has no page behind them, its chart comes at 25, 50 or 100 rows, and an episode can only be looked up inside the podcast it belongs to -- so an episode the player has never listed cannot be resolved by its id alone. The chart follows the region picker under **Settings**, which is a storefront for Apple and a language for Podcast Index; the same row carries both.
 
+Apple's episode list also stops at two hundred entries, however many a show has and however many are asked for, with no page behind them. On a show longer than that the oldest episodes are simply not in the answer, so when a list comes back full and the show itself says it has more, the player reads that show's own feed -- the address Apple's own row carries, and the source both directories are built from -- and lists what it finds instead. An episode keeps the id the directory gave it where the two agree, so what is already downloaded and already heard is not orphaned by the change of source. Where the feed is the *shorter* of the two -- a show whose back catalogue sits behind its own platform, publishing trailers while the directory still indexes the episodes -- the directory's list stands. Nothing to configure either way.
+
 ```ini
 [qobuz]
 app_id =

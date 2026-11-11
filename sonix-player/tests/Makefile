@@ -572,13 +572,35 @@ $(BUILD)/test_podcastplayed: test_podcastplayed.c $(ROOT)/src/system/streaming/p
 podcastdir: $(BUILD)/test_podcastdir
 	$(BUILD)/test_podcastdir
 
+# The show's own feed, read when a directory's episode list comes up short.
+# A parser with no tree and no validation, which is what the wild needs: see
+# podcastrss.h. Its three readings -- the date, the duration and the id
+# derived from a guid -- are tested on their own because each has more shapes
+# in the wild than one feed, and the id decides whether a downloaded episode is
+# found again.
+.PHONY: podcastrss
+podcastrss: $(BUILD)/test_podcastrss
+	$(BUILD)/test_podcastrss
+
+$(BUILD)/test_podcastrss: test_podcastrss.c $(ROOT)/src/system/streaming/podcastrss.c \
+                          $(ROOT)/src/system/streaming/podcastrss.h \
+                          $(ROOT)/src/system/streaming/podcast.h \
+                          $(ROOT)/src/system/ebook/epub_xml.c
+	@mkdir -p $(BUILD)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ test_podcastrss.c \
+		$(ROOT)/src/system/streaming/podcastrss.c $(ROOT)/src/system/ebook/epub_xml.c \
+		$(LDFLAGS) $(LDLIBS)
+
 $(BUILD)/test_podcastdir: test_podcastdir.c $(ROOT)/src/system/streaming/podcast.c \
                           $(ROOT)/src/system/streaming/podcast.h \
+                          $(ROOT)/src/system/streaming/podcastrss.c \
+                          $(ROOT)/src/system/ebook/epub_xml.c \
                           $(ROOT)/src/system/core/json.c $(ROOT)/src/system/core/config.c \
                           $(ROOT)/src/system/core/region.c $(ROOT)/src/system/core/sha1.c
 	@mkdir -p $(BUILD)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ test_podcastdir.c \
-		$(ROOT)/src/system/streaming/podcast.c $(ROOT)/src/system/core/json.c \
+		$(ROOT)/src/system/streaming/podcast.c $(ROOT)/src/system/streaming/podcastrss.c \
+		$(ROOT)/src/system/ebook/epub_xml.c $(ROOT)/src/system/core/json.c \
 		$(ROOT)/src/system/core/config.c $(ROOT)/src/system/core/region.c \
 		$(ROOT)/src/system/core/sha1.c $(LDFLAGS) $(LDLIBS)
 

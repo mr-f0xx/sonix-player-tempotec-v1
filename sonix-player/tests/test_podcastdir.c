@@ -34,6 +34,7 @@
 #include "src/system/core/sha1.h"
 #include "src/system/net/http.h"
 #include "src/system/streaming/podcast.h"
+#include "src/system/streaming/podcastrss.h"
 #include "src/system/streaming/streamkeys.h"
 
 static int failures;
@@ -70,6 +71,61 @@ static char last_url[2048];
 static char last_headers[1024];
 static int request_count;
 
+// A list of more than one answer, for the calls that make two or three
+// requests: the episode list, then the show it belongs to, then the show's own
+// feed. A route answers every request whose URL contains its needle, the first
+// matching one winning, and a request no route matches gets `reply_body` -- so
+// the tests written before routes existed still read the same way.
+#define ROUTES_MAX 6
+static struct {
+	const char *needle;
+	const char *body;
+	bool offline;
+} routes[ROUTES_MAX];
+static int route_count;
+
+// Every URL of this run, in order, so a test can say the feed was fetched or
+// that it was not. That is the assertion the fallback stands on.
+#define SEEN_MAX 8
+static char seen_urls[SEEN_MAX][512];
+static int seen_count;
+
+static void routes_clear(void) {
+	memset(routes, 0, sizeof(routes));
+	route_count = 0;
+	seen_count = 0;
+}
+
+static void route_add(const char *needle, const char *body) {
+	if (route_count >= ROUTES_MAX) {
+		return;
+	}
+	routes[route_count].needle = needle;
+	routes[route_count].body = body;
+	routes[route_count].offline = false;
+	route_count++;
+}
+
+// A route that fails the way an unreachable host does.
+static void route_offline(const char *needle) {
+	if (route_count >= ROUTES_MAX) {
+		return;
+	}
+	routes[route_count].needle = needle;
+	routes[route_count].body = NULL;
+	routes[route_count].offline = true;
+	route_count++;
+}
+
+static bool was_fetched(const char *needle) {
+	for (int i = 0; i < seen_count; i++) {
+		if (strstr(seen_urls[i], needle)) {
+			return true;
+		}
+	}
+	return false;
+}
+
 static void net_reset(const char *body) {
 	reply_body = body;
 	reply_status = 0;
@@ -78,6 +134,7 @@ static void net_reset(const char *body) {
 	last_url[0] = '\0';
 	last_headers[0] = '\0';
 	request_count = 0;
+	routes_clear();
 }
 
 bool http_get_ex(const char *url, const char *extra_headers, bool want_error_body, char **out, size_t *out_len,
@@ -89,6 +146,24 @@ bool http_get_ex(const char *url, const char *extra_headers, bool want_error_bod
 	request_count++;
 	snprintf(last_url, sizeof(last_url), "%s", url ? url : "");
 	snprintf(last_headers, sizeof(last_headers), "%s", extra_headers ? extra_headers : "");
+	if (seen_count < SEEN_MAX) {
+		snprintf(seen_urls[seen_count], sizeof(seen_urls[seen_count]), "%s", url ? url : "");
+		seen_count++;
+	}
+
+	// The first route that matches this URL answers it.
+	for (int i = 0; i < route_count; i++) {
+		if (strstr(last_url, routes[i].needle)) {
+			if (routes[i].offline) {
+				if (status_out) {
+					*status_out = 0;
+				}
+				return false;
+			}
+			reply_body = routes[i].body;
+			break;
+		}
+	}
 
 	if (status_out) {
 		*status_out = reply_offline ? 0 : (reply_status ? reply_status : 200);
@@ -256,6 +331,138 @@ static const char *PI_SEARCH =
 	"\"artwork\":\"https://pi.example/art.jpg\",\"episodeCount\":42}]}";
 
 static const char *PI_NOTHING = "{\"status\":\"false\",\"description\":\"Nothing found\"}";
+
+// ---------------------------------------------------------------------------
+// a show too long for one lookup, and the feed that has all of it
+// ---------------------------------------------------------------------------
+//
+// These are the fixtures the whole fallback turns on. Apple's episode lookup
+// answers with two hundred rows whatever it is asked for, so a show of four
+// hundred is a list whose first two hundred episodes cannot be reached at all
+// -- there is no offset and no larger limit, which was verified against a real
+// show rather than assumed. The only source with the rest is the feed the show
+// publishes, which is the one both directories are built from anyway.
+//
+// The lookup is generated rather than pasted, because what matters is its
+// length: two hundred rows is what the ceiling looks like from the inside, and
+// a hundred and ninety-nine is the case just under it, where nothing is
+// missing and the feed must not be read.
+
+#define LONG_SHOW_ID 1095138637LL
+#define LONG_SHOW_FEED "https://feeds.example/long-show.xml"
+
+static char *make_lookup(int rows, long long track_count, const char *feed_url) {
+	size_t size = (size_t)rows * 400 + 512;
+	char *out = malloc(size);
+	if (!out) {
+		return NULL;
+	}
+	int at = snprintf(out, size, "{\"resultCount\":%d,\"results\":[", rows + 1);
+	at += snprintf(out + at, size - (size_t)at,
+				   "{\"wrapperType\":\"track\",\"kind\":\"podcast\",\"collectionId\":%lld,\"trackId\":%lld,"
+				   "\"artistName\":\"Rusty Quill\",\"collectionName\":\"A Long Show\",\"trackCount\":%lld",
+				   LONG_SHOW_ID, LONG_SHOW_ID, track_count);
+	if (feed_url && feed_url[0]) {
+		at += snprintf(out + at, size - (size_t)at, ",\"feedUrl\":\"%s\"", feed_url);
+	}
+	at += snprintf(out + at, size - (size_t)at, "}");
+	for (int i = 0; i < rows; i++) {
+		at += snprintf(out + at, size - (size_t)at,
+					   ",{\"wrapperType\":\"podcastEpisode\",\"kind\":\"podcast-episode\","
+					   "\"trackId\":%d,\"collectionId\":%lld,\"collectionName\":\"A Long Show\","
+					   "\"trackName\":\"Ep %d\",\"episodeUrl\":\"https://cdn.example/%d.mp3\","
+					   "\"episodeFileExtension\":\"mp3\",\"episodeGuid\":\"guid-%d\","
+					   "\"releaseDate\":\"2026-11-10T10:55:29Z\",\"trackTimeMillis\":1904000}",
+					   1000800000 + i, LONG_SHOW_ID, i, i, i);
+	}
+	snprintf(out + at, size - (size_t)at, "]}");
+	return out;
+}
+
+// The same show's own feed, built to a size because its size is the point: a
+// feed with fewer episodes than the directory handed over is the paywalled
+// case below, not the one this fallback is for. The first three items carry
+// the shapes real feeds are written in -- indented text, CDATA with an entity
+// inside it, a duration in each of its three shapes, a date with and without
+// one -- the last real item is the oldest episode of all, and after it an item
+// with no title, which is not an episode and must not be shown.
+//
+// `middle` filler episodes go between the special ones and the oldest.
+static char *make_rss(int middle) {
+	size_t size = (size_t)(middle + 8) * 320 + 1024;
+	char *out = malloc(size);
+	if (!out) {
+		return NULL;
+	}
+	int at = snprintf(out, size,
+					  "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+					  "<rss version=\"2.0\" xmlns:itunes=\"http://www.itunes.com/dtds/podcast-1.0.dtd\">\n"
+					  "  <channel>\n"
+					  "    <title>A Long Show</title>\n"
+					  "    <description>Every episode, oldest included.</description>\n"
+					  "    <item>\n"
+					  "      <title>\n        Ep 0\n      </title>\n"
+					  "      <guid isPermaLink=\"false\">guid-0</guid>\n"
+					  "      <enclosure url=\"https://cdn.example/0.mp3\" type=\"audio/mpeg\" length=\"1\"/>\n"
+					  "      <pubDate>Tue, 10 Nov 2026 10:55:29 GMT</pubDate>\n"
+					  "      <itunes:duration>00:31:44</itunes:duration>\n"
+					  "      <itunes:image href=\"https://art.example/0.jpg\"/>\n"
+					  "    </item>\n"
+					  "    <item>\n"
+					  "      <title><![CDATA[Ep 1 &amp; friends]]></title>\n"
+					  "      <guid>guid-1</guid>\n"
+					  "      <enclosure url=\"https://cdn.example/1.mp3\" type=\"audio/mpeg\"/>\n"
+					  "      <pubDate>2026-11-09T08:00:00Z</pubDate>\n"
+					  "      <itunes:duration>1904</itunes:duration>\n"
+					  "    </item>\n"
+					  "    <item>\n"
+					  "      <title>Ep feed only</title>\n"
+					  "      <guid>guid-feed-only</guid>\n"
+					  "      <enclosure url=\"https://cdn.example/only.mp3\" type=\"audio/mpeg\"/>\n"
+					  "      <itunes:duration>00:20:00</itunes:duration>\n"
+					  "    </item>\n");
+	for (int i = 0; i < middle; i++) {
+		at += snprintf(out + at, size - (size_t)at,
+					   "    <item><title>Filler %d</title><guid>guid-r%d</guid>"
+					   "<enclosure url=\"https://cdn.example/r%d.mp3\" type=\"audio/mpeg\"/>"
+					   "<pubDate>Sun, 09 Nov 2025 09:00:00 GMT</pubDate>"
+					   "<itunes:duration>00:30:00</itunes:duration></item>\n",
+					   i, i, i);
+	}
+	// The oldest episode in the archive, and the one a two-hundred-row window
+	// never reaches. Its guid is the feed's alone, so its id can only come
+	// from it.
+	at += snprintf(out + at, size - (size_t)at,
+				   "    <item>\n"
+				   "      <title>Ep forty</title>\n"
+				   "      <guid>guid-old-2016</guid>\n"
+				   "      <enclosure url=\"https://cdn.example/40.mp3\" type=\"audio/mpeg\"/>\n"
+				   "      <pubDate>Sat, 04 Jun 2016 12:00:00 +0000</pubDate>\n"
+				   "      <itunes:duration>25:06</itunes:duration>\n"
+				   "    </item>\n"
+				   "    <item>\n"
+				   "      <title/>\n"
+				   "      <guid>guid-no-title</guid>\n"
+				   "      <enclosure url=\"https://cdn.example/empty.mp3\" type=\"audio/mpeg\"/>\n"
+				   "    </item>\n"
+				   "  </channel>\n"
+				   "</rss>\n");
+	return out;
+}
+
+// A feed that is not a list of episodes: an error page, a redirect, a feed
+// behind a login. Every one of those is a 200 with HTML in it, and none of
+// them is a shorter list of the show's episodes.
+static const char *NOT_A_FEED = "<html><head><title>403 Forbidden</title></head><body>Nope</body></html>";
+
+// The show behind its own paywall: a directory that indexes every episode and
+// a feed of trailers. This is why the feed is read only when the directory has
+// said it came up short -- read it always and this show gets worse.
+static const char *TRAILERS_ONLY_RSS =
+	"<rss><channel><title>A Show</title>"
+	"<item><title>Trailer</title><guid>t1</guid>"
+	"<enclosure url=\"https://cdn.example/trailer.mp3\" type=\"audio/mpeg\"/></item>"
+	"</channel></rss>";
 
 // ---------------------------------------------------------------------------
 // helpers
@@ -711,6 +918,199 @@ static void test_settings_untouched(void) {
 	printf("  settings untouched\n");
 }
 
+// ---------------------------------------------------------------------------
+// the episodes a directory does not list
+// ---------------------------------------------------------------------------
+
+// A lookup that hit Apple's ceiling on a show that says it has more, answered
+// from the show's own feed instead. Four hundred episodes where the directory
+// has two hundred.
+static void test_long_show_from_feed(void) {
+	reset();
+	config_set("podcast", "api_base", "apple");
+
+	char *lookup = make_lookup(200, 405, LONG_SHOW_FEED);
+	char *rss = make_rss(400);
+	CHECK(lookup != NULL && rss != NULL);
+	route_add("entity=podcastEpisode", lookup);
+	route_add(LONG_SHOW_FEED, rss);
+
+	static podcast_episode_t episodes[405];
+	int n = podcast_episodes(LONG_SHOW_ID, episodes, 405);
+
+	// Every episode the feed has, and not the one with no title in it.
+	CHECK(n == 404);
+	CHECK(podcast_last_raw_count() == 405); // items in the feed, the no-title one among them
+	CHECK(was_fetched("entity=podcastEpisode"));
+	CHECK(was_fetched(LONG_SHOW_FEED));
+
+	// In the order the feed lists them, newest first.
+	CHECK_STR(episodes[0].title, "Ep 0");
+	CHECK(episodes[0].title[0] == 'E'); // the indentation around it is not part of it
+	CHECK_STR(episodes[1].title, "Ep 1 & friends"); // CDATA, with an entity inside
+	CHECK_STR(episodes[2].title, "Ep feed only");
+
+	// An episode both sources know keeps the id the directory gave it, because
+	// that is the id its downloaded file and its heard mark are keyed on. A
+	// switch of source under the reader must not orphan either.
+	CHECK(episodes[0].id == 1000800000);
+	CHECK(episodes[1].id == 1000800001);
+	CHECK_STR(episodes[0].mime, "audio/mpeg");
+	CHECK(episodes[0].duration_secs == 31 * 60 + 44);
+	CHECK(episodes[0].published == unix_of(2026, 11, 10, 10, 55, 29));
+	CHECK_STR(episodes[0].image, "https://art.example/0.jpg"); // itunes:image, href attribute
+	CHECK(episodes[1].duration_secs == 1904); // a bare number of seconds
+	CHECK(episodes[1].published == unix_of(2026, 11, 9, 8, 0, 0)); // ISO 8601 rather than RFC 822
+
+	// One only the feed knows gets an id derived from its guid: not zero, not
+	// something a directory would hand out, and the same every time.
+	CHECK(episodes[2].id == podcastrss_guid_id("guid-feed-only"));
+	CHECK(episodes[2].id > 0);
+	CHECK(episodes[2].duration_secs == 20 * 60);
+	CHECK(episodes[2].published == 0); // a feed with no date on it is still an episode
+
+	// The oldest one, the reason this exists: a 2016 episode that no two
+	// hundred rows of a directory will ever reach.
+	int last = n - 1;
+	CHECK_STR(episodes[last].title, "Ep forty");
+	CHECK(episodes[last].id == podcastrss_guid_id("guid-old-2016"));
+	CHECK(episodes[last].id != episodes[2].id);
+	CHECK(episodes[last].feed_id == LONG_SHOW_ID);
+	CHECK_STR(episodes[last].feed_title, "A Long Show");
+	CHECK_STR(episodes[last].enclosure, "https://cdn.example/40.mp3");
+	CHECK(episodes[last].duration_secs == 25 * 60 + 6);
+	CHECK(episodes[last].published == unix_of(2016, 6, 4, 12, 0, 0));
+
+	// And it plays: asked for by the id it was listed under, the episode is
+	// found in the feed it came from rather than reported gone.
+	podcast_episode_t one;
+	CHECK(podcast_episode(episodes[last].id, &one));
+	CHECK(one.id == episodes[last].id);
+	CHECK_STR(one.enclosure, "https://cdn.example/40.mp3");
+	CHECK_STR(one.title, "Ep forty");
+
+	// One listed four hundred rows ago, and the memory of which show an
+	// episode belongs to has to reach that far back or the row on screen
+	// answers "gone" when it is touched. This is what the size of that memory
+	// is for: a show's whole list, not the last screenful of it.
+	CHECK(podcast_episode(episodes[2].id, &one));
+	CHECK_STR(one.title, "Ep feed only");
+
+	// An episode no source has is still gone, and says so rather than guessing.
+	CHECK(!podcast_episode(podcastrss_guid_id("guid-never-published"), &one));
+	CHECK_STR(podcast_last_error(), "podcast_episode_gone");
+
+	free(lookup);
+	free(rss);
+	printf("  long show, from its own feed\n");
+}
+
+// The ways the feed can fail to be the better source, each of which has to
+// leave the directory's list exactly as it was. A fallback that can make
+// things worse is worse than no fallback.
+static void test_feed_not_taken_when_it_does_not_help(void) {
+	static podcast_episode_t episodes[200];
+
+	// 1. The directory has all of them. A show of two hundred episodes that
+	//    answers with two hundred is not a truncated list.
+	reset();
+	config_set("podcast", "api_base", "apple");
+	char *complete = make_lookup(200, 200, LONG_SHOW_FEED);
+	char *rss = make_rss(400);
+	route_add("entity=podcastEpisode", complete);
+	route_add(LONG_SHOW_FEED, rss);
+	CHECK(podcast_episodes(LONG_SHOW_ID, episodes, 200) == 200);
+	CHECK(podcast_last_raw_count() == 200);
+	CHECK(!was_fetched(LONG_SHOW_FEED));
+	CHECK_STR(episodes[0].title, "Ep 0");
+	free(complete);
+	free(rss);
+
+	// 2. A page smaller than the ceiling. Apple answers a request for sixty
+	//    with sixty and says nothing about what else there is, so that is not
+	//    evidence of a truncated list -- and reading the feed here would send
+	//    every long show off to it on the very first page.
+	reset();
+	config_set("podcast", "api_base", "apple");
+	char *first_page = make_lookup(200, 405, LONG_SHOW_FEED);
+	rss = make_rss(400);
+	route_add("entity=podcastEpisode", first_page);
+	route_add(LONG_SHOW_FEED, rss);
+	CHECK(podcast_episodes(LONG_SHOW_ID, episodes, 60) == 60);
+	CHECK(!was_fetched(LONG_SHOW_FEED));
+	free(first_page);
+	free(rss);
+
+	// 3. A directory that indexes more than the feed publishes -- the show
+	//    behind its own paywall, whose feed is trailers. The lookup came up
+	//    short on the numbers and the feed was read, and the directory's
+	//    longer list is what the reader gets anyway. This is the case that
+	//    decides the fallback has to be conditional.
+	reset();
+	config_set("podcast", "api_base", "apple");
+	char *paywalled = make_lookup(200, 405, "https://feeds.example/trailers.xml");
+	route_add("entity=podcastEpisode", paywalled);
+	route_add("trailers.xml", TRAILERS_ONLY_RSS);
+	CHECK(podcast_episodes(LONG_SHOW_ID, episodes, 200) == 200);
+	CHECK(podcast_last_raw_count() == 200);
+	CHECK(was_fetched("trailers.xml")); // it was asked, and then not believed
+	CHECK_STR(episodes[0].title, "Ep 0");
+	free(paywalled);
+
+	printf("  feed left alone when it does not help\n");
+}
+
+// A feed that cannot be read is not an error, because the directory's list is
+// still there. Nothing here should leave a message up on the page.
+static void test_feed_that_cannot_be_read(void) {
+	static podcast_episode_t episodes[200];
+	char *lookup = make_lookup(200, 405, LONG_SHOW_FEED);
+
+	// An error page where the feed was: a 200, and no items in it.
+	reset();
+	config_set("podcast", "api_base", "apple");
+	route_add("entity=podcastEpisode", lookup);
+	route_add(LONG_SHOW_FEED, NOT_A_FEED);
+	CHECK(podcast_episodes(LONG_SHOW_ID, episodes, 200) == 200);
+	CHECK(podcast_last_raw_count() == 200);
+	CHECK_STR(episodes[0].title, "Ep 0");
+	CHECK_STR(podcast_last_error(), "");
+
+	// A feed host that does not answer at all.
+	reset();
+	config_set("podcast", "api_base", "apple");
+	route_add("entity=podcastEpisode", lookup);
+	route_offline(LONG_SHOW_FEED);
+	CHECK(podcast_episodes(LONG_SHOW_ID, episodes, 200) == 200);
+	CHECK_STR(podcast_last_error(), "");
+
+	// A show whose row carries no feed address: nothing to ask, and the list
+	// is the directory's.
+	reset();
+	config_set("podcast", "api_base", "apple");
+	char *no_feed = make_lookup(200, 405, "");
+	route_add("entity=podcastEpisode", no_feed);
+	CHECK(podcast_episodes(LONG_SHOW_ID, episodes, 200) == 200);
+	CHECK(!was_fetched("feeds.example"));
+
+	// A list just under the ceiling is not a truncated one, even on a show
+	// that has far more.
+	reset();
+	config_set("podcast", "api_base", "apple");
+	char *rss = make_rss(400);
+	char *short_list = make_lookup(199, 405, LONG_SHOW_FEED);
+	route_add("entity=podcastEpisode", short_list);
+	route_add(LONG_SHOW_FEED, rss);
+	CHECK(podcast_episodes(LONG_SHOW_ID, episodes, 200) == 199);
+	CHECK(!was_fetched(LONG_SHOW_FEED));
+
+	free(lookup);
+	free(no_feed);
+	free(short_list);
+	free(rss);
+	printf("  feed that cannot be read\n");
+}
+
 int main(void) {
 	printf("podcast directory tests\n");
 
@@ -724,6 +1124,10 @@ int main(void) {
 	test_apple_episodes();
 	test_apple_episode_by_id();
 	test_apple_feed_and_errors();
+	test_long_show_from_feed();
+	test_feed_not_taken_when_it_does_not_help();
+	test_feed_that_cannot_be_read();
+
 	test_podcast_index_unchanged();
 	test_settings_untouched();
 
