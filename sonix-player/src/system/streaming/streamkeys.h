@@ -59,6 +59,9 @@
 //
 // Without any of them, or without a section, the matching service disables
 // itself and its menu entry says so instead of failing halfway through a login.
+// Podcasts is the exception: it has a second directory that needs no key, so
+// a missing [podcast] section changes where it looks rather than turning it
+// off. See podcast.h.
 //
 // The path can be changed with [streaming] keys_file in device_config.ini, to
 // keep the keys on the card instead of the read-only rootfs -- the easy path
@@ -117,10 +120,15 @@ const char *streamkeys_qobuz_app_id(void);
 const char *streamkeys_qobuz_app_secret(void);
 const char *streamkeys_tidal_client_id(void);
 const char *streamkeys_tidal_client_secret(void);
-// Podcast Index. This pair identifies this player rather than a HiBy
-// application: it is requested free on podcastindex.org, and each request is
-// signed with the SHA-1 of key + secret + time. Same rule as the other two:
-// out of the source, in a file whoever assembles the firmware fills in.
+// Podcast Index, and the one pair of these that is optional. It identifies
+// this player rather than a HiBy application, is requested on podcastindex.org
+// -- whose terms do not allow a free email address, so it has to be an address
+// on a domain of your own -- and each request is signed with the SHA-1 of
+// key + secret + time.
+//
+// Without it Podcasts still works: podcast.c asks Apple's directory instead,
+// which needs no key, and this pair is what selects Podcast Index for whoever
+// has one. The other three services have no second directory to fall back to.
 const char *streamkeys_podcast_key(void);
 const char *streamkeys_podcast_secret(void);
 // Last.fm. An API account of this player, requested on last.fm/api: it signs

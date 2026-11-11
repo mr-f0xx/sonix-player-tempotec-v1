@@ -36,6 +36,7 @@ make -C sonix-player/tests genius
 make -C sonix-player/tests mostplayed
 make -C sonix-player/tests playback-state
 make -C sonix-player/tests podcastplayed
+make -C sonix-player/tests podcastdir
 make -C sonix-player/tests radio-store
 make -C sonix-player/tests led-rate
 make -C sonix-player/tests aamlayout
@@ -489,6 +490,57 @@ marks themselves, the sorted set the lookup binary-searches, what survives a
 restart, and a card whose database is deleted under the player. `utils.c`'s file
 identity is the only stubbed helper -- its contract, that deleted or replaced
 counts as changed, is reproduced with `stat()`.
+
+## The podcast catalogue, on both of its directories
+
+`make -C sonix-player/tests podcastdir` checks the seam between the two
+directories the Podcasts section can use -- Apple's, which needs no key, and
+Podcast Index, which needs a pair -- and that both fill the same structs the
+pages, the cache and the downloader read. It needs no key, no account and no
+network: the HTTP helper is stubbed the way `artsearch` stubs it, so every
+assertion about a request is made on the URL and the headers the production
+code built. The real `podcast.c`, JSON parser, settings store, region list and
+SHA-1 are linked; the network, the streaming keys and the two language
+functions are not.
+
+The JSON is the shape each directory really answers with, trimmed to the parts
+that are easy to get wrong. Checks include:
+
+- which directory a configuration picks: no `api_base` and no keys is Apple,
+  no `api_base` and a pair is Podcast Index, `apple` or an
+  `itunes.apple.com` base is Apple whatever keys are present, an
+  `api.podcastindex.org` base is Podcast Index, and a host that merely starts
+  with the name (`itunes.apple.com.evil.example`) is not it;
+- that an empty `api_base =` line reads as no value, rather than turning every
+  request into a relative one;
+- Apple's requests carry a User-Agent and nothing else -- no `X-Auth`, no
+  `Authorization` -- and that Podcast Index's still carry all three headers,
+  with the signature re-derived from the time in the request;
+- the search term is encoded, the storefront is left off, and `limit` is
+  capped at what Apple actually serves;
+- the chart's storefront comes from the region row, its depth is one of the
+  three Apple serves, its ids arrive as quoted strings, its 100 px artwork is
+  asked at 600 px, and an empty storefront falls back to the American chart
+  while Worldwide does not ask twice;
+- an episode list leads with the show itself, which is not counted as an
+  episode, and an episode with no audio is dropped from the count but not from
+  the raw one that tells the list whether another page is worth asking for;
+- durations arrive in milliseconds and leave in seconds, timestamps in ISO
+  8601 and leave as unix time, with or without the time of day;
+- an episode id the player has never seen is not guessed at and costs no
+  request, one it has listed is found again inside its podcast, and one that
+  is not in that podcast's list is gone rather than replaced by another;
+- the shared failures read the same whichever directory refused: a 5xx, a 4xx,
+  an unreachable network, and a body that is not JSON.
+
+The suite was checked by mutation: it fails when the directory choice is
+forced, when the show row is counted as an episode, when the artwork is left
+at 100 px, when the duration is left in milliseconds, when the chart depth is
+fixed, and when the declared audio type is hardcoded.
+
+This tests the requests and the parsing, not the download or the playback of
+what comes back; those have their own suites and see only the structs, which
+do not know which directory filled them.
 
 ## Headless calculator and notes page tests
 
