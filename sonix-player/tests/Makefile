@@ -757,6 +757,20 @@ WIFIPAGE_SRC = $(ROOT)/tests/ui/test_wifi_pages.c $(ROOT)/src/gui/wireless/wifis
 WIFIPAGE_OBJ = $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(WIFIPAGE_SRC)) \
             $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(UI_LVGL_SRC))
 
+# Tidal's "Favourite playlists" on the same renderer: the row on the main page,
+# the list, what its menus offer and what they send. The Tidal client under it
+# is a recording stub (see test_tidal_pages.c); the page, the module that
+# writes to the account and the lists kept on the card are the real ones.
+TIDALPAGE_SRC = $(ROOT)/tests/ui/test_tidal_pages.c $(ROOT)/src/gui/streaming/tidalpage.c \
+            $(ROOT)/src/system/streaming/tidalsync.c $(ROOT)/src/system/streaming/listcache.c \
+            $(ROOT)/src/gui/shell/settingsrow.c $(ROOT)/src/gui/shell/keyboard.c \
+            $(ROOT)/src/gui/shell/popover.c $(ROOT)/src/gui/shell/spinner.c \
+            $(ROOT)/src/gui/shell/theme.c $(ROOT)/src/gui/shell/icons.c \
+            $(ROOT)/src/gui/board_profile.c $(ROOT)/src/system/input/kblayout.c \
+            $(ROOT)/src/system/core/config.c $(ROOT)/src/system/core/lang.c
+TIDALPAGE_OBJ = $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(TIDALPAGE_SRC)) \
+            $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(UI_LVGL_SRC))
+
 SAVER_SRC = $(ROOT)/tests/ui/test_screensaver.c $(ROOT)/src/gui/settings/screensaver.c $(ROOT)/src/system/audio/visualizer.c \
             $(ROOT)/src/gui/shell/scrolltext.c $(ROOT)/src/gui/shell/settingsrow.c \
             $(ROOT)/src/gui/shell/theme.c $(ROOT)/src/gui/shell/icons.c \
@@ -965,7 +979,7 @@ STOCKKEYS_UI_SRC = $(ROOT)/tests/ui/test_stockkeys_ui.c \
 STOCKKEYS_UI_OBJ = $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(STOCKKEYS_UI_SRC)) \
                    $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(UI_LVGL_SRC))
 
-.PHONY: ui peq-ui corners playbutton stockkeys-ui
+.PHONY: ui peq-ui corners playbutton stockkeys-ui tidal-ui
 corners: $(BUILD)/test_corners
 	$(BUILD)/test_corners
 
@@ -978,6 +992,14 @@ peq-ui: $(BUILD)/test_peq_profiles
 stockkeys-ui: $(BUILD)/test_stockkeys_ui
 	$(BUILD)/test_stockkeys_ui ../../sonix-packer/assets/V1/usr/resource/sonix/language
 
+# Three runs: the main page's arrangement is read once per process, so the one
+# saved by a build without the row and the one this build saves each get their
+# own.
+tidal-ui: $(BUILD)/test_tidal_pages
+	$(BUILD)/test_tidal_pages ../../sonix-packer/assets/V1/usr/resource/sonix/language
+	$(BUILD)/test_tidal_pages ../../sonix-packer/assets/V1/usr/resource/sonix/language saved
+	$(BUILD)/test_tidal_pages ../../sonix-packer/assets/V1/usr/resource/sonix/language arranged
+
 $(BUILD)/test_peq_profiles: $(PEQPAGE_OBJ)
 	$(CC) -o $@ $^ $(LDFLAGS) $(LDLIBS)
 
@@ -985,7 +1007,7 @@ $(BUILD)/test_stockkeys_ui: $(ROOT)/build_gen/streamkeys_key.h $(STOCKKEYS_UI_OB
 	$(CC) -o $@ $(STOCKKEYS_UI_OBJ) $(LDFLAGS) $(LDLIBS)
 
 .PHONY: ui
-ui: $(BUILD)/test_qobuzgenregrid $(BUILD)/test_main_menu $(BUILD)/test_screensaver $(BUILD)/test_tools_pages $(BUILD)/test_wifi_pages $(BUILD)/test_chargescreen $(BUILD)/test_power_display $(BUILD)/test_lyricsearch $(BUILD)/test_games $(BUILD)/test_peq_profiles $(BUILD)/test_quickpanel_layout $(BUILD)/test_corners $(BUILD)/test_playbutton $(BUILD)/test_musicsettings_rows $(BUILD)/test_volume_overlay $(BUILD)/test_playerdeck $(BUILD)/test_vinylayout $(BUILD)/test_stickerlayout $(BUILD)/test_waveform_overlay $(BUILD)/test_hiresbadge_ui $(BUILD)/test_statusbar_ui $(BUILD)/test_stockkeys_ui
+ui: $(BUILD)/test_qobuzgenregrid $(BUILD)/test_main_menu $(BUILD)/test_screensaver $(BUILD)/test_tools_pages $(BUILD)/test_wifi_pages $(BUILD)/test_chargescreen $(BUILD)/test_power_display $(BUILD)/test_lyricsearch $(BUILD)/test_games $(BUILD)/test_peq_profiles $(BUILD)/test_quickpanel_layout $(BUILD)/test_corners $(BUILD)/test_playbutton $(BUILD)/test_musicsettings_rows $(BUILD)/test_volume_overlay $(BUILD)/test_playerdeck $(BUILD)/test_vinylayout $(BUILD)/test_stickerlayout $(BUILD)/test_waveform_overlay $(BUILD)/test_hiresbadge_ui $(BUILD)/test_statusbar_ui $(BUILD)/test_stockkeys_ui $(BUILD)/test_tidal_pages
 	$(BUILD)/test_qobuzgenregrid
 	$(BUILD)/test_main_menu ../../sonix-packer/assets/V1/usr/resource/sonix/language
 	$(BUILD)/test_main_menu ../../sonix-packer/assets/V1/usr/resource/sonix/language saved
@@ -1010,6 +1032,9 @@ ui: $(BUILD)/test_qobuzgenregrid $(BUILD)/test_main_menu $(BUILD)/test_screensav
 	$(BUILD)/test_hiresbadge_ui
 	$(BUILD)/test_statusbar_ui
 	$(BUILD)/test_stockkeys_ui ../../sonix-packer/assets/V1/usr/resource/sonix/language
+	$(BUILD)/test_tidal_pages ../../sonix-packer/assets/V1/usr/resource/sonix/language
+	$(BUILD)/test_tidal_pages ../../sonix-packer/assets/V1/usr/resource/sonix/language saved
+	$(BUILD)/test_tidal_pages ../../sonix-packer/assets/V1/usr/resource/sonix/language arranged
 
 $(BUILD)/test_main_menu: $(UI_OBJ)
 	$(CC) -o $@ $^ $(LDFLAGS) $(LDLIBS)
@@ -1025,6 +1050,15 @@ $(BUILD)/test_tools_pages: $(TOOLS_OBJ)
 
 $(BUILD)/test_wifi_pages: $(WIFIPAGE_OBJ)
 	$(CC) -o $@ $^ $(LDFLAGS) $(LDLIBS)
+
+$(BUILD)/test_tidal_pages: $(TIDALPAGE_OBJ)
+	$(CC) -o $@ $^ $(LDFLAGS) $(LDLIBS)
+
+# tidalpage.c copies a few strings into buffers GCC cannot prove are large
+# enough -- a search term, a file name off the card, an error message -- and
+# snprintf() cuts them short where they are not. That stays a warning for this
+# one object, as it does for the tag and cover tests above.
+$(BUILD)/ui/src/gui/streaming/tidalpage.o: UI_CFLAGS += -Wno-error=format-truncation
 
 $(BUILD)/test_lyricsearch: $(LYRICSEARCH_OBJ)
 	$(CC) -o $@ $^ $(LDFLAGS) $(LDLIBS)
@@ -1047,7 +1081,7 @@ $(BUILD)/ui/lvgl/%.o: $(ROOT)/lvgl/%.c ui/lv_conf.h $(ROOT)/lv_conf.h
 	@mkdir -p $(dir $@)
 	$(CC) $(UI_CPPFLAGS) $(filter-out -Werror,$(UI_CFLAGS)) -c $< -o $@
 
--include $(sort $(QOBUZGENRE_UI_OBJ:.o=.d) $(PEQPAGE_OBJ:.o=.d) $(UI_OBJ:.o=.d) $(SAVER_OBJ:.o=.d) $(CHARGE_OBJ:.o=.d) $(WIFIPAGE_OBJ:.o=.d) $(LYRICSEARCH_OBJ:.o=.d) $(GAMES_OBJ:.o=.d) $(CORNERS_OBJ:.o=.d) $(PLAYBUTTON_OBJ:.o=.d) $(MUSICROWS_OBJ:.o=.d) $(VOLUMEOVERLAY_OBJ:.o=.d) $(PLAYERDECK_OBJ:.o=.d) $(VINYLLAYOUT_OBJ:.o=.d) $(STICKERLAYOUT_OBJ:.o=.d) $(WAVEOVERLAY_OBJ:.o=.d) $(HIRESBADGE_UI_OBJ:.o=.d) $(STOCKKEYS_UI_OBJ:.o=.d))
+-include $(sort $(QOBUZGENRE_UI_OBJ:.o=.d) $(PEQPAGE_OBJ:.o=.d) $(UI_OBJ:.o=.d) $(SAVER_OBJ:.o=.d) $(CHARGE_OBJ:.o=.d) $(WIFIPAGE_OBJ:.o=.d) $(LYRICSEARCH_OBJ:.o=.d) $(GAMES_OBJ:.o=.d) $(CORNERS_OBJ:.o=.d) $(PLAYBUTTON_OBJ:.o=.d) $(MUSICROWS_OBJ:.o=.d) $(VOLUMEOVERLAY_OBJ:.o=.d) $(PLAYERDECK_OBJ:.o=.d) $(VINYLLAYOUT_OBJ:.o=.d) $(STICKERLAYOUT_OBJ:.o=.d) $(WAVEOVERLAY_OBJ:.o=.d) $(HIRESBADGE_UI_OBJ:.o=.d) $(STOCKKEYS_UI_OBJ:.o=.d) $(TIDALPAGE_OBJ:.o=.d))
 
 # Smart Mix track-count limits and traversal, with a memory-only graph fixture.
 GENIUS_SRC = test_genius.c $(ROOT)/src/system/library/genius.c
@@ -1089,13 +1123,21 @@ $(BUILD)/test_artsearch: test_artsearch.c $(ROOT)/src/system/tagmanager/artsearc
 	@mkdir -p $(BUILD)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ $^ $(LDFLAGS) $(LDLIBS)
 
+# The Tidal client against canned replies: the device-code sign-in, and the
+# playlists an account keeps as favourites (somebody else's, which the list of
+# the account's own never held).
 .PHONY: tidal
-tidal: $(BUILD)/test_tidal_login
+tidal: $(BUILD)/test_tidal_login $(BUILD)/test_tidal_favplaylists
 	$(BUILD)/test_tidal_login
+	$(BUILD)/test_tidal_favplaylists
 
 $(BUILD)/test_tidal_login: test_tidal_login.c $(ROOT)/src/system/streaming/tidal.c $(ROOT)/src/system/core/base64.c $(ROOT)/src/system/core/json.c
 	@mkdir -p $(BUILD)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ $^ $(LDFLAGS) $(LDLIBS)
+
+$(BUILD)/test_tidal_favplaylists: test_tidal_favplaylists.c $(ROOT)/src/system/streaming/tidal.c $(ROOT)/src/system/streaming/tidal.h $(ROOT)/src/system/core/base64.c $(ROOT)/src/system/core/json.c
+	@mkdir -p $(BUILD)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ $(filter %.c,$^) $(LDFLAGS) $(LDLIBS)
 
 
 .PHONY: browserstate

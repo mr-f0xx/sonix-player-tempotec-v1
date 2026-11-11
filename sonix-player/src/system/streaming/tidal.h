@@ -209,6 +209,13 @@ int tidal_favorite_albums(int offset, tidal_album_t *out, int max);
 int tidal_favorite_artists(int offset, tidal_artist_t *out, int max);
 int tidal_user_playlists(int offset, tidal_playlist_t *out, int max);
 
+// The playlists the account keeps as favourites: somebody else's -- Tidal's
+// editors', an artist's, another user's -- where tidal_user_playlists() lists
+// the ones the account made. Two lists on Tidal's side, asked for separately.
+// Their tracks are read with tidal_playlist_tracks(), which takes any
+// playlist's UUID; nothing in them is changed from here.
+int tidal_favorite_playlists(int offset, tidal_playlist_t *out, int max);
+
 // The collections Tidal features. `type` is one of the local short names, not
 // one of Tidal's: "new", "top", "recommended". See the table in tidal.c for how
 // they become URLs.
@@ -296,6 +303,13 @@ bool tidal_favorite_remove_album(const char *album_id);
 // albums, under "artists", and are addressed by their numeric id.
 bool tidal_favorite_add_artist(long artist_id);
 bool tidal_favorite_remove_artist(long artist_id);
+
+// Takes somebody else's playlist out of the favourites. The playlist itself is
+// not touched, which is the difference from tidal_playlist_delete(): that one
+// is for the playlists the account made. There is no "add" to go with it,
+// because nothing in this player lists a playlist the account does not already
+// hold.
+bool tidal_favorite_remove_playlist(const char *playlist_id);
 
 bool tidal_playlist_delete(const char *playlist_id);
 bool tidal_playlist_create(const char *name, char *out_id, size_t out_size);

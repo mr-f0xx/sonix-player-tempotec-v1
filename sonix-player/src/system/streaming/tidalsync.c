@@ -169,6 +169,7 @@ typedef enum {
 	JOB_ARTIST_FAVORITE,
 	JOB_ALBUMS_FAVORITES_LOAD,
 	JOB_ARTISTS_FAVORITES_LOAD,
+	JOB_PLAYLIST_UNFAVORITE,
 } job_kind_t;
 
 typedef struct {
@@ -410,6 +411,23 @@ static void do_playlist_remove(const job_t *job) {
 	}
 }
 
+// A favourited playlist is somebody else's, so this touches neither the
+// account's own playlists nor the copy of them the picker keeps: only the
+// favourites list on the card is made wrong. The playlist's rows go with it --
+// they are still true, but nothing is left on the page to open them from.
+static void do_playlist_unfavorite(const job_t *job) {
+	bool ok = tidal_favorite_remove_playlist(job->playlist_id);
+	if (ok) {
+		char key[64];
+		listcache_tidal_playlist_key(job->playlist_id, key, sizeof(key));
+		listcache_drop(key);
+		listcache_drop(LISTCACHE_TIDAL_FAV_PLAYLISTS);
+	}
+	if (job->done) {
+		job->done(ok, ok ? NULL : tidal_last_error(), job->user);
+	}
+}
+
 static void *worker_main(void *arg) {
 	(void)arg;
 	thread_be_background("tidal sync");
@@ -456,6 +474,9 @@ static void *worker_main(void *arg) {
 			break;
 		case JOB_ARTISTS_FAVORITES_LOAD:
 			do_artists_favorites_load(&job);
+			break;
+		case JOB_PLAYLIST_UNFAVORITE:
+			do_playlist_unfavorite(&job);
 			break;
 		default:
 			break;
@@ -558,6 +579,18 @@ void tidalsync_playlist_remove(const char *playlist_id, tidalsync_done_cb done, 
 		return;
 	}
 	job_t job = {.kind = JOB_PLAYLIST_REMOVE, .done = done, .user = user};
+	snprintf(job.playlist_id, sizeof(job.playlist_id), "%s", playlist_id);
+	submit(&job);
+}
+
+void tidalsync_playlist_unfavorite(const char *playlist_id, tidalsync_done_cb done, void *user) {
+	if (!playlist_id || !playlist_id[0]) {
+		if (done) {
+			done(false, tr("tidal_playlist_without_id"), user);
+		}
+		return;
+	}
+	job_t job = {.kind = JOB_PLAYLIST_UNFAVORITE, .done = done, .user = user};
 	snprintf(job.playlist_id, sizeof(job.playlist_id), "%s", playlist_id);
 	submit(&job);
 }

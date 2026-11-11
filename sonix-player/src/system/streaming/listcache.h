@@ -60,6 +60,7 @@ void listcache_drop(const char *key);
 #define LISTCACHE_TIDAL_FAV_TRACKS "tidal_fav_tracks"
 #define LISTCACHE_TIDAL_FAV_ALBUMS "tidal_fav_albums"
 #define LISTCACHE_TIDAL_FAV_ARTISTS "tidal_fav_artists"
+#define LISTCACHE_TIDAL_FAV_PLAYLISTS "tidal_fav_playlists"
 #define LISTCACHE_TIDAL_PLAYLISTS "tidal_playlists"
 
 // The tracks of one playlist, by its UUID.
