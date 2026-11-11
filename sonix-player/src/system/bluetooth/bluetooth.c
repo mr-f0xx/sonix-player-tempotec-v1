@@ -126,6 +126,7 @@ typedef enum {
 	JOB_RX_INFO,   // re-read what a device streaming to this one is sending
 	JOB_RX_CODEC,  // text: the codec to move the incoming stream onto
 	JOB_RX_INVITE, // the sender delivers nothing: ask it for a stream again
+	JOB_RX_RECOVER, // text: the codec to renegotiate away from, after a decode that will not run
 	JOB_MEDIA,	   // text: an AVRCP member to send to that device
 } job_type_t;
 
@@ -233,6 +234,11 @@ static unsigned g_rx_requested, g_rx_answered;
 static char g_rx_codecs[BT_MAX_CODECS][BT_CODEC_MAX];
 static int g_rx_codec_count;
 static char g_rx_codec_selected[BT_CODEC_MAX];
+
+// Recovery of a receiving link whose codec will not decode: how many were
+// asked for, and how many have been done. See bluetooth_receiver_recover_codec().
+static unsigned g_rx_recover_requests, g_rx_recover_done;
+#define RX_RECOVER_WAIT_MS 20000
 
 static bool post_job(const job_t *job);
 static bool queue_has(job_type_t type);
@@ -1709,19 +1715,43 @@ static bool ensure_bluealsa(void) {
 		//                  = 8    below this player's playback thread (SCHED_RR 10)
 		//                  = 12   above it
 		//
-		// The encoder is the side with the hard deadline -- a packet every few
-		// milliseconds or the sink hears a gap -- while the decoder has 750 ms of
-		// buffer as slack, which is the argument for 12. A consumer that outranks
-		// its producer on a single core is the argument for 8.
+		// The IO thread is the side with the hard deadline: a packet every few
+		// milliseconds or the other end hears a gap.
+		//
+		// In transmitter mode that is the encoder. In receiver mode it is the
+		// thread that decodes what the phone sent and writes it into the PCM
+		// FIFO this player reads, and the deadline is the same one seen from the
+		// other side: the FIFO is four kilobytes (see the asound plugin's
+		// F_SETPIPE_SZ), which at LDAC's 96 kHz 32-bit output is about eleven
+		// milliseconds. A decode thread that waits behind an LVGL paint on the
+		// one core does not merely arrive late -- it lets the FIFO empty, the
+		// DAC runs dry, and the phone is told about it the only way it can be
+		// told: the frames it keeps sending are not being taken, its socket
+		// backs up, and LDAC's adaptive bit rate answers by lowering the quality
+		// and taking a long time to climb back. That is the whole of "the sound
+		// goes mushy for a couple of minutes and then comes back".
+		//
+		// It stays a setting because the ordering between the two sides is a
+		// question a listen answers better than an argument does:
+		//
+		//   [bluetooth]
+		//   io_rt_priority = 0    no option at all
+		//                  = 8    below this player's playback thread (SCHED_RR 10)
+		//                  = 12   above it
+		//
+		// The thread with the hard deadline is the argument for 12. A consumer
+		// that outranks its producer on a single core is the argument for 8.
 		char rtprio[32] = {0};
 		int wanted = (int)config_get_int("bluetooth", "io_rt_priority", 12);
 		bool rt = wanted > 0 && bluealsa_knows_option("--io-rt-priority");
 		if (rt) {
 			snprintf(rtprio, sizeof(rtprio), "--io-rt-priority=%d", wanted);
-			fprintf(stderr, "bluetooth: encoder threads at SCHED_FIFO %d\n", wanted);
+			fprintf(stderr, "bluetooth: bluealsa's %s thread at SCHED_FIFO %d\n",
+					want_sink ? "decode" : "encoder", wanted);
 		} else if (wanted > 0) {
-			fprintf(stderr, "bluetooth: this bluealsa has no --io-rt-priority; the encoder stays at normal "
-							"priority\n");
+			fprintf(stderr, "bluetooth: this bluealsa has no --io-rt-priority; the %s thread stays at normal "
+							"priority\n",
+					want_sink ? "decode" : "encoder");
 		}
 		// LDAC's bit rate. A daemon option and not a per-link one: it is read
 		// here and nowhere else, which is why changing it restarts the daemon.
@@ -3527,6 +3557,52 @@ static void do_set_receiver_codec(const char *codec) {
 	set_op(done ? BT_OP_OK : BT_OP_FAILED, codec);
 }
 
+// A receiving link whose decoder cannot run: move it onto another codec.
+//
+// This is not a preference and not the user's codec button -- it is what is
+// left when the stream is open, frames are arriving, and nothing comes out.
+// bluez-alsa's aptX decoder loops on a decode error without consuming its
+// input (`a2dp_aptx_dec_thread`: `aptxdec_decode() <= 0` -> `continue`, with
+// `input` and `input_len` untouched), so one bad packet at the head of a stream
+// turns into a real-time thread spinning on the same bytes for ever: no audio,
+// a core gone, and nothing in any log but the same error at whatever rate the
+// daemon can print it. Picking a different codec is the only thing that ends
+// it, because it is a new transport and a new decode thread.
+//
+// The level the phone had set is carried over, exactly as the codec button
+// does: renegotiating builds a new PCM object, which starts at bluealsa's
+// default, and the phone does not resend what it already set.
+static void do_recover_receiver(const char *codec) {
+	char mac[BT_MAC_MAX];
+	if (!codec || !codec[0] || !btstack_audio_source(mac, sizeof(mac))) {
+		set_op(BT_OP_FAILED, NULL);
+		goto answered;
+	}
+
+	int volume = -1;
+	btstack_pcm_volume_get(mac, true, &volume);
+
+	fprintf(stderr, "bluetooth: %s is not decoding; moving the link to %s and opening it again\n", mac, codec);
+	bool done = btstack_select_codec_dir(mac, true, codec);
+	sleep_ms(600);
+	if (done && volume >= 0) {
+		if (!btstack_pcm_volume_set(mac, true, volume)) {
+			sleep_ms(400);
+			btstack_pcm_volume_set(mac, true, volume);
+		}
+	}
+	if (done) {
+		set_op(BT_OP_OK, codec);
+	} else {
+		set_op(BT_OP_FAILED, codec);
+	}
+
+answered:
+	pthread_mutex_lock(&lock);
+	g_rx_recover_done = g_rx_recover_requests;
+	pthread_mutex_unlock(&lock);
+}
+
 static void do_read_receiver(void) {
 	pthread_mutex_lock(&lock);
 	unsigned requested = g_rx_requested;
@@ -3714,6 +3790,47 @@ void bluetooth_receiver_set_codec(const char *codec) {
 	job_t job = {.type = JOB_RX_CODEC};
 	snprintf(job.text, sizeof(job.text), "%s", codec);
 	post_job(&job);
+}
+
+bool bluetooth_receiver_recover_codec(const char *codec) {
+	if (!codec || !codec[0]) {
+		return false;
+	}
+
+	// Queued, and waited for but not for long: the capture thread is real-time
+	// and holds the capture PCM, so it must not stand in a D-Bus round trip
+	// while the DAC waits on it. The worker does the renegotiation and says
+	// when it is done; the wait is only so that the caller does not reopen the
+	// same broken stream a moment later.
+	pthread_mutex_lock(&lock);
+	g_rx_recover_requests++;
+	pthread_mutex_unlock(&lock);
+
+	job_t job = {.type = JOB_RX_RECOVER};
+	snprintf(job.text, sizeof(job.text), "%s", codec);
+	post_job(&job);
+
+	// The clock is the player's own monotonic one, not time(): a device whose
+	// RTC is set at boot must not be able to make this wait forever or not at
+	// all.
+	uint32_t started = now_ms();
+	for (;;) {
+		pthread_mutex_lock(&lock);
+		bool done = g_rx_recover_done <= g_rx_recover_requests;
+		pthread_mutex_unlock(&lock);
+		if (done) {
+			return true;
+		}
+		if (now_ms() - started > RX_RECOVER_WAIT_MS) {
+			fprintf(stderr, "bluetooth: the codec change on the receiving link did not answer in %d ms\n",
+					RX_RECOVER_WAIT_MS);
+			pthread_mutex_lock(&lock);
+			g_rx_recover_done = g_rx_recover_requests; // do not wait for it twice
+			pthread_mutex_unlock(&lock);
+			return false;
+		}
+		usleep(20 * 1000);
+	}
 }
 
 unsigned bluetooth_receiver_stream_serial(void) {
@@ -4739,6 +4856,10 @@ static void *bluetooth_worker(void *arg) {
 				}
 				break;
 			}
+
+			case JOB_RX_RECOVER:
+				do_recover_receiver(job.text);
+				break;
 
 			case JOB_MEDIA:
 				do_media_command(job.text);

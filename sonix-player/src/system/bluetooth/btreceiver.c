@@ -4,6 +4,7 @@
 
 #include "src/system/audio/audio.h"
 #include "src/system/bluetooth/bluetooth.h"
+#include "src/system/bluetooth/btrxring.h"
 #include "src/system/core/config.h"
 #include "src/system/core/lang.h"
 #include "src/system/core/utils.h"
@@ -55,6 +56,54 @@
 #define CAPTURE_MS_DEFAULT 80
 #define OUTPUT_MS_DEFAULT 120
 
+// The buffer that separates the two clocks: what the phone sent, waiting to be
+// played. See btrxring.h for why it has to exist at all and what it costs.
+//
+// The depth it is topped up to before the DAC is fed is the slack for a bursty
+// delivery -- a Wi-Fi scan on the shared antenna, an ALSA read that arrives
+// twenty milliseconds late, the block a track change loses. The ceiling has no
+// good answer when it is reached (something has to be dropped, and dropping is
+// the stutter this exists to prevent), so it is set well above the depth the
+// link actually needs and only bounds a sender whose clock is badly fast.
+//
+// Together with the two buffers above they are the delay from the phone to the
+// ear: 120 ms of DAC buffer, the ring, and bluealsa's own queue inside its
+// capture buffer. 150 ms of ring is a third of a video's lip sync and several
+// times the worst delivery jitter a 2.4 GHz link produces; the ceiling is
+// where the ring stops being a buffer and starts being a late echo.
+//
+//   [bluetooth]
+//   receiver_jitter_ms   = 150   what is kept in hand
+//   receiver_ring_ms     = 400   the hard ceiling
+#define RING_MS_DEFAULT 150
+#define RING_CEILING_MS_DEFAULT 400
+#define RING_MS_MIN 20
+#define RING_MS_MAX 400
+
+// A session that has been open this long with nothing reaching the DAC, while
+// the phone's AVRCP status says it is playing, is not a quiet stream: it is a
+// decoder that will not run. bluez-alsa's aptX decoder is the case -- one packet
+// it cannot decode and it spins on that packet for ever (`a2dp-aptx.c`:
+// `aptxdec_decode() <= 0` -> `continue`, input not advanced) -- but the same
+// shape covers a build without the decoder the link negotiated, and any other
+// decoder that fails without failing the stream.
+//
+// Reopening the PCM does not help, because nothing is wrong with the PCM: the
+// frames are arriving and being decoded into nothing. What helps is a new
+// transport, which is another codec.
+#define DECODER_STUCK_MS 6000
+
+// How long the output thread waits for the ring to reach its depth before it
+// plays what there is anyway. A phone that is between tracks fills nothing, and
+// waiting on it would be silence with a reason rather than a delay.
+#define PLAYOUT_PRIME_MS 3000
+
+// How long the capture thread waits for room when the ring is full. The ring
+// being full is the sender's clock running ahead, not an error, so this is a
+// wait and not a fault -- and the wait is on the ring's own change signal, so a
+// full ring costs no wake-ups at all until the output takes some.
+#define PRODUCER_WAIT_MS 200
+
 // Below this neither side has room for a late turn of this thread, whatever the
 // config says.
 #define BUFFER_MS_MIN 30
@@ -68,6 +117,21 @@ static int capture_ms(void) {
 static int output_ms(void) {
 	int ms = (int)config_get_int("bluetooth", "receiver_output_ms", OUTPUT_MS_DEFAULT);
 	return ms < BUFFER_MS_MIN ? BUFFER_MS_MIN : (ms > BUFFER_MS_MAX ? BUFFER_MS_MAX : ms);
+}
+
+static int ring_ms(void) {
+	int ms = (int)config_get_int("bluetooth", "receiver_jitter_ms", RING_MS_DEFAULT);
+	return ms < RING_MS_MIN ? RING_MS_MIN : (ms > RING_MS_MAX ? RING_MS_MAX : ms);
+}
+
+static int ring_ceiling_ms(int target_ms) {
+	int ms = (int)config_get_int("bluetooth", "receiver_ring_ms", RING_CEILING_MS_DEFAULT);
+	if (ms < target_ms) {
+		ms = target_ms;
+	}
+	// btrxring_create() clamps the pair itself; this only keeps the config's
+	// number inside the range that clamp would allow anyway.
+	return ms > RING_MS_MAX + 400 ? RING_MS_MAX + 400 : ms;
 }
 
 // How long after the last frame the stream still counts as live. A sender that
@@ -99,6 +163,42 @@ static void touch(void) { serial++; }
 
 // Under `lock`.
 static bool sounding(void) { return last_frame_ms != 0 && (now_ms() - last_frame_ms) < SILENCE_MS; }
+
+// Whether this session is one whose decoder is not running: frames have
+// arrived, none of them has reached the DAC, and long enough has passed for
+// that not to be a slow start.
+//
+// Kept apart from the session so the condition can be checked without a
+// Bluetooth stack and a six-second wait; `stuck` on the caller's side makes
+// sure it is acted on once per session and not once per turn of the loop.
+static bool decoder_stuck(bool heard, unsigned pushed, unsigned long long played, uint32_t began, uint32_t now) {
+	return heard && pushed > 0 && played == 0 && began != 0 && (uint32_t)(now - began) >= DECODER_STUCK_MS;
+}
+
+// Another codec on this link that is not `codec`, for a stream that is arriving
+// and not decoding. Empty when the link offers nothing else -- which is a link
+// that has to be left as it is rather than reopened on the same codec for ever.
+static bool next_codec_offered(const char *codec, char *out, size_t size) {
+	out[0] = '\0';
+	char offered[BT_MAX_CODECS][BT_CODEC_MAX];
+	char selected[BT_CODEC_MAX] = "";
+	int count = bluetooth_receiver_codecs(offered, BT_MAX_CODECS, selected, sizeof(selected));
+	for (int i = 0; i < count; i++) {
+		if (codec && codec[0] && strcasecmp(offered[i], codec) == 0) {
+			continue;
+		}
+		if (offered[i][0]) {
+			snprintf(out, size, "%s", offered[i]);
+			return true;
+		}
+	}
+	return false;
+}
+
+// Frames as milliseconds at `rate`, for the log lines only.
+static unsigned ms_from_frames(unsigned frames, unsigned rate) {
+	return rate ? (unsigned)(((unsigned long long)frames * 1000u) / rate) : 0;
+}
 
 static void set_error(unsigned session, const char *text) {
 	pthread_mutex_lock(&lock);
@@ -293,6 +393,189 @@ static int wait_capture(snd_pcm_t *pcm) {
 #define FIRST_FRAME_MS 3000
 #endif
 
+// ---------------------------------------------------------------------------
+// the thread that feeds the DAC
+//
+// The capture thread above does two things that used to be one and must not be:
+// it drains the phone's PCM, and -- here -- another thread owns the output.
+//
+// They are separated because the two clocks are not the same clock. Decoding
+// runs at whatever rate the phone's audio clock produces; the DAC runs at its
+// own oscillator. With one thread and one buffer between them the two meet head
+// on, and every delivery that is a few milliseconds late -- and over a shared
+// antenna some always are -- takes the DAC below its buffer. That is a stutter
+// in the ear, and for LDAC it is worse than a stutter: while the sink is not
+// draining, the phone's socket backs up, its adaptive bit rate reads that as a
+// bad link and lowers the quality, and it takes minutes to climb back. So the
+// ring between them is the slack, and this thread spends it.
+//
+// It is short on purpose. A thread that owns the output does one thing per
+// wake-up -- copy frames out of the ring into the DAC -- and nothing else: no
+// D-Bus, no log line except its own occasional report, no allocation. What it
+// must not do is fall behind the DAC's period.
+// ---------------------------------------------------------------------------
+
+typedef enum {
+	PLAYOUT_RUNNING,	// feeding the DAC
+	PLAYOUT_FINISHED,	// the capture side ended; the ring was played out and it stopped
+	PLAYOUT_FAILED,		// the output stopped taking frames, which ends the session
+} playout_state_t;
+
+typedef struct {
+	pthread_mutex_t lock;
+	playout_state_t state;
+	bool consumer_gone; // set by the capture thread when it stops producing
+	btrxring_t *ring;
+	unsigned rate;
+	unsigned frame_bytes;
+	// Counters, under `lock`. Read once when the session ends and printed if
+	// any of them is non-zero: they say which side of the ring starved.
+	unsigned starved;   // reads that emptied the ring completely
+	unsigned long long frames_out;
+} playout_t;
+
+#define PLAYOUT_WAIT_MS 200
+
+// Under out->lock.
+static bool playout_running(playout_t *out) { return out->state == PLAYOUT_RUNNING; }
+
+static bool playout_live(playout_t *out) {
+	pthread_mutex_lock(&out->lock);
+	bool live = playout_running(out);
+	pthread_mutex_unlock(&out->lock);
+	return live;
+}
+
+static bool playout_failed(playout_t *out) {
+	pthread_mutex_lock(&out->lock);
+	bool failed = out->state == PLAYOUT_FAILED;
+	pthread_mutex_unlock(&out->lock);
+	return failed;
+}
+
+// One write of `count` frames. audio_external_write() owns the recovery -- an
+// underrun is prepared over, a suspended device is resumed, the route is
+// followed when it moves -- and what it cannot recover from, it answers with
+// zero. That is the one case here: the PCM was closed under it and the session
+// has to be reopened.
+static bool playout_write(playout_t *out, const void *frames, int count) {
+	int written = 0;
+	while (written < count) {
+		const void *at = (const char *)frames + (size_t)written * out->frame_bytes;
+		int got = audio_external_write(at, count - written);
+		if (got > 0) {
+			written += got;
+			pthread_mutex_lock(&out->lock);
+			out->frames_out += (unsigned long long)got;
+			pthread_mutex_unlock(&out->lock);
+			continue;
+		}
+		// audio_external_write() recovers underruns and suspends itself and
+		// returns what it managed. Nothing written at all is what happens when
+		// the PCM was closed under it -- the route moved, or the card went
+		// away -- and there is nothing to gain by trying again here.
+		if (got == 0) {
+			return false;
+		}
+	}
+	return true;
+}
+
+// Waits until the ring holds its target depth. One clean delay at the start of
+// a session instead of a handful of underruns while the phone fills the pipe.
+static void playout_prime(playout_t *out) {
+	uint32_t started = now_ms();
+	for (;;) {
+		pthread_mutex_lock(&out->lock);
+		bool run = playout_running(out);
+		// Nothing more is coming: the capture side has ended the session and is
+		// waiting to join this thread. Priming for the depth it will never reach
+		// would hold the teardown -- and the reopen of whatever replaced this
+		// stream -- for the whole of PLAYOUT_PRIME_MS.
+		bool gone = out->consumer_gone;
+		bool ready = btrxring_ready(out->ring);
+		pthread_mutex_unlock(&out->lock);
+		if (!run || gone || ready) {
+			return;
+		}
+		// A sender that never fills the ring within a few seconds is not going
+		// to: play what there is rather than sit silent for ever.
+		if (now_ms() - started >= PLAYOUT_PRIME_MS) {
+			return;
+		}
+		unsigned serial = btrxring_serial(out->ring);
+		btrxring_wait(out->ring, serial, PLAYOUT_WAIT_MS);
+	}
+}
+
+static void *playout_worker(void *arg) {
+	playout_t *out = arg;
+	thread_be_realtime("btrxplay", (int)config_get_int("bluetooth", "receiver_rt_priority", 10));
+
+	// A chunk big enough that one wake-up is a few periods' worth of frames at
+	// any rate this path sees, and small enough that the copy is not the work.
+	unsigned chunk = (unsigned)config_get_int("bluetooth", "receiver_output_ms", OUTPUT_MS_DEFAULT);
+	chunk = chunk < 20 ? 20 : (chunk > 200 ? 200 : chunk);
+	size_t frames_max = (size_t)((unsigned long long)out->rate * chunk / 1000u);
+	if (frames_max < CHUNK_FRAMES) {
+		frames_max = CHUNK_FRAMES;
+	}
+	void *buffer = malloc(frames_max * out->frame_bytes);
+	if (!buffer) {
+		pthread_mutex_lock(&out->lock);
+		out->state = PLAYOUT_FAILED;
+		pthread_mutex_unlock(&out->lock);
+		return NULL;
+	}
+
+	playout_prime(out);
+
+	for (;;) {
+		pthread_mutex_lock(&out->lock);
+		bool gone = out->consumer_gone;
+		bool failed = out->state == PLAYOUT_FAILED;
+		pthread_mutex_unlock(&out->lock);
+		if (failed) {
+			break;
+		}
+
+		unsigned took = btrxring_pop(out->ring, buffer, (unsigned)frames_max);
+		if (took == 0) {
+			if (gone) {
+				// Everything the capture side produced has been played. Only
+				// now does the session end, and only here is the ring empty.
+				break;
+			}
+			// Nothing to play: the phone is between tracks, or the link is
+			// having a moment. Wait on the ring's change signal -- not on a
+			// timeout -- so a sender that is quiet costs no wake-ups, and count
+			// the times a read did come back with an empty ring: that is the
+			// DAC being kept waiting, which is the sound of a stutter.
+			unsigned serial = btrxring_serial(out->ring);
+			pthread_mutex_lock(&out->lock);
+			out->starved++;
+			pthread_mutex_unlock(&out->lock);
+			btrxring_wait(out->ring, serial, PLAYOUT_WAIT_MS);
+			continue;
+		}
+
+		if (!playout_write(out, buffer, (int)took)) {
+			pthread_mutex_lock(&out->lock);
+			out->state = PLAYOUT_FAILED;
+			pthread_mutex_unlock(&out->lock);
+			break;
+		}
+	}
+
+	free(buffer);
+	pthread_mutex_lock(&out->lock);
+	if (out->state != PLAYOUT_FAILED) {
+		out->state = PLAYOUT_FINISHED;
+	}
+	pthread_mutex_unlock(&out->lock);
+	return NULL;
+}
+
 typedef enum {
 	SESSION_OVER,	// nothing more to try: the mode ends
 	SESSION_AGAIN,	// the configuration moved; open whatever replaced it
@@ -345,6 +628,10 @@ static session_t capture_session(const char *mac, const char *name, bool may_gue
 	// takes 32-bit words, so 16-bit frames are left-justified into the top half
 	// of one rather than handed over as they came. Asked in that order because
 	// 32 is the path the hardware is known to take.
+	//
+	// Widening happens on the way into the ring, not on the way out: the ring
+	// then holds the output's own format, and the thread that feeds the DAC has
+	// nothing to do but copy frames and write them.
 	bool widen = false;
 	bool opened = false;
 	int buffer_ms = output_ms();
@@ -354,6 +641,7 @@ static session_t capture_session(const char *mac, const char *name, bool may_gue
 	}
 	if (!opened) {
 		opened = audio_external_begin_latency((int)rate, (int)channels, (int)capture_bits, buffer_ms);
+		widen = false;
 	}
 	if (!opened) {
 		fprintf(stderr, "btreceiver: the output would not take %u Hz %u bit\n", rate, in_bits);
@@ -362,7 +650,27 @@ static session_t capture_session(const char *mac, const char *name, bool may_gue
 		return SESSION_OVER;
 	}
 
+	// What one frame is on the way into the ring: the output's format, which is
+	// the capture format unless the 16-to-32 widening happened above.
+	unsigned out_bits = widen ? 32 : capture_bits;
+	unsigned frame_bytes = channels * (out_bits / 8);
+
+	// The buffer between the two clocks, sized for the stream that is actually
+	// running rather than for a guess about it: 150 ms at 44.1 kHz and at
+	// 96 kHz are the same number of milliseconds of slack, not the same number
+	// of bytes, and the millisecond is the one that matters.
+	int target_ms = ring_ms();
+	btrxring_t *ring = btrxring_create(rate, frame_bytes, (unsigned)target_ms, (unsigned)ring_ceiling_ms(target_ms));
+	if (!ring) {
+		fprintf(stderr, "btreceiver: no memory for the %d ms jitter buffer\n", target_ms);
+		audio_external_end();
+		snd_pcm_close(pcm);
+		set_error(session, tr("btreceiver_not_enough_memory"));
+		return SESSION_OVER;
+	}
+
 	if (!session_live(session)) {
+		btrxring_destroy(ring);
 		audio_external_end();
 		snd_pcm_close(pcm);
 		return SESSION_OVER;
@@ -374,6 +682,7 @@ static session_t capture_session(const char *mac, const char *name, bool may_gue
 	if (!chunk || (widen && !wide)) {
 		free(chunk);
 		free(wide);
+		btrxring_destroy(ring);
 		audio_external_end();
 		snd_pcm_close(pcm);
 		set_error(session, tr("btreceiver_not_enough_memory"));
@@ -382,22 +691,55 @@ static session_t capture_session(const char *mac, const char *name, bool may_gue
 
 	fprintf(stderr, "btreceiver: %s is sending %s %u Hz %u ch %u bit\n", mac, info.codec[0] ? info.codec : "?", rate,
 			channels, in_bits);
+	fprintf(stderr, "btreceiver: %d ms buffer kept in hand, %u ms ceiling; the DAC gets its own thread\n",
+			(int)btrxring_target_ms(ring), btrxring_capacity_ms(ring));
 
 	// The PCM is open: whatever the last attempt complained about is over.
 	set_error(session, NULL);
+
+	// The two halves. The thread below owns the output and every frame taken
+	// from the ring; this one owns the capture PCM and puts frames in. Either
+	// can end the session, so `state` is written by both and read by both.
+	playout_t out;
+	memset(&out, 0, sizeof(out));
+	pthread_mutex_init(&out.lock, NULL);
+	out.ring = ring;
+	out.rate = rate;
+	out.frame_bytes = frame_bytes;
+	out.state = PLAYOUT_RUNNING;
+
+	pthread_t play_thread;
+	bool have_play = pthread_create(&play_thread, NULL, playout_worker, &out) == 0;
+	if (!have_play) {
+		// No second thread. One thread writing the DAC is what this was before
+		// the ring existed -- worse under load, but not a reason to refuse the
+		// session outright.
+		fprintf(stderr, "btreceiver: could not start the output thread; playing from this one\n");
+	}
 
 	bool again = false;
 	bool heard = false;
 	int empty = 0;
 	uint32_t began = now_ms();
 	uint32_t watched = now_ms();
+	uint32_t last_report = now_ms();
+	unsigned pushed = 0, dropped = 0;
 
-	for (;;) {
-		pthread_mutex_lock(&lock);
-		bool go = running && session == session_id;
-		pthread_mutex_unlock(&lock);
-		if (!go) {
+	while (playout_live(&out)) {
+		if (!session_live(session)) {
 			break;
+		}
+
+		// The producer's own report, once every ten seconds: how much slack is
+		// left, how often the ring was full, and how far behind the phone's
+		// clock this one has drifted. The three numbers that separate "the link
+		// is late", "the player is late" and "the two clocks differ", which
+		// otherwise all sound like a hiccup.
+		if (now_ms() - last_report >= 10000) {
+			last_report = now_ms();
+			fprintf(stderr, "btreceiver: buffer %u ms of %u (peak %u), %u frames in, %u dropped\n",
+					btrxring_fill_ms(ring), btrxring_capacity_ms(ring),
+					(unsigned)ms_from_frames(btrxring_high_water(ring), rate), pushed, dropped);
 		}
 
 		// What the other end is sending, asked of bluealsa rather than of the
@@ -437,6 +779,28 @@ static session_t capture_session(const char *mac, const char *name, bool may_gue
 			}
 		}
 
+		// Frames are being taken from the phone and nothing is coming out. That
+		// is the decoder, and the answer is a different one: the link is
+		// renegotiated away from the codec it is stuck on, once per session,
+		// and this session ends so the new transport is opened fresh.
+		if (decoder_stuck(heard, pushed, out.frames_out, began, now_ms()) && bluetooth_receiver_playing()) {
+			fprintf(stderr, "btreceiver: %u frames have arrived from %s and none of %s has reached the DAC; "
+							"moving the link off it\n",
+					pushed, mac, info.codec[0] ? info.codec : "the codec");
+			// Never the codec it is stuck on: the next one bluealsa offers on
+			// this link that is not this one. A link that offers nothing else
+			// ends the session rather than staying silent for ever.
+			char other[BT_CODEC_MAX] = "";
+			if (!next_codec_offered(info.codec, other, sizeof(other)) ||
+				!bluetooth_receiver_recover_codec(other)) {
+				fprintf(stderr, "btreceiver: no other codec to move to; leaving the link alone\n");
+				again = false;
+				break;
+			}
+			again = true;
+			break;
+		}
+
 		// A PCM that opened on a transport that is no longer there does not fail
 		// and does not error: it simply never delivers. The sender's own AVRCP
 		// status is what separates that from a sender that is paused.
@@ -448,7 +812,35 @@ static session_t capture_session(const char *mac, const char *name, bool may_gue
 			break;
 		}
 
-		snd_pcm_sframes_t got = snd_pcm_readi(pcm, chunk, CHUNK_FRAMES);
+		// No room is not an error and not a reason to read: the ring is a
+		// buffer, and being full means the sender's clock is ahead of this one
+		// for a moment. Wait for the output thread to take some, then read. A
+		// read that would not fit is where frames would have to be dropped.
+		//
+		// How much has to be free is one read, but never more than half the ring
+		// -- a short ring (a low rate with a small `receiver_jitter_ms`) would
+		// otherwise be asked for room it can never have, and this thread would
+		// wait for ever on a buffer that is merely full.
+		unsigned want = CHUNK_FRAMES;
+		unsigned half = btrxring_capacity_frames(ring) / 2;
+		if (half < want) {
+			want = half ? half : 1;
+		}
+		unsigned room = btrxring_room(ring);
+		if (room < want) {
+			unsigned serial = btrxring_serial(ring);
+			if (btrxring_room(ring) < want) {
+				btrxring_wait(ring, serial, PRODUCER_WAIT_MS);
+			}
+			continue;
+		}
+		// Never read more than the ring can take: a read of a full chunk into a
+		// ring with less room than that is frames the phone sent and this side
+		// threw away, and the ring exists so that nothing has to be thrown away.
+		// Reading less is free -- snd_pcm_readi takes what is there, and the
+		// remainder stays in bluealsa's buffer for the next turn.
+		snd_pcm_uframes_t ask = room < CHUNK_FRAMES ? (snd_pcm_uframes_t)room : (snd_pcm_uframes_t)CHUNK_FRAMES;
+		snd_pcm_sframes_t got = snd_pcm_readi(pcm, chunk, ask);
 		if (got == -EAGAIN || got == 0) {
 			int ready = wait_capture(pcm);
 			if (ready > 0) usleep(1000); // a lying readiness cannot spin FIFO
@@ -478,6 +870,8 @@ static session_t capture_session(const char *mac, const char *name, bool may_gue
 		empty = 0;
 		heard = true;
 
+		// A frame has arrived: the mode is receiving, whether or not this chunk
+		// reaches the DAC a moment later.
 		pthread_mutex_lock(&lock);
 		if (!running || session != session_id) {
 			pthread_mutex_unlock(&lock);
@@ -491,22 +885,73 @@ static session_t capture_session(const char *mac, const char *name, bool may_gue
 		}
 		pthread_mutex_unlock(&lock);
 
+		unsigned count = (unsigned)got;
+		const void *src = chunk;
 		if (widen) {
-			const int16_t *src = chunk;
+			const int16_t *narrow = chunk;
 			for (snd_pcm_sframes_t i = 0; i < got * (snd_pcm_sframes_t)channels; i++) {
-				wide[i] = (int32_t)((uint32_t)(uint16_t)src[i] << 16);
+				wide[i] = (int32_t)((uint32_t)(uint16_t)narrow[i] << 16);
 			}
-			audio_external_write(wide, (int)got);
-		} else {
-			audio_external_write(chunk, (int)got);
+			src = wide;
+		}
+		pushed += count;
+
+		if (have_play) {
+			unsigned took = btrxring_push(ring, src, count);
+			// Should not happen: the read above is bounded by the room there
+			// was. It is counted rather than logged per chunk because if it
+			// ever does happen, it does it a hundred times a second, and the
+			// session's closing line already carries the total.
+			dropped += count - took;
+		} else if (!playout_write(&out, src, (int)count)) {
+			// No output thread: the write is this thread's. When it fails there
+			// is nothing left to write to, and the session is over.
+			if (!session_live(session)) {
+				break;
+			}
+			again = true;
+			break;
 		}
 	}
 
+	// The capture side is done. Tell the output thread that nothing more is
+	// coming, so it plays out what it has and stops: a codec change is not the
+	// moment to throw away audio the user has already been sent.
+	pthread_mutex_lock(&out.lock);
+	out.consumer_gone = true;
+	pthread_mutex_unlock(&out.lock);
+	if (have_play) {
+		pthread_join(play_thread, NULL);
+	}
+	unsigned starved = out.starved;
+	unsigned long long played = out.frames_out;
+
+	// One line per session, and only when something was wrong: this is the line
+	// that says which side of the ring ran short. Dropped frames are the phone's
+	// clock ahead of this one; starved reads are this one behind the phone's;
+	// either way the next report has the answer in it instead of a description.
+	if (starved || dropped) {
+		fprintf(stderr, "btreceiver: session over: %llu frames played, %u starved reads, %u frames dropped, "
+						"peak buffer %u ms of %u\n",
+				played, starved, dropped, (unsigned)ms_from_frames(btrxring_high_water(ring), rate),
+				btrxring_capacity_ms(ring));
+	}
+	pthread_mutex_destroy(&out.lock);
+
 	free(chunk);
 	free(wide);
+	btrxring_destroy(ring);
 	audio_external_end();
 	snd_pcm_close(pcm);
 	*heard_out = heard;
+	// The output thread can also be the one that ended the session: a write the
+	// external path could not recover from means the PCM was closed under it --
+	// the route moved, or the card went away -- and that is answered the same
+	// way as a transport that moved: open whatever replaced it.
+	if (playout_failed(&out) && !again) {
+		fprintf(stderr, "btreceiver: the output stopped taking frames; opening the session again\n");
+		again = true;
+	}
 	return again ? SESSION_AGAIN : SESSION_OVER;
 }
 

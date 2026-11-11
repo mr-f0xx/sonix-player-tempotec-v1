@@ -91,6 +91,19 @@ per-device rewrite still runs when a sink connects). The real
 D-Bus signal cache is driven with a late simulated signal to check that a close
 clears incoming and outgoing PCMs, transport state and media state.
 
+The receiver's own suite (`test_btreceiver`) drives the real session against a
+fake non-blocking ALSA plug, for 16-, 24- and 32-bit sources: the format asked
+of the plugin, the widening to 32-bit words the DAC takes, the bounded wait
+that a lying readiness cannot spin, and that both threads close what they
+opened. Its jitter buffer (`test_btrxring`) is exercised on its own: the depth a
+caller asks for is the depth it gets, the capacity is never below the request
+even after the power-of-two rounding, frames come back in order across a wrap,
+a full ring takes what fits and loses nothing, a waiter returns on a change that
+happened before it was called and times out rather than spinning, and the
+high-water mark survives a clear. What these cannot show is whether 150 ms is
+enough for a particular phone and radio; that is the hardware note in
+`PATCHES.md`.
+
 The discovery fixture marshals the real `SetDiscoveryFilter` D-Bus body and
 checks `Transport="bredr"` with no UUID/RSSI restriction, the order before
 `StartDiscovery`, compatibility fallback for an unsupported filter, and refusal

@@ -307,6 +307,105 @@ Hardware validation pending: on the Tesla, start the player's Search, then open
 other, pairing completes, and playback works. Also recheck headphones and RX
 mode. Host marshalling/lifecycle tests are not a radio interoperability test.
 
+## Bluetooth receiver: the two clocks, LDAC quality and aptX stuttering
+
+Receiver mode (a phone sending to this player) had two faults that turned out to
+be the same fault seen twice: LDAC quality that sagged for a minute at a time on
+a Galaxy Z Fold 8 and an S10+ with everything on one desk, and aptX stuttering on
+both, worse on the S10+ (issue #265, and the "not fixed here" list of PR #271).
+
+**What it was.** Two clocks, one junction. The decode runs at the sending
+phone's audio clock; the CS43198 runs at its own oscillator. There is no
+resampler in the path and there cannot usefully be one -- the sender chose the
+rate. Until now the capture thread read bluealsa and wrote the DAC in the same
+call, so the two clocks met inside a 120 ms ALSA buffer and the daemon's own
+4 KiB PCM FIFO. Every delivery a few milliseconds late -- and over a radio
+shared with Wi-Fi some always are -- took the DAC under its buffer: an underrun,
+heard as a stutter. For LDAC the consequence is worse than a stutter. While the
+sink is not draining, the phone's packets are not being taken, its socket backs
+up, and LDAC's adaptive bit rate reads that as a bad link and steps *down*; it
+climbs back only slowly. That is exactly the reported shape -- heavily
+compressed at the start of the Fold 8 session and then better, intermittent
+sagging at two and three minutes on the S10+ -- and it is not a range problem,
+which is why putting the devices side by side changed nothing. aptX, with no
+adaptive rate to hide behind, is heard as the stutter itself.
+
+**What changed.** A ring buffer between the two halves, and a second thread on
+the other side of it (`btrxring.c`, and `btreceiver.c` split into a producer and
+a `btrxplay` consumer). The capture thread drains bluealsa and does nothing else
+with the frames; the playback thread owns the DAC and does nothing but copy
+frames out of the ring and write them. The ring is primed to
+`receiver_jitter_ms` (150 ms) before the first write, so a session starts with
+one clean delay instead of a run of underruns, and its occupancy is the slack a
+bursty delivery is allowed to use. 150 ms is a third of a video's lip sync and
+several times the worst jitter a 2.4 GHz link produces; the ceiling
+(`receiver_ring_ms`, 400 ms) is where the ring would stop being a buffer and
+start being an echo. Frames are widened to the output's format on the way in,
+so the thread facing the DAC does nothing but copy and write.
+
+Two related things went with it. bluealsa's IO thread -- the decoder, in this
+mode -- is now described and logged as such: it was already at `SCHED_FIFO 12`
+above the player's own threads, and that is now stated for the receiver as well
+as the transmitter, because in this direction that thread has the same kind of
+deadline from the other side. And the ring is instrumented: one line per session
+when anything went wrong (`N frames played, S starved reads, D frames dropped,
+peak buffer P ms`), and one every ten seconds while receiving with the buffer's
+current and peak depth. Starved reads and dropped frames are the two directions
+of clock mismatch; they are what a report needs to say whether the link, the
+player, or the two clocks' agreement is at fault, instead of describing the
+sound again.
+
+`--syslog` was already passed to bluealsa when the Bluetooth log is on; the log
+now also carries this end's counters in the same timeline, so
+`bluealsa: Dropping PCM frames: PCM overrun` (the daemon's FIFO) and the
+session's own starved reads can be put side by side.
+
+**A decoder that will not run.** The other half of "connects and stays silent"
+(aptX from the SafeFly Dual and the iPod 5.5, issue #265) has a named cause in
+the daemon: bluez-alsa's aptX decoder loops on a decode error without advancing
+its input (`a2dp-aptx.c`, `a2dp_aptx_dec_thread`: `aptxdec_decode() <= 0` ->
+`continue`, with `input` and `input_len` untouched), so a single packet the
+library does not like turns into a real-time thread spinning on the same bytes
+for ever -- silence, a core gone, and the same error line as the only trace.
+Nothing in this repository can patch a binary it does not build, but the
+receiver can notice the shape and end it: a session that has taken frames from
+the phone and put none into the DAC for six seconds, while the phone's AVRCP
+status says it is playing, is a decoder that is not running rather than a quiet
+stream. The link is then renegotiated onto the next codec it offers -- never the
+one it is stuck on, and the level the phone had set is carried across as the
+codec button already does -- and the new transport is opened fresh. A link with
+no other codec to offer is left alone rather than reopened on the same silence.
+If the daemon was instead built without the decoder (`HAVE_APTX_DECODE`), the
+codec is never offered on the link and this path does not run at all.
+
+**A measured 20 dB.** Separately: bluealsa's software-volume curve is
+`10^(0.01 * level / 20)` for levels 0-127, which over the full range is -12.7 dB,
+not the -40 dB the AVRCP scale it stands in for means. `--a2dp-volume` is passed
+to the daemon in both directions and `btvolume.c` writes `SoftVolume`, which
+makes the volume keys reach the phone; but with a separate (non-synchronised)
+volume an RX stream at any level below 100 is up to ~20 dB quieter than the same
+file played locally. That is a real difference and it is not touched here: it
+would change what every existing user hears at every level, and it wants one
+measurement from a phone with a metering app rather than an argument from a
+formula. It is written down so that the next "Bluetooth is much quieter than the
+card" report has an answer ready.
+
+The SBC stutter on the Fold 8 should be reduced by the same buffer, but it has
+not been measured: a low-bit-rate codec is less sensitive to a phone that is
+starving the link and more sensitive to this end's scheduling, which is what the
+ring and the two real-time priorities address.
+
+**Hardware validation pending.** With the Fold 8 and the S10+, over LDAC and
+then aptX: confirm the `btreceiver: ... ms buffer kept in hand` line names 150 ms
+and that a session's closing line reports zero dropped frames. Play for ten
+minutes through a Wi-Fi-scanning network and compare `starved reads` before and
+after with `receiver_jitter_ms` at 150 and at 250. Pin **LDAC quality** to
+*High* and listen for the sagging: if it goes, the adaptive controller was
+following this end; if it stays, the decode is short of time and
+`io_rt_priority` is the next thing to move. Then check plain SBC, and AAC for
+the MacBook. None of the host tests above touch a radio; they exercise the
+buffer, the wrapping, the waiter and the three sample widths only.
+
 ## TempoTec V1 240×320 interface profile
 
 The build of this fork is the TempoTec V1 profile. There is no runtime choice
