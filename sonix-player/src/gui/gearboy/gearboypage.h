@@ -5,8 +5,8 @@
 
 #include "lvgl/lvgl.h"
 
-// The game list: whatever is in Games/GB and Games/GBC on the card, titled
-// from the database (see src/system/gbdb.h) rather than from the filename.
+// The game shelf: ROMs from Games/GB and Games/GBC, titled from the cartridge
+// database and optionally decorated from a matching Cover Art image.
 
 extern lv_obj_t *gearboypage_screen;
 

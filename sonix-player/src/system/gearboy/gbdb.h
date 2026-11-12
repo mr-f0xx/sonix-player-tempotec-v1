@@ -30,6 +30,7 @@ typedef struct {
 	char path[GBROM_PATH_MAX]; // absolute path of the ROM
 	char name[GBROM_NAME_MAX]; // from the database, or the cleaned-up filename
 	char file[GBROM_NAME_MAX]; // the filename, for the second line
+	char cover_path[GBROM_PATH_MAX]; // matching PNG/JPEG in sibling Cover Art, or empty
 	uint32_t crc;
 	bool from_db; // true when the name came from the database
 	bool color;   // true when it sits in Games/GBC or ends in .gbc
@@ -50,9 +51,10 @@ void gbdb_set_root(const char *sd_root);
 // and returns the list sorted by name. `*out` must be freed with free().
 //
 // Not from the UI thread: the first time round this reads every ROM end to
-// end. `progress` is called on the caller's thread while it works and may be
-// NULL; returning false from it stops the scan, and what has been done so far
-// is still written to the cache.
+// end, and it resolves optional images from the sibling `Cover Art` directory
+// (matching the cartridge name or ROM filename). `progress` is called on the
+// caller's thread while it works and may be NULL; returning false from it
+// stops the scan, and what has been done so far is still written to the cache.
 //
 // Returns how many were found, or -1 when there is no root.
 int gbdb_scan(gbrom_t **out, bool (*progress)(int done, int total, void *user), void *user);

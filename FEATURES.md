@@ -452,8 +452,11 @@ a self-signed certificate), and HLS.
 > The `.gb` and `.gbc` ROMs need to be inside the `Games` folder, each in a separate folder: `GB` for Game Boy and `GBC` for Game Boy Color.
 > The boot ROMS need to be inside the `Games/Bios` folder, dmg_boot.bin for Game Boy cgb_boot.bin for Game Boy Color. (This step is optional).
 
-- Games show their real cartridge names, matched by CRC32 against the libretro
-  databases.
+- Games show two at a time in large cover-art cards, with the real cartridge
+  names matched by CRC32 against the libretro databases. Optional local art goes in
+  `Games/GB/Cover Art` or `Games/GBC/Cover Art`, named after the game (for
+  example `Tetris.png`); PNG and JPEG are supported. Artwork is loaded only
+  for games near the visible part of the shelf.
 - Save states, battery RAM, five palettes, shaders and GBC color
   correction. Mute game sound in Gearboy settings (also accessible from the
   in-game pause menu) to keep listening to music started before the game. The

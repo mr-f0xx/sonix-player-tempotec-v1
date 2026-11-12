@@ -22,9 +22,12 @@
 // Browser rows use slots 0..9; the library index pages (medialist.c) use
 // 12..23 for the name lists and 24..35 for the track lists; the search page
 // takes 36..59 -- its twelve track hits and twelve album hits; the audiobook
-// list takes 60..71 for its twelve rows; one artist's records take 72..83; and the
-// album carousel takes 84..89 -- so the pools never trample each other's requests.
-#define COVERLOADER_SLOTS 100
+// list takes 60..71 for its twelve rows; one artist's records take 72..83; the
+// album carousel takes 84..89; Qobuz downloads take 90..99; and the Game Boy
+// art shelf takes 100..111 -- so the pools never trample each other's requests.
+#define COVERLOADER_SLOTS 112
+#define COVERLOADER_GEARBOY_BASE 100
+#define COVERLOADER_GEARBOY_COUNT 12
 #define COVERLOADER_QOBUZ_DOWNLOAD_BASE 90
 #define COVERLOADER_QOBUZ_DOWNLOAD_COUNT 10
 #define COVERLOADER_SEARCH_BASE 36
@@ -44,6 +47,11 @@ void coverloader_start(void);
 // Asks for the artwork of `path` at `size` pixels, for `slot`. Returns
 // immediately. Any earlier request on this slot is abandoned.
 void coverloader_request(int slot, const char *path, int size);
+
+// Like coverloader_request(), but decodes the named image file itself rather
+// than looking for artwork embedded in or beside an audio file. Used by the
+// Game Boy shelf for optional art in Games/GB/Cover Art and Games/GBC/Cover Art.
+void coverloader_request_image(int slot, const char *path, int size);
 
 // Forgets the slot: anything pending is abandoned and anything already decoded
 // for it is freed.
