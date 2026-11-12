@@ -24,7 +24,7 @@
 lv_obj_t *gearboypage_screen;
 
 #define ART_SLOTS COVERLOADER_GEARBOY_COUNT
-#define ART_SIDE_MAX 176
+#define ART_SIDE_MAX 216
 
 static gui_config_t *page_cfg;
 static lv_obj_t *list_box;
@@ -33,7 +33,7 @@ static lv_obj_t *btn_gb;
 static lv_obj_t *btn_gbc;
 static lv_timer_t *art_timer;
 
-// The GB/GBC selector remains; each selection now shows a two-column shelf.
+// The GB/GBC selector remains; each selection shows exactly two game cards at once.
 static bool show_color;
 static gbrom_t *roms;
 static int rom_count;
@@ -107,20 +107,21 @@ static void refresh_view_buttons(void) {
 	}
 }
 
-static void make_tile(int index, int tile_w) {
+static void make_tile(int index, int tile_h, int tile_w, bool vertical) {
 	const gbrom_t *rom = &roms[index];
 	int art_side = art_side_px;
 	lv_obj_t *tile = lv_btn_create(list_box);
-	lv_obj_set_size(tile, tile_w, art_side + 62);
+	lv_obj_set_size(tile, tile_w, tile_h);
 	lv_obj_add_style(tile, &theme_style_card, 0);
 	lv_obj_add_style(tile, &theme_style_card_pressed, LV_STATE_PRESSED);
 	lv_obj_set_style_radius(tile, 14, 0);
 	lv_obj_set_style_border_width(tile, 0, 0);
 	lv_obj_set_style_shadow_width(tile, 0, 0);
-	lv_obj_set_style_pad_all(tile, 8, 0);
-	lv_obj_set_style_pad_row(tile, 7, 0);
+	lv_obj_set_style_pad_all(tile, 10, 0);
+	lv_obj_set_style_pad_column(tile, 12, 0);
+	lv_obj_set_style_pad_row(tile, 8, 0);
 	lv_obj_set_scrollable(tile, false);
-	lv_obj_set_flex_flow(tile, LV_FLEX_FLOW_COLUMN);
+	lv_obj_set_flex_flow(tile, vertical ? LV_FLEX_FLOW_COLUMN : LV_FLEX_FLOW_ROW);
 	lv_obj_set_flex_align(tile, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 	lv_obj_set_event_bubble(tile, true);
 	lv_obj_add_event_cb(tile, open_rom_cb, LV_EVENT_CLICKED, (void *)(intptr_t)index);
@@ -153,10 +154,11 @@ static void make_tile(int index, int tile_w) {
 	lv_obj_t *name = lv_label_create(tile);
 	lv_label_set_text(name, rom->name);
 	lv_label_set_long_mode(name, LV_LABEL_LONG_DOT);
-	lv_obj_set_width(name, lv_pct(100));
-	lv_obj_set_height(name, lv_font_get_line_height(&font_ui_20));
-	lv_obj_set_style_text_align(name, LV_TEXT_ALIGN_CENTER, 0);
-	lv_obj_set_style_text_font(name, &font_ui_20, 0);
+	lv_obj_set_width(name, vertical ? lv_pct(100) : LV_SIZE_CONTENT);
+	lv_obj_set_flex_grow(name, vertical ? 0 : 1);
+	lv_obj_set_height(name, lv_font_get_line_height(&font_ui_22));
+	lv_obj_set_style_text_align(name, vertical ? LV_TEXT_ALIGN_CENTER : LV_TEXT_ALIGN_LEFT, 0);
+	lv_obj_set_style_text_font(name, &font_ui_22, 0);
 	lv_obj_add_style(name, &theme_style_text, 0);
 	lv_obj_set_event_bubble(name, true);
 }
@@ -196,24 +198,23 @@ static void rebuild_grid(void) {
 
 	lv_obj_set_hidden(status_label, true);
 	lv_obj_scroll_to_y(list_box, 0, LV_ANIM_OFF);
-	// Size the art to the actual shelf viewport. Two complete rows should fit
-	// on screen; this avoids leaving the next row peeking in at the bottom on
-	// the shorter panel layout, while keeping a two-column grid.
+	// Each screen shows two complete game cards. On a narrow panel the art
+	// stacks above the title; on a wider panel it sits beside it for a cleaner,
+	// more artwork-forward row. The cards divide the actual viewport height, so
+	// the next game never peeks in at the bottom.
 	lv_obj_update_layout(list_box);
-	int available = page_cfg->screen_width - 2 * page_cfg->padding - 12;
-	int tile_w = available / 2;
-	if (tile_w < 90) {
-		tile_w = 90;
-	}
-	int width_fit = tile_w - 20;
-	int height_fit = (lv_obj_get_content_height(list_box) - 12 - 2 * 62) / 2;
+	int tile_w = lv_obj_get_content_width(list_box);
+	int tile_h = (lv_obj_get_content_height(list_box) - 12) / 2;
+	bool vertical = tile_w < 360;
+	int width_fit = vertical ? tile_w - 20 : tile_w - 132;
+	int height_fit = tile_h - (vertical ? 54 : 20);
 	art_side_px = LV_MIN(ART_SIDE_MAX, LV_MIN(width_fit, height_fit));
 	if (art_side_px < 1) {
 		art_side_px = 1;
 	}
 	for (int i = 0; i < rom_count; i++) {
 		if (roms[i].color == show_color) {
-			make_tile(i, tile_w);
+			make_tile(i, tile_h, tile_w, vertical);
 		}
 	}
 	lv_obj_update_layout(list_box);
@@ -437,9 +438,8 @@ void gearboypage_init(gui_config_t *cfg) {
 	lv_obj_set_style_pad_all(list_box, 0, 0);
 	lv_obj_set_style_pad_bottom(list_box, cfg->padding, 0);
 	lv_obj_set_style_pad_row(list_box, 12, 0);
-	lv_obj_set_style_pad_column(list_box, 12, 0);
-	lv_obj_set_flex_flow(list_box, LV_FLEX_FLOW_ROW_WRAP);
-	lv_obj_set_flex_align(list_box, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_START);
+	lv_obj_set_flex_flow(list_box, LV_FLEX_FLOW_COLUMN);
+	lv_obj_set_flex_align(list_box, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
 	lv_obj_set_scroll_dir(list_box, LV_DIR_VER);
 	switcher_attach_back_gesture(list_box);
 
