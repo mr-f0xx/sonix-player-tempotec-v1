@@ -31,6 +31,9 @@
 #define SC_HISTORY_DEPTH 10
 #define SC_CURSOR_STACK_MAX 16
 #define SC_QUEUE_CAP 256
+#define SC_CACHE_PRESET_COUNT 6
+
+static const int SC_CACHE_PRESET_MB[SC_CACHE_PRESET_COUNT] = {512, 1024, 2048, 4096, 8192, 0};
 
 lv_obj_t *soundcloud_screen;
 
@@ -53,6 +56,7 @@ static lv_obj_t *cid_value;
 static lv_obj_t *cache_value;
 static lv_obj_t *remember_switch;
 static lv_obj_t *quality_pills[3];
+static lv_obj_t *cache_limit_pills[SC_CACHE_PRESET_COUNT];
 
 static lv_obj_t *edit_screen;
 static lv_obj_t *edit_title;
@@ -745,6 +749,15 @@ static void refresh_quality_pills(void) {
 	}
 }
 
+static void refresh_cache_limit_pills(void) {
+	int cur_mb = soundcloudcache_get_max_mb();
+	for (int i = 0; i < SC_CACHE_PRESET_COUNT; i++) {
+		if (cache_limit_pills[i]) {
+			settingsrow_pill_active(cache_limit_pills[i], SC_CACHE_PRESET_MB[i] == cur_mb);
+		}
+	}
+}
+
 static void refresh_cache_label(void) {
 	if (!cache_value) {
 		return;
@@ -752,8 +765,26 @@ static void refresh_cache_label(void) {
 	int files = 0;
 	long long bytes = 0;
 	soundcloudcache_stats(&files, &bytes);
-	char buf[64];
-	snprintf(buf, sizeof(buf), "%d · %.1f MB", files, (double)bytes / (1024.0 * 1024.0));
+	int max_mb = soundcloudcache_get_max_mb();
+
+	char used_str[32];
+	if (bytes >= 1024LL * 1024LL * 1024LL) {
+		snprintf(used_str, sizeof(used_str), "%.2f GB", (double)bytes / (1024.0 * 1024.0 * 1024.0));
+	} else {
+		snprintf(used_str, sizeof(used_str), "%.1f MB", (double)bytes / (1024.0 * 1024.0));
+	}
+
+	char cap_str[64];
+	if (max_mb <= 0) {
+		snprintf(cap_str, sizeof(cap_str), "%s", tr("soundcloud_cache_unlimited"));
+	} else if (max_mb >= 1024 && (max_mb % 1024) == 0) {
+		snprintf(cap_str, sizeof(cap_str), "%d GB", max_mb / 1024);
+	} else {
+		snprintf(cap_str, sizeof(cap_str), "%d MB", max_mb);
+	}
+
+	char buf[128];
+	snprintf(buf, sizeof(buf), "%d · %s / %s", files, used_str, cap_str);
 	lv_label_set_text(cache_value, buf);
 }
 
@@ -770,6 +801,7 @@ static void refresh_settings_ui(void) {
 		lv_obj_remove_state(remember_switch, LV_STATE_CHECKED);
 	}
 	refresh_quality_pills();
+	refresh_cache_limit_pills();
 	refresh_cache_label();
 	refresh_home_summary();
 }
@@ -1280,6 +1312,13 @@ static void quality_pill_cb(lv_event_t *e) {
 	refresh_quality_pills();
 }
 
+static void cache_limit_pill_cb(lv_event_t *e) {
+	int mb = (int)(intptr_t)lv_event_get_user_data(e);
+	soundcloudcache_set_max_mb(mb);
+	refresh_cache_limit_pills();
+	refresh_cache_label();
+}
+
 static void connect_save_cb(lv_event_t *e) {
 	(void)e;
 	if ((busy && !waiting_for_track) || switcher_back_drag_active() || player_sheet_drag_active()) {
@@ -1499,6 +1538,7 @@ static void value_row_col_resized_cb(lv_event_t *e) {
 
 static void refresh_soundcloud_theme(void) {
 	refresh_quality_pills();
+	refresh_cache_limit_pills();
 	bool compact = bp_is_tempotec_v1();
 	bool fn_glyphs = theme_uses_function_glyphs();
 	bool flat = compact && fn_glyphs;
@@ -1727,6 +1767,17 @@ static void build_search_screen(gui_config_t *cfg) {
 									  search_field, NULL, "ok", accept_search_cb, NULL);
 }
 
+static void wrap_pills_card_heading(lv_obj_t *card) {
+	if (!card || lv_obj_get_child_count(card) == 0) {
+		return;
+	}
+	lv_obj_t *heading = lv_obj_get_child(card, 0);
+	if (heading && lv_obj_check_type(heading, &lv_label_class)) {
+		lv_obj_set_width(heading, lv_pct(100));
+		lv_label_set_long_mode(heading, LV_LABEL_LONG_WRAP);
+	}
+}
+
 static void build_settings_screens(gui_config_t *cfg) {
 	settings_screen = make_screen();
 	lv_obj_t *c = settingsrow_page(settings_screen, cfg, "soundcloud_account_settings");
@@ -1747,10 +1798,19 @@ static void build_settings_screens(gui_config_t *cfg) {
 						  edit_field_cb, (void *)(intptr_t)2);
 
 	lv_obj_t *pills = NULL;
-	settingsrow_pills(c, "soundcloud_quality", &pills);
+	wrap_pills_card_heading(settingsrow_pills(c, "soundcloud_quality", &pills));
 	quality_pills[0] = settingsrow_pill_text(pills, "Opus 64k", SOUNDCLOUD_QUALITY_LOW, quality_pill_cb);
 	quality_pills[1] = settingsrow_pill_text(pills, "MP3 128k", SOUNDCLOUD_QUALITY_STANDARD, quality_pill_cb);
 	quality_pills[2] = settingsrow_pill_text(pills, "AAC 256k", SOUNDCLOUD_QUALITY_HIGH, quality_pill_cb);
+
+	lv_obj_t *cache_pills = NULL;
+	wrap_pills_card_heading(settingsrow_pills(c, "soundcloud_cache_limit", &cache_pills));
+	cache_limit_pills[0] = settingsrow_pill_text(cache_pills, "512 MB", 512, cache_limit_pill_cb);
+	cache_limit_pills[1] = settingsrow_pill_text(cache_pills, "1 GB", 1024, cache_limit_pill_cb);
+	cache_limit_pills[2] = settingsrow_pill_text(cache_pills, "2 GB", 2048, cache_limit_pill_cb);
+	cache_limit_pills[3] = settingsrow_pill_text(cache_pills, "4 GB", 4096, cache_limit_pill_cb);
+	cache_limit_pills[4] = settingsrow_pill_text(cache_pills, "8 GB", 8192, cache_limit_pill_cb);
+	cache_limit_pills[5] = settingsrow_pill(cache_pills, "soundcloud_cache_unlimited", 0, cache_limit_pill_cb);
 
 	add_stacked_value_row(c, "soundcloud_clear_cache", &cache_value, &icon_trash, THEME_SEMANTIC_AMBER, false,
 						  clear_cache_cb, NULL);

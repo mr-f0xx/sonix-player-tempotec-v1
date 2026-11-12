@@ -1490,6 +1490,40 @@ int main(void) {
 	assert(stat(cached_inline_aac, &st) == 0);
 	assert(st.st_size == 52);
 
+	// -----------------------------------------------------------------------
+	// 11. Configurable SD cache ceiling (`[soundcloud] cache_max_mb` + >4 GiB
+	//     64-bit byte ceilings, Unlimited=0, and immediate LRU bundle eviction)
+	// -----------------------------------------------------------------------
+	assert(soundcloudcache_get_max_mb() == SOUNDCLOUDCACHE_DEFAULT_MAX_MB);
+	assert(soundcloudcache_get_max_bytes() == SOUNDCLOUDCACHE_MAX_BYTES);
+
+	// Extending to 4 GB (`4096` MB = 4,294,967,296 bytes > 32-bit INT_MAX) and 8 GB (`8192` MB):
+	soundcloudcache_set_max_mb(4096);
+	assert(soundcloudcache_get_max_mb() == 4096);
+	assert(soundcloudcache_get_max_bytes() == 4096LL * 1024LL * 1024LL);
+	assert(config_get_int("soundcloud", "cache_max_mb", -1) == 4096);
+
+	// Reloading root re-reads persisted `cache_max_mb` from device_config.ini:
+	soundcloudcache_set_root(sd_root);
+	assert(soundcloudcache_get_max_mb() == 4096);
+	assert(soundcloudcache_get_max_bytes() == 4096LL * 1024LL * 1024LL);
+
+	// Unlimited (`0`) disables fixed cap while keeping both cached tracks intact:
+	soundcloudcache_set_max_mb(0);
+	assert(soundcloudcache_get_max_mb() == 0);
+	assert(soundcloudcache_get_max_bytes() == 0);
+	assert(config_get_int("soundcloud", "cache_max_mb", -1) == 0);
+	assert(access(cached_2026, R_OK) == 0);
+	assert(access(cached_inline_aac, R_OK) == 0);
+
+	// Shrinking byte ceiling while protecting `cached_inline_aac` immediately evicts older `cached_2026`:
+	soundcloudcache_protect(cached_inline_aac);
+	soundcloudcache_set_max_bytes(256);
+	assert(access(cached_2026, F_OK) != 0);
+	assert(access(cached_inline_aac, R_OK) == 0);
+	soundcloudcache_protect(NULL);
+	soundcloudcache_set_max_mb(SOUNDCLOUDCACHE_DEFAULT_MAX_MB);
+
 	soundcloudcache_clear();
 	assert(soundcloud_forget());
 	assert(G.cdn_auth_leaks == 0);

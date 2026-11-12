@@ -392,9 +392,19 @@ bool soundcloud_like_track(long long track_id, bool like) {
 	return true;
 }
 
+static int stub_cache_max_mb = SOUNDCLOUDCACHE_DEFAULT_MAX_MB;
+
 void soundcloudcache_set_root(const char *sd_root) { (void)sd_root; }
 bool soundcloudcache_available(void) { return true; }
 const char *soundcloudcache_last_error(void) { return "soundcloud_stream_failed"; }
+int soundcloudcache_get_max_mb(void) { return stub_cache_max_mb; }
+void soundcloudcache_set_max_mb(int max_mb) { stub_cache_max_mb = max_mb; }
+long long soundcloudcache_get_max_bytes(void) {
+	return stub_cache_max_mb <= 0 ? 0 : (long long)stub_cache_max_mb * 1024LL * 1024LL;
+}
+void soundcloudcache_set_max_bytes(long long max_bytes) {
+	stub_cache_max_mb = max_bytes <= 0 ? 0 : (int)(max_bytes / (1024LL * 1024LL));
+}
 
 bool soundcloudcache_is_soundcloud_path(const char *p) {
 	return p && strncmp(p, "/mnt/sd/.local/soundcloud-cache/", 32) == 0;
@@ -552,9 +562,9 @@ static void assert_screen_no_overlaps(lv_obj_t *screen, const char *screen_name,
 			assert(!"card horizontal overflow");
 		}
 
-		leaf_box_t leaves[16];
+		leaf_box_t leaves[32];
 		int lcount = 0;
-		collect_card_leaves(card, leaves, &lcount, 16);
+		collect_card_leaves(card, leaves, &lcount, 32);
 		for (int i = 0; i < lcount; i++) {
 			if (leaves[i].area.x1 < ca.x1 - 1 || leaves[i].area.x2 > ca.x2 + 1 ||
 				leaves[i].area.y1 < ca.y1 - 1 || leaves[i].area.y2 > ca.y2 + 1) {
@@ -804,6 +814,28 @@ int main(int argc, char **argv) {
 	assert(pill_high != NULL);
 	lv_obj_send_event(pill_high, LV_EVENT_CLICKED, NULL);
 	assert(stub_quality == SOUNDCLOUD_QUALITY_HIGH);
+
+	// Verify SD cache limit pills (512 MB default -> 2 GB -> 8 GB -> Unlimited) & live Clear cache subtitle!
+	assert(stub_cache_max_mb == 512);
+	assert(find_clickable_with_label(settings_scr, "3 · 9.0 MB / 512 MB") != NULL);
+
+	lv_obj_t *pill_2gb = find_clickable_with_label(settings_scr, "2 GB");
+	assert(pill_2gb != NULL);
+	lv_obj_send_event(pill_2gb, LV_EVENT_CLICKED, NULL);
+	assert(stub_cache_max_mb == 2048);
+	assert(find_clickable_with_label(settings_scr, "3 · 9.0 MB / 2 GB") != NULL);
+
+	lv_obj_t *pill_8gb = find_clickable_with_label(settings_scr, "8 GB");
+	assert(pill_8gb != NULL);
+	lv_obj_send_event(pill_8gb, LV_EVENT_CLICKED, NULL);
+	assert(stub_cache_max_mb == 8192);
+	assert(find_clickable_with_label(settings_scr, "3 · 9.0 MB / 8 GB") != NULL);
+
+	lv_obj_t *pill_unlim = find_clickable_with_label(settings_scr, tr("soundcloud_cache_unlimited"));
+	assert(pill_unlim != NULL);
+	lv_obj_send_event(pill_unlim, LV_EVENT_CLICKED, NULL);
+	assert(stub_cache_max_mb == 0);
+	assert(find_clickable_with_label(settings_scr, "3 · 9.0 MB / Unlimited") != NULL);
 
 	lv_obj_t *clear_row = find_clickable_with_label(settings_scr, tr("soundcloud_clear_cache"));
 	assert(clear_row != NULL);
