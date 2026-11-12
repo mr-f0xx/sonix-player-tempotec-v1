@@ -72,6 +72,7 @@
 #include "src/system/library/library.h"
 #include "src/system/core/logging.h"
 #include "src/system/pet/petwatch.h"
+#include "src/system/pet/petalarm_runtime.h"
 #include "src/system/playback/playlist.h"
 #include "src/system/library/playlists.h"
 #include "src/system/device/power.h"
@@ -167,6 +168,9 @@ static bool restore_saved_track(void) {
 static void restore_track_timer_cb(lv_timer_t *timer) {
 	lv_timer_delete(timer);
 	restore_saved_track();
+	// The alarm waits for this restore, otherwise a late restore could replace
+	// its playlist (or pause the track it just resumed).
+	petalarm_runtime_restore_complete();
 	// Only now may automatic library work start: the restore timer and the
 	// old independent boot timer could otherwise become due in the wrong order.
 	libraryscan_boot_check_schedule();
@@ -2438,6 +2442,7 @@ int main(int argc, char **argv) {
 	// the first frame is the now-playing page, so the track is put back here,
 	// before it, and the page opened over the home screen without the slide.
 	// The artwork still arrives from its worker a moment later.
+	bool restore_track_pending = false;
 	if (config_get_int("player", "remember_track", 0)) {
 		if (config_get_bool("music", "nowplaying_at_boot", false)) {
 			if (restore_saved_track()) {
@@ -2446,7 +2451,14 @@ int main(int argc, char **argv) {
 			libraryscan_boot_check_schedule();
 		} else {
 			// The restore callback schedules the boot check after it finishes.
-			lv_timer_create(restore_track_timer_cb, 600, NULL);
+			lv_timer_t *restore_timer = lv_timer_create(restore_track_timer_cb, 600, NULL);
+			if (restore_timer) {
+				restore_track_pending = true;
+			} else {
+				// Never leave the alarm waiting for a timer that could not be made.
+				restore_saved_track();
+				libraryscan_boot_check_schedule();
+			}
 		}
 	} else {
 		libraryscan_boot_check_schedule();
@@ -2515,6 +2527,10 @@ int main(int argc, char **argv) {
 	// screen timeout is the Screen page's setting and comes from there.
 	powersettings_apply();
 	settings_apply_screen_off();
+
+	// After the player, restored volume and power manager: an alarm may start
+	// playback from the pet watcher's first tick, even when its page is closed.
+	petalarm_runtime_init(restore_track_pending);
 
 #ifndef HOST_BUILD
 	// Bluetooth off. A firmware whose /etc/init.d/S80_bt_init has not been

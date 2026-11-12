@@ -56,6 +56,13 @@ void btvolume_set_sync(bool on);
 // the write happens on the worker.
 void btvolume_notify_local(int percent);
 
+// Register a write sent through bluetooth.c's separate fallback connection so
+// its eventual PropertiesChanged is not mistaken for a headphone adjustment.
+// After the call returns (even on timeout), reassert the latest player level:
+// an older fallback can finish after a newer bridge write.
+void btvolume_note_fallback_write(const char *mac, int percent);
+void btvolume_finish_fallback_write(const char *mac);
+
 // Whether the bus path is up and can carry a volume. False means the caller
 // should use the independent PCM-property write path.
 bool btvolume_available(void);

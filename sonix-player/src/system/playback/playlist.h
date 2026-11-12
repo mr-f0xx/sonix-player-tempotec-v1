@@ -126,6 +126,12 @@ const char *playlist_album(void);
 // it back is not itself written down again.
 void playlist_note_album_restored(void);
 
+// Keep the on-disk album label unchanged while a tentative queue is opened.
+// release(true) writes the current label; release(false) leaves the old one.
+// UI thread only; holds are not nested.
+void playlist_hold_album_persistence(void);
+void playlist_release_album_persistence(bool commit_current);
+
 // Forces the custom flag. Only the boot-time restore uses this: the saved
 // queue comes back through playlist_load_paths() whatever its origin, and a
 // queue that was a folder queue before the reboot has to stay one.
@@ -136,6 +142,17 @@ void playlist_set_custom(bool custom);
 // survives a power cycle -- watches this to know when a full rewrite is due
 // rather than rewriting on every track change.
 unsigned playlist_revision(void);
+
+// Temporarily retain the complete queue while trying a replacement. This moves
+// its allocations and library handle rather than copying thousands of paths.
+// take() leaves an empty queue, or leaves the original untouched on allocation
+// failure. restore() consumes the checkpoint and replaces the current queue;
+// it returns false without replacing it if a saved library handle went stale.
+// discard() consumes it without changing the current queue. UI thread only.
+typedef struct playlist_checkpoint playlist_checkpoint_t;
+playlist_checkpoint_t *playlist_checkpoint_take(void);
+bool playlist_checkpoint_restore(playlist_checkpoint_t *checkpoint);
+void playlist_checkpoint_discard(playlist_checkpoint_t *checkpoint);
 
 // A queue that IS a library list: the handle is taken over, and the queue holds
 // four bytes a track instead of a path each. Paths are read back from the

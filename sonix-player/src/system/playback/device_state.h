@@ -52,6 +52,12 @@ void device_state_play_file(const char *filepath);
 // The same, but from `position` seconds in rather than from the start: an
 // audiobook picked up where it was left.
 void device_state_play_file_at(const char *filepath, double position);
+// Start a track at a position without rebuilding the already-installed queue.
+// Used when an alarm's replacement queue fails and the old queue is restored.
+void device_state_play_preserving_queue_at(const char *filepath, double position);
+// Cancel a failed replacement and restore what was loaded underneath a radio,
+// without starting a file. NULL clears it when there was no previous source.
+void device_state_restore_stopped_file(const char *filepath, double position);
 void device_state_restore_file(const char *filepath, double position); // paused, at position
 
 // Writes the queue down now, because something other than a track change moved
@@ -63,6 +69,13 @@ void device_state_restore_file(const char *filepath, double position); // paused
 // changes the queue costs nothing and is the only time the two can be out of
 // step for long.
 void device_state_queue_changed(void);
+
+// Temporarily leave the durable queue, album label and remembered track alone
+// while an alarm replacement is opening. End with true when playback succeeds
+// or the user changes it; false when restoring the old source or abandoning
+// an unconfirmed start. The hold is UI-thread only and must not be nested.
+void device_state_tentative_playback_begin(void);
+void device_state_tentative_playback_end(bool commit_current);
 
 // The boot-time restore for a queue that was a library list: the handle stands
 // in for the list of paths. Takes ownership of `ix`.
@@ -83,8 +96,8 @@ void device_state_restore_list(const char *const *list, int count, int start_ind
 
 // Starts a library list as the queue, handing the queue the same handle the
 // list is drawn from: the queue is then four bytes a track rather than a second
-// copy of every path. Takes ownership of `ix`. False when the list could not be
-// started, and then nothing has changed.
+// copy of every path. Takes ownership of `ix`. False when the queue could not
+// be installed or its first path resolved; the old queue may already be cleared.
 bool device_state_play_index(library_index_t *ix, int start_index);
 
 // Play from an explicit list of full paths: a playlist file, a streaming album,

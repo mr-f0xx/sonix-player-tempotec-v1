@@ -131,11 +131,20 @@ void audio_resume();
 
 void audio_stop();
 
+// Cancel a pending replacement and leave a previous file shown as stopped,
+// without opening it. Pass NULL or an empty path when there was no file. An
+// already-running context may still be unwinding; wait for
+// audio_playback_context_active() to become false before opening another source.
+void audio_restore_stopped_file(const char *filepath, double position);
+
 // Stops playback and waits up to `timeout_ms` for the playback thread to close
 // its open track descriptor before unmounting the card.
 void audio_stop_and_wait(int timeout_ms);
 
 audio_status_t audio_get_status(void);
+// Changes on client play/pause/resume/stop/seek commands, not decoder or PCM
+// failures. Lets a pending recovery yield to any later transport choice.
+unsigned audio_command_serial(void);
 
 // Returns true exactly once if the current track reached its end on its own
 // since the last call, clearing the internal flag. User-initiated stops

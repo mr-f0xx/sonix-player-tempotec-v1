@@ -3869,12 +3869,10 @@ static void do_set_volume(int percent) {
 		return;
 	}
 
-	// Keep the local change queued even while the bridge is opening its PCM:
-	// that lets it beat the initial headphone-volume adoption. If the bridge
-	// is not yet usable, also try the same properties through btstack's
-	// separately-owned D-Bus connection instead of dropping the volume key.
+	// bluetooth_notify_volume has already handed the latest level to the
+	// bridge immediately. If it is not usable yet, also try the properties
+	// through btstack's separate D-Bus connection instead of dropping a key.
 	bool bridge_ready = btvolume_available();
-	btvolume_notify_local(percent);
 	if (bridge_ready) {
 		return;
 	}
@@ -3888,7 +3886,20 @@ static void do_set_volume(int percent) {
 	int packed = (level << 8) | level; // equal channels, neither muted
 	bool soft_volume = !bluetooth_volume_sync();
 	bool mode_ok = btstack_pcm_softvolume_set(mac, false, soft_volume);
+	// SoftVolume can take long enough for a new fade step, disconnect, or
+	// the bridge coming online. Do not send an already-obsolete level after
+	// the newer one: the queued job or the bridge will handle it instead.
+	pthread_mutex_lock(&lock);
+	bool superseded = g_pending_volume >= 0 || !g_enabled || !g_a2dp_connected || strcmp(mac, g_a2dp_mac) != 0;
+	pthread_mutex_unlock(&lock);
+	if (superseded || btvolume_available()) return;
+	// This connection's property signal is also seen by the bridge. Register
+	// it before the write, since the signal can beat the method reply.
+	btvolume_note_fallback_write(mac, percent);
 	bool volume_ok = btstack_pcm_volume_set(mac, false, packed);
+	// If the bridge came up during this call, its newer write can precede our
+	// old one. Make it reassert its latest level after the fallback returns.
+	btvolume_finish_fallback_write(mac);
 	if (!mode_ok || !volume_ok) {
 		fprintf(stderr, "bluetooth: volume fallback for %s failed (SoftVolume %s, Volume %s)\n", mac,
 				mode_ok ? "ok" : "failed", volume_ok ? "ok" : "failed");
@@ -5505,6 +5516,10 @@ void bluetooth_notify_volume(int percent) {
 		g_pending_volume = percent;
 	}
 	pthread_mutex_unlock(&lock);
+
+	// Do not make the bridge wait behind the Bluetooth worker's other jobs:
+	// a fade's initial zero must beat a pending headphone-level adoption.
+	if (wanted) btvolume_notify_local(percent);
 
 	// One job in flight is enough: it picks up whatever the latest value is when
 	// it runs, so holding the volume key costs one AVRCP write, not one per

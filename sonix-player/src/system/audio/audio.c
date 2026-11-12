@@ -16,6 +16,7 @@
 #include "src/system/core/utils.h"
 
 #include <pthread.h>
+#include <stdatomic.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -243,6 +244,9 @@ static pthread_cond_t audio_cond = PTHREAD_COND_INITIALIZER;
 
 static audio_command_t audio_command = AUDIO_CMD_NONE;
 static audio_status_t playback_status = AUDIO_STATUS_STOPPED;
+// Distinguishes client transport commands from decoder/PCM failures while a
+// caller is waiting for a track to open. Protected by audio_mutex.
+static unsigned command_serial;
 static char current_filepath[512] = {0};
 static bool play_request = false;
 // When the pending play request was made. The playback thread clears it as it
@@ -285,7 +289,7 @@ static volatile bool hold_flush_request = false;
 // The suspend path waits on this, not on the status: the microSD loses power
 // in mem, and a descriptor left open across it leads to the reboot on the
 // first play afterwards.
-static volatile bool playback_context_active = false;
+static atomic_bool playback_context_active = false;
 
 // Fresh restart after mem: the first play is not an unpause. The stock binary
 // has a dedicated flag (player+0xBB8, set_param(0x1e,1) just before mem) that
@@ -518,6 +522,15 @@ void audio_set_completion_hook(void (*hook)(void)) { completion_hook = hook; }
 // Caller must hold audio_mutex.
 static void mark_stopped_unless_replaced(void) {
 	if (!play_request) {
+		playback_status = AUDIO_STATUS_STOPPED;
+	}
+}
+
+// An open/read/write can fail after a replacement was queued. Its failure
+// belongs to the outgoing track, not the new command. Caller holds audio_mutex.
+static void fail_track_unless_replaced(void) {
+	if (!play_request) {
+		audio_command = AUDIO_CMD_STOP;
 		playback_status = AUDIO_STATUS_STOPPED;
 	}
 }
@@ -2447,7 +2460,10 @@ static bool pcm_reroute(snd_pcm_t **pcm, int channels, int rate, int bits, snd_p
 // silence. One retry only, then a real stop.
 static bool retry_track_once(const char *filepath, const char *reason) {
 	pthread_mutex_lock(&audio_mutex);
-	if (write_fail_retry_used) {
+	// An old read can fail after a stop or a newer play request. It must not
+	// revive that old file over the caller's choice (including alarm rollback).
+	if (write_fail_retry_used || play_request || audio_command != AUDIO_CMD_PLAY ||
+		strcmp(current_filepath, filepath) != 0) {
 		pthread_mutex_unlock(&audio_mutex);
 		return false;
 	}
@@ -2638,8 +2654,7 @@ static void play_wav_file(const char *filepath) {
 	if (parsed != WAV_OK) {
 		fprintf(stderr, "Audio: Failed to parse WAV metadata: %s\n", filepath);
 		pthread_mutex_lock(&audio_mutex);
-		audio_command = AUDIO_CMD_STOP;
-		playback_status = AUDIO_STATUS_STOPPED;
+		fail_track_unless_replaced();
 		pthread_mutex_unlock(&audio_mutex);
 		return;
 	}
@@ -2648,6 +2663,13 @@ static void play_wav_file(const char *filepath) {
 	double bytes_per_sec = (double)info.sample_rate * info.src_frame_bytes;
 	int src_frame_bytes = info.src_frame_bytes;
 	pthread_mutex_lock(&audio_mutex);
+	// Parsing may have blocked while the caller stopped or replaced this
+	// track. Do not announce it as playing or open a PCM after that choice.
+	if (audio_command == AUDIO_CMD_STOP || play_request || stop_thread) {
+		pthread_mutex_unlock(&audio_mutex);
+		fclose(f);
+		return;
+	}
 	progress_total_secs = (double)info.data_size / bytes_per_sec;
 	progress_current_secs = opening_position();
 	progress_floor_secs = -1.0;
@@ -2675,8 +2697,7 @@ static void play_wav_file(const char *filepath) {
 	if (!pcm_handle) {
 		fclose(f);
 		pthread_mutex_lock(&audio_mutex);
-		audio_command = AUDIO_CMD_STOP;
-		playback_status = AUDIO_STATUS_STOPPED;
+		fail_track_unless_replaced();
 		pthread_mutex_unlock(&audio_mutex);
 		return;
 	}
@@ -2704,8 +2725,7 @@ static void play_wav_file(const char *filepath) {
 		snd_pcm_close(pcm_handle);
 		fclose(f);
 		pthread_mutex_lock(&audio_mutex);
-		audio_command = AUDIO_CMD_STOP;
-		playback_status = AUDIO_STATUS_STOPPED;
+		fail_track_unless_replaced();
 		pthread_mutex_unlock(&audio_mutex);
 		return;
 	}
@@ -2885,8 +2905,7 @@ static void play_wav_file(const char *filepath) {
 					pcm_handle = open_pcm_device(info.channels, info.sample_rate, info.out_bits, &new_period);
 					if (!pcm_handle) {
 						fprintf(stderr, "Audio: cannot reopen the device after a pause\n");
-						audio_command = AUDIO_CMD_STOP;
-						playback_status = AUDIO_STATUS_STOPPED;
+						fail_track_unless_replaced();
 						pthread_mutex_unlock(&audio_mutex);
 						break;
 					}
@@ -2907,8 +2926,7 @@ static void play_wav_file(const char *filepath) {
 							snd_pcm_close(pcm_handle);
 							pcm_handle = NULL;
 							pcm_device_open = false;
-							audio_command = AUDIO_CMD_STOP;
-							playback_status = AUDIO_STATUS_STOPPED;
+							fail_track_unless_replaced();
 							pthread_mutex_unlock(&audio_mutex);
 							break;
 						}
@@ -2943,8 +2961,7 @@ static void play_wav_file(const char *filepath) {
 								 &period_size)) {
 					fprintf(stderr, "Audio: reroute failed\n");
 					pthread_mutex_lock(&audio_mutex);
-					audio_command = AUDIO_CMD_STOP;
-					playback_status = AUDIO_STATUS_STOPPED;
+					fail_track_unless_replaced();
 					pthread_mutex_unlock(&audio_mutex);
 					break;
 				}
@@ -2996,8 +3013,7 @@ static void play_wav_file(const char *filepath) {
 					break;
 				}
 				pthread_mutex_lock(&audio_mutex);
-				audio_command = AUDIO_CMD_STOP;
-				playback_status = AUDIO_STATUS_STOPPED;
+				fail_track_unless_replaced();
 				pthread_mutex_unlock(&audio_mutex);
 				break;
 			}
@@ -3011,8 +3027,7 @@ static void play_wav_file(const char *filepath) {
 			// abandoning the download makes the read in flight return empty.
 			pthread_mutex_lock(&audio_mutex);
 			bool natural_end = audio_command != AUDIO_CMD_STOP && !play_request;
-			audio_command = AUDIO_CMD_STOP;
-			playback_status = AUDIO_STATUS_STOPPED;
+			fail_track_unless_replaced();
 			track_completed = natural_end;
 			pthread_mutex_unlock(&audio_mutex);
 			played_to_the_end = natural_end;
@@ -3060,8 +3075,7 @@ static void play_wav_file(const char *filepath) {
 				break; // the thread loop picks the queued replay up
 			}
 			pthread_mutex_lock(&audio_mutex);
-			audio_command = AUDIO_CMD_STOP;
-			playback_status = AUDIO_STATUS_STOPPED;
+			fail_track_unless_replaced();
 			pthread_mutex_unlock(&audio_mutex);
 			break;
 		}
@@ -3220,10 +3234,7 @@ static void play_decoded_file(const char *filepath, decode_format_t format) {
 		pthread_mutex_lock(&audio_mutex);
 		// A canceled buffered open belongs to the OLD request. Never overwrite
 		// the replacement which woke it; the playback thread will take it next.
-		if (!play_request) {
-			audio_command = AUDIO_CMD_STOP;
-			playback_status = AUDIO_STATUS_STOPPED;
-		}
+		fail_track_unless_replaced();
 		pthread_mutex_unlock(&audio_mutex);
 		return;
 	}
@@ -3271,6 +3282,13 @@ static void play_decoded_file(const char *filepath, decode_format_t format) {
 	}
 
 	pthread_mutex_lock(&audio_mutex);
+	// The decoder open can outlive a stop or a later play request. Its result
+	// is no longer the current track in either case.
+	if (audio_command == AUDIO_CMD_STOP || play_request || stop_thread) {
+		pthread_mutex_unlock(&audio_mutex);
+		decoder_close(dec);
+		return;
+	}
 	progress_total_secs = (double)total_frames / sample_rate;
 	progress_current_secs = opening_position();
 	progress_floor_secs = -1.0;
@@ -3342,8 +3360,7 @@ static void play_decoded_file(const char *filepath, decode_format_t format) {
 		set_dac_dop(0);
 		decoder_close(dec);
 		pthread_mutex_lock(&audio_mutex);
-		audio_command = AUDIO_CMD_STOP;
-		playback_status = AUDIO_STATUS_STOPPED;
+		fail_track_unless_replaced();
 		pthread_mutex_unlock(&audio_mutex);
 		return;
 	}
@@ -3364,8 +3381,7 @@ static void play_decoded_file(const char *filepath, decode_format_t format) {
 		set_dac_dop(0);
 		decoder_close(dec);
 		pthread_mutex_lock(&audio_mutex);
-		audio_command = AUDIO_CMD_STOP;
-		playback_status = AUDIO_STATUS_STOPPED;
+		fail_track_unless_replaced();
 		pthread_mutex_unlock(&audio_mutex);
 		return;
 	}
@@ -3607,8 +3623,7 @@ static void play_decoded_file(const char *filepath, decode_format_t format) {
 					pcm_handle = open_pcm_device(channels, out_rate, out_bits, &new_period);
 					if (!pcm_handle) {
 						fprintf(stderr, "Audio: cannot reopen the device after a pause\n");
-						audio_command = AUDIO_CMD_STOP;
-						playback_status = AUDIO_STATUS_STOPPED;
+						fail_track_unless_replaced();
 						pthread_mutex_unlock(&audio_mutex);
 						break;
 					}
@@ -3619,8 +3634,7 @@ static void play_decoded_file(const char *filepath, decode_format_t format) {
 							snd_pcm_close(pcm_handle);
 							pcm_handle = NULL;
 							pcm_device_open = false;
-							audio_command = AUDIO_CMD_STOP;
-							playback_status = AUDIO_STATUS_STOPPED;
+							fail_track_unless_replaced();
 							pthread_mutex_unlock(&audio_mutex);
 							break;
 						}
@@ -3655,8 +3669,7 @@ static void play_decoded_file(const char *filepath, decode_format_t format) {
 				if (!pcm_reroute(&pcm_handle, channels, out_rate, out_bits, &period_size)) {
 					fprintf(stderr, "Audio: reroute failed\n");
 					pthread_mutex_lock(&audio_mutex);
-					audio_command = AUDIO_CMD_STOP;
-					playback_status = AUDIO_STATUS_STOPPED;
+					fail_track_unless_replaced();
 					pthread_mutex_unlock(&audio_mutex);
 					break;
 				}
@@ -3799,8 +3812,7 @@ static void play_decoded_file(const char *filepath, decode_format_t format) {
 					break;
 				}
 				pthread_mutex_lock(&audio_mutex);
-				audio_command = AUDIO_CMD_STOP;
-				playback_status = AUDIO_STATUS_STOPPED;
+				fail_track_unless_replaced();
 				pthread_mutex_unlock(&audio_mutex);
 				break;
 			}
@@ -3831,10 +3843,7 @@ static void play_decoded_file(const char *filepath, decode_format_t format) {
 			bool natural_end = audio_command != AUDIO_CMD_STOP && !play_request && !cut_short;
 			// A replacement can interrupt a RAM read with zero frames. Preserve
 			// its PLAY command/status; only the outgoing track has ended.
-			if (!play_request) {
-				audio_command = AUDIO_CMD_STOP;
-				playback_status = AUDIO_STATUS_STOPPED;
-			}
+			fail_track_unless_replaced();
 			track_completed = natural_end;
 			pthread_mutex_unlock(&audio_mutex);
 			played_to_the_end = natural_end;
@@ -3891,8 +3900,7 @@ static void play_decoded_file(const char *filepath, decode_format_t format) {
 				break; // the thread loop picks the queued replay up
 			}
 			pthread_mutex_lock(&audio_mutex);
-			audio_command = AUDIO_CMD_STOP;
-			playback_status = AUDIO_STATUS_STOPPED;
+			fail_track_unless_replaced();
 			pthread_mutex_unlock(&audio_mutex);
 			break;
 		}
@@ -4218,6 +4226,7 @@ int audio_play(const char *filepath) {
 	// The playback thread routes at track start, the stock engine's way.
 
 	pthread_mutex_lock(&audio_mutex);
+	command_serial++;
 	restart_fresh_pending = false; // an explicit play beats the armed restart
 	strncpy(current_filepath, filepath, sizeof(current_filepath) - 1);
 	play_request = true;
@@ -4259,6 +4268,7 @@ int audio_play_at(const char *filepath, double start_secs) {
 	fprintf(stderr, "audio[%ld]: play requested '%s' from %.1f s\n", log_ms(), filepath, start_secs);
 
 	pthread_mutex_lock(&audio_mutex);
+	command_serial++;
 	restart_fresh_pending = false; // an explicit play beats the armed restart
 	strncpy(current_filepath, filepath, sizeof(current_filepath) - 1);
 	current_filepath[sizeof(current_filepath) - 1] = '\0';
@@ -4284,6 +4294,7 @@ int audio_play_paused(const char *filepath, double start_secs) {
 	fprintf(stderr, "audio[%ld]: restore requested '%s' at %.1f s (paused)\n", log_ms(), filepath, start_secs);
 
 	pthread_mutex_lock(&audio_mutex);
+	command_serial++;
 	restart_fresh_pending = false; // an explicit play beats the armed restart
 	strncpy(current_filepath, filepath, sizeof(current_filepath) - 1);
 	current_filepath[sizeof(current_filepath) - 1] = '\0';
@@ -4367,7 +4378,7 @@ bool audio_suspend_quiesce(int timeout_ms) {
 	return !pcm_device_open && !gapless_holding();
 }
 
-bool audio_playback_context_active(void) { return playback_context_active; }
+bool audio_playback_context_active(void) { return atomic_load(&playback_context_active); }
 
 // The real freeze, for mem. ALSA objects are not enough: a paused track keeps
 // play_file() alive with the decoder and a FILE* open on the card, the card
@@ -4454,6 +4465,7 @@ bool audio_prepare_poweroff(void) {
 void audio_pause(void) {
 	printf("pausing\n");
 	pthread_mutex_lock(&audio_mutex);
+	command_serial++;
 	audio_command = AUDIO_CMD_PAUSE;
 
 	// Report the new state immediately instead of waiting for the playback
@@ -4471,6 +4483,7 @@ void audio_resume(void) {
 	// rebuilding everything from scratch at the right point -- fresh decoder,
 	// fresh route, fresh PCM. That is the same path every track start takes.
 	pthread_mutex_lock(&audio_mutex);
+	command_serial++;
 	if (restart_fresh_pending && restart_fresh_path[0]) {
 		char path[512];
 		snprintf(path, sizeof(path), "%s", restart_fresh_path);
@@ -4499,11 +4512,38 @@ void audio_resume(void) {
 void audio_stop(void) {
 	printf("stopping\n");
 	pthread_mutex_lock(&audio_mutex);
+	command_serial++;
 	audio_command = AUDIO_CMD_STOP;
 	playback_status = AUDIO_STATUS_STOPPED;
 	seek_request = false;
 	seek_target_secs = -1.0;
 	track_completed = false; // deliberate stop is not a natural completion
+	pthread_cond_broadcast(&audio_cond);
+	pthread_mutex_unlock(&audio_mutex);
+	subsonicstream_cancel();
+}
+
+void audio_restore_stopped_file(const char *filepath, double position) {
+	pthread_mutex_lock(&audio_mutex);
+	command_serial++;
+	audio_command = AUDIO_CMD_STOP;
+	playback_status = AUDIO_STATUS_STOPPED;
+	// The failed request may not have been picked up yet. Cancel it under the
+	// same lock as its path so it cannot start beneath a restored radio.
+	play_request = false;
+	play_request_ms = 0;
+	write_fail_retry_used = true;
+	restart_fresh_pending = false;
+	seek_request = false;
+	seek_target_secs = -1.0;
+	track_completed = false;
+	snprintf(current_filepath, sizeof(current_filepath), "%s", filepath ? filepath : "");
+	progress_current_secs = position > 0 ? position : 0;
+	progress_floor_secs = -1.0;
+	progress_total_secs = 0;
+	stream_sample_rate = stream_channels = stream_bits = stream_dsd_multiple = stream_bitrate_kbps = 0;
+	stream_lossy = false;
+	stream_codec[0] = '\0';
 	pthread_cond_broadcast(&audio_cond);
 	pthread_mutex_unlock(&audio_mutex);
 	subsonicstream_cancel();
@@ -4521,6 +4561,13 @@ audio_status_t audio_get_status(void) {
 	audio_status_t status = playback_status;
 	pthread_mutex_unlock(&audio_mutex);
 	return status;
+}
+
+unsigned audio_command_serial(void) {
+	pthread_mutex_lock(&audio_mutex);
+	unsigned serial = command_serial;
+	pthread_mutex_unlock(&audio_mutex);
+	return serial;
 }
 
 bool audio_take_completion(void) {
@@ -4622,6 +4669,7 @@ void audio_seek(double seconds) {
 	printf("seeking to %.2f seconds\n", seconds);
 
 	pthread_mutex_lock(&audio_mutex);
+	command_serial++;
 	progress_current_secs = seconds; // the bar follows the finger, not the decoder
 	progress_floor_secs = -1.0;		// and a deliberate jump outranks the pause floor
 	seek_target_secs = seconds;

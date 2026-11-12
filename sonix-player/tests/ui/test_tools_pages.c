@@ -47,6 +47,8 @@
 #include "src/system/notes/notesstore.h"
 #include "src/system/pet/pet.h"
 #include "src/system/pet/petwatch.h"
+#include "src/system/pet/petalarm.h"
+#include "src/system/library/playlists.h"
 #include "src/system/text/textfile.h"
 
 /* ---- the parts of the shell these pages lean on, substituted ------------- */
@@ -224,13 +226,29 @@ void petwatch_flush(void) {}
 
 /* The clock is set, because this suite's whole day is a fixed second. */
 bool clock_is_set(void) { return true; }
+void clock_format_hm(char *out, size_t size, int hour, int minute) {
+	snprintf(out, size, "%02d:%02d", hour, minute);
+}
+int playlists_for_each(playlists_name_cb_t cb, void *user) {
+	static const char *const names[] = {"Morning Mix", "Evening Mix"};
+	int count = 0;
+	for (size_t i = 0; i < sizeof(names) / sizeof(names[0]); i++) {
+		if (!cb(names[i], user)) break;
+		count++;
+	}
+	return count;
+}
 
 /* A timer parked for the screen's dark half; there is no power manager here. */
 void power_pause_in_standby(lv_timer_t *timer) { (void)timer; }
 void switcher_attach_back_gesture(lv_obj_t *obj) { (void)obj; }
 bool switcher_back_drag_active(void) { return false; }
 static bool (*last_back_guard)(void);
-void switcher_set_back_guard(lv_obj_t *screen, bool (*handler)(void)) { (void)screen; last_back_guard=handler; }
+static bool (*pet_back_guard_test)(void);
+void switcher_set_back_guard(lv_obj_t *screen, bool (*handler)(void)) {
+	if (screen == petpage_screen) pet_back_guard_test = handler;
+	last_back_guard = handler;
+}
 void switcher_set_back_guard_peek(lv_obj_t *screen, bool (*peek)(void)) { (void)screen; (void)peek; }
 /* Counted rather than ignored: the two file viewers must not take the
  * player-sheet swipe (see the check after pictureview_init). */
@@ -853,6 +871,12 @@ static void check_strings(const char *language_dir) {
 		"pet_streak_none", "pet_feeding", "pet_feeding_music", "pet_feed_me",
 		"pet_asleep", "pet_pet", "pet_purr", "pet_cooldown", "pet_goal_toast",
 		"pet_stage_toast", "pet_customise",
+		"pet_alarm", "pet_alarm_time", "pet_alarm_days", "pet_alarm_daily",
+		"pet_alarm_sun", "pet_alarm_mon", "pet_alarm_tue", "pet_alarm_wed",
+		"pet_alarm_thu", "pet_alarm_fri", "pet_alarm_sat", "pet_alarm_fade",
+		"pet_alarm_source", "pet_alarm_resume", "pet_alarm_local_playlists",
+		"pet_alarm_no_clock", "pet_alarm_no_days", "pet_alarm_no_days_short",
+		"pet_alarm_note", "pet_alarm_volume_note", "pet_alarm_playlist_unavailable", "pet_alarm_source_busy", "pet_alarm_no_source",
 		"pet_mood_dizzy", "pet_temperament_none", "pet_temperament_upbeat",
 		"pet_temperament_calm", "pet_temperament_curious", "pet_dizzy_hint",
 		"pet_dizzy_toast", "pet_drop_toast", "pet_forage_toast", "pet_tap_game",
@@ -2129,6 +2153,52 @@ static void check_pet_page(gui_config_t *cfg, const char *tag) {
 	char sheet_tag[64];
 	snprintf(sheet_tag, sizeof(sheet_tag), "%s-name", tag);
 	dump_snapshot(petpage_screen, sheet_tag);
+
+	// The alarm is in pet settings. Its controls use the real configuration and
+	// the playlist picker, and the shell back button closes each sheet in turn.
+	press_visible_key(petpage_screen, tr("pet_alarm"));
+	lv_obj_update_layout(petpage_screen);
+	lv_obj_t *time_title = find_visible_label(petpage_screen, tr("pet_alarm_time"));
+	assert(time_title && pet_back_guard_test);
+	check_within_panel(petpage_screen, cfg, "Pet alarm (off)");
+	lv_obj_t *head = lv_obj_get_parent(time_title);
+	lv_obj_t *alarm_switch = find_class(head, &lv_switch_class);
+	assert(alarm_switch && !petalarm_enabled());
+	lv_obj_add_state(alarm_switch, LV_STATE_CHECKED);
+	lv_obj_send_event(alarm_switch, LV_EVENT_VALUE_CHANGED, NULL);
+	assert(petalarm_enabled());
+	lv_obj_t *time_card = lv_obj_get_parent(head);
+	lv_obj_t *hour = find_class(time_card, &lv_roller_class);
+	assert(hour);
+	lv_obj_t *wheels = lv_obj_get_parent(hour);
+	lv_obj_t *minute = lv_obj_get_child(wheels, 2);
+	assert(lv_obj_check_type(minute, &lv_roller_class));
+	lv_roller_set_selected(hour, 6, LV_ANIM_OFF);
+	lv_obj_send_event(hour, LV_EVENT_VALUE_CHANGED, NULL);
+	lv_roller_set_selected(minute, 45, LV_ANIM_OFF);
+	lv_obj_send_event(minute, LV_EVENT_VALUE_CHANGED, NULL);
+	assert(petalarm_minutes() == 405);
+	lv_obj_update_layout(petpage_screen);
+	check_within_panel(petpage_screen, cfg, "Pet alarm (on)");
+	press_visible_key(petpage_screen, tr("pet_alarm_mon"));
+	assert(petalarm_days() == (1u << 1));
+	press_visible_key(petpage_screen, tr("pet_alarm_wed"));
+	assert(petalarm_days() == ((1u << 1) | (1u << 3)));
+	press_visible_key(petpage_screen, "30 s");
+	assert(petalarm_fade_seconds() == 30);
+	press_visible_key(petpage_screen, tr("pet_alarm_source"));
+	assert(find_visible_label(petpage_screen, "Morning Mix"));
+	press_visible_key(petpage_screen, "Morning Mix");
+	assert(!strcmp(petalarm_playlist(), "Morning Mix"));
+	press_visible_key(petpage_screen, tr("pet_alarm_source"));
+	assert(pet_back_guard_test()); // picker back, not the whole alarm
+	assert(!find_visible_label(petpage_screen, "Evening Mix"));
+	assert(pet_back_guard_test()); // alarm back, to pet settings
+	assert(find_visible_label(petpage_screen, "06:45"));
+	assert(pet_back_guard_test()); // pet settings back
+	assert(!lv_obj_is_visible(sheet_title));
+	petalarm_set_enabled(false);
+	lv_obj_send_event(pencil, LV_EVENT_CLICKED, NULL); // show it again for the original close check
 	lv_obj_send_event(pencil, LV_EVENT_CLICKED, NULL);
 	lv_obj_update_layout(petpage_screen);
 	assert(!lv_obj_is_visible(sheet_title));
@@ -2636,6 +2706,7 @@ int main(int argc, char **argv) {
 	tagmanager_init(&cfg);
 	metronome_init(&cfg);
 	pet_defaults(&pet_state, petwatch_now(), pet_day_now(petwatch_now()));
+	petalarm_init();
 	petpage_init(&cfg);
 	morepage_init(&cfg);
 	player_drag_attaches = 0; // counting from here: only the viewers are built below

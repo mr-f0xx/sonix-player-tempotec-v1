@@ -26,6 +26,8 @@
 #include "src/system/library/audiobookdb.h"
 #include "src/system/device/clock.h"
 #include "src/system/pet/petwatch.h"
+#include "src/system/pet/petalarm.h"
+#include "src/system/pet/petalarm_runtime.h"
 #include "src/system/playback/device_state.h"
 #include "src/system/remote/dlna.h"
 #include "src/system/remote/sonixlink.h"
@@ -1150,23 +1152,24 @@ static void mem_skip(const char *why) {
 }
 
 // ---------------------------------------------------------------------------
-// The RTC wake alarm that carries the automatic shutdown across a suspend.
+// The one RTC wake alarm shared by standby and automatic shutdown.
 //
-// The process does not run while suspended: a shutdown deadline falling during
-// the sleep would go unseen, and the wake (always by the user) restarts the idle
-// markers, so with standby on the shutdown would never fire at all. The hardware
-// is there, though: the Ingenic RTC is a registered wake source
-// (system-power-controller, RTCLDO powered across the suspend).
-//
-// So before writing `mem`, if the automatic shutdown is on,
-// /sys/class/rtc/rtc0/wakealarm is programmed for the moment it would fire. If
-// the RTC is what wakes the device (no user: the deadline arrived), it really
-// shuts down. If the user wakes it first, turning the screen on disarms the
-// alarm, and the next suspend re-arms it with the new deadline.
+// The process cannot run in suspend. Before `mem`, program the RTC for the pet
+// alarm when one is armed, otherwise for the automatic shutdown. Automatic
+// shutdown is held off while an alarm is armed: powering the device off would
+// make a later music alarm impossible. Manual power-off and the battery guard
+// still win. A user wake disarms the RTC; the next suspend programs it again.
+// If an armed music alarm cannot be programmed, do not suspend at all: staying
+// awake with the screen dark is better than silently sleeping through it.
 // ---------------------------------------------------------------------------
 #define RTC_WAKEALARM_PATH "/sys/class/rtc/rtc0/wakealarm"
+// Wake a minute early, leaving time to correct the system clock and recover
+// the audio route even if the RTC has drifted a little during a long sleep.
+#define RTC_PET_WAKE_EARLY_S 60
+#define RTC_PET_MIN_SLEEP_S 30
 
 static bool g_rtc_alarm_armed;
+static bool g_rtc_alarm_for_pet;
 static time_t g_rtc_alarm_at;
 // The same deadline on CLOCK_BOOTTIME. The wall clock is not usable for this:
 // it does not count the sleep, and clock_resync() -- the one thing that would
@@ -1174,6 +1177,16 @@ static time_t g_rtc_alarm_at;
 // ntpdate, so on a device that has seen neither the deadline check never comes
 // true. CLOCK_BOOTTIME counts suspended time and needs nobody's permission.
 static uint32_t g_rtc_alarm_boot_at;
+
+static bool auto_off_due(uint32_t idle_wall_ms) {
+	return g_auto_off_enabled && g_auto_off_ms > 0 && idle_wall_ms >= g_auto_off_ms &&
+		   !petalarm_armed(clock_is_set());
+}
+
+static bool rtc_alarm_is_auto_off_wake(bool suspend_succeeded, bool user_woke_it) {
+	return suspend_succeeded && g_rtc_alarm_armed && !g_rtc_alarm_for_pet && !user_woke_it &&
+		   (int32_t)(boottime_ms() - g_rtc_alarm_boot_at) >= 0;
+}
 
 static bool rtc_wakealarm_write(const char *val) {
 #ifdef HOST_BUILD
@@ -1184,8 +1197,8 @@ static bool rtc_wakealarm_write(const char *val) {
 	if (!f) {
 		return false;
 	}
-	fputs(val, f);
-	return fclose(f) == 0;
+	bool ok = fputs(val, f) >= 0;
+	return fclose(f) == 0 && ok;
 #endif
 }
 
@@ -1194,41 +1207,68 @@ static void rtc_alarm_disarm(void) {
 		return;
 	}
 	g_rtc_alarm_armed = false;
+	g_rtc_alarm_for_pet = false;
 	rtc_wakealarm_write("0");
 	printf("power: RTC wake alarm disarmed\n");
 }
 
-static void rtc_alarm_arm_for_auto_off(void) {
+// False when a music alarm cannot safely be armed, or the automatic shutdown
+// has already expired and must be handled awake rather than slept through.
+static bool rtc_alarm_arm_for_sleep(void) {
 	g_rtc_alarm_armed = false;
-	// Cleared on every path, not only when a new one is written: an alarm left
-	// over from an earlier suspend outlives the setting that armed it, and fires
-	// later to wake a device that has no reason to wake -- with the software
-	// flag down, so nothing acts on it and it simply burns battery in the dark.
+	g_rtc_alarm_for_pet = false;
+	time_t now = time(NULL);
+	bool clock_set = clock_is_set();
+	if (petalarm_armed(clock_set)) {
+		time_t at = petalarm_next(now, clock_set);
+		// Teardown, sync and entering mem take time. Do not race an early
+		// wake already at hand; the watcher will handle the alarm awake.
+		double remaining = difftime(at, now);
+		if (!at || remaining <= RTC_PET_WAKE_EARLY_S + RTC_PET_MIN_SLEEP_S) {
+			rtc_wakealarm_write("0");
+			return false;
+		}
+		// The system clock is corrected from CLOCK_BOOTTIME, so it may differ
+		// from the RTC's own reading. Linux's +seconds wakealarm form is
+		// relative to the RTC, unlike writing the wall-clock epoch directly.
+		char buf[32];
+		snprintf(buf, sizeof(buf), "+%lld", (long long)remaining - RTC_PET_WAKE_EARLY_S);
+		if (!rtc_wakealarm_write("0") || !rtc_wakealarm_write(buf)) {
+			rtc_wakealarm_write("0");
+			return false;
+		}
+		g_rtc_alarm_armed = true;
+		g_rtc_alarm_for_pet = true;
+		g_rtc_alarm_at = at;
+		printf("power: mem: RTC wake %d s before the pet alarm at %lld\n",
+			   RTC_PET_WAKE_EARLY_S, (long long)at);
+		return true;
+	}
+
+	// Clear on every path: an alarm left over from an earlier suspend must not
+	// wake a device that no longer has a reason to wake.
 	if (!g_auto_off_enabled || g_auto_off_ms == 0) {
 		rtc_wakealarm_write("0");
-		return;
+		return true;
 	}
 	uint32_t idle_wall = boottime_ms() - g_last_active_boot_ms;
 	if (idle_wall >= g_auto_off_ms) {
 		rtc_wakealarm_write("0");
-		return; // already expired: the normal awake tick handles it
+		return false; // already expired: the next awake tick must handle it
 	}
 	long remaining_s = (long)((g_auto_off_ms - idle_wall) / 1000u) + 5; // margin
-	// Cleared first (the kernel rejects a new alarm over a pending one), then
-	// the absolute time in epoch seconds, which is how the RTC keeps it.
-	if (!rtc_wakealarm_write("0")) {
-		return;
-	}
+	if (!rtc_wakealarm_write("0")) return true;
 	char buf[32];
-	time_t at = time(NULL) + remaining_s;
+	time_t at = now + remaining_s;
+	// Retain the existing automatic-shutdown wake format; only the music
+	// alarm needs the RTC-relative form when its wall clock may differ.
 	snprintf(buf, sizeof(buf), "%lld", (long long)at);
-	if (!rtc_wakealarm_write(buf)) {
-		return;
-	}
+	if (!rtc_wakealarm_write(buf)) return true;
 	g_rtc_alarm_armed = true;
 	g_rtc_alarm_at = at;
 	g_rtc_alarm_boot_at = boottime_ms() + (uint32_t)remaining_s * 1000u;
 	printf("power: mem: RTC wake in %ld s for the automatic shutdown\n", remaining_s);
+	return true;
 }
 
 void power_shutdown(void) {
@@ -1251,6 +1291,8 @@ void power_shutdown(void) {
 	// watcher writes every two minutes while something plays, and a clean
 	// shutdown should not be the one that drops the difference.
 	petwatch_flush();
+	// A half-finished alarm fade is temporary, not the level to leave behind.
+	petalarm_runtime_shutdown();
 
 	// Dark the panel immediately, then fade/close audio before the kernel takes
 	// power away from the output stage. In particular, the HBC3000 is parked on
@@ -1316,6 +1358,13 @@ static void suspend_to_ram(void) {
 	printf("power: mem: starting the sequence (screen off for %u s)\n",
 		   (unsigned)((lv_tick_get() - g_screen_off_at) / 1000));
 
+	// Preflight a pet alarm before dismantling the audio path. If the RTC
+	// cannot carry it across the sleep, leave the watcher running awake.
+	if (petalarm_armed(clock_is_set()) && !rtc_alarm_arm_for_sleep()) {
+		mem_skip("the pet alarm is near or the RTC wake alarm could not be set");
+		return;
+	}
+
 	// A panel held up for a Bluetooth stream goes down before the sleep. It has
 	// normally been put down already -- the stream had to stop for the suspend
 	// to be allowed, and the tick follows the stream -- but a sleep that falls
@@ -1335,6 +1384,7 @@ static void suspend_to_ram(void) {
 	//    there was a pause, the freeze arms a fresh restart: the next play
 	//    rebuilds everything from scratch at the right position.
 	if (!audio_suspend_freeze(3000)) {
+		rtc_alarm_disarm();
 		mem_skip("the audio context did not stop");
 		return;
 	}
@@ -1358,9 +1408,15 @@ static void suspend_to_ram(void) {
 	//    towards it.
 	sync();
 
-	// 4-ter. The RTC alarm: if the automatic shutdown deadline falls during the
-	//        sleep, it is what wakes the device to actually shut down.
-	rtc_alarm_arm_for_auto_off();
+	// 4-ter. Recompute after the potentially lengthy audio teardown and sync:
+	// relative RTC deadlines must be measured immediately before sleep. This
+	// also catches an alarm that became due while the sequence was running.
+	if (!rtc_alarm_arm_for_sleep()) {
+		mem_skip("an alarm or automatic shutdown became due during teardown");
+		headset_suspend_finish();
+		audio_force_output_reinit_after_resume();
+		return;
+	}
 
 	// 5. The write that stops the SoC. Blocks until the wake: everything after
 	//    it already runs on the other side.
@@ -1480,9 +1536,11 @@ static void suspend_to_ram(void) {
 	bool user_woke_it = g_power_button_pending;
 	pthread_mutex_unlock(&g_lock);
 
-	if (rc == 0 && g_rtc_alarm_armed && !user_woke_it && (int32_t)(boottime_ms() - g_rtc_alarm_boot_at) >= 0) {
+	if (rtc_alarm_is_auto_off_wake(rc == 0, user_woke_it)) {
 		power_auto_off_now("RTC wake after mem: the idle time has run out");
 	}
+	// A pet-alarm wake is handled by the ordinary watcher on the next tick,
+	// after the clock and the audio route have both been restored above.
 
 	// No recovery of the old stream: there is nothing left to recover -- the
 	// freeze closed everything before the suspend, and the next play is a fresh
@@ -2270,10 +2328,11 @@ static void power_timer_cb(lv_timer_t *timer) {
 	// 4a-bis. the shutdown timer, once it has run out.
 	//
 	//     Before the suspend, not after it: on a tick where both are ready,
-	//     suspending first would leave rtc_alarm_arm_for_auto_off() with a
+	//     suspending first would leave rtc_alarm_arm_for_sleep() with a
 	//     deadline already past, so it would arm nothing, that sleep would carry
-	//     no alarm and the shutdown would slip by a whole period.
-	if (g_auto_off_enabled && g_auto_off_ms > 0 && off_idle_wall >= g_auto_off_ms) {
+	//     no alarm and the shutdown would slip by a whole period. A configured
+	//     pet alarm holds this off; a powered-off player cannot ring it.
+	if (auto_off_due(off_idle_wall)) {
 		char why[64];
 		snprintf(why, sizeof(why), "%u minutes idle", g_auto_off_ms / 60000u);
 		power_auto_off_now(why);

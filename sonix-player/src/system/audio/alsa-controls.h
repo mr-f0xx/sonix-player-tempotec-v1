@@ -144,6 +144,21 @@ void alsa_track_unmute(void);
 // work in plain percent, 0 = silent and 100 = loudest.
 int get_volume_percent(void);
 void set_volume_percent(int percent);
+// Initial Bluetooth connection adoption is not a user adjustment. It is
+// refused during an alarm fade. Later remote adjustments may cancel the fade.
+// Both are refused after switching away from Bluetooth, atomically with the
+// output transition, so a late signal cannot change another output's profile.
+bool volume_adopt_bluetooth(int percent);
+bool volume_adjust_bluetooth(int percent);
+
+// A temporary alarm fade on the current output. The ramp does not rewrite the
+// normal volume profile. A user volume change cancels it and wins; changing
+// output or line-out restores the old profile first. Fixed line-out and a
+// muted target cannot be faded, so begin() returns false for those cases.
+bool volume_fade_begin(void);
+bool volume_fade_active(void);
+void volume_fade_progress(int elapsed_seconds, int duration_seconds);
+void volume_fade_stop(void);
 
 // Line out: the jack that is plugged in, driven for an amplifier instead of a
 // pair of headphones. On the 3.5 mm hole that is route 1 in place of 2; on the

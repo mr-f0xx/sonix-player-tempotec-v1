@@ -18,6 +18,7 @@
 #include "src/system/device/led.h"
 #include "src/system/audio/audio.h"
 #include "src/system/playback/device_state.h"
+#include "src/system/pet/petalarm_runtime.h"
 #include "src/system/core/lang.h"
 #include "src/system/device/power.h"
 #include "src/system/device/system.h"
@@ -123,6 +124,10 @@ static void do_power_off(void) {
 static void do_reboot(void) {
 	printf("power: rebooting\n");
 	device_state_remember_flush();
+	// Resolve an alarm still opening after the guarded flush, just as the
+	// power-off path does; an unconfirmed track must not replace the last
+	// durable queue and remembered track on the way out.
+	petalarm_runtime_shutdown();
 	browser_state_flush();
 	power_screen_off();
 	// The status LED, faded out like the power-off path: the screen is already

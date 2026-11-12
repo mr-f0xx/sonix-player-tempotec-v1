@@ -11,6 +11,7 @@
 
 #include <alsa/asoundlib.h>
 #include <pthread.h>
+#include <stdatomic.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -20,7 +21,8 @@
 #include <unistd.h>
 
 static long current_volume;
-static int current_percent = 50;
+// Also sampled by the playback and Bluetooth workers outside the profile lock.
+static atomic_int current_percent = 50;
 static long current_output = -1; // last value written to "Output Port Switch"
 
 // The jack switches can chatter while a plug is being seated. Use the same
@@ -157,7 +159,8 @@ bool alsa_board_is_cs43131(void) {
 	return answer != 0;
 }
 
-static bool lineout_on;
+// The playback thread also consults this when restoring the DAC route.
+static atomic_bool lineout_on;
 static int lineout_saved_percent = -1;
 static int lineout_jack; // the jack the mode was switched on for
 static int current_balance_lineout = -1; // last value written to "Balance Lineout En"
@@ -169,8 +172,9 @@ static int current_balance_lineout = -1; // last value written to "Balance Lineo
 static int refused_balance_lineout = -1;
 
 static void apply_volume_hw(int percent);
+static void reapply_volume_hw(void);
 
-static int high_gain; // 0 = low gain (default, like the stock player)
+static atomic_int high_gain; // 0 = low gain (default, like the stock player)
 
 // The stock firmware's own volume curves, not a computed formula.
 //
@@ -695,13 +699,11 @@ void alsa_track_unmute(void) {
 		return;
 	}
 #ifndef HOST_BUILD
-	// Line out is a fixed level; restoring the ordinary user index here would
-	// briefly hand that level to an amplifier. Same rule as alsa_suspend_restore.
-	if (lineout_on) {
-		apply_volume_hw(LINEOUT_VOLUME_INDEX);
-	} else {
-		write_dac_attenuation();
-	}
+	// Only the DAC was muted. Reapply its current index, which is already the
+	// fixed index in line-out mode, without changing the logical level or
+	// notifying USB/Bluetooth from the playback thread. A stale line-out read
+	// must never write 100 over a concurrently restored headphone profile.
+	write_dac_attenuation();
 	usleep((useconds_t)dac_mute_settle_ms() * 1000);
 #endif
 	fprintf(stderr, "alsa: DAC level restored after the stream stop\n");
@@ -721,13 +723,9 @@ void alsa_suspend_restore(void) {
 		return;
 	}
 #ifndef HOST_BUILD
-	// Line out is a fixed level; restoring the ordinary user index here would
-	// briefly hand that level to an amplifier after a route transition.
-	if (lineout_on) {
-		apply_volume_hw(LINEOUT_VOLUME_INDEX);
-	} else {
-		write_dac_attenuation();
-	}
+	// Only this DAC was muted. Its current index already represents line out
+	// when that mode is active; do not republish a stale 100 to other outputs.
+	write_dac_attenuation();
 	usleep((useconds_t)dac_mute_settle_ms() * 1000);
 #endif
 	fprintf(stderr, "alsa: DAC level restored\n");
@@ -806,7 +804,6 @@ void alsa_controls_reapply(void) {
 	int filter = get_dac_filter();
 	int dre = get_dac_dre();
 	int nos = get_dac_nos();
-	int percent = current_percent;
 
 	current_output = -1; // force the route to be written again
 	current_balance_lineout = -1; // and the line-out flag with it
@@ -823,19 +820,14 @@ void alsa_controls_reapply(void) {
 	set_dac_filter(filter);
 	set_dac_dre(dre);
 	set_dac_nos(nos);
-	// Volume and gain live in the same register. In line out the level is the
-	// fixed index and set_volume_percent refuses to move it, so the hardware
-	// write goes through the same path the mode itself uses.
-	if (lineout_on) {
-		apply_volume_hw(LINEOUT_VOLUME_INDEX);
-	} else {
-		set_volume_percent(percent);
-	}
+	// Reapply the level currently in force under the volume lock. A snapshot
+	// taken before the route work could otherwise overwrite a newer fade step.
+	reapply_volume_hw();
 
 	// stderr because printf is block-buffered into the log file, and this line
 	// has to reach the log when it happens, not when the buffer fills.
-	fprintf(stderr, "alsa: controls re-applied after resume (route, %d%%, filter %d, DRE %d, NOS %d)\n", percent,
-			filter, dre, nos);
+	fprintf(stderr, "alsa: controls re-applied after resume (route, %d%%, filter %d, DRE %d, NOS %d)\n",
+			get_volume_percent(), filter, dre, nos);
 }
 
 // Writes the route to the mixer forcing a real transition, by writing a
@@ -975,9 +967,25 @@ long get_volume(void) { return current_volume; }
 // nobody chose for the other. USB-C is the fourth, and its level goes to the
 // device out there rather than to the CS43198, so it is not even the same
 // attenuation.
-static volume_output_t profile_out = VOLUME_OUTPUT_PHONES;
+static _Atomic(volume_output_t) profile_out = VOLUME_OUTPUT_PHONES;
 static int level[VOLUME_OUTPUT_COUNT] = {-1, -1, -1, -1}; // -1 = never set, so the first reading adopts it
 static bool profile_dirty;
+
+// An alarm ramp is an output level, not a new user setting. Keep the target
+// apart from the profile so the periodic profile save cannot write half of a
+// fade down as the level for the next boot.
+// Bluetooth's worker can adopt or change the level concurrently with the UI.
+// Serialize adjustments, profile/line-out transitions, limits and the alarm
+// ramp, so a late headphone event cannot corrupt another output's profile or
+// turn a just-started fade into a new saved setting.
+static pthread_mutex_t alarm_volume_lock = PTHREAD_MUTEX_INITIALIZER;
+static bool alarm_fade_active;
+static int alarm_fade_target;
+static volume_output_t alarm_fade_output;
+
+static void fade_stop_locked(void);
+static void set_volume_percent_locked(int percent);
+static void lineout_set_locked(bool on);
 
 // Where each level is written down. The first and the last are the historical
 // key names, so a player updating from a build with only two profiles finds its
@@ -1046,16 +1054,19 @@ static int limit_ceiling(volume_output_t out) {
 }
 
 bool volume_limit_enabled(void) {
+	pthread_mutex_lock(&alarm_volume_lock);
 	limit_load();
-	return limit_on;
+	bool enabled = limit_on;
+	pthread_mutex_unlock(&alarm_volume_lock);
+	return enabled;
 }
 
 int volume_limit(volume_output_t out) {
+	pthread_mutex_lock(&alarm_volume_lock);
 	limit_load();
-	if (!output_in_range(out) || !LIMIT_KEYS[out]) {
-		return 100;
-	}
-	return limit_level[out];
+	int value = (!output_in_range(out) || !LIMIT_KEYS[out]) ? 100 : limit_level[out];
+	pthread_mutex_unlock(&alarm_volume_lock);
+	return value;
 }
 
 static void apply_volume_hw(int percent);
@@ -1083,6 +1094,7 @@ static void limit_enforce(volume_output_t out) {
 }
 
 void volume_limit_set_enabled(bool on) {
+	pthread_mutex_lock(&alarm_volume_lock);
 	limit_load();
 	limit_on = on;
 	config_set_int("audio", "volume_limit", on ? 1 : 0);
@@ -1091,45 +1103,54 @@ void volume_limit_set_enabled(bool on) {
 		limit_enforce(VOLUME_OUTPUT_PHONES);
 		limit_enforce(VOLUME_OUTPUT_BALANCED);
 		limit_enforce(VOLUME_OUTPUT_USB);
-		volume_profile_persist();
 	}
+	pthread_mutex_unlock(&alarm_volume_lock);
+	if (on) volume_profile_persist();
 }
 
 void volume_limit_set(volume_output_t out, int percent) {
+	pthread_mutex_lock(&alarm_volume_lock);
 	limit_load();
 	if (!output_in_range(out) || !LIMIT_KEYS[out]) {
+		pthread_mutex_unlock(&alarm_volume_lock);
 		return;
 	}
 	limit_level[out] = limit_clamp_value(percent);
 	config_set_int("audio", LIMIT_KEYS[out], limit_level[out]);
 	limit_enforce(out);
+	pthread_mutex_unlock(&alarm_volume_lock);
+}
+
+static void profile_set_level_locked(volume_output_t out, int percent) {
+	if (!output_in_range(out)) return;
+	level[out] = (percent >= 0 && percent <= 100) ? percent : -1;
+	if (level[out] > limit_ceiling(out)) level[out] = limit_ceiling(out);
 }
 
 void volume_profile_set_level(volume_output_t out, int percent) {
-	if (!output_in_range(out)) {
-		return;
-	}
-	level[out] = (percent >= 0 && percent <= 100) ? percent : -1;
-	if (level[out] > limit_ceiling(out)) {
-		level[out] = limit_ceiling(out);
-	}
+	pthread_mutex_lock(&alarm_volume_lock);
+	profile_set_level_locked(out, percent);
+	pthread_mutex_unlock(&alarm_volume_lock);
 }
 
 void volume_profile_init(int wired_percent, int bt_percent) {
-	for (int i = 0; i < VOLUME_OUTPUT_COUNT; i++) {
-		level[i] = -1;
-	}
-	volume_profile_set_level(VOLUME_OUTPUT_PHONES, wired_percent);
-	volume_profile_set_level(VOLUME_OUTPUT_BLUETOOTH, bt_percent);
+	pthread_mutex_lock(&alarm_volume_lock);
+	for (int i = 0; i < VOLUME_OUTPUT_COUNT; i++) level[i] = -1;
+	profile_set_level_locked(VOLUME_OUTPUT_PHONES, wired_percent);
+	profile_set_level_locked(VOLUME_OUTPUT_BLUETOOTH, bt_percent);
 	profile_dirty = false;
+	pthread_mutex_unlock(&alarm_volume_lock);
 }
 
-volume_output_t volume_profile_output(void) { return profile_out; }
+volume_output_t volume_profile_output(void) { return (volume_output_t)atomic_load(&profile_out); }
 
-bool volume_profile_is_bluetooth(void) { return profile_out == VOLUME_OUTPUT_BLUETOOTH; }
+bool volume_profile_is_bluetooth(void) { return atomic_load(&profile_out) == VOLUME_OUTPUT_BLUETOOTH; }
 
 int volume_profile_level(bool bluetooth) {
-	return bluetooth ? level[VOLUME_OUTPUT_BLUETOOTH] : level[VOLUME_OUTPUT_PHONES];
+	pthread_mutex_lock(&alarm_volume_lock);
+	int value = bluetooth ? level[VOLUME_OUTPUT_BLUETOOTH] : level[VOLUME_OUTPUT_PHONES];
+	pthread_mutex_unlock(&alarm_volume_lock);
+	return value;
 }
 
 static void write_profiles(void) {
@@ -1145,44 +1166,49 @@ static void write_profiles(void) {
 // poll rather than from every step of a held volume key, so a long press costs
 // one config write instead of fifty.
 void volume_profile_persist(void) {
-	if (!profile_dirty) {
-		return;
+	pthread_mutex_lock(&alarm_volume_lock);
+	if (profile_dirty) {
+		profile_dirty = false;
+		write_profiles();
 	}
-	profile_dirty = false;
-	write_profiles();
+	pthread_mutex_unlock(&alarm_volume_lock);
 }
 
 // The same, whether or not anything has moved: for the moment the user switches
 // "Remember volume" on and every level in hand becomes the one to come back to.
 void volume_profile_persist_now(void) {
+	pthread_mutex_lock(&alarm_volume_lock);
 	profile_dirty = false;
 	write_profiles();
+	pthread_mutex_unlock(&alarm_volume_lock);
 }
 
 void volume_profile_set_output(volume_output_t out) {
-	if (!output_in_range(out) || out == profile_out) {
+	if (!output_in_range(out)) return;
+	pthread_mutex_lock(&alarm_volume_lock);
+	if (out == profile_out) {
+		pthread_mutex_unlock(&alarm_volume_lock);
 		return;
 	}
 
-	// Sound going out over the air, or out of a socket the mode was not
-	// switched on for, is not a line out. Leaving the mode here puts the old
-	// output back on the user's level before the profiles are swapped, so the
-	// fixed index cannot be mistaken for the level it was left at.
-	if (lineout_on) {
-		lineout_set(false);
-	}
+	// Hold the same lock as Bluetooth adoption through the whole transition:
+	// a delayed headphone event must not adjust the newly selected output.
+	fade_stop_locked();
 
-	level[profile_out] = current_percent; // the level the outgoing profile is at
-	volume_output_t leaving = profile_out;
+	// Sound going out over the air, or out of a socket the mode was not
+	// switched on for, is not a line out. Restore the old user level first.
+	if (lineout_on) lineout_set_locked(false);
+
+	volume_output_t leaving = (volume_output_t)profile_out;
+	level[leaving] = current_percent;
 	profile_out = out;
 	profile_dirty = true;
 
 	int wanted = level[out];
-	if (wanted < 0) {
-		wanted = current_percent; // no level for this output yet: keep the one in hand
-	}
+	if (wanted < 0) wanted = current_percent;
 	printf("volume: %s -> %s, %d%%\n", PROFILE_NAMES[leaving], PROFILE_NAMES[out], wanted);
-	set_volume_percent(wanted);
+	set_volume_percent_locked(wanted);
+	pthread_mutex_unlock(&alarm_volume_lock);
 	volume_profile_persist();
 }
 
@@ -1194,7 +1220,7 @@ void volume_profile_set_bluetooth(bool bluetooth) {
 	}
 }
 
-int get_volume_percent(void) { return current_percent; }
+int get_volume_percent(void) { return atomic_load(&current_percent); }
 
 // The level, on the hardware, without touching the two saved profile levels.
 // This is the "apply the volume index" of the stock player: it walks the gain
@@ -1234,7 +1260,69 @@ static void apply_volume_hw(int percent) {
 	}
 }
 
-void set_volume_percent(int percent) {
+// Rewrites the level without treating a gain/control refresh as a user change.
+static void reapply_volume_hw(void) {
+	pthread_mutex_lock(&alarm_volume_lock);
+	apply_volume_hw(current_percent);
+	pthread_mutex_unlock(&alarm_volume_lock);
+}
+
+// Caller holds alarm_volume_lock. The temporary level never becomes a profile.
+static void fade_stop_locked(void) {
+	if (!alarm_fade_active) return;
+	alarm_fade_active = false;
+	if (profile_out == alarm_fade_output && !lineout_on) {
+		int target = alarm_fade_target;
+		int ceiling = limit_ceiling(profile_out);
+		if (target > ceiling) target = ceiling;
+		apply_volume_hw(target);
+	}
+}
+
+bool volume_fade_begin(void) {
+	pthread_mutex_lock(&alarm_volume_lock);
+	fade_stop_locked();
+	bool start = !lineout_on && current_percent > 0;
+	if (start) {
+		alarm_fade_target = current_percent;
+		alarm_fade_output = profile_out;
+		alarm_fade_active = true;
+		apply_volume_hw(0);
+	}
+	pthread_mutex_unlock(&alarm_volume_lock);
+	return start;
+}
+
+bool volume_fade_active(void) {
+	pthread_mutex_lock(&alarm_volume_lock);
+	bool active = alarm_fade_active;
+	pthread_mutex_unlock(&alarm_volume_lock);
+	return active;
+}
+
+void volume_fade_progress(int elapsed_seconds, int duration_seconds) {
+	pthread_mutex_lock(&alarm_volume_lock);
+	if (alarm_fade_active) {
+		if (duration_seconds <= 0 || elapsed_seconds >= duration_seconds) {
+			fade_stop_locked();
+		} else {
+			if (elapsed_seconds < 0) elapsed_seconds = 0;
+			int value = alarm_fade_target * elapsed_seconds / duration_seconds;
+			int ceiling = limit_ceiling(profile_out);
+			if (value > ceiling) value = ceiling;
+			if (value != current_percent) apply_volume_hw(value);
+		}
+	}
+	pthread_mutex_unlock(&alarm_volume_lock);
+}
+
+void volume_fade_stop(void) {
+	pthread_mutex_lock(&alarm_volume_lock);
+	fade_stop_locked();
+	pthread_mutex_unlock(&alarm_volume_lock);
+}
+
+static void set_volume_percent_locked(int percent) {
 	if (percent < 0) {
 		percent = 0;
 	}
@@ -1247,6 +1335,19 @@ void set_volume_percent(int percent) {
 	// from pulling the output off the index the mode exists to hold.
 	if (lineout_on) {
 		return;
+	}
+
+	// A real volume adjustment takes control from the alarm. An echo of the
+	// level just sent to Bluetooth, or a redundant re-apply on screen wake,
+	// does not cancel it or turn the temporary level into a saved profile.
+	if (alarm_fade_active) {
+		if (percent == current_percent) {
+			// A screen wake or gain change may need the current attenuation
+			// rewritten, but must not save the temporary ramp as the profile.
+			apply_volume_hw(percent);
+			return;
+		}
+		alarm_fade_active = false;
 	}
 
 	// And no higher than the ceiling of the socket in use.
@@ -1263,7 +1364,38 @@ void set_volume_percent(int percent) {
 	apply_volume_hw(percent);
 }
 
-void change_volume_percent(int delta) { set_volume_percent(get_volume_percent() + delta); }
+void set_volume_percent(int percent) {
+	pthread_mutex_lock(&alarm_volume_lock);
+	set_volume_percent_locked(percent);
+	pthread_mutex_unlock(&alarm_volume_lock);
+}
+
+bool volume_adopt_bluetooth(int percent) {
+	pthread_mutex_lock(&alarm_volume_lock);
+	bool accepted = profile_out == VOLUME_OUTPUT_BLUETOOTH && !alarm_fade_active;
+	if (accepted && percent != current_percent) set_volume_percent_locked(percent);
+	pthread_mutex_unlock(&alarm_volume_lock);
+	return accepted;
+}
+
+bool volume_adjust_bluetooth(int percent) {
+	pthread_mutex_lock(&alarm_volume_lock);
+	// A signal already in flight at disconnect must not change the wired
+	// output, even if the worker observed the old route a moment earlier.
+	bool accepted = profile_out == VOLUME_OUTPUT_BLUETOOTH;
+	if (accepted && percent != current_percent) set_volume_percent_locked(percent);
+	pthread_mutex_unlock(&alarm_volume_lock);
+	return accepted;
+}
+
+void change_volume_percent(int delta) {
+	pthread_mutex_lock(&alarm_volume_lock);
+	// A physical key is an explicit choice, even if pressing down while the
+	// fade is at zero leaves the numerical level unchanged.
+	if (delta != 0) alarm_fade_active = false;
+	set_volume_percent_locked(current_percent + delta);
+	pthread_mutex_unlock(&alarm_volume_lock);
+}
 
 bool lineout_is_active(void) { return lineout_on; }
 
@@ -1281,15 +1413,17 @@ static void lineout_apply_route(void) {
 	auto_set_output();
 }
 
-void lineout_set(bool on) {
-	if (on == lineout_on) {
-		return;
-	}
+static void lineout_set_locked(bool on) {
+	if (on == lineout_on) return;
+
+	// Line-out is fixed level; do not capture a temporary alarm level as the
+	// volume to restore when it is switched off again.
+	fade_stop_locked();
 
 	if (on) {
 		// Sound going out over the air has no jack to drive, and the level the
 		// mode forces would be sent to the headphones as an absolute volume.
-		if (volume_profile_is_bluetooth()) {
+		if (profile_out == VOLUME_OUTPUT_BLUETOOTH) {
 			fprintf(stderr, "alsa: line out refused, the sound is going over bluetooth\n");
 			return;
 		}
@@ -1333,6 +1467,12 @@ void lineout_set(bool on) {
 	fprintf(stderr, "alsa: line out off (back to %d%%)\n", back);
 }
 
+void lineout_set(bool on) {
+	pthread_mutex_lock(&alarm_volume_lock);
+	lineout_set_locked(on);
+	pthread_mutex_unlock(&alarm_volume_lock);
+}
+
 // The mode belongs to the jack it was switched on for. Pulling that jack out --
 // or putting a different one in -- ends it, because the fixed level is not
 // something to hand to whatever is plugged in next, and while the mode is on
@@ -1366,14 +1506,10 @@ void set_high_gain(int enabled) {
 	}
 	high_gain = enabled;
 	printf("set gain to %s\n", enabled ? "high" : "low");
-	// The gain is which of the two tables the index is read from, so the level
-	// has to be applied again either way -- including in line out, where
-	// set_volume_percent refuses and the fixed index is the one to rewrite.
-	if (lineout_on) {
-		apply_volume_hw(LINEOUT_VOLUME_INDEX);
-	} else {
-		set_volume_percent(current_percent);
-	}
+	// Gain selects a different table for the same index. Reapply the actual
+	// current index (including a temporary fade or fixed line-out) without
+	// changing its profile, and serialize it with output transitions.
+	reapply_volume_hw();
 }
 
 int get_high_gain(void) { return high_gain; }

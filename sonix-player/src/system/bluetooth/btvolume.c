@@ -21,6 +21,11 @@
 
 #define BT_VOLUME_MAX 127
 #define PATH_MAX_LEN 160
+// PropertiesChanged can arrive after a later write has already completed.
+// Keep a short bounded set of in-flight values, rather than comparing only
+// against the most recent one, so an old fade step is not taken as a user turn.
+#define ECHO_SLOTS 16
+#define ECHO_LIFETIME_MS (CALL_TIMEOUT_MS + 1500)
 
 // How long to wait, after the stream appears, before taking the level it
 // declares at face value.
@@ -52,10 +57,17 @@ static bool want_sync = true;
 static bool have_sync = true;
 static bool bus_reset;			// bluealsa restarted, or moved a property underneath
 static int pending_local = -1;	// a percent the player wants the stream to be at
+static int latest_local = -1;  // retained after dispatch, for a late fallback write
 static int pending_remote = -1; // a 0..127 that arrived over the bus
 static int last_bt = -1;		// what the stream holds, as far as this side knows
 static bool path_live;			// a connection and a stream: writes can go over the bus
 static bool bus_broken;			// the stream is there but does not answer about its volume
+
+// Written under lock before either D-Bus connection sends a local level.
+// Entries are consumed by a matching signal or expire quickly: a real remote
+// adjustment to a different value still wins immediately.
+static struct { int level; uint32_t at; unsigned count; bool valid; } expected_echo[ECHO_SLOTS];
+static unsigned echo_next;
 
 // The stream whose level has already been adopted. Adoption happens once per
 // connection, not once per change on the bus: bluealsa resets SoftVolume its
@@ -75,6 +87,45 @@ static int clamp_int(int v, int low, int high) { return v < low ? low : (v > hig
 static int local_to_bt(int percent) { return (clamp_int(percent, 0, 100) * BT_VOLUME_MAX + 50) / 100; }
 
 static int bt_to_local(int volume) { return (clamp_int(volume, 0, BT_VOLUME_MAX) * 100 + 63) / BT_VOLUME_MAX; }
+
+// All three helpers are called with lock held, including on the signal thread.
+static void echo_clear_locked(void) {
+	memset(expected_echo, 0, sizeof(expected_echo));
+	echo_next = 0;
+}
+
+static void echo_expect_locked(int level) {
+	uint32_t now = now_ms();
+	for (int i = 0; i < ECHO_SLOTS; i++) {
+		if (expected_echo[i].valid && (uint32_t)(now - expected_echo[i].at) > ECHO_LIFETIME_MS)
+			expected_echo[i].valid = false;
+		if (expected_echo[i].valid && expected_echo[i].level == level) {
+			// A fallback and a reassertion can both emit this same value. Keep
+			// both echoes, so the second cannot undo a later fade step.
+			if (expected_echo[i].count < ECHO_SLOTS) expected_echo[i].count++;
+			expected_echo[i].at = now;
+			return;
+		}
+	}
+	expected_echo[echo_next].level = level;
+	expected_echo[echo_next].at = now;
+	expected_echo[echo_next].count = 1;
+	expected_echo[echo_next].valid = true;
+	echo_next = (echo_next + 1) % ECHO_SLOTS;
+}
+
+static bool echo_consume_locked(int level) {
+	uint32_t now = now_ms();
+	for (int i = 0; i < ECHO_SLOTS; i++) {
+		if (expected_echo[i].valid && (uint32_t)(now - expected_echo[i].at) > ECHO_LIFETIME_MS)
+			expected_echo[i].valid = false;
+		if (expected_echo[i].valid && expected_echo[i].level == level) {
+			if (--expected_echo[i].count == 0) expected_echo[i].valid = false;
+			return true;
+		}
+	}
+	return false;
+}
 
 // ---------------------------------------------------------------------------
 // The calls
@@ -176,13 +227,16 @@ static void handle_properties_changed(const dbus_msg_t *m) {
 			pthread_mutex_lock(&lock);
 			// Recheck the desired device after parsing: set_device() can switch
 			// paths while this signal is being decoded.
-			// A write from this side comes back as a change like any other.
-			// Recognising it by the value is what keeps the two sides from
-			// pushing each other around for ever.
-			if (strcmp(m->path, want_path) == 0 && left != last_bt) {
-				last_bt = left;
-				pending_remote = left;
-				pthread_cond_signal(&wake);
+			// Signals may trail more than one local write, including a write
+			// from bluetooth.c's fallback connection. Consume a matching
+			// in-flight echo without moving last_bt backwards to an old step.
+			if (strcmp(m->path, want_path) == 0) {
+				bool echoed = echo_consume_locked(left);
+				if (!echoed && left != last_bt) {
+					last_bt = left;
+					pending_remote = left;
+					pthread_cond_signal(&wake);
+				}
 			}
 			pthread_mutex_unlock(&lock);
 		} else if (strcmp(key, "SoftVolume") == 0 && sig[0] == 'b') {
@@ -216,6 +270,7 @@ static void on_signal(dbus_conn_t *c, const dbus_msg_t *m, void *user) {
 		pthread_mutex_lock(&lock);
 		bus_reset = true;
 		last_bt = -1;
+		echo_clear_locked();
 		adopted_path[0] = '\0'; // a new transport: the level has to be taken again
 		pthread_cond_signal(&wake);
 		pthread_mutex_unlock(&lock);
@@ -243,12 +298,15 @@ static dbus_conn_t *open_bus(void) {
 // gui_notify_volume() raises the volume slider over the player: the right
 // answer to a level that changes and a nuisance for one that does not. An
 // adoption that lands on the number already shown is not a change.
-static void apply_local(int percent) {
-	if (percent == get_volume_percent()) {
-		return;
-	}
-	set_volume_percent(percent);
-	gui_notify_volume(percent);
+static bool apply_local(int percent, bool adopting) {
+	int before = get_volume_percent();
+	// Initial adoption does not cancel a fade; a later genuine adjustment
+	// does. Both are rejected if the output has already left Bluetooth.
+	bool accepted = adopting ? volume_adopt_bluetooth(percent) : volume_adjust_bluetooth(percent);
+	if (!accepted) return false;
+	int after = get_volume_percent();
+	if (after != before) gui_notify_volume(after);
+	return true;
 }
 
 static void *btvolume_worker(void *unused) {
@@ -333,6 +391,10 @@ static void *btvolume_worker(void *unused) {
 			}
 			state = BTV_IDLE;
 		} else if (!conn) {
+			// The notification may arrive before the bus opens. Keep it for
+			// setup/adoption; dropping an alarm's zero here can leave the sink
+			// loud until the initial-volume settle window expires.
+			if (local >= 0) deferred_local = local;
 			if ((uint32_t)(now_ms() - last_try) >= RETRY_MS || last_try == 0) {
 				last_try = now_ms();
 				conn = open_bus();
@@ -347,7 +409,9 @@ static void *btvolume_worker(void *unused) {
 		} else if (broken) {
 			// The stream is on the bus but did not answer about its volume, so
 			// this is not the interface it was taken for. bluetooth.c uses its
-			// independent BlueALSA D-Bus connection as a fallback.
+			// independent BlueALSA D-Bus connection as a fallback. Keep the
+			// latest level in case the bridge is later reset and recovers.
+			if (local >= 0) deferred_local = local;
 			wait_ms = RETRY_MS;
 		} else {
 			if (state == BTV_SETUP) {
@@ -411,7 +475,7 @@ static void *btvolume_worker(void *unused) {
 						local = deferred_local;
 						deferred_local = -1;
 						deferred_remote = -1;
-						printf("btvolume: volume turned by hand; not adopting the headphones' level\n");
+						printf("btvolume: player level changed; not adopting the headphones' level\n");
 						remote = -1;
 						state = BTV_READY;
 					} else if (deferred_remote >= 0) {
@@ -419,10 +483,11 @@ static void *btvolume_worker(void *unused) {
 						// routed here; keep it instead of waiting for a duplicate.
 						adopt_seen = deferred_remote;
 						deferred_remote = -1;
-						printf("btvolume: the headphones are at %d/127; the player follows them\n", adopt_seen);
-						apply_local(bt_to_local(adopt_seen));
+						bool adopted = apply_local(bt_to_local(adopt_seen), true);
+						printf("btvolume: headphones at %d/127; %s\n", adopt_seen,
+							   adopted ? "player follows" : "alarm fade keeps the player level");
 						state = BTV_READY;
-						local = -1;
+						local = adopted ? -1 : get_volume_percent();
 						remote = -1;
 					} else if (adopt_deadline == 0) {
 						// The first read serves two purposes: knowing what is on
@@ -447,10 +512,12 @@ static void *btvolume_worker(void *unused) {
 						// The headphones have said their level: this is the value
 						// the wait was for.
 						adopt_seen = remote;
-						printf("btvolume: the headphones are at %d/127; the player follows them\n", adopt_seen);
-						apply_local(bt_to_local(adopt_seen));
+						bool adopted = apply_local(bt_to_local(adopt_seen), true);
+						printf("btvolume: headphones at %d/127; %s\n", adopt_seen,
+							   adopted ? "player follows" : "alarm fade keeps the player level");
 						state = BTV_READY;
-						local = -1; // the adopted level is the level; nothing to push back
+						// If a fade beat adoption, put its current level on the stream.
+						local = adopted ? -1 : get_volume_percent();
 					} else if ((int32_t)(now_ms() - adopt_deadline) >= 0) {
 						// No notification in time. What the stream declares is not
 						// the headphones' level: it is bluealsa's starting value,
@@ -481,7 +548,7 @@ static void *btvolume_worker(void *unused) {
 			if (state == BTV_READY) {
 				if (remote >= 0 && sync_on) {
 					printf("btvolume: the headphones moved the volume -> %d/127\n", remote);
-					apply_local(bt_to_local(remote));
+					apply_local(bt_to_local(remote), false);
 					local = -1;
 				}
 				if (local >= 0) {
@@ -502,6 +569,7 @@ static void *btvolume_worker(void *unused) {
 						pthread_mutex_lock(&lock);
 						int previous = last_bt;
 						last_bt = wanted;
+						echo_expect_locked(wanted);
 						pthread_mutex_unlock(&lock);
 
 						if (!set_stream_volume(conn, have_path, wanted)) {
@@ -509,6 +577,7 @@ static void *btvolume_worker(void *unused) {
 							if (last_bt == wanted) {
 								last_bt = previous;
 							}
+							(void)echo_consume_locked(wanted);
 							bus_broken = true;
 							pthread_mutex_unlock(&lock);
 						}
@@ -518,7 +587,9 @@ static void *btvolume_worker(void *unused) {
 		}
 
 		pthread_mutex_lock(&lock);
-		path_live = conn != NULL && have_path[0] && state != BTV_IDLE && !bus_broken;
+		// A connected bus alone is not enough: until SoftVolume is set, the
+		// bridge may still fail setup and must not suppress the fallback path.
+		path_live = conn != NULL && have_path[0] && (state == BTV_ADOPT || state == BTV_READY) && !bus_broken;
 		bool work = stopping || pending_local >= 0 || pending_remote >= 0 || bus_reset ||
 					strcmp(want_path, have_path) != 0 || want_sync != have_sync;
 		if (!work) {
@@ -563,18 +634,20 @@ void btvolume_stop(void) {
 	stopping = false;
 }
 
-void btvolume_set_device(const char *mac) {
-	char path[PATH_MAX_LEN] = "";
-	if (mac && mac[0]) {
-		char address[64];
-		snprintf(address, sizeof(address), "%s", mac);
-		for (char *p = address; *p; p++) {
-			if (*p == ':' || *p == '-') {
-				*p = '_';
-			}
-		}
-		snprintf(path, sizeof(path), "/org/bluealsa/hci0/dev_%s/a2dpsrc/sink", address);
+static void device_path(const char *mac, char path[PATH_MAX_LEN]) {
+	path[0] = '\0';
+	if (!mac || !mac[0]) return;
+	char address[64];
+	snprintf(address, sizeof(address), "%s", mac);
+	for (char *p = address; *p; p++) {
+		if (*p == ':' || *p == '-') *p = '_';
 	}
+	snprintf(path, PATH_MAX_LEN, "/org/bluealsa/hci0/dev_%s/a2dpsrc/sink", address);
+}
+
+void btvolume_set_device(const char *mac) {
+	char path[PATH_MAX_LEN];
+	device_path(mac, path);
 
 	pthread_mutex_lock(&lock);
 	if (strcmp(path, want_path) != 0) {
@@ -586,6 +659,7 @@ void btvolume_set_device(const char *mac) {
 		path_live = false;
 		pending_remote = -1;
 		last_bt = -1;
+		echo_clear_locked();
 		pthread_cond_signal(&wake);
 	}
 	pthread_mutex_unlock(&lock);
@@ -602,8 +676,31 @@ void btvolume_set_sync(bool on) {
 
 void btvolume_notify_local(int percent) {
 	pthread_mutex_lock(&lock);
-	pending_local = clamp_int(percent, 0, 100);
+	latest_local = pending_local = clamp_int(percent, 0, 100);
 	pthread_cond_signal(&wake);
+	pthread_mutex_unlock(&lock);
+}
+
+void btvolume_note_fallback_write(const char *mac, int percent) {
+	char path[PATH_MAX_LEN];
+	device_path(mac, path);
+	pthread_mutex_lock(&lock);
+	if (path[0] && strcmp(path, want_path) == 0) echo_expect_locked(local_to_bt(percent));
+	pthread_mutex_unlock(&lock);
+}
+
+void btvolume_finish_fallback_write(const char *mac) {
+	char path[PATH_MAX_LEN];
+	device_path(mac, path);
+	pthread_mutex_lock(&lock);
+	if (path[0] && strcmp(path, want_path) == 0 && latest_local >= 0) {
+		// The independent call may have landed after a newer bridge write, or
+		// timed out after being accepted. Reassert the latest level *after* it
+		// returns, even when our last bridge write was already that level.
+		last_bt = -1;
+		pending_local = latest_local;
+		pthread_cond_signal(&wake);
+	}
 	pthread_mutex_unlock(&lock);
 }
 

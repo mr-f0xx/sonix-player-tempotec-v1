@@ -414,6 +414,31 @@ a self-signed certificate), and HLS.
   spring, under a grey sky, leaves in autumn, snow in winter, nothing in
   summer. The two room themes are skies of their own, a sunset and a night.
 
+- **Pet alarm clock** - open **More → Pet**, tap the pencil, and choose
+  **Alarm clock**. Set the date, time and time zone first, turn the alarm on,
+  select a 24-hour local time and either every day or individual weekdays.
+  Manual time zones use a fixed offset and a separate daylight-saving setting;
+  check that setting when the clocks change. Select
+  **Resume current** to start the paused or stopped source, or choose a local
+  playlist; something already playing is not toggled off. An unavailable or
+  unstartable playlist attempts to restore the previous source and queue once
+  the failed audio context has stopped. A decoder or output that hangs may
+  leave the alarm silent. A 10-, 30- or 60-second fade-in is optional; it uses
+  the current output's volume without saving the temporary ramp, and a volume
+  adjustment takes control. Fixed-level line-out cannot fade. Playback follows
+  the normal sleep timer, so that timer can still pause an alarm-started track.
+
+  Keep the player powered on, the card and chosen output available, and enough
+  battery for the alarm. An enabled alarm with selected days and a valid clock
+  defers automatic shutdown; manual shutdown and the low-battery guard still
+  take precedence.
+  The player attempts to wake from standby using the RTC, waking early to
+  restore the clock and audio route, or remains awake if it cannot program the
+  wake. **This standby path has not yet been verified on the V1 hardware** and
+  does not wake a fully powered-off player. Radio needs a connection and
+  Bluetooth headphones may need to reconnect; neither can be guaranteed. Test
+  the configuration on the device before depending on it.
+
 ## Games
 
 > All four are in the **More** menu. They are played on the glass, they leave the

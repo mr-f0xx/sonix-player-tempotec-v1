@@ -9,6 +9,7 @@
 #include "src/gui/board_profile.h"
 #include "src/gui/fonts/fonts.h"
 #include "src/gui/pet/pikachu.h"
+#include "src/gui/pet/petalarm_page.h"
 #include "src/gui/shell/icons.h"
 #include "src/gui/shell/keyboard.h"
 #include "src/gui/shell/settingsrow.h"
@@ -20,6 +21,7 @@
 #include "src/system/device/power.h"
 #include "src/system/pet/pet.h"
 #include "src/system/pet/petwatch.h"
+#include "src/system/pet/petalarm.h"
 
 lv_obj_t *petpage_screen;
 
@@ -213,6 +215,7 @@ static bool wardrobe_visible;
 
 static lv_obj_t *customise_screen;
 static lv_obj_t *customise_name_value;
+static lv_obj_t *customise_alarm_value;
 static bool customise_visible;
 
 // The month's listening, on the card under the stage.
@@ -2759,6 +2762,17 @@ static void customise_refresh(void) {
 	char name[40];
 	pet_name(name, sizeof(name));
 	lv_label_set_text(customise_name_value, name);
+	if (customise_alarm_value) {
+		if (!petalarm_enabled()) {
+			lv_label_set_text(customise_alarm_value, tr("off"));
+		} else if (!petalarm_days()) {
+			lv_label_set_text(customise_alarm_value, tr("pet_alarm_no_days_short"));
+		} else {
+			char when[24];
+			clock_format_hm(when, sizeof(when), petalarm_minutes() / 60, petalarm_minutes() % 60);
+			lv_label_set_text(customise_alarm_value, when);
+		}
+	}
 }
 
 static void name_dialog_open(void) {
@@ -2808,6 +2822,11 @@ static void name_row_cb(lv_event_t *e) {
 	name_dialog_open();
 }
 
+static void alarm_row_cb(lv_event_t *e) {
+	(void)e;
+	petalarm_page_open();
+}
+
 static void customise_open(void) {
 	if (!customise_screen) {
 		return;
@@ -2822,6 +2841,7 @@ static void customise_close(void) {
 	if (!customise_screen) {
 		return;
 	}
+	petalarm_page_hide();
 	lv_obj_set_hidden(customise_screen, true);
 	customise_visible = false;
 }
@@ -2888,8 +2908,7 @@ static void build_customise(void) {
 	lv_obj_add_style(close_icon, &theme_style_icon, 0);
 	lv_obj_center(close_icon);
 
-	// The name is a row of its own: the one thing on this sheet, and the one
-	// thing on the page that is typed rather than tapped.
+	// The name and the alarm live together in the pet's settings.
 	int y = pad + page_cfg->top_bar_height + 44;
 	lv_obj_t *name_row = lv_btn_create(customise_screen);
 	lv_obj_set_size(name_row, card_w, 48);
@@ -2916,6 +2935,32 @@ static void build_customise(void) {
 	lv_label_set_long_mode(customise_name_value, LV_LABEL_LONG_DOT);
 	lv_obj_align(customise_name_value, LV_ALIGN_RIGHT_MID, -14, 0);
 	lv_label_set_text(customise_name_value, "");
+
+	lv_obj_t *alarm_row = lv_btn_create(customise_screen);
+	lv_obj_set_size(alarm_row, card_w, 48);
+	lv_obj_set_pos(alarm_row, pad, y + 56);
+	lv_obj_set_style_radius(alarm_row, 12, 0);
+	lv_obj_set_style_bg_color(alarm_row, theme()->surface, 0);
+	lv_obj_set_style_bg_opa(alarm_row, LV_OPA_COVER, 0);
+	lv_obj_set_style_border_width(alarm_row, 0, 0);
+	lv_obj_set_style_shadow_width(alarm_row, 0, 0);
+	lv_obj_set_style_pad_all(alarm_row, 0, 0);
+	lv_obj_add_event_cb(alarm_row, alarm_row_cb, LV_EVENT_CLICKED, NULL);
+	lv_obj_t *alarm_caption = lv_label_create(alarm_row);
+	lv_label_set_text(alarm_caption, tr("pet_alarm"));
+	lv_obj_add_style(alarm_caption, &theme_style_text, 0);
+	lv_obj_set_style_text_font(alarm_caption, &font_ui_16, 0);
+	lv_obj_set_width(alarm_caption, card_w / 2);
+	lv_label_set_long_mode(alarm_caption, LV_LABEL_LONG_DOT);
+	lv_obj_align(alarm_caption, LV_ALIGN_LEFT_MID, 14, 0);
+	customise_alarm_value = lv_label_create(alarm_row);
+	lv_obj_add_style(customise_alarm_value, &theme_style_text_dim, 0);
+	lv_obj_set_style_text_font(customise_alarm_value, &font_ui_16, 0);
+	lv_obj_set_width(customise_alarm_value, card_w / 2 - 20);
+	lv_obj_set_style_text_align(customise_alarm_value, LV_TEXT_ALIGN_RIGHT, 0);
+	lv_label_set_long_mode(customise_alarm_value, LV_LABEL_LONG_DOT);
+	lv_obj_align(customise_alarm_value, LV_ALIGN_RIGHT_MID, -14, 0);
+	petalarm_page_init(customise_screen, page_cfg, customise_refresh);
 
 	// The name's own layer, with the keyboard under it.
 	name_layer = lv_obj_create(customise_screen);
@@ -3232,6 +3277,9 @@ static void pet_tap_cb(lv_event_t *e) {
 static bool pet_back_guard(void) {
 	if (name_layer && !lv_obj_is_hidden(name_layer)) {
 		name_dialog_close();
+		return true;
+	}
+	if (petalarm_page_back()) {
 		return true;
 	}
 	if (customise_visible) {

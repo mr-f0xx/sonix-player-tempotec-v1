@@ -1,6 +1,7 @@
 #include "petwatch.h"
 
 #include "petlisten.h"
+#include "petalarm_runtime.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -190,6 +191,10 @@ static void tick_cb(lv_timer_t *timer) {
 	int64_t now = (int64_t)time(NULL);
 	long day = pet_day_now(now);
 	adopt_clock_if_it_was_set(now);
+
+	// The alarm shares this already-running tick, including while the pet page
+	// and the display are dark. It is a no-op until its runtime is initialized.
+	petalarm_runtime_tick((time_t)now, lv_tick_get());
 
 	bool radio_playing = radio_is_playing();
 	bool phone_streaming = btreceiver_is_streaming();

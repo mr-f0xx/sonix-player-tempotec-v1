@@ -82,6 +82,10 @@ typedef struct {
 } remember_state_t;
 
 static remember_state_t remember = {.pos = -1.0, .restore_pos = -1.0};
+// A named alarm playlist is tentative until its decoder and PCM are ready.
+// Keep the last durable queue and remembered track intact in the meantime.
+// All of these callers, like the queue itself, run on the UI thread.
+static bool tentative_playback;
 
 // Whether this sample is worth writing. Updates `st` when it says yes, so the
 // caller has nothing to remember on its own.
@@ -90,9 +94,12 @@ static bool remember_should_write(remember_state_t *st, const char *file, audio_
 	// The restore latch: hold everything until the engine reports the position
 	// that was asked for, and let go on its own if it never does.
 	if (st->restore_pos >= 0) {
+		// A replacement track has its own position: the old restore latch must
+		// not prevent it being remembered alongside its new queue.
+		bool replaced = strncmp(st->file, file, sizeof(st->file)) != 0;
 		bool arrived = pos >= st->restore_pos - REMEMBER_MOVE_SECS;
 		bool waited = (uint32_t)(now - st->restore_ms) > REMEMBER_RESTORE_GRACE_MS;
-		if (!arrived && !waited) {
+		if (!replaced && !arrived && !waited) {
 			return false;
 		}
 		st->restore_pos = -1.0;
@@ -170,7 +177,7 @@ void device_state_remember_restored(const char *path, double position) {
 }
 
 void device_state_remember_note(void) {
-	if (!remember_enabled()) {
+	if (tentative_playback || !remember_enabled()) {
 		return;
 	}
 	device_state_t state;
@@ -199,16 +206,17 @@ void device_state_remember_flush(void) {
 	device_state_t state;
 	device_state_get(&state);
 	flush_book_position(&state);
-	if (!remember_enabled()) {
+	if (tentative_playback || !remember_enabled()) {
 		return;
 	}
 	if (!remember_worth_saving(&state)) {
 		return;
 	}
-	// The latch still applies: on the way out, a position the engine has not
-	// reached yet is still the one that was asked for, and writing the zero it
-	// is currently reporting would throw it away at the last moment.
-	if (remember.restore_pos >= 0 && state.progress_current_secs < remember.restore_pos - REMEMBER_MOVE_SECS) {
+	// The latch protects only the track it belongs to, not a replacement.
+	// On the way out, a position the engine has not reached yet is still the
+	// one that was asked for; do not replace it with a transient zero.
+	if (remember.restore_pos >= 0 && strcmp(remember.file, state.current_file) == 0 &&
+		state.progress_current_secs < remember.restore_pos - REMEMBER_MOVE_SECS) {
 		return;
 	}
 	remember.restore_pos = -1.0;
@@ -365,6 +373,7 @@ static void queue_save_query_form(const library_index_spec_t *spec) {
 }
 
 static void queue_persist(void) {
+	if (tentative_playback) return;
 	int count = playlist_count();
 	int current = playlist_current_index();
 	if (count <= 0 || current < 0) {
@@ -437,6 +446,24 @@ static void queue_persist(void) {
 
 void device_state_queue_changed(void) { queue_persist(); }
 
+void device_state_tentative_playback_begin(void) {
+	if (tentative_playback) return;
+	tentative_playback = true;
+	playlist_hold_album_persistence();
+}
+
+void device_state_tentative_playback_end(bool commit_current) {
+	if (!tentative_playback) return;
+	tentative_playback = false;
+	playlist_release_album_persistence(commit_current);
+	if (commit_current) {
+		// A user may have edited the queue during the attempt. Persist what is
+		// actually installed now, not the originally requested alarm queue.
+		queue_persist();
+		device_state_remember_note();
+	}
+}
+
 // Four streaming preparations: Qobuz, Tidal, podcasts and Subsonic.
 #define PREPARE_CB_MAX 4
 static device_state_prepare_cb prepare_cbs[PREPARE_CB_MAX];
@@ -497,6 +524,20 @@ static void apply_track_speed(void) {
 	}
 }
 
+void device_state_restore_stopped_file(const char *filepath, double position) {
+	scrub_cancel();
+	audio_restore_stopped_file(filepath, position);
+	snprintf(current_metadata_file, sizeof(current_metadata_file), "%s", filepath ? filepath : "");
+	memset(&current_metadata, 0, sizeof(current_metadata));
+	if (current_metadata_file[0]) metadata_read(current_metadata_file, &current_metadata);
+	audiobook_track_changed(current_metadata_file);
+	replaygain_load(&current_metadata);
+	apply_track_speed();
+	restored_uncounted = false;
+	interrupted_file[0] = '\0';
+	interrupted_pos = -1.0;
+}
+
 // Loads metadata for `filepath` and starts playback, without touching the
 // folder queue. Shared by fresh selections, queue advances, and replays.
 //
@@ -554,6 +595,9 @@ static void load_and_play_at(const char *filepath, double position) {
 		apply_track_speed();
 	}
 
+	// This is a new play request, even when it names the same file that was
+	// restored at boot. Its position supersedes the old restore-seek latch.
+	remember.restore_pos = -1.0;
 	if (position > 0) {
 		audio_play_at(current_metadata_file, position);
 	} else {
@@ -571,6 +615,10 @@ static void load_and_play_at(const char *filepath, double position) {
 }
 
 static void load_and_play(const char *filepath) { load_and_play_at(filepath, -1.0); }
+
+void device_state_play_preserving_queue_at(const char *filepath, double position) {
+	if (filepath && filepath[0]) load_and_play_at(filepath, position);
+}
 
 // The same without starting: the track comes up paused at its beginning, and
 // play starts it. The queue is left as it is.
@@ -801,6 +849,7 @@ void device_state_play_file_at(const char *filepath, double position) {
 	replaygain_load(&current_metadata);
 	apply_track_speed();
 
+	remember.restore_pos = -1.0; // an explicit play supersedes the boot restore
 	audio_play_at(current_metadata_file, position);
 
 	queue_persist();

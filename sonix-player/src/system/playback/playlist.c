@@ -165,6 +165,9 @@ static char queue_album[256];
 // What is on the card, so the write happens when the label moves and not on
 // every queue that is built.
 static char persisted_album[256];
+// A tentative alarm replacement must not erase the previous queue's label
+// until the new track has actually opened or the user chooses another queue.
+static bool album_persistence_held;
 
 // The label goes down with the queue rather than at the next track change. The
 // two do not happen together: the queue is written the moment it is built, and
@@ -172,11 +175,19 @@ static char persisted_album[256];
 // middle of the first track came back without it, which is exactly the case
 // "play albums back to back" is for.
 static void persist_album(void) {
-	if (strcmp(persisted_album, queue_album) == 0) {
+	if (album_persistence_held || strcmp(persisted_album, queue_album) == 0) {
 		return;
 	}
 	snprintf(persisted_album, sizeof(persisted_album), "%s", queue_album);
 	library_queue_save_album(queue_album);
+}
+
+void playlist_hold_album_persistence(void) { album_persistence_held = true; }
+
+void playlist_release_album_persistence(bool commit_current) {
+	if (!album_persistence_held) return;
+	album_persistence_held = false;
+	if (commit_current) persist_album();
 }
 
 void playlist_set_album(const char *album) {
@@ -274,6 +285,82 @@ void playlist_clear(void) {
 	queue_album[0] = '\0'; // a new queue is not an album until somebody says so
 	persist_album();
 	revision++;
+}
+
+// A checkpoint holds the old queue's allocations, not a second copy of them.
+// Only one queue is installed at a time; the detached one can be restored if a
+// replacement fails to start, without losing shuffle order or queued additions.
+struct playlist_checkpoint {
+	char **paths;
+	library_index_t *source_ix;
+	size_t ix_count, entry_count, capacity;
+	size_t *order;
+	size_t pos;
+	bool custom_queue, ordered_queue;
+	size_t chain_from, chain_slot;
+	bool chain_valid;
+	char album[sizeof(queue_album)];
+};
+
+playlist_checkpoint_t *playlist_checkpoint_take(void) {
+	playlist_checkpoint_t *saved = malloc(sizeof(*saved));
+	if (!saved) return NULL;
+	*saved = (playlist_checkpoint_t){
+		.paths = paths, .source_ix = source_ix, .ix_count = ix_count,
+		.entry_count = entry_count, .capacity = capacity, .order = order,
+		.pos = pos, .custom_queue = custom_queue, .ordered_queue = ordered_queue,
+		.chain_from = chain_from, .chain_slot = chain_slot, .chain_valid = chain_valid,
+	};
+	memcpy(saved->album, queue_album, sizeof(saved->album));
+
+	paths = NULL;
+	source_ix = NULL;
+	ix_count = entry_count = capacity = pos = 0;
+	order = NULL;
+	custom_queue = ordered_queue = chain_valid = false;
+	queue_album[0] = '\0';
+	path_cache_clear();
+	revision++;
+	return saved;
+}
+
+void playlist_checkpoint_discard(playlist_checkpoint_t *saved) {
+	if (!saved) return;
+	size_t extra = saved->entry_count > saved->ix_count ? saved->entry_count - saved->ix_count : 0;
+	for (size_t i = 0; i < extra; i++) free(saved->paths ? saved->paths[i] : NULL);
+	free(saved->paths);
+	free(saved->order);
+	library_index_close(saved->source_ix);
+	free(saved);
+}
+
+bool playlist_checkpoint_restore(playlist_checkpoint_t *saved) {
+	if (!saved) return false;
+	// Row IDs in a library handle can be reused after a rescan or card swap.
+	// Never reinstate one whose entries might now name different tracks.
+	if (saved->source_ix && library_index_stale(saved->source_ix)) {
+		playlist_checkpoint_discard(saved);
+		return false;
+	}
+	playlist_clear();
+	paths = saved->paths;
+	source_ix = saved->source_ix;
+	ix_count = saved->ix_count;
+	entry_count = saved->entry_count;
+	capacity = saved->capacity;
+	order = saved->order;
+	pos = saved->pos;
+	custom_queue = saved->custom_queue;
+	ordered_queue = saved->ordered_queue;
+	chain_from = saved->chain_from;
+	chain_slot = saved->chain_slot;
+	chain_valid = saved->chain_valid;
+	memcpy(queue_album, saved->album, sizeof(queue_album));
+	free(saved);
+	path_cache_clear();
+	persist_album();
+	revision++;
+	return true;
 }
 
 static bool push_path(const char *path) {

@@ -20,6 +20,8 @@ make -C sonix-player/tests peq-ui
 make -C sonix-player/tests quickpanel-layout
 make -C sonix-player/tests btreceiver-session
 make -C sonix-player/tests power-display
+make -C sonix-player/tests petalarm
+make -C sonix-player/tests tools-ui
 make -C sonix-player/tests corners
 make -C sonix-player/tests playbutton
 make -C sonix-player/tests musicsettings-rows
@@ -50,7 +52,7 @@ make -C sonix-player/tests subsonicdl
 make -C sonix-player/tests subsonic-all
 ```
 
-The non-UI suites require only a C compiler, Make and Python 3 (plus standard pthread/dl/math libraries). The `hiresbadge-ui`, `peq-ui`, `quickpanel-layout`, `btreceiver-session`, `power-display`, `corners`, `playbutton`, `musicsettings-rows`, `volume-overlay`, `playerdeck`, `vinylayout`, `waveform-overlay`, `edge-lock`, `tidal-ui` and aggregate `ui` targets also need the LVGL 9.6.0 checkout described below. None requires ALSA, SDL, a MIPS toolchain, a music server, a real account, or downloaded audio.
+The non-UI suites require only a C compiler, Make and Python 3 (plus standard pthread/dl/math libraries). The `hiresbadge-ui`, `peq-ui`, `quickpanel-layout`, `btreceiver-session`, `power-display`, `petalarm`, `tools-ui`, `corners`, `playbutton`, `musicsettings-rows`, `volume-overlay`, `playerdeck`, `vinylayout`, `waveform-overlay`, `edge-lock`, `tidal-ui` and aggregate `ui` targets also need the LVGL 9.6.0 checkout described below. None requires ALSA, SDL, a MIPS toolchain, a music server, a real account, or downloaded audio.
 
 `run_subsonic_tests.py` starts a temporary threaded localhost HTTP server plus three HTTPS servers carrying the certificates in `tls_fixtures.py`, runs the C binary with a private temporary config directory, verifies its requests, then shuts down. All account values are synthetic. Build products live in ignored `.build/`; response/PCM fixtures are generated in memory rather than added to Git, and the three test certificates are pasted into that Python file rather than downloaded.
 
@@ -64,6 +66,16 @@ and nothing else. Link it against `subsonicdl.c` and stubs only — it needs no
 LVGL and no `support.c`. `subsonic-all` runs it together with the bridge
 integration suite and the Subsonic page UI suite, which links the real
 downloads page and opens it from the home page's corner arrow.
+
+The `petalarm` target tests the recurring local-time scheduler and persistence,
+playback and sleep-timer interaction with fake transports, delayed audio
+teardown and later user choices, queue checkpoint restore and rollback
+persistence against a real SQLite database (including empty, streaming and
+radio-backed queues), real volume profiles against a fake mixer, Bluetooth
+volume dispatch and worker/echo handling against fake D-Bus connections, and
+RTC/power policy against fake sysfs. These tests do not validate the V1's RTC
+driver, suspend/resume, connected outputs or audible sound. The `tools-ui` suite
+also exercises the alarm page and translations.
 
 The `statusbar-ui` test checks LVGL rendering of the frosted player status bar,
 icon recoloring, layout-background choices, and restoration of status colors.

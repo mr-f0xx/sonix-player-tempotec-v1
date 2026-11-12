@@ -220,7 +220,7 @@ This fork builds on the upstream [Sonix Player](https://github.com/Jepl4r/sonix-
 
 ### 🌟 New in this fork
 
-- 🐾 **Music pet** - a Pikachu that grows from the music you hear. See [Music pet](#music-pet).
+- 🐾 **Music pet and alarm** - a Pikachu that grows from the music you hear, with a recurring music alarm in its settings. See [Music pet](#music-pet).
 - 🧮 **Calculator, Notes, Metronome** - a pocket calculator, text notes from the card, and a metronome with tap tempo, all under More.
 - 🎮 **2048, Snake and Dino** - three small games under More, sized for the V1 panel.
 - 🏷️ **Tag Manager** - view and edit FLAC and MP3 tags and cover art, and search for covers over Wi-Fi. See the [usage and safety notes](docs/tag-manager.md).
@@ -280,6 +280,9 @@ How it works:
 - **Character:** after about a month of listening, the genres you play give it a character. Pop and dance make it Upbeat, jazz and classical make it Calm, and indie, alternative and metal make it Curious.
 - **Tap-along:** once a day it offers a sixteen-beat tap-along using the metronome.
 - **Naming:** it starts as Pikachu. Use the pencil in the corner to rename it.
+- **Alarm clock:** open **More → Pet → pencil → Alarm clock**, turn it on, and choose a local time, repeat days, optional fade-in and either the current source or a local playlist. Set the device's date, time and time zone first; check the daylight-saving setting when using a manual zone. The alarm uses the current output and its volume; an active sleep timer can still pause playback.
+
+**Alarm limitations:** keep the player powered on and the chosen output connected. An armed alarm defers automatic shutdown, but manual shutdown or a depleted battery still stops it; it cannot turn on a powered-off player. Standby wake via the RTC is implemented but has **not yet been verified on V1 hardware**. Internet radio and wireless outputs also depend on reconnecting successfully. Test the alarm on your device before relying on it.
 
 The full rules are in [FEATURES.md](FEATURES.md).
 

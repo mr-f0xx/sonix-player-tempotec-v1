@@ -346,6 +346,65 @@ $(BUILD)/test_calculator: $(CALC_SRC) $(ROOT)/src/gui/calculator/calcmodel.h
 	@mkdir -p $(BUILD)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ $(CALC_SRC) $(LDFLAGS) $(LDLIBS)
 
+# Pet alarm: real schedule, playback decisions, temporary volume and RTC policy,
+# with fake transports/mixer/sysfs and no device nodes touched.
+.PHONY: petalarm
+petalarm: $(BUILD)/test_petalarm $(BUILD)/test_petalarm_runtime $(BUILD)/test_petalarm_volume $(BUILD)/test_petalarm_power $(BUILD)/test_petalarm_queue $(BUILD)/test_petalarm_persistence $(BUILD)/test_petalarm_bt $(BUILD)/test_petalarm_bt_dispatch
+	$(BUILD)/test_petalarm
+	$(BUILD)/test_petalarm_runtime
+	$(BUILD)/test_petalarm_volume
+	$(BUILD)/test_petalarm_power
+	$(BUILD)/test_petalarm_queue
+	$(BUILD)/test_petalarm_persistence
+	$(BUILD)/test_petalarm_bt
+	$(BUILD)/test_petalarm_bt_dispatch
+
+$(BUILD)/test_petalarm: test_petalarm.c $(ROOT)/src/system/pet/petalarm.c \
+                        $(ROOT)/src/system/pet/petalarm.h $(ROOT)/src/system/core/config.c
+	@mkdir -p $(BUILD)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ test_petalarm.c $(ROOT)/src/system/pet/petalarm.c $(ROOT)/src/system/core/config.c $(LDFLAGS) $(LDLIBS)
+
+$(BUILD)/test_petalarm_runtime: test_petalarm_runtime.c $(ROOT)/src/system/pet/petalarm_runtime.c \
+                                $(ROOT)/src/system/playback/sleeptimer.c \
+                                $(ROOT)/src/system/pet/petalarm.c $(ROOT)/src/system/core/config.c
+	@mkdir -p $(BUILD)
+	$(CC) $(UI_CPPFLAGS) $(CFLAGS) -o $@ test_petalarm_runtime.c $(ROOT)/src/system/pet/petalarm.c $(ROOT)/src/system/core/config.c $(LDFLAGS) $(LDLIBS)
+
+$(BUILD)/test_petalarm_volume: test_petalarm_volume.c $(ROOT)/src/system/audio/alsa-controls.c \
+                               $(ROOT)/src/system/core/config.c stubs/alsa/asoundlib.h
+	@mkdir -p $(BUILD)
+	$(CC) $(CPPFLAGS) -Istubs $(CFLAGS) -o $@ test_petalarm_volume.c $(ROOT)/src/system/core/config.c $(LDFLAGS) $(LDLIBS)
+
+$(BUILD)/test_petalarm_power: test_petalarm_power.c $(ROOT)/src/system/device/power.c \
+                              $(ROOT)/src/system/pet/petalarm.c $(ROOT)/src/system/core/config.c
+	@mkdir -p $(BUILD)
+	$(CC) $(UI_CPPFLAGS) $(CFLAGS) -o $@ test_petalarm_power.c $(ROOT)/src/system/pet/petalarm.c $(ROOT)/src/system/core/config.c $(LDFLAGS) $(LDLIBS)
+
+$(BUILD)/test_petalarm_queue: test_petalarm_queue.c $(ROOT)/src/system/playback/playlist.c \
+                              $(ROOT)/src/system/playback/playlist.h $(ROOT)/src/system/core/config.c
+	@mkdir -p $(BUILD)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ test_petalarm_queue.c $(ROOT)/src/system/playback/playlist.c $(ROOT)/src/system/core/config.c $(LDFLAGS) $(LDLIBS)
+
+# Real queue and SQLite persistence around a faked, failing audio transport.
+PETALARM_PERSISTENCE_SRC = test_petalarm_persistence.c $(ROOT)/src/system/playback/device_state.c \
+                          $(ROOT)/src/system/playback/playlist.c $(ROOT)/src/system/pet/petalarm.c \
+                          $(ROOT)/src/system/library/library.c $(ROOT)/src/system/library/cue.c \
+                          $(ROOT)/src/system/core/config.c $(ROOT)/src/system/core/utils.c
+$(BUILD)/test_petalarm_persistence: $(PETALARM_PERSISTENCE_SRC) $(ROOT)/src/system/pet/petalarm_runtime.c $(BUILD)/sqlite3_impl.o
+	@mkdir -p $(BUILD)
+	$(CC) $(UI_CPPFLAGS) $(CFLAGS) -o $@ $(PETALARM_PERSISTENCE_SRC) $(BUILD)/sqlite3_impl.o $(LDFLAGS) $(LDLIBS)
+
+$(BUILD)/test_petalarm_bt: test_petalarm_bt.c $(ROOT)/src/system/bluetooth/btvolume.c \
+                           $(ROOT)/src/system/bluetooth/dbuslite.c $(ROOT)/src/system/audio/alsa-controls.c \
+                           $(ROOT)/src/system/core/config.c stubs/alsa/asoundlib.h
+	@mkdir -p $(BUILD)
+	$(CC) $(UI_CPPFLAGS) -Istubs $(CFLAGS) -o $@ test_petalarm_bt.c $(ROOT)/src/system/audio/alsa-controls.c $(ROOT)/src/system/core/config.c $(LDFLAGS) $(LDLIBS)
+
+$(BUILD)/test_petalarm_bt_dispatch: test_petalarm_bt_dispatch.c $(ROOT)/src/system/bluetooth/bluetooth.c \
+                                   $(ROOT)/src/system/bluetooth/btvolume.h
+	@mkdir -p $(BUILD)
+	$(CC) $(CPPFLAGS) -Istubs $(CFLAGS) -o $@ test_petalarm_bt_dispatch.c $(LDFLAGS) $(LDLIBS)
+
 # The music pet's arithmetic: how the mood moves with the listening, what
 # idleness costs, when the goal counts, when the creature grows, and that its
 # whole state survives in device_config.ini. Plain C, no LVGL and no audio.
@@ -824,8 +883,8 @@ SAVER_SRC = $(ROOT)/tests/ui/test_screensaver.c $(ROOT)/src/gui/settings/screens
 SAVER_OBJ = $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(SAVER_SRC)) \
             $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(UI_LVGL_SRC))
 
-# The Calculator and Notes pages on the same renderer, at both panel sizes:
-# every key, every row and every note inside the panel they are drawn on.
+# Calculator, Notes, Metronome and Pet (including the alarm) on the real
+# renderer: controls, navigation and layout on the 240x320 V1 panel.
 TOOLS_SRC = $(ROOT)/tests/ui/test_tools_pages.c \
             $(ROOT)/src/gui/calculator/calculator.c $(ROOT)/src/gui/calculator/calcmodel.c \
             $(ROOT)/src/gui/games/games.c $(ROOT)/src/gui/games/snake.c \
@@ -833,11 +892,11 @@ TOOLS_SRC = $(ROOT)/tests/ui/test_tools_pages.c \
             $(ROOT)/src/gui/notes/notes.c $(ROOT)/src/gui/notes/noteeditor.c \
             $(ROOT)/src/gui/tagmanager/tagmanager.c $(ROOT)/src/system/tagmanager/tagwrite.c \
             $(ROOT)/src/gui/metronome/metronome.c \
-            $(ROOT)/src/gui/pet/petpage.c $(ROOT)/src/gui/pet/peticon.c $(ROOT)/src/gui/pet/pikachu.c \
-            $(ROOT)/src/system/pet/pet.c \
+            $(ROOT)/src/gui/pet/petpage.c $(ROOT)/src/gui/pet/petalarm_page.c $(ROOT)/src/gui/pet/peticon.c $(ROOT)/src/gui/pet/pikachu.c \
+            $(ROOT)/src/system/pet/pet.c $(ROOT)/src/system/pet/petalarm.c \
             $(ROOT)/src/system/notes/notesstore.c $(ROOT)/src/system/text/textfile.c \
             $(ROOT)/src/gui/library/textview.c $(ROOT)/src/gui/library/pictureview.c \
-            $(ROOT)/src/gui/shell/morepage.c $(ROOT)/src/gui/shell/gridpage.c \
+            $(ROOT)/src/gui/shell/morepage.c $(ROOT)/src/gui/shell/gridpage.c $(ROOT)/src/gui/streaming/soundcloud_icon.c \
             $(ROOT)/src/system/addons/addons.c \
             $(ROOT)/src/gui/shell/settingsrow.c $(ROOT)/src/gui/shell/keyboard.c \
             $(ROOT)/src/gui/shell/popover.c $(ROOT)/src/system/input/kblayout.c \
@@ -846,6 +905,10 @@ TOOLS_SRC = $(ROOT)/tests/ui/test_tools_pages.c \
             $(ROOT)/src/system/core/config.c $(ROOT)/src/system/core/lang.c
 TOOLS_OBJ = $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(TOOLS_SRC)) \
             $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(UI_LVGL_SRC))
+
+.PHONY: tools-ui
+tools-ui: $(BUILD)/test_tools_pages
+	$(BUILD)/test_tools_pages ../../sonix-packer/assets/V1/usr/resource/sonix/language
 
 # The battery screen a charger boot opens on: its layout at both panel sizes,
 # the fill being the reading it was given, and the three state lines in ten
