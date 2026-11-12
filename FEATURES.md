@@ -23,7 +23,12 @@
 - **Parametric EQ** - 10 bands, each with frequency 20 Hz to 20 kHz, gain
   ±15 dB in tenths, Q from 0.10 to 10.00, and five shapes: peak, low shelf,
   high shelf, low-pass, high-pass. Preamp −15 to +6 dB. The page draws the real
-  response, computed from the coefficients that are running. Presets are
+  response, computed from the coefficients that are running. In a band, tap
+  the frequency, gain or Q above its slider to type the exact value on a
+  keypad: the sliders move in steps, and a published correction rarely lands
+  on one. The frequency is typed in Hz or kHz (the key beside OK switches
+  unit) and is kept to the whole Hz; anything out of range is brought back to
+  the nearest limit. Presets are
   Equalizer APO files in the `PEQ` folder of the card: the `ParametricEQ.txt`
   that AutoEq publishes for your headphones loads as it is, and a preset saved
   on the player opens in APO. Two persistent PEQ profiles keep separate bands,
