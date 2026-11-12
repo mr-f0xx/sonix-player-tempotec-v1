@@ -431,8 +431,8 @@ MAIN_MENU_ICON_SIZE = 128
 SECTION_ICON_SIZE = 112
 # The SoundCloud home cards draw their picture at this size, so the artwork and
 # the flat themes' glyphs are rendered at it rather than scaled at run time.
-SOUNDCLOUD_TILE_SIZE = 72
-SOUNDCLOUD_GLYPH_SIZE = 64
+SOUNDCLOUD_TILE_SIZE = 62
+SOUNDCLOUD_GLYPH_SIZE = 54
 
 COLOR_ICONS = [
     # The quality badges under a track's title. Here rather than above because

@@ -38,8 +38,8 @@
 #define SC_HOME_TILES 4
 // The size each card's picture is drawn at, matching the size tools/svg_to_lvgl.py
 // emits it: SOUNDCLOUD_TILE_SIZE and SOUNDCLOUD_GLYPH_SIZE there.
-#define SOUNDCLOUD_TILE_ART_PX 72
-#define SOUNDCLOUD_TILE_GLYPH_PX 64
+#define SOUNDCLOUD_TILE_ART_PX 62
+#define SOUNDCLOUD_TILE_GLYPH_PX 54
 
 static const int SC_CACHE_PRESET_MB[SC_CACHE_PRESET_COUNT] = {512, 1024, 2048, 4096, 8192, 0};
 
