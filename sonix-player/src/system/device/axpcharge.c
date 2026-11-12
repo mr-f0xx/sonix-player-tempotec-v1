@@ -26,6 +26,7 @@ void axpcharge_set(bool limit_voltage, bool limit_current) {
 	(void)limit_voltage;
 	(void)limit_current;
 }
+void axpcharge_set_charging_enabled(bool enabled) { (void)enabled; }
 void axpcharge_tick(void) {}
 bool axpcharge_holding(void) { return false; }
 
@@ -42,6 +43,11 @@ bool axpcharge_holding(void) { return false; }
 // REG01h[2:0], charging status: 4 is "charge done".
 #define AXP_REG_STATUS 0x01
 #define AXP_STATUS_DONE 4
+
+// REG18h[1], battery charging enable. Clearing this bit stops charging while
+// leaving the PMIC and system power path running from VBUS.
+#define AXP_REG_CHARGER_CONTROL 0x18
+#define AXP_CHARGE_ENABLE_MASK 0x02u
 
 // REG62h[4:0], constant charge current: N*25 mA up to 8 (200 mA), then
 // 200 + (N-8)*100 mA. 11 is 500 mA.
@@ -66,6 +72,7 @@ bool axpcharge_holding(void) { return false; }
 
 static bool configured;
 static bool want_voltage, want_current;
+static bool charging_enabled = true;
 static bool holding;
 static long long next_ms;
 
@@ -174,9 +181,12 @@ static bool apply_current(void) {
 static bool apply(void) {
 	bool ok = apply_voltage();
 	ok = apply_current() && ok;
+	ok = set_field(AXP_REG_CHARGER_CONTROL, AXP_CHARGE_ENABLE_MASK,
+			   charging_enabled ? AXP_CHARGE_ENABLE_MASK : 0) && ok;
 
 	uint8_t status;
-	holding = want_voltage && axp_read(AXP_REG_STATUS, &status) && (status & 7u) == AXP_STATUS_DONE;
+	bool charge_done = want_voltage && axp_read(AXP_REG_STATUS, &status) && (status & 7u) == AXP_STATUS_DONE;
+	holding = !charging_enabled || charge_done;
 	return ok;
 }
 
@@ -208,6 +218,23 @@ void axpcharge_set(bool limit_voltage, bool limit_current) {
 	next_ms = now_ms() + REASSERT_MS;
 	printf("axpcharge: charge limit %s, 500 mA limit %s%s\n", want_voltage ? "on" : "off",
 		   want_current ? "on" : "off", ok ? "" : " (the PMIC did not take it, retrying)");
+}
+
+void axpcharge_set_charging_enabled(bool enabled) {
+	if (!axpcharge_applies()) {
+		return;
+	}
+	configured = true;
+	charging_enabled = enabled;
+	bool ok = set_field(AXP_REG_CHARGER_CONTROL, AXP_CHARGE_ENABLE_MASK,
+			    enabled ? AXP_CHARGE_ENABLE_MASK : 0);
+	uint8_t status;
+	bool charge_done = enabled && want_voltage && axp_read(AXP_REG_STATUS, &status) &&
+			   (status & 7u) == AXP_STATUS_DONE;
+	holding = !enabled || charge_done;
+	if (!ok) {
+		printf("axpcharge: could not %s battery charging; retrying\n", enabled ? "enable" : "disable");
+	}
 }
 
 void axpcharge_tick(void) {

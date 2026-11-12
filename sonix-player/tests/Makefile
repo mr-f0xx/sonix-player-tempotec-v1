@@ -108,6 +108,15 @@ $(BUILD)/test_batteryguard: $(GUARD_SRC) $(ROOT)/src/system/device/batteryguard.
 	@mkdir -p $(BUILD)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ $(GUARD_SRC) $(LDFLAGS) $(LDLIBS)
 
+# Exact percentage cutoff and hysteresis used by both charger paths.
+.PHONY: chargelimit
+chargelimit: $(BUILD)/test_chargelimit
+	$(BUILD)/test_chargelimit
+
+$(BUILD)/test_chargelimit: test_chargelimit.c $(ROOT)/src/system/device/chargelimit.c $(ROOT)/src/system/device/chargelimit.h
+	@mkdir -p $(BUILD)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ test_chargelimit.c $(ROOT)/src/system/device/chargelimit.c $(LDFLAGS) $(LDLIBS)
+
 # The Screensaver folder's rules: which files are pictures, judged from their
 # JPEG headers, and the random pick between them. Plain C, no LVGL.
 PICS_SRC = test_screensaverpics.c $(ROOT)/src/system/device/screensaverpics.c \
