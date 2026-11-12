@@ -107,8 +107,34 @@ static void refresh_view_buttons(void) {
 	}
 }
 
+static void title_on_two_lines(const char *title, char out[GBROM_NAME_MAX + 2]) {
+	size_t len = strlen(title);
+	size_t target = len / 2;
+	size_t split = len;
+	size_t best_distance = len;
+	for (size_t i = 1; i + 1 < len; i++) {
+		if (title[i] != ' ') {
+			continue;
+		}
+		size_t distance = i > target ? i - target : target - i;
+		if (distance < best_distance) {
+			best_distance = distance;
+			split = i;
+		}
+	}
+	if (split == len) {
+		snprintf(out, GBROM_NAME_MAX + 2, "%s", title);
+		return;
+	}
+	memcpy(out, title, split);
+	out[split] = '\n';
+	snprintf(out + split + 1, GBROM_NAME_MAX + 1 - split, "%s", title + split + 1);
+}
+
 static void make_tile(int index, int tile_w, int tile_h) {
 	const gbrom_t *rom = &roms[index];
+	char title[GBROM_NAME_MAX + 2];
+	title_on_two_lines(rom->name, title);
 	int art_side = art_side_px;
 	lv_obj_t *tile = lv_btn_create(list_box);
 	lv_obj_set_size(tile, tile_w, tile_h);
@@ -117,11 +143,13 @@ static void make_tile(int index, int tile_w, int tile_h) {
 	lv_obj_set_style_radius(tile, 14, 0);
 	lv_obj_set_style_border_width(tile, 0, 0);
 	lv_obj_set_style_shadow_width(tile, 0, 0);
-	lv_obj_set_style_pad_all(tile, 12, 0);
-	lv_obj_set_style_pad_row(tile, 12, 0);
+	lv_obj_set_style_pad_hor(tile, 12, 0);
+	lv_obj_set_style_pad_top(tile, 28, 0);
+	lv_obj_set_style_pad_bottom(tile, 12, 0);
+	lv_obj_set_style_pad_row(tile, 14, 0);
 	lv_obj_set_scrollable(tile, false);
 	lv_obj_set_flex_flow(tile, LV_FLEX_FLOW_COLUMN);
-	lv_obj_set_flex_align(tile, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+	lv_obj_set_flex_align(tile, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 	lv_obj_set_event_bubble(tile, true);
 	lv_obj_add_event_cb(tile, open_rom_cb, LV_EVENT_CLICKED, (void *)(intptr_t)index);
 	tiles[index] = tile;
@@ -151,10 +179,10 @@ static void make_tile(int index, int tile_w, int tile_h) {
 	art_placeholders[index] = placeholder;
 
 	lv_obj_t *name = lv_label_create(tile);
-	lv_label_set_text(name, rom->name);
+	lv_label_set_text(name, title);
 	lv_label_set_long_mode(name, LV_LABEL_LONG_DOT);
 	lv_obj_set_width(name, lv_pct(100));
-	lv_obj_set_height(name, lv_font_get_line_height(&font_ui_22));
+	lv_obj_set_height(name, 2 * lv_font_get_line_height(&font_ui_22));
 	lv_obj_set_style_text_align(name, LV_TEXT_ALIGN_CENTER, 0);
 	lv_obj_set_style_text_font(name, &font_ui_22, 0);
 	lv_obj_add_style(name, &theme_style_text, 0);
@@ -198,14 +226,14 @@ static void rebuild_grid(void) {
 	lv_obj_scroll_to_y(list_box, 0, LV_ANIM_OFF);
 	// Keep the screenshot's two-column layout, but make each pair of tiles
 	// fill the viewport height. That leaves exactly two games on screen rather
-	// than a clipped preview of the next row. Artwork stays square and centered;
-	// titles sit at the bottom of each tall card.
+	// than a clipped preview of the next row. The artwork and two-line title are
+	// grouped around the card center for a more balanced layout.
 	lv_obj_update_layout(list_box);
 	int available_w = lv_obj_get_content_width(list_box);
 	int tile_w = (available_w - 12) / 2;
 	int tile_h = lv_obj_get_content_height(list_box);
 	int width_fit = tile_w - 24;
-	int height_fit = tile_h - 24 - 12 - lv_font_get_line_height(&font_ui_22);
+	int height_fit = tile_h - 28 - 12 - 14 - 2 * lv_font_get_line_height(&font_ui_22);
 	art_side_px = LV_MIN(ART_SIDE_MAX, LV_MIN(width_fit, height_fit));
 	if (art_side_px < 1) {
 		art_side_px = 1;
