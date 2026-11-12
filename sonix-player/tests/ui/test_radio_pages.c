@@ -538,6 +538,20 @@ static lv_obj_t *find_clickable_with_label(lv_obj_t *root, const char *needle) {
 	return NULL;
 }
 
+static lv_obj_t *find_label_by_text(lv_obj_t *root, const char *text) {
+	if (lv_obj_check_type(root, &lv_label_class) && strcmp(lv_label_get_text(root), text) == 0) {
+		return root;
+	}
+	uint32_t cnt = lv_obj_get_child_count(root);
+	for (uint32_t i = 0; i < cnt; i++) {
+		lv_obj_t *hit = find_label_by_text(lv_obj_get_child(root, (int32_t)i), text);
+		if (hit) {
+			return hit;
+		}
+	}
+	return NULL;
+}
+
 static int unlink_cb(const char *fpath, const struct stat *sb, int typeflag, struct FTW *ftwbuf) {
 	(void)sb;
 	(void)typeflag;
@@ -648,6 +662,13 @@ int main(int argc, char **argv) {
 	assert(lv_obj_is_hidden(grid));
 	assert(find_clickable_with_label(radiopage_screen, tr("wi_fi_settings")) != NULL);
 	assert(find_clickable_with_label(radiopage_screen, tr(HOME_KEYS[0])) == NULL);
+	// The notice leads the page from the top of the panel, where the tiles
+	// would start -- not floating in the middle of an empty page.
+	lv_obj_t *notice = find_label_by_text(radiopage_screen, tr("enable_wi_fi_first"));
+	assert(notice != NULL);
+	lv_area_t notice_area;
+	lv_obj_get_coords(notice, &notice_area);
+	assert(notice_area.y1 < (int32_t)cfg.screen_height / 3);
 	stub_connected = true;
 	lv_obj_send_event(radiopage_screen, LV_EVENT_SCREEN_LOADED, NULL);
 	lv_obj_update_layout(radiopage_screen);

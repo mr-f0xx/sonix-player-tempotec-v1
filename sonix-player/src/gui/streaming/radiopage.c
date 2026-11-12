@@ -1432,7 +1432,11 @@ static void build_offline_hub(gui_config_t *cfg) {
 	lv_obj_set_style_pad_gap(hub_offline, 12, 0);
 	lv_obj_set_scrollable(hub_offline, false);
 	lv_obj_set_flex_flow(hub_offline, LV_FLEX_FLOW_COLUMN);
-	lv_obj_set_flex_align(hub_offline, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+	// From the top of the panel, where the tiles would start: a notice left
+	// floating in the middle of an otherwise empty page reads as if something
+	// had failed to load above it. Cross-axis centre keeps the message itself
+	// centred in the width.
+	lv_obj_set_flex_align(hub_offline, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 
 	// The same notice as the Wi-Fi transfer page: a centred message, and below
 	// it the "Wi-Fi settings" row that leads to where it can be fixed.
