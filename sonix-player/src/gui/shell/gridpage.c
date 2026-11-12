@@ -13,6 +13,7 @@
 #include "src/gui/shell/settingsrow.h"
 #include "src/gui/shell/switcher.h"
 #include "src/gui/shell/theme.h"
+#include "src/gui/streaming/soundcloud_icon.h"
 #include "src/system/core/lang.h"
 
 #define GRID_GAP 14
@@ -238,7 +239,7 @@ static bool gridpage_tokyo_icon(const char *label, const lv_image_dsc_t **icon, 
 		{"dlna", &icon_dlna_quick, THEME_SEMANTIC_BLUE},
 		{"tidal", &icon_tidal_mark, THEME_SEMANTIC_CYAN},
 		{"qobuz", &icon_qobuz_mark, THEME_SEMANTIC_PURPLE},
-		{"soundcloud", &icon_audio_waveform, THEME_SEMANTIC_AMBER},
+		{"soundcloud", &icon_soundcloud_mark, THEME_SEMANTIC_AMBER},
 		{"subsonic", &icon_music_note, THEME_SEMANTIC_BLUE},
 		{"radio", &icon_radio_player, THEME_SEMANTIC_PURPLE},
 		{"podcasts", &icon_podcast_list, THEME_SEMANTIC_CYAN},
