@@ -6,6 +6,7 @@
 
 #include "src/system/device/power.h"
 #include "src/system/core/utils.h"
+#include "src/gui/nowplaying/cover.h"
 
 // One slot's worth of state. `generation` is what makes abandoning safe: the
 // worker records the generation it started with and throws its result away if
@@ -13,6 +14,7 @@
 typedef struct {
 	char path[512];
 	int size;
+	bool image_file;
 
 	uint32_t generation; // bumped by every request and every release
 	bool pending;		 // asked for, not started
@@ -266,6 +268,7 @@ static void *worker(void *arg) {
 		char path[sizeof(slot->path)];
 		memcpy(path, slot->path, sizeof(path));
 		int size = slot->size;
+		bool image_file = slot->image_file;
 		uint32_t generation = slot->generation;
 
 		slot->pending = false;
@@ -273,7 +276,8 @@ static void *worker(void *arg) {
 		pthread_mutex_unlock(&lock);
 
 		cover_image_t image;
-		bool found = cover_thumb_load(path, false, size, &image);
+		bool found = image_file ? cover_load_image_file(path, size, size, COVER_FIT_COVER, &image)
+								: cover_thumb_load(path, false, size, &image);
 
 		pthread_mutex_lock(&lock);
 		slot->running = false;
@@ -348,8 +352,25 @@ void coverloader_request(int slot_index, const char *path, int size) {
 
 	snprintf(slot->path, sizeof(slot->path), "%s", path);
 	slot->size = size;
+	slot->image_file = false;
 	slot->pending = true;
 
+	pthread_cond_signal(&wakeup);
+	pthread_mutex_unlock(&lock);
+}
+
+void coverloader_request_image(int slot_index, const char *path, int size) {
+	if (slot_index < 0 || slot_index >= COVERLOADER_SLOTS || !path) {
+		return;
+	}
+
+	pthread_mutex_lock(&lock);
+	slot_t *slot = &slots[slot_index];
+	discard(slot);
+	snprintf(slot->path, sizeof(slot->path), "%s", path);
+	slot->size = size;
+	slot->image_file = true;
+	slot->pending = true;
 	pthread_cond_signal(&wakeup);
 	pthread_mutex_unlock(&lock);
 }

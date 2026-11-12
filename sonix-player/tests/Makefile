@@ -20,10 +20,18 @@ CORE = $(ROOT)/src/system/streaming/subsonic.c \
        $(ROOT)/src/system/core/json.c $(ROOT)/src/system/core/md5.c \
        $(ROOT)/src/system/core/config.c $(ROOT)/src/system/playback/playlist.c
 
-.PHONY: test sanitize clean extractkeys qobuz
+.PHONY: test sanitize clean extractkeys qobuz gbdb
 
 test: $(BUILD)/test_subsonic
 	python3 run_subsonic_tests.py $(BUILD)/test_subsonic
+
+# Game Boy ROM naming and optional Cover Art matching. No LVGL or emulator core.
+gbdb: $(BUILD)/test_gbdb
+	$(BUILD)/test_gbdb
+
+$(BUILD)/test_gbdb: test_gbdb.c $(ROOT)/src/system/gearboy/gbdb.c $(ROOT)/src/system/gearboy/gbdb.h
+	@mkdir -p $(BUILD)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ test_gbdb.c $(ROOT)/src/system/gearboy/gbdb.c $(LDFLAGS) $(LDLIBS)
 
 # Everything Subsonic: the bridge and its mock server, the download worker
 # against a real temporary card, and the pages drawn with LVGL.

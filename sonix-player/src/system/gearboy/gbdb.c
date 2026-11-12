@@ -7,6 +7,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
@@ -522,6 +523,88 @@ static int compare_by_name(const void *a, const void *b) {
 	return c ? c : strcmp(x->path, y->path);
 }
 
+// Cover names are human-friendly rather than tied to a specific ROM dump:
+// "Pokemon Red.png" and "pokemon_red.gb" therefore match. Punctuation and
+// spacing are ignored, while the extension remains significant.
+static void cover_key(const char *text, char *out, size_t size) {
+	size_t n = 0;
+	for (const unsigned char *p = (const unsigned char *)text; *p && n + 1 < size; p++) {
+		// Database titles often append region/revision notes; those belong to
+		// cartridge identity, not to the human-readable cover filename.
+		if (*p == '(' || *p == '[') {
+			break;
+		}
+		if (isalnum(*p)) {
+			out[n++] = (char)tolower(*p);
+		}
+	}
+	out[n] = '\0';
+}
+
+static bool cover_image_name(const char *name) {
+	const char *dot = strrchr(name, '.');
+	return dot && (!strcasecmp(dot, ".png") || !strcasecmp(dot, ".jpg") || !strcasecmp(dot, ".jpeg"));
+}
+
+static void find_cover(gbrom_t *rom) {
+	rom->cover_path[0] = '\0';
+	char folder[GBROM_PATH_MAX + 32];
+	snprintf(folder, sizeof(folder), "%s", rom->path);
+	char *slash = strrchr(folder, '/');
+	if (!slash) {
+		return;
+	}
+	*slash = '\0';
+	char art_dir[GBROM_PATH_MAX + 48];
+	if (snprintf(art_dir, sizeof(art_dir), "%s/Cover Art", folder) >= (int)sizeof(art_dir)) {
+		return;
+	}
+	DIR *dir = opendir(art_dir);
+	if (!dir) {
+		return;
+	}
+
+	char wanted_name[GBROM_NAME_MAX];
+	cover_key(rom->name, wanted_name, sizeof(wanted_name));
+	char wanted_file[GBROM_NAME_MAX];
+	snprintf(wanted_file, sizeof(wanted_file), "%s", rom->file);
+	char *ext = strrchr(wanted_file, '.');
+	if (ext) {
+		*ext = '\0';
+	}
+	cover_key(wanted_file, wanted_file, sizeof(wanted_file));
+	char wanted_crc[16];
+	snprintf(wanted_crc, sizeof(wanted_crc), "%08x", rom->crc);
+
+	struct dirent *entry;
+	while ((entry = readdir(dir))) {
+		if (!cover_image_name(entry->d_name)) {
+			continue;
+		}
+		char stem[256];
+		snprintf(stem, sizeof(stem), "%s", entry->d_name);
+		char *dot = strrchr(stem, '.');
+		if (dot) {
+			*dot = '\0';
+		}
+		char key[sizeof(stem)];
+		cover_key(stem, key, sizeof(key));
+		if (!key[0] || (strcmp(key, wanted_name) && strcmp(key, wanted_file) && strcmp(key, wanted_crc))) {
+			continue;
+		}
+		char candidate[GBROM_PATH_MAX + 64];
+		struct stat st;
+		int path_len = snprintf(candidate, sizeof(candidate), "%s/%s", art_dir, entry->d_name);
+		if (path_len < 0 || (size_t)path_len >= sizeof(candidate) ||
+			(size_t)path_len >= sizeof(rom->cover_path) || stat(candidate, &st) != 0 || !S_ISREG(st.st_mode)) {
+			continue;
+		}
+		memcpy(rom->cover_path, candidate, (size_t)path_len + 1);
+		break;
+	}
+	closedir(dir);
+}
+
 int gbdb_scan(gbrom_t **out, bool (*progress)(int done, int total, void *user), void *user) {
 	if (out) {
 		*out = NULL;
@@ -646,6 +729,12 @@ int gbdb_scan(gbrom_t **out, bool (*progress)(int done, int total, void *user), 
 	}
 
 	cache_free(&cache);
+
+	// Covers are optional. Resolve them off the GUI thread so building a large
+	// game shelf never walks directories or touches image files on the UI.
+	for (int i = 0; i < list.count; i++) {
+		find_cover(&list.items[i]);
+	}
 
 	qsort(list.items, (size_t)list.count, sizeof(gbrom_t), compare_by_name);
 
