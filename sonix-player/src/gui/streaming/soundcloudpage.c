@@ -1554,20 +1554,24 @@ static void value_row_col_resized_cb(lv_event_t *e) {
 	fit_stacked_title((sc_value_row_t *)lv_event_get_user_data(e));
 }
 
-// These tiles are taller than a menu row's, so both the menu illustrations and
-// the function glyphs of the flat themes are drawn larger than the compact
-// default; a 46 px picture in a 120 px card reads as an empty card.
+// These cards are twice a menu row's height, and they are the whole page, so
+// the picture is drawn large and centred with the caption underneath in every
+// theme -- including the flat ones, whose menu rows would otherwise put the
+// glyph beside the text and leave the card mostly empty.
 static void home_fit_tile_icons(void) {
 	if (!home_grid) {
 		return;
 	}
 	bool fn = theme_uses_function_glyphs();
-	int size = fn ? 30 : (bp_is_tempotec_v1() ? 64 : 88);
+	// The menu illustrations carry their own margin inside the bitmap, the
+	// function glyphs are drawn tight, so the same card wants a larger number
+	// for the glyph.
+	int size = fn ? 54 : (bp_is_tempotec_v1() ? 68 : 92);
 	for (int i = 0; i < SC_HOME_TILES; i++) {
 		gridpage_set_tile_icon_size(home_grid, i, size);
-		// The row layout gives the caption everything the glyph does not use,
-		// so it has to be measured again once the glyph has changed size.
-		gridpage_set_tile_orientation(home_grid, i, fn && bp_is_tempotec_v1());
+		// A bigger picture leaves the caption less room in the row layout, and
+		// the vertical one has to re-measure it against the card's width.
+		gridpage_set_tile_orientation(home_grid, i, false);
 	}
 }
 
