@@ -77,8 +77,11 @@
 // ---------------------------------------------------------------------------
 
 // Global bound: all live graphs (including retired mounts), request wrappers,
-// private metadata, full path pools and temporary loader allocations combined.
-#define GENIUSDB_MAX_SNAPSHOT_BYTES ((size_t)4 * 1024 * 1024)
+// membership bits, full path pools and temporary loader allocations combined.
+// Sized for the builder's row cap: 57 bytes of reader state per path, the path
+// pool it measured, its 2 MiB neighbour array and the cluster tables. Large
+// libraries carry fewer neighbours per track rather than a larger budget.
+#define GENIUSDB_MAX_SNAPSHOT_BYTES ((size_t)12 * 1024 * 1024)
 
 typedef enum {
 	GENIUSDB_OK,

@@ -780,6 +780,36 @@ paths, invalid sizes, missing seeds, cancellation/card invalidation, shorter
 mixes when candidates run out, and failure when only the seed is available.
 No LVGL, database or card is required.
 
+## Smart Mix on large libraries
+
+`make -C sonix-player/tests geniuslarge` links the real builder, the real reader
+and the real mix generator to a synthetic index and a temporary "card" directory
+under `/tmp`. Only the library lookups are stubbed (`library_read_tags`,
+`library_get_indexed`, `library_revision`); the staging database, the BLOB and
+the atomic rename are the production ones, and so is the SQLite copy the tests
+build.
+
+Cases:
+
+- **25,000 and 50,000 tracks**: the build publishes instead of reporting
+  `GENIUSBUILD_LIMIT`, the decoded snapshot stays inside
+  `GENIUSDB_MAX_SNAPSHOT_BYTES`, and a 30-track mix comes back from the middle
+  of the library with no repeats (this is what caught the walker offering the
+  seed again through a mutual edge).
+- **One genre for the whole library** (20,000 tracks): the largest cluster the
+  ranking can meet, which must finish in bounded time rather than be scanned
+  whole for every seed.
+- **Unchanged and changed input**: a second build of the same tags reports
+  `GENIUSBUILD_CURRENT` without rewriting, and a changed tag rebuilds.
+- **Caps**: one row past `GENIUSBUILD_MAX_TRACKS`, and a path pool over
+  `GENIUSBUILD_MAX_TEXT_BYTES`, each report `GENIUSBUILD_LIMIT` and leave any
+  previous graph in place.
+
+It prints the build time, retained peak, blob and snapshot size per case; the
+numbers in `PATCHES.md` come from this run. The times are host times, not V1
+times. A case may also be run alone with an argument (`./.build/test_geniuslarge 2`
+for 50,000 tracks), and the suite takes a few seconds.
+
 ## TempoTec base version in About
 
 Run `make -C sonix-player/tests basebuild` from the repository root. This checks

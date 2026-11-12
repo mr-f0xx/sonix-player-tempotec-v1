@@ -6,6 +6,91 @@
 | Touchscreen multitouch, R1 | `tools/cst8xx_multitouch_patch.py` | the panel reports two fingers, the driver lets one out |
 
 
+## Smart Mix on large libraries (issue #285)
+
+A 25,000-track library on firmware 1.6.1.1 (TempoTec V1, MP3/FLAC/WAV, complete
+tags) reports "No Smartmix data for this track" for every track while the
+ordinary scan and shuffle are fine. Its log has
+
+    geniusbuild: result 3, 4096 tracks, retained peak 1212416 bytes
+    library: Smart Mix build failed (3); library scan outcome is unchanged
+
+and the reporter confirmed the split: 100 tracks work, the full library does
+not. `result 3` is `GENIUSBUILD_LIMIT`, and 4096 was the builder's row cap; the
+1,212,416-byte peak in the same line is under a quarter of the 4 MiB budget it
+was measured against, so this was never out of memory and no workaround with
+smaller cards was needed. The cap was a design choice, and the three budgets
+behind it (a 4 MiB builder, a 4 MiB decoded snapshot and a 2 MiB BLOB) could
+not simply be multiplied: the old builder held a path and four tag strings per
+track, sorted the whole library twice, and assembled the entire graph in RAM,
+which is about 12 MiB of builder memory for 25,000 tracks before the blob.
+
+What changed, in `geniusbuild.c`:
+
+- **Two streaming walks of the index.** The first counts rows, measures the path
+  pool and interns each *distinct* artist, album and genre string; sorting those
+  distinct values gives the dense ids the old whole-library sort produced,
+  because they are the ranks of the same strings in the same UTF-8 byte order.
+  The second walk writes one path and one 24-byte record per track, with the tags
+  already reduced to their ranks. Tag text is therefore held once per distinct
+  value rather than once per track. Both walks report the revision they saw and
+  the build fails as `GENIUSBUILD_CHANGED` if the index moved between them.
+- **A streaming encoder.** The seven sections are rendered in 16 KiB pieces into
+  the staging BLOB, and the same renderer feeds the SHA-256 graph digest, so the
+  whole blob is never in RAM. Offsets, the generation string, `quick_check`, the
+  fsync and the atomic rename are unchanged.
+- **A bounded neighbour array.** The reader keeps a fixed amount per path (sorted
+  pointer, 40-byte metadata, adjacency range and one membership bit) plus the
+  path pool, so the edge array is what a mounted graph costs. The builder picks
+  the neighbours per track from that budget and from a 2 MiB edge budget: 32 per
+  track for small libraries, scaling down (never below 4) as the library grows.
+  25,000 tracks keep 10 each, 50,000 keep 5.
+- **Bounded ranking.** One pass per seed instead of eight, filling seven score
+  groups in path order, with the per-artist (2) and per-album (3) caps in small
+  fixed hash tables instead of a `memset` of the whole library per seed. A genre
+  larger than 4,096 tracks is sampled with a fixed stride rather than scanned
+  whole, so one enormous genre cannot turn the build into hours; genres at or
+  under that size are ranked exactly as before. For libraries that fit the old
+  cap the published database is **byte for byte identical** to the previous
+  builder's (checked with a 4,000-track fixture), so an existing graph is
+  recognised as current and a graph from the PC exporter still matches.
+- **The reader's per-request metadata became one bit per path.** It used to keep
+  a second 40-byte metadata array per mount; membership is now a bitmap of
+  `paths/8` bytes, which is where the room for the larger libraries comes from.
+  `GENIUSDB_MAX_SNAPSHOT_BYTES` rises from 4 to 12 MiB.
+- **A mix no longer repeats its seed.** Edges are not one-way: another track can
+  list the starting track as similar, the walker offered it as a candidate, and
+  after enough tracks the spacing rules let it in -- a 25,000-track graph put the
+  seed back at position 24 of a 30-track mix. `genius_mix_build()` now marks the
+  seed as used.
+
+New limits: 65,535 rows (up from 4,096), 6 MiB of path and tag text (up from
+1 MiB), 12 MiB of builder allocations, a 12 MiB decoded snapshot and a 2 MiB
+neighbour array; 4,096 bytes per field is unchanged. Reaching any of them still
+reports `GENIUSBUILD_LIMIT` (3), keeps the previous graph and leaves the scan
+outcome alone.
+
+Host numbers, from `make -C sonix-player/tests geniuslarge` (a synthetic index of
+`/music/<dir>/Artist <n> - Track <n>.flac`, 40 genres, one tag set per track):
+
+| library | build | retained peak | blob | decoded snapshot | neighbours each |
+|---|---|---|---|---|---|
+| 4,000 | 0.03 s | 0.3 MiB | 1.4 MiB | 1.5 MiB | 32 |
+| 25,000 | 0.18 s | 3.5 MiB | 4.3 MiB | 4.7 MiB | 10 |
+| 50,000 | 0.53 s | 6.4 MiB | 6.7 MiB | 7.5 MiB | 5 |
+| 20,000, one genre | 0.38 s | 2.9 MiB | 3.9 MiB | 4.3 MiB | 13 |
+
+Those are host seconds and host peaks; they are not V1 timings. The same suite
+builds each library, mounts the result through the real reader, and walks a
+30-track mix from the middle of it, and it checks the row cap, the text cap, the
+generation being reused for unchanged input and rebuilt for a changed tag.
+
+Not verified on hardware: how long the two walks and the ranking take on the V1,
+card write time for a 5-10 MiB staging file, and the player's memory headroom
+with a graph of that size mounted. Check with a 25,000-track card: the log should
+show `geniusbuild: published <n> tracks, ...` once per scan and no
+`Smart Mix build failed`, and a mix should start from any track.
+
 ## Bluetooth RX: a freeze, the phone's volume, aptX stutter, and the control centre over the receiver
 
 Reported on firmware 1.6.1 (the log writes the build as `111120260719`) with a
@@ -4056,8 +4141,9 @@ are not evidence of what the V1 actually does.
 - `geniusbuild: result 3, 4096 tracks` is the existing intentional Smart Mix
   input limit, not proof of out-of-memory. Supporting this 26k-track library
   requires a separate bounded large-library design; this patch does not change
-  that limit. The logged Bluetooth underruns predate the separate coexistence
-  changes and still need on-device verification.
+  that limit. That design is now in "Smart Mix on large libraries" above. The
+  logged Bluetooth underruns predate the separate coexistence changes and still
+  need on-device verification.
 
 Host tests: `make -C sonix-player/tests usbhost readfile`, using private mocked
 sysfs, mount/claim and LUN fixtures, and real non-seekable procfs/pipe reads,

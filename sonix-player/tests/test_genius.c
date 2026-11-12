@@ -12,6 +12,9 @@ struct geniusdb_snapshot {
 	char paths[TRACKS][32];
 	genius_meta_t meta[TRACKS];
 	genius_edge_t edges[TRACKS - 1];
+	// Track 1 lists the seed back: similarity is not necessarily one-way, so
+	// the walker has to be told that the seed is already in the mix.
+	genius_edge_t back;
 };
 
 bool geniusdb_snapshot_current(const geniusdb_snapshot_t *s) { return s && s->current; }
@@ -32,6 +35,7 @@ const genius_meta_t *geniusdb_get_meta(const geniusdb_snapshot_t *s, int32_t id)
 	return s && id >= 0 && id < s->count ? &s->meta[id] : NULL;
 }
 genius_sim_list_t geniusdb_get_sims(const geniusdb_snapshot_t *s, int32_t id) {
+	if (id == 1) return (genius_sim_list_t){.edges = &s->back, .count = 1};
 	return (genius_sim_list_t){.edges = s->edges, .count = id == 0 ? s->count - 1 : 0};
 }
 genius_cluster_set_t geniusdb_get_neighbours(const geniusdb_snapshot_t *s, int32_t cluster) {
@@ -62,6 +66,7 @@ int main(void) {
 		s.meta[i] = (genius_meta_t){.cluster = 1, .k1 = i, .k2 = i, .k3 = i, .k20 = i, .present = true};
 		if (i) s.edges[i - 1] = (genius_edge_t){.path = 0, .other = i};
 	}
+	s.back = (genius_edge_t){.path = 1, .other = 0};
 	for (int count = 10; count <= 30; count += 5) check_mix(&s, count, count);
 	check_mix(&s, 2, 2);
 
@@ -79,6 +84,12 @@ int main(void) {
 	s.current = true;
 	s.count = 7;
 	check_mix(&s, 30, 7);
+	// The seed is listed back by track 1. Once spacing has been satisfied and
+	// only the seed is left as a candidate it must not come round again:
+	// without that rule the walk returns 26 entries for a 25-track graph and
+	// the mix repeats its starting track.
+	s.count = 25;
+	check_mix(&s, 30, 25);
 	s.count = 1;
 	assert(genius_mix_build(&s, s.paths[0], 30, 123, NULL, &mix) == GENIUS_TOO_FEW);
 	assert(!mix.paths && !mix.count);

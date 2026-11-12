@@ -26,11 +26,6 @@
 #define GENIUSDB_GENERATION_BYTES 4096
 
 typedef struct {
-	int32_t cluster;
-	int64_t k1, k2, k3, k20;
-} geniusdb_meta_t;
-
-typedef struct {
 	int32_t first, count;
 } geniusdb_range_t;
 
@@ -53,7 +48,7 @@ typedef struct {
 	const char **paths;
 	char *path_pool;
 	char *generation;
-	geniusdb_meta_t *meta;
+	genius_meta_t *meta;
 	geniusdb_range_t *sims;
 	genius_edge_t *edges;
 	geniusdb_cluster_t *clusters;
@@ -65,7 +60,10 @@ typedef struct {
 
 struct geniusdb_snapshot {
 	geniusdb_graph_t *graph;
-	genius_meta_t *meta;
+	// One bit per path: whether the index still holds that track. Private to
+	// this request, so a shared graph stays immutable while a worker keeps its
+	// own view. A byte per path would cost more than the metadata it guards.
+	unsigned char *membership;
 	size_t bytes;
 	unsigned revision;
 };
@@ -287,12 +285,13 @@ static geniusdb_result_t geniusdb_read_meta(sqlite3 *db, geniusdb_graph_t *snaps
 		// Metadata preserves the file's spelling on case-sensitive cards.
 		// NOCASE equal strings have the same length and sort position.
 		memcpy((char *)snapshot->paths[id], path, strlen(path) + 1);
-		snapshot->meta[id] = (geniusdb_meta_t){
+		snapshot->meta[id] = (genius_meta_t){
 			.cluster = (int32_t)cluster,
 			.k1 = sqlite3_column_int64(stmt, 2),
 			.k2 = sqlite3_column_int64(stmt, 3),
 			.k3 = sqlite3_column_int64(stmt, 4),
 			.k20 = sqlite3_column_int64(stmt, 5),
+			.present = true,
 		};
 		if (++rows % GENIUSDB_CANCEL_ROWS == 0 && geniusdb_read_cancelled(read)) {
 			break;
@@ -395,7 +394,7 @@ static void geniusdb_release_snapshot(geniusdb_snapshot_t *snapshot) {
 	if (snapshot) {
 		geniusdb_release_graph(snapshot->graph);
 		database.bytes -= snapshot->bytes;
-		free(snapshot->meta);
+		free(snapshot->membership);
 		free(snapshot);
 	}
 }
@@ -645,7 +644,7 @@ static geniusdb_result_t geniusdb_decode_blob(sqlite3_blob *blob, const char *ge
 				}
 				const unsigned char *p = buffer + j * width;
 				if (section == 0) {
-					graph->meta[i] = (geniusdb_meta_t){geniusdb_i32(p), geniusdb_i64(p + 4), geniusdb_i64(p + 12), geniusdb_i64(p + 20), geniusdb_i64(p + 28)};
+					graph->meta[i] = (genius_meta_t){geniusdb_i32(p), geniusdb_i64(p + 4), geniusdb_i64(p + 12), geniusdb_i64(p + 20), geniusdb_i64(p + 28), true};
 				} else if (section == 1) {
 					uint32_t first = geniusdb_u32(p), n = geniusdb_u32(p + 4);
 					if (first != edge_cursor || n > h[7] - edge_cursor) {
@@ -872,7 +871,7 @@ done:
 			snapshot->revision = read.revision;
 			snapshot->graph = graph;
 			graph = NULL; // Transfer this request's reference to its wrapper.
-			snapshot->meta = geniusdb_allocate_rows(&snapshot->bytes, (size_t)snapshot->graph->path_count, sizeof(*snapshot->meta), &result);
+			snapshot->membership = geniusdb_allocate_rows(&snapshot->bytes, ((size_t)snapshot->graph->path_count + 7) / 8, 1, &result);
 		}
 	}
 	if (result == GENIUSDB_OK) {
@@ -887,8 +886,7 @@ done:
 				result = GENIUSDB_INVALID;
 				break;
 			}
-			const geniusdb_meta_t *meta = &snapshot->graph->meta[i];
-			snapshot->meta[i] = (genius_meta_t){.cluster = meta->cluster, .k1 = meta->k1, .k2 = meta->k2, .k3 = meta->k3, .k20 = meta->k20, .present = indexed};
+			if (indexed) snapshot->membership[i / 8] |= (unsigned char)(1u << (i % 8));
 		}
 	}
 	if (geniusdb_read_cancelled(&read)) {
@@ -945,7 +943,12 @@ int32_t geniusdb_find_path(const geniusdb_snapshot_t *snapshot, const char *path
 
 const char *geniusdb_get_path(const geniusdb_snapshot_t *snapshot, int32_t id) { return snapshot && id >= 0 && id < snapshot->graph->path_count ? snapshot->graph->paths[id] : NULL; }
 
-const genius_meta_t *geniusdb_get_meta(const geniusdb_snapshot_t *snapshot, int32_t id) { return snapshot && id >= 0 && id < snapshot->graph->path_count && snapshot->meta[id].present ? &snapshot->meta[id] : NULL; }
+const genius_meta_t *geniusdb_get_meta(const geniusdb_snapshot_t *snapshot, int32_t id) {
+	if (!snapshot || id < 0 || id >= snapshot->graph->path_count || !(snapshot->membership[id / 8] & (1u << (id % 8)))) {
+		return NULL;
+	}
+	return &snapshot->graph->meta[id];
+}
 
 genius_sim_list_t geniusdb_get_sims(const geniusdb_snapshot_t *snapshot, int32_t id) {
 	if (!snapshot || id < 0 || id >= snapshot->graph->path_count || !snapshot->graph->sims[id].count) {
