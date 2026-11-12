@@ -196,14 +196,20 @@ static void rebuild_grid(void) {
 
 	lv_obj_set_hidden(status_label, true);
 	lv_obj_scroll_to_y(list_box, 0, LV_ANIM_OFF);
+	// Size the art to the actual shelf viewport. Two complete rows should fit
+	// on screen; this avoids leaving the next row peeking in at the bottom on
+	// the shorter panel layout, while keeping a two-column grid.
+	lv_obj_update_layout(list_box);
 	int available = page_cfg->screen_width - 2 * page_cfg->padding - 12;
 	int tile_w = available / 2;
 	if (tile_w < 90) {
 		tile_w = 90;
 	}
-	art_side_px = tile_w - 20;
-	if (art_side_px > ART_SIDE_MAX) {
-		art_side_px = ART_SIDE_MAX;
+	int width_fit = tile_w - 20;
+	int height_fit = (lv_obj_get_content_height(list_box) - 12 - 2 * 62) / 2;
+	art_side_px = LV_MIN(ART_SIDE_MAX, LV_MIN(width_fit, height_fit));
+	if (art_side_px < 1) {
+		art_side_px = 1;
 	}
 	for (int i = 0; i < rom_count; i++) {
 		if (roms[i].color == show_color) {
