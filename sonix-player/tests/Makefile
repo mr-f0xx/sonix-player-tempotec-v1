@@ -1114,6 +1114,26 @@ $(BUILD)/test_genius: $(GENIUS_SRC) $(ROOT)/src/system/library/genius.h $(ROOT)/
 	@mkdir -p $(BUILD)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ $(GENIUS_SRC) $(LDFLAGS) $(LDLIBS)
 
+# The whole Smart Mix path against synthetic 25k and 50k libraries: the real
+# builder writes a staging genius.db, the real reader decodes it, and the real
+# walker builds a mix from it. The index is the only stub.
+GENIUSLARGE_SRC = test_geniuslarge.c \
+                  $(ROOT)/src/system/library/geniusbuild.c \
+                  $(ROOT)/src/system/library/geniusdb.c \
+                  $(ROOT)/src/system/library/genius.c \
+                  $(ROOT)/src/system/core/sha256.c
+.PHONY: geniuslarge
+geniuslarge: $(BUILD)/test_geniuslarge
+	$(BUILD)/test_geniuslarge
+
+$(BUILD)/test_geniuslarge: $(GENIUSLARGE_SRC) $(BUILD)/sqlite3_impl.o \
+                           $(ROOT)/src/system/library/geniusbuild.h \
+                           $(ROOT)/src/system/library/geniusdb.h \
+                           $(ROOT)/src/system/library/genius.h \
+                           $(ROOT)/src/system/library/library.h
+	@mkdir -p $(BUILD)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ $(GENIUSLARGE_SRC) $(BUILD)/sqlite3_impl.o $(LDFLAGS) $(LDLIBS)
+
 # The stock TempoTec release version and its separate Sonix metadata field.
 .PHONY: basebuild
 basebuild: $(BUILD)/test_sysinfo

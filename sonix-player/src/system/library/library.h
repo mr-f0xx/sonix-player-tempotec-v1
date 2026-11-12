@@ -251,8 +251,9 @@ void library_set_log_database(bool enabled);
 // carry their exact length and an empty payload, and must be rejected by the
 // callback before dereferencing that length. Callback runs under
 // the existing index lock and must not call the library. False on SQL error,
-// cancellation or callback refusal. The bounded stream delivers at most 4097
-// rows: a Smart Mix builder accepts at most 4096, rejecting the extra row.
+// cancellation or callback refusal. The bounded stream delivers at most one
+// row past the builder's limit (GENIUSBUILD_MAX_TRACKS + 1): a Smart Mix
+// builder rejects the extra row rather than growing without bound.
 // revision identifies the input view and must still match before publication.
 typedef struct {
 	const char *path, *artist, *album, *genre;

@@ -378,6 +378,10 @@ genius_result_t genius_mix_build(const geniusdb_snapshot_t *snapshot, const char
 		playlist.result = GENIUS_NOMEM;
 		goto done;
 	}
+	// Edges are not necessarily one-way: another track may list the seed as
+	// similar. The seed is already the first entry of the mix, so it can never
+	// be offered again -- a mix that repeats its starting track is not one.
+	genius_set_bit(playlist.used, id);
 	for (size_t i = 0; i < GENIUS_RULE_COUNT; i++) {
 		playlist.states[i].distance = GENIUS_RULES[i].distance;
 	}

@@ -35,8 +35,9 @@ typedef enum {
 #define GENIUS_MAX_TRACKS 30
 #define GENIUS_MAX_NODES 4096
 #define GENIUS_MAX_EDGES 131072
-// Snapshot, traversal arrays, rule state and independently owned output.
-#define GENIUS_MAX_RETAINED_BYTES ((size_t)6 * 1024 * 1024)
+// Snapshot (bounded by GENIUSDB_MAX_SNAPSHOT_BYTES), traversal arrays, rule
+// state and independently owned output.
+#define GENIUS_MAX_RETAINED_BYTES ((size_t)14 * 1024 * 1024)
 #define GENIUS_CANCEL_INTERVAL 32
 
 // Background worker only.
