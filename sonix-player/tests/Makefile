@@ -93,7 +93,7 @@ $(BUILD)/test_subsonic: test_subsonic.c support.c $(CORE) $(shell find $(ROOT)/s
 	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ test_subsonic.c support.c $(CORE) $(LDFLAGS) $(LDLIBS)
 
 sanitize:
-	$(MAKE) BUILD=.build/sanitize CFLAGS='-O1 -g -std=gnu11 -Wall -Wextra -Werror -D_FILE_OFFSET_BITS=64 -ffunction-sections -fdata-sections -fno-omit-frame-pointer -fsanitize=address,undefined' LDFLAGS='-Wl,--gc-sections -fsanitize=address,undefined' test
+	$(MAKE) BUILD=.build/sanitize CFLAGS='-O1 -g -std=gnu11 -Wall -Wextra -Werror -D_FILE_OFFSET_BITS=64 -ffunction-sections -fdata-sections -fno-omit-frame-pointer -fsanitize=address,undefined' LDFLAGS='-Wl,--gc-sections -fsanitize=address,undefined' test soundcloud
 
 # The battery guard: when the player warns at five percent, when it switches
 # itself off at one, and which readings leave standby alone. The rule is its own
@@ -1026,7 +1026,7 @@ $(BUILD)/test_stockkeys_ui: $(ROOT)/build_gen/streamkeys_key.h $(STOCKKEYS_UI_OB
 	$(CC) -o $@ $(STOCKKEYS_UI_OBJ) $(LDFLAGS) $(LDLIBS)
 
 .PHONY: ui
-ui: $(BUILD)/test_qobuzgenregrid $(BUILD)/test_main_menu $(BUILD)/test_screensaver $(BUILD)/test_tools_pages $(BUILD)/test_wifi_pages $(BUILD)/test_chargescreen $(BUILD)/test_power_display $(BUILD)/test_lyricsearch $(BUILD)/test_games $(BUILD)/test_peq_profiles $(BUILD)/test_quickpanel_layout $(BUILD)/test_btreceiversession $(BUILD)/test_corners $(BUILD)/test_playbutton $(BUILD)/test_musicsettings_rows $(BUILD)/test_volume_overlay $(BUILD)/test_playerdeck $(BUILD)/test_vinylayout $(BUILD)/test_stickerlayout $(BUILD)/test_waveform_overlay $(BUILD)/test_hiresbadge_ui $(BUILD)/test_statusbar_ui $(BUILD)/test_stockkeys_ui $(BUILD)/test_tidal_pages
+ui: $(BUILD)/test_qobuzgenregrid $(BUILD)/test_main_menu $(BUILD)/test_screensaver $(BUILD)/test_tools_pages $(BUILD)/test_wifi_pages $(BUILD)/test_chargescreen $(BUILD)/test_power_display $(BUILD)/test_lyricsearch $(BUILD)/test_games $(BUILD)/test_peq_profiles $(BUILD)/test_quickpanel_layout $(BUILD)/test_btreceiversession $(BUILD)/test_corners $(BUILD)/test_playbutton $(BUILD)/test_musicsettings_rows $(BUILD)/test_volume_overlay $(BUILD)/test_playerdeck $(BUILD)/test_vinylayout $(BUILD)/test_stickerlayout $(BUILD)/test_waveform_overlay $(BUILD)/test_hiresbadge_ui $(BUILD)/test_statusbar_ui $(BUILD)/test_stockkeys_ui $(BUILD)/test_tidal_pages $(BUILD)/test_soundcloud_pages
 	$(BUILD)/test_qobuzgenregrid
 	$(BUILD)/test_main_menu ../../sonix-packer/assets/V1/usr/resource/sonix/language
 	$(BUILD)/test_main_menu ../../sonix-packer/assets/V1/usr/resource/sonix/language saved
@@ -1055,6 +1055,7 @@ ui: $(BUILD)/test_qobuzgenregrid $(BUILD)/test_main_menu $(BUILD)/test_screensav
 	$(BUILD)/test_tidal_pages ../../sonix-packer/assets/V1/usr/resource/sonix/language
 	$(BUILD)/test_tidal_pages ../../sonix-packer/assets/V1/usr/resource/sonix/language saved
 	$(BUILD)/test_tidal_pages ../../sonix-packer/assets/V1/usr/resource/sonix/language arranged
+	$(BUILD)/test_soundcloud_pages ../../sonix-packer/assets/V1/usr/resource/sonix/language
 
 $(BUILD)/test_main_menu: $(UI_OBJ)
 	$(CC) -o $@ $^ $(LDFLAGS) $(LDLIBS)
@@ -1202,3 +1203,71 @@ statusbar-ui: $(BUILD)/test_statusbar_ui
 $(BUILD)/test_statusbar_ui: $(STATUSBAR_UI_OBJ)
 	$(CC) -o $@ $^ $(LDFLAGS) $(LDLIBS)
 -include $(BUILD)/ui/tests/ui/test_statusbarstyle.d
+
+# SoundCloud API v2, credentials, client_id rotation, progressive & HLS cache,
+# AES-128-CBC, Ogg Opus and Go+ fMP4 -> ADTS AAC unwrapping.
+SOUNDCLOUD_CORE = $(ROOT)/src/system/streaming/soundcloud.c \
+                  $(ROOT)/src/system/streaming/soundcloudcache.c \
+                  $(ROOT)/src/system/streaming/streamkeys.c \
+                  $(ROOT)/src/system/streaming/streamturn.c \
+                  $(ROOT)/src/system/net/hls.c \
+                  $(ROOT)/src/system/net/http.c \
+                  $(ROOT)/src/system/net/tls.c \
+                  $(ROOT)/src/system/image/png_scaled.c \
+                  $(ROOT)/src/system/core/json.c \
+                  $(ROOT)/src/system/core/config.c \
+                  $(ROOT)/src/system/core/sha256.c \
+                  $(ROOT)/src/system/core/utils.c \
+                  $(ROOT)/src/system/library/metadata.c \
+                  $(ROOT)/src/system/library/oggtags.c \
+                  $(ROOT)/src/system/library/vorbischap.c \
+                  $(ROOT)/src/system/library/tagdate.c \
+                  $(ROOT)/src/system/library/cue.c
+
+SOUNDCLOUD_DECODE = $(ROOT)/src/system/decode/decode.c \
+                    $(ROOT)/src/system/decode/sndfile.c \
+                    $(ROOT)/src/system/decode/stb_vorbis.c \
+                    $(ROOT)/src/system/decode/mp4.c \
+                    $(ROOT)/src/system/decode/apedec.c \
+                    $(ROOT)/src/system/decode/ape/apecore.c \
+                    $(ROOT)/src/system/decode/alacdec.c \
+                    $(ROOT)/src/system/decode/alac/alac.c \
+                    $(ROOT)/src/system/decode/aacdec.c \
+                    $(ROOT)/src/system/decode/dsd.c \
+                    $(ROOT)/src/system/decode/growfile.c \
+                    $(ROOT)/src/system/streaming/streambridge.c
+
+.PHONY: soundcloud soundcloud-ui
+soundcloud: $(BUILD)/test_soundcloud
+	$(BUILD)/test_soundcloud
+
+$(BUILD)/test_soundcloud: test_soundcloud.c $(ROOT)/build_gen/streamkeys_key.h $(SOUNDCLOUD_CORE) $(SOUNDCLOUD_DECODE)
+	@mkdir -p $(BUILD)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -DHOST_BUILD -Wno-error=format-truncation -o $@ test_soundcloud.c $(SOUNDCLOUD_CORE) \
+		-Wno-unused-parameter -Wno-sign-compare -Wno-unused-function -Wno-implicit-fallthrough -Wno-misleading-indentation $(SOUNDCLOUD_DECODE) \
+		$(LDFLAGS) $(LDLIBS)
+
+SOUNDCLOUDPAGE_SRC = $(ROOT)/tests/ui/test_soundcloud_pages.c \
+                     $(ROOT)/src/gui/streaming/soundcloudpage.c \
+                     $(ROOT)/src/gui/streaming/soundcloud_icon.c \
+                     $(ROOT)/src/gui/shell/settingsrow.c \
+                     $(ROOT)/src/gui/shell/keyboard.c \
+                     $(ROOT)/src/gui/shell/popover.c \
+                     $(ROOT)/src/gui/shell/spinner.c \
+                     $(ROOT)/src/gui/shell/theme.c \
+                     $(ROOT)/src/gui/shell/icons.c \
+                     $(ROOT)/src/gui/board_profile.c \
+                     $(ROOT)/src/system/input/kblayout.c \
+                     $(ROOT)/src/system/core/config.c \
+                     $(ROOT)/src/system/core/lang.c \
+                     $(ROOT)/src/system/core/utils.c
+SOUNDCLOUDPAGE_OBJ = $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(SOUNDCLOUDPAGE_SRC)) \
+                     $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(UI_LVGL_SRC))
+
+soundcloud-ui: $(BUILD)/test_soundcloud_pages
+	$(BUILD)/test_soundcloud_pages ../../sonix-packer/assets/V1/usr/resource/sonix/language
+
+$(BUILD)/test_soundcloud_pages: $(SOUNDCLOUDPAGE_OBJ)
+	$(CC) -o $@ $^ $(LDFLAGS) $(LDLIBS)
+-include $(SOUNDCLOUDPAGE_OBJ:.o=.d)
+

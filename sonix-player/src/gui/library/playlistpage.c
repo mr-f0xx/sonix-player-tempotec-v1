@@ -27,6 +27,7 @@
 #include "src/system/streaming/podcastcache.h"
 #include "src/system/streaming/qobuzcache.h"
 #include "src/system/streaming/qobuzsync.h"
+#include "src/system/streaming/soundcloudcache.h"
 #include "src/system/streaming/tidalcache.h"
 #include "src/system/streaming/tidalsync.h"
 
@@ -1445,7 +1446,7 @@ static const char *mix_seed_pending(void) {
 // place for the track is the graph's to answer, when the row is used.
 static bool mix_seed_usable(const char *path) {
 	return path && path[0] && !podcastcache_is_episode(path) && qobuzcache_track_id(path) == 0 &&
-		   tidalcache_track_id(path) == 0;
+		   tidalcache_track_id(path) == 0 && !soundcloudcache_is_soundcloud_path(path);
 }
 
 // The walk reached a track in the seed picker: build the saved mix from it.

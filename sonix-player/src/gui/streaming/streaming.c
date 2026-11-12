@@ -12,6 +12,8 @@
 #include "src/gui/streaming/podcastpage.h"
 #include "src/gui/streaming/qobuzpage.h"
 #include "src/gui/streaming/radiopage.h"
+#include "src/gui/streaming/soundcloud_icon.h"
+#include "src/gui/streaming/soundcloudpage.h"
 #include "src/gui/streaming/tidalpage.h"
 #include "src/gui/streaming/subsonicpage.h"
 #include "src/system/addons/addons.h"
@@ -34,6 +36,7 @@ typedef struct {
 static const streaming_item_t tokyo_items[] = {
 	{"radio", &icon_radio_player, THEME_SEMANTIC_PURPLE, &radiopage_screen, "radio"},
 	{"podcasts", &icon_podcast_list, THEME_SEMANTIC_CYAN, &podcast_screen, "podcasts"},
+	{"soundcloud", &icon_soundcloud_mark, THEME_SEMANTIC_AMBER, &soundcloud_screen, "soundcloud"},
 	{"tidal", &icon_tidal_mark, THEME_SEMANTIC_CYAN, &tidal_screen, "tidal"},
 	{"qobuz", &icon_qobuz_mark, THEME_SEMANTIC_PURPLE, &qobuz_screen, "qobuz"},
 	{"subsonic", &icon_music_note, THEME_SEMANTIC_BLUE, &subsonic_screen, "subsonic"},
@@ -77,15 +80,19 @@ void streaming_init(gui_config_t *cfg) {
 	if (addons_enabled("subsonic")) {
 		subsonicpage_init(cfg);
 	}
+	if (addons_enabled("soundcloud")) {
+		soundcloudpage_init(cfg);
+	}
 
 	const grid_entry_t all_entries[] = {
+		{"soundcloud", &icon_menu_soundcloud, &soundcloud_screen, NULL},
 		{"tidal", &icon_menu_tidal, &tidal_screen, NULL},
 		{"qobuz", &icon_menu_qobuz, &qobuz_screen, NULL},
 		{"radio", &icon_menu_radio, &radiopage_screen, NULL},
 		{"podcasts", &icon_menu_podcast, &podcast_screen, NULL},
 		{"subsonic", &icon_menu_streaming, &subsonic_screen, NULL},
 	};
-	const char *const all_addons[] = {"tidal", "qobuz", "radio", "podcasts", "subsonic"};
+	const char *const all_addons[] = {"soundcloud", "tidal", "qobuz", "radio", "podcasts", "subsonic"};
 	grid_entry_t entries[sizeof(all_entries) / sizeof(all_entries[0])];
 	int count = 0;
 	for (unsigned int i = 0; i < sizeof(all_entries) / sizeof(all_entries[0]); i++) {

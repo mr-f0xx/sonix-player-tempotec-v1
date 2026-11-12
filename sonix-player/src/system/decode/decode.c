@@ -337,6 +337,31 @@ static drmp3_bool32 grow_tell_mp3(void *user, drmp3_int64 *cursor) {
 	return DRMP3_TRUE;
 }
 
+static int grow_read_opus(void *user, unsigned char *out, int bytes) {
+	return bytes > 0 ? (int)growfile_read((growfile_t *)user, out, (size_t)bytes) : 0;
+}
+
+static int sidecar_duration_secs(const char *filepath) {
+	char tags[640];
+	if (!filepath || snprintf(tags, sizeof(tags), "%s.tags", filepath) >= (int)sizeof(tags)) {
+		return 0;
+	}
+	FILE *f = fopen(tags, "r");
+	if (!f) {
+		return 0;
+	}
+	int duration = 0;
+	char line[128];
+	while (fgets(line, sizeof(line), f)) {
+		if (strncmp(line, "duration=", 9) == 0) {
+			duration = atoi(line + 9);
+			break;
+		}
+	}
+	fclose(f);
+	return duration > 0 ? duration : 0;
+}
+
 // ---------------------------------------------------------------------------
 // The MP3 frame index
 //
@@ -2032,14 +2057,26 @@ static decoder_t *decoder_open_file(const char *filepath, decode_format_t format
 	}
 
 	case DECODE_FORMAT_OPUS:
-		dec->impl.opus = opusdec_open(filepath);
+		if (growfile_is_growing(filepath)) {
+			dec->growing = growfile_open(filepath);
+			dec->impl.opus = dec->growing ? opusdec_open_stream(dec->growing, grow_read_opus) : NULL;
+		} else {
+			dec->impl.opus = opusdec_open(filepath);
+		}
 		if (!dec->impl.opus) {
+			growfile_close(dec->growing);
 			free(dec);
 			return NULL;
 		}
 		dec->channels = opusdec_channels(dec->impl.opus);
 		dec->sample_rate = opusdec_sample_rate(dec->impl.opus);
 		dec->total_pcm_frames = opusdec_total_frames(dec->impl.opus);
+		if (!dec->total_pcm_frames && dec->sample_rate > 0) {
+			int secs = sidecar_duration_secs(filepath);
+			if (secs > 0) {
+				dec->total_pcm_frames = (uint64_t)secs * (uint64_t)dec->sample_rate;
+			}
+		}
 		break;
 
 	case DECODE_FORMAT_WAVPACK:

@@ -54,6 +54,9 @@
 #include "src/system/device/power.h"
 #include "src/system/streaming/qobuzcache.h"
 #include "src/system/streaming/qobuzsync.h"
+#include "src/gui/streaming/soundcloudpage.h"
+#include "src/system/streaming/soundcloud.h"
+#include "src/system/streaming/soundcloudcache.h"
 #include "src/system/streaming/tidalcache.h"
 #include "src/system/streaming/tidalsync.h"
 #include "src/system/streaming/radio.h"
@@ -699,6 +702,8 @@ static void refresh_now_playing_card(void) {
 		// Reading the local database here would draw a star that disagrees with
 		// the one a tap fills.
 		fav = qobuzsync_is_favorite(qobuz_id);
+	} else if (state.current_file[0] && soundcloudcache_is_soundcloud_path(state.current_file)) {
+		fav = soundcloud_is_liked(soundcloudcache_track_id_of(state.current_file));
 	} else {
 		fav = state.current_file[0] && library_fav_contains(state.current_file);
 	}
@@ -1534,6 +1539,14 @@ static void star_cb(lv_event_t *e) {
 	if (tidal_id > 0) {
 		bool want = !tidalsync_is_favorite(tidal_id);
 		tidalsync_favorite_toggle(tidal_id, want, qp_tidal_fav_done, NULL);
+		refresh_now_playing_card();
+		player_refresh_now_playing();
+		return;
+	}
+
+	long long sc_id = soundcloudcache_track_id_of(state.current_file);
+	if (sc_id > 0) {
+		soundcloudpage_toggle_favorite_async(sc_id, qp_tidal_fav_done, NULL);
 		refresh_now_playing_card();
 		player_refresh_now_playing();
 		return;

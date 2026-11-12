@@ -135,6 +135,12 @@ const char *streamkeys_podcast_secret(void);
 // every call with the MD5 of the sorted parameters plus the secret.
 const char *streamkeys_lastfm_key(void);
 const char *streamkeys_lastfm_secret(void);
+// SoundCloud, all optional: client_id is auto-discovered from SoundCloud's web
+// assets when omitted; username or oauth_token preconfigures the user's free or
+// paid (Go / Go+) account from the card without typing on the screen.
+const char *streamkeys_soundcloud_client_id(void);
+const char *streamkeys_soundcloud_oauth_token(void);
+const char *streamkeys_soundcloud_username(void);
 
 // Where they were read from, for the log and the information page. NULL when
 // none were found.

@@ -28,6 +28,9 @@ static char podcast_key[64];
 static char podcast_secret[128];
 static char lastfm_key[64];
 static char lastfm_secret[64];
+static char soundcloud_client_id[64];
+static char soundcloud_oauth_token[256];
+static char soundcloud_username[128];
 static char source_path[256];
 static bool loaded_any;
 static bool loaded_from_image;
@@ -124,6 +127,17 @@ static void parse_line(char *line, char section[32]) {
 		} else if (strcmp(key, "client_secret") == 0) {
 			dest = tidal_client_secret;
 			dest_size = sizeof(tidal_client_secret);
+		}
+	} else if (strcmp(section, "soundcloud") == 0) {
+		if (strcmp(key, "client_id") == 0) {
+			dest = soundcloud_client_id;
+			dest_size = sizeof(soundcloud_client_id);
+		} else if (strcmp(key, "oauth_token") == 0 || strcmp(key, "token") == 0) {
+			dest = soundcloud_oauth_token;
+			dest_size = sizeof(soundcloud_oauth_token);
+		} else if (strcmp(key, "username") == 0 || strcmp(key, "user") == 0 || strcmp(key, "profile") == 0) {
+			dest = soundcloud_username;
+			dest_size = sizeof(soundcloud_username);
 		}
 	}
 
@@ -320,6 +334,9 @@ bool streamkeys_load_card(const char *card_root) {
 	char prev_tid[sizeof(tidal_client_id)], prev_tsec[sizeof(tidal_client_secret)];
 	char prev_pk[sizeof(podcast_key)], prev_ps[sizeof(podcast_secret)];
 	char prev_lk[sizeof(lastfm_key)], prev_ls[sizeof(lastfm_secret)];
+	char prev_sc_cid[sizeof(soundcloud_client_id)];
+	char prev_sc_tok[sizeof(soundcloud_oauth_token)];
+	char prev_sc_usr[sizeof(soundcloud_username)];
 	memcpy(prev_qid, qobuz_app_id, sizeof(prev_qid));
 	memcpy(prev_qsec, qobuz_app_secret, sizeof(prev_qsec));
 	memcpy(prev_tid, tidal_client_id, sizeof(prev_tid));
@@ -328,6 +345,9 @@ bool streamkeys_load_card(const char *card_root) {
 	memcpy(prev_ps, podcast_secret, sizeof(prev_ps));
 	memcpy(prev_lk, lastfm_key, sizeof(prev_lk));
 	memcpy(prev_ls, lastfm_secret, sizeof(prev_ls));
+	memcpy(prev_sc_cid, soundcloud_client_id, sizeof(prev_sc_cid));
+	memcpy(prev_sc_tok, soundcloud_oauth_token, sizeof(prev_sc_tok));
+	memcpy(prev_sc_usr, soundcloud_username, sizeof(prev_sc_usr));
 
 	char path[512];
 	const char *const names[] = {STREAMKEYS_CARD_BIN, STREAMKEYS_CARD_INI};
@@ -340,7 +360,10 @@ bool streamkeys_load_card(const char *card_root) {
 			bool changed = strcmp(prev_qid, qobuz_app_id) != 0 || strcmp(prev_qsec, qobuz_app_secret) != 0 ||
 						   strcmp(prev_tid, tidal_client_id) != 0 || strcmp(prev_tsec, tidal_client_secret) != 0 ||
 						   strcmp(prev_pk, podcast_key) != 0 || strcmp(prev_ps, podcast_secret) != 0 ||
-						   strcmp(prev_lk, lastfm_key) != 0 || strcmp(prev_ls, lastfm_secret) != 0;
+						   strcmp(prev_lk, lastfm_key) != 0 || strcmp(prev_ls, lastfm_secret) != 0 ||
+						   strcmp(prev_sc_cid, soundcloud_client_id) != 0 ||
+						   strcmp(prev_sc_tok, soundcloud_oauth_token) != 0 ||
+						   strcmp(prev_sc_usr, soundcloud_username) != 0;
 			if (!loaded_any) {
 				continue;
 			}
@@ -352,6 +375,9 @@ bool streamkeys_load_card(const char *card_root) {
 			wipe(prev_ps, sizeof(prev_ps));
 			wipe(prev_lk, sizeof(prev_lk));
 			wipe(prev_ls, sizeof(prev_ls));
+			wipe(prev_sc_cid, sizeof(prev_sc_cid));
+			wipe(prev_sc_tok, sizeof(prev_sc_tok));
+			wipe(prev_sc_usr, sizeof(prev_sc_usr));
 			if (changed) {
 				printf("streamkeys: the microSD card has them\n");
 				report(path);
@@ -367,6 +393,9 @@ bool streamkeys_load_card(const char *card_root) {
 	wipe(prev_ps, sizeof(prev_ps));
 	wipe(prev_lk, sizeof(prev_lk));
 	wipe(prev_ls, sizeof(prev_ls));
+	wipe(prev_sc_cid, sizeof(prev_sc_cid));
+	wipe(prev_sc_tok, sizeof(prev_sc_tok));
+	wipe(prev_sc_usr, sizeof(prev_sc_usr));
 	return false;
 }
 
@@ -382,6 +411,9 @@ bool streamkeys_reload(const char *card_root) {
 	wipe(podcast_secret, sizeof(podcast_secret));
 	wipe(lastfm_key, sizeof(lastfm_key));
 	wipe(lastfm_secret, sizeof(lastfm_secret));
+	wipe(soundcloud_client_id, sizeof(soundcloud_client_id));
+	wipe(soundcloud_oauth_token, sizeof(soundcloud_oauth_token));
+	wipe(soundcloud_username, sizeof(soundcloud_username));
 	source_path[0] = '\0';
 	loaded_any = false;
 
@@ -522,6 +554,44 @@ bool streamkeys_write_extracted(const char *qobuz_id, const char *qobuz_sec, con
 		}
 		pos += n;
 	}
+	if (soundcloud_client_id[0] || soundcloud_oauth_token[0] || soundcloud_username[0]) {
+		int n = snprintf(buf + pos, sizeof(buf) - (size_t)pos, "[soundcloud]\n");
+		if (n < 0 || (size_t)(pos + n) >= sizeof(buf)) {
+			wipe(buf, sizeof(buf));
+			return false;
+		}
+		pos += n;
+		if (soundcloud_client_id[0]) {
+			n = snprintf(buf + pos, sizeof(buf) - (size_t)pos, "client_id = %s\n", soundcloud_client_id);
+			if (n < 0 || (size_t)(pos + n) >= sizeof(buf)) {
+				wipe(buf, sizeof(buf));
+				return false;
+			}
+			pos += n;
+		}
+		if (soundcloud_username[0]) {
+			n = snprintf(buf + pos, sizeof(buf) - (size_t)pos, "username = %s\n", soundcloud_username);
+			if (n < 0 || (size_t)(pos + n) >= sizeof(buf)) {
+				wipe(buf, sizeof(buf));
+				return false;
+			}
+			pos += n;
+		}
+		if (soundcloud_oauth_token[0]) {
+			n = snprintf(buf + pos, sizeof(buf) - (size_t)pos, "oauth_token = %s\n", soundcloud_oauth_token);
+			if (n < 0 || (size_t)(pos + n) >= sizeof(buf)) {
+				wipe(buf, sizeof(buf));
+				return false;
+			}
+			pos += n;
+		}
+		n = snprintf(buf + pos, sizeof(buf) - (size_t)pos, "\n");
+		if (n < 0 || (size_t)(pos + n) >= sizeof(buf)) {
+			wipe(buf, sizeof(buf));
+			return false;
+		}
+		pos += n;
+	}
 
 	bool wrote_data = false;
 	const char *data_ini = streamkeys_data_path();
@@ -559,5 +629,9 @@ const char *streamkeys_podcast_secret(void) { return or_null(podcast_secret); }
 
 const char *streamkeys_lastfm_key(void) { return or_null(lastfm_key); }
 const char *streamkeys_lastfm_secret(void) { return or_null(lastfm_secret); }
+
+const char *streamkeys_soundcloud_client_id(void) { return or_null(soundcloud_client_id); }
+const char *streamkeys_soundcloud_oauth_token(void) { return or_null(soundcloud_oauth_token); }
+const char *streamkeys_soundcloud_username(void) { return or_null(soundcloud_username); }
 
 const char *streamkeys_source(void) { return loaded_any ? source_path : NULL; }
