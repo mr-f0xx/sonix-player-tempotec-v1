@@ -190,6 +190,7 @@ Showcase of **OLED** appearance: true black backgrounds with white as the accent
 - [Build a firmware image](#build-a-firmware-image)
 - [Install or restore firmware](#install-or-restore-firmware)
 - [Streaming: Tidal, Qobuz and credentials](#streaming-tidal-qobuz-and-credentials)
+- [SoundCloud](#soundcloud)
 - [Subsonic / Gonic](#subsonic--gonic)
 - [Build from source](#build-from-source)
 - [Project files and documentation](#project-files-and-documentation)
@@ -224,8 +225,9 @@ This fork builds on the upstream [Sonix Player](https://github.com/Jepl4r/sonix-
 - 🎮 **2048, Snake and Dino** - three small games under More, sized for the V1 panel.
 - 🏷️ **Tag Manager** - view and edit FLAC and MP3 tags and cover art, and search for covers over Wi-Fi. See the [usage and safety notes](docs/tag-manager.md).
 - 🏠 **Subsonic / Gonic** - stream from your own server. See [Subsonic / Gonic](#subsonic--gonic).
+- ☁️ **SoundCloud** - native SoundCloud streaming across anonymous, Free, Go and Go+ tiers: search and play public tracks out of the box without API keys (automatic web `client_id` discovery and rotation), browse Likes, Reposts and Playlists by profile URL / username or `oauth_token`, and stream **Opus 64k**, **MP3 128k** or **Go+ AAC 256k** with a bounded 512 MB microSD cache, lookahead prefetch, discreet non-blocking loading spinners, and Now Playing **Like** / **Keep** support. See [SoundCloud](#soundcloud) and [docs/soundcloud.md](docs/soundcloud.md).
 - 🌊 **One-tap Tidal & Qobuz setup + streaming upgrades** - extract the official V1 stock credentials directly on the player over Wi-Fi or from the microSD card (no PC, developer keys or restart needed). Includes V1-adapted **Tidal** with offline downloads (`Music/Tidal/<artist>/<album>`), a 1 GiB SD playback cache, cached lists, search history, configurable home rows and bulk selection; **Qobuz** up to 24-bit/192 kHz FLAC with full JWT session persistence, plus offline track and album downloads to `Music/Qobuz Downloads`; **FLAC internet radio** with a V1-sized page and Flylo's curated chill-hop picks; and upgraded **Podcasts** (heard/unheard tracking, episode ordering and regional charts). See [Streaming: Tidal, Qobuz and credentials](#streaming-tidal-qobuz-and-credentials).
-- 🧩 **Plugins (`Settings → Plugins`)** - switch optional modules (including Tidal, Qobuz, Podcasts, Radio, tools and games) on or off so unused pages are never built and RAM stays free. See [docs/ADDONS.md](docs/ADDONS.md).
+- 🧩 **Plugins (`Settings → Plugins`)** - switch optional modules (including Tidal, Qobuz, SoundCloud, Podcasts, Radio, tools and games) on or off so unused pages are never built and RAM stays free. See [docs/ADDONS.md](docs/ADDONS.md).
 - 🎨 **V1 themes** - **Tokyo Night**, **Amber on Black** and **OLED**, designed for the V1 panel, beside Dark and Light. Make your own with a [custom colour theme](docs/custom-themes.md).
 - 🚀 **Boot screens** - Retrospace (the default), Space, Travelling in space, Stock, or your own picture.
 - 🖼️ **Player layouts** - **Immersive**, **Poster**, **Album Art Max**, **Vinyl** and **Sticker**, beside Standard, Waveform and Alternative. See [FEATURES.md](FEATURES.md#now-playing) for the details of each layout.
@@ -298,7 +300,7 @@ The package builder is designed to preserve the stock `xImage` kernel and leave 
 
 ## Streaming: Tidal, Qobuz and credentials
 
-> **Fresh installs — enable streaming apps first:** On a clean install, optional streaming modules (**Tidal**, **Qobuz**, **Podcasts** and **Radio**) start switched **off** under **Settings → Plugins** so unused pages do not take up RAM (**Subsonic** starts on; updating an existing Sonix install keeps all modules enabled). Open **Settings → Plugins**, toggle the services you want **on**, and **restart** the player for them to appear under **Streaming**.
+> **Fresh installs — enable streaming apps first:** On a clean install, optional streaming modules (**Tidal**, **Qobuz**, **SoundCloud**, **Podcasts** and **Radio**) start switched **off** under **Settings → Plugins** so unused pages do not take up RAM (**Subsonic** starts on; updating an existing Sonix install keeps all modules enabled). Open **Settings → Plugins**, toggle the services you want **on**, and **restart** the player for them to appear under **Streaming**.
 
 ### Tidal and Qobuz
 
@@ -315,9 +317,10 @@ Instead, Sonix speaks the exact same authentication flows as the stock TempoTec 
    - **Tidal:** Sign in with the on-screen device code or QR code at `link.tidal.com` (tokens refresh automatically; read-only partner device keys automatically fall back from `r_usr w_usr` to `r_usr`). Supports **Low** (AAC 96 kbps), **High** (AAC 320 kbps), **Lossless** (16-bit/44.1 kHz FLAC) and **Hi-Res** (up to 24-bit/192 kHz FLAC), search with recent history, albums, artists, playlists, favourites (tracks, albums, artists and the playlists the account has favourited), configurable home rows, bulk selection, 12-hour card list caching, a bounded 1 GiB SD playback cache, and queued offline downloads / **Keep on card** saved with tags and artwork under `Music/Tidal/<artist>/<album>`.
    - **Qobuz:** Sign in with your Qobuz email/username and password over HTTPS (only the session token is kept in `/usr/data/qobuz_session.ini`; your password is never written to disk). Supports **MP3 320**, **CD** (16-bit/44.1 kHz FLAC), **Hi-Res 24/96** and **Hi-Res 24/192** FLAC, search, albums, artists, featured lists, favourites and playlist management.
 
-### Podcasts, Last.fm, ListenBrainz and Radio
+### SoundCloud, Podcasts, Last.fm, ListenBrainz and Radio
 
-- **Internet Radio**, **Subsonic / Gonic** and **Podcasts** require no API keys.
+- **SoundCloud**, **Internet Radio**, **Subsonic / Gonic** and **Podcasts** require no API keys.
+- **SoundCloud** searches and streams public tracks out of the box (automatically discovering and rotating a public web `client_id`), and optionally accepts a profile URL / `username` or session `oauth_token` on-device or under `[soundcloud]` in `streaming-keys.ini` — see [SoundCloud](#soundcloud).
 - **Podcasts** search, chart, play and download from Apple's public podcast directory, which asks for nothing: no signup, no key, no account. It works out of the box on any install, including a published image that ships without keys. Podcast Index remains available for anyone who has a pair -- see below.
 - **ListenBrainz** requires no key in `streaming-keys.ini`: request a personal user token at `listenbrainz.org/settings` and paste it into **Settings → Music → ListenBrainz**. Scrobbling to Last.fm and ListenBrainz are independent and can run side by side.
 - **Last.fm** uses a free personal API key (`last.fm/api`). Copy `sonix-player/streaming-keys.ini.example` to the root of the microSD card as `streaming-keys.ini` (or edit the `streaming-keys.ini` already created on the card), fill in `[lastfm]`, and restart the player. Do not commit or share this file.
@@ -359,6 +362,15 @@ api_secret =
 [lastfm]
 api_key =
 api_secret =
+
+# Optional: SoundCloud works anonymously without keys (client_id is discovered
+# and rotated automatically). Fill in username or oauth_token for Likes, Reposts,
+# Playlists and Go+ High Quality (AAC 256k), or set them on-device under
+# Streaming -> SoundCloud -> Account & Settings.
+[soundcloud]
+oauth_token =
+username =
+client_id =
 ```
 
 ### Alternative PC / private-build key extraction
@@ -396,6 +408,19 @@ tls_verify = relaxed
 
 The setting is global — it applies to every `https://` connection the player opens, radio stations included — because one TLS context serves them all. Anyone using a public network should leave it at the default, `strict`. A private certificate authority is better handled with `[network] ca_bundle` above, which keeps checking on: export the CA's own certificate, copy that file to the card, and point `ca_bundle` at it.
 
+## SoundCloud
+
+Enable **SoundCloud** under **Settings → Plugins** (restart if prompted), connect to Wi-Fi, and open **Streaming → SoundCloud** to stream from SoundCloud across anonymous, Free, SoundCloud Go, and SoundCloud Go+ tiers.
+
+- **Anonymous mode (zero keys or sign-in):** **Search tracks** and play public uploads immediately. On first API use, the player discovers and caches a valid public SoundCloud web `client_id` automatically and rotates it transparently on `401` expiry.
+- **Public profile & authenticated (Free / Go / Go+) modes:**
+  - Paste a profile URL (`soundcloud.com/...`, `m.soundcloud.com/...`, `on.soundcloud.com/...` shortlinks, or `@handle`) or `username` under **Account & Settings** to browse public **Likes**, **Reposts**, and **Playlists** (including automatic batched hydration of playlists longer than 50 tracks).
+  - Add your browser session `oauth_token` (on-device under **Account & Settings → OAuth token** or under `[soundcloud]` in `streaming-keys.ini`) to unlock private libraries, Now Playing / Quick Panel **Like** toggling, and **SoundCloud Go+ High Quality (`AAC 256k`)** streams.
+- **Audio quality & streaming pipeline:** Choose **Opus 64k** (growing Ogg `.opus` HLS via `growfile`), **MP3 128k** (progressive HTTP or AES-128-CBC HLS), or **AAC 256k** (Go+ fragmented MP4 unwrapped to ADTS `.aac` via `fdk-aac`). Stream resolution skips broken `abr*` presets, prefers full-length streams over 30-second `snipped` previews, and automatically falls back across available transcodings when legacy `mp3` format endpoints return `404`.
+- **Bounded SD cache, prefetch & privacy:** Audio, `.tags` metadata sidecars, and `-t500x500.jpg` artwork are cached in `<sd_root>/.local/soundcloud-cache/` with LRU eviction capped at **512 MB** (**256 MB** when card free space is under 1 GB), 80% lookahead queue prefetch, discreet non-blocking loading spinners, and **Keep** (`streamkeep`) support. Remembered credentials are written atomically (`0600`) to `/usr/data/soundcloud-credentials.json` (or kept in memory only when **Save credentials on device** is off), and `Authorization: OAuth` headers are strictly isolated to SoundCloud API hosts — never sent to CDN hosts (`*.sndcdn.com`).
+
+See [full setup, tier details, and validation notes](docs/soundcloud.md).
+
 ## Subsonic / Gonic
 
 **Streaming → Subsonic → Server settings** connects to your own Subsonic-compatible server, including Gonic. Enter its base URL and your account, then select **Connect / save**. Browse Music folders or Artists and select a track to play the current page.
@@ -413,6 +438,7 @@ See [setup, design, limitations and the V1 validation checklist](docs/subsonic.m
 - `docs/collecting-logs.md` — which logs to send with a bug report, and how to take them.
 - `docs/qobuz-stock-firmware.md` — how stock Qobuz and Tidal authentication and local credential extraction work.
 - `docs/ADDONS.md` — optional modules (`Settings → Plugins`) and fresh-install defaults.
+- `docs/soundcloud.md` — SoundCloud setup, anonymous/profile/OAuth modes, quality tiers, HLS/fMP4 pipeline and SD cache.
 - `docs/subsonic.md` — Subsonic/Gonic setup, RAM transport and hardware validation.
 - `docs/sgm31324-led-control.md` — driving the RGB status LED directly over I²C.
 - `sonix-player/tools/sonix-bugreport.sh` — one-file diagnostic bundle, run on the device over ADB.
