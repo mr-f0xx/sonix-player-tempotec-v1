@@ -8,7 +8,7 @@ never resamples one.
 
     python3 tools/tile_art.py
 
-writes the four Subsonic pictures into assets/icons. The SoundCloud home page's
+writes the Subsonic and Radio home pages' pictures into assets/icons. The SoundCloud home page's
 four (sc-likes, sc-reposts, sc-playlists, sc-account) were drawn with this same
 recipe and are kept as they are.
 
@@ -108,6 +108,10 @@ if __name__ == '__main__':
         ('sub-test.png', (46, 163, 104), 'wifi-high.svg'),
         ('sub-folders.png', (34, 164, 190), 'folder.svg'),
         ('sub-artists.png', (113, 77, 217), 'artist.svg'),
+        ('radio-language.png', (56, 119, 213), 'globe.svg'),
+        ('radio-country.png', (46, 163, 104), 'flag.svg'),
+        ('radio-genre.png', (206, 140, 44), 'genre.svg'),
+        ('radio-flylo.png', (113, 77, 217), 'headphones.svg'),
     ]
     for name, colour, svg in tiles:
         build(colour, os.path.join(icons, svg), os.path.join(icons, name))

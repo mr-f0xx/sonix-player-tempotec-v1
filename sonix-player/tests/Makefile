@@ -1319,3 +1319,31 @@ $(BUILD)/test_subsonic_pages: $(SUBSONICPAGE_OBJ)
 	$(CC) -o $@ $^ $(LDFLAGS) $(LDLIBS)
 -include $(SUBSONICPAGE_OBJ:.o=.d)
 
+# The Radio home page, the same tiled grid again: Language, Country, Genre and
+# Flylo's favs, in every language and every theme.
+RADIOPAGE_SRC = $(ROOT)/tests/ui/test_radio_pages.c \
+                     $(ROOT)/src/gui/streaming/radiopage.c \
+                     $(ROOT)/src/gui/streaming/soundcloud_icon.c \
+                     $(ROOT)/src/gui/shell/settingsrow.c \
+                     $(ROOT)/src/gui/shell/gridpage.c \
+                     $(ROOT)/src/gui/shell/azindex.c \
+                     $(ROOT)/src/gui/shell/keyboard.c \
+                     $(ROOT)/src/gui/shell/popover.c \
+                     $(ROOT)/src/gui/shell/spinner.c \
+                     $(ROOT)/src/gui/shell/theme.c \
+                     $(ROOT)/src/gui/shell/icons.c \
+                     $(ROOT)/src/gui/board_profile.c \
+                     $(ROOT)/src/system/input/kblayout.c \
+                     $(ROOT)/src/system/core/config.c \
+                     $(ROOT)/src/system/core/lang.c \
+                     $(ROOT)/src/system/core/utils.c
+RADIOPAGE_OBJ = $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(RADIOPAGE_SRC)) \
+                     $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(UI_LVGL_SRC))
+
+radio-ui: $(BUILD)/test_radio_pages
+	$(BUILD)/test_radio_pages ../../sonix-packer/assets/V1/usr/resource/sonix/language
+
+$(BUILD)/test_radio_pages: $(RADIOPAGE_OBJ)
+	$(CC) -o $@ $^ $(LDFLAGS) $(LDLIBS)
+-include $(RADIOPAGE_OBJ:.o=.d)
+

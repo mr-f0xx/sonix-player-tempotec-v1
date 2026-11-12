@@ -490,6 +490,12 @@ COLOR_ICONS = [
     ("wifi-high.svg", "sub_test_glyph", HOME_TILE_GLYPH_SIZE),
     ("folder.svg", "sub_folders_glyph", HOME_TILE_GLYPH_SIZE),
     ("artist.svg", "sub_artists_glyph", HOME_TILE_GLYPH_SIZE),
+    # The Radio home page's four tiles, same treatment: the flat themes draw the
+    # glyph itself, at the size the card gives it.
+    ("globe.svg", "radio_language_glyph", HOME_TILE_GLYPH_SIZE),
+    ("flag.svg", "radio_country_glyph", HOME_TILE_GLYPH_SIZE),
+    ("genre.svg", "radio_genre_glyph", HOME_TILE_GLYPH_SIZE),
+    ("headphones.svg", "radio_flylo_glyph", HOME_TILE_GLYPH_SIZE),
     # The four tiles on the SoundCloud home page. Emitted at the size those
     # cards draw them, so the player never has to resample the artwork.
     ("sc-likes.png", "menu_sc_likes", HOME_TILE_SIZE),
@@ -502,6 +508,12 @@ COLOR_ICONS = [
     ("sub-test.png", "menu_sub_test", HOME_TILE_SIZE),
     ("sub-folders.png", "menu_sub_folders", HOME_TILE_SIZE),
     ("sub-artists.png", "menu_sub_artists", HOME_TILE_SIZE),
+    # The four tiles on the Radio home page: Language, Country, Genre and
+    # Flylo's favs, drawn by the same card recipe.
+    ("radio-language.png", "menu_radio_language", HOME_TILE_SIZE),
+    ("radio-country.png", "menu_radio_country", HOME_TILE_SIZE),
+    ("radio-genre.png", "menu_radio_genre", HOME_TILE_SIZE),
+    ("radio-flylo.png", "menu_radio_flylo", HOME_TILE_SIZE),
     ("audiobooks.png", "menu_audiobooks", MAIN_MENU_ICON_SIZE),
     ("audiobook-library.png", "menu_audiobook_library", SECTION_ICON_SIZE),
     ("audiobook-series.png", "menu_audiobook_series", SECTION_ICON_SIZE),
