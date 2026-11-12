@@ -3,6 +3,7 @@
 #include "src/gui/fonts/fonts.h"
 #include "src/gui/nowplaying/player.h"
 #include "src/gui/shell/confirm.h"
+#include "src/gui/shell/gridpage.h"
 #include "src/gui/shell/icons.h"
 #include "src/gui/shell/keyboard.h"
 #include "src/gui/shell/settingsrow.h"
@@ -26,7 +27,7 @@
 #include <string.h>
 
 lv_obj_t *subsonic_screen;
-static lv_obj_t *settings_screen, *edit_screen, *list_screen;
+static lv_obj_t *settings_screen, *edit_screen, *list_screen, *home_grid;
 static lv_obj_t *list_container, *list_title, *server_value, *user_value, *remember_switch, *relaxed_switch;
 static lv_obj_t *edit_field, *edit_title, *format_pills[3], *bitrate_pills[2];
 static keyboard_t *keyboard;
@@ -34,6 +35,14 @@ static gui_config_t *config;
 static subsonic_credentials_t draft;
 static bool draft_remember, busy;
 static int editing;
+
+// Server settings, Test connection, Folders and Artists: a 2x2 grid that fills
+// the panel under the heading, the same cards the SoundCloud home page uses.
+#define SUBSONIC_HOME_TILES 4
+// The size each card's picture is drawn at, matching what tools/svg_to_lvgl.py
+// emits for it: HOME_TILE_SIZE and HOME_TILE_GLYPH_SIZE there.
+#define SUBSONIC_TILE_ART_PX 58
+#define SUBSONIC_TILE_GLYPH_PX 50
 
 // A single mailbox in each direction. Results own their memory until the GUI
 // takes it: a late worker can never overwrite the list the GUI is reading.
@@ -415,12 +424,12 @@ static bool list_back(void) {
 	return false;
 }
 
-static void browse_cb(lv_event_t *e) {
+static void browse(subsonic_browse_t which) {
 	if (busy || switcher_back_drag_active()) {
 		return;
 	}
-	job_t job = {.kind = JOB_BROWSE, .browse = (subsonic_browse_t)(intptr_t)lv_event_get_user_data(e)};
-	snprintf(job.title, sizeof(job.title), "%s", tr(job.browse == SUBSONIC_BROWSE_FOLDERS ? "subsonic_folders" : "artists"));
+	job_t job = {.kind = JOB_BROWSE, .browse = which};
+	snprintf(job.title, sizeof(job.title), "%s", tr(which == SUBSONIC_BROWSE_FOLDERS ? "subsonic_folders" : "artists"));
 	run_list(job, false);
 }
 
@@ -628,22 +637,79 @@ static void build_settings(void) {
 	settings_refresh();
 }
 
+// Tiles call a plain action: the grid already drops a tap that was really a
+// swipe, and nothing here needs the event.
+static void home_settings_action(void) { open_settings_cb(NULL); }
+static void home_test_action(void) { ping_cb(NULL); }
+static void home_folders_action(void) { browse(SUBSONIC_BROWSE_FOLDERS); }
+static void home_artists_action(void) { browse(SUBSONIC_BROWSE_ARTISTS); }
+
+// The cards are twice a menu row's height and they are the whole page, so the
+// picture is drawn large and centred with the caption underneath in every
+// theme -- including the flat ones, whose menu rows would otherwise put the
+// glyph beside the text. Dark and Light show the illustrations at the size the
+// generator emits them; the flat themes show the glyph in their own accent.
+static void home_style_tiles(void) {
+	if (!home_grid) {
+		return;
+	}
+	static const lv_image_dsc_t *const art[SUBSONIC_HOME_TILES] = {
+		&icon_menu_sub_server,
+		&icon_menu_sub_test,
+		&icon_menu_sub_folders,
+		&icon_menu_sub_artists,
+	};
+	static const lv_image_dsc_t *const glyphs[SUBSONIC_HOME_TILES] = {
+		&icon_sub_server_glyph,
+		&icon_sub_test_glyph,
+		&icon_sub_folders_glyph,
+		&icon_sub_artists_glyph,
+	};
+	static const theme_semantic_t tones[SUBSONIC_HOME_TILES] = {
+		THEME_SEMANTIC_BLUE,
+		THEME_SEMANTIC_GREEN,
+		THEME_SEMANTIC_CYAN,
+		THEME_SEMANTIC_PURPLE,
+	};
+	bool glyph = theme_uses_function_glyphs();
+	for (int i = 0; i < SUBSONIC_HOME_TILES; i++) {
+		// Both pictures are rendered at exactly the size they are drawn at, so
+		// a card shows its own pixels and never a resampled copy of them.
+		gridpage_set_tile_icon_style(home_grid, i, glyph ? glyphs[i] : art[i],
+									 glyph ? SUBSONIC_TILE_GLYPH_PX : SUBSONIC_TILE_ART_PX, glyph,
+									 theme_semantic_color(tones[i]), false);
+		// Picture above, caption underneath, in every theme. Re-applying the
+		// layout also measures the caption against the picture's new width.
+		gridpage_set_tile_orientation(home_grid, i, false);
+	}
+}
+
 void subsonicpage_init(gui_config_t *cfg) {
 	config = cfg;
 	subsonic_init();
 	device_state_add_prepare_cb(subsonicstream_prepare);
 	streamturn_register_abandon(subsonicstream_cancel);
 	subsonic_screen = screen();
-	lv_obj_t *home = settingsrow_page(subsonic_screen, cfg, "subsonic");
-	lv_obj_t *row = settingsrow_add(home, "subsonic_server_settings", NULL, open_settings_cb, NULL);
-	settingsrow_add_icon(row, &icon_music_settings, THEME_SEMANTIC_BLUE);
-	row = settingsrow_action(home, "subsonic_test_connection", ping_cb, NULL);
-	settingsrow_add_icon(row, &icon_wifi_high, THEME_SEMANTIC_GREEN);
-	row = settingsrow_add(home, "subsonic_folders", NULL, browse_cb, (void *)(intptr_t)SUBSONIC_BROWSE_FOLDERS);
-	settingsrow_add_icon(row, &icon_folder, THEME_SEMANTIC_CYAN);
-	row = settingsrow_add(home, "artists", NULL, browse_cb, (void *)(intptr_t)SUBSONIC_BROWSE_ARTISTS);
-	settingsrow_add_icon(row, &icon_artist, THEME_SEMANTIC_PURPLE);
-	player_sheet_attach_drag(home, true);
+	settingsrow_title(subsonic_screen, cfg, "subsonic");
+	// Four destinations, so two square tiles fill the panel under the heading
+	// exactly: the grid is sized from the space that is left, and there is
+	// never a fifth row to scroll to.
+	const grid_entry_t home_entries[] = {
+		{"subsonic_server_settings", &icon_menu_sub_server, NULL, home_settings_action},
+		{"subsonic_test_connection", &icon_menu_sub_test, NULL, home_test_action},
+		{"subsonic_folders", &icon_menu_sub_folders, NULL, home_folders_action},
+		{"artists", &icon_menu_sub_artists, NULL, home_artists_action},
+	};
+	home_grid = gridpage_build(subsonic_screen, cfg, home_entries, SUBSONIC_HOME_TILES, 2, 2, true);
+	// The captions are longer than one line in most languages ("Paramètres du
+	// serveur", "Test de la connexion"), so let them use two lines instead of
+	// an ellipsis.
+	for (int i = 0; i < SUBSONIC_HOME_TILES; i++) {
+		gridpage_set_tile_label_lines(home_grid, i, 2);
+	}
+	home_style_tiles();
+	theme_register_refresh(home_style_tiles);
+	player_sheet_attach_drag(subsonic_screen, true);
 
 	list_screen = screen();
 	list_container = settingsrow_page(list_screen, cfg, "subsonic");

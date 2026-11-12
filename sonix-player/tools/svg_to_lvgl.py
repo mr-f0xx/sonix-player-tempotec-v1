@@ -429,10 +429,11 @@ ICONS = [
 # weight in the binary and nothing else.
 MAIN_MENU_ICON_SIZE = 128
 SECTION_ICON_SIZE = 112
-# The SoundCloud home cards draw their picture at this size, so the artwork and
-# the flat themes' glyphs are rendered at it rather than scaled at run time.
-SOUNDCLOUD_TILE_SIZE = 72
-SOUNDCLOUD_GLYPH_SIZE = 64
+# The SoundCloud and Subsonic home cards are the same size and draw their
+# picture at this size, so both their artwork and the flat themes' glyphs are
+# rendered at it rather than scaled at run time.
+HOME_TILE_SIZE = 58
+HOME_TILE_GLYPH_SIZE = 50
 
 COLOR_ICONS = [
     # The quality badges under a track's title. Here rather than above because
@@ -479,16 +480,28 @@ COLOR_ICONS = [
     # The same four glyphs the SoundCloud home cards draw, rendered at the size
     # those cards use so the flat themes show them unscaled instead of blowing
     # a 32 px icon up by half again.
-    ("heart.svg", "sc_likes_glyph", SOUNDCLOUD_GLYPH_SIZE),
-    ("repeat.svg", "sc_reposts_glyph", SOUNDCLOUD_GLYPH_SIZE),
-    ("files-playlist.svg", "sc_playlists_glyph", SOUNDCLOUD_GLYPH_SIZE),
-    ("music-settings.svg", "sc_account_glyph", SOUNDCLOUD_GLYPH_SIZE),
+    ("heart.svg", "sc_likes_glyph", HOME_TILE_GLYPH_SIZE),
+    ("repeat.svg", "sc_reposts_glyph", HOME_TILE_GLYPH_SIZE),
+    ("files-playlist.svg", "sc_playlists_glyph", HOME_TILE_GLYPH_SIZE),
+    ("music-settings.svg", "sc_account_glyph", HOME_TILE_GLYPH_SIZE),
+    # The same four Subsonic tiles in the flat themes, whose cards put the
+    # glyph on its own rather than inside an illustration.
+    ("music-settings.svg", "sub_server_glyph", HOME_TILE_GLYPH_SIZE),
+    ("wifi-high.svg", "sub_test_glyph", HOME_TILE_GLYPH_SIZE),
+    ("folder.svg", "sub_folders_glyph", HOME_TILE_GLYPH_SIZE),
+    ("artist.svg", "sub_artists_glyph", HOME_TILE_GLYPH_SIZE),
     # The four tiles on the SoundCloud home page. Emitted at the size those
     # cards draw them, so the player never has to resample the artwork.
-    ("sc-likes.png", "menu_sc_likes", SOUNDCLOUD_TILE_SIZE),
-    ("sc-reposts.png", "menu_sc_reposts", SOUNDCLOUD_TILE_SIZE),
-    ("sc-playlists.png", "menu_sc_playlists", SOUNDCLOUD_TILE_SIZE),
-    ("sc-account.png", "menu_sc_account", SOUNDCLOUD_TILE_SIZE),
+    ("sc-likes.png", "menu_sc_likes", HOME_TILE_SIZE),
+    ("sc-reposts.png", "menu_sc_reposts", HOME_TILE_SIZE),
+    ("sc-playlists.png", "menu_sc_playlists", HOME_TILE_SIZE),
+    ("sc-account.png", "menu_sc_account", HOME_TILE_SIZE),
+    # The four tiles on the Subsonic home page, drawn by the same card recipe
+    # and rendered at the size those cards draw them.
+    ("sub-server.png", "menu_sub_server", HOME_TILE_SIZE),
+    ("sub-test.png", "menu_sub_test", HOME_TILE_SIZE),
+    ("sub-folders.png", "menu_sub_folders", HOME_TILE_SIZE),
+    ("sub-artists.png", "menu_sub_artists", HOME_TILE_SIZE),
     ("audiobooks.png", "menu_audiobooks", MAIN_MENU_ICON_SIZE),
     ("audiobook-library.png", "menu_audiobook_library", SECTION_ICON_SIZE),
     ("audiobook-series.png", "menu_audiobook_series", SECTION_ICON_SIZE),
