@@ -15,6 +15,7 @@
 #include "src/system/bluetooth/btlog.h"
 #include "src/system/streaming/qobuzcache.h"
 #include "src/system/streaming/podcastcache.h"
+#include "src/system/streaming/soundcloudcache.h"
 #include "src/system/streaming/tidalcache.h"
 #include "src/system/remote/dlna.h"
 #include "src/system/device/sysserver.h"
@@ -187,6 +188,7 @@ void factoryreset_run(void) {
 	// must not leave streamed tracks behind.
 	qobuzcache_clear_on_exit();
 	tidalcache_clear_on_exit();
+	soundcloudcache_clear_on_exit();
 	podcastcache_clear_on_exit();
 	dlna_clear_on_exit();
 
@@ -208,6 +210,8 @@ void factoryreset_run(void) {
 		STREAMKEYS_DATA_FILE,
 		"/usr/data/qobuz_session.ini",
 		"/usr/data/tidal_session.ini",
+		"/usr/data/soundcloud-credentials.json",
+		"/usr/data/soundcloud-credentials.json.tmp",
 	};
 	for (size_t i = 0; i < sizeof(OURS) / sizeof(OURS[0]); i++) {
 		if (unlink(OURS[i]) == 0) {
@@ -274,6 +278,8 @@ static const char *const KEEP[] = {
 	"qobuz_session.ini.tmp",
 	"tidal_session.ini",
 	"tidal_session.ini.tmp",
+	"soundcloud-credentials.json",
+	"soundcloud-credentials.json.tmp",
 	"lastfm.session",
 	"listenbrainz.token",
 };

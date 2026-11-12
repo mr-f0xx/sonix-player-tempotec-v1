@@ -61,6 +61,8 @@
 #include "src/system/streaming/podcastcache.h"
 #include "src/system/streaming/podcastsubs.h"
 #include "src/system/streaming/podcastplayed.h"
+#include "src/system/streaming/soundcloud.h"
+#include "src/system/streaming/soundcloudcache.h"
 #include "src/system/streaming/tidalcache.h"
 #include "src/system/streaming/stockkeys.h"
 #include "src/system/streaming/streamkeys.h"
@@ -2317,6 +2319,9 @@ int main(int argc, char **argv) {
 		if (addons_enabled("lastfm")) {
 			lastfm_init();
 		}
+		if (addons_enabled("soundcloud")) {
+			soundcloud_reload_streamkeys();
+		}
 	}
 
 	qobuzcache_set_root(card_root && card_root[0] ? card_root : gui_cfg.sd_root_path);
@@ -2326,6 +2331,8 @@ int main(int argc, char **argv) {
 	// track fits.
 	tidalcache_set_root(card_root && card_root[0] ? card_root : gui_cfg.sd_root_path);
 	tidalcache_clear(); // remove leftovers from a crash or power loss
+	soundcloudcache_set_root(card_root && card_root[0] ? card_root : gui_cfg.sd_root_path);
+	soundcloudcache_clear_on_exit();
 	podcastcache_set_root(card_root && card_root[0] ? card_root : gui_cfg.sd_root_path);
 	podcastsubs_set_root(card_root && card_root[0] ? card_root : gui_cfg.sd_root_path);
 	// Which episodes were heard. The marks live in podcast.db beside the
@@ -2347,6 +2354,7 @@ int main(int argc, char **argv) {
 	// rather than to the local database.
 	library_forget_under(qobuzcache_dir());
 	library_forget_under(tidalcache_dir());
+	library_forget_under(soundcloudcache_dir());
 	if (!tls_available()) {
 		fprintf(stderr, "tls: unavailable; https radio stations cannot be opened\n");
 	}

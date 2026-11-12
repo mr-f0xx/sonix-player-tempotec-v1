@@ -65,6 +65,10 @@
 #include "src/system/streaming/qobuzcache.h"
 #include "src/system/streaming/subsonicstream.h"
 #include "src/system/streaming/qobuzsync.h"
+#include "src/gui/streaming/soundcloud_icon.h"
+#include "src/gui/streaming/soundcloudpage.h"
+#include "src/system/streaming/soundcloud.h"
+#include "src/system/streaming/soundcloudcache.h"
 #include "src/system/streaming/tidalcache.h"
 #include "src/system/streaming/tidalsync.h"
 #include "src/system/core/utils.h"
@@ -281,6 +285,7 @@ static lv_obj_t *live_badge;	   // live indicator, top right over the artwork
 static lv_obj_t *qobuz_badge;	   // the Qobuz mark, in the same corner
 static lv_obj_t *tidal_badge;	   // and the Tidal one, over it: only one ever shows
 static lv_obj_t *podcast_badge;	   // and the podcast one, third in the same place
+static lv_obj_t *soundcloud_badge; // and the SoundCloud one, fourth in the same place
 static bool live_mode;
 static bool live_transport_hidden; // prev/next taken away on a stream
 static bool live_custom_nav;	   // on a station from a list, where they change station
@@ -718,6 +723,9 @@ static void apply_live_mode(bool live) {
 	}
 	if (podcast_badge && live) {
 		lv_obj_set_hidden(podcast_badge, true);
+	}
+	if (soundcloud_badge && live) {
+		lv_obj_set_hidden(soundcloud_badge, true);
 	}
 	if (qobuz_badge && live) {
 		lv_obj_set_hidden(qobuz_badge, true);
@@ -3288,7 +3296,7 @@ static int studio_cover_geometry(int *top_out) {
 // `parent` of NULL leaves them where they are and only re-places them, which
 // is what studio_place() wants on a relayout.
 static void studio_badges_move(lv_obj_t *parent, int y) {
-	lv_obj_t *const marks[] = {live_badge, qobuz_badge, tidal_badge, podcast_badge};
+	lv_obj_t *const marks[] = {live_badge, qobuz_badge, tidal_badge, podcast_badge, soundcloud_badge};
 	for (size_t i = 0; i < sizeof(marks) / sizeof(marks[0]); i++) {
 		if (!marks[i]) {
 			continue;
@@ -3472,7 +3480,7 @@ static void studio_take_back(void) {
 		}
 		// The marks go back to the corner of the artwork they share with every
 		// other arrangement.
-		lv_obj_t *const marks[] = {live_badge, qobuz_badge, tidal_badge, podcast_badge};
+		lv_obj_t *const marks[] = {live_badge, qobuz_badge, tidal_badge, podcast_badge, soundcloud_badge};
 		for (size_t i = 0; i < sizeof(marks) / sizeof(marks[0]); i++) {
 			if (marks[i]) {
 				lv_obj_set_parent(marks[i], cover_art_group);
@@ -5535,6 +5543,12 @@ static long current_tidal_track(void) {
 	return state.current_file[0] ? tidalcache_track_id(state.current_file) : 0;
 }
 
+static long long current_soundcloud_track(void) {
+	device_state_t state;
+	device_state_get(&state);
+	return state.current_file[0] ? soundcloudcache_track_id_of(state.current_file) : 0;
+}
+
 // The Qobuz mark, top right, when what is playing comes from there. Same place
 // and same purpose as the live badge for radio: say where the music comes from
 // without taking space from anything else.
@@ -5549,6 +5563,7 @@ static void update_qobuz_badge(void) {
 	bool from_qobuz = !live_mode && current_qobuz_track() != 0;
 	bool from_tidal = !live_mode && !from_qobuz && current_tidal_track() != 0;
 	bool from_podcast = !live_mode && !from_qobuz && !from_tidal && current_podcast_episode();
+	bool from_soundcloud = !live_mode && !from_qobuz && !from_tidal && !from_podcast && current_soundcloud_track() > 0;
 
 	if (qobuz_badge) {
 		if (from_qobuz) {
@@ -5574,6 +5589,14 @@ static void update_qobuz_badge(void) {
 			lv_obj_set_hidden(podcast_badge, true);
 		}
 	}
+	if (soundcloud_badge) {
+		if (from_soundcloud) {
+			lv_obj_set_hidden(soundcloud_badge, false);
+			lv_obj_move_foreground(soundcloud_badge);
+		} else {
+			lv_obj_set_hidden(soundcloud_badge, true);
+		}
+	}
 }
 
 // Repaints the favourite marker: filled when the loaded track is a favourite,
@@ -5591,6 +5614,7 @@ static void update_fav_button(void) {
 	bool starred = false;
 	long qobuz_id = 0;
 	long tidal_id = 0;
+	long long sc_id = 0;
 	long long feed_id = 0;
 	if (radio_current_station(&station)) {
 		starred = radio_fav_contains_station(&station);
@@ -5609,6 +5633,8 @@ static void update_fav_button(void) {
 	} else if ((tidal_id = current_tidal_track()) > 0) {
 		starred = tidalsync_is_favorite(tidal_id);
 		tidalsync_favorites_refresh(tidal_favorites_changed);
+	} else if ((sc_id = current_soundcloud_track()) > 0) {
+		starred = soundcloud_is_liked(sc_id);
 	} else {
 		// device_state, not audio_get_current_file(): the star is drawn from
 		// one source and toggled from another, and when the two disagreed the
@@ -5703,6 +5729,13 @@ static void tidal_fav_done(bool ok, const char *error, void *user) {
 	gui_post(fav_error_async, NULL);
 }
 
+static void soundcloud_fav_done(bool ok, const char *error, void *user) {
+	(void)user;
+	snprintf(fav_error, sizeof(fav_error), "%s",
+			 ok ? "" : (error && error[0] ? error : tr("soundcloud_connection_failed")));
+	gui_post(fav_error_async, NULL);
+}
+
 static void fav_btn_event_cb(lv_event_t *e) {
 	(void)e;
 
@@ -5756,6 +5789,13 @@ static void fav_btn_event_cb(lv_event_t *e) {
 		return;
 	}
 
+	long long sc_id = soundcloudcache_track_id_of(state.current_file);
+	if (sc_id > 0) {
+		soundcloudpage_toggle_favorite_async(sc_id, soundcloud_fav_done, NULL);
+		update_fav_button();
+		return;
+	}
+
 	const char *title = state.metadata.title[0] ? state.metadata.title : strrchr(state.current_file, '/') + 1;
 	// No notification popup: the star filling in is the whole feedback.
 	library_fav_toggle(state.current_file, title, state.metadata.artist);
@@ -5801,7 +5841,7 @@ static void update_hires_badge(const device_state_t *state) {
 	// the button while it is there on an edge-to-edge sleeve, and restore them
 	// when it returns left; Sticker's inset square sits clear of the chevron.
 	if (!layout_studio_now) {
-		lv_obj_t *const marks[] = {live_badge, qobuz_badge, tidal_badge, podcast_badge};
+		lv_obj_t *const marks[] = {live_badge, qobuz_badge, tidal_badge, podcast_badge, soundcloud_badge};
 		int y = (back_right && !layout_sticker_now)
 			? (back_btn_centre_y() - player_content_top()) + bp_header_button_size() / 2 + 4
 			: BADGE_INSET;
@@ -8521,6 +8561,11 @@ void player_init(gui_config_t *cfg) {
 	lv_image_set_src(podcast_badge, &icon_podcast_badge);
 	lv_obj_align(podcast_badge, LV_ALIGN_TOP_RIGHT, -BADGE_INSET, BADGE_INSET);
 	lv_obj_set_hidden(podcast_badge, true);
+
+	soundcloud_badge = lv_image_create(cover_art_group);
+	lv_image_set_src(soundcloud_badge, &icon_soundcloud_badge);
+	lv_obj_align(soundcloud_badge, LV_ALIGN_TOP_RIGHT, -BADGE_INSET, BADGE_INSET);
+	lv_obj_set_hidden(soundcloud_badge, true);
 
 	// Shown while there is no artwork for the current track. The mark is drawn
 	// at 128x128 natively, which overflows a V1 sleeve, so it is scaled to a

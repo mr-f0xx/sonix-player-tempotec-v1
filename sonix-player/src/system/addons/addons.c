@@ -20,6 +20,7 @@ static const addon_t ADDONS[] = {
 	{"podcasts", "podcasts", "addon_podcasts_note", "plugins_section_services"},
 	{"radio", "radio", "addon_radio_note", "plugins_section_services"},
 	{"subsonic", "subsonic", "addon_subsonic_note", "plugins_section_services"},
+	{"soundcloud", "soundcloud", "addon_soundcloud_note", "plugins_section_services"},
 	// What talks to a pair of earbuds over the Bluetooth link: the AirPods'
 	// battery and noise control through Apple's own protocol. Off means the
 	// worker that speaks it is never started and its page is not built.
@@ -87,6 +88,7 @@ static bool addon_is_default_on(const char *id) {
 		return false;
 	}
 	if (strcmp(id, "subsonic") == 0) return true;
+	if (strcmp(id, "soundcloud") == 0) return true;
 	if (strcmp(id, "eq") == 0) return true;
 	if (strcmp(id, "peq") == 0) return true;
 	if (strcmp(id, "mseb") == 0) return true;

@@ -33,6 +33,9 @@
 #include "src/system/streaming/subsonicstream.h"
 #include "src/system/streaming/podcastcache.h"
 #include "src/system/streaming/podcastdl.h"
+#include "src/system/streaming/soundcloud.h"
+#include "src/system/streaming/soundcloudcache.h"
+#include "src/gui/streaming/soundcloudpage.h"
 #include "src/system/streaming/tidalcache.h"
 #include "src/system/device/adb.h"
 #include "src/system/library/library.h"
@@ -822,7 +825,8 @@ static bool streaming_playback_active(void) {
 	if (!path[0]) {
 		return false;
 	}
-	return subsonicstream_owns(path) || qobuzcache_owns(path) || tidalcache_owns(path) || podcastcache_owns(path);
+	return subsonicstream_owns(path) || qobuzcache_owns(path) || tidalcache_owns(path) ||
+		   soundcloudcache_is_soundcloud_path(path) || podcastcache_owns(path);
 }
 
 // Whether the network is the point rather than an idle drain: an AirPlay
@@ -838,7 +842,9 @@ static bool wifi_in_use(void) {
 	// A scan or a connect in flight counts as use: parking the radio out from
 	// under wpa_supplicant mid-association leaves the driver to sort out a
 	// teardown it did not expect.
-	return subsonic_api_busy() || subsonicstream_network_wanted() || wifi_busy() || wifi_scan_running() || streaming_playback_active() || airplay_get_enabled() ||
+	return subsonic_api_busy() || subsonicstream_network_wanted() || soundcloud_api_busy() ||
+		   soundcloudcache_downloading() || soundcloudpage_waiting_for_track() || wifi_busy() || wifi_scan_running() ||
+		   streaming_playback_active() || airplay_get_enabled() ||
 		   dlna_get_enabled() || sonixlink_get_enabled() ||
 		   wifitransfer_get_enabled() || qobuzcache_downloading_id() > 0 ||
 		   qobuzcache_network_wanted() || qobuzdl_busy() || tidalcache_downloading_id() > 0 || tidalcache_network_wanted() ||
@@ -899,7 +905,8 @@ static bool player_is_busy(bool playing, uint32_t input_idle) {
 		   library_scan_running() ||			   // a scan, which is also writing to the card
 		   audiobookdb_scan_running() || wifitransfer_running() || dlna_running() || airplay_running() ||
 		   sonixlink_is_connected() || // a phone driving the player, not a switch left on
-		   qobuzcache_downloading_id() > 0 || tidalcache_downloading_id() > 0 || podcastcache_downloading_id() > 0 ||
+		   qobuzcache_downloading_id() > 0 || tidalcache_downloading_id() > 0 ||
+		   soundcloudcache_downloading() || podcastcache_downloading_id() > 0 ||
 		   ota_busy(); // a firmware update being fetched
 }
 
@@ -1245,6 +1252,7 @@ void power_shutdown(void) {
 	// the user never put there and will not listen to again.
 	qobuzcache_clear_on_exit();
 	tidalcache_clear_on_exit();
+	soundcloudcache_clear_on_exit();
 	podcastcache_clear_on_exit();
 	dlna_clear_on_exit();
 

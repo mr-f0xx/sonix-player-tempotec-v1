@@ -120,6 +120,9 @@ typedef struct {
 	// works.
 	bool accept_gzip;
 
+	// Optional User-Agent override; NULL sends HTTP_USER_AGENT.
+	const char *user_agent;
+
 } http_req_t;
 
 // Like http_get_ex(), but with the method and body chosen by the caller.
@@ -204,6 +207,9 @@ typedef struct {
 	void *socket_user;
 	bool no_icy; // finite file, not an internet radio station
 	bool no_https_downgrade;
+	const char *user_agent;	   // NULL sends HTTP_USER_AGENT
+	const char *extra_headers; // CRLF-terminated lines, or NULL
+	int *status_out;		   // optional HTTP status code on open/failure
 } http_stream_options_t;
 bool http_stream_open_ex(http_stream_t *st, const char *url, int timeout_secs,
 						 const http_stream_options_t *options);

@@ -981,8 +981,9 @@ static bool get_once(const url_t *u, const http_req_t *req, char **out, size_t *
 				 body_len);
 	}
 
+	const char *ua = req->user_agent && req->user_agent[0] ? req->user_agent : HTTP_USER_AGENT;
 	size_t extra_len = extra_headers ? strlen(extra_headers) : 0;
-	size_t req_cap = strlen(u->path) + extra_len + 1024;
+	size_t req_cap = strlen(u->path) + strlen(ua) + extra_len + 1024;
 	char *request = malloc(req_cap);
 	if (!request) {
 		conn_close(&conn);
@@ -991,14 +992,14 @@ static bool get_once(const url_t *u, const http_req_t *req, char **out, size_t *
 	int n = snprintf(request, req_cap,
 					 "%s %s HTTP/1.0\r\n"
 					 "Host: %s\r\n"
-					 "User-Agent: " HTTP_USER_AGENT "\r\n"
+					 "User-Agent: %s\r\n"
 					 "Accept: */*\r\n"
 					 "Accept-Encoding: %s\r\n"
 					 "Connection: close\r\n"
 					 "%s"
 					 "%s"
 					 "\r\n",
-					 method, u->path, host_header, req->accept_gzip ? "gzip, deflate" : "identity", body_headers,
+					 method, u->path, host_header, ua, req->accept_gzip ? "gzip, deflate" : "identity", body_headers,
 					 extra_headers ? extra_headers : "");
 	// Compare the length against the buffer, not just against zero: snprintf
 	// truncates but returns what it would have written, so an over-long
@@ -1258,17 +1259,27 @@ static bool stream_open_once(http_stream_t *st, const char *url, int timeout_sec
 	char host_header[300];
 	host_header_value(&u, host_header, sizeof(host_header));
 
-	char request[2600];
-	int n = snprintf(request, sizeof(request),
+	const char *ua = options && options->user_agent && options->user_agent[0] ? options->user_agent : HTTP_USER_AGENT;
+	const char *extra = options && options->extra_headers ? options->extra_headers : "";
+	size_t req_cap = strlen(u.path) + strlen(ua) + strlen(extra) + 1024;
+	char *request = malloc(req_cap);
+	if (!request) {
+		conn_close(&conn);
+		return false;
+	}
+	int n = snprintf(request, req_cap,
 					 "GET %s HTTP/1.0\r\n" // 1.0: no chunking, no keep-alive to argue about
 					 "Host: %s\r\n"
-					 "User-Agent: " HTTP_USER_AGENT "\r\n"
+					 "User-Agent: %s\r\n"
+					 "%s"
 					 "%s"
 					 "Accept: */*\r\n"
 					 "\r\n",
-					 u.path, host_header, options && options->no_icy ? "" : "Icy-MetaData: 1\r\n");
+					 u.path, host_header, ua, options && options->no_icy ? "" : "Icy-MetaData: 1\r\n", extra);
 	// As above: snprintf returns what it would have written, not what it did.
-	if (n <= 0 || (size_t)n >= sizeof(request) || !conn_write_all(&conn, request, (size_t)n)) {
+	bool wrote = n > 0 && (size_t)n < req_cap && conn_write_all(&conn, request, (size_t)n);
+	free(request);
+	if (!wrote) {
 		conn_close(&conn);
 		return false;
 	}
@@ -1352,6 +1363,9 @@ bool http_stream_open_ex(http_stream_t *st, const char *url, int timeout_secs, c
 	memset(st, 0, sizeof(*st));
 	st->fd = -1;
 	clear_last_error();
+	if (options && options->status_out) {
+		*options->status_out = 0;
+	}
 
 	char current[2600];
 	snprintf(current, sizeof(current), "%s", url);
@@ -1360,7 +1374,13 @@ bool http_stream_open_ex(http_stream_t *st, const char *url, int timeout_secs, c
 		int status = 0;
 		char location[2048] = "";
 		if (stream_open_once(st, current, timeout_secs, &status, location, sizeof(location), options)) {
+			if (options && options->status_out) {
+				*options->status_out = status;
+			}
 			return true;
+		}
+		if (options && options->status_out) {
+			*options->status_out = status;
 		}
 		if (status < 300 || status >= 400 || !location[0]) {
 			return false;

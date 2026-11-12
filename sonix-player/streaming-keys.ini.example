@@ -33,3 +33,11 @@ api_secret =
 [lastfm]
 api_key = 
 api_secret = 
+
+# Optional: SoundCloud works with no keys at all (client_id is discovered
+# automatically). You can configure your SoundCloud username and/or oauth_token
+# directly in Streaming -> SoundCloud -> Account settings, or place them here:
+[soundcloud]
+# username = your-profile-handle
+# oauth_token = 
+# client_id = 

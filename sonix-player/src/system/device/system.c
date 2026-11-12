@@ -47,6 +47,7 @@
 #include "src/system/streaming/podcastsubs.h"
 #include "src/system/streaming/podcastplayed.h"
 #include "src/system/streaming/radio.h"
+#include "src/system/streaming/soundcloudcache.h"
 #include "src/system/streaming/tidalcache.h"
 #include "src/system/library/library.h"
 #include "src/system/core/logging.h"
@@ -863,6 +864,7 @@ static void card_databases_detach(void) {
 	// storage the cache must not fill.
 	wifitransfer_release_card();
 	tidalcache_set_root(NULL);
+	soundcloudcache_set_root(NULL);
 
 	// Playback first. The playback thread keeps the track's descriptor open for
 	// the whole track -- and with "remember track" a track is loaded and paused
@@ -941,6 +943,7 @@ static void card_databases_attach(const char *root) {
 	// does not fit the internal data partition, so the card has to be the
 	// storage that is measured and filled.
 	tidalcache_set_root(root);
+	soundcloudcache_set_root(root);
 	podcastcache_set_root(root);
 	podcastsubs_set_root(root);
 	podcastplayed_set_root(root);

@@ -17,7 +17,7 @@ the section heading on the Plugins page.
 
 | Section | Module (id) | What switching it off removes |
 | --- | --- | --- |
-| Streaming services | `tidal`, `qobuz`, `podcasts`, `radio`, `subsonic` | The service's pages and its Streaming tile or list row. (`tidal` and `qobuz` also require API keys, which can be extracted on-device via **Set up from stock firmware**; see [qobuz-stock-firmware.md](qobuz-stock-firmware.md).) |
+| Streaming services | `tidal`, `qobuz`, `podcasts`, `radio`, `soundcloud`, `subsonic` | The service's pages and its Streaming tile or list row. (`tidal` and `qobuz` also require API keys, which can be extracted on-device via **Set up from stock firmware**; see [qobuz-stock-firmware.md](qobuz-stock-firmware.md). See [soundcloud.md](soundcloud.md) for SoundCloud setup.) |
 | Earbuds | `airpods` | The AirPods worker and its page. |
 | Library | `ebook` | The Books shelf and the EPUB reader (home Books tile). |
 | Player | `coverflow` | The album carousel and its larger cover cache. |
