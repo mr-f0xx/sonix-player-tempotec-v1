@@ -199,8 +199,9 @@ long power_get_min_brightness(void);   // dimmest level the sliders offer
 void power_hold_screen_on(bool hold);
 
 // Stops charging once the battery reaches `percent` (80..100; 100 means no
-// limit). Whether this can be enforced depends on the charger driver exposing
-// a control node -- power_charge_limit_supported() says whether it found one.
+// limit). Enforcement uses the V1 AXP2101 charge-enable control or, on other
+// supported builds, the MP2731 driver's control node. The support query reports
+// whether either hardware path is available.
 void power_set_charge_limit(int percent);
 int power_get_charge_limit(void); // 100 when no limit is set
 bool power_charge_limit_supported(void);

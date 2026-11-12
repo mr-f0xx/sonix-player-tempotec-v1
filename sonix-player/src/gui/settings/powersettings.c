@@ -107,9 +107,9 @@ static void set_checked(lv_obj_t *sw, bool on) {
 
 void powersettings_apply(void) {
 	if (axpcharge_applies()) {
-		power_set_charge_limit(100);
-		axpcharge_set(config_get_bool("power", "charge_limit_80", false),
-					  config_get_bool("power", "charge_500ma", false));
+		bool limit_80 = config_get_bool("power", "charge_limit_80", false);
+		power_set_charge_limit(limit_80 ? 80 : 100);
+		axpcharge_set(limit_80, config_get_bool("power", "charge_500ma", false));
 	} else {
 		power_set_charge_limit(CHARGE_LIMIT_MIN + (charge_index() * CHARGE_LIMIT_STEP));
 	}
@@ -322,9 +322,8 @@ void powersettings_init(gui_config_t *cfg) {
 	lv_obj_set_style_text_font(standby_note, &font_ui_22, 0);
 	lv_label_set_text(standby_note, tr("power_standby_mem_note"));
 
-	// The R1 charges through its PMIC, which takes a lower target voltage and a
-	// lower current rather than a percentage: two switches there, the slider
-	// everywhere else.
+	// The V1's AXP2101 offers voltage/current controls in addition to the
+	// percentage cutoff: two switches here, the configurable slider elsewhere.
 	bool pmic = axpcharge_applies();
 	if (pmic) {
 		settingsrow_toggle(container, "power_charge_limit_80", &axp_limit_switch, axp_limit_toggled_cb);

@@ -61,6 +61,7 @@
 #include "src/system/device/sysinfo.h"
 #include "src/system/device/axpcharge.h"
 #include "src/system/device/batteryguard.h"
+#include "src/system/device/chargelimit.h"
 #include "src/system/device/chargemode.h"
 #include "src/gui/shell/gui.h"
 #include "src/gui/shell/topbar.h"
@@ -609,6 +610,9 @@ static void find_charge_node(void) {
 }
 
 bool power_charge_limit_supported(void) {
+	if (axpcharge_applies()) {
+		return true;
+	}
 	find_charge_node();
 	return g_charge_node != NULL;
 }
@@ -620,6 +624,11 @@ bool power_charging_held(void) { return g_charging_suspended || axpcharge_holdin
 static void charger_run(bool run);
 
 void power_charging_release(void) {
+	if (axpcharge_applies()) {
+		axpcharge_set_charging_enabled(true);
+		g_charging_suspended = false;
+		return;
+	}
 	find_charge_node();
 	if (!g_charge_node) {
 		return;
@@ -650,22 +659,23 @@ static void charger_run(bool run) {
 // what the last decision was: the charger is written only when the answer has
 // changed, so this can be called as often as anything likes.
 static void apply_charge_limit(void) {
-	find_charge_node();
-	if (!g_charge_node) {
-		return;
+	bool axp = axpcharge_applies();
+	if (!axp) {
+		find_charge_node();
+		if (!g_charge_node) {
+			return;
+		}
 	}
 
 	bool allow;
-	if (!usb_vbus_present()) {
-		// No cable, nothing to hold off -- and this is the case that must not
-		// be got wrong. The bit survives the charger being unplugged, so a
-		// player that left it off would meet the next cable with a charger that
-		// does nothing, until the next reboot reset it.
-		allow = true;
-	} else if (g_charging_blocked) {
+	if (g_charging_blocked) {
 		// DAC mode with charging switched off. Outranks the percentage limit
 		// and outlasts it: the tick must not undo a choice the user made.
 		allow = false;
+	} else if (!usb_vbus_present()) {
+		// Do not leave the charger disabled when the cable is removed: its
+		// enable bit survives unplugging on both charger implementations.
+		allow = true;
 	} else if (g_charge_limit >= 100) {
 		allow = true;
 	} else {
@@ -674,8 +684,7 @@ static void apply_charge_limit(void) {
 			return; // no reading to judge by; leave the charger as it is
 		}
 		int percent = atoi(level);
-		// Three percent of hysteresis, so it does not chatter at the boundary.
-		allow = g_charging_suspended ? percent <= g_charge_limit - 3 : percent < g_charge_limit;
+		allow = charge_limit_should_allow(g_charge_limit, percent, g_charging_suspended);
 	}
 
 	// Written once at startup whatever the answer, so the player's idea of the
@@ -687,26 +696,31 @@ static void apply_charge_limit(void) {
 	}
 	ever_written = true;
 
-	charger_run(allow);
+	if (axp) {
+		axpcharge_set_charging_enabled(allow);
+	} else {
+		charger_run(allow);
+	}
 	g_charging_suspended = !allow;
-	printf("power: charging %s\n", allow ? "on" : "held off at the limit");
+	printf("power: charging %s%s\n", allow ? "on" : "held off",
+		   allow ? "" : (g_charging_blocked ? " (forbidden)" : " at the limit"));
 }
 
 // Forbids or allows charging outright, on top of whatever the percentage limit
 // is doing. DAC mode is the one caller: the choice is the user's and the
 // percentage limit must not undo it.
 void power_set_charging_allowed(bool allowed) {
-	find_charge_node();
 	g_charging_blocked = !allowed;
-
-	if (!g_charge_node) {
-		printf("power: charging cannot be controlled on this firmware\n");
-		return;
+	if (!axpcharge_applies()) {
+		find_charge_node();
+		if (!g_charge_node) {
+			printf("power: charging cannot be controlled on this firmware\n");
+			return;
+		}
 	}
 
 	printf("power: charging %s\n", allowed ? "allowed again" : "forbidden");
 	apply_charge_limit(); // one place decides, including this
-
 }
 
 // ---------------------------------------------------------------------------
@@ -2296,8 +2310,8 @@ static void power_timer_cb(lv_timer_t *timer) {
 	//           halt.
 	suspend_if_idle(now, playing);
 
-	// 4b. the charger, if it is being held below full: the MP2731 by the
-	//     percentage, or the PMIC by its own two switches on the R1
+	// 4b. enforce the percentage limit: through the MP2731 control node or the
+	//     V1 PMIC's charge-enable bit. Reassert PMIC voltage/current options too.
 	apply_charge_limit();
 	axpcharge_tick();
 
