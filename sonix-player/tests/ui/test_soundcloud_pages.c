@@ -231,6 +231,11 @@ void toast_error(const char *text) {}
 void switcher_attach_back_gesture(lv_obj_t *screen) {}
 bool switcher_back_drag_active(void) { return false; }
 void switcher_set_back_guard_peek(lv_obj_t *screen, bool (*peek)(void)) {}
+/* The tiled home page brings in the grid, which asks the cover flow whether a
+ * swipe is in progress and names the pet's artwork. The pet itself is not part
+ * of this page. */
+bool coverflow_drag_active(void) { return false; }
+const lv_image_dsc_t icon_pet = {0};
 void player_sheet_attach_drag(lv_obj_t *obj, bool opening) {}
 bool player_sheet_drag_active(void) { return false; }
 bool player_sheet_is_open(void) { return stub_sheet_open; }

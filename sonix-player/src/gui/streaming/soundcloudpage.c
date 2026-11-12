@@ -10,6 +10,7 @@
 #include "src/gui/fonts/fonts.h"
 #include "src/gui/nowplaying/player.h"
 #include "src/gui/shell/confirm.h"
+#include "src/gui/shell/gridpage.h"
 #include "src/gui/shell/icons.h"
 #include "src/gui/shell/keyboard.h"
 #include "src/gui/shell/settingsrow.h"
@@ -32,14 +33,20 @@
 #define SC_CURSOR_STACK_MAX 16
 #define SC_QUEUE_CAP 256
 #define SC_CACHE_PRESET_COUNT 6
+// Liked tracks, Reposts, Playlists and the account: a 2x2 grid that fills the
+// panel under the heading.
+#define SC_HOME_TILES 4
 
 static const int SC_CACHE_PRESET_MB[SC_CACHE_PRESET_COUNT] = {512, 1024, 2048, 4096, 8192, 0};
 
 lv_obj_t *soundcloud_screen;
 
 static gui_config_t *page_cfg;
-static lv_obj_t *home_container;
-static lv_obj_t *home_account_value;
+static lv_obj_t *home_grid;
+
+// The account tile names the account instead of repeating its own destination,
+// the way the row it replaces carried the name in its value line.
+static char home_account_caption[192];
 
 static lv_obj_t *search_screen;
 static lv_obj_t *search_field;
@@ -719,24 +726,29 @@ bool soundcloudpage_prepare_track(char *path, size_t path_size) {
 // UI state refreshes & navigation
 // ---------------------------------------------------------------------------
 
+// The signed-in name when there is one, the translated destination otherwise:
+// the tile says which account its settings belong to.
 static void refresh_home_summary(void) {
-	if (!home_account_value) {
+	if (!home_grid) {
 		return;
 	}
 	soundcloud_account_info_t info;
 	soundcloud_account_info(&info);
+	char summary[192];
 	if (info.display_name[0]) {
 		if (info.tier[0] && strcmp(info.tier, "Public") != 0) {
-			char summary[192];
 			snprintf(summary, sizeof(summary), "%s (%s)", info.display_name, info.tier);
-			lv_label_set_text(home_account_value, summary);
 		} else {
-			lv_label_set_text(home_account_value, info.display_name);
+			snprintf(summary, sizeof(summary), "%s", info.display_name);
 		}
 	} else if (info.has_token) {
-		lv_label_set_text(home_account_value, tr("soundcloud_connected"));
+		snprintf(summary, sizeof(summary), "%s", tr("soundcloud_connected"));
 	} else {
-		lv_label_set_text(home_account_value, tr("soundcloud_not_set"));
+		snprintf(summary, sizeof(summary), "%s", tr("soundcloud_account_settings"));
+	}
+	if (strcmp(summary, home_account_caption) != 0) {
+		snprintf(home_account_caption, sizeof(home_account_caption), "%s", summary);
+		gridpage_set_tile_caption(home_grid, SC_HOME_TILES - 1, home_account_caption);
 	}
 }
 
@@ -873,12 +885,11 @@ static bool list_back_guard(void) {
 	return false;
 }
 
-static void browse_section_cb(lv_event_t *e) {
+static void browse_section(view_kind_t view) {
 	if ((busy && !waiting_for_track) || switcher_back_drag_active() || player_sheet_drag_active()) {
 		return;
 	}
 	cancel_track_wait_if_active();
-	view_kind_t view = (view_kind_t)(intptr_t)lv_event_get_user_data(e);
 	const char *title_key = "soundcloud_likes";
 	if (view == VIEW_REPOSTS) title_key = "soundcloud_reposts";
 	else if (view == VIEW_PLAYLISTS) title_key = "soundcloud_playlists";
@@ -890,6 +901,13 @@ static void browse_section_cb(lv_event_t *e) {
 	snprintf(job.title, sizeof(job.title), "%s", tr(title_key));
 	run_view(job, false);
 }
+
+// Tiles call a plain action: the grid already drops a tap that was really a
+// swipe, and nothing here needs the event.
+static void home_likes_action(void) { browse_section(VIEW_LIKES); }
+static void home_reposts_action(void) { browse_section(VIEW_REPOSTS); }
+static void home_playlists_action(void) { browse_section(VIEW_PLAYLISTS); }
+static void home_settings_action(void) { open_settings_cb(NULL); }
 
 static void accept_search_cb(lv_event_t *e) {
 	(void)e;
@@ -1536,7 +1554,25 @@ static void value_row_col_resized_cb(lv_event_t *e) {
 	fit_stacked_title((sc_value_row_t *)lv_event_get_user_data(e));
 }
 
+// These tiles are taller than a menu row's, so both the menu illustrations and
+// the function glyphs of the flat themes are drawn larger than the compact
+// default; a 46 px picture in a 120 px card reads as an empty card.
+static void home_fit_tile_icons(void) {
+	if (!home_grid) {
+		return;
+	}
+	bool fn = theme_uses_function_glyphs();
+	int size = fn ? 30 : (bp_is_tempotec_v1() ? 64 : 88);
+	for (int i = 0; i < SC_HOME_TILES; i++) {
+		gridpage_set_tile_icon_size(home_grid, i, size);
+		// The row layout gives the caption everything the glyph does not use,
+		// so it has to be measured again once the glyph has changed size.
+		gridpage_set_tile_orientation(home_grid, i, fn && bp_is_tempotec_v1());
+	}
+}
+
 static void refresh_soundcloud_theme(void) {
+	home_fit_tile_icons();
 	refresh_quality_pills();
 	refresh_cache_limit_pills();
 	bool compact = bp_is_tempotec_v1();
@@ -1857,28 +1893,30 @@ void soundcloudpage_init(gui_config_t *cfg) {
 	device_state_add_prepare_cb(soundcloudpage_prepare_track);
 
 	soundcloud_screen = make_screen();
-	home_container = settingsrow_page(soundcloud_screen, cfg, "soundcloud");
+	settingsrow_title(soundcloud_screen, cfg, "soundcloud");
 	settingsrow_title_corner_slots(settingsrow_page_title(soundcloud_screen), cfg, 2);
 	add_corner_btn(soundcloud_screen, cfg, 0, &icon_music_settings, open_settings_cb);
 	add_corner_btn(soundcloud_screen, cfg, 1, &icon_search, open_search_cb);
 
-	// Search lives in the title bar's corner button only: a row repeating it
-	// ate a whole line of the four-line home list for the same destination.
-	add_stacked_value_row(home_container, "soundcloud_likes", NULL, &icon_heart_filled, THEME_SEMANTIC_RED, true,
-						  browse_section_cb, (void *)(intptr_t)VIEW_LIKES);
-
-	add_stacked_value_row(home_container, "soundcloud_reposts", NULL, &icon_repeat_all, THEME_SEMANTIC_GREEN, true,
-						  browse_section_cb, (void *)(intptr_t)VIEW_REPOSTS);
-
-	add_stacked_value_row(home_container, "soundcloud_playlists", NULL, &icon_files_playlist, THEME_SEMANTIC_PURPLE,
-						  true, browse_section_cb, (void *)(intptr_t)VIEW_PLAYLISTS);
-
-	add_stacked_value_row(home_container, "soundcloud_account_settings", &home_account_value, &icon_music_settings,
-						  THEME_SEMANTIC_BLUE, true, open_settings_cb, NULL);
+	// Four destinations, so two square tiles fill the panel under the heading
+	// exactly: the grid is sized from the space that is left, and there is
+	// never a fifth row to scroll to. Search stays the corner button.
+	const grid_entry_t home_entries[] = {
+		{"soundcloud_likes", &icon_menu_sc_likes, NULL, home_likes_action},
+		{"soundcloud_reposts", &icon_menu_sc_reposts, NULL, home_reposts_action},
+		{"soundcloud_playlists", &icon_menu_sc_playlists, NULL, home_playlists_action},
+		{"soundcloud_account_settings", &icon_menu_sc_account, NULL, home_settings_action},
+	};
+	home_grid = gridpage_build(soundcloud_screen, cfg, home_entries, SC_HOME_TILES, 2, 2, true);
+	// These tiles are taller than a menu row's, and the captions are longer
+	// than one line in most languages ("Account settings", "Paramètres du
+	// compte"), so let them use two lines instead of an ellipsis.
+	for (int i = 0; i < SC_HOME_TILES; i++) {
+		gridpage_set_tile_label_lines(home_grid, i, 2);
+	}
 
 	lv_obj_add_event_cb(soundcloud_screen, home_loaded_cb, LV_EVENT_SCREEN_LOADED, NULL);
 	player_sheet_attach_drag(soundcloud_screen, true);
-	player_sheet_attach_drag(home_container, true);
 
 	list_screen = make_screen();
 	list_container = settingsrow_page(list_screen, cfg, "soundcloud");

@@ -206,6 +206,38 @@ void gridpage_set_tile_icon_style(lv_obj_t *grid, int index, const lv_image_dsc_
 	lv_obj_align_to(halo, icon, LV_ALIGN_CENTER, 0, 0);
 }
 
+// Rescales a tile's picture without touching what the picture is or how it is
+// tinted. A page whose tiles are taller than a menu row's uses this to give the
+// larger card a larger illustration than the compact default.
+void gridpage_set_tile_icon_size(lv_obj_t *grid, int index, int icon_size) {
+	if (!grid || icon_size <= 0 || index < 0 || index >= (int)lv_obj_get_child_count(grid)) {
+		return;
+	}
+	lv_obj_t *tile = lv_obj_get_child(grid, index);
+	lv_obj_t *icon = tile ? tile_icon_object(tile) : NULL;
+	if (!icon) {
+		return;
+	}
+	const lv_image_dsc_t *source = lv_image_get_src(icon);
+	if (!source) {
+		return;
+	}
+	int source_w = (int)source->header.w;
+	int source_h = (int)source->header.h;
+	int max_side = LV_MAX(source_w, source_h);
+	if (max_side <= 0) {
+		return;
+	}
+	lv_obj_set_size(icon, LV_MAX(1, source_w * icon_size / max_side), LV_MAX(1, source_h * icon_size / max_side));
+	lv_image_set_inner_align(icon, LV_IMAGE_ALIGN_CENTER);
+	lv_image_set_scale(icon, (uint32_t)(LV_SCALE_NONE * icon_size / max_side));
+
+	lv_obj_update_layout(tile);
+	if (tile_has_icon_halo(tile)) {
+		lv_obj_align_to(lv_obj_get_child(tile, 0), icon, LV_ALIGN_CENTER, 0, 0);
+	}
+}
+
 static bool gridpage_tokyo_icon(const char *label, const lv_image_dsc_t **icon, theme_semantic_t *tone) {
 	// Function-matched monochrome icons: the bitmap menu illustrations remain
 	// untouched in Dark/Light, while Tokyo Night uses the existing compact
@@ -240,6 +272,10 @@ static bool gridpage_tokyo_icon(const char *label, const lv_image_dsc_t **icon, 
 		{"tidal", &icon_tidal_mark, THEME_SEMANTIC_CYAN},
 		{"qobuz", &icon_qobuz_mark, THEME_SEMANTIC_PURPLE},
 		{"soundcloud", &icon_soundcloud_mark, THEME_SEMANTIC_AMBER},
+		{"soundcloud_likes", &icon_heart_filled, THEME_SEMANTIC_RED},
+		{"soundcloud_reposts", &icon_repeat_all, THEME_SEMANTIC_GREEN},
+		{"soundcloud_playlists", &icon_files_playlist, THEME_SEMANTIC_PURPLE},
+		{"soundcloud_account_settings", &icon_music_settings, THEME_SEMANTIC_BLUE},
 		{"subsonic", &icon_music_note, THEME_SEMANTIC_BLUE},
 		{"radio", &icon_radio_player, THEME_SEMANTIC_PURPLE},
 		{"podcasts", &icon_podcast_list, THEME_SEMANTIC_CYAN},
@@ -383,6 +419,19 @@ void gridpage_set_tile_orientation(lv_obj_t *grid, int index, bool horizontal) {
 	lv_obj_update_layout(tile);
 	if (tile_has_icon_halo(tile)) {
 		lv_obj_align_to(lv_obj_get_child(tile, 0), icon, LV_ALIGN_CENTER, 0, 0);
+	}
+}
+
+// A caption that is not a tag: an account name, say. The tile keeps the label
+// it was built with for the theme mapping, so a Tokyo Night refresh still finds
+// the right glyph after the text was replaced.
+void gridpage_set_tile_caption(lv_obj_t *grid, int index, const char *text) {
+	if (!grid || !text || index < 0 || index >= (int)lv_obj_get_child_count(grid)) {
+		return;
+	}
+	lv_obj_t *label = tile_label_object(lv_obj_get_child(grid, index));
+	if (label) {
+		lv_label_set_text(label, tr(text));
 	}
 }
 

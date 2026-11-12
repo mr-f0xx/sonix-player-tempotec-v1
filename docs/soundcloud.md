@@ -7,8 +7,8 @@ Native SoundCloud API v2 client for `sonix_player`, supporting anonymous browsin
 1. Enable **SoundCloud** on **Settings → Plugins** (fresh installs start with optional streaming services off; existing updated devices keep it on) and restart if prompted.
 2. Connect the V1 to Wi-Fi.
 3. Open **Streaming → SoundCloud**. Both the standard tile grid and the compact list view include SoundCloud.
-4. **Anonymous mode**: you can immediately **Search tracks** and play public uploads without an account. On first API use, the client automatically discovers and caches a valid public SoundCloud web `client_id` (and rotates it automatically on `401` expiry).
-5. **Account mode (Free / Go / Go+)**: open **Account & Settings** inside SoundCloud (or place credentials on the microSD card — see below) to unlock **Likes**, **Reposts**, **Playlists**, Now Playing / Quick Panel **Like** toggling, and **Go+ High Quality (AAC 256 kbps)** streams.
+4. **Anonymous mode**: you can immediately search (the magnifier in the SoundCloud title bar) and play public uploads without an account. On first API use, the client automatically discovers and caches a valid public SoundCloud web `client_id` (and rotates it automatically on `401` expiry).
+5. **Account mode (Free / Go / Go+)**: the home page is four tiles — **Liked tracks**, **Reposts**, **Playlists** and the account tile, which names the account whose settings it opens. Sign in from that tile (or the gear in the title bar), or place credentials on the microSD card — see below — to unlock **Likes**, **Reposts**, **Playlists**, Now Playing / Quick Panel **Like** toggling, and **Go+ High Quality (AAC 256 kbps)** streams.
 
 ### Signing in (`oauth_token` / `username` / `streaming-keys.ini`)
 

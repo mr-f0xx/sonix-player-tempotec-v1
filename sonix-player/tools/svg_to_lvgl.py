@@ -472,6 +472,11 @@ COLOR_ICONS = [
     ("podcast.png", "menu_podcast", SECTION_ICON_SIZE),
     # SoundCloud joins the Streaming grid at the same size as its neighbours.
     ("soundcloud.png", "menu_soundcloud", SECTION_ICON_SIZE),
+    # The four tiles on the SoundCloud home page.
+    ("sc-likes.png", "menu_sc_likes", SECTION_ICON_SIZE),
+    ("sc-reposts.png", "menu_sc_reposts", SECTION_ICON_SIZE),
+    ("sc-playlists.png", "menu_sc_playlists", SECTION_ICON_SIZE),
+    ("sc-account.png", "menu_sc_account", SECTION_ICON_SIZE),
     ("audiobooks.png", "menu_audiobooks", MAIN_MENU_ICON_SIZE),
     ("audiobook-library.png", "menu_audiobook_library", SECTION_ICON_SIZE),
     ("audiobook-series.png", "menu_audiobook_series", SECTION_ICON_SIZE),
