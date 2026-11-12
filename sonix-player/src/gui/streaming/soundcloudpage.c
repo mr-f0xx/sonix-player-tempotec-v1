@@ -36,6 +36,10 @@
 // Liked tracks, Reposts, Playlists and the account: a 2x2 grid that fills the
 // panel under the heading.
 #define SC_HOME_TILES 4
+// The size each card's picture is drawn at, matching the size tools/svg_to_lvgl.py
+// emits it: SOUNDCLOUD_TILE_SIZE and SOUNDCLOUD_GLYPH_SIZE there.
+#define SOUNDCLOUD_TILE_ART_PX 72
+#define SOUNDCLOUD_TILE_GLYPH_PX 64
 
 static const int SC_CACHE_PRESET_MB[SC_CACHE_PRESET_COUNT] = {512, 1024, 2048, 4096, 8192, 0};
 
@@ -1563,14 +1567,15 @@ static void home_fit_tile_icons(void) {
 		return;
 	}
 	bool fn = theme_uses_function_glyphs();
-	// The menu illustrations carry their own margin inside the bitmap, the
-	// function glyphs are drawn tight, so the same card wants a larger number
-	// for the glyph.
-	int size = fn ? 54 : (bp_is_tempotec_v1() ? 68 : 92);
+	// Both pictures are rendered at exactly the size they are drawn at, so the
+	// card shows the artwork's own pixels and never a resampled copy of them.
+	int size = fn ? SOUNDCLOUD_TILE_GLYPH_PX : SOUNDCLOUD_TILE_ART_PX;
 	for (int i = 0; i < SC_HOME_TILES; i++) {
 		gridpage_set_tile_icon_size(home_grid, i, size);
-		// A bigger picture leaves the caption less room in the row layout, and
-		// the vertical one has to re-measure it against the card's width.
+		// Picture above, caption underneath, in every theme: the flat themes
+		// put the glyph beside the text on their menu rows, which leaves most
+		// of these taller cards empty. Re-applying the layout also measures the
+		// caption against the picture's new width.
 		gridpage_set_tile_orientation(home_grid, i, false);
 	}
 }
