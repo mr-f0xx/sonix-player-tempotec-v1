@@ -612,6 +612,23 @@ static lv_obj_t *find_clickable_with_label(lv_obj_t *root, const char *needle) {
 	return NULL;
 }
 
+static lv_obj_t *find_clickable_with_glyph(lv_obj_t *root, const lv_image_dsc_t *glyph) {
+	if (!root || lv_obj_is_hidden(root) || lv_obj_has_state(root, LV_STATE_DISABLED)) return NULL;
+	if (lv_obj_check_type(root, &lv_image_class) && lv_image_get_src(root) == glyph) {
+		lv_obj_t *cur = root;
+		while (cur && lv_obj_get_parent(cur) != NULL && !lv_obj_is_clickable(cur)) {
+			cur = lv_obj_get_parent(cur);
+		}
+		if (cur && lv_obj_get_parent(cur) != NULL && lv_obj_is_clickable(cur)) return cur;
+	}
+	uint32_t cnt = lv_obj_get_child_count(root);
+	for (uint32_t i = 0; i < cnt; i++) {
+		lv_obj_t *hit = find_clickable_with_glyph(lv_obj_get_child(root, (int32_t)i), glyph);
+		if (hit) return hit;
+	}
+	return NULL;
+}
+
 static lv_obj_t *find_textarea(lv_obj_t *root) {
 	if (!root) return NULL;
 	if (lv_obj_check_type(root, &lv_textarea_class)) return root;
@@ -674,7 +691,10 @@ int main(int argc, char **argv) {
 	lv_obj_update_layout(soundcloud_screen);
 
 	// 1. Search works without any account -> Discreet row spinner (no "Downloading" popup!) -> Playback handoff
-	lv_obj_t *search_row = find_clickable_with_label(soundcloud_screen, tr("soundcloud_search_tracks"));
+	// Search has no row of its own any more: the title bar's corner button is the
+	// only way in, and the home list must not repeat it.
+	assert(find_clickable_with_label(soundcloud_screen, tr("soundcloud_search_tracks")) == NULL);
+	lv_obj_t *search_row = find_clickable_with_glyph(soundcloud_screen, &icon_search);
 	assert(search_row != NULL);
 	lv_obj_send_event(search_row, LV_EVENT_CLICKED, NULL);
 	lv_obj_t *search_scr = lv_screen_active();
