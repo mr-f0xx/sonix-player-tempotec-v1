@@ -10,6 +10,7 @@
 #include "src/gui/board_profile.h"
 #include "src/gui/fonts/fonts.h"
 #include "src/gui/shell/azindex.h"
+#include "src/gui/shell/gridpage.h"
 #include "src/gui/shell/gui.h"
 #include "src/gui/shell/icons.h"
 #include "src/gui/nowplaying/player.h"
@@ -100,11 +101,19 @@ static char marked_station[RADIO_URL_MAX];
 static gui_config_t *g_cfg;
 
 // --- the hub ---
-static lv_obj_t *hub_container;
+// Language, Country, Genre and Flylo's favs: a 2x2 grid that fills the panel
+// under the heading, the same cards the SoundCloud and Subsonic home pages
+// draw. With no network the grid gives way to the notice and the Wi-Fi row.
+#define RADIO_HOME_TILES 4
+// The size each card's picture is drawn at, matching what tools/svg_to_lvgl.py
+// emits for it: HOME_TILE_SIZE and HOME_TILE_GLYPH_SIZE there.
+#define RADIO_TILE_ART_PX 54
+#define RADIO_TILE_GLYPH_PX 46
+
+static lv_obj_t *hub_grid;
+static lv_obj_t *hub_offline;
 static lv_obj_t *hub_wifi_warning;
 static lv_obj_t *hub_wifi_row;
-static lv_obj_t *hub_browse_rows[3];
-static lv_obj_t *hub_flylo_row;
 static lv_obj_t *hub_favourites_btn;
 static lv_obj_t *hub_recent_btn;
 static lv_obj_t *hub_search_btn;
@@ -747,7 +756,7 @@ static void menu_btn_cb(lv_event_t *e) {
 	snprintf(menu_name, sizeof(menu_name), "%s", stations[index].name);
 
 	static const popover_item_t items[] = {
-		{"remove_from_favourites", menu_remove_action, NULL},
+		{"remove_from_favourites", menu_remove_action, NULL, false, false},
 	};
 	popover_show(button, items, 1);
 }
@@ -1229,20 +1238,11 @@ static void open_browse(radio_browse_t kind, const char *title) {
 	switch_screen(radiolist_screen);
 }
 
-static void language_cb(lv_event_t *e) {
-	(void)e;
-	open_browse(RADIO_BROWSE_LANGUAGES, "language");
-}
-
-static void country_cb(lv_event_t *e) {
-	(void)e;
-	open_browse(RADIO_BROWSE_COUNTRIES, "radio_country");
-}
-
-static void genre_cb(lv_event_t *e) {
-	(void)e;
-	open_browse(RADIO_BROWSE_GENRES, "genre");
-}
+// Tiles call a plain action: the grid already drops a tap that was really a
+// swipe, and nothing here needs the event.
+static void hub_language(void) { open_browse(RADIO_BROWSE_LANGUAGES, "language"); }
+static void hub_country(void) { open_browse(RADIO_BROWSE_COUNTRIES, "radio_country"); }
+static void hub_genre(void) { open_browse(RADIO_BROWSE_GENRES, "genre"); }
 
 static void open_stored(list_mode_t mode, const char *title) {
 	stations_from_terms = false;
@@ -1258,10 +1258,7 @@ static void open_stored(list_mode_t mode, const char *title) {
 	switch_screen(radiolist_screen);
 }
 
-static void flylo_cb(lv_event_t *e) {
-	(void)e;
-	open_stored(LIST_FLYLO, "radio_flylo_favs");
-}
+static void hub_flylo(void) { open_stored(LIST_FLYLO, "radio_flylo_favs"); }
 
 static void favourites_cb(lv_event_t *e) {
 	(void)e;
@@ -1296,29 +1293,29 @@ static void wifi_row_cb(lv_event_t *e) {
 static void hub_refresh(void) {
 	bool connected = wifi_is_connected();
 
-	for (int i = 0; i < 3; i++) {
-		if (connected) {
-			show(hub_browse_rows[i]);
-		} else {
-			hide(hub_browse_rows[i]);
-		}
-	}
-
 	// With no network the page is the notice and nothing else. The starred and
 	// recent lists do come out of the database rather than the directory, but
 	// every station in them is a stream: offering them over a page that says
 	// the Wi-Fi is off leads to three corner buttons that open lists nothing in
 	// which can be played.
 	if (connected) {
-		show(hub_flylo_row);
+		if (hub_grid) {
+			show(hub_grid);
+		}
+		if (hub_offline) {
+			hide(hub_offline);
+		}
 		show(hub_favourites_btn);
 		show(hub_recent_btn);
 		show(hub_search_btn);
 		show(hub_custom_btn);
-		hide(hub_wifi_warning);
-		hide(hub_wifi_row);
 	} else {
-		hide(hub_flylo_row);
+		if (hub_grid) {
+			hide(hub_grid);
+		}
+		if (hub_offline) {
+			show(hub_offline);
+		}
 		hide(hub_favourites_btn);
 		hide(hub_recent_btn);
 		hide(hub_search_btn);
@@ -1326,12 +1323,8 @@ static void hub_refresh(void) {
 		// in it is a stream: a list nothing in which can be played is the same
 		// empty promise the other three would be.
 		hide(hub_custom_btn);
-		show(hub_wifi_warning);
-		show(hub_wifi_row);
 	}
 
-	// The heading gets the width the buttons are not using.
-	settingsrow_title_corner_slots(settingsrow_page_title(radiopage_screen), g_cfg, connected ? 4 : 0);
 }
 
 static void hub_poll_cb(lv_timer_t *timer) {
@@ -1425,18 +1418,91 @@ static void build_search_page(gui_config_t *cfg) {
 	switcher_attach_back_gesture(radiosearch_screen);
 }
 
+// The card the page falls back to with no network: the notice, and the one row
+// that leads to where the Wi-Fi is turned on. It takes the grid's place rather
+// than sitting above it, so the page never scrolls to reach the fix.
+static void build_offline_hub(gui_config_t *cfg) {
+	int top = settingsrow_content_top(cfg);
+	hub_offline = lv_obj_create(radiopage_screen);
+	lv_obj_set_size(hub_offline, cfg->screen_width - 2 * cfg->padding, cfg->screen_height - top);
+	lv_obj_align(hub_offline, LV_ALIGN_TOP_LEFT, cfg->padding, top);
+	lv_obj_set_style_bg_opa(hub_offline, LV_OPA_TRANSP, 0);
+	lv_obj_set_style_border_width(hub_offline, 0, 0);
+	lv_obj_set_style_pad_all(hub_offline, 0, 0);
+	lv_obj_set_style_pad_gap(hub_offline, 12, 0);
+	lv_obj_set_scrollable(hub_offline, false);
+	lv_obj_set_flex_flow(hub_offline, LV_FLEX_FLOW_COLUMN);
+	// From the top of the panel, where the tiles would start: a notice left
+	// floating in the middle of an otherwise empty page reads as if something
+	// had failed to load above it. Cross-axis centre keeps the message itself
+	// centred in the width.
+	lv_obj_set_flex_align(hub_offline, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+
+	// The same notice as the Wi-Fi transfer page: a centred message, and below
+	// it the "Wi-Fi settings" row that leads to where it can be fixed.
+	hub_wifi_warning = lv_label_create(hub_offline);
+	lv_label_set_text(hub_wifi_warning, tr("enable_wi_fi_first"));
+	lv_label_set_long_mode(hub_wifi_warning, LV_LABEL_LONG_WRAP);
+	lv_obj_set_width(hub_wifi_warning, lv_pct(100));
+	lv_obj_add_style(hub_wifi_warning, &theme_style_text, 0);
+	lv_obj_set_style_text_font(hub_wifi_warning, &font_ui_22, 0);
+	lv_obj_set_style_text_align(hub_wifi_warning, LV_TEXT_ALIGN_CENTER, 0);
+	lv_obj_set_style_pad_hor(hub_wifi_warning, 4, 0);
+
+	hub_wifi_row = settingsrow_add(hub_offline, "wi_fi_settings", NULL, wifi_row_cb, NULL);
+	hide(hub_offline);
+}
+
+// The cards are twice a menu row's height and they are the whole page, so the
+// picture is drawn large and centred with the caption underneath in every
+// theme -- including the flat ones, whose menu rows would otherwise put the
+// glyph beside the text. Dark and Light show the illustrations at the size the
+// generator emits them; the flat themes show the glyph in their own accent.
+static void hub_style_tiles(void) {
+	if (!hub_grid) {
+		return;
+	}
+	static const lv_image_dsc_t *const art[RADIO_HOME_TILES] = {
+		&icon_menu_radio_language,
+		&icon_menu_radio_country,
+		&icon_menu_radio_genre,
+		&icon_menu_radio_flylo,
+	};
+	static const lv_image_dsc_t *const glyphs[RADIO_HOME_TILES] = {
+		&icon_radio_language_glyph,
+		&icon_radio_country_glyph,
+		&icon_radio_genre_glyph,
+		&icon_radio_flylo_glyph,
+	};
+	static const theme_semantic_t tones[RADIO_HOME_TILES] = {
+		THEME_SEMANTIC_BLUE,
+		THEME_SEMANTIC_GREEN,
+		THEME_SEMANTIC_AMBER,
+		THEME_SEMANTIC_PURPLE,
+	};
+	bool glyph = theme_uses_function_glyphs();
+	for (int i = 0; i < RADIO_HOME_TILES; i++) {
+		// Both pictures are rendered at exactly the size they are drawn at, so
+		// a card shows its own pixels and never a resampled copy of them.
+		gridpage_set_tile_icon_style(hub_grid, i, glyph ? glyphs[i] : art[i],
+									 glyph ? RADIO_TILE_GLYPH_PX : RADIO_TILE_ART_PX, glyph,
+									 theme_semantic_color(tones[i]), false);
+		// Picture above, caption underneath, in every theme. Re-applying the
+		// layout also measures the caption against the picture's new width.
+		gridpage_set_tile_orientation(hub_grid, i, false);
+	}
+}
+
 void radiopage_init(gui_config_t *cfg) {
 	g_cfg = cfg;
 
 	radio_init();
 
-	hub_container = settingsrow_page(radiopage_screen, cfg, "radio");
-	settingsrow_title_corner_slots(settingsrow_page_title(radiopage_screen), cfg, 3);
-
-	// The drag towards the player. The screen already has it (gui.c attaches it
-	// along with the other pages'), but the container sits on top and would take
-	// the gesture, so as on the Qobuz pages it is attached to both.
-	player_sheet_attach_drag(hub_container, true);
+	lv_obj_add_style(radiopage_screen, &theme_style_screen, 0);
+	// No heading: with the four corner shortcuts in the row there is room for
+	// three letters of one, and the tiles say what the page is anyway.
+	// The drag towards the player, on the screen the tiles sit on.
+	player_sheet_attach_drag(radiopage_screen, true);
 
 	// Top right, in the corner every page of this player keeps its shortcuts:
 	// the starred stations, the ones played most recently to their left, and
@@ -1454,38 +1520,33 @@ void radiopage_init(gui_config_t *cfg) {
 	hub_search_btn = corner_button(cfg, 3, &icon_search);
 	lv_obj_add_event_cb(hub_search_btn, search_cb, LV_EVENT_CLICKED, NULL);
 
-	hub_browse_rows[0] = settingsrow_add(hub_container, "language", NULL, language_cb, NULL);
-	hub_browse_rows[1] = settingsrow_add(hub_container, "radio_country", NULL, country_cb, NULL);
-	hub_browse_rows[2] = settingsrow_add(hub_container, "genre", NULL, genre_cb, NULL);
-
-	// Flylo's curated chill-hop picks -- a short, hand-picked list that lives
-	// on the page rather than in a file or a database. Same row shape as the
-	// browse entries above, so the hub reads as one list.
-	hub_flylo_row = settingsrow_add(hub_container, "radio_flylo_favs", NULL, flylo_cb, NULL);
-
-	// The same notice as the Wi-Fi transfer page: a centred message, and below
-	// it the "Wi-Fi settings" row that leads to where it can be fixed.
-	hub_wifi_warning = lv_label_create(hub_container);
-	lv_label_set_text(hub_wifi_warning, tr("enable_wi_fi_first"));
-	lv_label_set_long_mode(hub_wifi_warning, LV_LABEL_LONG_WRAP);
-	lv_obj_set_width(hub_wifi_warning, lv_pct(100));
-	lv_obj_add_style(hub_wifi_warning, &theme_style_text, 0);
-	lv_obj_set_style_text_font(hub_wifi_warning, &font_ui_22, 0);
-	lv_obj_set_style_text_align(hub_wifi_warning, LV_TEXT_ALIGN_CENTER, 0);
-	lv_obj_set_style_pad_hor(hub_wifi_warning, 4, 0);
-	lv_obj_set_style_margin_top(hub_wifi_warning, 14, 0);
-	hide(hub_wifi_warning);
-
-	hub_wifi_row = settingsrow_add(hub_container, "wi_fi_settings", NULL, wifi_row_cb, NULL);
-	lv_obj_set_style_margin_top(hub_wifi_row, 16, 0);
-	hide(hub_wifi_row);
+	// Four destinations, so two square tiles fill the panel under the heading
+	// exactly: the grid is sized from the space that is left, and there is
+	// never a fifth row to scroll to.
+	const grid_entry_t home_entries[] = {
+		{"language", &icon_menu_radio_language, NULL, hub_language},
+		{"radio_country", &icon_menu_radio_country, NULL, hub_country},
+		{"genre", &icon_menu_radio_genre, NULL, hub_genre},
+		// Flylo's curated chill-hop picks -- a short, hand-picked list that
+		// lives on the page rather than in a file or a database.
+		{"radio_flylo_favs", &icon_menu_radio_flylo, NULL, hub_flylo},
+	};
+	hub_grid = gridpage_build(radiopage_screen, cfg, home_entries, RADIO_HOME_TILES, 2, 2, true);
+	// The captions are longer than one line in several languages ("Sprog",
+	// "Pays", "Flux Flylo"), so let them use two lines instead of an ellipsis.
+	for (int i = 0; i < RADIO_HOME_TILES; i++) {
+		gridpage_set_tile_label_lines(hub_grid, i, 2);
+	}
+	build_offline_hub(cfg);
+	hub_style_tiles();
+	theme_register_refresh(hub_style_tiles);
 
 	build_list_page(cfg);
 	build_search_page(cfg);
 
 	lv_obj_add_event_cb(radiopage_screen, hub_loaded_cb, LV_EVENT_SCREEN_LOADED, NULL);
 
-	// The Wi-Fi can come and go while the page is open; the rows follow it.
+	// The Wi-Fi can come and go while the page is open; the page follows it.
 	hub_timer = lv_timer_create(hub_poll_cb, 1000, NULL);
 	(void)hub_timer;
 }

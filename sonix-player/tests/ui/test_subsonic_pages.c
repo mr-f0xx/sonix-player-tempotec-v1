@@ -560,14 +560,14 @@ int main(int argc, char **argv) {
 
 	// The pictures are rendered at exactly the size the cards draw them, so the
 	// page never asks LVGL to resample one.
-	assert(icon_menu_sub_server.header.w == 58 && icon_menu_sub_server.header.h == 58);
-	assert(icon_menu_sub_test.header.w == 58 && icon_menu_sub_test.header.h == 58);
-	assert(icon_menu_sub_folders.header.w == 58 && icon_menu_sub_folders.header.h == 58);
-	assert(icon_menu_sub_artists.header.w == 58 && icon_menu_sub_artists.header.h == 58);
-	assert(icon_sub_server_glyph.header.w == 50 && icon_sub_server_glyph.header.h == 50);
-	assert(icon_sub_test_glyph.header.w == 50 && icon_sub_test_glyph.header.h == 50);
-	assert(icon_sub_folders_glyph.header.w == 50 && icon_sub_folders_glyph.header.h == 50);
-	assert(icon_sub_artists_glyph.header.w == 50 && icon_sub_artists_glyph.header.h == 50);
+	assert(icon_menu_sub_server.header.w == 54 && icon_menu_sub_server.header.h == 54);
+	assert(icon_menu_sub_test.header.w == 54 && icon_menu_sub_test.header.h == 54);
+	assert(icon_menu_sub_folders.header.w == 54 && icon_menu_sub_folders.header.h == 54);
+	assert(icon_menu_sub_artists.header.w == 54 && icon_menu_sub_artists.header.h == 54);
+	assert(icon_sub_server_glyph.header.w == 46 && icon_sub_server_glyph.header.h == 46);
+	assert(icon_sub_test_glyph.header.w == 46 && icon_sub_test_glyph.header.h == 46);
+	assert(icon_sub_folders_glyph.header.w == 46 && icon_sub_folders_glyph.header.h == 46);
+	assert(icon_sub_artists_glyph.header.w == 46 && icon_sub_artists_glyph.header.h == 46);
 	for (int i = 0; i < 4; i++) {
 		const lv_image_dsc_t *art[] = {&icon_menu_sub_server, &icon_menu_sub_test, &icon_menu_sub_folders,
 									   &icon_menu_sub_artists};
