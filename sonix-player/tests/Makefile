@@ -1271,6 +1271,7 @@ SOUNDCLOUDPAGE_SRC = $(ROOT)/tests/ui/test_soundcloud_pages.c \
                      $(ROOT)/src/gui/streaming/soundcloudpage.c \
                      $(ROOT)/src/gui/streaming/soundcloud_icon.c \
                      $(ROOT)/src/gui/shell/settingsrow.c \
+                     $(ROOT)/src/gui/shell/gridpage.c \
                      $(ROOT)/src/gui/shell/keyboard.c \
                      $(ROOT)/src/gui/shell/popover.c \
                      $(ROOT)/src/gui/shell/spinner.c \

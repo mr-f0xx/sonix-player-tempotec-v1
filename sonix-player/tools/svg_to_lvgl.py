@@ -429,6 +429,10 @@ ICONS = [
 # weight in the binary and nothing else.
 MAIN_MENU_ICON_SIZE = 128
 SECTION_ICON_SIZE = 112
+# The SoundCloud home cards draw their picture at this size, so the artwork and
+# the flat themes' glyphs are rendered at it rather than scaled at run time.
+SOUNDCLOUD_TILE_SIZE = 72
+SOUNDCLOUD_GLYPH_SIZE = 64
 
 COLOR_ICONS = [
     # The quality badges under a track's title. Here rather than above because
@@ -472,6 +476,19 @@ COLOR_ICONS = [
     ("podcast.png", "menu_podcast", SECTION_ICON_SIZE),
     # SoundCloud joins the Streaming grid at the same size as its neighbours.
     ("soundcloud.png", "menu_soundcloud", SECTION_ICON_SIZE),
+    # The same four glyphs the SoundCloud home cards draw, rendered at the size
+    # those cards use so the flat themes show them unscaled instead of blowing
+    # a 32 px icon up by half again.
+    ("heart.svg", "sc_likes_glyph", SOUNDCLOUD_GLYPH_SIZE),
+    ("repeat.svg", "sc_reposts_glyph", SOUNDCLOUD_GLYPH_SIZE),
+    ("files-playlist.svg", "sc_playlists_glyph", SOUNDCLOUD_GLYPH_SIZE),
+    ("music-settings.svg", "sc_account_glyph", SOUNDCLOUD_GLYPH_SIZE),
+    # The four tiles on the SoundCloud home page. Emitted at the size those
+    # cards draw them, so the player never has to resample the artwork.
+    ("sc-likes.png", "menu_sc_likes", SOUNDCLOUD_TILE_SIZE),
+    ("sc-reposts.png", "menu_sc_reposts", SOUNDCLOUD_TILE_SIZE),
+    ("sc-playlists.png", "menu_sc_playlists", SOUNDCLOUD_TILE_SIZE),
+    ("sc-account.png", "menu_sc_account", SOUNDCLOUD_TILE_SIZE),
     ("audiobooks.png", "menu_audiobooks", MAIN_MENU_ICON_SIZE),
     ("audiobook-library.png", "menu_audiobook_library", SECTION_ICON_SIZE),
     ("audiobook-series.png", "menu_audiobook_series", SECTION_ICON_SIZE),

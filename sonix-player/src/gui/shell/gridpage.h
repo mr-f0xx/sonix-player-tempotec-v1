@@ -43,10 +43,20 @@ void gridpage_set_tile(lv_obj_t *grid, int index, const lv_image_dsc_t *icon, co
 void gridpage_set_tile_icon_style(lv_obj_t *grid, int index, const lv_image_dsc_t *icon, int icon_size,
 								  bool recolor, lv_color_t color, bool glow);
 
+// Rescales a tile's picture in place, keeping its source and tint. For pages
+// whose tiles are taller than a menu row's, so the illustration can grow with
+// the card instead of staying at the compact default.
+void gridpage_set_tile_icon_size(lv_obj_t *grid, int index, int icon_size);
+
 // Sets a tile's contents in a horizontal icon-and-label row, or restores the
 // original centered vertical layout. The horizontal form is used by the V1's
 // Tokyo Night home menu; existing themes keep their original construction.
 void gridpage_set_tile_orientation(lv_obj_t *grid, int index, bool horizontal);
+
+// Sets a tile's caption to text that is not a translation key (an account name,
+// say). The tile keeps the label it was built with for the theme mapping, so a
+// Tokyo Night refresh still finds the tile's glyph afterwards.
+void gridpage_set_tile_caption(lv_obj_t *grid, int index, const char *text);
 
 // Hides a tile caption without deleting its text or changing other grids.
 // Pair with the vertical orientation to center an icon on its own.
