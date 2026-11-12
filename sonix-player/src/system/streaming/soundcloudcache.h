@@ -16,13 +16,23 @@
 // background thread completes the download. Go+ fMP4 AAC segments are unwrapped
 // into standard ADTS .aac files before decoder_open().
 
-#define SOUNDCLOUDCACHE_MAX_BYTES (512LL * 1024 * 1024)
-#define SOUNDCLOUDCACHE_MIN_FREE (256LL * 1024 * 1024)
+#define SOUNDCLOUDCACHE_DEFAULT_MAX_MB 512
+#define SOUNDCLOUDCACHE_MIN_MAX_MB 64
+#define SOUNDCLOUDCACHE_MAX_MAX_MB (1024 * 1024)
+#define SOUNDCLOUDCACHE_MAX_BYTES ((long long)SOUNDCLOUDCACHE_DEFAULT_MAX_MB * 1024LL * 1024LL)
+#define SOUNDCLOUDCACHE_MIN_FREE (256LL * 1024LL * 1024LL)
 
 void soundcloudcache_set_root(const char *sd_root);
 const char *soundcloudcache_dir(void);
 bool soundcloudcache_available(void);
 const char *soundcloudcache_last_error(void);
+
+// Configurable SD cache ceiling (`[soundcloud] cache_max_mb` in device_config.ini).
+// `0` means unlimited (evicts only when free microSD space drops below SOUNDCLOUDCACHE_MIN_FREE).
+int soundcloudcache_get_max_mb(void);
+void soundcloudcache_set_max_mb(int max_mb);
+long long soundcloudcache_get_max_bytes(void);
+void soundcloudcache_set_max_bytes(long long max_bytes);
 
 bool soundcloudcache_get(const soundcloud_track_t *track, char *out_path, size_t out_size);
 bool soundcloudcache_prefetch(const soundcloud_track_t *track);
