@@ -1068,6 +1068,11 @@ static void drag_cb(lv_event_t *e) {
 
 	lv_event_code_t code = lv_event_get_code(e);
 	if (code == LV_EVENT_PRESSED) {
+		// Count the start of the swipe once. power.c deliberately does not
+		// trust LVGL's continuously refreshed pointer timestamp while this
+		// lock screen is visible, so a held touch in a pocket cannot keep
+		// the backlight on indefinitely.
+		power_notify_activity();
 		lv_indev_get_point(indev, &start);
 		lv_anim_delete(saver, anim_y_cb);
 		tracking = true;
