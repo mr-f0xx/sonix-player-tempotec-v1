@@ -25,6 +25,11 @@ CORE = $(ROOT)/src/system/streaming/subsonic.c \
 test: $(BUILD)/test_subsonic
 	python3 run_subsonic_tests.py $(BUILD)/test_subsonic
 
+# Everything Subsonic: the bridge and its mock server, the download worker
+# against a real temporary card, and the pages drawn with LVGL.
+.PHONY: subsonic-all
+subsonic-all: test subsonicdl subsonic-ui
+
 # Pseudo-files (procfs/configfs) can have zero size or reject seeking.
 .PHONY: readfile
 readfile: $(BUILD)/test_read_file_content
@@ -87,6 +92,18 @@ qobuzdl: $(BUILD)/test_qobuzdl
 $(BUILD)/test_qobuzdl: test_qobuzdl.c $(ROOT)/src/system/streaming/qobuzdl.c $(ROOT)/src/system/streaming/qobuzdl.h
 	@mkdir -p $(BUILD)
 	$(CC) $(CPPFLAGS) -I$(ROOT)/lvgl $(CFLAGS) -Wno-error=format-truncation -DLV_CONF_INCLUDE_SIMPLE=1 -DHOST_BUILD -o $@ test_qobuzdl.c $(ROOT)/src/system/streaming/qobuzdl.c $(ROOT)/src/system/streaming/podcastdl.c $(LDFLAGS) $(LDLIBS)
+
+# The Subsonic download worker against a fake transport and a real temporary
+# card: what is saved, what is not, and what a cut or cancelled transfer
+# leaves behind. No LVGL.
+.PHONY: subsonicdl
+subsonicdl: $(BUILD)/test_subsonicdl
+	$(BUILD)/test_subsonicdl
+
+$(BUILD)/test_subsonicdl: test_subsonicdl.c $(ROOT)/src/system/streaming/subsonicdl.c \
+                          $(ROOT)/src/system/streaming/subsonicdl.h
+	@mkdir -p $(BUILD)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -DHOST_BUILD -o $@ test_subsonicdl.c $(ROOT)/src/system/streaming/subsonicdl.c $(LDFLAGS) $(LDLIBS)
 
 $(BUILD)/test_subsonic: test_subsonic.c support.c $(CORE) $(shell find $(ROOT)/src/system -name '*.h')
 	@mkdir -p $(BUILD)
@@ -1296,6 +1313,8 @@ $(BUILD)/test_soundcloud_pages: $(SOUNDCLOUDPAGE_OBJ)
 # cards, two by two, in every language and every theme.
 SUBSONICPAGE_SRC = $(ROOT)/tests/ui/test_subsonic_pages.c \
                      $(ROOT)/src/gui/streaming/subsonicpage.c \
+                     $(ROOT)/src/gui/streaming/subsonicdlpage.c \
+                     $(ROOT)/src/system/streaming/subsonicdl.c \
                      $(ROOT)/src/gui/streaming/soundcloud_icon.c \
                      $(ROOT)/src/gui/shell/settingsrow.c \
                      $(ROOT)/src/gui/shell/gridpage.c \

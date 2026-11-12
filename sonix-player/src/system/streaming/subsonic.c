@@ -369,6 +369,18 @@ bool subsonic_stream_url(const char *id, subsonic_quality_t q, char *out, size_t
 	return true;
 }
 
+bool subsonic_cover_url(const char *id, char *out, size_t size, char *error, size_t error_size) {
+	reason(error, error_size, "");
+	// The cover is an image, not an API document: the response is never parsed,
+	// so the request is exactly the one the API uses and the caller ignores the
+	// f=json parameter the server only consults for errors.
+	if (!out || !size || !id || !id[0] ||
+		!request_url("getCoverArt", "id", id, out, size, error, error_size)) {
+		return false;
+	}
+	return true;
+}
+
 static bool api(const char *endpoint, const char *key, const char *value, char **body,
 				json_doc_t *doc, int *response, char *error, size_t size) {
 	reason(error, size, "");
@@ -472,6 +484,12 @@ static bool entry(const json_doc_t *doc, int obj, subsonic_entry_kind_t kind, su
 	}
 	json_obj_str(doc, obj, "artist", out->artist, sizeof(out->artist));
 	json_obj_str(doc, obj, "album", out->album, sizeof(out->album));
+	// The album's own identity, when the server sends it: it is what keeps
+	// two albums with the same artist and title in different download folders.
+	// Absent is legal -- older servers omit it -- and is not an error.
+	if (!json_str_exact(doc, json_get(doc, obj, "albumId"), out->album_id, sizeof(out->album_id))) {
+		out->album_id[0] = '\0';
+	}
 	json_obj_str(doc, obj, "suffix", out->suffix, sizeof(out->suffix));
 	long duration = json_obj_long(doc, obj, "duration", 0);
 	out->duration = duration > 0 && duration <= INT_MAX ? (int)duration : 0;

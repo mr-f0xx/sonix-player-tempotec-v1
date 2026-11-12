@@ -4796,3 +4796,59 @@ unchanged on the rest of the interface.
 `test_power_display` simulates a held pointer refreshing LVGL's timestamp and
 checks that it cannot hold the screensaver lit indefinitely, that a swipe
 restarts the idle window, and that ordinary pages still respect LVGL activity.
+
+## Subsonic downloads on the SD card
+
+**Streaming → Subsonic** could play a server's music but never keep it: with no
+Wi-Fi, the music was gone. A track, or the rest of the album it sits on, can now
+be saved to the card as an ordinary file and played from there afterwards.
+
+Long-pressing a track in a Subsonic list opens a three-item menu: save this
+track, save the rest of the page (which is the whole album on an album page, the
+whole directory on a folder page) and open the saved-music list. The same list
+is one tap from the arrow now in the corner of the Subsonic home page, and the
+settings page carries a paragraph explaining both. A track already on the card
+is drawn with a tick.
+
+What is saved is what would have been streamed, in the **Quality** in force:
+MP3 or Opus transcoded by the server, or the original file when Raw is chosen;
+Raw entries that are not FLAC/MP3/Opus are refused, exactly as for playback.
+Files land in `Music/Subsonic Downloads/<artist>/<album>/<artist> - <title>` —
+the `Music` folder the podcast and Qobuz downloaders already use — so the
+library, playlists and the queue treat them as local tracks, and one album
+folder holds one `cover.jpg`/`cover.png` with a hidden marker naming the album
+it belongs to, so two albums of the same name do not collide.
+
+`subsonicdl.c` follows the shape the Qobuz and podcast downloaders already use,
+because the constraints are the player's, not the service's: one detached
+low-priority worker with a 256 KiB stack (not the GUI thread, whose stack is
+shared with everything else), one job at a time, reads of 32 KiB through a
+bounded `.part` file that is renamed only once its length matches the server's
+`Content-Length`, a `.tags` sidecar for the title/artist/album the list shows,
+and no half-written track left by a cut connection, a cancellation or a card
+that went away mid-transfer. The card is re-checked on every read, `Wi-Fi` is
+kept awake for the duration through `wifi_in_use()`, and a cancel closes the
+socket from the GUI thread so a stalled read returns at once.
+
+The downloads page is a progress card (track, bar, percentage, Cancel) above
+the files already on the card, newest first; its rows play the local file and
+long-press to delete it. Deleting removes the `.tags` sidecar, and an album
+folder left holding only its cover and marker is removed, then the artist
+folder if that is empty too — nothing outside the download folder is ever
+deleted. A once-a-second timer repaints the numbers only while the page is the
+loaded screen, and it does no I/O; the page re-reads the card on load, when a
+download ends and after a delete.
+
+Files are permanent and nothing prunes them; storage is the user's budget, not
+the app's. Downloads are per quality: a track saved as MP3 256 is not treated as
+present at Opus 320, and re-downloading an album after adding a track fetches
+only the new one.
+
+Tests: `make subsonicdl` runs the worker against a real temporary card and a
+fake transport — FAT-forbidden characters and UTF-8-safe shortening, one album
+folder and one cover for four tracks, a truncated transfer leaving neither a
+file nor a `.part`, a cancelled transfer, and a delete that empties the album
+and artist folders but never anything outside them. `make subsonic-ui` now
+links the real downloads page and checks that the corner arrow opens it, that
+an empty card says so in a translated sentence, and that the page has no
+overlaps in the shipped languages.
