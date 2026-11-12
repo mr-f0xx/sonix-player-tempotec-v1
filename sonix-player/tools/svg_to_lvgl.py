@@ -494,8 +494,8 @@ COLOR_ICONS = [
     # glyph itself, at the size the card gives it.
     ("globe.svg", "radio_language_glyph", HOME_TILE_GLYPH_SIZE),
     ("flag.svg", "radio_country_glyph", HOME_TILE_GLYPH_SIZE),
-    ("genre.svg", "radio_genre_glyph", HOME_TILE_GLYPH_SIZE),
-    ("headphones.svg", "radio_flylo_glyph", HOME_TILE_GLYPH_SIZE),
+    ("music-note.svg", "radio_genre_glyph", HOME_TILE_GLYPH_SIZE),
+    ("heart-outline.svg", "radio_flylo_glyph", HOME_TILE_GLYPH_SIZE),
     # The four tiles on the SoundCloud home page. Emitted at the size those
     # cards draw them, so the player never has to resample the artwork.
     ("sc-likes.png", "menu_sc_likes", HOME_TILE_SIZE),

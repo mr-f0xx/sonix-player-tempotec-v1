@@ -110,8 +110,8 @@ if __name__ == '__main__':
         ('sub-artists.png', (113, 77, 217), 'artist.svg'),
         ('radio-language.png', (56, 119, 213), 'globe.svg'),
         ('radio-country.png', (46, 163, 104), 'flag.svg'),
-        ('radio-genre.png', (206, 140, 44), 'genre.svg'),
-        ('radio-flylo.png', (113, 77, 217), 'headphones.svg'),
+        ('radio-genre.png', (206, 140, 44), 'music-note.svg'),
+        ('radio-flylo.png', (113, 77, 217), 'heart-outline.svg'),
     ]
     for name, colour, svg in tiles:
         build(colour, os.path.join(icons, svg), os.path.join(icons, name))

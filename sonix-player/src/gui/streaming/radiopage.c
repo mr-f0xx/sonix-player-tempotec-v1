@@ -1325,8 +1325,6 @@ static void hub_refresh(void) {
 		hide(hub_custom_btn);
 	}
 
-	// The heading gets the width the buttons are not using.
-	settingsrow_title_corner_slots(settingsrow_page_title(radiopage_screen), g_cfg, connected ? 4 : 0);
 }
 
 static void hub_poll_cb(lv_timer_t *timer) {
@@ -1497,9 +1495,8 @@ void radiopage_init(gui_config_t *cfg) {
 	radio_init();
 
 	lv_obj_add_style(radiopage_screen, &theme_style_screen, 0);
-	settingsrow_title(radiopage_screen, cfg, "radio");
-	settingsrow_title_corner_slots(settingsrow_page_title(radiopage_screen), cfg, 3);
-
+	// No heading: with the four corner shortcuts in the row there is room for
+	// three letters of one, and the tiles say what the page is anyway.
 	// The drag towards the player, on the screen the tiles sit on.
 	player_sheet_attach_drag(radiopage_screen, true);
 
