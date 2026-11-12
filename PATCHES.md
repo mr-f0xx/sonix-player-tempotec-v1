@@ -4693,3 +4693,20 @@ or the bound is reached, the device is left to bluez.
 
 Tests: `test_bluetooth` refuses the profile for a linked car and checks the
 retry spacing, the bound, and that a disconnect and reconnect asks again.
+
+## Screen timeout with the lock-screen screensaver (issue #286)
+
+LVGL counts a pointer that remains pressed as ongoing activity. On the
+screensaver lock screen, pressure against the player in a pocket could keep
+refreshing that pointer timestamp and prevent the configured screen-off timeout
+from ever expiring.
+
+While the screensaver is visible, the timeout now uses the explicit user
+activity clock instead of LVGL's repeated pointer timestamp. A real swipe still
+counts: its initial press refreshes that clock, as do physical keys, and waking
+by touch starts a fresh interval. The existing LVGL touch-idle behavior remains
+unchanged on the rest of the interface.
+
+`test_power_display` simulates a held pointer refreshing LVGL's timestamp and
+checks that it cannot hold the screensaver lit indefinitely, that a swipe
+restarts the idle window, and that ordinary pages still respect LVGL activity.

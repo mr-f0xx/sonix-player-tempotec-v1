@@ -12,6 +12,7 @@
 #include "src/system/audio/waveform.h"
 #include "src/system/device/ota.h"
 #include "src/gui/library/browser.h"
+#include "src/gui/settings/screensaver.h"
 #include "src/system/device/system.h"
 #include "src/system/core/panel.h"
 
@@ -516,7 +517,14 @@ static uint32_t boottime_ms(void) {
 	return (uint32_t)(ts.tv_sec * 1000) + (uint32_t)(ts.tv_nsec / 1000000);
 }
 
-// current idle time in ms considering both touch (LVGL) and physical buttons
+// Current idle time in ms considering touch (LVGL) and physical buttons.
+//
+// While the lock-screen screensaver is up, use the explicit activity marker
+// instead of LVGL's pointer timestamp. The screensaver is a display that may
+// be left in a pocket: a pointer held against it can keep LVGL's timestamp
+// fresh forever, defeating the timeout that is supposed to save the battery.
+// Its only gesture is a swipe to dismiss, which reports activity explicitly
+// from drag_cb; physical keys already report through power_notify_activity().
 static uint32_t input_idle_ms(uint32_t now) {
 	uint32_t touch_idle = lv_display_get_inactive_time(g_disp);
 
@@ -524,6 +532,9 @@ static uint32_t input_idle_ms(uint32_t now) {
 	uint32_t btn_idle = now - g_last_button_activity_ms;
 	pthread_mutex_unlock(&g_lock);
 
+	if (screensaver_is_visible()) {
+		return btn_idle;
+	}
 	return touch_idle < btn_idle ? touch_idle : btn_idle;
 }
 
@@ -1999,6 +2010,10 @@ void power_screen_on(void) {
 	set_indevs_enabled(true);
 	indev_timers_set_paused(false);
 	lv_display_trigger_activity(g_disp);
+	// A touch gesture can wake the panel without going through the queued
+	// power-button path. Keep the explicit activity clock in step as well: the
+	// screensaver's idle policy uses it while its lock screen is visible.
+	power_notify_activity();
 
 	// Radio restoration can involve slow hardware work and does not belong
 	// between the power press and the first visible frame.

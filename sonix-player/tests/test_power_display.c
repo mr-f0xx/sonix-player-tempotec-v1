@@ -136,6 +136,9 @@ static long saved_brightness = -1;
 static long wake_hold;
 static bool bt_tx, bt_rx, credible_vsync;
 static bool waveform_lit, led_dark;
+static bool saver_visible;
+
+bool screensaver_is_visible(void) { return saver_visible; }
 static unsigned wake_kicks;
 
 long config_get_int(const char *section, const char *key, long fallback) {
@@ -338,6 +341,30 @@ static void test_wake_cycles(void) {
 	assert(power_get_brightness() == 100 && write_count == 0);
 }
 
+static void test_screensaver_idle_timeout(void) {
+	start_power(60, 60, 100, 0, true);
+	saver_visible = true;
+
+	// Simulate the pointer staying asserted against the lock screen: LVGL sees
+	// fresh activity on every poll, but no new user gesture should be needed
+	// for the configured screen timeout to expire.
+	test_ms += 30000;
+	lv_display_trigger_activity(g_disp);
+	assert(lv_display_get_inactive_time(g_disp) == 0);
+	assert(input_idle_ms(test_ms) == test_ms - g_last_button_activity_ms);
+	assert(input_idle_ms(test_ms) >= 30000);
+
+	// Starting the screensaver's swipe is meaningful activity and restarts the
+	// independent idle clock, even though LVGL's timestamp is not consulted.
+	power_notify_activity();
+	assert(input_idle_ms(test_ms) == 0);
+
+	// Ordinary pages continue to respect LVGL touch activity as before.
+	saver_visible = false;
+	lv_display_trigger_activity(g_disp);
+	assert(input_idle_ms(test_ms) == 0);
+}
+
 static void test_charging_screen(void) {
 	start_power(100, 60, 100, 0, true);
 	assert(screen_brightness() == 99);
@@ -382,6 +409,7 @@ int main(void) {
 	lv_display_set_flush_cb(disp, flush);
 	test_levels_and_init();
 	test_wake_cycles();
+	test_screensaver_idle_timeout();
 	test_charging_screen();
 	lv_timer_delete(g_power_timer);
 	lv_display_delete(disp);
