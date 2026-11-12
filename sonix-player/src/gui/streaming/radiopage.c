@@ -107,8 +107,8 @@ static gui_config_t *g_cfg;
 #define RADIO_HOME_TILES 4
 // The size each card's picture is drawn at, matching what tools/svg_to_lvgl.py
 // emits for it: HOME_TILE_SIZE and HOME_TILE_GLYPH_SIZE there.
-#define RADIO_TILE_ART_PX 58
-#define RADIO_TILE_GLYPH_PX 50
+#define RADIO_TILE_ART_PX 54
+#define RADIO_TILE_GLYPH_PX 46
 
 static lv_obj_t *hub_grid;
 static lv_obj_t *hub_offline;

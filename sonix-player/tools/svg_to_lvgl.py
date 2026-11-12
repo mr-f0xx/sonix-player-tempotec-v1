@@ -432,8 +432,8 @@ SECTION_ICON_SIZE = 112
 # The SoundCloud and Subsonic home cards are the same size and draw their
 # picture at this size, so both their artwork and the flat themes' glyphs are
 # rendered at it rather than scaled at run time.
-HOME_TILE_SIZE = 58
-HOME_TILE_GLYPH_SIZE = 50
+HOME_TILE_SIZE = 54
+HOME_TILE_GLYPH_SIZE = 46
 
 COLOR_ICONS = [
     # The quality badges under a track's title. Here rather than above because
