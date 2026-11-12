@@ -31,12 +31,14 @@
 #include "src/gui/shell/switcher.h"
 #include "src/gui/shell/theme.h"
 #include "src/gui/shell/toast.h"
+#include "src/gui/streaming/subsonicdlpage.h"
 #include "src/gui/streaming/subsonicpage.h"
 #include "src/system/audio/audio.h"
 #include "src/system/core/config.h"
 #include "src/system/core/lang.h"
 #include "src/system/core/utils.h"
 #include "src/system/device/system.h"
+#include "src/system/net/http.h"
 #include "src/system/net/tls.h"
 #include "src/system/playback/device_state.h"
 #include "src/system/playback/playlist.h"
@@ -73,6 +75,9 @@ static void init_fonts(void) {
 
 static char card_root_buf[512];
 const char *storage_sd_root(void) { return card_root_buf; }
+bool storage_sd_writable(void) { return true; }
+bool storage_card_attached(void) { return true; }
+bool usb_storage_active(void) { return false; }
 
 lv_obj_t *player_screen;
 
@@ -196,6 +201,9 @@ void device_state_play_list(const char *const *list, int count, int start_index)
 }
 
 void device_state_play_file(const char *path) { (void)path; }
+void device_state_play_list_ordered(const char *const *list, int count, int start_index) {
+	(void)list; (void)count; (void)start_index;
+}
 
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wunused-parameter"
@@ -246,6 +254,54 @@ static tls_verify_t stub_verify = TLS_VERIFY_STRICT;
 static int stub_browses;
 
 void subsonic_init(void) {}
+
+/* ---- the card and the small device services the page leans on ----------- */
+/* The card itself (storage_sd_root and friends) is stubbed at the top, over the
+ * temporary card this test creates: empty, so the downloads page lists
+ * nothing. */
+bool playlist_is_playable_file(const char *name) { (void)name; return true; }
+void toast_plain(const char *text) { (void)text; }
+
+/* ---- downloads ---------------------------------------------------------- */
+/* The real page is linked in and drawn: it has to read an (empty) card, list
+ * nothing, and not offer anything while nothing is running. The worker's own
+ * behaviour is test_subsonicdl's business, against a real temporary card. */
+bool subsonic_stream_url(const char *id, subsonic_quality_t quality, char *out, size_t size,
+						 char *error, size_t error_size) {
+	(void)quality;
+	(void)error;
+	(void)error_size;
+	if (!out || !size) return false;
+	snprintf(out, size, "https://music.example/rest/stream?id=%s&format=mp3", id ? id : "");
+	return true;
+}
+bool subsonic_cover_url(const char *id, char *out, size_t size, char *error, size_t error_size) {
+	(void)error;
+	(void)error_size;
+	if (!out || !size) return false;
+	snprintf(out, size, "https://music.example/rest/getCoverArt?id=%s", id ? id : "");
+	return true;
+}
+static char stub_audio[16] = "not-audio";
+bool http_stream_open_ex(http_stream_t *st, const char *url, int timeout_secs,
+						 const http_stream_options_t *options) {
+	(void)url; (void)timeout_secs; (void)options;
+	if (st) {
+		st->content_length64 = (int64_t)sizeof(stub_audio);
+		st->lead_len = (int)sizeof(stub_audio);
+		st->lead_pos = 0;
+		memcpy(st->lead, stub_audio, sizeof(stub_audio));
+	}
+	return true;
+}
+int http_stream_read(http_stream_t *st, void *buf, int len) {
+	(void)st;
+	if (!buf || len <= 0) return -1;
+	memcpy(buf, stub_audio, sizeof(stub_audio));
+	return len < (int)sizeof(stub_audio) ? len : (int)sizeof(stub_audio);
+}
+void http_stream_close(http_stream_t *st) { (void)st; }
+void http_stream_wake(http_stream_t *st) { (void)st; }
 
 bool subsonic_configure(const subsonic_credentials_t *credentials, bool remember, char *error,
 						size_t error_size) {
@@ -631,6 +687,38 @@ int main(int argc, char **argv) {
 	assert(lv_screen_active() == settings_scr);
 	switch_screen_return_to(subsonic_screen);
 
+	// 4b. The corner arrow opens the downloads page. The card is empty, so the
+	// page says so, in words, and has nothing to scroll: a card with no
+	// downloads must not look broken, and the empty sentence must be a
+	// translated one.
+	switch_screen(subsonic_screen);
+	lv_obj_update_layout(subsonic_screen);
+	// The arrow is a picture, so it is found by its shape: the screen's only
+	// borderless button wrapping a single image.
+	lv_obj_t *arrow = NULL;
+	uint32_t top_cnt = lv_obj_get_child_count(subsonic_screen);
+	for (uint32_t i = 0; i < top_cnt; i++) {
+		lv_obj_t *ch = lv_obj_get_child(subsonic_screen, (int32_t)i);
+		if (lv_obj_check_type(ch, &lv_button_class) && lv_obj_get_child_count(ch) == 1 &&
+			lv_obj_check_type(lv_obj_get_child(ch, 0), &lv_image_class)) {
+			arrow = ch;
+			break;
+		}
+	}
+	assert(arrow != NULL);
+	assert(tree_has_visible_glyph(arrow, &icon_download));
+	lv_obj_send_event(arrow, LV_EVENT_CLICKED, NULL);
+	lv_timer_handler();
+	lv_obj_t *dl_scr = lv_screen_active();
+	assert(dl_scr == subsonicdl_screen);
+	assert(dl_scr != subsonic_screen);
+	lv_obj_update_layout(dl_scr);
+	assert(settingsrow_page_title(dl_scr) != NULL);
+	assert(find_clickable_with_label(dl_scr, tr("subsonic_downloads_empty")) != NULL);
+	assert_no_raw_subsonic_keys(dl_scr, "English");
+	assert_screen_no_overlaps(dl_scr, "subsonic_downloads", "English", THEME_KIND_DARK);
+	switch_screen_return_to(subsonic_screen);
+
 	// 5. Sweep all 11 shipped languages and all 5 built-in themes across the
 	// home page, asserting BOTH zero raw translation keys AND zero overlaps.
 	static const char *const LANGS[] = {
@@ -654,7 +742,7 @@ int main(int argc, char **argv) {
 	theme_set_kind(THEME_KIND_DARK);
 
 	printf("PASS subsonic_pages (240x320, 11 languages x 5 themes zero-overlap, four tiles, "
-		   "no scrolling)\n");
+		   "no scrolling, corner arrow opens an empty downloads page)\n");
 
 	(void)popup_calls;
 	(void)confirm_state;

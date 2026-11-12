@@ -44,6 +44,7 @@ typedef struct {
 	char title[200];
 	char artist[128];
 	char album[200];
+	char album_id[SUBSONIC_ID_MAX]; // "" when the server does not send one
 	char suffix[16];
 	int duration;
 	int track_number;
@@ -87,5 +88,12 @@ int subsonic_browse(subsonic_browse_t browse, const char *id, int offset,
 // v=1.16.1, c=sonix, f=json; no plaintext password in a URL or a log.
 bool subsonic_stream_url(const char *id, subsonic_quality_t quality,
 						 char *out, size_t size, char *error, size_t error_size);
+
+// The album's artwork (`getCoverArt`), for a downloaded album's cover file.
+// Same authentication and the same 512 KiB ceiling the bridge uses for an
+// embedded picture; `f=json` is not asked for, because this response is an
+// image, not an error document.
+bool subsonic_cover_url(const char *id, char *out, size_t size,
+						char *error, size_t error_size);
 
 #endif

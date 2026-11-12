@@ -33,6 +33,17 @@ Raw means the original compressed file, **not PCM**. Recognized suffixes are `fl
 - For a private certificate authority, use the existing `[network] ca_bundle` setting/trust store instead: it keeps full verification on. See the [TLS troubleshooting section](../README.md#lastfm-sign-in-tls-certificate-error); it applies to Subsonic too. Do not replace the trust store with an untrusted certificate bundle.
 - Playback queue names are credential-free, ephemeral `subsonic://...` source IDs, not HTTP URLs. They and their positions are not restored after reboot. Generic HTTP diagnostic URLs have their query removed.
 
+## Saving music to the SD card
+
+Streaming is not the only way to listen: a track, or the rest of the page it sits on, can be **saved to the card** once and played from there afterwards, without Wi-Fi and without the server. Long-press a track — a press, not a tap — and choose **Save this track** or **Save the whole album**; on an album or folder page the second saves every track from the pressed one to the end of the page, so press the first track for the whole album. **Downloads** on the same menu, or the arrow in the corner of the Subsonic home page, opens the list of everything already saved.
+
+- Files are written as ordinary audio, in the format the **Quality** setting selects: MP3 or Opus transcoded by your server, or the original file when Raw is chosen. A download therefore holds exactly the bytes playback would have streamed, and changing Quality later does not rewrite what is already saved; new downloads use the new setting. Raw files that are not FLAC, MP3 or Opus are refused, as they are for playback.
+- They go to `<card>/Music/Subsonic Downloads/<artist>/<album>/<artist> - <title>.<ext>`, named from each track's own tags — the same `Music` folder the other streaming services save into, so they are ordinary local tracks for the library, playlists and the rest of the player. Characters a FAT card cannot store are replaced, and long names are shortened on a character boundary. Each album folder also gets its `cover.jpg`/`cover.png` artwork (once, from the server) and a small hidden marker recording which album it belongs to, so two albums with the same name do not overwrite each other.
+- One download runs at a time, in the background: browsing, playback and the rest of the player keep working, and the progress card on the Downloads page shows the track and how far it has got. A second request while one is running is refused rather than queued. Wi-Fi is kept awake while a download runs, however the Wi-Fi policy is set; playback of a saved file is ordinary local playback and does not need the server.
+- A file is written beside its final name with a `.part` suffix and only renamed once it is complete and its length matches what the server promised. A cut connection, a cancelled download, or a card removed mid-transfer therefore leaves no half-written track, and a cancelled or failed file is deleted rather than played later. Tracks already saved at the current quality are recognised and skipped, so an album can be downloaded again after adding a track.
+- Saved files are permanent: nothing prunes them, and no storage limit is imposed. Delete one from the Downloads page (long-press its row): its `.tags` sidecar goes with it, and an album folder that is left holding only its cover and marker is removed, then its artist folder if that is empty too. Nothing outside the download folder is ever deleted.
+- The downloads page has no download button of its own: a save starts where the track is chosen, in the list. Its rows play the saved file and its progress card can cancel the running transfer.
+
 ## Transport and playback
 
 ```text
@@ -66,7 +77,7 @@ Worker sleeping, bounded RAM and server transcoding reduce avoidable work, but *
 
 ## Validation
 
-See [the test instructions](../sonix-player/tests/README.md) for the real local-HTTP integration harness. It exercises authentication/credentials, browsing/pagination, memory bounds/refill, chunk framing/retry, truncation, cancellation and two-slot ownership. The optional codec suite uses the actual player decoders and deterministic MP3/FLAC/Opus streams, including large headers and exact Opus trimming. Both suites have ASan/UBSan targets.
+See [the test instructions](../sonix-player/tests/README.md) for the real local-HTTP integration harness. It exercises authentication/credentials, browsing/pagination, memory bounds/refill, chunk framing/retry, truncation, cancellation and two-slot ownership. `make subsonicdl` runs the download worker against a real temporary card and a fake transport: names, album folders and their single cover, a cut transfer leaving nothing behind, cancellation, and a delete that empties both folders. `make subsonic-all` runs everything, including the pages in all 11 languages. The optional codec suite uses the actual player decoders and deterministic MP3/FLAC/Opus streams, including large headers and exact Opus trimming. Both suites have ASan/UBSan targets.
 
 These are host tests, not hardware certification. Before shipping a firmware build, test on a V1:
 
@@ -77,6 +88,7 @@ These are host tests, not hardware certification. Before shipping a firmware bui
 - temporary Wi-Fi stalls, server disconnects, malformed responses and a server ignoring the selected codec;
 - valid/expired/private-CA HTTPS, rejecting a downgrade redirect, and browsing-away during a pending connection;
 - a self-signed HTTPS server with the certificate switch off (refused), on (plays), and with a certificate that names another server or has expired (refused either way);
+- a whole-album download on each quality, watching the card's free space and the progress card while playback continues; cancelling mid-transfer; pulling the card during a download; deleting a saved track and its emptied folders; and playing saved files with Wi-Fi off;
 - screen-off playback, automatic Wi-Fi/suspend policy, RAM and CPU use, ALSA underrun logs, and battery drain against a local-playback baseline.
 
 The repository's target build/packer discovers the new C sources automatically. The strings are supplied in the one language tree the V1 image ships, `sonix-packer/assets/V1/usr/resource/sonix/language/`.

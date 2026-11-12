@@ -46,11 +46,24 @@ make -C sonix-player/tests statusbar-ui
 make -C sonix-player/tests extractkeys
 make -C sonix-player/tests tidal
 make -C sonix-player/tests tidal-ui
+make -C sonix-player/tests subsonicdl
+make -C sonix-player/tests subsonic-all
 ```
 
 The non-UI suites require only a C compiler, Make and Python 3 (plus standard pthread/dl/math libraries). The `hiresbadge-ui`, `peq-ui`, `quickpanel-layout`, `btreceiver-session`, `power-display`, `corners`, `playbutton`, `musicsettings-rows`, `volume-overlay`, `playerdeck`, `vinylayout`, `waveform-overlay`, `edge-lock`, `tidal-ui` and aggregate `ui` targets also need the LVGL 9.6.0 checkout described below. None requires ALSA, SDL, a MIPS toolchain, a music server, a real account, or downloaded audio.
 
 `run_subsonic_tests.py` starts a temporary threaded localhost HTTP server plus three HTTPS servers carrying the certificates in `tls_fixtures.py`, runs the C binary with a private temporary config directory, verifies its requests, then shuts down. All account values are synthetic. Build products live in ignored `.build/`; response/PCM fixtures are generated in memory rather than added to Git, and the three test certificates are pasted into that Python file rather than downloaded.
+
+The `subsonicdl` test is the SD-card download worker on its own: a real
+temporary directory stands in for the card and a fake transport serves the
+bytes, so it checks the file names (FAT-forbidden characters, UTF-8-safe
+shortening), that an album shares one folder and one cover, that a truncated
+transfer leaves neither a file nor a `.part`, that a cancel deletes what it had
+written, and that deleting a track removes an emptied album and artist folder
+and nothing else. Link it against `subsonicdl.c` and stubs only — it needs no
+LVGL and no `support.c`. `subsonic-all` runs it together with the bridge
+integration suite and the Subsonic page UI suite, which links the real
+downloads page and opens it from the home page's corner arrow.
 
 The `statusbar-ui` test checks LVGL rendering of the frosted player status bar,
 icon recoloring, layout-background choices, and restoration of status colors.
