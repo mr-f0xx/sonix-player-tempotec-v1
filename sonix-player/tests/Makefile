@@ -1292,3 +1292,30 @@ $(BUILD)/test_soundcloud_pages: $(SOUNDCLOUDPAGE_OBJ)
 	$(CC) -o $@ $^ $(LDFLAGS) $(LDLIBS)
 -include $(SOUNDCLOUDPAGE_OBJ:.o=.d)
 
+# The Subsonic home page, which is the same tiled grid as SoundCloud's: four
+# cards, two by two, in every language and every theme.
+SUBSONICPAGE_SRC = $(ROOT)/tests/ui/test_subsonic_pages.c \
+                     $(ROOT)/src/gui/streaming/subsonicpage.c \
+                     $(ROOT)/src/gui/streaming/soundcloud_icon.c \
+                     $(ROOT)/src/gui/shell/settingsrow.c \
+                     $(ROOT)/src/gui/shell/gridpage.c \
+                     $(ROOT)/src/gui/shell/keyboard.c \
+                     $(ROOT)/src/gui/shell/popover.c \
+                     $(ROOT)/src/gui/shell/spinner.c \
+                     $(ROOT)/src/gui/shell/theme.c \
+                     $(ROOT)/src/gui/shell/icons.c \
+                     $(ROOT)/src/gui/board_profile.c \
+                     $(ROOT)/src/system/input/kblayout.c \
+                     $(ROOT)/src/system/core/config.c \
+                     $(ROOT)/src/system/core/lang.c \
+                     $(ROOT)/src/system/core/utils.c
+SUBSONICPAGE_OBJ = $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(SUBSONICPAGE_SRC)) \
+                     $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(UI_LVGL_SRC))
+
+subsonic-ui: $(BUILD)/test_subsonic_pages
+	$(BUILD)/test_subsonic_pages ../../sonix-packer/assets/V1/usr/resource/sonix/language
+
+$(BUILD)/test_subsonic_pages: $(SUBSONICPAGE_OBJ)
+	$(CC) -o $@ $^ $(LDFLAGS) $(LDLIBS)
+-include $(SUBSONICPAGE_OBJ:.o=.d)
+
