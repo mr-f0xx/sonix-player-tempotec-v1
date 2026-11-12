@@ -700,6 +700,7 @@ printf-flag:
 # disabling SDL, FreeType and device drivers; no audio service is linked.
 UI_SRC = $(ROOT)/tests/ui/test_main_menu.c $(ROOT)/src/gui/shell/main_menu.c \
          $(ROOT)/src/gui/library/music.c $(ROOT)/src/gui/shell/popover.c \
+         $(ROOT)/src/gui/streaming/soundcloud_icon.c \
          $(ROOT)/src/gui/shell/gridpage.c $(ROOT)/src/gui/pet/peticon.c \
          $(ROOT)/src/gui/settings/appearance.c \
          $(ROOT)/src/gui/settings/bootpicpage.c \
@@ -712,6 +713,20 @@ UI_SRC = $(ROOT)/tests/ui/test_main_menu.c $(ROOT)/src/gui/shell/main_menu.c \
          $(ROOT)/src/system/core/config.c $(ROOT)/src/system/core/lang.c
 UI_LVGL_SRC = $(shell find $(ROOT)/lvgl/src -name '*.c' 2>/dev/null)
 UI_LVGL_OBJ = $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(UI_LVGL_SRC))
+
+# The same menu and editor with the production switcher/back-stack and both
+# sheet gestures; fonts, the library, artwork and device services are faked.
+MAINMENUNAV_SRC = $(ROOT)/tests/ui/test_main_menu_navigation.c $(ROOT)/tests/ui/main_menu_player_fixture.c \
+				  $(ROOT)/tests/ui/main_menu_coverflow_fixture.c $(ROOT)/src/gui/nowplaying/coverflow.c \
+                  $(ROOT)/src/gui/shell/main_menu.c $(ROOT)/src/gui/shell/main_menu_icons.c \
+                  $(ROOT)/src/gui/shell/gridpage.c $(ROOT)/src/gui/shell/settingsrow.c \
+                  $(ROOT)/src/gui/shell/switcher.c $(ROOT)/src/gui/shell/theme.c \
+                  $(ROOT)/src/gui/shell/icons.c $(ROOT)/src/gui/shell/gestures.c \
+                  $(ROOT)/src/gui/settings/appearance.c $(ROOT)/src/gui/pet/peticon.c \
+                  $(ROOT)/src/gui/streaming/soundcloud_icon.c $(ROOT)/src/gui/board_profile.c \
+                  $(ROOT)/src/system/addons/addons.c $(ROOT)/src/system/core/config.c \
+                  $(ROOT)/src/system/core/lang.c
+MAINMENUNAV_OBJ = $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(MAINMENUNAV_SRC)) $(UI_LVGL_OBJ)
 
 # The real power/charger display transitions with fake sysfs and time. Covers
 # saved 100% brightness, both wake paths, true-zero off and the PWM endpoint.
@@ -838,7 +853,7 @@ TOOLS_SRC = $(ROOT)/tests/ui/test_tools_pages.c \
             $(ROOT)/src/system/notes/notesstore.c $(ROOT)/src/system/text/textfile.c \
             $(ROOT)/src/gui/library/textview.c $(ROOT)/src/gui/library/pictureview.c \
             $(ROOT)/src/gui/shell/morepage.c $(ROOT)/src/gui/shell/gridpage.c \
-            $(ROOT)/src/system/addons/addons.c \
+            $(ROOT)/src/gui/streaming/soundcloud_icon.c $(ROOT)/src/system/addons/addons.c \
             $(ROOT)/src/gui/shell/settingsrow.c $(ROOT)/src/gui/shell/keyboard.c \
             $(ROOT)/src/gui/shell/popover.c $(ROOT)/src/system/input/kblayout.c \
             $(ROOT)/src/gui/shell/theme.c $(ROOT)/src/gui/shell/icons.c \
@@ -1052,11 +1067,22 @@ $(BUILD)/test_peq_profiles: $(PEQPAGE_OBJ)
 $(BUILD)/test_stockkeys_ui: $(ROOT)/build_gen/streamkeys_key.h $(STOCKKEYS_UI_OBJ)
 	$(CC) -o $@ $(STOCKKEYS_UI_OBJ) $(LDFLAGS) $(LDLIBS)
 
+.PHONY: mainmenu-ui
+mainmenu-ui: $(BUILD)/test_main_menu $(BUILD)/test_main_menu_navigation
+	$(BUILD)/test_main_menu ../../sonix-packer/assets/V1/usr/resource/sonix/language
+	$(BUILD)/test_main_menu ../../sonix-packer/assets/V1/usr/resource/sonix/language saved
+	$(BUILD)/test_main_menu ../../sonix-packer/assets/V1/usr/resource/sonix/language hidden
+	$(BUILD)/test_main_menu ../../sonix-packer/assets/V1/usr/resource/sonix/language empty
+	$(BUILD)/test_main_menu_navigation ../../sonix-packer/assets/V1/usr/resource/sonix/language
+
 .PHONY: ui
-ui: $(BUILD)/test_qobuzgenregrid $(BUILD)/test_main_menu $(BUILD)/test_screensaver $(BUILD)/test_tools_pages $(BUILD)/test_wifi_pages $(BUILD)/test_chargescreen $(BUILD)/test_power_display $(BUILD)/test_lyricsearch $(BUILD)/test_games $(BUILD)/test_peq_profiles $(BUILD)/test_quickpanel_layout $(BUILD)/test_btreceiversession $(BUILD)/test_corners $(BUILD)/test_playbutton $(BUILD)/test_musicsettings_rows $(BUILD)/test_volume_overlay $(BUILD)/test_playerdeck $(BUILD)/test_vinylayout $(BUILD)/test_stickerlayout $(BUILD)/test_waveform_overlay $(BUILD)/test_hiresbadge_ui $(BUILD)/test_statusbar_ui $(BUILD)/test_stockkeys_ui $(BUILD)/test_tidal_pages $(BUILD)/test_soundcloud_pages
+ui: $(BUILD)/test_qobuzgenregrid $(BUILD)/test_main_menu $(BUILD)/test_main_menu_navigation $(BUILD)/test_screensaver $(BUILD)/test_tools_pages $(BUILD)/test_wifi_pages $(BUILD)/test_chargescreen $(BUILD)/test_power_display $(BUILD)/test_lyricsearch $(BUILD)/test_games $(BUILD)/test_peq_profiles $(BUILD)/test_quickpanel_layout $(BUILD)/test_btreceiversession $(BUILD)/test_corners $(BUILD)/test_playbutton $(BUILD)/test_musicsettings_rows $(BUILD)/test_volume_overlay $(BUILD)/test_playerdeck $(BUILD)/test_vinylayout $(BUILD)/test_stickerlayout $(BUILD)/test_waveform_overlay $(BUILD)/test_hiresbadge_ui $(BUILD)/test_statusbar_ui $(BUILD)/test_stockkeys_ui $(BUILD)/test_tidal_pages $(BUILD)/test_soundcloud_pages
 	$(BUILD)/test_qobuzgenregrid
 	$(BUILD)/test_main_menu ../../sonix-packer/assets/V1/usr/resource/sonix/language
 	$(BUILD)/test_main_menu ../../sonix-packer/assets/V1/usr/resource/sonix/language saved
+	$(BUILD)/test_main_menu ../../sonix-packer/assets/V1/usr/resource/sonix/language hidden
+	$(BUILD)/test_main_menu ../../sonix-packer/assets/V1/usr/resource/sonix/language empty
+	$(BUILD)/test_main_menu_navigation ../../sonix-packer/assets/V1/usr/resource/sonix/language
 	$(BUILD)/test_screensaver ../../sonix-packer/assets/V1/usr/resource/sonix/language
 	$(BUILD)/test_screensaver ../../sonix-packer/assets/V1/usr/resource/sonix/language saved
 	$(BUILD)/test_tools_pages ../../sonix-packer/assets/V1/usr/resource/sonix/language
@@ -1087,6 +1113,9 @@ ui: $(BUILD)/test_qobuzgenregrid $(BUILD)/test_main_menu $(BUILD)/test_screensav
 $(BUILD)/test_main_menu: $(UI_OBJ)
 	$(CC) -o $@ $^ $(LDFLAGS) $(LDLIBS)
 
+$(BUILD)/test_main_menu_navigation: $(MAINMENUNAV_OBJ)
+	$(CC) -o $@ $^ $(LDFLAGS) $(LDLIBS)
+
 $(BUILD)/test_screensaver: $(SAVER_OBJ)
 	$(CC) -o $@ $^ $(LDFLAGS) $(LDLIBS)
 
@@ -1101,6 +1130,11 @@ $(BUILD)/test_wifi_pages: $(WIFIPAGE_OBJ)
 
 $(BUILD)/test_tidal_pages: $(TIDALPAGE_OBJ)
 	$(CC) -o $@ $^ $(LDFLAGS) $(LDLIBS)
+
+# The player-sheet fixture includes all of player.c to initialize the private
+# sheet state. Unused playback code is removed by section GC; its existing
+# initializer, bounded-format and string-comparison warnings are nonfatal here.
+$(BUILD)/ui/tests/ui/main_menu_player_fixture.o: UI_CFLAGS += -Wno-error=missing-field-initializers -Wno-error=format-truncation -Wno-error=string-compare
 
 # tidalpage.c copies a few strings into buffers GCC cannot prove are large
 # enough -- a search term, a file name off the card, an error message -- and
@@ -1129,7 +1163,7 @@ $(BUILD)/ui/lvgl/%.o: $(ROOT)/lvgl/%.c ui/lv_conf.h $(ROOT)/lv_conf.h
 	@mkdir -p $(dir $@)
 	$(CC) $(UI_CPPFLAGS) $(filter-out -Werror,$(UI_CFLAGS)) -c $< -o $@
 
--include $(sort $(QOBUZGENRE_UI_OBJ:.o=.d) $(PEQPAGE_OBJ:.o=.d) $(UI_OBJ:.o=.d) $(SAVER_OBJ:.o=.d) $(CHARGE_OBJ:.o=.d) $(WIFIPAGE_OBJ:.o=.d) $(LYRICSEARCH_OBJ:.o=.d) $(GAMES_OBJ:.o=.d) $(CORNERS_OBJ:.o=.d) $(PLAYBUTTON_OBJ:.o=.d) $(MUSICROWS_OBJ:.o=.d) $(VOLUMEOVERLAY_OBJ:.o=.d) $(PLAYERDECK_OBJ:.o=.d) $(VINYLLAYOUT_OBJ:.o=.d) $(STICKERLAYOUT_OBJ:.o=.d) $(WAVEOVERLAY_OBJ:.o=.d) $(HIRESBADGE_UI_OBJ:.o=.d) $(STOCKKEYS_UI_OBJ:.o=.d) $(TIDALPAGE_OBJ:.o=.d))
+-include $(sort $(QOBUZGENRE_UI_OBJ:.o=.d) $(PEQPAGE_OBJ:.o=.d) $(UI_OBJ:.o=.d) $(MAINMENUNAV_OBJ:.o=.d) $(SAVER_OBJ:.o=.d) $(CHARGE_OBJ:.o=.d) $(WIFIPAGE_OBJ:.o=.d) $(LYRICSEARCH_OBJ:.o=.d) $(GAMES_OBJ:.o=.d) $(CORNERS_OBJ:.o=.d) $(PLAYBUTTON_OBJ:.o=.d) $(MUSICROWS_OBJ:.o=.d) $(VOLUMEOVERLAY_OBJ:.o=.d) $(PLAYERDECK_OBJ:.o=.d) $(VINYLLAYOUT_OBJ:.o=.d) $(STICKERLAYOUT_OBJ:.o=.d) $(WAVEOVERLAY_OBJ:.o=.d) $(HIRESBADGE_UI_OBJ:.o=.d) $(STOCKKEYS_UI_OBJ:.o=.d) $(TIDALPAGE_OBJ:.o=.d))
 
 # Smart Mix track-count limits and traversal, with a memory-only graph fixture.
 GENIUS_SRC = test_genius.c $(ROOT)/src/system/library/genius.c

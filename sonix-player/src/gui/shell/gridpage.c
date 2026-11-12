@@ -508,10 +508,24 @@ void gridpage_set_layout(lv_obj_t *grid, gui_config_t *cfg, int top, int bottom,
 		return;
 	}
 
+	// Hidden children stay in the object tree so their callbacks and theme
+	// identities survive, but flex skips them. Size and widen the last tile by
+	// its *visible* position, not its original child index.
 	int count = (int)lv_obj_get_child_count(grid);
+	int visible = 0;
+	for (int i = 0; i < count; i++) {
+		if (!lv_obj_is_hidden(lv_obj_get_child(grid, i))) {
+			visible++;
+		}
+	}
+	int position = 0;
 	for (int i = 0; i < count; i++) {
 		lv_obj_t *tile = lv_obj_get_child(grid, i);
-		lv_obj_set_size(tile, lone_last_tile(count, columns, rows, i) ? usable_w : tile_w, tile_h);
+		if (lv_obj_is_hidden(tile)) {
+			continue;
+		}
+		lv_obj_set_size(tile, lone_last_tile(visible, columns, rows, position) ? usable_w : tile_w, tile_h);
+		position++;
 	}
 	lv_obj_update_layout(grid);
 
@@ -519,7 +533,7 @@ void gridpage_set_layout(lv_obj_t *grid, gui_config_t *cfg, int top, int bottom,
 	// its tile icon after the grid has moved or changed size.
 	for (int i = 0; i < count; i++) {
 		lv_obj_t *tile = lv_obj_get_child(grid, i);
-		if (!tile_has_icon_halo(tile)) {
+		if (lv_obj_is_hidden(tile) || !tile_has_icon_halo(tile)) {
 			continue;
 		}
 		lv_obj_t *halo = lv_obj_get_child(tile, 0);

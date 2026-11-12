@@ -50,7 +50,7 @@
 static void check_custom_theme(void) {
 	char root[] = "/tmp/sonix-theme-XXXXXX";
 	assert(mkdtemp(root));
-	char dir[256], path[256];
+	char dir[256], path[512];
 	snprintf(dir, sizeof(dir), "%s/Themes", root);
 	snprintf(path, sizeof(path), "%s/custom.ini", dir);
 	assert(mkdir(dir, 0700) == 0);
@@ -212,7 +212,8 @@ bool gui_card_available(void) { return true; }
 void gui_notify_no_card(void) { assert(!"unexpected missing card"); }
 void audiobooks_open(void) { switch_screen(audiobooks_screen); }
 void gui_notify_popup(const char *text) { (void)text; assert(!"unexpected popup"); }
-void toast_error(const char *text) { (void)text; assert(!"unexpected error"); }
+static int error_toasts;
+void toast_error(const char *text) { assert(text && text[0]); error_toasts++; }
 /* The busy card a pick puts up, and the success card that replaces it: this
  * test never asks for the failure one. */
 static const char *toast_busy_text;
@@ -228,15 +229,16 @@ void topbar_set_clock_position(int pos) { (void)pos; }
 void switch_screen(lv_obj_t *screen) { lv_screen_load(screen); }
 void switch_screen_cb(lv_event_t *e) { switch_screen(lv_event_get_user_data(e)); }
 void ebookpage_open(void) { switch_screen(ebookpage_screen); }
+static bool test_back_drag, test_player_drag, test_coverflow_drag;
 void switcher_attach_back_gesture(lv_obj_t *obj) { (void)obj; }
-bool switcher_back_drag_active(void) { return false; }
+bool switcher_back_drag_active(void) { return test_back_drag; }
 void player_sheet_attach_drag(lv_obj_t *obj, bool opening) { (void)obj; (void)opening; }
-bool player_sheet_drag_active(void) { return false; }
+bool player_sheet_drag_active(void) { return test_player_drag; }
 
 /* The carousel's own hooks. The pages here never open it: what they are checked
  * for is that they leave the pull alone (see the tap guards in gridpage.c). */
 void coverflow_attach_edge(lv_obj_t *obj, gui_config_t *cfg) { (void)obj; (void)cfg; }
-bool coverflow_drag_active(void) { return false; }
+bool coverflow_drag_active(void) { return test_coverflow_drag; }
 bool coverflow_is_open(void) { return false; }
 
 void player_refresh_now_playing(void) {}
@@ -340,15 +342,9 @@ static lv_obj_t *find_label_last(lv_obj_t *obj, const char *text) {
 
 /* Optional real-renderer diagnostics, kept out of Git. No display driver or
  * image library is needed; PPM can be opened by ordinary image tools. */
-static void dump_menu_snapshot(int kind) {
-	const char *prefix = getenv("SONIX_MENU_SNAPSHOTS");
-	if (!prefix || !prefix[0]) {
-		return;
-	}
-	lv_draw_buf_t *shot = lv_snapshot_take(main_menu_screen, LV_COLOR_FORMAT_RGB888);
+static void dump_screen_snapshot(lv_obj_t *screen, const char *path) {
+	lv_draw_buf_t *shot = lv_snapshot_take(screen, LV_COLOR_FORMAT_RGB888);
 	assert(shot);
-	char path[512];
-	snprintf(path, sizeof(path), "%s-%d-theme%d.ppm", prefix, bp_screen_w(), kind);
 	FILE *file = fopen(path, "wb");
 	assert(file);
 	fprintf(file, "P6\n%u %u\n255\n", shot->header.w, shot->header.h);
@@ -361,6 +357,25 @@ static void dump_menu_snapshot(int kind) {
 	}
 	assert(fclose(file) == 0);
 	lv_draw_buf_destroy(shot);
+}
+
+static void dump_menu_snapshot(int kind) {
+	const char *prefix = getenv("SONIX_MENU_SNAPSHOTS");
+	if (prefix && prefix[0]) {
+		char path[512];
+		snprintf(path, sizeof(path), "%s-%d-theme%d.ppm", prefix, bp_screen_w(), kind);
+		dump_screen_snapshot(main_menu_screen, path);
+	}
+}
+
+static void dump_visibility_snapshot(int kind, int icons, unsigned mask) {
+	const char *prefix = getenv("SONIX_MENU_VIS_SNAPSHOTS");
+	// One representative arrangement for each count, not all 64 subsets.
+	if (prefix && prefix[0] && (mask & (mask + 1u)) == 0) {
+		char path[512];
+		snprintf(path, sizeof(path), "%s-theme%d-icons%d-mask%u.ppm", prefix, kind, icons, mask);
+		dump_screen_snapshot(main_menu_screen, path);
+	}
 }
 
 static lv_obj_t *menu_toggle;
@@ -439,8 +454,16 @@ static void check_native_assets(void) {
 			}
 		}
 	}
+	for (int tile = MAIN_MENU_ICON_BROWSE; tile <= MAIN_MENU_ICON_BOOKS; tile++) {
+		assert(!main_menu_icon_native(tile, false, 74));
+		for (int glyph = 0; glyph <= 1; glyph++) {
+			const lv_image_dsc_t *art = main_menu_icon_native(tile, glyph != 0, 173);
+			assert(art && art->header.w == 173 && art->header.h == 173);
+			assert(art->header.cf == (glyph ? LV_COLOR_FORMAT_A8 : LV_COLOR_FORMAT_ARGB8888));
+		}
+	}
 	assert(!main_menu_icon_native(-1, true, 47));
-	assert(!main_menu_icon_native(6, false, 74));
+	assert(!main_menu_icon_native(8, false, 173));
 	assert(!main_menu_icon_native(0, true, -1));
 	assert(!main_menu_icon_native(0, true, 0));
 	assert(!main_menu_icon_native(0, false, 174));
@@ -555,9 +578,555 @@ static void check_strip_text_lines(lv_obj_t *strip, int expected_lines, const ch
 	}
 }
 
+/* Validate every visible card against the actual LVGL flex geometry. In
+ * particular, child indices are NOT visible positions after a card is hidden. */
+static void check_visibility_geometry(lv_obj_t *grid, const gui_config_t *cfg, unsigned mask) {
+	lv_obj_update_layout(main_menu_screen);
+	assert(lv_obj_get_child_count(grid) == MAIN_MENU_COUNT);
+	int count = 0;
+	for (int i = 0; i < MAIN_MENU_COUNT; i++) {
+		bool shown = (mask & (1u << i)) != 0;
+		assert(main_menu_slot_visible((main_menu_slot_t)i) == shown);
+		assert(lv_obj_is_hidden(lv_obj_get_child(grid, i)) == !shown);
+		count += shown;
+	}
+
+	lv_obj_t *hint = find_label(main_menu_screen, tr("main_menu_empty"));
+	assert(hint && lv_obj_is_hidden(hint) == (count != 0));
+	assert(lv_obj_is_clickable(grid));
+	lv_area_t grid_area;
+	lv_obj_get_coords(grid, &grid_area);
+	if (!count) {
+		lv_area_t hint_area;
+		lv_obj_get_coords(hint, &hint_area);
+		assert(hint_area.x1 >= grid_area.x1 && hint_area.x2 <= grid_area.x2);
+		assert(hint_area.y1 >= grid_area.y1 && hint_area.y2 <= grid_area.y2);
+		return;
+	}
+
+	int columns = count <= 2 ? 1 : 2;
+	int rows = count <= 2 ? count : (count + 1) / 2;
+	int gap = bp_pick(6, 14);
+	int usable_w = (int)cfg->screen_width - 2 * cfg->padding;
+	int usable_h = lv_obj_get_height(grid) - 2 * cfg->padding;
+	int tile_w = (usable_w - (columns - 1) * gap) / columns;
+	int tile_h = (usable_h - (rows - 1) * gap) / rows;
+	int position = 0;
+	for (int i = 0; i < MAIN_MENU_COUNT; i++) {
+		if (!(mask & (1u << i))) {
+			continue;
+		}
+		lv_obj_t *tile = lv_obj_get_child(grid, i);
+		lv_area_t area;
+		lv_obj_get_coords(tile, &area);
+		bool wide = columns == 1 || (count % columns == 1 && position == count - 1);
+		assert(lv_obj_get_width(tile) == (wide ? usable_w : tile_w));
+		assert(lv_obj_get_height(tile) == tile_h);
+		assert(area.x1 == grid_area.x1 + cfg->padding + (position % columns) * (tile_w + gap));
+		assert(area.y1 == grid_area.y1 + cfg->padding + (position / columns) * (tile_h + gap));
+		assert(area.x2 <= grid_area.x2 - cfg->padding);
+		assert(area.y2 <= grid_area.y2 - cfg->padding);
+
+		lv_obj_t *icon = child_of_type(tile, &lv_image_class);
+		lv_obj_t *label = child_of_type(tile, &lv_label_class);
+		lv_area_t icon_area;
+		lv_obj_get_coords(icon, &icon_area);
+		assert(icon_area.x1 >= area.x1 && icon_area.x2 <= area.x2);
+		assert(icon_area.y1 >= area.y1 && icon_area.y2 <= area.y2);
+		assert(lv_obj_is_hidden(label) == main_menu_icons_only());
+		bool reflowed = bp_is_tempotec_v1() && count <= 4 && !main_menu_icons_only();
+		if (main_menu_icons_only() || (reflowed && theme_uses_function_glyphs())) {
+			int art = i == MAIN_MENU_MUSIC && main_menu_browse() ? MAIN_MENU_ICON_BROWSE :
+					  i == MAIN_MENU_LIBRARY && main_menu_books() ? MAIN_MENU_ICON_BOOKS : i;
+			int size = LV_MAX(lv_obj_get_width(icon), lv_obj_get_height(icon));
+			const lv_image_dsc_t *expected = main_menu_icon_native(art, theme_uses_function_glyphs(), size);
+			if (!expected) expected = main_menu_icon_native(art, theme_uses_function_glyphs(), 173);
+			assert(expected && lv_image_get_src(icon) == expected);
+		}
+		if (main_menu_icons_only()) {
+			assert(abs((icon_area.x1 + icon_area.x2) - (area.x1 + area.x2)) <= 2);
+			assert(abs((icon_area.y1 + icon_area.y2) - (area.y1 + area.y2)) <= 2);
+		} else {
+			lv_area_t label_area;
+			lv_obj_get_coords(label, &label_area);
+			assert(label_area.x1 >= area.x1 && label_area.x2 <= area.x2);
+			assert(label_area.y1 >= area.y1 && label_area.y2 <= area.y2);
+			if (reflowed) {
+				assert(abs((icon_area.x1 + icon_area.x2) - (area.x1 + area.x2)) <= 2);
+				assert(icon_area.y2 < label_area.y1); // art and one/two-line name do not collide
+				int line_height = lv_font_get_line_height(bp_tile_label_font());
+				assert(lv_obj_get_height(label) == line_height || lv_obj_get_height(label) == 2 * line_height);
+			}
+		}
+
+		int visible_halos = 0;
+		for (uint32_t j = 0; j < lv_obj_get_child_count(tile); j++) {
+			lv_obj_t *child = lv_obj_get_child(tile, j);
+			visible_halos += lv_obj_is_floating(child) && !lv_obj_is_hidden(child);
+		}
+		bool glow = !main_menu_icons_only() && bp_is_tempotec_v1() && theme_uses_function_glyphs() &&
+				position % columns == 0;
+		assert(visible_halos == (glow ? 1 : 0));
+		position++;
+	}
+}
+
+/* A custom SD-card theme shares the colored-art layout, but is selected and
+ * refreshed through a different path from the five built-in themes. */
+static void check_custom_visibility(gui_config_t *cfg, lv_obj_t *grid) {
+	char root[] = "/tmp/sonix-menu-custom-XXXXXX";
+	assert(mkdtemp(root));
+	char dir[256], path[512];
+	snprintf(dir, sizeof(dir), "%s/Themes", root);
+	snprintf(path, sizeof(path), "%s/custom.ini", dir);
+	assert(mkdir(dir, 0700) == 0);
+	FILE *file = fopen(path, "w");
+	assert(file);
+	fputs("[theme]\nscreen_bg = #010203\nsurface = #101112\nsurface_pressed = #202122\n"
+		"panel = #303132\ncover_bg = #404142\ntext_primary = #f0f1f2\n"
+		"text_secondary = #a0a1a2\naccent = #123456\n", file);
+	assert(fclose(file) == 0);
+	theme_set_card_root(root);
+	theme_set_kind(THEME_KIND_CUSTOM);
+	assert(theme_get_kind() == THEME_KIND_CUSTOM);
+	for (int icons = 0; icons <= 1; icons++) {
+		set_icons_only(icons != 0);
+		for (unsigned step = 0; step < (1u << MAIN_MENU_COUNT); step++) {
+			unsigned mask = step ^ (step >> 1);
+			for (int i = 0; i < MAIN_MENU_COUNT; i++) {
+				assert(main_menu_set_slot_visible((main_menu_slot_t)i, (mask & (1u << i)) != 0));
+			}
+			check_visibility_geometry(grid, cfg, mask);
+		}
+	}
+	theme_set_kind(THEME_KIND_DARK);
+	theme_set_card_root(NULL);
+	assert(unlink(path) == 0);
+	assert(rmdir(dir) == 0);
+	assert(rmdir(root) == 0);
+}
+
+static lv_obj_t *visibility_switch(lv_obj_t *items, main_menu_slot_t slot) {
+	lv_obj_t *label = find_label(items, tr(main_menu_slot_label(slot)));
+	assert(label);
+	return child_of_type(lv_obj_get_parent(label), &lv_switch_class);
+}
+
+static void visibility_toggle(lv_obj_t *items, main_menu_slot_t slot, bool shown) {
+	lv_obj_t *sw = visibility_switch(items, slot);
+	lv_obj_set_state(sw, LV_STATE_CHECKED, shown);
+	lv_obj_send_event(sw, LV_EVENT_VALUE_CHANGED, NULL);
+	assert(main_menu_slot_visible(slot) == shown);
+}
+
+static lv_point_t touch_point;
+static lv_indev_state_t touch_state;
+static void fake_touch_read(lv_indev_t *indev, lv_indev_data_t *data) {
+	(void)indev;
+	data->point = touch_point;
+	data->state = touch_state;
+}
+
+static void touch_read(lv_indev_t *indev, lv_indev_state_t state, int millis) {
+	touch_state = state;
+	lv_tick_inc((uint32_t)millis);
+	lv_indev_read(indev);
+}
+
+static void touch_center(lv_obj_t *obj) {
+	lv_area_t area;
+	lv_obj_update_layout(lv_screen_active());
+	lv_obj_get_coords(obj, &area);
+	touch_point.x = (area.x1 + area.x2) / 2;
+	touch_point.y = (area.y1 + area.y2) / 2;
+}
+
+static void open_visibility_page(lv_obj_t *items) {
+	lv_screen_load(main_menu_screen);
+	lv_screen_load(items); // dispatch SCREEN_LOADED, just as navigation does
+}
+
+static void check_home_visibility(gui_config_t *cfg, lv_obj_t *grid, const char *config, bool saved_icons_only) {
+	lv_obj_t *items = appearance_main_menu_items_screen();
+	assert(items);
+	lv_obj_t *link = find_label(appearance_screen, tr("appearance_main_menu_items"));
+	assert(link);
+	lv_screen_load(appearance_screen);
+	lv_obj_send_event(lv_obj_get_parent(link), LV_EVENT_CLICKED, NULL);
+	assert(lv_screen_active() == items);
+	assert(find_label(items, tr("appearance_main_menu_items_note")));
+	const char *snapshot_prefix = getenv("SONIX_MENU_VIS_SNAPSHOTS");
+	if (snapshot_prefix && snapshot_prefix[0]) {
+		char path[512];
+		snprintf(path, sizeof(path), "%s-controls.ppm", snapshot_prefix);
+		lv_obj_update_layout(items);
+		dump_screen_snapshot(items, path);
+	}
+	for (int i = 0; i < MAIN_MENU_COUNT; i++) {
+		assert(main_menu_slot_visible((main_menu_slot_t)i));
+		assert(lv_obj_has_state(visibility_switch(items, (main_menu_slot_t)i), LV_STATE_CHECKED));
+	}
+	assert(!main_menu_slot_visible((main_menu_slot_t)-1));
+	assert(!main_menu_set_slot_visible((main_menu_slot_t)MAIN_MENU_COUNT, false));
+
+	/* Turning a shortcut off and on saves only a UI preference. In particular,
+	 * an already-disabled service must remain disabled and an enabled one on. */
+	bool radio_was_enabled = addons_enabled("radio");
+	assert(addons_set("radio", false));
+	bool addon_states[64];
+	assert(addons_count() <= (int)(sizeof(addon_states) / sizeof(addon_states[0])));
+	for (int i = 0; i < addons_count(); i++) {
+		addon_states[i] = addons_enabled(addons_at(i)->id);
+	}
+	visibility_toggle(items, MAIN_MENU_STREAMING, false);
+	assert(lv_obj_is_hidden(lv_obj_get_child(grid, MAIN_MENU_STREAMING)));
+	assert(config_init(config));
+	assert(!main_menu_slot_visible(MAIN_MENU_STREAMING));
+	assert(!addons_enabled("radio") && addons_enabled("qobuz"));
+	visibility_toggle(items, MAIN_MENU_STREAMING, true);
+
+	/* Settings itself can be hidden. A real pointer hold on a remaining tile
+	 * opens the editor, and its release must not click through to Music. */
+	visibility_toggle(items, MAIN_MENU_SETTINGS, false);
+	lv_screen_load(main_menu_screen);
+	check_visibility_geometry(grid, cfg, (1u << MAIN_MENU_SETTINGS) - 1u);
+	lv_indev_t *touch = lv_indev_create();
+	assert(touch);
+	lv_indev_set_type(touch, LV_INDEV_TYPE_POINTER);
+	lv_indev_set_display(touch, lv_display_get_default());
+	lv_indev_set_read_cb(touch, fake_touch_read);
+	lv_indev_set_long_press_time(touch, 500);
+	touch_center(lv_obj_get_child(grid, MAIN_MENU_MUSIC));
+	touch_read(touch, LV_INDEV_STATE_RELEASED, 20);
+	touch_read(touch, LV_INDEV_STATE_PRESSED, 20);
+	touch_read(touch, LV_INDEV_STATE_PRESSED, 600);
+	assert(lv_screen_active() == items);
+	touch_read(touch, LV_INDEV_STATE_RELEASED, 20);
+	assert(lv_screen_active() == items);
+	assert(!main_menu_slot_visible(MAIN_MENU_SETTINGS));
+
+	/* All six controls, including those below the fold, must be reachable and
+	 * work with real pointer taps rather than only synthetic change events. */
+	for (int i = 0; i < MAIN_MENU_COUNT; i++) {
+		main_menu_slot_t slot = (main_menu_slot_t)i;
+		lv_obj_t *sw = visibility_switch(items, slot);
+		lv_obj_scroll_to_view_recursive(sw, LV_ANIM_OFF);
+		lv_obj_update_layout(items);
+		lv_area_t area;
+		lv_obj_get_coords(sw, &area);
+		assert(area.y1 >= settingsrow_content_top(cfg) && area.y2 < (int)cfg->screen_height);
+		bool was_shown = main_menu_slot_visible(slot);
+		touch_center(sw);
+		touch_read(touch, LV_INDEV_STATE_PRESSED, 20);
+		touch_read(touch, LV_INDEV_STATE_RELEASED, 20);
+		assert(main_menu_slot_visible(slot) != was_shown);
+		touch_read(touch, LV_INDEV_STATE_PRESSED, 20);
+		touch_read(touch, LV_INDEV_STATE_RELEASED, 20);
+		assert(main_menu_slot_visible(slot) == was_shown);
+	}
+
+	/* Do not open the editor when the hold is the tail of another gesture. */
+	lv_screen_load(main_menu_screen);
+	test_player_drag = true;
+	lv_obj_send_event(grid, LV_EVENT_LONG_PRESSED, NULL);
+	assert(lv_screen_active() == main_menu_screen);
+	test_player_drag = false;
+	test_back_drag = true;
+	lv_obj_send_event(grid, LV_EVENT_LONG_PRESSED, NULL);
+	assert(lv_screen_active() == main_menu_screen);
+	test_back_drag = false;
+	test_coverflow_drag = true;
+	lv_obj_send_event(grid, LV_EVENT_LONG_PRESSED, NULL);
+	assert(lv_screen_active() == main_menu_screen);
+	test_coverflow_drag = false;
+
+	/* All six can be hidden, including Settings. The empty-state hint sits on
+	 * the grid, which still receives a real hold and restores any switch. */
+	open_visibility_page(items);
+	for (int i = 0; i < MAIN_MENU_COUNT; i++) {
+		visibility_toggle(items, (main_menu_slot_t)i, false);
+	}
+	for (int kind = 0; kind < THEME_KIND_COUNT; kind++) {
+		theme_set_kind((theme_kind_t)kind);
+		for (int icons = 0; icons <= 1; icons++) {
+			set_icons_only(icons != 0);
+			lv_screen_load(main_menu_screen);
+			check_visibility_geometry(grid, cfg, 0);
+			touch_center(grid);
+			touch_read(touch, LV_INDEV_STATE_RELEASED, 20);
+			touch_read(touch, LV_INDEV_STATE_PRESSED, 20);
+			touch_read(touch, LV_INDEV_STATE_PRESSED, 600);
+			assert(lv_screen_active() == items);
+			touch_read(touch, LV_INDEV_STATE_RELEASED, 20);
+			assert(lv_screen_active() == items);
+			for (int i = 0; i < MAIN_MENU_COUNT; i++) {
+				assert(!lv_obj_has_state(visibility_switch(items, (main_menu_slot_t)i), LV_STATE_CHECKED));
+			}
+		}
+	}
+	for (int i = 0; i < MAIN_MENU_COUNT; i++) {
+		visibility_toggle(items, (main_menu_slot_t)i, true);
+	}
+	/* Both action tiles and direct screen targets must bubble a hold without
+	 * navigating on release, in labeled and icon-only layouts. */
+	const theme_kind_t touch_themes[] = {THEME_KIND_DARK, THEME_KIND_TOKYO_NIGHT};
+	for (size_t k = 0; k < sizeof(touch_themes) / sizeof(touch_themes[0]); k++) {
+		theme_set_kind(touch_themes[k]);
+		for (int icons = 0; icons <= 1; icons++) {
+			set_icons_only(icons != 0);
+			for (int i = 0; i < MAIN_MENU_COUNT; i++) {
+				lv_screen_load(main_menu_screen);
+				touch_center(lv_obj_get_child(grid, i));
+				touch_read(touch, LV_INDEV_STATE_PRESSED, 20);
+				touch_read(touch, LV_INDEV_STATE_PRESSED, 600);
+				assert(lv_screen_active() == items);
+				touch_read(touch, LV_INDEV_STATE_RELEASED, 20);
+				assert(lv_screen_active() == items);
+			}
+		}
+	}
+	theme_set_kind(THEME_KIND_DARK);
+	set_icons_only(false);
+	/* A short tap still opens each destination after the holds. */
+	lv_obj_t *tap_destinations[] = {music_screen, streaming_screen, wireless_screen,
+			audiobooks_screen, morepage_screen, settings_screen};
+	for (int i = 0; i < MAIN_MENU_COUNT; i++) {
+		lv_screen_load(main_menu_screen);
+		touch_center(lv_obj_get_child(grid, i));
+		touch_read(touch, LV_INDEV_STATE_PRESSED, 20);
+		touch_read(touch, LV_INDEV_STATE_RELEASED, 20);
+		assert(lv_screen_active() == tap_destinations[i]);
+	}
+	lv_indev_delete(touch);
+
+	/* Failed saves roll back the switch and tile, with a visible error. */
+	open_visibility_page(items);
+	char blocked[512];
+	assert(snprintf(blocked, sizeof(blocked), "%s.tmp", config) < (int)sizeof(blocked));
+	assert(mkdir(blocked, 0700) == 0);
+	int old_errors = error_toasts;
+	lv_obj_t *sw = visibility_switch(items, MAIN_MENU_MUSIC);
+	lv_obj_set_state(sw, LV_STATE_CHECKED, false);
+	lv_obj_send_event(sw, LV_EVENT_VALUE_CHANGED, NULL);
+	assert(error_toasts == old_errors + 1);
+	assert(lv_obj_has_state(sw, LV_STATE_CHECKED));
+	assert(main_menu_slot_visible(MAIN_MENU_MUSIC));
+	assert(!lv_obj_is_hidden(lv_obj_get_child(grid, MAIN_MENU_MUSIC)));
+	assert(rmdir(blocked) == 0);
+	assert(config_save());
+
+	/* Swapped destinations have independent preferences; labels and switches
+	 * follow the active destination on the next visit to the editor. */
+	main_menu_set_browse(true);
+	open_visibility_page(items);
+	assert(find_label(items, tr("music_browse")));
+	visibility_toggle(items, MAIN_MENU_MUSIC, false);
+	main_menu_set_browse(false);
+	assert(main_menu_slot_visible(MAIN_MENU_MUSIC));
+	open_visibility_page(items);
+	visibility_toggle(items, MAIN_MENU_MUSIC, false);
+	main_menu_set_browse(true);
+	assert(!main_menu_slot_visible(MAIN_MENU_MUSIC));
+	open_visibility_page(items);
+	visibility_toggle(items, MAIN_MENU_MUSIC, true);
+	main_menu_set_browse(false);
+	assert(!main_menu_slot_visible(MAIN_MENU_MUSIC));
+	open_visibility_page(items);
+	visibility_toggle(items, MAIN_MENU_MUSIC, true);
+
+	assert(addons_enabled("ebook"));
+	main_menu_set_books(true);
+	open_visibility_page(items);
+	assert(find_label(items, tr("books")));
+	visibility_toggle(items, MAIN_MENU_LIBRARY, false);
+	main_menu_set_books(false);
+	assert(main_menu_slot_visible(MAIN_MENU_LIBRARY));
+	open_visibility_page(items);
+	visibility_toggle(items, MAIN_MENU_LIBRARY, false);
+	main_menu_set_books(true);
+	assert(!main_menu_slot_visible(MAIN_MENU_LIBRARY));
+	open_visibility_page(items);
+	visibility_toggle(items, MAIN_MENU_LIBRARY, true);
+	main_menu_set_books(false);
+	assert(!main_menu_slot_visible(MAIN_MENU_LIBRARY));
+	open_visibility_page(items);
+	visibility_toggle(items, MAIN_MENU_LIBRARY, true);
+
+	/* A disabled Books plugin falls back to Audiobooks, without losing either
+	 * visibility choice. Re-enabling the module restores the Books preference. */
+	main_menu_set_books(true);
+	open_visibility_page(items);
+	visibility_toggle(items, MAIN_MENU_LIBRARY, false);
+	assert(addons_set("ebook", false));
+	fonts_set_text_size(FONTS_TEXT_LARGE); // simulate a later page/theme refresh
+	assert(!main_menu_books() && main_menu_slot_visible(MAIN_MENU_LIBRARY));
+	assert(!lv_obj_is_hidden(lv_obj_get_child(grid, MAIN_MENU_LIBRARY)));
+	assert(find_label(lv_obj_get_child(grid, MAIN_MENU_LIBRARY), tr("audiobooks")));
+	assert(addons_set("ebook", true));
+	fonts_set_text_size(FONTS_TEXT_NORMAL);
+	assert(main_menu_books() && !main_menu_slot_visible(MAIN_MENU_LIBRARY));
+	open_visibility_page(items);
+	visibility_toggle(items, MAIN_MENU_LIBRARY, true);
+	main_menu_set_books(false);
+
+	/* Alternate destinations also use the sharp large sources when their cards
+	 * grow, in both coloured-art and function-glyph themes. */
+	main_menu_set_browse(true);
+	main_menu_set_books(true);
+	for (int i = 0; i < MAIN_MENU_COUNT; i++) {
+		if (i != MAIN_MENU_MUSIC && i != MAIN_MENU_LIBRARY) {
+			assert(main_menu_set_slot_visible((main_menu_slot_t)i, false));
+		}
+	}
+	for (int kind = 0; kind < THEME_KIND_COUNT; kind++) {
+		theme_set_kind((theme_kind_t)kind);
+		for (int icons = 0; icons <= 1; icons++) {
+			set_icons_only(icons != 0);
+			check_visibility_geometry(grid, cfg, (1u << MAIN_MENU_MUSIC) | (1u << MAIN_MENU_LIBRARY));
+			assert(main_menu_set_slot_visible(MAIN_MENU_LIBRARY, false));
+			check_visibility_geometry(grid, cfg, 1u << MAIN_MENU_MUSIC);
+			assert(main_menu_set_slot_visible(MAIN_MENU_MUSIC, false));
+			assert(main_menu_set_slot_visible(MAIN_MENU_LIBRARY, true));
+			check_visibility_geometry(grid, cfg, 1u << MAIN_MENU_LIBRARY);
+			assert(main_menu_set_slot_visible(MAIN_MENU_MUSIC, true));
+		}
+	}
+	for (int i = 0; i < MAIN_MENU_COUNT; i++) {
+		assert(main_menu_set_slot_visible((main_menu_slot_t)i, true));
+	}
+	main_menu_set_browse(false);
+	main_menu_set_books(false);
+
+	/* All 64 subsets, both caption modes and every theme. Gray-code order
+	 * changes only one slot at a time, exercising live reflow in both
+	 * directions without rebuilding the tile objects. */
+	lv_screen_load(main_menu_screen);
+	for (int kind = 0; kind < THEME_KIND_COUNT; kind++) {
+		theme_set_kind((theme_kind_t)kind);
+		for (int icons = 0; icons <= 1; icons++) {
+			set_icons_only(icons != 0);
+			for (unsigned step = 0; step < (1u << MAIN_MENU_COUNT); step++) {
+				unsigned mask = step ^ (step >> 1);
+				for (int i = 0; i < MAIN_MENU_COUNT; i++) {
+					assert(main_menu_set_slot_visible((main_menu_slot_t)i, (mask & (1u << i)) != 0));
+				}
+				check_visibility_geometry(grid, cfg, mask);
+				dump_visibility_snapshot(kind, icons, mask);
+				if (step == 7 || step == 32) {
+					fonts_set_text_size(FONTS_TEXT_LARGE);
+					check_visibility_geometry(grid, cfg, mask);
+					fonts_set_text_size(FONTS_TEXT_NORMAL);
+					check_visibility_geometry(grid, cfg, mask);
+				}
+			}
+		}
+	}
+	check_custom_visibility(cfg, grid);
+	/* The recovery hint and editor are translated even when every tile is
+	 * hidden, including after changing languages while the screens exist. */
+	for (int i = 0; i < MAIN_MENU_COUNT; i++) {
+		assert(main_menu_set_slot_visible((main_menu_slot_t)i, false));
+	}
+	const char *languages[] = {"English", "Deutsch", "Español", "Français", "Italiano", "Japanese",
+		"Nederlands", "Polski", "Português BR", "Russian", "Ukrainian"};
+	for (int kind = 0; kind < THEME_KIND_COUNT; kind++) {
+		theme_set_kind((theme_kind_t)kind);
+		for (size_t n = 0; n < sizeof(languages) / sizeof(languages[0]); n++) {
+			assert(lang_set(languages[n]));
+			assert(strcmp(tr("appearance_main_menu_items"), "appearance_main_menu_items") != 0);
+			assert(strcmp(tr("appearance_main_menu_items_note"), "appearance_main_menu_items_note") != 0);
+			assert(strcmp(tr("main_menu_empty"), "main_menu_empty") != 0);
+			for (int size = FONTS_TEXT_NORMAL; size <= FONTS_TEXT_LARGE; size++) {
+				fonts_set_text_size(size);
+				lv_screen_load(main_menu_screen);
+				check_visibility_geometry(grid, cfg, 0);
+				lv_screen_load(items);
+				lv_obj_update_layout(items);
+				lv_obj_t *heading = settingsrow_page_title(items);
+				assert(heading && strcmp(lv_label_get_text(heading), tr("appearance_main_menu_items")) == 0);
+				lv_point_t title_size;
+				lv_text_get_size(&title_size, tr("appearance_main_menu_items"),
+								 lv_obj_get_style_text_font(heading, LV_PART_MAIN), 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+				assert(title_size.x <= lv_obj_get_width(heading));
+				lv_area_t heading_area;
+				lv_obj_get_coords(heading, &heading_area);
+				assert(heading_area.y1 >= (int)cfg->top_bar_height && heading_area.y2 < settingsrow_content_top(cfg));
+				assert(find_label(items, tr("appearance_main_menu_items_note")));
+				for (int i = 0; i < MAIN_MENU_COUNT; i++) {
+					lv_obj_t *sw = visibility_switch(items, (main_menu_slot_t)i);
+					assert(!lv_obj_has_state(sw, LV_STATE_CHECKED));
+					lv_obj_t *row = lv_obj_get_parent(sw);
+					lv_obj_t *label = child_of_type(row, &lv_label_class);
+					lv_area_t row_area, label_area, switch_area;
+					lv_obj_get_coords(row, &row_area);
+					lv_obj_get_coords(label, &label_area);
+					lv_obj_get_coords(sw, &switch_area);
+					assert(label_area.y1 >= row_area.y1 && label_area.y2 <= row_area.y2);
+					assert(label_area.x2 - lv_obj_get_style_pad_right(label, LV_PART_MAIN) < switch_area.x1);
+					assert(switch_area.y1 >= row_area.y1 && switch_area.y2 <= row_area.y2);
+				}
+			}
+		}
+	}
+	fonts_set_text_size(FONTS_TEXT_NORMAL);
+	/* Four tall cards give their names the full width and, when needed, a
+	 * second line. Check retranslation on return from another page too. */
+	const unsigned text_mask = (1u << MAIN_MENU_STREAMING) | (1u << MAIN_MENU_WIRELESS) |
+			(1u << MAIN_MENU_LIBRARY) | (1u << MAIN_MENU_SETTINGS);
+	for (int i = 0; i < MAIN_MENU_COUNT; i++) {
+		assert(main_menu_set_slot_visible((main_menu_slot_t)i, (text_mask & (1u << i)) != 0));
+	}
+	set_icons_only(false);
+	bool saw_wrapped_caption = false;
+	for (int kind = 0; kind < THEME_KIND_COUNT; kind++) {
+		theme_set_kind((theme_kind_t)kind);
+		for (size_t n = 0; n < sizeof(languages) / sizeof(languages[0]); n++) {
+			assert(lang_set(languages[n]));
+			lv_screen_load(items);
+			lv_screen_load(main_menu_screen);
+			check_visibility_geometry(grid, cfg, text_mask);
+			for (int i = 0; i < MAIN_MENU_COUNT; i++) {
+				if (!(text_mask & (1u << i))) continue;
+				lv_obj_t *label = child_of_type(lv_obj_get_child(grid, i), &lv_label_class);
+				assert(strcmp(lv_label_get_text(label), tr(main_menu_slot_label((main_menu_slot_t)i))) == 0);
+				saw_wrapped_caption |= lv_obj_get_height(label) == 2 * lv_font_get_line_height(bp_tile_label_font());
+			}
+		}
+	}
+	assert(saw_wrapped_caption);
+	/* Extreme line metrics from a card-supplied face must not make a two-line
+	 * caption overlap its image; it may fall back to one ellipsized line. */
+	assert(lang_set("Polski"));
+	for (int kind = 0; kind < THEME_KIND_COUNT; kind++) {
+		theme_set_kind((theme_kind_t)kind);
+		for (int line_height = 15; line_height <= 32; line_height++) {
+			font_ui_14.line_height = line_height;
+			for (int i = 0; i < font_callback_count; i++) {
+				font_callbacks[i]();
+			}
+			check_visibility_geometry(grid, cfg, text_mask);
+		}
+	}
+	fonts_set_text_size(FONTS_TEXT_NORMAL);
+	assert(lang_set("English"));
+	for (int i = 0; i < MAIN_MENU_COUNT; i++) {
+		assert(main_menu_set_slot_visible((main_menu_slot_t)i, true));
+	}
+	for (int i = 0; i < addons_count(); i++) {
+		assert(addons_enabled(addons_at(i)->id) == addon_states[i]);
+	}
+	assert(addons_set("radio", radio_was_enabled));
+	set_icons_only(saved_icons_only);
+	theme_set_kind(THEME_KIND_DARK);
+	lv_screen_load(main_menu_screen);
+}
+
 int main(int argc, char **argv) {
 	assert(argc == 2 || argc == 3);
-	bool saved_icons_only = argc == 3;
+	bool saved_icons_only = argc == 3 && strcmp(argv[2], "saved") == 0;
+	bool saved_visibility = argc == 3 && strcmp(argv[2], "hidden") == 0;
+	bool saved_empty = argc == 3 && strcmp(argv[2], "empty") == 0;
+	assert(argc == 2 || saved_icons_only || saved_visibility || saved_empty);
 	char dir[] = "/tmp/sonix-menu-test-XXXXXX";
 	assert(mkdtemp(dir));
 	char config[256];
@@ -566,6 +1135,19 @@ int main(int argc, char **argv) {
 	assert(!main_menu_icons_only()); // no key: preserve the existing menu
 	if (saved_icons_only) {
 		config_set_bool("ui", "main_menu_icons_only", true);
+	}
+	if (saved_visibility) {
+		config_set_bool("home_menu", "music", false);
+		config_set_bool("home_menu", "more", false);
+		config_set_bool("home_menu", "settings", false);
+	}
+	if (saved_empty) {
+		const char *keys[] = {"music", "streaming", "wireless", "audiobooks", "more", "settings"};
+		for (size_t i = 0; i < sizeof(keys) / sizeof(keys[0]); i++) {
+			config_set_bool("home_menu", keys[i], false);
+		}
+	}
+	if (saved_icons_only || saved_visibility || saved_empty) {
 		assert(config_save());
 		assert(config_init(config));
 	}
@@ -594,6 +1176,46 @@ int main(int argc, char **argv) {
 	main_menu_init(&cfg);
 	lv_screen_load(main_menu_screen);
 	lv_obj_t *grid = lv_obj_get_child(main_menu_screen, 0);
+	if (saved_empty) {
+		check_visibility_geometry(grid, &cfg, 0);
+	}
+
+	bootpicpage_screen = lv_obj_create(NULL); // the page the boot screen's Custom pill opens
+	bootpicpage_init(&cfg);
+	appearance_screen = lv_obj_create(NULL); // after the page: its row points at it
+	appearance_init(&cfg);
+	if (saved_empty) {
+		/* At startup the empty grid exists before Appearance is built. Once all
+		 * screens are ready, a real hold must still reach the editor and allow
+		 * the saved choices to be restored. */
+		lv_obj_t *items = appearance_main_menu_items_screen();
+		lv_indev_t *touch = lv_indev_create();
+		assert(items && touch);
+		lv_indev_set_type(touch, LV_INDEV_TYPE_POINTER);
+		lv_indev_set_display(touch, lv_display_get_default());
+		lv_indev_set_read_cb(touch, fake_touch_read);
+		lv_indev_set_long_press_time(touch, 500);
+		touch_center(grid);
+		touch_read(touch, LV_INDEV_STATE_RELEASED, 20);
+		touch_read(touch, LV_INDEV_STATE_PRESSED, 20);
+		touch_read(touch, LV_INDEV_STATE_PRESSED, 600);
+		assert(lv_screen_active() == items);
+		touch_read(touch, LV_INDEV_STATE_RELEASED, 20);
+		assert(lv_screen_active() == items);
+		for (int i = 0; i < MAIN_MENU_COUNT; i++) {
+			assert(!lv_obj_has_state(visibility_switch(items, (main_menu_slot_t)i), LV_STATE_CHECKED));
+			visibility_toggle(items, (main_menu_slot_t)i, true);
+		}
+		lv_indev_delete(touch);
+		lv_screen_load(main_menu_screen);
+	}
+	if (saved_visibility) {
+		unsigned mask = (1u << MAIN_MENU_STREAMING) | (1u << MAIN_MENU_WIRELESS) | (1u << MAIN_MENU_LIBRARY);
+		check_visibility_geometry(grid, &cfg, mask);
+		assert(main_menu_set_slot_visible(MAIN_MENU_MUSIC, true));
+		assert(main_menu_set_slot_visible(MAIN_MENU_MORE, true));
+		assert(main_menu_set_slot_visible(MAIN_MENU_SETTINGS, true));
+	}
 	check_grid(grid, saved_icons_only);
 
 	/* The compact home footer (Tokyo Night / Amber / OLED only): the placeholder
@@ -631,14 +1253,11 @@ int main(int argc, char **argv) {
 	}
 	theme_set_kind(THEME_KIND_DARK);
 
-	bootpicpage_screen = lv_obj_create(NULL); // the page the boot screen's Custom pill opens
-	bootpicpage_init(&cfg);
-	appearance_screen = lv_obj_create(NULL); // after the page: its row points at it
-	appearance_init(&cfg);
 	lv_obj_t *toggle_label = find_label(appearance_screen, tr("appearance_main_menu_icons_only"));
 	assert(toggle_label);
 	menu_toggle = child_of_type(lv_obj_get_parent(toggle_label), &lv_switch_class);
 	assert(lv_obj_has_state(menu_toggle, LV_STATE_CHECKED) == saved_icons_only);
+	check_home_visibility(&cfg, grid, config, saved_icons_only);
 
 	assert(!main_menu_books());
 	assert(find_label(lv_obj_get_child(grid, 3), tr("audiobooks")));
@@ -955,7 +1574,7 @@ int main(int argc, char **argv) {
 	lv_deinit();
 	unlink(config);
 	rmdir(dir);
-	printf("PASS main-menu icons-only (%s, %s)\n", bp_is_tempotec_v1() ? "240x320" : "480x720",
-		saved_icons_only ? "saved setting" : "default setting");
+	printf("PASS main-menu visibility and icons (%s, %s)\n", bp_is_tempotec_v1() ? "240x320" : "480x720",
+		saved_icons_only ? "saved icons" : saved_visibility ? "saved visibility" : saved_empty ? "saved empty" : "defaults");
 	return 0;
 }

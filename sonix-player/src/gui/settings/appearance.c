@@ -36,6 +36,9 @@ static lv_obj_t *tint_toggle;
 static lv_obj_t *main_menu_icons_toggle;
 static lv_obj_t *main_menu_books_toggle;
 static lv_obj_t *main_menu_browse_toggle;
+static lv_obj_t *main_menu_items_screen;
+static lv_obj_t *main_menu_item_switches[MAIN_MENU_COUNT];
+static lv_obj_t *main_menu_item_labels[MAIN_MENU_COUNT];
 static lv_obj_t *stock_gestures_toggle;
 static lv_obj_t *battery_percent_toggle;
 static lv_obj_t *rounded_corners_toggle;
@@ -112,6 +115,79 @@ static void main_menu_books_cb(lv_event_t *e) {
 static void main_menu_browse_cb(lv_event_t *e) {
 	(void)e;
 	main_menu_set_browse(lv_obj_has_state(main_menu_browse_toggle, LV_STATE_CHECKED));
+}
+
+lv_obj_t *appearance_main_menu_items_screen(void) { return main_menu_items_screen; }
+
+// Refresh on entry: the two swappable home slots may have changed in
+// Appearance, or the Books plugin may have changed since the page was built.
+static void main_menu_items_refresh(void) {
+	for (int i = 0; i < MAIN_MENU_COUNT; i++) {
+		main_menu_slot_t slot = (main_menu_slot_t)i;
+		lv_label_set_text(main_menu_item_labels[i], tr(main_menu_slot_label(slot)));
+		lv_obj_set_state(main_menu_item_switches[i], LV_STATE_CHECKED, main_menu_slot_visible(slot));
+	}
+}
+
+static void main_menu_items_loaded_cb(lv_event_t *e) {
+	gui_config_t *cfg = lv_event_get_user_data(e);
+	lv_obj_t *title = settingsrow_page_title(main_menu_items_screen);
+	if (title) {
+		// A language change can make the title longer than the old fitted
+		// font. Restore the full translation, then fit it to this header.
+		lv_label_set_text(title, tr("appearance_main_menu_items"));
+		settingsrow_title_corner_slots(title, cfg, 0);
+		settingsrow_title_realign(title);
+	}
+	main_menu_items_refresh();
+}
+
+static void main_menu_item_cb(lv_event_t *e) {
+	lv_obj_t *sw = lv_event_get_target(e);
+	int index = (int)(intptr_t)lv_obj_get_user_data(sw) - 1;
+	if (index < 0 || index >= MAIN_MENU_COUNT) {
+		return;
+	}
+	main_menu_slot_t slot = (main_menu_slot_t)index;
+	// LVGL changes a checkable switch on RELEASED before that event bubbles
+	// to the page's swipe-back handler. Undo that change when the press was
+	// already claimed by a back drag; it must not save a visibility choice.
+	if (switcher_back_drag_active()) {
+		lv_obj_set_state(sw, LV_STATE_CHECKED, main_menu_slot_visible(slot));
+		return;
+	}
+	bool shown = lv_obj_has_state(sw, LV_STATE_CHECKED);
+	if (!main_menu_set_slot_visible(slot, shown)) {
+		lv_obj_set_state(sw, LV_STATE_CHECKED, main_menu_slot_visible(slot));
+		toast_error(tr("addon_save_failed"));
+	}
+}
+
+static void main_menu_items_init(gui_config_t *cfg) {
+	main_menu_items_screen = lv_obj_create(NULL);
+	lv_obj_t *list = settingsrow_page(main_menu_items_screen, cfg, "appearance_main_menu_items");
+	settingsrow_title_corner_slots(settingsrow_page_title(main_menu_items_screen), cfg, 0);
+
+	lv_obj_t *note = lv_label_create(list);
+	lv_label_set_text(note, tr("appearance_main_menu_items_note"));
+	lv_label_set_long_mode(note, LV_LABEL_LONG_WRAP);
+	lv_obj_set_width(note, lv_pct(100));
+	lv_obj_add_style(note, &theme_style_text_dim, 0);
+	lv_obj_set_style_text_font(note, &font_ui_14, 0);
+
+	for (int i = 0; i < MAIN_MENU_COUNT; i++) {
+		lv_obj_t *card = settingsrow_toggle(list, main_menu_slot_label((main_menu_slot_t)i),
+											&main_menu_item_switches[i], main_menu_item_cb);
+		main_menu_item_labels[i] = lv_obj_get_child(card, 0);
+		lv_obj_set_user_data(main_menu_item_switches[i], (void *)(intptr_t)(i + 1));
+		// Let the list see presses that start on the control as well as the
+		// card, so a back swipe there is not mistaken for a switch tap.
+		lv_obj_set_event_bubble(main_menu_item_switches[i], true);
+	}
+	main_menu_items_refresh();
+	lv_obj_add_event_cb(main_menu_items_screen, main_menu_items_loaded_cb, LV_EVENT_SCREEN_LOADED, cfg);
+	// settingsrow_page() handles the scrollable body; this covers the header.
+	switcher_attach_back_gesture(main_menu_items_screen);
 }
 
 static void refresh_text_size_pills(void) {
@@ -633,6 +709,7 @@ static void build_theme_previews(lv_obj_t *container, bool compact) {
 }
 
 void appearance_init(gui_config_t *cfg) {
+	main_menu_items_init(cfg);
 	const bool compact = cfg->screen_width < 320;
 	lv_obj_t *container = settingsrow_page(appearance_screen, cfg, "appearance");
 
@@ -697,6 +774,10 @@ void appearance_init(gui_config_t *cfg) {
 	lv_obj_add_style(menu_note, &theme_style_text_dim, 0);
 	lv_obj_set_style_text_font(menu_note, &font_ui_22, 0);
 	lv_label_set_text(menu_note, tr("appearance_main_menu_icons_only_note"));
+
+	lv_obj_t *items_row = settingsrow_add(container, "appearance_main_menu_items", NULL,
+										 switch_screen_cb, main_menu_items_screen);
+	settingsrow_add_icon(items_row, &icon_eye, THEME_SEMANTIC_BLUE);
 
 	// The two sheets, and which edge each is pulled from. Classic -- the control
 	// centre from the status bar, Cover Flow up from the main menu -- is what this

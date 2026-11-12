@@ -9,6 +9,12 @@ The change takes effect after a restart. The Plugins page says so, because a
 page that has already been built cannot give its memory back until the next
 start.
 
+For a visual change only, **Settings → Appearance → Main menu items** hides
+home shortcuts without changing any plugin switch, disabling the feature, or
+freeing its memory. The shortcut can be restored there, or by holding a home
+tile or empty space if Settings itself is hidden. If a destination has no other
+shortcut, restore its home tile to open it again.
+
 ## The list
 
 The source of truth is `sonix-player/src/system/addons/addons.c`. Each entry has
@@ -89,5 +95,5 @@ treated as on, so a misspelt name cannot quietly remove a feature.
 
 - Switching a module off does not free memory already in use until the restart.
 - If every streaming service is off, the Streaming tile still opens an empty page.
-  The main menu keeps its six tiles, so the tile is not hidden.
+  Plugins do not hide it; its visibility is controlled separately in Appearance.
 - Layouts (the `layout_*` switches of upstream) are not part of this system.

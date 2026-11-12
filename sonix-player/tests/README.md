@@ -259,11 +259,7 @@ existing defaults, fills an empty place in a saved v4 layout, waits in Settings
 when the grid is full, and survives a move into the first eight and a reload.
 Unrelated playback/radio handlers are removed by linker section GC; no sheet is
 built, and the radio, player and DAC answers are stand-ins. The full `ui` target
-includes both PEQ-related suites and the receiver session. (On GCC 12 the `ui`
-aggregate stops at three files this suite does not touch --
-`tests/ui/test_main_menu.c`, `src/gui/library/music.c` and
-`src/gui/wireless/wifisettings.c` fail `-Werror` -- so run the targets above one
-at a time.)
+includes both PEQ-related suites and the receiver session.
 
 ## Wi-Fi hidden networks
 
@@ -378,6 +374,8 @@ The fixture proves transport, byte/sample counts and ownership behavior on the h
 ```sh
 # Only needed if the player build has not already fetched LVGL:
 git clone --depth 1 -b v9.6.0 https://github.com/lvgl/lvgl.git sonix-player/lvgl
+make -C sonix-player/tests mainmenu-ui -j"$(nproc)"
+# Or run every headless UI suite:
 make -C sonix-player/tests ui -j"$(nproc)"
 ```
 
@@ -385,34 +383,46 @@ This optional suite links the real LVGL layout engine, main menu, shared grid,
 Appearance controls, themes, language loader and configuration store. It uses
 `tests/ui/lv_conf.h` to disable SDL, FreeType and device drivers, so a compiler
 and the LVGL checkout are sufficient; no audio libraries or display are needed.
-Deterministic built-in font metrics and unrelated navigation/playback services
-are substituted, rather than running the player or touching device hardware.
+The layout fixture substitutes deterministic built-in font metrics and unrelated
+navigation/playback services rather than touching device hardware. A second
+fixture uses the real switcher and player/Cover Flow gesture handlers with a
+minimal player sheet, an empty fake library and a placeholder Settings page.
+Existing warnings in the unused player code included by that fixture are
+nonfatal for its object; upstream LVGL and the full suite's existing Tidal
+formatting warnings are also nonfatal.
 
-It checks the default and saved **Main menu icons only** setting on both panel
-sizes, all five themes, exact icon sizes and centering, glow-free icon-only
-tiles, unchanged secondary-menu tiles, restoration of the labeled layout and
-its decorative glows, real switch callbacks and config save/reload,
-the rounded-corners switch and its radius slider (hidden while the corners are
-off, one stop per step, the value beside it, the choice kept across off and
-on), theme/accent/tint/font changes, hidden-label translation, and the six tile
-destinations. The V1 language tree is used. Icon-only images must have
-native-size sources and no scaling transform, including after font-metric
-reflows. Actual LVGL snapshots verify pixel-for-pixel alpha edges, theme tints
-and opaque pixels in ARGB8888 and the panel's RGB565 format; geometry alone
-cannot catch a small bitmap being enlarged into a blurry icon.
+It checks the default and saved **Main menu icons only** setting, all five
+built-in themes and a Custom theme, exact icon sizes and centering, glow-free
+icon-only tiles, unchanged secondary-menu tiles, restoration of the labeled
+layout and its decorative glows, real switch callbacks and config save/reload,
+and the rounded-corners switch and slider. It also checks all 64 visibility
+combinations in each theme and caption mode, including font reflows, row and
+icon bounds, odd-row spans, recentered art and one/two-line translated captions
+on larger cards, per-destination Books/Browse choices, plugin independence,
+save failures, all 11 languages, and startup with some or all items hidden.
+Simulated pointer input verifies every switch, swipe-back navigation and the
+hold-to-edit recovery path on a tile and an empty menu, with no click-through on
+release. Real player and Cover Flow pulls are checked for gesture conflicts with
+recovery; Cover Flow's classic edge pull is also checked on the empty grid.
+Native-size sources are checked pixel-for-pixel where available; other
+reflowed sizes use the large source rather than stretching a toolbar glyph.
+LVGL snapshots verify alpha edges, theme tints and opaque pixels in ARGB8888
+and the panel's RGB565 format.
 
 To inspect rendered screens, optionally set `SONIX_MENU_SNAPSHOTS` to an output
 prefix (its parent directory must exist), for example:
 
 ```sh
-SONIX_MENU_SNAPSHOTS=.build/menu make -C sonix-player/tests ui
+SONIX_MENU_SNAPSHOTS=.build/menu SONIX_MENU_VIS_SNAPSHOTS=.build/home \
+  make -C sonix-player/tests mainmenu-ui
 ```
 
-This writes ignored `.build/menu-<width>-theme<kind>.ppm` files using LVGL's
+This writes ignored `.build/menu-<width>-theme<kind>.ppm` files and representative
+visibility layouts and controls under `.build/home-*.ppm`, using LVGL's
 software renderer. To regenerate the main-menu-only native art, see
 `tools/main_menu_icons.py`; Python image tools are not required to build or
-run the player/tests. The host-build workflow runs this suite as well. These
-checks do not replace visual and touch testing on a physical V1.
+run the player/tests. These checks do not replace visual and touch testing on a
+physical V1.
 
 ## Rounded screen corners and their radius
 

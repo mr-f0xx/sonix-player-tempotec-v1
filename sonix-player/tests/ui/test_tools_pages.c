@@ -129,8 +129,8 @@ void ebookpage_open(void) { switch_screen(ebookpage_screen); }
 void filespage_open(void) { switch_screen(browser_screen); }
 void audiobooks_open(void) { switch_screen(audiobooks_screen); }
 /* The real answer (main_menu.c is not linked into this suite): More asks the
- * home menu whether Books took its Audiobooks slot. */
-bool main_menu_books(void) { return config_get_bool("ui", "home_books", false); }
+ * home menu whether Books took its Audiobooks slot. Visibility is separate. */
+bool main_menu_books(void) { return addons_enabled("ebook") && config_get_bool("ui", "home_books", false); }
 void flappybird_open(void) { /* not reached from this test */ }
 /* The games' page chrome: the way back in the header, and the status bar and
  * volume overlay a game hides while it is on screen. The games are opened
@@ -1078,9 +1078,9 @@ static void check_more_page(gui_config_t *cfg, const char *tag) {
 }
 
 /* The two libraries share one slot on the home screen. When Books takes it,
- * Audiobooks takes over More's library entry, so the two are never offered
- * twice and neither is ever unreachable: the choice made on the Appearance page
- * has to reach a page that was built at startup. */
+ * Audiobooks takes over More's library entry, so the two are not duplicated.
+ * The choice made on Appearance has to reach a page built at startup; hiding a
+ * home shortcut must not turn off the Books plugin or change More's other row. */
 static lv_obj_t *morepage_shape(bool *tiles) {
 	// Leave and come back: the page catches the choice up on the way in, and
 	// loading the screen that is already active would not enter it again.
@@ -1104,6 +1104,14 @@ static void check_more_audiobooks_option(gui_config_t *cfg) {
 		lv_obj_t *shown = morepage_shape(&tiles);
 		assert(has_entry(shown, tr("books")));
 		assert(!has_entry(shown, tr("audiobooks")));
+		config_set_bool("home_menu", "audiobooks", false);
+		shown = morepage_shape(&tiles);
+		assert(addons_enabled("ebook") && has_entry(shown, tr("books")));
+		lv_obj_t *books = entry_with_label(shown, tr("books"));
+		assert(books);
+		lv_obj_send_event(books, LV_EVENT_CLICKED, NULL);
+		assert(lv_screen_active() == ebookpage_screen);
+		config_set_bool("home_menu", "audiobooks", true);
 
 		// On: Books has moved to the home screen, so More offers the other
 		// library in its place rather than repeating Books.
@@ -1111,14 +1119,20 @@ static void check_more_audiobooks_option(gui_config_t *cfg) {
 		shown = morepage_shape(&tiles);
 		assert(has_entry(shown, tr("audiobooks")));
 		assert(!has_entry(shown, tr("books")));
+		config_set_bool("home_menu", "books", false);
+		shown = morepage_shape(&tiles);
+		assert(addons_enabled("ebook") && has_entry(shown, tr("audiobooks")));
+		assert(!has_entry(shown, tr("books")));
 		check_within_panel(morepage_screen, cfg, "More with Audiobooks");
 
-		// And the row opens the section it names.
+		// And the row opens the section it names, even with the Books home
+		// shortcut hidden. Restoring it needs only a visibility change.
 		lv_obj_t *entry = entry_with_label(shown, tr("audiobooks"));
 		assert(entry);
 		lv_obj_send_event(entry, LV_EVENT_CLICKED, NULL);
 		assert(lv_screen_active() == audiobooks_screen);
 
+		config_set_bool("home_menu", "books", true);
 		// Off again: the row goes away rather than staying as a duplicate.
 		config_set_bool("ui", "home_books", false);
 		shown = morepage_shape(&tiles);

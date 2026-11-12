@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate native-pixel art for Main menu icons only (no runtime resampling).
+"""Generate native-pixel and large-source art for adaptive main-menu tiles.
 
 Run from any directory:
     pip install resvg-py==0.5.0 pillow==12.3.0
@@ -19,9 +19,10 @@ The V1's glyphs can shrink with the mini-player's font-dependent height, hence
 all integer sizes 1..47. The maximum comes from its header-free OLED grid and
 includes both requested reductions. The two regular-panel glyph sizes are
 138 (OLED) and 173 (other themes); colored art is 74 (V1) or 173 (regular).
-UI tests assert native-size coverage after theme and font reflows. The lookup
-returns NULL for an unknown future layout, allowing the existing scaled art
-as a fallback rather than a missing image.
+Browse and Books use a large 173 px source as well, so the alternate home
+slots can also grow without enlarging small toolbar glyphs. For reflowed sizes
+without an exact match the player downsamples this large source. UI tests
+assert native-size coverage after theme and font reflows.
 """
 
 import argparse
@@ -48,6 +49,10 @@ COLORS = (
     "music.png", "streaming.png", "wireless.png",
     "audiobooks.png", "more.png", "settings.png",
 )
+# Alternate destinations for the first and fourth home slots.
+ALT_GLYPHS = ("folder.svg", "files-book.svg")
+ALT_COLORS = ("explorer.png", "ebook.png")
+ALT_SIZES = (173,)
 
 
 def render_glyph(filename, size):
@@ -83,6 +88,8 @@ def generate():
     for family, filenames, sizes, render in (
         ("glyph", GLYPHS, GLYPH_SIZES, render_glyph),
         ("color", COLORS, COLOR_SIZES, render_color),
+        ("glyph_alt", ALT_GLYPHS, ALT_SIZES, render_glyph),
+        ("color_alt", ALT_COLORS, ALT_SIZES, render_color),
     ):
         for size in sizes:
             entries = []
@@ -101,14 +108,21 @@ def generate():
                     f".data_size = sizeof({name}), .data = {name}" + "},"
                 )
             descriptors[(family, size)] = "\n".join(entries)
-    for family, sizes in (("glyph", GLYPH_SIZES), ("color", COLOR_SIZES)):
-        parts.append(f"static const lv_image_dsc_t {family}_icons[{len(sizes)}][6] = {{\n")
+    for family, sizes, count in (("glyph", GLYPH_SIZES, 6), ("color", COLOR_SIZES, 6),
+                                 ("glyph_alt", ALT_SIZES, 2), ("color_alt", ALT_SIZES, 2)):
+        parts.append(f"static const lv_image_dsc_t {family}_icons[{len(sizes)}][{count}] = {{\n")
         for size in sizes:
             parts.append("\t{\n" + descriptors[(family, size)] + "\n\t},\n")
         parts.append("};\n\n")
     parts.append("""const lv_image_dsc_t *main_menu_icon_native(int tile, bool glyph, int size) {
-	if (tile < 0 || tile >= 6) {
+	if (tile < 0 || tile >= 8) {
 		return NULL;
+	}
+	if (tile >= 6) {
+		if (size != 173) {
+			return NULL;
+		}
+		return glyph ? &glyph_alt_icons[0][tile - 6] : &color_alt_icons[0][tile - 6];
 	}
 	if (glyph) {
 		if (size >= 1 && size <= 47) {

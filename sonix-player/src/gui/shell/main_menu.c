@@ -19,6 +19,7 @@
 #include "src/gui/shell/icons.h"
 #include "src/gui/shell/main_menu_icons.h"
 #include "src/gui/shell/morepage.h"
+#include "src/gui/settings/appearance.h"
 #include "src/gui/settings/settings.h"
 #include "src/gui/shell/switcher.h"
 #include "src/gui/shell/theme.h"
@@ -43,9 +44,11 @@ static lv_obj_t *mini_player_icon;
 static lv_obj_t *mini_player_copy;
 static lv_obj_t *mini_player_title;
 static lv_obj_t *mini_player_subtitle;
+static lv_obj_t *empty_hint;
 static lv_timer_t *mini_player_timer;
 static gui_config_t *menu_cfg;
 static void main_menu_refresh_tiles(void);
+static void main_menu_refresh_theme(void);
 
 // lv_btn supplies state-specific focus and shadow styles. Those do not inherit
 // the zero-width default style below, and on the compact footer their bottom
@@ -130,7 +133,7 @@ static void set_label_if_changed(lv_obj_t *label, const char *text) {
 }
 
 // The V1 home's title and tagline. OLED leaves both out: its grid starts right
-// under the status bar, and the six cards share the height the header took.
+// under the status bar, and the visible cards share the height the header took.
 #define HOME_HEADER_HEIGHT 62
 
 static bool home_header_shown(void) { return !theme_is_oled(); }
@@ -144,13 +147,73 @@ bool main_menu_icons_only(void) { return config_get_bool("ui", "main_menu_icons_
 bool main_menu_books(void) { return addons_enabled("ebook") && config_get_bool("ui", "home_books", false); }
 bool main_menu_browse(void) { return config_get_bool("ui", "home_browse", false); }
 
+// Keep visibility separate from [addons]. The two swappable slots use the
+// currently displayed destination's key, so hiding Music does not also hide
+// Browse, and hiding Books does not change the Audiobooks preference.
+static const char *main_menu_slot_key(main_menu_slot_t slot) {
+	switch (slot) {
+	case MAIN_MENU_MUSIC: return main_menu_browse() ? "browse" : "music";
+	case MAIN_MENU_STREAMING: return "streaming";
+	case MAIN_MENU_WIRELESS: return "wireless";
+	case MAIN_MENU_LIBRARY: return main_menu_books() ? "books" : "audiobooks";
+	case MAIN_MENU_MORE: return "more";
+	case MAIN_MENU_SETTINGS: return "settings";
+	default: return NULL;
+	}
+}
+
+const char *main_menu_slot_label(main_menu_slot_t slot) {
+	if (slot == MAIN_MENU_MUSIC && main_menu_browse()) {
+		return "music_browse";
+	}
+	return main_menu_slot_key(slot);
+}
+
+bool main_menu_slot_visible(main_menu_slot_t slot) {
+	const char *key = main_menu_slot_key(slot);
+	return key && config_get_bool("home_menu", key, true);
+}
+
+static int main_menu_visible_count(void) {
+	int count = 0;
+	for (int i = 0; i < MAIN_MENU_COUNT; i++) {
+		if (main_menu_slot_visible((main_menu_slot_t)i)) {
+			count++;
+		}
+	}
+	return count;
+}
+
+bool main_menu_set_slot_visible(main_menu_slot_t slot, bool visible) {
+	const char *key = main_menu_slot_key(slot);
+	if (!key) {
+		return false;
+	}
+	bool previous = config_get_bool("home_menu", key, true);
+	if (previous == visible) {
+		return true;
+	}
+	config_set_bool("home_menu", key, visible);
+	if (config_get_bool("home_menu", key, true) != visible || !config_save()) {
+		config_set_bool("home_menu", key, previous);
+		return false;
+	}
+	main_menu_refresh_theme();
+	return true;
+}
+
+// Two destinations become two full-width rows; a lone final tile spans its
+// row. With no destinations, the grid remains a touch surface for recovery.
+static int main_menu_columns(int count) { return count <= 2 ? 1 : 2; }
+static int main_menu_rows(int count) { return count <= 2 ? LV_MAX(1, count) : (count + 1) / 2; }
+
 static void set_home_books(bool enabled) {
 	if (main_menu_books() == enabled) {
 		return;
 	}
 	config_set_bool("ui", "home_books", enabled);
 	config_save();
-	main_menu_refresh_tiles();
+	main_menu_refresh_theme();
 }
 
 void main_menu_set_books(bool enabled) { set_home_books(enabled); }
@@ -161,7 +224,7 @@ void main_menu_set_browse(bool enabled) {
 	}
 	config_set_bool("ui", "home_browse", enabled);
 	config_save();
-	main_menu_refresh_tiles();
+	main_menu_refresh_theme();
 }
 
 static void open_home_music(void) {
@@ -199,10 +262,37 @@ static void main_menu_refresh_tiles(void) {
 	gridpage_set_tile(menu_grid, 0, browse ? &icon_menu_explorer : &icon_menu_music,
 					 browse ? "music_browse" : "music");
 	gridpage_set_tile(menu_grid, 3, books ? &icon_menu_books : &icon_menu_audiobooks, books ? "books" : "audiobooks");
-	bool horizontal = compact && tokyo && !icons_only;
-	for (int i = 0; i < 6; i++) {
+	int visible_count = main_menu_visible_count();
+	bool reflowed = compact && visible_count > 0 && visible_count <= 4 && !icons_only;
+	// The original six compact glyph cards are short horizontal rows. With at
+	// most four cards they are tall enough to center larger art above the name;
+	// this also gives long translated names the full width of the card.
+	bool horizontal = compact && tokyo && !icons_only && !reflowed;
+	int visible_position = 0;
+	for (int i = 0; i < MAIN_MENU_COUNT; i++) {
 		lv_obj_t *tile = lv_obj_get_child(menu_grid, i);
+		bool visible = !lv_obj_is_hidden(tile);
 		int icon_size = tokyo ? (compact ? 22 : 46) : (compact ? 46 : 0);
+		if (compact) {
+			int lines = 1;
+			int line_height = lv_font_get_line_height(bp_tile_label_font());
+			if (reflowed) {
+				lv_point_t text_size;
+				int caption_width = LV_MAX(1, lv_obj_get_width(tile) - 6);
+				lv_text_get_size(&text_size, tr(main_menu_slot_label((main_menu_slot_t)i)),
+								 bp_tile_label_font(), 0, 0, caption_width, LV_TEXT_FLAG_NONE);
+				lines = LV_CLAMP((text_size.y + line_height - 1) / line_height, 1, 2);
+				// A custom font can have unusually tall line metrics. Prefer
+				// one ellipsized line over a second line colliding with the art.
+				if (lines == 2 && lv_obj_get_height(tile) < 2 * line_height + 18) {
+					lines = 1;
+				}
+				int available = LV_MIN(lv_obj_get_width(tile) - 12,
+					lv_obj_get_height(tile) - lines * line_height - 10);
+				icon_size = LV_MAX(1, LV_MIN(tokyo ? 64 : 80, available));
+			}
+			gridpage_set_tile_label_lines(menu_grid, i, lines);
+		}
 		if (icons_only) {
 			// Leave breathing room inside the tile. Size both the image's
 			// drawing and its flex layout box.
@@ -215,26 +305,35 @@ static void main_menu_refresh_tiles(void) {
 			// A further 5% reduction in every theme, rounded to the nearest
 			// display pixel so compact glyphs do not shrink by a full extra pixel.
 			icon_size = LV_MAX(1, (icon_size * 95 + 50) / 100);
+			// The largest native art is 173 px; a single tile should not
+			// stretch it past that size just because it fills the screen.
+			icon_size = LV_MIN(icon_size, 173);
 		}
 
 		const lv_image_dsc_t *source = tokyo ? TOKYO_MENU_ICONS[i] : NORMAL_MENU_ICONS[i];
 		if (i == 0 && browse) source = tokyo ? &icon_folder : &icon_menu_explorer;
 		if (i == 3 && books) source = tokyo ? &icon_files_book : &icon_menu_books;
-		if (icons_only && !(i == 0 && browse) && !(i == 3 && books)) {
-			// Use art pre-rasterized at the final pixel size, not stretched
-			// toolbar glyphs or colored art filtered for a second time.
-			// Matching source/layout sizes also avoids LVGL's fractional image
-			// transform and its extra edge interpolation. Other menus and the
-			// labeled layout continue to use their original sources and sizes.
-			const lv_image_dsc_t *native = main_menu_icon_native(i, tokyo, icon_size);
+		if (icons_only || (reflowed && tokyo)) {
+			// Use exact-size art when available, including after a font reflow.
+			// Large labeled glyphs and the alternate destinations need it too:
+			// scaling up a small toolbar icon would make the new cards blurry.
+			int art = i == MAIN_MENU_MUSIC && browse ? MAIN_MENU_ICON_BROWSE :
+					  i == MAIN_MENU_LIBRARY && books ? MAIN_MENU_ICON_BOOKS : i;
+			const lv_image_dsc_t *native = main_menu_icon_native(art, tokyo, icon_size);
+			if (!native) {
+				// A reflow can ask for sizes between the original native
+				// variants. Downsample the large art instead of enlarging a
+				// tiny toolbar glyph or filtering an already reduced image.
+				native = main_menu_icon_native(art, tokyo, 173);
+			}
 			if (native) {
 				source = native;
 			}
 		}
 		gridpage_set_tile_label_hidden(menu_grid, i, icons_only);
 		if (tokyo) {
-			// Keep the decorative left-column glow only in the labeled layout.
-			bool glow = !icons_only && compact && (i % 2 == 0);
+			// Follow the visible left column when earlier tiles are hidden.
+			bool glow = visible && !icons_only && compact && (visible_position % main_menu_columns(visible_count) == 0);
 			gridpage_set_tile_icon_style(menu_grid, i, source, icon_size, true,
 										 theme_semantic_color(TOKYO_MENU_TONES[i]), glow);
 		} else {
@@ -249,6 +348,21 @@ static void main_menu_refresh_tiles(void) {
 		} else {
 			lv_obj_remove_local_style_prop(tile, LV_STYLE_OUTLINE_WIDTH, 0);
 		}
+		if (visible) {
+			visible_position++;
+		}
+	}
+}
+
+static void main_menu_place_empty_hint(int count) {
+	if (!empty_hint) {
+		return;
+	}
+	lv_obj_set_hidden(empty_hint, count != 0);
+	if (count == 0) {
+		lv_obj_set_width(empty_hint, (int)menu_cfg->screen_width - 4 * (int)menu_cfg->padding);
+		lv_obj_update_layout(main_menu_screen);
+		lv_obj_align_to(empty_hint, menu_grid, LV_ALIGN_CENTER, 0, 0);
 	}
 }
 
@@ -285,7 +399,10 @@ static void main_menu_layout_tokyo_home(bool force) {
 
 	int bottom = (int)menu_cfg->padding + footer_height + 1;
 	int top = (int)menu_cfg->top_bar_height + (home_header_shown() ? HOME_HEADER_HEIGHT : 0);
-	gridpage_set_layout(menu_grid, menu_cfg, top, bottom, menu_cfg->padding, 6, 2, 3);
+	int count = main_menu_visible_count();
+	gridpage_set_layout(menu_grid, menu_cfg, top, bottom, menu_cfg->padding, 6,
+						main_menu_columns(count), main_menu_rows(count));
+	main_menu_place_empty_hint(count);
 	main_menu_refresh_tiles();
 }
 
@@ -412,7 +529,9 @@ static void mini_player_timer_cb(lv_timer_t *timer) {
 
 static void main_menu_screen_loaded_cb(lv_event_t *e) {
 	(void)e;
-	main_menu_refresh_now_playing();
+	// The language or an alternate home destination may have changed on a
+	// different page. Refit the translated captions as well as the footer.
+	main_menu_refresh_theme();
 }
 
 static void main_menu_refresh_theme(void) {
@@ -423,6 +542,10 @@ static void main_menu_refresh_theme(void) {
 	bool compact = bp_is_tempotec_v1();
 	bool tokyo = theme_uses_function_glyphs();
 	bool prototype_layout = compact && tokyo;
+	int count = main_menu_visible_count();
+	for (int i = 0; i < MAIN_MENU_COUNT; i++) {
+		lv_obj_set_hidden(lv_obj_get_child(menu_grid, i), !main_menu_slot_visible((main_menu_slot_t)i));
+	}
 
 	if (prototype_layout) {
 		lv_obj_set_hidden(home_header, !home_header_shown());
@@ -449,7 +572,9 @@ static void main_menu_refresh_theme(void) {
 		lv_obj_set_hidden(home_header, true);
 		lv_obj_set_hidden(home_note, true);
 		lv_obj_set_hidden(mini_player, true);
-		gridpage_set_layout(menu_grid, menu_cfg, menu_cfg->top_bar_height, 0, menu_cfg->padding, compact ? 6 : 14, 2, 3);
+		gridpage_set_layout(menu_grid, menu_cfg, menu_cfg->top_bar_height, 0, menu_cfg->padding, compact ? 6 : 14,
+							main_menu_columns(count), main_menu_rows(count));
+		main_menu_place_empty_hint(count);
 		main_menu_refresh_tiles();
 		lv_obj_set_style_bg_opa(home_header, LV_OPA_TRANSP, 0);
 		lv_obj_set_style_radius(home_header, 0, 0);
@@ -472,6 +597,23 @@ void main_menu_set_icons_only(bool enabled) {
 	main_menu_refresh_theme();
 }
 
+// This is the escape hatch when the Settings tile itself is hidden. A tile's
+// events bubble to the grid, and the grid remains clickable when it is empty.
+// Wait for release so the same hold cannot also activate the tile underneath.
+static void main_menu_hold_cb(lv_event_t *e) {
+	(void)e;
+	lv_obj_t *items = appearance_main_menu_items_screen();
+	if (!items || lv_screen_active() != main_menu_screen || player_sheet_drag_active() ||
+			switcher_back_drag_active() || coverflow_drag_active()) {
+		return;
+	}
+	lv_indev_t *indev = lv_indev_active();
+	if (indev) {
+		lv_indev_wait_release(indev);
+	}
+	switch_screen(items);
+}
+
 void main_menu_init(gui_config_t *cfg) {
 	menu_cfg = cfg;
 
@@ -480,14 +622,15 @@ void main_menu_init(gui_config_t *cfg) {
 		{"streaming", &icon_menu_streaming, &streaming_screen, NULL},
 		{"wireless", &icon_menu_wireless, &wireless_screen, NULL},
 		{"audiobooks", &icon_menu_audiobooks, NULL, open_home_library},
-		// The door to the More page, which holds the DAC and anything else
-		// that does not fit. The main menu has exactly six tiles, and one of
-		// them has to be able to keep growing.
+		// The door to More, which holds the DAC and anything else that does
+		// not fit in the home menu's six slots.
 		{"more", &icon_menu_more, &morepage_screen, NULL},
 		{"settings", &icon_menu_settings, &settings_screen, NULL},
 	};
 
 	menu_grid = gridpage_build(main_menu_screen, cfg, entries, (int)(sizeof(entries) / sizeof(entries[0])), 2, 3, false);
+	lv_obj_set_clickable(menu_grid, true);
+	lv_obj_add_event_cb(menu_grid, main_menu_hold_cb, LV_EVENT_LONG_PRESSED, NULL);
 	// Cover Flow, in the classic arrangement: pull up from the bottom edge, just
 	// as the music grid used to, without entering Music first. With the stock
 	// arrangement chosen the handler stands down by itself (see gestures.h), so
@@ -591,6 +734,18 @@ void main_menu_init(gui_config_t *cfg) {
 	lv_image_set_src(mini_chevron, &icon_chevron_right);
 	fit_menu_icon(mini_chevron, &icon_chevron_right, 14);
 	lv_obj_add_style(mini_chevron, &theme_style_icon, 0);
+
+	// With every tile hidden, make the otherwise blank recovery surface
+	// discoverable. This label is not clickable; the grid underneath receives
+	// the hold, and the hint is hidden as soon as a destination is restored.
+	empty_hint = lv_label_create(main_menu_screen);
+	lv_label_set_text(empty_hint, tr("main_menu_empty"));
+	lv_label_set_long_mode(empty_hint, LV_LABEL_LONG_WRAP);
+	lv_obj_add_style(empty_hint, &theme_style_text_dim, 0);
+	lv_obj_set_style_text_font(empty_hint, &font_ui_14, 0);
+	lv_obj_set_style_text_align(empty_hint, LV_TEXT_ALIGN_CENTER, 0);
+	lv_obj_set_clickable(empty_hint, false);
+	lv_obj_set_hidden(empty_hint, true);
 
 	lv_obj_add_event_cb(main_menu_screen, main_menu_screen_loaded_cb, LV_EVENT_SCREEN_LOADED, NULL);
 	mini_player_timer = lv_timer_create(mini_player_timer_cb, 1000, NULL);

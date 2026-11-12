@@ -673,7 +673,9 @@ static void slot_bind(int i) {
 	cf_slot_t *slot = &slots[i];
 	int base = scroll >> 16;
 	int index = base + i - CF_BEFORE;
-	int32_t d = ((int32_t)(i - CF_BEFORE) << 16) - (scroll - (base << 16));
+	// Slots before the centre have a negative offset; left-shifting that is
+	// undefined in C. Multiplication gives the same 16.16 value safely.
+	int32_t d = (i - CF_BEFORE) * CF_ONE - (scroll - (base << 16));
 
 	const cf_row_t *album = album_at(index);
 	if (!album) {

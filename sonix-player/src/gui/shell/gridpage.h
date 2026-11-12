@@ -67,9 +67,9 @@ void gridpage_set_tile_label_hidden(lv_obj_t *grid, int index, bool hidden);
 // artist). The caller restores one line when returning to Dark or Light.
 void gridpage_set_tile_label_lines(lv_obj_t *grid, int index, int lines);
 
-// Reflows an existing grid into a different screen area. Used by the V1's
-// Tokyo Night home screen to reserve space for its heading and mini-player,
-// without duplicating the six tile objects or changing Dark/Light geometry.
+// Reflows an existing grid into a different screen area. Hidden tile children
+// are excluded from sizing and the final visible tile can span a partial row.
+// The caller chooses rows/columns for the number of visible tiles.
 void gridpage_set_layout(lv_obj_t *grid, gui_config_t *cfg, int top, int bottom, int padding, int gap, int columns,
 						 int rows);
 

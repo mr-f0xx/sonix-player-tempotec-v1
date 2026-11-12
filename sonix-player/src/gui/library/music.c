@@ -199,24 +199,24 @@ static void compact_browse_action(void *unused) {
 static popover_item_t popover_item_for_tile(music_tile_id_t id) {
 	switch (id) {
 	case MUSIC_TILE_ALL_TRACKS:
-		return (popover_item_t){"music_all_tracks", compact_all_tracks_action, NULL, false};
+		return (popover_item_t){"music_all_tracks", compact_all_tracks_action, NULL, false, false};
 	case MUSIC_TILE_ALBUMS:
-		return (popover_item_t){"albums", compact_albums_action, NULL, false};
+		return (popover_item_t){"albums", compact_albums_action, NULL, false, false};
 	case MUSIC_TILE_ARTISTS:
-		return (popover_item_t){"artists", compact_artists_action, NULL, false};
+		return (popover_item_t){"artists", compact_artists_action, NULL, false, false};
 	case MUSIC_TILE_ALBUM_ARTISTS:
-		return (popover_item_t){"music_album_artists", compact_album_artists_action, NULL, false};
+		return (popover_item_t){"music_album_artists", compact_album_artists_action, NULL, false, false};
 	case MUSIC_TILE_GENRES:
-		return (popover_item_t){"music_genres", compact_genres_action, NULL, false};
+		return (popover_item_t){"music_genres", compact_genres_action, NULL, false, false};
 	case MUSIC_TILE_YEARS:
-		return (popover_item_t){"music_years", compact_years_action, NULL, false};
+		return (popover_item_t){"music_years", compact_years_action, NULL, false, false};
 	case MUSIC_TILE_PLAYLISTS:
-		return (popover_item_t){"playlists", compact_playlists_action, NULL, false};
+		return (popover_item_t){"playlists", compact_playlists_action, NULL, false, false};
 	case MUSIC_TILE_MOST_PLAYED:
-		return (popover_item_t){"music_most_played", compact_most_played_action, NULL, false};
+		return (popover_item_t){"music_most_played", compact_most_played_action, NULL, false, false};
 	case MUSIC_TILE_BROWSE:
 	default:
-		return (popover_item_t){"music_browse", compact_browse_action, NULL, false};
+		return (popover_item_t){"music_browse", compact_browse_action, NULL, false, false};
 	}
 }
 
@@ -228,8 +228,8 @@ static void compact_more_cb(lv_event_t *e) {
 	for (int i = 0; i < active_n && n < MUSIC_TILE_COUNT; i++) {
 		items[n++] = popover_item_for_tile(active[i]);
 	}
-	items[n++] = (popover_item_t){"favourites", compact_favourites_action, NULL, false};
-	items[n++] = (popover_item_t){"search", compact_search_action, NULL, false};
+	items[n++] = (popover_item_t){"favourites", compact_favourites_action, NULL, false, false};
+	items[n++] = (popover_item_t){"search", compact_search_action, NULL, false, false};
 	popover_show(lv_event_get_target(e), items, n);
 }
 

@@ -16,4 +16,8 @@ extern lv_obj_t *appearance_screen;
 
 void appearance_init(gui_config_t *cfg);
 
+// Also reachable by holding a home tile or empty grid, even when Settings is
+// hidden. NULL until Appearance has been initialized.
+lv_obj_t *appearance_main_menu_items_screen(void);
+
 #endif /* APPEARANCE_H */
