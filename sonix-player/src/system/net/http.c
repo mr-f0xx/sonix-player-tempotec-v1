@@ -1367,41 +1367,63 @@ bool http_stream_open_ex(http_stream_t *st, const char *url, int timeout_secs, c
 		*options->status_out = 0;
 	}
 
-	char current[2600];
-	snprintf(current, sizeof(current), "%s", url);
+	char *current = malloc(HTTP_URL_MAX);
+	char *location = malloc(HTTP_URL_PATH_MAX);
+	if (!current || !location) {
+		free(current);
+		free(location);
+		return false;
+	}
+	if (snprintf(current, HTTP_URL_MAX, "%s", url) >= HTTP_URL_MAX) {
+		free(current);
+		free(location);
+		set_last_error(tr("http_bad_address"), url);
+		return false;
+	}
 
 	for (int hop = 0; hop <= HTTP_MAX_REDIRECTS; hop++) {
 		int status = 0;
-		char location[2048] = "";
-		if (stream_open_once(st, current, timeout_secs, &status, location, sizeof(location), options)) {
+		location[0] = '\0';
+		if (stream_open_once(st, current, timeout_secs, &status, location, HTTP_URL_PATH_MAX, options)) {
 			if (options && options->status_out) {
 				*options->status_out = status;
 			}
+			snprintf(last_final_url, sizeof(last_final_url), "%s", current);
+			free(current);
+			free(location);
 			return true;
 		}
 		if (options && options->status_out) {
 			*options->status_out = status;
 		}
 		if (status < 300 || status >= 400 || !location[0]) {
+			free(current);
+			free(location);
 			return false;
 		}
 
 		url_t u;
 		if (!url_parse(current, &u)) {
+			free(current);
+			free(location);
 			return false;
 		}
 		if (options && options->no_https_downgrade && u.secure && strncasecmp(location, "http://", 7) == 0) {
 			set_last_error("subsonic_https_downgrade");
+			free(current);
+			free(location);
 			return false;
 		}
 		if (location[0] == '/') {
 			char base[512];
 			snprintf(base, sizeof(base), "%s://%s:%d", u.secure ? "https" : "http", u.host, u.port);
-			snprintf(current, sizeof(current), "%s%s", base, location);
+			snprintf(current, HTTP_URL_MAX, "%s%s", base, location);
 		} else {
-			snprintf(current, sizeof(current), "%s", location);
+			snprintf(current, HTTP_URL_MAX, "%s", location);
 		}
 	}
+	free(current);
+	free(location);
 	return false;
 }
 

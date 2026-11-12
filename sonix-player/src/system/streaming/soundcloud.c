@@ -40,7 +40,7 @@ static char web_base[256];
 static char credentials_file[600];
 
 static soundcloud_credentials_t creds;
-static bool creds_remembered;
+static bool creds_remembered = true;
 static bool creds_from_file;
 
 static char discovered_client_id[SOUNDCLOUD_CLIENT_ID_MAX];
@@ -180,28 +180,67 @@ static bool valid_client_id(const char *s) {
 	return true;
 }
 
+static bool is_on_soundcloud_shortlink(const char *s) {
+	return s && strncasecmp(s, "https://on.soundcloud.com/", 26) == 0 && s[26] != '\0';
+}
+
 // Accepts:
 //   "dj-example"
 //   "@dj-example"
 //   "soundcloud.com/dj-example"
-//   "https://soundcloud.com/dj-example/likes?utm=..." -> "dj-example"
+//   "m.soundcloud.com/dj-example" / "mobile.soundcloud.com/dj-example"
+//   "https://soundcloud.com/dj-example/likes?si=...&utm=..." -> "dj-example"
+//   "on.soundcloud.com/AbCdEf" -> "https://on.soundcloud.com/AbCdEf"
 static bool normalize_username(char *u) {
 	trim_inplace(u);
 	if (!u[0]) {
 		return true;
 	}
 	const char *p = u;
+	bool has_scheme = false;
 	if (strncasecmp(p, "https://", 8) == 0) {
 		p += 8;
+		has_scheme = true;
 	} else if (strncasecmp(p, "http://", 7) == 0) {
 		p += 7;
+		has_scheme = true;
 	}
-	const char *sc = strcasestr(p, "soundcloud.com/");
-	if (sc == p || (sc && (sc == p + 2 && strncasecmp(p, "m.", 2) == 0)) ||
-		(sc && (sc == p + 4 && strncasecmp(p, "www.", 4) == 0)) ||
-		(sc && (sc == p + 3 && strncasecmp(p, "on.", 3) == 0))) {
-		p = sc + strlen("soundcloud.com/");
+
+	const char *slash = strchr(p, '/');
+	if (slash) {
+		size_t hlen = (size_t)(slash - p);
+		if (hlen == 17 && strncasecmp(p, "on.soundcloud.com", 17) == 0) {
+			const char *sp = slash + 1;
+			while (*sp == '/') sp++;
+			char slug[128];
+			size_t sn = 0;
+			while (*sp && *sp != '/' && *sp != '?' && *sp != '#') {
+				unsigned char c = (unsigned char)*sp++;
+				if (c <= 32 || c == 127) {
+					return false;
+				}
+				if (sn + 1 >= sizeof(slug)) {
+					return false;
+				}
+				slug[sn++] = (char)c;
+			}
+			slug[sn] = '\0';
+			if (!slug[0]) {
+				return false;
+			}
+			int w = snprintf(u, SOUNDCLOUD_USER_MAX, "https://on.soundcloud.com/%s", slug);
+			return w > 0 && (size_t)w < SOUNDCLOUD_USER_MAX;
+		}
+		bool is_sc_host = (hlen == 14 && strncasecmp(p, "soundcloud.com", 14) == 0) ||
+						  (hlen > 15 && strncasecmp(p + hlen - 15, ".soundcloud.com", 15) == 0);
+		if (!is_sc_host) {
+			return false;
+		}
+		p = slash + 1;
+	} else if (has_scheme) {
+		return false;
 	}
+
 	while (*p == '/' || *p == '@') {
 		p++;
 	}
@@ -218,7 +257,7 @@ static bool normalize_username(char *u) {
 		clean[n++] = (char)c;
 	}
 	clean[n] = '\0';
-	if (!clean[0]) {
+	if (!clean[0] || strcasecmp(clean, "soundcloud.com") == 0) {
 		return false;
 	}
 	snprintf(u, SOUNDCLOUD_USER_MAX, "%s", clean);
@@ -273,9 +312,27 @@ static bool write_json_string(FILE *f, const char *s) {
 	return fputc('"', f) != EOF;
 }
 
+static void ensure_credentials_path(void) {
+	if (credentials_file[0]) {
+		return;
+	}
+	const char *cfg_path = config_path();
+	if (cfg_path && cfg_path[0]) {
+		const char *slash = strrchr(cfg_path, '/');
+		if (slash) {
+			snprintf(credentials_file, sizeof(credentials_file), "%.*s/%s", (int)(slash - cfg_path), cfg_path,
+					 SC_CREDENTIALS_FILE);
+		} else {
+			snprintf(credentials_file, sizeof(credentials_file), "%s", SC_CREDENTIALS_FILE);
+		}
+	}
+}
+
 static bool save_credentials_file(const soundcloud_credentials_t *c, long long uid, const char *disp,
 								  const char *perm, const char *tier) {
+	ensure_credentials_path();
 	if (!credentials_file[0]) {
+		fprintf(stderr, "soundcloud: cannot save credentials (no config path)\n");
 		return false;
 	}
 	char tmp[sizeof(credentials_file) + 8];
@@ -284,13 +341,10 @@ static bool save_credentials_file(const soundcloud_credentials_t *c, long long u
 	}
 	int fd = open(tmp, O_WRONLY | O_CREAT | O_TRUNC | O_NOFOLLOW | O_CLOEXEC, 0600);
 	if (fd < 0) {
+		fprintf(stderr, "soundcloud: cannot open %s (%s)\n", tmp, strerror(errno));
 		return false;
 	}
-	if (fchmod(fd, 0600) != 0) {
-		close(fd);
-		unlink(tmp);
-		return false;
-	}
+	(void)fchmod(fd, 0600);
 	FILE *f = fdopen(fd, "w");
 	if (!f) {
 		close(fd);
@@ -315,12 +369,14 @@ static bool save_credentials_file(const soundcloud_credentials_t *c, long long u
 		ok = rename(tmp, credentials_file) == 0;
 	}
 	if (!ok) {
+		fprintf(stderr, "soundcloud: failed to write %s (%s)\n", credentials_file, strerror(errno));
 		unlink(tmp);
 	}
 	return ok;
 }
 
 static bool remove_credentials_file(void) {
+	ensure_credentials_path();
 	if (!credentials_file[0]) {
 		return true;
 	}
@@ -457,7 +513,7 @@ void soundcloud_init(void) {
 	}
 
 	wipe(&creds, sizeof(creds));
-	creds_remembered = false;
+	creds_remembered = true;
 	creds_from_file = false;
 	account_user_id = 0;
 	account_display_name[0] = '\0';
@@ -522,7 +578,8 @@ void soundcloud_account_info(soundcloud_account_info_t *out) {
 	memset(out, 0, sizeof(*out));
 	pthread_mutex_lock(&state_lock);
 	out->user_id = account_user_id;
-	snprintf(out->display_name, sizeof(out->display_name), "%s",
+	snprintf(out->display_name, sizeof(out->display_name), "%.*s",
+			 (int)(sizeof(out->display_name) - 1),
 			 account_display_name[0] ? account_display_name : creds.username);
 	snprintf(out->permalink, sizeof(out->permalink), "%s",
 			 account_permalink[0] ? account_permalink : creds.username);
@@ -550,7 +607,7 @@ bool soundcloud_forget(void) {
 	pthread_mutex_lock(&creds_io_lock);
 	pthread_mutex_lock(&state_lock);
 	wipe(&creds, sizeof(creds));
-	creds_remembered = false;
+	creds_remembered = true;
 	creds_from_file = false;
 	account_user_id = 0;
 	account_display_name[0] = '\0';
@@ -1054,6 +1111,129 @@ static void parse_user_tier(const json_doc_t *doc, int user_obj, char *tier, siz
 	}
 }
 
+static bool preset_is_abr(const char *preset) {
+	if (!preset || !preset[0]) {
+		return false;
+	}
+	return strncmp(preset, "abr", 3) == 0 && (preset[3] == '\0' || preset[3] == '_');
+}
+
+static bool resolve_user_from_web_html(const char *handle, long long *uid_out, char *disp_out, size_t disp_size,
+									   char *perm_out, size_t perm_size, char *tier_out, size_t tier_size) {
+	if (!handle || !handle[0] || is_on_soundcloud_shortlink(handle)) {
+		return false;
+	}
+	char wbase[sizeof(web_base)];
+	pthread_mutex_lock(&state_lock);
+	snprintf(wbase, sizeof(wbase), "%s", web_base);
+	pthread_mutex_unlock(&state_lock);
+
+	char enc_h[512];
+	http_url_encode(handle, enc_h, sizeof(enc_h));
+	char page_url[800];
+	snprintf(page_url, sizeof(page_url), "%s/%s", wbase, enc_h);
+
+	char *html = NULL;
+	size_t html_len = 0;
+	int status = 0;
+	http_req_t req = {
+		.extra_headers = "Origin: https://soundcloud.com\r\nReferer: https://soundcloud.com/\r\n",
+		.no_https_downgrade = strncasecmp(page_url, "https://", 8) == 0,
+		.accept_gzip = true,
+		.user_agent = SOUNDCLOUD_USER_AGENT,
+	};
+	if (!http_request(page_url, &req, &html, &html_len, SC_WEB_HTML_LIMIT, SC_TIMEOUT_SECS, &status) || !html ||
+		status < 200 || status >= 300) {
+		free(html);
+		return false;
+	}
+
+	const char *hit = strstr(html, "\"hydratable\":\"user\"");
+	if (!hit) {
+		hit = strstr(html, "\"hydratable\": \"user\"");
+	}
+	if (!hit) {
+		free(html);
+		return false;
+	}
+	const char *data_key = strstr(hit, "\"data\":");
+	if (!data_key) {
+		free(html);
+		return false;
+	}
+	const char *brace = data_key + 7;
+	while (*brace == ' ' || *brace == '\t' || *brace == '\r' || *brace == '\n') {
+		brace++;
+	}
+	if (*brace != '{') {
+		free(html);
+		return false;
+	}
+
+	int depth = 0;
+	bool in_str = false;
+	bool esc = false;
+	size_t span = 0;
+	size_t max_span = (size_t)((html + html_len) - brace);
+	if (max_span > 65536) {
+		max_span = 65536;
+	}
+	for (size_t i = 0; i < max_span; i++) {
+		char ch = brace[i];
+		if (in_str) {
+			if (esc) {
+				esc = false;
+			} else if (ch == '\\') {
+				esc = true;
+			} else if (ch == '"') {
+				in_str = false;
+			}
+		} else {
+			if (ch == '"') {
+				in_str = true;
+			} else if (ch == '{') {
+				depth++;
+			} else if (ch == '}') {
+				depth--;
+				if (depth == 0) {
+					span = i + 1;
+					break;
+				}
+			}
+		}
+	}
+	if (span == 0) {
+		free(html);
+		return false;
+	}
+
+	char *obj_json = malloc(span + 1);
+	if (!obj_json) {
+		free(html);
+		return false;
+	}
+	memcpy(obj_json, brace, span);
+	obj_json[span] = '\0';
+	free(html);
+
+	json_doc_t doc = {0};
+	bool ok = false;
+	if (json_parse_limited(obj_json, &doc, 1024)) {
+		int root = json_root(&doc);
+		long long uid = json_obj_llong(&doc, root, "id", 0);
+		if (uid > 0) {
+			json_obj_str(&doc, root, "username", disp_out, disp_size);
+			json_obj_str(&doc, root, "permalink", perm_out, perm_size);
+			snprintf(tier_out, tier_size, "Public");
+			*uid_out = uid;
+			ok = true;
+		}
+		json_free(&doc);
+	}
+	free(obj_json);
+	return ok;
+}
+
 static bool resolve_account_network(const soundcloud_credentials_t *c, long long *uid_out, char *disp_out,
 									size_t disp_size, char *perm_out, size_t perm_size, char *tier_out,
 									size_t tier_size) {
@@ -1088,12 +1268,43 @@ static bool resolve_account_network(const soundcloud_credentials_t *c, long long
 		return false;
 	}
 
+	char lookup_user[SOUNDCLOUD_USER_MAX];
+	snprintf(lookup_user, sizeof(lookup_user), "%s", c->username);
+
+	// Expand mobile share shortlinks (`https://on.soundcloud.com/...`) via HTTP 302 redirect.
+	if (is_on_soundcloud_shortlink(lookup_user)) {
+		char *sl_body = NULL;
+		size_t sl_len = 0;
+		int sl_status = 0;
+		http_req_t sl_req = {
+			.allow_empty_body = true,
+			.no_https_downgrade = true,
+			.accept_gzip = true,
+			.user_agent = SOUNDCLOUD_USER_AGENT,
+		};
+		if (http_request(lookup_user, &sl_req, &sl_body, &sl_len, 65536, SC_TIMEOUT_SECS, &sl_status)) {
+			const char *final_u = http_last_final_url();
+			if (final_u && final_u[0]) {
+				char expanded[SOUNDCLOUD_USER_MAX];
+				snprintf(expanded, sizeof(expanded), "%s", final_u);
+				if (normalize_username(expanded) && !is_on_soundcloud_shortlink(expanded)) {
+					snprintf(lookup_user, sizeof(lookup_user), "%s", expanded);
+				}
+			}
+		}
+		free(sl_body);
+	}
+
 	char profile_url[512];
-	char enc_profile[768];
-	snprintf(profile_url, sizeof(profile_url), "https://soundcloud.com/%s", c->username);
+	char enc_profile[896];
+	if (is_on_soundcloud_shortlink(lookup_user)) {
+		snprintf(profile_url, sizeof(profile_url), "%s", lookup_user);
+	} else {
+		snprintf(profile_url, sizeof(profile_url), "https://soundcloud.com/%s", lookup_user);
+	}
 	http_url_encode(profile_url, enc_profile, sizeof(enc_profile));
 
-	char resolve_path[900];
+	char resolve_path[1024];
 	snprintf(resolve_path, sizeof(resolve_path), "/resolve?url=%s", enc_profile);
 
 	json_doc_t doc;
@@ -1117,43 +1328,69 @@ static bool resolve_account_network(const soundcloud_credentials_t *c, long long
 		free(text);
 	}
 
-	// Fallback: search users by display name or handle.
-	char enc_q[512];
-	http_url_encode(c->username, enc_q, sizeof(enc_q));
-	snprintf(resolve_path, sizeof(resolve_path), "/search/users?q=%s&limit=5", enc_q);
-	if (!api_request_json("GET", resolve_path, "", c->client_id, &doc, &text, NULL)) {
-		return false;
-	}
-	int root = json_root(&doc);
-	int col = json_get(&doc, root, "collection");
-	int n = json_len(&doc, col);
-	long long matched_uid = 0;
-	for (int i = 0; i < n; i++) {
-		int u = json_at(&doc, col, i);
-		long long uid = json_obj_llong(&doc, u, "id", 0);
-		char perm[SOUNDCLOUD_USER_MAX] = "";
-		char uname[SOUNDCLOUD_NAME_MAX] = "";
-		json_obj_str(&doc, u, "permalink", perm, sizeof(perm));
-		json_obj_str(&doc, u, "username", uname, sizeof(uname));
-		if (uid > 0 && (strcasecmp(perm, c->username) == 0 || strcasecmp(uname, c->username) == 0 || matched_uid == 0)) {
-			matched_uid = uid;
-			snprintf(disp_out, disp_size, "%s", uname[0] ? uname : perm);
-			snprintf(perm_out, perm_size, "%s", perm);
-			if (strcasecmp(perm, c->username) == 0 || strcasecmp(uname, c->username) == 0) {
-				break;
-			}
-		}
-	}
-	json_free(&doc);
-	free(text);
-
-	if (matched_uid <= 0) {
+	if (is_on_soundcloud_shortlink(lookup_user)) {
 		set_error("soundcloud_user_not_found");
 		return false;
 	}
-	snprintf(tier_out, tier_size, "Public");
-	*uid_out = matched_uid;
-	return true;
+
+	// Tier 2 fallback: search users by permalink / display name, preferring exact permalink match.
+	char enc_q[512];
+	http_url_encode(lookup_user, enc_q, sizeof(enc_q));
+	snprintf(resolve_path, sizeof(resolve_path), "/search/users?q=%s&limit=10", enc_q);
+	if (api_request_json("GET", resolve_path, "", c->client_id, &doc, &text, NULL)) {
+		int root = json_root(&doc);
+		int col = json_get(&doc, root, "collection");
+		int n = json_len(&doc, col);
+		long long matched_uid = 0;
+		int best_rank = 0;
+		for (int i = 0; i < n; i++) {
+			int u = json_at(&doc, col, i);
+			long long uid = json_obj_llong(&doc, u, "id", 0);
+			if (uid <= 0) {
+				continue;
+			}
+			char perm[SOUNDCLOUD_USER_MAX] = "";
+			char uname[SOUNDCLOUD_NAME_MAX] = "";
+			json_obj_str(&doc, u, "permalink", perm, sizeof(perm));
+			json_obj_str(&doc, u, "username", uname, sizeof(uname));
+			int rank = 1;
+			if (strcasecmp(perm, lookup_user) == 0) {
+				rank = 3;
+			} else if (strcasecmp(uname, lookup_user) == 0) {
+				rank = 2;
+			}
+			if (rank > best_rank) {
+				best_rank = rank;
+				matched_uid = uid;
+				snprintf(disp_out, disp_size, "%s", uname[0] ? uname : perm);
+				snprintf(perm_out, perm_size, "%s", perm);
+				if (rank == 3) {
+					break;
+				}
+			}
+		}
+		json_free(&doc);
+		free(text);
+
+		if (matched_uid > 0) {
+			clear_error();
+			snprintf(tier_out, tier_size, "Public");
+			*uid_out = matched_uid;
+			return true;
+		}
+	}
+
+	// Tier 3 fallback: extract `window.__sc_hydration` user object from SoundCloud profile page.
+	if (resolve_user_from_web_html(lookup_user, uid_out, disp_out, disp_size, perm_out, perm_size, tier_out,
+								   tier_size)) {
+		clear_error();
+		return true;
+	}
+
+	if (!last_error[0]) {
+		set_error("soundcloud_user_not_found");
+	}
+	return false;
 }
 
 static bool ensure_account_user_id(long long *uid_out) {
@@ -1181,17 +1418,104 @@ static bool ensure_account_user_id(long long *uid_out) {
 		return false;
 	}
 
+	pthread_mutex_lock(&creds_io_lock);
 	pthread_mutex_lock(&state_lock);
 	account_user_id = uid;
 	snprintf(account_display_name, sizeof(account_display_name), "%s", disp);
 	snprintf(account_permalink, sizeof(account_permalink), "%s", perm);
 	snprintf(account_tier, sizeof(account_tier), "%s", tier);
-	if (!creds.username[0] && perm[0]) {
+	if ((!creds.username[0] || is_on_soundcloud_shortlink(creds.username)) && perm[0]) {
 		snprintf(creds.username, sizeof(creds.username), "%s", perm);
+	}
+	soundcloud_credentials_t to_save = creds;
+	bool should_save = creds_remembered && (to_save.username[0] || to_save.oauth_token[0] || to_save.client_id[0]);
+	pthread_mutex_unlock(&state_lock);
+
+	if (should_save) {
+		(void)save_credentials_file(&to_save, uid, disp, perm, tier);
+	}
+	wipe(&to_save, sizeof(to_save));
+	pthread_mutex_unlock(&creds_io_lock);
+
+	*uid_out = uid;
+	return true;
+}
+
+static bool clean_and_validate_credentials(const soundcloud_credentials_t *input, bool require_account,
+										   soundcloud_credentials_t *clean_out, char *error, size_t error_size) {
+	if (!input) {
+		set_error("soundcloud_invalid_credentials");
+		if (error && error_size) snprintf(error, error_size, "%s", last_error);
+		return false;
+	}
+	*clean_out = *input;
+	trim_inplace(clean_out->client_id);
+	if (!normalize_username(clean_out->username) || !normalize_token(clean_out->oauth_token) ||
+		(clean_out->client_id[0] && !valid_client_id(clean_out->client_id)) ||
+		(require_account && !clean_out->username[0] && !clean_out->oauth_token[0])) {
+		wipe(clean_out, sizeof(*clean_out));
+		set_error("soundcloud_invalid_credentials");
+		if (error && error_size) snprintf(error, error_size, "%s", last_error);
+		return false;
+	}
+	return true;
+}
+
+bool soundcloud_save_draft(const soundcloud_credentials_t *input, bool remember, char *error, size_t error_size) {
+	if (error && error_size) {
+		error[0] = '\0';
+	}
+	clear_error();
+
+	soundcloud_credentials_t clean;
+	if (!clean_and_validate_credentials(input, false, &clean, error, error_size)) {
+		return false;
+	}
+
+	pthread_mutex_lock(&creds_io_lock);
+	pthread_mutex_lock(&state_lock);
+	bool same_identity = strcmp(creds.username, clean.username) == 0 &&
+						 strcmp(creds.oauth_token, clean.oauth_token) == 0;
+	long long uid = same_identity ? account_user_id : 0;
+	char disp[SOUNDCLOUD_NAME_MAX] = "";
+	char perm[SOUNDCLOUD_USER_MAX] = "";
+	char tier[32] = "";
+	if (same_identity) {
+		snprintf(disp, sizeof(disp), "%s", account_display_name);
+		snprintf(perm, sizeof(perm), "%s", account_permalink);
+		snprintf(tier, sizeof(tier), "%s", account_tier);
+	} else if (clean.username[0] && !is_on_soundcloud_shortlink(clean.username)) {
+		snprintf(perm, sizeof(perm), "%s", clean.username);
 	}
 	pthread_mutex_unlock(&state_lock);
 
-	*uid_out = uid;
+	bool has_any = clean.username[0] != '\0' || clean.oauth_token[0] != '\0' || clean.client_id[0] != '\0';
+	bool persisted = (remember && has_any) ? save_credentials_file(&clean, uid, disp, perm, tier)
+										   : remove_credentials_file();
+	if (!persisted) {
+		pthread_mutex_unlock(&creds_io_lock);
+		wipe(&clean, sizeof(clean));
+		set_error("soundcloud_cannot_save_credentials");
+		if (error && error_size) snprintf(error, error_size, "%s", last_error);
+		return false;
+	}
+
+	pthread_mutex_lock(&state_lock);
+	wipe(&creds, sizeof(creds));
+	creds = clean;
+	creds_remembered = remember;
+	creds_from_file = remember && has_any;
+	account_user_id = uid;
+	snprintf(account_display_name, sizeof(account_display_name), "%s", disp);
+	snprintf(account_permalink, sizeof(account_permalink), "%s", perm);
+	snprintf(account_tier, sizeof(account_tier), "%s", tier);
+	if (!same_identity) {
+		liked_count = 0;
+	}
+	pthread_mutex_unlock(&state_lock);
+	pthread_mutex_unlock(&creds_io_lock);
+
+	wipe(&clean, sizeof(clean));
 	return true;
 }
 
@@ -1200,20 +1524,16 @@ bool soundcloud_configure(const soundcloud_credentials_t *input, bool remember, 
 		error[0] = '\0';
 	}
 	clear_error();
-	if (!input) {
-		set_error("soundcloud_invalid_credentials");
-		if (error && error_size) snprintf(error, error_size, "%s", last_error);
+
+	soundcloud_credentials_t clean;
+	if (!clean_and_validate_credentials(input, true, &clean, error, error_size)) {
 		return false;
 	}
 
-	soundcloud_credentials_t clean = *input;
-	trim_inplace(clean.client_id);
-	if (!normalize_username(clean.username) || !normalize_token(clean.oauth_token) ||
-		(clean.client_id[0] && !valid_client_id(clean.client_id)) ||
-		(!clean.username[0] && !clean.oauth_token[0])) {
+	// Persist normalized credentials first (matching Subsonic's contract) so a
+	// temporary network failure never discards the URL/token the user entered.
+	if (!soundcloud_save_draft(&clean, remember, error, error_size)) {
 		wipe(&clean, sizeof(clean));
-		set_error("soundcloud_invalid_credentials");
-		if (error && error_size) snprintf(error, error_size, "%s", last_error);
 		return false;
 	}
 
@@ -1233,7 +1553,7 @@ bool soundcloud_configure(const soundcloud_credentials_t *input, bool remember, 
 		return false;
 	}
 
-	if (!clean.username[0] && perm[0]) {
+	if ((!clean.username[0] || is_on_soundcloud_shortlink(clean.username)) && perm[0]) {
 		snprintf(clean.username, sizeof(clean.username), "%s", perm);
 	}
 
@@ -1280,6 +1600,8 @@ static bool parse_track_obj(const json_doc_t *doc, int tok, soundcloud_track_t *
 	out->id = id;
 	json_obj_str(doc, tok, "title", out->title, sizeof(out->title));
 	json_obj_str(doc, tok, "secret_token", out->secret_token, sizeof(out->secret_token));
+	json_obj_str(doc, tok, "permalink_url", out->permalink_url, sizeof(out->permalink_url));
+	json_obj_str(doc, tok, "track_authorization", out->track_authorization, sizeof(out->track_authorization));
 
 	int pub = json_get(doc, tok, "publisher_metadata");
 	if (pub >= 0) {
@@ -1316,10 +1638,17 @@ static bool parse_track_obj(const json_doc_t *doc, int tok, soundcloud_track_t *
 	int tc_len = json_len(doc, transcodings);
 	bool any_playable_tc = false;
 	bool all_snipped = tc_len > 0;
+	int non_abr_count = 0;
 	for (int i = 0; i < tc_len; i++) {
 		int tc = json_at(doc, transcodings, i);
 		char url[64] = "";
+		char preset[48] = "";
 		json_obj_str(doc, tc, "url", url, sizeof(url));
+		json_obj_str(doc, tc, "preset", preset, sizeof(preset));
+		if (preset_is_abr(preset)) {
+			continue;
+		}
+		non_abr_count++;
 		if (url[0]) {
 			any_playable_tc = true;
 		}
@@ -1327,9 +1656,12 @@ static bool parse_track_obj(const json_doc_t *doc, int tok, soundcloud_track_t *
 			all_snipped = false;
 		}
 	}
+	if (non_abr_count == 0) {
+		all_snipped = false;
+	}
 
 	out->preview = (strcmp(access, "preview") == 0) || (strcmp(policy, "SNIP") == 0 && out->duration <= 45) ||
-				   (tc_len > 0 && all_snipped);
+				   (non_abr_count > 0 && all_snipped);
 	if (strcmp(access, "blocked") == 0 || strcmp(policy, "BLOCK") == 0 || !streamable) {
 		out->streamable = false;
 	} else if (transcodings >= 0) {
@@ -1800,7 +2132,8 @@ static int score_transcoding(const char *protocol, const char *mime, const char 
 	}
 	// Encrypted HLS (Widevine / CENC ctr-encrypted-hls) requires a proprietary
 	// CDM not available on Linux/MIPS; skip it in favour of standard streams.
-	if (strstr(protocol, "encrypted") != NULL) {
+	if (strstr(protocol, "encrypted") != NULL || strncmp(protocol, "ctr-", 4) == 0 ||
+		strncmp(protocol, "cbc-", 4) == 0) {
 		return -1;
 	}
 	bool is_prog = strcmp(protocol, "progressive") == 0;
@@ -1823,12 +2156,12 @@ static int score_transcoding(const char *protocol, const char *mime, const char 
 
 	if (pref_quality == SOUNDCLOUD_QUALITY_HIGH) {
 		if (is_hq && is_aac && is_hls) return 100;
-		if (is_hq && is_mp3 && is_prog) return 95;
-		if (is_hq && is_mp3 && is_hls) return 90;
+		if (is_aac && is_hls) return 95;
+		if (is_hq && is_mp3 && is_prog) return 92;
+		if (is_hq && is_mp3 && is_hls) return 88;
 		if (is_mp3 && is_prog) return 80;
 		if (is_mp3 && is_hls) return 75;
 		if (is_opus && is_hls) return 60;
-		if (is_aac && is_hls) return 50;
 	} else if (pref_quality == SOUNDCLOUD_QUALITY_LOW) {
 		if (is_opus && is_hls) return 100;
 		if (is_mp3 && is_prog) return 80;
@@ -1840,12 +2173,91 @@ static int score_transcoding(const char *protocol, const char *mime, const char 
 		if (is_mp3 && is_prog) return 100;
 		if (is_mp3 && is_hls) return 90;
 		if (is_opus && is_hls) return 75;
-		if (is_aac && is_hls) return 50;
+		if (is_aac && is_hls) return 60;
 	}
 	return 10;
 }
 
-bool soundcloud_get_stream(long long track_id, const char *secret_token, bool allow_aac, soundcloud_stream_t *out) {
+typedef struct {
+	int score;
+	char url[SOUNDCLOUD_URL_MAX];
+	soundcloud_stream_kind_t kind;
+	soundcloud_codec_t codec;
+	bool snipped;
+	long long dur_ms;
+} tc_cand_t;
+
+static bool fetch_track_metadata_doc(long long track_id, const char *secret_token, const char *permalink_url,
+									 json_doc_t *doc_out, char **text_out, int *track_tok_out) {
+	char path[512];
+	char enc_sec[192] = "";
+	if (secret_token && secret_token[0]) {
+		http_url_encode(secret_token, enc_sec, sizeof(enc_sec));
+		snprintf(path, sizeof(path), "/tracks/%lld?secret_token=%s", track_id, enc_sec);
+	} else {
+		snprintf(path, sizeof(path), "/tracks/%lld", track_id);
+	}
+
+	int status = 0;
+	if (api_request_json("GET", path, NULL, NULL, doc_out, text_out, &status)) {
+		int root = json_root(doc_out);
+		if (root >= 0 && doc_out->toks[root].type == JSON_OBJECT && json_obj_llong(doc_out, root, "id", 0) > 0) {
+			*track_tok_out = root;
+			return true;
+		}
+		json_free(doc_out);
+		free(*text_out);
+		*text_out = NULL;
+	}
+
+	if (status == 429) {
+		return false;
+	}
+
+	// Fallback 1: batch `/tracks?ids=<id>` endpoint (returns a 1-element JSON array).
+	if (enc_sec[0]) {
+		snprintf(path, sizeof(path), "/tracks?ids=%lld&secret_token=%s", track_id, enc_sec);
+	} else {
+		snprintf(path, sizeof(path), "/tracks?ids=%lld", track_id);
+	}
+	if (api_request_json("GET", path, NULL, NULL, doc_out, text_out, &status)) {
+		int root = json_root(doc_out);
+		int first = (root >= 0 && doc_out->toks[root].type == JSON_ARRAY) ? json_at(doc_out, root, 0) : -1;
+		if (first >= 0 && json_obj_llong(doc_out, first, "id", 0) > 0) {
+			clear_error();
+			*track_tok_out = first;
+			return true;
+		}
+		json_free(doc_out);
+		free(*text_out);
+		*text_out = NULL;
+	}
+
+	// Fallback 2: `/resolve?url=<permalink_url>` when the track's permalink URL is known.
+	if (permalink_url && permalink_url[0]) {
+		char enc_perm[768];
+		char rpath[896];
+		http_url_encode(permalink_url, enc_perm, sizeof(enc_perm));
+		snprintf(rpath, sizeof(rpath), "/resolve?url=%s", enc_perm);
+		if (api_request_json("GET", rpath, NULL, NULL, doc_out, text_out, &status)) {
+			int root = json_root(doc_out);
+			if (root >= 0 && doc_out->toks[root].type == JSON_OBJECT && json_obj_llong(doc_out, root, "id", 0) > 0) {
+				clear_error();
+				*track_tok_out = root;
+				return true;
+			}
+			json_free(doc_out);
+			free(*text_out);
+			*text_out = NULL;
+		}
+	}
+
+	return false;
+}
+
+static bool resolve_stream_internal(long long track_id, const char *secret_token, const char *permalink_url,
+									const char *track_auth_hint, bool allow_aac, bool allow_progressive,
+									soundcloud_stream_t *out) {
 	clear_error();
 	if (!out || track_id <= 0) {
 		set_error("soundcloud_invalid_id");
@@ -1853,48 +2265,41 @@ bool soundcloud_get_stream(long long track_id, const char *secret_token, bool al
 	}
 	memset(out, 0, sizeof(*out));
 
-	char path[384];
-	if (secret_token && secret_token[0]) {
-		char enc_sec[192];
-		http_url_encode(secret_token, enc_sec, sizeof(enc_sec));
-		snprintf(path, sizeof(path), "/tracks/%lld?secret_token=%s", track_id, enc_sec);
-	} else {
-		snprintf(path, sizeof(path), "/tracks/%lld", track_id);
-	}
-
 	int pref_q = soundcloud_get_quality();
 
 	begin_api();
-	json_doc_t doc;
+	json_doc_t doc = {0};
 	char *text = NULL;
-	if (!api_request_json("GET", path, NULL, NULL, &doc, &text, NULL)) {
+	int track_tok = -1;
+	if (!fetch_track_metadata_doc(track_id, secret_token, permalink_url, &doc, &text, &track_tok)) {
 		end_api();
 		return false;
 	}
 
-	int root = json_root(&doc);
 	char access[32] = "";
-	json_obj_str(&doc, root, "access", access, sizeof(access));
-	long long dur_ms = json_obj_llong(&doc, root, "duration", 0);
+	char track_auth[SOUNDCLOUD_AUTH_MAX] = "";
+	json_obj_str(&doc, track_tok, "access", access, sizeof(access));
+	json_obj_str(&doc, track_tok, "track_authorization", track_auth, sizeof(track_auth));
+	if (!track_auth[0] && track_auth_hint && track_auth_hint[0]) {
+		snprintf(track_auth, sizeof(track_auth), "%s", track_auth_hint);
+	}
+	long long dur_ms = json_obj_llong(&doc, track_tok, "duration", 0);
 
-	int transcodings = json_path(&doc, root, "media.transcodings");
+	int transcodings = json_path(&doc, track_tok, "media.transcodings");
 	int tc_len = json_len(&doc, transcodings);
-
-	int best_score = -1;
-	char best_tc_url[SOUNDCLOUD_URL_MAX] = "";
-	soundcloud_stream_kind_t best_kind = SOUNDCLOUD_STREAM_PROGRESSIVE;
-	soundcloud_codec_t best_codec = SOUNDCLOUD_CODEC_MP3;
-	bool best_snipped = false;
-	long long best_dur_ms = dur_ms;
+	tc_cand_t *cands = tc_len > 0 ? calloc((size_t)tc_len, sizeof(*cands)) : NULL;
+	int cand_count = 0;
 	bool saw_encrypted = false;
 
-	for (int i = 0; i < tc_len; i++) {
+	for (int i = 0; i < tc_len && cands; i++) {
 		int tc = json_at(&doc, transcodings, i);
 		char tc_url[SOUNDCLOUD_URL_MAX] = "";
+		char preset[48] = "";
 		char proto[48] = "";
 		char mime[96] = "";
 		char qual[16] = "";
 		json_obj_str(&doc, tc, "url", tc_url, sizeof(tc_url));
+		json_obj_str(&doc, tc, "preset", preset, sizeof(preset));
 		int fmt = json_get(&doc, tc, "format");
 		if (fmt >= 0) {
 			json_obj_str(&doc, fmt, "protocol", proto, sizeof(proto));
@@ -1904,33 +2309,51 @@ bool soundcloud_get_stream(long long track_id, const char *secret_token, bool al
 		if (!tc_url[0]) {
 			continue;
 		}
-		if (strstr(proto, "encrypted") != NULL) {
-			saw_encrypted = true;
+		// SoundCloud's `abr` / `abr_sq` transcodings return 404 on API v2; skip them.
+		if (preset_is_abr(preset)) {
+			continue;
 		}
+		if (strstr(proto, "encrypted") != NULL || strncmp(proto, "ctr-", 4) == 0 || strncmp(proto, "cbc-", 4) == 0 ||
+			strstr(tc_url, "/encrypted-hls") != NULL) {
+			saw_encrypted = true;
+			continue;
+		}
+		if (strcmp(proto, "hls") != 0 && strstr(tc_url, "/hls") != NULL) {
+			snprintf(proto, sizeof(proto), "hls");
+		}
+		bool is_prog = strcmp(proto, "progressive") == 0;
+		if (is_prog && !allow_progressive) {
+			continue;
+		}
+
 		bool tc_snipped = json_obj_bool(&doc, tc, "snipped", false) || strcmp(access, "preview") == 0;
 		int sc = score_transcoding(proto, mime, qual, pref_q, allow_aac);
-		if (sc >= 0 && !tc_snipped) {
+		if (sc < 0) {
+			continue;
+		}
+		if (!tc_snipped) {
 			sc += 1000; // Always prefer a full-length transcoding over a 30s Go+ snippet
 		}
-		if (sc > best_score) {
-			best_score = sc;
-			snprintf(best_tc_url, sizeof(best_tc_url), "%s", tc_url);
-			best_kind = strcmp(proto, "progressive") == 0 ? SOUNDCLOUD_STREAM_PROGRESSIVE : SOUNDCLOUD_STREAM_HLS;
-			if (strstr(mime, "opus") || strstr(mime, "ogg")) {
-				best_codec = SOUNDCLOUD_CODEC_OPUS;
-			} else if (strstr(mime, "mp4") || strstr(mime, "aac")) {
-				best_codec = SOUNDCLOUD_CODEC_AAC;
-			} else {
-				best_codec = SOUNDCLOUD_CODEC_MP3;
-			}
-			best_snipped = tc_snipped;
-			best_dur_ms = json_obj_llong(&doc, tc, "duration", dur_ms);
+
+		tc_cand_t *c = &cands[cand_count++];
+		c->score = sc;
+		snprintf(c->url, sizeof(c->url), "%s", tc_url);
+		c->kind = is_prog ? SOUNDCLOUD_STREAM_PROGRESSIVE : SOUNDCLOUD_STREAM_HLS;
+		if (strstr(mime, "opus") || strstr(mime, "ogg")) {
+			c->codec = SOUNDCLOUD_CODEC_OPUS;
+		} else if (strstr(mime, "mp4") || strstr(mime, "aac")) {
+			c->codec = SOUNDCLOUD_CODEC_AAC;
+		} else {
+			c->codec = SOUNDCLOUD_CODEC_MP3;
 		}
+		c->snipped = tc_snipped;
+		c->dur_ms = json_obj_llong(&doc, tc, "duration", dur_ms);
 	}
 	json_free(&doc);
 	free(text);
 
-	if (best_score < 0 || !best_tc_url[0]) {
+	if (cand_count == 0) {
+		free(cands);
 		end_api();
 		if (saw_encrypted && tc_len > 0) {
 			set_error("soundcloud_drm_unsupported");
@@ -1940,40 +2363,99 @@ bool soundcloud_get_stream(long long track_id, const char *secret_token, bool al
 		return false;
 	}
 
-	// Resolve the transcoding endpoint to obtain the short-lived CDN URL.
-	if (secret_token && secret_token[0] && strstr(best_tc_url, "track_authorization=") == NULL &&
-		strstr(best_tc_url, "secret_token=") == NULL) {
-		char enc_sec[192];
+	// Insertion-sort candidates in descending score order (typically 2..6 entries).
+	for (int i = 1; i < cand_count; i++) {
+		tc_cand_t key = cands[i];
+		int j = i - 1;
+		while (j >= 0 && cands[j].score < key.score) {
+			cands[j + 1] = cands[j];
+			j--;
+		}
+		cands[j + 1] = key;
+	}
+
+	char enc_auth[SOUNDCLOUD_AUTH_MAX * 2] = "";
+	if (track_auth[0]) {
+		http_url_encode(track_auth, enc_auth, sizeof(enc_auth));
+	}
+	char enc_sec[192] = "";
+	if (secret_token && secret_token[0]) {
 		http_url_encode(secret_token, enc_sec, sizeof(enc_sec));
-		size_t cur = strlen(best_tc_url);
-		snprintf(best_tc_url + cur, sizeof(best_tc_url) - cur, "%ssecret_token=%s",
-				 strchr(best_tc_url, '?') ? "&" : "?", enc_sec);
 	}
 
-	json_doc_t sdoc;
-	char *stext = NULL;
-	bool ok = api_request_json("GET", best_tc_url, NULL, NULL, &sdoc, &stext, NULL);
+	// Try each ranked transcoding candidate in turn: SoundCloud frequently lists
+	// legacy `mp3_1_0` formats that return HTTP 404 while `opus_0_0` / `aac_160k`
+	// HLS formats in the same `media.transcodings` array succeed.
+	for (int i = 0; i < cand_count; i++) {
+		char req_url[SOUNDCLOUD_URL_MAX + SOUNDCLOUD_AUTH_MAX * 2 + 256];
+		snprintf(req_url, sizeof(req_url), "%s", cands[i].url);
+
+		if (enc_auth[0] && strstr(req_url, "track_authorization=") == NULL) {
+			size_t cur = strlen(req_url);
+			snprintf(req_url + cur, sizeof(req_url) - cur, "%strack_authorization=%s",
+					 strchr(req_url, '?') ? "&" : "?", enc_auth);
+		}
+		if (enc_sec[0] && strstr(req_url, "secret_token=") == NULL) {
+			size_t cur = strlen(req_url);
+			snprintf(req_url + cur, sizeof(req_url) - cur, "%ssecret_token=%s",
+					 strchr(req_url, '?') ? "&" : "?", enc_sec);
+		}
+
+		json_doc_t sdoc = {0};
+		char *stext = NULL;
+		int tc_status = 0;
+		bool ok = api_request_json("GET", req_url, NULL, NULL, &sdoc, &stext, &tc_status);
+		if (!ok) {
+			if (tc_status == 429) {
+				free(cands);
+				end_api();
+				return false;
+			}
+			continue;
+		}
+
+		char cdn_url[SOUNDCLOUD_URL_MAX] = "";
+		json_obj_str(&sdoc, json_root(&sdoc), "url", cdn_url, sizeof(cdn_url));
+		json_free(&sdoc);
+		free(stext);
+
+		if (!cdn_url[0]) {
+			continue;
+		}
+
+		clear_error();
+		out->kind = cands[i].kind;
+		out->codec = cands[i].codec;
+		snprintf(out->url, sizeof(out->url), "%s", cdn_url);
+		out->duration_secs = cands[i].dur_ms > 0 ? (int)((cands[i].dur_ms + 500) / 1000) : 0;
+		out->snipped = cands[i].snipped;
+		free(cands);
+		end_api();
+		return true;
+	}
+
+	free(cands);
 	end_api();
-	if (!ok) {
+	set_error("soundcloud_track_unavailable");
+	return false;
+}
+
+bool soundcloud_get_track_stream_ex(const soundcloud_track_t *track, bool allow_aac, bool allow_progressive,
+									soundcloud_stream_t *out) {
+	if (!track) {
+		set_error("soundcloud_invalid_id");
 		return false;
 	}
+	return resolve_stream_internal(track->id, track->secret_token, track->permalink_url, track->track_authorization,
+								   allow_aac, allow_progressive, out);
+}
 
-	char cdn_url[SOUNDCLOUD_URL_MAX] = "";
-	json_obj_str(&sdoc, json_root(&sdoc), "url", cdn_url, sizeof(cdn_url));
-	json_free(&sdoc);
-	free(stext);
+bool soundcloud_get_track_stream(const soundcloud_track_t *track, bool allow_aac, soundcloud_stream_t *out) {
+	return soundcloud_get_track_stream_ex(track, allow_aac, true, out);
+}
 
-	if (!cdn_url[0]) {
-		set_error("soundcloud_stream_failed");
-		return false;
-	}
-
-	out->kind = best_kind;
-	out->codec = best_codec;
-	snprintf(out->url, sizeof(out->url), "%s", cdn_url);
-	out->duration_secs = best_dur_ms > 0 ? (int)((best_dur_ms + 500) / 1000) : 0;
-	out->snipped = best_snipped;
-	return true;
+bool soundcloud_get_stream(long long track_id, const char *secret_token, bool allow_aac, soundcloud_stream_t *out) {
+	return resolve_stream_internal(track_id, secret_token, NULL, NULL, allow_aac, true, out);
 }
 
 bool soundcloud_like_track(long long track_id, bool like) {

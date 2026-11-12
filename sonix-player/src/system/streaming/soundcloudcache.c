@@ -391,13 +391,35 @@ static size_t parse_moof_sample_sizes(const uint8_t *moof_body, size_t moof_len,
 	return count;
 }
 
-static bool unwrap_fmp4_segment_to_adts(int fd, const fmp4_aac_cfg_t *cfg, const uint8_t *seg, size_t seg_len,
+static size_t strip_id3v2_prefix(const uint8_t *buf, size_t len) {
+	size_t off = 0;
+	while (len - off >= 10 && buf[off] == 'I' && buf[off + 1] == 'D' && buf[off + 2] == '3') {
+		uint32_t tag_len = ((uint32_t)(buf[off + 6] & 0x7f) << 21) | ((uint32_t)(buf[off + 7] & 0x7f) << 14) |
+						   ((uint32_t)(buf[off + 8] & 0x7f) << 7) | (uint32_t)(buf[off + 9] & 0x7f);
+		size_t total = 10 + (size_t)tag_len + ((buf[off + 5] & 0x10) ? 10 : 0);
+		if (off + total > len) break;
+		off += total;
+	}
+	return off;
+}
+
+static bool unwrap_fmp4_segment_to_adts(int fd, fmp4_aac_cfg_t *cfg, const uint8_t *seg, size_t seg_len,
 										long *written_io) {
+	size_t id3_skip = strip_id3v2_prefix(seg, seg_len);
+	seg += id3_skip;
+	seg_len -= id3_skip;
+
 	// Raw ADTS segment (0xFFFx syncword): pass through directly.
 	if (seg_len >= 7 && seg[0] == 0xff && (seg[1] & 0xf0) == 0xf0) {
 		if (!write_all_fd(fd, seg, seg_len)) return false;
 		*written_io += (long)seg_len;
 		return true;
+	}
+
+	// SoundCloud's HLS AAC streams sometimes deliver `ftyp` + `moov` as regular
+	// segment #0 rather than `#EXT-X-MAP`; scan `moov` dynamically when needed.
+	if (!cfg->ready) {
+		scan_mp4_boxes_for_aac(seg, seg_len, cfg);
 	}
 	if (!cfg->ready) {
 		return false;
@@ -410,6 +432,7 @@ static bool unwrap_fmp4_segment_to_adts(int fd, const fmp4_aac_cfg_t *cfg, const
 	size_t n_sizes = 0;
 	size_t off = 0;
 	bool wrote_any = false;
+	bool saw_moov = false;
 
 	while (off + 8 <= seg_len) {
 		uint64_t bsize = be32(seg + off);
@@ -426,7 +449,12 @@ static bool unwrap_fmp4_segment_to_adts(int fd, const fmp4_aac_cfg_t *cfg, const
 
 		const uint8_t *body = seg + off + hdr;
 		size_t blen = (size_t)(bsize - hdr);
-		if (memcmp(btype, "moof", 4) == 0) {
+		if (memcmp(btype, "moov", 4) == 0) {
+			saw_moov = true;
+			if (!cfg->ready) {
+				scan_mp4_boxes_for_aac(body, blen, cfg);
+			}
+		} else if (memcmp(btype, "moof", 4) == 0) {
 			n_sizes = parse_moof_sample_sizes(body, blen, sizes, 4096);
 		} else if (memcmp(btype, "mdat", 4) == 0 && n_sizes > 0) {
 			size_t mpos = 0;
@@ -446,7 +474,7 @@ static bool unwrap_fmp4_segment_to_adts(int fd, const fmp4_aac_cfg_t *cfg, const
 	}
 
 	free(sizes);
-	return wrote_any;
+	return wrote_any || saw_moov;
 }
 
 // ---------------------------------------------------------------------------
@@ -1299,6 +1327,10 @@ static bool load_hls_plan(const char *manifest_url, hls_plan_t *plan) {
 		set_cache_error("soundcloud_stream_failed");
 		return false;
 	}
+	const char *final_url = http_last_final_url();
+	if (final_url && final_url[0]) {
+		snprintf(active_url, sizeof(active_url), "%s", final_url);
+	}
 
 	// Master playlist redirect (#EXT-X-STREAM-INF).
 	char variant[SOUNDCLOUD_URL_MAX] = "";
@@ -1310,6 +1342,10 @@ static bool load_hls_plan(const char *manifest_url, hls_plan_t *plan) {
 		if (!fetch_bytes(active_url, MANIFEST_LIMIT, &mbytes, &mlen, NULL) || !mbytes) {
 			set_cache_error("soundcloud_stream_failed");
 			return false;
+		}
+		final_url = http_last_final_url();
+		if (final_url && final_url[0]) {
+			snprintf(active_url, sizeof(active_url), "%s", final_url);
 		}
 	}
 
@@ -1426,18 +1462,6 @@ static bool load_hls_plan(const char *manifest_url, hls_plan_t *plan) {
 	return true;
 }
 
-static size_t strip_id3v2_prefix(const uint8_t *buf, size_t len) {
-	size_t off = 0;
-	while (len - off >= 10 && buf[off] == 'I' && buf[off + 1] == 'D' && buf[off + 2] == '3') {
-		uint32_t tag_len = ((uint32_t)(buf[off + 6] & 0x7f) << 21) | ((uint32_t)(buf[off + 7] & 0x7f) << 14) |
-						   ((uint32_t)(buf[off + 8] & 0x7f) << 7) | (uint32_t)(buf[off + 9] & 0x7f);
-		size_t total = 10 + (size_t)tag_len + ((buf[off + 5] & 0x10) ? 10 : 0);
-		if (off + total > len) break;
-		off += total;
-	}
-	return off;
-}
-
 typedef struct {
 	hls_plan_t plan;
 	int next_seg;
@@ -1464,7 +1488,7 @@ static bool process_one_hls_segment(hls_job_t *job, int idx, bool *refreshed_onc
 			*refreshed_once = true;
 			soundcloud_stream_t fresh;
 			hls_plan_t new_plan;
-			if (soundcloud_get_stream(job->track.id, job->track.secret_token, aac_supported(), &fresh) &&
+			if (soundcloud_get_track_stream_ex(&job->track, aac_supported(), false, &fresh) &&
 				fresh.kind == SOUNDCLOUD_STREAM_HLS && load_hls_plan(fresh.url, &new_plan) &&
 				idx < new_plan.seg_count) {
 				free_hls_plan(&job->plan);
@@ -1645,6 +1669,9 @@ static bool start_hls_download(const soundcloud_track_t *track, const soundcloud
 		if (est < 65536L) est = 65536L;
 		growfile_announce(job->audio_path, est);
 		job->growing_announced = true;
+		if (job->written > 0) {
+			growfile_progress(job->audio_path, job->written);
+		}
 	}
 
 	bool refreshed = false;
@@ -1781,7 +1808,7 @@ static bool fetch_track_internal(const soundcloud_track_t *track, bool is_prefet
 	}
 
 	soundcloud_stream_t stream;
-	if (!soundcloud_get_stream(track->id, track->secret_token, aac_supported(), &stream)) {
+	if (!soundcloud_get_track_stream(track, aac_supported(), &stream)) {
 		finish_dl_slot();
 		const char *err = soundcloud_last_error();
 		set_cache_error(err && err[0] ? err : "soundcloud_stream_failed");
@@ -1792,6 +1819,29 @@ static bool fetch_track_internal(const soundcloud_track_t *track, bool is_prefet
 	bool ok;
 	if (stream.kind == SOUNDCLOUD_STREAM_PROGRESSIVE) {
 		ok = start_progressive_download(track, &stream, is_prefetch, produced, sizeof(produced));
+		// If the CDN rejected or 404'd the progressive MP3 asset itself, retry
+		// once using an HLS transcoding (`opus_0_0` / `aac_160k` / `hls_mp3`).
+		if (!ok) {
+			streamturn_acquire();
+			pthread_mutex_lock(&dl_lock);
+			if (!dl_busy) {
+				dl_busy = true;
+				dl_cancel_flag = false;
+				dl_track_id = track->id;
+				dl_setup_fd = -1;
+				dl_active_stream = NULL;
+				pthread_mutex_unlock(&dl_lock);
+				soundcloud_stream_t hls_stream;
+				if (soundcloud_get_track_stream_ex(track, aac_supported(), false, &hls_stream)) {
+					ok = start_hls_download(track, &hls_stream, is_prefetch, produced, sizeof(produced));
+				} else {
+					finish_dl_slot();
+				}
+			} else {
+				pthread_mutex_unlock(&dl_lock);
+				streamturn_release();
+			}
+		}
 	} else {
 		ok = start_hls_download(track, &stream, is_prefetch, produced, sizeof(produced));
 	}

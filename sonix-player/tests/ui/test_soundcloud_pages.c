@@ -254,6 +254,22 @@ bool soundcloud_configure(const soundcloud_credentials_t *credentials, bool reme
 	return true;
 }
 
+bool soundcloud_save_draft(const soundcloud_credentials_t *credentials, bool remember, char *error,
+						   size_t error_size) {
+	(void)error;
+	(void)error_size;
+	if (!credentials) return false;
+	stub_creds = *credentials;
+	if (strncmp(stub_creds.username, "https://soundcloud.com/", 23) == 0) {
+		memmove(stub_creds.username, stub_creds.username + 23, strlen(stub_creds.username + 23) + 1);
+		char *q = strpbrk(stub_creds.username, "/?#");
+		if (q) *q = '\0';
+	}
+	stub_remember = remember;
+	stub_has_acc = (stub_creds.username[0] != '\0' || stub_creds.oauth_token[0] != '\0');
+	return true;
+}
+
 void soundcloud_credentials(soundcloud_credentials_t *out, bool *remembered) {
 	if (out) *out = stub_creds;
 	if (remembered) *remembered = stub_remember;
@@ -522,13 +538,35 @@ int main(int argc, char **argv) {
 	assert(soundcloudpage_prepare_track(prep_path, sizeof(prep_path)));
 	assert(strcmp(prep_path, "/mnt/sd/.local/soundcloud-cache/2199023255552.opus") == 0);
 
-	// 2. Account & Settings -> Enter OAuth token -> Connect Go+ account -> Quality pills -> Clear cache
+	// 2a. Profile URL saves immediately on keyboard OK even if user backs out before tapping Connect & save!
 	switch_screen_return_to(soundcloud_screen);
 	lv_obj_t *settings_row = find_clickable_with_label(soundcloud_screen, tr("soundcloud_account_settings"));
 	assert(settings_row != NULL);
 	lv_obj_send_event(settings_row, LV_EVENT_CLICKED, NULL);
 	lv_obj_t *settings_scr = lv_screen_active();
 	assert(settings_scr != soundcloud_screen);
+
+	lv_obj_t *prof_row = find_clickable_with_label(settings_scr, tr("soundcloud_username"));
+	assert(prof_row != NULL);
+	lv_obj_send_event(prof_row, LV_EVENT_CLICKED, NULL);
+	lv_obj_t *prof_ta = find_textarea(lv_screen_active());
+	assert(prof_ta != NULL);
+	lv_textarea_set_text(prof_ta, "https://soundcloud.com/my-v1-profile?si=share123");
+	lv_obj_t *prof_ok = find_clickable_with_label(lv_screen_active(), tr("ok"));
+	assert(prof_ok != NULL);
+	lv_obj_send_event(prof_ok, LV_EVENT_CLICKED, NULL);
+	assert(lv_screen_active() == settings_scr);
+	assert(stub_has_acc);
+	assert(stub_remember == true);
+	assert(strcmp(stub_creds.username, "my-v1-profile") == 0);
+
+	// Back out to Home and reopen Account & Settings: saved profile must still be present!
+	switch_screen_return_to(soundcloud_screen);
+	lv_obj_send_event(settings_row, LV_EVENT_CLICKED, NULL);
+	assert(lv_screen_active() == settings_scr);
+	assert(find_clickable_with_label(settings_scr, "my-v1-profile") != NULL);
+
+	// 2b. Enter OAuth token -> Connect Go+ account -> Quality pills -> Clear cache
 
 	lv_obj_t *tok_row = find_clickable_with_label(settings_scr, tr("soundcloud_oauth_token"));
 	assert(tok_row != NULL);

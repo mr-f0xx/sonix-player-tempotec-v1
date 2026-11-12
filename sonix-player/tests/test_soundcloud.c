@@ -453,6 +453,7 @@ typedef struct {
 	int discovery_js_hits;
 	int cdn_auth_leaks;
 	int cdn_prog_hits;
+	int abr_hits;
 	int like_puts;
 	int like_deletes;
 	int sub_tier; // 0=free, 1=go, 2=go+
@@ -539,6 +540,49 @@ static void format_track_json(char *out, size_t size, long long id, const char *
 	// mode 1: full hq aac HLS + mp3_128k progressive + opus_64k HLS (tests Go+ / Low / Standard)
 	// mode 2: AES-128 encrypted HLS mp3
 	// mode 3: BLOCK policy (no transcodings)
+	// mode 4: 2026 SoundCloud track (abr_sq + 404 mp3_1_0 + track_authorization-gated opus_0_0)
+	// mode 5: progressive CDN 404 -> HLS inline-moov AAC fallback
+	if (mode == 5) {
+		snprintf(out, size,
+				 "{\"id\":%lld,\"title\":\"%s\",\"duration\":120000,\"full_duration\":120000,"
+				 "\"policy\":\"ALLOW\",\"access\":\"playable\",\"streamable\":true,"
+				 "\"track_authorization\":\"jwt-test-auth-2026\","
+				 "\"user\":{\"id\":9000000006,\"username\":\"Modern Producer\"},"
+				 "\"media\":{\"transcodings\":["
+				 "{\"url\":\"http://127.0.0.1:%d/resolve/cdn_404_mp3\",\"preset\":\"mp3_1_0\",\"quality\":\"sq\","
+				 "\"duration\":120000,\"snipped\":false,"
+				 "\"format\":{\"protocol\":\"progressive\",\"mime_type\":\"audio/mpeg\"}},"
+				 "{\"url\":\"http://127.0.0.1:%d/resolve/hls_aac_inline\",\"preset\":\"aac_160k\",\"quality\":\"sq\","
+				 "\"duration\":120000,\"snipped\":false,"
+				 "\"format\":{\"protocol\":\"hls\",\"mime_type\":\"audio/mp4; codecs=\\\"mp4a.40.2\\\"\"}}"
+				 "]}}",
+				 id, title, G.api_port, G.api_port);
+		return;
+	}
+	if (mode == 4) {
+		snprintf(out, size,
+				 "{\"id\":%lld,\"title\":\"%s\",\"duration\":120000,\"full_duration\":120000,"
+				 "\"policy\":\"ALLOW\",\"access\":\"playable\",\"streamable\":true,"
+				 "\"permalink_url\":\"https://soundcloud.com/modern/track-2026\","
+				 "\"track_authorization\":\"jwt-test-auth-2026\","
+				 "\"user\":{\"id\":9000000005,\"username\":\"Modern Producer\"},"
+				 "\"media\":{\"transcodings\":["
+				 "{\"url\":\"http://127.0.0.1:%d/resolve/abr_sq\",\"preset\":\"abr_sq\",\"quality\":\"sq\","
+				 "\"duration\":120000,\"snipped\":false,"
+				 "\"format\":{\"protocol\":\"hls\",\"mime_type\":\"audio/mpeg\"}},"
+				 "{\"url\":\"http://127.0.0.1:%d/resolve/dead_mp3_prog\",\"preset\":\"mp3_1_0\",\"quality\":\"sq\","
+				 "\"duration\":120000,\"snipped\":false,"
+				 "\"format\":{\"protocol\":\"progressive\",\"mime_type\":\"audio/mpeg\"}},"
+				 "{\"url\":\"http://127.0.0.1:%d/resolve/dead_mp3_hls\",\"preset\":\"mp3_1_0\",\"quality\":\"sq\","
+				 "\"duration\":120000,\"snipped\":false,"
+				 "\"format\":{\"protocol\":\"hls\",\"mime_type\":\"audio/mpeg\"}},"
+				 "{\"url\":\"http://127.0.0.1:%d/resolve/auth_opus\",\"preset\":\"opus_0_0\",\"quality\":\"sq\","
+				 "\"duration\":120000,\"snipped\":false,"
+				 "\"format\":{\"protocol\":\"hls\",\"mime_type\":\"audio/ogg; codecs=\\\"opus\\\"\"}}"
+				 "]}}",
+				 id, title, G.api_port, G.api_port, G.api_port, G.api_port);
+		return;
+	}
 	if (mode == 3) {
 		snprintf(out, size,
 				 "{\"id\":%lld,\"title\":\"%s\",\"duration\":180000,\"full_duration\":180000,"
@@ -605,7 +649,26 @@ static void handle_api_conn(int fd) {
 	char method[16] = "", path[2048] = "";
 	if (sscanf(req, "%15s %2047s", method, path) != 2) return;
 
-	// Web HTML & JS bundle endpoints for client_id auto-discovery.
+	// Web HTML & JS bundle endpoints for client_id auto-discovery and web user hydration.
+	if (strncmp(path, "/shortlink/dj", 13) == 0) {
+		const char *redir =
+			"HTTP/1.1 302 Found\r\n"
+			"Location: https://soundcloud.com/hydration-dj?si=shortlink123\r\n"
+			"Content-Length: 0\r\n"
+			"Connection: close\r\n\r\n";
+		(void)send(fd, redir, strlen(redir), MSG_NOSIGNAL);
+		return;
+	}
+	if (strncmp(path, "/web/hydration-dj", 17) == 0) {
+		const char *html =
+			"<!doctype html><html><body><script>"
+			"window.__sc_hydration = [{\"hydratable\":\"sound\",\"data\":{\"id\":1}},"
+			"{\"hydratable\":\"user\",\"data\":{\"id\":555000111,\"username\":\"Hydration DJ\","
+			"\"permalink\":\"hydration-dj\",\"full_name\":\"Hydration DJ\"}}];"
+			"</script></body></html>";
+		send_http(fd, 200, "text/html", html, strlen(html));
+		return;
+	}
 	if (strcmp(path, "/web") == 0 || strcmp(path, "/web/") == 0) {
 		pthread_mutex_lock(&G.mu);
 		G.discovery_html_hits++;
@@ -727,10 +790,16 @@ static void handle_api_conn(int fd) {
 	// Single track lookup `/tracks/<id>` (used by soundcloud_get_stream)
 	if (strncmp(path, "/tracks/", 8) == 0) {
 		long long tid = atoll(path + 8);
-		char tj[1536];
+		if (tid == 2199023255570LL) {
+			// Simulate `/tracks/<id>` 404 forcing `/tracks?ids=<id>` fallback!
+			send_http(fd, 404, "application/json", "{\"error\":\"not found\"}", 21);
+			return;
+		}
+		char tj[2048];
 		if (tid == 2199023255552LL) format_track_json(tj, sizeof(tj), tid, "64-Bit Midnight Drive", G.cdn_port, 0);
 		else if (tid == 2199023255560LL) format_track_json(tj, sizeof(tj), tid, "Neon Synth Go+", G.cdn_port, 1);
 		else if (tid == 2199023255561LL) format_track_json(tj, sizeof(tj), tid, "Encrypted Club Mix", G.cdn_port, 2);
+		else if (tid == 2199023255571LL) format_track_json(tj, sizeof(tj), tid, "CDN Fallback AAC", G.cdn_port, 5);
 		else format_track_json(tj, sizeof(tj), tid, "Region Blocked Track", G.cdn_port, 3);
 		send_http(fd, 200, "application/json", tj, strlen(tj));
 		return;
@@ -789,9 +858,15 @@ static void handle_api_conn(int fd) {
 		assert(body != NULL);
 		int used = snprintf(body, cap, "[");
 		for (int i = count - 1; i >= 0; i--) {
-			char tj[1536], tname[64];
-			snprintf(tname, sizeof(tname), "Hydrated #%lld", parsed[i]);
-			format_track_json(tj, sizeof(tj), parsed[i], tname, G.cdn_port, 0);
+			char tj[2048], tname[64];
+			if (parsed[i] == 2199023255570LL) {
+				format_track_json(tj, sizeof(tj), parsed[i], "2026 Modern Track", G.cdn_port, 4);
+			} else if (parsed[i] == 2199023255571LL) {
+				format_track_json(tj, sizeof(tj), parsed[i], "CDN Fallback AAC", G.cdn_port, 5);
+			} else {
+				snprintf(tname, sizeof(tname), "Hydrated #%lld", parsed[i]);
+				format_track_json(tj, sizeof(tj), parsed[i], tname, G.cdn_port, 0);
+			}
 			used += snprintf(body + used, cap - (size_t)used, "%s%s", (i < count - 1) ? "," : "", tj);
 		}
 		used += snprintf(body + used, cap - (size_t)used, "]");
@@ -800,7 +875,54 @@ static void handle_api_conn(int fd) {
 		return;
 	}
 
+	if (strncmp(path, "/resolve?", 9) == 0 || strncmp(path, "/search/users?", 14) == 0) {
+		if (strstr(path, "hydration-dj") != NULL) {
+			// Force Tier 3 web HTML hydration fallback when /resolve and /search/users return 403!
+			send_http(fd, 403, "application/json", "{\"error\":\"datadome\"}", 20);
+			return;
+		}
+	}
+
 	if (strncmp(path, "/resolve/", 9) == 0) {
+		if (strncmp(path + 9, "abr_sq", 6) == 0) {
+			pthread_mutex_lock(&G.mu);
+			G.abr_hits++;
+			pthread_mutex_unlock(&G.mu);
+			send_http(fd, 404, "application/json", "{}", 2);
+			return;
+		}
+		if (strncmp(path + 9, "dead_mp3", 8) == 0) {
+			// 2026 SoundCloud behavior: mp3_1_0 format endpoints 404 while opus/aac work!
+			send_http(fd, 404, "application/json", "{}", 2);
+			return;
+		}
+		if (strncmp(path + 9, "auth_opus", 9) == 0) {
+			char ta[128] = "";
+			if (!query_param(path, "track_authorization", ta, sizeof(ta)) ||
+				strcmp(ta, "jwt-test-auth-2026") != 0) {
+				send_http(fd, 404, "application/json", "{\"error\":\"missing track_authorization\"}", 39);
+				return;
+			}
+			char body[512];
+			int n = snprintf(body, sizeof(body), "{\"url\":\"http://127.0.0.1:%d/hls_opus/playlist.m3u8\"}",
+							 G.cdn_port);
+			send_http(fd, 200, "application/json", body, (size_t)n);
+			return;
+		}
+		if (strncmp(path + 9, "cdn_404_mp3", 11) == 0) {
+			char body[512];
+			int n = snprintf(body, sizeof(body), "{\"url\":\"http://127.0.0.1:%d/missing_cdn.mp3\"}",
+							 G.cdn_port);
+			send_http(fd, 200, "application/json", body, (size_t)n);
+			return;
+		}
+		if (strncmp(path + 9, "hls_aac_inline", 14) == 0) {
+			char body[512];
+			int n = snprintf(body, sizeof(body),
+							 "{\"url\":\"http://127.0.0.1:%d/hls_aac_inline/playlist.m3u8\"}", G.cdn_port);
+			send_http(fd, 200, "application/json", body, (size_t)n);
+			return;
+		}
 		char body[512];
 		const char *target = "/prog.mp3";
 		if (strncmp(path + 9, "hls_aes", 7) == 0) target = "/hls_aes/master.m3u8";
@@ -916,6 +1038,34 @@ static void handle_cdn_conn(int fd) {
 	}
 	if (strcmp(path, "/hls_aac/seg1.m4s") == 0) {
 		send_http(fd, 200, "video/iso.segment", G.fmp4_seg1, G.fmp4_seg1_len);
+		return;
+	}
+	// SoundCloud cf-hls-aac-media style: init.mp4 is Segment #0 WITHOUT #EXT-X-MAP!
+	if (strcmp(path, "/hls_aac_inline/playlist.m3u8") == 0) {
+		const char *m =
+			"#EXTM3U\n"
+			"#EXT-X-VERSION:3\n"
+			"#EXT-X-MEDIA-SEQUENCE:0\n"
+			"#EXTINF:0.0,\n"
+			"init.mp4\n"
+			"#EXTINF:1.0,\n"
+			"seg0.m4s\n"
+			"#EXTINF:1.0,\n"
+			"seg1.m4s\n"
+			"#EXT-X-ENDLIST\n";
+		send_http(fd, 200, "application/vnd.apple.mpegurl", m, strlen(m));
+		return;
+	}
+	if (strcmp(path, "/hls_aac_inline/init.mp4") == 0) {
+		send_http(fd, 200, "audio/mp4", G.fmp4_init, G.fmp4_init_len);
+		return;
+	}
+	if (strcmp(path, "/hls_aac_inline/seg0.m4s") == 0) {
+		send_http(fd, 200, "audio/mp4", G.fmp4_seg0, G.fmp4_seg0_len);
+		return;
+	}
+	if (strcmp(path, "/hls_aac_inline/seg1.m4s") == 0) {
+		send_http(fd, 200, "audio/mp4", G.fmp4_seg1, G.fmp4_seg1_len);
 		return;
 	}
 	send_http(fd, 404, "text/plain", "not found", 9);
@@ -1271,6 +1421,77 @@ int main(void) {
 	assert(soundcloud_forget());
 	assert(!soundcloud_has_account());
 	assert(access(cred_path, F_OK) != 0);
+
+	// -----------------------------------------------------------------------
+	// 10. PR #284 hardware regressions:
+	//     a) Default remember=true & immediate draft persistence of long mobile
+	//        share URLs + Tier 3 web HTML hydration when API /resolve 403s.
+	//     b) 2026 SoundCloud 404 mp3_1_0 + abr_sq skip + track_authorization
+	//        + /tracks?ids= fallback (prevents false "soundcloud_not_found").
+	//     c) Progressive CDN 404 -> automatic HLS fallback with inline
+	//        Segment-0 ftyp+moov (no #EXT-X-MAP).
+	// -----------------------------------------------------------------------
+	soundcloud_credentials_t def_creds;
+	bool def_rem = false;
+	soundcloud_credentials(&def_creds, &def_rem);
+	assert(def_rem == true);
+
+	soundcloud_credentials_t share_draft;
+	memset(&share_draft, 0, sizeof(share_draft));
+	snprintf(share_draft.username, sizeof(share_draft.username),
+			 "https://m.soundcloud.com/hydration-dj/likes"
+			 "?si=8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b3c&utm_source=clipboard&utm_medium=text&utm_campaign=social_sharing");
+	char draft_err[128] = "";
+	assert(soundcloud_save_draft(&share_draft, true, draft_err, sizeof(draft_err)));
+	assert(access(cred_path, F_OK) == 0);
+
+	// Reload fresh from disk before any network call: profile URL must already be normalized & saved!
+	soundcloud_init();
+	soundcloud_set_endpoints_for_test(api_base, web_base);
+	soundcloud_credentials(&def_creds, &def_rem);
+	assert(def_rem == true);
+	assert(strcmp(def_creds.username, "hydration-dj") == 0);
+	assert(soundcloud_has_account());
+
+	// Configure resolves user via Tier 3 web HTML hydration when /resolve and /search/users return 403!
+	assert(soundcloud_configure(&def_creds, true, draft_err, sizeof(draft_err)));
+	soundcloud_account_info_t hyd_info;
+	soundcloud_account_info(&hyd_info);
+	assert(hyd_info.user_id == 555000111LL);
+	assert(strcmp(hyd_info.display_name, "Hydration DJ") == 0);
+
+	// Track 2199023255570: /tracks/<id> 404s, abr_sq is skipped, mp3_1_0 404s, opus_0_0 needs track_authorization!
+	soundcloud_set_quality(SOUNDCLOUD_QUALITY_STANDARD);
+	soundcloud_track_t tr_2026;
+	memset(&tr_2026, 0, sizeof(tr_2026));
+	tr_2026.id = 2199023255570LL;
+	snprintf(tr_2026.title, sizeof(tr_2026.title), "2026 Modern Track");
+	snprintf(tr_2026.artist, sizeof(tr_2026.artist), "Modern Producer");
+	tr_2026.streamable = true;
+
+	char cached_2026[PATH_MAX] = "";
+	assert(soundcloudcache_get(&tr_2026, cached_2026, sizeof(cached_2026)));
+	assert(strstr(cached_2026, "2199023255570.opus") != NULL);
+	assert(G.abr_hits == 0);
+	assert(stat(cached_2026, &st) == 0);
+	assert((size_t)st.st_size == G.opus_seg0_len + G.opus_seg1_len);
+
+	// Track 2199023255571: progressive MP3 404s on CDN -> auto-retries HLS inline-moov AAC!
+	soundcloud_track_t tr_inline_aac;
+	memset(&tr_inline_aac, 0, sizeof(tr_inline_aac));
+	tr_inline_aac.id = 2199023255571LL;
+	snprintf(tr_inline_aac.title, sizeof(tr_inline_aac.title), "CDN Fallback AAC");
+	snprintf(tr_inline_aac.artist, sizeof(tr_inline_aac.artist), "Modern Producer");
+	tr_inline_aac.streamable = true;
+
+	char cached_inline_aac[PATH_MAX] = "";
+	assert(soundcloudcache_get(&tr_inline_aac, cached_inline_aac, sizeof(cached_inline_aac)));
+	assert(strstr(cached_inline_aac, "2199023255571.aac") != NULL);
+	assert(stat(cached_inline_aac, &st) == 0);
+	assert(st.st_size == 52);
+
+	soundcloudcache_clear();
+	assert(soundcloud_forget());
 	assert(G.cdn_auth_leaks == 0);
 
 	soundcloudcache_cancel();

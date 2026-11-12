@@ -24,12 +24,14 @@
 
 #define SOUNDCLOUD_TITLE_MAX 200
 #define SOUNDCLOUD_NAME_MAX 128
-#define SOUNDCLOUD_USER_MAX 128
-#define SOUNDCLOUD_TOKEN_MAX 256
+#define SOUNDCLOUD_USER_MAX 256
+#define SOUNDCLOUD_TOKEN_MAX 512
 #define SOUNDCLOUD_CLIENT_ID_MAX 64
 #define SOUNDCLOUD_SECRET_MAX 64
-#define SOUNDCLOUD_URL_MAX 1536
-#define SOUNDCLOUD_CURSOR_MAX 1536
+#define SOUNDCLOUD_COVER_MAX 512
+#define SOUNDCLOUD_AUTH_MAX 768
+#define SOUNDCLOUD_URL_MAX 3072
+#define SOUNDCLOUD_CURSOR_MAX 2048
 #define SOUNDCLOUD_PAGE_LIMIT 50
 
 #define SOUNDCLOUD_USER_AGENT \
@@ -61,8 +63,10 @@ typedef struct {
 	char title[SOUNDCLOUD_TITLE_MAX];
 	char artist[SOUNDCLOUD_NAME_MAX];
 	char album[SOUNDCLOUD_TITLE_MAX];
-	char cover[SOUNDCLOUD_URL_MAX];
+	char cover[SOUNDCLOUD_COVER_MAX];
 	char secret_token[SOUNDCLOUD_SECRET_MAX];
+	char permalink_url[SOUNDCLOUD_USER_MAX];
+	char track_authorization[SOUNDCLOUD_AUTH_MAX];
 	int duration; // seconds (for 30s Go+ previews on Free, the playable snippet length)
 	int full_duration;
 	bool streamable;
@@ -73,7 +77,7 @@ typedef struct {
 	long long id;
 	char title[SOUNDCLOUD_TITLE_MAX];
 	char owner[SOUNDCLOUD_NAME_MAX];
-	char cover[SOUNDCLOUD_URL_MAX];
+	char cover[SOUNDCLOUD_COVER_MAX];
 	char secret_token[SOUNDCLOUD_SECRET_MAX];
 	int track_count;
 	bool is_liked_playlist;
@@ -108,8 +112,11 @@ typedef struct {
 void soundcloud_init(void);
 void soundcloud_reload_streamkeys(void);
 
-// Account configuration & state. `soundcloud_configure` validates against the
-// API and blocks; call it from a worker thread.
+// Account configuration & state. `soundcloud_save_draft` normalizes and
+// persists credentials locally without network I/O (safe from the GUI thread).
+// `soundcloud_configure` also verifies and resolves the profile against the API
+// and must be called from a worker thread.
+bool soundcloud_save_draft(const soundcloud_credentials_t *credentials, bool remember, char *error, size_t error_size);
 bool soundcloud_configure(const soundcloud_credentials_t *credentials, bool remember, char *error, size_t error_size);
 void soundcloud_credentials(soundcloud_credentials_t *out, bool *remembered);
 void soundcloud_account_info(soundcloud_account_info_t *out);
@@ -143,8 +150,11 @@ int soundcloud_playlists(const char *cursor, soundcloud_playlist_t *out, int max
 int soundcloud_playlist_tracks(long long playlist_id, const char *secret_token, int offset, soundcloud_track_t *out,
 							   int max, bool *more);
 
-// Resolves a fresh playable stream URL / HLS manifest URL for `track_id`.
+// Resolves a fresh playable stream URL / HLS manifest URL for `track_id` or `track`.
 bool soundcloud_get_stream(long long track_id, const char *secret_token, bool allow_aac, soundcloud_stream_t *out);
+bool soundcloud_get_track_stream(const soundcloud_track_t *track, bool allow_aac, soundcloud_stream_t *out);
+bool soundcloud_get_track_stream_ex(const soundcloud_track_t *track, bool allow_aac, bool allow_progressive,
+									soundcloud_stream_t *out);
 
 //Session-mirrored likes for the Now Playing favourite button.
 bool soundcloud_is_liked(long long track_id);

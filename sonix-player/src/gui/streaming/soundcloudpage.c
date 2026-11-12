@@ -983,14 +983,26 @@ static void edit_field_cb(lv_event_t *e) {
 
 static void accept_edit_cb(lv_event_t *e) {
 	(void)e;
-	char *dests[3] = {draft.username, draft.oauth_token, draft.client_id};
-	const size_t caps[3] = {sizeof(draft.username), sizeof(draft.oauth_token), sizeof(draft.client_id)};
+	soundcloud_credentials_t candidate = draft;
+	char *dests[3] = {candidate.username, candidate.oauth_token, candidate.client_id};
+	const size_t caps[3] = {sizeof(candidate.username), sizeof(candidate.oauth_token), sizeof(candidate.client_id)};
 	const char *txt = lv_textarea_get_text(edit_field);
 	if (strlen(txt) >= caps[editing_field]) {
+		wipe_mem(&candidate, sizeof(candidate));
 		toast_error("soundcloud_invalid_credentials");
 		return;
 	}
 	snprintf(dests[editing_field], caps[editing_field], "%s", txt);
+
+	char err[192] = "";
+	if (!soundcloud_save_draft(&candidate, draft_remember, err, sizeof(err))) {
+		wipe_mem(&candidate, sizeof(candidate));
+		toast_error(err[0] ? err : "soundcloud_invalid_credentials");
+		return;
+	}
+	wipe_mem(&candidate, sizeof(candidate));
+
+	soundcloud_credentials(&draft, &draft_remember);
 	lv_textarea_set_text(edit_field, "");
 	refresh_settings_ui();
 	switch_screen_return_to(settings_screen);
@@ -1003,6 +1015,12 @@ static void edit_unloaded_cb(lv_event_t *e) {
 
 static void remember_toggle_cb(lv_event_t *e) {
 	draft_remember = lv_obj_has_state(lv_event_get_target(e), LV_STATE_CHECKED);
+	char err[192] = "";
+	if (!soundcloud_save_draft(&draft, draft_remember, err, sizeof(err))) {
+		soundcloud_credentials(&draft, &draft_remember);
+		refresh_settings_ui();
+		toast_error(err[0] ? err : "soundcloud_cannot_save_credentials");
+	}
 }
 
 static void quality_pill_cb(lv_event_t *e) {
@@ -1061,7 +1079,7 @@ static void forget_confirm(void *user) {
 	}
 	bool removed = soundcloud_forget();
 	wipe_mem(&draft, sizeof(draft));
-	draft_remember = false;
+	draft_remember = true;
 	free(shown_entries);
 	shown_entries = NULL;
 	shown_count = 0;
@@ -1110,6 +1128,10 @@ static void poll_cb(lv_timer_t *timer) {
 			toast_busy_end();
 			if (res->count < 0) {
 				waiting_for_track = false;
+				if (res->job.kind == JOB_CONNECT) {
+					soundcloud_credentials(&draft, &draft_remember);
+					refresh_settings_ui();
+				}
 				toast_error(res->error[0] ? res->error : "soundcloud_connection_failed");
 			} else if (res->job.kind == JOB_BROWSE) {
 				free(shown_entries);
@@ -1226,13 +1248,13 @@ static void build_settings_screens(gui_config_t *cfg) {
 	row = settingsrow_add(c, "soundcloud_oauth_token", &token_value, edit_field_cb, (void *)(intptr_t)1);
 	settingsrow_add_icon(row, &icon_keylock_quick, THEME_SEMANTIC_BLUE);
 
-	row = settingsrow_add(c, "soundcloud_client_id", &cid_value, edit_field_cb, (void *)(intptr_t)2);
-	settingsrow_add_icon(row, &icon_wifi_high, THEME_SEMANTIC_PURPLE);
-
 	settingsrow_toggle(c, "soundcloud_remember", &remember_switch, remember_toggle_cb);
 
 	row = settingsrow_action(c, "soundcloud_connect_save", connect_save_cb, NULL);
 	settingsrow_add_icon(row, &icon_check, THEME_SEMANTIC_GREEN);
+
+	row = settingsrow_add(c, "soundcloud_client_id", &cid_value, edit_field_cb, (void *)(intptr_t)2);
+	settingsrow_add_icon(row, &icon_wifi_high, THEME_SEMANTIC_PURPLE);
 
 	lv_obj_t *pills = NULL;
 	settingsrow_pills(c, "soundcloud_quality", &pills);

@@ -12,7 +12,7 @@ Native SoundCloud API v2 client for `sonix_player`, supporting anonymous browsin
 
 ### Signing in (`oauth_token` / `username` / `streaming-keys.ini`)
 
-SoundCloud closed new public OAuth application registrations, so personal accounts authenticate with your session `oauth_token` (or browse public Likes/Reposts/Playlists by `username`, or configure `[soundcloud]` in `streaming-keys.ini` on the microSD card):
+SoundCloud closed new public OAuth application registrations, so personal accounts authenticate with your session `oauth_token` (or browse public Likes/Reposts/Playlists by profile URL, `@handle`, `on.soundcloud.com` shortlink, or `username`, or configure `[soundcloud]` in `streaming-keys.ini` on the microSD card):
 
 1. Sign in to `https://soundcloud.com` in a desktop browser.
 2. Open Developer Tools → **Application** (Chrome/Edge) or **Storage** (Firefox) → **Cookies** → `https://soundcloud.com`, and copy the value of the **`oauth_token`** cookie (for example `2-123456-78901234-abcdef...`).
@@ -41,9 +41,9 @@ client_id =
 | **Standard (`MP3 128k`, default)** | `mp3_128k` (progressive HTTP or HLS) | MP3 (`.mp3`) via `dr_mp3` + `growfile` | Universal compatibility across Free / Go / Go+ |
 | **High (`AAC 256k`)** | `aac_256k` (`mp4` HLS, Go+) | Unwrapped to ADTS AAC (`.aac`) via `fdk-aac` | Requires Go+ entitlement and `/usr/lib/libfdk-aac.so.2` on device; falls back automatically to MP3 128k / Opus 64k otherwise |
 
-### Preview (`snipped`) handling and playlist hydration
+### Preview (`snipped`) handling, multi-transcoding fallback, and playlist hydration
 
-- SoundCloud tracks frequently advertise a Go+-only `snipped` (30-second preview) transcoding alongside full-length transcodings, or restrict Go+ catalogue tracks to previews on Free accounts. When selecting a transcoding, `soundcloud_get_stream()` prefers non-snipped full-length streams first and only falls back to a preview transcoding when no full stream is available on the account. Tracks marked `BLOCK` fail cleanly with a localized notice.
+- SoundCloud tracks frequently advertise a Go+-only `snipped` (30-second preview) transcoding alongside full-length transcodings, or legacy `mp3_1_0` / `abr_*` format URLs that return HTTP `404` while `opus_0_0` / `aac_160k` HLS streams on the same track succeed. Stream resolution skips broken `abr_*` presets, attaches `track_authorization` when present, prefers non-snipped full-length streams first, and automatically falls back across all ranked transcodings (and from progressive HTTP to HLS if the CDN fails) before reporting an error. Tracks marked `BLOCK` fail cleanly with a localized notice.
 - SoundCloud API v2 playlist objects return full metadata for the first tracks and lightweight `{ "id": ... }` stubs for the remainder. `soundcloud_playlist_tracks()` automatically hydrates stub IDs in batches of up to 50 via `/tracks?ids=...` while preserving the original playlist order.
 - All SoundCloud track, user, and playlist IDs are stored as 64-bit `long long` values (`%lld`) so IDs above `2,147,483,647` work identically on 32-bit MIPS (`o32` ABI) and 64-bit hosts.
 
