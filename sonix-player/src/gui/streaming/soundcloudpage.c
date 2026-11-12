@@ -1862,9 +1862,8 @@ void soundcloudpage_init(gui_config_t *cfg) {
 	add_corner_btn(soundcloud_screen, cfg, 0, &icon_music_settings, open_settings_cb);
 	add_corner_btn(soundcloud_screen, cfg, 1, &icon_search, open_search_cb);
 
-	add_stacked_value_row(home_container, "soundcloud_search_tracks", NULL, &icon_search, THEME_SEMANTIC_CYAN, true,
-						  open_search_cb, NULL);
-
+	// Search lives in the title bar's corner button only: a row repeating it
+	// ate a whole line of the four-line home list for the same destination.
 	add_stacked_value_row(home_container, "soundcloud_likes", NULL, &icon_heart_filled, THEME_SEMANTIC_RED, true,
 						  browse_section_cb, (void *)(intptr_t)VIEW_LIKES);
 
