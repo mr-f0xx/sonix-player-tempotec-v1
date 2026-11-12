@@ -238,8 +238,12 @@ opens no ALSA device.
 `make -C sonix-player/tests peq-ui` links the real PEQ page and DSP engine to
 LVGL's headless renderer. It checks the profile pills at 240×320 in all eleven
 languages and five themes, selection and back-drag guarding, refresh of an open
-band editor after a quick switch, and profile-scoped reset. The shell and network
-AutoEq browser are stubbed.
+band editor after a quick switch, and profile-scoped reset. It then types a
+band's frequency (in Hz and in kHz, switching unit both ways), gain and Q on the
+band editor's keypad: whole-Hz values between slider steps, rounding, clamping
+at both limits, the sign key, cancel, an emptied display and leaving the page,
+plus the fit of every key and of the tappable values over the sliders. The shell
+and network AutoEq browser are stubbed.
 
 `make -C sonix-player/tests quickpanel-layout` uses the production Control
 Centre list parser, accessors and move operations with headless LVGL. It checks

@@ -357,6 +357,423 @@ static void q_cb(lv_event_t *e) {
 	band_commit(set_q, (int)lv_slider_get_value(q_slider));
 }
 
+// ---------------------------------------------------------------------------
+// Typing a value
+//
+// Tapping the frequency, the gain or the Q over its slider opens a keypad, the
+// way the stock player does it, and what is typed goes into the band as it is,
+// clamped to the band's limits: the sliders move in forty steps a decade, in
+// 0,5 dB and in a few hundredths of Q, and a correction published for a pair
+// of headphones lands on none of them. The frequency is typed in Hz or in kHz,
+// and the engine keeps it to the whole Hz either way.
+// ---------------------------------------------------------------------------
+
+typedef enum { ENTRY_GAIN, ENTRY_Q, ENTRY_FREQ } entry_kind_t;
+
+#define ENTRY_MAX_CHARS 7
+
+static lv_obj_t *entry_layer;
+static lv_obj_t *entry_heading;
+static lv_obj_t *entry_display;
+static lv_obj_t *entry_sign_btn;
+static lv_obj_t *entry_decimal_btn;
+static lv_obj_t *entry_ok_btn;
+static int entry_ok_w_whole;  // OK across the whole last row
+static int entry_ok_w_shared; // OK beside the sign key
+static entry_kind_t entry_kind;
+static char entry_text[16]; // digits, one comma, a leading minus
+static bool entry_fresh;	// the shown value is the old one: the first key replaces it
+static bool entry_khz;		// the frequency is being typed in kHz, not in Hz
+
+// The three decimals a whole Hz needs in kHz, without the zeros that close
+// them: 1250 Hz is "1,25", 2000 Hz is "2".
+static void entry_format_freq(int hz) {
+	if (!entry_khz) {
+		snprintf(entry_text, sizeof(entry_text), "%d", hz);
+		return;
+	}
+	snprintf(entry_text, sizeof(entry_text), "%d,%03d", hz / 1000, hz % 1000);
+	size_t len = strlen(entry_text);
+	while (len && entry_text[len - 1] == '0') {
+		entry_text[--len] = '\0';
+	}
+	if (len && entry_text[len - 1] == ',') {
+		entry_text[len - 1] = '\0';
+	}
+}
+
+static const char *entry_unit(void) {
+	switch (entry_kind) {
+	case ENTRY_GAIN:
+		return " dB";
+	case ENTRY_FREQ:
+		return entry_khz ? " kHz" : " Hz";
+	default:
+		return "";
+	}
+}
+
+static void entry_paint(void) {
+	char shown[32];
+	snprintf(shown, sizeof(shown), "%s%s", entry_text[0] ? entry_text : "0", entry_unit());
+	lv_label_set_text(entry_display, shown);
+	lv_obj_set_style_text_color(entry_display, entry_fresh ? theme()->text_secondary : theme()->text_primary, 0);
+
+	// The key beside OK flips the gain's sign, and for the frequency it is the
+	// way to the other unit, named after where it leads. Q has neither, and OK
+	// takes the whole row.
+	lv_obj_set_hidden(entry_sign_btn, entry_kind == ENTRY_Q);
+	lv_label_set_text(lv_obj_get_child(entry_sign_btn, 0), entry_kind == ENTRY_FREQ ? (entry_khz ? "Hz" : "kHz") : "+/-");
+	lv_obj_set_width(entry_ok_btn, entry_kind == ENTRY_Q ? entry_ok_w_whole : entry_ok_w_shared);
+
+	// A whole number of Hz has no decimals to type: the comma goes dead and
+	// half-lit. Not LV_STATE_DISABLED, which the default theme draws as a wash
+	// of light grey over the key, brighter than the live ones on a dark theme.
+	bool decimals = entry_kind != ENTRY_FREQ || entry_khz;
+	lv_obj_set_clickable(entry_decimal_btn, decimals);
+	lv_obj_set_style_opa(lv_obj_get_child(entry_decimal_btn, 0), decimals ? LV_OPA_COVER : LV_OPA_40, 0);
+}
+
+// Tenths, hundredths or thousandths out of "12,5" or "-3": the number times
+// 10^decimals, rounded on the last place kept. Wider than a long inside: seven
+// digits of kHz are ten digits of Hz, and a long is 32 bits on the player.
+static int entry_parse_scaled(const char *text, int decimals) {
+	bool negative = text[0] == '-';
+	const char *p = negative ? text + 1 : text;
+	long long whole = 0, frac = 0;
+	int frac_digits = 0;
+	bool after_comma = false;
+	int round_digit = 0;
+	for (; *p; p++) {
+		if (*p == ',') {
+			after_comma = true;
+		} else if (!after_comma) {
+			whole = whole * 10 + (*p - '0');
+		} else if (frac_digits < decimals) {
+			frac = frac * 10 + (*p - '0');
+			frac_digits++;
+		} else if (frac_digits == decimals) {
+			round_digit = *p - '0';
+			frac_digits++;
+		}
+	}
+	for (int i = frac_digits < decimals ? frac_digits : decimals; i < decimals; i++) {
+		frac *= 10;
+	}
+	long long scale = 1;
+	for (int i = 0; i < decimals; i++) {
+		scale *= 10;
+	}
+	long long value = whole * scale + frac + (round_digit >= 5 ? 1 : 0);
+	if (value > 1000000) {
+		value = 1000000;
+	}
+	return (int)(negative ? -value : value);
+}
+
+static int entry_typed_hz(void) { return entry_parse_scaled(entry_text, entry_khz ? 3 : 0); }
+
+// The keypad's own X is its way out: the back arrow goes while it is up.
+static void entry_hide(void) {
+	lv_obj_set_hidden(entry_layer, true);
+	back_btn_hide_on_screen(band_screen, false);
+}
+
+static void entry_cancel_cb(lv_event_t *e) {
+	(void)e;
+	entry_hide();
+}
+
+static void entry_set_gain(peq_band_t *b, int value) { b->gain_tenths = value; }
+static void entry_set_q(peq_band_t *b, int value) { b->q_cent = value; }
+static void entry_set_freq(peq_band_t *b, int value) { b->freq = value; }
+
+static int entry_clamp(int value, int low, int high) { return value < low ? low : (value > high ? high : value); }
+
+static void entry_accept_cb(lv_event_t *e) {
+	(void)e;
+	if (!entry_text[0] || strcmp(entry_text, "-") == 0) {
+		entry_hide();
+		return;
+	}
+	switch (entry_kind) {
+	case ENTRY_GAIN:
+		band_commit(entry_set_gain, entry_clamp(entry_parse_scaled(entry_text, 1), PEQ_GAIN_MIN_TENTHS, PEQ_GAIN_MAX_TENTHS));
+		break;
+	case ENTRY_Q:
+		band_commit(entry_set_q, entry_clamp(entry_parse_scaled(entry_text, 2), PEQ_Q_MIN, PEQ_Q_MAX));
+		break;
+	case ENTRY_FREQ:
+		band_commit(entry_set_freq, entry_clamp(entry_typed_hz(), PEQ_FREQ_MIN, PEQ_FREQ_MAX));
+		break;
+	}
+	entry_hide();
+}
+
+static void entry_flip_sign(void) {
+	size_t len = strlen(entry_text);
+	if (entry_text[0] == '-') {
+		memmove(entry_text, entry_text + 1, len);
+	} else if (len < sizeof(entry_text) - 1) {
+		memmove(entry_text + 1, entry_text, len + 1);
+		entry_text[0] = '-';
+	}
+}
+
+// One key: a digit, ',' or '-'. The last is the key beside OK, which types
+// nothing: it flips the gain's sign, or moves the frequency to the other unit.
+static void entry_key_cb(lv_event_t *e) {
+	char key = (char)(intptr_t)lv_event_get_user_data(e);
+	if (entry_kind == ENTRY_FREQ && key == '-') {
+		// The same frequency, written in the other unit. What is on the display
+		// stays as fresh as it was, so changing unit before typing still lets
+		// the first digit replace the band's old value.
+		int hz = entry_typed_hz();
+		entry_khz = !entry_khz;
+		if (entry_text[0]) {
+			entry_format_freq(hz);
+		}
+		entry_paint();
+		return;
+	}
+	if (entry_kind == ENTRY_FREQ && key == ',' && !entry_khz) {
+		return;
+	}
+	if (entry_fresh) {
+		// The old value is there to be read, not edited: the first digit starts
+		// a new number, keeping only its sign for the gain. The sign key flips
+		// the old value and leaves it fresh, so a +4,5 that should have been
+		// -4,5 is one tap, and +/- then 3 is -3.
+		if (key == '-') {
+			entry_flip_sign();
+			entry_paint();
+			return;
+		}
+		bool negative = entry_text[0] == '-';
+		entry_text[0] = '\0';
+		if (negative && entry_kind == ENTRY_GAIN) {
+			snprintf(entry_text, sizeof(entry_text), "-");
+		}
+		entry_fresh = false;
+	}
+
+	size_t len = strlen(entry_text);
+	if (key == '-') {
+		entry_flip_sign();
+	} else if (key == ',') {
+		if (!strchr(entry_text, ',') && len < ENTRY_MAX_CHARS) {
+			if (len == 0 || (len == 1 && entry_text[0] == '-')) {
+				strcat(entry_text, "0");
+			}
+			strcat(entry_text, ",");
+		}
+	} else if (len < ENTRY_MAX_CHARS) {
+		// No run of leading zeros: "0" followed by a digit becomes the digit.
+		const char *digits = entry_text[0] == '-' ? entry_text + 1 : entry_text;
+		if (strcmp(digits, "0") == 0) {
+			entry_text[len - 1] = key;
+		} else {
+			entry_text[len] = key;
+			entry_text[len + 1] = '\0';
+		}
+	}
+	entry_paint();
+}
+
+static void entry_delete_cb(lv_event_t *e) {
+	(void)e;
+	if (entry_fresh) {
+		entry_text[0] = '\0';
+		entry_fresh = false;
+	} else {
+		size_t len = strlen(entry_text);
+		if (len) {
+			entry_text[len - 1] = '\0';
+		}
+	}
+	entry_paint();
+}
+
+static void entry_open(entry_kind_t kind) {
+	if (editing < 0 || switcher_back_drag_active()) {
+		return;
+	}
+	peq_band_t b;
+	peq_get_band(editing, &b);
+
+	entry_kind = kind;
+	switch (kind) {
+	case ENTRY_GAIN: {
+		lv_label_set_text(entry_heading, tr("gain"));
+		int t = b.gain_tenths < 0 ? -b.gain_tenths : b.gain_tenths;
+		snprintf(entry_text, sizeof(entry_text), "%s%d,%d", b.gain_tenths < 0 ? "-" : "", t / 10, t % 10);
+		break;
+	}
+	case ENTRY_Q:
+		lv_label_set_text(entry_heading, "Q");
+		snprintf(entry_text, sizeof(entry_text), "%d,%02d", b.q_cent / 100, b.q_cent % 100);
+		break;
+	case ENTRY_FREQ:
+		// Opens in the unit the band's value is read in over its slider.
+		lv_label_set_text(entry_heading, tr("peq_frequency"));
+		entry_khz = b.freq >= 1000;
+		entry_format_freq(b.freq);
+		break;
+	}
+	entry_fresh = true;
+
+	entry_paint();
+	lv_obj_set_hidden(entry_layer, false);
+	lv_obj_move_foreground(entry_layer);
+	back_btn_hide_on_screen(band_screen, true);
+}
+
+// Leaving the band page by the back arrow or the gesture closes the keypad
+// with it, rather than having it greet the next band opened.
+static void entry_screen_unloaded_cb(lv_event_t *e) {
+	(void)e;
+	entry_hide();
+}
+
+static void entry_open_cb(lv_event_t *e) { entry_open((entry_kind_t)(intptr_t)lv_event_get_user_data(e)); }
+
+// A key of the pad. The accent one is OK: its caption takes the colour that
+// reads on the accent from the key's own style, so it follows a theme change.
+static lv_obj_t *entry_key(lv_obj_t *parent, const char *text, const lv_image_dsc_t *icon, lv_event_cb_t cb, intptr_t user, int width, int height, bool accent) {
+	lv_obj_t *btn = lv_btn_create(parent);
+	lv_obj_set_size(btn, width, height);
+	lv_obj_add_style(btn, accent ? &theme_style_accent_bg : &theme_style_card, 0);
+	lv_obj_add_style(btn, &theme_style_card_pressed, LV_STATE_PRESSED);
+	lv_obj_set_style_radius(btn, bp_pick(10, 14), 0);
+	lv_obj_set_style_border_width(btn, 0, 0);
+	lv_obj_set_style_shadow_width(btn, 0, 0);
+	lv_obj_set_style_pad_all(btn, 0, 0);
+	lv_obj_add_event_cb(btn, cb, LV_EVENT_CLICKED, (void *)user);
+	if (icon) {
+		lv_obj_t *image = lv_image_create(btn);
+		lv_image_set_src(image, icon);
+		lv_obj_add_style(image, &theme_style_icon, 0);
+		lv_obj_center(image);
+	} else {
+		lv_obj_t *label = lv_label_create(btn);
+		lv_label_set_text(label, text);
+		if (!accent) {
+			lv_obj_add_style(label, &theme_style_text, 0);
+		}
+		lv_obj_set_style_text_font(label, &font_ui_32, 0);
+		lv_obj_center(label);
+	}
+	return btn;
+}
+
+static void build_entry_layer(gui_config_t *cfg) {
+	entry_layer = lv_obj_create(band_screen);
+	lv_obj_set_size(entry_layer, cfg->screen_width, cfg->screen_height);
+	lv_obj_align(entry_layer, LV_ALIGN_TOP_LEFT, 0, 0);
+	lv_obj_add_style(entry_layer, &theme_style_screen, 0);
+	lv_obj_set_style_bg_opa(entry_layer, LV_OPA_COVER, 0);
+	lv_obj_set_style_border_width(entry_layer, 0, 0);
+	lv_obj_set_style_radius(entry_layer, 0, 0);
+	lv_obj_set_style_pad_all(entry_layer, 0, 0);
+	lv_obj_set_scrollable(entry_layer, false);
+	lv_obj_set_hidden(entry_layer, true);
+	lv_obj_add_event_cb(band_screen, entry_screen_unloaded_cb, LV_EVENT_SCREEN_UNLOADED, NULL);
+
+	// The page's own rows: what is being typed where the title is, the X in
+	// the corner the reset button has, the field where the content starts.
+	const int corner = settingsrow_corner_button_size(cfg);
+	const int width = cfg->screen_width - 2 * cfg->padding;
+	const int top = cfg->padding + cfg->top_bar_height;
+	const int field_top = settingsrow_content_top(cfg);
+	const int field_h = bp_pick(46, 84);
+	const int gap = bp_pick(4, 10);
+	const int pad_top = field_top + field_h + bp_pick(6, 16);
+	const int key_w = (width - 2 * gap) / 3;
+	const int key_h = (cfg->screen_height - pad_top - cfg->padding - 4 * gap) / 5;
+
+	entry_heading = lv_label_create(entry_layer);
+	lv_obj_add_style(entry_heading, &theme_style_text, 0);
+	lv_obj_set_style_text_font(entry_heading, &font_ui_24, 0);
+	lv_obj_set_width(entry_heading, width - corner - bp_pick(8, 12));
+	lv_label_set_long_mode(entry_heading, LV_LABEL_LONG_DOT);
+	lv_obj_align(entry_heading, LV_ALIGN_TOP_LEFT, cfg->padding + bp_pick(4, 6), top + (corner - lv_font_get_line_height(&font_ui_24)) / 2);
+
+	lv_obj_t *cancel = lv_btn_create(entry_layer);
+	settingsrow_place_corner_button(cancel, cfg, 0);
+	lv_obj_set_style_bg_opa(cancel, LV_OPA_TRANSP, 0);
+	lv_obj_set_style_border_width(cancel, 0, 0);
+	lv_obj_set_style_shadow_width(cancel, 0, 0);
+	lv_obj_set_style_pad_all(cancel, 0, 0);
+	lv_obj_add_event_cb(cancel, entry_cancel_cb, LV_EVENT_CLICKED, NULL);
+	lv_obj_t *cancel_icon = lv_image_create(cancel);
+	lv_image_set_src(cancel_icon, &icon_close);
+	lv_obj_add_style(cancel_icon, &theme_style_icon, 0);
+	settingsrow_scale_corner_icon(cancel_icon, cfg);
+	lv_obj_center(cancel_icon);
+
+	lv_obj_t *field = lv_obj_create(entry_layer);
+	lv_obj_set_size(field, width, field_h);
+	lv_obj_align(field, LV_ALIGN_TOP_LEFT, cfg->padding, field_top);
+	lv_obj_add_style(field, &theme_style_card, 0);
+	lv_obj_set_style_radius(field, bp_pick(bp_tile_radius(), 12), 0);
+	lv_obj_set_style_border_width(field, 0, 0);
+	lv_obj_set_style_shadow_width(field, 0, 0);
+	lv_obj_set_style_pad_hor(field, bp_pick(10, 20), 0);
+	lv_obj_set_style_pad_ver(field, 0, 0);
+	lv_obj_set_scrollable(field, false);
+	entry_display = lv_label_create(field);
+	lv_obj_set_style_text_font(entry_display, &font_ui_36_bold, 0);
+	lv_obj_align(entry_display, LV_ALIGN_RIGHT_MID, 0, 0);
+
+	lv_obj_t *pad = lv_obj_create(entry_layer);
+	lv_obj_set_size(pad, width, 5 * key_h + 4 * gap);
+	lv_obj_align(pad, LV_ALIGN_TOP_LEFT, cfg->padding, pad_top);
+	lv_obj_set_style_bg_opa(pad, LV_OPA_TRANSP, 0);
+	lv_obj_set_style_border_width(pad, 0, 0);
+	lv_obj_set_style_radius(pad, 0, 0);
+	lv_obj_set_style_pad_all(pad, 0, 0);
+	lv_obj_set_style_pad_gap(pad, gap, 0);
+	lv_obj_set_scrollable(pad, false);
+	lv_obj_set_flex_flow(pad, LV_FLEX_FLOW_ROW_WRAP);
+	// SPACE_BETWEEN rather than START: a width that does not divide by three
+	// leaves a pixel or two over, and they belong in the gaps rather than at
+	// the right-hand edge.
+	lv_obj_set_flex_align(pad, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
+
+	static const char *const DIGITS[9] = {"1", "2", "3", "4", "5", "6", "7", "8", "9"};
+	for (int i = 0; i < 9; i++) {
+		entry_key(pad, DIGITS[i], NULL, entry_key_cb, '1' + i, key_w, key_h, false);
+	}
+	entry_decimal_btn = entry_key(pad, ",", NULL, entry_key_cb, ',', key_w, key_h, false);
+	entry_key(pad, "0", NULL, entry_key_cb, '0', key_w, key_h, false);
+	lv_obj_t *del = entry_key(pad, NULL, &icon_delete, entry_delete_cb, 0, key_w, key_h, false);
+	lv_obj_add_event_cb(del, entry_delete_cb, LV_EVENT_LONG_PRESSED_REPEAT, NULL);
+
+	entry_ok_w_whole = width;
+	entry_ok_w_shared = width - key_w - gap;
+	entry_sign_btn = entry_key(pad, "+/-", NULL, entry_key_cb, '-', key_w, key_h, false);
+	entry_ok_btn = entry_key(pad, tr("ok"), NULL, entry_accept_cb, 0, entry_ok_w_whole, key_h, true);
+}
+
+// The number over a slider becomes the way into the keypad: set on a rounded
+// box of the pressed-card colour, with a margin round it a finger can find.
+// The slider card gives the value a fixed column to be cut short in; the box
+// is drawn round the number instead, as wide as the number is, and raised by
+// its own padding so the number stays on the line of the name beside it.
+static void entry_attach(lv_obj_t *value_label, entry_kind_t kind) {
+	const int pad_ver = bp_pick(2, 4);
+	lv_obj_add_style(value_label, &theme_style_card_pressed, 0);
+	lv_obj_set_style_radius(value_label, bp_pick(8, 10), 0);
+	lv_obj_set_style_pad_hor(value_label, bp_pick(7, 12), 0);
+	lv_obj_set_style_pad_ver(value_label, pad_ver, 0);
+	lv_label_set_long_mode(value_label, LV_LABEL_LONG_WRAP);
+	lv_obj_set_size(value_label, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+	lv_obj_align(value_label, LV_ALIGN_TOP_RIGHT, 0, -pad_ver);
+	lv_obj_set_clickable(value_label, true);
+	lv_obj_set_ext_click_area(value_label, bp_pick(10, 20));
+	lv_obj_add_event_cb(value_label, entry_open_cb, LV_EVENT_CLICKED, (void *)(intptr_t)kind);
+}
+
 static lv_obj_t *make_pill(lv_obj_t *parent, const char *text, int value) {
 	lv_obj_t *btn = lv_btn_create(parent);
 	lv_obj_set_size(btn, LV_SIZE_CONTENT, 52);
@@ -465,6 +882,11 @@ static void build_band_page(gui_config_t *cfg) {
 	settingsrow_slider(container, "peq_frequency", FREQ_STEPS, &freq_value, &freq_slider, freq_cb);
 	gain_card = settingsrow_slider(container, "gain", GAIN_STEPS, &gain_value, &gain_slider, gain_cb);
 	settingsrow_slider(container, "Q", Q_STEPS, &q_value, &q_slider, q_cb);
+
+	build_entry_layer(cfg);
+	entry_attach(freq_value, ENTRY_FREQ);
+	entry_attach(gain_value, ENTRY_GAIN);
+	entry_attach(q_value, ENTRY_Q);
 
 	switcher_attach_back_gesture(band_screen);
 }

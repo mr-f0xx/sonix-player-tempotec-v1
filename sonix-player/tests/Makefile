@@ -884,8 +884,9 @@ GAMES_SRC = $(ROOT)/tests/ui/test_games.c \
 GAMES_OBJ = $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(GAMES_SRC)) \
             $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(UI_LVGL_SRC))
 
-# PEQ profile selection on the real page and DSP engine, with the shell and
-# network AutoEq browser stubbed. No audio device or network is needed.
+# PEQ profile selection and the band editor's keypad (frequency in Hz or kHz,
+# gain, Q) on the real page and DSP engine, with the shell and network AutoEq
+# browser stubbed. No audio device or network is needed.
 PEQPAGE_SRC = $(ROOT)/tests/ui/test_peq_profiles.c $(ROOT)/src/gui/audio/peqpage.c \
               $(ROOT)/src/system/audio/eq.c $(ROOT)/src/system/addons/addons.c \
               $(ROOT)/src/gui/shell/settingsrow.c \
