@@ -55,7 +55,7 @@ Cached audio, `.tags` metadata sidecars, and `-t500x500.jpg` artwork live on the
 /mnt/sd_0/.local/soundcloud-cache/
 ```
 
-- **Bounded LRU eviction**: capped at **512 MB** normally and **256 MB** when microSD free space drops below 1 GB, evicting oldest track bundles (`.mp3`/`.opus`/`.aac`, `.tags`, `.jpg`) while protecting the currently playing track. The cache directory is excluded from local library indexing.
+- **Configurable LRU ceiling**: defaults to **512 MB** and can be extended directly on the player under **Streaming → SoundCloud → Account settings → SD cache limit** to **1 GB**, **2 GB**, **4 GB**, **8 GB**, or **Unlimited** (persisted as `[soundcloud] cache_max_mb` in `device_config.ini`, where `0` means Unlimited). Lowering the limit prunes oldest cached track bundles (`.mp3`/`.opus`/`.aac`, `.tags`, `.jpg`) immediately while protecting the currently playing or actively downloading track, and eviction always preserves at least **256 MB** of free space on the microSD card. The cache directory is excluded from local library indexing.
 - **Progressive & HLS streaming**:
   - Progressive MP3 streams announce via `growfile` once 64 KiB (or EOF) has arrived so playback starts without waiting for the full file.
   - HLS playlists support master-variant selection, `#EXT-X-KEY:METHOD=AES-128` CBC segment decryption (explicit `IV=` or segment-sequence IV with PKCS#7 unpadding), MPEG-TS (`0x47` sync) elementary-stream extraction, duplicate ID3v2 header stripping on MP3 segments `> 0`, growing `.opus` playback with `.tags` `duration=` fallback, and `#EXT-X-MAP` (`ftyp`/`moov` `esds` + `trex`) + `moof`/`mdat` (`trun`) fragmented-MP4 unwrapping into ADTS `.aac`.

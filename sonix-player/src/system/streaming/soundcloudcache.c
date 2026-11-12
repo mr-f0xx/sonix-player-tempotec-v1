@@ -16,6 +16,7 @@
 #include <sys/statvfs.h>
 #include <unistd.h>
 
+#include "src/system/core/config.h"
 #include "src/system/decode/aacdec.h"
 #include "src/system/decode/growfile.h"
 #include "src/system/net/hls.h"
@@ -35,6 +36,8 @@
 
 static char cache_dir[512];
 static long long protected_id;
+static int cache_max_mb = SOUNDCLOUDCACHE_DEFAULT_MAX_MB;
+static long long cache_max_bytes = SOUNDCLOUDCACHE_MAX_BYTES;
 static int aac_override = -1;
 
 static pthread_mutex_t cache_lock = PTHREAD_MUTEX_INITIALIZER;
@@ -624,6 +627,21 @@ static int cmp_entry_mtime(const void *a, const void *b) {
 	return 0;
 }
 
+static long long bundle_extra_bytes(const char *audio_name, long long id) {
+	long long extra = 0;
+	struct stat st;
+	char p[800];
+	snprintf(p, sizeof(p), "%s/%s.tags", cache_dir, audio_name);
+	if (stat(p, &st) == 0 && S_ISREG(st.st_mode)) extra += (long long)st.st_size;
+	snprintf(p, sizeof(p), "%s/%s.incompleto", cache_dir, audio_name);
+	if (stat(p, &st) == 0 && S_ISREG(st.st_mode)) extra += (long long)st.st_size;
+	if (id > 0) {
+		build_jpg_path(id, p, sizeof(p));
+		if (stat(p, &st) == 0 && S_ISREG(st.st_mode)) extra += (long long)st.st_size;
+	}
+	return extra;
+}
+
 static void unlink_track_bundle(const char *audio_name, long long id) {
 	char p[800];
 	snprintf(p, sizeof(p), "%s/%s", cache_dir, audio_name);
@@ -646,6 +664,22 @@ static long long free_disk_bytes(void) {
 	return (long long)vfs.f_bavail * (long long)vfs.f_frsize;
 }
 
+static int normalize_max_mb(int max_mb) {
+	if (max_mb == 0) {
+		return 0; // Unlimited (free-space floor only)
+	}
+	if (max_mb < 0) {
+		return SOUNDCLOUDCACHE_DEFAULT_MAX_MB;
+	}
+	if (max_mb < SOUNDCLOUDCACHE_MIN_MAX_MB) {
+		return SOUNDCLOUDCACHE_MIN_MAX_MB;
+	}
+	if (max_mb > SOUNDCLOUDCACHE_MAX_MAX_MB) {
+		return SOUNDCLOUDCACHE_MAX_MAX_MB;
+	}
+	return max_mb;
+}
+
 static void evict_if_needed(long long active_id) {
 	pthread_mutex_lock(&cache_lock);
 	if (!cache_dir[0]) {
@@ -661,6 +695,7 @@ static void evict_if_needed(long long active_id) {
 	cache_entry_t *entries = NULL;
 	size_t count = 0, cap = 0;
 	long long total_bytes = 0;
+	long long cap_bytes = (cache_max_bytes <= 0) ? LLONG_MAX : cache_max_bytes;
 
 	struct dirent *de;
 	while ((de = readdir(d)) != NULL) {
@@ -686,7 +721,7 @@ static void evict_if_needed(long long active_id) {
 		}
 		snprintf(entries[count].name, sizeof(entries[count].name), "%s", de->d_name);
 		entries[count].id = id;
-		entries[count].bytes = (long long)st.st_size;
+		entries[count].bytes = (long long)st.st_size + bundle_extra_bytes(de->d_name, id);
 		entries[count].mtime = st.st_mtime;
 		count++;
 	}
@@ -698,7 +733,7 @@ static void evict_if_needed(long long active_id) {
 
 	for (size_t i = 0; i < count; i++) {
 		long long avail = free_disk_bytes();
-		if (total_bytes <= SOUNDCLOUDCACHE_MAX_BYTES && avail >= SOUNDCLOUDCACHE_MIN_FREE) {
+		if (total_bytes <= cap_bytes && avail >= SOUNDCLOUDCACHE_MIN_FREE) {
 			break;
 		}
 		unlink_track_bundle(entries[i].name, entries[i].id);
@@ -764,7 +799,10 @@ long long soundcloudcache_current_id(void) {
 
 void soundcloudcache_set_root(const char *sd_root) {
 	abandon_active_download();
+	int cfg_mb = normalize_max_mb(config_get_int("soundcloud", "cache_max_mb", SOUNDCLOUDCACHE_DEFAULT_MAX_MB));
 	pthread_mutex_lock(&cache_lock);
+	cache_max_mb = cfg_mb;
+	cache_max_bytes = (cfg_mb == 0) ? 0 : (long long)cfg_mb * 1024LL * 1024LL;
 	if (sd_root && sd_root[0]) {
 		snprintf(cache_dir, sizeof(cache_dir), "%s/%s", sd_root, CACHE_SUBDIR);
 		if (!ensure_dir_tree(cache_dir)) {
@@ -777,6 +815,46 @@ void soundcloudcache_set_root(const char *sd_root) {
 	if (cache_dir[0]) {
 		streamturn_register_abandon(abandon_active_download);
 	}
+}
+
+int soundcloudcache_get_max_mb(void) {
+	pthread_mutex_lock(&cache_lock);
+	int mb = cache_max_mb;
+	pthread_mutex_unlock(&cache_lock);
+	return mb;
+}
+
+void soundcloudcache_set_max_mb(int max_mb) {
+	int norm = normalize_max_mb(max_mb);
+	pthread_mutex_lock(&cache_lock);
+	cache_max_mb = norm;
+	cache_max_bytes = (norm == 0) ? 0 : (long long)norm * 1024LL * 1024LL;
+	pthread_mutex_unlock(&cache_lock);
+	config_set_int("soundcloud", "cache_max_mb", norm);
+	config_save();
+	evict_if_needed(soundcloudcache_current_id());
+}
+
+long long soundcloudcache_get_max_bytes(void) {
+	pthread_mutex_lock(&cache_lock);
+	long long b = cache_max_bytes;
+	pthread_mutex_unlock(&cache_lock);
+	return b;
+}
+
+void soundcloudcache_set_max_bytes(long long max_bytes) {
+	pthread_mutex_lock(&cache_lock);
+	if (max_bytes <= 0) {
+		cache_max_mb = 0;
+		cache_max_bytes = 0;
+	} else {
+		cache_max_bytes = max_bytes;
+		long long mb = (max_bytes + 1024LL * 1024LL - 1LL) / (1024LL * 1024LL);
+		if (mb > SOUNDCLOUDCACHE_MAX_MAX_MB) mb = SOUNDCLOUDCACHE_MAX_MAX_MB;
+		cache_max_mb = (int)mb;
+	}
+	pthread_mutex_unlock(&cache_lock);
+	evict_if_needed(soundcloudcache_current_id());
 }
 
 bool soundcloudcache_available(void) {
