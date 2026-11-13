@@ -288,13 +288,8 @@ The full rules are in [FEATURES.md](FEATURES.md).
 Only attempt this on a TempoTec Variations V1. Read the warning above before proceeding.
 
 1. Keep the **official V1 `v1.upt` and its matching `v1_md5.txt`** somewhere safe. They are needed if you want to return to stock.
-2. Download the latest release in "R.
-3. Charge the player adequately, insert the card and start the device's built-in firmware update process. Menu names vary by stock firmware version; follow the device's on-screen instructions and do not interrupt the update.
-4. If you want to restore stock firmware, put the original vendor `v1.upt` and its matching checksum file at the card root and use the same update process.
-
-The build workflow defaults to the bundled official V1 1.3 OTA (`sonix-packer/firmware-input/v1.zip.part1` and `.part2`); an optional workflow URL selects a different stock image. See [stock firmware input](sonix-packer/firmware-input/README.md) for local preparation and checksums. An image built on 1.3 keeps the 1.3 kernel and the package's `ota_compatibility.in` marker byte-for-byte, and works on a V1 running stock firmware 1.3.
-
-The package builder is designed to preserve the stock `xImage` kernel and leave the existing update/recovery path in place. This is checked during the build, but it is **not** a guarantee that recovery will work on every device or in every failure case.
+2. Download the latest release in "Releases", (v1.upt), and put it on the root of your SD Card, then use the built-in firmware updater from your v1.
+3. If you want to restore stock firmware, put the original vendor `v1.upt` and its matching checksum file at the card root and use the same update process.
 
 <a id="streaming-credentials"></a>
 
