@@ -429,11 +429,13 @@ ICONS = [
 # weight in the binary and nothing else.
 MAIN_MENU_ICON_SIZE = 128
 SECTION_ICON_SIZE = 112
-# The SoundCloud and Subsonic home cards are the same size and draw their
-# picture at this size, so both their artwork and the flat themes' glyphs are
-# rendered at it rather than scaled at run time.
-HOME_TILE_SIZE = 54
-HOME_TILE_GLYPH_SIZE = 46
+# The SoundCloud, Subsonic, Radio and Qobuz home cards are the same size and
+# draw their picture at this size, so both their artwork and the flat themes'
+# glyphs are rendered at it rather than scaled at run time. The glyphs are a
+# little smaller than the artwork: a white line drawing of the same box reads
+# heavier than the shaded card behind it.
+HOME_TILE_SIZE = 48
+HOME_TILE_GLYPH_SIZE = 40
 
 COLOR_ICONS = [
     # The quality badges under a track's title. Here rather than above because
@@ -496,6 +498,12 @@ COLOR_ICONS = [
     ("flag.svg", "radio_country_glyph", HOME_TILE_GLYPH_SIZE),
     ("music-note.svg", "radio_genre_glyph", HOME_TILE_GLYPH_SIZE),
     ("heart-outline.svg", "radio_flylo_glyph", HOME_TILE_GLYPH_SIZE),
+    # The Qobuz home page's four cards: the same treatment the pages above
+    # give theirs, one glyph per destination.
+    ("heart-outline.svg", "qobuz_favourites_glyph", HOME_TILE_GLYPH_SIZE),
+    ("album.svg", "qobuz_albums_glyph", HOME_TILE_GLYPH_SIZE),
+    ("files-playlist.svg", "qobuz_playlists_glyph", HOME_TILE_GLYPH_SIZE),
+    ("music-note.svg", "qobuz_genres_glyph", HOME_TILE_GLYPH_SIZE),
     # The four tiles on the SoundCloud home page. Emitted at the size those
     # cards draw them, so the player never has to resample the artwork.
     ("sc-likes.png", "menu_sc_likes", HOME_TILE_SIZE),
@@ -514,6 +522,12 @@ COLOR_ICONS = [
     ("radio-country.png", "menu_radio_country", HOME_TILE_SIZE),
     ("radio-genre.png", "menu_radio_genre", HOME_TILE_SIZE),
     ("radio-flylo.png", "menu_radio_flylo", HOME_TILE_SIZE),
+    # The four tiles on the Qobuz home page: the favourites, the account's own
+    # playlists, and the genre picker that leads to the new releases.
+    ("qobuz-favourites.png", "menu_qobuz_favourites", HOME_TILE_SIZE),
+    ("qobuz-albums.png", "menu_qobuz_albums", HOME_TILE_SIZE),
+    ("qobuz-playlists.png", "menu_qobuz_playlists", HOME_TILE_SIZE),
+    ("qobuz-genres.png", "menu_qobuz_genres", HOME_TILE_SIZE),
     ("audiobooks.png", "menu_audiobooks", MAIN_MENU_ICON_SIZE),
     ("audiobook-library.png", "menu_audiobook_library", SECTION_ICON_SIZE),
     ("audiobook-series.png", "menu_audiobook_series", SECTION_ICON_SIZE),

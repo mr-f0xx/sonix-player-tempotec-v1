@@ -8,9 +8,9 @@ never resamples one.
 
     python3 tools/tile_art.py
 
-writes the Subsonic and Radio home pages' pictures into assets/icons. The SoundCloud home page's
-four (sc-likes, sc-reposts, sc-playlists, sc-account) were drawn with this same
-recipe and are kept as they are.
+writes the Subsonic, Radio and Qobuz home pages' pictures into assets/icons. The
+SoundCloud home page's four (sc-likes, sc-reposts, sc-playlists, sc-account) were
+drawn with this same recipe and are kept as they are.
 
 Needs cairosvg (for the glyph SVGs) and Pillow, like the icon generator.
 """
@@ -112,6 +112,15 @@ if __name__ == '__main__':
         ('radio-country.png', (46, 163, 104), 'flag.svg'),
         ('radio-genre.png', (206, 140, 44), 'music-note.svg'),
         ('radio-flylo.png', (113, 77, 217), 'heart-outline.svg'),
+        # Qobuz's four cards. Violet, blue, cyan and green: the section reads
+        # as one set, and its genre card stays clear of the Radio page's amber
+        # one even though both lead to a list of new releases. The heart is
+        # outlined like the disc, the file and the note beside it -- a solid
+        # one would be the only filled glyph on the page.
+        ('qobuz-favourites.png', (113, 77, 217), 'heart-outline.svg'),
+        ('qobuz-albums.png', (56, 119, 213), 'album.svg'),
+        ('qobuz-playlists.png', (34, 164, 190), 'files-playlist.svg'),
+        ('qobuz-genres.png', (46, 163, 104), 'music-note.svg'),
     ]
     for name, colour, svg in tiles:
         build(colour, os.path.join(icons, svg), os.path.join(icons, name))
