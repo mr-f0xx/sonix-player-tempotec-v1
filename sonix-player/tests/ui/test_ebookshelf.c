@@ -101,41 +101,95 @@ static void snapshot(void) {
 	lv_draw_buf_destroy(shot);
 }
 
-static void check_tiles(lv_obj_t *grid, int count) {
+// The scroller holds the empty note (a childless label) plus one row per pair.
+// Identify rows by structure rather than child order: a row carries tiles.
+static lv_obj_t *row_obj(lv_obj_t *page, int r) {
+	int seen = 0;
+	uint32_t n = lv_obj_get_child_count(page);
+	for (uint32_t i = 0; i < n; i++) {
+		lv_obj_t *c = lv_obj_get_child(page, (int)i);
+		if (lv_obj_get_child_count(c) > 0) {
+			if (seen == r) {
+				return c;
+			}
+			seen++;
+		}
+	}
+	assert(!"row not found");
+	return NULL;
+}
+
+static lv_obj_t *shelf_tile(lv_obj_t *page, int index) {
+	return lv_obj_get_child(row_obj(page, index / 2), index % 2);
+}
+
+static void check_tiles(lv_obj_t *page, int count) {
 	lv_obj_update_layout(ebookpage_screen);
-	assert(lv_obj_get_child_count(grid) == (uint32_t)count);
-	int width = (lv_obj_get_content_width(grid) - 14) / 2;
-	int row_y = 0, grid_bottom = 0;
-	for (int row = 0; row < (count + 1) / 2; row++) {
-		int row_bottom = row_y;
-		for (int col = 0; col < 2 && row * 2 + col < count; col++) {
-			lv_obj_t *tile = lv_obj_get_child(grid, row * 2 + col);
+	int rows = (count + 1) / 2;
+	assert(lv_obj_get_scroll_snap_y(page) == LV_SCROLL_SNAP_CENTER);
+	int width = (lv_obj_get_content_width(page) - 14) / 2;
+	int row_count = 0;
+	uint32_t n = lv_obj_get_child_count(page);
+	for (uint32_t i = 0; i < n; i++) {
+		lv_obj_t *row = lv_obj_get_child(page, (int)i);
+		if (lv_obj_get_child_count(row) == 0) {
+			continue; // the empty note
+		}
+		assert(lv_obj_is_snappable(row));
+		assert(lv_obj_get_width(row) == lv_obj_get_content_width(page));
+		int cols = (row_count == rows - 1 && count % 2) ? 1 : 2;
+		assert(lv_obj_get_child_count(row) == (uint32_t)cols);
+		for (int c = 0; c < cols; c++) {
+			lv_obj_t *tile = lv_obj_get_child(row, c);
 			lv_obj_t *plate = lv_obj_get_child(tile, 0);
 			lv_obj_t *label = lv_obj_get_child(tile, 1);
 			int expected_h = lv_obj_get_style_pad_top(tile, 0) + lv_obj_get_height(plate) +
 							 lv_obj_get_style_pad_row(tile, 0) + lv_obj_get_height(label) +
 							 lv_obj_get_style_pad_bottom(tile, 0);
 			assert(lv_obj_get_width(tile) == width);
-			// The regression: a viewport-tall background leaves a large empty
-			// band around a paperback-shaped cover. Only content and padding fit.
+			// Cards wrap their cover + caption + padding, not the viewport.
 			assert(lv_obj_get_height(tile) == expected_h);
 			assert(lv_obj_get_height(plate) == worker_h && lv_obj_get_width(plate) == worker_w);
 			assert(lv_obj_get_width(label) == width - 20);
 			assert(lv_obj_get_height(label) >= lv_font_get_line_height(&font_ui_18));
 			assert(abs((lv_obj_get_x(plate) + lv_obj_get_width(plate) / 2) - lv_obj_get_content_width(tile) / 2) <= 1);
 			assert(lv_obj_get_y(label) == lv_obj_get_y(plate) + lv_obj_get_height(plate) + 6);
-			assert(lv_obj_get_x(tile) == lv_obj_get_x(lv_obj_get_child(grid, col)));
-			assert(lv_obj_get_y(tile) >= row_y);
-			int bottom = lv_obj_get_y(tile) + lv_obj_get_height(tile);
-			if (bottom > row_bottom) {
-				row_bottom = bottom;
-			}
 		}
-		assert(row_bottom > row_y);
-		grid_bottom = row_bottom;
-		row_y = row_bottom + 14;
+		row_count++;
 	}
-	assert(lv_obj_get_height(grid) == grid_bottom);
+	assert(row_count == rows);
+}
+
+// One pair fills the screen at rest: the snapped row is centred in the
+// viewport and no other row peeks in above or below it.
+static void check_centered(lv_obj_t *page, int row_index, int rows) {
+	// Bring the pair on screen the way a swipe would, then let the snap settle
+	// it. Snapping only acts on a row already in view, exactly as on release.
+	lv_obj_scroll_to_view(row_obj(page, row_index), LV_ANIM_OFF);
+	lv_obj_update_snap(page, LV_ANIM_OFF);
+	lv_obj_update_layout(ebookpage_screen);
+	lv_area_t view, row;
+	lv_obj_get_content_coords(page, &view);
+	lv_obj_get_coords(row_obj(page, row_index), &row);
+	int view_c = (view.y1 + view.y2) / 2;
+	int row_c = (row.y1 + row.y2) / 2;
+	assert(abs(row_c - view_c) <= 1); // always centred, even if a caption wraps tall
+	// A pair that fits the viewport sits wholly inside it with no neighbour
+	// peeking. (A pathologically long caption can wrap past the viewport; it is
+	// still centred, but cannot be contained — that is not the resting case.)
+	if (row.y2 - row.y1 + 1 <= view.y2 - view.y1 + 1) {
+		assert(row.y1 >= view.y1 && row.y2 <= view.y2);
+		if (row_index > 0) {
+			lv_area_t prev;
+			lv_obj_get_coords(row_obj(page, row_index - 1), &prev);
+			assert(prev.y2 < view.y1);
+		}
+		if (row_index + 1 < rows) {
+			lv_area_t next;
+			lv_obj_get_coords(row_obj(page, row_index + 1), &next);
+			assert(next.y1 > view.y2);
+		}
+	}
 }
 
 int main(int argc, char **argv) {
@@ -165,20 +219,20 @@ int main(int argc, char **argv) {
 	lv_obj_t *menu = lv_obj_create(NULL);
 	lv_screen_load(menu);
 	lv_screen_load(ebookpage_screen);
-	lv_obj_t *page = lv_obj_get_child(ebookpage_screen, 1);
-	lv_obj_t *grid = lv_obj_get_child(page, 0);
+	lv_obj_t *page = lv_obj_get_child(ebookpage_screen, 1); // the scroller
 	assert(worker_count == 5);
 	snapshot();
-	check_tiles(grid, 5);
+	check_tiles(page, 5);
+	check_centered(page, 0, 3); // first pair centred, second pair not peeking
 
 	// Metadata and artwork arrive after the placeholders have been laid out.
 	// A wrapped title gets the room it needs; the picture adds no empty band.
-	int height = lv_obj_get_height(lv_obj_get_child(grid, 0));
-	int last_height = lv_obj_get_height(lv_obj_get_child(grid, 1));
+	int height = lv_obj_get_height(shelf_tile(page, 0));
+	int last_height = lv_obj_get_height(shelf_tile(page, 1));
 	assert(cover_ready(1, "A title much longer than the available caption width", NULL) == false);
 	lv_obj_update_layout(ebookpage_screen);
-	check_tiles(grid, 5);
-	assert(lv_obj_get_height(lv_obj_get_child(grid, 1)) > last_height);
+	check_tiles(page, 5);
+	assert(lv_obj_get_height(shelf_tile(page, 1)) > last_height);
 	uint8_t *pixels = calloc((size_t)worker_w * worker_h, 4);
 	assert(pixels);
 	cover_image_t image = {.pixels = pixels};
@@ -191,37 +245,37 @@ int main(int argc, char **argv) {
 	image.dsc.data = pixels;
 	assert(cover_ready(0, "Maelstrom", &image));
 	lv_obj_update_layout(ebookpage_screen);
-	check_tiles(grid, 5);
-	assert(lv_obj_get_height(lv_obj_get_child(grid, 0)) == height);
-	lv_obj_t *picture = lv_obj_get_child(lv_obj_get_child(lv_obj_get_child(grid, 0), 0), 1);
+	check_tiles(page, 5);
+	assert(lv_obj_get_height(shelf_tile(page, 0)) == height);
+	lv_obj_t *picture = lv_obj_get_child(lv_obj_get_child(shelf_tile(page, 0), 0), 1);
 	const lv_image_dsc_t *src = lv_image_get_src(picture);
 	assert(!lv_obj_is_hidden(picture) && src && src->data == pixels && src->header.w == (uint32_t)worker_w);
-	lv_obj_send_event(lv_obj_get_child(grid, 0), LV_EVENT_CLICKED, NULL);
+	lv_obj_send_event(shelf_tile(page, 0), LV_EVENT_CLICKED, NULL);
 	snprintf(path, sizeof(path), "%s/Ebook/Cache-cache.epub", root);
 	assert(strcmp(opened_book, path) == 0);
 
-	// Smaller cards still scroll as a two-column shelf and ask for late covers.
+	// Scrolling settles on the next pair, centred, with no peek of its neighbours.
 	int requests = visibility_requests;
 	lv_obj_scroll_to_y(page, lv_obj_get_scroll_bottom(page), LV_ANIM_OFF);
 	lv_obj_update_layout(ebookpage_screen);
 	assert(visibility_requests > requests);
-	check_tiles(grid, 5);
-	lv_area_t last, view;
-	lv_obj_get_coords(lv_obj_get_child(grid, 4), &last);
-	lv_obj_get_content_coords(page, &view);
-	assert(last.y1 < view.y2 && last.y2 > view.y1);
+	check_tiles(page, 5);
+	check_centered(page, 2, 3); // last (lone) pair centred, previous pair not peeking
+	check_centered(page, 1, 3); // a middle pair: neither neighbour peeks
 
 	// Changing the theme while the shelf is visible must only repaint it.
 	for (int kind = 0; kind < THEME_KIND_COUNT; kind++) {
 		theme_set_kind((theme_kind_t)kind);
-		check_tiles(grid, 5);
+		check_tiles(page, 5);
 	}
+	check_centered(page, 1, 3);
 	font_ui_18 = lv_font_montserrat_28;
 	lv_screen_load(menu);
 	assert(frees == 1);
 	lv_screen_load(ebookpage_screen);
-	check_tiles(grid, 5);
-	assert(lv_obj_get_height(lv_obj_get_child(grid, 0)) > height);
+	check_tiles(page, 5);
+	check_centered(page, 0, 3);
+	assert(lv_obj_get_height(shelf_tile(page, 0)) > height);
 
 	lv_screen_load(menu);
 	assert(stops >= 3 && cover_ready == NULL);
@@ -235,6 +289,6 @@ int main(int argc, char **argv) {
 	snprintf(path, sizeof(path), "%s/device_config.ini", root);
 	assert(unlink(path) == 0);
 	assert(rmdir(root) == 0);
-	puts("PASS EPUB shelf: content-sized cards, unchanged grid, async covers, scrolling and themes");
+	puts("PASS EPUB shelf: content-sized cards, one centred pair per screen, async covers, snapping and themes");
 	return 0;
 }

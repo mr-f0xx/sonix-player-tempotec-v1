@@ -418,10 +418,14 @@ checks do not replace visual and touch testing on a physical V1.
 `make -C sonix-player/tests ebookshelf-ui` runs the production EPUB shelf at
 240×320 with a recording cover worker. It checks that each card wraps its cover,
 caption and padding rather than filling the viewport, while keeping the
-two-column grid, paperback cover ratio and title spacing. Late titles and
-covers, long captions, scrolling, theme changes, larger font metrics and
-reader taps must not stretch the cards. Set `SONIX_EBOOK_SNAPSHOT` to a PPM
-path to inspect the initial shelf with LVGL's software renderer.
+two-column layout, paperback cover ratio and title spacing. The shelf is a
+column of book pairs with centre scroll snapping, so it rests on a single pair
+centred in the viewport with no peek of the next row; the test verifies the
+snapped pair is centred and, when it fits, wholly on screen with its neighbours
+off screen. Late titles and covers, long captions, scrolling, theme changes,
+larger font metrics and reader taps must not stretch the cards. Set
+`SONIX_EBOOK_SNAPSHOT` to a PPM path to inspect the initial shelf with LVGL's
+software renderer.
 
 ## Rounded screen corners and their radius
 

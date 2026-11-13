@@ -60,7 +60,6 @@ typedef struct {
 } shelf_entry_t;
 
 static gui_config_t *g_cfg;
-static lv_obj_t *grid;
 static lv_obj_t *page_container; // the scroller: what "on screen" is measured against
 static lv_obj_t *empty_note;
 
@@ -173,10 +172,13 @@ static void shelf_free(void) {
 	// Told, not waited for: it stops within one book of here, in its own time.
 	// Joining it would hold the page being left on screen and unresponsive.
 	ebookcovers_stop(covers_token);
-	if (grid) {
-		lv_obj_clean(grid);
-	}
 	for (int i = 0; i < shelf_count; i++) {
+		// Each pair lives in a row that is a direct child of the scroller (the
+		// snap points). Deleting the first tile's row takes its partner with it;
+		// the empty note is not a row and is left in place.
+		if (i % 2 == 0 && shelf[i].tile) {
+			lv_obj_delete(lv_obj_get_parent(shelf[i].tile));
+		}
 		if (shelf[i].has_cover) {
 			cover_free(&shelf[i].cover);
 		}
@@ -227,8 +229,7 @@ static void scan_folder(void) {
 
 static void build_tiles(void) {
 	lv_obj_update_layout(page_container);
-	lv_obj_update_layout(grid);
-	int width = lv_obj_get_content_width(grid);
+	int width = lv_obj_get_content_width(page_container);
 	tile_w = (width - (TILE_COLUMNS - 1) * TILE_GAP) / TILE_COLUMNS;
 	int viewport_h = lv_obj_get_content_height(page_container);
 	// The viewport only caps the cover's height. Cards wrap the cover and
@@ -243,10 +244,26 @@ static void build_tiles(void) {
 		cover_h = COVER_RATIO_NUM / COVER_RATIO_DEN;
 	}
 
+	lv_obj_t *row = NULL;
 	for (int i = 0; i < shelf_count; i++) {
 		shelf_entry_t *entry = &shelf[i];
 
-		lv_obj_t *tile = lv_obj_create(grid);
+		// One pair per row. The row is a direct child of the scroller so it is
+		// a snap point: the page settles with a single pair centred in the
+		// viewport instead of showing the top of the next pair at the bottom.
+		if (i % TILE_COLUMNS == 0) {
+			row = lv_obj_create(page_container);
+			lv_obj_remove_style_all(row);
+			lv_obj_set_size(row, lv_pct(100), LV_SIZE_CONTENT);
+			lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
+			lv_obj_set_flex_align(row, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+			lv_obj_set_style_pad_column(row, TILE_GAP, 0);
+			lv_obj_set_scrollable(row, false);
+			lv_obj_set_snappable(row, true);
+			lv_obj_set_event_bubble(row, true);
+		}
+
+		lv_obj_t *tile = lv_obj_create(row);
 		lv_obj_remove_style_all(tile);
 		lv_obj_set_size(tile, tile_w, LV_SIZE_CONTENT);
 		lv_obj_add_style(tile, &theme_style_card, 0);
@@ -309,6 +326,12 @@ static void build_tiles(void) {
 
 		entry->tile = tile;
 	}
+
+	// Centre the first pair on arrival. With centre snapping the scroll range
+	// is bounded by the first and last snap points, so the shelf rests on a
+	// whole pair with empty space above and below rather than a peek of the
+	// next row.
+	lv_obj_update_snap(page_container, LV_ANIM_OFF);
 }
 
 // The same shape the Music page's corner buttons have, so the two pages read
@@ -406,19 +429,13 @@ void ebookpage_init(gui_config_t *cfg) {
 	lv_obj_add_style(marks_icon, &theme_style_icon, 0);
 	settingsrow_scale_corner_icon(marks_icon, cfg);
 	lv_obj_center(marks_icon);
+	// The shelf is a column of book pairs. Each row is a direct child of this
+	// scroller so centre snapping can rest on one pair at a time: a single
+	// pair centred in the viewport, with no peek of the next row at the bottom.
+	lv_obj_set_flex_flow(container, LV_FLEX_FLOW_COLUMN);
+	lv_obj_set_flex_align(container, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_START);
 	lv_obj_set_style_pad_row(container, TILE_GAP, 0);
-
-	grid = lv_obj_create(container);
-	lv_obj_remove_style_all(grid);
-	lv_obj_set_size(grid, lv_pct(100), LV_SIZE_CONTENT);
-	lv_obj_set_flex_flow(grid, LV_FLEX_FLOW_ROW_WRAP);
-	lv_obj_set_style_pad_column(grid, TILE_GAP, 0);
-	lv_obj_set_style_pad_row(grid, TILE_GAP, 0);
-	lv_obj_set_scrollable(grid, false);
-	// Bubbling is one step at a time: the tile passes the press to this, and
-	// without this it stops here instead of reaching the container, which is
-	// where the swipe that goes back is watched.
-	lv_obj_set_event_bubble(grid, true);
+	lv_obj_set_scroll_snap_y(container, LV_SCROLL_SNAP_CENTER);
 
 	empty_note = lv_label_create(container);
 	lv_label_set_long_mode(empty_note, LV_LABEL_LONG_WRAP);
@@ -427,6 +444,7 @@ void ebookpage_init(gui_config_t *cfg) {
 	lv_obj_set_style_text_font(empty_note, &font_ui_20, 0);
 	lv_obj_set_style_text_align(empty_note, LV_TEXT_ALIGN_CENTER, 0);
 	lv_label_set_text(empty_note, tr("ebook_empty_note"));
+	lv_obj_set_snappable(empty_note, false); // the empty note is not a snap point
 	lv_obj_set_hidden(empty_note, true);
 
 	lv_obj_add_event_cb(ebookpage_screen, loaded_cb, LV_EVENT_SCREEN_LOADED, NULL);
