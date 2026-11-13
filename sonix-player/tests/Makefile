@@ -1066,7 +1066,7 @@ $(BUILD)/test_stockkeys_ui: $(ROOT)/build_gen/streamkeys_key.h $(STOCKKEYS_UI_OB
 	$(CC) -o $@ $(STOCKKEYS_UI_OBJ) $(LDFLAGS) $(LDLIBS)
 
 .PHONY: ui
-ui: $(BUILD)/test_qobuzgenregrid $(BUILD)/test_main_menu $(BUILD)/test_screensaver $(BUILD)/test_tools_pages $(BUILD)/test_wifi_pages $(BUILD)/test_chargescreen $(BUILD)/test_power_display $(BUILD)/test_lyricsearch $(BUILD)/test_games $(BUILD)/test_peq_profiles $(BUILD)/test_quickpanel_layout $(BUILD)/test_btreceiversession $(BUILD)/test_corners $(BUILD)/test_playbutton $(BUILD)/test_musicsettings_rows $(BUILD)/test_volume_overlay $(BUILD)/test_playerdeck $(BUILD)/test_vinylayout $(BUILD)/test_stickerlayout $(BUILD)/test_waveform_overlay $(BUILD)/test_hiresbadge_ui $(BUILD)/test_statusbar_ui $(BUILD)/test_stockkeys_ui $(BUILD)/test_tidal_pages $(BUILD)/test_soundcloud_pages $(BUILD)/test_webdav_pages
+ui: $(BUILD)/test_qobuzgenregrid $(BUILD)/test_main_menu $(BUILD)/test_screensaver $(BUILD)/test_tools_pages $(BUILD)/test_wifi_pages $(BUILD)/test_chargescreen $(BUILD)/test_power_display $(BUILD)/test_lyricsearch $(BUILD)/test_games $(BUILD)/test_peq_profiles $(BUILD)/test_quickpanel_layout $(BUILD)/test_btreceiversession $(BUILD)/test_corners $(BUILD)/test_playbutton $(BUILD)/test_musicsettings_rows $(BUILD)/test_volume_overlay $(BUILD)/test_playerdeck $(BUILD)/test_vinylayout $(BUILD)/test_stickerlayout $(BUILD)/test_waveform_overlay $(BUILD)/test_hiresbadge_ui $(BUILD)/test_statusbar_ui $(BUILD)/test_stockkeys_ui $(BUILD)/test_tidal_pages $(BUILD)/test_soundcloud_pages $(BUILD)/test_qobuz_pages $(BUILD)/test_webdav_pages
 	$(BUILD)/test_qobuzgenregrid
 	$(BUILD)/test_main_menu ../../sonix-packer/assets/V1/usr/resource/sonix/language
 	$(BUILD)/test_main_menu ../../sonix-packer/assets/V1/usr/resource/sonix/language saved
@@ -1096,6 +1096,7 @@ ui: $(BUILD)/test_qobuzgenregrid $(BUILD)/test_main_menu $(BUILD)/test_screensav
 	$(BUILD)/test_tidal_pages ../../sonix-packer/assets/V1/usr/resource/sonix/language saved
 	$(BUILD)/test_tidal_pages ../../sonix-packer/assets/V1/usr/resource/sonix/language arranged
 	$(BUILD)/test_soundcloud_pages ../../sonix-packer/assets/V1/usr/resource/sonix/language
+	$(BUILD)/test_qobuz_pages ../../sonix-packer/assets/V1/usr/resource/sonix/language
 	$(BUILD)/test_webdav_pages ../../sonix-packer/assets/V1/usr/resource/sonix/language
 
 $(BUILD)/test_main_menu: $(UI_OBJ)
@@ -1390,6 +1391,37 @@ radio-ui: $(BUILD)/test_radio_pages
 $(BUILD)/test_radio_pages: $(RADIOPAGE_OBJ)
 	$(CC) -o $@ $^ $(LDFLAGS) $(LDLIBS)
 -include $(RADIOPAGE_OBJ:.o=.d)
+
+# The Qobuz home page: the same tiled grid again, with the account's four
+# destinations on it. The Qobuz client under the page is a stub, as the radio's
+# is in the suite above; the page and the shell are the real ones.
+QOBUZPAGE_SRC = $(ROOT)/tests/ui/test_qobuz_pages.c \
+                     $(ROOT)/src/gui/streaming/qobuzpage.c \
+                     $(ROOT)/src/gui/streaming/qobuzgenregrid.c \
+                     $(ROOT)/src/gui/streaming/qobuzgenre_icons.c \
+                     $(ROOT)/src/gui/streaming/qobuzgenreorder.c \
+                     $(ROOT)/src/gui/streaming/soundcloud_icon.c \
+                     $(ROOT)/src/gui/shell/settingsrow.c \
+                     $(ROOT)/src/gui/shell/gridpage.c \
+                     $(ROOT)/src/gui/shell/keyboard.c \
+                     $(ROOT)/src/gui/shell/popover.c \
+                     $(ROOT)/src/gui/shell/spinner.c \
+                     $(ROOT)/src/gui/shell/theme.c \
+                     $(ROOT)/src/gui/shell/icons.c \
+                     $(ROOT)/src/gui/board_profile.c \
+                     $(ROOT)/src/system/input/kblayout.c \
+                     $(ROOT)/src/system/core/config.c \
+                     $(ROOT)/src/system/core/lang.c \
+                     $(ROOT)/src/system/core/utils.c
+QOBUZPAGE_OBJ = $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(QOBUZPAGE_SRC)) \
+                     $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(UI_LVGL_SRC))
+
+qobuz-ui: $(BUILD)/test_qobuz_pages
+	$(BUILD)/test_qobuz_pages ../../sonix-packer/assets/V1/usr/resource/sonix/language
+
+$(BUILD)/test_qobuz_pages: $(QOBUZPAGE_OBJ)
+	$(CC) -o $@ $^ $(LDFLAGS) $(LDLIBS)
+-include $(QOBUZPAGE_OBJ:.o=.d)
 
 # WebDAV protocol, RAM stream, SD growfile cache, permanent downloads, and LVGL pages.
 WEBDAV_CORE = $(ROOT)/src/system/streaming/webdav.c \

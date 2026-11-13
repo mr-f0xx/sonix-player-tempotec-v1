@@ -605,14 +605,14 @@ int main(int argc, char **argv) {
 
 	// The pictures are rendered at exactly the size the cards draw them, so the
 	// page never asks LVGL to resample one.
-	assert(icon_menu_radio_language.header.w == 54 && icon_menu_radio_language.header.h == 54);
-	assert(icon_menu_radio_country.header.w == 54 && icon_menu_radio_country.header.h == 54);
-	assert(icon_menu_radio_genre.header.w == 54 && icon_menu_radio_genre.header.h == 54);
-	assert(icon_menu_radio_flylo.header.w == 54 && icon_menu_radio_flylo.header.h == 54);
-	assert(icon_radio_language_glyph.header.w == 46 && icon_radio_language_glyph.header.h == 46);
-	assert(icon_radio_country_glyph.header.w == 46 && icon_radio_country_glyph.header.h == 46);
-	assert(icon_radio_genre_glyph.header.w == 46 && icon_radio_genre_glyph.header.h == 46);
-	assert(icon_radio_flylo_glyph.header.w == 46 && icon_radio_flylo_glyph.header.h == 46);
+	assert(icon_menu_radio_language.header.w == 48 && icon_menu_radio_language.header.h == 48);
+	assert(icon_menu_radio_country.header.w == 48 && icon_menu_radio_country.header.h == 48);
+	assert(icon_menu_radio_genre.header.w == 48 && icon_menu_radio_genre.header.h == 48);
+	assert(icon_menu_radio_flylo.header.w == 48 && icon_menu_radio_flylo.header.h == 48);
+	assert(icon_radio_language_glyph.header.w == 40 && icon_radio_language_glyph.header.h == 40);
+	assert(icon_radio_country_glyph.header.w == 40 && icon_radio_country_glyph.header.h == 40);
+	assert(icon_radio_genre_glyph.header.w == 40 && icon_radio_genre_glyph.header.h == 40);
+	assert(icon_radio_flylo_glyph.header.w == 40 && icon_radio_flylo_glyph.header.h == 40);
 
 	radiopage_init(&cfg);
 	assert(radiopage_screen != NULL);

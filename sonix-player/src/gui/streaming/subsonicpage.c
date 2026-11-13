@@ -44,8 +44,8 @@ static int editing;
 #define SUBSONIC_HOME_TILES 4
 // The size each card's picture is drawn at, matching what tools/svg_to_lvgl.py
 // emits for it: HOME_TILE_SIZE and HOME_TILE_GLYPH_SIZE there.
-#define SUBSONIC_TILE_ART_PX 54
-#define SUBSONIC_TILE_GLYPH_PX 46
+#define SUBSONIC_TILE_ART_PX 48
+#define SUBSONIC_TILE_GLYPH_PX 40
 
 // A single mailbox in each direction. Results own their memory until the GUI
 // takes it: a late worker can never overwrite the list the GUI is reading.
