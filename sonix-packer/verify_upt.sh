@@ -207,6 +207,15 @@ if [ -n "$STOCK_UPT" ]; then
 fi
 
 if $EXPECT_SONIX; then
+	MAX_ROOTFS_BYTES="${SONIX_MAX_ROOTFS_BYTES:-46137344}"
+	ROOTFS_BYTES="$(wc -c < "$WORK/rootfs.squashfs" | tr -d ' ')"
+	if [ "$ROOTFS_BYTES" -gt "$MAX_ROOTFS_BYTES" ]; then
+		echo "Error: rootfs.squashfs ($ROOTFS_BYTES bytes) exceeds the $MAX_ROOTFS_BYTES-byte V1 flash budget." >&2
+		exit 1
+	fi
+	printf 'Verified rootfs budget: %s / %s bytes (%s bytes headroom).\n' \
+		"$ROOTFS_BYTES" "$MAX_ROOTFS_BYTES" "$((MAX_ROOTFS_BYTES - ROOTFS_BYTES))"
+
 	LISTING="$WORK/rootfs.list"
 	unsquashfs -ll "$WORK/rootfs.squashfs" > "$LISTING"
 	grep -qE 'squashfs-root/usr/bin/sonix_player$' "$LISTING" || {

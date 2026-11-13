@@ -109,7 +109,17 @@ HOST_CFLAGS = $(CFLAGS) -DHOST_BUILD=1 $(shell sdl2-config --cflags) $(shell pkg
 # This fork builds for the TempoTec V1 and nothing else: the board profile is
 # the compiled one (src/gui/board_profile.c), host builds included, and there is
 # no BOARD value that selects another panel.
-TARGET_CFLAGS = $(CFLAGS) -march=mips32r2 -mno-madd4 -mplt -I$(LVGL_DIR)/src -I$(FREETYPE_PREFIX)/include/freetype2 \
+#
+# Size budget for the V1's read-only NAND rootfs partition:
+#   -ffunction-sections -fdata-sections + -Wl,--gc-sections drop unreferenced
+#   LVGL widgets/APIs, unused SQLite entry points, unreferenced icon bitmaps,
+#   and unused routines in the static libraries.
+#   -Os compiles UI, settings, SQLite and protocol code compactly (last -O*
+#   wins over CFLAGS's -O3), while audio DSP, decoders, image scaling, Gearboy
+#   and LVGL's software pixel blitters override TARGET_OPT back to -O3 below.
+TARGET_OPT = -Os
+TARGET_CFLAGS = $(CFLAGS) $(TARGET_OPT) -ffunction-sections -fdata-sections \
+				-march=mips32r2 -mno-madd4 -mplt -I$(LVGL_DIR)/src -I$(FREETYPE_PREFIX)/include/freetype2 \
 				-I$(AUDIO_PREFIX)/include -I$(AUDIO_PREFIX)/include/opus \
 				-include src/system/core/glibc_compat.h
 
@@ -144,7 +154,7 @@ TARGET_CXXFLAGS = $(TARGET_CFLAGS) $(GB_CFLAGS)
 GB_LDFLAGS = -static-libstdc++ -static-libgcc
 HOST_LDFLAGS = $(shell sdl2-config --libs) -lpthread -lm -ldl -lasound $(shell pkg-config --libs freetype2) \
 			   $(shell pkg-config --libs opusfile wavpack)
-TARGET_LDFLAGS = $(FREETYPE_PREFIX)/lib/libfreetype.a $(AUDIO_LIBS) -lpthread -lm -ldl -lasound \
+TARGET_LDFLAGS = -Wl,--gc-sections $(FREETYPE_PREFIX)/lib/libfreetype.a $(AUDIO_LIBS) -lpthread -lm -ldl -lasound \
 				 $(GB_LDFLAGS)
 
 # FreeType for the target, built static: the rootfs has no libfreetype.so. The
@@ -368,6 +378,15 @@ $(TARGET_FLAGS_STAMP): FORCE
 		echo '$(TARGET_CFLAGS) | $(TARGET_CXXFLAGS)' > $@
 FORCE:
 
+# Keep full -O3 throughput on real-time audio DSP, software decoders, image
+# scaling, the Gearboy emulator core, and LVGL's software pixel blitters.
+build_target/system/audio/%.o: TARGET_OPT = -O3
+build_target/system/decode/%.o: TARGET_OPT = -O3
+build_target/system/image/%.o: TARGET_OPT = -O3
+build_target/gb/%.o: TARGET_OPT = -O3
+build_target/gb/%.opp: TARGET_OPT = -O3
+build_target/lvgl/src/draw/%.o: TARGET_OPT = -O3
+
 build_target/%.o: src/%.c $(TARGET_FLAGS_STAMP)
 	@mkdir -p $(dir $@)
 	$(CROSS_CC) $(TARGET_CFLAGS) -c $< -o $@
@@ -402,14 +421,20 @@ $(CROSS_CC):
 	RBDEV_SONIX_MINIMAL=1 ./rockboxdev/rockboxdev.sh
 
 # The flags FreeType and the audio libraries are built with. -march and -mplt as
-# in TARGET_CFLAGS: they are static, so they end up in the same executable. They
-# are built once: `make libs-clean` removes them, with their extracted sources,
-# so the next `make target` builds them again.
-LIB_CFLAGS = -O2 -march=mips32r2 -mplt
+# in TARGET_CFLAGS: they are static, so they end up in the same executable, and
+# per-function/per-data sections let -Wl,--gc-sections prune unused library code.
+# LIB_FLAGS_STAMP lives inside AUDIO_PREFIX (cached alongside rockbox-toolchain
+# in CI), so changing LIB_CFLAGS rebuilds the static archives once while keeping
+# the cached cross-compiler.
+LIB_CFLAGS = -O2 -march=mips32r2 -mplt -ffunction-sections -fdata-sections
+LIB_FLAGS_STAMP = $(AUDIO_PREFIX)/.lib_flags
+$(LIB_FLAGS_STAMP): FORCE
+	@mkdir -p $(dir $@)
+	@echo '$(LIB_CFLAGS)' | cmp -s - $@ || echo '$(LIB_CFLAGS)' > $@
 
 # Cross-build FreeType, once. configure needs the toolchain on PATH for
 # ranlib/ar to be found under their host-triplet names.
-$(FREETYPE_PREFIX)/lib/libfreetype.a: $(CROSS_CC)
+$(FREETYPE_PREFIX)/lib/libfreetype.a: $(CROSS_CC) $(LIB_FLAGS_STAMP)
 	@echo "Building static FreeType $(FREETYPE_VER) for the target..."
 	@if [ ! -f $(FREETYPE_TARBALL) ]; then \
 		wget -O $(FREETYPE_TARBALL) $(FREETYPE_URL) || \
@@ -440,7 +465,7 @@ CROSS_TOOLS = CC=$(CROSS_CC) CFLAGS="$(LIB_CFLAGS)" \
 			  RANLIB=$(ROCKBOX_TOOLCHAIN_DIR)/bin/mipsel-rockbox-linux-gnu-ranlib
 CROSS_COMMON = --host=mipsel-rockbox-linux-gnu --prefix=$(AUDIO_PREFIX) --disable-shared --enable-static
 
-$(OGG_LIB): $(CROSS_CC)
+$(OGG_LIB): $(CROSS_CC) $(LIB_FLAGS_STAMP)
 	@echo "Building static libogg $(OGG_VER) for the target..."
 	@if [ ! -f $(OGG_TARBALL) ]; then \
 		wget -O $(OGG_TARBALL) $(OGG_URL) || wget -O $(OGG_TARBALL) $(OGG_URL_MIRROR); \
@@ -452,7 +477,7 @@ $(OGG_LIB): $(CROSS_CC)
 
 # --enable-fixed-point: integer decoder, bit-exact across platforms. The float
 # API stays compiled in -- removing it would take --disable-float-api.
-$(OPUS_LIB): $(CROSS_CC)
+$(OPUS_LIB): $(CROSS_CC) $(LIB_FLAGS_STAMP)
 	@echo "Building static libopus $(OPUS_VER) for the target..."
 	@if [ ! -f $(OPUS_TARBALL) ]; then \
 		wget -O $(OPUS_TARBALL) $(OPUS_URL) || wget -O $(OPUS_TARBALL) $(OPUS_URL_MIRROR); \
@@ -468,7 +493,7 @@ $(OPUS_LIB): $(CROSS_CC)
 # PKG_CHECK_MODULES, and no pkg-config here knows the cross sysroot. Passing
 # them skips the search. --disable-http drops the stream support that would
 # pull in OpenSSL.
-$(OPUSFILE_LIB): $(CROSS_CC) $(OGG_LIB) $(OPUS_LIB)
+$(OPUSFILE_LIB): $(CROSS_CC) $(OGG_LIB) $(OPUS_LIB) $(LIB_FLAGS_STAMP)
 	@echo "Building static opusfile $(OPUSFILE_VER) for the target..."
 	@if [ ! -f $(OPUSFILE_TARBALL) ]; then \
 		wget -O $(OPUSFILE_TARBALL) $(OPUSFILE_URL) || wget -O $(OPUSFILE_TARBALL) $(OPUSFILE_URL_MIRROR); \
@@ -486,7 +511,7 @@ $(OPUSFILE_LIB): $(CROSS_CC) $(OGG_LIB) $(OPUS_LIB)
 # costs a few kilobytes. --enable-dsd keeps DSD inside WavPack, which the
 # wrapper opens with OPEN_DSD_AS_PCM. --disable-asm because the assembly wavpack
 # ships is for x86 and ARM.
-$(WAVPACK_LIB): $(CROSS_CC)
+$(WAVPACK_LIB): $(CROSS_CC) $(LIB_FLAGS_STAMP)
 	@echo "Building static libwavpack $(WAVPACK_VER) for the target..."
 	@if [ ! -f $(WAVPACK_TARBALL) ]; then \
 		wget -O $(WAVPACK_TARBALL) $(WAVPACK_URL) || wget -O $(WAVPACK_TARBALL) $(WAVPACK_URL_MIRROR); \

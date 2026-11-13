@@ -37,8 +37,12 @@ except ImportError as exc:
 ROOT = Path(__file__).resolve().parents[1]
 ASSETS = ROOT / "assets" / "icons"
 OUTPUT = ROOT / "src" / "gui" / "shell" / "main_menu_icons.c"
-GLYPH_SIZES = (*range(1, 48), 138, 173)
-COLOR_SIZES = (74, 173)
+V1_GLYPH_SIZES = tuple(range(1, 48))
+REGULAR_GLYPH_SIZES = (138, 173)
+GLYPH_SIZES = (*V1_GLYPH_SIZES, *REGULAR_GLYPH_SIZES)
+V1_COLOR_SIZES = (74,)
+REGULAR_COLOR_SIZES = (173,)
+COLOR_SIZES = (*V1_COLOR_SIZES, *REGULAR_COLOR_SIZES)
 # Tile order: Music, Streaming, Wireless, Audiobooks, More, Settings.
 GLYPHS = (
     "music-2.svg", "radio-player.svg", "wifi-high.svg",
@@ -80,32 +84,46 @@ def generate():
     ]
     descriptors = {}
     total_bytes = 0
-    for family, filenames, sizes, render in (
-        ("glyph", GLYPHS, GLYPH_SIZES, render_glyph),
-        ("color", COLORS, COLOR_SIZES, render_color),
+    for family, filenames, v1_sizes, reg_sizes, render in (
+        ("glyph", GLYPHS, V1_GLYPH_SIZES, REGULAR_GLYPH_SIZES, render_glyph),
+        ("color", COLORS, V1_COLOR_SIZES, REGULAR_COLOR_SIZES, render_color),
     ):
-        for size in sizes:
-            entries = []
-            for tile, filename in enumerate(filenames):
-                name = f"{family}_{size}_{tile}"
-                pixels, stride, fmt = render(filename, size)
-                total_bytes += len(pixels)
-                lines = ["\t" + ", ".join(f"0x{b:02x}" for b in pixels[i:i + 16]) + ","
-                         for i in range(0, len(pixels), 16)]
-                parts.append(f"// {filename}, {size}x{size}, {fmt}\n"
-                             f"_Alignas(4) static const uint8_t {name}[] = {{\n" +
-                             "\n".join(lines) + "\n};\n\n")
-                entries.append(
-                    "\t{.header = {.magic = LV_IMAGE_HEADER_MAGIC, "
-                    f".cf = LV_COLOR_FORMAT_{fmt}, .w = {size}, .h = {size}, .stride = {stride}" + "}, "
-                    f".data_size = sizeof({name}), .data = {name}" + "},"
-                )
-            descriptors[(family, size)] = "\n".join(entries)
-    for family, sizes in (("glyph", GLYPH_SIZES), ("color", COLOR_SIZES)):
-        parts.append(f"static const lv_image_dsc_t {family}_icons[{len(sizes)}][6] = {{\n")
-        for size in sizes:
+        for group_idx, sizes in enumerate((v1_sizes, reg_sizes)):
+            if group_idx == 1:
+                parts.append("#if !defined(__mips__) || defined(HOST_BUILD)\n\n")
+            for size in sizes:
+                entries = []
+                for tile, filename in enumerate(filenames):
+                    name = f"{family}_{size}_{tile}"
+                    pixels, stride, fmt = render(filename, size)
+                    total_bytes += len(pixels)
+                    lines = ["\t" + ", ".join(f"0x{b:02x}" for b in pixels[i:i + 16]) + ","
+                             for i in range(0, len(pixels), 16)]
+                    parts.append(f"// {filename}, {size}x{size}, {fmt}\n"
+                                 f"_Alignas(4) static const uint8_t {name}[] = {{\n" +
+                                 "\n".join(lines) + "\n};\n\n")
+                    entries.append(
+                        "\t{.header = {.magic = LV_IMAGE_HEADER_MAGIC, "
+                        f".cf = LV_COLOR_FORMAT_{fmt}, .w = {size}, .h = {size}, .stride = {stride}" + "}, "
+                        f".data_size = sizeof({name}), .data = {name}" + "},"
+                    )
+                descriptors[(family, size)] = "\n".join(entries)
+            if group_idx == 1:
+                parts.append("#endif\n\n")
+    for family, v1_sizes, reg_sizes in (
+        ("glyph", V1_GLYPH_SIZES, REGULAR_GLYPH_SIZES),
+        ("color", V1_COLOR_SIZES, REGULAR_COLOR_SIZES),
+    ):
+        parts.append(f"static const lv_image_dsc_t {family}_icons[{len(v1_sizes)}][6] = {{\n")
+        for size in v1_sizes:
             parts.append("\t{\n" + descriptors[(family, size)] + "\n\t},\n")
         parts.append("};\n\n")
+        parts.append("#if !defined(__mips__) || defined(HOST_BUILD)\n")
+        parts.append(f"static const lv_image_dsc_t {family}_icons_regular[{len(reg_sizes)}][6] = {{\n")
+        for size in reg_sizes:
+            parts.append("\t{\n" + descriptors[(family, size)] + "\n\t},\n")
+        parts.append("};\n")
+        parts.append("#endif\n\n")
     parts.append("""const lv_image_dsc_t *main_menu_icon_native(int tile, bool glyph, int size) {
 	if (tile < 0 || tile >= 6) {
 		return NULL;
@@ -114,19 +132,23 @@ def generate():
 		if (size >= 1 && size <= 47) {
 			return &glyph_icons[size - 1][tile];
 		}
+#if !defined(__mips__) || defined(HOST_BUILD)
 		if (size == 138) {
-			return &glyph_icons[47][tile];
+			return &glyph_icons_regular[0][tile];
 		}
 		if (size == 173) {
-			return &glyph_icons[48][tile];
+			return &glyph_icons_regular[1][tile];
 		}
+#endif
 	} else {
 		if (size == 74) {
 			return &color_icons[0][tile];
 		}
+#if !defined(__mips__) || defined(HOST_BUILD)
 		if (size == 173) {
-			return &color_icons[1][tile];
+			return &color_icons_regular[0][tile];
 		}
+#endif
 	}
 	return NULL;
 }
