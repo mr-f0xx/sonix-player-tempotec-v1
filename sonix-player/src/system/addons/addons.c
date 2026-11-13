@@ -17,6 +17,7 @@
 static const addon_t ADDONS[] = {
 	{"tidal", "tidal", "addon_tidal_note", "plugins_section_services"},
 	{"qobuz", "qobuz", "addon_qobuz_note", "plugins_section_services"},
+	{"ytmusic", "YouTube Music", "addon_ytmusic_note", "plugins_section_services"},
 	{"podcasts", "podcasts", "addon_podcasts_note", "plugins_section_services"},
 	{"radio", "radio", "addon_radio_note", "plugins_section_services"},
 	{"subsonic", "subsonic", "addon_subsonic_note", "plugins_section_services"},
@@ -89,6 +90,7 @@ static bool addon_is_default_on(const char *id) {
 	}
 	if (strcmp(id, "subsonic") == 0) return true;
 	if (strcmp(id, "soundcloud") == 0) return true;
+	if (strcmp(id, "ytmusic") == 0) return true;
 	if (strcmp(id, "eq") == 0) return true;
 	if (strcmp(id, "peq") == 0) return true;
 	if (strcmp(id, "mseb") == 0) return true;

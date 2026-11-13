@@ -210,6 +210,8 @@ void factoryreset_run(void) {
 		STREAMKEYS_DATA_FILE,
 		"/usr/data/qobuz_session.ini",
 		"/usr/data/tidal_session.ini",
+		"/usr/data/ytmusic_session.ini",
+		"/usr/data/ytmusic_session.ini.tmp",
 		"/usr/data/soundcloud-credentials.json",
 		"/usr/data/soundcloud-credentials.json.tmp",
 	};
@@ -278,6 +280,8 @@ static const char *const KEEP[] = {
 	"qobuz_session.ini.tmp",
 	"tidal_session.ini",
 	"tidal_session.ini.tmp",
+	"ytmusic_session.ini",
+	"ytmusic_session.ini.tmp",
 	"soundcloud-credentials.json",
 	"soundcloud-credentials.json.tmp",
 	"lastfm.session",

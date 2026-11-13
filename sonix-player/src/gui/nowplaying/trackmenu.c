@@ -25,6 +25,7 @@
 #include "src/system/audio/audio.h"
 #include "src/system/audio/replaygain.h"
 #include "src/system/decode/decode.h"
+#include "src/system/decode/growfile.h"
 #include "src/system/library/metadata.h"
 #include "src/system/playback/device_state.h"
 #include "src/system/core/lang.h"
@@ -33,6 +34,7 @@
 #include "src/system/streaming/qobuzcache.h"
 #include "src/system/streaming/streamkeep.h"
 #include "src/system/streaming/tidalcache.h"
+#include "src/system/streaming/ytmusic.h"
 #include "src/system/library/library.h"
 #include "src/system/playback/playlist.h"
 #include "src/system/core/utils.h"
@@ -866,7 +868,7 @@ static void details_genius_cb(lv_event_t *e) {
 	device_state_t state;
 	device_state_get(&state);
 	const char *path = details_path[0] ? details_path : state.current_file;
-	if (path[0] && !podcastcache_is_episode(path)) {
+	if (path[0] && !podcastcache_is_episode(path) && !ytmusic_cache_is_podcast_episode(path)) {
 		geniusui_start(path);
 	}
 }
@@ -987,7 +989,7 @@ static void details_fill(const char *file, const song_metadata_t *tags, int bits
 	}
 
 	// A local music file can be the seed of a Smart Mix; episodes cannot.
-	if (file[0] && !podcastcache_is_episode(file)) {
+	if (file[0] && !podcastcache_is_episode(file) && !ytmusic_cache_is_podcast_episode(file)) {
 		lv_obj_t *row = lv_btn_create(details_card);
 		lv_obj_set_size(row, lv_pct(100), LV_SIZE_CONTENT);
 		lv_obj_set_style_bg_opa(row, 0, 0);
@@ -1072,11 +1074,27 @@ static void details_rebuild(void) {
 	// As in the player: when the file declares no bitrate, fall back to the real
 	// average, but only for a local file -- a streamed one may still be half
 	// downloaded and the number would climb by itself.
-	if (lossy && kbps <= 0 && !qobuzcache_owns(state.current_file) && !tidalcache_owns(state.current_file) &&
+	bool is_yt = state.current_file[0] && ytmusic_cache_owns(state.current_file);
+	if (lossy && kbps <= 0 && is_yt) {
+		kbps = ytmusic_last_bitrate_kbps();
+	}
+	if (lossy && kbps <= 0 && !growfile_is_growing(state.current_file) &&
+		!qobuzcache_owns(state.current_file) && !tidalcache_owns(state.current_file) &&
 		state.progress_total_secs > 0.5) {
 		struct stat st_lossy;
 		if (stat(state.current_file, &st_lossy) == 0 && st_lossy.st_size > 0) {
 			kbps = (int)((double)st_lossy.st_size * 8.0 / state.progress_total_secs / 1000.0 + 0.5);
+		}
+	}
+
+	if (lossy && kbps <= 0 && is_yt) {
+		kbps = ytmusic_quality_high() ? 256 : 128;
+	}
+	if (is_yt && kbps > 0) {
+		if (kbps >= 110 && kbps <= 150) {
+			kbps = 128;
+		} else if (kbps >= 220 && kbps <= 280) {
+			kbps = 256;
 		}
 	}
 
@@ -1184,7 +1202,8 @@ static void start_genius_cb(void *user) {
 	(void)user;
 	device_state_t state;
 	device_state_get(&state);
-	if (state.current_file[0] && !podcastcache_is_episode(state.current_file)) {
+	if (state.current_file[0] && !podcastcache_is_episode(state.current_file) &&
+		!ytmusic_cache_is_podcast_episode(state.current_file)) {
 		geniusui_start(state.current_file);
 	}
 }
@@ -1412,7 +1431,8 @@ void trackmenu_open(lv_obj_t *anchor) {
 
 	device_state_t state;
 	device_state_get(&state);
-	bool podcast = state.current_file[0] && podcastcache_is_episode(state.current_file);
+	bool podcast = state.current_file[0] && (podcastcache_is_episode(state.current_file) ||
+								  ytmusic_cache_is_podcast_episode(state.current_file));
 	bool tidal_track = tidalcache_owns(state.current_file);
 	// The Tidal Downloaded list is made of files already present on the card.
 	// Offering "Download" again is both misleading and useless offline.

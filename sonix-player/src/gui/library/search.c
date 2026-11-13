@@ -219,7 +219,7 @@ static int menu_playlist_count;
 static void menu_fav_action(void *user) {
 	(void)user;
 	if (menu_path[0]) {
-		library_fav_toggle(menu_path, menu_name, "");
+		medialist_fav_toggle(menu_path, menu_name, "");
 	}
 }
 
@@ -320,7 +320,7 @@ static void track_long_pressed_cb(lv_event_t *e) {
 	popover_item_t items[5];
 	int n = 0;
 	items[n++] = (popover_item_t){
-		library_fav_contains(menu_path) ? "remove_from_favourites" : "medialist_add_to_favourites", menu_fav_action, NULL,
+		medialist_fav_contains(menu_path) ? "remove_from_favourites" : "medialist_add_to_favourites", menu_fav_action, NULL,
 		false};
 	items[n++] = (popover_item_t){"smartmix_start", menu_genius_action, NULL, false};
 	items[n++] = (popover_item_t){"add_to_queue", menu_queue_action, NULL, false};

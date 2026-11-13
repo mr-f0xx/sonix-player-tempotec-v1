@@ -27,12 +27,20 @@ client_secret =
 # Podcast Index's terms do not allow registrations from a free email service,
 # so the pair has to be requested from an address on a domain you control.
 [podcast]
-api_key = 
+api_key =
 api_secret = 
 
 [lastfm]
-api_key = 
+api_key =
 api_secret = 
+
+# Optional: YouTube Music works without this -- search and playback are public.
+# The key is the InnerTube key the music.youtube.com page hands every visitor
+# (Google's, not a credential of anybody's). A build may carry it via
+# `make YTMUSIC_API_KEY=...` or a .ytmusic-key file; the card only fills a gap,
+# so put it here when the image was built without one.
+[ytmusic]
+api_key =
 
 # Optional: SoundCloud works with no keys at all (client_id is discovered
 # automatically). You can configure your SoundCloud username and/or oauth_token

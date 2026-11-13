@@ -433,6 +433,11 @@ int library_fav_add_many(const library_fav_row_t *rows, int count);
 // favourites and are not any more.
 int library_fav_remove_many(const char *const *paths, int count);
 
+// The same, for the favourites rows only. Used for a service's downloads: the
+// files stay on the card and are still played, but their star belongs to the
+// service, so a row an older build wrote into the card's list goes.
+int library_fav_forget_under(const char *prefix);
+
 // Removes from the favourites (and from the saved playback state) everything
 // under `prefix`. It is what clears rows pointing into the stream cache, whose
 // files are emptied and would otherwise show as dead favourites. Run once at

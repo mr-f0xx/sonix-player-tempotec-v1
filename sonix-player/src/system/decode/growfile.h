@@ -36,6 +36,12 @@
 
 // `total` is the final size when the server stated it, 0 when it did not.
 void growfile_announce(const char *path, long total);
+
+// Corrects the promised size once it is known, without touching what has
+// arrived: a downloader that learned the length from a Content-Range after the
+// first chunk calls this instead of announcing the path again, which would put
+// the byte count back to zero under a reader that is already waiting.
+void growfile_set_total(const char *path, long total);
 void growfile_progress(const char *path, long done);
 
 // End of the download: `ok` false means it died halfway, and waiting readers

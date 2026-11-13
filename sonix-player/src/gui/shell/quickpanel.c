@@ -54,6 +54,8 @@
 #include "src/system/device/power.h"
 #include "src/system/streaming/qobuzcache.h"
 #include "src/system/streaming/qobuzsync.h"
+#include "src/system/streaming/ytmusic.h"
+#include "src/system/streaming/ytlikes.h"
 #include "src/gui/streaming/soundcloudpage.h"
 #include "src/system/streaming/soundcloud.h"
 #include "src/system/streaming/soundcloudcache.h"
@@ -552,7 +554,9 @@ static void refresh_now_playing_card(void) {
 		// show: a podcast episode names its show's author and the show itself,
 		// which only the sidecar knows, and anything else keeps its artist.
 		char podcast_artist[256] = "";
-		if (podcastcache_is_episode(state.current_file)) {
+		if (ytmusic_cache_is_podcast_episode(state.current_file)) {
+			snprintf(podcast_artist, sizeof(podcast_artist), "%s", state.metadata.artist);
+		} else if (podcastcache_is_episode(state.current_file)) {
 			podcast_feed_t feed;
 			if (player_current_podcast_feed(NULL, &feed)) {
 				if (feed.author[0] && feed.title[0] && strcmp(feed.author, feed.title) != 0) {
@@ -635,7 +639,8 @@ static void refresh_now_playing_card(void) {
 	// player.
 	long long podcast_feed_id = 0;
 	player_current_podcast_feed(&podcast_feed_id, NULL);
-	bool podcast = !state.live && !book && podcastcache_is_episode(state.current_file);
+	bool podcast = !state.live && !book && (podcastcache_is_episode(state.current_file) ||
+								ytmusic_cache_is_podcast_episode(state.current_file));
 	bool skips = book || podcast;
 	int back = book ? audiobook_skip_back() : podcast ? podcast_skip_back() : 0;
 	int forward = book ? audiobook_skip_forward() : podcast ? podcast_skip_forward() : 0;
@@ -680,6 +685,7 @@ static void refresh_now_playing_card(void) {
 	bool fav;
 	long qobuz_id = 0;
 	long tidal_id = 0;
+	char yt_id[YTLIKES_ID_MAX] = "";
 	if (radio_current_station(&station)) {
 		fav = radio_fav_contains_station(&station);
 	} else if (podcast) {
@@ -704,6 +710,10 @@ static void refresh_now_playing_card(void) {
 		fav = qobuzsync_is_favorite(qobuz_id);
 	} else if (state.current_file[0] && soundcloudcache_is_soundcloud_path(state.current_file)) {
 		fav = soundcloud_is_liked(soundcloudcache_track_id_of(state.current_file));
+	} else if (state.current_file[0] && ytmusic_cache_track_id(state.current_file, yt_id, sizeof(yt_id))) {
+		// A YouTube Music song: the heart reports this player's own list, which
+		// is where a like goes when no account session is imported.
+		fav = ytlikes_contains(yt_id);
 	} else {
 		fav = state.current_file[0] && library_fav_contains(state.current_file);
 	}
@@ -1505,6 +1515,7 @@ static void star_cb(lv_event_t *e) {
 	// A podcast: the star follows or unfollows the feed, like the player's, and
 	// reads the same source so the two stars cannot disagree.
 	long long feed_id = 0;
+	char yt_id[YTLIKES_ID_MAX] = "";
 	podcast_feed_t feed;
 	if (player_current_podcast_feed(&feed_id, &feed)) {
 		if (podcastsubs_is_followed(feed_id)) {
@@ -1547,6 +1558,25 @@ static void star_cb(lv_event_t *e) {
 	long long sc_id = soundcloudcache_track_id_of(state.current_file);
 	if (sc_id > 0) {
 		soundcloudpage_toggle_favorite_async(sc_id, qp_tidal_fav_done, NULL);
+		refresh_now_playing_card();
+		player_refresh_now_playing();
+		return;
+	}
+
+	// A YouTube Music song: the like is this player's own record of it -- id,
+	// title, artist -- kept for the page that lists what has been liked. No
+	// account is needed for any of that.
+	if (ytmusic_cache_track_id(state.current_file, yt_id, sizeof(yt_id))) {
+		ytlike_t like;
+		memset(&like, 0, sizeof(like));
+		snprintf(like.id, sizeof(like.id), "%s", yt_id);
+		const char *name = strrchr(state.current_file, '/');
+		snprintf(like.title, sizeof(like.title), "%s",
+				 state.metadata.title[0] ? state.metadata.title : (name ? name + 1 : state.current_file));
+		snprintf(like.artist, sizeof(like.artist), "%s", state.metadata.artist);
+		snprintf(like.album, sizeof(like.album), "%s", state.metadata.album);
+		like.duration = (int)state.progress_total_secs;
+		ytlikes_toggle(&like);
 		refresh_now_playing_card();
 		player_refresh_now_playing();
 		return;

@@ -39,6 +39,7 @@
 #include "src/system/streaming/soundcloudcache.h"
 #include "src/gui/streaming/soundcloudpage.h"
 #include "src/system/streaming/tidalcache.h"
+#include "src/system/streaming/ytmusic.h"
 #include "src/system/device/adb.h"
 #include "src/system/library/library.h"
 #include "src/system/remote/airplay.h"
@@ -852,7 +853,21 @@ static bool streaming_playback_active(void) {
 		return false;
 	}
 	return subsonicstream_owns(path) || qobuzcache_owns(path) || tidalcache_owns(path) ||
-		   soundcloudcache_is_soundcloud_path(path) || podcastcache_owns(path);
+		   soundcloudcache_is_soundcloud_path(path) || podcastcache_owns(path) ||
+		   ytmusic_cache_owns(path);
+}
+
+// A YouTube Music track on its way to the player. Most of the transfer -- since
+// a song starts as soon as part of it has arrived -- runs while something is
+// playing and is covered by that. The seconds before the first note are what
+// this covers, and they are exactly the seconds in which the radio being parked
+// would end the song before it began.
+static bool ytmusic_transfer_busy(void) {
+	int percent = -1;
+	bool running = false;
+	ytmusic_download_progress(&percent, &running);
+	(void)percent;
+	return running;
 }
 
 // Whether the network is the point rather than an idle drain: an AirPlay
@@ -875,6 +890,7 @@ static bool wifi_in_use(void) {
 		   wifitransfer_get_enabled() || qobuzcache_downloading_id() > 0 ||
 		   qobuzcache_network_wanted() || qobuzdl_busy() || tidalcache_downloading_id() > 0 || tidalcache_network_wanted() ||
 		   podcastcache_downloading_id() > 0 || podcastcache_network_wanted() || podcastdl_busy() ||
+		   ytmusic_transfer_busy() ||
 		   lastfm_network_wanted() || listenbrainz_network_wanted() || ota_busy();
 }
 
@@ -933,6 +949,7 @@ static bool player_is_busy(bool playing, uint32_t input_idle) {
 		   sonixlink_is_connected() || // a phone driving the player, not a switch left on
 		   qobuzcache_downloading_id() > 0 || tidalcache_downloading_id() > 0 ||
 		   soundcloudcache_downloading() || podcastcache_downloading_id() > 0 ||
+		   ytmusic_transfer_busy() ||  // the seconds before a YouTube song is audible
 		   ota_busy(); // a firmware update being fetched
 }
 
@@ -1280,6 +1297,7 @@ void power_shutdown(void) {
 	tidalcache_clear_on_exit();
 	soundcloudcache_clear_on_exit();
 	podcastcache_clear_on_exit();
+	ytmusic_cache_clear();
 	dlna_clear_on_exit();
 
 	// The charger back on before the power goes: the driver keeps that bit

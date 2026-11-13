@@ -15,6 +15,9 @@ streaming-keys.ini
 streaming-keys.key
 streaming-keys.bin
 
+# The InnerTube key the build compiles in, read by sonix-player/Makefile.
+sonix-player/.ytmusic-key
+
 sonix-player/audio-target
 
 sonix-player/compile_commands.json

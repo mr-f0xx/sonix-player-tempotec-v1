@@ -251,6 +251,24 @@ $(STREAMKEYS_KEY_H): FORCE
 		else echo "streamkeys: no $(STREAMKEYS_KEY), this build reads only a plain streaming-keys.ini"; fi; fi
 build_host/system/streaming/streamkeys.o build_target/system/streaming/streamkeys.o: $(STREAMKEYS_KEY_H)
 
+# The InnerTube key YouTube Music's requests carry, compiled in rather than
+# committed (see the comment on YTMUSIC_API_KEY in
+# src/system/streaming/ytmusic.c: it is Google's public web-client key, not a
+# credential of anybody's, but it is not this repository's to publish and a
+# scanner flags the AIza... form wherever it sits).
+#
+# Three ways in, in this order: the environment or the command line
+# (make YTMUSIC_API_KEY=...), then a .ytmusic-key file beside this Makefile
+# (gitignored). A build with none of them still works -- every other feature is
+# unaffected, and YouTube Music says at its first request that it has no key.
+YTMUSIC_API_KEY ?= $(shell cat .ytmusic-key 2>/dev/null)
+ifeq ($(strip $(YTMUSIC_API_KEY)),)
+YTMUSIC_API_KEY := $(shell cat .ytmusic-key 2>/dev/null)
+endif
+ifneq ($(strip $(YTMUSIC_API_KEY)),)
+CFLAGS += -DYTMUSIC_API_KEY='"$(strip $(YTMUSIC_API_KEY))"'
+endif
+
 build_host/%.o: src/%.c
 	@mkdir -p $(dir $@)
 	$(CC) $(HOST_CFLAGS) -c $< -o $@

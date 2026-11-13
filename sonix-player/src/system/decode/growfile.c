@@ -83,6 +83,24 @@ void growfile_announce(const char *path, long total) {
 	pthread_mutex_unlock(&lock);
 }
 
+// The size the download learned after it started -- from a Content-Range, when
+// the API reply did not state one. Announcing the path again would put the
+// byte count back to zero and leave a reader already at the edge waiting for
+// bytes it has: this changes the promise and nothing else.
+void growfile_set_total(const char *path, long total) {
+	if (!path || total <= 0) {
+		return;
+	}
+	pthread_mutex_lock(&lock);
+	slot_t *slot = find_locked(path);
+	if (slot) {
+		slot->total = total;
+		fprintf(stderr, "growfile: %s is %ld bytes after all\n", path, total);
+	}
+	pthread_cond_broadcast(&grew);
+	pthread_mutex_unlock(&lock);
+}
+
 void growfile_progress(const char *path, long done) {
 	pthread_mutex_lock(&lock);
 	slot_t *slot = find_locked(path);

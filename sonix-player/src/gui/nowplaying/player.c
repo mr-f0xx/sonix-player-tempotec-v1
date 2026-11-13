@@ -70,6 +70,10 @@
 #include "src/system/streaming/soundcloud.h"
 #include "src/system/streaming/soundcloudcache.h"
 #include "src/system/streaming/tidalcache.h"
+#include "src/system/streaming/ytmusic.h"
+#include "src/system/streaming/ytlikes.h"
+#include "src/system/streaming/ytpodcastplayed.h"
+#include "src/system/decode/growfile.h"
 #include "src/system/streaming/tidalsync.h"
 #include "src/system/core/utils.h"
 #include "src/system/audio/waveform.h"
@@ -286,6 +290,20 @@ static lv_obj_t *qobuz_badge;	   // the Qobuz mark, in the same corner
 static lv_obj_t *tidal_badge;	   // and the Tidal one, over it: only one ever shows
 static lv_obj_t *podcast_badge;	   // and the podcast one, third in the same place
 static lv_obj_t *soundcloud_badge; // and the SoundCloud one, fourth in the same place
+static lv_obj_t *ytmusic_badge;	   // and the YouTube Music one, fifth in the same place
+
+static void update_qobuz_badge(void);
+
+// Whether what the player holds is a YouTube Music song, and its video id: the
+// key the player keeps its likes under.
+static bool current_yt_song(char *id, size_t size) {
+	device_state_t state;
+	device_state_get(&state);
+	if (!state.current_file[0]) return false;
+	// One question, not two: the card's copies are recognised here too, and
+	// their id comes from the tags written beside them.
+	return ytmusic_cache_track_id(state.current_file, id, size);
+}
 static bool live_mode;
 static bool live_transport_hidden; // prev/next taken away on a stream
 static bool live_custom_nav;	   // on a station from a list, where they change station
@@ -727,6 +745,9 @@ static void apply_live_mode(bool live) {
 	if (soundcloud_badge && live) {
 		lv_obj_set_hidden(soundcloud_badge, true);
 	}
+	if (ytmusic_badge && live) {
+		lv_obj_set_hidden(ytmusic_badge, true);
+	}
 	if (qobuz_badge && live) {
 		lv_obj_set_hidden(qobuz_badge, true);
 	}
@@ -945,7 +966,7 @@ static sleeptimer_kind_t sleeptimer_kind_playing(void) {
 	}
 	char path[512];
 	audio_get_current_file(path, sizeof(path));
-	if (podcastcache_is_episode(path)) {
+	if (podcastcache_is_episode(path) || ytmusic_cache_is_podcast_episode(path)) {
 		return SLEEPTIMER_PODCAST;
 	}
 	return SLEEPTIMER_MUSIC;
@@ -3224,7 +3245,8 @@ static void lyrics_bg_prepare(void) {
 // needs, and an episode is speech at whatever bitrate the publisher chose:
 // "lossy" beside it is true and says nothing anyone would act on.
 static const lv_image_dsc_t *studio_quality_mark(const device_state_t *state) {
-	if (!state->live && podcastcache_is_episode(state->current_file)) {
+	if (!state->live && (podcastcache_is_episode(state->current_file) ||
+							 ytmusic_cache_is_podcast_episode(state->current_file))) {
 		return NULL;
 	}
 	if (state->live) {
@@ -3296,7 +3318,8 @@ static int studio_cover_geometry(int *top_out) {
 // `parent` of NULL leaves them where they are and only re-places them, which
 // is what studio_place() wants on a relayout.
 static void studio_badges_move(lv_obj_t *parent, int y) {
-	lv_obj_t *const marks[] = {live_badge, qobuz_badge, tidal_badge, podcast_badge, soundcloud_badge};
+	lv_obj_t *const marks[] = {live_badge, qobuz_badge, tidal_badge, podcast_badge, soundcloud_badge,
+						    ytmusic_badge};
 	for (size_t i = 0; i < sizeof(marks) / sizeof(marks[0]); i++) {
 		if (!marks[i]) {
 			continue;
@@ -3480,7 +3503,8 @@ static void studio_take_back(void) {
 		}
 		// The marks go back to the corner of the artwork they share with every
 		// other arrangement.
-		lv_obj_t *const marks[] = {live_badge, qobuz_badge, tidal_badge, podcast_badge, soundcloud_badge};
+		lv_obj_t *const marks[] = {live_badge, qobuz_badge, tidal_badge, podcast_badge, soundcloud_badge,
+						    ytmusic_badge};
 		for (size_t i = 0; i < sizeof(marks) / sizeof(marks[0]); i++) {
 			if (marks[i]) {
 				lv_obj_set_parent(marks[i], cover_art_group);
@@ -5345,6 +5369,16 @@ static void update_qobuz_badge(void);
 
 static bool podcast_current_feed(long long *id_out, podcast_feed_t *feed_out);
 
+// What the artist line draws, besides the podcast feed and book cases below.
+static const char *shown_player_artist(const device_state_t *state) {
+	// The cached YouTube episode's sidecar has the creator; embedded album-artist
+	// tags must not take precedence over it.
+	if (ytmusic_cache_is_podcast_episode(state->current_file) && state->metadata.artist[0]) {
+		return state->metadata.artist;
+	}
+	return metadata_shown_artist(&state->metadata);
+}
+
 // Refreshes the now-playing info (title + artist) from the current
 // device state and resets the per-track length cache. Used both when the user
 // picks a file and when playback auto-advances to a new track.
@@ -5376,7 +5410,8 @@ static void refresh_now_playing(void) {
 	// and the first one forgotten leaves the player dressed as a podcast over
 	// a song.
 	apply_audiobook_mode(!state.live && audiobook_is_playing(),
-						 !state.live && podcastcache_is_episode(state.current_file));
+						 !state.live && (podcastcache_is_episode(state.current_file) ||
+									   ytmusic_cache_is_podcast_episode(state.current_file)));
 	if (state.live) {
 		// The station on top, what it says is on air underneath -- the same
 		// two lines as a track, carrying the two things a radio knows.
@@ -5431,7 +5466,7 @@ static void refresh_now_playing(void) {
 			}
 		}
 	}
-	const char *artist = podcast_artist[0] ? podcast_artist : metadata_shown_artist(&state.metadata);
+	const char *artist = podcast_artist[0] ? podcast_artist : shown_player_artist(&state);
 	scrolltext_set(song_artist_label, artist);
 	sticker_album_sync(&state);
 	lyrics_head_sync();
@@ -5523,7 +5558,8 @@ static bool podcast_current_feed(long long *id_out, podcast_feed_t *feed_out) {
 static bool current_podcast_episode(void) {
 	device_state_t state;
 	device_state_get(&state);
-	return state.current_file[0] && podcastcache_is_episode(state.current_file);
+	return state.current_file[0] && (podcastcache_is_episode(state.current_file) ||
+								   ytmusic_cache_is_podcast_episode(state.current_file));
 }
 
 // The playing episode's podcast, for callers outside the player (the control
@@ -5564,6 +5600,8 @@ static void update_qobuz_badge(void) {
 	bool from_tidal = !live_mode && !from_qobuz && current_tidal_track() != 0;
 	bool from_podcast = !live_mode && !from_qobuz && !from_tidal && current_podcast_episode();
 	bool from_soundcloud = !live_mode && !from_qobuz && !from_tidal && !from_podcast && current_soundcloud_track() > 0;
+	bool from_ytmusic = !live_mode && !from_qobuz && !from_tidal && !from_podcast && !from_soundcloud &&
+					   current_yt_song(NULL, 0);
 
 	if (qobuz_badge) {
 		if (from_qobuz) {
@@ -5597,6 +5635,14 @@ static void update_qobuz_badge(void) {
 			lv_obj_set_hidden(soundcloud_badge, true);
 		}
 	}
+	if (ytmusic_badge) {
+		if (from_ytmusic) {
+			lv_obj_set_hidden(ytmusic_badge, false);
+			lv_obj_move_foreground(ytmusic_badge);
+		} else {
+			lv_obj_set_hidden(ytmusic_badge, true);
+		}
+	}
 }
 
 // Repaints the favourite marker: filled when the loaded track is a favourite,
@@ -5615,6 +5661,7 @@ static void update_fav_button(void) {
 	long qobuz_id = 0;
 	long tidal_id = 0;
 	long long sc_id = 0;
+	char yt_id[YTLIKES_ID_MAX] = "";
 	long long feed_id = 0;
 	if (radio_current_station(&station)) {
 		starred = radio_fav_contains_station(&station);
@@ -5635,6 +5682,10 @@ static void update_fav_button(void) {
 		tidalsync_favorites_refresh(tidal_favorites_changed);
 	} else if ((sc_id = current_soundcloud_track()) > 0) {
 		starred = soundcloud_is_liked(sc_id);
+	} else if (current_yt_song(yt_id, sizeof(yt_id))) {
+		// A YouTube Music song: the player's own list. A heart with no account
+		// imported is still a heart, and this is where it is read back.
+		starred = ytlikes_contains(yt_id);
 	} else {
 		// device_state, not audio_get_current_file(): the star is drawn from
 		// one source and toggled from another, and when the two disagreed the
@@ -5796,6 +5847,26 @@ static void fav_btn_event_cb(lv_event_t *e) {
 		return;
 	}
 
+	// A YouTube Music song: the heart fills its own list on the player. There is
+	// no account to write to unless a browser session was imported, and the
+	// cache file it is playing from is swept on a later play -- so the like is
+	// recorded here, by id, and stays.
+	char yt_id[YTLIKES_ID_MAX];
+	if (ytmusic_cache_track_id(state.current_file, yt_id, sizeof(yt_id))) {
+		ytlike_t like;
+		const char *leaf = strrchr(state.current_file, '/');
+		memset(&like, 0, sizeof(like));
+		snprintf(like.id, sizeof(like.id), "%s", yt_id);
+		snprintf(like.title, sizeof(like.title), "%s",
+				 state.metadata.title[0] ? state.metadata.title : (leaf ? leaf + 1 : state.current_file));
+		snprintf(like.artist, sizeof(like.artist), "%s", state.metadata.artist);
+		snprintf(like.album, sizeof(like.album), "%s", state.metadata.album);
+		like.duration = (int)state.progress_total_secs;
+		ytlikes_toggle(&like);
+		update_fav_button();
+		return;
+	}
+
 	const char *title = state.metadata.title[0] ? state.metadata.title : strrchr(state.current_file, '/') + 1;
 	// No notification popup: the star filling in is the whole feedback.
 	library_fav_toggle(state.current_file, title, state.metadata.artist);
@@ -5825,7 +5896,8 @@ static void update_hires_badge(const device_state_t *state) {
 		radio_get_now(&now);
 		hi = hiresbadge_qualifies(now.playing && (strcmp(now.codec, "FLAC") == 0 || strcmp(now.codec, "Ogg FLAC") == 0),
 			false, now.bits, now.sample_rate, false);
-	} else if (state->current_file[0] && !podcastcache_is_episode(state->current_file)) {
+	} else if (state->current_file[0] && !podcastcache_is_episode(state->current_file) &&
+				 !ytmusic_cache_is_podcast_episode(state->current_file)) {
 		airplay_state_t air;
 		airplay_get_state(&air);
 		hi = hiresbadge_qualifies(!air.playing && !btreceiver_is_active(), audio_stream_is_lossy(),
@@ -5841,7 +5913,8 @@ static void update_hires_badge(const device_state_t *state) {
 	// the button while it is there on an edge-to-edge sleeve, and restore them
 	// when it returns left; Sticker's inset square sits clear of the chevron.
 	if (!layout_studio_now) {
-		lv_obj_t *const marks[] = {live_badge, qobuz_badge, tidal_badge, podcast_badge, soundcloud_badge};
+		lv_obj_t *const marks[] = {live_badge, qobuz_badge, tidal_badge, podcast_badge, soundcloud_badge,
+						    ytmusic_badge};
 		int y = (back_right && !layout_sticker_now)
 			? (back_btn_centre_y() - player_content_top()) + bp_header_button_size() / 2 + 4
 			: BADGE_INSET;
@@ -5883,7 +5956,7 @@ static void update_format_label(const device_state_t *state) {
 	bool year_visible = show_recording_year && layout_choice != PLAYER_LAYOUT_STANDARD &&
 		(layout_wave_now || layout_studio_now || layout_immersive_now || layout_poster_now || layout_aam_now) &&
 		!state->live && state->metadata.year > 0 && state->current_file[0] &&
-		!podcastcache_is_episode(state->current_file);
+		!podcastcache_is_episode(state->current_file) && !ytmusic_cache_is_podcast_episode(state->current_file);
 	if (layout_studio_now && studio_quality_icon) {
 		const lv_image_dsc_t *mark = year_visible ? NULL : studio_quality_mark(state);
 		if (mark) {
@@ -5975,13 +6048,35 @@ static void update_format_label(const device_state_t *state) {
 		// screen until the download finished and it settled.
 		int kbps = audio_get_stream_bitrate_kbps();
 
+		bool is_yt = (state->current_file[0] && ytmusic_cache_owns(state->current_file)) || current_yt_song(NULL, 0);
+
+		// A YouTube Music song arrives in chunks while it plays, so its file
+		// is a fraction of itself for the first minute: size over length read
+		// as "3 kbps AAC" on screen. What the instance said the stream is is
+		// the only honest figure there, so it stands in -- and the average is
+		// left out of it altogether.
+		if (kbps <= 0 && is_yt) {
+			kbps = ytmusic_last_bitrate_kbps();
+		}
+
 		// When the file does not declare one (a variable-bitrate MP3, a silent
 		// AAC) the real average stands in -- but only once the download has
-		// finished, for the reason just given.
+		// finished, so the average does not climb while growing.
 		struct stat st;
-		if (kbps <= 0 && !qobuzcache_owns(state->current_file) && !tidalcache_owns(state->current_file) &&
+		if (kbps <= 0 && !growfile_is_growing(state->current_file) &&
+			!qobuzcache_owns(state->current_file) && !tidalcache_owns(state->current_file) &&
 			state->progress_total_secs > 0.5 && stat(state->current_file, &st) == 0 && st.st_size > 0) {
 			kbps = (int)((double)st.st_size * 8.0 / state->progress_total_secs / 1000.0 + 0.5);
+		}
+		if (kbps <= 0 && is_yt) {
+			kbps = ytmusic_quality_high() ? 256 : 128;
+		}
+		if (is_yt && kbps > 0) {
+			if (kbps >= 110 && kbps <= 150) {
+				kbps = 128;
+			} else if (kbps >= 220 && kbps <= 280) {
+				kbps = 256;
+			}
 		}
 
 		if (kbps > 0) {
@@ -6155,6 +6250,15 @@ static void handle_track_finished(void) {
 	// audio.c's completion only fires when the file itself ran out. Marked
 	// before the early return below, so an episode that ends under "Stop at end
 	// of episode" is counted as heard too.
+	bool ytmusic_podcast = ytmusic_cache_is_podcast_episode(path);
+	if (ytmusic_podcast) {
+		char video_id[YTMUSIC_ID_MAX] = "";
+		if (ytmusic_cache_track_id(path, video_id, sizeof(video_id)) &&
+			!ytpodcastplayed_set(video_id, true)) {
+			fprintf(stderr, "player: could not save YouTube Music podcast listened state for %.11s\n",
+					video_id);
+		}
+	}
 	if (podcastcache_is_episode(path)) {
 		long long episode = podcastcache_episode_id(path);
 		podcastplayed_set(episode, true);
@@ -6166,7 +6270,7 @@ static void handle_track_finished(void) {
 		podcastsaved_episode_heard(episode);
 	}
 
-	if (podcast_stop_at_episode_end() && podcastcache_is_episode(path)) {
+	if (podcast_stop_at_episode_end() && (podcastcache_is_episode(path) || ytmusic_podcast)) {
 		fprintf(stderr, "player: end of the episode; not starting the next\n");
 		refresh_now_playing();
 		return;
@@ -6275,14 +6379,16 @@ static void update_progress(void) {
 	// by which the track can change, and the first one forgotten leaves the
 	// player dressed as a podcast over a song.
 	apply_audiobook_mode(!state.live && audiobook_is_playing(),
-						 !state.live && podcastcache_is_episode(state.current_file));
+						 !state.live && (podcastcache_is_episode(state.current_file) ||
+									   ytmusic_cache_is_podcast_episode(state.current_file)));
 	update_format_label(&state); // the rate/bits settle shortly after the start
 
 	// The status LED follows playback promptly from here (the battery poll
 	// only comes round once a minute). Its PCM colour follows the sample-rate
 	// band; podcasts and DSD retain their dedicated colours.
 	led_update_playback(state.status == AUDIO_STATUS_PLAYING, state.stream_sample_rate,
-						!state.live && podcastcache_is_episode(state.current_file),
+						!state.live && (podcastcache_is_episode(state.current_file) ||
+									 ytmusic_cache_is_podcast_episode(state.current_file)),
 						!state.live && audio_get_dsd_multiple() > 0);
 
 	// Where the book got to. Not the same thing as "remember track" below and
@@ -6902,21 +7008,12 @@ void player_output_unplugged(const char *what) {
 	apply_playback_status(AUDIO_STATUS_PAUSED);
 }
 
-// Pause what is playing before a stream is handed over to the decoder.
-//
-// A station is stopped rather than paused: it has no position to come back to,
-// and leaving it open while the next thing loads leaves two audio paths open.
-// The status is applied here so the transport and the title update at once,
-// instead of showing "playing" over a stream that is still loading.
+// Loading screens and busy spinners do not pause the music. A station keeps
+// playing until the next thing actually starts, and the decoder hand-over
+// stops it; pausing here stranded the transport on "paused" with nothing
+// coming.
 void player_pause_for_loading(void) {
-	if (radio_is_active()) {
-		radio_stop();
-		player_refresh_now_playing();
-	}
-	if (audio_get_status() == AUDIO_STATUS_PLAYING) {
-		audio_pause();
-		apply_playback_status(AUDIO_STATUS_PAUSED);
-	}
+	// Keep audio playing while loading screens and busy spinners are shown.
 }
 
 // A pause and not a stop, and for the same reason as the one above: the point
@@ -6961,7 +7058,7 @@ void player_refresh_artist(void) {
 	if (state.live || !state.current_file[0]) {
 		return;
 	}
-	scrolltext_set(song_artist_label, metadata_shown_artist(&state.metadata));
+	scrolltext_set(song_artist_label, shown_player_artist(&state));
 	lyrics_head_sync();
 	alt_pills_sync();
 }
@@ -8566,6 +8663,13 @@ void player_init(gui_config_t *cfg) {
 	lv_image_set_src(soundcloud_badge, &icon_soundcloud_badge);
 	lv_obj_align(soundcloud_badge, LV_ALIGN_TOP_RIGHT, -BADGE_INSET, BADGE_INSET);
 	lv_obj_set_hidden(soundcloud_badge, true);
+
+	// And the fifth. Only one of the five marks is ever on the sleeve at once:
+	// update_qobuz_badge() hides the others when it raises one.
+	ytmusic_badge = lv_image_create(cover_art_group);
+	lv_image_set_src(ytmusic_badge, &icon_ytmusic_badge);
+	lv_obj_align(ytmusic_badge, LV_ALIGN_TOP_RIGHT, -BADGE_INSET, BADGE_INSET);
+	lv_obj_set_hidden(ytmusic_badge, true);
 
 	// Shown while there is no artwork for the current track. The mark is drawn
 	// at 128x128 natively, which overflows a V1 sleeve, so it is scaled to a

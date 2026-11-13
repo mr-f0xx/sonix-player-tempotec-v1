@@ -50,6 +50,33 @@ static __thread char last_final_url[HTTP_URL_MAX];
 
 const char *http_last_final_url(void) { return last_final_url; }
 
+// The whole size a ranged reply stated, from "Content-Range: bytes a-b/total".
+//
+// This is the one place the true length of a stream is written down by servers
+// that do not put it in their API reply -- and a downloader that does not know
+// the length cannot tell a finished file from one cut off at thirty seconds.
+// Per thread for the same reason as the error string, and 0 when the reply
+// carried no such header (a plain 200, or a server that does not say).
+static __thread uint64_t last_range_total;
+
+// Defined with the rest of the response-header reading below.
+static bool header_value(const char *headers, const char *name, char *out, size_t out_size);
+
+uint64_t http_last_content_range_total(void) { return last_range_total; }
+
+// "bytes 0-262143/3456789" -> 3456789. Zero when the reply carries no total.
+static uint64_t content_range_total(const char *headers) {
+	char value[96];
+	if (!header_value(headers, "Content-Range", value, sizeof(value))) {
+		return 0;
+	}
+	const char *slash = strchr(value, '/');
+	if (!slash || !slash[1] || slash[1] == '*') {
+		return 0;
+	}
+	return (uint64_t)strtoull(slash + 1, NULL, 10);
+}
+
 static void clear_last_error(void) {
 	last_error[0] = '\0';
 }
@@ -1022,9 +1049,11 @@ static bool get_once(const url_t *u, const http_req_t *req, char **out, size_t *
 	char headers[HTTP_HEADER_BUFFER];
 	char lead[HTTP_HEADER_BUFFER];
 	int lead_len = 0;
+	last_range_total = 0;
 	int status = read_headers(&conn, headers, sizeof(headers), lead, sizeof(lead), &lead_len,
 	                          timeout_secs);
 	*status_out = status;
+	last_range_total = content_range_total(headers);
 
 	if (status >= 300 && status < 400) {
 		location[0] = '\0';

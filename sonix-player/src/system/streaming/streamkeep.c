@@ -20,6 +20,7 @@
 #include "src/system/streaming/qobuzcache.h"
 #include "src/system/streaming/soundcloudcache.h"
 #include "src/system/streaming/tidalcache.h"
+#include "src/system/streaming/ytmusic.h"
 
 #define KEEP_MUSIC_DIR "Music"
 #define KEEP_PART_SUFFIX ".part"
@@ -55,7 +56,11 @@ bool streamkeep_is_stream_track(const char *path) {
 	if (!path || !path[0]) {
 		return false;
 	}
-	return tidalcache_owns(path) || qobuzcache_owns(path) || soundcloudcache_is_soundcloud_path(path);
+	// YouTube Music's download lives in its own temporary cache rather than a
+	// service cache on the card, and is kept the same way: the finished file is
+	// copied into <card>/Music/YouTube Music/... with its tags and sleeve.
+	return tidalcache_owns(path) || qobuzcache_owns(path) || soundcloudcache_is_soundcloud_path(path) ||
+		   ytmusic_cache_owns(path);
 }
 
 bool streamkeep_busy(void) {
@@ -333,13 +338,25 @@ static bool wait_for_download(const char *path, const char *marker) {
 	int waited = 0;
 	while (waited < KEEP_WAIT_MAX_MS) {
 		struct stat st;
-		if (stat(marker, &st) != 0) {
+		if (ytmusic_cache_owns(path)) {
+			// YouTube Music keeps no .incompleto beside its cache file: the
+			// cache itself knows when a download is whole, and asking it is
+			// the difference between a copy of a finished song and a copy of
+			// a still-growing one.
+			if (ytmusic_cache_whole(path)) {
+				return true;
+			}
+		} else if (stat(marker, &st) != 0) {
 			return true; // finished, or never was in flight
 		}
 		if (!growfile_is_growing(path)) {
 			for (int i = 0; i < 10; i++) {
 				usleep(100 * 1000);
-				if (stat(marker, &st) != 0) {
+				if (ytmusic_cache_owns(path)) {
+					if (ytmusic_cache_whole(path)) {
+						return true;
+					}
+				} else if (stat(marker, &st) != 0) {
 					return true;
 				}
 			}
@@ -358,7 +375,8 @@ static void *keep_worker(void *arg) {
 	snprintf(path, sizeof(path), "%s", request->path);
 	bool notify_result = request->notify_result;
 	snprintf(service, sizeof(service), "%s",
-			 tidalcache_owns(path) ? "Tidal" : soundcloudcache_is_soundcloud_path(path) ? "SoundCloud" : "Qobuz");
+			 ytmusic_cache_owns(path) ? "YouTube Music"
+			 : tidalcache_owns(path) ? "Tidal" : soundcloudcache_is_soundcloud_path(path) ? "SoundCloud" : "Qobuz");
 	free(request);
 	thread_be_low_priority("stream keep"); // the card is also playing from it
 
@@ -402,6 +420,18 @@ static void *keep_worker(void *arg) {
 				snprintf(from, sizeof(from), "%s.tags", path);
 				snprintf(to, sizeof(to), "%s.tags", dest);
 				copy_bytes(from, to, NULL);
+				// The service's own id travels with the copy. Tidal and Qobuz keep
+				// a favourite on the account, and a file on the card that forgot
+				// its id would be starred into the card's own list instead.
+				long kept_id = tidalcache_owns(path) ? tidalcache_track_id(path)
+							 : qobuzcache_owns(path) ? qobuzcache_track_id(path) : 0;
+				if (kept_id > 0) {
+					FILE *tags_out = fopen(to, "a");
+					if (tags_out) {
+						fprintf(tags_out, "id=%ld\n", kept_id);
+						fclose(tags_out);
+					}
+				}
 				snprintf(from, sizeof(from), "%s.jpg", src_stem);
 				snprintf(to, sizeof(to), "%s.jpg", dest_stem);
 				copy_bytes(from, to, NULL);
