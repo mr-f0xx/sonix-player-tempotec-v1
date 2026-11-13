@@ -826,6 +826,17 @@ Music landing page keeps Settings plus one overflow menu in the title row;
 Playlists/Browse, Favourites and Search remain available inside that menu
 without allowing four actions to reduce the heading to `Musi…`.
 
+That menu did not actually carry all of them. It was built as the active tiles
+first and Favourites and Search last, and the popover truncated every menu at
+eight rows without saying so; with the default nine tiles, the two rows that
+were cut were exactly those two. The other three palettes were unaffected
+because their Music page draws Search as a browse tile of its own, so the loss
+showed only in Dark and Light. `popover.c` now holds twelve rows, and Search
+and Favourites lead the Music menu, ahead of the tiles that are already on the
+page behind it: a menu longer than the panel scrolls, and the two actions with
+no other route stay above the fold. `tests/ui/test_main_menu.c` opens that menu
+in every theme and checks both rows are present and that Search is first.
+
 The Game Boy / Game Boy Color emulator had its own geometry, written for the
 480-wide panels only: the picture was the panel's full width (160×144 at 3×,
 480×432), the D-pad was 220 px a side and the in-game menu was a 360 px card,

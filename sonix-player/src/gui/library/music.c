@@ -225,11 +225,17 @@ static void compact_more_cb(lv_event_t *e) {
 	int active_n = musicsettings_main_tiles(active, MUSIC_TILE_COUNT);
 	popover_item_t items[MUSIC_TILE_COUNT + 2];
 	int n = 0;
-	for (int i = 0; i < active_n && n < MUSIC_TILE_COUNT; i++) {
+	// The two whole-page actions come first. The menu can be longer than the
+	// panel, so the rows below the fold are reached by scrolling; putting
+	// Search and Favourites at the top is what keeps them in sight, and this
+	// menu is the only way to Search on a header too narrow for four corner
+	// buttons. The tiles behind it are already on the page, so they read as
+	// the tail of the list rather than its head.
+	items[n++] = (popover_item_t){"search", compact_search_action, NULL, false};
+	items[n++] = (popover_item_t){"favourites", compact_favourites_action, NULL, false};
+	for (int i = 0; i < active_n && n < MUSIC_TILE_COUNT + 2; i++) {
 		items[n++] = popover_item_for_tile(active[i]);
 	}
-	items[n++] = (popover_item_t){"favourites", compact_favourites_action, NULL, false};
-	items[n++] = (popover_item_t){"search", compact_search_action, NULL, false};
 	popover_show(lv_event_get_target(e), items, n);
 }
 

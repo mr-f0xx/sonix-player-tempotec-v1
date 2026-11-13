@@ -30,6 +30,7 @@
 #include "src/gui/shell/main_menu.h"
 #include "src/gui/shell/main_menu_icons.h"
 #include "src/gui/shell/morepage.h"
+#include "src/gui/shell/popover.h"
 #include "src/gui/shell/settingsrow.h"
 #include "src/gui/shell/switcher.h"
 #include "src/system/addons/addons.h"
@@ -319,6 +320,49 @@ static lv_obj_t *find_label(lv_obj_t *obj, const char *text) {
 		}
 	}
 	return NULL;
+}
+
+/* The Music page's overflow menu, opened from its second corner button on a
+ * header too narrow for four. Every action it names has to reach the card: the
+ * popover used to cut the list off after eight rows, which silently dropped
+ * Favourites and Search from the Dark and Light Music pages -- the themes
+ * whose Music page draws no Search tile of its own. Returns the card. */
+static lv_obj_t *open_music_overflow_menu(void) {
+	lv_screen_load(music_screen);
+	lv_obj_update_layout(music_screen);
+	/* Corner slots are counted from the right edge: slot 0 is Settings, so
+	 * the overflow menu is slot 1. */
+	lv_obj_t *more = NULL;
+	for (uint32_t i = 0; i < lv_obj_get_child_count(music_screen); i++) {
+		lv_obj_t *child = lv_obj_get_child(music_screen, i);
+		if (!lv_obj_check_type(child, &lv_button_class)) {
+			continue;
+		}
+		lv_obj_t *icon = child_of_type(child, &lv_image_class);
+		if (lv_image_get_src(icon) == &icon_list_music) {
+			more = child;
+		}
+	}
+	assert(more);
+	lv_obj_send_event(more, LV_EVENT_CLICKED, NULL);
+	lv_obj_update_layout(lv_layer_top());
+	/* The veil is built last, so it sits on top; the card is its only row
+	 * container. */
+	lv_obj_t *veil = lv_obj_get_child(lv_layer_top(), -1);
+	assert(veil && !lv_obj_is_hidden(veil));
+	return lv_obj_get_child(veil, 0);
+}
+
+/* How many rows a popover card holds: the buttons, not the hairlines between
+ * them. */
+static int popover_row_count(lv_obj_t *card) {
+	int rows = 0;
+	for (uint32_t i = 0; i < lv_obj_get_child_count(card); i++) {
+		if (lv_obj_check_type(lv_obj_get_child(card, i), &lv_button_class)) {
+			rows++;
+		}
+	}
+	return rows;
 }
 
 /* The last label in the tree that says this, for a word a page uses twice:
@@ -811,6 +855,7 @@ int main(int argc, char **argv) {
 	assert(slider_area.x2 + knob_overhang <= card_area.x2 - 1);
 
 	musicsettings_screen = lv_obj_create(NULL);
+	popover_init(); // as gui_init does, before any page opens its own menu
 	music_init(&cfg);
 	lv_obj_t *music_tile_grid = lv_obj_get_child(music_screen, 0);
 	assert(lv_obj_get_child_count(music_tile_grid) == MUSIC_TILE_COUNT);
@@ -821,6 +866,34 @@ int main(int argc, char **argv) {
 		assert(find_label(tokyo_panel, tr("music_years")));
 		assert(find_label(tokyo_panel, tr("music_most_played")));
 	}
+
+	/* The Music header on this panel keeps Settings and one overflow menu, so
+	 * Search has to be reachable from that menu in every theme -- Dark and
+	 * Light included, whose Music page has no Search tile of its own. The
+	 * menu holds all nine tiles plus Favourites and Search, past the eight
+	 * rows the popover used to stop at. */
+	for (int kind = 0; kind < THEME_KIND_COUNT; kind++) {
+		theme_set_kind((theme_kind_t)kind);
+		lv_obj_t *menu_card = open_music_overflow_menu();
+		/* Search, Favourites, then one row per tile. */
+		assert(popover_row_count(menu_card) == MUSIC_TILE_COUNT + 2);
+		assert(find_label(menu_card, tr("search")));
+		assert(find_label(menu_card, tr("favourites")));
+		/* Search and Favourites lead the list, so they are on screen
+		 * without a scroll: this menu is the only way to Search on this
+		 * header. The tiles behind them are the ones already on the
+		 * page. */
+		lv_obj_t *first_row = NULL;
+		for (uint32_t i = 0; i < lv_obj_get_child_count(menu_card); i++) {
+			if (lv_obj_check_type(lv_obj_get_child(menu_card, i), &lv_button_class)) {
+				first_row = lv_obj_get_child(menu_card, i);
+				break;
+			}
+		}
+		assert(first_row && find_label(first_row, tr("search")));
+		popover_close();
+	}
+	theme_set_kind(THEME_KIND_DARK);
 
 	/* Rearrange and disable Years and Most played; verify both tile_grid and tokyo_music_panel update. */
 	test_active_tiles[0] = MUSIC_TILE_PLAYLISTS;

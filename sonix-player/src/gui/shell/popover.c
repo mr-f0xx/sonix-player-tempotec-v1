@@ -7,7 +7,14 @@
 #include "src/gui/shell/theme.h"
 #include "src/system/core/lang.h"
 
-#define POPOVER_MAX_ITEMS 8
+// The largest menu any page passes is the Music page's overflow menu on a
+// panel too narrow for four corner buttons: one row per active tile (nine at
+// most) plus Favourites and Search, so eleven. A limit below that used to drop
+// the last rows without a word, which is how Search went missing from the Dark
+// and Light Music pages while the function-glyph themes kept their own tile.
+// Rows past the screen height scroll, so a longer menu costs nothing but a
+// swipe and never loses an action.
+#define POPOVER_MAX_ITEMS 12
 #define POPOVER_WIDTH 284
 #define POPOVER_ROW_HEIGHT 62
 #define POPOVER_RADIUS 16

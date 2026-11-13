@@ -26,7 +26,9 @@ typedef struct {
 // Builds the (hidden) veil and card once. Call from gui_init.
 void popover_init(void);
 
-// Opens the menu near `anchor` with `count` items (at most 7 are shown).
+// Opens the menu near `anchor` with `count` items. The card scrolls when the
+// rows do not fit the panel, so a long menu loses no action; only a count past
+// POPOVER_MAX_ITEMS (in popover.c) is truncated.
 void popover_show(lv_obj_t *anchor, const popover_item_t *items, int count);
 
 // Closes it (the veil tap and every item do this on their own).
