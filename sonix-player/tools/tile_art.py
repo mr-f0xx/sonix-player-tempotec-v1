@@ -114,8 +114,10 @@ if __name__ == '__main__':
         ('radio-flylo.png', (113, 77, 217), 'heart-outline.svg'),
         # Qobuz's four cards. Violet, blue, cyan and green: the section reads
         # as one set, and its genre card stays clear of the Radio page's amber
-        # one even though both lead to a list of new releases.
-        ('qobuz-favourites.png', (113, 77, 217), 'heart.svg'),
+        # one even though both lead to a list of new releases. The heart is
+        # outlined like the disc, the file and the note beside it -- a solid
+        # one would be the only filled glyph on the page.
+        ('qobuz-favourites.png', (113, 77, 217), 'heart-outline.svg'),
         ('qobuz-albums.png', (56, 119, 213), 'album.svg'),
         ('qobuz-playlists.png', (34, 164, 190), 'files-playlist.svg'),
         ('qobuz-genres.png', (46, 163, 104), 'music-note.svg'),

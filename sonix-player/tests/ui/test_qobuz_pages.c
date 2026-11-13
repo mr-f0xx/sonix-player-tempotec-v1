@@ -645,14 +645,14 @@ int main(int argc, char **argv) {
 
 	// The pictures are rendered at exactly the size the cards draw them, so the
 	// page never asks LVGL to resample one.
-	assert(icon_menu_qobuz_favourites.header.w == 54 && icon_menu_qobuz_favourites.header.h == 54);
-	assert(icon_menu_qobuz_albums.header.w == 54 && icon_menu_qobuz_albums.header.h == 54);
-	assert(icon_menu_qobuz_playlists.header.w == 54 && icon_menu_qobuz_playlists.header.h == 54);
-	assert(icon_menu_qobuz_genres.header.w == 54 && icon_menu_qobuz_genres.header.h == 54);
-	assert(icon_qobuz_favourites_glyph.header.w == 46 && icon_qobuz_favourites_glyph.header.h == 46);
-	assert(icon_qobuz_albums_glyph.header.w == 46 && icon_qobuz_albums_glyph.header.h == 46);
-	assert(icon_qobuz_playlists_glyph.header.w == 46 && icon_qobuz_playlists_glyph.header.h == 46);
-	assert(icon_qobuz_genres_glyph.header.w == 46 && icon_qobuz_genres_glyph.header.h == 46);
+	assert(icon_menu_qobuz_favourites.header.w == 48 && icon_menu_qobuz_favourites.header.h == 48);
+	assert(icon_menu_qobuz_albums.header.w == 48 && icon_menu_qobuz_albums.header.h == 48);
+	assert(icon_menu_qobuz_playlists.header.w == 48 && icon_menu_qobuz_playlists.header.h == 48);
+	assert(icon_menu_qobuz_genres.header.w == 48 && icon_menu_qobuz_genres.header.h == 48);
+	assert(icon_qobuz_favourites_glyph.header.w == 40 && icon_qobuz_favourites_glyph.header.h == 40);
+	assert(icon_qobuz_albums_glyph.header.w == 40 && icon_qobuz_albums_glyph.header.h == 40);
+	assert(icon_qobuz_playlists_glyph.header.w == 40 && icon_qobuz_playlists_glyph.header.h == 40);
+	assert(icon_qobuz_genres_glyph.header.w == 40 && icon_qobuz_genres_glyph.header.h == 40);
 
 	qobuzpage_init(&cfg);
 	assert(qobuz_screen != NULL);

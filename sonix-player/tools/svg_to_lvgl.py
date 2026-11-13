@@ -429,11 +429,13 @@ ICONS = [
 # weight in the binary and nothing else.
 MAIN_MENU_ICON_SIZE = 128
 SECTION_ICON_SIZE = 112
-# The SoundCloud and Subsonic home cards are the same size and draw their
-# picture at this size, so both their artwork and the flat themes' glyphs are
-# rendered at it rather than scaled at run time.
-HOME_TILE_SIZE = 54
-HOME_TILE_GLYPH_SIZE = 46
+# The SoundCloud, Subsonic, Radio and Qobuz home cards are the same size and
+# draw their picture at this size, so both their artwork and the flat themes'
+# glyphs are rendered at it rather than scaled at run time. The glyphs are a
+# little smaller than the artwork: a white line drawing of the same box reads
+# heavier than the shaded card behind it.
+HOME_TILE_SIZE = 48
+HOME_TILE_GLYPH_SIZE = 40
 
 COLOR_ICONS = [
     # The quality badges under a track's title. Here rather than above because
@@ -498,7 +500,7 @@ COLOR_ICONS = [
     ("heart-outline.svg", "radio_flylo_glyph", HOME_TILE_GLYPH_SIZE),
     # The Qobuz home page's four cards: the same treatment the pages above
     # give theirs, one glyph per destination.
-    ("heart.svg", "qobuz_favourites_glyph", HOME_TILE_GLYPH_SIZE),
+    ("heart-outline.svg", "qobuz_favourites_glyph", HOME_TILE_GLYPH_SIZE),
     ("album.svg", "qobuz_albums_glyph", HOME_TILE_GLYPH_SIZE),
     ("files-playlist.svg", "qobuz_playlists_glyph", HOME_TILE_GLYPH_SIZE),
     ("music-note.svg", "qobuz_genres_glyph", HOME_TILE_GLYPH_SIZE),

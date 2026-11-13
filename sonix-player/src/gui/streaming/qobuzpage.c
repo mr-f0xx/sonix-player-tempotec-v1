@@ -2150,8 +2150,8 @@ static lv_obj_t *search_btn;
 // illustrations -- put the glyph itself on the card, tinted with the theme's
 // colour, as those pages do.
 #define QOBUZ_HOME_TILES 4
-#define QOBUZ_TILE_ART_PX 54
-#define QOBUZ_TILE_GLYPH_PX 46
+#define QOBUZ_TILE_ART_PX 48
+#define QOBUZ_TILE_GLYPH_PX 40
 
 static const int QUALITY_VALUES[4] = {QOBUZ_FORMAT_MP3, QOBUZ_FORMAT_CD, QOBUZ_FORMAT_HIRES96,
 									  QOBUZ_FORMAT_HIRES192};
