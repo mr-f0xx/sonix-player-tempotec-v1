@@ -67,7 +67,7 @@ static lv_obj_t *empty_note;
 static shelf_entry_t *shelf;
 static int shelf_count;
 static int cover_w, cover_h;
-static int tile_w, tile_h;
+static int tile_w;
 static char shelf_dir[512];
 static uint32_t covers_token;
 
@@ -230,12 +230,12 @@ static void build_tiles(void) {
 	lv_obj_update_layout(grid);
 	int width = lv_obj_get_content_width(grid);
 	tile_w = (width - (TILE_COLUMNS - 1) * TILE_GAP) / TILE_COLUMNS;
-	tile_h = lv_obj_get_content_height(page_container);
-	// Each pair of books fills the visible shelf height, like the Gearboy
-	// cards. Keep the actual cover at its 2:3 aspect ratio and center the
-	// cover-and-title group inside each full-height card.
+	int viewport_h = lv_obj_get_content_height(page_container);
+	// The viewport only caps the cover's height. Cards wrap the cover and
+	// title with their padding, rather than stretching to fill the viewport
+	// and leaving empty bands above and below a paperback-shaped cover.
 	int inner_width = tile_w - 20;
-	int cover_height = tile_h - 24 - 12 - 6 - lv_font_get_line_height(&font_ui_18);
+	int cover_height = viewport_h - 24 - 12 - 6 - lv_font_get_line_height(&font_ui_18);
 	cover_h = LV_MIN(inner_width * COVER_RATIO_NUM / COVER_RATIO_DEN, cover_height);
 	cover_w = cover_h * COVER_RATIO_DEN / COVER_RATIO_NUM;
 	if (cover_w < 1) {
@@ -248,7 +248,7 @@ static void build_tiles(void) {
 
 		lv_obj_t *tile = lv_obj_create(grid);
 		lv_obj_remove_style_all(tile);
-		lv_obj_set_size(tile, tile_w, tile_h);
+		lv_obj_set_size(tile, tile_w, LV_SIZE_CONTENT);
 		lv_obj_add_style(tile, &theme_style_card, 0);
 		lv_obj_add_style(tile, &theme_style_card_pressed, LV_STATE_PRESSED);
 		lv_obj_set_style_radius(tile, 14, 0);

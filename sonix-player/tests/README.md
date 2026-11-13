@@ -43,6 +43,7 @@ make -C sonix-player/tests radio-store
 make -C sonix-player/tests led-rate
 make -C sonix-player/tests aamlayout
 make -C sonix-player/tests statusbar-ui
+make -C sonix-player/tests ebookshelf-ui
 make -C sonix-player/tests extractkeys
 make -C sonix-player/tests tidal
 make -C sonix-player/tests tidal-ui
@@ -50,7 +51,7 @@ make -C sonix-player/tests subsonicdl
 make -C sonix-player/tests subsonic-all
 ```
 
-The non-UI suites require only a C compiler, Make and Python 3 (plus standard pthread/dl/math libraries). The `hiresbadge-ui`, `peq-ui`, `quickpanel-layout`, `btreceiver-session`, `power-display`, `corners`, `playbutton`, `musicsettings-rows`, `volume-overlay`, `playerdeck`, `vinylayout`, `waveform-overlay`, `edge-lock`, `tidal-ui` and aggregate `ui` targets also need the LVGL 9.6.0 checkout described below. None requires ALSA, SDL, a MIPS toolchain, a music server, a real account, or downloaded audio.
+The non-UI suites require only a C compiler, Make and Python 3 (plus standard pthread/dl/math libraries). The `hiresbadge-ui`, `peq-ui`, `quickpanel-layout`, `btreceiver-session`, `power-display`, `corners`, `playbutton`, `musicsettings-rows`, `volume-overlay`, `playerdeck`, `vinylayout`, `waveform-overlay`, `edge-lock`, `tidal-ui`, `ebookshelf-ui` and aggregate `ui` targets also need the LVGL 9.6.0 checkout described below. None requires ALSA, SDL, a MIPS toolchain, a music server, a real account, or downloaded audio.
 
 `run_subsonic_tests.py` starts a temporary threaded localhost HTTP server plus three HTTPS servers carrying the certificates in `tls_fixtures.py`, runs the C binary with a private temporary config directory, verifies its requests, then shuts down. All account values are synthetic. Build products live in ignored `.build/`; response/PCM fixtures are generated in memory rather than added to Git, and the three test certificates are pasted into that Python file rather than downloaded.
 
@@ -413,6 +414,14 @@ software renderer. To regenerate the main-menu-only native art, see
 `tools/main_menu_icons.py`; Python image tools are not required to build or
 run the player/tests. The host-build workflow runs this suite as well. These
 checks do not replace visual and touch testing on a physical V1.
+
+`make -C sonix-player/tests ebookshelf-ui` runs the production EPUB shelf at
+240×320 with a recording cover worker. It checks that each card wraps its cover,
+caption and padding rather than filling the viewport, while keeping the
+two-column grid, paperback cover ratio and title spacing. Late titles and
+covers, long captions, scrolling, theme changes, larger font metrics and
+reader taps must not stretch the cards. Set `SONIX_EBOOK_SNAPSHOT` to a PPM
+path to inspect the initial shelf with LVGL's software renderer.
 
 ## Rounded screen corners and their radius
 

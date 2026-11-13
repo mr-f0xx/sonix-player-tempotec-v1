@@ -754,6 +754,23 @@ qobuzgenre-ui: $(BUILD)/test_qobuzgenregrid
 $(BUILD)/test_qobuzgenregrid: $(QOBUZGENRE_UI_OBJ)
 	$(CC) -o $@ $^ $(LDFLAGS) $(LDLIBS)
 
+# The EPUB shelf: content-sized cards on the production V1 page and shell.
+# Only fonts, navigation and the cover worker are substituted.
+EBOOKSHELF_SRC = $(ROOT)/tests/ui/test_ebookshelf.c \
+                 $(ROOT)/src/gui/ebook/ebookpage.c \
+                 $(ROOT)/src/gui/shell/settingsrow.c \
+                 $(ROOT)/src/gui/shell/theme.c $(ROOT)/src/gui/shell/icons.c \
+                 $(ROOT)/src/gui/board_profile.c \
+                 $(ROOT)/src/system/core/config.c $(ROOT)/src/system/core/lang.c
+EBOOKSHELF_OBJ = $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(EBOOKSHELF_SRC)) $(UI_LVGL_OBJ)
+.PHONY: ebookshelf-ui
+ebookshelf-ui: $(BUILD)/test_ebookshelf
+	$(BUILD)/test_ebookshelf ../../sonix-packer/assets/V1/usr/resource/sonix/language
+
+$(BUILD)/test_ebookshelf: $(EBOOKSHELF_OBJ)
+	$(CC) -o $@ $^ $(LDFLAGS) $(LDLIBS)
+-include $(EBOOKSHELF_OBJ:.o=.d)
+
 # Stock edge presses must not scroll the page beneath the sheet.
 .PHONY: edge-lock
 edge-lock: $(BUILD)/test_edge_lock
@@ -1061,8 +1078,9 @@ $(BUILD)/test_stockkeys_ui: $(ROOT)/build_gen/streamkeys_key.h $(STOCKKEYS_UI_OB
 	$(CC) -o $@ $(STOCKKEYS_UI_OBJ) $(LDFLAGS) $(LDLIBS)
 
 .PHONY: ui
-ui: $(BUILD)/test_qobuzgenregrid $(BUILD)/test_main_menu $(BUILD)/test_screensaver $(BUILD)/test_tools_pages $(BUILD)/test_wifi_pages $(BUILD)/test_chargescreen $(BUILD)/test_power_display $(BUILD)/test_lyricsearch $(BUILD)/test_games $(BUILD)/test_peq_profiles $(BUILD)/test_quickpanel_layout $(BUILD)/test_btreceiversession $(BUILD)/test_corners $(BUILD)/test_playbutton $(BUILD)/test_musicsettings_rows $(BUILD)/test_volume_overlay $(BUILD)/test_playerdeck $(BUILD)/test_vinylayout $(BUILD)/test_stickerlayout $(BUILD)/test_waveform_overlay $(BUILD)/test_hiresbadge_ui $(BUILD)/test_statusbar_ui $(BUILD)/test_stockkeys_ui $(BUILD)/test_tidal_pages $(BUILD)/test_soundcloud_pages $(BUILD)/test_qobuz_pages
+ui: $(BUILD)/test_qobuzgenregrid $(BUILD)/test_ebookshelf $(BUILD)/test_main_menu $(BUILD)/test_screensaver $(BUILD)/test_tools_pages $(BUILD)/test_wifi_pages $(BUILD)/test_chargescreen $(BUILD)/test_power_display $(BUILD)/test_lyricsearch $(BUILD)/test_games $(BUILD)/test_peq_profiles $(BUILD)/test_quickpanel_layout $(BUILD)/test_btreceiversession $(BUILD)/test_corners $(BUILD)/test_playbutton $(BUILD)/test_musicsettings_rows $(BUILD)/test_volume_overlay $(BUILD)/test_playerdeck $(BUILD)/test_vinylayout $(BUILD)/test_stickerlayout $(BUILD)/test_waveform_overlay $(BUILD)/test_hiresbadge_ui $(BUILD)/test_statusbar_ui $(BUILD)/test_stockkeys_ui $(BUILD)/test_tidal_pages $(BUILD)/test_soundcloud_pages $(BUILD)/test_qobuz_pages
 	$(BUILD)/test_qobuzgenregrid
+	$(BUILD)/test_ebookshelf ../../sonix-packer/assets/V1/usr/resource/sonix/language
 	$(BUILD)/test_main_menu ../../sonix-packer/assets/V1/usr/resource/sonix/language
 	$(BUILD)/test_main_menu ../../sonix-packer/assets/V1/usr/resource/sonix/language saved
 	$(BUILD)/test_screensaver ../../sonix-packer/assets/V1/usr/resource/sonix/language
