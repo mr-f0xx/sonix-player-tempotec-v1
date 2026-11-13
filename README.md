@@ -288,7 +288,7 @@ The full rules are in [FEATURES.md](FEATURES.md).
 Only attempt this on a TempoTec Variations V1. Read the warning above before proceeding.
 
 1. Keep the **official V1 `v1.upt` and its matching `v1_md5.txt`** somewhere safe. They are needed if you want to return to stock.
-2. Extract the workflow artifact — its name ends in the commit it was built from, and `BUILD-REPORT.txt` inside repeats it — and copy **both** `v1.upt` and `v1_md5.txt` to the root of a microSD card supported by the device. On a release, the uploaded `v1.upt` is always built from that release's own tag; if `BUILD-REPORT.txt` names another commit, the artifact is not the release's and should not be flashed as it.
+2. Download the latest release in "R.
 3. Charge the player adequately, insert the card and start the device's built-in firmware update process. Menu names vary by stock firmware version; follow the device's on-screen instructions and do not interrupt the update.
 4. If you want to restore stock firmware, put the original vendor `v1.upt` and its matching checksum file at the card root and use the same update process.
 
