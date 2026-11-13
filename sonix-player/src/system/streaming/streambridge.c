@@ -15,6 +15,7 @@
 #define FETCH_TIMEOUT 10
 #define READER_TIMEOUT 30
 #define URL_CAP 2048
+#define EXTRA_HEADERS_CAP 768
 #define HEADER_PROBE_WINDOW (32 * 1024)
 
 struct streambridge {
@@ -28,6 +29,7 @@ struct streambridge {
 	bool pending, quit, canceled, opened, eof, failed, fetching;
 	int fd; // published/retired under lock; only the worker ever closes it
 	char url[URL_CAP];
+	char extra_headers[EXTRA_HEADERS_CAP];
 	char error[192];
 };
 
@@ -100,6 +102,13 @@ static bool observe_socket(void *user, int fd) {
 	return keep;
 }
 
+static void wipe_bytes(void *buf, size_t len) {
+	volatile unsigned char *p = (volatile unsigned char *)buf;
+	while (len--) {
+		*p++ = 0;
+	}
+}
+
 static void *producer(void *arg) {
 	streambridge_t *b = arg;
 	// SCHED_IDLE can starve on the V1's single core while the UI redraws. Nice
@@ -116,8 +125,11 @@ static void *producer(void *arg) {
 		}
 		unsigned generation = b->generation;
 		char url[URL_CAP];
+		char extra_headers[EXTRA_HEADERS_CAP];
 		memcpy(url, b->url, sizeof(url));
-		memset(b->url, 0, sizeof(b->url));
+		memcpy(extra_headers, b->extra_headers, sizeof(extra_headers));
+		wipe_bytes(b->url, sizeof(b->url));
+		wipe_bytes(b->extra_headers, sizeof(b->extra_headers));
 		b->pending = false;
 		b->live_generation = generation;
 		b->read_pos = b->write_pos = b->floor = 0;
@@ -128,14 +140,22 @@ static void *producer(void *arg) {
 
 		http_stream_t stream;
 		opening_t opening = {b, generation};
+		int status = 0;
 		http_stream_options_t options = {.socket_cb = observe_socket, .socket_user = &opening,
-			.no_icy = true, .no_https_downgrade = true};
+			.no_icy = true, .no_https_downgrade = true,
+			.extra_headers = extra_headers[0] ? extra_headers : NULL,
+			.status_out = &status};
 		bool opened = http_stream_open_ex(&stream, url, FETCH_TIMEOUT, &options);
-		memset(url, 0, sizeof(url));
+		wipe_bytes(url, sizeof(url));
+		wipe_bytes(extra_headers, sizeof(extra_headers));
 		pthread_mutex_lock(&b->lock);
 		if (!opened) {
 			if (current(b, generation)) {
-				fail_locked(b, http_last_error() ? http_last_error() : "subsonic_stream_failed");
+				if (status == 401 || status == 403) {
+					fail_locked(b, "subsonic_stream_refused");
+				} else {
+					fail_locked(b, http_last_error() ? http_last_error() : "subsonic_stream_failed");
+				}
 			}
 			b->fetching = false;
 			pthread_cond_broadcast(&b->changed);
@@ -323,7 +343,8 @@ void streambridge_cancel(streambridge_t *b) {
 	b->pending = false;
 	b->canceled = true;
 	b->opened = false;
-	memset(b->url, 0, sizeof(b->url));
+	wipe_bytes(b->url, sizeof(b->url));
+	wipe_bytes(b->extra_headers, sizeof(b->extra_headers));
 	if (b->fd >= 0) {
 		shutdown(b->fd, SHUT_RDWR);
 	}
@@ -347,8 +368,11 @@ void streambridge_destroy(streambridge_t *b) {
 	free(b);
 }
 
-bool streambridge_start(streambridge_t *b, const char *url, bool prefetch) {
+bool streambridge_start_ex(streambridge_t *b, const char *url, const char *extra_headers, bool prefetch) {
 	if (!b || !url || !url[0] || strlen(url) >= sizeof(b->url)) {
+		return false;
+	}
+	if (extra_headers && strlen(extra_headers) >= sizeof(b->extra_headers)) {
 		return false;
 	}
 	pthread_mutex_lock(&b->lock);
@@ -357,6 +381,11 @@ bool streambridge_start(streambridge_t *b, const char *url, bool prefetch) {
 		shutdown(b->fd, SHUT_RDWR);
 	}
 	snprintf(b->url, sizeof(b->url), "%s", url);
+	if (extra_headers && extra_headers[0]) {
+		snprintf(b->extra_headers, sizeof(b->extra_headers), "%s", extra_headers);
+	} else {
+		wipe_bytes(b->extra_headers, sizeof(b->extra_headers));
+	}
 	b->quota = prefetch && b->capacity > STREAMBRIDGE_PRECACHE ? STREAMBRIDGE_PRECACHE : b->capacity;
 	b->canceled = b->opened = b->eof = b->failed = false;
 	b->error[0] = '\0';
@@ -364,6 +393,10 @@ bool streambridge_start(streambridge_t *b, const char *url, bool prefetch) {
 	pthread_cond_broadcast(&b->changed);
 	pthread_mutex_unlock(&b->lock);
 	return true;
+}
+
+bool streambridge_start(streambridge_t *b, const char *url, bool prefetch) {
+	return streambridge_start_ex(b, url, NULL, prefetch);
 }
 
 void streambridge_promote(streambridge_t *b) {

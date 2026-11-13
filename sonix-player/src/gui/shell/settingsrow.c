@@ -357,7 +357,7 @@ static void fit_row_label(lv_obj_t *label, int32_t width) {
 // page plain -- at 24 it was the Developer options row, the twenty-fifth
 // built, that came up without its terminal. A slot is a dozen bytes on the
 // device, so the headroom costs little.
-#define SETTINGSROW_MAX_LEADING_ICONS 256
+#define SETTINGSROW_MAX_LEADING_ICONS 512
 
 typedef struct {
 	lv_obj_t *row;
@@ -372,7 +372,7 @@ typedef struct {
 } settingsrow_caption_t;
 
 static settingsrow_leading_icon_t leading_icons[SETTINGSROW_MAX_LEADING_ICONS];
-static settingsrow_caption_t captions[24];
+static settingsrow_caption_t captions[48];
 static int leading_icon_count;
 static int caption_count;
 static bool settingsrow_refresh_registered;
@@ -519,6 +519,10 @@ static void fit_row(lv_obj_t *row) {
 		// Toggle cards already reserve the switch with right padding on the
 		// label. Keep that reservation and only reduce its width for the glyph.
 		lv_obj_set_width(label, LV_MAX(1, avail));
+		return;
+	}
+	if (lv_label_get_long_mode(label) == LV_LABEL_LONG_DOT && avail > 0) {
+		lv_obj_set_width(label, avail);
 		return;
 	}
 	fit_row_label(label, avail);
@@ -1213,11 +1217,22 @@ static void fit_row_lines(lv_obj_t *row) {
 	if (!label || !lv_obj_check_type(label, &lv_label_class)) {
 		return;
 	}
+	lv_obj_t *caption = settingsrow_caption(row);
+	if (caption && compact_rows() && theme_uses_function_glyphs()) {
+		fit_row(row);
+		return;
+	}
 	int32_t avail = lv_obj_get_content_width(row);
 	lv_obj_t *right = lv_obj_get_child(row, 1);
 	if (right) {
 		avail -= lv_obj_get_width(right) + ROW_LABEL_GAP;
 	}
+	lv_obj_t *leading = settingsrow_leading_icon(row);
+	int32_t leading_width = (theme_uses_function_glyphs() || settingsrow_icon_is_accent(row)) && leading
+								? lv_obj_get_width(leading) + ROW_LABEL_GAP
+								: 0;
+	avail -= leading_width;
+	lv_obj_align(label, LV_ALIGN_LEFT_MID, leading_width, 0);
 	if (avail > 0 && lv_obj_get_style_width(label, LV_PART_MAIN) != avail) {
 		lv_obj_set_width(label, avail);
 	}

@@ -20,6 +20,7 @@
 #include "src/system/streaming/qobuzcache.h"
 #include "src/system/streaming/soundcloudcache.h"
 #include "src/system/streaming/tidalcache.h"
+#include "src/system/streaming/webdavcache.h"
 
 #define KEEP_MUSIC_DIR "Music"
 #define KEEP_PART_SUFFIX ".part"
@@ -55,7 +56,8 @@ bool streamkeep_is_stream_track(const char *path) {
 	if (!path || !path[0]) {
 		return false;
 	}
-	return tidalcache_owns(path) || qobuzcache_owns(path) || soundcloudcache_is_soundcloud_path(path);
+	return tidalcache_owns(path) || qobuzcache_owns(path) || soundcloudcache_is_soundcloud_path(path) ||
+		   webdavcache_owns(path);
 }
 
 bool streamkeep_busy(void) {
@@ -358,7 +360,10 @@ static void *keep_worker(void *arg) {
 	snprintf(path, sizeof(path), "%s", request->path);
 	bool notify_result = request->notify_result;
 	snprintf(service, sizeof(service), "%s",
-			 tidalcache_owns(path) ? "Tidal" : soundcloudcache_is_soundcloud_path(path) ? "SoundCloud" : "Qobuz");
+			 tidalcache_owns(path) ? "Tidal"
+			 : soundcloudcache_is_soundcloud_path(path) ? "SoundCloud"
+			 : webdavcache_owns(path) ? "WebDAV"
+									  : "Qobuz");
 	free(request);
 	thread_be_low_priority("stream keep"); // the card is also playing from it
 

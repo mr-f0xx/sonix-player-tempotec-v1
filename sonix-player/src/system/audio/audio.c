@@ -5,6 +5,7 @@
 #include "src/system/decode/decode.h"
 #include "src/system/decode/growfile.h"
 #include "src/system/streaming/subsonicstream.h"
+#include "src/system/streaming/webdavstream.h"
 #include "src/system/decode/sndfile.h"
 #include "src/system/audio/replaygain.h"
 #include "src/system/audio/speed.h"
@@ -3182,7 +3183,7 @@ static bool playback_reader_should_abort(void);
 
 static void play_decoded_file(const char *filepath, decode_format_t format) {
 	decoder_t *dec = decoder_open(filepath, format);
-	if (!dec && !subsonicstream_owns(filepath)) {
+	if (!dec && !subsonicstream_owns(filepath) && !webdavstream_owns(filepath)) {
 		// A busy card (a cover decoding, the library scanning) can make the
 		// first open fail transiently; one more try costs nothing and saves
 		// the track.
@@ -4210,6 +4211,9 @@ int audio_play(const char *filepath) {
 	if (!subsonicstream_owns(filepath)) {
 		subsonicstream_cancel();
 	}
+	if (!webdavstream_owns(filepath)) {
+		webdavstream_cancel();
+	}
 	fprintf(stderr, "audio[%ld]: play requested '%s'\n", log_ms(), filepath);
 
 	// NO route write here: this runs on the UI thread while the previous
@@ -4507,6 +4511,7 @@ void audio_stop(void) {
 	pthread_cond_broadcast(&audio_cond);
 	pthread_mutex_unlock(&audio_mutex);
 	subsonicstream_cancel();
+	webdavstream_cancel();
 }
 
 void audio_stop_and_wait(int timeout_ms) {

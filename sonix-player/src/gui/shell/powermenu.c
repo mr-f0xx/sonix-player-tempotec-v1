@@ -25,6 +25,7 @@
 #include "src/system/streaming/podcastcache.h"
 #include "src/system/streaming/soundcloudcache.h"
 #include "src/system/streaming/tidalcache.h"
+#include "src/system/streaming/webdavcache.h"
 #include "src/system/remote/dlna.h"
 #include "src/system/streaming/radio.h"
 
@@ -136,6 +137,7 @@ static void do_reboot(void) {
 	qobuzcache_clear_on_exit();
 	tidalcache_clear_on_exit();
 	soundcloudcache_clear();
+	webdavcache_prune_incomplete();
 	podcastcache_clear_on_exit();
 	dlna_clear_on_exit();
 	storage_release_for_shutdown();

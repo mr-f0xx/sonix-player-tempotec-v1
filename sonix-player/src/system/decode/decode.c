@@ -4,6 +4,7 @@
 
 #include "src/system/decode/growfile.h"
 #include "src/system/streaming/subsonicstream.h"
+#include "src/system/streaming/webdavstream.h"
 
 #include "src/system/core/utils.h"
 
@@ -651,7 +652,7 @@ decode_format_t decode_detect_format(const char *filepath) {
 	// extension rule; a real path gets checked against its magic so an .m4a
 	// renamed .mp3 or an Opus inside .ogg goes to the decoder that can play it.
 	if (named == DECODE_FORMAT_UNKNOWN || named == DECODE_FORMAT_SNDFILE || has_extension(filepath, ".alac") ||
-		!strchr(filepath, '/') || subsonicstream_owns(filepath)) {
+		!strchr(filepath, '/') || subsonicstream_owns(filepath) || webdavstream_owns(filepath)) {
 		return named;
 	}
 	decode_format_t sniffed = sniff_format(filepath);
@@ -1766,14 +1767,32 @@ static int bridge_read_opus(void *source, unsigned char *out, int bytes) {
 	return bytes > 0 ? (int)streambridge_read(source, out, (size_t)bytes) : 0;
 }
 
+static streambridge_t *buffered_acquire(const char *path, int *duration) {
+	if (webdavstream_owns(path)) {
+		return webdavstream_acquire(path, duration, NULL);
+	}
+	return subsonicstream_acquire(path, duration, NULL);
+}
+
+static void buffered_release(const char *path, streambridge_t *source) {
+	if (webdavstream_owns(path)) {
+		webdavstream_release(source);
+	} else {
+		subsonicstream_release(source);
+	}
+}
+
 static decoder_t *decoder_open_buffered(const char *path, decode_format_t format) {
 	int duration = 0;
-	streambridge_t *source = subsonicstream_acquire(path, &duration, NULL);
+	bool is_webdav = webdavstream_owns(path);
+	const char *mismatch_err = is_webdav ? "webdav_codec_mismatch" : "subsonic_codec_mismatch";
+	const char *oom_err = is_webdav ? "webdav_out_of_memory" : "subsonic_out_of_memory";
+	streambridge_t *source = buffered_acquire(path, &duration);
 	if (!source) {
 		return NULL;
 	}
 	if (!streambridge_prime(source)) {
-		subsonicstream_release(source);
+		buffered_release(path, source);
 		return NULL;
 	}
 	// Fail fast if a server ignored the requested codec, returned an API error
@@ -1797,14 +1816,14 @@ static decoder_t *decoder_open_buffered(const char *path, decode_format_t format
 		}
 	}
 	if (!signature) {
-		streambridge_fail(source, "subsonic_codec_mismatch");
-		subsonicstream_release(source);
+		streambridge_fail(source, mismatch_err);
+		buffered_release(path, source);
 		return NULL;
 	}
 	decoder_t *dec = calloc(1, sizeof(*dec));
 	if (!dec) {
-		streambridge_fail(source, "subsonic_out_of_memory");
-		subsonicstream_release(source);
+		streambridge_fail(source, oom_err);
+		buffered_release(path, source);
 		return NULL;
 	}
 	dec->buffered = source;
@@ -1819,8 +1838,8 @@ static decoder_t *decoder_open_buffered(const char *path, decode_format_t format
 		// but must never be scanned to EOF merely to count its frames.
 		if (!drmp3_init(&dec->impl.mp3, bridge_read, bridge_seek_mp3, NULL, NULL, source, NULL)) {
 			free(dec);
-			streambridge_fail(source, "subsonic_codec_mismatch");
-			subsonicstream_release(source);
+			streambridge_fail(source, mismatch_err);
+			buffered_release(path, source);
 			return NULL;
 		}
 		dec->channels = (int)dec->impl.mp3.channels;
@@ -1833,8 +1852,8 @@ static decoder_t *decoder_open_buffered(const char *path, decode_format_t format
 		dec->impl.flac = drflac_open(bridge_read, bridge_seek_flac, bridge_tell_flac, source, NULL);
 		if (!dec->impl.flac) {
 			free(dec);
-			streambridge_fail(source, "subsonic_codec_mismatch");
-			subsonicstream_release(source);
+			streambridge_fail(source, mismatch_err);
+			buffered_release(path, source);
 			return NULL;
 		}
 		dec->channels = (int)dec->impl.flac->channels;
@@ -1845,8 +1864,8 @@ static decoder_t *decoder_open_buffered(const char *path, decode_format_t format
 		dec->impl.opus = opusdec_open_stream(source, bridge_read_opus);
 		if (!dec->impl.opus) {
 			free(dec);
-			streambridge_fail(source, "subsonic_codec_mismatch");
-			subsonicstream_release(source);
+			streambridge_fail(source, mismatch_err);
+			buffered_release(path, source);
 			return NULL;
 		}
 		dec->channels = opusdec_channels(dec->impl.opus);
@@ -1855,7 +1874,7 @@ static decoder_t *decoder_open_buffered(const char *path, decode_format_t format
 		break;
 	default:
 		free(dec);
-		subsonicstream_release(source);
+		buffered_release(path, source);
 		return NULL;
 	}
 	if (!dec->total_pcm_frames && duration > 0 && dec->sample_rate > 0) {
@@ -1875,7 +1894,7 @@ bool decoder_buffered_failed(const decoder_t *dec) {
 }
 
 decoder_t *decoder_open(const char *filepath, decode_format_t format) {
-	if (subsonicstream_owns(filepath)) {
+	if (subsonicstream_owns(filepath) || webdavstream_owns(filepath)) {
 		return decoder_open_buffered(filepath, format);
 	}
 	char sheet[512];
@@ -2827,7 +2846,7 @@ void decoder_close(decoder_t *dec) {
 
 	growfile_close(growing);
 	if (dec->buffered) {
-		subsonicstream_release(dec->buffered);
+		buffered_release(dec->path, dec->buffered);
 	}
 	free(dec);
 }

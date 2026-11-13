@@ -64,6 +64,7 @@
 #include "src/system/streaming/soundcloud.h"
 #include "src/system/streaming/soundcloudcache.h"
 #include "src/system/streaming/tidalcache.h"
+#include "src/system/streaming/webdavcache.h"
 #include "src/system/streaming/stockkeys.h"
 #include "src/system/streaming/streamkeys.h"
 #include "src/system/addons/addons.h"
@@ -2333,6 +2334,8 @@ int main(int argc, char **argv) {
 	tidalcache_clear(); // remove leftovers from a crash or power loss
 	soundcloudcache_set_root(card_root && card_root[0] ? card_root : gui_cfg.sd_root_path);
 	soundcloudcache_clear_on_exit();
+	webdavcache_set_root(card_root && card_root[0] ? card_root : gui_cfg.sd_root_path);
+	webdavcache_prune_incomplete();
 	podcastcache_set_root(card_root && card_root[0] ? card_root : gui_cfg.sd_root_path);
 	podcastsubs_set_root(card_root && card_root[0] ? card_root : gui_cfg.sd_root_path);
 	// Which episodes were heard. The marks live in podcast.db beside the
@@ -2355,6 +2358,7 @@ int main(int argc, char **argv) {
 	library_forget_under(qobuzcache_dir());
 	library_forget_under(tidalcache_dir());
 	library_forget_under(soundcloudcache_dir());
+	library_forget_under(webdavcache_dir());
 	if (!tls_available()) {
 		fprintf(stderr, "tls: unavailable; https radio stations cannot be opened\n");
 	}

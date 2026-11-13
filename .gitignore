@@ -45,11 +45,13 @@ sonix-packer/v1_md5_original.txt
 sonix-packer/sonix_launch
 sonix-packer/boot-script-report.txt
 
-# Optional, device-local Subsonic and SoundCloud accounts.
+# Optional, device-local Subsonic, SoundCloud, and WebDAV accounts.
 subsonic-credentials.json
 subsonic-credentials.json.tmp
 soundcloud-credentials.json
 soundcloud-credentials.json.tmp
+webdav-credentials.json
+webdav-credentials.json.tmp
 sonix-player/tests/.build/
 sonix-player/tests/__pycache__/
 sonix-player/tools/__pycache__/
