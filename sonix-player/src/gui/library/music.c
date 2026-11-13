@@ -69,6 +69,8 @@ static lv_obj_t *tile_grid;
 static lv_obj_t *playlists_icon;
 static gui_config_t *music_cfg;
 static lv_obj_t *empty_panel;
+static lv_obj_t *music_title;
+static lv_obj_t *compact_search_btn;
 
 static void music_remove_edges(lv_obj_t *obj) {
 	lv_obj_remove_style_all(obj);
@@ -220,6 +222,16 @@ static popover_item_t popover_item_for_tile(music_tile_id_t id) {
 	}
 }
 
+// On a compact header, the Dark and Light themes give search its own corner
+// button, so the overflow menu leaves it out. The other themes keep it there.
+static bool compact_search_in_corner(void) {
+	if (!music_cfg || music_cfg->screen_width >= 320) {
+		return false;
+	}
+	theme_kind_t kind = theme_get_kind();
+	return kind == THEME_KIND_DARK || kind == THEME_KIND_LIGHT;
+}
+
 static void compact_more_cb(lv_event_t *e) {
 	music_tile_id_t active[MUSIC_TILE_COUNT];
 	int active_n = musicsettings_main_tiles(active, MUSIC_TILE_COUNT);
@@ -229,7 +241,9 @@ static void compact_more_cb(lv_event_t *e) {
 		items[n++] = popover_item_for_tile(active[i]);
 	}
 	items[n++] = (popover_item_t){"favourites", compact_favourites_action, NULL, false};
-	items[n++] = (popover_item_t){"search", compact_search_action, NULL, false};
+	if (!compact_search_in_corner()) {
+		items[n++] = (popover_item_t){"search", compact_search_action, NULL, false};
+	}
 	popover_show(lv_event_get_target(e), items, n);
 }
 
@@ -750,6 +764,13 @@ static void music_refresh_theme(void) {
 		return;
 	}
 	music_update_visibility();
+	if (music_cfg && music_cfg->screen_width < 320 && music_title) {
+		bool search_in_corner = compact_search_in_corner();
+		if (compact_search_btn) {
+			lv_obj_set_hidden(compact_search_btn, !search_in_corner);
+		}
+		settingsrow_title_corner_slots(music_title, music_cfg, search_in_corner ? 3 : 2);
+	}
 	lv_color_t browse_fill = theme_now_playing_fill();
 	for (int i = 0; i < TOKYO_BROWSE_COUNT; i++) {
 		if (browse_tiles[i].button) {
@@ -826,7 +847,8 @@ void music_init(gui_config_t *cfg) {
 	tile_grid = gridpage_build(music_screen, cfg, entries, count, 2, 3, true);
 
 	bool compact_header = cfg->screen_width < 320;
-	settingsrow_title_corner_slots(settingsrow_title(music_screen, cfg, "music"), cfg, compact_header ? 2 : 4);
+	music_title = settingsrow_title(music_screen, cfg, "music");
+	settingsrow_title_corner_slots(music_title, cfg, compact_header ? 2 : 4);
 
 	lv_obj_t *settings_btn = corner_button(cfg, 0, &icon_music_settings);
 	lv_obj_add_event_cb(settings_btn, switch_screen_cb, LV_EVENT_CLICKED, musicsettings_screen);
@@ -835,6 +857,11 @@ void music_init(gui_config_t *cfg) {
 		playlists_icon = NULL;
 		lv_obj_t *more_btn = corner_button(cfg, 1, &icon_list_music);
 		lv_obj_add_event_cb(more_btn, compact_more_cb, LV_EVENT_CLICKED, NULL);
+
+		// Dark and Light only: search gets its own corner button (hidden by
+		// music_refresh_theme() on the other themes, which keep it in the menu).
+		compact_search_btn = corner_button(cfg, 2, &icon_search);
+		lv_obj_add_event_cb(compact_search_btn, search_cb, LV_EVENT_CLICKED, NULL);
 	} else {
 		lv_obj_t *playlists_btn = corner_button(cfg, 1, &icon_list_music);
 		playlists_icon = lv_obj_get_child(playlists_btn, 0);
