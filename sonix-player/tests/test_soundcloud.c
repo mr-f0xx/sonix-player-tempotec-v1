@@ -50,6 +50,23 @@ streambridge_t *subsonicstream_acquire(const char *path, int *duration, int *bit
 }
 void subsonicstream_release(streambridge_t *sb) { (void)sb; }
 
+bool webdavstream_owns(const char *path) {
+	(void)path;
+	return false;
+}
+bool webdavstream_metadata(const char *path, song_metadata_t *out) {
+	(void)path;
+	(void)out;
+	return false;
+}
+streambridge_t *webdavstream_acquire(const char *path, int *duration, int *bitrate) {
+	(void)path;
+	(void)duration;
+	(void)bitrate;
+	return NULL;
+}
+void webdavstream_release(streambridge_t *sb) { (void)sb; }
+
 struct opusdec {
 	int dummy;
 };

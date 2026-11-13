@@ -36,6 +36,7 @@ void streambridge_destroy(streambridge_t *bridge); // join; teardown/tests only
 // all stale writes and wakes readers. Caller must not replace a leased source.
 // `prefetch` stops at 512 KiB (or capacity if smaller) until promotion.
 bool streambridge_start(streambridge_t *bridge, const char *url, bool prefetch);
+bool streambridge_start_ex(streambridge_t *bridge, const char *url, const char *extra_headers, bool prefetch);
 void streambridge_promote(streambridge_t *bridge);
 void streambridge_cancel(streambridge_t *bridge);
 void streambridge_state(streambridge_t *bridge, streambridge_state_t *out);

@@ -99,9 +99,22 @@ SYSTEM_INFO="usr/resource/sonix/components/system-info.json"
 # to fit in flash.
 #
 # Note what is NOT in this list: usr/resource/sonix, which is where the assets
-# folder lands. The stock fonts and strings live one level above it and go;
-# ours stay.
-STOCK_UI_DIRS=(usr/resource/litegui usr/resource/layout usr/resource/str usr/resource/fonts)
+# folder lands. The stock fonts, LiteGUI encoding tables and strings live one
+# level above it and go; ours stay.
+STOCK_UI_DIRS=(usr/resource/litegui usr/resource/layout usr/resource/str usr/resource/fonts usr/resource/unicode)
+
+# Shared libraries in usr/lib that only the removed stock hiby_player links or
+# dlopens (its own HTTP/QR libraries and proprietary codec plugins). Sonix
+# carries its own HTTP client, QR renderer and audio decoders, while keeping
+# libssl/libcrypto (TLS) and libfdk-aac (bluealsa) untouched.
+STOCK_PLAYER_LIB_STEMS=(libcurl.so libwma.so libaac.so libvorbis.so libmp3.so libdsd2pcm.so libqrencode.so)
+
+# Maximum safe rootfs.squashfs budget in bytes. Release 1.6.2 sat at 47,161,344
+# bytes (44.98 MiB, 90 x 512 KiB chunks) and crossing 45 MiB (47,185,920 bytes,
+# 91 chunks) overflows the V1's rootfs NAND partition and hangs the recovery
+# updater on "Upgrading". Cap at 44 MiB (88 chunks) so at least 1 MiB (8 x 128 KiB
+# NAND eraseblocks) stays free for bad-block management and future headroom.
+MAX_ROOTFS_BYTES="${SONIX_MAX_ROOTFS_BYTES:-46137344}"
 
 # The working folders always go, whether the run succeeded or not.
 cleanup() { rm -rf "$WORK_DIR" "$SQUASH_DIR" "$MERGED_SQUASHFS" 2>/dev/null || true; }
@@ -718,6 +731,25 @@ if [ \"\$boot_sel\" = \"logo:4\" ]; then boot_waited=0; while [ \$boot_waited -l
 	say ""
 
 	# ==========================================================================
+	# 6a. Shared libraries used only by the removed stock player
+	# ==========================================================================
+	step "[$MODEL_NAME] removing unused stock-player libraries"
+
+	for stem in "${STOCK_PLAYER_LIB_STEMS[@]}"; do
+		removed_any=0
+		for lib in "$SQUASH_DIR/usr/lib/$stem" "$SQUASH_DIR/usr/lib/$stem".*; do
+			if [ -e "$lib" ] || [ -L "$lib" ]; then
+				rm -f "$lib"
+				[ -e "$lib" ] || [ -L "$lib" ] && die "could not remove ${lib#$SQUASH_DIR/}."
+				say "    ${lib#$SQUASH_DIR/} removed"
+				removed_any=1
+			fi
+		done
+		[ "$removed_any" = "1" ] || say "    usr/lib/$stem* was not there"
+	done
+	say ""
+
+	# ==========================================================================
 	# 6b. The stock status-LED driver
 	# ==========================================================================
 	#
@@ -809,6 +841,14 @@ if [ \"\$boot_sel\" = \"logo:4\" ]; then boot_waited=0; while [ \$boot_waited -l
 	ORIGINAL_SUM="$(get_md5 "$ROOTFS_NEW")"
 	SIZE="$(get_size "$ROOTFS_NEW")"
 	say "    rootfs.squashfs: $SIZE bytes, md5 $ORIGINAL_SUM"
+
+	if [ "$SIZE" -gt "$MAX_ROOTFS_BYTES" ]; then
+		OVER="$((SIZE - MAX_ROOTFS_BYTES))"
+		die "rootfs.squashfs ($SIZE bytes) exceeds the $MAX_ROOTFS_BYTES-byte flash budget by $OVER bytes.
+	  An image this large overflows the V1's rootfs NAND partition and hangs the recovery updater."
+	fi
+	HEADROOM="$((MAX_ROOTFS_BYTES - SIZE))"
+	say "    flash budget: $SIZE / $MAX_ROOTFS_BYTES bytes ($HEADROOM bytes headroom)"
 
 	step "[$MODEL_NAME] updating ota_update.in"
 	# The kernel is not touched, so its two lines stay exactly as they were:

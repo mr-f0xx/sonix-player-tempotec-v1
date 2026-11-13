@@ -64,6 +64,8 @@
 #include "src/gui/streaming/podcastsaved.h"
 #include "src/system/streaming/qobuzcache.h"
 #include "src/system/streaming/subsonicstream.h"
+#include "src/system/streaming/webdavcache.h"
+#include "src/system/streaming/webdavstream.h"
 #include "src/system/streaming/qobuzsync.h"
 #include "src/gui/streaming/soundcloud_icon.h"
 #include "src/gui/streaming/soundcloudpage.h"
@@ -1733,7 +1735,8 @@ static bool playing_local_file(const device_state_t *state) {
 		return false;
 	}
 	const char *f = state->current_file;
-	return !subsonicstream_owns(f) && !qobuzcache_owns(f) && !tidalcache_owns(f) && !podcastcache_is_episode(f) && !dlna_owns_path(f) &&
+	return !subsonicstream_owns(f) && !webdavstream_owns(f) && !webdavcache_owns(f) &&
+		   !qobuzcache_owns(f) && !tidalcache_owns(f) && !podcastcache_is_episode(f) && !dlna_owns_path(f) &&
 		   !dlna_owns_playback();
 }
 
@@ -6200,7 +6203,8 @@ static void update_progress(void) {
 
 	device_state_t state;
 	device_state_get(&state);
-	lv_obj_set_clickable(progress_slider, !subsonicstream_owns(state.current_file));
+	lv_obj_set_clickable(progress_slider,
+						 !subsonicstream_owns(state.current_file) && !webdavstream_owns(state.current_file));
 
 	// The live source moves under the player: the station's own name comes
 	// with the connection, the on-air title arrives later and keeps changing,

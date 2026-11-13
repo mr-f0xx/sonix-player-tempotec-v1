@@ -33,7 +33,7 @@ void streamturn_release(void) {
 // and from the UI thread, while the readers are the pages' workers. Without it
 // the count can become visible before the function it counts -- one preemption
 // between two instructions -- and the call lands on a null pointer.
-#define ABANDON_MAX 8
+#define ABANDON_MAX 12
 static pthread_mutex_t abandon_lock = PTHREAD_MUTEX_INITIALIZER;
 static streamturn_abandon_fn abandon_fns[ABANDON_MAX];
 static int abandon_count;

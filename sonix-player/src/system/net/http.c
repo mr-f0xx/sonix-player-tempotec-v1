@@ -1035,8 +1035,9 @@ static bool get_once(const url_t *u, const http_req_t *req, char **out, size_t *
 	// An API's 4xx is not silence: the body carries the reason, and that is
 	// what to show instead of "it did not work". Callers opt in.
 	// Any 2xx is fine for callers that allow a missing body: a DELETE's
-	// success is read from the status code, and that code is 204.
-	bool ok_status = status == 200 || (req->allow_empty_body && status >= 200 && status < 300);
+	// success is read from the status code, and that code is 204. WebDAV
+	// PROPFIND answers 207 Multi-Status with an XML body.
+	bool ok_status = status == 200 || status == 207 || (req->allow_empty_body && status >= 200 && status < 300);
 	if (!ok_status && !(want_error_body && status >= 400 && status < 500)) {
 		fprintf(stderr, "http: %s%.*s -> status %d\n", u->host, (int)strcspn(u->path, "?"), u->path, status);
 		// The status goes into last_error as well as the log, so that a server
@@ -1192,14 +1193,16 @@ bool http_request(const char *url, const http_req_t *req, char **out, size_t *ou
 			return false;
 		}
 
-		// Always on 303, and on 301/302 for anything that is not GET or HEAD:
-		// the target is fetched with a GET and no body. That is what browsers
-		// have done for twenty years and what servers assume -- re-sending a
-		// POST with its body to an address that just said "look elsewhere"
-		// can, at worst, write it twice. 307 and 308 exist to mean "repeat it
-		// as-is", so they change nothing here.
+		// Always on 303, and on 301/302 for anything that is not GET, HEAD or
+		// PROPFIND: the target is fetched with a GET and no body. That is what
+		// browsers have done for twenty years and what servers assume -- re-sending
+		// a POST with its body to an address that just said "look elsewhere" can,
+		// at worst, write it twice. WebDAV servers routinely 301/302 a collection
+		// URL missing its trailing slash and expect PROPFIND repeated there.
+		// 307 and 308 exist to mean "repeat it as-is", so they change nothing here.
 		if (status == 303 || ((status == 301 || status == 302) && hop_req.method &&
-							  strcmp(hop_req.method, "GET") != 0 && strcmp(hop_req.method, "HEAD") != 0)) {
+							  strcmp(hop_req.method, "GET") != 0 && strcmp(hop_req.method, "HEAD") != 0 &&
+							  strcmp(hop_req.method, "PROPFIND") != 0)) {
 			hop_req.method = "GET";
 			hop_req.body = NULL;
 			hop_req.body_len = 0;

@@ -16,6 +16,7 @@
 #include "src/gui/streaming/soundcloudpage.h"
 #include "src/gui/streaming/tidalpage.h"
 #include "src/gui/streaming/subsonicpage.h"
+#include "src/gui/streaming/webdavpage.h"
 #include "src/system/addons/addons.h"
 
 lv_obj_t *streaming_screen;
@@ -40,6 +41,7 @@ static const streaming_item_t tokyo_items[] = {
 	{"tidal", &icon_tidal_mark, THEME_SEMANTIC_CYAN, &tidal_screen, "tidal"},
 	{"qobuz", &icon_qobuz_mark, THEME_SEMANTIC_PURPLE, &qobuz_screen, "qobuz"},
 	{"subsonic", &icon_music_note, THEME_SEMANTIC_BLUE, &subsonic_screen, "subsonic"},
+	{"webdav", &icon_folder, THEME_SEMANTIC_CYAN, &webdav_screen, "webdav"},
 };
 
 static void streaming_list_build(gui_config_t *cfg) {
@@ -83,6 +85,9 @@ void streaming_init(gui_config_t *cfg) {
 	if (addons_enabled("soundcloud")) {
 		soundcloudpage_init(cfg);
 	}
+	if (addons_enabled("webdav")) {
+		webdavpage_init(cfg);
+	}
 
 	const grid_entry_t all_entries[] = {
 		{"soundcloud", &icon_menu_soundcloud, &soundcloud_screen, NULL},
@@ -91,8 +96,9 @@ void streaming_init(gui_config_t *cfg) {
 		{"radio", &icon_menu_radio, &radiopage_screen, NULL},
 		{"podcasts", &icon_menu_podcast, &podcast_screen, NULL},
 		{"subsonic", &icon_menu_streaming, &subsonic_screen, NULL},
+		{"webdav", &icon_menu_explorer, &webdav_screen, NULL},
 	};
-	const char *const all_addons[] = {"soundcloud", "tidal", "qobuz", "radio", "podcasts", "subsonic"};
+	const char *const all_addons[] = {"soundcloud", "tidal", "qobuz", "radio", "podcasts", "subsonic", "webdav"};
 	grid_entry_t entries[sizeof(all_entries) / sizeof(all_entries[0])];
 	int count = 0;
 	for (unsigned int i = 0; i < sizeof(all_entries) / sizeof(all_entries[0]); i++) {

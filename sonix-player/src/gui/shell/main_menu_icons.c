@@ -15236,6 +15236,8 @@ _Alignas(4) static const uint8_t glyph_47_5[] = {
 	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
 };
 
+#if !defined(__mips__) || defined(HOST_BUILD)
+
 // music-2.svg, 138x138, A8
 _Alignas(4) static const uint8_t glyph_138_0[] = {
 	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
@@ -33950,6 +33952,8 @@ _Alignas(4) static const uint8_t glyph_173_5[] = {
 	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
 };
 
+#endif
+
 // music.png, 74x74, ARGB8888
 _Alignas(4) static const uint8_t color_74_0[] = {
 	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
@@ -42187,6 +42191,8 @@ _Alignas(4) static const uint8_t color_74_5[] = {
 	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
 	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
 };
+
+#if !defined(__mips__) || defined(HOST_BUILD)
 
 // music.png, 173x173, ARGB8888
 _Alignas(4) static const uint8_t color_173_0[] = {
@@ -87110,7 +87116,9 @@ _Alignas(4) static const uint8_t color_173_5[] = {
 	0x00, 0x00, 0x00, 0x00,
 };
 
-static const lv_image_dsc_t glyph_icons[49][6] = {
+#endif
+
+static const lv_image_dsc_t glyph_icons[47][6] = {
 	{
 	{.header = {.magic = LV_IMAGE_HEADER_MAGIC, .cf = LV_COLOR_FORMAT_A8, .w = 1, .h = 1, .stride = 4}, .data_size = sizeof(glyph_1_0), .data = glyph_1_0},
 	{.header = {.magic = LV_IMAGE_HEADER_MAGIC, .cf = LV_COLOR_FORMAT_A8, .w = 1, .h = 1, .stride = 4}, .data_size = sizeof(glyph_1_1), .data = glyph_1_1},
@@ -87487,6 +87495,10 @@ static const lv_image_dsc_t glyph_icons[49][6] = {
 	{.header = {.magic = LV_IMAGE_HEADER_MAGIC, .cf = LV_COLOR_FORMAT_A8, .w = 47, .h = 47, .stride = 48}, .data_size = sizeof(glyph_47_4), .data = glyph_47_4},
 	{.header = {.magic = LV_IMAGE_HEADER_MAGIC, .cf = LV_COLOR_FORMAT_A8, .w = 47, .h = 47, .stride = 48}, .data_size = sizeof(glyph_47_5), .data = glyph_47_5},
 	},
+};
+
+#if !defined(__mips__) || defined(HOST_BUILD)
+static const lv_image_dsc_t glyph_icons_regular[2][6] = {
 	{
 	{.header = {.magic = LV_IMAGE_HEADER_MAGIC, .cf = LV_COLOR_FORMAT_A8, .w = 138, .h = 138, .stride = 140}, .data_size = sizeof(glyph_138_0), .data = glyph_138_0},
 	{.header = {.magic = LV_IMAGE_HEADER_MAGIC, .cf = LV_COLOR_FORMAT_A8, .w = 138, .h = 138, .stride = 140}, .data_size = sizeof(glyph_138_1), .data = glyph_138_1},
@@ -87504,8 +87516,9 @@ static const lv_image_dsc_t glyph_icons[49][6] = {
 	{.header = {.magic = LV_IMAGE_HEADER_MAGIC, .cf = LV_COLOR_FORMAT_A8, .w = 173, .h = 173, .stride = 176}, .data_size = sizeof(glyph_173_5), .data = glyph_173_5},
 	},
 };
+#endif
 
-static const lv_image_dsc_t color_icons[2][6] = {
+static const lv_image_dsc_t color_icons[1][6] = {
 	{
 	{.header = {.magic = LV_IMAGE_HEADER_MAGIC, .cf = LV_COLOR_FORMAT_ARGB8888, .w = 74, .h = 74, .stride = 296}, .data_size = sizeof(color_74_0), .data = color_74_0},
 	{.header = {.magic = LV_IMAGE_HEADER_MAGIC, .cf = LV_COLOR_FORMAT_ARGB8888, .w = 74, .h = 74, .stride = 296}, .data_size = sizeof(color_74_1), .data = color_74_1},
@@ -87514,6 +87527,10 @@ static const lv_image_dsc_t color_icons[2][6] = {
 	{.header = {.magic = LV_IMAGE_HEADER_MAGIC, .cf = LV_COLOR_FORMAT_ARGB8888, .w = 74, .h = 74, .stride = 296}, .data_size = sizeof(color_74_4), .data = color_74_4},
 	{.header = {.magic = LV_IMAGE_HEADER_MAGIC, .cf = LV_COLOR_FORMAT_ARGB8888, .w = 74, .h = 74, .stride = 296}, .data_size = sizeof(color_74_5), .data = color_74_5},
 	},
+};
+
+#if !defined(__mips__) || defined(HOST_BUILD)
+static const lv_image_dsc_t color_icons_regular[1][6] = {
 	{
 	{.header = {.magic = LV_IMAGE_HEADER_MAGIC, .cf = LV_COLOR_FORMAT_ARGB8888, .w = 173, .h = 173, .stride = 692}, .data_size = sizeof(color_173_0), .data = color_173_0},
 	{.header = {.magic = LV_IMAGE_HEADER_MAGIC, .cf = LV_COLOR_FORMAT_ARGB8888, .w = 173, .h = 173, .stride = 692}, .data_size = sizeof(color_173_1), .data = color_173_1},
@@ -87523,6 +87540,7 @@ static const lv_image_dsc_t color_icons[2][6] = {
 	{.header = {.magic = LV_IMAGE_HEADER_MAGIC, .cf = LV_COLOR_FORMAT_ARGB8888, .w = 173, .h = 173, .stride = 692}, .data_size = sizeof(color_173_5), .data = color_173_5},
 	},
 };
+#endif
 
 const lv_image_dsc_t *main_menu_icon_native(int tile, bool glyph, int size) {
 	if (tile < 0 || tile >= 6) {
@@ -87532,19 +87550,23 @@ const lv_image_dsc_t *main_menu_icon_native(int tile, bool glyph, int size) {
 		if (size >= 1 && size <= 47) {
 			return &glyph_icons[size - 1][tile];
 		}
+#if !defined(__mips__) || defined(HOST_BUILD)
 		if (size == 138) {
-			return &glyph_icons[47][tile];
+			return &glyph_icons_regular[0][tile];
 		}
 		if (size == 173) {
-			return &glyph_icons[48][tile];
+			return &glyph_icons_regular[1][tile];
 		}
+#endif
 	} else {
 		if (size == 74) {
 			return &color_icons[0][tile];
 		}
+#if !defined(__mips__) || defined(HOST_BUILD)
 		if (size == 173) {
-			return &color_icons[1][tile];
+			return &color_icons_regular[0][tile];
 		}
+#endif
 	}
 	return NULL;
 }

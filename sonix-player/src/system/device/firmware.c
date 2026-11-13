@@ -19,6 +19,7 @@
 #include "src/system/streaming/podcastcache.h"
 #include "src/system/streaming/soundcloudcache.h"
 #include "src/system/streaming/tidalcache.h"
+#include "src/system/streaming/webdavcache.h"
 #include "src/system/remote/dlna.h"
 #include "src/system/device/power.h"
 #include "src/system/device/sysinfo.h"
@@ -136,6 +137,7 @@ void firmware_update_start(void) {
 	qobuzcache_clear_on_exit();
 	tidalcache_clear_on_exit();
 	soundcloudcache_clear_on_exit();
+	webdavcache_prune_incomplete();
 	podcastcache_clear_on_exit();
 	dlna_clear_on_exit();
 

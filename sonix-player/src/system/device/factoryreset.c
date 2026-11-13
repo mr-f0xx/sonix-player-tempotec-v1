@@ -17,6 +17,7 @@
 #include "src/system/streaming/podcastcache.h"
 #include "src/system/streaming/soundcloudcache.h"
 #include "src/system/streaming/tidalcache.h"
+#include "src/system/streaming/webdavcache.h"
 #include "src/system/remote/dlna.h"
 #include "src/system/device/sysserver.h"
 #include "src/system/device/system.h"
@@ -189,6 +190,7 @@ void factoryreset_run(void) {
 	qobuzcache_clear_on_exit();
 	tidalcache_clear_on_exit();
 	soundcloudcache_clear_on_exit();
+	webdavcache_clear_on_exit();
 	podcastcache_clear_on_exit();
 	dlna_clear_on_exit();
 
@@ -212,6 +214,8 @@ void factoryreset_run(void) {
 		"/usr/data/tidal_session.ini",
 		"/usr/data/soundcloud-credentials.json",
 		"/usr/data/soundcloud-credentials.json.tmp",
+		"/usr/data/webdav-credentials.json",
+		"/usr/data/webdav-credentials.json.tmp",
 	};
 	for (size_t i = 0; i < sizeof(OURS) / sizeof(OURS[0]); i++) {
 		if (unlink(OURS[i]) == 0) {

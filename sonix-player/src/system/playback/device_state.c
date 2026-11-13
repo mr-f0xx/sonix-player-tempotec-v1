@@ -14,6 +14,8 @@
 #include "src/system/streaming/soundcloudcache.h"
 #include "src/system/streaming/subsonicstream.h"
 #include "src/system/streaming/tidalcache.h"
+#include "src/system/streaming/webdavcache.h"
+#include "src/system/streaming/webdavstream.h"
 #include "src/system/streaming/radio.h"
 #include "src/system/audio/replaygain.h"
 #include "src/system/device/system.h"
@@ -141,7 +143,8 @@ static bool remember_enabled(void) { return config_get_int("player", "remember_t
 static bool remember_worth_saving(const device_state_t *state) {
 	return !state->live && state->current_file[0] && !qobuzcache_owns(state->current_file) &&
 		   !tidalcache_owns(state->current_file) && !soundcloudcache_is_soundcloud_path(state->current_file) &&
-		   !subsonicstream_owns(state->current_file);
+		   !subsonicstream_owns(state->current_file) && !webdavstream_owns(state->current_file) &&
+		   !webdavcache_owns(state->current_file);
 }
 
 // True when the current track was restored paused at boot and has not yet
@@ -152,7 +155,8 @@ static void record_current_track_play(void) {
 	if (!current_metadata_file[0] || audiobook_is_playing() || podcastcache_is_episode(current_metadata_file) ||
 		qobuzcache_owns(current_metadata_file) || tidalcache_owns(current_metadata_file) ||
 		soundcloudcache_is_soundcloud_path(current_metadata_file) ||
-		subsonicstream_owns(current_metadata_file)) {
+		subsonicstream_owns(current_metadata_file) || webdavstream_owns(current_metadata_file) ||
+		webdavcache_owns(current_metadata_file)) {
 		return;
 	}
 	library_record_play(current_metadata_file, current_metadata.title, current_metadata.artist);
@@ -412,7 +416,7 @@ static void queue_persist(void) {
 		// that no longer exist, mixed in with the user's own tracks. The RAM
 		// bridge's source IDs are transient for the same reason.
 		if (qobuzcache_owns(path) || tidalcache_owns(path) || soundcloudcache_is_soundcloud_path(path) ||
-			subsonicstream_owns(path)) {
+			subsonicstream_owns(path) || webdavstream_owns(path) || webdavcache_owns(path)) {
 			from_stream = true;
 			break;
 		}
@@ -437,8 +441,8 @@ static void queue_persist(void) {
 
 void device_state_queue_changed(void) { queue_persist(); }
 
-// Four streaming preparations: Qobuz, Tidal, podcasts and Subsonic.
-#define PREPARE_CB_MAX 4
+// Streaming preparations: Qobuz, Tidal, podcasts, Subsonic, SoundCloud, and WebDAV.
+#define PREPARE_CB_MAX 8
 static device_state_prepare_cb prepare_cbs[PREPARE_CB_MAX];
 static int prepare_cb_count;
 
@@ -1418,7 +1422,7 @@ bool device_state_scrub_active(double *position_out) {
 }
 
 void device_state_scrub_by(double delta) {
-	if (subsonicstream_owns(current_metadata_file)) {
+	if (subsonicstream_owns(current_metadata_file) || webdavstream_owns(current_metadata_file)) {
 		return;
 	}
 	double current = 0;
@@ -1467,7 +1471,7 @@ void device_state_scrub_commit(void) {
 }
 
 void device_state_seek(double seconds) {
-	if (subsonicstream_owns(current_metadata_file)) {
+	if (subsonicstream_owns(current_metadata_file) || webdavstream_owns(current_metadata_file)) {
 		return; // forward-only RAM source: seeking would require a new request
 	}
 	// A seek from anywhere else -- the slider, the queue -- ends a scrub that

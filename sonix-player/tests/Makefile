@@ -15,6 +15,9 @@ LDFLAGS += -Wl,--gc-sections
 CORE = $(ROOT)/src/system/streaming/subsonic.c \
        $(ROOT)/src/system/streaming/streambridge.c \
        $(ROOT)/src/system/streaming/subsonicstream.c \
+       $(ROOT)/src/system/streaming/webdav.c \
+       $(ROOT)/src/system/streaming/webdavstream.c \
+       $(ROOT)/src/system/ebook/epub_xml.c \
        $(ROOT)/src/system/image/png_scaled.c \
        $(ROOT)/src/system/net/http.c $(ROOT)/src/system/net/tls.c \
        $(ROOT)/src/system/core/json.c $(ROOT)/src/system/core/md5.c \
@@ -118,7 +121,7 @@ $(BUILD)/test_subsonic: test_subsonic.c support.c $(CORE) $(shell find $(ROOT)/s
 	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ test_subsonic.c support.c $(CORE) $(LDFLAGS) $(LDLIBS)
 
 sanitize:
-	$(MAKE) BUILD=.build/sanitize CFLAGS='-O1 -g -std=gnu11 -Wall -Wextra -Werror -D_FILE_OFFSET_BITS=64 -ffunction-sections -fdata-sections -fno-omit-frame-pointer -fsanitize=address,undefined' LDFLAGS='-Wl,--gc-sections -fsanitize=address,undefined' test soundcloud
+	$(MAKE) BUILD=.build/sanitize CFLAGS='-O1 -g -std=gnu11 -Wall -Wextra -Werror -D_FILE_OFFSET_BITS=64 -ffunction-sections -fdata-sections -fno-omit-frame-pointer -fsanitize=address,undefined' LDFLAGS='-Wl,--gc-sections -fsanitize=address,undefined' test soundcloud webdav
 
 # The battery guard: when the player warns at five percent, when it switches
 # itself off at one, and which readings leave standby alone. The rule is its own
@@ -708,7 +711,8 @@ printf-flag:
 # disabling SDL, FreeType and device drivers; no audio service is linked.
 UI_SRC = $(ROOT)/tests/ui/test_main_menu.c $(ROOT)/src/gui/shell/main_menu.c \
          $(ROOT)/src/gui/library/music.c $(ROOT)/src/gui/shell/popover.c \
-         $(ROOT)/src/gui/shell/gridpage.c $(ROOT)/src/gui/pet/peticon.c \
+         $(ROOT)/src/gui/shell/gridpage.c $(ROOT)/src/gui/streaming/soundcloud_icon.c \
+         $(ROOT)/src/gui/pet/peticon.c \
          $(ROOT)/src/gui/settings/appearance.c \
          $(ROOT)/src/gui/settings/bootpicpage.c \
          $(ROOT)/src/gui/shell/corners.c $(ROOT)/src/gui/shell/settingsrow.c \
@@ -846,6 +850,7 @@ TOOLS_SRC = $(ROOT)/tests/ui/test_tools_pages.c \
             $(ROOT)/src/system/notes/notesstore.c $(ROOT)/src/system/text/textfile.c \
             $(ROOT)/src/gui/library/textview.c $(ROOT)/src/gui/library/pictureview.c \
             $(ROOT)/src/gui/shell/morepage.c $(ROOT)/src/gui/shell/gridpage.c \
+            $(ROOT)/src/gui/streaming/soundcloud_icon.c \
             $(ROOT)/src/system/addons/addons.c \
             $(ROOT)/src/gui/shell/settingsrow.c $(ROOT)/src/gui/shell/keyboard.c \
             $(ROOT)/src/gui/shell/popover.c $(ROOT)/src/system/input/kblayout.c \
@@ -1061,7 +1066,7 @@ $(BUILD)/test_stockkeys_ui: $(ROOT)/build_gen/streamkeys_key.h $(STOCKKEYS_UI_OB
 	$(CC) -o $@ $(STOCKKEYS_UI_OBJ) $(LDFLAGS) $(LDLIBS)
 
 .PHONY: ui
-ui: $(BUILD)/test_qobuzgenregrid $(BUILD)/test_main_menu $(BUILD)/test_screensaver $(BUILD)/test_tools_pages $(BUILD)/test_wifi_pages $(BUILD)/test_chargescreen $(BUILD)/test_power_display $(BUILD)/test_lyricsearch $(BUILD)/test_games $(BUILD)/test_peq_profiles $(BUILD)/test_quickpanel_layout $(BUILD)/test_btreceiversession $(BUILD)/test_corners $(BUILD)/test_playbutton $(BUILD)/test_musicsettings_rows $(BUILD)/test_volume_overlay $(BUILD)/test_playerdeck $(BUILD)/test_vinylayout $(BUILD)/test_stickerlayout $(BUILD)/test_waveform_overlay $(BUILD)/test_hiresbadge_ui $(BUILD)/test_statusbar_ui $(BUILD)/test_stockkeys_ui $(BUILD)/test_tidal_pages $(BUILD)/test_soundcloud_pages $(BUILD)/test_qobuz_pages
+ui: $(BUILD)/test_qobuzgenregrid $(BUILD)/test_main_menu $(BUILD)/test_screensaver $(BUILD)/test_tools_pages $(BUILD)/test_wifi_pages $(BUILD)/test_chargescreen $(BUILD)/test_power_display $(BUILD)/test_lyricsearch $(BUILD)/test_games $(BUILD)/test_peq_profiles $(BUILD)/test_quickpanel_layout $(BUILD)/test_btreceiversession $(BUILD)/test_corners $(BUILD)/test_playbutton $(BUILD)/test_musicsettings_rows $(BUILD)/test_volume_overlay $(BUILD)/test_playerdeck $(BUILD)/test_vinylayout $(BUILD)/test_stickerlayout $(BUILD)/test_waveform_overlay $(BUILD)/test_hiresbadge_ui $(BUILD)/test_statusbar_ui $(BUILD)/test_stockkeys_ui $(BUILD)/test_tidal_pages $(BUILD)/test_soundcloud_pages $(BUILD)/test_qobuz_pages $(BUILD)/test_webdav_pages
 	$(BUILD)/test_qobuzgenregrid
 	$(BUILD)/test_main_menu ../../sonix-packer/assets/V1/usr/resource/sonix/language
 	$(BUILD)/test_main_menu ../../sonix-packer/assets/V1/usr/resource/sonix/language saved
@@ -1092,6 +1097,7 @@ ui: $(BUILD)/test_qobuzgenregrid $(BUILD)/test_main_menu $(BUILD)/test_screensav
 	$(BUILD)/test_tidal_pages ../../sonix-packer/assets/V1/usr/resource/sonix/language arranged
 	$(BUILD)/test_soundcloud_pages ../../sonix-packer/assets/V1/usr/resource/sonix/language
 	$(BUILD)/test_qobuz_pages ../../sonix-packer/assets/V1/usr/resource/sonix/language
+	$(BUILD)/test_webdav_pages ../../sonix-packer/assets/V1/usr/resource/sonix/language
 
 $(BUILD)/test_main_menu: $(UI_OBJ)
 	$(CC) -o $@ $^ $(LDFLAGS) $(LDLIBS)
@@ -1116,6 +1122,7 @@ $(BUILD)/test_tidal_pages: $(TIDALPAGE_OBJ)
 # snprintf() cuts them short where they are not. That stays a warning for this
 # one object, as it does for the tag and cover tests above.
 $(BUILD)/ui/src/gui/streaming/tidalpage.o: UI_CFLAGS += -Wno-error=format-truncation
+$(BUILD)/ui/tests/ui/test_main_menu.o: UI_CFLAGS += -Wno-error=format-truncation
 
 $(BUILD)/test_lyricsearch: $(LYRICSEARCH_OBJ)
 	$(CC) -o $@ $^ $(LDFLAGS) $(LDLIBS)
@@ -1415,4 +1422,78 @@ qobuz-ui: $(BUILD)/test_qobuz_pages
 $(BUILD)/test_qobuz_pages: $(QOBUZPAGE_OBJ)
 	$(CC) -o $@ $^ $(LDFLAGS) $(LDLIBS)
 -include $(QOBUZPAGE_OBJ:.o=.d)
+
+# WebDAV protocol, RAM stream, SD growfile cache, permanent downloads, and LVGL pages.
+WEBDAV_CORE = $(ROOT)/src/system/streaming/webdav.c \
+              $(ROOT)/src/system/streaming/webdavstream.c \
+              $(ROOT)/src/system/streaming/webdavcache.c \
+              $(ROOT)/src/system/streaming/webdavdl.c \
+              $(ROOT)/src/system/streaming/streamturn.c \
+              $(ROOT)/src/system/ebook/epub_xml.c \
+              $(ROOT)/src/system/net/http.c \
+              $(ROOT)/src/system/net/tls.c \
+              $(ROOT)/src/system/image/png_scaled.c \
+              $(ROOT)/src/system/core/json.c \
+              $(ROOT)/src/system/core/config.c \
+              $(ROOT)/src/system/core/utils.c \
+              $(ROOT)/src/system/library/metadata.c \
+              $(ROOT)/src/system/library/oggtags.c \
+              $(ROOT)/src/system/library/vorbischap.c \
+              $(ROOT)/src/system/library/tagdate.c \
+              $(ROOT)/src/system/library/cue.c
+
+WEBDAV_DECODE = $(ROOT)/src/system/decode/decode.c \
+                $(ROOT)/src/system/decode/sndfile.c \
+                $(ROOT)/src/system/decode/stb_vorbis.c \
+                $(ROOT)/src/system/decode/mp4.c \
+                $(ROOT)/src/system/decode/apedec.c \
+                $(ROOT)/src/system/decode/ape/apecore.c \
+                $(ROOT)/src/system/decode/alacdec.c \
+                $(ROOT)/src/system/decode/alac/alac.c \
+                $(ROOT)/src/system/decode/aacdec.c \
+                $(ROOT)/src/system/decode/dsd.c \
+                $(ROOT)/src/system/decode/growfile.c \
+                $(ROOT)/src/system/streaming/streambridge.c
+
+.PHONY: webdav webdav-ui webdav-all
+webdav-all: webdav webdav-ui
+
+webdav: $(BUILD)/test_webdav
+	$(BUILD)/test_webdav
+
+$(BUILD)/test_webdav: test_webdav.c $(WEBDAV_CORE) $(WEBDAV_DECODE)
+	@mkdir -p $(BUILD)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -DHOST_BUILD -Wno-error=format-truncation -o $@ test_webdav.c $(WEBDAV_CORE) \
+		-Wno-unused-parameter -Wno-sign-compare -Wno-unused-function -Wno-implicit-fallthrough -Wno-misleading-indentation $(WEBDAV_DECODE) \
+		$(LDFLAGS) $(LDLIBS)
+
+WEBDAVPAGE_SRC = $(ROOT)/tests/ui/test_webdav_pages.c \
+                 $(ROOT)/src/gui/streaming/webdavpage.c \
+                 $(ROOT)/src/gui/streaming/webdavdlpage.c \
+                 $(ROOT)/src/gui/streaming/streaming.c \
+                 $(ROOT)/src/system/streaming/webdavdl.c \
+                 $(ROOT)/src/system/addons/addons.c \
+                 $(ROOT)/src/gui/streaming/soundcloud_icon.c \
+                 $(ROOT)/src/gui/shell/settingsrow.c \
+                 $(ROOT)/src/gui/shell/gridpage.c \
+                 $(ROOT)/src/gui/shell/keyboard.c \
+                 $(ROOT)/src/gui/shell/popover.c \
+                 $(ROOT)/src/gui/shell/spinner.c \
+                 $(ROOT)/src/gui/shell/theme.c \
+                 $(ROOT)/src/gui/shell/icons.c \
+                 $(ROOT)/src/gui/shell/main_menu_icons.c \
+                 $(ROOT)/src/gui/board_profile.c \
+                 $(ROOT)/src/system/input/kblayout.c \
+                 $(ROOT)/src/system/core/config.c \
+                 $(ROOT)/src/system/core/lang.c \
+                 $(ROOT)/src/system/core/utils.c
+WEBDAVPAGE_OBJ = $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(WEBDAVPAGE_SRC)) \
+                 $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(UI_LVGL_SRC))
+
+webdav-ui: $(BUILD)/test_webdav_pages
+	$(BUILD)/test_webdav_pages ../../sonix-packer/assets/V1/usr/resource/sonix/language
+
+$(BUILD)/test_webdav_pages: $(WEBDAVPAGE_OBJ)
+	$(CC) -o $@ $^ $(LDFLAGS) $(LDLIBS)
+-include $(WEBDAVPAGE_OBJ:.o=.d)
 

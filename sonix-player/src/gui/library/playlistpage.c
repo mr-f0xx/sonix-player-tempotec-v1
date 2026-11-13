@@ -30,6 +30,8 @@
 #include "src/system/streaming/soundcloudcache.h"
 #include "src/system/streaming/tidalcache.h"
 #include "src/system/streaming/tidalsync.h"
+#include "src/system/streaming/webdavcache.h"
+#include "src/system/streaming/webdavstream.h"
 
 lv_obj_t *playlistpage_screen;
 
@@ -1446,7 +1448,8 @@ static const char *mix_seed_pending(void) {
 // place for the track is the graph's to answer, when the row is used.
 static bool mix_seed_usable(const char *path) {
 	return path && path[0] && !podcastcache_is_episode(path) && qobuzcache_track_id(path) == 0 &&
-		   tidalcache_track_id(path) == 0 && !soundcloudcache_is_soundcloud_path(path);
+		   tidalcache_track_id(path) == 0 && !soundcloudcache_is_soundcloud_path(path) &&
+		   !webdavstream_owns(path) && !webdavcache_owns(path);
 }
 
 // The walk reached a track in the seed picker: build the saved mix from it.
