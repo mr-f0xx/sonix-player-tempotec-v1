@@ -54,6 +54,7 @@ static const calc_key_t KEYS[CALC_KEYS] = {
 // outlives every visit: the keys are built once at startup and stay.
 static calc_model_t model = {.shown = "0"};
 
+static lv_obj_t *display_card; // the card the sum is drawn in
 static lv_obj_t *display_label;
 static lv_obj_t *operation_label;
 
@@ -174,6 +175,13 @@ static lv_obj_t *key_labels[CALC_KEYS];
 // the operators' in the accent itself. Both are hand-set, so they have to be
 // set again after a theme or accent change: a style would follow on its own.
 static void calc_refresh_theme(void) {
+	// The display's keyline is the one edge drawn on the page, and it wears the
+	// accent rather than the grey the built-in theme gives a plain card. The
+	// width stays the theme's own; only the colour is ours, and a colour set by
+	// hand is a snapshot -- so it is put back here whenever the palette moves.
+	if (display_card) {
+		lv_obj_set_style_border_color(display_card, theme()->accent, 0);
+	}
 	if (operation_label) {
 		lv_obj_set_style_text_color(operation_label, theme()->accent, 0);
 	}
@@ -226,9 +234,13 @@ void calculator_init(gui_config_t *cfg) {
 	lv_obj_add_style(display, &theme_style_card, 0);
 	lv_obj_set_style_radius(display, bp_pick(10, 16), 0);
 	lv_obj_set_style_shadow_width(display, 0, 0);
+	// An opaque border: its width and colour are the theme's own until
+	// calc_refresh_theme() gives it the accent.
+	lv_obj_set_style_border_opa(display, LV_OPA_COVER, 0);
 	lv_obj_set_style_pad_hor(display, bp_pick(8, 18), 0);
 	lv_obj_set_style_pad_ver(display, 0, 0);
 	lv_obj_set_scrollable(display, false);
+	display_card = display;
 
 	display_label = lv_label_create(display);
 	lv_obj_add_style(display_label, &theme_style_text, 0);
