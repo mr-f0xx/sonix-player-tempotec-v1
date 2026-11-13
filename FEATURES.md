@@ -286,7 +286,10 @@ a self-signed certificate), and HLS.
 
 - **Calculator** - a display and the twenty keys of an ordinary pocket
   calculator: the four operations, sign, percent, backspace and clear. The sum
-  in progress is kept while you leave the page and come back. The keys are
+  in progress is kept while you leave the page and come back. The display's
+  keyline wears the accent -- the only edge on the page -- so the sum is framed
+  in the colour the rest of the interface marks its own with, and it follows a
+  change of accent or theme without a restart. The keys are
   laid out from the panel's own measurements, so the page fills the V1's 240×320
   screen. The operator keys are drawn a size up and in bold: a
   face sets a multiplication sign a little over half the height of the digits

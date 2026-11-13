@@ -1215,6 +1215,16 @@ static void check_calculator_page(gui_config_t *cfg, const char *tag) {
 	lv_obj_t *display = calc_display_label(calculator_screen);
 	assert(display);
 
+	/* The card the sum is drawn in wears the accent on its keyline -- the one
+	 * edge on the page -- rather than the grey the built-in theme gives a
+	 * plain card. The width is the theme's own; only the colour is the page's,
+	 * which is why it is hand-set and has to be checked to follow a later
+	 * palette change below. */
+	lv_obj_t *display_card = lv_obj_get_parent(display);
+	assert(lv_obj_get_style_border_width(display_card, LV_PART_MAIN) > 0);
+	assert(lv_obj_get_style_border_opa(display_card, LV_PART_MAIN) == LV_OPA_COVER);
+	assert(lv_color_eq(lv_obj_get_style_border_color(display_card, LV_PART_MAIN), theme()->accent));
+
 	// Twenty keys, every one of them a finger target: the V1's own corner
 	// buttons are 36 px, so a key is not allowed to be smaller than that.
 	lv_obj_t *keypad = NULL;
@@ -1317,6 +1327,16 @@ static void check_calculator_page(gui_config_t *cfg, const char *tag) {
 	press_key(keypad, "=");
 	assert(strcmp(lv_label_get_text(display), "12") == 0);
 	press_key(keypad, "AC");
+
+	// The keyline follows the palette, both a new accent and a new theme: a
+	// colour set by hand is a snapshot, and the page has to put it back.
+	theme_set_accent(7);
+	assert(lv_color_eq(lv_obj_get_style_border_color(display_card, LV_PART_MAIN), theme()->accent));
+	theme_set_kind(THEME_KIND_LIGHT);
+	assert(lv_color_eq(lv_obj_get_style_border_color(display_card, LV_PART_MAIN), theme()->accent));
+	theme_set_kind(THEME_KIND_DARK);
+	theme_set_accent(0);
+	assert(lv_color_eq(lv_obj_get_style_border_color(display_card, LV_PART_MAIN), theme()->accent));
 }
 
 /* ---- the Metronome page -------------------------------------------------- */
