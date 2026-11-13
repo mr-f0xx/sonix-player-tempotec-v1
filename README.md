@@ -288,8 +288,8 @@ The full rules are in [FEATURES.md](FEATURES.md).
 Only attempt this on a TempoTec Variations V1. Read the warning above before proceeding.
 
 1. Keep the **official V1 `v1.upt` and its matching `v1_md5.txt`** somewhere safe. They are needed if you want to return to stock.
-2. Download the latest release in "Releases", (v1.upt), and put it on the root of your SD Card, then use the built-in firmware updater from your v1.
-3. If you want to restore stock firmware, put the original vendor `v1.upt` and its matching checksum file at the card root and use the same update process.
+2. Download the latest release in "Releases", (`v1.upt`), and put it on the root of your SD Card, then use the built-in firmware updater from your v1.
+3. If you want to restore stock firmware, put the original vendor `v1.upt` and its matching checksum file in the root of your SD Card and use the same update process.
 
 <a id="streaming-credentials"></a>
 
