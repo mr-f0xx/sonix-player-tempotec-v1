@@ -8,6 +8,7 @@
 
 #include "src/gui/shell/confirm.h"
 #include "src/gui/fonts/fonts.h"
+#include "src/gui/shell/gridpage.h"
 #include "src/gui/shell/icons.h"
 #include "src/gui/shell/keyboard.h"
 #include "src/gui/nowplaying/player.h"
@@ -2135,8 +2136,22 @@ static void open_login_cb(lv_event_t *e) {
 // ---------------------------------------------------------------------------
 
 static lv_obj_t *home_container;
+static lv_obj_t *home_grid;
 static lv_obj_t *settings_btn;
 static lv_obj_t *search_btn;
+
+// Qobuz's four destinations are the whole page, so they are drawn as the same
+// two-by-two card grid the SoundCloud, Radio and Subsonic pages use: two square
+// tiles to a row, sized from the space under the heading, and never a fifth row
+// to scroll to. Search, the settings and the downloads stay corner buttons.
+//
+// The pictures come from tools/tile_art.py, the recipe every one of those card
+// pages uses. The flat themes -- the ones that draw function glyphs instead of
+// illustrations -- put the glyph itself on the card, tinted with the theme's
+// colour, as those pages do.
+#define QOBUZ_HOME_TILES 4
+#define QOBUZ_TILE_ART_PX 54
+#define QOBUZ_TILE_GLYPH_PX 46
 
 static const int QUALITY_VALUES[4] = {QOBUZ_FORMAT_MP3, QOBUZ_FORMAT_CD, QOBUZ_FORMAT_HIRES96,
 									  QOBUZ_FORMAT_HIRES192};
@@ -2267,10 +2282,59 @@ static void build_settings_page(gui_config_t *cfg) {
 	switcher_attach_back_gesture(qsettings_screen);
 }
 
-static void simple_job_cb(lv_event_t *e) {
+// One of the home cards asked for a list. The grid has already dropped a tap
+// that was really a swipe, so the actions below need no event of their own.
+static void run_simple_job(job_kind_t kind) {
 	job_t job = {0};
-	job.kind = (job_kind_t)(intptr_t)lv_event_get_user_data(e);
+	job.kind = kind;
 	run(&job, "loading");
+}
+
+static void home_favourite_tracks_action(void) { run_simple_job(JOB_FAV_TRACKS); }
+static void home_favourite_albums_action(void) { run_simple_job(JOB_FAV_ALBUMS); }
+static void home_playlists_action(void) { run_simple_job(JOB_USER_PLAYLISTS); }
+static void home_genres_action(void) { run_simple_job(JOB_GENRES); }
+
+// The cards are twice a menu row's height and they are the whole page, so the
+// picture is drawn large and centred with the caption underneath in every
+// theme -- including the flat ones, whose menu rows would put the glyph beside
+// the text. Dark and Light show the illustrations at the size the generator
+// emits them; the flat themes show the glyph in their own accent.
+static void home_style_tiles(void) {
+	if (!home_grid) {
+		return;
+	}
+	static const lv_image_dsc_t *const art[QOBUZ_HOME_TILES] = {
+		&icon_menu_qobuz_favourites,
+		&icon_menu_qobuz_albums,
+		&icon_menu_qobuz_playlists,
+		&icon_menu_qobuz_genres,
+	};
+	static const lv_image_dsc_t *const glyphs[QOBUZ_HOME_TILES] = {
+		&icon_qobuz_favourites_glyph,
+		&icon_qobuz_albums_glyph,
+		&icon_qobuz_playlists_glyph,
+		&icon_qobuz_genres_glyph,
+	};
+	// The tones match the illustrations' own hues, so the flat themes keep the
+	// colour coding the cards have in Dark and Light.
+	static const theme_semantic_t tones[QOBUZ_HOME_TILES] = {
+		THEME_SEMANTIC_PURPLE,
+		THEME_SEMANTIC_BLUE,
+		THEME_SEMANTIC_CYAN,
+		THEME_SEMANTIC_GREEN,
+	};
+	bool glyph = theme_uses_function_glyphs();
+	for (int i = 0; i < QOBUZ_HOME_TILES; i++) {
+		// Both pictures are rendered at exactly the size they are drawn at, so
+		// a card shows its own pixels and never a resampled copy of them.
+		gridpage_set_tile_icon_style(home_grid, i, glyph ? glyphs[i] : art[i],
+									 glyph ? QOBUZ_TILE_GLYPH_PX : QOBUZ_TILE_ART_PX, glyph,
+									 theme_semantic_color(tones[i]), false);
+		// Picture above, caption underneath, in every theme. Re-applying the
+		// layout also measures the caption against the picture's new width.
+		gridpage_set_tile_orientation(home_grid, i, false);
+	}
 }
 
 // The "Wi-Fi settings" row of the no-network notice, as on the transfer page:
@@ -2295,20 +2359,23 @@ static bool wifi_is_connected(void) {
 #endif
 }
 
+// The page has one of four states, and only the last of them has anything a
+// card can lead to. The tiles take the panel in that state and the container
+// -- two rows at most -- takes it in the other three, so the page is never a
+// grid of dead cards above a sentence saying what is missing.
 static void rebuild_home(void) {
 	lv_obj_clean(home_container);
 
-	if (!qobuz_configured()) {
-		update_corner_buttons();
-		stockkeys_ui_populate_missing(home_container, rebuild_home);
-		return;
-	}
+	bool ready = false;
 
-	// The network comes before the login, and not the other way round: signing
-	// in is a conversation with Qobuz's servers, so with no network the "Sign
-	// in" row could only fail. The notice says what is actually missing.
-	if (!wifi_is_connected()) {
-		update_corner_buttons();
+	if (!qobuz_configured()) {
+		stockkeys_ui_populate_missing(home_container, rebuild_home);
+	} else if (!wifi_is_connected()) {
+		// The network comes before the login, and not the other way round:
+		// signing in is a conversation with Qobuz's servers, so with no network
+		// the "Sign in" row could only fail. The notice says what is actually
+		// missing.
+		//
 		// The same notice as the Wi-Fi transfer page: centred message, with the
 		// "Wi-Fi settings" row below leading to where it is fixed.
 		lv_obj_t *note = lv_label_create(home_container);
@@ -2322,28 +2389,16 @@ static void rebuild_home(void) {
 		lv_label_set_text(note, tr("enable_wi_fi_first"));
 		lv_obj_t *row = settingsrow_add(home_container, "wi_fi_settings", NULL, open_wifi_settings_cb, NULL);
 		lv_obj_set_style_margin_top(row, 16, 0);
-		return;
-	}
-
-	if (!qobuz_logged_in()) {
-		update_corner_buttons();
+	} else if (!qobuz_logged_in()) {
 		settingsrow_add(home_container, "sign_in", NULL, open_login_cb, NULL);
-		return;
+	} else {
+		ready = true;
 	}
 
-	// No "Search" row: it is the magnifier in the corner, where it sits on
-	// every other searchable page.
-    lv_obj_t *row = settingsrow_add(home_container, "favourite_tracks", NULL, simple_job_cb, (void *)(intptr_t)JOB_FAV_TRACKS);
-    settingsrow_add_accent_icon(row, &icon_star);
-    row = settingsrow_add(home_container, "favourite_albums", NULL, simple_job_cb, (void *)(intptr_t)JOB_FAV_ALBUMS);
-    settingsrow_add_accent_icon(row, &icon_album);
-    row = settingsrow_add(home_container, "my_playlists", NULL, simple_job_cb, (void *)(intptr_t)JOB_USER_PLAYLISTS);
-    settingsrow_add_accent_icon(row, &icon_list_music);
-    row = settingsrow_add(home_container, "new_releases", NULL, simple_job_cb, (void *)(intptr_t)JOB_FEATURED);
-    settingsrow_add_accent_icon(row, &icon_sort_date_new);
-    row = settingsrow_add(home_container, "New releases by genre", NULL, simple_job_cb, (void *)(intptr_t)JOB_GENRES);
-    settingsrow_add_accent_icon(row, &icon_genre);
-
+	if (home_grid) {
+		lv_obj_set_hidden(home_grid, !ready);
+	}
+	lv_obj_set_hidden(home_container, ready);
 	update_corner_buttons();
 }
 
@@ -2625,6 +2680,26 @@ void qobuzpage_init(gui_config_t *cfg) {
     player_sheet_attach_drag(dl_history_screen, true);
     player_sheet_attach_drag(dl_history_container, true);
     lv_timer_create(dl_history_tick, 1000, NULL);
+
+	// Four destinations, so two square tiles fill the panel under the heading
+	// exactly. New releases are reached through their genre -- the same four
+	// cards, no fifth -- so the section is the genre picker and nothing else.
+	const grid_entry_t home_entries[] = {
+		{"favourite_tracks", &icon_menu_qobuz_favourites, NULL, home_favourite_tracks_action},
+		{"favourite_albums", &icon_menu_qobuz_albums, NULL, home_favourite_albums_action},
+		{"my_playlists", &icon_menu_qobuz_playlists, NULL, home_playlists_action},
+		{"new_releases_by_genre", &icon_menu_qobuz_genres, NULL, home_genres_action},
+	};
+	home_grid = gridpage_build(qobuz_screen, cfg, home_entries, QOBUZ_HOME_TILES, 2, 2, true);
+	// "New releases by genre" is longer than a card, and so is its translation
+	// in every language but English ("Nouveautés par genre", "Neuheiten nach
+	// Genre"), so the captions get two lines instead of an ellipsis after the
+	// first.
+	for (int i = 0; i < QOBUZ_HOME_TILES; i++) {
+		gridpage_set_tile_label_lines(home_grid, i, 2);
+	}
+	home_style_tiles();
+	theme_register_refresh(home_style_tiles);
 
 	build_list_page(cfg);
 	theme_register_refresh(genre_theme_refresh);
