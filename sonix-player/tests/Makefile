@@ -459,6 +459,9 @@ TAGS_DECODE_SRC = $(ROOT)/src/system/decode/decode.c \
 TAGS_SRC = test_tags.c \
            $(ROOT)/src/system/tagmanager/tagwrite.c \
            $(ROOT)/src/system/library/metadata.c \
+           $(ROOT)/src/system/library/jisx0208.c \
+           $(ROOT)/src/system/library/tagtext.c \
+           $(ROOT)/src/system/library/id3chap.c \
            $(ROOT)/src/system/library/oggtags.c \
            $(ROOT)/src/system/library/vorbischap.c \
            $(ROOT)/src/system/library/tagdate.c \
@@ -1291,6 +1294,8 @@ SOUNDCLOUD_CORE = $(ROOT)/src/system/streaming/soundcloud.c \
                   $(ROOT)/src/system/core/sha256.c \
                   $(ROOT)/src/system/core/utils.c \
                   $(ROOT)/src/system/library/metadata.c \
+                  $(ROOT)/src/system/library/jisx0208.c \
+                  $(ROOT)/src/system/library/tagtext.c \
                   $(ROOT)/src/system/library/oggtags.c \
                   $(ROOT)/src/system/library/vorbischap.c \
                   $(ROOT)/src/system/library/tagdate.c \

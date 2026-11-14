@@ -1,5 +1,7 @@
 #include "src/system/library/id3chap.h"
 
+#include "src/system/library/tagtext.h"
+
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -37,9 +39,9 @@ static uint32_t syncsafe32(const uint8_t *p) {
 }
 
 // One text field out of a sub-frame: an encoding byte and then the text.
-// Encodings 1 and 2 are UTF-16 and are read as their low bytes, which is right
-// up to U+00FF and a question mark above it; anything else is copied byte for
-// byte.
+// Encodings 1 and 2 are UTF-16; anything else goes through tagtext_guess(),
+// which is how a chapter title written in Shift-JIS or Windows-1251 under an
+// encoding byte of 0x00 comes out as the characters it was written as.
 static void read_text(const uint8_t *data, uint32_t len, char *out, size_t out_size) {
 	out[0] = '\0';
 	if (!len) {
@@ -48,35 +50,26 @@ static void read_text(const uint8_t *data, uint32_t len, char *out, size_t out_s
 	uint8_t encoding = data[0];
 	const uint8_t *text = data + 1;
 	uint32_t text_len = len - 1;
-	size_t w = 0;
+	size_t w;
 
 	if (encoding == 1 || encoding == 2) {
-		// UTF-16. Skip a byte-order mark and step two bytes at a time; which of
-		// the pair is the character depends on the order.
-		bool little = encoding == 1 && text_len >= 2 && text[0] == 0xFF && text[1] == 0xFE;
-		if (encoding == 1 && text_len >= 2) {
-			text += 2;
-			text_len -= 2;
+		// UTF-16, with the byte-order mark deciding the order for encoding 1;
+		// encoding 2 is big-endian by definition.
+		tagtext_utf16(text, text_len, encoding == 2, out, out_size);
+	} else if (encoding == 0x03) {
+		// UTF-8, the v2.4 encoding.
+		size_t copy_len = strnlen((const char *)text, text_len);
+		if (copy_len > out_size - 1) {
+			copy_len = out_size - 1;
 		}
-		for (uint32_t i = 0; i + 1 < text_len && w + 1 < out_size; i += 2) {
-			uint8_t c = little ? text[i] : text[i + 1];
-			uint8_t hi = little ? text[i + 1] : text[i];
-			if (!c && !hi) {
-				break;
-			}
-			// Above U+00FF there is no single byte to write; a question mark
-			// says "a character was here" instead of writing half of one.
-			out[w++] = hi ? '?' : (char)c;
-		}
+		memcpy(out, text, copy_len);
+		out[copy_len] = '\0';
 	} else {
-		for (uint32_t i = 0; i < text_len && w + 1 < out_size; i++) {
-			if (!text[i]) {
-				break;
-			}
-			out[w++] = (char)text[i];
-		}
+		// 0x00, nominally Latin-1 and in practice whatever the tagger wrote.
+		tagtext_guess(text, text_len, out, out_size);
 	}
-	out[w] = '\0';
+
+	w = strlen(out);
 
 	// Trailing whitespace is common in tags written by hand.
 	while (w > 0 && (out[w - 1] == ' ' || out[w - 1] == '\r' || out[w - 1] == '\n')) {

@@ -14,6 +14,7 @@
 #include "src/system/decode/opusdec.h"
 #include "src/system/decode/wavpackdec.h"
 #include "src/system/library/cue.h"
+#include "src/system/library/id3chap.h"
 #include "src/system/library/metadata.h"
 #include "src/system/tagmanager/tagwrite.h"
 #include "src/system/library/oggtags.h"
@@ -799,6 +800,234 @@ static void test_vorbischap_and_containers(const char *dir) {
 	assert(strcmp(meta.date, "2017-03-29") == 0);
 }
 
+// ---------------------------------------------------------------------------
+// 6. Tag text in a code page the frame does not name
+//
+// An ID3v2 frame says "Latin-1" in its encoding byte and holds Shift-JIS, which
+// is what a tagger on a Japanese Windows wrote; ID3v1 has no encoding byte at
+// all and gets the same treatment. Read as Latin-1, 宇多田ヒカル comes out as
+// "© ä Þ Ý - é" and the artist is filed under the wrong letter, which is the
+// report this suite exists for. The Latin-1, UTF-8, UTF-16 and Windows-1251
+// cases are here too, so that fixing Japanese cannot quietly break them.
+// ---------------------------------------------------------------------------
+
+// 宇多田ヒカル in Shift-JIS, the bytes a Japanese tagger wrote into the frame.
+static const uint8_t SJIS_UTADA[] = {0x89, 0x46, 0x91, 0xBD, 0x93, 0x63,
+									 0x83, 0x71, 0x83, 0x4A, 0x83, 0x8B};
+// The same name in EUC-JP, which is what a Unix tagger wrote for it.
+static const uint8_t EUC_UTADA[] = {0xB1, 0xA7, 0xC2, 0xBF, 0xC5, 0xC4,
+									0xA5, 0xD2, 0xA5, 0xAB, 0xA5, 0xEB};
+// あアー in half-width katakana (Shift-JIS single bytes 0xB1 0xB1 0xB0), then a
+// katakana word in the double-byte range -- half-width kana are the case a
+// naive "only look for 0x81..0x9F" rule would miss.
+static const uint8_t SJIS_HALFWIDTH[] = {0xB1, 0xB1, 0xB0, 0x20, 0x83, 0x65, 0x83, 0x58, 0x83, 0x67};
+
+static void test_japanese_tag_text(const char *dir) {
+	char path[512];
+	song_metadata_t meta;
+
+	// (a) ID3v2.3, encoding byte 0x00, Shift-JIS bytes in TIT2 and TPE1.
+	snprintf(path, sizeof(path), "%s/jp_id3v2.mp3", dir);
+	buf_t frames = {0};
+	append_id3v2_text_frame(&frames, 3, "TIT2", 0, SJIS_UTADA, sizeof(SJIS_UTADA), false);
+	append_id3v2_text_frame(&frames, 3, "TPE1", 0, SJIS_UTADA, sizeof(SJIS_UTADA), false);
+	append_id3v2_text_frame(&frames, 3, "TALB", 0, SJIS_HALFWIDTH, sizeof(SJIS_HALFWIDTH), false);
+	buf_t file = {0};
+	wrap_id3v2_tag(&file, 3, 0, &frames);
+	const uint8_t mpeg[8] = {0xFF, 0xFB, 0x90, 0x64, 0, 0, 0, 0};
+	buf_put(&file, mpeg, sizeof(mpeg));
+	write_fixture(path, file.data, file.len);
+	free(file.data);
+	free(frames.data);
+
+	metadata_read(path, &meta);
+	assert(strcmp(meta.title, "宇多田ヒカル") == 0);
+	assert(strcmp(meta.artist, "宇多田ヒカル") == 0);
+	assert(strcmp(meta.album, "ｱｱｰ テスト") == 0);
+
+	// (b) The same name in EUC-JP, which the bytes themselves have to identify.
+	snprintf(path, sizeof(path), "%s/jp_euc.mp3", dir);
+	frames = (buf_t){0};
+	append_id3v2_text_frame(&frames, 3, "TIT2", 0, EUC_UTADA, sizeof(EUC_UTADA), false);
+	append_id3v2_text_frame(&frames, 3, "TPE1", 0, EUC_UTADA, sizeof(EUC_UTADA), false);
+	file = (buf_t){0};
+	wrap_id3v2_tag(&file, 3, 0, &frames);
+	buf_put(&file, mpeg, sizeof(mpeg));
+	write_fixture(path, file.data, file.len);
+	free(file.data);
+	free(frames.data);
+
+	metadata_read(path, &meta);
+	assert(strcmp(meta.title, "宇多田ヒカル") == 0);
+	assert(strcmp(meta.artist, "宇多田ヒカル") == 0);
+
+	// (c) ID3v1, which has no encoding byte anywhere: 30 bytes of Shift-JIS.
+	snprintf(path, sizeof(path), "%s/jp_id3v1.mp3", dir);
+	file = (buf_t){0};
+	buf_put(&file, mpeg, sizeof(mpeg));
+	uint8_t v1[128];
+	memset(v1, 0, sizeof(v1));
+	memcpy(v1, "TAG", 3);
+	memcpy(v1 + 3, SJIS_UTADA, sizeof(SJIS_UTADA));
+	memcpy(v1 + 33, SJIS_UTADA, sizeof(SJIS_UTADA));
+	memcpy(v1 + 63, SJIS_HALFWIDTH, sizeof(SJIS_HALFWIDTH));
+	v1[125] = 0;
+	v1[126] = 4;
+	v1[127] = 17;
+	buf_put(&file, v1, sizeof(v1));
+	write_fixture(path, file.data, file.len);
+	free(file.data);
+
+	metadata_read(path, &meta);
+	assert(strcmp(meta.title, "宇多田ヒカル") == 0);
+	assert(strcmp(meta.artist, "宇多田ヒカル") == 0);
+	assert(strcmp(meta.album, "ｱｱｰ テスト") == 0);
+	assert(meta.track_number == 4);
+
+	// (d) ASCII and Shift-JIS in one field: the name a Japanese release of a
+	// Western record is filed under.
+	snprintf(path, sizeof(path), "%s/jp_mixed.mp3", dir);
+	// "Bjork ソングブック", the first half ASCII and the second half not.
+	static const uint8_t mixed[] = {'B', 'j', 'o', 'r', 'k', ' ', 0x83, 0x5C, 0x83, 0x93, 0x83,
+									0x4F, 0x83, 0x75, 0x83, 0x62, 0x83, 0x4E};
+	frames = (buf_t){0};
+	append_id3v2_text_frame(&frames, 3, "TPE1", 0, mixed, sizeof(mixed), false);
+	file = (buf_t){0};
+	wrap_id3v2_tag(&file, 3, 0, &frames);
+	buf_put(&file, mpeg, sizeof(mpeg));
+	write_fixture(path, file.data, file.len);
+	free(file.data);
+	free(frames.data);
+
+	metadata_read(path, &meta);
+	assert(strcmp(meta.artist, "Bjork ソングブック") == 0);
+
+	// (e) Non-regression: Latin-1 accents, both alone and inside a word.
+	snprintf(path, sizeof(path), "%s/latin1.mp3", dir);
+	frames = (buf_t){0};
+	const uint8_t latin[] = {'M', 0xFC, 'l', 'l', 'e', 'r', ' ', '&', ' ',
+							 0xC9, 't', 0xE9, ' ', 0xDE, 'a', 'd', ' ', 0xDD};
+	append_id3v2_text_frame(&frames, 3, "TIT2", 0, latin, sizeof(latin), false);
+	file = (buf_t){0};
+	wrap_id3v2_tag(&file, 3, 0, &frames);
+	buf_put(&file, mpeg, sizeof(mpeg));
+	write_fixture(path, file.data, file.len);
+	free(file.data);
+	free(frames.data);
+
+	metadata_read(path, &meta);
+	assert(strcmp(meta.title, "Müller & Été Þad Ý") == 0);
+
+	// (f) Non-regression: UTF-8 left in an encoding-0 frame by a tagger that
+	// had already moved on.
+	snprintf(path, sizeof(path), "%s/utf8_in_zero.mp3", dir);
+	frames = (buf_t){0};
+	const uint8_t utf8_zero[] = {0xE5, 0xAE, 0x87, 0xE5, 0xA4, 0x9A, 0xE7, 0x94, 0xB0};
+	append_id3v2_text_frame(&frames, 3, "TIT2", 0, utf8_zero, sizeof(utf8_zero), false);
+	file = (buf_t){0};
+	wrap_id3v2_tag(&file, 3, 0, &frames);
+	buf_put(&file, mpeg, sizeof(mpeg));
+	write_fixture(path, file.data, file.len);
+	free(file.data);
+	free(frames.data);
+
+	metadata_read(path, &meta);
+	assert(strcmp(meta.title, "宇多田") == 0);
+
+	// (g) Non-regression: Windows-1251 Cyrillic under the same encoding byte.
+	snprintf(path, sizeof(path), "%s/cp1251.mp3", dir);
+	frames = (buf_t){0};
+	const uint8_t cyr[] = {0xCC, 0xE5, 0xEB, 0xFC, 0xED, 0xE8, 0xF6, 0xE0}; // "Мельница"
+	append_id3v2_text_frame(&frames, 3, "TPE1", 0, cyr, sizeof(cyr), false);
+	file = (buf_t){0};
+	wrap_id3v2_tag(&file, 3, 0, &frames);
+	buf_put(&file, mpeg, sizeof(mpeg));
+	write_fixture(path, file.data, file.len);
+	free(file.data);
+	free(frames.data);
+
+	metadata_read(path, &meta);
+	assert(strcmp(meta.artist, "Мельница") == 0);
+
+	// (h) Non-regression: UTF-16, with a little-endian BOM and as plain
+	// big-endian (encoding 2). A UTF-16 frame must never be mistaken for the
+	// Shift-JIS one: its zeros and 0xFF bytes are not text in any code page.
+	snprintf(path, sizeof(path), "%s/utf16.mp3", dir);
+	frames = (buf_t){0};
+	const uint8_t u16le[] = {0xFF, 0xFE, 0x87, 0x5B, 0x1A, 0x59, 0x30, 0x75};
+	append_id3v2_text_frame(&frames, 3, "TIT2", 1, u16le, sizeof(u16le), false);
+	const uint8_t u16be[] = {0x5B, 0x87, 0x59, 0x1A, 0x75, 0x30};
+	append_id3v2_text_frame(&frames, 3, "TPE1", 2, u16be, sizeof(u16be), false);
+	file = (buf_t){0};
+	wrap_id3v2_tag(&file, 3, 0, &frames);
+	buf_put(&file, mpeg, sizeof(mpeg));
+	write_fixture(path, file.data, file.len);
+	free(file.data);
+	free(frames.data);
+
+	metadata_read(path, &meta);
+	assert(strcmp(meta.title, "宇多田") == 0);
+	assert(strcmp(meta.artist, "宇多田") == 0);
+
+	// (i) A chapter title inside a CHAP frame, read by id3chap.c rather than
+	// metadata.c: the same bytes, the same answer.
+	snprintf(path, sizeof(path), "%s/jp_chap.mp3", dir);
+	buf_t chap_payload = {0};
+	buf_put(&chap_payload, "ch1\0", 4); // element id, NUL-terminated
+	buf_be32(&chap_payload, 0);			// start, ms
+	buf_be32(&chap_payload, 60000);		// end, ms
+	buf_be32(&chap_payload, 0xFFFFFFFFu); // start offset
+	buf_be32(&chap_payload, 0xFFFFFFFFu); // end offset
+	append_id3v2_text_frame(&chap_payload, 3, "TIT2", 0, SJIS_UTADA, sizeof(SJIS_UTADA), false);
+	buf_t chap = {0};
+	buf_put(&chap, "CHAP", 4);
+	buf_be32(&chap, (uint32_t)chap_payload.len);
+	buf_be16(&chap, 0);
+	buf_put(&chap, chap_payload.data, chap_payload.len);
+	free(chap_payload.data);
+	file = (buf_t){0};
+	wrap_id3v2_tag(&file, 3, 0, &chap);
+	buf_put(&file, mpeg, sizeof(mpeg));
+	write_fixture(path, file.data, file.len);
+	free(file.data);
+	free(chap.data);
+
+	id3chap_t chapters[4];
+	int n = id3chap_read(path, chapters, 4);
+	assert(n == 1);
+	assert(strcmp(chapters[0].title, "宇多田ヒカル") == 0);
+	assert(chapters[0].start == 0.0);
+
+	// (j) A chapter title in UTF-16 with a little-endian BOM. The chapter
+	// reader used to keep every other byte and turn anything above U+00FF into
+	// a question mark; the mark now picks the byte order and the title survives.
+	snprintf(path, sizeof(path), "%s/jp_chap_u16.mp3", dir);
+	chap_payload = (buf_t){0};
+	buf_put(&chap_payload, "ch2\0", 4);
+	buf_be32(&chap_payload, 0);
+	buf_be32(&chap_payload, 30000);
+	buf_be32(&chap_payload, 0xFFFFFFFFu);
+	buf_be32(&chap_payload, 0xFFFFFFFFu);
+	const uint8_t chap_u16[] = {0xFF, 0xFE, 0x87, 0x5B, 0x1A, 0x59, 0x30, 0x75}; // BOM + 宇多田, LE
+	append_id3v2_text_frame(&chap_payload, 3, "TIT2", 1, chap_u16, sizeof(chap_u16), false);
+	chap = (buf_t){0};
+	buf_put(&chap, "CHAP", 4);
+	buf_be32(&chap, (uint32_t)chap_payload.len);
+	buf_be16(&chap, 0);
+	buf_put(&chap, chap_payload.data, chap_payload.len);
+	free(chap_payload.data);
+	file = (buf_t){0};
+	wrap_id3v2_tag(&file, 3, 0, &chap);
+	buf_put(&file, mpeg, sizeof(mpeg));
+	write_fixture(path, file.data, file.len);
+	free(file.data);
+	free(chap.data);
+
+	n = id3chap_read(path, chapters, 4);
+	assert(n == 1);
+	assert(strcmp(chapters[0].title, "宇多田") == 0);
+}
+
 // Exercise the actual writer with the player's real readers and decoder.
 static void test_tagwriter_roundtrip(const char *dir) {
     char path[512]; song_metadata_t meta; buf_t data={0}, frames={0};
@@ -828,12 +1057,14 @@ int main(void) {
 	test_broken_id3v2_tags(dir);
 	test_wrong_extensions_and_cue(dir);
 	test_vorbischap_and_containers(dir);
+	test_japanese_tag_text(dir);
 
 	char cmd[600];
 	snprintf(cmd, sizeof(cmd), "rm -rf '%s'", dir);
 	int rc = system(cmd);
 	(void)rc;
 
-	printf("PASS tags (FLAC+ID3, broken ID3v2.4/zlib/unsync/chained, format sniffing, CUE, Ogg streaming, V1 tagdate)\n");
+	printf("PASS tags (FLAC+ID3, broken ID3v2.4/zlib/unsync/chained, format sniffing, CUE, Ogg streaming, V1 tagdate, "
+		   "Japanese/Latin-1/UTF-8/UTF-16/CP1251 tag text)\n");
 	return 0;
 }

@@ -10,7 +10,7 @@
 
 **CUE sheets** split a single ripped disc into up to 99 tracks, taking the format from the file the sheet points at (and finding the audio file by stem when its extension differs from the `FILE` line). WAVs carrying their own RIFF markers work the same way.
 
-**Format & tag tolerance** - Containers and codecs are identified from file contents rather than extensions, so misnamed files scan and play cleanly. FLAC files carrying leading ID3v2 headers, broken or non-standard ID3v2 tags (v2.4 non-syncsafe sizes, unsynchronised UTF-16 frames, zlib-compressed frames, BOM-less UTF-16, chained tags), multi-page Ogg Vorbis/Opus comment headers, and APEv2/ASF/MP4/RIFF/AIFF/CAF metadata are all read reliably.
+**Format & tag tolerance** - Containers and codecs are identified from file contents rather than extensions, so misnamed files scan and play cleanly. FLAC files carrying leading ID3v2 headers, broken or non-standard ID3v2 tags (v2.4 non-syncsafe sizes, unsynchronised UTF-16 frames, zlib-compressed frames, BOM-less UTF-16, chained tags), multi-page Ogg Vorbis/Opus comment headers, and APEv2/ASF/MP4/RIFF/AIFF/CAF metadata are all read reliably. Tag text written in Shift-JIS or EUC-JP under the Latin-1 encoding byte — which is what a tagger on a Japanese machine left there, and what made a whole library read as `© ä Þ Ý - é` — is decoded to the characters it was written as, in ID3v2 frames, ID3v1 fields and audiobook chapter titles, alongside Latin-1, UTF-8 and Windows-1251 text.
 
 **WAV and AIFF tags** are read from the ID3 chunk taggers add to them, so titles in any script and the cover come through; a WAV's own INFO list fills in whatever that leaves empty.
 

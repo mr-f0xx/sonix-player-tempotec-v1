@@ -4852,3 +4852,75 @@ and artist folders but never anything outside them. `make subsonic-ui` now
 links the real downloads page and checks that the corner arrow opens it, that
 an empty card says so in a translated sentence, and that the page has no
 overlaps in the shipped languages.
+
+## Japanese text in MP3 tags showing as mojibake
+
+An MP3 whose artist and title are Japanese showed them as something like
+`© ä Þ Ý - é`, and filed the artist under `©`. FLAC files with the same names
+were fine, and so were Japanese folder names — so the defect was confined to
+text read out of MP3 tags, which is exactly where the two readers disagree
+about encodings.
+
+The cause is a byte the format does not honour. An ID3v2 text frame names its
+encoding in a byte of its own, and ID3v1 has no such byte at all; both are
+specified as Latin-1. A tagger on a Japanese Windows wrote Shift-JIS into that
+frame and left the byte at `0x00`, because on its own machine the text looked
+right. Read as Latin-1 the bytes become C1 and Latin-1 characters, the artist
+is filed under a punctuation mark, and the title cannot be searched for at all.
+EUC-JP, from a tagger on an older Unix, lands in the same place.
+
+`metadata.c` already knew two of the three cases: text that is really UTF-8 in
+a frame that claims Latin-1, and Windows-1251 Cyrillic written the same way
+(the machine of the person who wrote the tag, again). Japanese is the third,
+and it is the one that cannot be decided from a table: Shift-JIS, EUC-JP,
+Windows-1251 and Latin-1 all use bytes above `0x7F`, and a Japanese name, a
+Russian one and a French one look alike until the bytes are decoded.
+
+So the bytes are decoded, and the result is what decides. Shift-JIS is the one
+that can be recognised outright — its first byte is in `0x81..0x9F` for most
+of the character set, which Latin-1 never draws and Windows-1251 never uses —
+and then whichever of Shift-JIS and EUC-JP comes out as a text made of kana and
+kanji wins. Text that decodes cleanly but into Latin letters is left to
+Latin-1, so `Müller`, `Été` and `Motörhead` keep their accents and are not
+mistaken for Japanese; Cyrillic words written in Windows-1251 are still not
+kana, so Russian stays Russian.
+
+Both encodings address one character set, JIS X 0208: 94 rows of 94 cells.
+`tools/gen_jis_table.py` writes that grid once, as a UTF-8 string pool
+(`jisx0208.c`, 6878 characters in 27 KB) with one 16-bit offset per cell, so a
+reader needs a single lookup for either encoding instead of two tables. The
+generator takes the grid from Python's own EUC-JP codec and cross-checks the
+Shift-JIS arithmetic against the CP932 codec for every pair, with the six
+cells where the two standards disagree on the character named in the tool; a
+`--check` run fails if the checked-in table has drifted from the generator.
+
+The decoding itself moved out of `metadata.c` into `tagtext.c`, because it was
+already used from three places and the fourth — `id3chap.c`, which reads the
+chapter titles of an audiobook's MP3 — had a private copy that would otherwise
+have been left behind. That copy also read UTF-16 as its low bytes, so a
+chapter title above `U+00FF` came out as `?`; it now decodes UTF-16 properly
+and passes encoding-3 text through as the UTF-8 it is. Two smaller faults came
+out of the move: the Latin-1 fallback could write two bytes of a character into
+a buffer with room for only one, and the UTF-16 decoder did not consume a
+byte-order mark that the readers above it were expected to have stripped.
+
+ID3v1 (title, artist, album), ID3v2 frames in every metadata reader, WAV RIFF
+INFO, AIFF NAME/AUTH/ANNO, DSD DIAR/DITI and the audiobook chapter titles all
+read text through the one function, so a fix in one of them is a fix in all.
+Half-width katakana, which Shift-JIS writes as single bytes in `0xA1..0xDF` and
+which a rule that only looks for `0x81..0x9F` would miss, are decoded too.
+
+Nothing changes for text that was already right: UTF-8 in a Latin-1 frame,
+UTF-16 with a byte-order mark and without, Windows-1251, and Latin-1 accents
+all come out exactly as before, and FLAC/OGG tags are UTF-8 by definition and
+never take this path.
+
+Tests: `make -C sonix-player/tests tags` now covers ID3v2.3 and ID3v1 Japanese
+titles in Shift-JIS, the same name in EUC-JP, half-width katakana, ASCII mixed
+with Shift-JIS in one field, Shift-JIS and UTF-16 chapter titles read through
+`id3chap.c`, and the non-regressions — Latin-1 accents, UTF-8 in an encoding-0
+frame, Windows-1251 Cyrillic, and UTF-16 both byte orders. `python3
+tools/gen_jis_table.py --check` verifies the table against the generator, and
+`make -C sonix-player/tests sanitize` runs the whole suite under ASan and UBSan.
+The decoder was also fuzzed against 4 million exact-size output buffers, every
+one of which came back NUL-terminated with nothing written past it.
