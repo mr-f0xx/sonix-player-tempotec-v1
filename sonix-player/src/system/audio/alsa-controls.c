@@ -978,6 +978,7 @@ long get_volume(void) { return current_volume; }
 static volume_output_t profile_out = VOLUME_OUTPUT_PHONES;
 static int level[VOLUME_OUTPUT_COUNT] = {-1, -1, -1, -1}; // -1 = never set, so the first reading adopts it
 static bool profile_dirty;
+static bool suppress_bt_notify;
 
 // Where each level is written down. The first and the last are the historical
 // key names, so a player updating from a build with only two profiles finds its
@@ -1182,7 +1183,16 @@ void volume_profile_set_output(volume_output_t out) {
 		wanted = current_percent; // no level for this output yet: keep the one in hand
 	}
 	printf("volume: %s -> %s, %d%%\n", PROFILE_NAMES[leaving], PROFILE_NAMES[out], wanted);
+	// When switching onto Bluetooth with synchronised volume enabled, btvolume
+	// is waiting in BTV_ADOPT for the headphones' own AVRCP level (or will
+	// fall back to get_volume_percent() after ADOPT_SETTLE_MS). Suppressing the
+	// profile-swap notification avoids treating this automatic profile restore
+	// as "volume turned by hand".
+	if (out == VOLUME_OUTPUT_BLUETOOTH && bluetooth_volume_sync()) {
+		suppress_bt_notify = true;
+	}
 	set_volume_percent(wanted);
+	suppress_bt_notify = false;
 	volume_profile_persist();
 }
 
@@ -1220,7 +1230,9 @@ static void apply_volume_hw(int percent) {
 	// and sent over the air, so connected headphones are told separately over
 	// AVRCP. Free when Bluetooth is off or the setting is: the call looks at
 	// two booleans and returns.
-	bluetooth_notify_volume(percent);
+	if (!suppress_bt_notify) {
+		bluetooth_notify_volume(percent);
+	}
 
 	// The DSD offset is named when it is in force, because otherwise the raw
 	// value in this line does not follow from the index and the gain table and

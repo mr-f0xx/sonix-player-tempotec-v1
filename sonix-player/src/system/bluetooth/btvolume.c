@@ -32,6 +32,17 @@
 // value and not the headphones'.
 #define ADOPT_SETTLE_MS 2500
 
+// Minimum spacing between consecutive AVRCP volume writes when synchronised
+// volume is active, so holding a volume key or dragging the slider coalesces
+// into bounded updates instead of flooding a slow Bluetooth speaker.
+#define WRITE_MIN_INTERVAL_MS 150
+
+// How long after a local volume write to treat incoming PropertiesChanged
+// Volume signals as the speaker's delayed, reordered, or step-quantized
+// response to our own write rather than a button press on the speaker.
+// Matches BlueZ's 2-second AVRCP request timeout.
+#define LOCAL_SETTLE_MS 2000
+
 // Where the worker is with the stream it has been given.
 typedef enum {
 	BTV_IDLE,  // no stream
@@ -50,12 +61,17 @@ static char want_path[PATH_MAX_LEN]; // the stream to bridge, "" for none
 static char have_path[PATH_MAX_LEN]; // the one the worker has set up
 static bool want_sync = true;
 static bool have_sync = true;
-static bool bus_reset;			// bluealsa restarted, or moved a property underneath
-static int pending_local = -1;	// a percent the player wants the stream to be at
-static int pending_remote = -1; // a 0..127 that arrived over the bus
-static int last_bt = -1;		// what the stream holds, as far as this side knows
-static bool path_live;			// a connection and a stream: writes can go over the bus
-static bool bus_broken;			// the stream is there but does not answer about its volume
+static bool bus_reset;			  // bluealsa restarted, or moved a property underneath
+static int pending_local = -1;	  // a percent the player wants the stream to be at
+static int pending_remote = -1;	  // a 0..127 that arrived over the bus
+static int last_bus_bt = -1;	  // last 0..127 observed on the bus (or just written)
+static int last_sent_bt = -1;	  // last 0..127 this side wrote or adopted
+static bool local_write_active;	  // a D-Bus Volume write is currently in flight
+static bool local_deferred_pending; // a rate-limited local change is waiting to be written
+static bool local_settling;		  // ignoring echo/quantized replies until local_settle_until
+static uint32_t local_settle_until;
+static bool path_live;			  // a connection and a stream: writes can go over the bus
+static bool bus_broken;			  // the stream is there but does not answer about its volume
 
 // The stream whose level has already been adopted. Adoption happens once per
 // connection, not once per change on the bus: bluealsa resets SoftVolume its
@@ -176,13 +192,27 @@ static void handle_properties_changed(const dbus_msg_t *m) {
 			pthread_mutex_lock(&lock);
 			// Recheck the desired device after parsing: set_device() can switch
 			// paths while this signal is being decoded.
-			// A write from this side comes back as a change like any other.
-			// Recognising it by the value is what keeps the two sides from
-			// pushing each other around for ever.
-			if (strcmp(m->path, want_path) == 0 && left != last_bt) {
-				last_bt = left;
-				pending_remote = left;
-				pthread_cond_signal(&wake);
+			//
+			// Why left != last_bus_bt is not enough on its own:
+			//   1) Rapid volume steps send multiple Set("Volume") requests; an
+			//      older AVRCP reply or VolumeChanged notification can arrive
+			//      after last_sent_bt has already moved higher.
+			//   2) Speakers with coarse discrete AVRCP steps round/clamp the
+			//      requested value to their nearest step and echo that back.
+			// Treating either as a remote change would drop the player's
+			// volume back down mid-adjustment. Suppress remote adoption while a
+			// local write is queued, in flight, or within the AVRCP settle
+			// window after the last local write.
+			if (strcmp(m->path, want_path) == 0 && left != last_bus_bt) {
+				last_bus_bt = left;
+				bool settle = local_settling && (int32_t)(now_ms() - local_settle_until) < 0;
+				if (!settle) {
+					local_settling = false;
+				}
+				if (!local_write_active && pending_local < 0 && !local_deferred_pending && !settle) {
+					pending_remote = left;
+					pthread_cond_signal(&wake);
+				}
 			}
 			pthread_mutex_unlock(&lock);
 		} else if (strcmp(key, "SoftVolume") == 0 && sig[0] == 'b') {
@@ -215,7 +245,9 @@ static void on_signal(dbus_conn_t *c, const dbus_msg_t *m, void *user) {
 		// exported. Whatever was written to the old one means nothing.
 		pthread_mutex_lock(&lock);
 		bus_reset = true;
-		last_bt = -1;
+		last_bus_bt = -1;
+		last_sent_bt = -1;
+		local_settling = false;
 		adopted_path[0] = '\0'; // a new transport: the level has to be taken again
 		pthread_cond_signal(&wake);
 		pthread_mutex_unlock(&lock);
@@ -263,8 +295,10 @@ static void *btvolume_worker(void *unused) {
 	// so far.
 	uint32_t adopt_deadline = 0;
 	int adopt_seen = -1;
-	int deferred_local = -1;  // player change while the output still points at the jack
+	int deferred_local = -1;  // player change waiting on jack->BT route or write cooldown
 	int deferred_remote = -1; // headphone change during the same route transition
+	bool next_write_active = false;
+	uint32_t next_write_at = 0;
 
 	for (;;) {
 		char path[PATH_MAX_LEN];
@@ -296,7 +330,11 @@ static void *btvolume_worker(void *unused) {
 		if (path_changed || sync_changed || reset) {
 			snprintf(have_path, sizeof(have_path), "%s", path);
 			have_sync = sync_on;
-			last_bt = -1;
+			last_bus_bt = -1;
+			last_sent_bt = -1;
+			local_write_active = false;
+			local_settling = false;
+			next_write_active = false;
 			bus_broken = false;
 			state = path[0] ? BTV_SETUP : BTV_IDLE;
 			// A pending player volume is global to the output and remains a
@@ -307,9 +345,10 @@ static void *btvolume_worker(void *unused) {
 				local = -1;
 				deferred_local = -1;
 			}
+			local_deferred_pending = deferred_local >= 0;
 			deferred_remote = !reset && path[0] ? remote : -1;
 			if (deferred_remote >= 0) {
-				last_bt = deferred_remote;
+				last_bus_bt = deferred_remote;
 			}
 			remote = -1;
 		}
@@ -367,6 +406,7 @@ static void *btvolume_worker(void *unused) {
 						   sync_on ? "native volume (synchronised)" : "software volume (separate)", have_path);
 
 					pthread_mutex_lock(&lock);
+					path_live = true;
 					bool already_adopted = strcmp(adopted_path, have_path) == 0;
 					pthread_mutex_unlock(&lock);
 
@@ -380,6 +420,9 @@ static void *btvolume_worker(void *unused) {
 						// player's level, which has to be put back on the stream.
 						deferred_local = -1;
 						deferred_remote = -1;
+						pthread_mutex_lock(&lock);
+						local_deferred_pending = false;
+						pthread_mutex_unlock(&lock);
 						state = BTV_READY;
 						local = get_volume_percent();
 					}
@@ -411,6 +454,9 @@ static void *btvolume_worker(void *unused) {
 						local = deferred_local;
 						deferred_local = -1;
 						deferred_remote = -1;
+						pthread_mutex_lock(&lock);
+						local_deferred_pending = false;
+						pthread_mutex_unlock(&lock);
 						printf("btvolume: volume turned by hand; not adopting the headphones' level\n");
 						remote = -1;
 						state = BTV_READY;
@@ -419,6 +465,10 @@ static void *btvolume_worker(void *unused) {
 						// routed here; keep it instead of waiting for a duplicate.
 						adopt_seen = deferred_remote;
 						deferred_remote = -1;
+						pthread_mutex_lock(&lock);
+						last_sent_bt = adopt_seen;
+						last_bus_bt = adopt_seen;
+						pthread_mutex_unlock(&lock);
 						printf("btvolume: the headphones are at %d/127; the player follows them\n", adopt_seen);
 						apply_local(bt_to_local(adopt_seen));
 						state = BTV_READY;
@@ -431,7 +481,7 @@ static void *btvolume_worker(void *unused) {
 						int volume = 0;
 						if (get_stream_volume(conn, have_path, &volume)) {
 							pthread_mutex_lock(&lock);
-							last_bt = volume;
+							last_bus_bt = volume;
 							pthread_mutex_unlock(&lock);
 							adopt_seen = volume;
 							adopt_deadline = now_ms() + ADOPT_SETTLE_MS;
@@ -447,6 +497,10 @@ static void *btvolume_worker(void *unused) {
 						// The headphones have said their level: this is the value
 						// the wait was for.
 						adopt_seen = remote;
+						pthread_mutex_lock(&lock);
+						last_sent_bt = adopt_seen;
+						last_bus_bt = adopt_seen;
+						pthread_mutex_unlock(&lock);
 						printf("btvolume: the headphones are at %d/127; the player follows them\n", adopt_seen);
 						apply_local(bt_to_local(adopt_seen));
 						state = BTV_READY;
@@ -479,10 +533,17 @@ static void *btvolume_worker(void *unused) {
 			}
 
 			if (state == BTV_READY) {
-				if (remote >= 0 && sync_on) {
+				if (local < 0 && deferred_local >= 0) {
+					local = deferred_local;
+					deferred_local = -1;
+				}
+				if (remote >= 0 && sync_on && local < 0) {
+					pthread_mutex_lock(&lock);
+					last_sent_bt = remote;
+					last_bus_bt = remote;
+					pthread_mutex_unlock(&lock);
 					printf("btvolume: the headphones moved the volume -> %d/127\n", remote);
 					apply_local(bt_to_local(remote));
-					local = -1;
 				}
 				if (local >= 0) {
 					int wanted = local_to_bt(local);
@@ -492,25 +553,58 @@ static void *btvolume_worker(void *unused) {
 					// the 128 Bluetooth steps come back as a percent that
 					// converts to a different step -- so without this the two
 					// sides would nudge each other by one for ever.
-					bool move = last_bt < 0 || (wanted != last_bt && bt_to_local(last_bt) != local);
+					bool move = last_sent_bt < 0 || (wanted != last_sent_bt && bt_to_local(last_sent_bt) != local);
 					pthread_mutex_unlock(&lock);
 					if (move) {
-						// Written down before the call, not after: the change
-						// comes back as a PropertiesChanged that can beat the
-						// reply here, and a value the signal handler does not
-						// recognise as ours is taken for the headphones'.
-						pthread_mutex_lock(&lock);
-						int previous = last_bt;
-						last_bt = wanted;
-						pthread_mutex_unlock(&lock);
-
-						if (!set_stream_volume(conn, have_path, wanted)) {
-							pthread_mutex_lock(&lock);
-							if (last_bt == wanted) {
-								last_bt = previous;
+						uint32_t now = now_ms();
+						if (sync_on && next_write_active && (int32_t)(now - next_write_at) < 0) {
+							deferred_local = local;
+							uint32_t rem = next_write_at - now;
+							if (rem == 0) {
+								rem = 1;
 							}
-							bus_broken = true;
+							if (rem < wait_ms) {
+								wait_ms = rem;
+							}
+						} else {
+							next_write_active = false;
+							// Written down before the call, not after: the change
+							// comes back as a PropertiesChanged that can beat the
+							// reply here, and a value the signal handler does not
+							// recognise as ours is taken for the headphones'.
+							pthread_mutex_lock(&lock);
+							int prev_sent = last_sent_bt;
+							int prev_bus = last_bus_bt;
+							last_sent_bt = wanted;
+							last_bus_bt = wanted;
+							local_write_active = true;
+							local_settling = true;
+							local_settle_until = now + LOCAL_SETTLE_MS;
 							pthread_mutex_unlock(&lock);
+
+							if (!set_stream_volume(conn, have_path, wanted)) {
+								pthread_mutex_lock(&lock);
+								if (last_sent_bt == wanted) {
+									last_sent_bt = prev_sent;
+								}
+								if (last_bus_bt == wanted) {
+									last_bus_bt = prev_bus;
+								}
+								local_write_active = false;
+								bus_broken = true;
+								pthread_mutex_unlock(&lock);
+							} else {
+								uint32_t done = now_ms();
+								pthread_mutex_lock(&lock);
+								local_write_active = false;
+								local_settling = true;
+								local_settle_until = done + LOCAL_SETTLE_MS;
+								pthread_mutex_unlock(&lock);
+								if (sync_on) {
+									next_write_active = true;
+									next_write_at = done + WRITE_MIN_INTERVAL_MS;
+								}
+							}
 						}
 					}
 				}
@@ -518,6 +612,7 @@ static void *btvolume_worker(void *unused) {
 		}
 
 		pthread_mutex_lock(&lock);
+		local_deferred_pending = deferred_local >= 0;
 		path_live = conn != NULL && have_path[0] && state != BTV_IDLE && !bus_broken;
 		bool work = stopping || pending_local >= 0 || pending_remote >= 0 || bus_reset ||
 					strcmp(want_path, have_path) != 0 || want_sync != have_sync;
@@ -561,6 +656,19 @@ void btvolume_stop(void) {
 	pthread_join(worker, NULL);
 	worker_running = false;
 	stopping = false;
+	have_path[0] = '\0';
+	have_sync = want_sync;
+	bus_reset = false;
+	pending_local = -1;
+	pending_remote = -1;
+	last_bus_bt = -1;
+	last_sent_bt = -1;
+	local_write_active = false;
+	local_deferred_pending = false;
+	local_settling = false;
+	path_live = false;
+	bus_broken = false;
+	adopted_path[0] = '\0';
 }
 
 void btvolume_set_device(const char *mac) {
@@ -585,7 +693,9 @@ void btvolume_set_device(const char *mac) {
 		// the new PCM is being adopted.
 		path_live = false;
 		pending_remote = -1;
-		last_bt = -1;
+		last_bus_bt = -1;
+		last_sent_bt = -1;
+		local_settling = false;
 		pthread_cond_signal(&wake);
 	}
 	pthread_mutex_unlock(&lock);
