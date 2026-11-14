@@ -37,6 +37,7 @@ static lv_obj_t *main_menu_icons_toggle;
 static lv_obj_t *main_menu_books_toggle;
 static lv_obj_t *main_menu_browse_toggle;
 static lv_obj_t *stock_gestures_toggle;
+static lv_obj_t *swipe_up_home_toggle;
 static lv_obj_t *battery_percent_toggle;
 static lv_obj_t *rounded_corners_toggle;
 static lv_obj_t *rounded_corners_card; // the toggle and, while it is on, the slider under it
@@ -102,6 +103,11 @@ static void main_menu_icons_cb(lv_event_t *e) {
 static void stock_gestures_cb(lv_event_t *e) {
 	(void)e;
 	gestures_set_stock(lv_obj_has_state(stock_gestures_toggle, LV_STATE_CHECKED));
+}
+
+static void swipe_up_home_cb(lv_event_t *e) {
+	(void)e;
+	gestures_set_swipe_up_home(lv_obj_has_state(swipe_up_home_toggle, LV_STATE_CHECKED));
 }
 
 static void main_menu_books_cb(lv_event_t *e) {
@@ -712,6 +718,17 @@ void appearance_init(gui_config_t *cfg) {
 	lv_obj_add_style(gesture_note, &theme_style_text_dim, 0);
 	lv_obj_set_style_text_font(gesture_note, &font_ui_22, 0);
 	lv_label_set_text(gesture_note, tr("appearance_stock_gestures_note"));
+
+	settingsrow_toggle(container, "appearance_swipe_up_home", &swipe_up_home_toggle, swipe_up_home_cb);
+	if (gestures_swipe_up_home()) {
+		lv_obj_add_state(swipe_up_home_toggle, LV_STATE_CHECKED);
+	}
+	lv_obj_t *swipe_up_home_note = lv_label_create(container);
+	lv_label_set_long_mode(swipe_up_home_note, LV_LABEL_LONG_WRAP);
+	lv_obj_set_width(swipe_up_home_note, lv_pct(100));
+	lv_obj_add_style(swipe_up_home_note, &theme_style_text_dim, 0);
+	lv_obj_set_style_text_font(swipe_up_home_note, &font_ui_22, 0);
+	lv_label_set_text(swipe_up_home_note, tr("appearance_swipe_up_home_note"));
 
 	settingsrow_toggle(container, "appearance_home_books", &main_menu_books_toggle, main_menu_books_cb);
 	if (main_menu_books()) lv_obj_add_state(main_menu_books_toggle, LV_STATE_CHECKED);

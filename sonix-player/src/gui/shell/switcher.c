@@ -396,7 +396,10 @@ static bool home_swiping;
 static lv_point_t home_swipe_start;
 
 static void home_swipe_cb(lv_event_t *e) {
-	if (back_gesture_off) return;
+	if (back_gesture_off || !gestures_swipe_up_home()) {
+		home_swiping = false;
+		return;
+	}
 	lv_event_code_t code = lv_event_get_code(e);
 	lv_indev_t *indev = lv_indev_active();
 	if (!indev) return;
@@ -437,6 +440,7 @@ void back_gesture_blocked(bool blocked) {
 	back_gesture_off = blocked;
 	if (blocked) {
 		back_dragging = false;
+		home_swiping = false;
 	}
 }
 

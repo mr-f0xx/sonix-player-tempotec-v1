@@ -9,6 +9,9 @@
 static bool loaded;
 static bool stock;
 
+static bool swipe_up_home_loaded;
+static bool swipe_up_home;
+
 bool gestures_stock(void) {
 	if (!loaded) {
 		loaded = true;
@@ -21,5 +24,20 @@ void gestures_set_stock(bool on) {
 	loaded = true;
 	stock = on;
 	config_set_bool("ui", "stock_gestures", on);
+	config_save();
+}
+
+bool gestures_swipe_up_home(void) {
+	if (!swipe_up_home_loaded) {
+		swipe_up_home_loaded = true;
+		swipe_up_home = config_get_bool("ui", "swipe_up_home", true);
+	}
+	return swipe_up_home;
+}
+
+void gestures_set_swipe_up_home(bool on) {
+	swipe_up_home_loaded = true;
+	swipe_up_home = on;
+	config_set_bool("ui", "swipe_up_home", on);
 	config_save();
 }
