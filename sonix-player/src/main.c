@@ -61,6 +61,8 @@
 #include "src/system/streaming/podcastcache.h"
 #include "src/system/streaming/podcastsubs.h"
 #include "src/system/streaming/podcastplayed.h"
+#include "src/system/streaming/jellyfin.h"
+#include "src/system/streaming/jellyfincache.h"
 #include "src/system/streaming/soundcloud.h"
 #include "src/system/streaming/soundcloudcache.h"
 #include "src/system/streaming/tidalcache.h"
@@ -2333,6 +2335,11 @@ int main(int argc, char **argv) {
 	tidalcache_clear(); // remove leftovers from a crash or power loss
 	soundcloudcache_set_root(card_root && card_root[0] ? card_root : gui_cfg.sd_root_path);
 	soundcloudcache_clear_on_exit();
+	if (addons_enabled("jellyfin")) {
+		jellyfin_init();
+	}
+	jellyfincache_set_root(card_root && card_root[0] ? card_root : gui_cfg.sd_root_path);
+	jellyfincache_clear_on_exit();
 	podcastcache_set_root(card_root && card_root[0] ? card_root : gui_cfg.sd_root_path);
 	podcastsubs_set_root(card_root && card_root[0] ? card_root : gui_cfg.sd_root_path);
 	// Which episodes were heard. The marks live in podcast.db beside the
@@ -2355,6 +2362,7 @@ int main(int argc, char **argv) {
 	library_forget_under(qobuzcache_dir());
 	library_forget_under(tidalcache_dir());
 	library_forget_under(soundcloudcache_dir());
+	library_forget_under(jellyfincache_dir());
 	if (!tls_available()) {
 		fprintf(stderr, "tls: unavailable; https radio stations cannot be opened\n");
 	}
