@@ -25,6 +25,13 @@
 #include "src/gui/nowplaying/trackmenu.h"
 #include "src/system/core/config.h"
 #include "src/system/playback/device_state.h"
+#include "src/system/streaming/qobuzcache.h"
+#include "src/system/streaming/qobuzsync.h"
+#include "src/system/streaming/streamkeep.h"
+#include "src/system/streaming/tidalcache.h"
+#include "src/system/streaming/tidalsync.h"
+#include "src/system/streaming/ytlikes.h"
+#include "src/system/streaming/ytmusic.h"
 #include "src/system/core/lang.h"
 #include "src/system/playback/playlist.h"
 #include "src/system/device/power.h"
@@ -222,6 +229,12 @@ typedef struct {
 	char album_artist[128];
 	char title[160];
 	bool from_paths; // filled by medialist_open_paths: not a query, cannot reorder
+	// A downloads list: Tidal's saved songs, YouTube Music's downloads. The
+	// rows are files the player itself put on the card, so deleting them is
+	// always offered here -- Music > Settings > Library's switch is about the
+	// user's own music, not about scratch this player wrote. See
+	// medialist_open_downloads().
+	bool downloads;
 	// The playlist this list came from, empty when it came from anywhere else.
 	// It is what lets the ellipsis offer to take a track out of the list it is
 	// looking at, rather than to put it into another one.
@@ -273,6 +286,7 @@ typedef struct {
 	lv_obj_t *sel_delete_btn; // when Music > Settings > Library allows it
 	lv_obj_t *sel_unfav_btn;  // favourites only
 	lv_obj_t *sel_unlist_btn; // a playlist only
+	lv_obj_t *sel_confirm_btn; // the downloads lists' tick, which asks with a prompt
 	lv_obj_t *sel_close_btn;
 	unsigned corner_shown;
 	int corner_slots;
@@ -994,6 +1008,13 @@ static library_filter_t filter_for(library_list_t kind);
 // playlist, the favourites, the most played tracks, and years, read from the
 // index. Not genres, and not a list handed in as paths.
 static bool panel_selectable(const panel_t *p) {
+	// A downloads list (Tidal's saved songs, YouTube Music's downloads) is a path
+	// list, and it is the one where choosing several rows is the whole point. Its
+	// corner offers what those rows can do: the queue, a favourite, a playlist and
+	// the bin the flag already allowed one row to reach.
+	if (p->downloads) {
+		return p->is_tracks;
+	}
 	if (p->from_paths) {
 		return false;
 	}
@@ -1095,13 +1116,23 @@ static void show_if(lv_obj_t *obj, bool show) {
 // of tracks can be deleted from: a row that stands for an album or an artist is
 // not a file.
 static bool panel_can_delete(const panel_t *p) {
-	return p->is_tracks && musicsettings_allow_delete();
+	return p->is_tracks && (p->downloads || musicsettings_allow_delete());
 }
 
 // Selection mode's buttons, four on every list: the queue first, close last,
 // and in between what fits the list. A playlist trades "add to a playlist" for
 // "take out of this one", the favourites trade the star for its removal.
+//
+// A downloads list (Tidal's or YouTube Music's saved songs) takes the Tidal
+// pages' arrangement instead: a tick and the way out, with the tick asking by
+// prompt what to do with the chosen rows (sel_confirm_cb below) -- the same
+// corner the streaming pages put on a selection.
 static void sel_buttons_show(panel_t *p, bool on) {
+	if (p->downloads) {
+		show_if(p->sel_confirm_btn, on);
+		show_if(p->sel_close_btn, on);
+		return;
+	}
 	bool playlist = p->kind == LIBRARY_LIST_PLAYLIST;
 	bool favourites = p->kind == LIBRARY_LIST_FAVOURITES;
 	show_if(p->sel_queue_btn, on);
@@ -1149,10 +1180,13 @@ static void selection_start(panel_t *p) {
 		}
 	}
 	sel_buttons_show(p, true);
-	// Four buttons, or five where the list may also delete what is chosen: the
-	// heading gives up the room they take, which in selection mode is no great
-	// loss -- the rows are the page until the selection is dealt with.
-	settingsrow_title_corner_slots(p->title_label, p->cfg, panel_can_delete(p) ? 5 : 4);
+	// Four buttons, or five where the list may also delete what is chosen; a
+	// downloads list has the two of the streaming pages' corner, the tick and
+	// the way out. The heading gives up the room they take, which in selection
+	// mode is no great loss -- the rows are the page until the selection is
+	// dealt with.
+	settingsrow_title_corner_slots(p->title_label, p->cfg,
+								   p->downloads ? 2 : (panel_can_delete(p) ? 5 : 4));
 	lv_obj_move_foreground(p->corner);
 	rows_update_selection(p);
 }
@@ -1373,8 +1407,7 @@ static void sel_gather(panel_t *p, path_list_t *list) {
 	selection_stop(p);
 }
 
-static void sel_add_cb(lv_event_t *e) {
-	panel_t *p = lv_event_get_user_data(e);
+static void sel_add_go(panel_t *p) {
 	if (!p || !p->selecting || p->sel_count == 0) {
 		return;
 	}
@@ -1388,11 +1421,12 @@ static void sel_add_cb(lv_event_t *e) {
 	path_list_free(&list);
 }
 
+static void sel_add_cb(lv_event_t *e) { sel_add_go(lv_event_get_user_data(e)); }
+
 // Each track right after the one playing, the first chosen first -- see
 // playlist_insert_next() -- and the queue on disk written now rather than at
 // the next track change.
-static void sel_queue_cb(lv_event_t *e) {
-	panel_t *p = lv_event_get_user_data(e);
+static void sel_queue_go(panel_t *p) {
 	if (!p || !p->selecting || p->sel_count == 0) {
 		return;
 	}
@@ -1411,8 +1445,9 @@ static void sel_queue_cb(lv_event_t *e) {
 	path_list_free(&list);
 }
 
-static void sel_fav_cb(lv_event_t *e) {
-	panel_t *p = lv_event_get_user_data(e);
+static void sel_queue_cb(lv_event_t *e) { sel_queue_go(lv_event_get_user_data(e)); }
+
+static void sel_fav_go(panel_t *p) {
 	if (!p || !p->selecting || p->sel_count == 0) {
 		return;
 	}
@@ -1426,7 +1461,10 @@ static void sel_fav_cb(lv_event_t *e) {
 	path_list_free(&list);
 }
 
+static void sel_fav_cb(lv_event_t *e) { sel_fav_go(lv_event_get_user_data(e)); }
+
 static void window_update(panel_t *p);
+static void model_remove(panel_t *p, int index);
 
 // Taking rows out of the list on screen. Asked first: a slip of the finger on a
 // selection of fifty is fifty tracks to find again.
@@ -1520,6 +1558,40 @@ static void sel_unlist_cb(lv_event_t *e) { sel_remove_ask(lv_event_get_user_data
 
 static void sel_unfav_cb(lv_event_t *e) { sel_remove_ask(lv_event_get_user_data(e)); }
 
+static void sel_delete_ask(panel_t *p);
+
+// The tick's four lines take a void* because that is the sheet's shape; the
+// work itself is the same as the corner buttons'.
+static void sel_queue_action(void *user) { sel_queue_go(user); }
+
+static void sel_fav_action(void *user) { sel_fav_go(user); }
+
+static void sel_add_action(void *user) { sel_add_go(user); }
+
+static void sel_delete_action(void *user) { sel_delete_ask(user); }
+
+// The downloads lists' tick, which asks what to do rather than doing it. The
+// sheet holds what such a list's own three dots hold, in the same order, with
+// the one irreversible line last -- the same shape as the Tidal pages' tick
+// (see bulk_sheet_cb there), because these rows are those pages' songs.
+static void sel_confirm_cb(lv_event_t *e) {
+	lv_event_stop_bubbling(e);
+	panel_t *p = lv_event_get_user_data(e);
+	if (!p || !p->selecting || p->sel_count == 0) {
+		return;
+	}
+	popover_item_t items[4];
+	int n = 0;
+	items[n++] = (popover_item_t){"add_to_queue", sel_queue_action, p};
+	items[n++] = (popover_item_t){"medialist_add_to_favourites", sel_fav_action, p};
+	items[n++] = (popover_item_t){"add_to_playlist", sel_add_action, p};
+	// Last, because it is the only line here that cannot be undone.
+	if (panel_can_delete(p)) {
+		items[n++] = (popover_item_t){"delete", sel_delete_action, p};
+	}
+	popover_show(lv_event_get_current_target(e), items, n);
+}
+
 // ---------------------------------------------------------------------------
 // Deleting tracks from the card
 //
@@ -1578,15 +1650,29 @@ static void delete_confirmed(void *user) {
 	if (deleted > 0) {
 		library_remove_tracks((const char *const *)gone, deleted);
 	}
+	if (p) {
+		if (p->downloads) {
+			// A downloads list is a list of files this player wrote, not a
+			// window on the library: there is no query to re-run, so the rows
+			// that went are taken out of the model as they were deleted. Back
+			// to front, because each removal shifts the ones after it.
+			for (int i = 0; i < deleted; i++) {
+				for (int j = p->count - 1; j >= 0; j--) {
+					if (p->entries[j].path && strcmp(p->entries[j].path, gone[i]) == 0) {
+						model_remove(p, j);
+						break;
+					}
+				}
+			}
+		} else {
+			// The index moved under the list: everything the rows stand for is
+			// read again, and the ones that went are gone from it.
+			panel_refresh_stale(p);
+			window_update(p);
+		}
+	}
 	free(gone);
 	delete_pending_free();
-
-	if (p) {
-		// The index moved under the list: everything the rows stand for is
-		// read again, and the ones that went are gone from it.
-		panel_refresh_stale(p);
-		window_update(p);
-	}
 
 	if (deleted == asked && asked > 0) {
 		toast_success(deleted == 1 ? "medialist_track_deleted" : "medialist_tracks_deleted");
@@ -3465,14 +3551,75 @@ static void menu_playlist_remove_action(void *user) {
 	}
 }
 
+bool medialist_fav_contains(const char *path) {
+	char yt_id[YTLIKES_ID_MAX];
+	if (!path || !path[0]) {
+		return false;
+	}
+	if (ytmusic_cache_track_id(path, yt_id, sizeof(yt_id))) {
+		return yt_id[0] && ytlikes_contains(yt_id);
+	}
+	long tidal_id = tidalcache_track_id(path);
+	if (tidal_id > 0) {
+		return tidalsync_is_favorite(tidal_id);
+	}
+	long qobuz_id = qobuzcache_track_id(path);
+	if (qobuz_id > 0) {
+		return qobuzsync_is_favorite(qobuz_id);
+	}
+	return library_fav_contains(path);
+}
+
+void medialist_fav_toggle(const char *path, const char *title, const char *artist) {
+	if (!path || !path[0]) {
+		return;
+	}
+	char yt_id[YTLIKES_ID_MAX];
+	if (ytmusic_cache_track_id(path, yt_id, sizeof(yt_id))) {
+		// shortcut: a copy kept before its id was written has none in its tags,
+		// so it can only be starred by playing it again; upgrade when old cards
+		// have to be honoured.
+		if (!yt_id[0]) {
+			return;
+		}
+		ytlike_t like;
+		memset(&like, 0, sizeof(like));
+		snprintf(like.id, sizeof(like.id), "%s", yt_id);
+		snprintf(like.title, sizeof(like.title), "%s", title && title[0] ? title : yt_id);
+		snprintf(like.artist, sizeof(like.artist), "%s", artist ? artist : "");
+		ytlikes_toggle(&like);
+		return;
+	}
+	long tidal_id = tidalcache_track_id(path);
+	if (tidal_id > 0) {
+		tidalsync_favorite_toggle(tidal_id, !tidalsync_is_favorite(tidal_id), NULL, NULL);
+		return;
+	}
+	long qobuz_id = qobuzcache_track_id(path);
+	if (qobuz_id > 0) {
+		qobuzsync_favorite_toggle(qobuz_id, !qobuzsync_is_favorite(qobuz_id), NULL, NULL);
+		return;
+	}
+	library_fav_toggle(path, title, artist);
+}
+
+bool medialist_fav_is_stream(const char *path) {
+	char yt_id[YTLIKES_ID_MAX];
+	if (!path || !path[0]) {
+		return false;
+	}
+	return ytmusic_cache_track_id(path, yt_id, sizeof(yt_id)) || tidalcache_track_id(path) > 0 ||
+		   qobuzcache_track_id(path) > 0 || streamkeep_is_stream_track(path);
+}
+
 static void menu_fav_action(void *user) {
 	(void)user;
 	if (!menu_path[0]) {
 		return;
 	}
 	// No notification popup -- the change itself is the feedback.
-	bool was_favourite = library_fav_contains(menu_path);
-	library_fav_toggle(menu_path, menu_name, "");
+	bool was_favourite = medialist_fav_contains(menu_path);
+	medialist_fav_toggle(menu_path, menu_name, "");
 
 	// Taken out of the favourites while looking at the favourites: the row is
 	// about to stand for something that is no longer in the list, so it goes.
@@ -3510,6 +3657,29 @@ static void menu_details_action(void *user) {
 	if (menu_path[0]) {
 		trackmenu_details_open(menu_path);
 	}
+}
+
+// "Delete from the card", on a downloads list and nowhere else: these rows are
+// files this player put there itself, so removing one is housekeeping rather
+// than the irreversible change Music > Settings > Library guards for the user's
+// own recordings. Asked first all the same -- see delete_confirmed() -- because
+// the file is the file either way.
+static void menu_delete_action(void *user) {
+	(void)user;
+	if (!menu_path[0] || !menu_panel || !menu_panel->downloads) {
+		return;
+	}
+	delete_pending_free();
+	delete_paths = calloc(1, sizeof(*delete_paths));
+	if (!delete_paths || !(delete_paths[0] = strdup(menu_path))) {
+		delete_pending_free();
+		return;
+	}
+	delete_count = 1;
+	delete_panel = menu_panel;
+	char message[320];
+	snprintf(message, sizeof(message), "%s. %s", menu_name[0] ? menu_name : menu_path, tr("medialist_delete_note"));
+	confirm_show("medialist_delete_from_card", message, "delete", delete_confirmed, NULL);
 }
 
 // "Show album": the record this track came off, with everything else on it.
@@ -3565,7 +3735,7 @@ static void menu_btn_cb(lv_event_t *e) {
 		menu_album[0] = '\0';
 	}
 
-	popover_item_t items[6];
+	popover_item_t items[7];
 	int n = 0;
 	// The two "add to" lines stay next to each other: they are the same kind
 	// of thing, and reading past one to reach the other is friction with no
@@ -3573,7 +3743,7 @@ static void menu_btn_cb(lv_event_t *e) {
 	// ways of finding out more about the track rather than doing something to
 	// it.
 	items[n++] = (popover_item_t){
-		library_fav_contains(menu_path) ? "remove_from_favourites" : "medialist_add_to_favourites", menu_fav_action, NULL};
+		medialist_fav_contains(menu_path) ? "remove_from_favourites" : "medialist_add_to_favourites", menu_fav_action, NULL};
 	items[n++] = (popover_item_t){"add_to_queue", menu_queue_action, NULL};
 	items[n++] = (popover_item_t){"smartmix_start", medialist_mix_track, NULL};
 	// Inside a playlist the useful action is the opposite one: this list is
@@ -3592,6 +3762,10 @@ static void menu_btn_cb(lv_event_t *e) {
 	}
 
 	items[n++] = (popover_item_t){"details", menu_details_action, NULL};
+	// Last, because it is the only line here that cannot be undone.
+	if (p->downloads) {
+		items[n++] = (popover_item_t){"delete", menu_delete_action, NULL};
+	}
 	popover_show(button, items, n);
 }
 
@@ -3740,11 +3914,15 @@ static void build_panel(panel_t *p, gui_config_t *cfg, bool is_tracks, int slot_
 	p->sel_delete_btn = corner_button(p->corner, &icon_trash, sel_delete_cb, p);
 	p->sel_unfav_btn = corner_button(p->corner, &icon_heart_filled, sel_unfav_cb, p);
 	p->sel_unlist_btn = corner_button(p->corner, &icon_list_x, sel_unlist_cb, p);
+	// The downloads lists' tick, left of the way out for them: it opens the
+	// prompt that names what a selection of saved songs can do.
+	p->sel_confirm_btn = corner_button(p->corner, &icon_check, sel_confirm_cb, p);
 	p->sel_close_btn = corner_button(p->corner, &icon_close, sel_close_cb, p);
 	lv_obj_set_hidden(p->sel_queue_btn, true);
 	lv_obj_set_hidden(p->sel_fav_btn, true);
 	lv_obj_set_hidden(p->sel_add_btn, true);
 	lv_obj_set_hidden(p->sel_delete_btn, true);
+	lv_obj_set_hidden(p->sel_confirm_btn, true);
 	lv_obj_set_hidden(p->sel_close_btn, true);
 
 	// The "nothing here" note. Wraps at the rows' width: at the V1's font 24
@@ -4208,6 +4386,7 @@ void medialist_open_paths(const char *title, const char *const *paths, const cha
 	p->kind = LIBRARY_LIST_TRACKS;
 	p->filter = LIBRARY_FILTER_NONE;
 	p->from_paths = true;
+	p->downloads = false;
 	// A path list is always an ordinary listen, never a seed walk.
 	p->picking_seed = false;
 	snprintf(p->playlist, sizeof(p->playlist), "%s", playlist ? playlist : "");
@@ -4270,6 +4449,18 @@ void medialist_open_paths(const char *title, const char *const *paths, const cha
 	window_update(p);
 
 	switch_screen(p->screen);
+}
+
+// The same list, for files this player downloaded itself: Tidal's saved songs
+// and YouTube Music's downloads. Identical rows and identical playback; what
+// the flag adds is the offer to delete them, from the row's own menu and from
+// a selection, without asking Music > Settings > Library first -- that switch
+// is about the user's own collection, and these files are the player's own
+// scratch, written on request and never edited.
+void medialist_open_downloads(const char *title, const char *const *paths, const char *const *names,
+								  const char *const *artists, int count) {
+	medialist_open_paths(title, paths, names, artists, count, NULL);
+	panel_tracks.downloads = true;
 }
 
 void medialist_playlist_renamed(const char *old_name, const char *new_name) {

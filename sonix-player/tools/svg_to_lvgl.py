@@ -566,6 +566,9 @@ COLOR_ICONS = [
     # clear of the source marks. It is embedded like the other colour artwork,
     # so the player does not depend on a PNG decoder or a resource file.
     ("hi-res-audio.png", "hires_audio", (34, 34)),
+    # The YouTube Music mark for the player's top-right corner, where the
+    # Qobuz, Tidal and podcast marks sit. It is a PNG and needs no converter.
+    ("ytmusic-badge.png", "ytmusic_badge", 52),
 ]
 
 

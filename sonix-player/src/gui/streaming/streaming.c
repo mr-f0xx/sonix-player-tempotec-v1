@@ -16,7 +16,9 @@
 #include "src/gui/streaming/soundcloudpage.h"
 #include "src/gui/streaming/tidalpage.h"
 #include "src/gui/streaming/subsonicpage.h"
+#include "src/gui/streaming/ytmusicpage.h"
 #include "src/system/addons/addons.h"
+#include "src/system/streaming/ytmusic.h"
 
 lv_obj_t *streaming_screen;
 
@@ -40,6 +42,7 @@ static const streaming_item_t tokyo_items[] = {
 	{"tidal", &icon_tidal_mark, THEME_SEMANTIC_CYAN, &tidal_screen, "tidal"},
 	{"qobuz", &icon_qobuz_mark, THEME_SEMANTIC_PURPLE, &qobuz_screen, "qobuz"},
 	{"subsonic", &icon_music_note, THEME_SEMANTIC_BLUE, &subsonic_screen, "subsonic"},
+	{"YouTube Music", &icon_music_note, THEME_SEMANTIC_RED, &ytmusic_screen, "ytmusic"},
 };
 
 static void streaming_list_build(gui_config_t *cfg) {
@@ -67,6 +70,10 @@ static void streaming_refresh_theme(void) {
 }
 
 void streaming_init(gui_config_t *cfg) {
+	// The key material the service reads at start-up, before any page is built:
+	// the cookies beside the other on-device state, and the InnerTube key.
+	ytmusic_init();
+
 	// Each service's pages are built only while its Plugins switch is on.
 	if (addons_enabled("qobuz")) {
 		qobuzpage_init(cfg);
@@ -83,16 +90,20 @@ void streaming_init(gui_config_t *cfg) {
 	if (addons_enabled("soundcloud")) {
 		soundcloudpage_init(cfg);
 	}
+	if (addons_enabled("ytmusic")) {
+		ytmusicpage_init(cfg);
+	}
 
 	const grid_entry_t all_entries[] = {
 		{"soundcloud", &icon_menu_soundcloud, &soundcloud_screen, NULL},
+		{"YouTube Music", &icon_music_note, &ytmusic_screen, NULL},
 		{"tidal", &icon_menu_tidal, &tidal_screen, NULL},
 		{"qobuz", &icon_menu_qobuz, &qobuz_screen, NULL},
 		{"radio", &icon_menu_radio, &radiopage_screen, NULL},
 		{"podcasts", &icon_menu_podcast, &podcast_screen, NULL},
 		{"subsonic", &icon_menu_streaming, &subsonic_screen, NULL},
 	};
-	const char *const all_addons[] = {"soundcloud", "tidal", "qobuz", "radio", "podcasts", "subsonic"};
+	const char *const all_addons[] = {"soundcloud", "ytmusic", "tidal", "qobuz", "radio", "podcasts", "subsonic"};
 	grid_entry_t entries[sizeof(all_entries) / sizeof(all_entries[0])];
 	int count = 0;
 	for (unsigned int i = 0; i < sizeof(all_entries) / sizeof(all_entries[0]); i++) {

@@ -46,6 +46,8 @@ make -C sonix-player/tests statusbar-ui
 make -C sonix-player/tests extractkeys
 make -C sonix-player/tests tidal
 make -C sonix-player/tests tidal-ui
+make -C sonix-player/tests ytmusic
+make -C sonix-player/tests relay
 make -C sonix-player/tests subsonicdl
 make -C sonix-player/tests subsonic-all
 ```
@@ -75,6 +77,8 @@ The `vinylayout` UI test checks the Vinyl sleeve/record arithmetic at 240×320 a
 The `playerdeck` UI test exercises the V1 deck's real LVGL flex layout while switching between Standard and Waveform, including large font metrics and the fallback when waveform allocation fails. It checks row spacing and that every playback button stays clear of the bottom edge.
 
 The `musicsettings-rows` UI test checks that NOS does not reuse Filters' waveform bitmap and that the expandable DSD gain card shares the icon/title columns and collapsed midline of ordinary Music settings rows across all 11 shipped languages, all five themes, both switch states and larger text.
+
+The `ytmusic` suite is YouTube Music's backend against a fake network: search, charts and the player reply are fixtures under `fixtures/`, the streamed song starts before it has fully arrived (the `ready` callback fires on a partial file, at 3000 of 4095 bytes, with the `moov` box read) and its fixture body carries an `ftyp`+`moov` so the early start is a decodeable one, and the cache lives under the suite's own `.build/ytmusic-cache`. The InnerTube key is a build input, never a file in this repository, so the suite is built twice: `test_ytmusic` carries a dummy key (`test-key-not-a-credential`, which the fake network never sees) and `test_ytmusic_keyless` is built with an empty one and checks that the first search returns `ytmusic_api_key_missing` instead of sending a request the endpoint can only refuse. Both are run by `make ytmusic`. `make relay` checks `tools/ytmusic-relay.py`, the self-hostable relay the player falls back to, with the same fake-network discipline.
 
 The `tagwrite` suite checks FLAC and ID3 rewrites, artwork/audio preservation, validation and refusal of unsafe layouts. The `artsearch` suite uses a mocked network to test catalog parsing, URL validation and download limits. The aggregate `ui` suite exercises the Tag Manager browser, editor and cover selection at the V1 resolution with a mocked service.
 

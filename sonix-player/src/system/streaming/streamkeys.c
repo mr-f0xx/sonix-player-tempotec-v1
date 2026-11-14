@@ -31,9 +31,18 @@ static char lastfm_secret[64];
 static char soundcloud_client_id[64];
 static char soundcloud_oauth_token[256];
 static char soundcloud_username[128];
+// The InnerTube key the music.youtube.com page hands every visitor. It belongs
+// to Google rather than to this project, so it is a value from the keys file
+// like the rest of them -- and, being one value anybody can obtain, the piece
+// a personal copy of the player can carry on the card rather than in a build.
+static char ytmusic_api_key[128];
 static char source_path[256];
 static bool loaded_any;
 static bool loaded_from_image;
+// The card may fill only what the image left empty -- image values win, a
+// card adds the ones a build does not carry.
+static bool merge_missing_keys;
+static bool load_added_keys;
 
 // Not a plain memset: one on a buffer about to be freed may be dropped by the
 // compiler.
@@ -128,6 +137,14 @@ static void parse_line(char *line, char section[32]) {
 			dest = tidal_client_secret;
 			dest_size = sizeof(tidal_client_secret);
 		}
+	} else if (strcmp(section, "ytmusic") == 0) {
+		// api_key is the only thing this file carries for YouTube Music: the
+		// OAuth client pair it used to hold is gone with the sign-in it was
+		// for, and an old card still naming it is simply ignored.
+		if (strcmp(key, "api_key") == 0) {
+			dest = ytmusic_api_key;
+			dest_size = sizeof(ytmusic_api_key);
+		}
 	} else if (strcmp(section, "soundcloud") == 0) {
 		if (strcmp(key, "client_id") == 0) {
 			dest = soundcloud_client_id;
@@ -141,9 +158,10 @@ static void parse_line(char *line, char section[32]) {
 		}
 	}
 
-	if (dest) {
+	if (dest && (!merge_missing_keys || !dest[0])) {
 		snprintf(dest, dest_size, "%s", value);
 		loaded_any = true;
+		load_added_keys = true;
 	}
 }
 
@@ -239,6 +257,7 @@ static bool parse_sealed(const char *path, unsigned char *data, size_t len) {
 
 // Reads `path`, sealed or plain. False when it is not there.
 static bool load(const char *path) {
+	load_added_keys = false;
 	FILE *f = fopen(path, "rb");
 	if (!f) {
 		return false;
@@ -272,10 +291,12 @@ static bool load(const char *path) {
 static void report(const char *path) {
 	snprintf(source_path, sizeof(source_path), "%s", path);
 
-	printf("streamkeys: from %s -- Qobuz %s, Tidal %s, Podcast %s, Last.fm %s\n", path,
+	// The InnerTube key is reported by its presence only, like every other
+	// value here: the log lands on the card and travels further than it does.
+	printf("streamkeys: from %s -- Qobuz %s, Tidal %s, YouTube Music %s, Podcast %s, Last.fm %s\n", path,
 		   qobuz_app_id[0] && qobuz_app_secret[0] ? "yes" : "no",
 		   tidal_client_id[0] && tidal_client_secret[0] ? "yes" : "no",
-		   podcast_key[0] && podcast_secret[0] ? "yes" : "no",
+		   ytmusic_api_key[0] ? "yes" : "no", podcast_key[0] && podcast_secret[0] ? "yes" : "no",
 		   lastfm_key[0] && lastfm_secret[0] ? "yes" : "no");
 }
 
@@ -310,7 +331,7 @@ void streamkeys_init(void) {
 	}
 
 	if (!path) {
-		printf("streamkeys: no %s, Tidal, Qobuz, podcasts and Last.fm stay off\n",
+		printf("streamkeys: no %s, Tidal, Qobuz, YouTube Music, podcasts and Last.fm stay off\n",
 			   configured && configured[0] ? configured : STREAMKEYS_PATH);
 		return;
 	}
@@ -319,84 +340,30 @@ void streamkeys_init(void) {
 }
 
 bool streamkeys_load_card(const char *card_root) {
-	// A firmware that carries its own keys in the rootfs keeps them. The card
-	// is a way in for builds that ship none, not a way to replace what an image
-	// says. When /usr/data/streaming-keys.ini holds on-device extracted pairs,
-	// the card can still supply [podcast]/[lastfm] or updated pairs.
-	if (loaded_from_image) {
-		return false;
-	}
 	if (!card_root || !card_root[0]) {
 		return false;
 	}
 
-	char prev_qid[sizeof(qobuz_app_id)], prev_qsec[sizeof(qobuz_app_secret)];
-	char prev_tid[sizeof(tidal_client_id)], prev_tsec[sizeof(tidal_client_secret)];
-	char prev_pk[sizeof(podcast_key)], prev_ps[sizeof(podcast_secret)];
-	char prev_lk[sizeof(lastfm_key)], prev_ls[sizeof(lastfm_secret)];
-	char prev_sc_cid[sizeof(soundcloud_client_id)];
-	char prev_sc_tok[sizeof(soundcloud_oauth_token)];
-	char prev_sc_usr[sizeof(soundcloud_username)];
-	memcpy(prev_qid, qobuz_app_id, sizeof(prev_qid));
-	memcpy(prev_qsec, qobuz_app_secret, sizeof(prev_qsec));
-	memcpy(prev_tid, tidal_client_id, sizeof(prev_tid));
-	memcpy(prev_tsec, tidal_client_secret, sizeof(prev_tsec));
-	memcpy(prev_pk, podcast_key, sizeof(prev_pk));
-	memcpy(prev_ps, podcast_secret, sizeof(prev_ps));
-	memcpy(prev_lk, lastfm_key, sizeof(prev_lk));
-	memcpy(prev_ls, lastfm_secret, sizeof(prev_ls));
-	memcpy(prev_sc_cid, soundcloud_client_id, sizeof(prev_sc_cid));
-	memcpy(prev_sc_tok, soundcloud_oauth_token, sizeof(prev_sc_tok));
-	memcpy(prev_sc_usr, soundcloud_username, sizeof(prev_sc_usr));
-
 	char path[512];
 	const char *const names[] = {STREAMKEYS_CARD_BIN, STREAMKEYS_CARD_INI};
+	bool previous_merge = merge_missing_keys;
+	merge_missing_keys = true;
+	bool added = false;
 	for (size_t i = 0; i < sizeof(names) / sizeof(names[0]); i++) {
 		snprintf(path, sizeof(path), "%s/%s", card_root, names[i]);
 		if (load(path)) {
-			// A .bin sealed with another key reads as a file and yields
-			// nothing; the .ini beside it, if there is one, still gets its
-			// turn.
-			bool changed = strcmp(prev_qid, qobuz_app_id) != 0 || strcmp(prev_qsec, qobuz_app_secret) != 0 ||
-						   strcmp(prev_tid, tidal_client_id) != 0 || strcmp(prev_tsec, tidal_client_secret) != 0 ||
-						   strcmp(prev_pk, podcast_key) != 0 || strcmp(prev_ps, podcast_secret) != 0 ||
-						   strcmp(prev_lk, lastfm_key) != 0 || strcmp(prev_ls, lastfm_secret) != 0 ||
-						   strcmp(prev_sc_cid, soundcloud_client_id) != 0 ||
-						   strcmp(prev_sc_tok, soundcloud_oauth_token) != 0 ||
-						   strcmp(prev_sc_usr, soundcloud_username) != 0;
-			if (!loaded_any) {
+			// An unreadable sealed file, or one that adds no new keys, yields to
+			// the next card file. Card values only fill gaps; image values win.
+			if (!load_added_keys) {
 				continue;
 			}
-			wipe(prev_qid, sizeof(prev_qid));
-			wipe(prev_qsec, sizeof(prev_qsec));
-			wipe(prev_tid, sizeof(prev_tid));
-			wipe(prev_tsec, sizeof(prev_tsec));
-			wipe(prev_pk, sizeof(prev_pk));
-			wipe(prev_ps, sizeof(prev_ps));
-			wipe(prev_lk, sizeof(prev_lk));
-			wipe(prev_ls, sizeof(prev_ls));
-			wipe(prev_sc_cid, sizeof(prev_sc_cid));
-			wipe(prev_sc_tok, sizeof(prev_sc_tok));
-			wipe(prev_sc_usr, sizeof(prev_sc_usr));
-			if (changed) {
-				printf("streamkeys: the microSD card has them\n");
-				report(path);
-			}
-			return changed;
+			added = true;
+			printf("streamkeys: the microSD card added missing keys\n");
+			report(path);
 		}
 	}
-	wipe(prev_qid, sizeof(prev_qid));
-	wipe(prev_qsec, sizeof(prev_qsec));
-	wipe(prev_tid, sizeof(prev_tid));
-	wipe(prev_tsec, sizeof(prev_tsec));
-	wipe(prev_pk, sizeof(prev_pk));
-	wipe(prev_ps, sizeof(prev_ps));
-	wipe(prev_lk, sizeof(prev_lk));
-	wipe(prev_ls, sizeof(prev_ls));
-	wipe(prev_sc_cid, sizeof(prev_sc_cid));
-	wipe(prev_sc_tok, sizeof(prev_sc_tok));
-	wipe(prev_sc_usr, sizeof(prev_sc_usr));
-	return false;
+	merge_missing_keys = previous_merge;
+	return added;
 }
 
 bool streamkeys_reload(const char *card_root) {
@@ -414,6 +381,7 @@ bool streamkeys_reload(const char *card_root) {
 	wipe(soundcloud_client_id, sizeof(soundcloud_client_id));
 	wipe(soundcloud_oauth_token, sizeof(soundcloud_oauth_token));
 	wipe(soundcloud_username, sizeof(soundcloud_username));
+	wipe(ytmusic_api_key, sizeof(ytmusic_api_key));
 	source_path[0] = '\0';
 	loaded_any = false;
 
@@ -545,6 +513,15 @@ bool streamkeys_write_extracted(const char *qobuz_id, const char *qobuz_sec, con
 		}
 		pos += n;
 	}
+	if (ytmusic_api_key[0]) {
+		int n = snprintf(buf + pos, sizeof(buf) - (size_t)pos,
+						 "[ytmusic]\napi_key = %s\n\n", ytmusic_api_key);
+		if (n < 0 || (size_t)(pos + n) >= sizeof(buf)) {
+			wipe(buf, sizeof(buf));
+			return false;
+		}
+		pos += n;
+	}
 	if (lastfm_key[0] && lastfm_secret[0]) {
 		int n = snprintf(buf + pos, sizeof(buf) - (size_t)pos,
 						 "[lastfm]\napi_key = %s\napi_secret = %s\n\n", lastfm_key, lastfm_secret);
@@ -633,5 +610,7 @@ const char *streamkeys_lastfm_secret(void) { return or_null(lastfm_secret); }
 const char *streamkeys_soundcloud_client_id(void) { return or_null(soundcloud_client_id); }
 const char *streamkeys_soundcloud_oauth_token(void) { return or_null(soundcloud_oauth_token); }
 const char *streamkeys_soundcloud_username(void) { return or_null(soundcloud_username); }
+
+const char *streamkeys_ytmusic_api_key(void) { return or_null(ytmusic_api_key); }
 
 const char *streamkeys_source(void) { return loaded_any ? source_path : NULL; }

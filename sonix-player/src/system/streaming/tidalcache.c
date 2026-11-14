@@ -583,9 +583,17 @@ bool tidalcache_tag(const char *path, const char *key, char *out, size_t size) {
 	return read_tag(path, key, out, size);
 }
 
+// A copy kept on the card is still Tidal's: the id sits in the tags streamkeep
+// writes beside it, so the star there reaches the account rather than the
+// card's own favourites.
 long tidalcache_track_id(const char *path) {
 	if (!tidalcache_owns(path)) {
-		return 0;
+		char kept[24];
+		if (!path || !strstr(path, "/Music/Tidal/") || !read_tag(path, "id", kept, sizeof(kept))) {
+			return 0;
+		}
+		long id = strtol(kept, NULL, 10);
+		return id > 0 ? id : 0;
 	}
 	const char *name = strrchr(path, '/');
 	name = name ? name + 1 : path;

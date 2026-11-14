@@ -326,4 +326,6 @@ extern const lv_image_dsc_t icon_menu_metronome;
 extern const lv_image_dsc_t icon_settings_plugins;
 extern const lv_image_dsc_t icon_settings_more;
 
+extern const lv_image_dsc_t icon_ytmusic_badge;
+
 #endif // ICONS_H

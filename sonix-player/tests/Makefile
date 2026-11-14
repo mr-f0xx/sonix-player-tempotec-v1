@@ -53,6 +53,13 @@ extractkeys: $(BUILD)/test_stockkeys
 	python3 test_extract_streamkeys.py
 	$(BUILD)/test_stockkeys
 
+# The relay the player asks for when a track is played (tools/ytmusic-relay.py),
+# with the network taken out: the yt-dlp call is a canned record and the
+# endpoints are driven over a real socket. Plain Python, no compiler.
+.PHONY: relay
+relay:
+	python3 test_ytmusic_relay.py
+
 $(ROOT)/build_gen/streamkeys_key.h:
 	@mkdir -p $(dir $@)
 	@printf '// Generated for host tests.\n#define STREAMKEYS_KEY_LEN 0\n' > $@
@@ -100,6 +107,51 @@ qobuzdl: $(BUILD)/test_qobuzdl
 $(BUILD)/test_qobuzdl: test_qobuzdl.c $(ROOT)/src/system/streaming/qobuzdl.c $(ROOT)/src/system/streaming/qobuzdl.h
 	@mkdir -p $(BUILD)
 	$(CC) $(CPPFLAGS) -I$(ROOT)/lvgl $(CFLAGS) -Wno-error=format-truncation -DLV_CONF_INCLUDE_SIMPLE=1 -DHOST_BUILD -o $@ test_qobuzdl.c $(ROOT)/src/system/streaming/qobuzdl.c $(ROOT)/src/system/streaming/podcastdl.c $(LDFLAGS) $(LDLIBS)
+
+# The YouTube Music playback resolver against a fake network: the real
+# ytmusic.c linked with a fake http layer, so the resolver runs end to end on
+# any host (real http.c needs the POSIX socket API, which is the Linux hosts'
+# alone). The canned replies carry the Piped /streams shape and the refusals
+# Google sends today; the checks say which stream is picked and which error
+# stands. Guest search against the live endpoint is checked by hand; the
+# suite cannot reach the network, by design.
+# The InnerTube key is a build input, never a committed one. The suite needs a
+# non-empty value for the requests it checks -- any value, since the network is
+# a fake -- and the keyless build below is the check on what a build without
+# one says.
+YTM_KEY_FLAG = -DYTMUSIC_API_KEY='"test-key-not-a-credential"'
+YTM_SRC = test_ytmusic.c win_compat_host.c $(ROOT)/src/system/streaming/ytmusic.c \
+          $(ROOT)/src/system/streaming/ytlikes.c \
+          $(ROOT)/src/system/streaming/ytpodcastplayed.c \
+          $(ROOT)/src/system/streaming/streamkeys.c \
+          $(ROOT)/src/system/core/json.c $(ROOT)/src/system/core/config.c \
+          $(ROOT)/src/system/core/region.c \
+          $(ROOT)/src/system/core/sha1.c $(ROOT)/src/system/decode/growfile.c \
+          $(ROOT)/src/system/decode/mp4.c
+YTM_HDR = $(ROOT)/src/system/streaming/ytmusic.h \
+          $(ROOT)/src/system/streaming/streamkeys.h \
+          $(ROOT)/src/system/net/http.h $(ROOT)/src/system/core/config.h \
+          $(ROOT)/build_gen/streamkeys_key.h
+.PHONY: ytmusic
+ytmusic: $(BUILD)/test_ytmusic $(BUILD)/test_ytmusic_keyless
+	$(BUILD)/test_ytmusic
+	$(BUILD)/test_ytmusic_keyless
+
+# streamkeys.c reads its key out of a generated header; the tests run with no
+# key, which is exactly what the generated header says.
+$(BUILD)/test_ytmusic: $(YTM_SRC) $(YTM_HDR)
+	@mkdir -p $(BUILD)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -I$(BUILD) -include win_compat_host.h $(YTM_KEY_FLAG) \
+		-o $@ $(YTM_SRC) $(LDFLAGS) $(LDLIBS)
+
+# The same sources built the way a build with no key is built: the one check
+# it runs is that the first request names the missing key instead of sending a
+# request the endpoint can only refuse.
+$(BUILD)/test_ytmusic_keyless: $(YTM_SRC) $(YTM_HDR)
+	@mkdir -p $(BUILD)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -I$(BUILD) -include win_compat_host.h \
+		-DYTMUSIC_API_KEY='""' -DYTMUSIC_TEST_KEYLESS \
+		-o $@ $(YTM_SRC) $(LDFLAGS) $(LDLIBS)
 
 # The Subsonic download worker against a fake transport and a real temporary
 # card: what is saved, what is not, and what a cut or cancelled transfer

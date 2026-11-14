@@ -126,7 +126,7 @@ static bool current_is_favourite(const char *path) {
 	}
 	if (strcmp(known_path, path) != 0) {
 		snprintf(known_path, sizeof(known_path), "%s", path);
-		known_answer = library_fav_contains(path);
+		known_answer = medialist_fav_contains(path);
 	}
 	return known_answer;
 }
@@ -575,7 +575,7 @@ static void apply_command(const sonixlink_command_t *cmd) {
 		if (!cmd->path[0]) {
 			break;
 		}
-		bool starred = library_fav_contains(cmd->path);
+		bool starred = medialist_fav_contains(cmd->path);
 		bool want = cmd->arg < 0 ? !starred : (cmd->arg != 0);
 		if (want != starred) {
 			// The name and artist are stored at star time so the favourites
@@ -589,7 +589,9 @@ static void apply_command(const sonixlink_command_t *cmd) {
 				name = d.metadata.title;
 				artist = d.metadata.artist;
 			}
-			library_fav_toggle(cmd->path, name, artist);
+			// Through the same door as the device's own lists: a service's song
+			// is starred in that service's list, never in the card's.
+			medialist_fav_toggle(cmd->path, name, artist);
 			forget_favourite_memory();
 			player_refresh_now_playing();
 		}

@@ -64,6 +64,7 @@
 #include "src/system/streaming/soundcloud.h"
 #include "src/system/streaming/soundcloudcache.h"
 #include "src/system/streaming/tidalcache.h"
+#include "src/system/streaming/ytmusic.h"
 #include "src/system/streaming/stockkeys.h"
 #include "src/system/streaming/streamkeys.h"
 #include "src/system/addons/addons.h"
@@ -2331,6 +2332,9 @@ int main(int argc, char **argv) {
 	// track fits.
 	tidalcache_set_root(card_root && card_root[0] ? card_root : gui_cfg.sd_root_path);
 	tidalcache_clear(); // remove leftovers from a crash or power loss
+	// Told here as well as by the Streaming page, so the sweep below knows where
+	// YouTube Music's cache is before any page is built.
+	ytmusic_set_cache_root(card_root && card_root[0] ? card_root : gui_cfg.sd_root_path);
 	soundcloudcache_set_root(card_root && card_root[0] ? card_root : gui_cfg.sd_root_path);
 	soundcloudcache_clear_on_exit();
 	podcastcache_set_root(card_root && card_root[0] ? card_root : gui_cfg.sd_root_path);
@@ -2355,6 +2359,19 @@ int main(int argc, char **argv) {
 	library_forget_under(qobuzcache_dir());
 	library_forget_under(tidalcache_dir());
 	library_forget_under(soundcloudcache_dir());
+	library_forget_under(ytmusic_cache_dir());
+	// A song a service saved to the card keeps its star in that service's own
+	// list. The files stay and stay playable, but rows older builds wrote into
+	// the card's favourites go once, so Music > Favourites is the card's music.
+	static const char *const kept_folders[] = {"Music/YouTube Music", "Music/Tidal", "Music/Qobuz"};
+	if (card_root && card_root[0]) {
+		for (size_t i = 0; i < sizeof(kept_folders) / sizeof(kept_folders[0]); i++) {
+			char folder[600];
+			if (snprintf(folder, sizeof(folder), "%s/%s", card_root, kept_folders[i]) < (int)sizeof(folder)) {
+				library_fav_forget_under(folder);
+			}
+		}
+	}
 	if (!tls_available()) {
 		fprintf(stderr, "tls: unavailable; https radio stations cannot be opened\n");
 	}

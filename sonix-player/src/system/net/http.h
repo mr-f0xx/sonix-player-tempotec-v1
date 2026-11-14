@@ -61,6 +61,16 @@ bool http_get_ex(const char *url, const char *extra_headers, bool want_error_bod
 // overwritten by the next request on the same thread, so copy it immediately.
 const char *http_last_final_url(void);
 
+// The whole size a ranged reply stated, taken from its "Content-Range:
+// bytes a-b/total" header; 0 when the reply carried none.
+//
+// A downloader needs this. Invidious names the length of a stream in its JSON,
+// but Piped does not, and neither does every host in front of them -- and a
+// transfer whose total is unknown cannot be told apart from one that stopped at
+// thirty seconds. Per thread, like http_last_error(), and overwritten by the
+// next request on the same thread, so read it immediately.
+uint64_t http_last_content_range_total(void);
+
 // ---------------------------------------------------------------------------
 // Requests that are not GET
 //

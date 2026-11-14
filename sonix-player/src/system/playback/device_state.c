@@ -12,6 +12,7 @@
 #include "src/system/streaming/podcastcache.h"
 #include "src/system/streaming/qobuzcache.h"
 #include "src/system/streaming/soundcloudcache.h"
+#include "src/system/streaming/ytmusic.h"
 #include "src/system/streaming/subsonicstream.h"
 #include "src/system/streaming/tidalcache.h"
 #include "src/system/streaming/radio.h"
@@ -150,6 +151,7 @@ static bool restored_uncounted;
 
 static void record_current_track_play(void) {
 	if (!current_metadata_file[0] || audiobook_is_playing() || podcastcache_is_episode(current_metadata_file) ||
+		ytmusic_cache_is_podcast_episode(current_metadata_file) ||
 		qobuzcache_owns(current_metadata_file) || tidalcache_owns(current_metadata_file) ||
 		soundcloudcache_is_soundcloud_path(current_metadata_file) ||
 		subsonicstream_owns(current_metadata_file)) {
@@ -412,7 +414,7 @@ static void queue_persist(void) {
 		// that no longer exist, mixed in with the user's own tracks. The RAM
 		// bridge's source IDs are transient for the same reason.
 		if (qobuzcache_owns(path) || tidalcache_owns(path) || soundcloudcache_is_soundcloud_path(path) ||
-			subsonicstream_owns(path)) {
+			subsonicstream_owns(path) || ytmusic_cache_owns(path)) {
 			from_stream = true;
 			break;
 		}
@@ -437,8 +439,11 @@ static void queue_persist(void) {
 
 void device_state_queue_changed(void) { queue_persist(); }
 
-// Four streaming preparations: Qobuz, Tidal, podcasts and Subsonic.
-#define PREPARE_CB_MAX 4
+// The streaming preparations: Qobuz, Tidal, podcasts, Subsonic and YouTube
+// Music -- one per service, and two spare for the next ones. A service that
+// cannot register is a service whose queue stops at its first song that has not
+// been downloaded, so the count is here rather than "four, and that is enough".
+#define PREPARE_CB_MAX 7
 static device_state_prepare_cb prepare_cbs[PREPARE_CB_MAX];
 static int prepare_cb_count;
 
@@ -490,7 +495,8 @@ void device_state_note_storage_gone(void) {
 static void apply_track_speed(void) {
 	if (audiobook_is_playing()) {
 		audio_set_speed(audiobook_speed());
-	} else if (podcastcache_is_episode(current_metadata_file)) {
+	} else if (podcastcache_is_episode(current_metadata_file) ||
+	           ytmusic_cache_is_podcast_episode(current_metadata_file)) {
 		audio_set_speed(podcast_speed());
 	} else {
 		audio_set_speed(1.0);

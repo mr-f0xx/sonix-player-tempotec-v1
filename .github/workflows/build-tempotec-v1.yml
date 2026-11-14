@@ -197,6 +197,12 @@ jobs:
 
       - name: Build TempoTec V1 target binaries
         working-directory: sonix-player
+        # The InnerTube key YouTube Music's requests carry is a build input, not
+        # a file in this repository. Set a `YTMUSIC_API_KEY` secret to compile it
+        # in; without one the build still ships and reports ytmusic_api_key_missing
+        # instead of asking without a key.
+        env:
+          YTMUSIC_API_KEY: ${{ secrets.YTMUSIC_API_KEY }}
         run: make target -j"$(nproc)"
 
       - name: Build v1.upt

@@ -28,6 +28,7 @@
 #include "src/system/streaming/qobuzcache.h"
 #include "src/system/streaming/qobuzsync.h"
 #include "src/system/streaming/soundcloudcache.h"
+#include "src/system/streaming/ytmusic.h"
 #include "src/system/streaming/tidalcache.h"
 #include "src/system/streaming/tidalsync.h"
 
@@ -375,12 +376,22 @@ static void *fav_worker(void *arg) {
 	pthread_mutex_lock(&batch_lock);
 	for (int first = 0; rows && titles && artists && first < b->count; first += FAV_CHUNK) {
 		int n = b->count - first < FAV_CHUNK ? b->count - first : FAV_CHUNK;
+		int used = 0;
 		for (int i = 0; i < n; i++) {
 			const char *path = b->paths[first + i];
-			playlists_track_names(path, titles[i], sizeof(titles[i]), artists[i], sizeof(artists[i]));
-			rows[i] = (library_fav_row_t){path, titles[i], artists[i]};
+			// A streaming song is starred in its own service's list and nowhere
+			// else; it counts as not added, which is what the toast then says.
+			if (medialist_fav_is_stream(path)) {
+				continue;
+			}
+			playlists_track_names(path, titles[used], sizeof(titles[used]), artists[used],
+								  sizeof(artists[used]));
+			rows[used] = (library_fav_row_t){path, titles[used], artists[used]};
+			used++;
 		}
-		b->starred += library_fav_add_many(rows, n);
+		if (used > 0) {
+			b->starred += library_fav_add_many(rows, used);
+		}
 	}
 	pthread_mutex_unlock(&batch_lock);
 
@@ -1445,8 +1456,11 @@ static const char *mix_seed_pending(void) {
 // episode and not a streamed cache that empties itself. Whether the graph has a
 // place for the track is the graph's to answer, when the row is used.
 static bool mix_seed_usable(const char *path) {
-	return path && path[0] && !podcastcache_is_episode(path) && qobuzcache_track_id(path) == 0 &&
-		   tidalcache_track_id(path) == 0 && !soundcloudcache_is_soundcloud_path(path);
+	// The caches themselves, not the ids: a copy kept on the card is a file like
+	// any other and its graph is still askable. A YouTube Music copy kept on the
+	// card is the same file-wise, so only its episodes are out.
+	return path && path[0] && !podcastcache_is_episode(path) && !ytmusic_cache_is_podcast_episode(path) &&
+		   !qobuzcache_owns(path) && !tidalcache_owns(path) && !soundcloudcache_is_soundcloud_path(path);
 }
 
 // The walk reached a track in the seed picker: build the saved mix from it.
@@ -1555,8 +1569,10 @@ void playlistpage_add_track(const char *track_path) {
 	picking = true;
 	pending_many_free();
 	snprintf(pending_track, sizeof(pending_track), "%s", track_path);
-	pending_qobuz_id = qobuzcache_track_id(track_path);
-	pending_tidal_id = tidalcache_track_id(track_path);
+	// The service caches, not the kept copies: adding a file from the card writes
+	// the playlist on the card, whatever service the song came from.
+	pending_qobuz_id = qobuzcache_owns(track_path) ? qobuzcache_track_id(track_path) : 0;
+	pending_tidal_id = tidalcache_owns(track_path) ? tidalcache_track_id(track_path) : 0;
 	// The title states where the track is about to be written: an account or
 	// the card. The two caches live in different directories, so at most one of
 	// the two ids can be non-zero.

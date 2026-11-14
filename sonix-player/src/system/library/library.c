@@ -2133,6 +2133,33 @@ int library_fav_remove_many(const char *const *paths, int count) {
 	return removed;
 }
 
+// The favourites rows alone, for a folder whose files are still there and still
+// played: a service's downloads stay on the card, but the star on one of them
+// belongs to the service and never to the card's own list.
+int library_fav_forget_under(const char *prefix) {
+	if (!prefix || !prefix[0]) {
+		return 0;
+	}
+	char pattern[600];
+	snprintf(pattern, sizeof(pattern), "%.500s%%", prefix);
+
+	pthread_mutex_lock(&db_lock);
+	int removed = 0;
+	sqlite3_stmt *stmt = NULL;
+	if (db && sqlite3_prepare_v2(db, "DELETE FROM FAVOURITES WHERE path LIKE ?", -1, &stmt, NULL) == SQLITE_OK) {
+		sqlite3_bind_text(stmt, 1, pattern, -1, SQLITE_TRANSIENT);
+		if (sqlite3_step(stmt) == SQLITE_DONE) {
+			removed = sqlite3_changes(db);
+		}
+		sqlite3_finalize(stmt);
+	}
+	if (removed > 0) {
+		bump_generation(GEN_FAVOURITES);
+	}
+	pthread_mutex_unlock(&db_lock);
+	return removed;
+}
+
 int library_forget_under(const char *prefix) {
 	if (!prefix || !prefix[0]) {
 		return 0;

@@ -31,6 +31,9 @@
 //     api_key = ...
 //     api_secret = ...
 //
+//     [ytmusic]
+//     api_key = ...
+//
 // and shipped sealed, as /usr/resource/sonix/components/streaming-keys.bin, by
 // tools/seal_streamkeys.py. The key that opens it is not in the source: the
 // tool keeps it in streaming-keys.key, outside git, and the Makefile compiles
@@ -95,14 +98,14 @@ void streamkeys_init(void);
 // streamkeys_init() has run -- nothing mounts the card before the player does,
 // so at startup there is nothing to read there yet.
 //
-// Only a firmware that found no keys of its own in the rootfs is affected: one
-// that ships a sealed streaming-keys.bin keeps it, and a card cannot quietly
-// replace what the image says. When /usr/data/streaming-keys.ini holds keys
-// extracted on-device, the card can still supply [podcast] or [lastfm] (or
-// updated pairs).
+// The card only ever fills a gap: a key already in the image (or in
+// /usr/data/streaming-keys.ini) wins, and the card supplies the ones it does
+// not carry -- a build with no InnerTube key of its own gets it from the card
+// this way, with no rebuild and no reflash.
 //
-// True when keys are now held that were not held (or differed) before, which is
-// the caller's signal to hand them to the services that read them at startup.
+// True when the card supplied something the build did not already have, which
+// is the caller's signal to hand the keys to the services that read them at
+// startup.
 bool streamkeys_load_card(const char *card_root);
 
 // Re-reads /usr/data/streaming-keys.ini and the microSD card so credentials
@@ -141,6 +144,13 @@ const char *streamkeys_lastfm_secret(void);
 const char *streamkeys_soundcloud_client_id(void);
 const char *streamkeys_soundcloud_oauth_token(void);
 const char *streamkeys_soundcloud_username(void);
+// YouTube Music, optional: the InnerTube key the music.youtube.com page hands
+// every visitor, which this player sends on its requests as a web client. It is
+// not an account credential -- without it the YouTube Music page still works,
+// but it is the one value a build that carries no key must be given, by build
+// (make YTMUSIC_API_KEY=...) or on the card. The card only ever fills a gap:
+// a key already in the image or in /usr/data wins, the card supplies the rest.
+const char *streamkeys_ytmusic_api_key(void);
 
 // Where they were read from, for the log and the information page. NULL when
 // none were found.

@@ -5,6 +5,7 @@
 #include "src/system/decode/mp4.h"
 #include "src/system/decode/apedec.h"
 #include "src/system/library/oggtags.h"
+#include "src/system/streaming/ytmusic.h"
 #include "src/system/core/utils.h"
 
 #include <dirent.h>
@@ -976,7 +977,8 @@ static bool image_named_after(const char *name, const char *stem) {
 #define COVER_RANK_GENERIC 2
 #define COVER_RANK_NONE 1000
 
-static bool find_cover_file(const char *dirpath, const char *audio_stem, char *out_path, size_t out_size) {
+static bool find_cover_file(const char *dirpath, const char *audio_stem, char *out_path, size_t out_size,
+								bool track_only) {
 	DIR *dir = opendir(dirpath);
 	if (!dir)
 		return false;
@@ -996,6 +998,8 @@ static bool find_cover_file(const char *dirpath, const char *audio_stem, char *o
 		if (de->d_name[0] == '.')
 			continue;
 		if (!is_image_name(de->d_name))
+			continue;
+		if (track_only && !image_named_after(de->d_name, audio_stem))
 			continue;
 
 		image_count++;
@@ -1027,7 +1031,7 @@ static bool find_cover_file(const char *dirpath, const char *audio_stem, char *o
 
 	// Nothing matched by name, but if the folder holds exactly one image it's
 	// almost certainly the cover.
-	if (best[0] == '\0' && image_count == 1) {
+	if (!track_only && best[0] == '\0' && image_count == 1) {
 		snprintf(best, sizeof(best), "%s", only_image);
 	}
 
@@ -1141,7 +1145,8 @@ bool albumart_load_dir_candidate(const char *dirpath, int index, albumart_t *out
 
 	if (index == 0) {
 		char cover_path[1300];
-		return find_cover_file(dirpath, NULL, cover_path, sizeof(cover_path)) && read_whole_file(cover_path, out);
+		return find_cover_file(dirpath, NULL, cover_path, sizeof(cover_path), false) &&
+			   read_whole_file(cover_path, out);
 	}
 	if (index != 1)
 		return false;
@@ -1227,7 +1232,9 @@ bool albumart_load_candidate(const char *filepath, int index, albumart_t *out) {
 		strncpy(dirpath, "/", sizeof(dirpath) - 1);
 
 	char cover_path[1300];
-	if (find_cover_file(dirpath, stem, cover_path, sizeof(cover_path)))
+	char video_id[16];
+	bool ytmusic_cache = ytmusic_cache_track_id(filepath, video_id, sizeof(video_id));
+	if (find_cover_file(dirpath, stem, cover_path, sizeof(cover_path), ytmusic_cache))
 		return read_whole_file(cover_path, out);
 
 	return false;
