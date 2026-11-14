@@ -5,11 +5,11 @@
 #include "lvgl/lvgl.h"
 
 /* Pop-art / sticker player layout, measured for the V1's 240x320 panel:
- * a double neon-framed sleeve with a centre spindle hole and four corner
- * badges (tilted yellow queue pill, tilted cyan format pill, pink shuffle
- * disc and yellow favourite heart disc), over two tilted tape strips
- * (hot-pink title and yellow artist), a cyan album line, an inline seek bar
- * between the two clocks, and a ringed play/pause button. */
+ * a double neon-framed sleeve with four corner badges (tilted yellow queue
+ * pill, tilted cyan format pill, pink shuffle disc and yellow favourite heart
+ * disc), over two tilted tape strips (hot-pink title and yellow artist), a
+ * cyan album line, an inline seek bar between the two clocks, and a ringed
+ * play/pause button. */
 #define STICKER_BG_HEX       0x080510
 #define STICKER_PINK_HEX     0xff2b93
 #define STICKER_YELLOW_HEX   0xffe600
@@ -23,7 +23,6 @@
 #define STICKER_ART_RADIUS   28
 #define STICKER_FRAME_RADIUS 30
 #define STICKER_FRAME_OUTSET 3
-#define STICKER_SPINDLE_PCT  16
 #define STICKER_CORNER_DISC  24
 #define STICKER_PILL_H       18
 #define STICKER_ICON_SCALE   150
@@ -59,7 +58,6 @@
 typedef struct {
 	int art_x, art_y, art_side;
 	int frame_x, frame_y, frame_side;
-	int spindle_d;
 	int deck_y, deck_h;
 	int title_x, title_y, title_w, title_h;
 	int artist_x, artist_y, artist_w, artist_h;
@@ -78,7 +76,6 @@ typedef struct {
 	lv_obj_t *tilted_cyan;
 	lv_obj_t *tilted_pink;
 	lv_obj_t *straight_cyan;
-	lv_obj_t *spindle;
 	lv_obj_t *queue_pill;
 	lv_obj_t *format_pill;
 	lv_obj_t *repeat_disc;
@@ -93,7 +90,7 @@ typedef struct {
 void sticker_ground_apply(lv_obj_t *sheet, lv_obj_t *deck, lv_obj_t *backdrop);
 void sticker_place_sleeve(lv_obj_t *panel, lv_obj_t *sleeve, const sticker_box_t *box, int screen_w);
 void sticker_view_build(sticker_view_t *v, lv_obj_t *sheet, lv_obj_t *cover_panel,
-						lv_obj_t *sleeve, lv_obj_t *play_btn);
+						lv_obj_t *play_btn);
 void sticker_view_apply(sticker_view_t *v, const sticker_box_t *box, int screen_w);
 void sticker_view_set_hidden(sticker_view_t *v, bool hidden);
 

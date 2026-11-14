@@ -24,6 +24,7 @@
 #include "src/system/library/library.h"
 #include "src/system/library/playlists.h"
 #include "src/system/core/utils.h"
+#include "src/system/streaming/jellyfincache.h"
 #include "src/system/streaming/podcastcache.h"
 #include "src/system/streaming/qobuzcache.h"
 #include "src/system/streaming/qobuzsync.h"
@@ -1446,7 +1447,7 @@ static const char *mix_seed_pending(void) {
 // place for the track is the graph's to answer, when the row is used.
 static bool mix_seed_usable(const char *path) {
 	return path && path[0] && !podcastcache_is_episode(path) && qobuzcache_track_id(path) == 0 &&
-		   tidalcache_track_id(path) == 0 && !soundcloudcache_is_soundcloud_path(path);
+		   tidalcache_track_id(path) == 0 && !soundcloudcache_is_soundcloud_path(path) && !jellyfincache_owns(path);
 }
 
 // The walk reached a track in the seed picker: build the saved mix from it.

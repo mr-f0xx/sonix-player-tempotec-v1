@@ -98,6 +98,7 @@ static char last_success_toast[128];
 static int hold_screen_depth;
 static int qobuz_init_calls;
 static int tidal_init_calls;
+static int lastfm_init_calls;
 static int ready_calls;
 static bool stub_wifi_on;
 static char stub_card_dir[512];
@@ -137,6 +138,7 @@ void wifi_get_status(wifi_status_t *out) {
 
 void qobuz_init(void) { qobuz_init_calls++; }
 void tidal_init(void) { tidal_init_calls++; }
+void lastfm_init(void) { lastfm_init_calls++; }
 
 /* Unused HTTP symbols in this offline/card UI binary */
 const char *http_last_error(void) { return ""; }

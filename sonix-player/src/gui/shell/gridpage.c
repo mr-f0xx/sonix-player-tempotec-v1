@@ -13,6 +13,7 @@
 #include "src/gui/shell/settingsrow.h"
 #include "src/gui/shell/switcher.h"
 #include "src/gui/shell/theme.h"
+#include "src/gui/streaming/jellyfin_icon.h"
 #include "src/gui/streaming/soundcloud_icon.h"
 #include "src/system/core/lang.h"
 
@@ -31,7 +32,7 @@ static int grid_gap(void) { return compact_grid() ? 6 : GRID_GAP; }
 // and translation key that are needed to restore Dark/Light or apply Tokyo
 // Night later. V1 has six tiles per page; the extra slots cover optional
 // builds without allocating per-tile theme objects.
-#define GRIDPAGE_THEME_PAGE_MAX 12
+#define GRIDPAGE_THEME_PAGE_MAX 16
 #define GRIDPAGE_THEME_TILE_MAX 16
 typedef struct {
 	lv_obj_t *grid;
@@ -279,6 +280,15 @@ static bool gridpage_tokyo_icon(const char *label, const lv_image_dsc_t **icon, 
 		{"soundcloud_playlists", &icon_sc_playlists_glyph, THEME_SEMANTIC_PURPLE},
 		{"soundcloud_account_settings", &icon_sc_account_glyph, THEME_SEMANTIC_BLUE},
 		{"subsonic", &icon_music_note, THEME_SEMANTIC_BLUE},
+		{"jellyfin", &icon_jellyfin_mark, THEME_SEMANTIC_PURPLE},
+		{"jellyfin_folders", &icon_sub_folders_glyph, THEME_SEMANTIC_CYAN},
+		{"jellyfin_playlists", &icon_qobuz_playlists_glyph, THEME_SEMANTIC_PURPLE},
+		{"jellyfin_artists", &icon_sub_artists_glyph, THEME_SEMANTIC_GREEN},
+		{"jellyfin_albums", &icon_qobuz_albums_glyph, THEME_SEMANTIC_BLUE},
+		{"jellyfin_genres", &icon_qobuz_genres_glyph, THEME_SEMANTIC_AMBER},
+		{"jellyfin_favorites", &icon_qobuz_favourites_glyph, THEME_SEMANTIC_RED},
+		{"jellyfin_saved", &icon_podcast_downloaded, THEME_SEMANTIC_GREEN},
+		{"jellyfin_server_settings", &icon_sub_server_glyph, THEME_SEMANTIC_BLUE},
 		{"radio", &icon_radio_player, THEME_SEMANTIC_PURPLE},
 		{"podcasts", &icon_podcast_list, THEME_SEMANTIC_CYAN},
 		{"audiobook_library", &icon_book_headphones, THEME_SEMANTIC_AMBER},

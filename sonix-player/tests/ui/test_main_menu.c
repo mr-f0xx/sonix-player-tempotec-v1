@@ -650,6 +650,20 @@ int main(int argc, char **argv) {
 	lv_obj_t *gesture_toggle = child_of_type(lv_obj_get_parent(gesture_label), &lv_switch_class);
 	assert(gesture_toggle && !lv_obj_has_state(gesture_toggle, LV_STATE_CHECKED));
 
+	assert(gestures_swipe_up_home());
+	lv_obj_t *swipe_home_label = find_label(appearance_screen, tr("appearance_swipe_up_home"));
+	assert(swipe_home_label);
+	lv_obj_t *swipe_home_toggle = child_of_type(lv_obj_get_parent(swipe_home_label), &lv_switch_class);
+	assert(swipe_home_toggle && lv_obj_has_state(swipe_home_toggle, LV_STATE_CHECKED));
+	lv_obj_set_state(swipe_home_toggle, LV_STATE_CHECKED, false);
+	lv_obj_send_event(swipe_home_toggle, LV_EVENT_VALUE_CHANGED, NULL);
+	assert(!gestures_swipe_up_home());
+	assert(!config_get_bool("ui", "swipe_up_home", true));
+	lv_obj_set_state(swipe_home_toggle, LV_STATE_CHECKED, true);
+	lv_obj_send_event(swipe_home_toggle, LV_EVENT_VALUE_CHANGED, NULL);
+	assert(gestures_swipe_up_home());
+	assert(config_get_bool("ui", "swipe_up_home", false));
+
 	lv_obj_t *books_label = find_label(appearance_screen, tr("appearance_home_books"));
 	assert(books_label);
 	lv_obj_t *books_toggle = child_of_type(lv_obj_get_parent(books_label), &lv_switch_class);

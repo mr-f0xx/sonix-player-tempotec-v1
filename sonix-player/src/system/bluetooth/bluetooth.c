@@ -5500,18 +5500,37 @@ void bluetooth_set_volume_sync(bool on) {
 void bluetooth_notify_volume(int percent) {
 	pthread_mutex_lock(&lock);
 	bool wanted = g_enabled && g_a2dp_connected;
-	bool already_queued = g_pending_volume >= 0;
-	if (wanted) {
-		g_pending_volume = percent;
+	if (!wanted) {
+		pthread_mutex_unlock(&lock);
+		return;
 	}
+	if (btvolume_available()) {
+		g_pending_volume = -1;
+		pthread_mutex_unlock(&lock);
+		btvolume_notify_local(percent);
+		return;
+	}
+	bool already_queued = g_pending_volume >= 0;
+	g_pending_volume = percent;
 	pthread_mutex_unlock(&lock);
 
-	// One job in flight is enough: it picks up whatever the latest value is when
-	// it runs, so holding the volume key costs one AVRCP write, not one per
-	// step.
-	if (wanted && !already_queued) {
+	// Hand the local change to btvolume immediately too so a user adjustment
+	// made during BTV_ADOPT wins over headphone adoption without waiting behind
+	// bluetooth.c's job queue.
+	btvolume_notify_local(percent);
+
+	// One fallback job in flight is enough: it picks up whatever the latest
+	// value is when it runs, so holding the volume key costs one AVRCP write,
+	// not one per step.
+	if (!already_queued) {
 		job_t job = {.type = JOB_VOLUME};
-		post_job(&job);
+		if (!post_job(&job)) {
+			pthread_mutex_lock(&lock);
+			if (g_pending_volume == percent) {
+				g_pending_volume = -1;
+			}
+			pthread_mutex_unlock(&lock);
+		}
 	}
 }
 

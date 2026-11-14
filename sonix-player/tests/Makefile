@@ -118,7 +118,7 @@ $(BUILD)/test_subsonic: test_subsonic.c support.c $(CORE) $(shell find $(ROOT)/s
 	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ test_subsonic.c support.c $(CORE) $(LDFLAGS) $(LDLIBS)
 
 sanitize:
-	$(MAKE) BUILD=.build/sanitize CFLAGS='-O1 -g -std=gnu11 -Wall -Wextra -Werror -D_FILE_OFFSET_BITS=64 -ffunction-sections -fdata-sections -fno-omit-frame-pointer -fsanitize=address,undefined' LDFLAGS='-Wl,--gc-sections -fsanitize=address,undefined' test soundcloud
+	$(MAKE) BUILD=.build/sanitize CFLAGS='-O1 -g -std=gnu11 -Wall -Wextra -Werror -D_FILE_OFFSET_BITS=64 -ffunction-sections -fdata-sections -fno-omit-frame-pointer -fsanitize=address,undefined' LDFLAGS='-Wl,--gc-sections -fsanitize=address,undefined' test soundcloud jellyfin
 
 # The battery guard: when the player warns at five percent, when it switches
 # itself off at one, and which readings leave standby alone. The rule is its own
@@ -290,14 +290,18 @@ $(BUILD)/test_wifi: $(WIFI_SRC) $(ROOT)/src/system/net/wifi.h \
 
 # Bluetooth's real A2DP-direction decision, startup wait policy and D-Bus
 # signal cache, with fake controller/process state. No radio or ALSA required.
-.PHONY: bluetooth
-bluetooth: $(BUILD)/test_bluetooth $(BUILD)/test_btstack $(BUILD)/test_btreceiver $(BUILD)/test_btmetadata $(BUILD)/test_btdiscovery $(BUILD)/test_btpcmvolume
+.PHONY: bluetooth btvolume
+bluetooth: $(BUILD)/test_bluetooth $(BUILD)/test_btstack $(BUILD)/test_btreceiver $(BUILD)/test_btmetadata $(BUILD)/test_btdiscovery $(BUILD)/test_btpcmvolume $(BUILD)/test_btvolume
 	$(BUILD)/test_bluetooth
 	$(BUILD)/test_btstack
 	$(BUILD)/test_btreceiver
 	$(BUILD)/test_btmetadata
 	$(BUILD)/test_btdiscovery
 	$(BUILD)/test_btpcmvolume
+	$(BUILD)/test_btvolume
+
+btvolume: $(BUILD)/test_btvolume
+	$(BUILD)/test_btvolume
 
 $(BUILD)/test_bluetooth: test_bluetooth.c $(ROOT)/src/system/bluetooth/bluetooth.c \
                          $(ROOT)/src/system/bluetooth/bluetooth.h $(ROOT)/src/system/bluetooth/btafh.c \
@@ -325,6 +329,11 @@ $(BUILD)/test_btdiscovery: test_btdiscovery.c $(ROOT)/src/system/bluetooth/btsta
 $(BUILD)/test_btpcmvolume: test_btpcmvolume.c $(ROOT)/src/system/bluetooth/btstack.c $(ROOT)/src/system/bluetooth/dbuslite.c
 	@mkdir -p $(BUILD)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ test_btpcmvolume.c $(LDFLAGS) $(LDLIBS)
+
+$(BUILD)/test_btvolume: test_btvolume.c $(ROOT)/src/system/bluetooth/btvolume.c \
+                        $(ROOT)/src/system/bluetooth/btvolume.h $(ROOT)/src/system/bluetooth/dbuslite.c
+	@mkdir -p $(BUILD)
+	$(CC) $(CPPFLAGS) -Istubs $(CFLAGS) -o $@ test_btvolume.c $(LDFLAGS) $(LDLIBS)
 
 # The AFH map, follow policy and actual HCI packet, using fake sockets.
 .PHONY: btafh
@@ -402,6 +411,18 @@ $(BUILD)/test_listenbrainz: $(LB_SRC) $(ROOT)/src/system/listenbrainz/listenbrai
 	@mkdir -p $(BUILD)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ $(LB_SRC) $(LDFLAGS) $(LDLIBS)
 
+LASTFM_SRC = test_lastfm.c $(ROOT)/src/system/streaming/streamkeys.c \
+             $(ROOT)/src/system/core/config.c $(ROOT)/src/system/core/md5.c $(ROOT)/src/system/core/sha1.c
+.PHONY: lastfm
+lastfm: $(BUILD)/test_lastfm
+	$(BUILD)/test_lastfm
+
+$(BUILD)/test_lastfm: $(LASTFM_SRC) $(ROOT)/build_gen/streamkeys_key.h \
+                      $(ROOT)/src/system/lastfm/lastfm.h $(ROOT)/src/system/lastfm/lastfm.c \
+                      $(ROOT)/src/system/streaming/streamkeys.h $(ROOT)/src/system/core/config.h
+	@mkdir -p $(BUILD)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -DHOST_BUILD -o $@ $(LASTFM_SRC) $(LDFLAGS) $(LDLIBS)
+
 # The rows of Album Art Max: the now-playing arrangement that trades the media
 # controls for the artwork. The sleeve is asked for at the size this gives
 # before anything has been laid out, so the arithmetic is its own module -- and
@@ -459,6 +480,9 @@ TAGS_DECODE_SRC = $(ROOT)/src/system/decode/decode.c \
 TAGS_SRC = test_tags.c \
            $(ROOT)/src/system/tagmanager/tagwrite.c \
            $(ROOT)/src/system/library/metadata.c \
+           $(ROOT)/src/system/library/jisx0208.c \
+           $(ROOT)/src/system/library/tagtext.c \
+           $(ROOT)/src/system/library/id3chap.c \
            $(ROOT)/src/system/library/oggtags.c \
            $(ROOT)/src/system/library/vorbischap.c \
            $(ROOT)/src/system/library/tagdate.c \
@@ -709,6 +733,8 @@ printf-flag:
 UI_SRC = $(ROOT)/tests/ui/test_main_menu.c $(ROOT)/src/gui/shell/main_menu.c \
          $(ROOT)/src/gui/library/music.c $(ROOT)/src/gui/shell/popover.c \
          $(ROOT)/src/gui/shell/gridpage.c $(ROOT)/src/gui/pet/peticon.c \
+         $(ROOT)/src/gui/streaming/soundcloud_icon.c \
+         $(ROOT)/src/gui/streaming/jellyfin_icon.c \
          $(ROOT)/src/gui/settings/appearance.c \
          $(ROOT)/src/gui/settings/bootpicpage.c \
          $(ROOT)/src/gui/shell/corners.c $(ROOT)/src/gui/shell/settingsrow.c \
@@ -764,6 +790,20 @@ $(BUILD)/test_edge_lock: test_edge_lock.c $(ROOT)/src/gui/shell/edge_lock.h $(UI
 	$(CC) $(CPPFLAGS) $(CFLAGS) -I$(ROOT)/lvgl \
 		-DLV_CONF_PATH='"$(abspath ui/lv_conf.h)"' -o $@ test_edge_lock.c \
 		$(UI_LVGL_OBJ) $(LDFLAGS) $(LDLIBS)
+
+# Swipe-up-to-home gesture and its on/off toggle in switcher.c / gestures.c.
+.PHONY: home-swipe
+home-swipe: $(BUILD)/test_home_swipe
+	$(BUILD)/test_home_swipe
+
+$(BUILD)/test_home_swipe: test_home_swipe.c $(ROOT)/src/gui/shell/switcher.c \
+                          $(ROOT)/src/gui/shell/gestures.c $(ROOT)/src/gui/shell/gestures.h \
+                          $(ROOT)/src/system/core/config.c $(UI_LVGL_OBJ)
+	@mkdir -p $(BUILD)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -I$(ROOT)/lvgl \
+		-DLV_CONF_PATH='"$(abspath ui/lv_conf.h)"' -o $@ test_home_swipe.c \
+		$(ROOT)/src/gui/shell/switcher.c $(ROOT)/src/gui/shell/gestures.c \
+		$(ROOT)/src/system/core/config.c $(UI_LVGL_OBJ) $(LDFLAGS) $(LDLIBS)
 
 # Control Centre layout migration: the production parser and saved lists,
 # without constructing the unrelated radio/streaming services.
@@ -846,6 +886,8 @@ TOOLS_SRC = $(ROOT)/tests/ui/test_tools_pages.c \
             $(ROOT)/src/system/notes/notesstore.c $(ROOT)/src/system/text/textfile.c \
             $(ROOT)/src/gui/library/textview.c $(ROOT)/src/gui/library/pictureview.c \
             $(ROOT)/src/gui/shell/morepage.c $(ROOT)/src/gui/shell/gridpage.c \
+            $(ROOT)/src/gui/streaming/soundcloud_icon.c \
+            $(ROOT)/src/gui/streaming/jellyfin_icon.c \
             $(ROOT)/src/system/addons/addons.c \
             $(ROOT)/src/gui/shell/settingsrow.c $(ROOT)/src/gui/shell/keyboard.c \
             $(ROOT)/src/gui/shell/popover.c $(ROOT)/src/system/input/kblayout.c \
@@ -1061,7 +1103,7 @@ $(BUILD)/test_stockkeys_ui: $(ROOT)/build_gen/streamkeys_key.h $(STOCKKEYS_UI_OB
 	$(CC) -o $@ $(STOCKKEYS_UI_OBJ) $(LDFLAGS) $(LDLIBS)
 
 .PHONY: ui
-ui: $(BUILD)/test_qobuzgenregrid $(BUILD)/test_main_menu $(BUILD)/test_screensaver $(BUILD)/test_tools_pages $(BUILD)/test_wifi_pages $(BUILD)/test_chargescreen $(BUILD)/test_power_display $(BUILD)/test_lyricsearch $(BUILD)/test_games $(BUILD)/test_peq_profiles $(BUILD)/test_quickpanel_layout $(BUILD)/test_btreceiversession $(BUILD)/test_corners $(BUILD)/test_playbutton $(BUILD)/test_musicsettings_rows $(BUILD)/test_volume_overlay $(BUILD)/test_playerdeck $(BUILD)/test_vinylayout $(BUILD)/test_stickerlayout $(BUILD)/test_waveform_overlay $(BUILD)/test_hiresbadge_ui $(BUILD)/test_statusbar_ui $(BUILD)/test_stockkeys_ui $(BUILD)/test_tidal_pages $(BUILD)/test_soundcloud_pages $(BUILD)/test_qobuz_pages $(BUILD)/test_fwupdate
+ui: $(BUILD)/test_qobuzgenregrid $(BUILD)/test_main_menu $(BUILD)/test_screensaver $(BUILD)/test_tools_pages $(BUILD)/test_wifi_pages $(BUILD)/test_chargescreen $(BUILD)/test_power_display $(BUILD)/test_lyricsearch $(BUILD)/test_games $(BUILD)/test_peq_profiles $(BUILD)/test_quickpanel_layout $(BUILD)/test_btreceiversession $(BUILD)/test_home_swipe $(BUILD)/test_corners $(BUILD)/test_playbutton $(BUILD)/test_musicsettings_rows $(BUILD)/test_volume_overlay $(BUILD)/test_playerdeck $(BUILD)/test_vinylayout $(BUILD)/test_stickerlayout $(BUILD)/test_waveform_overlay $(BUILD)/test_hiresbadge_ui $(BUILD)/test_statusbar_ui $(BUILD)/test_stockkeys_ui $(BUILD)/test_tidal_pages $(BUILD)/test_soundcloud_pages $(BUILD)/test_qobuz_pages $(BUILD)/test_jellyfin_pages $(BUILD)/test_fwupdate
 	$(BUILD)/test_qobuzgenregrid
 	$(BUILD)/test_main_menu ../../sonix-packer/assets/V1/usr/resource/sonix/language
 	$(BUILD)/test_main_menu ../../sonix-packer/assets/V1/usr/resource/sonix/language saved
@@ -1076,6 +1118,7 @@ ui: $(BUILD)/test_qobuzgenregrid $(BUILD)/test_main_menu $(BUILD)/test_screensav
 	$(BUILD)/test_peq_profiles ../../sonix-packer/assets/V1/usr/resource/sonix/language
 	$(BUILD)/test_quickpanel_layout
 	$(BUILD)/test_btreceiversession
+	$(BUILD)/test_home_swipe
 	$(BUILD)/test_corners
 	$(BUILD)/test_playbutton ../../sonix-packer/assets/V1/usr/resource/sonix/language
 	$(BUILD)/test_musicsettings_rows ../../sonix-packer/assets/V1/usr/resource/sonix/language
@@ -1092,6 +1135,7 @@ ui: $(BUILD)/test_qobuzgenregrid $(BUILD)/test_main_menu $(BUILD)/test_screensav
 	$(BUILD)/test_tidal_pages ../../sonix-packer/assets/V1/usr/resource/sonix/language arranged
 	$(BUILD)/test_soundcloud_pages ../../sonix-packer/assets/V1/usr/resource/sonix/language
 	$(BUILD)/test_qobuz_pages ../../sonix-packer/assets/V1/usr/resource/sonix/language
+	$(BUILD)/test_jellyfin_pages ../../sonix-packer/assets/V1/usr/resource/sonix/language
 	$(BUILD)/test_fwupdate
 
 $(BUILD)/test_main_menu: $(UI_OBJ)
@@ -1302,6 +1346,8 @@ SOUNDCLOUD_CORE = $(ROOT)/src/system/streaming/soundcloud.c \
                   $(ROOT)/src/system/core/sha256.c \
                   $(ROOT)/src/system/core/utils.c \
                   $(ROOT)/src/system/library/metadata.c \
+                  $(ROOT)/src/system/library/jisx0208.c \
+                  $(ROOT)/src/system/library/tagtext.c \
                   $(ROOT)/src/system/library/oggtags.c \
                   $(ROOT)/src/system/library/vorbischap.c \
                   $(ROOT)/src/system/library/tagdate.c \
@@ -1333,6 +1379,7 @@ $(BUILD)/test_soundcloud: test_soundcloud.c $(ROOT)/build_gen/streamkeys_key.h $
 SOUNDCLOUDPAGE_SRC = $(ROOT)/tests/ui/test_soundcloud_pages.c \
                      $(ROOT)/src/gui/streaming/soundcloudpage.c \
                      $(ROOT)/src/gui/streaming/soundcloud_icon.c \
+                     $(ROOT)/src/gui/streaming/jellyfin_icon.c \
                      $(ROOT)/src/gui/shell/settingsrow.c \
                      $(ROOT)/src/gui/shell/gridpage.c \
                      $(ROOT)/src/gui/shell/keyboard.c \
@@ -1362,6 +1409,7 @@ SUBSONICPAGE_SRC = $(ROOT)/tests/ui/test_subsonic_pages.c \
                      $(ROOT)/src/gui/streaming/subsonicdlpage.c \
                      $(ROOT)/src/system/streaming/subsonicdl.c \
                      $(ROOT)/src/gui/streaming/soundcloud_icon.c \
+                     $(ROOT)/src/gui/streaming/jellyfin_icon.c \
                      $(ROOT)/src/gui/shell/settingsrow.c \
                      $(ROOT)/src/gui/shell/gridpage.c \
                      $(ROOT)/src/gui/shell/keyboard.c \
@@ -1389,6 +1437,7 @@ $(BUILD)/test_subsonic_pages: $(SUBSONICPAGE_OBJ)
 RADIOPAGE_SRC = $(ROOT)/tests/ui/test_radio_pages.c \
                      $(ROOT)/src/gui/streaming/radiopage.c \
                      $(ROOT)/src/gui/streaming/soundcloud_icon.c \
+                     $(ROOT)/src/gui/streaming/jellyfin_icon.c \
                      $(ROOT)/src/gui/shell/settingsrow.c \
                      $(ROOT)/src/gui/shell/gridpage.c \
                      $(ROOT)/src/gui/shell/azindex.c \
@@ -1421,6 +1470,7 @@ QOBUZPAGE_SRC = $(ROOT)/tests/ui/test_qobuz_pages.c \
                      $(ROOT)/src/gui/streaming/qobuzgenre_icons.c \
                      $(ROOT)/src/gui/streaming/qobuzgenreorder.c \
                      $(ROOT)/src/gui/streaming/soundcloud_icon.c \
+                     $(ROOT)/src/gui/streaming/jellyfin_icon.c \
                      $(ROOT)/src/gui/shell/settingsrow.c \
                      $(ROOT)/src/gui/shell/gridpage.c \
                      $(ROOT)/src/gui/shell/keyboard.c \
@@ -1443,3 +1493,55 @@ $(BUILD)/test_qobuz_pages: $(QOBUZPAGE_OBJ)
 	$(CC) -o $@ $^ $(LDFLAGS) $(LDLIBS)
 -include $(QOBUZPAGE_OBJ:.o=.d)
 
+JELLYFIN_CORE = $(ROOT)/src/system/streaming/jellyfin.c \
+                $(ROOT)/src/system/streaming/jellyfincache.c \
+                $(ROOT)/src/system/streaming/streamturn.c \
+                $(ROOT)/src/system/net/http.c \
+                $(ROOT)/src/system/net/tls.c \
+                $(ROOT)/src/system/image/png_scaled.c \
+                $(ROOT)/src/system/core/json.c \
+                $(ROOT)/src/system/core/config.c \
+                $(ROOT)/src/system/core/utils.c \
+                $(ROOT)/src/system/library/metadata.c \
+                $(ROOT)/src/system/library/jisx0208.c \
+                $(ROOT)/src/system/library/tagtext.c \
+                $(ROOT)/src/system/library/oggtags.c \
+                $(ROOT)/src/system/library/vorbischap.c \
+                $(ROOT)/src/system/library/tagdate.c \
+                $(ROOT)/src/system/library/cue.c
+
+.PHONY: jellyfin jellyfin-ui
+jellyfin: $(BUILD)/test_jellyfin
+	$(BUILD)/test_jellyfin
+
+$(BUILD)/test_jellyfin: test_jellyfin.c $(JELLYFIN_CORE) $(SOUNDCLOUD_DECODE)
+	@mkdir -p $(BUILD)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -DHOST_BUILD -Wno-error=format-truncation -o $@ test_jellyfin.c $(JELLYFIN_CORE) \
+		-Wno-unused-parameter -Wno-sign-compare -Wno-unused-function -Wno-implicit-fallthrough -Wno-misleading-indentation $(SOUNDCLOUD_DECODE) \
+		$(LDFLAGS) $(LDLIBS)
+
+JELLYFINPAGE_SRC = $(ROOT)/tests/ui/test_jellyfin_pages.c \
+                   $(ROOT)/src/gui/streaming/jellyfinpage.c \
+                   $(ROOT)/src/gui/streaming/jellyfin_icon.c \
+                   $(ROOT)/src/gui/streaming/soundcloud_icon.c \
+                   $(ROOT)/src/gui/shell/settingsrow.c \
+                   $(ROOT)/src/gui/shell/gridpage.c \
+                   $(ROOT)/src/gui/shell/keyboard.c \
+                   $(ROOT)/src/gui/shell/popover.c \
+                   $(ROOT)/src/gui/shell/spinner.c \
+                   $(ROOT)/src/gui/shell/theme.c \
+                   $(ROOT)/src/gui/shell/icons.c \
+                   $(ROOT)/src/gui/board_profile.c \
+                   $(ROOT)/src/system/input/kblayout.c \
+                   $(ROOT)/src/system/core/config.c \
+                   $(ROOT)/src/system/core/lang.c \
+                   $(ROOT)/src/system/core/utils.c
+JELLYFINPAGE_OBJ = $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(JELLYFINPAGE_SRC)) \
+                   $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(UI_LVGL_SRC))
+
+jellyfin-ui: $(BUILD)/test_jellyfin_pages
+	$(BUILD)/test_jellyfin_pages ../../sonix-packer/assets/V1/usr/resource/sonix/language
+
+$(BUILD)/test_jellyfin_pages: $(JELLYFINPAGE_OBJ)
+	$(CC) -o $@ $^ $(LDFLAGS) $(LDLIBS)
+-include $(JELLYFINPAGE_OBJ:.o=.d)

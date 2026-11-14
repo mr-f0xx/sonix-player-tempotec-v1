@@ -28,6 +28,7 @@ make -C sonix-player/tests playerdeck
 make -C sonix-player/tests vinylayout
 make -C sonix-player/tests waveform-overlay
 make -C sonix-player/tests edge-lock
+make -C sonix-player/tests home-swipe
 make -C sonix-player/tests calculator
 make -C sonix-player/tests notes
 make -C sonix-player/tests tagwrite

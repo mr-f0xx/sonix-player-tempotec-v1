@@ -192,6 +192,7 @@ Showcase of **OLED** appearance: true black backgrounds with white as the accent
 - [Streaming: Tidal, Qobuz and credentials](#streaming-tidal-qobuz-and-credentials)
 - [SoundCloud](#soundcloud)
 - [Subsonic / Gonic](#subsonic--gonic)
+- [Jellyfin](#jellyfin)
 - [Build from source](#build-from-source)
 - [Project files and documentation](#project-files-and-documentation)
 - [Credits](#credits)
@@ -225,6 +226,7 @@ This fork builds on the upstream [Sonix Player](https://github.com/Jepl4r/sonix-
 - 🎮 **2048, Snake and Dino** - three small games under More, sized for the V1 panel.
 - 🏷️ **Tag Manager** - view and edit FLAC and MP3 tags and cover art, and search for covers over Wi-Fi. See the [usage and safety notes](docs/tag-manager.md).
 - 🏠 **Subsonic / Gonic** - stream from your own server. See [Subsonic / Gonic](#subsonic--gonic).
+- 🪼 **Jellyfin** - stream from your own Jellyfin music server with **Quick Connect** (6-digit code + QR) or username/password (token-only `0600` persistence), **Direct Play** original files or server-side MP3/Opus transcoding, browsing across Folders, Playlists, Artists, Albums (A–Z / Recently added), Genres, Favourites and Search, extendable microSD playback cache with lookahead prefetch, offline saves (`Music/Jellyfin`), live favourite sync, and Jellyfin playback reporting. See [Jellyfin](#jellyfin) and [docs/jellyfin.md](docs/jellyfin.md).
 - ☁️ **SoundCloud** - native SoundCloud streaming across anonymous, Free, Go and Go+ tiers: search and play public tracks out of the box without API keys (automatic web `client_id` discovery and rotation), browse Likes, Reposts and Playlists by profile URL / username or `oauth_token`, and stream **Opus 64k**, **MP3 128k** or **Go+ AAC 256k** with an extendable microSD cache (**512 MB** default, up to **1 GB**, **2 GB**, **4 GB**, **8 GB**, or **Unlimited** directly in-app), lookahead prefetch, discreet non-blocking loading spinners, and Now Playing **Like** / **Keep** support. See [SoundCloud](#soundcloud) and [docs/soundcloud.md](docs/soundcloud.md).
 - 🌊 **One-tap Tidal & Qobuz setup + streaming upgrades** - extract the official V1 stock credentials directly on the player over Wi-Fi or from the microSD card (no PC, developer keys or restart needed). Includes V1-adapted **Tidal** with offline downloads (`Music/Tidal/<artist>/<album>`), a 1 GiB SD playback cache, cached lists, search history, configurable home rows and bulk selection; **Qobuz** up to 24-bit/192 kHz FLAC with full JWT session persistence, plus offline track and album downloads to `Music/Qobuz Downloads`; **FLAC internet radio** with a V1-sized page and Flylo's curated chill-hop picks; and upgraded **Podcasts** (heard/unheard tracking, episode ordering and regional charts). See [Streaming: Tidal, Qobuz and credentials](#streaming-tidal-qobuz-and-credentials).
 - 🧩 **Plugins (`Settings → Plugins`)** - switch optional modules (including Tidal, Qobuz, SoundCloud, Podcasts, Radio, tools and games) on or off so unused pages are never built and RAM stays free. See [docs/ADDONS.md](docs/ADDONS.md).
@@ -232,7 +234,7 @@ This fork builds on the upstream [Sonix Player](https://github.com/Jepl4r/sonix-
 - 🚀 **Boot screens** - Retrospace (the default), Space, Travelling in space, Stock, or your own picture.
 - 🖼️ **Player layouts** - **Immersive**, **Poster**, **Album Art Max**, **Vinyl** and **Sticker**, beside Standard, Waveform and Alternative. See [FEATURES.md](FEATURES.md#now-playing) for the details of each layout.
 - 🔘 **Legacy play button and corner roundness** - the original round disc behind play and pause, as an option under Settings → Music → Display options; and a slider for how round the screen corners are, from a hint of a corner (2 px) up to 20 px, for a V1 that looks boxier than its 16 px default.
-- 🔤 **Interface fonts** - choose MiSans, Neon 80s or Roboto, or any `.ttf`/`.otf` in the card's `Fonts` folder. Missing glyphs fall back to MiSans, so every language stays readable.
+- 🔤 **Interface fonts** - choose MiSans or Neon 80s, or any `.ttf`/`.otf` in the card's `Fonts` folder. Missing glyphs fall back to MiSans, so every language stays readable.
 - 🎚️ **Two PEQ profiles** - separate bands, preamp and on/off states for two pairs of headphones, with one-tap switching from the Control Centre and a long press to open the PEQ page.
 - 🎛️ **Editable control centre** - a second page with ten quick toggles (airplane mode, crossfeed, soundfield, replay gain, mono, key lock, LED, rotate, screen off and the power menu), **edit mode** to swap tiles in place by long press, and an optional **Both sliders** mode under Settings → Screen that shows separate brightness and volume rails.
 - 📥 **Control centre over Bluetooth in** - the swipe-down menu stays available while the player is a Bluetooth receiver: volume, brightness and the EQ / MSEB / PEQ switches, with the phone's track on the card, and a long press on EQ, MSEB or PEQ opens that page without ending the stream. See [FEATURES.md](FEATURES.md#wireless).
@@ -295,7 +297,7 @@ Only attempt this on a TempoTec Variations V1. Read the warning above before pro
 
 ## Streaming: Tidal, Qobuz and credentials
 
-> **Fresh installs — enable streaming apps first:** On a clean install, optional streaming modules (**Tidal**, **Qobuz**, **SoundCloud**, **Podcasts** and **Radio**) start switched **off** under **Settings → Plugins** so unused pages do not take up RAM (**Subsonic** starts on; updating an existing Sonix install keeps all modules enabled). Open **Settings → Plugins**, toggle the services you want **on**, and **restart** the player for them to appear under **Streaming**.
+> **Fresh installs — enable streaming apps first:** On a clean install, optional streaming modules (**Tidal**, **Qobuz**, **SoundCloud**, **Podcasts** and **Radio**) start switched **off** under **Settings → Plugins** so unused pages do not take up RAM (**Subsonic** and **Jellyfin** start on; updating an existing Sonix install keeps all modules enabled). Open **Settings → Plugins**, toggle the services you want **on**, and **restart** the player for them to appear under **Streaming**.
 
 ### Tidal and Qobuz
 
@@ -314,7 +316,7 @@ Instead, Sonix speaks the exact same authentication flows as the stock TempoTec 
 
 ### SoundCloud, Podcasts, Last.fm, ListenBrainz and Radio
 
-- **SoundCloud**, **Internet Radio**, **Subsonic / Gonic** and **Podcasts** require no API keys.
+- **SoundCloud**, **Internet Radio**, **Subsonic / Gonic**, **Jellyfin** and **Podcasts** require no API keys.
 - **SoundCloud** searches and streams public tracks out of the box (automatically discovering and rotating a public web `client_id`), and optionally accepts a profile URL / `username` or session `oauth_token` on-device or under `[soundcloud]` in `streaming-keys.ini` — see [SoundCloud](#soundcloud).
 - **Podcasts** search, chart, play and download from Apple's public podcast directory, which asks for nothing: no signup, no key, no account. It works out of the box on any install, including a published image that ships without keys. Podcast Index remains available for anyone who has a pair -- see below.
 - **ListenBrainz** requires no key in `streaming-keys.ini`: request a personal user token at `listenbrainz.org/settings` and paste it into **Settings → Music → ListenBrainz**. Scrobbling to Last.fm and ListenBrainz are independent and can run side by side.
@@ -426,6 +428,14 @@ No application API key is needed. Prefer HTTPS; credentials stay in memory unles
 
 See [setup, design, limitations and the V1 validation checklist](docs/subsonic.md), and [host integration tests](sonix-player/tests/README.md).
 
+## Jellyfin
+
+**Streaming → Jellyfin → Server settings** connects to your own self-hosted Jellyfin server over HTTP or HTTPS with no third-party API keys. Sign in with **Quick Connect** (6-digit code and scannable QR code pointing to `<server>/web/#/quickconnect`) or username and password. Passwords are never saved to disk — only the revocable Jellyfin `AccessToken` is written atomically (`0600`) to `/usr/data/jellyfin-credentials.json` when **Remember session** is on, and auth headers are strictly isolated to the configured server origin.
+
+Browse **Folders**, **Playlists**, **Artists**, **Albums** (A–Z or Recently added), **Genres**, **Favourites**, **Search**, and offline **Saved** tracks (`Music/Jellyfin`). **Original (Direct Play)** plays native Sonix formats bit-perfect (falling back to MP3 320 kbps for unsupported containers), alongside **MP3 320**, **MP3 192**, and **Opus 128** transcoding. Playback streams through a bounded microSD cache (`.local/jellyfin-cache/`, configurable **512 MB** to **Unlimited** with a **256 MB** free-space floor) with progressive `growfile` startup, 80% lookahead prefetch, single/bulk offline **Keep on card**, live favourite sync, and asynchronous Jellyfin playback reporting (`/Sessions/Playing*`).
+
+See [setup, security, quality and validation notes](docs/jellyfin.md).
+
 ## Project files and documentation
 
 - `sonix-player/` — player sources, LVGL configuration, launcher and build system.
@@ -433,6 +443,7 @@ See [setup, design, limitations and the V1 validation checklist](docs/subsonic.m
 - `docs/collecting-logs.md` — which logs to send with a bug report, and how to take them.
 - `docs/qobuz-stock-firmware.md` — how stock Qobuz and Tidal authentication and local credential extraction work.
 - `docs/ADDONS.md` — optional modules (`Settings → Plugins`) and fresh-install defaults.
+- `docs/jellyfin.md` — Jellyfin setup, Quick Connect, token-only auth, Direct Play/transcoding, playback reporting and SD cache.
 - `docs/soundcloud.md` — SoundCloud setup, anonymous/profile/OAuth modes, quality tiers, HLS/fMP4 pipeline and SD cache.
 - `docs/subsonic.md` — Subsonic/Gonic setup, RAM transport and hardware validation.
 - `docs/sgm31324-led-control.md` — driving the RGB status LED directly over I²C.

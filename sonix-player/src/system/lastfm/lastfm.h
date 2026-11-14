@@ -50,17 +50,23 @@ typedef struct {
 	lastfm_login_result_t login_result;
 } lastfm_status_t;
 
-// Reads the session and the queue and starts the worker. Call once, after
-// config_init() and streamkeys_init().
+// Reads the session and the queue and starts the worker. Call at startup after
+// config_init() and streamkeys_init(); subsequent calls refresh API keys and
+// wake the worker without touching the configuration.
 void lastfm_init(void);
+
+// Thread-safe key refresh: re-reads API keys from streamkeys and wakes the
+// worker (safe to call from storage hotplug/mount threads).
+void lastfm_reload_keys(void);
 
 bool lastfm_available(void);
 
 // Stored in the configuration. GUI thread.
 void lastfm_set_enabled(bool on);
 
-// Switched on, with keys and an account, signed in or with a session waiting
-// to be renewed: plays are being counted.
+// Switched on, with an account signed in or with a session waiting to be
+// renewed: plays are being counted and queued even if API keys or network are
+// not yet available.
 bool lastfm_active(void);
 
 // Both return at once; the worker does the work. The password is wiped as soon

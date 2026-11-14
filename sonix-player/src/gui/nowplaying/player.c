@@ -65,6 +65,10 @@
 #include "src/system/streaming/qobuzcache.h"
 #include "src/system/streaming/subsonicstream.h"
 #include "src/system/streaming/qobuzsync.h"
+#include "src/gui/streaming/jellyfin_icon.h"
+#include "src/gui/streaming/jellyfinpage.h"
+#include "src/system/streaming/jellyfin.h"
+#include "src/system/streaming/jellyfincache.h"
 #include "src/gui/streaming/soundcloud_icon.h"
 #include "src/gui/streaming/soundcloudpage.h"
 #include "src/system/streaming/soundcloud.h"
@@ -286,6 +290,7 @@ static lv_obj_t *qobuz_badge;	   // the Qobuz mark, in the same corner
 static lv_obj_t *tidal_badge;	   // and the Tidal one, over it: only one ever shows
 static lv_obj_t *podcast_badge;	   // and the podcast one, third in the same place
 static lv_obj_t *soundcloud_badge; // and the SoundCloud one, fourth in the same place
+static lv_obj_t *jellyfin_badge;   // and the Jellyfin one, fifth in the same place
 static bool live_mode;
 static bool live_transport_hidden; // prev/next taken away on a stream
 static bool live_custom_nav;	   // on a station from a list, where they change station
@@ -726,6 +731,9 @@ static void apply_live_mode(bool live) {
 	}
 	if (soundcloud_badge && live) {
 		lv_obj_set_hidden(soundcloud_badge, true);
+	}
+	if (jellyfin_badge && live) {
+		lv_obj_set_hidden(jellyfin_badge, true);
 	}
 	if (qobuz_badge && live) {
 		lv_obj_set_hidden(qobuz_badge, true);
@@ -1733,8 +1741,8 @@ static bool playing_local_file(const device_state_t *state) {
 		return false;
 	}
 	const char *f = state->current_file;
-	return !subsonicstream_owns(f) && !qobuzcache_owns(f) && !tidalcache_owns(f) && !podcastcache_is_episode(f) && !dlna_owns_path(f) &&
-		   !dlna_owns_playback();
+	return !subsonicstream_owns(f) && !qobuzcache_owns(f) && !tidalcache_owns(f) && !jellyfincache_owns(f) &&
+		   !podcastcache_is_episode(f) && !dlna_owns_path(f) && !dlna_owns_playback();
 }
 
 // Puts the progress slider over the waveform, or back where it belongs.
@@ -3296,7 +3304,7 @@ static int studio_cover_geometry(int *top_out) {
 // `parent` of NULL leaves them where they are and only re-places them, which
 // is what studio_place() wants on a relayout.
 static void studio_badges_move(lv_obj_t *parent, int y) {
-	lv_obj_t *const marks[] = {live_badge, qobuz_badge, tidal_badge, podcast_badge, soundcloud_badge};
+	lv_obj_t *const marks[] = {live_badge, qobuz_badge, tidal_badge, podcast_badge, soundcloud_badge, jellyfin_badge};
 	for (size_t i = 0; i < sizeof(marks) / sizeof(marks[0]); i++) {
 		if (!marks[i]) {
 			continue;
@@ -3480,7 +3488,7 @@ static void studio_take_back(void) {
 		}
 		// The marks go back to the corner of the artwork they share with every
 		// other arrangement.
-		lv_obj_t *const marks[] = {live_badge, qobuz_badge, tidal_badge, podcast_badge, soundcloud_badge};
+		lv_obj_t *const marks[] = {live_badge, qobuz_badge, tidal_badge, podcast_badge, soundcloud_badge, jellyfin_badge};
 		for (size_t i = 0; i < sizeof(marks) / sizeof(marks[0]); i++) {
 			if (marks[i]) {
 				lv_obj_set_parent(marks[i], cover_art_group);
@@ -5549,6 +5557,12 @@ static long long current_soundcloud_track(void) {
 	return state.current_file[0] ? soundcloudcache_track_id_of(state.current_file) : 0;
 }
 
+static bool current_jellyfin_track(char *out, size_t out_size) {
+	device_state_t state;
+	device_state_get(&state);
+	return state.current_file[0] && jellyfincache_item_id_of(state.current_file, out, out_size);
+}
+
 // The Qobuz mark, top right, when what is playing comes from there. Same place
 // and same purpose as the live badge for radio: say where the music comes from
 // without taking space from anything else.
@@ -5564,6 +5578,10 @@ static void update_qobuz_badge(void) {
 	bool from_tidal = !live_mode && !from_qobuz && current_tidal_track() != 0;
 	bool from_podcast = !live_mode && !from_qobuz && !from_tidal && current_podcast_episode();
 	bool from_soundcloud = !live_mode && !from_qobuz && !from_tidal && !from_podcast && current_soundcloud_track() > 0;
+	char jf_id[JELLYFIN_ID_MAX];
+	bool from_jellyfin =
+		!live_mode && !from_qobuz && !from_tidal && !from_podcast && !from_soundcloud &&
+		current_jellyfin_track(jf_id, sizeof(jf_id));
 
 	if (qobuz_badge) {
 		if (from_qobuz) {
@@ -5595,6 +5613,14 @@ static void update_qobuz_badge(void) {
 			lv_obj_move_foreground(soundcloud_badge);
 		} else {
 			lv_obj_set_hidden(soundcloud_badge, true);
+		}
+	}
+	if (jellyfin_badge) {
+		if (from_jellyfin) {
+			lv_obj_set_hidden(jellyfin_badge, false);
+			lv_obj_move_foreground(jellyfin_badge);
+		} else {
+			lv_obj_set_hidden(jellyfin_badge, true);
 		}
 	}
 }
@@ -5636,13 +5662,18 @@ static void update_fav_button(void) {
 	} else if ((sc_id = current_soundcloud_track()) > 0) {
 		starred = soundcloud_is_liked(sc_id);
 	} else {
-		// device_state, not audio_get_current_file(): the star is drawn from
-		// one source and toggled from another, and when the two disagreed the
-		// star never filled in -- the tap wrote the right track to the
-		// database while the drawing looked up a different one.
-		device_state_t state;
-		device_state_get(&state);
-		starred = state.current_file[0] && library_fav_contains(state.current_file);
+		char jf_id[JELLYFIN_ID_MAX];
+		if (current_jellyfin_track(jf_id, sizeof(jf_id))) {
+			starred = jellyfin_is_favorite(jf_id);
+		} else {
+			// device_state, not audio_get_current_file(): the star is drawn from
+			// one source and toggled from another, and when the two disagreed the
+			// star never filled in -- the tap wrote the right track to the
+			// database while the drawing looked up a different one.
+			device_state_t state;
+			device_state_get(&state);
+			starred = state.current_file[0] && library_fav_contains(state.current_file);
+		}
 	}
 
 	// The favorite marker's colour is decided here and nowhere else. This
@@ -5736,6 +5767,13 @@ static void soundcloud_fav_done(bool ok, const char *error, void *user) {
 	gui_post(fav_error_async, NULL);
 }
 
+static void jellyfin_fav_done(bool ok, const char *error, void *user) {
+	(void)user;
+	snprintf(fav_error, sizeof(fav_error), "%s",
+			 ok ? "" : (error && error[0] ? error : tr("jellyfin_connection_failed")));
+	gui_post(fav_error_async, NULL);
+}
+
 static void fav_btn_event_cb(lv_event_t *e) {
 	(void)e;
 
@@ -5796,6 +5834,13 @@ static void fav_btn_event_cb(lv_event_t *e) {
 		return;
 	}
 
+	char jf_id[JELLYFIN_ID_MAX];
+	if (jellyfincache_item_id_of(state.current_file, jf_id, sizeof(jf_id))) {
+		jellyfinpage_toggle_favorite_async(jf_id, jellyfin_fav_done, NULL);
+		update_fav_button();
+		return;
+	}
+
 	const char *title = state.metadata.title[0] ? state.metadata.title : strrchr(state.current_file, '/') + 1;
 	// No notification popup: the star filling in is the whole feedback.
 	library_fav_toggle(state.current_file, title, state.metadata.artist);
@@ -5841,7 +5886,7 @@ static void update_hires_badge(const device_state_t *state) {
 	// the button while it is there on an edge-to-edge sleeve, and restore them
 	// when it returns left; Sticker's inset square sits clear of the chevron.
 	if (!layout_studio_now) {
-		lv_obj_t *const marks[] = {live_badge, qobuz_badge, tidal_badge, podcast_badge, soundcloud_badge};
+		lv_obj_t *const marks[] = {live_badge, qobuz_badge, tidal_badge, podcast_badge, soundcloud_badge, jellyfin_badge};
 		int y = (back_right && !layout_sticker_now)
 			? (back_btn_centre_y() - player_content_top()) + bp_header_button_size() / 2 + 4
 			: BADGE_INSET;
@@ -5980,7 +6025,8 @@ static void update_format_label(const device_state_t *state) {
 		// finished, for the reason just given.
 		struct stat st;
 		if (kbps <= 0 && !qobuzcache_owns(state->current_file) && !tidalcache_owns(state->current_file) &&
-			state->progress_total_secs > 0.5 && stat(state->current_file, &st) == 0 && st.st_size > 0) {
+			!jellyfincache_owns(state->current_file) && state->progress_total_secs > 0.5 &&
+			stat(state->current_file, &st) == 0 && st.st_size > 0) {
 			kbps = (int)((double)st.st_size * 8.0 / state->progress_total_secs / 1000.0 + 0.5);
 		}
 
@@ -7596,8 +7642,8 @@ static void sticker_put(void) {
 	}
 	// On a stream the repeat disc in the bottom-left corner is gone, while the
 	// top-right corner belongs to the tilted format sticker and the centre to
-	// the spindle and radio mark. Park the red LIVE pill in that free corner
-	// over the sleeve rather than clipped inside it.
+	// the radio mark. Park the red LIVE pill in that free corner over the
+	// sleeve rather than clipped inside it.
 	if (live_badge && cover_panel) {
 		lv_obj_set_parent(live_badge, cover_panel);
 		lv_obj_set_style_pad_hor(live_badge, 8, 0);
@@ -8567,6 +8613,11 @@ void player_init(gui_config_t *cfg) {
 	lv_obj_align(soundcloud_badge, LV_ALIGN_TOP_RIGHT, -BADGE_INSET, BADGE_INSET);
 	lv_obj_set_hidden(soundcloud_badge, true);
 
+	jellyfin_badge = lv_image_create(cover_art_group);
+	lv_image_set_src(jellyfin_badge, &icon_jellyfin_badge);
+	lv_obj_align(jellyfin_badge, LV_ALIGN_TOP_RIGHT, -BADGE_INSET, BADGE_INSET);
+	lv_obj_set_hidden(jellyfin_badge, true);
+
 	// Shown while there is no artwork for the current track. The mark is drawn
 	// at 128x128 natively, which overflows a V1 sleeve, so it is scaled to a
 	// share of the sleeve (placeholder_rescale, also on a change of layout).
@@ -8794,7 +8845,7 @@ void player_init(gui_config_t *cfg) {
 	// apply_layout(), so they have to exist before it can run.
 	aam_status_h = compact ? cfg->top_bar_height : 0;
 	aam_build();
-	sticker_view_build(&sticker_view, player_screen, cover_panel, cover_art_group, play_btn);
+	sticker_view_build(&sticker_view, player_screen, cover_panel, play_btn);
 
 	// Last, so it is above the artwork: an invisible strip exactly where the
 	// status bar would be, owning the pull-down that brings the sheet in.

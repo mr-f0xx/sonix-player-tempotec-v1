@@ -1,6 +1,7 @@
 #include "streamkeys.h"
 
 #include <errno.h>
+#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -20,6 +21,7 @@
 
 // The values stay here for the life of the program: short strings, read once,
 // and every caller expects a pointer that does not die under it.
+static pthread_mutex_t keys_lock = PTHREAD_MUTEX_INITIALIZER;
 static char qobuz_app_id[64];
 static char qobuz_app_secret[128];
 static char tidal_client_id[64];
@@ -287,7 +289,7 @@ const char *streamkeys_data_path(void) {
 	return STREAMKEYS_DATA_DEFAULT_PATH;
 }
 
-void streamkeys_init(void) {
+static void streamkeys_init_locked(void) {
 	const char *configured = config_get("streaming", "keys_file", NULL);
 	const char *path = NULL;
 	loaded_from_image = false;
@@ -318,7 +320,13 @@ void streamkeys_init(void) {
 	report(path);
 }
 
-bool streamkeys_load_card(const char *card_root) {
+void streamkeys_init(void) {
+	pthread_mutex_lock(&keys_lock);
+	streamkeys_init_locked();
+	pthread_mutex_unlock(&keys_lock);
+}
+
+static bool streamkeys_load_card_locked(const char *card_root) {
 	// A firmware that carries its own keys in the rootfs keeps them. The card
 	// is a way in for builds that ship none, not a way to replace what an image
 	// says. When /usr/data/streaming-keys.ini holds on-device extracted pairs,
@@ -350,41 +358,22 @@ bool streamkeys_load_card(const char *card_root) {
 	memcpy(prev_sc_usr, soundcloud_username, sizeof(prev_sc_usr));
 
 	char path[512];
+	char loaded_path[512] = "";
 	const char *const names[] = {STREAMKEYS_CARD_BIN, STREAMKEYS_CARD_INI};
 	for (size_t i = 0; i < sizeof(names) / sizeof(names[0]); i++) {
 		snprintf(path, sizeof(path), "%s/%s", card_root, names[i]);
-		if (load(path)) {
-			// A .bin sealed with another key reads as a file and yields
-			// nothing; the .ini beside it, if there is one, still gets its
-			// turn.
-			bool changed = strcmp(prev_qid, qobuz_app_id) != 0 || strcmp(prev_qsec, qobuz_app_secret) != 0 ||
-						   strcmp(prev_tid, tidal_client_id) != 0 || strcmp(prev_tsec, tidal_client_secret) != 0 ||
-						   strcmp(prev_pk, podcast_key) != 0 || strcmp(prev_ps, podcast_secret) != 0 ||
-						   strcmp(prev_lk, lastfm_key) != 0 || strcmp(prev_ls, lastfm_secret) != 0 ||
-						   strcmp(prev_sc_cid, soundcloud_client_id) != 0 ||
-						   strcmp(prev_sc_tok, soundcloud_oauth_token) != 0 ||
-						   strcmp(prev_sc_usr, soundcloud_username) != 0;
-			if (!loaded_any) {
-				continue;
-			}
-			wipe(prev_qid, sizeof(prev_qid));
-			wipe(prev_qsec, sizeof(prev_qsec));
-			wipe(prev_tid, sizeof(prev_tid));
-			wipe(prev_tsec, sizeof(prev_tsec));
-			wipe(prev_pk, sizeof(prev_pk));
-			wipe(prev_ps, sizeof(prev_ps));
-			wipe(prev_lk, sizeof(prev_lk));
-			wipe(prev_ls, sizeof(prev_ls));
-			wipe(prev_sc_cid, sizeof(prev_sc_cid));
-			wipe(prev_sc_tok, sizeof(prev_sc_tok));
-			wipe(prev_sc_usr, sizeof(prev_sc_usr));
-			if (changed) {
-				printf("streamkeys: the microSD card has them\n");
-				report(path);
-			}
-			return changed;
+		if (load(path) && loaded_any) {
+			snprintf(loaded_path, sizeof(loaded_path), "%s", path);
 		}
 	}
+
+	bool changed = loaded_any && (strcmp(prev_qid, qobuz_app_id) != 0 || strcmp(prev_qsec, qobuz_app_secret) != 0 ||
+								  strcmp(prev_tid, tidal_client_id) != 0 || strcmp(prev_tsec, tidal_client_secret) != 0 ||
+								  strcmp(prev_pk, podcast_key) != 0 || strcmp(prev_ps, podcast_secret) != 0 ||
+								  strcmp(prev_lk, lastfm_key) != 0 || strcmp(prev_ls, lastfm_secret) != 0 ||
+								  strcmp(prev_sc_cid, soundcloud_client_id) != 0 ||
+								  strcmp(prev_sc_tok, soundcloud_oauth_token) != 0 ||
+								  strcmp(prev_sc_usr, soundcloud_username) != 0);
 	wipe(prev_qid, sizeof(prev_qid));
 	wipe(prev_qsec, sizeof(prev_qsec));
 	wipe(prev_tid, sizeof(prev_tid));
@@ -396,11 +385,24 @@ bool streamkeys_load_card(const char *card_root) {
 	wipe(prev_sc_cid, sizeof(prev_sc_cid));
 	wipe(prev_sc_tok, sizeof(prev_sc_tok));
 	wipe(prev_sc_usr, sizeof(prev_sc_usr));
-	return false;
+	if (changed && loaded_path[0]) {
+		printf("streamkeys: the microSD card has them\n");
+		report(loaded_path);
+	}
+	return changed;
+}
+
+bool streamkeys_load_card(const char *card_root) {
+	pthread_mutex_lock(&keys_lock);
+	bool changed = streamkeys_load_card_locked(card_root);
+	pthread_mutex_unlock(&keys_lock);
+	return changed;
 }
 
 bool streamkeys_reload(const char *card_root) {
+	pthread_mutex_lock(&keys_lock);
 	if (loaded_from_image) {
+		pthread_mutex_unlock(&keys_lock);
 		return true;
 	}
 	wipe(qobuz_app_id, sizeof(qobuz_app_id));
@@ -417,9 +419,11 @@ bool streamkeys_reload(const char *card_root) {
 	source_path[0] = '\0';
 	loaded_any = false;
 
-	streamkeys_init();
-	(void)streamkeys_load_card(card_root);
-	return loaded_any;
+	streamkeys_init_locked();
+	(void)streamkeys_load_card_locked(card_root);
+	bool ok = loaded_any;
+	pthread_mutex_unlock(&keys_lock);
+	return ok;
 }
 
 static void ensure_parent_dir(const char *path) {
@@ -490,6 +494,8 @@ bool streamkeys_write_extracted(const char *qobuz_id, const char *qobuz_sec, con
 		return false;
 	}
 
+	pthread_mutex_lock(&keys_lock);
+
 	// Preserve any [podcast] / [lastfm] keys already loaded or sitting in either
 	// existing INI file before we rewrite them.
 	if (!loaded_from_image) {
@@ -510,20 +516,20 @@ bool streamkeys_write_extracted(const char *qobuz_id, const char *qobuz_sec, con
 	const char *tsec = have_tidal ? tidal_sec : tidal_client_secret;
 
 	char buf[2048];
+	bool result = false;
 	int pos = snprintf(buf, sizeof(buf),
 					   "# Streaming service credentials, extracted from the stock firmware of\n"
 					   "# this device. Do not commit or share this file, and do not publish an\n"
 					   "# image that carries it: these pairs belong to HiBy, not to Sonix.\n\n");
 	if (pos < 0 || (size_t)pos >= sizeof(buf)) {
-		return false;
+		goto out;
 	}
 
 	if (qid[0] && qsec[0]) {
 		int n = snprintf(buf + pos, sizeof(buf) - (size_t)pos,
 						 "[qobuz]\napp_id = %s\napp_secret = %s\n\n", qid, qsec);
 		if (n < 0 || (size_t)(pos + n) >= sizeof(buf)) {
-			wipe(buf, sizeof(buf));
-			return false;
+			goto out;
 		}
 		pos += n;
 	}
@@ -531,8 +537,7 @@ bool streamkeys_write_extracted(const char *qobuz_id, const char *qobuz_sec, con
 		int n = snprintf(buf + pos, sizeof(buf) - (size_t)pos,
 						 "[tidal]\nclient_id = %s\nclient_secret = %s\n\n", tid, tsec);
 		if (n < 0 || (size_t)(pos + n) >= sizeof(buf)) {
-			wipe(buf, sizeof(buf));
-			return false;
+			goto out;
 		}
 		pos += n;
 	}
@@ -540,8 +545,7 @@ bool streamkeys_write_extracted(const char *qobuz_id, const char *qobuz_sec, con
 		int n = snprintf(buf + pos, sizeof(buf) - (size_t)pos,
 						 "[podcast]\napi_key = %s\napi_secret = %s\n\n", podcast_key, podcast_secret);
 		if (n < 0 || (size_t)(pos + n) >= sizeof(buf)) {
-			wipe(buf, sizeof(buf));
-			return false;
+			goto out;
 		}
 		pos += n;
 	}
@@ -549,46 +553,40 @@ bool streamkeys_write_extracted(const char *qobuz_id, const char *qobuz_sec, con
 		int n = snprintf(buf + pos, sizeof(buf) - (size_t)pos,
 						 "[lastfm]\napi_key = %s\napi_secret = %s\n\n", lastfm_key, lastfm_secret);
 		if (n < 0 || (size_t)(pos + n) >= sizeof(buf)) {
-			wipe(buf, sizeof(buf));
-			return false;
+			goto out;
 		}
 		pos += n;
 	}
 	if (soundcloud_client_id[0] || soundcloud_oauth_token[0] || soundcloud_username[0]) {
 		int n = snprintf(buf + pos, sizeof(buf) - (size_t)pos, "[soundcloud]\n");
 		if (n < 0 || (size_t)(pos + n) >= sizeof(buf)) {
-			wipe(buf, sizeof(buf));
-			return false;
+			goto out;
 		}
 		pos += n;
 		if (soundcloud_client_id[0]) {
 			n = snprintf(buf + pos, sizeof(buf) - (size_t)pos, "client_id = %s\n", soundcloud_client_id);
 			if (n < 0 || (size_t)(pos + n) >= sizeof(buf)) {
-				wipe(buf, sizeof(buf));
-				return false;
+				goto out;
 			}
 			pos += n;
 		}
 		if (soundcloud_username[0]) {
 			n = snprintf(buf + pos, sizeof(buf) - (size_t)pos, "username = %s\n", soundcloud_username);
 			if (n < 0 || (size_t)(pos + n) >= sizeof(buf)) {
-				wipe(buf, sizeof(buf));
-				return false;
+				goto out;
 			}
 			pos += n;
 		}
 		if (soundcloud_oauth_token[0]) {
 			n = snprintf(buf + pos, sizeof(buf) - (size_t)pos, "oauth_token = %s\n", soundcloud_oauth_token);
 			if (n < 0 || (size_t)(pos + n) >= sizeof(buf)) {
-				wipe(buf, sizeof(buf));
-				return false;
+				goto out;
 			}
 			pos += n;
 		}
 		n = snprintf(buf + pos, sizeof(buf) - (size_t)pos, "\n");
 		if (n < 0 || (size_t)(pos + n) >= sizeof(buf)) {
-			wipe(buf, sizeof(buf));
-			return false;
+			goto out;
 		}
 		pos += n;
 	}
@@ -612,9 +610,12 @@ bool streamkeys_write_extracted(const char *qobuz_id, const char *qobuz_sec, con
 			}
 		}
 	}
+	result = wrote_data || wrote_card;
 
+out:
 	wipe(buf, sizeof(buf));
-	return wrote_data || wrote_card;
+	pthread_mutex_unlock(&keys_lock);
+	return result;
 }
 
 static const char *or_null(const char *s) { return s[0] ? s : NULL; }
