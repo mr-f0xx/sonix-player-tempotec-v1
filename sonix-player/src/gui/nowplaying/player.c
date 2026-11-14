@@ -7596,8 +7596,8 @@ static void sticker_put(void) {
 	}
 	// On a stream the repeat disc in the bottom-left corner is gone, while the
 	// top-right corner belongs to the tilted format sticker and the centre to
-	// the spindle and radio mark. Park the red LIVE pill in that free corner
-	// over the sleeve rather than clipped inside it.
+	// the radio mark. Park the red LIVE pill in that free corner over the
+	// sleeve rather than clipped inside it.
 	if (live_badge && cover_panel) {
 		lv_obj_set_parent(live_badge, cover_panel);
 		lv_obj_set_style_pad_hor(live_badge, 8, 0);
@@ -8794,7 +8794,7 @@ void player_init(gui_config_t *cfg) {
 	// apply_layout(), so they have to exist before it can run.
 	aam_status_h = compact ? cfg->top_bar_height : 0;
 	aam_build();
-	sticker_view_build(&sticker_view, player_screen, cover_panel, cover_art_group, play_btn);
+	sticker_view_build(&sticker_view, player_screen, cover_panel, play_btn);
 
 	// Last, so it is above the artwork: an invisible strip exactly where the
 	// status bar would be, owning the pull-down that brings the sheet in.

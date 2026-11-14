@@ -27,8 +27,6 @@ static int check_geometry(int screen_h, int title_fh, int artist_fh, int album_f
 		  "sleeve bottom %d reaches deck_y %d", b.art_y + b.art_side + STICKER_ART_GAP, b.deck_y);
 	CHECK(b.frame_side == b.art_side + 2 * STICKER_FRAME_OUTSET,
 		  "frame_side=%d expected %d", b.frame_side, b.art_side + 2 * STICKER_FRAME_OUTSET);
-	CHECK(b.spindle_d >= 18 && (b.spindle_d & 1) == 0,
-		  "spindle_d=%d must be even and >= 18", b.spindle_d);
 	CHECK(b.deck_y + b.deck_h == screen_h,
 		  "deck_y=%d + deck_h=%d != screen_h=%d", b.deck_y, b.deck_h, screen_h);
 	CHECK(b.artist_y > b.title_y + b.title_h,
@@ -105,10 +103,11 @@ int main(void) {
 	lv_obj_set_size(play_btn, STICKER_PLAY_BTN, STICKER_PLAY_BTN);
 
 	sticker_view_t v = {0};
-	sticker_view_build(&v, sheet, panel, sleeve, play_btn);
+	sticker_view_build(&v, sheet, panel, play_btn);
 	CHECK(v.tilted_cyan && v.tilted_pink && v.straight_cyan, "decorative frames built");
-	CHECK(v.spindle && v.queue_pill && v.format_pill && v.repeat_disc && v.fav_disc, "sleeve overlays built");
+	CHECK(v.queue_pill && v.format_pill && v.repeat_disc && v.fav_disc, "sleeve overlays built");
 	CHECK(v.title_strip && v.artist_strip && v.album_label && v.seek_row && v.play_ring, "deck overlays built");
+	CHECK(lv_obj_get_child_count(sleeve) == 0, "sleeve must have no center spindle overlay");
 
 	/* Initially hidden until sticker_put activates the layout. */
 	CHECK(lv_obj_is_hidden(v.tilted_cyan) && lv_obj_is_hidden(v.title_strip) && lv_obj_is_hidden(v.play_ring),
@@ -140,8 +139,10 @@ int main(void) {
 		  "queue_pill must sit in front of sleeve");
 	CHECK(lv_obj_get_index(v.format_pill) > lv_obj_get_index(sleeve),
 		  "format_pill must sit in front of sleeve");
+	CHECK(lv_obj_get_child_count(sleeve) == 0,
+		  "sleeve must have no center spindle overlay after apply");
 
-	lv_area_t q_area, f_area, r_area, fav_area, s_area, c_area, t_area;
+	lv_area_t q_area, f_area, r_area, fav_area, s_area, c_area, t_area, sleeve_area;
 	lv_obj_get_coords(v.queue_pill, &q_area);
 	lv_obj_get_coords(v.format_pill, &f_area);
 	lv_obj_get_coords(v.repeat_disc, &r_area);
@@ -149,6 +150,17 @@ int main(void) {
 	lv_obj_get_coords(v.seek_row, &s_area);
 	lv_obj_get_coords(controls_row, &c_area);
 	lv_obj_get_coords(v.title_strip, &t_area);
+	lv_obj_get_coords(sleeve, &sleeve_area);
+
+	int sleeve_cx = (sleeve_area.x1 + sleeve_area.x2) / 2;
+	int sleeve_cy = (sleeve_area.y1 + sleeve_area.y2) / 2;
+	lv_obj_t *const corner_overlays[] = {v.queue_pill, v.format_pill, v.repeat_disc, v.fav_disc};
+	for (size_t i = 0; i < sizeof(corner_overlays) / sizeof(corner_overlays[0]); i++) {
+		lv_area_t ca;
+		lv_obj_get_coords(corner_overlays[i], &ca);
+		CHECK(sleeve_cx < ca.x1 || sleeve_cx > ca.x2 || sleeve_cy < ca.y1 || sleeve_cy > ca.y2,
+			  "corner overlay %zu covers sleeve center (%d,%d)", i, sleeve_cx, sleeve_cy);
+	}
 
 	CHECK(q_area.x2 < f_area.x1, "queue_pill x2=%d overlaps format_pill x1=%d",
 		  (int)q_area.x2, (int)f_area.x1);

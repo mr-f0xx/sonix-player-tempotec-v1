@@ -135,12 +135,6 @@ sticker_box_t sticker_layout_box(int screen_w, int screen_h, int title_line_h, i
 	b.frame_side = side + 2 * STICKER_FRAME_OUTSET;
 	b.frame_x = b.art_x - STICKER_FRAME_OUTSET;
 	b.frame_y = b.art_y - STICKER_FRAME_OUTSET;
-
-	int sd = side * STICKER_SPINDLE_PCT / 100;
-	sd &= ~1;
-	if (sd < 6)
-		sd = 6;
-	b.spindle_d = sd;
 	return b;
 }
 
@@ -238,7 +232,7 @@ static lv_obj_t *tape_strip(lv_obj_t *parent, uint32_t hex, int tilt) {
 }
 
 void sticker_view_build(sticker_view_t *v, lv_obj_t *sheet, lv_obj_t *cover_panel,
-						lv_obj_t *sleeve, lv_obj_t *play_btn) {
+						lv_obj_t *play_btn) {
 	if (!v)
 		return;
 	*v = (sticker_view_t){0};
@@ -251,16 +245,6 @@ void sticker_view_build(sticker_view_t *v, lv_obj_t *sheet, lv_obj_t *cover_pane
 		v->format_pill = corner_pill(cover_panel, STICKER_CYAN_HEX, STICKER_FORMAT_TILT);
 		v->repeat_disc = corner_disc(cover_panel, STICKER_PINK_HEX);
 		v->fav_disc = corner_disc(cover_panel, STICKER_GOLD_HEX);
-	}
-	if (sleeve) {
-		v->spindle = plain_box(sleeve);
-		lv_obj_set_style_radius(v->spindle, LV_RADIUS_CIRCLE, 0);
-		lv_obj_set_style_bg_color(v->spindle, lv_color_hex(STICKER_BG_HEX), 0);
-		lv_obj_set_style_bg_opa(v->spindle, LV_OPA_COVER, 0);
-		lv_obj_set_style_border_width(v->spindle, STICKER_ART_BORDER, 0);
-		lv_obj_set_style_border_color(v->spindle, lv_color_hex(STICKER_YELLOW_HEX), 0);
-		lv_obj_set_style_border_opa(v->spindle, LV_OPA_COVER, 0);
-		lv_obj_set_hidden(v->spindle, true);
 	}
 	if (sheet) {
 		v->title_strip = tape_strip(sheet, STICKER_PINK_HEX, STICKER_TITLE_TILT);
@@ -307,11 +291,6 @@ void sticker_view_apply(sticker_view_t *v, const sticker_box_t *b, int screen_w)
 		lv_obj_set_size(v->straight_cyan, b->frame_side, b->frame_side);
 		lv_obj_align(v->straight_cyan, LV_ALIGN_TOP_LEFT, b->frame_x, b->frame_y);
 		lv_obj_move_to_index(v->straight_cyan, 2);
-	}
-	if (v->spindle) {
-		lv_obj_set_size(v->spindle, b->spindle_d, b->spindle_d);
-		lv_obj_center(v->spindle);
-		lv_obj_move_foreground(v->spindle);
 	}
 	if (v->queue_pill) {
 		lv_obj_set_size(v->queue_pill, LV_SIZE_CONTENT, pill_height_for(v->queue_pill));
@@ -379,7 +358,7 @@ void sticker_view_set_hidden(sticker_view_t *v, bool hidden) {
 	if (!v)
 		return;
 	lv_obj_t *const all[] = {
-		v->tilted_cyan, v->tilted_pink, v->straight_cyan, v->spindle,
+		v->tilted_cyan, v->tilted_pink, v->straight_cyan,
 		v->queue_pill, v->format_pill, v->repeat_disc, v->fav_disc,
 		v->title_strip, v->artist_strip, v->album_label, v->seek_row, v->play_ring,
 	};
