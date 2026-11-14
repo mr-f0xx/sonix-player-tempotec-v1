@@ -3,6 +3,7 @@
 
 #include "src/system/library/cue.h"
 #include "src/system/library/tagdate.h"
+#include "src/system/library/tagtext.h"
 #include "src/system/decode/decode.h"
 #include "src/system/decode/mp4.h"
 #include "src/system/decode/apedec.h"
@@ -546,211 +547,6 @@ static uint32_t plain_to_uint32(const uint8_t b[4]) {
 	return ((uint32_t)b[0] << 24) | ((uint32_t)b[1] << 16) | ((uint32_t)b[2] << 8) | (uint32_t)b[3];
 }
 
-// Converts UTF-16 (LE or BE) text to UTF-8, stopping at a null terminator.
-static void utf16_to_utf8(const uint8_t *data, size_t len, bool big_endian, char *out, size_t out_size) {
-	size_t oi = 0;
-	size_t i = 0;
-	while (i + 1 < len && oi + 4 < out_size) {
-		uint32_t unit = big_endian ? ((uint32_t)data[i] << 8 | data[i + 1]) : ((uint32_t)data[i + 1] << 8 | data[i]);
-		i += 2;
-		if (unit == 0)
-			break;
-
-		uint32_t cp = unit;
-		if (unit >= 0xD800 && unit <= 0xDBFF && i + 1 < len) {
-			uint32_t unit2 = big_endian ? ((uint32_t)data[i] << 8 | data[i + 1]) : ((uint32_t)data[i + 1] << 8 | data[i]);
-			if (unit2 >= 0xDC00 && unit2 <= 0xDFFF) {
-				cp = 0x10000 + ((unit - 0xD800) << 10) + (unit2 - 0xDC00);
-				i += 2;
-			}
-		}
-
-		if (cp < 0x80) {
-			out[oi++] = (char)cp;
-		} else if (cp < 0x800) {
-			out[oi++] = (char)(0xC0 | (cp >> 6));
-			out[oi++] = (char)(0x80 | (cp & 0x3F));
-		} else if (cp < 0x10000) {
-			out[oi++] = (char)(0xE0 | (cp >> 12));
-			out[oi++] = (char)(0x80 | ((cp >> 6) & 0x3F));
-			out[oi++] = (char)(0x80 | (cp & 0x3F));
-		} else {
-			out[oi++] = (char)(0xF0 | (cp >> 18));
-			out[oi++] = (char)(0x80 | ((cp >> 12) & 0x3F));
-			out[oi++] = (char)(0x80 | ((cp >> 6) & 0x3F));
-			out[oi++] = (char)(0x80 | (cp & 0x3F));
-		}
-	}
-	out[oi] = '\0';
-}
-
-// ---------------------------------------------------------------------------
-// UTF-8 where it was not declared
-//
-// Text in a field that says Latin-1 (an ID3v2 frame with encoding 0x00, an
-// ID3v1 tag) or says nothing (RIFF INFO, the text of a .dff) is quite often
-// UTF-8: taggers write what the system gives them. Read as Latin-1, every
-// accented letter comes out as two wrong ones. Well-formed UTF-8 with at least
-// one sequence of two or more bytes is taken as UTF-8; real Latin-1 almost
-// never is, since there the byte after an accented letter is another letter,
-// not a continuation.
-// ---------------------------------------------------------------------------
-
-// The length of the UTF-8 sequence opened by `c`, or 0 when `c` cannot open
-// one.
-static size_t utf8_sequence_length(uint8_t c) {
-	if (c < 0x80) {
-		return 1;
-	}
-	if (c >= 0xC2 && c <= 0xDF) {
-		return 2;
-	}
-	if (c >= 0xE0 && c <= 0xEF) {
-		return 3;
-	}
-	if (c >= 0xF0 && c <= 0xF4) {
-		return 4;
-	}
-	return 0;
-}
-
-// Whether `len` bytes, up to the first NUL, are well-formed UTF-8. Plain ASCII
-// is. A Latin-1 accent on its own is not: a high byte has to open a sequence of
-// the right length, and in Latin-1 text the byte after it is a letter.
-static bool text_is_utf8(const uint8_t *p, size_t len) {
-	size_t i = 0;
-	while (i < len && p[i]) {
-		size_t follow = utf8_sequence_length(p[i]);
-		if (follow == 0) {
-			return false;
-		}
-		i++;
-		for (size_t k = 1; k < follow; k++, i++) {
-			if (i >= len || (p[i] & 0xC0) != 0x80) {
-				return false;
-			}
-		}
-	}
-	return true;
-}
-
-// Well-formed UTF-8 that is not plain ASCII.
-static bool text_is_wide_utf8(const uint8_t *p, size_t len) {
-	bool wide = false;
-	for (size_t i = 0; i < len && p[i] && !wide; i++) {
-		wide = p[i] >= 0x80;
-	}
-	return wide && text_is_utf8(p, len);
-}
-
-// ---------------------------------------------------------------------------
-// Windows-1251 in a Latin-1 frame
-//
-// An ID3v2 frame that declares encoding 0x00 says its bytes are ISO-8859-1, and
-// most taggers tell the truth. Russian ones often do not: they write
-// Windows-1251 and leave the encoding byte at zero, as does every ID3v1 tag,
-// which has no encoding byte at all. Read as Latin-1, "Алиса" comes out as
-// "Àëèñà" -- still in the database and still sorting, but under A, in
-// characters nobody is looking for.
-//
-// The two encodings cannot be told apart by the bytes alone, so this goes by
-// how they are arranged. A Latin-1 name spends its high bytes one at a time --
-// the e in "Café", the u in "Müller" -- with letters either side. Cyrillic
-// written as 1251 is high bytes all the way through a word. So a run of two or
-// more Cyrillic-range letters with no ASCII letter or digit touching either end
-// is 1251; anything else is left as Latin-1.
-// ---------------------------------------------------------------------------
-
-// The half of the code page that is not simply А-я: punctuation, the Ukrainian
-// and Belarusian letters, and the currency signs. 0 means "not in the page".
-static const uint16_t CP1251_HIGH[64] = {
-	0x0402, 0x0403, 0x201A, 0x0453, 0x201E, 0x2026, 0x2020, 0x2021, // 80-87
-	0x20AC, 0x2030, 0x0409, 0x2039, 0x040A, 0x040C, 0x040B, 0x040F, // 88-8F
-	0x0452, 0x2018, 0x2019, 0x201C, 0x201D, 0x2022, 0x2013, 0x2014, // 90-97
-	0x0000, 0x2122, 0x0459, 0x203A, 0x045A, 0x045C, 0x045B, 0x045F, // 98-9F
-	0x00A0, 0x040E, 0x045E, 0x0408, 0x00A4, 0x0490, 0x00A6, 0x00A7, // A0-A7
-	0x0401, 0x00A9, 0x0404, 0x00AB, 0x00AC, 0x00AD, 0x00AE, 0x0407, // A8-AF
-	0x00B0, 0x00B1, 0x0406, 0x0456, 0x0491, 0x00B5, 0x00B6, 0x00B7, // B0-B7
-	0x0451, 0x2116, 0x0454, 0x00BB, 0x0458, 0x0405, 0x0455, 0x0457, // B8-BF
-};
-
-// One byte of the code page as a Unicode code point.
-static uint32_t cp1251_code(uint8_t c) {
-	if (c < 0x80) {
-		return c;
-	}
-	if (c >= 0xC0) {
-		// А-Я then а-я, in one contiguous stretch each.
-		return (c < 0xE0) ? (uint32_t)(0x0410 + (c - 0xC0)) : (uint32_t)(0x0430 + (c - 0xE0));
-	}
-	uint16_t mapped = CP1251_HIGH[c - 0x80];
-	return mapped ? mapped : (uint32_t)c;
-}
-
-// A Cyrillic LETTER in the code page -- what a word is made of, as opposed to
-// the quotes and the currency signs that share the upper half.
-static bool cp1251_is_letter(uint8_t c) { return c >= 0xC0 || c == 0xA8 || c == 0xB8; }
-
-static bool ascii_alnum(uint8_t c) {
-	return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9');
-}
-
-// A whole word of high bytes, with no ASCII letter touching either end, is the
-// tell. An accent inside a Latin word always has letters beside it -- the u in
-// "Müller", the o in "Motörhead", the three umlauts in "ÄÖÜX" -- while a
-// Cyrillic word written as 1251 runs from one space to the next without an
-// ASCII letter in sight. Two letters is enough of a word; the high bytes that
-// are punctuation in both code pages are neither evidence nor objection.
-static bool looks_like_cp1251(const uint8_t *data, size_t len) {
-	size_t i = 0;
-	while (i < len && data[i]) {
-		if (!cp1251_is_letter(data[i])) {
-			i++;
-			continue;
-		}
-
-		size_t start = i;
-		while (i < len && data[i] && cp1251_is_letter(data[i])) {
-			i++;
-		}
-
-		bool free_left = start == 0 || !ascii_alnum(data[start - 1]);
-		bool free_right = i >= len || data[i] == 0 || !ascii_alnum(data[i]);
-		if (i - start >= 2 && free_left && free_right) {
-			return true;
-		}
-	}
-	return false;
-}
-
-// The same bytes as UTF-8, read through the code page.
-static void cp1251_to_utf8(const uint8_t *data, size_t len, char *out, size_t out_size) {
-	size_t oi = 0;
-	for (size_t i = 0; i < len && data[i]; i++) {
-		uint32_t code = cp1251_code(data[i]);
-		if (code < 0x80) {
-			if (oi + 1 >= out_size) {
-				break;
-			}
-			out[oi++] = (char)code;
-		} else if (code < 0x800) {
-			if (oi + 2 >= out_size) {
-				break;
-			}
-			out[oi++] = (char)(0xC0 | (code >> 6));
-			out[oi++] = (char)(0x80 | (code & 0x3F));
-		} else {
-			if (oi + 3 >= out_size) {
-				break;
-			}
-			out[oi++] = (char)(0xE0 | (code >> 12));
-			out[oi++] = (char)(0x80 | ((code >> 6) & 0x3F));
-			out[oi++] = (char)(0x80 | (code & 0x3F));
-		}
-	}
-	out[oi] = '\0';
-}
-
 // Decodes ID3v2 frame text (encoding byte 0x00-0x03) into UTF-8.
 static void id3_decode_text(uint8_t encoding, const uint8_t *data, size_t len, char *out, size_t out_size) {
 	if (out_size == 0)
@@ -760,35 +556,9 @@ static void id3_decode_text(uint8_t encoding, const uint8_t *data, size_t len, c
 		return;
 
 	switch (encoding) {
-	case 0x00: { // ISO-8859-1 (Latin-1), or UTF-8 or Windows-1251 pretending to be it
-		if (text_is_wide_utf8(data, len)) {
-			size_t copy_len = strnlen((const char *)data, len);
-			if (copy_len > out_size - 1) {
-				copy_len = out_size - 1;
-			}
-			memcpy(out, data, copy_len);
-			out[copy_len] = '\0';
-			break;
-		}
-		if (looks_like_cp1251(data, len)) {
-			cp1251_to_utf8(data, len, out, out_size);
-			break;
-		}
-		size_t oi = 0;
-		for (size_t i = 0; i < len && oi + 2 < out_size; i++) {
-			uint8_t c = data[i];
-			if (c == 0)
-				break;
-			if (c < 0x80) {
-				out[oi++] = (char)c;
-			} else {
-				out[oi++] = (char)(0xC0 | (c >> 6));
-				out[oi++] = (char)(0x80 | (c & 0x3F));
-			}
-		}
-		out[oi] = '\0';
+	case 0x00: // ISO-8859-1 (Latin-1), or UTF-8, Japanese or Windows-1251 pretending to be it
+		tagtext_guess(data, len, out, out_size);
 		break;
-	}
 	case 0x01: { // UTF-16 with BOM
 		bool big_endian = false;
 		size_t offset = 0;
@@ -801,11 +571,11 @@ static void id3_decode_text(uint8_t encoding, const uint8_t *data, size_t len, c
 				offset = 2;
 			}
 		}
-		utf16_to_utf8(data + offset, len - offset, big_endian, out, out_size);
+		tagtext_utf16(data + offset, len - offset, big_endian, out, out_size);
 		break;
 	}
 	case 0x02: // UTF-16BE, no BOM
-		utf16_to_utf8(data, len, true, out, out_size);
+		tagtext_utf16(data, len, 1, out, out_size);
 		break;
 	case 0x03: // UTF-8
 	default: {
@@ -1567,8 +1337,9 @@ static int read_id3v2_chain(FILE *f, song_metadata_t *out) {
 	return tags;
 }
 
-// Copies up to `max_src_len` raw ISO-8859-1 bytes from `src`, trimming
-// trailing spaces, and decodes them into `dst` as UTF-8.
+// Copies up to `max_src_len` raw bytes from `src`, trimming trailing spaces,
+// and decodes them into `dst` as UTF-8. ID3v1 has no encoding byte at all,
+// which is why the code page has to be worked out from the bytes.
 static void set_field_bounded(char *dst, size_t dst_size, const char *src, size_t max_src_len) {
 	size_t len = 0;
 	while (len < max_src_len && src[len] != '\0')
@@ -1814,7 +1585,7 @@ static void read_flac_metadata(const char *filepath, song_metadata_t *out) {
 //
 // RIFF INFO, the native AIFF and .dff text: taken as UTF-8 when it is
 // well-formed UTF-8, and otherwise as the single-byte text an ID3v1 tag holds
-// (Latin-1, or Windows-1251 -- see id3_decode_text).
+// (Latin-1, Windows-1251 or Japanese -- see id3_decode_text).
 // ---------------------------------------------------------------------------
 
 // One value into `out` as UTF-8. The value is usually NUL-terminated and
@@ -1824,7 +1595,7 @@ static void info_text(const char *raw, size_t len, char *out, size_t out_size) {
 	while (len > 0 && raw[len - 1] == ' ') {
 		len--;
 	}
-	if (text_is_utf8((const uint8_t *)raw, len)) {
+	if (tagtext_is_utf8((const uint8_t *)raw, len)) {
 		size_t copy_len = len < out_size - 1 ? len : out_size - 1;
 		memcpy(out, raw, copy_len);
 		out[copy_len] = '\0';
@@ -2516,7 +2287,7 @@ static void clean_text(char *s, size_t size) {
 	size_t len = strlen(s);
 	bool bad = false;
 	for (size_t i = 0; i < len && !bad;) {
-		size_t n = utf8_sequence_length((uint8_t)s[i]);
+		size_t n = tagtext_utf8_length((uint8_t)s[i]);
 		if (n == 0) {
 			bad = true;
 			break;
