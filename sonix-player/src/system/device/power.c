@@ -35,6 +35,9 @@
 #include "src/system/streaming/subsonicdl.h"
 #include "src/system/streaming/podcastcache.h"
 #include "src/system/streaming/podcastdl.h"
+#include "src/system/streaming/jellyfin.h"
+#include "src/system/streaming/jellyfincache.h"
+#include "src/gui/streaming/jellyfinpage.h"
 #include "src/system/streaming/soundcloud.h"
 #include "src/system/streaming/soundcloudcache.h"
 #include "src/gui/streaming/soundcloudpage.h"
@@ -852,7 +855,7 @@ static bool streaming_playback_active(void) {
 		return false;
 	}
 	return subsonicstream_owns(path) || qobuzcache_owns(path) || tidalcache_owns(path) ||
-		   soundcloudcache_is_soundcloud_path(path) || podcastcache_owns(path);
+		   soundcloudcache_is_soundcloud_path(path) || jellyfincache_owns(path) || podcastcache_owns(path);
 }
 
 // Whether the network is the point rather than an idle drain: an AirPlay
@@ -869,7 +872,9 @@ static bool wifi_in_use(void) {
 	// under wpa_supplicant mid-association leaves the driver to sort out a
 	// teardown it did not expect.
 	return subsonic_api_busy() || subsonicstream_network_wanted() || subsonicdl_busy() || soundcloud_api_busy() ||
-		   soundcloudcache_downloading() || soundcloudpage_waiting_for_track() || wifi_busy() || wifi_scan_running() ||
+		   soundcloudcache_downloading() || soundcloudpage_waiting_for_track() || jellyfin_api_busy() ||
+		   jellyfincache_downloading() || jellyfinpage_waiting_for_track() || jellyfinpage_download_busy() ||
+		   wifi_busy() || wifi_scan_running() ||
 		   streaming_playback_active() || airplay_get_enabled() ||
 		   dlna_get_enabled() || sonixlink_get_enabled() ||
 		   wifitransfer_get_enabled() || qobuzcache_downloading_id() > 0 ||
@@ -932,7 +937,8 @@ static bool player_is_busy(bool playing, uint32_t input_idle) {
 		   audiobookdb_scan_running() || wifitransfer_running() || dlna_running() || airplay_running() ||
 		   sonixlink_is_connected() || // a phone driving the player, not a switch left on
 		   qobuzcache_downloading_id() > 0 || tidalcache_downloading_id() > 0 ||
-		   soundcloudcache_downloading() || podcastcache_downloading_id() > 0 ||
+		   soundcloudcache_downloading() || jellyfincache_downloading() || jellyfinpage_download_busy() ||
+		   podcastcache_downloading_id() > 0 ||
 		   ota_busy(); // a firmware update being fetched
 }
 
@@ -1279,6 +1285,7 @@ void power_shutdown(void) {
 	qobuzcache_clear_on_exit();
 	tidalcache_clear_on_exit();
 	soundcloudcache_clear_on_exit();
+	jellyfincache_clear_on_exit();
 	podcastcache_clear_on_exit();
 	dlna_clear_on_exit();
 

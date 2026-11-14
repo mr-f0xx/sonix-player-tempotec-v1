@@ -54,6 +54,9 @@
 #include "src/system/device/power.h"
 #include "src/system/streaming/qobuzcache.h"
 #include "src/system/streaming/qobuzsync.h"
+#include "src/gui/streaming/jellyfinpage.h"
+#include "src/system/streaming/jellyfin.h"
+#include "src/system/streaming/jellyfincache.h"
 #include "src/gui/streaming/soundcloudpage.h"
 #include "src/system/streaming/soundcloud.h"
 #include "src/system/streaming/soundcloudcache.h"
@@ -704,6 +707,9 @@ static void refresh_now_playing_card(void) {
 		fav = qobuzsync_is_favorite(qobuz_id);
 	} else if (state.current_file[0] && soundcloudcache_is_soundcloud_path(state.current_file)) {
 		fav = soundcloud_is_liked(soundcloudcache_track_id_of(state.current_file));
+	} else if (state.current_file[0] && jellyfincache_owns(state.current_file)) {
+		char jf_id[JELLYFIN_ID_MAX];
+		fav = jellyfincache_item_id_of(state.current_file, jf_id, sizeof(jf_id)) && jellyfin_is_favorite(jf_id);
 	} else {
 		fav = state.current_file[0] && library_fav_contains(state.current_file);
 	}
@@ -1547,6 +1553,14 @@ static void star_cb(lv_event_t *e) {
 	long long sc_id = soundcloudcache_track_id_of(state.current_file);
 	if (sc_id > 0) {
 		soundcloudpage_toggle_favorite_async(sc_id, qp_tidal_fav_done, NULL);
+		refresh_now_playing_card();
+		player_refresh_now_playing();
+		return;
+	}
+
+	char jf_id[JELLYFIN_ID_MAX];
+	if (jellyfincache_item_id_of(state.current_file, jf_id, sizeof(jf_id))) {
+		jellyfinpage_toggle_favorite_async(jf_id, qp_tidal_fav_done, NULL);
 		refresh_now_playing_card();
 		player_refresh_now_playing();
 		return;
