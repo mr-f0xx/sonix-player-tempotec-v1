@@ -4924,3 +4924,20 @@ tools/gen_jis_table.py --check` verifies the table against the generator, and
 `make -C sonix-player/tests sanitize` runs the whole suite under ASan and UBSan.
 The decoder was also fuzzed against 4 million exact-size output buffers, every
 one of which came back NUL-terminated with nothing written past it.
+
+## Roboto dropped from the image
+
+The 478 KB Roboto that Settings → Appearance → Font offered beside MiSans and
+Neon 80s is gone from both font trees — `sonix-player/assets/fonts` for the
+simulator and `sonix-packer/assets/V1/usr/resource/sonix/fonts` for the image —
+together with the `FONT-LICENSES.txt` beside them, which existed only to carry
+its SIL OFL notice. Nothing else used the file: the interface has always drawn
+from MiSans, and Roboto sat at the end of its own chain with MiSans behind it
+anyway, so a device that had chosen it now comes up on MiSans, the face that was
+drawing its letters it had no glyphs for.
+
+`roboto` is out of the family table in `fonts.c`, and a stored `[ui] font` of
+`roboto` — or the older `roboto_mono` the table used to translate — resolves to
+MiSans instead of logging a choice the build can no longer honour. Fonts from
+the card's `Fonts` folder are untouched, so anyone who wants Roboto back can
+drop a `.ttf` there and pick it like any other family.
