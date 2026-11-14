@@ -48,7 +48,9 @@
 #include "src/system/streaming/podcastplayed.h"
 #include "src/system/streaming/radio.h"
 #include "src/system/streaming/soundcloudcache.h"
+#include "src/system/streaming/streamkeys.h"
 #include "src/system/streaming/tidalcache.h"
+#include "src/system/lastfm/lastfm.h"
 #include "src/system/library/library.h"
 #include "src/system/core/logging.h"
 #include "src/system/library/playlists.h"
@@ -955,6 +957,11 @@ static void card_databases_attach(const char *root) {
 	// logging_attach_sd() re-derives the path and honours the setting.
 	logging_attach_sd(root);
 	btlog_card_attach(root);
+
+	// A card that mounts late or arrives via hot-insert can carry streaming
+	// keys (or simply bring back the card that holds .local/lastfm.queue).
+	(void)streamkeys_load_card(root);
+	lastfm_reload_keys();
 
 	printf("storage: card databases reopened on %s\n", root);
 }
