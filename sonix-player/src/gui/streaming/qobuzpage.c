@@ -725,8 +725,8 @@ static void list_unloaded_cb(lv_event_t *e) {
 	}
 }
 
-// One list row: name on top, detail below, and -- where applicable -- the
-// ellipsis menu on the right.
+// One list row: name on top, detail below. Long-pressing the row opens the
+// per-row menu where applicable.
 //
 // The two labels form a flex column with a declared gap, each exactly one line
 // high: that is what makes the ellipsis the only possible outcome for text that
@@ -802,21 +802,9 @@ static lv_obj_t *make_row(const char *name, const char *detail, const char *cove
 		lv_obj_set_style_text_font(sub, &font_ui_18, 0);
 	}
 
-	// The ellipsis button, where the list has something to offer per entry.
+	// Long-press opens the per-row menu, where the list has something to offer per entry.
 	if (row_menu_kind(result_kind) != ROW_MENU_NONE) {
-		lv_obj_t *menu_btn = lv_btn_create(row);
-		lv_obj_set_size(menu_btn, 44, 44);
-		lv_obj_set_style_bg_opa(menu_btn, LV_OPA_TRANSP, 0);
-		lv_obj_set_style_border_width(menu_btn, 0, 0);
-		lv_obj_set_style_shadow_width(menu_btn, 0, 0);
-		lv_obj_set_style_pad_all(menu_btn, 0, 0);
-		lv_obj_add_event_cb(menu_btn, row_menu_cb, LV_EVENT_CLICKED, (void *)(intptr_t)index);
-
-		lv_obj_t *dots = lv_image_create(menu_btn);
-		lv_image_set_src(dots, &icon_ellipsis_vertical);
-		lv_obj_add_style(dots, &theme_style_icon, 0);
-		lv_obj_set_style_image_recolor_opa(dots, LV_OPA_COVER, 0);
-		lv_obj_center(dots);
+		lv_obj_add_event_cb(row, row_menu_cb, LV_EVENT_LONG_PRESSED, (void *)(intptr_t)index);
 	}
 
 	return row;
