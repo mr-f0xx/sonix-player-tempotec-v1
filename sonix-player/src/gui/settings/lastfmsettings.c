@@ -55,6 +55,8 @@ static void refresh(void) {
 	}
 	if (st.state == LASTFM_STATE_UNAVAILABLE) {
 		lv_obj_add_state(enabled_switch, LV_STATE_DISABLED);
+	} else {
+		lv_obj_remove_state(enabled_switch, LV_STATE_DISABLED);
 	}
 
 	lv_label_set_text(account_value, st.user[0] ? st.user : tr("lastfm_not_signed_in"));

@@ -16,6 +16,7 @@
 #include "src/system/core/lang.h"
 #include "src/system/device/power.h"
 #include "src/system/device/system.h"
+#include "src/system/lastfm/lastfm.h"
 #include "src/system/net/wifi.h"
 #include "src/system/streaming/qobuz.h"
 #include "src/system/streaming/stockkeys.h"
@@ -244,6 +245,9 @@ static void poll_cb(lv_timer_t *t) {
 		}
 		if (addons_enabled("tidal")) {
 			tidal_init();
+		}
+		if (addons_enabled("lastfm")) {
+			lastfm_init();
 		}
 		if (ready_cb) {
 			ready_cb();

@@ -402,6 +402,18 @@ $(BUILD)/test_listenbrainz: $(LB_SRC) $(ROOT)/src/system/listenbrainz/listenbrai
 	@mkdir -p $(BUILD)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ $(LB_SRC) $(LDFLAGS) $(LDLIBS)
 
+LASTFM_SRC = test_lastfm.c $(ROOT)/src/system/streaming/streamkeys.c \
+             $(ROOT)/src/system/core/config.c $(ROOT)/src/system/core/md5.c $(ROOT)/src/system/core/sha1.c
+.PHONY: lastfm
+lastfm: $(BUILD)/test_lastfm
+	$(BUILD)/test_lastfm
+
+$(BUILD)/test_lastfm: $(LASTFM_SRC) $(ROOT)/build_gen/streamkeys_key.h \
+                      $(ROOT)/src/system/lastfm/lastfm.h $(ROOT)/src/system/lastfm/lastfm.c \
+                      $(ROOT)/src/system/streaming/streamkeys.h $(ROOT)/src/system/core/config.h
+	@mkdir -p $(BUILD)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -DHOST_BUILD -o $@ $(LASTFM_SRC) $(LDFLAGS) $(LDLIBS)
+
 # The rows of Album Art Max: the now-playing arrangement that trades the media
 # controls for the artwork. The sleeve is asked for at the size this gives
 # before anything has been laid out, so the arithmetic is its own module -- and

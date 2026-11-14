@@ -64,10 +64,12 @@ typedef struct {
 
 static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t wake;
+static bool cond_initialized;
 static bool started;
 
-static const char *api_key;
-static const char *api_secret;
+static char api_key[64];
+static char api_secret[128];
+static unsigned keys_generation;
 
 static bool enabled;
 static char session_key[64];
@@ -135,6 +137,30 @@ static void copy_field(char *dst, const char *src) { snprintf(dst, FIELD_MAX, "%
 // one whose session has to be renewed: they wait in the queue on the card and
 // go out once the same account signs in again.
 static bool counting_locked(void) { return enabled && user[0] && (session_key[0] || session_expired); }
+
+static bool has_keys_locked(void) { return api_key[0] && api_secret[0]; }
+
+static bool refresh_keys_locked(void) {
+	const char *k = streamkeys_lastfm_key();
+	const char *s = streamkeys_lastfm_secret();
+	char next_key[sizeof(api_key)];
+	char next_secret[sizeof(api_secret)];
+	snprintf(next_key, sizeof(next_key), "%s", k ? k : "");
+	snprintf(next_secret, sizeof(next_secret), "%s", s ? s : "");
+	bool changed = strcmp(api_key, next_key) != 0 || strcmp(api_secret, next_secret) != 0;
+	if (changed) {
+		snprintf(api_key, sizeof(api_key), "%s", next_key);
+		snprintf(api_secret, sizeof(api_secret), "%s", next_secret);
+		keys_generation++;
+		if (refused) {
+			refused = false;
+			detail[0] = '\0';
+		}
+	}
+	wipe(next_key, sizeof(next_key));
+	wipe(next_secret, sizeof(next_secret));
+	return changed;
+}
 
 static bool online(void) {
 	wifi_status_t st;
@@ -342,7 +368,8 @@ static bool queue_append(const play_t *plays, int count, const char *name) {
 		fprintf(stderr, "lastfm: cannot open %s: %s\n", queue_path, strerror(errno));
 		return false;
 	}
-	if (ftell(f) == 0) {
+	struct stat st;
+	if (fstat(fileno(f), &st) == 0 ? st.st_size == 0 : ftell(f) == 0) {
 		fprintf(f, QUEUE_HEADER "%s\n", name);
 	}
 	for (int i = 0; i < count; i++) {
@@ -556,8 +583,21 @@ static result_t call(param_t *params, int count, char *why, size_t why_size, int
 	if (code_out) {
 		*code_out = 0;
 	}
+	char key_copy[sizeof(api_key)];
+	char secret_copy[sizeof(api_secret)];
+	pthread_mutex_lock(&lock);
+	snprintf(key_copy, sizeof(key_copy), "%s", api_key);
+	snprintf(secret_copy, sizeof(secret_copy), "%s", api_secret);
+	pthread_mutex_unlock(&lock);
+	if (!key_copy[0] || !secret_copy[0]) {
+		wipe(key_copy, sizeof(key_copy));
+		wipe(secret_copy, sizeof(secret_copy));
+		snprintf(why, why_size, "missing API keys");
+		return RESULT_RETRY;
+	}
+
 	snprintf(params[count].name, sizeof(params[count].name), "api_key");
-	params[count].value = api_key;
+	params[count].value = key_copy;
 	count++;
 	qsort(params, (size_t)count, sizeof(params[0]), param_cmp);
 
@@ -566,7 +606,8 @@ static result_t call(param_t *params, int count, char *why, size_t why_size, int
 		text_str(&sig, params[i].name);
 		text_str(&sig, params[i].value);
 	}
-	text_str(&sig, api_secret);
+	text_str(&sig, secret_copy);
+	wipe(secret_copy, sizeof(secret_copy));
 	char api_sig[MD5_HEX_LEN] = "";
 	bool sig_failed = sig.failed;
 	if (!sig_failed) {
@@ -587,6 +628,7 @@ static result_t call(param_t *params, int count, char *why, size_t why_size, int
 		text_str(&form, "=");
 		text_encoded(&form, params[i].value);
 	}
+	wipe(key_copy, sizeof(key_copy));
 	if (form.failed || sig_failed) {
 		text_free(&form);
 		snprintf(why, why_size, "out of memory");
@@ -810,8 +852,9 @@ static void flush_pending(const char *name) {
 		return;
 	}
 	pthread_mutex_lock(&lock);
+	int snap_count = pending_count;
 	int ready_count = 0;
-	for (int i = 0; i < pending_count; i++) {
+	for (int i = 0; i < snap_count; i++) {
 		if (pending[i].when) {
 			ready[ready_count++] = pending[i];
 		}
@@ -837,12 +880,12 @@ static void flush_pending(const char *name) {
 	}
 
 	// Out of `pending` go the plays just handled; the GUI thread may have added
-	// more behind them in the meantime.
+	// more behind `snap_count` in the meantime.
 	pthread_mutex_lock(&lock);
 	file_count += kept;
 	int keep = 0;
 	for (int i = 0; i < pending_count; i++) {
-		if (!pending[i].when) {
+		if (i >= snap_count || !pending[i].when) {
 			pending[keep++] = pending[i];
 		}
 	}
@@ -1005,6 +1048,7 @@ static void send_queue(sender_t *s, const char *sk) {
 static void *worker_main(void *arg) {
 	(void)arg;
 	sender_t sender = {.batch = BATCH_MAX, .backoff = RETRY_FIRST_SECS};
+	unsigned seen_keys_gen = 0;
 
 	for (;;) {
 		pthread_mutex_lock(&lock);
@@ -1033,7 +1077,12 @@ static void *worker_main(void *arg) {
 		}
 
 		pthread_mutex_lock(&lock);
-		bool active = enabled && session_key[0];
+		if (keys_generation != seen_keys_gen) {
+			seen_keys_gen = keys_generation;
+			sender.retry_at = 0;
+			sender.backoff = RETRY_FIRST_SECS;
+		}
+		bool active = enabled && session_key[0] && has_keys_locked();
 		bool counting = counting_locked();
 		char sk[64];
 		char account[128];
@@ -1042,7 +1091,7 @@ static void *worker_main(void *arg) {
 		pthread_mutex_unlock(&lock);
 
 		// Plays go to the card while there is an account to keep them for;
-		// they go to Last.fm only with a session.
+		// they go to Last.fm only when API keys and a session are present.
 		bool up = false;
 		if (counting) {
 			// The card comes and goes: pulled out, shared over USB, read-only.
@@ -1095,7 +1144,7 @@ static void *worker_main(void *arg) {
 		// network, the clock or a card, awake now and then to look again; with
 		// more to send and nothing in the way, straight on.
 		pthread_mutex_lock(&lock);
-		active = enabled && session_key[0];
+		active = enabled && session_key[0] && has_keys_locked();
 		counting = counting_locked();
 		bool more_now = active && up && file_count > 0 && boot_seconds() >= sender.retry_at;
 		bool waiting = (counting && (!card_ready || pending_count > 0)) || (active && (file_count > 0 || now_playing_waiting));
@@ -1119,41 +1168,76 @@ static void *worker_main(void *arg) {
 // ---------------------------------------------------------------------------
 
 void lastfm_init(void) {
-	if (started) {
-		return;
-	}
-	api_key = streamkeys_lastfm_key();
-	api_secret = streamkeys_lastfm_secret();
-	build_paths();
-
-	pthread_condattr_t attr;
-	pthread_condattr_init(&attr);
-	pthread_condattr_setclock(&attr, CLOCK_MONOTONIC);
-	pthread_cond_init(&wake, &attr);
-	pthread_condattr_destroy(&attr);
-
 	pthread_mutex_lock(&lock);
-	enabled = config_get_bool("lastfm", "enabled", false);
-	load_session();
-	session_expired = !session_key[0] && user[0];
+	bool already_started = started;
 	pthread_mutex_unlock(&lock);
 
-	if (!api_key || !api_secret) {
-		printf("lastfm: no API keys; Last.fm stays off\n");
+	if (already_started) {
+		lastfm_reload_keys();
 		return;
 	}
+
+	bool cfg_enabled = config_get_bool("lastfm", "enabled", false);
+
+	pthread_mutex_lock(&lock);
+	if (started) {
+		pthread_mutex_unlock(&lock);
+		lastfm_reload_keys();
+		return;
+	}
+	if (!cond_initialized) {
+		build_paths();
+		pthread_condattr_t attr;
+		pthread_condattr_init(&attr);
+		pthread_condattr_setclock(&attr, CLOCK_MONOTONIC);
+		pthread_cond_init(&wake, &attr);
+		pthread_condattr_destroy(&attr);
+		cond_initialized = true;
+	}
+	enabled = cfg_enabled;
+	load_session();
+	session_expired = !session_key[0] && user[0];
+	refresh_keys_locked();
+	bool keys_ok = has_keys_locked();
 
 	pthread_t thread;
 	if (pthread_create(&thread, NULL, worker_main, NULL) != 0) {
+		pthread_mutex_unlock(&lock);
 		fprintf(stderr, "lastfm: cannot start the worker\n");
 		return;
 	}
 	pthread_detach(thread);
 	started = true;
-	printf("lastfm: %s, %s\n", enabled ? "on" : "off", session_key[0] ? "signed in" : "signed out");
+	if (!keys_ok) {
+		printf("lastfm: no API keys yet; queueing plays while unavailable (%s, %s)\n",
+			   enabled ? "on" : "off", session_key[0] ? "signed in" : "signed out");
+	} else {
+		printf("lastfm: %s, %s\n", enabled ? "on" : "off", session_key[0] ? "signed in" : "signed out");
+	}
+	pthread_mutex_unlock(&lock);
 }
 
-bool lastfm_available(void) { return started; }
+void lastfm_reload_keys(void) {
+	pthread_mutex_lock(&lock);
+	if (!started) {
+		pthread_mutex_unlock(&lock);
+		return;
+	}
+	bool changed = refresh_keys_locked();
+	bool keys_ok = has_keys_locked();
+	pthread_cond_signal(&wake);
+	if (changed && keys_ok) {
+		printf("lastfm: API keys loaded (%s, %s)\n", enabled ? "on" : "off", session_key[0] ? "signed in" : "signed out");
+	}
+	pthread_mutex_unlock(&lock);
+}
+
+bool lastfm_available(void) {
+	pthread_mutex_lock(&lock);
+	bool ok = started && has_keys_locked();
+	pthread_mutex_unlock(&lock);
+	return ok;
+}
 
 void lastfm_set_enabled(bool on) {
 	config_set_bool("lastfm", "enabled", on);
@@ -1165,20 +1249,21 @@ void lastfm_set_enabled(bool on) {
 }
 
 bool lastfm_active(void) {
-	if (!started) {
-		return false;
-	}
 	pthread_mutex_lock(&lock);
-	bool counting = counting_locked();
+	bool counting = started && counting_locked();
 	pthread_mutex_unlock(&lock);
 	return counting;
 }
 
 void lastfm_login(const char *name, const char *password) {
-	if (!started || !name || !name[0] || !password || !password[0]) {
+	if (!name || !name[0] || !password || !password[0]) {
 		return;
 	}
 	pthread_mutex_lock(&lock);
+	if (!started || !has_keys_locked()) {
+		pthread_mutex_unlock(&lock);
+		return;
+	}
 	if (!logging_in) {
 		snprintf(login_user, sizeof(login_user), "%s", name);
 		snprintf(login_password, sizeof(login_password), "%s", password);
@@ -1190,10 +1275,11 @@ void lastfm_login(const char *name, const char *password) {
 }
 
 void lastfm_logout(void) {
+	pthread_mutex_lock(&lock);
 	if (!started) {
+		pthread_mutex_unlock(&lock);
 		return;
 	}
-	pthread_mutex_lock(&lock);
 	logout_requested = true;
 	session_key[0] = '\0';
 	session_expired = false;
@@ -1210,7 +1296,7 @@ void lastfm_get_status(lastfm_status_t *out) {
 	out->queued = file_count + pending_count;
 	out->login_serial = login_serial;
 	out->login_result = login_result;
-	if (!started) {
+	if (!started || !has_keys_locked()) {
 		out->state = LASTFM_STATE_UNAVAILABLE;
 	} else if (logging_in) {
 		out->state = LASTFM_STATE_SIGNING_IN;
@@ -1316,7 +1402,8 @@ void lastfm_note_playback(const lastfm_playback_t *now) {
 	} else if (!same) {
 		play.file[0] = '\0';
 		return;
-	} else if (!play.track.title[0] && now->title && now->title[0]) {
+	} else if ((!play.track.title[0] || !play.track.artist[0]) && now->title && now->title[0] && now->artist &&
+			   now->artist[0]) {
 		// The tags came in after the file started.
 		take_tags(now);
 		announce = true;
@@ -1339,7 +1426,7 @@ void lastfm_note_playback(const lastfm_playback_t *now) {
 	pthread_mutex_lock(&lock);
 	current_generation = play.generation;
 	current_playing = now->playing;
-	if (announce && session_key[0] && !play.skip && play.track.artist[0] && play.track.title[0]) {
+	if (announce && has_keys_locked() && session_key[0] && !play.skip && play.track.artist[0] && play.track.title[0]) {
 		now_playing = play.track;
 		now_playing_generation = play.generation;
 		now_playing_waiting = true;
