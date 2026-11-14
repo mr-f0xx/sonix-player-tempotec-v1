@@ -53,7 +53,6 @@
 static const char *const FONT_DEFAULT_FILES[] = FACE_FILES("default");
 static const char *const FONT_BOLD_FILES[] = FACE_FILES("bold");
 static const char *const FONT_NEON_FILES[] = FACE_FILES("Neon");
-static const char *const FONT_ROBOTO_FILES[] = FACE_FILES("Roboto");
 
 // ---------------------------------------------------------------------------
 // Settings -> Appearance -> UI font
@@ -80,7 +79,6 @@ typedef struct {
 static const ui_face_t faces[] = {
 	{FACE_DEFAULT_ID, "MiSans", FONT_DEFAULT_FILES, FONT_BOLD_FILES},
 	{"neon", "Neon 80s", FONT_NEON_FILES, NULL},
-	{"roboto", "Roboto", FONT_ROBOTO_FILES, NULL},
 };
 
 #define FACE_COUNT (sizeof(faces) / sizeof(faces[0]))
@@ -1082,8 +1080,12 @@ bool fonts_init(void) {
 	face_resolve(FACE_DEFAULT_ID, &default_face, true);
 
 	const char *stored_font = config_get("ui", "font", FACE_DEFAULT_ID);
-	// Keep devices that had Roboto Mono selected on the equivalent new face.
-	const char *chosen = strcmp(stored_font, "roboto_mono") == 0 ? "roboto" : stored_font;
+	// Roboto and Roboto Mono are no longer carried: a device that had one of
+	// them selected comes up on MiSans, the face behind them, rather than
+	// logging a failed choice it can never honour again.
+	const char *chosen = (strcmp(stored_font, "roboto") == 0 || strcmp(stored_font, "roboto_mono") == 0)
+			? FACE_DEFAULT_ID
+			: stored_font;
 	if (!face_resolve(chosen, &active, true)) {
 		if (strcmp(chosen, FACE_DEFAULT_ID) != 0) {
 			fprintf(stderr, "fonts: [ui] font = %s cannot be used; drawing with %s\n", chosen, FACE_DEFAULT_ID);

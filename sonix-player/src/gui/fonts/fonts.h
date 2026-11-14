@@ -23,9 +23,9 @@
 //                 interface is in Japanese
 //
 // MiSans is the face the interface was designed with, and the one it falls
-// back to. Settable families are the others in the directory: Neon 80s and
-// Roboto (their files are optional -- a family the firmware does not carry is
-// simply not offered). MiSans stays at the end of every chain, so a face with no
+// back to. Settable families are the others in the directory: Neon 80s (its
+// file is optional -- a family the firmware does not carry is simply not
+// offered). MiSans stays at the end of every chain, so a face with no
 // Cyrillic, no kanji or no Hangul still draws the whole interface.
 //
 // The script faces each have an optional -bold file, like bold.otf.
