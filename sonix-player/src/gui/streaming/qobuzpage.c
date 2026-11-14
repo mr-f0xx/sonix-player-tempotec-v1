@@ -749,7 +749,7 @@ static lv_obj_t *make_row(const char *name, const char *detail, const char *cove
 	// and a button keeps the press to itself: without this neither drag works
 	// on these lists.
 	lv_obj_set_event_bubble(row, true);
-	lv_obj_add_event_cb(row, row_clicked_cb, LV_EVENT_CLICKED, (void *)(intptr_t)index);
+	lv_obj_add_event_cb(row, row_clicked_cb, LV_EVENT_SHORT_CLICKED, (void *)(intptr_t)index);
 
 	// The cover, where there is a URL for one. It starts as the grey note and
 	// becomes the real image once the thread has downloaded it: the list is
