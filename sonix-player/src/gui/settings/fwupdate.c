@@ -378,10 +378,11 @@ static lv_obj_t *notes_bullet(const char *text, int depth) {
 	return row;
 }
 
-// Fills the notes: "#" lines as bold headings, "**bold**" within a line, "-",
-// "*" and "+" items as bullets (indented by their leading spaces, two per
-// level), anything else as plain paragraphs. HTML comments are dropped and
-// blank lines become a gap.
+// Fills the notes from the Markdown prepared by releasenotes.c: "#" lines as
+// bold headings, "**bold**" within a line, "-", "*" and "+" items as bullets
+// (indented by their leading spaces, two per level), anything else as plain
+// paragraphs. HTML banners/tags/comments have already been removed before the
+// notes buffer was bounded; blank lines become a gap.
 static void render_notes(const char *md) {
 	lv_obj_clean(notes_content);
 
