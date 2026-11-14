@@ -709,6 +709,7 @@ printf-flag:
 UI_SRC = $(ROOT)/tests/ui/test_main_menu.c $(ROOT)/src/gui/shell/main_menu.c \
          $(ROOT)/src/gui/library/music.c $(ROOT)/src/gui/shell/popover.c \
          $(ROOT)/src/gui/shell/gridpage.c $(ROOT)/src/gui/pet/peticon.c \
+         $(ROOT)/src/gui/streaming/soundcloud_icon.c \
          $(ROOT)/src/gui/settings/appearance.c \
          $(ROOT)/src/gui/settings/bootpicpage.c \
          $(ROOT)/src/gui/shell/corners.c $(ROOT)/src/gui/shell/settingsrow.c \
@@ -764,6 +765,20 @@ $(BUILD)/test_edge_lock: test_edge_lock.c $(ROOT)/src/gui/shell/edge_lock.h $(UI
 	$(CC) $(CPPFLAGS) $(CFLAGS) -I$(ROOT)/lvgl \
 		-DLV_CONF_PATH='"$(abspath ui/lv_conf.h)"' -o $@ test_edge_lock.c \
 		$(UI_LVGL_OBJ) $(LDFLAGS) $(LDLIBS)
+
+# Swipe-up-to-home gesture and its on/off toggle in switcher.c / gestures.c.
+.PHONY: home-swipe
+home-swipe: $(BUILD)/test_home_swipe
+	$(BUILD)/test_home_swipe
+
+$(BUILD)/test_home_swipe: test_home_swipe.c $(ROOT)/src/gui/shell/switcher.c \
+                          $(ROOT)/src/gui/shell/gestures.c $(ROOT)/src/gui/shell/gestures.h \
+                          $(ROOT)/src/system/core/config.c $(UI_LVGL_OBJ)
+	@mkdir -p $(BUILD)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -I$(ROOT)/lvgl \
+		-DLV_CONF_PATH='"$(abspath ui/lv_conf.h)"' -o $@ test_home_swipe.c \
+		$(ROOT)/src/gui/shell/switcher.c $(ROOT)/src/gui/shell/gestures.c \
+		$(ROOT)/src/system/core/config.c $(UI_LVGL_OBJ) $(LDFLAGS) $(LDLIBS)
 
 # Control Centre layout migration: the production parser and saved lists,
 # without constructing the unrelated radio/streaming services.
@@ -1061,7 +1076,7 @@ $(BUILD)/test_stockkeys_ui: $(ROOT)/build_gen/streamkeys_key.h $(STOCKKEYS_UI_OB
 	$(CC) -o $@ $(STOCKKEYS_UI_OBJ) $(LDFLAGS) $(LDLIBS)
 
 .PHONY: ui
-ui: $(BUILD)/test_qobuzgenregrid $(BUILD)/test_main_menu $(BUILD)/test_screensaver $(BUILD)/test_tools_pages $(BUILD)/test_wifi_pages $(BUILD)/test_chargescreen $(BUILD)/test_power_display $(BUILD)/test_lyricsearch $(BUILD)/test_games $(BUILD)/test_peq_profiles $(BUILD)/test_quickpanel_layout $(BUILD)/test_btreceiversession $(BUILD)/test_corners $(BUILD)/test_playbutton $(BUILD)/test_musicsettings_rows $(BUILD)/test_volume_overlay $(BUILD)/test_playerdeck $(BUILD)/test_vinylayout $(BUILD)/test_stickerlayout $(BUILD)/test_waveform_overlay $(BUILD)/test_hiresbadge_ui $(BUILD)/test_statusbar_ui $(BUILD)/test_stockkeys_ui $(BUILD)/test_tidal_pages $(BUILD)/test_soundcloud_pages $(BUILD)/test_qobuz_pages
+ui: $(BUILD)/test_qobuzgenregrid $(BUILD)/test_main_menu $(BUILD)/test_screensaver $(BUILD)/test_tools_pages $(BUILD)/test_wifi_pages $(BUILD)/test_chargescreen $(BUILD)/test_power_display $(BUILD)/test_lyricsearch $(BUILD)/test_games $(BUILD)/test_peq_profiles $(BUILD)/test_quickpanel_layout $(BUILD)/test_btreceiversession $(BUILD)/test_home_swipe $(BUILD)/test_corners $(BUILD)/test_playbutton $(BUILD)/test_musicsettings_rows $(BUILD)/test_volume_overlay $(BUILD)/test_playerdeck $(BUILD)/test_vinylayout $(BUILD)/test_stickerlayout $(BUILD)/test_waveform_overlay $(BUILD)/test_hiresbadge_ui $(BUILD)/test_statusbar_ui $(BUILD)/test_stockkeys_ui $(BUILD)/test_tidal_pages $(BUILD)/test_soundcloud_pages $(BUILD)/test_qobuz_pages
 	$(BUILD)/test_qobuzgenregrid
 	$(BUILD)/test_main_menu ../../sonix-packer/assets/V1/usr/resource/sonix/language
 	$(BUILD)/test_main_menu ../../sonix-packer/assets/V1/usr/resource/sonix/language saved
@@ -1076,6 +1091,7 @@ ui: $(BUILD)/test_qobuzgenregrid $(BUILD)/test_main_menu $(BUILD)/test_screensav
 	$(BUILD)/test_peq_profiles ../../sonix-packer/assets/V1/usr/resource/sonix/language
 	$(BUILD)/test_quickpanel_layout
 	$(BUILD)/test_btreceiversession
+	$(BUILD)/test_home_swipe
 	$(BUILD)/test_corners
 	$(BUILD)/test_playbutton ../../sonix-packer/assets/V1/usr/resource/sonix/language
 	$(BUILD)/test_musicsettings_rows ../../sonix-packer/assets/V1/usr/resource/sonix/language

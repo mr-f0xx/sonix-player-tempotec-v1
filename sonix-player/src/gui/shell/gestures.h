@@ -27,4 +27,7 @@
 bool gestures_stock(void);
 void gestures_set_stock(bool on);
 
+bool gestures_swipe_up_home(void);
+void gestures_set_swipe_up_home(bool on);
+
 #endif /* GESTURES_H */
