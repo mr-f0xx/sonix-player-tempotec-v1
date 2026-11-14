@@ -1061,7 +1061,7 @@ $(BUILD)/test_stockkeys_ui: $(ROOT)/build_gen/streamkeys_key.h $(STOCKKEYS_UI_OB
 	$(CC) -o $@ $(STOCKKEYS_UI_OBJ) $(LDFLAGS) $(LDLIBS)
 
 .PHONY: ui
-ui: $(BUILD)/test_qobuzgenregrid $(BUILD)/test_main_menu $(BUILD)/test_screensaver $(BUILD)/test_tools_pages $(BUILD)/test_wifi_pages $(BUILD)/test_chargescreen $(BUILD)/test_power_display $(BUILD)/test_lyricsearch $(BUILD)/test_games $(BUILD)/test_peq_profiles $(BUILD)/test_quickpanel_layout $(BUILD)/test_btreceiversession $(BUILD)/test_corners $(BUILD)/test_playbutton $(BUILD)/test_musicsettings_rows $(BUILD)/test_volume_overlay $(BUILD)/test_playerdeck $(BUILD)/test_vinylayout $(BUILD)/test_stickerlayout $(BUILD)/test_waveform_overlay $(BUILD)/test_hiresbadge_ui $(BUILD)/test_statusbar_ui $(BUILD)/test_stockkeys_ui $(BUILD)/test_tidal_pages $(BUILD)/test_soundcloud_pages $(BUILD)/test_qobuz_pages
+ui: $(BUILD)/test_qobuzgenregrid $(BUILD)/test_main_menu $(BUILD)/test_screensaver $(BUILD)/test_tools_pages $(BUILD)/test_wifi_pages $(BUILD)/test_chargescreen $(BUILD)/test_power_display $(BUILD)/test_lyricsearch $(BUILD)/test_games $(BUILD)/test_peq_profiles $(BUILD)/test_quickpanel_layout $(BUILD)/test_btreceiversession $(BUILD)/test_corners $(BUILD)/test_playbutton $(BUILD)/test_musicsettings_rows $(BUILD)/test_volume_overlay $(BUILD)/test_playerdeck $(BUILD)/test_vinylayout $(BUILD)/test_stickerlayout $(BUILD)/test_waveform_overlay $(BUILD)/test_hiresbadge_ui $(BUILD)/test_statusbar_ui $(BUILD)/test_stockkeys_ui $(BUILD)/test_tidal_pages $(BUILD)/test_soundcloud_pages $(BUILD)/test_qobuz_pages $(BUILD)/test_fwupdate
 	$(BUILD)/test_qobuzgenregrid
 	$(BUILD)/test_main_menu ../../sonix-packer/assets/V1/usr/resource/sonix/language
 	$(BUILD)/test_main_menu ../../sonix-packer/assets/V1/usr/resource/sonix/language saved
@@ -1092,6 +1092,7 @@ ui: $(BUILD)/test_qobuzgenregrid $(BUILD)/test_main_menu $(BUILD)/test_screensav
 	$(BUILD)/test_tidal_pages ../../sonix-packer/assets/V1/usr/resource/sonix/language arranged
 	$(BUILD)/test_soundcloud_pages ../../sonix-packer/assets/V1/usr/resource/sonix/language
 	$(BUILD)/test_qobuz_pages ../../sonix-packer/assets/V1/usr/resource/sonix/language
+	$(BUILD)/test_fwupdate
 
 $(BUILD)/test_main_menu: $(UI_OBJ)
 	$(CC) -o $@ $^ $(LDFLAGS) $(LDLIBS)
@@ -1169,6 +1170,32 @@ $(BUILD)/test_geniuslarge: $(GENIUSLARGE_SRC) $(BUILD)/sqlite3_impl.o \
                            $(ROOT)/src/system/library/library.h
 	@mkdir -p $(BUILD)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ $(GENIUSLARGE_SRC) $(BUILD)/sqlite3_impl.o $(LDFLAGS) $(LDLIBS)
+
+# Wi-Fi update descriptions: remove GitHub's HTML banner before the notes cap,
+# retain Markdown, decode JSON/entities, and keep truncated UTF-8 valid.
+RELEASE_NOTES_SRC = test_release_notes.c $(ROOT)/src/system/device/releasenotes.c \
+                    $(ROOT)/src/system/core/json.c
+.PHONY: release-notes
+release-notes: $(BUILD)/test_release_notes
+	$(BUILD)/test_release_notes
+
+$(BUILD)/test_release_notes: $(RELEASE_NOTES_SRC) $(ROOT)/src/system/device/releasenotes.h \
+                             $(ROOT)/src/system/device/ota.h $(ROOT)/src/system/core/json.h
+	@mkdir -p $(BUILD)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ $(RELEASE_NOTES_SRC) $(LDFLAGS) $(LDLIBS)
+
+# The same card on the V1 panel, with the production renderer and fake OTA.
+FWUPDATE_UI_SRC = $(ROOT)/tests/ui/test_fwupdate.c $(ROOT)/src/gui/settings/fwupdate.c \
+                  $(ROOT)/src/system/device/releasenotes.c $(ROOT)/src/system/core/json.c
+FWUPDATE_UI_OBJ = $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(FWUPDATE_UI_SRC)) \
+                  $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(UI_LVGL_SRC))
+.PHONY: fwupdate-ui
+fwupdate-ui: $(BUILD)/test_fwupdate
+	$(BUILD)/test_fwupdate
+
+$(BUILD)/test_fwupdate: $(FWUPDATE_UI_OBJ)
+	$(CC) -o $@ $^ $(LDFLAGS) $(LDLIBS)
+-include $(FWUPDATE_UI_OBJ:.o=.d)
 
 # The stock TempoTec release version and its separate Sonix metadata field.
 .PHONY: basebuild

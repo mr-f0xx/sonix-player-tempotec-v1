@@ -14,6 +14,7 @@
 #include "src/system/core/sha256.h"
 #include "src/system/core/utils.h"
 #include "src/system/device/firmware.h"
+#include "src/system/device/releasenotes.h"
 #include "src/system/device/sysinfo.h"
 #include "src/system/device/system.h"
 #include "src/system/net/http.h"
@@ -175,23 +176,6 @@ static int version_cmp(const long a[VERSION_PARTS], const long b[VERSION_PARTS])
 // the release list
 // ---------------------------------------------------------------------------
 
-// Drops a UTF-8 sequence cut in half at the end of `s`.
-static void trim_partial_utf8(char *s) {
-	size_t len = strlen(s);
-	size_t i = len;
-	while (i > 0 && ((unsigned char)s[i - 1] & 0xC0) == 0x80) {
-		i--;
-	}
-	if (i == 0) {
-		return;
-	}
-	unsigned char lead = (unsigned char)s[i - 1];
-	size_t need = lead >= 0xF0 ? 4 : lead >= 0xE0 ? 3 : lead >= 0xC0 ? 2 : 1;
-	if (len - (i - 1) < need) {
-		s[i - 1] = '\0';
-	}
-}
-
 // The asset named "<stem>.upt" in release `rel`, -1 when there is none.
 static int find_asset(const json_doc_t *doc, int rel) {
 	char wanted[80];
@@ -259,8 +243,10 @@ static ota_result_t pick_release(const json_doc_t *doc) {
 	if (!json_obj_str(doc, best_rel, "name", release.name, sizeof(release.name)) || !release.name[0]) {
 		snprintf(release.name, sizeof(release.name), "%s", release.tag);
 	}
-	json_obj_str(doc, best_rel, "body", release.notes, sizeof(release.notes));
-	trim_partial_utf8(release.notes);
+	// Clean the complete description before applying OTA_NOTES_MAX. A pasted
+	// HTML banner can be larger than the whole notes buffer; copying it first
+	// would leave no room for the changelog that follows it.
+	release_notes_load(doc, best_rel, release.notes, sizeof(release.notes));
 	release.size = json_obj_long(doc, best_asset, "size", 0);
 	json_obj_str(doc, best_asset, "browser_download_url", release.url, sizeof(release.url));
 

@@ -44,7 +44,7 @@ typedef enum {
 typedef struct {
 	char tag[32];
 	char name[128];			  // the release title, the tag when it has none
-	char notes[OTA_NOTES_MAX]; // the release description, Markdown as written, cut at OTA_NOTES_MAX
+	char notes[OTA_NOTES_MAX]; // release Markdown with HTML presentation removed, then cut at OTA_NOTES_MAX
 	long size;				  // bytes
 	char url[512];			  // browser_download_url of the asset
 	char sha256[65];		  // from the asset's "digest", "" when GitHub gives none
