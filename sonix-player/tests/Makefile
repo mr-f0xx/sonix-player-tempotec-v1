@@ -290,14 +290,18 @@ $(BUILD)/test_wifi: $(WIFI_SRC) $(ROOT)/src/system/net/wifi.h \
 
 # Bluetooth's real A2DP-direction decision, startup wait policy and D-Bus
 # signal cache, with fake controller/process state. No radio or ALSA required.
-.PHONY: bluetooth
-bluetooth: $(BUILD)/test_bluetooth $(BUILD)/test_btstack $(BUILD)/test_btreceiver $(BUILD)/test_btmetadata $(BUILD)/test_btdiscovery $(BUILD)/test_btpcmvolume
+.PHONY: bluetooth btvolume
+bluetooth: $(BUILD)/test_bluetooth $(BUILD)/test_btstack $(BUILD)/test_btreceiver $(BUILD)/test_btmetadata $(BUILD)/test_btdiscovery $(BUILD)/test_btpcmvolume $(BUILD)/test_btvolume
 	$(BUILD)/test_bluetooth
 	$(BUILD)/test_btstack
 	$(BUILD)/test_btreceiver
 	$(BUILD)/test_btmetadata
 	$(BUILD)/test_btdiscovery
 	$(BUILD)/test_btpcmvolume
+	$(BUILD)/test_btvolume
+
+btvolume: $(BUILD)/test_btvolume
+	$(BUILD)/test_btvolume
 
 $(BUILD)/test_bluetooth: test_bluetooth.c $(ROOT)/src/system/bluetooth/bluetooth.c \
                          $(ROOT)/src/system/bluetooth/bluetooth.h $(ROOT)/src/system/bluetooth/btafh.c \
@@ -325,6 +329,11 @@ $(BUILD)/test_btdiscovery: test_btdiscovery.c $(ROOT)/src/system/bluetooth/btsta
 $(BUILD)/test_btpcmvolume: test_btpcmvolume.c $(ROOT)/src/system/bluetooth/btstack.c $(ROOT)/src/system/bluetooth/dbuslite.c
 	@mkdir -p $(BUILD)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ test_btpcmvolume.c $(LDFLAGS) $(LDLIBS)
+
+$(BUILD)/test_btvolume: test_btvolume.c $(ROOT)/src/system/bluetooth/btvolume.c \
+                        $(ROOT)/src/system/bluetooth/btvolume.h $(ROOT)/src/system/bluetooth/dbuslite.c
+	@mkdir -p $(BUILD)
+	$(CC) $(CPPFLAGS) -Istubs $(CFLAGS) -o $@ test_btvolume.c $(LDFLAGS) $(LDLIBS)
 
 # The AFH map, follow policy and actual HCI packet, using fake sockets.
 .PHONY: btafh
