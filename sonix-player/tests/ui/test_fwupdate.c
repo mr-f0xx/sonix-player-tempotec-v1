@@ -86,12 +86,16 @@ static void check_text(lv_obj_t *obj) {
 		const char *text = lv_label_get_text(obj);
 		assert(!strstr(text, "<img") && !strstr(text, "width=") && !strstr(text, "alt="));
 		assert(!strstr(text, "user-attachments"));
+		assert(!strstr(text, "http://") && !strstr(text, "https://"));
+		assert(!strstr(text, "Full Changelog"));
 	}
 	if (lv_obj_check_type(obj, &lv_spangroup_class)) {
 		for (uint32_t i = 0; i < lv_spangroup_get_span_count(obj); i++) {
 			const char *text = lv_span_get_text(lv_spangroup_get_child(obj, i));
 			assert(!strstr(text, "<img") && !strstr(text, "width=") && !strstr(text, "alt="));
 			assert(!strstr(text, "user-attachments"));
+			assert(!strstr(text, "http://") && !strstr(text, "https://"));
+			assert(!strstr(text, "Full Changelog"));
 		}
 	}
 	for (uint32_t i = 0; i < lv_obj_get_child_count(obj); i++) check_text(lv_obj_get_child(obj, i));
@@ -112,8 +116,10 @@ static void show_release(bool changelog) {
 	lv_timer_handler();
 	if (changelog) {
 		assert(find_label(lv_layer_top(), "What's Changed"));
-		assert(has_span_text(lv_layer_top(), "Calculator: frame the display card in the accent colour"));
-		assert(has_span_text(lv_layer_top(), "Music: search corner button on compact Dark/Light headers"));
+		assert(has_span_text(lv_layer_top(), "Calculator: frame the display card in the accent colour by @mr-f0xx"));
+		assert(has_span_text(lv_layer_top(), "Music: search corner button on compact Dark/Light headers by @mr-f0xx"));
+		assert(has_span_text(lv_layer_top(), "Thanks u/nightdriveavenger for the idea by @mr-f0xx"));
+		assert(has_span_text(lv_layer_top(), "Streaming: Subsonic & Radio on the same 2x2 tile home page by @mr-f0xx"));
 	} else {
 		assert(find_label(lv_layer_top(), "No release notes"));
 	}
@@ -186,12 +192,16 @@ int main(void) {
 
 	snprintf(release.tag, sizeof(release.tag), "1.6.2.1");
 	release.size = 51312640;
+	// The body of the published release, with the banner and the auto-generated
+	// link lines as GitHub writes them.
 	release_notes_clean(
 		"<img width=\"1664\" height=\"624\" alt=\"D8As1YMQxmTvAAAAJXRFWHRkYXRlOmNyZWF0ZQ\" "
 		"src=\"https://github.com/user-attachments/assets/cdaf32ef-81f0-4c23-8d11-962c5a540be2\" />\r\n\r\n"
 		"## What's Changed\r\n\r\n"
-		"* Calculator: frame the display card in the accent colour\r\n"
-		"* Music: search corner button on compact Dark/Light headers\r\n\r\n"
+		"* Calculator: frame the display card in the accent colour by @mr-f0xx in https://github.com/mr-f0xx/sonix-player-tempotec-v1/pull/307\r\n"
+		"* Music: search corner button on compact Dark/Light headers by @mr-f0xx in https://github.com/mr-f0xx/sonix-player-tempotec-v1/pull/308\r\n"
+		"* Thanks [u/nightdriveavenger](https://www.reddit.com/user/nightdriveavenger/) for the idea by @mr-f0xx in https://github.com/mr-f0xx/sonix-player-tempotec-v1/pull/277\r\n"
+		"* Streaming: Subsonic & Radio on the same 2x2 tile home page by @mr-f0xx in https://github.com/mr-f0xx/sonix-player-tempotec-v1/pull/294 /https://github.com/mr-f0xx/sonix-player-tempotec-v1/pull/295\r\n\r\n"
 		"**Full Changelog**: https://github.com/mr-f0xx/sonix-player-tempotec-v1/compare/1.6.2...1.6.2.1",
 		release.notes, sizeof(release.notes));
 	show_release(true);
@@ -215,6 +225,6 @@ int main(void) {
 	show_release(false);
 	check_text(lv_layer_top());
 	lv_obj_send_event(lv_obj_get_parent(find_label(lv_layer_top(), "Cancel")), LV_EVENT_CLICKED, NULL);
-	puts("PASS firmware update card: changelog headings/bullets, no HTML, scrolling, visible actions, banner-only fallback");
+	puts("PASS firmware update card: changelog headings/bullets, no HTML or raw URLs, scrolling, visible actions, banner-only fallback");
 	return 0;
 }
