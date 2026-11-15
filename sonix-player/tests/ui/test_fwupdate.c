@@ -88,6 +88,7 @@ static void check_text(lv_obj_t *obj) {
 		assert(!strstr(text, "user-attachments"));
 		assert(!strstr(text, "http://") && !strstr(text, "https://"));
 		assert(!strstr(text, "Full Changelog"));
+		assert(!strstr(text, "@mr-f0xx"));
 	}
 	if (lv_obj_check_type(obj, &lv_spangroup_class)) {
 		for (uint32_t i = 0; i < lv_spangroup_get_span_count(obj); i++) {
@@ -96,6 +97,7 @@ static void check_text(lv_obj_t *obj) {
 			assert(!strstr(text, "user-attachments"));
 			assert(!strstr(text, "http://") && !strstr(text, "https://"));
 			assert(!strstr(text, "Full Changelog"));
+			assert(!strstr(text, "@mr-f0xx"));
 		}
 	}
 	for (uint32_t i = 0; i < lv_obj_get_child_count(obj); i++) check_text(lv_obj_get_child(obj, i));
@@ -116,10 +118,10 @@ static void show_release(bool changelog) {
 	lv_timer_handler();
 	if (changelog) {
 		assert(find_label(lv_layer_top(), "What's Changed"));
-		assert(has_span_text(lv_layer_top(), "Calculator: frame the display card in the accent colour by @mr-f0xx"));
-		assert(has_span_text(lv_layer_top(), "Music: search corner button on compact Dark/Light headers by @mr-f0xx"));
-		assert(has_span_text(lv_layer_top(), "Thanks u/nightdriveavenger for the idea by @mr-f0xx"));
-		assert(has_span_text(lv_layer_top(), "Streaming: Subsonic & Radio on the same 2x2 tile home page by @mr-f0xx"));
+		assert(has_span_text(lv_layer_top(), "Calculator: frame the display card in the accent colour"));
+		assert(has_span_text(lv_layer_top(), "Music: search corner button on compact Dark/Light headers"));
+		assert(has_span_text(lv_layer_top(), "Thanks u/nightdriveavenger for the idea!"));
+		assert(has_span_text(lv_layer_top(), "Streaming: Subsonic & Radio on the same 2x2 tile home page"));
 	} else {
 		assert(find_label(lv_layer_top(), "No release notes"));
 	}
@@ -200,7 +202,7 @@ int main(void) {
 		"## What's Changed\r\n\r\n"
 		"* Calculator: frame the display card in the accent colour by @mr-f0xx in https://github.com/mr-f0xx/sonix-player-tempotec-v1/pull/307\r\n"
 		"* Music: search corner button on compact Dark/Light headers by @mr-f0xx in https://github.com/mr-f0xx/sonix-player-tempotec-v1/pull/308\r\n"
-		"* Thanks [u/nightdriveavenger](https://www.reddit.com/user/nightdriveavenger/) for the idea by @mr-f0xx in https://github.com/mr-f0xx/sonix-player-tempotec-v1/pull/277\r\n"
+		"* Thanks [u/nightdriveavenger](https://www.reddit.com/user/nightdriveavenger/) for the idea! by @mr-f0xx in https://github.com/mr-f0xx/sonix-player-tempotec-v1/pull/277\r\n"
 		"* Streaming: Subsonic & Radio on the same 2x2 tile home page by @mr-f0xx in https://github.com/mr-f0xx/sonix-player-tempotec-v1/pull/294 /https://github.com/mr-f0xx/sonix-player-tempotec-v1/pull/295\r\n\r\n"
 		"**Full Changelog**: https://github.com/mr-f0xx/sonix-player-tempotec-v1/compare/1.6.2...1.6.2.1",
 		release.notes, sizeof(release.notes));
@@ -225,6 +227,6 @@ int main(void) {
 	show_release(false);
 	check_text(lv_layer_top());
 	lv_obj_send_event(lv_obj_get_parent(find_label(lv_layer_top(), "Cancel")), LV_EVENT_CLICKED, NULL);
-	puts("PASS firmware update card: changelog headings/bullets, no HTML or raw URLs, scrolling, visible actions, banner-only fallback");
+	puts("PASS firmware update card: changelog headings/bullets, no HTML, URLs or attribution, scrolling, visible actions, banner-only fallback");
 	return 0;
 }

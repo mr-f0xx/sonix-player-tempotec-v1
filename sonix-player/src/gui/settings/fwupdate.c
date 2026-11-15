@@ -384,8 +384,9 @@ static lv_obj_t *notes_bullet(const char *text, int depth) {
 // (several PRs as "in <url> /<url> / <url>"), and the last line is
 // "**Full Changelog**: <compare url>". No link can be followed on a 240 px
 // panel, and each wrapped URL buries the few words worth reading, so the
-// dialog drops them. The release page keeps everything; this changes what the
-// device displays, not what GitHub shows.
+// dialog drops them - the whole " by @user in <url>" tail, leaving what the
+// release says, not who merged it. The release page keeps everything; this
+// changes what the device displays, not what GitHub shows.
 //
 // A URL runs to whitespace or to a Markdown closer (")" or "]"): stopping at
 // the closer keeps "[text](url)" and "![alt](url)" intact for inline_text(),
@@ -470,9 +471,12 @@ static bool device_line(char *line) {
 	*write = '\0';
 
 	// Trim what the drops left behind: trailing spaces, a dangling "in" (the
-	// preposition GitHub puts before the link), then again spaces and any
-	// trailing ":" or "/" until the line is stable. A line that held no URL
-	// keeps its intentional trailing punctuation.
+	// preposition GitHub puts before the link), the "by @user" attribution
+	// (the other half of "TITLE by @user in <url>"), then again spaces and
+	// any trailing ":" or "/" until the line is stable. The attribution goes
+	// only along with a dropped URL, and only at the end of the line - a
+	// hand-written line ending in "by @user" keeps its words. A line that
+	// held no URL keeps its intentional trailing punctuation.
 	for (;;) {
 		size_t n = strlen(line);
 		while (n > 0 && (line[n - 1] == ' ' || line[n - 1] == '\t' || line[n - 1] == '\r')) {
@@ -484,6 +488,16 @@ static bool device_line(char *line) {
 		if (n >= 2 && strncasecmp(line + n - 2, "in", 2) == 0 &&
 			(n == 2 || line[n - 3] == ' ' || line[n - 3] == '\t')) {
 			line[n - 2] = '\0';
+			continue;
+		}
+		// Trailing " by @handle": scan the handle back from the end
+		// (alphanumerics and hyphens, the only characters GitHub allows).
+		size_t h = n;
+		while (h > 0 && (isalnum((unsigned char)line[h - 1]) || line[h - 1] == '-')) {
+			h--;
+		}
+		if (h < n && h >= 4 && strncasecmp(line + h - 4, "by @", 4) == 0) {
+			line[h - 4] = '\0';
 			continue;
 		}
 		if (n > 0 && (line[n - 1] == ':' || line[n - 1] == '/' || line[n - 1] == '-')) {
