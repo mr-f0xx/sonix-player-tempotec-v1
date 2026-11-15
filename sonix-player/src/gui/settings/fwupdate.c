@@ -1,5 +1,6 @@
 #include "fwupdate.h"
 
+#include <ctype.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -378,21 +379,162 @@ static lv_obj_t *notes_bullet(const char *text, int depth) {
 	return row;
 }
 
+// GitHub writes the generated part of its notes for a browser: "What's
+// Changed" items end with "by @user in https://github.com/owner/repo/pull/N"
+// (several PRs as "in <url> /<url> / <url>"), and the last line is
+// "**Full Changelog**: <compare url>". No link can be followed on a 240 px
+// panel, and each wrapped URL buries the few words worth reading, so the
+// dialog drops them - the whole " by @user in <url>" tail, leaving what the
+// release says, not who merged it. The release page keeps everything; this
+// changes what the device displays, not what GitHub shows.
+//
+// A URL runs to whitespace or to a Markdown closer (")" or "]"): stopping at
+// the closer keeps "[text](url)" and "![alt](url)" intact for inline_text(),
+// which resolves those itself.
+static char *find_url(char *s) {
+	for (char *p = s; *p; p++) {
+		if (strncasecmp(p, "http://", 7) == 0 || strncasecmp(p, "https://", 8) == 0) {
+			return p;
+		}
+	}
+	return NULL;
+}
+
+static const char *url_end(const char *p) {
+	const char *q = p;
+	while (*q && !isspace((unsigned char)*q) && *q != ')' && *q != ']') {
+		q++;
+	}
+	return q;
+}
+
+// True when everything from p to the end of the string is URLs, spaces and
+// "/" separators - GitHub's "in <url> /<url> / <url>" tail, where the whole
+// rest of the line is link plumbing.
+static bool only_urls(const char *p) {
+	while (*p) {
+		if (isspace((unsigned char)*p) || *p == '/') {
+			p++;
+			continue;
+		}
+		if (strncasecmp(p, "http://", 7) == 0 || strncasecmp(p, "https://", 8) == 0) {
+			p = url_end(p);
+			continue;
+		}
+		return false;
+	}
+	return true;
+}
+
+// The "**Full Changelog**" boilerplate: once the URL is gone the line is just
+// this label, whatever the case or the emphasis marks. Dropped with the link.
+static bool full_changelog_line(const char *text) {
+	char flat[32];
+	size_t n = 0;
+	for (const char *p = text; *p; p++) {
+		char c = *p;
+		if (c == ' ' || c == '\t' || c == '*' || c == '_' || c == ':' || c == '-') {
+			continue;
+		}
+		if (n + 1 >= sizeof(flat)) {
+			return false;
+		}
+		flat[n++] = (char)tolower((unsigned char)c);
+	}
+	flat[n] = '\0';
+	return strcmp(flat, "fullchangelog") == 0;
+}
+
+// Rewrites one notes line in place for the panel. A line-final links tail is
+// cut at its first URL (when everything after it is URLs and separators), and
+// any URL still inside the line is dropped on its own - what remains is the
+// text a person writes. False when nothing readable remains, and the line is
+// not drawn at all.
+static bool device_line(char *line) {
+	bool dropped = false;
+
+	char *first = find_url(line);
+	if (first && only_urls(first)) {
+		*first = '\0';
+		dropped = true;
+	}
+
+	char *read = line, *write = line;
+	while (*read) {
+		if (strncasecmp(read, "http://", 7) == 0 || strncasecmp(read, "https://", 8) == 0) {
+			read = (char *)url_end(read);
+			dropped = true;
+			continue;
+		}
+		*write++ = *read++;
+	}
+	*write = '\0';
+
+	// Trim what the drops left behind: trailing spaces, a dangling "in" (the
+	// preposition GitHub puts before the link), the "by @user" attribution
+	// (the other half of "TITLE by @user in <url>"), then again spaces and
+	// any trailing ":" or "/" until the line is stable. The attribution goes
+	// only along with a dropped URL, and only at the end of the line - a
+	// hand-written line ending in "by @user" keeps its words. A line that
+	// held no URL keeps its intentional trailing punctuation.
+	for (;;) {
+		size_t n = strlen(line);
+		while (n > 0 && (line[n - 1] == ' ' || line[n - 1] == '\t' || line[n - 1] == '\r')) {
+			line[--n] = '\0';
+		}
+		if (!dropped) {
+			break;
+		}
+		if (n >= 2 && strncasecmp(line + n - 2, "in", 2) == 0 &&
+			(n == 2 || line[n - 3] == ' ' || line[n - 3] == '\t')) {
+			line[n - 2] = '\0';
+			continue;
+		}
+		// Trailing " by @handle": scan the handle back from the end
+		// (alphanumerics and hyphens, the only characters GitHub allows).
+		size_t h = n;
+		while (h > 0 && (isalnum((unsigned char)line[h - 1]) || line[h - 1] == '-')) {
+			h--;
+		}
+		if (h < n && h >= 4 && strncasecmp(line + h - 4, "by @", 4) == 0) {
+			line[h - 4] = '\0';
+			continue;
+		}
+		if (n > 0 && (line[n - 1] == ':' || line[n - 1] == '/' || line[n - 1] == '-')) {
+			line[n - 1] = '\0';
+			continue;
+		}
+		break;
+	}
+
+	if (full_changelog_line(line)) {
+		return false;
+	}
+	for (const unsigned char *c = (const unsigned char *)line; *c; c++) {
+		if (isalnum(*c) || *c >= 0x80) {
+			return true;
+		}
+	}
+	return false;
+}
+
 // Fills the notes from the Markdown prepared by releasenotes.c: "#" lines as
 // bold headings, "**bold**" within a line, "-", "*" and "+" items as bullets
 // (indented by their leading spaces, two per level), anything else as plain
 // paragraphs. HTML banners/tags/comments have already been removed before the
-// notes buffer was bounded; blank lines become a gap.
+// notes buffer was bounded; device_line() strips what the panel cannot use;
+// blank lines become a gap.
 static void render_notes(const char *md) {
 	lv_obj_clean(notes_content);
 
+	char line_buf[1024];
 	bool gap = false;
 	bool any = false;
 	const char *p = md;
 	while (*p) {
 		const char *eol = strchr(p, '\n');
-		const char *end = eol ? eol : p + strlen(p);
-		const char *next = eol ? eol + 1 : end;
+		const char *eol_ptr = eol ? eol : p + strlen(p);
+		const char *next = eol ? eol + 1 : eol_ptr;
 
 		if (strncmp(p, "<!--", 4) == 0) {
 			const char *close = strstr(p, "-->");
@@ -400,13 +542,26 @@ static void render_notes(const char *md) {
 			continue;
 		}
 
+		// A line can be anything GitHub puts in a body, including what the
+		// panel cannot use (see device_line).
+		size_t raw = (size_t)(eol_ptr - p);
+		if (raw >= sizeof(line_buf)) {
+			raw = sizeof(line_buf) - 1;
+		}
+		memcpy(line_buf, p, raw);
+		line_buf[raw] = '\0';
+		if (!device_line(line_buf)) {
+			gap = any;
+			p = next;
+			continue;
+		}
+		p = line_buf;
+		const char *end = p + strlen(p);
+
 		int spaces = 0;
 		while (p < end && (*p == ' ' || *p == '\t')) {
 			spaces += *p == '\t' ? 2 : 1;
 			p++;
-		}
-		while (end > p && (end[-1] == '\r' || end[-1] == ' ')) {
-			end--;
 		}
 		if (p == end) {
 			gap = any;
