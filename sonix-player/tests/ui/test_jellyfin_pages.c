@@ -20,6 +20,7 @@
 #include "src/gui/fonts/fonts.h"
 #include "src/gui/nowplaying/player.h"
 #include "src/gui/shell/confirm.h"
+#include "src/gui/shell/gridpage.h"
 #include "src/gui/shell/gui.h"
 #include "src/gui/shell/icons.h"
 #include "src/gui/shell/keyboard.h"
@@ -580,6 +581,21 @@ static lv_obj_t *find_clickable_with_label(lv_obj_t *root, const char *text) {
 	return NULL;
 }
 
+// The picture a tile currently draws: its first image child.
+static const lv_image_dsc_t *tile_icon_source(lv_obj_t *tile) {
+	if (!tile) {
+		return NULL;
+	}
+	uint32_t n = lv_obj_get_child_count(tile);
+	for (uint32_t i = 0; i < n; i++) {
+		lv_obj_t *child = lv_obj_get_child(tile, (int32_t)i);
+		if (lv_obj_check_type(child, &lv_image_class)) {
+			return lv_image_get_src(child);
+		}
+	}
+	return NULL;
+}
+
 static lv_obj_t *find_textarea(lv_obj_t *root) {
 	if (!root || lv_obj_is_hidden(root))
 		return NULL;
@@ -683,6 +699,12 @@ int main(int argc, char **argv) {
 	assert(icon_jellyfin_badge.header.w == 52 && icon_jellyfin_badge.header.h == 52);
 	assert(icon_jellyfin_menu.header.w == 112 && icon_jellyfin_menu.header.h == 112);
 	assert(icon_jellyfin_saved.header.w == 48 && icon_jellyfin_saved.header.h == 48);
+	assert(icon_jellyfin_menu_card.header.w == 112 && icon_jellyfin_menu_card.header.h == 112);
+	assert(icon_jellyfin_saved_card.header.w == 48 && icon_jellyfin_saved_card.header.h == 48);
+	// The Dark/Light card art is its own bitmaps, not a recolour of the flat
+	// ones Custom and the glyph themes keep.
+	assert(icon_jellyfin_menu_card.data != icon_jellyfin_menu.data);
+	assert(icon_jellyfin_saved_card.data != icon_jellyfin_saved.data);
 
 	/* 2. Init Jellyfin page & load Home */
 	jellyfinpage_init(&cfg);
@@ -784,6 +806,18 @@ int main(int argc, char **argv) {
 		"Deutsch", "English", "Español", "Français", "Italiano", "Japanese",
 		"Nederlands", "Polski", "Português BR", "Russian", "Ukrainian",
 	};
+	// A Streaming-style grid carrying the "jellyfin" tile, so the theme's icon
+	// choice is checked for the section grid as well as the home grid.
+	lv_obj_t *section_scratch = lv_obj_create(NULL);
+	const grid_entry_t stream_entries[] = {
+		{"jellyfin", &icon_jellyfin_menu, NULL, NULL},
+	};
+	gridpage_build(section_scratch, &cfg, stream_entries, 1, 1, 1, true);
+	// Resolve the tiles once, in English: the sweep changes the language, and
+	// the tile captions keep the text they were built with.
+	lv_obj_t *saved_tile = find_clickable_with_label(jellyfin_screen, tr("jellyfin_saved"));
+	lv_obj_t *stream_tile = find_clickable_with_label(section_scratch, tr("jellyfin"));
+	assert(saved_tile && stream_tile);
 	for (size_t li = 0; li < sizeof(LANGS) / sizeof(LANGS[0]); li++) {
 		assert(lang_set(LANGS[li]));
 		for (int tk = 0; tk < THEME_KIND_COUNT; tk++) {
@@ -793,6 +827,22 @@ int main(int argc, char **argv) {
 			lv_obj_update_layout(jellyfin_screen);
 			assert_no_raw_jellyfin_keys(jellyfin_screen, LANGS[li]);
 			assert_screen_no_overlaps(jellyfin_screen, "jellyfin_home", LANGS[li], tk);
+
+			// Dark/Light draw the stacked-card artwork; the glyph themes the
+			// monochrome marks; nothing else changes the tile's picture.
+			const lv_image_dsc_t *saved_src = tile_icon_source(saved_tile);
+			const lv_image_dsc_t *stream_src = tile_icon_source(stream_tile);
+			assert(saved_src && stream_src);
+			if (tk == THEME_KIND_DARK || tk == THEME_KIND_LIGHT) {
+				assert(saved_src == &icon_jellyfin_saved_card);
+				assert(stream_src == &icon_jellyfin_menu_card);
+			} else if (theme_uses_function_glyphs()) {
+				assert(saved_src == &icon_podcast_downloaded);
+				assert(stream_src == &icon_jellyfin_mark);
+			} else {
+				assert(saved_src == &icon_jellyfin_saved);
+				assert(stream_src == &icon_jellyfin_menu);
+			}
 
 			lv_screen_load(settings_scr);
 			lv_obj_update_layout(settings_scr);
@@ -807,6 +857,35 @@ int main(int argc, char **argv) {
 	}
 	assert(lang_set("English"));
 	theme_set_kind(THEME_KIND_DARK);
+
+	/* 6b. A Custom theme from the SD card is not Dark or Light, so it keeps the
+	 * original flat Jellyfin icons; switching back to Dark restores the cards. */
+	{
+		char dir[600], path[700];
+		snprintf(dir, sizeof(dir), "%s/Themes", card_root_buf);
+		snprintf(path, sizeof(path), "%s/custom.ini", dir);
+		assert(mkdir(dir, 0700) == 0);
+		FILE *f = fopen(path, "w");
+		assert(f);
+		fputs("[theme]\nscreen_bg = #010203\nsurface = #101112\nsurface_pressed = #202122\n"
+			"panel = #303132\ncover_bg = #404142\ntext_primary = #f0f1f2\n"
+			"text_secondary = #a0a1a2\naccent = #123456\n", f);
+		assert(fclose(f) == 0);
+		theme_set_card_root(card_root_buf);
+		theme_set_kind(THEME_KIND_CUSTOM);
+		assert(theme_get_kind() == THEME_KIND_CUSTOM);
+		assert(!theme_uses_function_glyphs());
+		lv_screen_load(jellyfin_screen);
+		lv_obj_update_layout(jellyfin_screen);
+		assert(tile_icon_source(saved_tile) == &icon_jellyfin_saved);
+		assert(tile_icon_source(stream_tile) == &icon_jellyfin_menu);
+		theme_set_kind(THEME_KIND_DARK);
+		assert(tile_icon_source(saved_tile) == &icon_jellyfin_saved_card);
+		assert(tile_icon_source(stream_tile) == &icon_jellyfin_menu_card);
+		theme_set_card_root(NULL);
+		assert(unlink(path) == 0);
+		assert(rmdir(dir) == 0);
+	}
 
 	/* 7. Forget server */
 	lv_screen_load(settings_scr);

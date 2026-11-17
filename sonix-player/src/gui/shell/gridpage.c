@@ -322,6 +322,24 @@ static bool gridpage_tokyo_icon(const char *label, const lv_image_dsc_t **icon, 
 	return false;
 }
 
+// Dark and Light give Jellyfin the same stacked-card artwork its Streaming and
+// home-grid siblings wear, while Custom -- the other non-glyph theme -- and the
+// function-glyph themes keep the original flat icons (see gridpage_tokyo_icon).
+static void gridpage_classic_icon(const char *label, const lv_image_dsc_t **icon) {
+	theme_kind_t kind = theme_get_kind();
+	if (kind != THEME_KIND_DARK && kind != THEME_KIND_LIGHT) {
+		return;
+	}
+	if (!label || !icon) {
+		return;
+	}
+	if (strcmp(label, "jellyfin") == 0) {
+		*icon = &icon_jellyfin_menu_card;
+	} else if (strcmp(label, "jellyfin_saved") == 0) {
+		*icon = &icon_jellyfin_saved_card;
+	}
+}
+
 static void gridpage_apply_theme_page(gridpage_theme_page_t *page) {
 	if (!page || !page->grid) {
 		return;
@@ -334,6 +352,8 @@ static void gridpage_apply_theme_page(gridpage_theme_page_t *page) {
 		theme_semantic_t tone = THEME_SEMANTIC_BLUE;
 		if (tokyo) {
 			gridpage_tokyo_icon(page->labels[i], &icon, &tone);
+		} else {
+			gridpage_classic_icon(page->labels[i], &icon);
 		}
 		gridpage_set_tile_icon_style(page->grid, i, icon, tokyo ? (compact_grid() ? 22 : 42) :
 							 compact_grid() ? COMPACT_TILE_ICON_MAX : 0,
