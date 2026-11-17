@@ -287,7 +287,7 @@ WASM_FT_REL_SRCS = \
 	src/bdf/bdf.c src/sfnt/sfnt.c src/autofit/autofit.c src/pshinter/pshinter.c \
 	src/smooth/smooth.c src/raster/raster.c src/svg/svg.c src/sdf/sdf.c \
 	src/cache/ftcache.c src/gzip/ftgzip.c src/lzw/ftlzw.c src/bzip2/ftbzip2.c \
-	src/psaux/psaux.c src/psnames/psnames.c src/dlg/dlg.c
+	src/psaux/psaux.c src/psnames/psnames.c
 WASM_FT_OBJS = $(WASM_FT_REL_SRCS:src/%.c=build_wasm/freetype/%.o)
 WASM_FT_LIB = build_wasm/freetype/libfreetype.a
 WASM_FT_STAMP = $(FREETYPE_HOST_SRC)/include/ft2build.h
