@@ -18,72 +18,118 @@ const IDB_STORE_BUILDS = "builds";
 const IDB_STORE_SD = "sd_files";
 const IDB_STORE_META = "meta";
 
+// In-memory fallback used automatically when IndexedDB is unavailable or restricted
+// (e.g., iOS Safari Private Browsing or embedded mobile WebViews).
+const memFallback = {
+	[IDB_STORE_BUILDS]: new Map(),
+	[IDB_STORE_SD]: new Map(),
+	[IDB_STORE_META]: new Map(),
+};
+const STORE_KEY_FIELD = {
+	[IDB_STORE_BUILDS]: "id",
+	[IDB_STORE_SD]: "path",
+	[IDB_STORE_META]: "key",
+};
+let idbDisabled = false;
+
 function openDb() {
-	return new Promise((resolve, reject) => {
-		if (typeof indexedDB === "undefined") {
+	return new Promise((resolve) => {
+		if (idbDisabled || typeof indexedDB === "undefined") {
 			resolve(null);
 			return;
 		}
-		const req = indexedDB.open(IDB_NAME, 1);
-		req.onupgradeneeded = () => {
-			const db = req.result;
-			if (!db.objectStoreNames.contains(IDB_STORE_BUILDS)) db.createObjectStore(IDB_STORE_BUILDS, { keyPath: "id" });
-			if (!db.objectStoreNames.contains(IDB_STORE_SD)) db.createObjectStore(IDB_STORE_SD, { keyPath: "path" });
-			if (!db.objectStoreNames.contains(IDB_STORE_META)) db.createObjectStore(IDB_STORE_META, { keyPath: "key" });
-		};
-		req.onsuccess = () => resolve(req.result);
-		req.onerror = () => reject(req.error);
+		try {
+			const req = indexedDB.open(IDB_NAME, 1);
+			req.onupgradeneeded = () => {
+				const db = req.result;
+				if (!db.objectStoreNames.contains(IDB_STORE_BUILDS)) db.createObjectStore(IDB_STORE_BUILDS, { keyPath: "id" });
+				if (!db.objectStoreNames.contains(IDB_STORE_SD)) db.createObjectStore(IDB_STORE_SD, { keyPath: "path" });
+				if (!db.objectStoreNames.contains(IDB_STORE_META)) db.createObjectStore(IDB_STORE_META, { keyPath: "key" });
+			};
+			req.onsuccess = () => resolve(req.result);
+			req.onerror = () => {
+				idbDisabled = true;
+				resolve(null);
+			};
+		} catch {
+			idbDisabled = true;
+			resolve(null);
+		}
 	});
 }
 
 async function idbGetAll(storeName) {
 	const db = await openDb();
-	if (!db) return [];
-	return new Promise((resolve, reject) => {
-		const tx = db.transaction(storeName, "readonly");
-		const req = tx.objectStore(storeName).getAll();
-		req.onsuccess = () => resolve(req.result || []);
-		req.onerror = () => reject(req.error);
-	});
+	if (!db) return Array.from(memFallback[storeName]?.values() || []);
+	try {
+		return await new Promise((resolve, reject) => {
+			const tx = db.transaction(storeName, "readonly");
+			const req = tx.objectStore(storeName).getAll();
+			req.onsuccess = () => resolve(req.result || []);
+			req.onerror = () => reject(tx.error || req.error);
+		});
+	} catch {
+		return Array.from(memFallback[storeName]?.values() || []);
+	}
 }
 
 async function idbGet(storeName, key) {
 	const db = await openDb();
-	if (!db) return null;
-	return new Promise((resolve, reject) => {
-		const tx = db.transaction(storeName, "readonly");
-		const req = tx.objectStore(storeName).get(key);
-		req.onsuccess = () => resolve(req.result || null);
-		req.onerror = () => reject(req.error);
-	});
+	if (!db) return memFallback[storeName]?.get(key) || null;
+	try {
+		return await new Promise((resolve, reject) => {
+			const tx = db.transaction(storeName, "readonly");
+			const req = tx.objectStore(storeName).get(key);
+			req.onsuccess = () => resolve(req.result || null);
+			req.onerror = () => reject(tx.error || req.error);
+		});
+	} catch {
+		return memFallback[storeName]?.get(key) || null;
+	}
 }
 
 async function idbPut(storeName, value) {
+	const keyField = STORE_KEY_FIELD[storeName];
+	if (keyField && memFallback[storeName]) {
+		memFallback[storeName].set(value[keyField], value);
+	}
 	const db = await openDb();
 	if (!db) return;
-	return new Promise((resolve, reject) => {
-		const tx = db.transaction(storeName, "readwrite");
-		tx.objectStore(storeName).put(value);
-		tx.oncomplete = () => resolve();
-		tx.onerror = () => reject(tx.error);
-	});
+	try {
+		await new Promise((resolve, reject) => {
+			const tx = db.transaction(storeName, "readwrite");
+			tx.objectStore(storeName).put(value);
+			tx.oncomplete = () => resolve();
+			tx.onerror = () => reject(tx.error);
+		});
+	} catch {
+		// Fall back cleanly to in-memory cache when quota or private-mode blocks writes.
+	}
 }
 
 async function idbDelete(storeName, key) {
+	memFallback[storeName]?.delete(key);
 	const db = await openDb();
 	if (!db) return;
-	return new Promise((resolve, reject) => {
-		const tx = db.transaction(storeName, "readwrite");
-		tx.objectStore(storeName).delete(key);
-		tx.oncomplete = () => resolve();
-		tx.onerror = () => reject(tx.error);
-	});
+	try {
+		await new Promise((resolve, reject) => {
+			const tx = db.transaction(storeName, "readwrite");
+			tx.objectStore(storeName).delete(key);
+			tx.oncomplete = () => resolve();
+			tx.onerror = () => reject(tx.error);
+		});
+	} catch {}
 }
 
 /* -------------------------------------------------------------------------
  * Zero-dependency ZIP reader (Store + Deflate via DecompressionStream)
  * ------------------------------------------------------------------------- */
 async function inflateRaw(compressedBytes) {
+	if (typeof DecompressionStream === "undefined") {
+		throw new Error(
+			"This mobile browser does not support DecompressionStream (requires iOS Safari 16.4+, Chrome 80+, or Firefox 113+)."
+		);
+	}
 	const ds = new DecompressionStream("deflate-raw");
 	const writer = ds.writable.getWriter();
 	writer.write(compressedBytes);
@@ -460,10 +506,11 @@ export class SonixWasmBackend {
 	}
 
 	async loadBundleFromBuffer(arrayBuffer, options = {}) {
-		if (!window.crossOriginIsolated) {
-			throw new Error(
-				"SharedArrayBuffer is unavailable (Cross-Origin Isolation not active). Reload the page over HTTPS or localhost."
-			);
+		if (!window.crossOriginIsolated || typeof SharedArrayBuffer === "undefined") {
+			const hint = !window.isSecureContext
+				? "Open this page over HTTPS (or connect to a desktop running server.mjs over LAN)."
+				: "Tap Reload once so the Cross-Origin Isolation service worker activates (required for SharedArrayBuffer on mobile Safari & Chrome).";
+			throw new Error(`SharedArrayBuffer is unavailable. ${hint}`);
 		}
 
 		this.cb.onBuildStatus?.("Unpacking .sonix-web.zip bundle...", 0.7);
@@ -596,9 +643,8 @@ export class SonixWasmBackend {
 
 		const sdFiles = await idbGetAll(IDB_STORE_SD);
 		const jsBlob = new Blob([this.activeBundle.jsBytes], { type: "application/javascript" });
-		const wasmBlob = new Blob([this.activeBundle.wasmBytes], { type: "application/wasm" });
 		this.jsBlobUrl = URL.createObjectURL(jsBlob);
-		this.wasmBlobUrl = URL.createObjectURL(wasmBlob);
+		this.wasmBlobUrl = null;
 
 		window.createSonixPlayer = undefined;
 		await loadScriptFromBlobUrl(this.jsBlobUrl);
@@ -613,7 +659,17 @@ export class SonixWasmBackend {
 		const mod = await factory({
 			mainScriptUrlOrBlob: this.jsBlobUrl,
 			wasmBinary: wasmCopy,
-			locateFile: (p) => (p.endsWith(".wasm") ? self.wasmBlobUrl : p),
+			locateFile: (p) => {
+				if (p.endsWith(".wasm")) {
+					if (!self.wasmBlobUrl) {
+						self.wasmBlobUrl = URL.createObjectURL(
+							new Blob([self.activeBundle.wasmBytes], { type: "application/wasm" })
+						);
+					}
+					return self.wasmBlobUrl;
+				}
+				return p;
+			},
 			print: (line) => self._emitLog("stdout", line),
 			printErr: (line) => self._emitLog("stderr", line),
 			onAbort: (what) => {

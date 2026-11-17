@@ -2,12 +2,17 @@
 <html lang="en">
 <head>
 	<meta charset="utf-8">
-	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
+	<meta name="theme-color" content="#0b0e13">
+	<meta name="apple-mobile-web-app-capable" content="yes">
+	<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+	<meta name="apple-mobile-web-app-title" content="TempoTec V1">
+	<meta name="mobile-web-app-capable" content="yes">
 	<title>TempoTec Variations V1 — Interactive Emulator</title>
 	<script src="coi-serviceworker.js"></script>
 	<link rel="stylesheet" href="styles.css">
 </head>
-<body>
+<body data-mobile-view="device">
 	<div class="app-shell">
 		<!-- Top Workbench Header -->
 		<header class="topbar">
@@ -29,15 +34,20 @@
 
 			<div class="topbar-actions">
 				<div class="segmented" role="group" aria-label="Screen scale">
+					<button class="seg-btn" data-scale="fit">Fit</button>
 					<button class="seg-btn" data-scale="1">1&times;</button>
+					<button class="seg-btn active" data-scale="1.25">1.25&times;</button>
 					<button class="seg-btn" data-scale="1.5">1.5&times;</button>
-					<button class="seg-btn active" data-scale="2">2&times;</button>
-					<button class="seg-btn" data-scale="2.5">2.5&times;</button>
+					<button class="seg-btn" data-scale="2">2&times;</button>
 				</div>
 
 				<button id="btn-audio-toggle" class="btn btn-ghost" title="Enable live browser audio playback from virtual ALSA DAC">
 					<span class="icon-dot" id="audio-dot"></span>
 					<span id="audio-btn-label">Audio: Off</span>
+				</button>
+
+				<button id="btn-flip-device" class="btn btn-ghost" title="Flip TempoTec Variations V1 to inspect the rear shell">
+					Back View
 				</button>
 
 				<button id="btn-screenshot" class="btn btn-primary" title="Capture crisp 240x320 PNG screenshot (shortcut: S)">
@@ -56,101 +66,200 @@
 
 		<!-- Main Split Workspace -->
 		<main class="workspace">
-			<!-- Left / Center Stage: TempoTec V1 Physical Hardware Mockup -->
-			<section class="stage-pane" aria-label="TempoTec V1 Device">
-				<div class="stage-canvas-wrap">
-					<div class="v1-assembly" id="v1-assembly">
-						<!-- Left subtle microSD slot detail -->
-						<div class="v1-sd-slot" title="Virtual microSD card slot">
-							<span class="v1-sd-notch"></span>
-						</div>
+			<!-- Left / Center Stage: TempoTec Variations V1 Physical Hardware Mockup -->
+			<section class="stage-pane" aria-label="TempoTec Variations V1 Device">
+				<div class="stage-meta-bar">
+					<span class="v1-rot-badge hidden" id="v1-rot-badge">180&deg; Rotated</span>
+				</div>
 
-						<!-- Main CNC Aluminum Chassis -->
-						<div class="v1-chassis" id="v1-chassis">
-							<!-- Top bevel + SGM31324 RGB LED -->
-							<div class="v1-top-bezel">
-								<div class="v1-led-housing" id="v1-led-housing" title="SGM31324 RGB Status LED">
-									<div class="v1-led-glow" id="v1-led-glow"></div>
-									<div class="v1-led-core" id="v1-led-core"></div>
-								</div>
-								<span class="v1-top-label">Hi-Res AUDIO</span>
-								<span class="v1-rot-badge hidden" id="v1-rot-badge">180&deg;</span>
+				<div class="stage-canvas-wrap" id="stage-canvas-wrap">
+					<div class="v1-assembly" id="v1-assembly">
+						<!-- LEFT FLANK: Volume +, Volume -, and lower microSD card slot -->
+						<div class="v1-flank v1-flank-left" role="group" aria-label="Left side buttons and microSD slot">
+							<div class="flank-group flank-vol">
+								<button class="flank-btn flank-left flank-vol-up" data-hw-btn="vol_up" title="Volume Up (key: ArrowUp / +)" aria-label="Volume Up">
+									<span class="flank-tag"><span class="tag-full"><kbd>&uarr;</kbd>VOL+</span><span class="tag-compact" aria-hidden="true">+</span></span>
+									<span class="flank-cap" aria-hidden="true"><span class="cap-glyph">+</span></span>
+								</button>
+								<button class="flank-btn flank-left flank-vol-down" data-hw-btn="vol_down" title="Volume Down (key: ArrowDown / -)" aria-label="Volume Down">
+									<span class="flank-tag"><span class="tag-full"><kbd>&darr;</kbd>VOL&minus;</span><span class="tag-compact" aria-hidden="true">&minus;</span></span>
+									<span class="flank-cap" aria-hidden="true"><span class="cap-glyph">&minus;</span></span>
+								</button>
 							</div>
 
-							<!-- Recessed Glass 240x320 Touchscreen -->
-							<div class="v1-screen-bezel">
-								<div class="v1-screen-stage" id="v1-screen-stage">
-									<canvas id="v1-canvas" width="240" height="320"></canvas>
-									<div class="v1-backlight-dim" id="v1-backlight-dim"></div>
-									<div class="v1-glass-sheen" aria-hidden="true"></div>
-									<div class="v1-shutter-flash" id="v1-shutter-flash" aria-hidden="true"></div>
-									<div class="v1-touch-ripple" id="v1-touch-ripple" aria-hidden="true"></div>
+							<button type="button" class="v1-sd-slot-btn" id="v1-sd-slot" title="microSD / TF Card Slot (click to open microSD browser)" aria-label="microSD card slot">
+								<span class="flank-tag sd-tag">TF</span>
+								<span class="v1-sd-slot" aria-hidden="true">
+									<span class="v1-sd-notch"></span>
+								</span>
+							</button>
+						</div>
 
-									<!-- Overlay when screen off, powered off, building, or crashed -->
-									<div class="v1-screen-overlay hidden" id="v1-screen-overlay">
-										<div class="overlay-badge" id="overlay-title">Screen Off</div>
-										<div class="overlay-sub" id="overlay-sub">Press Power to wake</div>
-										<button class="btn btn-primary btn-sm hidden" id="overlay-boot-btn">Power On V1</button>
+						<!-- CENTER BODY: Top Gold Jacks + 3D Flippable TempoTec V1 Chassis + Bottom USB-C -->
+						<div class="v1-body-column">
+							<!-- Top Edge Dual Gold-Plated Headphone Outputs (4.4mm Balanced + 3.5mm SE) -->
+							<div class="v1-top-ports" id="v1-top-jacks" title="4.4mm Balanced &amp; 3.5mm SE Outputs (click to toggle browser audio)">
+								<button type="button" class="v1-top-jack jack-bal" data-audio-jack="4.4" aria-label="4.4mm Balanced output">
+									<span class="top-jack-label">4.4</span>
+									<span class="top-jack-collar">
+										<span class="top-jack-bore"></span>
+									</span>
+								</button>
+								<button type="button" class="v1-top-jack jack-se" data-audio-jack="3.5" aria-label="3.5mm Single-Ended output">
+									<span class="top-jack-label">3.5</span>
+									<span class="top-jack-plug" aria-hidden="true">
+										<span class="plug-cable"></span>
+										<span class="plug-boot"></span>
+										<span class="plug-barrel"></span>
+										<span class="plug-ring"></span>
+									</span>
+									<span class="top-jack-collar">
+										<span class="top-jack-bore"></span>
+									</span>
+								</button>
+							</div>
+
+							<!-- 3D Perspective Card for Front / Back Shell -->
+							<div class="v1-card-3d" id="v1-card-3d">
+								<!-- FRONT FACE: Precision Gunmetal Frame + Continuous Piano-Black Glass -->
+								<div class="v1-chassis v1-face v1-face-front" id="v1-chassis">
+									<div class="v1-front-glass">
+										<!-- Flush Upper-Half 2.0" 240x320 Touchscreen -->
+										<div class="v1-screen-stage" id="v1-screen-stage">
+											<canvas id="v1-canvas" width="240" height="320"></canvas>
+											<div class="v1-backlight-dim" id="v1-backlight-dim"></div>
+											<div class="v1-shutter-flash" id="v1-shutter-flash" aria-hidden="true"></div>
+											<div class="v1-touch-ripple" id="v1-touch-ripple" aria-hidden="true"></div>
+
+											<!-- Overlay when screen off, powered off, building, or crashed -->
+											<div class="v1-screen-overlay hidden" id="v1-screen-overlay">
+												<div class="overlay-badge" id="overlay-title">Screen Off</div>
+												<div class="overlay-sub" id="overlay-sub">Press Power to wake</div>
+												<button class="btn btn-primary btn-sm hidden" id="overlay-boot-btn">Power On V1</button>
+											</div>
+										</div>
+
+										<!-- Signature Expansive Piano-Black Lower Glass Chin -->
+										<div class="v1-chin">
+											<!-- Authentic Bottom-Left Vertical Pill RGB LED (SGM31324) -->
+											<div class="v1-led-housing" id="v1-led-housing" title="SGM31324 RGB Status LED">
+												<div class="v1-led-glow" id="v1-led-glow"></div>
+												<div class="v1-led-core" id="v1-led-core"></div>
+											</div>
+
+											<!-- Authentic Bottom-Right Brushed-Silver V1 Emblem -->
+											<div class="v1-chin-emblem" aria-label="V1">
+												<svg class="v1-mark-svg" viewBox="0 0 66 30" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+													<defs>
+														<linearGradient id="v1SilverGrad" x1="0" y1="0" x2="66" y2="30" gradientUnits="userSpaceOnUse">
+															<stop offset="0%" stop-color="#e4e8f0"/>
+															<stop offset="48%" stop-color="#b4bcc8"/>
+															<stop offset="100%" stop-color="#7f8795"/>
+														</linearGradient>
+													</defs>
+													<!-- Geometric wide flat-bottom V -->
+													<path d="M2 3H11.6L21.5 22.4L31.4 3H41L26 27.5H17L2 3Z" fill="url(#v1SilverGrad)"/>
+													<!-- Geometric angular 1 matching real V1 chin mark -->
+													<path d="M44.5 3H61.5V27.5H52.8V9.6H44.5V3Z" fill="url(#v1SilverGrad)"/>
+												</svg>
+											</div>
+										</div>
+
+										<!-- Unified continuous edge-to-edge front glass sheen -->
+										<div class="v1-glass-sheen" aria-hidden="true"></div>
+									</div>
+								</div>
+
+								<!-- BACK FACE: Authentic TempoTec Variations V1 Rear Design -->
+								<div class="v1-chassis v1-face v1-face-back" id="v1-chassis-back" title="Click to flip back to front screen">
+									<div class="v1-back-shell">
+										<!-- Full-height diagonal ribbed matte/satin black texture -->
+										<div class="v1-back-stripes" aria-hidden="true"></div>
+
+										<!-- Signature orange diagonal bevel insert + brushed upper gunmetal cap -->
+										<div class="v1-back-orange-accent" aria-hidden="true"></div>
+										<div class="v1-back-upper" aria-hidden="true"></div>
+
+										<!-- Exposed CNC silver 6-lobe Torx star screw in stepped upper-right corner -->
+										<div class="v1-back-torx" aria-hidden="true">
+											<svg class="v1-torx-svg" viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg">
+												<defs>
+													<radialGradient id="torxHead" cx="34%" cy="28%" r="72%">
+														<stop offset="0%" stop-color="#d2d8e2"/>
+														<stop offset="55%" stop-color="#8b929f"/>
+														<stop offset="100%" stop-color="#4c525c"/>
+													</radialGradient>
+												</defs>
+												<circle cx="14" cy="14" r="13" fill="#15171c" stroke="rgba(255,255,255,0.12)" stroke-width="1"/>
+												<circle cx="14" cy="14" r="10.4" fill="url(#torxHead)" stroke="#262a31" stroke-width="0.9"/>
+												<!-- 6-lobe Torx star socket -->
+												<path d="M14 7.6L15.8 10.6L19.2 10.7L17.5 13.8L19.2 16.9L15.8 17L14 20L12.2 17L8.8 16.9L10.5 13.8L8.8 10.7L12.2 10.6Z" fill="#1e222a" stroke="rgba(255,255,255,0.16)" stroke-width="0.45"/>
+											</svg>
+										</div>
+
+										<!-- Vertical TEMPoTEC + Piano-Key Square Logo along lower-right side -->
+										<div class="v1-back-brand" aria-hidden="true">
+											<svg class="v1-tempotec-svg" viewBox="0 0 220 44" fill="none" xmlns="http://www.w3.org/2000/svg">
+												<!-- Authentic TempoTec Piano-Key Square Logo -->
+												<g transform="translate(2, 6)">
+													<rect x="0" y="0" width="32" height="32" rx="1.5" fill="#e6e9ef"/>
+													<!-- White key divider grooves -->
+													<line x1="6.4" y1="0" x2="6.4" y2="32" stroke="#181a1f" stroke-width="1.2"/>
+													<line x1="12.8" y1="0" x2="12.8" y2="32" stroke="#181a1f" stroke-width="1.2"/>
+													<line x1="19.2" y1="0" x2="19.2" y2="32" stroke="#181a1f" stroke-width="1.2"/>
+													<line x1="25.6" y1="0" x2="25.6" y2="32" stroke="#181a1f" stroke-width="1.2"/>
+													<!-- Black piano keys -->
+													<rect x="4.3" y="0" width="4.2" height="19" fill="#181a1f"/>
+													<rect x="10.7" y="0" width="4.2" height="19" fill="#181a1f"/>
+													<rect x="23.5" y="0" width="4.2" height="19" fill="#181a1f"/>
+												</g>
+												<!-- TEMPoTEC Wordmark -->
+												<text x="44" y="30" fill="#e6e9ef" font-family="Inter, -apple-system, BlinkMacSystemFont, sans-serif" font-size="22" font-weight="700" letter-spacing="1.6">TEMPoTEC</text>
+											</svg>
+										</div>
+
+										<div class="v1-back-hint">Click to return to screen</div>
 									</div>
 								</div>
 							</div>
 
-							<!-- Lower Chin Engraving -->
-							<div class="v1-chin">
-								<div class="v1-logo">TEMPO-TEC</div>
-								<div class="v1-model">VARIATIONS &nbsp;V1</div>
-							</div>
-
-							<!-- Bottom Hardware Ports -->
-							<div class="v1-bottom-ports" aria-hidden="true">
-								<div class="v1-jack" title="3.5mm Single-Ended Output">
-									<span class="jack-ring"></span>
-									<span class="port-caption">3.5</span>
-								</div>
-								<div class="v1-usbc" id="v1-usbc" title="USB-C Power / Data">
-									<span class="usbc-slot"></span>
-									<span class="usbc-cable" id="v1-usbc-cable"></span>
+							<!-- Bottom Edge Centered USB Type-C Port -->
+							<div class="v1-bottom-ports">
+								<button type="button" class="v1-usbc" id="v1-usbc" title="USB Type-C Power / Data (click to open Hardware controls)">
+									<span class="usbc-slot">
+										<span class="usbc-tongue"></span>
+									</span>
+									<span class="usbc-cable" id="v1-usbc-cable" aria-hidden="true">
+										<span class="usbc-plug-body"></span>
+										<span class="usbc-plug-collar"></span>
+										<span class="usbc-plug-cord"></span>
+									</span>
 									<span class="port-caption">USB-C</span>
-								</div>
-								<div class="v1-jack jack-bal" title="4.4mm Balanced Output">
-									<span class="jack-ring"></span>
-									<span class="port-caption">4.4</span>
-								</div>
+								</button>
 							</div>
 						</div>
 
-						<!-- Right-Flank Physical Buttons (TempoTec V1 single-flank layout) -->
-						<div class="v1-flank" role="group" aria-label="Physical side buttons">
-							<button class="flank-btn flank-power" data-hw-btn="power" title="Power (short: sleep/wake · long 2s: power menu · key: P)">
-								<span class="flank-cap"></span>
-								<span class="flank-tag">PWR<kbd>P</kbd></span>
+						<!-- RIGHT FLANK: Authentic 4-Button Stack (Power, Prev, Play/Pause, Next) -->
+						<div class="v1-flank v1-flank-right" role="group" aria-label="Right side buttons">
+							<button class="flank-btn flank-right flank-power" data-hw-btn="power" title="Power (short: sleep/wake · long 2s: power menu · key: P)" aria-label="Power">
+								<span class="flank-cap" aria-hidden="true"><span class="cap-glyph">&#x23FB;</span></span>
+								<span class="flank-tag"><span class="tag-full">PWR<kbd>P</kbd></span><span class="tag-compact" aria-hidden="true">&#x23FB;</span></span>
 							</button>
 
-							<div class="flank-group flank-vol">
-								<button class="flank-btn flank-vol-up" data-hw-btn="vol_up" title="Volume Up (key: ArrowUp / +)">
-									<span class="flank-cap"></span>
-									<span class="flank-tag">VOL+<kbd>&uarr;</kbd></span>
-								</button>
-								<button class="flank-btn flank-vol-down" data-hw-btn="vol_down" title="Volume Down (key: ArrowDown / -)">
-									<span class="flank-cap"></span>
-									<span class="flank-tag">VOL&minus;<kbd>&darr;</kbd></span>
-								</button>
-							</div>
+							<button class="flank-btn flank-right flank-prev" data-hw-btn="prev" title="Previous / Rewind (key: ArrowLeft)" aria-label="Previous">
+								<span class="flank-cap" aria-hidden="true"><span class="cap-glyph cap-dbl">&#x25B2;</span></span>
+								<span class="flank-tag"><span class="tag-full">PREV<kbd>&larr;</kbd></span><span class="tag-compact" aria-hidden="true">&#x23EE;</span></span>
+							</button>
 
-							<div class="flank-group flank-transport">
-								<button class="flank-btn flank-prev" data-hw-btn="prev" title="Previous / Rewind (key: ArrowLeft)">
-									<span class="flank-cap"></span>
-									<span class="flank-tag">PREV<kbd>&larr;</kbd></span>
-								</button>
-								<button class="flank-btn flank-play" data-hw-btn="play" title="Play / Pause (key: Space)">
-									<span class="flank-cap"></span>
-									<span class="flank-tag">PLAY<kbd>&#9251;</kbd></span>
-								</button>
-								<button class="flank-btn flank-next" data-hw-btn="next" title="Next / Fast-Forward (key: ArrowRight)">
-									<span class="flank-cap"></span>
-									<span class="flank-tag">NEXT<kbd>&rarr;</kbd></span>
-								</button>
-							</div>
+							<button class="flank-btn flank-right flank-play" data-hw-btn="play" title="Play / Pause (key: Space)" aria-label="Play or Pause">
+								<span class="flank-cap" aria-hidden="true"><span class="cap-glyph">&#x25B6;</span></span>
+								<span class="flank-tag"><span class="tag-full">PLAY<kbd>&#9251;</kbd></span><span class="tag-compact" aria-hidden="true">&#x25B6;</span></span>
+							</button>
+
+							<button class="flank-btn flank-right flank-next" data-hw-btn="next" title="Next / Fast-Forward (key: ArrowRight)" aria-label="Next">
+								<span class="flank-cap" aria-hidden="true"><span class="cap-glyph cap-dbl">&#x25BC;</span></span>
+								<span class="flank-tag"><span class="tag-full">NEXT<kbd>&rarr;</kbd></span><span class="tag-compact" aria-hidden="true">&#x23ED;</span></span>
+							</button>
 						</div>
 					</div>
 				</div>
@@ -227,7 +336,7 @@
 								<h2>Load Any Sonix Build</h2>
 								<label class="btn btn-primary btn-xs upload-label">
 									Browse .zip
-									<input type="file" id="build-file-input" accept=".zip,.sonix-web.zip" hidden>
+									<input type="file" id="build-file-input" accept=".zip,.sonix-web.zip,application/zip,application/x-zip-compressed,application/octet-stream" hidden>
 								</label>
 							</div>
 
@@ -408,7 +517,7 @@
 								<li>Switch between the 44.1 kHz and 96 kHz demo tracks to see the real <strong>SGM31324 RGB LED</strong> change color &amp; the Hi-Res badge update.</li>
 								<li>Click <strong>Hold Power (2s)</strong> or hold the side <strong>PWR</strong> button to summon the V1 Power Menu.</li>
 								<li>Slide Battery to <strong>15%</strong> or switch Charger to <strong>Charging</strong> and watch both the topbar icon and the breathing RGB LED respond.</li>
-								<li>Try <strong>Settings &rarr; Buttons</strong> to test single-flank remapping, or <strong>Settings &rarr; Screen &rarr; Rotate 180&deg;</strong>.</li>
+								<li>Try <strong>Settings &rarr; Buttons</strong> to test hardware button remapping, or <strong>Settings &rarr; Screen &rarr; Rotate 180&deg;</strong>.</li>
 							</ul>
 						</div>
 					</div>
@@ -439,6 +548,30 @@
 				</section>
 			</aside>
 		</main>
+
+		<!-- Mobile Bottom Navigation Bar (shown on <= 768px screens) -->
+		<nav class="mobile-nav" aria-label="Mobile view navigation">
+			<button type="button" class="mobile-nav-btn active" data-mobile-nav="device">
+				<span class="mobile-nav-icon" aria-hidden="true">&#x25AF;</span>
+				<span class="mobile-nav-label">V1</span>
+			</button>
+			<button type="button" class="mobile-nav-btn" data-mobile-nav="builds">
+				<span class="mobile-nav-icon" aria-hidden="true">&#x2B07;</span>
+				<span class="mobile-nav-label">Builds</span>
+			</button>
+			<button type="button" class="mobile-nav-btn" data-mobile-nav="hardware">
+				<span class="mobile-nav-icon" aria-hidden="true">&#x2699;</span>
+				<span class="mobile-nav-label">Hardware</span>
+			</button>
+			<button type="button" class="mobile-nav-btn" data-mobile-nav="sd">
+				<span class="mobile-nav-icon" aria-hidden="true">&#x25A4;</span>
+				<span class="mobile-nav-label">microSD</span>
+			</button>
+			<button type="button" class="mobile-nav-btn" data-mobile-nav="logs">
+				<span class="mobile-nav-icon" aria-hidden="true">&gt;_</span>
+				<span class="mobile-nav-label">Logs</span>
+			</button>
+		</nav>
 	</div>
 
 	<!-- Screenshot Preview Modal -->

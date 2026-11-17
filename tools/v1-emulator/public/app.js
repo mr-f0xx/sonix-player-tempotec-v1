@@ -51,6 +51,7 @@ const el = {
 	buildUrlBtn: document.getElementById("btn-build-url"),
 
 	canvas: document.getElementById("v1-canvas"),
+	stageCanvasWrap: document.getElementById("stage-canvas-wrap"),
 	screenStage: document.getElementById("v1-screen-stage"),
 	backlightDim: document.getElementById("v1-backlight-dim"),
 	shutterFlash: document.getElementById("v1-shutter-flash"),
@@ -61,6 +62,11 @@ const el = {
 	overlayBootBtn: document.getElementById("overlay-boot-btn"),
 	rotBadge: document.getElementById("v1-rot-badge"),
 	usbcPort: document.getElementById("v1-usbc"),
+	topJacks: document.getElementById("v1-top-jacks"),
+	sdSlotBtn: document.getElementById("v1-sd-slot"),
+	v1Assembly: document.getElementById("v1-assembly"),
+	v1ChassisBack: document.getElementById("v1-chassis-back"),
+	flipDeviceBtn: document.getElementById("btn-flip-device"),
 
 	ledGlow: document.getElementById("v1-led-glow"),
 	ledCore: document.getElementById("v1-led-core"),
@@ -188,6 +194,8 @@ function showToast(message) {
 let audioEnabled = false;
 let audioCtx = null;
 let audioNextTime = 0;
+let audioUnlocked = false;
+const isCoarsePointer = () => window.matchMedia?.("(pointer: coarse)")?.matches ?? false;
 
 function ensureAudioContext() {
 	if (!audioCtx) {
@@ -202,13 +210,31 @@ function ensureAudioContext() {
 	if (audioCtx.state === "suspended") {
 		audioCtx.resume().catch(() => {});
 	}
+	// iOS Safari requires playing a silent buffer inside a direct user gesture to unlock audio output.
+	if (!audioUnlocked && audioCtx) {
+		try {
+			const silent = audioCtx.createBuffer(1, 1, 22050);
+			const src = audioCtx.createBufferSource();
+			src.buffer = silent;
+			src.connect(audioCtx.destination);
+			src.start(0);
+			audioUnlocked = true;
+		} catch {}
+	}
 	return audioCtx;
+}
+
+function resumeAudioIfEnabled() {
+	if (audioEnabled && audioCtx && audioCtx.state === "suspended") {
+		audioCtx.resume().catch(() => {});
+	}
 }
 
 function setAudioEnabled(on) {
 	audioEnabled = on;
 	el.audioDot.classList.toggle("on", on);
 	el.audioBtnLabel.textContent = on ? "Audio: On" : "Audio: Off";
+	el.topJacks?.classList.toggle("audio-active", on);
 	if (on) {
 		ensureAudioContext();
 	}
@@ -275,8 +301,9 @@ function schedulePcmBytes(pcmBytesView, rate, channels) {
 	src.connect(audioCtx.destination);
 
 	const now = audioCtx.currentTime;
-	if (audioNextTime < now + 0.015 || audioNextTime > now + 0.35) {
-		audioNextTime = now + 0.04;
+	const lead = isCoarsePointer() ? 0.065 : 0.04;
+	if (audioNextTime < now + 0.015 || audioNextTime > now + 0.4) {
+		audioNextTime = now + lead;
 	}
 	src.start(audioNextTime);
 	audioNextTime += buf.duration;
@@ -376,8 +403,8 @@ function renderLedFrame(now) {
 	}
 
 	if (intensity <= 0.01 || (led.r === 0 && led.g === 0 && led.b === 0)) {
-		el.ledCore.style.background = "#141820";
-		el.ledCore.style.boxShadow = "inset 0 1px 1px rgba(255,255,255,0.15)";
+		el.ledCore.style.background = "rgba(20, 24, 32, 0.55)";
+		el.ledCore.style.boxShadow = "inset 0 0 1px rgba(255,255,255,0.08)";
 		el.ledGlow.style.opacity = "0";
 		el.ledInspectorOrb.style.background = "#141923";
 		el.ledInspectorOrb.style.boxShadow = "none";
@@ -387,16 +414,16 @@ function renderLedFrame(now) {
 		const r = Math.min(255, Math.round(led.r * intensity));
 		const g = Math.min(255, Math.round(led.g * intensity));
 		const b = Math.min(255, Math.round(led.b * intensity));
-		const coreR = Math.min(255, Math.round(r + (255 - r) * 0.28 * intensity));
-		const coreG = Math.min(255, Math.round(g + (255 - g) * 0.28 * intensity));
-		const coreB = Math.min(255, Math.round(b + (255 - b) * 0.28 * intensity));
+		const coreR = Math.min(255, Math.round(r + (255 - r) * 0.42 * intensity));
+		const coreG = Math.min(255, Math.round(g + (255 - g) * 0.42 * intensity));
+		const coreB = Math.min(255, Math.round(b + (255 - b) * 0.42 * intensity));
 		const rgb = `rgb(${r}, ${g}, ${b})`;
 		const coreRgb = `rgb(${coreR}, ${coreG}, ${coreB})`;
 
-		el.ledCore.style.background = coreRgb;
-		el.ledCore.style.boxShadow = `0 0 ${Math.round(8 * intensity)}px ${rgb}`;
-		el.ledGlow.style.background = `radial-gradient(circle, ${rgb} 0%, transparent 72%)`;
-		el.ledGlow.style.opacity = String(Math.min(1, 0.9 * intensity));
+		el.ledCore.style.background = `linear-gradient(180deg, ${rgb} 0%, ${coreRgb} 50%, ${rgb} 100%)`;
+		el.ledCore.style.boxShadow = `0 0 ${Math.round(6 * intensity)}px ${coreRgb}, 0 0 ${Math.round(14 * intensity)}px ${rgb}`;
+		el.ledGlow.style.background = `radial-gradient(ellipse at center, ${rgb} 0%, transparent 72%)`;
+		el.ledGlow.style.opacity = String(Math.min(1, 0.92 * intensity));
 
 		el.ledInspectorOrb.style.background = coreRgb;
 		el.ledInspectorOrb.style.boxShadow = `0 0 ${Math.round(22 * intensity)}px ${rgb}`;
@@ -491,13 +518,26 @@ function syncUiFromState() {
 		el.teleScreen.textContent = "Building";
 	} else if (lc === "powered_off" || lc === "stopped") {
 		el.screenOverlay.classList.remove("hidden");
-		el.overlayTitle.textContent = runtimeMode === "wasm" && !wasmBackend?.activeBundle ? "Select a Sonix Build" : "TempoTec V1 Off";
-		el.overlaySub.textContent =
-			runtimeMode === "wasm" && !wasmBackend?.activeBundle
-				? "Choose a published build or drop a .sonix-web.zip file on the right"
-				: "Hold side PWR button (1s) or click below to boot";
-		el.overlayBootBtn.textContent = "Power On V1";
-		el.overlayBootBtn.classList.toggle("hidden", runtimeMode === "wasm" && !wasmBackend?.activeBundle);
+		const missingCoi = runtimeMode === "wasm" && (!window.crossOriginIsolated || typeof SharedArrayBuffer === "undefined");
+		const noBundle = runtimeMode === "wasm" && !wasmBackend?.activeBundle;
+		if (missingCoi) {
+			el.overlayTitle.textContent = "Reload to Enable WASM";
+			el.overlaySub.textContent = window.isSecureContext
+				? "Tap Reload once so your mobile browser activates Cross-Origin Isolation for SharedArrayBuffer."
+				: "In-browser WASM requires HTTPS. Over local Wi-Fi, connect to server.mjs instead.";
+			el.overlayBootBtn.textContent = "Reload Page";
+			el.overlayBootBtn.classList.remove("hidden");
+		} else if (noBundle) {
+			el.overlayTitle.textContent = "Select a Sonix Build";
+			el.overlaySub.textContent = "Choose a published build or load any .sonix-web.zip bundle in Builds.";
+			el.overlayBootBtn.textContent = "Open Builds";
+			el.overlayBootBtn.classList.toggle("hidden", !isMobileViewport());
+		} else {
+			el.overlayTitle.textContent = "TempoTec V1 Off";
+			el.overlaySub.textContent = "Hold side PWR button (1s) or tap below to boot";
+			el.overlayBootBtn.textContent = "Power On V1";
+			el.overlayBootBtn.classList.remove("hidden");
+		}
 		el.teleScreen.textContent = "Powered Off";
 	} else if (lc === "crashed") {
 		el.screenOverlay.classList.remove("hidden");
@@ -739,11 +779,15 @@ function showRipple(rx, ry, active) {
 	el.touchRipple.classList.toggle("active", active);
 }
 
+el.canvas.addEventListener("contextmenu", (ev) => ev.preventDefault());
+el.screenStage.addEventListener("contextmenu", (ev) => ev.preventDefault());
+
 el.canvas.addEventListener("pointerdown", (ev) => {
 	if (ev.button !== 0 && ev.pointerType === "mouse") return;
 	ev.preventDefault();
+	resumeAudioIfEnabled();
 	activePointerId = ev.pointerId;
-	el.canvas.setPointerCapture(ev.pointerId);
+	try { el.canvas.setPointerCapture(ev.pointerId); } catch {}
 	const pt = canvasCoordsFromEvent(ev);
 	showRipple(pt.rx, pt.ry, true);
 	sendWsJson({ type: "pointer", x: pt.x, y: pt.y, down: true });
@@ -758,15 +802,17 @@ el.canvas.addEventListener("pointermove", (ev) => {
 });
 
 function releasePointer(ev) {
-	if (activePointerId !== ev.pointerId) return;
+	if (ev && activePointerId !== ev.pointerId) return;
+	if (activePointerId === null) return;
 	activePointerId = null;
-	const pt = canvasCoordsFromEvent(ev);
+	const pt = ev ? canvasCoordsFromEvent(ev) : { x: 0, y: 0, rx: 0, ry: 0 };
 	showRipple(pt.rx, pt.ry, false);
 	sendWsJson({ type: "pointer", x: pt.x, y: pt.y, down: false });
 }
 
 el.canvas.addEventListener("pointerup", releasePointer);
 el.canvas.addEventListener("pointercancel", releasePointer);
+el.canvas.addEventListener("lostpointercapture", releasePointer);
 
 // Mouse wheel scrolling -> smooth synthesized vertical swipe on the touch panel
 let wheelBusy = false;
@@ -800,9 +846,17 @@ el.canvas.addEventListener(
 );
 
 /* --------------------------------------------------------------------------
- * Physical Side Buttons (mouse/touch hold + keyboard shortcuts)
+ * Physical Side Buttons (mouse/multi-touch hold + haptics + keyboard)
  * -------------------------------------------------------------------------- */
 const pressedButtons = new Set();
+
+function triggerHaptic(ms = 10) {
+	try {
+		if (typeof navigator !== "undefined" && typeof navigator.vibrate === "function") {
+			navigator.vibrate(ms);
+		}
+	} catch {}
+}
 
 function setHwButton(btnName, down) {
 	const domBtn = document.querySelector(`[data-hw-btn="${btnName}"]`);
@@ -819,19 +873,42 @@ function setHwButton(btnName, down) {
 	}
 }
 
+function releaseAllInputs() {
+	releasePointer(null);
+	for (const btn of Array.from(pressedButtons)) {
+		setHwButton(btn, false);
+	}
+}
+
 document.querySelectorAll("[data-hw-btn]").forEach((btn) => {
 	const name = btn.dataset.hwBtn;
+	let heldPointerId = null;
+
+	btn.addEventListener("contextmenu", (ev) => ev.preventDefault());
+
 	btn.addEventListener("pointerdown", (ev) => {
+		if (ev.button !== 0 && ev.pointerType === "mouse") return;
 		ev.preventDefault();
-		btn.setPointerCapture(ev.pointerId);
+		resumeAudioIfEnabled();
+		heldPointerId = ev.pointerId;
+		try { btn.setPointerCapture(ev.pointerId); } catch {}
+		if (ev.pointerType === "touch") triggerHaptic(10);
 		setHwButton(name, true);
 	});
 	const up = (ev) => {
+		if (heldPointerId !== null && ev.pointerId !== heldPointerId) return;
 		ev.preventDefault();
+		heldPointerId = null;
 		setHwButton(name, false);
 	};
 	btn.addEventListener("pointerup", up);
 	btn.addEventListener("pointercancel", up);
+	btn.addEventListener("lostpointercapture", () => {
+		if (heldPointerId !== null) {
+			heldPointerId = null;
+			setHwButton(name, false);
+		}
+	});
 });
 
 // Keyboard shortcuts
@@ -877,9 +954,15 @@ window.addEventListener("keyup", (ev) => {
 	}
 });
 
-window.addEventListener("blur", () => {
-	for (const btn of Array.from(pressedButtons)) {
-		setHwButton(btn, false);
+window.addEventListener("blur", releaseAllInputs);
+window.addEventListener("pagehide", () => {
+	releaseAllInputs();
+	if (runtimeMode === "wasm") wasmBackend?._persistMemfsState?.();
+});
+document.addEventListener("visibilitychange", () => {
+	if (document.hidden) {
+		releaseAllInputs();
+		if (runtimeMode === "wasm") wasmBackend?._persistMemfsState?.();
 	}
 });
 
@@ -923,19 +1006,136 @@ el.deviceShotBtn.addEventListener("click", async () => {
 });
 
 /* --------------------------------------------------------------------------
- * Scale switcher & Audio toggle & Rebuild
+ * Responsive Scale Switcher (Fit / 1x / 1.25x / 1.5x / 2x), Mobile Views,
+ * Audio Toggle, Flip View & Hardware Port Shortcuts
  * -------------------------------------------------------------------------- */
+let activeScaleMode = window.innerWidth <= 980 ? "fit" : "1.25";
+
+function isMobileViewport() {
+	return window.innerWidth <= 768;
+}
+
+function computeFitScale() {
+	const wrap = el.stageCanvasWrap;
+	const mobile = isMobileViewport();
+	// Available space inside the stage wrapper (fallback to viewport if hidden in another mobile tab)
+	const rect = wrap ? wrap.getBoundingClientRect() : null;
+	const hasMeasured = rect && rect.width > 120 && rect.height > 120;
+	const availW = hasMeasured ? rect.width - (mobile ? 8 : 28) : window.innerWidth - (mobile ? 16 : 440);
+	const availH = hasMeasured ? rect.height - (mobile ? 28 : 44) : window.innerHeight - (mobile ? 210 : 160);
+
+	// Account for left + right flanks (compact icon badges on mobile vs full key badges on desktop)
+	const flankW = mobile ? 96 : 196;
+	const portH = 44; // top gold jacks + bottom USB-C + vertical breathing room
+	// Chassis base dimensions at scale=1: width = 266*s + 10, height = 515*s + 10
+	const scaleByW = (availW - flankW - 10) / 266;
+	const scaleByH = (availH - portH - 10) / 515;
+
+	let target = Math.min(scaleByW, scaleByH);
+	if (!Number.isFinite(target) || target <= 0) target = 1;
+	// Clamp cleanly so tiny 320px phones stay usable and large desktops stay balanced
+	target = Math.max(0.58, Math.min(mobile ? 1.35 : 1.75, target));
+	return Math.round(target * 1000) / 1000;
+}
+
+function applyScreenScale(mode) {
+	activeScaleMode = String(mode);
+	const numericScale = activeScaleMode === "fit" ? computeFitScale() : Number(activeScaleMode) || 1.25;
+	document.documentElement.style.setProperty("--screen-scale", String(numericScale));
+	document.documentElement.dataset.scale = activeScaleMode;
+	const isIntegerScale = Math.abs(numericScale - Math.round(numericScale)) < 0.01;
+	document.documentElement.dataset.scaleSmooth = isIntegerScale ? "0" : "1";
+	document.querySelectorAll("[data-scale]").forEach((b) => {
+		b.classList.toggle("active", b.dataset.scale === activeScaleMode);
+	});
+}
+
+function setMobileView(view) {
+	document.body.dataset.mobileView = view;
+	document.querySelectorAll("[data-mobile-nav]").forEach((b) => {
+		b.classList.toggle("active", b.dataset.mobileNav === view);
+	});
+	if (view === "builds" || view === "hardware" || view === "sd") {
+		activateTab(view, false);
+	}
+	if (view === "device" && activeScaleMode === "fit") {
+		requestAnimationFrame(() => applyScreenScale("fit"));
+	}
+}
+
+document.querySelectorAll("[data-mobile-nav]").forEach((btn) => {
+	btn.addEventListener("click", () => {
+		setMobileView(btn.dataset.mobileNav);
+	});
+});
+
+applyScreenScale(activeScaleMode);
+
+if (typeof ResizeObserver !== "undefined" && el.stageCanvasWrap) {
+	const ro = new ResizeObserver(() => {
+		if (activeScaleMode === "fit") {
+			applyScreenScale("fit");
+		}
+	});
+	ro.observe(el.stageCanvasWrap);
+}
+
+window.addEventListener("resize", () => {
+	if (activeScaleMode === "fit") {
+		applyScreenScale("fit");
+	}
+});
+
+window.addEventListener("orientationchange", () => {
+	setTimeout(() => {
+		if (activeScaleMode === "fit") {
+			applyScreenScale("fit");
+		}
+	}, 120);
+});
+
 document.querySelectorAll("[data-scale]").forEach((btn) => {
 	btn.addEventListener("click", () => {
-		const scale = btn.dataset.scale;
-		document.documentElement.style.setProperty("--screen-scale", scale);
-		document.querySelectorAll("[data-scale]").forEach((b) => b.classList.toggle("active", b === btn));
+		applyScreenScale(btn.dataset.scale);
 	});
 });
 
 el.audioToggleBtn.addEventListener("click", () => {
 	setAudioEnabled(!audioEnabled);
 	showToast(audioEnabled ? "Live DAC audio playback enabled" : "Browser audio muted");
+});
+
+el.topJacks?.addEventListener("click", () => {
+	setAudioEnabled(!audioEnabled);
+	showToast(audioEnabled ? "Headphones connected · Live DAC audio enabled" : "Headphones unplugged · Browser audio muted");
+});
+
+function setDeviceFlipped(flipped) {
+	el.v1Assembly?.classList.toggle("flipped", flipped);
+	if (el.flipDeviceBtn) {
+		el.flipDeviceBtn.textContent = flipped ? "Front View" : "Back View";
+		el.flipDeviceBtn.classList.toggle("active", flipped);
+	}
+}
+
+el.flipDeviceBtn?.addEventListener("click", () => {
+	if (isMobileViewport() && document.body.dataset.mobileView !== "device") {
+		setMobileView("device");
+	}
+	const next = !el.v1Assembly?.classList.contains("flipped");
+	setDeviceFlipped(next);
+});
+
+el.v1ChassisBack?.addEventListener("click", () => {
+	setDeviceFlipped(false);
+});
+
+el.sdSlotBtn?.addEventListener("click", () => {
+	activateTab("sd");
+});
+
+el.usbcPort?.addEventListener("click", () => {
+	activateTab("hardware");
 });
 
 el.rebuildBtn.addEventListener("click", async () => {
@@ -1054,6 +1254,15 @@ el.powerToggleBtn.addEventListener("click", () => {
 });
 
 el.overlayBootBtn.addEventListener("click", () => {
+	if (runtimeMode === "wasm" && (!window.crossOriginIsolated || typeof SharedArrayBuffer === "undefined")) {
+		try { sessionStorage.removeItem("sonix_coi_reloaded_v2"); } catch {}
+		window.location.reload();
+		return;
+	}
+	if (runtimeMode === "wasm" && !wasmBackend?.activeBundle) {
+		setMobileView("builds");
+		return;
+	}
 	if (deviceState.lifecycle === "running" && !deviceState.screenOn) {
 		setHwButton("power", true);
 		setTimeout(() => setHwButton("power", false), 90);
@@ -1118,19 +1327,29 @@ for (const [slider, label] of [
 /* --------------------------------------------------------------------------
  * Inspector Tabs
  * -------------------------------------------------------------------------- */
+function activateTab(target, syncMobile = true) {
+	document.querySelectorAll(".tab-btn").forEach((b) => {
+		const isTarget = b.dataset.tab === target;
+		b.classList.toggle("active", isTarget);
+		b.setAttribute("aria-selected", String(isTarget));
+	});
+	document.querySelectorAll(".tab-content").forEach((pane) => {
+		pane.classList.toggle("active", pane.id === `tab-${target}`);
+	});
+	if (syncMobile && isMobileViewport() && (target === "builds" || target === "hardware" || target === "sd")) {
+		document.body.dataset.mobileView = target;
+		document.querySelectorAll("[data-mobile-nav]").forEach((b) => {
+			b.classList.toggle("active", b.dataset.mobileNav === target);
+		});
+	}
+	if (target === "sd") {
+		refreshSdList();
+	}
+}
+
 document.querySelectorAll(".tab-btn").forEach((btn) => {
 	btn.addEventListener("click", () => {
-		const target = btn.dataset.tab;
-		document.querySelectorAll(".tab-btn").forEach((b) => {
-			b.classList.toggle("active", b === btn);
-			b.setAttribute("aria-selected", String(b === btn));
-		});
-		document.querySelectorAll(".tab-content").forEach((pane) => {
-			pane.classList.toggle("active", pane.id === `tab-${target}`);
-		});
-		if (target === "sd") {
-			refreshSdList();
-		}
+		activateTab(btn.dataset.tab);
 	});
 });
 
@@ -1653,6 +1872,7 @@ async function bootCatalogEntry(entry) {
 		}
 		setBuildProgress(null, null);
 		showToast(`Booted ${entry.name}`);
+		if (isMobileViewport()) setMobileView("device");
 		refreshSdList();
 	} catch (err) {
 		setBuildProgress(null, null);
@@ -1679,6 +1899,7 @@ async function loadLocalZipFile(file) {
 		setBuildProgress(null, null);
 		await refreshBuildCatalog(meta?.id || null);
 		showToast(`Booted ${file.name}`);
+		if (isMobileViewport()) setMobileView("device");
 		refreshSdList();
 	} catch (err) {
 		setBuildProgress(null, null);

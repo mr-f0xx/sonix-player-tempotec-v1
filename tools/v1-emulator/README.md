@@ -29,7 +29,12 @@ Open the **Firmware Builds** tab in the emulator:
 - **Drag & Drop / Browse `.sonix-web.zip`**: drop any `.sonix-web.zip` artifact downloaded from GitHub Actions, Releases, or built locally onto the dropzone (or anywhere on the page).
 - **Load From URL**: paste a direct HTTPS URL to any `.sonix-web.zip` bundle, or share a direct link using `?build=https://.../sonix-v1-....sonix-web.zip`.
 
-> On GitHub Pages, `coi-serviceworker.js` automatically attaches `Cross-Origin-Opener-Policy: same-origin` and `Cross-Origin-Embedder-Policy: credentialless` headers on first visit so `SharedArrayBuffer` / WebAssembly pthreads work on static HTTPS hosting.
+> On GitHub Pages, `coi-serviceworker.js` automatically attaches `Cross-Origin-Opener-Policy: same-origin`, `Cross-Origin-Embedder-Policy: require-corp`, and `Cross-Origin-Resource-Policy: cross-origin` headers on first visit so `SharedArrayBuffer` / WebAssembly pthreads work on static HTTPS hosting across desktop and mobile browsers (including iOS Safari 16.4+, Android Chrome, and Firefox Mobile).
+
+### Mobile Devices (iPhone, iPad, Android)
+
+- **GitHub Pages (In-Browser WASM)**: Open the HTTPS GitHub Pages URL directly in iOS Safari (16.4+) or Android Chrome/Firefox. On mobile viewports (`<= 768px`), the TempoTec Variations V1 auto-fits to your screen with compact thumb-friendly side buttons, multi-touch button combos, long-press support, Web Audio unlock, and a bottom navigation bar (`V1`, `Builds`, `Hardware`, `microSD`, `Logs`). You can also use **Add to Home Screen** for a full-screen simulator view.
+- **Local Wi-Fi (Native Bridge)**: Run `make -C sonix-player run-web-emu` on your desktop and open the printed `Mobile / LAN URL` (`http://<lan-ip>:8080`) on your phone over the same Wi-Fi network.
 
 ### Building a `.sonix-web.zip` Bundle Locally (Emscripten)
 

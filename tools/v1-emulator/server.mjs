@@ -1257,7 +1257,7 @@ function serveWasmBuilds(req, res, parsedUrl) {
 	const sub = parsedUrl.pathname.slice("/builds/".length);
 	const headersBase = {
 		"Cross-Origin-Opener-Policy": "same-origin",
-		"Cross-Origin-Embedder-Policy": "credentialless",
+		"Cross-Origin-Embedder-Policy": "require-corp",
 		"Cross-Origin-Resource-Policy": "cross-origin",
 		"Cache-Control": "no-cache",
 	};
@@ -1352,7 +1352,7 @@ function serveStaticFile(req, res, parsedUrl) {
 		"Content-Type": MIME_TYPES[ext] || "application/octet-stream",
 		"Cache-Control": "no-cache",
 		"Cross-Origin-Opener-Policy": "same-origin",
-		"Cross-Origin-Embedder-Policy": "credentialless",
+		"Cross-Origin-Embedder-Policy": "require-corp",
 		"Cross-Origin-Resource-Policy": "cross-origin",
 	});
 	fs.createReadStream(full).pipe(res);
@@ -1461,6 +1461,16 @@ setupUnixBridge();
 
 server.listen(PORT, HOST, () => {
 	console.log(`TempoTec Variations V1 Web Emulator listening on http://${HOST}:${PORT}`);
+	if (HOST === "0.0.0.0" || HOST === "::") {
+		const ifaces = os.networkInterfaces();
+		for (const entries of Object.values(ifaces)) {
+			for (const info of entries || []) {
+				if (info.family === "IPv4" && !info.internal) {
+					console.log(`Mobile / LAN URL: http://${info.address}:${PORT}`);
+				}
+			}
+		}
+	}
 	console.log(`Virtual microSD: ${SD_DIR}`);
 	console.log(`Virtual config:  ${CONFIG_DIR}`);
 	startPlayer("normal");
