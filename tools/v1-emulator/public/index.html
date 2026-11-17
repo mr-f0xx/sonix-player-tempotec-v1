@@ -1,0 +1,410 @@
+<!doctype html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>TempoTec Variations V1 — Interactive Emulator</title>
+	<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+	<div class="app-shell">
+		<!-- Top Workbench Header -->
+		<header class="topbar">
+			<div class="brand">
+				<div class="brand-mark" aria-hidden="true">V1</div>
+				<div class="brand-text">
+					<h1>TempoTec Variations V1</h1>
+					<span class="brand-sub">Native sonix-player &middot; LVGL 9.6 &middot; 240&times;320</span>
+				</div>
+			</div>
+
+			<div class="topbar-status">
+				<span id="conn-pill" class="pill pill-warn">Connecting</span>
+				<span id="lifecycle-pill" class="pill pill-muted">Starting</span>
+				<span id="fps-pill" class="pill pill-mono">0 FPS</span>
+				<span id="audio-pill" class="pill pill-mono">DAC Idle</span>
+			</div>
+
+			<div class="topbar-actions">
+				<div class="segmented" role="group" aria-label="Screen scale">
+					<button class="seg-btn" data-scale="1">1&times;</button>
+					<button class="seg-btn" data-scale="1.5">1.5&times;</button>
+					<button class="seg-btn active" data-scale="2">2&times;</button>
+					<button class="seg-btn" data-scale="2.5">2.5&times;</button>
+				</div>
+
+				<button id="btn-audio-toggle" class="btn btn-ghost" title="Enable live browser audio playback from virtual ALSA DAC">
+					<span class="icon-dot" id="audio-dot"></span>
+					<span id="audio-btn-label">Audio: Off</span>
+				</button>
+
+				<button id="btn-screenshot" class="btn btn-primary" title="Capture crisp 240x320 PNG screenshot (shortcut: S)">
+					Screenshot PNG
+				</button>
+
+				<button id="btn-device-shot" class="btn btn-ghost" title="Trigger firmware on-device screenshot (saves to /Screenshots/)">
+					Device Shot
+				</button>
+
+				<button id="btn-rebuild" class="btn btn-ghost" title="Rebuild sonix_player_web via make web-emu and hot-restart">
+					Rebuild
+				</button>
+			</div>
+		</header>
+
+		<!-- Main Split Workspace -->
+		<main class="workspace">
+			<!-- Left / Center Stage: TempoTec V1 Physical Hardware Mockup -->
+			<section class="stage-pane" aria-label="TempoTec V1 Device">
+				<div class="stage-canvas-wrap">
+					<div class="v1-assembly" id="v1-assembly">
+						<!-- Left subtle microSD slot detail -->
+						<div class="v1-sd-slot" title="Virtual microSD card slot">
+							<span class="v1-sd-notch"></span>
+						</div>
+
+						<!-- Main CNC Aluminum Chassis -->
+						<div class="v1-chassis" id="v1-chassis">
+							<!-- Top bevel + SGM31324 RGB LED -->
+							<div class="v1-top-bezel">
+								<div class="v1-led-housing" id="v1-led-housing" title="SGM31324 RGB Status LED">
+									<div class="v1-led-glow" id="v1-led-glow"></div>
+									<div class="v1-led-core" id="v1-led-core"></div>
+								</div>
+								<span class="v1-top-label">Hi-Res AUDIO</span>
+								<span class="v1-rot-badge hidden" id="v1-rot-badge">180&deg;</span>
+							</div>
+
+							<!-- Recessed Glass 240x320 Touchscreen -->
+							<div class="v1-screen-bezel">
+								<div class="v1-screen-stage" id="v1-screen-stage">
+									<canvas id="v1-canvas" width="240" height="320"></canvas>
+									<div class="v1-backlight-dim" id="v1-backlight-dim"></div>
+									<div class="v1-glass-sheen" aria-hidden="true"></div>
+									<div class="v1-shutter-flash" id="v1-shutter-flash" aria-hidden="true"></div>
+									<div class="v1-touch-ripple" id="v1-touch-ripple" aria-hidden="true"></div>
+
+									<!-- Overlay when screen off, powered off, building, or crashed -->
+									<div class="v1-screen-overlay hidden" id="v1-screen-overlay">
+										<div class="overlay-badge" id="overlay-title">Screen Off</div>
+										<div class="overlay-sub" id="overlay-sub">Press Power to wake</div>
+										<button class="btn btn-primary btn-sm hidden" id="overlay-boot-btn">Power On V1</button>
+									</div>
+								</div>
+							</div>
+
+							<!-- Lower Chin Engraving -->
+							<div class="v1-chin">
+								<div class="v1-logo">TEMPO-TEC</div>
+								<div class="v1-model">VARIATIONS &nbsp;V1</div>
+							</div>
+
+							<!-- Bottom Hardware Ports -->
+							<div class="v1-bottom-ports" aria-hidden="true">
+								<div class="v1-jack" title="3.5mm Single-Ended Output">
+									<span class="jack-ring"></span>
+									<span class="port-caption">3.5</span>
+								</div>
+								<div class="v1-usbc" id="v1-usbc" title="USB-C Power / Data">
+									<span class="usbc-slot"></span>
+									<span class="usbc-cable" id="v1-usbc-cable"></span>
+									<span class="port-caption">USB-C</span>
+								</div>
+								<div class="v1-jack jack-bal" title="4.4mm Balanced Output">
+									<span class="jack-ring"></span>
+									<span class="port-caption">4.4</span>
+								</div>
+							</div>
+						</div>
+
+						<!-- Right-Flank Physical Buttons (TempoTec V1 single-flank layout) -->
+						<div class="v1-flank" role="group" aria-label="Physical side buttons">
+							<button class="flank-btn flank-power" data-hw-btn="power" title="Power (short: sleep/wake · long 2s: power menu · key: P)">
+								<span class="flank-cap"></span>
+								<span class="flank-tag">PWR<kbd>P</kbd></span>
+							</button>
+
+							<div class="flank-group flank-vol">
+								<button class="flank-btn flank-vol-up" data-hw-btn="vol_up" title="Volume Up (key: ArrowUp / +)">
+									<span class="flank-cap"></span>
+									<span class="flank-tag">VOL+<kbd>&uarr;</kbd></span>
+								</button>
+								<button class="flank-btn flank-vol-down" data-hw-btn="vol_down" title="Volume Down (key: ArrowDown / -)">
+									<span class="flank-cap"></span>
+									<span class="flank-tag">VOL&minus;<kbd>&darr;</kbd></span>
+								</button>
+							</div>
+
+							<div class="flank-group flank-transport">
+								<button class="flank-btn flank-prev" data-hw-btn="prev" title="Previous / Rewind (key: ArrowLeft)">
+									<span class="flank-cap"></span>
+									<span class="flank-tag">PREV<kbd>&larr;</kbd></span>
+								</button>
+								<button class="flank-btn flank-play" data-hw-btn="play" title="Play / Pause (key: Space)">
+									<span class="flank-cap"></span>
+									<span class="flank-tag">PLAY<kbd>&#9251;</kbd></span>
+								</button>
+								<button class="flank-btn flank-next" data-hw-btn="next" title="Next / Fast-Forward (key: ArrowRight)">
+									<span class="flank-cap"></span>
+									<span class="flank-tag">NEXT<kbd>&rarr;</kbd></span>
+								</button>
+							</div>
+						</div>
+					</div>
+				</div>
+
+				<!-- Compact Live Telemetry Strip below the V1 -->
+				<div class="telemetry-strip">
+					<div class="tele-item">
+						<span class="tele-label">LED</span>
+						<span class="tele-val">
+							<span class="mini-led" id="tele-led-dot"></span>
+							<span id="tele-led-text">OFF</span>
+						</span>
+					</div>
+					<div class="tele-item">
+						<span class="tele-label">Backlight</span>
+						<span class="tele-val" id="tele-backlight">78%</span>
+					</div>
+					<div class="tele-item">
+						<span class="tele-label">Volume</span>
+						<span class="tele-val" id="tele-volume">50%</span>
+					</div>
+					<div class="tele-item">
+						<span class="tele-label">Battery</span>
+						<span class="tele-val" id="tele-battery">82% &middot; Discharging</span>
+					</div>
+					<div class="tele-item">
+						<span class="tele-label">Screen</span>
+						<span class="tele-val" id="tele-screen">Active</span>
+					</div>
+				</div>
+			</section>
+
+			<!-- Right Inspector Column: Controls / microSD + Live Logs -->
+			<aside class="inspector-pane">
+				<!-- Upper Panel: Tabbed Controls & Virtual microSD -->
+				<section class="panel controls-panel">
+					<div class="panel-tabs" role="tablist">
+						<button class="tab-btn active" data-tab="hardware" role="tab" aria-selected="true">Hardware &amp; Power</button>
+						<button class="tab-btn" data-tab="sd" role="tab" aria-selected="false">microSD &amp; Shots</button>
+						<button class="tab-btn" data-tab="shortcuts" role="tab" aria-selected="false">Keys &amp; Tips</button>
+					</div>
+
+					<!-- Tab 1: Hardware & Power -->
+					<div class="tab-content active" id="tab-hardware">
+						<!-- Battery & Charger Card -->
+						<div class="card">
+							<div class="card-head">
+								<h2>Battery &amp; Charger</h2>
+								<span class="card-badge" id="bat-readout">82%</span>
+							</div>
+
+							<div class="slider-row">
+								<input type="range" id="bat-slider" min="0" max="100" value="82">
+							</div>
+
+							<div class="chip-row" aria-label="Battery presets">
+								<button class="chip" data-bat-pct="3">3% Crit</button>
+								<button class="chip" data-bat-pct="15">15% Low</button>
+								<button class="chip" data-bat-pct="50">50%</button>
+								<button class="chip" data-bat-pct="85">85%</button>
+								<button class="chip" data-bat-pct="100">100%</button>
+							</div>
+
+							<div class="charger-grid" role="group" aria-label="Charger status">
+								<button class="mode-btn active" data-bat-status="Discharging">Discharging</button>
+								<button class="mode-btn" data-bat-status="Charging">Charging</button>
+								<button class="mode-btn" data-bat-status="Full">Full</button>
+								<button class="mode-btn" data-bat-status="Not charging">Plugged (Hold)</button>
+							</div>
+						</div>
+
+						<!-- SGM31324 RGB LED Telemetry Card -->
+						<div class="card">
+							<div class="card-head">
+								<h2>SGM31324 RGB LED</h2>
+								<span class="card-badge mono" id="led-mode-badge">OFF</span>
+							</div>
+							<div class="led-inspector">
+								<div class="led-preview-orb" id="led-inspector-orb"></div>
+								<div class="led-meta">
+									<div class="led-meta-row">
+										<span>Color</span>
+										<code id="led-hex">#000000</code>
+									</div>
+									<div class="led-meta-row">
+										<span>Current Steps (0&ndash;79)</span>
+										<code id="led-steps">R:0 G:0 B:0</code>
+									</div>
+									<div class="led-meta-row">
+										<span>Breath Timing</span>
+										<code id="led-timing">Steady</code>
+									</div>
+								</div>
+							</div>
+						</div>
+
+						<!-- Hardware Actions & Button Combos -->
+						<div class="card">
+							<div class="card-head">
+								<h2>Device Actions &amp; Combos</h2>
+							</div>
+							<div class="action-grid">
+								<button id="btn-hold-power" class="btn btn-soft" title="Simulate holding Power for 2.2s to open the real Power Menu">
+									Hold Power (2s)
+								</button>
+								<button id="btn-combo-shot" class="btn btn-soft" title="Simulate pressing Vol+ and Power together">
+									Vol+ &amp; Power Shot
+								</button>
+								<button id="btn-charge-screen" class="btn btn-soft" title="Boot into the offline charging screen (SONIX_CHARGE_SCREEN=1)">
+									Charge Screen
+								</button>
+								<button id="btn-reboot" class="btn btn-soft" title="Restart sonix_player_web cleanly">
+									Reboot V1
+								</button>
+								<button id="btn-power-toggle" class="btn btn-soft" title="Power off or boot the virtual V1">
+									Power Off
+								</button>
+								<button id="btn-reset-config" class="btn btn-danger-soft" title="Clear device_config.ini to test First-Boot Welcome & Language Setup">
+									First-Boot Reset
+								</button>
+							</div>
+						</div>
+
+						<!-- AirPods Telemetry Simulator -->
+						<div class="card">
+							<div class="card-head">
+								<h2>AirPods Telemetry</h2>
+								<label class="switch">
+									<input type="checkbox" id="airpods-enable">
+									<span class="switch-slider"></span>
+								</label>
+							</div>
+							<div class="airpods-controls" id="airpods-controls">
+								<div class="field-row">
+									<label for="airpods-model">Model</label>
+									<select id="airpods-model">
+										<option value="A3047">AirPods Pro 2 (USB-C)</option>
+										<option value="A2084">AirPods Pro</option>
+										<option value="A3055">AirPods 4 ANC</option>
+										<option value="A2564">AirPods 3</option>
+										<option value="A2096">AirPods Max</option>
+									</select>
+								</div>
+								<div class="mini-sliders">
+									<label>L <span id="ap-l-val">85%</span><input type="range" id="ap-l" min="0" max="100" value="85"></label>
+									<label>R <span id="ap-r-val">80%</span><input type="range" id="ap-r" min="0" max="100" value="80"></label>
+									<label>Case <span id="ap-c-val">65%</span><input type="range" id="ap-c" min="0" max="100" value="65"></label>
+								</div>
+							</div>
+						</div>
+					</div>
+
+					<!-- Tab 2: Virtual microSD & Screenshots -->
+					<div class="tab-content" id="tab-sd">
+						<div class="sd-toolbar">
+							<div class="sd-crumbs" id="sd-crumbs">/</div>
+							<div class="sd-actions">
+								<label class="btn btn-primary btn-sm upload-label">
+									Upload Files
+									<input type="file" id="sd-upload-input" multiple hidden>
+								</label>
+								<button id="btn-sd-refresh" class="btn btn-ghost btn-sm">Refresh</button>
+							</div>
+						</div>
+
+						<div class="sd-quick-dirs">
+							<button class="chip" data-sd-dir="">/ (root)</button>
+							<button class="chip" data-sd-dir="Music">Music</button>
+							<button class="chip" data-sd-dir="Screenshots">Screenshots</button>
+							<button class="chip" data-sd-dir="Notes">Notes</button>
+							<button class="chip" data-sd-dir="Books">Books</button>
+							<button class="chip" data-sd-dir="Themes">Themes</button>
+						</div>
+
+						<div class="sd-dropzone" id="sd-dropzone">
+							Drop audio (.mp3, .flac, .wav, .ogg, .m4a, .dsf), .epub, .gb/.gbc, or theme files here to copy onto the virtual microSD
+						</div>
+
+						<div class="sd-list" id="sd-list"></div>
+					</div>
+
+					<!-- Tab 3: Keyboard Shortcuts & Tips -->
+					<div class="tab-content" id="tab-shortcuts">
+						<div class="card">
+							<div class="card-head">
+								<h2>Keyboard &amp; Input Map</h2>
+							</div>
+							<div class="shortcut-list">
+								<div class="shortcut-row"><span>Power button (tap / hold)</span><kbd>P</kbd></div>
+								<div class="shortcut-row"><span>Volume Up / Down</span><span><kbd>&uarr;</kbd> / <kbd>&darr;</kbd> or <kbd>+</kbd> / <kbd>-</kbd></span></div>
+								<div class="shortcut-row"><span>Prev / Play-Pause / Next</span><span><kbd>&larr;</kbd> <kbd>Space</kbd> <kbd>&rarr;</kbd></span></div>
+								<div class="shortcut-row"><span>Browser PNG Screenshot</span><kbd>S</kbd></div>
+								<div class="shortcut-row"><span>Scroll lists on screen</span><span>Drag or Mouse Wheel</span></div>
+							</div>
+						</div>
+						<div class="card">
+							<div class="card-head">
+								<h2>Quick Test Ideas</h2>
+							</div>
+							<ul class="tips-list">
+								<li>Open <strong>Music</strong> &rarr; <strong>TempoTec Demo</strong> and tap a track (enable <strong>Audio: On</strong> in the top bar to hear real PCM output!).</li>
+								<li>Switch between the 44.1 kHz and 96 kHz demo tracks to see the real <strong>SGM31324 RGB LED</strong> change color &amp; the Hi-Res badge update.</li>
+								<li>Click <strong>Hold Power (2s)</strong> or hold the side <strong>PWR</strong> button to summon the V1 Power Menu.</li>
+								<li>Slide Battery to <strong>15%</strong> or switch Charger to <strong>Charging</strong> and watch both the topbar icon and the breathing RGB LED respond.</li>
+								<li>Try <strong>Settings &rarr; Buttons</strong> to test single-flank remapping, or <strong>Settings &rarr; Screen &rarr; Rotate 180&deg;</strong>.</li>
+							</ul>
+						</div>
+					</div>
+				</section>
+
+				<!-- Lower Panel: Always-Live Console Log Panel -->
+				<section class="panel log-panel" aria-label="Live Device Logs">
+					<div class="log-header">
+						<div class="log-title">
+							<h2>Live Logs</h2>
+							<span class="log-count" id="log-count">0</span>
+						</div>
+						<div class="log-controls">
+							<input type="search" id="log-filter" placeholder="Filter logs..." aria-label="Filter logs">
+							<label class="log-check"><input type="checkbox" id="log-autoscroll" checked>Follow</label>
+							<button id="btn-log-copy" class="btn btn-ghost btn-xs" title="Copy visible logs">Copy</button>
+							<button id="btn-log-clear" class="btn btn-ghost btn-xs" title="Clear logs">Clear</button>
+						</div>
+					</div>
+					<div class="log-stream-filters">
+						<button class="stream-chip active" data-stream="all">All</button>
+						<button class="stream-chip" data-stream="stdout">stdout</button>
+						<button class="stream-chip" data-stream="stderr">stderr</button>
+						<button class="stream-chip" data-stream="emu">emulator</button>
+						<button class="stream-chip" data-stream="build">build</button>
+					</div>
+					<div class="log-body" id="log-body" role="log" aria-live="off"></div>
+				</section>
+			</aside>
+		</main>
+	</div>
+
+	<!-- Screenshot Preview Modal -->
+	<div class="modal hidden" id="shot-modal" role="dialog" aria-modal="true" aria-label="Screenshot Preview">
+		<div class="modal-backdrop" id="shot-modal-backdrop"></div>
+		<div class="modal-card">
+			<div class="modal-head">
+				<h3 id="shot-modal-title">Screenshot</h3>
+				<button class="btn btn-ghost btn-xs" id="shot-modal-close">Close</button>
+			</div>
+			<div class="modal-body">
+				<img id="shot-modal-img" alt="Device screenshot preview">
+			</div>
+			<div class="modal-foot">
+				<a id="shot-modal-download" class="btn btn-primary btn-sm" download>Download PNG</a>
+			</div>
+		</div>
+	</div>
+
+	<div class="toast-stack" id="toast-stack" aria-live="polite"></div>
+
+	<script type="module" src="app.js"></script>
+</body>
+</html>

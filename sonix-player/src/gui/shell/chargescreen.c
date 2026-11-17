@@ -12,7 +12,9 @@
 #include <time.h>
 #include <unistd.h>
 
-#ifdef HOST_BUILD
+#ifdef HOST_WEB_EMU
+#include "webemu.h"
+#elif defined(HOST_BUILD)
 #include <SDL2/SDL.h>
 #endif
 
@@ -154,8 +156,11 @@ static void panel_off(void) {
 
 #ifdef HOST_BUILD
 	// The simulator has no panel to blank. Taking the screen off the window is
-	// the same picture from the outside: black, and the loop still pumping SDL
-	// so the power key still arrives.
+	// the same picture from the outside: black, and the loop still pumping
+	// events so the power key still arrives.
+#ifdef HOST_WEB_EMU
+	webemu_notify_screen(false);
+#endif
 	lv_obj_set_hidden(root, true);
 	lv_refr_now(display);
 #endif
@@ -169,6 +174,9 @@ static void panel_on(void) {
 
 #ifdef HOST_BUILD
 	lv_obj_set_hidden(root, false);
+#ifdef HOST_WEB_EMU
+	webemu_notify_screen(true);
+#endif
 #else
 	// Unblank, and hold the backlight dark through the panel's own init: the
 	// glass is white until the frame after it, and the backlight at zero is
@@ -406,7 +414,7 @@ static int open_power_key(void) {
 	closedir(dir);
 	return best;
 }
-#else
+#elif !defined(HOST_WEB_EMU)
 // The simulator: the keyboard's P is the power button (see main.c's
 // HOST_BUTTONS). SDL's event watch cannot be called from the loop directly --
 // it is invoked while SDL pumps events -- so it only raises a flag, and the
@@ -447,7 +455,7 @@ void chargescreen_run(lv_display_t *disp, const battery_config_t *battery_cfg) {
 		fprintf(stderr, "chargescreen: no power key node; starting the player instead\n");
 		return;
 	}
-#else
+#elif !defined(HOST_WEB_EMU)
 	SDL_AddEventWatch(host_key_watch, NULL);
 #endif
 
@@ -549,6 +557,11 @@ void chargescreen_run(lv_display_t *disp, const battery_config_t *battery_cfg) {
 			}
 		}
 #else
+#ifdef HOST_WEB_EMU
+		lv_timer_handler();
+		wait_ms = 20;
+		webemu_take_power_edges(&was_pressed, &was_released);
+#else
 		// Pumping SDL is what delivers the key: the LVGL SDL driver reads its
 		// events from its own timer, which only runs inside lv_timer_handler().
 		lv_timer_handler();
@@ -557,6 +570,7 @@ void chargescreen_run(lv_display_t *disp, const battery_config_t *battery_cfg) {
 		was_released = host_release_seen != 0;
 		host_press_seen = 0;
 		host_release_seen = 0;
+#endif
 #endif
 		now = now_ms();
 
@@ -613,7 +627,7 @@ void chargescreen_run(lv_display_t *disp, const battery_config_t *battery_cfg) {
 
 #ifndef HOST_BUILD
 	close(key_fd);
-#else
+#elif !defined(HOST_WEB_EMU)
 	SDL_DelEventWatch(host_key_watch, NULL);
 #endif
 }

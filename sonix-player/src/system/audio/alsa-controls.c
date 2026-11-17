@@ -1,4 +1,7 @@
 #include "alsa-controls.h"
+#ifdef HOST_WEB_EMU
+#include "webemu.h"
+#endif
 
 #include "src/system/audio/audio.h"
 #include "src/system/bluetooth/bluetooth.h"
@@ -1213,6 +1216,9 @@ int get_volume_percent(void) { return current_percent; }
 // making 100 the level the jack is remembered at.
 static void apply_volume_hw(int percent) {
 	current_percent = percent;
+#ifdef HOST_WEB_EMU
+	webemu_notify_volume(percent);
+#endif
 	write_dac_attenuation();
 
 	// And, if the sound is leaving over the USB-C port, on the device out

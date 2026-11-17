@@ -91,12 +91,22 @@
 
 static volatile sig_atomic_t running = 1;
 
+#ifdef HOST_WEB_EMU
+#include "webemu.h"
+#endif
+
 #ifdef HOST_BUILD
 // Screenshot trigger on the simulator. The device uses volume-up plus power,
 // physical keys that do not exist here, so creating /tmp/sonix/shot takes their
 // place and runs the same screenshot path (copy, flash, PNG writer).
 static void host_shot_poll_cb(lv_timer_t *timer) {
 	(void)timer;
+#ifdef HOST_WEB_EMU
+	if (webemu_take_screenshot_request()) {
+		screenshot_request();
+		return;
+	}
+#endif
 	if (access("/tmp/sonix/shot", F_OK) == 0) {
 		remove("/tmp/sonix/shot");
 		screenshot_request();
@@ -958,7 +968,9 @@ static void install_signal_guards(void) {
 }
 
 #ifdef HOST_BUILD
+#ifndef HOST_WEB_EMU
 #include <SDL2/SDL.h>
+#endif
 
 #define GET_MUSIC_DIR() (snprintf((char[256]){0}, 256, "%s/Music", getenv("HOME") ? getenv("HOME") : ""))
 #else
@@ -1116,6 +1128,25 @@ static void post_gui_popup(const char *message, void *user_data) {
 }
 
 #ifdef HOST_BUILD
+#ifdef HOST_WEB_EMU
+static lv_display_t *init_host_display(void) {
+	int width = 0, height = 0;
+	panel_size(&width, &height, 0, 0);
+
+	lv_display_t *disp = webemu_init_display(width, height);
+	if (!disp) {
+		fprintf(stderr, "Error: Failed to create web emulator display\n");
+		return NULL;
+	}
+
+	lv_indev_t *mouse = webemu_init_pointer(disp);
+	if (mouse) {
+		tune_pointer(mouse);
+	}
+
+	return disp;
+}
+#else
 static lv_display_t *host_display;
 
 // The keyboard stands in for the buttons on the case.
@@ -1187,6 +1218,7 @@ static lv_display_t *init_host_display(void) {
 
 	return disp;
 }
+#endif /* HOST_WEB_EMU */
 
 // No panel to re-arm on the host: the SDL window never blanks.
 void display_wake_begin(lv_display_t *disp) { (void)disp; }
@@ -1258,13 +1290,21 @@ static void host_card_root(char *out, size_t size) {
 	}
 }
 
-// The simulator draws through SDL, which owns its own texture: there is no
-// framebuffer page to rotate into. The setting is still remembered so the
-// switch behaves the same way, it just has nothing to turn upside down.
+// The simulator draws through SDL (or the web framebuffer bridge). The web
+// emulator implements 180-degree software rotation; SDL keeps the setting only.
 static bool host_rotated;
+#ifdef HOST_WEB_EMU
+bool display_rotation_supported(void) { return true; }
+bool display_get_rotated(void) { return host_rotated; }
+void display_set_rotated(bool rotated) {
+	host_rotated = rotated;
+	webemu_set_rotated(rotated);
+}
+#else
 bool display_rotation_supported(void) { return false; }
 bool display_get_rotated(void) { return host_rotated; }
 void display_set_rotated(bool rotated) { host_rotated = rotated; }
+#endif
 
 // The touch panel on the simulator is the mouse inside the SDL window: there
 // is no evdev node to hand over, and nothing to switch off.
@@ -1272,10 +1312,13 @@ void panel_touch_enable(bool enabled) { (void)enabled; }
 const char *panel_touch_device(void) { return NULL; }
 void panel_touch_flush(void) {}
 
-// There is no framebuffer to read on the simulator, but the SDL renderer can
-// be read back. The rest of the path is identical (same copy, same flash, same
-// PNG writer); only the source of the pixels differs.
+// There is no framebuffer to read on the simulator, but the SDL renderer (or
+// web emulator shadow framebuffer) can be read back. The rest of the path is
+// identical (same copy, same flash, same PNG writer).
 uint16_t *display_capture_frame(int *out_w, int *out_h) {
+#ifdef HOST_WEB_EMU
+	return webemu_capture_frame(out_w, out_h);
+#else
 	SDL_Renderer *renderer = host_display ? (SDL_Renderer *)lv_sdl_window_get_renderer(host_display) : NULL;
 	if (!renderer) {
 		return NULL;
@@ -1311,6 +1354,7 @@ uint16_t *display_capture_frame(int *out_w, int *out_h) {
 		*out_h = h;
 	}
 	return copy;
+#endif
 }
 #else
 // ---------------------------------------------------------------------------
@@ -2081,8 +2125,12 @@ int main(int argc, char **argv) {
 	// It is one more LVGL timer on the interface thread, not a process.
 	petwatch_init();
 
-#ifdef HOST_BUILD
+#ifdef HOST_WEB_EMU
+	printf("Initializing Host Build (TempoTec V1 Web Emulator)...\n");
+#elif defined(HOST_BUILD)
 	printf("Initializing Host Build (SDL2 simulation)...\n");
+#endif
+#ifdef HOST_BUILD
 	lv_display_t *disp = init_host_display();
 	if (!disp) {
 		return 1; // on a PC, exiting is the right thing to do
@@ -2110,7 +2158,11 @@ int main(int argc, char **argv) {
 		// Both NULL: the player probes the block devices and the mount-point
 		// names the stock firmware uses and reports what it found in the log.
 		.device = NULL,
+#ifdef HOST_WEB_EMU
+		.mount_point = music_path,
+#else
 		.mount_point = NULL,
+#endif
 #ifdef HOST_BUILD
 		.manage_mount = false, // never touch the developer's own filesystem
 #else
@@ -2571,7 +2623,11 @@ int main(int argc, char **argv) {
 	watchdog_start();
 
 	printf("Entering main event loop...\n");
+#ifdef HOST_WEB_EMU
+	while (running && !webemu_quit_requested()) {
+#else
 	while (running) {
+#endif
 		ui_heartbeat++;
 		uint32_t time_till_next = lv_timer_handler();
 		if (time_till_next > MAIN_LOOP_MAX_SLEEP_MS) {
@@ -2587,6 +2643,10 @@ int main(int argc, char **argv) {
 	}
 
 	printf("\n");
+
+#ifdef HOST_WEB_EMU
+	webemu_shutdown();
+#endif
 
 	return 0;
 }

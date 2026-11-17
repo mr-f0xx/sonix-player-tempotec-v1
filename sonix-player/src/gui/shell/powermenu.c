@@ -1,5 +1,8 @@
 #include "powermenu.h"
 #include "src/gui/library/browser.h"
+#ifdef HOST_WEB_EMU
+#include "webemu.h"
+#endif
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -142,6 +145,14 @@ static void do_reboot(void) {
 	dlna_clear_on_exit();
 	storage_release_for_shutdown();
 	sync();
+
+#ifdef HOST_WEB_EMU
+	webemu_notify_power("reboot");
+	fflush(stdout);
+	fflush(stderr);
+	webemu_shutdown();
+	_exit(43);
+#endif
 
 	// Through init, the same way down as power_shutdown(). `reboot(RB_AUTOBOOT)`
 	// restarts the machine from inside this process: init's shutdown hooks never

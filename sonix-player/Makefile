@@ -2,6 +2,7 @@
 
 # Target executables
 HOST_BIN = sonix_player_host
+WEB_EMU_BIN = sonix_player_web
 TARGET_BIN = sonix_player
 # Built from launcher/, see "sonix_launch" below.
 LAUNCH_BIN = sonix_launch
@@ -216,10 +217,55 @@ TARGET_LD = $(CROSS_CXX)
 # Object files
 HOST_OBJS = $(APP_SRCS:src/%.c=build_host/%.o) $(APP_CXX_SRCS:src/%.cpp=build_host/%.opp) \
 			$(LVGL_SRCS:$(LVGL_DIR)/%.c=build_host/lvgl/%.o)
+WEB_EMU_BRIDGE_SRCS = webemu/webemu.c webemu/webemu_alsa.c
+WEB_EMU_OBJS = $(APP_SRCS:src/%.c=build_web/%.o) $(APP_CXX_SRCS:src/%.cpp=build_web/%.opp) \
+			   $(LVGL_SRCS:$(LVGL_DIR)/%.c=build_web/lvgl/%.o) \
+			   $(WEB_EMU_BRIDGE_SRCS:webemu/%.c=build_web/webemu/%.o)
 TARGET_OBJS = $(APP_SRCS:src/%.c=build_target/%.o) $(APP_CXX_SRCS:src/%.cpp=build_target/%.opp) \
 			  $(LVGL_SRCS:$(LVGL_DIR)/%.c=build_target/lvgl/%.o)
 
-.PHONY: all host target clean compile_commands.json
+# Browser-based TempoTec V1 emulator (headless LVGL framebuffer + virtual ALSA
+# PCM stream, zero SDL2 dependency). Uses system FreeType/Opus/WavPack when
+# available, or bootstraps static FreeType from GitHub automatically.
+WEB_HAVE_FT := $(shell command -v pkg-config >/dev/null 2>&1 && pkg-config --exists freetype2 && echo yes)
+WEB_HAVE_OPUS := $(shell command -v pkg-config >/dev/null 2>&1 && pkg-config --exists opusfile && echo yes)
+WEB_HAVE_WV := $(shell command -v pkg-config >/dev/null 2>&1 && pkg-config --exists wavpack && echo yes)
+
+FREETYPE_HOST_SRC = $(CURDIR)/freetype-host-src
+FREETYPE_HOST_LIB = $(FREETYPE_HOST_SRC)/objs/libfreetype.a
+
+ifeq ($(WEB_HAVE_FT),yes)
+WEB_FT_CFLAGS := $(shell pkg-config --cflags freetype2)
+WEB_FT_LIBS := $(shell pkg-config --libs freetype2)
+WEB_FT_DEP :=
+else
+WEB_FT_CFLAGS := -I$(FREETYPE_HOST_SRC)/include
+WEB_FT_LIBS := $(FREETYPE_HOST_LIB)
+WEB_FT_DEP := $(FREETYPE_HOST_LIB)
+endif
+
+ifeq ($(WEB_HAVE_OPUS),yes)
+WEB_OPUS_CFLAGS := $(shell pkg-config --cflags opusfile)
+WEB_OPUS_LIBS := $(shell pkg-config --libs opusfile)
+else
+WEB_OPUS_CFLAGS := -DSONIX_NO_OPUSFILE=1
+WEB_OPUS_LIBS :=
+endif
+
+ifeq ($(WEB_HAVE_WV),yes)
+WEB_WV_CFLAGS := $(shell pkg-config --cflags wavpack)
+WEB_WV_LIBS := $(shell pkg-config --libs wavpack)
+else
+WEB_WV_CFLAGS := -DSONIX_NO_WAVPACK=1
+WEB_WV_LIBS :=
+endif
+
+WEB_EMU_CFLAGS = $(CFLAGS) -DHOST_BUILD=1 -DHOST_WEB_EMU=1 -Iwebemu $(WEB_FT_CFLAGS) $(WEB_OPUS_CFLAGS) $(WEB_WV_CFLAGS) \
+				 -include src/system/core/glibc_compat.h
+WEB_EMU_CXXFLAGS = $(WEB_EMU_CFLAGS) $(GB_CFLAGS)
+WEB_EMU_LDFLAGS = $(WEB_FT_LIBS) $(WEB_OPUS_LIBS) $(WEB_WV_LIBS) -lpthread -lm -ldl
+
+.PHONY: all host web-emu run-web-emu target clean compile_commands.json
 
 all: host compile_commands.json
 
@@ -228,6 +274,26 @@ host: $(HOST_BIN) compile_commands.json
 $(HOST_BIN): $(HOST_OBJS)
 	$(HOST_LD) -o $@ $(HOST_OBJS) $(HOST_LDFLAGS)
 	@echo "Host build complete: Run './$(HOST_BIN)' to start the simulator."
+
+$(FREETYPE_HOST_LIB):
+	@if [ ! -d "$(FREETYPE_HOST_SRC)" ]; then \
+		echo "Cloning FreeType VER-2-13-3 for host emulator..."; \
+		git clone --depth 1 -b VER-2-13-3 https://github.com/freetype/freetype.git "$(FREETYPE_HOST_SRC)"; \
+	fi
+	@echo "Building static FreeType for host emulator..."
+	@$(MAKE) -C "$(FREETYPE_HOST_SRC)" setup ansi
+	@$(MAKE) -C "$(FREETYPE_HOST_SRC)" -j$$(nproc)
+
+web-emu: $(WEB_EMU_BIN)
+
+$(WEB_EMU_OBJS): $(WEB_FT_DEP)
+
+$(WEB_EMU_BIN): $(WEB_EMU_OBJS) $(WEB_FT_DEP)
+	$(HOST_LD) -o $@ $(WEB_EMU_OBJS) $(WEB_EMU_LDFLAGS)
+	@echo "Web emulator binary built: $(WEB_EMU_BIN)"
+
+run-web-emu: web-emu
+	@node ../tools/v1-emulator/server.mjs
 
 # The key that opens streaming-keys.bin (src/system/streaming/streamkeys.h),
 # kept outside git and compiled into streamkeys.c. The header is rewritten only
@@ -249,7 +315,7 @@ $(STREAMKEYS_KEY_H): FORCE
 	@if cmp -s $@.tmp $@; then rm -f $@.tmp; else mv $@.tmp $@; \
 		if [ -f "$(STREAMKEYS_KEY)" ]; then echo "streamkeys: key from $(STREAMKEYS_KEY)"; \
 		else echo "streamkeys: no $(STREAMKEYS_KEY), this build reads only a plain streaming-keys.ini"; fi; fi
-build_host/system/streaming/streamkeys.o build_target/system/streaming/streamkeys.o: $(STREAMKEYS_KEY_H)
+build_host/system/streaming/streamkeys.o build_web/system/streaming/streamkeys.o build_target/system/streaming/streamkeys.o: $(STREAMKEYS_KEY_H)
 
 build_host/%.o: src/%.c
 	@mkdir -p $(dir $@)
@@ -262,6 +328,22 @@ build_host/%.opp: src/%.cpp
 build_host/lvgl/%.o: $(LVGL_DIR)/%.c
 	@mkdir -p $(dir $@)
 	$(CC) $(HOST_CFLAGS) -c $< -o $@
+
+build_web/%.o: src/%.c
+	@mkdir -p $(dir $@)
+	$(CC) $(WEB_EMU_CFLAGS) -c $< -o $@
+
+build_web/%.opp: src/%.cpp
+	@mkdir -p $(dir $@)
+	$(CXX) $(WEB_EMU_CXXFLAGS) -c $< -o $@
+
+build_web/lvgl/%.o: $(LVGL_DIR)/%.c
+	@mkdir -p $(dir $@)
+	$(CC) $(WEB_EMU_CFLAGS) -c $< -o $@
+
+build_web/webemu/%.o: webemu/%.c
+	@mkdir -p $(dir $@)
+	$(CC) $(WEB_EMU_CFLAGS) -c $< -o $@
 
 target: $(TARGET_BIN) $(LAUNCH_BIN) compile_commands.json
 
@@ -385,7 +467,7 @@ compile_commands.json:
 	@python3 generate_compile_commands.py
 
 clean:
-	rm -rf build_host build_target build_gen $(HOST_BIN) $(TARGET_BIN) $(TARGET_DEBUG_BIN) $(LAUNCH_BIN) compile_commands.json compile_flags.txt
+	rm -rf build_host build_web build_target build_gen $(HOST_BIN) $(WEB_EMU_BIN) $(TARGET_BIN) $(TARGET_DEBUG_BIN) $(LAUNCH_BIN) compile_commands.json compile_flags.txt
 
 # The bundled libraries and their extracted sources. The downloaded tarballs stay.
 .PHONY: libs-clean
@@ -504,4 +586,5 @@ $(WAVPACK_LIB): $(CROSS_CC)
 # so the two compile rules cannot overlap, which is why both suffixes are
 # substituted -- otherwise make reads an object file as a makefile.
 -include $(patsubst %.opp,%.d,$(patsubst %.o,%.d,$(HOST_OBJS)))
+-include $(patsubst %.opp,%.d,$(patsubst %.o,%.d,$(WEB_EMU_OBJS)))
 -include $(patsubst %.opp,%.d,$(patsubst %.o,%.d,$(TARGET_OBJS)))
