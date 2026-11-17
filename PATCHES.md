@@ -4,6 +4,67 @@
 |---|---|---|
 | Touchscreen multitouch | `tools/gt9xx_multitouch_patch.py` | the panel reports five fingers, the driver lets one out |
 | Touchscreen multitouch, R1 | `tools/cst8xx_multitouch_patch.py` | the panel reports two fingers, the driver lets one out |
+| Touchscreen wake glitch, V1 / R1 | `tools/cst8xx_wake_patch.py` | spurious post-wake contact swallows the first tap or slide |
+
+
+## First touch after waking the screen (issue #325)
+
+On the TempoTec V1 -- and on the official V1 firmware for the same reason -- the
+first tap or slide after waking the panel with the power button did nothing, no
+matter which page was up or how long after wake the finger landed, while every
+touch after it behaved normally.
+
+The sequence sits across `pinctrl-ingenic`, `cst8xx_touch.ko` (`hyn_ts`, CST836U
+on `i2c1` `0x15`, `PA16` falling-edge IRQ, `PA17` reset, `aldo2` supply) and
+LVGL's `lv_evdev`:
+
+1. Blanking `/sys/class/graphics/fb0` runs `cst8xx_touch.ko`'s framebuffer
+   notifier, which calls `disable_irq_nosync(PA16)` and then turns `aldo2` off
+   and drives `PA17` low. Because `pinctrl-ingenic` leaves `irq_disable` NULL,
+   Linux disables `PA16` lazily: the falling edge as the controller loses power
+   latches `IRQS_PENDING` on the descriptor.
+2. Unblanking queues `hyn_resume_work`, which sends an empty `SYN_MT_REPORT` +
+   `BTN_TOUCH 0`, restores `aldo2`, holds reset for 20 ms + 200 ms (by which
+   point the CST836U has cleared its XDATA report buffer and returned `PA16`
+   high), verifies chip ID `0xA7`, and calls `enable_irq(PA16)`.
+   `check_irq_resend()` immediately replays `hyn_irq_handler`.
+3. `hyn_irq_handler` reads nine zero bytes from register `0x00` (`point_num = 0`,
+   `buf[3..8] = 0`). The loop was ported from FocalTech's driver, where an idle
+   slot reads back as `0xFF` (`id = 15`, `flag = 3`) and terminates parsing; the
+   CST836U only `0xFF`-fills slots 1 and up, leaving slot 0 at zero (`id = 0`,
+   `flag = 0`, which is `FTS_TOUCH_DOWN` at `(0, 0)`). Never checking
+   `point_num == 0`, the handler emits `ABS_MT_TRACKING_ID 0`, pressure, touch
+   major and `(0, 0)` while `input_handle_event()` drops `BTN_TOUCH 0` as
+   unchanged, and leaves the driver's per-contact scan toggle at `1`.
+4. `lv_evdev` treats `ABS_MT_TRACKING_ID != -1` as `LV_INDEV_STATE_PRESSED`
+   (protocol B semantics). When `panel_touch_flush()` drained that packet and
+   armed `lv_indev_wait_release()`, the pointer stayed permanently `PRESSED`:
+   `indev_proc_press()` discarded every tick and the entire first touch until
+   lifting a real finger finally delivered an undeduped `BTN_TOUCH 0` (and
+   meanwhile stamped `disp->last_activity_time` on every frame). Stock
+   `hiby_player`'s `hgl_ts_read` latches press on `ABS_MT_POSITION_X/Y` and
+   clears only on `BTN_TOUCH 0`, which is why the stock firmware fails the same
+   way.
+
+Fixed at both ends:
+
+- **`tools/cst8xx_wake_patch.py`** (run automatically on
+  `module_driver/cst8xx_touch.ko` by `sonix_firmware_packer.sh`, and checked by
+  `verify_upt.sh --sonix-v1`) folds `if (point_num == 0) event->flag |= 1` into
+  the contact parse loop at `.text + 0x06d8..0x0738` by reusing the two redundant
+  byte reloads GCC emitted and the loop branch's empty delay slot. A zero-point
+  frame sends `flag` 0 -> 1 (`UP`) and 2 -> 3 (`NO_EVENT`), leaves genuine
+  `TOUCH_UP` frames (`flag = 1`) intact, clears the scan toggle and `touchs`,
+  emits no `ABS_MT_*` events, still releases `BTN_TOUCH` if one was held, and
+  coexists in either order with `cst8xx_multitouch_patch.py`.
+- **`src/system/device/touch_evdev.c`** replaces `lv_evdev` for the touch
+  pointer: frames packets at `SYN_REPORT`, takes `BTN_TOUCH` as authoritative on
+  protocol-A panels (waiting for a full `(x, y)` before opening a press so even
+  an unpatched driver's toggled-off scan 0 never flashes a stale coordinate),
+  resynchronises via `EVIOCGKEY` on open, `SYN_DROPPED` and
+  `panel_touch_flush()`, suppresses any finger still physically on the glass
+  across a flush until it lifts, and yields across press/release boundaries so a
+  tap shorter than one refresh period is kept intact.
 
 
 ## Smart Mix on large libraries (issue #285)

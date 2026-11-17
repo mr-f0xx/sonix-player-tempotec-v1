@@ -1,6 +1,5 @@
 #include "lvgl/lvgl.h"
-// The touch panel's read callback, called directly to drain the panel (see
-// panel_touch_flush() below).
+// Touch indev state reset when flushing the panel (see panel_touch_flush()).
 #include "lvgl/src/indev/lv_indev_private.h"
 
 #include <dirent.h>
@@ -57,6 +56,7 @@
 #include "src/system/gearboy/gearboy.h"
 #include "src/system/remote/sonixlink.h"
 #include "src/system/core/panel.h"
+#include "src/system/device/touch_evdev.h"
 #include "src/system/streaming/qobuzcache.h"
 #include "src/system/streaming/podcastcache.h"
 #include "src/system/streaming/podcastsubs.h"
@@ -1705,31 +1705,29 @@ static void free_rot_pages_cb(void *unused) {
 
 bool display_rotation_supported(void) { return fb_display != NULL; }
 
-// The node lv_evdev_create() actually opened. Remembered because the emulator
-// must open exactly that one instead of guessing: touch is event1 on this
-// device, but the event0 fallback exists because that is not guaranteed.
+// The node touch_evdev_create() actually opened. Remembered because the
+// emulator must open exactly that one instead of guessing: touch is event1 on
+// this device, but the event0 fallback exists because that is not guaranteed.
 static char fb_touch_node[32];
 
 const char *panel_touch_device(void) { return fb_touch_node[0] ? fb_touch_node : NULL; }
 
-// Hands the touch panel over and takes it back. While disabled the indev is
-// not polled and stops reading the node, so events pile up unread in the
-// kernel queue. Whatever re-enables it must wait a moment before trusting the
-// first touch (see gearboyplay.c).
 // Throws away what the panel sent while nobody was reading it. A disabled indev
 // is not polled, so the kernel queue fills with whatever the glass did during
 // the blank -- wake transients, a palm on the screen, the tap that woke it --
 // and the first poll afterwards would replay all of it as presses and swipes.
-// The read callback is called by hand to consume the queue and its result is
-// dropped; the indev is then told to ignore the pointer until the finger is up.
+// touch_evdev_flush() drains the descriptor, checks the kernel's live key state
+// via EVIOCGKEY, and suppresses any finger still physically on the glass until
+// it lifts; when the glass is clear, wait_until_release is cleared too so the
+// very first post-wake touch lands cleanly even inside the first timer tick.
 void panel_touch_flush(void) {
-	if (!fb_touch || !fb_touch->read_cb) {
+	if (!fb_touch) {
 		return;
 	}
-	lv_indev_data_t discard;
-	memset(&discard, 0, sizeof(discard));
-	fb_touch->read_cb(fb_touch, &discard);
-	lv_indev_wait_release(fb_touch);
+	(void)touch_evdev_flush(fb_touch);
+	lv_indev_reset(fb_touch, NULL);
+	fb_touch->state = LV_INDEV_STATE_RELEASED;
+	fb_touch->wait_until_release = 0;
 }
 
 void panel_touch_enable(bool enabled) {
@@ -1777,9 +1775,9 @@ void display_set_rotated(bool rotated) {
 	// the top-left corner of the glass to the bottom-right of the screen.
 	if (fb_touch) {
 		if (fb_rotated) {
-			lv_evdev_set_calibration(fb_touch, (int)fb_var.xres - 1, (int)fb_var.yres - 1, 0, 0);
+			touch_evdev_set_calibration(fb_touch, (int)fb_var.xres - 1, (int)fb_var.yres - 1, 0, 0);
 		} else {
-			lv_evdev_set_calibration(fb_touch, 0, 0, (int)fb_var.xres - 1, (int)fb_var.yres - 1);
+			touch_evdev_set_calibration(fb_touch, 0, 0, (int)fb_var.xres - 1, (int)fb_var.yres - 1);
 		}
 	}
 
@@ -1873,20 +1871,20 @@ static lv_display_t *init_target_display(void) {
 	char found[sizeof(fb_touch_node)];
 	lv_indev_t *touch = NULL;
 	if (find_touch_node(found, sizeof(found))) {
-		touch = lv_evdev_create(LV_INDEV_TYPE_POINTER, found);
+		touch = touch_evdev_create(found);
 		if (touch) {
 			snprintf(fb_touch_node, sizeof(fb_touch_node), "%s", found);
 		}
 	}
 	if (!touch) {
-		touch = lv_evdev_create(LV_INDEV_TYPE_POINTER, "/dev/input/event1");
+		touch = touch_evdev_create("/dev/input/event1");
 		if (touch) {
 			snprintf(fb_touch_node, sizeof(fb_touch_node), "%s", "/dev/input/event1");
 		}
 	}
 	if (!touch) {
 		fprintf(stderr, "Warning: Failed to open /dev/input/event1. Trying event0...\n");
-		touch = lv_evdev_create(LV_INDEV_TYPE_POINTER, "/dev/input/event0");
+		touch = touch_evdev_create("/dev/input/event0");
 		if (touch) {
 			snprintf(fb_touch_node, sizeof(fb_touch_node), "%s", "/dev/input/event0");
 		}

@@ -33,10 +33,11 @@
 #
 # assets/V1/ is the complete overlay. It carries the model-independent Sonix
 # resource and web trees, the V1's own system-info.json, the boot screens and
-# its fonts. It leaves the stock touch, audio and boot drivers in place, but
-# replaces S80_bt_init with a no-op: Sonix owns Bluetooth startup itself and
-# the stock background script would race it. The TempoTec V1 update remains a
-# small overlay on a real TempoTec image rather than another player's rootfs.
+# its fonts. It leaves the stock audio and boot drivers in place, patches the
+# stock touch module's spurious wake report in place, and replaces S80_bt_init
+# with a no-op: Sonix owns Bluetooth startup itself and the stock background
+# script would race it. The TempoTec V1 update remains a small overlay on a
+# real TempoTec image rather than another player's rootfs.
 #
 # No questions asked: run it and it does the lot.
 #
@@ -743,6 +744,38 @@ if [ \"\$boot_sel\" = \"logo:4\" ]; then boot_waited=0; while [ \$boot_waited -l
 		say "    module_driver/leds_sgm31324_add.ko removed"
 	else
 		say "    module_driver/leds_sgm31324_add.ko was not there"
+	fi
+	say ""
+
+	# ==========================================================================
+	# 6c. The stock touch driver's post-wake phantom contact
+	# ==========================================================================
+	#
+	# Blanking fb0 lazy-disables the CST8xx interrupt and drops its supply, so
+	# enable_irq() on wake replays a falling edge against a freshly zeroed
+	# register block. hyn_irq_handler treats slot 0's zeros as a touch-down at
+	# (0, 0) despite point_num == 0 and leaves the per-contact scan toggle out
+	# of step (issue #325; see PATCHES.md). Patch the module in place so a
+	# zero-contact frame is never reported as a press; if a future stock update
+	# ships a rebuilt module whose sequence does not match (exit 2), warn and
+	# leave it alone -- the player's own evdev reader drops BTN_TOUCH-less
+	# wake frames too.
+	step "[$MODEL_NAME] patching the touch driver's wake handler"
+
+	TOUCH_MODULE="$SQUASH_DIR/module_driver/cst8xx_touch.ko"
+	WAKE_PATCH_TOOL="$SCRIPT_DIR/../sonix-player/tools/cst8xx_wake_patch.py"
+	if [ -f "$TOUCH_MODULE" ]; then
+		[ -f "$WAKE_PATCH_TOOL" ] || die "cannot find $WAKE_PATCH_TOOL"
+		PATCH_RC=0
+		python3 "$WAKE_PATCH_TOOL" --no-backup "$SQUASH_DIR/module_driver" || PATCH_RC=$?
+		if [ "$PATCH_RC" = "2" ]; then
+			warn "module_driver/cst8xx_touch.ko did not match the wake patch; left as stock"
+			warn "the player's own touch reader still filters unkeyed wake frames"
+		elif [ "$PATCH_RC" != "0" ]; then
+			die "patching module_driver/cst8xx_touch.ko failed (exit $PATCH_RC)."
+		fi
+	else
+		say "    module_driver/cst8xx_touch.ko was not there"
 	fi
 	say ""
 
