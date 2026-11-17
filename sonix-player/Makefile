@@ -292,6 +292,14 @@ WASM_FT_OBJS = $(WASM_FT_REL_SRCS:src/%.c=build_wasm/freetype/%.o)
 WASM_FT_LIB = build_wasm/freetype/libfreetype.a
 WASM_FT_STAMP = $(FREETYPE_HOST_SRC)/include/ft2build.h
 
+# Self-bootstrap FreeType source tree before evaluating WASM_FT_OBJS prerequisites
+ifneq ($(filter web-wasm web-wasm-bundle,$(MAKECMDGOALS)),)
+ifeq ($(wildcard $(WASM_FT_STAMP)),)
+$(info Cloning FreeType VER-2-13-3 for WebAssembly build...)
+$(shell git clone --depth 1 -b VER-2-13-3 https://github.com/freetype/freetype.git "$(FREETYPE_HOST_SRC)")
+endif
+endif
+
 WASM_CFLAGS = -O2 -pthread -MMD -MP -D_FILE_OFFSET_BITS=64 -DNAME_MAX=255 -I. -I$(LVGL_DIR) -DLV_CONF_INCLUDE_SIMPLE=1 -DGB_CORE=1 \
 			  -DHOST_BUILD=1 -DHOST_WEB_EMU=1 -DSONIX_NO_OPUSFILE=1 -DSONIX_NO_WAVPACK=1 \
 			  -Iwebemu/wasm_compat -Iwebemu -I$(FREETYPE_HOST_SRC)/include \

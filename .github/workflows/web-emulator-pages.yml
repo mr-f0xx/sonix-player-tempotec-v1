@@ -76,15 +76,14 @@ jobs:
         uses: mymindstorm/setup-emsdk@v14
         with:
           version: 'latest'
-          actions-cache-folder: 'emsdk-cache'
 
       - name: Cache LVGL and FreeType sources
         uses: actions/cache@v4
         with:
           path: |
             sonix-player/lvgl
-            sonix-player/freetype-VER-2-13-3
-          key: v1-web-wasm-deps-lvgl96-ft2133
+            sonix-player/freetype-host-src
+          key: v1-web-wasm-deps-lvgl96-ft2133-v2
 
       - name: Compile sonix-player to WebAssembly (Emscripten pthreads)
         run: |
