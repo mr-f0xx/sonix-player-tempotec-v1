@@ -7,7 +7,7 @@
 #include "src/gui/shell/theme.h"
 #include "src/system/core/lang.h"
 
-#define POPOVER_MAX_ITEMS 8
+#define POPOVER_MAX_ITEMS 9
 #define POPOVER_WIDTH 284
 #define POPOVER_ROW_HEIGHT 62
 #define POPOVER_RADIUS 16
@@ -162,8 +162,8 @@ void popover_show(lv_obj_t *anchor, const popover_item_t *items, int count) {
 	int card_h = lv_obj_get_height(card);
 	int max_card_h = screen_h - 2 * POPOVER_MARGIN;
 	if (card_h > max_card_h) {
-		// Seven regular rows fit on the large panels but not in 320 px. Keep
-		// every action reachable rather than drawing the last rows off-screen.
+		// The full menu does not fit on a 320 px panel. Keep every action
+		// reachable rather than drawing the last rows off-screen.
 		card_h = max_card_h;
 		lv_obj_set_height(card, card_h);
 		lv_obj_set_scrollable(card, true);
