@@ -38,6 +38,10 @@ void gbinput_set_glass(int width, int height) {
 #include "src/system/core/panel.h"
 #include "src/system/device/power.h"
 
+#ifndef SYN_DROPPED
+#define SYN_DROPPED 3
+#endif
+
 #define MAX_ZONES 16
 
 // How long to wait for a packet before rechecking whether it is time to stop.
@@ -212,11 +216,26 @@ static void *reader_thread(void *arg) {
 	bool protocol_a = false;
 
 	// The driver reports this separately and it is the most direct answer of
-	// all: at zero there is nothing on the glass. Not every driver sends it, so
-	// it cannot be relied on alone, but when it arrives it outranks any
-	// reconstruction.
+	// all: at zero there is nothing on the glass. Seed it from the device's
+	// declared capabilities and live EVIOCGKEY bitmap so a spurious wake
+	// contact at (0, 0) before the first real tap (an unpatched cst8xx_touch.ko)
+	// cannot trip the corner menu button either.
 	bool btn_touch_down = true;
 	bool saw_btn_touch = false;
+	bool in_syn_dropped = false;
+	const unsigned int key_bpw = (unsigned int)(8 * sizeof(unsigned long));
+	{
+		unsigned long key_cap[(KEY_MAX / (8 * sizeof(unsigned long))) + 1];
+		unsigned long key_now[(KEY_MAX / (8 * sizeof(unsigned long))) + 1];
+		memset(key_cap, 0, sizeof(key_cap));
+		memset(key_now, 0, sizeof(key_now));
+		if (ioctl(fd, EVIOCGBIT(EV_KEY, sizeof(key_cap)), key_cap) >= 0 &&
+			(key_cap[BTN_TOUCH / key_bpw] & (1UL << (BTN_TOUCH % key_bpw))) != 0 &&
+			ioctl(fd, EVIOCGKEY(sizeof(key_now)), key_now) >= 0) {
+			saw_btn_touch = true;
+			btn_touch_down = (key_now[BTN_TOUCH / key_bpw] & (1UL << (BTN_TOUCH % key_bpw))) != 0;
+		}
+	}
 
 	memset(pending, 0, sizeof(pending));
 
@@ -239,6 +258,34 @@ static void *reader_thread(void *arg) {
 		int count = (int)(got / (ssize_t)sizeof(ev[0]));
 		for (int i = 0; i < count; i++) {
 			const struct input_event *e = &ev[i];
+
+			if (e->type == EV_SYN && e->code == SYN_DROPPED) {
+				pending_count = 0;
+				pending_x = pending_y = pending_id = -1;
+				in_syn_dropped = true;
+				continue;
+			}
+			if (in_syn_dropped) {
+				if (e->type == EV_SYN && e->code == SYN_REPORT) {
+					in_syn_dropped = false;
+					pending_count = 0;
+					pending_x = pending_y = pending_id = -1;
+					if (saw_btn_touch) {
+						unsigned long key_now[(KEY_MAX / (8 * sizeof(unsigned long))) + 1];
+						memset(key_now, 0, sizeof(key_now));
+						if (ioctl(fd, EVIOCGKEY(sizeof(key_now)), key_now) >= 0) {
+							btn_touch_down = (key_now[BTN_TOUCH / key_bpw] & (1UL << (BTN_TOUCH % key_bpw))) != 0;
+						}
+						if (!btn_touch_down) {
+							memset(slots, 0, sizeof(slots));
+							memset(held, 0, sizeof(held));
+							last_mask = 0;
+							gearboy_set_keys(0);
+						}
+					}
+				}
+				continue;
+			}
 
 			if (e->type == EV_ABS) {
 				switch (e->code) {

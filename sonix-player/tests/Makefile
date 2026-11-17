@@ -759,6 +759,20 @@ $(BUILD)/test_power_display: test_power_display.c $(ROOT)/src/system/device/powe
 	@mkdir -p $(BUILD)
 	$(CC) $(UI_CPPFLAGS) $(CFLAGS) -o $@ test_power_display.c $(UI_LVGL_OBJ) $(LDFLAGS) $(LDLIBS)
 
+# Wake-touch regression suite (issue #325): SYN_REPORT-framed touch_evdev,
+# EVIOCGKEY-backed panel_touch_flush, gbinput's BTN_TOUCH guard, and the
+# cst8xx_touch.ko point_num==0 binary patcher.
+.PHONY: touch-wake
+touch-wake: $(BUILD)/test_touch_wake
+	$(BUILD)/test_touch_wake
+	python3 test_cst8xx_wake_patch.py
+
+$(BUILD)/test_touch_wake: test_touch_wake.c $(ROOT)/src/system/device/touch_evdev.c \
+                          $(ROOT)/src/system/device/touch_evdev.h \
+                          $(ROOT)/src/system/gearboy/gbinput.c $(ROOT)/src/system/gearboy/gbinput.h $(UI_LVGL_OBJ)
+	@mkdir -p $(BUILD)
+	$(CC) $(UI_CPPFLAGS) $(CFLAGS) -o $@ test_touch_wake.c $(UI_LVGL_OBJ) $(LDFLAGS) $(LDLIBS)
+
 # Curated order across API page boundaries, using a fake genre provider.
 .PHONY: qobuzgenre-order
 qobuzgenre-order: $(BUILD)/test_qobuzgenreorder
@@ -1103,7 +1117,7 @@ $(BUILD)/test_stockkeys_ui: $(ROOT)/build_gen/streamkeys_key.h $(STOCKKEYS_UI_OB
 	$(CC) -o $@ $(STOCKKEYS_UI_OBJ) $(LDFLAGS) $(LDLIBS)
 
 .PHONY: ui
-ui: $(BUILD)/test_qobuzgenregrid $(BUILD)/test_main_menu $(BUILD)/test_screensaver $(BUILD)/test_tools_pages $(BUILD)/test_wifi_pages $(BUILD)/test_chargescreen $(BUILD)/test_power_display $(BUILD)/test_lyricsearch $(BUILD)/test_games $(BUILD)/test_peq_profiles $(BUILD)/test_quickpanel_layout $(BUILD)/test_btreceiversession $(BUILD)/test_home_swipe $(BUILD)/test_corners $(BUILD)/test_playbutton $(BUILD)/test_musicsettings_rows $(BUILD)/test_volume_overlay $(BUILD)/test_playerdeck $(BUILD)/test_vinylayout $(BUILD)/test_stickerlayout $(BUILD)/test_waveform_overlay $(BUILD)/test_hiresbadge_ui $(BUILD)/test_statusbar_ui $(BUILD)/test_stockkeys_ui $(BUILD)/test_tidal_pages $(BUILD)/test_soundcloud_pages $(BUILD)/test_qobuz_pages $(BUILD)/test_jellyfin_pages $(BUILD)/test_fwupdate
+ui: $(BUILD)/test_qobuzgenregrid $(BUILD)/test_main_menu $(BUILD)/test_screensaver $(BUILD)/test_tools_pages $(BUILD)/test_wifi_pages $(BUILD)/test_chargescreen $(BUILD)/test_power_display $(BUILD)/test_touch_wake $(BUILD)/test_lyricsearch $(BUILD)/test_games $(BUILD)/test_peq_profiles $(BUILD)/test_quickpanel_layout $(BUILD)/test_btreceiversession $(BUILD)/test_home_swipe $(BUILD)/test_corners $(BUILD)/test_playbutton $(BUILD)/test_musicsettings_rows $(BUILD)/test_volume_overlay $(BUILD)/test_playerdeck $(BUILD)/test_vinylayout $(BUILD)/test_stickerlayout $(BUILD)/test_waveform_overlay $(BUILD)/test_hiresbadge_ui $(BUILD)/test_statusbar_ui $(BUILD)/test_stockkeys_ui $(BUILD)/test_tidal_pages $(BUILD)/test_soundcloud_pages $(BUILD)/test_qobuz_pages $(BUILD)/test_jellyfin_pages $(BUILD)/test_fwupdate
 	$(BUILD)/test_qobuzgenregrid
 	$(BUILD)/test_main_menu ../../sonix-packer/assets/V1/usr/resource/sonix/language
 	$(BUILD)/test_main_menu ../../sonix-packer/assets/V1/usr/resource/sonix/language saved
@@ -1113,6 +1127,7 @@ ui: $(BUILD)/test_qobuzgenregrid $(BUILD)/test_main_menu $(BUILD)/test_screensav
 	$(BUILD)/test_wifi_pages ../../sonix-packer/assets/V1/usr/resource/sonix/language
 	$(BUILD)/test_chargescreen ../../sonix-packer/assets/V1/usr/resource/sonix/language
 	$(BUILD)/test_power_display
+	$(BUILD)/test_touch_wake
 	$(BUILD)/test_lyricsearch ../../sonix-packer/assets/V1/usr/resource/sonix/language
 	$(BUILD)/test_games ../../sonix-packer/assets/V1/usr/resource/sonix/language
 	$(BUILD)/test_peq_profiles ../../sonix-packer/assets/V1/usr/resource/sonix/language

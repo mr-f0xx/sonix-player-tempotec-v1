@@ -239,6 +239,27 @@ if $EXPECT_SONIX; then
 	printf 'Verified CA bundle: %s certificates, %s bytes.\n' \
 		"$(grep -c '^-----BEGIN CERTIFICATE-----' "$CA_BUNDLE")" \
 		"$(wc -c < "$CA_BUNDLE" | tr -d ' ')"
+
+	# The V1's cst8xx_touch.ko emits a phantom touch on every screen wake unless
+	# patched by the packer (issue #325). Fail if a known-stock copy slipped
+	# through unpatched; allow exit 2 so a future stock update with a rebuilt
+	# module still validates while covered by the player's own evdev guard.
+	WAKE_PATCH_TOOL="$SCRIPT_DIR/../sonix-player/tools/cst8xx_wake_patch.py"
+	if command -v python3 >/dev/null 2>&1 && [ -f "$WAKE_PATCH_TOOL" ] &&
+	   grep -qE 'squashfs-root/module_driver/cst8xx_touch\.ko$' "$LISTING"; then
+		mkdir -p "$WORK/touch"
+		unsquashfs -cat "$WORK/rootfs.squashfs" module_driver/cst8xx_touch.ko > "$WORK/touch/cst8xx_touch.ko"
+		WAKE_RC=0
+		python3 "$WAKE_PATCH_TOOL" --check "$WORK/touch" >/dev/null || WAKE_RC=$?
+		if [ "$WAKE_RC" = "0" ]; then
+			printf 'Verified touch driver: cst8xx_touch.ko wake patch in place.\n'
+		elif [ "$WAKE_RC" = "2" ]; then
+			printf 'Touch driver: cst8xx_touch.ko is an unrecognised build (kept as stock).\n'
+		else
+			echo "Error: rootfs carries an unpatched module_driver/cst8xx_touch.ko (exit $WAKE_RC)." >&2
+			exit 1
+		fi
+	fi
 fi
 
 printf 'UPT validation passed: %s\n' "$UPT"
