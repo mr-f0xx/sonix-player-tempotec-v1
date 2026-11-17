@@ -31,6 +31,7 @@ const PLAYER_DIR = path.join(REPO_ROOT, "sonix-player");
 const PLAYER_BIN = path.join(PLAYER_DIR, "sonix_player_web");
 const ASSETS_DIR = path.join(REPO_ROOT, "sonix-packer", "assets", "V1");
 const PUBLIC_DIR = path.join(__dirname, "public");
+const DIST_DIR = path.join(__dirname, "dist");
 const RUNTIME_DIR = path.join(__dirname, ".runtime");
 const SD_DIR = path.join(RUNTIME_DIR, "sd");
 const CONFIG_DIR = path.join(RUNTIME_DIR, "config");
@@ -1252,6 +1253,79 @@ async function handleApiRequest(req, res, parsedUrl) {
 	return sendJson(res, 404, { error: "Unknown API endpoint" });
 }
 
+function serveWasmBuilds(req, res, parsedUrl) {
+	const sub = parsedUrl.pathname.slice("/builds/".length);
+	const headersBase = {
+		"Cross-Origin-Opener-Policy": "same-origin",
+		"Cross-Origin-Embedder-Policy": "credentialless",
+		"Cross-Origin-Resource-Policy": "cross-origin",
+		"Cache-Control": "no-cache",
+	};
+
+	// Check staged GitHub Pages output first (dist/pages/builds/), then flat dist/
+	const candidates = [path.join(DIST_DIR, "pages", "builds"), DIST_DIR];
+
+	if (sub === "manifest.json") {
+		for (const base of candidates) {
+			const manifestPath = path.join(base, "manifest.json");
+			if (fs.existsSync(manifestPath)) {
+				res.writeHead(200, { ...headersBase, "Content-Type": "application/json; charset=utf-8" });
+				fs.createReadStream(manifestPath).pipe(res);
+				return true;
+			}
+		}
+		// Synthesize manifest from any *.sonix-web.zip bundles in tools/v1-emulator/dist/
+		const builds = [];
+		if (fs.existsSync(DIST_DIR)) {
+			const files = fs
+				.readdirSync(DIST_DIR)
+				.filter((n) => n.endsWith(".sonix-web.zip"))
+				.sort()
+				.reverse();
+			for (const file of files) {
+				const st = fs.statSync(path.join(DIST_DIR, file));
+				const slug = file.replace(/\.sonix-web\.zip$/, "");
+				builds.push({
+					id: slug,
+					name: slug,
+					ref: "local",
+					shortCommit: slug.slice(-8),
+					builtAt: st.mtime.toISOString(),
+					file,
+					url: `./builds/${file}`,
+					size: st.size,
+				});
+			}
+		}
+		res.writeHead(200, { ...headersBase, "Content-Type": "application/json; charset=utf-8" });
+		res.end(JSON.stringify({ format: "sonix-web-catalog-v1", updatedAt: new Date().toISOString(), builds }));
+		return true;
+	}
+
+	const safeName = path.basename(sub);
+	if (!safeName || safeName !== sub || !safeName.endsWith(".sonix-web.zip")) {
+		res.writeHead(404);
+		res.end("Not found");
+		return true;
+	}
+	for (const base of candidates) {
+		const full = path.join(base, safeName);
+		if (fs.existsSync(full) && fs.statSync(full).isFile()) {
+			const st = fs.statSync(full);
+			res.writeHead(200, {
+				...headersBase,
+				"Content-Type": "application/zip",
+				"Content-Length": String(st.size),
+			});
+			fs.createReadStream(full).pipe(res);
+			return true;
+		}
+	}
+	res.writeHead(404);
+	res.end("Not found");
+	return true;
+}
+
 function serveStaticFile(req, res, parsedUrl) {
 	let rel = parsedUrl.pathname === "/" ? "/index.html" : parsedUrl.pathname;
 	try {
@@ -1277,6 +1351,9 @@ function serveStaticFile(req, res, parsedUrl) {
 	res.writeHead(200, {
 		"Content-Type": MIME_TYPES[ext] || "application/octet-stream",
 		"Cache-Control": "no-cache",
+		"Cross-Origin-Opener-Policy": "same-origin",
+		"Cross-Origin-Embedder-Policy": "credentialless",
+		"Cross-Origin-Resource-Policy": "cross-origin",
 	});
 	fs.createReadStream(full).pipe(res);
 }
@@ -1286,6 +1363,10 @@ const server = http.createServer(async (req, res) => {
 		const parsedUrl = new URL(req.url || "/", `http://${req.headers.host || "localhost"}`);
 		if (parsedUrl.pathname.startsWith("/api/")) {
 			await handleApiRequest(req, res, parsedUrl);
+			return;
+		}
+		if (parsedUrl.pathname.startsWith("/builds/")) {
+			serveWasmBuilds(req, res, parsedUrl);
 			return;
 		}
 		serveStaticFile(req, res, parsedUrl);

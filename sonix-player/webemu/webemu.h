@@ -42,6 +42,13 @@ void webemu_notify_power(const char *action);
 int webemu_get_volume_percent(void);
 void webemu_send_audio_pcm(uint32_t sample_rate, uint16_t channels, const int16_t *samples, size_t frame_count);
 
+#ifdef __EMSCRIPTEN__
+/* Condition-variable backed key event queue for WASM pthreads (MEMFS pipes do
+ * not support blocking poll()). */
+void webemu_wasm_push_key_event(int code, bool down);
+int webemu_wasm_wait_key_event(int *out_code, int *out_value, int timeout_ms);
+#endif
+
 #endif /* HOST_WEB_EMU */
 
 #endif /* SONIX_WEBEMU_H */

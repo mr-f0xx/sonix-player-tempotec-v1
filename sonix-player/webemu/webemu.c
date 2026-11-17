@@ -147,10 +147,6 @@ static void enqueue_pointer(int x, int y, bool pressed) {
 		if (x >= fb_width) x = fb_width - 1;
 		if (y < 0) y = 0;
 		if (y >= fb_height) y = fb_height - 1;
-		if (atomic_load(&fb_rotated)) {
-			x = fb_width - 1 - x;
-			y = fb_height - 1 - y;
-		}
 	}
 
 	pthread_mutex_lock(&ptr_lock);

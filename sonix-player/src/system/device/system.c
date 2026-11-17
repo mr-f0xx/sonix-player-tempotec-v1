@@ -1,4 +1,7 @@
 #include "system.h"
+#if defined(HOST_WEB_EMU) && defined(__EMSCRIPTEN__)
+#include "webemu.h"
+#endif
 
 #include <dirent.h>
 #include <errno.h>
@@ -1835,6 +1838,16 @@ static void *input_thread_func(void *arg) {
 	const char *node = info->node;
 
 	int fd = info->preopened_fd;
+#if defined(HOST_WEB_EMU) && defined(__EMSCRIPTEN__)
+	const bool wasm_queue = (fd == -2);
+	if (!wasm_queue && fd < 0) {
+		fd = open(node, O_RDONLY);
+	}
+	if (!wasm_queue && fd < 0) {
+		fprintf(stderr, "input: cannot open %s: %s\n", node, strerror(errno));
+		return NULL;
+	}
+#else
 	if (fd < 0) {
 		fd = open(node, O_RDONLY);
 	}
@@ -1842,6 +1855,7 @@ static void *input_thread_func(void *arg) {
 		fprintf(stderr, "input: cannot open %s: %s\n", node, strerror(errno));
 		return NULL;
 	}
+#endif
 
 	int held = -1;			   // key currently down, or -1
 	uint32_t held_since = 0;   // when it went down
@@ -1892,8 +1906,24 @@ static void *input_thread_func(void *arg) {
 			}
 		}
 
+#if defined(HOST_WEB_EMU) && defined(__EMSCRIPTEN__)
+		struct input_event wasm_ev;
+		int ready;
+		if (wasm_queue) {
+			int wcode = 0, wval = 0;
+			ready = webemu_wasm_wait_key_event(&wcode, &wval, timeout);
+			memset(&wasm_ev, 0, sizeof(wasm_ev));
+			wasm_ev.type = EV_KEY;
+			wasm_ev.code = (uint16_t)wcode;
+			wasm_ev.value = wval;
+		} else {
+			struct pollfd pfd = {.fd = fd, .events = POLLIN};
+			ready = poll(&pfd, 1, timeout);
+		}
+#else
 		struct pollfd pfd = {.fd = fd, .events = POLLIN};
 		int ready = poll(&pfd, 1, timeout);
+#endif
 
 		if (ready < 0) {
 			if (errno == EINTR) {
@@ -1964,9 +1994,17 @@ static void *input_thread_func(void *arg) {
 		}
 
 		struct input_event ev;
+#if defined(HOST_WEB_EMU) && defined(__EMSCRIPTEN__)
+		if (wasm_queue) {
+			ev = wasm_ev;
+		} else if (read(fd, &ev, sizeof(ev)) != sizeof(ev)) {
+			break;
+		}
+#else
 		if (read(fd, &ev, sizeof(ev)) != sizeof(ev)) {
 			break;
 		}
+#endif
 
 		if (ev.type != EV_KEY) {
 			continue;
@@ -2138,7 +2176,9 @@ static void *input_thread_func(void *arg) {
 		}
 	}
 
-	close(fd);
+	if (fd >= 0) {
+		close(fd);
+	}
 	return NULL;
 }
 
@@ -2171,14 +2211,21 @@ static void start_input_thread(const char *node, bool headset) { start_input_thr
 static int host_key_pipe[2] = {-1, -1};
 
 static void start_host_input_thread(void) {
+#if defined(HOST_WEB_EMU) && defined(__EMSCRIPTEN__)
+	start_input_thread_fd("keyboard", false, -2);
+#else
 	if (pipe(host_key_pipe) != 0) {
 		perror("input: pipe");
 		return;
 	}
 	start_input_thread_fd("keyboard", false, host_key_pipe[0]);
+#endif
 }
 
 void input_host_button(int code, bool down) {
+#if defined(HOST_WEB_EMU) && defined(__EMSCRIPTEN__)
+	webemu_wasm_push_key_event(code, down);
+#else
 	if (host_key_pipe[1] < 0) {
 		return;
 	}
@@ -2186,6 +2233,7 @@ void input_host_button(int code, bool down) {
 	if (write(host_key_pipe[1], &ev, sizeof(ev)) != (ssize_t)sizeof(ev)) {
 		perror("input: write");
 	}
+#endif
 }
 #endif
 

@@ -4,6 +4,7 @@
 	<meta charset="utf-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1">
 	<title>TempoTec Variations V1 — Interactive Emulator</title>
+	<script src="coi-serviceworker.js"></script>
 	<link rel="stylesheet" href="styles.css">
 </head>
 <body>
@@ -14,11 +15,12 @@
 				<div class="brand-mark" aria-hidden="true">V1</div>
 				<div class="brand-text">
 					<h1>TempoTec Variations V1</h1>
-					<span class="brand-sub">Native sonix-player &middot; LVGL 9.6 &middot; 240&times;320</span>
+					<span class="brand-sub" id="brand-sub">sonix-player &middot; LVGL 9.6 &middot; 240&times;320</span>
 				</div>
 			</div>
 
 			<div class="topbar-status">
+				<span id="runtime-pill" class="pill pill-info">Detecting</span>
 				<span id="conn-pill" class="pill pill-warn">Connecting</span>
 				<span id="lifecycle-pill" class="pill pill-muted">Starting</span>
 				<span id="fps-pill" class="pill pill-mono">0 FPS</span>
@@ -186,13 +188,66 @@
 				<!-- Upper Panel: Tabbed Controls & Virtual microSD -->
 				<section class="panel controls-panel">
 					<div class="panel-tabs" role="tablist">
-						<button class="tab-btn active" data-tab="hardware" role="tab" aria-selected="true">Hardware &amp; Power</button>
-						<button class="tab-btn" data-tab="sd" role="tab" aria-selected="false">microSD &amp; Shots</button>
-						<button class="tab-btn" data-tab="shortcuts" role="tab" aria-selected="false">Keys &amp; Tips</button>
+						<button class="tab-btn active" data-tab="builds" role="tab" aria-selected="true">Firmware Builds</button>
+						<button class="tab-btn" data-tab="hardware" role="tab" aria-selected="false">Hardware</button>
+						<button class="tab-btn" data-tab="sd" role="tab" aria-selected="false">microSD</button>
+						<button class="tab-btn" data-tab="shortcuts" role="tab" aria-selected="false">Keys</button>
+					</div>
+
+					<!-- Tab 0: Firmware Build Loader (Static WASM / GitHub Pages & Custom Bundles) -->
+					<div class="tab-content active" id="tab-builds">
+						<div class="card">
+							<div class="card-head">
+								<h2>Published Sonix Builds</h2>
+								<span class="card-badge mono" id="build-runtime-badge">WASM</span>
+							</div>
+
+							<div class="build-select-row">
+								<select id="build-select" aria-label="Select Sonix firmware build">
+									<option value="">Loading catalog...</option>
+								</select>
+								<button id="btn-build-load" class="btn btn-primary btn-sm">Boot</button>
+								<button id="btn-build-del" class="btn btn-danger-soft btn-sm hidden" title="Remove saved custom build from browser storage">Del</button>
+							</div>
+
+							<div class="build-meta" id="build-meta">
+								Select a published CI build or drop any <code>.sonix-web.zip</code> bundle below.
+							</div>
+
+							<div class="build-progress hidden" id="build-progress">
+								<div class="build-progress-text" id="build-progress-text">Loading...</div>
+								<div class="build-progress-track">
+									<div class="build-progress-fill" id="build-progress-fill"></div>
+								</div>
+							</div>
+						</div>
+
+						<div class="card">
+							<div class="card-head">
+								<h2>Load Any Sonix Build</h2>
+								<label class="btn btn-primary btn-xs upload-label">
+									Browse .zip
+									<input type="file" id="build-file-input" accept=".zip,.sonix-web.zip" hidden>
+								</label>
+							</div>
+
+							<div class="build-dropzone" id="build-dropzone">
+								Drop a <strong>.sonix-web.zip</strong> firmware bundle here to unpack &amp; boot it directly in your browser
+							</div>
+
+							<div class="build-url-row">
+								<input type="url" id="build-url-input" placeholder="https://.../sonix-v1-....sonix-web.zip" aria-label="Firmware bundle URL">
+								<button id="btn-build-url" class="btn btn-soft btn-sm">Fetch</button>
+							</div>
+
+							<div class="build-hint">
+								Build your own bundle locally with <code>make -C sonix-player web-wasm-bundle</code> or download one from GitHub Actions / Releases. Custom builds and virtual microSD files stay saved in your browser.
+							</div>
+						</div>
 					</div>
 
 					<!-- Tab 1: Hardware & Power -->
-					<div class="tab-content active" id="tab-hardware">
+					<div class="tab-content" id="tab-hardware">
 						<!-- Battery & Charger Card -->
 						<div class="card">
 							<div class="card-head">

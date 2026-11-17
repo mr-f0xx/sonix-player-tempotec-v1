@@ -1,15 +1,16 @@
 /**
  * TempoTec Variations V1 — Interactive Browser Emulator Frontend
  *
- * Connects to /ws (relative origin, works locally and behind HTTPS reverse proxies)
- * and renders:
- *   - Real-time 240x320 RGB565 LVGL framebuffer
- *   - Pointer / touch / drag / scroll-wheel input forwarding
- *   - Right-flank physical button simulation (short press, long hold, combos, keyboard)
- *   - SGM31324 RGB LED live steady & breathing optical simulation
- *   - Web Audio API streaming playback from virtual ALSA PCM
- *   - Battery & charger controls, AirPods telemetry, virtual microSD & screenshots, live logs
+ * Dual-runtime architecture:
+ *   1) In-Browser WebAssembly Mode (GitHub Pages / static hosting, or `?mode=wasm`):
+ *      Runs compiled `sonix_player_wasm.wasm` directly in browser pthreads via
+ *      `./wasm-runtime.js`, with a universal `.sonix-web.zip` Firmware Build Loader
+ *      (catalog switcher, drag-and-drop, file picker, URL fetch, IndexedDB persistence).
+ *   2) Local Native Bridge Mode (when served by `tools/v1-emulator/server.mjs`):
+ *      Streams RGB565 frames, ALSA PCM, and telemetry over `/ws` from native `sonix_player_web`.
  */
+
+import { SonixWasmBackend } from "./wasm-runtime.js";
 
 /* --------------------------------------------------------------------------
  * Fast RGB565 lookup tables
@@ -23,6 +24,8 @@ for (let i = 0; i < 64; i++) LUT6[i] = Math.round((i * 255) / 63);
  * DOM references
  * -------------------------------------------------------------------------- */
 const el = {
+	brandSub: document.getElementById("brand-sub"),
+	runtimePill: document.getElementById("runtime-pill"),
 	connPill: document.getElementById("conn-pill"),
 	lifecyclePill: document.getElementById("lifecycle-pill"),
 	fpsPill: document.getElementById("fps-pill"),
@@ -33,6 +36,19 @@ const el = {
 	screenshotBtn: document.getElementById("btn-screenshot"),
 	deviceShotBtn: document.getElementById("btn-device-shot"),
 	rebuildBtn: document.getElementById("btn-rebuild"),
+
+	buildRuntimeBadge: document.getElementById("build-runtime-badge"),
+	buildSelect: document.getElementById("build-select"),
+	buildLoadBtn: document.getElementById("btn-build-load"),
+	buildDelBtn: document.getElementById("btn-build-del"),
+	buildMeta: document.getElementById("build-meta"),
+	buildProgress: document.getElementById("build-progress"),
+	buildProgressText: document.getElementById("build-progress-text"),
+	buildProgressFill: document.getElementById("build-progress-fill"),
+	buildDropzone: document.getElementById("build-dropzone"),
+	buildFileInput: document.getElementById("build-file-input"),
+	buildUrlInput: document.getElementById("build-url-input"),
+	buildUrlBtn: document.getElementById("btn-build-url"),
 
 	canvas: document.getElementById("v1-canvas"),
 	screenStage: document.getElementById("v1-screen-stage"),
@@ -108,10 +124,16 @@ const ctx = el.canvas.getContext("2d", { alpha: false });
 let imgData = ctx.createImageData(240, 320);
 
 /* --------------------------------------------------------------------------
- * Client state
+ * Client state & dual-runtime controller
  * -------------------------------------------------------------------------- */
+let runtimeMode = "detecting"; // "wasm" | "native"
 let ws = null;
+let wsClosedManually = false;
 let reconnectDelay = 500;
+let wasmBackend = null;
+let catalogBuilds = []; // { id, name, ref, shortCommit, builtAt, size, url, source: 'catalog'|'custom' }
+let buildBusyText = null;
+let activeSdBlobUrls = [];
 let deviceState = {
 	lifecycle: "starting",
 	mode: "normal",
@@ -193,20 +215,14 @@ function setAudioEnabled(on) {
 	sendWsJson({ type: "audio_pref", enabled: on });
 }
 
-function handleAudioPacket(view) {
+function schedulePcmBytes(pcmBytesView, rate, channels) {
 	if (!audioEnabled || !audioCtx || audioCtx.state !== "running") return;
-	if (view.byteLength < 7) return;
-	const rate = view.getUint32(1, false);
-	const channels = view.getUint16(5, false);
 	if (rate < 8000 || rate > 384000 || channels < 1 || channels > 2) return;
 
-	const pcmBytes = view.byteLength - 7;
-	const totalSamples = Math.floor(pcmBytes / 2);
+	const totalSamples = Math.floor(pcmBytesView.byteLength / 2);
 	const frames = Math.floor(totalSamples / channels);
 	if (frames <= 0) return;
 
-	// Browser AudioContext.createBuffer supports up to 96 kHz (or 192 kHz on Chrome/Firefox).
-	// If sample rate exceeds AudioContext's allowed range, linearly decimate into 48 kHz.
 	let targetRate = rate;
 	let outFrames = frames;
 	let ratio = 1;
@@ -225,28 +241,31 @@ function handleAudioPacket(view) {
 
 	const chL = buf.getChannelData(0);
 	const chR = channels > 1 ? buf.getChannelData(1) : null;
-	const baseOffset = view.byteOffset + 7;
-	const s16 = new Int16Array(view.buffer, baseOffset, totalSamples);
+	// Ensure 2-byte alignment for Int16Array
+	const aligned =
+		pcmBytesView.byteOffset % 2 === 0
+			? new Int16Array(pcmBytesView.buffer, pcmBytesView.byteOffset, totalSamples)
+			: new Int16Array(pcmBytesView.slice().buffer, 0, totalSamples);
 
 	if (ratio === 1) {
 		if (channels === 2) {
 			for (let i = 0; i < outFrames; i++) {
-				chL[i] = s16[i * 2] / 32768;
-				chR[i] = s16[i * 2 + 1] / 32768;
+				chL[i] = aligned[i * 2] / 32768;
+				chR[i] = aligned[i * 2 + 1] / 32768;
 			}
 		} else {
 			for (let i = 0; i < outFrames; i++) {
-				chL[i] = s16[i] / 32768;
+				chL[i] = aligned[i] / 32768;
 			}
 		}
 	} else {
 		for (let i = 0; i < outFrames; i++) {
 			const srcIdx = Math.min(frames - 1, Math.floor(i * ratio));
 			if (channels === 2) {
-				chL[i] = s16[srcIdx * 2] / 32768;
-				chR[i] = s16[srcIdx * 2 + 1] / 32768;
+				chL[i] = aligned[srcIdx * 2] / 32768;
+				chR[i] = aligned[srcIdx * 2 + 1] / 32768;
 			} else {
-				chL[i] = s16[srcIdx] / 32768;
+				chL[i] = aligned[srcIdx] / 32768;
 			}
 		}
 	}
@@ -263,15 +282,20 @@ function handleAudioPacket(view) {
 	audioNextTime += buf.duration;
 }
 
+function handleAudioPacket(view) {
+	if (view.byteLength < 7) return;
+	const rate = view.getUint32(1, false);
+	const channels = view.getUint16(5, false);
+	const pcmView = new Uint8Array(view.buffer, view.byteOffset + 7, view.byteLength - 7);
+	schedulePcmBytes(pcmView, rate, channels);
+}
+
 /* --------------------------------------------------------------------------
  * Framebuffer RGB565 renderer
  * -------------------------------------------------------------------------- */
-function handleFramePacket(view) {
-	if (view.byteLength < 5) return;
-	const w = view.getUint16(1, false);
-	const h = view.getUint16(3, false);
-	const expectedBytes = 5 + w * h * 2;
-	if (w <= 0 || h <= 0 || view.byteLength < expectedBytes) return;
+function renderRgb565Bytes(bytes, w, h) {
+	const pxCount = w * h;
+	if (w <= 0 || h <= 0 || bytes.byteLength < pxCount * 2) return;
 
 	if (el.canvas.width !== w || el.canvas.height !== h) {
 		el.canvas.width = w;
@@ -280,9 +304,6 @@ function handleFramePacket(view) {
 	}
 
 	const dst = imgData.data;
-	const pxCount = w * h;
-	const bytes = new Uint8Array(view.buffer, view.byteOffset + 5, pxCount * 2);
-
 	for (let i = 0, s = 0, d = 0; i < pxCount; i++, s += 2, d += 4) {
 		const px = bytes[s] | (bytes[s + 1] << 8); // RGB565 little-endian
 		dst[d] = LUT5[(px >> 11) & 0x1f];
@@ -291,6 +312,16 @@ function handleFramePacket(view) {
 		dst[d + 3] = 255;
 	}
 	ctx.putImageData(imgData, 0, 0);
+}
+
+function handleFramePacket(view) {
+	if (view.byteLength < 5) return;
+	const w = view.getUint16(1, false);
+	const h = view.getUint16(3, false);
+	const expectedBytes = 5 + w * h * 2;
+	if (w <= 0 || h <= 0 || view.byteLength < expectedBytes) return;
+	const bytes = new Uint8Array(view.buffer, view.byteOffset + 5, w * h * 2);
+	renderRgb565Bytes(bytes, w, h);
 }
 
 /* --------------------------------------------------------------------------
@@ -382,17 +413,36 @@ requestAnimationFrame(renderLedFrame);
  * UI State Synchronization
  * -------------------------------------------------------------------------- */
 function syncUiFromState() {
+	// Runtime & build header pills
+	if (runtimeMode === "wasm") {
+		el.runtimePill.className = "pill pill-info";
+		el.runtimePill.textContent = "WASM · Browser";
+		el.connPill.className = "pill pill-ok";
+		el.connPill.textContent = deviceState.build?.shortCommit ? `Build ${deviceState.build.shortCommit}` : "In-Browser";
+		el.buildRuntimeBadge.textContent = "WASM";
+		el.rebuildBtn.classList.add("hidden");
+		el.brandSub.textContent = deviceState.build?.name
+			? `${deviceState.build.name} · LVGL 9.6 · 240×320`
+			: "WebAssembly sonix-player · LVGL 9.6 · 240×320";
+	} else if (runtimeMode === "native") {
+		el.runtimePill.className = "pill pill-muted";
+		el.runtimePill.textContent = "Native Bridge";
+		el.buildRuntimeBadge.textContent = "NATIVE";
+		el.rebuildBtn.classList.remove("hidden");
+		el.brandSub.textContent = "Native sonix-player · LVGL 9.6 · 240×320";
+	}
+
 	// Lifecycle badge
 	const lc = deviceState.lifecycle;
 	el.lifecyclePill.className = "pill";
 	if (lc === "running") {
 		el.lifecyclePill.classList.add("pill-ok");
 		el.lifecyclePill.textContent =
-			deviceState.mode === "charge_screen" ? "Charge Screen" : "Running";
+			deviceState.mode === "charge_screen" || deviceState.chargeScreen ? "Charge Screen" : "Running";
 	} else if (lc === "building") {
 		el.lifecyclePill.classList.add("pill-warn");
 		el.lifecyclePill.textContent = "Building...";
-	} else if (lc === "powered_off") {
+	} else if (lc === "powered_off" || lc === "stopped") {
 		el.lifecyclePill.classList.add("pill-muted");
 		el.lifecyclePill.textContent = "Powered Off";
 	} else if (lc === "crashed") {
@@ -404,7 +454,7 @@ function syncUiFromState() {
 	}
 
 	// Power Off / Boot toggle button
-	el.powerToggleBtn.textContent = lc === "powered_off" ? "Boot V1" : "Power Off";
+	el.powerToggleBtn.textContent = lc === "powered_off" || lc === "stopped" ? "Boot V1" : "Power Off";
 
 	// FPS & audio pills
 	el.fpsPill.textContent = `${deviceState.fps || 0} FPS`;
@@ -427,17 +477,27 @@ function syncUiFromState() {
 	el.teleVolume.textContent = `${deviceState.volume ?? 50}%`;
 	el.rotBadge.classList.toggle("hidden", !deviceState.rotated);
 
-	if (lc === "building") {
+	if (buildBusyText) {
+		el.screenOverlay.classList.remove("hidden");
+		el.overlayTitle.textContent = "Loading Firmware...";
+		el.overlaySub.textContent = buildBusyText;
+		el.overlayBootBtn.classList.add("hidden");
+		el.teleScreen.textContent = "Loading";
+	} else if (lc === "building") {
 		el.screenOverlay.classList.remove("hidden");
 		el.overlayTitle.textContent = "Rebuilding Firmware...";
 		el.overlaySub.textContent = "Compiling sonix_player_web via make web-emu";
 		el.overlayBootBtn.classList.add("hidden");
 		el.teleScreen.textContent = "Building";
-	} else if (lc === "powered_off") {
+	} else if (lc === "powered_off" || lc === "stopped") {
 		el.screenOverlay.classList.remove("hidden");
-		el.overlayTitle.textContent = "TempoTec V1 Off";
-		el.overlaySub.textContent = "Hold side PWR button (1s) or click below to boot";
-		el.overlayBootBtn.classList.remove("hidden");
+		el.overlayTitle.textContent = runtimeMode === "wasm" && !wasmBackend?.activeBundle ? "Select a Sonix Build" : "TempoTec V1 Off";
+		el.overlaySub.textContent =
+			runtimeMode === "wasm" && !wasmBackend?.activeBundle
+				? "Choose a published build or drop a .sonix-web.zip file on the right"
+				: "Hold side PWR button (1s) or click below to boot";
+		el.overlayBootBtn.textContent = "Power On V1";
+		el.overlayBootBtn.classList.toggle("hidden", runtimeMode === "wasm" && !wasmBackend?.activeBundle);
 		el.teleScreen.textContent = "Powered Off";
 	} else if (lc === "crashed") {
 		el.screenOverlay.classList.remove("hidden");
@@ -487,15 +547,30 @@ function syncUiFromState() {
 }
 
 /* --------------------------------------------------------------------------
- * WebSocket connection (relative URL, works behind proxies)
+ * Transport dispatch (WebAssembly in-browser OR local WebSocket server)
  * -------------------------------------------------------------------------- */
 function sendWsJson(obj) {
+	if (runtimeMode === "wasm") {
+		if (!wasmBackend) return;
+		if (obj.type === "pointer") wasmBackend.sendPointer(obj.x, obj.y, obj.down);
+		else if (obj.type === "key") wasmBackend.sendKey(obj.button, obj.down);
+		return;
+	}
 	if (ws && ws.readyState === WebSocket.OPEN) {
 		ws.send(JSON.stringify(obj));
 	}
 }
 
+function disconnectWs() {
+	wsClosedManually = true;
+	if (ws) {
+		try { ws.close(); } catch {}
+		ws = null;
+	}
+}
+
 function connectWs() {
+	wsClosedManually = false;
 	const proto = location.protocol === "https:" ? "wss:" : "ws:";
 	const url = `${proto}//${location.host}/ws`;
 	el.connPill.className = "pill pill-warn";
@@ -506,6 +581,7 @@ function connectWs() {
 	ws = sock;
 
 	sock.onopen = () => {
+		if (runtimeMode !== "native") return;
 		reconnectDelay = 500;
 		el.connPill.className = "pill pill-ok";
 		el.connPill.textContent = "Connected";
@@ -513,6 +589,7 @@ function connectWs() {
 	};
 
 	sock.onmessage = (ev) => {
+		if (runtimeMode !== "native") return;
 		if (ev.data instanceof ArrayBuffer) {
 			const view = new DataView(ev.data);
 			if (view.byteLength < 1) return;
@@ -534,6 +611,7 @@ function connectWs() {
 
 	sock.onclose = () => {
 		if (ws === sock) ws = null;
+		if (wsClosedManually || runtimeMode !== "native") return;
 		el.connPill.className = "pill pill-err";
 		el.connPill.textContent = "Reconnecting";
 		setTimeout(connectWs, reconnectDelay);
@@ -566,12 +644,27 @@ function handleServerJson(msg) {
 			syncUiFromState();
 			break;
 		case "led":
-			deviceState.led = msg.led;
+			deviceState.led = msg.led || {
+				mode: msg.mode || "off",
+				r: msg.r || 0,
+				g: msg.g || 0,
+				b: msg.b || 0,
+				r_step: msg.r_step || 0,
+				g_step: msg.g_step || 0,
+				b_step: msg.b_step || 0,
+				rise_ms: msg.rise_ms || 0,
+				fall_ms: msg.fall_ms || 0,
+				period_ms: msg.period_ms || 0,
+			};
 			ledAnimStart = performance.now();
 			updateLedMetadata();
 			break;
 		case "backlight":
-			deviceState.backlight = msg.backlight;
+			deviceState.backlight = msg.backlight || {
+				value: msg.value,
+				max: msg.max,
+				percent: msg.percent,
+			};
 			syncUiFromState();
 			break;
 		case "screen":
@@ -820,6 +913,11 @@ el.screenshotBtn.addEventListener("click", captureBrowserScreenshot);
 
 el.deviceShotBtn.addEventListener("click", async () => {
 	triggerShutterFlash();
+	if (runtimeMode === "wasm") {
+		wasmBackend?.requestDeviceScreenshot();
+		showToast("Requested firmware screenshot -> /Screenshots/");
+		return;
+	}
 	await fetch("/api/screenshot/device", { method: "POST" });
 	showToast("Requested firmware screenshot -> /Screenshots/");
 });
@@ -866,6 +964,10 @@ function pushBatteryUpdate(percent, status, immediate = false) {
 	syncUiFromState();
 
 	const send = () => {
+		if (runtimeMode === "wasm") {
+			wasmBackend?.setBattery(deviceState.battery.percent, deviceState.battery.status);
+			return;
+		}
 		fetch("/api/battery", {
 			method: "POST",
 			headers: { "Content-Type": "application/json" },
@@ -921,6 +1023,10 @@ el.comboShotBtn.addEventListener("click", () => {
 });
 
 async function postPowerAction(action) {
+	if (runtimeMode === "wasm") {
+		await wasmBackend?.powerAction(action);
+		return;
+	}
 	await fetch("/api/power", {
 		method: "POST",
 		headers: { "Content-Type": "application/json" },
@@ -939,7 +1045,7 @@ el.rebootBtn.addEventListener("click", () => {
 });
 
 el.powerToggleBtn.addEventListener("click", () => {
-	if (deviceState.lifecycle === "powered_off") {
+	if (deviceState.lifecycle === "powered_off" || deviceState.lifecycle === "stopped") {
 		showToast("Booting TempoTec V1...");
 		postPowerAction("boot");
 	} else {
@@ -976,6 +1082,13 @@ function applyAirpods() {
 		reboot: true,
 	};
 	el.airpodsControls.classList.toggle("enabled", payload.enabled);
+	if (runtimeMode === "wasm") {
+		wasmBackend
+			?.setAirpods(payload)
+			.then(() => showToast(payload.enabled ? "Applied AirPods telemetry (rebooting)" : "Disabled AirPods telemetry"))
+			.catch(() => {});
+		return;
+	}
 	fetch("/api/airpods", {
 		method: "POST",
 		headers: { "Content-Type": "application/json" },
@@ -1034,6 +1147,15 @@ async function refreshSdList(dir = currentSdDir) {
 	currentSdDir = dir;
 	el.sdCrumbs.textContent = `/${dir}`;
 	try {
+		if (runtimeMode === "wasm") {
+			if (!wasmBackend) {
+				renderSdEntries([]);
+				return;
+			}
+			const data = wasmBackend.listSd(dir);
+			renderSdEntries(data.items || []);
+			return;
+		}
 		const res = await fetch(`/api/sd/list?dir=${encodeURIComponent(dir)}`);
 		const data = await res.json();
 		renderSdEntries(data.items || []);
@@ -1042,7 +1164,15 @@ async function refreshSdList(dir = currentSdDir) {
 	}
 }
 
+function revokeSdBlobUrls() {
+	for (const url of activeSdBlobUrls) {
+		try { URL.revokeObjectURL(url); } catch {}
+	}
+	activeSdBlobUrls = [];
+}
+
 function renderSdEntries(items) {
+	revokeSdBlobUrls();
 	el.sdList.innerHTML = "";
 
 	if (currentSdDir) {
@@ -1096,32 +1226,71 @@ function renderSdEntries(items) {
 			sizeEl.textContent = formatSize(item.size);
 			actions.appendChild(sizeEl);
 
-			const fileUrl = `/api/sd/file?path=${encodeURIComponent(item.path)}`;
 			const isImage = /\.(png|jpe?g|webp|bmp)$/i.test(item.name);
+
+			const openWasmOrNativeFile = async (downloadOnly) => {
+				if (runtimeMode === "wasm") {
+					const bytes = await wasmBackend.readSdFile(item.path);
+					if (!bytes) {
+						showToast(`Failed to read ${item.name}`);
+						return;
+					}
+					const mime = item.name.toLowerCase().endsWith(".png")
+						? "image/png"
+						: "application/octet-stream";
+					const blobUrl = URL.createObjectURL(new Blob([bytes], { type: mime }));
+					activeSdBlobUrls.push(blobUrl);
+					if (downloadOnly) {
+						const a = document.createElement("a");
+						a.href = blobUrl;
+						a.download = item.name;
+						document.body.appendChild(a);
+						a.click();
+						a.remove();
+					} else {
+						openShotModal(item.name, blobUrl);
+					}
+					return;
+				}
+				const fileUrl = `/api/sd/file?path=${encodeURIComponent(item.path)}`;
+				if (downloadOnly) {
+					const a = document.createElement("a");
+					a.href = fileUrl;
+					a.download = item.name;
+					document.body.appendChild(a);
+					a.click();
+					a.remove();
+				} else {
+					openShotModal(item.name, fileUrl);
+				}
+			};
 
 			if (isImage) {
 				const previewBtn = document.createElement("button");
 				previewBtn.className = "btn btn-ghost btn-xs";
 				previewBtn.textContent = "View";
-				previewBtn.addEventListener("click", () => openShotModal(item.name, fileUrl));
-				nameWrap.addEventListener("click", () => openShotModal(item.name, fileUrl));
+				previewBtn.addEventListener("click", () => openWasmOrNativeFile(false));
+				nameWrap.addEventListener("click", () => openWasmOrNativeFile(false));
 				actions.appendChild(previewBtn);
 			}
 
-			const dl = document.createElement("a");
-			dl.className = "btn btn-ghost btn-xs";
-			dl.href = fileUrl;
-			dl.download = item.name;
-			dl.textContent = "DL";
-			actions.appendChild(dl);
+			const dlBtn = document.createElement("button");
+			dlBtn.className = "btn btn-ghost btn-xs";
+			dlBtn.textContent = "DL";
+			dlBtn.addEventListener("click", () => openWasmOrNativeFile(true));
+			actions.appendChild(dlBtn);
 
 			const delBtn = document.createElement("button");
 			delBtn.className = "btn btn-danger-soft btn-xs";
 			delBtn.textContent = "Del";
 			delBtn.addEventListener("click", async () => {
-				await fetch(`/api/sd/file?path=${encodeURIComponent(item.path)}`, {
-					method: "DELETE",
-				});
+				if (runtimeMode === "wasm") {
+					await wasmBackend.deleteSdFile(item.path);
+				} else {
+					await fetch(`/api/sd/file?path=${encodeURIComponent(item.path)}`, {
+						method: "DELETE",
+					});
+				}
 				refreshSdList();
 			});
 			actions.appendChild(delBtn);
@@ -1137,15 +1306,25 @@ async function uploadFilesToSd(fileList) {
 	if (!files.length) return;
 	const targetDir = currentSdDir || "Music";
 	for (const file of files) {
-		const url = `/api/sd/upload?dir=${encodeURIComponent(targetDir)}&name=${encodeURIComponent(file.name)}`;
-		const res = await fetch(url, {
-			method: "POST",
-			body: file,
-		});
-		if (res.ok) {
-			showToast(`Uploaded ${file.name} -> /${targetDir}/`);
+		if (runtimeMode === "wasm") {
+			try {
+				const buf = await file.arrayBuffer();
+				await wasmBackend.uploadSdFile(targetDir, file.name, buf);
+				showToast(`Copied ${file.name} -> /${targetDir}/`);
+			} catch {
+				showToast(`Failed to copy ${file.name}`);
+			}
 		} else {
-			showToast(`Failed to upload ${file.name}`);
+			const url = `/api/sd/upload?dir=${encodeURIComponent(targetDir)}&name=${encodeURIComponent(file.name)}`;
+			const res = await fetch(url, {
+				method: "POST",
+				body: file,
+			});
+			if (res.ok) {
+				showToast(`Uploaded ${file.name} -> /${targetDir}/`);
+			} else {
+				showToast(`Failed to upload ${file.name}`);
+			}
 		}
 	}
 	refreshSdList();
@@ -1290,11 +1469,369 @@ el.logCopyBtn.addEventListener("click", async () => {
 });
 
 el.logClearBtn.addEventListener("click", async () => {
+	if (runtimeMode === "wasm") {
+		allLogs.length = 0;
+		rebuildLogDom();
+		return;
+	}
 	await fetch("/api/logs/clear", { method: "POST" });
 });
 
 /* --------------------------------------------------------------------------
- * Boot frontend
+ * WebAssembly Runtime & Universal .sonix-web.zip Firmware Build Loader
  * -------------------------------------------------------------------------- */
+function ensureWasmBackend() {
+	if (wasmBackend) return wasmBackend;
+	wasmBackend = new SonixWasmBackend({
+		onFrame: (rgb565Bytes, w, h) => {
+			if (runtimeMode !== "wasm") return;
+			renderRgb565Bytes(rgb565Bytes, w, h);
+		},
+		onPcm: (pcmBytes, rate, channels) => {
+			if (runtimeMode !== "wasm") return;
+			schedulePcmBytes(pcmBytes, rate, channels);
+		},
+		onState: (state) => {
+			if (runtimeMode !== "wasm") return;
+			deviceState = { ...deviceState, ...state };
+			syncUiFromState();
+		},
+		onEvent: (ev) => {
+			if (runtimeMode !== "wasm") return;
+			handleServerJson(ev);
+		},
+		onLog: (entry) => {
+			if (runtimeMode !== "wasm") return;
+			appendLogEntry(entry);
+		},
+		onSdChanged: () => {
+			if (runtimeMode !== "wasm") return;
+			refreshSdList();
+		},
+		onBuildStatus: (label, frac) => {
+			if (label == null) {
+				setBuildProgress(null, null);
+			} else {
+				setBuildProgress(Math.round((frac || 0) * 100), label);
+			}
+		},
+	});
+	return wasmBackend;
+}
+
+function switchToWasmMode() {
+	if (runtimeMode === "wasm") return ensureWasmBackend();
+	disconnectWs();
+	runtimeMode = "wasm";
+	const backend = ensureWasmBackend();
+	deviceState = { ...deviceState, ...backend.state };
+	syncUiFromState();
+	return backend;
+}
+
+function setBuildProgress(percent, label) {
+	if (label == null) {
+		buildBusyText = null;
+		el.buildProgress.classList.add("hidden");
+		syncUiFromState();
+		return;
+	}
+	buildBusyText = label;
+	el.buildProgress.classList.remove("hidden");
+	el.buildProgressText.textContent = label;
+	el.buildProgressFill.style.width = `${Math.max(4, Math.min(100, percent))}%`;
+	syncUiFromState();
+}
+
+function updateSelectedBuildMeta() {
+	const selectedId = el.buildSelect.value;
+	const item = catalogBuilds.find((b) => b.id === selectedId);
+	if (!item) {
+		el.buildDelBtn.classList.add("hidden");
+		el.buildMeta.innerHTML =
+			'Select a published CI build or drop any <code>.sonix-web.zip</code> bundle below.';
+		return;
+	}
+	el.buildDelBtn.classList.toggle("hidden", item.source !== "custom");
+	const bits = [];
+	if (item.ref) bits.push(`Branch/Ref: <code>${item.ref}</code>`);
+	if (item.shortCommit) bits.push(`Commit: <code>${item.shortCommit}</code>`);
+	if (item.size) bits.push(`Size: <code>${formatSize(item.size)}</code>`);
+	if (item.builtAt) {
+		const dt = new Date(item.builtAt);
+		if (!Number.isNaN(dt.getTime())) {
+			bits.push(`Built: <code>${dt.toISOString().slice(0, 16).replace("T", " ")} UTC</code>`);
+		}
+	}
+	if (item.source === "custom") bits.push("<code>Saved locally in browser</code>");
+	el.buildMeta.innerHTML = bits.join(" &middot; ") || "Ready to boot in WebAssembly.";
+}
+
+async function refreshBuildCatalog(selectId = null) {
+	const items = [];
+
+	// 1. Static catalog published alongside index.html (GitHub Pages or local dist/)
+	try {
+		const res = await fetch("./builds/manifest.json", { cache: "no-cache" });
+		if (res.ok) {
+			const data = await res.json();
+			if (Array.isArray(data.builds)) {
+				for (const b of data.builds) {
+					const rawUrl = b.url || (b.file ? `./builds/${b.file}` : "");
+					if (!rawUrl) continue;
+					items.push({
+						id: `cat:${b.id || b.file || rawUrl}`,
+						name: b.name || `${b.ref || "sonix"} (${b.shortCommit || "build"})`,
+						ref: b.ref || "",
+						shortCommit: b.shortCommit || (b.commit ? b.commit.slice(0, 8) : ""),
+						builtAt: b.builtAt || "",
+						size: b.size || 0,
+						url: rawUrl,
+						source: "catalog",
+					});
+				}
+			}
+		}
+	} catch {
+		/* static catalog optional when running purely with dropped .sonix-web.zip files */
+	}
+
+	// 2. User-imported custom builds saved in IndexedDB
+	try {
+		const backend = ensureWasmBackend();
+		const custom = await backend.listSavedCustomBuilds();
+		for (const c of custom) {
+			items.push({
+				id: c.id,
+				name: `[Custom] ${c.name || c.id}`,
+				ref: c.ref || "custom",
+				shortCommit: c.shortCommit || "",
+				builtAt: c.builtAt || "",
+				size: c.size || 0,
+				source: "custom",
+			});
+		}
+	} catch {
+		/* ignore */
+	}
+
+	catalogBuilds = items;
+	el.buildSelect.innerHTML = "";
+	if (items.length === 0) {
+		const opt = document.createElement("option");
+		opt.value = "";
+		opt.textContent = "No published builds yet — drop a .sonix-web.zip below";
+		el.buildSelect.appendChild(opt);
+	} else {
+		for (const item of items) {
+			const opt = document.createElement("option");
+			opt.value = item.id;
+			opt.textContent = item.name;
+			el.buildSelect.appendChild(opt);
+		}
+		if (selectId && items.some((i) => i.id === selectId)) {
+			el.buildSelect.value = selectId;
+		}
+	}
+	updateSelectedBuildMeta();
+	return items;
+}
+
+async function bootCatalogEntry(entry) {
+	if (!entry) return;
+	const backend = switchToWasmMode();
+	await backend.initStorage();
+	try {
+		if (entry.source === "custom") {
+			setBuildProgress(25, `Reading ${entry.name}...`);
+			const buf = await backend.getSavedCustomBuildBuffer(entry.id);
+			if (!buf) throw new Error("Saved custom build not found in browser storage");
+			await backend.loadBundleFromBuffer(buf, { ...entry, saveCustom: false });
+		} else {
+			setBuildProgress(10, `Downloading ${entry.name}...`);
+			await backend.loadBundleFromUrl(entry.url, entry);
+		}
+		setBuildProgress(null, null);
+		showToast(`Booted ${entry.name}`);
+		refreshSdList();
+	} catch (err) {
+		setBuildProgress(null, null);
+		showToast(`Failed to load build: ${err.message}`);
+		appendLogEntry({
+			ts: Date.now(),
+			stream: "stderr",
+			line: `[wasm-loader] ${err.message}`,
+		});
+	}
+}
+
+async function loadLocalZipFile(file) {
+	if (!file) return;
+	const backend = switchToWasmMode();
+	await backend.initStorage();
+	try {
+		setBuildProgress(15, `Reading ${file.name}...`);
+		const buf = await file.arrayBuffer();
+		const meta = await backend.loadBundleFromBuffer(buf, {
+			name: file.name.replace(/\.sonix-web\.zip$/i, "").replace(/\.zip$/i, ""),
+			saveCustom: true,
+		});
+		setBuildProgress(null, null);
+		await refreshBuildCatalog(meta?.id || null);
+		showToast(`Booted ${file.name}`);
+		refreshSdList();
+	} catch (err) {
+		setBuildProgress(null, null);
+		showToast(`Invalid .sonix-web.zip: ${err.message}`);
+		appendLogEntry({
+			ts: Date.now(),
+			stream: "stderr",
+			line: `[wasm-loader] ${err.message}`,
+		});
+	}
+}
+
+el.buildSelect.addEventListener("change", updateSelectedBuildMeta);
+
+el.buildLoadBtn.addEventListener("click", () => {
+	const entry = catalogBuilds.find((b) => b.id === el.buildSelect.value);
+	if (!entry) {
+		showToast("Drop or select a .sonix-web.zip firmware bundle first");
+		return;
+	}
+	bootCatalogEntry(entry);
+});
+
+el.buildDelBtn.addEventListener("click", async () => {
+	const entry = catalogBuilds.find((b) => b.id === el.buildSelect.value);
+	if (!entry || entry.source !== "custom") return;
+	const backend = ensureWasmBackend();
+	await backend.deleteSavedCustomBuild(entry.id);
+	showToast(`Deleted ${entry.name}`);
+	await refreshBuildCatalog();
+});
+
+el.buildFileInput.addEventListener("change", () => {
+	const file = el.buildFileInput.files?.[0];
+	el.buildFileInput.value = "";
+	if (file) loadLocalZipFile(file);
+});
+
+el.buildDropzone.addEventListener("click", () => el.buildFileInput.click());
+
+["dragenter", "dragover"].forEach((evName) => {
+	el.buildDropzone.addEventListener(evName, (ev) => {
+		ev.preventDefault();
+		el.buildDropzone.classList.add("dragover");
+	});
+});
+["dragleave", "drop"].forEach((evName) => {
+	el.buildDropzone.addEventListener(evName, (ev) => {
+		ev.preventDefault();
+		el.buildDropzone.classList.remove("dragover");
+	});
+});
+el.buildDropzone.addEventListener("drop", (ev) => {
+	const file = ev.dataTransfer?.files?.[0];
+	if (file) loadLocalZipFile(file);
+});
+
+el.buildUrlBtn.addEventListener("click", async () => {
+	const url = el.buildUrlInput.value.trim();
+	if (!url) return;
+	const backend = switchToWasmMode();
+	await backend.initStorage();
+	try {
+		setBuildProgress(10, `Fetching ${url}...`);
+		await backend.loadBundleFromUrl(url, { name: url.split("/").pop() || "Remote Build" });
+		setBuildProgress(null, null);
+		showToast("Fetched & booted firmware bundle");
+		refreshSdList();
+	} catch (err) {
+		setBuildProgress(null, null);
+		showToast(`Fetch failed: ${err.message}`);
+	}
+});
+
+// Allow dropping a .sonix-web.zip anywhere on the stage or page
+window.addEventListener("dragover", (ev) => {
+	if (ev.dataTransfer?.types?.includes("Files")) {
+		ev.preventDefault();
+	}
+});
+window.addEventListener("drop", (ev) => {
+	if (ev.target === el.sdDropzone || el.sdDropzone.contains(ev.target)) return;
+	if (ev.target === el.buildDropzone || el.buildDropzone.contains(ev.target)) return;
+	const file = ev.dataTransfer?.files?.[0];
+	if (file && file.name.toLowerCase().endsWith(".zip")) {
+		ev.preventDefault();
+		loadLocalZipFile(file);
+	}
+});
+
+/* --------------------------------------------------------------------------
+ * Auto-detect runtime mode (Local Node Server vs Static GitHub Pages WASM)
+ * -------------------------------------------------------------------------- */
+async function probeLocalServer() {
+	try {
+		const ctrl = new AbortController();
+		const timer = setTimeout(() => ctrl.abort(), 900);
+		const res = await fetch("/api/state", { signal: ctrl.signal, cache: "no-store" });
+		clearTimeout(timer);
+		if (!res.ok) return false;
+		const ct = res.headers.get("content-type") || "";
+		if (!ct.includes("application/json")) return false;
+		const data = await res.json();
+		return Boolean(data && typeof data === "object" && data.state);
+	} catch {
+		return false;
+	}
+}
+
+async function bootstrap() {
+	const params = new URLSearchParams(location.search);
+	const forcedMode = (params.get("mode") || "").toLowerCase();
+	const explicitBuildUrl = params.get("build");
+
+	const catalog = await refreshBuildCatalog();
+
+	const hasLocalServer =
+		forcedMode === "wasm" || explicitBuildUrl ? false : await probeLocalServer();
+
+	if (hasLocalServer && forcedMode !== "wasm") {
+		runtimeMode = "native";
+		syncUiFromState();
+		connectWs();
+		return;
+	}
+
+	// Static GitHub Pages / In-Browser WebAssembly Mode!
+	const backend = switchToWasmMode();
+	await backend.initStorage();
+
+	if (explicitBuildUrl) {
+		el.buildUrlInput.value = explicitBuildUrl;
+		try {
+			setBuildProgress(10, `Fetching ${explicitBuildUrl}...`);
+			await backend.loadBundleFromUrl(explicitBuildUrl, {
+				name: explicitBuildUrl.split("/").pop() || "URL Build",
+			});
+			setBuildProgress(null, null);
+			refreshSdList();
+			return;
+		} catch (err) {
+			setBuildProgress(null, null);
+			showToast(`Could not load ?build URL: ${err.message}`);
+		}
+	}
+
+	if (catalog.length > 0) {
+		await bootCatalogEntry(catalog[0]);
+	} else {
+		syncUiFromState();
+		refreshSdList();
+	}
+}
+
 syncUiFromState();
-connectWs();
+bootstrap();
