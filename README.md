@@ -4,6 +4,8 @@ This repository is a community port (well, much more than just a simple port) of
 
 The firmware builder starts with an official V1 1.3 update package, replaces the stock music player and its interface with Sonix, then repackages the update as `v1.upt`.
 
+You can try the firrmware in the simulator i made here: https://mr-f0xx.github.io/sonix-player-tempotec-v1/
+
 ## Previews
 
 Showcase of the default theme. Click any picture to open it full size. (This is not the default font neither the color)
