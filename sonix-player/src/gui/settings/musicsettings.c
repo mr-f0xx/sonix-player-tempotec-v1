@@ -2531,9 +2531,9 @@ static void build_library_page(gui_config_t *cfg) {
 		lv_obj_add_state(quality_badges_switch, LV_STATE_CHECKED);
 	}
 
-	// Deleting tracks from the card: the trash button in a selection. Off by
-	// default, because it is the one thing a selection can do that cannot be
-	// undone.
+	// Deleting tracks from the card: from a library selection or the now-playing
+	// menu. Off by default, because it is the one thing the player can do that
+	// cannot be undone.
 	settingsrow_toggle(container, "musicsettings_allow_delete", &allow_delete_switch, allow_delete_cb);
 	option_note(container, "musicsettings_allow_delete_note");
 	if (musicsettings_allow_delete()) {
