@@ -2,6 +2,8 @@
 
 # Target executables
 HOST_BIN = sonix_player_host
+WEB_EMU_BIN = sonix_player_web
+WASM_JS = sonix_player_wasm.js
 TARGET_BIN = sonix_player
 # Built from launcher/, see "sonix_launch" below.
 LAUNCH_BIN = sonix_launch
@@ -216,10 +218,106 @@ TARGET_LD = $(CROSS_CXX)
 # Object files
 HOST_OBJS = $(APP_SRCS:src/%.c=build_host/%.o) $(APP_CXX_SRCS:src/%.cpp=build_host/%.opp) \
 			$(LVGL_SRCS:$(LVGL_DIR)/%.c=build_host/lvgl/%.o)
+WEB_EMU_BRIDGE_SRCS = webemu/webemu.c webemu/webemu_alsa.c
+WEB_EMU_OBJS = $(APP_SRCS:src/%.c=build_web/%.o) $(APP_CXX_SRCS:src/%.cpp=build_web/%.opp) \
+			   $(LVGL_SRCS:$(LVGL_DIR)/%.c=build_web/lvgl/%.o) \
+			   $(WEB_EMU_BRIDGE_SRCS:webemu/%.c=build_web/webemu/%.o)
 TARGET_OBJS = $(APP_SRCS:src/%.c=build_target/%.o) $(APP_CXX_SRCS:src/%.cpp=build_target/%.opp) \
 			  $(LVGL_SRCS:$(LVGL_DIR)/%.c=build_target/lvgl/%.o)
 
-.PHONY: all host target clean compile_commands.json
+# Browser-based TempoTec V1 emulator (headless LVGL framebuffer + virtual ALSA
+# PCM stream, zero SDL2 dependency). Uses system FreeType/Opus/WavPack when
+# available, or bootstraps static FreeType from GitHub automatically.
+WEB_HAVE_FT := $(shell command -v pkg-config >/dev/null 2>&1 && pkg-config --exists freetype2 && echo yes)
+WEB_HAVE_OPUS := $(shell command -v pkg-config >/dev/null 2>&1 && pkg-config --exists opusfile && echo yes)
+WEB_HAVE_WV := $(shell command -v pkg-config >/dev/null 2>&1 && pkg-config --exists wavpack && echo yes)
+
+FREETYPE_HOST_SRC = $(CURDIR)/freetype-host-src
+FREETYPE_HOST_LIB = $(FREETYPE_HOST_SRC)/objs/libfreetype.a
+
+ifeq ($(WEB_HAVE_FT),yes)
+WEB_FT_CFLAGS := $(shell pkg-config --cflags freetype2)
+WEB_FT_LIBS := $(shell pkg-config --libs freetype2)
+WEB_FT_DEP :=
+else
+WEB_FT_CFLAGS := -I$(FREETYPE_HOST_SRC)/include
+WEB_FT_LIBS := $(FREETYPE_HOST_LIB)
+WEB_FT_DEP := $(FREETYPE_HOST_LIB)
+endif
+
+ifeq ($(WEB_HAVE_OPUS),yes)
+WEB_OPUS_CFLAGS := $(shell pkg-config --cflags opusfile)
+WEB_OPUS_LIBS := $(shell pkg-config --libs opusfile)
+else
+WEB_OPUS_CFLAGS := -DSONIX_NO_OPUSFILE=1
+WEB_OPUS_LIBS :=
+endif
+
+ifeq ($(WEB_HAVE_WV),yes)
+WEB_WV_CFLAGS := $(shell pkg-config --cflags wavpack)
+WEB_WV_LIBS := $(shell pkg-config --libs wavpack)
+else
+WEB_WV_CFLAGS := -DSONIX_NO_WAVPACK=1
+WEB_WV_LIBS :=
+endif
+
+WEB_EMU_CFLAGS = $(CFLAGS) -DHOST_BUILD=1 -DHOST_WEB_EMU=1 -Iwebemu $(WEB_FT_CFLAGS) $(WEB_OPUS_CFLAGS) $(WEB_WV_CFLAGS) \
+				 -include src/system/core/glibc_compat.h
+WEB_EMU_CXXFLAGS = $(WEB_EMU_CFLAGS) $(GB_CFLAGS)
+WEB_EMU_LDFLAGS = $(WEB_FT_LIBS) $(WEB_OPUS_LIBS) $(WEB_WV_LIBS) -lpthread -lm -ldl
+
+# Emscripten WebAssembly build for static browser / GitHub Pages hosting.
+EMCC ?= emcc
+EMCXX ?= em++
+EMAR ?= emar
+
+WASM_BRIDGE_SRCS = webemu/webemu_wasm.c webemu/webemu_alsa.c
+WASM_OBJS = $(APP_SRCS:src/%.c=build_wasm/%.o) $(APP_CXX_SRCS:src/%.cpp=build_wasm/%.opp) \
+			$(LVGL_SRCS:$(LVGL_DIR)/%.c=build_wasm/lvgl/%.o) \
+			$(WASM_BRIDGE_SRCS:webemu/%.c=build_wasm/webemu/%.o)
+
+WASM_FT_REL_SRCS = \
+	src/base/ftsystem.c src/base/ftdebug.c src/base/ftinit.c src/base/ftbase.c \
+	src/base/ftbbox.c src/base/ftbdf.c src/base/ftbitmap.c src/base/ftcid.c \
+	src/base/ftfstype.c src/base/ftgasp.c src/base/ftglyph.c src/base/ftgxval.c \
+	src/base/ftmm.c src/base/ftotval.c src/base/ftpatent.c src/base/ftpfr.c \
+	src/base/ftstroke.c src/base/ftsynth.c src/base/fttype1.c src/base/ftwinfnt.c \
+	src/truetype/truetype.c src/type1/type1.c src/cff/cff.c src/cid/type1cid.c \
+	src/pfr/pfr.c src/type42/type42.c src/winfonts/winfnt.c src/pcf/pcf.c \
+	src/bdf/bdf.c src/sfnt/sfnt.c src/autofit/autofit.c src/pshinter/pshinter.c \
+	src/smooth/smooth.c src/raster/raster.c src/svg/svg.c src/sdf/sdf.c \
+	src/cache/ftcache.c src/gzip/ftgzip.c src/lzw/ftlzw.c src/bzip2/ftbzip2.c \
+	src/psaux/psaux.c src/psnames/psnames.c
+WASM_FT_OBJS = $(WASM_FT_REL_SRCS:src/%.c=build_wasm/freetype/%.o)
+WASM_FT_LIB = build_wasm/freetype/libfreetype.a
+WASM_FT_STAMP = $(FREETYPE_HOST_SRC)/include/ft2build.h
+
+# Self-bootstrap FreeType source tree before evaluating WASM_FT_OBJS prerequisites
+ifneq ($(filter web-wasm web-wasm-bundle,$(MAKECMDGOALS)),)
+ifeq ($(wildcard $(WASM_FT_STAMP)),)
+$(info Cloning FreeType VER-2-13-3 for WebAssembly build...)
+$(shell git clone --depth 1 -b VER-2-13-3 https://github.com/freetype/freetype.git "$(FREETYPE_HOST_SRC)")
+endif
+endif
+
+WASM_CFLAGS = -O2 -pthread -MMD -MP -D_FILE_OFFSET_BITS=64 -DNAME_MAX=255 -I. -I$(LVGL_DIR) -DLV_CONF_INCLUDE_SIMPLE=1 -DGB_CORE=1 \
+			  -DHOST_BUILD=1 -DHOST_WEB_EMU=1 -DSONIX_NO_OPUSFILE=1 -DSONIX_NO_WAVPACK=1 \
+			  -Iwebemu/wasm_compat -Iwebemu -I$(FREETYPE_HOST_SRC)/include \
+			  -Wno-unused-function -Wno-format-truncation -Wno-unknown-warning-option
+WASM_CXXFLAGS = $(WASM_CFLAGS) $(GB_CFLAGS)
+WASM_FT_CFLAGS = -O2 -pthread -DFT2_BUILD_LIBRARY -I$(FREETYPE_HOST_SRC)/include -I$(FREETYPE_HOST_SRC)/src
+WASM_LDFLAGS = -O2 -pthread $(WASM_FT_LIB) -Wno-pthreads-mem-growth \
+			   -sMODULARIZE=1 -sEXPORT_NAME=createSonixPlayer \
+			   -sPROXY_TO_PTHREAD=1 -sPTHREAD_POOL_SIZE=12 \
+			   -sALLOW_MEMORY_GROWTH=1 -sINITIAL_MEMORY=167772160 -sMAXIMUM_MEMORY=536870912 \
+			   -sSTACK_SIZE=2097152 -sDEFAULT_PTHREAD_STACK_SIZE=2097152 \
+			   -sEXIT_RUNTIME=1 -sFORCE_FILESYSTEM=1 \
+			   -sEXPORTED_FUNCTIONS="['_main','_malloc','_free','_webemu_wasm_pointer','_webemu_wasm_key','_webemu_wasm_screenshot','_webemu_wasm_quit']" \
+			   -sEXPORTED_RUNTIME_METHODS="['FS','HEAPU8','PThread','UTF8ToString','stringToUTF8','ccall','cwrap','ENV']" \
+			   -sINCOMING_MODULE_JS_API="['arguments','preRun','postRun','print','printErr','locateFile','wasmBinary','mainScriptUrlOrBlob','onExit','onAbort','noInitialRun']" \
+			   -lm
+
+.PHONY: all host web-emu run-web-emu web-wasm web-wasm-bundle target clean compile_commands.json
 
 all: host compile_commands.json
 
@@ -228,6 +326,51 @@ host: $(HOST_BIN) compile_commands.json
 $(HOST_BIN): $(HOST_OBJS)
 	$(HOST_LD) -o $@ $(HOST_OBJS) $(HOST_LDFLAGS)
 	@echo "Host build complete: Run './$(HOST_BIN)' to start the simulator."
+
+$(FREETYPE_HOST_LIB):
+	@if [ ! -d "$(FREETYPE_HOST_SRC)" ]; then \
+		echo "Cloning FreeType VER-2-13-3 for host emulator..."; \
+		git clone --depth 1 -b VER-2-13-3 https://github.com/freetype/freetype.git "$(FREETYPE_HOST_SRC)"; \
+	fi
+	@echo "Building static FreeType for host emulator..."
+	@$(MAKE) -C "$(FREETYPE_HOST_SRC)" setup ansi
+	@$(MAKE) -C "$(FREETYPE_HOST_SRC)" -j$$(nproc)
+
+web-emu: $(WEB_EMU_BIN)
+
+$(WEB_EMU_OBJS): $(WEB_FT_DEP)
+
+$(WEB_EMU_BIN): $(WEB_EMU_OBJS) $(WEB_FT_DEP)
+	$(HOST_LD) -o $@ $(WEB_EMU_OBJS) $(WEB_EMU_LDFLAGS)
+	@echo "Web emulator binary built: $(WEB_EMU_BIN)"
+
+run-web-emu: web-emu
+	@node ../tools/v1-emulator/server.mjs
+
+$(WASM_FT_STAMP):
+	@if [ ! -d "$(FREETYPE_HOST_SRC)" ]; then \
+		echo "Cloning FreeType VER-2-13-3 for WebAssembly build..."; \
+		git clone --depth 1 -b VER-2-13-3 https://github.com/freetype/freetype.git "$(FREETYPE_HOST_SRC)"; \
+	fi
+
+build_wasm/freetype/%.o: $(FREETYPE_HOST_SRC)/src/%.c | $(WASM_FT_STAMP)
+	@mkdir -p $(dir $@)
+	$(EMCC) $(WASM_FT_CFLAGS) -c $< -o $@
+
+$(WASM_FT_LIB): $(WASM_FT_OBJS)
+	@mkdir -p $(dir $@)
+	$(EMAR) rcs $@ $(WASM_FT_OBJS)
+
+web-wasm: $(WASM_JS)
+
+$(WASM_OBJS): | $(WASM_FT_STAMP)
+
+$(WASM_JS): $(WASM_OBJS) $(WASM_FT_LIB)
+	$(EMCXX) -o $@ $(WASM_OBJS) $(WASM_LDFLAGS)
+	@echo "WebAssembly build complete: $(WASM_JS) + sonix_player_wasm.wasm"
+
+web-wasm-bundle: web-wasm
+	@node ../tools/v1-emulator/pack-wasm-bundle.mjs
 
 # The key that opens streaming-keys.bin (src/system/streaming/streamkeys.h),
 # kept outside git and compiled into streamkeys.c. The header is rewritten only
@@ -249,7 +392,7 @@ $(STREAMKEYS_KEY_H): FORCE
 	@if cmp -s $@.tmp $@; then rm -f $@.tmp; else mv $@.tmp $@; \
 		if [ -f "$(STREAMKEYS_KEY)" ]; then echo "streamkeys: key from $(STREAMKEYS_KEY)"; \
 		else echo "streamkeys: no $(STREAMKEYS_KEY), this build reads only a plain streaming-keys.ini"; fi; fi
-build_host/system/streaming/streamkeys.o build_target/system/streaming/streamkeys.o: $(STREAMKEYS_KEY_H)
+build_host/system/streaming/streamkeys.o build_web/system/streaming/streamkeys.o build_wasm/system/streaming/streamkeys.o build_target/system/streaming/streamkeys.o: $(STREAMKEYS_KEY_H)
 
 build_host/%.o: src/%.c
 	@mkdir -p $(dir $@)
@@ -262,6 +405,38 @@ build_host/%.opp: src/%.cpp
 build_host/lvgl/%.o: $(LVGL_DIR)/%.c
 	@mkdir -p $(dir $@)
 	$(CC) $(HOST_CFLAGS) -c $< -o $@
+
+build_web/%.o: src/%.c
+	@mkdir -p $(dir $@)
+	$(CC) $(WEB_EMU_CFLAGS) -c $< -o $@
+
+build_web/%.opp: src/%.cpp
+	@mkdir -p $(dir $@)
+	$(CXX) $(WEB_EMU_CXXFLAGS) -c $< -o $@
+
+build_web/lvgl/%.o: $(LVGL_DIR)/%.c
+	@mkdir -p $(dir $@)
+	$(CC) $(WEB_EMU_CFLAGS) -c $< -o $@
+
+build_web/webemu/%.o: webemu/%.c
+	@mkdir -p $(dir $@)
+	$(CC) $(WEB_EMU_CFLAGS) -c $< -o $@
+
+build_wasm/%.o: src/%.c
+	@mkdir -p $(dir $@)
+	$(EMCC) $(WASM_CFLAGS) -c $< -o $@
+
+build_wasm/%.opp: src/%.cpp
+	@mkdir -p $(dir $@)
+	$(EMCXX) $(WASM_CXXFLAGS) -c $< -o $@
+
+build_wasm/lvgl/%.o: $(LVGL_DIR)/%.c
+	@mkdir -p $(dir $@)
+	$(EMCC) $(WASM_CFLAGS) -c $< -o $@
+
+build_wasm/webemu/%.o: webemu/%.c
+	@mkdir -p $(dir $@)
+	$(EMCC) $(WASM_CFLAGS) -c $< -o $@
 
 target: $(TARGET_BIN) $(LAUNCH_BIN) compile_commands.json
 
@@ -385,7 +560,7 @@ compile_commands.json:
 	@python3 generate_compile_commands.py
 
 clean:
-	rm -rf build_host build_target build_gen $(HOST_BIN) $(TARGET_BIN) $(TARGET_DEBUG_BIN) $(LAUNCH_BIN) compile_commands.json compile_flags.txt
+	rm -rf build_host build_web build_wasm build_target build_gen $(HOST_BIN) $(WEB_EMU_BIN) sonix_player_wasm.js sonix_player_wasm.wasm sonix_player_wasm.worker.js $(TARGET_BIN) $(TARGET_DEBUG_BIN) $(LAUNCH_BIN) compile_commands.json compile_flags.txt
 
 # The bundled libraries and their extracted sources. The downloaded tarballs stay.
 .PHONY: libs-clean
@@ -504,4 +679,6 @@ $(WAVPACK_LIB): $(CROSS_CC)
 # so the two compile rules cannot overlap, which is why both suffixes are
 # substituted -- otherwise make reads an object file as a makefile.
 -include $(patsubst %.opp,%.d,$(patsubst %.o,%.d,$(HOST_OBJS)))
+-include $(patsubst %.opp,%.d,$(patsubst %.o,%.d,$(WEB_EMU_OBJS)))
+-include $(patsubst %.opp,%.d,$(patsubst %.o,%.d,$(WASM_OBJS)))
 -include $(patsubst %.opp,%.d,$(patsubst %.o,%.d,$(TARGET_OBJS)))

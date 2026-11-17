@@ -1,5 +1,24 @@
 #include "wavpackdec.h"
 
+#ifdef SONIX_NO_WAVPACK
+
+#include <stdio.h>
+
+wavpackdec_t *wavpackdec_open(const char *filepath) {
+	fprintf(stderr, "wavpack: %s skipped (built without libwavpack)\n", filepath ? filepath : "(null)");
+	return NULL;
+}
+void wavpackdec_close(wavpackdec_t *w) { (void)w; }
+int wavpackdec_channels(const wavpackdec_t *w) { (void)w; return 0; }
+int wavpackdec_sample_rate(const wavpackdec_t *w) { (void)w; return 0; }
+int wavpackdec_bits(const wavpackdec_t *w) { (void)w; return 16; }
+uint64_t wavpackdec_total_frames(const wavpackdec_t *w) { (void)w; return 0; }
+uint64_t wavpackdec_read_s32(wavpackdec_t *w, uint64_t frames, int32_t *out) { (void)w; (void)frames; (void)out; return 0; }
+uint64_t wavpackdec_read_s16(wavpackdec_t *w, uint64_t frames, short *out) { (void)w; (void)frames; (void)out; return 0; }
+bool wavpackdec_seek(wavpackdec_t *w, uint64_t frame) { (void)w; (void)frame; return false; }
+
+#else
+
 #include <wavpack/wavpack.h>
 
 #include <stdio.h>
@@ -208,3 +227,5 @@ bool wavpackdec_seek(wavpackdec_t *w, uint64_t frame) {
 	}
 	return WavpackSeekSample64(w->wpc, (int64_t)frame) != 0;
 }
+
+#endif /* SONIX_NO_WAVPACK */

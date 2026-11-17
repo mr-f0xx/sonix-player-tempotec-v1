@@ -159,9 +159,14 @@
 #define LV_USE_THEME_MONO 0
 #define LV_USE_THEME_SIMPLE 0
 
-/* The display and input drivers: SDL in the simulator, framebuffer and evdev
- * on the device. */
-#ifdef HOST_BUILD
+/* The display and input drivers: SDL in the desktop simulator, headless
+ * framebuffer bridge in the browser emulator, framebuffer and evdev on the
+ * device. */
+#if defined(HOST_WEB_EMU)
+  #define LV_USE_SDL 0
+  #define LV_USE_LINUX_FBDEV 0
+  #define LV_USE_EVDEV 0
+#elif defined(HOST_BUILD)
   #define LV_USE_SDL 1
   #define LV_SDL_INCLUDE_PATH <SDL2/SDL.h>
   #define LV_USE_LINUX_FBDEV 0

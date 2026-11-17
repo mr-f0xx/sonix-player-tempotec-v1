@@ -1,0 +1,184 @@
+name: TempoTec V1 Web Emulator (WASM & GitHub Pages)
+
+on:
+  workflow_dispatch:
+    inputs:
+      build_ref:
+        description: Optional branch, tag, or commit to compile into a .sonix-web.zip bundle (empty uses current ref)
+        required: false
+        type: string
+      deploy_pages:
+        description: Publish updated emulator + build bundle to GitHub Pages
+        required: false
+        type: boolean
+        default: true
+  pull_request:
+    paths:
+      - .github/workflows/web-emulator-pages.yml
+      - sonix-player/**
+      - sonix-packer/assets/V1/**
+      - tools/v1-emulator/**
+  push:
+    branches:
+      - main
+      - arena/**
+    tags:
+      - '*'
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages-v1-emulator
+  cancel-in-progress: false
+
+jobs:
+  build-wasm:
+    name: Build WebAssembly firmware bundle (.sonix-web.zip)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+
+    outputs:
+      short_sha: ${{ steps.source.outputs.short_sha }}
+      bundle_name: ${{ steps.pack.outputs.bundle_name }}
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.build_ref || github.sha }}
+
+      - name: Record built revision
+        id: source
+        run: |
+          set -euo pipefail
+          sha="$(git rev-parse HEAD)"
+          short_sha="$(git rev-parse --short=8 HEAD)"
+          ref_label="${{ inputs.build_ref || github.ref_name }}"
+          subject="$(git log -1 --format=%s)"
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "short_sha=$short_sha" >> "$GITHUB_OUTPUT"
+          echo "ref_label=$ref_label" >> "$GITHUB_OUTPUT"
+          {
+            echo "### TempoTec V1 WebAssembly Build"
+            echo "- Revision: \`$short_sha\` (\`$ref_label\`)"
+            echo "- Commit: $subject"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Set up Emscripten
+        uses: mymindstorm/setup-emsdk@v14
+        with:
+          version: 'latest'
+
+      - name: Cache LVGL and FreeType sources
+        uses: actions/cache@v4
+        with:
+          path: |
+            sonix-player/lvgl
+            sonix-player/freetype-host-src
+          key: v1-web-wasm-deps-lvgl96-ft2133-v2
+
+      - name: Compile sonix-player to WebAssembly (Emscripten pthreads)
+        run: |
+          set -euo pipefail
+          emcc --version
+          make -C sonix-player -j"$(nproc)" web-wasm
+          ls -lh sonix-player/sonix_player_wasm.js sonix-player/sonix_player_wasm.wasm
+
+      - name: Pack universal .sonix-web.zip bundle & stage static Pages site
+        id: pack
+        env:
+          PAGES_BASE_URL: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}
+        run: |
+          set -euo pipefail
+          mkdir -p tools/v1-emulator/dist/pages/builds
+
+          # Carry forward recent previously published builds from live GitHub Pages
+          # so the webpage's "Published Sonix Builds" dropdown preserves build history.
+          MERGE_ARGS=""
+          if curl --fail --silent --location --max-time 15 \
+               "$PAGES_BASE_URL/builds/manifest.json" \
+               -o "$RUNNER_TEMP/prev-manifest.json"; then
+            echo "Fetched existing catalog from $PAGES_BASE_URL/builds/manifest.json"
+            node -e '
+              const fs = require("fs");
+              const m = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+              for (const b of (m.builds || []).slice(0, 7)) {
+                if (b.url) console.log(b.url);
+              }
+            ' "$RUNNER_TEMP/prev-manifest.json" | while read -r rel_url; do
+              fname="$(basename "$rel_url")"
+              if [ -n "$fname" ]; then
+                curl --fail --silent --location --max-time 60 \
+                  "$PAGES_BASE_URL/$rel_url" \
+                  -o "tools/v1-emulator/dist/pages/builds/$fname" || rm -f "tools/v1-emulator/dist/pages/builds/$fname"
+              fi
+            done
+            MERGE_ARGS="--merge-manifest $RUNNER_TEMP/prev-manifest.json --max-history 8"
+          else
+            echo "No existing GitHub Pages catalog found yet (first publish)."
+          fi
+
+          node tools/v1-emulator/pack-wasm-bundle.mjs \
+            --ref "${{ steps.source.outputs.ref_label }}" \
+            --stage-pages tools/v1-emulator/dist/pages \
+            $MERGE_ARGS
+
+          BUNDLE_PATH="$(ls -1 tools/v1-emulator/dist/*.sonix-web.zip | head -n 1)"
+          BUNDLE_NAME="$(basename "$BUNDLE_PATH")"
+          echo "bundle_path=$BUNDLE_PATH" >> "$GITHUB_OUTPUT"
+          echo "bundle_name=$BUNDLE_NAME" >> "$GITHUB_OUTPUT"
+          ls -lh tools/v1-emulator/dist/pages tools/v1-emulator/dist/pages/builds
+
+      - name: Upload downloadable .sonix-web.zip artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sonix-v1-web-wasm-${{ steps.source.outputs.short_sha }}
+          path: tools/v1-emulator/dist/*.sonix-web.zip
+          retention-days: 30
+
+      - name: Configure GitHub Pages
+        if: >-
+          (github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/'))) ||
+          (github.event_name == 'workflow_dispatch' && inputs.deploy_pages != false)
+        uses: actions/configure-pages@v5
+
+      - name: Upload GitHub Pages artifact
+        if: >-
+          (github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/'))) ||
+          (github.event_name == 'workflow_dispatch' && inputs.deploy_pages != false)
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: tools/v1-emulator/dist/pages
+
+  deploy-pages:
+    name: Deploy static V1 emulator to GitHub Pages
+    needs: build-wasm
+    if: >-
+      (github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/'))) ||
+      (github.event_name == 'workflow_dispatch' && inputs.deploy_pages != false)
+    runs-on: ubuntu-24.04
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
+
+      - name: Publish live emulator link
+        run: |
+          {
+            echo "### Live TempoTec V1 Browser Emulator"
+            echo "Open directly in your browser (zero install): ${{ steps.deployment.outputs.page_url }}"
+            echo ""
+            echo "Latest bundle included: \`${{ needs.build-wasm.outputs.bundle_name }}\`"
+          } >> "$GITHUB_STEP_SUMMARY"

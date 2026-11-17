@@ -4,6 +4,9 @@
 
 #include "power.h"
 #include "backlight.h"
+#ifdef HOST_WEB_EMU
+#include "webemu.h"
+#endif
 
 // LVGL 9.2 made lv_timer_t opaque. There is a lv_timer_set_period() but no
 // getter, and both places here have to read the period before changing it.
@@ -283,6 +286,9 @@ static void backlight_write(long value) {
 	if (g_cfg.brightness_path) {
 		write_long_to_file(g_cfg.brightness_path, value);
 	}
+#ifdef HOST_WEB_EMU
+	webemu_notify_backlight(value, brightness_max());
+#endif
 }
 
 static uint32_t monotonic_ms(void);
@@ -1301,6 +1307,14 @@ void power_shutdown(void) {
 	storage_release_for_shutdown();
 	sync();
 
+#ifdef HOST_WEB_EMU
+	webemu_notify_power("poweroff");
+	fflush(stdout);
+	fflush(stderr);
+	webemu_shutdown();
+	_exit(42);
+#endif
+
 	int rc = system("poweroff");
 	(void)rc;
 	sleep(8);
@@ -1796,6 +1810,9 @@ void power_screen_off(void) {
 	// restore a visible reset frame. The user's level is retained separately
 	// in g_cfg.brightness and restored through the PWM endpoint guard on wake.
 	backlight_black();
+#ifdef HOST_WEB_EMU
+	webemu_notify_screen(false);
+#endif
 
 	// With the panel dark, draw what the next wake should open on straight
 	// into the framebuffer. Unblanking presents whatever the framebuffer
@@ -2033,6 +2050,9 @@ void power_screen_on(void) {
 	// adding a visible fade to every wake. Do not shorten the guarded panel
 	// initialization above: that would expose its white reset frame.
 	backlight_write(g_cfg.brightness);
+#ifdef HOST_WEB_EMU
+	webemu_notify_screen(true);
+#endif
 	fprintf(stderr, "power: wake visible after %ums%s\n",
 			(unsigned)(monotonic_ms() - wake_started), panel_was_held ? " (panel kept)" : "");
 

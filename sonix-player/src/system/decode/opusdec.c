@@ -1,5 +1,27 @@
 #include "opusdec.h"
 
+#ifdef SONIX_NO_OPUSFILE
+
+#include <stdio.h>
+
+opusdec_t *opusdec_open(const char *filepath) {
+	fprintf(stderr, "opus: %s skipped (built without libopusfile)\n", filepath ? filepath : "(null)");
+	return NULL;
+}
+opusdec_t *opusdec_open_stream(void *source, int (*read)(void *, unsigned char *, int)) {
+	(void)source;
+	(void)read;
+	return NULL;
+}
+void opusdec_close(opusdec_t *o) { (void)o; }
+int opusdec_channels(const opusdec_t *o) { (void)o; return 0; }
+int opusdec_sample_rate(const opusdec_t *o) { (void)o; return 0; }
+uint64_t opusdec_total_frames(const opusdec_t *o) { (void)o; return 0; }
+uint64_t opusdec_read_s16(opusdec_t *o, uint64_t frames, short *out) { (void)o; (void)frames; (void)out; return 0; }
+bool opusdec_seek(opusdec_t *o, uint64_t frame) { (void)o; (void)frame; return false; }
+
+#else
+
 // opusfile.h itself includes <opus_multistream.h> unprefixed, so the opus/
 // directory must be on the -I path: on the host pkg-config handles it, on the
 // target the Makefile points at $(OPUS_PREFIX)/include/opus.
@@ -154,3 +176,5 @@ bool opusdec_seek(opusdec_t *o, uint64_t frame) {
 	}
 	return op_pcm_seek(o->of, (ogg_int64_t)frame) == 0;
 }
+
+#endif /* SONIX_NO_OPUSFILE */

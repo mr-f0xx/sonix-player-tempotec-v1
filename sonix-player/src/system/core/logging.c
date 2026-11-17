@@ -70,7 +70,18 @@ static bool usb_was_on_sd;
 // logging_sync(): a sync still running on the card's file would keep the card
 // busy through the unmount that follows a release. Recursive because
 // logging_attach_sd() goes through logging_resume_after_usb().
+#ifdef __EMSCRIPTEN__
+static pthread_mutex_t log_lock;
+__attribute__((constructor)) static void logging_wasm_init_lock(void) {
+	pthread_mutexattr_t attr;
+	pthread_mutexattr_init(&attr);
+	pthread_mutexattr_settype(&attr, PTHREAD_MUTEX_RECURSIVE);
+	pthread_mutex_init(&log_lock, &attr);
+	pthread_mutexattr_destroy(&attr);
+}
+#else
 static pthread_mutex_t log_lock = PTHREAD_RECURSIVE_MUTEX_INITIALIZER_NP;
+#endif
 
 // The size of the card's log at the last sync; -1 before the first.
 static off_t synced_size = -1;
@@ -498,6 +509,11 @@ static FILE *stamp_open(stamp_stream_t *stream) {
 // Puts the stamping streams in place of stdout and stderr. Either one that
 // cannot be made leaves the original where it was, which prints as before.
 static void stamp_install(void) {
+#ifdef __EMSCRIPTEN__
+	setvbuf(stdout, NULL, _IOLBF, 0);
+	setvbuf(stderr, NULL, _IONBF, 0);
+	return;
+#else
 	fflush(stdout);
 	fflush(stderr);
 	FILE *out = stamp_open(&stamp_out);
@@ -512,6 +528,7 @@ static void stamp_install(void) {
 	} else {
 		setvbuf(stderr, NULL, _IOLBF, 0);
 	}
+#endif
 }
 
 // Points descriptors 1 and 2 -- and so stdout and stderr, which write to them

@@ -1,5 +1,34 @@
 #include "led_i2c.h"
 
+#ifdef HOST_WEB_EMU
+#include "webemu.h"
+
+static bool webemu_led_ready;
+
+bool led_i2c_init(void) {
+	webemu_led_ready = true;
+	return true;
+}
+
+bool led_i2c_ready(void) { return webemu_led_ready; }
+
+void led_i2c_levels(int r, int g, int b, unsigned channels) {
+	int rr = (channels & LED_CH_R) ? r : 0;
+	int gg = (channels & LED_CH_G) ? g : 0;
+	int bb = (channels & LED_CH_B) ? b : 0;
+	webemu_notify_led((rr || gg || bb) ? "steady" : "off", rr, gg, bb, 0, 0, 0);
+}
+
+void led_i2c_steady(void) {}
+
+void led_i2c_breathe(int r, int g, int b, unsigned char period, unsigned char duty, unsigned char fade) {
+	webemu_notify_led("breathe", r, g, b, (int)period, (int)duty, (int)fade);
+}
+
+void led_i2c_off(void) { webemu_notify_led("off", 0, 0, 0, 0, 0, 0); }
+
+#else /* !HOST_WEB_EMU */
+
 #include <errno.h>
 #include <fcntl.h>
 #include <stdio.h>
@@ -160,3 +189,5 @@ void led_i2c_off(void) {
 	write_reg(REG_B, 0x00);
 	write_reg(REG_MODE, 0x00);
 }
+
+#endif /* HOST_WEB_EMU */
