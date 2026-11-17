@@ -129,9 +129,23 @@ GUARD_SRC = test_batteryguard.c $(ROOT)/src/system/device/batteryguard.c
 batteryguard: $(BUILD)/test_batteryguard
 	$(BUILD)/test_batteryguard
 
+# batteryhistory is listed separately below: it owns persistent charge points
+# and powered-on duration, while the guard only enforces the low-battery rule.
+
 $(BUILD)/test_batteryguard: $(GUARD_SRC) $(ROOT)/src/system/device/batteryguard.h
 	@mkdir -p $(BUILD)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ $(GUARD_SRC) $(LDFLAGS) $(LDLIBS)
+
+# The persistent charge-history state machine: charge-target and unplug edges,
+# with on-time made up only from the player's running sessions.
+BATTERYHISTORY_SRC = test_batteryhistory.c $(ROOT)/src/system/device/batteryhistory.c $(ROOT)/src/system/core/config.c
+.PHONY: batteryhistory
+batteryhistory: $(BUILD)/test_batteryhistory
+	$(BUILD)/test_batteryhistory
+
+$(BUILD)/test_batteryhistory: $(BATTERYHISTORY_SRC) $(ROOT)/src/system/device/batteryhistory.h
+	@mkdir -p $(BUILD)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ $(BATTERYHISTORY_SRC) $(LDFLAGS) $(LDLIBS)
 
 # Exact percentage cutoff and hysteresis used by both charger paths.
 .PHONY: chargelimit

@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #include "lvgl/lvgl.h"
 
@@ -22,6 +23,7 @@
 #include "src/system/audio/usbhostmode.h"
 #include "src/system/audio/usbhostprobe.h"
 #include "src/system/core/lang.h"
+#include "src/system/device/batteryhistory.h"
 #include "src/system/device/power.h"
 #include "src/system/device/sysinfo.h"
 #include "src/system/device/system.h"
@@ -147,6 +149,89 @@ static void sd_refresh(void) {
 	// still fits comfortably in 64 bits.
 	bool low = usage.free * 100 <= usage.total * SD_LOW_PERCENT;
 	lv_obj_set_style_bg_color(sd_bar, low ? BAR_RED : theme()->accent, LV_PART_INDICATOR);
+}
+
+// ---------------------------------------------------------------------------
+// Battery history
+// ---------------------------------------------------------------------------
+//
+// The status bar answers "how full?". These read-only About rows answer the
+// longer-term question: which charge point started this run-down, and how much
+// time the player itself has been on since then. batteryhistory.c keeps the
+// counter through clean reboots and deliberately does not add time while the
+// device is switched off.
+
+static lv_obj_t *battery_level_value;
+static lv_obj_t *battery_last_charge_value;
+static lv_obj_t *battery_charge_point_value;
+static lv_obj_t *battery_on_time_value;
+static lv_timer_t *battery_info_timer;
+
+static void battery_format_on_time(uint64_t seconds, char *out, size_t out_size) {
+	uint64_t minutes = seconds / 60;
+	uint64_t hours = minutes / 60;
+	uint64_t days = hours / 24;
+	if (days) {
+		snprintf(out, out_size, "%llud %02lluh", (unsigned long long)days, (unsigned long long)(hours % 24));
+	} else if (hours) {
+		snprintf(out, out_size, "%lluh %02llum", (unsigned long long)hours, (unsigned long long)(minutes % 60));
+	} else {
+		snprintf(out, out_size, "%llum", (unsigned long long)minutes);
+	}
+}
+
+static void battery_format_date(int64_t timestamp, char *out, size_t out_size) {
+	if (timestamp <= 0) {
+		snprintf(out, out_size, "%s", tr("system_battery_time_not_set"));
+		return;
+	}
+	time_t when = (time_t)timestamp;
+	struct tm local;
+	if (!localtime_r(&when, &local) || strftime(out, out_size, "%Y-%m-%d %H:%M", &local) == 0) {
+		snprintf(out, out_size, "%s", tr("system_battery_time_not_set"));
+	}
+}
+
+static void battery_history_refresh(void) {
+	if (!battery_level_value || !battery_last_charge_value || !battery_charge_point_value || !battery_on_time_value) {
+		return;
+	}
+
+	const char *percent = read_battery_percent();
+	if (percent && percent[0] >= '0' && percent[0] <= '9') {
+		lv_label_set_text_fmt(battery_level_value, "%d%%", atoi(percent));
+	} else {
+		lv_label_set_text(battery_level_value, "\xE2\x80\x94");
+	}
+
+	batteryhistory_saved_t history;
+	if (!batteryhistory_snapshot(&history)) {
+		lv_label_set_text(battery_last_charge_value, tr("system_battery_not_recorded"));
+		lv_label_set_text(battery_charge_point_value, "\xE2\x80\x94");
+		lv_label_set_text(battery_on_time_value, "\xE2\x80\x94");
+		return;
+	}
+
+	char date[32];
+	battery_format_date(history.marked_at, date, sizeof(date));
+	lv_label_set_text(battery_last_charge_value, date);
+	if (history.mark == BATTERYHISTORY_MARK_CHARGED_TO_TARGET) {
+		lv_label_set_text_fmt(battery_charge_point_value, tr("system_battery_charged_to"), history.charge_target);
+	} else {
+		lv_label_set_text(battery_charge_point_value, tr("system_battery_unplugged"));
+	}
+	char on_time[32];
+	battery_format_on_time(history.on_seconds, on_time, sizeof(on_time));
+	lv_label_set_text(battery_on_time_value, on_time);
+}
+
+static void battery_info_timer_cb(lv_timer_t *timer) {
+	(void)timer;
+	// The values only have to move while this page is visible. The timer is
+	// also registered with power.c below, so it cannot wake a dark player.
+	if (lv_screen_active() == sysinfo_screen) {
+		battery_history_refresh();
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -318,9 +403,11 @@ static void refresh_dotted_labels(lv_obj_t *obj) {
 
 static void sysinfo_loaded_cb(lv_event_t *e) {
 	(void)e;
-	// Card usage changes while the player runs, so it is re-read on every
-	// opening, and the tap counters start over.
+	// Card usage and the battery's current/on-time fields change while the
+	// player runs, so they are re-read on every opening, and the tap counters
+	// start over.
 	sd_refresh();
+	battery_history_refresh();
 	build_taps = 0;
 	easteregg_reset();
 }
@@ -344,6 +431,15 @@ static void build_sysinfo_page(gui_config_t *cfg) {
 	info_row(container, "dac", &dac_value);
 	const char *dac = sysinfo_dac_info();
 	lv_label_set_text(dac_value, dac[0] ? dac : "\xE2\x80\x94");
+
+	// A compact record of the last charge/discharge cycle. The status bar keeps
+	// the always-visible percentage; these rows make the battery comparison the
+	// feature request calls for without adding another live status indicator.
+	info_row(container, "system_battery_level", &battery_level_value);
+	info_row(container, "system_battery_last_charge", &battery_last_charge_value);
+	info_row(container, "system_battery_charge_point", &battery_charge_point_value);
+	info_row(container, "system_battery_on_time", &battery_on_time_value);
+	battery_history_refresh();
 
 	// The serial number, from the SoC efuse: the same one printed on the box
 	// ("V1" plus the first eight hex digits of the chip id). Not translated,
@@ -458,6 +554,12 @@ static void build_sysinfo_page(gui_config_t *cfg) {
 	lv_obj_add_event_cb(sysinfo_screen, sysinfo_loaded_cb, LV_EVENT_SCREEN_LOADED, NULL);
 	switcher_attach_back_gesture(sysinfo_screen);
 	theme_register_refresh(refresh_theme);
+
+	// A once-a-minute redraw keeps the duration useful while it is being
+	// watched. It is a painting timer, so standby pauses it with all the other
+	// display work rather than spending power on a hidden page.
+	battery_info_timer = lv_timer_create(battery_info_timer_cb, 60000, NULL);
+	power_pause_in_standby(battery_info_timer);
 }
 
 void systempage_init(gui_config_t *cfg) {

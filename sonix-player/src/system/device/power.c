@@ -68,6 +68,7 @@
 #include "src/system/device/sysinfo.h"
 #include "src/system/device/axpcharge.h"
 #include "src/system/device/batteryguard.h"
+#include "src/system/device/batteryhistory.h"
 #include "src/system/device/chargelimit.h"
 #include "src/system/device/chargemode.h"
 #include "src/gui/shell/gui.h"
@@ -1264,6 +1265,11 @@ void power_shutdown(void) {
 	// shutdown should not be the one that drops the difference.
 	petwatch_flush();
 
+	// Battery history is checkpointed separately from its five-minute cadence
+	// before the writable settings partition is released. This is the final
+	// powered-on slice; time after power-off deliberately never reaches it.
+	batteryhistory_flush();
+
 	// Dark the panel immediately, then fade/close audio before the kernel takes
 	// power away from the output stage. In particular, the HBC3000 is parked on
 	// its unused socket while its amplifier is still powered, avoiding a pop in
@@ -2260,6 +2266,10 @@ static void power_timer_cb(lv_timer_t *timer) {
 	// cannot fall in the middle of a track change.
 	bool usb_now = usb_vbus_present();
 	g_usb_now = usb_now; // read once: the guard and the sleep rule below reuse it
+	// Record a full/limited charge or an unplug edge, and add only this running
+	// session to the on-time shown under System > About. The gauge is cached by
+	// the status-bar poll, so this is not another sysfs read every 250 ms.
+	batteryhistory_tick(battery_percent_cached(), usb_now, power_get_charge_limit());
 	bool usb_changed = g_usb_present_known && usb_now != g_usb_present_last;
 	if (playing || input_idle < POWER_TICK_MS * 2 || usb_changed) {
 		g_mem_active_ms = now;
@@ -2522,6 +2532,11 @@ void power_init(const power_config_t *cfg, lv_display_t *disp) {
 	// process started belonged to the session that ended.
 	g_battery_guard = (batteryguard_t){0};
 	g_low_battery_woke_at = 0;
+
+	// The charge history survives a shutdown, but begins a new powered-on
+	// session here. Its BOOTTIME accounting includes suspend and excludes every
+	// second during which the player is actually switched off.
+	batteryhistory_init();
 
 	g_power_timer = lv_timer_create(power_timer_cb, POWER_TICK_MS, NULL);
 
