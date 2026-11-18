@@ -3629,6 +3629,18 @@ over the charging screen's page by the ordinary `lv_screen_load()` in
 glass, and the charging screen's objects (a dozen, once per boot) are left in
 memory with it.
 
+The hold itself had a tail of its own, and it put the panel down at the exact
+moment the boot finished. The charging screen reads the power key from its own
+evdev node and goes away a moment before the player does; the user is still
+lifting their thumb, and that release is delivered to the input thread the
+player starts for the same node — which never saw the press. The thread read it
+as a short press and toggled the screen off. The panel is lit by the boot, the
+hold ends it, the screen is dark a heartbeat later, and the power key wakes
+it. The player's button thread now tracks whether it saw the matching press
+(`power_press_seen` in `system.c`); a release with no press is the tail of
+somebody else's gesture, and does nothing. It pre-dates the work above — the
+white screen only made the hold look like the whole story.
+
 Every line on the screen is given the panel's width and told to wrap. The three
 states are short in English and not in every language -- the Ukrainian for
 "charger connected" is wider than the glass at 22 px -- and a label that sized
