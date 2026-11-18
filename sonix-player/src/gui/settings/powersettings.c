@@ -20,8 +20,8 @@ lv_obj_t *powersettings_screen;
 #define CHARGE_LIMIT_STEP 5
 #define CHARGE_LIMIT_COUNT 5 // 80, 85, 90, 95, 100
 
-// The two LED effect controls, shown only where the SGM31324 can be driven
-// directly (the V1 and the R3 Pro II; the R1's plain LEDs have no such knobs).
+// The RGB LED's brightness and fade controls, shown only where the SGM31324
+// can be driven directly (no such knobs for the plain LEDs on the R1).
 #define LED_BRIGHTNESS_MIN 1
 #define LED_BRIGHTNESS_MAX 5
 #define LED_BRIGHTNESS_STEPS (LED_BRIGHTNESS_MAX - LED_BRIGHTNESS_MIN + 1)
@@ -41,6 +41,7 @@ static lv_obj_t *charge_value, *charge_slider;
 static lv_obj_t *auto_off_switch, *auto_off_value, *auto_off_slider, *auto_off_card;
 static lv_obj_t *led_on_switch, *led_off_switch, *led_off_card;
 static lv_obj_t *led_stealth_switch, *led_visualizer_switch, *led_visualizer_card;
+static lv_obj_t *led_style_pills, *led_bass_pill, *led_glow_pill;
 static lv_obj_t *led_bright_value, *led_bright_slider;
 static lv_obj_t *led_trans_value, *led_trans_slider;
 static lv_obj_t *key_lock_switch;
@@ -157,8 +158,14 @@ static void refresh_labels(void) {
 	set_checked(led_off_switch, config_get_bool("power", "led_off_standby", true));
 	set_toggle_available(led_off_card, led_off_switch, led_on && !stealth);
 	if (led_visualizer_switch) {
-		set_checked(led_visualizer_switch, config_get_bool("power", "led_visualizer", false));
-		set_toggle_available(led_visualizer_card, led_visualizer_switch, led_on && !stealth);
+		bool smart = config_get_bool("power", "led_visualizer", false);
+		bool available = led_on && !stealth;
+		set_checked(led_visualizer_switch, smart);
+		set_toggle_available(led_visualizer_card, led_visualizer_switch, available);
+		lv_obj_set_hidden(led_style_pills, !smart || !available);
+		led_visualizer_style_t style = led_visualizer_style();
+		settingsrow_pill_active(led_bass_pill, style == LED_VISUALIZER_BASS_PULSE);
+		settingsrow_pill_active(led_glow_pill, style == LED_VISUALIZER_ENERGY_GLOW);
 	}
 
 	if (led_bright_value) {
@@ -253,6 +260,14 @@ static void led_visualizer_cb(lv_event_t *e) {
 	bool enabled = lv_obj_has_state(led_visualizer_switch, LV_STATE_CHECKED);
 	led_set_visualizer(enabled);
 	config_set_bool("power", "led_visualizer", enabled);
+	config_save();
+	refresh_labels();
+}
+
+static void led_visualizer_style_cb(lv_event_t *e) {
+	led_visualizer_style_t style = (led_visualizer_style_t)(intptr_t)lv_event_get_user_data(e);
+	led_set_visualizer_style(style);
+	config_set_int("power", "led_visualizer_style", style);
 	config_save();
 	refresh_labels();
 }
@@ -365,8 +380,16 @@ void powersettings_init(gui_config_t *cfg) {
 
 	// The visualizer, brightness and fades need the direct RGB controller.
 	if (led_effects_available()) {
-		led_visualizer_card = settingsrow_toggle(container, "power_led_visualizer", &led_visualizer_switch,
-												 led_visualizer_cb);
+		led_visualizer_card = settingsrow_toggle_pills(container, "power_led_visualizer", led_visualizer_cb,
+													 &led_visualizer_switch, &led_style_pills);
+		led_bass_pill = settingsrow_pill(led_style_pills, "power_led_bass_pulse", LED_VISUALIZER_BASS_PULSE,
+										 led_visualizer_style_cb);
+		led_glow_pill = settingsrow_pill(led_style_pills, "power_led_energy_glow", LED_VISUALIZER_ENERGY_GLOW,
+									 led_visualizer_style_cb);
+		// Fit both choices on the V1 at the usual size. Longer translations
+		// can still wrap to a second line of pills.
+		lv_obj_set_style_pad_hor(led_bass_pill, 6, 0);
+		lv_obj_set_style_pad_hor(led_glow_pill, 6, 0);
 		led_note(container, "power_led_visualizer_note");
 
 		settingsrow_slider(container, "power_led_brightness", LED_BRIGHTNESS_STEPS, &led_bright_value, &led_bright_slider,

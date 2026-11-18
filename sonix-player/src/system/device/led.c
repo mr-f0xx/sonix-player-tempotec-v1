@@ -70,7 +70,7 @@ static const int LADDER[11] = {0, 1, 3, 7, 15, 23, 31, 39, 47, 63, 79};
 #define LED_STEP_MS 10
 // A blinking state (the Wi-Fi transfer) is on and off for this long each.
 #define LED_BLINK_MS 500
-#define LED_PULSE_MS 40 // at most 25 brightness updates per second
+#define LED_VISUALIZER_MS 40 // at most 25 brightness updates per second
 
 // The logical states the LED can be in. Each is rendered either as a driver
 // pattern (the fallback) or as a colour and an effect (the direct path).
@@ -102,7 +102,8 @@ typedef struct {
 	int r, g, b;		   // scaled 0-79
 	int period, duty, fade; // breathing timing
 	int transition_ms;	   // length of the fade into this state
-	bool pulse, allow_notices;
+	led_visualizer_style_t effect;
+	bool allow_notices;
 } led_render_t;
 
 // Priority order. There is no queue: a low-battery warning can replace an
@@ -132,7 +133,8 @@ static bool has_sgm31324(void) {
 }
 
 static int current_state = -1;
-static bool current_pulse, current_notices;
+static led_visualizer_style_t current_effect;
+static bool current_notices;
 static int red_trigger_state = -1; // -1 unknown, 0 "none", 1 "breathing"
 
 static int s_brightness = BRIGHTNESS_DEFAULT;
@@ -154,6 +156,7 @@ static int s_dac_rate;
 static bool s_led_enabled = true; // the LED master switch, with its charge exception
 static bool s_stealth;
 static bool s_visualizer;
+static led_visualizer_style_t s_visualizer_style = LED_VISUALIZER_BASS_PULSE;
 static bool s_suspended; // includes the shutdown fade, until/unless we resume
 static bool s_idle_off_enabled;
 static bool s_standby;		  // screen off (set by power.c)
@@ -360,17 +363,39 @@ static int pulse_step(led_pulse_t *state, int bass) {
 	return LEVELS[frame];
 }
 
-static int pulse_channel(int rest, int peak, int pulse) {
-	return rest + ((peak - rest) * pulse + 127) / 255;
+// An asymmetric envelope keeps the light on during sustained sound, gliding
+// up over a few hundred ms and easing down more slowly between passages.
+static int glow_step(int *level_q8, int target) {
+	int delta = target * 256 - *level_q8;
+	int step = delta / (delta > 0 ? 5 : 12);
+	*level_q8 += step ? step : delta;
+	return (*level_q8 + 128) >> 8;
 }
 
-static void play_pulse(led_levels_t *cur, const led_render_t *t, led_levels_t rest, unsigned seen) {
-	led_pulse_t state = {0};
-	while (!led_wait(&led_seq, seen, LED_PULSE_MS)) {
-		int pulse = pulse_step(&state, visualizer_bass_level());
-		int r = pulse_channel(rest.r, t->r, pulse);
-		int g = pulse_channel(rest.g, t->g, pulse);
-		int b = pulse_channel(rest.b, t->b, pulse);
+static int effect_channel(int rest, int peak, int amount) {
+	return rest + ((peak - rest) * amount + 127) / 255;
+}
+
+static void play_visualizer(led_levels_t *cur, const led_render_t *t, led_levels_t rest, unsigned seen) {
+	led_pulse_t pulse = {0};
+	int glow_q8 = 0;
+	bool single_step = !(rest.r || rest.g || rest.b);
+	while (!led_wait(&led_seq, seen, LED_VISUALIZER_MS)) {
+		int amount;
+		if (t->effect == LED_VISUALIZER_ENERGY_GLOW) {
+			amount = glow_step(&glow_q8, visualizer_energy_level());
+			if (single_step) {
+				// With just dark/lit available, leave a gap between the on
+				// and off thresholds so nearby levels don't cause flicker.
+				int threshold = (cur->r || cur->g || cur->b) ? 112 : 144;
+				amount = amount >= threshold ? 255 : 0;
+			}
+		} else {
+			amount = pulse_step(&pulse, visualizer_bass_level());
+		}
+		int r = effect_channel(rest.r, t->r, amount);
+		int g = effect_channel(rest.g, t->g, amount);
+		int b = effect_channel(rest.b, t->b, amount);
 		if (r != cur->r || g != cur->g || b != cur->b) {
 			set_levels(cur, r, g, b, rest.channels);
 		}
@@ -389,11 +414,10 @@ static void play_steady(led_levels_t *cur, const led_render_t *t, unsigned seen)
 	// the visualizer). Both sets of channels stay enabled during the ramp.
 	led_levels_t from = *cur;
 	led_levels_t rest = {t->r, t->g, t->b, ch_mask(t->r, t->g, t->b)};
-	if (t->pulse) {
-		// Rest at roughly a fifth of the selected brightness, not two thirds.
-		// Keep each colour channel lit at rest except at brightness 1: at that
-		// setting a pulse can only go from dark to the first step. Keep the
-		// channels enabled in either case so they are ready for the next beat.
+	if (t->effect != LED_VISUALIZER_NONE) {
+		// Rest at roughly a fifth of the selected brightness. At brightness
+		// 1 there is only one lit step, so rest at zero instead. Keep the
+		// channels enabled for the next rise in brightness.
 		bool lit_floor = t->r > 1 || t->g > 1 || t->b > 1;
 		rest.r = lit_floor ? (t->r + 4) / 5 : 0;
 		rest.g = lit_floor ? (t->g + 4) / 5 : 0;
@@ -423,8 +447,8 @@ static void play_steady(led_levels_t *cur, const led_render_t *t, unsigned seen)
 	}
 	if (off) {
 		led_i2c_off();
-	} else if (t->pulse) {
-		play_pulse(cur, t, rest, seen);
+	} else if (t->effect != LED_VISUALIZER_NONE) {
+		play_visualizer(cur, t, rest, seen);
 	}
 }
 
@@ -604,24 +628,26 @@ static void build_render(led_state_t s, led_render_t *out) {
 	out->duty = 0x7D;
 	out->fade = 0xBB;
 	out->transition_ms = s == LS_STEALTH ? 0 : s_transition_ms;
-	out->pulse = out->allow_notices = false;
+	out->effect = LED_VISUALIZER_NONE;
+	out->allow_notices = false;
 }
 
 // Renders a state to whichever output is available: the direct controller, the
 // driver's pattern node, or the R1's plain blue LED. Cheap to call repeatedly:
 // it only writes when the state changes.
-static void render_state(led_state_t state, bool pulse, bool allow_notices) {
-	bool redraw = (int)state != current_state || pulse != current_pulse;
+static void render_state(led_state_t state, led_visualizer_style_t effect, bool allow_notices) {
+	bool redraw = (int)state != current_state || effect != current_effect;
 	if (!redraw && allow_notices == current_notices) {
 		return;
 	}
 	if (direct_mode) {
 		led_render_t t;
 		build_render(state, &t);
-		t.pulse = pulse;
+		t.effect = effect;
 		t.allow_notices = allow_notices;
-		if (pulse != current_pulse) {
-			visualizer_enable(VISUALIZER_STATUS_LED, pulse);
+		if (effect != current_effect) {
+			visualizer_enable(VISUALIZER_STATUS_LED_BASS, effect == LED_VISUALIZER_BASS_PULSE);
+			visualizer_enable(VISUALIZER_STATUS_LED_ENERGY, effect == LED_VISUALIZER_ENERGY_GLOW);
 		}
 		led_post(&t, redraw);
 	} else if (have_pattern_node) {
@@ -636,7 +662,7 @@ static void render_state(led_state_t state, bool pulse, bool allow_notices) {
 		return;
 	}
 	current_state = state;
-	current_pulse = pulse;
+	current_effect = effect;
 	current_notices = allow_notices;
 }
 
@@ -666,7 +692,7 @@ static void apply(void) {
 
 	bool smart = direct_mode && s_visualizer && s_led_enabled && !s_stealth && !s_suspended &&
 				 !charging_now && !s_on_charger;
-	bool pulse = false;
+	led_visualizer_style_t effect = LED_VISUALIZER_NONE;
 	led_state_t state;
 	if (s_stealth) {
 		state = LS_STEALTH;
@@ -692,7 +718,7 @@ static void apply(void) {
 		// is sampled.
 		state = s_podcast ? LS_PODCAST : rate_state(s_rate, s_dsd);
 		// DoP is not PCM and there is no PCM feed for the USB DAC mode below.
-		pulse = smart && state != LS_DSD && state != LS_PODCAST;
+		if (smart && state != LS_DSD && state != LS_PODCAST) effect = s_visualizer_style;
 	} else if (s_dac_streaming && s_dac_rate > 0) {
 		// In DAC mode nothing plays through audio.c, so s_playing is false and
 		// the LED went dark twenty seconds after the screen did -- with the
@@ -735,7 +761,11 @@ static void apply(void) {
 	} else {
 		state = LS_IDLE;
 	}
-	render_state(state, pulse, smart);
+	render_state(state, effect, smart);
+}
+
+static led_visualizer_style_t normalize_style(long style) {
+	return style == LED_VISUALIZER_ENERGY_GLOW ? LED_VISUALIZER_ENERGY_GLOW : LED_VISUALIZER_BASS_PULSE;
 }
 
 void led_init(void) {
@@ -760,6 +790,7 @@ void led_init(void) {
 	s_led_enabled = config_get_bool("power", "led_on", true);
 	s_stealth = config_get_bool("power", "led_stealth", false);
 	s_visualizer = config_get_bool("power", "led_visualizer", false);
+	s_visualizer_style = normalize_style(config_get_int("power", "led_visualizer_style", LED_VISUALIZER_BASS_PULSE));
 	s_idle_off_enabled = config_get_bool("power", "led_off_standby", true);
 	led_set_transition_ms(config_get_int("power", "led_transition_ms", TRANSITION_DEFAULT_MS));
 	s_brightness = (int)config_get_int("power", "led_brightness", BRIGHTNESS_DEFAULT);
@@ -841,6 +872,13 @@ void led_set_visualizer(bool enabled) {
 	s_visualizer = enabled;
 	apply();
 }
+
+void led_set_visualizer_style(led_visualizer_style_t style) {
+	s_visualizer_style = normalize_style(style);
+	apply();
+}
+
+led_visualizer_style_t led_visualizer_style(void) { return s_visualizer_style; }
 
 void led_notify_low_battery(void) { post_notice(LN_LOW_BATTERY); }
 

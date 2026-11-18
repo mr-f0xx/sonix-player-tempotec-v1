@@ -100,6 +100,14 @@ static size_t wait_frame(size_t start, int kind, int r, int g, int b) {
 	}
 }
 
+static frame_t last_frame(void) {
+	pthread_mutex_lock(&frame_lock);
+	assert(frame_count);
+	frame_t frame = frames[frame_count - 1];
+	pthread_mutex_unlock(&frame_lock);
+	return frame;
+}
+
 static unsigned count_frames(size_t start, size_t end, int r, int g, int b) {
 	unsigned n = 0;
 	pthread_mutex_lock(&frame_lock);
@@ -111,7 +119,8 @@ static unsigned count_frames(size_t start, size_t end, int r, int g, int b) {
 #define PCM_RATE 44100
 #define PCM_FRAMES 4096
 static int16_t bass_pcm[PCM_FRAMES], treble_pcm[PCM_FRAMES];
-static int16_t quiet_bass_pcm[PCM_FRAMES], beat_pcm[PCM_FRAMES];
+static int16_t quiet_bass_pcm[PCM_FRAMES], beat_pcm[PCM_FRAMES], quiet_treble_pcm[PCM_FRAMES];
+static const int16_t silence_pcm[PCM_FRAMES];
 
 static void feed(const int16_t *pcm) { visualizer_feed(pcm, PCM_FRAMES, 1, 16, PCM_RATE); }
 
@@ -123,16 +132,21 @@ static void feed_for(const int16_t *pcm, int ms) {
 	}
 }
 
-static void test_pcm_consumers(void) {
+static void init_pcm(void) {
 	for (int i = 0; i < PCM_FRAMES; i++) {
-		double sample = sin(2 * M_PI * 65 * i / PCM_RATE);
-		bass_pcm[i] = (int16_t)(16000 * sample);
-		quiet_bass_pcm[i] = (int16_t)(2400 * sample);
-		beat_pcm[i] = (int16_t)(3400 * sample); // about 3 dB above the quiet bass
-		treble_pcm[i] = (int16_t)(16000 * sin(2 * M_PI * 3000 * i / PCM_RATE));
+		double bass = sin(2 * M_PI * 65 * i / PCM_RATE);
+		double treble = sin(2 * M_PI * 3000 * i / PCM_RATE);
+		bass_pcm[i] = (int16_t)(16000 * bass);
+		quiet_bass_pcm[i] = (int16_t)(2400 * bass);
+		beat_pcm[i] = (int16_t)(3400 * bass); // about 3 dB above the quiet bass
+		treble_pcm[i] = (int16_t)(16000 * treble);
+		quiet_treble_pcm[i] = (int16_t)(1400 * treble);
 	}
+}
+
+static void test_pcm_consumers(void) {
 	feed(bass_pcm);
-	visualizer_enable(VISUALIZER_STATUS_LED, true);
+	visualizer_enable(VISUALIZER_STATUS_LED_BASS, true);
 	assert(visualizer_bass_level() == 0); // off meant no PCM was captured
 	feed(treble_pcm);
 	assert(visualizer_bass_level() < 32);
@@ -146,15 +160,15 @@ static void test_pcm_consumers(void) {
 	visualizer_enable(VISUALIZER_SCREENSAVER, false);
 	assert(visualizer_bass_level() > 180);
 	visualizer_enable(VISUALIZER_SCREENSAVER, true);
-	visualizer_enable(VISUALIZER_STATUS_LED, false);
+	visualizer_enable(VISUALIZER_STATUS_LED_BASS, false);
 	assert(visualizer_bass_level() == 0);
 	visualizer_levels(screen);
 	assert(screen[0] > 100);
-	visualizer_enable(VISUALIZER_STATUS_LED, true);
+	visualizer_enable(VISUALIZER_STATUS_LED_BASS, true);
 	usleep(300000);
 	assert(visualizer_bass_level() == 0); // stale (paused) signal cannot drive a pulse
 	visualizer_enable(VISUALIZER_SCREENSAVER, false);
-	visualizer_enable(VISUALIZER_STATUS_LED, false);
+	visualizer_enable(VISUALIZER_STATUS_LED_BASS, false);
 	puts("ok  bass vs treble, stale data, independent screensaver and LED readers");
 }
 
@@ -201,6 +215,7 @@ static void test_direct(void) {
 
 	led_init();
 	assert(led_effects_available());
+	assert(led_visualizer_style() == LED_VISUALIZER_BASS_PULSE); // existing configs
 	assert(wait_frame(0, DARK, 0, 0, 0) == 0); // no lit startup frames
 	led_set_charge_state(true, true);
 	led_notify_low_battery();
@@ -273,16 +288,16 @@ static void test_direct(void) {
 	start = mark();
 	led_update_playback(true, 176400, false, true);
 	wait_frame(start, LEVELS, 13, 13, 13);
-	assert(!current_pulse);
+	assert(current_effect == LED_VISUALIZER_NONE);
 	led_set_dac(true, true, 96000);
 	start = mark();
 	led_update_playback(false, 0, false, false);
 	wait_frame(start, LEVELS, 0, 23, 23);
-	assert(!current_pulse);
+	assert(current_effect == LED_VISUALIZER_NONE);
 	start = mark();
 	led_update_playback(true, 96000, false, false);
 	wait_frame(start, LEVELS, 0, floor, floor);
-	assert(current_pulse);
+	assert(current_effect == LED_VISUALIZER_BASS_PULSE);
 
 	start = mark();
 	led_notify_low_battery();
@@ -315,6 +330,134 @@ static void test_direct(void) {
 	puts("ok  startup, PCM pulse, alert priority/restore, Stealth and suspend on the RGB worker");
 }
 
+static void test_energy_capture(void) {
+	visualizer_enable(VISUALIZER_SCREENSAVER, true);
+	feed(treble_pcm);
+	assert(visualizer_energy_level() == 0); // spectrum alone doesn't collect energy
+	visualizer_enable(VISUALIZER_STATUS_LED_ENERGY, true);
+	assert(visualizer_energy_level() == 0); // a fresh window is needed
+	feed(silence_pcm);
+	assert(visualizer_energy_level() == 0);
+	feed(quiet_treble_pcm);
+	int quiet = visualizer_energy_level();
+	assert(quiet > 0 && quiet < 255);
+	feed(treble_pcm);
+	assert(visualizer_energy_level() == 255);
+
+	// Opposite-phase channels cancel in the mono spectrum, not in RMS.
+	int16_t stereo[PCM_FRAMES * 2];
+	for (int i = 0; i < PCM_FRAMES; i++) {
+		stereo[i * 2] = quiet_treble_pcm[i];
+		stereo[i * 2 + 1] = -quiet_treble_pcm[i];
+	}
+	visualizer_feed(stereo, PCM_FRAMES, 2, 16, PCM_RATE);
+	assert(visualizer_energy_level() == quiet);
+	uint8_t bands[VISUALIZER_BANDS];
+	visualizer_levels(bands);
+	for (int i = 0; i < VISUALIZER_BANDS; i++) assert(bands[i] == 0);
+
+	visualizer_enable(VISUALIZER_SCREENSAVER, false);
+	assert(visualizer_energy_level() == quiet);
+	usleep(300000);
+	assert(visualizer_energy_level() == 0);
+	feed(treble_pcm);
+	assert(visualizer_energy_level() > quiet);
+	visualizer_feed(treble_pcm, 1, 1, 16, 48000);
+	assert(visualizer_energy_level() == 0); // don't reuse a previous rate's samples
+	visualizer_enable(VISUALIZER_STATUS_LED_ENERGY, false);
+	puts("ok  overall PCM level includes treble and out-of-phase stereo, ignores stale PCM");
+}
+
+static void test_glow_envelope(void) {
+	int level_q8 = 0;
+	int level = glow_step(&level_q8, 255);
+	assert(level > 0 && level < 128); // no flash on the initial attack
+	for (int i = 0; i < 80; i++) {
+		int next = glow_step(&level_q8, 255);
+		assert(next >= level && next <= 255);
+		level = next;
+	}
+	assert(level == 255);
+	level = glow_step(&level_q8, 0);
+	assert(level > 200 && level < 255); // silence doesn't cut straight to dim
+	for (int i = 0; i < 100; i++) {
+		int next = glow_step(&level_q8, 0);
+		assert(next >= 0 && next <= level);
+		level = next;
+	}
+	assert(level == 0);
+}
+
+static void test_glow(void) {
+	char cfg[] = "/tmp/sonix-led-glow-XXXXXX";
+	int fd = mkstemp(cfg);
+	assert(fd >= 0);
+	close(fd);
+	config_init(cfg);
+	config_set_bool("power", "led_visualizer", true);
+	config_set_int("power", "led_visualizer_style", LED_VISUALIZER_ENERGY_GLOW);
+	config_set_int("power", "led_transition_ms", 20);
+	assert(config_save());
+	config_init(cfg);
+	unlink(cfg);
+
+	led_init();
+	assert(led_visualizer_style() == LED_VISUALIZER_ENERGY_GLOW);
+	assert(current_effect == LED_VISUALIZER_NONE); // not yet playing
+	const int floor = 5;
+	led_update_playback(true, PCM_RATE, false, false);
+	assert(current_effect == LED_VISUALIZER_ENERGY_GLOW);
+	wait_frame(0, LEVELS, floor, floor, 0);
+	led_set_standby(true);
+
+	feed_for(quiet_treble_pcm, 700);
+	frame_t mid = last_frame();
+	assert(mid.kind == LEVELS && mid.r == mid.g && mid.r > floor && mid.r < 23 && !mid.b);
+	size_t start = mark();
+	feed_for(treble_pcm, 1000);
+	size_t peak = wait_frame(start, LEVELS, 23, 23, 0);
+	pthread_mutex_lock(&frame_lock);
+	assert(peak > start); // there are intermediate steps before the bright peak
+	int previous = mid.r;
+	for (size_t i = start; i <= peak; i++) {
+		frame_t f = frames[i];
+		assert(f.kind == LEVELS && f.r == f.g && !f.b && f.r >= previous && f.r <= 23);
+		previous = f.r;
+	}
+	pthread_mutex_unlock(&frame_lock);
+	assert(matches(last_frame(), LEVELS, 23, 23, 0)); // the tone sustains the glow
+	wait_frame(peak + 1, LEVELS, floor, floor, 0); // fades out on a stale feed
+
+	led_set_visualizer_style(LED_VISUALIZER_BASS_PULSE);
+	assert(current_effect == LED_VISUALIZER_BASS_PULSE && !visualizer_energy_level());
+	led_set_visualizer_style(LED_VISUALIZER_ENERGY_GLOW);
+	assert(current_effect == LED_VISUALIZER_ENERGY_GLOW);
+	start = mark();
+	led_set_brightness(1);
+	wait_frame(start, LEVELS, 0, 0, 0);
+	start = mark();
+	feed_for(treble_pcm, 400);
+	peak = wait_frame(start, LEVELS, 1, 1, 0);
+	wait_frame(peak + 1, LEVELS, 0, 0, 0);
+
+	start = mark();
+	feed_for(treble_pcm, 240);
+	wait_frame(start, LEVELS, 1, 1, 0);
+	// A charging cable takes over an actively lit PCM effect right away.
+	start = mark();
+	led_set_charge_state(true, true);
+	wait_frame(start, BREATHE, 1, 0, 0);
+	assert(current_effect == LED_VISUALIZER_NONE);
+	feed(treble_pcm);
+	assert(visualizer_energy_level() == 0);
+	start = mark();
+	led_set_stealth(true);
+	wait_frame(start, DARK, 0, 0, 0);
+	assert(led_visualizer_style() == LED_VISUALIZER_ENERGY_GLOW);
+	led_shutdown();
+	puts("ok  saved Energy Glow, smooth PCM brightness on the RGB worker, style switch and overrides");
+}
+
 static void test_fallback(void) {
 	config_init(NULL);
 	led_init();
@@ -343,13 +486,19 @@ static void test_fallback(void) {
 }
 
 int main(int argc, char **argv) {
-	if (argc > 1) {
-		backend = !strcmp(argv[1], "pattern") ? PATTERN : !strcmp(argv[1], "pwm") ? PWM : UNAVAILABLE;
-		test_fallback();
-	} else {
+	if (argc == 1) {
+		init_pcm();
 		test_pcm_consumers();
 		test_pulse_envelope();
 		test_direct();
+	} else if (!strcmp(argv[1], "glow")) {
+		init_pcm();
+		test_energy_capture();
+		test_glow_envelope();
+		test_glow();
+	} else {
+		backend = !strcmp(argv[1], "pattern") ? PATTERN : !strcmp(argv[1], "pwm") ? PWM : UNAVAILABLE;
+		test_fallback();
 	}
 	return 0;
 }

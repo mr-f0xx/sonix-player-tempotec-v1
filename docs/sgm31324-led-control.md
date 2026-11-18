@@ -9,24 +9,30 @@ directly.
 
 ## Smart LED and Stealth mode
 
-In **Settings → Power**, turn on **Smart LED** to add two effects to the
-usual status light:
+In **Settings → Power**, turn on **Smart LED** and choose a playback style
+under the switch:
 
-- **Music:** a bass attack brings the light up to the selected brightness for
-  about 80 ms, then it fades back to a dim base. This works on PCM from the
-  player, including when the screen is off. A held bass note doesn't keep the
-  light at its peak. At brightness 1 the light rests dark between pulses
-  because there is only one lit step. The colour map is unchanged: yellow at
-  ≤48 kHz (including 44.1 kHz), aqua above 48 through 192 kHz, orange above
-  192 kHz, and steady white for DSD. USB DAC and Bluetooth receiver indicators
-  remain unchanged.
-- **Events:** three short red blinks accompany the normal low-battery warning
-  at 5%. Two green blinks confirm successful incoming Wi-Fi Transfer uploads.
-  The browser sends folders one file at a time, so confirmation waits for a
-  second without another upload. Failed or cancelled uploads don't signal
-  success, nor does switching off the server. After either pattern, the light
-  returns to the current state. Charging and full-charge indications take
-  priority over these effects.
+- **Bass Pulse** (default): bass attacks bring the light up to the selected
+  brightness for about 80 ms, then it fades back to a dim base. A held bass
+  note doesn't keep the light at its peak.
+- **Energy Glow:** brightness rises with overall PCM level (not just bass),
+  stays bright during sustained loud passages, and eases down in quieter ones.
+
+The selected style survives reboot and is remembered even if Smart LED is
+turned off. Both work on player PCM with the screen on or off. They use a dim
+base and the selected brightness as the ceiling; at brightness 1 there is
+only one lit step, so the styles move between dark and that step. The colour
+map is unchanged: yellow at ≤48 kHz (including 44.1 kHz), aqua above 48 through
+192 kHz, orange above 192 kHz, and steady white for DSD. USB DAC and Bluetooth
+receiver indicators remain unchanged.
+
+**Event notices** work with either Smart LED style: three short red blinks
+accompany the normal 5% battery warning, and two green blinks confirm
+successful incoming Wi-Fi Transfer uploads. The browser sends folders one
+file at a time, so confirmation waits for a second without another upload.
+Failed or cancelled uploads don't signal success, nor does switching off the
+server. After either notice, the light returns to the current state. Charging
+and full-charge indications take priority.
 
 **Stealth mode** takes priority over all of the above, including charging and
 all notifications. It cuts directly to black rather than waiting for the
@@ -34,18 +40,21 @@ configured fade. It preserves the **LED on** preference (which on its own
 still allows charging red), and remains in effect after suspend and reboot.
 It does not change battery safeguards or the screensaver visualizer.
 
-Both settings are off on an existing configuration unless explicitly enabled.
-Smart LED needs the direct SGM31324 controller; the stock driver pattern
-fallback still supports the normal colours and Stealth mode. The native web
-emulator models the RGB effects, but its Wi-Fi Transfer service is disabled.
+Smart LED and Stealth mode are both off unless explicitly enabled. Smart LED
+needs the direct SGM31324 controller; the stock driver pattern fallback still
+supports the normal colours and Stealth mode. The native web emulator models
+the RGB effects, but its Wi-Fi Transfer service is disabled.
 
 **On-device check:** Unplug the charger and play 44.1 kHz and 96 kHz PCM with
-clear bass hits and Smart LED enabled. Check for a distinct bright peak and a
-dim rest without changing the sample-rate colour or disturbing audio, with
-the screen on or off. Confirm that DSD stays steady white. Try an album upload
-followed by an aborted transfer, and watch for the low-battery warning on
-battery power. Switch Stealth on during charging, then suspend/wake and
-reboot: the light should stay dark until Stealth is turned off.
+clear bass hits and both loud and quiet passages. Try both styles: check
+for a distinct peak and a dim rest with Bass Pulse, and a smooth rise and
+fall with Energy Glow. Switch styles while playing and confirm the last
+choice comes back after reboot. Neither style should change the sample-rate
+colour or disturb audio, with the screen on or off. Confirm that DSD stays
+steady white. Try an album upload followed by an aborted transfer, and watch
+for the low-battery warning on battery power. Switch Stealth on during
+charging, then suspend/wake and reboot: the light should stay dark until
+Stealth is turned off.
 
 ## Register recipes
 
