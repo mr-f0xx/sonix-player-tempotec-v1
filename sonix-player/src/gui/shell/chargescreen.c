@@ -487,6 +487,25 @@ void chargescreen_run(lv_display_t *disp, const battery_config_t *battery_cfg) {
 	const uint32_t screen_on_ms = (uint32_t)seconds * 1000u;
 
 	chargescreen_build(NULL);
+
+	// The reading goes into the objects BEFORE the panel lights, not after:
+	// the only flush that is guaranteed to land on the glass on a charger boot
+	// is the one inside panel_on()'s wake bracket (see display_wake_begin() in
+	// main.c -- the panel loses whatever was pushed before its rails are up).
+	// A plain repaint after the light is on is not seen until the next
+	// blank/wake, which is how the screen used to come up showing an empty,
+	// unread battery. With the objects holding the reading already, the very
+	// first frame carries it.
+	int percent = -1;
+	bool charging = false;
+	bool have = battery_read_now(battery_cfg, &percent, &charging);
+#ifdef HOST_BUILD
+	bool cable = true; // a PC has no charger to take away
+#else
+	bool cable = charger_attached();
+#endif
+	chargescreen_show(have, percent, charging, cable);
+
 	// The panel may have come up blanked, or lit at a stale level from the
 	// session that switched the player off. Starting from "dark" and running
 	// the ordinary wake puts it right and draws the first frame where the
@@ -496,11 +515,6 @@ void chargescreen_run(lv_display_t *disp, const battery_config_t *battery_cfg) {
 
 	printf("chargescreen: up (screen %ld s, brightness %ld)\n", (long)seconds, on_level);
 	fflush(stdout);
-
-	bool have = false;
-	int percent = -1;
-	bool charging = false;
-	bool cable = true;
 
 	bool pressed = false;
 	uint32_t press_at = 0;
