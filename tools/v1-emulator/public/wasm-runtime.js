@@ -13,6 +13,8 @@
  *     fake telemetry, on-device PNG screenshots, and real-time PCM / RGB565 hooks.
  */
 
+import { unpackFirmware } from "./firmware-bundle.js";
+
 const IDB_NAME = "sonix_v1_wasm_emu_v1";
 const IDB_STORE_BUILDS = "builds";
 const IDB_STORE_SD = "sd_files";
@@ -30,15 +32,12 @@ const STORE_KEY_FIELD = {
 	[IDB_STORE_SD]: "path",
 	[IDB_STORE_META]: "key",
 };
-let idbDisabled = false;
+let dbPromise;
 
 function openDb() {
-	return new Promise((resolve) => {
-		if (idbDisabled || typeof indexedDB === "undefined") {
-			resolve(null);
-			return;
-		}
+	return dbPromise ??= new Promise((resolve) => {
 		try {
+			// Even reading window.indexedDB can throw in a restricted iframe.
 			const req = indexedDB.open(IDB_NAME, 1);
 			req.onupgradeneeded = () => {
 				const db = req.result;
@@ -46,13 +45,14 @@ function openDb() {
 				if (!db.objectStoreNames.contains(IDB_STORE_SD)) db.createObjectStore(IDB_STORE_SD, { keyPath: "path" });
 				if (!db.objectStoreNames.contains(IDB_STORE_META)) db.createObjectStore(IDB_STORE_META, { keyPath: "key" });
 			};
-			req.onsuccess = () => resolve(req.result);
-			req.onerror = () => {
-				idbDisabled = true;
-				resolve(null);
+			req.onsuccess = () => {
+				const db = req.result;
+				db.onversionchange = () => { db.close(); dbPromise = null; };
+				db.onclose = () => { dbPromise = null; };
+				resolve(db);
 			};
+			req.onerror = () => resolve(null);
 		} catch {
-			idbDisabled = true;
 			resolve(null);
 		}
 	});
@@ -60,22 +60,25 @@ function openDb() {
 
 async function idbGetAll(storeName) {
 	const db = await openDb();
-	if (!db) return Array.from(memFallback[storeName]?.values() || []);
+	const memory = memFallback[storeName];
+	if (!db) return [...memory.values()];
 	try {
-		return await new Promise((resolve, reject) => {
+		const stored = await new Promise((resolve, reject) => {
 			const tx = db.transaction(storeName, "readonly");
 			const req = tx.objectStore(storeName).getAll();
 			req.onsuccess = () => resolve(req.result || []);
 			req.onerror = () => reject(tx.error || req.error);
 		});
+		return [...stored.filter((row) => !memory.has(row[STORE_KEY_FIELD[storeName]])), ...memory.values()];
 	} catch {
-		return Array.from(memFallback[storeName]?.values() || []);
+		return [...memory.values()];
 	}
 }
 
 async function idbGet(storeName, key) {
+	if (memFallback[storeName].has(key)) return memFallback[storeName].get(key);
 	const db = await openDb();
-	if (!db) return memFallback[storeName]?.get(key) || null;
+	if (!db) return null;
 	try {
 		return await new Promise((resolve, reject) => {
 			const tx = db.transaction(storeName, "readonly");
@@ -89,10 +92,9 @@ async function idbGet(storeName, key) {
 }
 
 async function idbPut(storeName, value) {
-	const keyField = STORE_KEY_FIELD[storeName];
-	if (keyField && memFallback[storeName]) {
-		memFallback[storeName].set(value[keyField], value);
-	}
+	const key = value[STORE_KEY_FIELD[storeName]];
+	const memory = memFallback[storeName];
+	memory.set(key, value);
 	const db = await openDb();
 	if (!db) return;
 	try {
@@ -100,10 +102,11 @@ async function idbPut(storeName, value) {
 			const tx = db.transaction(storeName, "readwrite");
 			tx.objectStore(storeName).put(value);
 			tx.oncomplete = () => resolve();
-			tx.onerror = () => reject(tx.error);
+			tx.onerror = tx.onabort = () => reject(tx.error);
 		});
+		if (memory.get(key) === value) memory.delete(key);
 	} catch {
-		// Fall back cleanly to in-memory cache when quota or private-mode blocks writes.
+		// This write (possibly a rebuild of an existing ID) is newer than disk.
 	}
 }
 
@@ -116,102 +119,9 @@ async function idbDelete(storeName, key) {
 			const tx = db.transaction(storeName, "readwrite");
 			tx.objectStore(storeName).delete(key);
 			tx.oncomplete = () => resolve();
-			tx.onerror = () => reject(tx.error);
+			tx.onerror = tx.onabort = () => reject(tx.error);
 		});
 	} catch {}
-}
-
-/* -------------------------------------------------------------------------
- * Zero-dependency ZIP reader (Store + Deflate via DecompressionStream)
- * ------------------------------------------------------------------------- */
-async function inflateRaw(compressedBytes) {
-	if (typeof DecompressionStream === "undefined") {
-		throw new Error(
-			"This mobile browser does not support DecompressionStream (requires iOS Safari 16.4+, Chrome 80+, or Firefox 113+)."
-		);
-	}
-	const ds = new DecompressionStream("deflate-raw");
-	const writer = ds.writable.getWriter();
-	writer.write(compressedBytes);
-	writer.close();
-	const chunks = [];
-	const reader = ds.readable.getReader();
-	let total = 0;
-	while (true) {
-		const { done, value } = await reader.read();
-		if (done) break;
-		chunks.push(value);
-		total += value.byteLength;
-	}
-	const out = new Uint8Array(total);
-	let pos = 0;
-	for (const c of chunks) {
-		out.set(c, pos);
-		pos += c.byteLength;
-	}
-	return out;
-}
-
-export async function extractZip(arrayBuffer, onProgress) {
-	const bytes = new Uint8Array(arrayBuffer);
-	const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-	const decoder = new TextDecoder("utf-8");
-
-	// Locate End of Central Directory (EOCD: 0x06054b50)
-	let eocdOffset = -1;
-	const minOffset = Math.max(0, bytes.length - 65557);
-	for (let i = bytes.length - 22; i >= minOffset; i--) {
-		if (view.getUint32(i, true) === 0x06054b50) {
-			eocdOffset = i;
-			break;
-		}
-	}
-	if (eocdOffset < 0) {
-		throw new Error("Invalid .sonix-web.zip file (ZIP central directory not found)");
-	}
-
-	const totalEntries = view.getUint16(eocdOffset + 10, true);
-	const cdOffset = view.getUint32(eocdOffset + 16, true);
-	const files = new Map();
-
-	let ptr = cdOffset;
-	for (let idx = 0; idx < totalEntries; idx++) {
-		if (view.getUint32(ptr, true) !== 0x02014b50) {
-			throw new Error("Corrupt ZIP central directory entry");
-		}
-		const method = view.getUint16(ptr + 10, true);
-		const compSize = view.getUint32(ptr + 20, true);
-		const nameLen = view.getUint16(ptr + 28, true);
-		const extraLen = view.getUint16(ptr + 30, true);
-		const commentLen = view.getUint16(ptr + 32, true);
-		const localHeaderOffset = view.getUint32(ptr + 42, true);
-		const name = decoder.decode(bytes.subarray(ptr + 46, ptr + 46 + nameLen));
-		ptr += 46 + nameLen + extraLen + commentLen;
-
-		if (name.endsWith("/")) continue;
-
-		if (view.getUint32(localHeaderOffset, true) !== 0x04034b50) {
-			throw new Error(`Corrupt local header for ${name}`);
-		}
-		const lNameLen = view.getUint16(localHeaderOffset + 26, true);
-		const lExtraLen = view.getUint16(localHeaderOffset + 28, true);
-		const dataStart = localHeaderOffset + 30 + lNameLen + lExtraLen;
-		const compData = bytes.subarray(dataStart, dataStart + compSize);
-
-		let data;
-		if (method === 0) {
-			data = new Uint8Array(compData);
-		} else if (method === 8) {
-			data = await inflateRaw(compData);
-		} else {
-			throw new Error(`Unsupported ZIP compression method ${method} for ${name}`);
-		}
-		files.set(name.replace(/^\/+/, ""), data);
-		if (onProgress && (idx % 12 === 0 || idx === totalEntries - 1)) {
-			onProgress(idx + 1, totalEntries, name);
-		}
-	}
-	return files;
 }
 
 /* -------------------------------------------------------------------------
@@ -387,11 +297,12 @@ function loadScriptFromBlobUrl(url) {
  * ------------------------------------------------------------------------- */
 export class SonixWasmBackend {
 	constructor(callbacks) {
-		this.cb = callbacks; // { onFrame, onEvent, onLog, onState, onSdChanged, onBuildStatus }
+		this.cb = callbacks;
 		this.module = null;
-		this.activeBundle = null; // { meta, jsBytes, wasmBytes, usrFiles: Map }
+		this.activeBundle = null; // { meta, jsBytes, wasmBytes, workerBytes?, usrFiles: Map }
 		this.jsBlobUrl = null;
 		this.wasmBlobUrl = null;
+		this.workerBlobUrl = null;
 		this.bootSeq = 0;
 
 		this.state = {
@@ -446,7 +357,7 @@ export class SonixWasmBackend {
 				ref: b.ref || "local",
 				shortCommit: b.shortCommit || "custom",
 				builtAt: b.builtAt,
-				size: b.zipBuffer ? b.zipBuffer.byteLength : 0,
+				size: b.size || b.zipBuffer?.byteLength || 0,
 				source: "custom",
 			}))
 			.sort((a, b) => String(b.builtAt || "").localeCompare(String(a.builtAt || "")));
@@ -454,7 +365,9 @@ export class SonixWasmBackend {
 
 	async getSavedCustomBuildBuffer(id) {
 		const rec = await idbGet(IDB_STORE_BUILDS, id);
-		return rec ? rec.zipBuffer : null;
+		// Older records store ArrayBuffers. A Blob lets catalog reads clone
+		// handles rather than every previously imported firmware's bytes.
+		return rec?.zipBuffer instanceof Blob ? rec.zipBuffer.arrayBuffer() : rec?.zipBuffer;
 	}
 
 	async deleteSavedCustomBuild(id) {
@@ -469,11 +382,20 @@ export class SonixWasmBackend {
 		this.cb.onLog?.({ ts: Date.now(), stream, line: String(line) });
 	}
 
-	async loadBundleFromUrl(url, metaHint = {}) {
-		this.cb.onBuildStatus?.(`Downloading ${metaHint.name || url}...`, 0.05);
-		const res = await fetch(url);
+	async loadBundleFromUrl(url, options = {}) {
+		options.progress?.(`Downloading ${options.name || url}...`, 0.05);
+		let res;
+		try {
+			res = await fetch(url, { cache: "no-store", signal: options.signal });
+		} catch (err) {
+			if (options.signal?.aborted) throw err;
+			throw new Error(`Cannot fetch ${url}. Use a direct bundle URL that allows CORS, or download the ZIP and open it here.`);
+		}
 		if (!res.ok) {
 			throw new Error(`HTTP ${res.status} fetching firmware bundle from ${url}`);
+		}
+		if (res.headers.get("content-type")?.includes("text/html")) {
+			throw new Error("This URL returned a web page. Use a direct bundle URL or download the Actions artifact and browse to its ZIP.");
 		}
 		const contentLength = Number(res.headers.get("content-length") || 0);
 		let arrayBuffer;
@@ -487,8 +409,8 @@ export class SonixWasmBackend {
 				chunks.push(value);
 				received += value.byteLength;
 				const pct = Math.min(0.65, (received / contentLength) * 0.65);
-				this.cb.onBuildStatus?.(
-					`Downloading ${metaHint.name || "bundle"} (${(received / 1048576).toFixed(1)} / ${(contentLength / 1048576).toFixed(1)} MB)...`,
+				options.progress?.(
+					`Downloading ${options.name || "bundle"} (${(received / 1048576).toFixed(1)} / ${(contentLength / 1048576).toFixed(1)} MB)...`,
 					pct
 				);
 			}
@@ -502,48 +424,15 @@ export class SonixWasmBackend {
 		} else {
 			arrayBuffer = await res.arrayBuffer();
 		}
-		return this.loadBundleFromBuffer(arrayBuffer, { ...metaHint, saveCustom: false });
+		return this.loadBundleFromBuffer(arrayBuffer, options);
 	}
 
 	async loadBundleFromBuffer(arrayBuffer, options = {}) {
-		if (!window.crossOriginIsolated || typeof SharedArrayBuffer === "undefined") {
-			const hint = !window.isSecureContext
-				? "Open this page over HTTPS (or connect to a desktop running server.mjs over LAN)."
-				: "Tap Reload once so the Cross-Origin Isolation service worker activates (required for SharedArrayBuffer on mobile Safari & Chrome).";
-			throw new Error(`SharedArrayBuffer is unavailable. ${hint}`);
-		}
-
-		this.cb.onBuildStatus?.("Unpacking .sonix-web.zip bundle...", 0.7);
-		const files = await extractZip(arrayBuffer, (done, total) => {
-			const frac = 0.7 + (done / Math.max(1, total)) * 0.2;
-			this.cb.onBuildStatus?.(`Unpacking bundle (${done}/${total} files)...`, frac);
+		options.progress?.("Unpacking firmware bundle...", 0.7);
+		const { manifest, ...bundle } = await unpackFirmware(arrayBuffer, (done, total) => {
+			options.signal?.throwIfAborted();
+			options.progress?.(`Unpacking bundle (${done}/${total} assets)...`, 0.7 + (done / total) * 0.2);
 		});
-
-		let manifest = null;
-		const manifestBytes = files.get("manifest.json");
-		if (manifestBytes) {
-			try {
-				manifest = JSON.parse(new TextDecoder().decode(manifestBytes));
-			} catch {}
-		}
-
-		const entryJsName = manifest?.entryJs || "sonix_player_wasm.js";
-		const wasmName = manifest?.wasm || "sonix_player_wasm.wasm";
-		const jsBytes = files.get(entryJsName);
-		const wasmBytes = files.get(wasmName);
-		if (!jsBytes || !wasmBytes) {
-			throw new Error(`Bundle is missing ${entryJsName} or ${wasmName}`);
-		}
-
-		const usrFiles = new Map();
-		for (const [k, v] of files.entries()) {
-			if (k.startsWith("usr/")) {
-				usrFiles.set(k, v);
-			}
-		}
-		if (usrFiles.size === 0) {
-			throw new Error("Bundle is missing TempoTec V1 runtime assets (usr/)");
-		}
 
 		const meta = {
 			id: manifest?.id || options.id || `custom-${Date.now()}`,
@@ -554,28 +443,26 @@ export class SonixWasmBackend {
 			subject: manifest?.subject || options.subject || "",
 			builtAt: manifest?.builtAt || options.builtAt || new Date().toISOString(),
 			size: arrayBuffer.byteLength,
-			source: options.saveCustom ? "custom" : "catalog",
+			source: options.saveCustom ? "custom" : options.source || "url",
 		};
 
-		if (options.saveCustom) {
-			try {
-				await idbPut(IDB_STORE_BUILDS, { ...meta, zipBuffer: arrayBuffer });
-			} catch (err) {
-				this._emitLog("emu", `Note: could not cache bundle in IndexedDB (${err.message})`);
-			}
-		}
-
-		this.activeBundle = { meta, jsBytes, wasmBytes, usrFiles };
-		this.state.build = meta;
-		this._emitState();
-
-		this.cb.onBuildStatus?.(`Booting ${meta.name}...`, 0.95);
-		await this.boot({ chargeScreen: false });
-		this.cb.onBuildStatus?.(null, 1);
+		await (this.storageReady ??= this.initStorage());
+		options.signal?.throwIfAborted();
+		// Do not disconnect a working native bridge (or stop the previous WASM
+		// build) until we actually have a web bundle to replace it with.
+		this.cb.onActivate?.();
+		this.activeBundle = { meta, ...bundle };
+		options.progress?.(`Starting ${meta.name} — waiting for the display...`, 0.95);
+		await this.boot({ signal: options.signal });
+		if (options.saveCustom) await idbPut(IDB_STORE_BUILDS, { ...meta, zipBuffer: new Blob([arrayBuffer]) });
 		return meta;
 	}
 
 	async stop() {
+		++this.bootSeq; // Ignore late frames, exits and power events from the old module.
+		this.cancelBoot?.();
+		this.cancelBoot = null;
+		clearTimeout(this._audioIdleTimer);
 		this._persistMemfsState();
 		if (this._fpsTimer) {
 			clearInterval(this._fpsTimer);
@@ -585,32 +472,21 @@ export class SonixWasmBackend {
 			clearInterval(this._sdSyncTimer);
 			this._sdSyncTimer = null;
 		}
-		if (this.module) {
-			const mod = this.module;
-			this.module = null;
-			try {
-				if (mod._webemu_wasm_quit) mod._webemu_wasm_quit();
-			} catch {}
-			await new Promise((r) => setTimeout(r, 80));
-			try {
-				if (mod.PThread && typeof mod.PThread.terminateAllThreads === "function") {
-					mod.PThread.terminateAllThreads();
-				}
-			} catch {}
-		}
-		if (this.jsBlobUrl) {
-			URL.revokeObjectURL(this.jsBlobUrl);
-			this.jsBlobUrl = null;
-		}
-		if (this.wasmBlobUrl) {
-			URL.revokeObjectURL(this.wasmBlobUrl);
-			this.wasmBlobUrl = null;
-		}
+		const mod = this.module;
+		this.module = null;
+		const urls = [this.jsBlobUrl, this.wasmBlobUrl, this.workerBlobUrl];
+		this.jsBlobUrl = this.wasmBlobUrl = this.workerBlobUrl = null;
 		this.state.lifecycle = "stopped";
 		this.state.audioActive = false;
 		this.state.fps = 0;
 		this.state.led = { mode: "off", r: 0, g: 0, b: 0, r_step: 0, g_step: 0, b_step: 0, rise_ms: 0, fall_ms: 0, period_ms: 0 };
 		this._emitState();
+		if (mod) {
+			try { mod._webemu_wasm_quit?.(); } catch {}
+			await new Promise((r) => setTimeout(r, 80));
+			try { mod.PThread?.terminateAllThreads?.(); } catch {}
+		}
+		for (const url of urls) if (url) URL.revokeObjectURL(url);
 	}
 
 	_persistMemfsState() {
@@ -626,13 +502,17 @@ export class SonixWasmBackend {
 		} catch {}
 	}
 
-	async boot({ chargeScreen = false } = {}) {
+	async boot({ chargeScreen = false, signal } = {}) {
 		if (!this.activeBundle) {
 			throw new Error("No firmware bundle loaded yet");
 		}
-		const seq = ++this.bootSeq;
-		await this.stop();
-		if (seq !== this.bootSeq) return;
+		const stopping = this.stop();
+		const seq = this.bootSeq;
+		await stopping;
+		const superseded = () => new DOMException("Firmware boot superseded", "AbortError");
+		if (seq !== this.bootSeq || signal?.aborted) throw superseded();
+		this.state.build = this.activeBundle.meta;
+		this.state.error = null;
 
 		this.state.lifecycle = "booting";
 		this.state.chargeScreen = !!chargeScreen;
@@ -641,29 +521,81 @@ export class SonixWasmBackend {
 		this._emitState();
 		this._emitLog("emu", `Booting WebAssembly build: ${this.activeBundle.meta.name}`);
 
+		// With PROXY_TO_PTHREAD the factory can resolve before C main has
+		// even started. Only call this a successful boot after the first frame.
+		let frameReady, fail;
+		const firstFrame = new Promise((resolve) => { frameReady = resolve; });
+		const failed = new Promise((_, reject) => { fail = reject; });
+		const cancel = () => fail(superseded());
+		this.cancelBoot = cancel;
+		signal?.addEventListener("abort", cancel, { once: true });
+		const timer = setTimeout(() => fail(new Error("No display frame from this firmware after 45 seconds. See Live Logs.")), 45000);
+		try {
+			const ready = Promise.all([this._createModule(seq, chargeScreen, frameReady, fail), firstFrame]);
+			const [mod] = await Promise.race([ready, failed]);
+			if (seq !== this.bootSeq || signal?.aborted) throw superseded();
+			this.module = mod;
+		} catch (err) {
+			if (seq === this.bootSeq) {
+				const stopping = this.stop();
+				if (err.name !== "AbortError") {
+					this.state.lifecycle = "crashed";
+					this.state.error = err.message;
+					this._emitState();
+				}
+				await stopping;
+			}
+			throw err;
+		} finally {
+			clearTimeout(timer);
+			signal?.removeEventListener("abort", cancel);
+			if (this.cancelBoot === cancel) this.cancelBoot = null;
+		}
+		this.state.lifecycle = "running";
+		this._emitState();
+
+		this._fpsTimer = setInterval(() => {
+			this.state.fps = this._frameCounter;
+			this._frameCounter = 0;
+			this.cb.onEvent?.({ type: "metrics", fps: this.state.fps });
+		}, 1000);
+
+		this._sdSyncTimer = setInterval(() => {
+			this._persistMemfsState();
+		}, 5000);
+
+		this.cb.onSdChanged?.();
+	}
+
+	async _createModule(seq, chargeScreen, frameReady, fail) {
 		const sdFiles = await idbGetAll(IDB_STORE_SD);
-		const jsBlob = new Blob([this.activeBundle.jsBytes], { type: "application/javascript" });
+		if (seq !== this.bootSeq) throw new DOMException("Boot cancelled", "AbortError");
+		const bundle = this.activeBundle;
+		const jsBlob = new Blob([bundle.jsBytes], { type: "application/javascript" });
 		this.jsBlobUrl = URL.createObjectURL(jsBlob);
 		this.wasmBlobUrl = null;
 
 		window.createSonixPlayer = undefined;
 		await loadScriptFromBlobUrl(this.jsBlobUrl);
+		if (seq !== this.bootSeq) throw new DOMException("Boot cancelled", "AbortError");
 		if (typeof window.createSonixPlayer !== "function") {
 			throw new Error("createSonixPlayer factory not exported by bundle JS");
 		}
 
 		const factory = window.createSonixPlayer;
 		const self = this;
-		const wasmCopy = new Uint8Array(this.activeBundle.wasmBytes);
-
-		const mod = await factory({
+		const options = {
 			mainScriptUrlOrBlob: this.jsBlobUrl,
-			wasmBinary: wasmCopy,
+			wasmBinary: bundle.wasmBytes,
 			locateFile: (p) => {
+				if (p.endsWith(".worker.js")) {
+					if (!bundle.workerBytes) throw new Error(`Bundle is missing the pthread helper ${p}. Rebuild it with web-wasm-bundle.`);
+					return self.workerBlobUrl ??= URL.createObjectURL(new Blob([bundle.workerBytes], { type: "application/javascript" }));
+				}
 				if (p.endsWith(".wasm")) {
 					if (!self.wasmBlobUrl) {
 						self.wasmBlobUrl = URL.createObjectURL(
-							new Blob([self.activeBundle.wasmBytes], { type: "application/wasm" })
+							new Blob([bundle.wasmBytes], { type: "application/wasm" })
 						);
 					}
 					return self.wasmBlobUrl;
@@ -673,13 +605,21 @@ export class SonixWasmBackend {
 			print: (line) => self._emitLog("stdout", line),
 			printErr: (line) => self._emitLog("stderr", line),
 			onAbort: (what) => {
-				self._emitLog("emu", `WASM abort: ${what}`);
+				if (seq !== self.bootSeq) return;
+				const err = new Error(`WASM abort: ${what}`);
+				self._emitLog("stderr", err.message);
+				self.state.error = err.message;
+				self.state.lifecycle = "crashed";
+				self._emitState();
+				fail(err);
 			},
 			onExit: (code) => {
 				if (seq !== self.bootSeq) return;
 				self._emitLog("emu", `sonix_player_wasm exited (code=${code})`);
-				if (code === 43) {
-					setTimeout(() => self.boot({ chargeScreen: false }), 250);
+				if (self.state.lifecycle === "booting") {
+					fail(new Error(`Firmware exited during boot (code ${code}). See Live Logs.`));
+				} else if (code === 43) {
+					self._schedulePowerAction("boot", 250);
 				} else {
 					self.state.lifecycle = "stopped";
 					self.state.audioActive = false;
@@ -688,6 +628,7 @@ export class SonixWasmBackend {
 			},
 			preRun: [
 				(M) => {
+					if (seq !== self.bootSeq) throw new DOMException("Boot cancelled", "AbortError");
 					M.ENV.SONIX_PANEL = "v1";
 					M.ENV.SONIX_SD_ROOT = "/sd";
 					M.ENV.SONIX_CONFIG = "/config/device_config.ini";
@@ -705,7 +646,7 @@ export class SonixWasmBackend {
 					}
 
 					// Populate TempoTec V1 /usr assets from the loaded bundle
-					for (const [relPath, bytes] of self.activeBundle.usrFiles.entries()) {
+					for (const [relPath, bytes] of bundle.usrFiles.entries()) {
 						const fullPath = "/" + relPath;
 						const dir = fullPath.slice(0, fullPath.lastIndexOf("/"));
 						mkdirpFS(M.FS, dir);
@@ -735,15 +676,12 @@ export class SonixWasmBackend {
 
 					M._sonixBridge = {
 						onFrame(view, w, h) {
-							if (seq !== self.bootSeq) return;
+							if (seq !== self.bootSeq || !(w > 0 && h > 0 && view?.byteLength >= w * h * 2)) return;
 							self._frameCounter++;
 							self.state.width = w;
 							self.state.height = h;
-							if (self.state.lifecycle !== "running") {
-								self.state.lifecycle = "running";
-								self._emitState();
-							}
 							self.cb.onFrame?.(view, w, h);
+							frameReady();
 						},
 						onEvent(jsonStr) {
 							if (seq !== self.bootSeq) return;
@@ -770,29 +708,23 @@ export class SonixWasmBackend {
 					};
 				},
 			],
-		});
-
+		};
+		// Emscripten populates the options object during initialization. Keep
+		// it so stop() can terminate a partial pthread pool on boot failure.
+		this.module = options;
+		const mod = await factory(options);
 		if (seq !== this.bootSeq) {
-			try { mod._webemu_wasm_quit?.(); } catch {}
 			try { mod.PThread?.terminateAllThreads?.(); } catch {}
-			return;
+			throw new DOMException("Boot cancelled", "AbortError");
 		}
+		return mod;
+	}
 
-		this.module = mod;
-		this.state.lifecycle = "running";
-		this._emitState();
-
-		this._fpsTimer = setInterval(() => {
-			this.state.fps = this._frameCounter;
-			this._frameCounter = 0;
-			this.cb.onEvent?.({ type: "metrics", fps: this.state.fps });
-		}, 1000);
-
-		this._sdSyncTimer = setInterval(() => {
-			this._persistMemfsState();
-		}, 5000);
-
-		this.cb.onSdChanged?.();
+	_schedulePowerAction(action, delay) {
+		const seq = this.bootSeq;
+		setTimeout(() => {
+			if (seq === this.bootSeq) this.powerAction(action).catch((err) => this._emitLog("stderr", err.message));
+		}, delay);
 	}
 
 	_handleFirmwareEvent(ev) {
@@ -825,9 +757,9 @@ export class SonixWasmBackend {
 				break;
 			case "power":
 				if (ev.action === "reboot") {
-					setTimeout(() => this.boot({ chargeScreen: false }), 250);
+					this._schedulePowerAction("boot", 250);
 				} else if (ev.action === "poweroff") {
-					setTimeout(() => this.stop(), 150);
+					this._schedulePowerAction("poweroff", 150);
 				}
 				break;
 		}

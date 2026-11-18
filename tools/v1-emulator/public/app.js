@@ -10,6 +10,8 @@
  *      Streams RGB565 frames, ALSA PCM, and telemetry over `/ws` from native `sonix_player_web`.
  */
 
+import { publishedBuilds } from "./build-catalog.js";
+import { WEB_BUILD_HINT } from "./firmware-bundle.js";
 import { SonixWasmBackend } from "./wasm-runtime.js";
 
 /* --------------------------------------------------------------------------
@@ -39,6 +41,9 @@ const el = {
 
 	buildRuntimeBadge: document.getElementById("build-runtime-badge"),
 	buildSelect: document.getElementById("build-select"),
+	buildLatestBtn: document.getElementById("btn-build-latest"),
+	buildResult: document.getElementById("build-result"),
+	buildStandalone: document.getElementById("build-standalone"),
 	buildLoadBtn: document.getElementById("btn-build-load"),
 	buildDelBtn: document.getElementById("btn-build-del"),
 	buildMeta: document.getElementById("build-meta"),
@@ -48,7 +53,7 @@ const el = {
 	buildDropzone: document.getElementById("build-dropzone"),
 	buildFileInput: document.getElementById("build-file-input"),
 	buildUrlInput: document.getElementById("build-url-input"),
-	buildUrlBtn: document.getElementById("btn-build-url"),
+	buildUrlForm: document.getElementById("build-url-form"),
 
 	canvas: document.getElementById("v1-canvas"),
 	stageCanvasWrap: document.getElementById("stage-canvas-wrap"),
@@ -139,6 +144,13 @@ let reconnectDelay = 500;
 let wasmBackend = null;
 let catalogBuilds = []; // { id, name, ref, shortCommit, builtAt, size, url, source: 'catalog'|'custom' }
 let buildBusyText = null;
+let buildError = null;
+let localServerAvailable = false;
+let catalogRequest = 0;
+let loadRequest = null;
+let loadQueue = Promise.resolve();
+let followedBuild = null; // null when pinned to an explicit build; "" while awaiting the first publish.
+let checkingLatest = false;
 let activeSdBlobUrls = [];
 let deviceState = {
 	lifecycle: "starting",
@@ -440,14 +452,16 @@ requestAnimationFrame(renderLedFrame);
  * UI State Synchronization
  * -------------------------------------------------------------------------- */
 function syncUiFromState() {
+	// Rebuild always targets this server's working tree, even after a WASM import.
+	el.rebuildBtn.classList.toggle("hidden", !localServerAvailable);
+	el.rebuildBtn.disabled = Boolean(buildBusyText) || (runtimeMode === "native" && deviceState.lifecycle === "building");
 	// Runtime & build header pills
 	if (runtimeMode === "wasm") {
 		el.runtimePill.className = "pill pill-info";
 		el.runtimePill.textContent = "WASM · Browser";
-		el.connPill.className = "pill pill-ok";
+		el.connPill.className = deviceState.lifecycle === "running" ? "pill pill-ok" : "pill pill-muted";
 		el.connPill.textContent = deviceState.build?.shortCommit ? `Build ${deviceState.build.shortCommit}` : "In-Browser";
 		el.buildRuntimeBadge.textContent = "WASM";
-		el.rebuildBtn.classList.add("hidden");
 		el.brandSub.textContent = deviceState.build?.name
 			? `${deviceState.build.name} · LVGL 9.6 · 240×320`
 			: "WebAssembly sonix-player · LVGL 9.6 · 240×320";
@@ -455,7 +469,6 @@ function syncUiFromState() {
 		el.runtimePill.className = "pill pill-muted";
 		el.runtimePill.textContent = "Native Bridge";
 		el.buildRuntimeBadge.textContent = "NATIVE";
-		el.rebuildBtn.classList.remove("hidden");
 		el.brandSub.textContent = "Native sonix-player · LVGL 9.6 · 240×320";
 	}
 
@@ -518,20 +531,18 @@ function syncUiFromState() {
 		el.teleScreen.textContent = "Building";
 	} else if (lc === "powered_off" || lc === "stopped") {
 		el.screenOverlay.classList.remove("hidden");
-		const missingCoi = runtimeMode === "wasm" && (!window.crossOriginIsolated || typeof SharedArrayBuffer === "undefined");
+		const issue = runtimeMode === "wasm" && wasmSupportIssue();
 		const noBundle = runtimeMode === "wasm" && !wasmBackend?.activeBundle;
-		if (missingCoi) {
-			el.overlayTitle.textContent = "Reload to Enable WASM";
-			el.overlaySub.textContent = window.isSecureContext
-				? "Tap Reload once so your mobile browser activates Cross-Origin Isolation for SharedArrayBuffer."
-				: "In-browser WASM requires HTTPS. Over local Wi-Fi, connect to server.mjs instead.";
-			el.overlayBootBtn.textContent = "Reload Page";
+		if (issue) {
+			el.overlayTitle.textContent = "Web build needs isolation";
+			el.overlaySub.textContent = issue;
+			el.overlayBootBtn.textContent = window.top !== window.self ? "Open in new tab" : "Reload Page";
 			el.overlayBootBtn.classList.remove("hidden");
 		} else if (noBundle) {
-			el.overlayTitle.textContent = "Select a Sonix Build";
-			el.overlaySub.textContent = "Choose a published build or load any .sonix-web.zip bundle in Builds.";
+			el.overlayTitle.textContent = buildError ? "Firmware not loaded" : "Select a Sonix Build";
+			el.overlaySub.textContent = buildError || "Choose a published build or load a web firmware ZIP in Builds.";
 			el.overlayBootBtn.textContent = "Open Builds";
-			el.overlayBootBtn.classList.toggle("hidden", !isMobileViewport());
+			el.overlayBootBtn.classList.remove("hidden");
 		} else {
 			el.overlayTitle.textContent = "TempoTec V1 Off";
 			el.overlaySub.textContent = "Hold side PWR button (1s) or tap below to boot";
@@ -542,7 +553,8 @@ function syncUiFromState() {
 	} else if (lc === "crashed") {
 		el.screenOverlay.classList.remove("hidden");
 		el.overlayTitle.textContent = "Process Stopped";
-		el.overlaySub.textContent = "Inspect live logs or reboot the emulator";
+		el.overlaySub.textContent = deviceState.error || "Inspect live logs or reboot the emulator";
+		el.overlayBootBtn.textContent = "Retry boot";
 		el.overlayBootBtn.classList.remove("hidden");
 		el.teleScreen.textContent = "Stopped";
 	} else if (!deviceState.screenOn) {
@@ -610,6 +622,7 @@ function disconnectWs() {
 }
 
 function connectWs() {
+	if (runtimeMode !== "native" || ws) return;
 	wsClosedManually = false;
 	const proto = location.protocol === "https:" ? "wss:" : "ws:";
 	const url = `${proto}//${location.host}/ws`;
@@ -650,7 +663,8 @@ function connectWs() {
 	};
 
 	sock.onclose = () => {
-		if (ws === sock) ws = null;
+		if (ws !== sock) return;
+		ws = null;
 		if (wsClosedManually || runtimeMode !== "native") return;
 		el.connPill.className = "pill pill-err";
 		el.connPill.textContent = "Reconnecting";
@@ -934,6 +948,9 @@ function isTypingInField() {
 }
 
 window.addEventListener("keydown", (ev) => {
+	// Keep keyboard activation of workbench controls (including Browse ZIP)
+	// separate from the device's Space/Enter play button.
+	if ((ev.code === "Enter" || ev.code === "Space") && ev.target.closest?.("button:not([data-hw-btn]), a")) return;
 	if (isTypingInField() || ev.ctrlKey || ev.metaKey || ev.altKey) return;
 	if (ev.code === "KeyS") {
 		ev.preventDefault();
@@ -1139,12 +1156,25 @@ el.usbcPort?.addEventListener("click", () => {
 });
 
 el.rebuildBtn.addEventListener("click", async () => {
-	showToast("Rebuilding sonix_player_web...");
-	await fetch("/api/power", {
-		method: "POST",
-		headers: { "Content-Type": "application/json" },
-		body: JSON.stringify({ action: "rebuild" }),
-	});
+	if (!localServerAvailable || buildBusyText) return;
+	const intent = loadRequest;
+	followedBuild = null;
+	try {
+		const res = await fetch("/api/power", {
+			method: "POST", headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({ action: "rebuild" }),
+		});
+		if (!res.ok) throw new Error(`Local rebuild request failed (HTTP ${res.status})`);
+		if (loadRequest !== intent) return;
+		if (runtimeMode !== "native") {
+			runtimeMode = "native";
+			await wasmBackend?.stop();
+			deviceState.build = deviceState.error = null;
+			deviceState.chargeScreen = false;
+			connectWs();
+		}
+		setBuildResult("Testing the local working tree. See Live Logs for build output.");
+	} catch (err) { reportBuildError(err); }
 });
 
 /* --------------------------------------------------------------------------
@@ -1224,7 +1254,8 @@ el.comboShotBtn.addEventListener("click", () => {
 
 async function postPowerAction(action) {
 	if (runtimeMode === "wasm") {
-		await wasmBackend?.powerAction(action);
+		if (buildBusyText) return;
+		try { await wasmBackend?.powerAction(action); } catch (err) { reportBuildError(err); }
 		return;
 	}
 	await fetch("/api/power", {
@@ -1255,6 +1286,7 @@ el.powerToggleBtn.addEventListener("click", () => {
 
 el.overlayBootBtn.addEventListener("click", () => {
 	if (runtimeMode === "wasm" && (!window.crossOriginIsolated || typeof SharedArrayBuffer === "undefined")) {
+		if (window.top !== window.self) { el.buildStandalone.click(); return; }
 		try { sessionStorage.removeItem("sonix_coi_reloaded_v2"); } catch {}
 		window.location.reload();
 		return;
@@ -1702,6 +1734,7 @@ el.logClearBtn.addEventListener("click", async () => {
 function ensureWasmBackend() {
 	if (wasmBackend) return wasmBackend;
 	wasmBackend = new SonixWasmBackend({
+		onActivate: switchToWasmMode,
 		onFrame: (rgb565Bytes, w, h) => {
 			if (runtimeMode !== "wasm") return;
 			renderRgb565Bytes(rgb565Bytes, w, h);
@@ -1726,13 +1759,6 @@ function ensureWasmBackend() {
 		onSdChanged: () => {
 			if (runtimeMode !== "wasm") return;
 			refreshSdList();
-		},
-		onBuildStatus: (label, frac) => {
-			if (label == null) {
-				setBuildProgress(null, null);
-			} else {
-				setBuildProgress(Math.round((frac || 0) * 100), label);
-			}
 		},
 	});
 	return wasmBackend;
@@ -1762,166 +1788,181 @@ function setBuildProgress(percent, label) {
 	syncUiFromState();
 }
 
+function setBuildResult(message, error = false) {
+	buildError = error ? message : null;
+	el.buildResult.textContent = message;
+	el.buildResult.classList.toggle("error", error);
+}
+
+function reportBuildError(err) {
+	const message = err?.message || String(err);
+	setBuildResult(message, true);
+	showToast(message);
+	appendLogEntry({ ts: Date.now(), stream: "stderr", line: `[firmware] ${message}` });
+}
+
+function wasmSupportIssue() {
+	if (!window.isSecureContext) return "Use HTTPS or localhost for web firmware. Over plain HTTP, use the native bridge.";
+	if (!window.crossOriginIsolated || typeof SharedArrayBuffer === "undefined") {
+		return window.top !== window.self
+			? "Open the emulator in its own tab, then load the build there. This embedded page cannot use SharedArrayBuffer."
+			: "Reload once to activate cross-origin isolation. The host must support COOP/COEP for WebAssembly threads.";
+	}
+	return null;
+}
+
 function updateSelectedBuildMeta() {
-	const selectedId = el.buildSelect.value;
-	const item = catalogBuilds.find((b) => b.id === selectedId);
-	if (!item) {
-		el.buildDelBtn.classList.add("hidden");
-		el.buildMeta.innerHTML =
-			'Select a published CI build or drop any <code>.sonix-web.zip</code> bundle below.';
-		return;
-	}
-	el.buildDelBtn.classList.toggle("hidden", item.source !== "custom");
+	const item = catalogBuilds.find((b) => b.id === el.buildSelect.value);
+	el.buildLoadBtn.disabled = !item;
+	el.buildDelBtn.classList.toggle("hidden", item?.source !== "custom");
 	const bits = [];
-	if (item.ref) bits.push(`Branch/Ref: <code>${item.ref}</code>`);
-	if (item.shortCommit) bits.push(`Commit: <code>${item.shortCommit}</code>`);
-	if (item.size) bits.push(`Size: <code>${formatSize(item.size)}</code>`);
-	if (item.builtAt) {
-		const dt = new Date(item.builtAt);
-		if (!Number.isNaN(dt.getTime())) {
-			bits.push(`Built: <code>${dt.toISOString().slice(0, 16).replace("T", " ")} UTC</code>`);
-		}
-	}
-	if (item.source === "custom") bits.push("<code>Saved locally in browser</code>");
-	el.buildMeta.innerHTML = bits.join(" &middot; ") || "Ready to boot in WebAssembly.";
+	if (item?.ref) bits.push(`Ref: ${item.ref}`);
+	if (item?.shortCommit) bits.push(`Commit: ${item.shortCommit}`);
+	if (item?.size) bits.push(formatSize(item.size));
+	if (Date.parse(item?.builtAt)) bits.push(new Date(item.builtAt).toLocaleString());
+	if (item?.source === "custom") bits.push("Imported in this browser");
+	el.buildMeta.textContent = bits.join(" · ") || "Import a web build below, or check for the latest published firmware.";
 }
 
-async function refreshBuildCatalog(selectId = null) {
-	const items = [];
+async function fetchPublished(signal) {
+	const res = await fetch("./builds/manifest.json", { cache: "no-store", signal });
+	if (!res.ok) throw new Error(`HTTP ${res.status}`);
+	return publishedBuilds(await res.json());
+}
 
-	// 1. Static catalog published alongside index.html (GitHub Pages or local dist/)
+async function refreshBuildCatalog(signal) {
+	const seq = ++catalogRequest;
+	let published = [];
+	let catalogError;
 	try {
-		const res = await fetch("./builds/manifest.json", { cache: "no-cache" });
-		if (res.ok) {
-			const data = await res.json();
-			if (Array.isArray(data.builds)) {
-				for (const b of data.builds) {
-					const rawUrl = b.url || (b.file ? `./builds/${b.file}` : "");
-					if (!rawUrl) continue;
-					items.push({
-						id: `cat:${b.id || b.file || rawUrl}`,
-						name: b.name || `${b.ref || "sonix"} (${b.shortCommit || "build"})`,
-						ref: b.ref || "",
-						shortCommit: b.shortCommit || (b.commit ? b.commit.slice(0, 8) : ""),
-						builtAt: b.builtAt || "",
-						size: b.size || 0,
-						url: rawUrl,
-						source: "catalog",
-					});
-				}
-			}
-		}
-	} catch {
-		/* static catalog optional when running purely with dropped .sonix-web.zip files */
+		published = await fetchPublished(signal);
+	} catch (err) {
+		catalogError = err; // A missing catalog must not prevent local imports.
 	}
+	const custom = await ensureWasmBackend().listSavedCustomBuilds();
+	signal?.throwIfAborted();
+	const latest = published[0];
+	if (seq === catalogRequest) {
+		catalogBuilds = [...published, ...custom];
+		renderBuildOptions(loadRequest ? el.buildSelect.value : null);
+	}
+	return { latest, catalogError };
+}
 
-	// 2. User-imported custom builds saved in IndexedDB
-	try {
-		const backend = ensureWasmBackend();
-		const custom = await backend.listSavedCustomBuilds();
-		for (const c of custom) {
-			items.push({
-				id: c.id,
-				name: `[Custom] ${c.name || c.id}`,
-				ref: c.ref || "custom",
-				shortCommit: c.shortCommit || "",
-				builtAt: c.builtAt || "",
-				size: c.size || 0,
-				source: "custom",
-			});
-		}
-	} catch {
-		/* ignore */
+function renderBuildOptions(selectId) {
+	const latest = catalogBuilds.find((item) => item.source === "catalog");
+	el.buildSelect.replaceChildren();
+	for (const item of catalogBuilds) {
+		const prefix = item === latest ? "[Latest] " : item.source === "custom" ? "[Custom] " : "";
+		el.buildSelect.add(new Option(prefix + item.name, item.id));
 	}
-
-	catalogBuilds = items;
-	el.buildSelect.innerHTML = "";
-	if (items.length === 0) {
-		const opt = document.createElement("option");
-		opt.value = "";
-		opt.textContent = "No published builds yet — drop a .sonix-web.zip below";
-		el.buildSelect.appendChild(opt);
-	} else {
-		for (const item of items) {
-			const opt = document.createElement("option");
-			opt.value = item.id;
-			opt.textContent = item.name;
-			el.buildSelect.appendChild(opt);
-		}
-		if (selectId && items.some((i) => i.id === selectId)) {
-			el.buildSelect.value = selectId;
-		}
-	}
+	if (!catalogBuilds.length) el.buildSelect.add(new Option("No web builds available", ""));
+	if (selectId && catalogBuilds.some((b) => b.id === selectId)) el.buildSelect.value = selectId;
 	updateSelectedBuildMeta();
-	return items;
 }
 
-async function bootCatalogEntry(entry) {
-	if (!entry) return;
-	const backend = switchToWasmMode();
-	await backend.initStorage();
-	try {
-		if (entry.source === "custom") {
-			setBuildProgress(25, `Reading ${entry.name}...`);
-			const buf = await backend.getSavedCustomBuildBuffer(entry.id);
-			if (!buf) throw new Error("Saved custom build not found in browser storage");
-			await backend.loadBundleFromBuffer(buf, { ...entry, saveCustom: false });
-		} else {
-			setBuildProgress(10, `Downloading ${entry.name}...`);
-			await backend.loadBundleFromUrl(entry.url, entry);
+// A slow auto-boot must never finish over a later file/drop/URL selection.
+// Cancel stale downloads; serialize teardown/startup because Emscripten exports
+// its factory into the page and owns a pool of live pthread workers.
+function requestBuild(label, load) {
+	followedBuild = null;
+	loadRequest?.abort();
+	loadRequest = new AbortController();
+	const { signal } = loadRequest;
+	const progress = (text, fraction) => {
+		if (!signal.aborted) setBuildProgress(Math.round(fraction * 100), text);
+	};
+	setBuildResult("");
+	progress(label, 0.02);
+	loadQueue = loadQueue.then(async () => {
+		if (signal.aborted) return;
+		try {
+			const issue = wasmSupportIssue();
+			if (issue) throw new Error(issue);
+			const meta = await load(ensureWasmBackend(), { signal, progress });
+			signal.throwIfAborted();
+			const status = followedBuild ? "Following latest" : "Booted";
+			setBuildResult(`${status}: ${meta.name} · ${meta.shortCommit} · ${new Date(meta.builtAt).toLocaleString()}`);
+			if (isMobileViewport()) setMobileView("device");
+		} catch (err) {
+			if (!signal.aborted) reportBuildError(err);
+		} finally {
+			if (!signal.aborted) setBuildProgress(null, null);
 		}
-		setBuildProgress(null, null);
-		showToast(`Booted ${entry.name}`);
-		if (isMobileViewport()) setMobileView("device");
-		refreshSdList();
-	} catch (err) {
-		setBuildProgress(null, null);
-		showToast(`Failed to load build: ${err.message}`);
-		appendLogEntry({
-			ts: Date.now(),
-			stream: "stderr",
-			line: `[wasm-loader] ${err.message}`,
-		});
-	}
+	});
+	return loadQueue;
 }
 
-async function loadLocalZipFile(file) {
-	if (!file) return;
-	const backend = switchToWasmMode();
-	await backend.initStorage();
-	try {
-		setBuildProgress(15, `Reading ${file.name}...`);
-		const buf = await file.arrayBuffer();
-		const meta = await backend.loadBundleFromBuffer(buf, {
-			name: file.name.replace(/\.sonix-web\.zip$/i, "").replace(/\.zip$/i, ""),
-			saveCustom: true,
-		});
-		setBuildProgress(null, null);
-		await refreshBuildCatalog(meta?.id || null);
-		showToast(`Booted ${file.name}`);
-		if (isMobileViewport()) setMobileView("device");
-		refreshSdList();
-	} catch (err) {
-		setBuildProgress(null, null);
-		showToast(`Invalid .sonix-web.zip: ${err.message}`);
-		appendLogEntry({
-			ts: Date.now(),
-			stream: "stderr",
-			line: `[wasm-loader] ${err.message}`,
-		});
+async function loadEntry(entry, backend, request) {
+	if (entry.source === "custom") {
+		const buf = await backend.getSavedCustomBuildBuffer(entry.id);
+		if (!buf) throw new Error("Saved custom build not found. Browse to the file again.");
+		return backend.loadBundleFromBuffer(buf, { ...entry, ...request });
 	}
+	return backend.loadBundleFromUrl(entry.url, { ...entry, ...request });
+}
+
+function loadLocalZipFile(file) {
+	if (!file) return;
+	return requestBuild(`Reading ${file.name}...`, async (backend, request) => {
+		if (/\.upt$/i.test(file.name)) throw new Error(WEB_BUILD_HINT);
+		const meta = await backend.loadBundleFromBuffer(await file.arrayBuffer(), {
+			...request, name: file.name, saveCustom: true,
+		});
+		request.signal.throwIfAborted();
+		// No network round trip is needed to finish a file import.
+		catalogBuilds = [...catalogBuilds.filter((b) => b.id !== meta.id), meta];
+		renderBuildOptions(meta.id);
+		return meta;
+	});
+}
+
+function bootUrl(url) {
+	return requestBuild(`Fetching ${url}...`, (backend, request) =>
+		backend.loadBundleFromUrl(url, { ...request, name: url.split("/").pop() || "URL build" }));
 }
 
 el.buildSelect.addEventListener("change", updateSelectedBuildMeta);
 
 el.buildLoadBtn.addEventListener("click", () => {
 	const entry = catalogBuilds.find((b) => b.id === el.buildSelect.value);
-	if (!entry) {
-		showToast("Drop or select a .sonix-web.zip firmware bundle first");
-		return;
-	}
-	bootCatalogEntry(entry);
+	if (entry) requestBuild(`Loading ${entry.name}...`, (backend, request) => loadEntry(entry, backend, request));
 });
+
+function buildKey(b) {
+	return JSON.stringify([b.id, b.url, b.commit, b.builtAt, b.size]);
+}
+
+function bootLatest(catalog) {
+	return requestBuild("Checking for the latest firmware...", async (backend, request) => {
+		const { latest, catalogError } = catalog || await refreshBuildCatalog(request.signal);
+		if (!latest) throw new Error(noPublishedMessage(catalogError));
+		el.buildSelect.value = latest.id;
+		updateSelectedBuildMeta();
+		const meta = await loadEntry(latest, backend, request);
+		if (!request.signal.aborted) followedBuild = buildKey(latest);
+		return meta;
+	});
+}
+el.buildLatestBtn.addEventListener("click", () => bootLatest());
+
+// Poll just the small manifest, not the ZIP or the user's saved builds. Never
+// replace a hand-picked firmware, revive a powered-off device, or apply a late
+// poll response after the user has started another load.
+async function checkLatest() {
+	if (followedBuild === null || checkingLatest || document.hidden || (wasmBackend?.activeBundle && deviceState.lifecycle !== "running")) return;
+	const previousRequest = loadRequest;
+	checkingLatest = true;
+	try {
+		const [latest] = await fetchPublished();
+		if (previousRequest === loadRequest && followedBuild !== null && latest && buildKey(latest) !== followedBuild) {
+			await bootLatest();
+		}
+	} catch { /* Offline: keep the running firmware and try the catalog again later. */ }
+	finally { checkingLatest = false; }
+}
+setInterval(checkLatest, 60000);
+window.addEventListener("focus", checkLatest);
 
 el.buildDelBtn.addEventListener("click", async () => {
 	const entry = catalogBuilds.find((b) => b.id === el.buildSelect.value);
@@ -1929,7 +1970,8 @@ el.buildDelBtn.addEventListener("click", async () => {
 	const backend = ensureWasmBackend();
 	await backend.deleteSavedCustomBuild(entry.id);
 	showToast(`Deleted ${entry.name}`);
-	await refreshBuildCatalog();
+	catalogBuilds = catalogBuilds.filter((b) => b.id !== entry.id);
+	renderBuildOptions();
 });
 
 el.buildFileInput.addEventListener("change", () => {
@@ -1938,6 +1980,7 @@ el.buildFileInput.addEventListener("change", () => {
 	if (file) loadLocalZipFile(file);
 });
 
+document.getElementById("btn-build-browse").addEventListener("click", () => el.buildFileInput.click());
 el.buildDropzone.addEventListener("click", () => el.buildFileInput.click());
 
 ["dragenter", "dragover"].forEach((evName) => {
@@ -1957,21 +2000,11 @@ el.buildDropzone.addEventListener("drop", (ev) => {
 	if (file) loadLocalZipFile(file);
 });
 
-el.buildUrlBtn.addEventListener("click", async () => {
+el.buildUrlForm.addEventListener("submit", (ev) => {
+	ev.preventDefault();
 	const url = el.buildUrlInput.value.trim();
-	if (!url) return;
-	const backend = switchToWasmMode();
-	await backend.initStorage();
-	try {
-		setBuildProgress(10, `Fetching ${url}...`);
-		await backend.loadBundleFromUrl(url, { name: url.split("/").pop() || "Remote Build" });
-		setBuildProgress(null, null);
-		showToast("Fetched & booted firmware bundle");
-		refreshSdList();
-	} catch (err) {
-		setBuildProgress(null, null);
-		showToast(`Fetch failed: ${err.message}`);
-	}
+	if (url) bootUrl(url);
+	else reportBuildError(new Error("Enter a direct firmware bundle URL first."));
 });
 
 // Allow dropping a .sonix-web.zip anywhere on the stage or page
@@ -1984,7 +2017,7 @@ window.addEventListener("drop", (ev) => {
 	if (ev.target === el.sdDropzone || el.sdDropzone.contains(ev.target)) return;
 	if (ev.target === el.buildDropzone || el.buildDropzone.contains(ev.target)) return;
 	const file = ev.dataTransfer?.files?.[0];
-	if (file && file.name.toLowerCase().endsWith(".zip")) {
+	if (file && /\.(zip|upt)$/i.test(file.name)) {
 		ev.preventDefault();
 		loadLocalZipFile(file);
 	}
@@ -2009,50 +2042,39 @@ async function probeLocalServer() {
 	}
 }
 
+function noPublishedMessage(err) {
+	return (err ? `Cannot read the published catalog (${err.message}).` : "No published web firmware yet.")
+		+ " Import a web build below, or use Boot latest to check again.";
+}
+
 async function bootstrap() {
 	const params = new URLSearchParams(location.search);
-	const forcedMode = (params.get("mode") || "").toLowerCase();
-	const explicitBuildUrl = params.get("build");
-
-	const catalog = await refreshBuildCatalog();
-
-	const hasLocalServer =
-		forcedMode === "wasm" || explicitBuildUrl ? false : await probeLocalServer();
-
-	if (hasLocalServer && forcedMode !== "wasm") {
+	const explicitUrl = params.get("build");
+	el.buildStandalone.href = location.href;
+	el.buildStandalone.classList.toggle("hidden", window.top === window.self || !wasmSupportIssue());
+	const [catalog, hasLocalServer] = await Promise.all([refreshBuildCatalog(), probeLocalServer()]);
+	localServerAvailable = hasLocalServer;
+	if (runtimeMode === "detecting" && hasLocalServer && params.get("mode")?.toLowerCase() !== "wasm" && !explicitUrl) {
 		runtimeMode = "native";
 		syncUiFromState();
 		connectWs();
+		if (!loadRequest) setBuildResult("Testing the local working tree. After edits, choose Rebuild & boot local.");
 		return;
 	}
 
-	// Static GitHub Pages / In-Browser WebAssembly Mode!
-	const backend = switchToWasmMode();
-	await backend.initStorage();
-
-	if (explicitBuildUrl) {
-		el.buildUrlInput.value = explicitBuildUrl;
-		try {
-			setBuildProgress(10, `Fetching ${explicitBuildUrl}...`);
-			await backend.loadBundleFromUrl(explicitBuildUrl, {
-				name: explicitBuildUrl.split("/").pop() || "URL Build",
-			});
-			setBuildProgress(null, null);
-			refreshSdList();
-			return;
-		} catch (err) {
-			setBuildProgress(null, null);
-			showToast(`Could not load ?build URL: ${err.message}`);
-		}
+	switchToWasmMode();
+	syncUiFromState();
+	if (loadRequest) return; // Don't overwrite a choice made during runtime detection.
+	if (explicitUrl) {
+		el.buildUrlInput.value = explicitUrl;
+		return bootUrl(explicitUrl); // A bad explicit link must not boot some other revision.
 	}
-
-	if (catalog.length > 0) {
-		await bootCatalogEntry(catalog[0]);
-	} else {
-		syncUiFromState();
-		refreshSdList();
-	}
+	if (catalog.latest) return bootLatest(catalog);
+	followedBuild = "";
+	setBuildResult(noPublishedMessage(catalog.catalogError), Boolean(catalog.catalogError));
+	syncUiFromState();
+	refreshSdList();
 }
 
 syncUiFromState();
-bootstrap();
+bootstrap().catch(reportBuildError);

@@ -69,7 +69,7 @@ function crc32(buf) {
 	return (c ^ 0xffffffff) >>> 0;
 }
 
-function buildZip(entries) {
+export function buildZip(entries) {
 	const chunks = [];
 	const central = [];
 	let offset = 0;
@@ -217,12 +217,19 @@ function main() {
 		{ name: "sonix_player_wasm.js", data: wasmJs, compress: true },
 		{ name: "sonix_player_wasm.wasm", data: wasmBin, compress: true },
 	];
+	// Some Emscripten releases emit a separate pthread bootstrap; newer ones
+	// start workers from the main JS. Keep the bundle self-contained in both cases.
+	const worker = "sonix_player_wasm.worker.js";
+	if (fs.existsSync(path.join(PLAYER_DIR, worker))) {
+		entries.push({ name: worker, data: fs.readFileSync(path.join(PLAYER_DIR, worker)) });
+	}
 	collectTree(ASSETS_USR_DIR, "usr", entries);
 
 	const zipBuf = buildZip(entries);
 	const outPath = opts.out || path.join(DEFAULT_DIST_DIR, bundleFilename);
 	fs.mkdirSync(path.dirname(outPath), { recursive: true });
-	fs.writeFileSync(outPath, zipBuf);
+	fs.writeFileSync(`${outPath}.tmp`, zipBuf);
+	fs.renameSync(`${outPath}.tmp`, outPath);
 
 	const mb = (zipBuf.length / (1024 * 1024)).toFixed(2);
 	console.log(`Packed ${outPath} (${mb} MB, ${entries.length} files, ref=${ref} @ ${shortCommit})`);
@@ -297,4 +304,4 @@ function main() {
 	}
 }
 
-main();
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) main();

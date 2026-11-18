@@ -22,14 +22,18 @@ In your GitHub repository: **Settings → Pages → Build and deployment → Sou
 https://<owner>.github.io/<repo>/
 ```
 
-### Loading Any Sonix Firmware Build in the Browser
+### Testing a firmware change
 
-Open the **Firmware Builds** tab in the emulator:
-- **Published Sonix Builds**: pick any CI-published build from `builds/manifest.json` (or previously imported custom builds saved in IndexedDB) and click **Boot**.
-- **Drag & Drop / Browse `.sonix-web.zip`**: drop any `.sonix-web.zip` artifact downloaded from GitHub Actions, Releases, or built locally onto the dropzone (or anywhere on the page).
-- **Load From URL**: paste a direct HTTPS URL to any `.sonix-web.zip` bundle, or share a direct link using `?build=https://.../sonix-v1-....sonix-web.zip`.
+- **Latest published firmware:** open the site normally. It boots the catalog's `defaultBuildId` (or the newest `builtAt` in an older catalog). While following latest, a visible tab checks the catalog every minute and on focus. **Boot latest** checks immediately, even if the bundle was rebuilt at the same URL.
+- **Your branch or PR:** open the **TempoTec V1 Web Emulator (WASM & GitHub Pages)** Actions run for the commit you want. Download **`sonix-v1-web-wasm-<short SHA>`**. In **Firmware Builds → Test your web build**, browse to or drop the downloaded artifact ZIP **as is**. The inner `.sonix-web.zip` also works. Ordinary branch/PR builds do not replace the public Pages site.
+- **Uncommitted edits:** in local native mode click **Rebuild & boot local** after each edit (no Emscripten needed). To test WebAssembly instead, run `make -C sonix-player -j$(nproc) web-wasm-bundle` after each change and drop the new `tools/v1-emulator/dist/*.sonix-web.zip`. You can select the same filename again. A local server opened at `/?mode=wasm` can follow these bundles from `dist/` directly.
+- **A specific revision:** choose a published or previously imported build and click **Boot selected**, paste a direct bundle URL and click **Fetch**, or share `?build=<URL-encoded bundle URL>`. Remote hosts must allow CORS. These actions pin that build for the session; only **Boot latest** resumes following updates. An ordinary page reload without `?build` goes back to latest in WASM mode.
 
-> On GitHub Pages, `coi-serviceworker.js` automatically attaches `Cross-Origin-Opener-Policy: same-origin`, `Cross-Origin-Embedder-Policy: require-corp`, and `Cross-Origin-Resource-Policy: cross-origin` headers on first visit so `SharedArrayBuffer` / WebAssembly pthreads work on static HTTPS hosting across desktop and mobile browsers (including iOS Safari 16.4+, Android Chrome, and Firefox Mobile).
+The result in **Firmware Builds** shows the booted revision and build time **after the firmware sends its first display frame**. Load errors stay in that panel and Live Logs; a failed explicit link does not fall back to unrelated firmware. Imported builds, virtual microSD and config use browser storage (memory only if storage is restricted).
+
+**Which ZIP?** `sonix-tempotec-v1-…` and release `v1.upt` files are MIPS device updates, not browser programs. Use the **web** artifact from the same commit; the emulator runs that revision of the player, not the OTA kernel. For a device Actions artifact, `BUILD-REPORT.txt` gives the commit to use as `build_ref` in the web-emulator workflow (leave **deploy_pages** unchecked for a personal test). Only import web bundles you trust: they contain executable JavaScript as well as WASM.
+
+> On GitHub Pages, `coi-serviceworker.js` automatically attaches `Cross-Origin-Opener-Policy: same-origin`, `Cross-Origin-Embedder-Policy: require-corp`, and `Cross-Origin-Resource-Policy: cross-origin` headers on first visit so `SharedArrayBuffer` / WebAssembly pthreads work on static HTTPS hosting across desktop and mobile browsers. If an embedded preview is not isolated, use **Open emulator in a new tab** and select your bundle there. Plain HTTP over a LAN can use the native bridge, not WebAssembly pthreads.
 
 ### Mobile Devices (iPhone, iPad, Android)
 
@@ -58,10 +62,9 @@ From the repository root:
 make -C sonix-player run-web-emu
 ```
 
-Or build and start in separate steps:
+Or start the bridge directly; on startup it runs incremental `make web-emu` before booting, even if a binary already exists:
 
 ```bash
-make -C sonix-player -j$(nproc) web-emu
 node tools/v1-emulator/server.mjs
 ```
 
@@ -78,7 +81,19 @@ Then open **http://localhost:8080** in your browser (override the port with `POR
 - **Live Audio Output (Virtual ALSA DAC)**: Decoded stereo PCM streams from `sonix_player_web` over WebSocket into the browser's Web Audio API. Toggle **Audio: On** in the header to listen.
 - **Screenshots**: Instant crisp 240×320 PNG download (`Screenshot PNG` / key `S`) plus firmware-native `Device Shot` saving PNGs into the virtual microSD `/Screenshots/`.
 - **Virtual microSD & Demo Tracks**: Auto-seeds isolated runtime storage in `tools/v1-emulator/.runtime/` with 44.1 kHz and 96 kHz Hi-Res WAV demo tracks and sample notes. Upload your own audio, books, themes, fonts, or GB/GBC ROMs via drag-and-drop.
-- **Live Console & Hot Rebuild**: Real-time filtered `stdout`/`stderr`/emulator/build log viewer and a one-click **Rebuild** button that runs `make -C sonix-player web-emu` and restarts the emulator.
+- **Live Console & Hot Rebuild**: Real-time filtered `stdout`/`stderr`/emulator/build log viewer and a one-click **Rebuild & boot local** button that runs `make -C sonix-player web-emu` and restarts the emulator.
+
+## Checking the loader
+
+The emulator itself has no npm dependencies. Loader tests use Node 22; the browser smoke test also uses Playwright Core (test-only) and an installed Chrome. The Pages workflow runs it against the compiled firmware before publishing.
+
+```bash
+node --test tools/v1-emulator/tests/firmware.test.mjs
+npm ci --prefix tools/v1-emulator/tests
+SONIX_TEST_BUNDLE=/absolute/path/to/build.sonix-web.zip npm test --prefix tools/v1-emulator/tests
+```
+
+Use `CHROME_BIN=/path/to/chromium` if Chrome isn't in its standard location.
 
 ## Keyboard Shortcuts
 
