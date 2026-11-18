@@ -12,7 +12,8 @@
  *
  * Real: LVGL and its software renderer, the screen as chargescreen_run() builds
  * it, the translations and the config file. Substituted: the gauge and the
- * cable, which are the two readings the loop feeds the screen.
+ * cable, which are the two readings the loop feeds the screen, and the theme,
+ * whose kind and palette the test hands the screen one case at a time.
  */
 #include <assert.h>
 #include <dirent.h>
@@ -28,7 +29,7 @@
 #include "src/system/core/config.h"
 #include "src/system/core/lang.h"
 #include "src/system/device/system.h"
-#include "src/system/device/usb.h"
+#include "src/gui/shell/theme.h"
 
 /* ---- fonts: every face is LVGL's built-in one ---------------------------- */
 
@@ -70,7 +71,28 @@ bool battery_read_now(const battery_config_t *cfg, int *percent, bool *charging)
 	return gauge_percent >= 0;
 }
 
-bool usb_vbus_present(void) { return gauge_cable; }
+bool charger_attached(void) { return gauge_cable; }
+
+/* ---- the theme, a stub the test drives --------------------------------------
+ * Dark and Light draw the black screen they always had; the added palettes draw
+ * from the active one (see theme.c). The stub hands the screen both answers:
+ * which kind is in force -- flipped to Tokyo Night halfway down this file -- and
+ * a palette to draw from. */
+static theme_palette_t test_palette = {
+	.screen_bg = LV_COLOR_MAKE(26, 27, 38),      // Tokyo Night #1a1b26
+	.surface = LV_COLOR_MAKE(36, 40, 59),         // #24283b
+	.surface_pressed = LV_COLOR_MAKE(45, 53, 84), // #2d3554
+	.panel = LV_COLOR_MAKE(22, 22, 30),           // #16161e
+	.cover_bg = LV_COLOR_MAKE(22, 22, 30),
+	.text_primary = LV_COLOR_MAKE(192, 202, 245),   // #c0caf5
+	.text_secondary = LV_COLOR_MAKE(169, 177, 214), // #a9b1d6
+	.accent = LV_COLOR_MAKE(122, 162, 247),        // #7aa2f7
+	.dark = true,
+};
+static theme_kind_t test_kind = THEME_KIND_DARK;
+
+const theme_palette_t *theme(void) { return &test_palette; }
+theme_kind_t theme_get_kind(void) { return test_kind; }
 
 /* The panel's own wake bracket, which chargescreen_build() does not use but
  * chargescreen_run() does: the loop is linked whether or not it is called. */
@@ -229,6 +251,9 @@ int main(int argc, char **argv) {
 	chargescreen_build(disp);
 	lv_obj_t *root = lv_obj_get_child(lv_screen_active(), 0);
 	assert(root);
+	// Dark in force: the screen is the black one it has always been -- palette
+	// or not, that is the contract for the two default themes.
+	assert(lv_color_eq(lv_obj_get_style_bg_color(root, 0), lv_color_black()));
 
 	/* A charge in progress at 42%: the level as a number and as a bar, the
 	 * state under it, and the gesture that leaves the screen. */
@@ -318,8 +343,54 @@ int main(int argc, char **argv) {
 	lv_obj_update_layout(lv_screen_active());
 	assert(find_label(root, "4%"));
 	assert(find_label(root, tr("chargescreen_charging")));
+	/* The red rung, whatever the palette: it is captured here and asked of
+	 * the themed pass below. */
+	lv_color_t fill_low = lv_obj_get_style_bg_color(battery_fill(root), 0);
 	check_within_panel(lv_screen_active(), &cfg, "Charging screen, low");
 	dump_snapshot(lv_screen_active(), bp_is_tempotec_v1() ? "v1-charging-low" : "hiby-charging-low");
+
+	/* --- Tokyo Night stands in for the added palettes -------------------------
+	 * The screen comes down and is built again under the themed stub: same
+	 * content, the palette's own colours -- and, above the low-battery rungs,
+	 * a fill that wears the accent instead of the semantic green. */
+	{
+		lv_obj_delete(root);
+		test_kind = THEME_KIND_TOKYO_NIGHT;
+		chargescreen_build(NULL);
+		root = lv_obj_get_child(lv_screen_active(), 0);
+		assert(root);
+		assert(lv_color_eq(lv_obj_get_style_bg_color(root, 0), test_palette.screen_bg));
+		assert(lv_color_eq(lv_obj_get_style_border_color(battery_body(root), 0), test_palette.text_primary));
+		lv_obj_t *tpct = find_label(root, "--");
+		assert(tpct && lv_color_eq(lv_obj_get_style_text_color(tpct, 0), test_palette.text_primary));
+		lv_obj_t *tstate = find_label(root, tr("chargescreen_charging"));
+		assert(tstate && lv_color_eq(lv_obj_get_style_text_color(tstate, 0), test_palette.accent));
+		lv_obj_t *thint = find_label(root, tr("chargescreen_hold_to_start"));
+		assert(thint && lv_color_eq(lv_obj_get_style_text_color(thint, 0), test_palette.text_secondary));
+
+		chargescreen_show(true, 50, true, true);
+		lv_obj_update_layout(lv_screen_active());
+		assert(find_label(root, "50%"));
+		check_within_panel(lv_screen_active(), &cfg, "Charging screen, Tokyo Night");
+		int32_t tinner = lv_obj_get_content_width(battery_body(root));
+		int32_t at_50 = lv_obj_get_width(battery_fill(root));
+		assert(at_50 >= tinner * 50 / 100 - 1 && at_50 <= tinner * 50 / 100 + 1);
+		// Palette in force, the accent wears the bar: the top stop of the
+		// gradient is the accent a fingerprint lighter (lv_color_mix towards
+		// white, 70 of 255 -- see chargescreen.c), the bottom is the accent
+		// itself.
+		lv_color_t accent_hi = lv_color_mix(lv_color_white(), test_palette.accent, 70);
+		assert(lv_color_eq(lv_obj_get_style_bg_color(battery_fill(root), 0), accent_hi));
+		assert(lv_color_eq(lv_obj_get_style_bg_grad_color(battery_fill(root), 0), test_palette.accent));
+		// The low rungs stay semantic there as well: red, not the accent.
+		chargescreen_show(true, 4, true, true);
+		lv_obj_update_layout(lv_screen_active());
+		assert(lv_color_eq(lv_obj_get_style_bg_color(battery_fill(root), 0), fill_low));
+		chargescreen_show(true, 50, true, true);
+		lv_obj_update_layout(lv_screen_active());
+		dump_snapshot(lv_screen_active(), bp_is_tempotec_v1() ? "v1-charging-tokyo" : "hiby-charging-tokyo");
+		test_kind = THEME_KIND_DARK;
+	}
 
 	lv_deinit();
 	printf("PASS charge screen (%s)\n", bp_is_tempotec_v1() ? "240x320" : "480x720");

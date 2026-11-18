@@ -2501,7 +2501,19 @@ void power_init(const power_config_t *cfg, lv_display_t *disp) {
 	if (g_cfg.brightness > brightness_max()) {
 		g_cfg.brightness = brightness_max();
 	}
-	screen_power(true); // make sure the panel is unblanked (in case a prior run left it off)
+	// The two cases that need this line, in one place. An ordinary boot may be
+	// coming up over a panel a previous run left blanked, so the panel is
+	// unblanked unconditionally. A boot out of the charging screen is the other
+	// case: the panel was blanked at some point during this process, but the
+	// charging screen has since put it back up in the order this file documents
+	// (frame on the glass, then the light) with the charge frame still on the
+	// fb pages -- re-writing UNBLANK here would reset the glass to white behind
+	// a lit backlight, before the interface's first frame has been drawn.
+	if (g_cfg.panel_up) {
+		g_panel_blanked = false;
+	} else {
+		screen_power(true); // make sure the panel is unblanked (in case a prior run left it off)
+	}
 	backlight_write(g_cfg.brightness);
 
 

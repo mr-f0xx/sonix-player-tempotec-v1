@@ -23,7 +23,8 @@
 #include "src/system/core/lang.h"
 #include "src/system/device/power.h"
 #include "src/system/device/backlight.h"
-#include "src/system/device/usb.h"
+#include "src/system/device/chargerattached.h"
+#include "src/gui/shell/theme.h"
 
 // ---------------------------------------------------------------------------
 // The screen
@@ -68,11 +69,46 @@
 #define WAKE_SETTLE_MS 180
 
 // The battery's own colours: the green a charge in progress has on the status
-// bar, the amber that means nearly, and the red that means now.
+// bar, the amber that means nearly, and the red that means now. The gradient
+// stop keeps the bar from looking like a hole punched in the box; it is the
+// same hue a fingerprint lighter, top to bottom.
 #define CHARGE_GREEN lv_color_make(0x2e, 0xc2, 0x7e)
+#define CHARGE_GREEN_HI lv_color_make(0x54, 0xe0, 0x9b)
 #define CHARGE_AMBER lv_color_make(0xe5, 0xa5, 0x14)
+#define CHARGE_AMBER_HI lv_color_make(0xf9, 0xc0, 0x4a)
 #define CHARGE_RED lv_color_make(0xe0, 0x1b, 0x24)
-#define CHARGE_DIM lv_color_make(0x9a, 0x9a, 0xa0)
+#define CHARGE_RED_HI lv_color_make(0xff, 0x4d, 0x55)
+#define CHARGE_FAINT lv_color_make(0x5b, 0x5b, 0x63)
+#define CHARGE_TEXT lv_color_make(0xec, 0xec, 0xee)
+#define CHARGE_SHELL lv_color_make(0xe9, 0xe9, 0xeb)
+
+// The fill wears the accent in the added palettes -- and amber and red on the
+// way down, on every palette, because a battery on its knees must never be
+// red behind the theme. Dark and Light keep the semantic ladder the whole
+// way, as they always were. The gradient's top is the accent a fingerprint
+// lighter; the bottom is the accent itself.
+#define ACCENT_HI_MIX 70 // of 255, towards white, for the fill's top stop
+static void charge_fill_colors(int percent, lv_color_t *hi, lv_color_t *base) {
+	bool classic = theme_get_kind() == THEME_KIND_DARK || theme_get_kind() == THEME_KIND_LIGHT;
+	if (percent <= 10) {
+		*hi = CHARGE_RED_HI;
+		*base = CHARGE_RED;
+		return;
+	}
+	if (percent <= 20) {
+		*hi = CHARGE_AMBER_HI;
+		*base = CHARGE_AMBER;
+		return;
+	}
+	if (classic) {
+		*hi = CHARGE_GREEN_HI;
+		*base = CHARGE_GREEN;
+		return;
+	}
+	const theme_palette_t *pal = theme();
+	*base = pal->accent;
+	*hi = lv_color_mix(lv_color_white(), pal->accent, ACCENT_HI_MIX);
+}
 
 static lv_display_t *display;
 static lv_obj_t *root;
@@ -81,7 +117,9 @@ static lv_obj_t *percent_label;
 static lv_obj_t *status_label;
 static int fill_width; // the inside of the battery, where the fill travels
 static long on_level = -1; // the backlight the screen is meant to be seen at
-static bool screen_lit = true;
+// False until panel_on() has actually run: power_init() asks (see
+// chargescreen_panel_lit()) whether it may dispense with its own unblank.
+static bool screen_lit = false;
 
 static uint32_t now_ms(void) {
 	struct timespec ts;
@@ -218,7 +256,20 @@ void chargescreen_build(lv_display_t *disp) {
 	root = lv_obj_create(lv_screen_active());
 	lv_obj_set_size(root, width, height);
 	lv_obj_set_pos(root, 0, 0);
-	lv_obj_set_style_bg_color(root, lv_color_black(), 0);
+
+	// Dark and Light keep the black screen the charging page has always had;
+	// the added palettes draw from the active one, which the dynamic tint has
+	// already had a chance to shape (see theme_resolve_boot_palette()). The
+	// battery bar itself keeps its semantic green/amber/red in every palette.
+	bool classic = theme_get_kind() == THEME_KIND_DARK || theme_get_kind() == THEME_KIND_LIGHT;
+	const theme_palette_t *pal = theme();
+	lv_color_t col_bg = classic ? lv_color_black() : pal->screen_bg;
+	lv_color_t col_shell = classic ? CHARGE_SHELL : pal->text_primary;
+	lv_color_t col_percent = classic ? lv_color_white() : pal->text_primary;
+	lv_color_t col_state = classic ? CHARGE_TEXT : pal->accent;
+	lv_color_t col_hint = classic ? CHARGE_FAINT : pal->text_secondary;
+
+	lv_obj_set_style_bg_color(root, col_bg, 0);
 	lv_obj_set_style_bg_opa(root, LV_OPA_COVER, 0);
 	lv_obj_set_style_border_width(root, 0, 0);
 	lv_obj_set_style_radius(root, 0, 0);
@@ -250,33 +301,44 @@ void chargescreen_build(lv_display_t *disp) {
 	lv_obj_set_scrollable(row, false);
 	lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
 	lv_obj_set_flex_align(row, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+	lv_obj_set_style_pad_column(row, 3, 0);
 
 	lv_obj_t *body = lv_obj_create(row);
 	lv_obj_set_size(body, battery_w, battery_h);
 	lv_obj_set_style_bg_opa(body, LV_OPA_TRANSP, 0);
 	lv_obj_set_style_border_width(body, border, 0);
-	lv_obj_set_style_border_color(body, lv_color_white(), 0);
+	lv_obj_set_style_border_color(body, col_shell, 0);
 	lv_obj_set_style_radius(body, 10, 0);
 	lv_obj_set_style_pad_all(body, inset, 0);
 	lv_obj_set_style_shadow_width(body, 0, 0);
 	lv_obj_set_scrollable(body, false);
 
-	// The fill is a child of the box, so the border and the inset are already
-	// accounted for: it starts at nothing and grows to the right.
+	// The fill is placed inside the box at the origin of its content area
+	// with explicit geometry rather than an alignment: an aligned child of a
+	// bordered object overpaints the border on the side it is anchored to. The
+	// colour is the normal rung of the ladder (Dark and Light keep green);
+	// chargescreen_show() repaints it from the reading before the panel
+	// lights, so this is only the colour the object starts life with.
 	fill = lv_obj_create(body);
+	lv_obj_set_pos(fill, 0, 0);
 	lv_obj_set_height(fill, lv_pct(100));
 	lv_obj_set_width(fill, 0);
-	lv_obj_set_style_bg_color(fill, CHARGE_GREEN, 0);
+	{
+		lv_color_t fill_hi, fill_base;
+		charge_fill_colors(100, &fill_hi, &fill_base);
+		lv_obj_set_style_bg_color(fill, fill_hi, 0);
+		lv_obj_set_style_bg_grad_color(fill, fill_base, 0);
+	}
+	lv_obj_set_style_bg_grad_dir(fill, LV_GRAD_DIR_VER, 0);
 	lv_obj_set_style_bg_opa(fill, LV_OPA_COVER, 0);
 	lv_obj_set_style_border_width(fill, 0, 0);
 	lv_obj_set_style_radius(fill, 4, 0);
 	lv_obj_set_style_pad_all(fill, 0, 0);
 	lv_obj_set_style_shadow_width(fill, 0, 0);
-	lv_obj_align(fill, LV_ALIGN_LEFT_MID, 0, 0);
 
 	lv_obj_t *nub = lv_obj_create(row);
 	lv_obj_set_size(nub, nub_w, battery_h * 36 / 100);
-	lv_obj_set_style_bg_color(nub, lv_color_white(), 0);
+	lv_obj_set_style_bg_color(nub, col_shell, 0);
 	lv_obj_set_style_bg_opa(nub, LV_OPA_COVER, 0);
 	lv_obj_set_style_border_width(nub, 0, 0);
 	lv_obj_set_style_radius(nub, 3, 0);
@@ -292,7 +354,7 @@ void chargescreen_build(lv_display_t *disp) {
 	percent_label = lv_label_create(root);
 	lv_obj_set_width(percent_label, text_w);
 	lv_obj_set_style_text_font(percent_label, &font_ui_36_bold, 0);
-	lv_obj_set_style_text_color(percent_label, lv_color_white(), 0);
+	lv_obj_set_style_text_color(percent_label, col_percent, 0);
 	lv_obj_set_style_text_align(percent_label, LV_TEXT_ALIGN_CENTER, 0);
 	lv_label_set_long_mode(percent_label, LV_LABEL_LONG_WRAP);
 	lv_label_set_text(percent_label, "--");
@@ -300,14 +362,14 @@ void chargescreen_build(lv_display_t *disp) {
 	status_label = lv_label_create(root);
 	lv_obj_set_width(status_label, text_w);
 	lv_obj_set_style_text_font(status_label, &font_ui_22, 0);
-	lv_obj_set_style_text_color(status_label, CHARGE_DIM, 0);
+	lv_obj_set_style_text_color(status_label, col_state, 0);
 	lv_obj_set_style_text_align(status_label, LV_TEXT_ALIGN_CENTER, 0);
 	lv_label_set_long_mode(status_label, LV_LABEL_LONG_WRAP);
 	lv_label_set_text(status_label, tr("chargescreen_charging"));
 
 	lv_obj_t *hint = lv_label_create(root);
 	lv_obj_set_style_text_font(hint, &font_ui_18, 0);
-	lv_obj_set_style_text_color(hint, CHARGE_DIM, 0);
+	lv_obj_set_style_text_color(hint, col_hint, 0);
 	lv_obj_set_style_text_align(hint, LV_TEXT_ALIGN_CENTER, 0);
 	lv_obj_set_width(hint, text_w);
 	lv_label_set_long_mode(hint, LV_LABEL_LONG_WRAP);
@@ -338,7 +400,10 @@ void chargescreen_show(bool have, int percent, bool charging, bool cable) {
 			lv_label_set_text(percent_label, text);
 
 			lv_obj_set_width(fill, (int32_t)fill_width * percent / 100);
-			lv_obj_set_style_bg_color(fill, percent <= 10 ? CHARGE_RED : (percent <= 20 ? CHARGE_AMBER : CHARGE_GREEN), 0);
+			lv_color_t fill_hi, fill_base;
+			charge_fill_colors(percent, &fill_hi, &fill_base);
+			lv_obj_set_style_bg_color(fill, fill_hi, 0);
+			lv_obj_set_style_bg_grad_color(fill, fill_base, 0);
 		}
 
 		lv_label_set_text(status_label, tr(state == 2   ? "chargescreen_charging"
@@ -467,6 +532,25 @@ void chargescreen_run(lv_display_t *disp, const battery_config_t *battery_cfg) {
 	const uint32_t screen_on_ms = (uint32_t)seconds * 1000u;
 
 	chargescreen_build(NULL);
+
+	// The reading goes into the objects BEFORE the panel lights, not after:
+	// the only flush that is guaranteed to land on the glass on a charger boot
+	// is the one inside panel_on()'s wake bracket (see display_wake_begin() in
+	// main.c -- the panel loses whatever was pushed before its rails are up).
+	// A plain repaint after the light is on is not seen until the next
+	// blank/wake, which is how the screen used to come up showing an empty,
+	// unread battery. With the objects holding the reading already, the very
+	// first frame carries it.
+	int percent = -1;
+	bool charging = false;
+	bool have = battery_read_now(battery_cfg, &percent, &charging);
+#ifdef HOST_BUILD
+	bool cable = true; // a PC has no charger to take away
+#else
+	bool cable = charger_attached();
+#endif
+	chargescreen_show(have, percent, charging, cable);
+
 	// The panel may have come up blanked, or lit at a stale level from the
 	// session that switched the player off. Starting from "dark" and running
 	// the ordinary wake puts it right and draws the first frame where the
@@ -476,11 +560,6 @@ void chargescreen_run(lv_display_t *disp, const battery_config_t *battery_cfg) {
 
 	printf("chargescreen: up (screen %ld s, brightness %ld)\n", (long)seconds, on_level);
 	fflush(stdout);
-
-	bool have = false;
-	int percent = -1;
-	bool charging = false;
-	bool cable = true;
 
 	bool pressed = false;
 	uint32_t press_at = 0;
@@ -497,7 +576,10 @@ void chargescreen_run(lv_display_t *disp, const battery_config_t *battery_cfg) {
 #ifdef HOST_BUILD
 			cable = true; // a PC has no charger to take away
 #else
-			cable = usb_vbus_present();
+			// charger_attached(), not the raw online bit: with the cell held
+			// at its configured limit the charger does nothing, and a cable
+			// that reads as "not charging" is a cable, not an unplug.
+			cable = charger_attached();
 #endif
 			if (!cable) {
 				if (!unplugged_since) {
@@ -614,16 +696,19 @@ void chargescreen_run(lv_display_t *disp, const battery_config_t *battery_cfg) {
 #endif
 	}
 
-	// Back to the player: the panel is left lit at its proper level, and the
-	// screen comes off the display. main.c's ordinary startup puts up its own
-	// first frame a moment later.
-	lv_obj_delete(root);
-	root = NULL;
+	// Back to the player: the panel keeps the charge frame until the interface
+	// puts its own first frame on the glass. gui_init() ends with
+	// lv_screen_load(), which swaps whole screens, so the fb never shows an
+	// empty one -- which is what happened when the root was deleted here and
+	// the empty screen was repainted: whatever the framebuffer pages were
+	// holding showed through, lit, until the menu landed (the white flash on a
+	// hold out of the charging screen). The root stays on the screen it
+	// belongs to; the screen itself is never loaded again, and memory costs a
+	// dozen objects once per boot.
 	lv_timer_t *refr = lv_display_get_refr_timer(display);
 	if (refr) {
 		lv_timer_resume(refr);
 	}
-	lv_refr_now(display);
 
 #ifndef HOST_BUILD
 	close(key_fd);
@@ -631,3 +716,11 @@ void chargescreen_run(lv_display_t *disp, const battery_config_t *battery_cfg) {
 	SDL_DelEventWatch(host_key_watch, NULL);
 #endif
 }
+
+// Whether the panel is up with a drawn frame on it, as this screen left it.
+// main.c asks before power_init(): a panel that is already up must not be
+// unblanked a second time -- the UNBLANK write resets the glass to white
+// behind a lit backlight, which is the white between the charge frame and the
+// main menu. False for an ordinary boot, where power_init() still has to do
+// the unblank itself.
+bool chargescreen_panel_lit(void) { return screen_lit; }

@@ -191,6 +191,18 @@ $(BUILD)/test_chargelimit: test_chargelimit.c $(ROOT)/src/system/device/chargeli
 	@mkdir -p $(BUILD)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ test_chargelimit.c $(ROOT)/src/system/device/chargelimit.c $(LDFLAGS) $(LDLIBS)
 
+# The charger-presence probe the charging screen stands on: online bits,
+# USB-sized voltages, and the battery in its Full / Not charging states --
+# the case the 80% charge limit produces. Fake supplies in a temporary
+# directory, no hardware.
+.PHONY: chargerattached
+chargerattached: $(BUILD)/test_chargerattached
+	$(BUILD)/test_chargerattached
+
+$(BUILD)/test_chargerattached: test_chargerattached.c $(ROOT)/src/system/device/chargerattached.c $(ROOT)/src/system/device/chargerattached.h
+	@mkdir -p $(BUILD)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ test_chargerattached.c $(ROOT)/src/system/device/chargerattached.c $(LDFLAGS) $(LDLIBS)
+
 # The Screensaver folder's rules: which files are pictures, judged from their
 # JPEG headers, and the random pick between them. Plain C, no LVGL.
 PICS_SRC = test_screensaverpics.c $(ROOT)/src/system/device/screensaverpics.c \

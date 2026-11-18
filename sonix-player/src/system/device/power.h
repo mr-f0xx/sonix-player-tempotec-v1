@@ -52,6 +52,12 @@ typedef struct {
 	bool screen_off_enabled;
 	uint32_t screen_off_timeout_ms;
 
+	// True when the charging screen already brought the panel up in the
+	// documented order (frame on the glass, then the light). power_init()
+	// then skips its own unconditional unblank: writing UNBLANK again resets
+	// the glass to white behind a lit backlight. False for an ordinary boot.
+	bool panel_up;
+
 } power_config_t;
 
 // Initialize the power manager and start its state-machine timer. Copies cfg

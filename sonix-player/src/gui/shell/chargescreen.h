@@ -29,15 +29,24 @@
 // seconds are nothing beside a panel that is not lit.
 //
 // Nothing here needs the services: the gauge is read directly through
-// battery_read_now(), the cable through usb_vbus_present(), and the key through
+// battery_read_now(), the cable through charger_attached(), and the key through
 // the evdev node the panel's own power button lives on. That is deliberate --
 // it runs before the input threads exist, so that no other part of the player
 // answers a key the charging screen is using.
 //
 // `battery_cfg` is what system_start_services() would be given, so the
-// simulator's two override files work here too. Never returns without having
-// taken its screen down and restored the backlight.
+// simulator's two override files work here too. On the way out the last
+// charge frame stays on the glass (the interface is drawn onto the same fb
+// pages), so the panel is never left on a reset-white screen waiting for the
+// main menu.
 void chargescreen_run(lv_display_t *disp, const battery_config_t *battery_cfg);
+
+// Whether this screen left the panel up with a drawn frame on it (see
+// chargescreen_run()). main.c passes the answer to power_init() as
+// power_config_t.panel_up, so the panel is not unblanked a second time on the
+// way into the player -- that write resets the glass to white behind a lit
+// backlight. False for an ordinary boot.
+bool chargescreen_panel_lit(void);
 
 // The drawing half, without the loop and without the panel: the screen's
 // objects built on the active screen, and one reading painted into them. In

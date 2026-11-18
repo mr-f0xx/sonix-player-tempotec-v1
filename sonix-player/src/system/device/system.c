@@ -276,7 +276,7 @@ bool battery_read_now(const battery_config_t *cfg, int *percent, bool *charging)
 				// icon and the red LED in their charging state long after the
 				// charge has finished. The cable is still there, and for the
 				// charging screen that is the answer that matters -- see
-				// usb_vbus_present() there.
+				// charger_attached().
 				on_cable = (strcmp(content, "Charging") == 0);
 				free(content);
 			}
@@ -1901,6 +1901,15 @@ static void *input_thread_func(void *arg) {
 	// A power press on a dark screen starts waking on key-down. Remember that
 	// here so the matching release does not toggle the screen straight back off.
 	bool power_wake_started_on_press = false;
+	// Whether this thread ever saw the matching press. A bare power release
+	// with no press is not a short press: it is the tail of a hold another
+	// reader owned. The charging screen reads the same evdev node for the
+	// hold that starts the player, closes it on the way out, and the
+	// release arrives here afterwards -- after this thread has opened its
+	// own fd but long after it could have seen the press. Toggling the
+	// screen on that orphan toggles a panel the player has only just lit:
+	// the screen goes dark at the exact moment the boot finishes.
+	bool power_press_seen = false;
 	// Next and previous do their work on the way up, so that holding them can
 	// mean something else. `deferred` says the press left a job for the release;
 	// `seeked` says the hold took it over and there is no longer one.
@@ -2091,6 +2100,7 @@ static void *input_thread_func(void *arg) {
 			// consumed so it cannot immediately blank the screen again.
 			if (ev.code == KEY_POWER) {
 				power_wake_started_on_press = false;
+				power_press_seen = true;
 				if (!combo && !power_screen_is_on()) {
 					power_wake_started_on_press = true;
 					power_notify_power_button();
@@ -2174,7 +2184,14 @@ static void *input_thread_func(void *arg) {
 			bool combo = !info->headset && combo_release(ev.code);
 
 			if (ev.code == KEY_POWER) {
-				if (!long_press_done && !combo && !power_wake_started_on_press) {
+				// Had this thread seen the press? An orphaned release -- the
+				// tail of the hold that left the charging screen, delivered
+				// after this thread opened the node but with the press itself
+				// read elsewhere -- is the end of that gesture, not a short
+				// press, and must not put the panel down.
+				bool had_press = power_press_seen;
+				power_press_seen = false;
+				if (had_press && !long_press_done && !combo && !power_wake_started_on_press) {
 					// Short press: the screen toggle. A wake from the dark
 					// screen was already queued on key-down.
 					power_notify_power_button();
