@@ -291,9 +291,9 @@ static void credit_value_fit(lv_obj_t *value, int content_width) {
 
 static void add_fork_qr(lv_obj_t *row) {
 	static const char url[] = "https://github.com/mr-f0xx/sonix-player-tempotec-v1";
-	// This URL fits a 33-module QR at four pixels per module. Leave four
+	// Keep the 33-module QR at whole pixels per module and leave four
 	// white modules on each side, independent of the player's theme.
-	enum { QR_SIZE = 132, QUIET = 16, FRAME_SIZE = QR_SIZE + 2 * QUIET };
+	enum { MODULE_PX = 3, QR_SIZE = 33 * MODULE_PX, QUIET = 4 * MODULE_PX, FRAME_SIZE = QR_SIZE + 2 * QUIET };
 	lv_obj_t *frame = lv_obj_create(row);
 	lv_obj_remove_style_all(frame);
 	lv_obj_set_size(frame, FRAME_SIZE, FRAME_SIZE);
