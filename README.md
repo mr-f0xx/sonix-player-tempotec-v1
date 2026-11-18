@@ -177,8 +177,6 @@ Showcase of **OLED** appearance: true black backgrounds with white as the accent
   </tr>
 </table>
 
-**Tape Deck:** An optional More tool for WAV voice memos and 16 playable pads with custom WAV kits, one-bar overdubbing and live filter, echo and drive. Save editable sequences and record the stereo sampler mix to microSD. A compatible capture input is needed for voice memos only. See the [Tape Deck guide](docs/tape-deck.md).
-
 ## Contents
 
 - [Target device](#target-device)
@@ -189,6 +187,7 @@ Showcase of **OLED** appearance: true black backgrounds with white as the accent
   - [OLED theme](#oled-theme)
 - [Music pet](#music-pet)
 - [Tag Manager](#tag-manager)
+- [Tape Deck](#tape-deck)
 - [Wi-Fi file transfer](#wi-fi-file-transfer)
 - [Download from WebDAV or FTP](#download-from-webdav-or-ftp)
 - [Build a firmware image](#build-a-firmware-image)
@@ -304,6 +303,10 @@ The full rules are in [FEATURES.md](FEATURES.md).
 ## Tag Manager
 
 Open **More → Tag Manager** to view FLAC/MP3 tags and cover art, and edit track titles, artists, track numbers or genres, and search for cover art over Wi-Fi on the V1. See the [usage and safety notes](docs/tag-manager.md).
+
+## Tape Deck
+
+An optional More tool for WAV voice memos and 16 playable pads with custom WAV kits, one-bar overdubbing and live filter, echo and drive. Save editable sequences and record the stereo sampler mix to microSD. A compatible capture input is needed for voice memos only. See the [Tape Deck guide](docs/tape-deck.md).
 
 ## Wi-Fi file transfer
 
