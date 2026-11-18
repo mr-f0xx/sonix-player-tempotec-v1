@@ -8447,6 +8447,11 @@ void player_init(gui_config_t *cfg) {
 
 		*line = lv_obj_create(player_menu);
 		lv_obj_remove_style_all(*line);
+		// Ignore the parent's flex flow: these are drawn over the bar at
+		// absolute positions (update_ab_markers), not laid out as rows.
+		// Without this, un-hiding a marker when a point is marked would
+		// add two rows to the column and push the controls off the panel.
+		lv_obj_set_ignore_layout(*line, true);
 		lv_obj_set_size(*line, 3, 1);
 		lv_obj_set_style_bg_color(*line, chrome_accent(), 0);
 		lv_obj_set_style_bg_opa(*line, LV_OPA_COVER, 0);
@@ -8459,6 +8464,7 @@ void player_init(gui_config_t *cfg) {
 		lv_obj_set_hidden(*line, true);
 
 		*label = lv_label_create(player_menu);
+		lv_obj_set_ignore_layout(*label, true);
 		lv_label_set_text(*label, letter);
 		lv_obj_add_style(*label, &theme_style_text, 0);
 		lv_obj_set_style_text_font(*label, bp_format_label_font(), 0);
