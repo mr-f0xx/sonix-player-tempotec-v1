@@ -50,6 +50,7 @@ static const addon_t ADDONS[] = {
 	{"notes", "notes", "addon_notes_note", "plugins_section_tools"},
 	{"tagmanager", "addon_tagmanager_label", "addon_tagmanager_note", "plugins_section_tools"},
 	{"metronome", "metronome", "addon_metronome_note", "plugins_section_tools"},
+	{"tapedeck", "tape_deck", "addon_tapedeck_note", "plugins_section_tools"},
 #if GB_CORE
 	{"gearboy", "gearboy", "addon_gearboy_note", "plugins_section_games"},
 #endif

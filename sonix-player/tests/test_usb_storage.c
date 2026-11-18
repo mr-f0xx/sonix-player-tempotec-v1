@@ -11,7 +11,7 @@
 
 static char fake_udcs[256], fake_mounts[256], fake_lun[256], fake_card[256];
 static bool claim_succeeds, claim_unmounts, fail_lun_write, switch_adb_during_claim;
-static bool adb_wanted, adb_running, handover;
+static bool adb_wanted, adb_running, handover, recorder_finished, samples_released;
 static int stop_calls, closes, opens, mount_calls, begin_calls, end_calls, claim_fd = -1;
 
 static void set_mount(bool mounted) {
@@ -42,6 +42,7 @@ bool usbaudio_handover_pending(void) { return handover; }
 bool storage_usb_begin(void) { begin_calls++; return true; }
 void storage_usb_end(void) { end_calls++; }
 int usbexport_detach_and_claim(const char *device, const char *mountpoint, bool *unmounted) {
+	assert(recorder_finished && samples_released); // no Tape Deck descriptors at unmount
 	assert(strcmp(device, "/dev/test-card") == 0 && strcmp(mountpoint, fake_card) == 0);
 	*unmounted = claim_unmounts;
 	if (claim_unmounts) set_mount(false);
@@ -57,6 +58,8 @@ int sysserver_mount(const char *device, const char *mountpoint) {
 	mount_calls++; set_mount(true); return 0;
 }
 void device_state_note_storage_gone(void) {}
+void taperecorder_finish(void) { assert(storage_active); recorder_finished = true; }
+void tapepads_release_card(void) { assert(storage_active); samples_released = true; }
 void wifitransfer_release_card(void) { closes++; }
 void networkmusic_release_card(void) { assert(storage_active); closes++; }
 void audio_stop(void) { stop_calls++; }
@@ -100,7 +103,7 @@ static void expect(const char *path, const char *text) {
 static void reset(void) {
 	assert(!storage_active && export_mode == EXPORT_NONE && export_claim_fd == -1);
 	claim_succeeds = claim_unmounts = fail_lun_write = switch_adb_during_claim = false;
-	adb_wanted = adb_running = handover = false;
+	adb_wanted = adb_running = handover = recorder_finished = samples_released = false;
 	stop_calls = closes = opens = mount_calls = begin_calls = end_calls = 0;
 	claim_fd = -1;
 	put(fake_lun, "\n"); set_mount(true);

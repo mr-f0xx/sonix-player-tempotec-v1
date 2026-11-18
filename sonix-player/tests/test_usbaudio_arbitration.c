@@ -123,6 +123,15 @@ int main(void) {
 		char bus[32];
 		read_card_bus(1, bus, sizeof(bus));
 		assert(strcmp(bus, "1-1") == 0); // the interface and the device alike
+		char capture[256], playback[256];
+		pathcat(capture, sizeof(capture), fake_sound, "/pcmC1D0c");
+		pathcat(playback, sizeof(playback), fake_sound, "/pcmC1D0p");
+		put(capture, "");
+		bool present;
+		assert(find_usb_output(&present) == -1 && present); // a mic protects host role without taking output
+		put(playback, "");
+		assert(find_usb_output(&present) == 1 && present);
+		assert(unlink(capture) == 0 && unlink(playback) == 0);
 		assert(unlink(card1_link) == 0 && rmdir(card1) == 0);
 	}
 	char empty[32];

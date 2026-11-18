@@ -27,6 +27,8 @@
 #include "src/system/bluetooth/btlog.h"
 #include "src/system/device/sysserver.h"
 #include "src/system/audio/usbaudio.h"
+#include "src/system/audio/tapepads.h"
+#include "src/system/audio/taperecorder.h"
 #include "src/system/audio/usbhostmode.h"
 #include "src/system/audio/usbhostprobe.h"
 #include "src/system/audio/waveform.h"
@@ -985,6 +987,8 @@ static bool storage_export(void) {
 	storage_active = true; // keep the card supervisor from remounting mid-export
 	storage_usb_end();
 
+	taperecorder_finish(); // no new card job can start once export is marked active
+	tapepads_release_card();
 	wifitransfer_release_card();
 	networkmusic_release_card();
 	device_state_note_storage_gone();
