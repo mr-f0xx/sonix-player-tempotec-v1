@@ -289,29 +289,44 @@ static void credit_value_fit(lv_obj_t *value, int content_width) {
 	}
 }
 
+static lv_obj_t *fork_qr;
+
+static void refresh_fork_qr(void) {
+	if (!fork_qr) {
+		return;
+	}
+
+	// Tint the QR without inverting it or using a bright accent as ink.
+	// Even a white accent on a black theme stays dark on light.
+	lv_color_t ink = lv_color_mix(theme()->accent, lv_color_black(), LV_OPA_30);
+	lv_color_t paper = lv_color_mix(theme()->surface, lv_color_white(), LV_OPA_10);
+	lv_qrcode_set_dark_color(fork_qr, ink);
+	lv_qrcode_set_light_color(fork_qr, paper);
+	lv_obj_set_style_bg_color(lv_obj_get_parent(fork_qr), paper, 0);
+}
+
 static void add_fork_qr(lv_obj_t *row) {
 	static const char url[] = "https://github.com/mr-f0xx/sonix-player-tempotec-v1";
-	// Keep the 33-module QR at whole pixels per module and leave four
-	// white modules on each side, independent of the player's theme.
+	// Keep the 33-module QR at whole pixels per module and leave a quiet
+	// zone four modules wide on each side.
 	enum { MODULE_PX = 3, QR_SIZE = 33 * MODULE_PX, QUIET = 4 * MODULE_PX, FRAME_SIZE = QR_SIZE + 2 * QUIET };
 	lv_obj_t *frame = lv_obj_create(row);
 	lv_obj_remove_style_all(frame);
 	lv_obj_set_size(frame, FRAME_SIZE, FRAME_SIZE);
 	lv_obj_set_scrollable(frame, false);
 	lv_obj_set_clickable(frame, false);
-	lv_obj_set_style_bg_color(frame, lv_color_white(), 0);
 	lv_obj_set_style_bg_opa(frame, LV_OPA_COVER, 0);
 
 	lv_obj_t *qr = lv_qrcode_create(frame);
 	lv_qrcode_set_size(qr, QR_SIZE);
-	lv_qrcode_set_dark_color(qr, lv_color_black());
-	lv_qrcode_set_light_color(qr, lv_color_white());
 	lv_obj_set_clickable(qr, false);
 	lv_obj_center(qr);
 	if (lv_qrcode_update(qr, url, sizeof(url) - 1) != LV_RESULT_OK) {
 		lv_obj_delete(frame);
 		return; // Keep the ordinary credit row if encoding fails.
 	}
+	fork_qr = qr;
+	refresh_fork_qr();
 
 	// Keep the credit and the scan target together in the scrollable list.
 	lv_obj_set_height(row, LV_SIZE_CONTENT);
@@ -360,8 +375,10 @@ static void sysinfo_loaded_cb(lv_event_t *e) {
 	easteregg_reset();
 }
 
-// The usage bar is redrawn with the new palette.
-static void refresh_theme(void) { sd_refresh(); }
+static void refresh_theme(void) {
+	sd_refresh();
+	refresh_fork_qr();
+}
 
 static void build_sysinfo_page(gui_config_t *cfg) {
 	lv_obj_t *container = settingsrow_page(sysinfo_screen, cfg, "system_about");
