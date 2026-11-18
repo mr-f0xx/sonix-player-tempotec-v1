@@ -32,6 +32,7 @@
 #include "src/system/audio/waveform.h"
 #include "src/system/core/utils.h"
 #include "src/system/net/wifitransfer.h"
+#include "src/system/streaming/networkmusic.h"
 #include "src/system/remote/sonixlink.h"
 #include "src/system/streaming/radio.h"
 #include "src/gui/nowplaying/cover.h"
@@ -985,6 +986,7 @@ static bool storage_export(void) {
 	storage_usb_end();
 
 	wifitransfer_release_card();
+	networkmusic_release_card();
 	device_state_note_storage_gone();
 	audio_stop_and_wait(2000);
 	waveform_set_cache_dir(NULL);

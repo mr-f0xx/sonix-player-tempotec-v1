@@ -21,14 +21,15 @@ bool wifi_interface_address(char *out, size_t size) {
 	snprintf(out, size, "127.0.0.1");
 	return true;
 }
-int storage_wifi_transfer_begin(void) {
+int storage_card_file_job_begin(bool writable) {
+	assert(!writable);
 	assert(!card_lock_held);
 	if (!card_mounted) return -1;
 	int fd = open(card, O_RDONLY | O_DIRECTORY | O_CLOEXEC);
 	card_lock_held = fd >= 0;
 	return fd;
 }
-void storage_wifi_transfer_end(void) {
+void storage_card_file_job_end(void) {
 	assert(card_lock_held);
 	card_lock_held = false;
 }

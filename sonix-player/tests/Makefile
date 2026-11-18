@@ -1601,3 +1601,33 @@ jellyfin-ui: $(BUILD)/test_jellyfin_pages
 $(BUILD)/test_jellyfin_pages: $(JELLYFINPAGE_OBJ)
 	$(CC) -o $@ $^ $(LDFLAGS) $(LDLIBS)
 -include $(JELLYFINPAGE_OBJ:.o=.d)
+
+# WebDAV/FTP client against loopback protocol fixtures, with the real libcurl
+# transport and a temporary card. No libcurl headers or external server.
+.PHONY: networkmusic
+networkmusic: $(BUILD)/test_networkmusic
+	python3 run_networkmusic_tests.py $(BUILD)/test_networkmusic
+
+NETWORKMUSIC_SRC = test_networkmusic.c $(ROOT)/src/system/streaming/networkmusic.c \
+                   $(ROOT)/src/system/net/networkshare.c $(ROOT)/src/system/ebook/epub_xml.c \
+                   $(ROOT)/src/system/playback/playlist.c $(ROOT)/src/system/core/utils.c
+
+$(BUILD)/test_networkmusic: $(NETWORKMUSIC_SRC) $(ROOT)/src/system/streaming/networkmusic.h $(ROOT)/src/system/net/networkshare.h
+	@mkdir -p $(BUILD)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ $(NETWORKMUSIC_SRC) $(LDFLAGS) $(LDLIBS)
+
+NETWORKMUSIC_UI_SRC = $(ROOT)/tests/ui/test_networkmusic.c $(ROOT)/src/gui/shell/settingsrow.c \
+                      $(ROOT)/src/gui/shell/keyboard.c $(ROOT)/src/gui/shell/theme.c \
+                      $(ROOT)/src/gui/shell/icons.c $(ROOT)/src/gui/board_profile.c \
+                      $(ROOT)/src/system/input/kblayout.c $(ROOT)/src/system/core/config.c \
+                      $(ROOT)/src/system/core/lang.c $(ROOT)/src/system/net/networkshare.c
+NETWORKMUSIC_UI_OBJ = $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(NETWORKMUSIC_UI_SRC)) $(UI_LVGL_OBJ)
+.PHONY: networkmusic-ui
+ui: networkmusic-ui
+networkmusic-ui: $(BUILD)/test_networkmusic_ui
+	$(BUILD)/test_networkmusic_ui ../../sonix-packer/assets/V1/usr/resource/sonix/language
+
+$(BUILD)/test_networkmusic_ui: $(NETWORKMUSIC_UI_OBJ)
+	$(CC) -o $@ $^ $(LDFLAGS) $(LDLIBS)
+
+-include $(NETWORKMUSIC_UI_OBJ:.o=.d)

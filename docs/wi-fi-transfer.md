@@ -10,7 +10,7 @@ You can also download files and rename, move, or delete files and folders in the
 
 **Use a trusted Wi-Fi network only.** This is local HTTP, not HTTPS: the code limits access to the current session but doesn't encrypt it. Don't port-forward the server or share the QR code. A new session needs a new code. The listener is off by default and closes when you leave the screen, turn off Wi-Fi, lose the link, or hand the card to USB storage. It cannot start without a mounted microSD card.
 
-If the page doesn't load, check that the V1 is still on the Transfer screen and use the exact address shown, including the port if there is one. Guest networks sometimes block devices from reaching one another. This is the browser-based transfer option; there is no separate FTP/WebDAV service or HiBy-app discovery.
+If the page doesn't load, check that the V1 is still on the Transfer screen and use the exact address shown, including the port if there is one. Guest networks sometimes block devices from reaching one another. This is the browser upload option; it doesn't run an FTP/WebDAV server or advertise to the HiBy app. To connect in the other direction, see [Network folders](network-folders.md).
 
 ## Device check after flashing
 

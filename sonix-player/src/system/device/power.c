@@ -51,6 +51,7 @@
 #include "src/system/streaming/radio.h"
 #include "src/system/net/wifi.h"
 #include "src/system/net/wifitransfer.h"
+#include "src/system/streaming/networkmusic.h"
 #include "src/system/lastfm/lastfm.h"
 #include "src/system/listenbrainz/listenbrainz.h"
 #include "src/system/bluetooth/bluetooth.h"
@@ -878,7 +879,7 @@ static bool wifi_in_use(void) {
 	// A scan or a connect in flight counts as use: parking the radio out from
 	// under wpa_supplicant mid-association leaves the driver to sort out a
 	// teardown it did not expect.
-	return subsonic_api_busy() || subsonicstream_network_wanted() || subsonicdl_busy() || soundcloud_api_busy() ||
+	return networkmusic_busy() || subsonic_api_busy() || subsonicstream_network_wanted() || subsonicdl_busy() || soundcloud_api_busy() ||
 		   soundcloudcache_downloading() || soundcloudpage_waiting_for_track() || jellyfin_api_busy() ||
 		   jellyfincache_downloading() || jellyfinpage_waiting_for_track() || jellyfinpage_download_busy() ||
 		   wifi_busy() || wifi_scan_running() ||
@@ -941,7 +942,7 @@ static bool player_is_busy(bool playing, uint32_t input_idle) {
 		   usb_storage_active() ||				   // the card exported over USB
 		   gearboy_running() ||					   // the emulator
 		   library_scan_running() ||			   // a scan, which is also writing to the card
-		   audiobookdb_scan_running() || wifitransfer_running() || dlna_running() || airplay_running() ||
+		   audiobookdb_scan_running() || networkmusic_busy() || wifitransfer_running() || dlna_running() || airplay_running() ||
 		   sonixlink_is_connected() || // a phone driving the player, not a switch left on
 		   qobuzcache_downloading_id() > 0 || tidalcache_downloading_id() > 0 ||
 		   soundcloudcache_downloading() || jellyfincache_downloading() || jellyfinpage_download_busy() ||

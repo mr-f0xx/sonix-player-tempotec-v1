@@ -220,6 +220,10 @@ a self-signed certificate), and HLS.
   same Wi-Fi. Drag albums or individual FLACs onto the page to copy them directly
   to microSD. The browser also lists, downloads, renames, moves and deletes files.
   The embedded server closes when you leave the transfer page. See [Wi-Fi transfer](docs/wi-fi-transfer.md).
+- **Network folders** - under **Streaming**, browse a remote WebDAV or FTP
+  server and save individual tracks or all tracks in an album folder directly
+  to microSD. Save and play opens the completed local file for offline playback.
+  See [Network folders](docs/network-folders.md).
 - **SonixLink** - a control protocol for a phone: the phone fetches the index
   once and queries it locally instead of paging over the wire. Playback state,
   queue, favourites, artwork and commands.

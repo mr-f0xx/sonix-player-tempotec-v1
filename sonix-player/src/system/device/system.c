@@ -39,6 +39,7 @@
 #include "src/system/library/audiobookdb.h"
 #include "src/system/audio/eq.h"
 #include "src/system/net/wifitransfer.h"
+#include "src/system/streaming/networkmusic.h"
 #include "src/system/remote/dlna.h"
 #include "src/system/remote/sonixlink.h"
 #include "src/system/gearboy/gbdb.h"
@@ -869,6 +870,7 @@ static void card_databases_detach(void) {
 	// that is a directory on the player's own UBIFS, which is precisely the
 	// storage the cache must not fill.
 	wifitransfer_release_card();
+	networkmusic_release_card();
 	tidalcache_set_root(NULL);
 	soundcloudcache_set_root(NULL);
 	jellyfincache_set_root(NULL);
@@ -1012,8 +1014,8 @@ bool storage_usb_begin(void) {
 
 void storage_usb_end(void) { pthread_mutex_unlock(&card_lock); }
 
-int storage_wifi_transfer_begin(void) {
-	// The transfer switch is on the UI thread. Don't block on a mount or a
+int storage_card_file_job_begin(bool writable) {
+	// The file jobs start on the UI thread. Don't block on a mount or a
 	// USB handover in progress; the user can retry once the card is available.
 	if (pthread_mutex_trylock(&card_lock) != 0) return -1;
 	int fd = -1;
@@ -1021,14 +1023,21 @@ int storage_wifi_transfer_begin(void) {
 		!card_released && card_attached && !usb_storage_active() && sd_root[0] &&
 		is_mounted(sd_root) && mount_is_alive(sd_root)) {
 		// sd_root can be a trusted firmware alias. Descendants are opened
-		// without following symlinks by the HTTP server.
+		// without following symlinks by the caller.
 		fd = open(sd_root, O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+	}
+	if (fd >= 0 && writable) {
+		struct statvfs fs;
+		if (fstatvfs(fd, &fs) != 0 || (fs.f_flag & ST_RDONLY)) {
+			close(fd);
+			fd = -1;
+		}
 	}
 	if (fd < 0) pthread_mutex_unlock(&card_lock);
 	return fd;
 }
 
-void storage_wifi_transfer_end(void) { pthread_mutex_unlock(&card_lock); }
+void storage_card_file_job_end(void) { pthread_mutex_unlock(&card_lock); }
 
 void storage_recheck_card(void) {
 	if (!g_storage_cfg || !g_storage_cfg->manage_mount || getenv("SONIX_NO_MOUNT")) {
@@ -1184,6 +1193,7 @@ void storage_release_for_shutdown(void) {
 	bool already = card_released;
 	card_released = true;
 	wifitransfer_release_card();
+	networkmusic_release_card();
 
 	// A card handed to a computer is already off this device's hands.
 	if (already || !sd_root[0] || !is_mounted(sd_root) || usb_storage_active()) {

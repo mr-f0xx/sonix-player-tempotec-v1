@@ -145,7 +145,7 @@ wifitransfer_result_t wifitransfer_start(uint32_t rgb) {
 	// The storage lock spans opening the card and publishing the server. USB
 	// and hotplug can never miss a start while trying to release the card.
 	// The lock order here and on removal is storage, then transfer.
-	int card = storage_wifi_transfer_begin();
+	int card = storage_card_file_job_begin(false);
 	if (card < 0) {
 		free(html);
 		return WIFITRANSFER_NO_CARD;
@@ -170,7 +170,7 @@ wifitransfer_result_t wifitransfer_start(uint32_t rgb) {
 	if (!live) stop_locked();
 	close(card);
 	pthread_mutex_unlock(&lock);
-	storage_wifi_transfer_end();
+	storage_card_file_job_end();
 	free(html);
 	return live ? WIFITRANSFER_OK : WIFITRANSFER_START_FAILED;
 }

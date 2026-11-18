@@ -941,3 +941,16 @@ which has no micro sign, so no pixel width other than the 28 px is asserted.
 panel (tilted neon frames behind the opaque sleeve, corner pills and discs in
 front without horizontal overlap, and clean hide/restore).
 
+
+### Network folders (outbound WebDAV / FTP)
+
+`make -C sonix-player/tests networkmusic` uses the host's `libcurl.so.4` (7.66+
+with HTTP and FTP support) and starts isolated loopback WebDAV and FTP fixtures.
+It verifies authentication, directory listing (including MLSD and legacy LIST),
+URL/path scoping, bytes and folders saved on a temporary card, skipping existing
+tracks, transfer limits, and cancellation/USB-release cleanup. When `openssl`
+is installed it also checks HTTPS and implicit FTPS with a temporary certificate.
+No real server, account, or microSD is needed. `networkmusic-ui` checks the
+240×320 LVGL setup, navigation, progress, and Save and play handoff with a stub
+worker. Neither test substitutes for the hardware checklist in
+[`docs/network-folders.md`](../../docs/network-folders.md).

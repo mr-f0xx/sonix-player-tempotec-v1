@@ -86,6 +86,7 @@
 #include "src/system/core/utils.h"
 #include "src/system/net/wifi.h"
 #include "src/system/net/wifitransfer.h"
+#include "src/system/streaming/networkmusic.h"
 #include "src/system/library/geniusdb.h"
 
 
@@ -2632,6 +2633,8 @@ int main(int argc, char **argv) {
 	}
 
 	wifitransfer_release_card();
+	networkmusic_cancel();
+	networkmusic_release_card();
 	printf("\n");
 
 #ifdef HOST_WEB_EMU

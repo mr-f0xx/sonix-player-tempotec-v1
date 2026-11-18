@@ -58,6 +58,7 @@ int sysserver_mount(const char *device, const char *mountpoint) {
 }
 void device_state_note_storage_gone(void) {}
 void wifitransfer_release_card(void) { closes++; }
+void networkmusic_release_card(void) { assert(storage_active); closes++; }
 void audio_stop(void) { stop_calls++; }
 void audio_stop_and_wait(int timeout_ms) { assert(timeout_ms > 0); stop_calls++; }
 void waveform_set_cache_dir(const char *path) { if (path) opens++; else closes++; }
@@ -124,7 +125,7 @@ int main(void) {
 	reset();
 	assert(!storage_export());
 	assert(!storage_active && export_mode == EXPORT_NONE && export_claim_fd == -1);
-	assert(stop_calls == 1 && closes == 10 && opens == 11 && mount_calls == 0);
+	assert(stop_calls == 1 && closes == 11 && opens == 11 && mount_calls == 0);
 	assert(begin_calls == end_calls);
 	expect(fake_lun, "\n");
 
