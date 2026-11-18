@@ -35,10 +35,10 @@
 // remain the fallback, used only when the controller cannot be taken over or on
 // the R1, which has no SGM31324 at all.
 //
-// The states, and their priority when they overlap (matching the stock state
-// machine, with the charge indicator on top):
-//
-//   charging red > charged green > playback colour > idle aqua
+// Stealth and suspend take priority over everything; otherwise charging and
+// fully charged keep the stock charger priority. In Smart LED mode a brief
+// low-battery or upload notice can interrupt the normal playback/idle colour.
+// Smart LED playback effects use that colour and cap at the brightness setting.
 //
 // The playback colour follows the stock sample-rate bands, regardless of the
 // codec or bit depth:
@@ -58,30 +58,15 @@
 // Everything degrades to a no-op when the sysfs nodes are missing (the host
 // build, or firmware without the module loaded).
 
-// Probes the sysfs nodes, takes the SGM31324 over from the driver where it can,
-// and replays the stock startup sequence: red trigger released, then a fade-in
-// to the power-on aqua.
+// Probes the LED and reads the saved settings before its first render. Call
+// on the UI thread before creating the Power page. State updates and notices
+// also belong on that thread; the worker handles animation and I2C writes.
 void led_init(void);
 
-// Red breathing while a charge is actually going in, overriding the playback
-// colour like the stock player does. Not "a cable is in": a battery at 100%%,
-// or held at the configured charge limit, has nothing left to indicate and the
-// LED goes back to whatever it would be showing with no cable -- the playback
-// colour, a mode's colour, or the idle aqua. The red is an override on top of
-// the rest, not a state of its own.
-//
-// Cheap to call repeatedly: it only writes when the resolved state changes.
-// But the caller must hand it a settled answer -- the breathing is a ramp
-// programmed into the LED controller, and rewriting it restarts the ramp, so a
-// reading that flaps comes out as a red that stutters.
-void led_set_charging(bool charging);
-
-// Whether a cable is supplying at all, charge finished or not. While a charge is
-// going in it is the red above; once the charge is done it is the green that
-// says so. Either way the cable keeps the darken-in-standby option off the LED:
-// without it a player left plugged in overnight answers the end of its charge
-// by going dark.
-void led_set_on_charger(bool present);
+// Red breathing while charging, green when full or held at the charge limit.
+// The caller supplies a single settled reading: rewriting breathing restarts
+// the controller's ramp, and transient readings can make the red stutter.
+void led_set_charge_state(bool present, bool charging);
 
 // Picks the state for what is playing (shown when not charging). `playing`
 // false or rate 0 falls back to the idle aqua. PCM colour follows the stock
@@ -118,6 +103,30 @@ void led_set_dac(bool active, bool streaming, int sample_rate);
 // normal behaviour, including the standby option below.
 void led_set_enabled(bool enabled);
 
+// A separate blackout override, including charge indications. Does not change
+// the master switch, standby option or brightness preferences. Saved by caller.
+void led_set_stealth(bool enabled);
+
+// Smart LED mode: PCM playback effects and short, distinct event notices.
+// Requires the direct RGB controller. Saved by caller.
+void led_set_visualizer(bool enabled);
+
+typedef enum {
+	LED_VISUALIZER_NONE = 0, // no active PCM effect, not a saved choice
+	LED_VISUALIZER_BASS_PULSE = 1,
+	LED_VISUALIZER_ENERGY_GLOW = 2,
+} led_visualizer_style_t;
+
+// Selected PCM style, independent of the Smart LED switch and event notices.
+// Bass Pulse is the default. The caller saves it as power.led_visualizer_style.
+void led_set_visualizer_style(led_visualizer_style_t style);
+led_visualizer_style_t led_visualizer_style(void);
+
+// Call on the existing low-battery warning or a completed Wi-Fi upload. If
+// hidden by Stealth, charging or a higher priority notice, do not queue it.
+void led_notify_low_battery(void);
+void led_notify_upload_complete(void);
+
 // The darken-in-standby option: with it on, the LED goes dark after
 // twenty seconds in standby (screen off) with nothing playing. A charge in
 // progress is never darkened by it -- the red keeps breathing -- and any
@@ -138,19 +147,13 @@ void led_set_brightness(int brightness);
 // fade-out or cross-fade takes. Only the direct path uses it.
 void led_set_transition_ms(int ms);
 
-// Whether the fancy LED features (brightness, transition speed, the fades) are
-// available on this device -- true on the SGM31324, false on the R1 and the
-// host build. The settings page hides those rows when it is false.
+// Whether the direct RGB effects are available after led_init(). On the
+// pattern/PWM fallback and plain host builds only the static controls apply.
 bool led_effects_available(void);
 
-// Fades the LED out on the way down. Called from power_shutdown() before the
-// power goes; a no-op on the fallback path.
+// Fades the LED out before power-off or suspend, canceling any active notice.
+// Resume renders the current state again, including the saved blackout.
 void led_shutdown(void);
-
-// The same fade for a suspend to RAM: called just before the "mem" write, so
-// the light is gone before the SoC sleeps, and led_resume() brings the current
-// state back as a fade-in on the other side. Both are no-ops on the fallback
-// path.
 void led_suspend(void);
 void led_resume(void);
 

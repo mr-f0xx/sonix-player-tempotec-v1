@@ -31,6 +31,9 @@
 #define HEADER_MS 5000
 #define IO_MS 15000
 #define IDLE_CLIENTS 8
+// The browser sends a folder one file at a time. Don't announce every file
+// while the next one is still coming in.
+#define UPLOAD_QUIET_MS 1000
 #define DIR_FLAGS (O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
 #define TEMP_PREFIX ".sonix-upload-"
 #define COOKIE "sonix_transfer="
@@ -40,6 +43,7 @@ struct transfer_http {
 	dev_t device;
 	pthread_t thread;
 	atomic_bool stopping, running;
+	atomic_uint upload_ready_at; // monotonic ms; zero means nothing pending
 	const char *page;
 	size_t page_size;
 	uint16_t port;
@@ -635,6 +639,7 @@ static int dispatch(transfer_http_t *s, int client, request_t *r) {
 	if (!(listing || downloading || uploading || creating || deleting || moving)) return 404;
 	if ((listing && !get) || (downloading && !get && !head) || (uploading && !put) ||
 		((creating || deleting || moving) && !post)) return 405;
+	if (uploading) atomic_store(&s->upload_ready_at, 0);
 	if (uploading && !r->has_length) return 411;
 	if (uploading && r->length > UINT32_MAX) return 413; // works on FAT32 as well as exFAT
 
@@ -651,8 +656,14 @@ static int dispatch(transfer_http_t *s, int client, request_t *r) {
 	}
 	int status;
 	if (downloading) status = download(s, client, dir, leaf, head);
-	else if (uploading) status = upload(s, client, r, dir, leaf);
-	else if (moving) status = move(s, dir, leaf, r->query);
+	else if (uploading) {
+		status = upload(s, client, r, dir, leaf);
+		if (status == 201) {
+			// Publication, not a browser progress reading, is what counts.
+			unsigned due = (uint32_t)now_ms() + UPLOAD_QUIET_MS;
+			atomic_store(&s->upload_ready_at, due ? due : 1);
+		}
+	} else if (moving) status = move(s, dir, leaf, r->query);
 	else if (deleting) status = remove_tree(s, dir, leaf, 0);
 	else if (mkdirat(dir, leaf, 0755) == 0) status = 201;
 	else {
@@ -771,6 +782,7 @@ transfer_http_t *transfer_http_start(int card_fd, const char *ip, uint16_t port,
 	s->port = ntohs(addr.sin_port);
 	atomic_init(&s->stopping, false);
 	atomic_init(&s->running, true);
+	atomic_init(&s->upload_ready_at, 0);
 	if (pthread_create(&s->thread, NULL, worker, s) != 0) goto fail;
 	return s;
 
@@ -782,6 +794,13 @@ fail:
 uint16_t transfer_http_port(const transfer_http_t *s) { return s->port; }
 const char *transfer_http_code(const transfer_http_t *s) { return s->code; }
 bool transfer_http_running(const transfer_http_t *s) { return s && atomic_load(&s->running); }
+
+bool transfer_http_take_upload_complete(transfer_http_t *s) {
+	if (!transfer_http_running(s)) return false;
+	unsigned due = atomic_load(&s->upload_ready_at);
+	return due && (int32_t)((uint32_t)now_ms() - due) >= 0 &&
+		   atomic_compare_exchange_strong(&s->upload_ready_at, &due, 0);
+}
 
 void transfer_http_stop(transfer_http_t *s) {
 	if (!s) return;

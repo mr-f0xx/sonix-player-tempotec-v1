@@ -619,6 +619,21 @@ $(BUILD)/test_led_rate: test_led_rate.c $(ROOT)/src/system/device/led.c \
 	@mkdir -p $(BUILD)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ test_led_rate.c $(LDFLAGS) $(LDLIBS)
 
+LED_TELEMETRY_SRC = test_led_telemetry.c $(ROOT)/src/system/audio/visualizer.c $(ROOT)/src/system/core/config.c
+.PHONY: led-telemetry
+led-telemetry: $(BUILD)/test_led_telemetry
+	$(BUILD)/test_led_telemetry
+	$(BUILD)/test_led_telemetry glow
+	$(BUILD)/test_led_telemetry pattern
+	$(BUILD)/test_led_telemetry pwm
+	$(BUILD)/test_led_telemetry unavailable
+
+$(BUILD)/test_led_telemetry: $(LED_TELEMETRY_SRC) $(ROOT)/src/system/device/led.c \
+                             $(ROOT)/src/system/device/led.h $(ROOT)/src/system/device/led_i2c.h \
+                             $(ROOT)/src/system/audio/visualizer.h
+	@mkdir -p $(BUILD)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ $(LED_TELEMETRY_SRC) $(LDFLAGS) $(LDLIBS)
+
 # The Most played list against the real library database: the play upsert
 # device_state.c runs at track start, the handle the page opens, and the
 # streaming reader the queue is built from. The card is a temporary directory

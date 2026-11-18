@@ -17,6 +17,10 @@ transfer_http_t *transfer_http_start(int card_fd, const char *ip, uint16_t port,
 uint16_t transfer_http_port(const transfer_http_t *server);
 const char *transfer_http_code(const transfer_http_t *server);
 bool transfer_http_running(const transfer_http_t *server);
+// One event after a successful upload and a brief quiet period. A new upload
+// defers it until the new file has been saved; failed/aborted uploads do not
+// produce an event. The caller keeps the session alive during the read.
+bool transfer_http_take_upload_complete(transfer_http_t *server);
 
 // Interrupts any client and joins the worker. No card descriptor or unfinished
 // upload is left behind when this returns. Accepts NULL.

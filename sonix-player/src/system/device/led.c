@@ -2,16 +2,17 @@
 
 #include <pthread.h>
 #include <stdio.h>
-#include <string.h>
 #include <time.h>
 #include <unistd.h>
 
 #include "led_i2c.h"
+#include "src/system/audio/visualizer.h"
 #include "src/system/core/config.h"
 #include "src/system/device/sysinfo.h"
 
 #define PATTERN_NODE "/sys/class/leds/sgm31324-leds/led_pattern"
 #define RED_TRIGGER_NODE "/sys/class/leds/red/trigger"
+#define RED_BRIGHTNESS_NODE "/sys/class/leds/red/brightness"
 
 // The R1's blue LED (leds_pwm_add.ko, PC02, max_brightness 100). Its stock
 // player writes 50 for every lit state and 0 for off.
@@ -69,11 +70,13 @@ static const int LADDER[11] = {0, 1, 3, 7, 15, 23, 31, 39, 47, 63, 79};
 #define LED_STEP_MS 10
 // A blinking state (the Wi-Fi transfer) is on and off for this long each.
 #define LED_BLINK_MS 500
+#define LED_VISUALIZER_MS 40 // at most 25 brightness updates per second
 
 // The logical states the LED can be in. Each is rendered either as a driver
 // pattern (the fallback) or as a colour and an effect (the direct path).
 typedef enum {
 	LS_OFF,
+	LS_STEALTH, // cut to black immediately, even during a charge
 	LS_IDLE,
 	LS_PCM_48K, // PCM at or below 48 kHz
 	LS_PCM_192K, // PCM above 48 through 192 kHz
@@ -99,12 +102,22 @@ typedef struct {
 	int r, g, b;		   // scaled 0-79
 	int period, duty, fade; // breathing timing
 	int transition_ms;	   // length of the fade into this state
+	led_visualizer_style_t effect;
+	bool allow_notices;
 } led_render_t;
+
+// Priority order. There is no queue: a low-battery warning can replace an
+// upload confirmation, but neither is replayed after a higher priority state.
+typedef enum {
+	LN_NONE,
+	LN_UPLOAD_COMPLETE,
+	LN_LOW_BATTERY,
+} led_notice_t;
 
 static bool have_pattern_node;
 static bool have_red_node;
 static bool have_blue_node; // the R1: no pattern node, a red and a blue LED
-static bool direct_mode;	// the SGM31324 is ours, driven over I2C
+static bool direct_mode;	// the effect worker owns the SGM31324
 
 // Whether this player's status LED is the SGM31324 RGB controller. The model
 // table knows (sysinfo.h); when system-info.json names no model we fall back to
@@ -120,14 +133,15 @@ static bool has_sgm31324(void) {
 }
 
 static int current_state = -1;
+static led_visualizer_style_t current_effect;
+static bool current_notices;
 static int red_trigger_state = -1; // -1 unknown, 0 "none", 1 "breathing"
 
 static int s_brightness = BRIGHTNESS_DEFAULT;
 static int s_transition_ms = TRANSITION_DEFAULT_MS;
 
-// The three inputs the pattern is resolved from. The charger wins over
-// everything -- the stock LED state machine applies its charging override
-// after the playback colour -- and playback wins over idle.
+// Inputs to the state resolver. The GUI/power thread owns these, and only
+// the effect worker writes to the direct controller once it is started.
 static bool s_charging;
 static bool s_playing;
 static int s_rate;
@@ -139,7 +153,11 @@ static bool s_dac_active;	 // DAC mode is on: the gadget is up
 static bool s_dac_streaming; // ...and the computer is actually sending audio
 static int s_dac_rate;
 
-static bool s_led_enabled = true; // the LED master switch
+static bool s_led_enabled = true; // the LED master switch, with its charge exception
+static bool s_stealth;
+static bool s_visualizer;
+static led_visualizer_style_t s_visualizer_style = LED_VISUALIZER_BASS_PULSE;
+static bool s_suspended; // includes the shutdown fade, until/unless we resume
 static bool s_idle_off_enabled;
 static bool s_standby;		  // screen off (set by power.c)
 static time_t s_standby_since; // when the screen went off
@@ -156,12 +174,17 @@ static time_t s_charger_since; // when that last changed
 
 static pthread_t led_thread;
 static pthread_mutex_t led_lock = PTHREAD_MUTEX_INITIALIZER;
-static pthread_cond_t led_cond = PTHREAD_COND_INITIALIZER;
+static pthread_cond_t led_cond;
+static clockid_t led_clock = CLOCK_REALTIME;
 static pthread_cond_t led_done_cond = PTHREAD_COND_INITIALIZER;
 static led_render_t led_target;
-static volatile unsigned led_seq;
-static unsigned led_done_seq; // the target seq the worker has finished (under led_lock)
-static bool led_thread_started;
+// The target, notice and their generations are all protected by led_lock.
+// Base changes during a notice update the state it returns to, but do not
+// restart or cut the pattern unless they disallow notices altogether.
+static unsigned led_seq, led_done_seq;
+static led_notice_t led_notice;
+static unsigned led_notice_seq;
+static int led_notice_level;
 
 static void write_str(const char *path, const char *value) {
 	FILE *f = fopen(path, "w");
@@ -231,35 +254,207 @@ static unsigned ch_mask(int r, int g, int b) {
 	return m;
 }
 
-static void led_post(const led_render_t *t) {
+static void led_post(const led_render_t *t, bool redraw) {
 	pthread_mutex_lock(&led_lock);
 	led_target = *t;
-	led_seq++;
-	pthread_cond_signal(&led_cond);
+	if (!t->allow_notices && led_notice != LN_NONE) {
+		led_notice = LN_NONE;
+		led_notice_seq++;
+		redraw = true;
+	}
+	if (redraw) {
+		led_seq++;
+		pthread_cond_signal(&led_cond);
+	}
 	pthread_mutex_unlock(&led_lock);
 }
 
-// Sleeps `ms` in small slices, returning true if a newer target arrived while it
-// waited -- which is what lets a running fade be cut short by a colour change
-// instead of being played out to the end first.
-static bool led_wait(unsigned seen, int ms) {
-	int left = ms;
-	while (left > 0) {
-		int slice = left > 5 ? 5 : left;
-		struct timespec ts = {0, (long)slice * 1000000L};
-		nanosleep(&ts, NULL);
-		if (led_seq != seen) {
-			return true;
-		}
-		left -= slice;
+static void post_notice(led_notice_t notice) {
+	if (!direct_mode) {
+		return;
 	}
-	return false;
+	pthread_mutex_lock(&led_lock);
+	if (led_target.allow_notices && notice > led_notice) {
+		led_notice = notice;
+		led_notice_level = LADDER[led_level()];
+		led_notice_seq++;
+		led_seq++;
+		pthread_cond_signal(&led_cond);
+	}
+	pthread_mutex_unlock(&led_lock);
+}
+
+// Wait once per frame, not in short polling slices. A relevant target or
+// notice change wakes the effect early, even during a long blink interval.
+static bool led_wait(const unsigned *seq, unsigned seen, int ms) {
+	struct timespec until;
+	clock_gettime(led_clock, &until);
+	until.tv_nsec += (long)ms * 1000000L;
+	if (until.tv_nsec >= 1000000000L) {
+		until.tv_sec++;
+		until.tv_nsec -= 1000000000L;
+	}
+	pthread_mutex_lock(&led_lock);
+	while (*seq == seen && pthread_cond_timedwait(&led_cond, &led_lock, &until) == 0) {}
+	bool changed = *seq != seen;
+	pthread_mutex_unlock(&led_lock);
+	return changed;
+}
+
+typedef struct {
+	int r, g, b;
+	unsigned channels;
+} led_levels_t;
+
+static void set_levels(led_levels_t *cur, int r, int g, int b, unsigned ch) {
+	led_i2c_levels(r, g, b, ch);
+	*cur = (led_levels_t){r, g, b, ch};
+}
+
+// Zero repeats means the ongoing blue Wi-Fi Transfer pattern. Notices instead
+// run a finite number of beats and then return to the latest base target.
+static void play_blink(led_levels_t *cur, int r, int g, int b, int repeats, int on_ms, int off_ms,
+					   const unsigned *seq, unsigned seen) {
+	unsigned ch = ch_mask(r, g, b);
+	led_i2c_steady();
+	for (int i = 0; !repeats || i < repeats; i++) {
+		set_levels(cur, r, g, b, ch);
+		if (led_wait(seq, seen, on_ms)) {
+			return;
+		}
+		set_levels(cur, 0, 0, 0, ch);
+		if (led_wait(seq, seen, off_ms)) {
+			return;
+		}
+	}
+}
+
+typedef struct {
+	int average_q8;
+	unsigned frames_left;
+	bool above;
+} led_pulse_t;
+
+// Use the rise in bass to trigger a pulse, not to set its brightness. Bass is
+// already log-compressed, so a modest attack should still reach the peak.
+// Hysteresis keeps a sustained note from retriggering until the bass drops
+// back toward the running average.
+static int pulse_step(led_pulse_t *state, int bass) {
+	// At 40 ms per frame: 80 ms at the peak, then a soft fade back to rest.
+	static const int LEVELS[] = {255, 255, 192, 128, 72, 32, 12};
+	const unsigned frame_count = sizeof(LEVELS) / sizeof(LEVELS[0]);
+	int rise = bass - (state->average_q8 >> 8);
+	state->average_q8 += (bass * 256 - state->average_q8) / 5;
+	if (bass < 32 || rise <= 2) {
+		state->above = false;
+	} else if (rise >= 7 && !state->above) {
+		state->above = true;
+		// Leave a visible dip between close beats rather than holding the
+		// light at full brightness when several attacks arrive at once.
+		if (state->frames_left <= 3) {
+			state->frames_left = frame_count;
+		}
+	}
+	if (!state->frames_left) {
+		return 0;
+	}
+	unsigned frame = frame_count - state->frames_left;
+	state->frames_left--;
+	return LEVELS[frame];
+}
+
+// An asymmetric envelope keeps the light on during sustained sound, gliding
+// up over a few hundred ms and easing down more slowly between passages.
+static int glow_step(int *level_q8, int target) {
+	int delta = target * 256 - *level_q8;
+	int step = delta / (delta > 0 ? 5 : 12);
+	*level_q8 += step ? step : delta;
+	return (*level_q8 + 128) >> 8;
+}
+
+static int effect_channel(int rest, int peak, int amount) {
+	return rest + ((peak - rest) * amount + 127) / 255;
+}
+
+static void play_visualizer(led_levels_t *cur, const led_render_t *t, led_levels_t rest, unsigned seen) {
+	led_pulse_t pulse = {0};
+	int glow_q8 = 0;
+	bool single_step = !(rest.r || rest.g || rest.b);
+	while (!led_wait(&led_seq, seen, LED_VISUALIZER_MS)) {
+		int amount;
+		if (t->effect == LED_VISUALIZER_ENERGY_GLOW) {
+			amount = glow_step(&glow_q8, visualizer_energy_level());
+			if (single_step) {
+				// With just dark/lit available, leave a gap between the on
+				// and off thresholds so nearby levels don't cause flicker.
+				int threshold = (cur->r || cur->g || cur->b) ? 112 : 144;
+				amount = amount >= threshold ? 255 : 0;
+			}
+		} else {
+			amount = pulse_step(&pulse, visualizer_bass_level());
+		}
+		int r = effect_channel(rest.r, t->r, amount);
+		int g = effect_channel(rest.g, t->g, amount);
+		int b = effect_channel(rest.b, t->b, amount);
+		if (r != cur->r || g != cur->g || b != cur->b) {
+			set_levels(cur, r, g, b, rest.channels);
+		}
+	}
+}
+
+static void play_steady(led_levels_t *cur, const led_render_t *t, unsigned seen) {
+	bool off = t->mode == LM_OFF;
+	if (off && (t->transition_ms == 0 || !(cur->r || cur->g || cur->b))) {
+		led_i2c_off();
+		*cur = (led_levels_t){0};
+		return;
+	}
+
+	// Walk from the actual levels to the new colour (or a dimmer floor for
+	// the visualizer). Both sets of channels stay enabled during the ramp.
+	led_levels_t from = *cur;
+	led_levels_t rest = {t->r, t->g, t->b, ch_mask(t->r, t->g, t->b)};
+	if (t->effect != LED_VISUALIZER_NONE) {
+		// Rest at roughly a fifth of the selected brightness. At brightness
+		// 1 there is only one lit step, so rest at zero instead. Keep the
+		// channels enabled for the next rise in brightness.
+		bool lit_floor = t->r > 1 || t->g > 1 || t->b > 1;
+		rest.r = lit_floor ? (t->r + 4) / 5 : 0;
+		rest.g = lit_floor ? (t->g + 4) / 5 : 0;
+		rest.b = lit_floor ? (t->b + 4) / 5 : 0;
+	}
+	int steps = t->transition_ms / LED_STEP_MS;
+	if (steps < 1) steps = 1;
+
+	led_i2c_steady();
+	for (int i = 1; i <= steps; i++) {
+		int r, g, b;
+		if (off) {
+			// A quadratic fall eases out instead of dropping in a line.
+			int k = steps - i;
+			r = from.r * k * k / (steps * steps);
+			g = from.g * k * k / (steps * steps);
+			b = from.b * k * k / (steps * steps);
+		} else {
+			r = from.r + (rest.r - from.r) * i / steps;
+			g = from.g + (rest.g - from.g) * i / steps;
+			b = from.b + (rest.b - from.b) * i / steps;
+		}
+		set_levels(cur, r, g, b, i < steps ? from.channels | rest.channels : rest.channels);
+		if (i < steps && led_wait(&led_seq, seen, LED_STEP_MS)) {
+			return;
+		}
+	}
+	if (off) {
+		led_i2c_off();
+	} else if (t->effect != LED_VISUALIZER_NONE) {
+		play_visualizer(cur, t, rest, seen);
+	}
 }
 
 static void *led_worker(void *arg) {
 	(void)arg;
-	int cur_r = 0, cur_g = 0, cur_b = 0;
-	unsigned cur_ch = 0;
+	led_levels_t cur = {0};
 	unsigned seen = 0;
 
 	for (;;) {
@@ -267,93 +462,37 @@ static void *led_worker(void *arg) {
 		while (led_seq == seen) {
 			pthread_cond_wait(&led_cond, &led_lock);
 		}
+		if (led_notice != LN_NONE) {
+			led_notice_t notice = led_notice;
+			unsigned notice_seq = led_notice_seq;
+			int level = led_notice_level;
+			pthread_mutex_unlock(&led_lock);
+			if (notice == LN_LOW_BATTERY) {
+				play_blink(&cur, level, 0, 0, 3, 140, 140, &led_notice_seq, notice_seq);
+			} else {
+				play_blink(&cur, 0, level, 0, 2, 180, 120, &led_notice_seq, notice_seq);
+			}
+			pthread_mutex_lock(&led_lock);
+			if (led_notice_seq == notice_seq) led_notice = LN_NONE;
+			pthread_mutex_unlock(&led_lock);
+			// Leave seen alone to pick up the newest base after the pattern.
+			continue;
+		}
 		led_render_t t = led_target;
 		seen = led_seq;
 		pthread_mutex_unlock(&led_lock);
 
-		if (led_i2c_ready()) {
-			if (t.mode == LM_BREATHE) {
-				led_i2c_breathe(t.r, t.g, t.b, (unsigned char)t.period, (unsigned char)t.duty, (unsigned char)t.fade);
-				cur_r = t.r;
-				cur_g = t.g;
-				cur_b = t.b;
-				cur_ch = ch_mask(t.r, t.g, t.b);
-			} else if (t.mode == LM_BLINK) {
-				unsigned ch = ch_mask(t.r, t.g, t.b);
-				led_i2c_steady();
-				for (;;) {
-					led_i2c_levels(t.r, t.g, t.b, ch);
-					if (led_wait(seen, LED_BLINK_MS)) {
-						break;
-					}
-					led_i2c_levels(0, 0, 0, ch);
-					if (led_wait(seen, LED_BLINK_MS)) {
-						break;
-					}
-				}
-				cur_r = 0;
-				cur_g = 0;
-				cur_b = 0;
-				cur_ch = ch;
-			} else {
-				// Steady or off: walk from whatever is on now to the target. From
-				// black this is a fade-in, to black a fade-out, and between two
-				// colours a cross-fade -- the same walk, only the endpoints differ.
-				// Every channel lit at either end stays enabled for the duration,
-				// so a channel that is dark at one end fades rather than snapping.
-				int tr = (t.mode == LM_OFF) ? 0 : t.r;
-				int tg = (t.mode == LM_OFF) ? 0 : t.g;
-				int tb = (t.mode == LM_OFF) ? 0 : t.b;
-				unsigned tch = (t.mode == LM_OFF) ? 0 : ch_mask(tr, tg, tb);
-				unsigned ramp_ch = cur_ch | tch;
-				int steps = t.transition_ms / LED_STEP_MS;
-				if (steps < 1) {
-					steps = 1;
-				}
-
-				int sr = cur_r, sg = cur_g, sb = cur_b;
-				led_i2c_steady();
-				bool cut = false;
-				for (int i = 1; i <= steps; i++) {
-					int r, g, b;
-					if (t.mode == LM_OFF) {
-						// The doc's fade_out: a quadratic fall, so it eases out
-						// rather than dropping in a straight line.
-						int k = steps - i;
-						r = sr * k * k / (steps * steps);
-						g = sg * k * k / (steps * steps);
-						b = sb * k * k / (steps * steps);
-					} else {
-						r = sr + (tr - sr) * i / steps;
-						g = sg + (tg - sg) * i / steps;
-						b = sb + (tb - sb) * i / steps;
-					}
-					led_i2c_levels(r, g, b, ramp_ch);
-					cur_r = r;
-					cur_g = g;
-					cur_b = b;
-					if (i < steps && led_wait(seen, LED_STEP_MS)) {
-						cut = true;
-						break;
-					}
-				}
-				if (cut) {
-					cur_ch = ramp_ch;
-				} else {
-					if (t.mode == LM_OFF) {
-						// The map off entirely, as the doc's fade_out leaves it.
-						led_i2c_off();
-					}
-					cur_r = tr;
-					cur_g = tg;
-					cur_b = tb;
-					cur_ch = tch;
-				}
-			}
+		if (t.mode == LM_BREATHE) {
+			led_i2c_breathe(t.r, t.g, t.b, (unsigned char)t.period, (unsigned char)t.duty, (unsigned char)t.fade);
+			cur = (led_levels_t){t.r, t.g, t.b, ch_mask(t.r, t.g, t.b)};
+		} else if (t.mode == LM_BLINK) {
+			play_blink(&cur, t.r, t.g, t.b, 0, LED_BLINK_MS, LED_BLINK_MS, &led_seq, seen);
+		} else {
+			play_steady(&cur, &t, seen);
 		}
 
-		// This target is done (or was cut short by a newer one). Whoever is
-		// waiting for a fade to finish -- the shutdown path -- is told here.
+		// The target finished (or a newer one cut it short). Power transitions
+		// wait for their own fade to complete, not for the nominal duration.
 		pthread_mutex_lock(&led_lock);
 		led_done_seq = seen;
 		pthread_cond_broadcast(&led_done_cond);
@@ -362,19 +501,24 @@ static void *led_worker(void *arg) {
 	return NULL;
 }
 
-static void start_worker(void) {
-	if (led_thread_started) {
-		return;
-	}
+static bool start_worker(void) {
+	pthread_condattr_t clock_attr;
+	pthread_condattr_init(&clock_attr);
+	if (pthread_condattr_setclock(&clock_attr, CLOCK_MONOTONIC) == 0) led_clock = CLOCK_MONOTONIC;
+	int error = pthread_cond_init(&led_cond, &clock_attr);
+	pthread_condattr_destroy(&clock_attr);
+	if (error != 0) return false;
+
 	pthread_attr_t attr;
 	pthread_attr_init(&attr);
 	pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
-	if (pthread_create(&led_thread, &attr, led_worker, NULL) == 0) {
-		led_thread_started = true;
-	} else {
-		fprintf(stderr, "led: could not start the effect thread\n");
-	}
+	error = pthread_create(&led_thread, &attr, led_worker, NULL);
 	pthread_attr_destroy(&attr);
+	if (error != 0) {
+		fprintf(stderr, "led: could not start the effect thread\n");
+		pthread_cond_destroy(&led_cond);
+	}
+	return error == 0;
 }
 
 // --- state -> output -------------------------------------------------------
@@ -400,6 +544,7 @@ static led_state_t rate_state(int sample_rate, bool dsd) {
 static int state_pattern(led_state_t s) {
 	switch (s) {
 	case LS_OFF:
+	case LS_STEALTH:
 		return PATTERN_OFF;
 	case LS_IDLE:
 		return PATTERN_IDLE_AQUA;
@@ -435,6 +580,7 @@ static void build_render(led_state_t s, led_render_t *out) {
 	led_mode_t mode = LM_STEADY;
 	switch (s) {
 	case LS_OFF:
+	case LS_STEALTH:
 		mode = LM_OFF;
 		break;
 	case LS_IDLE:
@@ -481,33 +627,43 @@ static void build_render(led_state_t s, led_render_t *out) {
 	out->period = 0x1E; // the stock charging pulse
 	out->duty = 0x7D;
 	out->fade = 0xBB;
-	out->transition_ms = s_transition_ms;
+	out->transition_ms = s == LS_STEALTH ? 0 : s_transition_ms;
+	out->effect = LED_VISUALIZER_NONE;
+	out->allow_notices = false;
 }
 
 // Renders a state to whichever output is available: the direct controller, the
 // driver's pattern node, or the R1's plain blue LED. Cheap to call repeatedly:
 // it only writes when the state changes.
-static void render_state(led_state_t state) {
-	if ((int)state == current_state) {
+static void render_state(led_state_t state, led_visualizer_style_t effect, bool allow_notices) {
+	bool redraw = (int)state != current_state || effect != current_effect;
+	if (!redraw && allow_notices == current_notices) {
 		return;
 	}
 	if (direct_mode) {
 		led_render_t t;
 		build_render(state, &t);
-		led_post(&t);
+		t.effect = effect;
+		t.allow_notices = allow_notices;
+		if (effect != current_effect) {
+			visualizer_enable(VISUALIZER_STATUS_LED_BASS, effect == LED_VISUALIZER_BASS_PULSE);
+			visualizer_enable(VISUALIZER_STATUS_LED_ENERGY, effect == LED_VISUALIZER_ENERGY_GLOW);
+		}
+		led_post(&t, redraw);
 	} else if (have_pattern_node) {
 		char buf[16];
 		snprintf(buf, sizeof(buf), "%d", state_pattern(state));
 		write_str(PATTERN_NODE, buf);
 	} else if (have_blue_node) {
-		// On the R1 the pattern only decides whether the blue LED is lit: off
-		// and the charging red leave it dark, every colour becomes blue.
-		bool blue = state != LS_OFF && state != LS_CHARGING;
+		// On the R1 every lit colour except charging becomes blue.
+		bool blue = state != LS_OFF && state != LS_STEALTH && state != LS_CHARGING;
 		write_str(BLUE_BRIGHTNESS_NODE, blue ? BLUE_ON : "0");
 	} else {
 		return;
 	}
 	current_state = state;
+	current_effect = effect;
+	current_notices = allow_notices;
 }
 
 // When the "off in standby" countdown starts: the latest of the screen going
@@ -522,7 +678,7 @@ static void apply(void) {
 	// takes the battery being full, or held at its limit, out of it, and hands
 	// this a settled answer rather than a reading that is still wobbling. See
 	// led.h.
-	bool charging_now = s_charging;
+	bool charging_now = s_charging && !s_stealth && !s_suspended;
 
 	// The separate red classdev: the R1's red LED. Breathing while a charge goes
 	// in, released otherwise. The R3 Pro II has no such node, and its charging
@@ -531,10 +687,18 @@ static void apply(void) {
 	if (have_red_node && want_red != red_trigger_state) {
 		red_trigger_state = want_red;
 		write_str(RED_TRIGGER_NODE, charging_now ? "breathing" : "none");
+		if (!charging_now) write_str(RED_BRIGHTNESS_NODE, "0");
 	}
 
+	bool smart = direct_mode && s_visualizer && s_led_enabled && !s_stealth && !s_suspended &&
+				 !charging_now && !s_on_charger;
+	led_visualizer_style_t effect = LED_VISUALIZER_NONE;
 	led_state_t state;
-	if (!s_led_enabled) {
+	if (s_stealth) {
+		state = LS_STEALTH;
+	} else if (s_suspended) {
+		state = LS_OFF;
+	} else if (!s_led_enabled) {
 		// The master switch is off: the LED stays dark, except that a charge in
 		// progress still shows -- a device that looks dead while it is charging
 		// is worse than a lit LED.
@@ -553,6 +717,8 @@ static void apply(void) {
 		// whatever the sample rate: it says what is being listened to, not how it
 		// is sampled.
 		state = s_podcast ? LS_PODCAST : rate_state(s_rate, s_dsd);
+		// DoP is not PCM and there is no PCM feed for the USB DAC mode below.
+		if (smart && state != LS_DSD && state != LS_PODCAST) effect = s_visualizer_style;
 	} else if (s_dac_streaming && s_dac_rate > 0) {
 		// In DAC mode nothing plays through audio.c, so s_playing is false and
 		// the LED went dark twenty seconds after the screen did -- with the
@@ -595,71 +761,63 @@ static void apply(void) {
 	} else {
 		state = LS_IDLE;
 	}
-	render_state(state);
+	render_state(state, effect, smart);
+}
+
+static led_visualizer_style_t normalize_style(long style) {
+	return style == LED_VISUALIZER_ENERGY_GLOW ? LED_VISUALIZER_ENERGY_GLOW : LED_VISUALIZER_BASS_PULSE;
 }
 
 void led_init(void) {
+	static bool initialized;
+	if (initialized) {
+		return;
+	}
+	initialized = true;
+#ifndef HOST_BUILD
 	have_pattern_node = access(PATTERN_NODE, W_OK) == 0;
 	have_red_node = access(RED_TRIGGER_NODE, W_OK) == 0;
 	have_blue_node = !have_pattern_node && access(BLUE_BRIGHTNESS_NODE, W_OK) == 0;
+#endif
 
 	bool sgm = has_sgm31324();
 	if (!sgm && !have_red_node && !have_blue_node) {
-		return; // host build, or firmware without the LED module
+		return; // no supported LED
 	}
 
-	// The switches and the two effect controls, as they were left, so the very
-	// first render already honours them.
+	// Read every setting before posting the first target: a saved Stealth Mode
+	// never fades in so much as one step of aqua on its way to going dark.
 	s_led_enabled = config_get_bool("power", "led_on", true);
+	s_stealth = config_get_bool("power", "led_stealth", false);
+	s_visualizer = config_get_bool("power", "led_visualizer", false);
+	s_visualizer_style = normalize_style(config_get_int("power", "led_visualizer_style", LED_VISUALIZER_BASS_PULSE));
 	s_idle_off_enabled = config_get_bool("power", "led_off_standby", true);
+	led_set_transition_ms(config_get_int("power", "led_transition_ms", TRANSITION_DEFAULT_MS));
 	s_brightness = (int)config_get_int("power", "led_brightness", BRIGHTNESS_DEFAULT);
-	s_transition_ms = (int)config_get_int("power", "led_transition_ms", TRANSITION_DEFAULT_MS);
 
-	// On the SGM31324 (the V1 and the R3 Pro II) drive the controller directly
-	// -- that is what the fade-in below and the colour cross-fades need. The
-	// controller is free either because the firmware driver was never loaded (the
-	// packer disables it) or because led_i2c_init() unloads it. The R1 has no
-	// such controller and keeps its pattern/blue path.
-	if (sgm) {
-		direct_mode = led_i2c_init();
-	}
-	if (direct_mode) {
-		start_worker();
+	if (sgm && led_i2c_init()) {
+		direct_mode = start_worker();
+		if (!direct_mode && s_stealth) led_i2c_off();
 	}
 
 	const char *mode = direct_mode ? "direct i2c"
-					   : have_pattern_node ? "pattern node"
-					   : have_blue_node	 ? "blue pwm"
-										 : "unavailable";
+							   : have_pattern_node ? "pattern node"
+							   : have_blue_node	 ? "blue pwm"
+											 : "unavailable";
 	fprintf(stderr, "led: %s, red trigger %s, blue %s\n", mode, have_red_node ? "ok" : "missing",
 			have_blue_node ? "ok" : "missing");
 
 	s_last_playing = time(NULL); // the power-on colour holds for the first idle window
-
-	// Exactly the stock startup sequence: red trigger released, then the idle
-	// colour. On the direct path the worker starts from black, so this first
-	// render is a fade-in.
-	if (have_red_node) {
-		write_str(RED_TRIGGER_NODE, "none");
-		red_trigger_state = 0;
-	}
 	apply();
 }
 
-void led_set_charging(bool charging) {
-	s_charging = charging;
-	apply(); // cheap: both writes only happen on a change
-}
-
-void led_set_on_charger(bool present) {
-	if (present == s_on_charger) {
-		return;
+void led_set_charge_state(bool present, bool charging) {
+	s_charging = present && charging;
+	if (present != s_on_charger) {
+		s_on_charger = present;
+		// A cable going in or out gives the idle light a fresh standby window.
+		s_charger_since = time(NULL);
 	}
-	s_on_charger = present;
-	// A cable going in or out restarts the idle window, so the aqua gets its
-	// twenty seconds after an unplug instead of the LED going dark in the same
-	// instant as the cable leaves.
-	s_charger_since = time(NULL);
 	apply();
 }
 
@@ -705,6 +863,27 @@ void led_set_enabled(bool enabled) {
 	apply();
 }
 
+void led_set_stealth(bool enabled) {
+	s_stealth = enabled;
+	apply();
+}
+
+void led_set_visualizer(bool enabled) {
+	s_visualizer = enabled;
+	apply();
+}
+
+void led_set_visualizer_style(led_visualizer_style_t style) {
+	s_visualizer_style = normalize_style(style);
+	apply();
+}
+
+led_visualizer_style_t led_visualizer_style(void) { return s_visualizer_style; }
+
+void led_notify_low_battery(void) { post_notice(LN_LOW_BATTERY); }
+
+void led_notify_upload_complete(void) { post_notice(LN_UPLOAD_COMPLETE); }
+
 void led_set_idle_off(bool enabled) {
 	s_idle_off_enabled = enabled;
 	apply();
@@ -735,7 +914,7 @@ void led_set_brightness(int brightness) {
 		return;
 	}
 	s_brightness = brightness;
-	if (direct_mode) {
+	if (direct_mode && current_state != LS_STEALTH && current_state != LS_OFF) {
 		current_state = -1; // force a re-render at the new level
 		apply();
 	}
@@ -751,44 +930,22 @@ void led_set_transition_ms(int ms) {
 	s_transition_ms = ms;
 }
 
-bool led_effects_available(void) {
-	// The direct path is available once we own the controller, or -- before
-	// led_init() has run -- on a model whose LED is the SGM31324. The R1 has
-	// neither.
-	if (direct_mode) {
-		return true;
-	}
-	const sysinfo_model_t *model = sysinfo_model();
-	if (model) {
-		return model->sgm31324_led;
-	}
-	return access(PATTERN_NODE, F_OK) == 0;
-}
+bool led_effects_available(void) { return direct_mode; }
 
-// Posts a fade to black and waits for the worker to actually finish it, rather
-// than sleeping for the nominal duration: the I2C writes make a fade take a
-// little longer than its length in steps, and a fixed sleep cut the last of it
-// off -- the light snapped out instead of reaching black. Shared by the
-// power-off and the suspend paths, both of which want the light gone before the
-// power does.
 static void fade_out_and_wait(void) {
+	s_suspended = true;
+	apply();
 	if (!direct_mode) {
 		return;
 	}
 
 	pthread_mutex_lock(&led_lock);
-	memset(&led_target, 0, sizeof(led_target));
-	led_target.mode = LM_OFF;
-	led_target.transition_ms = s_transition_ms;
-	led_seq++;
 	unsigned want = led_seq;
-	pthread_cond_signal(&led_cond);
-
 	// A safety net, not the expected path: the longest fade is two seconds.
 	struct timespec deadline;
 	clock_gettime(CLOCK_REALTIME, &deadline);
 	deadline.tv_sec += 3;
-	while (led_done_seq < want) {
+	while (led_done_seq != want) {
 		if (pthread_cond_timedwait(&led_done_cond, &led_lock, &deadline) != 0) {
 			break;
 		}
@@ -801,12 +958,6 @@ void led_shutdown(void) { fade_out_and_wait(); }
 void led_suspend(void) { fade_out_and_wait(); }
 
 void led_resume(void) {
-	// The light was faded out for the sleep; bring the current state back, as a
-	// fade-in from black. Forcing the render is what does it -- the state itself
-	// has not changed, so render_state() would otherwise skip it.
-	if (!direct_mode) {
-		return;
-	}
-	current_state = -1;
+	s_suspended = false;
 	apply();
 }

@@ -15,7 +15,8 @@ lv_obj_t *wifisettings_screen;
 static bool hardware = true, mounted = true, listener, led, slow_poll;
 static wifi_state_t wifi = WIFI_STATE_OFF;
 static const char *ip_address = "192.168.100.250";
-static unsigned refreshes, abandon_calls;
+static unsigned refreshes, abandon_calls, upload_notices;
+static bool upload_complete;
 static bool (*guard)(void);
 static void (*confirmed)(void *);
 
@@ -51,7 +52,13 @@ bool wifitransfer_get_info(wifitransfer_info_t *out) {
 								.name = "http://sonix-transfer.local:4399", .code = "W7X9ABCD"};
 	return true;
 }
-void wifitransfer_release_card(void) { listener = false; }
+bool wifitransfer_take_upload_complete(void) {
+	assert(listener);
+	bool ready = upload_complete;
+	upload_complete = false;
+	return ready;
+}
+void wifitransfer_release_card(void) { listener = upload_complete = false; }
 void wifi_get_status(wifi_status_t *out) { *out = (wifi_status_t){.state = wifi}; }
 bool wifi_interface_address(char *out, size_t size) {
 	if (!ip_address) return false;
@@ -60,6 +67,7 @@ bool wifi_interface_address(char *out, size_t size) {
 }
 void wifi_set_status_poll_slow(bool slow) { slow_poll = slow; }
 void led_set_wifi_transfer(bool on) { led = on; }
+void led_notify_upload_complete(void) { upload_notices++; }
 bool gui_card_available(void) { return mounted; }
 const char *storage_sd_root(void) { return "/test-card"; }
 void storage_card_files_recheck(void) { assert(!listener); }
@@ -149,6 +157,12 @@ int main(int argc, char **argv) {
 	on_glass(url_label, &cfg);
 	on_glass(code_label, &cfg);
 	assert(lv_obj_get_width(qr_box) - lv_obj_get_width(qr) == 2 * QR_QUIET);
+
+	assert(upload_notices == 0);
+	upload_complete = true;
+	poll_cb(NULL);
+	poll_cb(NULL);
+	assert(upload_notices == 1 && listener && led);
 
 	// A transient association poll does not unpair an otherwise live session.
 	wifi = WIFI_STATE_ON;

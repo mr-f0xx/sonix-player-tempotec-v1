@@ -856,25 +856,22 @@ static void jack_timer_cb(lv_timer_t *timer) {
 		settled = candidate;
 	}
 
-	if (percent == last_battery_percent && settled == last_battery_charging) {
-		return;
+	if (percent != last_battery_percent || settled != last_battery_charging) {
+		last_battery_percent = percent;
+		last_battery_charging = settled;
+		update_battery_indicator(percent, settled == 2);
+		led_set_charge_state(settled != 0, settled == 2);
 	}
-	last_battery_percent = percent;
-	last_battery_charging = settled;
 
-	update_battery_indicator(percent, settled == 2);
-
-	// And the LED, which says the same thing in the dark, from the same settled
-	// answer: the pattern is never rewritten for a reading that is about to
-	// change back. The cable goes with it -- a charge that has finished still
-	// leaves the player on a charger, and that is what keeps the LED off the
-	// darken-in-standby option.
-	led_set_charging(settled == 2);
-	led_set_on_charger(settled != 0);
+	// The status LED needs to follow PCM changes even outside Now Playing and
+	// when the battery has not changed. Reuse the same device-state snapshot.
+	bool playing = state.status == AUDIO_STATUS_PLAYING;
+	led_update_playback(playing, state.stream_sample_rate,
+						playing && !state.live && podcastcache_is_episode(state.current_file),
+						playing && !state.live && audio_get_dsd_multiple() > 0);
 }
 
-// The periodic poll: battery, volume persistence, playback glyph and the
-// status LED all ride this one timer.
+// The slower poll: volume persistence, playback glyph and special LED modes.
 static void timer_update_cb(lv_timer_t *timer) {
 	(void)timer;
 
@@ -894,18 +891,8 @@ static void timer_update_cb(lv_timer_t *timer) {
 	topbar_refresh_volume((int)state.volume);
 	refresh_play_icon(&state);
 
-	// The battery and the charge LED ride jack_timer instead, which runs often
-	// enough for plugging the charger in to show at once. What is on this poll
-	// is what nobody is standing over -- the playback colour, Wi-Fi transfer,
-	// DAC mode.
-	led_update_playback(state.status == AUDIO_STATUS_PLAYING, state.stream_sample_rate,
-						!state.live && podcastcache_is_episode(state.current_file),
-						!state.live && audio_get_dsd_multiple() > 0);
-	// Wi-Fi transfer takes the same route: its pattern stays lit, screen off
-	// included, for as long as the transfer is on. The switch rather than the
-	// process, because this poll is five seconds apart and the server takes a
-	// moment to come up and to die -- the light would lag the toggle by most of
-	// a poll in both directions.
+	// The page sets the Wi-Fi transfer light immediately; this poll also catches
+	// the server being stopped by card removal / USB export.
 	led_set_wifi_transfer(wifitransfer_get_enabled());
 
 	// And Bluetooth receiver mode, which like the transfer is a thing the

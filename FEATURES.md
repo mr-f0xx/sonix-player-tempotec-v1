@@ -550,6 +550,19 @@ a self-signed certificate), and HLS.
   power-on, cross-fades between colours, breathes red while charging, turns
   green when the charge is done and fades out on the way down. Brightness (1-5)
   and transition speed (20 ms to 2 s) are set under Power.
+- **Power → Smart LED** (off by default) adds a choice of playback effects.
+  **Bass Pulse** (default) briefly reaches the selected brightness on bass
+  attacks. **Energy Glow** rises and falls smoothly with overall PCM level.
+  The style is remembered and both keep the sample-rate colour and brightness
+  limit: warm yellow through 48 kHz, aqua above 48 through 192 kHz, and orange
+  above 192 kHz. DSD remains steady white. Three red blinks accompany the
+  usual 5% battery warning, and two green blinks confirm successful Wi-Fi
+  Transfer uploads once the browser's uploads settle. Charging still gets
+  its normal indication.
+- **Power → Stealth mode** (off by default) turns the status light off
+  immediately, including while charging. The setting survives reboot; turning
+  it back off restores the previous LED settings. It does not silence the
+  on-screen battery warning or change the automatic low-battery shutdown.
 - **Date and time** - first-run setup guides you to connect to Wi-Fi, then sets
   the clock automatically (including the time zone, estimated from the internet
   connection, and daylight-saving rules) or lets you set it by hand; the clock

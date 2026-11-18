@@ -26,6 +26,8 @@ bool wifitransfer_available(void); // off in host emulators
 wifitransfer_result_t wifitransfer_start(uint32_t accent_rgb);
 bool wifitransfer_get_enabled(void);
 bool wifitransfer_running(void);
+// Consumes a completion from the live session; never fires on switch-off.
+bool wifitransfer_take_upload_complete(void);
 // A consistent snapshot for the displayed URL, code and QR, only while live.
 bool wifitransfer_get_info(wifitransfer_info_t *out);
 

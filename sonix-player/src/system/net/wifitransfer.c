@@ -9,6 +9,7 @@ wifitransfer_result_t wifitransfer_start(uint32_t accent_rgb) {
 }
 bool wifitransfer_get_enabled(void) { return false; }
 bool wifitransfer_running(void) { return false; }
+bool wifitransfer_take_upload_complete(void) { return false; }
 bool wifitransfer_get_info(wifitransfer_info_t *out) { (void)out; return false; }
 void wifitransfer_release_card(void) {}
 #else
@@ -113,6 +114,13 @@ bool wifitransfer_get_info(wifitransfer_info_t *out) {
 	if (live) *out = info;
 	pthread_mutex_unlock(&lock);
 	return live;
+}
+
+bool wifitransfer_take_upload_complete(void) {
+	pthread_mutex_lock(&lock);
+	bool complete = transfer_http_take_upload_complete(server);
+	pthread_mutex_unlock(&lock);
+	return complete;
 }
 
 static void stop_locked(void) {
