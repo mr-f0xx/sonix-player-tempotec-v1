@@ -54,7 +54,6 @@
 #include "src/system/library/library.h"
 #include "src/system/library/lrclib.h"
 #include "src/system/library/lyrics.h"
-#include "src/system/device/led.h"
 #include "src/system/playback/playlist.h"
 #include "src/system/streaming/podcast.h"
 #include "src/system/streaming/podcastcache.h"
@@ -6323,13 +6322,6 @@ static void update_progress(void) {
 	apply_audiobook_mode(!state.live && audiobook_is_playing(),
 						 !state.live && podcastcache_is_episode(state.current_file));
 	update_format_label(&state); // the rate/bits settle shortly after the start
-
-	// The status LED follows playback promptly from here (the battery poll
-	// only comes round once a minute). Its PCM colour follows the sample-rate
-	// band; podcasts and DSD retain their dedicated colours.
-	led_update_playback(state.status == AUDIO_STATUS_PLAYING, state.stream_sample_rate,
-						!state.live && podcastcache_is_episode(state.current_file),
-						!state.live && audio_get_dsd_multiple() > 0);
 
 	// Where the book got to. Not the same thing as "remember track" below and
 	// not subject to its switch: that setting is about which track comes back

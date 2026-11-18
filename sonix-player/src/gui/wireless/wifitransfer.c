@@ -121,6 +121,7 @@ static void refresh(void) {
 	if (available && connected) lv_obj_remove_state(toggle, LV_STATE_DISABLED);
 	else lv_obj_add_state(toggle, LV_STATE_DISABLED);
 	if (page_active) {
+		if (wifitransfer_take_upload_complete()) led_notify_upload_complete();
 		show_session(&session);
 		return;
 	}

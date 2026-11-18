@@ -2462,7 +2462,8 @@ static void refresh_audio_buttons(void) {
 	circle_button_set_on(replaygain_btn, replaygain_mode() != REPLAYGAIN_OFF);
 	circle_button_set_on(mono_btn, mono_get_enabled());
 	circle_button_set_on(keylock_btn, config_get_bool("power", "lock_keys_screen_off", false));
-	circle_button_set_on(led_btn, config_get_bool("power", "led_on", true));
+	circle_button_set_on(led_btn, config_get_bool("power", "led_on", true) &&
+									 !config_get_bool("power", "led_stealth", false));
 	circle_button_set_on(rotate_btn, display_get_rotated());
 	// Screen off and the power menu are not switches: they are never lit.
 }
@@ -3104,6 +3105,11 @@ static void led_clicked_cb(lv_event_t *e) {
 	(void)e;
 	if (long_press_consumed) {
 		long_press_consumed = false;
+		return;
+	}
+	if (config_get_bool("power", "led_stealth", false)) {
+		// Keep the pre-Stealth preference. Long-press still opens Power.
+		gui_notify_popup("power_led_stealth");
 		return;
 	}
 	config_set_bool("power", "led_on", !config_get_bool("power", "led_on", true));

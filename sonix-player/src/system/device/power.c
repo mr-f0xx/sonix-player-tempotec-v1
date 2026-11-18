@@ -2180,6 +2180,7 @@ static void battery_guard_tick(void) {
 			power_screen_on();
 			g_low_battery_woke_at = lv_tick_get();
 		}
+		led_notify_low_battery();
 		gui_notify_battery_low();
 		return;
 	}

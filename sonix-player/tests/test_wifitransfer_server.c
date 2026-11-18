@@ -63,6 +63,8 @@ int main(int argc, char **argv) {
 			wifitransfer_info_t info;
 			assert(!wifitransfer_get_info(&info) && !wifitransfer_get_enabled() && !wifitransfer_running() && !mdns_live);
 			puts("STOPPED");
+		} else if (!strcmp(cmd, "completion\n")) {
+			printf("COMPLETION %d\n", wifitransfer_take_upload_complete());
 		} else if (!strcmp(cmd, "no-card\n")) {
 			card_mounted = false;
 			assert(wifitransfer_start(0) == WIFITRANSFER_NO_CARD && !wifitransfer_get_enabled());

@@ -2198,6 +2198,11 @@ int main(int argc, char **argv) {
 	// display, the fonts and the language are already up; everything below this
 	// point is what the hold releases.
 	if (chargemode_wanted()) {
+		// The charger-only screen normally leaves the status light alone. If
+		// blackout was saved, clear any LED left on by the previous boot too.
+		if (config_get_bool("power", "led_stealth", false)) {
+			led_init();
+		}
 		chargescreen_run(disp, &battery_cfg);
 	}
 	// Whatever came of that -- a hold on the power key, or a boot with no
@@ -2428,6 +2433,8 @@ int main(int argc, char **argv) {
 	// they are built, and read before this they all say off, 0 minutes.
 	sleeptimer_init();
 
+	// The Power page offers RGB effects only after the controller is acquired.
+	led_init();
 	gui_init(&gui_cfg);
 
 	// "Rotate screen", as it was left. After gui_init so there are screens to
@@ -2511,9 +2518,6 @@ int main(int argc, char **argv) {
 	// the transport commands it receives are sent onto the GUI thread; it does
 	// nothing at all until Bluetooth is switched on.
 	btplayer_init();
-
-	// The status LED: aqua from power-on, exactly like the stock firmware.
-	led_init();
 
 #ifndef HOST_BUILD
 	// USB mass storage: hand the card to a PC when one is attached, exactly

@@ -7,6 +7,45 @@ and the player just writes a pattern number. Unload the module and the
 controller is free for userspace, where `i2cset` can program the registers
 directly.
 
+## Smart LED and Stealth mode
+
+In **Settings → Power**, turn on **Smart LED** to add two effects to the
+usual status light:
+
+- **Music:** the light brightens gently on bass transients in PCM from the
+  player, including when the screen is off. The selected brightness is the
+  peak, not a multiplier. At brightness 1 there is no lower lit step to pulse
+  from. The colour map is unchanged: yellow at ≤48 kHz (including 44.1 kHz),
+  aqua above 48 through 192 kHz, orange above 192 kHz, and steady white for
+  DSD. USB DAC and Bluetooth receiver indicators remain unchanged.
+- **Events:** three short red blinks accompany the normal low-battery warning
+  at 5%. Two green blinks confirm successful incoming Wi-Fi Transfer uploads.
+  The browser sends folders one file at a time, so confirmation waits for a
+  second without another upload. Failed or cancelled uploads don't signal
+  success, nor does switching off the server. After either pattern, the light
+  returns to the current state. Charging and full-charge indications take
+  priority over these effects.
+
+**Stealth mode** takes priority over all of the above, including charging and
+all notifications. It cuts directly to black rather than waiting for the
+configured fade. It preserves the **LED on** preference (which on its own
+still allows charging red), and remains in effect after suspend and reboot.
+It does not change battery safeguards or the screensaver visualizer.
+
+Both settings are off on an existing configuration unless explicitly enabled.
+Smart LED needs the direct SGM31324 controller; the stock driver pattern
+fallback still supports the normal colours and Stealth mode. The native web
+emulator models the RGB effects, but its Wi-Fi Transfer service is disabled.
+
+**On-device check:** Play 44.1 kHz and 96 kHz PCM with Smart LED enabled, check
+that bass pulses do not change the colour or disturb audio with the screen on
+or off, and confirm DSD stays steady white. Try an album upload followed by
+an aborted transfer, and watch for the low-battery warning on battery power.
+Switch Stealth on during charging, then suspend/wake and reboot: the light
+should stay dark until Stealth is turned off.
+
+## Register recipes
+
 The routines below do exactly that, from a shell on the device:
 
 - **Static colour** (`led`) - a single steady RGB level.

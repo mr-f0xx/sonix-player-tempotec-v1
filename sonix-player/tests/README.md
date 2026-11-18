@@ -865,6 +865,22 @@ repeated switching, non-interactive badges and moving between sleeves.
 V1 dual-slider layout using LVGL hit-testing, both gesture positions, page
 counts, DAC status, persistence, volume limits and separate slider callbacks.
 
+## Smart status LED
+
+`make -C sonix-player/tests led-rate led-telemetry` checks the stock
+sample-rate colour bands and runs the real effect worker with a recording I²C
+backend and in-memory sysfs. It covers saved Stealth at boot (no lit frame),
+blackout while charging or blinking, suspend/resume, both fallback LED paths,
+and the red/green notice counts, priority and return to the latest state.
+Synthetic bass and treble exercise the real PCM tap, including stale samples
+and independent screensaver/LED capture. No physical LED or audio is needed.
+
+`make -C sonix-player/tests wifitransfer wifitransfer-ui` also checks that a real
+upload is confirmed only after publication and a quiet period, that failures,
+aborts and restarts don't signal success, and that the page consumes the
+notification exactly once. The I²C timing, brightness and listening experience
+still need the on-device check in [the LED guide](../../docs/sgm31324-led-control.md).
+
 ## Display power and maximum brightness
 
 `make -C sonix-player/tests power-display` uses the LVGL checkout above. It

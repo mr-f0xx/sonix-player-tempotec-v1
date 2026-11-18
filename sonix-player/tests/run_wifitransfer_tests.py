@@ -209,6 +209,38 @@ class TransferTests(unittest.TestCase):
             self.assertEqual(pending.recv(1), b"")
         self.assertEqual(list(self.root.iterdir()), [])
 
+    def test_upload_completion_is_coalesced_and_consumed_once(self):
+        cookie = self.pair()
+
+        def completed():
+            return self.command("completion", "COMPLETION ") == "COMPLETION 1"
+
+        self.assertFalse(completed())  # serving/pairing is not a completion
+        self.action("PUT", "upload", cookie, 201, b"track 1", path="/01.flac")
+        self.assertFalse(completed())
+        self.action("PUT", "upload", cookie, 201, b"track 2", path="/02.flac")
+        self.assertFalse(completed())
+        time.sleep(1.1)
+        self.assertTrue(completed())
+        self.assertFalse(completed())
+
+        # No confirmation for a conflict, and a new in-progress upload
+        # replaces the pending event instead of flashing mid-transfer.
+        self.action("PUT", "upload", cookie, 409, b"conflict", path="/02.flac")
+        self.action("PUT", "upload", cookie, 201, b"next", path="/03.flac")
+        pending = self.partial_upload(cookie, "/incomplete.flac")
+        time.sleep(1.1)
+        self.assertFalse(completed())
+        pending.close()
+        self.action("GET", "list", cookie, 200, path="/")
+        time.sleep(1.1)
+        self.assertFalse(completed())
+
+        self.action("PUT", "upload", cookie, 201, b"last", path="/04.flac")
+        self.command("stop", "STOPPED")
+        self.start_session()
+        self.assertFalse(completed())
+
     def test_card_fd_is_pinned_and_idle_browser_does_not_block(self):
         original = self.root.parent / "original-card"
         self.root.rename(original)

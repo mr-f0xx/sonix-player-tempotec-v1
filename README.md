@@ -460,7 +460,7 @@ See [setup, security, quality and validation notes](docs/jellyfin.md).
 - `docs/jellyfin.md` — Jellyfin setup, Quick Connect, token-only auth, Direct Play/transcoding, playback reporting and SD cache.
 - `docs/soundcloud.md` — SoundCloud setup, anonymous/profile/OAuth modes, quality tiers, HLS/fMP4 pipeline and SD cache.
 - `docs/subsonic.md` — Subsonic/Gonic setup, RAM transport and hardware validation.
-- `docs/sgm31324-led-control.md` — driving the RGB status LED directly over I²C.
+- `docs/sgm31324-led-control.md` — Smart LED, Stealth mode, and RGB control over I²C.
 - `sonix-player/tools/sonix-bugreport.sh` — one-file diagnostic bundle, run on the device over ADB.
 - `FEATURES.md` — detailed feature notes.
 - `PATCHES.md` — device-porting and implementation notes.
