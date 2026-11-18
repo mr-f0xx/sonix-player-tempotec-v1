@@ -29,7 +29,7 @@ int hiresbadge_header_width(const hiresbadge_view_t *view, int chevron_height);
 
 // Move the same badge between a sleeve corner and the player header.
 void hiresbadge_place_on_art(hiresbadge_view_t *view, lv_obj_t *art, bool left, int inset);
-void hiresbadge_place_in_header(hiresbadge_view_t *view, lv_obj_t *sheet, int inset, int centre_y,
-							   int chevron_height);
+void hiresbadge_place_in_header(hiresbadge_view_t *view, lv_obj_t *sheet, bool left, int inset,
+							   int centre_y, int chevron_height);
 
 #endif /* HIRESBADGEVIEW_H */

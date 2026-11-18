@@ -30,9 +30,8 @@ void hiresbadge_build(hiresbadge_view_t *view, lv_obj_t *parent) {
 	lv_obj_set_size(view->box, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
 	lv_obj_set_scrollable(view->box, false);
 	lv_obj_set_clickable(view->box, false);
-	// The right edge and vertical centre stay fixed when the header scales
+	// The outer edge and vertical centre stay fixed when the header scales
 	// the badge. On artwork the transform is reset to native size.
-	lv_obj_set_style_transform_pivot_x(view->box, lv_pct(100), 0);
 	lv_obj_set_style_transform_pivot_y(view->box, lv_pct(50), 0);
 	lv_obj_add_event_cb(view->box, size_changed_cb, LV_EVENT_SIZE_CHANGED, view);
 
@@ -94,12 +93,16 @@ void hiresbadge_place_on_art(hiresbadge_view_t *view, lv_obj_t *art, bool left, 
 	place(view, art, left, inset, inset, 0);
 }
 
-void hiresbadge_place_in_header(hiresbadge_view_t *view, lv_obj_t *sheet, int inset, int centre_y,
-							   int chevron_height) {
+void hiresbadge_place_in_header(hiresbadge_view_t *view, lv_obj_t *sheet, bool left, int inset,
+							   int centre_y, int chevron_height) {
 	if (view->header_height != chevron_height) {
 		view->header_height = chevron_height;
 		fit_badge(view);
 	}
+	int pivot_x = left ? 0 : lv_pct(100);
+	if (lv_obj_get_style_transform_pivot_x(view->box, 0) != pivot_x) {
+		lv_obj_set_style_transform_pivot_x(view->box, pivot_x, 0);
+	}
 	// Anchor the centre even when the design or text size changes.
-	place(view, sheet, false, inset, centre_y, lv_pct(-50));
+	place(view, sheet, left, inset, centre_y, lv_pct(-50));
 }

@@ -91,7 +91,7 @@ static lv_obj_t *song_title_label;
 static lv_obj_t *song_artist_label;
 static hiresbadge_view_t hires_badge;
 static hiresbadge_style_t hires_style = HIRESBADGE_TWO_LINE;
-static bool hires_badge_in_header; // enabled and qualified; lyrics can temporarily hide it
+static player_hires_position_t hires_header_pos; // Off unless enabled and qualified; lyrics can temporarily hide it
 static lv_obj_t *format_label; // "16/44.1 FLAC", right of the artist line
 static lv_obj_t *fav_btn_obj;  // the button it sits on, hidden on a book
 static lv_obj_t *controls_row; // transport row: where the ellipsis lives, and the favourite button in Studio
@@ -2408,29 +2408,42 @@ static void lyrics_star_to_head(bool up) {
 // ellipsis where an arrangement keeps one up there, in the corner otherwise.
 #define LYRICS_FIND_BTN bp_pick(COMPACT_CORNER_BTN, 56)
 
-// Alternative (Studio) already has an ellipsis in the right-hand slot. Keep
-// it next to the badge, and give the title only the room left between them
-// and the chevron. Limit the width without changing lyrics' own width setting.
+// Alternative (Studio) already has an ellipsis in the right-hand slot. Move
+// it inboard of whichever mark takes that corner. Limit the names to the room
+// left between the controls without changing lyrics' own width setting.
 static void studio_hires_fit(void) {
 	if (!studio_up) return;
-	int extra = 0;
-	if (hires_badge_in_header && !lv_obj_is_hidden(hires_badge.box)) {
+	int extra_left = 0, extra_right = 0;
+	if (hires_header_pos != PLAYER_HIRES_OFF && !lv_obj_is_hidden(hires_badge.box)) {
 		lv_area_t ink = back_btn_player_ink_bounds();
-		extra = ink.x1 - STUDIO_INFO_MARGIN + hiresbadge_header_width(&hires_badge, lv_area_get_height(&ink)) +
-			COMPACT_CORNER_BTN_EXT_CLICK;
+		int badge_room = ink.x1 - STUDIO_INFO_MARGIN + hiresbadge_header_width(&hires_badge, lv_area_get_height(&ink));
+		if (hires_header_pos == PLAYER_HIRES_LEFT) {
+			extra_left = LV_MAX(0, badge_room + bp_header_button_gap() - STUDIO_HEAD_SIDE_ROOM);
+			extra_right = bp_header_button_size() + COMPACT_CORNER_BTN_EXT_CLICK;
+		} else {
+			extra_right = badge_room + COMPACT_CORNER_BTN_EXT_CLICK;
+		}
 	}
 	int names_w = studio_box_w - 2 * (STUDIO_INFO_MARGIN + STUDIO_HEAD_SIDE_ROOM);
+	int extra = extra_left + extra_right;
 	int max_w = extra ? LV_MAX(1, names_w - extra) : LV_COORD_MAX;
 	if (lv_obj_get_style_max_width(studio_text_col, 0) != max_w) {
 		lv_obj_set_style_max_width(studio_text_col, max_w, 0);
 	}
-	lv_obj_set_x(studio_text_col, -extra / 2);
-	lv_obj_set_x(more_btn_obj, -extra);
+	lv_obj_set_x(studio_text_col, (extra_left - extra_right) / 2);
+	lv_obj_set_x(more_btn_obj, -extra_right);
 }
 
 static void hires_size_changed_cb(lv_event_t *e) {
 	(void)e;
-	if (hires_badge_in_header) studio_hires_fit();
+	if (hires_header_pos != PLAYER_HIRES_OFF) studio_hires_fit();
+}
+
+static void hires_present(bool show, bool back_right) {
+	back_btn_player_right_set(back_right);
+	lv_obj_set_hidden(hires_badge.box, !show);
+	if (show) lv_obj_move_foreground(hires_badge.box);
+	studio_hires_fit();
 }
 
 // The names at the top give up the button's width on both sides, so a long
@@ -2500,11 +2513,10 @@ static void lyrics_progress_apply(int32_t progress) {
 	bool rest = progress == 0;
 	bool sleeve_changed = rest != (lyrics_progress == 0);
 	lyrics_progress = progress;
-	// The sleeve badge used to slide away with the artwork. Its header
-	// counterpart must also make way for the lyrics' search button and star.
-	if (sleeve_changed && hires_badge_in_header) {
-		lv_obj_set_hidden(hires_badge.box, !rest);
-		studio_hires_fit();
+	// The header badge makes way for the lyrics' search button and star.
+	// While it is hidden, put the chevron back in the lyrics' left slot.
+	if (sleeve_changed && hires_header_pos != PLAYER_HIRES_OFF) {
+		hires_present(rest, rest && hires_header_pos == PLAYER_HIRES_LEFT);
 	}
 	lyrics_find_sync(progress == LYRICS_FULL);
 	int32_t travel = cover_box_w - lyrics_pane_x;
@@ -5912,17 +5924,14 @@ static void update_hires_badge(const device_state_t *state) {
 	}
 	bool source = state->live || current_qobuz_track() != 0 || current_tidal_track() != 0;
 	// The source mark can push a visible right-hand badge into the left corner.
-	bool back_right = layout_sticker_now ||
-		hiresbadge_back_right(layout == PLAYER_LAYOUT_IMMERSIVE || layout == PLAYER_LAYOUT_POSTER,
-			hi, pos == PLAYER_HIRES_LEFT, pos == PLAYER_HIRES_RIGHT, source);
-	back_btn_player_right_set(back_right);
-	// The source marks normally occupy the right corner too. Move them below
-	// the button while it is there on an edge-to-edge sleeve, and restore them
-	// when it returns left; Sticker's inset square sits clear of the chevron.
+	bool edge_back_right = hiresbadge_back_right(layout == PLAYER_LAYOUT_IMMERSIVE || layout == PLAYER_LAYOUT_POSTER,
+		hi, pos == PLAYER_HIRES_LEFT, pos == PLAYER_HIRES_RIGHT, source);
+	bool back_right = layout_sticker_now || edge_back_right;
+	// Move source marks below the right-hand chevron on edge-to-edge sleeves.
+	// On inset sleeves they stay on the art when the header badge swaps sides.
 	if (!layout_studio_now) {
 		lv_obj_t *const marks[] = {live_badge, qobuz_badge, tidal_badge, podcast_badge, soundcloud_badge, jellyfin_badge};
-		int y = (back_right && !layout_sticker_now)
-			? (back_btn_centre_y() - player_content_top()) + bp_header_button_size() / 2 + 4
+		int y = edge_back_right ? (back_btn_centre_y() - player_content_top()) + bp_header_button_size() / 2 + 4
 			: BADGE_INSET;
 		for (size_t i = 0; i < sizeof(marks) / sizeof(marks[0]); i++) {
 			if (marks[i] && lv_obj_get_parent(marks[i]) == cover_art_group)
@@ -5930,16 +5939,19 @@ static void update_hires_badge(const device_state_t *state) {
 		}
 	}
 	bool show = hi && pos != PLAYER_HIRES_OFF && layout != PLAYER_LAYOUT_ALBUM_ART_MAX && layout != PLAYER_LAYOUT_STICKER;
-	// With Vinyl art, either enabled position uses the header's right corner.
-	// Keep the saved corner for when the user goes back to another shape.
-	hires_badge_in_header = show && art_shape == PLAYER_ART_VINYL &&
+	// Vinyl art uses the saved corner in the header instead of on the sleeve.
+	bool use_header = show && art_shape == PLAYER_ART_VINYL &&
 		(layout == PLAYER_LAYOUT_STANDARD || layout == PLAYER_LAYOUT_ALTERNATIVE ||
 		 layout == PLAYER_LAYOUT_STUDIO || layout == PLAYER_LAYOUT_VINYL);
-	if (hires_badge_in_header) {
+	hires_header_pos = use_header ? pos : PLAYER_HIRES_OFF;
+	if (use_header) {
 		lv_area_t ink = back_btn_player_ink_bounds();
 		int height = lv_area_get_height(&ink);
 		int centre_y = ink.y1 + height / 2 - player_content_top();
-		hiresbadge_place_in_header(&hires_badge, player_screen, ink.x1, centre_y, height);
+		bool left = pos == PLAYER_HIRES_LEFT;
+		hiresbadge_place_in_header(&hires_badge, player_screen, left, ink.x1, centre_y, height);
+		show = lyrics_progress == 0;
+		back_right = show && left;
 	} else if (show) {
 		// Studio draws a separate sleeve. On artwork, a source mark takes
 		// precedence in the right corner; use the left rather than stacking.
@@ -5947,10 +5959,7 @@ static void update_hires_badge(const device_state_t *state) {
 			? (lv_obj_is_hidden(studio_cover) ? studio_empty : studio_cover) : cover_art_group;
 		hiresbadge_place_on_art(&hires_badge, parent, pos == PLAYER_HIRES_LEFT || source, BADGE_INSET);
 	}
-	show = show && (!hires_badge_in_header || lyrics_progress == 0);
-	lv_obj_set_hidden(hires_badge.box, !show);
-	if (show) lv_obj_move_foreground(hires_badge.box);
-	studio_hires_fit();
+	hires_present(show, back_right);
 }
 
 // The format line, the way the stock player writes it: "16/44.1 FLAC".

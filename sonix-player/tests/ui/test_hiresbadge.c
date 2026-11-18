@@ -143,45 +143,54 @@ static void exercise_header(const lv_font_t *font, int status_h) {
 	int height = lv_area_get_height(&back_ink);
 	int target_height = height + 2;
 	int centre_y = back_ink.y1 + height / 2;
-	assert(height < lv_obj_get_height(back) && back_ink.x1 > 6);
+	int inset = back_ink.x1;
+	assert(height < lv_obj_get_height(back) && inset > 6);
 
 	font_ui_14 = *font;
 	hiresbadge_view_t view;
 	hiresbadge_build(&view, art);
-	hiresbadge_place_in_header(&view, sheet, back_ink.x1, centre_y - status_h, height);
+	hiresbadge_place_in_header(&view, sheet, false, inset, centre_y - status_h, height);
 	assert(lv_obj_is_hidden(view.box));
 	lv_obj_set_hidden(view.box, false);
-	// Designs resize in place and keep the same visible anchor.
+	// Keep the measured size and padding even when the same badge changes
+	// sides and the back button uses the other corner.
 	for (int style = 0; style < HIRESBADGE_STYLE_COUNT; style++) {
 		hiresbadge_apply(&view, (hiresbadge_style_t)style);
-		lv_obj_update_layout(screen);
-		assert(lv_obj_get_parent(view.box) == sheet);
-		shot = lv_snapshot_take(screen, LV_COLOR_FORMAT_XRGB8888);
-		assert(shot);
-		lv_area_t badge = header_ink(shot, 150, 239, status_h, status_h + 50);
-		assert(badge.x2 == 239 - back_ink.x1);
-		assert(lv_area_get_height(&badge) <= target_height);
-		assert(lv_area_get_height(&badge) < lv_obj_get_height(view.box));
-		int badge_centre = badge.y1 + lv_area_get_height(&badge) / 2;
-		assert(badge_centre >= centre_y - 1 && badge_centre <= centre_y + 1);
-		if (style == HIRESBADGE_LOGO) {
-			assert(badge.y1 == back_ink.y1 - 1 && badge.y2 == back_ink.y2 + 1);
-			assert(lv_area_get_width(&badge) == target_height);
-			assert(close_to(pixel_at(shot, badge.x1 + target_height / 2, badge.y1 + 1), 0xf8d17c, 14));
-			assert(close_to(pixel_at(shot, badge.x1 + 2, badge.y1 + target_height * 2 / 3), 0x000000, 14));
+		for (int side = 0; side < 2; side++) {
+			bool left = side == 0;
+			lv_obj_align(back, left ? LV_ALIGN_TOP_RIGHT : LV_ALIGN_TOP_LEFT, left ? -6 : 6, status_h + 10);
+			hiresbadge_place_in_header(&view, sheet, left, inset, centre_y - status_h, height);
+			lv_obj_update_layout(screen);
+			assert(lv_obj_get_parent(view.box) == sheet);
+			shot = lv_snapshot_take(screen, LV_COLOR_FORMAT_XRGB8888);
+			assert(shot);
+			back_ink = header_ink(shot, left ? 150 : 0, left ? 239 : 89, status_h, status_h + 50);
+			lv_area_t badge = header_ink(shot, left ? 0 : 150, left ? 89 : 239, status_h, status_h + 50);
+			assert((left ? badge.x1 : 239 - badge.x2) == inset);
+			assert((left ? 239 - back_ink.x2 : back_ink.x1) == inset);
+			assert(lv_area_get_height(&badge) <= target_height);
+			assert(lv_area_get_height(&badge) < lv_obj_get_height(view.box));
+			int badge_centre = badge.y1 + lv_area_get_height(&badge) / 2;
+			assert(badge_centre >= centre_y - 1 && badge_centre <= centre_y + 1);
+			if (style == HIRESBADGE_LOGO) {
+				assert(badge.y1 == back_ink.y1 - 1 && badge.y2 == back_ink.y2 + 1);
+				assert(lv_area_get_width(&badge) == target_height);
+				assert(close_to(pixel_at(shot, badge.x1 + target_height / 2, badge.y1 + 1), 0xf8d17c, 14));
+				assert(close_to(pixel_at(shot, badge.x1 + 2, badge.y1 + target_height * 2 / 3), 0x000000, 14));
+			}
+			lv_draw_buf_destroy(shot);
+			lv_obj_set_hidden(view.box, true);
+			int reserved = hiresbadge_header_width(&view, height);
+			assert(reserved >= lv_area_get_width(&badge) && reserved <= lv_area_get_width(&badge) + 1);
+			lv_obj_set_hidden(view.box, false);
 		}
-		lv_draw_buf_destroy(shot);
-		lv_obj_set_hidden(view.box, true);
-		int reserved = hiresbadge_header_width(&view, height);
-		assert(reserved >= lv_area_get_width(&badge) && reserved <= lv_area_get_width(&badge) + 1);
-		lv_obj_set_hidden(view.box, false);
 	}
 	// The badge rides the player sheet, not the display's global top layer.
 	lv_obj_set_x(sheet, 40);
 	lv_obj_update_layout(screen);
 	lv_area_t box;
 	lv_obj_get_coords(view.box, &box);
-	assert(box.x2 == 239 - back_ink.x1 + 40);
+	assert(box.x2 == 239 - inset + 40);
 
 	// Switching back to a non-Vinyl shape restores the native-size badge at
 	// its original artwork anchor, not just the parent.
