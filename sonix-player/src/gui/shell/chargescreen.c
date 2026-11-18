@@ -68,11 +68,18 @@
 #define WAKE_SETTLE_MS 180
 
 // The battery's own colours: the green a charge in progress has on the status
-// bar, the amber that means nearly, and the red that means now.
+// bar, the amber that means nearly, and the red that means now. The gradient
+// stop keeps the bar from looking like a hole punched in the box; it is the
+// same hue a fingerprint lighter, top to bottom.
 #define CHARGE_GREEN lv_color_make(0x2e, 0xc2, 0x7e)
+#define CHARGE_GREEN_HI lv_color_make(0x54, 0xe0, 0x9b)
 #define CHARGE_AMBER lv_color_make(0xe5, 0xa5, 0x14)
+#define CHARGE_AMBER_HI lv_color_make(0xf9, 0xc0, 0x4a)
 #define CHARGE_RED lv_color_make(0xe0, 0x1b, 0x24)
-#define CHARGE_DIM lv_color_make(0x9a, 0x9a, 0xa0)
+#define CHARGE_RED_HI lv_color_make(0xff, 0x4d, 0x55)
+#define CHARGE_FAINT lv_color_make(0x5b, 0x5b, 0x63)
+#define CHARGE_TEXT lv_color_make(0xec, 0xec, 0xee)
+#define CHARGE_SHELL lv_color_make(0xe9, 0xe9, 0xeb)
 
 static lv_display_t *display;
 static lv_obj_t *root;
@@ -250,33 +257,37 @@ void chargescreen_build(lv_display_t *disp) {
 	lv_obj_set_scrollable(row, false);
 	lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
 	lv_obj_set_flex_align(row, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+	lv_obj_set_style_pad_column(row, 3, 0);
 
 	lv_obj_t *body = lv_obj_create(row);
 	lv_obj_set_size(body, battery_w, battery_h);
 	lv_obj_set_style_bg_opa(body, LV_OPA_TRANSP, 0);
 	lv_obj_set_style_border_width(body, border, 0);
-	lv_obj_set_style_border_color(body, lv_color_white(), 0);
+	lv_obj_set_style_border_color(body, CHARGE_SHELL, 0);
 	lv_obj_set_style_radius(body, 10, 0);
 	lv_obj_set_style_pad_all(body, inset, 0);
 	lv_obj_set_style_shadow_width(body, 0, 0);
 	lv_obj_set_scrollable(body, false);
 
-	// The fill is a child of the box, so the border and the inset are already
-	// accounted for: it starts at nothing and grows to the right.
+	// The fill is placed inside the box at the origin of its content area
+	// with explicit geometry rather than an alignment: an aligned child of a
+	// bordered object overpaints the border on the side it is anchored to.
 	fill = lv_obj_create(body);
+	lv_obj_set_pos(fill, 0, 0);
 	lv_obj_set_height(fill, lv_pct(100));
 	lv_obj_set_width(fill, 0);
-	lv_obj_set_style_bg_color(fill, CHARGE_GREEN, 0);
+	lv_obj_set_style_bg_color(fill, CHARGE_GREEN_HI, 0);
+	lv_obj_set_style_bg_grad_color(fill, CHARGE_GREEN, 0);
+	lv_obj_set_style_bg_grad_dir(fill, LV_GRAD_DIR_VER, 0);
 	lv_obj_set_style_bg_opa(fill, LV_OPA_COVER, 0);
 	lv_obj_set_style_border_width(fill, 0, 0);
 	lv_obj_set_style_radius(fill, 4, 0);
 	lv_obj_set_style_pad_all(fill, 0, 0);
 	lv_obj_set_style_shadow_width(fill, 0, 0);
-	lv_obj_align(fill, LV_ALIGN_LEFT_MID, 0, 0);
 
 	lv_obj_t *nub = lv_obj_create(row);
 	lv_obj_set_size(nub, nub_w, battery_h * 36 / 100);
-	lv_obj_set_style_bg_color(nub, lv_color_white(), 0);
+	lv_obj_set_style_bg_color(nub, CHARGE_SHELL, 0);
 	lv_obj_set_style_bg_opa(nub, LV_OPA_COVER, 0);
 	lv_obj_set_style_border_width(nub, 0, 0);
 	lv_obj_set_style_radius(nub, 3, 0);
@@ -300,14 +311,14 @@ void chargescreen_build(lv_display_t *disp) {
 	status_label = lv_label_create(root);
 	lv_obj_set_width(status_label, text_w);
 	lv_obj_set_style_text_font(status_label, &font_ui_22, 0);
-	lv_obj_set_style_text_color(status_label, CHARGE_DIM, 0);
+	lv_obj_set_style_text_color(status_label, CHARGE_TEXT, 0);
 	lv_obj_set_style_text_align(status_label, LV_TEXT_ALIGN_CENTER, 0);
 	lv_label_set_long_mode(status_label, LV_LABEL_LONG_WRAP);
 	lv_label_set_text(status_label, tr("chargescreen_charging"));
 
 	lv_obj_t *hint = lv_label_create(root);
 	lv_obj_set_style_text_font(hint, &font_ui_18, 0);
-	lv_obj_set_style_text_color(hint, CHARGE_DIM, 0);
+	lv_obj_set_style_text_color(hint, CHARGE_FAINT, 0);
 	lv_obj_set_style_text_align(hint, LV_TEXT_ALIGN_CENTER, 0);
 	lv_obj_set_width(hint, text_w);
 	lv_label_set_long_mode(hint, LV_LABEL_LONG_WRAP);
@@ -338,7 +349,16 @@ void chargescreen_show(bool have, int percent, bool charging, bool cable) {
 			lv_label_set_text(percent_label, text);
 
 			lv_obj_set_width(fill, (int32_t)fill_width * percent / 100);
-			lv_obj_set_style_bg_color(fill, percent <= 10 ? CHARGE_RED : (percent <= 20 ? CHARGE_AMBER : CHARGE_GREEN), 0);
+			if (percent <= 10) {
+				lv_obj_set_style_bg_color(fill, CHARGE_RED_HI, 0);
+				lv_obj_set_style_bg_grad_color(fill, CHARGE_RED, 0);
+			} else if (percent <= 20) {
+				lv_obj_set_style_bg_color(fill, CHARGE_AMBER_HI, 0);
+				lv_obj_set_style_bg_grad_color(fill, CHARGE_AMBER, 0);
+			} else {
+				lv_obj_set_style_bg_color(fill, CHARGE_GREEN_HI, 0);
+				lv_obj_set_style_bg_grad_color(fill, CHARGE_GREEN, 0);
+			}
 		}
 
 		lv_label_set_text(status_label, tr(state == 2   ? "chargescreen_charging"
