@@ -32,6 +32,10 @@ static lv_obj_t *btn_boot[5];		 // Stock / Retrospace / Space / Travelling in sp
 static lv_obj_t *boot_picture_value; // the name of the custom picture, on its row
 static lv_obj_t *btn_clock[4]; // left / centre / right / hidden
 static lv_obj_t *btn_accent[THEME_ACCENT_COUNT]; // the coloured circles
+static lv_obj_t *btn_custom_accent;
+static lv_obj_t *custom_accent_swatch;
+static lv_obj_t *custom_accent_hex;
+static bool appearance_compact;
 static lv_obj_t *tint_toggle;
 static lv_obj_t *main_menu_icons_toggle;
 static lv_obj_t *main_menu_books_toggle;
@@ -294,6 +298,275 @@ static void refresh_accent_buttons(void) {
 			lv_obj_set_style_outline_width(btn_accent[i], 0, 0);
 		}
 	}
+	if (btn_custom_accent && custom_accent_swatch && custom_accent_hex) {
+		bool is_custom = theme_has_custom_accent();
+		lv_color_t c = is_custom ? theme_get_custom_accent() : theme()->accent;
+		lv_obj_set_style_bg_color(custom_accent_swatch, c, 0);
+		char hex[16];
+		snprintf(hex, sizeof(hex), "#%02X%02X%02X", c.red, c.green, c.blue);
+		lv_label_set_text(custom_accent_hex, hex);
+		if (is_custom) {
+			lv_obj_set_style_border_width(btn_custom_accent, 2, 0);
+			lv_obj_set_style_border_color(btn_custom_accent, theme()->text_primary, 0);
+			lv_obj_set_style_border_opa(btn_custom_accent, LV_OPA_COVER, 0);
+		} else {
+			lv_obj_set_style_border_width(btn_custom_accent, 0, 0);
+		}
+	}
+}
+
+static lv_color_t picker_hsv_to_rgb(uint16_t h, uint8_t s, uint8_t v) {
+	float hf = (float)(h % 360) / 60.0f;
+	float sf = (float)s / 100.0f;
+	float vf = (float)v / 100.0f;
+	int i = (int)hf;
+	float f = hf - (float)i;
+	float p = vf * (1.0f - sf);
+	float q = vf * (1.0f - sf * f);
+	float t = vf * (1.0f - sf * (1.0f - f));
+	float r = 0, g = 0, b = 0;
+	switch (i) {
+	case 0: r = vf; g = t; b = p; break;
+	case 1: r = q; g = vf; b = p; break;
+	case 2: r = p; g = vf; b = t; break;
+	case 3: r = p; g = q; b = vf; break;
+	case 4: r = t; g = p; b = vf; break;
+	default: r = vf; g = p; b = q; break;
+	}
+	return lv_color_make((uint8_t)(r * 255.0f + 0.5f),
+						 (uint8_t)(g * 255.0f + 0.5f),
+						 (uint8_t)(b * 255.0f + 0.5f));
+}
+
+static void picker_rgb_to_hsv(lv_color_t c, uint16_t *h_out, uint8_t *s_out, uint8_t *v_out) {
+	float r = (float)c.red / 255.0f;
+	float g = (float)c.green / 255.0f;
+	float b = (float)c.blue / 255.0f;
+	float max = r > g ? (r > b ? r : b) : (g > b ? g : b);
+	float min = r < g ? (r < b ? r : b) : (g < b ? g : b);
+	float d = max - min;
+	float h = 0.0f;
+	if (d > 0.0001f) {
+		if (max == r) {
+			h = 60.0f * ((g - b) / d + (g < b ? 6.0f : 0.0f));
+		} else if (max == g) {
+			h = 60.0f * ((b - r) / d + 2.0f);
+		} else {
+			h = 60.0f * ((r - g) / d + 4.0f);
+		}
+	}
+	float s = max > 0.0001f ? (d / max) : 0.0f;
+	*h_out = (uint16_t)(h + 0.5f) % 360;
+	*s_out = (uint8_t)(s * 100.0f + 0.5f);
+	*v_out = (uint8_t)(max * 100.0f + 0.5f);
+}
+
+typedef struct {
+	lv_obj_t *backdrop;
+	lv_obj_t *preview;
+	lv_obj_t *hex_label;
+	lv_obj_t *sl_h;
+	lv_obj_t *sl_s;
+	lv_obj_t *sl_v;
+	lv_obj_t *val_h;
+	lv_obj_t *val_s;
+	lv_obj_t *val_v;
+	lv_color_t current;
+} color_picker_ctx_t;
+
+static color_picker_ctx_t picker_ctx;
+
+static void picker_update_preview(void) {
+	uint16_t h = (uint16_t)lv_slider_get_value(picker_ctx.sl_h);
+	uint8_t s = (uint8_t)lv_slider_get_value(picker_ctx.sl_s);
+	uint8_t v = (uint8_t)lv_slider_get_value(picker_ctx.sl_v);
+	picker_ctx.current = picker_hsv_to_rgb(h, s, v);
+	lv_obj_set_style_bg_color(picker_ctx.preview, picker_ctx.current, 0);
+	char buf[16];
+	snprintf(buf, sizeof(buf), "#%02X%02X%02X",
+			 picker_ctx.current.red, picker_ctx.current.green, picker_ctx.current.blue);
+	lv_label_set_text(picker_ctx.hex_label, buf);
+	snprintf(buf, sizeof(buf), "%u", (unsigned)h);
+	lv_label_set_text(picker_ctx.val_h, buf);
+	snprintf(buf, sizeof(buf), "%u%%", (unsigned)s);
+	lv_label_set_text(picker_ctx.val_s, buf);
+	snprintf(buf, sizeof(buf), "%u%%", (unsigned)v);
+	lv_label_set_text(picker_ctx.val_v, buf);
+}
+
+static void picker_slider_cb(lv_event_t *e) {
+	(void)e;
+	picker_update_preview();
+}
+
+static void picker_cancel_cb(lv_event_t *e) {
+	(void)e;
+	if (picker_ctx.backdrop) {
+		lv_obj_del(picker_ctx.backdrop);
+		picker_ctx.backdrop = NULL;
+	}
+}
+
+static void picker_apply_cb(lv_event_t *e) {
+	(void)e;
+	lv_color_t chosen = picker_ctx.current;
+	if (picker_ctx.backdrop) {
+		lv_obj_del(picker_ctx.backdrop);
+		picker_ctx.backdrop = NULL;
+	}
+	theme_set_custom_accent(chosen);
+	refresh_accent_buttons();
+}
+
+static lv_obj_t *make_picker_slider_row(lv_obj_t *parent, const char *name, int min_v, int max_v,
+										int init_v, lv_obj_t **val_out, bool compact) {
+	lv_obj_t *row = lv_obj_create(parent);
+	lv_obj_set_size(row, lv_pct(100), LV_SIZE_CONTENT);
+	lv_obj_set_style_bg_opa(row, 0, 0);
+	lv_obj_set_style_border_width(row, 0, 0);
+	lv_obj_set_style_pad_all(row, 0, 0);
+	lv_obj_set_style_pad_ver(row, compact ? 4 : 6, 0);
+	lv_obj_set_style_pad_gap(row, compact ? 6 : 10, 0);
+	lv_obj_set_scrollable(row, false);
+	lv_obj_set_clickable(row, false);
+	lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
+	lv_obj_set_flex_align(row, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+
+	lv_obj_t *lbl = lv_label_create(row);
+	lv_label_set_text(lbl, name);
+	lv_obj_add_style(lbl, &theme_style_text, 0);
+	lv_obj_set_style_text_font(lbl, compact ? &font_ui_16 : &font_ui_20, 0);
+	lv_obj_set_width(lbl, compact ? 16 : 24);
+
+	lv_obj_t *sl = lv_slider_create(row);
+	lv_slider_set_range(sl, min_v, max_v);
+	lv_slider_set_value(sl, init_v, LV_ANIM_OFF);
+	lv_obj_set_flex_grow(sl, 1);
+	lv_obj_set_height(sl, compact ? 14 : 18);
+	lv_obj_set_ext_click_area(sl, compact ? 12 : 14);
+	lv_obj_add_style(sl, &theme_style_slider_track, LV_PART_MAIN);
+	lv_obj_add_style(sl, &theme_style_accent_bg, LV_PART_INDICATOR);
+	theme_apply_slider_knob(sl);
+	lv_obj_add_event_cb(sl, picker_slider_cb, LV_EVENT_VALUE_CHANGED, NULL);
+
+	lv_obj_t *val = lv_label_create(row);
+	lv_obj_add_style(val, &theme_style_text_dim, 0);
+	lv_obj_set_style_text_font(val, compact ? &font_ui_16 : &font_ui_18, 0);
+	lv_obj_set_width(val, compact ? 36 : 48);
+	lv_obj_set_style_text_align(val, LV_TEXT_ALIGN_RIGHT, 0);
+	*val_out = val;
+
+	return sl;
+}
+
+static void open_color_picker_cb(lv_event_t *e) {
+	(void)e;
+	if (picker_ctx.backdrop) {
+		return;
+	}
+	bool compact = appearance_compact;
+	lv_color_t init = theme_has_custom_accent() ? theme_get_custom_accent() : theme()->accent;
+	uint16_t h = 0;
+	uint8_t s = 0, v = 0;
+	picker_rgb_to_hsv(init, &h, &s, &v);
+	if (v < 10) {
+		v = 10;
+	}
+
+	lv_obj_t *backdrop = lv_obj_create(lv_layer_top());
+	lv_obj_set_size(backdrop, lv_pct(100), lv_pct(100));
+	lv_obj_set_style_bg_color(backdrop, lv_color_black(), 0);
+	lv_obj_set_style_bg_opa(backdrop, LV_OPA_70, 0);
+	lv_obj_set_style_border_width(backdrop, 0, 0);
+	lv_obj_set_style_radius(backdrop, 0, 0);
+	lv_obj_set_style_pad_all(backdrop, 0, 0);
+	lv_obj_set_scrollable(backdrop, false);
+	lv_obj_set_clickable(backdrop, true);
+	picker_ctx.backdrop = backdrop;
+
+	lv_obj_t *card = lv_obj_create(backdrop);
+	lv_obj_set_width(card, compact ? 224 : 380);
+	lv_obj_set_height(card, LV_SIZE_CONTENT);
+	lv_obj_center(card);
+	lv_obj_add_style(card, &theme_style_card, 0);
+	lv_obj_set_style_radius(card, compact ? 12 : 16, 0);
+	lv_obj_set_style_border_width(card, 0, 0);
+	lv_obj_set_style_shadow_width(card, 24, 0);
+	lv_obj_set_style_pad_all(card, compact ? 12 : 20, 0);
+	lv_obj_set_style_pad_gap(card, compact ? 10 : 16, 0);
+	lv_obj_set_scrollable(card, false);
+	lv_obj_set_flex_flow(card, LV_FLEX_FLOW_COLUMN);
+
+	lv_obj_t *hdr = lv_obj_create(card);
+	lv_obj_set_size(hdr, lv_pct(100), LV_SIZE_CONTENT);
+	lv_obj_set_style_bg_opa(hdr, 0, 0);
+	lv_obj_set_style_border_width(hdr, 0, 0);
+	lv_obj_set_style_pad_all(hdr, 0, 0);
+	lv_obj_set_style_pad_gap(hdr, compact ? 8 : 12, 0);
+	lv_obj_set_scrollable(hdr, false);
+	lv_obj_set_flex_flow(hdr, LV_FLEX_FLOW_ROW);
+	lv_obj_set_flex_align(hdr, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+
+	lv_obj_t *swatch = lv_obj_create(hdr);
+	lv_obj_set_size(swatch, compact ? 28 : 40, compact ? 28 : 40);
+	lv_obj_set_style_radius(swatch, LV_RADIUS_CIRCLE, 0);
+	lv_obj_set_style_border_width(swatch, 1, 0);
+	lv_obj_set_style_border_color(swatch, theme()->text_secondary, 0);
+	lv_obj_set_style_bg_opa(swatch, LV_OPA_COVER, 0);
+	lv_obj_set_scrollable(swatch, false);
+	picker_ctx.preview = swatch;
+
+	lv_obj_t *title = lv_label_create(hdr);
+	lv_label_set_text(title, tr("appearance_accent_colour"));
+	lv_obj_add_style(title, &theme_style_text, 0);
+	lv_obj_set_style_text_font(title, compact ? &font_ui_16 : &font_ui_22, 0);
+	lv_obj_set_flex_grow(title, 1);
+
+	lv_obj_t *hex_lbl = lv_label_create(hdr);
+	lv_obj_add_style(hex_lbl, &theme_style_text_dim, 0);
+	lv_obj_set_style_text_font(hex_lbl, compact ? &font_ui_16 : &font_ui_20, 0);
+	picker_ctx.hex_label = hex_lbl;
+
+	picker_ctx.sl_h = make_picker_slider_row(card, "H", 0, 359, h, &picker_ctx.val_h, compact);
+	picker_ctx.sl_s = make_picker_slider_row(card, "S", 0, 100, s, &picker_ctx.val_s, compact);
+	picker_ctx.sl_v = make_picker_slider_row(card, "V", 10, 100, v, &picker_ctx.val_v, compact);
+
+	lv_obj_t *btns = lv_obj_create(card);
+	lv_obj_set_size(btns, lv_pct(100), LV_SIZE_CONTENT);
+	lv_obj_set_style_bg_opa(btns, 0, 0);
+	lv_obj_set_style_border_width(btns, 0, 0);
+	lv_obj_set_style_pad_all(btns, 0, 0);
+	lv_obj_set_style_pad_gap(btns, compact ? 8 : 12, 0);
+	lv_obj_set_scrollable(btns, false);
+	lv_obj_set_flex_flow(btns, LV_FLEX_FLOW_ROW);
+
+	lv_obj_t *cancel_btn = lv_btn_create(btns);
+	lv_obj_set_flex_grow(cancel_btn, 1);
+	lv_obj_set_height(cancel_btn, compact ? 34 : 44);
+	lv_obj_set_style_radius(cancel_btn, compact ? 8 : 10, 0);
+	lv_obj_set_style_bg_color(cancel_btn, theme()->surface_pressed, 0);
+	lv_obj_set_style_bg_opa(cancel_btn, LV_OPA_COVER, 0);
+	lv_obj_set_style_shadow_width(cancel_btn, 0, 0);
+	lv_obj_add_event_cb(cancel_btn, picker_cancel_cb, LV_EVENT_CLICKED, NULL);
+	lv_obj_t *cancel_lbl = lv_label_create(cancel_btn);
+	lv_label_set_text(cancel_lbl, tr("cancel"));
+	lv_obj_add_style(cancel_lbl, &theme_style_text, 0);
+	lv_obj_set_style_text_font(cancel_lbl, compact ? &font_ui_16 : &font_ui_20, 0);
+	lv_obj_center(cancel_lbl);
+
+	lv_obj_t *apply_btn = lv_btn_create(btns);
+	lv_obj_set_flex_grow(apply_btn, 1);
+	lv_obj_set_height(apply_btn, compact ? 34 : 44);
+	lv_obj_set_style_radius(apply_btn, compact ? 8 : 10, 0);
+	lv_obj_add_style(apply_btn, &theme_style_accent_bg, 0);
+	lv_obj_set_style_shadow_width(apply_btn, 0, 0);
+	lv_obj_add_event_cb(apply_btn, picker_apply_cb, LV_EVENT_CLICKED, NULL);
+	lv_obj_t *apply_lbl = lv_label_create(apply_btn);
+	lv_label_set_text(apply_lbl, tr("apply"));
+	lv_obj_set_style_text_font(apply_lbl, compact ? &font_ui_16 : &font_ui_20, 0);
+	lv_obj_center(apply_lbl);
+
+	picker_update_preview();
 }
 
 static void accent_pick_cb(lv_event_t *e) {
@@ -726,9 +999,43 @@ void appearance_init(gui_config_t *cfg) {
 	lv_obj_set_flex_flow(accent_row, LV_FLEX_FLOW_ROW_WRAP);
 	lv_obj_set_flex_align(accent_row, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 
-	for (int i = 0; i < THEME_ACCENT_COUNT; i++) {
+	static const int VISIBLE_ACCENTS[] = {1, 2, 4, 6, 8, 9};
+	for (size_t k = 0; k < sizeof(VISIBLE_ACCENTS) / sizeof(VISIBLE_ACCENTS[0]); k++) {
+		int i = VISIBLE_ACCENTS[k];
 		btn_accent[i] = make_accent_circle(accent_row, i, compact);
 	}
+
+	appearance_compact = compact;
+	btn_custom_accent = lv_btn_create(accent_card);
+	lv_obj_set_size(btn_custom_accent, lv_pct(100), compact ? 36 : 48);
+	lv_obj_set_style_radius(btn_custom_accent, compact ? 8 : 10, 0);
+	lv_obj_set_style_bg_color(btn_custom_accent, theme()->surface_pressed, 0);
+	lv_obj_set_style_bg_opa(btn_custom_accent, LV_OPA_COVER, 0);
+	lv_obj_set_style_shadow_width(btn_custom_accent, 0, 0);
+	lv_obj_set_style_pad_hor(btn_custom_accent, compact ? 10 : 14, 0);
+	lv_obj_set_style_pad_gap(btn_custom_accent, compact ? 8 : 12, 0);
+	lv_obj_set_flex_flow(btn_custom_accent, LV_FLEX_FLOW_ROW);
+	lv_obj_set_flex_align(btn_custom_accent, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+	lv_obj_add_event_cb(btn_custom_accent, open_color_picker_cb, LV_EVENT_CLICKED, NULL);
+
+	custom_accent_swatch = lv_obj_create(btn_custom_accent);
+	lv_obj_set_size(custom_accent_swatch, compact ? 20 : 28, compact ? 20 : 28);
+	lv_obj_set_style_radius(custom_accent_swatch, LV_RADIUS_CIRCLE, 0);
+	lv_obj_set_style_border_width(custom_accent_swatch, 1, 0);
+	lv_obj_set_style_border_color(custom_accent_swatch, theme()->text_secondary, 0);
+	lv_obj_set_style_bg_opa(custom_accent_swatch, LV_OPA_COVER, 0);
+	lv_obj_set_scrollable(custom_accent_swatch, false);
+	lv_obj_set_clickable(custom_accent_swatch, false);
+
+	lv_obj_t *custom_lbl = lv_label_create(btn_custom_accent);
+	lv_label_set_text(custom_lbl, "Custom colour...");
+	lv_obj_add_style(custom_lbl, &theme_style_text, 0);
+	lv_obj_set_style_text_font(custom_lbl, compact ? &font_ui_16 : &font_ui_20, 0);
+	lv_obj_set_flex_grow(custom_lbl, 1);
+
+	custom_accent_hex = lv_label_create(btn_custom_accent);
+	lv_obj_add_style(custom_accent_hex, &theme_style_text_dim, 0);
+	lv_obj_set_style_text_font(custom_accent_hex, compact ? &font_ui_16 : &font_ui_18, 0);
 
 	// Straight under the accent, because it is what the tint is made from: the
 	// same hue carried across the backgrounds, the cards and the status bar.

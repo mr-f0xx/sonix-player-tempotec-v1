@@ -880,7 +880,7 @@ int main(int argc, char **argv) {
 	assert(lv_obj_get_sibling(glyph_card, 1) == accent_card);
 	assert(lv_obj_get_sibling(accent_card, 1) == lv_obj_get_parent(tint_label));
 	lv_obj_t *accent_row = lv_obj_get_sibling(accent_label, 1);
-	assert(accent_row && lv_obj_get_child_count(accent_row) == THEME_ACCENT_COUNT);
+	assert(accent_row && lv_obj_get_child_count(accent_row) == 6);
 
 	for (int kind = 0; kind < THEME_KIND_COUNT; kind++) {
 		set_icons_only(false);
@@ -918,8 +918,8 @@ int main(int argc, char **argv) {
 		dump_menu_snapshot(kind);
 
 		lv_obj_send_event(lv_obj_get_child(accent_row, 3), LV_EVENT_CLICKED, NULL);
-		assert(theme_get_accent() == 3);
-		assert(config_get_int("ui", "accent", -1) == 3);
+		assert(theme_get_accent() == 6);
+		assert(config_get_int("ui", "accent", -1) == 6);
 		theme_set_dynamic_tint(true);
 		check_grid(grid, true);
 		check_grid(section_grid, false);

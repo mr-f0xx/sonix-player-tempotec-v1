@@ -249,6 +249,7 @@ static const lv_color_t ACCENT_COLORS[THEME_ACCENT_COUNT] = {
 	LV_COLOR_MAKE(139, 142, 148), // slate (#8b8e94)
 };
 static int accent_index;
+static lv_color_t custom_accent_color = LV_COLOR_MAKE(53, 132, 228);
 
 static lv_color_t default_accent(theme_kind_t kind) {
 	switch (kind) {
@@ -500,27 +501,42 @@ static void select_active(void) {
 
 	// The accent slot is shared across themes; slot zero resolves to each new
 	// palette's native accent while the other slots retain their shared colors.
+	// Slot -1 means a user-picked custom colour in [ui] accent_custom.
 	accent_index = (int)config_get_int("ui", "accent", 0);
-	if (accent_index < 0 || accent_index >= THEME_ACCENT_COUNT) {
+	if (accent_index == -1) {
+		int rgb = (int)config_get_int("ui", "accent_custom", 0x3584e4);
+		custom_accent_color = lv_color_make((uint8_t)((rgb >> 16) & 0xFF),
+											(uint8_t)((rgb >> 8) & 0xFF),
+											(uint8_t)(rgb & 0xFF));
+	} else if (accent_index < 0 || accent_index >= THEME_ACCENT_COUNT) {
 		accent_index = 0;
 	}
 	if (config_get_int("ui", "accent_scheme", 0) == 0) {
 		// No marker: the value came from the six-preset palette. Move the
 		// choice to its place among the twelve and write the marker, so a
 		// boot after this one reads the index as it is.
-		if (accent_index < 6) {
+		if (accent_index >= 0 && accent_index < 6) {
 			accent_index = LEGACY_ACCENT_MAP[accent_index];
 		}
 		config_set_int("ui", "accent", accent_index);
 		config_set_int("ui", "accent_scheme", 1);
 		config_save();
 	}
-	palette_dark.accent = ACCENT_COLORS[accent_index];
-	palette_light.accent = ACCENT_COLORS[accent_index];
-	palette_tokyo.accent = accent_index == 0 ? default_accent(THEME_KIND_TOKYO_NIGHT) : ACCENT_COLORS[accent_index];
-	palette_amber.accent = accent_index == 0 ? default_accent(THEME_KIND_AMBER_ON_BLACK) : ACCENT_COLORS[accent_index];
-	palette_oled.accent = accent_index == 0 ? default_accent(THEME_KIND_OLED) : ACCENT_COLORS[accent_index];
-	palette_custom.accent = accent_index == 0 ? custom_accent : ACCENT_COLORS[accent_index];
+	if (accent_index == -1) {
+		palette_dark.accent = custom_accent_color;
+		palette_light.accent = custom_accent_color;
+		palette_tokyo.accent = custom_accent_color;
+		palette_amber.accent = custom_accent_color;
+		palette_oled.accent = custom_accent_color;
+		palette_custom.accent = custom_accent_color;
+	} else {
+		palette_dark.accent = ACCENT_COLORS[accent_index];
+		palette_light.accent = ACCENT_COLORS[accent_index];
+		palette_tokyo.accent = accent_index == 0 ? default_accent(THEME_KIND_TOKYO_NIGHT) : ACCENT_COLORS[accent_index];
+		palette_amber.accent = accent_index == 0 ? default_accent(THEME_KIND_AMBER_ON_BLACK) : ACCENT_COLORS[accent_index];
+		palette_oled.accent = accent_index == 0 ? default_accent(THEME_KIND_OLED) : ACCENT_COLORS[accent_index];
+		palette_custom.accent = accent_index == 0 ? custom_accent : ACCENT_COLORS[accent_index];
+	}
 
 	dynamic_tint = config_get_bool("ui", "dynamic_tint", false);
 
@@ -905,7 +921,8 @@ bool theme_reload_custom(void) {
 	if (!load_custom(&next)) return false;
 	custom_accent = next.accent;
 	palette_custom = next;
-	palette_custom.accent = accent_index == 0 ? custom_accent : ACCENT_COLORS[accent_index];
+	palette_custom.accent = accent_index == -1 ? custom_accent_color
+						  : (accent_index == 0 ? custom_accent : ACCENT_COLORS[accent_index]);
 	if (selected_kind == THEME_KIND_CUSTOM) {
 		rebuild_active();
 		apply_palette();
@@ -926,10 +943,17 @@ void theme_set_kind(theme_kind_t kind) {
 	}
 
 	selected_kind = kind;
-	palette_tokyo.accent = accent_index == 0 ? default_accent(THEME_KIND_TOKYO_NIGHT) : ACCENT_COLORS[accent_index];
-	palette_amber.accent = accent_index == 0 ? default_accent(THEME_KIND_AMBER_ON_BLACK) : ACCENT_COLORS[accent_index];
-	palette_oled.accent = accent_index == 0 ? default_accent(THEME_KIND_OLED) : ACCENT_COLORS[accent_index];
-	palette_custom.accent = accent_index == 0 ? custom_accent : ACCENT_COLORS[accent_index];
+	if (accent_index == -1) {
+		palette_tokyo.accent = custom_accent_color;
+		palette_amber.accent = custom_accent_color;
+		palette_oled.accent = custom_accent_color;
+		palette_custom.accent = custom_accent_color;
+	} else {
+		palette_tokyo.accent = accent_index == 0 ? default_accent(THEME_KIND_TOKYO_NIGHT) : ACCENT_COLORS[accent_index];
+		palette_amber.accent = accent_index == 0 ? default_accent(THEME_KIND_AMBER_ON_BLACK) : ACCENT_COLORS[accent_index];
+		palette_oled.accent = accent_index == 0 ? default_accent(THEME_KIND_OLED) : ACCENT_COLORS[accent_index];
+		palette_custom.accent = accent_index == 0 ? custom_accent : ACCENT_COLORS[accent_index];
+	}
 	rebuild_active();
 	apply_palette();
 
@@ -957,10 +981,35 @@ void theme_set_accent(int index) {
 	palette_tokyo.accent = index == 0 ? default_accent(THEME_KIND_TOKYO_NIGHT) : ACCENT_COLORS[index];
 	palette_amber.accent = index == 0 ? default_accent(THEME_KIND_AMBER_ON_BLACK) : ACCENT_COLORS[index];
 	palette_oled.accent = index == 0 ? default_accent(THEME_KIND_OLED) : ACCENT_COLORS[index];
+	palette_custom.accent = index == 0 ? custom_accent : ACCENT_COLORS[index];
 	rebuild_active(); // the tint is drawn from the accent, so it moves with it
 	apply_palette();
 
 	config_set_int("ui", "accent", index);
+	config_save();
+
+	refresh_all();
+}
+
+bool theme_has_custom_accent(void) { return accent_index == -1; }
+
+lv_color_t theme_get_custom_accent(void) { return custom_accent_color; }
+
+void theme_set_custom_accent(lv_color_t color) {
+	accent_index = -1;
+	custom_accent_color = color;
+	palette_dark.accent = color;
+	palette_light.accent = color;
+	palette_tokyo.accent = color;
+	palette_amber.accent = color;
+	palette_oled.accent = color;
+	palette_custom.accent = color;
+	rebuild_active();
+	apply_palette();
+
+	int rgb = ((int)color.red << 16) | ((int)color.green << 8) | (int)color.blue;
+	config_set_int("ui", "accent", -1);
+	config_set_int("ui", "accent_custom", rgb);
 	config_save();
 
 	refresh_all();

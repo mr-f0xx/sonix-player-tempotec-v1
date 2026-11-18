@@ -198,6 +198,9 @@ void theme_toggle(void);
 lv_color_t theme_accent_preset(int index);
 int theme_get_accent(void);
 void theme_set_accent(int index);
+bool theme_has_custom_accent(void);
+lv_color_t theme_get_custom_accent(void);
+void theme_set_custom_accent(lv_color_t color);
 
 // Picks the legacy Dark or Light preset rather than flipping. Asking for Dark
 // while any added palette is selected switches back to the original Dark
