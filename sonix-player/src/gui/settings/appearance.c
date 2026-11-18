@@ -425,8 +425,10 @@ static lv_obj_t *make_picker_slider_row(lv_obj_t *parent, const char *name, int 
 	lv_obj_set_style_bg_opa(row, 0, 0);
 	lv_obj_set_style_border_width(row, 0, 0);
 	lv_obj_set_style_pad_all(row, 0, 0);
+	lv_obj_set_style_pad_ver(row, compact ? 4 : 6, 0);
 	lv_obj_set_style_pad_gap(row, compact ? 6 : 10, 0);
 	lv_obj_set_scrollable(row, false);
+	lv_obj_set_clickable(row, false);
 	lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
 	lv_obj_set_flex_align(row, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 
@@ -440,7 +442,8 @@ static lv_obj_t *make_picker_slider_row(lv_obj_t *parent, const char *name, int 
 	lv_slider_set_range(sl, min_v, max_v);
 	lv_slider_set_value(sl, init_v, LV_ANIM_OFF);
 	lv_obj_set_flex_grow(sl, 1);
-	lv_obj_set_height(sl, compact ? 8 : 10);
+	lv_obj_set_height(sl, compact ? 14 : 18);
+	lv_obj_set_ext_click_area(sl, compact ? 12 : 14);
 	lv_obj_add_style(sl, &theme_style_slider_track, LV_PART_MAIN);
 	lv_obj_add_style(sl, &theme_style_accent_bg, LV_PART_INDICATOR);
 	theme_apply_slider_knob(sl);
