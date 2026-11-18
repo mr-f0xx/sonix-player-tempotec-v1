@@ -870,9 +870,23 @@ int main(int argc, char **argv) {
 	gridpage_set_tile_label_hidden(section_grid, -1, true);
 	gridpage_set_tile_label_hidden(section_grid, 99, true);
 
+	/* Accent colour comes right after the icon preview, with its tint below. */
+	lv_obj_t *glyph_label = find_label(appearance_screen, tr("appearance_function_glyphs"));
+	lv_obj_t *accent_label = find_label(appearance_screen, tr("appearance_accent_colour"));
+	lv_obj_t *tint_label = find_label(appearance_screen, tr("appearance_dynamic_tint"));
+	assert(glyph_label && accent_label && tint_label);
+	lv_obj_t *glyph_card = lv_obj_get_parent(glyph_label);
+	lv_obj_t *accent_card = lv_obj_get_parent(accent_label);
+	assert(lv_obj_get_sibling(glyph_card, 1) == accent_card);
+	assert(lv_obj_get_sibling(accent_card, 1) == lv_obj_get_parent(tint_label));
+	lv_obj_t *accent_row = lv_obj_get_sibling(accent_label, 1);
+	assert(accent_row && lv_obj_get_child_count(accent_row) == THEME_ACCENT_COUNT);
+
 	for (int kind = 0; kind < THEME_KIND_COUNT; kind++) {
 		set_icons_only(false);
 		theme_set_kind((theme_kind_t)kind);
+		assert(lv_obj_is_hidden(glyph_card) == !theme_uses_function_glyphs());
+		assert(!lv_obj_is_hidden(accent_card));
 		tile_metrics_t year_tile = tile_metrics(lv_obj_get_child(section_grid, 2));
 		tile_metrics_t most_tile = tile_metrics(lv_obj_get_child(section_grid, 3));
 		tile_metrics_t play_tile = tile_metrics(lv_obj_get_child(section_grid, 4));
@@ -903,7 +917,9 @@ int main(int argc, char **argv) {
 		assert(lv_obj_is_hidden(lv_obj_get_child(main_menu_screen, 3)) == footer_hidden);
 		dump_menu_snapshot(kind);
 
-		theme_set_accent(3);
+		lv_obj_send_event(lv_obj_get_child(accent_row, 3), LV_EVENT_CLICKED, NULL);
+		assert(theme_get_accent() == 3);
+		assert(config_get_int("ui", "accent", -1) == 3);
 		theme_set_dynamic_tint(true);
 		check_grid(grid, true);
 		check_grid(section_grid, false);
