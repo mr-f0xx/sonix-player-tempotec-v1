@@ -344,7 +344,7 @@ $(WEB_EMU_BIN): $(WEB_EMU_OBJS) $(WEB_FT_DEP)
 	$(HOST_LD) -o $@ $(WEB_EMU_OBJS) $(WEB_EMU_LDFLAGS)
 	@echo "Web emulator binary built: $(WEB_EMU_BIN)"
 
-run-web-emu: web-emu
+run-web-emu:
 	@node ../tools/v1-emulator/server.mjs
 
 $(WASM_FT_STAMP):

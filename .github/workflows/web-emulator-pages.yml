@@ -20,18 +20,18 @@ on:
       - tools/v1-emulator/**
   push:
     branches:
-      - main
-      - arena/**
+      - '**'
     tags:
       - '*'
 
 permissions:
   contents: read
-  pages: write
-  id-token: write
+  pages: read
 
 concurrency:
-  group: pages-v1-emulator
+  # Only publications share a deployment queue. A burst of PR/branch builds
+  # must not cancel a pending main deployment (or another revision's artifact).
+  group: v1-emulator-${{ ((github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref_type == 'tag')) || (github.event_name == 'workflow_dispatch' && inputs.deploy_pages)) && 'pages' || github.run_id }}
   cancel-in-progress: false
 
 jobs:
@@ -52,11 +52,13 @@ jobs:
 
       - name: Record built revision
         id: source
+        env:
+          BUILD_REF: ${{ inputs.build_ref || github.ref_name }}
         run: |
           set -euo pipefail
           sha="$(git rev-parse HEAD)"
           short_sha="$(git rev-parse --short=8 HEAD)"
-          ref_label="${{ inputs.build_ref || github.ref_name }}"
+          ref_label="$BUILD_REF"
           subject="$(git log -1 --format=%s)"
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
           echo "short_sha=$short_sha" >> "$GITHUB_OUTPUT"
@@ -66,6 +68,14 @@ jobs:
             echo "- Revision: \`$short_sha\` (\`$ref_label\`)"
             echo "- Commit: $subject"
           } >> "$GITHUB_STEP_SUMMARY"
+
+      # A dispatch can compile an older firmware revision. Package its actual
+      # binary/assets, but don't downgrade the site's loader or its boot tests.
+      - name: Use this workflow revision's emulator tooling
+        if: github.event_name == 'workflow_dispatch' && inputs.build_ref != ''
+        run: |
+          git fetch --no-tags --depth=1 origin "$GITHUB_SHA"
+          git restore --source="$GITHUB_SHA" --worktree -- tools/v1-emulator
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -95,6 +105,8 @@ jobs:
       - name: Pack universal .sonix-web.zip bundle & stage static Pages site
         id: pack
         env:
+          BUILD_REF: ${{ steps.source.outputs.ref_label }}
+          PUBLISH: ${{ (github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref_type == 'tag')) || (github.event_name == 'workflow_dispatch' && inputs.deploy_pages) }}
           PAGES_BASE_URL: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}
         run: |
           set -euo pipefail
@@ -103,7 +115,7 @@ jobs:
           # Carry forward recent previously published builds from live GitHub Pages
           # so the webpage's "Published Sonix Builds" dropdown preserves build history.
           MERGE_ARGS=""
-          if curl --fail --silent --location --max-time 15 \
+          if [ "$PUBLISH" = true ] && curl --fail --silent --location --max-time 15 \
                "$PAGES_BASE_URL/builds/manifest.json" \
                -o "$RUNNER_TEMP/prev-manifest.json"; then
             echo "Fetched existing catalog from $PAGES_BASE_URL/builds/manifest.json"
@@ -123,11 +135,11 @@ jobs:
             done
             MERGE_ARGS="--merge-manifest $RUNNER_TEMP/prev-manifest.json --max-history 8"
           else
-            echo "No existing GitHub Pages catalog found yet (first publish)."
+            echo "Building without previous Pages history."
           fi
 
           node tools/v1-emulator/pack-wasm-bundle.mjs \
-            --ref "${{ steps.source.outputs.ref_label }}" \
+            --ref "$BUILD_REF" \
             --stage-pages tools/v1-emulator/dist/pages \
             $MERGE_ARGS
 
@@ -137,12 +149,30 @@ jobs:
           echo "bundle_name=$BUNDLE_NAME" >> "$GITHUB_OUTPUT"
           ls -lh tools/v1-emulator/dist/pages tools/v1-emulator/dist/pages/builds
 
+      - name: Boot the compiled firmware and test the build loader in Chrome
+        env:
+          SONIX_TEST_BUNDLE: ${{ github.workspace }}/${{ steps.pack.outputs.bundle_path }}
+        run: |
+          npm ci --prefix tools/v1-emulator/tests --ignore-scripts
+          npm test --prefix tools/v1-emulator/tests
+
       - name: Upload downloadable .sonix-web.zip artifact
+        id: web_artifact
         uses: actions/upload-artifact@v4
         with:
           name: sonix-v1-web-wasm-${{ steps.source.outputs.short_sha }}
           path: tools/v1-emulator/dist/*.sonix-web.zip
           retention-days: 30
+          if-no-files-found: error
+          compression-level: 0
+
+      - name: Show how to test this exact revision
+        env:
+          ARTIFACT_URL: ${{ steps.web_artifact.outputs.artifact-url }}
+          REVISION: ${{ steps.source.outputs.short_sha }}
+          SITE_URL: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/
+        run: |
+          echo "[Download the web build for $REVISION]($ARTIFACT_URL), then drop the downloaded ZIP into **Firmware Builds** in the [V1 emulator]($SITE_URL). No extraction or device update needed." >> "$GITHUB_STEP_SUMMARY"
 
       - name: Configure GitHub Pages
         if: >-
@@ -161,6 +191,9 @@ jobs:
   deploy-pages:
     name: Deploy static V1 emulator to GitHub Pages
     needs: build-wasm
+    permissions:
+      pages: write
+      id-token: write
     if: >-
       (github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/'))) ||
       (github.event_name == 'workflow_dispatch' && inputs.deploy_pages != false)

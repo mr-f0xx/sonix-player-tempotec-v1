@@ -2400,6 +2400,16 @@ kbd {
 	border-radius: 4px;
 }
 
+#btn-build-latest { margin-top: 8px; }
+
+.build-result:not(:empty), #build-standalone {
+	margin-top: 8px;
+	font-size: 12px;
+	overflow-wrap: anywhere;
+}
+.build-result.error { color: #ffa9a9; }
+#build-standalone { display: inline-block; color: var(--accent-bright); }
+
 .build-progress {
 	margin-top: 10px;
 }

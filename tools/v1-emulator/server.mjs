@@ -15,6 +15,7 @@
  *   - Live color-coded stdout/stderr log console & one-click rebuild
  */
 
+import { localCatalog, newestFile } from "./local-builds.mjs";
 import http from "node:http";
 import net from "node:net";
 import fs from "node:fs";
@@ -868,13 +869,13 @@ function startPlayer(mode = "normal") {
 }
 
 async function rebuildAndStart(modeAfter = "normal") {
-	if (buildProc) return;
-	await stopPlayer("restart");
+	if (buildProc || state.lifecycle === "building") return;
 	state.lifecycle = "building";
 	state.screenOn = false;
 	broadcastState();
 
-	const jobs = Math.max(1, os.cpus().length);
+	await stopPlayer("restart");
+	const jobs = os.availableParallelism?.() || Math.max(1, os.cpus().length);
 	pushLog("build", `Running make -C sonix-player -j${jobs} web-emu ...`);
 
 	const proc = spawn("make", ["-C", PLAYER_DIR, `-j${jobs}`, "web-emu"], {
@@ -885,8 +886,9 @@ async function rebuildAndStart(modeAfter = "normal") {
 
 	attachLineReader(proc.stdout, "build");
 	attachLineReader(proc.stderr, "build");
+	proc.once("error", (err) => pushLog("stderr", `Cannot run make: ${err.message}`));
 
-	proc.on("exit", (code) => {
+	proc.once("close", (code) => {
 		buildProc = null;
 		state.binaryExists = fs.existsSync(PLAYER_BIN);
 		if (code === 0) {
@@ -1254,7 +1256,7 @@ async function handleApiRequest(req, res, parsedUrl) {
 }
 
 function serveWasmBuilds(req, res, parsedUrl) {
-	const sub = parsedUrl.pathname.slice("/builds/".length);
+	const sub = decodeURIComponent(parsedUrl.pathname.slice("/builds/".length));
 	const headersBase = {
 		"Cross-Origin-Opener-Policy": "same-origin",
 		"Cross-Origin-Embedder-Policy": "require-corp",
@@ -1262,43 +1264,10 @@ function serveWasmBuilds(req, res, parsedUrl) {
 		"Cache-Control": "no-cache",
 	};
 
-	// Check staged GitHub Pages output first (dist/pages/builds/), then flat dist/
-	const candidates = [path.join(DIST_DIR, "pages", "builds"), DIST_DIR];
-
 	if (sub === "manifest.json") {
-		for (const base of candidates) {
-			const manifestPath = path.join(base, "manifest.json");
-			if (fs.existsSync(manifestPath)) {
-				res.writeHead(200, { ...headersBase, "Content-Type": "application/json; charset=utf-8" });
-				fs.createReadStream(manifestPath).pipe(res);
-				return true;
-			}
-		}
-		// Synthesize manifest from any *.sonix-web.zip bundles in tools/v1-emulator/dist/
-		const builds = [];
-		if (fs.existsSync(DIST_DIR)) {
-			const files = fs
-				.readdirSync(DIST_DIR)
-				.filter((n) => n.endsWith(".sonix-web.zip"))
-				.sort()
-				.reverse();
-			for (const file of files) {
-				const st = fs.statSync(path.join(DIST_DIR, file));
-				const slug = file.replace(/\.sonix-web\.zip$/, "");
-				builds.push({
-					id: slug,
-					name: slug,
-					ref: "local",
-					shortCommit: slug.slice(-8),
-					builtAt: st.mtime.toISOString(),
-					file,
-					url: `./builds/${file}`,
-					size: st.size,
-				});
-			}
-		}
+		const catalog = localCatalog(DIST_DIR);
 		res.writeHead(200, { ...headersBase, "Content-Type": "application/json; charset=utf-8" });
-		res.end(JSON.stringify({ format: "sonix-web-catalog-v1", updatedAt: new Date().toISOString(), builds }));
+		res.end(JSON.stringify(catalog));
 		return true;
 	}
 
@@ -1308,18 +1277,13 @@ function serveWasmBuilds(req, res, parsedUrl) {
 		res.end("Not found");
 		return true;
 	}
-	for (const base of candidates) {
-		const full = path.join(base, safeName);
-		if (fs.existsSync(full) && fs.statSync(full).isFile()) {
-			const st = fs.statSync(full);
-			res.writeHead(200, {
-				...headersBase,
-				"Content-Type": "application/zip",
-				"Content-Length": String(st.size),
-			});
-			fs.createReadStream(full).pipe(res);
-			return true;
-		}
+	const found = newestFile([DIST_DIR, path.join(DIST_DIR, "pages", "builds")], safeName);
+	if (found) {
+		res.writeHead(200, {
+			...headersBase, "Content-Type": "application/zip", "Content-Length": String(found.stat.size),
+		});
+		fs.createReadStream(found.file).pipe(res);
+		return true;
 	}
 	res.writeHead(404);
 	res.end("Not found");
@@ -1473,5 +1437,6 @@ server.listen(PORT, HOST, () => {
 	}
 	console.log(`Virtual microSD: ${SD_DIR}`);
 	console.log(`Virtual config:  ${CONFIG_DIR}`);
-	startPlayer("normal");
+	// Incremental make also checks an existing binary against working-tree edits.
+	rebuildAndStart("normal");
 });

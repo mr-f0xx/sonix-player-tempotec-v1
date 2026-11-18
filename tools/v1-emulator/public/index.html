@@ -58,8 +58,8 @@
 					Device Shot
 				</button>
 
-				<button id="btn-rebuild" class="btn btn-ghost" title="Rebuild sonix_player_web via make web-emu and hot-restart">
-					Rebuild
+				<button id="btn-rebuild" class="btn btn-ghost hidden" title="Rebuild sonix_player_web via make web-emu and hot-restart">
+					Rebuild &amp; boot local
 				</button>
 			</div>
 		</header>
@@ -307,7 +307,7 @@
 					<div class="tab-content active" id="tab-builds">
 						<div class="card">
 							<div class="card-head">
-								<h2>Published Sonix Builds</h2>
+								<h2>Firmware builds</h2>
 								<span class="card-badge mono" id="build-runtime-badge">WASM</span>
 							</div>
 
@@ -315,14 +315,17 @@
 								<select id="build-select" aria-label="Select Sonix firmware build">
 									<option value="">Loading catalog...</option>
 								</select>
-								<button id="btn-build-load" class="btn btn-primary btn-sm">Boot</button>
+								<button id="btn-build-load" class="btn btn-soft btn-sm" disabled>Boot selected</button>
 								<button id="btn-build-del" class="btn btn-danger-soft btn-sm hidden" title="Remove saved custom build from browser storage">Del</button>
 							</div>
 
 							<div class="build-meta" id="build-meta">
-								Select a published CI build or drop any <code>.sonix-web.zip</code> bundle below.
+								Checking for published firmware…
 							</div>
 
+							<button id="btn-build-latest" class="btn btn-primary btn-sm" title="Check the catalog again and boot its latest web firmware">Boot latest</button>
+							<div class="build-result" id="build-result" role="status"></div>
+							<a class="hidden" id="build-standalone" target="_blank" rel="noopener">Open emulator in a new tab</a>
 							<div class="build-progress hidden" id="build-progress">
 								<div class="build-progress-text" id="build-progress-text">Loading...</div>
 								<div class="build-progress-track">
@@ -333,24 +336,22 @@
 
 						<div class="card">
 							<div class="card-head">
-								<h2>Load Any Sonix Build</h2>
-								<label class="btn btn-primary btn-xs upload-label">
-									Browse .zip
-									<input type="file" id="build-file-input" accept=".zip,.sonix-web.zip,application/zip,application/x-zip-compressed,application/octet-stream" hidden>
-								</label>
+								<h2>Test your web build</h2>
+								<button type="button" id="btn-build-browse" class="btn btn-primary btn-xs">Browse ZIP</button>
+								<input type="file" id="build-file-input" accept=".zip,.sonix-web.zip,application/zip,application/x-zip-compressed,application/octet-stream" hidden>
 							</div>
 
 							<div class="build-dropzone" id="build-dropzone">
-								Drop a <strong>.sonix-web.zip</strong> firmware bundle here to unpack &amp; boot it directly in your browser
+								Drop a <strong>.sonix-web.zip</strong> or its <strong>Actions artifact ZIP</strong> here to boot it
 							</div>
 
-							<div class="build-url-row">
-								<input type="url" id="build-url-input" placeholder="https://.../sonix-v1-....sonix-web.zip" aria-label="Firmware bundle URL">
-								<button id="btn-build-url" class="btn btn-soft btn-sm">Fetch</button>
-							</div>
+							<form class="build-url-row" id="build-url-form" novalidate>
+								<input type="url" id="build-url-input" spellcheck="false" autocapitalize="none" placeholder="https://.../sonix-v1-....sonix-web.zip" aria-label="Firmware bundle URL">
+								<button type="submit" id="btn-build-url" class="btn btn-soft btn-sm">Fetch</button>
+							</form>
 
 							<div class="build-hint">
-								Build your own bundle locally with <code>make -C sonix-player web-wasm-bundle</code> or download one from GitHub Actions / Releases. Custom builds and virtual microSD files stay saved in your browser.
+								For each revision, use the <code>sonix-v1-web-wasm</code> artifact from Actions or run <code>make -C sonix-player web-wasm-bundle</code>. Drop the rebuilt file again to test changes. A device update (<code>v1.upt</code>) is not a browser build. Only load bundles you trust.
 							</div>
 						</div>
 					</div>
