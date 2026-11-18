@@ -500,6 +500,26 @@ static bool stop_thread = false;
 static double seek_target_secs = -1.0;
 static bool seek_request = false;
 
+// The A-B loop points, in seconds of the track that is playing. -1 while a
+// point is unset. Behind audio_mutex like the seek: the playback thread
+// reads them in report_position() to wind playback back at B, and the UI
+// reaches them through the audio_ab_* functions below.
+static double ab_loop_a_secs = -1.0;
+static double ab_loop_b_secs = -1.0;
+
+// Whether the next time playback reaches B it winds back to A. False when
+// the loop is not live, and when a scrub has carried the playhead to B or
+// past it: the points stay, but a loop whose end sits behind the playhead
+// would fight the scrub, so it only re-arms when the playhead comes back
+// inside the region.
+static bool ab_loop_armed;
+
+// Whether the two points make a loop: both set, A before B. Caller holds
+// audio_mutex.
+static bool ab_loop_live(void) {
+	return ab_loop_a_secs >= 0.0 && ab_loop_b_secs > ab_loop_a_secs;
+}
+
 // Set true by the playback thread when a track plays through to its end (as
 // opposed to being stopped/replaced by the user). Consumed via
 // audio_take_completion() so the controller can auto-advance.
@@ -554,6 +574,19 @@ static double opening_position(void) {
 static void report_position(double seconds) {
 	if (!seek_request) {
 		progress_current_secs = seconds;
+	}
+	// The A-B loop: the block that carried the playhead to B, or past it,
+	// winds the file back to A. The repositioning itself is left queued for
+	// the top of the loop, which does it like any other seek; this only
+	// asks for it. The position here is the file's own (bytes_played, not
+	// wall time), so what is compared and what is sought are the same scale
+	// whatever the playback speed is. A seek the user asked for in the
+	// meantime wins: its target is already queued, and the loop's jump
+	// would ride over it.
+	if (!seek_request && ab_loop_armed && seconds >= ab_loop_b_secs) {
+		progress_floor_secs = -1.0; // a deliberate jump outranks the pause floor
+		seek_target_secs = ab_loop_a_secs;
+		seek_request = true;
 	}
 }
 
@@ -4247,6 +4280,11 @@ int audio_play(const char *filepath) {
 	stream_channels = 0;
 	seek_request = false;
 	seek_target_secs = -1.0;
+	// The A-B points are positions in the track that is going; a new one
+	// would loop a stretch of the old track at the new file's timeline.
+	ab_loop_a_secs = -1.0;
+	ab_loop_b_secs = -1.0;
+	ab_loop_armed = false;
 	stream_bits = 0;
 	stream_bitrate_kbps = 0;
 	stream_lossy = false;
@@ -4284,6 +4322,10 @@ int audio_play_at(const char *filepath, double start_secs) {
 	progress_current_secs = start_secs > 0 ? start_secs : 0;
 	progress_floor_secs = -1.0;
 	progress_total_secs = 0;
+	// The A-B points belong to the track that was playing; see audio_play().
+	ab_loop_a_secs = -1.0;
+	ab_loop_b_secs = -1.0;
+	ab_loop_armed = false;
 	pthread_mutex_unlock(&audio_mutex);
 
 	pthread_cond_signal(&audio_cond);
@@ -4309,6 +4351,10 @@ int audio_play_paused(const char *filepath, double start_secs) {
 	progress_current_secs = start_secs > 0 ? start_secs : 0;
 	progress_floor_secs = -1.0;
 	progress_total_secs = 0;
+	// The A-B points belong to the track that was playing; see audio_play().
+	ab_loop_a_secs = -1.0;
+	ab_loop_b_secs = -1.0;
+	ab_loop_armed = false;
 	pthread_mutex_unlock(&audio_mutex);
 
 	pthread_cond_signal(&audio_cond);
@@ -4636,7 +4682,70 @@ void audio_seek(double seconds) {
 	progress_floor_secs = -1.0;		// and a deliberate jump outranks the pause floor
 	seek_target_secs = seconds;
 	seek_request = true;
+	// A scrub that carries the playhead to B, or past it, leaves the loop
+	// disarmed. The points stay -- scrubbing back inside the region arms the
+	// loop again -- but a loop whose end sits behind the playhead would wind
+	// it back on the next block, fighting the very scrub that moved it.
+	if (ab_loop_b_secs >= 0.0 && seconds >= ab_loop_b_secs) {
+		ab_loop_armed = false;
+	}
 	pthread_mutex_unlock(&audio_mutex);
+}
+
+// Mark A, at the position the player reports. Both points are kept as they
+// are: a mark that puts A behind or on B leaves the loop not live (the bar
+// shows the two out of order), and the next mark that puts them right arms
+// it again.
+void audio_ab_set_a(double seconds) {
+	if (seconds < 0.0) {
+		seconds = 0.0;
+	}
+	pthread_mutex_lock(&audio_mutex);
+	ab_loop_a_secs = seconds;
+	ab_loop_armed = ab_loop_live();
+	pthread_mutex_unlock(&audio_mutex);
+}
+
+// Mark B, at the position the player reports. Marking B arms the loop: the
+// playhead is at its end, and the block that follows winds playback back to
+// A.
+void audio_ab_set_b(double seconds) {
+	if (seconds < 0.0) {
+		seconds = 0.0;
+	}
+	pthread_mutex_lock(&audio_mutex);
+	ab_loop_b_secs = seconds;
+	ab_loop_armed = ab_loop_live();
+	pthread_mutex_unlock(&audio_mutex);
+}
+
+void audio_ab_clear(void) {
+	pthread_mutex_lock(&audio_mutex);
+	ab_loop_a_secs = -1.0;
+	ab_loop_b_secs = -1.0;
+	ab_loop_armed = false;
+	pthread_mutex_unlock(&audio_mutex);
+}
+
+bool audio_ab_loop_active(void) {
+	pthread_mutex_lock(&audio_mutex);
+	bool live = ab_loop_live();
+	pthread_mutex_unlock(&audio_mutex);
+	return live;
+}
+
+double audio_ab_a(void) {
+	pthread_mutex_lock(&audio_mutex);
+	double a = ab_loop_a_secs;
+	pthread_mutex_unlock(&audio_mutex);
+	return a;
+}
+
+double audio_ab_b(void) {
+	pthread_mutex_lock(&audio_mutex);
+	double b = ab_loop_b_secs;
+	pthread_mutex_unlock(&audio_mutex);
+	return b;
 }
 
 // ---------------------------------------------------------------------------

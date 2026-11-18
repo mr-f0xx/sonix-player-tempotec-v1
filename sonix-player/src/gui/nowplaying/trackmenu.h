@@ -21,6 +21,11 @@ void trackmenu_open(lv_obj_t *anchor);
 // are the queue.
 void trackmenu_open_queue(void);
 
+// Opens the A-B loop menu: mark point A, mark point B, clear the loop. The
+// second menu of the player's overflow menu (the row that opens it is in the
+// track tables above), and the audiobook menu's own row opens the same one.
+void trackmenu_ab_loop_open(void *user);
+
 // Opens the details page for a specific file (from a library list's menu).
 void trackmenu_details_open(const char *path);
 

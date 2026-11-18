@@ -129,6 +129,13 @@ static void sticker_pills_sync(void);
 static void sticker_seek_fit(void);
 static void sticker_album_sync(const device_state_t *state);
 static lv_obj_t *progress_slider;
+// The A-B loop points as ticks on the progress bar: a thin line at each
+// point, the point's letter above it. Drawing over the bar, not part of it,
+// so the bar still scrubs underneath (see update_ab_markers).
+static lv_obj_t *ab_marker_a_line;
+static lv_obj_t *ab_marker_a_label;
+static lv_obj_t *ab_marker_b_line;
+static lv_obj_t *ab_marker_b_label;
 // The compact slider leaves room for its oversized endpoint knob and shadow.
 // Zero means use the original percentage width on the HiBy panels.
 static int compact_progress_width;
@@ -1201,6 +1208,60 @@ static void set_progress_label(double current_secs, double total_secs) {
 	// and on every track change, which is exactly when the answer can move.
 	update_queue_position();
 	sticker_seek_fit();
+}
+
+// The A-B loop points on the progress bar, drawn over it rather than as part
+// of it: the slider is the bar and its own parts draw the track, so the two
+// ticks are separate objects placed from the slider's own rect on every
+// poll. The fraction is the same one view_value() uses, so a tick and the
+// playhead can never disagree about where a point sits -- whatever the view
+// (a chapter of a book, say) or the playback speed.
+static void update_ab_markers(void) {
+	if (!progress_slider || !ab_marker_a_line || !ab_marker_a_label ||
+		!ab_marker_b_line || !ab_marker_b_label) {
+		return;
+	}
+
+	double a = audio_ab_a();
+	double b = audio_ab_b();
+	if (a < 0.0 || b < 0.0 || view_length <= 0.0) {
+		lv_obj_set_hidden(ab_marker_a_line, true);
+		lv_obj_set_hidden(ab_marker_a_label, true);
+		lv_obj_set_hidden(ab_marker_b_line, true);
+		lv_obj_set_hidden(ab_marker_b_label, true);
+		return;
+	}
+
+	lv_area_t s;
+	lv_obj_get_coords(progress_slider, &s);
+	int bar_w = s.x2 - s.x1 + 1;
+	int bar_h = s.y2 - s.y1 + 1;
+	int label_h = (int)lv_font_get_line_height(bp_format_label_font());
+
+	for (int i = 0; i < 2; i++) {
+		lv_obj_t *line = i == 0 ? ab_marker_a_line : ab_marker_b_line;
+		lv_obj_t *label = i == 0 ? ab_marker_a_label : ab_marker_b_label;
+		double p = i == 0 ? a : b;
+
+		double frac = (p - view_start) / view_length;
+		if (frac < 0.0) {
+			frac = 0.0;
+		}
+		if (frac > 1.0) {
+			frac = 1.0;
+		}
+		int x = s.x1 + (int)(frac * (double)bar_w);
+
+		// The line stands on the bar's own track; the letter sits just above
+		// it, clear of the knob that travels along the same axis.
+		lv_obj_set_size(line, 3, bar_h);
+		lv_obj_set_pos(line, x - 1, s.y1);
+		lv_obj_set_size(label, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+		lv_obj_set_pos(label, x - 8, s.y1 - label_h - 4);
+
+		lv_obj_set_hidden(line, false);
+		lv_obj_set_hidden(label, false);
+	}
 }
 
 // True while a decode is in flight at the worker.
@@ -6344,6 +6405,7 @@ static void update_progress(void) {
 	}
 
 	set_progress_label(state.progress_current_secs, current_total_length);
+	update_ab_markers();
 	// Album Art Max: the two clocks are not on the page, and come up over the
 	// dimmed picture while a scrub is running. This poll can only see half of
 	// that -- a held skip key, which the playback side reports -- because a
@@ -6660,6 +6722,7 @@ static void more_btn_event_cb(lv_event_t *e) {
 	if (audiobook_mode) {
 		static const popover_item_t BOOK_ITEMS[] = {
 			{"chapters", book_chapters_action, NULL},
+			{"ab_loop", trackmenu_ab_loop_open, NULL},
 			{"audiobook_add_bookmark", book_add_bookmark_action, NULL},
 			{"bookmarks", book_bookmarks_action, NULL},
 			{"audiobook_summary", book_summary_action, NULL},
@@ -8368,6 +8431,36 @@ void player_init(gui_config_t *cfg) {
 	lv_obj_set_style_shadow_offset_y(progress_slider, 1, LV_PART_KNOB);
 
 	lv_obj_add_event_cb(progress_slider, progress_slider_event_cb, LV_EVENT_ALL, NULL);
+
+	// The A-B loop points on the bar. Neither half is clickable and neither
+	// has an event, so a finger over a tick still reaches the slider under
+	// it; update_ab_markers() positions them from the slider's own rect.
+	for (int i = 0; i < 2; i++) {
+		lv_obj_t *line = i == 0 ? ab_marker_a_line : ab_marker_b_line;
+		lv_obj_t *label = i == 0 ? ab_marker_a_label : ab_marker_b_label;
+		const char *letter = i == 0 ? "A" : "B";
+
+		*line = lv_obj_create(player_menu);
+		lv_obj_remove_style_all(*line);
+		lv_obj_set_size(*line, 3, 1);
+		lv_obj_set_style_bg_color(*line, chrome_accent(), 0);
+		lv_obj_set_style_bg_opa(*line, LV_OPA_COVER, 0);
+		lv_obj_set_style_radius(*line, LV_RADIUS_CIRCLE, 0);
+		lv_obj_set_style_border_width(*line, 0, 0);
+		lv_obj_set_style_shadow_width(*line, 0, 0);
+		lv_obj_set_style_pad_all(*line, 0, 0);
+		lv_obj_set_clickable(*line, false);
+		lv_obj_set_scrollable(*line, false);
+		lv_obj_set_hidden(*line, true);
+
+		*label = lv_label_create(player_menu);
+		lv_label_set_text(*label, letter);
+		lv_obj_add_style(*label, &theme_style_text, 0);
+		lv_obj_set_style_text_font(*label, bp_format_label_font(), 0);
+		lv_obj_set_style_text_color(*label, chrome_accent(), 0);
+		lv_obj_set_clickable(*label, false);
+		lv_obj_set_hidden(*label, true);
+	}
 
 	// Polls playback to keep the slider, the clock and the play/pause icon in
 	// sync. It runs from here on, slowing down rather than stopping when

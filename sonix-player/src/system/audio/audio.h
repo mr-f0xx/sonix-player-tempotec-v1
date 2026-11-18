@@ -178,6 +178,23 @@ int audio_get_dsd_multiple(void);
 
 void audio_seek(double seconds);
 
+// The A-B loop, on the track that is playing. A is where the loop starts and
+// B where it ends: with both points set and the playback reaching B, the
+// file winds back to A and the stretch plays again. The points are set from
+// the player's menu, at the position the player reports, on any track.
+//
+// A point is -1 while unset; the loop is live exactly when 0 <= A < B. The
+// points belong to the track and go when another one starts. A scrub that
+// carries the playhead to B or past it leaves the loop armed off -- the
+// points stay, and the loop takes over again when the playhead comes back
+// inside the region.
+void audio_ab_set_a(double seconds);
+void audio_ab_set_b(double seconds);
+void audio_ab_clear(void);
+bool audio_ab_loop_active(void);
+double audio_ab_a(void);
+double audio_ab_b(void);
+
 // Playback speed. 1.0 is normal; anything else goes through a time stretcher,
 // so the pitch does not move -- see speed.h. Only the 16-bit path honours it,
 // which is every audiobook and every lossy track; a hi-res FLAC ignores it.
