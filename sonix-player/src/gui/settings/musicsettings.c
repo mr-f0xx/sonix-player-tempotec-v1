@@ -113,6 +113,19 @@ static lv_obj_t *dre_switch;
 // that does not go through them is unaffected.
 static lv_obj_t *gapless_switch;
 
+// The A-B loop row in the now-playing menu. The loop itself has no global
+// on/off -- it is armed by marking its two points -- so this switch only
+// decides whether the menu row that reaches it is there at all: off hides it
+// for a listener who never marks points.
+static lv_obj_t *ab_loop_switch;
+
+static void ab_loop_toggle_cb(lv_event_t *e) {
+	(void)e;
+	bool on = lv_obj_has_state(ab_loop_switch, LV_STATE_CHECKED);
+	config_set_bool("player", "ab_loop", on);
+	config_save();
+}
+
 bool musicsettings_gapless_enabled(void) { return audio_get_gapless(); }
 
 void musicsettings_set_gapless_enabled(bool enabled) {
@@ -1248,6 +1261,11 @@ lv_obj_t *musicsettings_crossfeed_screen(void) { return crossfeed_screen; }
 bool musicsettings_fade_enabled(void) { return config_get_bool("audio", "fade", false); }
 
 bool musicsettings_endless_shuffle(void) { return config_get_bool("player", "endless_shuffle", false); }
+
+// The A-B loop row in the now-playing menu. The loop is armed by marking its
+// points, so this is not a global switch for the loop itself -- it decides
+// whether the menu reaches it. On by default.
+bool musicsettings_ab_loop_enabled(void) { return config_get_bool("player", "ab_loop", true); }
 
 // The setters below are also called by the control centre, which can sit open
 // on top of this page, so the chevrons have to be repainted from here.
@@ -2770,6 +2788,15 @@ static void build_playback_page(gui_config_t *cfg) {
 	settingsrow_toggle(container, "musicsettings_gapless_playback", &gapless_switch, gapless_toggle_cb);
 	if (musicsettings_gapless_enabled()) {
 		lv_obj_add_state(gapless_switch, LV_STATE_CHECKED);
+	}
+
+	// The A-B loop row in the now-playing menu, on by default. The loop is
+	// armed by marking its two points rather than by a global mode, so this
+	// switch is about the menu: off, the row that reaches it is not built.
+	settingsrow_toggle(container, "musicsettings_ab_loop", &ab_loop_switch, ab_loop_toggle_cb);
+	option_note(container, "musicsettings_ab_loop_note");
+	if (musicsettings_ab_loop_enabled()) {
+		lv_obj_add_state(ab_loop_switch, LV_STATE_CHECKED);
 	}
 
 	// ReplayGain: off, corrected per track, corrected per album or corrected per track when shuffled.

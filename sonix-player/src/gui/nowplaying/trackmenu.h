@@ -2,6 +2,7 @@
 #define TRACKMENU_H
 
 #include "src/gui/shell/gui.h"
+#include "src/gui/shell/popover.h"
 
 #include "lvgl/lvgl.h"
 
@@ -15,6 +16,10 @@ void trackmenu_init(gui_config_t *cfg);
 
 // Opens the popover next to `anchor` with the queue and details entries.
 void trackmenu_open(lv_obj_t *anchor);
+
+// Shows a menu table at `anchor`, dropping the A-B loop row when the
+// playback settings switch hides it (see musicsettings_ab_loop_enabled).
+void trackmenu_show_items(lv_obj_t *anchor, const popover_item_t *items, int count);
 
 // Opens the queue page directly, without the menu in front. For the player with
 // a podcast playing: there the button is the episodes button, and the episodes

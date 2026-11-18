@@ -6727,7 +6727,8 @@ static void more_btn_event_cb(lv_event_t *e) {
 			{"bookmarks", book_bookmarks_action, NULL},
 			{"audiobook_summary", book_summary_action, NULL},
 		};
-		popover_show(lv_event_get_current_target(e), BOOK_ITEMS, (int)(sizeof(BOOK_ITEMS) / sizeof(BOOK_ITEMS[0])));
+		trackmenu_show_items(lv_event_get_current_target(e), BOOK_ITEMS,
+						  (int)(sizeof(BOOK_ITEMS) / sizeof(BOOK_ITEMS[0])));
 		return;
 	}
 	// A podcast has no chapters: it has episodes, and the episodes are already

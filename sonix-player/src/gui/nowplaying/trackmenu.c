@@ -1535,8 +1535,36 @@ void trackmenu_ab_loop_open(void *user) {
 	// menu. The audiobook menu has no track menu in front of it -- its own
 	// popover was opened straight from the player -- so the anchor may never
 	// have been set; the screen is where the menu then centres itself.
+	// Not through trackmenu_show_items(): this is the menu the row reaches,
+	// not a table that may carry the row.
 	lv_obj_t *anchor = artist_menu_anchor ? artist_menu_anchor : lv_screen_active();
 	popover_show(anchor, ITEMS, (int)(sizeof(ITEMS) / sizeof(ITEMS[0])));
+}
+
+// Shows a track-menu table, dropping the A-B loop row when the playback
+// settings switch turns it off: a listener who never marks points should
+// not see the row, and the feature it reaches is not offered at all.
+//
+// The tables stay static so the string-extraction tool reads their
+// initialisers; what is filtered is the copy shown. The row is found by its
+// label, the one thing every entry of a table is guaranteed to have.
+void trackmenu_show_items(lv_obj_t *anchor, const popover_item_t *items, int count) {
+	if (musicsettings_ab_loop_enabled()) {
+		popover_show(anchor, items, count);
+		return;
+	}
+	popover_item_t without[12];
+	int n = 0;
+	for (int i = 0; i < count; i++) {
+		if (n >= (int)(sizeof(without) / sizeof(without[0]))) {
+			break;
+		}
+		if (items[i].label && strcmp(items[i].label, "ab_loop") == 0) {
+			continue;
+		}
+		without[n++] = items[i];
+	}
+	popover_show(anchor, without, n);
 }
 
 void trackmenu_open(lv_obj_t *anchor) {
@@ -1628,15 +1656,15 @@ void trackmenu_open(lv_obj_t *anchor) {
 	// their own action to the upstream row set. A local track gets the delete
 	// row only when the existing safety setting is enabled.
 	if (keepable) {
-		popover_show(anchor, ITEMS_KEEP, (int)(sizeof(ITEMS_KEEP) / sizeof(ITEMS_KEEP[0])));
+		trackmenu_show_items(anchor, ITEMS_KEEP, (int)(sizeof(ITEMS_KEEP) / sizeof(ITEMS_KEEP[0])));
 	} else if (tidal_track) {
-		popover_show(anchor, ITEMS_TIDAL, (int)(sizeof(ITEMS_TIDAL) / sizeof(ITEMS_TIDAL[0])));
+		trackmenu_show_items(anchor, ITEMS_TIDAL, (int)(sizeof(ITEMS_TIDAL) / sizeof(ITEMS_TIDAL[0])));
 	} else if (podcast) {
-		popover_show(anchor, ITEMS_PODCAST, (int)(sizeof(ITEMS_PODCAST) / sizeof(ITEMS_PODCAST[0])));
+		trackmenu_show_items(anchor, ITEMS_PODCAST, (int)(sizeof(ITEMS_PODCAST) / sizeof(ITEMS_PODCAST[0])));
 	} else if (deletable) {
-		popover_show(anchor, ITEMS_DELETE, (int)(sizeof(ITEMS_DELETE) / sizeof(ITEMS_DELETE[0])));
+		trackmenu_show_items(anchor, ITEMS_DELETE, (int)(sizeof(ITEMS_DELETE) / sizeof(ITEMS_DELETE[0])));
 	} else {
-		popover_show(anchor, ITEMS, (int)(sizeof(ITEMS) / sizeof(ITEMS[0])));
+		trackmenu_show_items(anchor, ITEMS, (int)(sizeof(ITEMS) / sizeof(ITEMS[0])));
 	}
 }
 
