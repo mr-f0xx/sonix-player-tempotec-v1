@@ -526,6 +526,7 @@ a self-signed certificate), and HLS.
   once per discharge; it comes back after the battery has been charged past
   7 %.
 - **Battery history (System → About)** - beside the live percentage, the About page records the last charge point and the player-on time since it. A charge point is either the moment a connected battery first reaches the configured target (100 %, or 80 % when the cap is on) or when the cable is unplugged; the page says which one. The timestamp and accumulated duration are checkpointed every five minutes and on a clean shutdown. Duration uses the boot-time clock, including standby but excluding all time while the player is switched off, so it can be used to compare screen, radio, gain and output choices without an overnight power-off inflating the figure. A newly updated player deliberately shows “Not recorded yet” until it sees a real cable/target transition rather than inventing a historical date.
+- **Battery profiler (Settings → System)** - live AXP2101 voltage and its programmed charge-current limit, plus estimated runtime and draw. Save an unplugged baseline, change the output, gain, PEQ or Wi-Fi, and compare estimated draw in mA and percent. The V1 does not report live charge current or battery wear. See [Battery profiler](docs/battery-profiler.md) for a repeatable A/B test.
 - **Charging with the player off** - a player that was switched off and is then
   put on a charger comes up on a battery screen rather than the library: the
   level as a filling battery, the percentage, and whether the charger is still

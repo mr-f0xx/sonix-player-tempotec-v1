@@ -34,6 +34,10 @@ void axpcharge_set(bool limit_voltage, bool limit_current);
 // The desired state is reasserted by axpcharge_tick().
 void axpcharge_set_charging_enabled(bool enabled);
 
+// Reads the programmed constant-charge current ceiling in mA (REG62h), or
+// -1 if unavailable. This is a register setting, not current into the cell.
+int axpcharge_current_setting_ma(void);
+
 // Re-asserts the switches, at most every few seconds. Called from the power
 // tick.
 void axpcharge_tick(void);
