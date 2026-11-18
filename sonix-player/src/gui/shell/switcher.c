@@ -87,50 +87,47 @@ void back_btn_player_top_inset(int inset) {
 	}
 }
 
-// Where the chevron's own stroke begins inside its canvas.
-//
-// The icon is a 36 px square drawn from a 24 px viewBox with the arrow in the
-// middle third, so a third of the button is empty margin on either side. A page
-// that lines the chevron up with its own marks -- Album Art Max puts the star
-// the same distance from the right edge -- has to measure from the stroke, not
-// from the canvas, or the way back reads as pushed in towards the middle.
-//
-// Read out of the image rather than assumed: the number belongs to the
-// generated asset, and regenerating the icons would otherwise leave this
-// pointing at the wrong place.
-static int chevron_ink_left(void) {
+// Measure the ink of the chevron, not the transparent canvas or touch slot.
+// Cache it: the player can ask at every playback poll, but the asset is fixed.
+static lv_area_t chevron_ink_bounds(void) {
+	static bool measured;
+	static lv_area_t bounds;
+	if (measured) return bounds;
+	measured = true;
+
 	const lv_image_dsc_t *dsc = &icon_chevron_left;
-	if (!dsc->data || dsc->header.cf != LV_COLOR_FORMAT_ARGB8888) {
-		return 0;
-	}
-	int w = (int)dsc->header.w;
-	int h = (int)dsc->header.h;
-	const uint8_t *px = (const uint8_t *)dsc->data;
-	for (int x = 0; x < w; x++) {
-		for (int y = 0; y < h; y++) {
-			if (px[((size_t)y * (size_t)w + (size_t)x) * 4 + 3] > 24) {
-				return x;
-			}
+	int w = dsc->header.w;
+	int h = dsc->header.h;
+	bounds = (lv_area_t){0, 0, w - 1, h - 1};
+	if (!dsc->data || dsc->header.cf != LV_COLOR_FORMAT_ARGB8888) return bounds;
+
+	lv_area_t ink = {w, h, -1, -1};
+	for (int y = 0; y < h; y++) {
+		const uint8_t *row = dsc->data + (size_t)y * dsc->header.stride;
+		for (int x = 0; x < w; x++) {
+			if (row[x * 4 + 3] <= 24) continue;
+			ink.x1 = LV_MIN(ink.x1, x);
+			ink.y1 = LV_MIN(ink.y1, y);
+			ink.x2 = LV_MAX(ink.x2, x);
+			ink.y2 = LV_MAX(ink.y2, y);
 		}
 	}
-	return 0;
+	if (ink.x2 >= 0) bounds = ink;
+	return bounds;
 }
 
-static int8_t back_btn_ink_inset;
+lv_area_t back_btn_player_ink_bounds(void) {
+	lv_area_t ink = chevron_ink_bounds();
+	int x = back_btn_padding + (back_btn_size - (int)icon_chevron_left.header.w) / 2;
+	int y = back_btn_padding + back_btn_player_top() + (back_btn_size - (int)icon_chevron_left.header.h) / 2;
+	lv_area_move(&ink, x, y);
+	return ink;
+}
 
 void back_btn_player_ink_inset(int inset) {
-	if (inset < 0) {
-		inset = 0;
-	}
-	back_btn_ink_inset = (int8_t)inset;
-	if (!back_btn_icon) {
-		return;
-	}
+	if (!back_btn_icon) return;
 	// Zero is the button as it was built: the glyph centred in its slot.
-	int dx = 0;
-	if (back_btn_ink_inset > 0) {
-		dx = (int)back_btn_ink_inset - back_btn_padding - chevron_ink_left();
-	}
+	int dx = inset > 0 ? inset - back_btn_player_ink_bounds().x1 : 0;
 	lv_obj_set_style_translate_x(back_btn_icon, dx, 0);
 }
 

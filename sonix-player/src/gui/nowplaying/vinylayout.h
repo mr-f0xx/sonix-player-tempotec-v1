@@ -64,8 +64,9 @@ typedef struct {
 } vinyl_box_t;
 
 /* All coordinates are relative to the player sheet. The artwork is decoded
- * at art_side - 2*VINYL_ART_BORDER, so the border never covers its pixels. */
-vinyl_box_t vinyl_layout_box(int screen_w, int screen_h, int deck_h);
+ * at art_side - 2*VINYL_ART_BORDER, so the border never covers its pixels.
+ * Increase the side margin only when header chrome needs more room. */
+vinyl_box_t vinyl_layout_box(int screen_w, int screen_h, int deck_h, int side_margin);
 
 typedef struct {
 	lv_obj_t *disc;

@@ -859,7 +859,9 @@ threshold, unknown stream metadata, lossy exclusion, DSD handling, the four
 design values and their safe fallback. `make -C sonix-player/tests hiresbadge-ui`
 renders all four designs on LVGL at small sleeve sizes and two font sizes: it
 checks the exact text, the official logo's gold/black pixels, corner fit,
-repeated switching, non-interactive badges and moving between sleeves.
+repeated switching, non-interactive badges, and moving between sleeves and the
+header. Snapshots check the badge's visible size and mirrored chevron inset
+with and without the player status bar.
 
 `make -C sonix-player/tests quickpanel-layout` also exercises the optional
 V1 dual-slider layout using LVGL hit-testing, both gesture positions, page

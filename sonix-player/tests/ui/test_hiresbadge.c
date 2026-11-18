@@ -67,8 +67,7 @@ static void exercise(int width, const lv_font_t *font, bool right) {
 		hiresbadge_apply(&view, style);
 		assert(lv_obj_is_hidden(view.box)); // changing design never enables it
 		lv_obj_set_hidden(view.box, false);
-		lv_obj_align(view.box, right ? LV_ALIGN_TOP_RIGHT : LV_ALIGN_TOP_LEFT,
-					 right ? -INSET : INSET, INSET);
+		hiresbadge_place_on_art(&view, art, !right, INSET);
 		lv_obj_update_layout(screen);
 		lv_area_t box, sleeve;
 		lv_obj_get_coords(view.box, &box);
@@ -94,13 +93,119 @@ static void exercise(int width, const lv_font_t *font, bool right) {
 	}
 	// The player moves one badge between the ordinary sleeve and Studio's.
 	lv_obj_t *studio = plain(screen, width);
-	lv_obj_set_parent(view.box, studio);
 	hiresbadge_apply(&view, HIRESBADGE_INITIALS);
 	lv_obj_set_hidden(view.box, false);
-	lv_obj_align(view.box, LV_ALIGN_TOP_LEFT, INSET, INSET);
+	hiresbadge_place_on_art(&view, studio, true, INSET);
 	lv_obj_update_layout(screen);
 	assert(lv_obj_get_parent(view.box) == studio);
 	assert(!lv_obj_is_hidden(view.label) && lv_obj_is_hidden(view.image));
+	lv_obj_delete(screen);
+}
+
+// All fixture panels are the same blue. Measure the rendered ink rather
+// than counting empty pixels in the chevron's canvas or the unscaled badge.
+static lv_area_t header_ink(const lv_draw_buf_t *shot, int x1, int x2, int y1, int y2) {
+	lv_area_t ink = {x2, y2, -1, -1};
+	for (int y = y1; y <= y2; y++) {
+		for (int x = x1; x <= x2; x++) {
+			if (close_to(pixel_at(shot, x, y), 0x336699, 8)) continue;
+			ink.x1 = LV_MIN(ink.x1, x);
+			ink.y1 = LV_MIN(ink.y1, y);
+			ink.x2 = LV_MAX(ink.x2, x);
+			ink.y2 = LV_MAX(ink.y2, y);
+		}
+	}
+	assert(ink.x2 >= ink.x1 && ink.y2 >= ink.y1);
+	return ink;
+}
+
+static void exercise_header(const lv_font_t *font, int status_h) {
+	lv_obj_t *screen = lv_obj_create(NULL);
+	lv_obj_set_style_pad_all(screen, 0, 0);
+	lv_obj_t *sheet = plain(screen, 240);
+	lv_obj_set_height(sheet, 320 - status_h);
+	lv_obj_align(sheet, LV_ALIGN_TOP_LEFT, 0, status_h);
+	lv_obj_t *art = plain(sheet, 200);
+	lv_obj_align(art, LV_ALIGN_TOP_MID, 0, 18);
+	lv_obj_set_style_radius(art, LV_RADIUS_CIRCLE, 0);
+	lv_obj_set_style_clip_corner(art, true, 0);
+	lv_obj_t *back = plain(screen, 36);
+	lv_obj_set_style_bg_opa(back, LV_OPA_TRANSP, 0);
+	lv_obj_align(back, LV_ALIGN_TOP_LEFT, 6, status_h + 10);
+	lv_obj_t *chevron = lv_image_create(back);
+	lv_image_set_src(chevron, &icon_chevron_left);
+	lv_obj_center(chevron);
+	lv_obj_update_layout(screen);
+	lv_draw_buf_t *shot = lv_snapshot_take(screen, LV_COLOR_FORMAT_XRGB8888);
+	assert(shot);
+	lv_area_t back_ink = header_ink(shot, 0, 60, status_h, status_h + 50);
+	lv_draw_buf_destroy(shot);
+	int height = lv_area_get_height(&back_ink);
+	const int target_height = 27;
+	int centre_y = back_ink.y1 + height / 2;
+	int inset = back_ink.x1;
+	assert(height < lv_obj_get_height(back) && inset > 6);
+
+	font_ui_14 = *font;
+	hiresbadge_view_t view;
+	hiresbadge_build(&view, art);
+	hiresbadge_place_in_header(&view, sheet, false, inset, centre_y - status_h, height);
+	assert(lv_obj_is_hidden(view.box));
+	lv_obj_set_hidden(view.box, false);
+	// Keep the measured size and padding even when the same badge changes
+	// sides and the back button uses the other corner.
+	for (int style = 0; style < HIRESBADGE_STYLE_COUNT; style++) {
+		hiresbadge_apply(&view, (hiresbadge_style_t)style);
+		for (int side = 0; side < 2; side++) {
+			bool left = side == 0;
+			lv_obj_align(back, left ? LV_ALIGN_TOP_RIGHT : LV_ALIGN_TOP_LEFT, left ? -6 : 6, status_h + 10);
+			hiresbadge_place_in_header(&view, sheet, left, inset, centre_y - status_h, height);
+			lv_obj_update_layout(screen);
+			assert(lv_obj_get_parent(view.box) == sheet);
+			shot = lv_snapshot_take(screen, LV_COLOR_FORMAT_XRGB8888);
+			assert(shot);
+			back_ink = header_ink(shot, left ? 150 : 0, left ? 239 : 89, status_h, status_h + 50);
+			lv_area_t badge = header_ink(shot, left ? 0 : 150, left ? 89 : 239, status_h, status_h + 50);
+			assert((left ? badge.x1 : 239 - badge.x2) == inset);
+			assert((left ? 239 - back_ink.x2 : back_ink.x1) == inset);
+			assert(lv_area_get_height(&badge) <= target_height);
+			assert(lv_area_get_height(&badge) < lv_obj_get_height(view.box));
+			int badge_centre = badge.y1 + lv_area_get_height(&badge) / 2;
+			assert(badge_centre >= centre_y - 1 && badge_centre <= centre_y + 1);
+			if (style == HIRESBADGE_LOGO) {
+				assert(lv_area_get_width(&badge) == target_height);
+				assert(lv_area_get_height(&badge) == target_height);
+				// Allow half a pixel when the heights have different parity.
+				assert(LV_ABS(badge.y1 + badge.y2 - back_ink.y1 - back_ink.y2) <= 1);
+				assert(close_to(pixel_at(shot, badge.x1 + target_height / 2, badge.y1 + 1), 0xf8d17c, 14));
+				assert(close_to(pixel_at(shot, badge.x1 + 2, badge.y1 + target_height * 2 / 3), 0x000000, 14));
+			}
+			lv_draw_buf_destroy(shot);
+			lv_obj_set_hidden(view.box, true);
+			int reserved = hiresbadge_header_width(&view, height);
+			assert(reserved >= lv_area_get_width(&badge) && reserved <= lv_area_get_width(&badge) + 1);
+			lv_obj_set_hidden(view.box, false);
+		}
+	}
+	// The badge rides the player sheet, not the display's global top layer.
+	lv_obj_set_x(sheet, 40);
+	lv_obj_update_layout(screen);
+	lv_area_t box;
+	lv_obj_get_coords(view.box, &box);
+	assert(box.x2 == 239 - inset + 40);
+
+	// Switching back to a non-Vinyl shape restores the native-size badge at
+	// its original artwork anchor, not just the parent.
+	hiresbadge_place_on_art(&view, art, true, INSET);
+	lv_obj_update_layout(screen);
+	lv_area_t sleeve;
+	lv_obj_get_coords(art, &sleeve);
+	lv_obj_get_coords(view.box, &box);
+	assert(lv_obj_get_parent(view.box) == art);
+	assert(box.x1 == sleeve.x1 + INSET && box.y1 == sleeve.y1 + INSET);
+	assert(lv_obj_get_style_transform_scale_x(view.box, 0) == LV_SCALE_NONE);
+	assert(lv_obj_get_style_transform_scale_y(view.box, 0) == LV_SCALE_NONE);
+	assert(lv_area_get_width(&box) == 34 && lv_area_get_height(&box) == 34);
 	lv_obj_delete(screen);
 }
 
@@ -113,6 +218,8 @@ int main(void) {
 		exercise(width, &lv_font_montserrat_20, false);
 		exercise(width, &lv_font_montserrat_20, true);
 	}
-	puts("PASS hi-res badge designs (text, official colours, corners, switching, two font sizes)");
+	exercise_header(&lv_font_montserrat_14, 0);
+	exercise_header(&lv_font_montserrat_20, 24);
+	puts("PASS hi-res badge designs, sleeve corners and back-button header alignment");
 	return 0;
 }
