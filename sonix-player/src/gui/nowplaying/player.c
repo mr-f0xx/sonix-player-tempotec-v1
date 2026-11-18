@@ -2733,12 +2733,33 @@ typedef struct {
 	char artist[256];
 	char album[256];
 	int duration;
+	bool title_only;
+} lyrics_query_t;
+
+typedef struct {
+	lyrics_query_t query;
 	lrclib_result_t result;
 	lrclib_record_t *records;
 	int count;
 } lyrics_fetch_t;
 
+// The track a question or Wi-Fi wait belongs to. A worker gets its own copy;
+// a new swipe or tap starts over with the ordinary title-and-artist search.
+static lyrics_query_t lyrics_query;
 static bool lyrics_fetching; // one search at a time
+
+static bool lyrics_search_current(const lyrics_query_t *query) {
+	device_state_t state;
+	device_state_get(&state);
+	return sheet_open && strcmp(state.current_file, query->path) == 0 && playing_local_file(&state);
+}
+
+static void lyrics_download_cb(void *user);
+
+static void lyrics_offer_title_only(const char *reason) {
+	lyrics_query.title_only = true;
+	confirm_show("lyrics_search_title_only", reason, "lyrics_download", lyrics_download_cb, NULL);
+}
 
 void player_lyrics_reload(const char *path) {
 	device_state_t state;
@@ -2762,30 +2783,29 @@ static void lyrics_fetched(void *user) {
 	lyrics_fetching = false;
 	toast_busy_end();
 
-	switch (job->result) {
-	case LRCLIB_OK: {
-		// The list is for the track it was asked about, over the player it was
-		// asked from; with either gone it is no longer wanted.
-		device_state_t state;
-		device_state_get(&state);
-		if (sheet_open && strcmp(state.current_file, job->path) == 0) {
-			lyricsearch_open(job->path, job->records, job->count);
+	if (lyrics_search_current(&job->query)) {
+		switch (job->result) {
+		case LRCLIB_OK:
+			lyricsearch_open(job->query.path, job->records, job->count);
 			job->records = NULL;
+			break;
+		case LRCLIB_INSTRUMENTAL:
+			toast_plain("lyrics_instrumental");
+			break;
+		case LRCLIB_NOT_FOUND:
+			if (job->query.title_only) {
+				toast_plain("lyrics_not_found");
+			} else {
+				lyrics_offer_title_only("lyrics_not_found");
+			}
+			break;
+		case LRCLIB_NO_TAGS:
+			toast_error("lyrics_no_tags");
+			break;
+		default:
+			toast_error("lyrics_download_failed");
+			break;
 		}
-		break;
-	}
-	case LRCLIB_INSTRUMENTAL:
-		toast_plain("lyrics_instrumental");
-		break;
-	case LRCLIB_NOT_FOUND:
-		toast_plain("lyrics_not_found");
-		break;
-	case LRCLIB_NO_TAGS:
-		toast_error("lyrics_no_tags");
-		break;
-	default:
-		toast_error("lyrics_download_failed");
-		break;
 	}
 	lrclib_free(job->records, job->count);
 	free(job);
@@ -2793,7 +2813,12 @@ static void lyrics_fetched(void *user) {
 
 static void *lyrics_fetch_worker(void *arg) {
 	lyrics_fetch_t *job = arg;
-	job->result = lrclib_search(job->title, job->artist, job->album, job->duration, &job->records, &job->count);
+	const lyrics_query_t *q = &job->query;
+	if (q->title_only) {
+		job->result = lrclib_search_title(q->title, q->album, q->duration, &job->records, &job->count);
+	} else {
+		job->result = lrclib_search(q->title, q->artist, q->album, q->duration, &job->records, &job->count);
+	}
 	if (!gui_post(lyrics_fetched, job)) {
 		lrclib_free(job->records, job->count);
 		free(job);
@@ -2808,7 +2833,7 @@ static void lyrics_search_run(void);
 //
 // With Wi-Fi off the question offers to switch it on instead of searching; the
 // search then starts by itself once the link has an address, for the file that
-// was playing when the question was answered.
+// was playing when the lookup was requested.
 // ---------------------------------------------------------------------------
 
 #define LYRICS_WIFI_POLL_MS 500
@@ -2816,7 +2841,6 @@ static void lyrics_search_run(void);
 
 static lv_timer_t *lyrics_wifi_timer;
 static uint32_t lyrics_wifi_since;
-static char lyrics_wifi_path[1024];
 
 static bool lyrics_wifi_online(void) {
 	wifi_status_t wifi;
@@ -2833,10 +2857,8 @@ static void lyrics_wifi_wait_end(void) {
 
 static void lyrics_wifi_tick_cb(lv_timer_t *t) {
 	(void)t;
-	device_state_t state;
-	device_state_get(&state);
-	// Another track, or Wi-Fi switched off again: the search is no longer wanted.
-	if (!wifi_get_enabled() || strcmp(state.current_file, lyrics_wifi_path) != 0) {
+	// Another track, a closed player or Wi-Fi switched off again: stop waiting.
+	if (!wifi_get_enabled() || !lyrics_search_current(&lyrics_query)) {
 		lyrics_wifi_wait_end();
 		toast_busy_end();
 		return;
@@ -2856,12 +2878,9 @@ static void lyrics_wifi_tick_cb(lv_timer_t *t) {
 
 static void lyrics_enable_wifi_cb(void *user) {
 	(void)user;
-	device_state_t state;
-	device_state_get(&state);
-	if (!state.current_file[0] || !playing_local_file(&state)) {
+	if (!lyrics_search_current(&lyrics_query)) {
 		return;
 	}
-	snprintf(lyrics_wifi_path, sizeof(lyrics_wifi_path), "%s", state.current_file);
 	wifi_set_enabled(true);
 	lyrics_wifi_since = lv_tick_get();
 	if (!lyrics_wifi_timer) {
@@ -2873,10 +2892,6 @@ static void lyrics_enable_wifi_cb(void *user) {
 // Wi-Fi is off and can be switched on: the question offers that in place of
 // the search.
 static bool lyrics_offer_wifi(void) {
-	if (lyrics_wifi_timer) {
-		toast_busy_dismissable("lyrics_wifi_connecting");
-		return true;
-	}
 	if (wifi_get_enabled() || !wifi_available()) {
 		return false;
 	}
@@ -2886,41 +2901,18 @@ static bool lyrics_offer_wifi(void) {
 
 // The file playing looked up on LRCLIB, on a thread of its own; what is found
 // is listed to pick from.
-static void lyrics_search_start(void) {
-	if (!lyrics_fetching && lyrics_offer_wifi()) {
-		return;
-	}
-	lyrics_search_run();
-}
-
 static void lyrics_search_run(void) {
-	if (lyrics_fetching) {
-		toast_busy_dismissable("lyrics_downloading");
-		return;
-	}
 	wifi_status_t wifi;
 	wifi_get_status(&wifi);
 	if (wifi.state != WIFI_STATE_CONNECTED) {
 		toast_error("lyrics_no_wifi");
 		return;
 	}
-	device_state_t state;
-	device_state_get(&state);
-	if (!state.current_file[0] || !playing_local_file(&state)) {
-		return;
-	}
-
 	lyrics_fetch_t *job = calloc(1, sizeof(*job));
 	if (!job) {
 		return;
 	}
-	snprintf(job->path, sizeof(job->path), "%s", state.current_file);
-	snprintf(job->title, sizeof(job->title), "%s", state.metadata.title);
-	// The track's own performer is who LRCLIB files it under; the album's
-	// artist only when the track names none.
-	snprintf(job->artist, sizeof(job->artist), "%s", state.metadata.artist[0] ? state.metadata.artist : state.metadata.album_artist);
-	snprintf(job->album, sizeof(job->album), "%s", state.metadata.album);
-	job->duration = (int)(state.progress_total_secs + 0.5);
+	job->query = lyrics_query;
 
 	pthread_t thread;
 	if (pthread_create(&thread, NULL, lyrics_fetch_worker, job) != 0) {
@@ -2934,31 +2926,65 @@ static void lyrics_search_run(void) {
 	toast_busy_dismissable("lyrics_downloading");
 }
 
-// The answer to the question below.
+static bool lyrics_search_busy(void) {
+	if (lyrics_fetching || lyrics_wifi_timer) {
+		toast_busy_dismissable(lyrics_fetching ? "lyrics_downloading" : "lyrics_wifi_connecting");
+		return true;
+	}
+	return false;
+}
+
+// Both confirmations (initial search and title-only retry) can be left up
+// while the track changes. Neither should start a search for a different file.
 static void lyrics_download_cb(void *user) {
 	(void)user;
-	lyrics_search_start();
+	if (lyrics_search_current(&lyrics_query) && !lyrics_search_busy() && !lyrics_offer_wifi()) {
+		lyrics_search_run();
+	}
 }
 
-// The button over the words: other words for the same file, in their place.
-static void lyrics_find_cb(lv_event_t *e) {
-	(void)e;
-	if (player_sheet_drag_active()) {
+static void lyrics_search_begin(bool ask_download) {
+	if (lyrics_search_busy()) {
 		return;
 	}
-	lyrics_search_start();
-}
+	device_state_t state;
+	device_state_get(&state);
+	if (!sheet_open || !playing_local_file(&state)) {
+		return;
+	}
+	snprintf(lyrics_query.path, sizeof(lyrics_query.path), "%s", state.current_file);
+	snprintf(lyrics_query.title, sizeof(lyrics_query.title), "%s", state.metadata.title);
+	// Prefer the track's performer over a compilation's album artist.
+	snprintf(lyrics_query.artist, sizeof(lyrics_query.artist), "%s",
+			 state.metadata.artist[0] ? state.metadata.artist : state.metadata.album_artist);
+	snprintf(lyrics_query.album, sizeof(lyrics_query.album), "%s", state.metadata.album);
+	lyrics_query.duration = (int)(state.progress_total_secs + 0.5);
+	lyrics_query.title_only = false;
 
-// A swipe to the words of a file that has none.
-static void lyrics_offer_download(void) {
-	if (lyrics_fetching) {
-		toast_busy_dismissable("lyrics_downloading");
+	if (!lyrics_query.title[0]) {
+		toast_error("lyrics_no_tags");
+		return;
+	}
+	if (!lyrics_query.artist[0]) {
+		lyrics_offer_title_only("trackmenu_no_artist");
 		return;
 	}
 	if (lyrics_offer_wifi()) {
 		return;
 	}
-	confirm_show("lyrics_download_title", "lyrics_download_note", "lyrics_download", lyrics_download_cb, NULL);
+	if (ask_download) {
+		confirm_show("lyrics_download_title", "lyrics_download_note", "lyrics_download", lyrics_download_cb, NULL);
+	} else {
+		lyrics_search_run();
+	}
+}
+
+// The button over the words: other words for the same file, in their place.
+static void lyrics_find_cb(lv_event_t *e) {
+	(void)e;
+	if (!player_sheet_drag_active()) {
+		lyrics_search_begin(false);
+	}
 }
 
 // The swipe that pulls the page in (on the sleeve, right to left) or pushes it
@@ -3050,7 +3076,7 @@ static void lyrics_drag_cb(lv_event_t *e) {
 		bool far = LV_ABS(dx) > cover_box_w / LYRICS_COMMIT_FRACTION;
 		if (asking) {
 			if (far) {
-				lyrics_offer_download();
+				lyrics_search_begin(true);
 			}
 		} else {
 			lyrics_commit(opening ? far : !far);

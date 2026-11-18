@@ -14,7 +14,7 @@ typedef enum {
 	LRCLIB_OK,			 // at least one record with words
 	LRCLIB_NOT_FOUND,	 // nothing for these tags
 	LRCLIB_INSTRUMENTAL, // only records that say the track has no words
-	LRCLIB_NO_TAGS,		 // no title or no artist to search with
+	LRCLIB_NO_TAGS,		 // missing a tag required for this search
 	LRCLIB_NETWORK,		 // no answer, or not one that could be read
 } lrclib_result_t;
 
@@ -33,6 +33,11 @@ typedef struct {
 // Free them with lrclib_free().
 lrclib_result_t lrclib_search(const char *title, const char *artist, const char *album, int duration_secs,
 							  lrclib_record_t **records, int *count);
+
+// Searches the track name alone, across all artists. Album and duration are
+// only used to rank the returned records, as above.
+lrclib_result_t lrclib_search_title(const char *title, const char *album, int duration_secs,
+									lrclib_record_t **records, int *count);
 
 void lrclib_free(lrclib_record_t *records, int count);
 
