@@ -10,6 +10,7 @@
 #include "src/system/core/lang.h"
 #include "src/system/device/axpcharge.h"
 #include "src/system/device/batteryguard.h"
+#include "src/system/device/batteryhistory.h"
 #include "src/system/device/batteryprofile.h"
 #include "src/system/device/power.h"
 #include "src/system/device/system.h"
@@ -45,6 +46,7 @@ typedef struct {
 static lv_obj_t *screen;
 static lv_timer_t *poll;
 static lv_obj_t *level_value, *voltage_value, *charge_limit_value;
+static lv_obj_t *last_charge_value, *charge_point_value, *on_time_value;
 static lv_obj_t *runtime_value, *draw_value, *estimate_note;
 static lv_obj_t *load_value, *baseline_value, *baseline_note, *baseline_load_value, *delta_value, *save_row;
 static batteryprofile_t sample;
@@ -103,6 +105,41 @@ static void set_reading(lv_obj_t *label, int n, const char *unit) {
 		snprintf(text, sizeof(text), "%d%s", n, unit);
 		set_text(label, text);
 	}
+}
+
+static void refresh_history(void) {
+	// The power manager tracks charge history even when the profiler is closed.
+	batteryhistory_saved_t history;
+	if (!batteryhistory_snapshot(&history)) {
+		set_text(last_charge_value, tr("system_battery_not_recorded"));
+		set_text(charge_point_value, NO_VALUE);
+		set_text(on_time_value, NO_VALUE);
+		return;
+	}
+
+	char text[64];
+	time_t when = (time_t)history.marked_at;
+	struct tm local;
+	bool dated = when > 0 && (int64_t)when == history.marked_at && localtime_r(&when, &local) &&
+				 strftime(text, sizeof(text), "%Y-%m-%d %H:%M", &local) != 0;
+	set_text(last_charge_value, dated ? text : tr("system_battery_time_not_set"));
+	if (history.mark == BATTERYHISTORY_MARK_CHARGED_TO_TARGET) {
+		snprintf(text, sizeof(text), tr("system_battery_charged_to"), history.charge_target);
+		set_text(charge_point_value, text);
+	} else {
+		set_text(charge_point_value, tr("system_battery_unplugged"));
+	}
+
+	unsigned long long minutes = history.on_seconds / 60;
+	unsigned long long hours = minutes / 60;
+	if (hours >= 24) {
+		snprintf(text, sizeof(text), "%llud %02lluh", hours / 24, hours % 24);
+	} else if (hours) {
+		snprintf(text, sizeof(text), "%lluh %02llum", hours, minutes % 60);
+	} else {
+		snprintf(text, sizeof(text), "%llum", minutes);
+	}
+	set_text(on_time_value, text);
 }
 
 static void set_load(lv_obj_t *label, load_t value) {
@@ -171,6 +208,7 @@ static void refresh(void) {
 	set_reading(level_value, reading.percent, "%");
 	set_reading(voltage_value, reading.pmic_mv, " mV");
 	set_reading(charge_limit_value, axpcharge_current_setting_ma(), " mA");
+	refresh_history();
 	set_load(load_value, load);
 
 	bool available = current.source != BATTERYPROFILE_NONE;
@@ -301,6 +339,11 @@ lv_obj_t *batteryprofilepage_init(gui_config_t *cfg) {
 	voltage_value = metric(telemetry, "battery_profile_voltage");
 	metric(telemetry, "battery_profile_charge_current"); // no current ADC on the V1
 	charge_limit_value = metric(telemetry, "battery_profile_charge_limit");
+
+	lv_obj_t *history = card(container);
+	last_charge_value = metric(history, "system_battery_last_charge");
+	charge_point_value = metric(history, "system_battery_charge_point");
+	on_time_value = metric(history, "system_battery_on_time");
 
 	save_row = settingsrow_action(container, "battery_profile_save", save_cb, NULL);
 	lv_obj_t *resample = settingsrow_action(container, "battery_profile_resample", resample_cb, NULL);

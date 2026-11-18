@@ -76,7 +76,7 @@ The `vinylayout` UI test checks the Vinyl sleeve/record arithmetic at 240×320 a
 
 The `playerdeck` UI test exercises the V1 deck's real LVGL flex layout while switching between Standard and Waveform, including large font metrics and the fallback when waveform allocation fails. It checks row spacing and that every playback button stays clear of the bottom edge.
 
-The `batteryprofile` test uses temporary sysfs files and a wrapped I²C adapter to check stock V1 units, missing or invalid readings, read-only charge-limit access, discharge estimates, and same-source deltas. `batteryprofile-ui` drives the production page at 240×320 with fake battery samples. It covers USB and screen-off behavior, baseline and resample actions, polling off-page, and translated metric layouts. To validate a real cell's load response, follow the [on-device A/B procedure](../../docs/battery-profiler.md).
+The `batteryprofile` test uses temporary sysfs files and a wrapped I²C adapter to check stock V1 units, missing or invalid readings, read-only charge-limit access, discharge estimates, and same-source deltas. `batteryprofile-ui` drives the production page at 240×320 with fake battery samples. It covers USB and screen-off behavior, charge history, baseline and resample actions, polling off-page, and translated metric layouts. To validate a real cell's load response, follow the [on-device A/B procedure](../../docs/battery-profiler.md).
 
 The `musicsettings-rows` UI test checks that NOS does not reuse Filters' waveform bitmap and that the expandable DSD gain card shares the icon/title columns and collapsed midline of ordinary Music settings rows across all 11 shipped languages, all five themes, both switch states and larger text.
 

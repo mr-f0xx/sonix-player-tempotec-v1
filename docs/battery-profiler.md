@@ -2,7 +2,9 @@
 
 Open **Settings → System → Battery profiler**. While visible, it refreshes every two seconds. It shows the battery level, the AXP2101's battery voltage in mV, and the PMIC's programmed charge-current limit in mA. They are read-only: opening this page does not change any charging, playback or sleep settings.
 
-The programmed limit is **not** current flowing into the cell. The AXP2101 has no public current ADC, and the bundled 1.3 `axp_battery/current_now` returns a fixed 200,000 µA, not a sensor reading. Neither that value nor the driver's fixed “Good” health value is displayed as telemetry. The V1 does not report measured charge current, full-charge capacity or battery wear. Charge history remains in **System → About**.
+The programmed limit is **not** current flowing into the cell. The AXP2101 has no public current ADC, and the bundled 1.3 `axp_battery/current_now` returns a fixed 200,000 µA, not a sensor reading. Neither that value nor the driver's fixed “Good” health value is displayed as telemetry. The V1 does not report measured charge current, full-charge capacity or battery wear.
+
+Below the live readings, the profiler shows the last charge date and time, whether the battery reached its charge target or was unplugged, and how long the player has been on since then. On-time includes standby, but not time spent powered off.
 
 ## Compare two playback setups
 

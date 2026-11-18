@@ -2,6 +2,7 @@
 // units without touching host sysfs, and run both the sampler and the UI.
 #include <assert.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <time.h>
 
@@ -12,6 +13,7 @@
 #include "src/system/audio/alsa-controls.h"
 #include "src/system/audio/audio.h"
 #include "src/system/core/lang.h"
+#include "src/system/device/batteryhistory.h"
 #include "src/system/device/batteryprofile.h"
 #include "src/system/net/wifi.h"
 
@@ -26,7 +28,8 @@ bool switcher_back_drag_active(void) { return false; }
 void switcher_attach_back_gesture(lv_obj_t *obj) { (void)obj; }
 
 static int seconds, percent = 50, rrt_minutes = 300, pmic_mv = 3950, charge_limit = 500;
-static unsigned samples, voltage_reads, limit_reads;
+static unsigned samples, voltage_reads, limit_reads, history_reads;
+static batteryhistory_saved_t history;
 static bool cable, screen_on = true, heavy;
 static lv_timer_t *sample_timer;
 
@@ -44,6 +47,12 @@ batteryprofile_reading_t __wrap_batteryprofile_read(const char *root, int cached
 		.percent = cached, .cw2015_percent = true, .gauge_minutes = rrt_minutes,
 		.pmic_mv = voltage ? pmic_mv : -1,
 	};
+}
+
+bool batteryhistory_snapshot(batteryhistory_saved_t *out) {
+	history_reads++;
+	*out = history;
+	return history.mark != BATTERYHISTORY_MARK_NONE;
 }
 
 int axpcharge_current_setting_ma(void) { limit_reads++; return charge_limit; }
@@ -121,6 +130,8 @@ static void flush_cb(lv_display_t *display, const lv_area_t *area, uint8_t *pixe
 
 int main(int argc, char **argv) {
 	assert(argc == 2);
+	assert(setenv("TZ", "UTC0", 1) == 0);
+	tzset();
 	lv_init();
 	font_ui_14 = font_ui_18 = lv_font_montserrat_14;
 	font_ui_16 = lv_font_montserrat_16;
@@ -138,7 +149,7 @@ int main(int argc, char **argv) {
 	lv_obj_t *other = lv_screen_active();
 	lv_obj_t *page = batteryprofilepage_init(&cfg);
 	advance(4);
-	assert(samples == 0); // no probing at boot or on other pages
+	assert(samples == 0 && history_reads == 0); // no probing on other pages
 	lv_screen_load(page);
 	assert(samples == 1);
 	lv_obj_t *save = lv_obj_get_parent(named(page, "battery_profile_save"));
@@ -147,8 +158,21 @@ int main(int argc, char **argv) {
 	check_metric(page, "battery_profile_voltage", "3950 mV");
 	check_metric(page, "battery_profile_charge_current", "—");
 	check_metric(page, "battery_profile_charge_limit", "500 mA");
+	check_metric(page, "system_battery_level", "50%");
+	check_metric(page, "system_battery_last_charge", tr("system_battery_not_recorded"));
+	check_metric(page, "system_battery_charge_point", "—");
+	check_metric(page, "system_battery_on_time", "—");
 
+	history = (batteryhistory_saved_t){
+		.mark = BATTERYHISTORY_MARK_CHARGED_TO_TARGET,
+		.charge_target = 80,
+		.marked_at = 1704067200,
+		.on_seconds = 62 * 60,
+	};
 	advance(10);
+	check_metric(page, "system_battery_last_charge", "2024-01-01 00:00");
+	check_metric(page, "system_battery_charge_point", "Charged to 80%");
+	check_metric(page, "system_battery_on_time", "1h 02m");
 	assert(!lv_obj_has_state(save, LV_STATE_DISABLED));
 	check_metric(page, "battery_profile_runtime", "4.9 h");
 	check_metric(page, "battery_profile_draw", "140 mA");
@@ -168,16 +192,18 @@ int main(int argc, char **argv) {
 	assert(find_label(page, "4.4 mm · High gain · 35%\nPEQ: On · Wi-Fi: On\nPlaying"));
 
 	// Screen-off tracking uses the same sample but skips painted/PMIC fields.
-	unsigned before = samples, raw = voltage_reads, limits = limit_reads;
+	unsigned before = samples, raw = voltage_reads, limits = limit_reads, histories = history_reads;
 	screen_on = false;
+	history.on_seconds += 60;
 	lv_timer_set_period(sample_timer, 5000);
 	advance(15);
-	assert(samples > before && voltage_reads == raw && limit_reads == limits);
+	assert(samples > before && voltage_reads == raw && limit_reads == limits && history_reads == histories);
 	screen_on = true;
 	lv_timer_set_period(sample_timer, 2000);
 	lv_timer_ready(sample_timer);
 	advance(1);
 	check_metric(page, "battery_profile_delta", "+60 mA (+43%)");
+	check_metric(page, "system_battery_on_time", "1h 03m");
 
 	cable = true;
 	advance(2);
@@ -200,9 +226,14 @@ int main(int argc, char **argv) {
 
 	lv_screen_load(other);
 	before = samples;
+	histories = history_reads;
+	history = (batteryhistory_saved_t){.mark = BATTERYHISTORY_MARK_UNPLUGGED, .on_seconds = 25 * 3600};
 	advance(8);
-	assert(samples == before);
+	assert(samples == before && history_reads == histories);
 	lv_screen_load(page);
+	check_metric(page, "system_battery_last_charge", tr("system_battery_time_not_set"));
+	check_metric(page, "system_battery_charge_point", tr("system_battery_unplugged"));
+	check_metric(page, "system_battery_on_time", "1d 01h");
 	advance(10);
 	check_metric(page, "battery_profile_delta", "+60 mA (+43%)");
 	pmic_mv = charge_limit = rrt_minutes = -1;
@@ -249,9 +280,12 @@ int main(int argc, char **argv) {
 		check_metric(page, "battery_profile_delta", "+0 mA (+0%)");
 		check_metric(page, "battery_profile_voltage", "—");
 		check_metric(page, "battery_profile_charge_limit", "—");
+		check_metric(page, "system_battery_last_charge", tr("system_battery_time_not_set"));
+		check_metric(page, "system_battery_charge_point", tr("system_battery_unplugged"));
+		check_metric(page, "system_battery_on_time", "1d 01h");
 		named(page, "battery_profile_save");
 		named(page, "battery_profile_resample");
 	}
-	puts("PASS battery profiler UI (240x320, 11 languages, baseline, load changes, charger, resample and navigation)");
+	puts("PASS battery profiler UI (240x320, 11 languages, charge history, baseline, load changes, charger, resample and navigation)");
 	return 0;
 }
