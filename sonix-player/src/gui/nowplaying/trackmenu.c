@@ -1461,6 +1461,112 @@ void trackmenu_details_open(const char *path) {
 	switcher_set_player_return(NULL);
 }
 
+// ---------------------------------------------------------------------------
+// The A-B loop. One row in the track menu opens a second, focused menu:
+// the track tables are already eight to ten rows deep, and three rows of
+// their own would crowd out the entries that are there. The points are
+// marked at the position the player reports, and the progress bar shows
+// them.
+
+// The position to mark, or -1 when there is no timeline to put a point on.
+// A live stream has no position, and a track whose length is not known has
+// no scale for one.
+static double ab_markable_position(void) {
+	device_state_t state;
+	device_state_get(&state);
+	if (!state.current_file[0] || state.live || state.progress_total_secs <= 0.0 ||
+		state.progress_current_secs < 0.0) {
+		return -1.0;
+	}
+	return state.progress_current_secs;
+}
+
+static void ab_mark_a_cb(void *user) {
+	(void)user;
+	double pos = ab_markable_position();
+	if (pos < 0.0) {
+		gui_notify_popup("ab_loop_no_position");
+		return;
+	}
+	audio_ab_set_a(pos);
+	char time[24];
+	formatDoubleSeconds(pos, time, sizeof(time));
+	char msg[48];
+	snprintf(msg, sizeof(msg), "%s %s", tr("ab_loop_a_set_at"), time);
+	toast_plain(msg);
+}
+
+static void ab_mark_b_cb(void *user) {
+	(void)user;
+	double pos = ab_markable_position();
+	if (pos < 0.0) {
+		gui_notify_popup("ab_loop_no_position");
+		return;
+	}
+	audio_ab_set_b(pos);
+	char time[24];
+	formatDoubleSeconds(pos, time, sizeof(time));
+	char msg[48];
+	snprintf(msg, sizeof(msg), "%s %s", tr("ab_loop_b_set_at"), time);
+	toast_plain(msg);
+}
+
+static void ab_clear_cb(void *user) {
+	(void)user;
+	if (audio_ab_a() < 0.0 && audio_ab_b() < 0.0) {
+		return; // nothing set: the tap has nothing to undo
+	}
+	audio_ab_clear();
+	toast_plain("ab_loop_cleared");
+}
+
+// The row the track menu opens: the second menu, anchored where the first
+// one was. The action runs after the first popover has closed, so the two
+// never overlap. Public, because the audiobook menu opens the same second
+// menu from the player (see trackmenu.h).
+void trackmenu_ab_loop_open(void *user) {
+	(void)user;
+	static const popover_item_t ITEMS[] = {
+		{"ab_loop_mark_a", ab_mark_a_cb, NULL},
+		{"ab_loop_mark_b", ab_mark_b_cb, NULL},
+		{"ab_loop_clear", ab_clear_cb, NULL},
+	};
+	// The anchor is the overflow button, when the row came from the track
+	// menu. The audiobook menu has no track menu in front of it -- its own
+	// popover was opened straight from the player -- so the anchor may never
+	// have been set; the screen is where the menu then centres itself.
+	// Not through trackmenu_show_items(): this is the menu the row reaches,
+	// not a table that may carry the row.
+	lv_obj_t *anchor = artist_menu_anchor ? artist_menu_anchor : lv_screen_active();
+	popover_show(anchor, ITEMS, (int)(sizeof(ITEMS) / sizeof(ITEMS[0])));
+}
+
+// Shows a track-menu table, dropping the A-B loop row when the playback
+// settings switch turns it off: a listener who never marks points should
+// not see the row, and the feature it reaches is not offered at all.
+//
+// The tables stay static so the string-extraction tool reads their
+// initialisers; what is filtered is the copy shown. The row is found by its
+// label, the one thing every entry of a table is guaranteed to have.
+void trackmenu_show_items(lv_obj_t *anchor, const popover_item_t *items, int count) {
+	if (musicsettings_ab_loop_enabled()) {
+		popover_show(anchor, items, count);
+		return;
+	}
+	popover_item_t without[12];
+	int n = 0;
+	for (int i = 0; i < count; i++) {
+		if (n >= (int)(sizeof(without) / sizeof(without[0]))) {
+			break;
+		}
+		if (items[i].label && strcmp(items[i].label, "ab_loop") == 0) {
+			continue;
+		}
+		without[n++] = items[i];
+	}
+	popover_show(anchor, without, n);
+}
+
 void trackmenu_open(lv_obj_t *anchor) {
 	// Separate tables rather than changing a label after initialization,
 	// because of the string-extraction tool: it reads popover_item_t initialisers
@@ -1475,6 +1581,7 @@ void trackmenu_open(lv_obj_t *anchor) {
 	static const popover_item_t ITEMS[] = {
 		{"trackmenu_back", trackmenu_back_cb, NULL},
 		{"trackmenu_queue", open_queue_cb, NULL},
+		{"ab_loop", trackmenu_ab_loop_open, NULL},
 		{"smartmix_start", start_genius_cb, NULL},
 		{"add_to_playlist", add_to_playlist_cb, NULL},
 		{"show_album", open_album_cb, NULL},
@@ -1485,6 +1592,7 @@ void trackmenu_open(lv_obj_t *anchor) {
 	static const popover_item_t ITEMS_DELETE[] = {
 		{"trackmenu_back", trackmenu_back_cb, NULL},
 		{"trackmenu_queue", open_queue_cb, NULL},
+		{"ab_loop", trackmenu_ab_loop_open, NULL},
 		{"smartmix_start", start_genius_cb, NULL},
 		{"add_to_playlist", add_to_playlist_cb, NULL},
 		{"show_album", open_album_cb, NULL},
@@ -1496,6 +1604,7 @@ void trackmenu_open(lv_obj_t *anchor) {
 	static const popover_item_t ITEMS_TIDAL[] = {
 		{"trackmenu_back", trackmenu_back_cb, NULL},
 		{"trackmenu_queue", open_queue_cb, NULL},
+		{"ab_loop", trackmenu_ab_loop_open, NULL},
 		{"smartmix_start", start_genius_cb, NULL},
 		{"add_to_playlist", add_to_playlist_cb, NULL},
 		{"show_album", open_album_cb, NULL},
@@ -1506,6 +1615,7 @@ void trackmenu_open(lv_obj_t *anchor) {
 	static const popover_item_t ITEMS_PODCAST[] = {
 		{"trackmenu_back", trackmenu_back_cb, NULL},
 		{"trackmenu_queue", open_queue_cb, NULL},
+		{"ab_loop", trackmenu_ab_loop_open, NULL},
 		{"add_to_playlist", add_to_playlist_cb, NULL},
 		{"trackmenu_show_podcast", open_album_cb, NULL},
 		{"details", open_details_cb, NULL},
@@ -1518,6 +1628,7 @@ void trackmenu_open(lv_obj_t *anchor) {
 	static const popover_item_t ITEMS_KEEP[] = {
 		{"trackmenu_back", trackmenu_back_cb, NULL},
 		{"trackmenu_queue", open_queue_cb, NULL},
+		{"ab_loop", trackmenu_ab_loop_open, NULL},
 		{"smartmix_start", start_genius_cb, NULL},
 		{"add_to_playlist", add_to_playlist_cb, NULL},
 		{"show_album", open_album_cb, NULL},
@@ -1545,15 +1656,15 @@ void trackmenu_open(lv_obj_t *anchor) {
 	// their own action to the upstream row set. A local track gets the delete
 	// row only when the existing safety setting is enabled.
 	if (keepable) {
-		popover_show(anchor, ITEMS_KEEP, (int)(sizeof(ITEMS_KEEP) / sizeof(ITEMS_KEEP[0])));
+		trackmenu_show_items(anchor, ITEMS_KEEP, (int)(sizeof(ITEMS_KEEP) / sizeof(ITEMS_KEEP[0])));
 	} else if (tidal_track) {
-		popover_show(anchor, ITEMS_TIDAL, (int)(sizeof(ITEMS_TIDAL) / sizeof(ITEMS_TIDAL[0])));
+		trackmenu_show_items(anchor, ITEMS_TIDAL, (int)(sizeof(ITEMS_TIDAL) / sizeof(ITEMS_TIDAL[0])));
 	} else if (podcast) {
-		popover_show(anchor, ITEMS_PODCAST, (int)(sizeof(ITEMS_PODCAST) / sizeof(ITEMS_PODCAST[0])));
+		trackmenu_show_items(anchor, ITEMS_PODCAST, (int)(sizeof(ITEMS_PODCAST) / sizeof(ITEMS_PODCAST[0])));
 	} else if (deletable) {
-		popover_show(anchor, ITEMS_DELETE, (int)(sizeof(ITEMS_DELETE) / sizeof(ITEMS_DELETE[0])));
+		trackmenu_show_items(anchor, ITEMS_DELETE, (int)(sizeof(ITEMS_DELETE) / sizeof(ITEMS_DELETE[0])));
 	} else {
-		popover_show(anchor, ITEMS, (int)(sizeof(ITEMS) / sizeof(ITEMS[0])));
+		trackmenu_show_items(anchor, ITEMS, (int)(sizeof(ITEMS) / sizeof(ITEMS[0])));
 	}
 }
 

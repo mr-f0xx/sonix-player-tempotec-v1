@@ -57,6 +57,11 @@ bool musicsettings_playlists_first(void);
 
 bool musicsettings_endless_shuffle(void);
 
+// The A-B loop row in the now-playing menu. The loop itself is armed by
+// marking its two points, so this switch only decides whether the menu
+// reaches it: off, the row is not built. On by default.
+bool musicsettings_ab_loop_enabled(void);
+
 // Whether tracks may be deleted from library selections and the now-playing
 // menu. Off by default; Music > Settings > Library > Allow deleting tracks.
 bool musicsettings_allow_delete(void);
