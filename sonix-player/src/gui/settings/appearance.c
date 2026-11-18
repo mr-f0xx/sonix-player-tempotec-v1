@@ -999,7 +999,9 @@ void appearance_init(gui_config_t *cfg) {
 	lv_obj_set_flex_flow(accent_row, LV_FLEX_FLOW_ROW_WRAP);
 	lv_obj_set_flex_align(accent_row, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 
-	for (int i = 0; i < THEME_ACCENT_COUNT; i++) {
+	static const int VISIBLE_ACCENTS[] = {1, 2, 4, 6, 8, 9};
+	for (size_t k = 0; k < sizeof(VISIBLE_ACCENTS) / sizeof(VISIBLE_ACCENTS[0]); k++) {
+		int i = VISIBLE_ACCENTS[k];
 		btn_accent[i] = make_accent_circle(accent_row, i, compact);
 	}
 
