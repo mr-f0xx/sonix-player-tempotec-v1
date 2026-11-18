@@ -596,9 +596,9 @@ corner of the artwork, the hi-res badge uses the left corner instead. With the
 Vinyl art shape selected, the badge uses the chosen corner of the player
 header in Standard, Waveform, Alternative and Vinyl. The back chevron takes
 the opposite corner, and the two have matching edge insets and vertical
-centers. The logo is slightly taller for legibility. Album Art Max reserves
-its corners for text and has no badge. Waveform's Standard fallback uses the
-Standard setting.
+centers. The logo measures 25 × 25 pixels in the V1 header. Album Art Max
+reserves its corners for text and has no badge. Waveform's Standard fallback
+uses the Standard setting.
 
 ### Both control-centre sliders
 

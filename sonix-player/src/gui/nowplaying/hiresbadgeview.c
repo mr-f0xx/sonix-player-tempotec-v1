@@ -4,19 +4,27 @@
 #include "src/gui/shell/icons.h"
 
 static int header_scale(int chevron_height, int design_height) {
-	// Give the badge one extra pixel above and below the chevron for legibility.
-	// Anchor and width calculations still use the same scale for every design.
-	int target_height = chevron_height + 2;
+	// Scale the logo to 25 px against the V1's 22 px chevron. The same
+	// scale keeps the drawn badge and its reserved width in agreement.
+	int target_height = chevron_height + 3;
 	int natural_height = LV_MAX(icon_hires_audio.header.h, design_height);
 	return LV_CLAMP(1, target_height * LV_SCALE_NONE / natural_height, LV_SCALE_NONE);
 }
 
+static int scaled_length(int length, int scale) {
+	return (length * scale + LV_SCALE_NONE - 1) / LV_SCALE_NONE;
+}
+
 static void fit_badge(hiresbadge_view_t *view) {
-	int scale = view->header_height > 0
-		? header_scale(view->header_height, lv_obj_get_height(view->box)) : LV_SCALE_NONE;
+	int height = lv_obj_get_height(view->box);
+	int scale = view->header_height > 0 ? header_scale(view->header_height, height) : LV_SCALE_NONE;
 	if (lv_obj_get_style_transform_scale_x(view->box, 0) != scale) {
 		lv_obj_set_style_transform_scale(view->box, scale, 0);
 	}
+	// Scale from the top edge so rounding at both ends doesn't add a row
+	// to the odd-sized logo. Centre the result on the chevron afterwards.
+	int dy = view->header_height > 0 ? -scaled_length(height, scale) / 2 : 0;
+	if (lv_obj_get_style_translate_y(view->box, 0) != dy) lv_obj_set_style_translate_y(view->box, dy, 0);
 }
 
 static void size_changed_cb(lv_event_t *e) {
@@ -30,9 +38,6 @@ void hiresbadge_build(hiresbadge_view_t *view, lv_obj_t *parent) {
 	lv_obj_set_size(view->box, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
 	lv_obj_set_scrollable(view->box, false);
 	lv_obj_set_clickable(view->box, false);
-	// The outer edge and vertical centre stay fixed when the header scales
-	// the badge. On artwork the transform is reset to native size.
-	lv_obj_set_style_transform_pivot_y(view->box, lv_pct(50), 0);
 	lv_obj_add_event_cb(view->box, size_changed_cb, LV_EVENT_SIZE_CHANGED, view);
 
 	// Compact, high-contrast text like the reference, legible on any sleeve.
@@ -78,19 +83,18 @@ int hiresbadge_header_width(const hiresbadge_view_t *view, int chevron_height) {
 	lv_obj_t *design = lv_obj_is_hidden(view->image) ? view->label : view->image;
 	int width = lv_obj_calc_dynamic_width(design, LV_STYLE_WIDTH);
 	int scale = header_scale(chevron_height, lv_obj_calc_dynamic_height(design, LV_STYLE_HEIGHT));
-	return (width * scale + LV_SCALE_NONE - 1) / LV_SCALE_NONE;
+	return scaled_length(width, scale);
 }
 
-static void place(hiresbadge_view_t *view, lv_obj_t *parent, bool left, int inset, int y, int dy) {
+static void place(hiresbadge_view_t *view, lv_obj_t *parent, bool left, int inset, int y) {
 	if (lv_obj_get_parent(view->box) != parent) lv_obj_set_parent(view->box, parent);
-	if (lv_obj_get_style_translate_y(view->box, 0) != dy) lv_obj_set_style_translate_y(view->box, dy, 0);
 	lv_obj_align(view->box, left ? LV_ALIGN_TOP_LEFT : LV_ALIGN_TOP_RIGHT, left ? inset : -inset, y);
 }
 
 void hiresbadge_place_on_art(hiresbadge_view_t *view, lv_obj_t *art, bool left, int inset) {
 	view->header_height = 0;
 	fit_badge(view);
-	place(view, art, left, inset, inset, 0);
+	place(view, art, left, inset, inset);
 }
 
 void hiresbadge_place_in_header(hiresbadge_view_t *view, lv_obj_t *sheet, bool left, int inset,
@@ -103,6 +107,6 @@ void hiresbadge_place_in_header(hiresbadge_view_t *view, lv_obj_t *sheet, bool l
 	if (lv_obj_get_style_transform_pivot_x(view->box, 0) != pivot_x) {
 		lv_obj_set_style_transform_pivot_x(view->box, pivot_x, 0);
 	}
-	// Anchor the centre even when the design or text size changes.
-	place(view, sheet, left, inset, centre_y, lv_pct(-50));
+	// fit_badge() supplies the offset from the centre to the scaled top edge.
+	place(view, sheet, left, inset, centre_y);
 }

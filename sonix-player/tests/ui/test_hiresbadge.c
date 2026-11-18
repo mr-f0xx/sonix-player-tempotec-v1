@@ -141,7 +141,7 @@ static void exercise_header(const lv_font_t *font, int status_h) {
 	lv_area_t back_ink = header_ink(shot, 0, 60, status_h, status_h + 50);
 	lv_draw_buf_destroy(shot);
 	int height = lv_area_get_height(&back_ink);
-	int target_height = height + 2;
+	const int target_height = 25;
 	int centre_y = back_ink.y1 + height / 2;
 	int inset = back_ink.x1;
 	assert(height < lv_obj_get_height(back) && inset > 6);
@@ -173,8 +173,10 @@ static void exercise_header(const lv_font_t *font, int status_h) {
 			int badge_centre = badge.y1 + lv_area_get_height(&badge) / 2;
 			assert(badge_centre >= centre_y - 1 && badge_centre <= centre_y + 1);
 			if (style == HIRESBADGE_LOGO) {
-				assert(badge.y1 == back_ink.y1 - 1 && badge.y2 == back_ink.y2 + 1);
 				assert(lv_area_get_width(&badge) == target_height);
+				assert(lv_area_get_height(&badge) == target_height);
+				// An odd-height logo can only centre to within half a pixel.
+				assert(LV_ABS(badge.y1 + badge.y2 - back_ink.y1 - back_ink.y2) == 1);
 				assert(close_to(pixel_at(shot, badge.x1 + target_height / 2, badge.y1 + 1), 0xf8d17c, 14));
 				assert(close_to(pixel_at(shot, badge.x1 + 2, badge.y1 + target_height * 2 / 3), 0x000000, 14));
 			}
