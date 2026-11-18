@@ -4,9 +4,9 @@
 #include "src/gui/shell/icons.h"
 
 static int header_scale(int chevron_height, int design_height) {
-	// Scale the logo to 26 px against the V1's 22 px chevron. The same
+	// Scale the logo to 27 px against the V1's 22 px chevron. The same
 	// scale keeps the drawn badge and its reserved width in agreement.
-	int target_height = chevron_height + 4;
+	int target_height = chevron_height + 5;
 	int natural_height = LV_MAX(icon_hires_audio.header.h, design_height);
 	return LV_CLAMP(1, target_height * LV_SCALE_NONE / natural_height, LV_SCALE_NONE);
 }
