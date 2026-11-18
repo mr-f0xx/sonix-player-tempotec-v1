@@ -264,7 +264,7 @@ This fork builds on the upstream [Sonix Player](https://github.com/Jepl4r/sonix-
 - **Audiobooks and e-books**: chapters, bookmarks and speed control, plus an EPUB reader.
 - **Wireless**: Wi-Fi, Bluetooth headphones and speakers, a Bluetooth receiver, AirPlay, DLNA, Wi-Fi file transfer and SonixLink.
 - **Tools and games**: a file manager, a Game Boy / Game Boy Color emulator, and Flappy Bird.
-- **Screen and power**: rounded corners (with a choice of how round), brightness, a screensaver, standby, a low-battery warning and a battery screen when off.
+- **Screen and power**: rounded corners (with a choice of how round), brightness, a screensaver, standby, a low-battery warning, a battery screen when off, and a [battery profiler](docs/battery-profiler.md) for comparing estimated playback loads.
 
 Local audio decoder inputs include WAV, FLAC, MP3, Ogg Vorbis, Opus, M4A/M4B/MP4, AAC, ALAC, WavPack, APE, AIFF/AIFC, CAF and DSD (DSF/DFF). Streaming services depend on third-party availability and an active account where applicable — see [Streaming: Tidal, Qobuz and credentials](#streaming-tidal-qobuz-and-credentials).
 

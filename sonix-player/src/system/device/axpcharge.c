@@ -29,6 +29,7 @@ void axpcharge_set(bool limit_voltage, bool limit_current) {
 void axpcharge_set_charging_enabled(bool enabled) { (void)enabled; }
 void axpcharge_tick(void) {}
 bool axpcharge_holding(void) { return false; }
+int axpcharge_current_setting_ma(void) { return -1; }
 
 #else
 
@@ -135,6 +136,16 @@ static bool set_field(uint8_t reg, uint8_t mask, uint8_t target) {
 }
 
 static int current_ma(unsigned n) { return n <= 8 ? (int)n * 25 : 200 + ((int)n - 8) * 100; }
+
+int axpcharge_current_setting_ma(void) {
+	uint8_t reg;
+	if (!axpcharge_applies() || !axp_read(AXP_REG_CURRENT, &reg)) {
+		return -1;
+	}
+	unsigned field = reg & AXP_CURRENT_MASK;
+	// AXP2101 v1.4 §6.13.2.60: the code table reserves 1–3 and 17–31.
+	return field == 0 || (field >= 4 && field <= 16) ? current_ma(field) : -1;
+}
 
 static bool apply_voltage(void) {
 	uint8_t v;

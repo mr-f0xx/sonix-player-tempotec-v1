@@ -147,6 +147,18 @@ $(BUILD)/test_batteryhistory: $(BATTERYHISTORY_SRC) $(ROOT)/src/system/device/ba
 	@mkdir -p $(BUILD)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ $(BATTERYHISTORY_SRC) $(LDFLAGS) $(LDLIBS)
 
+# Live battery profiler: stock sysfs units, rate estimation, comparison and
+# read-only PMIC access. No hardware or LVGL required.
+BATTERYPROFILE_SRC = test_batteryprofile.c $(ROOT)/src/system/device/batteryprofile.c $(ROOT)/src/system/device/axpcharge.c
+.PHONY: batteryprofile
+batteryprofile: $(BUILD)/test_batteryprofile
+	$(BUILD)/test_batteryprofile
+
+$(BUILD)/test_batteryprofile: $(BATTERYPROFILE_SRC) $(ROOT)/src/system/device/batteryprofile.h $(ROOT)/src/system/device/batteryguard.h $(ROOT)/src/system/device/axpcharge.h
+	@mkdir -p $(BUILD)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ $(BATTERYPROFILE_SRC) $(LDFLAGS) $(LDLIBS) \
+		-Wl,--wrap=open,--wrap=open64,--wrap=ioctl,--wrap=close
+
 # Exact percentage cutoff and hysteresis used by both charger paths.
 .PHONY: chargelimit
 chargelimit: $(BUILD)/test_chargelimit
@@ -1082,6 +1094,22 @@ musicsettings-rows: $(BUILD)/test_musicsettings_rows
 $(BUILD)/test_musicsettings_rows: $(MUSICROWS_OBJ)
 	$(CC) -o $@ $^ $(LDFLAGS) $(LDLIBS)
 
+# The profiler page on the real V1 layout with synthetic PMIC/gauge samples.
+BATTERYPROFILE_UI_SRC = $(ROOT)/tests/ui/test_batteryprofile.c \
+                       $(ROOT)/src/gui/settings/batteryprofilepage.c $(ROOT)/src/system/device/batteryprofile.c \
+                       $(ROOT)/src/gui/shell/settingsrow.c $(ROOT)/src/gui/shell/theme.c \
+                       $(ROOT)/src/gui/shell/icons.c $(ROOT)/src/gui/board_profile.c \
+                       $(ROOT)/src/system/core/config.c $(ROOT)/src/system/core/lang.c
+BATTERYPROFILE_UI_OBJ = $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(BATTERYPROFILE_UI_SRC))
+.PHONY: batteryprofile-ui
+batteryprofile-ui: $(BUILD)/test_batteryprofile_ui
+	$(BUILD)/test_batteryprofile_ui ../../sonix-packer/assets/V1/usr/resource/sonix/language
+
+$(BUILD)/test_batteryprofile_ui: $(BATTERYPROFILE_UI_OBJ) $(UI_LVGL_OBJ)
+	$(CC) -o $@ $^ $(LDFLAGS) $(LDLIBS) -Wl,--wrap=clock_gettime,--wrap=batteryprofile_read
+
+-include $(BATTERYPROFILE_UI_OBJ:.o=.d)
+
 # The volume pill with the level read as a voltage: the production overlay and
 # reading on the V1 layout, with the audio side reduced to what the test sets.
 # The label has to hold one width, and one line, over every reading.
@@ -1144,7 +1172,7 @@ $(BUILD)/test_stockkeys_ui: $(ROOT)/build_gen/streamkeys_key.h $(STOCKKEYS_UI_OB
 	$(CC) -o $@ $(STOCKKEYS_UI_OBJ) $(LDFLAGS) $(LDLIBS)
 
 .PHONY: ui
-ui: wifitransfer-ui
+ui: wifitransfer-ui batteryprofile-ui
 ui: $(BUILD)/test_qobuzgenregrid $(BUILD)/test_main_menu $(BUILD)/test_screensaver $(BUILD)/test_tools_pages $(BUILD)/test_wifi_pages $(BUILD)/test_chargescreen $(BUILD)/test_power_display $(BUILD)/test_touch_wake $(BUILD)/test_lyricsearch $(BUILD)/test_games $(BUILD)/test_peq_profiles $(BUILD)/test_quickpanel_layout $(BUILD)/test_btreceiversession $(BUILD)/test_home_swipe $(BUILD)/test_corners $(BUILD)/test_playbutton $(BUILD)/test_musicsettings_rows $(BUILD)/test_volume_overlay $(BUILD)/test_playerdeck $(BUILD)/test_vinylayout $(BUILD)/test_stickerlayout $(BUILD)/test_waveform_overlay $(BUILD)/test_hiresbadge_ui $(BUILD)/test_statusbar_ui $(BUILD)/test_stockkeys_ui $(BUILD)/test_tidal_pages $(BUILD)/test_soundcloud_pages $(BUILD)/test_qobuz_pages $(BUILD)/test_jellyfin_pages $(BUILD)/test_fwupdate
 	$(BUILD)/test_qobuzgenregrid
 	$(BUILD)/test_main_menu ../../sonix-packer/assets/V1/usr/resource/sonix/language
