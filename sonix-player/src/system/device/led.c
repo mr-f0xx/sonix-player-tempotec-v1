@@ -71,6 +71,9 @@ static const int LADDER[11] = {0, 1, 3, 7, 15, 23, 31, 39, 47, 63, 79};
 // A blinking state (the Wi-Fi transfer) is on and off for this long each.
 #define LED_BLINK_MS 500
 #define LED_VISUALIZER_MS 40 // at most 25 brightness updates per second
+#define RAINBOW_SECTOR_FRAMES 40 // 9.6 s for all six hue sectors
+#define RAINBOW_HUE_FRAMES (6 * RAINBOW_SECTOR_FRAMES)
+#define RAINBOW_HALF_BREATH_FRAMES 48 // 3.84 s for a rise and fall
 
 // The logical states the LED can be in. Each is rendered either as a driver
 // pattern (the fallback) or as a colour and an effect (the direct path).
@@ -402,6 +405,47 @@ static void play_visualizer(led_levels_t *cur, const led_render_t *t, led_levels
 	}
 }
 
+// Walk the six saturated HSV sectors as brightness eases up and down on a
+// separate clock. The different periods let every hue spend time near the
+// brighter part of a breath. Use integer levels throughout, including at the
+// lowest setting where the envelope can only switch between dark and lit.
+static led_levels_t rainbow_frame(int hue_frame, int breath_frame, int peak) {
+	const int half = RAINBOW_HALF_BREATH_FRAMES;
+	const int full = half * half * half;
+	int rise = breath_frame <= half ? breath_frame : 2 * half - breath_frame;
+	int eased = rise * rise * (3 * half - 2 * rise); // smoothstep, 0 to full
+	int floor = peak > 1 ? (peak + 4) / 5 : 0;
+	int level = floor + ((peak - floor) * eased + full / 2) / full;
+	int sector = hue_frame / RAINBOW_SECTOR_FRAMES;
+	int offset = hue_frame % RAINBOW_SECTOR_FRAMES;
+	int up = (level * offset + RAINBOW_SECTOR_FRAMES / 2) / RAINBOW_SECTOR_FRAMES;
+	int down = level - up;
+
+	// Keep all channels enabled; zero levels are dark, and hue transitions
+	// don't need to switch channels on and off in the middle of a fade.
+	const unsigned ch = LED_CH_R | LED_CH_G | LED_CH_B;
+	switch (sector) {
+	case 0: return (led_levels_t){level, up, 0, ch};
+	case 1: return (led_levels_t){down, level, 0, ch};
+	case 2: return (led_levels_t){0, level, up, ch};
+	case 3: return (led_levels_t){0, down, level, ch};
+	case 4: return (led_levels_t){up, 0, level, ch};
+	default: return (led_levels_t){level, 0, down, ch};
+	}
+}
+
+static void play_rainbow(led_levels_t *cur, int peak, unsigned seen) {
+	int hue_frame = 0, breath_frame = 0;
+	while (!led_wait(&led_seq, seen, LED_VISUALIZER_MS)) {
+		if (++hue_frame == RAINBOW_HUE_FRAMES) hue_frame = 0;
+		if (++breath_frame == 2 * RAINBOW_HALF_BREATH_FRAMES) breath_frame = 0;
+		led_levels_t next = rainbow_frame(hue_frame, breath_frame, peak);
+		if (next.r != cur->r || next.g != cur->g || next.b != cur->b) {
+			set_levels(cur, next.r, next.g, next.b, next.channels);
+		}
+	}
+}
+
 static void play_steady(led_levels_t *cur, const led_render_t *t, unsigned seen) {
 	bool off = t->mode == LM_OFF;
 	if (off && (t->transition_ms == 0 || !(cur->r || cur->g || cur->b))) {
@@ -414,7 +458,10 @@ static void play_steady(led_levels_t *cur, const led_render_t *t, unsigned seen)
 	// the visualizer). Both sets of channels stay enabled during the ramp.
 	led_levels_t from = *cur;
 	led_levels_t rest = {t->r, t->g, t->b, ch_mask(t->r, t->g, t->b)};
-	if (t->effect != LED_VISUALIZER_NONE) {
+	bool rainbow = t->effect == LED_VISUALIZER_RAINBOW_BREATH;
+	if (rainbow) {
+		rest = rainbow_frame(0, 0, t->r);
+	} else if (t->effect != LED_VISUALIZER_NONE) {
 		// Rest at roughly a fifth of the selected brightness. At brightness
 		// 1 there is only one lit step, so rest at zero instead. Keep the
 		// channels enabled for the next rise in brightness.
@@ -447,6 +494,8 @@ static void play_steady(led_levels_t *cur, const led_render_t *t, unsigned seen)
 	}
 	if (off) {
 		led_i2c_off();
+	} else if (rainbow) {
+		play_rainbow(cur, t->r, seen);
 	} else if (t->effect != LED_VISUALIZER_NONE) {
 		play_visualizer(cur, t, rest, seen);
 	}
@@ -643,6 +692,11 @@ static void render_state(led_state_t state, led_visualizer_style_t effect, bool 
 	if (direct_mode) {
 		led_render_t t;
 		build_render(state, &t);
+		if (effect == LED_VISUALIZER_RAINBOW_BREATH) {
+			// Start the wheel at red. Its level is the ceiling for every hue.
+			t.r = LADDER[led_level()];
+			t.g = t.b = 0;
+		}
 		t.effect = effect;
 		t.allow_notices = allow_notices;
 		if (effect != current_effect) {
@@ -713,9 +767,8 @@ static void apply(void) {
 		// by the standby option: a player left plugged in overnight stays lit.
 		state = LS_CHARGED;
 	} else if (s_playing && s_rate > 0) {
-		// Playback always shows its colour. A podcast has its own colour, purple,
-		// whatever the sample rate: it says what is being listened to, not how it
-		// is sampled.
+		// Choose the playback colour (purple for podcasts). Rainbow Breath
+		// can replace it for PCM, but DSD and podcast indicators stay steady.
 		state = s_podcast ? LS_PODCAST : rate_state(s_rate, s_dsd);
 		// DoP is not PCM and there is no PCM feed for the USB DAC mode below.
 		if (smart && state != LS_DSD && state != LS_PODCAST) effect = s_visualizer_style;
@@ -765,7 +818,14 @@ static void apply(void) {
 }
 
 static led_visualizer_style_t normalize_style(long style) {
-	return style == LED_VISUALIZER_ENERGY_GLOW ? LED_VISUALIZER_ENERGY_GLOW : LED_VISUALIZER_BASS_PULSE;
+	switch (style) {
+	case LED_VISUALIZER_ENERGY_GLOW:
+		return LED_VISUALIZER_ENERGY_GLOW;
+	case LED_VISUALIZER_RAINBOW_BREATH:
+		return LED_VISUALIZER_RAINBOW_BREATH;
+	default:
+		return LED_VISUALIZER_BASS_PULSE;
+	}
 }
 
 void led_init(void) {

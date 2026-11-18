@@ -17,16 +17,21 @@ under the switch:
   note doesn't keep the light at its peak.
 - **Energy Glow:** brightness rises with overall PCM level (not just bass),
   stays bright during sustained loud passages, and eases down in quieter ones.
+- **Rainbow Breath:** sweeps around the RGB colour wheel in about 10 seconds,
+  while the brightness gently rises and falls about every 4 seconds. It
+  replaces the sample-rate colour during PCM playback, independent of the
+  beat or volume.
 
 The selected style survives reboot and is remembered even if Smart LED is
-turned off. Both work on player PCM with the screen on or off. They use a dim
-base and the selected brightness as the ceiling; at brightness 1 there is
-only one lit step, so the styles move between dark and that step. The colour
-map is unchanged: yellow at ≤48 kHz (including 44.1 kHz), aqua above 48 through
-192 kHz, orange above 192 kHz, and steady white for DSD. USB DAC and Bluetooth
-receiver indicators remain unchanged.
+turned off. All three work on player PCM with the screen on or off. They use a
+dim base and the selected brightness as the ceiling; at brightness 1 there
+is only one lit step, so the styles move between dark and that step. Bass
+Pulse and Energy Glow keep the sample-rate colour: yellow at ≤48 kHz
+(including 44.1 kHz), aqua above 48 through 192 kHz, and orange above 192 kHz.
+DSD stays steady white in all styles. USB DAC and Bluetooth receiver
+indicators remain unchanged.
 
-**Event notices** work with either Smart LED style: three short red blinks
+**Event notices** work with any Smart LED style: three short red blinks
 accompany the normal 5% battery warning, and two green blinks confirm
 successful incoming Wi-Fi Transfer uploads. The browser sends folders one
 file at a time, so confirmation waits for a second without another upload.
@@ -46,15 +51,15 @@ supports the normal colours and Stealth mode. The native web emulator models
 the RGB effects, but its Wi-Fi Transfer service is disabled.
 
 **On-device check:** Unplug the charger and play 44.1 kHz and 96 kHz PCM with
-clear bass hits and both loud and quiet passages. Try both styles: check
-for a distinct peak and a dim rest with Bass Pulse, and a smooth rise and
-fall with Energy Glow. Switch styles while playing and confirm the last
-choice comes back after reboot. Neither style should change the sample-rate
-colour or disturb audio, with the screen on or off. Confirm that DSD stays
-steady white. Try an album upload followed by an aborted transfer, and watch
-for the low-battery warning on battery power. Switch Stealth on during
-charging, then suspend/wake and reboot: the light should stay dark until
-Stealth is turned off.
+clear bass hits and both loud and quiet passages. Check for a distinct peak
+and a dim rest with Bass Pulse, a smooth rise and fall with Energy Glow, and
+a full colour cycle with Rainbow Breath. Only Rainbow Breath should replace
+the sample-rate colour, and none should disturb audio with the screen on or
+off. Switch styles while playing and confirm the last choice comes back after
+reboot. Confirm that DSD stays steady white. Try an album upload followed by
+an aborted transfer, and watch for the low-battery warning on battery power.
+Switch Stealth on during charging, then suspend/wake and reboot: the light
+should stay dark until Stealth is turned off.
 
 ## Register recipes
 

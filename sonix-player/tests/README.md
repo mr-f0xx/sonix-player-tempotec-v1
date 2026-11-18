@@ -884,8 +884,11 @@ without a held note retriggering the pulse. The Energy Glow fixture checks
 that the saved style starts up, treble and out-of-phase stereo contribute to
 RMS energy, and the worker smoothly rises, holds, and fades instead of
 flashing. It also checks switching styles while playing and the charging and
-Stealth overrides. Both styles must work at brightness 1, where only dark and
-the first lit step are available. No physical LED or audio is needed.
+Stealth overrides. The Rainbow Breath fixture checks the six hues, smooth
+colour transitions, the brightness envelope at every setting, and an active
+wheel without PCM capture. It also verifies saved selection and returns to the
+right state after an alert, charging, or Stealth. At brightness 1, only dark
+and the first lit step are available. No physical LED or audio is needed.
 
 `make -C sonix-player/tests wifitransfer wifitransfer-ui` also checks that a real
 upload is confirmed only after publication and a quiet period, that failures,

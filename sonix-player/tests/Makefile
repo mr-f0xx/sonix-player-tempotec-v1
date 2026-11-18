@@ -624,6 +624,7 @@ LED_TELEMETRY_SRC = test_led_telemetry.c $(ROOT)/src/system/audio/visualizer.c $
 led-telemetry: $(BUILD)/test_led_telemetry
 	$(BUILD)/test_led_telemetry
 	$(BUILD)/test_led_telemetry glow
+	$(BUILD)/test_led_telemetry rainbow
 	$(BUILD)/test_led_telemetry pattern
 	$(BUILD)/test_led_telemetry pwm
 	$(BUILD)/test_led_telemetry unavailable
