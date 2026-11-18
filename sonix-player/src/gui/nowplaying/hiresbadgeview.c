@@ -4,9 +4,9 @@
 #include "src/gui/shell/icons.h"
 
 static int header_scale(int chevron_height, int design_height) {
-	// Scale the logo to 25 px against the V1's 22 px chevron. The same
+	// Scale the logo to 26 px against the V1's 22 px chevron. The same
 	// scale keeps the drawn badge and its reserved width in agreement.
-	int target_height = chevron_height + 3;
+	int target_height = chevron_height + 4;
 	int natural_height = LV_MAX(icon_hires_audio.header.h, design_height);
 	return LV_CLAMP(1, target_height * LV_SCALE_NONE / natural_height, LV_SCALE_NONE);
 }
@@ -21,8 +21,8 @@ static void fit_badge(hiresbadge_view_t *view) {
 	if (lv_obj_get_style_transform_scale_x(view->box, 0) != scale) {
 		lv_obj_set_style_transform_scale(view->box, scale, 0);
 	}
-	// Scale from the top edge so rounding at both ends doesn't add a row
-	// to the odd-sized logo. Centre the result on the chevron afterwards.
+	// Scaling from the top edge avoids rounding both ends. Offset by
+	// half the scaled height to centre the badge on the chevron.
 	int dy = view->header_height > 0 ? -scaled_length(height, scale) / 2 : 0;
 	if (lv_obj_get_style_translate_y(view->box, 0) != dy) lv_obj_set_style_translate_y(view->box, dy, 0);
 }
