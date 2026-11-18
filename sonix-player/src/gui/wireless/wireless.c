@@ -55,6 +55,7 @@ static const wireless_action_item_t tokyo_actions[WIRELESS_ACTION_COUNT] = {
 	{"transfer", &icon_wifi_transfer_quick, THEME_SEMANTIC_GREEN, &wifitransfer_screen},
 	{"sonixlink", &icon_sonixlink_quick, THEME_SEMANTIC_AMBER, &sonixlink_screen},
 	{"dlna", &icon_dlna_quick, THEME_SEMANTIC_BLUE, &dlna_screen},
+	{"listen together", &icon_sonixlink_quick, THEME_SEMANTIC_GREEN, &listentogether_screen},
 };
 
 static gui_config_t *wireless_cfg;
