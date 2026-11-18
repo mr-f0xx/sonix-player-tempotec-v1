@@ -34,6 +34,7 @@
 #include "src/gui/settings/language.h"
 #include "src/gui/library/libraryscan.h"
 #include "src/gui/wireless/dlna.h"
+#include "src/gui/wireless/listentogether.h"
 #include "src/gui/wireless/sonixlink.h"
 #include "src/gui/gearboy/gearboypage.h"
 #include "src/gui/gearboy/gearboysettings.h"
@@ -758,6 +759,7 @@ void gui_init(gui_config_t *cfg) {
 	wifitransfer_page_init(cfg); // after wifisettings: its "no Wi-Fi" row points there
 	airplay_page_init(cfg);		 // likewise
 	dlna_page_init(cfg);		 // likewise: its "no Wi-Fi" row points there too
+	listentogether_page_init(cfg);
 	sonixlink_page_init(cfg);	 // likewise
 	if (addons_enabled("airpods")) {
 		airpodspage_init(cfg);		 // before btaudio: its AirPods row points at this page

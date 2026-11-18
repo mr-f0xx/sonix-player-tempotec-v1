@@ -17,6 +17,7 @@
 #include "src/gui/shell/theme.h"
 #include "src/gui/wireless/airplay.h"
 #include "src/gui/wireless/dlna.h"
+#include "src/gui/wireless/listentogether.h"
 #include "src/gui/wireless/sonixlink.h"
 #include "src/gui/wireless/wifisettings.h"
 #include "src/gui/wireless/wifitransfer.h"
@@ -54,6 +55,7 @@ static const wireless_action_item_t tokyo_actions[WIRELESS_ACTION_COUNT] = {
 	{"transfer", &icon_wifi_transfer_quick, THEME_SEMANTIC_GREEN, &wifitransfer_screen},
 	{"sonixlink", &icon_sonixlink_quick, THEME_SEMANTIC_AMBER, &sonixlink_screen},
 	{"dlna", &icon_dlna_quick, THEME_SEMANTIC_BLUE, &dlna_screen},
+	{"listen together", &icon_sonixlink_quick, THEME_SEMANTIC_GREEN, &listentogether_screen},
 };
 
 static gui_config_t *wireless_cfg;
@@ -477,6 +479,7 @@ void wireless_init(gui_config_t *cfg) {
 		{"transfer", &icon_menu_wifi_transfer, &wifitransfer_screen, NULL},
 		{"sonixlink", &icon_menu_sonixlink, &sonixlink_screen, NULL},
 		{"dlna", &icon_menu_dlna, &dlna_screen, NULL},
+		{"listen together", &icon_menu_sonixlink, &listentogether_screen, NULL},
 	};
 
 	// Dark and Light keep their established six-tile page. Tokyo Night on the

@@ -247,4 +247,7 @@ bool audio_external_begin_exclusive_latency(int sample_rate, int channels, int b
 int audio_external_write(const void *frames, int count);
 void audio_external_end(void);
 
+typedef void (*audio_pcm_tap_cb_t)(const void *buf, int frames, int sample_rate, int channels, int bits);
+void audio_set_pcm_tap_cb(audio_pcm_tap_cb_t cb);
+
 #endif // AUDIO_H
