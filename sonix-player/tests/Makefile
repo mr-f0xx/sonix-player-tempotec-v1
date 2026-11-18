@@ -38,9 +38,12 @@ $(BUILD)/test_taperecorder: test_taperecorder.c $(ROOT)/src/system/audio/taperec
 		-DTAPE_REC_LIMIT_SECONDS=1 -o $@ $(filter %.c,$^) $(LDFLAGS) -Wl,--wrap=time,--wrap=fsync $(LDLIBS)
 
 $(BUILD)/test_tapepads: test_tapepads.c $(ROOT)/src/system/audio/tapepads.c $(ROOT)/src/system/audio/tapepads.h \
-                       $(ROOT)/src/system/audio/tapewav.c $(ROOT)/src/system/audio/tapewav.h
+                       $(ROOT)/src/system/audio/tapewav.c $(ROOT)/src/system/audio/tapewav.h \
+                       $(ROOT)/src/system/audio/tapemix.c $(ROOT)/src/system/audio/tapemix.h \
+                       $(ROOT)/src/system/audio/tapestore.c $(ROOT)/src/system/audio/tapestore.h
 	@mkdir -p $(BUILD)
-	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ $(filter %.c,$^) $(LDFLAGS) $(LDLIBS)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -DTAPE_MIX_LIMIT_SECONDS=2 -o $@ $(filter %.c,$^) $(LDFLAGS) \
+		-Wl,--wrap=time,--wrap=fsync,--wrap=write $(LDLIBS)
 
 tools-ui: $(BUILD)/test_tools_pages
 	$(BUILD)/test_tools_pages ../../sonix-packer/assets/V1/usr/resource/sonix/language

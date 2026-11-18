@@ -199,7 +199,7 @@ static void poll_cb(lv_timer_t *t) {
 		return;
 	}
 	if (view == PADS) { tapesampler_poll(); return; }
-	if (view != MEMOS) return;
+	if (view == KITS) { tapesampler_poll_kits(); return; }
 	if (lv_tick_elaps(last_probe) >= PROBE_MS) {
 		if (!taperecorder_active()) probe();
 		bool card = gui_card_available();
@@ -265,6 +265,7 @@ static void screen_leaving(lv_event_t *e) {
 
 static lv_obj_t *build_rec(void) {
 	lv_obj_t *memos = stack(body, LV_FLEX_FLOW_COLUMN, LV_SIZE_CONTENT, 4, false);
+	lv_obj_set_width(text_label(memos, tr("tape_deck"), &font_ui_22, false), lv_pct(100));
 	lv_obj_t *card = stack(memos, LV_FLEX_FLOW_COLUMN, LV_SIZE_CONTENT, 5, true);
 	lv_obj_set_style_pad_ver(card, 6, 0);
 	lv_obj_t *header = stack(card, LV_FLEX_FLOW_ROW, LV_SIZE_CONTENT, 6, false);
@@ -303,14 +304,18 @@ void tapedeck_open(void) {
 	if (!screen) {
 		screen = lv_obj_create(NULL);
 		body = settingsrow_page(screen, cfg, "tape_deck");
-		// Keep all 16 pads and transport in the V1's first viewport.
 		lv_obj_set_style_pad_top(body, 0, 0);
 		lv_obj_set_scrollbar_mode(body, LV_SCROLLBAR_MODE_ACTIVE);
-		settingsrow_title_corner_slots(settingsrow_page_title(screen), cfg, 0);
-		lv_obj_t *tab_row = stack(body, LV_FLEX_FLOW_ROW, 31, 5, false);
-		tabs[MEMOS] = row_key(tab_row, tr("tape_memos"), tab_cb, MEMOS);
-		tabs[PADS] = row_key(tab_row, tr("tape_pads"), tab_cb, PADS);
-		tabs[KITS] = row_key(tab_row, tr("tape_kits"), tab_cb, KITS);
+		// Put navigation beside Back, not above the playing surface. This
+		// leaves room for live FX + record without shrinking the pad hitboxes.
+		lv_obj_delete(settingsrow_page_title(screen));
+		int left = settingsrow_header_text_left(cfg);
+		lv_obj_t *tab_row = stack(screen, LV_FLEX_FLOW_ROW, settingsrow_corner_button_size(cfg), 4, false);
+		lv_obj_set_width(tab_row, cfg->screen_width - left - cfg->padding);
+		lv_obj_align(tab_row, LV_ALIGN_TOP_LEFT, left, cfg->top_bar_height + cfg->padding);
+		tabs[MEMOS] = compact_key(tab_row, tr("tape_memos"), tab_cb, MEMOS);
+		tabs[PADS] = compact_key(tab_row, tr("tape_pads"), tab_cb, PADS);
+		tabs[KITS] = compact_key(tab_row, tr("tape_kits"), tab_cb, KITS);
 		views[MEMOS] = build_rec();
 		tapesampler_build(body, &views[PADS], &views[KITS]);
 		poll_timer = lv_timer_create(poll_cb, POLL_MS, NULL);

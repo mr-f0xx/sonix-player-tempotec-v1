@@ -75,10 +75,14 @@ handover and failed saves close the input without publishing an incomplete WAV.
 The sampler test checks 16 distinct factory sounds, manual taps, exact bar
 boundaries, step-quantized overdubs, numbered and unnumbered kit loading,
 resampled stereo WAV streaming, long-clip controls and release of card-backed
-voices before unmount. `tools-ui` also drives Tape Deck on the real LVGL
-renderer, including input hotplug, memo playback, all 16 touch targets and
-loading a WAV or a kit. Physical USB mic validation is described in the
-[Tape Deck guide](../../docs/tape-deck.md).
+voices before unmount. It round-trips tempo, pattern and sample assignments
+through a real sequence file, rejects missing samples and invalid saves,
+checks the three effects, and compares recorded stereo PCM with the live
+post-FX output. It also covers bounded capture, slow/failed card writes and
+finalizing a factory-only take before card export. `tools-ui` drives Tape Deck
+on the real LVGL renderer, including all 16 touch targets at 240×320, live FX,
+sequence save/reload, and recording and playing back a take. Physical checks
+are described in the [Tape Deck guide](../../docs/tape-deck.md).
 
 The `statusbar-ui` test checks LVGL rendering of the frosted player status bar,
 icon recoloring, layout-background choices, and restoration of status colors.

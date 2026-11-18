@@ -9,16 +9,28 @@
 #include <string.h>
 #include <strings.h>
 #include <sys/stat.h>
+#if defined(HOST_BUILD) && !defined(__EMSCRIPTEN__)
+#include <sys/statvfs.h>
+#endif
 #include <unistd.h>
 
-int tape_card_begin(void) {
+int tape_card_begin(bool writable) {
 #ifdef HOST_BUILD
 	// The emulator owns an ordinary virtual microSD folder and never exports
-	// it as a block device. Capture/writes still use the stricter recorder API.
+	// it as a block device. Keep sampler writes in that folder too.
 	const char *root = storage_sd_root();
-	return root && *root ? open(root, O_RDONLY | O_DIRECTORY | O_CLOEXEC) : -1;
+	int fd = root && *root ? open(root, O_RDONLY | O_DIRECTORY | O_CLOEXEC) : -1;
+#ifndef __EMSCRIPTEN__
+	if (fd >= 0 && writable) {
+		struct statvfs fs;
+		if (fstatvfs(fd, &fs) != 0 || (fs.f_flag & ST_RDONLY)) { close(fd); return -1; }
+	}
 #else
-	return storage_card_file_job_begin(false);
+	(void)writable; // MEMFS is writable; the individual open/write still checks
+#endif
+	return fd;
+#else
+	return storage_card_file_job_begin(writable);
 #endif
 }
 
@@ -79,7 +91,7 @@ static int entry_cmp(const tape_file_t *a, const tape_file_t *b) {
 
 int tape_card_list(const char *path, bool folders_only, const tape_file_t *after, tape_file_t *out, int cap) {
 	if (!out || cap <= 0) return 0;
-	int card = tape_card_begin();
+	int card = tape_card_begin(false);
 	if (card < 0) return -1;
 	int fd = tape_open_at(card, path, true);
 	int total = fd < 0 && errno != ENOENT ? -1 : 0;

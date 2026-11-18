@@ -24,7 +24,7 @@ typedef struct {
 
 // All paths are relative to an already reserved card. The trusted root may
 // be a firmware alias, but neither sample files nor folders may be symlinks.
-int tape_card_begin(void);
+int tape_card_begin(bool writable);
 void tape_card_end(void);
 int tape_open_at(int root, const char *path, bool directory);
 bool tape_wav_name(const char *name);

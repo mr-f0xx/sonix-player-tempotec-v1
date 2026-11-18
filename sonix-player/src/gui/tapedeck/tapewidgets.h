@@ -80,6 +80,15 @@ static inline lv_obj_t *row_key(lv_obj_t *row, const char *text, lv_event_cb_t c
 	return btn;
 }
 
+static inline lv_obj_t *compact_key(lv_obj_t *row, const char *text, lv_event_cb_t cb, intptr_t arg) {
+	lv_obj_t *btn = row_key(row, text, cb, arg);
+	lv_obj_t *caption = lv_obj_get_child(btn, 0);
+	lv_obj_set_style_text_font(caption, &font_ui_14, 0);
+	lv_obj_set_width(caption, lv_pct(98));
+	lv_obj_set_height(caption, lv_font_get_line_height(&font_ui_14));
+	return btn;
+}
+
 static inline void disabled(lv_obj_t *obj, bool value) { lv_obj_set_state(obj, LV_STATE_DISABLED, value); }
 static inline void selected(lv_obj_t *obj, bool value) { lv_obj_set_state(obj, LV_STATE_CHECKED, value); }
 

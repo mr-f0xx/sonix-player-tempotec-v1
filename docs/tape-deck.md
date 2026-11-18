@@ -27,7 +27,8 @@ and choose **Factory sounds** to move any of the 16 sounds to that pad.
 - **Loop** starts or stops a one-bar loop. The lights mark its 16 sixteenth-note
   steps. You can tap over it without changing it. **Overdub** adds your short
   hits to the current step while the loop runs; tap it again to disarm it.
-  **Stop** cuts the loop and all playing pads.
+  Turn **Loop** off to keep playing pads without the sequence. **Stop** cuts
+  everything and ends any mix recording.
 - In **Kits**, adjust tempo from 60 to 200 BPM. Use **Clear loop** for a blank
   bar, or **Demo loop** to restore the starter rhythm (pads 01, 05 and 09).
 - In **Kits**, choose a numbered pad, then **Load WAV** and browse the microSD.
@@ -38,6 +39,48 @@ and choose **Factory sounds** to move any of the 16 sounds to that pad.
   the other pads and the loop can play over it.
 - First playback takes over from local music, but won't take over an active
   external audio stream. Backing out or changing tabs stops the sampler.
+
+### Save an editable sequence
+
+1. Use **Loop** and **Overdub** to record hits in the 16-step bar. In **Kits**,
+   **Clear loop** gives you an empty bar to start with.
+2. In **Kits**, tap **Save sequence**. This makes a new snapshot on the microSD
+   in `Sequences/Sequence-YYYYMMDD-HHMMSS-NNN.seq`.
+3. Use **Kits → Load sequence** and pick a timestamped save. It restores the
+   tempo, 16 steps and pad assignments; return to **Pads** and tap **Loop** to
+   play or continue overdubbing. Save again to keep a new version.
+
+The sequence points to any imported WAVs by their paths on the card; it does
+not contain copies of those files. Keep the samples in their original folders,
+including long backing tracks. If a sample was moved or is unreadable, the
+load is refused and the current beat is left alone. Unsaved changes and live
+FX switches are session-local.
+
+### Record a performance WAV
+
+- On **Pads**, tap **Rec mix** before playing, or while a beat is already
+  running. The timer shows the length of the take. It records the sampler's
+  stereo output: manual pads, the loop, any WAV backing you trigger from a pad,
+  and the effects. It does **not** use the microphone or capture music playing
+  outside the sampler. Headphone volume does not change the recorded level.
+- Tap **End rec** to save the take while continuing to play. **Stop**, leaving
+  Pads, and a normal shutdown or card export also end and finalize the take.
+  Screen blanking doesn't by itself stop recording. Wait for **Take saved**
+  before removing the card.
+- Tap **Kits → Saved takes**, then a timestamp to listen. Takes are **44.1 kHz,
+  stereo, 16-bit PCM WAV** files in `Recordings/Take-YYYYMMDD-HHMMSS-NNN.wav`
+  on a writable microSD. Each take can run up to one hour (about 606 MiB).
+  A slow card or interrupted audio output may end the take early and save the
+  continuous part. If the WAV can't be written and finalized, it isn't listed
+  as saved. Use File Manager or a card reader to copy or delete takes.
+
+### Live effects
+
+Tap **Filter** for a darker low-pass sound, **Echo** for a quarter-second
+repeat, or **Drive** for soft distortion. Tap a lit button again to bypass it.
+The three switches work independently, can be stacked, and do not restart the
+loop or stop recording. They affect the whole sampler mix, including backing
+tracks; switching them during a take is audible in the WAV.
 
 ### Load a whole drum kit
 
@@ -57,9 +100,8 @@ Drum Kits/
 Use **Kits → Load drum kit → My Kit**. Prefixes `01`–`16` map to exact pads;
 unused numbers are empty. If there are no usable numbered WAVs, the first 16
 valid unnumbered WAVs are loaded in filename order. **Factory kit** restores
-the built-in kit. Changes to pad assignments, tempo and the loop last for the
-current session; reselect a card kit after rebooting, removing or exporting
-its card.
+the built-in kit. Reselect a card kit or load a saved sequence after rebooting,
+removing or exporting its card.
 
 Import supports mono or stereo **PCM WAV** (8/16/24/32-bit integer, 8–96 kHz).
 Convert MP3, AAC, FLAC or floating-point WAV to PCM WAV before importing.

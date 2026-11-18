@@ -1,6 +1,7 @@
 #ifndef TAPEPADS_H
 #define TAPEPADS_H
 
+#include "tapemix.h"
 #include "tapewav.h"
 
 #define TAPE_PAD_COUNT 16
@@ -30,9 +31,10 @@ typedef struct {
 // One voice per pad; one long clip at once (re-tap the pad to cut it).
 bool tapepads_hit(int pad);
 bool tapepads_start(void); // run the one-bar sixteenth-note loop
-void tapepads_stop(void); // request stop of loop and all voices
+void tapepads_stop_loop(void); // leave manual pads and any recording running
+void tapepads_stop(void); // stop the loop and voices, and save any take
 void tapepads_finish(void); // join before shutdown
-void tapepads_release_card(void); // stop card-backed voices and forget that card's pads
+void tapepads_release_card(void); // finalize a take and clear card-backed pads
 bool tapepads_active(void);
 tape_pads_state_t tapepads_state(void);
 unsigned tapepads_sounding(void);
@@ -44,7 +46,19 @@ void tapepads_pattern(bool demo); // replace the loop with the demo, or clear it
 int tapepads_bpm(void);
 void tapepads_set_bpm(int bpm);
 
-// Assignments are session-local. These operations stop performance and make
+// Leave the running transport alone when flipping effects or ending a take.
+typedef enum { TAPE_FX_FILTER = 1, TAPE_FX_ECHO = 2, TAPE_FX_DRIVE = 4 } tape_pad_effect_t;
+unsigned tapepads_effects(void);
+void tapepads_toggle_effect(tape_pad_effect_t effect);
+tape_mix_state_t tapepads_record(void); // start a new WAV, also opens silent PCM if needed
+
+typedef enum {
+	TAPE_SEQ_OK, TAPE_SEQ_NO_CARD, TAPE_SEQ_INVALID, TAPE_SEQ_SAMPLE_MISSING, TAPE_SEQ_SAVE_ERROR,
+} tape_seq_result_t;
+tape_seq_result_t tapepads_save_sequence(void);
+tape_seq_result_t tapepads_load_sequence(const char *name); // validate before replacing the beat
+
+// These operations stop performance and make
 // a new mapping available only after it is valid; they never copy whole WAVs.
 unsigned tapepads_revision(void);
 void tapepads_info(tape_pad_info_t out[TAPE_PAD_COUNT]);
