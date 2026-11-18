@@ -64,3 +64,4 @@ jellyfin-credentials.json.tmp
 sonix-player/tests/.build/
 sonix-player/tests/__pycache__/
 sonix-player/tools/__pycache__/
+sonix-player/web/build/

@@ -5,7 +5,7 @@
   TEMPLATE. This is not the page that gets served: tools/web_to_c.py assembles
   it, replacing three placeholders, and writes both the finished page
   (web/build/index.html, openable in a browser) and the C string the player
-  carries (src/system/webpage.h).
+  carries (src/system/net/webpage.h).
 
   The placeholders are HTML comments named ICONS, LOGO and FAVICON. They are
   spelled out below without their comment markers on purpose -- writing one of
@@ -17,26 +17,9 @@
       LOGO       web/img/logo-web.png, as a data: URL
       FAVICON    web/img/favicon-web.png, as a data: URL
 
-  Assembled rather than linked so the page itself stays a single file: the
-  player writes one file into thttpd's document root, and a page with no
-  stylesheet or script to fetch cannot half-load on a flaky link.
-
-  The one subresource is the typeface -- see the @font-face below. It is
-  deliberately not inlined: it is 6.5 MB, the page is perfectly readable
-  without it, and the browser caches it.
-
-  It talks to the firmware's own six CGI programs, whose paths and parameter
-  names are compiled into them and cannot be changed:
-
-    GET  list?path=<dir>      -> [{"path","name","ctime"[,"size"]}, ...]
-                                 no "size" means it is a directory, and its
-                                 "path" ends in "/"; "ctime" is a string
-    GET  download?path=<file> -> the file, as an attachment
-    POST upload               -> multipart: "path" + "files[]"
-    POST create               -> urlencoded: "path"
-    POST move                 -> urlencoded: "oldPath", "newPath"
-    POST delete               -> urlencoded: "path"
-    GET  hostname             -> the device name, as text
+  The embedded transfer server serves this one self-contained page and its
+  microSD API (see src/system/net/transferhttp.c). No external resources are
+  needed. Paths in the API are relative to the card, with a leading slash.
 -->
 <html lang="it">
 <head>
@@ -47,50 +30,6 @@
 <title>{{Trasferimento Wi-Fi}}</title>
 <link rel="icon" type="image/png" href="<!--FAVICON-->">
 <style>
-/* ---------------------------------------------------------------------------
-   The device's own typeface.
-
-   /usr/resource/fonts holds the faces the player itself draws with -- the same
-   files src/gui/fonts/fonts.c opens. The player symlinks them into thttpd's
-   document root when it starts the server, so the page renders in the face of
-   the screen it came from.
-
-   Two names for each, because the container is not the same on every firmware:
-   some ship .ttf, some .otf. A `src` list is exactly the right tool for that --
-   the browser tries each in turn and keeps the first that loads and parses.
-
-   Not inlined: the regular face alone is 6.5 MB of full CJK coverage. `swap`
-   means the page draws immediately in the system font and changes over when the
-   file lands; if it never lands -- a firmware without it, or the page opened
-   from somewhere else -- the system font is simply what stays.
-
-   The bold is a family of its own rather than weight 700 of this one, and that
-   is deliberate. As weight 700 of "HiBy UI", a missing bold file would send
-   every heading to the system font while the body stayed in MiSans: half the
-   page in one face, half in another. As a separate family it just falls through
-   to the regular, and the browser synthesises the weight -- so the headings
-   look like headings either way.
-   --------------------------------------------------------------------------- */
-@font-face {
-  font-family: "HiBy UI";
-  src: url("fonts/default.ttf") format("truetype"),
-       url("fonts/default.otf") format("opentype");
-  font-weight: 400;
-  font-style: normal;
-  font-display: swap;
-}
-@font-face {
-  font-family: "HiBy UI Bold";
-  src: url("fonts/bold.ttf") format("truetype"),
-       url("fonts/bold.otf") format("opentype");
-  font-weight: 400;
-  font-style: normal;
-  font-display: swap;
-}
-
-/* ---------------------------------------------------------------------------
-   The player's palette, straight out of src/gui/theme.c (Adwaita dark).
-   --------------------------------------------------------------------------- */
 :root {
   --screen-bg: #242424;
   --surface: #303030;
@@ -110,12 +49,8 @@
   --radius-card: 12px;
   --radius-panel: 16px;
 
-  /* The device's face first, then whatever this system calls its own. Nothing
-     is fetched from the internet: a page served off a player on a local network
-     has no business waiting for a webfont from somewhere else. */
-  --font-ui: "HiBy UI", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+  --font-ui: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
              Roboto, Ubuntu, Cantarell, "Noto Sans", "Helvetica Neue", Arial, sans-serif;
-  --font-ui-bold: "HiBy UI Bold", var(--font-ui);
 }
 
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
@@ -153,7 +88,6 @@ body.dragging { outline: 3px solid var(--accent); outline-offset: -3px; }
   gap: 12px;
 }
 .masthead b {
-  font-family: var(--font-ui-bold);
   font-size: 17px;
   font-weight: 600;
   min-width: 0;
@@ -169,7 +103,6 @@ body.dragging { outline: 3px solid var(--accent); outline-offset: -3px; }
 .head .where { min-width: 0; }
 .head .where h1 {
   margin: 0;
-  font-family: var(--font-ui-bold);
   font-size: 22px;
   font-weight: 600;
   overflow: hidden;
@@ -342,8 +275,11 @@ body.dragging { outline: 3px solid var(--accent); outline-offset: -3px; }
   flex-direction: column;
   gap: 14px;
 }
-.card h2 { margin: 0; font-family: var(--font-ui-bold); font-size: 20px; font-weight: 600; text-align: center; }
-.card p { margin: 0; color: var(--text-dim); font-size: 15px; text-align: center; word-break: break-all; }
+.card h2 { margin: 0; font-size: 20px; font-weight: 600; text-align: center; }
+.card p { margin: 0; color: var(--text-dim); font-size: 15px; text-align: center; overflow-wrap: anywhere; }
+#pair-form { margin: 12px auto; }
+#pair-code { text-align: center; text-transform: uppercase; letter-spacing: .18em; }
+#pair-status { color: var(--text); min-height: 1.4em; }
 .card input[type=text] {
   appearance: none;
   border: 0;
@@ -503,21 +439,32 @@ body.dragging { outline: 3px solid var(--accent); outline-offset: -3px; }
   <img class="logo" src="<!--LOGO-->" alt="Sonix">
 </header>
 
-<div class="shell">
+<section class="shell" id="pair-panel" hidden>
+  <form class="card" id="pair-form" action="pair" method="post">
+    <h2>{{Collega il browser}}</h2>
+    <p>{{Inserisci il codice mostrato nella pagina Trasferimento del V1.}}</p>
+    <input type="text" id="pair-code" aria-label="{{Codice di abbinamento}}"
+           autocomplete="off" autocapitalize="characters" spellcheck="false" maxlength="8" required>
+    <div class="actions"><button class="btn accent" id="pair-connect">{{Connetti}}</button></div>
+    <p id="pair-status" role="status"></p>
+  </form>
+</section>
+
+<div class="shell" id="files-shell" hidden>
 
   <div class="head">
     <div class="where">
-      <h1 id="title">{{Trasferimento}}</h1>
+      <h1 id="title">{{Scheda microSD}}</h1>
       <div class="count" id="count"></div>
     </div>
     <div class="tools">
-      <button class="btn accent" id="pick">
+      <button class="btn accent" id="pick" aria-label="{{Carica file}}">
         <svg class="svgicon"><use href="#upload"/></svg><span class="label">{{Carica file}}</span>
       </button>
-      <button class="btn" id="pick-folder">
+      <button class="btn" id="pick-folder" aria-label="{{Carica cartella}}">
         <svg class="svgicon"><use href="#folder"/></svg><span class="label">{{Carica cartella}}</span>
       </button>
-      <button class="btn" id="mkdir">
+      <button class="btn" id="mkdir" aria-label="{{Nuova cartella}}">
         <svg class="svgicon"><use href="#folder-new"/></svg><span class="label">{{Nuova cartella}}</span>
       </button>
       <button class="btn btn-icon" id="hidden" title="{{Mostra file nascosti}}" aria-label="{{Mostra file nascosti}}">
@@ -533,8 +480,7 @@ body.dragging { outline: 3px solid var(--accent); outline-offset: -3px; }
 
   <input class="hidden-input" type="file" id="files" multiple>
   <!-- The folder picker. `webkitdirectory` is the only way a browser will hand
-       over a whole tree, and it is what the stock page uses too; `directory`
-       is the standardised spelling nothing implements yet. Every file then
+       over a whole tree. Every file then
        carries a webkitRelativePath, which is how the structure survives the
        trip. -->
   <input class="hidden-input" type="file" id="folders" webkitdirectory directory multiple>
@@ -591,19 +537,10 @@ body.dragging { outline: 3px solid var(--accent); outline-offset: -3px; }
 <script>
 "use strict";
 
-/* ---------------------------------------------------------------------------
-   The card, and the top of everything this page can see.
+var CARD = "/";
 
-   The CGI programs know four paths -- /data/mnt/sd_0, sd_1, udisk_0, udisk_1 --
-   compiled in, unchangeable. This device has one card slot, and the player only
-   binds the card onto sd_0, so sd_0 is the whole world here: there is no storage
-   picker, because a list of one thing is furniture.
-   --------------------------------------------------------------------------- */
-var CARD = "/data/mnt/sd_0/";
-
-/* What the player can do something with. Only used to warn: the CGIs take
-   anything, and a .exe on a music player is a mistake worth catching before it
-   has spent four minutes uploading. */
+/* Warn about unfamiliar types without rejecting cover art, CUE files, or
+   other files that may be part of an album folder. */
 var AUDIO     = ["ISO","DFF","DSF","DTS","APE","FLAC","AIF","AIFF","WAV","M4A","AAC",
                  "MP2","MP3","OGG","OGA","WMA","OPUS","DSD","WV","MPC","TAK","TTA"];
 var AUDIOBOOK = ["M4B","AA","AAX"];
@@ -627,13 +564,7 @@ var openMenu = null;
 // .Spotlight-V100 and a ._ twin for every track.
 var showHidden = false;
 
-// The firmware's list.cgi cannot show hidden entries -- it drops any name whose
-// first character is a dot, in compiled code -- so the player publishes its own
-// listing at sonix-list and that is what this asks first. If it is not there (an
-// older player, a document root the symlink could not be made in), the stock one
-// answers and the eye simply has nothing to reveal.
-var lister = "sonix-list";
-var deviceName = "";
+var listSerial = 0;
 
 var $ = function (id) { return document.getElementById(id); };
 
@@ -682,16 +613,14 @@ function humanDate(secs) {
 function isCard(p) { return p === CARD; }
 function normalise(p) { return p.replace(/\/+/g, "/"); }
 
-/* The name of the card's own level: the device, if it told us what it is. */
-function rootLabel() { return deviceName || "{{js|Trasferimento}}"; }
+function rootLabel() { return "{{js|Scheda microSD}}"; }
 
 /* The two markers, and why there are two.
 
    A doubled-brace marker is replaced by the player when it writes this page out
-   (install_page in src/system/wifitransfer.c). A plain one is escaped as HTML,
-   which is right for the markup and for the fragments built below with
-   innerHTML -- and, because HTML escaping leaves no quotes and no backslashes
-   behind, it is safe inside a JavaScript string literal as well. One prefixed
+   (src/system/net/wifitransfer.c). A plain one is escaped as HTML,
+   which is right for the markup and the HTML fragments built below in
+   JavaScript. One prefixed
    with "js|" is escaped for JavaScript instead, and is for text that reaches
    the page through textContent or a DOM property, where an escaped entity
    would be shown literally.
@@ -808,14 +737,16 @@ function askFolder(note, start, forbidden, done) {
   };
 
   var go = function (target) {
-    here = normalise(target);
+    target = normalise(target);
+    here = target;
     drawHere();
 
     var box = $("picker-list");
     box.innerHTML = '<div class="none">' + icon("loader", "big spin") + "</div>";
 
-    listing(here)
+    listing(target)
       .then(function (data) {
+        if (here !== target || $("picker-veil").hidden) { return; }
         var dirs = (data || []).filter(function (f) {
           var isDir = f.size === undefined || f.size === null;
           return isDir && f.path !== forbidden;
@@ -838,6 +769,7 @@ function askFolder(note, start, forbidden, done) {
         });
       })
       .catch(function (err) {
+        if (here !== target || $("picker-veil").hidden) { return; }
         box.innerHTML = '<div class="none">{{Impossibile leggere questa cartella.}}</div>';
         toast(fill("{{js|Lettura di {1} non riuscita ({2})}}", here, err.message));
       });
@@ -865,48 +797,93 @@ document.addEventListener("keydown", function (e) {
   $("picker-veil").hidden = true;
 });
 
-/* --- talking to the CGIs ------------------------------------------------- */
+/* --- session and requests ---------------------------------------------- */
 
-function post(endpoint, fields) {
-  var body = Object.keys(fields).map(function (k) {
-    return encodeURIComponent(k) + "=" + encodeURIComponent(fields[k]);
-  }).join("&");
-
-  return fetch(endpoint, {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: body
-  }).then(function (res) {
-    if (!res.ok) { throw new Error("HTTP " + res.status); }
-    return res;
-  });
+function showPair(note) {
+  ++listSerial;
+  queue.length = 0;
+  madeDirs = Object.create(null);
+  closeMenu();
+  ["prompt", "confirm", "picker"].forEach(function (id) { $(id + "-veil").hidden = true; });
+  $("files-shell").hidden = true;
+  $("pair-panel").hidden = false;
+  $("pair-status").textContent = note || "";
 }
 
-// One directory, from whichever lister is answering. The first failure of
-// sonix-list is taken as "this player does not have it" and the firmware's own is
-// used from then on -- one probe, not one per navigation.
-function listing(target) {
-  var url = lister + "?path=" + encodeURIComponent(target) +
-            (lister === "sonix-list" && showHidden ? "&hidden=1" : "");
+function connectionLost() {
+  showPair("{{js|Impossibile connettersi. Lascia aperta la pagina Trasferimento sul V1.}}");
+}
 
-  return fetch(url, { cache: "no-store" }).then(function (res) {
-    if (res.ok) { return res.json(); }
-    if (lister === "sonix-list") {
-      lister = "list";
-      updateHiddenButton();
-      return listing(target);
-    }
-    throw new Error("HTTP " + res.status);
-  });
+function statusMessage(status) {
+  if (status === 409) { return "{{js|Esiste già un file o una cartella con questo nome.}}"; }
+  if (status === 413) { return "{{js|File troppo grande (limite: 4 GiB meno un byte).}}"; }
+  if (status === 507) { return "{{js|Spazio insufficiente sulla microSD.}}"; }
+  return "HTTP " + status;
+}
+
+function checkResponse(res) {
+  if (res.ok) { return res; }
+  if (res.status === 401) { showPair(); }
+  var err = new Error(statusMessage(res.status));
+  err.status = res.status;
+  throw err;
+}
+
+function pair(code) {
+  if (!/^[2-9A-HJ-NP-Z]{8}$/.test(code)) {
+    showPair("{{js|Codice non valido o scaduto.}}");
+    return;
+  }
+  $("pair-connect").disabled = true;
+  $("pair-status").textContent = "{{js|Connessione...}}";
+  fetch("pair", { method: "POST", headers: { "X-Sonix-Pair": code } })
+    .then(function (res) {
+      if (res.status === 401) { showPair("{{js|Codice non valido o scaduto.}}"); }
+      else if (!res.ok) { throw new Error(statusMessage(res.status)); }
+      else {
+        $("pair-code").value = "";
+        load(CARD);
+      }
+    })
+    .catch(connectionLost)
+    .then(function () { $("pair-connect").disabled = false; });
+}
+
+$("pair-form").onsubmit = function (e) {
+  e.preventDefault();
+  if (!$("pair-connect").disabled) { pair($("pair-code").value.trim().toUpperCase()); }
+};
+
+function endpoint(route, fields) {
+  return route + "?" + Object.keys(fields).map(function (k) {
+    return k + "=" + encodeURIComponent(fields[k]);
+  }).join("&");
+}
+
+function post(route, fields) {
+  return fetch(endpoint(route, fields), {
+    method: "POST",
+    headers: { "X-Sonix-Transfer": "1" }
+  }).then(checkResponse);
+}
+
+function listing(target) {
+  return fetch(endpoint("list", { path: target, hidden: showHidden ? 1 : 0 }), { cache: "no-store" })
+    .then(checkResponse)
+    .then(function (res) { return res.json(); });
 }
 
 function load(target) {
   path = normalise(target);
+  var serial = ++listSerial;
   closeMenu();
   $("list").innerHTML = '<div class="loading">' + icon("loader", "big spin") + "</div>";
 
   listing(path)
     .then(function (data) {
+      if (serial !== listSerial) { return; }
+      $("pair-panel").hidden = true;
+      $("files-shell").hidden = false;
       entries = (data || []).map(function (f) {
         return {
           name: f.name,
@@ -927,6 +904,8 @@ function load(target) {
       draw();
     })
     .catch(function (err) {
+      if (serial !== listSerial) { return; }
+      if ($("files-shell").hidden) { connectionLost(); return; }
       entries = [];
       $("list").innerHTML = '<div class="empty">{{Impossibile leggere questa cartella.}}</div>';
       drawCrumbs();
@@ -1063,7 +1042,7 @@ function showMenu(anchor, entry) {
     item("open", "{{js|Apri}}", null, function () { load(entry.path); });
   } else {
     item("download", "{{js|Scarica}}", null, function () {
-      window.location = "download?path=" + encodeURIComponent(entry.path);
+      window.location = endpoint("download", { path: entry.path });
     });
   }
 
@@ -1136,12 +1115,7 @@ $("mkdir").onclick = function () {
 // dot-files too -- .Trashes, ._ twins, whatever a computer left behind.
 function updateHiddenButton() {
   var button = $("hidden");
-  var can = lister === "sonix-list";
-
-  button.disabled = !can;
-  button.title = !can
-    ? "{{js|Il firmware di questo player non può mostrare i file nascosti}}"
-    : (showHidden ? "{{js|Nascondi i file nascosti}}" : "{{js|Mostra i file nascosti}}");
+  button.title = showHidden ? "{{js|Nascondi i file nascosti}}" : "{{js|Mostra i file nascosti}}";
 
   button.querySelector("use").setAttribute("href", showHidden ? "#eye-on" : "#eye-off");
   button.querySelector(".svgicon").style.color = showHidden ? "var(--accent)" : "";
@@ -1162,7 +1136,7 @@ var uploading = false;
 
 /* Folders that have been created (or found already there) during this run, so
    a hundred files out of one album cost one `create` and not a hundred. */
-var madeDirs = {};
+var madeDirs = Object.create(null);
 
 /* Where a job's file has to land. For a plain pick that is the folder on
    screen; for a folder pick the relative path carries the structure and the
@@ -1174,11 +1148,8 @@ function jobDir(job) {
   return parts.length ? job.dir + parts.join("/") + "/" : job.dir;
 }
 
-/* Creates the folders a relative path needs, outermost first, one at a time.
-   A `create` that fails is almost always "it is already there" -- the stock
-   page reads a 409 for exactly that -- and a genuinely broken one shows up a
-   moment later as a failed upload with a message of its own, so there is
-   nothing useful to say here. */
+/* Create a dropped tree one parent at a time. A directory already there
+   returns success; a file in its place is a conflict, not a folder to skip. */
 function ensureDirs(job) {
   var parts = job.rel ? job.rel.split("/").filter(Boolean) : [];
   parts.pop();
@@ -1191,15 +1162,15 @@ function ensureDirs(job) {
     var target = here;
     chain = chain.then(function () {
       if (madeDirs[target]) { return; }
-      madeDirs[target] = true;
-      return post("create", { path: target }).catch(function () {});
+      return post("create", { path: target }).then(function () { madeDirs[target] = true; });
     });
   });
 
   return chain;
 }
 
-function enqueue(files, fromFolder) {
+function enqueue(files, fromFolder, target) {
+  if ($("files-shell").hidden) { return; }
   var unknown = 0;
 
   Array.prototype.forEach.call(files, function (file) {
@@ -1212,7 +1183,7 @@ function enqueue(files, fromFolder) {
         toast(fill('{{js|"{1}" non è un formato che il player legge; lo carico comunque.}}', file.name));
       }
     }
-    queue.push({ file: file, dir: path, rel: rel });
+    queue.push({ file: file, dir: target || path, rel: rel });
   });
 
   if (fromFolder && unknown) {
@@ -1225,9 +1196,9 @@ function enqueue(files, fromFolder) {
 }
 
 function pump() {
-  if (uploading) { return; }
+  if (uploading || $("files-shell").hidden) { return; }
   var job = queue.shift();
-  if (!job) { madeDirs = {}; load(path); return; }
+  if (!job) { madeDirs = Object.create(null); load(path); return; }
 
   uploading = true;
 
@@ -1246,22 +1217,11 @@ function pump() {
   card.querySelector(".name").textContent = job.rel || job.file.name;
   $("uploads").appendChild(card);
 
-  ensureDirs(job).then(function () { send(job, card); });
-}
-
-function send(job, card) {
-  var form = new FormData();
-  form.append("path", jobDir(job));
-  form.append("files[]", job.file, job.file.name);
-
-  var xhr = new XMLHttpRequest();
-  xhr.open("POST", "upload", true);
-
-  xhr.upload.onprogress = function (e) {
-    if (!e.lengthComputable) { return; }
-    var pct = Math.round(e.loaded / e.total * 100);
-    card.querySelector(".bar > span").style.width = pct + "%";
-    card.querySelector(".pct").textContent = pct + "%";
+  var xhr = null;
+  var cancelled = false;
+  card.querySelector(".head2 button").onclick = function () {
+    cancelled = true;
+    if (xhr) { xhr.abort(); }
   };
 
   var finish = function (ok, why) {
@@ -1269,20 +1229,39 @@ function send(job, card) {
     uploading = false;
     if (ok) {
       toast(fill("{{js|{1} caricato}}", job.file.name), "ok");
-    } else if (why !== "abort") {
-      toast(why ? fill("{{js|Caricamento di {1} non riuscito ({2})}}", job.file.name, why)
-                : fill("{{js|Caricamento di {1} non riuscito}}", job.file.name));
+    } else if (!cancelled && why) {
+      toast(fill("{{js|Caricamento di {1} non riuscito ({2})}}", job.file.name, why));
     }
     pump();
   };
 
-  xhr.onload = function () { finish(xhr.status >= 200 && xhr.status < 300, "HTTP " + xhr.status); };
-  xhr.onerror = function () { finish(false, "{{js|rete}}"); };
-  xhr.onabort = function () { finish(false, "abort"); };
-
-  card.querySelector(".head2 button").onclick = function () { xhr.abort(); };
-
-  xhr.send(form);
+  ensureDirs(job)
+    .then(function () {
+      if (cancelled || $("files-shell").hidden) { finish(false); return; }
+      xhr = new XMLHttpRequest();
+      xhr.open("PUT", endpoint("upload", { path: jobDir(job) + job.file.name }));
+      xhr.setRequestHeader("X-Sonix-Transfer", "1");
+      xhr.upload.onprogress = function (e) {
+        if (!e.lengthComputable || !e.total) { return; }
+        var pct = Math.min(99, Math.round(e.loaded / e.total * 100));
+        card.querySelector(".bar > span").style.width = pct + "%";
+        card.querySelector(".pct").textContent = pct + "%";
+      };
+      xhr.onload = function () {
+        if (xhr.status === 401) { showPair(); finish(false); }
+        else if (xhr.status === 201) { finish(true); }
+        else { finish(false, statusMessage(xhr.status)); }
+      };
+      xhr.onerror = function () { connectionLost(); finish(false); };
+      xhr.onabort = function () { finish(false); };
+      // Raw File bytes: the player streams to microSD without buffering the
+      // album or parsing a multipart form. XHR still provides upload progress.
+      xhr.send(job.file);
+    })
+    .catch(function (err) {
+      if (err instanceof TypeError) { connectionLost(); }
+      finish(false, $("files-shell").hidden ? null : err.message);
+    });
 }
 
 $("pick").onclick = function () { $("files").click(); };
@@ -1296,7 +1275,7 @@ $("folders").onchange = function () { enqueue(this.files, true); this.value = ""
 ["dragenter", "dragover"].forEach(function (name) {
   document.addEventListener(name, function (e) {
     e.preventDefault();
-    document.body.classList.add("dragging");
+    if (!$("files-shell").hidden) { document.body.classList.add("dragging"); }
   });
 });
 ["dragleave", "drop"].forEach(function (name) {
@@ -1345,6 +1324,8 @@ function walkEntry(entry, prefix, out) {
 }
 
 document.addEventListener("drop", function (e) {
+  if ($("files-shell").hidden) { return; }
+  var target = path;
   var items = e.dataTransfer && e.dataTransfer.items;
   var canWalk = items && items.length && typeof items[0].webkitGetAsEntry === "function";
 
@@ -1360,7 +1341,10 @@ document.addEventListener("drop", function (e) {
     var entry = items[i].webkitGetAsEntry();
     if (entry) { entries.push(entry); }
   }
-  if (!entries.length) { return; }
+  if (!entries.length) {
+    if (e.dataTransfer.files.length) { enqueue(e.dataTransfer.files, false, target); }
+    return;
+  }
 
   var files = [];
   var anyFolder = entries.some(function (entry) { return entry.isDirectory; });
@@ -1371,22 +1355,22 @@ document.addEventListener("drop", function (e) {
   });
 
   chain.then(function () {
-    if (files.length) { enqueue(files, anyFolder); }
+    if (files.length) { enqueue(files, anyFolder, target); }
   });
 });
 
 /* --- go ----------------------------------------------------------------- */
 
-fetch("hostname", { cache: "no-store" })
-  .then(function (res) { return res.ok ? res.text() : ""; })
-  .then(function (name) {
-    deviceName = (name || "").trim().toUpperCase();
-    if (deviceName) { draw(); } // the title and the first crumb are its name
-  })
-  .catch(function () { /* the name is decoration; the page works without it */ });
-
 updateHiddenButton();
-load(CARD);
+var scannedCode = window.location.hash.slice(1);
+if (scannedCode) {
+  // Don't leave the temporary pairing code in the address bar or history.
+  window.history.replaceState(null, "", window.location.pathname);
+  showPair();
+  pair(scannedCode);
+} else {
+  load(CARD); // a same-session reload can use the browser's HttpOnly cookie
+}
 </script>
 </body>
 </html>

@@ -84,8 +84,9 @@
 #include "src/system/device/system.h"
 #include "src/system/device/usb.h"
 #include "src/system/core/utils.h"
-#include "src/system/net/webcgi.h"
 #include "src/system/net/wifi.h"
+#include "src/system/net/wifitransfer.h"
+#include "src/system/streaming/networkmusic.h"
 #include "src/system/library/geniusdb.h"
 
 
@@ -1944,15 +1945,6 @@ static void limit_realtime_share(void) {
 #endif
 
 int main(int argc, char **argv) {
-	// Before anything at all -- before the signal guards, before the allocator
-	// is tuned, before a display is opened. thttpd runs this same binary as the
-	// transfer page's directory listing (see src/system/webcgi.h), and in that
-	// role it is a small program that prints JSON and exits. None of the player
-	// belongs on that path.
-	if (webcgi_should_run(argc, argv)) {
-		return webcgi_main();
-	}
-
 	// On this device dying means rebooting (see above).
 	install_signal_guards();
 
@@ -2640,6 +2632,9 @@ int main(int argc, char **argv) {
 		}
 	}
 
+	wifitransfer_release_card();
+	networkmusic_cancel();
+	networkmusic_release_card();
 	printf("\n");
 
 #ifdef HOST_WEB_EMU

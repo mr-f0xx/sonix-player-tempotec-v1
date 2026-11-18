@@ -1,447 +1,224 @@
 #include "wifitransfer.h"
 
-#include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 
-#include "lvgl/lvgl.h"
-
-#include "src/gui/shell/confirm.h"
 #include "src/gui/fonts/fonts.h"
-#include "src/gui/shell/gui.h"
-#include "src/gui/shell/icons.h"
 #include "src/gui/nowplaying/player.h"
+#include "src/gui/shell/confirm.h"
 #include "src/gui/shell/settingsrow.h"
 #include "src/gui/shell/switcher.h"
 #include "src/gui/shell/theme.h"
 #include "src/gui/wireless/wifisettings.h"
 #include "src/system/audio/audio.h"
 #include "src/system/core/lang.h"
-#include "src/system/library/library.h"
-#include "src/system/net/wifi.h"
 #include "src/system/device/led.h"
 #include "src/system/device/system.h"
+#include "src/system/library/library.h"
+#include "src/system/net/wifi.h"
 #include "src/system/net/wifitransfer.h"
 #include "src/system/streaming/radio.h"
 #include "src/system/streaming/streamturn.h"
 
 lv_obj_t *wifitransfer_screen;
 
-// Half a second: the page has a state that lasts only as long as the server
-// takes to come up, and a "turning on" message that lingers after thttpd is
-// already listening reads as a slow player.
 #define WT_POLL_MS 500
+#define WT_LINK_GRACE_TICKS 6 // tolerate a brief scan, but stop at once when switched off
+#define QR_SIZE 88  // the numeric URL fits a 29-module QR at 3 px per module
+#define QR_QUIET 12 // four modules of white, plus the bitmap's own margin
 
-// The stock player puts its server back every fifteen seconds if it has died
-// (it runs cgic_deamon on that cadence). Same interval, counted in ticks.
-#define WT_WATCHDOG_TICKS 30
-
-// How long the link has to be gone before this page believes it.
-//
-// One sample is not enough: `wpa_cli status` reports SCANNING while a perfectly
-// good link does a background scan, and reports nothing at all when the read
-// loses a race with a busy supplicant, and either would tear the server down
-// with an upload in flight. The question asked is whether wlan0 has an address
-// -- which is what a server needs -- and it has to answer no for three seconds
-// running before anything is switched off.
-#define WT_LINK_GRACE_TICKS 6
-
-static lv_obj_t *toggle;
-static lv_obj_t *status_label;
-static lv_obj_t *url_label;
-static lv_obj_t *addr_label;
-static lv_obj_t *warn1_label;
-static lv_obj_t *warn2_label;
-static lv_obj_t *wifi_row;
+static lv_obj_t *toggle, *status_label, *url_label, *name_label, *code_label;
+static lv_obj_t *qr_box, *qr, *trusted_label, *keep_open_label, *wifi_row;
 static lv_timer_t *poll_timer;
-
-static int watchdog_ticks;
-
-// True from the moment the confirmation is accepted until the page is gone, so
-// the back guard does not ask a second time on the way out.
-static bool leaving;
-
-// Keys taken verbatim from the stock firmware's own strings for this page
-// (/usr/resource/str/italy/wifi_song.ini), which are a better source than a
-// fresh translation.
-#define WT_HELP "wifitransfer_address_note"
-#define WT_WARN1 "wifitransfer_same_network_note"
-#define WT_WARN2 "wifitransfer_keep_open_note"
-#define WT_STOP_PLAY "wifitransfer_stops_playback"
-
-// ---------------------------------------------------------------------------
-
+static bool page_active, start_on_load, leaving;
 static int link_missing_ticks;
+static char qr_payload[WIFITRANSFER_URL_SIZE + 20];
+static const char *last_error;
 
-// The kernel's answer: an ioctl, no fork, no flap. What it does NOT say is
-// whether the radio is on -- an interface switched off keeps the address it was
-// given until something takes it away, and on this device nothing does, so this
-// alone would show a live server with the Wi-Fi off.
-static bool wifi_has_address(void) { return wifi_interface_address(NULL, 0); }
-
-// What every other wireless page asks, and the reason they all get this right:
-// AirPlay, DLNA and SonixLink decide by this and nothing else.
-static bool wifi_is_connected(void) {
-	wifi_status_t status;
-	wifi_get_status(&status);
-	return status.state == WIFI_STATE_CONNECTED && status.ip[0] != '\0';
-}
-
-// The radio is off. Unlike everything else in here this is not a poll's
-// opinion: the player writes it itself the moment the user switches Wi-Fi off
-// (see set_enabled() in system/wifi.c), so there is nothing to wait and see
-// about.
-static bool wifi_is_off(void) {
-	wifi_status_t status;
-	wifi_get_status(&status);
-	return status.state == WIFI_STATE_OFF;
-}
-
-// One poll's worth of evidence, and the only thing that writes the counter.
-//
-// Two questions are being answered at once here, which is why it reads the way
-// it does. Is there a network? -- the supplicant, same as the other three
-// pages, so one device never shows two answers. Is it safe to tear down a
-// running server? -- that one needs the three seconds, because `wpa_cli status`
-// says SCANNING during a background scan of a link that is carrying an upload
-// just fine.
-static void link_note(void) {
-	if (wifi_is_off()) {
-		link_missing_ticks = WT_LINK_GRACE_TICKS; // believed at once
-		return;
-	}
-	if (wifi_is_connected() || wifi_has_address()) {
-		link_missing_ticks = 0;
-		return;
-	}
-	if (link_missing_ticks < WT_LINK_GRACE_TICKS) {
-		link_missing_ticks++;
-	}
-}
-
-// The debounced version, and the only one anything acts on.
-static bool wifi_link_is_up(void) { return link_missing_ticks < WT_LINK_GRACE_TICKS; }
-
-static bool switch_is_on(void) { return lv_obj_has_state(toggle, LV_STATE_CHECKED); }
-
-static void hide(lv_obj_t *obj) { lv_obj_set_hidden(obj, true); }
-static void show(lv_obj_t *obj) { lv_obj_set_hidden(obj, false); }
-
-// lv_label_set_text reallocates and invalidates whether or not the text
-// changed, so setting the same five labels twice a second would redraw the
-// whole page twice a second -- the address at font_ui_32 included -- for
-// nothing.
 static void set_text(lv_obj_t *label, const char *text) {
-	const char *shown = lv_label_get_text(label);
-	if (shown && strcmp(shown, text) == 0) {
-		return;
-	}
-	lv_label_set_text(label, text);
+	if (strcmp(lv_label_get_text(label), text) != 0) lv_label_set_text(label, text);
 }
 
-// Everything below the switch, from the state the page is actually in. Cheap
-// enough to run on every tick: it is four labels and a row.
+static void set_labels_hidden(bool hide) {
+	lv_obj_set_hidden(url_label, hide);
+	lv_obj_set_hidden(code_label, hide);
+	lv_obj_set_hidden(trusted_label, hide);
+	lv_obj_set_hidden(keep_open_label, hide);
+	if (hide) {
+		lv_obj_set_hidden(qr_box, true);
+		lv_obj_set_hidden(name_label, true);
+		qr_payload[0] = '\0';
+	}
+}
+
+static void show_session(const wifitransfer_info_t *info) {
+	// Encode the *numeric* URL, not .local, which not every phone resolves.
+	// The fragment pairs the browser but is never sent as an HTTP URL.
+	char payload[sizeof(qr_payload)];
+	snprintf(payload, sizeof(payload), "%s/#%s", info->address, info->code);
+	if (strcmp(payload, qr_payload) != 0) {
+		bool valid = lv_qrcode_update(qr, payload, (uint32_t)strlen(payload)) == LV_RESULT_OK;
+		lv_obj_set_hidden(qr_box, !valid);
+		snprintf(qr_payload, sizeof(qr_payload), "%s", payload);
+	}
+	set_text(status_label, tr(lv_obj_is_hidden(qr_box) ? "wifitransfer_address_note" : "wifitransfer_scan_note"));
+	set_text(url_label, info->address);
+	char code[96], name[WIFITRANSFER_URL_SIZE + 32];
+	const char *format = tr("wifitransfer_pairing_code");
+	snprintf(code, sizeof(code), strcmp(format, "wifitransfer_pairing_code") ? format : "Code: %s", info->code);
+	set_text(code_label, code);
+	if (info->name[0]) {
+		snprintf(name, sizeof(name), tr("wifitransfer_or"), info->name);
+		set_text(name_label, name);
+	}
+	lv_obj_set_hidden(name_label, !info->name[0]);
+	set_text(trusted_label, tr("wifitransfer_trusted_note"));
+	set_text(keep_open_label, tr("wifitransfer_keep_open_note"));
+	set_labels_hidden(false);
+}
+
+static bool read_link(char ip[16]) {
+	wifi_status_t status;
+	wifi_get_status(&status);
+	bool have = status.state != WIFI_STATE_OFF && wifi_interface_address(ip, 16);
+	if (have) link_missing_ticks = 0;
+	else if (status.state == WIFI_STATE_OFF || !page_active) link_missing_ticks = WT_LINK_GRACE_TICKS;
+	else if (link_missing_ticks < WT_LINK_GRACE_TICKS) link_missing_ticks++;
+	return have;
+}
+
+static void stop_transfer(void) {
+	lv_obj_remove_state(toggle, LV_STATE_CHECKED);
+	if (!page_active) return;
+	page_active = false;
+	// Join the worker before rechecking databases or scanning the card. In
+	// particular, an in-flight upload needs to remove its part file first.
+	wifitransfer_release_card();
+	led_set_wifi_transfer(false);
+	wifi_set_status_poll_slow(false);
+	if (gui_card_available()) {
+		storage_card_files_recheck();
+		library_card_returned(storage_sd_root());
+	}
+}
+
 static void refresh(void) {
-	if (!wifitransfer_available()) {
-		set_text(status_label, tr("wifitransfer_unavailable"));
-		lv_obj_add_state(toggle, LV_STATE_DISABLED);
-		hide(url_label);
-		hide(addr_label);
-		hide(warn1_label);
-		hide(warn2_label);
-		hide(wifi_row);
-		return;
-	}
-
-	if (!wifi_link_is_up()) {
-		// The stock player says this in a modal with a settings button; saying
-		// what is missing and offering the way there does the same job without a
-		// dialog to dismiss. Same wording as every other network-backed page.
-		set_text(status_label, tr("enable_wi_fi_first"));
-		lv_obj_add_state(toggle, LV_STATE_DISABLED);
-		hide(url_label);
-		hide(addr_label);
-		hide(warn1_label);
-		hide(warn2_label);
-		show(wifi_row);
-		return;
-	}
-
-	lv_obj_remove_state(toggle, LV_STATE_DISABLED);
-	hide(wifi_row);
-
-	if (!switch_is_on()) {
-		set_text(status_label, tr("wifitransfer_off_note"));
-		hide(url_label);
-		hide(addr_label);
-		hide(warn1_label);
-		hide(warn2_label);
-		return;
-	}
-
-	// On, but the server takes a moment: the first time it is switched on it
-	// also copies the web page into the writable partition. Until thttpd is
-	// actually listening there is no point printing an address for it.
-	if (!wifitransfer_running()) {
-		set_text(status_label, tr("turning_on"));
-		hide(url_label);
-		hide(addr_label);
-		hide(warn1_label);
-		hide(warn2_label);
-		return;
-	}
-
-	// The name first, the address under it. Both work; the name is the one worth
-	// typing, and the address is the one that works from an Android browser,
-	// which cannot resolve a .local name at all.
-	char name[80];
-	char address[80];
-	wifitransfer_url(name, sizeof(name));
-	wifitransfer_address(address, sizeof(address));
-
-	set_text(status_label, tr(WT_HELP));
-
-	if (name[0]) {
-		set_text(url_label, name);
-		if (address[0]) {
-			lv_label_set_text_fmt(addr_label, tr("wifitransfer_or"), address);
-			show(addr_label);
-		} else {
-			hide(addr_label);
+	char ip[16];
+	bool have = read_link(ip);
+	bool connected = link_missing_ticks < WT_LINK_GRACE_TICKS;
+	bool available = wifitransfer_available();
+	wifitransfer_info_t session;
+	if (page_active) {
+		bool live = wifitransfer_get_info(&session);
+		bool moved = live && have && strcmp(ip, session.ip) != 0;
+		if (!live || !connected || moved) {
+			stop_transfer();
+			last_error = moved ? "wifitransfer_link_changed" : NULL;
 		}
-	} else {
-		set_text(url_label, address[0] ? address : "--");
-		hide(addr_label);
 	}
 
-	set_text(warn1_label, tr(WT_WARN1));
-	set_text(warn2_label, tr(WT_WARN2));
-	show(url_label);
-	show(warn1_label);
-	show(warn2_label);
+	lv_obj_set_hidden(wifi_row, !available || connected);
+	if (available && connected) lv_obj_remove_state(toggle, LV_STATE_DISABLED);
+	else lv_obj_add_state(toggle, LV_STATE_DISABLED);
+	if (page_active) {
+		show_session(&session);
+		return;
+	}
+	set_labels_hidden(true);
+	const char *message = !available ? "wifitransfer_unavailable" : !connected ? "enable_wi_fi_first" :
+		 last_error ? last_error : "wifitransfer_off_note";
+	set_text(status_label, tr(message));
 }
 
-// ---------------------------------------------------------------------------
-// switching it on and off
-// ---------------------------------------------------------------------------
-
-// The stock player stops playback outright, closing the decoder and clearing
-// the now-playing state. Pausing is the audible half of that and keeps the
-// track loaded, so playback resumes with one tap.
-//
-// It happens at all because the browser can delete or overwrite the file being
-// played: the card is about to be written by a root process outside this one.
-//
-// A station is stopped rather than paused: a live stream has no position to
-// come back to, and play afterwards reconnects to it. Which is also why
-// audio_get_status() cannot answer for one -- the stream goes out through
-// audio_external_*(), which the decoder's status knows nothing about.
-static void stop_playback_and_warn(void) {
+// Keep the existing playback and streaming behavior of the transfer switch:
+// pause local playback so it can resume; a live station has no position to save.
+static void pause_playback(void) {
 	if (radio_is_active()) {
-		if (!radio_is_playing()) {
-			return;
-		}
+		if (!radio_is_playing()) return;
 		radio_stop();
 		player_refresh_now_playing();
 	} else if (audio_get_status() == AUDIO_STATUS_PLAYING) {
-		player_key_play_pause(); // through the player, so the sheet and the bar follow
+		player_key_play_pause();
 	} else {
 		return;
 	}
-
-	gui_notify_popup(WT_STOP_PLAY);
+	gui_notify_popup("wifitransfer_stops_playback");
 }
 
-// The browser may have changed the card while the server was up: deleted a
-// database, added music, taken some away. What changed is looked at the same
-// way as a card back from a computer.
-static void transfer_finished(void) {
-	storage_card_files_recheck();
-	library_card_returned(storage_sd_root());
-}
-
-static void set_transfer(bool on) {
-	if (on) {
-		// The page is written out when the server starts, so the colour has to
-		// be handed over first. Read fresh each time: the accent can have been
-		// changed in Aspetto since the last time this page was opened.
-		lv_color_t accent = theme()->accent;
-		wifitransfer_set_accent(((uint32_t)accent.red << 16) | ((uint32_t)accent.green << 8) | accent.blue);
+static void start_transfer(void) {
+	if (page_active) return;
+	lv_color_t accent = theme()->accent;
+	uint32_t rgb = ((uint32_t)accent.red << 16) | ((uint32_t)accent.green << 8) | accent.blue;
+	wifitransfer_result_t result = wifitransfer_start(rgb);
+	last_error = NULL;
+	if (result != WIFITRANSFER_OK) {
+		lv_obj_remove_state(toggle, LV_STATE_CHECKED);
+		last_error = result == WIFITRANSFER_NO_WIFI ? "enable_wi_fi_first" :
+			result == WIFITRANSFER_NO_CARD ? "wifitransfer_card_note" : "wifitransfer_start_failed";
+		return;
 	}
-
-	wifitransfer_set_enabled(on);
-	watchdog_ticks = 0;
-	if (!on) {
-		transfer_finished();
-	}
-
-	// The light follows the switch straight away. Left to the status bar's own
-	// poll it would be up to five seconds behind, which on a toggle reads as the
-	// toggle not having worked.
-	led_set_wifi_transfer(on);
-
-	// While the server is up the radio is carrying files, and every status poll
-	// is a fork of the whole player. The bars can lag.
-	wifi_set_status_poll_slow(on);
-
-	if (on) {
-		stop_playback_and_warn();
-
-		// A Qobuz or Tidal track, or a podcast episode, can be stopped only
-		// because its file has not arrived yet: the download carries on and the
-		// page that owns it starts playing the moment it lands. What is in
-		// flight is dropped here, and while the server is up those three pages
-		// ask for nothing further and resume nothing.
-		streamturn_abandon_all();
-	}
-	refresh();
+	page_active = true;
+	lv_obj_add_state(toggle, LV_STATE_CHECKED);
+	led_set_wifi_transfer(true);
+	wifi_set_status_poll_slow(true);
+	pause_playback();
+	streamturn_abandon_all();
 }
 
 static void toggle_changed_cb(lv_event_t *e) {
 	(void)e;
-
-	bool on = switch_is_on();
-
-	if (on && !wifitransfer_available()) {
-		lv_obj_remove_state(toggle, LV_STATE_CHECKED);
-		gui_notify_popup("wifitransfer_unavailable");
-		return;
-	}
-	if (on && !wifi_is_connected()) {
-		lv_obj_remove_state(toggle, LV_STATE_CHECKED);
-		gui_notify_popup("enable_wi_fi_first");
-		return;
-	}
-
-	set_transfer(on);
+	if (lv_obj_has_state(toggle, LV_STATE_CHECKED)) start_transfer();
+	else stop_transfer();
+	refresh();
 }
 
-// ---------------------------------------------------------------------------
-// leaving
-// ---------------------------------------------------------------------------
-
-// Deferred by one turn of the event loop. Calling back_btn_cb() straight from
-// here runs it inside the confirmation dialog's own handler, and the screen
-// change is then undone as the dialog finishes closing over it, which makes
-// confirming a no-op.
 static void leave_async(void *user) {
 	(void)user;
-	back_btn_cb(NULL); // the guard lets it through now
+	back_btn_cb(NULL);
 	leaving = false;
 }
 
 static void confirm_leave_cb(void *user) {
 	(void)user;
-
 	leaving = true;
-	lv_obj_remove_state(toggle, LV_STATE_CHECKED);
-	set_transfer(false);
+	wifitransfer_page_stop();
+	// Navigate outside the confirmation dialog's close handler.
 	lv_async_call(leave_async, NULL);
 }
 
-// The chevron, while the server is up. Leaving the page takes the server with
-// it, so an upload in progress dies: ask first.
 static bool back_guard(void) {
-	if (leaving || !switch_is_on()) {
-		return false;
-	}
-
+	if (leaving || !page_active) return false;
 	confirm_show("wifitransfer_leave_transfer", "wifitransfer_off_confirm_note", "wifitransfer_turn_off",
 				 confirm_leave_cb, NULL);
 	return true;
 }
 
-// ---------------------------------------------------------------------------
-
 static void poll_cb(lv_timer_t *timer) {
 	(void)timer;
-
-	// Before the repaint, so the page answers on the same tick that decides.
-	bool was_up = wifi_link_is_up();
-	link_note();
-
 	refresh();
-
-	if (!switch_is_on()) {
-		return;
-	}
-
-	// The network went away under a running server: there is nothing left to
-	// serve and no address to print, so hand the port back.
-	if (!wifi_link_is_up()) {
-		if (was_up) {
-			printf("wifitransfer: %s; switching the server off\n",
-				   wifi_is_off() ? "the radio has been switched off" : "wlan0 has had no network for three seconds");
-		}
-		lv_obj_remove_state(toggle, LV_STATE_CHECKED);
-		set_transfer(false);
-		return;
-	}
-
-	if (++watchdog_ticks >= WT_WATCHDOG_TICKS) {
-		watchdog_ticks = 0;
-		wifitransfer_watchdog();
-	}
 }
-
-// Set by wifitransfer_page_open_started(): the next arrival on the page turns
-// the switch on.
-static bool start_on_load;
 
 static void screen_loaded_cb(lv_event_t *e) {
 	(void)e;
-
 	leaving = false;
-	watchdog_ticks = 0;
-
-	// Answered straight away on arrival rather than after the grace period. The
-	// three seconds exist to keep one bad sample from tearing down a running
-	// server; nothing is running when the page opens, so there is nothing to
-	// protect and every reason not to show a live-looking page for three
-	// seconds to someone with the Wi-Fi off.
-	link_missing_ticks = (wifi_is_connected() || wifi_has_address()) ? 0 : WT_LINK_GRACE_TICKS;
-
-	// The switch says what the server is doing, not what it was doing last time
-	// this page was open: something else may have taken it down in between.
-	if (wifitransfer_get_enabled() && wifitransfer_available()) {
-		lv_obj_add_state(toggle, LV_STATE_CHECKED);
-	} else {
-		lv_obj_remove_state(toggle, LV_STATE_CHECKED);
-	}
-
+	last_error = NULL;
 	if (start_on_load) {
 		start_on_load = false;
-		if (!switch_is_on() && wifitransfer_available() && wifi_is_connected()) {
-			lv_obj_add_state(toggle, LV_STATE_CHECKED);
-			set_transfer(true);
-		}
+		start_transfer();
 	}
-
 	refresh();
 	lv_timer_resume(poll_timer);
-	lv_timer_ready(poll_timer);
 }
 
-static void screen_unloaded_cb(lv_event_t *e) {
+static void screen_unload_cb(lv_event_t *e) {
 	(void)e;
 	lv_timer_pause(poll_timer);
-
-	// Whatever route was taken off this page -- the confirmed chevron, a jump
-	// to the Wi-Fi settings, the player's own navigation -- the server does not
-	// outlive the page. An unauthenticated file server running as root is not
-	// something to leave behind by accident.
-	if (wifitransfer_get_enabled()) {
-		wifitransfer_set_enabled(false);
-		led_set_wifi_transfer(false);
-		transfer_finished();
-	}
-	wifi_set_status_poll_slow(false);
+	stop_transfer();
+	set_labels_hidden(true);
 }
 
 void wifitransfer_page_open_started(void) {
-	if (!wifitransfer_screen) {
-		return;
-	}
+	if (!wifitransfer_screen) return;
 	start_on_load = true;
 	if (lv_screen_active() == wifitransfer_screen) {
 		lv_obj_send_event(wifitransfer_screen, LV_EVENT_SCREEN_LOADED, NULL);
@@ -451,12 +228,9 @@ void wifitransfer_page_open_started(void) {
 }
 
 void wifitransfer_page_stop(void) {
-	if (toggle) {
-		lv_obj_remove_state(toggle, LV_STATE_CHECKED);
-	}
-	if (wifitransfer_get_enabled()) {
-		set_transfer(false);
-	}
+	if (!toggle) return;
+	stop_transfer();
+	refresh();
 }
 
 static void wifi_row_cb(lv_event_t *e) {
@@ -464,87 +238,52 @@ static void wifi_row_cb(lv_event_t *e) {
 	switch_screen(wifisettings_screen);
 }
 
-// The address is painted in the accent colour once, when the page is built, so
-// like every other accent-coloured widget it hooks the theme refresh pass; an
-// accent changed afterwards would otherwise stay stale until reboot.
 static void refresh_accent(void) {
-	if (url_label) {
-		lv_obj_set_style_text_color(url_label, theme()->accent, 0);
-	}
+	lv_obj_set_style_text_color(url_label, theme()->accent, 0);
 }
 
-// ---------------------------------------------------------------------------
+static lv_obj_t *label(lv_obj_t *container, lv_style_t *style, const lv_font_t *font) {
+	lv_obj_t *obj = lv_label_create(container);
+	lv_obj_set_width(obj, lv_pct(100));
+	lv_label_set_long_mode(obj, LV_LABEL_LONG_WRAP);
+	lv_obj_add_style(obj, style, 0);
+	lv_obj_set_style_text_font(obj, font, 0);
+	lv_obj_set_style_text_align(obj, LV_TEXT_ALIGN_CENTER, 0);
+	return obj;
+}
 
 void wifitransfer_page_init(gui_config_t *cfg) {
 	lv_obj_t *container = settingsrow_page(wifitransfer_screen, cfg, "transfer");
-
+	// Keep both the QR and the manual pairing details above the fold.
+	lv_obj_set_style_pad_row(container, 2, 0);
 	settingsrow_toggle(container, "wifitransfer_title", &toggle, toggle_changed_cb);
+	status_label = label(container, &theme_style_text, &font_ui_14);
 
-	status_label = lv_label_create(container);
-	lv_obj_set_width(status_label, lv_pct(100));
-	lv_label_set_long_mode(status_label, LV_LABEL_LONG_WRAP);
-	lv_obj_add_style(status_label, &theme_style_text, 0);
-	lv_obj_set_style_text_font(status_label, &font_ui_22, 0);
-	lv_obj_set_style_text_align(status_label, LV_TEXT_ALIGN_CENTER, 0);
-	lv_obj_set_style_pad_hor(status_label, 4, 0);
-	lv_obj_set_style_pad_top(status_label, 14, 0);
+	qr_box = lv_obj_create(container);
+	lv_obj_remove_style_all(qr_box);
+	lv_obj_set_size(qr_box, QR_SIZE + 2 * QR_QUIET, QR_SIZE + 2 * QR_QUIET);
+	lv_obj_set_scrollable(qr_box, false);
+	lv_obj_set_style_bg_color(qr_box, lv_color_white(), 0);
+	lv_obj_set_style_bg_opa(qr_box, LV_OPA_COVER, 0);
+	qr = lv_qrcode_create(qr_box);
+	lv_qrcode_set_size(qr, QR_SIZE);
+	lv_qrcode_set_dark_color(qr, lv_color_black());
+	lv_qrcode_set_light_color(qr, lv_color_white());
+	lv_obj_center(qr);
 
-	// The address, which is the whole point of the page: big, centred, and in
-	// the accent colour, the way the stock page prints it in blue.
-	url_label = lv_label_create(container);
-	lv_obj_set_width(url_label, lv_pct(100));
-	lv_label_set_long_mode(url_label, LV_LABEL_LONG_WRAP);
-	lv_obj_add_style(url_label, &theme_style_text, 0);
-	lv_obj_set_style_text_font(url_label, &font_ui_32, 0);
-	lv_obj_set_style_text_color(url_label, theme()->accent, 0);
-	lv_obj_set_style_text_align(url_label, LV_TEXT_ALIGN_CENTER, 0);
-	lv_obj_set_style_pad_ver(url_label, 16, 0);
-
-	// The address, quieter and under the name: a fallback, not a second offer.
-	addr_label = lv_label_create(container);
-	lv_obj_set_width(addr_label, lv_pct(100));
-	lv_label_set_long_mode(addr_label, LV_LABEL_LONG_WRAP);
-	lv_obj_add_style(addr_label, &theme_style_text_dim, 0);
-	lv_obj_set_style_text_font(addr_label, &font_ui_20, 0);
-	lv_obj_set_style_text_align(addr_label, LV_TEXT_ALIGN_CENTER, 0);
-	lv_obj_set_style_pad_bottom(addr_label, 14, 0);
-	hide(addr_label);
-
-	warn1_label = lv_label_create(container);
-	lv_obj_set_width(warn1_label, lv_pct(100));
-	lv_label_set_long_mode(warn1_label, LV_LABEL_LONG_WRAP);
-	lv_obj_add_style(warn1_label, &theme_style_text_dim, 0);
-	lv_obj_set_style_text_font(warn1_label, &font_ui_20, 0);
-	lv_obj_set_style_text_align(warn1_label, LV_TEXT_ALIGN_CENTER, 0);
-	lv_obj_set_style_pad_hor(warn1_label, 4, 0);
-
-	warn2_label = lv_label_create(container);
-	lv_obj_set_width(warn2_label, lv_pct(100));
-	lv_label_set_long_mode(warn2_label, LV_LABEL_LONG_WRAP);
-	lv_obj_add_style(warn2_label, &theme_style_text_dim, 0);
-	lv_obj_set_style_text_font(warn2_label, &font_ui_20, 0);
-	lv_obj_set_style_text_align(warn2_label, LV_TEXT_ALIGN_CENTER, 0);
-	lv_obj_set_style_pad_hor(warn2_label, 4, 0);
-	lv_obj_set_style_pad_top(warn2_label, 8, 0);
-
-	// The way out of the "no Wi-Fi" state, which is the only actionable thing
-	// this page ever offers besides its own switch.
+	url_label = label(container, &theme_style_text, &font_ui_16);
+	code_label = label(container, &theme_style_text, &font_ui_16);
+	name_label = label(container, &theme_style_text_dim, &font_ui_14);
+	trusted_label = label(container, &theme_style_text_dim, &font_ui_14);
+	keep_open_label = label(container, &theme_style_text_dim, &font_ui_14);
 	wifi_row = settingsrow_add(container, "wi_fi_settings", NULL, wifi_row_cb, NULL);
-	lv_obj_set_style_margin_top(wifi_row, 16, 0);
-	hide(wifi_row);
 
 	poll_timer = lv_timer_create(poll_cb, WT_POLL_MS, NULL);
 	lv_timer_pause(poll_timer);
-
 	lv_obj_add_event_cb(wifitransfer_screen, screen_loaded_cb, LV_EVENT_SCREEN_LOADED, NULL);
-	lv_obj_add_event_cb(wifitransfer_screen, screen_unloaded_cb, LV_EVENT_SCREEN_UNLOADED, NULL);
-
-	// Deliberately no swipe-back on this page: a page that is also the switch
-	// for a server should not be left by a gesture that can happen while
-	// scrolling. The chevron is the way out, and it asks first.
+	lv_obj_add_event_cb(wifitransfer_screen, screen_unload_cb, LV_EVENT_SCREEN_UNLOAD_START, NULL);
 	switcher_set_back_guard(wifitransfer_screen, back_guard);
-
 	theme_register_refresh(refresh_accent);
-
+	refresh_accent();
 	refresh();
 }

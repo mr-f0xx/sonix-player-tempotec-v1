@@ -115,6 +115,13 @@ void storage_recheck_card(void);
 bool storage_usb_begin(void);
 void storage_usb_end(void);
 
+// Opens the mounted microSD and reserves the card transition lock until
+// end(). Call end() once the job or listener is registered so teardown can
+// find it. If writable is true, a read-only mount is also rejected. On failure
+// returns -1 with no lock held. Caller owns the fd.
+int storage_card_file_job_begin(bool writable);
+void storage_card_file_job_end(void);
+
 // Before the machine is powered off or rebooted: an experimental USB host
 // override is restored if possible, playback stops, everything kept open on
 // the card is closed, and the card is unmounted, or remounted

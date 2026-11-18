@@ -1717,7 +1717,7 @@ bool wifi_interface_address(char *out, size_t size) {
 		out[0] = '\0';
 	}
 
-	int fd = socket(AF_INET, SOCK_DGRAM, 0);
+	int fd = socket(AF_INET, SOCK_DGRAM | SOCK_CLOEXEC, 0);
 	if (fd < 0) {
 		return false;
 	}
@@ -1727,13 +1727,14 @@ bool wifi_interface_address(char *out, size_t size) {
 	snprintf(req.ifr_name, sizeof(req.ifr_name), "%s", WIFI_IFACE);
 
 	bool have = false;
-	if (ioctl(fd, SIOCGIFADDR, &req) == 0) {
+	// Losing association does not necessarily clear the lease. Also check
+	// the interface's operational state so an old address cannot keep an
+	// upload session alive on a disconnected radio.
+	const short up = IFF_UP | IFF_RUNNING;
+	if (ioctl(fd, SIOCGIFFLAGS, &req) == 0 && (req.ifr_flags & up) == up && ioctl(fd, SIOCGIFADDR, &req) == 0) {
 		struct sockaddr_in *in = (struct sockaddr_in *)&req.ifr_addr;
 		if (in->sin_addr.s_addr != 0) {
-			have = true;
-			if (out && size) {
-				inet_ntop(AF_INET, &in->sin_addr, out, (socklen_t)size);
-			}
+			have = !out || !size || inet_ntop(AF_INET, &in->sin_addr, out, (socklen_t)size) != NULL;
 		}
 	}
 	close(fd);

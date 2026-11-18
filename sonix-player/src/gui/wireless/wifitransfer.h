@@ -8,10 +8,8 @@
 // "Transfer": the page that puts the microSD on the network so a browser on
 // the same Wi-Fi can drop music onto it.
 //
-// The page itself is the switch, exactly as in the stock player: the server
-// comes up when the page opens and goes down when it is left. Hence the
-// warning the firmware prints on it -- "keep this page open; closing it closes
-// the connection" -- which is literal, not advice.
+// The switch opens a local browser session and shows its QR/address and code.
+// Navigating away from this page closes the session and cancels any upload.
 
 extern lv_obj_t *wifitransfer_screen;
 

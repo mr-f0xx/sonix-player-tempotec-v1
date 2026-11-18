@@ -215,9 +215,15 @@ a self-signed certificate), and HLS.
   "Add hidden network" at the foot of the Wi-Fi page takes a name and
   passphrase typed by hand (blank for an open network) and probes for the
   network by name, since it never appears in the scan list.
-- **Wi-Fi transfer** - a browser on the same network gets the card: upload
-  files and whole folders, rename, move, delete, download, show hidden files.
-  Reachable at `sonix-transfer.local`.
+- **Wi-Fi file transfer** - open **Wireless → Transfer**, then scan the on-screen
+  QR code or enter the displayed address and session code in a browser on the
+  same Wi-Fi. Drag albums or individual FLACs onto the page to copy them directly
+  to microSD. The browser also lists, downloads, renames, moves and deletes files.
+  The embedded server closes when you leave the transfer page. See [Wi-Fi transfer](docs/wi-fi-transfer.md).
+- **Network folders** - under **Streaming**, browse a remote WebDAV or FTP
+  server and save individual tracks or all tracks in an album folder directly
+  to microSD. Save and play opens the completed local file for offline playback.
+  See [Network folders](docs/network-folders.md).
 - **SonixLink** - a control protocol for a phone: the phone fetches the index
   once and queries it locally instead of paging over the wire. Playback state,
   queue, favourites, artwork and commands.

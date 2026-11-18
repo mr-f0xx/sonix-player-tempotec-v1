@@ -99,9 +99,8 @@ void wifi_set_enabled_transient(bool on);
 // A snapshot of where the radio is. Never blocks.
 void wifi_get_status(wifi_status_t *out);
 
-// The address wlan0 actually has, asked of the kernel rather than of the
-// supplicant: an ioctl, no fork, and no flapping. True when there is one.
-// This is the right question for "can a server still serve" -- see wifi.c.
+// The IPv4 address on an operational wlan0, asked of the kernel rather
+// than the supplicant: no fork and no stale address after link loss.
 bool wifi_interface_address(char *out, size_t size);
 
 // Slows the status poll while something is moving bulk data over the radio.

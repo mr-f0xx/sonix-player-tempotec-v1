@@ -11,6 +11,7 @@
 #include "src/gui/nowplaying/player.h"
 #include "src/gui/streaming/jellyfin_icon.h"
 #include "src/gui/streaming/jellyfinpage.h"
+#include "src/gui/streaming/networkmusicpage.h"
 #include "src/gui/streaming/podcastpage.h"
 #include "src/gui/streaming/qobuzpage.h"
 #include "src/gui/streaming/radiopage.h"
@@ -43,6 +44,9 @@ static const streaming_item_t tokyo_items[] = {
 	{"qobuz", &icon_qobuz_mark, THEME_SEMANTIC_PURPLE, &qobuz_screen, "qobuz"},
 	{"subsonic", &icon_music_note, THEME_SEMANTIC_BLUE, &subsonic_screen, "subsonic"},
 	{"jellyfin", &icon_jellyfin_mark, THEME_SEMANTIC_PURPLE, &jellyfin_screen, "jellyfin"},
+#ifndef __EMSCRIPTEN__
+	{"Network folders", &icon_sub_folders_glyph, THEME_SEMANTIC_CYAN, &networkmusic_screen, NULL},
+#endif
 };
 
 static void streaming_list_build(gui_config_t *cfg) {
@@ -51,7 +55,7 @@ static void streaming_list_build(gui_config_t *cfg) {
 
 	for (unsigned int i = 0; i < sizeof(tokyo_items) / sizeof(tokyo_items[0]); i++) {
 		const streaming_item_t *item = &tokyo_items[i];
-		if (!addons_enabled(item->addon)) {
+		if (item->addon && !addons_enabled(item->addon)) {
 			continue;
 		}
 		lv_obj_t *row = settingsrow_add(streaming_list, item->label, NULL, switch_screen_cb, *item->target);
@@ -89,6 +93,9 @@ void streaming_init(gui_config_t *cfg) {
 	if (addons_enabled("soundcloud")) {
 		soundcloudpage_init(cfg);
 	}
+#ifndef __EMSCRIPTEN__
+	networkmusic_page_init(cfg);
+#endif
 
 	const grid_entry_t all_entries[] = {
 		{"soundcloud", &icon_menu_soundcloud, &soundcloud_screen, NULL},
@@ -98,12 +105,20 @@ void streaming_init(gui_config_t *cfg) {
 		{"podcasts", &icon_menu_podcast, &podcast_screen, NULL},
 		{"subsonic", &icon_menu_streaming, &subsonic_screen, NULL},
 		{"jellyfin", &icon_jellyfin_menu, &jellyfin_screen, NULL},
+#ifndef __EMSCRIPTEN__
+		{"Network folders", &icon_menu_sub_folders, &networkmusic_screen, NULL},
+#endif
 	};
-	const char *const all_addons[] = {"soundcloud", "tidal", "qobuz", "radio", "podcasts", "subsonic", "jellyfin"};
+	const char *const all_addons[] = {
+		"soundcloud", "tidal", "qobuz", "radio", "podcasts", "subsonic", "jellyfin",
+#ifndef __EMSCRIPTEN__
+		NULL, // Network folders is a native file client, not a streaming add-on.
+#endif
+	};
 	grid_entry_t entries[sizeof(all_entries) / sizeof(all_entries[0])];
 	int count = 0;
 	for (unsigned int i = 0; i < sizeof(all_entries) / sizeof(all_entries[0]); i++) {
-		if (addons_enabled(all_addons[i])) {
+		if (!all_addons[i] || addons_enabled(all_addons[i])) {
 			entries[count++] = all_entries[i];
 		}
 	}

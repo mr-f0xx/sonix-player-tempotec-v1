@@ -161,6 +161,7 @@ void waveform_set_screen_on(bool on) { waveform_lit = on; }
 void led_set_standby(bool dark) { led_dark = dark; }
 void clock_remember(void) {}
 bool clock_resync(void) { return false; }
+void batteryhistory_init(void) {} // This display fixture must not open the history store.
 void panel_touch_flush(void) {}
 void topbar_refresh_audio_outputs(void) {}
 const sysinfo_model_t *sysinfo_model(void) {
