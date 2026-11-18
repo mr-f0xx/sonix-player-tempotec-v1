@@ -296,10 +296,13 @@ static void refresh_fork_qr(void) {
 		return;
 	}
 
-	// Tint the QR without inverting it or using a bright accent as ink.
-	// Even a white accent on a black theme stays dark on light.
-	lv_color_t ink = lv_color_mix(theme()->accent, lv_color_black(), LV_OPA_30);
-	lv_color_t paper = lv_color_mix(theme()->surface, lv_color_white(), LV_OPA_10);
+	const theme_palette_t *palette = theme();
+	// Let the paper carry more of the accent and surface colors. Keep the
+	// mixes anchored to black and off-white so even extreme custom palettes
+	// produce dark modules on a light background.
+	lv_color_t ink = lv_color_mix(palette->accent, lv_color_black(), LV_OPA_20);
+	lv_color_t tint = lv_color_mix(palette->accent, palette->surface, LV_OPA_60);
+	lv_color_t paper = lv_color_mix(tint, lv_color_hex(0xf4f4f4), LV_OPA_30);
 	lv_qrcode_set_dark_color(fork_qr, ink);
 	lv_qrcode_set_light_color(fork_qr, paper);
 	lv_obj_set_style_bg_color(lv_obj_get_parent(fork_qr), paper, 0);
