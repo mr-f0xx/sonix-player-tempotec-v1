@@ -8437,8 +8437,12 @@ void player_init(gui_config_t *cfg) {
 	// has an event, so a finger over a tick still reaches the slider under
 	// it; update_ab_markers() positions them from the slider's own rect.
 	for (int i = 0; i < 2; i++) {
-		lv_obj_t *line = i == 0 ? ab_marker_a_line : ab_marker_b_line;
-		lv_obj_t *label = i == 0 ? ab_marker_a_label : ab_marker_b_label;
+		// Pointers to the statics, so *line/​*label are lv_obj_t *: the
+		// LVGL setters take the object pointer, and lv_obj_t itself is
+		// only forward-declared here, so an object value could not be
+		// passed or assigned through.
+		lv_obj_t **line = i == 0 ? &ab_marker_a_line : &ab_marker_b_line;
+		lv_obj_t **label = i == 0 ? &ab_marker_a_label : &ab_marker_b_label;
 		const char *letter = i == 0 ? "A" : "B";
 
 		*line = lv_obj_create(player_menu);
