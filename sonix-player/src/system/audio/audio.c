@@ -2296,6 +2296,12 @@ static snd_pcm_sframes_t pcm_write_bluetooth(snd_pcm_t *pcm, const void *buf, sn
 	return (snd_pcm_sframes_t)done;
 }
 
+static audio_pcm_tap_cb_t pcm_tap_cb = NULL;
+
+void audio_set_pcm_tap_cb(audio_pcm_tap_cb_t cb) {
+	__atomic_store_n(&pcm_tap_cb, cb, __ATOMIC_RELEASE);
+}
+
 static snd_pcm_sframes_t pcm_write_recover(snd_pcm_t **pcm, const void *buf, snd_pcm_uframes_t frames, int channels,
 										   int rate, int bits, snd_pcm_uframes_t *period) {
 	for (int attempt = 0; attempt < 8; attempt++) {
@@ -2346,6 +2352,10 @@ static snd_pcm_sframes_t pcm_write_recover(snd_pcm_t **pcm, const void *buf, snd
 			written = snd_pcm_writei(*pcm, buf, frames);
 		}
 		if (written >= 0) {
+			audio_pcm_tap_cb_t tap = __atomic_load_n(&pcm_tap_cb, __ATOMIC_ACQUIRE);
+			if (tap && written > 0) {
+				tap(buf, (int)written, rate, channels, bits);
+			}
 			return written;
 		}
 
