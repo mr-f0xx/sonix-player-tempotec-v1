@@ -17,6 +17,7 @@
 #include "src/gui/library/filespage.h"
 #include "src/gui/metronome/metronome.h"
 #include "src/gui/notes/notes.h"
+#include "src/gui/tapedeck/tapedeck.h"
 #include "src/gui/tagmanager/tagmanager.h"
 #include "src/gui/pet/petpage.h"
 #include "src/gui/pet/peticon.h"
@@ -88,6 +89,9 @@ static bool more_tokyo_icon(const char *label, const lv_image_dsc_t **icon, them
 	} else if (strcmp(label, "notes") == 0) {
 		*icon = &icon_notes;
 		*tone = THEME_SEMANTIC_PURPLE;
+	} else if (strcmp(label, "tape_deck") == 0) {
+		*icon = &icon_audio_waveform;
+		*tone = THEME_SEMANTIC_RED;
 	} else if (strcmp(label, "metronome") == 0) {
 		*icon = &icon_metronome;
 		*tone = THEME_SEMANTIC_GREEN;
@@ -172,6 +176,7 @@ static const grid_entry_t MORE_ENTRIES[] = {
 	// Its own tile: two destinations that share a picture look like one
 	// destination typed twice, and the tag editor does not browse folders.
 	{"Tag Manager", &icon_menu_tag_manager, NULL, tagmanager_open},
+	{"tape_deck", &icon_menu_podcast, NULL, tapedeck_open},
 	// An action: the artwork is read from the resource tree on the way in.
 	{"flappy_bird", &icon_menu_flappy_bird, NULL, flappybird_open},
 	// The three games take the same route as Flappy Bird: an action rather than
@@ -200,7 +205,7 @@ static const grid_entry_t MORE_ENTRIES[] = {
 	{"pet", &icon_menu_pet, NULL, petpage_open},
 };
 
-#define MORE_ENTRIES_MAX 13
+#define MORE_ENTRIES_MAX (sizeof(MORE_ENTRIES) / sizeof(MORE_ENTRIES[0]))
 
 // The page's destinations for the settings in force now.
 //
@@ -227,6 +232,7 @@ static const char *more_addon_of(const char *label) {
 	if (strcmp(label, "calculator") == 0) return "calculator";
 	if (strcmp(label, "notes") == 0) return "notes";
 	if (strcmp(label, "metronome") == 0) return "metronome";
+	if (strcmp(label, "tape_deck") == 0) return "tapedeck";
 	if (strcmp(label, "pet") == 0) return "pet";
 	return NULL;
 }

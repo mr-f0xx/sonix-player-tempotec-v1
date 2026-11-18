@@ -51,6 +51,7 @@
 #include "src/gui/pet/petpage.h"
 #include "src/gui/notes/noteeditor.h"
 #include "src/gui/metronome/metronome.h"
+#include "src/gui/tapedeck/tapedeck.h"
 #include "src/gui/notes/notes.h"
 #include "src/gui/tagmanager/tagmanager.h"
 #include "src/gui/shell/morepage.h"
@@ -822,6 +823,9 @@ void gui_init(gui_config_t *cfg) {
 	}
 	if (addons_enabled("metronome")) {
 		metronome_init(cfg); // before morepage: its tile opens it
+	}
+	if (addons_enabled("tapedeck")) {
+		tapedeck_init(cfg);
 	}
 	morepage_init(cfg);
 	textview_init(cfg); // before filespage: a text file tapped there opens here

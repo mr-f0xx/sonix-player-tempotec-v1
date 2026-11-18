@@ -25,6 +25,26 @@ CORE = $(ROOT)/src/system/streaming/subsonic.c \
 test: $(BUILD)/test_subsonic
 	python3 run_subsonic_tests.py $(BUILD)/test_subsonic
 
+# Tape Deck worker tests: a fake capture/output PCM and a real temporary card.
+.PHONY: tapedeck tools-ui
+tapedeck: $(BUILD)/test_taperecorder $(BUILD)/test_tapepads
+	$(BUILD)/test_taperecorder
+	$(BUILD)/test_tapepads
+
+$(BUILD)/test_taperecorder: test_taperecorder.c $(ROOT)/src/system/audio/taperecorder.c \
+                            $(ROOT)/src/system/audio/taperecorder.h $(ROOT)/webemu/alsa/asoundlib.h
+	@mkdir -p $(BUILD)
+	$(CC) $(CPPFLAGS) -I$(ROOT)/webemu $(CFLAGS) -DTAPE_SOUND_CLASS='"sound"' -DTAPE_ASOUND_ROOT='"asound"' \
+		-DTAPE_REC_LIMIT_SECONDS=1 -o $@ $(filter %.c,$^) $(LDFLAGS) -Wl,--wrap=time,--wrap=fsync $(LDLIBS)
+
+$(BUILD)/test_tapepads: test_tapepads.c $(ROOT)/src/system/audio/tapepads.c $(ROOT)/src/system/audio/tapepads.h \
+                       $(ROOT)/src/system/audio/tapewav.c $(ROOT)/src/system/audio/tapewav.h
+	@mkdir -p $(BUILD)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ $(filter %.c,$^) $(LDFLAGS) $(LDLIBS)
+
+tools-ui: $(BUILD)/test_tools_pages
+	$(BUILD)/test_tools_pages ../../sonix-packer/assets/V1/usr/resource/sonix/language
+
 # Game Boy ROM naming and optional Cover Art matching. No LVGL or emulator core.
 gbdb: $(BUILD)/test_gbdb
 	$(BUILD)/test_gbdb
@@ -118,7 +138,7 @@ $(BUILD)/test_subsonic: test_subsonic.c support.c $(CORE) $(shell find $(ROOT)/s
 	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ test_subsonic.c support.c $(CORE) $(LDFLAGS) $(LDLIBS)
 
 sanitize:
-	$(MAKE) BUILD=.build/sanitize CFLAGS='-O1 -g -std=gnu11 -Wall -Wextra -Werror -D_FILE_OFFSET_BITS=64 -ffunction-sections -fdata-sections -fno-omit-frame-pointer -fsanitize=address,undefined' LDFLAGS='-Wl,--gc-sections -fsanitize=address,undefined' test soundcloud jellyfin
+	$(MAKE) BUILD=.build/sanitize CFLAGS='-O1 -g -std=gnu11 -Wall -Wextra -Werror -D_FILE_OFFSET_BITS=64 -ffunction-sections -fdata-sections -fno-omit-frame-pointer -fsanitize=address,undefined' LDFLAGS='-Wl,--gc-sections -fsanitize=address,undefined' test soundcloud jellyfin tapedeck
 
 # The battery guard: when the player warns at five percent, when it switches
 # itself off at one, and which readings leave standby alone. The rule is its own
@@ -950,6 +970,8 @@ TOOLS_SRC = $(ROOT)/tests/ui/test_tools_pages.c \
             $(ROOT)/src/gui/notes/notes.c $(ROOT)/src/gui/notes/noteeditor.c \
             $(ROOT)/src/gui/tagmanager/tagmanager.c $(ROOT)/src/system/tagmanager/tagwrite.c \
             $(ROOT)/src/gui/metronome/metronome.c \
+            $(ROOT)/src/gui/tapedeck/tapedeck.c \
+            $(ROOT)/src/gui/tapedeck/tapesampler.c \
             $(ROOT)/src/gui/pet/petpage.c $(ROOT)/src/gui/pet/peticon.c $(ROOT)/src/gui/pet/pikachu.c \
             $(ROOT)/src/system/pet/pet.c \
             $(ROOT)/src/system/notes/notesstore.c $(ROOT)/src/system/text/textfile.c \

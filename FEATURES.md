@@ -340,6 +340,13 @@ a self-signed certificate), and HLS.
   remembered across visits and across a reboot; leaving the page stops the
   click, because the page is the only place it can be stopped from.
 
+- **Tape Deck** - an optional More tool with a peak input meter, clipping
+  indicator and voice memos saved as mono WAVs in `Recordings/` on the microSD.
+  A capture-capable ALSA input is required; the headset remote ADC is not a
+  microphone. The 16-pad sampler can play the factory drums without a mic or
+  card, import drums and long vocal WAVs from microSD, and overdub a 16-step
+  loop. See the [Tape Deck guide](docs/tape-deck.md) for setup.
+
 - **Pet** - a small creature fed by the music it can actually be heard by: a
   local track, a stream, internet radio or a phone over Bluetooth, at a volume
   at or above 10 percent. The pet is a **Pikachu**, drawn as pixel art in the

@@ -32,6 +32,7 @@ make -C sonix-player/tests edge-lock
 make -C sonix-player/tests home-swipe
 make -C sonix-player/tests calculator
 make -C sonix-player/tests notes
+make -C sonix-player/tests tapedeck tools-ui
 make -C sonix-player/tests tagwrite
 make -C sonix-player/tests artsearch
 make -C sonix-player/tests tagdate
@@ -66,6 +67,18 @@ and nothing else. Link it against `subsonicdl.c` and stubs only — it needs no
 LVGL and no `support.c`. `subsonic-all` runs it together with the bridge
 integration suite and the Subsonic page UI suite, which links the real
 downloads page and opens it from the home page's corner arrow.
+
+The `tapedeck` tests run the recording worker against a fake ALSA capture PCM
+and a temporary card: playback-only hardware is rejected, metering does not
+save, recordings have valid WAV headers and sample data, and stop, unplug, card
+handover and failed saves close the input without publishing an incomplete WAV.
+The sampler test checks 16 distinct factory sounds, manual taps, exact bar
+boundaries, step-quantized overdubs, numbered and unnumbered kit loading,
+resampled stereo WAV streaming, long-clip controls and release of card-backed
+voices before unmount. `tools-ui` also drives Tape Deck on the real LVGL
+renderer, including input hotplug, memo playback, all 16 touch targets and
+loading a WAV or a kit. Physical USB mic validation is described in the
+[Tape Deck guide](../../docs/tape-deck.md).
 
 The `statusbar-ui` test checks LVGL rendering of the frosted player status bar,
 icon recoloring, layout-background choices, and restoration of status colors.

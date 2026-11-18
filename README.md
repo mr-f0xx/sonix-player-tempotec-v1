@@ -180,6 +180,8 @@ Showcase of **OLED** appearance: true black backgrounds with white as the accent
 
 🏷️ **Tag Manager:** Open More → Tag Manager to view FLAC/MP3 tags and cover art, and edit track titles, artists, track numbers or genres, and search for cover art over Wi-Fi on the V1. See the [usage and safety notes](docs/tag-manager.md).
 
+**Tape Deck:** An optional More tool for WAV voice memos and 16 playable pads with factory drum sounds, custom WAV kits and a one-bar overdub loop. Recording needs a compatible capture input; the sampler does not. See the [Tape Deck guide](docs/tape-deck.md).
+
 ## Contents
 
 - [Target device](#target-device)

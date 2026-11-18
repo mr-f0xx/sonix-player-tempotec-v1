@@ -184,7 +184,7 @@ static bool host_bus_has_device(void) {
 // interfaces' own class numbers -- "1-1:1.0/bInterfaceClass" is 01 for Audio
 // -- which sysfs holds from the moment the device is enumerated, long before
 // snd-usb-audio has finished probing it into a sound card. The sound card is
-// what find_usb_card() looks for; this is the same thing seen earlier, and the
+// what find_usb_output() looks for; this is the same thing seen earlier, and the
 // difference is seconds a slow probe can need and a handover must not be
 // allowed to take away.
 static bool bus_has_audio_device(void) {
@@ -406,10 +406,11 @@ static bool card_is_usb(int n) {
 	return strstr(resolved, "/usb") != NULL;
 }
 
-// The lowest-numbered USB sound card, or -1. Lowest rather than newest because
-// there is only ever one socket: a second would mean a hub, and the first is as
-// good a choice as any.
-static int find_usb_card(void) {
+// The lowest-numbered USB card with a playback PCM on device 0 (the device
+// this router opens). For port ownership count any USB sound card, including
+// a capture-only microphone; it must not take over the headphone output.
+static int find_usb_output(bool *audio_present) {
+	*audio_present = false;
 	DIR *dir = opendir(SOUND_CLASS);
 	if (!dir) {
 		return -1;
@@ -423,12 +424,13 @@ static int find_usb_card(void) {
 		}
 		char *end = NULL;
 		long n = strtol(de->d_name + 4, &end, 10);
-		if (!end || *end || n < 0) {
+		if (end == de->d_name + 4 || *end || n < 0 || n > INT_MAX || !card_is_usb((int)n)) {
 			continue; // pcmC0D0p and the rest of the class
 		}
-		if (card_is_usb((int)n) && (found < 0 || n < found)) {
-			found = (int)n;
-		}
+		*audio_present = true;
+		char playback[PATH_MAX];
+		snprintf(playback, sizeof(playback), "%s/pcmC%ldD0p", SOUND_CLASS, n);
+		if ((found < 0 || n < found) && access(playback, F_OK) == 0) found = (int)n;
 	}
 	closedir(dir);
 	return found;
@@ -1242,9 +1244,10 @@ void usbaudio_poll(void) {
 	// away by ADB, DAC mode or a storage export.
 	usbhostmode_tick();
 
-	int card = find_usb_card();
+	bool audio_present;
+	int card = find_usb_output(&audio_present);
 	if (usbhostprobe_active()) {
-		usbhost_probe_event_t event = usbhostprobe_poll(card >= 0, bus_has_audio_device());
+		usbhost_probe_event_t event = usbhostprobe_poll(audio_present, bus_has_audio_device());
 		// The held role is quiet by design: a DAC that is plugged in, unplugged
 		// and plugged in again is the same setting doing its job, and a popup
 		// for each of those would be reading the log out loud. Only the two
@@ -1283,7 +1286,7 @@ void usbaudio_poll(void) {
 		empty_polls++;
 		card = active_card;
 	}
-	arbitrate_port(card >= 0);
+	arbitrate_port(audio_present || card >= 0);
 
 	// A different device on the same card number is a different output: one
 	// dongle out, another in. The number is the lowest free one either way, so
@@ -1351,7 +1354,7 @@ void usbaudio_poll(void) {
 		// it rather than inheriting this one's.
 		usb_ctl_floor_db = LONG_MIN;
 		swvolume_clear_usb_gain();
-		fprintf(stderr, "usbaudio: the port is empty again; playback goes back to the jacks\n");
+		fprintf(stderr, "usbaudio: no USB playback device; playback goes back to the jacks\n");
 		audio_set_output_device(NULL);
 	}
 }

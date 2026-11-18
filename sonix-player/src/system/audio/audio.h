@@ -240,6 +240,11 @@ bool audio_external_begin_latency(int sample_rate, int channels, int bits, int b
 // Exclusive sources must not reuse or close another external source's PCM.
 bool audio_external_is_active(void);
 bool audio_external_begin_exclusive_latency(int sample_rate, int channels, int bits, int buffer_ms);
+// Private PCM lease: while held, even legacy external callers cannot join,
+// write to, or close this stream. Use a stable non-NULL address as the owner.
+bool audio_external_begin_owned(const void *owner, int sample_rate, int channels, int bits, int buffer_ms);
+int audio_external_write_owned(const void *owner, const void *frames, int count);
+void audio_external_end_owned(const void *owner);
 // Writes interleaved frames without modifying the caller's buffer. If the USB
 // output's volume relies on software attenuation, it is applied to a private
 // copy here so external sources (including Bluetooth RX) follow the same level

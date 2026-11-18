@@ -32,6 +32,8 @@
 #include "src/system/bluetooth/btplayer.h"
 #include "src/system/audio/audio.h"
 #include "src/system/audio/alsa-controls.h"
+#include "src/system/audio/tapepads.h"
+#include "src/system/audio/taperecorder.h"
 #include "src/system/audio/usbhostmode.h"
 #include "src/system/audio/usbhostprobe.h"
 #include "src/system/audio/waveform.h"
@@ -863,6 +865,8 @@ static void card_databases_detach(void) {
 		return;
 	}
 	card_attached = false;
+	taperecorder_finish(); // release the recording file before unmounting
+	tapepads_release_card();
 
 	// The Tidal cache is on the card now, so with the card gone there is
 	// nowhere to download to. Clearing its root also keeps a transfer that was
@@ -1176,6 +1180,13 @@ static void log_open_on_card(void) {
 }
 
 void storage_release_for_shutdown(void) {
+	pthread_mutex_lock(&card_lock);
+	bool already = card_released;
+	card_released = true;
+	taperecorder_finish(); // finalize before the USB input or the card goes away
+	tapepads_finish();
+	pthread_mutex_unlock(&card_lock);
+
 	// This common exit path also runs for reboot and firmware recovery. End a
 	// manual USB host override while the process can still retry or leave its
 	// persistent recovery journal intact, even when no SD card is configured.
@@ -1190,8 +1201,6 @@ void storage_release_for_shutdown(void) {
 	}
 
 	pthread_mutex_lock(&card_lock);
-	bool already = card_released;
-	card_released = true;
 	wifitransfer_release_card();
 	networkmusic_release_card();
 

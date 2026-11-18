@@ -26,6 +26,8 @@
 #include "src/system/audio/alsa-controls.h"
 #include "src/system/audio/audio.h"
 #include "src/system/audio/headset.h"
+#include "src/system/audio/tapepads.h"
+#include "src/system/audio/taperecorder.h"
 #include "src/system/library/audiobookdb.h"
 #include "src/system/device/clock.h"
 #include "src/system/pet/petwatch.h"
@@ -1784,6 +1786,13 @@ void power_screen_off(void) {
 		return;
 	}
 	g_screen_on = false;
+	// A level check belongs to the visible meter. An explicit recording can
+	// keep running in a pocket even when the backlight times out.
+	tape_rec_status_t tape;
+	taperecorder_status(&tape);
+	if (!tape.record && (tape.state == TAPE_REC_OPENING || tape.state == TAPE_REC_MONITORING)) {
+		taperecorder_request_stop();
+	}
 	g_screen_off_at = lv_tick_get();
 	// The screen going dark opens a new idle window: the standby countdown
 	// starts here, unless activity keeps pushing it back.
@@ -2257,6 +2266,7 @@ static void power_timer_cb(lv_timer_t *timer) {
 	if (playing) {
 		g_last_playing_ms = now;
 	}
+	bool audio_busy = playing || taperecorder_active() || tapepads_active();
 
 	// 3. idle computations
 	uint32_t input_idle = input_idle_ms(now);
@@ -2273,7 +2283,7 @@ static void power_timer_cb(lv_timer_t *timer) {
 	// the status-bar poll, so this is not another sysfs read every 250 ms.
 	batteryhistory_tick(battery_percent_cached(), usb_now, power_get_charge_limit());
 	bool usb_changed = g_usb_present_known && usb_now != g_usb_present_last;
-	if (playing || input_idle < POWER_TICK_MS * 2 || usb_changed) {
+	if (audio_busy || input_idle < POWER_TICK_MS * 2 || usb_changed) {
 		g_mem_active_ms = now;
 	}
 	g_usb_present_last = usb_now;
@@ -2288,7 +2298,7 @@ static void power_timer_cb(lv_timer_t *timer) {
 	// It counts on CLOCK_BOOTTIME, which keeps running while the SoC is
 	// suspended, so a device that spends the wait asleep still switches off at
 	// the right moment.
-	if (g_screen_on || player_is_busy(playing, input_idle)) {
+	if (g_screen_on || player_is_busy(audio_busy, input_idle)) {
 		g_last_active_boot_ms = boottime_ms();
 	}
 	uint32_t off_idle_wall = boottime_ms() - g_last_active_boot_ms;
@@ -2348,7 +2358,7 @@ static void power_timer_cb(lv_timer_t *timer) {
 	// 4a-bis-3. the real sleep, a minute after the screen goes dark. Stopped and
 	//           off the network, the SoC halts the way the stock binary makes it
 	//           halt.
-	suspend_if_idle(now, playing);
+	suspend_if_idle(now, audio_busy);
 
 	// 4b. enforce the percentage limit: through the MP2731 control node or the
 	//     V1 PMIC's charge-enable bit. Reassert PMIC voltage/current options too.

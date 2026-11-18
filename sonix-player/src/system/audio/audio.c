@@ -4431,6 +4431,8 @@ bool audio_suspend_freeze(int timeout_ms) {
 	return true;
 }
 
+static void external_end(const void *owner, bool force);
+
 // A real power-off or reboot has the same last transition as suspend, except
 // that nothing is coming back to unmute the route. Fade the DAC to silence
 // first, close every PCM (local, gapless, and external), then park the HBC3000
@@ -4438,7 +4440,7 @@ bool audio_suspend_freeze(int timeout_ms) {
 // stage. The caller has already saved the playback position.
 bool audio_prepare_poweroff(void) {
 	alsa_poweroff_mute();
-	audio_external_end();
+	external_end(NULL, true);
 	if (!audio_suspend_freeze(3000)) {
 		// A route transition finishing concurrently may have restored its
 		// short-lived mute; reassert the shutdown mute before returning to the
@@ -4690,6 +4692,7 @@ void audio_get_output_device(char *out, size_t out_size) {
 
 static int external_frame_bytes = 4;
 static pthread_mutex_t external_lock = PTHREAD_MUTEX_INITIALIZER;
+static const void *external_owner; // guarded by external_lock; NULL for legacy streams
 
 // What the open was made on, so a change can be noticed.
 //
@@ -4756,12 +4759,13 @@ bool audio_external_begin(int sample_rate, int channels, int bits) {
 
 bool audio_external_is_active(void) {
 	pthread_mutex_lock(&external_lock);
-	bool active = external_pcm != NULL;
+	bool active = external_pcm || external_owner;
 	pthread_mutex_unlock(&external_lock);
 	return active;
 }
 
-static bool external_begin_latency(int sample_rate, int channels, int bits, int buffer_ms, bool exclusive) {
+static bool external_begin_latency(int sample_rate, int channels, int bits, int buffer_ms, bool exclusive,
+								   const void *owner) {
 	// A PCM held by gapless occupies the DAC. Callers here want to open one of
 	// their own on the same device, and without this they find it busy right
 	// after a track has ended on its own.
@@ -4773,6 +4777,10 @@ static bool external_begin_latency(int sample_rate, int channels, int bits, int 
 
 	pthread_mutex_lock(&external_lock);
 
+	if (external_owner) {
+		pthread_mutex_unlock(&external_lock);
+		return false;
+	}
 	if (external_pcm) {
 		pthread_mutex_unlock(&external_lock);
 		return !exclusive; // Legacy callers reuse it; exclusive callers must not share it.
@@ -4796,6 +4804,7 @@ static bool external_begin_latency(int sample_rate, int channels, int bits, int 
 	external_underrun_logged_ms = 0;
 
 	bool ok = external_open_locked();
+	if (ok) external_owner = owner;
 
 	printf("audio: external source %s (%d Hz, %d ch, %d bits)\n", ok ? "playing" : "COULD NOT OPEN", sample_rate,
 		   channels, bits);
@@ -4805,11 +4814,15 @@ static bool external_begin_latency(int sample_rate, int channels, int bits, int 
 }
 
 bool audio_external_begin_latency(int sample_rate, int channels, int bits, int buffer_ms) {
-	return external_begin_latency(sample_rate, channels, bits, buffer_ms, false);
+	return external_begin_latency(sample_rate, channels, bits, buffer_ms, false, NULL);
 }
 
 bool audio_external_begin_exclusive_latency(int sample_rate, int channels, int bits, int buffer_ms) {
-	return external_begin_latency(sample_rate, channels, bits, buffer_ms, true);
+	return external_begin_latency(sample_rate, channels, bits, buffer_ms, true, NULL);
+}
+
+bool audio_external_begin_owned(const void *owner, int sample_rate, int channels, int bits, int buffer_ms) {
+	return owner && external_begin_latency(sample_rate, channels, bits, buffer_ms, true, owner);
 }
 
 // Under external_lock. Re-opens when the headphones have moved, and says
@@ -4887,10 +4900,10 @@ static bool external_wait_room(long *last_progress_ms) {
 	return true;
 }
 
-int audio_external_write(const void *frames, int count) {
+static int external_write(const void *owner, const void *frames, int count) {
 	pthread_mutex_lock(&external_lock);
 
-	if (!external_pcm || count <= 0) {
+	if (external_owner != owner || !external_pcm || count <= 0) {
 		pthread_mutex_unlock(&external_lock);
 		return 0;
 	}
@@ -4969,9 +4982,20 @@ int audio_external_write(const void *frames, int count) {
 	return written;
 }
 
-void audio_external_end(void) {
+int audio_external_write(const void *frames, int count) { return external_write(NULL, frames, count); }
+
+int audio_external_write_owned(const void *owner, const void *frames, int count) {
+	return owner ? external_write(owner, frames, count) : 0;
+}
+
+static void external_end(const void *owner, bool force) {
 	pthread_mutex_lock(&external_lock);
 
+	if (!force && external_owner != owner) {
+		pthread_mutex_unlock(&external_lock);
+		return;
+	}
+	external_owner = NULL;
 	if (external_pcm) {
 		snd_pcm_drop(external_pcm);
 		snd_pcm_close(external_pcm);
@@ -4983,4 +5007,10 @@ void audio_external_end(void) {
 	}
 
 	pthread_mutex_unlock(&external_lock);
+}
+
+void audio_external_end(void) { external_end(NULL, false); }
+
+void audio_external_end_owned(const void *owner) {
+	if (owner) external_end(owner, false);
 }

@@ -137,6 +137,8 @@ static long wake_hold;
 static bool bt_tx, bt_rx, credible_vsync;
 static bool waveform_lit, led_dark;
 static bool saver_visible;
+static tape_rec_status_t tape_status;
+static unsigned tape_stops;
 
 bool screensaver_is_visible(void) { return saver_visible; }
 static unsigned wake_kicks;
@@ -152,6 +154,10 @@ long config_get_int(const char *section, const char *key, long fallback) {
 audio_status_t audio_get_status(void) { return bt_tx ? AUDIO_STATUS_PLAYING : AUDIO_STATUS_STOPPED; }
 bool audio_output_is_bluetooth(void) { return bt_tx; }
 bool btreceiver_is_streaming(void) { return bt_rx; }
+bool taperecorder_active(void) { return false; }
+void taperecorder_status(tape_rec_status_t *out) { *out = tape_status; }
+void taperecorder_request_stop(void) { tape_stops++; }
+bool tapepads_active(void) { return false; }
 bool usbaudio_active(void) { return false; }
 int get_volume_percent(void) { return 50; }
 void set_volume_percent(int value) { assert(value == 50); }
@@ -342,6 +348,26 @@ static void test_wake_cycles(void) {
 	assert(power_get_brightness() == 100 && write_count == 0);
 }
 
+static void test_screen_off_during_capture(void) {
+	const struct { tape_rec_state_t state; bool record, stops; } cases[] = {
+		{TAPE_REC_IDLE, false, false},
+		{TAPE_REC_OPENING, false, true},
+		{TAPE_REC_MONITORING, false, true},
+		{TAPE_REC_OPENING, true, false},
+		{TAPE_REC_RECORDING, true, false},
+		{TAPE_REC_SAVING, true, false},
+	};
+	for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
+		start_power(60, 60, 100, 0, true);
+		tape_status = (tape_rec_status_t){.state = cases[i].state, .record = cases[i].record};
+		tape_stops = 0;
+		power_screen_off();
+		assert_dark(true);
+		assert(tape_stops == (unsigned)cases[i].stops);
+	}
+	tape_status = (tape_rec_status_t){0};
+}
+
 static void test_screensaver_idle_timeout(void) {
 	start_power(60, 60, 100, 0, true);
 	saver_visible = true;
@@ -410,6 +436,7 @@ int main(void) {
 	lv_display_set_flush_cb(disp, flush);
 	test_levels_and_init();
 	test_wake_cycles();
+	test_screen_off_during_capture();
 	test_screensaver_idle_timeout();
 	test_charging_screen();
 	lv_timer_delete(g_power_timer);

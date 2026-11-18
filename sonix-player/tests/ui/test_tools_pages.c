@@ -24,6 +24,9 @@
 #include "src/gui/library/pictureview.h"
 #include "src/gui/library/textview.h"
 #include "src/gui/metronome/metronome.h"
+#include "src/gui/tapedeck/tapedeck.h"
+#include "src/system/audio/tapepads.h"
+#include "src/system/audio/taperecorder.h"
 #include "src/gui/nowplaying/cover.h"
 #include "src/gui/notes/noteeditor.h"
 #include "src/gui/notes/notes.h"
@@ -169,6 +172,84 @@ void metronomeclick_stop(void) { click_started = false; }
 bool metronomeclick_failed(void) { return click_failed; }
 unsigned metronomeclick_beats(void) { return click_written; }
 int metronomeclick_beat_index(void) { return click_last; }
+
+/* Tape Deck uses the real page, with just the recorder and sequencer's
+ * asynchronous state substituted. The I/O paths have their own host tests. */
+static tape_rec_status_t deck_rec;
+static bool deck_input, deck_memo;
+static int deck_starts, deck_stops, deck_played;
+static tape_pads_state_t deck_beat;
+static int deck_tempo = 120;
+static int deck_hit = -1, deck_loads;
+static bool deck_loop, deck_dub, deck_assigned;
+static const char deck_filename[] = "Memo-20261118-120000-001.wav";
+
+void taperecorder_status(tape_rec_status_t *out) { *out = deck_rec; }
+bool taperecorder_active(void) {
+	return deck_rec.state == TAPE_REC_MONITORING || deck_rec.state == TAPE_REC_RECORDING;
+}
+bool taperecorder_find_input(tape_input_t *out) {
+	if (deck_input) *out = (tape_input_t){.card = 1, .device = 2, .usb = true};
+	return deck_input;
+}
+tape_rec_state_t taperecorder_start(const tape_input_t *in, bool record) {
+	assert(in && in->usb && in->card == 1 && in->device == 2);
+	deck_starts++;
+	deck_rec = (tape_rec_status_t){.state = record ? TAPE_REC_RECORDING : TAPE_REC_MONITORING, .record = record};
+	return TAPE_REC_OPENING;
+}
+void taperecorder_request_stop(void) { deck_stops++; }
+int taperecorder_list(char names[][TAPE_MEMO_NAME_SIZE], int cap) {
+	assert(cap > 0);
+	if (!deck_memo) return 0;
+	strcpy(names[0], deck_filename);
+	return 1;
+}
+bool taperecorder_path(const char *name, char *out, size_t size) {
+	assert(!strcmp(name, deck_filename));
+	return snprintf(out, size, "/card/Recordings/%s", name) < (int)size;
+}
+void player_play_file(const char *path) { assert(strstr(path, deck_filename)); deck_played++; }
+void player_sheet_open(bool animate) { assert(animate); }
+tape_pads_state_t tapepads_state(void) { return deck_beat; }
+bool tapepads_active(void) { return deck_beat == TAPE_PADS_PLAYING; }
+bool tapepads_start(void) { deck_loop = true; deck_beat = TAPE_PADS_PLAYING; return true; }
+void tapepads_stop(void) { deck_loop = deck_dub = false; deck_beat = TAPE_PADS_IDLE; }
+bool tapepads_hit(int pad) { deck_hit = pad; deck_beat = TAPE_PADS_PLAYING; return true; }
+int tapepads_step(void) { return deck_loop ? 2 : -1; }
+unsigned tapepads_sounding(void) { return tapepads_active() && deck_hit >= 0 ? 1u << deck_hit : 0; }
+bool tapepads_looping(void) { return deck_loop; }
+bool tapepads_overdub(void) { return deck_dub; }
+void tapepads_set_overdub(bool enabled) { assert(deck_loop); deck_dub = enabled; }
+void tapepads_pattern(bool demo) { (void)demo; assert(!tapepads_active()); }
+int tapepads_bpm(void) { return deck_tempo; }
+void tapepads_set_bpm(int bpm) { deck_tempo = bpm; }
+unsigned tapepads_revision(void) { return (unsigned)deck_assigned; }
+void tapepads_info(tape_pad_info_t out[TAPE_PAD_COUNT]) {
+	for (int p = 0; p < TAPE_PAD_COUNT; p++) out[p] = (tape_pad_info_t){.kind = TAPE_PAD_FACTORY, .preset = p};
+	if (deck_assigned) out[15] = (tape_pad_info_t){.kind = TAPE_PAD_WAV, .long_clip = true, .name = "Vocal.wav"};
+}
+void tapepads_factory(void) { deck_assigned = false; }
+void tapepads_set_preset(int pad, int preset) { assert(pad >= 0 && pad < 16 && preset >= -1); }
+bool tapepads_assign(int pad, const char *path) {
+	assert(pad == 15 && !strcmp(path, "Vocals/Vocal.wav"));
+	deck_assigned = true;
+	return true;
+}
+int tapepads_load_kit(const char *name) { assert(!strcmp(name, "My Kit")); deck_loads++; return 16; }
+int tape_card_list(const char *dir, bool kit, const tape_file_t *after, tape_file_t *out, int cap) {
+	assert(!after && cap > 0);
+	if (kit) {
+		assert(!strcmp(dir, TAPE_KIT_DIR));
+		*out = (tape_file_t){.name = "My Kit", .directory = true};
+	} else if (!dir[0]) {
+		*out = (tape_file_t){.name = "Vocals", .directory = true};
+	} else {
+		assert(!strcmp(dir, "Vocals"));
+		*out = (tape_file_t){.name = "Vocal.wav"};
+	}
+	return 1;
+}
 
 /* The music pet's watcher: the page asks it four things, and the arithmetic
  * under it is the real pet.c (linked below). What is substituted is the
@@ -847,6 +928,9 @@ static void check_strings(const char *language_dir) {
 		"musicsettings_rearrange_main_page",
 		"metronome", "metronome_bpm", "metronome_beats", "metronome_start",
 		"metronome_stop", "metronome_tap", "metronome_no_audio",
+		"tape_deck", "addon_tapedeck_note", "tape_no_input", "tape_card_needed",
+		"tape_record", "tape_partial", "tape_pads", "tape_kits", "tape_loop", "tape_overdub",
+		"tape_wav_invalid", "tape_load_kit", "tape_load_wav", "tape_kit_hint", "tape_output_error",
 		"pet", "pet_mood_sleeping", "pet_mood_sad", "pet_mood_okay", "pet_mood_happy",
 		"pet_mood_blissful", "pet_stage_egg", "pet_stage_baby", "pet_stage_child",
 		"pet_stage_teen", "pet_stage_adult", "pet_energy", "pet_today", "pet_streak",
@@ -970,6 +1054,7 @@ static void check_more_page(gui_config_t *cfg, const char *tag) {
 	assert(has_entry(shown, "Tag Manager"));
 	assert(has_entry(shown, tr("flappy_bird")));
 	assert(has_entry(shown, tr("metronome")));
+	assert(has_entry(shown, tr("tape_deck")));
 	assert(has_entry(shown, tr("pet")));
 	// The three games are on the page too, after Flappy Bird, which they sit
 	// beside: they are the rows the More menu gained back.
@@ -1088,6 +1173,109 @@ static lv_obj_t *morepage_shape(bool *tiles) {
 	lv_screen_load(morepage_screen);
 	lv_obj_update_layout(morepage_screen);
 	return visible_shape(morepage_screen, tiles);
+}
+
+static lv_obj_t *deck_button(lv_obj_t *page, const char *label) {
+	lv_obj_t *text = find_label(page, tr(label));
+	assert(text);
+	lv_obj_t *btn = lv_obj_get_parent(text);
+	assert(lv_obj_check_type(btn, &lv_button_class));
+	return btn;
+}
+
+static void check_tapedeck(gui_config_t *cfg) {
+	bool tiles;
+	lv_obj_t *shown = morepage_shape(&tiles);
+	lv_obj_t *entry = entry_with_label(shown, tr("tape_deck"));
+	assert(entry);
+	lv_obj_send_event(entry, LV_EVENT_CLICKED, NULL);
+	lv_obj_t *page = lv_screen_active();
+	assert(page != morepage_screen && find_label(page, tr("tape_deck")));
+	lv_obj_update_layout(page);
+	check_within_panel(page, cfg, "Tape Deck with no input");
+	assert(find_label(page, tr("tape_no_input")) && !deck_starts);
+	lv_obj_t *record = deck_button(page, "tape_record");
+	lv_obj_t *monitor = deck_button(page, "tape_meter");
+	assert(lv_obj_has_state(record, LV_STATE_DISABLED) && lv_obj_has_state(monitor, LV_STATE_DISABLED));
+	lv_obj_send_event(record, LV_EVENT_CLICKED, NULL);
+	assert(!deck_starts);
+	dump_snapshot(page, "v1-tape-no-input");
+
+	deck_input = true;
+	lv_tick_inc(1200);
+	lv_timer_handler();
+	assert(!lv_obj_has_state(record, LV_STATE_DISABLED) && !lv_obj_has_state(monitor, LV_STATE_DISABLED));
+	lv_obj_send_event(monitor, LV_EVENT_CLICKED, NULL);
+	assert(deck_starts == 1 && deck_rec.state == TAPE_REC_MONITORING);
+	deck_rec.peak = 16384;
+	lv_tick_inc(100);
+	lv_timer_handler();
+	assert(find_label(page, "-6 dBFS"));
+	lv_obj_send_event(record, LV_EVENT_CLICKED, NULL);
+	assert(deck_starts == 2 && deck_rec.state == TAPE_REC_RECORDING);
+	deck_rec.peak = 32768;
+	deck_rec.clipped = true;
+	deck_rec.frames = TAPE_REC_RATE * 3;
+	lv_tick_inc(100);
+	lv_timer_handler();
+	assert(find_label(page, "00:03") && find_label(page, "0 dBFS"));
+	assert(lv_obj_get_style_opa(find_label(page, "CLIP"), 0) == LV_OPA_COVER);
+	dump_snapshot(page, "v1-tape-recording");
+
+	int stops = deck_stops;
+	lv_obj_send_event(record, LV_EVENT_CLICKED, NULL);
+	assert(deck_stops == stops + 1 && lv_obj_has_state(record, LV_STATE_DISABLED));
+	deck_rec = (tape_rec_status_t){.state = TAPE_REC_SAVED, .frames = TAPE_REC_RATE * 3};
+	deck_memo = true;
+	lv_tick_inc(100);
+	lv_timer_handler();
+	assert(find_label(page, tr("tape_saved")));
+	lv_obj_send_event(deck_button(page, "2026-11-18  12:00:00"), LV_EVENT_CLICKED, NULL);
+	assert(deck_played == 1);
+
+	// Every pad is tappable at V1 size without scrolling, even with no mic.
+	deck_input = false;
+	lv_obj_send_event(deck_button(page, "tape_pads"), LV_EVENT_CLICKED, NULL);
+	lv_obj_update_layout(page);
+	check_within_panel(page, cfg, "Tape Deck pads");
+	for (int p = 0; p < TAPE_PAD_COUNT; p++) {
+		char number[8];
+		snprintf(number, sizeof(number), "%02d", p + 1);
+		lv_obj_t *pad = deck_button(page, number);
+		lv_area_t area;
+		lv_obj_get_coords(pad, &area);
+		if (area.y2 >= (int32_t)cfg->screen_height || lv_obj_get_width(pad) < 48 || lv_obj_get_height(pad) < 38) {
+			fprintf(stderr, "Pad %d at %d,%d..%d,%d exceeds the playing area or is too small\n", p + 1,
+				area.x1, area.y1, area.x2, area.y2);
+			assert(!"16 playable pads must fit the panel");
+		}
+		lv_obj_send_event(pad, LV_EVENT_PRESSED, NULL);
+		assert(deck_hit == p && tapepads_active() && !deck_loop);
+	}
+	lv_obj_send_event(deck_button(page, "tape_loop"), LV_EVENT_CLICKED, NULL);
+	lv_obj_send_event(deck_button(page, "tape_overdub"), LV_EVENT_CLICKED, NULL);
+	assert(deck_loop && deck_dub);
+	dump_snapshot(page, "v1-tape-pads");
+	lv_obj_send_event(deck_button(page, "tape_kits"), LV_EVENT_CLICKED, NULL);
+	assert(!tapepads_active());
+	lv_obj_send_event(deck_button(page, "+"), LV_EVENT_CLICKED, NULL);
+	assert(deck_tempo == 125 && find_label(page, "125 BPM"));
+	lv_obj_send_event(deck_button(page, "tape_load_kit"), LV_EVENT_CLICKED, NULL);
+	lv_obj_send_event(deck_button(page, "My Kit"), LV_EVENT_CLICKED, NULL);
+	assert(deck_loads == 1 && find_label(page, tr("tape_kit_loaded")));
+	lv_obj_send_event(deck_button(page, "16  Clap 4"), LV_EVENT_CLICKED, NULL);
+	lv_obj_send_event(deck_button(page, "tape_load_wav"), LV_EVENT_CLICKED, NULL);
+	lv_obj_send_event(deck_button(page, "Vocals/"), LV_EVENT_CLICKED, NULL);
+	lv_obj_send_event(deck_button(page, "Vocal.wav"), LV_EVENT_CLICKED, NULL);
+	assert(deck_assigned);
+	lv_obj_send_event(deck_button(page, "tape_pads"), LV_EVENT_CLICKED, NULL);
+	lv_obj_send_event(deck_button(page, "16 / L"), LV_EVENT_PRESSED, NULL);
+	assert(deck_hit == 15 && tapepads_active() && !deck_loop);
+	lv_screen_load(morepage_screen);
+	assert(!tapepads_active());
+	tapedeck_open();
+	assert(lv_screen_active() == page && lv_obj_has_state(record, LV_STATE_DISABLED));
+	lv_screen_load(morepage_screen);
 }
 
 static void check_more_audiobooks_option(gui_config_t *cfg) {
@@ -2655,6 +2843,7 @@ int main(int argc, char **argv) {
 	notes_init(&cfg);
 	tagmanager_init(&cfg);
 	metronome_init(&cfg);
+	tapedeck_init(&cfg);
 	pet_defaults(&pet_state, petwatch_now(), pet_day_now(petwatch_now()));
 	petpage_init(&cfg);
 	morepage_init(&cfg);
@@ -2691,6 +2880,7 @@ int main(int argc, char **argv) {
 	}
 	theme_set_kind(THEME_KIND_DARK);
 	check_more_audiobooks_option(&cfg);
+	check_tapedeck(&cfg);
 
     // Music is the only browser root; unrelated card folders are not shown.
     char musicdir[1200]; snprintf(musicdir,sizeof(musicdir),"%s/Music",card); assert(!mkdir(musicdir,0755));
@@ -2767,6 +2957,6 @@ int main(int argc, char **argv) {
 					 bp_is_tempotec_v1() ? "v1-note-long" : "hiby-note-long");
 
 	lv_deinit();
-	printf("PASS calculator, notes, metronome and pet pages (%s)\n", bp_is_tempotec_v1() ? "240x320" : "480x720");
+	printf("PASS calculator, notes, metronome, Tape Deck and pet pages (%s)\n", bp_is_tempotec_v1() ? "240x320" : "480x720");
 	return 0;
 }
