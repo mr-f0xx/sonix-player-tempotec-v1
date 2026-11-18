@@ -4,10 +4,11 @@
 #include "src/gui/shell/icons.h"
 
 static int header_scale(int chevron_height, int design_height) {
-	// The logo matches the chevron's height. Apply the same reduction to
-	// shorter text designs and fit taller two-line labels within that height.
+	// Give the badge one extra pixel above and below the chevron for legibility.
+	// Anchor and width calculations still use the same scale for every design.
+	int target_height = chevron_height + 2;
 	int natural_height = LV_MAX(icon_hires_audio.header.h, design_height);
-	return LV_CLAMP(1, chevron_height * LV_SCALE_NONE / natural_height, LV_SCALE_NONE);
+	return LV_CLAMP(1, target_height * LV_SCALE_NONE / natural_height, LV_SCALE_NONE);
 }
 
 static void fit_badge(hiresbadge_view_t *view) {
