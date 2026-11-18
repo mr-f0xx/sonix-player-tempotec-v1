@@ -1,4 +1,5 @@
 #include "streaming.h"
+#include "src/gui/wireless/listentogether.h"
 
 #include "lvgl/lvgl.h"
 
@@ -46,6 +47,7 @@ static const streaming_item_t tokyo_items[] = {
 	{"jellyfin", &icon_jellyfin_mark, THEME_SEMANTIC_PURPLE, &jellyfin_screen, "jellyfin"},
 #ifndef __EMSCRIPTEN__
 	{"Network folders", &icon_sub_folders_glyph, THEME_SEMANTIC_CYAN, &networkmusic_screen, NULL},
+	{"Listen Together", &icon_music_note, THEME_SEMANTIC_GREEN, &listentogether_screen, NULL},
 #endif
 };
 
@@ -107,12 +109,14 @@ void streaming_init(gui_config_t *cfg) {
 		{"jellyfin", &icon_jellyfin_menu, &jellyfin_screen, NULL},
 #ifndef __EMSCRIPTEN__
 		{"Network folders", &icon_menu_sub_folders, &networkmusic_screen, NULL},
+		{"Listen Together", &icon_menu_streaming, &listentogether_screen, NULL},
 #endif
 	};
 	const char *const all_addons[] = {
 		"soundcloud", "tidal", "qobuz", "radio", "podcasts", "subsonic", "jellyfin",
 #ifndef __EMSCRIPTEN__
 		NULL, // Network folders is a native file client, not a streaming add-on.
+		NULL, // Listen Together is a native P2P feature, not a streaming add-on.
 #endif
 	};
 	grid_entry_t entries[sizeof(all_entries) / sizeof(all_entries[0])];
