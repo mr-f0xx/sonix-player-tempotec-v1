@@ -11,6 +11,11 @@
 #define FILE_PAGE 16
 static lv_obj_t *body, *setup, *play, *stop, *dub, *tempo_label, *setup_notice;
 static lv_obj_t *pad_buttons[TAPE_PAD_COUNT], *steps[TAPE_PAD_STEPS];
+static lv_obj_t *rec, *mix_note, *fx_keys[3];
+static tape_mix_state_t record_error;
+static const struct { tape_pad_effect_t mask; const char *key; } fx_specs[] = {
+	{TAPE_FX_FILTER, "tape_fx_filter"}, {TAPE_FX_ECHO, "tape_fx_echo"}, {TAPE_FX_DRIVE, "tape_fx_drive"},
+};
 static tape_pad_info_t pads[TAPE_PAD_COUNT];
 static unsigned revision, last_sounding;
 static int last_step = -2;
@@ -21,11 +26,15 @@ static int editing;
 static bool kits_browser, have_cursor;
 static char directory[TAPE_PATH_SIZE];
 static tape_file_t cursor, files[FILE_PAGE + 1];
+static tape_store_kind_t saves_kind;
+static char saves_after[TAPE_SAVE_NAME_SIZE], saves[FILE_PAGE + 1][TAPE_SAVE_NAME_SIZE];
+static bool waiting_for_take;
 
 static void show_setup(void);
 static void show_assignment(void);
 static void show_presets(void);
 static void show_files(void);
+static void show_saves(void);
 
 static void preset_label(int preset, char *text, size_t size) {
 	snprintf(text, size, "%s %d", tr(drum_keys[preset / 4]), preset % 4 + 1);
@@ -57,6 +66,30 @@ static void refresh_labels(void) {
 	}
 }
 
+static void paint_mix(void) {
+	tape_mix_info_t mix;
+	tapemix_info(&mix);
+	bool live = mix.state == TAPE_MIX_OPENING || mix.state == TAPE_MIX_RECORDING;
+	bool saving = mix.state == TAPE_MIX_SAVING;
+	label_text(lv_obj_get_child(rec, 0), tr(live ? "tape_end_rec" : "tape_rec_mix"));
+	selected(rec, live);
+	disabled(rec, saving);
+	lv_color_t ink = live ? theme_semantic_color(THEME_SEMANTIC_RED) : theme()->text_secondary;
+	if (!lv_color_eq(lv_obj_get_style_text_color(mix_note, 0), ink)) lv_obj_set_style_text_color(mix_note, ink, 0);
+	char number[24];
+	const char *text = number;
+	if (live) {
+		unsigned secs = mix.frames / TAPE_PAD_RATE;
+		snprintf(number, sizeof(number), "%02u:%02u", secs / 60, secs % 60);
+	} else if (saving) text = tr("tape_saving");
+	else if (record_error == TAPE_MIX_NO_CARD) text = tr("tape_write_card");
+	else if (record_error == TAPE_MIX_ERROR || mix.state == TAPE_MIX_ERROR) text = tr("tape_take_error");
+	else if (mix.state == TAPE_MIX_PARTIAL) text = tr("tape_take_partial");
+	else if (mix.state == TAPE_MIX_SAVED) text = tr("tape_take_saved");
+	else snprintf(number, sizeof(number), "%d BPM", tapepads_bpm());
+	label_text(mix_note, text);
+}
+
 void tapesampler_poll(void) {
 	unsigned rev = tapepads_revision();
 	if (rev != revision) { revision = rev; refresh_labels(); }
@@ -77,6 +110,9 @@ void tapesampler_poll(void) {
 	selected(dub, tapepads_overdub());
 	disabled(dub, !loop);
 	disabled(stop, !tapepads_active());
+	unsigned effects = tapepads_effects();
+	for (unsigned i = 0; i < sizeof(fx_specs) / sizeof(*fx_specs); i++) selected(fx_keys[i], effects & fx_specs[i].mask);
+	paint_mix();
 	tape_pads_state_t state = tapepads_state();
 	if (state != last_state) {
 		if (state == TAPE_PADS_SAMPLE_ERROR) gui_notify_popup("tape_sample_error");
@@ -87,6 +123,7 @@ void tapesampler_poll(void) {
 
 void tapesampler_open_pads(void) {
 	revision = UINT_MAX;
+	record_error = TAPE_MIX_IDLE;
 	last_state = tapepads_state();
 	tapesampler_poll();
 }
@@ -99,7 +136,7 @@ static void pad_cb(lv_event_t *e) {
 
 static void play_cb(lv_event_t *e) {
 	if (!clicked(e)) return;
-	if (tapepads_looping()) tapepads_stop();
+	if (tapepads_looping()) tapepads_stop_loop();
 	else (void)tapepads_start();
 	tapesampler_poll();
 }
@@ -112,7 +149,27 @@ static void dub_cb(lv_event_t *e) {
 	if (clicked(e)) { tapepads_set_overdub(!tapepads_overdub()); tapesampler_poll(); }
 }
 
+static void fx_cb(lv_event_t *e) {
+	if (!clicked(e)) return;
+	tapepads_toggle_effect((tape_pad_effect_t)(intptr_t)lv_event_get_user_data(e));
+	tapesampler_poll();
+}
+
+static void record_cb(lv_event_t *e) {
+	if (!clicked(e)) return;
+	tape_mix_info_t mix;
+	tapemix_info(&mix);
+	record_error = TAPE_MIX_IDLE;
+	if (mix.state == TAPE_MIX_OPENING || mix.state == TAPE_MIX_RECORDING) tapemix_stop();
+	else if (mix.state != TAPE_MIX_SAVING) {
+		tape_mix_state_t result = tapepads_record();
+		if (result != TAPE_MIX_OPENING) record_error = result;
+	}
+	tapesampler_poll();
+}
+
 static void reset_setup(void) {
+	waiting_for_take = false;
 	lv_obj_clean(setup);
 	lv_obj_scroll_to_y(body, 0, LV_ANIM_OFF);
 }
@@ -132,6 +189,80 @@ static void tempo_cb(lv_event_t *e) {
 static void notice(const char *message) {
 	label_text(setup_notice, tr(message));
 	lv_obj_set_hidden(setup_notice, false);
+}
+
+static const char *sequence_message(tape_seq_result_t result, bool save) {
+	switch (result) {
+	case TAPE_SEQ_OK: return save ? "tape_seq_saved" : "tape_seq_loaded";
+	case TAPE_SEQ_NO_CARD: return save ? "tape_write_card" : "sd_card_missing";
+	case TAPE_SEQ_SAMPLE_MISSING: return "tape_seq_sample_missing";
+	case TAPE_SEQ_SAVE_ERROR: return "tape_seq_save_error";
+	default: return "tape_seq_invalid";
+	}
+}
+
+static void save_sequence_cb(lv_event_t *e) {
+	if (clicked(e)) notice(sequence_message(tapepads_save_sequence(), true));
+}
+
+static void saves_cb(lv_event_t *e) {
+	if (!clicked(e)) return;
+	saves_kind = (tape_store_kind_t)(intptr_t)lv_event_get_user_data(e);
+	saves_after[0] = '\0';
+	show_saves();
+}
+
+static void save_page_cb(lv_event_t *e) {
+	if (!clicked(e)) return;
+	if (lv_event_get_user_data(e)) strcpy(saves_after, saves[FILE_PAGE - 1]);
+	else saves_after[0] = '\0';
+	show_saves();
+}
+
+static void saved_file_cb(lv_event_t *e) {
+	if (!clicked(e)) return;
+	const char *name = saves[(int)(intptr_t)lv_event_get_user_data(e)];
+	if (saves_kind == TAPE_STORE_SEQUENCE) {
+		tape_seq_result_t result = tapepads_load_sequence(name);
+		if (result == TAPE_SEQ_OK) show_setup();
+		notice(sequence_message(result, false));
+		lv_obj_scroll_to_view(setup_notice, LV_ANIM_OFF);
+	} else {
+		char path[PATH_MAX];
+		if (tape_store_take_path(name, path, sizeof(path))) {
+			player_play_file(path);
+			player_sheet_open(true);
+		} else gui_notify_popup("tape_sample_error");
+	}
+}
+
+static void show_saves(void) {
+	reset_setup();
+	bool take = saves_kind == TAPE_STORE_TAKE;
+	key(setup, tr("trackmenu_back"), 40, setup_cb, 0);
+	note_label(setup, tr(take ? "tape_saved_takes" : "tape_load_seq"));
+	setup_notice = note_label(setup, "");
+	lv_obj_set_hidden(setup_notice, true);
+	if (take && tapemix_active()) {
+		waiting_for_take = true;
+		notice("tape_saving");
+		return;
+	}
+	if (saves_after[0]) key(setup, tr("tape_first_page"), 40, save_page_cb, 0);
+	int count = tape_store_list(saves_kind, saves_after[0] ? saves_after : NULL, saves, FILE_PAGE + 1);
+	if (count <= 0) notice(count < 0 ? "sd_card_missing" : take ? "tape_no_takes" : "tape_no_seqs");
+	for (int i = 0; i < count && i < FILE_PAGE; i++) {
+		const char *stamp = saves[i] + (take ? sizeof("Take-") : sizeof("Sequence-")) - 1;
+		char title[40];
+		snprintf(title, sizeof(title), "%.4s-%.2s-%.2s  %.2s:%.2s:%.2s  #%.3s",
+			stamp, stamp + 4, stamp + 6, stamp + 9, stamp + 11, stamp + 13, stamp + 16);
+		key(setup, title, 40, saved_file_cb, i);
+	}
+	if (count > FILE_PAGE) key(setup, tr("subsonic_next_page"), 40, save_page_cb, 1);
+}
+
+void tapesampler_poll_kits(void) {
+	if (waiting_for_take && !tapemix_active()) show_saves();
 }
 
 static void pattern_cb(lv_event_t *e) {
@@ -179,10 +310,15 @@ static void show_setup(void) {
 	lv_obj_t *pattern = stack(setup, LV_FLEX_FLOW_ROW, 40, 6, false);
 	row_key(pattern, tr("tape_demo_loop"), pattern_cb, 1);
 	row_key(pattern, tr("tape_clear_loop"), pattern_cb, 0);
-	key(setup, tr("tape_factory_kit"), 42, factory_cb, 0);
-	key(setup, tr("tape_load_kit"), 42, browser_cb, 1);
+	lv_obj_t *seq = stack(setup, LV_FLEX_FLOW_ROW, 38, 6, false);
+	compact_key(seq, tr("tape_save_seq"), save_sequence_cb, 0);
+	compact_key(seq, tr("tape_load_seq"), saves_cb, TAPE_STORE_SEQUENCE);
 	setup_notice = note_label(setup, "");
 	lv_obj_set_hidden(setup_notice, true);
+	key(setup, tr("tape_saved_takes"), 38, saves_cb, TAPE_STORE_TAKE);
+	lv_obj_t *kits = stack(setup, LV_FLEX_FLOW_ROW, 40, 6, false);
+	compact_key(kits, tr("tape_factory_kit"), factory_cb, 0);
+	compact_key(kits, tr("tape_load_kit"), browser_cb, 1);
 	note_label(setup, tr("tape_assign_hint"));
 	tapepads_info(pads);
 	for (int p = 0; p < TAPE_PAD_COUNT; p++) {
@@ -278,12 +414,24 @@ void tapesampler_open_kits(void) { show_setup(); }
 
 void tapesampler_build(lv_obj_t *parent, lv_obj_t **out_pads, lv_obj_t **out_kits) {
 	body = parent;
-	lv_obj_t *surface = stack(parent, LV_FLEX_FLOW_COLUMN, LV_SIZE_CONTENT, 3, false);
-	lv_obj_t *transport = stack(surface, LV_FLEX_FLOW_ROW, 32, 5, false);
-	play = row_key(transport, tr("tape_loop"), play_cb, 0);
-	dub = row_key(transport, tr("tape_overdub"), dub_cb, 0);
-	stop = row_key(transport, tr("metronome_stop"), stop_cb, 0);
-	lv_obj_t *lights = stack(surface, LV_FLEX_FLOW_ROW, 4, 3, false);
+	lv_obj_t *surface = stack(parent, LV_FLEX_FLOW_COLUMN, LV_SIZE_CONTENT, 2, false);
+	lv_obj_t *transport = stack(surface, LV_FLEX_FLOW_ROW, 31, 4, false);
+	play = compact_key(transport, tr("tape_loop"), play_cb, 0);
+	dub = compact_key(transport, tr("tape_overdub"), dub_cb, 0);
+	stop = compact_key(transport, tr("metronome_stop"), stop_cb, 0);
+	rec = compact_key(transport, tr("tape_rec_mix"), record_cb, 0);
+	// Give the longer captions a little more of the 216 px available.
+	lv_obj_set_flex_grow(play, 42);
+	lv_obj_set_flex_grow(dub, 70);
+	lv_obj_set_flex_grow(stop, 43);
+	lv_obj_set_flex_grow(rec, 61);
+	lv_obj_t *fx_row = stack(surface, LV_FLEX_FLOW_ROW, 30, 4, false);
+	for (unsigned i = 0; i < sizeof(fx_specs) / sizeof(*fx_specs); i++) {
+		fx_keys[i] = row_key(fx_row, tr(fx_specs[i].key), fx_cb, fx_specs[i].mask);
+	}
+	lv_obj_t *status = stack(surface, LV_FLEX_FLOW_ROW, 16, 5, false);
+	lv_obj_t *lights = stack(status, LV_FLEX_FLOW_ROW, 4, 2, false);
+	lv_obj_set_width(lights, 103);
 	for (int i = 0; i < TAPE_PAD_STEPS; i++) {
 		lv_obj_t *lamp = lv_obj_create(lights);
 		lv_obj_remove_style_all(lamp);
@@ -295,6 +443,12 @@ void tapesampler_build(lv_obj_t *parent, lv_obj_t **out_pads, lv_obj_t **out_kit
 		lv_obj_set_flex_grow(lamp, 1);
 		steps[i] = lamp;
 	}
+	mix_note = text_label(status, "", &font_ui_14, true);
+	lv_obj_set_width(mix_note, 0);
+	lv_obj_set_flex_grow(mix_note, 1);
+	lv_obj_set_height(mix_note, lv_font_get_line_height(&font_ui_14));
+	lv_obj_set_style_text_align(mix_note, LV_TEXT_ALIGN_RIGHT, 0);
+	lv_label_set_long_mode(mix_note, LV_LABEL_LONG_CLIP);
 	for (int i = 0; i < TAPE_PAD_COUNT; i += 4) {
 		lv_obj_t *row = stack(surface, LV_FLEX_FLOW_ROW, bp_pick(39, 60), 4, false);
 		for (int p = i; p < i + 4; p++) {

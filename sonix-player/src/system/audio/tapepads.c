@@ -4,6 +4,7 @@
 #include "src/system/device/usb.h"
 
 #include <dirent.h>
+#include <errno.h>
 #include <math.h>
 #include <pthread.h>
 #include <stdatomic.h>
@@ -20,8 +21,8 @@
 #define STEP_PHASE (TAPE_PAD_RATE * 60u)
 #define IDLE_BLOCKS 80 // release the PCM after the last one-shot's tail
 
-// Lock order: card reservation -> worker_lock -> command_lock. The worker
-// only takes command_lock, for short mailbox operations, never for I/O.
+// Lock order: card reservation -> worker_lock -> command_lock -> take lock.
+// The PCM worker doesn't acquire the first two or hold either mailbox over I/O.
 static pthread_mutex_t worker_lock = PTHREAD_MUTEX_INITIALIZER;
 static pthread_mutex_t command_lock = PTHREAD_MUTEX_INITIALIZER;
 static pthread_t worker;
@@ -29,7 +30,7 @@ static bool joinable, accepting;
 static unsigned pending;
 static int job_card = -1;
 static atomic_int state, step = -1, tempo = 120;
-static atomic_uint sounding, revision, playable = (1u << TAPE_PAD_COUNT) - 1;
+static atomic_uint sounding, revision, effects, playable = (1u << TAPE_PAD_COUNT) - 1;
 static atomic_bool stop_requested, looping, overdub, needs_card;
 static const char output_owner;
 
@@ -50,9 +51,11 @@ static atomic_uint pattern[TAPE_PAD_STEPS] = DEMO;
 
 static void finish_locked(void) {
 	tapepads_stop();
-	if (!joinable) return;
-	pthread_join(worker, NULL);
-	joinable = false;
+	if (joinable) {
+		pthread_join(worker, NULL);
+		joinable = false;
+	}
+	tapemix_finish();
 }
 
 void tapepads_finish(void) {
@@ -90,6 +93,10 @@ void tapepads_release_card(void) {
 		finish_locked(); // every sample and the anchored directory close before unmount
 		memset(slots, 0, sizeof(slots));
 		publish_slots();
+	} else {
+		// A factory-only performance has no sample fds, but the take is
+		// still writing to this card. The instruments can keep running.
+		tapemix_finish();
 	}
 	pthread_mutex_unlock(&worker_lock);
 }
@@ -134,7 +141,7 @@ static bool read_slot(int card, const char *path, pad_slot_t *slot) {
 
 bool tapepads_assign(int pad, const char *path) {
 	if (pad < 0 || pad >= TAPE_PAD_COUNT) return false;
-	int card = tape_card_begin();
+	int card = tape_card_begin(false);
 	if (card < 0) return false;
 	pad_slot_t sample;
 	bool ok = read_slot(card, path, &sample);
@@ -162,7 +169,7 @@ int tapepads_load_kit(const char *name) {
 	char path[TAPE_PATH_SIZE];
 	int prefix = snprintf(path, sizeof(path), "%s/%s", TAPE_KIT_DIR, name);
 	if (prefix < 0 || prefix >= (int)sizeof(path)) return -2;
-	int card = tape_card_begin();
+	int card = tape_card_begin(false);
 	if (card < 0) return -1;
 	int fd = tape_open_at(card, path, true);
 	DIR *dir = fd >= 0 ? fdopendir(fd) : NULL;
@@ -212,6 +219,123 @@ int tapepads_load_kit(const char *name) {
 	close(card);
 	tape_card_end();
 	return count ? count : -2;
+}
+
+// Sequence v1: six magic bytes, version/reserved, LE16 BPM, sixteen LE16
+// step masks, then one tag per pad. A WAV tag is followed by its LE16 path
+// length and raw card-relative path (no NUL). No samples or native structs.
+static const uint8_t seq_magic[] = {'S','N','X','S','E','Q',1,0};
+#define SEQ_HEADER (sizeof(seq_magic) + 2 + TAPE_PAD_STEPS * 2)
+#define SEQ_EMPTY 16
+#define SEQ_WAV 17
+
+static void put_le16(uint8_t *p, unsigned value) {
+	p[0] = (uint8_t)value;
+	p[1] = (uint8_t)(value >> 8);
+}
+
+static unsigned get_le16(const uint8_t *p) { return (unsigned)p[0] | (unsigned)p[1] << 8; }
+
+static ssize_t seq_read(int fd, void *out, size_t size) {
+	ssize_t n;
+	do n = read(fd, out, size); while (n < 0 && errno == EINTR);
+	return n;
+}
+
+static bool read_exact(int fd, void *out, size_t size) {
+	uint8_t *p = out;
+	while (size) {
+		ssize_t n = seq_read(fd, p, size);
+		if (n <= 0) return false;
+		p += n;
+		size -= (size_t)n;
+	}
+	return true;
+}
+
+tape_seq_result_t tapepads_save_sequence(void) {
+	int card = tape_card_begin(true);
+	if (card < 0) return TAPE_SEQ_NO_CARD;
+	uint8_t head[SEQ_HEADER];
+	memcpy(head, seq_magic, sizeof(seq_magic));
+	pad_slot_t saved[TAPE_PAD_COUNT];
+	pthread_mutex_lock(&worker_lock);
+	memcpy(saved, slots, sizeof(saved));
+	pthread_mutex_lock(&command_lock);
+	put_le16(head + sizeof(seq_magic), (unsigned)tempo);
+	for (int i = 0; i < TAPE_PAD_STEPS; i++) put_le16(head + sizeof(seq_magic) + 2 + 2 * i, pattern[i]);
+	pthread_mutex_unlock(&command_lock);
+	pthread_mutex_unlock(&worker_lock);
+
+	tape_savefile_t file;
+	bool ok = tape_store_begin(card, TAPE_STORE_SEQUENCE, &file);
+	if (ok) {
+		ok = tape_store_write(file.fd, head, sizeof(head));
+		for (int p = 0; p < TAPE_PAD_COUNT && ok; p++) {
+			const pad_slot_t *slot = &saved[p];
+			uint8_t tag = slot->kind == TAPE_PAD_WAV ? SEQ_WAV :
+				slot->kind == TAPE_PAD_EMPTY ? SEQ_EMPTY : (uint8_t)preset_of(slot, p);
+			ok = tape_store_write(file.fd, &tag, 1);
+			if (ok && tag == SEQ_WAV) {
+				size_t len = strlen(slot->path);
+				uint8_t size[2];
+				put_le16(size, (unsigned)len);
+				ok = tape_store_write(file.fd, size, sizeof(size)) && tape_store_write(file.fd, slot->path, len);
+			}
+		}
+		ok = tape_store_end(&file, ok);
+	}
+	close(card);
+	tape_card_end();
+	return ok ? TAPE_SEQ_OK : TAPE_SEQ_SAVE_ERROR;
+}
+
+static tape_seq_result_t read_sequence(int card, int fd, int *bpm, unsigned *beats, pad_slot_t *pads) {
+	uint8_t head[SEQ_HEADER];
+	if (!read_exact(fd, head, sizeof(head)) || memcmp(head, seq_magic, sizeof(seq_magic))) return TAPE_SEQ_INVALID;
+	*bpm = (int)get_le16(head + sizeof(seq_magic));
+	if (*bpm < TAPE_PAD_MIN_BPM || *bpm > TAPE_PAD_MAX_BPM) return TAPE_SEQ_INVALID;
+	for (int i = 0; i < TAPE_PAD_STEPS; i++) beats[i] = get_le16(head + sizeof(seq_magic) + 2 + 2 * i);
+	for (int p = 0; p < TAPE_PAD_COUNT; p++) {
+		uint8_t tag;
+		if (!read_exact(fd, &tag, 1)) return TAPE_SEQ_INVALID;
+		if (tag < TAPE_PAD_COUNT) pads[p] = (pad_slot_t){.kind = TAPE_PAD_FACTORY, .preset = tag + 1};
+		else if (tag == SEQ_EMPTY) pads[p] = (pad_slot_t){.kind = TAPE_PAD_EMPTY};
+		else if (tag == SEQ_WAV) {
+			uint8_t size[2];
+			char path[TAPE_PATH_SIZE];
+			if (!read_exact(fd, size, sizeof(size))) return TAPE_SEQ_INVALID;
+			unsigned len = get_le16(size);
+			if (!len || len >= sizeof(path) || !read_exact(fd, path, len) || memchr(path, 0, len)) return TAPE_SEQ_INVALID;
+			path[len] = '\0';
+			if (!read_slot(card, path, &pads[p])) return TAPE_SEQ_SAMPLE_MISSING;
+		} else return TAPE_SEQ_INVALID;
+	}
+	uint8_t extra;
+	return seq_read(fd, &extra, 1) == 0 ? TAPE_SEQ_OK : TAPE_SEQ_INVALID;
+}
+
+tape_seq_result_t tapepads_load_sequence(const char *name) {
+	int card = tape_card_begin(false);
+	if (card < 0) return TAPE_SEQ_NO_CARD;
+	int fd = tape_store_open(card, TAPE_STORE_SEQUENCE, name);
+	int bpm;
+	unsigned beats[TAPE_PAD_STEPS];
+	pad_slot_t pads[TAPE_PAD_COUNT];
+	tape_seq_result_t result = fd < 0 ? TAPE_SEQ_INVALID : read_sequence(card, fd, &bpm, beats, pads);
+	if (fd >= 0) close(fd);
+	if (result == TAPE_SEQ_OK) {
+		pthread_mutex_lock(&worker_lock);
+		finish_locked();
+		memcpy(slots, pads, sizeof(slots));
+		tempo = bpm;
+		for (int i = 0; i < TAPE_PAD_STEPS; i++) pattern[i] = beats[i];
+		publish_slots();
+		pthread_mutex_unlock(&worker_lock);
+	}
+	close(card);
+	tape_card_end();
+	return result;
 }
 
 typedef struct { unsigned frames; int16_t pcm[DRUM_FRAMES]; } drum_t;
@@ -333,6 +457,77 @@ static bool mix(voice_t voices[TAPE_PAD_COUNT], int32_t *sum, unsigned frames) {
 	return true;
 }
 
+// Integer DSP for the small V1. Each toggle ramps over ~12 ms, without
+// changing the playback clock or restarting any voices. Controls are on the
+// full stereo bus, so the monitor and the WAV get the very same samples.
+#define FX_WET 512u
+#define ECHO_FRAMES (TAPE_PAD_RATE / 4)
+static struct {
+	int32_t low[2]; // Q8 filter state
+	unsigned filter, drive, echo, at;
+	int16_t delay[ECHO_FRAMES][2];
+} fx; // mixer worker only
+
+static unsigned fade(unsigned current, bool target) {
+	return target ? current + (current < FX_WET) : current - (current > 0);
+}
+
+static int32_t blend(int32_t dry, int32_t wet, unsigned amount) {
+	return dry + (wet - dry) * (int32_t)amount / (int32_t)FX_WET;
+}
+
+static int16_t clip16(int32_t v) {
+	return (int16_t)(v > INT16_MAX ? INT16_MAX : v < INT16_MIN ? INT16_MIN : v);
+}
+
+static int32_t saturate(int32_t v) {
+	int32_t amp = clip16(v);
+	if (amp < 0) amp = -amp;
+	amp *= 3;
+	if (amp > 24576) {
+		int32_t over = amp - 24576;
+		amp = 24576 + 8191 * over / (8192 + over);
+	}
+	return v < 0 ? -amp : amp;
+}
+
+static bool render(const int32_t *sum, int16_t *out) {
+	unsigned mask = effects;
+	if (!(mask || fx.filter || fx.drive || fx.echo)) {
+		for (unsigned i = 0; i < BLOCK * 2; i++) out[i] = clip16(sum[i]);
+		return false;
+	}
+	bool clear_delay = fx.echo && !(mask & TAPE_FX_ECHO);
+	bool tail = false;
+	for (unsigned i = 0; i < BLOCK; i++) {
+		fx.filter = fade(fx.filter, mask & TAPE_FX_FILTER);
+		fx.drive = fade(fx.drive, mask & TAPE_FX_DRIVE);
+		fx.echo = fade(fx.echo, mask & TAPE_FX_ECHO);
+		for (int ch = 0; ch < 2; ch++) {
+			int32_t x = sum[i * 2 + ch];
+			if (fx.filter) {
+				fx.low[ch] += (x * 256 - fx.low[ch]) / 8;
+				x = blend(x, fx.low[ch] / 256, fx.filter);
+			}
+			if (fx.drive) x = blend(x, saturate(x), fx.drive);
+			if (fx.echo) {
+				int32_t y = fx.delay[fx.at][ch];
+				fx.delay[fx.at][ch] = clip16(x + y * 3 / 8);
+				x += y * (int32_t)fx.echo / (int32_t)(2 * FX_WET);
+			}
+			out[i * 2 + ch] = clip16(x);
+			tail |= out[i * 2 + ch] != 0;
+		}
+		if (fx.echo && ++fx.at == ECHO_FRAMES) fx.at = 0;
+	}
+	if (!fx.filter) fx.low[0] = fx.low[1] = 0;
+	if (clear_delay && !fx.echo) {
+		memset(fx.delay, 0, sizeof(fx.delay));
+		fx.at = 0;
+	}
+	return tail;
+}
+
 #ifdef HOST_WEB_EMU
 static int64_t clock_us(void) {
 	struct timespec ts;
@@ -354,6 +549,7 @@ static void *pads_main(void *unused) {
 	owned = !stop_requested && !audio_playback_context_active() &&
 		audio_external_begin_owned(&output_owner, TAPE_PAD_RATE, 2, 16, 32);
 	if (!owned) goto done;
+	memset(&fx, 0, sizeof(fx));
 	state = TAPE_PADS_PLAYING;
 	result = TAPE_PADS_IDLE;
 	unsigned quiet = 0, phase = STEP_PHASE;
@@ -369,12 +565,15 @@ static void *pads_main(void *unused) {
 		bool loop = looping, dub = overdub;
 		pthread_mutex_unlock(&command_lock);
 		if (loop && !was_looping) { phase = STEP_PHASE; current = TAPE_PAD_STEPS - 1; }
+		if (!loop && was_looping) step = -1;
 		was_looping = loop;
 		unsigned performed = 0;
 		if (!trigger(voices, hits, true, &performed)) goto bad_sample;
 		if (loop && dub && performed) {
 			unsigned at = phase >= STEP_PHASE ? (current + 1) % TAPE_PAD_STEPS : current;
-			atomic_fetch_or(&pattern[at], performed);
+			pthread_mutex_lock(&command_lock);
+			pattern[at] |= performed;
+			pthread_mutex_unlock(&command_lock);
 		}
 
 		int32_t sum[BLOCK * 2] = {0};
@@ -398,23 +597,22 @@ static void *pads_main(void *unused) {
 		unsigned active = 0;
 		for (int p = 0; p < TAPE_PAD_COUNT; p++) if (voices[p].on) active |= 1u << p;
 		sounding = active;
-		if (active || loop || hits) quiet = 0;
+		int16_t out[BLOCK * 2];
+		bool tail = render(sum, out);
+		if (active || loop || hits || tail || tapemix_accepting()) quiet = 0;
 		else if (++quiet >= IDLE_BLOCKS) {
 			// No tap can land between our last mailbox check and retiring. If
 			// it found us closing, the caller joins and opens a new stream.
 			pthread_mutex_lock(&command_lock);
-			bool done = !pending && !looping;
+			bool done = !pending && !looping && !tapemix_accepting();
 			if (done) accepting = false;
 			pthread_mutex_unlock(&command_lock);
 			if (done) break;
 			quiet = 0;
 		}
-		int16_t out[BLOCK * 2];
-		for (unsigned i = 0; i < BLOCK * 2; i++) {
-			int v = sum[i];
-			out[i] = (int16_t)(v > INT16_MAX ? INT16_MAX : v < INT16_MIN ? INT16_MIN : v);
-		}
-		if (audio_external_write_owned(&output_owner, out, BLOCK) != BLOCK) {
+		int written = audio_external_write_owned(&output_owner, out, BLOCK);
+		if (written > 0) tapemix_push(out, (unsigned)written);
+		if (written != BLOCK) {
 			result = TAPE_PADS_UNAVAILABLE;
 			break;
 		}
@@ -426,6 +624,7 @@ static void *pads_main(void *unused) {
 		else if (wait < -30000) next_write = now;
 #endif
 	}
+	if (!stop_requested && (usb_dac_mode() || audio_playback_context_active())) result = TAPE_PADS_UNAVAILABLE;
 	goto done;
 bad_sample:
 	result = TAPE_PADS_SAMPLE_ERROR;
@@ -434,6 +633,8 @@ done:
 	accepting = false;
 	pending = 0;
 	looping = overdub = false;
+	if (stop_requested) tapemix_stop();
+	else tapemix_interrupt();
 	pthread_mutex_unlock(&command_lock);
 	if (owned) audio_external_end_owned(&output_owner);
 	for (int p = 0; p < TAPE_PAD_COUNT; p++) {
@@ -458,9 +659,25 @@ static bool enqueue(unsigned hits, bool play) {
 	return ok;
 }
 
+// worker_lock and command_lock held, with the previous PCM joined.
+static bool start_locked(unsigned hits, bool play, int samples) {
+	job_card = samples;
+	pending = hits;
+	stop_requested = false;
+	looping = play;
+	state = TAPE_PADS_OPENING;
+	if (pthread_create(&worker, NULL, pads_main, NULL) == 0) {
+		accepting = joinable = true;
+		return true;
+	}
+	looping = false;
+	state = TAPE_PADS_UNAVAILABLE;
+	return false;
+}
+
 static bool request(unsigned hits, bool play) {
 	if (enqueue(hits, play)) return true;
-	int card = needs_card ? tape_card_begin() : -1;
+	int card = needs_card ? tape_card_begin(false) : -1;
 	bool reserved = card >= 0;
 	pthread_mutex_lock(&worker_lock);
 	bool ok = enqueue(hits, play);
@@ -468,20 +685,11 @@ static bool request(unsigned hits, bool play) {
 		finish_locked();
 		if (needs_card && card < 0) state = TAPE_PADS_SAMPLE_ERROR;
 		else {
-			job_card = card;
+			int samples = needs_card ? card : -1;
 			pthread_mutex_lock(&command_lock);
-			pending = hits;
-			stop_requested = false;
-			looping = play;
-			state = TAPE_PADS_OPENING;
-			if (pthread_create(&worker, NULL, pads_main, NULL) == 0) {
-				accepting = joinable = ok = true;
-				card = -1; // now the worker's fd
-			} else {
-				looping = false;
-				state = TAPE_PADS_UNAVAILABLE;
-			}
+			ok = start_locked(hits, play, samples);
 			pthread_mutex_unlock(&command_lock);
+			if (ok && samples >= 0) card = -1; // now the worker's fd
 		}
 	}
 	pthread_mutex_unlock(&worker_lock);
@@ -490,20 +698,72 @@ static bool request(unsigned hits, bool play) {
 	return ok;
 }
 
+tape_mix_state_t tapepads_record(void) {
+	int card = tape_card_begin(true);
+	if (card < 0) return TAPE_MIX_NO_CARD;
+	pthread_mutex_lock(&worker_lock);
+	tape_mix_state_t result = TAPE_MIX_BUSY;
+	if (!tapemix_active()) {
+		pthread_mutex_lock(&command_lock);
+		bool reuse = accepting && !stop_requested;
+		int samples = -1;
+		if (!reuse) {
+			pthread_mutex_unlock(&command_lock);
+			finish_locked();
+			// A take writer and a sampler importing WAVs each own their fd.
+			if (needs_card) samples = tape_open_at(card, "", true);
+			pthread_mutex_lock(&command_lock);
+		}
+		result = !reuse && needs_card && samples < 0 ? TAPE_MIX_ERROR : tapemix_start(card);
+		if (result == TAPE_MIX_OPENING) {
+			card = -1; // now the writer's fd
+			if (!reuse) {
+				if (start_locked(0, false, samples)) samples = -1;
+				else { tapemix_interrupt(); result = TAPE_MIX_ERROR; }
+			}
+		}
+		if (samples >= 0) close(samples);
+		pthread_mutex_unlock(&command_lock);
+	}
+	pthread_mutex_unlock(&worker_lock);
+	if (card >= 0) close(card);
+	tape_card_end();
+	return result;
+}
+
 bool tapepads_hit(int pad) {
 	return pad >= 0 && pad < TAPE_PAD_COUNT && (playable & (1u << pad)) && request(1u << pad, false);
 }
 bool tapepads_start(void) { return request(0, true); }
-void tapepads_stop(void) { stop_requested = true; looping = overdub = false; }
+void tapepads_stop_loop(void) {
+	pthread_mutex_lock(&command_lock);
+	looping = overdub = false;
+	pthread_mutex_unlock(&command_lock);
+}
+void tapepads_stop(void) {
+	pthread_mutex_lock(&command_lock);
+	stop_requested = true;
+	looping = overdub = false;
+	tapemix_stop();
+	pthread_mutex_unlock(&command_lock);
+}
+unsigned tapepads_effects(void) { return effects; }
+void tapepads_toggle_effect(tape_pad_effect_t effect) {
+	atomic_fetch_xor(&effects, (unsigned)effect & (TAPE_FX_FILTER | TAPE_FX_ECHO | TAPE_FX_DRIVE));
+}
 tape_pads_state_t tapepads_state(void) { return state; }
 bool tapepads_active(void) {
 	tape_pads_state_t now = state;
-	return now == TAPE_PADS_OPENING || now == TAPE_PADS_PLAYING;
+	return now == TAPE_PADS_OPENING || now == TAPE_PADS_PLAYING || tapemix_active();
 }
 unsigned tapepads_sounding(void) { return sounding; }
 bool tapepads_looping(void) { return looping; }
 bool tapepads_overdub(void) { return overdub; }
-void tapepads_set_overdub(bool enabled) { overdub = enabled && looping; }
+void tapepads_set_overdub(bool enabled) {
+	pthread_mutex_lock(&command_lock);
+	overdub = enabled && looping;
+	pthread_mutex_unlock(&command_lock);
+}
 int tapepads_step(void) { return step; }
 void tapepads_pattern(bool demo) {
 	pthread_mutex_lock(&worker_lock);

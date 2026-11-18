@@ -182,6 +182,13 @@ static tape_pads_state_t deck_beat;
 static int deck_tempo = 120;
 static int deck_hit = -1, deck_loads;
 static bool deck_loop, deck_dub, deck_assigned;
+static unsigned deck_fx;
+static tape_mix_info_t deck_mix;
+static tape_mix_state_t deck_record_result = TAPE_MIX_OPENING;
+static tape_seq_result_t deck_restore_result;
+static int deck_recorded, deck_saved, deck_restored, deck_played_take;
+static const char deck_seq_name[] = "Sequence-20261118-120000-002.seq";
+static const char deck_take_name[] = "Take-20261118-120000-003.wav";
 static const char deck_filename[] = "Memo-20261118-120000-001.wav";
 
 void taperecorder_status(tape_rec_status_t *out) { *out = deck_rec; }
@@ -209,12 +216,49 @@ bool taperecorder_path(const char *name, char *out, size_t size) {
 	assert(!strcmp(name, deck_filename));
 	return snprintf(out, size, "/card/Recordings/%s", name) < (int)size;
 }
-void player_play_file(const char *path) { assert(strstr(path, deck_filename)); deck_played++; }
+void player_play_file(const char *path) {
+	if (strstr(path, deck_take_name)) deck_played_take++;
+	else { assert(strstr(path, deck_filename)); deck_played++; }
+}
 void player_sheet_open(bool animate) { assert(animate); }
 tape_pads_state_t tapepads_state(void) { return deck_beat; }
-bool tapepads_active(void) { return deck_beat == TAPE_PADS_PLAYING; }
+bool tapepads_active(void) { return deck_beat == TAPE_PADS_PLAYING || tapemix_active(); }
 bool tapepads_start(void) { deck_loop = true; deck_beat = TAPE_PADS_PLAYING; return true; }
-void tapepads_stop(void) { deck_loop = deck_dub = false; deck_beat = TAPE_PADS_IDLE; }
+void tapepads_stop_loop(void) { deck_loop = deck_dub = false; }
+void tapepads_stop(void) { tapepads_stop_loop(); tapemix_stop(); deck_beat = TAPE_PADS_IDLE; }
+unsigned tapepads_effects(void) { return deck_fx; }
+void tapepads_toggle_effect(tape_pad_effect_t effect) { deck_fx ^= effect; }
+tape_mix_state_t tapepads_record(void) {
+	deck_recorded++;
+	if (deck_record_result == TAPE_MIX_OPENING) deck_mix = (tape_mix_info_t){.state = TAPE_MIX_RECORDING};
+	return deck_record_result;
+}
+void tapemix_info(tape_mix_info_t *out) { *out = deck_mix; }
+bool tapemix_active(void) { return deck_mix.state == TAPE_MIX_RECORDING || deck_mix.state == TAPE_MIX_SAVING; }
+void tapemix_stop(void) { if (deck_mix.state == TAPE_MIX_RECORDING) deck_mix.state = TAPE_MIX_SAVING; }
+tape_seq_result_t tapepads_save_sequence(void) { deck_saved++; return TAPE_SEQ_OK; }
+tape_seq_result_t tapepads_load_sequence(const char *name) {
+	assert(!strcmp(name, deck_seq_name));
+	deck_restored++;
+	if (deck_restore_result == TAPE_SEQ_OK) deck_tempo = 125;
+	return deck_restore_result;
+}
+int tape_store_list(tape_store_kind_t kind, const char *after, char names[][TAPE_SAVE_NAME_SIZE], int cap) {
+	assert(cap > 0 && !after);
+	if (kind == TAPE_STORE_SEQUENCE) {
+		if (!deck_saved) return 0;
+		strcpy(names[0], deck_seq_name);
+	} else {
+		assert(!tapemix_active());
+		if (deck_mix.state != TAPE_MIX_SAVED) return 0;
+		strcpy(names[0], deck_take_name);
+	}
+	return 1;
+}
+bool tape_store_take_path(const char *name, char *out, size_t size) {
+	assert(!strcmp(name, deck_take_name));
+	return snprintf(out, size, "/card/Recordings/%s", name) < (int)size;
+}
 bool tapepads_hit(int pad) { deck_hit = pad; deck_beat = TAPE_PADS_PLAYING; return true; }
 int tapepads_step(void) { return deck_loop ? 2 : -1; }
 unsigned tapepads_sounding(void) { return tapepads_active() && deck_hit >= 0 ? 1u << deck_hit : 0; }
@@ -931,6 +975,10 @@ static void check_strings(const char *language_dir) {
 		"tape_deck", "addon_tapedeck_note", "tape_no_input", "tape_card_needed",
 		"tape_record", "tape_partial", "tape_pads", "tape_kits", "tape_loop", "tape_overdub",
 		"tape_wav_invalid", "tape_load_kit", "tape_load_wav", "tape_kit_hint", "tape_output_error",
+		"tape_rec_mix", "tape_end_rec", "tape_write_card", "tape_take_error", "tape_take_partial", "tape_take_saved",
+		"tape_fx_filter", "tape_fx_echo", "tape_fx_drive", "tape_save_seq", "tape_load_seq", "tape_saved_takes",
+		"tape_seq_saved", "tape_seq_loaded", "tape_seq_sample_missing", "tape_seq_save_error", "tape_seq_invalid",
+		"tape_no_takes", "tape_no_seqs",
 		"pet", "pet_mood_sleeping", "pet_mood_sad", "pet_mood_okay", "pet_mood_happy",
 		"pet_mood_blissful", "pet_stage_egg", "pet_stage_baby", "pet_stage_child",
 		"pet_stage_teen", "pet_stage_adult", "pet_energy", "pet_today", "pet_streak",
@@ -1177,6 +1225,7 @@ static lv_obj_t *morepage_shape(bool *tiles) {
 
 static lv_obj_t *deck_button(lv_obj_t *page, const char *label) {
 	lv_obj_t *text = find_label(page, tr(label));
+	if (!text) fprintf(stderr, "Tape Deck button not found: %s (%s)\n", label, tr(label));
 	assert(text);
 	lv_obj_t *btn = lv_obj_get_parent(text);
 	assert(lv_obj_check_type(btn, &lv_button_class));
@@ -1255,11 +1304,56 @@ static void check_tapedeck(gui_config_t *cfg) {
 	lv_obj_send_event(deck_button(page, "tape_loop"), LV_EVENT_CLICKED, NULL);
 	lv_obj_send_event(deck_button(page, "tape_overdub"), LV_EVENT_CLICKED, NULL);
 	assert(deck_loop && deck_dub);
+	const char *const effects[] = {"tape_fx_filter", "tape_fx_echo", "tape_fx_drive"};
+	for (int i = 0; i < 3; i++) {
+		lv_obj_t *fx = deck_button(page, effects[i]);
+		lv_obj_send_event(fx, LV_EVENT_CLICKED, NULL);
+		assert(deck_loop && deck_dub && lv_obj_has_state(fx, LV_STATE_CHECKED));
+	}
+	assert(deck_fx == (TAPE_FX_FILTER | TAPE_FX_ECHO | TAPE_FX_DRIVE));
+	lv_obj_t *mix = deck_button(page, "tape_rec_mix");
+	deck_record_result = TAPE_MIX_NO_CARD;
+	lv_obj_send_event(mix, LV_EVENT_CLICKED, NULL);
+	assert(deck_loop && !tapemix_active() && find_label(page, tr("tape_write_card")));
+	deck_record_result = TAPE_MIX_OPENING;
+	lv_obj_send_event(mix, LV_EVENT_CLICKED, NULL);
+	assert(deck_recorded == 2 && deck_loop && tapemix_active() && mix == deck_button(page, "tape_end_rec"));
+	deck_mix.frames = TAPE_PAD_RATE * 4;
+	lv_tick_inc(50);
+	lv_timer_handler();
+	assert(find_label(page, "00:04"));
 	dump_snapshot(page, "v1-tape-pads");
+	lv_obj_send_event(mix, LV_EVENT_CLICKED, NULL);
+	assert(deck_loop && deck_mix.state == TAPE_MIX_SAVING && lv_obj_has_state(mix, LV_STATE_DISABLED));
+	deck_mix.state = TAPE_MIX_SAVED;
+	lv_tick_inc(50);
+	lv_timer_handler();
+	assert(!lv_obj_has_state(mix, LV_STATE_DISABLED) && find_label(page, tr("tape_take_saved")));
+
+	lv_obj_send_event(mix, LV_EVENT_CLICKED, NULL);
+	assert(deck_mix.state == TAPE_MIX_RECORDING);
 	lv_obj_send_event(deck_button(page, "tape_kits"), LV_EVENT_CLICKED, NULL);
-	assert(!tapepads_active());
+	assert(!deck_loop && deck_beat == TAPE_PADS_IDLE && deck_mix.state == TAPE_MIX_SAVING);
+	lv_obj_send_event(deck_button(page, "tape_saved_takes"), LV_EVENT_CLICKED, NULL);
+	deck_mix.state = TAPE_MIX_SAVED;
+	lv_tick_inc(100);
+	lv_timer_handler();
+	lv_obj_send_event(deck_button(page, "2026-11-18  12:00:00  #003"), LV_EVENT_CLICKED, NULL);
+	assert(deck_played_take == 1);
+	lv_obj_send_event(deck_button(page, "trackmenu_back"), LV_EVENT_CLICKED, NULL);
 	lv_obj_send_event(deck_button(page, "+"), LV_EVENT_CLICKED, NULL);
 	assert(deck_tempo == 125 && find_label(page, "125 BPM"));
+	lv_obj_send_event(deck_button(page, "tape_save_seq"), LV_EVENT_CLICKED, NULL);
+	assert(deck_saved == 1 && find_label(page, tr("tape_seq_saved")));
+	lv_obj_send_event(deck_button(page, "+"), LV_EVENT_CLICKED, NULL);
+	assert(deck_tempo == 130);
+	lv_obj_send_event(deck_button(page, "tape_load_seq"), LV_EVENT_CLICKED, NULL);
+	deck_restore_result = TAPE_SEQ_SAMPLE_MISSING;
+	lv_obj_send_event(deck_button(page, "2026-11-18  12:00:00  #002"), LV_EVENT_CLICKED, NULL);
+	assert(deck_tempo == 130 && find_label(page, tr("tape_seq_sample_missing")));
+	deck_restore_result = TAPE_SEQ_OK;
+	lv_obj_send_event(deck_button(page, "2026-11-18  12:00:00  #002"), LV_EVENT_CLICKED, NULL);
+	assert(deck_restored == 2 && deck_tempo == 125 && find_label(page, tr("tape_seq_loaded")));
 	lv_obj_send_event(deck_button(page, "tape_load_kit"), LV_EVENT_CLICKED, NULL);
 	lv_obj_send_event(deck_button(page, "My Kit"), LV_EVENT_CLICKED, NULL);
 	assert(deck_loads == 1 && find_label(page, tr("tape_kit_loaded")));
