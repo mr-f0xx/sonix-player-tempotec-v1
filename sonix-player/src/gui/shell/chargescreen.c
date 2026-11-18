@@ -82,6 +82,34 @@
 #define CHARGE_TEXT lv_color_make(0xec, 0xec, 0xee)
 #define CHARGE_SHELL lv_color_make(0xe9, 0xe9, 0xeb)
 
+// The fill wears the accent in the added palettes -- and amber and red on the
+// way down, on every palette, because a battery on its knees must never be
+// red behind the theme. Dark and Light keep the semantic ladder the whole
+// way, as they always were. The gradient's top is the accent a fingerprint
+// lighter; the bottom is the accent itself.
+#define ACCENT_HI_MIX 70 // of 255, towards white, for the fill's top stop
+static void charge_fill_colors(int percent, lv_color_t *hi, lv_color_t *base) {
+	bool classic = theme_get_kind() == THEME_KIND_DARK || theme_get_kind() == THEME_KIND_LIGHT;
+	if (percent <= 10) {
+		*hi = CHARGE_RED_HI;
+		*base = CHARGE_RED;
+		return;
+	}
+	if (percent <= 20) {
+		*hi = CHARGE_AMBER_HI;
+		*base = CHARGE_AMBER;
+		return;
+	}
+	if (classic) {
+		*hi = CHARGE_GREEN_HI;
+		*base = CHARGE_GREEN;
+		return;
+	}
+	const theme_palette_t *pal = theme();
+	*base = pal->accent;
+	*hi = lv_color_mix(lv_color_white(), pal->accent, ACCENT_HI_MIX);
+}
+
 static lv_display_t *display;
 static lv_obj_t *root;
 static lv_obj_t *fill;
@@ -287,13 +315,20 @@ void chargescreen_build(lv_display_t *disp) {
 
 	// The fill is placed inside the box at the origin of its content area
 	// with explicit geometry rather than an alignment: an aligned child of a
-	// bordered object overpaints the border on the side it is anchored to.
+	// bordered object overpaints the border on the side it is anchored to. The
+	// colour is the normal rung of the ladder (Dark and Light keep green);
+	// chargescreen_show() repaints it from the reading before the panel
+	// lights, so this is only the colour the object starts life with.
 	fill = lv_obj_create(body);
 	lv_obj_set_pos(fill, 0, 0);
 	lv_obj_set_height(fill, lv_pct(100));
 	lv_obj_set_width(fill, 0);
-	lv_obj_set_style_bg_color(fill, CHARGE_GREEN_HI, 0);
-	lv_obj_set_style_bg_grad_color(fill, CHARGE_GREEN, 0);
+	{
+		lv_color_t fill_hi, fill_base;
+		charge_fill_colors(100, &fill_hi, &fill_base);
+		lv_obj_set_style_bg_color(fill, fill_hi, 0);
+		lv_obj_set_style_bg_grad_color(fill, fill_base, 0);
+	}
 	lv_obj_set_style_bg_grad_dir(fill, LV_GRAD_DIR_VER, 0);
 	lv_obj_set_style_bg_opa(fill, LV_OPA_COVER, 0);
 	lv_obj_set_style_border_width(fill, 0, 0);
@@ -365,16 +400,10 @@ void chargescreen_show(bool have, int percent, bool charging, bool cable) {
 			lv_label_set_text(percent_label, text);
 
 			lv_obj_set_width(fill, (int32_t)fill_width * percent / 100);
-			if (percent <= 10) {
-				lv_obj_set_style_bg_color(fill, CHARGE_RED_HI, 0);
-				lv_obj_set_style_bg_grad_color(fill, CHARGE_RED, 0);
-			} else if (percent <= 20) {
-				lv_obj_set_style_bg_color(fill, CHARGE_AMBER_HI, 0);
-				lv_obj_set_style_bg_grad_color(fill, CHARGE_AMBER, 0);
-			} else {
-				lv_obj_set_style_bg_color(fill, CHARGE_GREEN_HI, 0);
-				lv_obj_set_style_bg_grad_color(fill, CHARGE_GREEN, 0);
-			}
+			lv_color_t fill_hi, fill_base;
+			charge_fill_colors(percent, &fill_hi, &fill_base);
+			lv_obj_set_style_bg_color(fill, fill_hi, 0);
+			lv_obj_set_style_bg_grad_color(fill, fill_base, 0);
 		}
 
 		lv_label_set_text(status_label, tr(state == 2   ? "chargescreen_charging"

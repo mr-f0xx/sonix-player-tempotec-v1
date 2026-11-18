@@ -269,7 +269,6 @@ int main(int argc, char **argv) {
 
 	lv_obj_t *body = battery_body(root);
 	lv_obj_t *fill = battery_fill(root);
-	lv_color_t fill_green = lv_obj_get_style_bg_color(fill, 0); // semantic green, 42%
 	int32_t inner = lv_obj_get_content_width(body);
 	assert(inner > 0);
 	int32_t at_42 = lv_obj_get_width(fill);
@@ -344,13 +343,16 @@ int main(int argc, char **argv) {
 	lv_obj_update_layout(lv_screen_active());
 	assert(find_label(root, "4%"));
 	assert(find_label(root, tr("chargescreen_charging")));
+	/* The red rung, whatever the palette: it is captured here and asked of
+	 * the themed pass below. */
+	lv_color_t fill_low = lv_obj_get_style_bg_color(battery_fill(root), 0);
 	check_within_panel(lv_screen_active(), &cfg, "Charging screen, low");
 	dump_snapshot(lv_screen_active(), bp_is_tempotec_v1() ? "v1-charging-low" : "hiby-charging-low");
 
 	/* --- Tokyo Night stands in for the added palettes -------------------------
 	 * The screen comes down and is built again under the themed stub: same
-	 * content, the palette's own colours -- except the bar, which stays
-	 * semantic green. */
+	 * content, the palette's own colours -- and, above the low-battery rungs,
+	 * a fill that wears the accent instead of the semantic green. */
 	{
 		lv_obj_delete(root);
 		test_kind = THEME_KIND_TOKYO_NIGHT;
@@ -373,8 +375,19 @@ int main(int argc, char **argv) {
 		int32_t tinner = lv_obj_get_content_width(battery_body(root));
 		int32_t at_50 = lv_obj_get_width(battery_fill(root));
 		assert(at_50 >= tinner * 50 / 100 - 1 && at_50 <= tinner * 50 / 100 + 1);
-		// Palette in force, green stays green.
-		assert(lv_color_eq(lv_obj_get_style_bg_color(battery_fill(root), 0), fill_green));
+		// Palette in force, the accent wears the bar: the top stop of the
+		// gradient is the accent a fingerprint lighter (lv_color_mix towards
+		// white, 70 of 255 -- see chargescreen.c), the bottom is the accent
+		// itself.
+		lv_color_t accent_hi = lv_color_mix(lv_color_white(), test_palette.accent, 70);
+		assert(lv_color_eq(lv_obj_get_style_bg_color(battery_fill(root), 0), accent_hi));
+		assert(lv_color_eq(lv_obj_get_style_bg_grad_color(battery_fill(root), 0), test_palette.accent));
+		// The low rungs stay semantic there as well: red, not the accent.
+		chargescreen_show(true, 4, true, true);
+		lv_obj_update_layout(lv_screen_active());
+		assert(lv_color_eq(lv_obj_get_style_bg_color(battery_fill(root), 0), fill_low));
+		chargescreen_show(true, 50, true, true);
+		lv_obj_update_layout(lv_screen_active());
 		dump_snapshot(lv_screen_active(), bp_is_tempotec_v1() ? "v1-charging-tokyo" : "hiby-charging-tokyo");
 		test_kind = THEME_KIND_DARK;
 	}

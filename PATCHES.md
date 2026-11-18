@@ -3599,8 +3599,11 @@ black screen they always had, and the added palettes draw from the active one
 -- the background and the percentage and the outline take the palette's colours
 (the outline what the type wears, tinted like the rest when Dynamic tint is on),
 the state line the accent, the hold hint the palette's secondary text. The bar
-itself keeps its semantic green/amber/red everywhere -- a nearly flat battery
-reads as red on any palette. The palette is resolved before the screen is
+itself keeps the semantic ladder on Dark and Light, unchanged. The added
+palettes wear the accent there instead -- the bar's fill is the accent over a
+fingerprint-lighter accent -- above the two low rungs, which are amber and red
+on every palette, so a nearly flat battery reads as red behind any theme. The
+palette is resolved before the screen is
 built (`theme_resolve_boot_palette()`), which reads only the config: a Custom
 inherently needs the card, which is not mounted at this point in the boot, so
 the charging screen falls back to Dark for it and the pages pick the Custom
@@ -3664,7 +3667,8 @@ one reading at a time, because the screen only repaints a line that has
 changed. The pass runs twice: once in Dark, checking the black screen is what
 it has always been, and once in Tokyo Night, checking the palette is picked up
 -- background, outline, percentage, state line and hint all redrawn from the
-active palette, the bar still semantic green. `make -C sonix-player/tests chargerattached` checks the cable probe
+active palette, the bar wearing the accent above the low rungs (amber and red
+kept, as on every palette). `make -C sonix-player/tests chargerattached` checks the cable probe
 against fake supplies in a temporary directory -- the `Full` / `Not charging`
 readings the 80% charge limit produces with the cable in, an `online` bit that
 reads `0` with a USB-sized voltage behind it, and the garbage each node is
