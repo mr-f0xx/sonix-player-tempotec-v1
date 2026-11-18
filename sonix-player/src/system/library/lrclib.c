@@ -36,8 +36,13 @@
 static bool build_query(char *out, size_t size, const char *title, const char *artist) {
 	char t[768], a[768];
 	http_url_encode(title, t, sizeof(t));
-	http_url_encode(artist, a, sizeof(a));
-	int n = snprintf(out, size, "track_name=%s&artist_name=%s", t, a);
+	int n;
+	if (artist) {
+		http_url_encode(artist, a, sizeof(a));
+		n = snprintf(out, size, "track_name=%s&artist_name=%s", t, a);
+	} else {
+		n = snprintf(out, size, "track_name=%s", t);
+	}
 	return n > 0 && (size_t)n < size;
 }
 
@@ -182,11 +187,12 @@ static void rank(lrclib_record_t *list, int count, int duration, const char *alb
 	}
 }
 
-lrclib_result_t lrclib_search(const char *title, const char *artist, const char *album, int duration_secs,
-							  lrclib_record_t **records, int *count) {
+// A NULL artist is an explicit title-only request; an empty tag is not.
+static lrclib_result_t search_tracks(const char *title, const char *artist, const char *album, int duration_secs,
+									 lrclib_record_t **records, int *count) {
 	*records = NULL;
 	*count = 0;
-	if (!title || !title[0] || !artist || !artist[0]) {
+	if (!title || !title[0] || (artist && !artist[0])) {
 		return LRCLIB_NO_TAGS;
 	}
 
@@ -199,7 +205,7 @@ lrclib_result_t lrclib_search(const char *title, const char *artist, const char 
 	bool instrumental = false;
 	lrclib_result_t result =
 		search(query, LRCLIB_ATTEMPTS, LRCLIB_TIMEOUT_SECS, &list, &found, &instrumental);
-	if (result == LRCLIB_NOT_FOUND && found == 0 && build_free_query(query, sizeof(query), title, artist)) {
+	if (artist && result == LRCLIB_NOT_FOUND && found == 0 && build_free_query(query, sizeof(query), title, artist)) {
 		// LRCLIB has already said it has nothing under these tags: a free-text
 		// search that does not answer leaves that as the answer, rather than
 		// reporting LRCLIB as unreachable. What it does find is in `found`.
@@ -211,15 +217,25 @@ lrclib_result_t lrclib_search(const char *title, const char *artist, const char 
 		if (result == LRCLIB_NOT_FOUND && instrumental) {
 			result = LRCLIB_INSTRUMENTAL;
 		}
-		fprintf(stderr, "lrclib: '%s' by '%s': %d\n", title, artist, (int)result);
+		fprintf(stderr, "lrclib: '%s' by '%s': %d\n", title, artist ? artist : "(any artist)", (int)result);
 		return result;
 	}
 
 	rank(list, found, duration_secs > 0 && duration_secs <= 3600 ? duration_secs : 0, album);
-	fprintf(stderr, "lrclib: '%s' by '%s': %d records\n", title, artist, found);
+	fprintf(stderr, "lrclib: '%s' by '%s': %d records\n", title, artist ? artist : "(any artist)", found);
 	*records = list;
 	*count = found;
 	return LRCLIB_OK;
+}
+
+lrclib_result_t lrclib_search(const char *title, const char *artist, const char *album, int duration_secs,
+							  lrclib_record_t **records, int *count) {
+	return search_tracks(title, artist ? artist : "", album, duration_secs, records, count);
+}
+
+lrclib_result_t lrclib_search_title(const char *title, const char *album, int duration_secs,
+									lrclib_record_t **records, int *count) {
+	return search_tracks(title, NULL, album, duration_secs, records, count);
 }
 
 void lrclib_free(lrclib_record_t *records, int count) {

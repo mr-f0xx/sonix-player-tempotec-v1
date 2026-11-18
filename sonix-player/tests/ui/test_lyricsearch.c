@@ -1,7 +1,7 @@
 /*
  * Headless LVGL layout and workflow regression checks for the LRCLIB lyrics
  * search & preview screen (lyricsearch.c) on the TempoTec V1 240x320 panel:
- * - all 20 lyrics_* translation keys across all 11 shipped V1 languages
+ * - all lyrics_* translation keys across all 11 shipped V1 languages
  * - list + preview + Apply pill bounds within the 240x320 panel across all 11
  *   languages and all 5 V1 themes (Dark, Light, Tokyo Night, Amber on Black,
  *   OLED), including OLED's dark-on-white Apply pill contrast
@@ -259,6 +259,7 @@ static void check_all_languages_and_themes(const char *language_dir, gui_config_
 		"lyrics_no_tags",		  "lyrics_not_saved",	   "lyrics_download_failed", "lyrics_no_wifi",
 		"lyrics_wifi_off_note",	  "lyrics_enable_wifi",	   "lyrics_wifi_connecting", "lyrics_wifi_failed",
 		"lyrics_results",		  "lyrics_synced",		   "lyrics_plain",		   "lyrics_apply",
+		"lyrics_search_title_only",
 	};
 
 	DIR *dir = opendir(language_dir);

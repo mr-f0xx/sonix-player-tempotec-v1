@@ -174,6 +174,34 @@ static void test_free_text_fallback_and_instrumental(void) {
 	assert(recs == NULL && count == 0);
 }
 
+static void test_title_only_search(void) {
+	lrclib_record_t *recs = NULL;
+	int count = -1;
+	reset_http();
+	assert(lrclib_search_title("", NULL, 0, &recs, &count) == LRCLIB_NO_TAGS);
+	assert(lrclib_search_title(NULL, NULL, 0, &recs, &count) == LRCLIB_NO_TAGS);
+	assert(recs == NULL && count == 0 && call_count == 0);
+
+	// The cover's album and duration can rank the results, but never filter
+	// the request. Both artists are selectable; the closer recording is first.
+	const char *title = "L'été & moi";
+	push_reply(true, 200,
+			   "[{\"artistName\":\"Live band\",\"duration\":300,\"plainLyrics\":\"live\"},"
+			   "{\"artistName\":\"Original artist\",\"duration\":201,\"syncedLyrics\":\"[00:01] original\"}]");
+	assert(lrclib_search_title(title, "Cover album", 200, &recs, &count) == LRCLIB_OK);
+	assert(call_count == 1 && count == 2);
+	assert(strcmp(seen_urls[0], LRCLIB_API "/search?track_name=L%27%C3%A9t%C3%A9%20%26%20moi") == 0);
+	assert(recs[0].synced && strcmp(recs[0].artist, "Original artist") == 0);
+	assert(!recs[1].synced && strcmp(recs[1].artist, "Live band") == 0);
+	lrclib_free(recs, count);
+
+	// No second, free-text query when the explicit title search comes up empty.
+	reset_http();
+	push_reply(true, 200, "[]");
+	assert(lrclib_search_title(title, NULL, 0, &recs, &count) == LRCLIB_NOT_FOUND);
+	assert(call_count == 1 && recs == NULL && count == 0);
+}
+
 static void test_ranking_priority_and_stability(void) {
 	reset_http();
 	push_reply(
@@ -258,6 +286,7 @@ int main(void) {
 	test_missing_tags_rejected();
 	test_retry_on_transient_errors_only();
 	test_free_text_fallback_and_instrumental();
+	test_title_only_search();
 	test_ranking_priority_and_stability();
 	test_atomic_save_and_sidecar_paths();
 	printf("lrclib: all checks passed\n");
