@@ -1,14 +1,15 @@
+#ifndef __EMSCRIPTEN__
+#define _GNU_SOURCE
 #include "mdns.h"
 
 #include <arpa/inet.h>
 #include <errno.h>
-#include <net/if.h>
+#include <fcntl.h>
 #include <netinet/in.h>
 #include <poll.h>
 #include <pthread.h>
 #include <stdio.h>
 #include <string.h>
-#include <sys/ioctl.h>
 #include <sys/socket.h>
 #include <unistd.h>
 
@@ -33,46 +34,12 @@
 // to the whole group.
 #define DNS_UNICAST_RESPONSE 0x8000
 
+// The transfer service serializes start and stop. These values are immutable
+// until the responder has been joined, just like its listener's address.
 static pthread_t thread;
-static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
-
-static volatile bool running;
-static volatile bool stop_requested;
-
-static char host_label[64];	 // "sonix-transfer"
-static char host_full[80];	 // "sonix-transfer.local"
-static uint16_t host_port;	 // only used in the log line
-
-// ---------------------------------------------------------------------------
-// the local address
-// ---------------------------------------------------------------------------
-
-// The IPv4 of the wireless interface, or 0. Asked of the kernel rather than of
-// wifi.c: this has to be right at the moment a packet is answered, and a cached
-// value from another module's worker is one DHCP renewal away from being a lie.
-static uint32_t local_address(void) {
-	static const char *const interfaces[] = {"wlan0", "wlan1", "eth0"};
-
-	int fd = socket(AF_INET, SOCK_DGRAM, 0);
-	if (fd < 0) {
-		return 0;
-	}
-
-	uint32_t address = 0;
-	for (unsigned i = 0; i < sizeof(interfaces) / sizeof(interfaces[0]) && !address; i++) {
-		struct ifreq req;
-		memset(&req, 0, sizeof(req));
-		snprintf(req.ifr_name, sizeof(req.ifr_name), "%s", interfaces[i]);
-
-		if (ioctl(fd, SIOCGIFADDR, &req) == 0) {
-			struct sockaddr_in *in = (struct sockaddr_in *)&req.ifr_addr;
-			address = in->sin_addr.s_addr;
-		}
-	}
-
-	close(fd);
-	return address;
-}
+static int sock = -1, wake[2];
+static char host_full[80];
+static uint32_t address;
 
 // ---------------------------------------------------------------------------
 // DNS names
@@ -206,7 +173,7 @@ static int build_answer(uint8_t *out, int size, uint16_t id, const char *name, u
 		return -1;
 	}
 
-	memcpy(out + at, &address, 4); // already network order, straight from the ioctl
+	memcpy(out + at, &address, 4); // already in network order
 	return at + 4;
 }
 
@@ -215,7 +182,7 @@ static int build_answer(uint8_t *out, int size, uint16_t id, const char *name, u
 // ---------------------------------------------------------------------------
 
 static int open_socket(uint32_t address) {
-	int fd = socket(AF_INET, SOCK_DGRAM, 0);
+	int fd = socket(AF_INET, SOCK_DGRAM | SOCK_CLOEXEC | SOCK_NONBLOCK, 0);
 	if (fd < 0) {
 		perror("mdns: socket");
 		return -1;
@@ -328,163 +295,59 @@ static int handle_query(const uint8_t *in, int len, uint32_t address, const char
 
 static void *mdns_thread(void *unused) {
 	(void)unused;
+	uint8_t out[MDNS_BUF];
+	int announce = build_answer(out, sizeof(out), 0, host_full, address);
+	if (announce > 0) send_to_group(sock, out, announce);
 
-	int fd = -1;
-	uint32_t bound_address = 0;
-
-	while (!stop_requested) {
-		uint32_t address = local_address();
-
-		// No address yet, or it moved: start again on the new one. An mDNS
-		// responder answering with an address it no longer has is worse than
-		// one that says nothing.
-		if (address == 0) {
-			if (fd >= 0) {
-				close(fd);
-				fd = -1;
-				bound_address = 0;
-			}
-			usleep(500 * 1000);
-			continue;
-		}
-
-		if (fd < 0 || address != bound_address) {
-			if (fd >= 0) {
-				close(fd);
-			}
-			fd = open_socket(address);
-			if (fd < 0) {
-				usleep(1000 * 1000);
-				continue;
-			}
-			bound_address = address;
-
-			char shown[INET_ADDRSTRLEN] = "?";
-			inet_ntop(AF_INET, &address, shown, sizeof(shown));
-
-			pthread_mutex_lock(&lock);
-			char name[sizeof(host_full)];
-			snprintf(name, sizeof(name), "%s", host_full);
-			uint16_t port = host_port;
-			pthread_mutex_unlock(&lock);
-
-			printf("mdns: answering for %s at %s (port %u)\n", name, shown, (unsigned)port);
-
-			// Say it before being asked, twice: a browser that already had the
-			// page open when the address changed picks the new one up without
-			// having to time out first.
-			uint8_t packet[MDNS_BUF];
-			int length = build_answer(packet, sizeof(packet), 0, name, address);
-			if (length > 0) {
-				send_to_group(fd, packet, length);
-				usleep(150 * 1000);
-				send_to_group(fd, packet, length);
-			}
-		}
-
-		struct pollfd waiting = {.fd = fd, .events = POLLIN, .revents = 0};
-		int ready = poll(&waiting, 1, 1000);
-		if (ready <= 0) {
-			continue; // timeout, or a signal: go round and re-check the address
-		}
-
+	struct pollfd waiting[] = {{wake[0], POLLIN, 0}, {sock, POLLIN, 0}};
+	for (;;) {
+		int ready = poll(waiting, 2, -1);
+		if (ready < 0 && errno == EINTR) continue;
+		if (ready < 0 || waiting[0].revents || !(waiting[1].revents & POLLIN)) break;
 		uint8_t in[MDNS_BUF];
 		struct sockaddr_in from;
 		socklen_t from_len = sizeof(from);
-		ssize_t got = recvfrom(fd, in, sizeof(in), 0, (struct sockaddr *)&from, &from_len);
-		if (got <= 0) {
-			continue;
-		}
+		ssize_t got = recvfrom(sock, in, sizeof(in), 0, (struct sockaddr *)&from, &from_len);
+		if (got <= 0) continue;
 
-		pthread_mutex_lock(&lock);
-		char name[sizeof(host_full)];
-		snprintf(name, sizeof(name), "%s", host_full);
-		pthread_mutex_unlock(&lock);
-
-		if (!name[0]) {
-			continue;
-		}
-
-		uint8_t out[MDNS_BUF];
 		bool unicast = false;
-		int length = handle_query(in, (int)got, address, name, out, sizeof(out), &unicast);
-		if (length <= 0) {
-			continue;
-		}
-
+		int length = handle_query(in, (int)got, address, host_full, out, sizeof(out), &unicast);
+		if (length <= 0) continue;
 		if (unicast) {
-			sendto(fd, out, (size_t)length, 0, (struct sockaddr *)&from, from_len);
+			sendto(sock, out, (size_t)length, 0, (struct sockaddr *)&from, from_len);
 		} else {
-			send_to_group(fd, out, length);
+			send_to_group(sock, out, length);
 		}
 	}
-
-	if (fd >= 0) {
-		close(fd);
-	}
-
-	running = false;
 	return NULL;
 }
 
-// ---------------------------------------------------------------------------
-// public
-// ---------------------------------------------------------------------------
-
-bool mdns_start(const char *name, uint16_t port) {
-	if (!name || !name[0]) {
-		return false;
+bool mdns_start(const char *name, const char *ip) {
+	struct in_addr in;
+	if (sock >= 0 || !name || !*name || inet_pton(AF_INET, ip, &in) != 1) return false;
+	int n = snprintf(host_full, sizeof(host_full), "%s.local", name);
+	if (n < 0 || (size_t)n >= sizeof(host_full)) return false;
+	address = in.s_addr;
+	sock = open_socket(address);
+	if (sock < 0) return false;
+	if (pipe2(wake, O_CLOEXEC | O_NONBLOCK) == 0) {
+		if (pthread_create(&thread, NULL, mdns_thread, NULL) == 0) return true;
+		close(wake[0]);
+		close(wake[1]);
 	}
-
-	pthread_mutex_lock(&lock);
-	snprintf(host_label, sizeof(host_label), "%s", name);
-	snprintf(host_full, sizeof(host_full), "%s.local", name);
-	host_port = port;
-	pthread_mutex_unlock(&lock);
-
-	if (running) {
-		return true; // already up; it just answers for the new name now
-	}
-
-	stop_requested = false;
-	running = true;
-
-	if (pthread_create(&thread, NULL, mdns_thread, NULL) != 0) {
-		perror("mdns: pthread_create");
-		running = false;
-		return false;
-	}
-	pthread_detach(thread);
-
-	return true;
+	close(sock);
+	sock = -1;
+	return false;
 }
 
 void mdns_stop(void) {
-	if (!running) {
-		return;
-	}
-
-	stop_requested = true;
-
-	// The thread wakes at least once a second, so this is a short wait. Bounded
-	// anyway: nothing here is worth hanging the caller over.
-	for (int i = 0; i < 30 && running; i++) {
-		usleep(100 * 1000);
-	}
-
-	pthread_mutex_lock(&lock);
-	host_full[0] = '\0';
-	host_label[0] = '\0';
-	pthread_mutex_unlock(&lock);
+	if (sock < 0) return;
+	ssize_t n;
+	do { n = write(wake[1], "!", 1); } while (n < 0 && errno == EINTR);
+	pthread_join(thread, NULL);
+	close(wake[0]);
+	close(wake[1]);
+	close(sock);
+	sock = -1;
 }
-
-bool mdns_running(void) { return running; }
-
-void mdns_hostname(char *out, int size) {
-	if (!out || size <= 0) {
-		return;
-	}
-	pthread_mutex_lock(&lock);
-	snprintf(out, (size_t)size, "%s", host_full);
-	pthread_mutex_unlock(&lock);
-}
+#endif /* !__EMSCRIPTEN__ */

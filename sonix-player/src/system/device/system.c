@@ -1012,6 +1012,24 @@ bool storage_usb_begin(void) {
 
 void storage_usb_end(void) { pthread_mutex_unlock(&card_lock); }
 
+int storage_wifi_transfer_begin(void) {
+	// The transfer switch is on the UI thread. Don't block on a mount or a
+	// USB handover in progress; the user can retry once the card is available.
+	if (pthread_mutex_trylock(&card_lock) != 0) return -1;
+	int fd = -1;
+	if (g_storage_cfg && g_storage_cfg->manage_mount && !getenv("SONIX_NO_MOUNT") &&
+		!card_released && card_attached && !usb_storage_active() && sd_root[0] &&
+		is_mounted(sd_root) && mount_is_alive(sd_root)) {
+		// sd_root can be a trusted firmware alias. Descendants are opened
+		// without following symlinks by the HTTP server.
+		fd = open(sd_root, O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+	}
+	if (fd < 0) pthread_mutex_unlock(&card_lock);
+	return fd;
+}
+
+void storage_wifi_transfer_end(void) { pthread_mutex_unlock(&card_lock); }
+
 void storage_recheck_card(void) {
 	if (!g_storage_cfg || !g_storage_cfg->manage_mount || getenv("SONIX_NO_MOUNT")) {
 		return;
@@ -1165,6 +1183,7 @@ void storage_release_for_shutdown(void) {
 	pthread_mutex_lock(&card_lock);
 	bool already = card_released;
 	card_released = true;
+	wifitransfer_release_card();
 
 	// A card handed to a computer is already off this device's hands.
 	if (already || !sd_root[0] || !is_mounted(sd_root) || usb_storage_active()) {
@@ -1176,7 +1195,6 @@ void storage_release_for_shutdown(void) {
 	// The card lifecycle may already be detached even though logging was
 	// reopened independently. Always release these idempotent handles before
 	// attempting the unmount, including in that case.
-	wifitransfer_release_card();
 	waveform_set_cache_dir(NULL);
 	sonixlink_set_thumbs_path(NULL);
 	logging_suspend_for_usb();

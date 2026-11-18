@@ -1027,10 +1027,7 @@ static void panel_prepare(void) {
 // which would end the stream, say so instead. A Wi-Fi file server still owns the
 // screen, so the sheet stays shut for that.
 bool quickpanel_blocked(void) {
-	// The transfer answers with the switch rather than with the server: killing
-	// thttpd takes a moment and the answer about the process is cached on top of
-	// that, so asking the process left the control centre refusing to open for
-	// seconds after the page said the transfer was off.
+	// The session holds the screen until its listener and card handles close.
 	return wifitransfer_get_enabled();
 }
 

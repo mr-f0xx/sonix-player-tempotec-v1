@@ -282,6 +282,21 @@ this stays a plain-C suite. The Wi-Fi page itself -- the "Add hidden network"
 row and the manual-entry page behind it -- is covered by `test_wifi_pages`
 in the headless UI suite below.
 
+## Wi-Fi file transfer
+
+`make -C sonix-player/tests wifitransfer` runs the embedded HTTP server over
+loopback against a temporary card. It checks pairing and code rotation, nested
+folder uploads and byte-for-byte downloads, refusal to overwrite existing files,
+card-only path resolution, and removal of unfinished uploads on disconnect or
+server stop. The V1's mount and radio are stubbed; stop uses the real function
+called by USB export and hotplug.
+
+`make -C sonix-player/tests wifitransfer-ui` (with the LVGL checkout) runs the
+real 240×320 page with a fake network. It checks that the QR and manual pairing
+code fit on the screen and that link loss, address changes, and screen exit end
+the session. See the [on-device checklist](../../docs/wi-fi-transfer.md#device-check-after-flashing)
+for camera scanning, real Wi-Fi and microSD validation.
+
 ## Tidal's favourite playlists
 
 `make -C sonix-player/tests tidal` runs the real Tidal client (`tidal.c`)

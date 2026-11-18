@@ -189,6 +189,7 @@ Showcase of **OLED** appearance: true black backgrounds with white as the accent
   - [Ember theme](#ember-theme)
   - [OLED theme](#oled-theme)
 - [Music pet](#music-pet)
+- [Wi-Fi file transfer](#wi-fi-file-transfer)
 - [Build a firmware image](#build-a-firmware-image)
 - [Install or restore firmware](#install-or-restore-firmware)
 - [Streaming: Tidal, Qobuz and credentials](#streaming-tidal-qobuz-and-credentials)
@@ -286,6 +287,12 @@ How it works:
 - **Naming:** it starts as Pikachu. Use the pencil in the corner to rename it.
 
 The full rules are in [FEATURES.md](FEATURES.md).
+
+## Wi-Fi file transfer
+
+Open **Wireless → Transfer** and turn on **Wi-Fi transfer**. On the same Wi-Fi network, scan the QR code with a phone or open the displayed `http://` address on a laptop and enter the session code. Drop FLACs or whole album folders into the browser to copy them to microSD. Leave the page open until the uploads finish; turning transfer off or leaving the page closes the session.
+
+Use trusted Wi-Fi only: the session code controls access, but HTTP traffic is not encrypted. See the [transfer guide](docs/wi-fi-transfer.md) for folder uploads, library scanning, and troubleshooting.
 
 ## Install or restore firmware
 

@@ -302,6 +302,19 @@ $(BUILD)/test_wifi: $(WIFI_SRC) $(ROOT)/src/system/net/wifi.h \
 	@mkdir -p $(BUILD)
 	$(CC) $(CPPFLAGS) -Istubs $(CFLAGS) -o $@ test_wifi.c $(ROOT)/src/system/net/wifi.c $(LDFLAGS) $(LDLIBS)
 
+# Native transfer session against real TCP sockets and a temporary card. Use
+# an OS-assigned test port rather than the firmware's fixed port.
+WIFITRANSFER_SRC = test_wifitransfer_server.c $(ROOT)/src/system/net/wifitransfer.c \
+                   $(ROOT)/src/system/net/transferhttp.c
+.PHONY: wifitransfer
+wifitransfer: $(BUILD)/test_wifitransfer_server
+	python3 run_wifitransfer_tests.py $(BUILD)/test_wifitransfer_server
+
+$(BUILD)/test_wifitransfer_server: $(WIFITRANSFER_SRC) $(ROOT)/src/system/net/webpage.h \
+                                 $(ROOT)/src/system/net/wifitransfer.h $(ROOT)/src/system/net/transferhttp.h
+	@mkdir -p $(BUILD)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -DWT_PORT=0 -o $@ $(WIFITRANSFER_SRC) $(LDFLAGS) $(LDLIBS)
+
 # Bluetooth's real A2DP-direction decision, startup wait policy and D-Bus
 # signal cache, with fake controller/process state. No radio or ALSA required.
 .PHONY: bluetooth btvolume
@@ -1131,6 +1144,7 @@ $(BUILD)/test_stockkeys_ui: $(ROOT)/build_gen/streamkeys_key.h $(STOCKKEYS_UI_OB
 	$(CC) -o $@ $(STOCKKEYS_UI_OBJ) $(LDFLAGS) $(LDLIBS)
 
 .PHONY: ui
+ui: wifitransfer-ui
 ui: $(BUILD)/test_qobuzgenregrid $(BUILD)/test_main_menu $(BUILD)/test_screensaver $(BUILD)/test_tools_pages $(BUILD)/test_wifi_pages $(BUILD)/test_chargescreen $(BUILD)/test_power_display $(BUILD)/test_touch_wake $(BUILD)/test_lyricsearch $(BUILD)/test_games $(BUILD)/test_peq_profiles $(BUILD)/test_quickpanel_layout $(BUILD)/test_btreceiversession $(BUILD)/test_home_swipe $(BUILD)/test_corners $(BUILD)/test_playbutton $(BUILD)/test_musicsettings_rows $(BUILD)/test_volume_overlay $(BUILD)/test_playerdeck $(BUILD)/test_vinylayout $(BUILD)/test_stickerlayout $(BUILD)/test_waveform_overlay $(BUILD)/test_hiresbadge_ui $(BUILD)/test_statusbar_ui $(BUILD)/test_stockkeys_ui $(BUILD)/test_tidal_pages $(BUILD)/test_soundcloud_pages $(BUILD)/test_qobuz_pages $(BUILD)/test_jellyfin_pages $(BUILD)/test_fwupdate
 	$(BUILD)/test_qobuzgenregrid
 	$(BUILD)/test_main_menu ../../sonix-packer/assets/V1/usr/resource/sonix/language
@@ -1181,6 +1195,19 @@ $(BUILD)/test_tools_pages: $(TOOLS_OBJ)
 
 $(BUILD)/test_wifi_pages: $(WIFIPAGE_OBJ)
 	$(CC) -o $@ $^ $(LDFLAGS) $(LDLIBS)
+
+WIFITRANSFER_UI_SRC = $(ROOT)/tests/ui/test_wifitransfer.c $(ROOT)/src/gui/shell/settingsrow.c \
+                      $(ROOT)/src/gui/shell/theme.c $(ROOT)/src/gui/shell/icons.c \
+                      $(ROOT)/src/gui/board_profile.c $(ROOT)/src/system/core/config.c $(ROOT)/src/system/core/lang.c
+WIFITRANSFER_UI_OBJ = $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(WIFITRANSFER_UI_SRC)) $(UI_LVGL_OBJ)
+.PHONY: wifitransfer-ui
+wifitransfer-ui: $(BUILD)/test_wifitransfer_ui
+	$(BUILD)/test_wifitransfer_ui ../../sonix-packer/assets/V1/usr/resource/sonix/language
+
+$(BUILD)/test_wifitransfer_ui: $(WIFITRANSFER_UI_OBJ)
+	$(CC) -o $@ $^ $(LDFLAGS) $(LDLIBS)
+
+-include $(WIFITRANSFER_UI_OBJ:.o=.d)
 
 $(BUILD)/test_tidal_pages: $(TIDALPAGE_OBJ)
 	$(CC) -o $@ $^ $(LDFLAGS) $(LDLIBS)
