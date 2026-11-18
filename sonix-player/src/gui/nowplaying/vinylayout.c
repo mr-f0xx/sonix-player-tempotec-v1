@@ -1,6 +1,6 @@
 #include "vinylayout.h"
 
-vinyl_box_t vinyl_layout_box(int screen_w, int screen_h, int deck_h) {
+vinyl_box_t vinyl_layout_box(int screen_w, int screen_h, int deck_h, int side_margin) {
 	vinyl_box_t b = {0};
 	if (screen_w < 1)
 		screen_w = 1;
@@ -39,7 +39,7 @@ vinyl_box_t vinyl_layout_box(int screen_w, int screen_h, int deck_h) {
 		sleeve_room = 1;
 	if (side > sleeve_room)
 		side = sleeve_room;
-	int max_side = screen_w - 2 * VINYL_SIDE_MARGIN;
+	int max_side = screen_w - 2 * LV_MAX(VINYL_SIDE_MARGIN, side_margin);
 	if (max_side < 1)
 		max_side = 1;
 	if (side > max_side)

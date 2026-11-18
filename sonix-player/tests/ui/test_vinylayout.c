@@ -12,7 +12,7 @@ lv_font_t font_ui_14;
 
 static void check_box(int w, int h, int info_h) {
 	int deck_h = vinyl_deck_height(info_h);
-	vinyl_box_t b = vinyl_layout_box(w, h, deck_h);
+	vinyl_box_t b = vinyl_layout_box(w, h, deck_h, VINYL_SIDE_MARGIN);
 	assert(b.art_side > 0 && b.record_d > 0);
 	assert(b.art_x >= 0 && b.art_x + b.art_side <= w);
 	assert(b.art_y >= 0);
@@ -223,9 +223,15 @@ int main(void) {
 	vinyl_record_build(&record, screen);
 
 	for (int info = 24; info <= 52; info += 4) {
-		vinyl_box_t b = vinyl_layout_box(240, 320, vinyl_deck_height(info));
+		int deck = vinyl_deck_height(info);
+		vinyl_box_t b = vinyl_layout_box(240, 320, deck, VINYL_SIDE_MARGIN);
 		for (int pass = 0; pass < 3; pass++)
 			check_nested_placement(panel, sleeve, &record, &b, 240);
+		// A wide one-line badge needs a larger side gutter than the sleeve has.
+		vinyl_box_t with_badge = vinyl_layout_box(240, 320, deck, 62);
+		assert(with_badge.art_x + with_badge.art_side <= 240 - 62);
+		assert(with_badge.art_y == b.art_y && with_badge.deck_y == b.deck_y);
+		check_nested_placement(panel, sleeve, &record, &with_badge, 240);
 	}
 	assert(!lv_obj_is_hidden(record.disc));
 	lv_obj_set_hidden(record.disc, true);
@@ -234,7 +240,7 @@ int main(void) {
 
 	/* The 360x640 concept is geometry-only here: the native display is
 	 * 240x320, and a wider panel is not a firmware path. */
-	vinyl_box_t b = vinyl_layout_box(360, 640, vinyl_deck_height(34));
+	vinyl_box_t b = vinyl_layout_box(360, 640, vinyl_deck_height(34), VINYL_SIDE_MARGIN);
 	check_nested_placement(panel, sleeve, &record, &b, 360);
 	puts("PASS vinyl layout (V1, eight text metrics, reference-slanted pressing mark, no deck/info/seek/transport overlap, tiny-screen fallback, repeated apply/take-back, nested-panel alignment, visible clean grooves, larger centre label and black ground)");
 	return 0;

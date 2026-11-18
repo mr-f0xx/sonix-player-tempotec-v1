@@ -67,8 +67,7 @@ static void exercise(int width, const lv_font_t *font, bool right) {
 		hiresbadge_apply(&view, style);
 		assert(lv_obj_is_hidden(view.box)); // changing design never enables it
 		lv_obj_set_hidden(view.box, false);
-		lv_obj_align(view.box, right ? LV_ALIGN_TOP_RIGHT : LV_ALIGN_TOP_LEFT,
-					 right ? -INSET : INSET, INSET);
+		hiresbadge_place_on_art(&view, art, !right, INSET);
 		lv_obj_update_layout(screen);
 		lv_area_t box, sleeve;
 		lv_obj_get_coords(view.box, &box);
@@ -94,13 +93,71 @@ static void exercise(int width, const lv_font_t *font, bool right) {
 	}
 	// The player moves one badge between the ordinary sleeve and Studio's.
 	lv_obj_t *studio = plain(screen, width);
-	lv_obj_set_parent(view.box, studio);
 	hiresbadge_apply(&view, HIRESBADGE_INITIALS);
 	lv_obj_set_hidden(view.box, false);
-	lv_obj_align(view.box, LV_ALIGN_TOP_LEFT, INSET, INSET);
+	hiresbadge_place_on_art(&view, studio, true, INSET);
 	lv_obj_update_layout(screen);
 	assert(lv_obj_get_parent(view.box) == studio);
 	assert(!lv_obj_is_hidden(view.label) && lv_obj_is_hidden(view.image));
+	lv_obj_delete(screen);
+}
+
+static void exercise_header(const lv_font_t *font, int status_h) {
+	lv_obj_t *screen = lv_obj_create(NULL);
+	lv_obj_set_style_pad_all(screen, 0, 0);
+	lv_obj_t *sheet = plain(screen, 240);
+	lv_obj_set_height(sheet, 320 - status_h);
+	lv_obj_align(sheet, LV_ALIGN_TOP_LEFT, 0, status_h);
+	lv_obj_t *art = plain(sheet, 200);
+	lv_obj_align(art, LV_ALIGN_TOP_MID, 0, 18);
+	lv_obj_set_style_radius(art, LV_RADIUS_CIRCLE, 0);
+	lv_obj_set_style_clip_corner(art, true, 0);
+	lv_obj_t *back = plain(screen, 36);
+	lv_obj_align(back, LV_ALIGN_TOP_LEFT, 6, status_h + 10);
+	lv_obj_update_layout(screen);
+	lv_area_t back_coords;
+	lv_obj_get_coords(back, &back_coords);
+	int centre_y = back_coords.y1 + lv_obj_get_height(back) / 2;
+
+	font_ui_14 = *font;
+	hiresbadge_view_t view;
+	hiresbadge_build(&view, art);
+	hiresbadge_place_in_header(&view, sheet, 6, centre_y - status_h);
+	assert(lv_obj_is_hidden(view.box));
+	lv_obj_set_hidden(view.box, false);
+	// The same header anchor must survive changes to the badge's dimensions.
+	for (int style = 0; style < HIRESBADGE_STYLE_COUNT; style++) {
+		hiresbadge_apply(&view, (hiresbadge_style_t)style);
+		lv_obj_update_layout(screen);
+		lv_area_t box;
+		lv_obj_get_coords(view.box, &box);
+		assert(lv_obj_get_parent(view.box) == sheet);
+		assert(box.x2 == 239 - 6 && box.x1 > back_coords.x2);
+		assert(box.y1 + lv_obj_get_height(view.box) / 2 == centre_y);
+		assert(box.y1 >= status_h);
+		lv_obj_t *design = style == HIRESBADGE_LOGO ? view.image : view.label;
+		assert(lv_obj_get_width(view.box) == lv_obj_get_width(design));
+		assert(lv_obj_get_height(view.box) == lv_obj_get_height(design));
+		if (style == HIRESBADGE_LOGO) check_logo_pixels(screen, &view);
+		lv_obj_set_hidden(view.box, true);
+		assert(hiresbadge_width(&view) == lv_obj_get_width(design));
+		lv_obj_set_hidden(view.box, false);
+	}
+	// The badge rides the player sheet, not the display's global top layer.
+	lv_obj_set_x(sheet, 40);
+	lv_obj_update_layout(screen);
+	lv_area_t box;
+	lv_obj_get_coords(view.box, &box);
+	assert(box.x2 == 239 - 6 + 40);
+
+	// Switching back to a non-Vinyl shape restores the old artwork anchor.
+	hiresbadge_place_on_art(&view, art, true, INSET);
+	lv_obj_update_layout(screen);
+	lv_area_t sleeve;
+	lv_obj_get_coords(art, &sleeve);
+	lv_obj_get_coords(view.box, &box);
+	assert(lv_obj_get_parent(view.box) == art);
+	assert(box.x1 == sleeve.x1 + INSET && box.y1 == sleeve.y1 + INSET);
 	lv_obj_delete(screen);
 }
 
@@ -113,6 +170,8 @@ int main(void) {
 		exercise(width, &lv_font_montserrat_20, false);
 		exercise(width, &lv_font_montserrat_20, true);
 	}
-	puts("PASS hi-res badge designs (text, official colours, corners, switching, two font sizes)");
+	exercise_header(&lv_font_montserrat_14, 0);
+	exercise_header(&lv_font_montserrat_20, 24);
+	puts("PASS hi-res badge designs, sleeve corners and back-button header alignment");
 	return 0;
 }

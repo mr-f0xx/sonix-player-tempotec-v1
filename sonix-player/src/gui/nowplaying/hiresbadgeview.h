@@ -23,4 +23,11 @@ void hiresbadge_build(hiresbadge_view_t *view, lv_obj_t *parent);
 // until the player shows it. Invalid values fall back to the original look.
 void hiresbadge_apply(hiresbadge_view_t *view, hiresbadge_style_t style);
 
+// The active design's width, even if the badge is currently hidden.
+int hiresbadge_width(const hiresbadge_view_t *view);
+
+// Move the same badge between a sleeve corner and the player header.
+void hiresbadge_place_on_art(hiresbadge_view_t *view, lv_obj_t *art, bool left, int inset);
+void hiresbadge_place_in_header(hiresbadge_view_t *view, lv_obj_t *sheet, int inset, int centre_y);
+
 #endif /* HIRESBADGEVIEW_H */
