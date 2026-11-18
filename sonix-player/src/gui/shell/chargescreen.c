@@ -89,7 +89,9 @@ static lv_obj_t *percent_label;
 static lv_obj_t *status_label;
 static int fill_width; // the inside of the battery, where the fill travels
 static long on_level = -1; // the backlight the screen is meant to be seen at
-static bool screen_lit = true;
+// False until panel_on() has actually run: power_init() asks (see
+// chargescreen_panel_lit()) whether it may dispense with its own unblank.
+static bool screen_lit = false;
 
 static uint32_t now_ms(void) {
 	struct timespec ts;
@@ -665,16 +667,19 @@ void chargescreen_run(lv_display_t *disp, const battery_config_t *battery_cfg) {
 #endif
 	}
 
-	// Back to the player: the panel is left lit at its proper level, and the
-	// screen comes off the display. main.c's ordinary startup puts up its own
-	// first frame a moment later.
-	lv_obj_delete(root);
-	root = NULL;
+	// Back to the player: the panel keeps the charge frame until the interface
+	// puts its own first frame on the glass. gui_init() ends with
+	// lv_screen_load(), which swaps whole screens, so the fb never shows an
+	// empty one -- which is what happened when the root was deleted here and
+	// the empty screen was repainted: whatever the framebuffer pages were
+	// holding showed through, lit, until the menu landed (the white flash on a
+	// hold out of the charging screen). The root stays on the screen it
+	// belongs to; the screen itself is never loaded again, and memory costs a
+	// dozen objects once per boot.
 	lv_timer_t *refr = lv_display_get_refr_timer(display);
 	if (refr) {
 		lv_timer_resume(refr);
 	}
-	lv_refr_now(display);
 
 #ifndef HOST_BUILD
 	close(key_fd);
@@ -682,3 +687,11 @@ void chargescreen_run(lv_display_t *disp, const battery_config_t *battery_cfg) {
 	SDL_DelEventWatch(host_key_watch, NULL);
 #endif
 }
+
+// Whether the panel is up with a drawn frame on it, as this screen left it.
+// main.c asks before power_init(): a panel that is already up must not be
+// unblanked a second time -- the UNBLANK write resets the glass to white
+// behind a lit backlight, which is the white between the charge frame and the
+// main menu. False for an ordinary boot, where power_init() still has to do
+// the unblank itself.
+bool chargescreen_panel_lit(void) { return screen_lit; }

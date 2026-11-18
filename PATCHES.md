@@ -3615,6 +3615,20 @@ the settle, and brought up over a frame that is already in the framebuffer. The
 code is short and repeats `power_screen_on()`'s order deliberately; the long note
 on that function is the reason for each step.
 
+The way out of the screen holds the same rule. On a hold, the last charge frame
+stays on the glass until the interface puts its own first frame there: the
+exit no longer deletes the screen's contents and flushes the empty result
+(which put the framebuffer pages in front of a lit backlight and read as a
+white screen while the player started -- the library, TLS and the caches all
+load before the main menu exists), and `power_init()` skips its own unconditional
+unblank when the charging screen left the panel up (`chargescreen_panel_lit()`,
+carried into `power_config_t.panel_up`) -- that second UNBLANK write is a panel
+reset, and a panel reset behind a lit backlight is white. The menu is loaded
+over the charging screen's page by the ordinary `lv_screen_load()` in
+`gui_init()`; the charge frame is what shows until that first frame is on the
+glass, and the charging screen's objects (a dozen, once per boot) are left in
+memory with it.
+
 Every line on the screen is given the panel's width and told to wrap. The three
 states are short in English and not in every language -- the Ukrainian for
 "charger connected" is wider than the glass at 22 px -- and a label that sized

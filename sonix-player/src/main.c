@@ -2555,6 +2555,10 @@ int main(int argc, char **argv) {
 		.power_state_path = "/sys/power/state",
 #endif
 		.brightness = -1, // adopt the panel's current level as the on-brightness
+		// A boot out of the charging screen already left the panel up with a
+		// frame on it -- power_init() must not reset its glass. See
+		// chargescreen_panel_lit() and power_config_t.panel_up.
+		.panel_up = chargescreen_panel_lit(),
 		.screen_off_enabled = false,
 		// Off unless asked for in Settings. Blanking this panel powers the
 		// touch controller down with it, so the screen cannot be woken by
