@@ -124,6 +124,14 @@ void theme_apply_slider_knob(lv_obj_t *slider);
 void theme_set_card_root(const char *root);
 bool theme_reload_custom(void);
 
+// Palette resolved without any of the styles, for pages that run before the
+// interface exists -- the charging screen, which the board reaches before
+// gui_init(). The config is the only input, so a Custom palette saved with no
+// card behind it falls back to Dark, exactly what happens today at startup;
+// the full theme_init() runs later and applies the Custom palette to the
+// pages then. Idempotent: theme_init() runs the same selection itself.
+void theme_resolve_boot_palette(void);
+
 // Builds the shared styles. Call once, before any screen is created.
 void theme_init(void);
 

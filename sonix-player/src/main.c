@@ -23,6 +23,7 @@
 #include "src/gui/board_profile.h"
 #include "src/gui/fonts/fonts.h"
 #include "src/gui/shell/gui.h"
+#include "src/gui/shell/theme.h"
 #include "src/gui/shell/chargescreen.h"
 #include "src/gui/nowplaying/player.h"
 #include "src/gui/library/libraryscan.h"
@@ -2188,6 +2189,14 @@ int main(int argc, char **argv) {
 	// Press power to bring the screen back after it has gone dark, hold power
 	// to start the player after all.
 	//
+	// The palette is resolved here, before the branch, because the charging
+	// screen draws from it (the added palettes paint from the user's theme;
+	// Dark and Light keep the black screen they always had). No styles or
+	// flash marker are touched -- the full theme_init() runs in gui_init as
+	// always. A Custom palette cannot load yet (the card is not mounted), so
+	// it falls back to Dark for this screen only.
+	theme_resolve_boot_palette();
+
 	// Here, and not later, for two reasons: the screen reads the gauge itself
 	// (battery_read_now), so it needs nothing the services would start, and the
 	// input threads those services start must not be running while it owns the

@@ -24,6 +24,7 @@
 #include "src/system/device/power.h"
 #include "src/system/device/backlight.h"
 #include "src/system/device/chargerattached.h"
+#include "src/gui/shell/theme.h"
 
 // ---------------------------------------------------------------------------
 // The screen
@@ -225,7 +226,20 @@ void chargescreen_build(lv_display_t *disp) {
 	root = lv_obj_create(lv_screen_active());
 	lv_obj_set_size(root, width, height);
 	lv_obj_set_pos(root, 0, 0);
-	lv_obj_set_style_bg_color(root, lv_color_black(), 0);
+
+	// Dark and Light keep the black screen the charging page has always had;
+	// the added palettes draw from the active one, which the dynamic tint has
+	// already had a chance to shape (see theme_resolve_boot_palette()). The
+	// battery bar itself keeps its semantic green/amber/red in every palette.
+	bool classic = theme_get_kind() == THEME_KIND_DARK || theme_get_kind() == THEME_KIND_LIGHT;
+	const theme_palette_t *pal = theme();
+	lv_color_t col_bg = classic ? lv_color_black() : pal->screen_bg;
+	lv_color_t col_shell = classic ? CHARGE_SHELL : pal->text_primary;
+	lv_color_t col_percent = classic ? lv_color_white() : pal->text_primary;
+	lv_color_t col_state = classic ? CHARGE_TEXT : pal->accent;
+	lv_color_t col_hint = classic ? CHARGE_FAINT : pal->text_secondary;
+
+	lv_obj_set_style_bg_color(root, col_bg, 0);
 	lv_obj_set_style_bg_opa(root, LV_OPA_COVER, 0);
 	lv_obj_set_style_border_width(root, 0, 0);
 	lv_obj_set_style_radius(root, 0, 0);
@@ -263,7 +277,7 @@ void chargescreen_build(lv_display_t *disp) {
 	lv_obj_set_size(body, battery_w, battery_h);
 	lv_obj_set_style_bg_opa(body, LV_OPA_TRANSP, 0);
 	lv_obj_set_style_border_width(body, border, 0);
-	lv_obj_set_style_border_color(body, CHARGE_SHELL, 0);
+	lv_obj_set_style_border_color(body, col_shell, 0);
 	lv_obj_set_style_radius(body, 10, 0);
 	lv_obj_set_style_pad_all(body, inset, 0);
 	lv_obj_set_style_shadow_width(body, 0, 0);
@@ -287,7 +301,7 @@ void chargescreen_build(lv_display_t *disp) {
 
 	lv_obj_t *nub = lv_obj_create(row);
 	lv_obj_set_size(nub, nub_w, battery_h * 36 / 100);
-	lv_obj_set_style_bg_color(nub, CHARGE_SHELL, 0);
+	lv_obj_set_style_bg_color(nub, col_shell, 0);
 	lv_obj_set_style_bg_opa(nub, LV_OPA_COVER, 0);
 	lv_obj_set_style_border_width(nub, 0, 0);
 	lv_obj_set_style_radius(nub, 3, 0);
@@ -303,7 +317,7 @@ void chargescreen_build(lv_display_t *disp) {
 	percent_label = lv_label_create(root);
 	lv_obj_set_width(percent_label, text_w);
 	lv_obj_set_style_text_font(percent_label, &font_ui_36_bold, 0);
-	lv_obj_set_style_text_color(percent_label, lv_color_white(), 0);
+	lv_obj_set_style_text_color(percent_label, col_percent, 0);
 	lv_obj_set_style_text_align(percent_label, LV_TEXT_ALIGN_CENTER, 0);
 	lv_label_set_long_mode(percent_label, LV_LABEL_LONG_WRAP);
 	lv_label_set_text(percent_label, "--");
@@ -311,14 +325,14 @@ void chargescreen_build(lv_display_t *disp) {
 	status_label = lv_label_create(root);
 	lv_obj_set_width(status_label, text_w);
 	lv_obj_set_style_text_font(status_label, &font_ui_22, 0);
-	lv_obj_set_style_text_color(status_label, CHARGE_TEXT, 0);
+	lv_obj_set_style_text_color(status_label, col_state, 0);
 	lv_obj_set_style_text_align(status_label, LV_TEXT_ALIGN_CENTER, 0);
 	lv_label_set_long_mode(status_label, LV_LABEL_LONG_WRAP);
 	lv_label_set_text(status_label, tr("chargescreen_charging"));
 
 	lv_obj_t *hint = lv_label_create(root);
 	lv_obj_set_style_text_font(hint, &font_ui_18, 0);
-	lv_obj_set_style_text_color(hint, CHARGE_FAINT, 0);
+	lv_obj_set_style_text_color(hint, col_hint, 0);
 	lv_obj_set_style_text_align(hint, LV_TEXT_ALIGN_CENTER, 0);
 	lv_obj_set_width(hint, text_w);
 	lv_label_set_long_mode(hint, LV_LABEL_LONG_WRAP);

@@ -3594,6 +3594,20 @@ long press waits for, and the player starts. With the cable taken out while the
 screen is dark it switches the player off instead: a device that was off, was
 woken by a cable and no longer has one has nowhere to be.
 
+The screen belongs to the theme, with two exceptions: Dark and Light draw the
+black screen they always had, and the added palettes draw from the active one
+-- the background and the percentage and the outline take the palette's colours
+(the outline what the type wears, tinted like the rest when Dynamic tint is on),
+the state line the accent, the hold hint the palette's secondary text. The bar
+itself keeps its semantic green/amber/red everywhere -- a nearly flat battery
+reads as red on any palette. The palette is resolved before the screen is
+built (`theme_resolve_boot_palette()`), which reads only the config: a Custom
+inherently needs the card, which is not mounted at this point in the boot, so
+the charging screen falls back to Dark for it and the pages pick the Custom
+up when `gui_init()` runs the full `theme_init()` a moment later. The first
+frame the backlight comes up over already carries the reading -- the gauge and
+the cable are read before the panel lights, not after.
+
 The panel is blanked and woken the way `power.c` does it, which on this board is
 not optional: the SLCD leaves its memory white on reset and loses a frame pushed
 before it is listening, so the backlight is held at zero across the unblank and
@@ -3621,7 +3635,10 @@ glass, the fill within a pixel of the reading it was given and never past the
 box at 100%, `--` and an empty bar for a gauge that answered nothing (never
 `0%`), and the three state lines in each of the ten languages -- stepped through
 one reading at a time, because the screen only repaints a line that has
-changed. `make -C sonix-player/tests chargerattached` checks the cable probe
+changed. The pass runs twice: once in Dark, checking the black screen is what
+it has always been, and once in Tokyo Night, checking the palette is picked up
+-- background, outline, percentage, state line and hint all redrawn from the
+active palette, the bar still semantic green. `make -C sonix-player/tests chargerattached` checks the cable probe
 against fake supplies in a temporary directory -- the `Full` / `Not charging`
 readings the 80% charge limit produces with the cable in, an `online` bit that
 reads `0` with a USB-sized voltage behind it, and the garbage each node is
