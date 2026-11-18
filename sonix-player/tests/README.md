@@ -873,7 +873,10 @@ backend and in-memory sysfs. It covers saved Stealth at boot (no lit frame),
 blackout while charging or blinking, suspend/resume, both fallback LED paths,
 and the red/green notice counts, priority and return to the latest state.
 Synthetic bass and treble exercise the real PCM tap, including stale samples
-and independent screensaver/LED capture. No physical LED or audio is needed.
+and independent screensaver/LED capture. A modest bass attack has to span the
+full dim-to-peak range even over ongoing bass, hold briefly, and settle again
+without a held note retriggering the pulse. Brightness 1 must still pulse from
+dark to the first lit step. No physical LED or audio is needed.
 
 `make -C sonix-player/tests wifitransfer wifitransfer-ui` also checks that a real
 upload is confirmed only after publication and a quiet period, that failures,

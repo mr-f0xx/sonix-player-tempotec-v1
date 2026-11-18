@@ -12,12 +12,14 @@ directly.
 In **Settings → Power**, turn on **Smart LED** to add two effects to the
 usual status light:
 
-- **Music:** the light brightens gently on bass transients in PCM from the
-  player, including when the screen is off. The selected brightness is the
-  peak, not a multiplier. At brightness 1 there is no lower lit step to pulse
-  from. The colour map is unchanged: yellow at ≤48 kHz (including 44.1 kHz),
-  aqua above 48 through 192 kHz, orange above 192 kHz, and steady white for
-  DSD. USB DAC and Bluetooth receiver indicators remain unchanged.
+- **Music:** a bass attack brings the light up to the selected brightness for
+  about 80 ms, then it fades back to a dim base. This works on PCM from the
+  player, including when the screen is off. A held bass note doesn't keep the
+  light at its peak. At brightness 1 the light rests dark between pulses
+  because there is only one lit step. The colour map is unchanged: yellow at
+  ≤48 kHz (including 44.1 kHz), aqua above 48 through 192 kHz, orange above
+  192 kHz, and steady white for DSD. USB DAC and Bluetooth receiver indicators
+  remain unchanged.
 - **Events:** three short red blinks accompany the normal low-battery warning
   at 5%. Two green blinks confirm successful incoming Wi-Fi Transfer uploads.
   The browser sends folders one file at a time, so confirmation waits for a
@@ -37,12 +39,13 @@ Smart LED needs the direct SGM31324 controller; the stock driver pattern
 fallback still supports the normal colours and Stealth mode. The native web
 emulator models the RGB effects, but its Wi-Fi Transfer service is disabled.
 
-**On-device check:** Play 44.1 kHz and 96 kHz PCM with Smart LED enabled, check
-that bass pulses do not change the colour or disturb audio with the screen on
-or off, and confirm DSD stays steady white. Try an album upload followed by
-an aborted transfer, and watch for the low-battery warning on battery power.
-Switch Stealth on during charging, then suspend/wake and reboot: the light
-should stay dark until Stealth is turned off.
+**On-device check:** Unplug the charger and play 44.1 kHz and 96 kHz PCM with
+clear bass hits and Smart LED enabled. Check for a distinct bright peak and a
+dim rest without changing the sample-rate colour or disturbing audio, with
+the screen on or off. Confirm that DSD stays steady white. Try an album upload
+followed by an aborted transfer, and watch for the low-battery warning on
+battery power. Switch Stealth on during charging, then suspend/wake and
+reboot: the light should stay dark until Stealth is turned off.
 
 ## Register recipes
 

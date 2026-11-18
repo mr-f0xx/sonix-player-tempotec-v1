@@ -326,35 +326,53 @@ static void play_blink(led_levels_t *cur, int r, int g, int b, int repeats, int 
 	}
 }
 
-// Look for a rise over the running bass level, not a loudness meter. The
-// slower average takes a few hundred ms to catch up, the peak decays softly,
-// and a held tone (or silence) settles back to the base light.
-static int pulse_step(int bass, int *average, int pulse) {
-	int transient = (bass - (*average >> 8) - 16) * 4;
-	*average += (bass * 256 - *average) / 8;
-	pulse = pulse * 3 / 4;
-	if (transient > pulse) {
-		pulse = transient > 255 ? 255 : transient;
+typedef struct {
+	int average_q8;
+	unsigned frames_left;
+	bool above;
+} led_pulse_t;
+
+// Use the rise in bass to trigger a pulse, not to set its brightness. Bass is
+// already log-compressed, so a modest attack should still reach the peak.
+// Hysteresis keeps a sustained note from retriggering until the bass drops
+// back toward the running average.
+static int pulse_step(led_pulse_t *state, int bass) {
+	// At 40 ms per frame: 80 ms at the peak, then a soft fade back to rest.
+	static const int LEVELS[] = {255, 255, 192, 128, 72, 32, 12};
+	const unsigned frame_count = sizeof(LEVELS) / sizeof(LEVELS[0]);
+	int rise = bass - (state->average_q8 >> 8);
+	state->average_q8 += (bass * 256 - state->average_q8) / 5;
+	if (bass < 32 || rise <= 2) {
+		state->above = false;
+	} else if (rise >= 7 && !state->above) {
+		state->above = true;
+		// Leave a visible dip between close beats rather than holding the
+		// light at full brightness when several attacks arrive at once.
+		if (state->frames_left <= 3) {
+			state->frames_left = frame_count;
+		}
 	}
-	return pulse;
+	if (!state->frames_left) {
+		return 0;
+	}
+	unsigned frame = frame_count - state->frames_left;
+	state->frames_left--;
+	return LEVELS[frame];
 }
 
-// Between two thirds and full brightness, with the user setting as the peak.
-// Round the floor up so a lit channel at the lowest step never goes dark.
-static int pulse_channel(int value, int pulse) {
-	int floor = (value * 2 + 2) / 3;
-	return floor + ((value - floor) * pulse + 127) / 255;
+static int pulse_channel(int rest, int peak, int pulse) {
+	return rest + ((peak - rest) * pulse + 127) / 255;
 }
 
-static void play_pulse(led_levels_t *cur, const led_render_t *t, unsigned seen) {
-	int average = 0, pulse = 0;
+static void play_pulse(led_levels_t *cur, const led_render_t *t, led_levels_t rest, unsigned seen) {
+	led_pulse_t state = {0};
 	while (!led_wait(&led_seq, seen, LED_PULSE_MS)) {
-		pulse = pulse_step(visualizer_bass_level(), &average, pulse);
-		int r = pulse_channel(t->r, pulse);
-		int g = pulse_channel(t->g, pulse);
-		int b = pulse_channel(t->b, pulse);
+		int pulse = pulse_step(&state, visualizer_bass_level());
+		int r = pulse_channel(rest.r, t->r, pulse);
+		int g = pulse_channel(rest.g, t->g, pulse);
+		int b = pulse_channel(rest.b, t->b, pulse);
 		if (r != cur->r || g != cur->g || b != cur->b) {
-			set_levels(cur, r, g, b, cur->channels);
+			set_levels(cur, r, g, b, rest.channels);
 		}
 	}
 }
@@ -370,10 +388,17 @@ static void play_steady(led_levels_t *cur, const led_render_t *t, unsigned seen)
 	// Walk from the actual levels to the new colour (or a dimmer floor for
 	// the visualizer). Both sets of channels stay enabled during the ramp.
 	led_levels_t from = *cur;
-	int tr = t->pulse ? pulse_channel(t->r, 0) : t->r;
-	int tg = t->pulse ? pulse_channel(t->g, 0) : t->g;
-	int tb = t->pulse ? pulse_channel(t->b, 0) : t->b;
-	unsigned ch = ch_mask(tr, tg, tb);
+	led_levels_t rest = {t->r, t->g, t->b, ch_mask(t->r, t->g, t->b)};
+	if (t->pulse) {
+		// Rest at roughly a fifth of the selected brightness, not two thirds.
+		// Keep each colour channel lit at rest except at brightness 1: at that
+		// setting a pulse can only go from dark to the first step. Keep the
+		// channels enabled in either case so they are ready for the next beat.
+		bool lit_floor = t->r > 1 || t->g > 1 || t->b > 1;
+		rest.r = lit_floor ? (t->r + 4) / 5 : 0;
+		rest.g = lit_floor ? (t->g + 4) / 5 : 0;
+		rest.b = lit_floor ? (t->b + 4) / 5 : 0;
+	}
 	int steps = t->transition_ms / LED_STEP_MS;
 	if (steps < 1) steps = 1;
 
@@ -387,11 +412,11 @@ static void play_steady(led_levels_t *cur, const led_render_t *t, unsigned seen)
 			g = from.g * k * k / (steps * steps);
 			b = from.b * k * k / (steps * steps);
 		} else {
-			r = from.r + (tr - from.r) * i / steps;
-			g = from.g + (tg - from.g) * i / steps;
-			b = from.b + (tb - from.b) * i / steps;
+			r = from.r + (rest.r - from.r) * i / steps;
+			g = from.g + (rest.g - from.g) * i / steps;
+			b = from.b + (rest.b - from.b) * i / steps;
 		}
-		set_levels(cur, r, g, b, i < steps ? from.channels | ch : ch);
+		set_levels(cur, r, g, b, i < steps ? from.channels | rest.channels : rest.channels);
 		if (i < steps && led_wait(&led_seq, seen, LED_STEP_MS)) {
 			return;
 		}
@@ -399,7 +424,7 @@ static void play_steady(led_levels_t *cur, const led_render_t *t, unsigned seen)
 	if (off) {
 		led_i2c_off();
 	} else if (t->pulse) {
-		play_pulse(cur, t, seen);
+		play_pulse(cur, t, rest, seen);
 	}
 }
 
@@ -667,7 +692,7 @@ static void apply(void) {
 		// is sampled.
 		state = s_podcast ? LS_PODCAST : rate_state(s_rate, s_dsd);
 		// DoP is not PCM and there is no PCM feed for the USB DAC mode below.
-		pulse = smart && led_level() > BRIGHTNESS_MIN && state != LS_DSD && state != LS_PODCAST;
+		pulse = smart && state != LS_DSD && state != LS_PODCAST;
 	} else if (s_dac_streaming && s_dac_rate > 0) {
 		// In DAC mode nothing plays through audio.c, so s_playing is false and
 		// the LED went dark twenty seconds after the screen did -- with the

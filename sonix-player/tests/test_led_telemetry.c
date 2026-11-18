@@ -111,12 +111,24 @@ static unsigned count_frames(size_t start, size_t end, int r, int g, int b) {
 #define PCM_RATE 44100
 #define PCM_FRAMES 4096
 static int16_t bass_pcm[PCM_FRAMES], treble_pcm[PCM_FRAMES];
+static int16_t quiet_bass_pcm[PCM_FRAMES], beat_pcm[PCM_FRAMES];
 
 static void feed(const int16_t *pcm) { visualizer_feed(pcm, PCM_FRAMES, 1, 16, PCM_RATE); }
 
+static void feed_for(const int16_t *pcm, int ms) {
+	// Repeat the feed in case the worker briefly has the ring locked.
+	for (int elapsed = 0; elapsed < ms; elapsed += 20) {
+		feed(pcm);
+		usleep(20000);
+	}
+}
+
 static void test_pcm_consumers(void) {
 	for (int i = 0; i < PCM_FRAMES; i++) {
-		bass_pcm[i] = (int16_t)(16000 * sin(2 * M_PI * 65 * i / PCM_RATE));
+		double sample = sin(2 * M_PI * 65 * i / PCM_RATE);
+		bass_pcm[i] = (int16_t)(16000 * sample);
+		quiet_bass_pcm[i] = (int16_t)(2400 * sample);
+		beat_pcm[i] = (int16_t)(3400 * sample); // about 3 dB above the quiet bass
 		treble_pcm[i] = (int16_t)(16000 * sin(2 * M_PI * 3000 * i / PCM_RATE));
 	}
 	feed(bass_pcm);
@@ -144,6 +156,35 @@ static void test_pcm_consumers(void) {
 	visualizer_enable(VISUALIZER_SCREENSAVER, false);
 	visualizer_enable(VISUALIZER_STATUS_LED, false);
 	puts("ok  bass vs treble, stale data, independent screensaver and LED readers");
+}
+
+static void test_pulse_envelope(void) {
+	led_pulse_t pulse = {0};
+	assert(pulse_step(&pulse, 20) == 0); // noise floor
+	for (int i = 0; i < 50; i++) pulse_step(&pulse, 180);
+	assert(pulse_step(&pulse, 183) == 0); // small variations are not beats
+	assert(pulse_step(&pulse, 189) == 255); // modest rise, full-strength pulse
+	assert(pulse_step(&pulse, 189) == 255); // hold the peak for two frames
+	int previous = pulse_step(&pulse, 189);
+	assert(previous > 0 && previous < 255);
+	for (int i = 0; i < 50; i++) {
+		int level = pulse_step(&pulse, 189);
+		assert(level <= previous); // decay without retriggering the held tone
+		previous = level;
+	}
+	assert(previous == 0);
+	assert(pulse_step(&pulse, 180) == 0);
+	assert(pulse_step(&pulse, 197) == 255); // a fresh beat re-arms the pulse
+
+	pulse = (led_pulse_t){0};
+	assert(pulse_step(&pulse, 180) == 255);
+	assert(pulse_step(&pulse, 0) == 255);
+	assert(pulse_step(&pulse, 180) < 255); // the next attack arrived too soon
+	pulse_step(&pulse, 0);
+	int dip = pulse_step(&pulse, 0);
+	assert(dip > 0 && dip < 128);
+	assert(pulse_step(&pulse, 180) == 255); // the next peak follows a visible dip
+	puts("ok  bass attacks reach the peak, hold, and leave a dip between pulses");
 }
 
 static void test_direct(void) {
@@ -181,26 +222,34 @@ static void test_direct(void) {
 
 	start = mark();
 	led_set_visualizer(true);
-	int floor = pulse_channel(23, 0);
+	const int floor = 5;
 	wait_frame(start, LEVELS, floor, floor, 0);
-	start = mark();
 	led_set_standby(true);
-	// A few attempts account for the PCM tap intentionally skipping a write
-	// if the worker is briefly copying the ring.
-	for (int i = 0; i < 20 && visualizer_bass_level() == 0; i++) {
-		feed(bass_pcm);
-		usleep(1000);
-	}
-	wait_frame(start, LEVELS, 23, 23, 0);
-	wait_frame(start, LEVELS, floor, floor, 0);
-
-	// A held tone stops triggering once the slow average catches up.
-	int average = 0, pulse = pulse_step(200, &average, 0);
-	assert(pulse == 255);
-	for (int i = 0; i < 100; i++) pulse = pulse_step(200, &average, pulse);
-	assert(!pulse);
-	assert(pulse_channel(1, 0) == 1 && pulse_channel(23, 255) == 23);
+	feed_for(quiet_bass_pcm, 1000); // let the detector settle to a nonzero baseline
+	start = mark();
+	feed_for(beat_pcm, 420);
+	size_t peak = wait_frame(start, LEVELS, 23, 23, 0);
+	size_t rest = wait_frame(peak + 1, LEVELS, floor, floor, 0);
+	assert(count_frames(start, rest, 23, 23, 0) == 1);
 	led_set_standby(false);
+
+	// At the minimum brightness there is only one lit step. The actual
+	// controller output should go dark between beats, not disable the effect
+	// or exceed that step to create the contrast.
+	led_set_visualizer(false);
+	start = mark();
+	led_set_brightness(1);
+	wait_frame(start, LEVELS, 1, 1, 0);
+	start = mark();
+	led_set_visualizer(true);
+	wait_frame(start, LEVELS, 0, 0, 0);
+	start = mark();
+	feed_for(bass_pcm, 120);
+	peak = wait_frame(start, LEVELS, 1, 1, 0);
+	wait_frame(peak + 1, LEVELS, 0, 0, 0);
+	start = mark();
+	led_set_brightness(5);
+	wait_frame(start, LEVELS, floor, floor, 0);
 
 	// Two green beats, then the new playback colour, not the old one.
 	start = mark();
@@ -299,6 +348,7 @@ int main(int argc, char **argv) {
 		test_fallback();
 	} else {
 		test_pcm_consumers();
+		test_pulse_envelope();
 		test_direct();
 	}
 	return 0;
