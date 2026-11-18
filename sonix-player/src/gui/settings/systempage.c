@@ -289,6 +289,42 @@ static void credit_value_fit(lv_obj_t *value, int content_width) {
 	}
 }
 
+static void add_fork_qr(lv_obj_t *row) {
+	static const char url[] = "https://github.com/mr-f0xx/sonix-player-tempotec-v1";
+	// This URL fits a 33-module QR at four pixels per module. Leave four
+	// white modules on each side, independent of the player's theme.
+	enum { QR_SIZE = 132, QUIET = 16, FRAME_SIZE = QR_SIZE + 2 * QUIET };
+	lv_obj_t *frame = lv_obj_create(row);
+	lv_obj_remove_style_all(frame);
+	lv_obj_set_size(frame, FRAME_SIZE, FRAME_SIZE);
+	lv_obj_set_scrollable(frame, false);
+	lv_obj_set_clickable(frame, false);
+	lv_obj_set_style_bg_color(frame, lv_color_white(), 0);
+	lv_obj_set_style_bg_opa(frame, LV_OPA_COVER, 0);
+
+	lv_obj_t *qr = lv_qrcode_create(frame);
+	lv_qrcode_set_size(qr, QR_SIZE);
+	lv_qrcode_set_dark_color(qr, lv_color_black());
+	lv_qrcode_set_light_color(qr, lv_color_white());
+	lv_obj_set_clickable(qr, false);
+	lv_obj_center(qr);
+	if (lv_qrcode_update(qr, url, sizeof(url) - 1) != LV_RESULT_OK) {
+		lv_obj_delete(frame);
+		return; // Keep the ordinary credit row if encoding fails.
+	}
+
+	// Keep the credit and the scan target together in the scrollable list.
+	lv_obj_set_height(row, LV_SIZE_CONTENT);
+	lv_obj_set_style_pad_row(row, 4, 0);
+	lv_obj_set_flex_flow(row, LV_FLEX_FLOW_COLUMN);
+	lv_obj_set_flex_align(row, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_START);
+
+	lv_obj_t *caption = lv_label_create(row);
+	lv_label_set_text(caption, "GitHub");
+	lv_obj_add_style(caption, &theme_style_text_dim, 0);
+	lv_obj_set_style_text_font(caption, &font_ui_14, 0);
+}
+
 static lv_obj_t *system_value_row(lv_obj_t *parent, const char *name, lv_obj_t **value_out,
 								  lv_event_cb_t callback, void *user_data, bool clickable) {
 	if (bp_is_tempotec_v1()) {
@@ -443,11 +479,12 @@ static void build_sysinfo_page(gui_config_t *cfg) {
 	}
 
 	lv_obj_t *forked_by_value = NULL;
-	info_row(container, "system_forked_by", &forked_by_value);
+	lv_obj_t *forked_by_row = info_row(container, "system_forked_by", &forked_by_value);
 	lv_label_set_text(forked_by_value, "Imre Ferenczi (mr-f0xx)");
 	if (compact) {
 		credit_value_fit(forked_by_value, value_width);
 	}
+	add_fork_qr(forked_by_row);
 
 	if (compact) {
 		lv_obj_update_layout(container);
