@@ -594,10 +594,10 @@ above 16-bit or 48 kHz, and for DSD, once the stream's format is known. Lossy
 audio and podcasts do not show it. When a source badge occupies the right
 corner of the artwork, the hi-res badge uses the left corner instead. With the
 Vinyl art shape selected, an enabled badge instead sits in the upper-right of
-the player header, level with the back button, in Standard, Waveform,
-Alternative and Vinyl. Album Art Max reserves its corners for text and has no
-badge. Waveform's Standard fallback uses the
-Standard setting.
+the player header in Standard, Waveform, Alternative and Vinyl. It mirrors the
+visible back chevron's edge inset and is scaled to fit its height. Album Art
+Max reserves its corners for text and has no badge. Waveform's Standard
+fallback uses the Standard setting.
 
 ### Both control-centre sliders
 

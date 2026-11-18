@@ -69,6 +69,10 @@ void back_btn_translate(int32_t x);
 // the way back -- the player's Studio arrangement puts the ellipsis there.
 int back_btn_centre_y(void);
 
+// Screen bounds of the visible player chevron in its normal left slot, before
+// horizontal sheet motion or a layout-specific override of its ink inset.
+lv_area_t back_btn_player_ink_bounds(void);
+
 // How far under the top edge the chevron sits while the player is open, over
 // the offset the panel already keeps. Zero is the player as it has always
 // been, with the status bar hidden and the artwork running to the bezel.

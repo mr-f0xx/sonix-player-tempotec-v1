@@ -2413,8 +2413,12 @@ static void lyrics_star_to_head(bool up) {
 // and the chevron. Limit the width without changing lyrics' own width setting.
 static void studio_hires_fit(void) {
 	if (!studio_up) return;
-	int extra = hires_badge_in_header && !lv_obj_is_hidden(hires_badge.box)
-		? lv_obj_get_width(hires_badge.box) + COMPACT_CORNER_BTN_EXT_CLICK : 0;
+	int extra = 0;
+	if (hires_badge_in_header && !lv_obj_is_hidden(hires_badge.box)) {
+		lv_area_t ink = back_btn_player_ink_bounds();
+		extra = ink.x1 - STUDIO_INFO_MARGIN + hiresbadge_header_width(&hires_badge, lv_area_get_height(&ink)) +
+			COMPACT_CORNER_BTN_EXT_CLICK;
+	}
 	int names_w = studio_box_w - 2 * (STUDIO_INFO_MARGIN + STUDIO_HEAD_SIDE_ROOM);
 	int max_w = extra ? LV_MAX(1, names_w - extra) : LV_COORD_MAX;
 	if (lv_obj_get_style_max_width(studio_text_col, 0) != max_w) {
@@ -5932,7 +5936,10 @@ static void update_hires_badge(const device_state_t *state) {
 		(layout == PLAYER_LAYOUT_STANDARD || layout == PLAYER_LAYOUT_ALTERNATIVE ||
 		 layout == PLAYER_LAYOUT_STUDIO || layout == PLAYER_LAYOUT_VINYL);
 	if (hires_badge_in_header) {
-		hiresbadge_place_in_header(&hires_badge, player_screen, bp_padding(), back_btn_centre_y() - player_content_top());
+		lv_area_t ink = back_btn_player_ink_bounds();
+		int height = lv_area_get_height(&ink);
+		int centre_y = ink.y1 + height / 2 - player_content_top();
+		hiresbadge_place_in_header(&hires_badge, player_screen, ink.x1, centre_y, height);
 	} else if (show) {
 		// Studio draws a separate sleeve. On artwork, a source mark takes
 		// precedence in the right corner; use the left rather than stacking.
@@ -7421,7 +7428,8 @@ static vinyl_box_t vinyl_box(void) {
 	int side_margin = VINYL_SIDE_MARGIN;
 	if (art_shape == PLAYER_ART_VINYL && hires_badge.box &&
 		player_hires_position_get(PLAYER_LAYOUT_VINYL) != PLAYER_HIRES_OFF) {
-		side_margin = bp_padding() + hiresbadge_width(&hires_badge) + bp_header_button_gap();
+		lv_area_t ink = back_btn_player_ink_bounds();
+		side_margin = ink.x1 + hiresbadge_header_width(&hires_badge, lv_area_get_height(&ink)) + bp_header_button_gap();
 	}
 	return vinyl_layout_box((int)lv_obj_get_width(player_screen),
 						 (int)lv_obj_get_height(player_screen), vinyl_deck_height(info_h), side_margin);
