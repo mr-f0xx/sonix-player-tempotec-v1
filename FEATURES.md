@@ -553,9 +553,11 @@ a self-signed certificate), and HLS.
 - **Power → Smart LED** (off by default) adds a choice of playback effects.
   **Bass Pulse** (default) briefly reaches the selected brightness on bass
   attacks. **Energy Glow** rises and falls smoothly with overall PCM level.
-  The style is remembered and both keep the sample-rate colour and brightness
-  limit: warm yellow through 48 kHz, aqua above 48 through 192 kHz, and orange
-  above 192 kHz. DSD remains steady white. Three red blinks accompany the
+  **Rainbow Breath** sweeps through the RGB colour wheel while brightening and
+  dimming automatically. All three respect the brightness limit and the
+  chosen style is remembered. Bass Pulse and Energy Glow keep the sample-rate
+  colour: warm yellow through 48 kHz, aqua above 48 through 192 kHz, and
+  orange above 192 kHz. DSD remains steady white. Three red blinks accompany the
   usual 5% battery warning, and two green blinks confirm successful Wi-Fi
   Transfer uploads once the browser's uploads settle. Charging still gets
   its normal indication.

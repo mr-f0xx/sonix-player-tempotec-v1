@@ -388,21 +388,24 @@ static void test_glow_envelope(void) {
 	assert(level == 0);
 }
 
-static void test_glow(void) {
-	char cfg[] = "/tmp/sonix-led-glow-XXXXXX";
+static void init_saved_style(led_visualizer_style_t style) {
+	char cfg[] = "/tmp/sonix-led-style-XXXXXX";
 	int fd = mkstemp(cfg);
 	assert(fd >= 0);
 	close(fd);
 	config_init(cfg);
 	config_set_bool("power", "led_visualizer", true);
-	config_set_int("power", "led_visualizer_style", LED_VISUALIZER_ENERGY_GLOW);
+	config_set_int("power", "led_visualizer_style", style);
 	config_set_int("power", "led_transition_ms", 20);
 	assert(config_save());
 	config_init(cfg);
 	unlink(cfg);
-
 	led_init();
-	assert(led_visualizer_style() == LED_VISUALIZER_ENERGY_GLOW);
+	assert(led_visualizer_style() == style);
+}
+
+static void test_glow(void) {
+	init_saved_style(LED_VISUALIZER_ENERGY_GLOW);
 	assert(current_effect == LED_VISUALIZER_NONE); // not yet playing
 	const int floor = 5;
 	led_update_playback(true, PCM_RATE, false, false);
@@ -458,10 +461,106 @@ static void test_glow(void) {
 	puts("ok  saved Energy Glow, smooth PCM brightness on the RGB worker, style switch and overrides");
 }
 
+static void test_rainbow_frames(void) {
+	// Pure hues are joined by interpolated frames, including magenta -> red.
+	static const int colours[][3] = {{1,0,0}, {1,1,0}, {0,1,0}, {0,1,1}, {0,0,1}, {1,0,1}};
+	const int half = RAINBOW_HALF_BREATH_FRAMES;
+	const int max = 23;
+	for (int i = 0; i < 6; i++) {
+		led_levels_t f = rainbow_frame(i * RAINBOW_SECTOR_FRAMES, half, max);
+		assert(f.r == max * colours[i][0] && f.g == max * colours[i][1] && f.b == max * colours[i][2]);
+	}
+	led_levels_t previous = rainbow_frame(0, half, max);
+	for (int hue = 1; hue <= RAINBOW_HUE_FRAMES; hue++) {
+		led_levels_t f = rainbow_frame(hue % RAINBOW_HUE_FRAMES, half, max);
+		assert(abs(f.r - previous.r) <= 1 && abs(f.g - previous.g) <= 1 && abs(f.b - previous.b) <= 1);
+		previous = f;
+	}
+
+	// Value rises and falls smoothly even as hue keeps moving. Across all
+	// settings at least one channel reaches the selected peak, never more.
+	for (int brightness = BRIGHTNESS_MIN; brightness <= BRIGHTNESS_MAX; brightness++) {
+		int peak = LADDER[brightness];
+		int floor = brightness == BRIGHTNESS_MIN ? 0 : (peak + 4) / 5;
+		int last = floor;
+		for (int breath = 0; breath <= 2 * half; breath++) {
+			led_levels_t f = rainbow_frame(breath * 2, breath, peak);
+			assert(f.r >= 0 && f.r <= peak && f.g >= 0 && f.g <= peak && f.b >= 0 && f.b <= peak);
+			int level = f.r > f.g ? f.r : f.g;
+			if (f.b > level) level = f.b;
+			assert(level >= floor);
+			assert(breath <= half ? level >= last : level <= last);
+			if (breath == half) assert(level == peak);
+			if (breath == half / 2 && peak == max) assert(level > floor && level < peak);
+			last = level;
+		}
+		assert(last == floor);
+	}
+	puts("ok  Rainbow Breath covers all six hues with a smooth fade and brightness limit");
+}
+
+static void test_rainbow(void) {
+	init_saved_style(LED_VISUALIZER_RAINBOW_BREATH);
+	assert(current_effect == LED_VISUALIZER_NONE);
+	led_set_standby(true);
+	led_update_playback(true, PCM_RATE, false, false);
+	assert(current_effect == LED_VISUALIZER_RAINBOW_BREATH);
+	size_t start = wait_frame(0, LEVELS, 5, 0, 0);
+	const int half = RAINBOW_HALF_BREATH_FRAMES;
+	led_levels_t crest = rainbow_frame(half, half, 23);
+	// No audio samples at all: this is a timed effect, not an analyzer.
+	size_t bright = wait_frame(start + 1, LEVELS, crest.r, crest.g, crest.b);
+	int fall = 3 * half / 2;
+	led_levels_t fading = rainbow_frame(fall, fall, 23);
+	wait_frame(bright + 1, LEVELS, fading.r, fading.g, fading.b);
+
+	start = mark();
+	led_notify_low_battery();
+	size_t restored = wait_frame(start, LEVELS, 5, 0, 0);
+	assert(count_frames(start, restored, 23, 0, 0) == 3);
+
+	// Switching from an audio-reactive style to rainbow releases its tap.
+	led_set_visualizer_style(LED_VISUALIZER_ENERGY_GLOW);
+	feed_for(treble_pcm, 120);
+	assert(visualizer_energy_level() > 0);
+	start = mark();
+	led_set_visualizer_style(LED_VISUALIZER_RAINBOW_BREATH);
+	feed(treble_pcm);
+	assert(!visualizer_energy_level() && !visualizer_bass_level());
+	wait_frame(start, LEVELS, 5, 0, 0);
+
+	start = mark();
+	led_set_charge_state(true, true);
+	wait_frame(start, BREATHE, 23, 0, 0);
+	assert(current_effect == LED_VISUALIZER_NONE);
+	start = mark();
+	led_set_stealth(true);
+	wait_frame(start, DARK, 0, 0, 0);
+	led_set_charge_state(false, false);
+	assert(mark() == start + 1);
+	start = mark();
+	led_set_stealth(false);
+	wait_frame(start, LEVELS, 5, 0, 0);
+	assert(led_visualizer_style() == LED_VISUALIZER_RAINBOW_BREATH);
+
+	start = mark();
+	led_update_playback(true, 176400, false, true);
+	wait_frame(start, LEVELS, 13, 13, 13);
+	assert(current_effect == LED_VISUALIZER_NONE);
+	led_set_visualizer(false);
+	start = mark();
+	led_update_playback(true, PCM_RATE, false, false);
+	wait_frame(start, LEVELS, 23, 23, 0);
+	assert(current_effect == LED_VISUALIZER_NONE);
+	led_shutdown();
+	puts("ok  saved Rainbow Breath without PCM capture, correct alerts, charging, Stealth and format fallback");
+}
+
 static void test_fallback(void) {
 	config_init(NULL);
 	led_init();
 	assert(!led_effects_available());
+	led_set_visualizer_style(LED_VISUALIZER_RAINBOW_BREATH);
 	led_set_visualizer(true);
 	led_notify_upload_complete();
 	led_notify_low_battery();
@@ -496,6 +595,10 @@ int main(int argc, char **argv) {
 		test_energy_capture();
 		test_glow_envelope();
 		test_glow();
+	} else if (!strcmp(argv[1], "rainbow")) {
+		init_pcm();
+		test_rainbow_frames();
+		test_rainbow();
 	} else {
 		backend = !strcmp(argv[1], "pattern") ? PATTERN : !strcmp(argv[1], "pwm") ? PWM : UNAVAILABLE;
 		test_fallback();

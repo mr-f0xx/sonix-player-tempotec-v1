@@ -37,11 +37,21 @@ static const struct {
 };
 #define AUTO_OFF_COUNT ((int)(sizeof(AUTO_OFF) / sizeof(AUTO_OFF[0])))
 
+static const struct {
+	led_visualizer_style_t style;
+	const char *label;
+} LED_STYLES[] = {
+	{LED_VISUALIZER_BASS_PULSE, "power_led_bass_pulse"},
+	{LED_VISUALIZER_ENERGY_GLOW, "power_led_energy_glow"},
+	{LED_VISUALIZER_RAINBOW_BREATH, "power_led_rainbow_breath"},
+};
+#define LED_STYLE_COUNT (sizeof(LED_STYLES) / sizeof(LED_STYLES[0]))
+
 static lv_obj_t *charge_value, *charge_slider;
 static lv_obj_t *auto_off_switch, *auto_off_value, *auto_off_slider, *auto_off_card;
 static lv_obj_t *led_on_switch, *led_off_switch, *led_off_card;
 static lv_obj_t *led_stealth_switch, *led_visualizer_switch, *led_visualizer_card;
-static lv_obj_t *led_style_pills, *led_bass_pill, *led_glow_pill;
+static lv_obj_t *led_style_pills, *led_style_button[LED_STYLE_COUNT];
 static lv_obj_t *led_bright_value, *led_bright_slider;
 static lv_obj_t *led_trans_value, *led_trans_slider;
 static lv_obj_t *key_lock_switch;
@@ -164,8 +174,9 @@ static void refresh_labels(void) {
 		set_toggle_available(led_visualizer_card, led_visualizer_switch, available);
 		lv_obj_set_hidden(led_style_pills, !smart || !available);
 		led_visualizer_style_t style = led_visualizer_style();
-		settingsrow_pill_active(led_bass_pill, style == LED_VISUALIZER_BASS_PULSE);
-		settingsrow_pill_active(led_glow_pill, style == LED_VISUALIZER_ENERGY_GLOW);
+		for (size_t i = 0; i < LED_STYLE_COUNT; i++) {
+			settingsrow_pill_active(led_style_button[i], style == LED_STYLES[i].style);
+		}
 	}
 
 	if (led_bright_value) {
@@ -382,14 +393,12 @@ void powersettings_init(gui_config_t *cfg) {
 	if (led_effects_available()) {
 		led_visualizer_card = settingsrow_toggle_pills(container, "power_led_visualizer", led_visualizer_cb,
 													 &led_visualizer_switch, &led_style_pills);
-		led_bass_pill = settingsrow_pill(led_style_pills, "power_led_bass_pulse", LED_VISUALIZER_BASS_PULSE,
-										 led_visualizer_style_cb);
-		led_glow_pill = settingsrow_pill(led_style_pills, "power_led_energy_glow", LED_VISUALIZER_ENERGY_GLOW,
-									 led_visualizer_style_cb);
-		// Fit both choices on the V1 at the usual size. Longer translations
-		// can still wrap to a second line of pills.
-		lv_obj_set_style_pad_hor(led_bass_pill, 6, 0);
-		lv_obj_set_style_pad_hor(led_glow_pill, 6, 0);
+		for (size_t i = 0; i < LED_STYLE_COUNT; i++) {
+			led_style_button[i] = settingsrow_pill(led_style_pills, LED_STYLES[i].label, LED_STYLES[i].style,
+														 led_visualizer_style_cb);
+			// Keep the normal font and let long labels wrap on the V1.
+			lv_obj_set_style_pad_hor(led_style_button[i], 6, 0);
+		}
 		led_note(container, "power_led_visualizer_note");
 
 		settingsrow_slider(container, "power_led_brightness", LED_BRIGHTNESS_STEPS, &led_bright_value, &led_bright_slider,

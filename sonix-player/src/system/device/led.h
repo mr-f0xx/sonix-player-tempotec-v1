@@ -38,7 +38,8 @@
 // Stealth and suspend take priority over everything; otherwise charging and
 // fully charged keep the stock charger priority. In Smart LED mode a brief
 // low-battery or upload notice can interrupt the normal playback/idle colour.
-// Smart LED playback effects use that colour and cap at the brightness setting.
+// Smart LED playback effects cap at the brightness setting. Only the optional
+// Rainbow Breath style replaces the sample-rate colour during PCM playback.
 //
 // The playback colour follows the stock sample-rate bands, regardless of the
 // codec or bit depth:
@@ -115,6 +116,7 @@ typedef enum {
 	LED_VISUALIZER_NONE = 0, // no active PCM effect, not a saved choice
 	LED_VISUALIZER_BASS_PULSE = 1,
 	LED_VISUALIZER_ENERGY_GLOW = 2,
+	LED_VISUALIZER_RAINBOW_BREATH = 3,
 } led_visualizer_style_t;
 
 // Selected PCM style, independent of the Smart LED switch and event notices.
