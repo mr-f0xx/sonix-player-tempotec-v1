@@ -642,7 +642,7 @@ void appearance_init(gui_config_t *cfg) {
 	const bool compact = cfg->screen_width < 320;
 	lv_obj_t *container = settingsrow_page(appearance_screen, cfg, "appearance");
 
-	// One tall card: the option's name on top, the two choices under it.
+	// The theme card: the option's name on top, the choices below.
 	lv_obj_t *card = lv_obj_create(container);
 	lv_obj_set_width(card, lv_pct(100));
 	lv_obj_set_height(card, LV_SIZE_CONTENT);
@@ -688,10 +688,61 @@ void appearance_init(gui_config_t *cfg) {
 	lv_obj_set_style_text_font(custom_note, &font_ui_22, 0);
 	lv_label_set_text(custom_note, tr("appearance_custom_note"));
 
-	// Compact palette and function-glyph examples for Tokyo Night, Amber on
-	// Black and OLED, immediately after the theme switch. Hidden for Dark/Light
-	// so their existing Appearance page remains unchanged.
+	// Compact palette and function-matched icon previews for Tokyo Night, Amber
+	// on Black and OLED. The accent picker stays here even when they are hidden.
 	build_theme_previews(container, compact);
+
+	// The accent colour, as two rows of coloured circles.
+	lv_obj_t *accent_card = lv_obj_create(container);
+	lv_obj_set_width(accent_card, lv_pct(100));
+	lv_obj_set_height(accent_card, LV_SIZE_CONTENT);
+	lv_obj_add_style(accent_card, &theme_style_card, 0);
+	lv_obj_set_style_radius(accent_card, compact ? 10 : 12, 0);
+	lv_obj_set_style_border_width(accent_card, 0, 0);
+	lv_obj_set_style_shadow_width(accent_card, 0, 0);
+	lv_obj_set_style_pad_all(accent_card, compact ? 8 : 20, 0);
+	lv_obj_set_style_pad_gap(accent_card, compact ? 8 : 18, 0);
+	lv_obj_set_scrollable(accent_card, false);
+	lv_obj_set_event_bubble(accent_card, true);
+	lv_obj_set_flex_flow(accent_card, LV_FLEX_FLOW_COLUMN);
+	lv_obj_set_flex_align(accent_card, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
+
+	lv_obj_t *accent_name = lv_label_create(accent_card);
+	lv_label_set_text(accent_name, tr("appearance_accent_colour"));
+	lv_obj_add_style(accent_name, &theme_style_text, 0);
+	lv_obj_set_style_text_font(accent_name, compact ? &font_ui_18 : &font_ui_24, 0);
+
+	lv_obj_t *accent_row = lv_obj_create(accent_card);
+	lv_obj_set_size(accent_row, lv_pct(100), LV_SIZE_CONTENT);
+	lv_obj_set_style_bg_opa(accent_row, 0, 0);
+	lv_obj_set_style_border_width(accent_row, 0, 0);
+	lv_obj_set_style_pad_all(accent_row, 0, 0);
+	// Twelve circles do not fit on one line, so the row wraps onto two of
+	// six: at each size the gap is the widest that still keeps six on a line
+	// (the row runs 410 and 212 pixels wide on the two panel widths).
+	lv_obj_set_style_pad_gap(accent_row, compact ? 4 : 14, 0);
+	lv_obj_set_scrollable(accent_row, false);
+	lv_obj_set_event_bubble(accent_row, true);
+	lv_obj_set_flex_flow(accent_row, LV_FLEX_FLOW_ROW_WRAP);
+	lv_obj_set_flex_align(accent_row, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+
+	for (int i = 0; i < THEME_ACCENT_COUNT; i++) {
+		btn_accent[i] = make_accent_circle(accent_row, i, compact);
+	}
+
+	// Straight under the accent, because it is what the tint is made from: the
+	// same hue carried across the backgrounds, the cards and the status bar.
+	settingsrow_toggle(container, "appearance_dynamic_tint", &tint_toggle, dynamic_tint_cb);
+	if (theme_dynamic_tint()) {
+		lv_obj_add_state(tint_toggle, LV_STATE_CHECKED);
+	}
+
+	lv_obj_t *tint_note = lv_label_create(container);
+	lv_label_set_long_mode(tint_note, LV_LABEL_LONG_WRAP);
+	lv_obj_set_width(tint_note, lv_pct(100));
+	lv_obj_add_style(tint_note, &theme_style_text_dim, 0);
+	lv_obj_set_style_text_font(tint_note, &font_ui_22, 0);
+	lv_label_set_text(tint_note, tr("appearance_dynamic_tint_note"));
 
 	settingsrow_toggle(container, "appearance_main_menu_icons_only", &main_menu_icons_toggle, main_menu_icons_cb);
 	if (main_menu_icons_only()) {
@@ -735,10 +786,9 @@ void appearance_init(gui_config_t *cfg) {
 	settingsrow_toggle(container, "appearance_home_browse", &main_menu_browse_toggle, main_menu_browse_cb);
 	if (main_menu_browse()) lv_obj_add_state(main_menu_browse_toggle, LV_STATE_CHECKED);
 
-	// A second card: which picture the next power-on shows. Unlike every
-	// other choice on this page it is not only a config value -- it also
-	// goes into the flash marker the boot script reads, so it takes effect
-	// at the next boot and not a moment before.
+	// Which picture the next power-on shows. Unlike every other choice on this
+	// page, it also goes into the flash marker the boot script reads, so it
+	// takes effect at the next boot and not a moment before.
 	lv_obj_t *boot_card = lv_obj_create(container);
 	lv_obj_set_width(boot_card, lv_pct(100));
 	lv_obj_set_height(boot_card, LV_SIZE_CONTENT);
@@ -802,7 +852,7 @@ void appearance_init(gui_config_t *cfg) {
 	lv_obj_set_style_text_font(boot_picture_note, &font_ui_22, 0);
 	lv_label_set_text(boot_picture_note, tr("appearance_boot_picture_note"));
 
-	// A third card: where the clock sits in the status bar.
+	// Where the clock sits in the status bar.
 	lv_obj_t *clock_card = lv_obj_create(container);
 	lv_obj_set_width(clock_card, lv_pct(100));
 	lv_obj_set_height(clock_card, LV_SIZE_CONTENT);
@@ -841,58 +891,6 @@ void appearance_init(gui_config_t *cfg) {
 	btn_clock[TOPBAR_CLOCK_RIGHT] = make_clock_choice(clock_row, "right", TOPBAR_CLOCK_RIGHT, compact);
 	btn_clock[TOPBAR_CLOCK_HIDDEN] = make_clock_choice(clock_row, "hide", TOPBAR_CLOCK_HIDDEN, compact);
 
-	// A fourth card: the accent colour, as two rows of coloured circles.
-	lv_obj_t *accent_card = lv_obj_create(container);
-	lv_obj_set_width(accent_card, lv_pct(100));
-	lv_obj_set_height(accent_card, LV_SIZE_CONTENT);
-	lv_obj_add_style(accent_card, &theme_style_card, 0);
-	lv_obj_set_style_radius(accent_card, compact ? 10 : 12, 0);
-	lv_obj_set_style_border_width(accent_card, 0, 0);
-	lv_obj_set_style_shadow_width(accent_card, 0, 0);
-	lv_obj_set_style_pad_all(accent_card, compact ? 8 : 20, 0);
-	lv_obj_set_style_pad_gap(accent_card, compact ? 8 : 18, 0);
-	lv_obj_set_scrollable(accent_card, false);
-	lv_obj_set_event_bubble(accent_card, true);
-	lv_obj_set_flex_flow(accent_card, LV_FLEX_FLOW_COLUMN);
-	lv_obj_set_flex_align(accent_card, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
-
-	lv_obj_t *accent_name = lv_label_create(accent_card);
-	lv_label_set_text(accent_name, tr("appearance_accent_colour"));
-	lv_obj_add_style(accent_name, &theme_style_text, 0);
-	lv_obj_set_style_text_font(accent_name, compact ? &font_ui_18 : &font_ui_24, 0);
-
-	lv_obj_t *accent_row = lv_obj_create(accent_card);
-	lv_obj_set_size(accent_row, lv_pct(100), LV_SIZE_CONTENT);
-	lv_obj_set_style_bg_opa(accent_row, 0, 0);
-	lv_obj_set_style_border_width(accent_row, 0, 0);
-	lv_obj_set_style_pad_all(accent_row, 0, 0);
-	// Twelve circles do not fit on one line, so the row wraps onto two of
-	// six: at each size the gap is the widest that still keeps six on a line
-	// (the row runs 410 and 212 pixels wide on the two panel widths).
-	lv_obj_set_style_pad_gap(accent_row, compact ? 4 : 14, 0);
-	lv_obj_set_scrollable(accent_row, false);
-	lv_obj_set_event_bubble(accent_row, true);
-	lv_obj_set_flex_flow(accent_row, LV_FLEX_FLOW_ROW_WRAP);
-	lv_obj_set_flex_align(accent_row, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-
-	for (int i = 0; i < THEME_ACCENT_COUNT; i++) {
-		btn_accent[i] = make_accent_circle(accent_row, i, compact);
-	}
-
-	// Straight under the accent, because it is what the tint is made from: the
-	// same hue carried across the backgrounds, the cards and the status bar.
-	settingsrow_toggle(container, "appearance_dynamic_tint", &tint_toggle, dynamic_tint_cb);
-	if (theme_dynamic_tint()) {
-		lv_obj_add_state(tint_toggle, LV_STATE_CHECKED);
-	}
-
-	lv_obj_t *tint_note = lv_label_create(container);
-	lv_label_set_long_mode(tint_note, LV_LABEL_LONG_WRAP);
-	lv_obj_set_width(tint_note, lv_pct(100));
-	lv_obj_add_style(tint_note, &theme_style_text_dim, 0);
-	lv_obj_set_style_text_font(tint_note, &font_ui_22, 0);
-	lv_label_set_text(tint_note, tr("appearance_dynamic_tint_note"));
-
 	// How big the text on every page is: secondary lines, notes, clocks and
 	// counters. See fonts.c for which sizes change and by how much.
 	lv_obj_t *text_size_pills;
@@ -917,8 +915,7 @@ void appearance_init(gui_config_t *cfg) {
 	lv_obj_set_style_text_font(font_note, &font_ui_22, 0);
 	lv_label_set_text(font_note, tr("appearance_font_note"));
 
-	// A fifth card, and the last plain switch on the page: whether the status
-	// bar prints the charge as a number as well as drawing it.
+	// Whether the status bar prints the charge as a number as well as drawing it.
 	settingsrow_toggle(container, "appearance_battery_percentage", &battery_percent_toggle, battery_percent_cb);
 	if (config_get_int("screen", "battery_percent", 1) != 0) {
 		lv_obj_add_state(battery_percent_toggle, LV_STATE_CHECKED);
