@@ -28,7 +28,6 @@
 #include "src/system/core/config.h"
 #include "src/system/core/lang.h"
 #include "src/system/device/system.h"
-#include "src/system/device/usb.h"
 
 /* ---- fonts: every face is LVGL's built-in one ---------------------------- */
 
@@ -70,7 +69,7 @@ bool battery_read_now(const battery_config_t *cfg, int *percent, bool *charging)
 	return gauge_percent >= 0;
 }
 
-bool usb_vbus_present(void) { return gauge_cable; }
+bool charger_attached(void) { return gauge_cable; }
 
 /* The panel's own wake bracket, which chargescreen_build() does not use but
  * chargescreen_run() does: the loop is linked whether or not it is called. */

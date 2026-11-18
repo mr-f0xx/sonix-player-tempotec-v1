@@ -20,6 +20,7 @@ make -C sonix-player/tests peq-ui
 make -C sonix-player/tests quickpanel-layout
 make -C sonix-player/tests btreceiver-session
 make -C sonix-player/tests power-display
+make -C sonix-player/tests chargerattached
 make -C sonix-player/tests batteryprofile batteryprofile-ui
 make -C sonix-player/tests corners
 make -C sonix-player/tests playbutton

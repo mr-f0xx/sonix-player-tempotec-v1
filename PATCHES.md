@@ -3561,10 +3561,27 @@ here that no code in the player can observe. Both are rare, and both are
 answered by holding power for a moment, which is what the screen would have
 asked for anyway.
 
+The cable half of that decision is deliberately generous. `charger_attached()`
+-- shared by the boot and by the screen watching for an unplug -- does not ask
+for one `online` bit: the two VBUS nodes are the same PMIC the panel's rails go
+through, so their reading wobbles around a panel event, and with the charge
+limit holding the cell at its ceiling the charger does nothing at all, which is
+precisely when the answer matters most. So all of it is consulted: any
+non-battery supply reporting `online`, any non-battery supply holding a
+USB-sized voltage (about five volts; a battery is 4.35 V at best), or the
+battery itself in any state other than discharging or unknown -- "Full" or
+"Not charging" with a cable in is the charge limit doing its job. The marker is
+checked before any of it, so an ordinary boot pays one `access()` and no sysfs.
+A candidate charger boot asks the question a couple of times with a brief pause
+between, because the first read lands microseconds after the panel's rails open
+and close at the PMIC; and whichever way it goes, the log says what was decided
+and why -- the marker's path when it is what sent the boot to the library, the
+unlink's error when the marker could not be removed.
+
 ### The screen
 
 `chargescreen.c` runs before the services start, on purpose: it reads the gauge
-through `battery_read_now()`, the cable through `usb_vbus_present()`, and the
+through `battery_read_now()`, the cable through `charger_attached()`, and the
 power key off its own evdev node, so no input thread is running to answer a key
 it is using. A hold would otherwise open the power menu of a player that has not
 been built yet.
@@ -3604,7 +3621,11 @@ glass, the fill within a pixel of the reading it was given and never past the
 box at 100%, `--` and an empty bar for a gauge that answered nothing (never
 `0%`), and the three state lines in each of the ten languages -- stepped through
 one reading at a time, because the screen only repaints a line that has
-changed.
+changed. `make -C sonix-player/tests chargerattached` checks the cable probe
+against fake supplies in a temporary directory -- the `Full` / `Not charging`
+readings the 80% charge limit produces with the cable in, an `online` bit that
+reads `0` with a USB-sized voltage behind it, and the garbage each node is
+allowed to hold.
 
 ## The last five percent
 

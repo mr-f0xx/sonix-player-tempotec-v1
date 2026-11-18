@@ -29,7 +29,7 @@
 // seconds are nothing beside a panel that is not lit.
 //
 // Nothing here needs the services: the gauge is read directly through
-// battery_read_now(), the cable through usb_vbus_present(), and the key through
+// battery_read_now(), the cable through charger_attached(), and the key through
 // the evdev node the panel's own power button lives on. That is deliberate --
 // it runs before the input threads exist, so that no other part of the player
 // answers a key the charging screen is using.

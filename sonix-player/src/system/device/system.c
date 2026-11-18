@@ -276,7 +276,7 @@ bool battery_read_now(const battery_config_t *cfg, int *percent, bool *charging)
 				// icon and the red LED in their charging state long after the
 				// charge has finished. The cable is still there, and for the
 				// charging screen that is the answer that matters -- see
-				// usb_vbus_present() there.
+				// charger_attached().
 				on_cable = (strcmp(content, "Charging") == 0);
 				free(content);
 			}

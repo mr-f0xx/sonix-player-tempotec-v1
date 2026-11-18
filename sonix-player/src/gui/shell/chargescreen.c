@@ -23,7 +23,7 @@
 #include "src/system/core/lang.h"
 #include "src/system/device/power.h"
 #include "src/system/device/backlight.h"
-#include "src/system/device/usb.h"
+#include "src/system/device/chargerattached.h"
 
 // ---------------------------------------------------------------------------
 // The screen
@@ -497,7 +497,10 @@ void chargescreen_run(lv_display_t *disp, const battery_config_t *battery_cfg) {
 #ifdef HOST_BUILD
 			cable = true; // a PC has no charger to take away
 #else
-			cable = usb_vbus_present();
+			// charger_attached(), not the raw online bit: with the cell held
+			// at its configured limit the charger does nothing, and a cable
+			// that reads as "not charging" is a cable, not an unplug.
+			cable = charger_attached();
 #endif
 			if (!cable) {
 				if (!unplugged_since) {
