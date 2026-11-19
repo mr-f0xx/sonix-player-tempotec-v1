@@ -900,33 +900,112 @@ static void place_sheet(void) {
 // ---------------------------------------------------------------------------
 // The sliders under the buttons
 //
-// The existing single-slider setting is preserved when the optional second
-// rail is enabled; turning the second rail off returns to that exact choice.
+// The single-slider choice is preserved when two rails are enabled; those two
+// rails take their own pair of jobs. Turning the second rail off returns to
+// the exact single-rail choice.
 // ---------------------------------------------------------------------------
 
-quickpanel_level_target_t quickpanel_level_target(void) {
-	const char *saved = config_get("quickpanel", "level_target", NULL);
+static const char *level_target_name(quickpanel_level_target_t target) {
+	if (target == QP_LEVEL_VOLUME) return "volume";
+	if (target == QP_LEVEL_SOUNDFIELD) return "soundfield";
+	return "brightness";
+}
+
+static quickpanel_level_target_t parse_level_target(const char *saved, quickpanel_level_target_t fallback) {
 	if (saved) {
 		if (strcmp(saved, "volume") == 0) return QP_LEVEL_VOLUME;
 		if (strcmp(saved, "soundfield") == 0) return QP_LEVEL_SOUNDFIELD;
 		if (strcmp(saved, "brightness") == 0) return QP_LEVEL_BRIGHTNESS;
 	}
+	return fallback;
+}
+
+quickpanel_level_target_t quickpanel_level_target(void) {
+	const char *saved = config_get("quickpanel", "level_target", NULL);
 	// A player updated from the two-state setting has no level_target yet:
 	// its volume switch is still the answer it gave.
-	return config_get_int("quickpanel", "volume_slider", 0) ? QP_LEVEL_VOLUME : QP_LEVEL_BRIGHTNESS;
+	return parse_level_target(saved, config_get_int("quickpanel", "volume_slider", 0) ?
+							  QP_LEVEL_VOLUME : QP_LEVEL_BRIGHTNESS);
 }
 bool quickpanel_volume_slider(void) { return quickpanel_level_target() == QP_LEVEL_VOLUME; }
 bool quickpanel_both_sliders(void) { return config_get_bool("quickpanel", "both_sliders", false); }
 
-// Which job the visible single rail is doing right now. With both rails on
-// the first is always brightness, whatever the saved single-rail choice was;
-// Soundfield falls back to brightness when its plugin is switched off in
-// Plugins, so the rail never moves to something the player cannot hear.
+// The two rails are stored as their targets, not as a single pair code, so a
+// player that already had both sliders on keeps its old brightness + volume
+// pair when it updates. Equal or unknown targets are repaired on the way out.
+quickpanel_level_pair_t quickpanel_level_pair(void) {
+	quickpanel_level_target_t first = parse_level_target(config_get("quickpanel", "level_pair_first", NULL),
+														QP_LEVEL_BRIGHTNESS);
+	quickpanel_level_target_t second = parse_level_target(config_get("quickpanel", "level_pair_second", NULL),
+														 QP_LEVEL_VOLUME);
+	if (first == second) second = first == QP_LEVEL_BRIGHTNESS ? QP_LEVEL_VOLUME : QP_LEVEL_BRIGHTNESS;
+	if (first == QP_LEVEL_BRIGHTNESS) {
+		return second == QP_LEVEL_SOUNDFIELD ? QP_LEVEL_PAIR_BRIGHTNESS_SOUNDFIELD :
+											QP_LEVEL_PAIR_BRIGHTNESS_VOLUME;
+	}
+	if (first == QP_LEVEL_VOLUME && second == QP_LEVEL_SOUNDFIELD) return QP_LEVEL_PAIR_VOLUME_SOUNDFIELD;
+	// Volume + brightness is the same pair as brightness + volume.
+	return QP_LEVEL_PAIR_BRIGHTNESS_VOLUME;
+}
+
+static void level_sync(void);
+
+void quickpanel_set_level_pair(quickpanel_level_pair_t pair) {
+	quickpanel_level_target_t first = QP_LEVEL_BRIGHTNESS;
+	quickpanel_level_target_t second = QP_LEVEL_VOLUME;
+	if (pair == QP_LEVEL_PAIR_BRIGHTNESS_SOUNDFIELD) {
+		second = QP_LEVEL_SOUNDFIELD;
+	} else if (pair == QP_LEVEL_PAIR_VOLUME_SOUNDFIELD) {
+		first = QP_LEVEL_VOLUME;
+		second = QP_LEVEL_SOUNDFIELD;
+	}
+	config_set("quickpanel", "level_pair_first", level_target_name(first));
+	config_set("quickpanel", "level_pair_second", level_target_name(second));
+	config_save();
+	level_sync();
+}
+
+// The Soundfield rail becomes the remaining control when the plugin is off,
+// rather than showing a slider that cannot change anything. Which control it
+// becomes depends on the pair: brightness + Soundfield falls back to volume;
+// volume + Soundfield falls back to brightness.
+static void pair_targets(quickpanel_level_pair_t pair, quickpanel_level_target_t *first,
+						 quickpanel_level_target_t *second) {
+	bool soundfield = addons_enabled("soundfield");
+	quickpanel_level_target_t a = QP_LEVEL_BRIGHTNESS;
+	quickpanel_level_target_t b = QP_LEVEL_VOLUME;
+	if (pair == QP_LEVEL_PAIR_BRIGHTNESS_SOUNDFIELD) {
+		b = soundfield ? QP_LEVEL_SOUNDFIELD : QP_LEVEL_VOLUME;
+	} else if (pair == QP_LEVEL_PAIR_VOLUME_SOUNDFIELD) {
+		a = QP_LEVEL_VOLUME;
+		b = soundfield ? QP_LEVEL_SOUNDFIELD : QP_LEVEL_BRIGHTNESS;
+	}
+	if (first) *first = a;
+	if (second) *second = b;
+}
+
+// Which job each visible rail is doing right now. The single-rail choice is
+// untouched by the pair, so turning the second rail off comes back to it; a
+// Soundfield single rail falls back to brightness when its plugin is off.
 static quickpanel_level_target_t level_mode(void) {
-	if (level_both) return QP_LEVEL_BRIGHTNESS;
+	if (level_both) {
+		quickpanel_level_target_t first;
+		pair_targets(quickpanel_level_pair(), &first, NULL);
+		return first;
+	}
 	quickpanel_level_target_t target = quickpanel_level_target();
 	if (target == QP_LEVEL_SOUNDFIELD && !addons_enabled("soundfield")) return QP_LEVEL_BRIGHTNESS;
 	return target;
+}
+
+static quickpanel_level_target_t level_mode_second(void) {
+	quickpanel_level_target_t second;
+	pair_targets(quickpanel_level_pair(), NULL, &second);
+	return second;
+}
+
+static quickpanel_level_target_t level_target_for_slider(lv_obj_t *slider) {
+	return slider == volume_slider ? level_mode_second() : level_mode();
 }
 
 // Keep the rails independent, including the volume warning colour and the
@@ -963,7 +1042,7 @@ static void level_icon_refresh_one(lv_obj_t *icon_obj, lv_obj_t *slider, quickpa
 
 static void level_icon_refresh(void) {
 	level_icon_refresh_one(level_icon, level_slider, level_mode());
-	if (level_both) level_icon_refresh_one(volume_icon, volume_slider, QP_LEVEL_VOLUME);
+	if (level_both) level_icon_refresh_one(volume_icon, volume_slider, level_mode_second());
 }
 
 static void level_sync_one(lv_obj_t *slider, quickpanel_level_target_t target) {
@@ -1003,31 +1082,34 @@ static void level_sync(void) {
 	quickpanel_level_target_t target = level_mode();
 	level_is_volume = target == QP_LEVEL_VOLUME;
 	level_sync_one(level_slider, target);
-	if (level_both) level_sync_one(volume_slider, QP_LEVEL_VOLUME);
+	if (level_both) level_sync_one(volume_slider, level_mode_second());
 	level_icon_refresh();
 }
 
-static void level_follow(void) {
-	quickpanel_level_target_t target = level_mode();
-	// With two rails the second one is always volume, whichever target the
-	// single-rail setting is holding for when the second is put away.
-	lv_obj_t *slider = level_both ? volume_slider :
-				  target == QP_LEVEL_VOLUME ? level_slider : NULL;
-	if (slider && !lv_obj_has_state(slider, LV_STATE_PRESSED)) {
+// The side keys, a remote or the Soundfield page can move a value this rail
+// shows without going through its slider. Which rail that is now depends on
+// the chosen pair, so ask both rather than assuming the second is volume.
+static void level_follow_one(lv_obj_t *slider, quickpanel_level_target_t target) {
+	if (!slider || lv_obj_has_state(slider, LV_STATE_PRESSED)) return;
+	if (target == QP_LEVEL_VOLUME) {
 		int percent = get_volume_percent();
 		if (lv_slider_get_value(slider) != percent) {
 			lv_slider_set_value(slider, percent, LV_ANIM_OFF);
 			level_icon_refresh();
 		}
-	} else if (!level_both && target == QP_LEVEL_SOUNDFIELD && level_slider &&
-			   !lv_obj_has_state(level_slider, LV_STATE_PRESSED)) {
+	} else if (target == QP_LEVEL_SOUNDFIELD) {
 		int width = soundfield_get_width();
 		int steps = (width - SOUNDFIELD_WIDTH_MIN) / SOUNDFIELD_WIDTH_STEP;
-		if (lv_slider_get_value(level_slider) != steps) {
-			lv_slider_set_value(level_slider, steps, LV_ANIM_OFF);
+		if (lv_slider_get_value(slider) != steps) {
+			lv_slider_set_value(slider, steps, LV_ANIM_OFF);
 			level_icon_refresh();
 		}
 	}
+}
+
+static void level_follow(void) {
+	level_follow_one(level_slider, level_mode());
+	if (level_both) level_follow_one(volume_slider, level_mode_second());
 }
 
 static void level_layout(void);
@@ -1448,7 +1530,7 @@ static void edge_indev_cb(lv_event_t *e) {
 // follows the finger either way; what changes is what it is turning up.
 static void level_changed_cb(lv_event_t *e) {
 	lv_obj_t *slider = lv_event_get_target(e);
-	quickpanel_level_target_t target = slider == volume_slider ? QP_LEVEL_VOLUME : level_mode();
+	quickpanel_level_target_t target = level_target_for_slider(slider);
 	if (target == QP_LEVEL_VOLUME) {
 		set_volume_percent((int)lv_slider_get_value(slider));
 		int percent = get_volume_percent();
@@ -1469,7 +1551,7 @@ static void level_changed_cb(lv_event_t *e) {
 
 static void level_released_cb(lv_event_t *e) {
 	lv_obj_t *slider = lv_event_get_target(e);
-	quickpanel_level_target_t target = slider == volume_slider ? QP_LEVEL_VOLUME : level_mode();
+	quickpanel_level_target_t target = level_target_for_slider(slider);
 	if (target == QP_LEVEL_VOLUME) {
 		volume_profile_persist();
 	} else if (target == QP_LEVEL_BRIGHTNESS) {

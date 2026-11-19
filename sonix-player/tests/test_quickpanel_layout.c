@@ -355,6 +355,65 @@ static void test_level_rows(const char *path) {
 	level_sync(); assert(level_mode() == QP_LEVEL_SOUNDFIELD);
 	assert(strcmp(config_get("quickpanel", "level_target", ""), "soundfield") == 0);
 	quickpanel_set_level_target(QP_LEVEL_BRIGHTNESS);
+
+	// Two rails need not be brightness + volume. The same three pills choose
+	// any pair, the saved single-rail choice waits untouched, and each rail
+	// drives and follows its own target rather than a fixed second job.
+	quickpanel_set_both_sliders(true);
+	assert(quickpanel_level_pair() == QP_LEVEL_PAIR_BRIGHTNESS_VOLUME);
+	assert(level_mode() == QP_LEVEL_BRIGHTNESS && level_mode_second() == QP_LEVEL_VOLUME);
+	quickpanel_set_level_pair(QP_LEVEL_PAIR_BRIGHTNESS_SOUNDFIELD);
+	assert(level_mode() == QP_LEVEL_BRIGHTNESS && level_mode_second() == QP_LEVEL_SOUNDFIELD);
+	assert(lv_image_get_src(level_icon) == &icon_sun);
+	assert(lv_image_get_src(volume_icon) == &icon_soundfield_quick);
+	assert(lv_slider_get_min_value(volume_slider) == 0 && lv_slider_get_max_value(volume_slider) == 40);
+	int before_brightness = brightness_writes, before_volume = volume_writes;
+	sf_writes = 0;
+	lv_slider_set_value(volume_slider, 33, LV_ANIM_OFF);
+	lv_obj_send_event(volume_slider, LV_EVENT_VALUE_CHANGED, NULL);
+	assert(test_sf_width == 165 && sf_writes == 1);
+	assert(brightness_writes == before_brightness && volume_writes == before_volume);
+	lv_obj_send_event(volume_slider, LV_EVENT_RELEASED, NULL);
+	assert(brightness_writes == before_brightness && volume_writes == before_volume);
+	test_sf_width = 100; level_follow();
+	assert(lv_slider_get_value(volume_slider) == 20);
+
+	quickpanel_set_level_pair(QP_LEVEL_PAIR_VOLUME_SOUNDFIELD);
+	assert(level_mode() == QP_LEVEL_VOLUME && level_mode_second() == QP_LEVEL_SOUNDFIELD);
+	assert(lv_slider_get_min_value(level_slider) == 0 && lv_slider_get_max_value(level_slider) == 100);
+	before_volume = volume_writes;
+	lv_slider_set_value(level_slider, 70, LV_ANIM_OFF);
+	lv_obj_send_event(level_slider, LV_EVENT_VALUE_CHANGED, NULL);
+	assert(test_volume == 70 && volume_writes == before_volume + 1);
+	test_volume = 40; level_follow();
+	assert(lv_slider_get_value(level_slider) == 40);
+
+	// A plugin switched off puts each Soundfield pair on the other control in
+	// that slot, and putting it back restores the saved pair.
+	config_set_bool("addons", "soundfield", false);
+	level_sync();
+	assert(level_mode() == QP_LEVEL_VOLUME && level_mode_second() == QP_LEVEL_BRIGHTNESS);
+	assert(lv_image_get_src(volume_icon) == &icon_sun);
+	assert(lv_slider_get_min_value(volume_slider) == 5);
+	config_set_bool("addons", "soundfield", true);
+	level_sync();
+	assert(level_mode_second() == QP_LEVEL_SOUNDFIELD);
+	assert(quickpanel_level_pair() == QP_LEVEL_PAIR_VOLUME_SOUNDFIELD);
+	quickpanel_set_level_pair(QP_LEVEL_PAIR_BRIGHTNESS_SOUNDFIELD);
+	config_set_bool("addons", "soundfield", false);
+	level_sync();
+	assert(level_mode() == QP_LEVEL_BRIGHTNESS && level_mode_second() == QP_LEVEL_VOLUME);
+	config_set_bool("addons", "soundfield", true);
+	quickpanel_set_level_pair(QP_LEVEL_PAIR_VOLUME_SOUNDFIELD);
+
+	assert(config_save()); config_init(path);
+	assert(quickpanel_both_sliders() && quickpanel_level_pair() == QP_LEVEL_PAIR_VOLUME_SOUNDFIELD);
+	quickpanel_set_both_sliders(false);
+	assert(quickpanel_level_target() == QP_LEVEL_BRIGHTNESS);
+	quickpanel_set_both_sliders(true);
+	assert(quickpanel_level_pair() == QP_LEVEL_PAIR_VOLUME_SOUNDFIELD);
+	quickpanel_set_both_sliders(false);
+
 	// DAC mode needs its status text even when the compact transport is gone.
 	dac_active = true; quickpanel_set_both_sliders(true);
 	assert(!lv_obj_is_hidden(np_title) && !lv_obj_is_hidden(np_artist));

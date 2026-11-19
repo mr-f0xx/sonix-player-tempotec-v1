@@ -9,8 +9,8 @@
 // toggle, long press to open the page) on a first page and more toggles on a
 // second one a swipe away, the transport controls and the slider
 // under them -- the panel brightness, the volume, or the Soundfield width,
-// whichever the user picked (see quickpanel_level_target), or brightness and
-// volume together when both rails are on. A swipe back towards the edge
+// whichever the user picked (see quickpanel_level_target), or any two of those
+// three when both rails are on (see quickpanel_level_pair). A swipe back towards the edge
 // carries it out again, and a tap outside puts it away the short way.
 //
 // Which edge is the setting in gestures.h. By default it comes down from the
@@ -40,7 +40,19 @@ void quickpanel_set_level_target(quickpanel_level_target_t target);
 bool quickpanel_volume_slider(void); // the legacy two-state answer
 void quickpanel_set_volume_slider(bool on);
 
-// Show separate brightness and volume sliders. On the V1 this makes room by
+// Which two jobs the pair of sliders does when both rails are shown. The
+// single-rail choice above is kept separately, so turning the second rail off
+// restores whichever job that one rail had.
+typedef enum {
+	QP_LEVEL_PAIR_BRIGHTNESS_VOLUME = 0,
+	QP_LEVEL_PAIR_BRIGHTNESS_SOUNDFIELD = 1,
+	QP_LEVEL_PAIR_VOLUME_SOUNDFIELD = 2,
+} quickpanel_level_pair_t;
+
+quickpanel_level_pair_t quickpanel_level_pair(void);
+void quickpanel_set_level_pair(quickpanel_level_pair_t pair);
+
+// Show two sliders, set to the pair chosen above. On the V1 this makes room by
 // replacing the now-playing text with a compact transport; USB DAC status is
 // still shown. Off restores the single-slider choice above.
 bool quickpanel_both_sliders(void);

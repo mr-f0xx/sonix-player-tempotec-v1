@@ -65,7 +65,8 @@ static lv_obj_t *screensettings_screen;
 static lv_obj_t *othersettings_screen;
 static lv_obj_t *brightness_slider;
 static lv_obj_t *brightness_value;
-static lv_obj_t *cc_level_pills, *cc_level_pill[3]; // what the control centre's rail is for
+static lv_obj_t *cc_level_pills, *cc_level_pill[3]; // what the control centre's rail(s) are for
+static lv_obj_t *cc_level_note;
 static lv_obj_t *cc_both_switch;
 // The volume read as a voltage (volumereadout.h): the switch, and under it the
 // socket the figure is for.
@@ -270,26 +271,44 @@ static void brightness_released_cb(lv_event_t *e) {
 	config_save();
 }
 
-// Which of its three jobs the single slider in the control centre does.
-// Nothing here is rebuilt: quickpanel keeps the choice and applies it to the
-// row at once, and the sheet reads it again at every pull in case the row is
-// not built yet.
+// One row of three pills serves both settings: a single rail picks one of its
+// three jobs, two rails pick which pair of those jobs to show. The labels and
+// the active pill change with the Both sliders switch, but neither choice is
+// lost when the switch flips back.
 static void cc_level_refresh(void) {
-	quickpanel_level_target_t target = quickpanel_level_target();
+	static const char *single_tags[3] = {
+		"settings_cc_slider_brightness", "settings_cc_slider_volume", "settings_cc_slider_soundfield"
+	};
+	static const char *pair_tags[3] = {
+		"settings_cc_pair_bright_vol", "settings_cc_pair_bright_sf", "settings_cc_pair_vol_sf"
+	};
+	bool both = quickpanel_both_sliders();
+	bool soundfield = addons_enabled("soundfield");
+	int active = both ? (int)quickpanel_level_pair() : (int)quickpanel_level_target();
 	for (int i = 0; i < 3; i++) {
-		if (cc_level_pill[i]) settingsrow_pill_active(cc_level_pill[i], i == (int)target);
+		if (!cc_level_pill[i]) continue;
+		lv_label_set_text(lv_obj_get_child(cc_level_pill[i], 0), tr(both ? pair_tags[i] : single_tags[i]));
+		settingsrow_pill_active(cc_level_pill[i], i == active);
+		// A module switched off in Plugins has no width to move, so both
+		// pairs that contain it are unavailable until it is on again.
+		bool sf_choice = both ? i > 0 : i == QP_LEVEL_SOUNDFIELD;
+		lv_obj_set_state(cc_level_pill[i], LV_STATE_DISABLED, sf_choice && !soundfield);
 	}
-	// With two rails the first is always brightness and the second volume;
-	// the single-rail choice waits, greyed out, for the second to be turned off.
-	if (cc_level_pills) lv_obj_set_state(cc_level_pills, LV_STATE_DISABLED, quickpanel_both_sliders());
+	if (cc_level_note) lv_label_set_text(cc_level_note, tr(both ? "settings_cc_pair_note" : "settings_cc_slider_note"));
 }
 
 static void cc_level_pick_cb(lv_event_t *e) {
-	quickpanel_level_target_t target = (quickpanel_level_target_t)(intptr_t)lv_event_get_user_data(e);
-	if (target == QP_LEVEL_SOUNDFIELD && !addons_enabled("soundfield")) {
+	int choice = (int)(intptr_t)lv_event_get_user_data(e);
+	bool both = quickpanel_both_sliders();
+	bool soundfield = addons_enabled("soundfield");
+	if (!soundfield && (both ? choice > 0 : choice == QP_LEVEL_SOUNDFIELD)) {
 		return; // a module switched off in Plugins has no width to move
 	}
-	quickpanel_set_level_target(target);
+	if (both) {
+		quickpanel_set_level_pair((quickpanel_level_pair_t)choice);
+	} else {
+		quickpanel_set_level_target((quickpanel_level_target_t)choice);
+	}
 	cc_level_refresh();
 }
 
@@ -423,11 +442,11 @@ static void build_screen_page(gui_config_t *cfg) {
 	lv_obj_add_event_cb(brightness_slider, brightness_changed_cb, LV_EVENT_VALUE_CHANGED, NULL);
 	lv_obj_add_event_cb(brightness_slider, brightness_released_cb, LV_EVENT_RELEASED, NULL);
 
-	// What the single slider under the control centre's buttons is for. The
-	// brightness bar is where the stock firmware puts it and where this
-	// player has always had it; volume and Soundfield width are the other two
-	// choices. A player that only ever used the old volume switch sees Volume
-	// selected here, which is the answer it already gave.
+	// What the slider(s) under the control centre's buttons are for. A single
+	// rail picks brightness (where the stock firmware puts it), volume, or
+	// Soundfield width; two rails pick any pair of those three. A player that
+	// only ever used the old volume switch sees Volume selected here, which
+	// is the answer it already gave.
 	settingsrow_pills(container, "settings_cc_slider", &cc_level_pills);
 	cc_level_pill[QP_LEVEL_BRIGHTNESS] =
 		settingsrow_pill(cc_level_pills, "settings_cc_slider_brightness", QP_LEVEL_BRIGHTNESS, cc_level_pick_cb);
@@ -439,7 +458,7 @@ static void build_screen_page(gui_config_t *cfg) {
 		lv_obj_set_state(cc_level_pill[QP_LEVEL_SOUNDFIELD], LV_STATE_DISABLED, true);
 	}
 	cc_level_refresh();
-	lv_obj_t *cc_level_note = lv_label_create(container);
+	cc_level_note = lv_label_create(container);
 	lv_label_set_long_mode(cc_level_note, LV_LABEL_LONG_WRAP);
 	lv_obj_set_width(cc_level_note, lv_pct(100));
 	lv_obj_add_style(cc_level_note, &theme_style_text_dim, 0);
