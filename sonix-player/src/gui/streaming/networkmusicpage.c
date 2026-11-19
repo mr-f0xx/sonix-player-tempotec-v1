@@ -1,4 +1,5 @@
 #include "networkmusicpage.h"
+#include "streaming.h"
 
 #include "src/gui/fonts/fonts.h"
 #include "src/gui/nowplaying/player.h"
@@ -359,7 +360,19 @@ static void build_pages(void) {
 	settingsrow_add(setup, edit_keys[0], &address_value, edit_cb, NULL);
 	settingsrow_add(setup, edit_keys[1], &username_value, edit_cb, (void *)(uintptr_t)1);
 	settingsrow_add(setup, edit_keys[2], &password_value, edit_cb, (void *)(uintptr_t)2);
-	settingsrow_action(setup, "Connect", connect_cb, NULL);
+	if (STREAMING_LAN_PREVIEW_ONLY) {
+		// Keep the reason on the action itself, even when the note below it is off-screen.
+		lv_obj_t *reason;
+		lv_obj_t *connect = settingsrow_add(setup, "Connect", &reason, NULL, NULL);
+		lv_obj_set_width(reason, lv_pct(55));
+		lv_obj_set_style_text_font(reason, &font_ui_14, 0);
+		lv_obj_set_style_text_align(reason, LV_TEXT_ALIGN_RIGHT, 0);
+		lv_label_set_long_mode(reason, LV_LABEL_LONG_WRAP);
+		lv_label_set_text(reason, tr("Unavailable in browser"));
+		streaming_disable_preview_action(connect, settingsrow_name_label(connect));
+	} else {
+		settingsrow_action(setup, "Connect", connect_cb, NULL);
+	}
 	note(setup, "Passwords are kept until restart. Leave both login fields blank for public shares.");
 
 	edit = lv_obj_create(NULL);
@@ -378,6 +391,10 @@ static void build_pages(void) {
 	keyboard = keyboard_create(edit, cfg->screen_width, cfg->screen_width < 320 ? 144 : 316, edit_field, NULL, "ok", edit_ok, NULL);
 	lv_obj_add_event_cb(edit, edit_left, LV_EVENT_SCREEN_UNLOADED, NULL);
 	switcher_attach_back_gesture(edit);
+
+	// The profile and keyboard work in the preview, but no transfer can start:
+	// don't construct a remote listing, its worker callbacks or its polling timer.
+	if (STREAMING_LAN_PREVIEW_ONLY) return;
 
 	browser = lv_obj_create(NULL);
 	content = settingsrow_page(browser, cfg, "Network folders");
@@ -421,5 +438,6 @@ void networkmusic_page_init(gui_config_t *config) {
 	settingsrow_add_icon(settingsrow_add(menu, "WebDAV", NULL, choose_profile, NULL), &icon_folder, THEME_SEMANTIC_CYAN);
 	settingsrow_add_icon(settingsrow_add(menu, "FTP", NULL, choose_profile, (void *)(uintptr_t)SHARE_FTP),
 						 &icon_folder, THEME_SEMANTIC_BLUE);
-	note(menu, "Browse music on a server and save it to microSD. Use HTTPS WebDAV or FTPS for encrypted connections.");
+	note(menu, STREAMING_LAN_PREVIEW_ONLY ? "Browser preview: try the settings without connecting to a server." :
+		 "Browse music on a server and save it to microSD. Use HTTPS WebDAV or FTPS for encrypted connections.");
 }

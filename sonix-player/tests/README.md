@@ -1001,5 +1001,9 @@ tracks, transfer limits, and cancellation/USB-release cleanup. When `openssl`
 is installed it also checks HTTPS and implicit FTPS with a temporary certificate.
 No real server, account, or microSD is needed. `networkmusic-ui` checks the
 240×320 LVGL setup, navigation, progress, and Save and play handoff with a stub
-worker. Neither test substitutes for the hardware checklist in
+worker. `streaming-preview-ui` exercises the browser versions of the Network
+folders and Listen Together screens on the same renderer, with no native network
+backend linked. It opens them from the grid and list, edits each protocol's
+profile, and checks that Connect, Start Hosting, and Join Stream stay disabled.
+These tests do not substitute for the hardware checklist in
 [`docs/network-folders.md`](../../docs/network-folders.md).
