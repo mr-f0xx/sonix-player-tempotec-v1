@@ -254,6 +254,11 @@ static void test_level_rows(const char *path) {
 	assert(lv_obj_get_height(level_row) == 40 && lv_obj_get_height(volume_row) == 40);
 	assert(lv_obj_get_height(pages_view) >= 2 * circle_button_size + circle_button_gap);
 	assert(lv_obj_get_height(np_card) >= 44 + 2 * card_padding && lv_obj_get_height(np_transport) == 44);
+	// The sun's rays start closer to the edge of their bitmap than the
+	// speaker does, so paired rails inset it to keep the same gap to each
+	// slider. The volume glyph is left where it has always been.
+	assert(lv_image_get_offset_x(level_icon) == -2 && lv_image_get_offset_y(level_icon) == 2);
+	assert(lv_image_get_offset_x(volume_icon) == 0 && lv_image_get_offset_y(volume_icon) == 0);
 	lv_area_t a, b, card, np;
 	lv_obj_get_coords(level_row, &a); lv_obj_get_coords(volume_row, &b);
 	lv_obj_get_coords(controls_card, &card); lv_obj_get_coords(np_card, &np);
@@ -311,6 +316,8 @@ static void test_level_rows(const char *path) {
 	lv_obj_update_layout(screen);
 	assert(level_is_volume && lv_obj_is_hidden(volume_row));
 	assert(!lv_obj_is_hidden(np_title) && !lv_obj_is_hidden(np_artist));
+	// The paired-only inset is removed when the second rail goes away.
+	assert(lv_image_get_offset_x(level_icon) == 0 && lv_image_get_offset_y(level_icon) == 0);
 	assert(lv_obj_get_height(pages_view) == normal_page_h);
 	assert(lv_obj_get_height(np_card) == np_card_h_rest - dots_room);
 	assert(lv_obj_get_height(np_transport) == 52);
@@ -339,6 +346,7 @@ static void test_level_rows(const char *path) {
 	// brightness without losing the saved Soundfield choice.
 	quickpanel_set_both_sliders(true);
 	assert(level_mode() == QP_LEVEL_BRIGHTNESS);
+	assert(lv_image_get_offset_x(level_icon) == -2 && lv_image_get_offset_y(level_icon) == 2);
 	quickpanel_set_both_sliders(false);
 	assert(level_mode() == QP_LEVEL_SOUNDFIELD);
 	config_set_bool("addons", "soundfield", false);

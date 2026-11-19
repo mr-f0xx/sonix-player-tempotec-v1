@@ -944,6 +944,20 @@ static void level_icon_refresh_one(lv_obj_t *icon_obj, lv_obj_t *slider, quickpa
 		icon = &icon_soundfield_quick;
 	}
 	lv_image_set_src(icon_obj, icon);
+	// With two rails the sun sits directly above the speaker, so their
+	// visible glyphs need the same inset inside the 30 px image cell. The
+	// speaker art starts 3 px into its bitmap and the sun's rays start at
+	// 1 px; without this nudge the sun looks closer to its slider. Keep the
+	// original placement for a single rail, where there is nothing to line
+	// up with.
+	int32_t offset_x = 0;
+	int32_t offset_y = 0;
+	if (qp_compact && level_both && icon == &icon_sun) {
+		offset_x = -2;
+		offset_y = 2;
+	}
+	lv_image_set_offset_x(icon_obj, offset_x);
+	lv_image_set_offset_y(icon_obj, offset_y);
 	lv_obj_set_style_bg_color(slider, fill, LV_PART_INDICATOR);
 }
 
