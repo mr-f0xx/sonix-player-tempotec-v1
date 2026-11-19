@@ -45,11 +45,19 @@ static const streaming_item_t tokyo_items[] = {
 	{"qobuz", &icon_qobuz_mark, THEME_SEMANTIC_PURPLE, &qobuz_screen, "qobuz"},
 	{"subsonic", &icon_music_note, THEME_SEMANTIC_BLUE, &subsonic_screen, "subsonic"},
 	{"jellyfin", &icon_jellyfin_mark, THEME_SEMANTIC_PURPLE, &jellyfin_screen, "jellyfin"},
-#ifndef __EMSCRIPTEN__
 	{"Network folders", &icon_sub_folders_glyph, THEME_SEMANTIC_CYAN, &networkmusic_screen, NULL},
 	{"Listen Together", &icon_music_note, THEME_SEMANTIC_GREEN, &listentogether_screen, NULL},
-#endif
 };
+
+void streaming_disable_preview_action(lv_obj_t *button, lv_obj_t *label) {
+	// LVGL's default disabled tint washes out both the card and its text on
+	// dark themes. Use the palette's neutral surface and readable muted text.
+	lv_obj_add_style(button, &theme_style_card, LV_STATE_DISABLED);
+	lv_obj_set_style_recolor_opa(button, LV_OPA_TRANSP, LV_STATE_DISABLED);
+	lv_obj_set_style_shadow_width(button, 0, LV_STATE_DISABLED);
+	lv_obj_add_style(label, &theme_style_text_dim, 0);
+	lv_obj_add_state(button, LV_STATE_DISABLED);
+}
 
 static void streaming_list_build(gui_config_t *cfg) {
 	streaming_list = settingsrow_page(streaming_screen, cfg, "streaming");
@@ -95,9 +103,9 @@ void streaming_init(gui_config_t *cfg) {
 	if (addons_enabled("soundcloud")) {
 		soundcloudpage_init(cfg);
 	}
-#ifndef __EMSCRIPTEN__
+	// Both destinations exist on every build; only their LAN actions are native.
 	networkmusic_page_init(cfg);
-#endif
+	listentogether_page_init(cfg);
 
 	const grid_entry_t all_entries[] = {
 		{"soundcloud", &icon_menu_soundcloud, &soundcloud_screen, NULL},
@@ -107,17 +115,13 @@ void streaming_init(gui_config_t *cfg) {
 		{"podcasts", &icon_menu_podcast, &podcast_screen, NULL},
 		{"subsonic", &icon_menu_streaming, &subsonic_screen, NULL},
 		{"jellyfin", &icon_jellyfin_menu, &jellyfin_screen, NULL},
-#ifndef __EMSCRIPTEN__
 		{"Network folders", &icon_menu_sub_folders, &networkmusic_screen, NULL},
 		{"Listen Together", &icon_menu_streaming, &listentogether_screen, NULL},
-#endif
 	};
 	const char *const all_addons[] = {
 		"soundcloud", "tidal", "qobuz", "radio", "podcasts", "subsonic", "jellyfin",
-#ifndef __EMSCRIPTEN__
 		NULL, // Network folders is a native file client, not a streaming add-on.
 		NULL, // Listen Together is a native P2P feature, not a streaming add-on.
-#endif
 	};
 	grid_entry_t entries[sizeof(all_entries) / sizeof(all_entries[0])];
 	int count = 0;

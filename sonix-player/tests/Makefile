@@ -1697,11 +1697,10 @@ $(BUILD)/test_networkmusic: $(NETWORKMUSIC_SRC) $(ROOT)/src/system/streaming/net
 	@mkdir -p $(BUILD)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ $(NETWORKMUSIC_SRC) $(LDFLAGS) $(LDLIBS)
 
-NETWORKMUSIC_UI_SRC = $(ROOT)/tests/ui/test_networkmusic.c $(ROOT)/src/gui/shell/settingsrow.c \
-                      $(ROOT)/src/gui/shell/keyboard.c $(ROOT)/src/gui/shell/theme.c \
-                      $(ROOT)/src/gui/shell/icons.c $(ROOT)/src/gui/board_profile.c \
-                      $(ROOT)/src/system/input/kblayout.c $(ROOT)/src/system/core/config.c \
-                      $(ROOT)/src/system/core/lang.c $(ROOT)/src/system/net/networkshare.c
+NETWORKMUSIC_UI_COMMON = $(ROOT)/src/gui/shell/settingsrow.c $(ROOT)/src/gui/shell/keyboard.c \
+                       $(ROOT)/src/gui/shell/theme.c $(ROOT)/src/gui/shell/icons.c $(ROOT)/src/gui/board_profile.c \
+                       $(ROOT)/src/system/input/kblayout.c $(ROOT)/src/system/core/config.c $(ROOT)/src/system/core/lang.c
+NETWORKMUSIC_UI_SRC = $(ROOT)/tests/ui/test_networkmusic.c $(ROOT)/src/system/net/networkshare.c $(NETWORKMUSIC_UI_COMMON)
 NETWORKMUSIC_UI_OBJ = $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(NETWORKMUSIC_UI_SRC)) $(UI_LVGL_OBJ)
 .PHONY: networkmusic-ui
 ui: networkmusic-ui
@@ -1711,4 +1710,24 @@ networkmusic-ui: $(BUILD)/test_networkmusic_ui
 $(BUILD)/test_networkmusic_ui: $(NETWORKMUSIC_UI_OBJ)
 	$(CC) -o $@ $^ $(LDFLAGS) $(LDLIBS)
 
--include $(NETWORKMUSIC_UI_OBJ:.o=.d)
+# Use the WASM paths in just these UI objects, on the same headless LVGL as
+# the native test. Native network backends are deliberately not linked.
+LAN_PREVIEW_SRC = tests/ui/test_streaming_preview.c src/gui/streaming/streaming.c \
+                  src/gui/streaming/networkmusicpage.c src/gui/wireless/listentogether.c
+LAN_PREVIEW_SHARED = $(NETWORKMUSIC_UI_COMMON) $(ROOT)/src/gui/shell/gridpage.c $(ROOT)/src/gui/pet/peticon.c \
+                     $(ROOT)/src/gui/streaming/soundcloud_icon.c $(ROOT)/src/gui/streaming/jellyfin_icon.c
+LAN_PREVIEW_OBJ = $(addprefix $(BUILD)/ui-preview/,$(LAN_PREVIEW_SRC:.c=.o)) \
+                  $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(LAN_PREVIEW_SHARED)) $(UI_LVGL_OBJ)
+.PHONY: streaming-preview-ui
+ui: streaming-preview-ui
+streaming-preview-ui: $(BUILD)/test_streaming_preview
+	$(BUILD)/test_streaming_preview ../../sonix-packer/assets/V1/usr/resource/sonix/language
+
+$(BUILD)/ui-preview/%.o: $(ROOT)/%.c ui/lv_conf.h $(ROOT)/lv_conf.h
+	@mkdir -p $(dir $@)
+	$(CC) $(UI_CPPFLAGS) $(UI_CFLAGS) -D__EMSCRIPTEN__ -DHOST_WEB_EMU=1 -DHOST_BUILD=1 -c $< -o $@
+
+$(BUILD)/test_streaming_preview: $(LAN_PREVIEW_OBJ)
+	$(CC) -o $@ $^ $(LDFLAGS) $(LDLIBS)
+
+-include $(NETWORKMUSIC_UI_OBJ:.o=.d) $(LAN_PREVIEW_OBJ:.o=.d)

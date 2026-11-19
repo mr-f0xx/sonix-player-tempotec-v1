@@ -102,6 +102,12 @@ jobs:
           make -C sonix-player -j"$(nproc)" web-wasm
           ls -lh sonix-player/sonix_player_wasm.js sonix-player/sonix_player_wasm.wasm
 
+      # A manual build_ref can predate these screens. Its firmware still runs
+      # through the real-bundle Chrome boot test below.
+      - name: Check Streaming navigation and browser-only network restrictions
+        if: inputs.build_ref == '' || hashFiles('sonix-player/tests/ui/test_streaming_preview.c') != ''
+        run: make -C sonix-player/tests -j"$(nproc)" streaming-preview-ui networkmusic-ui
+
       - name: Pack universal .sonix-web.zip bundle & stage static Pages site
         id: pack
         env:

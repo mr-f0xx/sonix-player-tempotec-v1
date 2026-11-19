@@ -1,6 +1,7 @@
 #include "src/gui/wireless/listentogether.h"
 #include "src/system/net/listentogether.h"
-#include "src/gui/shell/theme.h"
+#include "src/gui/streaming/streaming.h"
+#include "src/system/core/lang.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -92,16 +93,29 @@ void listentogether_page_init(gui_config_t *cfg) {
 
 	lv_obj_t *host_btn = lv_button_create(cont);
 	lv_obj_set_width(host_btn, LV_PCT(80));
-	lv_obj_add_event_cb(host_btn, host_btn_cb, LV_EVENT_CLICKED, NULL);
 	host_btn_lbl = lv_label_create(host_btn);
 	lv_obj_center(host_btn_lbl);
 
 	lv_obj_t *join_btn = lv_button_create(cont);
 	lv_obj_set_width(join_btn, LV_PCT(80));
-	lv_obj_add_event_cb(join_btn, join_btn_cb, LV_EVENT_CLICKED, NULL);
 	join_btn_lbl = lv_label_create(join_btn);
 	lv_obj_center(join_btn_lbl);
 
+	if (STREAMING_LAN_PREVIEW_ONLY) {
+		lv_label_set_text(status_lbl, tr("Listen Together"));
+		lv_obj_set_width(stats_lbl, LV_PCT(100));
+		lv_label_set_long_mode(stats_lbl, LV_LABEL_LONG_WRAP);
+		lv_obj_set_style_text_align(stats_lbl, LV_TEXT_ALIGN_CENTER, 0);
+		lv_label_set_text(stats_lbl, tr("Hosting and joining are unavailable in the browser."));
+		lv_label_set_text(host_btn_lbl, "Start Hosting");
+		lv_label_set_text(join_btn_lbl, "Join Stream");
+		streaming_disable_preview_action(host_btn, host_btn_lbl);
+		streaming_disable_preview_action(join_btn, join_btn_lbl);
+		return; // No discovery, socket callbacks, or stats timer in the browser.
+	}
+
+	lv_obj_add_event_cb(host_btn, host_btn_cb, LV_EVENT_CLICKED, NULL);
+	lv_obj_add_event_cb(join_btn, join_btn_cb, LV_EVENT_CLICKED, NULL);
 	update_ui();
 	if (!lt_ui_timer) {
 		lt_ui_timer = lv_timer_create(lt_timer_cb, 500, NULL);
