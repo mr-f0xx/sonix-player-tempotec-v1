@@ -8,7 +8,14 @@ You can now try Sonix in the Tempotec V1 simulator I made (also compatible with 
 
 ## Previews
 
-Showcase of the default theme. Click any picture to open it full size. (This is not the default font neither the color)
+Expand a theme to see its screenshots. Select a screenshot to view it full size.
+
+<a name="default-theme"></a>
+
+<details>
+<summary><strong>Default theme</strong></summary>
+
+These screenshots use a custom font and color.
 
 <table>
   <tr>
@@ -48,10 +55,15 @@ Showcase of the default theme. Click any picture to open it full size. (This is 
     </td>
   </tr>
 </table>
+</details>
 
-### Tokyo Night theme
+<a name="tokyo-night-theme"></a>
+
+<details>
+<summary><strong>Tokyo Night theme</strong></summary>
 
 Showcase of **Tokyo Night** appearance: a blue-black palette with function-matched icons.
+
 <table>
   <tr>
     <td align="center">
@@ -90,8 +102,12 @@ Showcase of **Tokyo Night** appearance: a blue-black palette with function-match
     </td>
   </tr>
 </table>
+</details>
 
-### Amber on black theme
+<a name="amber-on-black-theme"></a>
+
+<details>
+<summary><strong>Amber on Black theme</strong></summary>
 
 Showcase of **Amber** appearance: fiery orange accents on a pure black background, with warm amber artwork and glowing icons.
 
@@ -133,8 +149,12 @@ Showcase of **Amber** appearance: fiery orange accents on a pure black backgroun
     </td>
   </tr>
 </table>
+</details>
 
-### OLED theme
+<a name="oled-theme"></a>
+
+<details>
+<summary><strong>OLED theme</strong></summary>
 
 Showcase of **OLED** appearance: true black backgrounds with white as the accent, on the same V1 layouts as Tokyo Night and Amber.
 
@@ -176,14 +196,16 @@ Showcase of **OLED** appearance: true black backgrounds with white as the accent
     </td>
   </tr>
 </table>
+</details>
 
 ## Contents
 
 - [Target device](#target-device)
 - [Features](#features)
-- [Screenshots](#screenshots)
+- [Previews](#previews)
+  - [Default theme](#default-theme)
   - [Tokyo Night theme](#tokyo-night-theme)
-  - [Ember theme](#ember-theme)
+  - [Amber on Black theme](#amber-on-black-theme)
   - [OLED theme](#oled-theme)
 - [Music pet](#music-pet)
 - [Tag Manager](#tag-manager)
