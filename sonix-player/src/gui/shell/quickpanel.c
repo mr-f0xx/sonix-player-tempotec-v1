@@ -110,9 +110,10 @@ static int card_gap = CARD_GAP;
 static int card_row_gap = CARD_ROW_GAP;
 static int dots_room = DOTS_ROOM;
 static int level_row_h = LEVEL_ROW_H;
-// The first rail is brightness by default, or volume in single-slider mode.
-// Both mode always uses brightness first and a separate volume rail second.
-static bool level_is_volume;
+// The first rail is brightness by default, or volume or Soundfield width in
+// single-slider mode. Both mode always uses brightness first and a separate
+// volume rail second.
+static bool level_is_volume; // the legacy mirror of a volume rail
 static bool level_both;
 static int panel_pad_top;
 static int panel_pad_bottom = 8;
@@ -903,35 +904,70 @@ static void place_sheet(void) {
 // rail is enabled; turning the second rail off returns to that exact choice.
 // ---------------------------------------------------------------------------
 
-bool quickpanel_volume_slider(void) { return config_get_int("quickpanel", "volume_slider", 0) != 0; }
+quickpanel_level_target_t quickpanel_level_target(void) {
+	const char *saved = config_get("quickpanel", "level_target", NULL);
+	if (saved) {
+		if (strcmp(saved, "volume") == 0) return QP_LEVEL_VOLUME;
+		if (strcmp(saved, "soundfield") == 0) return QP_LEVEL_SOUNDFIELD;
+		if (strcmp(saved, "brightness") == 0) return QP_LEVEL_BRIGHTNESS;
+	}
+	// A player updated from the two-state setting has no level_target yet:
+	// its volume switch is still the answer it gave.
+	return config_get_int("quickpanel", "volume_slider", 0) ? QP_LEVEL_VOLUME : QP_LEVEL_BRIGHTNESS;
+}
+bool quickpanel_volume_slider(void) { return quickpanel_level_target() == QP_LEVEL_VOLUME; }
 bool quickpanel_both_sliders(void) { return config_get_bool("quickpanel", "both_sliders", false); }
 
-// Keep the two rails independent, including the volume warning colour.
-static void level_icon_refresh_one(lv_obj_t *icon_obj, lv_obj_t *slider, bool volume) {
+// Which job the visible single rail is doing right now. With both rails on
+// the first is always brightness, whatever the saved single-rail choice was;
+// Soundfield falls back to brightness when its plugin is switched off in
+// Plugins, so the rail never moves to something the player cannot hear.
+static quickpanel_level_target_t level_mode(void) {
+	if (level_both) return QP_LEVEL_BRIGHTNESS;
+	quickpanel_level_target_t target = quickpanel_level_target();
+	if (target == QP_LEVEL_SOUNDFIELD && !addons_enabled("soundfield")) return QP_LEVEL_BRIGHTNESS;
+	return target;
+}
+
+// Keep the rails independent, including the volume warning colour and the
+// Soundfield glyph on the width rail.
+static void level_icon_refresh_one(lv_obj_t *icon_obj, lv_obj_t *slider, quickpanel_level_target_t target) {
 	if (!icon_obj || !slider) return;
 	const lv_image_dsc_t *icon = &icon_sun;
 	lv_color_t fill = theme()->accent;
-	if (volume) {
+	if (target == QP_LEVEL_VOLUME) {
 		int percent = get_volume_percent();
 		icon = percent <= 0 ? &icon_volume_mute :
 			percent < VOLUME_WARN_PERCENT ? &icon_volume_low : &icon_volume_high;
 		if (percent > VOLUME_WARN_PERCENT) fill = VOLUME_WARN_COLOR;
+	} else if (target == QP_LEVEL_SOUNDFIELD) {
+		icon = &icon_soundfield_quick;
 	}
 	lv_image_set_src(icon_obj, icon);
 	lv_obj_set_style_bg_color(slider, fill, LV_PART_INDICATOR);
 }
 
 static void level_icon_refresh(void) {
-	level_icon_refresh_one(level_icon, level_slider, level_is_volume);
-	if (level_both) level_icon_refresh_one(volume_icon, volume_slider, true);
+	level_icon_refresh_one(level_icon, level_slider, level_mode());
+	if (level_both) level_icon_refresh_one(volume_icon, volume_slider, QP_LEVEL_VOLUME);
 }
 
-static void level_sync_one(lv_obj_t *slider, bool volume) {
+static void level_sync_one(lv_obj_t *slider, quickpanel_level_target_t target) {
 	if (!slider) return;
-	if (volume) {
+	if (target == QP_LEVEL_VOLUME) {
 		lv_slider_set_range(slider, 0, 100);
 		if (!lv_obj_has_state(slider, LV_STATE_PRESSED))
 			lv_slider_set_value(slider, get_volume_percent(), LV_ANIM_OFF);
+	} else if (target == QP_LEVEL_SOUNDFIELD) {
+		// The full page works in hundredths with a 0.05 step; the rail has
+		// one notch per step, so 0..40 covers mono through twice natural.
+		int steps = (SOUNDFIELD_WIDTH_MAX - SOUNDFIELD_WIDTH_MIN) / SOUNDFIELD_WIDTH_STEP;
+		lv_slider_set_range(slider, 0, steps);
+		if (!lv_obj_has_state(slider, LV_STATE_PRESSED)) {
+			int width = soundfield_get_width();
+			if (width < SOUNDFIELD_WIDTH_MIN || width > SOUNDFIELD_WIDTH_MAX) width = SOUNDFIELD_WIDTH_DEFAULT;
+			lv_slider_set_value(slider, (width - SOUNDFIELD_WIDTH_MIN) / SOUNDFIELD_WIDTH_STEP, LV_ANIM_OFF);
+		}
 	} else {
 		long max = power_get_max_brightness();
 		if (max <= 0) max = 100;
@@ -950,28 +986,52 @@ static void level_sync_one(lv_obj_t *slider, bool volume) {
 static void level_sync(void) {
 	if (!level_slider) return;
 	level_both = quickpanel_both_sliders();
-	level_is_volume = !level_both && quickpanel_volume_slider();
-	level_sync_one(level_slider, level_is_volume);
-	if (level_both) level_sync_one(volume_slider, true);
+	quickpanel_level_target_t target = level_mode();
+	level_is_volume = target == QP_LEVEL_VOLUME;
+	level_sync_one(level_slider, target);
+	if (level_both) level_sync_one(volume_slider, QP_LEVEL_VOLUME);
 	level_icon_refresh();
 }
 
 static void level_follow(void) {
-	lv_obj_t *slider = level_both ? volume_slider : level_is_volume ? level_slider : NULL;
-	if (!slider || lv_obj_has_state(slider, LV_STATE_PRESSED)) return;
-	int percent = get_volume_percent();
-	if (lv_slider_get_value(slider) != percent) {
-		lv_slider_set_value(slider, percent, LV_ANIM_OFF);
-		level_icon_refresh();
+	quickpanel_level_target_t target = level_mode();
+	// With two rails the second one is always volume, whichever target the
+	// single-rail setting is holding for when the second is put away.
+	lv_obj_t *slider = level_both ? volume_slider :
+				  target == QP_LEVEL_VOLUME ? level_slider : NULL;
+	if (slider && !lv_obj_has_state(slider, LV_STATE_PRESSED)) {
+		int percent = get_volume_percent();
+		if (lv_slider_get_value(slider) != percent) {
+			lv_slider_set_value(slider, percent, LV_ANIM_OFF);
+			level_icon_refresh();
+		}
+	} else if (!level_both && target == QP_LEVEL_SOUNDFIELD && level_slider &&
+			   !lv_obj_has_state(level_slider, LV_STATE_PRESSED)) {
+		int width = soundfield_get_width();
+		int steps = (width - SOUNDFIELD_WIDTH_MIN) / SOUNDFIELD_WIDTH_STEP;
+		if (lv_slider_get_value(level_slider) != steps) {
+			lv_slider_set_value(level_slider, steps, LV_ANIM_OFF);
+			level_icon_refresh();
+		}
 	}
 }
 
 static void level_layout(void);
 
-void quickpanel_set_volume_slider(bool on) {
-	config_set_int("quickpanel", "volume_slider", on ? 1 : 0);
+void quickpanel_set_level_target(quickpanel_level_target_t target) {
+	const char *name = "brightness";
+	if (target == QP_LEVEL_VOLUME) name = "volume";
+	if (target == QP_LEVEL_SOUNDFIELD) name = "soundfield";
+	config_set("quickpanel", "level_target", name);
+	// Keep the old switch in step: firmware that predates the three-way
+	// choice, and config readers that still ask it, see the same answer.
+	config_set_int("quickpanel", "volume_slider", target == QP_LEVEL_VOLUME ? 1 : 0);
 	config_save();
 	level_sync();
+}
+
+void quickpanel_set_volume_slider(bool on) {
+	quickpanel_set_level_target(on ? QP_LEVEL_VOLUME : QP_LEVEL_BRIGHTNESS);
 }
 
 void quickpanel_set_both_sliders(bool on) {
@@ -1370,16 +1430,24 @@ static void edge_indev_cb(lv_event_t *e) {
 // controls
 // ---------------------------------------------------------------------------
 
-// The row's one slider, in whichever of its two jobs it is doing. The panel
+// The row's one slider, in whichever of its three jobs it is doing. The panel
 // follows the finger either way; what changes is what it is turning up.
 static void level_changed_cb(lv_event_t *e) {
 	lv_obj_t *slider = lv_event_get_target(e);
-	if (slider == volume_slider || level_is_volume) {
+	quickpanel_level_target_t target = slider == volume_slider ? QP_LEVEL_VOLUME : level_mode();
+	if (target == QP_LEVEL_VOLUME) {
 		set_volume_percent((int)lv_slider_get_value(slider));
 		int percent = get_volume_percent();
 		if (lv_slider_get_value(slider) != percent) lv_slider_set_value(slider, percent, LV_ANIM_OFF);
 		level_icon_refresh();
 		topbar_refresh_volume(percent);
+	} else if (target == QP_LEVEL_SOUNDFIELD) {
+		int width = SOUNDFIELD_WIDTH_MIN + (int)lv_slider_get_value(slider) * SOUNDFIELD_WIDTH_STEP;
+		soundfield_set_width(width);
+		// Moving this rail is a request to hear the change: switch the module
+		// on the first time it is used. Its own setter saves the width already.
+		if (!soundfield_get_enabled()) soundfield_set_enabled(true);
+		level_icon_refresh();
 	} else {
 		power_set_brightness(lv_slider_get_value(slider));
 	}
@@ -1387,12 +1455,14 @@ static void level_changed_cb(lv_event_t *e) {
 
 static void level_released_cb(lv_event_t *e) {
 	lv_obj_t *slider = lv_event_get_target(e);
-	if (slider == volume_slider || level_is_volume) {
+	quickpanel_level_target_t target = slider == volume_slider ? QP_LEVEL_VOLUME : level_mode();
+	if (target == QP_LEVEL_VOLUME) {
 		volume_profile_persist();
-	} else {
+	} else if (target == QP_LEVEL_BRIGHTNESS) {
 		config_set_int("screen", "brightness", (int)lv_slider_get_value(slider));
 		config_save();
 	}
+	// Soundfield's setter saved its width on every step of the drag.
 }
 
 static void play_cb(lv_event_t *e) {
@@ -3321,10 +3391,10 @@ static lv_obj_t *make_level_row(lv_obj_t **icon_out, lv_obj_t **slider_out) {
 void quickpanel_init(gui_config_t *cfg) {
 	panel_h = cfg->screen_height;
 	qp_compact = cfg->screen_width < 320;
-	// Which of the slider's two jobs it starts in. The setting is read again
+	// Which of the slider's three jobs it starts in. The setting is read again
 	// when the sheet opens, so this only has to be right before the first pull.
 	level_both = quickpanel_both_sliders();
-	level_is_volume = !level_both && quickpanel_volume_slider();
+	level_is_volume = level_mode() == QP_LEVEL_VOLUME;
 	circle_button_size = qp_compact ? 44 : CIRCLE_BUTTON_SIZE;
 	circle_button_gap = qp_compact ? 4 : CIRCLE_BUTTON_GAP;
 	qp_buttons_per_line = 4;

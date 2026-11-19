@@ -29,6 +29,7 @@
 #include "src/gui/shell/topbar.h"
 #include "src/gui/shell/volumereadout.h"
 #include "src/system/audio/alsa-controls.h"
+#include "src/system/addons/addons.h"
 #include "src/system/core/config.h"
 #include "src/system/audio/headset.h"
 #include "src/system/core/lang.h"
@@ -64,7 +65,7 @@ static lv_obj_t *screensettings_screen;
 static lv_obj_t *othersettings_screen;
 static lv_obj_t *brightness_slider;
 static lv_obj_t *brightness_value;
-static lv_obj_t *cc_volume_switch; // what the control centre's slider is for
+static lv_obj_t *cc_level_pills, *cc_level_pill[3]; // what the control centre's rail is for
 static lv_obj_t *cc_both_switch;
 // The volume read as a voltage (volumereadout.h): the switch, and under it the
 // socket the figure is for.
@@ -269,21 +270,33 @@ static void brightness_released_cb(lv_event_t *e) {
 	config_save();
 }
 
-// Which of its two jobs the slider in the control centre does. Nothing here is
-// rebuilt: quickpanel keeps the choice and applies it to the row at once, and
-// the sheet reads it again at every pull in case the row is not built yet.
-static void cc_volume_toggled_cb(lv_event_t *e) {
-	(void)e;
-	quickpanel_set_volume_slider(lv_obj_has_state(cc_volume_switch, LV_STATE_CHECKED));
+// Which of its three jobs the single slider in the control centre does.
+// Nothing here is rebuilt: quickpanel keeps the choice and applies it to the
+// row at once, and the sheet reads it again at every pull in case the row is
+// not built yet.
+static void cc_level_refresh(void) {
+	quickpanel_level_target_t target = quickpanel_level_target();
+	for (int i = 0; i < 3; i++) {
+		if (cc_level_pill[i]) settingsrow_pill_active(cc_level_pill[i], i == (int)target);
+	}
+	// With two rails the first is always brightness and the second volume;
+	// the single-rail choice waits, greyed out, for the second to be turned off.
+	if (cc_level_pills) lv_obj_set_state(cc_level_pills, LV_STATE_DISABLED, quickpanel_both_sliders());
+}
+
+static void cc_level_pick_cb(lv_event_t *e) {
+	quickpanel_level_target_t target = (quickpanel_level_target_t)(intptr_t)lv_event_get_user_data(e);
+	if (target == QP_LEVEL_SOUNDFIELD && !addons_enabled("soundfield")) {
+		return; // a module switched off in Plugins has no width to move
+	}
+	quickpanel_set_level_target(target);
+	cc_level_refresh();
 }
 
 static void cc_both_toggled_cb(lv_event_t *e) {
 	(void)e;
-	bool on = lv_obj_has_state(cc_both_switch, LV_STATE_CHECKED);
-	quickpanel_set_both_sliders(on);
-	// Keep the previous single-slider choice, but make clear it only applies
-	// when the second slider is off.
-	if (cc_volume_switch) lv_obj_set_state(cc_volume_switch, LV_STATE_DISABLED, on);
+	quickpanel_set_both_sliders(lv_obj_has_state(cc_both_switch, LV_STATE_CHECKED));
+	cc_level_refresh();
 }
 
 // Volume as voltage: the switch, the two sockets under it, and which of them
@@ -410,24 +423,31 @@ static void build_screen_page(gui_config_t *cfg) {
 	lv_obj_add_event_cb(brightness_slider, brightness_changed_cb, LV_EVENT_VALUE_CHANGED, NULL);
 	lv_obj_add_event_cb(brightness_slider, brightness_released_cb, LV_EVENT_RELEASED, NULL);
 
-	// What the slider under the control centre's buttons is for: the brightness
-	// this page sets, or the output volume instead. Off keeps the brightness
-	// bar, which is what the stock firmware puts there and what this player has
-	// always had, so an update moves nobody's hand.
-	settingsrow_toggle(container, "settings_cc_volume", &cc_volume_switch, cc_volume_toggled_cb);
-	if (quickpanel_volume_slider()) {
-		lv_obj_add_state(cc_volume_switch, LV_STATE_CHECKED);
+	// What the single slider under the control centre's buttons is for. The
+	// brightness bar is where the stock firmware puts it and where this
+	// player has always had it; volume and Soundfield width are the other two
+	// choices. A player that only ever used the old volume switch sees Volume
+	// selected here, which is the answer it already gave.
+	settingsrow_pills(container, "settings_cc_slider", &cc_level_pills);
+	cc_level_pill[QP_LEVEL_BRIGHTNESS] =
+		settingsrow_pill(cc_level_pills, "settings_cc_slider_brightness", QP_LEVEL_BRIGHTNESS, cc_level_pick_cb);
+	cc_level_pill[QP_LEVEL_VOLUME] =
+		settingsrow_pill(cc_level_pills, "settings_cc_slider_volume", QP_LEVEL_VOLUME, cc_level_pick_cb);
+	cc_level_pill[QP_LEVEL_SOUNDFIELD] =
+		settingsrow_pill(cc_level_pills, "settings_cc_slider_soundfield", QP_LEVEL_SOUNDFIELD, cc_level_pick_cb);
+	if (!addons_enabled("soundfield")) {
+		lv_obj_set_state(cc_level_pill[QP_LEVEL_SOUNDFIELD], LV_STATE_DISABLED, true);
 	}
-	lv_obj_t *cc_volume_note = lv_label_create(container);
-	lv_label_set_long_mode(cc_volume_note, LV_LABEL_LONG_WRAP);
-	lv_obj_set_width(cc_volume_note, lv_pct(100));
-	lv_obj_add_style(cc_volume_note, &theme_style_text_dim, 0);
-	lv_obj_set_style_text_font(cc_volume_note, &font_ui_22, 0);
-	lv_label_set_text(cc_volume_note, tr("settings_cc_volume_note"));
+	cc_level_refresh();
+	lv_obj_t *cc_level_note = lv_label_create(container);
+	lv_label_set_long_mode(cc_level_note, LV_LABEL_LONG_WRAP);
+	lv_obj_set_width(cc_level_note, lv_pct(100));
+	lv_obj_add_style(cc_level_note, &theme_style_text_dim, 0);
+	lv_obj_set_style_text_font(cc_level_note, &font_ui_22, 0);
+	lv_label_set_text(cc_level_note, tr("settings_cc_slider_note"));
 
 	settingsrow_toggle(container, "settings_cc_both", &cc_both_switch, cc_both_toggled_cb);
 	lv_obj_set_state(cc_both_switch, LV_STATE_CHECKED, quickpanel_both_sliders());
-	lv_obj_set_state(cc_volume_switch, LV_STATE_DISABLED, quickpanel_both_sliders());
 	lv_obj_t *cc_both_note = lv_label_create(container);
 	lv_label_set_long_mode(cc_both_note, LV_LABEL_LONG_WRAP);
 	lv_obj_set_width(cc_both_note, lv_pct(100));

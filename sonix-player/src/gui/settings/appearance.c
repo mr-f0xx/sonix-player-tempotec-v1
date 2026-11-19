@@ -30,6 +30,7 @@ lv_obj_t *appearance_screen;
 static lv_obj_t *theme_buttons[THEME_KIND_CUSTOM + 1];
 static lv_obj_t *btn_boot[5];		 // Stock / Retrospace / Space / Travelling in space / Custom
 static lv_obj_t *boot_picture_value; // the name of the custom picture, on its row
+static lv_obj_t *boot_light_value, *boot_light_slider; // splash brightness
 static lv_obj_t *btn_clock[4]; // left / centre / right / hidden
 static lv_obj_t *btn_accent[THEME_ACCENT_COUNT]; // the coloured circles
 static lv_obj_t *btn_custom_accent;
@@ -639,6 +640,8 @@ static void theme_pick_cb(lv_event_t *e) {
 	appearance_preview_refresh();
 }
 
+#define BOOT_LIGHT_COUNT ((BOOTLOGO_LIGHT_MAX - BOOTLOGO_LIGHT_MIN) / BOOTLOGO_LIGHT_STEP + 1)
+
 // ---------------------------------------------------------------------------
 // The boot screen: the picture the next power-on opens with
 //
@@ -711,10 +714,42 @@ static void custom_card_refresh_cb(lv_event_t *e) {
 	theme_reload_custom();
 }
 
+static void boot_light_show(void);
+
 static void boot_card_refresh_cb(lv_event_t *e) {
 	(void)e;
 	refresh_boot_picture();
 	refresh_boot_buttons();
+	boot_light_show();
+}
+
+// The splash is drawn before the config is mounted, so this slider writes the
+// same flash marker as the picture choice: the next boot is the first one it
+// affects. 60% is the stock level and is what a player keeps on update.
+static void boot_light_show(void) {
+	if (boot_light_value) {
+		lv_label_set_text_fmt(boot_light_value, "%d%%", theme_boot_brightness());
+	}
+	if (boot_light_slider) {
+		lv_slider_set_value(boot_light_slider,
+							(theme_boot_brightness() - BOOTLOGO_LIGHT_MIN) / BOOTLOGO_LIGHT_STEP, LV_ANIM_OFF);
+	}
+}
+
+// The label follows the finger; the flash marker waits for the finger to lift.
+// A slider fires VALUE_CHANGED many times in one drag and NAND has a finite
+// number of erase cycles.
+static void boot_light_changed_cb(lv_event_t *e) {
+	(void)e;
+	int light = BOOTLOGO_LIGHT_MIN + (int)lv_slider_get_value(boot_light_slider) * BOOTLOGO_LIGHT_STEP;
+	lv_label_set_text_fmt(boot_light_value, "%d%%", light);
+}
+
+static void boot_light_released_cb(lv_event_t *e) {
+	(void)e;
+	int light = BOOTLOGO_LIGHT_MIN + (int)lv_slider_get_value(boot_light_slider) * BOOTLOGO_LIGHT_STEP;
+	theme_set_boot_brightness(light);
+	boot_light_show();
 }
 
 // The four names are not translated, the way a font's name is not: they are
@@ -1135,6 +1170,20 @@ void appearance_init(gui_config_t *cfg) {
 	btn_boot[BOOTLOGO_TRAVELLING] =
 		make_boot_choice(boot_row, "Travelling in space", BOOTLOGO_TRAVELLING, compact);
 	btn_boot[BOOTLOGO_CUSTOM] = make_boot_choice(boot_row, tr("appearance_boot_custom"), BOOTLOGO_CUSTOM, compact);
+
+	// How bright the panel is while that picture is on it. Same marker, same
+	// next-boot timing, so it belongs with the picture rather than with the
+	// live Screen brightness slider.
+	settingsrow_slider(container, "appearance_boot_brightness", BOOT_LIGHT_COUNT, &boot_light_value,
+					   &boot_light_slider, boot_light_changed_cb);
+	lv_obj_add_event_cb(boot_light_slider, boot_light_released_cb, LV_EVENT_RELEASED, NULL);
+	boot_light_show();
+	lv_obj_t *boot_light_note = lv_label_create(container);
+	lv_label_set_long_mode(boot_light_note, LV_LABEL_LONG_WRAP);
+	lv_obj_set_width(boot_light_note, lv_pct(100));
+	lv_obj_add_style(boot_light_note, &theme_style_text_dim, 0);
+	lv_obj_set_style_text_font(boot_light_note, &font_ui_22, 0);
+	lv_label_set_text(boot_light_note, tr("appearance_boot_brightness_note"));
 
 	// Under the card, like the other notes on this page: when the change
 	// becomes visible.

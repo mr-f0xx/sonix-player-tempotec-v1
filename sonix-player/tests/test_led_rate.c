@@ -6,6 +6,13 @@
 
 static int failures;
 
+// led_set_brightness() re-renders the current state; the visualizer consumer is
+// irrelevant to the colour arithmetic checked here.
+void visualizer_enable(visualizer_consumer_t consumer, bool enabled) {
+	(void)consumer;
+	(void)enabled;
+}
+
 #define CHECK(cond)                                                                            \
 	do {                                                                                        \
 		if (!(cond)) {                                                                          \
@@ -46,6 +53,22 @@ int main(void) {
 	CHECK(dsd == LS_DSD);
 	CHECK(state_pattern(dsd) == PATTERN_DSD_WHITE);
 	CHECK(rate_state(2822400, false) == LS_DSD);
+
+	// The brightness slider reaches every lit rung of the ladder, but never
+	// level 0 (off): Stealth and the LED switch are the ways to turn it out.
+	// The default is unchanged from the old five-step slider, so an update
+	// does not change the light a saved (or unsaved) player puts out.
+	CHECK(BRIGHTNESS_MIN == 1 && BRIGHTNESS_MAX == 10 && BRIGHTNESS_DEFAULT == 5);
+	CHECK(led_level() == BRIGHTNESS_DEFAULT);
+	led_set_brightness(0);
+	CHECK(led_level() == BRIGHTNESS_MIN);
+	led_set_brightness(11);
+	CHECK(led_level() == BRIGHTNESS_MAX);
+	led_set_brightness(10);
+	led_render_t top;
+	build_render(LS_PCM_48K, &top);
+	CHECK(top.r == LADDER[10] && top.g == LADDER[10] && top.b == 0);
+	led_set_brightness(BRIGHTNESS_DEFAULT);
 
 	if (failures) {
 		fprintf(stderr, "%d LED rate check(s) failed\n", failures);

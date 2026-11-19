@@ -131,6 +131,25 @@ const lv_image_dsc_t icon_volume_high = TEST_ICON;
 // LVGL's configured default font; no widgets are created in this suite.
 lv_font_t font_ui_14;
 
+// Soundfield's width rail uses the real page's arithmetic bounds, with the
+// module state kept here instead of in the audio chain.
+static int test_sf_width = SOUNDFIELD_WIDTH_DEFAULT;
+static bool test_sf_enabled = true;
+static int sf_writes, sf_enable_writes;
+bool soundfield_get_enabled(void) { return test_sf_enabled; }
+void soundfield_set_enabled(bool on) {
+	test_sf_enabled = on;
+	sf_enable_writes++;
+}
+int soundfield_get_width(void) { return test_sf_width; }
+void soundfield_set_width(int hundredths) {
+	if (hundredths < SOUNDFIELD_WIDTH_MIN) hundredths = SOUNDFIELD_WIDTH_MIN;
+	if (hundredths > SOUNDFIELD_WIDTH_MAX) hundredths = SOUNDFIELD_WIDTH_MAX;
+	test_sf_width = (hundredths / SOUNDFIELD_WIDTH_STEP) * SOUNDFIELD_WIDTH_STEP;
+	sf_writes++;
+}
+const lv_image_dsc_t icon_soundfield_quick = TEST_ICON;
+
 static void reset_layout(void) {
 	order_loaded = false;
 	hidden_n = 0;
@@ -295,6 +314,39 @@ static void test_level_rows(const char *path) {
 	assert(lv_obj_get_height(pages_view) == normal_page_h);
 	assert(lv_obj_get_height(np_card) == np_card_h_rest - dots_room);
 	assert(lv_obj_get_height(np_transport) == 52);
+	// The single rail can also drive Soundfield width, on the full page's
+	// 0.05 steps. Its glyph follows the choice, the first use switches the
+	// module on, and no brightness/volume write leaks out of the rail.
+	config_set("quickpanel", "level_target", ""); // old players: the volume switch answers
+	assert(quickpanel_level_target() == QP_LEVEL_VOLUME);
+	quickpanel_set_level_target(QP_LEVEL_SOUNDFIELD);
+	level_sync();
+	assert(level_mode() == QP_LEVEL_SOUNDFIELD && !level_is_volume);
+	assert(lv_slider_get_min_value(level_slider) == 0 && lv_slider_get_max_value(level_slider) == 40);
+	assert(lv_slider_get_value(level_slider) == SOUNDFIELD_WIDTH_DEFAULT / SOUNDFIELD_WIDTH_STEP);
+	assert(lv_image_get_src(level_icon) == &icon_soundfield_quick);
+	test_sf_enabled = false;
+	int writes_before = brightness_writes + volume_writes;
+	lv_slider_set_value(level_slider, 33, LV_ANIM_OFF);
+	lv_obj_send_event(level_slider, LV_EVENT_VALUE_CHANGED, NULL);
+	assert(test_sf_width == 165 && test_sf_enabled && sf_writes == 1 && sf_enable_writes == 1);
+	assert(brightness_writes + volume_writes == writes_before);
+	lv_obj_send_event(level_slider, LV_EVENT_RELEASED, NULL);
+	assert(brightness_writes + volume_writes == writes_before);
+	test_sf_width = 100; level_follow();
+	assert(lv_slider_get_value(level_slider) == 20);
+	// Both rails, or a plugin switched off, put the first rail back on
+	// brightness without losing the saved Soundfield choice.
+	quickpanel_set_both_sliders(true);
+	assert(level_mode() == QP_LEVEL_BRIGHTNESS);
+	quickpanel_set_both_sliders(false);
+	assert(level_mode() == QP_LEVEL_SOUNDFIELD);
+	config_set_bool("addons", "soundfield", false);
+	level_sync(); assert(level_mode() == QP_LEVEL_BRIGHTNESS);
+	config_set_bool("addons", "soundfield", true);
+	level_sync(); assert(level_mode() == QP_LEVEL_SOUNDFIELD);
+	assert(strcmp(config_get("quickpanel", "level_target", ""), "soundfield") == 0);
+	quickpanel_set_level_target(QP_LEVEL_BRIGHTNESS);
 	// DAC mode needs its status text even when the compact transport is gone.
 	dac_active = true; quickpanel_set_both_sliders(true);
 	assert(!lv_obj_is_hidden(np_title) && !lv_obj_is_hidden(np_artist));
@@ -309,6 +361,7 @@ static void test_level_rows(const char *path) {
 	np_title = np_artist = np_transport = page_dots = NULL;
 	for (int i = 0; i < QP_PAGE_COUNT; i++) page_row[i] = NULL;
 	config_set_bool("quickpanel", "volume_slider", false);
+	config_set("quickpanel", "level_target", "");
 }
 
 

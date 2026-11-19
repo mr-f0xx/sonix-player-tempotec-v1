@@ -576,14 +576,31 @@ build_image() {
 		# file is what the player's Developer options page shows after a boot.
 		# The custom picture, in the writable partition: the player writes it
 		# there when the choice is made (see bootpic.h). A fixed name, because
-		# the fourteen bytes of marker this block reads carry WHICH picture and
-		# not a path to one.
+		# the twenty-four bytes of marker this block reads carry WHICH picture,
+		# how bright the splash is, and not a path to one.
 		CUSTOM_LOGO="/usr/data/bootlogo_custom.jpeg"
 
 		BOOT_BLOCK="# --- sonix boot screen choice (added by the firmware packer) ---
-boot_raw=\$(nanddump -q -s 0x20000 -l 14 /dev/mtd5 -a 2>/dev/null)
+boot_raw=\$(nanddump -q -s 0x20000 -l 24 /dev/mtd5 -a 2>/dev/null)
 boot_sel=\${boot_raw#* }
-echo \"sel=\$boot_sel raw=\$boot_raw\" > /tmp/.bootlogo_trace 2>/dev/null
+boot_sel=\${boot_sel%% *}
+boot_light=\${boot_raw##*light:}
+boot_light=\${boot_light%%[!0-9]*}
+case \"\$boot_light\" in ''|*[!0-9]*) boot_light= ;; esac
+[ -n \"\$boot_light\" ] && [ \"\$boot_light\" -gt 100 ] && boot_light=100
+sonix_boot_light() {
+	[ -n \"\$boot_light\" ] || return 0
+	sonix_bl_node=/sys/class/backlight/backlight_pwm0/brightness
+	[ -w \"\$sonix_bl_node\" ] || return 0
+	sonix_bl_max=\$(cat \"\${sonix_bl_node%/brightness}/max_brightness\" 2>/dev/null)
+	case \"\$sonix_bl_max\" in ''|*[!0-9]*) sonix_bl_max=100 ;; esac
+	[ \"\$sonix_bl_max\" -gt 0 ] || sonix_bl_max=100
+	sonix_bl_val=\$(( sonix_bl_max * boot_light / 100 ))
+	[ \"\$sonix_bl_val\" -lt 1 ] && sonix_bl_val=1
+	printf '%s' \"\$sonix_bl_val\" > \"\$sonix_bl_node\" 2>/dev/null
+}
+trap 'sonix_boot_light' EXIT
+echo \"sel=\$boot_sel light=\$boot_light raw=\$boot_raw\" > /tmp/.bootlogo_trace 2>/dev/null
 if [ \"\$boot_sel\" = \"logo:2\" ] && [ -f /etc/logo_space.jpeg ]; then $DISPLAY_CMD /etc/logo_space.jpeg && { echo \"drawn=space\" >> /tmp/.bootlogo_trace; boot_drawn=1; $LEAVE; }; fi
 if [ \"\$boot_sel\" = \"logo:3\" ] && [ -f /etc/logo_travelling.jpeg ]; then $DISPLAY_CMD /etc/logo_travelling.jpeg && { echo \"drawn=travelling\" >> /tmp/.bootlogo_trace; boot_drawn=1; $LEAVE; }; fi
 if [ \"\$boot_sel\" = \"logo:4\" ]; then boot_waited=0; while [ \$boot_waited -lt 60 ] && [ ! -f $CUSTOM_LOGO ]; do boot_waited=\$((boot_waited + 1)); sleep 0.1; done; if [ -f $CUSTOM_LOGO ]; then $DISPLAY_CMD $CUSTOM_LOGO && { echo \"drawn=custom\" >> /tmp/.bootlogo_trace; boot_drawn=1; $LEAVE; }; else echo \"drawn=custom-missing\" >> /tmp/.bootlogo_trace 2>/dev/null; fi; fi
