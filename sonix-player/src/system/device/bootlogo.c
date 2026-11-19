@@ -32,8 +32,8 @@ static char trace_buf[512];
 static bool trace_loaded;
 static char status_buf[64];
 
-// The splash brightness saved in the config, snapped to the ten steps the
-// setting offers. A value outside them came from a marker written by newer
+// The splash brightness saved in the config, snapped to the five-percent
+// steps the setting offers. A value outside them came from a marker written by newer
 // firmware, not from this page, and falls back to the stock level.
 static int boot_light(void) {
 	int light = (int)config_get_int("ui", "boot_brightness", BOOTLOGO_LIGHT_DEFAULT);

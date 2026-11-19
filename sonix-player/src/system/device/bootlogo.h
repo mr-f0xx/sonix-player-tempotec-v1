@@ -75,13 +75,14 @@
 
 // The splash brightness offered with the boot screen under Appearance, in
 // percent of the panel's range. 60 is what the stock V1 script writes when it
-// has drawn its picture, so that is the level an existing player keeps; the
-// other choices are ten steps apart and no lower than 10, which still leaves
-// the picture readable. The choice lives in the config, but reaches the boot
+// has drawn its picture, so that is the level an existing player keeps. The
+// choices run from 5 to 100 in five-percent steps: a splash is only a picture,
+// not something the user has to read, so the dim end goes well below the
+// panel's working floor. The choice lives in the config, but reaches the boot
 // script through the marker below -- nothing on the card is mounted then.
-#define BOOTLOGO_LIGHT_MIN     10
+#define BOOTLOGO_LIGHT_MIN     5
 #define BOOTLOGO_LIGHT_MAX     100
-#define BOOTLOGO_LIGHT_STEP    10
+#define BOOTLOGO_LIGHT_STEP    5
 #define BOOTLOGO_LIGHT_DEFAULT 60
 
 // Points the boot logo at the theme and at the chosen boot screen: the stock

@@ -37,10 +37,12 @@ int main(void) {
 	expect(BOOTLOGO_CUSTOM, false, 60, "theme:3 logo:4 light:60");
 
 	// The default is the stock script's own level, and a saved value is
-	// snapped to the ten steps the setting offers. Out-of-range values come
-	// from a marker written by a newer firmware, not from this page.
-	expect(BOOTLOGO_SPACE, false, BOOTLOGO_LIGHT_MIN, "theme:3 logo:2 light:10");
-	expect(BOOTLOGO_SPACE, false, 35, "theme:3 logo:2 light:30");
+	// snapped to the five-percent steps the setting offers, all the way down
+	// to 5%. Out-of-range values come from a marker written by newer
+	// firmware, not from this page.
+	expect(BOOTLOGO_SPACE, false, BOOTLOGO_LIGHT_MIN, "theme:3 logo:2 light:5");
+	expect(BOOTLOGO_SPACE, false, 6, "theme:3 logo:2 light:5");
+	expect(BOOTLOGO_SPACE, false, 35, "theme:3 logo:2 light:35");
 	expect(BOOTLOGO_SPACE, false, BOOTLOGO_LIGHT_MAX, "theme:3 logo:2 light:100");
 	expect(BOOTLOGO_SPACE, false, 0, "theme:3 logo:2 light:60");
 	expect(BOOTLOGO_SPACE, false, 130, "theme:3 logo:2 light:60");
