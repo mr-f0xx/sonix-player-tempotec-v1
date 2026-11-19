@@ -1731,3 +1731,11 @@ $(BUILD)/test_streaming_preview: $(LAN_PREVIEW_OBJ)
 	$(CC) -o $@ $^ $(LDFLAGS) $(LDLIBS)
 
 -include $(NETWORKMUSIC_UI_OBJ:.o=.d) $(LAN_PREVIEW_OBJ:.o=.d)
+
+.PHONY: usbdac-identity
+usbdac-identity: $(BUILD)/test_usbdac_identity
+	$(BUILD)/test_usbdac_identity
+
+$(BUILD)/test_usbdac_identity: test_usbdac_identity.c $(ROOT)/src/system/audio/usbdac.c
+	@mkdir -p $(BUILD)
+	$(CC) $(CPPFLAGS) -Istubs $(CFLAGS) -o $@ test_usbdac_identity.c $(LDFLAGS) $(LDLIBS)

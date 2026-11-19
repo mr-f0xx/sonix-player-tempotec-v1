@@ -135,6 +135,23 @@ static bool write_file(const char *path, const char *value) {
 	return n >= 0;
 }
 
+// android0 is shared with storage (and may also have been recreated by ADB).
+// Never inherit its identity: hosts cache drivers/descriptors by VID/PID.
+// These are the stock audio IDs, distinct from storage's 0x0101 PID.
+static bool gadget_set_audio_identity(void) {
+	static const struct { const char *path; const char *value; } ids[] = {
+		{GADGET "/idVendor", "0x32BB"},
+		{GADGET "/idProduct", "0x0004"},
+	};
+	for (size_t i = 0; i < sizeof(ids) / sizeof(ids[0]); i++) {
+		if (!write_file(ids[i].path, ids[i].value)) {
+			set_error(tr("usbdac_gadget_failed"), strerror(errno));
+			return false;
+		}
+	}
+	return true;
+}
+
 // Like write_file(), but says when it could not. Used for the attributes whose
 // absence is a symptom rather than a shrug -- a missing product string is why
 // a host calls the device "Unknown", and a missing feedback endpoint is why a
@@ -269,6 +286,10 @@ static bool gadget_build(void) {
 			set_error(tr("usbdac_gadget_failed"), strerror(errno));
 			return false;
 		}
+	}
+
+	if (!gadget_set_audio_identity()) {
+		return false;
 	}
 
 	unlink_functions();

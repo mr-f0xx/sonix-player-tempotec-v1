@@ -10,9 +10,20 @@
 
 static char test_udc_class[256], test_storage_udc[256];
 static bool fake_adb_wanted, fake_adb_running, fake_handover;
+static bool fake_audio_active;
+static int sink_writes;
+static int fake_access(const char *path, int mode) {
+	if (strcmp(path, "/sys/class/typec/port0/port_type") == 0) return 0;
+	return access(path, mode);
+}
+
 static bool reflect_storage_binding, fail_storage_write, partial_storage_unbind;
 
 static FILE *fake_fopen(const char *path, const char *mode) {
+	if (strcmp(path, "/sys/class/typec/port0/port_type") == 0) {
+		sink_writes++;
+		return tmpfile();
+	}
 	if (fail_storage_write && strcmp(path, test_storage_udc) == 0 && strcmp(mode, "w") == 0) {
 		if (partial_storage_unbind) {
 			FILE *real = fopen(path, mode);
@@ -27,10 +38,13 @@ static FILE *fake_fopen(const char *path, const char *mode) {
 
 #define USB_UDC_CLASS test_udc_class
 #define STORAGE_UDC_PATH test_storage_udc
+#define access fake_access
 #define fopen fake_fopen
 #include "../src/system/device/usb.c"
 #undef fopen
+#undef access
 
+bool usbaudio_active(void) { return fake_audio_active; }
 bool adb_switched_on(void) { return fake_adb_wanted; }
 bool adb_is_running(void) { return fake_adb_running; }
 bool usbaudio_handover_pending(void) { return fake_handover; }
@@ -70,6 +84,13 @@ static void expect(const char *path, const char *text) {
 }
 
 int main(void) {
+	// A peripheral-role request must not interrupt an external DAC/handover.
+	typec_force_sink(); assert(sink_writes == 1);
+	fake_audio_active = true; typec_force_sink(); assert(sink_writes == 1);
+	fake_audio_active = false; fake_handover = true;
+	typec_force_sink(); assert(sink_writes == 1);
+	fake_handover = false;
+
 	char root[] = "/tmp/sonix-usbowner-XXXXXX";
 	assert(mkdtemp(root));
 	pathcat(test_udc_class, sizeof(test_udc_class), root, "/udcs");

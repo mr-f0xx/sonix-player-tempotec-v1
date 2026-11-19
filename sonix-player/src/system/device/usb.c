@@ -214,6 +214,7 @@ static atomic_bool dac_owns_usb;
 static atomic_bool suppress_popups;
 static void ensure_storage_gadget(void);
 static bool take_card_back(const char *why);
+static void typec_force_sink(void);
 
 bool usb_set_dac_mode(bool on) {
 	// The flag goes up before anything else: setting it afterwards leaves a
@@ -246,6 +247,13 @@ bool usb_set_dac_mode(bool on) {
 			return false;
 		}
 	}
+	if (on) {
+		// DAC mode is a USB peripheral too. Do not rely on an earlier storage
+		// setup to have selected sink before connecting a dual-role phone.
+		// Keep the active/pending external-audio safety guards in this helper.
+		typec_force_sink();
+	}
+
 	dac_owns_usb = on;
 	owner_changed();
 	fprintf(stderr, "usb: controller %s\n", on ? "handed to DAC mode" : "back from DAC mode");
