@@ -33,6 +33,14 @@ void medialist_init(gui_config_t *cfg);
 bool medialist_album_view(void);
 void medialist_set_album_view(bool on);
 
+// "Albums in a grid": the album list drawn as covers -- four to the V1's
+// 240 px panel, six across on the wider boards -- instead of as rows. Off by
+// default. The track, artist and genre lists keep their rows whatever this
+// says: there is no cover to fill a tile with on them. Music > Display options
+// > Library.
+bool medialist_album_grid(void);
+void medialist_set_album_grid(bool on);
+
 // "Go to the current track": All tracks, Albums, Artists, Album artists and
 // Genres open scrolled to the row of what is playing -- the track itself in
 // All tracks, its album, artist, album artist or genre in the others. Off by

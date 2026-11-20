@@ -94,6 +94,26 @@ static const char *const SCHEMA[] = {
 	// FAVOURITES so play counts survive library rescans.
 	"CREATE TABLE IF NOT EXISTS PLAY_COUNTS(path TEXT PRIMARY KEY, name TEXT, artist TEXT, plays INT NOT NULL DEFAULT 0, updated_at INT)",
 
+	// Also local: the day-by-day listening history behind the Music page's
+	// Stats view (see listeningstats.h for how little is written and when).
+	//
+	// LISTEN_DAY holds one row per day the player was used, and LISTEN_TRACK
+	// one per day and track -- a track listened to forty times in an evening
+	// is one row with 40 in it, not forty rows. Everything the Stats page draws
+	// is a GROUP BY over that table, so the history costs one row a track a
+	// day rather than one a play.
+	//
+	// The track row carries what was true when it was last played -- its
+	// record, its artist, its genre -- because the tags on the card can change
+	// under it, and a play belongs to the record the user was listening to at
+	// the time, not to whatever the file says a month later.
+	"CREATE TABLE IF NOT EXISTS LISTEN_DAY(day INT PRIMARY KEY, seconds INT NOT NULL DEFAULT 0,"
+	" tracks INT NOT NULL DEFAULT 0)",
+	"CREATE TABLE IF NOT EXISTS LISTEN_TRACK(day INT, path TEXT COLLATE NOCASE, name TEXT COLLATE NOCASE,"
+	" album TEXT COLLATE NOCASE, album_key TEXT COLLATE NOCASE, album_artist TEXT COLLATE NOCASE,"
+	" artist TEXT COLLATE NOCASE, genre TEXT COLLATE NOCASE, plays INT NOT NULL DEFAULT 0,"
+	" seconds INT NOT NULL DEFAULT 0, PRIMARY KEY(day, path))",
+
 	"CREATE TABLE IF NOT EXISTS LYRICS_OFFSETS(path TEXT PRIMARY KEY, ms INTEGER NOT NULL)",
 
 	// Also local: where playback was left (the "Ricorda traccia" option). One
@@ -206,6 +226,10 @@ static const char *const SCHEMA_INDEXES[] = {
 	"CREATE INDEX IF NOT EXISTS media_album_artist_idx ON MEDIA_TABLE(album_artist)",
 	"CREATE INDEX IF NOT EXISTS media_year_idx ON MEDIA_TABLE(year)",
 	"CREATE INDEX IF NOT EXISTS play_counts_order_idx ON PLAY_COUNTS(plays DESC, updated_at DESC)",
+	// The Stats page's top lists group by day range and then by one of the
+	// track's own columns. Without this the year and all-time queries walk
+	// the whole history every time the page is opened.
+	"CREATE INDEX IF NOT EXISTS listen_track_day_idx ON LISTEN_TRACK(day)",
 	"CREATE INDEX IF NOT EXISTS artist_link_name_idx ON ARTIST_LINK(artist)",
 	"CREATE INDEX IF NOT EXISTS artist_link_path_idx ON ARTIST_LINK(path)",
 	"CREATE INDEX IF NOT EXISTS genre_link_name_idx ON GENRE_LINK(genre)",
@@ -7670,11 +7694,26 @@ int library_search(const char *query, int per_category, library_search_cb_t cb, 
 }
 
 // ---------------------------------------------------------------------------
+// Listening statistics: the day number every row of the history is keyed by
+// ---------------------------------------------------------------------------
+
+int library_stats_today(void) {
+	time_t now = time(NULL);
+	if (now < 0) {
+		now = 0;
+	}
+	return (int)(now / 86400);
+}
+
+// ---------------------------------------------------------------------------
 // Play counts
 // ---------------------------------------------------------------------------
 
-void library_record_play(const char *path, const char *name, const char *artist) {
-	if (!path || !path[0]) {
+// One play of a track, for the caller already holding `db_lock`: the stats
+// flush adds a whole minute of them in one transaction, and taking the lock
+// again inside would be a lock the same thread already holds.
+void library_record_play_locked(const char *path, const char *name, const char *artist, int count) {
+	if (!path || !path[0] || count <= 0) {
 		return;
 	}
 
@@ -7685,45 +7724,54 @@ void library_record_play(const char *path, const char *name, const char *artist)
 	}
 	const char *safe_artist = artist ? artist : "";
 
-	pthread_mutex_lock(&db_lock);
-	if (db) {
-		sqlite3_stmt *stmt = NULL;
-		bool updated = false;
-		// Update in place first so an existing row keeps its rowid: an active
-		// playback queue built from Most played holds those rowids and would
-		// otherwise be invalidated mid-listen.
+	sqlite3_stmt *stmt = NULL;
+	bool updated = false;
+	// Update in place first so an existing row keeps its rowid: an active
+	// playback queue built from Most played holds those rowids and would
+	// otherwise be invalidated mid-listen.
+	if (sqlite3_prepare_v2(db,
+						   "UPDATE PLAY_COUNTS SET plays = plays + ?4,"
+						   " name = CASE WHEN ?2 <> '' THEN ?2 ELSE name END,"
+						   " artist = CASE WHEN ?3 <> '' THEN ?3 ELSE artist END,"
+						   " updated_at = strftime('%s','now') WHERE path = ?1",
+						   -1, &stmt, NULL) == SQLITE_OK) {
+		sqlite3_bind_text(stmt, 1, path, -1, SQLITE_TRANSIENT);
+		sqlite3_bind_text(stmt, 2, fallback_name, -1, SQLITE_TRANSIENT);
+		sqlite3_bind_text(stmt, 3, safe_artist, -1, SQLITE_TRANSIENT);
+		sqlite3_bind_int(stmt, 4, count);
+		if (sqlite3_step(stmt) == SQLITE_DONE && sqlite3_changes(db) > 0) {
+			updated = true;
+		}
+		sqlite3_finalize(stmt);
+	}
+	if (!updated) {
+		stmt = NULL;
 		if (sqlite3_prepare_v2(db,
-							   "UPDATE PLAY_COUNTS SET plays = plays + 1,"
-							   " name = CASE WHEN ?2 <> '' THEN ?2 ELSE name END,"
-							   " artist = CASE WHEN ?3 <> '' THEN ?3 ELSE artist END,"
-							   " updated_at = strftime('%s','now') WHERE path = ?1",
+							   "INSERT INTO PLAY_COUNTS(path, name, artist, plays, updated_at)"
+							   " VALUES(?1, ?2, ?3, ?4, strftime('%s','now'))",
 							   -1, &stmt, NULL) == SQLITE_OK) {
 			sqlite3_bind_text(stmt, 1, path, -1, SQLITE_TRANSIENT);
 			sqlite3_bind_text(stmt, 2, fallback_name, -1, SQLITE_TRANSIENT);
 			sqlite3_bind_text(stmt, 3, safe_artist, -1, SQLITE_TRANSIENT);
-			if (sqlite3_step(stmt) == SQLITE_DONE && sqlite3_changes(db) > 0) {
+			sqlite3_bind_int(stmt, 4, count);
+			if (sqlite3_step(stmt) == SQLITE_DONE) {
 				updated = true;
 			}
 			sqlite3_finalize(stmt);
 		}
-		if (!updated) {
-			stmt = NULL;
-			if (sqlite3_prepare_v2(db,
-								   "INSERT INTO PLAY_COUNTS(path, name, artist, plays, updated_at)"
-								   " VALUES(?1, ?2, ?3, 1, strftime('%s','now'))",
-								   -1, &stmt, NULL) == SQLITE_OK) {
-				sqlite3_bind_text(stmt, 1, path, -1, SQLITE_TRANSIENT);
-				sqlite3_bind_text(stmt, 2, fallback_name, -1, SQLITE_TRANSIENT);
-				sqlite3_bind_text(stmt, 3, safe_artist, -1, SQLITE_TRANSIENT);
-				if (sqlite3_step(stmt) == SQLITE_DONE) {
-					updated = true;
-				}
-				sqlite3_finalize(stmt);
-			}
-		}
-		if (updated) {
-			play_counts_rev++;
-		}
+	}
+	if (updated) {
+		play_counts_rev++;
+	}
+}
+
+void library_record_play(const char *path, const char *name, const char *artist) {
+	if (!path || !path[0]) {
+		return;
+	}
+	pthread_mutex_lock(&db_lock);
+	if (db) {
+		library_record_play_locked(path, name, artist, 1);
 	}
 	pthread_mutex_unlock(&db_lock);
 }
@@ -7786,3 +7834,373 @@ uint32_t library_play_counts_revision(void) {
 	return rev;
 }
 
+
+// ---------------------------------------------------------------------------
+// Listening statistics
+//
+// The schema is above (LISTEN_DAY / LISTEN_TRACK); the counting is in
+// listeningstats.c, which hands a minute's worth of seconds and plays here on
+// its own flush. Nothing in this section is on the drawing path: the Stats page
+// asks for a summary, a chart and three top lists when it is opened.
+// ---------------------------------------------------------------------------
+
+// The first day a range covers, inclusive. All time is 0 -- no day is before
+// it, since the epoch is day 0.
+static int stats_first_day(int range, int today) {
+	switch (range) {
+	case 0: // week: today and the six before it
+		return today - 6;
+	case 1: // month
+		return today - 29;
+	case 2: // year
+		return today - 364;
+	default:
+		return 0;
+	}
+}
+
+// A text column into a fixed buffer, NULL as empty. Every string the history
+// keeps is a tag, and a fixed buffer per row is what makes a window of them a
+// stack object rather than an allocation.
+static void stats_copy_text(char *out, size_t size, const char *text) {
+	if (size == 0) {
+		return;
+	}
+	snprintf(out, size, "%s", text ? text : "");
+}
+
+// Writes one flush: `seconds` of playback on `day`, and the plays banked with
+// it. One transaction, so a card pulled out halfway through leaves either the
+// whole minute or none of it.
+//
+// The track rows carry the library's own account of each file when it has one
+// -- title, album, album artist, artist, genre -- and the row is then summed
+// into everything the page groups by. A file the index does not hold (the card
+// was rescanned, or the track was played from the browser without a scan) is
+// still counted: the path is all the history needs.
+bool library_stats_add(int day, long seconds, const library_stats_play_t *plays, int play_count) {
+	bool ok = true;
+	pthread_mutex_lock(&db_lock);
+	if (!db) {
+		pthread_mutex_unlock(&db_lock);
+		return false;
+	}
+
+	if (!exec("BEGIN")) {
+		pthread_mutex_unlock(&db_lock);
+		return false;
+	}
+
+	// SQLite's own upsert, spelled out rather than as ON CONFLICT: the
+	// database this ships on is the one built into the player
+	// (sqlite3_amalgamation.h), and which of the two upsert syntaxes it was
+	// built with is not something a player five hundred lines away should
+	// have to know. Update first, insert if nothing moved -- the same shape
+	// library_record_play() uses for PLAY_COUNTS, and the one that keeps the
+	// day's row and the track's row where they are.
+	if (seconds > 0) {
+		sqlite3_stmt *stmt = NULL;
+		bool updated = false;
+		if (sqlite3_prepare_v2(db, "UPDATE LISTEN_DAY SET seconds = seconds + ?2 WHERE day = ?1", -1, &stmt, NULL) ==
+			SQLITE_OK) {
+			sqlite3_bind_int(stmt, 1, day);
+			sqlite3_bind_int64(stmt, 2, (sqlite3_int64)seconds);
+			if (sqlite3_step(stmt) == SQLITE_DONE && sqlite3_changes(db) > 0) {
+				updated = true;
+			}
+			sqlite3_finalize(stmt);
+		} else {
+			ok = false;
+		}
+		if (ok && !updated) {
+			stmt = NULL;
+			if (sqlite3_prepare_v2(db, "INSERT INTO LISTEN_DAY(day, seconds, tracks) VALUES(?1, ?2, 0)", -1, &stmt,
+								   NULL) == SQLITE_OK) {
+				sqlite3_bind_int(stmt, 1, day);
+				sqlite3_bind_int64(stmt, 2, (sqlite3_int64)seconds);
+				if (sqlite3_step(stmt) != SQLITE_DONE) {
+					ok = false;
+				}
+				sqlite3_finalize(stmt);
+			} else {
+				ok = false;
+			}
+		}
+	}
+
+	int counted = 0;
+	for (int i = 0; ok && i < play_count; i++) {
+		const char *path = plays[i].path;
+		int n = plays[i].plays;
+		if (!path[0] || n <= 0) {
+			continue;
+		}
+
+		// What the library knows about the file, in the same read that tells
+		// whether it knows it at all.
+		char name[256] = "", album[256] = "", album_key[300] = "", album_artist[128] = "", artist[128] = "",
+			 genre[128] = "";
+		sqlite3_stmt *lookup = NULL;
+		if (sqlite3_prepare_v2(db,
+							   "SELECT COALESCE(name,''), COALESCE(album,''), COALESCE(album_key,''),"
+							   " COALESCE(NULLIF(album_artist,''), artist, ''), COALESCE(artist,''),"
+							   " COALESCE(genre,'')"
+							   " FROM MEDIA_TABLE WHERE path = ?1 LIMIT 1",
+							   -1, &lookup, NULL) == SQLITE_OK) {
+			sqlite3_bind_text(lookup, 1, path, -1, SQLITE_TRANSIENT);
+			if (sqlite3_step(lookup) == SQLITE_ROW) {
+				stats_copy_text(name, sizeof(name), (const char *)sqlite3_column_text(lookup, 0));
+				stats_copy_text(album, sizeof(album), (const char *)sqlite3_column_text(lookup, 1));
+				stats_copy_text(album_key, sizeof(album_key), (const char *)sqlite3_column_text(lookup, 2));
+				stats_copy_text(album_artist, sizeof(album_artist), (const char *)sqlite3_column_text(lookup, 3));
+				stats_copy_text(artist, sizeof(artist), (const char *)sqlite3_column_text(lookup, 4));
+				stats_copy_text(genre, sizeof(genre), (const char *)sqlite3_column_text(lookup, 5));
+			}
+			sqlite3_finalize(lookup);
+		}
+		if (!name[0]) {
+			const char *slash = strrchr(path, '/');
+			snprintf(name, sizeof(name), "%s", slash ? slash + 1 : path);
+		}
+
+		sqlite3_stmt *stmt = NULL;
+		bool updated = false;
+		if (sqlite3_prepare_v2(db,
+							   "UPDATE LISTEN_TRACK SET plays = plays + ?9, name = ?3, album = ?4, album_key = ?5,"
+							   " album_artist = ?6, artist = ?7, genre = ?8 WHERE day = ?1 AND path = ?2",
+							   -1, &stmt, NULL) == SQLITE_OK) {
+			sqlite3_bind_int(stmt, 1, day);
+			sqlite3_bind_text(stmt, 2, path, -1, SQLITE_TRANSIENT);
+			sqlite3_bind_text(stmt, 3, name, -1, SQLITE_TRANSIENT);
+			sqlite3_bind_text(stmt, 4, album, -1, SQLITE_TRANSIENT);
+			sqlite3_bind_text(stmt, 5, album_key, -1, SQLITE_TRANSIENT);
+			sqlite3_bind_text(stmt, 6, album_artist, -1, SQLITE_TRANSIENT);
+			sqlite3_bind_text(stmt, 7, artist, -1, SQLITE_TRANSIENT);
+			sqlite3_bind_text(stmt, 8, genre, -1, SQLITE_TRANSIENT);
+			sqlite3_bind_int(stmt, 9, n);
+			if (sqlite3_step(stmt) == SQLITE_DONE && sqlite3_changes(db) > 0) {
+				updated = true;
+			}
+			sqlite3_finalize(stmt);
+		} else {
+			ok = false;
+		}
+		if (ok && !updated) {
+			stmt = NULL;
+			if (sqlite3_prepare_v2(db,
+								   "INSERT INTO LISTEN_TRACK(day, path, name, album, album_key, album_artist,"
+								   " artist, genre, plays, seconds) VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 0)",
+								   -1, &stmt, NULL) == SQLITE_OK) {
+				sqlite3_bind_int(stmt, 1, day);
+				sqlite3_bind_text(stmt, 2, path, -1, SQLITE_TRANSIENT);
+				sqlite3_bind_text(stmt, 3, name, -1, SQLITE_TRANSIENT);
+				sqlite3_bind_text(stmt, 4, album, -1, SQLITE_TRANSIENT);
+				sqlite3_bind_text(stmt, 5, album_key, -1, SQLITE_TRANSIENT);
+				sqlite3_bind_text(stmt, 6, album_artist, -1, SQLITE_TRANSIENT);
+				sqlite3_bind_text(stmt, 7, artist, -1, SQLITE_TRANSIENT);
+				sqlite3_bind_text(stmt, 8, genre, -1, SQLITE_TRANSIENT);
+				sqlite3_bind_int(stmt, 9, n);
+				if (sqlite3_step(stmt) != SQLITE_DONE) {
+					ok = false;
+				}
+				sqlite3_finalize(stmt);
+			} else {
+				ok = false;
+			}
+		}
+		if (ok) {
+			counted += n;
+		}
+	}
+
+	if (ok && counted > 0) {
+		sqlite3_stmt *stmt = NULL;
+		if (sqlite3_prepare_v2(db, "UPDATE LISTEN_DAY SET tracks = tracks + ?2 WHERE day = ?1", -1, &stmt, NULL) ==
+			SQLITE_OK) {
+			sqlite3_bind_int(stmt, 1, day);
+			sqlite3_bind_int(stmt, 2, counted);
+			if (sqlite3_step(stmt) != SQLITE_DONE) {
+				ok = false;
+			}
+			sqlite3_finalize(stmt);
+		}
+	}
+
+	// A play is a play for the play counts as well, so Most played keeps its
+	// own total: that is what library_record_play() has always counted, and
+	// the two must not drift. Not fatal if it fails -- the history above is
+	// the one this section is responsible for.
+	if (ok && play_count > 0) {
+		for (int i = 0; i < play_count; i++) {
+			if (!plays[i].path[0] || plays[i].plays <= 0) {
+				continue;
+			}
+			library_record_play_locked(plays[i].path, NULL, NULL, plays[i].plays);
+		}
+	}
+
+	if (ok) {
+		if (!exec("COMMIT")) {
+			ok = false;
+			exec_quiet("ROLLBACK");
+		}
+	} else {
+		exec_quiet("ROLLBACK");
+	}
+	pthread_mutex_unlock(&db_lock);
+	return ok;
+}
+
+// The per-day rows for the chart, merged into `out`. `out[i].day` is the day
+// each row is for, so a day with nothing played stays at zero instead of
+// sliding the others along.
+void library_stats_daily(int first_day, int count, stats_day_row_t *out) {
+	if (!out || count <= 0) {
+		return;
+	}
+	pthread_mutex_lock(&db_lock);
+	if (db) {
+		sqlite3_stmt *stmt = NULL;
+		if (sqlite3_prepare_v2(db, "SELECT day, seconds, tracks FROM LISTEN_DAY WHERE day >= ?1 AND day < ?2",
+							   -1, &stmt, NULL) == SQLITE_OK) {
+			sqlite3_bind_int(stmt, 1, first_day);
+			sqlite3_bind_int(stmt, 2, first_day + count);
+			while (sqlite3_step(stmt) == SQLITE_ROW) {
+				int day = sqlite3_column_int(stmt, 0);
+				int index = day - first_day;
+				if (index < 0 || index >= count) {
+					continue;
+				}
+				out[index].seconds = (long)sqlite3_column_int64(stmt, 1);
+				out[index].tracks = sqlite3_column_int(stmt, 2);
+			}
+			sqlite3_finalize(stmt);
+		}
+	}
+	pthread_mutex_unlock(&db_lock);
+}
+
+// The summary cards. Distinct tracks, records and artists come from the same
+// rows the top lists do, so the card can never say there were three artists
+// under a list of four.
+static void stats_counts(int first_day, int *tracks, int *albums, int *artists) {
+	*tracks = *albums = *artists = 0;
+	const char *SQL[] = {
+		"SELECT COUNT(DISTINCT path) FROM LISTEN_TRACK WHERE day >= ?1",
+		// A record is its value -- name and whose it is -- or its name when the
+		// index never wrote a key: see library.h on album values.
+		"SELECT COUNT(DISTINCT CASE WHEN album_key <> '' THEN album_key ELSE album END)"
+		" FROM LISTEN_TRACK WHERE day >= ?1 AND album <> ''",
+		"SELECT COUNT(DISTINCT artist) FROM LISTEN_TRACK WHERE day >= ?1 AND artist <> ''",
+	};
+	int *out[3] = {tracks, albums, artists};
+	for (int i = 0; i < 3; i++) {
+		sqlite3_stmt *stmt = NULL;
+		if (sqlite3_prepare_v2(db, SQL[i], -1, &stmt, NULL) == SQLITE_OK) {
+			sqlite3_bind_int(stmt, 1, first_day);
+			if (sqlite3_step(stmt) == SQLITE_ROW) {
+				*out[i] = sqlite3_column_int(stmt, 0);
+			}
+			sqlite3_finalize(stmt);
+		}
+	}
+}
+
+void library_stats_summary(int range, listening_stats_summary_t *out) {
+	if (!out) {
+		return;
+	}
+	memset(out, 0, sizeof(*out));
+	pthread_mutex_lock(&db_lock);
+	if (db) {
+		int first_day = stats_first_day(range, library_stats_today());
+		sqlite3_stmt *stmt = NULL;
+		if (sqlite3_prepare_v2(db, "SELECT COALESCE(SUM(seconds),0), COALESCE(SUM(tracks),0) FROM LISTEN_DAY"
+								   " WHERE day >= ?1",
+							   -1, &stmt, NULL) == SQLITE_OK) {
+			sqlite3_bind_int(stmt, 1, first_day);
+			if (sqlite3_step(stmt) == SQLITE_ROW) {
+				out->seconds = (long)sqlite3_column_int64(stmt, 0);
+				out->plays = (unsigned long)sqlite3_column_int64(stmt, 1);
+			}
+			sqlite3_finalize(stmt);
+		}
+		stats_counts(first_day, &out->tracks, &out->albums, &out->artists);
+	}
+	pthread_mutex_unlock(&db_lock);
+}
+
+// The three top lists, and their lengths. `group` names the column each one
+// gathers by; the display columns come from the first row of the group, which
+// is the same for every row in it.
+int library_stats_top(int kind, int range, int offset, int count, listening_stats_entry_t *out) {
+	if (!out || count <= 0) {
+		return 0;
+	}
+	// One statement per list rather than one built from a column name: each
+	// gathers by a different expression (a track is its path, a record its
+	// value, an artist its name) and reads its display columns from the first
+	// row of the group, which is the same for every row in it.
+	static const char *const SQL[3] = {
+		"SELECT name, path, artist, genre, SUM(plays) FROM LISTEN_TRACK WHERE day >= ?1"
+		" GROUP BY path ORDER BY SUM(plays) DESC, name LIMIT ?2 OFFSET ?3",
+		"SELECT album, (CASE WHEN album_key <> '' THEN album_key ELSE album END), album_artist, genre,"
+		" SUM(plays) FROM LISTEN_TRACK WHERE day >= ?1 AND album <> ''"
+		" GROUP BY (CASE WHEN album_key <> '' THEN album_key ELSE album END)"
+		" ORDER BY SUM(plays) DESC, album LIMIT ?2 OFFSET ?3",
+		"SELECT artist, '', '', genre, SUM(plays) FROM LISTEN_TRACK WHERE day >= ?1 AND artist <> ''"
+		" GROUP BY artist ORDER BY SUM(plays) DESC, artist LIMIT ?2 OFFSET ?3",
+	};
+	if (kind < 0 || kind > 2) {
+		return 0;
+	}
+	pthread_mutex_lock(&db_lock);
+	int written = 0;
+	if (db) {
+		sqlite3_stmt *stmt = NULL;
+		if (sqlite3_prepare_v2(db, SQL[kind], -1, &stmt, NULL) == SQLITE_OK) {
+			sqlite3_bind_int(stmt, 1, stats_first_day(range, library_stats_today()));
+			sqlite3_bind_int(stmt, 2, count);
+			sqlite3_bind_int(stmt, 3, offset < 0 ? 0 : offset);
+			while (written < count && sqlite3_step(stmt) == SQLITE_ROW) {
+				listening_stats_entry_t *row = &out[written];
+				memset(row, 0, sizeof(*row));
+				stats_copy_text(row->name, sizeof(row->name), (const char *)sqlite3_column_text(stmt, 0));
+				stats_copy_text(row->value, sizeof(row->value), (const char *)sqlite3_column_text(stmt, 1));
+				stats_copy_text(row->artist, sizeof(row->artist), (const char *)sqlite3_column_text(stmt, 2));
+				stats_copy_text(row->genre, sizeof(row->genre), (const char *)sqlite3_column_text(stmt, 3));
+				row->plays = sqlite3_column_int(stmt, 4);
+				written++;
+			}
+			sqlite3_finalize(stmt);
+		}
+	}
+	pthread_mutex_unlock(&db_lock);
+	return written;
+}
+
+int library_stats_top_count(int kind, int range) {
+	const char *SQL;
+	if (kind == 0) {
+		SQL = "SELECT COUNT(DISTINCT path) FROM LISTEN_TRACK WHERE day >= ?1";
+	} else if (kind == 1) {
+		SQL = "SELECT COUNT(DISTINCT (CASE WHEN album_key <> '' THEN album_key ELSE album END))"
+			  " FROM LISTEN_TRACK WHERE day >= ?1 AND album <> ''";
+	} else {
+		SQL = "SELECT COUNT(DISTINCT artist) FROM LISTEN_TRACK WHERE day >= ?1 AND artist <> ''";
+	}
+	int total = 0;
+	pthread_mutex_lock(&db_lock);
+	if (db) {
+		sqlite3_stmt *stmt = NULL;
+		if (sqlite3_prepare_v2(db, SQL, -1, &stmt, NULL) == SQLITE_OK) {
+			sqlite3_bind_int(stmt, 1, stats_first_day(range, library_stats_today()));
+			if (sqlite3_step(stmt) == SQLITE_ROW) {
+				total = sqlite3_column_int(stmt, 0);
+			}
+			sqlite3_finalize(stmt);
+		}
+	}
+	pthread_mutex_unlock(&db_lock);
+	return total;
+}

@@ -12,6 +12,7 @@
 #include <unistd.h>
 
 #include "src/gui/board_profile.h"
+#include "src/gui/library/albumgrid.h"
 #include "src/gui/nowplaying/coverloader.h"
 #include "src/gui/fonts/fonts.h"
 #include "src/gui/shell/gui.h"
@@ -53,6 +54,17 @@ lv_obj_t *medialist_albums_screen;
 #define ROW_PAD bp_pick(4, 14)
 #define THUMB_SIZE bp_pick(36, 72)
 #define QUALITY_GAP bp_pick(0, 4) // between a title and the badge under it
+
+// The album grid. Its geometry -- how wide a cover is, how many fit a
+// screenful, where the next tile goes -- is albumgrid.c's, measured against
+// the panel by tests/test_albumgrid.c. What is here is only what the module
+// cannot know: which font the names are drawn in (it is handed the line
+// height), and that an album's name is one line and cut with dots, because a
+// name that wrapped would make the tiles of one row different heights.
+#define GRID_CAPTION_FONT (bp_is_tempotec_v1() ? &font_ui_14 : &font_ui_18)
+#define GRID_LABEL_LINES 1
+// The tile's own padding, matching albumgrid.c's.
+#define GRID_PAD 4
 
 // The row's two lines.  On the V1 these are a step below the shell's usual
 // sizes: at the regular font_ui_24/font_ui_20 pair the two lines alone are
@@ -164,6 +176,12 @@ typedef struct {
 	bool thumb_settled;
 	cover_image_t thumb;
 	char thumb_path[512]; // the file the picture, or the request for it, is of
+
+	// Album grid only: the cover is the row. The text column, the chevron and
+	// the play mark are hidden and the picture fills the tile, with the name
+	// on one line under it. Never set on the list rows, which keep the shape
+	// they have always had.
+	bool cover_only;
 } row_t;
 
 // Everything one of the two screens owns.
@@ -221,6 +239,15 @@ typedef struct {
 	// credited when its own artist is someone else.
 	char album_artist[128];
 	char title[160];
+	// The album grid. `grid_pairs` is NULL unless this panel is the album list
+	// in grid mode, and then it holds one entry per tile -- the row index whose
+	// left half it is, two halves to a tile -- because a tile is two list rows
+	// standing side by side. It is rebuilt whenever the list is (reloaded,
+	// rescanned, reordered), never while scrolling.
+	int *grid_pairs;
+	int grid_tiles;
+	bool grid_mode;
+
 	bool from_paths; // filled by medialist_open_paths: not a query, cannot reorder
 	// The playlist this list came from, empty when it came from anywhere else.
 	// It is what lets the ellipsis offer to take a track out of the list it is
@@ -287,6 +314,13 @@ struct sel_item {
 
 static panel_t panel_names;
 static panel_t panel_tracks;
+static void medialist_panel_apply_grid(panel_t *p);
+// The grid's helpers sit below panel_refresh_stale(), which is the first thing
+// that needs them; these are the forward declarations that let it.
+static bool panel_is_album_grid(const panel_t *p);
+static int body_height(panel_t *p);
+static void grid_pairs_build(panel_t *p);
+static void panel_grid_metrics(const panel_t *p, albumgrid_metrics_t *out);
 // One artist's records: a name list like panel_names, on a screen of its own so
 // it can sit between the artist list and an album's tracks.
 static panel_t panel_artist_albums;
@@ -368,6 +402,42 @@ void medialist_set_album_view(bool on) {
 	album_view = on;
 	config_set_int("library", "album_view", on ? 1 : 0);
 	config_save();
+}
+
+// "Albums in a grid": four covers on the V1's panel, six across on the wider
+// boards. It applies to the album list and to nothing else -- a track list has
+// no picture to fill a tile with, and an artist list is a list of names -- so
+// the setting is read here and the panel decides for itself whether it is one
+// of the lists it means.
+static bool album_grid;
+
+static void album_grid_load(void) {
+	static bool loaded;
+	if (loaded) {
+		return;
+	}
+	loaded = true;
+	album_grid = config_get_bool("library", "album_grid", false);
+}
+
+bool medialist_album_grid(void) {
+	album_grid_load();
+	return album_grid;
+}
+
+void medialist_set_album_grid(bool on) {
+	album_grid_load();
+	album_grid = on;
+	config_set_bool("library", "album_grid", on);
+	config_save();
+
+	// Whatever is drawn switches shape on the spot: the album list is one
+	// screen, and a setting that is only read the next time it opens would
+	// look like it did nothing.
+	panel_t *panels[] = {&panel_names, &panel_tracks, &panel_artist_albums};
+	for (size_t i = 0; i < sizeof(panels) / sizeof(panels[0]); i++) {
+		medialist_panel_apply_grid(panels[i]);
+	}
 }
 
 bool medialist_go_to_current(void) {
@@ -540,7 +610,10 @@ static void panel_refresh_stale(panel_t *p) {
 	for (int i = 0; i < ROW_POOL; i++) {
 		p->rows[i].index = -2;
 	}
-	lv_obj_set_height(p->body, p->count ? p->count * ROW_PITCH : ROW_PITCH);
+	if (panel_is_album_grid(p)) {
+		grid_pairs_build(p);
+	}
+	lv_obj_set_height(p->body, body_height(p));
 	if (p->count == 0) {
 		lv_obj_set_hidden(p->empty, false);
 	} else {
@@ -683,6 +756,42 @@ static bool load_row_cb(const char *name, const char *path, const char *artist, 
 // ---------------------------------------------------------------------------
 // rows, windowing and artwork (the browser's technique)
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// The album grid
+//
+// A tile is one album and the library's list keeps one row per album, so the
+// two numberings are the same numbering: tile N is row N, and the geometry
+// that turns N into a place on the canvas lives in albumgrid.c, which the
+// tests measure against the V1's panel. Nothing here has to know how wide a
+// cover is.
+// ---------------------------------------------------------------------------
+
+static bool panel_is_album_grid(const panel_t *p) { return p->grid_mode && p->kind == LIBRARY_LIST_ALBUMS; }
+
+// The geometry for the panel as it is right now: its list's own width, its
+// viewport's height, and the line height of the font the names are drawn in.
+static void panel_grid_metrics(const panel_t *p, albumgrid_metrics_t *out) {
+	int width = p->body ? lv_obj_get_width(p->body) : 0;
+	int height = p->list ? lv_obj_get_height(p->list) : 0;
+	if (width <= 0 && p->screen) {
+		width = lv_obj_get_width(p->screen) - 2 * (p->cfg ? p->cfg->padding : 0);
+	}
+	albumgrid_measure(width, height, lv_font_get_line_height(GRID_CAPTION_FONT), out);
+}
+
+// The canvas height the rows need: one pitch each in a list, whole rows of
+// tiles in the grid.
+static int body_height(panel_t *p) {
+	if (panel_is_album_grid(p) && p->count > 0) {
+		albumgrid_metrics_t m;
+		panel_grid_metrics(p, &m);
+		return albumgrid_canvas_height(p->count, &m);
+	}
+	return p->count ? p->count * ROW_PITCH : ROW_PITCH;
+}
+
+static void grid_pairs_build(panel_t *p) { p->grid_tiles = panel_is_album_grid(p) ? p->count : 0; }
 
 static int row_slot(panel_t *p, const row_t *row) { return p->slot_base + (int)(row - p->rows); }
 
@@ -976,7 +1085,9 @@ static void row_update_detail(panel_t *p, row_t *row, int index, const char *pat
 	}
 
 	bool badge = row->quality && !lv_obj_is_hidden(row->quality);
-	if (badge || artist) {
+	// A grid tile has one line of room and it is the name: the detail row
+	// stays hidden whatever is in it.
+	if ((badge || artist) && !row->cover_only) {
 		lv_obj_set_hidden(row->detail, false);
 	} else {
 		lv_obj_set_hidden(row->detail, true);
@@ -1043,7 +1154,7 @@ static void row_update_selection(panel_t *p, row_t *row, const char *name, const
 	// goes somewhere.
 	lv_obj_t *usual = row->menu_btn ? row->menu_btn : row->chevron;
 	if (usual) {
-		lv_obj_set_hidden(usual, p->selecting || (p->picking_seed && row->menu_btn != NULL));
+		lv_obj_set_hidden(usual, row->cover_only || p->selecting || (p->picking_seed && row->menu_btn != NULL));
 	}
 }
 
@@ -1128,6 +1239,9 @@ static void selection_stop(panel_t *p) {
 		}
 	}
 	sel_buttons_show(p, false);
+	if (p->title_label) {
+		lv_obj_set_hidden(p->title_label, false);
+	}
 	settingsrow_title_corner_slots(p->title_label, p->cfg, p->corner_slots);
 	rows_update_selection(p);
 }
@@ -1152,7 +1266,11 @@ static void selection_start(panel_t *p) {
 	// Four buttons, or five where the list may also delete what is chosen: the
 	// heading gives up the room they take, which in selection mode is no great
 	// loss -- the rows are the page until the selection is dealt with.
-	settingsrow_title_corner_slots(p->title_label, p->cfg, panel_can_delete(p) ? 5 : 4);
+	if (p->cfg && p->cfg->screen_width < 320 && p->title_label) {
+		lv_obj_set_hidden(p->title_label, true);
+	} else {
+		settingsrow_title_corner_slots(p->title_label, p->cfg, panel_can_delete(p) ? 5 : 4);
+	}
 	lv_obj_move_foreground(p->corner);
 	rows_update_selection(p);
 }
@@ -1666,12 +1784,92 @@ static void row_bind(panel_t *p, row_t *row, int index) {
 	}
 
 	lv_obj_set_hidden(row->button, false);
-	lv_obj_set_y(row->button, index * ROW_PITCH);
+
+	if (panel_is_album_grid(p)) {
+		// One album, one tile: where it goes is the geometry's answer, not
+		// this function's.
+		albumgrid_metrics_t m;
+		panel_grid_metrics(p, &m);
+		lv_obj_set_size(row->button, m.tile_w, m.tile_h);
+		lv_obj_set_pos(row->button, albumgrid_tile_x(index, &m), albumgrid_tile_y(index, &m));
+	} else {
+		// Restore both x and the full row size when leaving grid mode; setting
+		// y alone leaves odd tiles shifted right and narrow.
+		int row_w = p->cfg ? (int)(p->cfg->screen_width - 2 * p->cfg->padding) : (int)lv_obj_get_width(p->body);
+		lv_obj_set_size(row->button, row_w, ROW_HEIGHT);
+		lv_obj_set_pos(row->button, 0, index * ROW_PITCH);
+	}
+
 	// An album row is named by its value -- name and key, see library.h -- and
 	// only the name is for reading.
 	char shown[sizeof(((winrow_t *)0)->name)];
 	library_album_title(name, shown, sizeof(shown));
 	lv_label_set_text(row->label, shown);
+	// A grid tile is its cover: no room for a second line, a chevron or a
+	// play mark beside it, and a name that only fits under the picture. Set
+	// on every bind, so a panel that switches modes while it holds a list is
+	// consistent on the very next frame.
+	bool cover_only = panel_is_album_grid(p);
+	bool was_cover_only = row->cover_only;
+	row->cover_only = cover_only;
+	if (cover_only) {
+		albumgrid_metrics_t m;
+		panel_grid_metrics(p, &m);
+		lv_obj_set_size(row->icon, m.cover, m.cover);
+		lv_obj_set_style_radius(row->icon, ROW_RADIUS, 0);
+		// The picture centred in the tile, the caption underneath it: the
+		// same column the row already uses, turned round for the shorter
+		// space it has.
+		lv_obj_set_flex_flow(row->button, LV_FLEX_FLOW_COLUMN);
+		lv_obj_set_flex_align(row->button, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+		lv_obj_set_style_pad_row(row->button, 0, 0);
+		lv_obj_set_style_pad_all(row->button, GRID_PAD, 0);
+		lv_obj_set_flex_grow(row->text, 0);
+		lv_obj_set_width(row->text, LV_PCT(100));
+		lv_obj_set_width(row->label, LV_PCT(100));
+		lv_obj_set_height(row->label, m.caption * GRID_LABEL_LINES);
+		lv_obj_set_style_text_font(row->label, GRID_CAPTION_FONT, 0);
+		lv_obj_set_style_text_align(row->label, LV_TEXT_ALIGN_CENTER, 0);
+		lv_obj_set_hidden(row->detail, true);
+		if (row->chevron) {
+			lv_obj_set_hidden(row->chevron, true);
+		}
+		lv_obj_set_hidden(row->playmark, true);
+		// Out of the vertical flex column (which has no spare height below the
+		// caption): sit in the top-right corner of the cover with a dark pill
+		// behind it so it stays legible over bright artwork.
+		lv_obj_set_ignore_layout(row->check, true);
+		lv_obj_align(row->check, LV_ALIGN_TOP_RIGHT, -2, 2);
+		lv_obj_set_style_bg_color(row->check, lv_color_black(), 0);
+		lv_obj_set_style_bg_opa(row->check, LV_OPA_70, 0);
+		lv_obj_set_style_radius(row->check, LV_RADIUS_CIRCLE, 0);
+		lv_obj_move_foreground(row->check);
+	} else if (was_cover_only) {
+		// Back to a list row, on a pool that has held a grid. Only a row that
+		// really was one is reset, so the ordinary list does no extra work.
+		lv_obj_set_flex_flow(row->button, LV_FLEX_FLOW_ROW);
+		lv_obj_set_flex_align(row->button, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+		lv_obj_remove_local_style_prop(row->button, LV_STYLE_PAD_TOP, 0);
+		lv_obj_remove_local_style_prop(row->button, LV_STYLE_PAD_BOTTOM, 0);
+		lv_obj_remove_local_style_prop(row->button, LV_STYLE_PAD_LEFT, 0);
+		lv_obj_remove_local_style_prop(row->button, LV_STYLE_PAD_RIGHT, 0);
+		lv_obj_remove_local_style_prop(row->button, LV_STYLE_PAD_ROW, 0);
+		lv_obj_set_flex_grow(row->text, 1);
+		lv_obj_remove_local_style_prop(row->text, LV_STYLE_WIDTH, 0);
+		lv_obj_set_style_text_font(row->label, ROW_TITLE_FONT, 0);
+		lv_obj_set_size(row->icon, THUMB_SIZE, THUMB_SIZE);
+		lv_obj_set_style_radius(row->icon, 6, 0);
+		lv_obj_set_width(row->label, LV_PCT(100));
+		lv_obj_set_height(row->label, lv_font_get_line_height(ROW_TITLE_FONT) * (p == &panel_artist_albums ? 2 : 1));
+		lv_obj_set_style_text_align(row->label, LV_TEXT_ALIGN_LEFT, 0);
+		lv_obj_set_ignore_layout(row->check, false);
+		lv_obj_set_align(row->check, LV_ALIGN_DEFAULT);
+		lv_obj_set_pos(row->check, 0, 0);
+		lv_obj_remove_local_style_prop(row->check, LV_STYLE_BG_COLOR, 0);
+		lv_obj_remove_local_style_prop(row->check, LV_STYLE_BG_OPA, 0);
+		lv_obj_remove_local_style_prop(row->check, LV_STYLE_RADIUS, 0);
+	}
+
 	// Decided here and not at construction, because the same panel serves
 	// Artists, Albums and Genres in turn: only the bind knows which list is
 	// loaded right now.
@@ -1724,7 +1922,16 @@ static void thumbs_update(panel_t *p) {
 		}
 
 		if (!row->thumb_requested) {
-			coverloader_request(row_slot(p, row), source, THUMB_SIZE);
+			// The grid draws its covers at tile size, not at a list row's:
+			// asked for at the size it is drawn, or the picture comes back
+			// soft and is scaled up in the tile.
+			int size = THUMB_SIZE;
+			if (row->cover_only) {
+				albumgrid_metrics_t m;
+				panel_grid_metrics(p, &m);
+				size = m.cover;
+			}
+			coverloader_request(row_slot(p, row), source, size);
 			row->thumb_requested = true;
 			snprintf(row->thumb_path, sizeof(row->thumb_path), "%s", source);
 		}
@@ -1783,9 +1990,48 @@ static void window_update(panel_t *p) {
 		scroll = 0;
 	}
 
-	int first = (scroll / ROW_PITCH) - 1;
-	if (first + ROW_POOL > p->count) {
-		first = p->count - ROW_POOL;
+	// In the grid the pool covers whole tiles and not rows: two rows stand
+	// side by side, so a band that started on the second of a pair would put
+	// half a tile above the visible one, and a pool sized in rows would leave
+	// a gap every other tile. Everything below counts in ROWS either way --
+	// the pool is filled with consecutive list rows, which is exactly how the
+	// pair table indexes them.
+	int first;
+	int span;
+	if (panel_is_album_grid(p)) {
+		albumgrid_metrics_t m;
+		panel_grid_metrics(p, &m);
+		int per_screen = ROW_POOL;
+		if (m.pitch_y <= 0) {
+			m.pitch_y = 1;
+		}
+		if (p->grid_tiles > 0) {
+			int first_row = (scroll / m.pitch_y) - 1;
+			if (first_row < 0) {
+				first_row = 0;
+			}
+			first = first_row * m.columns;
+			// The pool covers whole rows of tiles, so the last row it can
+			// start on is the one that still fills it.
+			if (first + per_screen > p->count) {
+				first = p->count - per_screen;
+				if (first < 0) {
+					first = 0;
+				}
+				// Back to the start of its row of tiles: half a tile at the
+				// top of the band is half a tile floating on the canvas.
+				first -= first % m.columns;
+			}
+		} else {
+			first = 0;
+		}
+		span = per_screen;
+	} else {
+		first = (scroll / ROW_PITCH) - 1;
+		span = ROW_POOL;
+	}
+	if (first + span > p->count) {
+		first = p->count - span;
 	}
 	if (first < 0) {
 		first = 0;
@@ -1793,7 +2039,7 @@ static void window_update(panel_t *p) {
 
 	// index -> widget index % ROW_POOL, so a one-step slide of the band
 	// rebinds exactly one row instead of renaming all of them.
-	for (int i = 0; i < ROW_POOL; i++) {
+	for (int i = 0; i < span; i++) {
 		int index = first + i;
 		row_bind(p, &p->rows[index % ROW_POOL], index < p->count ? index : -1);
 	}
@@ -1806,6 +2052,70 @@ static void window_update(panel_t *p) {
 	panel_refresh_playmarks(p);
 
 	thumbs_update(p);
+}
+
+// Re-flowing one panel into or out of the grid. The scroll offset is kept
+// meaningful by putting the same ALBUM back on screen rather than the same
+// pixel: the two layouts have nothing in common vertically, so a preserved
+// offset would land the user somewhere else entirely.
+static void medialist_panel_apply_grid(panel_t *p) {
+	if (!p->rows[0].button || !p->list || !p->body) {
+		return; // never built, or built for nothing yet
+	}
+	bool want = medialist_album_grid() && p->kind == LIBRARY_LIST_ALBUMS && !p->from_paths;
+	if (want == p->grid_mode) {
+		return;
+	}
+
+	int anchor_row = -1;
+	if (p->grid_mode) {
+		// The album at the top of the grid before the change, so the same
+		// record is at the top of the list after it.
+		albumgrid_metrics_t m;
+		panel_grid_metrics(p, &m);
+		anchor_row = albumgrid_row_at(lv_obj_get_scroll_y(p->list), &m);
+		if (anchor_row >= p->count) {
+			anchor_row = -1;
+		}
+	} else {
+		int scroll = lv_obj_get_scroll_y(p->list);
+		if (scroll > 0) {
+			anchor_row = scroll / ROW_PITCH;
+		}
+	}
+
+	p->grid_mode = want;
+	if (want) {
+		grid_pairs_build(p);
+	} else if (p->grid_pairs) {
+		free(p->grid_pairs);
+		p->grid_pairs = NULL;
+		p->grid_tiles = 0;
+	}
+
+	// Every pooled row carries the other layout's geometry, so all of them
+	// are rebound -- including the artwork, which a tile asks for at tile
+	// size. The pictures are dropped rather than kept: they were decoded for
+	// the other size.
+	for (int i = 0; i < ROW_POOL; i++) {
+		row_drop_thumb(p, &p->rows[i]);
+		p->rows[i].index = -2;
+	}
+	lv_obj_set_height(p->body, body_height(p));
+
+	int target = 0;
+	if (anchor_row > 0 && p->count > 0) {
+		if (p->grid_mode) {
+			albumgrid_metrics_t m;
+			panel_grid_metrics(p, &m);
+			target = albumgrid_tile_y(anchor_row, &m);
+		} else {
+			target = anchor_row * ROW_PITCH;
+		}
+	}
+	lv_obj_scroll_to_y(p->list, target, LV_ANIM_OFF);
+	p->saved_scroll = lv_obj_get_scroll_y(p->list);
+	window_update(p);
 }
 
 void medialist_refresh_visible(void) {
@@ -1915,7 +2225,7 @@ static void model_remove(panel_t *p, int index) {
 		p->rows[i].index = -2;
 	}
 
-	lv_obj_set_height(p->body, p->count ? p->count * ROW_PITCH : ROW_PITCH);
+	lv_obj_set_height(p->body, body_height(p));
 	if (p->count == 0) {
 		lv_obj_set_hidden(p->empty, false);
 	}
@@ -4148,13 +4458,24 @@ static void panel_open(const char *title, library_list_t kind, library_filter_t 
 	bool desc = (sortable && sort_desc) || (kind == LIBRARY_LIST_FAVOURITES && fav_reversed);
 
 	p->from_paths = false;
+	p->grid_mode = medialist_album_grid() && kind == LIBRARY_LIST_ALBUMS;
 	p->list_order = order;
 	p->list_desc = desc;
 	p->play_counts_rev = library_play_counts_revision();
 	p->ix = library_index_open(kind, filter, filter_value, order, desc);
 	p->count = library_index_count(p->ix);
 
-	lv_obj_set_height(p->body, p->count ? p->count * ROW_PITCH : ROW_PITCH);
+	// The grid's pair table is a function of the count, so it is rebuilt
+	// wherever the count can change -- here on a reload, and in
+	// panel_refresh_stale() when the handle was re-asked under the page.
+	if (panel_is_album_grid(p)) {
+		grid_pairs_build(p);
+	} else if (p->grid_pairs) {
+		free(p->grid_pairs);
+		p->grid_pairs = NULL;
+		p->grid_tiles = 0;
+	}
+	lv_obj_set_height(p->body, body_height(p));
 	if (p->count == 0) {
 		lv_obj_set_hidden(p->empty, false);
 	} else {
@@ -4179,11 +4500,20 @@ static void panel_open(const char *title, library_list_t kind, library_filter_t 
 		// In the middle of the screen rather than at the top, so the rows
 		// around it show where in the list it is.
 		target_scroll = current * ROW_PITCH - (lv_obj_get_height(p->list) - ROW_PITCH) / 2;
+		if (panel_is_album_grid(p) && p->grid_tiles > 0 && p->body) {
+			// A grid moves a screenful at a time, so "in the middle" is the
+			// row of tiles the album sits in, not the row of the list.
+			albumgrid_metrics_t m;
+			panel_grid_metrics(p, &m);
+			if (m.pitch_y > 0) {
+				target_scroll = albumgrid_tile_y(current, &m) - (lv_obj_get_height(p->list) - m.pitch_y) / 2;
+			}
+		}
 		if (target_scroll < 0) {
 			target_scroll = 0;
 		}
 	}
-	int max_scroll = p->count * ROW_PITCH - lv_obj_get_height(p->list);
+	int max_scroll = lv_obj_get_height(p->body) - lv_obj_get_height(p->list);
 	if (target_scroll > max_scroll) {
 		target_scroll = max_scroll > 0 ? max_scroll : 0;
 	}
@@ -4208,6 +4538,7 @@ void medialist_open_paths(const char *title, const char *const *paths, const cha
 	p->kind = LIBRARY_LIST_TRACKS;
 	p->filter = LIBRARY_FILTER_NONE;
 	p->from_paths = true;
+	p->grid_mode = false;
 	// A path list is always an ordinary listen, never a seed walk.
 	p->picking_seed = false;
 	snprintf(p->playlist, sizeof(p->playlist), "%s", playlist ? playlist : "");
@@ -4254,7 +4585,7 @@ void medialist_open_paths(const char *title, const char *const *paths, const cha
 		}
 	}
 
-	lv_obj_set_height(p->body, p->count ? p->count * ROW_PITCH : ROW_PITCH);
+	lv_obj_set_height(p->body, body_height(p));
 	if (p->count == 0) {
 		lv_obj_set_hidden(p->empty, false);
 	} else {
@@ -4307,6 +4638,10 @@ void medialist_init(gui_config_t *cfg) {
 	panel_artist_albums.screen = medialist_albums_screen;
 
 	build_panel(&panel_names, cfg, false, SLOT_BASE_NAMES);
+	// The album list may be a 2x2 of covers rather than a list of names; the
+	// setting is read once here, and medialist_set_album_grid() (Music >
+	// Display options > Library) re-flows whichever panels are built.
+	panel_names.grid_mode = medialist_album_grid();
 	build_panel(&panel_tracks, cfg, true, SLOT_BASE_TRACKS);
 	build_panel(&panel_artist_albums, cfg, false, SLOT_BASE_ARTIST_ALBUMS);
 	// The records of one artist carry the disc button too, lit, to go back to

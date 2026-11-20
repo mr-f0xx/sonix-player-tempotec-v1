@@ -44,6 +44,7 @@
 #include "src/gui/gearboy/gearboyplay.h"
 #include "src/gui/shell/main_menu.h"
 #include "src/gui/library/medialist.h"
+#include "src/gui/library/stats.h"
 #include "src/gui/library/filespage.h"
 #include "src/gui/library/pictureview.h"
 #include "src/gui/library/textview.h"
@@ -691,6 +692,7 @@ void gui_init(gui_config_t *cfg) {
 	bootpicpage_screen = lv_obj_create(NULL); // the page the boot screen's Custom pill opens
 	language_screen = lv_obj_create(NULL);
 	medialist_screen = lv_obj_create(NULL);
+	stats_screen = lv_obj_create(NULL);
 	medialist_tracks_screen = lv_obj_create(NULL);
 	medialist_albums_screen = lv_obj_create(NULL);
 	audiobooks_screen = lv_obj_create(NULL);
@@ -868,6 +870,7 @@ void gui_init(gui_config_t *cfg) {
 	musicsettings_init(cfg);
 	search_init(cfg);
 	medialist_init(cfg);
+	stats_init(cfg);
 	playlistpage_init(cfg);
 	audiobookextras_init(cfg); // the bookmarks and summary pages
 	audiobooks_init(cfg);
@@ -904,6 +907,7 @@ void gui_init(gui_config_t *cfg) {
 		devoptions_screen, processespage_screen, musicsettings_screen, powersettings_screen, appearance_screen,
 		bootpicpage_screen, language_screen,
 		medialist_screen,  medialist_tracks_screen, medialist_albums_screen, audiobooks_screen, audiobooksettings_screen,
+		stats_screen, stats_artists_screen, stats_albums_screen,
 		queue_screen,	  chapters_screen,		 details_screen,   audiobookcontrols_screen,
 		lyricsearch_screen,
 		wireless_screen,

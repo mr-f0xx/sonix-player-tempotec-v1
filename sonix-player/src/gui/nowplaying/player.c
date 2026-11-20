@@ -52,6 +52,7 @@
 #include "src/system/core/config.h"
 #include "src/system/core/lang.h"
 #include "src/system/library/library.h"
+#include "src/system/library/listeningstats.h"
 #include "src/system/library/lrclib.h"
 #include "src/system/library/lyrics.h"
 #include "src/system/playback/playlist.h"
@@ -6451,6 +6452,29 @@ static void update_progress(void) {
 	// the power menu and the automatic shutdown have to do the same thing on
 	// their way out, and neither of them comes through here.
 	device_state_remember_note();
+
+	// The Stats page's own clock. Handed the position from this poll rather
+	// than one of its own: how far the track moved between two polls is the
+	// listening, and this is the only place that already asks for it. The
+	// poll runs twice a second while something plays, so the module works
+	// from the distance and not the call count. Only files: a station, a
+	// podcast episode or a streamed cache file has no card record to file a
+	// day against, and this is the same test the rest of the page uses for
+	// "is what plays a file in the library".
+	if (playing_local_file(&state)) {
+		stats_note_playback(state.current_file, state.progress_current_secs, state.progress_total_secs,
+							lv_tick_get());
+	} else {
+		// Nothing local playing: told so the module forgets the position it was
+		// comparing against. A pause of ten minutes must not come back as ten
+		// minutes of listening when the track resumes, and a seek made while
+		// paused must not read as one when it does. This holds whether the
+		// stream has stopped or is still going: a podcast episode or a radio
+		// station that is playing is not a library file, and leaving the last
+		// file's position behind would turn the next local track's first poll
+		// into a jump of however long the station had been on.
+		stats_note_idle();
+	}
 }
 
 static void play_btn_event_cb(lv_event_t *e) {

@@ -421,6 +421,17 @@ ICONS = [
     # outlines, so every appearance tints them with its own semantic colour.
     ("settings-plugins.svg", "settings_plugins", 30),
     ("settings-more.svg", "settings_more", 30),
+    # Listening statistics: the corner button on the Music page that opens the
+    # page, and the capital each of its summary cards is drawn with. The two
+    # layout glyphs are the Albums list's 2x2 grid and its one-column list,
+    # the corner button that switches between them.
+    ("chart-column.svg", "chart_column", 34),
+    ("chart-column.svg", "stats_play", 28),
+    ("music.svg", "stats_tracks", 28),
+    ("artist.svg", "stats_artists", 28),
+    ("album.svg", "stats_albums", 28),
+    ("layout-grid.svg", "layout_grid", 34),
+    ("layout-list.svg", "layout_list", 34),
 ]
 
 # Main menu and section tiles, which keep their own colours and are therefore
