@@ -741,7 +741,7 @@ void back_btn_cb(lv_event_t *e) {
 	// The player sits on top of everything else, so it is what the chevron
 	// dismisses first.
 	if (player_sheet_is_open()) {
-		player_sheet_close(true);
+		if (!player_lyrics_back()) player_sheet_close(true);
 		return;
 	}
 

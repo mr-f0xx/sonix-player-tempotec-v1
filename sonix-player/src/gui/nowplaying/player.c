@@ -2039,7 +2039,8 @@ static int immersive_menu_index;
 static bool lyrics_wanted;  // pulled in by a swipe
 static bool lyrics_allowed; // wanted, and a file on the card playing
 static bool lyrics_now;		// on screen: allowed, and the file has words
-static lv_obj_t *lyrics_pane; // the page: the column and the note
+static lv_obj_t *lyrics_pane; // full-player overlay: the column and the note
+static lv_obj_t *lyrics_overlay_bg;
 static lv_obj_t *lyrics_head; // the title and artist at the top while the words are up
 static lv_obj_t *lyrics_head_col;
 static lv_obj_t *lyrics_head_title;
@@ -2072,7 +2073,7 @@ static int lyrics_view_h;
 // Timed lines have room above the first and below the last, so either can be
 // brought to the middle; untimed ones read from the top.
 static void lyrics_pad(void) {
-	int around = lyrics_cur.synced ? lyrics_view_h / 2 - 20 : LYRICS_FADE_PX / 2;
+	int around = lyrics_cur.synced ? LV_MAX(0, lyrics_view_h / 2 - 20) : LYRICS_FADE_PX / 2;
 	lv_obj_set_style_pad_top(lyrics_view, around, 0);
 	lv_obj_set_style_pad_bottom(lyrics_view, lyrics_cur.synced ? around : LYRICS_FADE_PX, 0);
 }
@@ -2363,73 +2364,20 @@ static void lyrics_head_sync(void) {
 	scrolltext_set(lyrics_head_artist, lv_label_get_text(song_artist_label));
 }
 
-// Studio's look for the arrangements that are not Studio: its blurred
-// sleeve behind the whole screen, and the surfaces that would cover it --
-// the sleeve's panel and the controls' own blurred block -- made clear. Put on
-// in one step when the words start to come in, not faded with the finger: a
-// screen-sized blend redrawn on every frame of the swipe is what this
-// processor cannot keep up with. Only with a picture to show; without one the
-// page keeps its own background, whole, and the words take the theme's
-// colours. (lyrics_look_on is declared with the Studio state above, where
-// full_backdrop_apply() reads it.)
-
+// Repaint the overlay without changing the layout beneath it.
 static void lyrics_look(bool on) {
-	if (layout_studio_now) {
-		on = false; // Studio is the look already
+	const lv_image_dsc_t *backdrop = on ? lyrics_backdrop() : NULL;
+	// The overlay has its own image; the player backdrop remains independent.
+	if (lyrics_overlay_bg) {
+		lv_image_set_src(lyrics_overlay_bg, backdrop);
+		lv_obj_set_hidden(lyrics_overlay_bg, backdrop == NULL);
 	}
-	const lv_image_dsc_t *backdrop = lyrics_backdrop();
-	if (on && !backdrop) {
-		on = false;
-	}
-	if (on) {
-		lv_image_set_src(studio_bg, backdrop);
-		lv_obj_set_hidden(studio_bg, false);
-		lv_obj_move_background(studio_bg);
-		lv_obj_set_style_bg_opa(cover_panel, LV_OPA_TRANSP, 0);
-		lv_obj_set_style_bg_opa(player_menu, LV_OPA_TRANSP, 0);
-		lv_obj_set_style_bg_image_opa(player_menu, LV_OPA_TRANSP, 0);
-	} else if (lyrics_look_on && !layout_studio_now) {
-		lv_obj_set_hidden(studio_bg, true);
-		lv_obj_remove_local_style_prop(cover_panel, LV_STYLE_BG_OPA, 0);
-		lv_obj_remove_local_style_prop(player_menu, LV_STYLE_BG_OPA, 0);
-		lv_obj_remove_local_style_prop(player_menu, LV_STYLE_BG_IMAGE_OPA, 0);
-		// What was handed back at the foot of the block is Immersive's own
-		// arrangement of it, where the picture is behind the controls rather
-		// than beside them.
-		if (layout_immersive_now) {
-			immersive_deck_clear();
-		}
-		// And Poster's: the removing above took the deck's opacity with the
-		// words' own, and Poster's ground is opaque whether the words are up
-		// or not.
-		if (layout_poster_now) {
-			lv_obj_set_style_bg_opa(player_menu, LV_OPA_COVER, 0);
-		}
-		if (layout_vinyl_now) {
-			vinyl_ground_apply(player_screen, player_menu, studio_bg);
-		}
-		if (layout_sticker_now) {
-			sticker_ground_apply(player_screen, player_menu, studio_bg);
-		}
-	}
-	lyrics_look_on = on;
-	// The V1 had the same blur up before the words came, and wants it back.
-	full_backdrop_apply();
-	// Immersive's frost likewise: down while the words' own blur is up, back
-	// at the foot of the picture when they go.
-	immersive_blur_apply();
-	// The words are white over a blurred sleeve or a layout with a fixed dark
-	// ground (Vinyl, Sticker), and in the theme's own colour over the page's
-	// own background where there is no picture.
-	bool dark_ground = lyrics_backdrop() != NULL || layout_vinyl_now || layout_sticker_now;
-	lv_color_t ink = dark_ground ? lv_color_white() : theme()->text_primary;
+	// A solid theme surface is used until the blurred cover is ready.
+	lv_obj_set_style_bg_color(lyrics_pane, backdrop ? lv_color_black() : theme()->cover_bg, 0);
+	lv_color_t ink = backdrop ? lv_color_white() : theme()->text_primary;
 	lv_obj_set_style_text_color(lyrics_view, ink, 0);
 	lv_obj_set_style_text_color(lyrics_note, ink, 0);
-	lv_obj_set_style_text_color(lyrics_head_title, ink, 0);
-	lv_obj_set_style_text_color(lyrics_head_artist, dark_ground ? lv_color_make(200, 200, 200) : theme()->text_secondary, 0);
-	if (lyrics_find_icon) {
-		lv_obj_set_style_image_recolor(lyrics_find_icon, ink, 0);
-	}
+	if (lyrics_find_icon) lv_obj_set_style_image_recolor(lyrics_find_icon, ink, 0);
 }
 
 // What travels with the sleeve: it goes out to the left as the words come in.
@@ -2441,25 +2389,6 @@ static void lyrics_shift(lv_obj_t *obj, int32_t x) {
 		lv_obj_remove_local_style_prop(obj, LV_STYLE_TRANSLATE_X, 0);
 	} else {
 		lv_obj_set_style_translate_x(obj, x, 0);
-	}
-}
-
-// The star of the arrangement with the shape of the track, which lives in a
-// disc on the sleeve: while the words are up it moves to the head, at the
-// right of the names, and back into its disc when they go.
-static bool lyrics_star_up;
-
-static void lyrics_star_to_head(bool up) {
-	if (up == lyrics_star_up || !fav_btn_obj || !alt_fav_circle) {
-		return;
-	}
-	lyrics_star_up = up;
-	if (up) {
-		lv_obj_set_parent(fav_btn_obj, lyrics_head);
-		lv_obj_align(fav_btn_obj, LV_ALIGN_RIGHT_MID, 0, 0);
-	} else {
-		lv_obj_set_parent(fav_btn_obj, alt_fav_circle);
-		lv_obj_center(fav_btn_obj);
 	}
 }
 
@@ -2533,28 +2462,20 @@ static void lyrics_find_sync(bool full) {
 		lyrics_find_make_room(NULL);
 		return;
 	}
-	int right = lv_obj_get_x(cover_panel) + (layout_studio_now ? studio_box_w : cover_box_w);
-	int beside = 0;
-	if (layout_studio_now && more_btn_obj) {
-		beside = lv_obj_get_width(more_btn_obj);
-	} else if (layout_alt_now && fav_btn_obj) {
-		beside = lv_obj_get_width(fav_btn_obj);
-	}
-	// Album Art Max already fills its header row (format, repeat, menu, star);
-	// park the search mark just inside the top-right corner of the lyrics box.
-	int btn_y = layout_aam_now ? lv_obj_get_y(cover_panel) + 2 : (back_btn_centre_y() - player_content_top()) - LYRICS_FIND_BTN / 2;
-	// The Sticker arrangement puts the back chevron on the right, so the
-	// search mark takes the left corner instead of sitting under it.
-	int btn_x = layout_sticker_now ? STUDIO_INFO_MARGIN : right - STUDIO_INFO_MARGIN - beside - LYRICS_FIND_BTN;
+	// The chevron is on the right in Sticker (unless a hi-res badge moved it
+	// back to the left). The search button takes the opposite corner.
+	bool back_right = layout_sticker_now && hires_header_pos == PLAYER_HIRES_OFF;
+	int btn_x = back_right ? STUDIO_INFO_MARGIN : lv_obj_get_width(player_screen) - STUDIO_INFO_MARGIN - LYRICS_FIND_BTN;
+	int btn_y = back_btn_centre_y() - lv_obj_get_y(player_screen) - LYRICS_FIND_BTN / 2;
 	lv_obj_set_pos(lyrics_find_btn, btn_x, btn_y);
-	lyrics_find_make_room(layout_studio_now ? studio_text_col : layout_alt_now ? lyrics_head_col : NULL);
-	// The ink of the names beside it: white over the blurred sleeve or a fixed
-	// dark ground, the theme's own over the page's background.
-	bool dark_ground = lyrics_backdrop() != NULL || layout_vinyl_now || layout_sticker_now;
-	lv_obj_set_style_image_recolor(lyrics_find_icon, dark_ground ? lv_color_white() : theme()->text_primary, 0);
+	lyrics_find_make_room(NULL);
+	lv_obj_set_style_image_recolor(lyrics_find_icon, lyrics_backdrop() ? lv_color_white() : theme()->text_primary, 0);
 	lv_obj_set_hidden(lyrics_find_btn, false);
 	lv_obj_move_foreground(lyrics_find_btn);
 }
+
+static int aam_chevron_inset(void);
+static void lyrics_overlay_geometry(void);
 
 // Everything the swipe moves, at `progress` of the way from the sleeve (0)
 // to the words (LYRICS_FULL). Only positions change from one frame to the
@@ -2573,14 +2494,21 @@ static void lyrics_progress_apply(int32_t progress) {
 	bool rest = progress == 0;
 	bool sleeve_changed = rest != (lyrics_progress == 0);
 	lyrics_progress = progress;
+	if (sleeve_changed && sheet_open) {
+		// The status bar is useful while the transport is covered. Restore the
+		// user's player setting as soon as the overlay is dismissed.
+		topbar_set_hidden(rest && !(layout_aam_now || player_status_bar));
+		back_btn_player_top_inset(rest ? (layout_aam_now ? aam_chevron_inset() : player_content_top())
+								 : (layout_aam_now ? aam_chevron_inset() : player_status_height));
+		lyrics_overlay_geometry();
+	}
 	// The header badge makes way for the lyrics' search button and star.
 	// While it is hidden, put the chevron back in the lyrics' left slot.
 	if (sleeve_changed && hires_header_pos != PLAYER_HIRES_OFF) {
 		hires_present(rest, rest && hires_header_pos == PLAYER_HIRES_LEFT);
 	}
 	lyrics_find_sync(progress == LYRICS_FULL);
-	int32_t travel = cover_box_w - lyrics_pane_x;
-
+	int32_t travel = lv_obj_get_width(player_screen);
 	if (rest) {
 		lv_obj_set_hidden(lyrics_pane, true);
 	} else if (lv_obj_is_hidden(lyrics_pane)) {
@@ -2588,52 +2516,10 @@ static void lyrics_progress_apply(int32_t progress) {
 		lv_obj_move_foreground(lyrics_pane);
 	}
 	lv_obj_set_x(lyrics_pane, lyrics_pane_x + travel * (LYRICS_FULL - progress) / LYRICS_FULL);
-	if (rest || !lyrics_look_on) {
-		lyrics_look(!rest);
-	}
-
-	int32_t away = -(int32_t)cover_box_w * progress / LYRICS_FULL;
-	if (layout_studio_now) {
-		lyrics_shift(studio_cover, away);
-		lyrics_shift(studio_empty, away);
-		lyrics_shift(studio_quality, away);
-		return;
-	}
-	// The clipped group carries the sleeve, source badges, and alternative
-	// layout overlays together; the no-art placeholder remains a separate
-	// sibling at the same centre point.
-	lyrics_shift(cover_art_group, away);
-	lyrics_shift(cover_placeholder_icon, away);
-	if (layout_vinyl_now) lyrics_shift(vinyl_record.disc, away);
-	if (layout_sticker_now) {
-		lyrics_shift(sticker_view.tilted_cyan, away);
-		lyrics_shift(sticker_view.tilted_pink, away);
-		lyrics_shift(sticker_view.straight_cyan, away);
-		lyrics_shift(sticker_view.queue_pill, away);
-		lyrics_shift(sticker_view.format_pill, away);
-		lyrics_shift(sticker_view.repeat_disc, away);
-		lyrics_shift(sticker_view.fav_disc, away);
-		lyrics_shift(live_badge, away);
-	}
-	if (!layout_alt_now) {
-		return; // the names stay in their row below the sleeve
-	}
-
-	// With the shape of the track the names are pills on the sleeve, so they
-	// travel with the artwork group and the star comes up into the head once
-	// the words are all the way in.
-	bool full = progress == LYRICS_FULL;
-	lyrics_star_to_head(full);
-	if (full) {
-		lyrics_head_sync();
-		lv_obj_set_hidden(lyrics_head, false);
-		lv_obj_move_foreground(lyrics_head);
-		if (lyrics_find_btn && !lv_obj_is_hidden(lyrics_find_btn)) {
-			lv_obj_move_foreground(lyrics_find_btn);
-		}
-	} else {
-		lv_obj_set_hidden(lyrics_head, true);
-	}
+	if (sleeve_changed) lyrics_look(!rest);
+	// Search is a sibling so it can occupy the header above the column.
+	if (progress == LYRICS_FULL && lyrics_find_btn && !lv_obj_is_hidden(lyrics_find_btn))
+		lv_obj_move_foreground(lyrics_find_btn);
 }
 
 // While the page moves, the fade at its edges is left off: it is drawn by
@@ -2674,79 +2560,35 @@ static void lyrics_slide_to(int32_t progress) {
 	lv_anim_start(&a);
 }
 
-// The head's place: Studio's, between the chevron and the right edge.
-static int lyrics_head_top(void) {
-	int head_top = (back_btn_centre_y() - player_content_top()) - STUDIO_HEAD_H / 2;
-	return head_top < 2 ? 2 : head_top;
+// The column fills the player below its header, independent of the artwork.
+static void lyrics_overlay_geometry(void) {
+	int w = lv_obj_get_width(player_screen);
+	int h = lv_obj_get_height(player_screen);
+	int top = back_btn_centre_y() - lv_obj_get_y(player_screen) + bp_header_button_size() / 2 + 4;
+	if (top < 0) top = 0;
+	if (top > h) top = h;
+	lyrics_pane_x = 0;
+	lv_obj_set_y(lyrics_pane, 0);
+	lv_obj_set_size(lyrics_pane, w, h);
+	lv_obj_set_pos(lyrics_overlay_bg, 0, 0);
+	int margin = STUDIO_MARGIN;
+	int view_w = LV_MAX(1, w - 2 * margin);
+	int view_h = h - top;
+	lv_obj_set_pos(lyrics_view, margin, top);
+	lv_obj_set_size(lyrics_view, view_w, view_h);
+	lyrics_view_h = view_h;
+	lyrics_pad();
+	lyrics_mask_build(view_w, view_h);
+	lv_obj_set_size(lyrics_note, view_w, LV_SIZE_CONTENT);
+	lv_obj_set_pos(lyrics_note, margin, top + view_h / 2 - 20);
+	lyrics_centred = false;
 }
 
-// Where the page goes in the arrangement on show: in Studio from under the
-// head to above the controls, over the sleeve; with the shape of the track
-// from under the head that takes the names; in the standard arrangement from
-// under the chevron. Outside Studio the page covers the whole square.
 static void lyrics_layout(void) {
-	if (!lyrics_pane) {
-		return;
-	}
-	int head_bottom = lyrics_head_top() + STUDIO_HEAD_H + STUDIO_BADGE_GAP;
-	int top = layout_alt_now || layout_studio_now ? head_bottom : (back_btn_centre_y() - player_content_top()) + 28;
-	if (layout_aam_now) {
-		// Album Art Max has no head to keep clear of: the words take the
-		// sleeve's whole box, which is the panel here, and the strip under it
-		// is outside the panel already. What they do keep clear of is the
-		// band, which stands over the picture's foot in this arrangement and
-		// would otherwise run across the last line of them.
-		top = 0;
-	}
-	int pane_y = 0;
-	int x = 0, w = cover_box_w, h = cover_box_h - top;
-	if (layout_aam_now) {
-		h -= AAM_BAR_H; // the band's own row, at the foot of the picture
-	} else if (layout_immersive_now) {
-		// The panel spans the screen; the words stop above the controls.
-		h -= menu_height;
-	} else if (layout_studio_now) {
-		pane_y = top;
-		int bottom = studio_box_h - STUDIO_BOTTOM;
-		if (layout_wave_now && wave_canvas) {
-			bottom -= wave_h - PROGRESS_TRACK_HEIGHT;
-		}
-		x = STUDIO_MARGIN;
-		w = studio_box_w - 2 * STUDIO_MARGIN;
-		h = bottom - top;
-	}
-	if (h < 0) {
-		h = 0;
-	}
-	lyrics_pane_x = x;
-	int view_x = layout_studio_now ? 0 : STUDIO_MARGIN;
-	int view_y = top - pane_y;
-	int view_w = w - 2 * view_x;
-
-	// Into the new arrangement with the styles of the old one handed back.
+	if (!lyrics_pane) return;
 	lv_anim_delete(lyrics_pane, lyrics_progress_exec);
 	lyrics_progress_apply(0);
-	// apply_layout() has just put the star where this arrangement keeps it,
-	// and the head belongs to the one before.
-	lyrics_star_up = false;
-	if (lyrics_head) {
-		lv_obj_set_hidden(lyrics_head, true);
-	}
-
-	lv_obj_set_y(lyrics_pane, pane_y);
-	lv_obj_set_size(lyrics_pane, w, h + view_y);
-	lv_obj_set_pos(lyrics_view, view_x, view_y);
-	lv_obj_set_size(lyrics_view, view_w, h);
-	lyrics_view_h = h;
-	lyrics_pad();
-	lyrics_mask_build(view_w, h);
-	lv_obj_set_size(lyrics_note, view_w, LV_SIZE_CONTENT);
-	lv_obj_set_pos(lyrics_note, view_x, view_y + h / 2 - 20);
-
-	if (lyrics_head) {
-		lv_obj_set_pos(lyrics_head, STUDIO_INFO_MARGIN, lyrics_head_top());
-		lv_obj_set_size(lyrics_head, cover_box_w - 2 * STUDIO_INFO_MARGIN, STUDIO_HEAD_H);
-	}
+	lyrics_overlay_geometry();
 	lyrics_progress_apply(lyrics_now ? LYRICS_FULL : 0);
 }
 
@@ -2765,6 +2607,13 @@ static void lyrics_commit(bool on) {
 	} else {
 		lyrics_slide_to(0);
 	}
+}
+
+// The shared player chevron returns to the layout before closing the player.
+bool player_lyrics_back(void) {
+	if (!lyrics_now && lyrics_progress == 0) return false;
+	lyrics_commit(false);
+	return true;
 }
 
 // The words for the file playing have been read: a page wanted and up stays
@@ -3182,13 +3031,18 @@ static void lyrics_tap_cb(lv_event_t *e) {
 }
 
 static void lyrics_build(void) {
-	lyrics_pane = lv_obj_create(cover_panel);
+	lyrics_pane = lv_obj_create(player_screen);
 	lv_obj_remove_style_all(lyrics_pane);
 	lv_obj_set_ignore_layout(lyrics_pane, true);
 	lv_obj_set_scrollable(lyrics_pane, false);
-	// Presses on the page outside the column go to the sleeve under it.
-	lv_obj_set_clickable(lyrics_pane, false);
+	// Block taps from reaching the covered player controls.
+	lv_obj_set_clickable(lyrics_pane, true);
+	lv_obj_set_style_bg_opa(lyrics_pane, LV_OPA_COVER, 0);
 	lv_obj_set_hidden(lyrics_pane, true);
+
+	lyrics_overlay_bg = lv_image_create(lyrics_pane);
+	lv_obj_set_clickable(lyrics_overlay_bg, false);
+	lv_obj_set_hidden(lyrics_overlay_bg, true);
 
 	lyrics_view = lv_obj_create(lyrics_pane);
 	lv_obj_remove_style_all(lyrics_view);
@@ -3314,9 +3168,11 @@ static void *lyrics_bg_worker(void *arg) {
 // with it while the words are up.
 static void lyrics_bg_forget(void) {
 	lyrics_bg_generation++;
-	if (lyrics_look_on && !layout_studio_now) {
-		lyrics_look(false);
+	if (lyrics_overlay_bg) {
+		lv_image_set_src(lyrics_overlay_bg, NULL);
+		lv_obj_set_hidden(lyrics_overlay_bg, true);
 	}
+	if (lyrics_pane) lyrics_look(false);
 	if (!layout_studio_now && studio_bg && lv_image_get_src(studio_bg) == &lyrics_screen_pic.dsc) {
 		lv_image_set_src(studio_bg, NULL);
 	}
@@ -4830,16 +4686,17 @@ static void apply_layout(void) {
 	// can reach the top edge. Only while the sheet is actually up: the setting
 	// can be changed from a page the player is not on.
 	if (sheet_open) {
-		topbar_set_hidden(!(layout_aam_now || player_status_bar));
+		topbar_set_hidden(!(layout_aam_now || player_status_bar || lyrics_progress > 0));
 		player_status_background_apply();
 		player_status_color_apply();
-		back_btn_player_top_inset(layout_aam_now ? aam_chevron_inset() : player_content_top());
+		back_btn_player_top_inset(layout_aam_now ? aam_chevron_inset() : (lyrics_progress > 0 ? player_status_height : player_content_top()));
 		// And its stroke, not its button: the glyph is drawn with a third of its
 		// canvas empty on either side, so a chevron whose *button* starts where
 		// the star's does sits visibly further in. AAM_HEAD_END_PAD is the air
 		// the star's own stroke keeps from the edge, and the way back mirrors it.
 		back_btn_player_ink_inset(layout_aam_now ? AAM_HEAD_END_PAD : 0);
 		back_btn_player_mode(true);
+		if (lyrics_progress > 0) { lyrics_overlay_geometry(); lyrics_find_sync(lyrics_progress == LYRICS_FULL); }
 	}
 }
 
@@ -5477,7 +5334,7 @@ static void player_refresh_theme(void) {
 	full_backdrop_apply();
 	player_status_background_apply();
 	if (lyrics_pane) {
-		lyrics_look(lyrics_look_on); // the words in the new theme's colours
+		lyrics_look(lyrics_progress > 0); // the words in the new theme's colours
 	}
 }
 
@@ -7262,12 +7119,13 @@ void player_sheet_open(bool animate) {
 	// saying which way the hardware key will go, and its row is where the
 	// chevron and the format line are aligned from. The chevron moves under
 	// it for the same reason (see apply_layout).
-	topbar_set_hidden(!(layout_aam_now || player_status_bar));
+	topbar_set_hidden(!(layout_aam_now || player_status_bar || lyrics_progress > 0));
 	player_status_background_apply();
 	player_status_color_apply();
-	back_btn_player_top_inset(layout_aam_now ? aam_chevron_inset() : player_content_top());
+	back_btn_player_top_inset(layout_aam_now ? aam_chevron_inset() : (lyrics_progress > 0 ? player_status_height : player_content_top()));
 	back_btn_player_ink_inset(layout_aam_now ? AAM_HEAD_END_PAD : 0);
 	back_btn_player_mode(true);
+	if (lyrics_progress > 0) { lyrics_overlay_geometry(); lyrics_find_sync(lyrics_progress == LYRICS_FULL); }
 
 	sheet_move_to(0, animate);
 }
