@@ -5070,3 +5070,30 @@ drawing its letters it had no glyphs for.
 MiSans instead of logging a choice the build can no longer honour. Fonts from
 the card's `Fonts` folder are untouched, so anyone who wants Roboto back can
 drop a `.ttf` there and pick it like any other family.
+
+## The status bar over the lyrics (issue #372)
+
+Music → Display options has a status bar above the player, off by default and
+off for the reporter of this issue, so the artwork on the now-playing page ran
+to the top edge. Swiping left for the words brought the bar back: a 24 px band
+of clock, volume and battery across the top of a page that had asked for none,
+pushing the first lines down and putting the chevron under it.
+
+The words were being treated as a reason to keep the bar rather than as part of
+the same player. Three places in `player.c` OR-ed `lyrics_progress > 0` into the
+expression that hides it -- `lyrics_progress_apply()`, the sheet-open block in
+`apply_layout()` and `player_sheet_open()` -- so the bar appeared the moment the
+overlay slid in and went away again when it slid out, whatever the setting said.
+The chevron's inset followed the same term, lifting it to the bar's height over
+the words alone.
+
+The overlay now follows the same setting as the sleeve it covers: with the bar
+off the words run to the top edge exactly as the artwork does, with it on the
+bar stands above them as it does above the player, and the chevron keeps the
+inset `player_content_top()` gives it either way. Album Art Max still keeps the
+bar whatever the setting, on both pages, and the bar's backdrop and tint were
+already reading the setting alone, so nothing else moved.
+
+The device suite's player, lyrics, status bar, layout and settings pages all
+still pass, and `FEATURES.md` now says which of the two arrangements the words
+follow.
