@@ -6,6 +6,7 @@
 #include "src/system/core/config.h"
 #include "src/system/core/lang.h"
 #include "src/system/library/library.h"
+#include "src/system/library/listeningstats.h"
 #include "src/system/library/metadata.h"
 #include "src/system/playback/playlist.h"
 #include "src/system/streaming/jellyfincache.h"
@@ -157,6 +158,14 @@ static void record_current_track_play(void) {
 		return;
 	}
 	library_record_play(current_metadata_file, current_metadata.title, current_metadata.artist);
+
+	// The same play for the Stats page. Two stores and not one because the
+	// two answer different questions: Most played wants a single number per
+	// file, forever, and the Stats page wants that number split across the
+	// days it was earned on. Neither can be derived from the other. This one
+	// is banked and written a minute later -- see listeningstats.c -- so a
+	// track started and skipped costs nothing on the card.
+	stats_note_play(current_metadata_file);
 }
 
 void device_state_remember_restored(const char *path, double position) {
@@ -197,6 +206,13 @@ static void flush_book_position(const device_state_t *state) {
 }
 
 void device_state_remember_flush(void) {
+	// The listening history first, and outside every switch below: this is the
+	// one function the power menu and the automatic shutdown both call on
+	// their way out, and the minute of playback gathered since the last write
+	// belongs on the card whether or not "remember track" is on. Half a
+	// second of work on a connection that is already open.
+	stats_flush();
+
 	device_state_t state;
 	device_state_get(&state);
 	flush_book_position(&state);

@@ -76,6 +76,7 @@
 #include "src/system/core/logging.h"
 #include "src/system/pet/petwatch.h"
 #include "src/system/playback/playlist.h"
+#include "src/system/library/listeningstats.h"
 #include "src/system/library/playlists.h"
 #include "src/system/device/power.h"
 #include "src/system/streaming/radio.h"
@@ -2319,6 +2320,11 @@ int main(int argc, char **argv) {
 		char db_path[600];
 		snprintf(db_path, sizeof(db_path), "%s/.local/library.db", db_root);
 		library_open(db_path);
+		// The listening history's RAM side: nothing to read, just the counters
+		// the progress poll fills. Opened here with the index it is written
+		// into, so a session that plays before ever visiting the Stats page
+		// still counts.
+		listeningstats_init();
 		// The same file the app downloads: one index, served as it is.
 		sonixlink_set_db_path(db_path);
 

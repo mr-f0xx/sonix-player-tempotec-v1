@@ -325,5 +325,12 @@ extern const lv_image_dsc_t icon_metronome;
 extern const lv_image_dsc_t icon_menu_metronome;
 extern const lv_image_dsc_t icon_settings_plugins;
 extern const lv_image_dsc_t icon_settings_more;
+extern const lv_image_dsc_t icon_chart_column;
+extern const lv_image_dsc_t icon_stats_play;
+extern const lv_image_dsc_t icon_stats_tracks;
+extern const lv_image_dsc_t icon_stats_artists;
+extern const lv_image_dsc_t icon_stats_albums;
+extern const lv_image_dsc_t icon_layout_grid;
+extern const lv_image_dsc_t icon_layout_list;
 
 #endif // ICONS_H

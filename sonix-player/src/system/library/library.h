@@ -605,6 +605,72 @@ int library_play_count(const char *path);
 // view knows to reload its ordering without invalidating active queue row ids.
 uint32_t library_play_counts_revision(void);
 
+// One play of a track, already holding the database lock: how a flush of
+// listening statistics adds a whole minute of plays in one transaction. Not
+// for anything else -- library_record_play() is the public one.
+void library_record_play_locked(const char *path, const char *name, const char *artist, int count);
+
+// ---------------------------------------------------------------------------
+// Listening statistics
+//
+// The day-by-day history behind the Music page's Stats view. Written by
+// listeningstats.c a minute at a time; read by the page when it opens.
+// ---------------------------------------------------------------------------
+
+// Today, as a count of days since 1970-01-01 (UTC).
+int library_stats_today(void);
+
+// One play banked for a flush: the track and how many times it was played.
+typedef struct {
+	char path[512];
+	int plays;
+} library_stats_play_t;
+
+// One day's row of the chart.
+typedef struct {
+	long seconds;
+	int tracks;
+} stats_day_row_t;
+
+// The summary cards of one range (0 week, 1 month, 2 year, 3 all time).
+typedef struct {
+	long seconds;
+	unsigned long plays;
+	int tracks;
+	int albums;
+	int artists;
+} listening_stats_summary_t;
+
+// One row of a top list: a track, a record or an artist.
+typedef struct {
+	char name[256];
+	char value[300];  // albums: the album's value (see library_album_title)
+	char artist[128]; // tracks and albums: whose it is
+	char genre[128];  // artists: what they mostly play
+	int plays;
+} listening_stats_entry_t;
+
+// Writes `seconds` of playback on `day` and the plays banked with them, in one
+// transaction. False when nothing was written, and the caller keeps its
+// counters.
+bool library_stats_add(int day, long seconds, const library_stats_play_t *plays, int play_count);
+
+// Merges the per-day rows of `count` days starting at `first_day` into `out`,
+// which the caller has already given its day numbers. Days with nothing played
+// are left at zero.
+void library_stats_daily(int first_day, int count, stats_day_row_t *out);
+
+// The summary cards of one range: see listening_stats_summary_t.
+void library_stats_summary(int range, listening_stats_summary_t *out);
+
+// The leaders of one kind (0 tracks, 1 albums, 2 artists) in one range,
+// `count` of them from `offset`. The whole list is ordered by plays, so the
+// "See all" page pages through it.
+int library_stats_top(int kind, int range, int offset, int count, listening_stats_entry_t *out);
+
+// How many rows that page holds.
+int library_stats_top_count(int kind, int range);
+
 // ---------------------------------------------------------------------------
 // Playlists
 //

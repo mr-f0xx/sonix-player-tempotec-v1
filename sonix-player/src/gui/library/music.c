@@ -12,6 +12,7 @@
 #include "src/gui/library/browser.h"
 #include "src/gui/library/libraryscan.h"
 #include "src/gui/library/medialist.h"
+#include "src/gui/library/stats.h"
 #include "src/gui/library/playlistpage.h"
 #include "src/gui/library/search.h"
 #include "src/gui/nowplaying/player.h"
@@ -70,7 +71,6 @@ static lv_obj_t *playlists_icon;
 static gui_config_t *music_cfg;
 static lv_obj_t *empty_panel;
 static lv_obj_t *music_title;
-static lv_obj_t *compact_search_btn;
 
 static void music_remove_edges(lv_obj_t *obj) {
 	lv_obj_remove_style_all(obj);
@@ -222,14 +222,27 @@ static popover_item_t popover_item_for_tile(music_tile_id_t id) {
 	}
 }
 
-// On a compact header, the Dark and Light themes give search its own corner
-// button, so the overflow menu leaves it out. The other themes keep it there.
+// On a compact header there is room for three buttons and no more: at 240 px
+// the strip is 116 px wide and the heading has 64 px left to be read in. Those
+// three are the settings gear, the overflow menu and Stats, in that order from
+// the right edge -- the two that were always there keep the places a thumb
+// already knows, and Stats takes the third.
+//
+// Search used to take that third place on the Dark and Light themes. It goes
+// back into the overflow menu now, on every theme: search is one tap inside a
+// menu that is itself one tap away, and the statistics are a page with no
+// other way in at all.
 static bool compact_search_in_corner(void) {
-	if (!music_cfg || music_cfg->screen_width >= 320) {
-		return false;
-	}
-	theme_kind_t kind = theme_get_kind();
-	return kind == THEME_KIND_DARK || kind == THEME_KIND_LIGHT;
+	return false;
+}
+
+// Stats: the listening history, opened from the Music page's own header --
+// the one page where "how much of this have I been playing" is asked, and the
+// one place a music-shaped statistic belongs.
+static void stats_cb(lv_event_t *e) {
+	(void)e;
+	stats_refresh();
+	switch_screen(stats_screen);
 }
 
 static void compact_more_cb(lv_event_t *e) {
@@ -765,11 +778,9 @@ static void music_refresh_theme(void) {
 	}
 	music_update_visibility();
 	if (music_cfg && music_cfg->screen_width < 320 && music_title) {
-		bool search_in_corner = compact_search_in_corner();
-		if (compact_search_btn) {
-			lv_obj_set_hidden(compact_search_btn, !search_in_corner);
-		}
-		settingsrow_title_corner_slots(music_title, music_cfg, search_in_corner ? 3 : 2);
+		// Three buttons on the compact header whatever the theme: see
+		// compact_search_in_corner().
+		settingsrow_title_corner_slots(music_title, music_cfg, 3);
 	}
 	lv_color_t browse_fill = theme_now_playing_fill();
 	for (int i = 0; i < TOKYO_BROWSE_COUNT; i++) {
@@ -848,7 +859,7 @@ void music_init(gui_config_t *cfg) {
 
 	bool compact_header = cfg->screen_width < 320;
 	music_title = settingsrow_title(music_screen, cfg, "music");
-	settingsrow_title_corner_slots(music_title, cfg, compact_header ? 2 : 4);
+	settingsrow_title_corner_slots(music_title, cfg, compact_header ? 3 : 5);
 
 	lv_obj_t *settings_btn = corner_button(cfg, 0, &icon_music_settings);
 	lv_obj_add_event_cb(settings_btn, switch_screen_cb, LV_EVENT_CLICKED, musicsettings_screen);
@@ -858,10 +869,9 @@ void music_init(gui_config_t *cfg) {
 		lv_obj_t *more_btn = corner_button(cfg, 1, &icon_list_music);
 		lv_obj_add_event_cb(more_btn, compact_more_cb, LV_EVENT_CLICKED, NULL);
 
-		// Dark and Light only: search gets its own corner button (hidden by
-		// music_refresh_theme() on the other themes, which keep it in the menu).
-		compact_search_btn = corner_button(cfg, 2, &icon_search);
-		lv_obj_add_event_cb(compact_search_btn, search_cb, LV_EVENT_CLICKED, NULL);
+		// The third of three: see compact_search_in_corner().
+		lv_obj_t *stats_btn = corner_button(cfg, 2, &icon_chart_column);
+		lv_obj_add_event_cb(stats_btn, stats_cb, LV_EVENT_CLICKED, NULL);
 	} else {
 		lv_obj_t *playlists_btn = corner_button(cfg, 1, &icon_list_music);
 		playlists_icon = lv_obj_get_child(playlists_btn, 0);
@@ -872,6 +882,9 @@ void music_init(gui_config_t *cfg) {
 
 		lv_obj_t *search_btn = corner_button(cfg, 3, &icon_search);
 		lv_obj_add_event_cb(search_btn, search_cb, LV_EVENT_CLICKED, NULL);
+
+		lv_obj_t *stats_btn = corner_button(cfg, 4, &icon_chart_column);
+		lv_obj_add_event_cb(stats_btn, stats_cb, LV_EVENT_CLICKED, NULL);
 	}
 
 	empty_panel = gridpage_empty_panel(music_screen, cfg, &icon_music_note, "music_no_database", scan_cb);

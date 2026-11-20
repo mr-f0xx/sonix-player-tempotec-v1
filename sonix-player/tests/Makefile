@@ -715,6 +715,34 @@ $(BUILD)/test_mostplayed: $(MOSTPLAYED_SRC) $(BUILD)/sqlite3_impl.o \
 	@mkdir -p $(BUILD)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ $(MOSTPLAYED_SRC) $(BUILD)/sqlite3_impl.o $(LDFLAGS) $(LDLIBS)
 
+# The album grid's arithmetic: the four covers that fill the V1's 240x320
+# panel, and the same rules on the wide boards. No LVGL, no library: plain C.
+.PHONY: albumgrid
+albumgrid: $(BUILD)/test_albumgrid
+	$(BUILD)/test_albumgrid
+
+$(BUILD)/test_albumgrid: test_albumgrid.c $(ROOT)/src/gui/library/albumgrid.c \
+                         $(ROOT)/src/gui/library/albumgrid.h
+	@mkdir -p $(BUILD)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ test_albumgrid.c $(ROOT)/src/gui/library/albumgrid.c $(LDFLAGS) $(LDLIBS)
+
+# The day-by-day listening history behind the Stats page: the accumulator, the
+# one-a-minute write, the summary cards, the chart rows and the three top
+# lists, against the real database.
+LISTENINGSTATS_SRC = test_listeningstats.c $(ROOT)/src/system/library/library.c \
+                    $(ROOT)/src/system/library/listeningstats.c \
+                    $(ROOT)/src/system/core/config.c $(ROOT)/src/system/core/utils.c
+.PHONY: listeningstats
+listeningstats: $(BUILD)/test_listeningstats
+	$(BUILD)/test_listeningstats
+
+$(BUILD)/test_listeningstats: $(LISTENINGSTATS_SRC) $(BUILD)/sqlite3_impl.o \
+                             $(ROOT)/src/system/library/library.h $(ROOT)/src/system/library/listeningstats.h \
+                             $(ROOT)/src/system/library/cue.h \
+                             $(ROOT)/src/system/decode/mp4.h $(ROOT)/src/system/decode/apedec.h
+	@mkdir -p $(BUILD)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ $(LISTENINGSTATS_SRC) $(BUILD)/sqlite3_impl.o $(LDFLAGS) $(LDLIBS)
+
 # The boot-time playback record: ordinary and CUE-virtual paths, the saved album
 # queue across a real database reopen, and no automatic card worker with Detect
 # changes off. Real library, CUE parser and SQLite; unrelated codecs are stubbed.
@@ -1083,6 +1111,22 @@ PEQPAGE_OBJ = $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(PEQPAGE_SRC)) \
 # The rounded screen corners and their radius: the real masks drawn into a
 # framebuffer the way the panel is driven (only what was invalidated is redrawn),
 # so a corner that was not repainted when the arc moved is still there to find.
+# The Stats page's shape on the real renderer: the pills on one line, the two
+# summary cards side by side, seven bars with seven letters under them, and two
+# top lists inside the panel. The history it reads is a stub.
+STATS_UI_SRC = $(ROOT)/tests/ui/test_stats.c $(ROOT)/src/gui/library/stats.c \
+               $(ROOT)/src/gui/shell/settingsrow.c $(ROOT)/src/gui/shell/theme.c \
+               $(ROOT)/src/gui/board_profile.c $(ROOT)/src/system/core/config.c
+STATS_UI_OBJ = $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(STATS_UI_SRC)) \
+               $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(UI_LVGL_SRC))
+
+.PHONY: stats-ui
+stats-ui: $(BUILD)/test_stats
+	$(BUILD)/test_stats
+
+$(BUILD)/test_stats: $(STATS_UI_OBJ)
+	$(CC) -o $@ $^ $(LDFLAGS) $(LDLIBS)
+
 CORNERS_SRC = $(ROOT)/tests/ui/test_corners.c $(ROOT)/src/gui/shell/corners.c \
               $(ROOT)/src/gui/board_profile.c $(ROOT)/src/system/core/config.c
 CORNERS_OBJ = $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(CORNERS_SRC)) \
@@ -1254,7 +1298,7 @@ $(BUILD)/test_stockkeys_ui: $(ROOT)/build_gen/streamkeys_key.h $(STOCKKEYS_UI_OB
 
 .PHONY: ui
 ui: wifitransfer-ui batteryprofile-ui
-ui: $(BUILD)/test_qobuzgenregrid $(BUILD)/test_main_menu $(BUILD)/test_screensaver $(BUILD)/test_tools_pages $(BUILD)/test_wifi_pages $(BUILD)/test_chargescreen $(BUILD)/test_power_display $(BUILD)/test_touch_wake $(BUILD)/test_lyricsearch $(BUILD)/test_games $(BUILD)/test_peq_profiles $(BUILD)/test_quickpanel_layout $(BUILD)/test_bootlogo $(BUILD)/test_btreceiversession $(BUILD)/test_home_swipe $(BUILD)/test_corners $(BUILD)/test_playbutton $(BUILD)/test_musicsettings_rows $(BUILD)/test_volume_overlay $(BUILD)/test_playerdeck $(BUILD)/test_vinylayout $(BUILD)/test_stickerlayout $(BUILD)/test_waveform_overlay $(BUILD)/test_hiresbadge_ui $(BUILD)/test_statusbar_ui $(BUILD)/test_stockkeys_ui $(BUILD)/test_tidal_pages $(BUILD)/test_soundcloud_pages $(BUILD)/test_qobuz_pages $(BUILD)/test_jellyfin_pages $(BUILD)/test_fwupdate
+ui: $(BUILD)/test_qobuzgenregrid $(BUILD)/test_main_menu $(BUILD)/test_screensaver $(BUILD)/test_tools_pages $(BUILD)/test_wifi_pages $(BUILD)/test_chargescreen $(BUILD)/test_power_display $(BUILD)/test_touch_wake $(BUILD)/test_lyricsearch $(BUILD)/test_games $(BUILD)/test_peq_profiles $(BUILD)/test_quickpanel_layout $(BUILD)/test_bootlogo $(BUILD)/test_btreceiversession $(BUILD)/test_home_swipe $(BUILD)/test_corners $(BUILD)/test_playbutton $(BUILD)/test_musicsettings_rows $(BUILD)/test_stats $(BUILD)/test_volume_overlay $(BUILD)/test_playerdeck $(BUILD)/test_vinylayout $(BUILD)/test_stickerlayout $(BUILD)/test_waveform_overlay $(BUILD)/test_hiresbadge_ui $(BUILD)/test_statusbar_ui $(BUILD)/test_stockkeys_ui $(BUILD)/test_tidal_pages $(BUILD)/test_soundcloud_pages $(BUILD)/test_qobuz_pages $(BUILD)/test_jellyfin_pages $(BUILD)/test_fwupdate
 	$(BUILD)/test_qobuzgenregrid
 	$(BUILD)/test_main_menu ../../sonix-packer/assets/V1/usr/resource/sonix/language
 	$(BUILD)/test_main_menu ../../sonix-packer/assets/V1/usr/resource/sonix/language saved
@@ -1275,6 +1319,7 @@ ui: $(BUILD)/test_qobuzgenregrid $(BUILD)/test_main_menu $(BUILD)/test_screensav
 	$(BUILD)/test_corners
 	$(BUILD)/test_playbutton ../../sonix-packer/assets/V1/usr/resource/sonix/language
 	$(BUILD)/test_musicsettings_rows ../../sonix-packer/assets/V1/usr/resource/sonix/language
+	$(BUILD)/test_stats
 	$(BUILD)/test_volume_overlay
 	$(BUILD)/test_playerdeck
 	$(BUILD)/test_vinylayout
@@ -1349,7 +1394,7 @@ $(BUILD)/ui/lvgl/%.o: $(ROOT)/lvgl/%.c ui/lv_conf.h $(ROOT)/lv_conf.h
 	@mkdir -p $(dir $@)
 	$(CC) $(UI_CPPFLAGS) $(filter-out -Werror,$(UI_CFLAGS)) -c $< -o $@
 
--include $(sort $(QOBUZGENRE_UI_OBJ:.o=.d) $(PEQPAGE_OBJ:.o=.d) $(UI_OBJ:.o=.d) $(SAVER_OBJ:.o=.d) $(CHARGE_OBJ:.o=.d) $(WIFIPAGE_OBJ:.o=.d) $(LYRICSEARCH_OBJ:.o=.d) $(GAMES_OBJ:.o=.d) $(CORNERS_OBJ:.o=.d) $(PLAYBUTTON_OBJ:.o=.d) $(MUSICROWS_OBJ:.o=.d) $(VOLUMEOVERLAY_OBJ:.o=.d) $(PLAYERDECK_OBJ:.o=.d) $(VINYLLAYOUT_OBJ:.o=.d) $(STICKERLAYOUT_OBJ:.o=.d) $(WAVEOVERLAY_OBJ:.o=.d) $(HIRESBADGE_UI_OBJ:.o=.d) $(STOCKKEYS_UI_OBJ:.o=.d) $(TIDALPAGE_OBJ:.o=.d))
+-include $(sort $(QOBUZGENRE_UI_OBJ:.o=.d) $(PEQPAGE_OBJ:.o=.d) $(UI_OBJ:.o=.d) $(SAVER_OBJ:.o=.d) $(CHARGE_OBJ:.o=.d) $(WIFIPAGE_OBJ:.o=.d) $(LYRICSEARCH_OBJ:.o=.d) $(GAMES_OBJ:.o=.d) $(CORNERS_OBJ:.o=.d) $(STATS_UI_OBJ:.o=.d) $(PLAYBUTTON_OBJ:.o=.d) $(MUSICROWS_OBJ:.o=.d) $(VOLUMEOVERLAY_OBJ:.o=.d) $(PLAYERDECK_OBJ:.o=.d) $(VINYLLAYOUT_OBJ:.o=.d) $(STICKERLAYOUT_OBJ:.o=.d) $(WAVEOVERLAY_OBJ:.o=.d) $(HIRESBADGE_UI_OBJ:.o=.d) $(STOCKKEYS_UI_OBJ:.o=.d) $(TIDALPAGE_OBJ:.o=.d))
 
 # Smart Mix track-count limits and traversal, with a memory-only graph fixture.
 GENIUS_SRC = test_genius.c $(ROOT)/src/system/library/genius.c
