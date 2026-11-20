@@ -148,7 +148,15 @@ void soundfield_set_width(int hundredths) {
 	test_sf_width = (hundredths / SOUNDFIELD_WIDTH_STEP) * SOUNDFIELD_WIDTH_STEP;
 	sf_writes++;
 }
-const lv_image_dsc_t icon_soundfield_quick = TEST_ICON;
+// Production's Soundfield glyph is drawn at 46 px while the sun and speaker
+// are 30 px; the test keeps that difference so a wider cell or a larger drawn
+// glyph cannot pass silently.
+static const uint8_t sf_icon_pixels[46 * 46 * 4];
+const lv_image_dsc_t icon_soundfield_quick = {
+	.header = { .magic = LV_IMAGE_HEADER_MAGIC, .cf = LV_COLOR_FORMAT_ARGB8888,
+				.w = 46, .h = 46, .stride = 46 * 4 },
+	.data_size = sizeof(sf_icon_pixels), .data = sf_icon_pixels
+};
 
 static void reset_layout(void) {
 	order_loaded = false;
@@ -161,6 +169,15 @@ static bool contains(const uint8_t *list, int n, quickpanel_button_t button) {
 		if (list[i] == button) { return true; }
 	}
 	return false;
+}
+// How wide the glyph actually draws, not just the size of its source bitmap.
+static int rail_drawn_width(lv_obj_t *icon) {
+	return (int)((long)lv_image_get_scale(icon) * lv_image_get_src_width(icon) / LV_SCALE_NONE);
+}
+static void check_rail_icon_pair(lv_obj_t *a, lv_obj_t *b) {
+	assert(lv_obj_get_width(a) == lv_obj_get_width(b));
+	assert(lv_obj_get_height(a) == lv_obj_get_height(b));
+	assert(abs(rail_drawn_width(a) - rail_drawn_width(b)) <= 1);
 }
 static void check_partition(void) {
 	bool seen[QP_BTN_COUNT] = {false};
@@ -257,8 +274,9 @@ static void test_level_rows(const char *path) {
 	// The sun's rays start closer to the edge of their bitmap than the
 	// speaker does, so paired rails inset it to keep the same gap to each
 	// slider. The volume glyph is left where it has always been.
-	assert(lv_image_get_offset_x(level_icon) == -2 && lv_image_get_offset_y(level_icon) == 2);
+	assert(lv_image_get_offset_x(level_icon) == 0 && lv_image_get_offset_y(level_icon) == 1);
 	assert(lv_image_get_offset_x(volume_icon) == 0 && lv_image_get_offset_y(volume_icon) == 0);
+	check_rail_icon_pair(level_icon, volume_icon);
 	lv_area_t a, b, card, np;
 	lv_obj_get_coords(level_row, &a); lv_obj_get_coords(volume_row, &b);
 	lv_obj_get_coords(controls_card, &card); lv_obj_get_coords(np_card, &np);
@@ -332,6 +350,7 @@ static void test_level_rows(const char *path) {
 	assert(lv_slider_get_min_value(level_slider) == 0 && lv_slider_get_max_value(level_slider) == 40);
 	assert(lv_slider_get_value(level_slider) == SOUNDFIELD_WIDTH_DEFAULT / SOUNDFIELD_WIDTH_STEP);
 	assert(lv_image_get_src(level_icon) == &icon_soundfield_quick);
+	check_rail_icon_pair(level_icon, volume_icon);
 	test_sf_enabled = false;
 	int writes_before = brightness_writes + volume_writes;
 	lv_slider_set_value(level_slider, 33, LV_ANIM_OFF);
@@ -346,7 +365,7 @@ static void test_level_rows(const char *path) {
 	// brightness without losing the saved Soundfield choice.
 	quickpanel_set_both_sliders(true);
 	assert(level_mode() == QP_LEVEL_BRIGHTNESS);
-	assert(lv_image_get_offset_x(level_icon) == -2 && lv_image_get_offset_y(level_icon) == 2);
+	assert(lv_image_get_offset_x(level_icon) == 0 && lv_image_get_offset_y(level_icon) == 1);
 	quickpanel_set_both_sliders(false);
 	assert(level_mode() == QP_LEVEL_SOUNDFIELD);
 	config_set_bool("addons", "soundfield", false);
@@ -366,6 +385,12 @@ static void test_level_rows(const char *path) {
 	assert(level_mode() == QP_LEVEL_BRIGHTNESS && level_mode_second() == QP_LEVEL_SOUNDFIELD);
 	assert(lv_image_get_src(level_icon) == &icon_sun);
 	assert(lv_image_get_src(volume_icon) == &icon_soundfield_quick);
+	check_rail_icon_pair(level_icon, volume_icon);
+	// A wider source bitmap must not push this rail's slider out of line.
+	lv_area_t sf_rail, other_rail;
+	lv_obj_get_coords(volume_slider, &sf_rail);
+	lv_obj_get_coords(level_slider, &other_rail);
+	assert(sf_rail.x1 == other_rail.x1);
 	assert(lv_slider_get_min_value(volume_slider) == 0 && lv_slider_get_max_value(volume_slider) == 40);
 	int before_brightness = brightness_writes, before_volume = volume_writes;
 	sf_writes = 0;

@@ -644,6 +644,8 @@ and Soundfield width they carry: Bright + vol (the default), Bright + SF, or
 Vol + SF. The two choices are remembered separately, so turning the switch off
 restores the previous single slider. Soundfield pairs are unavailable while the
 module is off in Plugins, and the light falls back to the remaining control.
-On the V1, the quick buttons and playback controls remain accessible while the
-track text is hidden to make room for two full-width, finger-sized targets. USB
-DAC status remains visible.
+Whichever glyph a rail shows, it draws in the same square cell with the same
+padding, and the sliders start at the same x position. On the V1, the quick
+buttons and playback controls remain accessible while the track text is hidden
+to make room for two full-width, finger-sized targets. USB DAC status remains
+visible.

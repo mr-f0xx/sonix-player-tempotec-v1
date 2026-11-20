@@ -1023,17 +1023,14 @@ static void level_icon_refresh_one(lv_obj_t *icon_obj, lv_obj_t *slider, quickpa
 		icon = &icon_soundfield_quick;
 	}
 	lv_image_set_src(icon_obj, icon);
-	// With two rails the sun sits directly above the speaker, so their
-	// visible glyphs need the same inset inside the 30 px image cell. The
-	// speaker art starts 3 px into its bitmap and the sun's rays start at
-	// 1 px; without this nudge the sun looks closer to its slider. Keep the
-	// original placement for a single rail, where there is nothing to line
-	// up with.
+	// With two rails the sun sits directly above another glyph, so its visible
+	// rays need the same inset as the speaker art: the sun starts 1 px into its
+	// 30 px source, the speaker 3 px. Nudge it down one drawn pixel, and leave
+	// it alone on a single rail where there is nothing to line up with.
 	int32_t offset_x = 0;
 	int32_t offset_y = 0;
 	if (qp_compact && level_both && icon == &icon_sun) {
-		offset_x = -2;
-		offset_y = 2;
+		offset_y = 1;
 	}
 	lv_image_set_offset_x(icon_obj, offset_x);
 	lv_image_set_offset_y(icon_obj, offset_y);
@@ -3443,6 +3440,9 @@ static lv_obj_t *make_level_row(lv_obj_t **icon_out, lv_obj_t **slider_out) {
 	// slice the knob down the middle. Keeping the track 13 px short of the row's
 	// right edge gives it room.
 	lv_obj_set_style_pad_right(row, qp_compact ? 12 : 15, 0);
+	// The glyph cell is smaller than the old 30 px bitmap box; this keeps its
+	// centre where it was, so the rail still starts in the same place.
+	lv_obj_set_style_pad_left(row, qp_compact ? 6 : 0, 0);
 	lv_obj_set_style_pad_gap(row, qp_compact ? 6 : 18, 0);
 	lv_obj_set_scrollable(row, false);
 	lv_obj_set_event_bubble(row, true);
@@ -3453,9 +3453,14 @@ static lv_obj_t *make_level_row(lv_obj_t **icon_out, lv_obj_t **slider_out) {
 	lv_image_set_src(icon, &icon_sun);
 	lv_obj_add_style(icon, &theme_style_icon, 0);
 	lv_obj_set_style_image_recolor_opa(icon, LV_OPA_COVER, 0);
-	if (qp_compact) {
-		lv_image_set_scale(icon, 160);
-	}
+	// One fixed square cell for every glyph: the sun and the speaker are 30 px
+	// sources, Soundfield is 46 px. CONTAIN scales whichever source is shown to
+	// the same drawn size, and the flex row can no longer give the wider
+	// Soundfield bitmap a wider cell -- which used to push its rail to the
+	// right of the brightness and volume rails.
+	int icon_side = qp_compact ? 19 : 30;
+	lv_obj_set_size(icon, icon_side, icon_side);
+	lv_image_set_inner_align(icon, LV_IMAGE_ALIGN_CONTAIN);
 
 	lv_obj_t *slider = lv_slider_create(row);
 	// Keep the visual rail slim; the enlarged click area below makes it easier
