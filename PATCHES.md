@@ -5120,3 +5120,36 @@ there.
 
 The cast feature itself needed no change, and the rest of the file compiles
 under emcc as it stands.
+
+## A held sleeve opens the queue (issue #379)
+
+The playback queue was two taps into the ellipsis menu, and the issue asks for
+the artwork itself to be the way in. The page already carries four gestures on
+that picture -- the sheet drag, the lyric swipe, Album Art Max's double tap and
+the tap that brings the overlay back -- so the new one had to be a gesture none
+of them use: a press held still for half a second.
+
+It is a 500 ms `lv_timer` of the player's own rather than `LV_EVENT_LONG_PRESSED`.
+That event needs the object it lands on to be the pressed one when it comes due,
+and the sleeve frame is deliberately not clickable: it is part of the panel the
+sheet is dragged by, so the press has to be watched on that panel and the sleeve
+asked separately, by rectangle, whether the finger was on the picture. `PRESSING`
+drops the hold once the finger moves 12 px or the panel hands the gesture to a
+scroll or to the sheet drag, so a swipe is never mistaken for one. The release
+cancels an unfired hold, `PRESS_LOST` and `INDEV_RESET` do the same for a press
+that never reports its end -- the screen going dark under the finger, the words
+coming up over it -- and a fired hold swallows the rest of the gesture with
+`lv_indev_wait_release()`, so the lift cannot land as a tap on a queue row.
+
+The gesture asks the question the menu's **Queue** row already asks before it
+opens anything: not in a book, not while the phone holds the queue over DLNA,
+and not on a queue of one. Album Art Max, Studio and Poster are each answered by
+the picture they actually draw -- Studio's square, Poster's panel clipped at the
+deck, Album Art Max left alone because it double-taps the same picture -- and
+the words, the scrub bar and the open sheet all keep their presses.
+
+`tests/ui/test_sleeve_hold.c` compiles the real `player.c` and drives LVGL's own
+pointer and timer dispatch rather than hand-sent events: the hold firing, the
+slop dropping a wandering finger, each of the guards holding, and the release
+after a fired hold leaving the row under it alone. `FEATURES.md` and the tests
+README describe the gesture.
