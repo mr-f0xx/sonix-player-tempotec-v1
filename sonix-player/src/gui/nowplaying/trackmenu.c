@@ -1243,9 +1243,9 @@ static void trackmenu_delete_track_cb(void *user) {
 
 static void trackmenu_back_cb(void *user) {
 	(void)user;
-	// Equivalent to the player's floating chevron, available from inside the
-	// overflow menu as well: close the now-playing sheet to its previous page.
-	player_sheet_close(true);
+	// The popover closes itself before its action runs (see item_clicked_cb),
+	// which is all "Back" has to do: the listener stays on the playback view.
+	// Leaving the sheet is the chevron's job, not this row's.
 }
 
 static void open_queue_cb(void *user) {
@@ -1312,8 +1312,10 @@ static void cast_current_cb(void *user) {
 		gui_notify_popup("enable_wi_fi_first");
 		return;
 	}
-	player_sheet_close(false);
 	if (dlna_cast_selected() < 0) {
+		// Picking a renderer needs the DLNA page, so this one case leaves the
+		// playback view; with a renderer chosen the track is sent from here.
+		player_sheet_close(false);
 		gui_notify_popup("trackmenu_cast_no_renderer");
 		switch_screen(dlna_screen);
 		return;
