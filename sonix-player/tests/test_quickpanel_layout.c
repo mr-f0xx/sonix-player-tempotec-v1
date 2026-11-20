@@ -127,6 +127,12 @@ const lv_image_dsc_t icon_sun = TEST_ICON;
 const lv_image_dsc_t icon_volume_mute = TEST_ICON;
 const lv_image_dsc_t icon_volume_low = TEST_ICON;
 const lv_image_dsc_t icon_volume_high = TEST_ICON;
+static const uint8_t profile_icon_pixels[46 * 46 * 4];
+static const lv_image_dsc_t profile_test_icon = {
+	.header = { .magic = LV_IMAGE_HEADER_MAGIC, .cf = LV_COLOR_FORMAT_ARGB8888,
+				.w = 46, .h = 46, .stride = 46 * 4 },
+	.data_size = sizeof(profile_icon_pixels), .data = profile_icon_pixels
+};
 
 // LVGL's configured default font; no widgets are created in this suite.
 lv_font_t font_ui_14;
@@ -813,6 +819,44 @@ static void test_receiver_session(void) {
 	peq_stub = eq_stub = mseb_stub = NULL;
 }
 
+static void test_profile_icon_fits_its_circle(void) {
+	for (int compact = 0; compact <= 1; compact++) {
+		int size = compact ? 44 : CIRCLE_BUTTON_SIZE;
+		qp_compact = compact != 0;
+		circle_button_size = size;
+
+		lv_display_t *display = lv_display_create(compact ? 240 : 480, compact ? 320 : 720);
+		lv_obj_t *screen = lv_obj_create(NULL);
+		lv_screen_load(screen);
+		lv_obj_t *button = lv_obj_create(screen);
+		lv_obj_set_size(button, size, size);
+		lv_obj_center(button);
+		lv_obj_t *icon = lv_image_create(button);
+		lv_image_set_src(icon, &profile_test_icon);
+		place_peq_profile_icon(icon);
+		lv_obj_update_layout(screen);
+
+		lv_area_t button_area, icon_area;
+		lv_obj_get_coords(button, &button_area);
+		lv_obj_get_coords(icon, &icon_area);
+		double button_cy = ((double)button_area.y1 + button_area.y2) / 2.0;
+		double icon_cy = ((double)icon_area.y1 + icon_area.y2) / 2.0;
+		int expected_offset = size / 5;
+		assert(button_cy > icon_cy);
+		assert((int)(button_cy - icon_cy + 0.5) == expected_offset);
+
+		// Check the transformed bitmap's outer corners against the circle, not
+		// just the 46 px source box: LVGL keeps that box unscaled for layout.
+		double half = 46.0 * lv_image_get_scale(icon) / (2.0 * LV_SCALE_NONE);
+		double vertical = half + button_cy - icon_cy;
+		assert(half * half + vertical * vertical <= (size * 0.5) * (size * 0.5));
+
+		lv_display_delete(display);
+	}
+	qp_compact = false;
+	circle_button_size = CIRCLE_BUTTON_SIZE;
+}
+
 int main(void) {
 	lv_init();
 	char dir[] = "/tmp/sonix-qp-layout-XXXXXX";
@@ -820,6 +864,7 @@ int main(void) {
 	char path[512];
 	snprintf(path, sizeof(path), "%s/config.ini", dir);
 	config_init(path);
+	test_profile_icon_fits_its_circle();
 	test_quickpanel_mode_gating();
 	test_level_rows(path);
 	test_receiver_card_text();

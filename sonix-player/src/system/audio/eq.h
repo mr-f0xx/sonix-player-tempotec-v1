@@ -22,6 +22,12 @@ void eq_init(void);
 void eq_set_enabled(bool enabled); // saved to config
 bool eq_get_enabled(void);
 
+// Master automatic level control for the equalizer chain. When off, the engine
+// applies only the user's PEQ preamp and skips its automatic GEQ/PEQ headroom
+// and MSEB level compensation. Persistent; on by default for existing setups.
+void eq_set_auto_level(bool enabled);
+bool eq_get_auto_level(void);
+
 void eq_set_band(int band, int gain_db); // clamped, saved to config
 int eq_get_band(int band);
 
@@ -142,10 +148,11 @@ void peq_reset_band(int index);
 // <card>/.local/peq.
 //
 // Loading replaces the whole chain: the file's filters in order from the first
-// band, the rest off, and its preamp. `ignored` (may be NULL) gets how many
-// filters of the file could not come along -- past the tenth, or of a kind the
-// chain does not have. False, changing nothing, when the file cannot be read
-// or holds no usable filter at all.
+// band, the rest off, and (with Automatic Level on) its preamp. With Automatic
+// Level off, the current manual preamp is retained. `ignored` (may be NULL)
+// gets how many filters of the file could not come along -- past the tenth, or
+// of a kind the chain does not have. False, changing nothing, when the file
+// cannot be read or holds no usable filter at all.
 void peq_presets_set_dir(const char *sd_root);
 bool peq_preset_save(const char *name);
 bool peq_preset_load(const char *name, int *ignored);
@@ -179,7 +186,7 @@ int peq_response_tenths(int freq, int sample_rate);
 // The figure holds for a normal sample rate (44.1 kHz and above), which is the
 // rate the MSEB half is asked at. On a 32 kHz or slower file the engine drops
 // the highest bands and measures a shorter band, so the real figure differs a
-// little from the one reported here.
+// little from the one reported here. Returns zero when Automatic Level is off.
 int eq_auto_headroom_tenths(void);
 
 // ---------------------------------------------------------------------------

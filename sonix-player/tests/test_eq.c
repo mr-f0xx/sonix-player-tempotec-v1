@@ -328,6 +328,21 @@ static void test_peq_profiles(const char *dir) {
 	peq_get_band(0, &imported);
 	CHECK(imported.on && imported.freq == 1000 && imported.gain_tenths == 40);
 
+	// Manual mode keeps the current preamp when a preset's APO Preamp line is
+	// imported, and the preference itself survives a restart.
+	CHECK(eq_get_auto_level());
+	eq_set_auto_level(false);
+	peq_set_preamp(-55);
+	CHECK(peq_preset_load("exported", NULL));
+	CHECK(peq_get_preamp() == -55);
+	CHECK(eq_auto_headroom_tenths() == 0);
+	CHECK(config_save());
+	config_init(config_path);
+	eq_init();
+	CHECK(!eq_get_auto_level());
+	CHECK(peq_get_preamp() == -55);
+	eq_set_auto_level(true);
+
 	// The actual PCM path, including a switch from enabled to disabled.
 	set_profile_curve(100, 120, -120, true);
 	peq_select_profile(2);
@@ -356,6 +371,42 @@ static void test_peq_profiles(const char *dir) {
 	// response must return to the same curve, not the other profile's curve.
 	CHECK(peq_response_tenths(1000, RATE) == profile_two_response);
 	all_off();
+}
+
+static double pcm_rms(const short *pcm, int first_frame, int frames) {
+	double sum = 0.0;
+	for (int i = first_frame; i < first_frame + frames; i++) {
+		double sample = pcm[2 * i];
+		sum += sample * sample;
+	}
+	return sqrt(sum / frames);
+}
+
+static void test_auto_level_switch(void) {
+	const int frames = 8192;
+	short original[frames * 2];
+	short automatic[frames * 2];
+	short manual[frames * 2];
+
+	all_off();
+	eq_set_auto_level(true);
+	eq_set_enabled(true);
+	eq_set_band(5, 12); // 1 kHz boost: automatic headroom should cancel it
+	fill_sine(original, frames, RATE, 1000, 1000);
+	CHECK(eq_auto_headroom_tenths() <= -115 && eq_auto_headroom_tenths() >= -125);
+	memcpy(automatic, original, sizeof(original));
+	eq_process(automatic, frames, 2, RATE);
+	double auto_rms = pcm_rms(automatic, frames - 2048, 2048);
+
+	eq_set_auto_level(false);
+	CHECK(eq_auto_headroom_tenths() == 0);
+	memcpy(manual, original, sizeof(original));
+	eq_process(manual, frames, 2, RATE);
+	double manual_rms = pcm_rms(manual, frames - 2048, 2048);
+	CHECK(manual_rms > auto_rms * 2.5); // manual mode leaves the +12 dB boost alone
+
+	all_off();
+	eq_set_auto_level(true);
 }
 
 static void test_legacy_peq_upgrade(const char *dir) {
@@ -396,6 +447,7 @@ int main(void) {
 	// defaults are used until the first save.
 	config_init(path);
 	eq_init();
+	CHECK(eq_get_auto_level()); // missing setting keeps the historical default
 
 	test_off_is_a_no_op();
 	test_graphic_eq_changes_samples();
@@ -404,6 +456,7 @@ int main(void) {
 	test_radio_rates();
 	test_mono_station_widening();
 	test_peq_profiles(dir);
+	test_auto_level_switch();
 	test_legacy_peq_upgrade(dir);
 
 	if (failures) {

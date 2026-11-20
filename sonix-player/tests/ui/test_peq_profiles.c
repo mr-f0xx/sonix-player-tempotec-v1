@@ -86,6 +86,22 @@ static lv_obj_t *profile_button(int profile) {
 	assert(label);
 	return lv_obj_get_parent(label);
 }
+static lv_obj_t *switch_for_label(lv_obj_t *screen, const char *text) {
+	lv_obj_t *label = find_label(screen, text);
+	assert(label);
+	lv_obj_t *card = lv_obj_get_parent(label);
+	for (uint32_t i = 0; i < lv_obj_get_child_count(card); i++) {
+		lv_obj_t *child = lv_obj_get_child(card, (int32_t)i);
+		if (lv_obj_check_type(child, &lv_switch_class)) { return child; }
+	}
+	assert(0);
+	return NULL;
+}
+static void set_switch(lv_obj_t *sw, bool checked) {
+	if (checked) { lv_obj_add_state(sw, LV_STATE_CHECKED); }
+	else { lv_obj_remove_state(sw, LV_STATE_CHECKED); }
+	lv_obj_send_event(sw, LV_EVENT_VALUE_CHANGED, NULL);
+}
 static void check_pills(void) {
 	lv_obj_update_layout(peqpage_screen());
 	for (int i = 1; i <= PEQ_PROFILE_COUNT; i++) {
@@ -114,6 +130,7 @@ static void check_languages(const char *dir) {
 		snprintf(language, sizeof(language), "%.*s", (int)(len - 4), ent->d_name);
 		assert(lang_set(language));
 		assert(strcmp(tr("peq_profile"), "peq_profile") != 0);
+		assert(strcmp(tr("peq_auto_level"), "peq_auto_level") != 0);
 		assert(strstr(tr("peq_profile_name"), "%d") != NULL);
 		lv_obj_send_event(peqpage_screen(), LV_EVENT_REFRESH, NULL);
 		for (int kind = 0; kind < THEME_KIND_COUNT; kind++) {
@@ -435,6 +452,15 @@ int main(int argc, char **argv) {
 	lv_screen_load(peqpage_screen());
 	check_languages(argv[1]);
 
+	// Automatic Level is a persistent global switch, not one of the two PEQ
+	// profile states. It remains independently operable while PEQ is off.
+	lv_obj_t *automatic_switch = switch_for_label(peqpage_screen(), tr("peq_auto_level"));
+	assert(lv_obj_has_state(automatic_switch, LV_STATE_CHECKED));
+	set_switch(automatic_switch, false);
+	assert(!eq_get_auto_level());
+	set_switch(automatic_switch, true);
+	assert(eq_get_auto_level());
+
 	// Profile 1 on, Profile 2 off. The pills select; they do not enable PEQ.
 	peq_set_enabled(true);
 	peq_band_t band;
@@ -444,7 +470,7 @@ int main(int argc, char **argv) {
 	peq_set_preamp(-60);
 	lv_obj_send_event(profile_button(2), LV_EVENT_CLICKED, NULL);
 	assert(peq_get_profile() == 2 && !peq_get_enabled());
-	assert(!has_checked(peqpage_screen()));
+	assert(!lv_obj_has_state(switch_for_label(peqpage_screen(), tr("on")), LV_STATE_CHECKED));
 	assert(peq_get_preamp() == 0);
 	back_drag = true;
 	lv_obj_send_event(profile_button(1), LV_EVENT_CLICKED, NULL);
@@ -452,7 +478,7 @@ int main(int argc, char **argv) {
 	back_drag = false;
 	lv_obj_send_event(profile_button(1), LV_EVENT_CLICKED, NULL);
 	assert(peq_get_profile() == 1 && peq_get_enabled() && peq_get_preamp() == -60);
-	assert(has_checked(peqpage_screen()));
+	assert(lv_obj_has_state(switch_for_label(peqpage_screen(), tr("on")), LV_STATE_CHECKED));
 	assert(preset_reload);
 
 	// Open Band 1, then change profile as the quick control would. Both pages
@@ -488,6 +514,20 @@ int main(int argc, char **argv) {
 	assert(peq_get_preamp() == -60);
 	peq_get_band(0, &band);
 	assert(band.on && band.freq == 100 && band.gain_tenths == 60);
+
+	// settingsrow_page keeps its list offset when a child screen is opened and
+	// when the user returns, rather than resetting the long PEQ list to top.
+	lv_obj_t *page_list = lv_obj_get_child(peqpage_screen(), 1);
+	lv_obj_update_layout(peqpage_screen());
+	assert(lv_obj_get_scroll_bottom(page_list) > 0);
+	lv_obj_scroll_to_y(page_list, 128, LV_ANIM_OFF);
+	int remembered_scroll = (int)lv_obj_get_scroll_y(page_list);
+	assert(remembered_scroll > 0);
+	lv_screen_load(editor);
+	assert((int)lv_obj_get_scroll_y(page_list) == remembered_scroll);
+	lv_screen_load(peqpage_screen());
+	assert((int)lv_obj_get_scroll_y(page_list) == remembered_scroll);
+
 	check_entry();
 	printf("peq UI: profile pills fit 11 languages / 5 themes; selection, refresh and scoped reset passed\n");
 	printf("peq UI: frequency (Hz and kHz), gain and Q typed on the keypad, clamped, cancelled; keys fit the panel\n");

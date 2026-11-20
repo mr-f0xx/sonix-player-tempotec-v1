@@ -40,6 +40,9 @@
   Settings → More → Control centre to make room for it on a full panel. A long press opens the PEQ page.
   Existing PEQ settings become Profile 1; Profile 2 starts flat and off. Switching is manual and
   preserves each profile's on/off state, rather than enabling EQ automatically.
+  The PEQ page's **Automatic level** switch can disable automatic EQ headroom and
+  MSEB level compensation; with it off, the preamp is manual and loading a preset
+  keeps the current preamp while replacing its filters.
 - **MSEB** - HiBy's MageSound tuning, matched to the stock player: 10
   characteristics driven by 13 filters, with the slider travel selectable
   between 20, 40 and 100.

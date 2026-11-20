@@ -31,6 +31,7 @@ const int eq_band_freq[EQ_BANDS] = {31, 63, 125, 250, 500, 1000, 2000, 4000, 800
 
 static volatile int band_gain_db[EQ_BANDS];
 static volatile int eq_enabled;
+static volatile int eq_auto_level_enabled = 1;
 static volatile int mseb_value[MSEB_BANDS];
 
 // PEQ. The bands are not `volatile`: they are structs, and a volatile struct is
@@ -305,6 +306,7 @@ void eq_init(void) {
 	// too. The setting itself is kept: switching it back on is what "back to
 	// normal" means, and it comes back exactly as it was left.
 	eq_enabled = addons_enabled("eq") && (int)config_get_int("eq", "enabled", 0);
+	eq_auto_level_enabled = config_get_bool("peq", "auto_level", true) ? 1 : 0;
 	for (int i = 0; i < EQ_BANDS; i++) {
 		char key[16];
 		snprintf(key, sizeof(key), "band%d", i);
@@ -368,6 +370,15 @@ void eq_set_enabled(bool enabled) {
 }
 
 bool eq_get_enabled(void) { return eq_enabled != 0; }
+
+void eq_set_auto_level(bool enabled) {
+	eq_auto_level_enabled = enabled ? 1 : 0;
+	settings_version++;
+	config_set_bool("peq", "auto_level", enabled);
+	config_save();
+}
+
+bool eq_get_auto_level(void) { return eq_auto_level_enabled != 0; }
 
 void eq_set_band(int band, int gain_db) {
 	if (band < 0 || band >= EQ_BANDS) {
@@ -1039,16 +1050,20 @@ bool peq_preset_load(const char *name, int *ignored) {
 	}
 
 	// Publish the whole imported chain together, retaining this profile's
-	// enable state. Persist afterwards, with one write rather than one per band.
+	// enable state. Automatic Level on imports the file's APO preamp as before;
+	// in manual mode the user's preamp remains untouched while the filters load.
 	pthread_mutex_lock(&peq_snapshot_mutex);
 	memcpy(peq_bands, bands, sizeof(peq_bands));
-	peq_preamp_tenths = preamp;
+	if (eq_auto_level_enabled) {
+		peq_preamp_tenths = preamp;
+	}
+	int saved_preamp = peq_preamp_tenths;
 	settings_version++;
 	pthread_mutex_unlock(&peq_snapshot_mutex);
 	for (int i = 0; i < PEQ_BANDS; i++) {
 		peq_store_band(i);
 	}
-	config_set_int("peq", "preamp", preamp);
+	config_set_int("peq", "preamp", saved_preamp);
 	config_save();
 
 	if (ignored) {
@@ -1717,8 +1732,10 @@ static void filters_rebuild(int rate, const peq_profile_t *peq) {
 	}
 
 	// MSEB's own level, from its own bank. Its filters are the first thing the
-	// sample meets, and this is applied immediately in front of them.
-	mseb_pregain_db = mseb_auto_preamp_db(rate);
+	// sample meets, and this is applied immediately in front of them. The
+	// master Automatic Level switch bypasses this normalization along with the
+	// anti-clip headroom below.
+	mseb_pregain_db = eq_auto_level_enabled ? mseb_auto_preamp_db(rate) : 0.0f;
 	mseb_pregain_target = (float)pow(10.0, (double)mseb_pregain_db / 20.0);
 
 	// The anti-clip headroom (the stock's geq_pre_gain), for the graphic
@@ -1732,9 +1749,11 @@ static void filters_rebuild(int rate, const peq_profile_t *peq) {
 	// boost off again on top of it played the curve 6 dB quieter than it plays
 	// anywhere else. So the headroom only takes what a negative preamp has not
 	// already taken; a positive preamp, which guards nothing, is applied on top
-	// of the full headroom.
+	// of the full headroom. With Automatic Level off, only the manual preamp is
+	// applied and the user takes responsibility for clipping headroom.
 	double manual = peq_on ? (double)peq_preamp / 10.0 : 0.0;
-	pregain_target = (float)pow(10.0, headroom_db(max_boost, manual) / 20.0);
+	double target_db = eq_auto_level_enabled ? headroom_db(max_boost, manual) : manual;
+	pregain_target = (float)pow(10.0, target_db / 20.0);
 	if (rate_changed) {
 		pregain = pregain_target;
 		mseb_pregain = mseb_pregain_target;
@@ -1804,6 +1823,10 @@ int peq_response_tenths(int freq, int sample_rate) {
 #define EQ_HEADROOM_REFERENCE_RATE 44100
 
 int eq_auto_headroom_tenths(void) {
+	if (!eq_auto_level_enabled) {
+		return 0;
+	}
+
 	double max_boost = 0;
 	double total = (double)mseb_auto_preamp_db(EQ_HEADROOM_REFERENCE_RATE);
 
