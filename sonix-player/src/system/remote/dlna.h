@@ -2,6 +2,7 @@
 #define DLNA_H
 
 #include <stdbool.h>
+#include <stddef.h>
 
 // DLNA, done the way the original firmware does it, which here too is not what
 // one would expect.
@@ -150,6 +151,11 @@ void dlna_request_prev(void);
 // turns on but has nowhere to put the track, and says so.
 #define DLNACACHE_DIR ".local/dlna-cache"
 void dlna_set_root(const char *sd_root);
+
+// The directory incoming tracks are written to, or empty when there is no
+// card. The cast fallback reuses it for converted files, so both kinds of
+// transient track are kept in one place and cleared together.
+bool dlna_cache_dir(char *out, size_t size);
 
 // Empties the cache. Call on the way out -- shutdown, reboot, firmware update,
 // factory reset -- exactly as for the Qobuz and Tidal caches and for the same

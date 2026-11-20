@@ -1,11 +1,15 @@
 #define _GNU_SOURCE
 #include "dlna_cast.h"
 
+#include "src/system/remote/dlna.h"
+#include "src/system/decode/decode.h"
+
 #include "src/system/net/http.h"
 #include "src/system/net/wifi.h"
 
 #include <arpa/inet.h>
 #include <ctype.h>
+#include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <netinet/in.h>
@@ -468,29 +472,38 @@ static bool soap_call(const char *url, const char *service_type, const char *act
 // ConnectionManager, or lists nothing lands on the format's preferred
 // spelling, and a cast that would have worked is not withheld because a
 // preference could not be confirmed.
-static void choose_mime(const renderer_t *renderer, const media_format_t *format, char *out, size_t size) {
+// True when the renderer's own sink list named a spelling of the format, so
+// what gets sent is what the renderer says it plays rather than a guess: a
+// renderer that lists nothing for FLAC gets a WAV instead (see cast_worker).
+static bool choose_mime(const renderer_t *renderer, const media_format_t *format, char *out, size_t size) {
 	snprintf(out, size, "%s", format->mimes[0]);
-	if (!renderer->manager_url[0] || !renderer->manager_type[0]) return;
+	if (!renderer->manager_url[0] || !renderer->manager_type[0]) return false;
 	char *response = NULL;
 	if (!soap_call(renderer->manager_url, renderer->manager_type, "GetProtocolInfo", NULL, &response, 32 * 1024) || !response) {
 		free(response);
-		return;
+		return false;
 	}
 	char *sink = malloc(16 * 1024);
-	if (!sink) { free(response); return; }
+	if (!sink) { free(response); return false; }
+	bool matched = false;
 	if (xml_value(response, "Sink", sink, 16 * 1024)) {
 		xml_unescape(sink);
 		if (!sink_accepts_anything(sink)) {
 			for (size_t i = 0; i < sizeof(format->mimes) / sizeof(format->mimes[0]) && format->mimes[i]; i++) {
 				if (sink_names_mime(sink, format->mimes[i])) {
 					snprintf(out, size, "%s", format->mimes[i]);
+					matched = true;
 					break;
 				}
 			}
+		} else {
+			// http-get:*:*:* or audio/*: anything goes, the preferred spelling is fine
+			matched = true;
 		}
 	}
 	free(sink);
 	free(response);
+	return matched;
 }
 
 // ---------------------------------------------------------------------------
@@ -837,6 +850,116 @@ static bool soap(const renderer_t *renderer, const char *action, const char *arg
 	return soap_call(renderer->control_url, renderer->service_type, action, arguments, NULL, 16 * 1024);
 }
 
+// A renderer that does not list FLAC among the formats it plays gets WAV:
+// the FLAC is decoded to 16-bit PCM and wrapped in a plain RIFF header, which
+// every DLNA television accepts where an "audio/flac" stream is refused as an
+// illegal MIME type (issue #365). The file lands in the DLNA cache next to the
+// tracks phones send over, so both kinds of transient track live in one place
+// and are cleared together. The decoder is the unified one in system/decode:
+// dr_flac behind it, opened once and read to the end.
+static bool flac_to_wav(const char *flac_path, char *wav_path, size_t size) {
+	char dir[DLNA_PATH_MAX];
+	if (!dlna_cache_dir(dir, sizeof(dir))) return false;
+
+	// Casts are serialised: at most one converted file should be lying around,
+	// so drop the WAV a previous cast left behind. A renderer still playing it
+	// got Stop first -- a new cast always follows one.
+	{
+		DIR *d = opendir(dir);
+		if (d) {
+			struct dirent *e;
+			while ((e = readdir(d)) != NULL) {
+				if (strncmp(e->d_name, "cast-", 5) != 0) continue;
+				size_t len = strlen(e->d_name);
+				if (len > 4 && strcmp(e->d_name + len - 4, ".wav") == 0) {
+					char gone[DLNA_PATH_MAX + 32];
+					if (snprintf(gone, sizeof(gone), "%s/%s", dir, e->d_name) < (int)sizeof(gone)) {
+						remove(gone);
+					}
+				}
+			}
+			closedir(d);
+		}
+	}
+
+	// Overwriting a file a renderer may still be fetching is off the table:
+	// each cast gets its own name.
+	snprintf(wav_path, size, "%s/cast-%lu.wav", dir, (unsigned long)time(NULL));
+
+	decoder_t *dec = decoder_open(flac_path, DECODE_FORMAT_FLAC);
+	if (!dec) return false;
+	int channels = decoder_channels(dec);
+	int rate = decoder_sample_rate(dec);
+	if (channels <= 0 || rate <= 0) {
+		decoder_close(dec);
+		return false;
+	}
+
+	FILE *out = fopen(wav_path, "wb");
+	if (!out) {
+		decoder_close(dec);
+		return false;
+	}
+
+	// RIFF header, both sizes left blank until the decode is done.
+	uint32_t byte_rate = (uint32_t)rate * (uint32_t)channels * 2;
+	uint16_t block_align = (uint16_t)(channels * 2);
+	const char riff[4] = {'R', 'I', 'F', 'F'};
+	const char wave[4] = {'W', 'A', 'V', 'E'};
+	const char fmt[4] = {'f', 'm', 't', ' '};
+	const char data[4] = {'d', 'a', 't', 'a'};
+	uint32_t riff_size = 0, data_size = 0;
+	uint16_t format_tag = 1, bits = 16;
+	uint32_t fmt_size = 16;
+	fwrite(riff, 1, 4, out);
+	fwrite(&riff_size, 4, 1, out);
+	fwrite(wave, 1, 4, out);
+	fwrite(fmt, 1, 4, out);
+	fwrite(&fmt_size, 4, 1, out);
+	fwrite(&format_tag, 2, 1, out);
+	fwrite(&channels, 2, 1, out);
+	fwrite(&rate, 4, 1, out);
+	fwrite(&byte_rate, 4, 1, out);
+	fwrite(&block_align, 2, 1, out);
+	fwrite(&bits, 2, 1, out);
+	fwrite(data, 1, 4, out);
+	fwrite(&data_size, 4, 1, out);
+
+	short buffer[4096];
+	uint64_t frames;
+	while ((frames = decoder_read_pcm_frames_s16(dec,
+			(uint64_t)(sizeof(buffer) / sizeof(short) / (size_t)channels), buffer)) > 0) {
+		if (fwrite(buffer, (size_t)frames * (size_t)channels * sizeof(short), 1, out) != 1) break;
+		data_size += (uint32_t)frames * (uint32_t)channels * 2u;
+	}
+	bool ok = ferror(out) == 0 && data_size > 0;
+	fclose(out);
+	decoder_close(dec);
+
+	if (!ok) {
+		remove(wav_path);
+		return false;
+	}
+
+	// Patch the two sizes the decoder could not know up front.
+	out = fopen(wav_path, "r+b");
+	if (out) {
+		fseek(out, 0, SEEK_END);
+		long file_size = ftell(out);
+		if (file_size >= 0) {
+			uint32_t riff_size_v = (uint32_t)file_size - 8;
+			fseek(out, 4, SEEK_SET);
+			fwrite(&riff_size_v, 4, 1, out);
+			// RIFF(4) size(4) WAVE(4) fmt(4) fmtSize(4) = 20, tag(2) channels(2)
+			// rate(4) byteRate(4) blockAlign(2) bits(2) = 16 more, data(4) at 36
+			fseek(out, 40, SEEK_SET);
+			fwrite(&data_size, 4, 1, out);
+		}
+		fclose(out);
+	}
+	return ok;
+}
+
 static void *cast_worker(void *arg) {
 	char path[PATH_MAXIMUM];
 	snprintf(path, sizeof(path), "%s", (char *)arg);
@@ -856,23 +979,39 @@ static void *cast_worker(void *arg) {
 	pthread_mutex_unlock(&cast_lock);
 
 	// How this renderer wants the format spelled, asked of its own sink list
-	// (see choose_mime()).
+	// (see choose_mime()). A renderer that does not say it plays FLAC gets a
+	// converted WAV/LPCM instead: plain uncompressed audio every DLNA
+	// television accepts, where "audio/flac" is refused as an illegal
+	// MIME type (issue #365).
 	const media_format_t *format = format_for_path(path);
 	char mime[MIME_MAX] = "application/octet-stream";
-	if (format) choose_mime(&target, format, mime, sizeof(mime));
+	bool sink_speaks_flac = format && choose_mime(&target, format, mime, sizeof(mime));
+	char serve_path[PATH_MAXIMUM] = "";
+	const char *serve = path;
+	const media_format_t *serve_format = format;
+	if (format && !strcasecmp(format->extension, ".flac") && !sink_speaks_flac) {
+		if (!flac_to_wav(path, serve_path, sizeof(serve_path))) {
+			set_message("This FLAC track cannot be sent");
+			goto done;
+		}
+		serve = serve_path;
+		serve_format = format_for_path(serve);
+		(void)choose_mime(&target, serve_format, mime, sizeof(mime));
+	}
+	char suffix[SUFFIX_MAX];
+	snprintf(suffix, sizeof(suffix), "%s", serve_format ? serve_format->extension : "");
 	char features[192];
-	dlna_features(format, features, sizeof(features));
+	dlna_features(serve_format, features, sizeof(features));
 
 	pthread_mutex_lock(&media_lock);
 	unsigned serial = ++token_sequence;
 	char token[TOKEN_MAX];
 	snprintf(token, sizeof(token), "%08x%08x", (unsigned)getpid(), serial ^ (unsigned)time(NULL));
 	pthread_mutex_unlock(&media_lock);
-	media_publish(path, token, format ? format->extension : "", mime, features);
+	media_publish(serve, token, suffix, mime, features);
 
 	char uri[URL_MAX];
-	if (snprintf(uri, sizeof(uri), "http://%s:%u/sonix/%s/track%s", ip, media_port, token,
-				 format ? format->extension : "") >= (int)sizeof(uri)) {
+	if (snprintf(uri, sizeof(uri), "http://%s:%u/sonix/%s/track%s", ip, media_port, token, suffix) >= (int)sizeof(uri)) {
 		set_message("Could not build the track URL"); goto done;
 	}
 	const char *base = strrchr(path, '/'); base = base ? base + 1 : path;
