@@ -220,6 +220,7 @@ Showcase of **OLED** appearance: true black backgrounds with white as the accent
 - [Jellyfin](#jellyfin)
 - [Build from source](#build-from-source)
 - [Project files and documentation](#project-files-and-documentation)
+- [Collecting logs for a bug report](docs/collecting-logs.md)
 - [Credits](#credits)
 
 ## Target device
