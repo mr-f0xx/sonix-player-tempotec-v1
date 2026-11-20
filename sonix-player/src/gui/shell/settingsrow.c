@@ -220,24 +220,10 @@ int settingsrow_content_top(gui_config_t *cfg) {
 	return cfg->top_bar_height + cfg->padding + settingsrow_corner_button_size(cfg) + cfg->padding;
 }
 
-// Every page built by settingsrow_page() reopens scrolled to the top; a long
-// page would otherwise stay wherever it was last left.
-//
-// The reset runs on unload, not on load. On load it would race: many pages
-// rebuild their content inside LV_EVENT_SCREEN_LOADED, and LVGL calls callbacks
-// in registration order, so this one -- registered inside settingsrow_page() --
-// would run before the content exists. On unload the page is already off
-// screen, so it scrolls back invisibly.
-//
-// The sheet player needs no handling: it opens on the top layer without a
-// screen change, so the page beneath is never unloaded and keeps its position.
-static void page_scroll_top_cb(lv_event_t *e) {
-	lv_obj_t *container = (lv_obj_t *)lv_event_get_user_data(e);
-	if (container) {
-		lv_obj_scroll_to_y(container, 0, LV_ANIM_OFF);
-	}
-}
-
+// Pages built by settingsrow_page() stay alive while another screen is shown.
+// Leave their scroll offset alone on unload so backing out of a setting or
+// submenu returns to the exact row the user left. A page that replaces its
+// contents while away must preserve and restore its own offset around rebuilds.
 lv_obj_t *settingsrow_page(lv_obj_t *screen, gui_config_t *cfg, const char *title) {
 	lv_obj_add_style(screen, &theme_style_screen, 0);
 
@@ -263,8 +249,6 @@ lv_obj_t *settingsrow_page(lv_obj_t *screen, gui_config_t *cfg, const char *titl
 	// would drag it over the option being adjusted. The swipe-back gesture must
 	// still be able to start on the page body.
 	switcher_attach_back_gesture(container);
-
-	lv_obj_add_event_cb(screen, page_scroll_top_cb, LV_EVENT_SCREEN_UNLOADED, container);
 
 	return container;
 }

@@ -2518,6 +2518,14 @@ static void make_np_open_line(lv_obj_t *label) {
 // glyph centred on it. Callers attach their own handlers. Presses bubble on to
 // the sheet, so a drag that starts on a circle moves the sheet or the card like
 // a drag anywhere else.
+static void place_peq_profile_icon(lv_obj_t *icon) {
+	lv_image_set_scale(icon, qp_compact ? 112 : 192);
+	// This image is used above a profile number. Center its scaled artwork in
+	// the upper part of the circle; a top-edge alignment plus a positive offset
+	// pushed the chart glyph down toward the lower rim, especially on V1.
+	lv_obj_align(icon, LV_ALIGN_CENTER, 0, -circle_button_size / 5);
+}
+
 static lv_obj_t *make_circle_button(lv_obj_t *parent, const lv_image_dsc_t *glyph) {
 	lv_obj_t *btn = lv_btn_create(parent);
 	lv_obj_set_event_bubble(btn, true);
@@ -3698,8 +3706,7 @@ void quickpanel_init(gui_config_t *cfg) {
 
 	peq_profile_btn = make_circle_button(row, &icon_peq_quick);
 	lv_obj_t *profile_icon = lv_obj_get_child(peq_profile_btn, 0);
-	lv_image_set_scale(profile_icon, qp_compact ? 112 : 192);
-	lv_obj_align(profile_icon, LV_ALIGN_TOP_MID, 0, qp_compact ? 3 : 10);
+	place_peq_profile_icon(profile_icon);
 	lv_obj_t *profile_number = lv_label_create(peq_profile_btn);
 	lv_obj_set_style_text_font(profile_number, qp_compact ? &font_ui_14 : &font_ui_24, 0);
 	lv_obj_align(profile_number, LV_ALIGN_BOTTOM_MID, 0, qp_compact ? -2 : -8);

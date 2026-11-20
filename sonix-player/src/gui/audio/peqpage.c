@@ -901,6 +901,7 @@ static lv_obj_t *reset_btn;
 static lv_obj_t *autoeq_btn;
 static lv_timer_t *autoeq_timer;
 static lv_obj_t *preamp_slider, *preamp_value;
+static lv_obj_t *auto_level_switch;
 static lv_obj_t *headroom_label;
 static lv_obj_t *band_rows[PEQ_BANDS];
 static lv_obj_t *band_values[PEQ_BANDS];
@@ -960,6 +961,14 @@ static void refresh_preamp(void) {
 	gain_text(tenths, text, sizeof(text));
 	lv_label_set_text(preamp_value, text);
 
+	if (auto_level_switch) {
+		if (eq_get_auto_level()) {
+			lv_obj_add_state(auto_level_switch, LV_STATE_CHECKED);
+		} else {
+			lv_obj_remove_state(auto_level_switch, LV_STATE_CHECKED);
+		}
+	}
+
 	// What the engine does to the level on its own, which is not always a cut:
 	// MSEB hands level back when its curve takes more away than it adds, so
 	// this can read either way. Shown only when non-zero, since a "0,0 dB" line
@@ -977,9 +986,9 @@ static void refresh_preamp(void) {
 	}
 }
 
-// Everything on the page except the switch itself follows the switch: the
-// reset, the preamp and the band rows go dead and half-lit while the
-// parametric is off, the way the graphic equaliser and MSEB do it.
+// The PEQ enable switch gates controls that edit its curve. Automatic Level
+// is a chain-wide setting, so its switch remains available even while PEQ is
+// off; the reset, manual preamp and band rows go dead and half-lit as before.
 static void apply_enabled(bool on) {
 	if (reset_btn) {
 		if (on) {
@@ -1033,6 +1042,12 @@ static void preamp_cb(lv_event_t *e) {
 	peq_set_preamp(preamp_from_index((int)lv_slider_get_value(preamp_slider)));
 	refresh_preamp();
 	graph_refresh();
+}
+
+static void auto_level_cb(lv_event_t *e) {
+	(void)e;
+	eq_set_auto_level(lv_obj_has_state(auto_level_switch, LV_STATE_CHECKED));
+	refresh_preamp();
 }
 
 static void band_clicked_cb(lv_event_t *e) {
@@ -1202,13 +1217,16 @@ void peqpage_init(gui_config_t *cfg) {
 
 	settingsrow_slider(container, "peq_preamp", PREAMP_STEPS, &preamp_value, &preamp_slider, preamp_cb);
 
+	// Automatic Level is optional and remains available even with PEQ off: it
+	// also controls the graphic EQ and MSEB's automatic compensation.
+	settingsrow_toggle(container, "peq_auto_level", &auto_level_switch, auto_level_cb);
+
 	// A dead slider looks dead, the same half opacity the graphic equaliser and
 	// MSEB use for theirs.
 	lv_obj_set_style_opa(preamp_slider, LV_OPA_40, LV_STATE_DISABLED);
 
-	// The automatic anti-clipping cut, placed under the preamp because it is
-	// the same quantity: one chosen by the listener, one by the engine, and
-	// they add up.
+	// Show the amount of automatic level compensation beneath its switch, but
+	// keep the manual preamp value above it separate and unchanged.
 	headroom_label = lv_label_create(container);
 	lv_label_set_long_mode(headroom_label, LV_LABEL_LONG_WRAP);
 	lv_obj_set_width(headroom_label, lv_pct(100));

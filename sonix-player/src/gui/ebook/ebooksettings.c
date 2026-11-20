@@ -140,16 +140,6 @@ static void loaded_cb(lv_event_t *e) {
 // chosen one.
 static void refresh_theme(void) { scope_refresh(); }
 
-// Every page built by settingsrow_page() reopens at the top; this one builds
-// its own body, so it has to do that itself. On unload and not on load, for the
-// reason settingsrow.c gives: on load it would race the rebuild.
-static void unloaded_cb(lv_event_t *e) {
-	(void)e;
-	if (option_list) {
-		lv_obj_scroll_to_y(option_list, 0, LV_ANIM_OFF);
-	}
-}
-
 void ebooksettings_init(gui_config_t *cfg) {
 	ebooksettings_screen = lv_obj_create(NULL);
 	lv_obj_add_style(ebooksettings_screen, &theme_style_screen, 0);
@@ -218,7 +208,6 @@ void ebooksettings_init(gui_config_t *cfg) {
 	relayout();
 
 	lv_obj_add_event_cb(ebooksettings_screen, loaded_cb, LV_EVENT_SCREEN_LOADED, NULL);
-	lv_obj_add_event_cb(ebooksettings_screen, unloaded_cb, LV_EVENT_SCREEN_UNLOADED, NULL);
 	switcher_attach_back_gesture(ebooksettings_screen);
 	switcher_attach_back_gesture(option_list);
 	player_sheet_attach_drag(option_list, true);

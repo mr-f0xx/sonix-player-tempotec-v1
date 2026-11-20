@@ -189,7 +189,8 @@ static void make_tile(int index, int tile_w, int tile_h) {
 	lv_obj_set_event_bubble(name, true);
 }
 
-static void rebuild_grid(void) {
+static void rebuild_grid(bool preserve_scroll) {
+	int32_t saved_scroll = preserve_scroll ? lv_obj_get_scroll_y(list_box) : 0;
 	release_art();
 	lv_obj_clean(list_box);
 	if (!rom_count || !roms) {
@@ -223,7 +224,9 @@ static void rebuild_grid(void) {
 	}
 
 	lv_obj_set_hidden(status_label, true);
-	lv_obj_scroll_to_y(list_box, 0, LV_ANIM_OFF);
+	if (!preserve_scroll) {
+		lv_obj_scroll_to_y(list_box, 0, LV_ANIM_OFF);
+	}
 	// Keep the screenshot's two-column layout, but make each pair of tiles
 	// fill the viewport height. That leaves exactly two games on screen rather
 	// than a clipped preview of the next row. The artwork and two-line title are
@@ -244,6 +247,9 @@ static void rebuild_grid(void) {
 		}
 	}
 	lv_obj_update_layout(list_box);
+	if (preserve_scroll) {
+		lv_obj_scroll_to_y(list_box, saved_scroll, LV_ANIM_OFF);
+	}
 }
 
 static void pick_view_cb(lv_event_t *e) {
@@ -252,7 +258,7 @@ static void pick_view_cb(lv_event_t *e) {
 	}
 	show_color = (bool)(uintptr_t)lv_event_get_user_data(e);
 	refresh_view_buttons();
-	rebuild_grid();
+	rebuild_grid(false);
 }
 
 static lv_obj_t *make_view_choice(lv_obj_t *parent, const char *text, bool color) {
@@ -354,7 +360,7 @@ static void scan_done_cb(void *user) {
 	roms = res->list;
 	rom_count = res->count;
 	scanning = false;
-	rebuild_grid();
+	rebuild_grid(true);
 	free(res);
 }
 
@@ -397,7 +403,8 @@ static void start_scan(void) {
 static void screen_loaded_cb(lv_event_t *e) {
 	(void)e;
 	refresh_view_buttons();
-	lv_obj_scroll_to_y(list_box, 0, LV_ANIM_OFF);
+	// The scan refreshes the grid asynchronously; rebuild_grid() restores the
+	// list's current offset after replacing its rows.
 	start_scan();
 }
 

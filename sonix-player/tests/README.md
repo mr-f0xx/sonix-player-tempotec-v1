@@ -262,13 +262,15 @@ opens no ALSA device.
 
 `make -C sonix-player/tests peq-ui` links the real PEQ page and DSP engine to
 LVGL's headless renderer. It checks the profile pills at 240×320 in all eleven
-languages and five themes, selection and back-drag guarding, refresh of an open
-band editor after a quick switch, and profile-scoped reset. It then types a
-band's frequency (in Hz and in kHz, switching unit both ways), gain and Q on the
-band editor's keypad: whole-Hz values between slider steps, rounding, clamping
-at both limits, the sign key, cancel, an emptied display and leaving the page,
-plus the fit of every key and of the tappable values over the sliders. The shell
-and network AutoEq browser are stubbed.
+languages and five themes, the translated Automatic Level switch and its
+independence from PEQ enable/profile state, list-offset retention when leaving
+and returning from a child screen, selection and back-drag guarding, refresh of
+an open band editor after a quick switch, and profile-scoped reset. It then
+types a band's frequency (in Hz and in kHz, switching unit both ways), gain and
+Q on the band editor's keypad: whole-Hz values between slider steps, rounding,
+clamping at both limits, the sign key, cancel, an emptied display and leaving
+the page, plus the fit of every key and of the tappable values over the sliders.
+The shell and network AutoEq browser are stubbed.
 
 `make -C sonix-player/tests quickpanel-layout` uses the production Control
 Centre list parser, accessors and move operations with headless LVGL. It checks
@@ -281,7 +283,8 @@ and PEQ open without ending the receiver and ask nothing, that every other page
 asks first and opens only on yes, and that a refused question leaves nothing
 behind; and that the PEQ profile control does not displace
 existing defaults, fills an empty place in a saved v4 layout, waits in Settings
-when the grid is full, and survives a move into the first eight and a reload.
+when the grid is full, and survives a move into the first eight and a reload;
+the profile glyph stays centered inside its circle in compact and normal layouts.
 Unrelated playback/radio handlers are removed by linker section GC; no sheet is
 built, and the radio, player and DAC answers are stand-ins. The full `ui` target
 includes both PEQ-related suites and the receiver session. (On GCC 12 the `ui`
