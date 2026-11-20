@@ -1,10 +1,10 @@
 ![Sonix Player for TempoTec Variations V1 cycling through the Tokyo Night, Amber on Black and OLED main menus](screenshots/readme-banner.gif)
 
-This repository is a community port (**well, much more than just a simple port**) of the original **[Sonix Player](https://github.com/Jepl4r/sonix-player)** project by **[Jepl4r](https://github.com/Jepl4r)** for the Tempotec Variations V1. It's basically Sonix on *steroids*.
+This repository is originally a **TempoTec Variations V1** community port of the original **[Sonix Player](https://github.com/Jepl4r/sonix-player)** project by **[Jepl4r](https://github.com/Jepl4r)** made for the Hiby R1 & the HiBy R3 Pro II, before it became much more than just a simple *port*, it's almost a brand new firmware and is basically Sonix but on *steroids*,perfectly optimized for v1's small little screen,with tons of features, you wouldn't have suspected your DAP could have!
 
 The firmware builder starts with an official V1 1.3 update package, replaces the stock music player and its interface with Sonix, then repackages the update as `v1.upt`.
 
-You can now try Sonix in the [Tempotec V1](https://mr-f0xx.github.io/sonix-player-tempotec-v1/) browser emulator I made (also compatible with mobile devices)
+You can now try Sonix in the **[Tempotec V1](https://mr-f0xx.github.io/sonix-player-tempotec-v1/)** browser emulator I made (PC & Mobile compatible)
 
 ## Previews
 
