@@ -6611,6 +6611,200 @@ static void aam_sleeve_tap_cb(lv_event_t *e) {
 	}
 }
 
+// --- a held sleeve opens the queue (issue #379) ---
+//
+// The queue is behind the ellipsis: the menu, then the row. A finger already
+// resting on the artwork is a better way in, so a press held still on the
+// sleeve for HOLD_SLEEVE_MS opens the queue directly and the lift that ends it
+// does nothing more -- no tap on a row, no drag, no seek.
+//
+// It is a hold of our own rather than LV_EVENT_LONG_PRESSED. That event needs
+// the object it lands on to be the pressed one at the moment it comes due, and
+// the sleeve frame is deliberately not clickable: it is part of the panel the
+// sheet is dragged by, and the lyric swipe and the Album Art Max double tap
+// both start there too. So the press is watched where it lands (on the panel,
+// as every gesture on the artwork already is), and the sleeve's own rectangle
+// is asked whether it was on the picture. Movement past HOLD_SLOP_PX drops it:
+// a finger that wanders is a drag, and every sideways drag that starts here
+// belongs to the lyric swipe or to pushing the player away.
+//
+// Nothing follows the press sideways -- there is no preview and no animation
+// while the finger is down -- so the only thing this can take away from those
+// gestures is a press held still for most of a second, which none of them use.
+#define HOLD_SLEEVE_MS 500
+#define HOLD_SLOP_PX 12
+
+static lv_timer_t *sleeve_hold_timer;
+static lv_point_t sleeve_hold_from;
+
+// The device the finger went down on. A timer callback runs outside LVGL's
+// input processing, where lv_indev_active() is NULL, so the device that has to
+// be told the gesture is over is remembered here instead.
+static lv_indev_t *sleeve_hold_indev;
+
+// Set while a held sleeve is taking the sheet down to open the queue. The
+// panel's drag handler listens to the same press, and the end of that press
+// reads to it as a finished swipe, which puts the player straight back over the
+// queue that has just opened. It stands down while this is set, and is the one
+// that clears it: an end of press is exactly what it is waiting for.
+static bool sheet_leaving_for_queue;
+
+// Whether the queue is worth opening at all. It is the ellipsis's own question
+// asked a step earlier: a row the menu does not carry is a page the hold must
+// not open either. A book has chapters instead of a queue, a phone casting to
+// the player keeps the queue on the phone, and a queue of one is the track
+// playing and nothing after it. What is left -- a podcast's episodes, a
+// station's list, anything a library list lined up -- is a real queue.
+static bool sleeve_hold_queue_there(void) {
+	if (audiobook_mode || dlna_owns_playback()) {
+		return false;
+	}
+	if (live_mode) {
+		return live_custom_nav;
+	}
+	return playlist_count() > 1;
+}
+
+static bool point_in_box(lv_obj_t *obj, const lv_point_t *at) {
+	lv_area_t box;
+	lv_obj_get_coords(obj, &box);
+	return at->x >= box.x1 && at->x <= box.x2 && at->y >= box.y1 && at->y <= box.y2;
+}
+
+// Is the finger on the picture, in whichever arrangement is up?
+//
+// The frame's own rectangle answers for most of them. Studio draws a square of
+// its own instead, and Poster's picture reaches past the foot of the panel,
+// where a press belongs to the scrub bar and not to the sleeve: what can be
+// seen of that one is the part the deck is not standing in front of, which is
+// the panel.
+//
+// The rounded corners are not subtracted: a press that lands in one of the four
+// little arcs over the sleeve is on the picture as far as this gesture is
+// concerned.
+static bool sleeve_hold_on_art(const lv_point_t *at) {
+	if (layout_studio_now) {
+		lv_obj_t *shown = studio_cover && !lv_obj_is_hidden(studio_cover) ? studio_cover : studio_empty;
+		return shown && point_in_box(shown, at);
+	}
+	if (layout_poster_now) {
+		return cover_panel && point_in_box(cover_panel, at);
+	}
+	return cover_art_group && point_in_box(cover_art_group, at);
+}
+
+static void sleeve_hold_done(void) {
+	if (sleeve_hold_timer) {
+		lv_timer_delete(sleeve_hold_timer); // a timer may delete itself here
+		sleeve_hold_timer = NULL;
+	}
+	sleeve_hold_indev = NULL;
+}
+
+// The hold fired: the gesture is over, and the finger is still down.
+//
+// Left alone, that finger is two problems. LVGL looks for a pressed object
+// again on every frame a finger is held, so the lift would land on one of the
+// queue's own rows -- the single tap the hold was there to replace. And the
+// panel's drag handler has been listening to this same press all along, so the
+// end of it reads as a finished swipe, which is the gesture that puts the
+// player away: the queue opens and the player slides straight back over it.
+//
+// lv_indev_active() is no help here: a timer callback runs outside the input
+// processing, where it is NULL, so the device is the one remembered at press
+// time. Telling it to wait for a release drops the rest of this gesture on the
+// spot -- and it is what ends the press for the drag handler too, which is told
+// in so many words not to read that end as a swipe (see sheet_drag_cb).
+static void sleeve_hold_fire_cb(lv_timer_t *timer) {
+	(void)timer;
+	sleeve_hold_done(); // one shot: held once is asked once
+	sheet_leaving_for_queue = true;
+	if (sleeve_hold_indev) {
+		lv_indev_wait_release(sleeve_hold_indev);
+	}
+	trackmenu_open_queue();
+}
+
+static void sleeve_hold_end(void) {
+	if (!sleeve_hold_timer) {
+		return;
+	}
+	sleeve_hold_done();
+}
+
+// LV_EVENT_PRESSED, PRESSING, RELEASED and PRESS_LOST, on the panel.
+static void sleeve_hold_cb(lv_event_t *e) {
+	lv_event_code_t code = lv_event_get_code(e);
+
+	if (code == LV_EVENT_PRESSED) {
+		sheet_leaving_for_queue = false; // a new gesture, whatever the last one did
+		sleeve_hold_done(); // a gesture that never reported its end
+		lv_indev_t *indev = lv_indev_active();
+		if (!indev || !sheet_open || lyrics_progress > 0 || layout_aam_now || !sleeve_hold_queue_there()) {
+			return;
+		}
+		lv_indev_get_point(indev, &sleeve_hold_from);
+		if (!sleeve_hold_on_art(&sleeve_hold_from)) {
+			return;
+		}
+		sleeve_hold_indev = indev;
+		sleeve_hold_timer = lv_timer_create(sleeve_hold_fire_cb, HOLD_SLEEVE_MS, NULL);
+		if (sleeve_hold_timer) {
+			lv_timer_set_repeat_count(sleeve_hold_timer, 1);
+		}
+		return;
+	}
+
+	if (!sleeve_hold_timer) {
+		return;
+	}
+
+	if (code == LV_EVENT_PRESSING) {
+		lv_indev_t *indev = lv_indev_active();
+		if (!indev) {
+			return;
+		}
+		lv_point_t at;
+		lv_indev_get_point(indev, &at);
+		int dx = at.x - sleeve_hold_from.x;
+		int dy = at.y - sleeve_hold_from.y;
+		// Sideways is a swipe, and so is a scroll the panel handed to
+		// something else: either way the finger is doing something that is not
+		// holding still.
+		if (LV_ABS(dx) >= HOLD_SLOP_PX || LV_ABS(dy) >= HOLD_SLOP_PX ||
+			lv_indev_get_scroll_obj(indev) || player_sheet_drag_active()) {
+			sleeve_hold_done();
+		}
+		return;
+	}
+
+	if (code == LV_EVENT_RELEASED || code == LV_EVENT_PRESS_LOST) {
+		sleeve_hold_end();
+	}
+}
+
+// A press that is never reported as over leaves the timer armed, and one that
+// fires then is a hold nobody made: after the player was put away, after the
+// words were pulled up, after the screen went dark. The indev says so with
+// LV_EVENT_INDEV_RESET, which is where every other gesture on this page is told
+// the same thing.
+static void sleeve_hold_forget_cb(lv_event_t *e) {
+	(void)e;
+	sleeve_hold_done();
+}
+
+// Puts the gesture on the panel the artwork is dragged by.
+static void sleeve_hold_attach(lv_obj_t *panel) {
+	if (!panel) {
+		return;
+	}
+	lv_obj_add_event_cb(panel, sleeve_hold_cb, LV_EVENT_PRESSED, NULL);
+	lv_obj_add_event_cb(panel, sleeve_hold_cb, LV_EVENT_PRESSING, NULL);
+	lv_obj_add_event_cb(panel, sleeve_hold_cb, LV_EVENT_RELEASED, NULL);
+	lv_obj_add_event_cb(panel, sleeve_hold_cb, LV_EVENT_PRESS_LOST, NULL);
+	lv_obj_add_event_cb(panel, sleeve_hold_forget_cb, LV_EVENT_INDEV_RESET, NULL);
+}
+
 // --- hardware transport keys ---
 //
 // They do exactly what the on-screen buttons do, whichever page is showing:
@@ -7159,6 +7353,7 @@ static bool dragging;
 // does not also select it.
 static bool drag_committed;
 
+
 static void sheet_anim_x_cb(void *obj, int32_t value) {
 	lv_obj_set_x((lv_obj_t *)obj, (int)value);
 	// The chevron belongs to the sheet while it moves: ride its edge, and
@@ -7317,6 +7512,8 @@ static void sheet_drag_cb(lv_event_t *e) {
 	}
 
 	if (code == LV_EVENT_PRESSED) {
+		// A new press: whatever the last one turned into, it is over.
+		sheet_leaving_for_queue = false;
 		if (opening == sheet_open) {
 			return; // dragging the wrong way for the current state
 		}
@@ -7371,6 +7568,16 @@ static void sheet_drag_cb(lv_event_t *e) {
 
 	if (code == LV_EVENT_RELEASED || code == LV_EVENT_PRESS_LOST) {
 		dragging = false;
+		if (sheet_leaving_for_queue) {
+			// This press was a held sleeve, and the queue is what it opened. The
+			// end of it is not a swipe: the player stays down and the page the
+			// hold asked for stays up. The flag goes with the gesture, and the
+			// drag flag must not outlive it either -- the queue's rows are what
+			// the finger is over now, not the artwork.
+			sheet_leaving_for_queue = false;
+			lv_async_call(drag_committed_clear_cb, NULL);
+			return;
+		}
 
 		int travelled = opening ? -dx : dx;
 		bool commit = travelled > (sheet_width / SHEET_COMMIT_FRACTION);
@@ -8685,6 +8892,9 @@ void player_init(gui_config_t *cfg) {
 	// presses; the callback decides for itself whether the pair landed on the
 	// picture.
 	lv_obj_add_event_cb(cover_panel, aam_sleeve_tap_cb, LV_EVENT_DOUBLE_CLICKED, NULL);
+	// A press held still on the picture opens the queue (issue #379), on the
+	// panel for the same reason and with the same question asked of the sleeve.
+	sleeve_hold_attach(cover_panel);
 	// Studio stretches the panel down over the top of the controls, where the
 	// taller shape of the track can reach: presses there go to the slider.
 	lv_obj_set_adv_hittest(cover_panel, true);

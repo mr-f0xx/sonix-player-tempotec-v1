@@ -28,6 +28,7 @@ make -C sonix-player/tests playbutton
 make -C sonix-player/tests musicsettings-rows
 make -C sonix-player/tests volume-overlay
 make -C sonix-player/tests playerdeck lyrics-size-ui
+make -C sonix-player/tests sleeve-hold-ui
 make -C sonix-player/tests vinylayout
 make -C sonix-player/tests waveform-overlay
 make -C sonix-player/tests edge-lock
@@ -94,6 +95,8 @@ The `waveform-overlay` UI test checks that both scrolling text pills stay clear 
 The `vinylayout` UI test checks the Vinyl sleeve/record arithmetic at 240×320 across text sizes, the reference-slanted pressing mark in the exposed lower-right arc, the visible even-diameter 2 px grooves, the larger centre label peeking below the sleeve, the tiny-screen fallback, a no-overlap guarantee against the whole deck (including transparent info/seek rows), repeated apply/take-back and sleeve-over-record layering on the real LVGL renderer. It does not link the player's audio/network shell.
 
 The `playerdeck` UI test exercises the V1 deck's real LVGL flex layout while switching between Standard and Waveform, including large font metrics and the fallback when waveform allocation fails. It checks row spacing and that every playback button stays clear of the bottom edge.
+
+The `sleeve-hold-ui` test holds a finger still on the album artwork with the real `player.c` compiled in, driving LVGL's own pointer and timer dispatch rather than hand-sent events. It checks the 500 ms hold opening the queue, and that a hold is not armed on a queue of one, while the menu sheet is up, over the words, in a book, while casting, in Album Art Max or under Studio's square. It checks that a finger that wanders, or a press that never reports its end, drops the hold, and that the lift ending a fired hold is neither a tap on the row the queue puts under it nor a swipe that puts the player back over the queue: the real `player_sheet_attach_drag()` is attached alongside the hold, so the two share a press as they do on the device.
 
 The `lyrics-size-ui` test exercises the lyrics text-size and timing popovers on the 240×320 LVGL display. It checks that the three header buttons stay clear of each other, the active size is marked, synced lines stay centred, untimed lyrics retain their scroll position, and the saved lyrics size leaves the UI setting unchanged. It also checks repeated timing nudges, highlighting and seek targets, reset, and a track change with the menu open. The `mostplayed` database fixture verifies per-track offset persistence across a reopen.
 
