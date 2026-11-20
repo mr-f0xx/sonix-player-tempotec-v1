@@ -588,6 +588,11 @@ typedef enum {
 typedef void (*library_search_cb_t)(library_search_type_t type, const char *name, const char *path, void *user);
 int library_search(const char *query, int per_category, library_search_cb_t cb, void *user);
 
+// Manual lyrics correction in milliseconds (positive shows words sooner).
+// Missing entries read as zero; saving zero removes the correction.
+int library_lyrics_offset(const char *path);
+bool library_set_lyrics_offset(const char *path, int ms);
+
 // ---------------------------------------------------------------------------
 // Play counts
 //

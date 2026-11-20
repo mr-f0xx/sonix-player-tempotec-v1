@@ -1316,7 +1316,9 @@ $(BUILD)/test_stockkeys_ui: $(ROOT)/build_gen/streamkeys_key.h $(STOCKKEYS_UI_OB
 
 .PHONY: ui
 ui: wifitransfer-ui batteryprofile-ui
+ui: $(BUILD)/test_sleeve_hold
 ui: $(BUILD)/test_qobuzgenregrid $(BUILD)/test_main_menu $(BUILD)/test_screensaver $(BUILD)/test_tools_pages $(BUILD)/test_wifi_pages $(BUILD)/test_chargescreen $(BUILD)/test_power_display $(BUILD)/test_touch_wake $(BUILD)/test_lyricsearch $(BUILD)/test_games $(BUILD)/test_peq_profiles $(BUILD)/test_quickpanel_layout $(BUILD)/test_bootlogo $(BUILD)/test_btreceiversession $(BUILD)/test_home_swipe $(BUILD)/test_corners $(BUILD)/test_playbutton $(BUILD)/test_musicsettings_rows $(BUILD)/test_albumgrid_ui $(BUILD)/test_stats $(BUILD)/test_volume_overlay $(BUILD)/test_playerdeck $(BUILD)/test_vinylayout $(BUILD)/test_stickerlayout $(BUILD)/test_waveform_overlay $(BUILD)/test_hiresbadge_ui $(BUILD)/test_statusbar_ui $(BUILD)/test_stockkeys_ui $(BUILD)/test_tidal_pages $(BUILD)/test_soundcloud_pages $(BUILD)/test_qobuz_pages $(BUILD)/test_jellyfin_pages $(BUILD)/test_fwupdate
+	$(BUILD)/test_sleeve_hold ../../sonix-packer/assets/V1/usr/resource/sonix/language
 	$(BUILD)/test_qobuzgenregrid
 	$(BUILD)/test_main_menu ../../sonix-packer/assets/V1/usr/resource/sonix/language
 	$(BUILD)/test_main_menu ../../sonix-packer/assets/V1/usr/resource/sonix/language saved
@@ -1826,7 +1828,7 @@ $(BUILD)/test_streaming_preview: $(LAN_PREVIEW_OBJ)
 -include $(NETWORKMUSIC_UI_OBJ:.o=.d) $(LAN_PREVIEW_OBJ:.o=.d)
 
 # The lyrics size button, its popover and label reflow, without playback or networking.
-LYRICS_UI_SRC = $(ROOT)/tests/ui/test_lyrics_size.c $(ROOT)/src/gui/shell/popover.c \
+LYRICS_UI_SRC = $(ROOT)/tests/ui/test_lyrics_size.c $(ROOT)/src/system/library/lyrics.c $(ROOT)/src/gui/shell/popover.c \
                 $(ROOT)/src/gui/shell/icons.c $(ROOT)/src/gui/board_profile.c \
                 $(ROOT)/src/system/core/config.c $(ROOT)/src/system/core/lang.c
 LYRICS_UI_OBJ = $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(LYRICS_UI_SRC)) $(UI_LVGL_OBJ)
@@ -1844,3 +1846,26 @@ $(BUILD)/test_lyrics_size: $(LYRICS_UI_OBJ)
 	$(CC) -o $@ $^ $(LDFLAGS) $(LDLIBS)
 
 -include $(LYRICS_UI_OBJ:.o=.d)
+
+# A press held still on the artwork opening the queue (issue #379), driven
+# through LVGL's own pointer and timer dispatch: the real player translation
+# unit, with the page the hold opens a page of the test's own and two entries in
+# the queue. The shell, the artwork and the faces are fixtures.
+SLEEVEHOLD_SRC = $(ROOT)/tests/ui/test_sleeve_hold.c $(ROOT)/src/system/playback/playlist.c \
+                 $(ROOT)/src/gui/board_profile.c \
+                 $(ROOT)/src/system/core/config.c $(ROOT)/src/system/core/lang.c
+SLEEVEHOLD_OBJ = $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(SLEEVEHOLD_SRC)) $(UI_LVGL_OBJ)
+
+.PHONY: sleeve-hold-ui
+ui: sleeve-hold-ui
+sleeve-hold-ui: $(BUILD)/test_sleeve_hold
+	$(BUILD)/test_sleeve_hold ../../sonix-packer/assets/V1/usr/resource/sonix/language
+
+# As for the lyrics page: the included player translation unit is built
+# without warnings-as-errors, and unrelated code is dropped at link time.
+$(BUILD)/ui/tests/ui/test_sleeve_hold.o: UI_CFLAGS := $(filter-out -Werror,$(UI_CFLAGS))
+
+$(BUILD)/test_sleeve_hold: $(SLEEVEHOLD_OBJ)
+	$(CC) -o $@ $^ $(LDFLAGS) $(LDLIBS)
+
+-include $(SLEEVEHOLD_OBJ:.o=.d)

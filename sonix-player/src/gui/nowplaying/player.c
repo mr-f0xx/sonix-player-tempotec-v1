@@ -2049,6 +2049,10 @@ static lv_obj_t *lyrics_find_btn;
 static lv_obj_t *lyrics_find_icon;
 static lv_obj_t *lyrics_size_btn;
 static lv_obj_t *lyrics_size_icon;
+static lv_obj_t *lyrics_offset_btn;
+static lv_obj_t *lyrics_offset_icon;
+static int lyrics_offset_ms; // added to playback time, like a positive LRC offset
+static unsigned lyrics_offset_menu_generation;
 static int lyrics_text_size;
 static cover_image_t lyrics_screen_pic; // the blurred sleeve at the shape of the screen
 static unsigned lyrics_bg_generation;
@@ -2172,10 +2176,11 @@ typedef struct {
 	char path[1024];
 	char title[256];
 	lyrics_t lyrics;
-	bool found;
+	int offset_ms;
 } lyrics_job_t;
 
 static void lyrics_settle(void);
+static void lyrics_header_sync(bool full);
 
 static void lyrics_arrived(void *user) {
 	lyrics_job_t *job = user;
@@ -2183,6 +2188,8 @@ static void lyrics_arrived(void *user) {
 		lyrics_free(&lyrics_cur);
 		lyrics_cur = job->lyrics; // handed over, found or empty
 		lyrics_loaded = true;
+		lyrics_offset_ms = job->offset_ms;
+		lyrics_header_sync(lyrics_progress == LYRICS_FULL);
 		lyrics_fill();
 		lyrics_settle();
 	} else {
@@ -2193,7 +2200,9 @@ static void lyrics_arrived(void *user) {
 
 static void *lyrics_worker(void *arg) {
 	lyrics_job_t *job = arg;
-	job->found = lyrics_load(job->path, job->title, &job->lyrics);
+	if (lyrics_load(job->path, job->title, &job->lyrics) && job->lyrics.synced) {
+		job->offset_ms = library_lyrics_offset(job->path);
+	}
 	if (!gui_post(lyrics_arrived, job)) {
 		lyrics_free(&job->lyrics);
 		free(job);
@@ -2229,6 +2238,9 @@ static void lyrics_request(const device_state_t *state) {
 	snprintf(lyrics_path, sizeof(lyrics_path), "%s", state->current_file);
 	lyrics_free(&lyrics_cur);
 	lyrics_loaded = false;
+	lyrics_offset_ms = 0;
+	lyrics_tap_ms = -1;
+	lyrics_header_sync(lyrics_progress == LYRICS_FULL);
 	lyrics_generation++;
 	lyrics_fill();
 
@@ -2303,7 +2315,7 @@ static void lyrics_follow(double seconds) {
 	if (!lyrics_on_screen() || !lyrics_view || !lyrics_cur.synced || lyrics_cur.count == 0) {
 		return;
 	}
-	int32_t ms = (int32_t)(seconds * 1000.0);
+	int64_t ms = (int64_t)(seconds * 1000.0 + 0.5);
 	if (lyrics_tap_ms >= 0) {
 		// Until the player reports a position near the tapped line, the one
 		// it reports is from before the jump: following it would send the
@@ -2313,7 +2325,7 @@ static void lyrics_follow(double seconds) {
 		}
 		lyrics_tap_ms = -1;
 	}
-	int line = lyrics_line_at(&lyrics_cur, ms);
+	int line = lyrics_line_at(&lyrics_cur, ms + lyrics_offset_ms);
 	if (line != lyrics_lit) {
 		lyrics_paint_line(lyrics_lit, false);
 		lyrics_lit = line;
@@ -2388,6 +2400,7 @@ static void lyrics_look(bool on) {
 	lv_obj_set_style_text_color(lyrics_note, ink, 0);
 	if (lyrics_find_icon) lv_obj_set_style_image_recolor(lyrics_find_icon, ink, 0);
 	if (lyrics_size_icon) lv_obj_set_style_image_recolor(lyrics_size_icon, ink, 0);
+	if (lyrics_offset_icon) lv_obj_set_style_image_recolor(lyrics_offset_icon, ink, 0);
 }
 
 // What travels with the sleeve: it goes out to the left as the words come in.
@@ -2404,7 +2417,7 @@ static void lyrics_shift(lv_obj_t *obj, int32_t x) {
 
 // Lyrics header controls are visible only once the page is all the way in.
 #define LYRICS_HEADER_BTN bp_pick(COMPACT_CORNER_BTN, 56)
-#define LYRICS_HEADER_HIT_SLOP bp_pick(COMPACT_CORNER_BTN_EXT_CLICK, CORNER_BTN_EXT_CLICK)
+#define LYRICS_HEADER_HIT_SLOP bp_pick(COMPACT_CORNER_BTN_EXT_CLICK, 10)
 
 // Alternative (Studio) already has an ellipsis in the right-hand slot. Move
 // it inboard of whichever mark takes that corner. Limit the names to the room
@@ -2451,19 +2464,21 @@ static void lyrics_header_sync(bool full) {
 	bool show = full && lyrics_now;
 	lv_obj_set_hidden(lyrics_find_btn, !show);
 	lv_obj_set_hidden(lyrics_size_btn, !show);
+	lv_obj_set_hidden(lyrics_offset_btn, !show || !lyrics_cur.synced);
 	if (!show) {
 		return;
 	}
 	// The chevron is on the right in Sticker (unless a hi-res badge moved it
 	// back to the left). The search button takes the opposite corner, with
-	// the text size button inboard. Leave room for both expanded hit areas.
+	// the size and timing buttons inboard. Keep their hit areas disjoint.
 	bool back_right = layout_sticker_now && hires_header_pos == PLAYER_HIRES_OFF;
 	int size = LYRICS_HEADER_BTN;
 	int x = back_right ? STUDIO_INFO_MARGIN : lv_obj_get_width(player_screen) - STUDIO_INFO_MARGIN - size;
 	int y = back_btn_centre_y() - lv_obj_get_y(player_screen) - size / 2;
-	int step = size + 2 * LYRICS_HEADER_HIT_SLOP;
+	int step = (size + 2 * LYRICS_HEADER_HIT_SLOP) * (back_right ? 1 : -1);
 	lv_obj_set_pos(lyrics_find_btn, x, y);
-	lv_obj_set_pos(lyrics_size_btn, x + (back_right ? step : -step), y);
+	lv_obj_set_pos(lyrics_size_btn, x + step, y);
+	lv_obj_set_pos(lyrics_offset_btn, x + 2 * step, y);
 }
 
 static int aam_chevron_inset(void);
@@ -2887,6 +2902,44 @@ static void lyrics_find_cb(lv_event_t *e) {
 	}
 }
 
+static void lyrics_offset_menu(void);
+
+static void lyrics_offset_pick(void *user) {
+	device_state_t state;
+	device_state_get(&state);
+	if (lyrics_generation != lyrics_offset_menu_generation || !lyrics_now || !lyrics_cur.synced ||
+	    strcmp(state.current_file, lyrics_path) != 0) return;
+
+	int step = (int)(intptr_t)user;
+	int64_t ms = step ? (int64_t)lyrics_offset_ms + step : 0;
+	if (ms < INT32_MIN || ms > INT32_MAX) return;
+	lyrics_offset_ms = (int)ms;
+	lyrics_tap_ms = -1;
+	lyrics_follow(state.progress_current_secs);
+	if (!library_set_lyrics_offset(lyrics_path, lyrics_offset_ms)) {
+		toast_error(tr("addon_save_failed")); // still usable for this playback
+		return;
+	}
+	if (step) lyrics_offset_menu(); // keep nudging without reopening the menu
+}
+
+static void lyrics_offset_menu(void) {
+	char reset[128];
+	snprintf(reset, sizeof(reset), "%s (%+.1f s)", tr("reset"), lyrics_offset_ms / 1000.0);
+	popover_item_t items[] = {
+		{.label = "-0.1s", .verbatim = true, .action = lyrics_offset_pick, .user = (void *)(intptr_t)-100},
+		{.label = "+0.1s", .verbatim = true, .action = lyrics_offset_pick, .user = (void *)(intptr_t)100},
+		{.label = reset, .verbatim = true, .action = lyrics_offset_pick},
+	};
+	lyrics_offset_menu_generation = lyrics_generation;
+	popover_show(lyrics_offset_btn, items, 3);
+}
+
+static void lyrics_offset_cb(lv_event_t *e) {
+	(void)e;
+	if (!player_sheet_drag_active() && lyrics_cur.synced) lyrics_offset_menu();
+}
+
 // Reflow the labels in place: the highlight, timestamps and any manual
 // scroll hold belong to the same lines before and after the change.
 static void lyrics_size_pick(void *user) {
@@ -3043,6 +3096,11 @@ static void lyrics_drag_cb(lv_event_t *e) {
 	}
 }
 
+static int32_t lyrics_seek_ms(int32_t line_ms) {
+	int64_t target = (int64_t)line_ms - lyrics_offset_ms;
+	return (int32_t)LV_CLAMP(0, target, INT32_MAX);
+}
+
 // A tap on a timed line plays from where it is sung.
 static void lyrics_tap_cb(lv_event_t *e) {
 	(void)e;
@@ -3061,10 +3119,8 @@ static void lyrics_tap_cb(lv_event_t *e) {
 		lv_obj_get_coords(lv_obj_get_child(lyrics_view, i), &area);
 		// The gap between two lines belongs to the one above it.
 		if (p.y >= area.y1 && p.y <= area.y2 + LYRICS_LINE_GAP) {
-			int32_t ms = lyrics_cur.lines[i].ms;
-			if (ms < 0) {
-				return;
-			}
+			int32_t ms = lyrics_seek_ms(lyrics_cur.lines[i].ms);
+			lyrics_tap_ms = -1;
 			device_state_seek((double)ms / 1000.0);
 			// Back to following at once: the finger chose this line.
 			lyrics_user_until = 0;
@@ -3176,6 +3232,7 @@ static void lyrics_build(void) {
 
 	lyrics_find_btn = lyrics_header_button(&icon_lyrics_search, bp_pick(192, 256), lyrics_find_cb, &lyrics_find_icon);
 	lyrics_size_btn = lyrics_header_button(&icon_ebook_font, bp_pick(140, 186), lyrics_size_cb, &lyrics_size_icon);
+	lyrics_offset_btn = lyrics_header_button(&icon_radio_recent, bp_pick(180, 240), lyrics_offset_cb, &lyrics_offset_icon);
 
 	// The sleeve is where the page is pulled in from.
 	lv_obj_add_event_cb(cover_panel, lyrics_drag_cb, LV_EVENT_PRESSED, (void *)(uintptr_t) true);
@@ -6578,6 +6635,200 @@ static void aam_sleeve_tap_cb(lv_event_t *e) {
 	}
 }
 
+// --- a held sleeve opens the queue (issue #379) ---
+//
+// The queue is behind the ellipsis: the menu, then the row. A finger already
+// resting on the artwork is a better way in, so a press held still on the
+// sleeve for HOLD_SLEEVE_MS opens the queue directly and the lift that ends it
+// does nothing more -- no tap on a row, no drag, no seek.
+//
+// It is a hold of our own rather than LV_EVENT_LONG_PRESSED. That event needs
+// the object it lands on to be the pressed one at the moment it comes due, and
+// the sleeve frame is deliberately not clickable: it is part of the panel the
+// sheet is dragged by, and the lyric swipe and the Album Art Max double tap
+// both start there too. So the press is watched where it lands (on the panel,
+// as every gesture on the artwork already is), and the sleeve's own rectangle
+// is asked whether it was on the picture. Movement past HOLD_SLOP_PX drops it:
+// a finger that wanders is a drag, and every sideways drag that starts here
+// belongs to the lyric swipe or to pushing the player away.
+//
+// Nothing follows the press sideways -- there is no preview and no animation
+// while the finger is down -- so the only thing this can take away from those
+// gestures is a press held still for most of a second, which none of them use.
+#define HOLD_SLEEVE_MS 500
+#define HOLD_SLOP_PX 12
+
+static lv_timer_t *sleeve_hold_timer;
+static lv_point_t sleeve_hold_from;
+
+// The device the finger went down on. A timer callback runs outside LVGL's
+// input processing, where lv_indev_active() is NULL, so the device that has to
+// be told the gesture is over is remembered here instead.
+static lv_indev_t *sleeve_hold_indev;
+
+// Set while a held sleeve is taking the sheet down to open the queue. The
+// panel's drag handler listens to the same press, and the end of that press
+// reads to it as a finished swipe, which puts the player straight back over the
+// queue that has just opened. It stands down while this is set, and is the one
+// that clears it: an end of press is exactly what it is waiting for.
+static bool sheet_leaving_for_queue;
+
+// Whether the queue is worth opening at all. It is the ellipsis's own question
+// asked a step earlier: a row the menu does not carry is a page the hold must
+// not open either. A book has chapters instead of a queue, a phone casting to
+// the player keeps the queue on the phone, and a queue of one is the track
+// playing and nothing after it. What is left -- a podcast's episodes, a
+// station's list, anything a library list lined up -- is a real queue.
+static bool sleeve_hold_queue_there(void) {
+	if (audiobook_mode || dlna_owns_playback()) {
+		return false;
+	}
+	if (live_mode) {
+		return live_custom_nav;
+	}
+	return playlist_count() > 1;
+}
+
+static bool point_in_box(lv_obj_t *obj, const lv_point_t *at) {
+	lv_area_t box;
+	lv_obj_get_coords(obj, &box);
+	return at->x >= box.x1 && at->x <= box.x2 && at->y >= box.y1 && at->y <= box.y2;
+}
+
+// Is the finger on the picture, in whichever arrangement is up?
+//
+// The frame's own rectangle answers for most of them. Studio draws a square of
+// its own instead, and Poster's picture reaches past the foot of the panel,
+// where a press belongs to the scrub bar and not to the sleeve: what can be
+// seen of that one is the part the deck is not standing in front of, which is
+// the panel.
+//
+// The rounded corners are not subtracted: a press that lands in one of the four
+// little arcs over the sleeve is on the picture as far as this gesture is
+// concerned.
+static bool sleeve_hold_on_art(const lv_point_t *at) {
+	if (layout_studio_now) {
+		lv_obj_t *shown = studio_cover && !lv_obj_is_hidden(studio_cover) ? studio_cover : studio_empty;
+		return shown && point_in_box(shown, at);
+	}
+	if (layout_poster_now) {
+		return cover_panel && point_in_box(cover_panel, at);
+	}
+	return cover_art_group && point_in_box(cover_art_group, at);
+}
+
+static void sleeve_hold_done(void) {
+	if (sleeve_hold_timer) {
+		lv_timer_delete(sleeve_hold_timer); // a timer may delete itself here
+		sleeve_hold_timer = NULL;
+	}
+	sleeve_hold_indev = NULL;
+}
+
+// The hold fired: the gesture is over, and the finger is still down.
+//
+// Left alone, that finger is two problems. LVGL looks for a pressed object
+// again on every frame a finger is held, so the lift would land on one of the
+// queue's own rows -- the single tap the hold was there to replace. And the
+// panel's drag handler has been listening to this same press all along, so the
+// end of it reads as a finished swipe, which is the gesture that puts the
+// player away: the queue opens and the player slides straight back over it.
+//
+// lv_indev_active() is no help here: a timer callback runs outside the input
+// processing, where it is NULL, so the device is the one remembered at press
+// time. Telling it to wait for a release drops the rest of this gesture on the
+// spot -- and it is what ends the press for the drag handler too, which is told
+// in so many words not to read that end as a swipe (see sheet_drag_cb).
+static void sleeve_hold_fire_cb(lv_timer_t *timer) {
+	(void)timer;
+	sleeve_hold_done(); // one shot: held once is asked once
+	sheet_leaving_for_queue = true;
+	if (sleeve_hold_indev) {
+		lv_indev_wait_release(sleeve_hold_indev);
+	}
+	trackmenu_open_queue();
+}
+
+static void sleeve_hold_end(void) {
+	if (!sleeve_hold_timer) {
+		return;
+	}
+	sleeve_hold_done();
+}
+
+// LV_EVENT_PRESSED, PRESSING, RELEASED and PRESS_LOST, on the panel.
+static void sleeve_hold_cb(lv_event_t *e) {
+	lv_event_code_t code = lv_event_get_code(e);
+
+	if (code == LV_EVENT_PRESSED) {
+		sheet_leaving_for_queue = false; // a new gesture, whatever the last one did
+		sleeve_hold_done(); // a gesture that never reported its end
+		lv_indev_t *indev = lv_indev_active();
+		if (!indev || !sheet_open || lyrics_progress > 0 || layout_aam_now || !sleeve_hold_queue_there()) {
+			return;
+		}
+		lv_indev_get_point(indev, &sleeve_hold_from);
+		if (!sleeve_hold_on_art(&sleeve_hold_from)) {
+			return;
+		}
+		sleeve_hold_indev = indev;
+		sleeve_hold_timer = lv_timer_create(sleeve_hold_fire_cb, HOLD_SLEEVE_MS, NULL);
+		if (sleeve_hold_timer) {
+			lv_timer_set_repeat_count(sleeve_hold_timer, 1);
+		}
+		return;
+	}
+
+	if (!sleeve_hold_timer) {
+		return;
+	}
+
+	if (code == LV_EVENT_PRESSING) {
+		lv_indev_t *indev = lv_indev_active();
+		if (!indev) {
+			return;
+		}
+		lv_point_t at;
+		lv_indev_get_point(indev, &at);
+		int dx = at.x - sleeve_hold_from.x;
+		int dy = at.y - sleeve_hold_from.y;
+		// Sideways is a swipe, and so is a scroll the panel handed to
+		// something else: either way the finger is doing something that is not
+		// holding still.
+		if (LV_ABS(dx) >= HOLD_SLOP_PX || LV_ABS(dy) >= HOLD_SLOP_PX ||
+			lv_indev_get_scroll_obj(indev) || player_sheet_drag_active()) {
+			sleeve_hold_done();
+		}
+		return;
+	}
+
+	if (code == LV_EVENT_RELEASED || code == LV_EVENT_PRESS_LOST) {
+		sleeve_hold_end();
+	}
+}
+
+// A press that is never reported as over leaves the timer armed, and one that
+// fires then is a hold nobody made: after the player was put away, after the
+// words were pulled up, after the screen went dark. The indev says so with
+// LV_EVENT_INDEV_RESET, which is where every other gesture on this page is told
+// the same thing.
+static void sleeve_hold_forget_cb(lv_event_t *e) {
+	(void)e;
+	sleeve_hold_done();
+}
+
+// Puts the gesture on the panel the artwork is dragged by.
+static void sleeve_hold_attach(lv_obj_t *panel) {
+	if (!panel) {
+		return;
+	}
+	lv_obj_add_event_cb(panel, sleeve_hold_cb, LV_EVENT_PRESSED, NULL);
+	lv_obj_add_event_cb(panel, sleeve_hold_cb, LV_EVENT_PRESSING, NULL);
+	lv_obj_add_event_cb(panel, sleeve_hold_cb, LV_EVENT_RELEASED, NULL);
+	lv_obj_add_event_cb(panel, sleeve_hold_cb, LV_EVENT_PRESS_LOST, NULL);
+	lv_obj_add_event_cb(panel, sleeve_hold_forget_cb, LV_EVENT_INDEV_RESET, NULL);
+}
+
 // --- hardware transport keys ---
 //
 // They do exactly what the on-screen buttons do, whichever page is showing:
@@ -7126,6 +7377,7 @@ static bool dragging;
 // does not also select it.
 static bool drag_committed;
 
+
 static void sheet_anim_x_cb(void *obj, int32_t value) {
 	lv_obj_set_x((lv_obj_t *)obj, (int)value);
 	// The chevron belongs to the sheet while it moves: ride its edge, and
@@ -7284,6 +7536,8 @@ static void sheet_drag_cb(lv_event_t *e) {
 	}
 
 	if (code == LV_EVENT_PRESSED) {
+		// A new press: whatever the last one turned into, it is over.
+		sheet_leaving_for_queue = false;
 		if (opening == sheet_open) {
 			return; // dragging the wrong way for the current state
 		}
@@ -7338,6 +7592,16 @@ static void sheet_drag_cb(lv_event_t *e) {
 
 	if (code == LV_EVENT_RELEASED || code == LV_EVENT_PRESS_LOST) {
 		dragging = false;
+		if (sheet_leaving_for_queue) {
+			// This press was a held sleeve, and the queue is what it opened. The
+			// end of it is not a swipe: the player stays down and the page the
+			// hold asked for stays up. The flag goes with the gesture, and the
+			// drag flag must not outlive it either -- the queue's rows are what
+			// the finger is over now, not the artwork.
+			sheet_leaving_for_queue = false;
+			lv_async_call(drag_committed_clear_cb, NULL);
+			return;
+		}
 
 		int travelled = opening ? -dx : dx;
 		bool commit = travelled > (sheet_width / SHEET_COMMIT_FRACTION);
@@ -8652,6 +8916,9 @@ void player_init(gui_config_t *cfg) {
 	// presses; the callback decides for itself whether the pair landed on the
 	// picture.
 	lv_obj_add_event_cb(cover_panel, aam_sleeve_tap_cb, LV_EVENT_DOUBLE_CLICKED, NULL);
+	// A press held still on the picture opens the queue (issue #379), on the
+	// panel for the same reason and with the same question asked of the sleeve.
+	sleeve_hold_attach(cover_panel);
 	// Studio stretches the panel down over the top of the controls, where the
 	// taller shape of the track can reach: presses there go to the slider.
 	lv_obj_set_adv_hittest(cover_panel, true);

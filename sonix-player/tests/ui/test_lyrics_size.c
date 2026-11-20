@@ -1,4 +1,4 @@
-// Drive the real size button and popover on a 240x320 LVGL display. Only
+// Drive the lyrics appearance and timing menus on a 240x320 LVGL display. Only
 // the playback shell and FreeType faces are replaced by test fixtures.
 #include <assert.h>
 #include <unistd.h>
@@ -27,24 +27,40 @@ const lv_font_t *fonts_lyrics(int size) {
 	return fonts[size];
 }
 
+static device_state_t state;
+static int saved_ms;
+void device_state_get(device_state_t *out) { *out = state; }
+audio_status_t audio_get_status(void) { return AUDIO_STATUS_PLAYING; }
+void toast_error(const char *text) { (void)text; assert(false); }
+bool library_set_lyrics_offset(const char *path, int ms) {
+	assert(strcmp(path, state.current_file) == 0);
+	saved_ms = ms;
+	return true;
+}
+
 static void ignore_search(lv_event_t *e) { (void)e; }
 
 static void check_header(void) {
-	lv_area_t search, size;
+	lv_area_t search, size, offset;
 	lyrics_header_sync(false);
 	assert(lv_obj_is_hidden(lyrics_find_btn) && lv_obj_is_hidden(lyrics_size_btn));
+	assert(lv_obj_is_hidden(lyrics_offset_btn));
 	lyrics_header_sync(true);
 	assert(!lv_obj_is_hidden(lyrics_find_btn) && !lv_obj_is_hidden(lyrics_size_btn));
 	lv_obj_update_layout(lyrics_pane);
 	lv_obj_get_coords(lyrics_find_btn, &search);
 	lv_obj_get_coords(lyrics_size_btn, &size);
 	assert(search.y1 == size.y1 && search.y2 == size.y2);
+	lv_obj_get_coords(lyrics_offset_btn, &offset);
+	assert(offset.x2 + 2 * LYRICS_HEADER_HIT_SLOP < size.x1);
 	assert(size.x2 + 2 * LYRICS_HEADER_HIT_SLOP < search.x1);
 	layout_sticker_now = true;
 	lyrics_header_sync(true);
 	lv_obj_update_layout(lyrics_pane);
 	lv_obj_get_coords(lyrics_find_btn, &search);
 	lv_obj_get_coords(lyrics_size_btn, &size);
+	lv_obj_get_coords(lyrics_offset_btn, &offset);
+	assert(size.x2 + 2 * LYRICS_HEADER_HIT_SLOP < offset.x1);
 	assert(search.x2 + 2 * LYRICS_HEADER_HIT_SLOP < size.x1);
 	layout_sticker_now = false;
 	lyrics_header_sync(true);
@@ -65,6 +81,31 @@ static void choose_size(int row, int checked_row) {
 	}
 	lv_obj_send_event(lv_obj_get_child(card, 2 * row), LV_EVENT_CLICKED, NULL);
 	assert(lv_obj_is_hidden(veil));
+}
+
+static void check_offset(void) {
+	strcpy(state.current_file, "/card/test.flac");
+	strcpy(lyrics_path, state.current_file);
+	state.progress_current_secs = 0.95;
+	lyrics_header_sync(true);
+	assert(!lv_obj_is_hidden(lyrics_offset_btn));
+	lv_obj_send_event(lyrics_offset_btn, LV_EVENT_CLICKED, NULL);
+	lv_obj_t *veil = lv_obj_get_child(lv_layer_top(), -1);
+	lv_obj_t *card = lv_obj_get_child(veil, 0);
+	lv_obj_send_event(lv_obj_get_child(card, 2), LV_EVENT_CLICKED, NULL);
+	assert(!lv_obj_is_hidden(veil) && saved_ms == 100 && lyrics_lit == 1);
+	assert(lyrics_seek_ms(1000) == 900 && lyrics_seek_ms(0) == 0);
+	lv_obj_send_event(lv_obj_get_child(card, 0), LV_EVENT_CLICKED, NULL);
+	lv_obj_send_event(lv_obj_get_child(card, 0), LV_EVENT_CLICKED, NULL);
+	assert(saved_ms == -100 && lyrics_lit == 0 && lyrics_seek_ms(1000) == 1100);
+	lv_obj_send_event(lv_obj_get_child(card, 4), LV_EVENT_CLICKED, NULL);
+	assert(lv_obj_is_hidden(veil) && saved_ms == 0 && lyrics_seek_ms(1000) == 1000);
+
+	// An open menu cannot change the next song when playback advances.
+	lv_obj_send_event(lyrics_offset_btn, LV_EVENT_CLICKED, NULL);
+	lyrics_generation++;
+	lv_obj_send_event(lv_obj_get_child(card, 2), LV_EVENT_CLICKED, NULL);
+	assert(saved_ms == 0);
 }
 
 static int label_y(lv_obj_t *label) {
@@ -110,8 +151,8 @@ int main(int argc, char **argv) {
 	lyrics_view_h = 256;
 	lyrics_find_btn = lyrics_header_button(&icon_lyrics_search, 192, ignore_search, &lyrics_find_icon);
 	lyrics_size_btn = lyrics_header_button(&icon_ebook_font, 140, lyrics_size_cb, &lyrics_size_icon);
+	lyrics_offset_btn = lyrics_header_button(&icon_radio_recent, 180, lyrics_offset_cb, &lyrics_offset_icon);
 	lyrics_now = true;
-	check_header();
 
 	lyrics_line_t lines[30];
 	for (int i = 0; i < 30; i++) {
@@ -119,7 +160,9 @@ int main(int argc, char **argv) {
 	}
 	lyrics_cur = (lyrics_t){.lines = lines, .count = 30, .synced = true};
 	lyrics_loaded = true;
+	check_header();
 	lyrics_fill();
+	check_offset();
 	lyrics_lit = 9;
 	lv_obj_t *line = lv_obj_get_child(lyrics_view, lyrics_lit);
 	lyrics_paint_line(lyrics_lit, true);
@@ -141,6 +184,8 @@ int main(int argc, char **argv) {
 	// A new untimed track uses the saved size. Resizing does not jump back to
 	// its start when the reader has scrolled down.
 	lyrics_cur.synced = false;
+	lyrics_header_sync(true);
+	assert(lv_obj_is_hidden(lyrics_offset_btn));
 	lyrics_fill();
 	line = lv_obj_get_child(lyrics_view, 9);
 	lv_obj_update_layout(lyrics_view);

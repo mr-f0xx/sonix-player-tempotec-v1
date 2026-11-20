@@ -114,6 +114,8 @@ static const char *const SCHEMA[] = {
 	" artist TEXT COLLATE NOCASE, genre TEXT COLLATE NOCASE, plays INT NOT NULL DEFAULT 0,"
 	" seconds INT NOT NULL DEFAULT 0, PRIMARY KEY(day, path))",
 
+	"CREATE TABLE IF NOT EXISTS LYRICS_OFFSETS(path TEXT PRIMARY KEY, ms INTEGER NOT NULL)",
+
 	// Also local: where playback was left (the "Ricorda traccia" option). One
 	// row only; id is always 0.
 	"CREATE TABLE IF NOT EXISTS PLAYBACK_STATE(id INT PRIMARY KEY, path TEXT, position REAL, updated_at INT)",
@@ -5684,6 +5686,7 @@ static int forget_side_rows(const char *path) {
 		"DELETE FROM FAVOURITES WHERE path = ?1",
 		"DELETE FROM PLAYBACK_STATE WHERE path = ?1",
 		"DELETE FROM PLAY_COUNTS WHERE path = ?1",
+		"DELETE FROM LYRICS_OFFSETS WHERE path = ?1",
 	};
 	for (size_t i = 0; db && i < sizeof(SQL) / sizeof(SQL[0]); i++) {
 		sqlite3_stmt *stmt = NULL;
@@ -7771,6 +7774,36 @@ void library_record_play(const char *path, const char *name, const char *artist)
 		library_record_play_locked(path, name, artist, 1);
 	}
 	pthread_mutex_unlock(&db_lock);
+}
+
+int library_lyrics_offset(const char *path) {
+	int ms = 0;
+	sqlite3_stmt *stmt = NULL;
+	pthread_mutex_lock(&db_lock);
+	if (db && sqlite3_prepare_v2(db, "SELECT ms FROM LYRICS_OFFSETS WHERE path=?1", -1, &stmt, NULL) == SQLITE_OK) {
+		sqlite3_bind_text(stmt, 1, path, -1, SQLITE_TRANSIENT);
+		if (sqlite3_step(stmt) == SQLITE_ROW) ms = sqlite3_column_int(stmt, 0);
+	}
+	sqlite3_finalize(stmt);
+	pthread_mutex_unlock(&db_lock);
+	return ms;
+}
+
+bool library_set_lyrics_offset(const char *path, int ms) {
+	if (!path || !*path) return false;
+	const char *sql = ms ? "INSERT OR REPLACE INTO LYRICS_OFFSETS(path, ms) VALUES(?1, ?2)"
+	                     : "DELETE FROM LYRICS_OFFSETS WHERE path=?1";
+	bool saved = false;
+	sqlite3_stmt *stmt = NULL;
+	pthread_mutex_lock(&db_lock);
+	if (db && sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) == SQLITE_OK) {
+		sqlite3_bind_text(stmt, 1, path, -1, SQLITE_TRANSIENT);
+		if (ms) sqlite3_bind_int(stmt, 2, ms);
+		saved = sqlite3_step(stmt) == SQLITE_DONE;
+	}
+	sqlite3_finalize(stmt);
+	pthread_mutex_unlock(&db_lock);
+	return saved;
 }
 
 int library_play_count(const char *path) {
