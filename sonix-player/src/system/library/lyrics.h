@@ -38,6 +38,6 @@ void lyrics_free(lyrics_t *lyrics);
 
 // The line being sung at `ms` into the track: the last one whose time has
 // come. -1 before the first line, and for untimed lyrics.
-int lyrics_line_at(const lyrics_t *lyrics, int32_t ms);
+int lyrics_line_at(const lyrics_t *lyrics, int64_t ms);
 
 #endif /* LYRICS_H */

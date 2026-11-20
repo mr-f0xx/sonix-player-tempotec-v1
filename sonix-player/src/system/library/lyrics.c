@@ -429,7 +429,7 @@ void lyrics_free(lyrics_t *lyrics) {
 	memset(lyrics, 0, sizeof(*lyrics));
 }
 
-int lyrics_line_at(const lyrics_t *lyrics, int32_t ms) {
+int lyrics_line_at(const lyrics_t *lyrics, int64_t ms) {
 	if (!lyrics || !lyrics->synced || lyrics->count == 0 || ms < lyrics->lines[0].ms) {
 		return -1;
 	}
