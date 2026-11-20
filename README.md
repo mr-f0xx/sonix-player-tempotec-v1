@@ -246,6 +246,8 @@ This fork builds on the upstream [Sonix Player](https://github.com/Jepl4r/sonix-
 
 ### 🌟 New in this fork
 
+- 📊 **Listening statistics** - open **Music → Stats** to see how long you listened and which tracks, albums and artists you played most. Switch between week, month, year and all time.
+- 🖼️ **2×2 album grid** - browse albums by cover art, four at a time.
 - 🎧 **Listen Together** - open **Streaming → Listen Together** on two V1s on the same Wi-Fi. Tap **Start Hosting** on the one playing music and **Join Stream** on the other to listen in sync.
 - 📼 **Tape Deck** - the optional [More → Tape Deck](docs/tape-deck.md) sampler has 16 pads for factory drums or your own WAVs. Overdub a one-bar loop, save the editable sequence or record the stereo mix to microSD with live filter, echo and drive. Add a compatible capture input to record WAV voice memos.
 - 🔁 **A-B loop and Now Playing actions** - mark two points in the track menu to repeat a passage on a seekable track; both marks appear on the progress bar. **Back** returns to the previous screen. With **Allow deleting tracks** enabled, **Delete track** removes a local file from microSD after confirmation.
