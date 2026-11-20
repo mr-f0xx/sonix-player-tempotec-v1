@@ -46,6 +46,8 @@ static lv_obj_t *artist_label;
 static lv_obj_t *album_label;
 static lv_obj_t *status_label;
 static lv_obj_t *wifi_row;
+static lv_obj_t *cast_btn;
+static lv_obj_t *cast_layer;
 static lv_obj_t *cast_status_label;
 static lv_obj_t *cast_rows[DLNA_CAST_MAX_TARGETS];
 static lv_obj_t *cast_row_labels[DLNA_CAST_MAX_TARGETS];
@@ -54,6 +56,7 @@ static lv_obj_t *cast_stop_row;
 static lv_timer_t *page_timer;
 
 static void refresh_cast_controls(void);
+static void cast_layer_hide(void);
 
 // ---------------------------------------------------------------------------
 
@@ -355,6 +358,7 @@ static void screen_loaded_cb(lv_event_t *e) {
 static void screen_unloaded_cb(lv_event_t *e) {
 	(void)e;
 	lv_timer_pause(page_timer);
+	cast_layer_hide();
 }
 
 static void wifi_row_cb(lv_event_t *e) {
@@ -366,6 +370,45 @@ static void wifi_row_cb(lv_event_t *e) {
 // DLNA controller (cast-to-renderer) controls. These are independent of the
 // receiver switch above: both roles can be used, and switching either role
 // never disables the other.
+
+static void cast_layer_hide(void) {
+	if (cast_layer) {
+		lv_obj_set_hidden(cast_layer, true);
+	}
+	back_btn_force_hidden(false);
+}
+
+static void cast_layer_show(void) {
+	if (!cast_layer) {
+		return;
+	}
+	refresh_cast_controls();
+	lv_obj_set_hidden(cast_layer, false);
+	lv_obj_move_foreground(cast_layer);
+	back_btn_force_hidden(true);
+}
+
+static void cast_cancel_cb(lv_event_t *e) {
+	(void)e;
+	cast_layer_hide();
+}
+
+static void cast_btn_cb(lv_event_t *e) {
+	(void)e;
+	cast_layer_show();
+}
+
+static bool dlna_back_guard(void) {
+	if (cast_layer && !lv_obj_is_hidden(cast_layer)) {
+		cast_layer_hide();
+		return true;
+	}
+	return false;
+}
+
+static bool dlna_back_peek(void) {
+	return cast_layer && !lv_obj_is_hidden(cast_layer);
+}
 
 static void cast_renderer_cb(lv_event_t *e) {
 	int index = (int)(intptr_t)lv_event_get_user_data(e);
@@ -427,10 +470,93 @@ static void refresh_cast_controls(void) {
 	else hide(cast_stop_row);
 }
 
+static void build_cast_layer(gui_config_t *cfg) {
+	cast_layer = lv_obj_create(dlna_screen);
+	lv_obj_set_size(cast_layer, cfg->screen_width, cfg->screen_height);
+	lv_obj_align(cast_layer, LV_ALIGN_TOP_LEFT, 0, 0);
+	lv_obj_add_style(cast_layer, &theme_style_screen, 0);
+	lv_obj_set_style_bg_opa(cast_layer, LV_OPA_COVER, 0);
+	lv_obj_set_style_border_width(cast_layer, 0, 0);
+	lv_obj_set_style_radius(cast_layer, 0, 0);
+	lv_obj_set_style_pad_all(cast_layer, 0, 0);
+	lv_obj_set_scrollable(cast_layer, false);
+	lv_obj_set_hidden(cast_layer, true);
+
+	lv_obj_t *heading = lv_label_create(cast_layer);
+	lv_label_set_text(heading, tr("Cast to a DLNA renderer"));
+	lv_obj_add_style(heading, &theme_style_text, 0);
+	lv_obj_set_style_text_font(heading, &font_ui_24, 0);
+	lv_obj_align(heading, LV_ALIGN_TOP_LEFT, cfg->padding, cfg->padding + cfg->top_bar_height + 10);
+
+	lv_obj_t *cancel = lv_btn_create(cast_layer);
+	settingsrow_place_corner_button(cancel, cfg, 0);
+	lv_obj_set_style_bg_opa(cancel, LV_OPA_TRANSP, 0);
+	lv_obj_set_style_border_width(cancel, 0, 0);
+	lv_obj_set_style_shadow_width(cancel, 0, 0);
+	lv_obj_set_style_pad_all(cancel, 0, 0);
+	lv_obj_add_event_cb(cancel, cast_cancel_cb, LV_EVENT_CLICKED, NULL);
+
+	lv_obj_t *cancel_icon = lv_image_create(cancel);
+	lv_image_set_src(cancel_icon, &icon_close);
+	lv_obj_add_style(cancel_icon, &theme_style_icon, 0);
+	settingsrow_scale_corner_icon(cancel_icon, cfg);
+	lv_obj_center(cancel_icon);
+
+	int top = settingsrow_content_top(cfg);
+	lv_obj_t *box = lv_obj_create(cast_layer);
+	lv_obj_set_size(box, lv_pct(100), cfg->screen_height - top);
+	lv_obj_align(box, LV_ALIGN_TOP_LEFT, 0, top);
+	lv_obj_set_style_bg_opa(box, 0, 0);
+	lv_obj_set_style_border_width(box, 0, 0);
+	lv_obj_set_style_radius(box, 0, 0);
+	lv_obj_set_style_pad_hor(box, cfg->padding, 0);
+	lv_obj_set_style_pad_bottom(box, cfg->padding, 0);
+	lv_obj_set_style_pad_gap(box, 8, 0);
+	lv_obj_set_scroll_dir(box, LV_DIR_VER);
+	lv_obj_set_flex_flow(box, LV_FLEX_FLOW_COLUMN);
+
+	settingsrow_action(box, "Search for DLNA renderers", cast_find_cb, NULL);
+	for (int i = 0; i < DLNA_CAST_MAX_TARGETS; i++) {
+		cast_rows[i] = settingsrow_action(box, "DLNA renderer", cast_renderer_cb, (void *)(intptr_t)i);
+		cast_row_labels[i] = settingsrow_name_label(cast_rows[i]);
+		hide(cast_rows[i]);
+	}
+	cast_play_row = settingsrow_action(box, "Cast current track", cast_play_cb, NULL);
+	cast_stop_row = settingsrow_action(box, "Stop casting", cast_stop_cb, NULL);
+	hide(cast_play_row);
+	hide(cast_stop_row);
+
+	cast_status_label = lv_label_create(box);
+	lv_obj_set_width(cast_status_label, lv_pct(100));
+	lv_label_set_long_mode(cast_status_label, LV_LABEL_LONG_WRAP);
+	lv_obj_add_style(cast_status_label, &theme_style_text_dim, 0);
+	lv_obj_set_style_text_font(cast_status_label, &font_ui_18, 0);
+	lv_obj_set_style_pad_hor(cast_status_label, 8, 0);
+	lv_obj_set_style_pad_ver(cast_status_label, 8, 0);
+}
+
 // ---------------------------------------------------------------------------
 
 void dlna_page_init(gui_config_t *cfg) {
+	const bool compact = cfg->screen_width < 320;
+
 	lv_obj_t *container = settingsrow_page(dlna_screen, cfg, "dlna");
+	settingsrow_title_corner_slots(settingsrow_page_title(dlna_screen), cfg, 1);
+
+	cast_btn = lv_btn_create(dlna_screen);
+	settingsrow_place_corner_button(cast_btn, cfg, 0);
+	lv_obj_set_style_bg_opa(cast_btn, LV_OPA_TRANSP, 0);
+	lv_obj_set_style_border_width(cast_btn, 0, 0);
+	lv_obj_set_style_shadow_width(cast_btn, 0, 0);
+	lv_obj_set_style_pad_all(cast_btn, 0, 0);
+	lv_obj_add_event_cb(cast_btn, cast_btn_cb, LV_EVENT_CLICKED, NULL);
+
+	lv_obj_t *cast_btn_icon = lv_image_create(cast_btn);
+	lv_image_set_src(cast_btn_icon, &icon_dlna_page);
+	lv_obj_add_style(cast_btn_icon, &theme_style_icon, 0);
+	int corner_icon_side = compact ? 22 : 28;
+	lv_image_set_scale(cast_btn_icon, (uint32_t)(LV_SCALE_NONE * corner_icon_side / 128));
+	lv_obj_center(cast_btn_icon);
 
 	settingsrow_toggle(container, "dlna", &toggle, toggle_changed_cb);
 
@@ -438,29 +564,33 @@ void dlna_page_init(gui_config_t *cfg) {
 	lv_image_set_src(glyph, &icon_dlna_page);
 	lv_obj_add_style(glyph, &theme_style_icon, 0);
 	lv_obj_set_style_image_opa(glyph, LV_OPA_40, 0);
-	lv_obj_set_style_margin_top(glyph, 40, 0);
-	lv_obj_set_style_margin_bottom(glyph, 28, 0);
+	int icon_size = compact ? 72 : 96;
+	lv_obj_set_size(glyph, icon_size, icon_size);
+	lv_image_set_inner_align(glyph, LV_IMAGE_ALIGN_CENTER);
+	lv_image_set_scale(glyph, (uint32_t)(LV_SCALE_NONE * icon_size / 128));
+	lv_obj_set_style_margin_top(glyph, compact ? 8 : 16, 0);
+	lv_obj_set_style_margin_bottom(glyph, compact ? 8 : 16, 0);
 	lv_obj_set_style_align(glyph, LV_ALIGN_CENTER, 0);
 
 	title_label = lv_label_create(container);
 	lv_obj_set_width(title_label, lv_pct(100));
 	lv_obj_add_style(title_label, &theme_style_text, 0);
-	lv_obj_set_style_text_font(title_label, &font_ui_26, 0);
+	lv_obj_set_style_text_font(title_label, compact ? &font_ui_22 : &font_ui_26, 0);
 	lv_obj_set_style_text_align(title_label, LV_TEXT_ALIGN_CENTER, 0);
 	scrolltext_apply(title_label);
 
 	artist_label = lv_label_create(container);
 	lv_obj_set_width(artist_label, lv_pct(100));
 	lv_obj_add_style(artist_label, &theme_style_text_dim, 0);
-	lv_obj_set_style_text_font(artist_label, &font_ui_22, 0);
+	lv_obj_set_style_text_font(artist_label, compact ? &font_ui_18 : &font_ui_22, 0);
 	lv_obj_set_style_text_align(artist_label, LV_TEXT_ALIGN_CENTER, 0);
-	lv_obj_set_style_pad_top(artist_label, 6, 0);
+	lv_obj_set_style_pad_top(artist_label, compact ? 2 : 6, 0);
 	scrolltext_apply(artist_label);
 
 	album_label = lv_label_create(container);
 	lv_obj_set_width(album_label, lv_pct(100));
 	lv_obj_add_style(album_label, &theme_style_text_dim, 0);
-	lv_obj_set_style_text_font(album_label, &font_ui_20, 0);
+	lv_obj_set_style_text_font(album_label, compact ? &font_ui_18 : &font_ui_20, 0);
 	lv_obj_set_style_text_align(album_label, LV_TEXT_ALIGN_CENTER, 0);
 	scrolltext_apply(album_label);
 
@@ -468,45 +598,18 @@ void dlna_page_init(gui_config_t *cfg) {
 	lv_obj_set_width(status_label, lv_pct(100));
 	lv_label_set_long_mode(status_label, LV_LABEL_LONG_WRAP);
 	lv_obj_add_style(status_label, &theme_style_text_dim, 0);
-	lv_obj_set_style_text_font(status_label, &font_ui_20, 0);
+	lv_obj_set_style_text_font(status_label, compact ? &font_ui_18 : &font_ui_20, 0);
 	lv_obj_set_style_text_align(status_label, LV_TEXT_ALIGN_CENTER, 0);
 	lv_obj_set_style_pad_hor(status_label, 4, 0);
-	lv_obj_set_style_pad_top(status_label, 14, 0);
-
-	// Outbound controller controls are a separate role from the receiver
-	// switch. The V1 serves the selected local file over HTTP and asks the
-	// chosen renderer to fetch it; the existing phone-to-V1 receiver remains
-	// available independently above.
-	lv_obj_t *cast_heading = lv_label_create(container);
-	lv_label_set_text(cast_heading, tr("Cast to a DLNA renderer"));
-	lv_obj_add_style(cast_heading, &theme_style_text, 0);
-	lv_obj_set_style_text_font(cast_heading, &font_ui_22, 0);
-	lv_obj_set_style_margin_top(cast_heading, 22, 0);
-	lv_obj_set_width(cast_heading, lv_pct(100));
-
-	settingsrow_action(container, "Search for DLNA renderers", cast_find_cb, NULL);
-	for (int i = 0; i < DLNA_CAST_MAX_TARGETS; i++) {
-		cast_rows[i] = settingsrow_action(container, "DLNA renderer", cast_renderer_cb, (void *)(intptr_t)i);
-		cast_row_labels[i] = settingsrow_name_label(cast_rows[i]);
-		hide(cast_rows[i]);
-	}
-	cast_play_row = settingsrow_action(container, "Cast current track", cast_play_cb, NULL);
-	cast_stop_row = settingsrow_action(container, "Stop casting", cast_stop_cb, NULL);
-	hide(cast_play_row);
-	hide(cast_stop_row);
-	cast_status_label = lv_label_create(container);
-	lv_obj_set_width(cast_status_label, lv_pct(100));
-	lv_label_set_long_mode(cast_status_label, LV_LABEL_LONG_WRAP);
-	lv_obj_add_style(cast_status_label, &theme_style_text_dim, 0);
-	lv_obj_set_style_text_font(cast_status_label, &font_ui_18, 0);
-	lv_obj_set_style_pad_hor(cast_status_label, 8, 0);
-	lv_obj_set_style_pad_ver(cast_status_label, 8, 0);
+	lv_obj_set_style_pad_top(status_label, compact ? 8 : 14, 0);
 
 	// The same row as the Wi-Fi transfer page: the notice says what is missing,
 	// the Wi-Fi settings row leads to where it is fixed.
 	wifi_row = settingsrow_add(container, "wi_fi_settings", NULL, wifi_row_cb, NULL);
 	lv_obj_set_style_margin_top(wifi_row, 16, 0);
 	hide(wifi_row);
+
+	build_cast_layer(cfg);
 
 	page_timer = lv_timer_create(page_poll_cb, PAGE_POLL_MS, NULL);
 	lv_timer_pause(page_timer);
@@ -521,6 +624,8 @@ void dlna_page_init(gui_config_t *cfg) {
 	lv_obj_add_event_cb(dlna_screen, screen_loaded_cb, LV_EVENT_SCREEN_LOADED, NULL);
 	lv_obj_add_event_cb(dlna_screen, switched_elsewhere_cb, LV_EVENT_REFRESH, NULL);
 	lv_obj_add_event_cb(dlna_screen, screen_unloaded_cb, LV_EVENT_SCREEN_UNLOADED, NULL);
+	switcher_set_back_guard(dlna_screen, dlna_back_guard);
+	switcher_set_back_guard_peek(dlna_screen, dlna_back_peek);
 
 	// No dlna_set_root() here: main.c has already called it with the real card
 	// or the fallback root, and this runs later, so repeating it with whatever
