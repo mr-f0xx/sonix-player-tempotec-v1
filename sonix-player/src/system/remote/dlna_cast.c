@@ -22,22 +22,37 @@
 #include <time.h>
 #include <unistd.h>
 
+#ifndef SSDP_ADDR
 #define SSDP_ADDR "239.255.255.250"
+#endif
+#ifndef SSDP_PORT
 #define SSDP_PORT 1900
+#endif
 #define DESCRIPTION_MAX (96 * 1024)
 #define HTTP_REQUEST_MAX 8192
 #define FILE_CHUNK 32768
+// A renderer opens two or three connections to one stream: a probe, the
+// stream itself, and another one every time it seeks. They are served at the
+// same time, so a slow reader cannot hold up the next request.
+#define MEDIA_CLIENTS_MAX 4
+#define MEDIA_CLIENT_STACK (128 * 1024)
 
 #define URL_MAX 1024
 #define PATH_MAXIMUM 1024
 #define CONTROL_MAX 1024
 #define TOKEN_MAX 40
+#define SUFFIX_MAX 16
+#define MIME_MAX 64
 
 typedef struct {
 	char name[DLNA_CAST_NAME_MAX];
 	char location[URL_MAX];
 	char control_url[CONTROL_MAX];
 	char service_type[160];
+	// ConnectionManager is optional, and it is the only place a renderer says
+	// which mime types it accepts -- see choose_mime().
+	char manager_url[CONTROL_MAX];
+	char manager_type[160];
 } renderer_t;
 
 static pthread_mutex_t cast_lock = PTHREAD_MUTEX_INITIALIZER;
@@ -49,12 +64,26 @@ static bool casting;
 static char cast_message[160] = "";
 
 static pthread_mutex_t media_lock = PTHREAD_MUTEX_INITIALIZER;
-static char media_path[PATH_MAXIMUM];
-static char media_token[TOKEN_MAX];
+// What the media server is handing out right now. Published as a whole, under
+// the lock, so a request can never see one cast's path beside another's token.
+typedef struct {
+	char path[PATH_MAXIMUM];
+	char token[TOKEN_MAX];
+	char suffix[SUFFIX_MAX]; // ".mp3": the tail of the URL, because some
+							 // televisions decide what a stream is from its
+							 // name and look at nothing else
+	char mime[MIME_MAX];
+	char features[192]; // the fourth field of protocolInfo, and the
+						// contentFeatures.dlna.org response header
+} media_service_t;
+static media_service_t media;
 static int media_listener = -1;
 static unsigned token_sequence;
 static uint16_t media_port;
 static pthread_once_t media_once = PTHREAD_ONCE_INIT;
+
+static pthread_mutex_t client_lock = PTHREAD_MUTEX_INITIALIZER;
+static int client_count;
 
 static void set_message(const char *message) {
 	pthread_mutex_lock(&cast_lock);
@@ -190,6 +219,7 @@ static bool get_renderer(const char *location, renderer_t *out) {
 	const char *list_end = strstr(list, "</serviceList>");
 	if (!list_end) { free(xml); return false; }
 	char service_type[160] = "", control[CONTROL_MAX] = "";
+	char manager_type[160] = "", manager[CONTROL_MAX] = "";
 	const char *svc = list;
 	while ((svc = strstr(svc, "<service")) && svc < list_end) {
 		const char *svc_end = strstr(svc, "</service>");
@@ -199,19 +229,33 @@ static bool get_renderer(const char *location, renderer_t *out) {
 		if (!section) break;
 		memcpy(section, svc, len); section[len] = '\0';
 		char st[160] = "", cu[CONTROL_MAX] = "";
-		if (xml_value(section, "serviceType", st, sizeof(st)) && strstr(st, "AVTransport") &&
+		if (xml_value(section, "serviceType", st, sizeof(st)) &&
 			xml_value(section, "controlURL", cu, sizeof(cu))) {
-			snprintf(service_type, sizeof(service_type), "%s", st);
 			xml_unescape(cu);
-			snprintf(control, sizeof(control), "%s", cu);
-			free(section);
-			break;
+			if (strstr(st, "AVTransport") && !control[0]) {
+				snprintf(service_type, sizeof(service_type), "%s", st);
+				snprintf(control, sizeof(control), "%s", cu);
+			} else if (strstr(st, "ConnectionManager") && !manager[0]) {
+				// Kept for choose_mime(): a renderer that names its formats
+				// in a spelling this player would not guess can only be
+				// asked, not deduced.
+				snprintf(manager_type, sizeof(manager_type), "%s", st);
+				snprintf(manager, sizeof(manager), "%s", cu);
+			}
 		}
 		free(section);
+		if (control[0] && manager[0]) break;
 		svc = svc_end + 10;
 	}
 	free(xml);
 	if (!control[0] || !resolve_url(location, control, out->control_url, sizeof(out->control_url))) return false;
+	// ConnectionManager is optional: a renderer without one is cast to all the
+	// same, on the format's preferred spelling.
+	out->manager_url[0] = '\0';
+	out->manager_type[0] = '\0';
+	if (manager[0] && resolve_url(location, manager, out->manager_url, sizeof(out->manager_url))) {
+		snprintf(out->manager_type, sizeof(out->manager_type), "%s", manager_type);
+	}
 	snprintf(out->name, sizeof(out->name), "%s", name[0] ? name : "DLNA renderer");
 	snprintf(out->location, sizeof(out->location), "%s", location);
 	snprintf(out->service_type, sizeof(out->service_type), "%s", service_type);
@@ -319,17 +363,234 @@ static bool send_all(int fd, const void *data, size_t length) {
 	return true;
 }
 
-static const char *mime_for_path(const char *path) {
+// ---------------------------------------------------------------------------
+// what a renderer is told the track is
+// ---------------------------------------------------------------------------
+//
+// DLNA does not let a renderer judge a stream by Content-Type alone. The
+// fourth field of the DIDL's protocolInfo and the contentFeatures.dlna.org
+// response header carry a feature string, a television that follows DLNA
+// (Samsung, LG and Sony in particular) will not play a track without it, and
+// what it says when it refuses is that the format is not valid -- [#363].
+// "http-get:*:audio/mpeg:*", what this player used to send, says only "some
+// MPEG audio"; the feature string says what can be done with the stream.
+//
+//   DLNA.ORG_OP=01   byte-range seeks are served, time seeks are not (see
+//                    parse_range())
+//   DLNA.ORG_CI=0    the bytes are the file on the card, not converted
+//   DLNA.ORG_FLAGS   01700000...: DLNA 1.5, streaming and interactive
+//                    transfer modes, background transfer allowed -- the set
+//                    minidlna and every other media server sends.
+#define DLNA_ORG_OP_CI "DLNA.ORG_OP=01;DLNA.ORG_CI=0"
+#define DLNA_ORG_FLAGS "DLNA.ORG_FLAGS=01700000000000000000000000000000"
+
+typedef struct {
+	// Also the tail of the URL: a renderer given "/sonix/<token>/track" with no
+	// name has nothing to go on, and several say "not a valid video" rather
+	// than guess.
+	const char *extension;
+	// DLNA.ORG_PN=..., or NULL where DLNA has no profile that fits every file
+	// with this extension. MP3 and FLAC are named because the profile covers
+	// the format exactly; a bare audio/mp4 may hold AAC or ALAC, and a wav may
+	// hold samples the LPCM profile does not allow, so neither is named --
+	// claiming a profile the bytes do not follow is a refusal, not a courtesy.
+	const char *profile;
+	// What this format may be called, preferred first. The renderer's own sink
+	// list picks between them; the first is used when it expresses no opinion.
+	const char *mimes[4];
+} media_format_t;
+
+static const media_format_t MEDIA_FORMATS[] = {
+	{".mp3", "DLNA.ORG_PN=MP3", {"audio/mpeg", "audio/mp3", "audio/x-mp3", NULL}},
+	{".flac", "DLNA.ORG_PN=FLAC", {"audio/flac", "audio/x-flac", NULL}},
+	{".m4a", NULL, {"audio/mp4", "audio/x-m4a", "audio/m4a", NULL}},
+	{".m4b", NULL, {"audio/mp4", "audio/x-m4a", "audio/m4a", NULL}},
+	{".mp4", NULL, {"audio/mp4", "audio/x-m4a", "audio/m4a", NULL}},
+	{".aac", NULL, {"audio/aac", "audio/x-aac", "audio/mp4", NULL}},
+	{".wav", NULL, {"audio/wav", "audio/x-wav", "audio/wave", NULL}},
+	{".ogg", NULL, {"audio/ogg", "application/ogg", "audio/x-vorbis+ogg", NULL}},
+	{".oga", NULL, {"audio/ogg", "application/ogg", "audio/x-vorbis+ogg", NULL}},
+	{".opus", NULL, {"audio/ogg", "audio/opus", "audio/x-opus+ogg", NULL}},
+	{".aiff", NULL, {"audio/aiff", "audio/x-aiff", NULL}},
+	{".aif", NULL, {"audio/aiff", "audio/x-aiff", NULL}},
+	{".ape", NULL, {"audio/x-ape", "audio/ape", NULL}},
+	{".wv", NULL, {"audio/x-wavpack", "audio/wavpack", NULL}},
+	{".dsf", NULL, {"audio/x-dsf", "audio/dsd", NULL}},
+	{".dff", NULL, {"audio/x-dff", "audio/dsd", NULL}},
+};
+
+#define MEDIA_FORMAT_COUNT (sizeof(MEDIA_FORMATS) / sizeof(MEDIA_FORMATS[0]))
+
+static const media_format_t *format_for_path(const char *path) {
 	const char *ext = strrchr(path ? path : "", '.');
-	if (!ext) return "application/octet-stream";
-	if (!strcasecmp(ext, ".mp3")) return "audio/mpeg";
-	if (!strcasecmp(ext, ".flac")) return "audio/flac";
-	if (!strcasecmp(ext, ".m4a") || !strcasecmp(ext, ".mp4") || !strcasecmp(ext, ".aac")) return "audio/mp4";
-	if (!strcasecmp(ext, ".wav")) return "audio/wav";
-	if (!strcasecmp(ext, ".ogg") || !strcasecmp(ext, ".opus")) return "audio/ogg";
-	if (!strcasecmp(ext, ".ape")) return "audio/ape";
-	if (!strcasecmp(ext, ".wv")) return "audio/x-wavpack";
-	return "application/octet-stream";
+	if (!ext) return NULL;
+	for (size_t i = 0; i < MEDIA_FORMAT_COUNT; i++) {
+		if (!strcasecmp(ext, MEDIA_FORMATS[i].extension)) return &MEDIA_FORMATS[i];
+	}
+	return NULL;
+}
+
+// The feature string for a format; also the fourth field of protocolInfo.
+static void dlna_features(const media_format_t *format, char *out, size_t size) {
+	if (format && format->profile)
+		snprintf(out, size, "%s;%s;%s", format->profile, DLNA_ORG_OP_CI, DLNA_ORG_FLAGS);
+	else
+		snprintf(out, size, "%s;%s", DLNA_ORG_OP_CI, DLNA_ORG_FLAGS);
+}
+
+// A comma-separated sink list entry is "http-get:*:<mime>:<features>", so the
+// mime is what sits between a ':' on each side. Matching on those boundaries
+// keeps "audio/mpeg" from matching inside "audio/mpeg4-generic".
+static bool sink_names_mime(const char *sink, const char *mime) {
+	size_t len = strlen(mime);
+	for (const char *p = sink; (p = strcasestr(p, mime)) != NULL; p += len) {
+		if (p > sink && p[-1] == ':' && p[len] == ':') return true;
+	}
+	return false;
+}
+
+// "http-get:*:*:*" and friends: the renderer is not being specific, so any
+// spelling will do. (Testing for ":*:" anywhere would match every entry --
+// the second field of protocolInfo is always a star.)
+static bool sink_accepts_anything(const char *sink) {
+	return strstr(sink, "http-get:*:*:") != NULL || sink_names_mime(sink, "audio/*");
+}
+
+static bool soap_call(const char *url, const char *service_type, const char *action, const char *arguments,
+					  char **response, size_t limit);
+
+// The one thing a control point cannot know on its own is how a renderer
+// spells a format: FLAC is "audio/flac" to some televisions and "audio/x-flac"
+// to others, and a renderer that is sent the spelling it does not list refuses
+// the track. ConnectionManager's GetProtocolInfo is where it says.
+//
+// Everything here is best effort. A renderer that does not answer, has no
+// ConnectionManager, or lists nothing lands on the format's preferred
+// spelling, and a cast that would have worked is not withheld because a
+// preference could not be confirmed.
+static void choose_mime(const renderer_t *renderer, const media_format_t *format, char *out, size_t size) {
+	snprintf(out, size, "%s", format->mimes[0]);
+	if (!renderer->manager_url[0] || !renderer->manager_type[0]) return;
+	char *response = NULL;
+	if (!soap_call(renderer->manager_url, renderer->manager_type, "GetProtocolInfo", NULL, &response, 32 * 1024) || !response) {
+		free(response);
+		return;
+	}
+	char *sink = malloc(16 * 1024);
+	if (!sink) { free(response); return; }
+	if (xml_value(response, "Sink", sink, 16 * 1024)) {
+		xml_unescape(sink);
+		if (!sink_accepts_anything(sink)) {
+			for (size_t i = 0; i < sizeof(format->mimes) / sizeof(format->mimes[0]) && format->mimes[i]; i++) {
+				if (sink_names_mime(sink, format->mimes[i])) {
+					snprintf(out, size, "%s", format->mimes[i]);
+					break;
+				}
+			}
+		}
+	}
+	free(sink);
+	free(response);
+}
+
+// ---------------------------------------------------------------------------
+// the media server: the track, on a socket the renderer can reach
+// ---------------------------------------------------------------------------
+
+// One header out of a request. Names are compared without case, as the spec
+// says, and the value is copied bounded: a renderer is free to send a Range
+// that makes no sense.
+static bool header_value(const char *request, const char *name, char *out, size_t size) {
+	size_t len = strlen(name);
+	const char *line = strstr(request, "\r\n");
+	while (line) {
+		line += 2;
+		if (line[0] == '\r' && line[1] == '\n') break; // end of the headers
+		if (strncasecmp(line, name, len) == 0 && line[len] == ':') {
+			const char *value = line + len + 1;
+			while (*value == ' ' || *value == '\t') value++;
+			const char *end = strstr(value, "\r\n");
+			size_t n = end ? (size_t)(end - value) : strlen(value);
+			if (n >= size) n = size - 1;
+			memcpy(out, value, n);
+			out[n] = '\0';
+			return true;
+		}
+		line = strstr(line, "\r\n");
+	}
+	return false;
+}
+
+typedef enum {
+	RANGE_NONE,			 // no range asked for, or one that cannot be honoured
+	RANGE_PARTIAL,		 // start and end are set
+	RANGE_UNSATISFIABLE, // entirely past the end of the file: 416
+} range_result_t;
+
+// "bytes=" ranges, the only unit a renderer on a LAN sends.
+//
+// The open-ended form is the one that matters: "Range: bytes=0-" asks for the
+// whole file, because the second number means "to the end" when it is missing.
+// Reading that missing number as a zero -- which is what this player did --
+// answered with a one-byte body, and a television handed one byte of an MP3
+// reports the file as not a valid format. That was [#363], and it explains a
+// failure that had nothing to do with the format of the file.
+//
+// A list of ranges is not honoured: the answer is the whole file, which DLNA
+// allows, and no renderer asks for one while playing a single track.
+static range_result_t parse_range(const char *value, uint64_t size, off_t *start, off_t *end) {
+	if (size == 0 || !value || strncasecmp(value, "bytes=", 6) != 0) return RANGE_NONE;
+	const char *first_digit = value + 6;
+	if (strchr(first_digit, ',')) return RANGE_NONE;
+	const char *dash = strchr(first_digit, '-');
+	if (!dash) return RANGE_NONE;
+	const char *tail = dash + 1;
+	size_t first_len = (size_t)(dash - first_digit), second_len = strcspn(tail, " \t\r\n");
+	char first[32], second[32];
+	if (first_len >= sizeof(first) || second_len >= sizeof(second)) return RANGE_NONE;
+	memcpy(first, first_digit, first_len);
+	first[first_len] = '\0';
+	memcpy(second, tail, second_len);
+	second[second_len] = '\0';
+	char *after = NULL;
+	if (first_len == 0) {
+		// "-N": the last N bytes.
+		if (second_len == 0) return RANGE_NONE;
+		unsigned long long n = strtoull(second, &after, 10);
+		if (!after || *after) return RANGE_NONE;
+		if (n == 0) return RANGE_UNSATISFIABLE;
+		*start = (off_t)(n >= size ? 0 : size - n);
+		*end = (off_t)(size - 1);
+		return RANGE_PARTIAL;
+	}
+	unsigned long long a = strtoull(first, &after, 10);
+	if (!after || *after) return RANGE_NONE;
+	if (a >= size) return RANGE_UNSATISFIABLE;
+	*start = (off_t)a;
+	*end = (off_t)(size - 1);
+	if (second_len) {
+		unsigned long long b = strtoull(second, &after, 10);
+		if (!after || *after) return RANGE_NONE;
+		if (b < a) return RANGE_NONE;
+		if (b < size) *end = (off_t)b; // a last byte past the end means "to the end"
+	}
+	return RANGE_PARTIAL;
+}
+
+static void http_date(char *out, size_t size) {
+	// Spelled out rather than through strftime(): %a and %b follow the locale,
+	// and this header is read by machines.
+	static const char *const DAYS[] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
+	static const char *const MONTHS[] = {"Jan", "Feb", "Mar", "Apr", "May", "Jun",
+										 "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"};
+	time_t now = time(NULL);
+	struct tm tm;
+	if (!gmtime_r(&now, &tm)) {
+		snprintf(out, size, "Thu, 01 Jan 1970 00:00:00 GMT");
+		return;
+	}
+	snprintf(out, size, "%s, %02d %s %04d %02d:%02d:%02d GMT", DAYS[tm.tm_wday % 7], tm.tm_mday,
+			 MONTHS[tm.tm_mon % 12], tm.tm_year + 1900, tm.tm_hour, tm.tm_min, tm.tm_sec);
 }
 
 static void serve_media_client(int client) {
@@ -355,49 +616,84 @@ static void serve_media_client(int client) {
 		const char response[] = "HTTP/1.1 405 Method Not Allowed\r\nConnection: close\r\nContent-Length: 0\r\n\r\n";
 		send_all(client, response, sizeof(response) - 1); return;
 	}
-	char path[PATH_MAXIMUM], token[TOKEN_MAX];
+	media_service_t service;
 	pthread_mutex_lock(&media_lock);
-	snprintf(path, sizeof(path), "%s", media_path);
-	snprintf(token, sizeof(token), "%s", media_token);
+	service = media;
 	pthread_mutex_unlock(&media_lock);
-	char expected[96]; snprintf(expected, sizeof(expected), "/sonix/%s/track", token);
-	if (!token[0] || strcmp(uri, expected) != 0) {
+	// The name carries the token and the format's extension, both of which a
+	// renderer may look at: the token so that one cast's URL is not another's,
+	// the extension because several decide what a stream is from its name.
+	char expected[TOKEN_MAX + SUFFIX_MAX + 32];
+	snprintf(expected, sizeof(expected), "/sonix/%s/track%s", service.token, service.suffix);
+	if (!service.token[0] || strcmp(uri, expected) != 0) {
 		const char response[] = "HTTP/1.1 404 Not Found\r\nConnection: close\r\nContent-Length: 0\r\n\r\n";
 		send_all(client, response, sizeof(response) - 1); return;
 	}
-	int file = open(path, O_RDONLY);
+	int file = open(service.path, O_RDONLY);
 	struct stat st;
 	if (file < 0 || fstat(file, &st) != 0 || !S_ISREG(st.st_mode)) {
 		if (file >= 0) close(file);
 		const char response[] = "HTTP/1.1 404 Not Found\r\nConnection: close\r\nContent-Length: 0\r\n\r\n";
 		send_all(client, response, sizeof(response) - 1); return;
 	}
-	off_t start = 0, end = st.st_size ? st.st_size - 1 : 0;
-	bool partial = false;
-	char *range = NULL;
-	for (char *line = strstr(request, "\r\n"); line && *line; ) {
-		line += 2;
-		if (strncasecmp(line, "Range:", 6) == 0) { range = line + 6; break; }
-		char *next = strstr(line, "\r\n"); if (!next) break; line = next;
+	char range[128] = "";
+	off_t start = 0, end = st.st_size > 0 ? st.st_size - 1 : 0;
+	range_result_t ranged = RANGE_NONE;
+	if (header_value(request, "Range", range, sizeof(range))) {
+		ranged = parse_range(range, (uint64_t)st.st_size, &start, &end);
 	}
-	if (range && st.st_size > 0) {
-		while (*range == ' ' || *range == '\t') range++;
-		unsigned long long a = 0, b = 0;
-		if (sscanf(range, "bytes=%llu-%llu", &a, &b) >= 1 && a < (unsigned long long)st.st_size) {
-			start = (off_t)a;
-			if (b >= a && b < (unsigned long long)st.st_size) end = (off_t)b;
-			partial = true;
-		}
+	if (ranged == RANGE_NONE) start = 0;
+	uint64_t length = ranged == RANGE_PARTIAL ? (uint64_t)(end - start + 1) : (uint64_t)st.st_size;
+	if (ranged == RANGE_UNSATISFIABLE) {
+		char headers[256];
+		snprintf(headers, sizeof(headers),
+				 "HTTP/1.1 416 Range Not Satisfiable\r\n"
+				 "Connection: close\r\n"
+				 "Content-Range: bytes */%llu\r\n"
+				 "Content-Length: 0\r\n\r\n",
+				 (unsigned long long)st.st_size);
+		send_all(client, headers, strlen(headers));
+		close(file);
+		return;
 	}
-	uint64_t length = st.st_size > 0 ? (uint64_t)(end - start + 1) : 0;
-	const char *mime = mime_for_path(path);
-	char headers[1024];
-	int hn = snprintf(headers, sizeof(headers),
-		"HTTP/1.1 %s\r\nConnection: close\r\nAccept-Ranges: bytes\r\nContent-Type: %s\r\nContent-Length: %llu\r\n",
-		partial ? "206 Partial Content" : "200 OK", mime, (unsigned long long)length);
-	if (partial) hn += snprintf(headers + hn, sizeof(headers) - (size_t)hn, "Content-Range: bytes %llu-%llu/%llu\r\n",
-		(unsigned long long)start, (unsigned long long)end, (unsigned long long)st.st_size);
-	snprintf(headers + hn, sizeof(headers) - (size_t)hn, "\r\n");
+	// DLNA lets a renderer ask for the transfer to be paced differently, and
+	// Background is the one worth honouring: the renderer wants the file ahead
+	// of playing it.
+	char transfer_mode[16] = "Streaming", requested[16] = "";
+	if (header_value(request, "transferMode.dlna.org", requested, sizeof(requested)) &&
+		!strcasecmp(requested, "Background")) {
+		snprintf(transfer_mode, sizeof(transfer_mode), "Background");
+	}
+	char date[64];
+	http_date(date, sizeof(date));
+	// contentFeatures.dlna.org is what a DLNA television reads instead of
+	// trusting Content-Type, and it is sent on every response rather than only
+	// when asked for with getcontentFeatures.dlna.org: a renderer that needs it
+	// and forgets to ask is still served correctly.
+	char headers[900];
+	int n = snprintf(headers, sizeof(headers),
+					 "HTTP/1.1 %s\r\n"
+					 "Server: Linux/3.0 UPnP/1.0 SonixPlayer/1.0\r\n"
+					 "Date: %s\r\n"
+					 "Connection: close\r\n"
+					 "Accept-Ranges: bytes\r\n"
+					 "Content-Type: %s\r\n"
+					 "Content-Length: %llu\r\n"
+					 "contentFeatures.dlna.org: %s\r\n"
+					 "transferMode.dlna.org: %s\r\n",
+					 ranged == RANGE_PARTIAL ? "206 Partial Content" : "200 OK", date,
+					 service.mime[0] ? service.mime : "application/octet-stream",
+					 (unsigned long long)length, service.features, transfer_mode);
+	if (n < 0 || (size_t)n >= sizeof(headers)) { close(file); return; }
+	if (ranged == RANGE_PARTIAL) {
+		int added = snprintf(headers + n, sizeof(headers) - (size_t)n, "Content-Range: bytes %llu-%llu/%llu\r\n",
+							 (unsigned long long)start, (unsigned long long)end,
+							 (unsigned long long)st.st_size);
+		if (added < 0 || (size_t)added >= sizeof(headers) - (size_t)n) { close(file); return; }
+		n += added;
+	}
+	int added = snprintf(headers + n, sizeof(headers) - (size_t)n, "\r\n");
+	if (added < 0 || (size_t)added >= sizeof(headers) - (size_t)n) { close(file); return; }
 	if (!send_all(client, headers, strlen(headers)) || head || length == 0) { close(file); return; }
 	if (lseek(file, start, SEEK_SET) < 0) { close(file); return; }
 	char buffer[FILE_CHUNK];
@@ -412,16 +708,45 @@ static void serve_media_client(int client) {
 	close(file);
 }
 
+static void *media_client_thread(void *arg) {
+	int client = (int)(intptr_t)arg;
+	serve_media_client(client);
+	close(client);
+	pthread_mutex_lock(&client_lock);
+	client_count--;
+	pthread_mutex_unlock(&client_lock);
+	return NULL;
+}
+
 static void *media_server(void *unused) {
 	(void)unused;
 	for (;;) {
 		struct pollfd pfd = {.fd = media_listener, .events = POLLIN};
-		int r = poll(&pfd, 1, 1000);
-		if (r <= 0) continue;
+		if (poll(&pfd, 1, 1000) <= 0) continue;
 		int client = accept(media_listener, NULL, NULL);
-		if (client < 0) { if (errno == EINTR) continue; continue; }
-		serve_media_client(client);
-		close(client);
+		if (client < 0) continue;
+		pthread_mutex_lock(&client_lock);
+		bool room = client_count < MEDIA_CLIENTS_MAX;
+		if (room) client_count++;
+		pthread_mutex_unlock(&client_lock);
+		if (!room) {
+			const char response[] = "HTTP/1.1 503 Service Unavailable\r\nConnection: close\r\nContent-Length: 0\r\n\r\n";
+			send_all(client, response, sizeof(response) - 1);
+			close(client);
+			continue;
+		}
+		pthread_attr_t attr;
+		pthread_attr_init(&attr);
+		pthread_attr_setstacksize(&attr, MEDIA_CLIENT_STACK);
+		pthread_t thread;
+		if (pthread_create(&thread, &attr, media_client_thread, (void *)(intptr_t)client) == 0) {
+			pthread_detach(thread);
+		} else {
+			// No thread to spare: serve it here rather than drop a renderer
+			// that is already playing.
+			media_client_thread((void *)(intptr_t)client);
+		}
+		pthread_attr_destroy(&attr);
 	}
 	return NULL;
 }
@@ -450,6 +775,25 @@ static bool ensure_media_server(void) {
 	return media_listener >= 0 && media_port != 0;
 }
 
+// What the server answers with, published in one piece under the media lock.
+static void media_publish(const char *path, const char *token, const char *suffix, const char *mime,
+						  const char *features) {
+	pthread_mutex_lock(&media_lock);
+	snprintf(media.path, sizeof(media.path), "%s", path ? path : "");
+	snprintf(media.token, sizeof(media.token), "%s", token ? token : "");
+	snprintf(media.suffix, sizeof(media.suffix), "%s", suffix ? suffix : "");
+	snprintf(media.mime, sizeof(media.mime), "%s", mime ? mime : "");
+	snprintf(media.features, sizeof(media.features), "%s", features ? features : "");
+	pthread_mutex_unlock(&media_lock);
+}
+
+static void media_withdraw(void) {
+	pthread_mutex_lock(&media_lock);
+	media.token[0] = '\0';
+	media.path[0] = '\0';
+	pthread_mutex_unlock(&media_lock);
+}
+
 static void xml_escape(const char *src, char *out, size_t size) {
 	size_t used = 0;
 	if (!src) src = "";
@@ -462,22 +806,35 @@ static void xml_escape(const char *src, char *out, size_t size) {
 	out[used] = '\0';
 }
 
-static bool soap(const renderer_t *renderer, const char *action, const char *arguments) {
+// One SOAP action against one service. The response is handed back malloc'd
+// for callers that read it -- GetProtocolInfo's sink list is the only one that
+// does -- and dropped for the rest.
+static bool soap_call(const char *url, const char *service_type, const char *action, const char *arguments,
+					  char **response, size_t limit) {
 	char body[8192], extra[512];
 	int n = snprintf(body, sizeof(body),
 		"<?xml version=\"1.0\" encoding=\"utf-8\"?>"
 		"<s:Envelope xmlns:s=\"http://schemas.xmlsoap.org/soap/envelope/\" s:encodingStyle=\"http://schemas.xmlsoap.org/soap/encoding/\">"
 		"<s:Body><u:%s xmlns:u=\"%s\">%s</u:%s></s:Body></s:Envelope>",
-		action, renderer->service_type, arguments ? arguments : "", action);
+		action, service_type, arguments ? arguments : "", action);
 	if (n < 0 || (size_t)n >= sizeof(body)) return false;
-	snprintf(extra, sizeof(extra), "SOAPAction: \"%s#%s\"\r\n", renderer->service_type, action);
+	snprintf(extra, sizeof(extra), "SOAPAction: \"%s#%s\"\r\n", service_type, action);
 	http_req_t req = {.method = "POST", .extra_headers = extra, .body = body,
 		.body_len = strlen(body), .content_type = "text/xml; charset=\"utf-8\"", .allow_empty_body = true};
-	char *response = NULL;
+	char *received = NULL;
 	int status = 0;
-	bool ok = http_request(renderer->control_url, &req, &response, NULL, 16 * 1024, 8, &status);
-	free(response);
-	return ok && status >= 200 && status < 300;
+	bool ok = http_request(url, &req, &received, NULL, limit, 8, &status);
+	if (!ok || status < 200 || status >= 300) {
+		free(received);
+		return false;
+	}
+	if (response) *response = received;
+	else free(received);
+	return true;
+}
+
+static bool soap(const renderer_t *renderer, const char *action, const char *arguments) {
+	return soap_call(renderer->control_url, renderer->service_type, action, arguments, NULL, 16 * 1024);
 }
 
 static void *cast_worker(void *arg) {
@@ -498,15 +855,24 @@ static void *cast_worker(void *arg) {
 	target = renderers[choice];
 	pthread_mutex_unlock(&cast_lock);
 
+	// How this renderer wants the format spelled, asked of its own sink list
+	// (see choose_mime()).
+	const media_format_t *format = format_for_path(path);
+	char mime[MIME_MAX] = "application/octet-stream";
+	if (format) choose_mime(&target, format, mime, sizeof(mime));
+	char features[192];
+	dlna_features(format, features, sizeof(features));
+
 	pthread_mutex_lock(&media_lock);
-	snprintf(media_path, sizeof(media_path), "%s", path);
 	unsigned serial = ++token_sequence;
-	snprintf(media_token, sizeof(media_token), "%08x%08x", (unsigned)getpid(), serial ^ (unsigned)time(NULL));
-	char token[TOKEN_MAX]; snprintf(token, sizeof(token), "%s", media_token);
+	char token[TOKEN_MAX];
+	snprintf(token, sizeof(token), "%08x%08x", (unsigned)getpid(), serial ^ (unsigned)time(NULL));
 	pthread_mutex_unlock(&media_lock);
+	media_publish(path, token, format ? format->extension : "", mime, features);
 
 	char uri[URL_MAX];
-	if (snprintf(uri, sizeof(uri), "http://%s:%u/sonix/%s/track", ip, media_port, token) >= (int)sizeof(uri)) {
+	if (snprintf(uri, sizeof(uri), "http://%s:%u/sonix/%s/track%s", ip, media_port, token,
+				 format ? format->extension : "") >= (int)sizeof(uri)) {
 		set_message("Could not build the track URL"); goto done;
 	}
 	const char *base = strrchr(path, '/'); base = base ? base + 1 : path;
@@ -517,11 +883,15 @@ static void *cast_worker(void *arg) {
 	xml_escape(title_source, safe_title, sizeof(safe_title));
 	xml_escape(uri, safe_uri, sizeof(safe_uri));
 	char metadata[2048], args[7600];
-	const char *mime = mime_for_path(path);
+	// The fourth field of protocolInfo is the feature string, not a star: a
+	// DLNA renderer reads it (and contentFeatures.dlna.org) to decide whether
+	// it can play the track at all. The size lets a renderer that wants the
+	// whole file ahead of time know how much that is.
 	snprintf(metadata, sizeof(metadata),
 		"<DIDL-Lite xmlns=\"urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/\" xmlns:dc=\"http://purl.org/dc/elements/1.1/\" xmlns:upnp=\"urn:schemas-upnp-org:metadata-1-0/upnp/\">"
 		"<item id=\"0\" parentID=\"0\" restricted=\"1\"><dc:title>%s</dc:title><upnp:class>object.item.audioItem.musicTrack</upnp:class>"
-		"<res protocolInfo=\"http-get:*:%s:*\">%s</res></item></DIDL-Lite>", safe_title, mime, safe_uri);
+		"<res protocolInfo=\"http-get:*:%s:%s\" size=\"%llu\">%s</res></item></DIDL-Lite>",
+		safe_title, mime, features, (unsigned long long)st.st_size, safe_uri);
 	char safe_metadata[7000]; xml_escape(metadata, safe_metadata, sizeof(safe_metadata));
 	snprintf(args, sizeof(args), "<InstanceID>0</InstanceID><CurrentURI>%s</CurrentURI><CurrentURIMetaData>%s</CurrentURIMetaData>", safe_uri, safe_metadata);
 	set_message("Connecting to renderer…");
@@ -559,12 +929,7 @@ static void *stop_worker(void *arg) {
 	renderer_t *renderer = arg;
 	bool stopped = soap(renderer, "Stop", "<InstanceID>0</InstanceID>");
 	free(renderer);
-	if (stopped) {
-		pthread_mutex_lock(&media_lock);
-		media_token[0] = '\0';
-		media_path[0] = '\0';
-		pthread_mutex_unlock(&media_lock);
-	}
+	if (stopped) media_withdraw();
 	set_message(stopped ? "Stopped DLNA playback" : "Could not stop the renderer");
 	pthread_mutex_lock(&cast_lock); casting = false; pthread_mutex_unlock(&cast_lock);
 	return NULL;

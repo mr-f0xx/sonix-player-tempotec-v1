@@ -374,6 +374,22 @@ $(BUILD)/test_wifitransfer_server: $(WIFITRANSFER_SRC) $(ROOT)/src/system/net/we
 	@mkdir -p $(BUILD)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -DWT_PORT=0 -o $@ $(WIFITRANSFER_SRC) $(LDFLAGS) $(LDLIBS)
 
+# Casting to a renderer, against a real one: the Python side answers SSDP,
+# describes itself, takes the DIDL and then fetches the track the way a
+# television does -- ranges, DLNA headers, and a second connection while the
+# first is still reading. Only Wi-Fi's interface address is substituted.
+DLNACAST_SRC = test_dlna_cast.c $(ROOT)/src/system/remote/dlna_cast.c \
+               $(ROOT)/src/system/net/http.c $(ROOT)/src/system/net/tls.c \
+               $(ROOT)/src/system/core/config.c $(ROOT)/src/system/image/png_scaled.c
+.PHONY: dlnacast
+dlnacast: $(BUILD)/test_dlna_cast
+	python3 run_dlna_cast_tests.py $(BUILD)/test_dlna_cast
+
+$(BUILD)/test_dlna_cast: $(DLNACAST_SRC) $(ROOT)/src/system/remote/dlna_cast.h \
+                         $(ROOT)/src/system/net/http.h $(ROOT)/src/system/net/wifi.h
+	@mkdir -p $(BUILD)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ $(DLNACAST_SRC) $(LDFLAGS) $(LDLIBS)
+
 # Bluetooth's real A2DP-direction decision, startup wait policy and D-Bus
 # signal cache, with fake controller/process state. No radio or ALSA required.
 .PHONY: bluetooth btvolume

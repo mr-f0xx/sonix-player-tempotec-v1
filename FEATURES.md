@@ -211,7 +211,11 @@ a self-signed certificate), and HLS.
   other long press asks before it leaves, since that would silence the phone.
   Cover Flow stays shut.
 - **AirPlay** - the player appears as an AirPlay target.
-- **DLNA** - the player appears as a renderer.
+- **DLNA** - the player appears as a renderer, and casts the current track the
+  other way: **Wireless → DLNA → Cast to a DLNA renderer** finds the televisions
+  and speakers on the same Wi-Fi and plays the track on the one picked. The
+  file itself is served from the card, so the renderer seeks within it rather
+  than the phone or the player re-sending it.
 - **Wi-Fi** - scan and join the networks in the air, and hidden ones too:
   "Add hidden network" at the foot of the Wi-Fi page takes a name and
   passphrase typed by hand (blank for an open network) and probes for the

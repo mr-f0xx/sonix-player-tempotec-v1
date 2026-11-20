@@ -14,6 +14,7 @@ make -C sonix-player/tests readfile
 make -C sonix-player/tests bluetooth
 make -C sonix-player/tests btafh
 make -C sonix-player/tests wifi
+make -C sonix-player/tests dlnacast
 make -C sonix-player/tests basebuild
 make -C sonix-player/tests stock-prepare
 make -C sonix-player/tests peq-ui
