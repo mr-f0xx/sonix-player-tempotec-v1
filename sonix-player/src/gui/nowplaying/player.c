@@ -2495,11 +2495,12 @@ static void lyrics_progress_apply(int32_t progress) {
 	bool sleeve_changed = rest != (lyrics_progress == 0);
 	lyrics_progress = progress;
 	if (sleeve_changed && sheet_open) {
-		// The status bar is useful while the transport is covered. Restore the
-		// user's player setting as soon as the overlay is dismissed.
-		topbar_set_hidden(rest && !(layout_aam_now || player_status_bar));
-		back_btn_player_top_inset(rest ? (layout_aam_now ? aam_chevron_inset() : player_content_top())
-								 : (layout_aam_now ? aam_chevron_inset() : player_status_height));
+		// The status bar follows the same setting on the words as on the
+		// sleeve, so opening or dismissing the overlay changes neither it
+		// nor the chevron's place under it; only the column's geometry is
+		// re-measured in case the chevron moved for another reason.
+		topbar_set_hidden(!(layout_aam_now || player_status_bar));
+		back_btn_player_top_inset(layout_aam_now ? aam_chevron_inset() : player_content_top());
 		lyrics_overlay_geometry();
 	}
 	// The header badge makes way for the lyrics' search button and star.
@@ -4683,13 +4684,15 @@ static void apply_layout(void) {
 
 	// Album Art Max keeps the shell's status bar, and the chevron belongs under
 	// it rather than in it; every other arrangement hides the bar so artwork
-	// can reach the top edge. Only while the sheet is actually up: the setting
-	// can be changed from a page the player is not on.
+	// can reach the top edge, unless the user asked for it above the player.
+	// The words follow the same setting, so the overlay changes nothing here.
+	// Only while the sheet is actually up: the setting can be changed from a
+	// page the player is not on.
 	if (sheet_open) {
-		topbar_set_hidden(!(layout_aam_now || player_status_bar || lyrics_progress > 0));
+		topbar_set_hidden(!(layout_aam_now || player_status_bar));
 		player_status_background_apply();
 		player_status_color_apply();
-		back_btn_player_top_inset(layout_aam_now ? aam_chevron_inset() : (lyrics_progress > 0 ? player_status_height : player_content_top()));
+		back_btn_player_top_inset(layout_aam_now ? aam_chevron_inset() : player_content_top());
 		// And its stroke, not its button: the glyph is drawn with a third of its
 		// canvas empty on either side, so a chevron whose *button* starts where
 		// the star's does sits visibly further in. AAM_HEAD_END_PAD is the air
@@ -7118,11 +7121,12 @@ void player_sheet_open(bool animate) {
 	// traded for the sleeve, the bar's play/pause mark is the only thing
 	// saying which way the hardware key will go, and its row is where the
 	// chevron and the format line are aligned from. The chevron moves under
-	// it for the same reason (see apply_layout).
-	topbar_set_hidden(!(layout_aam_now || player_status_bar || lyrics_progress > 0));
+	// it for the same reason (see apply_layout). The words follow the same
+	// setting as the sleeve, so they change nothing here either.
+	topbar_set_hidden(!(layout_aam_now || player_status_bar));
 	player_status_background_apply();
 	player_status_color_apply();
-	back_btn_player_top_inset(layout_aam_now ? aam_chevron_inset() : (lyrics_progress > 0 ? player_status_height : player_content_top()));
+	back_btn_player_top_inset(layout_aam_now ? aam_chevron_inset() : player_content_top());
 	back_btn_player_ink_inset(layout_aam_now ? AAM_HEAD_END_PAD : 0);
 	back_btn_player_mode(true);
 	if (lyrics_progress > 0) { lyrics_overlay_geometry(); lyrics_find_sync(lyrics_progress == LYRICS_FULL); }
