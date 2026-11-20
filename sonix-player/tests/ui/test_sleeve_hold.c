@@ -50,15 +50,45 @@ static bool queue_page_on_open;
 
 void trackmenu_open_queue(void) {
 	opened++;
-	if (queue_page && queue_page_on_open) {
+	player_sheet_close(false); // as the real one does, wherever it is called from
+	if (queue_page_on_open) {
 		lv_screen_load(queue_page);
 	}
+}
+
+// Back on the player, as picking a track from the queue leaves it: the sheet is
+// up again, and the sleeve is where the next gesture finds it.
+static void back_to_player(void) {
+	// As player_sheet_open() leaves the page: shown again, with its own layout,
+	// since the close hid it and a hidden object takes no presses.
+	sheet_open = true;
+	lv_screen_load(player_screen);
+	lv_obj_set_hidden(player_screen, false);
+	lv_obj_update_layout(player_screen);
 }
 
 // Three things the player translation unit reaches that the queue has no
 // business touching. The gesture reads the queue's length, never its contents.
 static bool casting;
 bool dlna_owns_playback(void) { return casting; }
+
+// The rest of the panel the artwork is dragged by: the drag handler is the real
+// one, because it shares this press.
+const lv_font_t *fonts_lyrics(int size) { (void)size; return &font_ui_14; }
+bool theme_is_oled(void) { return false; }
+bool btreceiver_is_active(void) { return false; }
+void topbar_set_hidden(bool hidden) { (void)hidden; }
+void topbar_set_player_color(bool on, lv_color_t c) { (void)on; (void)c; }
+void topbar_set_player_frost(const lv_image_dsc_t *image) { (void)image; }
+void topbar_set_player_ground(bool on, lv_color_t c) { (void)on; (void)c; }
+void topbar_set_player_palette(bool on, lv_color_t accent) { (void)on; (void)accent; }
+void back_btn_sync_visibility(void) {}
+void back_btn_translate(int32_t x) { (void)x; }
+void back_btn_player_mode(bool on) { (void)on; }
+void back_btn_player_top_inset(int v) { (void)v; }
+void back_btn_player_ink_inset(int v) { (void)v; }
+void medialist_refresh_visible(void) {}
+void switch_screen_no_history(lv_obj_t *screen) { lv_screen_load(screen); }
 void library_index_close(library_index_t *ix) { (void)ix; }
 void library_queue_save_album(const char *album) { (void)album; }
 
@@ -95,11 +125,19 @@ static void tick(lv_indev_t *indev, int ms) {
 // changed is not the sleeve: what it does there is the point of the queue-page
 // step in main().
 static void hold(lv_indev_t *indev, int x, int y) {
+	int before = opened;
 	read_at(indev, x, y, LV_INDEV_STATE_PRESSED);
 	tick(indev, HOLD_SLEEVE_MS / 2);
 	tick(indev, HOLD_SLEEVE_MS / 2 + 20);
 	assert(sleeve_hold_timer == NULL);
 	read_at(indev, x, y, LV_INDEV_STATE_RELEASED);
+	if (opened != before) {
+		// A hold that opened the queue left the player down with it. The press
+		// was still on the sleeve when the page changed, and the same press is
+		// watched by the drag that puts the player away: the lift must not read
+		// to it as a swipe that puts the player back over the queue.
+		assert(!sheet_open);
+	}
 }
 
 static void press_and_lift(lv_indev_t *indev, int x, int y) {
@@ -156,6 +194,7 @@ int main(int argc, char **argv) {
 	lv_obj_set_pos(cover_panel, 0, 0);
 	// The same attachment player_init() makes on the panel it builds.
 	sleeve_hold_attach(cover_panel);
+	player_sheet_attach_drag(cover_panel, false);
 
 	// The panel is the page's own body and takes presses; the sleeve frame over
 	// it is deliberately not clickable (see player_init), so presses on the
@@ -197,18 +236,34 @@ int main(int argc, char **argv) {
 	hold_centre(indev);
 	assert(opened == 1);
 
+	// The queue took the player down with it: a second press is on the queue and
+	// not on the sleeve, which is what the lift of the first hold must leave.
+	// Picking a track there brings the player back, and this is that.
+	back_to_player();
+
 	// A tap on the picture is still a tap, and not another hold.
 	press_and_lift(indev, centre_x, centre_y);
 	assert(opened == 1);
 
-	// A press that wanders is a drag -- the lyric swipe, or pushing the player
-	// away -- and never a hold.
+	// A press that wanders is a drag and never a hold. Downwards here, which is
+	// the one direction nothing else on this page wants -- a sideways drag is
+	// the sheet's or the words', and either may well close the player.
+	read_at(indev, centre_x, centre_y, LV_INDEV_STATE_PRESSED);
+	read_at(indev, centre_x, centre_y + HOLD_SLOP_PX + 8, LV_INDEV_STATE_PRESSED);
+	tick(indev, HOLD_SLEEVE_MS + 40);
+	assert(sleeve_hold_timer == NULL);
+	read_at(indev, centre_x, centre_y + HOLD_SLOP_PX + 8, LV_INDEV_STATE_RELEASED);
+	assert(opened == 1);
+
+	// The same sideways, where the sheet's own drag takes the press: the hold
+	// drops out of its way rather than opening the queue on the way past.
 	read_at(indev, centre_x, centre_y, LV_INDEV_STATE_PRESSED);
 	read_at(indev, centre_x + HOLD_SLOP_PX + 8, centre_y, LV_INDEV_STATE_PRESSED);
 	tick(indev, HOLD_SLEEVE_MS + 40);
 	assert(sleeve_hold_timer == NULL);
 	read_at(indev, centre_x + HOLD_SLOP_PX + 8, centre_y, LV_INDEV_STATE_RELEASED);
 	assert(opened == 1);
+	back_to_player();
 
 	// Off the picture: the panel is wider than the sleeve on the V1, and a
 	// press beside it belongs to whatever else is there.
@@ -222,6 +277,7 @@ int main(int argc, char **argv) {
 
 	// A book has chapters instead of a queue, and a phone casting to the
 	// player keeps the queue on the phone: neither opens it.
+	back_to_player();
 	audiobook_mode = true;
 	assert(!sleeve_hold_queue_there());
 	hold_centre(indev);
@@ -234,12 +290,14 @@ int main(int argc, char **argv) {
 	assert(opened == 1);
 	casting = false;
 
+	back_to_player();
 	// The words are over the page: the press belongs to them.
 	lyrics_progress = 1;
 	hold_centre(indev);
 	assert(opened == 1);
 	lyrics_progress = 0;
 
+	back_to_player();
 	// Album Art Max has the double tap on the same picture, and its strip
 	// carries the queue count already: the hold keeps out of its way.
 	layout_aam_now = true;
@@ -247,6 +305,7 @@ int main(int argc, char **argv) {
 	assert(opened == 1);
 	layout_aam_now = false;
 
+	back_to_player();
 	// Studio draws a square of its own, and the frame's rectangle is not where
 	// the picture is: a hold there is a hold on nothing.
 	layout_studio_now = true;
@@ -262,6 +321,7 @@ int main(int argc, char **argv) {
 	hold(indev, 80, 120); // Studio's own square
 	assert(opened == 2);
 
+	back_to_player();
 	lv_obj_delete(studio_empty);
 	studio_empty = NULL;
 	layout_studio_now = false;
@@ -281,6 +341,7 @@ int main(int argc, char **argv) {
 	lv_obj_set_clickable(queue_row, true);
 	lv_obj_update_layout(queue_page);
 
+	back_to_player();
 	queue_page_on_open = true;
 	hold_centre(indev);
 	queue_page_on_open = false;
@@ -289,8 +350,9 @@ int main(int argc, char **argv) {
 	// And the next gesture on that page is a gesture of its own.
 	press_and_lift(indev, centre_x, centre_y);
 	assert(rows_tapped == 1);
-	lv_screen_load(player_screen);
+	queue_row = NULL;
 
+	back_to_player();
 	// Poster's picture reaches past the foot of the panel, where the scrub bar
 	// is: only what is seen of it above the deck holds.
 	layout_poster_now = true;
@@ -308,6 +370,7 @@ int main(int argc, char **argv) {
 	lv_obj_center(cover_art_group);
 	lv_obj_update_layout(player_screen);
 
+	back_to_player();
 	// A press that is never reported as over -- the screen went dark under the
 	// finger, the words came up over it -- leaves the hold armed, and the reset
 	// the indev sends then is what takes it away: nothing fires onto a page

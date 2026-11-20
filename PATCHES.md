@@ -5153,3 +5153,29 @@ pointer and timer dispatch rather than hand-sent events: the hold firing, the
 slop dropping a wandering finger, each of the guards holding, and the release
 after a fired hold leaving the row under it alone. `FEATURES.md` and the tests
 README describe the gesture.
+
+### The player came back over the queue
+
+On the device the hold did two things at once: the queue opened, and the player
+slid back over it, so the queue was only visible for an instant. Both came from
+the finger still being down when the hold fired, through two different routes.
+
+The player's panel is watched by the swipe that puts the sheet away, and that
+handler had been following the same press from the start. `trackmenu_open_queue()`
+takes the sheet down itself, and the press then ended -- so the swipe handler saw
+the end of a press it was still tracking and took it for a completed swipe,
+which is exactly the gesture that closes the player and puts it back. And the
+hold's own `lv_indev_wait_release()`, which exists to stop the lift landing on a
+queue row, was called through `lv_indev_active()`: a timer callback runs outside
+LVGL's input processing, where that is NULL, so the call never happened at all.
+The flag was there; the guard it was meant to set was not.
+
+The device the finger went down on is now remembered at press time and told to
+wait for a release when the hold fires, and the swipe handler stands down for
+that one press: `sheet_leaving_for_queue` makes it drop the end of the gesture
+rather than read it as a swipe, and it clears the flag itself, since an end of
+press is what it was waiting for.
+
+`tests/ui/test_sleeve_hold.c` now attaches the real `player_sheet_attach_drag()`
+alongside the hold, so the two share a press the way they do on the device, and
+every hold it fires asserts that the sheet is still down afterwards.

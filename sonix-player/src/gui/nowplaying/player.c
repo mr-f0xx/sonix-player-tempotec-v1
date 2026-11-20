@@ -6580,6 +6580,18 @@ static void aam_sleeve_tap_cb(lv_event_t *e) {
 static lv_timer_t *sleeve_hold_timer;
 static lv_point_t sleeve_hold_from;
 
+// The device the finger went down on. A timer callback runs outside LVGL's
+// input processing, where lv_indev_active() is NULL, so the device that has to
+// be told the gesture is over is remembered here instead.
+static lv_indev_t *sleeve_hold_indev;
+
+// Set while a held sleeve is taking the sheet down to open the queue. The
+// panel's drag handler listens to the same press, and the end of that press
+// reads to it as a finished swipe, which puts the player straight back over the
+// queue that has just opened. It stands down while this is set, and is the one
+// that clears it: an end of press is exactly what it is waiting for.
+static bool sheet_leaving_for_queue;
+
 // Whether the queue is worth opening at all. It is the ellipsis's own question
 // asked a step earlier: a row the menu does not carry is a page the hold must
 // not open either. A book has chapters instead of a queue, a phone casting to
@@ -6629,26 +6641,30 @@ static void sleeve_hold_done(void) {
 		lv_timer_delete(sleeve_hold_timer); // a timer may delete itself here
 		sleeve_hold_timer = NULL;
 	}
+	sleeve_hold_indev = NULL;
 }
 
-// The rest of the gesture is dropped. LVGL looks for a pressed object again on
-// every frame a finger is held, so one still down after the page has changed
-// under it can find the queue's own rows and lift onto one of them -- the
-// single tap the hold was there to replace. A screen load resets the input
-// device on its own and that is what does the work here; this does not depend
-// on it.
-static void sleeve_hold_swallow_release(void) {
-	lv_indev_t *indev = lv_indev_active();
-	if (indev) {
-		lv_indev_wait_release(indev);
-	}
-}
-
+// The hold fired: the gesture is over, and the finger is still down.
+//
+// Left alone, that finger is two problems. LVGL looks for a pressed object
+// again on every frame a finger is held, so the lift would land on one of the
+// queue's own rows -- the single tap the hold was there to replace. And the
+// panel's drag handler has been listening to this same press all along, so the
+// end of it reads as a finished swipe, which is the gesture that puts the
+// player away: the queue opens and the player slides straight back over it.
+//
+// lv_indev_active() is no help here: a timer callback runs outside the input
+// processing, where it is NULL, so the device is the one remembered at press
+// time. Telling it to wait for a release drops the rest of this gesture on the
+// spot -- and it is what ends the press for the drag handler too, which is told
+// in so many words not to read that end as a swipe (see sheet_drag_cb).
 static void sleeve_hold_fire_cb(lv_timer_t *timer) {
 	(void)timer;
 	sleeve_hold_done(); // one shot: held once is asked once
-	printf("player: sleeve held; opening the queue\n");
-	sleeve_hold_swallow_release();
+	sheet_leaving_for_queue = true;
+	if (sleeve_hold_indev) {
+		lv_indev_wait_release(sleeve_hold_indev);
+	}
 	trackmenu_open_queue();
 }
 
@@ -6664,6 +6680,7 @@ static void sleeve_hold_cb(lv_event_t *e) {
 	lv_event_code_t code = lv_event_get_code(e);
 
 	if (code == LV_EVENT_PRESSED) {
+		sheet_leaving_for_queue = false; // a new gesture, whatever the last one did
 		sleeve_hold_done(); // a gesture that never reported its end
 		lv_indev_t *indev = lv_indev_active();
 		if (!indev || !sheet_open || lyrics_progress > 0 || layout_aam_now || !sleeve_hold_queue_there()) {
@@ -6673,6 +6690,7 @@ static void sleeve_hold_cb(lv_event_t *e) {
 		if (!sleeve_hold_on_art(&sleeve_hold_from)) {
 			return;
 		}
+		sleeve_hold_indev = indev;
 		sleeve_hold_timer = lv_timer_create(sleeve_hold_fire_cb, HOLD_SLEEVE_MS, NULL);
 		if (sleeve_hold_timer) {
 			lv_timer_set_repeat_count(sleeve_hold_timer, 1);
@@ -7278,6 +7296,7 @@ static bool dragging;
 // does not also select it.
 static bool drag_committed;
 
+
 static void sheet_anim_x_cb(void *obj, int32_t value) {
 	lv_obj_set_x((lv_obj_t *)obj, (int)value);
 	// The chevron belongs to the sheet while it moves: ride its edge, and
@@ -7436,6 +7455,8 @@ static void sheet_drag_cb(lv_event_t *e) {
 	}
 
 	if (code == LV_EVENT_PRESSED) {
+		// A new press: whatever the last one turned into, it is over.
+		sheet_leaving_for_queue = false;
 		if (opening == sheet_open) {
 			return; // dragging the wrong way for the current state
 		}
@@ -7490,6 +7511,16 @@ static void sheet_drag_cb(lv_event_t *e) {
 
 	if (code == LV_EVENT_RELEASED || code == LV_EVENT_PRESS_LOST) {
 		dragging = false;
+		if (sheet_leaving_for_queue) {
+			// This press was a held sleeve, and the queue is what it opened. The
+			// end of it is not a swipe: the player stays down and the page the
+			// hold asked for stays up. The flag goes with the gesture, and the
+			// drag flag must not outlive it either -- the queue's rows are what
+			// the finger is over now, not the artwork.
+			sheet_leaving_for_queue = false;
+			lv_async_call(drag_committed_clear_cb, NULL);
+			return;
+		}
 
 		int travelled = opening ? -dx : dx;
 		bool commit = travelled > (sheet_width / SHEET_COMMIT_FRACTION);
