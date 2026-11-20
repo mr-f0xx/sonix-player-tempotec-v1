@@ -174,19 +174,25 @@ lv_font_t font_ui_32;
 lv_font_t font_ui_36_bold;
 lv_font_t font_ui_64_bold;
 lv_font_t font_ui_72;
+static lv_font_t lyrics_fonts[FONTS_TEXT_COUNT];
 
 typedef struct {
 	lv_font_t *font;
 	int size;
 	bool bold;
+	int fixed_v1_size; // nonzero for sizes that do not follow the UI scale
 } ui_font_t;
 
 static const ui_font_t ui_fonts[] = {
-	{&font_ui_14, 14, false}, {&font_ui_16, 16, false}, {&font_ui_18, 18, false},
-	{&font_ui_20, 20, false}, {&font_ui_22, 22, false}, {&font_ui_24, 24, false},
-	{&font_ui_26, 26, false}, {&font_ui_28, 28, false}, {&font_ui_32, 32, false},
-	{&font_ui_72, 72, false}, {&font_ui_20_bold, 20, true}, {&font_ui_22_bold, 22, true}, {&font_ui_24_bold, 24, true}, {&font_ui_36_bold, 36, true},
-	{&font_ui_64_bold, 64, true},
+	{&font_ui_14, 14, false, 0}, {&font_ui_16, 16, false, 0}, {&font_ui_18, 18, false, 0},
+	{&font_ui_20, 20, false, 0}, {&font_ui_22, 22, false, 0}, {&font_ui_24, 24, false, 0},
+	{&font_ui_26, 26, false, 0}, {&font_ui_28, 28, false, 0}, {&font_ui_32, 32, false, 0},
+	{&font_ui_72, 72, false, 0},
+	{&font_ui_20_bold, 20, true, 0}, {&font_ui_22_bold, 22, true, 0}, {&font_ui_24_bold, 24, true, 0},
+	{&font_ui_36_bold, 36, true, 0}, {&font_ui_64_bold, 64, true, 0},
+	{&lyrics_fonts[FONTS_TEXT_SMALL], 21, false, 15},
+	{&lyrics_fonts[FONTS_TEXT_NORMAL], 26, false, 18},
+	{&lyrics_fonts[FONTS_TEXT_LARGE], 32, false, 23},
 };
 
 #define UI_FONT_COUNT (sizeof(ui_fonts) / sizeof(ui_fonts[0]))
@@ -244,7 +250,15 @@ static int tempotec_drawn_size(int size, int setting) {
 	return compact;
 }
 
-static int drawn_size(int size, int setting) {
+const lv_font_t *fonts_lyrics(int size) {
+	return &lyrics_fonts[size >= 0 && size < FONTS_TEXT_COUNT ? size : FONTS_TEXT_NORMAL];
+}
+
+static int drawn_size(const ui_font_t *ui, int setting) {
+	int size = ui->size;
+	if (ui->fixed_v1_size) {
+		return bp_is_tempotec_v1() ? ui->fixed_v1_size : size;
+	}
 	if (bp_is_tempotec_v1()) {
 		return tempotec_drawn_size(size, setting);
 	}
@@ -768,11 +782,22 @@ static void free_font_set(font_set_t *set) {
 static bool build_font_set(font_set_t *set, int setting, bool reuse_current) {
 	for (size_t i = 0; i < UI_FONT_COUNT; i++) {
 		const ui_font_t *ui = &ui_fonts[i];
-		int size = drawn_size(ui->size, setting);
+		int size = drawn_size(ui, setting);
 		bool borrowed = false;
-		if (reuse_current) {
+		// The fixed lyrics sizes can share an already-open UI chain of the
+		// same size and weight, even in the first set built for a face.
+		if (ui->fixed_v1_size) {
+			for (size_t j = 0; j < i; j++) {
+				if (ui_fonts[j].bold == ui->bold && drawn_size(&ui_fonts[j], setting) == size) {
+					set->fonts[i] = set->fonts[j];
+					borrowed = true;
+					break;
+				}
+			}
+		}
+		if (!borrowed && reuse_current) {
 			for (int other = 0; other < FONTS_TEXT_COUNT; other++) {
-				if (current_sets[other].built && drawn_size(ui->size, other) == size) {
+				if (current_sets[other].built && drawn_size(ui, other) == size) {
 					set->fonts[i] = current_sets[other].fonts[i];
 					borrowed = true;
 					break;

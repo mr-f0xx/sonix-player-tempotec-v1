@@ -2042,12 +2042,13 @@ static bool lyrics_now;		// on screen: allowed, and the file has words
 static lv_obj_t *lyrics_pane; // full-player overlay: the column and the note
 static lv_obj_t *lyrics_overlay_bg;
 static lv_obj_t *lyrics_head; // the title and artist at the top while the words are up
-static lv_obj_t *lyrics_head_col;
 static lv_obj_t *lyrics_head_title;
 static lv_obj_t *lyrics_head_artist;
 static lv_obj_t *lyrics_find_btn;
 static lv_obj_t *lyrics_find_icon;
-static lv_obj_t *lyrics_find_narrowed; // the names' column, made room in
+static lv_obj_t *lyrics_size_btn;
+static lv_obj_t *lyrics_size_icon;
+static int lyrics_text_size;
 static cover_image_t lyrics_screen_pic; // the blurred sleeve at the shape of the screen
 static unsigned lyrics_bg_generation;
 static int32_t lyrics_progress; // 0 the sleeve, LYRICS_FULL the words
@@ -2073,7 +2074,8 @@ static int lyrics_view_h;
 // Timed lines have room above the first and below the last, so either can be
 // brought to the middle; untimed ones read from the top.
 static void lyrics_pad(void) {
-	int around = lyrics_cur.synced ? LV_MAX(0, lyrics_view_h / 2 - 20) : LYRICS_FADE_PX / 2;
+	int line_h = fonts_lyrics(lyrics_text_size)->line_height;
+	int around = lyrics_cur.synced ? LV_MAX(0, (lyrics_view_h - line_h) / 2) : LYRICS_FADE_PX / 2;
 	lv_obj_set_style_pad_top(lyrics_view, around, 0);
 	lv_obj_set_style_pad_bottom(lyrics_view, lyrics_cur.synced ? around : LYRICS_FADE_PX, 0);
 }
@@ -2150,13 +2152,14 @@ static void lyrics_fill(void) {
 	}
 	lyrics_note_show(NULL);
 
+	const lv_font_t *font = fonts_lyrics(lyrics_text_size);
 	for (int i = 0; i < lyrics_cur.count; i++) {
 		lv_obj_t *line = lv_label_create(lyrics_view);
 		lv_label_set_text(line, lyrics_cur.lines[i].text[0] ? lyrics_cur.lines[i].text : " ");
 		lv_label_set_long_mode(line, LV_LABEL_LONG_WRAP);
 		lv_obj_set_width(line, lv_pct(100));
 		lv_obj_set_style_text_align(line, LV_TEXT_ALIGN_CENTER, 0);
-		lv_obj_set_style_text_font(line, &font_ui_26, 0);
+		lv_obj_set_style_text_font(line, font, 0);
 		lv_obj_set_style_text_opa(line, lyrics_cur.synced ? LYRICS_DIM_OPA : LV_OPA_COVER, 0);
 		lv_obj_set_event_bubble(line, true);
 		lv_obj_set_clickable(line, false);
@@ -2245,7 +2248,7 @@ static void lyrics_request(const device_state_t *state) {
 
 // Brings `label` to the middle of the column, always in the same short time
 // whatever the distance, so the words step up like a typewriter's paper.
-static void lyrics_centre(lv_obj_t *label) {
+static void lyrics_centre(lv_obj_t *label, bool animate) {
 	lv_obj_update_layout(lyrics_view);
 	lv_area_t line_area;
 	lv_area_t view_area;
@@ -2258,6 +2261,10 @@ static void lyrics_centre(lv_obj_t *label) {
 	}
 
 	lv_anim_delete(lyrics_view, lyrics_scroll_exec);
+	if (!animate) {
+		lv_obj_scroll_to_y(lyrics_view, to, LV_ANIM_OFF);
+		return;
+	}
 	if (to == from) {
 		return;
 	}
@@ -2323,16 +2330,17 @@ static void lyrics_follow(double seconds) {
 	lyrics_user_until = 0;
 	lyrics_centred = true;
 	if (line >= 0 && line < (int)lv_obj_get_child_count(lyrics_view)) {
-		lyrics_centre(lv_obj_get_child(lyrics_view, line));
+		lyrics_centre(lv_obj_get_child(lyrics_view, line), true);
 	} else {
-		lyrics_centre(lv_obj_get_child(lyrics_view, 0));
+		lyrics_centre(lv_obj_get_child(lyrics_view, 0), true);
 	}
 }
 
 static void lyrics_scroll_cb(lv_event_t *e) {
 	(void)e;
 	// A finger, not the column following the music: that scrolls from a timer.
-	if (lv_indev_active()) {
+	lv_indev_t *indev = lv_indev_active();
+	if (indev && lv_indev_get_scroll_obj(indev) == lyrics_view) {
 		lv_anim_delete(lyrics_view, lyrics_scroll_exec);
 		lyrics_user_until = lv_tick_get() + LYRICS_USER_HOLD_MS;
 		lyrics_centred = false;
@@ -2378,6 +2386,7 @@ static void lyrics_look(bool on) {
 	lv_obj_set_style_text_color(lyrics_view, ink, 0);
 	lv_obj_set_style_text_color(lyrics_note, ink, 0);
 	if (lyrics_find_icon) lv_obj_set_style_image_recolor(lyrics_find_icon, ink, 0);
+	if (lyrics_size_icon) lv_obj_set_style_image_recolor(lyrics_size_icon, ink, 0);
 }
 
 // What travels with the sleeve: it goes out to the left as the words come in.
@@ -2392,10 +2401,9 @@ static void lyrics_shift(lv_obj_t *obj, int32_t x) {
 	}
 }
 
-// The button at the top right while the words are all the way in: it looks them
-// up on LRCLIB again, to pick others in their place. Beside the star or the
-// ellipsis where an arrangement keeps one up there, in the corner otherwise.
-#define LYRICS_FIND_BTN bp_pick(COMPACT_CORNER_BTN, 56)
+// Lyrics header controls are visible only once the page is all the way in.
+#define LYRICS_HEADER_BTN bp_pick(COMPACT_CORNER_BTN, 56)
+#define LYRICS_HEADER_HIT_SLOP bp_pick(COMPACT_CORNER_BTN_EXT_CLICK, CORNER_BTN_EXT_CLICK)
 
 // Alternative (Studio) already has an ellipsis in the right-hand slot. Move
 // it inboard of whichever mark takes that corner. Limit the names to the room
@@ -2435,43 +2443,26 @@ static void hires_present(bool show, bool back_right) {
 	studio_hires_fit();
 }
 
-// The names at the top give up the button's width on both sides, so a long
-// title stays centred and stops short of it.
-static void lyrics_find_make_room(lv_obj_t *col) {
-	if (col == lyrics_find_narrowed) {
-		return;
-	}
-	if (lyrics_find_narrowed) {
-		int32_t w = lv_obj_get_style_width(lyrics_find_narrowed, 0);
-		lv_obj_set_width(lyrics_find_narrowed, w + 2 * LYRICS_FIND_BTN);
-	}
-	if (col) {
-		int32_t w = lv_obj_get_style_width(col, 0);
-		lv_obj_set_width(col, w - 2 * LYRICS_FIND_BTN);
-	}
-	lyrics_find_narrowed = col;
-}
-
-static void lyrics_find_sync(bool full) {
+static void lyrics_header_sync(bool full) {
 	if (!lyrics_find_btn) {
 		return;
 	}
 	bool show = full && lyrics_now;
+	lv_obj_set_hidden(lyrics_find_btn, !show);
+	lv_obj_set_hidden(lyrics_size_btn, !show);
 	if (!show) {
-		lv_obj_set_hidden(lyrics_find_btn, true);
-		lyrics_find_make_room(NULL);
 		return;
 	}
 	// The chevron is on the right in Sticker (unless a hi-res badge moved it
-	// back to the left). The search button takes the opposite corner.
+	// back to the left). The search button takes the opposite corner, with
+	// the text size button inboard. Leave room for both expanded hit areas.
 	bool back_right = layout_sticker_now && hires_header_pos == PLAYER_HIRES_OFF;
-	int btn_x = back_right ? STUDIO_INFO_MARGIN : lv_obj_get_width(player_screen) - STUDIO_INFO_MARGIN - LYRICS_FIND_BTN;
-	int btn_y = back_btn_centre_y() - lv_obj_get_y(player_screen) - LYRICS_FIND_BTN / 2;
-	lv_obj_set_pos(lyrics_find_btn, btn_x, btn_y);
-	lyrics_find_make_room(NULL);
-	lv_obj_set_style_image_recolor(lyrics_find_icon, lyrics_backdrop() ? lv_color_white() : theme()->text_primary, 0);
-	lv_obj_set_hidden(lyrics_find_btn, false);
-	lv_obj_move_foreground(lyrics_find_btn);
+	int size = LYRICS_HEADER_BTN;
+	int x = back_right ? STUDIO_INFO_MARGIN : lv_obj_get_width(player_screen) - STUDIO_INFO_MARGIN - size;
+	int y = back_btn_centre_y() - lv_obj_get_y(player_screen) - size / 2;
+	int step = size + 2 * LYRICS_HEADER_HIT_SLOP;
+	lv_obj_set_pos(lyrics_find_btn, x, y);
+	lv_obj_set_pos(lyrics_size_btn, x + (back_right ? step : -step), y);
 }
 
 static int aam_chevron_inset(void);
@@ -2508,7 +2499,7 @@ static void lyrics_progress_apply(int32_t progress) {
 	if (sleeve_changed && hires_header_pos != PLAYER_HIRES_OFF) {
 		hires_present(rest, rest && hires_header_pos == PLAYER_HIRES_LEFT);
 	}
-	lyrics_find_sync(progress == LYRICS_FULL);
+	lyrics_header_sync(progress == LYRICS_FULL);
 	int32_t travel = lv_obj_get_width(player_screen);
 	if (rest) {
 		lv_obj_set_hidden(lyrics_pane, true);
@@ -2518,9 +2509,6 @@ static void lyrics_progress_apply(int32_t progress) {
 	}
 	lv_obj_set_x(lyrics_pane, lyrics_pane_x + travel * (LYRICS_FULL - progress) / LYRICS_FULL);
 	if (sleeve_changed) lyrics_look(!rest);
-	// Search is a sibling so it can occupy the header above the column.
-	if (progress == LYRICS_FULL && lyrics_find_btn && !lv_obj_is_hidden(lyrics_find_btn))
-		lv_obj_move_foreground(lyrics_find_btn);
 }
 
 // While the page moves, the fade at its edges is left off: it is drawn by
@@ -2898,6 +2886,63 @@ static void lyrics_find_cb(lv_event_t *e) {
 	}
 }
 
+// Reflow the labels in place: the highlight, timestamps and any manual
+// scroll hold belong to the same lines before and after the change.
+static void lyrics_size_pick(void *user) {
+	int size = (int)(intptr_t)user;
+	if (size == lyrics_text_size) {
+		return;
+	}
+	lyrics_text_size = size;
+	config_set_int("ui", "lyrics_text_size", size);
+	config_save();
+
+	lv_anim_delete(lyrics_view, lyrics_scroll_exec);
+	lv_obj_update_layout(lyrics_view);
+	uint32_t count = lv_obj_get_child_count(lyrics_view);
+	bool following = lyrics_cur.synced && !lyrics_user_until;
+	lv_obj_t *anchor = NULL;
+	lv_area_t view_area, line_area;
+	int32_t anchor_y = 0;
+	const lv_font_t *font = fonts_lyrics(size);
+	lv_obj_get_coords(lyrics_view, &view_area);
+	for (uint32_t i = 0; i < count; i++) {
+		lv_obj_t *line = lv_obj_get_child(lyrics_view, i);
+		if (!following && !anchor) {
+			lv_obj_get_coords(line, &line_area);
+			if (line_area.y2 >= view_area.y1) {
+				anchor = line;
+				anchor_y = line_area.y1;
+			}
+		}
+		lv_obj_set_style_text_font(line, font, 0);
+	}
+	lyrics_pad();
+	lv_obj_update_layout(lyrics_view);
+	if (following && count > 0) {
+		lyrics_centre(lv_obj_get_child(lyrics_view, LV_MAX(0, lyrics_lit)), false);
+	} else if (anchor) {
+		lv_obj_get_coords(anchor, &line_area);
+		int32_t scroll_y = lv_obj_get_scroll_y(lyrics_view) + line_area.y1 - anchor_y;
+		lv_obj_scroll_to_y(lyrics_view, scroll_y, LV_ANIM_OFF);
+	}
+}
+
+static void lyrics_size_cb(lv_event_t *e) {
+	if (player_sheet_drag_active()) {
+		return;
+	}
+	popover_item_t items[] = {
+		{.label = "appearance_text_small", .action = lyrics_size_pick,
+		 .user = (void *)(intptr_t)FONTS_TEXT_SMALL, .checked = lyrics_text_size == FONTS_TEXT_SMALL},
+		{.label = "appearance_text_normal", .action = lyrics_size_pick,
+		 .user = (void *)(intptr_t)FONTS_TEXT_NORMAL, .checked = lyrics_text_size == FONTS_TEXT_NORMAL},
+		{.label = "appearance_text_large", .action = lyrics_size_pick,
+		 .user = (void *)(intptr_t)FONTS_TEXT_LARGE, .checked = lyrics_text_size == FONTS_TEXT_LARGE},
+	};
+	popover_show(lv_event_get_current_target(e), items, sizeof(items) / sizeof(items[0]));
+}
+
 // The swipe that pulls the page in (on the sleeve, right to left) or pushes it
 // out (on the words, left to right). `opening` is the user data. Sideways
 // only: a movement that reads as vertical is the column being scrolled, and
@@ -3031,7 +3076,31 @@ static void lyrics_tap_cb(lv_event_t *e) {
 	}
 }
 
+static lv_obj_t *lyrics_header_button(const lv_image_dsc_t *src, int scale, lv_event_cb_t cb, lv_obj_t **icon) {
+	lv_obj_t *btn = lv_btn_create(lyrics_pane);
+	lv_obj_set_size(btn, LYRICS_HEADER_BTN, LYRICS_HEADER_BTN);
+	lv_obj_set_style_bg_opa(btn, LV_OPA_TRANSP, 0);
+	lv_obj_set_style_shadow_width(btn, 0, 0);
+	lv_obj_set_style_border_width(btn, 0, 0);
+	lv_obj_set_ext_click_area(btn, LYRICS_HEADER_HIT_SLOP);
+	lv_obj_add_event_cb(btn, cb, LV_EVENT_CLICKED, NULL);
+	lv_obj_set_hidden(btn, true);
+	*icon = lv_image_create(btn);
+	lv_image_set_src(*icon, src);
+	lv_image_set_scale(*icon, scale);
+	lv_obj_add_style(*icon, &theme_style_icon, 0);
+	lv_obj_set_style_image_recolor_opa(*icon, LV_OPA_COVER, 0);
+	lv_obj_center(*icon);
+	return btn;
+}
+
+static void lyrics_size_load(void) {
+	long size = config_get_int("ui", "lyrics_text_size", FONTS_TEXT_NORMAL);
+	lyrics_text_size = size >= 0 && size < FONTS_TEXT_COUNT ? (int)size : FONTS_TEXT_NORMAL;
+}
+
 static void lyrics_build(void) {
+	lyrics_size_load();
 	lyrics_pane = lv_obj_create(player_screen);
 	lv_obj_remove_style_all(lyrics_pane);
 	lv_obj_set_ignore_layout(lyrics_pane, true);
@@ -3081,7 +3150,6 @@ static void lyrics_build(void) {
 	lv_obj_set_hidden(lyrics_head, true);
 
 	lv_obj_t *col = lv_obj_create(lyrics_head);
-	lyrics_head_col = col;
 	lv_obj_remove_style_all(col);
 	lv_obj_set_size(col, cover_box_w - 2 * STUDIO_INFO_MARGIN - 2 * STUDIO_HEAD_SIDE_ROOM, LV_SIZE_CONTENT);
 	lv_obj_align(col, LV_ALIGN_CENTER, 0, 0);
@@ -3105,21 +3173,8 @@ static void lyrics_build(void) {
 	lv_obj_set_style_text_color(lyrics_head_artist, lv_color_make(200, 200, 200), 0);
 	scrolltext_apply(lyrics_head_artist);
 
-	lyrics_find_btn = lv_btn_create(player_screen);
-	lv_obj_set_ignore_layout(lyrics_find_btn, true);
-	lv_obj_set_size(lyrics_find_btn, LYRICS_FIND_BTN, LYRICS_FIND_BTN);
-	lv_obj_set_style_bg_opa(lyrics_find_btn, LV_OPA_TRANSP, 0);
-	lv_obj_set_style_shadow_width(lyrics_find_btn, 0, 0);
-	lv_obj_set_style_border_width(lyrics_find_btn, 0, 0);
-	lv_obj_set_ext_click_area(lyrics_find_btn, bp_pick(COMPACT_CORNER_BTN_EXT_CLICK, CORNER_BTN_EXT_CLICK));
-	lv_obj_add_event_cb(lyrics_find_btn, lyrics_find_cb, LV_EVENT_CLICKED, NULL);
-	lv_obj_set_hidden(lyrics_find_btn, true);
-	lyrics_find_icon = lv_image_create(lyrics_find_btn);
-	lv_image_set_src(lyrics_find_icon, &icon_lyrics_search);
-	lv_image_set_scale(lyrics_find_icon, bp_pick(192, 256));
-	lv_obj_add_style(lyrics_find_icon, &theme_style_icon, 0);
-	lv_obj_set_style_image_recolor_opa(lyrics_find_icon, LV_OPA_COVER, 0);
-	lv_obj_center(lyrics_find_icon);
+	lyrics_find_btn = lyrics_header_button(&icon_lyrics_search, bp_pick(192, 256), lyrics_find_cb, &lyrics_find_icon);
+	lyrics_size_btn = lyrics_header_button(&icon_ebook_font, bp_pick(140, 186), lyrics_size_cb, &lyrics_size_icon);
 
 	// The sleeve is where the page is pulled in from.
 	lv_obj_add_event_cb(cover_panel, lyrics_drag_cb, LV_EVENT_PRESSED, (void *)(uintptr_t) true);
@@ -4699,7 +4754,7 @@ static void apply_layout(void) {
 		// the star's own stroke keeps from the edge, and the way back mirrors it.
 		back_btn_player_ink_inset(layout_aam_now ? AAM_HEAD_END_PAD : 0);
 		back_btn_player_mode(true);
-		if (lyrics_progress > 0) { lyrics_overlay_geometry(); lyrics_find_sync(lyrics_progress == LYRICS_FULL); }
+		if (lyrics_progress > 0) { lyrics_overlay_geometry(); lyrics_header_sync(lyrics_progress == LYRICS_FULL); }
 	}
 }
 
@@ -7129,7 +7184,7 @@ void player_sheet_open(bool animate) {
 	back_btn_player_top_inset(layout_aam_now ? aam_chevron_inset() : player_content_top());
 	back_btn_player_ink_inset(layout_aam_now ? AAM_HEAD_END_PAD : 0);
 	back_btn_player_mode(true);
-	if (lyrics_progress > 0) { lyrics_overlay_geometry(); lyrics_find_sync(lyrics_progress == LYRICS_FULL); }
+	if (lyrics_progress > 0) { lyrics_overlay_geometry(); lyrics_header_sync(lyrics_progress == LYRICS_FULL); }
 
 	sheet_move_to(0, animate);
 }
