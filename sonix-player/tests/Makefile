@@ -1764,7 +1764,7 @@ $(BUILD)/test_streaming_preview: $(LAN_PREVIEW_OBJ)
 -include $(NETWORKMUSIC_UI_OBJ:.o=.d) $(LAN_PREVIEW_OBJ:.o=.d)
 
 # The lyrics size button, its popover and label reflow, without playback or networking.
-LYRICS_UI_SRC = $(ROOT)/tests/ui/test_lyrics_size.c $(ROOT)/src/gui/shell/popover.c \
+LYRICS_UI_SRC = $(ROOT)/tests/ui/test_lyrics_size.c $(ROOT)/src/system/library/lyrics.c $(ROOT)/src/gui/shell/popover.c \
                 $(ROOT)/src/gui/shell/icons.c $(ROOT)/src/gui/board_profile.c \
                 $(ROOT)/src/system/core/config.c $(ROOT)/src/system/core/lang.c
 LYRICS_UI_OBJ = $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(LYRICS_UI_SRC)) $(UI_LVGL_OBJ)
