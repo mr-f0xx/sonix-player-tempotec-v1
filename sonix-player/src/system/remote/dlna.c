@@ -163,7 +163,7 @@ void dlna_set_root(const char *sd_root) {
 	pthread_mutex_unlock(&state_lock);
 }
 
-static bool cache_dir(char *out, size_t size) {
+bool dlna_cache_dir(char *out, size_t size) {
 	pthread_mutex_lock(&state_lock);
 	bool have = cache_root[0] != '\0';
 	if (have) {
@@ -197,7 +197,7 @@ bool dlna_owns_path(const char *path) {
 		return false;
 	}
 	char dir[DLNA_PATH_MAX];
-	if (!cache_dir(dir, sizeof(dir))) {
+	if (!dlna_cache_dir(dir, sizeof(dir))) {
 		return false;
 	}
 	size_t n = strlen(dir);
@@ -548,7 +548,7 @@ static void extension_for(const char *content_type, const char *url, char *out, 
 // previous one, if the phone already pushed the next while this one finishes.
 static void prune_cache(const char *keep) {
 	char dir[DLNA_PATH_MAX];
-	if (!cache_dir(dir, sizeof(dir))) {
+	if (!dlna_cache_dir(dir, sizeof(dir))) {
 		return;
 	}
 
@@ -641,7 +641,7 @@ static void *fetch_thread(void *arg) {
 	// track is in.
 	{
 		char dir[DLNA_PATH_MAX];
-		if (!cache_dir(dir, sizeof(dir))) {
+		if (!dlna_cache_dir(dir, sizeof(dir))) {
 			set_error(tr("dlna_needs_a_microsd_card"));
 			http_stream_close(&stream);
 			goto done_label;
