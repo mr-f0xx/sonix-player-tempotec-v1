@@ -12,7 +12,7 @@
 
 typedef struct {
 	const char *label;
-	void (*action)(void *user); // called after the popover has closed
+	void (*action)(void *user); // ordinary menus close before invoking the action
 	void *user;
 	// A tick at the right of the row, for when the menu is not a list of
 	// actions but a choice between alternatives (Qobuz audio quality): there
@@ -30,7 +30,12 @@ void popover_init(void);
 // needed).
 void popover_show(lv_obj_t *anchor, const popover_item_t *items, int count);
 
-// Closes it (the veil tap and every item do this on their own).
+// An editor stays open across item actions. Its close callback runs once, also
+// when dismissed by the veil or replaced by another menu.
+void popover_show_editor(lv_obj_t *anchor, const popover_item_t *items, int count, void (*on_close)(void));
+void popover_set_item_text(int index, const char *text);
+
+// Closes the current menu, if any.
 void popover_close(void);
 
 #endif /* POPOVER_H */

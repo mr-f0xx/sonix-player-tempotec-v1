@@ -28,12 +28,13 @@ const lv_font_t *fonts_lyrics(int size) {
 }
 
 static device_state_t state;
-static int saved_ms;
+static int saved_ms, writes;
 void device_state_get(device_state_t *out) { *out = state; }
 audio_status_t audio_get_status(void) { return AUDIO_STATUS_PLAYING; }
 void toast_error(const char *text) { (void)text; assert(false); }
 bool library_set_lyrics_offset(const char *path, int ms) {
-	assert(strcmp(path, state.current_file) == 0);
+	assert(strcmp(path, "/card/test.flac") == 0);
+	writes++;
 	saved_ms = ms;
 	return true;
 }
@@ -93,19 +94,36 @@ static void check_offset(void) {
 	lv_obj_t *veil = lv_obj_get_child(lv_layer_top(), -1);
 	lv_obj_t *card = lv_obj_get_child(veil, 0);
 	lv_obj_send_event(lv_obj_get_child(card, 2), LV_EVENT_CLICKED, NULL);
-	assert(!lv_obj_is_hidden(veil) && saved_ms == 100 && lyrics_lit == 1);
+	assert(!lv_obj_is_hidden(veil) && writes == 0 && lyrics_lit == 1);
 	assert(lyrics_seek_ms(1000) == 900 && lyrics_seek_ms(0) == 0);
 	lv_obj_send_event(lv_obj_get_child(card, 0), LV_EVENT_CLICKED, NULL);
 	lv_obj_send_event(lv_obj_get_child(card, 0), LV_EVENT_CLICKED, NULL);
-	assert(saved_ms == -100 && lyrics_lit == 0 && lyrics_seek_ms(1000) == 1100);
+	assert(writes == 0 && lyrics_lit == 0 && lyrics_seek_ms(1000) == 1100);
+	assert(strcmp(lv_label_get_text(lv_obj_get_child(lv_obj_get_child(card, 4), 0)), "Reset (-0.1 s)") == 0);
+	lv_obj_send_event(veil, LV_EVENT_CLICKED, NULL);
+	assert(lv_obj_is_hidden(veil) && writes == 1 && saved_ms == -100);
+
+	// Closing untouched, or undoing the changes before dismissal, writes nothing.
+	lv_obj_send_event(lyrics_offset_btn, LV_EVENT_CLICKED, NULL);
+	popover_close();
+	lv_obj_send_event(lyrics_offset_btn, LV_EVENT_CLICKED, NULL);
+	lv_obj_send_event(lv_obj_get_child(card, 2), LV_EVENT_CLICKED, NULL);
+	lv_obj_send_event(lv_obj_get_child(card, 0), LV_EVENT_CLICKED, NULL);
+	popover_close();
+	assert(writes == 1);
+
+	lv_obj_send_event(lyrics_offset_btn, LV_EVENT_CLICKED, NULL);
 	lv_obj_send_event(lv_obj_get_child(card, 4), LV_EVENT_CLICKED, NULL);
-	assert(lv_obj_is_hidden(veil) && saved_ms == 0 && lyrics_seek_ms(1000) == 1000);
+	assert(lv_obj_is_hidden(veil) && writes == 2 && saved_ms == 0 && lyrics_seek_ms(1000) == 1000);
 
 	// An open menu cannot change the next song when playback advances.
 	lv_obj_send_event(lyrics_offset_btn, LV_EVENT_CLICKED, NULL);
-	lyrics_generation++;
 	lv_obj_send_event(lv_obj_get_child(card, 2), LV_EVENT_CLICKED, NULL);
-	assert(saved_ms == 0);
+	strcpy(state.current_file, "/card/next.flac");
+	lv_obj_send_event(lv_obj_get_child(card, 2), LV_EVENT_CLICKED, NULL);
+	assert(lv_obj_is_hidden(veil) && writes == 3 && saved_ms == 100);
+	popover_close();
+	assert(writes == 3);
 }
 
 static int label_y(lv_obj_t *label) {
