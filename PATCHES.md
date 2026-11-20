@@ -5097,3 +5097,26 @@ already reading the setting alone, so nothing else moved.
 The device suite's player, lyrics, status bar, layout and settings pages all
 still pass, and `FEATURES.md` now says which of the two arrangements the words
 follow.
+
+## The web emulator build, and a missing include (issue #374)
+
+The TempoTec V1 web emulator stopped building the day after the DLNA casting
+controls landed: the `Compile sonix-player to WebAssembly` step failed on every
+branch, `main` included, while the cross-compiled `.v1.upt` went on passing.
+
+`dlna_cast.c` sets `SO_RCVTIMEO` and `SO_SNDTIMEO` on the socket a renderer
+fetches from, and both take a `struct timeval`. The file included
+`<sys/socket.h>` and `<sys/stat.h>`, and glibc pulls `<sys/time.h>` in
+transitively through those, so the host and target builds never asked the
+question. Emscripten's musl headers do not: `timeval` is a forward declaration
+there, and the build stopped at
+
+    dlna_cast.c:610:17: error: variable has incomplete type 'struct timeval'
+
+on both timeouts. `<sys/time.h>` is now included where it is used, which is all
+the file was assuming. The bundle compiles, packs and boots in Chrome again, and
+nothing changes on the device: the include was already reaching the compiler
+there.
+
+The cast feature itself needed no change, and the rest of the file compiles
+under emcc as it stands.
