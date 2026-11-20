@@ -1,5 +1,6 @@
 #include "dlna.h"
 
+#include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -18,6 +19,7 @@
 #include "src/system/audio/audio.h"
 #include "src/system/playback/device_state.h"
 #include "src/system/remote/dlna.h"
+#include "src/system/remote/dlna_cast.h"
 #include "src/system/core/lang.h"
 #include "src/system/device/system.h"
 #include "src/system/net/wifi.h"
@@ -44,7 +46,14 @@ static lv_obj_t *artist_label;
 static lv_obj_t *album_label;
 static lv_obj_t *status_label;
 static lv_obj_t *wifi_row;
+static lv_obj_t *cast_status_label;
+static lv_obj_t *cast_rows[DLNA_CAST_MAX_TARGETS];
+static lv_obj_t *cast_row_labels[DLNA_CAST_MAX_TARGETS];
+static lv_obj_t *cast_play_row;
+static lv_obj_t *cast_stop_row;
 static lv_timer_t *page_timer;
+
+static void refresh_cast_controls(void);
 
 // ---------------------------------------------------------------------------
 
@@ -258,6 +267,7 @@ static void page_poll_cb(lv_timer_t *timer) {
 	(void)timer;
 
 	refresh();
+	refresh_cast_controls();
 
 	if (!switch_is_on()) {
 		return;
@@ -334,6 +344,7 @@ static void screen_loaded_cb(lv_event_t *e) {
 	}
 
 	refresh();
+	refresh_cast_controls();
 	lv_timer_resume(page_timer);
 	lv_timer_ready(page_timer);
 }
@@ -349,6 +360,71 @@ static void screen_unloaded_cb(lv_event_t *e) {
 static void wifi_row_cb(lv_event_t *e) {
 	(void)e;
 	switch_screen(wifisettings_screen);
+}
+
+// ---------------------------------------------------------------------------
+// DLNA controller (cast-to-renderer) controls. These are independent of the
+// receiver switch above: both roles can be used, and switching either role
+// never disables the other.
+
+static void cast_renderer_cb(lv_event_t *e) {
+	int index = (int)(intptr_t)lv_event_get_user_data(e);
+	dlna_cast_select(index);
+	refresh_cast_controls();
+}
+
+static void cast_find_cb(lv_event_t *e) {
+	(void)e;
+	if (!wifi_is_connected()) {
+		gui_notify_popup("enable_wi_fi_first");
+		return;
+	}
+	dlna_cast_scan();
+	refresh_cast_controls();
+}
+
+static void cast_play_cb(lv_event_t *e) {
+	(void)e;
+	char path[1024] = "";
+	audio_get_current_file(path, sizeof(path));
+	if (!path[0]) {
+		gui_notify_popup("Nothing is playing");
+		return;
+	}
+	dlna_cast_play(path);
+	refresh_cast_controls();
+}
+
+static void cast_stop_cb(lv_event_t *e) {
+	(void)e;
+	dlna_cast_stop();
+	refresh_cast_controls();
+}
+
+static void refresh_cast_controls(void) {
+	if (!cast_status_label) return;
+	char status[160] = "";
+	dlna_cast_status(status, sizeof(status));
+	if (!wifi_is_connected()) snprintf(status, sizeof(status), "%s", tr("Enable Wi-Fi to cast to a DLNA renderer"));
+	lv_label_set_text(cast_status_label, status);
+
+	dlna_cast_target_t targets[DLNA_CAST_MAX_TARGETS];
+	int count = dlna_cast_targets(targets, DLNA_CAST_MAX_TARGETS);
+	int selected = dlna_cast_selected();
+	for (int i = 0; i < DLNA_CAST_MAX_TARGETS; i++) {
+		if (i < count) {
+			char name[DLNA_CAST_NAME_MAX + 4];
+			snprintf(name, sizeof(name), "%s%s", i == selected ? "✓ " : "", targets[i].name);
+			lv_label_set_text(cast_row_labels[i], name);
+			show(cast_rows[i]);
+		} else {
+			hide(cast_rows[i]);
+		}
+	}
+	if (selected >= 0 && selected < count && wifi_is_connected()) show(cast_play_row);
+	else hide(cast_play_row);
+	if (selected >= 0 && selected < count && status[0] && strncmp(status, "Playing on ", 11) == 0) show(cast_stop_row);
+	else hide(cast_stop_row);
 }
 
 // ---------------------------------------------------------------------------
@@ -396,6 +472,35 @@ void dlna_page_init(gui_config_t *cfg) {
 	lv_obj_set_style_text_align(status_label, LV_TEXT_ALIGN_CENTER, 0);
 	lv_obj_set_style_pad_hor(status_label, 4, 0);
 	lv_obj_set_style_pad_top(status_label, 14, 0);
+
+	// Outbound controller controls are a separate role from the receiver
+	// switch. The V1 serves the selected local file over HTTP and asks the
+	// chosen renderer to fetch it; the existing phone-to-V1 receiver remains
+	// available independently above.
+	lv_obj_t *cast_heading = lv_label_create(container);
+	lv_label_set_text(cast_heading, tr("Cast to a DLNA renderer"));
+	lv_obj_add_style(cast_heading, &theme_style_text, 0);
+	lv_obj_set_style_text_font(cast_heading, &font_ui_22, 0);
+	lv_obj_set_style_margin_top(cast_heading, 22, 0);
+	lv_obj_set_width(cast_heading, lv_pct(100));
+
+	settingsrow_action(container, "Search for DLNA renderers", cast_find_cb, NULL);
+	for (int i = 0; i < DLNA_CAST_MAX_TARGETS; i++) {
+		cast_rows[i] = settingsrow_action(container, "DLNA renderer", cast_renderer_cb, (void *)(intptr_t)i);
+		cast_row_labels[i] = settingsrow_name_label(cast_rows[i]);
+		hide(cast_rows[i]);
+	}
+	cast_play_row = settingsrow_action(container, "Cast current track", cast_play_cb, NULL);
+	cast_stop_row = settingsrow_action(container, "Stop casting", cast_stop_cb, NULL);
+	hide(cast_play_row);
+	hide(cast_stop_row);
+	cast_status_label = lv_label_create(container);
+	lv_obj_set_width(cast_status_label, lv_pct(100));
+	lv_label_set_long_mode(cast_status_label, LV_LABEL_LONG_WRAP);
+	lv_obj_add_style(cast_status_label, &theme_style_text_dim, 0);
+	lv_obj_set_style_text_font(cast_status_label, &font_ui_18, 0);
+	lv_obj_set_style_pad_hor(cast_status_label, 8, 0);
+	lv_obj_set_style_pad_ver(cast_status_label, 8, 0);
 
 	// The same row as the Wi-Fi transfer page: the notice says what is missing,
 	// the Wi-Fi settings row leads to where it is fixed.
