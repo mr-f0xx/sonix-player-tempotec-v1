@@ -224,6 +224,14 @@ void theme_set_kind(theme_kind_t kind);
 int theme_boot_screen(void);
 void theme_set_boot_screen(int choice);
 
+// The backlight level for that splash, in percent: BOOTLOGO_LIGHT_MIN to
+// BOOTLOGO_LIGHT_MAX in BOOTLOGO_LIGHT_STEP steps, default 60 (the stock
+// picture's own level). It is saved in the config as well as written to the
+// same flash marker as the picture, so the next boot is dim (or bright)
+// without anything on the card having been mounted yet.
+int theme_boot_brightness(void);
+void theme_set_boot_brightness(int percent);
+
 // Which file in the Bootlogo folder the custom picture was last made from, or
 // "" when none has been. The name only, no path: it is a caption for the row
 // on the Appearance page and a tick in the picker's list, and the card it

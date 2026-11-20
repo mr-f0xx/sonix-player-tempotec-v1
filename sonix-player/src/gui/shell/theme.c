@@ -460,6 +460,31 @@ void theme_set_boot_screen(int choice) {
 	bootlogo_set(choice, active->dark);
 }
 
+// How bright the splash is while the boot picture is on the panel, as a
+// percent of the backlight's range. 60 is the stock picture's own level, so
+// that is what a player without this setting keeps. Like the boot picture it
+// is read by the boot script, before any config file can be mounted.
+int theme_boot_brightness(void) {
+	int light = (int)config_get_int("ui", "boot_brightness", BOOTLOGO_LIGHT_DEFAULT);
+	if (light < BOOTLOGO_LIGHT_MIN || light > BOOTLOGO_LIGHT_MAX) {
+		return BOOTLOGO_LIGHT_DEFAULT;
+	}
+	return BOOTLOGO_LIGHT_MIN + ((light - BOOTLOGO_LIGHT_MIN) / BOOTLOGO_LIGHT_STEP) * BOOTLOGO_LIGHT_STEP;
+}
+
+void theme_set_boot_brightness(int light) {
+	if (light < BOOTLOGO_LIGHT_MIN || light > BOOTLOGO_LIGHT_MAX) {
+		return;
+	}
+	light = BOOTLOGO_LIGHT_MIN + ((light - BOOTLOGO_LIGHT_MIN) / BOOTLOGO_LIGHT_STEP) * BOOTLOGO_LIGHT_STEP;
+	config_set_int("ui", "boot_brightness", light);
+	config_save();
+
+	// Picture and brightness share one marker in the flash, so saving either
+	// writes the whole marker again.
+	bootlogo_set(theme_boot_screen(), active->dark);
+}
+
 // Which file in the Bootlogo folder the custom picture was made from. The name
 // and nothing else: the card it came from may not be the one in the slot, and
 // the copy on the partition is what boots either way.

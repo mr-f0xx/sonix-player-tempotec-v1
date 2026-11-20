@@ -136,7 +136,10 @@ channel enabled with a level of `0x00` is simply dark.
 
 The controller has an 11-step current ladder. Level `0` is off and each step
 scales a channel's `0`-`255` value down to `0`-`79`, so full scale is about a
-third of the nominal range:
+third of the nominal range. The player's brightness slider exposes the ten lit
+levels, 1 through 10; 0 is deliberately not offered because Stealth and the LED
+switch are the ways to turn the light out. A player that saved a level under the
+old 1–5 slider keeps that level, which is now the middle of the range:
 
 | Level | 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |

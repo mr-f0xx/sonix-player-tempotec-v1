@@ -1,5 +1,6 @@
 #include "bootlogo.h"
 
+#include "src/system/core/config.h"
 #include "src/system/core/utils.h"
 
 #include <pthread.h>
@@ -12,9 +13,10 @@
 // firmware's own, read out of its init script and its binary, not guesses.
 #define MTD_DEVICE "/dev/mtd5"
 #define MARKER_OFFSET "0x20000"
-// "theme:N logo:M": the stock field, the space the stock script's own read
-// never looks past, and the field the block the packer adds reads at byte 8.
-#define MARKER_LENGTH 14
+// "theme:N logo:M light:P": the stock pair, the field the packer's block reads
+// at byte 8, and the splash brightness at byte 15. The stock script reads only
+// seven bytes, so the extra fields do not change what it draws.
+#define MARKER_LENGTH 24
 #define MARKER_SECOND_FIELD 8
 
 static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
@@ -30,15 +32,40 @@ static char trace_buf[512];
 static bool trace_loaded;
 static char status_buf[64];
 
-// The marker for a choice and a theme, as it has to land in the flash. The
-// stock pair keeps the theme field the stock script expects; everything else
-// asks for theme:3, the value that falls through to /etc/logo.jpeg, and says
-// what it really is in the second field. That includes Custom: its picture is
-// not one the stock script could find, so the theme field asks for the
-// fallback and the block the packer adds is what draws the real one.
+// The splash brightness saved in the config, snapped to the five-percent
+// steps the setting offers. A value outside them came from a marker written by newer
+// firmware, not from this page, and falls back to the stock level.
+static int boot_light(void) {
+	int light = (int)config_get_int("ui", "boot_brightness", BOOTLOGO_LIGHT_DEFAULT);
+	if (light < BOOTLOGO_LIGHT_MIN || light > BOOTLOGO_LIGHT_MAX) {
+		light = BOOTLOGO_LIGHT_DEFAULT; // a marker from a newer firmware, or a stale file
+	}
+	return BOOTLOGO_LIGHT_MIN + ((light - BOOTLOGO_LIGHT_MIN) / BOOTLOGO_LIGHT_STEP) * BOOTLOGO_LIGHT_STEP;
+}
+
+// The marker for a choice, a theme and the splash brightness, as it has to
+// land in the flash. The stock pair keeps the theme field the stock script
+// expects; everything else asks for theme:3, the value that falls through to
+// /etc/logo.jpeg, and says what it really is in the second field. That includes
+// Custom: its picture is not one the stock script could find, so the theme
+// field asks for the fallback and the block the packer adds is what draws the
+// real one. The third field is the splash level that block applies on exit.
 static void marker_for(int choice, bool dark, char out[MARKER_LENGTH + 1]) {
+	// Every field is fixed-width in practice; bound them here too, both so
+	// the marker cannot grow past its 24 bytes and so the compiler can see
+	// that the snprintf fits.
+	if (choice < BOOTLOGO_STOCK || choice > BOOTLOGO_CUSTOM) {
+		choice = BOOTLOGO_RETROSPACE;
+	}
+	choice &= 0x0f; // one digit, whatever the caller's type promised
 	int theme = choice == BOOTLOGO_STOCK ? (dark ? 2 : 1) : 3;
-	snprintf(out, MARKER_LENGTH + 1, "theme:%d logo:%d", theme, choice);
+	// A roomy buffer first: every field is fixed-width, but GCC's
+	// format-truncation check cannot see that from three separate getters.
+	char full[64];
+	snprintf(full, sizeof(full), "theme:%d logo:%d light:%d", theme, choice, boot_light());
+	memset(out, ' ', MARKER_LENGTH); // light:60 is a byte shorter than light:100
+	memcpy(out, full, strlen(full) < MARKER_LENGTH ? strlen(full) : MARKER_LENGTH);
+	out[MARKER_LENGTH] = '\0';
 }
 
 // The marker as it is now, or false when there is nothing to read. The stock

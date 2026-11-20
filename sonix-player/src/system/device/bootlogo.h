@@ -36,13 +36,18 @@
 //     if [ "$boot_sel" = "logo:4" ]; then ... /usr/data/bootlogo_custom.jpeg ...
 //
 // reading the second field at byte 8 of the same block. The marker this player
-// writes is therefore "theme:N logo:M", fourteen bytes: the stock pair follows
-// the theme in the first field as it always did, Retrospace is theme:3 with
-// logo:1 -- the stock script's fallback file is the one that carries it -- and
-// Space, Travelling in space and Custom are logo:2, logo:3 and logo:4, drawn
-// by the added block before the stock chain is ever reached. A device whose
-// script has no added block, an older firmware included, draws logo.jpeg for
-// those three: the graceful end of the same idea.
+// writes is therefore "theme:N logo:M light:P", twenty-four bytes: the stock
+// pair follows the theme in the first field as it always did, Retrospace is
+// theme:3 with logo:1 -- the stock script's fallback file is the one that
+// carries it -- and Space, Travelling in space and Custom are logo:2, logo:3
+// and logo:4, drawn by the added block before the stock chain is ever reached.
+// The third field is the panel brightness for the splash, in percent: the
+// stock script raises the backlight to 60 after it draws, so the added block
+// writes this level on the way out of the script instead, after that write.
+// A device whose script has no added block, an older firmware included, draws
+// logo.jpeg at the stock level for the three extra pictures: the graceful end
+// of the same idea. A marker with no third field (written by older firmware)
+// leaves the stock level alone.
 //
 // The custom branch is the only one that waits. Its picture is written to the
 // UBIFS partition, which is mounted a line or two later in the boot than the
@@ -67,6 +72,18 @@
 #define BOOTLOGO_SPACE      2
 #define BOOTLOGO_TRAVELLING 3
 #define BOOTLOGO_CUSTOM     4
+
+// The splash brightness offered with the boot screen under Appearance, in
+// percent of the panel's range. 60 is what the stock V1 script writes when it
+// has drawn its picture, so that is the level an existing player keeps. The
+// choices run from 5 to 100 in five-percent steps: a splash is only a picture,
+// not something the user has to read, so the dim end goes well below the
+// panel's working floor. The choice lives in the config, but reaches the boot
+// script through the marker below -- nothing on the card is mounted then.
+#define BOOTLOGO_LIGHT_MIN     5
+#define BOOTLOGO_LIGHT_MAX     100
+#define BOOTLOGO_LIGHT_STEP    5
+#define BOOTLOGO_LIGHT_DEFAULT 60
 
 // Points the boot logo at the theme and at the chosen boot screen: the stock
 // pair follows the palette, the other three are one picture either way.

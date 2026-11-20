@@ -22,8 +22,12 @@ lv_obj_t *powersettings_screen;
 
 // The RGB LED's brightness and fade controls, shown only where the SGM31324
 // can be driven directly (no such knobs for the plain LEDs on the R1).
+// The controller's ladder has ten lit levels; level 0 is off. Keep the
+// default at 5 so a player updated from the five-step slider keeps the light
+// it had, with five more steps above it for those who want them.
 #define LED_BRIGHTNESS_MIN 1
-#define LED_BRIGHTNESS_MAX 5
+#define LED_BRIGHTNESS_MAX 10
+#define LED_BRIGHTNESS_DEFAULT 5
 #define LED_BRIGHTNESS_STEPS (LED_BRIGHTNESS_MAX - LED_BRIGHTNESS_MIN + 1)
 #define LED_TRANSITION_MIN_MS 20
 #define LED_TRANSITION_STEP_MS 10
@@ -85,7 +89,7 @@ static int auto_off_index(void) {
 }
 
 static int led_brightness_index(void) {
-	int brightness = (int)config_get_int("power", "led_brightness", 5);
+	int brightness = (int)config_get_int("power", "led_brightness", LED_BRIGHTNESS_DEFAULT);
 	if (brightness < LED_BRIGHTNESS_MIN) {
 		brightness = LED_BRIGHTNESS_MIN;
 	}

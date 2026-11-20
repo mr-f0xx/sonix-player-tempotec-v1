@@ -29,6 +29,7 @@
 #include "src/gui/shell/topbar.h"
 #include "src/gui/shell/volumereadout.h"
 #include "src/system/audio/alsa-controls.h"
+#include "src/system/addons/addons.h"
 #include "src/system/core/config.h"
 #include "src/system/audio/headset.h"
 #include "src/system/core/lang.h"
@@ -64,7 +65,8 @@ static lv_obj_t *screensettings_screen;
 static lv_obj_t *othersettings_screen;
 static lv_obj_t *brightness_slider;
 static lv_obj_t *brightness_value;
-static lv_obj_t *cc_volume_switch; // what the control centre's slider is for
+static lv_obj_t *cc_level_pills, *cc_level_pill[3]; // what the control centre's rail(s) are for
+static lv_obj_t *cc_level_note;
 static lv_obj_t *cc_both_switch;
 // The volume read as a voltage (volumereadout.h): the switch, and under it the
 // socket the figure is for.
@@ -269,21 +271,51 @@ static void brightness_released_cb(lv_event_t *e) {
 	config_save();
 }
 
-// Which of its two jobs the slider in the control centre does. Nothing here is
-// rebuilt: quickpanel keeps the choice and applies it to the row at once, and
-// the sheet reads it again at every pull in case the row is not built yet.
-static void cc_volume_toggled_cb(lv_event_t *e) {
-	(void)e;
-	quickpanel_set_volume_slider(lv_obj_has_state(cc_volume_switch, LV_STATE_CHECKED));
+// One row of three pills serves both settings: a single rail picks one of its
+// three jobs, two rails pick which pair of those jobs to show. The labels and
+// the active pill change with the Both sliders switch, but neither choice is
+// lost when the switch flips back.
+static void cc_level_refresh(void) {
+	static const char *single_tags[3] = {
+		"settings_cc_slider_brightness", "settings_cc_slider_volume", "settings_cc_slider_soundfield"
+	};
+	static const char *pair_tags[3] = {
+		"settings_cc_pair_bright_vol", "settings_cc_pair_bright_sf", "settings_cc_pair_vol_sf"
+	};
+	bool both = quickpanel_both_sliders();
+	bool soundfield = addons_enabled("soundfield");
+	int active = both ? (int)quickpanel_level_pair() : (int)quickpanel_level_target();
+	for (int i = 0; i < 3; i++) {
+		if (!cc_level_pill[i]) continue;
+		lv_label_set_text(lv_obj_get_child(cc_level_pill[i], 0), tr(both ? pair_tags[i] : single_tags[i]));
+		settingsrow_pill_active(cc_level_pill[i], i == active);
+		// A module switched off in Plugins has no width to move, so both
+		// pairs that contain it are unavailable until it is on again.
+		bool sf_choice = both ? i > 0 : i == QP_LEVEL_SOUNDFIELD;
+		lv_obj_set_state(cc_level_pill[i], LV_STATE_DISABLED, sf_choice && !soundfield);
+	}
+	if (cc_level_note) lv_label_set_text(cc_level_note, tr(both ? "settings_cc_pair_note" : "settings_cc_slider_note"));
+}
+
+static void cc_level_pick_cb(lv_event_t *e) {
+	int choice = (int)(intptr_t)lv_event_get_user_data(e);
+	bool both = quickpanel_both_sliders();
+	bool soundfield = addons_enabled("soundfield");
+	if (!soundfield && (both ? choice > 0 : choice == QP_LEVEL_SOUNDFIELD)) {
+		return; // a module switched off in Plugins has no width to move
+	}
+	if (both) {
+		quickpanel_set_level_pair((quickpanel_level_pair_t)choice);
+	} else {
+		quickpanel_set_level_target((quickpanel_level_target_t)choice);
+	}
+	cc_level_refresh();
 }
 
 static void cc_both_toggled_cb(lv_event_t *e) {
 	(void)e;
-	bool on = lv_obj_has_state(cc_both_switch, LV_STATE_CHECKED);
-	quickpanel_set_both_sliders(on);
-	// Keep the previous single-slider choice, but make clear it only applies
-	// when the second slider is off.
-	if (cc_volume_switch) lv_obj_set_state(cc_volume_switch, LV_STATE_DISABLED, on);
+	quickpanel_set_both_sliders(lv_obj_has_state(cc_both_switch, LV_STATE_CHECKED));
+	cc_level_refresh();
 }
 
 // Volume as voltage: the switch, the two sockets under it, and which of them
@@ -410,24 +442,31 @@ static void build_screen_page(gui_config_t *cfg) {
 	lv_obj_add_event_cb(brightness_slider, brightness_changed_cb, LV_EVENT_VALUE_CHANGED, NULL);
 	lv_obj_add_event_cb(brightness_slider, brightness_released_cb, LV_EVENT_RELEASED, NULL);
 
-	// What the slider under the control centre's buttons is for: the brightness
-	// this page sets, or the output volume instead. Off keeps the brightness
-	// bar, which is what the stock firmware puts there and what this player has
-	// always had, so an update moves nobody's hand.
-	settingsrow_toggle(container, "settings_cc_volume", &cc_volume_switch, cc_volume_toggled_cb);
-	if (quickpanel_volume_slider()) {
-		lv_obj_add_state(cc_volume_switch, LV_STATE_CHECKED);
+	// What the slider(s) under the control centre's buttons are for. A single
+	// rail picks brightness (where the stock firmware puts it), volume, or
+	// Soundfield width; two rails pick any pair of those three. A player that
+	// only ever used the old volume switch sees Volume selected here, which
+	// is the answer it already gave.
+	settingsrow_pills(container, "settings_cc_slider", &cc_level_pills);
+	cc_level_pill[QP_LEVEL_BRIGHTNESS] =
+		settingsrow_pill(cc_level_pills, "settings_cc_slider_brightness", QP_LEVEL_BRIGHTNESS, cc_level_pick_cb);
+	cc_level_pill[QP_LEVEL_VOLUME] =
+		settingsrow_pill(cc_level_pills, "settings_cc_slider_volume", QP_LEVEL_VOLUME, cc_level_pick_cb);
+	cc_level_pill[QP_LEVEL_SOUNDFIELD] =
+		settingsrow_pill(cc_level_pills, "settings_cc_slider_soundfield", QP_LEVEL_SOUNDFIELD, cc_level_pick_cb);
+	if (!addons_enabled("soundfield")) {
+		lv_obj_set_state(cc_level_pill[QP_LEVEL_SOUNDFIELD], LV_STATE_DISABLED, true);
 	}
-	lv_obj_t *cc_volume_note = lv_label_create(container);
-	lv_label_set_long_mode(cc_volume_note, LV_LABEL_LONG_WRAP);
-	lv_obj_set_width(cc_volume_note, lv_pct(100));
-	lv_obj_add_style(cc_volume_note, &theme_style_text_dim, 0);
-	lv_obj_set_style_text_font(cc_volume_note, &font_ui_22, 0);
-	lv_label_set_text(cc_volume_note, tr("settings_cc_volume_note"));
+	cc_level_refresh();
+	cc_level_note = lv_label_create(container);
+	lv_label_set_long_mode(cc_level_note, LV_LABEL_LONG_WRAP);
+	lv_obj_set_width(cc_level_note, lv_pct(100));
+	lv_obj_add_style(cc_level_note, &theme_style_text_dim, 0);
+	lv_obj_set_style_text_font(cc_level_note, &font_ui_22, 0);
+	lv_label_set_text(cc_level_note, tr("settings_cc_slider_note"));
 
 	settingsrow_toggle(container, "settings_cc_both", &cc_both_switch, cc_both_toggled_cb);
 	lv_obj_set_state(cc_both_switch, LV_STATE_CHECKED, quickpanel_both_sliders());
-	lv_obj_set_state(cc_volume_switch, LV_STATE_DISABLED, quickpanel_both_sliders());
 	lv_obj_t *cc_both_note = lv_label_create(container);
 	lv_label_set_long_mode(cc_both_note, LV_LABEL_LONG_WRAP);
 	lv_obj_set_width(cc_both_note, lv_pct(100));
