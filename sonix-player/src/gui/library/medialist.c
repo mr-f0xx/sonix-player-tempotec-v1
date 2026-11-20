@@ -1239,6 +1239,9 @@ static void selection_stop(panel_t *p) {
 		}
 	}
 	sel_buttons_show(p, false);
+	if (p->title_label) {
+		lv_obj_set_hidden(p->title_label, false);
+	}
 	settingsrow_title_corner_slots(p->title_label, p->cfg, p->corner_slots);
 	rows_update_selection(p);
 }
@@ -1263,7 +1266,11 @@ static void selection_start(panel_t *p) {
 	// Four buttons, or five where the list may also delete what is chosen: the
 	// heading gives up the room they take, which in selection mode is no great
 	// loss -- the rows are the page until the selection is dealt with.
-	settingsrow_title_corner_slots(p->title_label, p->cfg, panel_can_delete(p) ? 5 : 4);
+	if (p->cfg && p->cfg->screen_width < 320 && p->title_label) {
+		lv_obj_set_hidden(p->title_label, true);
+	} else {
+		settingsrow_title_corner_slots(p->title_label, p->cfg, panel_can_delete(p) ? 5 : 4);
+	}
 	lv_obj_move_foreground(p->corner);
 	rows_update_selection(p);
 }
@@ -1828,6 +1835,15 @@ static void row_bind(panel_t *p, row_t *row, int index) {
 			lv_obj_set_hidden(row->chevron, true);
 		}
 		lv_obj_set_hidden(row->playmark, true);
+		// Out of the vertical flex column (which has no spare height below the
+		// caption): sit in the top-right corner of the cover with a dark pill
+		// behind it so it stays legible over bright artwork.
+		lv_obj_set_ignore_layout(row->check, true);
+		lv_obj_align(row->check, LV_ALIGN_TOP_RIGHT, -2, 2);
+		lv_obj_set_style_bg_color(row->check, lv_color_black(), 0);
+		lv_obj_set_style_bg_opa(row->check, LV_OPA_70, 0);
+		lv_obj_set_style_radius(row->check, LV_RADIUS_CIRCLE, 0);
+		lv_obj_move_foreground(row->check);
 	} else if (was_cover_only) {
 		// Back to a list row, on a pool that has held a grid. Only a row that
 		// really was one is reset, so the ordinary list does no extra work.
@@ -1846,6 +1862,12 @@ static void row_bind(panel_t *p, row_t *row, int index) {
 		lv_obj_set_width(row->label, LV_PCT(100));
 		lv_obj_set_height(row->label, lv_font_get_line_height(ROW_TITLE_FONT) * (p == &panel_artist_albums ? 2 : 1));
 		lv_obj_set_style_text_align(row->label, LV_TEXT_ALIGN_LEFT, 0);
+		lv_obj_set_ignore_layout(row->check, false);
+		lv_obj_set_align(row->check, LV_ALIGN_DEFAULT);
+		lv_obj_set_pos(row->check, 0, 0);
+		lv_obj_remove_local_style_prop(row->check, LV_STYLE_BG_COLOR, 0);
+		lv_obj_remove_local_style_prop(row->check, LV_STYLE_BG_OPA, 0);
+		lv_obj_remove_local_style_prop(row->check, LV_STYLE_RADIUS, 0);
 	}
 
 	// Decided here and not at construction, because the same panel serves

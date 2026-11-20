@@ -377,6 +377,38 @@ int main(void) {
 		assert(la.x2 - la.x1 + 1 >= m.cover - 4);
 	}
 
+	// Long-press album 0 and tap album 1 in grid mode: the header title hides
+	// instead of truncating to "A...", and the check mark sits cleanly inside
+	// the top-right corner of each selected tile without clipping.
+	lv_obj_t *title_lbl = find_label(medialist_screen, "albums");
+	assert(title_lbl && !lv_obj_is_hidden(title_lbl));
+	lv_obj_send_event(btn0, LV_EVENT_LONG_PRESSED, NULL);
+	lv_obj_t *btn1 = button_of(find_label(medialist_screen, ALBUMS[1].name));
+	assert(btn1);
+	lv_obj_send_event(btn1, LV_EVENT_CLICKED, NULL);
+	lv_obj_update_layout(medialist_screen);
+	dump_snapshot(medialist_screen, "selected");
+
+	assert(lv_obj_is_hidden(title_lbl));
+	lv_obj_t *sel_btns[2] = {btn0, btn1};
+	for (int i = 0; i < 2; i++) {
+		lv_obj_t *chk = lv_obj_get_child(sel_btns[i], 4);
+		assert(chk && !lv_obj_is_hidden(chk));
+		lv_area_t ba, ca;
+		lv_obj_get_coords(sel_btns[i], &ba);
+		lv_obj_get_coords(chk, &ca);
+		assert(ca.x1 >= ba.x1 && ca.x2 <= ba.x2);
+		assert(ca.y1 >= ba.y1 && ca.y2 <= ba.y2);
+		assert(ca.y1 <= ba.y1 + 10);
+		assert(ca.x2 >= ba.x2 - 10);
+	}
+
+	// Tap the two selected tiles again to exit selection mode and restore the header.
+	lv_obj_send_event(btn0, LV_EVENT_CLICKED, NULL);
+	lv_obj_send_event(btn1, LV_EVENT_CLICKED, NULL);
+	lv_obj_update_layout(medialist_screen);
+	assert(!lv_obj_is_hidden(title_lbl));
+
 	// Disable album grid and verify immediate restoration to list layout.
 	medialist_set_album_grid(false);
 	lv_obj_update_layout(medialist_screen);
