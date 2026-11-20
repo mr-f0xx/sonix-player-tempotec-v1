@@ -2052,7 +2052,8 @@ static lv_obj_t *lyrics_size_icon;
 static lv_obj_t *lyrics_offset_btn;
 static lv_obj_t *lyrics_offset_icon;
 static int lyrics_offset_ms; // added to playback time, like a positive LRC offset
-static unsigned lyrics_offset_menu_generation;
+static int lyrics_offset_saved_ms;
+static bool lyrics_offset_editing;
 static int lyrics_text_size;
 static cover_image_t lyrics_screen_pic; // the blurred sleeve at the shape of the screen
 static unsigned lyrics_bg_generation;
@@ -2188,7 +2189,7 @@ static void lyrics_arrived(void *user) {
 		lyrics_free(&lyrics_cur);
 		lyrics_cur = job->lyrics; // handed over, found or empty
 		lyrics_loaded = true;
-		lyrics_offset_ms = job->offset_ms;
+		lyrics_offset_ms = lyrics_offset_saved_ms = job->offset_ms;
 		lyrics_header_sync(lyrics_progress == LYRICS_FULL);
 		lyrics_fill();
 		lyrics_settle();
@@ -2230,11 +2231,13 @@ static bool lyrics_has_words(void) { return lyrics_loaded && lyrics_cur.count > 
 // not the interface's to wait for. Asked again only when the file changes.
 static void lyrics_request(const device_state_t *state) {
 	if (!state->current_file[0] || !playing_local_file(state)) {
+		if (lyrics_offset_editing) popover_close();
 		return;
 	}
 	if (strcmp(state->current_file, lyrics_path) == 0) {
 		return;
 	}
+	if (lyrics_offset_editing) popover_close(); // commit before replacing the path and its offset
 	snprintf(lyrics_path, sizeof(lyrics_path), "%s", state->current_file);
 	lyrics_free(&lyrics_cur);
 	lyrics_loaded = false;
@@ -2616,6 +2619,10 @@ static void lyrics_commit(bool on) {
 
 // The shared player chevron returns to the layout before closing the player.
 bool player_lyrics_back(void) {
+	if (lyrics_offset_editing) {
+		popover_close();
+		return true;
+	}
 	if (!lyrics_now && lyrics_progress == 0) return false;
 	lyrics_commit(false);
 	return true;
@@ -2686,6 +2693,7 @@ void player_lyrics_reload(const char *path) {
 	// and change in place; otherwise the page is wanted, and comes in when the
 	// words arrive (lyrics_settle()).
 	bool up = lyrics_now;
+	if (lyrics_offset_editing) popover_close();
 	lyrics_path[0] = '\0';
 	lyrics_request(&state);
 	if (!up) {
@@ -2902,13 +2910,29 @@ static void lyrics_find_cb(lv_event_t *e) {
 	}
 }
 
-static void lyrics_offset_menu(void);
+static void lyrics_offset_closed(void) {
+	lyrics_offset_editing = false;
+	if (lyrics_offset_ms == lyrics_offset_saved_ms) return;
+	if (library_set_lyrics_offset(lyrics_path, lyrics_offset_ms)) {
+		lyrics_offset_saved_ms = lyrics_offset_ms;
+	} else {
+		toast_error(tr("addon_save_failed")); // still usable for this playback
+	}
+}
+
+static void lyrics_offset_label(void) {
+	char reset[128];
+	snprintf(reset, sizeof(reset), "%s (%+.1f s)", tr("reset"), lyrics_offset_ms / 1000.0);
+	popover_set_item_text(2, reset);
+}
 
 static void lyrics_offset_pick(void *user) {
 	device_state_t state;
 	device_state_get(&state);
-	if (lyrics_generation != lyrics_offset_menu_generation || !lyrics_now || !lyrics_cur.synced ||
-	    strcmp(state.current_file, lyrics_path) != 0) return;
+	if (!lyrics_now || !lyrics_cur.synced || strcmp(state.current_file, lyrics_path) != 0) {
+		popover_close(); // playback has moved on; finish the old track's edit
+		return;
+	}
 
 	int step = (int)(intptr_t)user;
 	int64_t ms = step ? (int64_t)lyrics_offset_ms + step : 0;
@@ -2916,28 +2940,21 @@ static void lyrics_offset_pick(void *user) {
 	lyrics_offset_ms = (int)ms;
 	lyrics_tap_ms = -1;
 	lyrics_follow(state.progress_current_secs);
-	if (!library_set_lyrics_offset(lyrics_path, lyrics_offset_ms)) {
-		toast_error(tr("addon_save_failed")); // still usable for this playback
-		return;
-	}
-	if (step) lyrics_offset_menu(); // keep nudging without reopening the menu
-}
-
-static void lyrics_offset_menu(void) {
-	char reset[128];
-	snprintf(reset, sizeof(reset), "%s (%+.1f s)", tr("reset"), lyrics_offset_ms / 1000.0);
-	popover_item_t items[] = {
-		{.label = "-0.1s", .verbatim = true, .action = lyrics_offset_pick, .user = (void *)(intptr_t)-100},
-		{.label = "+0.1s", .verbatim = true, .action = lyrics_offset_pick, .user = (void *)(intptr_t)100},
-		{.label = reset, .verbatim = true, .action = lyrics_offset_pick},
-	};
-	lyrics_offset_menu_generation = lyrics_generation;
-	popover_show(lyrics_offset_btn, items, 3);
+	if (step) lyrics_offset_label();
+	else popover_close(); // Reset ends the edit
 }
 
 static void lyrics_offset_cb(lv_event_t *e) {
 	(void)e;
-	if (!player_sheet_drag_active() && lyrics_cur.synced) lyrics_offset_menu();
+	if (player_sheet_drag_active() || !lyrics_cur.synced || lyrics_offset_editing) return;
+	popover_item_t items[] = {
+		{.label = "-0.1s", .verbatim = true, .action = lyrics_offset_pick, .user = (void *)(intptr_t)-100},
+		{.label = "+0.1s", .verbatim = true, .action = lyrics_offset_pick, .user = (void *)(intptr_t)100},
+		{.label = "reset", .action = lyrics_offset_pick},
+	};
+	popover_show_editor(lyrics_offset_btn, items, 3, lyrics_offset_closed);
+	lyrics_offset_editing = true;
+	lyrics_offset_label();
 }
 
 // Reflow the labels in place: the highlight, timestamps and any manual
@@ -7477,6 +7494,7 @@ static void sheet_hidden_anim_ready_cb(lv_anim_t *a) {
 }
 
 void player_sheet_close(bool animate) {
+	if (lyrics_offset_editing) popover_close();
 	bool was_open = sheet_open;
 	sheet_open = false;
 	player_status_background_apply();

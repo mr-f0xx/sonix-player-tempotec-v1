@@ -21,11 +21,20 @@ static lv_obj_t *card;
 
 static popover_item_t items_copy[POPOVER_MAX_ITEMS];
 static int items_count;
+static void (*editor_closed)(void);
+static lv_obj_t *labels[POPOVER_MAX_ITEMS];
 
 void popover_close(void) {
 	if (veil) {
 		lv_obj_set_hidden(veil, true);
 	}
+	void (*closed)(void) = editor_closed;
+	editor_closed = NULL;
+	if (closed) closed();
+}
+
+void popover_set_item_text(int index, const char *text) {
+	if (editor_closed && index >= 0 && index < items_count) lv_label_set_text(labels[index], text);
 }
 
 static void veil_clicked_cb(lv_event_t *e) {
@@ -42,7 +51,7 @@ static void item_clicked_cb(lv_event_t *e) {
 	// Close first: the action may well open another page, and the veil must
 	// not linger over it.
 	popover_item_t item = items_copy[index];
-	popover_close();
+	if (!editor_closed) popover_close();
 
 	if (item.action) {
 		item.action(item.user);
@@ -81,9 +90,15 @@ void popover_init(void) {
 }
 
 void popover_show(lv_obj_t *anchor, const popover_item_t *items, int count) {
+	popover_show_editor(anchor, items, count, NULL);
+}
+
+void popover_show_editor(lv_obj_t *anchor, const popover_item_t *items, int count, void (*on_close)(void)) {
 	if (!veil || !items || count <= 0) {
 		return;
 	}
+	if (editor_closed) popover_close();
+	editor_closed = on_close;
 	if (count > POPOVER_MAX_ITEMS) {
 		count = POPOVER_MAX_ITEMS;
 	}
@@ -127,7 +142,7 @@ void popover_show(lv_obj_t *anchor, const popover_item_t *items, int count) {
 		lv_obj_set_style_pad_hor(row, compact ? 10 : 14, 0);
 		lv_obj_add_event_cb(row, item_clicked_cb, LV_EVENT_CLICKED, (void *)(intptr_t)i);
 
-		lv_obj_t *label = lv_label_create(row);
+		lv_obj_t *label = labels[i] = lv_label_create(row);
 		lv_label_set_text(label, items[i].verbatim ? items[i].label : tr(items[i].label));
 		lv_obj_add_style(label, &theme_style_text, 0);
 		lv_obj_set_style_text_font(label, &font_ui_24, 0);
