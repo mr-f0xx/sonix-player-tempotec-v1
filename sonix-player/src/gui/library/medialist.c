@@ -1154,7 +1154,7 @@ static void row_update_selection(panel_t *p, row_t *row, const char *name, const
 	// goes somewhere.
 	lv_obj_t *usual = row->menu_btn ? row->menu_btn : row->chevron;
 	if (usual) {
-		lv_obj_set_hidden(usual, p->selecting || (p->picking_seed && row->menu_btn != NULL));
+		lv_obj_set_hidden(usual, row->cover_only || p->selecting || (p->picking_seed && row->menu_btn != NULL));
 	}
 }
 
@@ -1786,7 +1786,11 @@ static void row_bind(panel_t *p, row_t *row, int index) {
 		lv_obj_set_size(row->button, m.tile_w, m.tile_h);
 		lv_obj_set_pos(row->button, albumgrid_tile_x(index, &m), albumgrid_tile_y(index, &m));
 	} else {
-		lv_obj_set_y(row->button, index * ROW_PITCH);
+		// Restore both x and the full row size when leaving grid mode; setting
+		// y alone leaves odd tiles shifted right and narrow.
+		int row_w = p->cfg ? (int)(p->cfg->screen_width - 2 * p->cfg->padding) : (int)lv_obj_get_width(p->body);
+		lv_obj_set_size(row->button, row_w, ROW_HEIGHT);
+		lv_obj_set_pos(row->button, 0, index * ROW_PITCH);
 	}
 
 	// An album row is named by its value -- name and key, see library.h -- and
@@ -1813,6 +1817,8 @@ static void row_bind(panel_t *p, row_t *row, int index) {
 		lv_obj_set_flex_align(row->button, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 		lv_obj_set_style_pad_row(row->button, 0, 0);
 		lv_obj_set_style_pad_all(row->button, GRID_PAD, 0);
+		lv_obj_set_flex_grow(row->text, 0);
+		lv_obj_set_width(row->text, LV_PCT(100));
 		lv_obj_set_width(row->label, LV_PCT(100));
 		lv_obj_set_height(row->label, m.caption * GRID_LABEL_LINES);
 		lv_obj_set_style_text_font(row->label, GRID_CAPTION_FONT, 0);
@@ -1827,12 +1833,18 @@ static void row_bind(panel_t *p, row_t *row, int index) {
 		// really was one is reset, so the ordinary list does no extra work.
 		lv_obj_set_flex_flow(row->button, LV_FLEX_FLOW_ROW);
 		lv_obj_set_flex_align(row->button, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-		lv_obj_set_style_pad_all(row->button, ROW_PAD, 0);
-		lv_obj_set_style_pad_row(row->button, 0, 0);
+		lv_obj_remove_local_style_prop(row->button, LV_STYLE_PAD_TOP, 0);
+		lv_obj_remove_local_style_prop(row->button, LV_STYLE_PAD_BOTTOM, 0);
+		lv_obj_remove_local_style_prop(row->button, LV_STYLE_PAD_LEFT, 0);
+		lv_obj_remove_local_style_prop(row->button, LV_STYLE_PAD_RIGHT, 0);
+		lv_obj_remove_local_style_prop(row->button, LV_STYLE_PAD_ROW, 0);
+		lv_obj_set_flex_grow(row->text, 1);
+		lv_obj_remove_local_style_prop(row->text, LV_STYLE_WIDTH, 0);
 		lv_obj_set_style_text_font(row->label, ROW_TITLE_FONT, 0);
 		lv_obj_set_size(row->icon, THUMB_SIZE, THUMB_SIZE);
 		lv_obj_set_style_radius(row->icon, 6, 0);
 		lv_obj_set_width(row->label, LV_PCT(100));
+		lv_obj_set_height(row->label, lv_font_get_line_height(ROW_TITLE_FONT) * (p == &panel_artist_albums ? 2 : 1));
 		lv_obj_set_style_text_align(row->label, LV_TEXT_ALIGN_LEFT, 0);
 	}
 
@@ -2029,7 +2041,7 @@ static void medialist_panel_apply_grid(panel_t *p) {
 		return; // never built, or built for nothing yet
 	}
 	bool want = medialist_album_grid() && p->kind == LIBRARY_LIST_ALBUMS && !p->from_paths;
-	if (want == p->grid_mode && (want ? p->grid_pairs != NULL : p->grid_pairs == NULL)) {
+	if (want == p->grid_mode) {
 		return;
 	}
 
@@ -4424,6 +4436,7 @@ static void panel_open(const char *title, library_list_t kind, library_filter_t 
 	bool desc = (sortable && sort_desc) || (kind == LIBRARY_LIST_FAVOURITES && fav_reversed);
 
 	p->from_paths = false;
+	p->grid_mode = medialist_album_grid() && kind == LIBRARY_LIST_ALBUMS;
 	p->list_order = order;
 	p->list_desc = desc;
 	p->play_counts_rev = library_play_counts_revision();
@@ -4503,6 +4516,7 @@ void medialist_open_paths(const char *title, const char *const *paths, const cha
 	p->kind = LIBRARY_LIST_TRACKS;
 	p->filter = LIBRARY_FILTER_NONE;
 	p->from_paths = true;
+	p->grid_mode = false;
 	// A path list is always an ordinary listen, never a seed walk.
 	p->picking_seed = false;
 	snprintf(p->playlist, sizeof(p->playlist), "%s", playlist ? playlist : "");
