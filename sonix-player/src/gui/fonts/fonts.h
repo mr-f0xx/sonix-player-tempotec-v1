@@ -87,6 +87,11 @@ int fonts_text_size(void);
 // cannot be opened at the new sizes or the value is invalid.
 bool fonts_set_text_size(int size);
 
+// Small, Normal and Large lyrics use the active face and its script fallbacks,
+// but their metrics do not follow Appearance -> Text size. Invalid values
+// fall back to Normal.
+const lv_font_t *fonts_lyrics(int size);
+
 // Called after every such switch, for a page that worked something out from a
 // font when it was built and has to work it out again.
 void fonts_register_change(void (*cb)(void));

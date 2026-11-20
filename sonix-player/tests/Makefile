@@ -1760,3 +1760,23 @@ $(BUILD)/test_streaming_preview: $(LAN_PREVIEW_OBJ)
 	$(CC) -o $@ $^ $(LDFLAGS) $(LDLIBS)
 
 -include $(NETWORKMUSIC_UI_OBJ:.o=.d) $(LAN_PREVIEW_OBJ:.o=.d)
+
+# The lyrics size button, its popover and label reflow, without playback or networking.
+LYRICS_UI_SRC = $(ROOT)/tests/ui/test_lyrics_size.c $(ROOT)/src/gui/shell/popover.c \
+                $(ROOT)/src/gui/shell/icons.c $(ROOT)/src/gui/board_profile.c \
+                $(ROOT)/src/system/core/config.c $(ROOT)/src/system/core/lang.c
+LYRICS_UI_OBJ = $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(LYRICS_UI_SRC)) $(UI_LVGL_OBJ)
+
+.PHONY: lyrics-size-ui
+ui: lyrics-size-ui
+lyrics-size-ui: $(BUILD)/test_lyrics_size
+	$(BUILD)/test_lyrics_size ../../sonix-packer/assets/V1/usr/resource/sonix/language
+
+# The included player translation unit is built without warnings-as-errors
+# in production too (the test discards its unrelated code at link time).
+$(BUILD)/ui/tests/ui/test_lyrics_size.o: UI_CFLAGS := $(filter-out -Werror,$(UI_CFLAGS))
+
+$(BUILD)/test_lyrics_size: $(LYRICS_UI_OBJ)
+	$(CC) -o $@ $^ $(LDFLAGS) $(LDLIBS)
+
+-include $(LYRICS_UI_OBJ:.o=.d)

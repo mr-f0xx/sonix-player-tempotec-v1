@@ -27,7 +27,7 @@ make -C sonix-player/tests corners
 make -C sonix-player/tests playbutton
 make -C sonix-player/tests musicsettings-rows
 make -C sonix-player/tests volume-overlay
-make -C sonix-player/tests playerdeck
+make -C sonix-player/tests playerdeck lyrics-size-ui
 make -C sonix-player/tests vinylayout
 make -C sonix-player/tests waveform-overlay
 make -C sonix-player/tests edge-lock
@@ -94,6 +94,8 @@ The `waveform-overlay` UI test checks that both scrolling text pills stay clear 
 The `vinylayout` UI test checks the Vinyl sleeve/record arithmetic at 240×320 across text sizes, the reference-slanted pressing mark in the exposed lower-right arc, the visible even-diameter 2 px grooves, the larger centre label peeking below the sleeve, the tiny-screen fallback, a no-overlap guarantee against the whole deck (including transparent info/seek rows), repeated apply/take-back and sleeve-over-record layering on the real LVGL renderer. It does not link the player's audio/network shell.
 
 The `playerdeck` UI test exercises the V1 deck's real LVGL flex layout while switching between Standard and Waveform, including large font metrics and the fallback when waveform allocation fails. It checks row spacing and that every playback button stays clear of the bottom edge.
+
+The `lyrics-size-ui` test opens the lyrics text-size popover on the 240×320 LVGL display. It checks that the two header buttons stay clear of each other, the active size is marked, synced lines stay centred, untimed lyrics retain their scroll position, and the saved lyrics size leaves the UI setting unchanged.
 
 The `batteryprofile` test uses temporary sysfs files and a wrapped I²C adapter to check stock V1 units, missing or invalid readings, read-only charge-limit access, discharge estimates, and same-source deltas. `batteryprofile-ui` drives the production page at 240×320 with fake battery samples. It covers USB and screen-off behavior, charge history, baseline and resample actions, polling off-page, and translated metric layouts. To validate a real cell's load response, follow the [on-device A/B procedure](../../docs/battery-profiler.md).
 
