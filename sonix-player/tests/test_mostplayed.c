@@ -283,6 +283,19 @@ int main(void) {
 	CHECK(library_open(db));
 	CHECK(library_is_open());
 
+	// Same basename in two albums: only the adjusted track changes, even
+	// across a database reopen. Reset drops just that track's correction.
+	const char *a = "/album A/song.flac", *b = "/album B/song.flac";
+	CHECK(library_lyrics_offset(a) == 0);
+	CHECK(library_set_lyrics_offset(a, 100));
+	CHECK(library_lyrics_offset(b) == 0);
+	CHECK(library_set_lyrics_offset(b, -200));
+	library_close();
+	CHECK(library_open(db));
+	CHECK(library_lyrics_offset(a) == 100 && library_lyrics_offset(b) == -200);
+	CHECK(library_set_lyrics_offset(a, 0));
+	CHECK(library_lyrics_offset(a) == 0 && library_lyrics_offset(b) == -200);
+
 	test_records_and_lists();
 	test_order_follows_counts();
 	test_counts_survive_reopen();

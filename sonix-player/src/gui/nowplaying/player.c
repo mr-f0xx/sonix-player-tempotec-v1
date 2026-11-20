@@ -2048,6 +2048,10 @@ static lv_obj_t *lyrics_find_btn;
 static lv_obj_t *lyrics_find_icon;
 static lv_obj_t *lyrics_size_btn;
 static lv_obj_t *lyrics_size_icon;
+static lv_obj_t *lyrics_offset_btn;
+static lv_obj_t *lyrics_offset_icon;
+static int lyrics_offset_ms; // added to playback time, like a positive LRC offset
+static unsigned lyrics_offset_menu_generation;
 static int lyrics_text_size;
 static cover_image_t lyrics_screen_pic; // the blurred sleeve at the shape of the screen
 static unsigned lyrics_bg_generation;
@@ -2171,10 +2175,11 @@ typedef struct {
 	char path[1024];
 	char title[256];
 	lyrics_t lyrics;
-	bool found;
+	int offset_ms;
 } lyrics_job_t;
 
 static void lyrics_settle(void);
+static void lyrics_header_sync(bool full);
 
 static void lyrics_arrived(void *user) {
 	lyrics_job_t *job = user;
@@ -2182,6 +2187,8 @@ static void lyrics_arrived(void *user) {
 		lyrics_free(&lyrics_cur);
 		lyrics_cur = job->lyrics; // handed over, found or empty
 		lyrics_loaded = true;
+		lyrics_offset_ms = job->offset_ms;
+		lyrics_header_sync(lyrics_progress == LYRICS_FULL);
 		lyrics_fill();
 		lyrics_settle();
 	} else {
@@ -2192,7 +2199,9 @@ static void lyrics_arrived(void *user) {
 
 static void *lyrics_worker(void *arg) {
 	lyrics_job_t *job = arg;
-	job->found = lyrics_load(job->path, job->title, &job->lyrics);
+	if (lyrics_load(job->path, job->title, &job->lyrics) && job->lyrics.synced) {
+		job->offset_ms = library_lyrics_offset(job->path);
+	}
 	if (!gui_post(lyrics_arrived, job)) {
 		lyrics_free(&job->lyrics);
 		free(job);
@@ -2228,6 +2237,9 @@ static void lyrics_request(const device_state_t *state) {
 	snprintf(lyrics_path, sizeof(lyrics_path), "%s", state->current_file);
 	lyrics_free(&lyrics_cur);
 	lyrics_loaded = false;
+	lyrics_offset_ms = 0;
+	lyrics_tap_ms = -1;
+	lyrics_header_sync(lyrics_progress == LYRICS_FULL);
 	lyrics_generation++;
 	lyrics_fill();
 
@@ -2302,7 +2314,7 @@ static void lyrics_follow(double seconds) {
 	if (!lyrics_on_screen() || !lyrics_view || !lyrics_cur.synced || lyrics_cur.count == 0) {
 		return;
 	}
-	int32_t ms = (int32_t)(seconds * 1000.0);
+	int64_t ms = (int64_t)(seconds * 1000.0 + 0.5);
 	if (lyrics_tap_ms >= 0) {
 		// Until the player reports a position near the tapped line, the one
 		// it reports is from before the jump: following it would send the
@@ -2312,7 +2324,7 @@ static void lyrics_follow(double seconds) {
 		}
 		lyrics_tap_ms = -1;
 	}
-	int line = lyrics_line_at(&lyrics_cur, ms);
+	int line = lyrics_line_at(&lyrics_cur, ms + lyrics_offset_ms);
 	if (line != lyrics_lit) {
 		lyrics_paint_line(lyrics_lit, false);
 		lyrics_lit = line;
@@ -2387,6 +2399,7 @@ static void lyrics_look(bool on) {
 	lv_obj_set_style_text_color(lyrics_note, ink, 0);
 	if (lyrics_find_icon) lv_obj_set_style_image_recolor(lyrics_find_icon, ink, 0);
 	if (lyrics_size_icon) lv_obj_set_style_image_recolor(lyrics_size_icon, ink, 0);
+	if (lyrics_offset_icon) lv_obj_set_style_image_recolor(lyrics_offset_icon, ink, 0);
 }
 
 // What travels with the sleeve: it goes out to the left as the words come in.
@@ -2403,7 +2416,7 @@ static void lyrics_shift(lv_obj_t *obj, int32_t x) {
 
 // Lyrics header controls are visible only once the page is all the way in.
 #define LYRICS_HEADER_BTN bp_pick(COMPACT_CORNER_BTN, 56)
-#define LYRICS_HEADER_HIT_SLOP bp_pick(COMPACT_CORNER_BTN_EXT_CLICK, CORNER_BTN_EXT_CLICK)
+#define LYRICS_HEADER_HIT_SLOP bp_pick(COMPACT_CORNER_BTN_EXT_CLICK, 10)
 
 // Alternative (Studio) already has an ellipsis in the right-hand slot. Move
 // it inboard of whichever mark takes that corner. Limit the names to the room
@@ -2450,19 +2463,21 @@ static void lyrics_header_sync(bool full) {
 	bool show = full && lyrics_now;
 	lv_obj_set_hidden(lyrics_find_btn, !show);
 	lv_obj_set_hidden(lyrics_size_btn, !show);
+	lv_obj_set_hidden(lyrics_offset_btn, !show || !lyrics_cur.synced);
 	if (!show) {
 		return;
 	}
 	// The chevron is on the right in Sticker (unless a hi-res badge moved it
 	// back to the left). The search button takes the opposite corner, with
-	// the text size button inboard. Leave room for both expanded hit areas.
+	// the size and timing buttons inboard. Keep their hit areas disjoint.
 	bool back_right = layout_sticker_now && hires_header_pos == PLAYER_HIRES_OFF;
 	int size = LYRICS_HEADER_BTN;
 	int x = back_right ? STUDIO_INFO_MARGIN : lv_obj_get_width(player_screen) - STUDIO_INFO_MARGIN - size;
 	int y = back_btn_centre_y() - lv_obj_get_y(player_screen) - size / 2;
-	int step = size + 2 * LYRICS_HEADER_HIT_SLOP;
+	int step = (size + 2 * LYRICS_HEADER_HIT_SLOP) * (back_right ? 1 : -1);
 	lv_obj_set_pos(lyrics_find_btn, x, y);
-	lv_obj_set_pos(lyrics_size_btn, x + (back_right ? step : -step), y);
+	lv_obj_set_pos(lyrics_size_btn, x + step, y);
+	lv_obj_set_pos(lyrics_offset_btn, x + 2 * step, y);
 }
 
 static int aam_chevron_inset(void);
@@ -2886,6 +2901,44 @@ static void lyrics_find_cb(lv_event_t *e) {
 	}
 }
 
+static void lyrics_offset_menu(void);
+
+static void lyrics_offset_pick(void *user) {
+	device_state_t state;
+	device_state_get(&state);
+	if (lyrics_generation != lyrics_offset_menu_generation || !lyrics_now || !lyrics_cur.synced ||
+	    strcmp(state.current_file, lyrics_path) != 0) return;
+
+	int step = (int)(intptr_t)user;
+	int64_t ms = step ? (int64_t)lyrics_offset_ms + step : 0;
+	if (ms < INT32_MIN || ms > INT32_MAX) return;
+	lyrics_offset_ms = (int)ms;
+	lyrics_tap_ms = -1;
+	lyrics_follow(state.progress_current_secs);
+	if (!library_set_lyrics_offset(lyrics_path, lyrics_offset_ms)) {
+		toast_error(tr("addon_save_failed")); // still usable for this playback
+		return;
+	}
+	if (step) lyrics_offset_menu(); // keep nudging without reopening the menu
+}
+
+static void lyrics_offset_menu(void) {
+	char reset[128];
+	snprintf(reset, sizeof(reset), "%s (%+.1f s)", tr("reset"), lyrics_offset_ms / 1000.0);
+	popover_item_t items[] = {
+		{.label = "-0.1s", .verbatim = true, .action = lyrics_offset_pick, .user = (void *)(intptr_t)-100},
+		{.label = "+0.1s", .verbatim = true, .action = lyrics_offset_pick, .user = (void *)(intptr_t)100},
+		{.label = reset, .verbatim = true, .action = lyrics_offset_pick},
+	};
+	lyrics_offset_menu_generation = lyrics_generation;
+	popover_show(lyrics_offset_btn, items, 3);
+}
+
+static void lyrics_offset_cb(lv_event_t *e) {
+	(void)e;
+	if (!player_sheet_drag_active() && lyrics_cur.synced) lyrics_offset_menu();
+}
+
 // Reflow the labels in place: the highlight, timestamps and any manual
 // scroll hold belong to the same lines before and after the change.
 static void lyrics_size_pick(void *user) {
@@ -3042,6 +3095,11 @@ static void lyrics_drag_cb(lv_event_t *e) {
 	}
 }
 
+static int32_t lyrics_seek_ms(int32_t line_ms) {
+	int64_t target = (int64_t)line_ms - lyrics_offset_ms;
+	return (int32_t)LV_CLAMP(0, target, INT32_MAX);
+}
+
 // A tap on a timed line plays from where it is sung.
 static void lyrics_tap_cb(lv_event_t *e) {
 	(void)e;
@@ -3060,10 +3118,8 @@ static void lyrics_tap_cb(lv_event_t *e) {
 		lv_obj_get_coords(lv_obj_get_child(lyrics_view, i), &area);
 		// The gap between two lines belongs to the one above it.
 		if (p.y >= area.y1 && p.y <= area.y2 + LYRICS_LINE_GAP) {
-			int32_t ms = lyrics_cur.lines[i].ms;
-			if (ms < 0) {
-				return;
-			}
+			int32_t ms = lyrics_seek_ms(lyrics_cur.lines[i].ms);
+			lyrics_tap_ms = -1;
 			device_state_seek((double)ms / 1000.0);
 			// Back to following at once: the finger chose this line.
 			lyrics_user_until = 0;
@@ -3175,6 +3231,7 @@ static void lyrics_build(void) {
 
 	lyrics_find_btn = lyrics_header_button(&icon_lyrics_search, bp_pick(192, 256), lyrics_find_cb, &lyrics_find_icon);
 	lyrics_size_btn = lyrics_header_button(&icon_ebook_font, bp_pick(140, 186), lyrics_size_cb, &lyrics_size_icon);
+	lyrics_offset_btn = lyrics_header_button(&icon_radio_recent, bp_pick(180, 240), lyrics_offset_cb, &lyrics_offset_icon);
 
 	// The sleeve is where the page is pulled in from.
 	lv_obj_add_event_cb(cover_panel, lyrics_drag_cb, LV_EVENT_PRESSED, (void *)(uintptr_t) true);

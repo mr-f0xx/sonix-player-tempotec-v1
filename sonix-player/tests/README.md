@@ -95,7 +95,7 @@ The `vinylayout` UI test checks the Vinyl sleeve/record arithmetic at 240×320 a
 
 The `playerdeck` UI test exercises the V1 deck's real LVGL flex layout while switching between Standard and Waveform, including large font metrics and the fallback when waveform allocation fails. It checks row spacing and that every playback button stays clear of the bottom edge.
 
-The `lyrics-size-ui` test opens the lyrics text-size popover on the 240×320 LVGL display. It checks that the two header buttons stay clear of each other, the active size is marked, synced lines stay centred, untimed lyrics retain their scroll position, and the saved lyrics size leaves the UI setting unchanged.
+The `lyrics-size-ui` test exercises the lyrics text-size and timing popovers on the 240×320 LVGL display. It checks that the three header buttons stay clear of each other, the active size is marked, synced lines stay centred, untimed lyrics retain their scroll position, and the saved lyrics size leaves the UI setting unchanged. It also checks repeated timing nudges, highlighting and seek targets, reset, and a track change with the menu open. The `mostplayed` database fixture verifies per-track offset persistence across a reopen.
 
 The `batteryprofile` test uses temporary sysfs files and a wrapped I²C adapter to check stock V1 units, missing or invalid readings, read-only charge-limit access, discharge estimates, and same-source deltas. `batteryprofile-ui` drives the production page at 240×320 with fake battery samples. It covers USB and screen-off behavior, charge history, baseline and resample actions, polling off-page, and translated metric layouts. To validate a real cell's load response, follow the [on-device A/B procedure](../../docs/battery-profiler.md).
 
