@@ -325,6 +325,8 @@ int main(void) {
 	assert(dot_visible);
 	ota_auto_release_taken();
 	assert(!dot_visible);
+	// The taken tag is remembered on disk, so a restart does not re-notify.
+	assert(strcmp(config_get("system", "ota_taken_tag", ""), "1.9.0") == 0);
 	lv_tick_inc(6 * 60 * 60 * 1000 + 300);
 	lv_timer_handler();
 	tick();
@@ -342,6 +344,27 @@ int main(void) {
 	assert(notice_blinks == 3);
 	assert(dot_visible);
 	assert(confirm_showing());
+
+	// Defer, then make the update: the dot comes back for the deferral on the
+	// next check, then the update is made and it is gone for good.
+	press_button_with_label("Later");
+	assert(dot_visible);
+	assert(strcmp(config_get("system", "ota_dismissed_tag", ""), "1.10.0") == 0);
+	lv_tick_inc(6 * 60 * 60 * 1000 + 300);
+	lv_timer_handler();
+	tick();
+	assert(check_starts == 7);
+	assert(dot_visible); // the deferred release stands, as designed
+	ota_auto_release_taken();
+	assert(!dot_visible);
+	assert(strcmp(config_get("system", "ota_dismissed_tag", ""), "") == 0); // the deferral is forgotten
+	lv_tick_inc(6 * 60 * 60 * 1000 + 300);
+	lv_timer_handler();
+	tick();
+	assert(check_starts == 8);
+	assert(notice_blinks == 3); // no new blink for the handled release
+	assert(!dot_visible);
+	assert(!confirm_showing());
 
 	puts("PASS auto OTA notice: check on connect and at interval, LED/dot/toast/popup, dedupe, battery guard, toggle");
 	return 0;
