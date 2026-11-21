@@ -611,6 +611,31 @@ static void set_page_backdrop(const lv_image_dsc_t *backdrop) {
 // accent blue for the time. Dark and Light have no
 // field of their own: they keep the light type they have always worn over the
 // blurred strip, whatever the page behind them is.
+// The note drawn in the field while nothing plays: the active set's own
+// drawing of it, cut at the field's size where the set carries one.
+//
+// Ask for a set that supplies the note cut at `note_side` itself before falling
+// back to scaling, the way the menu tiles do. This field is ~94 px on the V1,
+// and the set's only other note is a 32 px mark -- stretching that up is what
+// turned the placeholder into a soft blob. The scale is a fallback now, for
+// sets that carry one cut of the note and no more.
+//
+// Called again from screensaver_refresh_theme(): the drawing is a property of
+// the active set, and recolouring it was not enough when the palette changed
+// under it, because a set that has its own note is the whole point.
+static void apply_idle_note_art(void) {
+	if (!idle_note) {
+		return;
+	}
+	int note_side = lv_obj_get_height(spectrum) / 2;
+	if (note_side < 48) {
+		note_side = 48;
+	}
+	const lv_image_dsc_t *note_art = theme_icon_at(&icon_music_note, note_side);
+	lv_image_set_src(idle_note, note_art);
+	lv_image_set_scale(idle_note, theme_icon_scale_to(note_art, note_side));
+}
+
 static void screensaver_refresh_theme(void) {
 	if (!saver) {
 		return;
@@ -671,7 +696,9 @@ static void screensaver_refresh_theme(void) {
 	}
 	if (idle_note) {
 		// The note shown while nothing plays wears the accent, like the rail
-		// it replaces.
+		// it replaces -- and is the new set's drawing of it, not the one that
+		// happened to be active when this screen was built.
+		apply_idle_note_art();
 		lv_obj_set_style_image_recolor(idle_note, theme()->accent, 0);
 	}
 
@@ -1656,10 +1683,7 @@ void screensaver_init(gui_config_t *cfg) {
 		note_side = 48;
 	}
 	idle_note = lv_image_create(spectrum);
-	// The biggest drawing of the note the set has -- the sleeve mark, not the
-	// small row copy -- scaled to the field.
-	lv_image_set_src(idle_note, theme_icon_at(&icon_music_note, note_side));
-	lv_image_set_scale(idle_note, theme_icon_scale_to(lv_image_get_src(idle_note), note_side));
+	apply_idle_note_art();
 	lv_obj_set_style_image_recolor_opa(idle_note, LV_OPA_COVER, 0);
 	lv_obj_center(idle_note);
 	lv_obj_set_clickable(idle_note, false);

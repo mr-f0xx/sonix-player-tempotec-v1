@@ -33,6 +33,7 @@
 #include "src/gui/shell/settingsrow.h"
 #include "src/gui/shell/icons.h"
 #include "src/gui/shell/theme.h"
+#include "src/gui/shell/theme_icons.h"
 #include "src/system/core/config.h"
 #include "src/system/core/lang.h"
 #include "src/system/device/bootlogo.h"
@@ -1099,7 +1100,44 @@ int main(int argc, char **argv) {
 	assert(lv_obj_is_hidden(rail));
 	assert(!lv_obj_is_hidden(idle_note));
 	assert(lv_color_eq(lv_obj_get_style_image_recolor(idle_note, 0), theme()->accent));
-	assert(lv_image_get_src(idle_note) == &icon_music_note);
+	/* A theme with its own set answers with its own note -- and the note is the
+	 * point. This used to resolve to whatever row happened to claim the shared
+	 * icon_music_note symbol, which was the Subsonic logo: a service mark shown
+	 * as the "nothing playing" placeholder, and at 32 px stretched up to the
+	 * field's ~94. So check it is a note-sized drawing of a note, not the size
+	 * that lands on screen by accident. */
+	/* Every palette, not just the one the run happened to start on: a theme
+	 * with its own set answers with its own note, and the note is the point.
+	 * This used to resolve to whichever row claimed the shared icon_music_note
+	 * symbol, which was the Subsonic logo -- a service mark standing in for the
+	 * "nothing playing" placeholder, at 32 px stretched up to this field's
+	 * ~94. */
+	for (int kind = 0; kind < THEME_KIND_COUNT; kind++) {
+		theme_set_kind((theme_kind_t)kind);
+		pump(100);
+		if (!lv_obj_is_hidden(idle_note)) {
+			const lv_image_dsc_t *drawn = lv_image_get_src(idle_note);
+			assert(drawn);
+			if (theme_icons_active()) {
+				const lv_image_dsc_t *note = theme_icon_at(&icon_music_note, 96);
+				assert(note != &icon_music_note);
+				assert(drawn == note);
+				/* Cut for this field rather than a small mark stretched up
+				 * to it: a set whose only claimant of the symbol is a 32 px
+				 * service mark resamples to fill ~94 px, which is the blur.
+				 * One pixel of tolerance, because the field's height is not
+				 * a size every set is obliged to have cut. */
+				int field = lv_obj_get_height(spectrum) / 2;
+				assert(field >= 48);
+				assert(note->header.w == note->header.h);
+				assert((int)note->header.w + 1 >= field);
+			} else {
+				assert(drawn == &icon_music_note);
+			}
+		}
+	}
+	theme_set_kind(THEME_KIND_DARK);
+	pump(100);
 	state.status = AUDIO_STATUS_PLAYING;
 	pump(100);
 	assert(!lv_obj_is_hidden(rail));

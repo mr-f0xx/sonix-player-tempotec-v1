@@ -16,6 +16,8 @@
 
 #include "theme_icons.h"
 
+extern const lv_image_dsc_t icon_rose_music_note;
+extern const lv_image_dsc_t icon_rose_music_note_cover;
 extern const lv_image_dsc_t icon_rose_home_music;
 extern const lv_image_dsc_t icon_rose_home_streaming;
 extern const lv_image_dsc_t icon_rose_home_wireless;

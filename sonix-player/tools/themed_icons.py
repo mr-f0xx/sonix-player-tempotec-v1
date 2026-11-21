@@ -91,8 +91,23 @@ ICONS = {
     # the first rung of the icon-only ladder (22 px), so it costs nothing to
     # reuse them there. The length of this list is what
     # tools/main_menu_icons.py renders for the shared set.
+    # The "no artwork" placeholder, drawn by the player, the library scan and
+    # both the screensaver's cover slot and its idle field. It had no art of
+    # its own, so the nearest row claiming the shared symbol answered instead
+    # -- which was the Subsonic logo, on every theme that carries a set. Cut at
+    # the two sizes the call sites ask for: the 128 px cover slot and the
+    # 96 px scan note. The screensaver's idle field asks for ~94 and takes the
+    # 96 px one.
+    # The "no artwork" placeholder, drawn by the player, the library scan and
+    # both the screensaver's cover slot and its idle field. It had no art of its
+    # own, so the only row claiming the shared symbol answered instead -- the
+    # Subsonic logo, on every theme that carries a set. Cut at the two sizes the
+    # call sites ask for: the 128 px cover slot and the 96 px scan note, which
+    # is also the nearest to the screensaver's ~94 px field.
+    "music_note": ("music_note.svg", 96, "music_note"),
+    "music_note_cover": ("music_note.svg", 128, "music_note"),
     "home_music": ("music.svg", 22, "music2"),
-    "home_streaming": ("streaming.svg", 22, "radio_player"),
+    "home_streaming": ("radio_player.svg", 22, "radio_player"),
     "home_wireless": ("wireless.svg", 22, "wifi_high"),
     "home_audiobooks": ("audiobooks.svg", 22, "files_audiobook"),
     "home_more": ("more.svg", 22, "ellipsis_vertical"),
@@ -149,7 +164,7 @@ ICONS = {
     "qobuz": ("qobuz.svg", 32, "qobuz_mark"),
     "soundcloud": ("soundcloud.svg", 32, "soundcloud_mark"),
     "jellyfin": ("jellyfin.svg", 32, "jellyfin_mark"),
-    "subsonic": ("subsonic.svg", 32, "music_note"),
+    "subsonic": ("subsonic.svg", 32, None),
 
     # The More page.
     "dac": ("dac.svg", 32, "usbaudioout"),
@@ -271,8 +286,18 @@ MENU_TILES = (
 MENU_SIZES = (22, 28, 34, 40, 46, 52)
 
 # The drawings the ladder cuts, in MENU_TILES order, without the home_ prefix.
+# The drawing each home tile uses, and the family it is stored under. They are
+# separate because Streaming keeps its family name (home_streaming) while
+# drawing radio.svg: the tile is the boombox, the same mark Tokyo Night shows
+# there (icon_radio_player), so the set matches what every other theme draws for
+# that destination instead of inventing its own metaphor for it.
 MENU_LADDER_DRAWINGS = (
-    "music", "streaming", "wireless", "audiobooks", "more", "settings",
+    ("music", "music"),
+    ("radio_player", "streaming"),
+    ("wireless", "wireless"),
+    ("audiobooks", "audiobooks"),
+    ("more", "more"),
+    ("settings", "settings"),
 )
 
 
@@ -289,10 +314,10 @@ def menu_ladder(folder, prefix):
     rungs = []
     for size in MENU_SIZES:
         names = []
-        for drawing in MENU_LADDER_DRAWINGS:
+        for drawing, family in MENU_LADDER_DRAWINGS:
             if size == 22:
                 # Reuse the labelled tile art instead of a duplicate copy.
-                names.append("&icon_%s_home_%s" % (prefix, drawing))
+                names.append("&icon_%s_home_%s" % (prefix, family))
                 continue
             name = "icon_%s_menu_%s_%d" % (prefix, drawing, size)
             path = os.path.join(ICON_DIR, folder, drawing + ".svg")
