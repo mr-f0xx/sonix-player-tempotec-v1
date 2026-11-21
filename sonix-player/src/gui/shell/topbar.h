@@ -42,6 +42,13 @@ typedef enum {
 } topbar_library_t;
 void topbar_set_library_check(topbar_library_t state);
 
+// The accent dot beside the playback/library/sonixlink glyphs: a small circle
+// in the theme accent, shown while a new firmware release is waiting to be
+// installed. It is the one child of the status bar allowed to keep its press;
+// tapping it runs the callback registered with topbar_set_update_tap_cb.
+void topbar_set_update_available(bool shown);
+void topbar_set_update_tap_cb(void (*cb)(void));
+
 // Shows or hides the status bar. Pages that want the full screen height (the
 // player, with its artwork flush to the top) hide it on entry.
 void topbar_set_hidden(bool hidden);

@@ -98,6 +98,16 @@ static bool player_palette_enabled;
 static lv_color_t player_palette_accent;
 static void topbar_apply_player_ink(void);
 
+// The update dot: a small accent circle beside the radio glyphs, shown while
+// a new firmware release waits to be installed. It is the one child of the
+// status bar allowed to keep its press -- every other child is press-suppressed
+// so the bar's own gestures (flick, drag) reach the bar.
+#define UPDATE_DOT_COMPACT 9
+#define UPDATE_DOT_REGULAR 13
+
+static lv_obj_t *update_dot;
+static void (*update_tap_cb)(void);
+
 static void topbar_apply_player_color(void) {
 	if (!top_bar) return;
 	topbar_apply_player_ink();
@@ -700,6 +710,27 @@ void topbar_set_library_check(topbar_library_t state) {
 	}
 }
 
+// The dot: a new update is waiting. Tapping it runs whatever the caller
+// registered -- the OTA notice re-brings the update card. It is hidden
+// whenever the caller takes the release away again.
+static void update_dot_click_cb(lv_event_t *e) {
+	(void)e;
+	if (update_tap_cb) {
+		update_tap_cb();
+	}
+}
+
+void topbar_set_update_available(bool shown) {
+	if (!update_dot) {
+		return;
+	}
+	lv_obj_set_hidden(update_dot, !shown);
+}
+
+void topbar_set_update_tap_cb(void (*cb)(void)) {
+	update_tap_cb = cb;
+}
+
 static void radio_timer_cb(lv_timer_t *timer) {
 	(void)timer;
 	topbar_refresh_radios();
@@ -1025,6 +1056,9 @@ static void topbar_refresh_theme(void) {
 	topbar_apply_player_color();
 	last_battery_percent = -2;
 	last_battery_charging = -1;
+	if (update_dot) {
+		lv_obj_set_style_bg_color(update_dot, theme()->accent, 0);
+	}
 	if (jack_timer) {
 		lv_timer_ready(jack_timer);
 	}
@@ -1425,6 +1459,23 @@ void topbar_init(gui_config_t *cfg) {
 	// function. The bar keeps its own CLICKABLE, which is what the drag hangs
 	// off; only what is inside it gives presses up.
 	topbar_clear_child_presses(top_bar);
+
+	// The one child allowed to keep its press: the update dot. Everything else
+	// in the bar is press-free by design, because the bar's whole body is the
+	// sheet pull. The dot is a small accent circle at the end of the left group,
+	// and tapping it runs the caller's callback.
+	update_dot = lv_obj_create(container_left);
+	lv_obj_set_size(update_dot, topbar_compact ? UPDATE_DOT_COMPACT : UPDATE_DOT_REGULAR,
+			  topbar_compact ? UPDATE_DOT_COMPACT : UPDATE_DOT_REGULAR);
+	lv_obj_set_style_bg_color(update_dot, theme()->accent, 0);
+	lv_obj_set_style_bg_opa(update_dot, LV_OPA_COVER, 0);
+	lv_obj_set_style_border_width(update_dot, 0, 0);
+	lv_obj_set_style_radius(update_dot, LV_RADIUS_CIRCLE, 0);
+	lv_obj_set_style_shadow_width(update_dot, 0, 0);
+	lv_obj_set_style_pad_all(update_dot, 0, 0);
+	lv_obj_set_scrollable(update_dot, false);
+	lv_obj_add_event_cb(update_dot, update_dot_click_cb, LV_EVENT_CLICKED, NULL);
+	lv_obj_set_hidden(update_dot, true);
 
 	// The battery shell is recoloured by hand rather than by a style, so it needs
 	// a repaint when the palette changes.

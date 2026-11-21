@@ -14,4 +14,10 @@
 
 void fwupdate_show(void);
 
+// As fwupdate_show(), but with the release a background check already found:
+// the download starts immediately, straight onto the progress screen. The
+// release must be in ota_release() (a finished OTA_OK check). If the release is
+// not there, the "busy" notice is shown instead.
+void fwupdate_start_download(void);
+
 #endif /* FWUPDATE_H */

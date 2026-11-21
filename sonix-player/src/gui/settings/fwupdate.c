@@ -670,7 +670,7 @@ static void show_downloading(void) {
 	hide_buttons(1);
 }
 
-static void download_clicked(void) {
+static void start_download(void) {
 	if (!ota_download_start()) {
 		show_notice(tr("system_update_busy"));
 		return;
@@ -678,6 +678,10 @@ static void download_clicked(void) {
 	phase = PHASE_DOWNLOAD;
 	show_downloading();
 	start_polling();
+}
+
+static void download_clicked(void) {
+	start_download();
 }
 
 // The box as tall as the notes, up to notes_max_h; longer notes scroll.
@@ -849,4 +853,19 @@ void fwupdate_show(void) {
 		holding_screen = true;
 		power_hold_screen_on(true);
 	}
+}
+
+void fwupdate_start_download(void) {
+	if (!veil) {
+		build();
+	}
+	if (!holding_screen) {
+		holding_screen = true;
+		power_hold_screen_on(true);
+	}
+	start_download();
+	// Whether the download started or the busy notice came up, the card is
+	// what the user should see.
+	lv_obj_set_hidden(veil, false);
+	lv_obj_move_foreground(veil);
 }
