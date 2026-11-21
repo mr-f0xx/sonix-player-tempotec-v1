@@ -122,6 +122,34 @@ static gui_config_t *config;
 static bool browse_grid;
 static bool browse_covers;
 
+// The optional views belong only to the card's Music tree, not other
+// folders whose names merely start with "Music". Paths here use the mount's
+// spelling, just like browser_state_directory(). Do not resolve paths on the
+// UI thread: card I/O belongs to the reader.
+static bool browser_in_music(const char *root, const char *path) {
+	if (!root || !root[0] || !path) return false;
+	size_t n = strlen(root);
+	while (n > 1 && root[n - 1] == '/') n--;
+	const char *tail;
+	if (n == 1 && root[0] == '/') {
+		if (path[0] != '/') return false;
+		tail = path + 1;
+	} else {
+		if (strncmp(path, root, n) != 0 || path[n] != '/') return false;
+		tail = path + n;
+	}
+	while (*tail == '/') tail++;
+	if (strncmp(tail, "Music", 5) != 0 || (tail[5] != '\0' && tail[5] != '/')) return false;
+	// Never treat an unnormalised path that escapes Music as being inside it.
+	for (const char *p = tail + 5; *p;) {
+		while (*p == '/') p++;
+		const char *start = p;
+		while (*p && *p != '/') p++;
+		if (p - start == 2 && start[0] == '.' && start[1] == '.') return false;
+	}
+	return true;
+}
+
 static void grid_metrics(albumgrid_metrics_t *m) {
 	int width = config->screen_width - 2 * config->padding;
 	int height = lv_obj_get_height(file_list);
@@ -483,6 +511,36 @@ static void row_bind(row_t *row, int index) {
 // windowing
 // ---------------------------------------------------------------------------
 
+// The pool deliberately extends beyond the viewport. Queue visible entries
+// first instead of making the single worker decode off-screen covers ahead of
+// them. Partially visible rows count; no storage or decoding runs here.
+static bool row_is_visible(int index) {
+	int y, height;
+	if (browse_grid) {
+		albumgrid_metrics_t m;
+		grid_metrics(&m);
+		y = albumgrid_tile_y(index, &m);
+		height = m.tile_h;
+	} else {
+		y = index * ROW_PITCH;
+		height = ROW_HEIGHT;
+	}
+	int scroll = lv_obj_get_scroll_y(file_list);
+	if (scroll < 0) scroll = 0;
+	return y + height > scroll && y < scroll + lv_obj_get_height(file_list);
+}
+
+static void cancel_offscreen_thumbs(void) {
+	if (!browse_grid && !browse_covers) return;
+	for (int i = 0; i < ROW_POOL; i++) {
+		row_t *row = &rows[i];
+		if (row->index >= 0 && row->thumb_requested && !row->thumb_settled && !row_is_visible(row->index)) {
+			coverloader_release(row_slot(row));
+			row->thumb_requested = false;
+		}
+	}
+}
+
 // Assigns the row widgets to the band of entries around the scroll position,
 // the way the stock player's listview does: quantise the scroll offset to the
 // row pitch, start one row early, and cover the viewport from there.
@@ -526,6 +584,7 @@ static void window_update(void) {
 		int index = first + i;
 		row_bind(&rows[index % ROW_POOL], index < (int)shown.count ? index : -1);
 	}
+	cancel_offscreen_thumbs();
 }
 
 // Do not save the initial root listing or a programmatic scroll as user
@@ -607,16 +666,9 @@ static void thumbs_update(void) {
 			continue;
 		}
 
-		// The pool can hold more than a screenful. Avoid decoding distant
-		// tiles merely because their widgets exist; scroll resumes this timer.
-		if (browse_grid && !row->thumb_requested) {
-			albumgrid_metrics_t m;
-			grid_metrics(&m);
-			int scroll = lv_obj_get_scroll_y(file_list);
-			int y = albumgrid_tile_y(row->index, &m);
-			if (y + m.tile_h < scroll - m.pitch_y ||
-			    y > scroll + lv_obj_get_height(file_list) + m.pitch_y) continue;
-		}
+		// Requests outside the viewport are cancelled as soon as it scrolls.
+		// A later scroll resumes the timer and asks for newly visible covers.
+		if ((browse_grid || browse_covers) && !row_is_visible(row->index)) continue;
 
 		// In the default list, folders keep their familiar icons and cost no decode.
 		if (shown.entries[row->index].is_dir && !browse_covers && !browse_grid) {
@@ -1022,6 +1074,15 @@ static void screen_unloaded_cb(lv_event_t *e) {
 	(void)e;
 	save_browser_state();
 	selection_stop();
+	// Do not leave this page's thumbnails queued ahead of another page.
+	for (int i = 0; i < ROW_POOL; i++) {
+		row_t *row = &rows[i];
+		if (row->thumb_requested && !row->thumb_settled) {
+			coverloader_release(row_slot(row));
+			row->thumb_requested = false;
+		}
+	}
+	if (thumb_timer) lv_timer_pause(thumb_timer);
 }
 
 static void entry_clicked_cb(lv_event_t *e) {
@@ -1578,8 +1639,9 @@ static void browser_open_dir(const char *path) {
 
 	shown.count = 0;
 	shown.pool_used = 0;
-	browse_grid = config_get_bool("library", "browse_grid", false);
-	browse_covers = config_get_bool("library", "browse_covers", false);
+	bool in_music = browser_in_music(root_path, current_path);
+	browse_grid = in_music && config_get_bool("library", "browse_grid", false);
+	browse_covers = in_music && config_get_bool("library", "browse_covers", false);
 	lv_obj_set_height(list_body, ROW_PITCH);
 	lv_obj_scroll_to_y(file_list, 0, LV_ANIM_OFF);
 

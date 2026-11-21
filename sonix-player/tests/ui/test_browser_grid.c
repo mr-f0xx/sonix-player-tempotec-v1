@@ -13,13 +13,24 @@ bool bp_is_tempotec_v1(void) { return true; }
 int bp_pick(int compact, int regular) { (void)regular; return compact; }
 const lv_font_t *bp_tile_label_font(void) { return &font_ui_14; }
 int settingsrow_content_top(gui_config_t *cfg) { (void)cfg; return 72; }
-void coverloader_release(int slot) { (void)slot; }
+static int released[COVERLOADER_SLOTS];
+void coverloader_release(int slot) { assert(slot >= 0 && slot < COVERLOADER_SLOTS); released[slot]++; }
 void cover_free(cover_image_t *image) { (void)image; }
 static const uint8_t glyph[] = {255};
 #define ICON(n) const lv_image_dsc_t n = { .header = { .magic = LV_IMAGE_HEADER_MAGIC, .cf = LV_COLOR_FORMAT_A8, .w = 1, .h = 1, .stride = 1 }, .data = glyph, .data_size = 1 }
 ICON(icon_folder); ICON(icon_music2); ICON(icon_album);
 
 int main(void) {
+	// Only the actual Music tree, including mounts with a trailing slash or /.
+	assert(browser_in_music("/card", "/card/Music"));
+	assert(browser_in_music("/card/", "/card//Music/Artist/Album"));
+	assert(browser_in_music("/", "/Music/Artist"));
+	assert(!browser_in_music("/card", "/card"));
+	assert(!browser_in_music("/card", "/card/Downloads"));
+	assert(!browser_in_music("/card", "/card/Music Videos"));
+	assert(!browser_in_music("/card", "/cards/Music"));
+	assert(!browser_in_music("/card", "/card/Music/../Downloads"));
+	assert(!browser_in_music("/card", "/card/music"));
 	lv_init(); lv_display_create(240, 320);
 	font_ui_14 = font_ui_18 = lv_font_montserrat_14;
 	lv_style_init(&theme_style_icon);
@@ -55,6 +66,16 @@ int main(void) {
 	assert(lv_obj_get_width(rows[0].icon) == m.cover);
 	assert(lv_image_get_src(rows[0].icon) == &icon_album);
 	assert(lv_image_get_src(rows[1].icon) == &icon_album);
+	assert(row_is_visible(0) && row_is_visible(3));
+	assert(!row_is_visible(6));
+	// Scrolling cancels an off-screen pending cover even if its row remains
+	// in the recycled pool; it can be requested again on the way back.
+	rows[0].thumb_requested = true;
+	int slot = row_slot(&rows[0]), before = released[slot];
+	lv_obj_scroll_to_y(file_list, m.pitch_y, LV_ANIM_OFF);
+	window_update();
+	assert(rows[0].index == 0 && !rows[0].thumb_requested && released[slot] == before + 1);
+	lv_obj_scroll_to_y(file_list, 0, LV_ANIM_OFF); window_update();
 	// Selection and the playing mark still belong to the entry in a tile.
 	selecting = true; chosen = calloc(shown.count, 1); assert(chosen);
 	chosen[0] = 1; row_update_selection(&rows[0]);

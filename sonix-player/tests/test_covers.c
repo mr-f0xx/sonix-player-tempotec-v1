@@ -374,6 +374,21 @@ static void test_ogg_and_wv_embedded_covers(const char *dir) {
 // ---------------------------------------------------------------------------
 // 4. 1000-cover JPEG cache + LRU eviction + prefetch + V1 backdrop + id_worker
 // ---------------------------------------------------------------------------
+static int picture_thumb_count(const char *db_path, int size) {
+	sqlite3 *db = NULL;
+	sqlite3_stmt *stmt = NULL;
+	assert(sqlite3_open(db_path, &db) == SQLITE_OK);
+	assert(sqlite3_prepare_v2(db, "SELECT COUNT(*) FROM thumbs WHERE key LIKE ?1", -1, &stmt, NULL) == SQLITE_OK);
+	char pattern[32];
+	snprintf(pattern, sizeof(pattern), "p%%|%d", size);
+	sqlite3_bind_text(stmt, 1, pattern, -1, SQLITE_TRANSIENT);
+	assert(sqlite3_step(stmt) == SQLITE_ROW);
+	int count = sqlite3_column_int(stmt, 0);
+	sqlite3_finalize(stmt);
+	sqlite3_close(db);
+	return count;
+}
+
 static void test_1000_cover_cache_and_loader(const char *dir) {
 	cover_set_cache_dir(dir);
 
@@ -484,8 +499,15 @@ static void test_1000_cover_cache_and_loader(const char *dir) {
 	free(cover_jpg);
 	snprintf(path, sizeof(path), "%s/track.flac", embedded_dir);
 	assert(link(track_path, path) == 0);
+	// A thumbnail first built for a track can be reused by a folder whose
+	// first track embeds the same picture, without decoding it a second time.
+	cover_image_t warm;
+	assert(cover_thumb_load(track_path, false, 36, &warm));
+	cover_free(&warm);
+	assert(picture_thumb_count(db_path, 36) > 0);
 	const char *folders[] = {cover_dir, embedded_dir, empty_dir};
 	for (int i = 0; i < 3; i++) {
+		int before = picture_thumb_count(db_path, 36);
 		coverloader_request_dir(COVERLOADER_BROWSER_BASE, folders[i], 36);
 		cover_image_t thumb;
 		bool done = false, found = false;
@@ -495,6 +517,7 @@ static void test_1000_cover_cache_and_loader(const char *dir) {
 		}
 		assert(done && found == (i < 2));
 		if (found) { assert(thumb.dsc.header.w == 36); cover_free(&thumb); }
+		if (i == 1) assert(picture_thumb_count(db_path, 36) == before);
 	}
 	coverloader_release(COVERLOADER_BROWSER_BASE);
 }
