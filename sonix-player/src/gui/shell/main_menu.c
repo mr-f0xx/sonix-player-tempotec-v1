@@ -219,26 +219,35 @@ static void main_menu_refresh_tiles(void) {
 			// A further 5% reduction in every theme, rounded to the nearest
 			// display pixel so compact glyphs do not shrink by a full extra pixel.
 			icon_size = LV_MAX(1, (icon_size * 95 + 50) / 100);
+			// A themed set carries the six at a ladder of sizes, and the box
+			// just measured lands between rungs as the header and footer move.
+			// Snapping to the nearest rung here means the layout draws at
+			// exactly the size the art was cut at -- no resample at all, at
+			// every height the grid reaches -- rather than handing LVGL a
+			// fractional scale for the sake of two or three pixels of breathing
+			// room it does not need. Themes without a set of their own are
+			// left alone: they have art at every size already.
+			icon_size = theme_icon_home_tile_size(icon_size);
 		}
 
 		const lv_image_dsc_t *source = tokyo ? TOKYO_MENU_ICONS[i] : NORMAL_MENU_ICONS[i];
 		if (i == 0 && browse) source = tokyo ? &icon_folder : &icon_menu_explorer;
 		if (i == 3 && books) source = tokyo ? &icon_files_book : &icon_menu_books;
-		// Rosé Pine Moon draws these six itself, at the size this layout
-		// draws them (22 px labelled, see the table in
-		// tools/themed_icons.py). The swap comes after the browse/books
-		// substitutions so the folder and the books glyph -- which those two
-		// destinations borrow -- are themed too, and before the native-size
-		// path below, which then finds art at the tile's own size rather than
-		// a shared bitmap scaled down.
+		// The two menu layouts draw these six at very different sizes, so the
+		// set carries each of them at a ladder of cuts and takes the size as an
+		// argument rather than being told which layout is asking. That
+		// distinction is what the icons-only arrangement used to get wrong: it
+		// asked for the 22 px labelled tile art and drew it at 52, which put a
+		// 2.4x resample on a 1.6 px stroke and left the six looking soft and
+		// hollow next to the shared illustrations.
 		if (tokyo && !(i == 0 && browse) && !(i == 3 && books)) {
-			const lv_image_dsc_t *themed = theme_icon_home_tile(i);
+			const lv_image_dsc_t *themed = theme_icon_home_tile_at(i, icon_size);
 			if (themed) {
 				source = themed;
 			}
 		}
 		if (tokyo) {
-			source = theme_icon(source);
+			source = theme_icon_at(source, icon_size);
 		}
 		if (icons_only && !(i == 0 && browse) && !(i == 3 && books)) {
 			// Use art pre-rasterized at the final pixel size, not stretched
@@ -246,9 +255,8 @@ static void main_menu_refresh_tiles(void) {
 			// Matching source/layout sizes also avoids LVGL's fractional image
 			// transform and its extra edge interpolation. Other menus and the
 			// labeled layout continue to use their original sources and sizes.
-			// A themed set carries its own 22 px rendering (theme_icon above
-			// already answered with it), so the shared native-size table is
-			// only consulted for the themes that share it.
+			// A themed set names its own art at each size, so the shared
+			// native-size table is only consulted for the themes that share it.
 			if (!theme_icons_active()) {
 				const lv_image_dsc_t *native = main_menu_icon_native(i, tokyo, icon_size);
 				if (native) {

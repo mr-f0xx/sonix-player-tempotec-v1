@@ -421,23 +421,25 @@ static void check_native_icon(lv_obj_t *icon, int tile, int size) {
 	// tile, cut at the size this layout draws it -- so the shared native-size
 	// table is not consulted at all and the assertion below would be wrong.
 	if (theme_icons_active()) {
-		// The set draws the tile once, at the size the labelled layout uses
-		// (22 px on V1); the image widget may then be scaled up to the larger
-		// icon-only box, so only the source is checked here.
+		// A theme with its own set carries each home tile at a ladder of
+		// sizes: 22 px for the labelled layout, then the sizes the icon-only
+		// arrangement reaches (52 in the full-height grid, 39 when the footer
+		// takes more room). The layout passes the size it is about to draw at
+		// and the set answers with the nearest rung, so the software renderer
+		// stays at LV_SCALE_NONE.
 		//
-		// Not every tile is cut at 22 px, though: a tile whose shared symbol
-		// is a large mark (Streaming answers icon_radio_player, a 128 px cover)
-		// has to be cut at that symbol's size, because theme_icon() hands the
-		// shared call sites this same drawing and they scale by its own width.
-		// A 22 px drawing returned there would be blown up to 128. So the
-		// bitmap is square, and it is scaled to the box rather than drawn at
-		// its natural size -- both of which this checks.
-		const lv_image_dsc_t *themed = theme_icon_home_tile(tile);
+		// This used to be a single 22 px cut scaled up to fill the larger box,
+		// which is what left these six looking soft. So the checks that matter
+		// are: the drawing is at least as large as the box (never upscaled),
+		// and it is within a couple of pixels of it (so the resample is at
+		// most sub-pixel, not a 2.4x blow-up).
+		const lv_image_dsc_t *themed = theme_icon_home_tile_at(tile, size);
 		assert(source == themed);
 		assert(themed && themed->header.w == themed->header.h);
-		if (themed->header.w > (uint32_t)size) {
-			assert(lv_image_get_scale_x(icon) != LV_SCALE_NONE);
-		}
+		int side = (int)themed->header.w;
+		assert(side == size);
+		assert(lv_image_get_scale_x(icon) == LV_SCALE_NONE);
+		assert(lv_image_get_scale_y(icon) == LV_SCALE_NONE);
 		return;
 	}
 	assert(source == main_menu_icon_native(tile, theme_uses_function_glyphs(), size));
@@ -542,6 +544,10 @@ static void check_grid(lv_obj_t *grid, bool icons_only) {
 		int available = LV_MAX(1, LV_MIN(lv_obj_get_width(tile), lv_obj_get_height(tile)) - bp_pick(12, 24));
 		int previous_size = theme_is_oled() ? LV_MAX(1, available * 80 / 100) : available;
 		int expected_size = LV_MAX(1, (previous_size * 95 + 50) / 100);
+		/* A theme with its own set snaps that measured box onto the nearest
+		 * size it has cut (see theme_icon_home_tile_size): the ladder is spaced
+		 * so the layout never asks for art it does not have. */
+		expected_size = theme_icon_home_tile_size(expected_size);
 		assert(long_side == expected_size);
 		check_native_icon(icon, (int)i, expected_size);
 		lv_area_t t, image;

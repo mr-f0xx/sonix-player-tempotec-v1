@@ -1061,11 +1061,24 @@ void appearance_init(gui_config_t *cfg) {
 	}
 
 	appearance_compact = compact;
+	// The custom colour is a row on the accent card, not a box inside it. It
+	// used to be filled with surface_pressed at full opacity, which on every
+	// dark palette reads as a second, slightly lighter card floating in the
+	// accent one -- the one solid block on a page of outline rows. Leaving the
+	// fill transparent and keeping only the hairline puts it in the same
+	// family as the toggles and the pills around it.
 	btn_custom_accent = lv_btn_create(accent_card);
 	lv_obj_set_size(btn_custom_accent, lv_pct(100), compact ? 36 : 48);
 	lv_obj_set_style_radius(btn_custom_accent, compact ? 8 : 10, 0);
-	lv_obj_set_style_bg_color(btn_custom_accent, theme()->surface_pressed, 0);
-	lv_obj_set_style_bg_opa(btn_custom_accent, LV_OPA_COVER, 0);
+	lv_obj_set_style_bg_opa(btn_custom_accent, LV_OPA_TRANSP, 0);
+	lv_obj_set_style_border_width(btn_custom_accent, 1, 0);
+	// The hairline has to be visible against the card it sits on, and
+	// surface_pressed is only a step above it -- on the dark palettes that is
+	// about fifteen levels of grey, which reads as no edge at all. The
+	// secondary text tone is the one the row's own swatch outline already
+	// uses, so the control reads as one object.
+	lv_obj_set_style_border_color(btn_custom_accent, theme()->text_secondary, 0);
+	lv_obj_set_style_border_opa(btn_custom_accent, LV_OPA_40, 0);
 	lv_obj_set_style_shadow_width(btn_custom_accent, 0, 0);
 	lv_obj_set_style_pad_hor(btn_custom_accent, compact ? 10 : 14, 0);
 	lv_obj_set_style_pad_gap(btn_custom_accent, compact ? 8 : 12, 0);

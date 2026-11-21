@@ -81,21 +81,16 @@ def icon(name, size):
 # and a page that swaps one for the other does not relayout.
 ICONS = {
     # ------------------------------------------------------------------
-    # The six destinations of the home screen, then the pages behind them.
-    # 46 px is the size the icon-only arrangement asks for; the labelled V1
-    # layout draws the same six at 22 px, which is the home_* rows below.
+    # The six destinations of the home screen. The labelled V1 layout draws
+    # them at 22 px (the home_* rows below, which is exact). The icon-only
+    # arrangement draws them much larger and at a size that moves with the
+    # tile height, so that art is emitted as a ladder -- see MENU_LADDER
+    # and the block at the end of generate() -- rather than as one row here.
     # ------------------------------------------------------------------
-    "menu_music": ("music.svg", 46, None),
-    "menu_streaming": ("streaming.svg", 46, None),
-    "menu_wireless": ("wireless.svg", 46, None),
-    "menu_audiobooks": ("audiobooks.svg", 46, None),
-    "menu_more": ("more.svg", 46, None),
-    "menu_settings": ("settings.svg", 46, None),
-
-    # The same six at the size the labelled V1 tiles draw them. Each is also
-    # the native-size art for its tile in the icon-only arrangement, which is
-    # why the length of this list is what tools/main_menu_icons.py renders for
-    # the shared set.
+    # The same six at the size the labelled V1 tiles draw them, which is also
+    # the first rung of the icon-only ladder (22 px), so it costs nothing to
+    # reuse them there. The length of this list is what
+    # tools/main_menu_icons.py renders for the shared set.
     "home_music": ("music.svg", 22, "music2"),
     "home_streaming": ("streaming.svg", 22, "radio_player"),
     "home_wireless": ("wireless.svg", 22, "wifi_high"),
@@ -250,14 +245,108 @@ ICONS = {
     "equalizer": ("equalizer.svg", 46, "equalizer"),
 }
 
-# The six home tiles as the icon-only V1 arrangement draws them. The shared set
-# renders these at every integer size (tools/main_menu_icons.py); a themed set
-# only needs the one the compact layout actually uses, 22 px, which is already
-# in ICONS as home_*.
+# The six home tiles as the icon-only V1 arrangement draws them, in tile order.
 MENU_TILES = (
     "home_music", "home_streaming", "home_wireless",
     "home_audiobooks", "home_more", "home_settings",
 )
+
+# The sizes the icon-only arrangement can actually land on. It does not draw
+# these six at one size: the box is the tile's short side minus the layout's
+# padding and 5%, and the tile's height moves with the header and footer (the
+# live strip hides in this layout, the header does not). Measured on the V1
+# that is 52 px for the full-height tiles and 39 px when the footer takes
+# more room -- and the tests sweep the line height on top of that.
+#
+# So render the ladder rather than one size. The shared set does the same at
+# every integer size (tools/main_menu_icons.py); this is the same idea with
+# the range narrowed to the sizes the layout reaches. The lookup takes the
+# nearest, so a size between two rungs resamples by at most a pixel, where
+# before it was resampling 22 px art up by 2.4x.
+# Even steps from the labelled size to the largest the full-height V1 grid
+# reaches. The layout snaps its measured box onto one of these before drawing
+# (main_menu.c), so every rung is used at exactly its own size and there is no
+# resample anywhere in the range -- the alternative, covering every integer the
+# grid can land on, costs 238 KB instead of 50.
+MENU_SIZES = (22, 28, 34, 40, 46, 52)
+
+# The drawings the ladder cuts, in MENU_TILES order, without the home_ prefix.
+MENU_LADDER_DRAWINGS = (
+    "music", "streaming", "wireless", "audiobooks", "more", "settings",
+)
+
+
+def menu_ladder(folder, prefix):
+    """The six home tiles, cut at every size the icon-only layout reaches.
+
+    Emitted as its own table rather than as ICONS rows because it is not a
+    drawing standing in for one shared bitmap -- it is one drawing cut many
+    times so the layout can pick the rung matching the box it measured. The
+    22 px rung is already in the set as icon_<prefix>_home_* and is reused
+    here rather than stored twice.
+    """
+    parts = []
+    rungs = []
+    for size in MENU_SIZES:
+        names = []
+        for drawing in MENU_LADDER_DRAWINGS:
+            if size == 22:
+                # Reuse the labelled tile art instead of a duplicate copy.
+                names.append("&icon_%s_home_%s" % (prefix, drawing))
+                continue
+            name = "icon_%s_menu_%s_%d" % (prefix, drawing, size)
+            path = os.path.join(ICON_DIR, folder, drawing + ".svg")
+            if not os.path.exists(path):
+                raise SystemExit("missing icon: %s" % path)
+            data, w, h = render(path, size)
+            parts.append(
+                "// %s, %dx%d (icon-only menu ladder)\n"
+                "static const uint8_t %s_data[] = {\n%s\n};\n\n"
+                "const lv_image_dsc_t %s = {\n"
+                "\t.header = {\n"
+                "\t\t.magic = LV_IMAGE_HEADER_MAGIC,\n"
+                "\t\t.cf = LV_COLOR_FORMAT_A8,\n"
+                "\t\t.w = %d,\n"
+                "\t\t.h = %d,\n"
+                "\t\t.stride = %d,\n"
+                "\t},\n"
+                "\t.data_size = sizeof(%s_data),\n"
+                "\t.data = %s_data,\n"
+                "};\n"
+                % (drawing, w, h, name, c_array(data), name, w, h, w, name, name)
+            )
+            names.append("&" + name)
+        rungs.append((size, names))
+
+    # Each rung's six pointers need a name of their own: the row holds a
+    # pointer-to-const-pointer, which a braced initializer will not build.
+    for size, names in rungs:
+        out_rows = [
+            "\n// The six home tiles at %d px, in tile order." % size,
+            "static const lv_image_dsc_t *const theme_%s_menu_%d[6] = {" % (prefix, size),
+        ]
+        for n in names:
+            out_rows.append("\t%s," % n)
+        out_rows.append("};\n")
+        parts.append("\n".join(out_rows))
+
+    out = [
+        "\n// The six home tiles cut at every size the icon-only arrangement",
+        "// reaches, one row per size. The layout measures its box and asks for",
+        "// the row whose rung matches, so the software renderer draws at",
+        "// LV_SCALE_NONE instead of resampling 22 px art up by 2.4x.",
+        "const theme_menu_rung_t theme_%s_menu_ladder[] = {" % prefix,
+    ]
+    for i, (size, _) in enumerate(rungs):
+        out.append("\t{%d, theme_%s_menu_%d}," % (size, prefix, size))
+    out.append("};\n")
+    out.append(
+        "const size_t theme_%s_menu_ladder_count =\n"
+        "\tsizeof(theme_%s_menu_ladder) / sizeof(theme_%s_menu_ladder[0]);\n"
+        % (prefix, prefix, prefix)
+    )
+    return "\n".join(parts) + "\n" + "\n".join(out)
+
 
 HEADER = (
     "/*\n"
@@ -462,10 +551,12 @@ def generate(key):
         "\t&icon_%s_%s," % (prefix, family) for family in MENU_TILES
     )
     tile_table = (
-        "\n// The six home tiles in this set's own art, in tile order.\n"
+        "\n// The six home tiles in this set's own art, in tile order, at the size\n"
+        "// the labelled layout draws them.\n"
         "const lv_image_dsc_t *const theme_%s_tiles[6] = {\n" % prefix
         + tiles
         + "\n};\n"
+        + menu_ladder(folder, prefix)
     )
 
     header = HEADER.format(folder=folder, title=cfg["title"])
@@ -492,8 +583,13 @@ def generate(key):
         + ' live\n// in theme_icons.h, which every consumer includes first.\n'
         'extern const theme_icon_row_t theme_%s_map[];\n' % prefix
         + 'extern const size_t theme_%s_map_count;\n' % prefix
-        + '\n// The six home tiles in this set\'s own art, in tile order.\n'
+        + "\n// The six home tiles in this set's own art, in tile order: the\n"
+        + "// 22 px cuts the labelled layout draws, then the 52 px ones the\n"
+        + "// icon-only arrangement draws.\n"
         + 'extern const lv_image_dsc_t *const theme_%s_tiles[6];\n' % prefix
+        + "\n// The icon-only arrangement's six, cut at every size it reaches.\n"
+        + 'extern const theme_menu_rung_t theme_%s_menu_ladder[];\n' % prefix
+        + 'extern const size_t theme_%s_menu_ladder_count;\n' % prefix
         + "\n\n#endif // %s\n" % cfg["guard"]
     )
     return source, decls, total

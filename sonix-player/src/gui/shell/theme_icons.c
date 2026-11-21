@@ -38,6 +38,61 @@ const lv_image_dsc_t *theme_icon_home_tile(int tile) {
 	}
 }
 
+const lv_image_dsc_t *theme_icon_home_tile_at(int tile, int target) {
+	if (tile < 0 || tile >= 6 || !theme_icons_active()) {
+		return NULL;
+	}
+	// The set carries the six tiles cut at a ladder of sizes, because the two
+	// menu layouts draw them far apart and the icon-only one is not even fixed:
+	// its box is the tile's short side minus padding and 5%, so it lands on
+	// 52 px in the full-height grid and 39 px when the footer takes more room
+	// (and the tests sweep the line height on top of that). Take the rung
+	// nearest the size the caller will draw at, which keeps LVGL at
+	// LV_SCALE_NONE for every size the layout reaches and otherwise resamples
+	// by at most a pixel -- where asking for the 22 px art and drawing it at 52
+	// put a 2.4x resample on a 1.6 px stroke and turned each line into two grey
+	// ones.
+	switch (theme_glyph_set()) {
+	case THEME_GLYPH_SET_ROSE_PINE: {
+		if (target <= 0) {
+			return theme_rose_tiles[tile];
+		}
+		const theme_menu_rung_t *best = NULL;
+		int best_gap = 0;
+		for (size_t i = 0; i < theme_rose_menu_ladder_count; i++) {
+			const theme_menu_rung_t *rung = &theme_rose_menu_ladder[i];
+			int gap = rung->size > target ? rung->size - target : target - rung->size;
+			if (!best || gap < best_gap) {
+				best = rung;
+				best_gap = gap;
+			}
+		}
+		return best ? best->tiles[tile] : theme_rose_tiles[tile];
+	}
+	case THEME_GLYPH_SET_LUCIDE:
+	default:
+		return NULL;
+	}
+}
+
+int theme_icon_home_tile_size(int target) {
+	if (!theme_icons_active() || theme_glyph_set() != THEME_GLYPH_SET_ROSE_PINE) {
+		return target;
+	}
+	int best = target;
+	int best_gap = 0;
+	for (size_t i = 0; i < theme_rose_menu_ladder_count; i++) {
+		int rung = theme_rose_menu_ladder[i].size;
+		int gap = rung > target ? rung - target : target - rung;
+		if (i == 0 || gap < best_gap) {
+			best = rung;
+			best_gap = gap;
+		}
+	}
+	return best;
+}
+
+
 static uint32_t scale_of(const lv_image_dsc_t *drawn, int target) {
 	if (!drawn || target <= 0) {
 		return LV_SCALE_NONE;

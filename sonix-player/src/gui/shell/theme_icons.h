@@ -80,6 +80,31 @@ uint32_t theme_icon_scale_for(const lv_image_dsc_t *shared, int target);
 // when the tile is outside 0..5.
 const lv_image_dsc_t *theme_icon_home_tile(int tile);
 
+// One rung of the icon-only menu ladder: the size the six home tiles are cut
+// at, and the six drawings at that size, in tile order. A set emits as many
+// rungs as the layout can reach, because that size is not fixed -- it follows
+// the tile height, which moves with the header and footer.
+typedef struct {
+	int size;
+	const lv_image_dsc_t *const *tiles;
+} theme_menu_rung_t;
+
+// The same, for a caller that knows the size it will draw the tile at. The set
+// carries the six cut at a ladder of sizes, because the two layouts draw them
+// far apart and the icon-only one is not even fixed: it follows the tile
+// height, so it lands on 52 px in the full-height grid and 39 px when the
+// footer takes more room. Handing back the wrong cut is visible -- resampling
+// 22 px art up to 52 turns each 1.6 px stroke into two grey ones -- so this
+// takes the rung nearest `target`, in pixels on the long side.
+const lv_image_dsc_t *theme_icon_home_tile_at(int tile, int target);
+
+// The size `theme_icon_home_tile_at()` will answer with for `target`, in pixels
+// on the long side. A caller that lays the image out itself should size it to
+// this rather than to its measured box, so the drawing lands at its own size
+// and LVGL stays at LV_SCALE_NONE. Returns `target` unchanged when the active
+// theme has no set of its own.
+int theme_icon_home_tile_size(int target);
+
 // True when the active theme draws its own glyphs (Rose Pine). Pages use it
 // where the shared art needs preparing and the themed art does not -- for
 // instance choosing a coloured illustration, which would waste the work.

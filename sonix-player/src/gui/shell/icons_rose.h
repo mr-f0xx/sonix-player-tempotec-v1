@@ -16,12 +16,6 @@
 
 #include "theme_icons.h"
 
-extern const lv_image_dsc_t icon_rose_menu_music;
-extern const lv_image_dsc_t icon_rose_menu_streaming;
-extern const lv_image_dsc_t icon_rose_menu_wireless;
-extern const lv_image_dsc_t icon_rose_menu_audiobooks;
-extern const lv_image_dsc_t icon_rose_menu_more;
-extern const lv_image_dsc_t icon_rose_menu_settings;
 extern const lv_image_dsc_t icon_rose_home_music;
 extern const lv_image_dsc_t icon_rose_home_streaming;
 extern const lv_image_dsc_t icon_rose_home_wireless;
@@ -162,8 +156,14 @@ extern const lv_image_dsc_t icon_rose_equalizer;
 extern const theme_icon_row_t theme_rose_map[];
 extern const size_t theme_rose_map_count;
 
-// The six home tiles in this set's own art, in tile order.
+// The six home tiles in this set's own art, in tile order: the
+// 22 px cuts the labelled layout draws, then the 52 px ones the
+// icon-only arrangement draws.
 extern const lv_image_dsc_t *const theme_rose_tiles[6];
+
+// The icon-only arrangement's six, cut at every size it reaches.
+extern const theme_menu_rung_t theme_rose_menu_ladder[];
+extern const size_t theme_rose_menu_ladder_count;
 
 
 #endif // ICONS_ROSE_H
