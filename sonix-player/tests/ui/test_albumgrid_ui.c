@@ -179,7 +179,10 @@ DUMMY_ICON(icon_year);
 
 struct library_index {
 	library_list_t kind;
+	int count;
 };
+
+static int fake_album_count = 4;
 
 static const struct {
 	const char *name;
@@ -199,33 +202,62 @@ library_index_t *library_index_open(library_list_t kind, library_filter_t filter
 	(void)filter; (void)value; (void)order; (void)desc;
 	library_index_t *ix = calloc(1, sizeof(*ix));
 	ix->kind = kind;
+	ix->count = fake_album_count;
 	return ix;
 }
 void library_index_close(library_index_t *ix) { free(ix); }
-int library_index_count(const library_index_t *ix) { (void)ix; return 4; }
+int library_index_count(const library_index_t *ix) { return ix ? ix->count : 0; }
 bool library_index_stale(const library_index_t *ix) { (void)ix; return false; }
 library_index_t *library_index_clone(const library_index_t *ix) {
 	library_index_t *c = calloc(1, sizeof(*c));
 	c->kind = ix->kind;
+	c->count = ix->count;
 	return c;
 }
 int library_index_window(const library_index_t *ix, int offset, int count, library_row_cb cb, void *user) {
-	(void)ix;
+	int total = ix ? ix->count : 0;
 	int n = 0;
-	for (int i = offset; i < 4 && n < count; i++, n++) {
-		if (!cb(ALBUMS[i].name, ALBUMS[i].path, ALBUMS[i].artist, user)) {
-			break;
+	for (int i = offset; i < total && n < count; i++, n++) {
+		if (total == 4) {
+			if (!cb(ALBUMS[i].name, ALBUMS[i].path, ALBUMS[i].artist, user)) {
+				break;
+			}
+		} else {
+			char name[64], path[128];
+			snprintf(name, sizeof(name), "Album %02d", i + 1);
+			snprintf(path, sizeof(path), "/music/artist/album_%02d/01.flac", i + 1);
+			if (!cb(name, path, "Prolific Artist", user)) {
+				break;
+			}
 		}
 	}
 	return n;
 }
+static int ptr_x, ptr_y;
+static lv_indev_state_t ptr_state = LV_INDEV_STATE_RELEASED;
+static void read_pointer_cb(lv_indev_t *indev, lv_indev_data_t *data) {
+	(void)indev;
+	data->point.x = ptr_x;
+	data->point.y = ptr_y;
+	data->state = ptr_state;
+}
+
 bool library_index_buckets(const library_index_t *ix, int counts[LIBRARY_INDEX_BUCKETS]) {
-	(void)ix;
 	memset(counts, 0, sizeof(int) * LIBRARY_INDEX_BUCKETS);
+	if (ix && ix->count >= 30) {
+		int half = ix->count / 2;
+		counts[1] = half;              // 'A'
+		counts[15] = ix->count - half; // 'O' starts at `half`
+	}
 	return true;
 }
 char library_index_letter(const char *name) { return name && name[0] ? name[0] : '#'; }
-int library_index_slot(char letter) { (void)letter; return 0; }
+int library_index_slot(char letter) {
+	if (letter >= 'A' && letter <= 'Z') {
+		return 1 + (letter - 'A');
+	}
+	return 0;
+}
 int library_index_find_name(const library_index_t *ix, const char *name) { (void)ix; (void)name; return -1; }
 int library_index_find_path(const library_index_t *ix, const char *path) { (void)ix; (void)path; return -1; }
 void library_album_title(const char *value, char *out, size_t size) {
@@ -445,6 +477,121 @@ int main(void) {
 	assert(b1.x1 - body_a.x1 == albumgrid_tile_x(1, &m));
 	assert(b1.y1 - body_a.y1 == 0);
 	assert(b1.x2 - b1.x1 + 1 == m.tile_w);
+
+	// Regression: an artist (or full album list) with more than ROW_POOL albums
+	// -- especially odd totals like 13, 17, or 19 -- must bind and show every
+	// album right down to the final tile when scrolled to the bottom of the 2x2
+	// grid, and rebind cleanly when scrolling back up.
+	const int counts_to_check[] = {13, 16, 17, 19, 35};
+	for (size_t ci = 0; ci < sizeof(counts_to_check) / sizeof(counts_to_check[0]); ci++) {
+		int total = counts_to_check[ci];
+		fake_album_count = total;
+
+		char artist_name[64];
+		snprintf(artist_name, sizeof(artist_name), "Prolific Artist %d", total);
+		medialist_open(artist_name, LIBRARY_LIST_ALBUMS, LIBRARY_FILTER_ARTIST, artist_name);
+		lv_obj_update_layout(medialist_albums_screen);
+
+		lv_obj_t *lbl_first = find_label(medialist_albums_screen, "Album 01");
+		assert(lbl_first);
+		lv_obj_t *artist_body = lv_obj_get_parent(button_of(lbl_first));
+		lv_obj_t *artist_list = lv_obj_get_parent(artist_body);
+		assert(lv_obj_get_height(artist_body) == albumgrid_canvas_height(total, &m));
+
+		// Walk every tile down to the bottom and verify it sits inside the
+		// viewport at its exact 2x2 grid position.
+		for (int idx = 0; idx < total; idx++) {
+			lv_obj_scroll_to_y(artist_list, albumgrid_tile_y(idx, &m), LV_ANIM_OFF);
+			lv_obj_send_event(artist_list, LV_EVENT_SCROLL, NULL);
+			lv_obj_update_layout(medialist_albums_screen);
+
+			char expected[64];
+			snprintf(expected, sizeof(expected), "Album %02d", idx + 1);
+			lv_obj_t *lbl = find_label(medialist_albums_screen, expected);
+			assert(lbl);
+			lv_obj_t *tile = button_of(lbl);
+			assert(tile && !lv_obj_is_hidden(tile));
+			lv_area_t abody_a, tile_a, list_a;
+			lv_obj_get_coords(artist_body, &abody_a);
+			lv_obj_get_coords(tile, &tile_a);
+			lv_obj_get_coords(artist_list, &list_a);
+			assert(tile_a.x1 - abody_a.x1 == albumgrid_tile_x(idx, &m));
+			assert(tile_a.y1 - abody_a.y1 == albumgrid_tile_y(idx, &m));
+			assert(tile_a.y1 >= list_a.y1 && tile_a.y2 <= list_a.y2);
+		}
+
+		// Reopening the same 17-album artist at the bottom preserves scroll and
+		// keeps Album 17 bound and visible.
+		if (total == 17) {
+			medialist_open(artist_name, LIBRARY_LIST_ALBUMS, LIBRARY_FILTER_ARTIST, artist_name);
+			lv_obj_update_layout(medialist_albums_screen);
+			lv_obj_t *lbl17 = find_label(medialist_albums_screen, "Album 17");
+			assert(lbl17 && !lv_obj_is_hidden(button_of(lbl17)));
+		}
+
+		// Walk every tile back up to Album 01 to verify paired rows rebind cleanly.
+		for (int idx = total - 1; idx >= 0; idx--) {
+			lv_obj_scroll_to_y(artist_list, albumgrid_tile_y(idx, &m), LV_ANIM_OFF);
+			lv_obj_send_event(artist_list, LV_EVENT_SCROLL, NULL);
+			lv_obj_update_layout(medialist_albums_screen);
+
+			char expected[64];
+			snprintf(expected, sizeof(expected), "Album %02d", idx + 1);
+			lv_obj_t *lbl = find_label(medialist_albums_screen, expected);
+			assert(lbl && !lv_obj_is_hidden(button_of(lbl)));
+		}
+
+		// Also verify the top-level Albums panel with 17 albums.
+		if (total == 17) {
+			medialist_open("albums_17", LIBRARY_LIST_ALBUMS, LIBRARY_FILTER_NONE, NULL);
+			lv_obj_update_layout(medialist_screen);
+			lv_obj_t *top_lbl1 = find_label(medialist_screen, "Album 01");
+			assert(top_lbl1);
+			lv_obj_t *top_list = lv_obj_get_parent(lv_obj_get_parent(button_of(top_lbl1)));
+			lv_obj_scroll_to_y(top_list, albumgrid_tile_y(16, &m), LV_ANIM_OFF);
+			lv_obj_send_event(top_list, LV_EVENT_SCROLL, NULL);
+			lv_obj_update_layout(medialist_screen);
+			lv_obj_t *top_lbl17 = find_label(medialist_screen, "Album 17");
+			assert(top_lbl17 && !lv_obj_is_hidden(button_of(top_lbl17)));
+		}
+	}
+
+	// Verify A-Z strip jump on a 60-album grid lands at albumgrid_tile_y(30, &m)
+	// rather than list-mode 30 * ROW_PITCH.
+	medialist_open("artists", LIBRARY_LIST_ARTISTS, LIBRARY_FILTER_NONE, NULL);
+	fake_album_count = 60;
+	medialist_open("albums_60", LIBRARY_LIST_ALBUMS, LIBRARY_FILTER_NONE, NULL);
+	lv_obj_update_layout(medialist_screen);
+	lv_obj_t *top_lbl1 = find_label(medialist_screen, "Album 01");
+	assert(top_lbl1);
+	lv_obj_t *top_list = lv_obj_get_parent(lv_obj_get_parent(button_of(top_lbl1)));
+	// Scrolling wakes the A-Z strip on long lists.
+	lv_obj_scroll_to_y(top_list, m.pitch_y, LV_ANIM_OFF);
+	lv_obj_send_event(top_list, LV_EVENT_SCROLL, NULL);
+	lv_obj_update_layout(medialist_screen);
+	lv_obj_t *letter_o = find_label(medialist_screen, "O");
+	assert(letter_o && !lv_obj_is_hidden(lv_obj_get_parent(letter_o)));
+	lv_area_t oa;
+	lv_obj_get_coords(letter_o, &oa);
+
+	lv_indev_t *indev = lv_indev_create();
+	lv_indev_set_type(indev, LV_INDEV_TYPE_POINTER);
+	lv_indev_set_read_cb(indev, read_pointer_cb);
+	ptr_x = 0; ptr_y = 0; ptr_state = LV_INDEV_STATE_RELEASED;
+	lv_indev_read(indev);
+
+	ptr_x = (oa.x1 + oa.x2) / 2;
+	ptr_y = (oa.y1 + oa.y2) / 2;
+	ptr_state = LV_INDEV_STATE_PRESSED;
+	lv_indev_read(indev);
+	lv_tick_inc(30);
+	ptr_state = LV_INDEV_STATE_RELEASED;
+	lv_indev_read(indev);
+	lv_obj_update_layout(medialist_screen);
+
+	assert(lv_obj_get_scroll_y(top_list) == albumgrid_tile_y(30, &m));
+	lv_obj_t *lbl31 = find_label(medialist_screen, "Album 31");
+	assert(lbl31 && !lv_obj_is_hidden(button_of(lbl31)));
 
 	printf("albumgrid-ui: 2x2 grid toggles on and restores clean single-column list rows\n");
 	return 0;

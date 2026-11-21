@@ -239,14 +239,7 @@ typedef struct {
 	// credited when its own artist is someone else.
 	char album_artist[128];
 	char title[160];
-	// The album grid. `grid_pairs` is NULL unless this panel is the album list
-	// in grid mode, and then it holds one entry per tile -- the row index whose
-	// left half it is, two halves to a tile -- because a tile is two list rows
-	// standing side by side. It is rebuilt whenever the list is (reloaded,
-	// rescanned, reordered), never while scrolling.
-	int *grid_pairs;
-	int grid_tiles;
-	bool grid_mode;
+	bool grid_mode; // album list shown as cover tiles rather than full-width rows
 
 	bool from_paths; // filled by medialist_open_paths: not a query, cannot reorder
 	// The playlist this list came from, empty when it came from anywhere else.
@@ -319,7 +312,6 @@ static void medialist_panel_apply_grid(panel_t *p);
 // that needs them; these are the forward declarations that let it.
 static bool panel_is_album_grid(const panel_t *p);
 static int body_height(panel_t *p);
-static void grid_pairs_build(panel_t *p);
 static void panel_grid_metrics(const panel_t *p, albumgrid_metrics_t *out);
 // One artist's records: a name list like panel_names, on a screen of its own so
 // it can sit between the artist list and an album's tracks.
@@ -610,9 +602,6 @@ static void panel_refresh_stale(panel_t *p) {
 	for (int i = 0; i < ROW_POOL; i++) {
 		p->rows[i].index = -2;
 	}
-	if (panel_is_album_grid(p)) {
-		grid_pairs_build(p);
-	}
 	lv_obj_set_height(p->body, body_height(p));
 	if (p->count == 0) {
 		lv_obj_set_hidden(p->empty, false);
@@ -774,8 +763,13 @@ static bool panel_is_album_grid(const panel_t *p) { return p->grid_mode && p->ki
 static void panel_grid_metrics(const panel_t *p, albumgrid_metrics_t *out) {
 	int width = p->body ? lv_obj_get_width(p->body) : 0;
 	int height = p->list ? lv_obj_get_height(p->list) : 0;
-	if (width <= 0 && p->screen) {
+	if (width <= 0 && p->cfg) {
+		width = p->cfg->screen_width - 2 * p->cfg->padding;
+	} else if (width <= 0 && p->screen) {
 		width = lv_obj_get_width(p->screen) - 2 * (p->cfg ? p->cfg->padding : 0);
+	}
+	if (height <= 0 && p->cfg) {
+		height = p->cfg->screen_height - settingsrow_content_top(p->cfg);
 	}
 	albumgrid_measure(width, height, lv_font_get_line_height(GRID_CAPTION_FONT), out);
 }
@@ -790,8 +784,6 @@ static int body_height(panel_t *p) {
 	}
 	return p->count ? p->count * ROW_PITCH : ROW_PITCH;
 }
-
-static void grid_pairs_build(panel_t *p) { p->grid_tiles = panel_is_album_grid(p) ? p->count : 0; }
 
 static int row_slot(panel_t *p, const row_t *row) { return p->slot_base + (int)(row - p->rows); }
 
@@ -1990,48 +1982,22 @@ static void window_update(panel_t *p) {
 		scroll = 0;
 	}
 
-	// In the grid the pool covers whole tiles and not rows: two rows stand
-	// side by side, so a band that started on the second of a pair would put
-	// half a tile above the visible one, and a pool sized in rows would leave
-	// a gap every other tile. Everything below counts in ROWS either way --
-	// the pool is filled with consecutive list rows, which is exactly how the
-	// pair table indexes them.
+	// In the grid the pool steps by whole rows of tiles while scrolling, with
+	// one row of slack above the viewport. At the bottom of the list `first` is
+	// clamped to `count - ROW_POOL` without rounding back to a row start: when
+	// `count` is odd, rounding `first` down by `first % m.columns` would leave
+	// `first + ROW_POOL < count` and hide the final album. Any odd `first` produced
+	// by that tail clamp sits well above the viewport.
 	int first;
-	int span;
 	if (panel_is_album_grid(p)) {
 		albumgrid_metrics_t m;
 		panel_grid_metrics(p, &m);
-		int per_screen = ROW_POOL;
-		if (m.pitch_y <= 0) {
-			m.pitch_y = 1;
-		}
-		if (p->grid_tiles > 0) {
-			int first_row = (scroll / m.pitch_y) - 1;
-			if (first_row < 0) {
-				first_row = 0;
-			}
-			first = first_row * m.columns;
-			// The pool covers whole rows of tiles, so the last row it can
-			// start on is the one that still fills it.
-			if (first + per_screen > p->count) {
-				first = p->count - per_screen;
-				if (first < 0) {
-					first = 0;
-				}
-				// Back to the start of its row of tiles: half a tile at the
-				// top of the band is half a tile floating on the canvas.
-				first -= first % m.columns;
-			}
-		} else {
-			first = 0;
-		}
-		span = per_screen;
+		first = albumgrid_row_at(scroll, &m) - m.columns;
 	} else {
 		first = (scroll / ROW_PITCH) - 1;
-		span = ROW_POOL;
 	}
-	if (first + span > p->count) {
-		first = p->count - span;
+	if (first + ROW_POOL > p->count) {
+		first = p->count - ROW_POOL;
 	}
 	if (first < 0) {
 		first = 0;
@@ -2039,7 +2005,7 @@ static void window_update(panel_t *p) {
 
 	// index -> widget index % ROW_POOL, so a one-step slide of the band
 	// rebinds exactly one row instead of renaming all of them.
-	for (int i = 0; i < span; i++) {
+	for (int i = 0; i < ROW_POOL; i++) {
 		int index = first + i;
 		row_bind(p, &p->rows[index % ROW_POOL], index < p->count ? index : -1);
 	}
@@ -2085,13 +2051,6 @@ static void medialist_panel_apply_grid(panel_t *p) {
 	}
 
 	p->grid_mode = want;
-	if (want) {
-		grid_pairs_build(p);
-	} else if (p->grid_pairs) {
-		free(p->grid_pairs);
-		p->grid_pairs = NULL;
-		p->grid_tiles = 0;
-	}
 
 	// Every pooled row carries the other layout's geometry, so all of them
 	// are rebound -- including the artwork, which a tile asks for at tile
@@ -2418,7 +2377,13 @@ static void index_go(panel_t *p, int slot) {
 		return;
 	}
 
-	lv_obj_scroll_to_y(p->list, row * ROW_PITCH, LV_ANIM_OFF);
+	int target = row * ROW_PITCH;
+	if (panel_is_album_grid(p)) {
+		albumgrid_metrics_t m;
+		panel_grid_metrics(p, &m);
+		target = albumgrid_tile_y(row, &m);
+	}
+	lv_obj_scroll_to_y(p->list, target, LV_ANIM_OFF);
 	p->saved_scroll = lv_obj_get_scroll_y(p->list);
 	window_update(p);
 }
@@ -4465,17 +4430,8 @@ static void panel_open(const char *title, library_list_t kind, library_filter_t 
 	p->ix = library_index_open(kind, filter, filter_value, order, desc);
 	p->count = library_index_count(p->ix);
 
-	// The grid's pair table is a function of the count, so it is rebuilt
-	// wherever the count can change -- here on a reload, and in
-	// panel_refresh_stale() when the handle was re-asked under the page.
-	if (panel_is_album_grid(p)) {
-		grid_pairs_build(p);
-	} else if (p->grid_pairs) {
-		free(p->grid_pairs);
-		p->grid_pairs = NULL;
-		p->grid_tiles = 0;
-	}
-	lv_obj_set_height(p->body, body_height(p));
+	int canvas_h = body_height(p);
+	lv_obj_set_height(p->body, canvas_h);
 	if (p->count == 0) {
 		lv_obj_set_hidden(p->empty, false);
 	} else {
@@ -4495,25 +4451,29 @@ static void panel_open(const char *title, library_list_t kind, library_filter_t 
 	// The same list resumes at its old scroll position; a different one
 	// starts at the top -- unless it opens on what is playing.
 	int target_scroll = same_list ? p->saved_scroll : 0;
+	int list_h = lv_obj_get_height(p->list);
+	if (list_h <= 0 && p->cfg) {
+		list_h = p->cfg->screen_height - settingsrow_content_top(p->cfg);
+	}
 	int current = current_row(p);
 	if (current >= 0) {
 		// In the middle of the screen rather than at the top, so the rows
 		// around it show where in the list it is.
-		target_scroll = current * ROW_PITCH - (lv_obj_get_height(p->list) - ROW_PITCH) / 2;
-		if (panel_is_album_grid(p) && p->grid_tiles > 0 && p->body) {
+		target_scroll = current * ROW_PITCH - (list_h - ROW_PITCH) / 2;
+		if (panel_is_album_grid(p) && p->count > 0 && p->body) {
 			// A grid moves a screenful at a time, so "in the middle" is the
 			// row of tiles the album sits in, not the row of the list.
 			albumgrid_metrics_t m;
 			panel_grid_metrics(p, &m);
 			if (m.pitch_y > 0) {
-				target_scroll = albumgrid_tile_y(current, &m) - (lv_obj_get_height(p->list) - m.pitch_y) / 2;
+				target_scroll = albumgrid_tile_y(current, &m) - (list_h - m.pitch_y) / 2;
 			}
 		}
 		if (target_scroll < 0) {
 			target_scroll = 0;
 		}
 	}
-	int max_scroll = lv_obj_get_height(p->body) - lv_obj_get_height(p->list);
+	int max_scroll = canvas_h - list_h;
 	if (target_scroll > max_scroll) {
 		target_scroll = max_scroll > 0 ? max_scroll : 0;
 	}
