@@ -400,26 +400,16 @@ def generate(key):
     names = []
     # shared symbol -> the family whose drawing is cut at that symbol's own
     # size. A set can draw one shape twice (the 32 px Radio row mark and the
-    # 128 px Radio cover are both radio.svg); only the second is allowed to
-    # answer for the shared symbol by name, or the lookup would return the row
-    # drawing to a caller asking for the cover and then scale 32 up to 128.
+    # 128 px Radio cover are both radio.svg), and a shape can also be drawn at
+    # a size of its own for a tile (the 22 px home_st_render rows). Only one may
+    # answer for the shared symbol by name, or a caller asking for the 128 px
+    # cover would be handed the 32 px row mark and scale it up four times.
     by_shared = {}
     for family, (filename, size, shared) in ICONS.items():
         path = os.path.join(ICON_DIR, folder, filename)
         if not os.path.exists(path):
             raise SystemExit("missing icon: %s" % path)
-        # The alias row below answers for the shared symbol by name, and the
-        # call sites that ask that way scale by the bitmap's own width -- so a
-        # drawing that stands in for a shared bitmap cut at another size has to
-        # be cut at that size. The alias is a different call site of the same
-        # shape (the 22 px home tile for a 128 px service mark), and the
-        # drawing has to fill the grid the caller measures against.
-        draw_at = size
-        if shared and by_shared.get(shared) is None:
-            shared_side = shared_sides_cached().get("icon_" + shared)
-            if shared_side:
-                draw_at = shared_side
-        data, w, h = render(path, draw_at)
+        data, w, h = render(path, size)
         total += len(data)
         name = "icon_%s_%s" % (prefix, family)
         parts_c.append(
@@ -447,14 +437,42 @@ def generate(key):
     # with a shared name mean "this drawing also lands here", for the places
     # that ask for a bitmap under a name of its own (the corner sizes, the
     # status rungs, the standalone service marks).
+    # Which drawing answers each shared symbol. The rule is the smallest
+    # drawing that still covers the symbol: a caller scaling *up* to its target
+    # is what resamples, and a tile drawn at 22 px wants the 22 px cut, not a
+    # 32 px one shrunk to fit. Only when every drawing of the shape is smaller
+    # than the symbol does the largest answer instead -- the Streaming tile's
+    # 22 px art has to serve the 128 px placeholder behind it, and a bitmap
+    # blown up is worse than one shrunk.
+    candidates = {}
+    for family, shared in names:
+        if shared:
+            candidates.setdefault(shared, []).append(family)
+    alias_for = {}
+    for shared, families in candidates.items():
+        symbol_side = shared_sides_cached().get("icon_" + shared)
+        if symbol_side is None:
+            # Nothing to match against: the biggest drawing gives the most to
+            # scale from.
+            alias_for[shared] = max(families, key=lambda f: ICONS[f][1])
+            continue
+        # A drawing at least as large as the symbol is preferred (a caller
+        # shrinking it keeps every edge it drew); among those the smallest wins,
+        # then the one closest to the symbol. With none large enough, the
+        # largest available answers -- see the note in theme_icons.h.
+        alias_for[shared] = min(
+            families,
+            key=lambda f: (ICONS[f][1] < symbol_side, abs(ICONS[f][1] - symbol_side)),
+        )
+
     rows = []
     for family, shared in names:
         themed = "&icon_%s_%s" % (prefix, family)
-        if not shared:
+        if not shared or alias_for.get(shared) != family:
             # No shared bitmap carries this drawing on its own (the 46 px menu
-            # art): the caller only ever asks for the themed copy.
-            rows.append("\t{%s, NULL}," % themed)
-        elif by_shared.get(shared) != family:
+            # art), or another size of the same shape answers better: the
+            # caller only ever asks for the themed copy, or finds it under the
+            # family that does.
             rows.append("\t{%s, NULL}," % themed)
         else:
             rows.append("\t{%s, &icon_%s}," % (themed, shared))

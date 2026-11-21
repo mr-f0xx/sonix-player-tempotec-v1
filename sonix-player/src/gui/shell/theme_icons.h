@@ -33,6 +33,19 @@ typedef struct {
 // it is about to draw, not what it asked for -- see theme_icon_scale_to().
 const lv_image_dsc_t *theme_icon(const lv_image_dsc_t *shared);
 
+// Which drawing answers for a shared symbol, when the set drew that shape more
+// than once: the smallest drawing that is still at least as large as the shared
+// bitmap. A caller that asks for the symbol and scales by the drawing's own
+// width is then shrinking it, never enlarging it -- enlarging is what smears,
+// and a 32 px cut shrunk to a tile's 22 px loses the antialiasing the 22 px cut
+// was drawn with. Where the set drew the shape only smaller than the symbol
+// (the Streaming tile has no 128 px art), the largest drawing answers instead:
+// a bitmap blown up is still better than one that cannot fill the box.
+//
+// theme_icon_home_tile() is separate from this on purpose. A tile is drawn at
+// its own size and answers with the drawing cut for that layout (22 px on V1),
+// so the home screen never goes through the alias at all.
+//
 // The same lookup for a call site that knows the size it is about to draw.
 //
 // A set draws one shape at several sizes -- a 22 px home tile, a 30 px

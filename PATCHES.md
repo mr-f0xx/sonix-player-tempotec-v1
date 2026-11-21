@@ -5258,8 +5258,8 @@ every call site already applies. `lv_draw_sw_img.c` hands an A8 source straight
 to the blend colour, so `image_recolor` and its opacity work exactly as before,
 and the bitmaps stayed on the same grid: 124 of the 140 glyphs have
 byte-identical alpha to what they shipped with, checked by diffing the old and
-new arrays. The result is 316 KB of `text` per set instead of 941 KB -- 2.44 MB
-off the firmware, and the web emulator binary went from 45.6 MB to 42.1 MB.
+new arrays. The result is 237 KB of `text` per set instead of 941 KB -- 2.8 MB
+off the firmware, and the web emulator binary went from 45.6 MB to 41.8 MB.
 
 Cropping the transparent margins was the other candidate and it pays about a
 third as well: the median glyph wastes 1.72x its own area in padding, so a
@@ -5283,11 +5283,24 @@ shared symbol is also reached by call sites that ask for that symbol and scale
 by the bitmap's own width. When the set drew the shape at a different size than
 the shared symbol -- `home_streaming` at 22 px standing in for a 128 px
 `radio_player` -- those call sites got the small drawing and enlarged it, which
-is the exact smearing the set exists to avoid. Every aliased drawing is now cut
-at the shared symbol's own size, so `theme_icon()` returns art the caller can
-measure against. That is why the Streaming home tile carries a 128 px bitmap to
-fill a 22 px box: the tile scales it down by its own width, and the same
-drawing has to serve the placeholder that wants all 128.
+is the exact smearing the set exists to avoid.
+
+The first fix was to cut every aliased drawing at the shared symbol's size, and
+that was wrong in the other direction: it gave the home tiles art at 22-34 px
+*upscaled from a 32-128 px cut*, and a 32 px drawing shrunk to 22 loses the
+antialiasing a 22 px cut was drawn with -- 123 soft pixels spread over a 22x25
+ink instead of 75 over 15x17, so every stroke washes out. The rule now is the
+smallest drawing that is still at least as large as the shared symbol: a caller
+then shrinks it and keeps every edge that was drawn. Only when the set has
+nothing that large does the biggest drawing answer (the Streaming tile has no
+128 px art, so its 22 px cut serves the 128 px placeholder).
+
+`theme_icon_home_tile()` never goes through the alias at all: the home screen
+draws its own six at 22 px and asks the tile API, which answers with the art cut
+for that layout. Splitting the two lookups is what let the tiles keep their
+native drawings while the shared symbols stayed served at their own sizes. The
+tile glyphs are now within one RGB565 quantisation step (delta 8 of 255) of the
+ARGB originals, against 157 in the upscaled build.
 
 `tests/ui/test_main_menu.c`'s themed branch learned the same thing: a tile
 whose drawing is larger than the box is expected to be scaled to it, rather
