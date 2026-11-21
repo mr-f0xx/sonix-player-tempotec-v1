@@ -448,6 +448,30 @@ static void main_menu_screen_loaded_cb(lv_event_t *e) {
 	main_menu_refresh_now_playing();
 }
 
+// The tagline under the title takes the palette's own decorative colour where
+// it has one, rather than the generic secondary text role.
+//
+// Rosé Pine already paints several of its home glyphs from its decorations --
+// the More dots are moon rose -- and the note sat in the neutral subtitle grey
+// next to them, which read as a different, cooler grey rather than as part of
+// the palette. It shares the rose now. The role is the one the dots use, so a
+// future palette that redefines it moves both together instead of drifting.
+//
+// Re-applied from main_menu_refresh_theme(): this label carries
+// theme_style_text_dim, and that style is rebuilt under it on every palette
+// change, so a colour set once at build time would be replaced by the neutral
+// grey the first time the theme moved.
+static void main_menu_tint_note(lv_obj_t *note) {
+	if (!note) {
+		return;
+	}
+	if (theme_get_kind() == THEME_KIND_ROSE_PINE) {
+		lv_obj_set_style_text_color(note, theme_semantic_color(THEME_SEMANTIC_GREEN), 0);
+	} else {
+		lv_obj_remove_local_style_prop(note, LV_STYLE_TEXT_COLOR, 0);
+	}
+}
+
 static void main_menu_refresh_theme(void) {
 	if (!menu_grid || !menu_cfg) {
 		return;
@@ -456,6 +480,8 @@ static void main_menu_refresh_theme(void) {
 	bool compact = bp_is_tempotec_v1();
 	bool tokyo = theme_uses_function_glyphs();
 	bool prototype_layout = compact && tokyo;
+
+	main_menu_tint_note(home_note);
 
 	if (prototype_layout) {
 		lv_obj_set_hidden(home_header, !home_header_shown());
@@ -556,6 +582,7 @@ void main_menu_init(gui_config_t *cfg) {
 	lv_obj_set_height(home_note, lv_font_get_line_height(&font_ui_14));
 	lv_obj_set_pos(home_note, cfg->padding, cfg->top_bar_height + 40);
 	lv_obj_add_style(home_note, &theme_style_text_dim, 0);
+	main_menu_tint_note(home_note);
 	lv_obj_set_style_text_font(home_note, &font_ui_14, 0);
 
 	mini_player = lv_btn_create(main_menu_screen);

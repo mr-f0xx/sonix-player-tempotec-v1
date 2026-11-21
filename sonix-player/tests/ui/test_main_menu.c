@@ -680,6 +680,32 @@ int main(int argc, char **argv) {
 		lv_obj_send_event(main_menu_screen, LV_EVENT_SCREEN_LOADED, NULL);
 		check_strip_text_lines(strip, 1, tr("player_no_track_loaded"));
 
+		/* The tagline takes the palette's own decorative colour where it has
+		 * one, rather than the neutral secondary text role -- and it has to
+		 * survive the palette changing under it, which is why this is checked
+		 * per theme and not once at build. */
+		/* find_label() compares whole strings, and this label is LONG_DOT: it
+		 * stores the text with its ellipsis appended, so match the prefix. */
+		lv_obj_t *note = NULL;
+		for (uint32_t c = 0; c < lv_obj_get_child_count(main_menu_screen); c++) {
+			lv_obj_t *child = lv_obj_get_child(main_menu_screen, c);
+			if (lv_obj_check_type(child, &lv_label_class) &&
+				strncmp(lv_label_get_text(child), tr("main_menu_tagline"), 8) == 0) {
+				note = child;
+				break;
+			}
+		}
+		assert(note);
+		if (kind == THEME_KIND_ROSE_PINE) {
+			assert(lv_color_eq(lv_obj_get_style_text_color(note, 0),
+							   theme_semantic_color(THEME_SEMANTIC_GREEN)));
+		} else {
+			/* Every other palette keeps the neutral secondary role it had:
+			 * the tint is Rosé Pine's own, not a global change. */
+			assert(!lv_color_eq(lv_obj_get_style_text_color(note, 0),
+								theme_semantic_color(THEME_SEMANTIC_GREEN)));
+		}
+
 		snprintf(strip_state.current_file, sizeof(strip_state.current_file), "/music/a.flac");
 		snprintf(strip_state.metadata.title, sizeof(strip_state.metadata.title), "Good Light");
 		snprintf(strip_state.metadata.artist, sizeof(strip_state.metadata.artist), "Children of Zeus");
