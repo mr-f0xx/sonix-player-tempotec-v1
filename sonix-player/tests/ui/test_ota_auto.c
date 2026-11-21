@@ -317,6 +317,32 @@ int main(void) {
 	assert(notice_blinks == 2);
 	wifi_connected = true;
 
+	// The update made from the manual card: the standing dot is hidden and the
+	// notice never comes back for that tag. Simulate the stale reminder the
+	// card leaves behind, then the update is made.
+	set_release("1.9.0");
+	topbar_set_update_available(true);
+	assert(dot_visible);
+	ota_auto_release_taken();
+	assert(!dot_visible);
+	lv_tick_inc(6 * 60 * 60 * 1000 + 300);
+	lv_timer_handler();
+	tick();
+	assert(check_starts == 5);
+	assert(notice_blinks == 2);
+	assert(!dot_visible);
+	assert(!confirm_showing());
+
+	// A newer release is a new notice: the popup comes up again.
+	set_release("1.10.0");
+	lv_tick_inc(6 * 60 * 60 * 1000 + 300);
+	lv_timer_handler();
+	tick();
+	assert(check_starts == 6);
+	assert(notice_blinks == 3);
+	assert(dot_visible);
+	assert(confirm_showing());
+
 	puts("PASS auto OTA notice: check on connect and at interval, LED/dot/toast/popup, dedupe, battery guard, toggle");
 	return 0;
 }

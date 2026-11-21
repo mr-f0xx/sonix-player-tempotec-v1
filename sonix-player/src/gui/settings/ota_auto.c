@@ -42,7 +42,9 @@
 // s_dismissed_tag  a tag the user has pressed "Later" for: the notification is
 //                  not brought up again for it, this boot or any later one.
 // s_shown_tag      the tag of the notice most recently brought up: a repeat
-//                  check for that tag does not re-show it.
+//                  check for that tag does not re-show it. Also set to the
+//                  tag the user has just made the update for, so the notice
+//                  never comes back for it.
 // s_connect_last   last connect-triggered check, monotonic ms.
 // s_inflight       the module started the OTA check currently running: only
 //                  those results are ours to show, so the manual card and the
@@ -211,6 +213,14 @@ static void poll_cb(lv_timer_t *timer) {
 static void periodic_cb(lv_timer_t *timer) {
 	(void)timer;
 	try_start_check();
+}
+
+void ota_auto_release_taken(void) {
+	const ota_release_t *rel = ota_release();
+	if (rel->tag[0]) {
+		snprintf(s_shown_tag, sizeof(s_shown_tag), "%s", rel->tag);
+	}
+	topbar_set_update_available(false);
 }
 
 // ---------------------------------------------------------------------------
