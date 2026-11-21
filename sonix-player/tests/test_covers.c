@@ -374,6 +374,21 @@ static void test_ogg_and_wv_embedded_covers(const char *dir) {
 // ---------------------------------------------------------------------------
 // 4. 1000-cover JPEG cache + LRU eviction + prefetch + V1 backdrop + id_worker
 // ---------------------------------------------------------------------------
+static int picture_thumb_count(const char *db_path, int size) {
+	sqlite3 *db = NULL;
+	sqlite3_stmt *stmt = NULL;
+	assert(sqlite3_open(db_path, &db) == SQLITE_OK);
+	assert(sqlite3_prepare_v2(db, "SELECT COUNT(*) FROM thumbs WHERE key LIKE ?1", -1, &stmt, NULL) == SQLITE_OK);
+	char pattern[32];
+	snprintf(pattern, sizeof(pattern), "p%%|%d", size);
+	sqlite3_bind_text(stmt, 1, pattern, -1, SQLITE_TRANSIENT);
+	assert(sqlite3_step(stmt) == SQLITE_ROW);
+	int count = sqlite3_column_int(stmt, 0);
+	sqlite3_finalize(stmt);
+	sqlite3_close(db);
+	return count;
+}
+
 static void test_1000_cover_cache_and_loader(const char *dir) {
 	cover_set_cache_dir(dir);
 
@@ -470,6 +485,41 @@ static void test_1000_cover_cache_and_loader(const char *dir) {
 	}
 	assert(finished);
 	assert(async_id != 0 && async_id == cover_source_id(track_path));
+
+	// Browser requests resolve a folder cover or its first track's embedded art.
+	char cover_dir[512], embedded_dir[512], empty_dir[512], path[560];
+	snprintf(cover_dir, sizeof(cover_dir), "%s/browser_cover", dir);
+	snprintf(embedded_dir, sizeof(embedded_dir), "%s/browser_embedded", dir);
+	snprintf(empty_dir, sizeof(empty_dir), "%s/browser_empty", dir);
+	assert(mkdir(cover_dir, 0755) == 0 && mkdir(embedded_dir, 0755) == 0 && mkdir(empty_dir, 0755) == 0);
+	size_t cover_len = 0;
+	uint8_t *cover_jpg = make_test_jpeg(48, 48, 70, 120, 200, 5, &cover_len);
+	snprintf(path, sizeof(path), "%s/cover.jpg", cover_dir);
+	write_file_bytes(path, cover_jpg, cover_len);
+	free(cover_jpg);
+	snprintf(path, sizeof(path), "%s/track.flac", embedded_dir);
+	assert(link(track_path, path) == 0);
+	// A thumbnail first built for a track can be reused by a folder whose
+	// first track embeds the same picture, without decoding it a second time.
+	cover_image_t warm;
+	assert(cover_thumb_load(track_path, false, 36, &warm));
+	cover_free(&warm);
+	assert(picture_thumb_count(db_path, 36) > 0);
+	const char *folders[] = {cover_dir, embedded_dir, empty_dir};
+	for (int i = 0; i < 3; i++) {
+		int before = picture_thumb_count(db_path, 36);
+		coverloader_request_dir(COVERLOADER_BROWSER_BASE, folders[i], 36);
+		cover_image_t thumb;
+		bool done = false, found = false;
+		for (int tries = 0; tries < 400 && !done; tries++) {
+			found = coverloader_take(COVERLOADER_BROWSER_BASE, &thumb, &done);
+			if (!done) { struct timespec ts = {0, 5 * 1000 * 1000}; nanosleep(&ts, NULL); }
+		}
+		assert(done && found == (i < 2));
+		if (found) { assert(thumb.dsc.header.w == 36); cover_free(&thumb); }
+		if (i == 1) assert(picture_thumb_count(db_path, 36) == before);
+	}
+	coverloader_release(COVERLOADER_BROWSER_BASE);
 }
 
 // The written front cover is found by the real embedded-art reader and

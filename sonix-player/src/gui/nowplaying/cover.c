@@ -1973,25 +1973,21 @@ static void thumb_picture_store(void *ctx, const cover_image_t *outs) {
 	}
 }
 
-// A track's thumbnail, decoded at most once per picture. Each candidate's bytes
-// are identified before decoding, so tracks embedding the same cover can reuse
-// the first thumbnail while retaining the normal candidate fallback order.
-static cover_build_t thumb_build_track(const char *path, int size, cover_image_t *out) {
+// Tracks and folders share thumbnails by picture bytes, so a folder can reuse
+// artwork already decoded for the Albums list (and vice versa). Each candidate
+// still follows its own normal source and fallback order.
+static cover_build_t thumb_build_source(const char *path, bool is_dir, int size, cover_image_t *out) {
 	image_request_t req = {.w = size, .h = size, .fit = COVER_FIT_CONTAIN, .backdrop = false};
 	if (size > THUMB_DISK_MAX_SIZE) {
-		return build_from_sources(path, false, &req, 1, out);
+		return build_from_sources(path, is_dir, &req, 1, out);
 	}
 	thumb_picture_t pic = {.box = size};
 	cover_source_hook_t hook = {.lookup = thumb_picture_lookup, .store = thumb_picture_store, .ctx = &pic};
-	return build_from_sources_hooked(path, false, &req, 1, out, &hook);
+	return build_from_sources_hooked(path, is_dir, &req, 1, out, &hook);
 }
 
 static cover_build_t thumb_load_uncached(const char *path, bool is_dir, int size, cover_image_t *out) {
-	if (!is_dir) {
-		return thumb_build_track(path, size, out);
-	}
-	image_request_t req = {.w = size, .h = size, .fit = COVER_FIT_CONTAIN, .backdrop = false};
-	return build_from_sources(path, is_dir, &req, 1, out);
+	return thumb_build_source(path, is_dir, size, out);
 }
 
 bool cover_thumb_cached(const char *path, int size, cover_image_t *out) {
@@ -2017,7 +2013,7 @@ bool cover_thumb_load(const char *path, bool is_dir, int size, cover_image_t *ou
 	// breaks as soon as a folder holds tracks from different albums, since every
 	// row below the first would show the first track's cover. The per-file disk
 	// cache keeps the cost at one decode per file, ever, and tracks that carry
-	// the same picture share one decode (thumb_build_track).
+	// the same picture share one decode (thumb_build_source).
 
 	char key[32];
 	bool cacheable = thumb_key(key, sizeof(key), path, size, is_dir);
