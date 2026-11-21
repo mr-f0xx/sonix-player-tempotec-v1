@@ -102,7 +102,7 @@ The `lyrics-size-ui` test exercises the lyrics text-size and timing popovers on 
 
 The `batteryprofile` test uses temporary sysfs files and a wrapped I²C adapter to check stock V1 units, missing or invalid readings, read-only charge-limit access, discharge estimates, and same-source deltas. `batteryprofile-ui` drives the production page at 240×320 with fake battery samples. It covers USB and screen-off behavior, charge history, baseline and resample actions, polling off-page, and translated metric layouts. To validate a real cell's load response, follow the [on-device A/B procedure](../../docs/battery-profiler.md).
 
-The `musicsettings-rows` UI test checks that NOS does not reuse Filters' waveform bitmap and that the expandable DSD gain card shares the icon/title columns and collapsed midline of ordinary Music settings rows across all 11 shipped languages, all nine built-in themes, both switch states and larger text.
+The `musicsettings-rows` UI test checks that NOS does not reuse Filters' waveform bitmap and that the expandable DSD gain card shares the icon/title columns and collapsed midline of ordinary Music settings rows across all 11 shipped languages, all eight built-in themes, both switch states and larger text.
 
 The `tagwrite` suite checks FLAC and ID3 rewrites, artwork/audio preservation, validation and refusal of unsafe layouts. The `artsearch` suite uses a mocked network to test catalog parsing, URL validation and download limits. The aggregate `ui` suite exercises the Tag Manager browser, editor and cover selection at the V1 resolution with a mocked service.
 
@@ -265,7 +265,7 @@ opens no ALSA device.
 
 `make -C sonix-player/tests peq-ui` links the real PEQ page and DSP engine to
 LVGL's headless renderer. It checks the profile pills at 240×320 in all eleven
-languages and all nine built-in themes, the translated Automatic Level switch and its
+languages and all eight built-in themes, the translated Automatic Level switch and its
 independence from PEQ enable/profile state, list-offset retention when leaving
 and returning from a child screen, selection and back-drag guarding, refresh of
 an open band editor after a quick switch, and profile-scoped reset. It then
@@ -435,7 +435,7 @@ Deterministic built-in font metrics and unrelated navigation/playback services
 are substituted, rather than running the player or touching device hardware.
 
 It checks the default and saved **Main menu icons only** setting on both panel
-sizes, all nine built-in themes, exact icon sizes and centering, glow-free icon-only
+sizes, all eight built-in themes, exact icon sizes and centering, glow-free icon-only
 tiles, unchanged secondary-menu tiles, restoration of the labeled layout and
 its decorative glows, real switch callbacks and config save/reload,
 the rounded-corners switch and its radius slider (hidden while the corners are
@@ -548,7 +548,7 @@ and saved:
   non-square Immersive crop is not used as a stand-in.
 - The frame is centred in the area above the strip, with the margins, the
   player's rounded corners and no strip backdrop.
-- The page behind the frame is right in all nine built-in themes.
+- The page behind the frame is right in all eight built-in themes.
 - Small pictures are shown at their own size.
 - Track changes, abandoned decodes, switching back to Fill, switching to
   Pictures, dismissing and switching off release every borrowed and owned

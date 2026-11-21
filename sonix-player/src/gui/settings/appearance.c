@@ -823,9 +823,8 @@ static void appearance_preview_refresh(void) {
 	bool oled = theme_is_oled();
 	bool rose = theme_is_rose_pine();
 	bool gruv = theme_is_gruvbox();
-	bool drac = theme_is_dracula();
 	bool cat = theme_is_catppuccin();
-	bool show = bp_is_tempotec_v1() && (tokyo || amber || oled || rose || gruv || drac || cat);
+	bool show = bp_is_tempotec_v1() && (tokyo || amber || oled || rose || gruv || cat);
 	if (theme_palette_card) {
 		lv_obj_set_hidden(theme_palette_card, !show);
 	}
@@ -834,7 +833,6 @@ static void appearance_preview_refresh(void) {
 						: oled   ? "appearance_oled_palette"
 						: rose   ? "appearance_rose_pine_palette"
 						: gruv   ? "appearance_gruvbox_palette"
-						: drac   ? "appearance_dracula_palette"
 						: cat    ? "appearance_catppuccin_palette"
 								 : "appearance_tokyo_palette";
 		lv_label_set_text(theme_palette_title, tr(title));
@@ -879,17 +877,6 @@ static void appearance_preview_refresh(void) {
 		swatches[5] = lv_color_make(215, 153, 33); // #d79921, yellow
 		swatches[6] = lv_color_make(214, 93, 14); // #d65d0e, orange
 		swatches[7] = theme_semantic_color(THEME_SEMANTIC_RED);
-	} else if (drac) {
-		// Background, selection, current line, then the six the scheme is
-		// known for: purple, cyan, green, yellow, orange and pink.
-		swatches[0] = theme()->screen_bg;
-		swatches[1] = theme()->surface;
-		swatches[2] = theme_player_chrome_color(THEME_PLAYER_CHROME_SECONDARY);
-		swatches[3] = lv_color_make(189, 147, 249); // #bd93f9, purple
-		swatches[4] = lv_color_make(139, 233, 253); // #8be9fd, cyan
-		swatches[5] = lv_color_make(80, 250, 123); // #50fa7b, green
-		swatches[6] = lv_color_make(241, 250, 140); // #f1fa8c, yellow
-		swatches[7] = lv_color_make(255, 121, 198); // #ff79c6, pink
 	} else if (cat) {
 		// Base, surface 0, surface 1, then the pastels: mauve, blue, teal,
 		// green and peach.
@@ -925,7 +912,7 @@ static void appearance_preview_refresh(void) {
 			continue;
 		}
 		lv_obj_set_style_bg_color(theme_palette_swatches[i], swatches[i], 0);
-		if (amber || oled || rose || gruv || drac || cat) {
+		if (amber || oled || rose || gruv || cat) {
 			// The near-black swatches otherwise disappear into the card and
 			// look like unpainted boxes on the low-contrast V1 panel.
 			lv_obj_set_style_border_width(theme_palette_swatches[i], 1, 0);
@@ -1047,7 +1034,6 @@ void appearance_init(gui_config_t *cfg) {
 	theme_buttons[THEME_KIND_ROSE_PINE] =
 		make_theme_choice(row, "appearance_rose_pine", THEME_KIND_ROSE_PINE, compact);
 	theme_buttons[THEME_KIND_GRUVBOX] = make_theme_choice(row, "appearance_gruvbox", THEME_KIND_GRUVBOX, compact);
-	theme_buttons[THEME_KIND_DRACULA] = make_theme_choice(row, "appearance_dracula", THEME_KIND_DRACULA, compact);
 	theme_buttons[THEME_KIND_CATPPUCCIN_MOCHA] =
 		make_theme_choice(row, compact ? "appearance_catppuccin_short" : "appearance_catppuccin_mocha",
 						  THEME_KIND_CATPPUCCIN_MOCHA, compact);

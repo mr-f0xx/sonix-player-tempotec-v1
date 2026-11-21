@@ -1,26 +1,22 @@
 #!/usr/bin/env python3
-"""Draw the Dracula and Catppuccin Mocha icon sets from one geometry.
+"""Draw the Catppuccin Mocha icon set from the Gruvbox geometry.
 
 Rosé Pine and Gruvbox were drawn by hand, file by file, because each is a
 different *hand*: Rosé Pine is 1.6 px round-cap line art, Gruvbox a 2 px
-square-cap silhouette. Dracula and Catppuccin are two more hands, not two more
-copies of those:
+square-cap silhouette. Catppuccin is a third hand, not a copy of those:
 
-  * Dracula's marks are mid-weight (1.9 px), slightly soft -- round joins but
-    square terminals -- because the scheme's own character is a friendly
-    monospace rather than either a hairline or a stencil.
-  * Catppuccin's are light and round (1.5 px, round everywhere), the crisp
-    pastel line its style guide draws its ports with.
+  * Catppuccin's marks are light and round (1.5 px, round everywhere), the
+    crisp pastel line its style guide draws its ports with.
 
-Both are derived from the Gruvbox geometry in assets/icons/gruvbox, which is
+It is derived from the Gruvbox geometry in assets/icons/gruvbox, which is
 already a clean 24 px outline drawing of every glyph the player asks for: the
-build here re-strokes each file at the new weapon weight and re-cuts the marks
-where the two schemes are distinctive enough to deserve their own drawing
-(Dracula's fang-cut play triangle, Catppuccin's soft heart, and so on).
+build here re-strokes each file at the lighter weight and re-cuts the marks
+where the scheme is distinctive enough to deserve its own drawing (the soft
+heart, and so on).
 
 Run from anywhere:
 
-    python3 tools/theme_icon_sets.py            # writes both directories
+    python3 tools/theme_icon_sets.py            # writes the directory
     python3 tools/theme_icon_sets.py --check     # verifies they are current
 
 The SVGs are the source: tools/themed_icons.py renders them into C.
@@ -36,14 +32,6 @@ ICON_DIR = os.path.join(REPO_ROOT, "assets", "icons")
 SOURCE_SET = "gruvbox"
 
 SETS = {
-    "dracula": {
-        "dir": "dracula",
-        "title": "Dracula",
-        # Mid-weight, soft: round joins, square terminals, 1.9 px.
-        "stroke_width": "1.9",
-        "stroke_linecap": "square",
-        "stroke_linejoin": "round",
-    },
     "catppuccin": {
         "dir": "catppuccin-mocha",
         "title": "Catppuccin Mocha",
@@ -65,65 +53,6 @@ HEADER = (
 # in the 24 px box; the header above supplies the stroke. Anything not named
 # here keeps the shared geometry, re-stroked.
 #
-# Dracula: sharp, slightly theatrical. Its play triangle has a fang-cut notch,
-# its folders a tab corner, its star a narrow five-point and its wifi a
-# broadcast mast; the heart is a broad, low one.
-# ---------------------------------------------------------------------------
-DRACULA = {
-    # A bat's wing: the outer edge cut in two, so the mark reads as Dracula's
-    # rather than as every other player's triangle.
-    "play.svg": """
-  <path fill="#ffffff" stroke="none" d="M7.2 3.6 20.4 12 7.2 20.4 12.1 12z"/>
-""",
-    "pause.svg": """
-  <path fill="#ffffff" stroke="none" d="M6.5 4.5h4v15h-4z"/>
-  <path fill="#ffffff" stroke="none" d="M13.5 4.5h4v15h-4z"/>
-""",
-    "star.svg": """
-  <path d="M12 3.4 14.4 9l5.9.7-4.4 4 1.2 5.8L12 16.6 6.9 19.5 8.1 13.7 3.7 9.7 9.6 9z"/>
-""",
-    "star-filled.svg": """
-  <path fill="#ffffff" stroke="none" d="M12 3.4 14.4 9l5.9.7-4.4 4 1.2 5.8L12 16.6 6.9 19.5 8.1 13.7 3.7 9.7 9.6 9z"/>
-""",
-    "heart.svg": """
-  <path d="M12 20.2C8 17.4 3.6 14.4 3.6 10.2a4.4 4.4 0 0 1 8.4-1.9 4.4 4.4 0 0 1 8.4 1.9c0 4.2-4.4 7.2-8.4 10z"/>
-""",
-    "heart-filled.svg": """
-  <path fill="#ffffff" stroke="none" d="M12 20.2C8 17.4 3.6 14.4 3.6 10.2a4.4 4.4 0 0 1 8.4-1.9 4.4 4.4 0 0 1 8.4 1.9c0 4.2-4.4 7.2-8.4 10z"/>
-""",
-    "chevron-right.svg": """
-  <path d="M9.4 4.6 16.9 12 9.4 19.4"/>
-""",
-    "chevron-left.svg": """
-  <path d="M14.6 4.6 7.1 12l7.5 7.4"/>
-""",
-    "check.svg": """
-  <path d="M4.6 12.7 9.6 18 19.6 5.8"/>
-""",
-    "close.svg": """
-  <path d="M6.2 6.2 17.8 17.8"/>
-  <path d="M17.8 6.2 6.2 17.8"/>
-""",
-    "search.svg": """
-  <circle cx="10.6" cy="10.6" r="7"/>
-  <path d="M15.8 15.8 21 21"/>
-""",
-    "wifi.svg": """
-  <path d="M12 4 21.4 13.4"/>
-  <path d="M12 4 2.6 13.4"/>
-  <path d="M12 8.4 18.4 14.8"/>
-  <path d="M12 8.4 5.6 14.8"/>
-  <rect x="10.6" y="17.6" width="2.8" height="2.8" fill="#ffffff" stroke="none"/>
-""",
-    "folder.svg": """
-  <path d="M3 6.6h6.4l2 2H21v10.8H3z"/>
-""",
-    "music.svg": """
-  <path fill="#ffffff" stroke="none" d="M9 4.2 19.4 2.2v11.2a3.1 3.1 0 1 1-1.9-2.86V5.1L9 7z"/>
-  <circle cx="6.2" cy="17.4" r="3.2" fill="#ffffff" stroke="none"/>
-""",
-}
-
 # ---------------------------------------------------------------------------
 # Catppuccin Mocha: soft, even, generous curves. The play triangle is rounded
 # at all three corners, the heart is a wide plump one, the star is a five-point
@@ -176,7 +105,7 @@ CATPPUCCIN = {
 """,
 }
 
-SPECIALS = {"dracula": DRACULA, "catppuccin": CATPPUCCIN}
+SPECIALS = {"catppuccin": CATPPUCCIN}
 
 STROKE_ATTRS = re.compile(
     r'\s*stroke-width="[^"]*"|\s*stroke-linecap="[^"]*"|\s*stroke-linejoin="[^"]*"'

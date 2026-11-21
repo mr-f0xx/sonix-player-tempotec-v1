@@ -2,7 +2,6 @@
 
 #include "icons.h"
 #include "icons_catppuccin.h"
-#include "icons_dracula.h"
 #include "icons_gruvbox.h"
 #include "icons_rose.h"
 #include "theme.h"
@@ -20,9 +19,6 @@ static const theme_icon_row_t *active_map(size_t *count) {
 	case THEME_GLYPH_SET_GRUVBOX:
 		*count = theme_gruvbox_map_count;
 		return theme_gruvbox_map;
-	case THEME_GLYPH_SET_DRACULA:
-		*count = theme_dracula_map_count;
-		return theme_dracula_map;
 	case THEME_GLYPH_SET_CATPPUCCIN:
 		*count = theme_catppuccin_map_count;
 		return theme_catppuccin_map;
@@ -46,8 +42,6 @@ const lv_image_dsc_t *theme_icon_home_tile(int tile) {
 		return theme_rose_tiles[tile];
 	case THEME_GLYPH_SET_GRUVBOX:
 		return theme_gruvbox_tiles[tile];
-	case THEME_GLYPH_SET_DRACULA:
-		return theme_dracula_tiles[tile];
 	case THEME_GLYPH_SET_CATPPUCCIN:
 		return theme_catppuccin_tiles[tile];
 	case THEME_GLYPH_SET_LUCIDE:

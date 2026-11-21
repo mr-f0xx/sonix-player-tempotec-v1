@@ -198,53 +198,6 @@ Showcase of **Gruvbox** appearance: warm retro greys, amber and green, with icon
 </table>
 </details>
 
-<a name="dracula-theme"></a>
-
-<details>
-<summary><strong>Dracula theme</strong></summary>
-
-Showcase of **Dracula** appearance: the familiar purple-and-cyan night theme, down to its bat-wing play glyph.
-
-<table>
-  <tr>
-    <td align="center">
-      <a href="screenshots/dracula/main-menu.png"><img src="screenshots/dracula/main-menu.png" width="180" alt="Dracula main menu"></a>
-      <br><sub><b>Main menu</b></sub>
-    </td>
-    <td align="center">
-      <a href="screenshots/dracula/music.png"><img src="screenshots/dracula/music.png" width="180" alt="Dracula music"></a>
-      <br><sub><b>Music</b></sub>
-    </td>
-    <td align="center">
-      <a href="screenshots/dracula/more.png"><img src="screenshots/dracula/more.png" width="180" alt="Dracula more"></a>
-      <br><sub><b>More</b></sub>
-    </td>
-    <td align="center">
-      <a href="screenshots/dracula/wireless.png"><img src="screenshots/dracula/wireless.png" width="180" alt="Dracula wireless"></a>
-      <br><sub><b>Wireless</b></sub>
-    </td>
-  </tr>
-  <tr>
-    <td align="center">
-      <a href="screenshots/dracula/settings.png"><img src="screenshots/dracula/settings.png" width="180" alt="Dracula settings"></a>
-      <br><sub><b>Settings</b></sub>
-    </td>
-    <td align="center">
-      <a href="screenshots/dracula/now-playing.png"><img src="screenshots/dracula/now-playing.png" width="180" alt="Dracula now playing"></a>
-      <br><sub><b>Now Playing</b></sub>
-    </td>
-    <td align="center">
-      <a href="screenshots/dracula/file-browser.png"><img src="screenshots/dracula/file-browser.png" width="180" alt="Dracula file browser"></a>
-      <br><sub><b>File Browser</b></sub>
-    </td>
-    <td align="center">
-      <a href="screenshots/dracula/streaming.png"><img src="screenshots/dracula/streaming.png" width="180" alt="Dracula streaming"></a>
-      <br><sub><b>Streaming</b></sub>
-    </td>
-  </tr>
-</table>
-</details>
-
 <a name="catppuccin-mocha-theme"></a>
 
 <details>
@@ -395,7 +348,6 @@ Showcase of **OLED** appearance: true black backgrounds with white as the accent
   - [Tokyo Night theme](#tokyo-night-theme)
   - [Rosé Pine Moon theme](#rose-pine-theme)
   - [Gruvbox theme](#gruvbox-theme)
-  - [Dracula theme](#dracula-theme)
   - [Catppuccin Mocha theme](#catppuccin-mocha-theme)
   - [Amber on Black theme](#amber-on-black-theme)
   - [OLED theme](#oled-theme)

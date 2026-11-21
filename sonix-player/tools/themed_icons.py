@@ -68,14 +68,6 @@ SETS = {
         "guard": "ICONS_GRUVBOX_H",
         "title": "Gruvbox's icon set",
     },
-    "drac": {
-        "prefix": "dracula",
-        "dir": "dracula",
-        "file": "icons_dracula",
-        "header": "icons_dracula.h",
-        "guard": "ICONS_DRACULA_H",
-        "title": "Dracula's icon set",
-    },
     "cat": {
         "prefix": "catppuccin",
         "dir": "catppuccin-mocha",

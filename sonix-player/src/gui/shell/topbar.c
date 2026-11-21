@@ -309,11 +309,11 @@ static void remember_timer_cb(lv_timer_t *timer) {
 // Amber on Black and OLED map the battery's colours to their accent (signal
 // orange, white), so volume and playback take that accent too.
 //
-// The four schemes with a glyph set of their own colour the bar the way their
+// The three schemes with a glyph set of their own colour the bar the way their
 // editors colour a buffer: the "what is playing" glyph in the scheme's own
-// green -- Rosé Pine's pine, Gruvbox's #98971a, Dracula's #50fa7b, Catppuccin's
-// #a6e3a1 -- and the volume glyph beside it in a second hue, foam for Rosé
-// Pine, #83a598 for Gruvbox, cyan for Dracula and sapphire for Catppuccin.
+// green -- Rosé Pine's pine, Gruvbox's #98971a, Catppuccin's #a6e3a1 -- and the
+// volume glyph beside it in a second hue, foam for Rosé Pine, #83a598 for
+// Gruvbox and sapphire for Catppuccin.
 // Amber and Tokyo Night had this already; without it these four bars were the
 // only ones whose glyphs were all the same plain foreground.
 static void refresh_status_icon_color(lv_obj_t *icon) {
@@ -328,8 +328,6 @@ static void refresh_status_icon_color(lv_obj_t *icon) {
 		ink = lv_color_make(62, 143, 176); // #3e8fb0, pine: the scheme's green-deep
 	} else if (theme_is_gruvbox()) {
 		ink = lv_color_make(152, 151, 26); // #98971a, green
-	} else if (theme_is_dracula()) {
-		ink = lv_color_make(80, 250, 123); // #50fa7b, green
 	} else if (theme_is_catppuccin()) {
 		ink = lv_color_make(166, 227, 161); // #a6e3a1, green
 	} else {
@@ -347,10 +345,6 @@ static void refresh_status_icon_color(lv_obj_t *icon) {
 static bool volume_icon_ink(lv_color_t *out) {
 	if (theme_is_rose_pine()) {
 		*out = theme_semantic_color(THEME_SEMANTIC_BLUE); // foam
-		return true;
-	}
-	if (theme_is_dracula()) {
-		*out = lv_color_make(139, 233, 253); // #8be9fd, cyan
 		return true;
 	}
 	if (theme_is_catppuccin()) {
@@ -796,11 +790,10 @@ static void refresh_play_icon(const device_state_t *state) {
 		return;
 	}
 
-	// Amber on Black, OLED and the four hand-drawn schemes keep this glyph in
+	// Amber on Black, OLED and the three hand-drawn schemes keep this glyph in
 	// the set's playing colour. Other themes retain the Bluetooth-blue route
 	// indicator while it plays, which takes precedence where it applies.
-	if (theme_is_monochrome() || theme_is_rose_pine() || theme_is_gruvbox() ||
-		theme_is_dracula() || theme_is_catppuccin()) {
+	if (theme_is_monochrome() || theme_is_rose_pine() || theme_is_gruvbox() || theme_is_catppuccin()) {
 		refresh_status_icon_color(play_icon);
 	} else if (state->status == AUDIO_STATUS_PLAYING && bluetooth_audio_active()) {
 		// Fixed Bluetooth blue rather than the accent: it means wireless, not active.

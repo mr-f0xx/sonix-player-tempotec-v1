@@ -5183,14 +5183,13 @@ every hold it fires asserts that the sheet is still down afterwards.
 ## Four more palettes, each with an icon set of its own
 
 The Themes page had five entries. The four added here -- Rosé Pine Moon,
-Gruvbox, Dracula and Catppuccin Mocha -- are not recolours of the same
+Gruvbox and Catppuccin Mocha -- are not recolours of the same
 drawings: each is a port of a published scheme, and each carries its own glyph
 set, so the artwork changes with the palette instead of only the rectangles
 around it.
 
 They are selected the same way the earlier themes are, saved in
-`device_config.ini` as `theme = rose-pine`, `gruvbox`, `dracula` or
-`catppuccin-mocha`, and they honour the same Custom accent row: pick one of the
+`device_config.ini` as `theme = rose-pine`, `gruvbox` or `catppuccin-mocha`, and they honour the same Custom accent row: pick one of the
 fixed accents and that hue drives the accent role, or leave it on the theme's
 own and the port's own accent stands.
 
@@ -5204,15 +5203,12 @@ accent, and the function colours the icons and status bar read.
 |---|---|---|---|---|
 | Rosé Pine Moon | `#232136` | `#2a273f` | iris `#c4a7e7` | iris draws the player controls; pine/foam/rose/gold/love fill the rest |
 | Gruvbox | `#282828` | `#3c3836` | `#d79921` | the dark scheme's medium-contrast steps, amber and green |
-| Dracula | `#282A36` | `#44475A` | `#BD93F9` | the familiar purple and cyan |
 | Catppuccin Mocha | `#1E1E2E` | `#313244` | `#CBA6F7` | pastel lavender and mint on a deep blue-grey |
 
 Rosé Pine keeps iris for the player's own controls while the status bar's
 "what is playing" glyph reads pine (`#3e8fb0`) and the volume glyph beside it
 foam (`#9ccfd8`) -- the two answer different questions and the scheme gives
-both, as the section below spells out. Dracula's play glyph is the scheme's own
-bat-wing triangle rather than the shared play symbol, which is why the set is
-not just a recolour.
+both, as the section below spells out.
 
 ### One icon set per theme, and the shared set underneath
 
@@ -5239,8 +5235,7 @@ already the right size, so no themed glyph is resampled in either direction.
 
 `tools/themed_icons.py` holds the table: 140 symbols, each with the size its
 set draws and the shared symbol it stands in for. `tools/theme_icon_sets.py`
-regenerates `icons_rose.c`, `icons_gruvbox.c`, `icons_dracula.c` and
-`icons_catppuccin.c` from the SVGs in `assets/icons/<theme>/` (114 drawings
+regenerates `icons_rose.c`, `icons_gruvbox.c` and `icons_catppuccin.c` from the SVGs in `assets/icons/<theme>/` (114 drawings
 each); `--check` verifies the committed sources still match the drawings.
 
 ### One ink per glyph, so one byte per pixel
@@ -5318,7 +5313,7 @@ than the new themes by name:
 
 - `refresh_status_icon_color()` -- a monochrome theme stays green (unchanged);
   a themed one paints its function glyphs with that scheme's role colour.
-  Rosé Pine `#3e8fb0`, Gruvbox `#98971a`, Dracula `#50fa7b`, Catppuccin
+  Rosé Pine `#3e8fb0`, Gruvbox `#98971a`, Catppuccin
   `#a6e3a1`. Sampled off the real frames: the bars read (41,69,90), (132,162,148),
   (140,231,255) and (99,125,173).
 - `volume_icon_ink()` -- the volume glyph's own ink, one step softer than the
@@ -5335,7 +5330,7 @@ theme with its own set answers with that set's drawing of the tile, cut at the
 size the labelled layout uses, and the shared native-size table is not
 consulted at all. `theme_icon_at()` is what the other tests exercise; the four
 new palettes are checked for their roles and their saved names in `theme.c`.
-The suite runs 34 UI tests green with the four themes in the rotation.
+The suite runs 34 UI tests green with the new themes in the rotation.
 
 Several suites already swept `THEME_KIND_COUNT`, so they picked the new themes
 up the moment the enum grew -- but their console lines still said "5 themes",
@@ -5343,7 +5338,7 @@ and the tests README said "all five themes" in four places. Those now print and
 say the count they actually sweep (nine), and `test_stockkeys_ui`, which really
 does loop `tk < 5`, was left alone.
 
-`screenshots/{rose-pine,gruvbox,dracula,catppuccin-mocha}/` carry the same
+`screenshots/{rose-pine,gruvbox,catppuccin-mocha}/` carry the same
 eight scenes each, captured from the web emulator at 240×320, and `README.md`
 gains a `<details>` block per theme in the Previews section. Now Playing is a
 real playback in every capture -- the album tracklist opened the player and the
@@ -5352,3 +5347,44 @@ seek bar advanced -- which is worth saying because a seeded
 with `access()` before it plays anything, and a path that only resolves from
 the emulator's working directory fails there even though the library indexed it.
 The reliable route is the one a user takes: Music, the album, the track.
+
+## Dracula is withdrawn
+
+The Dracula port was the heaviest of the four themed palettes and the least
+distinct in practice, so it was pulled rather than carried at cost. What went:
+
+- `icons_dracula.c` / `.h` -- 1.5 MB of generated source, 237 KB of `text` in
+  the image;
+- `assets/icons/dracula/`, the 114 SVGs the set was drawn from;
+- its palette, semantic role table, player-chrome table, status-bar tints, the
+  Appearance swatch row and the picker button;
+- the `THEME_KIND_DRACULA` and `THEME_GLYPH_SET_DRACULA` slots, with Catppuccin
+  and Custom moved down to close the hole (`THEME_KIND_COUNT` 9 -> 8);
+- `appearance_dracula`, `_palette` and `_glyphs` from all 11 language files;
+- its README gallery and the eight captures behind it.
+
+### A device that had it selected
+
+Dracula is saved by name, `ui = dracula`, and removing the branch that
+recognised the name would have dropped those devices to Dark -- the runner-up
+in `theme_init` -- quietly losing the themed glyphs with it. `theme_init`
+instead maps the stale name onto **Rosé Pine Moon**, the other scheme-accurate
+port, so a device comes up on a palette it never chose rather than on one with
+no glyph set at all. This is the same treatment Roboto got in `fonts.c`: a
+retired choice resolves to the face behind it instead of logging a failure it
+can never honour.
+
+Verified on the emulator by leaving `ui = dracula` in `device_config.ini`
+through a reboot: the Appearance page highlights Rosé Pine, and the home screen
+draws Rosé Pine's palette and glyphs.
+
+### What did not change
+
+Dracula's 114 drawings were part of the shared 140-symbol table, so the sets
+that remain re-render byte-for-byte from the same SVGs -- `themed_icons.py
+--check` passes untouched. Its play glyph was the shared triangle like every
+other set's; only the pause bars were distinctive, so nothing unique was lost
+from the artwork.
+
+`ui` is 34/34 green, `subsonic-ui` and `radio-ui` pass, and every suite that
+sweeps `THEME_KIND_COUNT` now reports eight themes.
