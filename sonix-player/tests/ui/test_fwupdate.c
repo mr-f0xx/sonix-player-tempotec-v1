@@ -56,6 +56,7 @@ void power_hold_screen_on(bool hold) { (void)hold; }
 bool usbhostmode_release(bool clear) { (void)clear; return true; }
 bool firmware_update_file_find(char *out, size_t size) { (void)out; (void)size; return false; }
 void firmware_update_start(void) {}
+void ota_auto_release_taken(void) {}
 void gui_notify_popup(const char *key) { (void)key; }
 void gui_notify_popup_long(const char *key) { (void)key; }
 void sysinfo_format_size(uint64_t bytes, char *out, size_t size) { snprintf(out, size, "%llu MB", (unsigned long long)(bytes / 1000000)); }

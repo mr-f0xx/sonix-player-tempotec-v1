@@ -7,6 +7,7 @@
 #include "lvgl/lvgl.h"
 
 #include "src/gui/fonts/fonts.h"
+#include "src/gui/settings/ota_auto.h"
 #include "src/gui/shell/gui.h"
 #include "src/gui/board_profile.h"
 #include "src/gui/shell/theme.h"
@@ -728,6 +729,9 @@ static void install_cb(lv_timer_t *timer) {
 static void show_installing(void) {
 	layout(PRODUCT_NAME, tr("system_update_installing"), false, false);
 	hide_buttons(0);
+	// The update is being made: the standing notice must not come back for
+	// this release afterwards.
+	ota_auto_release_taken();
 	lv_timer_t *t = lv_timer_create(install_cb, INSTALL_DELAY_MS, NULL);
 	lv_timer_set_repeat_count(t, 1);
 }
@@ -826,6 +830,9 @@ static void sd_run(void *unused) {
 		gui_notify_popup_long("usbhost_restore_failed");
 		return;
 	}
+	// The update is being made: the standing notice must not come back for
+	// this release afterwards.
+	ota_auto_release_taken();
 	firmware_update_start();
 }
 
