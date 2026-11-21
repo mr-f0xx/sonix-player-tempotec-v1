@@ -46,6 +46,10 @@ static uint32_t framebuffer[W * H];
 // What the page asks the world for
 // ---------------------------------------------------------------------------
 
+// Set by the empty-list section at the end: a history with nothing in it, the
+// state the "nothing played yet" line is the whole page for.
+static bool lists_empty;
+
 // The history the page is drawn from, held here so the test decides the shape
 // of the answer: four artists, three records, all with a file behind them (so a
 // cover is asked for) and all with plays.
@@ -85,6 +89,9 @@ void stats_summary(stats_range_t range, stats_summary_t *out) {
 
 int stats_top(stats_top_t kind, stats_range_t range, int offset, int count, stats_entry_t *out) {
 	(void)range;
+	if (lists_empty) {
+		return 0;
+	}
 	static const char *const ARTISTS[] = {"Slowspace", "Alyzea", "Nightjar", "Kessler"};
 	static const char *const ALBUMS[] = {"Red", "Blue", "Green"};
 	static const char *const FILES[] = {"/card/a/01.flac", "/card/b/01.flac", "/card/c/01.flac", "/card/d/01.flac"};
@@ -104,6 +111,9 @@ int stats_top(stats_top_t kind, stats_range_t range, int offset, int count, stat
 
 int stats_top_count(stats_top_t kind, stats_range_t range) {
 	(void)range;
+	if (lists_empty) {
+		return 0;
+	}
 	return kind == STATS_TOP_ALBUMS ? 3 : 4;
 }
 
@@ -131,15 +141,20 @@ void coverloader_release(int slot) { (void)slot; }
 // Translation and the theme's two boot-screen questions: the page asks for
 // words, and theme_init() asks for the boot picture it should remember.
 // Every other string the page draws is a plain tag, and the tag is what the
-// test looks for. The two count lines are format strings, though, and a tag
-// there would swallow the number the test wants to see, so those come back as
-// the English they stand for.
+// test looks for. Three of them come back as the English they stand for,
+// because a tag would hide what the test is about: the two count lines are
+// format strings and a tag there would swallow the number, and the empty-list
+// note is only worth checking as a sentence: its length is the whole problem,
+// and "stats_nothing_yet" fits on a line of its own.
 const char *tr(const char *key) {
 	if (strcmp(key, "stats_plays") == 0) {
 		return "%d plays";
 	}
 	if (strcmp(key, "stats_play_one") == 0) {
 		return "%d play";
+	}
+	if (strcmp(key, "stats_nothing_yet") == 0) {
+		return "Nothing played yet. Play something and come back.";
 	}
 	return key;
 }
@@ -502,6 +517,58 @@ int main(void) {
 	lv_obj_update_layout(stats_albums_screen);
 	lv_obj_t *all_three = find_label_prefix(stats_albums_screen, "Green");
 	assert(all_three);
+
+	// --- the page with nothing on it --------------------------------------------
+	// Neither list has a row, so the note saying so is all either page has to
+	// say -- and it is a sentence longer than the panel. A label measured at its
+	// natural width is one unbroken line, and in a centred column that line
+	// overhangs the panel on both sides at once: the first words and the last
+	// ones both disappear, which is what the empty Top artists and Top albums
+	// pages showed. Wrapped into the page it stays legible end to end, on as
+	// many lines as the language needs.
+	//
+	// The English is spelled out rather than looked up by its tag for the same
+	// reason the plays lines are: the tag is shorter than the panel, so a page
+	// that cut the sentence off would still pass a test that only knew the tag.
+	static const char *const NOTHING_YET = "Nothing played yet. Play something and come back.";
+
+	lists_empty = true;
+	lv_obj_send_event(lv_obj_get_parent(see_all), LV_EVENT_CLICKED, NULL); // the artists card's "See all"
+	lv_obj_update_layout(stats_artists_screen);
+	lv_obj_t *note = find_label(stats_artists_screen, NOTHING_YET);
+	assert(note);
+	assert(!lv_obj_is_hidden(note));
+	assert(!find_label_prefix(stats_artists_screen, "Slowspace")); // the list itself stayed empty
+	lv_area_t note_area;
+	lv_obj_get_coords(note, &note_area);
+	// All of it inside the panel, on both edges and at the bottom.
+	assert(note_area.x1 >= 0 && note_area.x2 < W);
+	assert(note_area.y1 >= 0 && note_area.y2 < H);
+	// And over more than one line, which is how it fits: a single line of that
+	// sentence is exactly what used to hang over both edges.
+	assert(note_area.y2 - note_area.y1 + 1 > lv_font_get_line_height(&font_ui_18) + 2);
+
+	// The albums page is this page built a second time, so it is read the same
+	// way.
+	lv_obj_t *album_see_all = find_label(lv_obj_get_parent(top_albums), "stats_see_all");
+	assert(album_see_all);
+	lv_obj_send_event(lv_obj_get_parent(album_see_all), LV_EVENT_CLICKED, NULL);
+	lv_obj_update_layout(stats_albums_screen);
+	lv_obj_t *album_note = find_label(stats_albums_screen, NOTHING_YET);
+	assert(album_note);
+	assert(!lv_obj_is_hidden(album_note));
+	lv_area_t album_note_area;
+	lv_obj_get_coords(album_note, &album_note_area);
+	assert(album_note_area.x1 >= 0 && album_note_area.x2 < W);
+	assert(album_note_area.y2 - album_note_area.y1 + 1 > lv_font_get_line_height(&font_ui_18) + 2);
+
+	// And the note steps aside as soon as there is something to show, since the
+	// page is refilled on every entry rather than rebuilt.
+	lists_empty = false;
+	lv_obj_send_event(lv_obj_get_parent(see_all), LV_EVENT_CLICKED, NULL);
+	lv_obj_update_layout(stats_artists_screen);
+	assert(lv_obj_is_hidden(note));
+	assert(find_label_prefix(stats_artists_screen, "Slowspace"));
 
 	printf("stats: the pills, the cards, the chart and the two top lists fit the V1's panel\n");
 	return 0;
