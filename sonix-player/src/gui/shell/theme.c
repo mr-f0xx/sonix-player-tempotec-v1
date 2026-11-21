@@ -124,24 +124,6 @@ static theme_palette_t palette_rose_pine = {
 	.dark = true,
 };
 
-// Gruvbox, the dark scheme's medium-contrast steps from gruvbox.org: bg0 #282828
-// for the page, bg1 #3c3836 for the cards, bg2 #504945 for the pressed state,
-// the deck one step darker than the page at bg0_s #32302f -- the scheme's own
-// step for a raised block, so the panel reads as part of the page rather than
-// as the hole OLED's does. fg1 #ebdbb2 is the type, fg4 #a89984 the second
-// line, and yellow #d79921 the accent: the scheme's "information" hue.
-static theme_palette_t palette_gruvbox = {
-	.screen_bg = LV_COLOR_MAKE(40, 40, 40),         // #282828, bg0
-	.surface = LV_COLOR_MAKE(60, 56, 54),           // #3c3836, bg1
-	.surface_pressed = LV_COLOR_MAKE(80, 73, 69),   // #504945, bg2
-	.panel = LV_COLOR_MAKE(50, 48, 47),             // #32302f, bg0_s
-	.cover_bg = LV_COLOR_MAKE(50, 48, 47),
-	.text_primary = LV_COLOR_MAKE(235, 219, 178),   // #ebdbb2, fg1
-	.text_secondary = LV_COLOR_MAKE(168, 153, 132), // #a89984, fg4
-	.accent = LV_COLOR_MAKE(215, 153, 33),          // #d79921, yellow
-	.dark = true,
-};
-
 // A fixed filename keeps the card interface simple and avoids user-supplied
 // paths. Parsing is transactional: a partial or malformed edit is never shown.
 static char custom_root[512];
@@ -248,8 +230,6 @@ static theme_palette_t *selected_palette(void) {
 		return &palette_oled;
 	case THEME_KIND_ROSE_PINE:
 		return &palette_rose_pine;
-	case THEME_KIND_GRUVBOX:
-		return &palette_gruvbox;
 	case THEME_KIND_CUSTOM:
 		return &palette_custom;
 	case THEME_KIND_DARK:
@@ -301,8 +281,6 @@ static lv_color_t default_accent(theme_kind_t kind) {
 		return lv_color_make(255, 255, 255); // OLED white
 	case THEME_KIND_ROSE_PINE:
 		return lv_color_make(196, 167, 231); // Rosé Pine iris
-	case THEME_KIND_GRUVBOX:
-		return lv_color_make(215, 153, 33); // Gruvbox yellow
 	case THEME_KIND_CUSTOM:
 		return custom_accent;
 	case THEME_KIND_DARK:
@@ -561,13 +539,13 @@ static void select_active(void) {
 		selected_kind = THEME_KIND_OLED;
 	} else if (saved_theme && strcmp(saved_theme, "rose-pine") == 0) {
 		selected_kind = THEME_KIND_ROSE_PINE;
-	} else if (saved_theme && strcmp(saved_theme, "gruvbox") == 0) {
-		selected_kind = THEME_KIND_GRUVBOX;
-	} else if (saved_theme && (strcmp(saved_theme, "dracula") == 0 ||
+	} else if (saved_theme && (strcmp(saved_theme, "gruvbox") == 0 ||
+							   strcmp(saved_theme, "dracula") == 0 ||
 							   strcmp(saved_theme, "catppuccin-mocha") == 0)) {
-		// Neither is carried any more. A device that had one of them selected
-		// comes up on Rosé Pine Moon, the remaining painted scheme, rather
-		// than falling through to Dark and losing a palette it never chose.
+		// None of the three is carried any more. A device that had one of
+		// them selected comes up on Rosé Pine Moon, the remaining painted
+		// scheme, rather than falling through to Dark and losing a palette
+		// it never chose.
 		selected_kind = THEME_KIND_ROSE_PINE;
 	} else if (saved_theme && strcmp(saved_theme, "custom") == 0) {
 		selected_kind = load_custom(&palette_custom) ? THEME_KIND_CUSTOM : THEME_KIND_DARK;
@@ -608,7 +586,6 @@ static void select_active(void) {
 		palette_amber.accent = custom_accent_color;
 		palette_oled.accent = custom_accent_color;
 		palette_rose_pine.accent = custom_accent_color;
-		palette_gruvbox.accent = custom_accent_color;
 		palette_custom.accent = custom_accent_color;
 	} else {
 		palette_dark.accent = ACCENT_COLORS[accent_index];
@@ -617,7 +594,6 @@ static void select_active(void) {
 		palette_amber.accent = accent_index == 0 ? default_accent(THEME_KIND_AMBER_ON_BLACK) : ACCENT_COLORS[accent_index];
 		palette_oled.accent = accent_index == 0 ? default_accent(THEME_KIND_OLED) : ACCENT_COLORS[accent_index];
 		palette_rose_pine.accent = accent_index == 0 ? default_accent(THEME_KIND_ROSE_PINE) : ACCENT_COLORS[accent_index];
-		palette_gruvbox.accent = accent_index == 0 ? default_accent(THEME_KIND_GRUVBOX) : ACCENT_COLORS[accent_index];
 		palette_custom.accent = accent_index == 0 ? custom_accent : ACCENT_COLORS[accent_index];
 	}
 
@@ -746,24 +722,19 @@ bool theme_is_oled(void) { return selected_kind == THEME_KIND_OLED; }
 
 bool theme_is_rose_pine(void) { return selected_kind == THEME_KIND_ROSE_PINE; }
 
-bool theme_is_gruvbox(void) { return selected_kind == THEME_KIND_GRUVBOX; }
-
 bool theme_is_monochrome(void) {
 	return selected_kind == THEME_KIND_AMBER_ON_BLACK || selected_kind == THEME_KIND_OLED;
 }
 
 bool theme_uses_function_glyphs(void) {
 	return selected_kind == THEME_KIND_TOKYO_NIGHT || selected_kind == THEME_KIND_AMBER_ON_BLACK ||
-		   selected_kind == THEME_KIND_OLED || selected_kind == THEME_KIND_ROSE_PINE ||
-		   selected_kind == THEME_KIND_GRUVBOX;
+		   selected_kind == THEME_KIND_OLED || selected_kind == THEME_KIND_ROSE_PINE;
 }
 
 theme_glyph_set_t theme_glyph_set(void) {
 	switch (selected_kind) {
 	case THEME_KIND_ROSE_PINE:
 		return THEME_GLYPH_SET_ROSE_PINE;
-	case THEME_KIND_GRUVBOX:
-		return THEME_GLYPH_SET_GRUVBOX;
 	case THEME_KIND_TOKYO_NIGHT:
 	case THEME_KIND_AMBER_ON_BLACK:
 	case THEME_KIND_OLED:
@@ -806,29 +777,6 @@ lv_color_t theme_semantic_color(theme_semantic_t role) {
 		case THEME_SEMANTIC_MUTED:
 		default:
 			return lv_color_make(110, 106, 134); // #6e6a86, muted
-		}
-	}
-
-	// Gruvbox takes the bright steps of its ANSI palette, one role per hue:
-	// blue, aqua, purple, green, yellow and red, with the scheme's grey for
-	// the mute.
-	if (selected_kind == THEME_KIND_GRUVBOX) {
-		switch (role) {
-		case THEME_SEMANTIC_BLUE:
-			return lv_color_make(131, 165, 152); // #83a598, bright blue
-		case THEME_SEMANTIC_CYAN:
-			return lv_color_make(142, 192, 124); // #8ec07c, bright aqua
-		case THEME_SEMANTIC_PURPLE:
-			return lv_color_make(211, 134, 155); // #d3869b, bright purple
-		case THEME_SEMANTIC_GREEN:
-			return lv_color_make(184, 187, 38); // #b8bb26, bright green
-		case THEME_SEMANTIC_AMBER:
-			return lv_color_make(250, 189, 47); // #fabd2f, bright yellow
-		case THEME_SEMANTIC_RED:
-			return lv_color_make(251, 73, 52); // #fb4934, bright red
-		case THEME_SEMANTIC_MUTED:
-		default:
-			return lv_color_make(146, 131, 116); // #928374, gray
 		}
 	}
 
@@ -941,27 +889,6 @@ lv_color_t theme_player_chrome_color(theme_player_chrome_t role) {
 		case THEME_PLAYER_CHROME_SHUFFLE_IDLE:
 		case THEME_PLAYER_CHROME_OVERFLOW:
 			return lv_color_make(110, 106, 134); // #6e6a86, muted
-		}
-	}
-
-	// Gruvbox's deck keeps the scheme's own steps: the track name in fg1, the
-	// second line and the quiet controls in fg4, the playback glyph and the
-	// progress bar in the accent yellow whose deep step -- #b57614, the
-	// palette's "dark yellow" -- is the rest of the bar.
-	if (selected_kind == THEME_KIND_GRUVBOX) {
-		switch (role) {
-		case THEME_PLAYER_CHROME_PRIMARY:
-			return lv_color_make(235, 219, 178); // #ebdbb2, fg1
-		case THEME_PLAYER_CHROME_SECONDARY:
-		case THEME_PLAYER_CHROME_CHEVRON:
-		case THEME_PLAYER_CHROME_MUTED:
-		case THEME_PLAYER_CHROME_SHUFFLE_IDLE:
-		case THEME_PLAYER_CHROME_OVERFLOW:
-			return lv_color_make(168, 153, 132); // #a89984, fg4
-		case THEME_PLAYER_CHROME_PLAYBACK:
-			return lv_color_make(250, 189, 47); // #fabd2f, bright yellow
-		case THEME_PLAYER_CHROME_PROGRESS_REST:
-			return lv_color_make(80, 73, 69); // #504945, bg2
 		}
 	}
 
@@ -1104,8 +1031,6 @@ static const char *theme_config_value(theme_kind_t kind) {
 		return "oled";
 	case THEME_KIND_ROSE_PINE:
 		return "rose-pine";
-	case THEME_KIND_GRUVBOX:
-		return "gruvbox";
 	case THEME_KIND_CUSTOM:
 		return "custom";
 	case THEME_KIND_DARK:
@@ -1133,7 +1058,7 @@ void theme_set_kind(theme_kind_t kind) {
 	if (kind < THEME_KIND_DARK || kind > THEME_KIND_CUSTOM) {
 		return;
 	}
-	// Every kind between the two ends is a real choice: the seven built-in
+	// Every kind between the two ends is a real choice: the six built-in
 	// themes and Custom. Nothing falls through to Dark by accident.
 	if (kind == THEME_KIND_CUSTOM && !theme_reload_custom()) {
 		return;
@@ -1148,14 +1073,12 @@ void theme_set_kind(theme_kind_t kind) {
 		palette_amber.accent = custom_accent_color;
 		palette_oled.accent = custom_accent_color;
 		palette_rose_pine.accent = custom_accent_color;
-		palette_gruvbox.accent = custom_accent_color;
 		palette_custom.accent = custom_accent_color;
 	} else {
 		palette_tokyo.accent = accent_index == 0 ? default_accent(THEME_KIND_TOKYO_NIGHT) : ACCENT_COLORS[accent_index];
 		palette_amber.accent = accent_index == 0 ? default_accent(THEME_KIND_AMBER_ON_BLACK) : ACCENT_COLORS[accent_index];
 		palette_oled.accent = accent_index == 0 ? default_accent(THEME_KIND_OLED) : ACCENT_COLORS[accent_index];
 		palette_rose_pine.accent = accent_index == 0 ? default_accent(THEME_KIND_ROSE_PINE) : ACCENT_COLORS[accent_index];
-		palette_gruvbox.accent = accent_index == 0 ? default_accent(THEME_KIND_GRUVBOX) : ACCENT_COLORS[accent_index];
 		palette_custom.accent = accent_index == 0 ? custom_accent : ACCENT_COLORS[accent_index];
 	}
 	rebuild_active();
@@ -1186,7 +1109,6 @@ void theme_set_accent(int index) {
 	palette_amber.accent = index == 0 ? default_accent(THEME_KIND_AMBER_ON_BLACK) : ACCENT_COLORS[index];
 	palette_oled.accent = index == 0 ? default_accent(THEME_KIND_OLED) : ACCENT_COLORS[index];
 	palette_rose_pine.accent = index == 0 ? default_accent(THEME_KIND_ROSE_PINE) : ACCENT_COLORS[index];
-	palette_gruvbox.accent = index == 0 ? default_accent(THEME_KIND_GRUVBOX) : ACCENT_COLORS[index];
 	palette_custom.accent = index == 0 ? custom_accent : ACCENT_COLORS[index];
 	rebuild_active(); // the tint is drawn from the accent, so it moves with it
 	apply_palette();
@@ -1210,7 +1132,6 @@ void theme_set_custom_accent(lv_color_t color) {
 	palette_amber.accent = color;
 	palette_oled.accent = color;
 	palette_rose_pine.accent = color;
-	palette_gruvbox.accent = color;
 	palette_custom.accent = color;
 	rebuild_active();
 	apply_palette();

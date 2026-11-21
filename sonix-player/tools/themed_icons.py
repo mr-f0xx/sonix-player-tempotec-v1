@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate the Rosé Pine and Gruvbox icon sets and their LVGL bitmaps.
+"""Generate the Rosé Pine icon set and its LVGL bitmaps.
 
 Run from any directory:
 
@@ -7,13 +7,12 @@ Run from any directory:
     python3 tools/themed_icons.py            # rewrite the generated files
     python3 tools/themed_icons.py --check    # verify they are current
 
-The SVGs these two sets are drawn from are kept beside this file, under
-assets/icons/rose-pine/ and assets/icons/gruvbox/, so the drawings can be
-opened, compared and edited like every other icon in the repository. This tool
-rasterises them into two self-contained C files the player compiles:
+The SVGs this set is drawn from are kept beside this file, under
+assets/icons/rose-pine/, so the drawings can be opened, compared and edited like
+every other icon in the repository. This tool rasterises them into one
+self-contained C file the player compiles:
 
     src/gui/shell/icons_rose.c      (icons_rose.h)
-    src/gui/shell/icons_gruvbox.c   (icons_gruvbox.h)
 
 Each bitmap is a single white shape stored as 8-bit alpha (LV_COLOR_FORMAT_A8),
 so a page tints a themed glyph with the same lv_obj_set_style_image_recolor() it
@@ -24,12 +23,11 @@ identical output. A themed set only replaces the glyphs it carries; anything it
 does not draw keeps the shared Lucide bitmap, which is why the lookup in
 src/gui/shell/theme_icons.c answers NULL for those.
 
-The two sets are not recolours of the shared one. Rosé Pine's is drawn for the
+The set is not a recolour of the shared one. Rosé Pine's is drawn for the
 scheme's airy, decorative weight -- a 1.6 px line, round caps, shapes with a
-little more curve in them -- and Gruvbox's for the scheme's warm terminal look:
-a 1.9 px line on a wider stroke lattice, squarer joins and chunkier
-silhouettes. Both keep the 24 px grid of the shared icons, so a page that swaps
-one for another does not relayout: the glyphs land in the same box.
+little more curve in them -- and keeps the 24 px grid of the shared icons, so a
+page that swaps one for the other does not relayout: the glyphs land in the
+same box.
 """
 
 import argparse
@@ -60,14 +58,6 @@ SETS = {
         "guard": "ICONS_ROSE_H",
         "title": "Rosé Pine Moon's icon set",
     },
-    "gruv": {
-        "prefix": "gruvbox",
-        "dir": "gruvbox",
-        "file": "icons_gruvbox",
-        "header": "icons_gruvbox.h",
-        "guard": "ICONS_GRUVBOX_H",
-        "title": "Gruvbox's icon set",
-    },
 }
 
 
@@ -76,7 +66,7 @@ def icon(name, size):
 
 
 # The family table, in the shape the lookup uses: the C name of the themed
-# bitmap (icon_rose_<family> / icon_gruvbox_<family>), the drawing under this
+# bitmap (icon_rose_<family>), the drawing under this
 # set's folder, the size it is rasterised at, and the shared symbol it stands
 # in for.
 #
@@ -516,7 +506,7 @@ def write_file(path, text):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Generate the Rosé Pine and Gruvbox icon bitmaps."
+        description="Generate the Rosé Pine icon bitmaps."
     )
     parser.add_argument(
         "--check",

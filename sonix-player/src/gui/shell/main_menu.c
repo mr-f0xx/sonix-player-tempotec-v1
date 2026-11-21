@@ -224,8 +224,8 @@ static void main_menu_refresh_tiles(void) {
 		const lv_image_dsc_t *source = tokyo ? TOKYO_MENU_ICONS[i] : NORMAL_MENU_ICONS[i];
 		if (i == 0 && browse) source = tokyo ? &icon_folder : &icon_menu_explorer;
 		if (i == 3 && books) source = tokyo ? &icon_files_book : &icon_menu_books;
-		// Rosé Pine Moon and Gruvbox draw these six themselves, at the size
-		// this layout draws them (22 px labelled, see the table in
+		// Rosé Pine Moon draws these six itself, at the size this layout
+		// draws them (22 px labelled, see the table in
 		// tools/themed_icons.py). The swap comes after the browse/books
 		// substitutions so the folder and the books glyph -- which those two
 		// destinations borrow -- are themed too, and before the native-size

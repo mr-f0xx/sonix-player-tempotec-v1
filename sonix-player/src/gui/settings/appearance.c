@@ -822,8 +822,7 @@ static void appearance_preview_refresh(void) {
 	bool amber = theme_is_amber_on_black();
 	bool oled = theme_is_oled();
 	bool rose = theme_is_rose_pine();
-	bool gruv = theme_is_gruvbox();
-	bool show = bp_is_tempotec_v1() && (tokyo || amber || oled || rose || gruv);
+	bool show = bp_is_tempotec_v1() && (tokyo || amber || oled || rose);
 	if (theme_palette_card) {
 		lv_obj_set_hidden(theme_palette_card, !show);
 	}
@@ -831,7 +830,6 @@ static void appearance_preview_refresh(void) {
 		const char *title = amber ? "appearance_amber_palette"
 						: oled   ? "appearance_oled_palette"
 						: rose   ? "appearance_rose_pine_palette"
-						: gruv   ? "appearance_gruvbox_palette"
 								 : "appearance_tokyo_palette";
 		lv_label_set_text(theme_palette_title, tr(title));
 	}
@@ -865,16 +863,6 @@ static void appearance_preview_refresh(void) {
 		swatches[5] = theme_semantic_color(THEME_SEMANTIC_CYAN);
 		swatches[6] = theme_semantic_color(THEME_SEMANTIC_AMBER);
 		swatches[7] = theme_semantic_color(THEME_SEMANTIC_RED);
-	} else if (gruv) {
-		// bg0, bg1, bg2, then the medium steps of the ANSI palette.
-		swatches[0] = theme()->screen_bg;
-		swatches[1] = theme()->surface;
-		swatches[2] = theme()->surface_pressed;
-		swatches[3] = lv_color_make(69, 133, 136); // #458588, blue
-		swatches[4] = lv_color_make(152, 151, 26); // #98971a, green
-		swatches[5] = lv_color_make(215, 153, 33); // #d79921, yellow
-		swatches[6] = lv_color_make(214, 93, 14); // #d65d0e, orange
-		swatches[7] = theme_semantic_color(THEME_SEMANTIC_RED);
 	} else if (amber) {
 		swatches[0] = theme()->screen_bg;
 		swatches[1] = theme()->surface;
@@ -899,7 +887,7 @@ static void appearance_preview_refresh(void) {
 			continue;
 		}
 		lv_obj_set_style_bg_color(theme_palette_swatches[i], swatches[i], 0);
-		if (amber || oled || rose || gruv) {
+		if (amber || oled || rose) {
 			// The near-black swatches otherwise disappear into the card and
 			// look like unpainted boxes on the low-contrast V1 panel.
 			lv_obj_set_style_border_width(theme_palette_swatches[i], 1, 0);
@@ -965,7 +953,7 @@ static void build_theme_previews(lv_obj_t *container, bool compact) {
 	for (int i = 0; i < 4; i++) {
 		lv_obj_t *icon = lv_image_create(glyph_row);
 		// The set this card is describing: the shared four, or Rose Pine's
-		// and Gruvbox's own renderings of the same four when one is active.
+		// own renderings of the same four when it is active.
 		lv_image_set_src(icon, theme_icon(glyphs[i]));
 		lv_obj_add_style(icon, &theme_style_icon, 0);
 		lv_obj_set_size(icon, 18, 18);
@@ -1020,7 +1008,6 @@ void appearance_init(gui_config_t *cfg) {
 	theme_buttons[THEME_KIND_OLED] = make_theme_choice(row, "appearance_oled", THEME_KIND_OLED, compact);
 	theme_buttons[THEME_KIND_ROSE_PINE] =
 		make_theme_choice(row, "appearance_rose_pine", THEME_KIND_ROSE_PINE, compact);
-	theme_buttons[THEME_KIND_GRUVBOX] = make_theme_choice(row, "appearance_gruvbox", THEME_KIND_GRUVBOX, compact);
 	theme_buttons[THEME_KIND_CUSTOM] = make_theme_choice(row, "appearance_custom", THEME_KIND_CUSTOM, compact);
 	lv_obj_t *custom_note = lv_label_create(container);
 	lv_label_set_long_mode(custom_note, LV_LABEL_LONG_WRAP);

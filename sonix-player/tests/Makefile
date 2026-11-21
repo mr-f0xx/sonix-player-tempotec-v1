@@ -880,7 +880,7 @@ printf-flag:
 # generated (tools/themed_icons.py) and every consumer of icons.c now resolves
 # glyphs through theme_icon(), so a test linking icons.c needs these with it.
 THEMED_ICONS_SRC = $(ROOT)/src/gui/shell/theme_icons.c \
-                   $(ROOT)/src/gui/shell/icons_rose.c $(ROOT)/src/gui/shell/icons_gruvbox.c
+                   $(ROOT)/src/gui/shell/icons_rose.c
 
 # The drawings a themed set stands in for that live outside icons.c. Every binary
 # that links a themed set needs them: a row's {themed, shared} pair names the

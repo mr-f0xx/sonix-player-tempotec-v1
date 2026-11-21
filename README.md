@@ -151,53 +151,6 @@ Showcase of **Rosé Pine Moon** appearance: soft rose greys over the original pi
 </table>
 </details>
 
-<a name="gruvbox-theme"></a>
-
-<details>
-<summary><strong>Gruvbox theme</strong></summary>
-
-Showcase of **Gruvbox** appearance: warm retro greys, amber and green, with icons matched to the palette.
-
-<table>
-  <tr>
-    <td align="center">
-      <a href="screenshots/gruvbox/main-menu.png"><img src="screenshots/gruvbox/main-menu.png" width="180" alt="Gruvbox main menu"></a>
-      <br><sub><b>Main menu</b></sub>
-    </td>
-    <td align="center">
-      <a href="screenshots/gruvbox/music.png"><img src="screenshots/gruvbox/music.png" width="180" alt="Gruvbox music"></a>
-      <br><sub><b>Music</b></sub>
-    </td>
-    <td align="center">
-      <a href="screenshots/gruvbox/more.png"><img src="screenshots/gruvbox/more.png" width="180" alt="Gruvbox more"></a>
-      <br><sub><b>More</b></sub>
-    </td>
-    <td align="center">
-      <a href="screenshots/gruvbox/wireless.png"><img src="screenshots/gruvbox/wireless.png" width="180" alt="Gruvbox wireless"></a>
-      <br><sub><b>Wireless</b></sub>
-    </td>
-  </tr>
-  <tr>
-    <td align="center">
-      <a href="screenshots/gruvbox/settings.png"><img src="screenshots/gruvbox/settings.png" width="180" alt="Gruvbox settings"></a>
-      <br><sub><b>Settings</b></sub>
-    </td>
-    <td align="center">
-      <a href="screenshots/gruvbox/now-playing.png"><img src="screenshots/gruvbox/now-playing.png" width="180" alt="Gruvbox now playing"></a>
-      <br><sub><b>Now Playing</b></sub>
-    </td>
-    <td align="center">
-      <a href="screenshots/gruvbox/file-browser.png"><img src="screenshots/gruvbox/file-browser.png" width="180" alt="Gruvbox file browser"></a>
-      <br><sub><b>File Browser</b></sub>
-    </td>
-    <td align="center">
-      <a href="screenshots/gruvbox/streaming.png"><img src="screenshots/gruvbox/streaming.png" width="180" alt="Gruvbox streaming"></a>
-      <br><sub><b>Streaming</b></sub>
-    </td>
-  </tr>
-</table>
-</details>
-
 <a name="amber-on-black-theme"></a>
 
 <details>
@@ -300,7 +253,6 @@ Showcase of **OLED** appearance: true black backgrounds with white as the accent
   - [Default theme](#default-theme)
   - [Tokyo Night theme](#tokyo-night-theme)
   - [Rosé Pine Moon theme](#rose-pine-theme)
-  - [Gruvbox theme](#gruvbox-theme)
   - [Amber on Black theme](#amber-on-black-theme)
   - [OLED theme](#oled-theme)
 - [Music pet](#music-pet)

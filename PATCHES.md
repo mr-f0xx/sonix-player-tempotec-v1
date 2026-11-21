@@ -5186,11 +5186,12 @@ The Themes page had five entries. The four added here -- Rosé Pine Moon,
 Gruvbox, Dracula and Catppuccin Mocha -- are not recolours of the same
 drawings: each is a port of a published scheme, and each carries its own glyph
 set, so the artwork changes with the palette instead of only the rectangles
-around it. (Dracula and Catppuccin Mocha were withdrawn later, for the reasons
-in their own chapters below; the two that remain are described here.)
+around it. (Dracula, Catppuccin Mocha and Gruvbox were withdrawn later, for the
+reasons in their own chapters below; Rosé Pine Moon is the one that remains, and
+the sections here describe it alongside the three that are gone.)
 
 They are selected the same way the earlier themes are, saved in
-`device_config.ini` as `theme = rose-pine` or `gruvbox`, and they honour the same Custom accent row: pick one of the
+`device_config.ini` as `theme = rose-pine`, and they honour the same Custom accent row: pick one of the
 fixed accents and that hue drives the accent role, or leave it on the theme's
 own and the port's own accent stands.
 
@@ -5203,7 +5204,6 @@ accent, and the function colours the icons and status bar read.
 | Theme | Background | Card | Accent | Notes |
 |---|---|---|---|---|
 | Rosé Pine Moon | `#232136` | `#2a273f` | iris `#c4a7e7` | iris draws the player controls; pine/foam/rose/gold/love fill the rest |
-| Gruvbox | `#282828` | `#3c3836` | `#d79921` | the dark scheme's medium-contrast steps, amber and green |
 
 Rosé Pine keeps iris for the player's own controls while the status bar's
 "what is playing" glyph reads pine (`#3e8fb0`) and the volume glyph beside it
@@ -5235,9 +5235,8 @@ already the right size, so no themed glyph is resampled in either direction.
 
 `tools/themed_icons.py` holds the table: 140 symbols, each with the size its
 set draws and the shared symbol it stands in for, and regenerates
-`icons_rose.c` and `icons_gruvbox.c` from the SVGs in `assets/icons/<theme>/`
-(114 drawings each); `--check` verifies the committed sources still match the
-drawings.
+`icons_rose.c` from the SVGs in `assets/icons/rose-pine/` (114 drawings);
+`--check` verifies the committed source still matches the drawings.
 
 ### One ink per glyph, so one byte per pixel
 
@@ -5314,9 +5313,8 @@ than the new themes by name:
 
 - `refresh_status_icon_color()` -- a monochrome theme stays green (unchanged);
   a themed one paints its function glyphs with that scheme's role colour.
-  Rosé Pine `#3e8fb0`, Gruvbox `#98971a`
-  `#a6e3a1`. Sampled off the real frames: the bars read (41,69,90), (132,162,148),
-  (140,231,255) and (99,125,173).
+  Rosé Pine `#3e8fb0`. Sampled off the real frames: the bars read (41,69,90),
+  (132,162,148), (140,231,255) and (99,125,173).
 - `volume_icon_ink()` -- the volume glyph's own ink, one step softer than the
   rest: `#9ccfd8`, `#83a598`, `#8be9fd`, `#89b4fa`.
 
@@ -5339,7 +5337,7 @@ and the tests README said "all five themes" in four places. Those now print and
 say the count they actually sweep (nine), and `test_stockkeys_ui`, which really
 does loop `tk < 5`, was left alone.
 
-`screenshots/{rose-pine,gruvbox}/` carry the same
+`screenshots/rose-pine/` carries the same
 eight scenes each, captured from the web emulator at 240×320, and `README.md`
 gains a `<details>` block per theme in the Previews section. Now Playing is a
 real playback in every capture -- the album tracklist opened the player and the
@@ -5402,7 +5400,8 @@ straight ports and the next heaviest set. What went:
 - `tools/theme_icon_sets.py` entirely: after Dracula it drew one set, and the
   script existed to derive the two generated hands from Gruvbox. With one
   remaining, `tools/themed_icons.py` is the only generator, which is what the
-  hand-drawn sets (Rosé Pine, Gruvbox) have always used;
+  hand-drawn sets (Rosé Pine, Gruvbox) have always used; Gruvbox's own
+  withdrawal came next, leaving that tool with a single set;
 - its palette, semantic role table, player-chrome table, status-bar tints, the
   Appearance swatch row and the picker button;
 - the `THEME_KIND_CATPPUCCIN_MOCHA` and `THEME_GLYPH_SET_CATPPUCCIN` slots,
@@ -5416,14 +5415,49 @@ straight ports and the next heaviest set. What went:
 Catppuccin name is still compared there, which is the one place in `theme.c`
 that mentions it.
 
-### What is left
+### What was left at this point
 
-The Themes page offers seven built-in themes -- Dark, Light, Tokyo Night,
-Amber on Black, OLED, Rosé Pine Moon and Gruvbox -- beside the Custom
-entry, which is an SD-card palette rather than a built-in. Two of the seven
-carry an icon set of their own, both drawn by hand rather than derived, and
-`themed_icons.py` regenerates and `--check`s them from their SVGs.
+The Themes page then offered seven built-in themes -- Dark, Light, Tokyo Night,
+Amber on Black, OLED, Rosé Pine Moon and Gruvbox -- beside the Custom entry,
+which is an SD-card palette rather than a built-in. Two of the seven carried an
+icon set of their own, both drawn by hand rather than derived.
 
-`ui` is 34/34 green, `subsonic-ui` and `radio-ui` pass, and every suite that
-sweeps `THEME_KIND_COUNT` reports seven themes. Emulator binary 41.5 MB ->
-41.2 MB.
+`ui` was 34/34 green and every suite that swept `THEME_KIND_COUNT` reported
+seven themes. Emulator binary 41.5 MB -> 41.2 MB.
+
+## Gruvbox goes as well
+
+The last of the four themes added together, and the one nobody reached for.
+Gruvbox was drawn by hand -- a 1.9 px line on a wider stroke lattice, squarer
+joins, chunkier silhouettes -- so it cost more than the ports did: the set, its
+SVGs, the semantic hue table, its own player-chrome table, its status-bar
+tints and its Appearance swatch row. What went:
+
+- `icons_gruvbox.c` / `.h` -- 1.5 MB of generated source, 237 KB of `text` in
+  the image;
+- `assets/icons/gruvbox/`, the 114 SVGs it was drawn from;
+- `screenshots/gruvbox/`, its README gallery and the ToC entry behind them;
+- the palette, the semantic role table, the player-chrome table, the
+  status-bar tints, the Appearance swatch row and the picker button;
+- the `THEME_KIND_GRUVBOX` and `THEME_GLYPH_SET_GRUVBOX` slots, with Custom
+  moved down (`THEME_KIND_COUNT` 7 -> 6);
+- `appearance_gruvbox`, `_palette` and `_glyphs` from all 11 language files --
+  three keys each, 33 in total;
+- its entry in `tools/themed_icons.py`, which now generates one set.
+
+`saved_theme` folds it into the same branch as Dracula and Catppuccin Mocha: a
+device with `ui = gruvbox` comes up on Rosé Pine Moon instead of falling through
+to Dark. That comparison is the only Gruvbox reference left in the tree.
+
+### What is left now
+
+Six built-in themes -- Dark, Light, Tokyo Night, Amber on Black, OLED and Rosé
+Pine Moon -- beside Custom. One of them, Rosé Pine Moon, carries an icon set of
+its own; the rest draw the shared Lucide bitmap. `themed_icons.py` generates
+that one set and `--check`s it.
+
+`ui` is 36/36 green across `ui`, `subsonic-ui` and `radio-ui`, every suite that
+sweeps `THEME_KIND_COUNT` reports six themes, and the emulator binary goes
+41.20 MB -> 40.91 MB. Across the three withdrawals -- 41.49 MB before Dracula
+went -- the image is 0.58 MB lighter and the built-in theme count has halved
+from nine to six.

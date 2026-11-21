@@ -353,9 +353,9 @@ static void gridpage_apply_theme_page(gridpage_theme_page_t *page) {
 		theme_semantic_t tone = THEME_SEMANTIC_BLUE;
 		if (tokyo) {
 			gridpage_tokyo_icon(page->labels[i], &icon, &tone);
-			// Rosé Pine Moon and Gruvbox draw this glyph their own way. The
-			// shared table above still names the bitmap and the tone, so the
-			// page only has to swap the drawing.
+			// Rosé Pine Moon draws this glyph its own way. The shared table
+			// above still names the bitmap and the tone, so the page only has
+			// to swap the drawing.
 			icon = theme_icon(icon);
 		} else {
 			gridpage_classic_icon(page->labels[i], &icon);

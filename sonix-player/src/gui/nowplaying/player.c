@@ -6287,8 +6287,8 @@ static void update_repeat_button(void) {
 		break;
 	}
 
-	// Rosé Pine Moon and Gruvbox draw each mode their own way; the tone above
-	// is unchanged, so the button reads the same at a glance.
+	// Rosé Pine Moon draws each mode its own way; the tone above is
+	// unchanged, so the button reads the same at a glance.
 	lv_image_set_src(repeat_btn_icon, theme_icon(icon));
 	// And at the deck's size everywhere but in Album Art Max, whose header row
 	// carries it beside the star and the menu at one weight.

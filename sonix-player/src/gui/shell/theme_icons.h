@@ -80,9 +80,9 @@ uint32_t theme_icon_scale_for(const lv_image_dsc_t *shared, int target);
 // when the tile is outside 0..5.
 const lv_image_dsc_t *theme_icon_home_tile(int tile);
 
-// True when the active theme draws its own glyphs (Rose Pine, Gruvbox). Pages
-// use it where the shared art needs preparing and the themed art does not --
-// for instance choosing a coloured illustration, which would waste the work.
+// True when the active theme draws its own glyphs (Rose Pine). Pages use it
+// where the shared art needs preparing and the themed art does not -- for
+// instance choosing a coloured illustration, which would waste the work.
 bool theme_icons_active(void);
 
 #endif // THEME_ICONS_H

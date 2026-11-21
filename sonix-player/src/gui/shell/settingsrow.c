@@ -1075,8 +1075,8 @@ static lv_obj_t *settingsrow_add_icon_internal(lv_obj_t *row, const lv_image_dsc
 
 	lv_obj_t *icon = lv_image_create(row);
 	// Every settings and menu row's leading glyph comes through here, so the
-	// themed sets answer once for the whole app: Rose Pine Moon and Gruvbox
-	// draw their own; the rest keep the shared bitmap.
+	// themed set answers once for the whole app: Rose Pine Moon draws its
+	// own; the rest keep the shared bitmap.
 	//
 	// Size and scale are taken from the bitmap that is actually drawn, not
 	// from the shared one asked for: the themed drawing is rasterised at the
