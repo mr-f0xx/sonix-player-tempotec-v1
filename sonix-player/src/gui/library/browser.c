@@ -1,5 +1,6 @@
 #include "browser.h"
 #include "browserstate.h"
+#include "albumgrid.h"
 
 #include <dirent.h>
 #include <errno.h>
@@ -74,10 +75,10 @@
 #define PLAYMARK_HEIGHT bp_pick(26, 52)
 #define PLAYMARK_INSET bp_pick(3, 4)
 
-// How many row widgets exist. A 720 px panel shows six or seven; the spares
-// cover the partly visible rows at each end and give the recycling somewhere
-// to go.
-#define ROW_POOL 10
+// A fixed pool covers the list or a grid, including partly visible tiles and
+// a row of look-ahead while scrolling.
+#define ROW_POOL 16
+#define GRID_CAPTION_FONT (bp_is_tempotec_v1() ? &font_ui_14 : &font_ui_18)
 
 // How often the list checks the artwork worker for finished pictures. Nothing
 // is decoded here, so this is just a polling rate.
@@ -118,6 +119,17 @@ static char current_path[512];
 
 static lv_obj_t *title_label;
 static gui_config_t *config;
+static bool browse_grid;
+static bool browse_covers;
+
+static void grid_metrics(albumgrid_metrics_t *m) {
+	int width = config->screen_width - 2 * config->padding;
+	int height = lv_obj_get_height(file_list);
+	if (height <= 0) height = config->screen_height - settingsrow_content_top(config);
+	albumgrid_measure(width, height, lv_font_get_line_height(GRID_CAPTION_FONT), m);
+}
+
+static int browser_body_height(void);
 
 // ---------------------------------------------------------------------------
 // the entries
@@ -154,6 +166,14 @@ static char cue_claims[CUE_CLAIM_MAX][512];
 
 static listing_t shown;	  // what is on screen
 static listing_t staging; // what the reader thread is building
+
+static int browser_body_height(void) {
+	if (!shown.count) return ROW_PITCH;
+	if (!browse_grid) return (int)shown.count * ROW_PITCH;
+	albumgrid_metrics_t m;
+	grid_metrics(&m);
+	return albumgrid_canvas_height((int)shown.count, &m);
+}
 
 // What the row says, and what the row points at. The two are the same string
 // for a folder or a file on the card, and different for a track inside a cue
@@ -294,14 +314,18 @@ static bool list_directory(const char *path, listing_t *out, cue_sheet_t *sheets
 static void row_show_glyph(row_t *row, bool is_dir) {
 	// Audio files get the note, not a generic sheet of paper -- everything a
 	// browser row can show besides a folder is playable anyway.
-	lv_image_set_src(row->icon, is_dir ? &icon_folder : &icon_music2);
+	bool placeholder = browse_grid || (browse_covers && is_dir);
+	lv_image_set_src(row->icon, placeholder ? &icon_album : (is_dir ? &icon_folder : &icon_music2));
+	lv_obj_set_style_bg_color(row->icon, lv_color_hex(0x383838), 0);
+	lv_obj_set_style_bg_opa(row->icon, placeholder ? LV_OPA_COVER : LV_OPA_TRANSP, 0);
+	lv_obj_set_style_radius(row->icon, 6, 0);
 	lv_obj_add_style(row->icon, &theme_style_icon, 0);
 	// A folder wears the colour the palette gives this page -- Tokyo Night's
 	// violet, the signal green on Amber on Black -- so it reads as the thing
 	// that can be entered. The note keeps the shared icon colour. Rows are
 	// recycled between folders and files, so the local recolour is dropped
 	// again for everything else.
-	if (is_dir) {
+	if (is_dir && !placeholder) {
 		lv_obj_set_style_image_recolor(row->icon, theme_browser_folder_color(), 0);
 	} else {
 		lv_obj_remove_local_style_prop(row->icon, LV_STYLE_IMAGE_RECOLOR, 0);
@@ -316,7 +340,7 @@ static void row_show_cover(row_t *row, const lv_image_dsc_t *dsc) {
 	lv_obj_set_style_image_recolor_opa(row->icon, LV_OPA_TRANSP, 0);
 }
 
-static int row_slot(const row_t *row) { return (int)(row - rows); }
+static int row_slot(const row_t *row) { return COVERLOADER_BROWSER_BASE + (int)(row - rows); }
 
 static void row_drop_thumb(row_t *row) {
 	// Whatever the worker was doing for this row is no longer wanted.
@@ -380,6 +404,50 @@ void browser_notify_now_playing(void) {
 	}
 }
 
+// Rows are recycled between list and grid, including the message row.
+static void row_layout(row_t *row, bool grid, int index) {
+	if (grid) {
+		albumgrid_metrics_t m;
+		grid_metrics(&m);
+		lv_obj_set_size(row->button, m.tile_w, m.tile_h);
+		lv_obj_set_pos(row->button, albumgrid_tile_x(index, &m), albumgrid_tile_y(index, &m));
+		lv_obj_set_flex_flow(row->button, LV_FLEX_FLOW_COLUMN);
+		lv_obj_set_flex_align(row->button, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+		lv_obj_set_style_pad_all(row->button, m.pad, 0);
+		lv_obj_set_style_pad_row(row->button, 0, 0);
+		lv_obj_set_size(row->icon, m.cover, m.cover);
+		lv_obj_set_flex_grow(row->label, 0);
+		lv_obj_set_size(row->label, lv_pct(100), m.caption);
+		lv_obj_set_style_max_height(row->label, m.caption, 0);
+		lv_obj_set_style_text_font(row->label, GRID_CAPTION_FONT, 0);
+		lv_obj_set_style_text_align(row->label, LV_TEXT_ALIGN_CENTER, 0);
+		lv_obj_set_ignore_layout(row->check, true);
+		lv_obj_align(row->check, LV_ALIGN_TOP_RIGHT, -2, 2);
+		lv_obj_set_style_bg_color(row->check, lv_color_black(), 0);
+		lv_obj_set_style_bg_opa(row->check, LV_OPA_70, 0);
+		lv_obj_move_foreground(row->check);
+	} else {
+		lv_obj_set_size(row->button, config->screen_width - 2 * config->padding, ROW_HEIGHT);
+		lv_obj_set_pos(row->button, 0, index * ROW_PITCH);
+		lv_obj_set_flex_flow(row->button, LV_FLEX_FLOW_ROW);
+		lv_obj_set_flex_align(row->button, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+		lv_obj_set_style_pad_all(row->button, LIST_ROW_PAD, 0);
+		lv_obj_set_style_pad_row(row->button, 0, 0);
+		lv_obj_set_size(row->icon, THUMB_SIZE, THUMB_SIZE);
+		lv_obj_set_flex_grow(row->label, 1);
+		lv_obj_set_width(row->label, LV_SIZE_CONTENT);
+		lv_obj_set_height(row->label, LV_SIZE_CONTENT);
+		lv_obj_set_style_max_height(row->label, 2 * lv_font_get_line_height(bp_tile_label_font()) +
+		                             lv_obj_get_style_text_line_space(row->label, LV_PART_MAIN), 0);
+		lv_obj_set_style_text_font(row->label, bp_tile_label_font(), 0);
+		lv_obj_set_style_text_align(row->label, LV_TEXT_ALIGN_LEFT, 0);
+		lv_obj_set_ignore_layout(row->check, false);
+		lv_obj_set_align(row->check, LV_ALIGN_DEFAULT);
+		lv_obj_set_pos(row->check, 0, 0);
+		lv_obj_set_style_bg_opa(row->check, LV_OPA_TRANSP, 0);
+	}
+}
+
 // Points a row at an entry. Cheap by design: it moves a widget and rewrites a
 // label, it does not create anything.
 static void row_bind(row_t *row, int index) {
@@ -404,7 +472,7 @@ static void row_bind(row_t *row, int index) {
 	}
 
 	lv_obj_set_hidden(row->button, false);
-	lv_obj_set_y(row->button, index * ROW_PITCH);
+	row_layout(row, browse_grid, index);
 	lv_label_set_text(row->label, entry_name((size_t)index));
 	row_show_glyph(row, shown.entries[index].is_dir != 0);
 	row_update_playmark(row);
@@ -420,9 +488,8 @@ static void row_bind(row_t *row, int index) {
 // row pitch, start one row early, and cover the viewport from there.
 //
 // Entry `index` always lives in widget `index % ROW_POOL`. That stability is
-// the point: when the band slides down by one, nine of the ten entries are
-// still on screen, and with this mapping their rows are simply left alone --
-// only the one that scrolled out gets rebound to the one that scrolled in.
+// the point: when the band slides, the entries still on screen are left alone;
+// only entries that moved out are rebound to those that moved in.
 // An assignment of rows[i] = first + i would rename every row on every step of
 // the band, and a rename drops the row's artwork: the covers would be stripped
 // off rows that never left the screen and refetched at every notch.
@@ -439,7 +506,14 @@ static void window_update(void) {
 		scroll = 0;
 	}
 
-	int first = (scroll / ROW_PITCH) - 1;
+	int first;
+	if (browse_grid) {
+		albumgrid_metrics_t m;
+		grid_metrics(&m);
+		first = albumgrid_row_at(scroll, &m) - m.columns;
+	} else {
+		first = (scroll / ROW_PITCH) - 1;
+	}
 	if (first + ROW_POOL > (int)shown.count) {
 		first = (int)shown.count - ROW_POOL;
 	}
@@ -510,7 +584,7 @@ static void list_scroll_cb(lv_event_t *e) {
 // ---------------------------------------------------------------------------
 // thumbnails
 //
-// Only the rows that exist can hold artwork, and there are ten of them, so the
+// Only the rows that exist can hold artwork, so the
 // memory artwork occupies is fixed no matter how long the folder is.
 // ---------------------------------------------------------------------------
 
@@ -533,10 +607,19 @@ static void thumbs_update(void) {
 			continue;
 		}
 
-		// Folders keep their folder icon: reading artwork for every album just
-		// to scroll past it is memory spent on a row that already says
-		// "folder".
-		if (shown.entries[row->index].is_dir) {
+		// The pool can hold more than a screenful. Avoid decoding distant
+		// tiles merely because their widgets exist; scroll resumes this timer.
+		if (browse_grid && !row->thumb_requested) {
+			albumgrid_metrics_t m;
+			grid_metrics(&m);
+			int scroll = lv_obj_get_scroll_y(file_list);
+			int y = albumgrid_tile_y(row->index, &m);
+			if (y + m.tile_h < scroll - m.pitch_y ||
+			    y > scroll + lv_obj_get_height(file_list) + m.pitch_y) continue;
+		}
+
+		// In the default list, folders keep their familiar icons and cost no decode.
+		if (shown.entries[row->index].is_dir && !browse_covers && !browse_grid) {
 			row->thumb_settled = true;
 			continue;
 		}
@@ -545,7 +628,12 @@ static void thumbs_update(void) {
 			char entry_path[sizeof(current_path) + 256 + 1];
 			snprintf(entry_path, sizeof(entry_path), "%s/%s", current_path, entry_file((size_t)row->index));
 
-			coverloader_request(row_slot(row), entry_path, THUMB_SIZE);
+			int size = THUMB_SIZE;
+			if (browse_grid) { albumgrid_metrics_t m; grid_metrics(&m); size = m.cover; }
+			if (shown.entries[row->index].is_dir)
+				coverloader_request_dir(row_slot(row), entry_path, size);
+			else
+				coverloader_request(row_slot(row), entry_path, size);
 			row->thumb_requested = true;
 			busy = true;
 			continue;
@@ -1129,7 +1217,7 @@ bool browser_go_up(void) {
 // build a widget just to say a folder is empty.
 static void set_message(const char *text) {
 	lv_obj_set_hidden(rows[0].button, false);
-	lv_obj_set_y(rows[0].button, 0);
+	row_layout(&rows[0], false, 0);
 	lv_obj_set_hidden(rows[0].icon, true);
 	// A sentence is not a track: whatever this row was showing before, it is
 	// not playing now.
@@ -1490,6 +1578,8 @@ static void browser_open_dir(const char *path) {
 
 	shown.count = 0;
 	shown.pool_used = 0;
+	browse_grid = config_get_bool("library", "browse_grid", false);
+	browse_covers = config_get_bool("library", "browse_covers", false);
 	lv_obj_set_height(list_body, ROW_PITCH);
 	lv_obj_scroll_to_y(file_list, 0, LV_ANIM_OFF);
 
@@ -1557,13 +1647,13 @@ static void adopt_listing(void) {
 
 	// The body is as tall as the whole list would be: that is what the scroll
 	// position and the scrollbar come from, while only ROW_POOL widgets exist.
-	lv_obj_set_height(list_body, shown.count ? (int)(shown.count * ROW_PITCH) : ROW_PITCH);
+	lv_obj_set_height(list_body, browser_body_height());
 
 	// Fresh folders start at the top; a walk back up resumes where the level
 	// was left (clamped: the folder may have shrunk meanwhile).
 	int target_scroll = pending_scroll >= 0 ? pending_scroll : 0;
 	pending_scroll = -1;
-	int max_scroll = (int)(shown.count * ROW_PITCH) - lv_obj_get_height(file_list);
+	int max_scroll = browser_body_height() - lv_obj_get_height(file_list);
 	if (target_scroll > max_scroll) {
 		target_scroll = max_scroll > 0 ? max_scroll : 0;
 	}

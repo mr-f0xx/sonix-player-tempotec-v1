@@ -470,6 +470,33 @@ static void test_1000_cover_cache_and_loader(const char *dir) {
 	}
 	assert(finished);
 	assert(async_id != 0 && async_id == cover_source_id(track_path));
+
+	// Browser requests resolve a folder cover or its first track's embedded art.
+	char cover_dir[512], embedded_dir[512], empty_dir[512], path[560];
+	snprintf(cover_dir, sizeof(cover_dir), "%s/browser_cover", dir);
+	snprintf(embedded_dir, sizeof(embedded_dir), "%s/browser_embedded", dir);
+	snprintf(empty_dir, sizeof(empty_dir), "%s/browser_empty", dir);
+	assert(mkdir(cover_dir, 0755) == 0 && mkdir(embedded_dir, 0755) == 0 && mkdir(empty_dir, 0755) == 0);
+	size_t cover_len = 0;
+	uint8_t *cover_jpg = make_test_jpeg(48, 48, 70, 120, 200, 5, &cover_len);
+	snprintf(path, sizeof(path), "%s/cover.jpg", cover_dir);
+	write_file_bytes(path, cover_jpg, cover_len);
+	free(cover_jpg);
+	snprintf(path, sizeof(path), "%s/track.flac", embedded_dir);
+	assert(link(track_path, path) == 0);
+	const char *folders[] = {cover_dir, embedded_dir, empty_dir};
+	for (int i = 0; i < 3; i++) {
+		coverloader_request_dir(COVERLOADER_BROWSER_BASE, folders[i], 36);
+		cover_image_t thumb;
+		bool done = false, found = false;
+		for (int tries = 0; tries < 400 && !done; tries++) {
+			found = coverloader_take(COVERLOADER_BROWSER_BASE, &thumb, &done);
+			if (!done) { struct timespec ts = {0, 5 * 1000 * 1000}; nanosleep(&ts, NULL); }
+		}
+		assert(done && found == (i < 2));
+		if (found) { assert(thumb.dsc.header.w == 36); cover_free(&thumb); }
+	}
+	coverloader_release(COVERLOADER_BROWSER_BASE);
 }
 
 // The written front cover is found by the real embedded-art reader and

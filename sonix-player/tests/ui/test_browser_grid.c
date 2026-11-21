@@ -1,0 +1,86 @@
+// Exercise the browser's real recycled rows on LVGL without a card or worker.
+#include <assert.h>
+#include <stdio.h>
+#include "lvgl/lvgl.h"
+#include "src/gui/library/browser.c"
+
+lv_font_t font_ui_14, font_ui_18;
+lv_style_t theme_style_icon;
+static theme_palette_t palette;
+const theme_palette_t *theme(void) { return &palette; }
+lv_color_t theme_browser_folder_color(void) { return lv_color_hex(0x123456); }
+bool bp_is_tempotec_v1(void) { return true; }
+int bp_pick(int compact, int regular) { (void)regular; return compact; }
+const lv_font_t *bp_tile_label_font(void) { return &font_ui_14; }
+int settingsrow_content_top(gui_config_t *cfg) { (void)cfg; return 72; }
+void coverloader_release(int slot) { (void)slot; }
+void cover_free(cover_image_t *image) { (void)image; }
+static const uint8_t glyph[] = {255};
+#define ICON(n) const lv_image_dsc_t n = { .header = { .magic = LV_IMAGE_HEADER_MAGIC, .cf = LV_COLOR_FORMAT_A8, .w = 1, .h = 1, .stride = 1 }, .data = glyph, .data_size = 1 }
+ICON(icon_folder); ICON(icon_music2); ICON(icon_album);
+
+int main(void) {
+	lv_init(); lv_display_create(240, 320);
+	font_ui_14 = font_ui_18 = lv_font_montserrat_14;
+	lv_style_init(&theme_style_icon);
+	gui_config_t cfg = {.screen_width = 240, .screen_height = 320, .padding = 6};
+	config = &cfg;
+	lv_obj_t *screen = lv_screen_active();
+	file_list = lv_obj_create(screen);
+	lv_obj_set_size(file_list, 240, 248);
+	lv_obj_set_style_pad_all(file_list, 0, 0);
+	list_body = lv_obj_create(file_list);
+	lv_obj_set_size(list_body, 228, 3000);
+	lv_obj_set_style_pad_all(list_body, 0, 0);
+	for (int i = 0; i < ROW_POOL; i++) {
+		row_t *r = &rows[i];
+		r->button = lv_button_create(list_body);
+		r->icon = lv_image_create(r->button);
+		r->label = lv_label_create(r->button);
+		r->check = lv_image_create(r->button);
+		r->playmark = lv_obj_create(r->button);
+		r->index = -1;
+	}
+	for (int i = 0; i < 40; i++) {
+		char name[32]; snprintf(name, sizeof(name), "Album %d", i);
+		assert(listing_add(&shown, name, NULL, i != 1));
+	}
+	lv_obj_update_layout(screen);
+	browse_grid = true; window_update(); lv_obj_update_layout(screen);
+	albumgrid_metrics_t m; grid_metrics(&m);
+	assert(m.columns == 2);
+	assert(lv_obj_get_x(rows[0].button) == 0);
+	assert(lv_obj_get_x(rows[1].button) == m.pitch_x);
+	assert(lv_obj_get_y(rows[2].button) == m.pitch_y);
+	assert(lv_obj_get_width(rows[0].icon) == m.cover);
+	assert(lv_image_get_src(rows[0].icon) == &icon_album);
+	assert(lv_image_get_src(rows[1].icon) == &icon_album);
+	// Selection and the playing mark still belong to the entry in a tile.
+	selecting = true; chosen = calloc(shown.count, 1); assert(chosen);
+	chosen[0] = 1; row_update_selection(&rows[0]);
+	assert(!lv_obj_is_hidden(rows[0].check));
+	snprintf(current_path, sizeof(current_path), "/music");
+	snprintf(np_path, sizeof(np_path), "/music/Album 0/song.flac");
+	row_update_playmark(&rows[0]);
+	assert(!lv_obj_is_hidden(rows[0].playmark));
+	free(chosen); chosen = NULL; selecting = false;
+	assert(browser_body_height() == albumgrid_canvas_height(40, &m));
+	lv_obj_set_height(list_body, browser_body_height()); lv_obj_update_layout(screen);
+	lv_obj_scroll_to_y(file_list, m.pitch_y * 8, LV_ANIM_OFF); window_update();
+	int visible = albumgrid_row_at(lv_obj_get_scroll_y(file_list), &m);
+	assert(rows[visible % ROW_POOL].index == visible);
+	assert(rows[(visible + 3) % ROW_POOL].index == visible + 3);
+	for (int i = 0; i < ROW_POOL; i++) row_bind(&rows[i], -1);
+	lv_obj_scroll_to_y(file_list, 0, LV_ANIM_OFF);
+	browse_grid = false; browse_covers = false; window_update(); lv_obj_update_layout(screen);
+	assert(lv_obj_get_width(rows[0].button) == 228);
+	assert(lv_obj_get_y(rows[1].button) == ROW_PITCH);
+	assert(lv_image_get_src(rows[0].icon) == &icon_folder);
+	assert(lv_image_get_src(rows[1].icon) == &icon_music2);
+	for (int i = 0; i < ROW_POOL; i++) row_bind(&rows[i], -1);
+	browse_covers = true; window_update();
+	assert(lv_image_get_src(rows[0].icon) == &icon_album);
+	assert(lv_image_get_src(rows[1].icon) == &icon_music2);
+	puts("PASS browser cover grid, recycling, placeholders and list restore");
+	return 0;
+}
