@@ -124,6 +124,23 @@ static lv_obj_t *text(lv_obj_t *parent, const char *body, const lv_font_t *font,
 // The dim caption a card wears: "Listening time", "Last 7 days".
 static lv_obj_t *caption(lv_obj_t *parent, const char *key) { return text(parent, tr(key), &font_ui_14, theme()->text_secondary); }
 
+// A sentence, as opposed to a line: the whole width of the page, broken over as
+// many lines as it needs.
+//
+// A label left at its natural width is measured as one unbroken line -- LVGL
+// hands the wrap a width of LV_COORD_MAX when the label's own width is
+// LV_SIZE_CONTENT -- and in a centred column like the shell's page such a line
+// overhangs the panel on both sides at once, so the first words and the last
+// ones are both lost. That is what the empty "Top artists" list showed on a V1:
+// a fragment of a sentence with both its ends cut off.
+static lv_obj_t *sentence(lv_obj_t *parent, const char *body, const lv_font_t *font, lv_color_t color) {
+	lv_obj_t *label = text(parent, body, font, color);
+	lv_label_set_long_mode(label, LV_LABEL_LONG_WRAP);
+	lv_obj_set_width(label, LV_PCT(100));
+	lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_CENTER, 0);
+	return label;
+}
+
 // A card's own heading with "See all" on its right. The whole strip is the
 // button, so the arrow is as easy to hit as the words are to read.
 static lv_obj_t *heading_strip(lv_obj_t *parent, const char *key, lv_event_cb_t cb, void *user) {
@@ -655,8 +672,10 @@ static lv_obj_t *build_full_page(gui_config_t *cfg, const char *title, lv_obj_t 
 	lv_obj_set_style_pad_row(*rows_out, bp_pick(6, 10), 0);
 
 	// Nothing to show yet: a line saying so, rather than an empty page that
-	// reads like a fault.
-	*empty_out = text(container, tr("stats_nothing_yet"), &font_ui_18, theme()->text_secondary);
+	// reads like a fault. It is a sentence and not a row, so it is given the
+	// page's width and told to wrap: at its natural width it runs off a 240 px
+	// panel on both sides, in every language but the shortest.
+	*empty_out = sentence(container, tr("stats_nothing_yet"), &font_ui_18, theme()->text_secondary);
 	lv_obj_set_hidden(*empty_out, true);
 
 	switcher_attach_back_gesture(screen);
