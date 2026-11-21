@@ -68,14 +68,6 @@ SETS = {
         "guard": "ICONS_GRUVBOX_H",
         "title": "Gruvbox's icon set",
     },
-    "cat": {
-        "prefix": "catppuccin",
-        "dir": "catppuccin-mocha",
-        "file": "icons_catppuccin",
-        "header": "icons_catppuccin.h",
-        "guard": "ICONS_CATPPUCCIN_H",
-        "title": "Catppuccin Mocha's icon set",
-    },
 }
 
 

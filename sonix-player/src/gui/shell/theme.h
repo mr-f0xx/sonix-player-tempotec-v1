@@ -6,11 +6,10 @@
 #include "lvgl/lvgl.h"
 
 // The built-in appearances. Dark and Light keep their existing palettes;
-// Tokyo Night, Amber on Black, OLED, Rosé Pine Moon, Gruvbox and
-// Catppuccin Mocha add six dark palettes designed for the V1. OLED is true
-// black with white as its accent; Rosé Pine Moon, Gruvbox and
-// Catppuccin Mocha draw their function glyphs with icon sets of their own, in
-// the hand their schemes are known for.
+// Tokyo Night, Amber on Black, OLED, Rosé Pine Moon and Gruvbox add five dark
+// palettes designed for the V1. OLED is true black with white as its accent;
+// Rosé Pine Moon and Gruvbox draw their function glyphs with icon sets of
+// their own, in the hand their schemes are known for.
 typedef enum {
 	THEME_KIND_DARK = 0,
 	THEME_KIND_LIGHT = 1,
@@ -19,21 +18,19 @@ typedef enum {
 	THEME_KIND_OLED = 4,
 	THEME_KIND_ROSE_PINE = 5,
 	THEME_KIND_GRUVBOX = 6,
-	THEME_KIND_CATPPUCCIN_MOCHA = 7,
-	THEME_KIND_CUSTOM = 8,
+	THEME_KIND_CUSTOM = 7,
 } theme_kind_t;
 
-#define THEME_KIND_COUNT 8 // built-in themes; Custom is a separate SD-card choice
+#define THEME_KIND_COUNT 7 // built-in themes; Custom is a separate SD-card choice
 
 // Which set of function-matched glyphs a page draws. Tokyo Night and Amber on
 // Black share the original Lucide-derived set; Rosé Pine Moon, Gruvbox,
-// and Catppuccin Mocha each carry an icon set of their own, drawn for
+// and Gruvbox each carry an icon set of their own, drawn for
 // their scheme's weight of line.
 typedef enum {
 	THEME_GLYPH_SET_LUCIDE = 0, // Tokyo Night, Amber on Black and OLED
 	THEME_GLYPH_SET_ROSE_PINE = 1,
 	THEME_GLYPH_SET_GRUVBOX = 2,
-	THEME_GLYPH_SET_CATPPUCCIN = 3,
 } theme_glyph_set_t;
 
 // Fixed semantic accents used by the function-matched glyphs. Tokyo Night,
@@ -169,22 +166,18 @@ bool theme_is_amber_on_black(void);
 bool theme_is_oled(void);
 bool theme_is_rose_pine(void);
 bool theme_is_gruvbox(void);
-// Catppuccin Mocha: the scheme-accurate port, with its own glyph hand and its
-// own semantic hues (theme.c).
-bool theme_is_catppuccin(void);
 // The single-hue palettes, Amber on Black and OLED: every glyph and status
 // mark wears the accent, and nothing borrows a second hue (no Bluetooth blue,
 // codec colours or balanced-output gold). The roles still come from the
 // active palette, so each keeps its own colours.
 bool theme_is_monochrome(void);
-// Tokyo Night, Amber on Black, OLED, Rosé Pine Moon, Gruvbox and
-// Catppuccin Mocha use the same function-matched icon and compact V1 layouts.
+// Tokyo Night, Amber on Black, OLED, Rosé Pine Moon and Gruvbox use the same
+// function-matched icon and compact V1 layouts.
 // Their palettes, semantic hues and glyph sets remain distinct.
 bool theme_uses_function_glyphs(void);
 // Which glyph set the pages draw: the Lucide-derived one Tokyo Night, Amber on
-// Black and OLED share, or one of the four scheme sets drawn for Rosé Pine
-// Moon, Gruvbox and Catppuccin Mocha. Only meaningful while
-// theme_uses_function_glyphs() is true.
+// Black and OLED share, or one of the two scheme sets drawn for Rosé Pine Moon
+// and Gruvbox. Only meaningful while theme_uses_function_glyphs() is true.
 theme_glyph_set_t theme_glyph_set(void);
 theme_kind_t theme_get_kind(void);
 

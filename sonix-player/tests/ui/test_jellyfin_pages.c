@@ -838,8 +838,8 @@ int main(int argc, char **argv) {
 				assert(saved_src == &icon_jellyfin_saved_card);
 				assert(stream_src == &icon_jellyfin_menu_card);
 			} else if (theme_uses_function_glyphs()) {
-				// Rosé Pine, Gruvbox and Catppuccin answer with their
-				// own drawing of the mark; the rest share the Lucide one.
+				// Rosé Pine and Gruvbox answer with their own drawing
+				// of the mark; the rest share the Lucide one.
 				assert(saved_src == &icon_podcast_downloaded);
 				assert(stream_src == theme_icon(&icon_jellyfin_mark));
 			} else {
