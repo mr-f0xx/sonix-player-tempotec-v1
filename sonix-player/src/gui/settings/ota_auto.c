@@ -41,6 +41,9 @@
 //
 // s_dismissed_tag  a tag the user has pressed "Later" for: the notification is
 //                  not brought up again for it, this boot or any later one.
+// s_taken_tag      the tag the user has made the update for: the notice, the
+//                  LED blink and the standing dot never come back for it,
+//                  this boot or any later one. Persisted as ota_taken_tag.
 // s_shown_tag      the tag of the notice most recently brought up: a repeat
 //                  check for that tag does not re-show it. Also set to the
 //                  tag the user has just made the update for, so the notice
@@ -53,6 +56,7 @@
 // ---------------------------------------------------------------------------
 
 static char s_dismissed_tag[32];
+static char s_taken_tag[32];
 static char s_shown_tag[32];
 static uint32_t s_connect_last;
 static bool s_inflight;
@@ -198,6 +202,12 @@ static void poll_cb(lv_timer_t *timer) {
 		return; // no network, no card-sized release, check failed: silent
 	}
 	const ota_release_t *rel = ota_release();
+	if (s_taken_tag[0] && strcmp(rel->tag, s_taken_tag) == 0) {
+		// The user made the update for this release: it must not come back
+		// as a notice, a blink or the standing dot, even across a restart.
+		topbar_set_update_available(false);
+		return;
+	}
 	if (strcmp(rel->tag, s_dismissed_tag) == 0) {
 		// The user deferred this release: the dot still says it is available.
 		topbar_set_update_available(true);
@@ -219,6 +229,19 @@ void ota_auto_release_taken(void) {
 	const ota_release_t *rel = ota_release();
 	if (rel->tag[0]) {
 		snprintf(s_shown_tag, sizeof(s_shown_tag), "%s", rel->tag);
+		snprintf(s_taken_tag, sizeof(s_taken_tag), "%s", rel->tag);
+		// The taken release is remembered, not only this boot: after a
+		// restart the check finds the same release and the notice must not
+		// come back for it.
+		config_set("system", "ota_taken_tag", rel->tag);
+		// A remembered deferral for this release no longer applies: the
+		// update is made, not deferred any more, and the standing dot must
+		// not come back for it.
+		if (strcmp(s_dismissed_tag, rel->tag) == 0) {
+			s_dismissed_tag[0] = '\0';
+			config_set("system", "ota_dismissed_tag", "");
+		}
+		config_save();
 	}
 	topbar_set_update_available(false);
 }
@@ -233,6 +256,8 @@ void ota_auto_init(void) {
 	}
 	snprintf(s_dismissed_tag, sizeof(s_dismissed_tag), "%s", config_get("system", "ota_dismissed_tag", ""));
 	s_dismissed_tag[sizeof(s_dismissed_tag) - 1] = '\0';
+	snprintf(s_taken_tag, sizeof(s_taken_tag), "%s", config_get("system", "ota_taken_tag", ""));
+	s_taken_tag[sizeof(s_taken_tag) - 1] = '\0';
 	s_shown_tag[0] = '\0';
 	set_enabled(config_get_bool("system", "auto_update_notices", true));
 

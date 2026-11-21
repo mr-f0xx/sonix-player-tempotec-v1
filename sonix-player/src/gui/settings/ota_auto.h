@@ -17,9 +17,9 @@
 //
 // The dismissal is remembered per release tag, so a deferred tag does not
 // re-notify on later boots; a newer tag always re-notifies. Likewise, once the
-// user has made the update, that tag is treated as handled for the rest of
-// this boot (ota_auto_release_taken): no dot, no LED blink and no popup come
-// back for it.
+// user has made the update, that tag is treated as handled on disk: no dot,
+// no LED blink and no popup come back for it, this boot or any later one
+// (ota_auto_release_taken).
 //
 // Interface thread only, except ota_auto_link_online(), which the Wi-Fi
 // worker calls on every successful link poll (the same moment the clock asks
@@ -36,8 +36,9 @@ void ota_auto_link_online(void);
 // The user has made the update for the release currently in ota_release()
 // (the download succeeded and install began, or the update is starting from
 // the SD card). Hide the standing dot and bring the notice up for this tag
-// no more this boot. In-memory only: after the device restarts onto the new
-// version the check finds nothing new and stays silent on its own.
+// no more, this boot or any later one: the tag is remembered on disk, so a
+// restart does not re-notify for a release that is already made. Any remembered
+// deferral for this release is dropped as well.
 void ota_auto_release_taken(void);
 
 // Whether the notice switch is on.
