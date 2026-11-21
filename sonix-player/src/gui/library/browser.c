@@ -1,5 +1,6 @@
 #include "browser.h"
 #include "browserstate.h"
+#include "albumgrid.h"
 
 #include <dirent.h>
 #include <errno.h>
@@ -74,10 +75,12 @@
 #define PLAYMARK_HEIGHT bp_pick(26, 52)
 #define PLAYMARK_INSET bp_pick(3, 4)
 
-// How many row widgets exist. A 720 px panel shows six or seven; the spares
-// cover the partly visible rows at each end and give the recycling somewhere
-// to go.
-#define ROW_POOL 10
+// A fixed pool covers the list or a grid, including partly visible tiles and
+// a row of look-ahead while scrolling.
+#define ROW_POOL 16
+// At most eight additional decoded grid covers kept when rows are recycled.
+#define GRID_THUMB_CACHE_SIZE 8
+#define GRID_CAPTION_FONT (bp_is_tempotec_v1() ? &font_ui_14 : &font_ui_18)
 
 // How often the list checks the artwork worker for finished pictures. Nothing
 // is decoded here, so this is just a polling rate.
@@ -118,6 +121,45 @@ static char current_path[512];
 
 static lv_obj_t *title_label;
 static gui_config_t *config;
+static bool browse_grid;
+static bool browse_covers;
+
+// The optional views belong only to the card's Music tree, not other
+// folders whose names merely start with "Music". Paths here use the mount's
+// spelling, just like browser_state_directory(). Do not resolve paths on the
+// UI thread: card I/O belongs to the reader.
+static bool browser_in_music(const char *root, const char *path) {
+	if (!root || !root[0] || !path) return false;
+	size_t n = strlen(root);
+	while (n > 1 && root[n - 1] == '/') n--;
+	const char *tail;
+	if (n == 1 && root[0] == '/') {
+		if (path[0] != '/') return false;
+		tail = path + 1;
+	} else {
+		if (strncmp(path, root, n) != 0 || path[n] != '/') return false;
+		tail = path + n;
+	}
+	while (*tail == '/') tail++;
+	if (strncmp(tail, "Music", 5) != 0 || (tail[5] != '\0' && tail[5] != '/')) return false;
+	// Never treat an unnormalised path that escapes Music as being inside it.
+	for (const char *p = tail + 5; *p;) {
+		while (*p == '/') p++;
+		const char *start = p;
+		while (*p && *p != '/') p++;
+		if (p - start == 2 && start[0] == '.' && start[1] == '.') return false;
+	}
+	return true;
+}
+
+static void grid_metrics(albumgrid_metrics_t *m) {
+	int width = config->screen_width - 2 * config->padding;
+	int height = lv_obj_get_height(file_list);
+	if (height <= 0) height = config->screen_height - settingsrow_content_top(config);
+	albumgrid_measure(width, height, lv_font_get_line_height(GRID_CAPTION_FONT), m);
+}
+
+static int browser_body_height(void);
 
 // ---------------------------------------------------------------------------
 // the entries
@@ -154,6 +196,14 @@ static char cue_claims[CUE_CLAIM_MAX][512];
 
 static listing_t shown;	  // what is on screen
 static listing_t staging; // what the reader thread is building
+
+static int browser_body_height(void) {
+	if (!shown.count) return ROW_PITCH;
+	if (!browse_grid) return (int)shown.count * ROW_PITCH;
+	albumgrid_metrics_t m;
+	grid_metrics(&m);
+	return albumgrid_canvas_height((int)shown.count, &m);
+}
 
 // What the row says, and what the row points at. The two are the same string
 // for a folder or a file on the card, and different for a track inside a cue
@@ -280,6 +330,70 @@ typedef struct {
 
 static row_t rows[ROW_POOL];
 
+// Small UI-thread LRU for grid covers displaced from the row pool. Pixels
+// move between a row and this cache; no copies, card reads or extra decodes on
+// the UI thread. Entries are valid only for one directory listing.
+typedef struct {
+	int index;
+	uint32_t generation;
+	uint64_t age;
+	bool valid;
+	bool found;
+	cover_image_t image;
+} grid_thumb_entry_t;
+static grid_thumb_entry_t grid_thumb_cache[GRID_THUMB_CACHE_SIZE];
+static uint64_t grid_thumb_clock;
+
+static void grid_thumb_cache_clear(void) {
+	for (int i = 0; i < GRID_THUMB_CACHE_SIZE; i++) {
+		if (grid_thumb_cache[i].valid && grid_thumb_cache[i].found) cover_free(&grid_thumb_cache[i].image);
+		memset(&grid_thumb_cache[i], 0, sizeof(grid_thumb_cache[i]));
+	}
+	grid_thumb_clock = 0;
+}
+
+static void grid_thumb_cache_put(row_t *row) {
+	if (!browse_grid || row->index < 0 || !row->thumb_settled) return;
+	int slot = -1;
+	for (int i = 0; i < GRID_THUMB_CACHE_SIZE; i++) {
+		if (grid_thumb_cache[i].valid && grid_thumb_cache[i].generation == row->generation &&
+		    grid_thumb_cache[i].index == row->index) { slot = i; break; }
+		if (!grid_thumb_cache[i].valid) { slot = i; break; }
+		if (slot < 0 || grid_thumb_cache[i].age < grid_thumb_cache[slot].age) slot = i;
+	}
+	grid_thumb_entry_t *entry = &grid_thumb_cache[slot];
+	if (entry->valid && entry->found) cover_free(&entry->image);
+	memset(entry, 0, sizeof(*entry));
+	entry->valid = true;
+	entry->index = row->index;
+	entry->generation = row->generation;
+	entry->age = ++grid_thumb_clock;
+	entry->found = row->has_thumb;
+	if (entry->found) {
+		entry->image = row->thumb;
+		entry->image.dsc.data = entry->image.pixels;
+		memset(&row->thumb, 0, sizeof(row->thumb));
+		row->has_thumb = false;
+	}
+}
+
+static bool grid_thumb_cache_take(row_t *row) {
+	if (!browse_grid) return false;
+	for (int i = 0; i < GRID_THUMB_CACHE_SIZE; i++) {
+		grid_thumb_entry_t *entry = &grid_thumb_cache[i];
+		if (!entry->valid || entry->index != row->index || entry->generation != row->generation) continue;
+		row->thumb_settled = true;
+		row->has_thumb = entry->found;
+		if (entry->found) {
+			row->thumb = entry->image;
+			row->thumb.dsc.data = row->thumb.pixels;
+		}
+		memset(entry, 0, sizeof(*entry)); // ownership moved, not freed
+		return true;
+	}
+	return false;
+}
+
 // Bumped every time a finished listing is taken over. Starts at 1 so a row
 // that has never been filled (generation 0) is never mistaken for a current
 // one.
@@ -294,14 +408,22 @@ static bool list_directory(const char *path, listing_t *out, cue_sheet_t *sheets
 static void row_show_glyph(row_t *row, bool is_dir) {
 	// Audio files get the note, not a generic sheet of paper -- everything a
 	// browser row can show besides a folder is playable anyway.
-	lv_image_set_src(row->icon, is_dir ? &icon_folder : &icon_music2);
+	bool placeholder = browse_grid || (browse_covers && is_dir);
+	// A circular loading glyph is distinct from the bland album placeholder:
+	// the latter means the worker has actually finished and found no art.
+	const lv_image_dsc_t *glyph = placeholder ?
+		(row->thumb_settled ? &icon_album : &icon_refresh) : (is_dir ? &icon_folder : &icon_music2);
+	lv_image_set_src(row->icon, glyph);
+	lv_obj_set_style_bg_color(row->icon, lv_color_hex(0x383838), 0);
+	lv_obj_set_style_bg_opa(row->icon, placeholder ? LV_OPA_COVER : LV_OPA_TRANSP, 0);
+	lv_obj_set_style_radius(row->icon, 6, 0);
 	lv_obj_add_style(row->icon, &theme_style_icon, 0);
 	// A folder wears the colour the palette gives this page -- Tokyo Night's
 	// violet, the signal green on Amber on Black -- so it reads as the thing
 	// that can be entered. The note keeps the shared icon colour. Rows are
 	// recycled between folders and files, so the local recolour is dropped
 	// again for everything else.
-	if (is_dir) {
+	if (is_dir && !placeholder) {
 		lv_obj_set_style_image_recolor(row->icon, theme_browser_folder_color(), 0);
 	} else {
 		lv_obj_remove_local_style_prop(row->icon, LV_STYLE_IMAGE_RECOLOR, 0);
@@ -316,20 +438,22 @@ static void row_show_cover(row_t *row, const lv_image_dsc_t *dsc) {
 	lv_obj_set_style_image_recolor_opa(row->icon, LV_OPA_TRANSP, 0);
 }
 
-static int row_slot(const row_t *row) { return (int)(row - rows); }
+static int row_slot(const row_t *row) { return COVERLOADER_BROWSER_BASE + (int)(row - rows); }
 
 static void row_drop_thumb(row_t *row) {
 	// Whatever the worker was doing for this row is no longer wanted.
 	coverloader_release(row_slot(row));
 
 	if (row->has_thumb) {
-		// The widget has to stop pointing at the pixels before they go.
+		// Stop pointing at the pixels before moving or freeing them.
 		bool is_dir = row->index >= 0 && (size_t)row->index < shown.count && shown.entries[row->index].is_dir;
 		row_show_glyph(row, is_dir);
+	}
+	grid_thumb_cache_put(row);
+	if (row->has_thumb) {
 		cover_free(&row->thumb);
 		row->has_thumb = false;
 	}
-
 	row->thumb_requested = false;
 	row->thumb_settled = false;
 }
@@ -380,6 +504,50 @@ void browser_notify_now_playing(void) {
 	}
 }
 
+// Rows are recycled between list and grid, including the message row.
+static void row_layout(row_t *row, bool grid, int index) {
+	if (grid) {
+		albumgrid_metrics_t m;
+		grid_metrics(&m);
+		lv_obj_set_size(row->button, m.tile_w, m.tile_h);
+		lv_obj_set_pos(row->button, albumgrid_tile_x(index, &m), albumgrid_tile_y(index, &m));
+		lv_obj_set_flex_flow(row->button, LV_FLEX_FLOW_COLUMN);
+		lv_obj_set_flex_align(row->button, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+		lv_obj_set_style_pad_all(row->button, m.pad, 0);
+		lv_obj_set_style_pad_row(row->button, 0, 0);
+		lv_obj_set_size(row->icon, m.cover, m.cover);
+		lv_obj_set_flex_grow(row->label, 0);
+		lv_obj_set_size(row->label, lv_pct(100), m.caption);
+		lv_obj_set_style_max_height(row->label, m.caption, 0);
+		lv_obj_set_style_text_font(row->label, GRID_CAPTION_FONT, 0);
+		lv_obj_set_style_text_align(row->label, LV_TEXT_ALIGN_CENTER, 0);
+		lv_obj_set_ignore_layout(row->check, true);
+		lv_obj_align(row->check, LV_ALIGN_TOP_RIGHT, -2, 2);
+		lv_obj_set_style_bg_color(row->check, lv_color_black(), 0);
+		lv_obj_set_style_bg_opa(row->check, LV_OPA_70, 0);
+		lv_obj_move_foreground(row->check);
+	} else {
+		lv_obj_set_size(row->button, config->screen_width - 2 * config->padding, ROW_HEIGHT);
+		lv_obj_set_pos(row->button, 0, index * ROW_PITCH);
+		lv_obj_set_flex_flow(row->button, LV_FLEX_FLOW_ROW);
+		lv_obj_set_flex_align(row->button, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+		lv_obj_set_style_pad_all(row->button, LIST_ROW_PAD, 0);
+		lv_obj_set_style_pad_row(row->button, 0, 0);
+		lv_obj_set_size(row->icon, THUMB_SIZE, THUMB_SIZE);
+		lv_obj_set_flex_grow(row->label, 1);
+		lv_obj_set_width(row->label, LV_SIZE_CONTENT);
+		lv_obj_set_height(row->label, LV_SIZE_CONTENT);
+		lv_obj_set_style_max_height(row->label, 2 * lv_font_get_line_height(bp_tile_label_font()) +
+		                             lv_obj_get_style_text_line_space(row->label, LV_PART_MAIN), 0);
+		lv_obj_set_style_text_font(row->label, bp_tile_label_font(), 0);
+		lv_obj_set_style_text_align(row->label, LV_TEXT_ALIGN_LEFT, 0);
+		lv_obj_set_ignore_layout(row->check, false);
+		lv_obj_set_align(row->check, LV_ALIGN_DEFAULT);
+		lv_obj_set_pos(row->check, 0, 0);
+		lv_obj_set_style_bg_opa(row->check, LV_OPA_TRANSP, 0);
+	}
+}
+
 // Points a row at an entry. Cheap by design: it moves a widget and rewrites a
 // label, it does not create anything.
 static void row_bind(row_t *row, int index) {
@@ -404,9 +572,11 @@ static void row_bind(row_t *row, int index) {
 	}
 
 	lv_obj_set_hidden(row->button, false);
-	lv_obj_set_y(row->button, index * ROW_PITCH);
+	row_layout(row, browse_grid, index);
 	lv_label_set_text(row->label, entry_name((size_t)index));
-	row_show_glyph(row, shown.entries[index].is_dir != 0);
+	grid_thumb_cache_take(row);
+	if (row->has_thumb) row_show_cover(row, &row->thumb.dsc);
+	else row_show_glyph(row, shown.entries[index].is_dir != 0);
 	row_update_playmark(row);
 	row_update_selection(row);
 }
@@ -415,14 +585,78 @@ static void row_bind(row_t *row, int index) {
 // windowing
 // ---------------------------------------------------------------------------
 
+// The pool deliberately extends beyond the viewport. Queue visible entries
+// first instead of making the single worker decode off-screen covers ahead of
+// them. Partially visible rows count; no storage or decoding runs here.
+static bool row_is_visible(int index) {
+	int y, height;
+	if (browse_grid) {
+		albumgrid_metrics_t m;
+		grid_metrics(&m);
+		y = albumgrid_tile_y(index, &m);
+		height = m.tile_h;
+	} else {
+		y = index * ROW_PITCH;
+		height = ROW_HEIGHT;
+	}
+	int scroll = lv_obj_get_scroll_y(file_list);
+	if (scroll < 0) scroll = 0;
+	return y + height > scroll && y < scroll + lv_obj_get_height(file_list);
+}
+
+static void cancel_offscreen_thumbs(void) {
+	if (!browse_grid && !browse_covers) return;
+	// In the grid, keep one prefetch running while scrolling if no newly
+	// visible row needs the worker. Otherwise visible rows go first.
+	bool visible_waiting = !browse_grid;
+	for (int i = 0; browse_grid && i < ROW_POOL; i++) {
+		row_t *row = &rows[i];
+		if (row->index >= 0 && !row->thumb_settled && !row->thumb_requested && row_is_visible(row->index)) {
+			visible_waiting = true;
+			break;
+		}
+	}
+	if (!visible_waiting) return;
+	for (int i = 0; i < ROW_POOL; i++) {
+		row_t *row = &rows[i];
+		if (row->index >= 0 && row->thumb_requested && !row->thumb_settled && !row_is_visible(row->index)) {
+			coverloader_release(row_slot(row));
+			row->thumb_requested = false;
+		}
+	}
+}
+
+// One neighbouring tile at a time, only after visible tiles have settled.
+// The pool already contains the neighbours; no additional widgets or threads.
+static row_t *grid_prefetch_candidate(void) {
+	if (!browse_grid) return NULL;
+	albumgrid_metrics_t m;
+	grid_metrics(&m);
+	int scroll = lv_obj_get_scroll_y(file_list);
+	if (scroll < 0) scroll = 0;
+	int bottom = scroll + lv_obj_get_height(file_list);
+	int best_distance = m.pitch_y + 1;
+	row_t *best = NULL;
+	for (int i = 0; i < ROW_POOL; i++) {
+		row_t *row = &rows[i];
+		if (row->index < 0 || row->thumb_settled || row->thumb_requested || row_is_visible(row->index)) continue;
+		int y = albumgrid_tile_y(row->index, &m);
+		int distance = y >= bottom ? y - bottom : scroll - (y + m.tile_h);
+		if (distance >= 0 && distance <= m.pitch_y && distance < best_distance) {
+			best_distance = distance;
+			best = row;
+		}
+	}
+	return best;
+}
+
 // Assigns the row widgets to the band of entries around the scroll position,
 // the way the stock player's listview does: quantise the scroll offset to the
 // row pitch, start one row early, and cover the viewport from there.
 //
 // Entry `index` always lives in widget `index % ROW_POOL`. That stability is
-// the point: when the band slides down by one, nine of the ten entries are
-// still on screen, and with this mapping their rows are simply left alone --
-// only the one that scrolled out gets rebound to the one that scrolled in.
+// the point: when the band slides, the entries still on screen are left alone;
+// only entries that moved out are rebound to those that moved in.
 // An assignment of rows[i] = first + i would rename every row on every step of
 // the band, and a rename drops the row's artwork: the covers would be stripped
 // off rows that never left the screen and refetched at every notch.
@@ -439,7 +673,14 @@ static void window_update(void) {
 		scroll = 0;
 	}
 
-	int first = (scroll / ROW_PITCH) - 1;
+	int first;
+	if (browse_grid) {
+		albumgrid_metrics_t m;
+		grid_metrics(&m);
+		first = albumgrid_row_at(scroll, &m) - m.columns;
+	} else {
+		first = (scroll / ROW_PITCH) - 1;
+	}
 	if (first + ROW_POOL > (int)shown.count) {
 		first = (int)shown.count - ROW_POOL;
 	}
@@ -452,6 +693,7 @@ static void window_update(void) {
 		int index = first + i;
 		row_bind(&rows[index % ROW_POOL], index < (int)shown.count ? index : -1);
 	}
+	cancel_offscreen_thumbs();
 }
 
 // Do not save the initial root listing or a programmatic scroll as user
@@ -510,67 +752,71 @@ static void list_scroll_cb(lv_event_t *e) {
 // ---------------------------------------------------------------------------
 // thumbnails
 //
-// Only the rows that exist can hold artwork, and there are ten of them, so the
-// memory artwork occupies is fixed no matter how long the folder is.
+// The fixed row pool and small grid cache bound artwork memory regardless of
+// how long the folder is. The UI only submits and collects worker requests.
 // ---------------------------------------------------------------------------
 
 // Runs on the UI thread every tick. It only posts requests and picks up
 // finished pictures -- the decoding happens on the worker thread, so however
 // slow a cover is, the list keeps scrolling.
-static void thumbs_update(void) {
-	// A folder the reader thread has finished with is taken over here, on the
-	// UI thread, where touching widgets is allowed.
-	if (reader_has_result()) {
-		adopt_listing();
-	}
+static void request_row_thumb(row_t *row) {
+	char entry_path[sizeof(current_path) + 256 + 1];
+	snprintf(entry_path, sizeof(entry_path), "%s/%s", current_path, entry_file((size_t)row->index));
+	int size = THUMB_SIZE;
+	if (browse_grid) { albumgrid_metrics_t m; grid_metrics(&m); size = m.cover; }
+	if (shown.entries[row->index].is_dir)
+		coverloader_request_dir(row_slot(row), entry_path, size);
+	else
+		coverloader_request(row_slot(row), entry_path, size);
+	row->thumb_requested = true;
+}
 
+static void row_finish_thumb(row_t *row, bool found, cover_image_t *image) {
+	row->thumb_requested = false;
+	row->thumb_settled = true;
+	if (found) {
+		row->thumb = *image;
+		row->thumb.dsc.data = row->thumb.pixels;
+		row->has_thumb = true;
+		row_show_cover(row, &row->thumb.dsc);
+	} else {
+		row_show_glyph(row, shown.entries[row->index].is_dir != 0);
+	}
+}
+
+static void thumbs_update(void) {
+	if (reader_has_result()) adopt_listing();
 	bool busy = false;
 
 	for (int i = 0; i < ROW_POOL; i++) {
 		row_t *row = &rows[i];
+		if (row->index < 0 || row->thumb_settled) continue;
 
-		if (row->index < 0 || row->thumb_settled) {
+		// Collect a prefetch even while it is still outside the viewport.
+		if (row->thumb_requested) {
+			bool finished = false;
+			cover_image_t image;
+			bool found = coverloader_take(row_slot(row), &image, &finished);
+			if (!finished) busy = true;
+			else row_finish_thumb(row, found, &image);
 			continue;
 		}
-
-		// Folders keep their folder icon: reading artwork for every album just
-		// to scroll past it is memory spent on a row that already says
-		// "folder".
-		if (shown.entries[row->index].is_dir) {
+		if ((browse_grid || browse_covers) && !row_is_visible(row->index)) continue;
+		if (shown.entries[row->index].is_dir && !browse_covers && !browse_grid) {
 			row->thumb_settled = true;
 			continue;
 		}
-
-		if (!row->thumb_requested) {
-			char entry_path[sizeof(current_path) + 256 + 1];
-			snprintf(entry_path, sizeof(entry_path), "%s/%s", current_path, entry_file((size_t)row->index));
-
-			coverloader_request(row_slot(row), entry_path, THUMB_SIZE);
-			row->thumb_requested = true;
-			busy = true;
-			continue;
-		}
-
-		bool finished = false;
-		cover_image_t image;
-		bool found = coverloader_take(row_slot(row), &image, &finished);
-
-		if (!finished) {
-			busy = true; // still decoding
-			continue;
-		}
-
-		row->thumb_settled = true;
-		if (found) {
-			row->thumb = image;
-			row->has_thumb = true;
-			row_show_cover(row, &row->thumb.dsc);
-		}
+		request_row_thumb(row);
+		busy = true;
 	}
 
-	if (!busy && !reader_busy()) {
-		lv_timer_pause(thumb_timer);
+	// Only one speculative decode and only after the visible requests have
+	// finished. On a scroll, cancel_offscreen_thumbs gives visible rows priority.
+	if (!busy && browse_grid && lv_screen_active() == browser_screen) {
+		row_t *next = grid_prefetch_candidate();
+		if (next) { request_row_thumb(next); busy = true; }
 	}
+	if (!busy && !reader_busy()) lv_timer_pause(thumb_timer);
 }
 
 static void thumb_timer_cb(lv_timer_t *timer) {
@@ -934,6 +1180,16 @@ static void screen_unloaded_cb(lv_event_t *e) {
 	(void)e;
 	save_browser_state();
 	selection_stop();
+	// Do not leave this page's thumbnails queued ahead of another page.
+	for (int i = 0; i < ROW_POOL; i++) {
+		row_t *row = &rows[i];
+		if (row->thumb_requested && !row->thumb_settled) {
+			coverloader_release(row_slot(row));
+			row->thumb_requested = false;
+		}
+	}
+	if (thumb_timer) lv_timer_pause(thumb_timer);
+	grid_thumb_cache_clear();
 }
 
 static void entry_clicked_cb(lv_event_t *e) {
@@ -1129,7 +1385,7 @@ bool browser_go_up(void) {
 // build a widget just to say a folder is empty.
 static void set_message(const char *text) {
 	lv_obj_set_hidden(rows[0].button, false);
-	lv_obj_set_y(rows[0].button, 0);
+	row_layout(&rows[0], false, 0);
 	lv_obj_set_hidden(rows[0].icon, true);
 	// A sentence is not a track: whatever this row was showing before, it is
 	// not playing now.
@@ -1487,9 +1743,13 @@ static void browser_open_dir(const char *path) {
 	for (int i = 0; i < ROW_POOL; i++) {
 		row_bind(&rows[i], -1);
 	}
+	grid_thumb_cache_clear();
 
 	shown.count = 0;
 	shown.pool_used = 0;
+	bool in_music = browser_in_music(root_path, current_path);
+	browse_grid = in_music && config_get_bool("library", "browse_grid", false);
+	browse_covers = in_music && config_get_bool("library", "browse_covers", false);
 	lv_obj_set_height(list_body, ROW_PITCH);
 	lv_obj_scroll_to_y(file_list, 0, LV_ANIM_OFF);
 
@@ -1546,7 +1806,8 @@ static void adopt_listing(void) {
 	staging.count = 0;
 	staging.pool_used = 0;
 
-	// From here on every row holds a stale index, whatever number it is.
+	// The new listing may reuse indices for completely different files.
+	grid_thumb_cache_clear();
 	listing_generation++;
 
 	bool failed = reader_failed;
@@ -1557,13 +1818,13 @@ static void adopt_listing(void) {
 
 	// The body is as tall as the whole list would be: that is what the scroll
 	// position and the scrollbar come from, while only ROW_POOL widgets exist.
-	lv_obj_set_height(list_body, shown.count ? (int)(shown.count * ROW_PITCH) : ROW_PITCH);
+	lv_obj_set_height(list_body, browser_body_height());
 
 	// Fresh folders start at the top; a walk back up resumes where the level
 	// was left (clamped: the folder may have shrunk meanwhile).
 	int target_scroll = pending_scroll >= 0 ? pending_scroll : 0;
 	pending_scroll = -1;
-	int max_scroll = (int)(shown.count * ROW_PITCH) - lv_obj_get_height(file_list);
+	int max_scroll = browser_body_height() - lv_obj_get_height(file_list);
 	if (target_scroll > max_scroll) {
 		target_scroll = max_scroll > 0 ? max_scroll : 0;
 	}
