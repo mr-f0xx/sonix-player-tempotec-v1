@@ -15,9 +15,12 @@ rasterises them into two self-contained C files the player compiles:
     src/gui/shell/icons_rose.c      (icons_rose.h)
     src/gui/shell/icons_gruvbox.c   (icons_gruvbox.h)
 
-Each bitmap is a white ARGB8888 shape exactly as icons.c emits them, so a page
-tints a themed glyph with the same lv_obj_set_style_image_recolor() it uses for
-the shared set. A themed set only replaces the glyphs it carries; anything it
+Each bitmap is a single white shape stored as 8-bit alpha (LV_COLOR_FORMAT_A8),
+so a page tints a themed glyph with the same lv_obj_set_style_image_recolor() it
+uses for the shared set. The shared set is ARGB8888, three quarters of it the
+same white pixel; these sets are one ink each, so they carry only the alpha and
+the recolour paints the ink back. That is a quarter of the firmware bytes for
+identical output. A themed set only replaces the glyphs it carries; anything it
 does not draw keeps the shared Lucide bitmap, which is why the lookup in
 src/gui/shell/theme_icons.c answers NULL for those.
 
@@ -287,26 +290,32 @@ HEADER = (
     " * GENERATED FILE -- do not edit by hand.\n"
     " * Produced from the SVGs in assets/icons/{folder} by tools/themed_icons.py.\n"
     " *\n"
-    " * {title}. White ARGB8888 bitmaps, exactly as icons.c emits\n"
-    " * them: tint them with lv_obj_set_style_image_recolor(). A page that finds no\n"
-    " * themed glyph here keeps the shared Lucide bitmap instead.\n"
+    " * {title}. White glyphs stored as 8-bit alpha (LV_COLOR_FORMAT_A8):\n"
+    " * tint them with lv_obj_set_style_image_recolor(), as the shared set is\n"
+    " * tinted. A page that finds no themed glyph here keeps the shared Lucide\n"
+    " * bitmap instead.\n"
     " */\n\n"
 )
 
 
 def render(svg_path, size):
-    """SVG -> white BGRA bytes, the layout LVGL's ARGB8888 wants."""
+    """SVG -> one alpha byte per pixel, the layout LVGL's A8 wants.
+
+    Every glyph in these sets is a single ink: the drawings are white all the
+    way down and only their alpha varies. Stored as ARGB8888 that is four bytes
+    per pixel, three of which are the same constant in every icon -- 3.68 MB
+    across the four sets in the firmware image. A8 keeps the alpha and drops
+    the white, and the recolour every call site already applies paints the ink
+    back (lv_draw_sw_img.c hands an A8 source straight to the blend colour, so
+    image_recolor still works).
+    """
     png = resvg_py.svg_to_bytes(
         svg_path=svg_path, width=size, height=size, skip_system_fonts=True
     )
     img = Image.open(io.BytesIO(png)).convert("RGBA")
     if img.size != (size, size):
         img = img.resize((size, size), Image.Resampling.LANCZOS)
-    raw = img.tobytes()
-    out = bytearray()
-    for i in range(0, len(raw), 4):
-        out += bytes((255, 255, 255, raw[i + 3]))
-    return bytes(out), img.width, img.height
+    return img.getchannel("A").tobytes(), img.width, img.height
 
 
 def c_array(data, per_line=12):
@@ -346,6 +355,17 @@ def shared_sizes():
     return sizes
 
 
+def shared_sides_cached():
+    """shared_sizes() once per run; the generator asks for it per glyph."""
+    global _SHARED_SIDES
+    if _SHARED_SIDES is None:
+        _SHARED_SIDES = shared_sizes()
+    return _SHARED_SIDES
+
+
+_SHARED_SIDES = None
+
+
 def check_aliases():
     """Report aliases whose drawing is cut at a size the shared bitmap is not.
 
@@ -378,11 +398,28 @@ def generate(key):
     total = 0
 
     names = []
+    # shared symbol -> the family whose drawing is cut at that symbol's own
+    # size. A set can draw one shape twice (the 32 px Radio row mark and the
+    # 128 px Radio cover are both radio.svg); only the second is allowed to
+    # answer for the shared symbol by name, or the lookup would return the row
+    # drawing to a caller asking for the cover and then scale 32 up to 128.
+    by_shared = {}
     for family, (filename, size, shared) in ICONS.items():
         path = os.path.join(ICON_DIR, folder, filename)
         if not os.path.exists(path):
             raise SystemExit("missing icon: %s" % path)
-        data, w, h = render(path, size)
+        # The alias row below answers for the shared symbol by name, and the
+        # call sites that ask that way scale by the bitmap's own width -- so a
+        # drawing that stands in for a shared bitmap cut at another size has to
+        # be cut at that size. The alias is a different call site of the same
+        # shape (the 22 px home tile for a 128 px service mark), and the
+        # drawing has to fill the grid the caller measures against.
+        draw_at = size
+        if shared and by_shared.get(shared) is None:
+            shared_side = shared_sides_cached().get("icon_" + shared)
+            if shared_side:
+                draw_at = shared_side
+        data, w, h = render(path, draw_at)
         total += len(data)
         name = "icon_%s_%s" % (prefix, family)
         parts_c.append(
@@ -391,7 +428,7 @@ def generate(key):
             "const lv_image_dsc_t %s = {\n"
             "\t.header = {\n"
             "\t\t.magic = LV_IMAGE_HEADER_MAGIC,\n"
-            "\t\t.cf = LV_COLOR_FORMAT_ARGB8888,\n"
+            "\t\t.cf = LV_COLOR_FORMAT_A8,\n"
             "\t\t.w = %d,\n"
             "\t\t.h = %d,\n"
             "\t\t.stride = %d,\n"
@@ -399,10 +436,12 @@ def generate(key):
             "\t.data_size = sizeof(%s_data),\n"
             "\t.data = %s_data,\n"
             "};\n"
-            % (filename, w, h, name, c_array(data), name, w, h, w * 4, name, name)
+            % (filename, w, h, name, c_array(data), name, w, h, w, name, name)
         )
         parts_h.append("extern const lv_image_dsc_t %s;" % name)
         names.append((family, shared))
+        if shared and shared not in by_shared:
+            by_shared[shared] = family
 
     # The table the lookup walks: one row per glyph, naming both bitmaps. Rows
     # with a shared name mean "this drawing also lands here", for the places
@@ -411,12 +450,14 @@ def generate(key):
     rows = []
     for family, shared in names:
         themed = "&icon_%s_%s" % (prefix, family)
-        if shared:
-            rows.append("\t{%s, &icon_%s}," % (themed, shared))
-        else:
+        if not shared:
             # No shared bitmap carries this drawing on its own (the 46 px menu
             # art): the caller only ever asks for the themed copy.
             rows.append("\t{%s, NULL}," % themed)
+        elif by_shared.get(shared) != family:
+            rows.append("\t{%s, NULL}," % themed)
+        else:
+            rows.append("\t{%s, &icon_%s}," % (themed, shared))
     table = (
         "const theme_icon_row_t theme_%s_map[] = {\n" % prefix
         + "\n".join(rows)

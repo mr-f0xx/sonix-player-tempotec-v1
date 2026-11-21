@@ -424,10 +424,20 @@ static void check_native_icon(lv_obj_t *icon, int tile, int size) {
 		// The set draws the tile once, at the size the labelled layout uses
 		// (22 px on V1); the image widget may then be scaled up to the larger
 		// icon-only box, so only the source is checked here.
+		//
+		// Not every tile is cut at 22 px, though: a tile whose shared symbol
+		// is a large mark (Streaming answers icon_radio_player, a 128 px cover)
+		// has to be cut at that symbol's size, because theme_icon() hands the
+		// shared call sites this same drawing and they scale by its own width.
+		// A 22 px drawing returned there would be blown up to 128. So the
+		// bitmap is square, and it is scaled to the box rather than drawn at
+		// its natural size -- both of which this checks.
 		const lv_image_dsc_t *themed = theme_icon_home_tile(tile);
 		assert(source == themed);
 		assert(themed && themed->header.w == themed->header.h);
-		assert(themed->header.w <= size);
+		if (themed->header.w > (uint32_t)size) {
+			assert(lv_image_get_scale_x(icon) != LV_SCALE_NONE);
+		}
 		return;
 	}
 	assert(source == main_menu_icon_native(tile, theme_uses_function_glyphs(), size));

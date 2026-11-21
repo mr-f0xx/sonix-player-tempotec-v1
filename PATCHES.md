@@ -5243,6 +5243,56 @@ regenerates `icons_rose.c`, `icons_gruvbox.c`, `icons_dracula.c` and
 `icons_catppuccin.c` from the SVGs in `assets/icons/<theme>/` (114 drawings
 each); `--check` verifies the committed sources still match the drawings.
 
+### One ink per glyph, so one byte per pixel
+
+The first cut of these sets stored each drawing the way `icons.c` does --
+white ARGB8888 -- which is four bytes per pixel for a glyph whose colour never
+varies: every one of them is `#ffffff` with an alpha ramp. At the sizes the V1
+draws them that came to 941 KB of pixel data per set, 3.68 MB across the four,
+compiled into the firmware. (The sources are 5.6 MB each before the compiler
+touches them; `APP_SRCS` is a `find`, so all 23 MB of them are built.)
+
+They are single-ink drawings, so they are stored as single-ink drawings now:
+`LV_COLOR_FORMAT_A8`, one alpha byte per pixel, white supplied by the recolour
+every call site already applies. `lv_draw_sw_img.c` hands an A8 source straight
+to the blend colour, so `image_recolor` and its opacity work exactly as before,
+and the bitmaps stayed on the same grid: 124 of the 140 glyphs have
+byte-identical alpha to what they shipped with, checked by diffing the old and
+new arrays. The result is 316 KB of `text` per set instead of 941 KB -- 2.44 MB
+off the firmware, and the web emulator binary went from 45.6 MB to 42.1 MB.
+
+Cropping the transparent margins was the other candidate and it pays about a
+third as well: the median glyph wastes 1.72x its own area in padding, so a
+crop saves 46% of the bytes rather than 75%, and it moves every drawing inside
+its box, which changes where a centred glyph lands. A8 changes neither the
+geometry nor a single pixel of output.
+
+### Two bugs the resize work turned up
+
+**A shared symbol answered twice.** `radio_player` is drawn twice on purpose
+(`radio` at 32 px for the Streaming row, `radio_cover` at 128 px for the
+now-playing placeholder), and both rows named the same shared symbol -- so
+`theme_icon_at(&icon_radio_player, 128)` could match the 32 px row drawing
+first and blow it up four times. `music_settings` had the same shape
+(`home_settings` and `system`). The generator now keeps one row per shared
+symbol: whichever drawing is cut at that symbol's own size, with the other
+left unaliased.
+
+**The alias was cut at the wrong size.** A themed bitmap that stands in for a
+shared symbol is also reached by call sites that ask for that symbol and scale
+by the bitmap's own width. When the set drew the shape at a different size than
+the shared symbol -- `home_streaming` at 22 px standing in for a 128 px
+`radio_player` -- those call sites got the small drawing and enlarged it, which
+is the exact smearing the set exists to avoid. Every aliased drawing is now cut
+at the shared symbol's own size, so `theme_icon()` returns art the caller can
+measure against. That is why the Streaming home tile carries a 128 px bitmap to
+fill a 22 px box: the tile scales it down by its own width, and the same
+drawing has to serve the placeholder that wants all 128.
+
+`tests/ui/test_main_menu.c`'s themed branch learned the same thing: a tile
+whose drawing is larger than the box is expected to be scaled to it, rather
+than asserted to fit inside it by natural size.
+
 `check_aliases()` reports aliases whose drawing is cut at a size the shared
 bitmap is not -- 18 of them, all deliberate: the home tiles name a 22 px
 drawing of a symbol the shared set cuts at 32, the service marks name the

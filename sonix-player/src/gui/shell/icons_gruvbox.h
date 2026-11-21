@@ -2,9 +2,10 @@
  * GENERATED FILE -- do not edit by hand.
  * Produced from the SVGs in assets/icons/gruvbox by tools/themed_icons.py.
  *
- * Gruvbox's icon set. White ARGB8888 bitmaps, exactly as icons.c emits
- * them: tint them with lv_obj_set_style_image_recolor(). A page that finds no
- * themed glyph here keeps the shared Lucide bitmap instead.
+ * Gruvbox's icon set. White glyphs stored as 8-bit alpha (LV_COLOR_FORMAT_A8):
+ * tint them with lv_obj_set_style_image_recolor(), as the shared set is
+ * tinted. A page that finds no themed glyph here keeps the shared Lucide
+ * bitmap instead.
  */
 
 #ifndef ICONS_GRUVBOX_H
