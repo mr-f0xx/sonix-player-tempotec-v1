@@ -7,6 +7,7 @@
 #include "src/gui/shell/icons.h"
 #include "src/gui/shell/settingsrow.h"
 #include "src/gui/shell/theme.h"
+#include "src/gui/shell/theme_icons.h"
 #include "src/system/core/lang.h"
 #include "src/system/core/utils.h"
 
@@ -250,7 +251,7 @@ void processespage_init(gui_config_t *cfg) {
 		lv_obj_add_event_cb(button, refresh_clicked_cb, LV_EVENT_CLICKED, NULL);
 
 		lv_obj_t *icon = lv_image_create(button);
-		lv_image_set_src(icon, &icon_refresh);
+		lv_image_set_src(icon, theme_icon(&icon_refresh));
 		lv_obj_add_style(icon, &theme_style_icon, 0);
 		settingsrow_scale_corner_icon(icon, cfg);
 		lv_obj_center(icon);

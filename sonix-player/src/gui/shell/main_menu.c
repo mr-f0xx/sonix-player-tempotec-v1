@@ -22,6 +22,7 @@
 #include "src/gui/settings/settings.h"
 #include "src/gui/shell/switcher.h"
 #include "src/gui/shell/theme.h"
+#include "src/gui/shell/theme_icons.h"
 #include "src/gui/streaming/streaming.h"
 #include "src/system/streaming/podcast.h"
 #include "src/system/streaming/podcastcache.h"
@@ -84,6 +85,9 @@ static const lv_image_dsc_t *const NORMAL_MENU_ICONS[6] = {
 	&icon_menu_settings,
 };
 
+// The function-glyph themes' destinations. These are the shared set's
+// renderings; a theme that carries its own art swaps them for it in
+// main_menu_refresh_tiles(), through theme_icon().
 static const lv_image_dsc_t *const TOKYO_MENU_ICONS[6] = {
 	&icon_music2,           // Music
 	&icon_radio_player,     // Streaming
@@ -220,15 +224,36 @@ static void main_menu_refresh_tiles(void) {
 		const lv_image_dsc_t *source = tokyo ? TOKYO_MENU_ICONS[i] : NORMAL_MENU_ICONS[i];
 		if (i == 0 && browse) source = tokyo ? &icon_folder : &icon_menu_explorer;
 		if (i == 3 && books) source = tokyo ? &icon_files_book : &icon_menu_books;
+		// Rosé Pine Moon and Gruvbox draw these six themselves, at the size
+		// this layout draws them (22 px labelled, see the table in
+		// tools/themed_icons.py). The swap comes after the browse/books
+		// substitutions so the folder and the books glyph -- which those two
+		// destinations borrow -- are themed too, and before the native-size
+		// path below, which then finds art at the tile's own size rather than
+		// a shared bitmap scaled down.
+		if (tokyo && !(i == 0 && browse) && !(i == 3 && books)) {
+			const lv_image_dsc_t *themed = theme_icon_home_tile(i);
+			if (themed) {
+				source = themed;
+			}
+		}
+		if (tokyo) {
+			source = theme_icon(source);
+		}
 		if (icons_only && !(i == 0 && browse) && !(i == 3 && books)) {
 			// Use art pre-rasterized at the final pixel size, not stretched
 			// toolbar glyphs or colored art filtered for a second time.
 			// Matching source/layout sizes also avoids LVGL's fractional image
 			// transform and its extra edge interpolation. Other menus and the
 			// labeled layout continue to use their original sources and sizes.
-			const lv_image_dsc_t *native = main_menu_icon_native(i, tokyo, icon_size);
-			if (native) {
-				source = native;
+			// A themed set carries its own 22 px rendering (theme_icon above
+			// already answered with it), so the shared native-size table is
+			// only consulted for the themes that share it.
+			if (!theme_icons_active()) {
+				const lv_image_dsc_t *native = main_menu_icon_native(i, tokyo, icon_size);
+				if (native) {
+					source = native;
+				}
 			}
 		}
 		gridpage_set_tile_label_hidden(menu_grid, i, icons_only);
@@ -588,7 +613,7 @@ void main_menu_init(gui_config_t *cfg) {
 	lv_obj_set_style_text_font(mini_player_subtitle, &font_ui_14, 0);
 
 	lv_obj_t *mini_chevron = lv_image_create(mini_player);
-	lv_image_set_src(mini_chevron, &icon_chevron_right);
+	lv_image_set_src(mini_chevron, theme_icon(&icon_chevron_right));
 	fit_menu_icon(mini_chevron, &icon_chevron_right, 14);
 	lv_obj_add_style(mini_chevron, &theme_style_icon, 0);
 

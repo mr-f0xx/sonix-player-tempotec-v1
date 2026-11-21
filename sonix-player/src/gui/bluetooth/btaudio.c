@@ -15,6 +15,7 @@
 #include "src/gui/shell/settingsrow.h"
 #include "src/gui/shell/switcher.h"
 #include "src/gui/shell/theme.h"
+#include "src/gui/shell/theme_icons.h"
 #include "src/gui/shell/toast.h"
 #include "src/system/device/power.h"
 #include "src/system/bluetooth/airpods.h"
@@ -506,7 +507,7 @@ static void build_name_layer(gui_config_t *cfg) {
 	lv_obj_add_event_cb(cancel, name_cancel_cb, LV_EVENT_CLICKED, NULL);
 
 	lv_obj_t *cancel_icon = lv_image_create(cancel);
-	lv_image_set_src(cancel_icon, &icon_close);
+	lv_image_set_src(cancel_icon, theme_icon(&icon_close));
 	lv_obj_add_style(cancel_icon, &theme_style_icon, 0);
 	settingsrow_scale_corner_icon(cancel_icon, cfg);
 	lv_obj_center(cancel_icon);

@@ -14,6 +14,7 @@
 #include "src/gui/shell/settingsrow.h"
 #include "src/gui/shell/switcher.h" // switch_screen
 #include "src/gui/shell/theme.h"
+#include "src/gui/shell/theme_icons.h"
 #include "src/gui/shell/toast.h"
 #include "src/system/core/lang.h"
 #include "src/system/device/clock.h"
@@ -314,10 +315,13 @@ static void show(lv_obj_t *o, bool visible) {
 }
 
 // An icon from the shell's set, drawn at `size` whatever the art was cut at.
+// The pet page asks for its share of the same glyphs (the hearts, the note,
+// the pencil on the corner buttons), so the themed sets answer here too; the
+// scale is worked out from what was actually drawn.
 static lv_obj_t *icon_image(lv_obj_t *parent, const lv_image_dsc_t *source, int size) {
 	lv_obj_t *img = lv_image_create(parent);
-	lv_image_set_src(img, source);
-	lv_image_set_scale(img, (uint32_t)((int64_t)LV_SCALE_NONE * size / (int)source->header.h));
+	lv_image_set_src(img, theme_icon(source));
+	lv_image_set_scale(img, theme_icon_scale_to(lv_image_get_src(img), size));
 	lv_obj_set_size(img, size, size);
 	lv_image_set_inner_align(img, LV_IMAGE_ALIGN_CENTER);
 	lv_obj_set_style_image_recolor_opa(img, LV_OPA_COVER, 0);

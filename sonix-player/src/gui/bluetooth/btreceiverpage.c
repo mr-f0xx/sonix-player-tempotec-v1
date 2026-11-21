@@ -12,6 +12,7 @@
 #include "src/gui/shell/settingsrow.h"
 #include "src/gui/shell/switcher.h"
 #include "src/gui/shell/theme.h"
+#include "src/gui/shell/theme_icons.h"
 #include "src/system/bluetooth/bluetooth.h"
 #include "src/system/bluetooth/btreceiver.h"
 #include "src/system/core/lang.h"
@@ -318,7 +319,7 @@ void btreceiverpage_init(gui_config_t *cfg) {
 	lv_obj_add_event_cb(codec_btn, codec_btn_cb, LV_EVENT_CLICKED, NULL);
 
 	lv_obj_t *codec_glyph = lv_image_create(codec_btn);
-	lv_image_set_src(codec_glyph, &icon_change_codec);
+	lv_image_set_src(codec_glyph, theme_icon(&icon_change_codec));
 	lv_obj_add_style(codec_glyph, &theme_style_icon, 0);
 	settingsrow_scale_corner_icon(codec_glyph, cfg);
 	lv_obj_center(codec_glyph);
@@ -329,15 +330,11 @@ void btreceiverpage_init(gui_config_t *cfg) {
 	// space. On the V1 the 200 px source nearly fills the display and crowds
 	// the receiver status below it, so scale both its drawing and layout box.
 	big_icon = lv_image_create(container);
-	lv_image_set_src(big_icon, &icon_bluetooth_receiver_page);
+	lv_image_set_src(big_icon, theme_icon(&icon_bluetooth_receiver_page));
 	int icon_size = compact ? 96 : 200;
-	int source_side = LV_MAX((int)icon_bluetooth_receiver_page.header.w,
-							 (int)icon_bluetooth_receiver_page.header.h);
 	lv_obj_set_size(big_icon, icon_size, icon_size);
 	lv_image_set_inner_align(big_icon, LV_IMAGE_ALIGN_CENTER);
-	if (source_side > 0) {
-		lv_image_set_scale(big_icon, (uint32_t)(LV_SCALE_NONE * icon_size / source_side));
-	}
+	lv_image_set_scale(big_icon, theme_icon_scale_to(lv_image_get_src(big_icon), icon_size));
 	lv_obj_set_style_margin_top(big_icon, compact ? 8 : 40, 0);
 
 	format_label = lv_label_create(container);

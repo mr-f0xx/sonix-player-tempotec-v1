@@ -529,7 +529,8 @@ int main(int argc, char **argv) {
 	assert((int)lv_obj_get_scroll_y(page_list) == remembered_scroll);
 
 	check_entry();
-	printf("peq UI: profile pills fit 11 languages / 5 themes; selection, refresh and scoped reset passed\n");
+	printf("peq UI: profile pills fit 11 languages / %d themes; selection, refresh and scoped reset passed\n",
+	       THEME_KIND_COUNT);
 	printf("peq UI: frequency (Hz and kHz), gain and Q typed on the keypad, clamped, cancelled; keys fit the panel\n");
 	lv_deinit();
 	return 0;

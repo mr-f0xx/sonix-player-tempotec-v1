@@ -18,6 +18,7 @@
 #include "src/gui/shell/settingsrow.h"
 #include "src/gui/shell/switcher.h"
 #include "src/gui/shell/theme.h"
+#include "src/gui/shell/theme_icons.h"
 #include "src/system/core/config.h"
 #include "src/system/core/lang.h"
 #include "src/system/device/power.h"
@@ -142,7 +143,7 @@ static void sort_menu_show(lv_obj_t *anchor, list_id_t list, void (*reload)(void
 	popover_item_t items[6];
 	for (int i = 0; i < sorts->choice_count; i++) {
 		sort_choice_t choice = sorts->choices[i];
-		items[i] = (popover_item_t){SORT_LABELS[choice], sort_picked, (void *)(intptr_t)choice, choice == current};
+		items[i] = (popover_item_t){SORT_LABELS[choice], sort_picked, (void *)(intptr_t)choice, choice == current, false};
 	}
 	sort_menu_list = list;
 	sort_menu_reload = reload;
@@ -162,7 +163,7 @@ static lv_obj_t *corner_button(lv_obj_t *screen, gui_config_t *cfg, int slot, co
 	}
 
 	lv_obj_t *icon = lv_image_create(button);
-	lv_image_set_src(icon, glyph);
+	lv_image_set_src(icon, theme_icon(glyph));
 	lv_obj_add_style(icon, &theme_style_icon, 0);
 	settingsrow_scale_corner_icon(icon, cfg);
 	lv_obj_center(icon);
@@ -317,7 +318,7 @@ static audiobookdb_index_t *books_index_open(void) {
 }
 
 static void row_show_glyph(row_t *row) {
-	lv_image_set_src(row->icon, &icon_book_headphones_row);
+	lv_image_set_src(row->icon, theme_icon(&icon_book_headphones_row));
 	// The glyph is a 64 px bitmap. The V1's 48 px thumb box needs it drawn
 	// smaller, or it hangs out of the row; 176/256 of 64 px is 44 px.
 	lv_image_set_scale(row->icon, (uint32_t)bp_pick(176, LV_SCALE_NONE));
@@ -1154,7 +1155,7 @@ static void tokyo_continue_panel_build(gui_config_t *cfg) {
 	lv_obj_set_event_bubble(tokyo_continue_book, true);
 	lv_obj_add_event_cb(tokyo_continue_book, tokyo_continue_book_cb, LV_EVENT_CLICKED, NULL);
 	lv_obj_t *book_icon = lv_image_create(tokyo_continue_book);
-	lv_image_set_src(book_icon, &icon_book_headphones_row);
+	lv_image_set_src(book_icon, theme_icon(&icon_book_headphones_row));
 	lv_obj_add_style(book_icon, &theme_style_icon, 0);
 	lv_obj_set_size(book_icon, 24, 24);
 	lv_image_set_scale(book_icon, (uint32_t)(LV_SCALE_NONE * 24 / 64));
@@ -1198,7 +1199,7 @@ static void tokyo_continue_panel_build(gui_config_t *cfg) {
 	lv_obj_set_event_bubble(open_continue, true);
 	lv_obj_add_event_cb(open_continue, tokyo_open_continue_cb, LV_EVENT_CLICKED, NULL);
 	lv_obj_t *open_icon = lv_image_create(open_continue);
-	lv_image_set_src(open_icon, &icon_play);
+	lv_image_set_src(open_icon, theme_icon(&icon_play));
 	lv_obj_add_style(open_icon, &theme_style_icon, 0);
 	lv_obj_set_size(open_icon, 17, 17);
 	lv_image_set_inner_align(open_icon, LV_IMAGE_ALIGN_CENTER);
@@ -1212,7 +1213,7 @@ static void tokyo_continue_panel_build(gui_config_t *cfg) {
 	lv_obj_add_style(open_label, &theme_style_text, 0);
 	lv_obj_set_style_text_font(open_label, &font_ui_14, 0);
 	lv_obj_t *open_chevron = lv_image_create(open_continue);
-	lv_image_set_src(open_chevron, &icon_chevron_right);
+	lv_image_set_src(open_chevron, theme_icon(&icon_chevron_right));
 	lv_obj_add_style(open_chevron, &theme_style_icon, 0);
 	lv_obj_set_size(open_chevron, 14, 14);
 	lv_image_set_scale(open_chevron, (uint32_t)(LV_SCALE_NONE * 14 / 36));
@@ -1247,11 +1248,10 @@ static void tokyo_continue_panel_build(gui_config_t *cfg) {
 		lv_obj_add_event_cb(button, category_rows[i].callback, LV_EVENT_CLICKED, NULL);
 
 		lv_obj_t *icon = lv_image_create(button);
-		lv_image_set_src(icon, category_rows[i].icon);
+		lv_image_set_src(icon, theme_icon_at(category_rows[i].icon, 18));
 		lv_obj_add_style(icon, &theme_style_icon, 0);
 		lv_obj_set_size(icon, 18, 18);
-		int side = LV_MAX((int)category_rows[i].icon->header.w, (int)category_rows[i].icon->header.h);
-		lv_image_set_scale(icon, side ? (uint32_t)(LV_SCALE_NONE * 18 / side) : LV_SCALE_NONE);
+		lv_image_set_scale(icon, theme_icon_scale_to(lv_image_get_src(icon), 18));
 		lv_image_set_inner_align(icon, LV_IMAGE_ALIGN_CENTER);
 		lv_obj_set_style_image_recolor(icon, theme_semantic_color(category_rows[i].tone), 0);
 		lv_obj_set_style_image_recolor_opa(icon, LV_OPA_COVER, 0);
@@ -1262,7 +1262,7 @@ static void tokyo_continue_panel_build(gui_config_t *cfg) {
 		lv_obj_add_style(label, &theme_style_text, 0);
 		lv_obj_set_style_text_font(label, &font_ui_14, 0);
 		lv_obj_t *chevron = lv_image_create(button);
-		lv_image_set_src(chevron, &icon_chevron_right);
+		lv_image_set_src(chevron, theme_icon(&icon_chevron_right));
 		lv_obj_add_style(chevron, &theme_style_icon, 0);
 		lv_obj_set_size(chevron, 14, 14);
 		lv_image_set_scale(chevron, (uint32_t)(LV_SCALE_NONE * 14 / 36));
@@ -1286,7 +1286,7 @@ static void tokyo_continue_panel_build(gui_config_t *cfg) {
 	lv_obj_set_event_bubble(tokyo_scan_button, true);
 	lv_obj_add_event_cb(tokyo_scan_button, section_scan_cb, LV_EVENT_CLICKED, NULL);
 	lv_obj_t *scan_icon = lv_image_create(tokyo_scan_button);
-	lv_image_set_src(scan_icon, &icon_book_headphones_row);
+	lv_image_set_src(scan_icon, theme_icon(&icon_book_headphones_row));
 	lv_obj_add_style(scan_icon, &theme_style_icon, 0);
 	lv_obj_set_size(scan_icon, 18, 18);
 	lv_image_set_scale(scan_icon, (uint32_t)(LV_SCALE_NONE * 18 / 64));
@@ -1873,7 +1873,7 @@ static void build_scan_page(gui_config_t *cfg) {
 	lv_obj_set_flex_align(container, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 
 	lv_obj_t *book = lv_image_create(container);
-	lv_image_set_src(book, &icon_book_headphones);
+	lv_image_set_src(book, theme_icon(&icon_book_headphones));
 	lv_obj_add_style(book, &theme_style_icon, 0);
 	lv_obj_set_style_image_recolor_opa(book, LV_OPA_COVER, 0);
 	lv_obj_set_style_pad_bottom(book, bp_pick(8, 16), 0);

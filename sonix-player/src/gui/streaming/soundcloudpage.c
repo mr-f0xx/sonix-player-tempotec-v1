@@ -17,6 +17,7 @@
 #include "src/gui/shell/spinner.h"
 #include "src/gui/shell/switcher.h"
 #include "src/gui/shell/theme.h"
+#include "src/gui/shell/theme_icons.h"
 #include "src/gui/shell/toast.h"
 #include "src/system/audio/audio.h"
 #include "src/system/core/lang.h"
@@ -1190,7 +1191,7 @@ static lv_obj_t *make_list_entry_row(const char *title_txt, const char *sub_txt,
 
 	if (with_chevron) {
 		lv_obj_t *chev = lv_image_create(row);
-		lv_image_set_src(chev, &icon_chevron_right);
+		lv_image_set_src(chev, theme_icon(&icon_chevron_right));
 		lv_obj_add_style(chev, &theme_style_icon, 0);
 		lv_obj_set_style_image_opa(chev, LV_OPA_60, 0);
 		lv_obj_set_clickable(chev, false);
@@ -1691,7 +1692,7 @@ static lv_obj_t *add_stacked_value_row(lv_obj_t *parent, const char *name, lv_ob
 
 	if (with_chevron) {
 		lv_obj_t *chev = lv_image_create(row);
-		lv_image_set_src(chev, &icon_chevron_right);
+		lv_image_set_src(chev, theme_icon(&icon_chevron_right));
 		lv_obj_add_style(chev, &theme_style_icon, 0);
 		lv_obj_set_style_image_opa(chev, LV_OPA_60, 0);
 		lv_obj_set_clickable(chev, false);

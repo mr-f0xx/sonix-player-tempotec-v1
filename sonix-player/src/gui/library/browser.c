@@ -28,6 +28,7 @@
 #include "src/gui/shell/settingsrow.h"
 #include "src/gui/shell/switcher.h"
 #include "src/gui/shell/theme.h"
+#include "src/gui/shell/theme_icons.h"
 #include "src/system/library/cue.h"
 #include "src/system/playback/device_state.h"
 #include "src/gui/shell/toast.h"
@@ -1650,7 +1651,7 @@ static void build_rows(int width) {
 									0);
 
 		row->check = lv_image_create(row->button);
-		lv_image_set_src(row->check, &icon_check);
+		lv_image_set_src(row->check, theme_icon(&icon_check));
 		lv_obj_add_style(row->check, &theme_style_icon, 0);
 		lv_obj_set_style_image_recolor_opa(row->check, LV_OPA_COVER, 0);
 		lv_obj_set_clickable(row->check, false);
@@ -1691,7 +1692,7 @@ static lv_obj_t *corner_button(gui_config_t *cfg, int slot, const lv_image_dsc_t
 	lv_obj_set_hidden(btn, true);
 
 	lv_obj_t *image = lv_image_create(btn);
-	lv_image_set_src(image, glyph);
+	lv_image_set_src(image, theme_icon(glyph));
 	lv_obj_add_style(image, &theme_style_icon, 0);
 	settingsrow_scale_corner_icon(image, cfg);
 	lv_obj_center(image);

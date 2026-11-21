@@ -20,6 +20,7 @@
 #include "src/gui/shell/settingsrow.h"
 #include "src/gui/shell/switcher.h"
 #include "src/gui/shell/theme.h"
+#include "src/gui/shell/theme_icons.h"
 #include "src/gui/shell/toast.h"
 #include "src/system/core/lang.h"
 #include "src/system/library/library.h"
@@ -267,7 +268,7 @@ static void remove_menu_show_async(void *user) {
 	}
 	popover_item_t items[MENU_PLAYLISTS_MAX];
 	for (int i = 0; i < menu_playlist_count; i++) {
-		items[i] = (popover_item_t){menu_playlists[i], menu_remove_one_action, (void *)(intptr_t)i, false};
+		items[i] = (popover_item_t){menu_playlists[i], menu_remove_one_action, (void *)(intptr_t)i, false, false};
 	}
 	popover_show(menu_anchor, items, menu_playlist_count);
 }
@@ -321,12 +322,12 @@ static void track_long_pressed_cb(lv_event_t *e) {
 	int n = 0;
 	items[n++] = (popover_item_t){
 		library_fav_contains(menu_path) ? "remove_from_favourites" : "medialist_add_to_favourites", menu_fav_action, NULL,
-		false};
-	items[n++] = (popover_item_t){"smartmix_start", menu_genius_action, NULL, false};
-	items[n++] = (popover_item_t){"add_to_queue", menu_queue_action, NULL, false};
-	items[n++] = (popover_item_t){"add_to_playlist", menu_playlist_action, NULL, false};
+		false, false};
+	items[n++] = (popover_item_t){"smartmix_start", menu_genius_action, NULL, false, false};
+	items[n++] = (popover_item_t){"add_to_queue", menu_queue_action, NULL, false, false};
+	items[n++] = (popover_item_t){"add_to_playlist", menu_playlist_action, NULL, false, false};
 	if (menu_playlist_count > 0) {
-		items[n++] = (popover_item_t){"medialist_remove_from_playlist", menu_remove_action, NULL, false};
+		items[n++] = (popover_item_t){"medialist_remove_from_playlist", menu_remove_action, NULL, false, false};
 	}
 	popover_show(menu_anchor, items, n);
 }
@@ -562,7 +563,7 @@ static void row_create(row_t *row) {
 	lv_obj_set_style_text_font(row->subtitle, &font_ui_18, 0);
 
 	row->chevron = lv_image_create(button);
-	lv_image_set_src(row->chevron, &icon_chevron_right);
+	lv_image_set_src(row->chevron, theme_icon(&icon_chevron_right));
 	lv_obj_add_style(row->chevron, &theme_style_icon, 0);
 	lv_obj_set_style_image_opa(row->chevron, LV_OPA_60, 0);
 }

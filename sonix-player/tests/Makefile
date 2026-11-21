@@ -876,16 +876,30 @@ printf-flag:
 
 # Optional headless LVGL layout regression tests. Reuse the production config,
 # disabling SDL, FreeType and device drivers; no audio service is linked.
+# The four themed glyph sets and the lookup that chooses between them. All are
+# generated (tools/themed_icons.py) and every consumer of icons.c now resolves
+# glyphs through theme_icon(), so a test linking icons.c needs these with it.
+THEMED_ICONS_SRC = $(ROOT)/src/gui/shell/theme_icons.c \
+                   $(ROOT)/src/gui/shell/icons_rose.c $(ROOT)/src/gui/shell/icons_gruvbox.c \
+                   $(ROOT)/src/gui/shell/icons_dracula.c $(ROOT)/src/gui/shell/icons_catppuccin.c
+
+# The drawings a themed set stands in for that live outside icons.c. Every binary
+# that links a themed set needs them: a row's {themed, shared} pair names the
+# shared bitmap by symbol, so the set is not self-contained.
+THEMED_ICON_DEPS = $(ROOT)/src/gui/pet/peticon.c \
+                   $(ROOT)/src/gui/streaming/soundcloud_icon.c $(ROOT)/src/gui/streaming/jellyfin_icon.c
+
 UI_SRC = $(ROOT)/tests/ui/test_main_menu.c $(ROOT)/src/gui/shell/main_menu.c \
          $(ROOT)/src/gui/library/music.c $(ROOT)/src/gui/shell/popover.c \
          $(ROOT)/src/gui/shell/gridpage.c $(ROOT)/src/gui/pet/peticon.c \
          $(ROOT)/src/gui/streaming/soundcloud_icon.c \
          $(ROOT)/src/gui/streaming/jellyfin_icon.c \
          $(ROOT)/src/gui/settings/appearance.c \
+         $(ROOT)/src/gui/library/stats.c \
          $(ROOT)/src/gui/settings/bootpicpage.c \
          $(ROOT)/src/gui/shell/corners.c $(ROOT)/src/gui/shell/settingsrow.c \
          $(ROOT)/src/gui/shell/theme.c \
-         $(ROOT)/src/gui/shell/icons.c $(ROOT)/src/gui/shell/main_menu_icons.c \
+         $(ROOT)/src/gui/shell/icons.c $(THEMED_ICONS_SRC) $(ROOT)/src/gui/shell/main_menu_icons.c $(THEMED_ICON_DEPS) \
          $(ROOT)/src/gui/shell/gestures.c \
          $(ROOT)/src/system/addons/addons.c \
          $(ROOT)/src/gui/board_profile.c \
@@ -994,7 +1008,7 @@ $(BUILD)/test_btreceiversession: test_btreceiversession.c $(ROOT)/src/gui/blueto
 		$(UI_LVGL_OBJ) $(LDFLAGS) $(LDLIBS)
 
 UI_OBJ = $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(UI_SRC)) \
-         $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(UI_LVGL_SRC))
+         $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(UI_LVGL_SRC)) $(BUILD)/sqlite3_impl.o
 UI_CPPFLAGS = $(CPPFLAGS) -I$(ROOT)/lvgl -DLV_CONF_PATH='"$(abspath ui/lv_conf.h)"'
 UI_CFLAGS = $(CFLAGS) -MMD -MP
 
@@ -1004,7 +1018,7 @@ UI_CFLAGS = $(CFLAGS) -MMD -MP
 WIFIPAGE_SRC = $(ROOT)/tests/ui/test_wifi_pages.c $(ROOT)/src/gui/wireless/wifisettings.c \
             $(ROOT)/src/gui/shell/settingsrow.c $(ROOT)/src/gui/shell/keyboard.c \
             $(ROOT)/src/gui/shell/popover.c $(ROOT)/src/gui/shell/spinner.c \
-            $(ROOT)/src/gui/shell/theme.c $(ROOT)/src/gui/shell/icons.c \
+            $(ROOT)/src/gui/shell/theme.c $(ROOT)/src/gui/shell/icons.c $(THEMED_ICONS_SRC) $(THEMED_ICON_DEPS) \
             $(ROOT)/src/gui/board_profile.c $(ROOT)/src/system/input/kblayout.c \
             $(ROOT)/src/system/core/config.c $(ROOT)/src/system/core/lang.c
 WIFIPAGE_OBJ = $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(WIFIPAGE_SRC)) \
@@ -1018,7 +1032,7 @@ TIDALPAGE_SRC = $(ROOT)/tests/ui/test_tidal_pages.c $(ROOT)/src/gui/streaming/ti
             $(ROOT)/src/system/streaming/tidalsync.c $(ROOT)/src/system/streaming/listcache.c \
             $(ROOT)/src/gui/shell/settingsrow.c $(ROOT)/src/gui/shell/keyboard.c \
             $(ROOT)/src/gui/shell/popover.c $(ROOT)/src/gui/shell/spinner.c \
-            $(ROOT)/src/gui/shell/theme.c $(ROOT)/src/gui/shell/icons.c \
+            $(ROOT)/src/gui/shell/theme.c $(ROOT)/src/gui/shell/icons.c $(THEMED_ICONS_SRC) $(THEMED_ICON_DEPS) \
             $(ROOT)/src/gui/board_profile.c $(ROOT)/src/system/input/kblayout.c \
             $(ROOT)/src/system/core/config.c $(ROOT)/src/system/core/lang.c
 TIDALPAGE_OBJ = $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(TIDALPAGE_SRC)) \
@@ -1026,8 +1040,10 @@ TIDALPAGE_OBJ = $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(TIDALPAGE_SRC)) \
 
 SAVER_SRC = $(ROOT)/tests/ui/test_screensaver.c $(ROOT)/src/gui/settings/screensaver.c $(ROOT)/src/system/audio/visualizer.c \
             $(ROOT)/src/gui/shell/scrolltext.c $(ROOT)/src/gui/shell/settingsrow.c \
-            $(ROOT)/src/gui/shell/theme.c $(ROOT)/src/gui/shell/icons.c \
+            $(ROOT)/src/gui/shell/theme.c $(ROOT)/src/gui/shell/icons.c $(THEMED_ICONS_SRC) $(THEMED_ICON_DEPS) \
             $(ROOT)/src/gui/board_profile.c \
+            $(ROOT)/src/gui/pet/peticon.c $(ROOT)/src/gui/streaming/soundcloud_icon.c \
+            $(ROOT)/src/gui/streaming/jellyfin_icon.c \
             $(ROOT)/src/system/core/config.c $(ROOT)/src/system/core/lang.c
 SAVER_OBJ = $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(SAVER_SRC)) \
             $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(UI_LVGL_SRC))
@@ -1053,7 +1069,7 @@ TOOLS_SRC = $(ROOT)/tests/ui/test_tools_pages.c \
             $(ROOT)/src/system/addons/addons.c \
             $(ROOT)/src/gui/shell/settingsrow.c $(ROOT)/src/gui/shell/keyboard.c \
             $(ROOT)/src/gui/shell/popover.c $(ROOT)/src/system/input/kblayout.c \
-            $(ROOT)/src/gui/shell/theme.c $(ROOT)/src/gui/shell/icons.c \
+            $(ROOT)/src/gui/shell/theme.c $(ROOT)/src/gui/shell/icons.c $(THEMED_ICONS_SRC) $(THEMED_ICON_DEPS) \
             $(ROOT)/src/gui/board_profile.c \
             $(ROOT)/src/system/core/config.c $(ROOT)/src/system/core/lang.c
 TOOLS_OBJ = $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(TOOLS_SRC)) \
@@ -1075,7 +1091,7 @@ LYRICSEARCH_SRC = $(ROOT)/tests/ui/test_lyricsearch.c \
                   $(ROOT)/src/gui/nowplaying/lyricsearch.c \
                   $(ROOT)/src/gui/shell/settingsrow.c \
                   $(ROOT)/src/gui/shell/theme.c \
-                  $(ROOT)/src/gui/shell/icons.c \
+                  $(ROOT)/src/gui/shell/icons.c $(THEMED_ICONS_SRC) $(THEMED_ICON_DEPS) \
                   $(ROOT)/src/gui/board_profile.c \
                   $(ROOT)/src/system/library/lrclib.c \
                   $(ROOT)/src/system/core/json.c \
@@ -1090,7 +1106,7 @@ LYRICSEARCH_OBJ = $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(LYRICSEARCH_SRC)) \
 GAMES_SRC = $(ROOT)/tests/ui/test_games.c \
             $(ROOT)/src/gui/games/games.c $(ROOT)/src/gui/games/snake.c \
             $(ROOT)/src/gui/games/game2048.c $(ROOT)/src/gui/games/dino.c \
-            $(ROOT)/src/gui/shell/theme.c $(ROOT)/src/gui/shell/icons.c \
+            $(ROOT)/src/gui/shell/theme.c $(ROOT)/src/gui/shell/icons.c $(THEMED_ICONS_SRC) $(THEMED_ICON_DEPS) \
             $(ROOT)/src/gui/board_profile.c \
             $(ROOT)/src/system/core/config.c $(ROOT)/src/system/core/lang.c
 GAMES_OBJ = $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(GAMES_SRC)) \
@@ -1102,7 +1118,7 @@ GAMES_OBJ = $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(GAMES_SRC)) \
 PEQPAGE_SRC = $(ROOT)/tests/ui/test_peq_profiles.c $(ROOT)/src/gui/audio/peqpage.c \
               $(ROOT)/src/system/audio/eq.c $(ROOT)/src/system/addons/addons.c \
               $(ROOT)/src/gui/shell/settingsrow.c \
-              $(ROOT)/src/gui/shell/theme.c $(ROOT)/src/gui/shell/icons.c \
+              $(ROOT)/src/gui/shell/theme.c $(ROOT)/src/gui/shell/icons.c $(THEMED_ICONS_SRC) $(THEMED_ICON_DEPS) \
               $(ROOT)/src/gui/board_profile.c $(ROOT)/src/system/core/config.c \
               $(ROOT)/src/system/core/lang.c
 PEQPAGE_OBJ = $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(PEQPAGE_SRC)) \
@@ -1118,8 +1134,8 @@ PEQPAGE_OBJ = $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(PEQPAGE_SRC)) \
 # list on the V1 panel.
 ALBUMGRID_UI_SRC = $(ROOT)/tests/ui/test_albumgrid_ui.c $(ROOT)/src/gui/library/medialist.c \
                    $(ROOT)/src/gui/library/albumgrid.c $(ROOT)/src/gui/shell/settingsrow.c \
-                   $(ROOT)/src/gui/shell/theme.c $(ROOT)/src/gui/board_profile.c \
-                   $(ROOT)/src/system/core/config.c
+                   $(ROOT)/src/gui/shell/theme.c \
+                   $(ROOT)/src/gui/board_profile.c $(ROOT)/src/system/core/config.c
 ALBUMGRID_UI_OBJ = $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(ALBUMGRID_UI_SRC)) \
                    $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(UI_LVGL_SRC))
 
@@ -1127,7 +1143,12 @@ ALBUMGRID_UI_OBJ = $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(ALBUMGRID_UI_SRC)) \
 albumgrid-ui: $(BUILD)/test_albumgrid_ui
 	$(BUILD)/test_albumgrid_ui
 
+# popover_item_t grew a `verbatim` field; most call sites still write the four
+# fields they care about and let the rest zero out. That is the intended style
+# here, so the warning is off for the pages that build popover menus.
 $(BUILD)/ui/src/gui/library/medialist.o: UI_CFLAGS += -Wno-missing-field-initializers
+$(BUILD)/ui/src/gui/library/music.o: UI_CFLAGS += -Wno-missing-field-initializers
+$(BUILD)/ui/src/gui/shell/popover.o: UI_CFLAGS += -Wno-missing-field-initializers
 
 $(BUILD)/test_albumgrid_ui: $(ALBUMGRID_UI_OBJ)
 	$(CC) -o $@ $^ $(LDFLAGS) $(LDLIBS)
@@ -1200,7 +1221,7 @@ $(BUILD)/test_waveform_overlay: $(WAVEOVERLAY_OBJ)
 
 # The four hi-res artwork badge designs, including the embedded official logo.
 HIRESBADGE_UI_SRC = $(ROOT)/tests/ui/test_hiresbadge.c $(ROOT)/src/gui/nowplaying/hiresbadgeview.c \
-                    $(ROOT)/src/gui/shell/icons.c
+                    $(ROOT)/src/gui/shell/icons.c $(THEMED_ICONS_SRC) $(THEMED_ICON_DEPS)
 HIRESBADGE_UI_OBJ = $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(HIRESBADGE_UI_SRC)) \
                     $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(UI_LVGL_SRC))
 
@@ -1215,7 +1236,7 @@ $(BUILD)/test_hiresbadge_ui: $(HIRESBADGE_UI_OBJ)
 # real disc drawn on a stand-in for the sleeve under every palette and accent.
 # The player around it is not built; see src/gui/nowplaying/playbutton.h.
 PLAYBUTTON_SRC = $(ROOT)/tests/ui/test_playbutton.c $(ROOT)/src/gui/nowplaying/playbutton.c \
-                 $(ROOT)/src/gui/shell/theme.c $(ROOT)/src/gui/shell/icons.c \
+                 $(ROOT)/src/gui/shell/theme.c $(ROOT)/src/gui/shell/icons.c $(THEMED_ICONS_SRC) $(THEMED_ICON_DEPS) \
                  $(ROOT)/src/gui/board_profile.c $(ROOT)/src/system/core/config.c \
                  $(ROOT)/src/system/core/lang.c
 PLAYBUTTON_OBJ = $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(PLAYBUTTON_SRC)) \
@@ -1225,7 +1246,7 @@ PLAYBUTTON_OBJ = $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(PLAYBUTTON_SRC)) \
 # and midline of ordinary toggle/navigation rows; NOS has its own glyph.
 MUSICROWS_SRC = $(ROOT)/tests/ui/test_musicsettings_rows.c \
                 $(ROOT)/src/gui/shell/settingsrow.c $(ROOT)/src/gui/shell/theme.c \
-                $(ROOT)/src/gui/shell/icons.c $(ROOT)/src/gui/board_profile.c \
+                $(ROOT)/src/gui/shell/icons.c $(THEMED_ICONS_SRC) $(ROOT)/src/gui/board_profile.c $(THEMED_ICON_DEPS) \
                 $(ROOT)/src/system/core/config.c $(ROOT)/src/system/core/lang.c
 MUSICROWS_OBJ = $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(MUSICROWS_SRC)) \
                 $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(UI_LVGL_SRC))
@@ -1241,7 +1262,7 @@ $(BUILD)/test_musicsettings_rows: $(MUSICROWS_OBJ)
 BATTERYPROFILE_UI_SRC = $(ROOT)/tests/ui/test_batteryprofile.c \
                        $(ROOT)/src/gui/settings/batteryprofilepage.c $(ROOT)/src/system/device/batteryprofile.c \
                        $(ROOT)/src/gui/shell/settingsrow.c $(ROOT)/src/gui/shell/theme.c \
-                       $(ROOT)/src/gui/shell/icons.c $(ROOT)/src/gui/board_profile.c \
+                       $(ROOT)/src/gui/shell/icons.c $(THEMED_ICONS_SRC) $(ROOT)/src/gui/board_profile.c $(THEMED_ICON_DEPS) \
                        $(ROOT)/src/system/core/config.c $(ROOT)/src/system/core/lang.c
 BATTERYPROFILE_UI_OBJ = $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(BATTERYPROFILE_UI_SRC))
 .PHONY: batteryprofile-ui
@@ -1258,7 +1279,7 @@ $(BUILD)/test_batteryprofile_ui: $(BATTERYPROFILE_UI_OBJ) $(UI_LVGL_OBJ)
 # The label has to hold one width, and one line, over every reading.
 VOLUMEOVERLAY_SRC = $(ROOT)/tests/ui/test_volume_overlay.c \
                     $(ROOT)/src/gui/shell/volume_overlay.c $(ROOT)/src/gui/shell/volumereadout.c \
-                    $(ROOT)/src/gui/shell/theme.c $(ROOT)/src/gui/shell/icons.c \
+                    $(ROOT)/src/gui/shell/theme.c $(ROOT)/src/gui/shell/icons.c $(THEMED_ICONS_SRC) $(THEMED_ICON_DEPS) \
                     $(ROOT)/src/gui/board_profile.c $(ROOT)/src/system/core/config.c
 VOLUMEOVERLAY_OBJ = $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(VOLUMEOVERLAY_SRC)) \
                     $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(UI_LVGL_SRC))
@@ -1280,7 +1301,7 @@ STOCKKEYS_UI_SRC = $(ROOT)/tests/ui/test_stockkeys_ui.c \
                    $(ROOT)/src/system/core/utils.c \
                    $(ROOT)/src/gui/shell/settingsrow.c \
                    $(ROOT)/src/gui/shell/theme.c \
-                   $(ROOT)/src/gui/shell/icons.c \
+                   $(ROOT)/src/gui/shell/icons.c $(THEMED_ICONS_SRC) $(THEMED_ICON_DEPS) \
                    $(ROOT)/src/gui/board_profile.c \
                    $(ROOT)/src/system/core/config.c \
                    $(ROOT)/src/system/core/lang.c
@@ -1373,7 +1394,7 @@ $(BUILD)/test_wifi_pages: $(WIFIPAGE_OBJ)
 	$(CC) -o $@ $^ $(LDFLAGS) $(LDLIBS)
 
 WIFITRANSFER_UI_SRC = $(ROOT)/tests/ui/test_wifitransfer.c $(ROOT)/src/gui/shell/settingsrow.c \
-                      $(ROOT)/src/gui/shell/theme.c $(ROOT)/src/gui/shell/icons.c \
+                      $(ROOT)/src/gui/shell/theme.c $(ROOT)/src/gui/shell/icons.c $(THEMED_ICONS_SRC) $(THEMED_ICON_DEPS) \
                       $(ROOT)/src/gui/board_profile.c $(ROOT)/src/system/core/config.c $(ROOT)/src/system/core/lang.c
 WIFITRANSFER_UI_OBJ = $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(WIFITRANSFER_UI_SRC)) $(UI_LVGL_OBJ)
 .PHONY: wifitransfer-ui
@@ -1618,7 +1639,7 @@ SOUNDCLOUDPAGE_SRC = $(ROOT)/tests/ui/test_soundcloud_pages.c \
                      $(ROOT)/src/gui/shell/popover.c \
                      $(ROOT)/src/gui/shell/spinner.c \
                      $(ROOT)/src/gui/shell/theme.c \
-                     $(ROOT)/src/gui/shell/icons.c \
+                     $(ROOT)/src/gui/shell/icons.c $(THEMED_ICONS_SRC) \
                      $(ROOT)/src/gui/board_profile.c \
                      $(ROOT)/src/system/input/kblayout.c \
                      $(ROOT)/src/system/core/config.c \
@@ -1648,7 +1669,7 @@ SUBSONICPAGE_SRC = $(ROOT)/tests/ui/test_subsonic_pages.c \
                      $(ROOT)/src/gui/shell/popover.c \
                      $(ROOT)/src/gui/shell/spinner.c \
                      $(ROOT)/src/gui/shell/theme.c \
-                     $(ROOT)/src/gui/shell/icons.c \
+                     $(ROOT)/src/gui/shell/icons.c $(THEMED_ICONS_SRC) \
                      $(ROOT)/src/gui/board_profile.c \
                      $(ROOT)/src/system/input/kblayout.c \
                      $(ROOT)/src/system/core/config.c \
@@ -1677,7 +1698,7 @@ RADIOPAGE_SRC = $(ROOT)/tests/ui/test_radio_pages.c \
                      $(ROOT)/src/gui/shell/popover.c \
                      $(ROOT)/src/gui/shell/spinner.c \
                      $(ROOT)/src/gui/shell/theme.c \
-                     $(ROOT)/src/gui/shell/icons.c \
+                     $(ROOT)/src/gui/shell/icons.c $(THEMED_ICONS_SRC) \
                      $(ROOT)/src/gui/board_profile.c \
                      $(ROOT)/src/system/input/kblayout.c \
                      $(ROOT)/src/system/core/config.c \
@@ -1709,7 +1730,7 @@ QOBUZPAGE_SRC = $(ROOT)/tests/ui/test_qobuz_pages.c \
                      $(ROOT)/src/gui/shell/popover.c \
                      $(ROOT)/src/gui/shell/spinner.c \
                      $(ROOT)/src/gui/shell/theme.c \
-                     $(ROOT)/src/gui/shell/icons.c \
+                     $(ROOT)/src/gui/shell/icons.c $(THEMED_ICONS_SRC) \
                      $(ROOT)/src/gui/board_profile.c \
                      $(ROOT)/src/system/input/kblayout.c \
                      $(ROOT)/src/system/core/config.c \
@@ -1762,7 +1783,7 @@ JELLYFINPAGE_SRC = $(ROOT)/tests/ui/test_jellyfin_pages.c \
                    $(ROOT)/src/gui/shell/popover.c \
                    $(ROOT)/src/gui/shell/spinner.c \
                    $(ROOT)/src/gui/shell/theme.c \
-                   $(ROOT)/src/gui/shell/icons.c \
+                   $(ROOT)/src/gui/shell/icons.c $(THEMED_ICONS_SRC) \
                    $(ROOT)/src/gui/board_profile.c \
                    $(ROOT)/src/system/input/kblayout.c \
                    $(ROOT)/src/system/core/config.c \
@@ -1793,7 +1814,7 @@ $(BUILD)/test_networkmusic: $(NETWORKMUSIC_SRC) $(ROOT)/src/system/streaming/net
 	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ $(NETWORKMUSIC_SRC) $(LDFLAGS) $(LDLIBS)
 
 NETWORKMUSIC_UI_COMMON = $(ROOT)/src/gui/shell/settingsrow.c $(ROOT)/src/gui/shell/keyboard.c \
-                       $(ROOT)/src/gui/shell/theme.c $(ROOT)/src/gui/shell/icons.c $(ROOT)/src/gui/board_profile.c \
+                       $(ROOT)/src/gui/shell/theme.c $(ROOT)/src/gui/shell/icons.c $(THEMED_ICONS_SRC) $(ROOT)/src/gui/board_profile.c $(THEMED_ICON_DEPS) \
                        $(ROOT)/src/system/input/kblayout.c $(ROOT)/src/system/core/config.c $(ROOT)/src/system/core/lang.c
 NETWORKMUSIC_UI_SRC = $(ROOT)/tests/ui/test_networkmusic.c $(ROOT)/src/system/net/networkshare.c $(NETWORKMUSIC_UI_COMMON)
 NETWORKMUSIC_UI_OBJ = $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(NETWORKMUSIC_UI_SRC)) $(UI_LVGL_OBJ)
@@ -1829,9 +1850,12 @@ $(BUILD)/test_streaming_preview: $(LAN_PREVIEW_OBJ)
 
 # The lyrics size button, its popover and label reflow, without playback or networking.
 LYRICS_UI_SRC = $(ROOT)/tests/ui/test_lyrics_size.c $(ROOT)/src/system/library/lyrics.c $(ROOT)/src/gui/shell/popover.c \
-                $(ROOT)/src/gui/shell/icons.c $(ROOT)/src/gui/board_profile.c \
+                $(ROOT)/src/gui/shell/icons.c $(THEMED_ICONS_SRC) $(ROOT)/src/gui/board_profile.c $(THEMED_ICON_DEPS) \
                 $(ROOT)/src/system/core/config.c $(ROOT)/src/system/core/lang.c
 LYRICS_UI_OBJ = $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(LYRICS_UI_SRC)) $(UI_LVGL_OBJ)
+# player.c's menus and glyphs: the popover and the themed sets resolve even
+# though the test never opens them (the linker drops what it does not reach).
+LYRICS_UI_EXTRA = $(ROOT)/src/gui/shell/popover.c $(THEMED_ICONS_SRC) $(THEMED_ICON_DEPS)
 
 .PHONY: lyrics-size-ui
 ui: lyrics-size-ui
@@ -1842,7 +1866,7 @@ lyrics-size-ui: $(BUILD)/test_lyrics_size
 # in production too (the test discards its unrelated code at link time).
 $(BUILD)/ui/tests/ui/test_lyrics_size.o: UI_CFLAGS := $(filter-out -Werror,$(UI_CFLAGS))
 
-$(BUILD)/test_lyrics_size: $(LYRICS_UI_OBJ)
+$(BUILD)/test_lyrics_size: $(LYRICS_UI_OBJ) $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(LYRICS_UI_EXTRA))
 	$(CC) -o $@ $^ $(LDFLAGS) $(LDLIBS)
 
 -include $(LYRICS_UI_OBJ:.o=.d)
@@ -1855,6 +1879,7 @@ SLEEVEHOLD_SRC = $(ROOT)/tests/ui/test_sleeve_hold.c $(ROOT)/src/system/playback
                  $(ROOT)/src/gui/board_profile.c \
                  $(ROOT)/src/system/core/config.c $(ROOT)/src/system/core/lang.c
 SLEEVEHOLD_OBJ = $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(SLEEVEHOLD_SRC)) $(UI_LVGL_OBJ)
+SLEEVEHOLD_EXTRA = $(ROOT)/src/gui/shell/popover.c $(THEMED_ICONS_SRC) $(THEMED_ICON_DEPS)
 
 .PHONY: sleeve-hold-ui
 ui: sleeve-hold-ui
@@ -1865,7 +1890,7 @@ sleeve-hold-ui: $(BUILD)/test_sleeve_hold
 # without warnings-as-errors, and unrelated code is dropped at link time.
 $(BUILD)/ui/tests/ui/test_sleeve_hold.o: UI_CFLAGS := $(filter-out -Werror,$(UI_CFLAGS))
 
-$(BUILD)/test_sleeve_hold: $(SLEEVEHOLD_OBJ)
+$(BUILD)/test_sleeve_hold: $(SLEEVEHOLD_OBJ) $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(SLEEVEHOLD_EXTRA))
 	$(CC) -o $@ $^ $(LDFLAGS) $(LDLIBS)
 
 -include $(SLEEVEHOLD_OBJ:.o=.d)

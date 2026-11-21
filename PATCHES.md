@@ -5179,3 +5179,113 @@ press is what it was waiting for.
 `tests/ui/test_sleeve_hold.c` now attaches the real `player_sheet_attach_drag()`
 alongside the hold, so the two share a press the way they do on the device, and
 every hold it fires asserts that the sheet is still down afterwards.
+
+## Four more palettes, each with an icon set of its own
+
+The Themes page had five entries. The four added here -- Rosé Pine Moon,
+Gruvbox, Dracula and Catppuccin Mocha -- are not recolours of the same
+drawings: each is a port of a published scheme, and each carries its own glyph
+set, so the artwork changes with the palette instead of only the rectangles
+around it.
+
+They are selected the same way the earlier themes are, saved in
+`device_config.ini` as `theme = rose-pine`, `gruvbox`, `dracula` or
+`catppuccin-mocha`, and they honour the same Custom accent row: pick one of the
+fixed accents and that hue drives the accent role, or leave it on the theme's
+own and the port's own accent stands.
+
+### The palettes
+
+Sampled from each scheme's published values, then mapped onto the roles the
+interface actually has -- background, card, raised card, text, muted text,
+accent, and the function colours the icons and status bar read.
+
+| Theme | Background | Card | Accent | Notes |
+|---|---|---|---|---|
+| Rosé Pine Moon | `#232136` | `#2a273f` | iris `#c4a7e7` | iris draws the player controls; pine/foam/rose/gold/love fill the rest |
+| Gruvbox | `#282828` | `#3c3836` | `#d79921` | the dark scheme's medium-contrast steps, amber and green |
+| Dracula | `#282A36` | `#44475A` | `#BD93F9` | the familiar purple and cyan |
+| Catppuccin Mocha | `#1E1E2E` | `#313244` | `#CBA6F7` | pastel lavender and mint on a deep blue-grey |
+
+Rosé Pine keeps iris for the player's own controls while the status bar's
+"what is playing" glyph reads pine (`#3e8fb0`) and the volume glyph beside it
+foam (`#9ccfd8`) -- the two answer different questions and the scheme gives
+both, as the section below spells out. Dracula's play glyph is the scheme's own
+bat-wing triangle rather than the shared play symbol, which is why the set is
+not just a recolour.
+
+### One icon set per theme, and the shared set underneath
+
+Adding four complete sets to the existing five would have meant four more
+branches at every call site that draws a glyph. Instead `theme_icons.c/.h`
+inserts one lookup between the pages and `icons.h`:
+
+- every page keeps naming `&icon_play`, `&icon_wifi_high` and friends;
+- `theme_icon()` answers with the active set's drawing of that symbol, or with
+  the shared bitmap when the set has not drawn it -- a themed set does not have
+  to be complete to be usable;
+- the themed drawing has the same shape and colour space (white ARGB8888 on
+  the same grid), so the caller's size, scale and `image_recolor` style all
+  still apply and nothing moves on screen.
+
+A themed set draws each glyph at the size its call site asks for -- 24 px list
+rows, 22 px home tiles, 30 px settings rows, 128 px service marks -- while the
+shared bitmap it stands in for may be cut at another size (Radio's shared mark
+is 128 px; a row wants 24). A caller that scales by the glyph's own width would
+therefore enlarge the small drawing or shrink the large one. `theme_icon_at()`
+answers with the drawing cut nearest the caller's target, and
+`theme_icon_scale_to()` returns exactly `LV_SCALE_NONE` for a drawing that is
+already the right size, so no themed glyph is resampled in either direction.
+
+`tools/themed_icons.py` holds the table: 140 symbols, each with the size its
+set draws and the shared symbol it stands in for. `tools/theme_icon_sets.py`
+regenerates `icons_rose.c`, `icons_gruvbox.c`, `icons_dracula.c` and
+`icons_catppuccin.c` from the SVGs in `assets/icons/<theme>/` (114 drawings
+each); `--check` verifies the committed sources still match the drawings.
+
+`check_aliases()` reports aliases whose drawing is cut at a size the shared
+bitmap is not -- 18 of them, all deliberate: the home tiles name a 22 px
+drawing of a symbol the shared set cuts at 32, the service marks name the
+other way round, and the pages that draw them place them by their own size.
+
+### The status bar follows the palette
+
+The tint work touched `topbar.c` in two places and both read the palette rather
+than the new themes by name:
+
+- `refresh_status_icon_color()` -- a monochrome theme stays green (unchanged);
+  a themed one paints its function glyphs with that scheme's role colour.
+  Rosé Pine `#3e8fb0`, Gruvbox `#98971a`, Dracula `#50fa7b`, Catppuccin
+  `#a6e3a1`. Sampled off the real frames: the bars read (41,69,90), (132,162,148),
+  (140,231,255) and (99,125,173).
+- `volume_icon_ink()` -- the volume glyph's own ink, one step softer than the
+  rest: `#9ccfd8`, `#83a598`, `#8be9fd`, `#89b4fa`.
+
+`refresh_play_icon()` asks for the set tint before it reaches the Bluetooth
+blue branch, so a themed build keeps its palette while a monochrome one keeps
+the behaviour it had.
+
+### Tests and previews
+
+`tests/ui/test_main_menu.c` grows a themed branch in `check_native_icon()`: a
+theme with its own set answers with that set's drawing of the tile, cut at the
+size the labelled layout uses, and the shared native-size table is not
+consulted at all. `theme_icon_at()` is what the other tests exercise; the four
+new palettes are checked for their roles and their saved names in `theme.c`.
+The suite runs 34 UI tests green with the four themes in the rotation.
+
+Several suites already swept `THEME_KIND_COUNT`, so they picked the new themes
+up the moment the enum grew -- but their console lines still said "5 themes",
+and the tests README said "all five themes" in four places. Those now print and
+say the count they actually sweep (nine), and `test_stockkeys_ui`, which really
+does loop `tk < 5`, was left alone.
+
+`screenshots/{rose-pine,gruvbox,dracula,catppuccin-mocha}/` carry the same
+eight scenes each, captured from the web emulator at 240×320, and `README.md`
+gains a `<details>` block per theme in the Previews section. Now Playing is a
+real playback in every capture -- the album tracklist opened the player and the
+seek bar advanced -- which is worth saying because a seeded
+`PLAYBACK_STATE` row is not enough: the restore path checks the saved path
+with `access()` before it plays anything, and a path that only resolves from
+the emulator's working directory fails there even though the library indexed it.
+The reliable route is the one a user takes: Music, the album, the track.

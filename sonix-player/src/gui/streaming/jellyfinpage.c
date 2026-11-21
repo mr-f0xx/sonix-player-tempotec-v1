@@ -25,6 +25,7 @@
 #include "src/gui/shell/spinner.h"
 #include "src/gui/shell/switcher.h"
 #include "src/gui/shell/theme.h"
+#include "src/gui/shell/theme_icons.h"
 #include "src/gui/shell/toast.h"
 #include "src/system/audio/audio.h"
 #include "src/system/core/lang.h"
@@ -1361,7 +1362,7 @@ static lv_obj_t *make_list_row(const char *title_txt, const char *sub_txt, const
 
 	if (with_chevron) {
 		lv_obj_t *chev = lv_image_create(row);
-		lv_image_set_src(chev, &icon_chevron_right);
+		lv_image_set_src(chev, theme_icon(&icon_chevron_right));
 		lv_obj_set_style_image_recolor(chev, theme()->text_secondary, 0);
 		lv_obj_set_style_image_recolor_opa(chev, LV_OPA_COVER, 0);
 	}
@@ -1414,7 +1415,7 @@ static void update_list_corner_button(void) {
 		lv_obj_set_hidden(list_corner_btn, false);
 		settingsrow_title_corner_slots(list_title, page_cfg, 1);
 	} else if (has_tracks) {
-		lv_image_set_src(list_corner_icon, &icon_download);
+		lv_image_set_src(list_corner_icon, theme_icon(&icon_download));
 		settingsrow_scale_corner_icon(list_corner_icon, page_cfg);
 		lv_obj_set_hidden(list_corner_btn, false);
 		settingsrow_title_corner_slots(list_title, page_cfg, 1);
@@ -1821,7 +1822,7 @@ static lv_obj_t *add_stacked_value_row(lv_obj_t *parent, const char *title_key, 
 	lv_obj_add_style(val, &theme_style_text_dim, 0);
 
 	lv_obj_t *chev = lv_image_create(row);
-	lv_image_set_src(chev, &icon_chevron_right);
+	lv_image_set_src(chev, theme_icon(&icon_chevron_right));
 	lv_obj_set_style_image_recolor(chev, theme()->text_secondary, 0);
 	lv_obj_set_style_image_recolor_opa(chev, LV_OPA_COVER, 0);
 
@@ -2481,7 +2482,7 @@ static void build_list_screen(gui_config_t *cfg) {
 	lv_obj_add_event_cb(list_corner_btn, list_corner_action_cb, LV_EVENT_CLICKED, NULL);
 
 	list_corner_icon = lv_image_create(list_corner_btn);
-	lv_image_set_src(list_corner_icon, &icon_download);
+	lv_image_set_src(list_corner_icon, theme_icon(&icon_download));
 	settingsrow_scale_corner_icon(list_corner_icon, cfg);
 	lv_obj_add_style(list_corner_icon, &theme_style_icon, 0);
 	lv_obj_center(list_corner_icon);
@@ -2636,7 +2637,7 @@ void jellyfinpage_init(gui_config_t *cfg) {
 	lv_obj_add_event_cb(search_btn, open_search_cb, LV_EVENT_CLICKED, NULL);
 
 	lv_obj_t *search_ic = lv_image_create(search_btn);
-	lv_image_set_src(search_ic, &icon_search);
+	lv_image_set_src(search_ic, theme_icon(&icon_search));
 	settingsrow_scale_corner_icon(search_ic, cfg);
 	lv_obj_add_style(search_ic, &theme_style_icon, 0);
 	lv_obj_center(search_ic);

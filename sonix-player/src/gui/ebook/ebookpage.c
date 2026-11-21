@@ -19,6 +19,7 @@
 #include "src/gui/shell/settingsrow.h"
 #include "src/gui/shell/switcher.h"
 #include "src/gui/shell/theme.h"
+#include "src/gui/shell/theme_icons.h"
 #include "src/system/core/lang.h"
 #include "src/system/core/utils.h"
 
@@ -322,7 +323,7 @@ static lv_obj_t *corner_button(gui_config_t *cfg, int slot, const lv_image_dsc_t
 	lv_obj_set_style_pad_all(button, 0, 0);
 
 	lv_obj_t *icon = lv_image_create(button);
-	lv_image_set_src(icon, glyph);
+	lv_image_set_src(icon, theme_icon(glyph));
 	// A style and not a recolour: a style follows the theme by itself.
 	lv_obj_add_style(icon, &theme_style_icon, 0);
 	settingsrow_scale_corner_icon(icon, cfg);

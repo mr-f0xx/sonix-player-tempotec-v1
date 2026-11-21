@@ -14,6 +14,7 @@
 #include "src/gui/shell/settingsrow.h"
 #include "src/gui/shell/switcher.h"
 #include "src/gui/shell/theme.h"
+#include "src/gui/shell/theme_icons.h"
 #include "src/gui/shell/toast.h"
 #include "src/system/core/lang.h"
 #include "src/system/notes/notesstore.h"
@@ -192,7 +193,7 @@ static void set_editing(bool on) {
 		// Writing continues the note rather than starting at the top of it --
 		// and a tap into the text still moves the caret where it is wanted.
 		lv_textarea_set_cursor_pos(field, LV_TEXTAREA_CURSOR_LAST);
-		lv_image_set_src(edit_glyph, &icon_check);
+		lv_image_set_src(edit_glyph, theme_icon(&icon_check));
 		return;
 	}
 

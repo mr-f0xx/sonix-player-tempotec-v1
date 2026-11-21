@@ -28,6 +28,7 @@
 #include "src/gui/shell/settingsrow.h"
 #include "src/gui/shell/switcher.h"
 #include "src/gui/shell/theme.h"
+#include "src/gui/shell/theme_icons.h"
 #include "src/system/addons/addons.h"
 
 lv_obj_t *morepage_screen;
@@ -111,7 +112,8 @@ static void more_list_add_entry(const grid_entry_t *entry) {
 	const lv_image_dsc_t *icon = NULL;
 	theme_semantic_t tone;
 	if (more_tokyo_icon(entry->label, &icon, &tone)) {
-		settingsrow_add_icon(row, icon, tone);
+		// The drawing follows the theme; the row's tone is the table's.
+		settingsrow_add_icon(row, theme_icon(icon), tone);
 	}
 }
 

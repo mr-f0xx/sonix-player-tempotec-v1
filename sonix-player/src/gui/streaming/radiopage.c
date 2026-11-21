@@ -19,6 +19,7 @@
 #include "src/gui/shell/settingsrow.h"
 #include "src/gui/shell/switcher.h"
 #include "src/gui/shell/theme.h"
+#include "src/gui/shell/theme_icons.h"
 #include "src/gui/shell/toast.h"
 #include "src/gui/shell/keyboard.h"
 #include "src/gui/wireless/wifisettings.h"
@@ -1110,7 +1111,7 @@ static void build_list_page(gui_config_t *cfg) {
 		hide(row->menu_btn);
 
 		lv_obj_t *dots = lv_image_create(row->menu_btn);
-		lv_image_set_src(dots, &icon_ellipsis_vertical);
+		lv_image_set_src(dots, theme_icon(&icon_ellipsis_vertical));
 		lv_obj_add_style(dots, &theme_style_icon, 0);
 		lv_obj_set_style_image_recolor_opa(dots, LV_OPA_COVER, 0);
 		// Scale the dots icon to fit the compact button; on the regular layout
@@ -1119,7 +1120,7 @@ static void build_list_page(gui_config_t *cfg) {
 		lv_obj_center(dots);
 
 		row->chevron = lv_image_create(row->button);
-		lv_image_set_src(row->chevron, &icon_chevron_right);
+		lv_image_set_src(row->chevron, theme_icon(&icon_chevron_right));
 		lv_obj_add_style(row->chevron, &theme_style_icon, 0);
 		lv_obj_set_style_image_opa(row->chevron, LV_OPA_60, 0);
 		settingsrow_scale_corner_icon(row->chevron, cfg);
@@ -1154,7 +1155,7 @@ static void build_list_page(gui_config_t *cfg) {
 	lv_obj_set_hidden(sort_btn, true);
 
 	sort_icon = lv_image_create(sort_btn);
-	lv_image_set_src(sort_icon, &icon_sort_az);
+	lv_image_set_src(sort_icon, theme_icon(&icon_sort_az));
 	lv_obj_add_style(sort_icon, &theme_style_icon, 0);
 	settingsrow_scale_corner_icon(sort_icon, cfg);
 	lv_obj_center(sort_icon);
@@ -1185,7 +1186,7 @@ static lv_obj_t *corner_button(gui_config_t *cfg, int slot, const lv_image_dsc_t
 	lv_obj_set_style_pad_all(button, 0, 0);
 
 	lv_obj_t *icon = lv_image_create(button);
-	lv_image_set_src(icon, glyph);
+	lv_image_set_src(icon, theme_icon(glyph));
 	lv_obj_add_style(icon, &theme_style_icon, 0);
 	settingsrow_scale_corner_icon(icon, cfg);
 	lv_obj_center(icon);

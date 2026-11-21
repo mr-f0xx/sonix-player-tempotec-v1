@@ -10,6 +10,7 @@
 #include "src/gui/shell/settingsrow.h"
 #include "src/gui/shell/switcher.h"
 #include "src/gui/shell/theme.h"
+#include "src/gui/shell/theme_icons.h"
 #include "src/gui/shell/toast.h"
 #include "src/system/audio/audio.h"
 #include "src/system/core/lang.h"
@@ -94,7 +95,7 @@ static void open_login(void) {
 	lv_textarea_set_text(user_field, "");
 	lv_textarea_set_text(password_field, "");
 	lv_textarea_set_password_mode(password_field, true);
-	lv_image_set_src(password_eye_icon, &icon_eye);
+	lv_image_set_src(password_eye_icon, theme_icon(&icon_eye));
 	keyboard_refresh_password(password_field);
 	keyboard_reset(login_keyboard);
 	lv_obj_t *other = password_field;
@@ -265,7 +266,7 @@ static void build_login(gui_config_t *cfg) {
 
 	password_eye_icon = lv_image_create(eye);
 	lv_obj_add_style(password_eye_icon, &theme_style_icon, 0);
-	lv_image_set_src(password_eye_icon, &icon_eye);
+	lv_image_set_src(password_eye_icon, theme_icon(&icon_eye));
 	lv_obj_center(password_eye_icon);
 
 	lv_obj_t *note = lv_label_create(login_screen);

@@ -18,6 +18,7 @@
 #include "src/gui/shell/icons.h"
 #include "src/gui/shell/switcher.h"
 #include "src/gui/shell/theme.h"
+#include "src/gui/shell/theme_icons.h"
 #include "src/gui/shell/topbar.h"
 #include "src/gui/shell/volume_overlay.h"
 #include "src/system/core/config.h"
@@ -188,7 +189,7 @@ static lv_obj_t *glyph_button(lv_obj_t *parent, const lv_image_dsc_t *icon) {
 	lv_obj_set_style_pad_all(button, 0, 0);
 
 	lv_obj_t *image = lv_image_create(button);
-	lv_image_set_src(image, icon);
+	lv_image_set_src(image, theme_icon(icon));
 	lv_obj_add_style(image, &theme_style_icon, 0);
 	lv_obj_center(image);
 	if (bp_is_tempotec_v1()) {
@@ -525,7 +526,7 @@ void game_frame_set_header_button_icon(game_frame_t *g, int which, const lv_imag
 	}
 	lv_obj_t *image = lv_obj_get_child(g->header_button[which], 0);
 	if (image) {
-		lv_image_set_src(image, icon);
+		lv_image_set_src(image, theme_icon(icon));
 	}
 }
 
@@ -645,7 +646,7 @@ static void build_header(game_frame_t *g, gui_config_t *cfg) {
 	lv_obj_set_ext_click_area(g->back, 4);
 
 	lv_obj_t *chevron = lv_image_create(g->back);
-	lv_image_set_src(chevron, &icon_chevron_left);
+	lv_image_set_src(chevron, theme_icon(&icon_chevron_left));
 	lv_obj_add_style(chevron, &theme_style_icon, 0);
 	lv_obj_center(chevron);
 	lv_obj_add_event_cb(g->back, back_cb, LV_EVENT_CLICKED, NULL);

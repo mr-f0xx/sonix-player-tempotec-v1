@@ -15,6 +15,7 @@
 #include "src/system/streaming/podcast.h"
 #include "src/gui/shell/scrolltext.h"
 #include "src/gui/shell/theme.h"
+#include "src/gui/shell/theme_icons.h"
 #include "src/system/device/clock.h"
 #include "src/system/audio/visualizer.h"
 #include "src/system/core/config.h"
@@ -803,7 +804,8 @@ static void refresh_content(void) {
 	// The placeholder behind a missing cover says what kind of thing is
 	// playing: a note for a track, a radio for a stream.
 	if (cover_placeholder) {
-		lv_image_set_src(cover_placeholder, state.live ? &icon_radio_player : &icon_music_note);
+		lv_image_set_src(cover_placeholder,
+						 theme_icon_at(state.live ? &icon_radio_player : &icon_music_note, 128));
 	}
 
 	if (state.live) {
@@ -1502,7 +1504,9 @@ void screensaver_init(gui_config_t *cfg) {
 	// with the controls taken away rather than a different screen that has
 	// gone wrong.
 	cover_placeholder = lv_image_create(cover_box);
-	lv_image_set_src(cover_placeholder, &icon_music_note);
+	// A sleeve-sized mark: the set's largest drawing of the note, not its
+	// 32 px row copy.
+	lv_image_set_src(cover_placeholder, theme_icon_at(&icon_music_note, 128));
 	lv_obj_set_style_image_recolor_opa(cover_placeholder, LV_OPA_COVER, 0);
 	lv_obj_center(cover_placeholder);
 
@@ -1585,7 +1589,7 @@ void screensaver_init(gui_config_t *cfg) {
 	lv_obj_set_scrollable(chevron_btn, false);
 
 	chevron_icon = lv_image_create(chevron_btn);
-	lv_image_set_src(chevron_icon, &icon_chevron_up);
+	lv_image_set_src(chevron_icon, theme_icon(&icon_chevron_up));
 	lv_obj_set_style_image_recolor_opa(chevron_icon, LV_OPA_COVER, 0);
 	lv_obj_set_style_image_opa(chevron_icon, LV_OPA_70, 0);
 	lv_obj_center(chevron_icon);
@@ -1647,13 +1651,15 @@ void screensaver_init(gui_config_t *cfg) {
 	// spectrum area's height, recolored with the accent in screensaver_refresh_theme.
 	// Made last, after the LED grid, so the rail, bars and grid keep their
 	// places as the spectrum's first children.
-	idle_note = lv_image_create(spectrum);
-	lv_image_set_src(idle_note, &icon_music_note);
 	int note_side = spectrum_h / 2;
 	if (note_side < 48) {
 		note_side = 48;
 	}
-	lv_image_set_scale(idle_note, (uint32_t)(LV_SCALE_NONE * note_side / 128));
+	idle_note = lv_image_create(spectrum);
+	// The biggest drawing of the note the set has -- the sleeve mark, not the
+	// small row copy -- scaled to the field.
+	lv_image_set_src(idle_note, theme_icon_at(&icon_music_note, note_side));
+	lv_image_set_scale(idle_note, theme_icon_scale_to(lv_image_get_src(idle_note), note_side));
 	lv_obj_set_style_image_recolor_opa(idle_note, LV_OPA_COVER, 0);
 	lv_obj_center(idle_note);
 	lv_obj_set_clickable(idle_note, false);

@@ -4,6 +4,7 @@
 #include "src/gui/shell/icons.h"
 #include "src/gui/shell/spinner.h"
 #include "src/gui/shell/theme.h"
+#include "src/gui/shell/theme_icons.h"
 #include "src/system/core/lang.h"
 
 #include <string.h>
@@ -169,7 +170,7 @@ static void show(const lv_image_dsc_t *glyph, lv_color_t colour, const char *tex
 
 	const char *shown = text ? tr(text) : "";
 	if (glyph) {
-		lv_image_set_src(icon, glyph);
+		lv_image_set_src(icon, theme_icon(glyph));
 		lv_obj_set_style_image_recolor(icon, colour, 0);
 		lv_obj_set_hidden(icon, false);
 	} else {

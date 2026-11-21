@@ -23,6 +23,7 @@
 #include "src/gui/shell/spinner.h"
 #include "src/gui/shell/switcher.h"
 #include "src/gui/shell/theme.h"
+#include "src/gui/shell/theme_icons.h"
 #include "src/gui/shell/toast.h"
 #include "src/gui/shell/keyboard.h"
 #include "src/gui/wireless/wifisettings.h"
@@ -597,7 +598,7 @@ static void row_tick_put(int index, bool on) {
 		// The plain tick the file browser puts on a chosen row: the circled one
 		// this used to show was a 36 px ring around its own tick, and at 22 px
 		// the two ran into each other and read as a smudge.
-		lv_image_set_src(check, &icon_check);
+		lv_image_set_src(check, theme_icon(&icon_check));
 		lv_obj_add_style(check, &theme_style_icon, 0);
 		lv_obj_set_style_image_recolor(check, theme()->accent, 0);
 		lv_obj_set_style_image_recolor_opa(check, LV_OPA_COVER, 0);
@@ -1810,7 +1811,7 @@ static lv_obj_t *make_row(const char *name, const char *detail, const char *cove
 		lv_obj_add_event_cb(menu_btn, row_menu_cb, LV_EVENT_CLICKED, (void *)(intptr_t)index);
 
 		lv_obj_t *dots = lv_image_create(menu_btn);
-		lv_image_set_src(dots, &icon_ellipsis_vertical);
+		lv_image_set_src(dots, theme_icon(&icon_ellipsis_vertical));
 		lv_obj_add_style(dots, &theme_style_icon, 0);
 		lv_obj_set_style_image_recolor_opa(dots, LV_OPA_COVER, 0);
 		// 22 px of glyph in the 32 px target: the source is 36, and unscaled it
@@ -4564,7 +4565,7 @@ static lv_obj_t *corner_button_on(lv_obj_t *parent, gui_config_t *cfg, int slot,
 	lv_obj_set_style_pad_all(button, 0, 0);
 
 	lv_obj_t *icon = lv_image_create(button);
-	lv_image_set_src(icon, glyph);
+	lv_image_set_src(icon, theme_icon(glyph));
 	lv_obj_add_style(icon, &theme_style_icon, 0);
 	settingsrow_scale_corner_icon(icon, cfg);
 	lv_obj_center(icon);
@@ -4603,7 +4604,7 @@ static lv_obj_t *home_arrow_button(lv_obj_t *parent, bool down, bool dim, lv_eve
 	lv_obj_add_event_cb(button, cb, LV_EVENT_CLICKED, (void *)(intptr_t)row);
 
 	lv_obj_t *icon = lv_image_create(button);
-	lv_image_set_src(icon, &icon_chevron_up);
+	lv_image_set_src(icon, theme_icon(&icon_chevron_up));
 	lv_obj_add_style(icon, &theme_style_icon, 0);
 	if (down) {
 		lv_image_set_rotation(icon, 1800);

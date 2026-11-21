@@ -13,6 +13,7 @@
 #include "src/gui/shell/settingsrow.h"
 #include "src/gui/shell/switcher.h"
 #include "src/gui/shell/theme.h"
+#include "src/gui/shell/theme_icons.h"
 #include "src/system/audio/eq.h"
 #include "src/system/core/lang.h"
 #include "src/system/addons/addons.h"
@@ -706,7 +707,7 @@ static void build_entry_layer(gui_config_t *cfg) {
 	lv_obj_set_style_pad_all(cancel, 0, 0);
 	lv_obj_add_event_cb(cancel, entry_cancel_cb, LV_EVENT_CLICKED, NULL);
 	lv_obj_t *cancel_icon = lv_image_create(cancel);
-	lv_image_set_src(cancel_icon, &icon_close);
+	lv_image_set_src(cancel_icon, theme_icon(&icon_close));
 	lv_obj_add_style(cancel_icon, &theme_style_icon, 0);
 	settingsrow_scale_corner_icon(cancel_icon, cfg);
 	lv_obj_center(cancel_icon);
@@ -803,7 +804,7 @@ static lv_obj_t *corner_button(lv_obj_t *screen, gui_config_t *cfg, int slot, co
 	lv_obj_add_event_cb(button, cb, LV_EVENT_CLICKED, NULL);
 
 	lv_obj_t *icon = lv_image_create(button);
-	lv_image_set_src(icon, glyph);
+	lv_image_set_src(icon, theme_icon(glyph));
 	lv_obj_add_style(icon, &theme_style_icon, 0);
 	settingsrow_scale_corner_icon(icon, cfg);
 	lv_obj_center(icon);

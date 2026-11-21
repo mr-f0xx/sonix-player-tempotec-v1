@@ -22,6 +22,7 @@
 #include "src/gui/shell/settingsrow.h"
 #include "src/gui/shell/switcher.h"
 #include "src/gui/shell/theme.h"
+#include "src/gui/shell/theme_icons.h"
 #include "src/gui/shell/toast.h"
 #include "src/system/core/lang.h"
 #include "src/system/library/metadata.h"
@@ -353,7 +354,7 @@ static void paint_thumb(lv_obj_t *thumb, const cover_image_t *image) {
 		lv_obj_set_style_clip_corner(thumb, true, 0);
 		return;
 	}
-	lv_image_set_src(thumb, &icon_podcast_list);
+	lv_image_set_src(thumb, theme_icon(&icon_podcast_list));
 	lv_obj_add_style(thumb, &theme_style_icon, 0);
 	lv_obj_set_style_image_recolor_opa(thumb, LV_OPA_COVER, 0);
 	lv_obj_set_style_clip_corner(thumb, false, 0);
@@ -443,7 +444,7 @@ static lv_obj_t *make_row(lv_obj_t *parent, const cover_image_t *image, const ch
 					 (SAVED_ROW_HEIGHT - SAVED_THUMB) / 2 + SAVED_THUMB - SAVED_BADGE_INSET -
 							 SAVED_BADGE / 2 - SAVED_ROW_HEIGHT / 2);
 		lv_obj_t *badge_tick = lv_image_create(badge);
-		lv_image_set_src(badge_tick, &icon_check);
+		lv_image_set_src(badge_tick, theme_icon(&icon_check));
 		lv_obj_add_style(badge_tick, &theme_style_icon, 0);
 		lv_obj_set_style_image_recolor_opa(badge_tick, LV_OPA_COVER, 0);
 		lv_image_set_scale(badge_tick, (uint32_t)(LV_SCALE_NONE * bp_pick(14, 20) / 36));
@@ -465,7 +466,7 @@ static lv_obj_t *make_row(lv_obj_t *parent, const cover_image_t *image, const ch
 	if (chosen) {
 		lv_obj_t *tick = lv_image_create(row);
 		lv_obj_set_size(tick, SAVED_MARK_W, SAVED_MARK_W);
-		lv_image_set_src(tick, &icon_check);
+		lv_image_set_src(tick, theme_icon(&icon_check));
 		lv_obj_add_style(tick, &theme_style_icon, 0);
 		lv_obj_set_style_image_recolor(tick, theme()->accent, 0);
 		lv_obj_set_style_image_recolor_opa(tick, LV_OPA_COVER, 0);
@@ -486,7 +487,7 @@ static lv_obj_t *make_row(lv_obj_t *parent, const cover_image_t *image, const ch
 		lv_obj_set_ext_click_area(dots, bp_pick(7, 10));
 		lv_obj_add_event_cb(dots, menu_cb, LV_EVENT_CLICKED, (void *)(intptr_t)index);
 		lv_obj_t *dots_icon = lv_image_create(dots);
-		lv_image_set_src(dots_icon, &icon_ellipsis_vertical);
+		lv_image_set_src(dots_icon, theme_icon(&icon_ellipsis_vertical));
 		lv_obj_add_style(dots_icon, &theme_style_icon, 0);
 		lv_image_set_scale(dots_icon, (uint32_t)(LV_SCALE_NONE * 20 / 36));
 		lv_obj_center(dots_icon);
@@ -855,12 +856,12 @@ static void sel_sheet_cb(lv_event_t *e) {
 	popover_item_t actions[3];
 	int count = 0;
 	if (any_unheard) {
-		actions[count++] = (popover_item_t){"podcast_mark_listened", sel_heard_cb, NULL, false};
+		actions[count++] = (popover_item_t){"podcast_mark_listened", sel_heard_cb, NULL, false, false};
 	}
 	if (any_heard) {
-		actions[count++] = (popover_item_t){"podcast_mark_not_listened", sel_unheard_cb, NULL, false};
+		actions[count++] = (popover_item_t){"podcast_mark_not_listened", sel_unheard_cb, NULL, false, false};
 	}
-	actions[count++] = (popover_item_t){"delete", sel_delete_cb, NULL, false};
+	actions[count++] = (popover_item_t){"delete", sel_delete_cb, NULL, false, false};
 	popover_show(lv_event_get_current_target(e), actions, count);
 }
 
@@ -1001,7 +1002,7 @@ static lv_obj_t *corner_button(gui_config_t *cfg, lv_obj_t *parent, int slot, co
 	lv_obj_set_style_pad_all(button, 0, 0);
 
 	lv_obj_t *icon = lv_image_create(button);
-	lv_image_set_src(icon, glyph);
+	lv_image_set_src(icon, theme_icon(glyph));
 	lv_obj_add_style(icon, &theme_style_icon, 0);
 	settingsrow_scale_corner_icon(icon, cfg);
 	lv_obj_center(icon);

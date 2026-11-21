@@ -7,6 +7,7 @@
 #include "src/gui/nowplaying/player.h"
 #include "src/gui/settings/screensaver.h"
 #include "src/gui/shell/theme.h"
+#include "src/gui/shell/theme_icons.h"
 #include "src/gui/shell/volumereadout.h"
 #include "src/system/audio/alsa-controls.h"
 
@@ -261,7 +262,7 @@ void volume_overlay_init(gui_config_t *cfg) {
 	lv_obj_set_flex_align(overlay, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 
 	overlay_icon = lv_image_create(overlay);
-	lv_image_set_src(overlay_icon, &icon_volume_high);
+	lv_image_set_src(overlay_icon, theme_icon(&icon_volume_high));
 	if (compact) {
 		// As in the status bar, make the layout box match the transformed image;
 		// otherwise flex still reserves the 30 px source icon.

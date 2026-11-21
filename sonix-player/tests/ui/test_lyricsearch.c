@@ -396,6 +396,7 @@ int main(int argc, char **argv) {
 
 	lv_deinit();
 	rmdir(card);
-	printf("PASS lyricsearch (%dx%d, 11 languages, 5 themes)\n", (int)cfg.screen_width, (int)cfg.screen_height);
+	printf("PASS lyricsearch (%dx%d, 11 languages, %d themes)\n", (int)cfg.screen_width, (int)cfg.screen_height,
+	       THEME_KIND_COUNT);
 	return 0;
 }

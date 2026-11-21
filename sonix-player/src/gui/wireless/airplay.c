@@ -12,6 +12,7 @@
 #include "src/gui/shell/settingsrow.h"
 #include "src/gui/shell/switcher.h"
 #include "src/gui/shell/theme.h"
+#include "src/gui/shell/theme_icons.h"
 #include "src/gui/wireless/wifisettings.h"
 #include "src/system/remote/airplay.h"
 #include "src/system/core/lang.h"
@@ -241,7 +242,7 @@ void airplay_page_init(gui_config_t *cfg) {
 	// not part of it. What is left is the section's own glyph, quiet enough to
 	// read as a mark rather than a control.
 	glyph = lv_image_create(container);
-	lv_image_set_src(glyph, &icon_airplay_page);
+	lv_image_set_src(glyph, theme_icon(&icon_airplay_page));
 	lv_obj_add_style(glyph, &theme_style_icon, 0);
 	lv_obj_set_style_image_opa(glyph, LV_OPA_40, 0);
 	lv_obj_set_style_margin_top(glyph, 40, 0);

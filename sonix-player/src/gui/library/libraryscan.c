@@ -18,6 +18,7 @@
 #include "src/gui/shell/settingsrow.h"
 #include "src/gui/shell/switcher.h"
 #include "src/gui/shell/theme.h"
+#include "src/gui/shell/theme_icons.h"
 #include "src/gui/shell/topbar.h"
 #include "src/gui/shell/toast.h"
 #include "src/system/library/audiobookdb.h"
@@ -513,7 +514,7 @@ static void pick_append(int n) {
 		lv_obj_add_event_cb(row, pick_row_cb, LV_EVENT_CLICKED, (void *)(intptr_t)i);
 
 		lv_obj_t *folder = lv_image_create(row);
-		lv_image_set_src(folder, &icon_folder);
+		lv_image_set_src(folder, theme_icon(&icon_folder));
 		lv_obj_add_style(folder, &theme_style_icon, 0);
 
 		lv_obj_t *label = lv_label_create(row);
@@ -526,7 +527,7 @@ static void pick_append(int n) {
 		lv_obj_set_style_text_font(label, row_font, 0);
 
 		pick_marks[i] = lv_image_create(row);
-		lv_image_set_src(pick_marks[i], &icon_check);
+		lv_image_set_src(pick_marks[i], theme_icon(&icon_check));
 		lv_obj_add_style(pick_marks[i], &theme_style_icon, 0);
 		lv_obj_set_style_image_recolor(pick_marks[i], theme()->accent, 0);
 		lv_obj_set_style_image_recolor_opa(pick_marks[i], LV_OPA_COVER, 0);
@@ -676,7 +677,9 @@ static void scan_fit_note(void) {
 
 	lv_obj_set_size(scan_note, size, size + pad_bottom);
 	lv_image_set_inner_align(scan_note, LV_IMAGE_ALIGN_CENTER);
-	lv_image_set_scale(scan_note, (uint32_t)((int64_t)LV_SCALE_NONE * size / (int)icon_music_note.header.h));
+	// Measured on what is drawn: the themed note is rasterised near the size
+	// this page asks for, where the shared mark is 128 px.
+	lv_image_set_scale(scan_note, theme_icon_scale_to(lv_image_get_src(scan_note), size));
 }
 
 // ---------------------------------------------------------------------------
@@ -842,7 +845,9 @@ void libraryscan_init(gui_config_t *cfg) {
 	scan_container = container;
 
 	lv_obj_t *note = lv_image_create(container);
-	lv_image_set_src(note, &icon_music_note);
+	// The note is drawn large (up to 128 px); ask for the biggest drawing the
+	// set has rather than the 32 px row mark.
+	lv_image_set_src(note, theme_icon_at(&icon_music_note, SCAN_NOTE_MAX));
 	lv_obj_add_style(note, &theme_style_icon, 0);
 	lv_obj_set_style_image_recolor_opa(note, LV_OPA_COVER, 0);
 	lv_obj_set_style_pad_bottom(note, bp_pick(6, 16), 0);

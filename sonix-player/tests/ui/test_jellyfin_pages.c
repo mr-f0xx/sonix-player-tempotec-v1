@@ -28,6 +28,7 @@
 #include "src/gui/shell/settingsrow.h"
 #include "src/gui/shell/switcher.h"
 #include "src/gui/shell/theme.h"
+#include "src/gui/shell/theme_icons.h"
 #include "src/gui/shell/toast.h"
 #include "src/gui/streaming/jellyfin_icon.h"
 #include "src/gui/streaming/jellyfinpage.h"
@@ -801,7 +802,7 @@ int main(int argc, char **argv) {
 	pump_until_idle("play track");
 	assert(strstr(last_started_path, "trk-1.flac") != NULL);
 
-	/* 6. Sweep all 11 languages x 5 themes across Home, Settings, List */
+	/* 6. Sweep all 11 languages x every built-in theme across Home, Settings, List */
 	static const char *const LANGS[] = {
 		"Deutsch", "English", "Español", "Français", "Italiano", "Japanese",
 		"Nederlands", "Polski", "Português BR", "Russian", "Ukrainian",
@@ -837,8 +838,10 @@ int main(int argc, char **argv) {
 				assert(saved_src == &icon_jellyfin_saved_card);
 				assert(stream_src == &icon_jellyfin_menu_card);
 			} else if (theme_uses_function_glyphs()) {
+				// Rosé Pine, Gruvbox, Dracula and Catppuccin answer with their
+				// own drawing of the mark; the rest share the Lucide one.
 				assert(saved_src == &icon_podcast_downloaded);
-				assert(stream_src == &icon_jellyfin_mark);
+				assert(stream_src == theme_icon(&icon_jellyfin_mark));
 			} else {
 				assert(saved_src == &icon_jellyfin_saved);
 				assert(stream_src == &icon_jellyfin_menu);
@@ -900,7 +903,8 @@ int main(int argc, char **argv) {
 	assert(!stub_logged_in);
 
 	nftw(tmp, unlink_cb, 32, FTW_DEPTH | FTW_PHYS);
-	printf("PASS jellyfin_pages (240x320, 11 languages x 5 themes zero-overlap, Quick Connect, browse, "
-		   "settings & forget)\n");
+	printf("PASS jellyfin_pages (240x320, 11 languages x %d themes zero-overlap, Quick Connect, browse, "
+	       "settings & forget)\n",
+	       THEME_KIND_COUNT);
 	return 0;
 }

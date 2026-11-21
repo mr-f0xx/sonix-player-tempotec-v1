@@ -7,6 +7,7 @@
 #include "src/gui/shell/settingsrow.h"
 #include "src/gui/shell/switcher.h"
 #include "src/gui/shell/theme.h"
+#include "src/gui/shell/theme_icons.h"
 #include "src/gui/settings/timeset.h"
 #include "src/gui/wireless/wifisettings.h"
 #include "src/system/core/config.h"
@@ -135,7 +136,7 @@ static lv_obj_t *make_row(lv_obj_t *parent, const char *name, int index) {
 	lv_obj_t *row = settingsrow_action(parent, name, pick_cb, (void *)(intptr_t)index);
 
 	lv_obj_t *mark = lv_image_create(row);
-	lv_image_set_src(mark, &icon_check);
+	lv_image_set_src(mark, theme_icon(&icon_check));
 	lv_obj_set_style_image_recolor(mark, CHECK_GREEN, 0);
 	lv_obj_set_style_image_recolor_opa(mark, LV_OPA_COVER, 0);
 	lv_obj_align(mark, LV_ALIGN_RIGHT_MID, 0, 0);

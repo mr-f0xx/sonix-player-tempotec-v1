@@ -14,6 +14,7 @@
 #include "src/gui/shell/settingsrow.h"
 #include "src/gui/shell/switcher.h"
 #include "src/gui/shell/theme.h"
+#include "src/gui/shell/theme_icons.h"
 #include "src/gui/shell/toast.h"
 #include "src/gui/shell/topbar.h"
 #include "src/system/core/config.h"
@@ -2507,7 +2508,7 @@ static void turn_row(lv_obj_t *parent, int index, const lv_image_dsc_t *icon, co
 	lv_obj_set_flex_grow(name, 1);
 
 	lv_obj_t *tick = lv_image_create(row);
-	lv_image_set_src(tick, &icon_check);
+	lv_image_set_src(tick, theme_icon(&icon_check));
 	lv_obj_set_style_image_recolor(tick, theme()->accent, 0);
 	lv_obj_set_style_image_recolor_opa(tick, LV_OPA_COVER, 0);
 
@@ -2636,12 +2637,10 @@ static void build_reader_brightness_control(lv_obj_t *parent) {
 	lv_obj_set_scrollable(heading, false);
 
 	reader_brightness_icon = lv_image_create(heading);
-	lv_image_set_src(reader_brightness_icon, &icon_sun);
+	lv_image_set_src(reader_brightness_icon, theme_icon(&icon_sun));
 	lv_obj_set_size(reader_brightness_icon, 18, 18);
 	lv_obj_add_style(reader_brightness_icon, &theme_style_icon, 0);
-	int icon_side = LV_MAX((int)icon_sun.header.w, (int)icon_sun.header.h);
-	lv_image_set_scale(reader_brightness_icon,
-					   icon_side ? (uint32_t)(LV_SCALE_NONE * 18 / icon_side) : LV_SCALE_NONE);
+	lv_image_set_scale(reader_brightness_icon, theme_icon_scale_to(lv_image_get_src(reader_brightness_icon), 18));
 	lv_obj_set_style_image_recolor(reader_brightness_icon, theme()->text_primary, 0);
 	lv_obj_set_style_image_recolor_opa(reader_brightness_icon, LV_OPA_COVER, 0);
 	remember_glyph(reader_brightness_icon);
@@ -2785,7 +2784,7 @@ static void build_menu(gui_config_t *cfg) {
 	lv_obj_add_event_cb(back, section_back_cb, LV_EVENT_CLICKED, NULL);
 
 	lv_obj_t *chev = lv_image_create(back);
-	lv_image_set_src(chev, &icon_chevron_left);
+	lv_image_set_src(chev, theme_icon(&icon_chevron_left));
 	lv_obj_center(chev);
 	lv_obj_set_style_image_recolor(chev, theme()->text_primary, 0);
 	lv_obj_set_style_image_recolor_opa(chev, LV_OPA_COVER, 0);

@@ -15,6 +15,7 @@
 #include "src/gui/shell/spinner.h"
 #include "src/gui/shell/switcher.h"
 #include "src/gui/shell/theme.h"
+#include "src/gui/shell/theme_icons.h"
 #include "src/gui/shell/toast.h"
 #include "src/gui/shell/topbar.h"
 #include "src/gui/shell/main_menu.h"
@@ -274,15 +275,15 @@ static void ask_for_password(const char *ssid) {
 static void show_row_menu(lv_obj_t *anchor, bool current) {
 	if (current) {
 		static const popover_item_t items[] = {
-			{"details", details_action, NULL, false},
-			{"disconnect", disconnect_action, NULL, false},
-			{"wifi_forget_network", forget_action, NULL, false},
+			{"details", details_action, NULL, false, false},
+			{"disconnect", disconnect_action, NULL, false, false},
+			{"wifi_forget_network", forget_action, NULL, false, false},
 		};
 		popover_show(anchor, items, 3);
 	} else {
 		static const popover_item_t items[] = {
-			{"connect", connect_action, NULL, false},
-			{"wifi_forget_network", forget_action, NULL, false},
+			{"connect", connect_action, NULL, false, false},
+			{"wifi_forget_network", forget_action, NULL, false, false},
 		};
 		popover_show(anchor, items, 2);
 	}
@@ -472,7 +473,7 @@ static void add_row(lv_obj_t *parent, const wifi_network_t *net, bool with_menu)
 		lv_obj_add_event_cb(menu_btn, row_menu_clicked_cb, LV_EVENT_CLICKED, ssid_copy);
 
 		lv_obj_t *dots = lv_image_create(menu_btn);
-		lv_image_set_src(dots, &icon_ellipsis_vertical);
+		lv_image_set_src(dots, theme_icon(&icon_ellipsis_vertical));
 		lv_obj_add_style(dots, &theme_style_icon, 0);
 		lv_obj_set_style_image_opa(dots, LV_OPA_70, 0);
 		lv_obj_center(dots);
@@ -772,7 +773,7 @@ static lv_obj_t *corner_button(lv_obj_t *screen, gui_config_t *cfg, const lv_ima
 	lv_obj_set_style_pad_all(button, 0, 0);
 
 	lv_obj_t *icon = lv_image_create(button);
-	lv_image_set_src(icon, glyph);
+	lv_image_set_src(icon, theme_icon(glyph));
 	lv_obj_add_style(icon, &theme_style_icon, 0);
 	settingsrow_scale_corner_icon(icon, cfg);
 	lv_obj_center(icon);

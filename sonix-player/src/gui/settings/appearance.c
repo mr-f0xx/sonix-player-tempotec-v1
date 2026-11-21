@@ -16,6 +16,7 @@
 #include "src/gui/shell/settingsrow.h"
 #include "src/gui/shell/switcher.h"
 #include "src/gui/shell/theme.h"
+#include "src/gui/shell/theme_icons.h"
 #include "src/gui/shell/toast.h"
 #include "src/gui/shell/topbar.h"
 #include "src/gui/settings/bootpicpage.h"
@@ -237,8 +238,9 @@ static void font_pills_reload_cb(lv_event_t *e) {
 }
 
 // Paints the active theme choice. Dark and Light keep their original filled
-// accent treatment; the blue-, amber- and true-black palettes use the quieter
-// outlined selected pill that suits their compact V1 appearance card.
+// accent treatment; the blue-, amber-, true-black, rose- and warm-grey
+// palettes use the quieter outlined selected pill that suits their compact V1
+// appearance card.
 static void refresh_buttons(void) {
 	theme_kind_t active_kind = theme_get_kind();
 	for (int i = 0; i <= THEME_KIND_CUSTOM; i++) {
@@ -819,12 +821,22 @@ static void appearance_preview_refresh(void) {
 	bool tokyo = theme_is_tokyo_night();
 	bool amber = theme_is_amber_on_black();
 	bool oled = theme_is_oled();
-	bool show = bp_is_tempotec_v1() && (tokyo || amber || oled);
+	bool rose = theme_is_rose_pine();
+	bool gruv = theme_is_gruvbox();
+	bool drac = theme_is_dracula();
+	bool cat = theme_is_catppuccin();
+	bool show = bp_is_tempotec_v1() && (tokyo || amber || oled || rose || gruv || drac || cat);
 	if (theme_palette_card) {
 		lv_obj_set_hidden(theme_palette_card, !show);
 	}
 	if (theme_palette_title) {
-		const char *title = amber ? "appearance_amber_palette" : oled ? "appearance_oled_palette" : "appearance_tokyo_palette";
+		const char *title = amber ? "appearance_amber_palette"
+						: oled   ? "appearance_oled_palette"
+						: rose   ? "appearance_rose_pine_palette"
+						: gruv   ? "appearance_gruvbox_palette"
+						: drac   ? "appearance_dracula_palette"
+						: cat    ? "appearance_catppuccin_palette"
+								 : "appearance_tokyo_palette";
 		lv_label_set_text(theme_palette_title, tr(title));
 	}
 	if (function_glyph_card) {
@@ -846,6 +858,49 @@ static void appearance_preview_refresh(void) {
 		swatches[5] = theme_player_chrome_color(THEME_PLAYER_CHROME_SECONDARY);
 		swatches[6] = theme_player_chrome_color(THEME_PLAYER_CHROME_PRIMARY);
 		swatches[7] = theme()->accent;
+	} else if (rose) {
+		// Base, surface, overlay, then the decorations the scheme is known
+		// for: pine, foam, iris, gold and love.
+		swatches[0] = theme()->screen_bg;
+		swatches[1] = theme()->surface;
+		swatches[2] = theme()->surface_pressed;
+		swatches[3] = theme_player_chrome_color(THEME_PLAYER_CHROME_PLAYBACK);
+		swatches[4] = theme_semantic_color(THEME_SEMANTIC_BLUE);
+		swatches[5] = theme_semantic_color(THEME_SEMANTIC_CYAN);
+		swatches[6] = theme_semantic_color(THEME_SEMANTIC_AMBER);
+		swatches[7] = theme_semantic_color(THEME_SEMANTIC_RED);
+	} else if (gruv) {
+		// bg0, bg1, bg2, then the medium steps of the ANSI palette.
+		swatches[0] = theme()->screen_bg;
+		swatches[1] = theme()->surface;
+		swatches[2] = theme()->surface_pressed;
+		swatches[3] = lv_color_make(69, 133, 136); // #458588, blue
+		swatches[4] = lv_color_make(152, 151, 26); // #98971a, green
+		swatches[5] = lv_color_make(215, 153, 33); // #d79921, yellow
+		swatches[6] = lv_color_make(214, 93, 14); // #d65d0e, orange
+		swatches[7] = theme_semantic_color(THEME_SEMANTIC_RED);
+	} else if (drac) {
+		// Background, selection, current line, then the six the scheme is
+		// known for: purple, cyan, green, yellow, orange and pink.
+		swatches[0] = theme()->screen_bg;
+		swatches[1] = theme()->surface;
+		swatches[2] = theme_player_chrome_color(THEME_PLAYER_CHROME_SECONDARY);
+		swatches[3] = lv_color_make(189, 147, 249); // #bd93f9, purple
+		swatches[4] = lv_color_make(139, 233, 253); // #8be9fd, cyan
+		swatches[5] = lv_color_make(80, 250, 123); // #50fa7b, green
+		swatches[6] = lv_color_make(241, 250, 140); // #f1fa8c, yellow
+		swatches[7] = lv_color_make(255, 121, 198); // #ff79c6, pink
+	} else if (cat) {
+		// Base, surface 0, surface 1, then the pastels: mauve, blue, teal,
+		// green and peach.
+		swatches[0] = theme()->screen_bg;
+		swatches[1] = theme()->surface;
+		swatches[2] = theme()->surface_pressed;
+		swatches[3] = lv_color_make(203, 166, 247); // #cba6f7, mauve
+		swatches[4] = lv_color_make(137, 180, 250); // #89b4fa, blue
+		swatches[5] = lv_color_make(148, 226, 213); // #94e2d5, teal
+		swatches[6] = lv_color_make(166, 227, 161); // #a6e3a1, green
+		swatches[7] = lv_color_make(250, 179, 135); // #fab387, peach
 	} else if (amber) {
 		swatches[0] = theme()->screen_bg;
 		swatches[1] = theme()->surface;
@@ -870,7 +925,7 @@ static void appearance_preview_refresh(void) {
 			continue;
 		}
 		lv_obj_set_style_bg_color(theme_palette_swatches[i], swatches[i], 0);
-		if (amber || oled) {
+		if (amber || oled || rose || gruv || drac || cat) {
 			// The near-black swatches otherwise disappear into the card and
 			// look like unpainted boxes on the low-contrast V1 panel.
 			lv_obj_set_style_border_width(theme_palette_swatches[i], 1, 0);
@@ -935,12 +990,13 @@ static void build_theme_previews(lv_obj_t *container, bool compact) {
 	static const lv_image_dsc_t *const glyphs[4] = {&icon_music2, &icon_play_status, &icon_wifi, &icon_equalizer};
 	for (int i = 0; i < 4; i++) {
 		lv_obj_t *icon = lv_image_create(glyph_row);
-		lv_image_set_src(icon, glyphs[i]);
+		// The set this card is describing: the shared four, or Rose Pine's
+		// and Gruvbox's own renderings of the same four when one is active.
+		lv_image_set_src(icon, theme_icon(glyphs[i]));
 		lv_obj_add_style(icon, &theme_style_icon, 0);
 		lv_obj_set_size(icon, 18, 18);
 		lv_image_set_inner_align(icon, LV_IMAGE_ALIGN_CENTER);
-		lv_image_set_scale(icon, (uint32_t)(LV_SCALE_NONE * 18 / LV_MAX((int)glyphs[i]->header.w,
-																(int)glyphs[i]->header.h)));
+		lv_image_set_scale(icon, theme_icon_scale_to(lv_image_get_src(icon), 18));
 		function_glyph_icons[i] = icon;
 	}
 	appearance_preview_refresh();
@@ -988,6 +1044,13 @@ void appearance_init(gui_config_t *cfg) {
 	theme_buttons[THEME_KIND_AMBER_ON_BLACK] = make_theme_choice(row,
 		compact ? "appearance_amber_short" : "appearance_amber_on_black", THEME_KIND_AMBER_ON_BLACK, compact);
 	theme_buttons[THEME_KIND_OLED] = make_theme_choice(row, "appearance_oled", THEME_KIND_OLED, compact);
+	theme_buttons[THEME_KIND_ROSE_PINE] =
+		make_theme_choice(row, "appearance_rose_pine", THEME_KIND_ROSE_PINE, compact);
+	theme_buttons[THEME_KIND_GRUVBOX] = make_theme_choice(row, "appearance_gruvbox", THEME_KIND_GRUVBOX, compact);
+	theme_buttons[THEME_KIND_DRACULA] = make_theme_choice(row, "appearance_dracula", THEME_KIND_DRACULA, compact);
+	theme_buttons[THEME_KIND_CATPPUCCIN_MOCHA] =
+		make_theme_choice(row, compact ? "appearance_catppuccin_short" : "appearance_catppuccin_mocha",
+						  THEME_KIND_CATPPUCCIN_MOCHA, compact);
 	theme_buttons[THEME_KIND_CUSTOM] = make_theme_choice(row, "appearance_custom", THEME_KIND_CUSTOM, compact);
 	lv_obj_t *custom_note = lv_label_create(container);
 	lv_label_set_long_mode(custom_note, LV_LABEL_LONG_WRAP);

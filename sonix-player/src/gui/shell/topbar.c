@@ -16,6 +16,7 @@
 #include "src/gui/nowplaying/player.h"
 #include "src/gui/shell/quickpanel.h"
 #include "src/gui/shell/theme.h"
+#include "src/gui/shell/theme_icons.h"
 #include "src/gui/shell/statusbarstyle.h"
 #include "src/gui/shell/volumereadout.h"
 #include "src/system/remote/airplay.h"
@@ -196,14 +197,12 @@ static void compact_status_icon(lv_obj_t *icon, const lv_image_dsc_t *source) {
 
 	// Transforming alone only changes the drawing; LVGL flex would still
 	// reserve the source glyph's 26--34 px box. Give every glyph a real 18 px
-	// layout box and derive the scale from its source, so Wi-Fi, volume and the
-	// smaller playback glyph all align without crowding the centred clock.
-	int max_side = LV_MAX((int)source->header.w, (int)source->header.h);
+	// layout box and derive the scale from the bitmap that is actually drawn
+	// (a themed rung is cut at its own size), so Wi-Fi, volume and the smaller
+	// playback glyph all align without crowding the centred clock.
 	lv_obj_set_size(icon, COMPACT_STATUS_ICON_SIZE, COMPACT_STATUS_ICON_SIZE);
 	lv_image_set_inner_align(icon, LV_IMAGE_ALIGN_CENTER);
-	if (max_side > 0) {
-		lv_image_set_scale(icon, (uint32_t)(LV_SCALE_NONE * COMPACT_STATUS_ICON_SIZE / max_side));
-	}
+	lv_image_set_scale(icon, theme_icon_scale_for(source, COMPACT_STATUS_ICON_SIZE));
 }
 
 // Parses the sysfs capacity string. Returns -1 when it is not a number: the
@@ -223,7 +222,7 @@ static int parse_percent(const char *text) {
 // Repaints the battery indicator: level as the width of the coloured bar
 // inside the shell, plus the charging bolt on top when the charger is in.
 static void update_battery_indicator(int percent, bool charging) {
-	lv_image_set_src(bat_shell, charging ? &icon_battery_charging_body : &icon_battery);
+	lv_image_set_src(bat_shell, theme_icon(charging ? &icon_battery_charging_body : &icon_battery));
 
 	if (charging) {
 		lv_obj_set_hidden(bat_bolt, false);
@@ -305,21 +304,64 @@ static void remember_timer_cb(lv_timer_t *timer) {
 	clock_remember();
 }
 
-// Amber on Black and OLED map the battery's semantic colours to their accent
-// (signal orange, white). Give these two status glyphs that same colour; in
-// every other theme they continue to inherit the regular icon style.
+// The status bar's semantic colours, one glyph at a time.
+//
+// Amber on Black and OLED map the battery's colours to their accent (signal
+// orange, white), so volume and playback take that accent too.
+//
+// The four schemes with a glyph set of their own colour the bar the way their
+// editors colour a buffer: the "what is playing" glyph in the scheme's own
+// green -- Rosé Pine's pine, Gruvbox's #98971a, Dracula's #50fa7b, Catppuccin's
+// #a6e3a1 -- and the volume glyph beside it in a second hue, foam for Rosé
+// Pine, #83a598 for Gruvbox, cyan for Dracula and sapphire for Catppuccin.
+// Amber and Tokyo Night had this already; without it these four bars were the
+// only ones whose glyphs were all the same plain foreground.
 static void refresh_status_icon_color(lv_obj_t *icon) {
 	if (!icon) {
 		return;
 	}
 
+	lv_color_t ink;
 	if (theme_is_monochrome()) {
-		lv_obj_set_style_image_recolor(icon, theme_semantic_color(THEME_SEMANTIC_GREEN), 0);
-		lv_obj_set_style_image_recolor_opa(icon, LV_OPA_COVER, 0);
+		ink = theme_semantic_color(THEME_SEMANTIC_GREEN);
+	} else if (theme_is_rose_pine()) {
+		ink = lv_color_make(62, 143, 176); // #3e8fb0, pine: the scheme's green-deep
+	} else if (theme_is_gruvbox()) {
+		ink = lv_color_make(152, 151, 26); // #98971a, green
+	} else if (theme_is_dracula()) {
+		ink = lv_color_make(80, 250, 123); // #50fa7b, green
+	} else if (theme_is_catppuccin()) {
+		ink = lv_color_make(166, 227, 161); // #a6e3a1, green
 	} else {
 		lv_obj_remove_local_style_prop(icon, LV_STYLE_IMAGE_RECOLOR, 0);
 		lv_obj_remove_local_style_prop(icon, LV_STYLE_IMAGE_RECOLOR_OPA, 0);
+		return;
 	}
+	lv_obj_set_style_image_recolor(icon, ink, 0);
+	lv_obj_set_style_image_recolor_opa(icon, LV_OPA_COVER, 0);
+}
+
+// The volume glyph's own colour, where a scheme gives it one. Tokyo Night and
+// Amber on Black leave it in the bar's foreground; the four hand-drawn schemes
+// give it a second hue so the level is not read as just another word.
+static bool volume_icon_ink(lv_color_t *out) {
+	if (theme_is_rose_pine()) {
+		*out = theme_semantic_color(THEME_SEMANTIC_BLUE); // foam
+		return true;
+	}
+	if (theme_is_dracula()) {
+		*out = lv_color_make(139, 233, 253); // #8be9fd, cyan
+		return true;
+	}
+	if (theme_is_catppuccin()) {
+		*out = lv_color_make(137, 180, 250); // #89b4fa, sapphire
+		return true;
+	}
+	if (theme_is_gruvbox()) {
+		*out = lv_color_make(131, 165, 152); // #83a598, the ANSI bright blue
+		return true;
+	}
+	return false;
 }
 
 // The volume number is held at the width of the widest reading it can show, so
@@ -405,8 +447,13 @@ void topbar_refresh_volume(int percent) {
 	} else if (percent < VOLUME_HIGH_PERCENT) {
 		icon = &icon_volume_low;
 	}
-	lv_image_set_src(vol_icon, icon);
+	lv_image_set_src(vol_icon, theme_icon(icon));
 	refresh_status_icon_color(vol_icon);
+	lv_color_t volume_ink;
+	if (volume_icon_ink(&volume_ink)) {
+		lv_obj_set_style_image_recolor(vol_icon, volume_ink, 0);
+		lv_obj_set_style_image_recolor_opa(vol_icon, LV_OPA_COVER, 0);
+	}
 }
 
 // Shows or hides the headphone glyph to match what is in the jacks. Four times
@@ -465,7 +512,7 @@ static void refresh_headphone_icon(bool force) {
 	// With a DAC on the port the sockets are not what the sound comes out of,
 	// whatever is plugged into them.
 	if (usb) {
-		lv_image_set_src(hp_icon, &icon_usbaudioout);
+		lv_image_set_src(hp_icon, theme_icon(&icon_usbaudioout));
 		if (theme_uses_function_glyphs()) {
 			lv_obj_set_style_image_recolor(hp_icon, theme_semantic_color(THEME_SEMANTIC_CYAN), 0);
 			lv_obj_set_style_image_recolor_opa(hp_icon, LV_OPA_COVER, 0);
@@ -477,7 +524,7 @@ static void refresh_headphone_icon(bool force) {
 		topbar_apply_player_ink();
 		return;
 	}
-	lv_image_set_src(hp_icon, &icon_headphones);
+	lv_image_set_src(hp_icon, theme_icon(&icon_headphones));
 
 	if (state == JACK_NONE) {
 		lv_obj_set_hidden(hp_icon, true);
@@ -591,13 +638,15 @@ void topbar_refresh_radios(void) {
 				} else if (status.bars == 2) {
 					glyph = &icon_wifi_high;
 				}
-				lv_image_set_src(wifi_icon, glyph);
+				// Themed sets draw one arc per signal level, so the level's
+				// own bitmap goes through the lookup.
+				lv_image_set_src(wifi_icon, theme_icon(glyph));
 				lv_obj_set_style_image_opa(wifi_icon, LV_OPA_COVER, 0);
 			} else {
 				// On but attached to nothing: the full arc, faded. The empty
 				// glyph is a single dot at this size and reads as a speck of dust
 				// rather than a radio.
-				lv_image_set_src(wifi_icon, &icon_wifi_max);
+				lv_image_set_src(wifi_icon, theme_icon(&icon_wifi_max));
 				lv_obj_set_style_image_opa(wifi_icon, RADIO_IDLE_OPA, 0);
 			}
 		}
@@ -688,11 +737,11 @@ void topbar_set_library_check(topbar_library_t state) {
 		lv_obj_set_hidden(library_icon, true);
 		break;
 	case TOPBAR_LIBRARY_CHECKING:
-		lv_image_set_src(library_icon, &icon_library_checking);
+		lv_image_set_src(library_icon, theme_icon(&icon_library_checking));
 		lv_obj_set_hidden(library_icon, false);
 		break;
 	case TOPBAR_LIBRARY_CHECKED:
-		lv_image_set_src(library_icon, &icon_library_checked);
+		lv_image_set_src(library_icon, theme_icon(&icon_library_checked));
 		lv_obj_set_hidden(library_icon, false);
 		library_timer = lv_timer_create(library_timer_cb, LIBRARY_CHECKED_MS, NULL);
 		lv_timer_set_repeat_count(library_timer, 1);
@@ -732,24 +781,26 @@ static void refresh_play_icon(const device_state_t *state) {
 	airplay_state_t ap;
 	airplay_get_state(&ap);
 	if (ap.playing) {
-		lv_image_set_src(play_icon, &icon_airplay_status);
+		lv_image_set_src(play_icon, theme_icon(&icon_airplay_status));
 		lv_obj_remove_local_style_prop(play_icon, LV_STYLE_IMAGE_RECOLOR, 0);
 		lv_obj_set_hidden(play_icon, false);
 		return;
 	}
 
 	if (state->status == AUDIO_STATUS_PLAYING) {
-		lv_image_set_src(play_icon, &icon_play_status);
+		lv_image_set_src(play_icon, theme_icon(&icon_play_status));
 	} else if (state->current_file[0]) {
-		lv_image_set_src(play_icon, &icon_pause_status);
+		lv_image_set_src(play_icon, theme_icon(&icon_pause_status));
 	} else {
 		lv_obj_set_hidden(play_icon, true);
 		return;
 	}
 
-	// Amber on Black and OLED keep this status glyph in the battery's colour.
-	// Other themes retain the Bluetooth-blue route indicator while it plays.
-	if (theme_is_monochrome()) {
+	// Amber on Black, OLED and the four hand-drawn schemes keep this glyph in
+	// the set's playing colour. Other themes retain the Bluetooth-blue route
+	// indicator while it plays, which takes precedence where it applies.
+	if (theme_is_monochrome() || theme_is_rose_pine() || theme_is_gruvbox() ||
+		theme_is_dracula() || theme_is_catppuccin()) {
 		refresh_status_icon_color(play_icon);
 	} else if (state->status == AUDIO_STATUS_PLAYING && bluetooth_audio_active()) {
 		// Fixed Bluetooth blue rather than the accent: it means wireless, not active.
@@ -1217,7 +1268,7 @@ void topbar_init(gui_config_t *cfg) {
 
 	// Glyph first, then the number: the icon says what the number means.
 	vol_icon = lv_image_create(container_left);
-	lv_image_set_src(vol_icon, &icon_volume_high);
+	lv_image_set_src(vol_icon, theme_icon(&icon_volume_high));
 	compact_status_icon(vol_icon, &icon_volume_high);
 	lv_obj_add_style(vol_icon, &theme_style_icon, 0);
 	refresh_status_icon_color(vol_icon);
@@ -1235,7 +1286,7 @@ void topbar_init(gui_config_t *cfg) {
 	// The jack indicator: appears when headphones are plugged in, theme-coloured
 	// for the 3.5 mm jack and gold for the 4.4 mm balanced one.
 	hp_icon = lv_image_create(container_left);
-	lv_image_set_src(hp_icon, &icon_headphones);
+	lv_image_set_src(hp_icon, theme_icon(&icon_headphones));
 	compact_status_icon(hp_icon, &icon_headphones);
 	lv_obj_add_style(hp_icon, &theme_style_icon, 0);
 	lv_obj_set_hidden(hp_icon, true);
@@ -1243,7 +1294,7 @@ void topbar_init(gui_config_t *cfg) {
 	// What the player is doing, right of the jack indicator: play while a track
 	// runs, pause while one is loaded and stopped, hidden when nothing is loaded.
 	play_icon = lv_image_create(container_left);
-	lv_image_set_src(play_icon, &icon_play_status);
+	lv_image_set_src(play_icon, theme_icon(&icon_play_status));
 	compact_status_icon(play_icon, &icon_play_status);
 	lv_obj_add_style(play_icon, &theme_style_icon, 0);
 	lv_obj_set_hidden(play_icon, true);
@@ -1251,7 +1302,7 @@ void topbar_init(gui_config_t *cfg) {
 	// Right of it, Detect changes while it runs and briefly once it is done
 	// (topbar_set_library_check).
 	library_icon = lv_image_create(container_left);
-	lv_image_set_src(library_icon, &icon_library_checking);
+	lv_image_set_src(library_icon, theme_icon(&icon_library_checking));
 	compact_status_icon(library_icon, &icon_library_checking);
 	lv_obj_add_style(library_icon, &theme_style_icon, 0);
 	lv_obj_set_hidden(library_icon, true);
@@ -1261,7 +1312,7 @@ void topbar_init(gui_config_t *cfg) {
 	// player, not taking the sound away from it, so what the DAC is doing stays
 	// true and this only adds who is asking.
 	sonixlink_icon = lv_image_create(container_left);
-	lv_image_set_src(sonixlink_icon, &icon_sonixlink_status);
+	lv_image_set_src(sonixlink_icon, theme_icon(&icon_sonixlink_status));
 	compact_status_icon(sonixlink_icon, &icon_sonixlink_status);
 	lv_obj_add_style(sonixlink_icon, &theme_style_icon, 0);
 	lv_obj_set_hidden(sonixlink_icon, true);
@@ -1287,13 +1338,13 @@ void topbar_init(gui_config_t *cfg) {
 	// wifi, then the charge percentage and the battery. Both start hidden;
 	// topbar_refresh_radios() decides what is shown.
 	bt_icon = lv_image_create(container_right);
-	lv_image_set_src(bt_icon, &icon_bluetooth_status);
+	lv_image_set_src(bt_icon, theme_icon(&icon_bluetooth_status));
 	compact_status_icon(bt_icon, &icon_bluetooth_status);
 	lv_obj_add_style(bt_icon, &theme_style_icon, 0);
 	lv_obj_set_hidden(bt_icon, true);
 
 	wifi_icon = lv_image_create(container_right);
-	lv_image_set_src(wifi_icon, &icon_wifi_max);
+	lv_image_set_src(wifi_icon, theme_icon(&icon_wifi_max));
 	compact_status_icon(wifi_icon, &icon_wifi_max);
 	lv_obj_add_style(wifi_icon, &theme_style_icon, 0);
 	lv_obj_set_hidden(wifi_icon, true);
@@ -1341,7 +1392,7 @@ void topbar_init(gui_config_t *cfg) {
 	lv_obj_set_scrollable(bat_fill, false);
 
 	bat_shell = lv_image_create(bat_widget);
-	lv_image_set_src(bat_shell, &icon_battery);
+	lv_image_set_src(bat_shell, theme_icon(&icon_battery));
 	lv_obj_set_style_image_recolor(bat_shell, theme()->text_primary, 0);
 	lv_obj_set_style_image_recolor_opa(bat_shell, LV_OPA_COVER, 0);
 	if (topbar_compact) {
@@ -1352,7 +1403,7 @@ void topbar_init(gui_config_t *cfg) {
 	}
 
 	bat_bolt = lv_image_create(bat_widget);
-	lv_image_set_src(bat_bolt, &icon_battery_charging_bolt);
+	lv_image_set_src(bat_bolt, theme_icon(&icon_battery_charging_bolt));
 	lv_obj_set_style_image_recolor(bat_bolt,
 								   theme_is_monochrome() ? theme()->accent : lv_color_make(245, 205, 60), 0);
 	lv_obj_set_style_image_recolor_opa(bat_bolt, LV_OPA_COVER, 0);

@@ -10,6 +10,7 @@
 #include "src/gui/fonts/fonts.h"
 #include "src/gui/shell/icons.h"
 #include "src/gui/shell/theme.h"
+#include "src/gui/shell/theme_icons.h"
 #include "src/system/core/config.h"
 #include "src/system/core/lang.h"
 
@@ -919,7 +920,7 @@ static lv_obj_t *kb_key_label(lv_obj_t *btn) {
 
 static lv_obj_t *kb_key_icon(lv_obj_t *btn, const lv_image_dsc_t *glyph) {
 	lv_obj_t *icon = lv_image_create(btn);
-	lv_image_set_src(icon, glyph);
+	lv_image_set_src(icon, theme_icon(glyph));
 	lv_obj_add_style(icon, &theme_style_icon, 0);
 	lv_obj_set_style_image_recolor_opa(icon, LV_OPA_COVER, 0);
 	lv_obj_center(icon);

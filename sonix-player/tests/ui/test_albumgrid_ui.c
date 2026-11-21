@@ -142,6 +142,10 @@ static const uint8_t GLYPH_BYTES[4] = {0xff, 0xff, 0xff, 0xff};
 	const lv_image_dsc_t name = {.header = {.magic = LV_IMAGE_HEADER_MAGIC, .cf = LV_COLOR_FORMAT_A8, .w = 2, .h = 2, .stride = 2}, \
 								 .data = GLYPH_BYTES, .data_size = sizeof(GLYPH_BYTES)}
 
+// The grid resolves every glyph through theme_icon(); this test draws with its
+// own 2x2 stand-ins and no themed set, so the lookup is the identity.
+const lv_image_dsc_t *theme_icon(const lv_image_dsc_t *shared) { return shared; }
+
 DUMMY_ICON(icon_album);
 DUMMY_ICON(icon_album_corner);
 DUMMY_ICON(icon_arrow_down_up);

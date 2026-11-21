@@ -11,6 +11,7 @@
 #include "src/gui/shell/settingsrow.h"
 #include "src/gui/shell/switcher.h"
 #include "src/gui/shell/theme.h"
+#include "src/gui/shell/theme_icons.h"
 #include "src/gui/shell/toast.h"
 #include "src/system/audio/audio.h"
 #include "src/system/core/lang.h"
@@ -794,7 +795,7 @@ void subsonicpage_init(gui_config_t *cfg) {
 	lv_obj_set_style_shadow_width(downloads_btn, 0, 0);
 	lv_obj_set_style_pad_all(downloads_btn, 0, 0);
 	lv_obj_t *downloads_icon = lv_image_create(downloads_btn);
-	lv_image_set_src(downloads_icon, &icon_download);
+	lv_image_set_src(downloads_icon, theme_icon(&icon_download));
 	lv_obj_add_style(downloads_icon, &theme_style_icon, 0);
 	settingsrow_scale_corner_icon(downloads_icon, cfg);
 	lv_obj_center(downloads_icon);

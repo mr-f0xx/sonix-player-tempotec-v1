@@ -9,6 +9,7 @@
 #include "src/gui/fonts/fonts.h"
 #include "src/gui/shell/icons.h"
 #include "src/gui/shell/theme.h"
+#include "src/gui/shell/theme_icons.h"
 #include "src/gui/shell/topbar.h"
 #include "src/system/device/clock.h"
 #include "src/system/core/lang.h"
@@ -713,7 +714,7 @@ static void build_timezone_panel(gui_config_t *cfg) {
 	lv_obj_add_event_cb(back, tz_back_cb, LV_EVENT_CLICKED, NULL);
 
 	lv_obj_t *back_icon = lv_image_create(back);
-	lv_image_set_src(back_icon, &icon_chevron_left);
+	lv_image_set_src(back_icon, theme_icon(&icon_chevron_left));
 	lv_obj_add_style(back_icon, &theme_style_icon, 0);
 	lv_obj_center(back_icon);
 
@@ -772,7 +773,7 @@ static void build_timezone_panel(gui_config_t *cfg) {
 		lv_obj_set_style_text_font(places, &font_ui_20, 0);
 
 		tz_checks[i] = lv_image_create(row);
-		lv_image_set_src(tz_checks[i], &icon_check);
+		lv_image_set_src(tz_checks[i], theme_icon(&icon_check));
 		lv_obj_set_style_image_recolor(tz_checks[i], TZ_CHECK_GREEN, 0);
 		lv_obj_set_style_image_recolor_opa(tz_checks[i], LV_OPA_COVER, 0);
 		lv_obj_set_hidden(tz_checks[i], true);
@@ -848,7 +849,7 @@ void timeset_init(gui_config_t *cfg) {
 	lv_obj_add_event_cb(cancel_btn, cancel_cb, LV_EVENT_CLICKED, NULL);
 
 	lv_obj_t *cancel_icon = lv_image_create(cancel_btn);
-	lv_image_set_src(cancel_icon, &icon_chevron_left);
+	lv_image_set_src(cancel_icon, theme_icon(&icon_chevron_left));
 	lv_obj_add_style(cancel_icon, &theme_style_icon, 0);
 	lv_obj_center(cancel_icon);
 

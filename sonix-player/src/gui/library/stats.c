@@ -11,6 +11,7 @@
 #include "src/gui/shell/settingsrow.h"
 #include "src/gui/shell/switcher.h"
 #include "src/gui/shell/theme.h"
+#include "src/gui/shell/theme_icons.h"
 #include "src/system/core/lang.h"
 #include "src/system/library/listeningstats.h"
 
@@ -158,7 +159,7 @@ static lv_obj_t *heading_strip(lv_obj_t *parent, const char *key, lv_event_cb_t 
 		lv_obj_set_style_text_color(label, theme()->accent, 0);
 
 		lv_obj_t *chevron = lv_image_create(see);
-		lv_image_set_src(chevron, &icon_chevron_right);
+		lv_image_set_src(chevron, theme_icon(&icon_chevron_right));
 		lv_obj_set_style_image_recolor(chevron, theme()->accent, 0);
 		lv_obj_set_style_image_recolor_opa(chevron, LV_OPA_COVER, 0);
 		lv_obj_set_style_image_opa(chevron, LV_OPA_COVER, 0);

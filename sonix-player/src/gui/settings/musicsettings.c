@@ -25,6 +25,7 @@
 #include "src/gui/shell/settingsrow.h"
 #include "src/gui/shell/switcher.h"
 #include "src/gui/shell/theme.h"
+#include "src/gui/shell/theme_icons.h"
 #include "src/system/audio/alsa-controls.h"
 #include "src/gui/shell/topbar.h"
 #include "src/system/device/sysinfo.h"
@@ -882,7 +883,7 @@ static lv_obj_t *corner_button(lv_obj_t *screen, gui_config_t *cfg, int slot, co
 	lv_obj_add_event_cb(button, cb, LV_EVENT_CLICKED, user);
 
 	lv_obj_t *icon = lv_image_create(button);
-	lv_image_set_src(icon, glyph);
+	lv_image_set_src(icon, theme_icon(glyph));
 	lv_obj_add_style(icon, &theme_style_icon, 0);
 	settingsrow_scale_corner_icon(icon, cfg);
 	lv_obj_center(icon);
@@ -2394,11 +2395,11 @@ static void build_rearrange_row(int index) {
 
 	const int icon_box = bp_pick(22, 32);
 	entry->icon = lv_image_create(entry->row);
-	lv_image_set_src(entry->icon, &icon_music2);
+	lv_image_set_src(entry->icon, theme_icon(&icon_music2));
 	lv_obj_add_style(entry->icon, &theme_style_icon, 0);
 	lv_obj_set_style_image_recolor_opa(entry->icon, LV_OPA_COVER, 0);
 	lv_obj_set_size(entry->icon, icon_box, icon_box);
-	lv_image_set_scale(entry->icon, (uint32_t)(LV_SCALE_NONE * icon_box / 32));
+	lv_image_set_scale(entry->icon, theme_icon_scale_to(lv_image_get_src(entry->icon), icon_box));
 	lv_image_set_inner_align(entry->icon, LV_IMAGE_ALIGN_CENTER);
 	lv_obj_align(entry->icon, LV_ALIGN_LEFT_MID, bp_pick(10, 16), 0);
 

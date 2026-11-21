@@ -15,6 +15,7 @@
 #include "src/gui/shell/scrolltext.h"
 #include "src/gui/shell/switcher.h"
 #include "src/gui/shell/theme.h"
+#include "src/gui/shell/theme_icons.h"
 #include "src/gui/wireless/airplay.h"
 #include "src/gui/wireless/dlna.h"
 #include "src/gui/wireless/sonixlink.h"
@@ -246,11 +247,11 @@ static lv_obj_t *radio_card(lv_obj_t *parent, const char *label, const lv_image_
 	lv_obj_add_event_cb(open, switch_screen_cb, LV_EVENT_CLICKED, target);
 
 	lv_obj_t *icon = lv_image_create(open);
-	lv_image_set_src(icon, source);
+	lv_image_set_src(icon, theme_icon_at(source, 18));
 	lv_obj_add_style(icon, &theme_style_icon, 0);
 	lv_obj_set_size(icon, 18, 18);
 	lv_image_set_inner_align(icon, LV_IMAGE_ALIGN_CENTER);
-	lv_image_set_scale(icon, (uint32_t)(LV_SCALE_NONE * 18 / LV_MAX((int)source->header.w, (int)source->header.h)));
+	lv_image_set_scale(icon, theme_icon_scale_to(lv_image_get_src(icon), 18));
 	lv_obj_set_style_image_recolor(icon, theme_semantic_color(tone), 0);
 	lv_obj_set_style_image_recolor_opa(icon, LV_OPA_COVER, 0);
 
@@ -330,7 +331,7 @@ static lv_obj_t *radio_card(lv_obj_t *parent, const char *label, const lv_image_
 	lv_obj_set_style_text_font(option_label, &font_ui_14, 0);
 
 	lv_obj_t *chevron = lv_image_create(row->options);
-	lv_image_set_src(chevron, &icon_chevron_right);
+	lv_image_set_src(chevron, theme_icon(&icon_chevron_right));
 	lv_obj_add_style(chevron, &theme_style_icon, 0);
 	lv_obj_set_size(chevron, 14, 14);
 	lv_image_set_inner_align(chevron, LV_IMAGE_ALIGN_CENTER);
@@ -370,12 +371,13 @@ static lv_obj_t *wireless_action_grid(lv_obj_t *parent) {
 		lv_obj_add_event_cb(button, switch_screen_cb, LV_EVENT_CLICKED, *item->target);
 
 		lv_obj_t *icon = lv_image_create(button);
-		lv_image_set_src(icon, item->icon);
+		lv_image_set_src(icon, theme_icon_at(item->icon, 20));
 		lv_obj_add_style(icon, &theme_style_icon, 0);
 		lv_obj_set_size(icon, 20, 20);
 		lv_image_set_inner_align(icon, LV_IMAGE_ALIGN_CENTER);
-		int side = LV_MAX((int)item->icon->header.w, (int)item->icon->header.h);
-		lv_image_set_scale(icon, side ? (uint32_t)(LV_SCALE_NONE * 20 / side) : LV_SCALE_NONE);
+		// Measured on what is drawn: the themed AirPlay / SonixLink / DLNA
+		// drawing is cut at the 46 px quick-button size, not the shared art's.
+		lv_image_set_scale(icon, theme_icon_scale_to(lv_image_get_src(icon), 20));
 		lv_obj_set_style_image_recolor(icon, theme_semantic_color(item->tone), 0);
 		lv_obj_set_style_image_recolor_opa(icon, LV_OPA_COVER, 0);
 

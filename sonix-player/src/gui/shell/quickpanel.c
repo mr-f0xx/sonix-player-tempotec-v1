@@ -26,6 +26,7 @@
 #include "src/gui/wireless/sonixlink.h"
 #include "src/gui/wireless/wifitransfer.h"
 #include "src/gui/shell/theme.h"
+#include "src/gui/shell/theme_icons.h"
 #include "src/system/playback/audiobook.h"
 #include "src/system/streaming/podcast.h"
 #include "src/system/streaming/podcastcache.h"
@@ -2539,7 +2540,7 @@ static lv_obj_t *make_circle_button(lv_obj_t *parent, const lv_image_dsc_t *glyp
 	lv_obj_set_style_shadow_width(btn, 0, 0);
 
 	lv_obj_t *icon = lv_image_create(btn);
-	lv_image_set_src(icon, glyph);
+	lv_image_set_src(icon, theme_icon(glyph));
 	lv_obj_add_style(icon, &theme_style_icon, 0);
 	lv_obj_set_style_image_recolor_opa(icon, LV_OPA_COVER, 0);
 	if (qp_compact) {
@@ -3894,7 +3895,7 @@ void quickpanel_init(gui_config_t *cfg) {
 	np_star_icon = NULL; // really created further down, once the star button exists
 	lv_obj_t *prev_icon = lv_image_create(prev_btn);
 	np_prev_icon = prev_icon;
-	lv_image_set_src(prev_icon, &icon_skip_back_large);
+	lv_image_set_src(prev_icon, theme_icon(&icon_skip_back_large));
 	lv_obj_add_style(prev_icon, &theme_style_icon, 0);
 	lv_obj_set_style_image_recolor_opa(prev_icon, LV_OPA_COVER, 0);
 	if (qp_compact) {
@@ -3920,7 +3921,7 @@ void quickpanel_init(gui_config_t *cfg) {
 	lv_obj_set_style_opa(play_btn, LV_OPA_40, LV_STATE_DISABLED);
 	lv_obj_set_style_opa(next_btn, LV_OPA_40, LV_STATE_DISABLED);
 	np_next_icon = next_icon;
-	lv_image_set_src(next_icon, &icon_skip_forward_large);
+	lv_image_set_src(next_icon, theme_icon(&icon_skip_forward_large));
 	lv_obj_add_style(next_icon, &theme_style_icon, 0);
 	lv_obj_set_style_image_recolor_opa(next_icon, LV_OPA_COVER, 0);
 	if (qp_compact) {

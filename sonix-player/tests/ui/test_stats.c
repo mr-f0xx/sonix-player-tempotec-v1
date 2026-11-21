@@ -83,6 +83,10 @@ void stats_summary(stats_range_t range, stats_summary_t *out) {
 	out->artists = 4;
 }
 
+// The page resolves its glyphs through theme_icon(); this test draws with its
+// own stand-ins and no themed set, so the lookup is the identity.
+const lv_image_dsc_t *theme_icon(const lv_image_dsc_t *shared) { return shared; }
+
 int stats_top(stats_top_t kind, stats_range_t range, int offset, int count, stats_entry_t *out) {
 	(void)range;
 	static const char *const ARTISTS[] = {"Slowspace", "Alyzea", "Nightjar", "Kessler"};

@@ -17,6 +17,7 @@
 #include "src/gui/fonts/fonts.h"
 #include "src/gui/shell/icons.h"
 #include "src/gui/shell/theme.h"
+#include "src/gui/shell/theme_icons.h"
 #include "src/system/device/clock.h"
 #include "src/system/device/led.h"
 #include "src/system/audio/audio.h"
@@ -341,7 +342,7 @@ void powermenu_init(gui_config_t *cfg) {
 	lv_obj_add_event_cb(cancel, cancel_cb, LV_EVENT_CLICKED, NULL);
 
 	lv_obj_t *cancel_icon = lv_image_create(cancel);
-	lv_image_set_src(cancel_icon, &icon_close);
+	lv_image_set_src(cancel_icon, theme_icon(&icon_close));
 	lv_obj_set_style_image_recolor(cancel_icon, lv_color_white(), 0);
 	lv_obj_set_style_image_recolor_opa(cancel_icon, LV_OPA_COVER, 0);
 	lv_obj_center(cancel_icon);

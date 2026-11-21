@@ -120,7 +120,7 @@ static void mark_long_pressed_cb(lv_event_t *e) {
 	}
 	menu_mark = (int)(intptr_t)lv_event_get_user_data(e);
 	swallow_next_click = true;
-	static const popover_item_t items[] = {{"ebookmarks_delete_bookmark", delete_mark_action, NULL, false}};
+	static const popover_item_t items[] = {{"ebookmarks_delete_bookmark", delete_mark_action, NULL, false, false}};
 	popover_show(lv_event_get_current_target(e), items, 1);
 }
 

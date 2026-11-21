@@ -19,6 +19,7 @@
 #include "src/gui/shell/spinner.h"
 #include "src/gui/shell/switcher.h"
 #include "src/gui/shell/theme.h"
+#include "src/gui/shell/theme_icons.h"
 #include "src/gui/shell/toast.h"
 #include "src/gui/shell/topbar.h"
 #include "src/system/bluetooth/bluetooth.h"
@@ -331,22 +332,22 @@ static void show_device_menu(lv_obj_t *anchor, bool connected, bool audio_connec
 	int count = 0;
 
 	if (audio_connected) {
-		items[count++] = (popover_item_t){"disconnect", disconnect_action, NULL, false};
+		items[count++] = (popover_item_t){"disconnect", disconnect_action, NULL, false, false};
 	} else if (connected) {
 		// The ACL link can remain up after A2DP has gone. Let the user request
 		// the audio profile again without cycling the whole Bluetooth radio.
-		items[count++] = (popover_item_t){"connect", connect_action, NULL, false};
-		items[count++] = (popover_item_t){"disconnect", disconnect_action, NULL, false};
+		items[count++] = (popover_item_t){"connect", connect_action, NULL, false, false};
+		items[count++] = (popover_item_t){"disconnect", disconnect_action, NULL, false, false};
 	} else {
-		items[count++] = (popover_item_t){"connect", connect_action, NULL, false};
+		items[count++] = (popover_item_t){"connect", connect_action, NULL, false, false};
 	}
 
-	items[count++] = (popover_item_t){"bt_rename_device", rename_action, NULL, false};
+	items[count++] = (popover_item_t){"bt_rename_device", rename_action, NULL, false, false};
 	char alias[BT_NAME_MAX];
 	if (bluetooth_get_device_alias(menu_mac, alias, sizeof(alias))) {
-		items[count++] = (popover_item_t){"bt_restore_device_name", restore_name_action, NULL, false};
+		items[count++] = (popover_item_t){"bt_restore_device_name", restore_name_action, NULL, false, false};
 	}
-	items[count++] = (popover_item_t){"bt_forget", forget_action, NULL, false};
+	items[count++] = (popover_item_t){"bt_forget", forget_action, NULL, false, false};
 	popover_show(anchor, items, count);
 }
 
@@ -472,7 +473,7 @@ static void add_row(lv_obj_t *parent, const bt_device_t *device, bool paired_sec
 	lv_obj_add_event_cb(row, row_free_cb, LV_EVENT_DELETE, mac_copy);
 
 	lv_obj_t *icon = lv_image_create(row);
-	lv_image_set_src(icon, &icon_bluetooth_status);
+	lv_image_set_src(icon, theme_icon(&icon_bluetooth_status));
 	lv_obj_add_style(icon, &theme_style_icon, 0);
 	lv_obj_set_style_image_recolor_opa(icon, LV_OPA_COVER, 0);
 	if (compact_rows) {
@@ -540,7 +541,7 @@ static void add_row(lv_obj_t *parent, const bt_device_t *device, bool paired_sec
 		lv_obj_add_event_cb(menu_btn, row_menu_clicked_cb, LV_EVENT_CLICKED, mac_copy);
 
 		lv_obj_t *dots = lv_image_create(menu_btn);
-		lv_image_set_src(dots, &icon_ellipsis_vertical);
+		lv_image_set_src(dots, theme_icon(&icon_ellipsis_vertical));
 		lv_obj_add_style(dots, &theme_style_icon, 0);
 		lv_obj_set_style_image_opa(dots, LV_OPA_70, 0);
 		lv_obj_center(dots);
@@ -816,7 +817,7 @@ static lv_obj_t *corner_button(lv_obj_t *screen, gui_config_t *cfg, int slot, co
 	lv_obj_set_style_pad_all(button, 0, 0);
 
 	lv_obj_t *icon = lv_image_create(button);
-	lv_image_set_src(icon, glyph);
+	lv_image_set_src(icon, theme_icon(glyph));
 	lv_obj_add_style(icon, &theme_style_icon, 0);
 	settingsrow_scale_corner_icon(icon, cfg);
 	lv_obj_center(icon);
@@ -854,7 +855,7 @@ static void build_rename_layer(gui_config_t *cfg) {
 	lv_obj_add_event_cb(cancel, rename_cancel_cb, LV_EVENT_CLICKED, NULL);
 
 	lv_obj_t *cancel_icon = lv_image_create(cancel);
-	lv_image_set_src(cancel_icon, &icon_close);
+	lv_image_set_src(cancel_icon, theme_icon(&icon_close));
 	lv_obj_add_style(cancel_icon, &theme_style_icon, 0);
 	settingsrow_scale_corner_icon(cancel_icon, cfg);
 	lv_obj_center(cancel_icon);

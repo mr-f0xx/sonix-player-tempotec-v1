@@ -22,6 +22,7 @@
 #include "src/gui/shell/settingsrow.h"
 #include "src/gui/shell/switcher.h"
 #include "src/gui/shell/theme.h"
+#include "src/gui/shell/theme_icons.h"
 #include "src/gui/nowplaying/cover.h"
 #include "src/gui/wireless/dlna.h"
 #include "src/system/audio/audio.h"
@@ -213,7 +214,7 @@ static void queue_row_paint_mark(queue_row_t *row) {
 	// says what is playing where the two are not the same row: a chosen row
 	// that is not playing keeps the note, a playing row keeps its mark.
 	if (chosen) {
-		lv_image_set_src(row->icon, &icon_check);
+		lv_image_set_src(row->icon, theme_icon(&icon_check));
 	} else {
 		lv_image_set_src(row->icon, is_playing_row ? &icon_now_playing : &icon_music2);
 	}

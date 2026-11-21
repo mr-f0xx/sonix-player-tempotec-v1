@@ -106,6 +106,78 @@ static theme_palette_t palette_oled = {
 	.dark = true,
 };
 
+// Rosé Pine Moon, the scheme's own moon variant, sampled from the published
+// palette: base for the page, surface for the cards, overlay -- a step above
+// the cards -- for the pressed state, highlight med for the status bar and the
+// player's deck, and the muted and subtle greys for the two steps of text. Its
+// accent is iris, the violet the scheme uses for what is selected, and its
+// glyphs are the set drawn for it (see icons_rose.c).
+static theme_palette_t palette_rose_pine = {
+	.screen_bg = LV_COLOR_MAKE(35, 33, 54),        // #232136, base
+	.surface = LV_COLOR_MAKE(42, 39, 63),          // #2a273f, surface
+	.surface_pressed = LV_COLOR_MAKE(57, 53, 82),  // #393552, overlay
+	.panel = LV_COLOR_MAKE(42, 40, 62),            // #2a283e, highlight low
+	.cover_bg = LV_COLOR_MAKE(42, 40, 62),
+	.text_primary = LV_COLOR_MAKE(224, 222, 244),  // #e0def4, text
+	.text_secondary = LV_COLOR_MAKE(144, 140, 170), // #908caa, subtle
+	.accent = LV_COLOR_MAKE(196, 167, 231),        // #c4a7e7, iris
+	.dark = true,
+};
+
+// Gruvbox, the dark scheme's medium-contrast steps from gruvbox.org: bg0 #282828
+// for the page, bg1 #3c3836 for the cards, bg2 #504945 for the pressed state,
+// the deck one step darker than the page at bg0_s #32302f -- the scheme's own
+// step for a raised block, so the panel reads as part of the page rather than
+// as the hole OLED's does. fg1 #ebdbb2 is the type, fg4 #a89984 the second
+// line, and yellow #d79921 the accent: the scheme's "information" hue.
+static theme_palette_t palette_gruvbox = {
+	.screen_bg = LV_COLOR_MAKE(40, 40, 40),         // #282828, bg0
+	.surface = LV_COLOR_MAKE(60, 56, 54),           // #3c3836, bg1
+	.surface_pressed = LV_COLOR_MAKE(80, 73, 69),   // #504945, bg2
+	.panel = LV_COLOR_MAKE(50, 48, 47),             // #32302f, bg0_s
+	.cover_bg = LV_COLOR_MAKE(50, 48, 47),
+	.text_primary = LV_COLOR_MAKE(235, 219, 178),   // #ebdbb2, fg1
+	.text_secondary = LV_COLOR_MAKE(168, 153, 132), // #a89984, fg4
+	.accent = LV_COLOR_MAKE(215, 153, 33),          // #d79921, yellow
+	.dark = true,
+};
+
+// Dracula, sampled from the published palette on draculatheme.com: background
+// #282a36 for the page, the selection step #44475a for the cards and current
+// line #6272a4 -- the scheme's own comment blue -- for the status bar and the
+// player's deck, which sits between the two. Foreground #f8f8f2 is the type and
+// the comment blue the second line; purple #bd93f9 is the accent, the hue the
+// scheme spends on what is selected.
+static theme_palette_t palette_dracula = {
+	.screen_bg = LV_COLOR_MAKE(40, 42, 54),         // #282a36, background
+	.surface = LV_COLOR_MAKE(68, 71, 90),           // #44475a, selection
+	.surface_pressed = LV_COLOR_MAKE(84, 88, 110),  // #54586e, selection lit
+	.panel = LV_COLOR_MAKE(52, 55, 70),             // #343746, between the two
+	.cover_bg = LV_COLOR_MAKE(52, 55, 70),
+	.text_primary = LV_COLOR_MAKE(248, 248, 242),   // #f8f8f2, foreground
+	.text_secondary = LV_COLOR_MAKE(98, 114, 164),  // #6272a4, comment
+	.accent = LV_COLOR_MAKE(189, 147, 249),         // #bd93f9, purple
+	.dark = true,
+};
+
+// Catppuccin Mocha, the flavour the port style guide calls the original: base
+// #1e1e2e for the page, surface 0 #313244 for the cards, surface 1 #45475a for
+// the pressed state, mantle #181825 for the status bar and the player's deck --
+// one step under the page, so the deck reads as a well rather than a raised
+// block. Text #cdd6f4 is the type, subtext 0 #a6adc8 the second line, and mauve
+// #cba6f7 the accent: the flavour's signature pastel violet.
+static theme_palette_t palette_catppuccin = {
+	.screen_bg = LV_COLOR_MAKE(30, 30, 46),         // #1e1e2e, base
+	.surface = LV_COLOR_MAKE(49, 50, 68),           // #313244, surface 0
+	.surface_pressed = LV_COLOR_MAKE(69, 71, 90),   // #45475a, surface 1
+	.panel = LV_COLOR_MAKE(24, 24, 37),             // #181825, mantle
+	.cover_bg = LV_COLOR_MAKE(24, 24, 37),
+	.text_primary = LV_COLOR_MAKE(205, 214, 244),   // #cdd6f4, text
+	.text_secondary = LV_COLOR_MAKE(166, 173, 200), // #a6adc8, subtext 0
+	.accent = LV_COLOR_MAKE(203, 166, 247),         // #cba6f7, mauve
+	.dark = true,
+};
+
 // A fixed filename keeps the card interface simple and avoids user-supplied
 // paths. Parsing is transactional: a partial or malformed edit is never shown.
 static char custom_root[512];
@@ -210,6 +282,14 @@ static theme_palette_t *selected_palette(void) {
 		return &palette_amber;
 	case THEME_KIND_OLED:
 		return &palette_oled;
+	case THEME_KIND_ROSE_PINE:
+		return &palette_rose_pine;
+	case THEME_KIND_GRUVBOX:
+		return &palette_gruvbox;
+	case THEME_KIND_DRACULA:
+		return &palette_dracula;
+	case THEME_KIND_CATPPUCCIN_MOCHA:
+		return &palette_catppuccin;
 	case THEME_KIND_CUSTOM:
 		return &palette_custom;
 	case THEME_KIND_DARK:
@@ -259,6 +339,14 @@ static lv_color_t default_accent(theme_kind_t kind) {
 		return lv_color_make(255, 173, 46); // Amber on Black signal
 	case THEME_KIND_OLED:
 		return lv_color_make(255, 255, 255); // OLED white
+	case THEME_KIND_ROSE_PINE:
+		return lv_color_make(196, 167, 231); // Rosé Pine iris
+	case THEME_KIND_GRUVBOX:
+		return lv_color_make(215, 153, 33); // Gruvbox yellow
+	case THEME_KIND_DRACULA:
+		return lv_color_make(189, 147, 249); // Dracula purple
+	case THEME_KIND_CATPPUCCIN_MOCHA:
+		return lv_color_make(203, 166, 247); // Catppuccin Mocha mauve
 	case THEME_KIND_CUSTOM:
 		return custom_accent;
 	case THEME_KIND_DARK:
@@ -515,6 +603,14 @@ static void select_active(void) {
 		selected_kind = THEME_KIND_AMBER_ON_BLACK;
 	} else if (saved_theme && strcmp(saved_theme, "oled") == 0) {
 		selected_kind = THEME_KIND_OLED;
+	} else if (saved_theme && strcmp(saved_theme, "rose-pine") == 0) {
+		selected_kind = THEME_KIND_ROSE_PINE;
+	} else if (saved_theme && strcmp(saved_theme, "gruvbox") == 0) {
+		selected_kind = THEME_KIND_GRUVBOX;
+	} else if (saved_theme && strcmp(saved_theme, "dracula") == 0) {
+		selected_kind = THEME_KIND_DRACULA;
+	} else if (saved_theme && strcmp(saved_theme, "catppuccin-mocha") == 0) {
+		selected_kind = THEME_KIND_CATPPUCCIN_MOCHA;
 	} else if (saved_theme && strcmp(saved_theme, "custom") == 0) {
 		selected_kind = load_custom(&palette_custom) ? THEME_KIND_CUSTOM : THEME_KIND_DARK;
 		if (selected_kind == THEME_KIND_CUSTOM) custom_accent = palette_custom.accent;
@@ -553,6 +649,10 @@ static void select_active(void) {
 		palette_tokyo.accent = custom_accent_color;
 		palette_amber.accent = custom_accent_color;
 		palette_oled.accent = custom_accent_color;
+		palette_rose_pine.accent = custom_accent_color;
+		palette_gruvbox.accent = custom_accent_color;
+		palette_dracula.accent = custom_accent_color;
+		palette_catppuccin.accent = custom_accent_color;
 		palette_custom.accent = custom_accent_color;
 	} else {
 		palette_dark.accent = ACCENT_COLORS[accent_index];
@@ -560,6 +660,11 @@ static void select_active(void) {
 		palette_tokyo.accent = accent_index == 0 ? default_accent(THEME_KIND_TOKYO_NIGHT) : ACCENT_COLORS[accent_index];
 		palette_amber.accent = accent_index == 0 ? default_accent(THEME_KIND_AMBER_ON_BLACK) : ACCENT_COLORS[accent_index];
 		palette_oled.accent = accent_index == 0 ? default_accent(THEME_KIND_OLED) : ACCENT_COLORS[accent_index];
+		palette_rose_pine.accent = accent_index == 0 ? default_accent(THEME_KIND_ROSE_PINE) : ACCENT_COLORS[accent_index];
+		palette_gruvbox.accent = accent_index == 0 ? default_accent(THEME_KIND_GRUVBOX) : ACCENT_COLORS[accent_index];
+		palette_dracula.accent = accent_index == 0 ? default_accent(THEME_KIND_DRACULA) : ACCENT_COLORS[accent_index];
+		palette_catppuccin.accent =
+			accent_index == 0 ? default_accent(THEME_KIND_CATPPUCCIN_MOCHA) : ACCENT_COLORS[accent_index];
 		palette_custom.accent = accent_index == 0 ? custom_accent : ACCENT_COLORS[accent_index];
 	}
 
@@ -686,13 +791,41 @@ bool theme_is_amber_on_black(void) { return selected_kind == THEME_KIND_AMBER_ON
 
 bool theme_is_oled(void) { return selected_kind == THEME_KIND_OLED; }
 
+bool theme_is_rose_pine(void) { return selected_kind == THEME_KIND_ROSE_PINE; }
+
+bool theme_is_gruvbox(void) { return selected_kind == THEME_KIND_GRUVBOX; }
+
+bool theme_is_dracula(void) { return selected_kind == THEME_KIND_DRACULA; }
+
+bool theme_is_catppuccin(void) { return selected_kind == THEME_KIND_CATPPUCCIN_MOCHA; }
+
 bool theme_is_monochrome(void) {
 	return selected_kind == THEME_KIND_AMBER_ON_BLACK || selected_kind == THEME_KIND_OLED;
 }
 
 bool theme_uses_function_glyphs(void) {
 	return selected_kind == THEME_KIND_TOKYO_NIGHT || selected_kind == THEME_KIND_AMBER_ON_BLACK ||
-		   selected_kind == THEME_KIND_OLED;
+		   selected_kind == THEME_KIND_OLED || selected_kind == THEME_KIND_ROSE_PINE ||
+		   selected_kind == THEME_KIND_GRUVBOX || selected_kind == THEME_KIND_DRACULA ||
+		   selected_kind == THEME_KIND_CATPPUCCIN_MOCHA;
+}
+
+theme_glyph_set_t theme_glyph_set(void) {
+	switch (selected_kind) {
+	case THEME_KIND_ROSE_PINE:
+		return THEME_GLYPH_SET_ROSE_PINE;
+	case THEME_KIND_GRUVBOX:
+		return THEME_GLYPH_SET_GRUVBOX;
+	case THEME_KIND_DRACULA:
+		return THEME_GLYPH_SET_DRACULA;
+	case THEME_KIND_CATPPUCCIN_MOCHA:
+		return THEME_GLYPH_SET_CATPPUCCIN;
+	case THEME_KIND_TOKYO_NIGHT:
+	case THEME_KIND_AMBER_ON_BLACK:
+	case THEME_KIND_OLED:
+	default:
+		return THEME_GLYPH_SET_LUCIDE;
+	}
 }
 
 lv_color_t theme_ink_on(lv_color_t fill) { return theme_color_is_light(fill) ? lv_color_black() : lv_color_white(); }
@@ -708,6 +841,100 @@ lv_color_t theme_semantic_color(theme_semantic_t role) {
 		// destination glyphs.
 		return theme_is_monochrome() ? active->accent : active->text_secondary;
 	}
+
+	// Rosé Pine Moon fills the roles from its own decorations: pine for blue,
+	// foam for cyan, iris for purple, rose for green, gold for amber and love
+	// for red. The mute is the scheme's own, one step under the subtitle.
+	if (selected_kind == THEME_KIND_ROSE_PINE) {
+		switch (role) {
+		case THEME_SEMANTIC_BLUE:
+			return lv_color_make(62, 143, 176); // #3e8fb0, moon pine
+		case THEME_SEMANTIC_CYAN:
+			return lv_color_make(156, 207, 216); // #9ccfd8, foam
+		case THEME_SEMANTIC_PURPLE:
+			return lv_color_make(196, 167, 231); // #c4a7e7, iris
+		case THEME_SEMANTIC_GREEN:
+			return lv_color_make(234, 154, 151); // #ea9a97, moon rose
+		case THEME_SEMANTIC_AMBER:
+			return lv_color_make(246, 193, 119); // #f6c177, gold
+		case THEME_SEMANTIC_RED:
+			return lv_color_make(235, 111, 146); // #eb6f92, love
+		case THEME_SEMANTIC_MUTED:
+		default:
+			return lv_color_make(110, 106, 134); // #6e6a86, muted
+		}
+	}
+
+	// Gruvbox takes the bright steps of its ANSI palette, one role per hue:
+	// blue, aqua, purple, green, yellow and red, with the scheme's grey for
+	// the mute.
+	if (selected_kind == THEME_KIND_GRUVBOX) {
+		switch (role) {
+		case THEME_SEMANTIC_BLUE:
+			return lv_color_make(131, 165, 152); // #83a598, bright blue
+		case THEME_SEMANTIC_CYAN:
+			return lv_color_make(142, 192, 124); // #8ec07c, bright aqua
+		case THEME_SEMANTIC_PURPLE:
+			return lv_color_make(211, 134, 155); // #d3869b, bright purple
+		case THEME_SEMANTIC_GREEN:
+			return lv_color_make(184, 187, 38); // #b8bb26, bright green
+		case THEME_SEMANTIC_AMBER:
+			return lv_color_make(250, 189, 47); // #fabd2f, bright yellow
+		case THEME_SEMANTIC_RED:
+			return lv_color_make(251, 73, 52); // #fb4934, bright red
+		case THEME_SEMANTIC_MUTED:
+		default:
+			return lv_color_make(146, 131, 116); // #928374, gray
+		}
+	}
+
+	// Dracula fills the roles from the palette on draculatheme.com: cyan, purple,
+	// green, yellow, orange -- its "orange" -- for the amber slot, pink for red,
+	// and the comment blue for the mute. Red proper is saved for the roles that
+	// must shout, as it is on every other palette here.
+	if (selected_kind == THEME_KIND_DRACULA) {
+		switch (role) {
+		case THEME_SEMANTIC_BLUE:
+			return lv_color_make(139, 233, 253); // #8be9fd, cyan
+		case THEME_SEMANTIC_CYAN:
+			return lv_color_make(80, 250, 123); // #50fa7b, green
+		case THEME_SEMANTIC_PURPLE:
+			return lv_color_make(189, 147, 249); // #bd93f9, purple
+		case THEME_SEMANTIC_GREEN:
+			return lv_color_make(241, 250, 140); // #f1fa8c, yellow
+		case THEME_SEMANTIC_AMBER:
+			return lv_color_make(255, 184, 108); // #ffb86c, orange
+		case THEME_SEMANTIC_RED:
+			return lv_color_make(255, 121, 198); // #ff79c6, pink
+		case THEME_SEMANTIC_MUTED:
+		default:
+			return lv_color_make(98, 114, 164); // #6272a4, comment
+		}
+	}
+
+	// Catppuccin Mocha's roles are the flavour's pastels, one per hue: sapphire
+	// and sky for blue, teal for cyan, mauve for purple, green, peach for
+	// amber, red, and the overlay grey for the mute.
+	if (selected_kind == THEME_KIND_CATPPUCCIN_MOCHA) {
+		switch (role) {
+		case THEME_SEMANTIC_BLUE:
+			return lv_color_make(137, 180, 250); // #89b4fa, blue
+		case THEME_SEMANTIC_CYAN:
+			return lv_color_make(148, 226, 213); // #94e2d5, teal
+		case THEME_SEMANTIC_PURPLE:
+			return lv_color_make(203, 166, 247); // #cba6f7, mauve
+		case THEME_SEMANTIC_GREEN:
+			return lv_color_make(166, 227, 161); // #a6e3a1, green
+		case THEME_SEMANTIC_AMBER:
+			return lv_color_make(250, 179, 135); // #fab387, peach
+		case THEME_SEMANTIC_RED:
+			return lv_color_make(243, 139, 168); // #f38ba8, red
+		case THEME_SEMANTIC_MUTED:
+		default:
+			return lv_color_make(127, 132, 156); // #7f849c, overlay 1
+		}
+	}
+
 	// Amber on Black and OLED are intentionally monochrome: blue, cyan,
 	// purple, green, amber and red roles all resolve to the chosen accent.
 	if (selected_kind != THEME_KIND_TOKYO_NIGHT) {
@@ -742,8 +969,9 @@ lv_color_t theme_semantic_color(theme_semantic_t role) {
 // The names on the rows are not part of this: they read in the ordinary text
 // colour, the same one the library lists write theirs in.
 lv_color_t theme_browser_folder_color(void) {
-	if (selected_kind == THEME_KIND_TOKYO_NIGHT) {
-		return theme_semantic_color(THEME_SEMANTIC_PURPLE); // #bb9af7, the palette's violet
+	if (selected_kind == THEME_KIND_TOKYO_NIGHT || selected_kind == THEME_KIND_ROSE_PINE ||
+		selected_kind == THEME_KIND_DRACULA || selected_kind == THEME_KIND_CATPPUCCIN_MOCHA) {
+		return theme_semantic_color(THEME_SEMANTIC_PURPLE); // violet / iris / purple / mauve: each palette's "what is selected"
 	}
 	// Unchanged from before: the signal green a folder wears on the other
 	// function-glyph palettes (their accent), and the plain text colour
@@ -793,6 +1021,92 @@ lv_color_t theme_player_chrome_color(theme_player_chrome_t role) {
 			return lv_color_make(48, 48, 48); // #303030
 		case THEME_PLAYER_CHROME_SHUFFLE_IDLE:
 			return lv_color_make(96, 96, 96); // #606060
+		}
+	}
+
+	// Rosé Pine Moon's Now Playing deck is drawn from its decorations the way
+	// Tokyo Night's is from its three: the track name wears the scheme's rose,
+	// the artist line, the playback glyph and the progress bar its iris, the
+	// format line and the clocks its subtle grey, and the quiet controls its
+	// muted. The star keeps the gold semantic role it asks for itself.
+	if (selected_kind == THEME_KIND_ROSE_PINE) {
+		switch (role) {
+		case THEME_PLAYER_CHROME_PRIMARY:
+			return lv_color_make(234, 154, 151); // #ea9a97, moon rose
+		case THEME_PLAYER_CHROME_SECONDARY:
+		case THEME_PLAYER_CHROME_CHEVRON:
+			return lv_color_make(144, 140, 170); // #908caa, subtle
+		case THEME_PLAYER_CHROME_MUTED:
+			return lv_color_make(110, 106, 134); // #6e6a86, muted
+		case THEME_PLAYER_CHROME_PLAYBACK:
+			return lv_color_make(196, 167, 231); // #c4a7e7, iris
+		case THEME_PLAYER_CHROME_PROGRESS_REST:
+			return lv_color_make(64, 61, 82); // #403d52, highlight med
+		case THEME_PLAYER_CHROME_SHUFFLE_IDLE:
+		case THEME_PLAYER_CHROME_OVERFLOW:
+			return lv_color_make(110, 106, 134); // #6e6a86, muted
+		}
+	}
+
+	// Gruvbox's deck keeps the scheme's own steps: the track name in fg1, the
+	// second line and the quiet controls in fg4, the playback glyph and the
+	// progress bar in the accent yellow whose deep step -- #b57614, the
+	// palette's "dark yellow" -- is the rest of the bar.
+	if (selected_kind == THEME_KIND_GRUVBOX) {
+		switch (role) {
+		case THEME_PLAYER_CHROME_PRIMARY:
+			return lv_color_make(235, 219, 178); // #ebdbb2, fg1
+		case THEME_PLAYER_CHROME_SECONDARY:
+		case THEME_PLAYER_CHROME_CHEVRON:
+		case THEME_PLAYER_CHROME_MUTED:
+		case THEME_PLAYER_CHROME_SHUFFLE_IDLE:
+		case THEME_PLAYER_CHROME_OVERFLOW:
+			return lv_color_make(168, 153, 132); // #a89984, fg4
+		case THEME_PLAYER_CHROME_PLAYBACK:
+			return lv_color_make(250, 189, 47); // #fabd2f, bright yellow
+		case THEME_PLAYER_CHROME_PROGRESS_REST:
+			return lv_color_make(80, 73, 69); // #504945, bg2
+		}
+	}
+
+	// Dracula's deck reads like its editor: the track name in the foreground,
+	// the artist line and the quiet controls in the comment blue, the playback
+	// glyph and progress bar in the purple, and the rest of the bar in the
+	// scheme's own dark step so it recedes into the panel.
+	if (selected_kind == THEME_KIND_DRACULA) {
+		switch (role) {
+		case THEME_PLAYER_CHROME_PRIMARY:
+			return lv_color_make(248, 248, 242); // #f8f8f2, foreground
+		case THEME_PLAYER_CHROME_SECONDARY:
+		case THEME_PLAYER_CHROME_CHEVRON:
+		case THEME_PLAYER_CHROME_MUTED:
+		case THEME_PLAYER_CHROME_SHUFFLE_IDLE:
+		case THEME_PLAYER_CHROME_OVERFLOW:
+			return lv_color_make(98, 114, 164); // #6272a4, comment
+		case THEME_PLAYER_CHROME_PLAYBACK:
+			return lv_color_make(189, 147, 249); // #bd93f9, purple
+		case THEME_PLAYER_CHROME_PROGRESS_REST:
+			return lv_color_make(68, 71, 90); // #44475a, selection
+		}
+	}
+
+	// Catppuccin Mocha's deck: text for the track, subtext for the second line
+	// and the quiet controls, mauve for playback and the bar, surface 1 for the
+	// part of the bar still to play.
+	if (selected_kind == THEME_KIND_CATPPUCCIN_MOCHA) {
+		switch (role) {
+		case THEME_PLAYER_CHROME_PRIMARY:
+			return lv_color_make(205, 214, 244); // #cdd6f4, text
+		case THEME_PLAYER_CHROME_SECONDARY:
+		case THEME_PLAYER_CHROME_CHEVRON:
+		case THEME_PLAYER_CHROME_MUTED:
+		case THEME_PLAYER_CHROME_SHUFFLE_IDLE:
+		case THEME_PLAYER_CHROME_OVERFLOW:
+			return lv_color_make(166, 173, 200); // #a6adc8, subtext 0
+		case THEME_PLAYER_CHROME_PLAYBACK:
+			return lv_color_make(203, 166, 247); // #cba6f7, mauve
+		case THEME_PLAYER_CHROME_PROGRESS_REST:
+			return lv_color_make(69, 71, 90); // #45475a, surface 1
 		}
 	}
 
@@ -933,6 +1247,14 @@ static const char *theme_config_value(theme_kind_t kind) {
 		return "amber-on-black";
 	case THEME_KIND_OLED:
 		return "oled";
+	case THEME_KIND_ROSE_PINE:
+		return "rose-pine";
+	case THEME_KIND_GRUVBOX:
+		return "gruvbox";
+	case THEME_KIND_DRACULA:
+		return "dracula";
+	case THEME_KIND_CATPPUCCIN_MOCHA:
+		return "catppuccin-mocha";
 	case THEME_KIND_CUSTOM:
 		return "custom";
 	case THEME_KIND_DARK:
@@ -960,6 +1282,8 @@ void theme_set_kind(theme_kind_t kind) {
 	if (kind < THEME_KIND_DARK || kind > THEME_KIND_CUSTOM) {
 		return;
 	}
+	// Every kind between the two ends is a real choice: the seven named
+	// palettes, OLED and Custom. Nothing falls through to Dark by accident.
 	if (kind == THEME_KIND_CUSTOM && !theme_reload_custom()) {
 		return;
 	}
@@ -972,11 +1296,20 @@ void theme_set_kind(theme_kind_t kind) {
 		palette_tokyo.accent = custom_accent_color;
 		palette_amber.accent = custom_accent_color;
 		palette_oled.accent = custom_accent_color;
+		palette_rose_pine.accent = custom_accent_color;
+		palette_gruvbox.accent = custom_accent_color;
+		palette_dracula.accent = custom_accent_color;
+		palette_catppuccin.accent = custom_accent_color;
 		palette_custom.accent = custom_accent_color;
 	} else {
 		palette_tokyo.accent = accent_index == 0 ? default_accent(THEME_KIND_TOKYO_NIGHT) : ACCENT_COLORS[accent_index];
 		palette_amber.accent = accent_index == 0 ? default_accent(THEME_KIND_AMBER_ON_BLACK) : ACCENT_COLORS[accent_index];
 		palette_oled.accent = accent_index == 0 ? default_accent(THEME_KIND_OLED) : ACCENT_COLORS[accent_index];
+		palette_rose_pine.accent = accent_index == 0 ? default_accent(THEME_KIND_ROSE_PINE) : ACCENT_COLORS[accent_index];
+		palette_gruvbox.accent = accent_index == 0 ? default_accent(THEME_KIND_GRUVBOX) : ACCENT_COLORS[accent_index];
+		palette_dracula.accent = accent_index == 0 ? default_accent(THEME_KIND_DRACULA) : ACCENT_COLORS[accent_index];
+		palette_catppuccin.accent =
+			accent_index == 0 ? default_accent(THEME_KIND_CATPPUCCIN_MOCHA) : ACCENT_COLORS[accent_index];
 		palette_custom.accent = accent_index == 0 ? custom_accent : ACCENT_COLORS[accent_index];
 	}
 	rebuild_active();
@@ -1006,6 +1339,10 @@ void theme_set_accent(int index) {
 	palette_tokyo.accent = index == 0 ? default_accent(THEME_KIND_TOKYO_NIGHT) : ACCENT_COLORS[index];
 	palette_amber.accent = index == 0 ? default_accent(THEME_KIND_AMBER_ON_BLACK) : ACCENT_COLORS[index];
 	palette_oled.accent = index == 0 ? default_accent(THEME_KIND_OLED) : ACCENT_COLORS[index];
+	palette_rose_pine.accent = index == 0 ? default_accent(THEME_KIND_ROSE_PINE) : ACCENT_COLORS[index];
+	palette_gruvbox.accent = index == 0 ? default_accent(THEME_KIND_GRUVBOX) : ACCENT_COLORS[index];
+	palette_dracula.accent = index == 0 ? default_accent(THEME_KIND_DRACULA) : ACCENT_COLORS[index];
+	palette_catppuccin.accent = index == 0 ? default_accent(THEME_KIND_CATPPUCCIN_MOCHA) : ACCENT_COLORS[index];
 	palette_custom.accent = index == 0 ? custom_accent : ACCENT_COLORS[index];
 	rebuild_active(); // the tint is drawn from the accent, so it moves with it
 	apply_palette();
@@ -1028,6 +1365,10 @@ void theme_set_custom_accent(lv_color_t color) {
 	palette_tokyo.accent = color;
 	palette_amber.accent = color;
 	palette_oled.accent = color;
+	palette_rose_pine.accent = color;
+	palette_gruvbox.accent = color;
+	palette_dracula.accent = color;
+	palette_catppuccin.accent = color;
 	palette_custom.accent = color;
 	rebuild_active();
 	apply_palette();

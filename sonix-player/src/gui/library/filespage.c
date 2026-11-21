@@ -25,6 +25,7 @@
 #include "src/gui/shell/settingsrow.h"
 #include "src/gui/shell/switcher.h"
 #include "src/gui/shell/theme.h"
+#include "src/gui/shell/theme_icons.h"
 #include "src/gui/shell/toast.h"
 #include "src/system/core/lang.h"
 #include "src/system/core/utils.h"
@@ -769,7 +770,7 @@ static void pick_rebuild(void) {
 		lv_obj_add_event_cb(row, pick_row_cb, LV_EVENT_CLICKED, kept);
 
 		lv_obj_t *glyph = lv_image_create(row);
-		lv_image_set_src(glyph, &icon_folder);
+		lv_image_set_src(glyph, theme_icon(&icon_folder));
 		lv_obj_add_style(glyph, &theme_style_icon, 0);
 		lv_obj_set_style_image_recolor(glyph, theme()->accent, 0);
 		lv_obj_set_style_image_recolor_opa(glyph, LV_OPA_COVER, 0);
@@ -954,10 +955,10 @@ static void entry_menu_cb(lv_event_t *e) {
 	snprintf(acting_on, sizeof(acting_on), "%s", entries[index].name);
 
 	static const popover_item_t items[] = {
-		{"rename", menu_rename_action, NULL, false},
-		{"files_move_to", menu_move_action, NULL, false},
-		{"files_copy_to", menu_copy_action, NULL, false},
-		{"delete", menu_delete_action, NULL, false},
+		{"rename", menu_rename_action, NULL, false, false},
+		{"files_move_to", menu_move_action, NULL, false, false},
+		{"files_copy_to", menu_copy_action, NULL, false, false},
+		{"delete", menu_delete_action, NULL, false, false},
 	};
 	popover_show(lv_event_get_target(e), items, 4);
 }
@@ -1061,7 +1062,7 @@ static void build_row(int index) {
 	lv_obj_add_event_cb(dots, entry_menu_cb, LV_EVENT_CLICKED, (void *)(intptr_t)index);
 
 	lv_obj_t *dots_glyph = lv_image_create(dots);
-	lv_image_set_src(dots_glyph, &icon_ellipsis_vertical);
+	lv_image_set_src(dots_glyph, theme_icon(&icon_ellipsis_vertical));
 	lv_obj_add_style(dots_glyph, &theme_style_icon, 0);
 	lv_obj_set_style_image_opa(dots_glyph, LV_OPA_60, 0);
 	lv_obj_center(dots_glyph);
@@ -1258,7 +1259,7 @@ void filespage_init(gui_config_t *cfg) {
 	lv_obj_add_event_cb(cancel, name_cancel_cb, LV_EVENT_CLICKED, NULL);
 
 	lv_obj_t *cancel_icon = lv_image_create(cancel);
-	lv_image_set_src(cancel_icon, &icon_close);
+	lv_image_set_src(cancel_icon, theme_icon(&icon_close));
 	lv_obj_add_style(cancel_icon, &theme_style_icon, 0);
 	settingsrow_scale_corner_icon(cancel_icon, cfg);
 	lv_obj_center(cancel_icon);
@@ -1308,7 +1309,7 @@ void filespage_init(gui_config_t *cfg) {
 	lv_obj_add_event_cb(pick_cancel, pick_cancel_cb, LV_EVENT_CLICKED, NULL);
 
 	lv_obj_t *pick_cancel_icon = lv_image_create(pick_cancel);
-	lv_image_set_src(pick_cancel_icon, &icon_close);
+	lv_image_set_src(pick_cancel_icon, theme_icon(&icon_close));
 	lv_obj_add_style(pick_cancel_icon, &theme_style_icon, 0);
 	settingsrow_scale_corner_icon(pick_cancel_icon, cfg);
 	lv_obj_center(pick_cancel_icon);

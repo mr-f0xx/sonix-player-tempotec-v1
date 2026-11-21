@@ -705,8 +705,9 @@ int main(int argc, char **argv) {
 	assert(lang_set("English"));
 	theme_set_kind(THEME_KIND_DARK);
 
-	printf("PASS radio_pages (240x320, 11 languages x 5 themes zero-overlap, four tiles, "
-		   "no scrolling, offline notice)\n");
+	printf("PASS radio_pages (240x320, 11 languages x %d themes zero-overlap, four tiles, "
+	       "no scrolling, offline notice)\n",
+	       THEME_KIND_COUNT);
 
 	nftw(tmp, unlink_cb, 64, FTW_DEPTH | FTW_PHYS);
 	return 0;

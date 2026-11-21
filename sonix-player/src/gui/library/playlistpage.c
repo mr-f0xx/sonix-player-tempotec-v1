@@ -19,6 +19,7 @@
 #include "src/gui/shell/settingsrow.h"
 #include "src/gui/shell/switcher.h"
 #include "src/gui/shell/theme.h"
+#include "src/gui/shell/theme_icons.h"
 #include "src/gui/shell/toast.h"
 #include "src/system/core/lang.h"
 #include "src/system/library/library.h"
@@ -646,7 +647,7 @@ static lv_obj_t *add_row(const char *name, const char *subtitle, const lv_image_
 	lv_obj_add_event_cb(row, row_delete_cb, LV_EVENT_DELETE, owned);
 
 	lv_obj_t *icon = lv_image_create(row);
-	lv_image_set_src(icon, glyph);
+	lv_image_set_src(icon, theme_icon(glyph));
 	scale_row_icon(icon);
 	lv_obj_add_style(icon, &theme_style_icon, 0);
 	lv_obj_set_style_image_recolor_opa(icon, LV_OPA_COVER, 0);
@@ -693,7 +694,7 @@ static lv_obj_t *add_row(const char *name, const char *subtitle, const lv_image_
 	lv_obj_add_event_cb(menu_btn, menu_btn_cb, LV_EVENT_CLICKED, owned);
 
 	lv_obj_t *dots = lv_image_create(menu_btn);
-	lv_image_set_src(dots, &icon_ellipsis_vertical);
+	lv_image_set_src(dots, theme_icon(&icon_ellipsis_vertical));
 	scale_row_icon(dots);
 	lv_obj_add_style(dots, &theme_style_icon, 0);
 	lv_obj_set_style_image_recolor_opa(dots, LV_OPA_COVER, 0);
@@ -1183,7 +1184,7 @@ static void import_add_candidate_row(int index) {
 	lv_obj_add_event_cb(row, import_row_clicked_cb, LV_EVENT_CLICKED, (void *)(intptr_t)index);
 
 	lv_obj_t *tick = lv_image_create(row);
-	lv_image_set_src(tick, &icon_check);
+	lv_image_set_src(tick, theme_icon(&icon_check));
 	scale_row_icon(tick);
 	lv_obj_add_style(tick, &theme_style_icon, 0);
 	lv_obj_set_style_image_recolor_opa(tick, LV_OPA_COVER, 0);
@@ -1413,7 +1414,7 @@ static lv_obj_t *action_row(const char *label_key, const lv_image_dsc_t *glyph, 
 	lv_obj_add_event_cb(row, cb, LV_EVENT_CLICKED, NULL);
 
 	lv_obj_t *icon = lv_image_create(row);
-	lv_image_set_src(icon, glyph);
+	lv_image_set_src(icon, theme_icon(glyph));
 	scale_row_icon(icon);
 	lv_obj_add_style(icon, &theme_style_icon, 0);
 	lv_obj_set_style_image_recolor(icon, theme()->accent, 0);
@@ -1665,7 +1666,7 @@ void playlistpage_init(gui_config_t *cfg) {
 	lv_obj_add_event_cb(cancel, name_cancel_cb, LV_EVENT_CLICKED, NULL);
 
 	lv_obj_t *cancel_icon = lv_image_create(cancel);
-	lv_image_set_src(cancel_icon, &icon_close);
+	lv_image_set_src(cancel_icon, theme_icon(&icon_close));
 	lv_obj_add_style(cancel_icon, &theme_style_icon, 0);
 	settingsrow_scale_corner_icon(cancel_icon, cfg);
 	lv_obj_center(cancel_icon);
@@ -1733,7 +1734,7 @@ void playlistpage_init(gui_config_t *cfg) {
 	lv_obj_add_event_cb(import_close, import_close_cb, LV_EVENT_CLICKED, NULL);
 
 	lv_obj_t *import_close_icon = lv_image_create(import_close);
-	lv_image_set_src(import_close_icon, &icon_close);
+	lv_image_set_src(import_close_icon, theme_icon(&icon_close));
 	lv_obj_add_style(import_close_icon, &theme_style_icon, 0);
 	settingsrow_scale_corner_icon(import_close_icon, cfg);
 	lv_obj_center(import_close_icon);

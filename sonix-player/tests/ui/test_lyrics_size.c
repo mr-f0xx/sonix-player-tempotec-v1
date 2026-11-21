@@ -12,6 +12,9 @@ static const theme_palette_t palette;
 const theme_palette_t *theme(void) { return &palette; }
 bool theme_is_monochrome(void) { return false; }
 bool theme_is_tokyo_night(void) { return false; }
+// The player's pages resolve glyphs through theme_icons.c, which asks the
+// active theme for its set. No set here: the shared bitmaps are drawn.
+theme_glyph_set_t theme_glyph_set(void) { return THEME_GLYPH_SET_LUCIDE; }
 lv_color_t theme_player_chrome_color(theme_player_chrome_t role) {
 	(void)role;
 	return palette.accent;

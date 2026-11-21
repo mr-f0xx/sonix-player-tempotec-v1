@@ -34,6 +34,7 @@
 #include "src/gui/shell/switcher.h"
 #include "src/system/addons/addons.h"
 #include "src/gui/shell/theme.h"
+#include "src/gui/shell/theme_icons.h"
 #include "src/gui/shell/toast.h"
 #include "src/gui/shell/topbar.h"
 #include "src/gui/streaming/streaming.h"
@@ -44,13 +45,53 @@
 #include "src/system/device/bootpic.h"
 #include "src/system/library/audiobookdb.h"
 #include "src/system/library/library.h"
+#include "src/system/library/listeningstats.h"
 #include "src/system/playback/device_state.h"
 #include "src/system/playback/playlist.h"
+
+// The Statistics page hangs off the Music page's menu, so this test links it.
+// The page's numbers come from listeningstats.c and are covered against the
+// real database by test_listeningstats.c; here they only have to resolve.
+// stats_refresh() itself lives in the real stats.c, which is linked in.
+void coverloader_request(int slot, const char *path, int size) {
+	(void)slot;
+	(void)path;
+	(void)size;
+}
+void stats_daily(int days, stats_day_t *out, int count) {
+	(void)days;
+	memset(out, 0, sizeof(*out) * (size_t)count);
+}
+void stats_summary(stats_range_t range, stats_summary_t *out) {
+	(void)range;
+	memset(out, 0, sizeof(*out));
+}
+int stats_top(stats_top_t kind, stats_range_t range, int offset, int count, stats_entry_t *out) {
+	(void)kind;
+	(void)range;
+	(void)offset;
+	(void)count;
+	(void)out;
+	return 0;
+}
+int stats_top_count(stats_top_t kind, stats_range_t range) {
+	(void)kind;
+	(void)range;
+	return 0;
+}
+void stats_format_duration(long seconds, char *out, size_t size) {
+	(void)seconds;
+	if (size) {
+		out[0] = '\0';
+	}
+}
 
 static void check_custom_theme(void) {
 	char root[] = "/tmp/sonix-theme-XXXXXX";
 	assert(mkdtemp(root));
-	char dir[256], path[256];
+	// Sized for root plus "/Themes/custom.ini" with room to spare: the default
+	// 256 leaves the compiler unable to prove the second snprintf fits.
+	char dir[288], path[320];
 	snprintf(dir, sizeof(dir), "%s/Themes", root);
 	snprintf(path, sizeof(path), "%s/custom.ini", dir);
 	assert(mkdir(dir, 0700) == 0);
@@ -376,6 +417,19 @@ static void set_icons_only(bool enabled) {
  * including its alpha edges and theme tint, in ARGB8888 and the panel's RGB565. */
 static void check_native_icon(lv_obj_t *icon, int tile, int size) {
 	const lv_image_dsc_t *source = lv_image_get_src(icon);
+	// A theme with its own glyph set answers with that set's drawing of the
+	// tile, cut at the size this layout draws it -- so the shared native-size
+	// table is not consulted at all and the assertion below would be wrong.
+	if (theme_icons_active()) {
+		// The set draws the tile once, at the size the labelled layout uses
+		// (22 px on V1); the image widget may then be scaled up to the larger
+		// icon-only box, so only the source is checked here.
+		const lv_image_dsc_t *themed = theme_icon_home_tile(tile);
+		assert(source == themed);
+		assert(themed && themed->header.w == themed->header.h);
+		assert(themed->header.w <= size);
+		return;
+	}
 	assert(source == main_menu_icon_native(tile, theme_uses_function_glyphs(), size));
 	assert(source && source->header.w == size && source->header.h == size);
 	assert(lv_image_get_scale_x(icon) == LV_SCALE_NONE);
@@ -890,7 +944,13 @@ int main(int argc, char **argv) {
 		tile_metrics_t year_tile = tile_metrics(lv_obj_get_child(section_grid, 2));
 		tile_metrics_t most_tile = tile_metrics(lv_obj_get_child(section_grid, 3));
 		tile_metrics_t play_tile = tile_metrics(lv_obj_get_child(section_grid, 4));
-		if (theme_uses_function_glyphs()) {
+		if (theme_icons_active()) {
+			// A theme with its own set draws these three from that set; the
+			// shared symbol is not what the page asks for any more.
+			assert(year_tile.source == theme_icon(&icon_year));
+			assert(most_tile.source == theme_icon(&icon_most_played));
+			assert(play_tile.source == theme_icon(&icon_list_music));
+		} else if (theme_uses_function_glyphs()) {
 			assert(year_tile.source == &icon_year);
 			assert(most_tile.source == &icon_most_played);
 			assert(play_tile.source == &icon_list_music);

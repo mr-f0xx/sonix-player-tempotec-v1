@@ -26,6 +26,7 @@
 #include "src/gui/shell/spinner.h"
 #include "src/gui/shell/switcher.h"
 #include "src/gui/shell/theme.h"
+#include "src/gui/shell/theme_icons.h"
 #include "src/gui/wireless/wifisettings.h"
 #include "src/system/decode/growfile.h"
 #include "src/system/playback/device_state.h"
@@ -462,7 +463,7 @@ static void paint_thumb(lv_obj_t *thumb, int index) {
 	}
 	// The microphone, not the musical note: a podcast row without a cover is
 	// not a track. The icon is the one supplied by the user (podcast-list.svg).
-	lv_image_set_src(thumb, &icon_podcast_list);
+	lv_image_set_src(thumb, theme_icon(&icon_podcast_list));
 	lv_obj_add_style(thumb, &theme_style_icon, 0);
 	lv_obj_set_style_image_recolor_opa(thumb, LV_OPA_COVER, 0);
 	lv_obj_set_style_clip_corner(thumb, false, 0);
@@ -1180,7 +1181,7 @@ static void build_rows(int width) {
 		lv_obj_set_hidden(row->heard, true);
 
 		lv_obj_t *heard_tick = lv_image_create(row->heard);
-		lv_image_set_src(heard_tick, &icon_check);
+		lv_image_set_src(heard_tick, theme_icon(&icon_check));
 		lv_obj_add_style(heard_tick, &theme_style_icon, 0);
 		lv_obj_set_style_image_recolor_opa(heard_tick, LV_OPA_COVER, 0);
 		lv_image_set_scale(heard_tick, (uint32_t)(LV_SCALE_NONE * bp_pick(14, 20) / 36));
@@ -1193,7 +1194,7 @@ static void build_rows(int width) {
 		// The plain tick the file browser puts on a chosen row: the circled one
 		// this used to show was a 36 px ring around its own tick, and at 22 px
 		// the two ran into each other and read as a smudge.
-		lv_image_set_src(row->check, &icon_check);
+		lv_image_set_src(row->check, theme_icon(&icon_check));
 		lv_obj_add_style(row->check, &theme_style_icon, 0);
 		lv_obj_set_style_image_recolor_opa(row->check, LV_OPA_COVER, 0);
 		lv_image_set_scale(row->check, 156); // 36 px source -> about 22 px
@@ -1214,7 +1215,7 @@ static void build_rows(int width) {
 		lv_obj_add_event_cb(row->menu_btn, row_menu_dispatch_cb, LV_EVENT_CLICKED, NULL);
 
 		lv_obj_t *dots = lv_image_create(row->menu_btn);
-		lv_image_set_src(dots, &icon_ellipsis_vertical);
+		lv_image_set_src(dots, theme_icon(&icon_ellipsis_vertical));
 		lv_obj_add_style(dots, &theme_style_icon, 0);
 		lv_obj_set_style_image_recolor_opa(dots, LV_OPA_COVER, 0);
 		lv_image_set_scale(dots, (uint32_t)(LV_SCALE_NONE * 20 / 36));
@@ -2345,8 +2346,8 @@ static void row_menu_cb(lv_event_t *e) {
 		return;
 	}
 
-	static const popover_item_t FOLLOW[] = {{"podcast_follow", follow_cb, NULL, false}};
-	static const popover_item_t UNFOLLOW[] = {{"podcast_unfollow", unfollow_cb, NULL, false}};
+	static const popover_item_t FOLLOW[] = {{"podcast_follow", follow_cb, NULL, false, false}};
+	static const popover_item_t UNFOLLOW[] = {{"podcast_unfollow", unfollow_cb, NULL, false, false}};
 
 	bool followed = podcastsubs_is_followed(result_feeds[menu_row_index].id);
 	popover_show(lv_event_get_current_target(e), followed ? UNFOLLOW : FOLLOW, 1);
@@ -2359,10 +2360,10 @@ static void episode_menu_cb(lv_event_t *e) {
 		return;
 	}
 	dl_row = index;
-	static const popover_item_t NOT_HEARD[] = {{"podcast_mark_listened", mark_heard_cb, NULL, false},
-												 {"podcast_download", download_cb, NULL, false}};
-	static const popover_item_t HEARD[] = {{"podcast_mark_not_listened", mark_not_heard_cb, NULL, false},
-									   {"podcast_download", download_cb, NULL, false}};
+	static const popover_item_t NOT_HEARD[] = {{"podcast_mark_listened", mark_heard_cb, NULL, false, false},
+												 {"podcast_download", download_cb, NULL, false, false}};
+	static const popover_item_t HEARD[] = {{"podcast_mark_not_listened", mark_not_heard_cb, NULL, false, false},
+									   {"podcast_download", download_cb, NULL, false, false}};
 	bool heard = podcastplayed_get(result_episodes[index].id);
 	popover_show(lv_event_get_current_target(e), heard ? HEARD : NOT_HEARD, 2);
 }
@@ -2833,12 +2834,12 @@ static void bulk_episode_sheet(lv_obj_t *anchor) {
 	popover_item_t actions[3];
 	int count = 0;
 	if (has_unheard) {
-		actions[count++] = (popover_item_t){"podcast_mark_listened", bulk_mark_heard_cb, NULL, false};
+		actions[count++] = (popover_item_t){"podcast_mark_listened", bulk_mark_heard_cb, NULL, false, false};
 	}
 	if (has_heard) {
-		actions[count++] = (popover_item_t){"podcast_mark_not_listened", bulk_mark_unheard_cb, NULL, false};
+		actions[count++] = (popover_item_t){"podcast_mark_not_listened", bulk_mark_unheard_cb, NULL, false, false};
 	}
-	actions[count++] = (popover_item_t){"podcast_download", bulk_download_selected_cb, NULL, false};
+	actions[count++] = (popover_item_t){"podcast_download", bulk_download_selected_cb, NULL, false, false};
 	popover_show(anchor, actions, count);
 }
 
@@ -3504,7 +3505,7 @@ static lv_obj_t *corner_button(gui_config_t *cfg, int slot, const lv_image_dsc_t
 	lv_obj_set_style_pad_all(button, 0, 0);
 
 	lv_obj_t *icon = lv_image_create(button);
-	lv_image_set_src(icon, glyph);
+	lv_image_set_src(icon, theme_icon(glyph));
 	lv_obj_add_style(icon, &theme_style_icon, 0);
 	settingsrow_scale_corner_icon(icon, cfg);
 	lv_obj_center(icon);

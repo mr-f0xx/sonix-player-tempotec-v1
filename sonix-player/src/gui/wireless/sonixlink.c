@@ -10,6 +10,7 @@
 #include "src/gui/fonts/fonts.h"
 #include "src/gui/shell/gui.h"
 #include "src/gui/shell/icons.h"
+#include "src/gui/shell/theme_icons.h"
 #include "src/gui/library/medialist.h"
 #include "src/gui/library/playlistpage.h"
 #include "src/gui/settings/musicsettings.h"
@@ -813,14 +814,12 @@ void sonixlink_page_init(gui_config_t *cfg) {
 	// the image gets a compact layout box as well as a smaller draw scale, and
 	// takes only the space it visibly occupies.
 	glyph = lv_image_create(container);
-	lv_image_set_src(glyph, &icon_sonixlink_page);
+	lv_image_set_src(glyph, theme_icon(&icon_sonixlink_page));
 	int icon_size = compact ? 96 : 200;
-	int source_side = LV_MAX((int)icon_sonixlink_page.header.w, (int)icon_sonixlink_page.header.h);
 	lv_obj_set_size(glyph, icon_size, icon_size);
 	lv_image_set_inner_align(glyph, LV_IMAGE_ALIGN_CENTER);
-	if (source_side > 0) {
-		lv_image_set_scale(glyph, (uint32_t)(LV_SCALE_NONE * icon_size / source_side));
-	}
+	// Measured on what is drawn: the themed mark is cut at 128 px.
+	lv_image_set_scale(glyph, theme_icon_scale_to(lv_image_get_src(glyph), icon_size));
 	lv_obj_set_style_margin_top(glyph, compact ? 8 : 40, 0);
 
 	status_label = lv_label_create(container);

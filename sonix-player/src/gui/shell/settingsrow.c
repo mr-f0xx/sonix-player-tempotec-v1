@@ -18,6 +18,7 @@
 #include "src/gui/nowplaying/player.h"
 #include "src/gui/shell/switcher.h"
 #include "src/gui/shell/theme.h"
+#include "src/gui/shell/theme_icons.h"
 #include "src/system/core/lang.h"
 
 // Regular dimensions. Compact values come from the board profile below.
@@ -1038,7 +1039,7 @@ lv_obj_t *settingsrow_add(lv_obj_t *parent, const char *name, lv_obj_t **value_o
 		// A plain row opens another page, which the chevron announces; rows
 		// with a value use their right edge for the value instead.
 		lv_obj_t *chev = lv_image_create(row);
-		lv_image_set_src(chev, &icon_chevron_right);
+		lv_image_set_src(chev, theme_icon(&icon_chevron_right));
 		lv_obj_add_style(chev, &theme_style_icon, 0);
 		lv_obj_set_style_image_opa(chev, LV_OPA_60, 0);
 		lv_obj_align(chev, LV_ALIGN_RIGHT_MID, 0, 0);
@@ -1073,16 +1074,29 @@ static lv_obj_t *settingsrow_add_icon_internal(lv_obj_t *row, const lv_image_dsc
 	}
 
 	lv_obj_t *icon = lv_image_create(row);
-	lv_image_set_src(icon, source);
+	// Every settings and menu row's leading glyph comes through here, so the
+	// themed sets answer once for the whole app: Rose Pine Moon and Gruvbox
+	// draw their own; the rest keep the shared bitmap.
+	//
+	// Size and scale are taken from the bitmap that is actually drawn, not
+	// from the shared one asked for: the themed drawing is rasterised at the
+	// size this row wants (24 px, 18 px on the V1), so measuring the shared
+	// 128 px service mark instead would shrink a Radio row's glyph to a
+	// mote. Measuring what lands in the object keeps both honest.
+	// The row draws its glyph at 24 px (18 on the V1), so ask for the drawing
+	// cut nearest that: the shared mark a row may name can be 128 px, and its
+	// themed counterpart at the row's own size is the sharp one.
+	int target_side = compact_rows() ? 18 : 24;
+	const lv_image_dsc_t *drawn = theme_icon_at(source, target_side);
+	lv_image_set_src(icon, drawn);
 	lv_obj_add_style(icon, &theme_style_icon, 0);
 	lv_obj_set_style_image_recolor_opa(icon, LV_OPA_COVER, 0);
 	lv_obj_set_clickable(icon, false);
 	lv_obj_set_scrollable(icon, false);
 
-	int source_w = (int)source->header.w;
-	int source_h = (int)source->header.h;
+	int source_w = (int)drawn->header.w;
+	int source_h = (int)drawn->header.h;
 	int max_side = LV_MAX(source_w, source_h);
-	int target_side = compact_rows() ? 18 : 24;
 	if (max_side > 0) {
 		lv_obj_set_size(icon, LV_MAX(1, source_w * target_side / max_side),
 						LV_MAX(1, source_h * target_side / max_side));

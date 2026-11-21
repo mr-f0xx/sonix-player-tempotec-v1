@@ -6,22 +6,42 @@
 #include "lvgl/lvgl.h"
 
 // The built-in appearances. Dark and Light keep their existing palettes;
-// Tokyo Night, Amber on Black and OLED add three dark palettes designed for
-// the V1. OLED is true black with white as its accent.
+// Tokyo Night, Amber on Black, OLED, Rosé Pine Moon, Gruvbox, Dracula and
+// Catppuccin Mocha add seven dark palettes designed for the V1. OLED is true
+// black with white as its accent; Rosé Pine Moon, Gruvbox, Dracula and
+// Catppuccin Mocha draw their function glyphs with icon sets of their own, in
+// the hand their schemes are known for.
 typedef enum {
 	THEME_KIND_DARK = 0,
 	THEME_KIND_LIGHT = 1,
 	THEME_KIND_TOKYO_NIGHT = 2,
 	THEME_KIND_AMBER_ON_BLACK = 3,
 	THEME_KIND_OLED = 4,
-	THEME_KIND_CUSTOM = 5,
+	THEME_KIND_ROSE_PINE = 5,
+	THEME_KIND_GRUVBOX = 6,
+	THEME_KIND_DRACULA = 7,
+	THEME_KIND_CATPPUCCIN_MOCHA = 8,
+	THEME_KIND_CUSTOM = 9,
 } theme_kind_t;
 
-#define THEME_KIND_COUNT 5 // built-in themes; Custom is a separate SD-card choice
+#define THEME_KIND_COUNT 9 // built-in themes; Custom is a separate SD-card choice
 
-// Fixed semantic accents used by Tokyo Night's function-matched glyphs.
-// Amber on Black and OLED map every icon role to their accent (signal amber,
-// white); Dark and Light continue to use their existing single accent.
+// Which set of function-matched glyphs a page draws. Tokyo Night and Amber on
+// Black share the original Lucide-derived set; Rosé Pine Moon, Gruvbox,
+// Dracula and Catppuccin Mocha each carry an icon set of their own, drawn for
+// their scheme's weight of line.
+typedef enum {
+	THEME_GLYPH_SET_LUCIDE = 0, // Tokyo Night, Amber on Black and OLED
+	THEME_GLYPH_SET_ROSE_PINE = 1,
+	THEME_GLYPH_SET_GRUVBOX = 2,
+	THEME_GLYPH_SET_DRACULA = 3,
+	THEME_GLYPH_SET_CATPPUCCIN = 4,
+} theme_glyph_set_t;
+
+// Fixed semantic accents used by the function-matched glyphs. Tokyo Night,
+// Rosé Pine Moon and Gruvbox fill these roles with their own hues; Amber on
+// Black and OLED map every icon role to their accent (signal amber, white);
+// Dark and Light continue to use their existing single accent.
 typedef enum {
 	THEME_SEMANTIC_BLUE,
 	THEME_SEMANTIC_CYAN,
@@ -142,25 +162,40 @@ void theme_notify_screen_shown(lv_obj_t *screen);
 
 const theme_palette_t *theme(void);
 // The subtle accent-tinted surface shared by the dark themes' mini-player
-// and Music browse tiles. OLED's is plain black, like the rest of its cards.
+// and Music browse tiles. OLED's is plain black, like the rest of its cards,
+// and Rosé Pine's is the overlay step its cards are drawn a level above.
 lv_color_t theme_now_playing_fill(void);
 bool theme_is_dark(void);
 bool theme_is_tokyo_night(void);
 bool theme_is_amber_on_black(void);
 bool theme_is_oled(void);
+bool theme_is_rose_pine(void);
+bool theme_is_gruvbox(void);
+// Dracula and Catppuccin Mocha: the two scheme-accurate ports, each with its
+// own glyph hand and its own semantic hues (theme.c).
+bool theme_is_dracula(void);
+bool theme_is_catppuccin(void);
 // The single-hue palettes, Amber on Black and OLED: every glyph and status
 // mark wears the accent, and nothing borrows a second hue (no Bluetooth blue,
 // codec colours or balanced-output gold). The roles still come from the
 // active palette, so each keeps its own colours.
 bool theme_is_monochrome(void);
-// Tokyo Night, Amber on Black and OLED use the same function-matched icon and
-// compact V1 layouts. Their palettes and semantic hues remain distinct.
+// Tokyo Night, Amber on Black, OLED, Rosé Pine Moon, Gruvbox, Dracula and
+// Catppuccin Mocha use the same function-matched icon and compact V1 layouts.
+// Their palettes, semantic hues and glyph sets remain distinct.
 bool theme_uses_function_glyphs(void);
+// Which glyph set the pages draw: the Lucide-derived one Tokyo Night, Amber on
+// Black and OLED share, or one of the four scheme sets drawn for Rosé Pine
+// Moon, Gruvbox, Dracula and Catppuccin Mocha. Only meaningful while
+// theme_uses_function_glyphs() is true.
+theme_glyph_set_t theme_glyph_set(void);
 theme_kind_t theme_get_kind(void);
 
-// Tokyo Night's blue, cyan, violet, green, amber, red and muted roles. Amber
-// on Black and OLED map every icon role to their accent; in Dark/Light they
-// resolve to the chosen accent (or secondary text for muted).
+// Tokyo Night's blue, cyan, violet, green, amber, red and muted roles; Rosé
+// Pine Moon's pine, foam, iris, rose, gold, love and muted; Gruvbox's blue,
+// aqua, purple, green, yellow, red and grey. Amber on Black and OLED map every
+// icon role to their accent; in Dark/Light they resolve to the chosen accent
+// (or secondary text for muted).
 lv_color_t theme_semantic_color(theme_semantic_t role);
 lv_color_t theme_player_chrome_color(theme_player_chrome_t role);
 
@@ -175,9 +210,9 @@ lv_color_t theme_ink_on(lv_color_t fill);
 bool theme_color_is_light(lv_color_t c);
 
 // What the file browser recolours its folder glyphs to, and nothing else on
-// the page. Tokyo Night answers with the violet of its own palette; every
-// other theme with the shared icon colour it has always used, so the page is
-// unchanged outside Tokyo Night.
+// the page. Tokyo Night answers with the violet of its own palette, Rosé Pine
+// Moon with its iris; every other theme with the shared icon colour it has
+// always used, so the page is unchanged outside those two.
 //
 // Read at paint time: a hand-set colour is a snapshot, so the page asks again
 // whenever the palette moves.
@@ -191,8 +226,9 @@ void theme_toggle(void);
 // colour): 0 blue (default), 1 red, 2 orange, 3 yellow, 4 lime, 5 green,
 // 6 cyan, 7 indigo, 8 purple, 9 pink, 10 brown, 11 slate. Dark and Light
 // retain the same presets; Tokyo Night defaults to its own blue (#7aa2f7),
-// Amber on Black to amber (#ffad2e), OLED to white (#ffffff), and all three
-// honor any explicitly selected non-default accent.
+// Amber on Black to amber (#ffad2e), OLED to white (#ffffff), Rosé Pine Moon
+// to its iris (#c4a7e7) and Gruvbox to its yellow (#d79921); every one of them
+// honors an explicitly selected non-default accent.
 // Persists in the config.
 #define THEME_ACCENT_COUNT 12
 lv_color_t theme_accent_preset(int index);

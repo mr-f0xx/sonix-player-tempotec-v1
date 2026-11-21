@@ -104,6 +104,194 @@ Showcase of **Tokyo Night** appearance: a blue-black palette with function-match
 </table>
 </details>
 
+<a name="rose-pine-theme"></a>
+
+<details>
+<summary><strong>Rosé Pine Moon theme</strong></summary>
+
+Showcase of **Rosé Pine Moon** appearance: soft rose greys over the original pine, with iris drawing the player controls.
+
+<table>
+  <tr>
+    <td align="center">
+      <a href="screenshots/rose-pine/main-menu.png"><img src="screenshots/rose-pine/main-menu.png" width="180" alt="Rose Pine Moon main menu"></a>
+      <br><sub><b>Main menu</b></sub>
+    </td>
+    <td align="center">
+      <a href="screenshots/rose-pine/music.png"><img src="screenshots/rose-pine/music.png" width="180" alt="Rose Pine Moon music"></a>
+      <br><sub><b>Music</b></sub>
+    </td>
+    <td align="center">
+      <a href="screenshots/rose-pine/more.png"><img src="screenshots/rose-pine/more.png" width="180" alt="Rose Pine Moon more"></a>
+      <br><sub><b>More</b></sub>
+    </td>
+    <td align="center">
+      <a href="screenshots/rose-pine/wireless.png"><img src="screenshots/rose-pine/wireless.png" width="180" alt="Rose Pine Moon wireless"></a>
+      <br><sub><b>Wireless</b></sub>
+    </td>
+  </tr>
+  <tr>
+    <td align="center">
+      <a href="screenshots/rose-pine/settings.png"><img src="screenshots/rose-pine/settings.png" width="180" alt="Rose Pine Moon settings"></a>
+      <br><sub><b>Settings</b></sub>
+    </td>
+    <td align="center">
+      <a href="screenshots/rose-pine/now-playing.png"><img src="screenshots/rose-pine/now-playing.png" width="180" alt="Rose Pine Moon now playing"></a>
+      <br><sub><b>Now Playing</b></sub>
+    </td>
+    <td align="center">
+      <a href="screenshots/rose-pine/file-browser.png"><img src="screenshots/rose-pine/file-browser.png" width="180" alt="Rose Pine Moon file browser"></a>
+      <br><sub><b>File Browser</b></sub>
+    </td>
+    <td align="center">
+      <a href="screenshots/rose-pine/streaming.png"><img src="screenshots/rose-pine/streaming.png" width="180" alt="Rose Pine Moon streaming"></a>
+      <br><sub><b>Streaming</b></sub>
+    </td>
+  </tr>
+</table>
+</details>
+
+<a name="gruvbox-theme"></a>
+
+<details>
+<summary><strong>Gruvbox theme</strong></summary>
+
+Showcase of **Gruvbox** appearance: warm retro greys, amber and green, with icons matched to the palette.
+
+<table>
+  <tr>
+    <td align="center">
+      <a href="screenshots/gruvbox/main-menu.png"><img src="screenshots/gruvbox/main-menu.png" width="180" alt="Gruvbox main menu"></a>
+      <br><sub><b>Main menu</b></sub>
+    </td>
+    <td align="center">
+      <a href="screenshots/gruvbox/music.png"><img src="screenshots/gruvbox/music.png" width="180" alt="Gruvbox music"></a>
+      <br><sub><b>Music</b></sub>
+    </td>
+    <td align="center">
+      <a href="screenshots/gruvbox/more.png"><img src="screenshots/gruvbox/more.png" width="180" alt="Gruvbox more"></a>
+      <br><sub><b>More</b></sub>
+    </td>
+    <td align="center">
+      <a href="screenshots/gruvbox/wireless.png"><img src="screenshots/gruvbox/wireless.png" width="180" alt="Gruvbox wireless"></a>
+      <br><sub><b>Wireless</b></sub>
+    </td>
+  </tr>
+  <tr>
+    <td align="center">
+      <a href="screenshots/gruvbox/settings.png"><img src="screenshots/gruvbox/settings.png" width="180" alt="Gruvbox settings"></a>
+      <br><sub><b>Settings</b></sub>
+    </td>
+    <td align="center">
+      <a href="screenshots/gruvbox/now-playing.png"><img src="screenshots/gruvbox/now-playing.png" width="180" alt="Gruvbox now playing"></a>
+      <br><sub><b>Now Playing</b></sub>
+    </td>
+    <td align="center">
+      <a href="screenshots/gruvbox/file-browser.png"><img src="screenshots/gruvbox/file-browser.png" width="180" alt="Gruvbox file browser"></a>
+      <br><sub><b>File Browser</b></sub>
+    </td>
+    <td align="center">
+      <a href="screenshots/gruvbox/streaming.png"><img src="screenshots/gruvbox/streaming.png" width="180" alt="Gruvbox streaming"></a>
+      <br><sub><b>Streaming</b></sub>
+    </td>
+  </tr>
+</table>
+</details>
+
+<a name="dracula-theme"></a>
+
+<details>
+<summary><strong>Dracula theme</strong></summary>
+
+Showcase of **Dracula** appearance: the familiar purple-and-cyan night theme, down to its bat-wing play glyph.
+
+<table>
+  <tr>
+    <td align="center">
+      <a href="screenshots/dracula/main-menu.png"><img src="screenshots/dracula/main-menu.png" width="180" alt="Dracula main menu"></a>
+      <br><sub><b>Main menu</b></sub>
+    </td>
+    <td align="center">
+      <a href="screenshots/dracula/music.png"><img src="screenshots/dracula/music.png" width="180" alt="Dracula music"></a>
+      <br><sub><b>Music</b></sub>
+    </td>
+    <td align="center">
+      <a href="screenshots/dracula/more.png"><img src="screenshots/dracula/more.png" width="180" alt="Dracula more"></a>
+      <br><sub><b>More</b></sub>
+    </td>
+    <td align="center">
+      <a href="screenshots/dracula/wireless.png"><img src="screenshots/dracula/wireless.png" width="180" alt="Dracula wireless"></a>
+      <br><sub><b>Wireless</b></sub>
+    </td>
+  </tr>
+  <tr>
+    <td align="center">
+      <a href="screenshots/dracula/settings.png"><img src="screenshots/dracula/settings.png" width="180" alt="Dracula settings"></a>
+      <br><sub><b>Settings</b></sub>
+    </td>
+    <td align="center">
+      <a href="screenshots/dracula/now-playing.png"><img src="screenshots/dracula/now-playing.png" width="180" alt="Dracula now playing"></a>
+      <br><sub><b>Now Playing</b></sub>
+    </td>
+    <td align="center">
+      <a href="screenshots/dracula/file-browser.png"><img src="screenshots/dracula/file-browser.png" width="180" alt="Dracula file browser"></a>
+      <br><sub><b>File Browser</b></sub>
+    </td>
+    <td align="center">
+      <a href="screenshots/dracula/streaming.png"><img src="screenshots/dracula/streaming.png" width="180" alt="Dracula streaming"></a>
+      <br><sub><b>Streaming</b></sub>
+    </td>
+  </tr>
+</table>
+</details>
+
+<a name="catppuccin-mocha-theme"></a>
+
+<details>
+<summary><strong>Catppuccin Mocha theme</strong></summary>
+
+Showcase of **Catppuccin Mocha** appearance: pastel lavender and mint on a deep blue-grey, with pastel icons throughout.
+
+<table>
+  <tr>
+    <td align="center">
+      <a href="screenshots/catppuccin-mocha/main-menu.png"><img src="screenshots/catppuccin-mocha/main-menu.png" width="180" alt="Catppuccin Mocha main menu"></a>
+      <br><sub><b>Main menu</b></sub>
+    </td>
+    <td align="center">
+      <a href="screenshots/catppuccin-mocha/music.png"><img src="screenshots/catppuccin-mocha/music.png" width="180" alt="Catppuccin Mocha music"></a>
+      <br><sub><b>Music</b></sub>
+    </td>
+    <td align="center">
+      <a href="screenshots/catppuccin-mocha/more.png"><img src="screenshots/catppuccin-mocha/more.png" width="180" alt="Catppuccin Mocha more"></a>
+      <br><sub><b>More</b></sub>
+    </td>
+    <td align="center">
+      <a href="screenshots/catppuccin-mocha/wireless.png"><img src="screenshots/catppuccin-mocha/wireless.png" width="180" alt="Catppuccin Mocha wireless"></a>
+      <br><sub><b>Wireless</b></sub>
+    </td>
+  </tr>
+  <tr>
+    <td align="center">
+      <a href="screenshots/catppuccin-mocha/settings.png"><img src="screenshots/catppuccin-mocha/settings.png" width="180" alt="Catppuccin Mocha settings"></a>
+      <br><sub><b>Settings</b></sub>
+    </td>
+    <td align="center">
+      <a href="screenshots/catppuccin-mocha/now-playing.png"><img src="screenshots/catppuccin-mocha/now-playing.png" width="180" alt="Catppuccin Mocha now playing"></a>
+      <br><sub><b>Now Playing</b></sub>
+    </td>
+    <td align="center">
+      <a href="screenshots/catppuccin-mocha/file-browser.png"><img src="screenshots/catppuccin-mocha/file-browser.png" width="180" alt="Catppuccin Mocha file browser"></a>
+      <br><sub><b>File Browser</b></sub>
+    </td>
+    <td align="center">
+      <a href="screenshots/catppuccin-mocha/streaming.png"><img src="screenshots/catppuccin-mocha/streaming.png" width="180" alt="Catppuccin Mocha streaming"></a>
+      <br><sub><b>Streaming</b></sub>
+    </td>
+  </tr>
+</table>
+</details>
+
 <a name="amber-on-black-theme"></a>
 
 <details>
@@ -205,6 +393,10 @@ Showcase of **OLED** appearance: true black backgrounds with white as the accent
 - [Previews](#previews)
   - [Default theme](#default-theme)
   - [Tokyo Night theme](#tokyo-night-theme)
+  - [Rosé Pine Moon theme](#rose-pine-theme)
+  - [Gruvbox theme](#gruvbox-theme)
+  - [Dracula theme](#dracula-theme)
+  - [Catppuccin Mocha theme](#catppuccin-mocha-theme)
   - [Amber on Black theme](#amber-on-black-theme)
   - [OLED theme](#oled-theme)
 - [Music pet](#music-pet)

@@ -14,6 +14,7 @@
 #include "src/gui/shell/settingsrow.h"
 #include "src/gui/shell/switcher.h"
 #include "src/gui/shell/theme.h"
+#include "src/gui/shell/theme_icons.h"
 #include "src/gui/wireless/wifisettings.h"
 #include "src/system/audio/alsa-controls.h"
 #include "src/system/audio/audio.h"
@@ -497,7 +498,7 @@ static void build_cast_layer(gui_config_t *cfg) {
 	lv_obj_add_event_cb(cancel, cast_cancel_cb, LV_EVENT_CLICKED, NULL);
 
 	lv_obj_t *cancel_icon = lv_image_create(cancel);
-	lv_image_set_src(cancel_icon, &icon_close);
+	lv_image_set_src(cancel_icon, theme_icon(&icon_close));
 	lv_obj_add_style(cancel_icon, &theme_style_icon, 0);
 	settingsrow_scale_corner_icon(cancel_icon, cfg);
 	lv_obj_center(cancel_icon);
@@ -552,22 +553,22 @@ void dlna_page_init(gui_config_t *cfg) {
 	lv_obj_add_event_cb(cast_btn, cast_btn_cb, LV_EVENT_CLICKED, NULL);
 
 	lv_obj_t *cast_btn_icon = lv_image_create(cast_btn);
-	lv_image_set_src(cast_btn_icon, &icon_dlna_page);
+	lv_image_set_src(cast_btn_icon, theme_icon(&icon_dlna_page));
 	lv_obj_add_style(cast_btn_icon, &theme_style_icon, 0);
 	int corner_icon_side = compact ? 22 : 28;
-	lv_image_set_scale(cast_btn_icon, (uint32_t)(LV_SCALE_NONE * corner_icon_side / 128));
+	lv_image_set_scale(cast_btn_icon, theme_icon_scale_to(lv_image_get_src(cast_btn_icon), corner_icon_side));
 	lv_obj_center(cast_btn_icon);
 
 	settingsrow_toggle(container, "dlna", &toggle, toggle_changed_cb);
 
 	glyph = lv_image_create(container);
-	lv_image_set_src(glyph, &icon_dlna_page);
+	lv_image_set_src(glyph, theme_icon(&icon_dlna_page));
 	lv_obj_add_style(glyph, &theme_style_icon, 0);
 	lv_obj_set_style_image_opa(glyph, LV_OPA_40, 0);
 	int icon_size = compact ? 72 : 96;
 	lv_obj_set_size(glyph, icon_size, icon_size);
 	lv_image_set_inner_align(glyph, LV_IMAGE_ALIGN_CENTER);
-	lv_image_set_scale(glyph, (uint32_t)(LV_SCALE_NONE * icon_size / 128));
+	lv_image_set_scale(glyph, theme_icon_scale_to(lv_image_get_src(glyph), icon_size));
 	lv_obj_set_style_margin_top(glyph, compact ? 8 : 16, 0);
 	lv_obj_set_style_margin_bottom(glyph, compact ? 8 : 16, 0);
 	lv_obj_set_style_align(glyph, LV_ALIGN_CENTER, 0);

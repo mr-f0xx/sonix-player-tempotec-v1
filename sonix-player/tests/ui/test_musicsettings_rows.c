@@ -238,7 +238,9 @@ int main(int argc, char **argv) {
 	snprintf(path, sizeof(path), "%s/device_config.ini", dir);
 	unlink(path);
 	rmdir(dir);
-	printf("PASS musicsettings rows: distinct NOS glyph; DSD title/icon/switch alignment in 11 languages, 5 themes, both states and large text\n");
+	printf("PASS musicsettings rows: distinct NOS glyph; DSD title/icon/switch alignment in 11 languages, %d themes, "
+	       "both states and large text\n",
+	       THEME_KIND_COUNT);
 	lv_deinit();
 	return 0;
 }

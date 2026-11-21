@@ -31,6 +31,7 @@
 #include "src/system/device/power.h"
 #include "src/gui/shell/switcher.h"
 #include "src/gui/shell/theme.h"
+#include "src/gui/shell/theme_icons.h"
 #include "src/gui/shell/confirm.h"
 #include "src/gui/shell/toast.h"
 #include "src/gui/library/geniusui.h"
@@ -2910,7 +2911,7 @@ static lv_obj_t *corner_button(lv_obj_t *parent, const lv_image_dsc_t *glyph, lv
 	lv_obj_add_event_cb(btn, cb, LV_EVENT_CLICKED, p);
 
 	lv_obj_t *image = lv_image_create(btn);
-	lv_image_set_src(image, glyph);
+	lv_image_set_src(image, theme_icon(glyph));
 	lv_obj_add_style(image, &theme_style_icon, 0);
 	lv_obj_set_style_image_recolor_opa(image, LV_OPA_COVER, 0);
 	settingsrow_scale_corner_icon(image, p->cfg);
@@ -3273,7 +3274,7 @@ static void sort_clicked_cb(lv_event_t *e) {
 	int n = sort_can_year(p->kind, p->filter) ? SORT_CHOICES : SORT_YEAR_UP;
 	popover_item_t items[SORT_CHOICES];
 	for (int i = 0; i < n; i++) {
-		items[i] = (popover_item_t){labels[i], sort_picked, (void *)(intptr_t)i, i == (int)current};
+		items[i] = (popover_item_t){labels[i], sort_picked, (void *)(intptr_t)i, i == (int)current, false};
 	}
 	sort_menu_panel = p;
 	popover_show(lv_event_get_current_target(e), items, n);
@@ -4173,7 +4174,7 @@ static void build_panel(panel_t *p, gui_config_t *cfg, bool is_tracks, int slot_
 			// Name rows (album, artist, genre...) open another list: say so
 			// with the chevron, like every other page-opening row.
 			row->chevron = lv_image_create(row->button);
-			lv_image_set_src(row->chevron, &icon_chevron_right);
+			lv_image_set_src(row->chevron, theme_icon(&icon_chevron_right));
 			lv_obj_add_style(row->chevron, &theme_style_icon, 0);
 			lv_obj_set_style_image_opa(row->chevron, LV_OPA_60, 0);
 		}
@@ -4196,7 +4197,7 @@ static void build_panel(panel_t *p, gui_config_t *cfg, bool is_tracks, int slot_
 			lv_obj_add_event_cb(row->menu_btn, grip_cb, LV_EVENT_PRESS_LOST, p);
 
 			lv_obj_t *dots = lv_image_create(row->menu_btn);
-			lv_image_set_src(dots, &icon_ellipsis_vertical);
+			lv_image_set_src(dots, theme_icon(&icon_ellipsis_vertical));
 			lv_obj_add_style(dots, &theme_style_icon, 0);
 			lv_obj_set_style_image_recolor_opa(dots, LV_OPA_COVER, 0);
 			// Match Tidal's native rows exactly: both lists point at the one
@@ -4209,7 +4210,7 @@ static void build_panel(panel_t *p, gui_config_t *cfg, bool is_tracks, int slot_
 		// The tick of a chosen row, in the place of the ellipsis or the
 		// chevron while the list is in selection mode.
 		row->check = lv_image_create(row->button);
-		lv_image_set_src(row->check, &icon_check);
+		lv_image_set_src(row->check, theme_icon(&icon_check));
 		lv_obj_add_style(row->check, &theme_style_icon, 0);
 		lv_obj_set_style_image_recolor_opa(row->check, LV_OPA_COVER, 0);
 		lv_obj_set_clickable(row->check, false);

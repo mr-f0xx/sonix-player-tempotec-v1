@@ -928,7 +928,8 @@ int main(int argc, char **argv) {
 	assert_screen_no_overlaps(soundcloud_screen, "soundcloud_home_forgotten", "English", THEME_KIND_DARK);
 
 	nftw(tmp, unlink_cb, 32, FTW_DEPTH | FTW_PHYS);
-	printf("PASS soundcloud_pages (240x320, 11 languages x 5 themes zero-overlap, discreet spinner, "
-		   "placeholder->opus handoff, settings & forget)\n");
+	printf("PASS soundcloud_pages (240x320, 11 languages x %d themes zero-overlap, discreet spinner, "
+	       "placeholder->opus handoff, settings & forget)\n",
+	       THEME_KIND_COUNT);
 	return 0;
 }

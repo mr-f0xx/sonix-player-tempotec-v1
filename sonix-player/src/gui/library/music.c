@@ -23,6 +23,7 @@
 #include "src/gui/shell/settingsrow.h"
 #include "src/gui/shell/switcher.h"
 #include "src/gui/shell/theme.h"
+#include "src/gui/shell/theme_icons.h"
 #include "src/gui/settings/musicsettings.h"
 #include "src/system/core/lang.h"
 #include "src/system/library/audiobookdb.h"
@@ -201,24 +202,24 @@ static void compact_browse_action(void *unused) {
 static popover_item_t popover_item_for_tile(music_tile_id_t id) {
 	switch (id) {
 	case MUSIC_TILE_ALL_TRACKS:
-		return (popover_item_t){"music_all_tracks", compact_all_tracks_action, NULL, false};
+		return (popover_item_t){"music_all_tracks", compact_all_tracks_action, NULL, false, false};
 	case MUSIC_TILE_ALBUMS:
-		return (popover_item_t){"albums", compact_albums_action, NULL, false};
+		return (popover_item_t){"albums", compact_albums_action, NULL, false, false};
 	case MUSIC_TILE_ARTISTS:
-		return (popover_item_t){"artists", compact_artists_action, NULL, false};
+		return (popover_item_t){"artists", compact_artists_action, NULL, false, false};
 	case MUSIC_TILE_ALBUM_ARTISTS:
-		return (popover_item_t){"music_album_artists", compact_album_artists_action, NULL, false};
+		return (popover_item_t){"music_album_artists", compact_album_artists_action, NULL, false, false};
 	case MUSIC_TILE_GENRES:
-		return (popover_item_t){"music_genres", compact_genres_action, NULL, false};
+		return (popover_item_t){"music_genres", compact_genres_action, NULL, false, false};
 	case MUSIC_TILE_YEARS:
-		return (popover_item_t){"music_years", compact_years_action, NULL, false};
+		return (popover_item_t){"music_years", compact_years_action, NULL, false, false};
 	case MUSIC_TILE_PLAYLISTS:
-		return (popover_item_t){"playlists", compact_playlists_action, NULL, false};
+		return (popover_item_t){"playlists", compact_playlists_action, NULL, false, false};
 	case MUSIC_TILE_MOST_PLAYED:
-		return (popover_item_t){"music_most_played", compact_most_played_action, NULL, false};
+		return (popover_item_t){"music_most_played", compact_most_played_action, NULL, false, false};
 	case MUSIC_TILE_BROWSE:
 	default:
-		return (popover_item_t){"music_browse", compact_browse_action, NULL, false};
+		return (popover_item_t){"music_browse", compact_browse_action, NULL, false, false};
 	}
 }
 
@@ -253,9 +254,9 @@ static void compact_more_cb(lv_event_t *e) {
 	for (int i = 0; i < active_n && n < MUSIC_TILE_COUNT; i++) {
 		items[n++] = popover_item_for_tile(active[i]);
 	}
-	items[n++] = (popover_item_t){"favourites", compact_favourites_action, NULL, false};
+	items[n++] = (popover_item_t){"favourites", compact_favourites_action, NULL, false, false};
 	if (!compact_search_in_corner()) {
-		items[n++] = (popover_item_t){"search", compact_search_action, NULL, false};
+		items[n++] = (popover_item_t){"search", compact_search_action, NULL, false, false};
 	}
 	popover_show(lv_event_get_target(e), items, n);
 }
@@ -324,12 +325,11 @@ static lv_obj_t *make_browse_button(lv_obj_t *parent, const char *label_key, con
 	lv_obj_add_event_cb(button, cb, LV_EVENT_CLICKED, NULL);
 
 	lv_obj_t *icon = lv_image_create(button);
-	lv_image_set_src(icon, source);
+	lv_image_set_src(icon, theme_icon_at(source, 17));
 	lv_obj_add_style(icon, &theme_style_icon, 0);
 	lv_obj_set_size(icon, 17, 17);
 	lv_image_set_inner_align(icon, LV_IMAGE_ALIGN_CENTER);
-	int source_side = LV_MAX((int)source->header.w, (int)source->header.h);
-	lv_image_set_scale(icon, source_side ? (uint32_t)(LV_SCALE_NONE * 17 / source_side) : LV_SCALE_NONE);
+	lv_image_set_scale(icon, theme_icon_scale_to(lv_image_get_src(icon), 17));
 	lv_obj_set_style_image_recolor(icon, theme_semantic_color(tone), 0);
 	lv_obj_set_style_image_recolor_opa(icon, LV_OPA_COVER, 0);
 	if (index >= 0 && index < TOKYO_BROWSE_COUNT) {
@@ -426,11 +426,10 @@ static void add_shortcut_row(lv_obj_t *card, const char *label_key, const lv_ima
 	lv_obj_add_event_cb(button, callback, LV_EVENT_CLICKED, NULL);
 
 	lv_obj_t *icon = lv_image_create(button);
-	lv_image_set_src(icon, source);
+	lv_image_set_src(icon, theme_icon_at(source, 18));
 	lv_obj_add_style(icon, &theme_style_icon, 0);
 	lv_obj_set_size(icon, 18, 18);
-	int side = LV_MAX((int)source->header.w, (int)source->header.h);
-	lv_image_set_scale(icon, side ? (uint32_t)(LV_SCALE_NONE * 18 / side) : LV_SCALE_NONE);
+	lv_image_set_scale(icon, theme_icon_scale_to(lv_image_get_src(icon), 18));
 	lv_image_set_inner_align(icon, LV_IMAGE_ALIGN_CENTER);
 	lv_obj_set_style_image_recolor(icon, theme_semantic_color(tone), 0);
 	lv_obj_set_style_image_recolor_opa(icon, LV_OPA_COVER, 0);
@@ -447,7 +446,7 @@ static void add_shortcut_row(lv_obj_t *card, const char *label_key, const lv_ima
 	lv_obj_set_height(label, lv_font_get_line_height(&font_ui_14) * (wrap ? 2 : 1));
 
 	lv_obj_t *chevron = lv_image_create(button);
-	lv_image_set_src(chevron, &icon_chevron_right);
+	lv_image_set_src(chevron, theme_icon(&icon_chevron_right));
 	lv_obj_add_style(chevron, &theme_style_icon, 0);
 	lv_obj_set_size(chevron, 14, 14);
 	lv_image_set_scale(chevron, (uint32_t)(LV_SCALE_NONE * 14 / 36));
@@ -572,10 +571,12 @@ static void tokyo_music_build(gui_config_t *cfg) {
 		lv_obj_add_event_cb(row->button, recent_track_clicked_cb, LV_EVENT_CLICKED, row);
 
 		row->icon = lv_image_create(row->button);
-		lv_image_set_src(row->icon, &icon_album);
+		// A recent row is a record: the same album mark the lists use, in the
+		// active set's drawing when there is one.
+		lv_image_set_src(row->icon, theme_icon(&icon_album));
 		lv_obj_set_size(row->icon, 25, 25);
 		lv_image_set_inner_align(row->icon, LV_IMAGE_ALIGN_CENTER);
-		lv_image_set_scale(row->icon, (uint32_t)(LV_SCALE_NONE * 25 / 32));
+		lv_image_set_scale(row->icon, theme_icon_scale_to(lv_image_get_src(row->icon), 25));
 		lv_obj_add_style(row->icon, &theme_style_icon, 0);
 		lv_obj_set_style_image_recolor(row->icon, theme_semantic_color(THEME_SEMANTIC_PURPLE), 0);
 		lv_obj_set_style_image_recolor_opa(row->icon, LV_OPA_COVER, 0);
@@ -605,10 +606,10 @@ static void tokyo_music_build(gui_config_t *cfg) {
 		lv_obj_set_style_text_font(row->artist, &font_ui_14, 0);
 
 		row->play_icon = lv_image_create(row->button);
-		lv_image_set_src(row->play_icon, &icon_play);
+		lv_image_set_src(row->play_icon, theme_icon(&icon_play));
 		lv_obj_add_style(row->play_icon, &theme_style_icon, 0);
 		lv_obj_set_size(row->play_icon, 16, 16);
-		lv_image_set_scale(row->play_icon, (uint32_t)(LV_SCALE_NONE * 16 / 40));
+		lv_image_set_scale(row->play_icon, theme_icon_scale_to(lv_image_get_src(row->play_icon), 16));
 		lv_image_set_inner_align(row->play_icon, LV_IMAGE_ALIGN_CENTER);
 		lv_obj_set_style_image_recolor(row->play_icon, theme_semantic_color(THEME_SEMANTIC_CYAN), 0);
 		lv_obj_set_style_image_recolor_opa(row->play_icon, LV_OPA_COVER, 0);
@@ -665,10 +666,10 @@ static void tokyo_music_build(gui_config_t *cfg) {
 	lv_obj_set_event_bubble(tokyo_scan_button, true);
 	lv_obj_add_event_cb(tokyo_scan_button, scan_cb, LV_EVENT_CLICKED, NULL);
 	lv_obj_t *scan_icon = lv_image_create(tokyo_scan_button);
-	lv_image_set_src(scan_icon, &icon_folder);
+	lv_image_set_src(scan_icon, theme_icon(&icon_folder));
 	lv_obj_add_style(scan_icon, &theme_style_icon, 0);
 	lv_obj_set_size(scan_icon, 18, 18);
-	lv_image_set_scale(scan_icon, (uint32_t)(LV_SCALE_NONE * 18 / 32));
+	lv_image_set_scale(scan_icon, theme_icon_scale_to(lv_image_get_src(scan_icon), 18));
 	lv_image_set_inner_align(scan_icon, LV_IMAGE_ALIGN_CENTER);
 	lv_obj_set_style_image_recolor(scan_icon, theme_semantic_color(THEME_SEMANTIC_CYAN), 0);
 	lv_obj_set_style_image_recolor_opa(scan_icon, LV_OPA_COVER, 0);
@@ -842,7 +843,7 @@ static lv_obj_t *corner_button(gui_config_t *cfg, int slot, const lv_image_dsc_t
 	lv_obj_set_style_pad_all(button, 0, 0);
 
 	lv_obj_t *icon = lv_image_create(button);
-	lv_image_set_src(icon, glyph);
+	lv_image_set_src(icon, theme_icon(glyph));
 	lv_obj_add_style(icon, &theme_style_icon, 0);
 	settingsrow_scale_corner_icon(icon, cfg);
 	lv_obj_center(icon);

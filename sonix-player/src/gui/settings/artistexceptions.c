@@ -13,6 +13,7 @@
 #include "src/gui/shell/settingsrow.h"
 #include "src/gui/shell/switcher.h"
 #include "src/gui/shell/theme.h"
+#include "src/gui/shell/theme_icons.h"
 #include "src/system/core/lang.h"
 #include "src/system/library/library.h"
 
@@ -87,7 +88,7 @@ static void rebuild(void) {
 		lv_obj_add_event_cb(del, delete_cb, LV_EVENT_CLICKED, (void *)(intptr_t)i);
 
 		lv_obj_t *icon = lv_image_create(del);
-		lv_image_set_src(icon, &icon_trash);
+		lv_image_set_src(icon, theme_icon(&icon_trash));
 		lv_obj_add_style(icon, &theme_style_icon, 0);
 		lv_obj_center(icon);
 	}
@@ -187,7 +188,7 @@ void artistexceptions_init(gui_config_t *cfg, void (*changed)(void)) {
 	lv_obj_set_style_pad_all(add, 0, 0);
 	lv_obj_add_event_cb(add, add_cb, LV_EVENT_CLICKED, NULL);
 	lv_obj_t *plus = lv_image_create(add);
-	lv_image_set_src(plus, &icon_plus);
+	lv_image_set_src(plus, theme_icon(&icon_plus));
 	lv_obj_add_style(plus, &theme_style_icon, 0);
 	settingsrow_scale_corner_icon(plus, cfg);
 	lv_obj_center(plus);
@@ -243,7 +244,7 @@ void artistexceptions_init(gui_config_t *cfg, void (*changed)(void)) {
 	lv_obj_set_style_pad_all(cancel, 0, 0);
 	lv_obj_add_event_cb(cancel, cancel_cb, LV_EVENT_CLICKED, NULL);
 	lv_obj_t *cancel_icon = lv_image_create(cancel);
-	lv_image_set_src(cancel_icon, &icon_close);
+	lv_image_set_src(cancel_icon, theme_icon(&icon_close));
 	lv_obj_add_style(cancel_icon, &theme_style_icon, 0);
 	settingsrow_scale_corner_icon(cancel_icon, cfg);
 	lv_obj_center(cancel_icon);

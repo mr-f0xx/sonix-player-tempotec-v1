@@ -5,6 +5,7 @@
 #include "src/gui/fonts/fonts.h"
 #include "src/gui/shell/icons.h"
 #include "src/gui/shell/theme.h"
+#include "src/gui/shell/theme_icons.h"
 #include "src/system/core/lang.h"
 
 // The track menu carries ten rows on the delete-track variant, and the card
@@ -154,7 +155,7 @@ void popover_show_editor(lv_obj_t *anchor, const popover_item_t *items, int coun
 			lv_obj_set_flex_grow(label, 1);
 
 			lv_obj_t *check = lv_image_create(row);
-			lv_image_set_src(check, &icon_check);
+			lv_image_set_src(check, theme_icon(&icon_check));
 			lv_obj_set_style_image_recolor(check, theme()->accent, 0);
 			lv_obj_set_style_image_recolor_opa(check, LV_OPA_COVER, 0);
 		} else {

@@ -37,6 +37,7 @@
 #include "src/gui/nowplaying/trackmenu.h"
 #include "src/gui/shell/switcher.h"
 #include "src/gui/shell/theme.h"
+#include "src/gui/shell/theme_icons.h"
 #include "src/gui/shell/toast.h"
 #include "src/gui/shell/topbar.h"
 #include "src/system/device/power.h"
@@ -752,8 +753,9 @@ static void apply_live_mode(bool live) {
 	// gets the radio. Coming back off a stream has to restore whichever of the
 	// first two is right, not assume the note.
 	if (cover_placeholder_icon) {
-		lv_image_set_src(cover_placeholder_icon, live ? &icon_radio_player
-									: (audiobook_mode ? &icon_book_headphones : &icon_music_note));
+		lv_image_set_src(cover_placeholder_icon,
+						 theme_icon(live ? &icon_radio_player
+										 : (audiobook_mode ? &icon_book_headphones : &icon_music_note)));
 	}
 	sticker_pills_sync();
 }
@@ -795,14 +797,14 @@ static void apply_audiobook_mode(bool book, bool podcast) {
 	// on the V1; the regular 34 px track-skip icons keep their original size.
 	int skip_icon_scale = skips && bp_is_tempotec_v1() ? 192 : 256;
 	if (prev_icon) {
-		lv_image_set_src(prev_icon, !skips                            ? &icon_skip_back
+		lv_image_set_src(prev_icon, !skips                            ? theme_icon(&icon_skip_back)
 									: back == AUDIOBOOK_SKIP_HUGE ? &icon_prev_60
 									: back == AUDIOBOOK_SKIP_LONG ? &icon_prev_30
 																  : &icon_prev_10);
 		lv_image_set_scale(prev_icon, skip_icon_scale);
 	}
 	if (next_icon) {
-		lv_image_set_src(next_icon, !skips                               ? &icon_skip_forward
+		lv_image_set_src(next_icon, !skips                               ? theme_icon(&icon_skip_forward)
 									: forward == AUDIOBOOK_SKIP_HUGE ? &icon_next_60
 									: forward == AUDIOBOOK_SKIP_LONG ? &icon_next_30
 																	 : &icon_next_10);
@@ -813,7 +815,8 @@ static void apply_audiobook_mode(bool book, bool podcast) {
 	// episodes, the only thing wanted from it, rather than to a menu whose one
 	// useful entry would always be picked.
 	if (more_btn_icon) {
-		lv_image_set_src(more_btn_icon, podcast && !book ? &icon_podcast_episodes : &icon_ellipsis_vertical);
+		lv_image_set_src(more_btn_icon, theme_icon(
+							podcast && !book ? &icon_podcast_episodes : &icon_ellipsis_vertical));
 	}
 
 	// The star and the repeat mode are about the music library and its queue.
@@ -858,7 +861,9 @@ static void apply_audiobook_mode(bool book, bool podcast) {
 	// icon while it is on.
 	if (cover_placeholder_icon && !live_mode) {
 		const lv_image_dsc_t *mark = book ? &icon_book_headphones : podcast ? &icon_podcast_cover : &icon_music_note;
-		lv_image_set_src(cover_placeholder_icon, mark);
+		// The sleeve is the size this placeholder is drawn at; ask the set for
+		// its drawing nearest that, not the small row mark of the same shape.
+		lv_image_set_src(cover_placeholder_icon, theme_icon_at(mark, 128));
 	}
 	sticker_pills_sync();
 }
@@ -1027,8 +1032,8 @@ static void apply_playback_status(audio_status_t status) {
 	// not resume, it reconnects -- so the button says stop while it is on.
 	// Stopped, it goes back to play: the station stays loaded, and pressing
 	// it opens a fresh connection to the same one.
-	lv_image_set_src(play_btn_icon,
-					 live_mode ? (playing ? &icon_stop : &icon_play) : (playing ? &icon_pause : &icon_play));
+	lv_image_set_src(play_btn_icon, theme_icon(
+					live_mode ? (playing ? &icon_stop : &icon_play) : (playing ? &icon_pause : &icon_play)));
 	paint_play_button();
 
 	// Keep polling either way, just less often when nothing is playing. The
@@ -6282,7 +6287,9 @@ static void update_repeat_button(void) {
 		break;
 	}
 
-	lv_image_set_src(repeat_btn_icon, icon);
+	// Rosé Pine Moon and Gruvbox draw each mode their own way; the tone above
+	// is unchanged, so the button reads the same at a glance.
+	lv_image_set_src(repeat_btn_icon, theme_icon(icon));
 	// And at the deck's size everywhere but in Album Art Max, whose header row
 	// carries it beside the star and the menu at one weight.
 	lv_image_set_scale(repeat_btn_icon, layout_sticker_now ? STICKER_ICON_SCALE
@@ -8872,7 +8879,7 @@ void player_init(gui_config_t *cfg) {
 
 	lv_obj_t *more_icon = lv_image_create(more_btn);
 	more_btn_icon = more_icon;
-	lv_image_set_src(more_icon, &icon_ellipsis_vertical);
+	lv_image_set_src(more_icon, theme_icon(&icon_ellipsis_vertical));
 	lv_obj_add_style(more_icon, &theme_style_icon, 0);
 	paint_overflow_tint(); // the muted menu grey, or the sleeve's with the tint on
 	lv_obj_center(more_icon);
@@ -8886,7 +8893,7 @@ void player_init(gui_config_t *cfg) {
 	lv_obj_set_style_border_width(prev_btn, 0, 0);
 	lv_obj_set_style_shadow_width(prev_btn, 0, 0);
 	prev_icon = lv_image_create(prev_btn);
-	lv_image_set_src(prev_icon, &icon_skip_back);
+	lv_image_set_src(prev_icon, theme_icon(&icon_skip_back));
 	lv_obj_add_style(prev_icon, &theme_style_icon, 0);
 	lv_obj_center(prev_icon);
 
@@ -8915,7 +8922,7 @@ void player_init(gui_config_t *cfg) {
 	lv_obj_set_style_border_width(next_btn, 0, 0);
 	lv_obj_set_style_shadow_width(next_btn, 0, 0);
 	next_icon = lv_image_create(next_btn);
-	lv_image_set_src(next_icon, &icon_skip_forward);
+	lv_image_set_src(next_icon, theme_icon(&icon_skip_forward));
 	lv_obj_add_style(next_icon, &theme_style_icon, 0);
 	lv_obj_center(next_icon);
 
@@ -9036,7 +9043,9 @@ void player_init(gui_config_t *cfg) {
 	// at 128x128 natively, which overflows a V1 sleeve, so it is scaled to a
 	// share of the sleeve (placeholder_rescale, also on a change of layout).
 	cover_placeholder_icon = lv_image_create(cover_panel);
-	lv_image_set_src(cover_placeholder_icon, &icon_music_note);
+	// Drawn at a share of the sleeve and never past its native size, so ask
+	// the set for the largest drawing of the note rather than the row mark.
+	lv_image_set_src(cover_placeholder_icon, theme_icon_at(&icon_music_note, 128));
 	lv_obj_add_style(cover_placeholder_icon, &theme_style_text_dim, 0);
 	lv_obj_set_style_image_recolor(cover_placeholder_icon, theme()->text_secondary, 0);
 	lv_obj_set_style_image_recolor_opa(cover_placeholder_icon, LV_OPA_COVER, 0);

@@ -16,6 +16,7 @@
 #include "src/gui/library/music.h"
 #include "src/gui/nowplaying/player.h"
 #include "src/gui/shell/theme.h"
+#include "src/gui/shell/theme_icons.h"
 #include "src/gui/shell/topbar.h"
 #include "src/gui/nowplaying/trackmenu.h"
 
@@ -332,7 +333,7 @@ static void back_underlay_build(void) {
 	// carries a plain copy at the same spot.
 	if (target != main_menu_screen) {
 		lv_obj_t *chevron = lv_image_create(back_underlay);
-		lv_image_set_src(chevron, &icon_chevron_left);
+		lv_image_set_src(chevron, theme_icon(&icon_chevron_left));
 		// The same two placements as place_back_btn(): the player's own offset
 		// where there is no status bar, the status bar's height everywhere else.
 		int y = back_btn_padding + (going_to_player ? back_btn_player_top() : back_btn_top_bar_height);
@@ -911,7 +912,7 @@ void back_btn_init(gui_config_t *cfg) {
 	place_back_btn(true);
 
 	back_btn_icon = lv_image_create(back_btn);
-	lv_image_set_src(back_btn_icon, &icon_chevron_left);
+	lv_image_set_src(back_btn_icon, theme_icon(&icon_chevron_left));
 	lv_obj_add_style(back_btn_icon, &theme_style_icon, 0);
 	lv_obj_center(back_btn_icon);
 	chevron_apply_color();
