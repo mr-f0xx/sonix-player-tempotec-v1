@@ -15,10 +15,14 @@ const lv_font_t *bp_tile_label_font(void) { return &font_ui_14; }
 int settingsrow_content_top(gui_config_t *cfg) { (void)cfg; return 72; }
 static int released[COVERLOADER_SLOTS];
 void coverloader_release(int slot) { assert(slot >= 0 && slot < COVERLOADER_SLOTS); released[slot]++; }
-void cover_free(cover_image_t *image) { (void)image; }
+static int freed_images;
+void cover_free(cover_image_t *image) {
+	if (image && image->pixels) { free(image->pixels); freed_images++; }
+	if (image) memset(image, 0, sizeof(*image));
+}
 static const uint8_t glyph[] = {255};
 #define ICON(n) const lv_image_dsc_t n = { .header = { .magic = LV_IMAGE_HEADER_MAGIC, .cf = LV_COLOR_FORMAT_A8, .w = 1, .h = 1, .stride = 1 }, .data = glyph, .data_size = 1 }
-ICON(icon_folder); ICON(icon_music2); ICON(icon_album);
+ICON(icon_folder); ICON(icon_music2); ICON(icon_album); ICON(icon_refresh);
 
 int main(void) {
 	// Only the actual Music tree, including mounts with a trailing slash or /.
@@ -64,17 +68,59 @@ int main(void) {
 	assert(lv_obj_get_x(rows[1].button) == m.pitch_x);
 	assert(lv_obj_get_y(rows[2].button) == m.pitch_y);
 	assert(lv_obj_get_width(rows[0].icon) == m.cover);
-	assert(lv_image_get_src(rows[0].icon) == &icon_album);
+	// Until a request completes, the refresh glyph means "loading", not
+	// the no-art fallback. A completed miss gets the album glyph instead.
+	assert(lv_image_get_src(rows[0].icon) == &icon_refresh);
+	assert(lv_image_get_src(rows[1].icon) == &icon_refresh);
+	cover_image_t fake = {0};
+	fake.pixels = malloc(8); assert(fake.pixels);
+	fake.dsc.header.magic = LV_IMAGE_HEADER_MAGIC;
+	fake.dsc.header.cf = LV_COLOR_FORMAT_RGB565;
+	fake.dsc.header.w = fake.dsc.header.h = 2;
+	fake.dsc.header.stride = 4;
+	fake.dsc.data_size = 8;
+	fake.dsc.data = fake.pixels;
+	uint8_t *original_pixels = fake.pixels;
+	row_finish_thumb(&rows[0], true, &fake);
+	assert(lv_image_get_src(rows[0].icon) == &rows[0].thumb.dsc);
+	row_bind(&rows[0], 16); // recycle a loaded row into the in-memory cache
+	assert(lv_image_get_src(rows[0].icon) == &icon_refresh);
+	row_bind(&rows[0], 0);
+	assert(rows[0].thumb_settled && rows[0].thumb.pixels == original_pixels);
+	assert(rows[0].thumb.dsc.data == original_pixels);
+	assert(lv_image_get_src(rows[0].icon) == &rows[0].thumb.dsc);
+	row_finish_thumb(&rows[1], false, NULL);
 	assert(lv_image_get_src(rows[1].icon) == &icon_album);
+	row_bind(&rows[1], 17);
+	assert(lv_image_get_src(rows[1].icon) == &icon_refresh);
+	row_bind(&rows[1], 1); // a known miss also survives recycling
+	assert(rows[1].thumb_settled && lv_image_get_src(rows[1].icon) == &icon_album);
+	row_t *prefetch = grid_prefetch_candidate();
+	assert(prefetch && !row_is_visible(prefetch->index));
+	// A neighbouring prefetch may continue while all visible rows are ready,
+	// but it is abandoned as soon as a visible row needs the worker.
+	for (int i = 0; i < ROW_POOL; i++) {
+		if (rows[i].index >= 2 && row_is_visible(rows[i].index)) rows[i].thumb_settled = true;
+	}
+	prefetch->thumb_requested = true;
+	int pref_slot = row_slot(prefetch), pref_before = released[pref_slot];
+	cancel_offscreen_thumbs();
+	assert(prefetch->thumb_requested && released[pref_slot] == pref_before);
+	rows[2].thumb_settled = false;
+	cancel_offscreen_thumbs();
+	assert(!prefetch->thumb_requested && released[pref_slot] == pref_before + 1);
+	for (int i = 2; i < ROW_POOL; i++) rows[i].thumb_settled = false;
 	assert(row_is_visible(0) && row_is_visible(3));
 	assert(!row_is_visible(6));
 	// Scrolling cancels an off-screen pending cover even if its row remains
 	// in the recycled pool; it can be requested again on the way back.
+	rows[0].thumb_settled = false;
 	rows[0].thumb_requested = true;
 	int slot = row_slot(&rows[0]), before = released[slot];
 	lv_obj_scroll_to_y(file_list, m.pitch_y, LV_ANIM_OFF);
 	window_update();
 	assert(rows[0].index == 0 && !rows[0].thumb_requested && released[slot] == before + 1);
+	rows[0].thumb_settled = true; // retained decoded pixels still belong to this row
 	lv_obj_scroll_to_y(file_list, 0, LV_ANIM_OFF); window_update();
 	// Selection and the playing mark still belong to the entry in a tile.
 	selecting = true; chosen = calloc(shown.count, 1); assert(chosen);
@@ -100,8 +146,32 @@ int main(void) {
 	assert(lv_image_get_src(rows[1].icon) == &icon_music2);
 	for (int i = 0; i < ROW_POOL; i++) row_bind(&rows[i], -1);
 	browse_covers = true; window_update();
-	assert(lv_image_get_src(rows[0].icon) == &icon_album);
+	assert(lv_image_get_src(rows[0].icon) == &icon_refresh);
 	assert(lv_image_get_src(rows[1].icon) == &icon_music2);
-	puts("PASS browser cover grid, recycling, placeholders and list restore");
+	grid_thumb_cache_clear();
+	assert(freed_images >= 1);
+
+	// The cache is bounded and owns its pixels. A ninth image evicts the
+	// oldest; a different listing generation must never reuse an old cover.
+	browse_grid = true;
+	int freed_before = freed_images;
+	for (int i = 0; i < GRID_THUMB_CACHE_SIZE + 1; i++) {
+		row_t temp = {.index = i, .generation = 123, .thumb_settled = true, .has_thumb = true};
+		temp.thumb.pixels = malloc(8); assert(temp.thumb.pixels);
+		temp.thumb.dsc.data = temp.thumb.pixels;
+		grid_thumb_cache_put(&temp);
+		assert(!temp.has_thumb && !temp.thumb.pixels);
+	}
+	assert(freed_images == freed_before + 1);
+	row_t lookup = {.index = 0, .generation = 123};
+	assert(!grid_thumb_cache_take(&lookup)); // evicted
+	lookup.index = 1; lookup.generation = 124;
+	assert(!grid_thumb_cache_take(&lookup)); // another listing
+	lookup.generation = 123;
+	assert(grid_thumb_cache_take(&lookup) && lookup.has_thumb);
+	cover_free(&lookup.thumb);
+	grid_thumb_cache_clear();
+	assert(freed_images == freed_before + GRID_THUMB_CACHE_SIZE + 1);
+	puts("PASS browser cover grid, cache, prefetch, loading and list restore");
 	return 0;
 }
