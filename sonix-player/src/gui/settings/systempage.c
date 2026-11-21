@@ -12,6 +12,7 @@
 #include "src/gui/fonts/fonts.h"
 #include "src/gui/settings/batteryprofilepage.h"
 #include "src/gui/settings/fwupdate.h"
+#include "src/gui/settings/ota_auto.h"
 #include "src/gui/settings/settings.h"
 #include "src/gui/shell/settingsrow.h"
 #include "src/gui/shell/icons.h"
@@ -516,6 +517,10 @@ static void build_sysinfo_page(gui_config_t *cfg) {
 	theme_register_refresh(refresh_theme);
 }
 
+static void auto_notices_cb(lv_event_t *e) {
+	ota_auto_set_enabled(lv_obj_has_state(lv_event_get_target(e), LV_STATE_CHECKED));
+}
+
 void systempage_init(gui_config_t *cfg) {
 	// system-info.json was read at startup, before the display: the simulator
 	// sizes its window from the model named in it.
@@ -531,6 +536,15 @@ void systempage_init(gui_config_t *cfg) {
 	// Actions, not pages: settingsrow_action leaves off the chevron.
 	row = settingsrow_action(container, "system_update_firmware", firmware_clicked_cb, NULL);
 	settingsrow_add_accent_icon(row, &icon_download);
+
+	// The update notice: a background check that pings when a new release is out.
+	// Off, or re-armed, only from here.
+	lv_obj_t *auto_notices_switch = NULL;
+	settingsrow_toggle(container, "system_update_auto_notices", &auto_notices_switch, auto_notices_cb);
+	if (ota_auto_enabled()) {
+		lv_obj_add_state(auto_notices_switch, LV_STATE_CHECKED);
+	}
+
 	row = settingsrow_action(container, "system_factory_reset", factory_clicked_cb, NULL);
 	settingsrow_add_accent_icon(row, &icon_reset);
 

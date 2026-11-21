@@ -129,6 +129,9 @@ led_visualizer_style_t led_visualizer_style(void);
 void led_notify_low_battery(void);
 void led_notify_upload_complete(void);
 
+// A new update is on the way: three green blinks. Same rule as the two above.
+void led_notify_update_ready(void);
+
 // The darken-in-standby option: with it on, the LED goes dark after
 // twenty seconds in standby (screen off) with nothing playing. A charge in
 // progress is never darkened by it -- the red keeps breathing -- and any

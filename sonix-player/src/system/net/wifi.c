@@ -18,6 +18,7 @@
 #include <sys/socket.h>
 
 #include "src/system/device/clock.h"
+#include "src/gui/settings/ota_auto.h"
 #include "src/system/core/config.h"
 #include "src/system/device/power.h"
 #include "src/system/device/sysserver.h"
@@ -1451,6 +1452,9 @@ static void poll_status(void) {
 	// first request races DHCP, DNS or the access point's internet route.
 	if (now_online) {
 		clock_network_sync();
+		// The same moment: check once a link has come back, for a release worth
+		// the notice. Debounced inside the module.
+		ota_auto_link_online();
 	}
 }
 

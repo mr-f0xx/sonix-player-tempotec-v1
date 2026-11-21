@@ -117,6 +117,7 @@ typedef struct {
 typedef enum {
 	LN_NONE,
 	LN_UPLOAD_COMPLETE,
+	LN_UPDATE_AVAILABLE,
 	LN_LOW_BATTERY,
 } led_notice_t;
 
@@ -280,7 +281,13 @@ static void post_notice(led_notice_t notice) {
 		return;
 	}
 	pthread_mutex_lock(&led_lock);
-	if (led_target.allow_notices && notice > led_notice) {
+	// An update notice replaces an update notice still playing: each release
+	// found is its own blink, and a fresh tag must never be swallowed by the
+	// tail of its predecessor. The other kinds keep the stricter rule, where a
+	// lower-priority notice cannot take a higher-priority blink over.
+	bool replace = notice > led_notice
+		|| (notice == LN_UPDATE_AVAILABLE && led_notice == LN_UPDATE_AVAILABLE);
+	if (led_target.allow_notices && replace) {
 		led_notice = notice;
 		led_notice_level = LADDER[led_level()];
 		led_notice_seq++;
@@ -521,6 +528,8 @@ static void *led_worker(void *arg) {
 			pthread_mutex_unlock(&led_lock);
 			if (notice == LN_LOW_BATTERY) {
 				play_blink(&cur, level, 0, 0, 3, 140, 140, &led_notice_seq, notice_seq);
+			} else if (notice == LN_UPDATE_AVAILABLE) {
+				play_blink(&cur, 0, level, 0, 3, 200, 130, &led_notice_seq, notice_seq);
 			} else {
 				play_blink(&cur, 0, level, 0, 2, 180, 120, &led_notice_seq, notice_seq);
 			}
@@ -946,6 +955,8 @@ led_visualizer_style_t led_visualizer_style(void) { return s_visualizer_style; }
 void led_notify_low_battery(void) { post_notice(LN_LOW_BATTERY); }
 
 void led_notify_upload_complete(void) { post_notice(LN_UPLOAD_COMPLETE); }
+
+void led_notify_update_ready(void) { post_notice(LN_UPDATE_AVAILABLE); }
 
 void led_set_idle_off(bool enabled) {
 	s_idle_off_enabled = enabled;

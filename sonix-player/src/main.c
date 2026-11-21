@@ -28,6 +28,7 @@
 #include "src/gui/nowplaying/player.h"
 #include "src/gui/library/libraryscan.h"
 #include "src/gui/settings/language.h"
+#include "src/gui/settings/ota_auto.h"
 #include "src/gui/settings/powersettings.h"
 #include "src/gui/settings/settings.h"
 #include "src/system/device/adb.h"
@@ -2450,6 +2451,12 @@ int main(int argc, char **argv) {
 
 	// The Power page offers RGB effects only after the controller is acquired.
 	led_init();
+
+	// The OTA update notice: timers and config read, before the interface is
+	// built so the Settings toggle shows its real state. The check itself runs
+	// on Wi-Fi connect (the Wi-Fi worker's hook) and then every few hours.
+	ota_auto_init();
+
 	gui_init(&gui_cfg);
 
 	// "Rotate screen", as it was left. After gui_init so there are screens to
