@@ -402,8 +402,19 @@ static void play_index(int index) {
 	}
 
 	// One PCM takes one writer, so whatever was playing stops first -- the
-	// same order the radio keeps. A paused local track must not be holding
-	// the DAC the daemon is about to write into.
+	// same order the radio keeps.
+	//
+	// A pause is not enough, and the difference is the whole reason this line
+	// exists: audio_pause() drops the ALSA stream but keeps the device handle
+	// open, because a resume reopens it from scratch a moment later. The
+	// device is therefore still held, and audio_external_begin() -- which the
+	// PCM thread calls and which does not evict anybody -- would retry the
+	// open for two seconds and then fail. The page would say "the Spotify
+	// stream could not open the output" with the local track silently paused
+	// underneath it. radio_play() stops for exactly this reason.
+	audio_stop();
+	// The interface still wants the player's own state moved off PLAYING, so
+	// the sheet behind the new page is not left drawing a track that is gone.
 	player_pause_for_loading();
 
 	const char *kind = source == SOURCE_PLAYLIST ? "playlist" : (source == SOURCE_SEARCH ? "search" : "liked");

@@ -408,6 +408,11 @@ const lv_image_dsc_t icon_pet = {0};
 void device_state_stop(void) {}
 void device_state_get(device_state_t *out) { memset(out, 0, sizeof(*out)); }
 audio_status_t audio_get_status(void) { return AUDIO_STATUS_STOPPED; }
+// Counting the stop is the point: starting a Spotify track has to take the DAC
+// from whatever was playing locally, not merely pause it. A pause keeps the
+// device handle open, and audio_external_begin() would then fail the open.
+int g_audio_stops;
+void audio_stop(void) { g_audio_stops++; }
 void audio_get_current_file(char *out, size_t size) {
 	if (out && size) {
 		out[0] = '\0';
@@ -850,11 +855,17 @@ int main(int argc, char **argv) {
 	assert_screen_no_overlaps(list_screen, "liked", "English");
 
 	int sheets_before = open_sheets;
+	int stops_before = g_audio_stops;
 	lv_obj_t *row = find_clickable_with_label(list_screen, "Blue Hour");
 	assert(row != NULL);
 	lv_obj_send_event(row, LV_EVENT_CLICKED, NULL);
 	pump();
 	assert(g_play_context_calls == 1);
+	// One PCM, one writer: tapping a Spotify track stops local playback
+	// outright. A pause would leave the DAC handle open and the PCM thread's
+	// audio_external_begin() would fail two seconds later, with the page
+	// reporting that it could not open the output.
+	assert(g_audio_stops == stops_before + 1);
 	assert(strcmp(g_last_play_kind, "liked") == 0);
 	assert(strcmp(g_last_play_track, "trk01-liked") == 0);
 	assert(open_sheets == sheets_before + 1);

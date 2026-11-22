@@ -625,6 +625,12 @@ static void load_and_play(const char *filepath) { load_and_play_at(filepath, -1.
 static void load_paused(const char *filepath) {
 	scrub_cancel();
 	radio_clear();
+	// This opens the local PCM too (paused, but open), so a Spotify stream
+	// would still be writing into the same device. Same rule as
+	// load_and_play_at() below: one live source at a time.
+	if (spotify_stream_active()) {
+		spotify_stop();
+	}
 
 	if (filepath != current_metadata_file) {
 		snprintf(current_metadata_file, sizeof(current_metadata_file), "%s", filepath);
@@ -839,6 +845,11 @@ void device_state_play_file_at(const char *filepath, double position) {
 	playlist_load_folder(folder, filename);
 
 	radio_clear();
+	// The restore opens the DAC through audio_play_at() below, so the rule
+	// from load_and_play_at() holds here as well.
+	if (spotify_stream_active()) {
+		spotify_stop();
+	}
 	if (filepath != current_metadata_file) {
 		strncpy(current_metadata_file, filepath, sizeof(current_metadata_file) - 1);
 		current_metadata_file[sizeof(current_metadata_file) - 1] = '\0';
