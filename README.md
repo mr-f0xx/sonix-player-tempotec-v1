@@ -270,7 +270,7 @@ This fork builds on the upstream [Sonix Player](https://github.com/Jepl4r/sonix-
 - ☁️ **SoundCloud** - native SoundCloud streaming across anonymous, Free, Go and Go+ tiers: search and play public tracks out of the box without API keys (automatic web `client_id` discovery and rotation), browse Likes, Reposts and Playlists by profile URL / username or `oauth_token`, and stream **Opus 64k**, **MP3 128k** or **Go+ AAC 256k** with an extendable microSD cache (**512 MB** default, up to **1 GB**, **2 GB**, **4 GB**, **8 GB**, or **Unlimited** directly in-app), lookahead prefetch, discreet non-blocking loading spinners, and Now Playing **Like** / **Keep** support. See [SoundCloud](#soundcloud) and [docs/soundcloud.md](docs/soundcloud.md).
 - 🌊 **One-tap Tidal & Qobuz setup + streaming upgrades** - extract the official V1 stock credentials directly on the player over Wi-Fi or from the microSD card (no PC, developer keys or restart needed). Includes V1-adapted **Tidal** with offline downloads (`Music/Tidal/<artist>/<album>`), a 1 GiB SD playback cache, cached lists, favourite playlists, search history, configurable home rows and bulk selection; **Qobuz** up to 24-bit/192 kHz FLAC with full JWT session persistence, plus offline track and album downloads to `Music/Qobuz Downloads`; **FLAC internet radio** with a V1-sized page and Flylo's curated chill-hop picks; and upgraded **Podcasts** (keyless Apple directory with RSS fallback for long shows, heard/unheard tracking, episode ordering and regional charts). See [Streaming: Tidal, Qobuz and credentials](#streaming-tidal-qobuz-and-credentials).
 - 🧩 **Plugins (`Settings → Plugins`)** - switch optional modules (including Tidal, Qobuz, SoundCloud, Podcasts, Radio, tools and games) on or off so unused pages are never built and RAM stays free. See [docs/ADDONS.md](docs/ADDONS.md).
-- 🎨 **V1 themes** - **Tokyo Night**, **Amber on Black** and **OLED**, designed for the V1 panel, beside Dark and Light. Make your own with the [custom theme template](#custom-theme).
+- 🎨 **V1 themes** - **Tokyo Night**, **Amber on Black** and **OLED**, designed for the V1 panel, beside Dark and Light. Make your own with the [custom theme template](#custom-theme), or start from a ready-made palette (Gruvbox, Rosé Pine, Dracula, Catppuccin Mocha).
 - 🚀 **Boot screens** - Retrospace (the default), Space, Travelling in space, Stock, or your own picture, with a separate brightness for the splash so a late-night power-on need not light the room.
 - 🖼️ **Player layouts** - **Immersive**, **Poster**, **Album Art Max**, **Vinyl** and **Sticker**, beside Standard, Waveform and Alternative. See [FEATURES.md](FEATURES.md#now-playing) for the details of each layout.
 - 🔘 **Legacy play button and corner roundness** - the original round disc behind play and pause, as an option under Settings → Music → Display options; and a slider for how round the screen corners are, from a hint of a corner (2 px) up to 20 px, for a V1 that looks boxier than its 16 px default.
@@ -327,6 +327,8 @@ accent = #7aa2f7
 ```
 
 Every key in `[theme]` is required. Lines starting with `;` or `#` are comments. Selecting Custom with a missing or invalid file shows an error and keeps the current appearance. See [docs/custom-themes.md](docs/custom-themes.md) for the rest.
+
+Four ready-made palettes — **Gruvbox**, **Rosé Pine**, **Dracula** and **Catppuccin Mocha** — are in [`sonix-player/examples/themes/`](sonix-player/examples/themes/): copy one over `Themes/custom.ini` instead of editing the template, or use it as a starting point for your own colours.
 
 ## Music pet
 
@@ -523,7 +525,7 @@ See [setup, security, quality and validation notes](docs/jellyfin.md).
 - `sonix-player/` — player sources, LVGL configuration, launcher and build system.
 - `sonix-packer/` — stock-image preparation, firmware packaging and validation scripts.
 - `docs/collecting-logs.md` — which logs to send with a bug report, and how to take them.
-- `docs/custom-themes.md` — the custom SD-card theme palette (`Themes/custom.ini`), its keys and how edits are applied.
+- `docs/custom-themes.md` — the custom SD-card theme palette (`Themes/custom.ini`), its keys, the ready-made Gruvbox / Rosé Pine / Dracula / Catppuccin Mocha palettes, and how edits are applied.
 - `docs/qobuz-stock-firmware.md` — how stock Qobuz and Tidal authentication and local credential extraction work.
 - `docs/ADDONS.md` — optional modules (`Settings → Plugins`) and fresh-install defaults.
 - `docs/jellyfin.md` — Jellyfin setup, Quick Connect, token-only auth, Direct Play/transcoding, playback reporting and SD cache.
