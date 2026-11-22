@@ -741,9 +741,22 @@ void theme_set_icon_sources(theme_glyph_mode_fn_t glyphs, theme_semantic_color_f
 	icon_semantic_color = semantic;
 }
 
+bool theme_custom_tokyo_layout(void) {
+	return config_get_bool("ui", "custom_tokyo_layout", false);
+}
+
+void theme_set_custom_tokyo_layout(bool on) {
+	config_set_bool("ui", "custom_tokyo_layout", on);
+	config_save();
+}
+
 bool theme_uses_function_glyphs(void) {
 	if (icon_glyph_mode && icon_glyph_mode()) {
 		return true;
+	}
+	// Custom follows the Appearance switch; the presets carry their own.
+	if (selected_kind == THEME_KIND_CUSTOM) {
+		return theme_custom_tokyo_layout();
 	}
 	return selected_kind == THEME_KIND_TOKYO_NIGHT || selected_kind == THEME_KIND_AMBER_ON_BLACK ||
 		   selected_kind == THEME_KIND_OLED;

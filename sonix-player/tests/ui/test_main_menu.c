@@ -103,6 +103,15 @@ static void check_custom_theme(void) {
 	assert(theme()->screen_bg.red == 7);
 	assert(theme_select_custom_file("custom.ini"));
 	assert(theme()->screen_bg.red == 4);
+	// The Appearance switch dresses a selected custom palette with the
+	// Tokyo-style function-matched layout; off keeps the classic artwork.
+	theme_set_kind(THEME_KIND_CUSTOM);
+	assert(theme_get_kind() == THEME_KIND_CUSTOM);
+	assert(!theme_uses_function_glyphs());
+	theme_set_custom_tokyo_layout(true);
+	assert(theme_uses_function_glyphs());
+	theme_set_custom_tokyo_layout(false);
+	assert(!theme_uses_function_glyphs());
 	// Invalid edits must not partially repaint or change the saved choice.
 	f = fopen(path, "w");
 	assert(f);

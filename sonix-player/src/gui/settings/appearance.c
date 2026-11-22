@@ -34,6 +34,7 @@ static lv_obj_t *custom_files_row;
 static lv_obj_t *custom_file_pills[CUSTOM_FILE_MAX];
 static char custom_file_names[CUSTOM_FILE_MAX][256];
 static int custom_file_count;
+static lv_obj_t *custom_tokyo_switch;
 
 static lv_obj_t *btn_boot[5];		 // Stock / Retrospace / Space / Travelling in space / Custom
 static lv_obj_t *boot_picture_value; // the name of the custom picture, on its row
@@ -763,6 +764,21 @@ static void custom_file_pick_cb(lv_event_t *e) {
 	appearance_preview_refresh();
 }
 
+// The switch that lets a selected custom palette wear the Tokyo-style
+// function-matched layout instead of the classic artwork. Saved first, then
+// repainted: the gate feeds the menu, grid and topbar rebuilds through the
+// theme refresh, so the reflow lands in the same event.
+static void custom_tokyo_cb(lv_event_t *e) {
+	(void)e;
+	// The stored switch rather than the event target, matching the other
+	// toggles in the settings pages.
+	bool on = lv_obj_has_state(custom_tokyo_switch, LV_STATE_CHECKED);
+	theme_set_custom_tokyo_layout(on);
+	theme_repaint();
+	refresh_buttons();
+	appearance_preview_refresh();
+}
+
 #define BOOT_LIGHT_COUNT ((BOOTLOGO_LIGHT_MAX - BOOTLOGO_LIGHT_MIN) / BOOTLOGO_LIGHT_STEP + 1)
 
 // ---------------------------------------------------------------------------
@@ -1128,6 +1144,15 @@ void appearance_init(gui_config_t *cfg) {
 	lv_obj_add_style(custom_note, &theme_style_text_dim, 0);
 	lv_obj_set_style_text_font(custom_note, &font_ui_22, 0);
 	lv_label_set_text(custom_note, tr("appearance_custom_note"));
+
+	// A custom palette may also wear the Tokyo-style layout; the switch sits
+	// with the note it applies to and only changes what Custom dresses with,
+	// never which palette is selected.
+	custom_tokyo_switch = NULL;
+	settingsrow_toggle(container, "appearance_custom_tokyo_layout", &custom_tokyo_switch, custom_tokyo_cb);
+	if (theme_custom_tokyo_layout()) {
+		lv_obj_add_state(custom_tokyo_switch, LV_STATE_CHECKED);
+	}
 
 	// Compact palette and function-matched icon previews for Tokyo Night, Amber
 	// on Black and OLED. The accent picker stays here even when they are hidden.
