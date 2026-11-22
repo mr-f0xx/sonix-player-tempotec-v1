@@ -362,6 +362,24 @@ jobs:
           path: sonix-player/tools/spotifyd/Cargo.lock
           if-no-files-found: warn
 
+      # One annotation per error, because an annotation body is a single line
+      # here: each becomes `error: <file>:<line> -- <message>`, which is enough
+      # to fix it without seeing the log.
+      - name: One annotation per compile error
+        if: failure()
+        run: |
+          f="$RUNNER_TEMP/build.log"
+          [ -f "$f" ] || exit 0
+          sed 's/\x1b\[[0-9;]*m//g' "$f" > "$RUNNER_TEMP/clean.log"
+          # "  --> src/main.rs:274:35" follows each error; pair them up.
+          awk '
+            /^error(\[[A-Za-z0-9]+\])?:/ { msg=$0; loc=""; want=1; next }
+            want && /^ *-->/ { loc=$0; sub(/^ *--> */,"",loc); print msg "|" loc; want=0 }
+            want && /^$/ { print msg "|"; want=0 }
+          ' "$RUNNER_TEMP/clean.log" | head -n 12 | while IFS='|' read -r msg loc; do
+            echo "::error title=${loc:-compile error}::${msg}"
+          done
+
       - name: Upload the logs when something failed
         if: failure()
         uses: actions/upload-artifact@v4
