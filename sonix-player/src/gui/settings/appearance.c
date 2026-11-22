@@ -28,6 +28,12 @@
 lv_obj_t *appearance_screen;
 
 static lv_obj_t *theme_buttons[THEME_KIND_CUSTOM + 1];
+#define CUSTOM_FILE_MAX 24
+static lv_obj_t *custom_files_row;
+static lv_obj_t *custom_file_pills[CUSTOM_FILE_MAX];
+static char custom_file_names[CUSTOM_FILE_MAX][256];
+static int custom_file_count;
+
 static lv_obj_t *btn_boot[5];		 // Stock / Retrospace / Space / Travelling in space / Custom
 static lv_obj_t *boot_picture_value; // the name of the custom picture, on its row
 static lv_obj_t *boot_light_value, *boot_light_slider; // splash brightness
@@ -629,6 +635,18 @@ static lv_obj_t *make_clock_choice(lv_obj_t *parent, const char *text, int pos, 
 	return btn;
 }
 
+static void custom_file_pick_cb(lv_event_t *e);
+
+static void custom_files_refresh(void) {
+	if (!custom_files_row) return;
+	lv_obj_clean(custom_files_row);
+	custom_file_count = theme_custom_files(custom_file_names, CUSTOM_FILE_MAX);
+	for (int i = 0; i < custom_file_count; i++) {
+		custom_file_pills[i] = settingsrow_pill_text(custom_files_row, custom_file_names[i], i + 1, custom_file_pick_cb);
+		settingsrow_pill_active(custom_file_pills[i], strcmp(custom_file_names[i], theme_custom_file()) == 0);
+	}
+}
+
 static void theme_pick_cb(lv_event_t *e) {
 	theme_kind_t kind = (theme_kind_t)(intptr_t)lv_event_get_user_data(e);
 	if (kind == THEME_KIND_CUSTOM && !theme_reload_custom()) {
@@ -636,6 +654,20 @@ static void theme_pick_cb(lv_event_t *e) {
 		return;
 	}
 	theme_set_kind(kind);
+	refresh_buttons();
+	appearance_preview_refresh();
+}
+
+static void custom_file_pick_cb(lv_event_t *e) {
+	if (switcher_back_drag_active()) return;
+	int i = (int)(intptr_t)lv_event_get_user_data(e) - 1;
+	if (i < 0 || i >= custom_file_count || !theme_select_custom_file(custom_file_names[i])) {
+		toast_error("appearance_custom_invalid");
+		return;
+	}
+	theme_set_kind(THEME_KIND_CUSTOM);
+	for (int j = 0; j < custom_file_count; j++)
+		settingsrow_pill_active(custom_file_pills[j], j == i);
 	refresh_buttons();
 	appearance_preview_refresh();
 }
@@ -712,6 +744,7 @@ static void custom_card_refresh_cb(lv_event_t *e) {
 	// The player may have started without a card and mounted one later.
 	theme_set_card_root(storage_sd_root());
 	theme_reload_custom();
+	custom_files_refresh();
 }
 
 static void boot_light_show(void);
@@ -989,6 +1022,15 @@ void appearance_init(gui_config_t *cfg) {
 		compact ? "appearance_amber_short" : "appearance_amber_on_black", THEME_KIND_AMBER_ON_BLACK, compact);
 	theme_buttons[THEME_KIND_OLED] = make_theme_choice(row, "appearance_oled", THEME_KIND_OLED, compact);
 	theme_buttons[THEME_KIND_CUSTOM] = make_theme_choice(row, "appearance_custom", THEME_KIND_CUSTOM, compact);
+	custom_files_row = lv_obj_create(card);
+	lv_obj_set_size(custom_files_row, lv_pct(100), LV_SIZE_CONTENT);
+	lv_obj_set_style_bg_opa(custom_files_row, 0, 0);
+	lv_obj_set_style_border_width(custom_files_row, 0, 0);
+	lv_obj_set_style_pad_all(custom_files_row, 0, 0);
+	lv_obj_set_scrollable(custom_files_row, false);
+	lv_obj_set_event_bubble(custom_files_row, true);
+	lv_obj_set_flex_flow(custom_files_row, LV_FLEX_FLOW_ROW_WRAP);
+	custom_files_refresh();
 	lv_obj_t *custom_note = lv_label_create(container);
 	lv_label_set_long_mode(custom_note, LV_LABEL_LONG_WRAP);
 	lv_obj_set_width(custom_note, lv_pct(100));
