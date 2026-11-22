@@ -269,8 +269,7 @@ jobs:
 
       - name: Build
         run: |
-          set -o pipefail
-          cargo build --release 2>&1 | tee "$RUNNER_TEMP/build.log"
+          cargo build --release >"$RUNNER_TEMP/build.log" 2>&1 || true
           {
             echo "### Spotify daemon: release build"
             echo '```'
@@ -278,6 +277,14 @@ jobs:
             tail -n 15 "$RUNNER_TEMP/build.log"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
+          cat "$RUNNER_TEMP/build.log"
+          if ! grep -q "Finished" "$RUNNER_TEMP/build.log"; then
+            first="$(grep -m1 -E "^error(\[[0-9]+\])?:" "$RUNNER_TEMP/build.log" || true)"
+            [ -z "$first" ] && first="$(grep -m1 -E "^error" "$RUNNER_TEMP/build.log" || true)"
+            [ -z "$first" ] && first="$(tail -n 4 "$RUNNER_TEMP/build.log" | tr '\n' ' ')"
+            echo "::error title=spotifyd does not build::${first}"
+            exit 1
+          fi
 
       - name: Stage the binary and its configuration
         run: |
