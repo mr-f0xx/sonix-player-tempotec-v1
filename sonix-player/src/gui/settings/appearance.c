@@ -1214,8 +1214,13 @@ void appearance_init(gui_config_t *cfg) {
 	btn_custom_accent = lv_btn_create(accent_card);
 	lv_obj_set_size(btn_custom_accent, lv_pct(100), compact ? 36 : 48);
 	lv_obj_set_style_radius(btn_custom_accent, compact ? 8 : 10, 0);
-	lv_obj_set_style_bg_color(btn_custom_accent, theme()->surface_pressed, 0);
-	lv_obj_set_style_bg_opa(btn_custom_accent, LV_OPA_COVER, 0);
+	// The row blends into the card it sits in: the shared card styles carry
+	// each theme's own surface, so the background is the theme's colour on
+	// every theme and repaints with the palette, and it darkens only under a
+	// press. The local surface_pressed fill this replaces was baked once at
+	// build -- a grey slab everywhere, and a stale grey after a theme switch.
+	lv_obj_add_style(btn_custom_accent, &theme_style_card, 0);
+	lv_obj_add_style(btn_custom_accent, &theme_style_card_pressed, LV_STATE_PRESSED);
 	lv_obj_set_style_shadow_width(btn_custom_accent, 0, 0);
 	lv_obj_set_style_pad_hor(btn_custom_accent, compact ? 10 : 14, 0);
 	lv_obj_set_style_pad_gap(btn_custom_accent, compact ? 8 : 12, 0);
