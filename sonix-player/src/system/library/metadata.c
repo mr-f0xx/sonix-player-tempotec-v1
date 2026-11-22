@@ -154,7 +154,15 @@ static bool replaygain_field(song_metadata_t *out, const char *key, const char *
 		return false; // not a number at all
 	}
 
-	if (strcmp(key, "REPLAYGAIN_TRACK_GAIN") == 0) {
+	if (strcmp(key, "R128_TRACK_GAIN") == 0) {
+		// Opus uses an integer gain in 1/256 dB units, referenced to
+		// -23 LUFS. ReplayGain uses -18 LUFS, so convert to its dB scale.
+		// Prefer an explicit ReplayGain value if the file has both.
+		if (!out->has_track_gain) {
+			out->track_gain_db = (float)(number / 256.0 + 5.0);
+			out->has_track_gain = true;
+		}
+	} else if (strcmp(key, "REPLAYGAIN_TRACK_GAIN") == 0) {
 		out->track_gain_db = (float)number;
 		out->has_track_gain = true;
 	} else if (strcmp(key, "REPLAYGAIN_ALBUM_GAIN") == 0) {
@@ -481,7 +489,7 @@ static void apply_vorbis_comment(song_metadata_t *out, const char *comment, size
 			out->year = (int)strtol(num_buf, NULL, 10);
 		}
 		return;
-	} else if (strncmp(key, "REPLAYGAIN_", 11) == 0) {
+	} else if (strncmp(key, "REPLAYGAIN_", 11) == 0 || strcmp(key, "R128_TRACK_GAIN") == 0) {
 		replaygain_field(out, key, value, value_len);
 		return;
 	} else if (strcmp(key, "SERIES") == 0 || (strcmp(key, "MOVEMENTNAME") == 0 && !out->series[0])) {
@@ -823,7 +831,7 @@ static void id3_txxx(song_metadata_t *out, uint8_t encoding, const uint8_t *data
 		copy_bounded(out->series, sizeof(out->series), text);
 	} else if (strcmp(key, "SERIES-PART") == 0 || strcmp(key, "SERIES_PART") == 0 || strcmp(key, "SERIESPART") == 0) {
 		copy_bounded(out->series_part, sizeof(out->series_part), text);
-	} else if (strncmp(key, "REPLAYGAIN_", 11) == 0) {
+	} else if (strncmp(key, "REPLAYGAIN_", 11) == 0 || strcmp(key, "R128_TRACK_GAIN") == 0) {
 		replaygain_field(out, key, text, strlen(text));
 	} else if (strcmp(key, "COMPILATION") == 0) {
 		out->compilation = flag_is_set(text, strlen(text));
