@@ -422,7 +422,8 @@ static void fade_slider_cb(lv_event_t *e) {
 
 static void build_fade_page(gui_config_t *cfg) {
 	fade_screen = lv_obj_create(NULL);
-	lv_obj_t *container = settingsrow_page(fade_screen, cfg, "fade");
+	lv_obj_t *container = settingsrow_page(fade_screen, cfg, "musicsettings_fade_crossfade");
+	settingsrow_title_corner_slots(settingsrow_page_title(fade_screen), cfg, 0);
 
 	fade_card = settingsrow_toggle_slider(container, "fade", FADE_STEPS, &fade_switch, &fade_value,
 										  &fade_slider, fade_toggle_cb, fade_slider_cb);
@@ -2902,7 +2903,7 @@ static void build_playback_page(gui_config_t *cfg) {
 	// The fade at the two ends of a track: a page of its own because it carries
 	// a length as well as a switch.
 	build_fade_page(cfg);
-	fade_row = settingsrow_add(container, "fade", NULL, switch_screen_cb, fade_screen);
+	fade_row = settingsrow_add(container, "musicsettings_fade_crossfade", NULL, switch_screen_cb, fade_screen);
 
 	// Both channels as one, for a single earbud or one ear.
 	if (addons_enabled("mono")) {
