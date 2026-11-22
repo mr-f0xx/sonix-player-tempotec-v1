@@ -317,7 +317,9 @@ jobs:
             # The E0277 block names the trait and the type that failed the
             # bound, and those are what say who is at fault. Emitted raw and in
             # full: an annotation body can be several lines.
-            block="$(awk '/^error\[E0277\]/{f=1} f{print} f&&/^$/{exit}' "$RUNNER_TEMP/errors.txt" | head -n 12)"
+            # The first error of any kind, with the lines that follow it: the
+            # note and the arrows are the part that names file and line.
+            block="$(awk '/^error(\[[A-Z0-9]+\])?:/{f=1} f{print} f&&/^$/{exit}' "$RUNNER_TEMP/errors.txt" | head -n 14)"
             [ -z "$block" ] && block="$(grep -m1 -E "^error" "$RUNNER_TEMP/errors.txt" || true)"
             echo "::error title=spotifyd does not build::${block}"
             # The detail goes where a 64 KB cap cannot cut it: a step summary
