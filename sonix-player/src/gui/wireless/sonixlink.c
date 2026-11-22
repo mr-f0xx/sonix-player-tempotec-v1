@@ -111,6 +111,7 @@ static void wire_to_mode(int wire) {
 		playlist_set_mode(PLAYBACK_MODE_NORMAL);
 		break;
 	}
+	device_state_sync_crossfade();
 }
 
 // Whether the track playing now is starred. The answer is remembered by path:

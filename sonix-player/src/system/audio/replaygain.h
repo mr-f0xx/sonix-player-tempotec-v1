@@ -42,9 +42,17 @@ void replaygain_load(const song_metadata_t *meta);
 bool replaygain_active(void);
 double replaygain_current_db(void);
 
+// Works out the Q15 ReplayGain multiplier (32768 = unity) for `meta` under the
+// active mode, without modifying the loaded track's global gain.
+int replaygain_compute_q15(const song_metadata_t *meta);
+
 // In place on interleaved PCM, audio thread only. A no-op when off or when the
 // track carries no usable tag.
 void replaygain_process(short *frames, int frame_count, int channels);
 void replaygain_process_s32(int32_t *frames, int frame_count, int channels);
+
+// Explicit-gain variants for mixing two tracks with independent ReplayGain.
+void replaygain_apply_q15_s16(short *frames, int frame_count, int channels, int gain_q15);
+void replaygain_apply_q15_s32(int32_t *frames, int frame_count, int channels, int gain_q15);
 
 #endif /* REPLAYGAIN_H */

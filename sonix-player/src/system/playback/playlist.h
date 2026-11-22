@@ -214,6 +214,11 @@ bool playlist_advance_auto(char *out, size_t out_size);
 // (that next item is not knowable until the round is dealt). GUI thread only.
 bool playlist_peek_auto(char *out, size_t out_size);
 
+// Like playlist_peek_auto(), except at the end of a shuffle-repeat round it
+// pre-deals the upcoming round deterministically so crossfade can stage the
+// exact track that playlist_advance_auto() will consume. GUI thread only.
+bool playlist_peek_crossfade(char *out, size_t out_size);
+
 // User-initiated next/prev, walking the playback order. Copy the new track's
 // path into `out`; return false only when the queue is empty.
 bool playlist_next(char *out, size_t out_size);

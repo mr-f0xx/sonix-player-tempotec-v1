@@ -268,6 +268,19 @@ $(BUILD)/test_eq: $(EQ_SRC) $(ROOT)/src/system/audio/eq.h $(ROOT)/src/system/cor
 	@mkdir -p $(BUILD)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ $(EQ_SRC) $(LDFLAGS) $(LDLIBS)
 
+# Equal-power Q15 crossfade mixer, stateful resampler/channel-mapper,
+# ReplayGain Q15 precomputation, and deterministic shuffle-repeat look-ahead.
+XFADE_SRC = test_crossfade.c support.c $(ROOT)/src/system/audio/crossfade.c $(ROOT)/src/system/audio/replaygain.c \
+            $(ROOT)/src/system/playback/playlist.c $(ROOT)/src/system/core/config.c
+.PHONY: crossfade
+crossfade: $(BUILD)/test_crossfade
+	$(BUILD)/test_crossfade
+
+$(BUILD)/test_crossfade: $(XFADE_SRC) $(ROOT)/src/system/audio/crossfade.h $(ROOT)/src/system/audio/replaygain.h \
+                         $(ROOT)/src/system/playback/playlist.h
+	@mkdir -p $(BUILD)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ $(XFADE_SRC) $(LDFLAGS) $(LDLIBS)
+
 # The explicit V1 external-DAC host trial against a private fake sysfs tree.
 # Exercises the real role writes, bounded wait, rollback and crash recovery.
 .PHONY: usbhost

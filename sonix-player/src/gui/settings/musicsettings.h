@@ -47,6 +47,8 @@ lv_obj_t *musicsettings_soundfield_screen(void);
 lv_obj_t *musicsettings_crossfeed_screen(void);
 bool musicsettings_fade_enabled(void);
 void musicsettings_set_fade_enabled(bool enabled);
+bool musicsettings_crossfade_mode(void);
+void musicsettings_set_crossfade_mode(bool crossfade);
 
 // Which of the two shuffles "Play in random order" starts: with this on it is
 // the one that comes round again instead of stopping at the end of the deal.
