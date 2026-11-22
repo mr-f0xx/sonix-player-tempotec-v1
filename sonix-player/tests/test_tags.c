@@ -585,7 +585,7 @@ static void test_wrong_extensions_and_cue(const char *dir) {
 	buf_put(&tags_pkt, "OpusTags", 8);
 	buf_le32(&tags_pkt, 5);
 	buf_put(&tags_pkt, "sonix", 5);
-	buf_le32(&tags_pkt, 4); // 4 comments: TITLE, huge PICTURE, ARTIST, long LYRICS
+	buf_le32(&tags_pkt, 5); // TITLE, huge PICTURE, ARTIST, long LYRICS, R128 gain
 	const char *c1 = "TITLE=Opus In Ogg Clothing";
 	buf_le32(&tags_pkt, (uint32_t)strlen(c1));
 	buf_put(&tags_pkt, c1, strlen(c1));
@@ -610,6 +610,10 @@ static void test_wrong_extensions_and_cue(const char *dir) {
 	for (size_t i = 0; i < pad_len; i++)
 		buf_u8(&tags_pkt, 'x');
 
+	const char *r128_gain = "R128_TRACK_GAIN=-2048";
+	buf_le32(&tags_pkt, (uint32_t)strlen(r128_gain));
+	buf_put(&tags_pkt, r128_gain, strlen(r128_gain));
+
 	// Split OpusTags packet across continuation Ogg pages ( per RFC 3533, every
 	// non-final page of a continued packet carries 255-byte segments only ).
 	const size_t page_cap = 200 * 255; // 51000 bytes (200 x 255 segments)
@@ -629,6 +633,7 @@ static void test_wrong_extensions_and_cue(const char *dir) {
 	metadata_read(opus_as_ogg, &meta);
 	assert(strcmp(meta.title, "Opus In Ogg Clothing") == 0);
 	assert(strcmp(meta.artist, "Burial") == 0);
+	assert(meta.has_track_gain && meta.track_gain_db > -3.01f && meta.track_gain_db < -2.99f);
 	char *lyrics = metadata_read_lyrics(opus_as_ogg);
 	assert(lyrics != NULL);
 	assert(strncmp(lyrics, "[00:01.00]Archangel ", 20) == 0);
