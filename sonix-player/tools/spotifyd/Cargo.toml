@@ -11,19 +11,23 @@ edition = "2021"
 description = "librespot's library and queue over a text socket, with PCM to the player"
 license = "MIT"
 
-# The wire format lives in a library so it can be tested without librespot:
-# protocol.rs has no dependencies and no session, and `cargo test --lib` runs
-# its tests in seconds where building the binary means waiting for librespot.
-# main.rs declares `mod protocol` as well and they are the same file, compiled
-# into both; that is deliberate, not a duplicate.
+# The wire format is the library root (src/lib.rs), so `cargo test --lib`
+# builds it and nothing else -- no librespot, no ALSA, no OpenSSL. The binary
+# imports it as crate::protocol. Two targets out of one source tree, and the
+# protocol half is testable on a machine with no audio stack at all.
 [lib]
-name = "sonix_spotifyd"
-path = "src/protocol.rs"
+name = "protocol"
+path = "src/lib.rs"
 
 [[bin]]
 name = "spotifyd"
 path = "src/main.rs"
 
 [dependencies]
-librespot = "0.6"
+# 0.6 does not build against a current stable Rust: its build script fails with
+# E0277 before a line of this code is compiled. 0.8 renames SpotifyId to
+# SpotifyUri throughout the metadata and player APIs, which is a rewrite of the
+# glue; 0.7 keeps the SpotifyId-based calls the glue is written against, and is
+# edition 2024 on a toolchain that exists today.
+librespot = "0.7"
 tokio = { version = "1", features = ["full"] }

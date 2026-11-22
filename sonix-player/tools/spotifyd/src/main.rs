@@ -16,7 +16,10 @@
 // the reply. The handlers themselves live in the glue.
 
 mod librespot_glue;
-mod protocol;
+
+// The wire format is the package's library target (src/lib.rs), so the binary
+// and the tests share one compiled copy instead of each growing its own.
+use protocol;
 
 use std::io::{BufRead, BufReader, Read, Write};
 use std::os::unix::net::{UnixListener, UnixStream};

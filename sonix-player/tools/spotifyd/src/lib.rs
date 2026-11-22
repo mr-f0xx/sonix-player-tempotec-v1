@@ -1,4 +1,9 @@
-// The wire format, and nothing else.
+// The wire format, and nothing else -- the package's library root, so that
+// main.rs imports it as `protocol` and `cargo test --lib` builds it alone.
+//
+// It is deliberately a library of its own because the protocol has no librespot
+// types and needs no session: the tests below run in seconds, where building the
+// binary means building librespot first.
 //
 // PROTOCOL.md is the contract; this file is its shape in code. It knows no
 // librespot types and needs no network, which is what makes it the part worth

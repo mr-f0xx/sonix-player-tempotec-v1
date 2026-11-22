@@ -37,7 +37,7 @@ use librespot::playback::audio_backend::{Sink, SinkError, SinkResult};
 use librespot::playback::config::{Bitrate, PlayerConfig};
 use librespot::playback::player::{Player, PlayerEvent};
 
-use crate::protocol::{ListPage, PlaylistRow, Reply, Status, Track as WireTrack};
+use protocol::{ListPage, PlaylistRow, Reply, Status, Track as WireTrack};
 use crate::Library;
 
 /// What every handler reads and the status page reports. Atomics because
@@ -303,7 +303,7 @@ impl Daemon {
         let lists = Playlist::get_playlists(&self.session).await.map_err(|e| e.to_string())?;
         Ok(lists
             .into_iter()
-            .map(|l| crate::protocol::PlaylistRow {
+            .map(|l| protocol::PlaylistRow {
                 id: l.id.to_base62(),
                 name: l.name,
                 owner: l.owner.name.unwrap_or_default(),
@@ -325,7 +325,7 @@ impl Daemon {
         for track in page.items {
             out.push(self.describe(&track, &mut artists, &mut albums).await);
         }
-        Ok(crate::protocol::ListPage { total: out.len(), tracks: out })
+        Ok(protocol::ListPage { total: out.len(), tracks: out })
     }
 
     /// The shared body of the three list commands: skip, take, then describe
@@ -341,7 +341,7 @@ impl Daemon {
                 Err(_) => out.push(None),
             }
         }
-        Ok(crate::protocol::ListPage { total, tracks: out })
+        Ok(protocol::ListPage { total, tracks: out })
     }
 
     /// Track + artist + album + cover, with the last three cached: a page of
