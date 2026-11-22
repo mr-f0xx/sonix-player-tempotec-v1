@@ -1,11 +1,11 @@
 # Custom SD-card theme
 
 Copy [`sonix-player/examples/custom-theme.ini`](../sonix-player/examples/custom-theme.ini)
-onto the SD card as **`Themes/custom.ini`** (create `Themes` at the card root).
+onto the SD card in **`Themes/`** (keep any `.ini` filename) (create `Themes` at the card root).
 Edit it with a text editor, safely eject the card, then open **Settings →
-Appearance → Custom**. To see subsequent edits, return to Appearance (or tap
+Appearance → Custom**, then tap the filename to select it. To see subsequent edits, return to Appearance (or tap
 Custom again). The choice persists across restarts as long as the card and
-file are available at startup; if not, the player starts in Dark. Selecting
+selected file is available at startup; if not, the player starts in Dark. Selecting
 Custom with a missing or invalid file shows an error and keeps the current
 appearance. Editing a selected Custom theme while the player is running takes
 effect when Appearance is reopened; invalid edits leave the last valid palette
@@ -23,8 +23,10 @@ one file per scheme, each mapped from the official colours of its theme:
 | [`dracula.ini`](../sonix-player/examples/themes/dracula.ini) | Dracula (Classic) | [draculatheme.com/spec](https://draculatheme.com/spec) |
 | [`catppuccin-mocha.ini`](../sonix-player/examples/themes/catppuccin-mocha.ini) | Catppuccin Mocha | [catppuccin.com/palette](https://catppuccin.com/palette) |
 
-Copy the one you want onto the card as **`Themes/custom.ini`** — only one file
-is active at a time — then select **Custom** in Appearance as usual. Each file
+Copy as many as you want into **`Themes/`**, keeping their original `.ini` names.
+The filenames appear under Custom in Appearance; tap one to apply it. Only one
+is active at a time, and its filename is remembered across restarts. Existing
+`Themes/custom.ini` cards continue to work. Each file
 is a complete eight-key palette, so no editing is required; tweak any value if
 you like (for example Dracula's `text_secondary` is its deliberately dim
 Comment grey). The `sonix-player/tools/validate_theme_ini.py` script checks a

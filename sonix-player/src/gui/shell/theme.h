@@ -117,11 +117,14 @@ void theme_register_refresh(theme_refresh_cb_t cb);
 // callback -- the colour depends on the theme in force.
 void theme_apply_slider_knob(lv_obj_t *slider);
 
-// A single editable palette at <SD root>/Themes/custom.ini. Set the root
+// Palettes at <SD root>/Themes/*.ini. Set the root
 // before theme_init(); reload on entering Appearance or when selecting Custom.
 // A missing/invalid file never changes the active palette. Custom saved in
 // config falls back to Dark at startup if the card is unavailable.
 void theme_set_card_root(const char *root);
+int theme_custom_files(char names[][256], int max);
+const char *theme_custom_file(void);
+bool theme_select_custom_file(const char *name);
 bool theme_reload_custom(void);
 
 // Palette resolved without any of the styles, for pages that run before the

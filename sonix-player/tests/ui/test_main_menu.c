@@ -83,6 +83,26 @@ static void check_custom_theme(void) {
 	assert(fclose(f) == 0);
 	assert(theme_reload_custom());
 	assert(theme()->screen_bg.red == 4);
+	// Multiple named palettes can coexist; selection remembers the basename.
+	char other[256];
+	snprintf(other, sizeof(other), "%s/rose-pine.ini", dir);
+	f = fopen(other, "w");
+	assert(f);
+	fputs("[theme]\nscreen_bg = #070809\nsurface = #101112\nsurface_pressed = #202122\n"
+		"panel = #303132\ncover_bg = #404142\ntext_primary = #f0f1f2\n"
+		"text_secondary = #a0a1a2\naccent = #123456\n", f);
+	assert(fclose(f) == 0);
+	char names[4][256];
+	assert(theme_custom_files(names, 4) == 2);
+	assert(strcmp(names[0], "custom.ini") == 0);
+	assert(strcmp(names[1], "rose-pine.ini") == 0);
+	assert(!theme_select_custom_file("../rose-pine.ini"));
+	assert(theme_select_custom_file("rose-pine.ini"));
+	assert(strcmp(theme_custom_file(), "rose-pine.ini") == 0);
+	assert(strcmp(config_get("ui", "theme_file", ""), "rose-pine.ini") == 0);
+	assert(theme()->screen_bg.red == 7);
+	assert(theme_select_custom_file("custom.ini"));
+	assert(theme()->screen_bg.red == 4);
 	// Invalid edits must not partially repaint or change the saved choice.
 	f = fopen(path, "w");
 	assert(f);
@@ -93,6 +113,7 @@ static void check_custom_theme(void) {
 	theme_set_kind(THEME_KIND_DARK);
 	theme_set_kind(THEME_KIND_CUSTOM);
 	assert(theme_get_kind() == THEME_KIND_DARK);
+	assert(unlink(other) == 0);
 	assert(unlink(path) == 0);
 	assert(rmdir(dir) == 0);
 	assert(rmdir(root) == 0);
