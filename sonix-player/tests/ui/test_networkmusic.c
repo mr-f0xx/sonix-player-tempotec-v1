@@ -1,7 +1,9 @@
 // The actual LVGL setup, keyboard and browser at the V1's 240x320 size.
 // The loopback suite exercises the real worker and network separately.
 #include <assert.h>
+#include <stdio.h>
 #include <stdlib.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 #include "src/gui/board_profile.h"
@@ -111,9 +113,11 @@ static void tap(lv_obj_t *screen, const char *name) {
 
 int main(int argc, char **argv) {
 	assert(argc == 2);
-	char dir[] = "/tmp/sonix-netfolders-ui-XXXXXX", config[128];
+	char dir[] = "/tmp/sonix-netfolders-ui-XXXXXX", config[128], cred_file[128];
+	struct stat st;
 	assert(mkdtemp(dir));
 	snprintf(config, sizeof(config), "%s/device.ini", dir);
+	snprintf(cred_file, sizeof(cred_file), "%s/network-credentials.json", dir);
 	config_init(config);
 	config_set("language", "name", "English");
 	config_set("network_webdav", "address", "http://nas/dav/");
@@ -142,7 +146,11 @@ int main(int argc, char **argv) {
 	tap(networkmusic_screen, "WebDAV");
 	assert(lv_screen_active() == settings && kind == SHARE_WEBDAV);
 	lv_obj_update_layout(settings);
-	within_panel(find_label(settings, "Connect"));
+	// The page scrolls: Connect sits just below the fold until we scroll to it.
+	lv_obj_t *connect_label = find_label(settings, "Connect");
+	assert(connect_label);
+	lv_obj_scroll_to_view(lv_obj_get_parent(connect_label), LV_ANIM_OFF);
+	within_panel(connect_label);
 	tap(settings, tr("subsonic_username"));
 	assert(lv_screen_active() == edit && !lv_textarea_get_password_mode(edit_field));
 	lv_textarea_set_text(edit_field, "login");
@@ -155,6 +163,13 @@ int main(int argc, char **argv) {
 	lv_textarea_set_text(edit_field, "secret");
 	edit_ok(NULL);
 	assert(!lv_textarea_get_text(edit_field)[0]);
+	// Remember password is off by default; flipping it on applies the note
+	// warning above it.
+	assert(!lv_obj_has_state(remember_switch, LV_STATE_CHECKED));
+	lv_obj_set_state(remember_switch, LV_STATE_CHECKED, true);
+	lv_obj_send_event(remember_switch, LV_EVENT_VALUE_CHANGED, NULL);
+	assert(lv_obj_has_state(remember_switch, LV_STATE_CHECKED));
+	assert(strstr(lv_label_get_text(password_note), "unencrypted"));
 	wifi = false;
 	tap(settings, "Connect");
 	assert(!worker && toast && lv_screen_active() == settings);
@@ -163,6 +178,18 @@ int main(int argc, char **argv) {
 	assert(worker && !strcmp(sent_folder, "/dav/") && lv_screen_active() == browser);
 	assert(config_get("network_webdav", "password", NULL) == NULL);
 	assert(!strcmp(config_get("network_webdav", "username", ""), "login"));
+	// Remembered password: the private file exists with 0600 and holds the password.
+	assert(stat(cred_file, &st) == 0 && (st.st_mode & 0777) == 0600);
+	{
+		FILE *f = fopen(cred_file, "r");
+		assert(f);
+		char content[512];
+		size_t n = fread(content, 1, sizeof(content) - 1, f);
+		fclose(f);
+		content[n] = '\0';
+		assert(strstr(content, "secret"));
+		assert(!strstr(content, "\"ftp\""));
+	}
 
 	share_listing_t *root = calloc(1, sizeof(*root));
 	assert(root);
@@ -208,9 +235,32 @@ int main(int argc, char **argv) {
 	assert(cancels == 1);
 	done((networkmusic_result_t){.status = SHARE_CANCELLED});
 	assert(played == 1);
+	// Remember off: edit the password away and toggle remember back off.
+	switch_screen(networkmusic_screen);
+	tap(networkmusic_screen, "WebDAV");
+	assert(lv_screen_active() == settings && kind == SHARE_WEBDAV);
+	assert(lv_obj_has_state(remember_switch, LV_STATE_CHECKED));
+	tap(settings, tr("password"));
+	assert(lv_screen_active() == edit);
+	lv_textarea_set_text(edit_field, "");
+	edit_ok(NULL);
+	// Remembering needs a password; leave it empty and refuse the connect.
+	tap(settings, "Connect");
+	assert(!worker && toast && lv_screen_active() == settings);
+	// The guard refused before saving: the stored password is still on disk.
+	assert(stat(cred_file, &st) == 0);
+	lv_obj_set_state(remember_switch, LV_STATE_CHECKED, false);
+	lv_obj_send_event(remember_switch, LV_EVENT_VALUE_CHANGED, NULL);
+	assert(!lv_obj_has_state(remember_switch, LV_STATE_CHECKED));
+	assert(!strstr(lv_label_get_text(password_note), "unencrypted"));
+	tap(settings, "Connect");
+	assert(worker && sent_kind == SHARE_WEBDAV);
+	assert(access(cred_file, F_OK) != 0);
+	done((networkmusic_result_t){.status = SHARE_CANCELLED});
 	switch_screen(networkmusic_screen);
 	tap(networkmusic_screen, "FTP");
 	assert(lv_screen_active() == settings && kind == SHARE_FTP);
+	assert(!lv_obj_has_state(remember_switch, LV_STATE_CHECKED));
 	tap(settings, "Connect");
 	assert(worker && sent_kind == SHARE_FTP && !strcmp(sent_folder, "/pub/"));
 	done((networkmusic_result_t){.status = SHARE_AUTH_ERROR});

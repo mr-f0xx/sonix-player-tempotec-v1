@@ -2,6 +2,10 @@ CC ?= cc
 PKG_CONFIG ?= pkg-config
 ROOT := ..
 BUILD := .build
+# Same LVGL tree the firmware builds against, including the icon-set hook the
+# main Makefile applies (see ../lvgl-patch.mk).
+LVGL_DIR := $(abspath $(ROOT)/lvgl)
+include $(ROOT)/lvgl-patch.mk
 CPPFLAGS += -I$(ROOT)
 CFLAGS ?= -O2 -g
 CFLAGS += -std=gnu11 -Wall -Wextra -Werror -D_FILE_OFFSET_BITS=64 -ffunction-sections -fdata-sections
@@ -267,6 +271,19 @@ eq: $(BUILD)/test_eq
 $(BUILD)/test_eq: $(EQ_SRC) $(ROOT)/src/system/audio/eq.h $(ROOT)/src/system/core/config.h
 	@mkdir -p $(BUILD)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ $(EQ_SRC) $(LDFLAGS) $(LDLIBS)
+
+# Equal-power Q15 crossfade mixer, stateful resampler/channel-mapper,
+# ReplayGain Q15 precomputation, and deterministic shuffle-repeat look-ahead.
+XFADE_SRC = test_crossfade.c support.c $(ROOT)/src/system/audio/crossfade.c $(ROOT)/src/system/audio/replaygain.c \
+            $(ROOT)/src/system/playback/playlist.c $(ROOT)/src/system/core/config.c
+.PHONY: crossfade
+crossfade: $(BUILD)/test_crossfade
+	$(BUILD)/test_crossfade
+
+$(BUILD)/test_crossfade: $(XFADE_SRC) $(ROOT)/src/system/audio/crossfade.h $(ROOT)/src/system/audio/replaygain.h \
+                         $(ROOT)/src/system/playback/playlist.h
+	@mkdir -p $(BUILD)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ $(XFADE_SRC) $(LDFLAGS) $(LDLIBS)
 
 # The explicit V1 external-DAC host trial against a private fake sysfs tree.
 # Exercises the real role writes, bounded wait, rollback and crash recovery.
@@ -882,7 +899,11 @@ UI_SRC = $(ROOT)/tests/ui/test_main_menu.c $(ROOT)/src/gui/shell/main_menu.c \
          $(ROOT)/src/gui/streaming/soundcloud_icon.c \
          $(ROOT)/src/gui/streaming/jellyfin_icon.c \
          $(ROOT)/src/gui/settings/appearance.c \
+         $(ROOT)/src/gui/shell/iconset.c \
+         $(ROOT)/src/system/image/stb_image_impl.c \
          $(ROOT)/src/gui/settings/bootpicpage.c \
+         $(ROOT)/src/gui/settings/iconsetpage.c \
+         $(ROOT)/src/gui/settings/themefilepage.c \
          $(ROOT)/src/gui/shell/corners.c $(ROOT)/src/gui/shell/settingsrow.c \
          $(ROOT)/src/gui/shell/theme.c \
          $(ROOT)/src/gui/shell/icons.c $(ROOT)/src/gui/shell/main_menu_icons.c \
@@ -1143,6 +1164,22 @@ stats-ui: $(BUILD)/test_stats
 	$(BUILD)/test_stats
 
 $(BUILD)/test_stats: $(STATS_UI_OBJ)
+	$(CC) -o $@ $^ $(LDFLAGS) $(LDLIBS)
+
+# The SD icon set loader: swap, palette, restore. Writes its own folders, so
+# no card or reader is involved.
+ICONSET_UI_SRC = $(ROOT)/tests/ui/test_iconset.c $(ROOT)/src/gui/shell/iconset.c \
+                 $(ROOT)/src/gui/shell/icons.c $(ROOT)/src/gui/shell/theme.c \
+                 $(ROOT)/src/gui/board_profile.c $(ROOT)/src/system/core/config.c \
+                 $(ROOT)/src/system/image/stb_image_impl.c
+ICONSET_UI_OBJ = $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(ICONSET_UI_SRC)) \
+                 $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(UI_LVGL_SRC))
+
+.PHONY: iconset-ui
+iconset-ui: $(BUILD)/test_iconset
+	$(BUILD)/test_iconset
+
+$(BUILD)/test_iconset: $(ICONSET_UI_OBJ)
 	$(CC) -o $@ $^ $(LDFLAGS) $(LDLIBS)
 
 CORNERS_SRC = $(ROOT)/tests/ui/test_corners.c $(ROOT)/src/gui/shell/corners.c \
@@ -1844,6 +1881,22 @@ $(BUILD)/test_jellyfin_pages: $(JELLYFINPAGE_OBJ)
 networkmusic: $(BUILD)/test_networkmusic
 	python3 run_networkmusic_tests.py $(BUILD)/test_networkmusic
 
+# Remembered-password storage next to device_config.ini: write, mode 0600,
+# JSON round-trip, unlink on clear, refusal of anything unreadable.
+.PHONY: networkcredentials
+networkcredentials: $(BUILD)/test_networkcredentials
+	$(BUILD)/test_networkcredentials
+
+$(BUILD)/test_networkcredentials: test_networkcredentials.c $(ROOT)/src/system/net/networkcredentials.c \
+                                $(ROOT)/src/system/core/json.c $(ROOT)/src/system/core/config.c \
+                                $(ROOT)/src/system/net/networkcredentials.h \
+                                $(ROOT)/src/system/core/json.h $(ROOT)/src/system/core/config.h \
+                                $(ROOT)/src/system/net/networkshare.h
+	@mkdir -p $(BUILD)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ test_networkcredentials.c \
+	    $(ROOT)/src/system/net/networkcredentials.c $(ROOT)/src/system/core/json.c \
+	    $(ROOT)/src/system/core/config.c $(LDFLAGS) $(LDLIBS)
+
 NETWORKMUSIC_SRC = test_networkmusic.c $(ROOT)/src/system/streaming/networkmusic.c \
                    $(ROOT)/src/system/net/networkshare.c $(ROOT)/src/system/ebook/epub_xml.c \
                    $(ROOT)/src/system/playback/playlist.c $(ROOT)/src/system/core/utils.c
@@ -1855,7 +1908,8 @@ $(BUILD)/test_networkmusic: $(NETWORKMUSIC_SRC) $(ROOT)/src/system/streaming/net
 NETWORKMUSIC_UI_COMMON = $(ROOT)/src/gui/shell/settingsrow.c $(ROOT)/src/gui/shell/keyboard.c \
                        $(ROOT)/src/gui/shell/theme.c $(ROOT)/src/gui/shell/icons.c $(ROOT)/src/gui/board_profile.c \
                        $(ROOT)/src/system/input/kblayout.c $(ROOT)/src/system/core/config.c $(ROOT)/src/system/core/lang.c
-NETWORKMUSIC_UI_SRC = $(ROOT)/tests/ui/test_networkmusic.c $(ROOT)/src/system/net/networkshare.c $(NETWORKMUSIC_UI_COMMON)
+NETWORKMUSIC_UI_SRC = $(ROOT)/tests/ui/test_networkmusic.c $(ROOT)/src/system/net/networkshare.c \
+                      $(ROOT)/src/system/net/networkcredentials.c $(ROOT)/src/system/core/json.c $(NETWORKMUSIC_UI_COMMON)
 NETWORKMUSIC_UI_OBJ = $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(NETWORKMUSIC_UI_SRC)) $(UI_LVGL_OBJ)
 .PHONY: networkmusic-ui
 ui: networkmusic-ui
@@ -1869,7 +1923,8 @@ $(BUILD)/test_networkmusic_ui: $(NETWORKMUSIC_UI_OBJ)
 # the native test. Native network backends are deliberately not linked.
 LAN_PREVIEW_SRC = tests/ui/test_streaming_preview.c src/gui/streaming/streaming.c \
                   src/gui/streaming/networkmusicpage.c src/gui/wireless/listentogether.c
-LAN_PREVIEW_SHARED = $(NETWORKMUSIC_UI_COMMON) $(ROOT)/src/gui/shell/gridpage.c $(ROOT)/src/gui/pet/peticon.c \
+LAN_PREVIEW_SHARED = $(NETWORKMUSIC_UI_COMMON) $(ROOT)/src/system/net/networkcredentials.c \
+                     $(ROOT)/src/system/core/json.c $(ROOT)/src/gui/shell/gridpage.c $(ROOT)/src/gui/pet/peticon.c \
                      $(ROOT)/src/gui/streaming/soundcloud_icon.c $(ROOT)/src/gui/streaming/jellyfin_icon.c
 LAN_PREVIEW_OBJ = $(addprefix $(BUILD)/ui-preview/,$(LAN_PREVIEW_SRC:.c=.o)) \
                   $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(LAN_PREVIEW_SHARED)) $(UI_LVGL_OBJ)

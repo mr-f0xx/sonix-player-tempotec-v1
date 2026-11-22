@@ -31,6 +31,24 @@ lv_color_t theme_player_chrome_color(theme_player_chrome_t role) {
 	(void)role;
 	return palette.accent;
 }
+// The lyrics offset menu lives in a popover; this test never opens it.
+void popover_init(void) {}
+void popover_show(lv_obj_t *anchor, const popover_item_t *items, int count) {
+	(void)anchor;
+	(void)items;
+	(void)count;
+}
+void popover_show_editor(lv_obj_t *anchor, const popover_item_t *items, int count, void (*on_close)(void)) {
+	(void)anchor;
+	(void)items;
+	(void)count;
+	(void)on_close;
+}
+void popover_set_item_text(int index, const char *text) {
+	(void)index;
+	(void)text;
+}
+void popover_close(void) {}
 int back_btn_centre_y(void) { return 42; }
 
 static int opened;

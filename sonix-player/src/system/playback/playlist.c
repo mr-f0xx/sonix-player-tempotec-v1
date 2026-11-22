@@ -126,6 +126,19 @@ static const char *entry_path(size_t entry) {
 static size_t *order;	// permutation of [0, entry_count)
 static size_t pos = 0;	// where playback is, as an index into `order`
 
+// Pre-dealt shuffle order for PLAYBACK_MODE_SHUFFLE_REPEAT when a caller peeks
+// past the last slot before `playlist_advance_auto()` runs (e.g. crossfade or
+// cover prefetch). Cleared whenever the queue or mode changes; consumed by
+// `order_shuffle_round()` so the peeked track is the exact track that plays.
+static size_t *next_round_order;
+static size_t next_round_count;
+
+static void clear_next_round(void) {
+	free(next_round_order);
+	next_round_order = NULL;
+	next_round_count = 0;
+}
+
 static bool custom_queue = false;
 static playback_mode_t mode = PLAYBACK_MODE_NORMAL;
 
@@ -254,6 +267,7 @@ static int path_cmp(const void *a, const void *b) {
 }
 
 void playlist_clear(void) {
+	clear_next_round();
 	for (size_t i = 0; i < appended_count(); i++) {
 		free(paths ? paths[i] : NULL);
 	}
@@ -308,6 +322,7 @@ static void seed_once(void) {
 
 // (Re)allocates `order` as the identity and points pos at `start_entry`.
 static void order_identity(size_t start_entry) {
+	clear_next_round();
 	free(order);
 	order = malloc(entry_count * sizeof(*order));
 	if (!order) {
@@ -350,6 +365,7 @@ static void order_identity(size_t start_entry) {
 // and has its own answer -- see order_shuffle_upcoming(), which deals only what
 // is ahead and leaves the history alone.
 static void order_shuffle_from(size_t current_entry) {
+	clear_next_round();
 	if (!order || entry_count == 0) {
 		return;
 	}
@@ -385,10 +401,45 @@ static void order_shuffle_from(size_t current_entry) {
 // This is the end of a shuffled queue that repeats: what comes round is the
 // shuffle, not the order it dealt last time. Hearing the same random sequence
 // over and over is only random once.
+static bool ensure_next_round(void) {
+	if (next_round_order && next_round_count == entry_count) {
+		return true;
+	}
+	clear_next_round();
+	if (entry_count == 0) {
+		return false;
+	}
+	next_round_order = malloc(entry_count * sizeof(*next_round_order));
+	if (!next_round_order) {
+		return false;
+	}
+	next_round_count = entry_count;
+	seed_once();
+	for (size_t i = 0; i < entry_count; i++) {
+		next_round_order[i] = i;
+	}
+	for (size_t i = entry_count - 1; i > 0; i--) {
+		size_t j = (size_t)(rand() % (int)(i + 1));
+		size_t tmp = next_round_order[i];
+		next_round_order[i] = next_round_order[j];
+		next_round_order[j] = tmp;
+	}
+	return true;
+}
+
 static void order_shuffle_round(void) {
 	if (!order || entry_count == 0) {
+		clear_next_round();
 		return;
 	}
+	if (next_round_order && next_round_count == entry_count) {
+		memcpy(order, next_round_order, entry_count * sizeof(*order));
+		clear_next_round();
+		pos = 0;
+		revision++;
+		return;
+	}
+	clear_next_round();
 	seed_once();
 
 	for (size_t i = 0; i < entry_count; i++) {
@@ -415,6 +466,7 @@ static void order_shuffle_round(void) {
 // the full deal above does -- would throw it away and make the queue look as
 // though it began at the current track.
 static void order_shuffle_upcoming(void) {
+	clear_next_round();
 	if (!order || entry_count < 3 || pos + 2 >= entry_count) {
 		return; // nothing ahead but the next one, and one entry cannot be shuffled
 	}
@@ -630,6 +682,7 @@ bool playlist_insert_next(const char *path) {
 	// A folder queue would be rebuilt from the directory the next time
 	// device_state resynced, taking the addition with it.
 	custom_queue = true;
+	clear_next_round();
 	revision++;
 	return true;
 }
@@ -686,6 +739,7 @@ bool playlist_insert_at(const char *path, int slot) {
 	chain_valid = false;
 
 	custom_queue = true;
+	clear_next_round();
 	revision++;
 	return true;
 }
@@ -982,6 +1036,7 @@ static bool materialise_source(void) {
 		order = NULL;
 		pos = 0;
 	}
+	clear_next_round();
 	revision++;
 	return true;
 }
@@ -1028,6 +1083,7 @@ bool playlist_remove_at(int index) {
 	}
 
 	chain_valid = false;
+	clear_next_round();
 	revision++;
 	return true;
 }
@@ -1067,6 +1123,7 @@ bool playlist_move(int from, int to) {
 	}
 
 	chain_valid = false;
+	clear_next_round();
 	revision++;
 	return true;
 }
@@ -1183,6 +1240,7 @@ bool playlist_current_path(char *out, size_t out_size) {
 bool playlist_at_end(void) { return entry_count == 0 || pos + 1 >= entry_count; }
 
 bool playlist_peek_auto(char *out, size_t out_size) {
+	refresh_stale_source();
 	if (!entry_count || !out || !out_size) {
 		return false;
 	}
@@ -1195,6 +1253,25 @@ bool playlist_peek_auto(char *out, size_t out_size) {
 		return false;
 	}
 	return playlist_path_at((int)next, out, out_size);
+}
+
+bool playlist_peek_crossfade(char *out, size_t out_size) {
+	refresh_stale_source();
+	if (!entry_count || !out || !out_size) {
+		return false;
+	}
+	if (!ordered_queue && mode == PLAYBACK_MODE_SHUFFLE_REPEAT && pos + 1 >= entry_count) {
+		if (!ensure_next_round()) {
+			return false;
+		}
+		const char *path = entry_path(next_round_order[0]);
+		if (!path) {
+			return false;
+		}
+		snprintf(out, out_size, "%s", path);
+		return true;
+	}
+	return playlist_peek_auto(out, out_size);
 }
 
 bool playlist_advance_auto(char *out, size_t out_size) {
@@ -1277,6 +1354,7 @@ bool playlist_prev(char *out, size_t out_size) {
 // ---------------------------------------------------------------------------
 
 static void apply_mode_change(playback_mode_t old_mode) {
+	clear_next_round();
 	if (entry_count == 0 || mode == old_mode) {
 		return;
 	}

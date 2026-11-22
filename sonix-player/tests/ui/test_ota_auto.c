@@ -125,7 +125,7 @@ static void (*dot_tap)(void);
 void topbar_set_update_tap_cb(void (*cb)(void)) { dot_tap = cb; }
 static int toasts;
 void toast_glyph(const lv_image_dsc_t *glyph, const char *text) { (void)glyph; (void)text; toasts++; }
-const lv_image_dsc_t icon_download = {0};
+lv_image_dsc_t icon_download = {0};
 void gui_notify_popup(const char *key) { (void)key; }
 void sysinfo_format_size(uint64_t bytes, char *out, size_t size) {
 	snprintf(out, size, "%llu MB", (unsigned long long)(bytes / 1000000));

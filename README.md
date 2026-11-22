@@ -207,6 +207,7 @@ Showcase of **OLED** appearance: true black backgrounds with white as the accent
   - [Tokyo Night theme](#tokyo-night-theme)
   - [Amber on Black theme](#amber-on-black-theme)
   - [OLED theme](#oled-theme)
+- [Custom theme](#custom-theme)
 - [Music pet](#music-pet)
 - [Tag Manager](#tag-manager)
 - [Tape Deck](#tape-deck)
@@ -255,7 +256,7 @@ This fork builds on the upstream [Sonix Player](https://github.com/Jepl4r/sonix-
 - 🔁 **A-B loop and Now Playing actions** - mark two points in the track menu to repeat a passage on a seekable track; both marks appear on the progress bar. **Back** returns to the previous screen. With **Allow deleting tracks** enabled, **Delete track** removes a local file from microSD after confirmation.
 - 🎤 **Title-only lyrics search** - if LRCLIB finds no match for a local track's title and artist, or the artist tag is missing, search by title alone. Preview the lyrics before saving a match, even if it's by a different artist.
 - 📲 **Wi-Fi folder uploads** - pair a browser with [Wireless → Transfer](docs/wi-fi-transfer.md) by QR or session code on trusted Wi-Fi, then drop whole album folders onto microSD with their paths intact.
-- 🗂️ **WebDAV and FTP downloads** - in [Streaming → Network folders](docs/network-folders.md), browse a server and save a track or the current folder's music to `Music/Network Downloads` on microSD. **Save and play** opens the local file once the download finishes.
+- 🗂️ **WebDAV and FTP downloads** - in [Streaming → Network folders](docs/network-folders.md), browse a server and save a track or the current folder's music to `Music/Network Downloads` on microSD. **Save and play** opens the local file once the download finishes. Optionally, **Remember password** keeps the password across reboots — unencrypted, in a private device-local file — or leaves it off so it stays in memory until restart.
 - 💡 **Smart LED and Stealth mode** - choose Bass Pulse, Energy Glow or Rainbow Breath under [Settings → Power](docs/sgm31324-led-control.md#smart-led-and-stealth-mode). Three red blinks warn at 5% battery; two green blinks confirm a Wi-Fi upload. Stealth keeps the light off even while charging.
 - 🔋 **Battery profiler and charge history** - in [Settings → System → Battery profiler](docs/battery-profiler.md), check voltage and estimated runtime or compare estimated draw against a saved baseline. Charge history shows when the battery reached its target or was unplugged, and how long the player has been on since.
 - 🔌 **Themed charging screen** - the off-state battery screen uses your theme and checks for a connected cable even when the 80% charge limit has paused charging.
@@ -264,14 +265,15 @@ This fork builds on the upstream [Sonix Player](https://github.com/Jepl4r/sonix-
 - 🐾 **Music pet** - a Pikachu that grows from the music you hear. See [Music pet](#music-pet).
 - 🧮 **Calculator, Notes, Metronome** - a pocket calculator, text notes from the card, and a metronome with tap tempo, all under More.
 - 🎮 **2048, Snake and Dino** - three small games under More, sized for the V1 panel. Gearboy also gains a cover-art grid and a game-audio mute so you can keep listening to music while playing.
-- 🏷️ **Tag Manager** - view and edit FLAC and MP3 tags and cover art, and search for covers over Wi-Fi. See the [usage and safety notes](docs/tag-manager.md).
+- 🏷️ **Tag Manager** - view and edit FLAC, MP3, M4A, AAC, Opus and Ogg tags and cover art, and search for covers over Wi-Fi. See the [usage and safety notes](docs/tag-manager.md).
 - 🏠 **Subsonic / Gonic** - stream from [your own server](#subsonic--gonic), or [save tracks and albums](docs/subsonic.md#saving-music-to-the-sd-card) to `Music/Subsonic Downloads` for offline listening.
 - 🪼 **Jellyfin** - stream from your own Jellyfin music server with **Quick Connect** (6-digit code + QR) or username/password (token-only `0600` persistence), **Direct Play** original files or server-side MP3/Opus transcoding, browsing across Folders, Playlists, Artists, Albums (A–Z / Recently added), Genres, Favourites and Search, extendable microSD playback cache with lookahead prefetch, offline saves (`Music/Jellyfin`), live favourite sync, and Jellyfin playback reporting. See [Jellyfin](#jellyfin) and [docs/jellyfin.md](docs/jellyfin.md).
 - ☁️ **SoundCloud** - native SoundCloud streaming across anonymous, Free, Go and Go+ tiers: search and play public tracks out of the box without API keys (automatic web `client_id` discovery and rotation), browse Likes, Reposts and Playlists by profile URL / username or `oauth_token`, and stream **Opus 64k**, **MP3 128k** or **Go+ AAC 256k** with an extendable microSD cache (**512 MB** default, up to **1 GB**, **2 GB**, **4 GB**, **8 GB**, or **Unlimited** directly in-app), lookahead prefetch, discreet non-blocking loading spinners, and Now Playing **Like** / **Keep** support. See [SoundCloud](#soundcloud) and [docs/soundcloud.md](docs/soundcloud.md).
-- 🌊 **One-tap Tidal & Qobuz setup + streaming upgrades** - extract the official V1 stock credentials directly on the player over Wi-Fi or from the microSD card (no PC, developer keys or restart needed). Includes V1-adapted **Tidal** with offline downloads (`Music/Tidal/<artist>/<album>`), a 1 GiB SD playback cache, cached lists, favourite playlists, search history, configurable home rows and bulk selection; **Qobuz** up to 24-bit/192 kHz FLAC with full JWT session persistence, plus offline track and album downloads to `Music/Qobuz Downloads`; **FLAC internet radio** with a V1-sized page and Flylo's curated chill-hop picks; and upgraded **Podcasts** (keyless Apple directory with RSS fallback for long shows, heard/unheard tracking, episode ordering and regional charts). See [Streaming: Tidal, Qobuz and credentials](#streaming-tidal-qobuz-and-credentials).
+- 🌊 **One-tap Tidal & Qobuz setup + streaming upgrades** - extract the official V1 stock credentials directly on the player over Wi-Fi or from the microSD card (no PC, developer keys or restart needed). Includes V1-adapted **Tidal** with offline downloads (`Music/Tidal/<artist>/<album>`), a configurable SD playback cache (512 MB, 1/2/4/8 GB or unlimited), cached lists, favourite playlists, search history, configurable home rows and bulk selection; **Qobuz** up to 24-bit/192 kHz FLAC with full JWT session persistence, plus offline track and album downloads to `Music/Qobuz Downloads`; **FLAC internet radio** with a V1-sized page and Flylo's curated chill-hop picks; and upgraded **Podcasts** (keyless Apple directory with RSS fallback for long shows, heard/unheard tracking, episode ordering and regional charts). See [Streaming: Tidal, Qobuz and credentials](#streaming-tidal-qobuz-and-credentials).
 - 🎧 **Spotify** - a native Spotify client for **Premium** accounts, after [SpotUI](https://github.com/noisetta/spotui-hiby-r3proii): Liked Songs, playlists, search and a queue drawn on the V1's own screen, with the audio decoded by a [librespot](https://github.com/librespot-org/librespot) daemon on a computer on your network and streamed to the player as PCM, so the player's DAC, volume, equaliser and output routing stay in charge. Library writes are out of scope (they need the Web API's OAuth flow); when no daemon is reachable the page offers a built-in **DEMO** library. See [Spotify](#spotify) and [docs/spotify.md](docs/spotify.md).
 - 🧩 **Plugins (`Settings → Plugins`)** - switch optional modules (including Tidal, Qobuz, SoundCloud, Podcasts, Radio, tools and games) on or off so unused pages are never built and RAM stays free. See [docs/ADDONS.md](docs/ADDONS.md).
-- 🎨 **V1 themes** - **Tokyo Night**, **Amber on Black** and **OLED**, designed for the V1 panel, beside Dark and Light. Make your own with a [custom colour theme](docs/custom-themes.md).
+- 🎨 **V1 themes** - **Tokyo Night**, **Amber on Black** and **OLED**, designed for the V1 panel, beside Dark and Light. Make your own with the [custom theme template](#custom-theme), or start from a ready-made palette (Gruvbox, Rosé Pine, Dracula, Catppuccin Mocha).
+- 🖼️ **Icon sets** - change the artwork of the whole interface from the SD card, with four sets matching those ready-made palettes (Gruvbox, Rosé Pine, Dracula, Catppuccin Mocha) in `Icons/<set>/`, picked in **Settings → Appearance → Icon set**. Nothing is baked into the firmware; see [docs/icon-sets.md](docs/icon-sets.md).
 - 🚀 **Boot screens** - Retrospace (the default), Space, Travelling in space, Stock, or your own picture, with a separate brightness for the splash so a late-night power-on need not light the room.
 - 🖼️ **Player layouts** - **Immersive**, **Poster**, **Album Art Max**, **Vinyl** and **Sticker**, beside Standard, Waveform and Alternative. See [FEATURES.md](FEATURES.md#now-playing) for the details of each layout.
 - 🔘 **Legacy play button and corner roundness** - the original round disc behind play and pause, as an option under Settings → Music → Display options; and a slider for how round the screen corners are, from a hint of a corner (2 px) up to 20 px, for a V1 that looks boxier than its 16 px default.
@@ -306,6 +308,33 @@ This fork builds on the upstream [Sonix Player](https://github.com/Jepl4r/sonix-
 
 Local audio decoder inputs include WAV, FLAC, MP3, Ogg Vorbis, Opus, M4A/M4B/MP4, AAC, ALAC, WavPack, APE, AIFF/AIFC, CAF and DSD (DSF/DFF). Streaming services depend on third-party availability and an active account where applicable — see [Streaming: Tidal, Qobuz and credentials](#streaming-tidal-qobuz-and-credentials).
 
+<a name="custom-theme"></a>
+
+## Custom theme
+
+Make your own palette from the template below. Copy it to **`Themes/custom.ini`** on the microSD card (create `Themes` at the card root), edit the eight `#RRGGBB` values, then open **Settings → Appearance → Custom**. The same template is in the repository at [`sonix-player/examples/custom-theme.ini`](sonix-player/examples/custom-theme.ini); the full guide, including what each key does and how edits take effect, is in [docs/custom-themes.md](docs/custom-themes.md).
+
+```ini
+; Copy this file to Themes/custom.ini in the ROOT of the SD card.
+; Edit each #RRGGBB colour. All eight keys are required; no other keys.
+; Reopen Appearance after editing, then select Custom.
+[theme]
+screen_bg = #1a1b26
+surface = #24283b
+surface_pressed = #2d3554
+panel = #16161e
+cover_bg = #16161e
+text_primary = #c0caf5
+text_secondary = #a9b1d6
+accent = #7aa2f7
+```
+
+Every key in `[theme]` is required. Lines starting with `;` or `#` are comments. Selecting Custom with a missing or invalid file shows an error and keeps the current appearance. See [docs/custom-themes.md](docs/custom-themes.md) for the rest.
+
+Four ready-made palettes — **Gruvbox**, **Rosé Pine**, **Dracula** and **Catppuccin Mocha** — are in [`sonix-player/examples/themes/`](sonix-player/examples/themes/): copy one over `Themes/custom.ini` instead of editing the template, or use it as a starting point for your own colours.
+
+Each of the four also has an **icon set** in [`sonix-player/examples/icon-sets/`](sonix-player/examples/icon-sets/): copy one to `Icons/<set>` on the card and choose it under **Settings → Appearance → Icon set**, and every glyph in the interface wears that palette — same colours, same function matching, artwork instead of tint. The sets live entirely on the card; see [docs/icon-sets.md](docs/icon-sets.md).
+
 ## Music pet
 
 Open **More → Pet** to meet a small Pikachu that is fed by the music you listen to.
@@ -329,7 +358,7 @@ The full rules are in [FEATURES.md](FEATURES.md).
 
 ## Tag Manager
 
-Open **More → Tag Manager** to view FLAC/MP3 tags and cover art, and edit track titles, artists, track numbers or genres, and search for cover art over Wi-Fi on the V1. See the [usage and safety notes](docs/tag-manager.md).
+Open **More → Tag Manager** to view FLAC, MP3, M4A, AAC, Opus and Ogg tags and cover art, and edit track titles, artists, track numbers or genres, and search for cover art over Wi-Fi on the V1. See the [usage and safety notes](docs/tag-manager.md).
 
 ## Tape Deck
 
@@ -343,7 +372,7 @@ Use trusted Wi-Fi only: the session code controls access, but HTTP traffic is no
 
 ## Download from WebDAV or FTP
 
-On the V1, open **Streaming → Network folders**, choose **WebDAV** or **FTP**, and enter the server's folder URL and login. Browse albums and save a track or the current folder's music directly to microSD, under `Music/Network Downloads`. **Save and play** starts playback once the track is fully saved. See the [Network folders guide](docs/network-folders.md) for supported URLs, certificates, and download limits.
+On the V1, open **Streaming → Network folders**, choose **WebDAV** or **FTP**, and enter the server's folder URL and login. Browse albums and save a track or the current folder's music directly to microSD, under `Music/Network Downloads`. **Save and play** starts playback once the track is fully saved. If you want the password kept across reboots, turn on **Remember password** on the settings page — it is stored **unencrypted** in a private device-local file, so leave it off for a server you do not trust. See the [Network folders guide](docs/network-folders.md) for supported URLs, certificates, and download limits.
 
 ## Install or restore firmware
 
@@ -371,25 +400,8 @@ Instead, Sonix speaks the exact same authentication flows as the stock TempoTec 
    - If no stock file is on the card, connect to **Wi-Fi** and tap **Set up from stock firmware** — the player streams and unpacks the official TempoTec V1 1.3 archive over HTTPS (using ~48 MB of temporary scratch space on the microSD card or `/usr/data`).
    - Extracted `[qobuz]` and `[tidal]` keys are saved to both `/usr/data/streaming-keys.ini` (so they survive swapping microSD cards) and `<sd_root>/streaming-keys.ini` (preserving any `[podcast]` or `[lastfm]` entries). **Both Tidal and Qobuz unlock immediately without restarting.**
 2. **Sign in and stream:**
-   - **Tidal:** Sign in with the on-screen device code or QR code at `link.tidal.com` (tokens refresh automatically; read-only partner device keys automatically fall back from `r_usr w_usr` to `r_usr`). Supports **Low** (AAC 96 kbps), **High** (AAC 320 kbps), **Lossless** (16-bit/44.1 kHz FLAC) and **Hi-Res** (up to 24-bit/192 kHz FLAC), search with recent history, albums, artists, playlists, favourites (tracks, albums, artists and the playlists the account has favourited), configurable home rows, bulk selection, 12-hour card list caching, a bounded 1 GiB SD playback cache, and queued offline downloads / **Keep on card** saved with tags and artwork under `Music/Tidal/<artist>/<album>`.
+   - **Tidal:** Sign in with the on-screen device code or QR code at `link.tidal.com` (tokens refresh automatically; read-only partner device keys automatically fall back from `r_usr w_usr` to `r_usr`). Supports **Low** (AAC 96 kbps), **High** (AAC 320 kbps), **Lossless** (16-bit/44.1 kHz FLAC) and **Hi-Res** (up to 24-bit/192 kHz FLAC), search with recent history, albums, artists, playlists, favourites (tracks, albums, artists and the playlists the account has favourited), configurable home rows, bulk selection, 12-hour card list caching, a configurable, bounded SD playback cache (512 MB, 1/2/4/8 GB or unlimited), and queued offline downloads / **Keep on card** saved with tags and artwork under `Music/Tidal/<artist>/<album>`.
    - **Qobuz:** Sign in with your Qobuz email/username and password over HTTPS (only the session token is kept in `/usr/data/qobuz_session.ini`; your password is never written to disk). Supports **MP3 320**, **CD** (16-bit/44.1 kHz FLAC), **Hi-Res 24/96** and **Hi-Res 24/192** FLAC, search, albums, artists, featured lists, favourites and playlist management.
-
-### Spotify
-
-Spotify has no audio in its Web API: playback lives behind the licensed client protocol that [librespot](https://github.com/librespot-org/librespot) implements. The V1 cannot run librespot, so **Spotify is split in two**:
-
-- The **player** draws the pages, owns the queue controls and plays what it is given through its own DAC — `sonix-player/src/gui/streaming/spotifypage.c` over `src/system/streaming/spotify.c`.
-- **`spotifyd`** (`sonix-player/tools/spotifyd`) runs on a computer on the same Wi-Fi, signs in with librespot once, browses the library, and writes raw 44.1 kHz PCM to the player over the LAN. It never opens an audio device.
-
-A **Spotify Premium** account is required — librespot will not stream for a free one. Setup is three steps on the computer and one on the player:
-
-1. Build the daemon once (`cargo build --release`) and log in once with `librespot --cache /usr/data/librespot-cache --cache-tool login --username you`.
-2. Start it. It listens on TCP 6600 and answers the player's discovery broadcast on UDP 7790.
-3. On the V1, turn **Spotify** on under **Settings → Plugins → Streaming services** (it is off out of the box) and open **Streaming → Spotify**. The player finds the daemon on its own — there is no address to type.
-
-The home page is four tiles — **Liked Songs**, **Playlists**, **Search** and **Account** — and the player sheet has the usual play/pause, next/previous, seek, shuffle and repeat. Nothing is written to the microSD card while playing: audio arrives as a stream, like the radio. With the add-on on but no daemon reachable, the page shows its **DEMO** library so every screen still works.
-
-Full instructions, the socket contract and the cross-build steps are in [docs/spotify.md](docs/spotify.md) and [`sonix-player/tools/spotifyd/README.md`](sonix-player/tools/spotifyd/README.md). **The daemon is not part of the firmware build**: the image ships the tile and the client, not the Rust binary.
 
 ### SoundCloud, Podcasts, Last.fm, ListenBrainz and Radio
 
@@ -482,6 +494,23 @@ tls_verify = relaxed
 
 The setting is global — it applies to every `https://` connection the player opens, radio stations included — because one TLS context serves them all. Anyone using a public network should leave it at the default, `strict`. A private certificate authority is better handled with `[network] ca_bundle` above, which keeps checking on: export the CA's own certificate, copy that file to the card, and point `ca_bundle` at it.
 
+## Spotify
+
+Spotify has no audio in its Web API: playback lives behind the licensed client protocol that [librespot](https://github.com/librespot-org/librespot) implements. The V1 cannot run librespot, so **Spotify is split in two**:
+
+- The **player** draws the pages, owns the queue controls and plays what it is given through its own DAC — `sonix-player/src/gui/streaming/spotifypage.c` over `src/system/streaming/spotify.c`.
+- **`spotifyd`** (`sonix-player/tools/spotifyd`) runs on a computer on the same Wi-Fi, signs in with librespot once, browses the library, and writes raw 44.1 kHz PCM to the player over the LAN. It never opens an audio device.
+
+A **Spotify Premium** account is required — librespot will not stream for a free one. Setup is three steps on the computer and one on the player:
+
+1. Build the daemon once (`cargo build --release`) and log in once with `librespot --cache /usr/data/librespot-cache --cache-tool login --username you`.
+2. Start it. It listens on TCP 6600 and answers the player's discovery broadcast on UDP 7790.
+3. On the V1, turn **Spotify** on under **Settings → Plugins → Streaming services** (it is off out of the box) and open **Streaming → Spotify**. The player finds the daemon on its own — there is no address to type.
+
+The home page is four tiles — **Liked Songs**, **Playlists**, **Search** and **Account** — and the player sheet has the usual play/pause, next/previous, seek, shuffle and repeat. Nothing is written to the microSD card while playing: audio arrives as a stream, like the radio. With the add-on on but no daemon reachable, the page shows its **DEMO** library so every screen still works.
+
+Full instructions, the socket contract and the cross-build steps are in [docs/spotify.md](docs/spotify.md) and [`sonix-player/tools/spotifyd/README.md`](sonix-player/tools/spotifyd/README.md). **The daemon is not part of the firmware build**: the image ships the tile and the client, not the Rust binary.
+
 ## SoundCloud
 
 Enable **SoundCloud** under **Settings → Plugins** (restart if prompted), connect to Wi-Fi, and open **Streaming → SoundCloud** to stream from SoundCloud across anonymous, Free, SoundCloud Go, and SoundCloud Go+ tiers.
@@ -518,6 +547,8 @@ See [setup, security, quality and validation notes](docs/jellyfin.md).
 - `sonix-player/` — player sources, LVGL configuration, launcher and build system.
 - `sonix-packer/` — stock-image preparation, firmware packaging and validation scripts.
 - `docs/collecting-logs.md` — which logs to send with a bug report, and how to take them.
+- `docs/custom-themes.md` — the custom SD-card theme palette (`Themes/custom.ini`), its keys, the ready-made Gruvbox / Rosé Pine / Dracula / Catppuccin Mocha palettes, and how edits are applied.
+- `docs/icon-sets.md` — the SD-card icon sets (`Icons/<set>/`): the four ready-made sets, the settings row that picks one, the `palette.ini` roles, and how to build your own.
 - `docs/qobuz-stock-firmware.md` — how stock Qobuz and Tidal authentication and local credential extraction work.
 - `docs/ADDONS.md` — optional modules (`Settings → Plugins`) and fresh-install defaults.
 - `docs/jellyfin.md` — Jellyfin setup, Quick Connect, token-only auth, Direct Play/transcoding, playback reporting and SD cache.

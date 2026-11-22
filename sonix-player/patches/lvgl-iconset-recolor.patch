@@ -1,0 +1,20 @@
+--- a/src/core/lv_obj_draw.c
++++ b/src/core/lv_obj_draw.c
+@@ -251,6 +251,17 @@
+     draw_dsc->recolor_opa = result.alpha;
+     draw_dsc->recolor = lv_color_make(result.red, result.green, result.blue);
+ 
++    /* Sonix: an SD icon set ships artwork that already carries the interface's
++       colours (see src/gui/shell/iconset.c). When the app says this object's
++       tint is only the idle text colour, the artwork's own pixels are drawn
++       instead of the flat tint. Weak: builds without the app (LVGL's own
++       examples, the test harnesses) simply keep the tint. */
++    extern lv_opa_t sonix_iconset_recolor_bypass(lv_obj_t * obj, lv_color_t recolor, lv_opa_t opa)
++                       __attribute__((weak));
++    if(sonix_iconset_recolor_bypass) {
++        draw_dsc->recolor_opa = sonix_iconset_recolor_bypass(obj, draw_dsc->recolor, draw_dsc->recolor_opa);
++    }
++
+     draw_dsc->colorkey = lv_obj_get_style_image_colorkey_internal(obj, part);
+ 
+     if(part != LV_PART_MAIN) draw_dsc->blend_mode = lv_obj_get_style_blend_mode_internal(obj, part);

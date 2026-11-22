@@ -5,10 +5,13 @@
 #include "src/system/playback/audiobook.h"
 #include "src/system/core/config.h"
 #include "src/system/core/lang.h"
+#include "src/system/decode/growfile.h"
+#include "src/system/library/cue.h"
 #include "src/system/library/library.h"
 #include "src/system/library/listeningstats.h"
 #include "src/system/library/metadata.h"
 #include "src/system/playback/playlist.h"
+#include "src/system/remote/dlna.h"
 #include "src/system/streaming/jellyfincache.h"
 #include "src/system/streaming/podcast.h"
 #include "src/system/streaming/podcastcache.h"
@@ -21,11 +24,14 @@
 #include "src/system/audio/replaygain.h"
 #include "src/system/device/system.h"
 
+#include <dirent.h>
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <time.h>
+#include <unistd.h>
 
 // Cache of the currently loaded track's metadata, refreshed whenever a new
 // file is loaded via device_state_play_file(). Only ever touched from the
@@ -479,7 +485,10 @@ static void queue_persist(void) {
 	free(list);
 }
 
-void device_state_queue_changed(void) { queue_persist(); }
+void device_state_queue_changed(void) {
+	queue_persist();
+	device_state_invalidate_crossfade();
+}
 
 // Streaming preparations: Qobuz, Tidal, podcasts, Subsonic, SoundCloud, Jellyfin.
 #define PREPARE_CB_MAX 8
@@ -500,8 +509,9 @@ void device_state_add_prepare_cb(device_state_prepare_cb cb) {
 	prepare_cbs[prepare_cb_count++] = cb;
 }
 
-// Defined with the rest of the scrub state further down.
+// Defined further down.
 static void scrub_cancel(void);
+static void reset_xfade_plan(void);
 
 // Where playback was when the storage under it went away: the card pulled out,
 // or the card exported to a computer. Both stop the engine, and from the
@@ -551,6 +561,7 @@ static void load_and_play_at(const char *filepath, double position) {
 	// the track can change under a held button -- the queue advances on its
 	// own when the outgoing one ends.
 	scrub_cancel();
+	reset_xfade_plan();
 
 	// A file and a stream cannot both have the output. Starting a track ends
 	// the radio outright -- not merely stops it -- because from here on the
@@ -960,6 +971,7 @@ void device_state_set_album_chaining(bool on) {
 		config_set_int("player", "album_chaining_random", 0);
 	}
 	config_save();
+	device_state_invalidate_crossfade();
 }
 
 // Whether the record that follows is picked at random instead of being the
@@ -976,6 +988,7 @@ bool device_state_album_chaining_random(void) { return config_get_int("player", 
 void device_state_set_album_chaining_random(bool on) {
 	config_set_int("player", "album_chaining_random", on ? 1 : 0);
 	config_save();
+	device_state_invalidate_crossfade();
 }
 
 bool device_state_folder_chaining(void) { return config_get_int("player", "folder_chaining", 0) != 0; }
@@ -983,6 +996,7 @@ bool device_state_folder_chaining(void) { return config_get_int("player", "folde
 void device_state_set_folder_chaining(bool on) {
 	config_set_int("player", "folder_chaining", on ? 1 : 0);
 	config_save();
+	device_state_invalidate_crossfade();
 }
 
 // One pass over the records, keeping both neighbours of the current one. It
@@ -1381,6 +1395,457 @@ bool device_state_prev(char *out_path, size_t out_size) {
 		strncpy(out_path, path, out_size - 1);
 		out_path[out_size - 1] = '\0';
 	}
+	return true;
+}
+
+// ---------------------------------------------------------------------------
+// Crossfade next-track staging & seamless handoff commit
+//
+// While Track A plays, `device_state_sync_crossfade()` non-destructively peeks
+// the track that would start on an automatic transition, resolves any cached
+// streaming container name without interrupting Track A's download, computes
+// its ReplayGain Q15 multiplier, and stages it in `audio.c`. When the playback
+// thread completes the overlap and hands off into Track B,
+// `device_state_take_crossfade_handoff()` commits the queue advance, metadata,
+// ReplayGain, speed, play-count and queue persistence on the UI thread without
+// restarting `audio_play()`.
+// ---------------------------------------------------------------------------
+
+typedef enum {
+	XFADE_CHAIN_NONE = 0,
+	XFADE_CHAIN_ALBUM = 1,
+	XFADE_CHAIN_FOLDER = 2,
+} xfade_chain_kind_t;
+
+static struct {
+	bool active;
+	char raw_path[512];
+	char resolved_path[512];
+	int rg_q15;
+	unsigned queue_rev;
+	int queue_idx;
+	playback_mode_t mode;
+	xfade_chain_kind_t chain_kind;
+	char chain_target[512]; // album name or folder path
+} xfade_plan;
+
+static void reset_xfade_plan(void) {
+	memset(&xfade_plan, 0, sizeof(xfade_plan));
+}
+
+void device_state_invalidate_crossfade(void) {
+	reset_xfade_plan();
+	audio_clear_crossfade_next();
+}
+
+// Non-destructively checks whether `raw` is playable right now and writes its
+// resolved file path to `out` (handling Tidal/Qobuz/SoundCloud/Jellyfin/Podcast
+// container differences and Subsonic's spare RAM slot). Never calls
+// `device_state_stop()` or cancels an active stream.
+static bool resolve_ready_for_crossfade(const char *raw, char *out, size_t out_size) {
+	if (!raw || !raw[0] || !out || out_size == 0) {
+		return false;
+	}
+	if (qobuzcache_owns(raw)) {
+		long id = qobuzcache_track_id(raw);
+		if (id <= 0) {
+			return false;
+		}
+		if (qobuzcache_find(id, out, out_size)) {
+			return true;
+		}
+		if (qobuzcache_downloading_id() == id && growfile_is_growing(raw) && access(raw, R_OK) == 0) {
+			snprintf(out, out_size, "%s", raw);
+			return true;
+		}
+		return false;
+	}
+	if (tidalcache_owns(raw)) {
+		long id = tidalcache_track_id(raw);
+		if (id <= 0) {
+			return false;
+		}
+		if (tidalcache_find(id, out, out_size)) {
+			return true;
+		}
+		char dl_path[512];
+		if (tidalcache_downloading_path(id, dl_path, sizeof(dl_path)) && growfile_is_growing(dl_path) &&
+			access(dl_path, R_OK) == 0) {
+			snprintf(out, out_size, "%s", dl_path);
+			return true;
+		}
+		return false;
+	}
+	if (soundcloudcache_is_soundcloud_path(raw)) {
+		long long id = soundcloudcache_track_id_of(raw);
+		if (id <= 0) {
+			return false;
+		}
+		if (soundcloudcache_find_playable(id, out, out_size)) {
+			return true;
+		}
+		if (soundcloudcache_current_id() == id && growfile_is_growing(raw) && access(raw, R_OK) == 0) {
+			snprintf(out, out_size, "%s", raw);
+			return true;
+		}
+		return false;
+	}
+	if (jellyfincache_owns(raw)) {
+		char item_id[96];
+		if (!jellyfincache_item_id_of(raw, item_id, sizeof(item_id))) {
+			return false;
+		}
+		if (jellyfincache_find_playable(item_id, out, out_size)) {
+			return true;
+		}
+		if (growfile_is_growing(raw) && access(raw, R_OK) == 0) {
+			snprintf(out, out_size, "%s", raw);
+			return true;
+		}
+		return false;
+	}
+	if (podcastcache_owns(raw)) {
+		long long ep = podcastcache_episode_id(raw);
+		if (ep <= 0) {
+			return false;
+		}
+		if (podcastcache_find(ep, out, out_size)) {
+			return true;
+		}
+		if (podcastcache_downloading_id() == ep && growfile_is_growing(raw) && access(raw, R_OK) == 0) {
+			snprintf(out, out_size, "%s", raw);
+			return true;
+		}
+		return false;
+	}
+	if (subsonicstream_owns(raw)) {
+		if (!subsonicstream_ready_for_crossfade(raw)) {
+			return false;
+		}
+		snprintf(out, out_size, "%s", raw);
+		return true;
+	}
+
+	char base[512];
+	cue_split_path(raw, base, sizeof(base));
+	if (!base[0] || access(base, R_OK) != 0) {
+		return false;
+	}
+	snprintf(out, out_size, "%s", raw);
+	return true;
+}
+
+static bool peek_chained_album(const char *album, char *album_out, size_t album_size, char *first_track_out,
+							   size_t track_size) {
+	album_walk_t walk = {album, "", "", "", "", false, false, false};
+	library_for_each(LIBRARY_LIST_ALBUMS, LIBRARY_FILTER_NONE, NULL, album_walk_cb, &walk);
+
+	album_random_t drawn = {album, 0, ""};
+	if (device_state_album_chaining_random()) {
+		library_for_each(LIBRARY_LIST_ALBUMS, LIBRARY_FILTER_NONE, NULL, album_random_cb, &drawn);
+	}
+
+	const char *wanted = NULL;
+	if (drawn.seen > 0 && drawn.name[0]) {
+		wanted = drawn.name;
+	} else if (walk.found_next) {
+		wanted = walk.next;
+	} else if (walk.first[0] && !library_album_same(walk.first, album)) {
+		wanted = walk.first;
+	}
+	if (!wanted || !wanted[0]) {
+		return false;
+	}
+
+	album_tracks_t tracks = {NULL, 0, 0};
+	library_for_each_ordered(LIBRARY_LIST_TRACKS, LIBRARY_FILTER_ALBUM, wanted, LIBRARY_ORDER_DEFAULT,
+							 album_track_cb, &tracks);
+	bool ok = false;
+	if (tracks.count > 0 && tracks.paths[0] && tracks.paths[0][0]) {
+		snprintf(album_out, album_size, "%s", wanted);
+		snprintf(first_track_out, track_size, "%s", tracks.paths[0]);
+		ok = true;
+	}
+	for (int i = 0; i < tracks.count; i++) {
+		free(tracks.paths[i]);
+	}
+	free(tracks.paths);
+	return ok;
+}
+
+static bool first_track_in_folder(const char *folder, char *track_out, size_t track_size) {
+	// Temporarily inspect the folder without touching the active playlist.
+	// Use playlist_is_playable_file / cue expansion in sorted order by asking a
+	// directory listing, matching playlist_load_folder()'s first entry.
+	DIR *dir = opendir(folder);
+	if (!dir) {
+		return false;
+	}
+	char best[512] = "";
+	bool found = false;
+
+	cue_sheet_t *sheet = malloc(sizeof(*sheet));
+	char (*claimed)[512] = calloc(64, sizeof(*claimed));
+	size_t claims = 0;
+	struct dirent *de;
+	if (sheet && claimed) {
+		while ((de = readdir(dir)) != NULL) {
+			if (de->d_name[0] == '.' || !cue_is_sheet(de->d_name)) {
+				continue;
+			}
+			char sheet_path[512];
+			int sn = snprintf(sheet_path, sizeof(sheet_path), "%s/%s", folder, de->d_name);
+			if (sn < 0 || sn >= (int)sizeof(sheet_path)) {
+				continue;
+			}
+			if (!cue_parse(sheet_path, sheet) || sheet->track_count <= 0) {
+				continue;
+			}
+			for (int t = 0; t < sheet->track_count; t++) {
+				if (claims < 64 && sheet->tracks[t].audio_path[0]) {
+					snprintf(claimed[claims++], sizeof(claimed[0]), "%s", sheet->tracks[t].audio_path);
+				}
+				char virt[512];
+				cue_virtual_path(sheet_path, sheet->tracks[t].number, virt, sizeof(virt));
+				int by_track = 0;
+				bool earlier = !found || (cue_order_tracks(virt, best, &by_track) ? by_track < 0 : strcasecmp(virt, best) < 0);
+				if (earlier) {
+					snprintf(best, sizeof(best), "%s", virt);
+					found = true;
+				}
+			}
+		}
+		rewinddir(dir);
+	}
+
+	while ((de = readdir(dir)) != NULL) {
+		if (de->d_name[0] == '.' || !playlist_is_playable_file(de->d_name)) {
+			continue;
+		}
+		char full[512];
+		int fn = snprintf(full, sizeof(full), "%s/%s", folder, de->d_name);
+		if (fn < 0 || fn >= (int)sizeof(full)) {
+			continue;
+		}
+		bool skip = false;
+		for (size_t c = 0; c < claims; c++) {
+			if (strcmp(claimed[c], full) == 0) {
+				skip = true;
+				break;
+			}
+		}
+		if (skip) {
+			continue;
+		}
+		if (sheet && cue_wav_has_markers(full) && cue_parse(full, sheet) && sheet->track_count > 0) {
+			char virt[512];
+			cue_virtual_path(full, sheet->tracks[0].number, virt, sizeof(virt));
+			if (!found || strcasecmp(virt, best) < 0) {
+				snprintf(best, sizeof(best), "%s", virt);
+				found = true;
+			}
+			continue;
+		}
+		if (!found || strcasecmp(full, best) < 0) {
+			snprintf(best, sizeof(best), "%s", full);
+			found = true;
+		}
+	}
+	free(claimed);
+	free(sheet);
+	closedir(dir);
+
+	if (found) {
+		snprintf(track_out, track_size, "%s", best);
+	}
+	return found;
+}
+
+static bool peek_chained_folder(const char *file, char *folder_out, size_t folder_size, char *first_track_out,
+								size_t track_size) {
+	const char *root = playlist_card_root();
+	if (!root || !root[0] || !file || !file[0]) {
+		return false;
+	}
+	char folder[512];
+	snprintf(folder, sizeof(folder), "%s", file);
+	char *slash = strrchr(folder, '/');
+	if (!slash) {
+		return false;
+	}
+	*slash = '\0';
+
+	char wanted[512];
+	if (!playlist_next_folder(root, folder, wanted, sizeof(wanted))) {
+		return false;
+	}
+	if (!first_track_in_folder(wanted, first_track_out, track_size)) {
+		return false;
+	}
+	snprintf(folder_out, folder_size, "%s", wanted);
+	return true;
+}
+
+void device_state_sync_crossfade(void) {
+	if (!audio_crossfade_active() || radio_is_active() || dlna_owns_playback() || audiobook_is_playing() ||
+		audio_get_status() != AUDIO_STATUS_PLAYING || !current_metadata_file[0]) {
+		if (xfade_plan.active) {
+			device_state_invalidate_crossfade();
+		}
+		return;
+	}
+	if (podcastcache_is_episode(current_metadata_file)) {
+		// Podcasts use episode skips, optional speed != 1.0, and stop-at-episode-end.
+		if (xfade_plan.active) {
+			device_state_invalidate_crossfade();
+		}
+		return;
+	}
+
+	double cur_secs = 0.0, tot_secs = 0.0;
+	audio_get_progress(&cur_secs, &tot_secs);
+	double lead_window = (double)audio_fade_seconds() + 4.0;
+	if (tot_secs <= 0.0 || (tot_secs - cur_secs) > lead_window) {
+		// Wait until we are within a few seconds of the crossfade window before
+		// resolving streaming slots or reading upcoming metadata.
+		return;
+	}
+
+	playlist_resync_to_current();
+	unsigned rev = playlist_revision();
+	int idx = playlist_current_index();
+	playback_mode_t mode = playlist_get_mode();
+
+	if (xfade_plan.active && xfade_plan.queue_rev == rev && xfade_plan.queue_idx == idx && xfade_plan.mode == mode) {
+		// Keep staging in case a transient open failure cleared audio.c's copy and
+		// a streaming download has since finished, or simply keep it fresh.
+		if (resolve_ready_for_crossfade(xfade_plan.raw_path, xfade_plan.resolved_path,
+										sizeof(xfade_plan.resolved_path))) {
+			audio_stage_crossfade_next(xfade_plan.resolved_path, xfade_plan.rg_q15);
+		}
+		return;
+	}
+
+	char raw_next[512] = "";
+	xfade_chain_kind_t chain_kind = XFADE_CHAIN_NONE;
+	char chain_target[512] = "";
+
+	if (playlist_at_end() && mode != PLAYBACK_MODE_REPEAT_ONE) {
+		const char *album = playlist_album();
+		if (album && album[0] && device_state_album_chaining() &&
+			peek_chained_album(album, chain_target, sizeof(chain_target), raw_next, sizeof(raw_next))) {
+			chain_kind = XFADE_CHAIN_ALBUM;
+		} else if (device_state_folder_chaining() && !playlist_is_custom() &&
+				   peek_chained_folder(current_metadata_file, chain_target, sizeof(chain_target), raw_next,
+									   sizeof(raw_next))) {
+			chain_kind = XFADE_CHAIN_FOLDER;
+		}
+	}
+
+	if (!raw_next[0] && !playlist_peek_crossfade(raw_next, sizeof(raw_next))) {
+		device_state_invalidate_crossfade();
+		return;
+	}
+
+	char resolved[512] = "";
+	if (!resolve_ready_for_crossfade(raw_next, resolved, sizeof(resolved))) {
+		device_state_invalidate_crossfade();
+		return;
+	}
+
+	song_metadata_t next_meta;
+	memset(&next_meta, 0, sizeof(next_meta));
+	metadata_read(resolved, &next_meta);
+	int rg_q15 = replaygain_compute_q15(&next_meta);
+
+	xfade_plan.active = true;
+	snprintf(xfade_plan.raw_path, sizeof(xfade_plan.raw_path), "%s", raw_next);
+	snprintf(xfade_plan.resolved_path, sizeof(xfade_plan.resolved_path), "%s", resolved);
+	xfade_plan.rg_q15 = rg_q15;
+	xfade_plan.queue_rev = rev;
+	xfade_plan.queue_idx = idx;
+	xfade_plan.mode = mode;
+	xfade_plan.chain_kind = chain_kind;
+	snprintf(xfade_plan.chain_target, sizeof(xfade_plan.chain_target), "%s", chain_target);
+
+	audio_stage_crossfade_next(resolved, rg_q15);
+}
+
+static bool commit_chained_album(const char *wanted_album) {
+	if (!wanted_album || !wanted_album[0]) {
+		return false;
+	}
+	album_tracks_t tracks = {NULL, 0, 0};
+	library_for_each_ordered(LIBRARY_LIST_TRACKS, LIBRARY_FILTER_ALBUM, wanted_album, LIBRARY_ORDER_DEFAULT,
+							 album_track_cb, &tracks);
+	bool ok = false;
+	if (tracks.count > 0) {
+		playlist_load_paths((const char *const *)tracks.paths, tracks.count, 0);
+		playlist_set_album(wanted_album);
+		ok = true;
+	}
+	for (int i = 0; i < tracks.count; i++) {
+		free(tracks.paths[i]);
+	}
+	free(tracks.paths);
+	return ok;
+}
+
+static void scrub_cancel(void);
+
+bool device_state_take_crossfade_handoff(void) {
+	char handed_path[512];
+	if (!audio_take_crossfade_handoff(handed_path, sizeof(handed_path))) {
+		return false;
+	}
+
+	scrub_cancel();
+	radio_clear();
+
+	bool queue_committed = false;
+	if (xfade_plan.active && strcmp(xfade_plan.resolved_path, handed_path) == 0) {
+		if (xfade_plan.chain_kind == XFADE_CHAIN_ALBUM) {
+			queue_committed = commit_chained_album(xfade_plan.chain_target);
+		} else if (xfade_plan.chain_kind == XFADE_CHAIN_FOLDER && xfade_plan.chain_target[0]) {
+			playlist_load_folder(xfade_plan.chain_target, NULL);
+			queue_committed = playlist_count() > 0;
+		}
+	}
+	if (!queue_committed) {
+		playlist_resync_to_current();
+		char dummy[512];
+		if (!playlist_advance_auto(dummy, sizeof(dummy))) {
+			playlist_locate(handed_path);
+		}
+	}
+
+	memset(&xfade_plan, 0, sizeof(xfade_plan));
+
+	snprintf(current_metadata_file, sizeof(current_metadata_file), "%s", handed_path);
+	metadata_read(current_metadata_file, &current_metadata);
+	audiobook_track_changed(current_metadata_file);
+	replaygain_load(&current_metadata);
+	apply_track_speed();
+
+	// Notify streaming caches/protections for the track now playing without
+	// restarting playback (Track B is already playing seamlessly in audio.c).
+	if (qobuzcache_owns(current_metadata_file)) {
+		qobuzcache_note_played(current_metadata_file);
+	} else if (tidalcache_owns(current_metadata_file)) {
+		tidalcache_note_played(current_metadata_file);
+	} else if (soundcloudcache_is_soundcloud_path(current_metadata_file)) {
+		soundcloudcache_protect(current_metadata_file);
+	} else if (jellyfincache_owns(current_metadata_file)) {
+		jellyfincache_protect(current_metadata_file);
+	} else if (podcastcache_owns(current_metadata_file)) {
+		podcastcache_note_played(current_metadata_file);
+	}
+
+	record_current_track_play();
+	restored_uncounted = false;
+	interrupted_file[0] = '\0';
+	interrupted_pos = -1.0;
+	queue_persist();
 	return true;
 }
 

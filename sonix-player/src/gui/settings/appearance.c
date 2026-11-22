@@ -11,6 +11,7 @@
 #include "src/gui/nowplaying/player.h"
 #include "src/gui/shell/corners.h"
 #include "src/gui/shell/gestures.h"
+#include "src/gui/shell/iconset.h"
 #include "src/gui/shell/icons.h"
 #include "src/gui/shell/main_menu.h"
 #include "src/gui/shell/settingsrow.h"
@@ -19,6 +20,8 @@
 #include "src/gui/shell/toast.h"
 #include "src/gui/shell/topbar.h"
 #include "src/gui/settings/bootpicpage.h"
+#include "src/gui/settings/iconsetpage.h"
+#include "src/gui/settings/themefilepage.h"
 #include "src/system/core/config.h"
 #include "src/system/core/lang.h"
 #include "src/system/device/bootlogo.h"
@@ -28,6 +31,13 @@
 lv_obj_t *appearance_screen;
 
 static lv_obj_t *theme_buttons[THEME_KIND_CUSTOM + 1];
+static lv_obj_t *custom_tokyo_switch;
+// The two rows that name card content: which Themes file Custom wears, and
+// which Icons folder the interface draws with. Both open a page of their own
+// rather than listing the content here, so both only carry the current name.
+static lv_obj_t *custom_theme_value;
+static lv_obj_t *iconset_value;
+
 static lv_obj_t *btn_boot[5];		 // Stock / Retrospace / Space / Travelling in space / Custom
 static lv_obj_t *boot_picture_value; // the name of the custom picture, on its row
 static lv_obj_t *boot_light_value, *boot_light_slider; // splash brightness
@@ -640,6 +650,47 @@ static void theme_pick_cb(lv_event_t *e) {
 	appearance_preview_refresh();
 }
 
+// The two card-content rows name what is currently in force: the Themes file
+// Custom wears, and the icon set the interface draws with. Both change on the
+// pages those rows open, so both are re-read every time Appearance comes up.
+static void refresh_custom_theme_value(void) {
+	if (!custom_theme_value) {
+		return;
+	}
+	char label[64];
+	theme_item_label(theme_custom_file(), label, sizeof(label));
+	lv_label_set_text(custom_theme_value, label);
+}
+
+static void refresh_iconset_value(void) {
+	if (!iconset_value) {
+		return;
+	}
+	const char *name = iconset_active_name();
+	char label[64];
+	if (name[0]) {
+		theme_item_label(name, label, sizeof(label));
+	} else {
+		snprintf(label, sizeof(label), "%s", tr("appearance_icon_set_default"));
+	}
+	lv_label_set_text(iconset_value, label);
+}
+
+// The switch that lets a selected custom palette wear the Tokyo-style
+// function-matched layout instead of the classic artwork. Saved first, then
+// repainted: the gate feeds the menu, grid and topbar rebuilds through the
+// theme refresh, so the reflow lands in the same event.
+static void custom_tokyo_cb(lv_event_t *e) {
+	(void)e;
+	// The stored switch rather than the event target, matching the other
+	// toggles in the settings pages.
+	bool on = lv_obj_has_state(custom_tokyo_switch, LV_STATE_CHECKED);
+	theme_set_custom_tokyo_layout(on);
+	theme_repaint();
+	refresh_buttons();
+	appearance_preview_refresh();
+}
+
 #define BOOT_LIGHT_COUNT ((BOOTLOGO_LIGHT_MAX - BOOTLOGO_LIGHT_MIN) / BOOTLOGO_LIGHT_STEP + 1)
 
 // ---------------------------------------------------------------------------
@@ -712,6 +763,14 @@ static void custom_card_refresh_cb(lv_event_t *e) {
 	// The player may have started without a card and mounted one later.
 	theme_set_card_root(storage_sd_root());
 	theme_reload_custom();
+}
+
+// The two rows that name card content re-read what is in force, which the
+// pages they open may have changed: a set swapped, a different file picked.
+static void card_rows_refresh_cb(lv_event_t *e) {
+	(void)e;
+	refresh_custom_theme_value();
+	refresh_iconset_value();
 }
 
 static void boot_light_show(void);
@@ -989,6 +1048,15 @@ void appearance_init(gui_config_t *cfg) {
 		compact ? "appearance_amber_short" : "appearance_amber_on_black", THEME_KIND_AMBER_ON_BLACK, compact);
 	theme_buttons[THEME_KIND_OLED] = make_theme_choice(row, "appearance_oled", THEME_KIND_OLED, compact);
 	theme_buttons[THEME_KIND_CUSTOM] = make_theme_choice(row, "appearance_custom", THEME_KIND_CUSTOM, compact);
+
+	// Which Themes/*.ini file Custom wears, the way Boot picture names its
+	// picture: a row into a page that lists the card's files. A pill per
+	// file crowded the theme row the moment there was more than one, and a
+	// filename is not a theme name -- the page lists them without their
+	// extension, under the name each palette is known by.
+	settingsrow_add(container, "appearance_custom_theme", &custom_theme_value, switch_screen_cb,
+					 themefilepage_screen);
+
 	lv_obj_t *custom_note = lv_label_create(container);
 	lv_label_set_long_mode(custom_note, LV_LABEL_LONG_WRAP);
 	lv_obj_set_width(custom_note, lv_pct(100));
@@ -996,9 +1064,32 @@ void appearance_init(gui_config_t *cfg) {
 	lv_obj_set_style_text_font(custom_note, &font_ui_22, 0);
 	lv_label_set_text(custom_note, tr("appearance_custom_note"));
 
+	// A custom palette may also wear the Tokyo-style layout; the switch sits
+	// with the note it applies to and only changes what Custom dresses with,
+	// never which palette is selected.
+	custom_tokyo_switch = NULL;
+	settingsrow_toggle(container, "appearance_custom_tokyo_layout", &custom_tokyo_switch, custom_tokyo_cb);
+	if (theme_custom_tokyo_layout()) {
+		lv_obj_add_state(custom_tokyo_switch, LV_STATE_CHECKED);
+	}
+
 	// Compact palette and function-matched icon previews for Tokyo Night, Amber
 	// on Black and OLED. The accent picker stays here even when they are hidden.
 	build_theme_previews(container, compact);
+
+	// Which artwork the whole interface wears: Default, or a folder from
+	// Icons/ on the card. A row into its own page, the same as Custom's
+	// files -- the folders are card content, discovered on the way in, and
+	// the row under the previews because a set is the same decision the
+	// theme row just took, in pictures instead of colour.
+	settingsrow_add(container, "appearance_icon_set", &iconset_value, switch_screen_cb, iconsetpage_screen);
+
+	lv_obj_t *iconset_note = lv_label_create(container);
+	lv_label_set_long_mode(iconset_note, LV_LABEL_LONG_WRAP);
+	lv_obj_set_width(iconset_note, lv_pct(100));
+	lv_obj_add_style(iconset_note, &theme_style_text_dim, 0);
+	lv_obj_set_style_text_font(iconset_note, &font_ui_22, 0);
+	lv_label_set_text(iconset_note, tr("appearance_icon_set_note"));
 
 	// The accent colour, as two rows of coloured circles.
 	lv_obj_t *accent_card = lv_obj_create(container);
@@ -1044,8 +1135,13 @@ void appearance_init(gui_config_t *cfg) {
 	btn_custom_accent = lv_btn_create(accent_card);
 	lv_obj_set_size(btn_custom_accent, lv_pct(100), compact ? 36 : 48);
 	lv_obj_set_style_radius(btn_custom_accent, compact ? 8 : 10, 0);
-	lv_obj_set_style_bg_color(btn_custom_accent, theme()->surface_pressed, 0);
-	lv_obj_set_style_bg_opa(btn_custom_accent, LV_OPA_COVER, 0);
+	// The row blends into the card it sits in: the shared card styles carry
+	// each theme's own surface, so the background is the theme's colour on
+	// every theme and repaints with the palette, and it darkens only under a
+	// press. The local surface_pressed fill this replaces was baked once at
+	// build -- a grey slab everywhere, and a stale grey after a theme switch.
+	lv_obj_add_style(btn_custom_accent, &theme_style_card, 0);
+	lv_obj_add_style(btn_custom_accent, &theme_style_card_pressed, LV_STATE_PRESSED);
 	lv_obj_set_style_shadow_width(btn_custom_accent, 0, 0);
 	lv_obj_set_style_pad_hor(btn_custom_accent, compact ? 10 : 14, 0);
 	lv_obj_set_style_pad_gap(btn_custom_accent, compact ? 8 : 12, 0);
@@ -1295,6 +1391,8 @@ void appearance_init(gui_config_t *cfg) {
 	refresh_clock_buttons();
 	refresh_accent_buttons();
 	refresh_text_size_pills();
+	refresh_custom_theme_value();
+	refresh_iconset_value();
 	theme_register_refresh(refresh_buttons);
 	theme_register_refresh(refresh_boot_buttons);
 	theme_register_refresh(refresh_text_size_pills);
@@ -1305,8 +1403,11 @@ void appearance_init(gui_config_t *cfg) {
 
 	// The card's fonts again on every visit: one copied over the USB cable
 	// while the player was running is offered the next time this page comes
-	// up, and one whose card has been pulled out is gone from the row.
+	// up, and one whose card has been pulled out is gone from the row. The
+	// two card-content rows re-read their names the same way, because the
+	// pages they open change them.
 	lv_obj_add_event_cb(appearance_screen, font_pills_reload_cb, LV_EVENT_SCREEN_LOADED, NULL);
 	lv_obj_add_event_cb(appearance_screen, boot_card_refresh_cb, LV_EVENT_SCREEN_LOADED, NULL);
 	lv_obj_add_event_cb(appearance_screen, custom_card_refresh_cb, LV_EVENT_SCREEN_LOADED, NULL);
+	lv_obj_add_event_cb(appearance_screen, card_rows_refresh_cb, LV_EVENT_SCREEN_LOADED, NULL);
 }

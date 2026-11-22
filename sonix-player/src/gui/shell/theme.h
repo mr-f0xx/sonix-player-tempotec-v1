@@ -117,11 +117,19 @@ void theme_register_refresh(theme_refresh_cb_t cb);
 // callback -- the colour depends on the theme in force.
 void theme_apply_slider_knob(lv_obj_t *slider);
 
-// A single editable palette at <SD root>/Themes/custom.ini. Set the root
+// Palettes at <SD root>/Themes/*.ini. Set the root
 // before theme_init(); reload on entering Appearance or when selecting Custom.
 // A missing/invalid file never changes the active palette. Custom saved in
 // config falls back to Dark at startup if the card is unavailable.
 void theme_set_card_root(const char *root);
+int theme_custom_files(char names[][256], int max);
+const char *theme_custom_file(void);
+bool theme_select_custom_file(const char *name);
+// The name a Themes/*.ini file or an Icons/ folder is listed under: the
+// filename without its .ini, separators turned into spaces and each word
+// capitalised, with the shipped palettes under their theme names
+// (catppuccin-mocha lists as "Catppuccin").
+void theme_item_label(const char *name, char *out, size_t size);
 bool theme_reload_custom(void);
 
 // Palette resolved without any of the styles, for pages that run before the
@@ -155,8 +163,30 @@ bool theme_is_oled(void);
 bool theme_is_monochrome(void);
 // Tokyo Night, Amber on Black and OLED use the same function-matched icon and
 // compact V1 layouts. Their palettes and semantic hues remain distinct.
+// Appearance's "Tokyo layout for custom themes" switch opts a selected custom
+// palette into the same layouts; see theme_set_custom_tokyo_layout().
 bool theme_uses_function_glyphs(void);
+
+// The switch behind the custom branch of theme_uses_function_glyphs(): config
+// is the single copy, read on every gate call rather than cached, so flipping
+// it in Appearance needs no invalidation dance.
+void theme_set_custom_tokyo_layout(bool on);
+bool theme_custom_tokyo_layout(void);
 theme_kind_t theme_get_kind(void);
+
+// An SD icon set (iconset.c) takes over the two colour decisions Tokyo Night
+// made: whether the interface draws function glyphs at all, and what colour
+// each role is. Registered by iconset_init(); NULL until then, which leaves
+// every theme exactly as it was.
+typedef bool (*theme_glyph_mode_fn_t)(void);
+typedef bool (*theme_semantic_color_fn_t)(theme_semantic_t role, lv_color_t *out);
+void theme_set_icon_sources(theme_glyph_mode_fn_t glyphs, theme_semantic_color_fn_t semantic);
+
+// Repaint after something outside a palette change moved pixels under the
+// styles: an SD icon set swapping the glyphs, for one. The palette-change
+// machinery itself (palette_generation and the refresh callbacks) is what
+// runs.
+void theme_repaint(void);
 
 // Tokyo Night's blue, cyan, violet, green, amber, red and muted roles. Amber
 // on Black and OLED map every icon role to their accent; in Dark/Light they

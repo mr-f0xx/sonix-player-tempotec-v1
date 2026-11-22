@@ -2041,6 +2041,10 @@ int main(int argc, char **argv) {
 	// the end of every track.
 	// On by default: an unset key means a new install, and a saved 0 stays off.
 	audio_set_gapless(config_get_int("audio", "gapless", 1) != 0);
+	audio_set_fade_mode(config_get_int("audio", "fade_mode", (int)AUDIO_FADE_CROSSFADE) == (int)AUDIO_FADE_CROSSFADE
+							? AUDIO_FADE_CROSSFADE
+							: AUDIO_FADE_OUT_IN);
+	audio_set_fade(config_get_bool("audio", "fade", false), (int)config_get_int("audio", "fade_seconds", 3));
 	clock_init();
 	// A forced host trial may have been interrupted by a player restart. Its
 	// PHY override must be recovered before ADB (or any gadget) can start.

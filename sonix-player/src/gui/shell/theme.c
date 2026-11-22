@@ -6,6 +6,7 @@
 
 #include <stdio.h>
 #include <ctype.h>
+#include <dirent.h>
 #include <sys/stat.h>
 #include <stdlib.h>
 #include <string.h>
@@ -106,11 +107,11 @@ static theme_palette_t palette_oled = {
 	.dark = true,
 };
 
-// A fixed filename keeps the card interface simple and avoids user-supplied
-// paths. Parsing is transactional: a partial or malformed edit is never shown.
+// Only basenames discovered in Themes are accepted; parsing is transactional.
 static char custom_root[512];
 static theme_palette_t palette_custom;
 static lv_color_t custom_accent;
+static char custom_file[256] = "custom.ini";
 
 void theme_set_card_root(const char *root) {
 	if (!root || strlen(root) >= sizeof(custom_root)) {
@@ -142,12 +143,81 @@ static bool hex_color(const char *s, lv_color_t *out) {
 	return true;
 }
 
-static bool load_custom(theme_palette_t *result) {
+// Enumerate bounded, regular .ini files in stable order for the picker.
+int theme_custom_files(char names[][256], int max) {
+	char dir[600], path[900];
+	if (!custom_root[0] || max <= 0 ||
+		snprintf(dir, sizeof(dir), "%s/Themes", custom_root) >= (int)sizeof(dir)) return 0;
+	DIR *d = opendir(dir);
+	if (!d) return 0;
+	int count = 0;
+	struct dirent *ent;
+	while ((ent = readdir(d))) {
+		size_t len = strlen(ent->d_name);
+		if (len <= 4 || len >= 256 || strcmp(ent->d_name + len - 4, ".ini") != 0 ||
+			snprintf(path, sizeof(path), "%s/%s", dir, ent->d_name) >= (int)sizeof(path)) continue;
+		struct stat st;
+		if (lstat(path, &st) || !S_ISREG(st.st_mode)) continue;
+		int pos = 0;
+		while (pos < count && strcmp(names[pos], ent->d_name) < 0) pos++;
+		if (pos >= max) continue;
+		if (count < max) count++;
+		for (int i = count - 1; i > pos; i--) memcpy(names[i], names[i - 1], 256);
+		snprintf(names[pos], 256, "%s", ent->d_name);
+	}
+	closedir(d);
+	return count;
+}
+
+const char *theme_custom_file(void) { return custom_file; }
+
+void theme_item_label(const char *name, char *out, size_t size) {
+	if (!out || size == 0) {
+		return;
+	}
+	out[0] = '\0';
+	if (!name) {
+		name = "";
+	}
+	// The shipped palettes go by their theme names, not their file names.
+	if (strcmp(name, "catppuccin-mocha") == 0 || strcmp(name, "catppuccin-mocha.ini") == 0) {
+		snprintf(out, size, "Catppuccin");
+		return;
+	}
+	// Drop a .ini suffix, then copy with the separators as spaces and the
+	// first letter of every word up-cased: gruvbox -> Gruvbox, rose-pine ->
+	// Rose Pine, custom.ini -> Custom. Letters already up-cased, digits and
+	// anything outside a-z pass through untouched.
+	size_t len = strlen(name);
+	if (len > 4 && strcmp(name + len - 4, ".ini") == 0) {
+		len -= 4;
+	}
+	bool word_start = true;
+	size_t i = 0;
+	for (; i < len && i + 1 < size; i++) {
+		char c = name[i];
+		if (c == '-' || c == '_' || c == ' ') {
+			out[i] = ' ';
+			word_start = true;
+			continue;
+		}
+		if (word_start && c >= 'a' && c <= 'z') {
+			c = (char)(c - 'a' + 'A');
+		}
+		word_start = false;
+		out[i] = c;
+	}
+	out[i] = '\0';
+}
+
+static bool load_custom_file(const char *name, theme_palette_t *result) {
 	char path[600];
-	if (!custom_root[0] || snprintf(path, sizeof(path), "%s/Themes/custom.ini", custom_root) >= (int)sizeof(path))
+	if (!custom_root[0] || !name || !*name || strchr(name, '/') || strchr(name, '\\') ||
+		strstr(name, "..") || strlen(name) >= 256 ||
+		snprintf(path, sizeof(path), "%s/Themes/%s", custom_root, name) >= (int)sizeof(path))
 		return false;
 	struct stat st;
-	if (stat(path, &st) != 0 || !S_ISREG(st.st_mode) || st.st_size > 4096) return false;
+	if (lstat(path, &st) != 0 || !S_ISREG(st.st_mode) || st.st_size > 4096) return false;
 	FILE *f = fopen(path, "r");
 	if (!f) return false;
 	static const char *keys[] = {"screen_bg", "surface", "surface_pressed", "panel", "cover_bg",
@@ -178,6 +248,8 @@ static bool load_custom(theme_palette_t *result) {
 		.text_primary = colors[5], .text_secondary = colors[6], .accent = colors[7], .dark = true};
 	return true;
 }
+
+static bool load_custom(theme_palette_t *result) { return load_custom_file(custom_file, result); }
 
 // With no fill to darken, OLED still has to show a press: a row or a button
 // under a finger flashes this grey, the only grey that is ever a fill. A quiet
@@ -504,6 +576,15 @@ void theme_set_boot_screen_custom(const char *name) {
 // no flash marker -- which is why the boot path may run it before the
 // interface exists.
 static void select_active(void) {
+	const char *saved_file = config_get("ui", "theme_file", "custom.ini");
+	char names[24][256];
+	int count = theme_custom_files(names, 24);
+	for (int i = 0; i < count; i++) {
+		// %.255s: names[i] is a 256-byte slot, and the precision keeps the
+		// copy provably inside custom_file.
+		if (strcmp(names[i], saved_file) == 0) snprintf(custom_file, sizeof(custom_file), "%.255s", names[i]);
+	}
+
 	// Read the named theme choice when present; configs from older builds have
 	// only `dark_theme`, so they keep their original Dark/Light setting.
 	const char *saved_theme = config_get("ui", "theme", NULL);
@@ -690,7 +771,32 @@ bool theme_is_monochrome(void) {
 	return selected_kind == THEME_KIND_AMBER_ON_BLACK || selected_kind == THEME_KIND_OLED;
 }
 
+// Set by an SD icon set (iconset.c); NULL keeps every theme on its own.
+static theme_glyph_mode_fn_t icon_glyph_mode;
+static theme_semantic_color_fn_t icon_semantic_color;
+
+void theme_set_icon_sources(theme_glyph_mode_fn_t glyphs, theme_semantic_color_fn_t semantic) {
+	icon_glyph_mode = glyphs;
+	icon_semantic_color = semantic;
+}
+
+bool theme_custom_tokyo_layout(void) {
+	return config_get_bool("ui", "custom_tokyo_layout", false);
+}
+
+void theme_set_custom_tokyo_layout(bool on) {
+	config_set_bool("ui", "custom_tokyo_layout", on);
+	config_save();
+}
+
 bool theme_uses_function_glyphs(void) {
+	if (icon_glyph_mode && icon_glyph_mode()) {
+		return true;
+	}
+	// Custom follows the Appearance switch; the presets carry their own.
+	if (selected_kind == THEME_KIND_CUSTOM) {
+		return theme_custom_tokyo_layout();
+	}
 	return selected_kind == THEME_KIND_TOKYO_NIGHT || selected_kind == THEME_KIND_AMBER_ON_BLACK ||
 		   selected_kind == THEME_KIND_OLED;
 }
@@ -702,6 +808,14 @@ lv_color_t theme_on_accent(void) { return theme_ink_on(active->accent); }
 theme_kind_t theme_get_kind(void) { return selected_kind; }
 
 lv_color_t theme_semantic_color(theme_semantic_t role) {
+	// An SD icon set's palette wins over every built-in mapping, monochrome
+	// and Tokyo alike: it is the artwork on screen, and it brought its colours.
+	if (icon_semantic_color) {
+		lv_color_t from_set;
+		if (icon_semantic_color(role, &from_set)) {
+			return from_set;
+		}
+	}
 	if (role == THEME_SEMANTIC_MUTED) {
 		// The monochrome palettes' icons all share the same signal colour;
 		// reserve their secondary tone for labels and surfaces, not
@@ -923,6 +1037,11 @@ static void refresh_all(void) {
 	}
 }
 
+// What an SD icon set calls after swapping the glyphs behind the styles: the
+// same repaint a palette change gets, so the new pixels land on screen now
+// rather than at the next navigation.
+void theme_repaint(void) { refresh_all(); }
+
 static const char *theme_config_value(theme_kind_t kind) {
 	switch (kind) {
 	case THEME_KIND_LIGHT:
@@ -939,6 +1058,20 @@ static const char *theme_config_value(theme_kind_t kind) {
 	default:
 		return "dark";
 	}
+}
+
+bool theme_select_custom_file(const char *name) {
+	char names[24][256];
+	int count = theme_custom_files(names, 24);
+	bool found = false;
+	for (int i = 0; i < count; i++) if (name && strcmp(names[i], name) == 0) found = true;
+	if (!found) return false;
+	theme_palette_t next;
+	if (!load_custom_file(name, &next)) return false;
+	snprintf(custom_file, sizeof(custom_file), "%s", name);
+	config_set("ui", "theme_file", custom_file);
+	config_save();
+	return theme_reload_custom();
 }
 
 bool theme_reload_custom(void) {

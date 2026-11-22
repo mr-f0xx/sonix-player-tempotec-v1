@@ -165,13 +165,13 @@ bool bootpic_present(void) { return false; }
 // real ones are 30 MB of bitmaps (icons.c) that this test has no opinion
 // about; what matters is that a row has an image in its cover slot.
 static const uint8_t GLYPH_BYTES[4] = {0xff, 0xff, 0xff, 0xff};
-const lv_image_dsc_t icon_stats_artists = {.header = {.magic = LV_IMAGE_HEADER_MAGIC, .cf = LV_COLOR_FORMAT_A8,
+lv_image_dsc_t icon_stats_artists = {.header = {.magic = LV_IMAGE_HEADER_MAGIC, .cf = LV_COLOR_FORMAT_A8,
 													  .w = 2, .h = 2, .stride = 2},
 										   .data = GLYPH_BYTES, .data_size = sizeof(GLYPH_BYTES)};
-const lv_image_dsc_t icon_stats_albums = {.header = {.magic = LV_IMAGE_HEADER_MAGIC, .cf = LV_COLOR_FORMAT_A8,
+lv_image_dsc_t icon_stats_albums = {.header = {.magic = LV_IMAGE_HEADER_MAGIC, .cf = LV_COLOR_FORMAT_A8,
 													 .w = 2, .h = 2, .stride = 2},
 										  .data = GLYPH_BYTES, .data_size = sizeof(GLYPH_BYTES)};
-const lv_image_dsc_t icon_chevron_right = {.header = {.magic = LV_IMAGE_HEADER_MAGIC, .cf = LV_COLOR_FORMAT_A8,
+lv_image_dsc_t icon_chevron_right = {.header = {.magic = LV_IMAGE_HEADER_MAGIC, .cf = LV_COLOR_FORMAT_A8,
 													  .w = 2, .h = 2, .stride = 2},
 										   .data = GLYPH_BYTES, .data_size = sizeof(GLYPH_BYTES)};
 

@@ -78,7 +78,7 @@ static const uint8_t icon_spotify_mark_data[] = {
 	0x00, 0x00, 0x00, 0x00,
 };
 
-const lv_image_dsc_t icon_spotify_mark = {
+lv_image_dsc_t icon_spotify_mark = {
 	.header = {
 		.magic = LV_IMAGE_HEADER_MAGIC,
 		.cf = LV_COLOR_FORMAT_A8,
@@ -162,7 +162,7 @@ static const uint8_t icon_spotify_menu_data[] = {
 	0x00, 0x00, 0x00, 0x00,
 };
 
-const lv_image_dsc_t icon_spotify_menu = {
+lv_image_dsc_t icon_spotify_menu = {
 	.header = {
 		.magic = LV_IMAGE_HEADER_MAGIC,
 		.cf = LV_COLOR_FORMAT_A8,
@@ -246,7 +246,7 @@ static const uint8_t icon_spotify_badge_data[] = {
 	0x00, 0x00, 0x00, 0x00,
 };
 
-const lv_image_dsc_t icon_spotify_badge = {
+lv_image_dsc_t icon_spotify_badge = {
 	.header = {
 		.magic = LV_IMAGE_HEADER_MAGIC,
 		.cf = LV_COLOR_FORMAT_A8,

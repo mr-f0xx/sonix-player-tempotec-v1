@@ -121,11 +121,30 @@ unsigned audio_loop_turns(void);
 void audio_set_gapless(bool enabled);
 bool audio_get_gapless(void);
 
-// Fade: ramp the last seconds of a track down to silence and the first seconds
-// of the next up from it. One decoder means the two cannot truly overlap, so
-// this is the ramp-out/ramp-in version of the effect. `seconds` is clamped to
-// 1..12.
+// Fade & Crossfade:
+//   AUDIO_FADE_OUT_IN: ramp the last seconds of a track down to silence and the
+//     first seconds of the next up from it.
+//   AUDIO_FADE_CROSSFADE: overlap the last seconds of the outgoing track with
+//     the first seconds of the incoming track on automatic track transitions
+//     using an equal-power curve; manual skips cut cleanly without crossfading.
+typedef enum {
+	AUDIO_FADE_OUT_IN = 0,
+	AUDIO_FADE_CROSSFADE = 1,
+} audio_fade_mode_t;
+
 void audio_set_fade(bool enabled, int seconds);
+void audio_set_fade_mode(audio_fade_mode_t mode);
+audio_fade_mode_t audio_get_fade_mode(void);
+bool audio_crossfade_active(void);
+int audio_fade_seconds(void);
+
+// Staging & handoff for overlapping automatic crossfade transitions.
+// `audio_stage_crossfade_next` is called from the UI thread once the upcoming
+// track path and its ReplayGain Q15 multiplier are known; NULL or "" clears it.
+void audio_stage_crossfade_next(const char *filepath, int replaygain_q15);
+void audio_clear_crossfade_next(void);
+bool audio_take_crossfade_handoff(char *out_path, size_t out_size);
+void audio_set_crossfade_handoff_hook(void (*hook)(void));
 
 void audio_resume();
 

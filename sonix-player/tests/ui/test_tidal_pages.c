@@ -286,6 +286,16 @@ void tidalcache_progress(long *done, long *total) {
 	*done = 0;
 	*total = 0;
 }
+
+/* The configurable SD cache ceiling. The stub keeps the last value set, so the
+ * test can check that tapping a cache-limit pill reaches the cache. */
+static int stub_cache_max_mb = 1024;
+int tidalcache_get_max_mb(void) { return stub_cache_max_mb; }
+void tidalcache_set_max_mb(int mb) { stub_cache_max_mb = mb; }
+long long tidalcache_get_max_bytes(void) { return (long long)stub_cache_max_mb * 1024LL * 1024LL; }
+void tidalcache_set_max_bytes(long long bytes) { (void)bytes; }
+long long tidalcache_bytes(void) { return 0; }
+
 void tidalcache_path(long track_id, const char *mime, char *out, size_t size) {
 	(void)track_id;
 	(void)mime;
@@ -318,6 +328,11 @@ void thread_be_background(const char *name) {}
 void device_state_add_prepare_cb(device_state_prepare_cb cb) {}
 bool device_state_play_queue_index(int index) { return false; }
 void device_state_stop(void) {}
+void audio_get_current_file(char *out, size_t out_size) {
+	if (out && out_size) {
+		out[0] = '\0';
+	}
+}
 int playlist_count(void) { return 0; }
 int playlist_current_index(void) { return -1; }
 bool playlist_is_library_backed(void) { return false; }
@@ -684,6 +699,35 @@ static lv_obj_t *row_named(lv_obj_t *screen, const char *name) {
 	return NULL;
 }
 
+/* The clickable whose own label is exactly `needle`: a pill, a row, a button.
+ * Pills carry their text on a label inside a button, so the search walks down
+ * to the label and then back up to the clickable that owns it. */
+static lv_obj_t *find_clickable_with_label(lv_obj_t *root, const char *needle) {
+	if (!root || lv_obj_is_hidden(root) || lv_obj_has_state(root, LV_STATE_DISABLED)) {
+		return NULL;
+	}
+	if (lv_obj_check_type(root, &lv_label_class)) {
+		const char *txt = lv_label_get_text(root);
+		if (txt && strcmp(txt, needle) == 0) {
+			lv_obj_t *cur = root;
+			while (cur && lv_obj_get_parent(cur) != NULL && !lv_obj_is_clickable(cur)) {
+				cur = lv_obj_get_parent(cur);
+			}
+			if (cur && lv_obj_get_parent(cur) != NULL && lv_obj_is_clickable(cur)) {
+				return cur;
+			}
+		}
+	}
+	uint32_t cnt = lv_obj_get_child_count(root);
+	for (uint32_t i = 0; i < cnt; i++) {
+		lv_obj_t *hit = find_clickable_with_label(lv_obj_get_child(root, (int32_t)i), needle);
+		if (hit) {
+			return hit;
+		}
+	}
+	return NULL;
+}
+
 static bool shows_icon(lv_obj_t *button, const void *glyph) {
 	for (uint32_t i = 0; i < lv_obj_get_child_count(button); i++) {
 		lv_obj_t *child = lv_obj_get_child(button, (int32_t)i);
@@ -873,6 +917,9 @@ static void check_strings(const char *language_dir) {
 		"remove_from_favourites", "remove_from_favourites_2",
 		"remove",				  "playlist_track_2",
 		"playlist_tracks",
+		"tidal_cache_limit",	"tidal_cache_unlimited",
+		"tidal_clear_cache",	"tidal_clear_cache_note",
+		"tidal_cache_cleared",	"tidal_clear",
 	};
 	DIR *dir = opendir(language_dir);
 	assert(dir);
@@ -939,6 +986,49 @@ static void check_untouched_home(gui_config_t *cfg) {
 	lv_obj_get_coords(row_named(tidal_screen, tr("my_playlists")), &own);
 	assert((own.y1 + own.y2) / 2 < (int32_t)cfg->screen_height);
 	dump_snapshot(tidal_screen, "v1-tidal-home");
+}
+
+/* The SD cache ceiling: the 1 GiB default, a pill that raises it, the usage
+ * row that names the new ceiling, and the clear-cache row that asks before it
+ * empties the cache. */
+static void check_cache_limit(void) {
+	tap(corner_button(tidal_screen, &icon_music_settings));
+	lv_obj_t *settings = lv_screen_active();
+	assert(settings != tidal_screen);
+	lv_obj_update_layout(settings);
+
+	// The ceiling starts at the 1 GiB default, and the matching pill is there.
+	assert(stub_cache_max_mb == 1024);
+	assert(find_clickable_with_label(settings, "1 GB") != NULL);
+
+	// Raising it to 4 GB reaches the cache, and the usage row names the ceiling.
+	lv_obj_t *pill_4gb = find_clickable_with_label(settings, "4 GB");
+	assert(pill_4gb != NULL);
+	tap(pill_4gb);
+	assert(stub_cache_max_mb == 4096);
+	assert(find_clickable_with_label(settings, "0.0 MB / 4 GB") != NULL);
+
+	// Unlimited is the 0 sentinel.
+	lv_obj_t *pill_unlim = find_clickable_with_label(settings, tr("tidal_cache_unlimited"));
+	assert(pill_unlim != NULL);
+	tap(pill_unlim);
+	assert(stub_cache_max_mb == 0);
+	assert(find_clickable_with_label(settings, "0.0 MB / Unlimited") != NULL);
+
+	// Clearing asks first; the confirmation is the one meant, and answering it
+	// clears the cache once.
+	int clears_before = cache_clears;
+	lv_obj_t *clear_row = find_clickable_with_label(settings, tr("tidal_clear_cache"));
+	assert(clear_row != NULL);
+	tap(clear_row);
+	expect_asked("tidal_clear_cache", tr("tidal_clear_cache_note"), "tidal_clear");
+	answer(true);
+	assert(cache_clears == clears_before + 1);
+	// Hand the counter back: the sign-out check below counts its own clear.
+	cache_clears = clears_before;
+
+	assert(!go_back());
+	assert(lv_screen_active() == tidal_screen);
 }
 
 /* ---- the list, and what can be done in it --------------------------------- */
@@ -1345,6 +1435,7 @@ int main(int argc, char **argv) {
 		check_arranged_home();
 	} else {
 		check_untouched_home(&cfg);
+		check_cache_limit();
 		check_favourite_playlists(&cfg);
 		check_own_playlists();
 		/* Six un-favouritings were sent, two of them refused and said so,

@@ -50,6 +50,9 @@ $(error wrong LVGL version)
 endif
 endif
 
+# Apply the icon-set hook to a freshly cloned LVGL (idempotent; see the file).
+include $(CURDIR)/lvgl-patch.mk
+
 # Compile flags.
 #
 #   -DLV_CONF_INCLUDE_SIMPLE=1  lets lv_conf.h be included as "lv_conf.h".

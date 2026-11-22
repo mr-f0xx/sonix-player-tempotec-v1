@@ -3238,7 +3238,7 @@ static void sort_clicked_cb(lv_event_t *e) {
 	int n = sort_can_year(p->kind, p->filter) ? SORT_CHOICES : SORT_YEAR_UP;
 	popover_item_t items[SORT_CHOICES];
 	for (int i = 0; i < n; i++) {
-		items[i] = (popover_item_t){labels[i], sort_picked, (void *)(intptr_t)i, i == (int)current};
+		items[i] = (popover_item_t){labels[i], sort_picked, (void *)(intptr_t)i, i == (int)current, false};
 	}
 	sort_menu_panel = p;
 	popover_show(lv_event_get_current_target(e), items, n);

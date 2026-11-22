@@ -274,15 +274,15 @@ static void ask_for_password(const char *ssid) {
 static void show_row_menu(lv_obj_t *anchor, bool current) {
 	if (current) {
 		static const popover_item_t items[] = {
-			{"details", details_action, NULL, false},
-			{"disconnect", disconnect_action, NULL, false},
-			{"wifi_forget_network", forget_action, NULL, false},
+			{"details", details_action, NULL, false, false},
+			{"disconnect", disconnect_action, NULL, false, false},
+			{"wifi_forget_network", forget_action, NULL, false, false},
 		};
 		popover_show(anchor, items, 3);
 	} else {
 		static const popover_item_t items[] = {
-			{"connect", connect_action, NULL, false},
-			{"wifi_forget_network", forget_action, NULL, false},
+			{"connect", connect_action, NULL, false, false},
+			{"wifi_forget_network", forget_action, NULL, false, false},
 		};
 		popover_show(anchor, items, 2);
 	}

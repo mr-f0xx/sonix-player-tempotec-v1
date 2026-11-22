@@ -22,6 +22,8 @@
 #include "src/system/streaming/podcast.h"
 #include "src/gui/settings/appearance.h"
 #include "src/gui/settings/bootpicpage.h"
+#include "src/gui/settings/iconsetpage.h"
+#include "src/gui/settings/themefilepage.h"
 #include "src/gui/settings/musicsettings.h"
 #include "src/gui/settings/settings.h"
 #include "src/gui/shell/corners.h"
@@ -47,10 +49,15 @@
 #include "src/system/playback/device_state.h"
 #include "src/system/playback/playlist.h"
 
+// music.c's compact header opens Stats from the Music page. The page itself
+// is exercised by test_stats; here it only has to exist for the link.
+lv_obj_t *stats_screen;
+void stats_refresh(void) {}
+
 static void check_custom_theme(void) {
 	char root[] = "/tmp/sonix-theme-XXXXXX";
 	assert(mkdtemp(root));
-	char dir[256], path[256];
+	char dir[256], path[512];
 	snprintf(dir, sizeof(dir), "%s/Themes", root);
 	snprintf(path, sizeof(path), "%s/custom.ini", dir);
 	assert(mkdir(dir, 0700) == 0);
@@ -78,6 +85,35 @@ static void check_custom_theme(void) {
 	assert(fclose(f) == 0);
 	assert(theme_reload_custom());
 	assert(theme()->screen_bg.red == 4);
+	// Multiple named palettes can coexist; selection remembers the basename.
+	char other[512];
+	snprintf(other, sizeof(other), "%s/rose-pine.ini", dir);
+	f = fopen(other, "w");
+	assert(f);
+	fputs("[theme]\nscreen_bg = #070809\nsurface = #101112\nsurface_pressed = #202122\n"
+		"panel = #303132\ncover_bg = #404142\ntext_primary = #f0f1f2\n"
+		"text_secondary = #a0a1a2\naccent = #123456\n", f);
+	assert(fclose(f) == 0);
+	char names[4][256];
+	assert(theme_custom_files(names, 4) == 2);
+	assert(strcmp(names[0], "custom.ini") == 0);
+	assert(strcmp(names[1], "rose-pine.ini") == 0);
+	assert(!theme_select_custom_file("../rose-pine.ini"));
+	assert(theme_select_custom_file("rose-pine.ini"));
+	assert(strcmp(theme_custom_file(), "rose-pine.ini") == 0);
+	assert(strcmp(config_get("ui", "theme_file", ""), "rose-pine.ini") == 0);
+	assert(theme()->screen_bg.red == 7);
+	assert(theme_select_custom_file("custom.ini"));
+	assert(theme()->screen_bg.red == 4);
+	// The Appearance switch dresses a selected custom palette with the
+	// Tokyo-style function-matched layout; off keeps the classic artwork.
+	theme_set_kind(THEME_KIND_CUSTOM);
+	assert(theme_get_kind() == THEME_KIND_CUSTOM);
+	assert(!theme_uses_function_glyphs());
+	theme_set_custom_tokyo_layout(true);
+	assert(theme_uses_function_glyphs());
+	theme_set_custom_tokyo_layout(false);
+	assert(!theme_uses_function_glyphs());
 	// Invalid edits must not partially repaint or change the saved choice.
 	f = fopen(path, "w");
 	assert(f);
@@ -88,6 +124,7 @@ static void check_custom_theme(void) {
 	theme_set_kind(THEME_KIND_DARK);
 	theme_set_kind(THEME_KIND_CUSTOM);
 	assert(theme_get_kind() == THEME_KIND_DARK);
+	assert(unlink(other) == 0);
 	assert(unlink(path) == 0);
 	assert(rmdir(dir) == 0);
 	assert(rmdir(root) == 0);
@@ -633,6 +670,10 @@ int main(int argc, char **argv) {
 
 	bootpicpage_screen = lv_obj_create(NULL); // the page the boot screen's Custom pill opens
 	bootpicpage_init(&cfg);
+	iconsetpage_screen = lv_obj_create(NULL);
+	themefilepage_screen = lv_obj_create(NULL);
+	iconsetpage_init(&cfg);
+	themefilepage_init(&cfg);
 	appearance_screen = lv_obj_create(NULL); // after the page: its row points at it
 	appearance_init(&cfg);
 	lv_obj_t *toggle_label = find_label(appearance_screen, tr("appearance_main_menu_icons_only"));
@@ -870,15 +911,30 @@ int main(int argc, char **argv) {
 	gridpage_set_tile_label_hidden(section_grid, -1, true);
 	gridpage_set_tile_label_hidden(section_grid, 99, true);
 
-	/* Accent colour comes right after the icon preview, with its tint below. */
+	/* The icon set row sits between the icon preview and the accent colour,
+	   with its caption under it; the tint card follows the accent. */
 	lv_obj_t *glyph_label = find_label(appearance_screen, tr("appearance_function_glyphs"));
 	lv_obj_t *accent_label = find_label(appearance_screen, tr("appearance_accent_colour"));
 	lv_obj_t *tint_label = find_label(appearance_screen, tr("appearance_dynamic_tint"));
-	assert(glyph_label && accent_label && tint_label);
+	lv_obj_t *iconset_label = find_label(appearance_screen, tr("appearance_icon_set"));
+	lv_obj_t *iconset_caption = find_label(appearance_screen, tr("appearance_icon_set_note"));
+	assert(glyph_label && accent_label && tint_label && iconset_label && iconset_caption);
 	lv_obj_t *glyph_card = lv_obj_get_parent(glyph_label);
 	lv_obj_t *accent_card = lv_obj_get_parent(accent_label);
-	assert(lv_obj_get_sibling(glyph_card, 1) == accent_card);
+	lv_obj_t *iconset_card = lv_obj_get_parent(iconset_label);
+	assert(lv_obj_get_sibling(glyph_card, 1) == iconset_card);
+	assert(lv_obj_get_sibling(iconset_card, 1) == iconset_caption);
+	assert(lv_obj_get_sibling(iconset_caption, 1) == accent_card);
 	assert(lv_obj_get_sibling(accent_card, 1) == lv_obj_get_parent(tint_label));
+	/* With no card mounted the row still offers Default. */
+	assert(find_label(iconsetpage_screen, tr("appearance_icon_set_default")));
+	assert(find_label(themefilepage_screen, tr("appearance_custom_theme_empty")));
+	assert(find_label(appearance_screen, tr("appearance_custom_theme")));
+	char pretty[128];
+	theme_item_label("catppuccin-mocha.ini", pretty, sizeof(pretty));
+	assert(strcmp(pretty, "Catppuccin") == 0);
+	theme_item_label("rose-pine.ini", pretty, sizeof(pretty));
+	assert(strcmp(pretty, "Rose Pine") == 0);
 	lv_obj_t *accent_row = lv_obj_get_sibling(accent_label, 1);
 	assert(accent_row && lv_obj_get_child_count(accent_row) == 6);
 
