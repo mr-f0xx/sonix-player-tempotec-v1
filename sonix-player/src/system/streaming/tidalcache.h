@@ -37,17 +37,31 @@
 // player's internal data partition can hold; the card is the only storage with
 // room for it, and the only one whose free space says whether a track fits.
 //
-// One GB is the same ceiling as Qobuz's and roughly ten hi-res albums: enough
-// not to re-download what is being listened to these days, small enough not to
-// silently fill a card. Manually kept tracks are copied to Music/Tidal by
-// streamkeep.
-#define TIDALCACHE_MAX_BYTES (1024L * 1024L * 1024L)
+// The ceiling defaults to one GB -- the same as Qobuz's and roughly ten hi-res
+// albums -- but is configurable from the Tidal settings page and persisted as
+// `[tidal] cache_max_mb` in device_config.ini. `0` means unlimited: the cache
+// is then held back only by free card space (TIDALCACHE_MIN_FREE below).
+// Manually kept tracks are copied to Music/Tidal by streamkeep.
+#define TIDALCACHE_DEFAULT_MAX_MB 1024
+#define TIDALCACHE_MIN_MAX_MB 64
+#define TIDALCACHE_MAX_MAX_MB (1024 * 1024)
+#define TIDALCACHE_MAX_BYTES ((long long)TIDALCACHE_DEFAULT_MAX_MB * 1024LL * 1024LL)
+#define TIDALCACHE_MIN_FREE (256LL * 1024LL * 1024LL)
 
 // Where the card is. Called once at startup and on every card change; NULL or
 // empty disables the cache (and with it Tidal, which cannot play anything
 // without it). On the simulator there is no card, and /tmp stands in for one.
+// The configured ceiling is (re)read from device_config.ini here.
 void tidalcache_set_root(const char *sd_root);
 bool tidalcache_ready(void);
+
+// Configurable SD cache ceiling (`[tidal] cache_max_mb` in device_config.ini).
+// `0` means unlimited: the cache is evicted only when free microSD space drops
+// below TIDALCACHE_MIN_FREE.
+int tidalcache_get_max_mb(void);
+void tidalcache_set_max_mb(int max_mb);
+long long tidalcache_get_max_bytes(void);
+void tidalcache_set_max_bytes(long long max_bytes);
 
 // The path this track would have. Says nothing about whether it exists.
 void tidalcache_path(long track_id, const char *mime, char *out, size_t size);
@@ -199,8 +213,9 @@ void tidalcache_set_protected(const char *const *paths, int count);
 // Call on the way out (shutdown, reboot).
 void tidalcache_clear_on_exit(void);
 
-// Current size, and how to empty it.
-long tidalcache_bytes(void);
+// Current size, and how to empty it. The total is kept in bytes as a 64-bit
+// value: a multi-GB cache overflows the 32-bit `long` of the MIPS target.
+long long tidalcache_bytes(void);
 void tidalcache_clear(void);
 
 #endif /* TIDALCACHE_H */

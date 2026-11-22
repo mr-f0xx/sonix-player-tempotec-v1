@@ -4483,6 +4483,11 @@ static const int QUALITY_VALUES[4] = {TIDAL_QUALITY_LOW, TIDAL_QUALITY_HIGH, TID
 static const char *const QUALITY_NAMES[4] = {"tidal_low_aac_96", "tidal_high_aac_320", "tidal_cd_flac_16_44",
 											 "tidal_hi_res_flac_24"};
 
+// The SD cache ceiling presets, the same set SoundCloud and Jellyfin offer.
+// The last is 0: unlimited, held back only by free card space.
+#define TIDAL_CACHE_PRESET_COUNT 6
+static const int TIDAL_CACHE_PRESET_MB[TIDAL_CACHE_PRESET_COUNT] = {512, 1024, 2048, 4096, 8192, 0};
+
 // The two corner buttons: the gear (Tidal settings) and the magnifier. Shown
 // only when signed in, because otherwise there is nothing to configure and
 // nothing to search.
@@ -4796,6 +4801,8 @@ static void build_home_settings_page(gui_config_t *cfg) {
 
 static lv_obj_t *tsettings_screen;
 static lv_obj_t *quality_pills[4];
+static lv_obj_t *cache_limit_pills[TIDAL_CACHE_PRESET_COUNT];
+static lv_obj_t *cache_value;
 
 static void quality_refresh(void) {
 	int current = tidal_get_quality();
@@ -4813,6 +4820,78 @@ static void quality_pick_cb(lv_event_t *e) {
 	}
 	tidal_set_quality((int)(intptr_t)lv_event_get_user_data(e));
 	quality_refresh();
+}
+
+// The SD cache ceiling: the same pill card SoundCloud and Jellyfin use, and a
+// clear-cache row that shows how much of the ceiling the cached tracks take.
+static void cache_limit_refresh(void) {
+	int cur_mb = tidalcache_get_max_mb();
+	for (int i = 0; i < TIDAL_CACHE_PRESET_COUNT; i++) {
+		if (cache_limit_pills[i]) {
+			settingsrow_pill_active(cache_limit_pills[i], TIDAL_CACHE_PRESET_MB[i] == cur_mb);
+		}
+	}
+}
+
+static void cache_label_refresh(void) {
+	if (!cache_value) {
+		return;
+	}
+	long long bytes = tidalcache_bytes();
+	int max_mb = tidalcache_get_max_mb();
+
+	char used_str[32];
+	if (bytes >= 1024LL * 1024LL * 1024LL) {
+		snprintf(used_str, sizeof(used_str), "%.2f GB", (double)bytes / (1024.0 * 1024.0 * 1024.0));
+	} else {
+		snprintf(used_str, sizeof(used_str), "%.1f MB", (double)bytes / (1024.0 * 1024.0));
+	}
+
+	char cap_str[64];
+	if (max_mb <= 0) {
+		snprintf(cap_str, sizeof(cap_str), "%s", tr("tidal_cache_unlimited"));
+	} else if (max_mb >= 1024 && (max_mb % 1024) == 0) {
+		snprintf(cap_str, sizeof(cap_str), "%d GB", max_mb / 1024);
+	} else {
+		snprintf(cap_str, sizeof(cap_str), "%d MB", max_mb);
+	}
+
+	char buf[128];
+	snprintf(buf, sizeof(buf), "%s / %s", used_str, cap_str);
+	lv_label_set_text(cache_value, buf);
+}
+
+static void cache_limit_pill_cb(lv_event_t *e) {
+	if (switcher_back_drag_active()) {
+		return;
+	}
+	int mb = (int)(intptr_t)lv_event_get_user_data(e);
+	tidalcache_set_max_mb(mb);
+	cache_limit_refresh();
+	cache_label_refresh();
+}
+
+static void clear_cache_confirmed(void *user) {
+	(void)user;
+	char active[512];
+	audio_get_current_file(active, sizeof(active));
+	if (tidalcache_owns(active)) {
+		device_state_stop();
+	}
+	tidalcache_clear();
+	cache_label_refresh();
+	toast_success("tidal_cache_cleared");
+}
+
+static void clear_cache_cb(lv_event_t *e) {
+	(void)e;
+	confirm_show("tidal_clear_cache", tr("tidal_clear_cache_note"), "tidal_clear", clear_cache_confirmed, NULL);
+}
+
+static void settings_refresh(void) {
+	quality_refresh();
+	cache_limit_refresh();
+	cache_label_refresh();
 }
 
 static void do_logout(void *user) {
@@ -4851,7 +4930,7 @@ static void logout_cb(lv_event_t *e) {
 
 static void open_settings_cb(lv_event_t *e) {
 	(void)e;
-	quality_refresh();
+	settings_refresh();
 	switch_screen(tsettings_screen);
 }
 
@@ -4872,6 +4951,21 @@ static void build_settings_page(gui_config_t *cfg) {
 		quality_pills[i] = settingsrow_pill(pills, QUALITY_NAMES[i], QUALITY_VALUES[i], quality_pick_cb);
 	}
 
+	// SD cache limit: the same pill card SoundCloud and Jellyfin use. The
+	// ceiling was a fixed 1 GiB before; these pills let it be raised (or set
+	// unlimited) without a rebuild, persisted as [tidal] cache_max_mb.
+	lv_obj_t *cache_pills = NULL;
+	settingsrow_pills(container, "tidal_cache_limit", &cache_pills);
+	cache_limit_pills[0] = settingsrow_pill_text(cache_pills, "512 MB", 512, cache_limit_pill_cb);
+	cache_limit_pills[1] = settingsrow_pill_text(cache_pills, "1 GB", 1024, cache_limit_pill_cb);
+	cache_limit_pills[2] = settingsrow_pill_text(cache_pills, "2 GB", 2048, cache_limit_pill_cb);
+	cache_limit_pills[3] = settingsrow_pill_text(cache_pills, "4 GB", 4096, cache_limit_pill_cb);
+	cache_limit_pills[4] = settingsrow_pill_text(cache_pills, "8 GB", 8192, cache_limit_pill_cb);
+	cache_limit_pills[5] = settingsrow_pill(cache_pills, "tidal_cache_unlimited", 0, cache_limit_pill_cb);
+
+	// The cache's size and ceiling, on the right of the row that empties it.
+	settingsrow_add(container, "tidal_clear_cache", &cache_value, clear_cache_cb, NULL);
+
 	settingsrow_add(container, "tidal_home", NULL, open_home_settings_cb, NULL);
 
 	settingsrow_action(container, "clear_search_history", clear_search_history_cb, NULL);
@@ -4880,8 +4974,8 @@ static void build_settings_page(gui_config_t *cfg) {
 	// account out. The confirmation follows the same word.
 	settingsrow_action(container, "sign_out_of_tidal", logout_cb, NULL);
 
-	quality_refresh();
-	theme_register_refresh(quality_refresh);
+	settings_refresh();
+	theme_register_refresh(settings_refresh);
 	switcher_attach_back_gesture(tsettings_screen);
 }
 

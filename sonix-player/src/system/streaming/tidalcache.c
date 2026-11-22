@@ -21,6 +21,7 @@
 #include "src/system/net/http.h"
 #include "src/system/library/mp4flac.h"
 #include "src/system/streaming/streamturn.h"
+#include "src/system/core/config.h"
 #include "src/system/core/utils.h"
 #include "src/system/core/lang.h"
 
@@ -46,6 +47,15 @@
 
 static char cache_dir[512];
 
+// The configured SD cache ceiling, in MiB. `0` means unlimited. Read from
+// `[tidal] cache_max_mb` in device_config.ini and changed from the Tidal
+// settings page. Kept beside cache_dir rather than behind a lock for the same
+// reason cache_dir itself is a plain static: the ceiling is written on the GUI
+// thread and read on the download thread, and a torn int read is not a real
+// failure on this target.
+static int cache_max_mb = TIDALCACHE_DEFAULT_MAX_MB;
+static long long custom_max_bytes = -1; // >= 0 overrides cache_max_mb (tests)
+
 static __thread char last_error[192];
 
 const char *tidalcache_last_error(void) { return last_error; }
@@ -62,8 +72,22 @@ static void register_abandon_once(void) {
 	}
 }
 
+static int normalize_max_mb(int mb) {
+	if (mb <= 0) {
+		return 0;
+	}
+	if (mb < TIDALCACHE_MIN_MAX_MB) {
+		return TIDALCACHE_MIN_MAX_MB;
+	}
+	if (mb > TIDALCACHE_MAX_MAX_MB) {
+		return TIDALCACHE_MAX_MAX_MB;
+	}
+	return mb;
+}
+
 void tidalcache_set_root(const char *sd_root) {
 	register_abandon_once();
+	cache_max_mb = normalize_max_mb((int)config_get_int("tidal", "cache_max_mb", TIDALCACHE_DEFAULT_MAX_MB));
 	if (!sd_root || !*sd_root) {
 		cache_dir[0] = '\0';
 		return;
@@ -77,6 +101,25 @@ void tidalcache_set_root(const char *sd_root) {
 }
 
 bool tidalcache_ready(void) { return cache_dir[0] != '\0'; }
+
+int tidalcache_get_max_mb(void) { return cache_max_mb; }
+
+void tidalcache_set_max_mb(int max_mb) {
+	int norm = normalize_max_mb(max_mb);
+	cache_max_mb = norm;
+	custom_max_bytes = -1;
+	config_set_int("tidal", "cache_max_mb", norm);
+	config_save();
+}
+
+long long tidalcache_get_max_bytes(void) {
+	if (custom_max_bytes >= 0) {
+		return custom_max_bytes;
+	}
+	return (long long)cache_max_mb * 1024LL * 1024LL;
+}
+
+void tidalcache_set_max_bytes(long long max_bytes) { custom_max_bytes = max_bytes; }
 
 // The extension from the MIME type. The decoder picks by extension: nothing
 // will open a FLAC called .bin.
@@ -215,12 +258,12 @@ static bool ensure_dir(void) {
 
 typedef struct {
 	char name[64];
-	long size;
-	long atime; // last access: what tells which tracks are still listened to
+	long long size; // 64-bit: a single file is small, but the running total is not
+	long atime;     // last access: what tells which tracks are still listened to
 } entry_t;
 
-static int scan(entry_t *out, int max, long *total_out) {
-	long total = 0;
+static int scan(entry_t *out, int max, long long *total_out) {
+	long long total = 0;
 	int count = 0;
 
 	DIR *d = opendir(cache_dir);
@@ -261,7 +304,7 @@ static int scan(entry_t *out, int max, long *total_out) {
 		}
 		if (out && count < max && strlen(e->d_name) < sizeof(out[0].name)) {
 			snprintf(out[count].name, sizeof(out[count].name), "%.63s", e->d_name);
-			out[count].size = (long)st.st_size;
+			out[count].size = (long long)st.st_size;
 			out[count].atime = (long)st.st_atime;
 			count++;
 		}
@@ -274,11 +317,11 @@ static int scan(entry_t *out, int max, long *total_out) {
 	return count;
 }
 
-long tidalcache_bytes(void) {
+long long tidalcache_bytes(void) {
 	if (!tidalcache_ready()) {
 		return 0;
 	}
-	long total = 0;
+	long long total = 0;
 	scan(NULL, 0, &total);
 	return total;
 }
@@ -305,15 +348,23 @@ static bool cache_has_room(long keep_room_for) {
 	uint64_t available;
 	if (!cache_free_bytes(&available)) return true; // no filesystem report: retain the existing cache policy
 	uint64_t required = keep_room_for > 0 ? (uint64_t)keep_room_for : 0;
-	// Leave some blocks for directory entries, the marker, and filesystem
-	// bookkeeping. DASH also passes its one-segment staging allowance here.
-	return available >= required + 64 * 1024;
+	// Always keep a floor of free card space, as the SoundCloud and Jellyfin
+	// caches do. With a bounded ceiling the byte cap is what stops the cache,
+	// and this is the slack for directory entries, the marker and filesystem
+	// bookkeeping (DASH also passes its one-segment staging allowance here);
+	// with the ceiling unlimited this floor is the only thing that stops the
+	// cache filling the card to the last block.
+	return available >= required + (uint64_t)TIDALCACHE_MIN_FREE;
 }
 
-static bool cache_within_limit(long total, long keep_room_for) {
+static bool cache_within_limit(long long total, long keep_room_for) {
+	long long cap = tidalcache_get_max_bytes();
+	if (cap <= 0) {
+		return true; // unlimited: only the free-space floor of cache_has_room applies
+	}
 	uint64_t used = total > 0 ? (uint64_t)total : 0;
 	uint64_t reserve = keep_room_for > 0 ? (uint64_t)keep_room_for : 0;
-	return used + reserve <= (uint64_t)TIDALCACHE_MAX_BYTES;
+	return used + reserve <= (uint64_t)cap;
 }
 
 static bool prune(long keep_room_for) {
@@ -325,7 +376,7 @@ static bool prune(long keep_room_for) {
 		return cache_has_room(keep_room_for); // retain the old cache if there is nothing to prune
 	}
 
-	long total = 0;
+	long long total = 0;
 	int count = scan(entries, PRUNE_MAX_ENTRIES, &total);
 	if (cache_within_limit(total, keep_room_for) && cache_has_room(keep_room_for)) {
 		free(entries);
@@ -366,7 +417,7 @@ static bool prune(long keep_room_for) {
 		snprintf(path, sizeof(path), "%.500s/%.63s", cache_dir, entries[i].name);
 		if (remove(path) == 0) {
 			total -= entries[i].size;
-			printf("tidalcache: removed %s (%ld KB)\n", entries[i].name, entries[i].size / 1024);
+			printf("tidalcache: removed %s (%lld KB)\n", entries[i].name, entries[i].size / 1024);
 		}
 	}
 
