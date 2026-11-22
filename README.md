@@ -198,29 +198,6 @@ Showcase of **OLED** appearance: true black backgrounds with white as the accent
 </table>
 </details>
 
-<a name="custom-theme"></a>
-
-## Custom theme
-
-Make your own palette from the template below. Copy it to **`Themes/custom.ini`** on the microSD card (create `Themes` at the card root), edit the eight `#RRGGBB` values, then open **Settings → Appearance → Custom**. The same template is in the repository at [`sonix-player/examples/custom-theme.ini`](sonix-player/examples/custom-theme.ini); the full guide, including what each key does and how edits take effect, is in [docs/custom-themes.md](docs/custom-themes.md).
-
-```ini
-; Copy this file to Themes/custom.ini in the ROOT of the SD card.
-; Edit each #RRGGBB colour. All eight keys are required; no other keys.
-; Reopen Appearance after editing, then select Custom.
-[theme]
-screen_bg = #1a1b26
-surface = #24283b
-surface_pressed = #2d3554
-panel = #16161e
-cover_bg = #16161e
-text_primary = #c0caf5
-text_secondary = #a9b1d6
-accent = #7aa2f7
-```
-
-Every key in `[theme]` is required. Lines starting with `;` or `#` are comments. Selecting Custom with a missing or invalid file shows an error and keeps the current appearance. See [docs/custom-themes.md](docs/custom-themes.md) for the rest.
-
 ## Contents
 
 - [Target device](#target-device)
@@ -327,6 +304,29 @@ This fork builds on the upstream [Sonix Player](https://github.com/Jepl4r/sonix-
 - **Screen and power**: rounded corners (with a choice of how round), brightness, a screensaver, standby, a low-battery warning, and a battery screen when off.
 
 Local audio decoder inputs include WAV, FLAC, MP3, Ogg Vorbis, Opus, M4A/M4B/MP4, AAC, ALAC, WavPack, APE, AIFF/AIFC, CAF and DSD (DSF/DFF). Streaming services depend on third-party availability and an active account where applicable — see [Streaming: Tidal, Qobuz and credentials](#streaming-tidal-qobuz-and-credentials).
+
+<a name="custom-theme"></a>
+
+## Custom theme
+
+Make your own palette from the template below. Copy it to **`Themes/custom.ini`** on the microSD card (create `Themes` at the card root), edit the eight `#RRGGBB` values, then open **Settings → Appearance → Custom**. The same template is in the repository at [`sonix-player/examples/custom-theme.ini`](sonix-player/examples/custom-theme.ini); the full guide, including what each key does and how edits take effect, is in [docs/custom-themes.md](docs/custom-themes.md).
+
+```ini
+; Copy this file to Themes/custom.ini in the ROOT of the SD card.
+; Edit each #RRGGBB colour. All eight keys are required; no other keys.
+; Reopen Appearance after editing, then select Custom.
+[theme]
+screen_bg = #1a1b26
+surface = #24283b
+surface_pressed = #2d3554
+panel = #16161e
+cover_bg = #16161e
+text_primary = #c0caf5
+text_secondary = #a9b1d6
+accent = #7aa2f7
+```
+
+Every key in `[theme]` is required. Lines starting with `;` or `#` are comments. Selecting Custom with a missing or invalid file shows an error and keeps the current appearance. See [docs/custom-themes.md](docs/custom-themes.md) for the rest.
 
 ## Music pet
 
