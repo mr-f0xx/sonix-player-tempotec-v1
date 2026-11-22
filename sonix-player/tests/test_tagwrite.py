@@ -111,5 +111,119 @@ with tempfile.TemporaryDirectory() as td:
     assert run(flac,0,'0')==1 and run(flac,0,'3/2')==1 and run(flac,1,'')==1
     link=tmp/'link.flac'; link.symlink_to(flac); assert run(link,1,'Rock')==3 and flac.read_bytes()==original
     flac.chmod(0o444); assert run(flac,1,'Rock')==3 and flac.read_bytes()==original
+
+    # --- M4A (MP4 ilst) ---
+    def mbox(typ, payload): return struct.pack('>I', 8+len(payload)) + typ + payload
+    def mdata(payload, flag=1): return mbox(b'data', struct.pack('>II', flag, 0) + payload)
+    def mitem(typ, payload, flag=1): return mbox(typ, mdata(payload, flag))
+    def build_m4a(moov_before=True, with_free=False, genre_gnre=False):
+        ilst = b''.join([mitem(b'\xa9nam', b'Old Title'), mitem(b'\xa9ART', b'Old Artist'),
+            mbox(b'gnre', mdata(struct.pack('>H', 1), 0)) if genre_gnre else mitem(b'\xa9gen', b'Old Genre'),
+            mitem(b'trkn', struct.pack('>HHHH', 0, 3, 9, 0), 0)])
+        meta = mbox(b'meta', b'\x00\x00\x00\x00' + mbox(b'hdlr', b'\x00'*24) + mbox(b'ilst', ilst))
+        udta = mbox(b'udta', meta)
+        ftyp = mbox(b'ftyp', b'M4A \x00\x00\x00\x00M4A ')
+        def moov(stco):
+            stbl = mbox(b'stbl', mbox(b'stco', b'\x00\x00\x00\x00' + struct.pack('>II', 1, stco)))
+            return mbox(b'moov', mbox(b'trak', mbox(b'mdia', mbox(b'minf', stbl))) + udta)
+        mdat = mbox(b'mdat', AUDIO)
+        freeb = mbox(b'free', b'\x00'*200) if with_free else b''
+        if moov_before:
+            off = len(ftyp) + len(moov(0)) + len(freeb) + 8
+            return ftyp + moov(off) + freeb + mdat
+        return ftyp + mdat + moov(len(ftyp) + 8)
+    def parse_m4a(data):
+        idx = data.find(b'ilst'); start = idx - 4; end = start + struct.unpack('>I', data[start:start+4])[0]
+        pos = start + 8; out = {}
+        while pos < end:
+            sz = struct.unpack('>I', data[pos:pos+4])[0]; typ = data[pos+4:pos+8]
+            payload = data[pos+8:pos+sz]; dsz = struct.unpack('>I', payload[0:4])[0]
+            assert payload[4:8] == b'data'
+            out[typ] = (struct.unpack('>I', payload[8:12])[0], payload[16:dsz]); pos += sz
+        return out
+    def m4a_stco_ok(data):
+        mi = data.find(b'mdat'); si = data.find(b'stco')
+        return struct.unpack('>I', data[si+12:si+16])[0] == mi - 4 + 8
+    m4a = tmp/'song.m4a'
+    m4a.write_bytes(build_m4a()); assert run(m4a, 1, 'Jazz') == 0
+    tags = parse_m4a(m4a.read_bytes()); assert tags[b'\xa9gen'][1] == b'Jazz' and tags[b'\xa9nam'][1] == b'Old Title' and AUDIO in m4a.read_bytes() and m4a_stco_ok(m4a.read_bytes())
+    m4a.write_bytes(build_m4a(with_free=True)); size0 = len(m4a.read_bytes()); assert run(m4a, 2, 'A much longer title than before') == 0
+    assert len(m4a.read_bytes()) == size0 and parse_m4a(m4a.read_bytes())[b'\xa9nam'][1] == b'A much longer title than before' and m4a_stco_ok(m4a.read_bytes())
+    m4a.write_bytes(build_m4a()); assert run(m4a, 2, 'A much longer title than before') == 0
+    assert parse_m4a(m4a.read_bytes())[b'\xa9nam'][1] == b'A much longer title than before' and m4a_stco_ok(m4a.read_bytes())
+    m4a.write_bytes(build_m4a(moov_before=False)); assert run(m4a, 3, 'New Artist') == 0 and parse_m4a(m4a.read_bytes())[b'\xa9ART'][1] == b'New Artist'
+    m4a.write_bytes(build_m4a(moov_before=False)); assert run(m4a, 0, '5/12') == 0 and parse_m4a(m4a.read_bytes())[b'trkn'][1] == struct.pack('>HHHH', 0, 5, 12, 0)
+    m4a.write_bytes(build_m4a(moov_before=False)); assert setcover(m4a, jpeg) == 0 and parse_m4a(m4a.read_bytes())[b'covr'] == (13, jpeg)
+    m4a.write_bytes(build_m4a(moov_before=False, genre_gnre=True)); assert run(m4a, 1, 'Rock') == 0
+    tags = parse_m4a(m4a.read_bytes()); assert tags[b'\xa9gen'][1] == b'Rock' and b'gnre' not in tags
+    # An MP4 without ilst is refused unchanged.
+    bare = mbox(b'ftyp', b'M4A \x00\x00\x00\x00M4A ') + mbox(b'moov', mbox(b'mvhd', b'\x00'*100)) + mbox(b'mdat', AUDIO)
+    m4a.write_bytes(bare); original = m4a.read_bytes(); assert run(m4a, 2, 'New') == 2 and m4a.read_bytes() == original
+    # --- Ogg Opus / Vorbis ---
+    import base64 as _b64
+    _crc = []
+    for _i in range(256):
+        _r = _i << 24
+        for _ in range(8): _r = ((_r << 1) ^ 0x04c11db7) & 0xffffffff if _r & 0x80000000 else (_r << 1) & 0xffffffff
+        _crc.append(_r)
+    def ogg_crc(data):
+        c = 0
+        for b in data: c = ((c << 8) & 0xffffffff) ^ _crc[((c >> 24) & 0xff) ^ b]
+        return c
+    def ogg_page(serial, seq, typ, granule, segs, data):
+        h = b'OggS' + bytes([0, typ]) + struct.pack('<Q', granule) + struct.pack('<I', serial) + struct.pack('<I', seq) + b'\x00\x00\x00\x00' + bytes([len(segs)]) + bytes(segs) + data
+        return h[:22] + struct.pack('<I', ogg_crc(h)) + h[26:]
+    def ogg_packets(serial, seq0, typ0, packet):
+        pages = []; off = 0; seq = seq0; first = True
+        while True:
+            left = len(packet) - off; need = left//255 + 1; here = min(need, 255); take = left if here == need else 255*here
+            pages.append(ogg_page(serial, seq, typ0 if first else 1, 0, [255]*(here-1) + [take - 255*(here-1)], packet[off:off+take]))
+            seq += 1; off += take; first = False
+            if off >= len(packet): break
+        return pages, seq
+    def build_opus(comments, serial=0x1234):
+        head = b'OpusHead' + bytes([1, 2]) + struct.pack('<H', 312) + struct.pack('<I', 48000) + struct.pack('<h', 0) + bytes([0])
+        tags = b'OpusTags' + vorbis(comments)
+        pages, seq = ogg_packets(serial, 0, 2, head); more, seq = ogg_packets(serial, seq, 0, tags); pages += more
+        for i in range(2):
+            d = b'AUDIO' + bytes([i])*20; pages.append(ogg_page(serial, seq, 4 if i == 1 else 0, (i+1)*960, [len(d)], d)); seq += 1
+        return b''.join(pages)
+    def parse_opus(data):
+        pos = 0; packets = []; cur = b''; pages = []
+        while pos < len(data):
+            assert data[pos:pos+4] == b'OggS'
+            nseg = data[pos+26]; segs = list(data[pos+27:pos+27+nseg]); dlen = sum(segs)
+            pages.append(data[pos:pos+27+nseg+dlen]); off = 27+nseg
+            for s in segs:
+                cur += data[pos+off:pos+off+s]; off += s
+                if s < 255: packets.append(cur); cur = b''
+            pos += 27+nseg+dlen
+        assert cur == b''
+        return packets, pages
+    opus = tmp/'song.opus'
+    opus.write_bytes(build_opus([b'TITLE=Old', b'GENRE=Old', b'TRACKNUMBER=3'])); assert run(opus, 1, 'Jazz') == 0
+    packets, pages = parse_opus(opus.read_bytes()); assert packets[0].startswith(b'OpusHead') and packets[1].startswith(b'OpusTags') and b'GENRE=Jazz' in fields(packets[1][8:]) and len(packets) == 4
+    opus.write_bytes(build_opus([b'TITLE=Old'])); assert run(opus, 2, 'Nouveau') == 0 and run(opus, 3, 'Artiste') == 0 and run(opus, 0, '4/9') == 0
+    packets, _ = parse_opus(opus.read_bytes()); assert b'TITLE=Nouveau' in fields(packets[1][8:]) and b'ARTIST=Artiste' in fields(packets[1][8:]) and b'TRACKNUMBER=4/9' in fields(packets[1][8:])
+    opus.write_bytes(build_opus([b'TITLE=Song'])); assert setcover(opus, jpeg) == 0
+    packets, _ = parse_opus(opus.read_bytes()); pics = [c for c in fields(packets[1][8:]) if c.startswith(b'METADATA_BLOCK_PICTURE=')]
+    assert len(pics) == 1 and jpeg in _b64.b64decode(pics[0].split(b'=', 1)[1])
+    opus.write_bytes(build_opus([b'TITLE=Song', b'METADATA_BLOCK_PICTURE=' + _b64.b64encode(b'OLD')])); assert setcover(opus, jpeg) == 0
+    packets, _ = parse_opus(opus.read_bytes()); pics = [c for c in fields(packets[1][8:]) if c.startswith(b'METADATA_BLOCK_PICTURE=')]
+    assert len(pics) == 1 and jpeg in _b64.b64decode(pics[0].split(b'=', 1)[1])
+    big = b'\xff\xd8' + b'X'*100000 + b'\xff\xd9'; opus.write_bytes(build_opus([b'TITLE=A'])); assert setcover(opus, big) == 0
+    packets, pages = parse_opus(opus.read_bytes()); assert [struct.unpack('<I', pg[18:22])[0] for pg in pages] == list(range(len(pages)))
+    # Vorbis in Ogg shares the comment writer.
+    vid = b'\x01vorbis' + b'\x00'*23; vtags = b'\x03vorbis' + vorbis([b'TITLE=Old'])
+    pages, seq = ogg_packets(0x9999, 0, 2, vid); more, seq = ogg_packets(0x9999, seq, 0, vtags); pages += more
+    pages.append(ogg_page(0x9999, seq, 4, 960, [50], b'AUDIO'*10))
+    ogg = tmp/'song.ogg'; ogg.write_bytes(b''.join(pages)); assert run(ogg, 2, 'New') == 0
+    packets, _ = parse_opus(ogg.read_bytes()); assert packets[1].startswith(b'\x03vorbis') and b'TITLE=New' in fields(packets[1][7:])
+    # An Ogg with an ID3 prefix is refused unchanged.
+    opus.write_bytes(id3([title])[:10+sync(id3([title])[6:10])] + build_opus([b'TITLE=Old'])); original = opus.read_bytes()
+    assert run(opus, 2, 'New') == 2 and opus.read_bytes() == original
+    # ID3-tagged AAC (ADTS) edits through the ID3 writer.
+    aac = tmp/'song.aac'; aac.write_bytes(id3([title])); assert run(aac, 2, 'New title') == 0
+    frames, audio = parse_id3(aac.read_bytes()); assert (b'TIT2', b'\x03New title') in frames and audio == AUDIO
     assert not list(tmp.glob('*.sonix-*'))
 print('tag writer tests passed')
