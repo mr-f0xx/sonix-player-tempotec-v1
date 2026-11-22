@@ -68,6 +68,14 @@ static void init_fonts(void) {
 
 /* ---- the snapshot the page is drawn from --------------------------------- */
 
+// The pitch spotifypage.c scrolls the list by, mirrored here: ROW_HEIGHT is
+// bp_pick(56, 100), ROW_GAP is bp_pick(4, 8). It is a copy on purpose -- the
+// assertion is that the page's rows still match it, and a shared constant
+// would pass even if the page drifted.
+#define ROW_HEIGHT_TEST bp_pick(56, 100)
+#define ROW_GAP_TEST bp_pick(4, 8)
+#define ROW_PITCH_TEST (ROW_HEIGHT_TEST + ROW_GAP_TEST)
+
 static spotify_status_t g_status;
 static unsigned g_serial;
 static int g_wifi_state = 3; /* WIFI_STATE_CONNECTED */
@@ -940,6 +948,40 @@ int main(int argc, char **argv) {
 	assert(find_clickable_with_label(list_screen, "Blue Hour") != NULL);
 	assert(find_clickable_with_label(list_screen, "Paper Lanterns") != NULL);
 	assert_screen_no_overlaps(list_screen, "liked", "English");
+
+	// The rows are content-sized -- title over subtitle, in a column -- but
+	// the list finds the row under a finger by dividing the scroll offset by
+	// ROW_PITCH. That is only true while no row is taller than the pitch: a
+	// taller row pushes every row below it a little further from where the
+	// scroll thinks it is, and the error accumulates down the page. So a row
+	// may be shorter than the pitch, never taller.
+	for (int i = 0; i < 3; i++) {
+		lv_obj_t *rr = spotify_list_row_for_test(i);
+		assert(rr != NULL);
+		if (lv_obj_is_hidden(rr)) {
+			continue;
+		}
+		lv_area_t ra;
+		lv_obj_get_coords(rr, &ra);
+		int h = (int)(ra.y2 - ra.y1 + 1);
+		if (h > ROW_PITCH_TEST) {
+			fprintf(stderr, "[English] list row %d is %dpx tall, past the %dpx pitch the list scrolls by\n", i, h,
+					ROW_PITCH_TEST);
+			assert(!"a row is taller than the pitch the list scrolls by");
+		}
+		// Both lines have to be inside the card: the restyle put them in a
+		// rising column, and a column that overflows would clip the subtitle.
+		lv_obj_t *ttl = lv_obj_get_child(lv_obj_get_child(rr, 1), 0);
+		if (ttl) {
+			lv_area_t ta;
+			lv_obj_get_coords(ttl, &ta);
+			if (ta.y2 > ra.y2 + 1) {
+				fprintf(stderr, "[English] row %d title ends at y=%d, past the card at y=%d\n", i, (int)ta.y2,
+						(int)ra.y2);
+				assert(!"row title overflows its card");
+			}
+		}
+	}
 
 	int sheets_before = open_sheets;
 	int stops_before = g_audio_stops;

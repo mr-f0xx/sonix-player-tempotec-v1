@@ -33,6 +33,9 @@ bool spotifypage_open_playlist(const char *playlist_id, const char *title);
 // top of a tile -- states the test never looked at, because it only ever asked
 // whether the captions existed. These hand it the objects to measure.
 lv_obj_t *spotify_home_grid_for_test(void);
+// One of the list page's rows. The rows are content-sized flex containers, and
+// the list scrolls by a fixed pitch, so the test measures a row against that.
+lv_obj_t *spotify_list_row_for_test(int index);
 lv_obj_t *spotify_home_demo_for_test(void);
 lv_obj_t *spotify_home_note_for_test(void);
 

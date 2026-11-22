@@ -50,6 +50,12 @@
 #define ROW_HEIGHT bp_pick(56, 100)
 #define ROW_GAP bp_pick(4, 8)
 #define ROW_PITCH (ROW_HEIGHT + ROW_GAP)
+// The text column inside a row: a title line, a gap, a subtitle line. The row
+// is content-sized so the two lines cannot collide, and this is how tall they
+// come to, from the same fonts the rows are built with -- see row_text_h().
+// It is only ever used to check the row against ROW_PITCH, because the list
+// scrolls by ROW_PITCH for every row: a row taller than the pitch would drift
+// a little further out of place with every row below it.
 #define PAGE_TRACKS 64
 
 typedef struct {
@@ -514,33 +520,67 @@ static void draw_playlists(const result_t *r) {
 
 	for (int i = 0; i < r->list_count; i++) {
 		const spotify_list_t *pl = &r->lists[i];
+		// The same card the tracks use: a themed row with a pressed state,
+		// a leading icon and a column of two lines. A playlist has no track
+		// number to show, so the leading slot is the icon and stays put.
 		lv_obj_t *row = lv_obj_create(playlists_body);
 		lv_obj_add_style(row, &theme_style_card, 0);
-		lv_obj_set_size(row, lv_pct(100), ROW_HEIGHT);
-		lv_obj_set_style_pad_all(row, 0, 0);
-		lv_obj_set_style_pad_hor(row, compact() ? 10 : 16, 0);
+		lv_obj_add_style(row, &theme_style_card_pressed, LV_STATE_PRESSED);
+		lv_obj_set_width(row, lv_pct(100));
+		lv_obj_set_height(row, LV_SIZE_CONTENT);
+		lv_obj_set_style_min_height(row, ROW_HEIGHT, 0);
+		lv_obj_set_style_pad_ver(row, compact() ? 7 : 12, 0);
+		lv_obj_set_style_pad_hor(row, compact() ? 8 : 16, 0);
+		lv_obj_set_style_pad_column(row, compact() ? 8 : 12, 0);
 		lv_obj_set_style_radius(row, bp_tile_radius(), 0);
+		lv_obj_set_style_shadow_width(row, 0, 0);
 		lv_obj_set_scrollable(row, false);
 		// lv_obj_create() makes a container, and a container is not clickable.
 		// A row that answers no tap is a row that cannot be played.
 		lv_obj_set_clickable(row, true);
+		lv_obj_set_event_bubble(row, true);
+		lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
+		lv_obj_set_flex_align(row, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 
-		lv_obj_t *name = lv_label_create(row);
+		lv_obj_t *icon = lv_image_create(row);
+		lv_image_set_src(icon, &icon_play);
+		lv_obj_add_style(icon, &theme_style_icon, 0);
+		lv_obj_set_style_image_recolor(icon, theme()->accent, 0);
+		lv_obj_set_style_image_recolor_opa(icon, LV_OPA_COVER, 0);
+		lv_obj_set_clickable(icon, false);
+		lv_obj_set_scrollable(icon, false);
+
+		lv_obj_t *col = lv_obj_create(row);
+		lv_obj_remove_style_all(col);
+		lv_obj_set_flex_grow(col, 1);
+		lv_obj_set_height(col, LV_SIZE_CONTENT);
+		lv_obj_set_flex_flow(col, LV_FLEX_FLOW_COLUMN);
+		lv_obj_set_style_pad_row(col, 2, 0);
+		lv_obj_set_clickable(col, false);
+		lv_obj_set_scrollable(col, false);
+		lv_obj_set_event_bubble(col, true);
+
+		const lv_font_t *pl_tf = compact() ? &font_ui_18 : &font_ui_22;
+		const lv_font_t *pl_sf = compact() ? &font_ui_14 : &font_ui_18;
+
+		lv_obj_t *name = lv_label_create(col);
 		lv_obj_add_style(name, &theme_style_text, 0);
-		lv_obj_set_style_text_font(name, &font_ui_16, 0);
+		lv_obj_set_style_text_font(name, pl_tf, 0);
 		lv_obj_set_width(name, lv_pct(100));
+		lv_obj_set_height(name, lv_font_get_line_height(pl_tf));
 		lv_label_set_long_mode(name, LV_LABEL_LONG_DOT);
 		lv_label_set_text(name, pl->name[0] ? pl->name : pl->id);
-		lv_obj_align(name, LV_ALIGN_TOP_LEFT, 0, compact() ? 7 : 14);
+		lv_obj_set_clickable(name, false);
 
-		lv_obj_t *sub = lv_label_create(row);
+		lv_obj_t *sub = lv_label_create(col);
 		lv_obj_add_style(sub, &theme_style_text_dim, 0);
-		lv_obj_set_style_text_font(sub, &font_ui_14, 0);
+		lv_obj_set_style_text_font(sub, pl_sf, 0);
 		lv_obj_set_width(sub, lv_pct(100));
+		lv_obj_set_height(sub, lv_font_get_line_height(pl_sf));
 		lv_label_set_long_mode(sub, LV_LABEL_LONG_DOT);
 		lv_label_set_text_fmt(sub, "%s%s%d %s", pl->owner[0] ? pl->owner : "", pl->owner[0] ? " - " : "", pl->total,
 							  tr("spotify_tracks"));
-		lv_obj_align(sub, LV_ALIGN_TOP_LEFT, 0, compact() ? 27 : 44);
+		lv_obj_set_clickable(sub, false);
 
 		// The id has to outlive this function: one small copy per row, freed
 		// with the row.
@@ -959,42 +999,85 @@ static void build_list(gui_config_t *cfg) {
 	lv_label_set_text(list_count, "");
 	lv_obj_set_hidden(list_count, true);
 
+	// The rows are built like the SoundCloud list's (make_list_entry_row): a
+	// card, a leading icon, then a column of title over subtitle. Before this
+	// they were absolutely positioned labels on a fixed-height card, which on
+	// a long title put an ellipsis at one width and clipped at another, and
+	// which had no pressed state at all -- the row simply did not move under
+	// a finger. A flex row lets the title own the space the icon leaves, so
+	// the ellipsis lands in the same place every time.
 	for (int i = 0; i < ROW_POOL; i++) {
 		list_row_t *r = &rows[i];
 		r->row = lv_obj_create(list_body);
 		lv_obj_add_style(r->row, &theme_style_card, 0);
-		lv_obj_set_size(r->row, lv_pct(100), ROW_HEIGHT);
-		lv_obj_set_style_pad_all(r->row, 0, 0);
-		lv_obj_set_style_pad_hor(r->row, compact() ? 10 : 16, 0);
+		lv_obj_add_style(r->row, &theme_style_card_pressed, LV_STATE_PRESSED);
+		lv_obj_set_width(r->row, lv_pct(100));
+		lv_obj_set_height(r->row, LV_SIZE_CONTENT);
+		lv_obj_set_style_min_height(r->row, ROW_HEIGHT, 0);
+		lv_obj_set_style_pad_ver(r->row, compact() ? 7 : 12, 0);
+		lv_obj_set_style_pad_hor(r->row, compact() ? 8 : 16, 0);
+		lv_obj_set_style_pad_column(r->row, compact() ? 8 : 12, 0);
 		lv_obj_set_style_radius(r->row, bp_tile_radius(), 0);
+		lv_obj_set_style_shadow_width(r->row, 0, 0);
 		lv_obj_set_scrollable(r->row, false);
 		lv_obj_set_clickable(r->row, true);
+		lv_obj_set_event_bubble(r->row, true);
+		lv_obj_set_flex_flow(r->row, LV_FLEX_FLOW_ROW);
+		lv_obj_set_flex_align(r->row, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 
-		r->num = lv_label_create(r->row);
+		// The number and the play mark share one slot: a track is either
+		// "third in this list" or "the one you are hearing", never both.
+		lv_obj_t *slot = lv_obj_create(r->row);
+		lv_obj_remove_style_all(slot);
+		lv_obj_set_size(slot, compact() ? 18 : 24, compact() ? 18 : 24);
+		lv_obj_set_style_bg_opa(slot, 0, 0);
+		lv_obj_set_clickable(slot, false);
+		lv_obj_set_scrollable(slot, false);
+		lv_obj_set_event_bubble(slot, true);
+
+		r->num = lv_label_create(slot);
 		lv_obj_add_style(r->num, &theme_style_text_dim, 0);
 		lv_obj_set_style_text_font(r->num, &font_ui_14, 0);
-		lv_obj_align(r->num, LV_ALIGN_LEFT_MID, 0, 0);
+		lv_obj_center(r->num);
 
-		r->mark = lv_image_create(r->row);
+		r->mark = lv_image_create(slot);
 		lv_image_set_src(r->mark, &icon_play);
-		lv_obj_align(r->mark, LV_ALIGN_LEFT_MID, 0, 0);
+		lv_obj_add_style(r->mark, &theme_style_icon, 0);
+		lv_obj_center(r->mark);
 		lv_obj_set_style_image_recolor(r->mark, theme()->accent, 0);
 		lv_obj_set_style_image_recolor_opa(r->mark, LV_OPA_COVER, 0);
 		lv_obj_set_hidden(r->mark, true);
 
-		r->title = lv_label_create(r->row);
-		lv_obj_add_style(r->title, &theme_style_text, 0);
-		lv_obj_set_style_text_font(r->title, &font_ui_16, 0);
-		lv_obj_set_width(r->title, lv_pct(100) - (compact() ? 26 : 36));
-		lv_label_set_long_mode(r->title, LV_LABEL_LONG_DOT);
-		lv_obj_align(r->title, LV_ALIGN_TOP_LEFT, compact() ? 22 : 30, compact() ? 7 : 14);
+		// The column takes whatever the icon leaves, so the two text lines
+		// are the same width and end their ellipsis at the same x.
+		lv_obj_t *col = lv_obj_create(r->row);
+		lv_obj_remove_style_all(col);
+		lv_obj_set_flex_grow(col, 1);
+		lv_obj_set_height(col, LV_SIZE_CONTENT);
+		lv_obj_set_flex_flow(col, LV_FLEX_FLOW_COLUMN);
+		lv_obj_set_style_pad_row(col, 2, 0);
+		lv_obj_set_clickable(col, false);
+		lv_obj_set_scrollable(col, false);
+		lv_obj_set_event_bubble(col, true);
 
-		r->sub = lv_label_create(r->row);
+		const lv_font_t *tf = compact() ? &font_ui_18 : &font_ui_22;
+		const lv_font_t *sf = compact() ? &font_ui_14 : &font_ui_18;
+
+		r->title = lv_label_create(col);
+		lv_obj_add_style(r->title, &theme_style_text, 0);
+		lv_obj_set_style_text_font(r->title, tf, 0);
+		lv_obj_set_width(r->title, lv_pct(100));
+		lv_obj_set_height(r->title, lv_font_get_line_height(tf));
+		lv_label_set_long_mode(r->title, LV_LABEL_LONG_DOT);
+		lv_obj_set_clickable(r->title, false);
+
+		r->sub = lv_label_create(col);
 		lv_obj_add_style(r->sub, &theme_style_text_dim, 0);
-		lv_obj_set_style_text_font(r->sub, &font_ui_14, 0);
-		lv_obj_set_width(r->sub, lv_pct(100) - (compact() ? 26 : 36));
+		lv_obj_set_style_text_font(r->sub, sf, 0);
+		lv_obj_set_width(r->sub, lv_pct(100));
+		lv_obj_set_height(r->sub, lv_font_get_line_height(sf));
 		lv_label_set_long_mode(r->sub, LV_LABEL_LONG_DOT);
-		lv_obj_align(r->sub, LV_ALIGN_TOP_LEFT, compact() ? 22 : 30, compact() ? 27 : 44);
+		lv_obj_set_clickable(r->sub, false);
 
 		lv_obj_add_event_cb(r->row, row_click_cb, LV_EVENT_CLICKED, r);
 		lv_obj_set_hidden(r->row, true);
@@ -1344,6 +1427,16 @@ static void build_account(gui_config_t *cfg) {
 
 // See spotifypage.h: the page test measures these instead of trusting that a
 // label exists somewhere.
+// A row of the list page, for the test: the restyle made the row a flex
+// container whose height comes from its text, so the interesting question is
+// whether two lines still fit the pitch the list scrolls by.
+lv_obj_t *spotify_list_row_for_test(int index) {
+	if (index < 0 || index >= ROW_POOL) {
+		return NULL;
+	}
+	return rows[index].row;
+}
+
 lv_obj_t *spotify_home_grid_for_test(void) { return home_grid; }
 lv_obj_t *spotify_home_demo_for_test(void) { return home_demo; }
 lv_obj_t *spotify_home_note_for_test(void) { return home_account_line; }

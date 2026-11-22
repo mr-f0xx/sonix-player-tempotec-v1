@@ -242,23 +242,24 @@ struct Opened {
 async fn open(cfg: &crate::Config) -> Result<Opened, Box<dyn std::error::Error>> {
     let cache = Cache::new(Some(&cfg.cache), None, None, None).ok();
 
-    let session_config = SessionConfig {
-        device_name: cfg.device_name.clone(),
-        ..Default::default()
-    };
+    // SessionConfig is the session's own settings, not the Connect device's:
+    // device_name belongs to spirc, which this daemon does not run. Nothing in
+    // this config needs changing from the default, so it stays default.
+    let session_config = SessionConfig::default();
 
     let session = Session::new(session_config, cache.clone());
 
     // The cache holds the credentials a one-time `librespot --cache-tool login`
     // saved. There is no password in this program and no sign-in on the player.
     let username = std::env::var("SPOTIFYD_USERNAME").unwrap_or_default();
-    let session = if username.is_empty() {
-        session
-    } else {
+    if !username.is_empty() {
+        // connect() fills the session in place and stores what it learned, so
+        // there is no new session to bind -- the old binding was the bug, not
+        // a missing assignment.
         session
             .connect(Credentials::with_password(&username, ""), true)
-            .await?
-    };
+            .await?;
+    }
 
     let account = session.username();
 
@@ -278,7 +279,7 @@ async fn open(cfg: &crate::Config) -> Result<Opened, Box<dyn std::error::Error>>
             ..Default::default()
         },
         session.clone(),
-        Box::new(NoOpVolume::default()),
+        Box::new(NoOpVolume),
         move || {
             Box::new(SocketSink {
                 shared: sink_shared.clone(),
@@ -293,7 +294,7 @@ async fn open(cfg: &crate::Config) -> Result<Opened, Box<dyn std::error::Error>>
         let shared = shared.clone();
         let mut events = player.get_player_event_channel();
         std::thread::spawn(move || loop {
-            match events.recv() {
+            match events.blocking_recv() {
                 Ok(PlayerEvent::Playing { .. }) => {
                     shared.state.store(3, Ordering::SeqCst);
                     shared.playing.store(true, Ordering::SeqCst);
