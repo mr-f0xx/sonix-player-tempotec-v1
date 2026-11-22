@@ -4000,12 +4000,17 @@ static void build_search_page(gui_config_t *cfg) {
 // ---------------------------------------------------------------------------
 
 static lv_obj_t *login_hint;
-// The login QR. 200 px on a 480 px screen: large enough for a camera to read
-// it from half a metre, small enough to leave room for the written code below.
-#define LOGIN_QR_SIZE 200
+// The login QR. Sized to the panel, not to a phantom 480-px screen: 200 px on
+// the large display, where there is room for it, and a smaller target on the
+// 240-px TempoTec V1. A 200-px code with its quiet zone alone fills the V1's
+// 320-px height and runs straight into the code label, the spinner and the
+// privacy note below it.
+#define LOGIN_QR_SIZE_LARGE 200
+#define LOGIN_QR_SIZE_V1 44
 // The quiet zone, the white border around it. The standard asks for four
 // modules; here it is a fixed border, which works better at this size.
-#define LOGIN_QR_QUIET 10
+#define LOGIN_QR_QUIET_LARGE 10
+#define LOGIN_QR_QUIET_V1 5
 
 static lv_obj_t *login_qr;
 static lv_obj_t *login_url;
@@ -4203,16 +4208,24 @@ static void build_login_page(gui_config_t *cfg) {
 	settingsrow_title(login_screen, cfg, "tidal_sign_in_to_tidal");
 	int top = settingsrow_content_top(cfg);
 
+	// The QR is sized to the panel: the V1's 240x320 leaves room for a
+	// 44-px code with its quiet zone, the written code and the spinner below
+	// it, and the privacy note at the foot of the page -- all of which a
+	// 200-px code (sized for a 480-px screen) would run into.
+	bool compact = cfg->screen_width < 320;
+	int qr_size = compact ? LOGIN_QR_SIZE_V1 : LOGIN_QR_SIZE_LARGE;
+	int qr_quiet = compact ? LOGIN_QR_QUIET_V1 : LOGIN_QR_QUIET_LARGE;
+
 	// A single centred column: there is nothing to touch here except the retry
 	// button, and everything on it has to be readable from a distance with a
-	// phone in hand.
+	// phone in hand. The row gap is tight so the stack fits the small panel.
 	lv_obj_t *box = lv_obj_create(login_screen);
 	lv_obj_set_size(box, cfg->screen_width - 2 * cfg->padding, LV_SIZE_CONTENT);
-	lv_obj_align(box, LV_ALIGN_TOP_MID, 0, top + 20);
+	lv_obj_align(box, LV_ALIGN_TOP_MID, 0, top);
 	lv_obj_set_style_bg_opa(box, 0, 0);
 	lv_obj_set_style_border_width(box, 0, 0);
 	lv_obj_set_style_pad_all(box, 0, 0);
-	lv_obj_set_style_pad_row(box, 22, 0);
+	lv_obj_set_style_pad_row(box, compact ? 6 : 22, 0);
 	lv_obj_set_scrollable(box, false);
 	lv_obj_set_flex_flow(box, LV_FLEX_FLOW_COLUMN);
 	lv_obj_set_flex_align(box, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
@@ -4222,7 +4235,7 @@ static void build_login_page(gui_config_t *cfg) {
 	lv_obj_set_width(login_hint, lv_pct(100));
 	lv_obj_set_style_text_align(login_hint, LV_TEXT_ALIGN_CENTER, 0);
 	lv_obj_add_style(login_hint, &theme_style_text, 0);
-	lv_obj_set_style_text_font(login_hint, &font_ui_20, 0);
+	lv_obj_set_style_text_font(login_hint, compact ? &font_ui_14 : &font_ui_20, 0);
 	lv_label_set_text(login_hint, "");
 
 	// The QR, which is the URL. It encodes verificationUriComplete, the one
@@ -4235,11 +4248,11 @@ static void build_login_page(gui_config_t *cfg) {
 	// zone is part of the standard, and without it many readers will not lock
 	// onto the code.
 	login_qr = lv_qrcode_create(box);
-	lv_qrcode_set_size(login_qr, LOGIN_QR_SIZE);
+	lv_qrcode_set_size(login_qr, qr_size);
 	lv_qrcode_set_dark_color(login_qr, lv_color_black());
 	lv_qrcode_set_light_color(login_qr, lv_color_white());
 	lv_obj_set_style_border_color(login_qr, lv_color_white(), 0);
-	lv_obj_set_style_border_width(login_qr, LOGIN_QR_QUIET, 0);
+	lv_obj_set_style_border_width(login_qr, qr_quiet, 0);
 	lv_obj_set_style_bg_color(login_qr, lv_color_white(), 0);
 	lv_obj_set_style_bg_opa(login_qr, LV_OPA_COVER, 0);
 
@@ -4250,7 +4263,7 @@ static void build_login_page(gui_config_t *cfg) {
 	lv_label_set_long_mode(login_url, LV_LABEL_LONG_WRAP);
 	lv_obj_set_width(login_url, lv_pct(100));
 	lv_obj_set_style_text_align(login_url, LV_TEXT_ALIGN_CENTER, 0);
-	lv_obj_set_style_text_font(login_url, &font_ui_26, 0);
+	lv_obj_set_style_text_font(login_url, compact ? &font_ui_16 : &font_ui_26, 0);
 	lv_label_set_text(login_url, "");
 
 	// The code below, bold and on one line: the fallback for anyone who cannot
@@ -4260,23 +4273,23 @@ static void build_login_page(gui_config_t *cfg) {
 	// being confused while copying.
 	login_code = lv_label_create(box);
 	lv_label_set_long_mode(login_code, LV_LABEL_LONG_CLIP);
-	lv_obj_set_style_text_font(login_code, &font_ui_36_bold, 0);
-	lv_obj_set_style_text_letter_space(login_code, 5, 0);
+	lv_obj_set_style_text_font(login_code, compact ? &font_ui_24_bold : &font_ui_36_bold, 0);
+	lv_obj_set_style_text_letter_space(login_code, compact ? 3 : 5, 0);
 	lv_label_set_text(login_code, "");
 
-	login_spin = spinner_create(box, &icon_loader_big);
+	login_spin = spinner_create(box, compact ? &icon_loader_small : &icon_loader_big);
 
 	login_message = lv_label_create(box);
 	lv_label_set_long_mode(login_message, LV_LABEL_LONG_WRAP);
 	lv_obj_set_width(login_message, lv_pct(100));
 	lv_obj_set_style_text_align(login_message, LV_TEXT_ALIGN_CENTER, 0);
 	lv_obj_add_style(login_message, &theme_style_text_dim, 0);
-	lv_obj_set_style_text_font(login_message, &font_ui_20, 0);
+	lv_obj_set_style_text_font(login_message, compact ? &font_ui_14 : &font_ui_20, 0);
 	lv_label_set_text(login_message, "");
 
 	login_retry = lv_btn_create(box);
-	lv_obj_set_size(login_retry, LV_SIZE_CONTENT, 56);
-	lv_obj_set_style_pad_hor(login_retry, 22, 0);
+	lv_obj_set_size(login_retry, LV_SIZE_CONTENT, compact ? 44 : 56);
+	lv_obj_set_style_pad_hor(login_retry, compact ? 16 : 22, 0);
 	lv_obj_set_style_radius(login_retry, LV_RADIUS_CIRCLE, 0);
 	lv_obj_set_style_shadow_width(login_retry, 0, 0);
 	lv_obj_set_style_border_width(login_retry, 0, 0);
@@ -4284,7 +4297,7 @@ static void build_login_page(gui_config_t *cfg) {
 
 	lv_obj_t *retry_label = lv_label_create(login_retry);
 	lv_label_set_text(retry_label, tr("tidal_ask_for_a_new_code"));
-	lv_obj_set_style_text_font(retry_label, &font_ui_20, 0);
+	lv_obj_set_style_text_font(retry_label, compact ? &font_ui_14 : &font_ui_20, 0);
 	lv_obj_center(retry_label);
 
 	login_set_visible(login_url, false);
@@ -4296,10 +4309,10 @@ static void build_login_page(gui_config_t *cfg) {
 	lv_obj_t *note = lv_label_create(login_screen);
 	lv_label_set_long_mode(note, LV_LABEL_LONG_WRAP);
 	lv_obj_set_width(note, cfg->screen_width - 2 * cfg->padding);
-	lv_obj_align(note, LV_ALIGN_BOTTOM_MID, 0, -cfg->padding - 10);
+	lv_obj_align(note, LV_ALIGN_BOTTOM_MID, 0, -cfg->padding - (compact ? 4 : 10));
 	lv_obj_set_style_text_align(note, LV_TEXT_ALIGN_CENTER, 0);
 	lv_obj_add_style(note, &theme_style_text_dim, 0);
-	lv_obj_set_style_text_font(note, &font_ui_18, 0);
+	lv_obj_set_style_text_font(note, compact ? &font_ui_14 : &font_ui_18, 0);
 	lv_label_set_text(note, tr("tidal_login_privacy_note"));
 
 	paint_login();
