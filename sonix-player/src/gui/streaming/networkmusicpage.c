@@ -14,6 +14,7 @@
 #include "src/system/core/lang.h"
 #include "src/system/device/system.h"
 #include "src/system/device/usb.h"
+#include "src/system/net/networkcredentials.h"
 #include "src/system/net/wifi.h"
 #include "src/system/streaming/networkmusic.h"
 
@@ -31,11 +32,13 @@ typedef struct {
 } profile_t;
 
 static profile_t profiles[2];
+static bool remember_draft[2];
 static share_kind_t kind;
 static gui_config_t *cfg;
 lv_obj_t *networkmusic_screen;
 static lv_obj_t *settings, *browser, *edit;
 static lv_obj_t *settings_title, *address_value, *username_value, *password_value;
+static lv_obj_t *remember_switch, *password_note;
 static lv_obj_t *edit_title, *edit_field;
 static keyboard_t *keyboard;
 static int editing;
@@ -284,12 +287,32 @@ static void poll(lv_timer_t *timer) {
 
 static const char *const edit_keys[] = {"jellyfin_server_url", "subsonic_username", "password"};
 
+// The toggle and the note under it always describe what will happen on the
+// next Connect.
+static void remember_refresh(void) {
+	bool on = remember_draft[kind];
+	if (remember_switch) {
+		if (on) lv_obj_add_state(remember_switch, LV_STATE_CHECKED);
+		else lv_obj_remove_state(remember_switch, LV_STATE_CHECKED);
+	}
+	if (password_note) {
+		lv_label_set_text(password_note, tr(on ? "The password is saved on the player, unencrypted. Leave both login fields blank for public shares."
+							  : "Passwords are kept until restart. Leave both login fields blank for public shares."));
+	}
+}
+
+static void remember_cb(lv_event_t *e) {
+	remember_draft[kind] = lv_obj_has_state(lv_event_get_target(e), LV_STATE_CHECKED);
+	remember_refresh();
+}
+
 static void refresh_settings(void) {
 	profile_t *profile = &profiles[kind];
 	lv_label_set_text(settings_title, protocol_name(kind));
 	lv_label_set_text(address_value, profile->address[0] ? profile->address : "—");
 	lv_label_set_text(username_value, profile->username[0] ? profile->username : "—");
 	lv_label_set_text(password_value, profile->password[0] ? "••••" : "—");
+	remember_refresh();
 }
 
 static void edit_cb(lv_event_t *e) {
@@ -334,9 +357,20 @@ static void connect_cb(lv_event_t *e) {
 	if (busy()) return;
 	if (!wifi_get_enabled()) { toast_error("Connect to Wi-Fi first."); return; }
 	profile_t *p = &profiles[kind];
+	if (remember_draft[kind] && !p->password[0]) {
+		toast_error(tr("Enter a password before remembering it."));
+		return;
+	}
 	share_server_t next;
 	if (!networkshare_server_init(&next, kind, p->address, p->username, p->password, config_get("network", "ca_bundle", NULL))) {
 		toast_error(error_label(SHARE_BAD_ADDRESS));
+		return;
+	}
+	// Saved before the listing starts: an unreachable server must not silently
+	// drop a password the user explicitly asked the player to keep.
+	char error[192] = "";
+	if (!networkcredentials_apply(kind, p->password, remember_draft[kind], error, sizeof(error))) {
+		toast_error(tr(error[0] ? error : "Could not save or remove the password file."));
 		return;
 	}
 	share_status_t status = networkmusic_list_start(&next, next.root);
@@ -360,6 +394,7 @@ static void build_pages(void) {
 	settingsrow_add(setup, edit_keys[0], &address_value, edit_cb, NULL);
 	settingsrow_add(setup, edit_keys[1], &username_value, edit_cb, (void *)(uintptr_t)1);
 	settingsrow_add(setup, edit_keys[2], &password_value, edit_cb, (void *)(uintptr_t)2);
+	settingsrow_toggle(setup, "Remember password", &remember_switch, remember_cb);
 	if (STREAMING_LAN_PREVIEW_ONLY) {
 		// Keep the reason on the action itself, even when the note below it is off-screen.
 		lv_obj_t *reason;
@@ -370,10 +405,13 @@ static void build_pages(void) {
 		lv_label_set_long_mode(reason, LV_LABEL_LONG_WRAP);
 		lv_label_set_text(reason, tr("Unavailable in browser"));
 		streaming_disable_preview_action(connect, settingsrow_name_label(connect));
+		lv_obj_add_state(remember_switch, LV_STATE_DISABLED);
 	} else {
 		settingsrow_action(setup, "Connect", connect_cb, NULL);
 	}
-	note(setup, "Passwords are kept until restart. Leave both login fields blank for public shares.");
+	password_note = note(setup, remember_draft[kind] ?
+		"The password is saved on the player, unencrypted. Leave both login fields blank for public shares." :
+			"Passwords are kept until restart. Leave both login fields blank for public shares.");
 
 	edit = lv_obj_create(NULL);
 	lv_obj_add_style(edit, &theme_style_screen, 0);
@@ -428,10 +466,12 @@ static void choose_profile(lv_event_t *e) {
 
 void networkmusic_page_init(gui_config_t *config) {
 	cfg = config;
+	networkcredentials_init();
 	for (int i = 0; i < 2; i++) {
 		const char *name = section((share_kind_t)i);
 		snprintf(profiles[i].address, sizeof(profiles[i].address), "%s", config_get(name, "address", ""));
 		snprintf(profiles[i].username, sizeof(profiles[i].username), "%s", config_get(name, "username", ""));
+		networkcredentials_get((share_kind_t)i, profiles[i].password, sizeof(profiles[i].password), &remember_draft[i]);
 	}
 	networkmusic_screen = lv_obj_create(NULL);
 	lv_obj_t *menu = settingsrow_page(networkmusic_screen, cfg, "Network folders");

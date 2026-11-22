@@ -103,6 +103,9 @@ static void check_pages(theme_kind_t theme) {
 		assert(profile != networkmusic_screen && find_label(profile, profiles[i]));
 		assert(find_label(button("Connect"), "Unavailable in browser"));
 		check_disabled("Connect");
+		// Remembering a password makes no sense in the browser either.
+		lv_obj_t *toggle = lv_obj_get_child_by_type(button("Remember password"), 0, &lv_switch_class);
+		assert(toggle && lv_obj_is_disabled(toggle));
 		tap(tr("jellyfin_server_url")); // the real editor still opens
 		lv_obj_t *field = lv_obj_get_child_by_type(lv_screen_active(), 0, &lv_textarea_class);
 		assert(field && !lv_obj_is_disabled(field));

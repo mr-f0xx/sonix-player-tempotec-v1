@@ -255,7 +255,7 @@ This fork builds on the upstream [Sonix Player](https://github.com/Jepl4r/sonix-
 - 🔁 **A-B loop and Now Playing actions** - mark two points in the track menu to repeat a passage on a seekable track; both marks appear on the progress bar. **Back** returns to the previous screen. With **Allow deleting tracks** enabled, **Delete track** removes a local file from microSD after confirmation.
 - 🎤 **Title-only lyrics search** - if LRCLIB finds no match for a local track's title and artist, or the artist tag is missing, search by title alone. Preview the lyrics before saving a match, even if it's by a different artist.
 - 📲 **Wi-Fi folder uploads** - pair a browser with [Wireless → Transfer](docs/wi-fi-transfer.md) by QR or session code on trusted Wi-Fi, then drop whole album folders onto microSD with their paths intact.
-- 🗂️ **WebDAV and FTP downloads** - in [Streaming → Network folders](docs/network-folders.md), browse a server and save a track or the current folder's music to `Music/Network Downloads` on microSD. **Save and play** opens the local file once the download finishes.
+- 🗂️ **WebDAV and FTP downloads** - in [Streaming → Network folders](docs/network-folders.md), browse a server and save a track or the current folder's music to `Music/Network Downloads` on microSD. **Save and play** opens the local file once the download finishes. Optionally, **Remember password** keeps the password across reboots — unencrypted, in a private device-local file — or leaves it off so it stays in memory until restart.
 - 💡 **Smart LED and Stealth mode** - choose Bass Pulse, Energy Glow or Rainbow Breath under [Settings → Power](docs/sgm31324-led-control.md#smart-led-and-stealth-mode). Three red blinks warn at 5% battery; two green blinks confirm a Wi-Fi upload. Stealth keeps the light off even while charging.
 - 🔋 **Battery profiler and charge history** - in [Settings → System → Battery profiler](docs/battery-profiler.md), check voltage and estimated runtime or compare estimated draw against a saved baseline. Charge history shows when the battery reached its target or was unplugged, and how long the player has been on since.
 - 🔌 **Themed charging screen** - the off-state battery screen uses your theme and checks for a connected cable even when the 80% charge limit has paused charging.
@@ -370,7 +370,7 @@ Use trusted Wi-Fi only: the session code controls access, but HTTP traffic is no
 
 ## Download from WebDAV or FTP
 
-On the V1, open **Streaming → Network folders**, choose **WebDAV** or **FTP**, and enter the server's folder URL and login. Browse albums and save a track or the current folder's music directly to microSD, under `Music/Network Downloads`. **Save and play** starts playback once the track is fully saved. See the [Network folders guide](docs/network-folders.md) for supported URLs, certificates, and download limits.
+On the V1, open **Streaming → Network folders**, choose **WebDAV** or **FTP**, and enter the server's folder URL and login. Browse albums and save a track or the current folder's music directly to microSD, under `Music/Network Downloads`. **Save and play** starts playback once the track is fully saved. If you want the password kept across reboots, turn on **Remember password** on the settings page — it is stored **unencrypted** in a private device-local file, so leave it off for a server you do not trust. See the [Network folders guide](docs/network-folders.md) for supported URLs, certificates, and download limits.
 
 ## Install or restore firmware
 
