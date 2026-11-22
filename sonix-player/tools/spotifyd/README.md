@@ -4,7 +4,7 @@ The player's Spotify pages are useless without something to speak for Spotify: t
 V1 cannot decode Spotify's audio stream, and Spotify's Web API has no audio in
 it. This program is that something. It runs on a computer on the same network,
 signs in with **librespot**, browses your library, keeps the queue, and writes
-raw PCM to the player over a UNIX-domain socket — the player's own DAC, volume,
+raw PCM to the player over TCP (or a UNIX socket on a test rig) — the player's own DAC, volume,
 equaliser and output routing stay in charge.
 
 The contract between the two halves is [`PROTOCOL.md`](PROTOCOL.md). Read it
@@ -74,8 +74,10 @@ sudo install -m 755 S99spotifyd /etc/init.d/S99spotifyd
 sudo /etc/init.d/S99spotifyd start
 ```
 
-The daemon creates `/var/run/sonix-spotify.sock` by default. That is the path the
-player looks for; `socket=` in `spotifyd.conf` moves both.
+The daemon listens on TCP 6600 by default and answers player discovery on UDP
+7790, so a player that has never been configured finds it on its own. `socket=`
+in `spotifyd.conf` moves the listening side; a UNIX socket path works there
+instead of `host:port`, which is what the on-device test rig uses.
 
 ### On the V1
 
@@ -113,7 +115,7 @@ why a pause on the V1 survives the daemon carrying on.
 
 | Symptom | What it means |
 | --- | --- |
-| The page says **no daemon** | The socket is not there: is `spotifyd` running, and is `socket=` the path the player looks for? `/var/run/sonix-spotify.sock` is the default on both ends. |
+| The page says **no daemon** | Nothing answered: is `spotifyd` running, and is it on the same Wi-Fi as the player? Both ends default to TCP 6600 and discovery on UDP 7790. A router that blocks broadcasts still lets you type the address: Account ▸ **Find on this network** ▸ long-press. A firewall must allow TCP 6600 and UDP 7790. |
 | `AUTH none` on the page | The daemon has no session: run the `librespot --cache-tool login` step with the cache directory it was configured with. |
 | Tracks list but nothing plays | The account is not Premium, or `bitrate=` asks for a tier it does not have. Try `bitrate=160`. |
 | Audio plays on the computer instead | That is stock `librespot` with its own ALSA backend; `spotifyd` never opens an audio device. Check you started this binary, not `librespot`. |

@@ -26,7 +26,9 @@
 #
 # spotifyd.conf (all optional):
 #
-#   socket=/var/run/sonix-spotify.sock     what the player connects to
+#   socket=0.0.0.0:6600                    what the player connects to: a
+#                                          host:port for TCP, or a path for a
+#                                          UNIX socket on an on-device rig
 #   cache=/usr/data/librespot-cache        librespot credentials and volume
 #   device_name=Sonix Player               what the phone's Spotify app shows
 #   bitrate=320                            librespot's 96/160/320
@@ -36,8 +38,13 @@
 #
 # Transport
 # ---------
-# A UNIX SOCK_STREAM socket at `socket`. Several clients may be connected at
-# once; each connection is a request/response stream:
+# A TCP socket at `socket` when it looks like host:port (the default,
+# 0.0.0.0:6600 -- the daemon is on a computer, the player is on the Wi-Fi), or
+# a UNIX SOCK_STREAM socket when it is a path. The listener side is the same
+# either way, and the player picks its side by the same rule.
+#
+# Several clients may be connected at once; each connection is a
+# request/response stream:
 #
 #   client -> one line,   COMMAND [arg]...    (space-separated, \n-terminated)
 #   daemon -> zero or more data lines         (tab-separated fields)

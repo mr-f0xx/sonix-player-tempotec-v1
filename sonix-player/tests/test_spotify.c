@@ -28,6 +28,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <signal.h>
+#include <arpa/inet.h>
+#include <netinet/in.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/un.h>
@@ -157,6 +159,18 @@ long config_get_int(const char* section, const char* key, long fallback) {
 	(void)key;
 	return fallback;
 }
+
+// Discovery persists what it found with these two; the test's store is a
+// variable, and nothing here reads it back through config_get(), so the
+// fixture sees exactly the daemon the test started.
+static char g_saved_socket[128];
+void config_set(const char* section, const char* key, const char* value) {
+	if (strcmp(section, "spotify") != 0 || strcmp(key, "socket") != 0) {
+		return;
+	}
+	snprintf(g_saved_socket, sizeof(g_saved_socket), "%s", value ? value : "");
+}
+bool config_save(void) { return true; }
 
 // The SD card, for the artwork cache's path: a temporary directory, so a cover
 // download test would not write into the source tree. No URL in these fixtures
@@ -566,23 +580,60 @@ static void* daemon_main(void* arg) {
 	return NULL;
 }
 
+// Paths are UNIX sockets, "host:port" is TCP -- the same rule the client
+// applies, so the fixture and the client agree on what they were handed.
 static bool daemon_start(const char* path) {
 	memset(&g_daemon, 0, sizeof(g_daemon));
 	pthread_mutex_init(&g_daemon.lock, NULL);
 	snprintf(g_daemon.path, sizeof(g_daemon.path), "%s", path);
-	unlink(path);
 
-	struct sockaddr_un addr;
-	memset(&addr, 0, sizeof(addr));
-	addr.sun_family = AF_UNIX;
-	snprintf(addr.sun_path, sizeof(addr.sun_path), "%s", path);
+	const char* colon = strrchr(path, ':');
+	bool tcp = colon != NULL;
+	for (const char* c = colon ? colon + 1 : NULL; tcp && c && *c; c++) {
+		tcp = (*c >= '0' && *c <= '9') ? tcp : false;
+	}
 
-	g_daemon.listen_fd = socket(AF_UNIX, SOCK_STREAM, 0);
-	if (g_daemon.listen_fd < 0 ||
-		bind(g_daemon.listen_fd, (struct sockaddr*)&addr, sizeof(addr)) != 0 ||
-		listen(g_daemon.listen_fd, 8) != 0) {
-		perror("fake daemon: socket");
-		return false;
+	if (tcp) {
+		int port = atoi(colon + 1);
+		struct sockaddr_in addr4;
+		memset(&addr4, 0, sizeof(addr4));
+		addr4.sin_family = AF_INET;
+		addr4.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+		addr4.sin_port = htons((uint16_t)port);
+		g_daemon.listen_fd = socket(AF_INET, SOCK_STREAM, 0);
+		if (g_daemon.listen_fd < 0) {
+			perror("fake daemon: socket");
+			return false;
+		}
+		int one = 1;
+		setsockopt(g_daemon.listen_fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
+		if (bind(g_daemon.listen_fd, (struct sockaddr*)&addr4, sizeof(addr4)) != 0 ||
+			listen(g_daemon.listen_fd, 8) != 0) {
+			perror("fake daemon: tcp bind");
+			close(g_daemon.listen_fd);
+			return false;
+		}
+	} else {
+		unlink(path);
+		struct sockaddr_un addr;
+		memset(&addr, 0, sizeof(addr));
+		addr.sun_family = AF_UNIX;
+		// sun_path is 108 bytes and the daemon's own address limit is larger;
+		// a truncation here would silently bind a different socket than the
+		// client connects to, and the test would fail somewhere confusing.
+		if (strlen(path) >= sizeof(addr.sun_path)) {
+			fprintf(stderr, "test_spotify: daemon path too long for sun_path: %s\n", path);
+			return false;
+		}
+		memcpy(addr.sun_path, path, strlen(path) + 1);
+
+		g_daemon.listen_fd = socket(AF_UNIX, SOCK_STREAM, 0);
+		if (g_daemon.listen_fd < 0 ||
+			bind(g_daemon.listen_fd, (struct sockaddr*)&addr, sizeof(addr)) != 0 ||
+			listen(g_daemon.listen_fd, 8) != 0) {
+			perror("fake daemon: socket");
+			return false;
+		}
 	}
 
 	daemon_reset_state();
@@ -599,7 +650,9 @@ static void daemon_stop(void) {
 	g_daemon.stop = true;
 	pthread_join(g_daemon.thread, NULL);
 	close(g_daemon.listen_fd);
-	unlink(g_daemon.path);
+	if (strchr(g_daemon.path, ':') == NULL) {
+		unlink(g_daemon.path);
+	}
 	pthread_mutex_destroy(&g_daemon.lock);
 }
 
@@ -1112,6 +1165,142 @@ static void test_socket_path(void) {
 }
 
 // ---------------------------------------------------------------------------
+// discovery
+//
+// A fresh device has no address typed in. It broadcasts one small probe and
+// the daemon answers with the port it listens on; the client then talks to the
+// address the answer came from. This is the whole of the setup a person on the
+// sofa should ever see, so it is tested against a real socket rather than
+// mocked: the probe's bytes, the answer's bytes, and the address the client
+// ends up holding all matter.
+// ---------------------------------------------------------------------------
+
+typedef struct {
+	int fd;
+	int port;
+	volatile int answered;
+} udp_answerer_t;
+
+// Answers in the daemon's own wire format: two big-endian-looking uint32s,
+// magic then port. It checks the probe it got as strictly as the daemon does,
+// because a client that broadcast the wrong bytes would still "pass" against
+// an answerer that replied to anything.
+static void *udp_answer_thread(void *arg) {
+	udp_answerer_t *a = (udp_answerer_t *)arg;
+	uint32_t probe[2] = {0, 0};
+	struct sockaddr_in from;
+	socklen_t from_len = sizeof(from);
+	ssize_t n = recvfrom(a->fd, probe, sizeof(probe), 0, (struct sockaddr *)&from, &from_len);
+	if (n == (ssize_t)sizeof(probe) && ntohl(probe[0]) == SPOTIFY_DISCOVERY_MAGIC &&
+		ntohl(probe[1]) == SPOTIFY_PROTOCOL_VERSION) {
+		uint32_t answer[2] = {htonl(SPOTIFY_DISCOVERY_MAGIC), htonl((uint32_t)a->port)};
+		sendto(a->fd, answer, sizeof(answer), 0, (struct sockaddr *)&from, from_len);
+		a->answered = 1;
+	}
+	return NULL;
+}
+
+// ---------------------------------------------------------------------------
+// TCP transport
+//
+// The daemon runs on a computer on the Wi-Fi, not on the player, so the same
+// protocol has to work over TCP. Everything above this ran over a UNIX socket;
+// this runs the same browse-and-play sequence against a TCP listener on the
+// loopback, which is the code path a real player uses.
+// ---------------------------------------------------------------------------
+
+static void test_tcp_transport(void) {
+	char address[64];
+	// A fixed high port would collide when the suite is run twice at once;
+	// find a free one by binding and reading it back, then hand the number to
+	// the fake daemon.
+	int probe = socket(AF_INET, SOCK_STREAM, 0);
+	assert(probe >= 0);
+	struct sockaddr_in addr;
+	memset(&addr, 0, sizeof(addr));
+	addr.sin_family = AF_INET;
+	addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+	addr.sin_port = 0;
+	assert(bind(probe, (struct sockaddr*)&addr, sizeof(addr)) == 0);
+	socklen_t len = sizeof(addr);
+	assert(getsockname(probe, (struct sockaddr*)&addr, &len) == 0);
+	int port = ntohs(addr.sin_port);
+	close(probe);
+
+	snprintf(address, sizeof(address), "127.0.0.1:%d", port);
+	assert(daemon_start(address));
+
+	spotify_set_socket(address);
+	spotify_shutdown();
+	assert(spotify_init());
+
+	spotify_status_t st;
+	memset(&st, 0, sizeof(st));
+	spotify_status(&st);
+	// The daemon is there, so this must not be the demo library: the whole
+	// point of the transport is that the real one is reachable.
+	assert(strcmp(st.backend, "daemon") == 0);
+
+	int count = 0;
+	spotify_track_t tracks[8];
+	memset(tracks, 0, sizeof(tracks));
+	assert(spotify_fetch_liked(0, 8, tracks, 8, &count));
+	assert(count > 0);
+	assert(tracks[0].title[0] != '\0');
+
+	spotify_shutdown();
+	daemon_stop();
+	printf("  tcp transport: ok\n");
+}
+
+static void test_discovery(void) {
+	// The answerer holds 7790, the port the daemon advertises on, and is bound
+	// to every interface so the client's broadcast reaches it the way it would
+	// reach a daemon on the LAN.
+	int fd = socket(AF_INET, SOCK_DGRAM, 0);
+	assert(fd >= 0);
+	int one = 1;
+	setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
+	struct sockaddr_in addr;
+	memset(&addr, 0, sizeof(addr));
+	addr.sin_family = AF_INET;
+	addr.sin_addr.s_addr = htonl(INADDR_ANY);
+	addr.sin_port = htons(SPOTIFY_DISCOVERY_PORT);
+	if (bind(fd, (struct sockaddr *)&addr, sizeof(addr)) != 0) {
+		printf("  discovery: skipped, port %d busy\n", SPOTIFY_DISCOVERY_PORT);
+		close(fd);
+		return;
+	}
+
+	// 6600 is the daemon's real default, but the point is that the port comes
+	// from the answer rather than from a constant in the client: the daemon is
+	// free to listen anywhere.
+	udp_answerer_t answerer = {.fd = fd, .port = 6600, .answered = 0};
+	pthread_t thread;
+	assert(pthread_create(&thread, NULL, udp_answer_thread, &answerer) == 0);
+
+	spotify_set_socket("");
+	bool found = spotify_discover();
+	pthread_join(thread, NULL);
+	close(fd);
+
+	assert(found);
+	assert(answerer.answered == 1); // the probe was the protocol, not just bytes
+
+	const char *address = spotify_get_socket();
+	assert(spotify_address_set());
+	// "<interface address>:6600" -- the host is whichever address the answer
+	// came back from, which in this sandbox is a container address and not a
+	// value the test can hard-code.
+	char *colon = strrchr(address, ':');
+	assert(colon != NULL);
+	assert(strcmp(colon + 1, "6600") == 0);
+	assert(colon != address); // a host was filled in, not left as ":6600"
+
+	printf("  discovery: ok (%s)\n", address);
+}
+
+// ---------------------------------------------------------------------------
 // main
 // ---------------------------------------------------------------------------
 
@@ -1148,6 +1337,8 @@ int main(void) {
 
 	test_daemon_absent();
 	test_socket_path();
+	test_tcp_transport();
+	test_discovery();
 
 	printf("spotify: all tests passed\n");
 	return 0;

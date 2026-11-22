@@ -122,7 +122,24 @@ bool spotify_init(void) {
 }
 void spotify_shutdown(void) {}
 spotify_backend_t spotify_backend(void) { return SPOTIFY_BACKEND_DAEMON; }
-void spotify_set_socket(const char *p) { (void)p; }
+// The address the setup row shows, and the discoverer the row calls. The test
+// drives both: g_daemon_address is what spotify_address_set() reports on, and
+// spotify_discover() is a stub that either finds something or does not, so the
+// page's two states can be checked without a network.
+static char g_daemon_address[128];
+static bool g_daemon_found;
+void spotify_set_socket(const char *p) {
+	snprintf(g_daemon_address, sizeof(g_daemon_address), "%s", p ? p : "");
+}
+const char *spotify_get_socket(void) { return g_daemon_address; }
+bool spotify_address_set(void) { return g_daemon_address[0] != '\0' && g_daemon_address[0] != ':'; }
+bool spotify_discover(void) {
+	if (!g_daemon_found) {
+		return false;
+	}
+	spotify_set_socket("192.168.1.20:6600");
+	return true;
+}
 void spotify_set_command(const char *c) { (void)c; }
 const char *spotify_get_command(void) { return ""; }
 

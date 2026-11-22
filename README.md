@@ -379,13 +379,13 @@ Instead, Sonix speaks the exact same authentication flows as the stock TempoTec 
 Spotify has no audio in its Web API: playback lives behind the licensed client protocol that [librespot](https://github.com/librespot-org/librespot) implements. The V1 cannot run librespot, so **Spotify is split in two**:
 
 - The **player** draws the pages, owns the queue controls and plays what it is given through its own DAC — `sonix-player/src/gui/streaming/spotifypage.c` over `src/system/streaming/spotify.c`.
-- **`spotifyd`** (`sonix-player/tools/spotifyd`) runs on a computer on the same Wi-Fi, signs in with librespot once, browses the library, and writes raw 44.1 kHz PCM to the player over a UNIX socket. It never opens an audio device.
+- **`spotifyd`** (`sonix-player/tools/spotifyd`) runs on a computer on the same Wi-Fi, signs in with librespot once, browses the library, and writes raw 44.1 kHz PCM to the player over the LAN. It never opens an audio device.
 
 A **Spotify Premium** account is required — librespot will not stream for a free one. Setup is three steps on the computer and one on the player:
 
 1. Build the daemon once (`cargo build --release`) and log in once with `librespot --cache /usr/data/librespot-cache --cache-tool login --username you`.
-2. Start it; it creates `/var/run/sonix-spotify.sock`, which is where the player looks.
-3. On the V1, turn **Spotify** on under **Settings → Plugins → Streaming services** (it is off out of the box) and open **Streaming → Spotify**.
+2. Start it. It listens on TCP 6600 and answers the player's discovery broadcast on UDP 7790.
+3. On the V1, turn **Spotify** on under **Settings → Plugins → Streaming services** (it is off out of the box) and open **Streaming → Spotify**. The player finds the daemon on its own — there is no address to type.
 
 The home page is four tiles — **Liked Songs**, **Playlists**, **Search** and **Account** — and the player sheet has the usual play/pause, next/previous, seek, shuffle and repeat. Nothing is written to the microSD card while playing: audio arrives as a stream, like the radio. With the add-on on but no daemon reachable, the page shows its **DEMO** library so every screen still works.
 

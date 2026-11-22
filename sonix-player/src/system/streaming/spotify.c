@@ -8,6 +8,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <arpa/inet.h>
+#include <netdb.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/time.h>
@@ -146,11 +148,51 @@ static void clear_error_locked(void) {
 	}
 }
 
+// Whether the configured address is a network one.
+//
+// This is the difference that makes the feature work at all: librespot does not
+// run on a 64 MB MIPS player, so spotifyd runs on a computer on the same Wi-Fi
+// and the player connects to it over TCP. A bare path -- no "host:" before the
+// port -- is still accepted, for a daemon that really is running on the player
+// itself (a USB-ethernet dhcp run, or a test rig on the same box).
+//
+// "host:port" with a numeric port is a network address; anything else is a
+// filesystem path. The check is a colon followed by digits to the end, because
+// a UNIX path may legitimately contain a colon: /tmp/a:b/spotify.sock is a
+// path, 192.168.1.20:6600 is an address.
+static bool address_is_network(const char *address, char *host, size_t host_size, int *port) {
+	if (!address || !address[0] || !host || !port) {
+		return false;
+	}
+	const char *colon = strrchr(address, ':');
+	if (!colon || colon == address || !colon[1]) {
+		return false;
+	}
+	for (const char *p = colon + 1; *p; p++) {
+		if (*p < '0' || *p > '9') {
+			return false;
+		}
+	}
+	int value = atoi(colon + 1);
+	if (value < 1 || value > 65535) {
+		return false;
+	}
+	size_t host_len = (size_t)(colon - address);
+	if (host_len >= host_size) {
+		return false;
+	}
+	memcpy(host, address, host_len);
+	host[host_len] = '\0';
+	*port = value;
+	return true;
+}
+
 // A socket with connect and I/O deadlines. Unix sockets ignore SO_RCVTIMEO for
 // connect (there is no handshake), but the daemon is local: a connect that
 // hangs is a daemon that is wedged, which the poll reports as unavailable
-// rather than waiting for.
-static int connect_socket(const char *path) {
+// rather than waiting for. A network connect does have a handshake, and gets
+// the same deadline so an asleep computer costs one poll, not a page.
+static int connect_unix(const char *path) {
 	struct sockaddr_un addr;
 	memset(&addr, 0, sizeof(addr));
 	addr.sun_family = AF_UNIX;
@@ -167,6 +209,56 @@ static int connect_socket(const char *path) {
 		close(fd);
 		return -1;
 	}
+	return fd;
+}
+
+// getaddrinfo() rather than inet_pton(): the address may be a hostname
+// ("studio-pc.local"), which is what somebody types when the DHCP lease moves.
+// Both families are tried, v6 first only if it resolved to one: a player on
+// IPv4-only Wi-Fi must not spend its deadline on an AAAA record.
+static int connect_tcp(const char *host, int port) {
+	char port_text[8];
+	snprintf(port_text, sizeof(port_text), "%d", port);
+
+	struct addrinfo hints;
+	memset(&hints, 0, sizeof(hints));
+	hints.ai_family = AF_UNSPEC;
+	hints.ai_socktype = SOCK_STREAM;
+	hints.ai_protocol = IPPROTO_TCP;
+
+	struct addrinfo *list = NULL;
+	if (getaddrinfo(host, port_text, &hints, &list) != 0 || !list) {
+		return -1;
+	}
+
+	int fd = -1;
+	for (struct addrinfo *ai = list; ai; ai = ai->ai_next) {
+		fd = socket(ai->ai_family, ai->ai_socktype | SOCK_CLOEXEC, ai->ai_protocol);
+		if (fd < 0) {
+			continue;
+		}
+		if (connect(fd, ai->ai_addr, ai->ai_addrlen) == 0) {
+			break;
+		}
+		close(fd);
+		fd = -1;
+	}
+	freeaddrinfo(list);
+	return fd;
+}
+
+static int connect_socket(const char *address) {
+	char host[SPOTIFY_SOCKET_PATH_MAX];
+	int port = 0;
+	int fd = -1;
+	if (address_is_network(address, host, sizeof(host), &port)) {
+		fd = connect_tcp(host, port);
+	} else {
+		fd = connect_unix(address);
+	}
+	if (fd < 0) {
+		return -1;
+	}
 	struct timeval tv;
 	tv.tv_sec = SPOTIFY_CONNECT_TIMEOUT_MS / 1000;
 	tv.tv_usec = (SPOTIFY_CONNECT_TIMEOUT_MS % 1000) * 1000;
@@ -175,6 +267,86 @@ static int connect_socket(const char *path) {
 	// Writes stay small and rare; blocking the writer briefly is cheaper than
 	// a partial write that would desync a line.
 	return fd;
+}
+
+// ---------------------------------------------------------------------------
+// finding the daemon without being told where it is
+// ---------------------------------------------------------------------------
+//
+// The setup step exists because nobody can spell "192.168.1.20:6600" on a
+// 240-pixel keyboard with a d-pad. So the daemon answers a broadcast: it
+// listens on SPOTIFY_DISCOVERY_PORT for one magic packet and replies with its
+// own control port. The player sends the packet to the broadcast address, and
+// the first answer wins.
+//
+// This is the same shape listen_together uses on the same network (see
+// lt_discover_hosts): a magic u32, a broadcast, a bounded wait, and the source
+// address of the reply as the answer. No mDNS: the player's resolver is glibc's
+// and ".local" needs avahi, which is not in the firmware.
+
+static int discover_daemon(char *found, size_t found_size) {
+	if (!found || found_size == 0) {
+		return -1;
+	}
+	found[0] = '\0';
+
+	int fd = socket(AF_INET, SOCK_DGRAM | SOCK_CLOEXEC, 0);
+	if (fd < 0) {
+		return -1;
+	}
+	int bcast = 1;
+	setsockopt(fd, SOL_SOCKET, SO_BROADCAST, &bcast, sizeof(bcast));
+
+	// The probe: the magic, and the protocol's version so a future daemon can
+	// refuse an older player without the player having to know why.
+	// Network byte order, like every other number that crosses this wire: the
+	// player is little-endian MIPS and the daemon is whatever the person's
+	// computer is. Both ends convert, so neither has to know.
+	uint32_t probe[2] = {htonl(SPOTIFY_DISCOVERY_MAGIC), htonl(SPOTIFY_PROTOCOL_VERSION)};
+	struct sockaddr_in to;
+	memset(&to, 0, sizeof(to));
+	to.sin_family = AF_INET;
+	to.sin_port = htons(SPOTIFY_DISCOVERY_PORT);
+	to.sin_addr.s_addr = htonl(INADDR_BROADCAST);
+	sendto(fd, probe, sizeof(probe), 0, (struct sockaddr *)&to, sizeof(to));
+
+	// Two seconds: a daemon that has to be woken and has to read its cache can
+	// take a moment, and this runs once, behind a spinner on the setup row.
+	uint32_t answer[2] = {0, 0};
+	struct sockaddr_in from;
+	socklen_t from_len = sizeof(from);
+	struct timeval deadline;
+	deadline.tv_sec = 2;
+	deadline.tv_usec = 0;
+	setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &deadline, sizeof(deadline));
+
+	ssize_t got = recvfrom(fd, answer, sizeof(answer), 0, (struct sockaddr *)&from, &from_len);
+	close(fd);
+	if (got < (ssize_t)sizeof(answer) || ntohl(answer[0]) != SPOTIFY_DISCOVERY_MAGIC) {
+		return -1;
+	}
+	char host[64];
+	if (!inet_ntop(AF_INET, &from.sin_addr, host, sizeof(host))) {
+		return -1;
+	}
+	uint32_t answered_port = ntohl(answer[1]);
+	int port = (int)(answered_port ? answered_port : SPOTIFY_DEFAULT_PORT);
+	snprintf(found, found_size, "%s:%d", host, port);
+	return 0;
+}
+
+// Finds the daemon and remembers the address, once. Called by the setup row and
+// by spotify_init() when nothing has been configured: the second one is what
+// makes a fresh device work with no typing at all.
+bool spotify_discover(void) {
+	char found[SPOTIFY_SOCKET_PATH_MAX];
+	if (discover_daemon(found, sizeof(found)) != 0) {
+		return false;
+	}
+	spotify_set_socket(found);
+	config_set("spotify", "socket", found);
+	config_save();
+	return true;
 }
 
 static void settimeout_ms(int fd, int ms) {
@@ -1197,6 +1369,23 @@ void spotify_set_socket(const char *path) {
 	pthread_mutex_unlock(&g.lock);
 }
 
+const char *spotify_get_socket(void) {
+	if (!g.inited) {
+		read_settings();
+	}
+	return g.inited ? g.socket_path : g_socket_override;
+}
+
+bool spotify_address_set(void) {
+	const char *address = spotify_get_socket();
+	// ":6600" is the default: the port is known and the host is not. Anything
+	// that starts with a real host -- or a path -- counts as an address.
+	if (!address || !address[0] || address[0] == ':') {
+		return false;
+	}
+	return true;
+}
+
 void spotify_set_command(const char *command) {
 	pthread_mutex_lock(&g.lock);
 	copy_utf8(g.command, sizeof(g.command), command && command[0] ? command : "");
@@ -1226,11 +1415,48 @@ bool spotify_init(void) {
 
 	read_settings();
 
-	// The backend decision: a socket already answering means the daemon is up
+	// The backend decision: an address already answering means the daemon is up
 	// (init started it, or the last session left it); a configured command
 	// means it can be started; otherwise the demo library answers, so the
 	// pages work on a device with no Spotify at all.
-	int probe = access(g.socket_path, F_OK) == 0 ? connect_socket(g.socket_path) : -1;
+	//
+	// The access() short-cut is only for a filesystem path. A network address
+	// has nothing to stat -- the whole point is that it is another machine --
+	// and asking access() about "192.168.1.20:6600" would either fail or, worse,
+	// find a file of that name in the working directory.
+	char probe_host[SPOTIFY_SOCKET_PATH_MAX];
+	int probe_port = 0;
+	int probe = -1;
+	if (address_is_network(g.socket_path, probe_host, sizeof(probe_host), &probe_port)) {
+		probe = connect_socket(g.socket_path);
+	} else if (access(g.socket_path, F_OK) == 0) {
+		probe = connect_socket(g.socket_path);
+	}
+
+	// Nothing configured at all: look for the daemon on the LAN before giving
+	// up on it. This is the step that makes a new device work without anybody
+	// typing an address -- the pages then have a real library on first open,
+	// and the demo only appears when the network really has no daemon on it.
+	//
+	// An address that was set on purpose is honoured even when nothing answers
+	// it: a test that points at a dead socket is asking about the mock, and a
+	// person who typed their computer's name does not want it silently
+	// replaced by whatever else is on the Wi-Fi.
+	if (probe < 0 && !g_socket_override[0] && !g.command[0]) {
+		char found[SPOTIFY_SOCKET_PATH_MAX];
+		if (discover_daemon(found, sizeof(found)) == 0) {
+			// Only remember an address that is different: the discovery runs on
+			// every boot and writing the same line to the config file each time
+			// is a flash write for nothing.
+			if (strcmp(found, g.socket_path) != 0) {
+				copy_utf8(g.socket_path, sizeof(g.socket_path), found);
+				copy_utf8(g_socket_override, sizeof(g_socket_override), found);
+				config_set("spotify", "socket", found);
+				config_save();
+			}
+			probe = connect_socket(g.socket_path);
+		}
+	}
 	if (probe >= 0 || g.command[0]) {
 		g.backend = SPOTIFY_BACKEND_DAEMON;
 	} else {

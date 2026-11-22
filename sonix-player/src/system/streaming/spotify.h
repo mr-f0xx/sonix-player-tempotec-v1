@@ -21,12 +21,18 @@
 //          ^                                |
 //          +----- PCM (46-byte header + S16_LE stereo 44.1 kHz) --+
 //
-// Over a UNIX stream socket, /var/run/sonix-spotify.sock by default. A line is
-// one command with tab-separated arguments and ends with '\n'; the reply is
-// one or more lines and ends with END or ERR, so a reader always knows where a
-// reply stops. No JSON on the wire: the player already parses JSON for its
-// other services and a JSON encoder on the daemon side would be a dependency
-// for nothing.
+// Over a stream socket, and the transport is the interesting part: librespot
+// cannot run on a 64 MB MIPS player, so the daemon runs on a computer on the
+// same Wi-Fi and the player reaches it over TCP at "host:port" -- 6600 by
+// default, the address the daemon advertises. A bare path with no port is
+// still accepted, for a daemon that really is on the player itself, so the
+// same binary works in a test rig without a network.
+//
+// A line is one command with space-separated arguments and ends with '\n'; the
+// reply is one or more lines and ends with END or ERR, so a reader always
+// knows where a reply stops. No JSON on the wire: the player already parses
+// JSON for its other services and a JSON encoder on the daemon side would be a
+// dependency for nothing.
 //
 // The PCM channel is a second connection to the same daemon, announced with
 // AOPEN <16|24>. The daemon writes frames as they are decoded -- no temp file,
@@ -41,15 +47,27 @@
 
 #define SPOTIFY_NAME_MAX 192
 #define SPOTIFY_ID_MAX 64
-#define SPOTIFY_SOCKET_PATH_MAX 108 // sun_path's own limit: one byte more is ENOTDIR
+#define SPOTIFY_SOCKET_PATH_MAX 128 // a hostname and a port; sun_path's 108 is only the fallback
 #define SPOTIFY_ERROR_MAX 192
 #define SPOTIFY_TOKEN_MAX 4096
 
-// Where the daemon listens when the configuration says nothing.
+// Where the daemon listens when the configuration says nothing. The port is
+// the daemon's own default; the host is left empty on purpose, because the
+// address of somebody's computer cannot be compiled in. Empty host is the
+// "not set up yet" state: the pages say so in one sentence and offer the
+// search, rather than timing out against a guess.
+#define SPOTIFY_DEFAULT_PORT 6600
+
+// Finding the daemon on the LAN: the UDP port it answers a broadcast on, the
+// magic the probe and the answer share, and the protocol version the answer
+// carries so a daemon can refuse an older player by saying so.
+#define SPOTIFY_DISCOVERY_PORT 7790
+#define SPOTIFY_DISCOVERY_MAGIC 0x53505431u /* "SPT1" */
+#define SPOTIFY_PROTOCOL_VERSION 1u
 #ifdef HOST_BUILD
 #define SPOTIFY_DEFAULT_SOCKET "usr/data/spotifyd.sock" // relative, like every HOST_BUILD path
 #else
-#define SPOTIFY_DEFAULT_SOCKET "/var/run/sonix-spotify.sock"
+#define SPOTIFY_DEFAULT_SOCKET ":6600" // host unset: SPOTIFY_ADDRESS_SET is false until one is
 #endif
 
 // The daemon's credential store: librespot's own cache directory, which is
@@ -124,9 +142,25 @@ void spotify_shutdown(void);
 
 spotify_backend_t spotify_backend(void);
 
-// The socket the player talks to, for the settings page to show and for tests
-// to replace (before spotify_init()).
+// The address the player talks to -- "host:port", or a path for a daemon on
+// this machine. This is what the setup row asks for, and what is written to
+// [spotify] socket in the configuration so it survives a reboot.
 void spotify_set_socket(const char *path);
+
+// The address as configured, for the settings row to show.
+const char *spotify_get_socket(void);
+
+// False when nobody has said where the daemon is yet, which is the state a
+// fresh install is in: the port is known, the host is not. The pages use this
+// to say "set up the daemon" once, instead of reporting "no daemon at :6600"
+// on a loop.
+bool spotify_address_set(void);
+
+// Broadcasts once and keeps the first answer. This is what the setup row does:
+// the daemon is on the same Wi-Fi, it says where it is, and nobody types an
+// address on a d-pad. Saves [spotify] socket to the configuration on success,
+// so it is found again next boot without asking. False when nothing answered.
+bool spotify_discover(void);
 
 // When non-NULL, the daemon is started by this program: anything up to the
 // first space is the executable, the rest its arguments, with {socket} replaced

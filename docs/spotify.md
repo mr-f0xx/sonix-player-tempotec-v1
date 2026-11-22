@@ -17,7 +17,7 @@ which is what **librespot** implements. So the V1 does not speak to Spotify itse
 
 ```
    V1 (240×320, MIPS, 64 MB)                    a computer on the same Wi-Fi
- ┌──────────────────────────────┐   unix socket  ┌──────────────────────┐
+ ┌──────────────────────────────┐   TCP :6600    ┌──────────────────────┐
  │  Streaming ▸ Spotify pages   │◄── commands ──►│  spotifyd            │
  │  spotify.c (the client)      │◄── 44.1k PCM ──│  librespot inside    │
  │  audio_external_* → DAC      │                │  (tools/spotifyd)    │
@@ -70,17 +70,25 @@ playing: a track arrives as a stream, the way the radio does.
    # or: cp tools/spotifyd/S99spotifyd /etc/init.d/ && /etc/init.d/S99spotifyd start
    ```
 
-   Its default socket is `/var/run/sonix-spotify.sock`; `spotifyd.conf` next to it can move that,
-   name the device the phone's Spotify app shows, and choose 96/160/320 kbps.
+   It listens on TCP 6600 and answers the player's discovery broadcasts on UDP 7790; a
+   `spotifyd.conf` next to it can move the port, name the device the phone's Spotify app shows,
+   and choose 96/160/320 kbps. **There is nothing to configure on the player**: it finds the
+   daemon by itself (see below).
 5. **Open Streaming ▸ Spotify.** The home page is four tiles — **Liked Songs**, **Playlists**,
    **Search** and **Account** — with the account named under them.
 
-### Where the daemon's socket is
+### How the player finds the daemon
 
-The player looks for the socket in the order below and stops at the first that exists:
+Nothing on the player needs typing. In order:
 
-1. `spotify.socket=` in `[spotify]` in `/usr/data/streaming-keys.ini` (or on the microSD card),
-2. `/var/run/sonix-spotify.sock`, the daemon's default.
+1. `spotify.socket=` in `[spotify]` in `/usr/data/streaming-keys.ini` (or on the microSD card), if
+   you set one — a `host:port` for the LAN, or a path for a UNIX socket on a test rig.
+2. Otherwise the player broadcasts one probe on UDP 7790 at startup. A daemon on the same Wi-Fi
+   answers with the port it listens on, the player dials back to whoever answered, and the address
+   is written into `streaming-keys.ini` so the next boot is a plain connection.
+
+That discovery is the whole setup step. It is also on the Account page as **Find on this network**
+(tap to search again; long-press to type an address, for a network whose router blocks broadcasts).
 
 If it finds no daemon at all, the page says so plainly and offers the **DEMO** library instead —
 see below.
@@ -120,7 +128,8 @@ tested with no daemon, no credentials and no network.
 ## Validation
 
 ```sh
-# The protocol client against a fake daemon on a real socket (8 groups):
+# The protocol client against a fake daemon on a real socket, over both a UNIX
+# path and TCP, plus discovery against a real UDP answerer (10 groups):
 make -C sonix-player/tests spotify
 
 # The LVGL pages, headless: 240×320, 11 languages × 5 themes, no overlapping

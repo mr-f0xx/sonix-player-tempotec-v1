@@ -47,7 +47,7 @@ pub struct Shared {
     /// The player's socket while a PCM channel is open. `None` between
     /// channels, which is also how the sink knows to drop frames decoded in
     /// the gap rather than block the decoder.
-    pub pcm: Mutex<Option<std::os::unix::net::UnixStream>>,
+    pub pcm: Mutex<Option<Box<dyn std::io::Write + Send>>>,
     pub playing: AtomicBool,
     pub position_ms: AtomicI64,
     pub duration_ms: AtomicI64,
@@ -527,7 +527,7 @@ impl Library for Daemon {
         r
     }
 
-    fn open_pcm(&self, stream: std::os::unix::net::UnixStream) {
+    fn open_pcm(&self, stream: Box<dyn std::io::Write + Send>) {
         *self.shared.pcm.lock().unwrap() = Some(stream);
     }
 

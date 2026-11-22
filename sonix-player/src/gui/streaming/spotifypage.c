@@ -20,6 +20,7 @@
 #include "src/gui/shell/toast.h"
 #include "src/gui/wireless/wifisettings.h"
 #include "src/system/audio/audio.h"
+#include "src/system/core/config.h"
 #include "src/system/core/lang.h"
 #include "src/system/net/wifi.h"
 #include "src/system/streaming/spotify.h"
@@ -70,6 +71,7 @@ static gui_config_t *g_cfg;
 
 static void start_list(source_t src, const char *playlist_id, const char *name, const char *query);
 static void draw_window(int first);
+static void refresh_daemon_row(void);
 static void refresh_chrome(void);
 static void search_submit_cb(lv_event_t *e);
 static void playlists_unloaded_cb(lv_event_t *e);
@@ -121,6 +123,11 @@ static keyboard_t *search_keyboard;
 // Account page.
 static lv_obj_t *account_screen;
 static lv_obj_t *account_name;
+static lv_obj_t *daemon_row;        // the "Spotify daemon" row: its value is the address
+static lv_obj_t *daemon_note;       // the finding state: what was found, or why nothing was
+static lv_obj_t *daemon_edit_screen; // the address screen, opened from the row's chevron
+static lv_obj_t *daemon_field;      // the address screen's textarea
+static keyboard_t *daemon_keyboard;
 static lv_obj_t *account_backend;
 static lv_obj_t *account_quality;
 static lv_obj_t *account_notice;
@@ -651,6 +658,9 @@ static void refresh_chrome(void) {
 	if (account_quality) {
 		lv_label_set_text(account_quality, "320 kbps");
 	}
+	if (daemon_note) {
+		refresh_daemon_row();
+	}
 	if (account_notice) {
 		const char *notice = "";
 		if (demo) {
@@ -748,6 +758,18 @@ static void open_account_cb(void) {
 	switch_screen(account_screen);
 }
 
+// The corner button speaks LVGL's event signature; the grid entry speaks the
+// page's plain one. One line each, rather than making every caller wrap it.
+static void account_corner_cb(lv_event_t *e) {
+	(void)e;
+	open_account_cb();
+}
+
+static void search_corner_cb(lv_event_t *e) {
+	(void)e;
+	open_search_cb();
+}
+
 static void offline_wifi_cb(lv_event_t *e) {
 	(void)e;
 	switch_screen(wifisettings_screen);
@@ -777,7 +799,38 @@ static void playlists_unloaded_cb(lv_event_t *e) {
 // Building the pages
 // ---------------------------------------------------------------------------
 
+// A corner button that is only an icon, the way SoundCloud's title bar has
+// them: the search and the settings live up there so the grid can be four
+// destinations and nothing else.
+static lv_obj_t *add_corner_btn(lv_obj_t *parent, gui_config_t *cfg, int slot, const lv_image_dsc_t *glyph,
+								 lv_event_cb_t cb) {
+	lv_obj_t *btn = lv_button_create(parent);
+	settingsrow_place_corner_button(btn, cfg, slot);
+	lv_obj_set_style_bg_opa(btn, LV_OPA_TRANSP, 0);
+	lv_obj_set_style_border_width(btn, 0, 0);
+	lv_obj_set_style_shadow_width(btn, 0, 0);
+	lv_obj_set_style_pad_all(btn, 0, 0);
+
+	lv_obj_t *ic = lv_image_create(btn);
+	lv_image_set_src(ic, glyph);
+	lv_obj_add_style(ic, &theme_style_icon, 0);
+	settingsrow_scale_corner_icon(ic, cfg);
+	lv_obj_center(ic);
+	lv_obj_add_event_cb(btn, cb, LV_EVENT_CLICKED, NULL);
+	return btn;
+}
+
 static void build_home(gui_config_t *cfg) {
+	// The heading and the two corner buttons, as SoundCloud has them: the
+	// title says where you are, the magnifier and the gear are what you reach
+	// for without leaving the page. Search used to be a tile of its own; it is
+	// a corner button on every other streaming service, and a fifth grid slot
+	// would have pushed the fourth row under the fold.
+	settingsrow_title(spotify_screen, cfg, "spotify");
+	settingsrow_title_corner_slots(settingsrow_page_title(spotify_screen), cfg, 2);
+	add_corner_btn(spotify_screen, cfg, 0, &icon_music_settings, account_corner_cb);
+	add_corner_btn(spotify_screen, cfg, 1, &icon_search, search_corner_cb);
+
 	const grid_entry_t entries[] = {
 		{"spotify_liked", &icon_menu_qobuz_favourites, NULL, open_liked_cb},
 		{"playlists", &icon_menu_qobuz_playlists, NULL, open_playlists_cb},
@@ -789,6 +842,7 @@ static void build_home(gui_config_t *cfg) {
 		gridpage_set_tile_label_lines(home_grid, i, 2);
 	}
 	switcher_attach_back_gesture(home_grid);
+	player_sheet_attach_drag(spotify_screen, true);
 
 	// The DEMO badge, under the corner buttons: the pages work and the music
 	// does not, and a silent demo track must not leave anybody guessing why.
@@ -986,6 +1040,119 @@ static void account_repeat_cb(lv_event_t *e) {
 	spotify_set_repeat(st.repeat >= 2 ? 0 : st.repeat + 1);
 }
 
+// ---------------------------------------------------------------------------
+// where the daemon is: the one setup step the player does itself
+// ---------------------------------------------------------------------------
+
+static void daemon_note_set(const char *text, bool visible) {
+	if (!daemon_note) {
+		return;
+	}
+	lv_label_set_text(daemon_note, text ? text : "");
+	lv_obj_set_hidden(daemon_note, !visible);
+}
+
+// What the player knows about the daemon, in one line under the row: the
+// address it will use, or that it has none.
+static void refresh_daemon_row(void) {
+	if (!daemon_note) {
+		return;
+	}
+	if (spotify_address_set()) {
+		char line[160];
+		snprintf(line, sizeof(line), tr("spotify_daemon_found"), spotify_get_socket());
+		daemon_note_set(line, true);
+	} else {
+		daemon_note_set(tr("spotify_daemon_hint"), true);
+	}
+}
+
+// The finder. It blocks for up to two seconds, which is exactly the length of a
+// broadcast round trip, so it runs on the worker and the result comes back
+// through the same gui_post queue the pages already use. Doing it inline would
+// freeze the interface under the finger that pressed it.
+// gui_post() hands a void* back to a callback on the UI thread, so the result
+// travels as a heap string rather than as a pointer into the worker's stack.
+static void daemon_find_done(void *user) {
+	char *address = (char *)user;
+	if (!address || !address[0]) {
+		daemon_note_set(tr("spotify_daemon_missing"), true);
+		free(address);
+		return;
+	}
+	// The format string is the translation's, and a translation without the %s
+	// would silently drop the address; snprintf() is safe either way.
+	char line[160];
+	snprintf(line, sizeof(line), tr("spotify_daemon_found"), address);
+	daemon_note_set(line, true);
+	refresh_daemon_row();
+	free(address);
+}
+
+static void *daemon_worker(void *arg) {
+	(void)arg;
+	// spotify_discover() writes the configuration itself, so a device that
+	// found its daemon once boots straight into it next time.
+	char *found = calloc(1, SPOTIFY_SOCKET_PATH_MAX);
+	if (!found) {
+		return NULL;
+	}
+	if (!spotify_discover()) {
+		found[0] = '\0';
+	} else {
+		snprintf(found, SPOTIFY_SOCKET_PATH_MAX, "%s", spotify_get_socket());
+	}
+	if (!gui_post(daemon_find_done, found)) {
+		free(found); // the queue was full: whoever posted it still owns it
+	}
+	return NULL;
+}
+
+static void daemon_row_cb(lv_event_t *e) {
+	(void)e;
+	// A tap means "find it". The address screen is the chevron's business, so
+	// the common case stays one tap with no keyboard.
+	daemon_note_set(tr("spotify_daemon_searching"), true);
+	pthread_t thread;
+	if (pthread_create(&thread, NULL, daemon_worker, NULL) == 0) {
+		pthread_detach(thread);
+	} else {
+		daemon_note_set(tr("spotify_daemon_missing"), true);
+	}
+}
+
+static void daemon_edit_accept_cb(lv_event_t *e) {
+	(void)e;
+	const char *text = daemon_field ? lv_textarea_get_text(daemon_field) : "";
+	if (!text || !text[0]) {
+		return;
+	}
+	spotify_set_socket(text);
+	config_set("spotify", "socket", text);
+	config_save();
+	refresh_daemon_row();
+	daemon_note_set(tr("spotify_daemon_saved"), true);
+	switch_screen_return_to(account_screen);
+}
+
+static void daemon_edit_unloaded_cb(lv_event_t *e) {
+	(void)e;
+	if (daemon_keyboard) {
+		keyboard_set_visible(daemon_keyboard, false);
+	}
+}
+
+static void daemon_manual_cb(lv_event_t *e) {
+	(void)e;
+	switch_screen(daemon_edit_screen);
+	if (daemon_keyboard) {
+		keyboard_set_visible(daemon_keyboard, true);
+	}
+	if (daemon_field) {
+		lv_textarea_set_text(daemon_field, spotify_address_set() ? spotify_get_socket() : "");
+	}
+}
+
 static void build_account(gui_config_t *cfg) {
 	account_screen = lv_obj_create(NULL);
 	lv_obj_t *body = settingsrow_page(account_screen, cfg, "spotify_account");
@@ -1023,6 +1190,27 @@ static void build_account(gui_config_t *cfg) {
 	// a player that pretended to set it would be lying.
 	lv_obj_t *quality = settingsrow_add(body, "spotify_quality", &account_quality, NULL, NULL);
 	(void)quality;
+
+	// Where the daemon is. This is the whole of the setup a person does on the
+	// player: one tap finds it on the Wi-Fi, and the row says what was found.
+	// Nobody should have to type an address on a d-pad -- but if the broadcast
+	// is blocked by the router, the address screen is there.
+	daemon_row = settingsrow_action(body, "spotify_daemon_find", daemon_row_cb, NULL);
+	// A tap finds; a long press types the address. The row's label is the verb,
+	// not a noun with a value beside it: a sentence like "Find on this network"
+	// does not belong in a value slot next to a name, where on a 240-pixel V1 it
+	// either collides with the name or has to be cut to "Find on t...".
+	if (daemon_row) {
+		lv_obj_add_event_cb(daemon_row, daemon_manual_cb, LV_EVENT_LONG_PRESSED, NULL);
+	}
+
+	daemon_note = lv_label_create(body);
+	lv_obj_add_style(daemon_note, &theme_style_text_dim, 0);
+	lv_obj_set_style_text_font(daemon_note, &font_ui_14, 0);
+	lv_obj_set_width(daemon_note, lv_pct(100));
+	lv_label_set_long_mode(daemon_note, LV_LABEL_LONG_WRAP);
+	lv_label_set_text(daemon_note, "");
+	lv_obj_set_hidden(daemon_note, true);
 
 	// How to sign out, as a note rather than a row: it is a sentence, not
 	// something to press, and a settings row's single line would run off the
@@ -1084,6 +1272,31 @@ static void build_account(gui_config_t *cfg) {
 	// The notice: the demo sentence, how a login is done, or what to do about
 	// no daemon. Last on the page, because it is the one read only when
 	// something is missing.
+	// The address screen: a field and the shared keyboard, the way SoundCloud's
+	// account edit works. This is the fallback for a network whose router does
+	// not pass broadcasts, and for a daemon on a machine the broadcast cannot
+	// reach.
+	daemon_edit_screen = lv_obj_create(NULL);
+	lv_obj_add_style(daemon_edit_screen, &theme_style_screen, 0);
+	settingsrow_title(daemon_edit_screen, cfg, "spotify_daemon_manual");
+	switcher_attach_back_gesture(daemon_edit_screen);
+
+	daemon_field = lv_textarea_create(daemon_edit_screen);
+	lv_textarea_set_one_line(daemon_field, true);
+	lv_textarea_set_max_length(daemon_field, 96);
+	lv_obj_add_style(daemon_field, &theme_style_card, 0);
+	lv_obj_set_style_text_font(daemon_field, &font_ui_24, 0);
+	lv_obj_set_style_pad_all(daemon_field, 8, 0);
+	lv_obj_set_size(daemon_field, cfg->screen_width - 2 * cfg->padding, compact() ? 40 : 52);
+	lv_obj_align(daemon_field, LV_ALIGN_TOP_LEFT, cfg->padding, settingsrow_content_top(cfg));
+	lv_textarea_set_placeholder_text(daemon_field, "192.168.1.20:6600");
+	keyboard_style_caret(daemon_field);
+	daemon_keyboard = keyboard_create(daemon_edit_screen, cfg->screen_width,
+									  compact() ? (cfg->screen_height / 2) : 210, daemon_field, NULL,
+									  tr("spotify_daemon_manual"), daemon_edit_accept_cb, NULL);
+	keyboard_set_visible(daemon_keyboard, false);
+	lv_obj_add_event_cb(daemon_edit_screen, daemon_edit_unloaded_cb, LV_EVENT_SCREEN_UNLOADED, NULL);
+
 	account_notice = lv_label_create(body);
 	lv_obj_add_style(account_notice, &theme_style_text_dim, 0);
 	lv_obj_set_style_text_font(account_notice, &font_ui_14, 0);
