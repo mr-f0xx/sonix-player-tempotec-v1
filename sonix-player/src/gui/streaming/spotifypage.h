@@ -28,4 +28,12 @@ extern lv_obj_t *spotify_list_screen;
 bool spotifypage_open_liked(void);
 bool spotifypage_open_playlist(const char *playlist_id, const char *title);
 
+// The home page's geometry, for the headless page test. The photo of a real V1
+// showed the demo note printed across the bottom tiles and the badge sitting on
+// top of a tile -- states the test never looked at, because it only ever asked
+// whether the captions existed. These hand it the objects to measure.
+lv_obj_t *spotify_home_grid_for_test(void);
+lv_obj_t *spotify_home_demo_for_test(void);
+lv_obj_t *spotify_home_note_for_test(void);
+
 #endif /* SPOTIFYPAGE_H */

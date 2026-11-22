@@ -1,0 +1,68 @@
+name: Build the Spotify daemon
+
+# tools/spotifyd is Rust, and the firmware's toolchain has no Rust in it: the
+# daemon is built on the computer that hosts it, not on the player. That also
+# meant nothing in this repository ever compiled it -- the C client has a test
+# suite and the daemon had a promise. This workflow is that promise made
+# checkable: if it does not build here, it does not build anywhere.
+#
+# It is deliberately separate from the firmware workflow. The firmware takes
+# half an hour and needs the stock image; this takes a few minutes and needs
+# nothing but cargo.
+
+on:
+  pull_request:
+    paths:
+      - sonix-player/tools/spotifyd/**
+      - .github/workflows/spotifyd.yml
+  push:
+    branches:
+      - main
+    paths:
+      - sonix-player/tools/spotifyd/**
+      - .github/workflows/spotifyd.yml
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: cargo build and test
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: sonix-player/tools/spotifyd
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      # The dependency tree is librespot's, which is large; a warm cache turns
+      # a rebuild after a one-line change into seconds instead of minutes.
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: sonix-player/tools/spotifyd
+
+      # librespot's native dependencies are a C compiler and pkg-config, and
+      # for the default backend ALSA's headers. All are present on the runner
+      # image, but they are named here so a missing one is a one-line fix
+      # rather than a mystery link error.
+      - name: System dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential pkg-config libasound2-dev libssl-dev
+
+      - name: Protocol tests (no librespot, no network)
+        run: cargo test --lib
+
+      # The part that matters: does the whole binary -- main.rs, the dispatch
+      # table, the discovery answerer and the librespot glue -- actually
+      # compile against the pinned librespot?
+      - name: Build the daemon
+        run: cargo build --release
+
+      - name: Report the binary
+        run: |
+          ls -la target/release/spotifyd
+          file target/release/spotifyd

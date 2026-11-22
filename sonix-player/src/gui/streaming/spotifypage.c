@@ -802,6 +802,15 @@ static void playlists_unloaded_cb(lv_event_t *e) {
 // A corner button that is only an icon, the way SoundCloud's title bar has
 // them: the search and the settings live up there so the grid can be four
 // destinations and nothing else.
+// The strip under the grid: the account name, or the sentence that explains a
+// demo library. Two lines of font_ui_14 and the margin around them. Long
+// translations wrap onto the second line; nothing here may grow into the grid.
+#define HOME_NOTE_LINES 2
+static int home_note_h(gui_config_t *cfg) {
+	(void)cfg;
+	return HOME_NOTE_LINES * lv_font_get_line_height(&font_ui_14) + 14;
+}
+
 static lv_obj_t *add_corner_btn(lv_obj_t *parent, gui_config_t *cfg, int slot, const lv_image_dsc_t *glyph,
 								 lv_event_cb_t cb) {
 	lv_obj_t *btn = lv_button_create(parent);
@@ -841,6 +850,16 @@ static void build_home(gui_config_t *cfg) {
 	for (int i = 0; i < 4; i++) {
 		gridpage_set_tile_label_lines(home_grid, i, 2);
 	}
+	// The grid is built from the whole space under the heading, which leaves
+	// nothing for the line the page says under it. Reserve the note's strip and
+	// re-lay the grid out -- set_layout() also resizes the tiles, which merely
+	// shrinking the grid does not: the tiles keep the height the build gave
+	// them and the last row hangs below its own container.
+	//
+	// The photo of a real V1 is what caught this. The demo note was printed
+	// across the bottom two tiles, and the badge sat on "Playlists".
+	gridpage_set_layout(home_grid, cfg, settingsrow_content_top(cfg), home_note_h(cfg), cfg->padding,
+						gridpage_gap(), 2, 2);
 	switcher_attach_back_gesture(home_grid);
 	player_sheet_attach_drag(spotify_screen, true);
 
@@ -855,8 +874,13 @@ static void build_home(gui_config_t *cfg) {
 	lv_obj_set_style_radius(home_demo, 6, 0);
 	lv_obj_set_style_pad_hor(home_demo, 8, 0);
 	lv_obj_set_style_pad_ver(home_demo, 3, 0);
-	lv_obj_align(home_demo, LV_ALIGN_TOP_RIGHT, -cfg->padding,
-				 cfg->top_bar_height + cfg->padding + settingsrow_corner_button_size(cfg) + 6);
+	// Inside the heading row, beside the "Spotify" title: the badge used to be
+	// placed below the corner buttons, which is already the first tile, so on
+	// the device it sat on top of "Playlists". The heading row is the one place
+	// on this page that is always empty.
+	lv_obj_align(home_demo, LV_ALIGN_TOP_LEFT, cfg->padding + settingsrow_corner_button_size(cfg) + 8,
+				 cfg->top_bar_height + (settingsrow_content_top(cfg) - cfg->top_bar_height -
+										 lv_font_get_line_height(&font_ui_14)) / 2);
 	lv_obj_set_hidden(home_demo, true);
 
 	// The offline card. The grid stays behind it -- the pages exist, they
@@ -896,8 +920,16 @@ static void build_home(gui_config_t *cfg) {
 	lv_obj_add_style(home_account_line, &theme_style_text_dim, 0);
 	lv_obj_set_style_text_font(home_account_line, &font_ui_14, 0);
 	lv_obj_set_width(home_account_line, cfg->screen_width - 2 * cfg->padding);
-	lv_label_set_long_mode(home_account_line, LV_LABEL_LONG_DOT);
-	lv_obj_align(home_account_line, LV_ALIGN_BOTTOM_MID, 0, -6);
+	// Wrapping, not an ellipsis: when the daemon is missing this line is a
+	// sentence that tells somebody what to do, and "Set up the Spotify daem..."
+	// is not that. The strip under the grid is sized for two lines.
+	lv_label_set_long_mode(home_account_line, LV_LABEL_LONG_WRAP);
+	lv_obj_set_height(home_account_line, home_note_h(cfg));
+	lv_obj_set_style_text_align(home_account_line, LV_TEXT_ALIGN_CENTER, 0);
+	// Below the grid's own box, not merely at the bottom of the screen: the
+	// grid has padding, so its tiles stop short of its height, and a label
+	// pinned to the screen bottom climbed three pixels into the last row.
+	lv_obj_align_to(home_account_line, home_grid, LV_ALIGN_OUT_BOTTOM_MID, 0, 0);
 }
 
 static void build_list(gui_config_t *cfg) {
@@ -1309,6 +1341,12 @@ static void build_account(gui_config_t *cfg) {
 // ---------------------------------------------------------------------------
 // init
 // ---------------------------------------------------------------------------
+
+// See spotifypage.h: the page test measures these instead of trusting that a
+// label exists somewhere.
+lv_obj_t *spotify_home_grid_for_test(void) { return home_grid; }
+lv_obj_t *spotify_home_demo_for_test(void) { return home_demo; }
+lv_obj_t *spotify_home_note_for_test(void) { return home_account_line; }
 
 void spotifypage_init(gui_config_t *cfg) {
 	g_cfg = cfg;

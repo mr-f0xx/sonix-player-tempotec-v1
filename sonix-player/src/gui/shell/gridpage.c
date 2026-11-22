@@ -25,7 +25,13 @@
 #define COMPACT_EMPTY_ICON_MAX 56
 
 static bool compact_grid(void) { return bp_is_tempotec_v1(); }
-static int grid_gap(void) { return compact_grid() ? 6 : GRID_GAP; }
+static int grid_gap(void) { return gridpage_gap(); }
+
+// The gap between tiles, which is a property of the panel rather than of one
+// page: a caller that lays a grid out again (gridpage_set_layout) has to use
+// the same number the build did, or the tiles stop lining up with the ones
+// beside them.
+int gridpage_gap(void) { return compact_grid() ? 6 : GRID_GAP; }
 
 // A compact list of the tiled menu pages. The entry arrays passed to
 // gridpage_build() are local to each init function, so retain just the icon

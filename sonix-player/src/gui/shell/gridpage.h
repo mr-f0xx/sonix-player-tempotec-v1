@@ -70,6 +70,10 @@ void gridpage_set_tile_label_lines(lv_obj_t *grid, int index, int lines);
 // Reflows an existing grid into a different screen area. Used by the V1's
 // Tokyo Night home screen to reserve space for its heading and mini-player,
 // without duplicating the six tile objects or changing Dark/Light geometry.
+// The gap between tiles for this panel. Pass it to gridpage_set_layout() when
+// re-laying a grid out, so the result matches what gridpage_build() produced.
+int gridpage_gap(void);
+
 void gridpage_set_layout(lv_obj_t *grid, gui_config_t *cfg, int top, int bottom, int padding, int gap, int columns,
 						 int rows);
 

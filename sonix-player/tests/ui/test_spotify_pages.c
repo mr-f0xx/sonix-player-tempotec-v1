@@ -804,6 +804,75 @@ static int unlink_cb(const char *fpath, const struct stat *sb, int typeflag, str
 	return remove(fpath);
 }
 
+// The home page is the one screen a person sees first, and it was the one
+// screen this test never measured: it checked that the four tile captions
+// existed and stopped there. On the device the demo note was drawn across the
+// bottom two tiles and the DEMO badge sat on top of "Playlists". Everything
+// here is geometry, because existence was already true when it looked wrong.
+//
+// The note is allowed to be long -- it is a sentence -- but it has to sit
+// somewhere that does not cover a tile, and it must not be silently hidden
+// behind one either.
+static void assert_home_is_clean(lv_obj_t *screen, gui_config_t *cfg, const char *lang_name) {
+	assert(screen != NULL);
+	// The screen bounds as signed numbers: lv_area_t is int32_t and cfg's sizes
+	// are unsigned, and mixing them is a sign-compare warning in this build.
+	const int32_t w = (int32_t)cfg->screen_width;
+	const int32_t h = (int32_t)cfg->screen_height;
+
+	// The heading is at the top and inside the screen.
+	lv_obj_t *title = settingsrow_page_title(screen);
+	assert(title != NULL);
+	const char *title_text = lv_label_get_text(title);
+	assert(title_text && strcmp(title_text, tr("spotify")) == 0);
+	lv_area_t title_a;
+	lv_obj_get_coords(title, &title_a);
+	// Plain comparisons rather than lv_area_is_in(): this LVGL build does not
+	// export the area helpers as public API, and the arithmetic is the point
+	// anyway -- every failure here should print the numbers.
+	if (title_a.x1 < 0 || title_a.y1 < 0 || title_a.x2 >= w || title_a.y2 >= h) {
+		fprintf(stderr, "[%s] home heading off screen: [%d,%d..%d,%d]\n", lang_name, (int)title_a.x1,
+				(int)title_a.y1, (int)title_a.x2, (int)title_a.y2);
+		assert(!"home heading off screen");
+	}
+
+	// The grid starts below the heading, in full: a grid aligned to the top of
+	// the screen would draw its first row over the title.
+	lv_area_t grid_a;
+	lv_obj_get_coords(spotify_home_grid_for_test(), &grid_a);
+	if (grid_a.y1 < title_a.y2) {
+		fprintf(stderr, "[%s] home grid starts at y=%d, above the heading (ends y=%d)\n", lang_name,
+				(int)grid_a.y1, (int)title_a.y2);
+		assert(!"home grid drawn over the heading");
+	}
+
+	// The demo badge and the note, when shown, are inside the screen and clear
+	// of the tiles.
+	lv_obj_t *notices[] = {spotify_home_demo_for_test(), spotify_home_note_for_test()};
+	for (size_t i = 0; i < sizeof(notices) / sizeof(notices[0]); i++) {
+		lv_obj_t *c = notices[i];
+		if (!c || lv_obj_is_hidden(c)) {
+			continue;
+		}
+		lv_area_t a;
+		lv_obj_get_coords(c, &a);
+		if (a.x1 < 0 || a.y1 < 0 || a.x2 >= w || a.y2 >= h) {
+			fprintf(stderr, "[%s] home notice %zu is off screen: [%d,%d..%d,%d]\n", lang_name, i, (int)a.x1,
+					(int)a.y1, (int)a.x2, (int)a.y2);
+			assert(!"home notice off screen");
+		}
+		// A rectangle overlap, written out: these are inclusive coordinates,
+		// so the rectangles meet when neither is entirely left of the other.
+		bool overlaps = a.x1 <= grid_a.x2 && a.x2 >= grid_a.x1 && a.y1 <= grid_a.y2 && a.y2 >= grid_a.y1;
+		if (overlaps) {
+			fprintf(stderr, "[%s] home notice %zu [%d,%d..%d,%d] covers the tiles [%d,%d..%d,%d]\n",
+					lang_name, i, (int)a.x1, (int)a.y1, (int)a.x2, (int)a.y2, (int)grid_a.x1,
+					(int)grid_a.y1, (int)grid_a.x2, (int)grid_a.y2);
+			assert(!"home notice drawn over the tiles");
+		}
+	}
+}
+
 /* ---- main --------------------------------------------------------------- */
 
 int main(int argc, char **argv) {
@@ -858,6 +927,7 @@ int main(int argc, char **argv) {
 	assert(find_label_text(spotify_screen, "sonix") != NULL);
 	assert(find_label_text(spotify_screen, tr("spotify_demo")) == NULL);
 	assert(find_label_text(spotify_screen, tr("spotify_needs_wifi")) == NULL);
+	assert_home_is_clean(spotify_screen, &cfg, "English");
 
 	// ---- 2. Liked Songs: the list, the playing mark, and tapping a row.
 	assert(spotifypage_open_liked());
@@ -1065,8 +1135,10 @@ int main(int argc, char **argv) {
 			theme_set_kind((theme_kind_t)tk);
 
 			switch_screen_home(spotify_screen);
+			pump();
 			assert_no_raw_spotify_keys(spotify_screen, LANGS[li]);
 			assert_screen_no_overlaps(spotify_screen, "spotify_home", LANGS[li]);
+			assert_home_is_clean(spotify_screen, &cfg, LANGS[li]);
 
 			assert(spotifypage_open_liked());
 			pump();
@@ -1094,6 +1166,29 @@ int main(int argc, char **argv) {
 			assert_screen_no_overlaps(lv_screen_active(), "account", LANGS[li]);
 		}
 	}
+	// ---- 9b. The demo library in every language: the state the photo showed.
+	// The demo note is the longest thing the page ever puts under the grid, so
+	// if any translation is going to collide with the tiles, it is here.
+	fixture_mock();
+	g_serial++;
+	assert(find_label_text(spotify_screen, tr("spotify_demo")) == NULL);
+	for (size_t li = 0; li < sizeof(LANGS) / sizeof(LANGS[0]); li++) {
+		assert(lang_set(LANGS[li]));
+		for (int tk = 0; tk < THEME_KIND_COUNT; tk++) {
+			theme_set_kind((theme_kind_t)tk);
+			switch_screen_home(spotify_screen);
+			pump();
+			assert_no_raw_spotify_keys(spotify_screen, LANGS[li]);
+			assert_screen_no_overlaps(spotify_screen, "spotify_home_demo", LANGS[li]);
+			assert_home_is_clean(spotify_screen, &cfg, LANGS[li]);
+			// The badge really is shown in this state; otherwise this pass
+			// would be testing the connected page all over again.
+			if (tk == 0) {
+				assert(find_label_text(spotify_screen, tr("spotify_demo")) != NULL);
+			}
+		}
+	}
+
 	assert(lang_set("English"));
 	theme_set_kind(THEME_KIND_DARK);
 
