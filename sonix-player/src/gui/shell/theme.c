@@ -541,7 +541,9 @@ static void select_active(void) {
 	char names[24][256];
 	int count = theme_custom_files(names, 24);
 	for (int i = 0; i < count; i++) {
-		if (strcmp(names[i], saved_file) == 0) snprintf(custom_file, sizeof(custom_file), "%s", names[i]);
+		// %.255s: names[i] is a 256-byte slot, and the precision keeps the
+		// copy provably inside custom_file.
+		if (strcmp(names[i], saved_file) == 0) snprintf(custom_file, sizeof(custom_file), "%.255s", names[i]);
 	}
 
 	// Read the named theme choice when present; configs from older builds have

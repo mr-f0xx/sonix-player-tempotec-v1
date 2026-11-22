@@ -84,7 +84,7 @@ static void check_custom_theme(void) {
 	assert(theme_reload_custom());
 	assert(theme()->screen_bg.red == 4);
 	// Multiple named palettes can coexist; selection remembers the basename.
-	char other[256];
+	char other[512];
 	snprintf(other, sizeof(other), "%s/rose-pine.ini", dir);
 	f = fopen(other, "w");
 	assert(f);
