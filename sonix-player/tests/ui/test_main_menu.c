@@ -911,20 +911,22 @@ int main(int argc, char **argv) {
 	gridpage_set_tile_label_hidden(section_grid, -1, true);
 	gridpage_set_tile_label_hidden(section_grid, 99, true);
 
-	/* The icon set row sits between the icon preview and the accent colour,
-	   with its caption under it; the tint card follows the accent. */
+	/* The Icon set row follows Custom theme; the preview cards still lead
+	   directly to Accent colour, then the tint card. */
 	lv_obj_t *glyph_label = find_label(appearance_screen, tr("appearance_function_glyphs"));
 	lv_obj_t *accent_label = find_label(appearance_screen, tr("appearance_accent_colour"));
 	lv_obj_t *tint_label = find_label(appearance_screen, tr("appearance_dynamic_tint"));
 	lv_obj_t *iconset_label = find_label(appearance_screen, tr("appearance_icon_set"));
+	lv_obj_t *custom_theme_label = find_label(appearance_screen, tr("appearance_custom_theme"));
 	lv_obj_t *iconset_caption = find_label(appearance_screen, tr("appearance_icon_set_note"));
-	assert(glyph_label && accent_label && tint_label && iconset_label && iconset_caption);
+	assert(glyph_label && accent_label && tint_label && iconset_label && custom_theme_label && iconset_caption);
 	lv_obj_t *glyph_card = lv_obj_get_parent(glyph_label);
 	lv_obj_t *accent_card = lv_obj_get_parent(accent_label);
+	lv_obj_t *custom_theme_card = lv_obj_get_parent(custom_theme_label);
 	lv_obj_t *iconset_card = lv_obj_get_parent(iconset_label);
-	assert(lv_obj_get_sibling(glyph_card, 1) == iconset_card);
+	assert(lv_obj_get_sibling(custom_theme_card, 1) == iconset_card);
 	assert(lv_obj_get_sibling(iconset_card, 1) == iconset_caption);
-	assert(lv_obj_get_sibling(iconset_caption, 1) == accent_card);
+	assert(lv_obj_get_sibling(glyph_card, 1) == accent_card);
 	assert(lv_obj_get_sibling(accent_card, 1) == lv_obj_get_parent(tint_label));
 	/* With no card mounted the row still offers Default. */
 	assert(find_label(iconsetpage_screen, tr("appearance_icon_set_default")));

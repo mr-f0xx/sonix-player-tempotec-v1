@@ -1057,6 +1057,18 @@ void appearance_init(gui_config_t *cfg) {
 	settingsrow_add(container, "appearance_custom_theme", &custom_theme_value, switch_screen_cb,
 					 themefilepage_screen);
 
+	// Which artwork the whole interface wears: Default, or a folder from
+	// Icons/ on the card. Like Custom theme, it opens a page of card choices;
+	// keep the two card-backed selectors together in Appearance.
+	settingsrow_add(container, "appearance_icon_set", &iconset_value, switch_screen_cb, iconsetpage_screen);
+
+	lv_obj_t *iconset_note = lv_label_create(container);
+	lv_label_set_long_mode(iconset_note, LV_LABEL_LONG_WRAP);
+	lv_obj_set_width(iconset_note, lv_pct(100));
+	lv_obj_add_style(iconset_note, &theme_style_text_dim, 0);
+	lv_obj_set_style_text_font(iconset_note, &font_ui_22, 0);
+	lv_label_set_text(iconset_note, tr("appearance_icon_set_note"));
+
 	lv_obj_t *custom_note = lv_label_create(container);
 	lv_label_set_long_mode(custom_note, LV_LABEL_LONG_WRAP);
 	lv_obj_set_width(custom_note, lv_pct(100));
@@ -1076,20 +1088,6 @@ void appearance_init(gui_config_t *cfg) {
 	// Compact palette and function-matched icon previews for Tokyo Night, Amber
 	// on Black and OLED. The accent picker stays here even when they are hidden.
 	build_theme_previews(container, compact);
-
-	// Which artwork the whole interface wears: Default, or a folder from
-	// Icons/ on the card. A row into its own page, the same as Custom's
-	// files -- the folders are card content, discovered on the way in, and
-	// the row under the previews because a set is the same decision the
-	// theme row just took, in pictures instead of colour.
-	settingsrow_add(container, "appearance_icon_set", &iconset_value, switch_screen_cb, iconsetpage_screen);
-
-	lv_obj_t *iconset_note = lv_label_create(container);
-	lv_label_set_long_mode(iconset_note, LV_LABEL_LONG_WRAP);
-	lv_obj_set_width(iconset_note, lv_pct(100));
-	lv_obj_add_style(iconset_note, &theme_style_text_dim, 0);
-	lv_obj_set_style_text_font(iconset_note, &font_ui_22, 0);
-	lv_label_set_text(iconset_note, tr("appearance_icon_set_note"));
 
 	// The accent colour, as two rows of coloured circles.
 	lv_obj_t *accent_card = lv_obj_create(container);
