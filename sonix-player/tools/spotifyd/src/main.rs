@@ -180,43 +180,46 @@ pub fn dispatch<W: Write>(lib: &dyn Library, line: &str, out: &mut W) -> std::io
                 lib.play_context(arg(0), arg(1), arg(2))
             }
         }
+        // The transport commands carry no answer: the caller reads the new
+        // state from the next STATUS. Reply::new().encode() would be a String
+        // here, which is not what this match yields -- the empty Reply is.
         "TOGGLE" => {
             lib.toggle();
-            Reply::new().encode()
+            Reply::new()
         }
         "RESUME" => {
             lib.resume();
-            Reply::new().encode()
+            Reply::new()
         }
         "PAUSE" => {
             lib.pause();
-            Reply::new().encode()
+            Reply::new()
         }
         "NEXT" => {
             lib.next();
-            Reply::new().encode()
+            Reply::new()
         }
         "PREV" => {
             lib.previous();
-            Reply::new().encode()
+            Reply::new()
         }
         "SEEK" => {
             lib.seek(num(0, 0) as u32);
-            Reply::new().encode()
+            Reply::new()
         }
         "SHUFFLE" => {
             lib.shuffle(arg(0) != "0");
-            Reply::new().encode()
+            Reply::new()
         }
         "REPEAT" => {
             lib.repeat((num(0, 0).clamp(0, 2)) as u32);
-            Reply::new().encode()
+            Reply::new()
         }
         "VOLUME" => {
             lib.volume(num(0, 50).clamp(0, 100));
-            Reply::new().encode()
+            Reply::new()
         }
-        "PING" => Reply::new().encode(),
+        "PING" => Reply::new(),
         "END" => {
             out.write_all(b"END\n")?;
             return Ok(false);

@@ -179,7 +179,11 @@ impl Sink for SocketSink {
     }
 
     fn write(&mut self, packet: AudioPacket, converter: &mut Converter) -> SinkResult<()> {
-        let mut guard = self.shared.pcm.lock().map_err(|_| SinkError::NotConnected)?;
+        let mut guard = self
+            .shared
+            .pcm
+            .lock()
+            .map_err(|_| SinkError::NotConnected("the PCM channel was poisoned".into()))?;
         let stream = match guard.as_mut() {
             Some(s) => s,
             None => return Ok(()), // no player listening: drop the frame
