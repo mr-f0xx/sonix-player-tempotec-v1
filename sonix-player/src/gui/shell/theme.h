@@ -125,6 +125,11 @@ void theme_set_card_root(const char *root);
 int theme_custom_files(char names[][256], int max);
 const char *theme_custom_file(void);
 bool theme_select_custom_file(const char *name);
+// The name a Themes/*.ini file or an Icons/ folder is listed under: the
+// filename without its .ini, separators turned into spaces and each word
+// capitalised, with the shipped palettes under their theme names
+// (catppuccin-mocha lists as "Catppuccin").
+void theme_item_label(const char *name, char *out, size_t size);
 bool theme_reload_custom(void);
 
 // Palette resolved without any of the styles, for pages that run before the

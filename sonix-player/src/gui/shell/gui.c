@@ -16,6 +16,8 @@
 #include "src/gui/wireless/airplay.h"
 #include "src/gui/bluetooth/airpodspage.h"
 #include "src/gui/settings/appearance.h"
+#include "src/gui/settings/iconsetpage.h"
+#include "src/gui/settings/themefilepage.h"
 #include "src/gui/bluetooth/btaudio.h"
 #include "src/gui/settings/bootpicpage.h"
 #include "src/gui/bluetooth/btsettings.h"
@@ -695,6 +697,8 @@ void gui_init(gui_config_t *cfg) {
 	powersettings_screen = lv_obj_create(NULL);
 	appearance_screen = lv_obj_create(NULL);
 	bootpicpage_screen = lv_obj_create(NULL); // the page the boot screen's Custom pill opens
+	iconsetpage_screen = lv_obj_create(NULL);
+	themefilepage_screen = lv_obj_create(NULL);
 	language_screen = lv_obj_create(NULL);
 	medialist_screen = lv_obj_create(NULL);
 	stats_screen = lv_obj_create(NULL);
@@ -858,6 +862,8 @@ void gui_init(gui_config_t *cfg) {
 	systempage_init(cfg);
 	appearance_init(cfg);
 	bootpicpage_init(cfg); // after appearance: its Custom pill opens this page
+	iconsetpage_init(cfg);
+	themefilepage_init(cfg);
 	language_init(cfg);
 	libraryscan_init(cfg);
 	if (addons_enabled("mseb")) {
