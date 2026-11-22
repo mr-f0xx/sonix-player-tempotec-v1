@@ -139,7 +139,7 @@ int playlists_remove_positions(const char *name, const int *positions, int count
 
 static const uint8_t GLYPH_BYTES[4] = {0xff, 0xff, 0xff, 0xff};
 #define DUMMY_ICON(name) \
-	const lv_image_dsc_t name = {.header = {.magic = LV_IMAGE_HEADER_MAGIC, .cf = LV_COLOR_FORMAT_A8, .w = 2, .h = 2, .stride = 2}, \
+	lv_image_dsc_t name = {.header = {.magic = LV_IMAGE_HEADER_MAGIC, .cf = LV_COLOR_FORMAT_A8, .w = 2, .h = 2, .stride = 2}, \
 								 .data = GLYPH_BYTES, .data_size = sizeof(GLYPH_BYTES)}
 
 DUMMY_ICON(icon_album);

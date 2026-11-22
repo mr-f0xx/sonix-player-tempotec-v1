@@ -267,7 +267,7 @@ static void remove_menu_show_async(void *user) {
 	}
 	popover_item_t items[MENU_PLAYLISTS_MAX];
 	for (int i = 0; i < menu_playlist_count; i++) {
-		items[i] = (popover_item_t){menu_playlists[i], menu_remove_one_action, (void *)(intptr_t)i, false};
+		items[i] = (popover_item_t){menu_playlists[i], menu_remove_one_action, (void *)(intptr_t)i, false, false};
 	}
 	popover_show(menu_anchor, items, menu_playlist_count);
 }
@@ -321,12 +321,12 @@ static void track_long_pressed_cb(lv_event_t *e) {
 	int n = 0;
 	items[n++] = (popover_item_t){
 		library_fav_contains(menu_path) ? "remove_from_favourites" : "medialist_add_to_favourites", menu_fav_action, NULL,
-		false};
-	items[n++] = (popover_item_t){"smartmix_start", menu_genius_action, NULL, false};
-	items[n++] = (popover_item_t){"add_to_queue", menu_queue_action, NULL, false};
-	items[n++] = (popover_item_t){"add_to_playlist", menu_playlist_action, NULL, false};
+		false, false};
+	items[n++] = (popover_item_t){"smartmix_start", menu_genius_action, NULL, false, false};
+	items[n++] = (popover_item_t){"add_to_queue", menu_queue_action, NULL, false, false};
+	items[n++] = (popover_item_t){"add_to_playlist", menu_playlist_action, NULL, false, false};
 	if (menu_playlist_count > 0) {
-		items[n++] = (popover_item_t){"medialist_remove_from_playlist", menu_remove_action, NULL, false};
+		items[n++] = (popover_item_t){"medialist_remove_from_playlist", menu_remove_action, NULL, false, false};
 	}
 	popover_show(menu_anchor, items, n);
 }

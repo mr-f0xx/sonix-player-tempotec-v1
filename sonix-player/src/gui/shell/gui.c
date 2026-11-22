@@ -86,6 +86,7 @@
 #include "src/gui/settings/timeset.h"
 #include "src/gui/fonts/fonts.h"
 #include "src/gui/shell/icons.h"
+#include "src/gui/shell/iconset.h"
 #include "src/gui/shell/theme.h"
 #include "src/gui/shell/toast.h"
 #include "src/gui/shell/topbar.h"
@@ -665,9 +666,13 @@ void gui_init(gui_config_t *cfg) {
 	// which main.c has done by now. See fonts_set_card_root().
 	fonts_set_card_root(cfg->sd_root_path);
 	theme_set_card_root(cfg->sd_root_path);
+	iconset_set_card_root(cfg->sd_root_path);
 
 	// Colours first: every screen below styles itself from the active palette.
 	theme_init();
+	// Then the saved icon set, if any: it publishes its glyph mode to the
+	// theme before any screen below asks what mode it draws in.
+	iconset_init();
 
 	// The player sheet is parked off the right edge of the top layer, which
 	// makes that layer scrollable unless told otherwise -- and then a sideways

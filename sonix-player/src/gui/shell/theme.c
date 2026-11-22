@@ -690,7 +690,19 @@ bool theme_is_monochrome(void) {
 	return selected_kind == THEME_KIND_AMBER_ON_BLACK || selected_kind == THEME_KIND_OLED;
 }
 
+// Set by an SD icon set (iconset.c); NULL keeps every theme on its own.
+static theme_glyph_mode_fn_t icon_glyph_mode;
+static theme_semantic_color_fn_t icon_semantic_color;
+
+void theme_set_icon_sources(theme_glyph_mode_fn_t glyphs, theme_semantic_color_fn_t semantic) {
+	icon_glyph_mode = glyphs;
+	icon_semantic_color = semantic;
+}
+
 bool theme_uses_function_glyphs(void) {
+	if (icon_glyph_mode && icon_glyph_mode()) {
+		return true;
+	}
 	return selected_kind == THEME_KIND_TOKYO_NIGHT || selected_kind == THEME_KIND_AMBER_ON_BLACK ||
 		   selected_kind == THEME_KIND_OLED;
 }
@@ -702,6 +714,14 @@ lv_color_t theme_on_accent(void) { return theme_ink_on(active->accent); }
 theme_kind_t theme_get_kind(void) { return selected_kind; }
 
 lv_color_t theme_semantic_color(theme_semantic_t role) {
+	// An SD icon set's palette wins over every built-in mapping, monochrome
+	// and Tokyo alike: it is the artwork on screen, and it brought its colours.
+	if (icon_semantic_color) {
+		lv_color_t from_set;
+		if (icon_semantic_color(role, &from_set)) {
+			return from_set;
+		}
+	}
 	if (role == THEME_SEMANTIC_MUTED) {
 		// The monochrome palettes' icons all share the same signal colour;
 		// reserve their secondary tone for labels and surfaces, not
@@ -922,6 +942,11 @@ static void refresh_all(void) {
 		refresh_cbs[i]();
 	}
 }
+
+// What an SD icon set calls after swapping the glyphs behind the styles: the
+// same repaint a palette change gets, so the new pixels land on screen now
+// rather than at the next navigation.
+void theme_repaint(void) { refresh_all(); }
 
 static const char *theme_config_value(theme_kind_t kind) {
 	switch (kind) {

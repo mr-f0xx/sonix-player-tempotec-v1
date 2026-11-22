@@ -11,6 +11,7 @@
 #include "src/gui/nowplaying/player.h"
 #include "src/gui/shell/corners.h"
 #include "src/gui/shell/gestures.h"
+#include "src/gui/shell/iconset.h"
 #include "src/gui/shell/icons.h"
 #include "src/gui/shell/main_menu.h"
 #include "src/gui/shell/settingsrow.h"
@@ -234,6 +235,96 @@ static void font_pills_rebuild(void) {
 static void font_pills_reload_cb(lv_event_t *e) {
 	(void)e;
 	font_pills_rebuild();
+}
+
+// ---------------------------------------------------------------------------
+// Settings -> Appearance -> Icon set
+//
+// The artwork the whole interface is drawn with, as a row of pills: Default
+// (the built-in glyphs) plus every folder in Icons/ on the card. See
+// iconset.c for what a set is. Folder names are not translated -- they are
+// the names on the card -- and the row is looked at again every time the
+// page is opened, the way the font row is, so a set copied over while the
+// player was running is offered without anything else moving.
+// ---------------------------------------------------------------------------
+
+#define ICONSET_PILLS_MAX 8 // one is always Default; the rest are folders
+#define ICONSET_NAME_COPY 64
+
+static lv_obj_t *iconset_pills;
+static lv_obj_t *iconset_pill[ICONSET_PILLS_MAX];
+static char iconset_pill_name[ICONSET_PILLS_MAX][ICONSET_NAME_COPY]; // the pill's own copy
+static int iconset_pill_count;
+
+// Paints the chosen set as the filled accent pill, the rest quiet. Default
+// is the empty name, which is what iconset_active_name() reports with no
+// set loaded.
+static void refresh_iconset_pills(void) {
+	const char *active = iconset_active_name();
+	for (int i = 0; i < iconset_pill_count; i++) {
+		settingsrow_pill_active(iconset_pill[i], strcmp(iconset_pill_name[i], active) == 0);
+	}
+}
+
+// The pill's number in the row, one-based, as the pill helpers pass a value
+// to their callback: the name is looked up here rather than carried as user
+// data, so the list can be rebuilt without leaving a pill pointing at a
+// buffer that has moved on.
+static void iconset_pick_cb(lv_event_t *e) {
+	if (switcher_back_drag_active()) {
+		return;
+	}
+	int index = (int)(intptr_t)lv_event_get_user_data(e) - 1;
+	if (index < 0 || index >= iconset_pill_count) {
+		return;
+	}
+	if (!iconset_select(iconset_pill_name[index])) {
+		// The folder went with a card that was pulled out, or the set
+		// shipped no icons the firmware knows. Nothing changes; the row
+		// repaints over the attempt.
+		toast_error("appearance_icon_set_failed");
+		refresh_iconset_pills();
+		return;
+	}
+	config_set("ui", "icon_set", iconset_pill_name[index]);
+	config_save();
+	// The pixels behind every screen on the device just changed.
+	theme_repaint();
+	refresh_iconset_pills();
+}
+
+// Builds the row, and rebuilds it when the folders themselves have changed:
+// a set copied onto the card (or taken off it) appears the next time the
+// page is opened, without the pills already there being disturbed in
+// between.
+static void iconset_pills_rebuild(void) {
+	const char *sets[ICONSET_PILLS_MAX];
+	int folders = iconset_choices(sets, ICONSET_PILLS_MAX - 1);
+
+	bool same = folders + 1 == iconset_pill_count;
+	for (int i = 0; same && i < folders; i++) {
+		same = strcmp(sets[i], iconset_pill_name[i + 1]) == 0;
+	}
+	if (same) {
+		refresh_iconset_pills();
+		return;
+	}
+
+	lv_obj_clean(iconset_pills);
+	iconset_pill_count = folders + 1;
+	iconset_pill_name[0][0] = '\0';
+	iconset_pill[0] = settingsrow_pill_text(iconset_pills, tr("appearance_icon_set_default"), 1, iconset_pick_cb);
+	for (int i = 0; i < folders; i++) {
+		snprintf(iconset_pill_name[i + 1], ICONSET_NAME_COPY, "%s", sets[i]);
+		iconset_pill[i + 1] =
+			settingsrow_pill_text(iconset_pills, iconset_pill_name[i + 1], i + 2, iconset_pick_cb);
+	}
+	refresh_iconset_pills();
+}
+
+static void iconset_pills_reload_cb(lv_event_t *e) {
+	(void)e;
+	iconset_pills_rebuild();
 }
 
 // Paints the active theme choice. Dark and Light keep their original filled
@@ -1000,6 +1091,18 @@ void appearance_init(gui_config_t *cfg) {
 	// on Black and OLED. The accent picker stays here even when they are hidden.
 	build_theme_previews(container, compact);
 
+	// Which artwork the whole interface wears: Default, or a folder from
+	// Icons/ on the card. Under the theme previews because a set is the
+	// same decision the theme row just took, in pictures instead of colour.
+	settingsrow_pills(container, "appearance_icon_set", &iconset_pills);
+
+	lv_obj_t *iconset_note = lv_label_create(container);
+	lv_label_set_long_mode(iconset_note, LV_LABEL_LONG_WRAP);
+	lv_obj_set_width(iconset_note, lv_pct(100));
+	lv_obj_add_style(iconset_note, &theme_style_text_dim, 0);
+	lv_obj_set_style_text_font(iconset_note, &font_ui_22, 0);
+	lv_label_set_text(iconset_note, tr("appearance_icon_set_note"));
+
 	// The accent colour, as two rows of coloured circles.
 	lv_obj_t *accent_card = lv_obj_create(container);
 	lv_obj_set_width(accent_card, lv_pct(100));
@@ -1288,6 +1391,7 @@ void appearance_init(gui_config_t *cfg) {
 	settingsrow_toggle_slider_expanded(rounded_corners_card, corners_enabled());
 
 	font_pills_rebuild();
+	iconset_pills_rebuild();
 
 	refresh_buttons();
 	refresh_boot_buttons();
@@ -1295,18 +1399,22 @@ void appearance_init(gui_config_t *cfg) {
 	refresh_clock_buttons();
 	refresh_accent_buttons();
 	refresh_text_size_pills();
+	refresh_iconset_pills();
 	theme_register_refresh(refresh_buttons);
 	theme_register_refresh(refresh_boot_buttons);
 	theme_register_refresh(refresh_text_size_pills);
 	theme_register_refresh(refresh_clock_buttons);
 	theme_register_refresh(refresh_accent_buttons);
 	theme_register_refresh(refresh_font_pills);
+	theme_register_refresh(refresh_iconset_pills);
 	theme_register_refresh(appearance_preview_refresh);
 
 	// The card's fonts again on every visit: one copied over the USB cable
 	// while the player was running is offered the next time this page comes
-	// up, and one whose card has been pulled out is gone from the row.
+	// up, and one whose card has been pulled out is gone from the row. The
+	// icon sets are the same deal with folders.
 	lv_obj_add_event_cb(appearance_screen, font_pills_reload_cb, LV_EVENT_SCREEN_LOADED, NULL);
+	lv_obj_add_event_cb(appearance_screen, iconset_pills_reload_cb, LV_EVENT_SCREEN_LOADED, NULL);
 	lv_obj_add_event_cb(appearance_screen, boot_card_refresh_cb, LV_EVENT_SCREEN_LOADED, NULL);
 	lv_obj_add_event_cb(appearance_screen, custom_card_refresh_cb, LV_EVENT_SCREEN_LOADED, NULL);
 }

@@ -855,12 +855,12 @@ static void sel_sheet_cb(lv_event_t *e) {
 	popover_item_t actions[3];
 	int count = 0;
 	if (any_unheard) {
-		actions[count++] = (popover_item_t){"podcast_mark_listened", sel_heard_cb, NULL, false};
+		actions[count++] = (popover_item_t){"podcast_mark_listened", sel_heard_cb, NULL, false, false};
 	}
 	if (any_heard) {
-		actions[count++] = (popover_item_t){"podcast_mark_not_listened", sel_unheard_cb, NULL, false};
+		actions[count++] = (popover_item_t){"podcast_mark_not_listened", sel_unheard_cb, NULL, false, false};
 	}
-	actions[count++] = (popover_item_t){"delete", sel_delete_cb, NULL, false};
+	actions[count++] = (popover_item_t){"delete", sel_delete_cb, NULL, false, false};
 	popover_show(lv_event_get_current_target(e), actions, count);
 }
 

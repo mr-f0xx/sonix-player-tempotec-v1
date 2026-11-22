@@ -21,7 +21,7 @@ void cover_free(cover_image_t *image) {
 	if (image) memset(image, 0, sizeof(*image));
 }
 static const uint8_t glyph[] = {255};
-#define ICON(n) const lv_image_dsc_t n = { .header = { .magic = LV_IMAGE_HEADER_MAGIC, .cf = LV_COLOR_FORMAT_A8, .w = 1, .h = 1, .stride = 1 }, .data = glyph, .data_size = 1 }
+#define ICON(n) lv_image_dsc_t n = { .header = { .magic = LV_IMAGE_HEADER_MAGIC, .cf = LV_COLOR_FORMAT_A8, .w = 1, .h = 1, .stride = 1 }, .data = glyph, .data_size = 1 }
 ICON(icon_folder); ICON(icon_music2); ICON(icon_album); ICON(icon_refresh);
 
 int main(void) {

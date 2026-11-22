@@ -331,22 +331,22 @@ static void show_device_menu(lv_obj_t *anchor, bool connected, bool audio_connec
 	int count = 0;
 
 	if (audio_connected) {
-		items[count++] = (popover_item_t){"disconnect", disconnect_action, NULL, false};
+		items[count++] = (popover_item_t){"disconnect", disconnect_action, NULL, false, false};
 	} else if (connected) {
 		// The ACL link can remain up after A2DP has gone. Let the user request
 		// the audio profile again without cycling the whole Bluetooth radio.
-		items[count++] = (popover_item_t){"connect", connect_action, NULL, false};
-		items[count++] = (popover_item_t){"disconnect", disconnect_action, NULL, false};
+		items[count++] = (popover_item_t){"connect", connect_action, NULL, false, false};
+		items[count++] = (popover_item_t){"disconnect", disconnect_action, NULL, false, false};
 	} else {
-		items[count++] = (popover_item_t){"connect", connect_action, NULL, false};
+		items[count++] = (popover_item_t){"connect", connect_action, NULL, false, false};
 	}
 
-	items[count++] = (popover_item_t){"bt_rename_device", rename_action, NULL, false};
+	items[count++] = (popover_item_t){"bt_rename_device", rename_action, NULL, false, false};
 	char alias[BT_NAME_MAX];
 	if (bluetooth_get_device_alias(menu_mac, alias, sizeof(alias))) {
-		items[count++] = (popover_item_t){"bt_restore_device_name", restore_name_action, NULL, false};
+		items[count++] = (popover_item_t){"bt_restore_device_name", restore_name_action, NULL, false, false};
 	}
-	items[count++] = (popover_item_t){"bt_forget", forget_action, NULL, false};
+	items[count++] = (popover_item_t){"bt_forget", forget_action, NULL, false, false};
 	popover_show(anchor, items, count);
 }
 

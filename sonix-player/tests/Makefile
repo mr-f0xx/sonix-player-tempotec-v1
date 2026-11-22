@@ -2,6 +2,10 @@ CC ?= cc
 PKG_CONFIG ?= pkg-config
 ROOT := ..
 BUILD := .build
+# Same LVGL tree the firmware builds against, including the icon-set hook the
+# main Makefile applies (see ../lvgl-patch.mk).
+LVGL_DIR := $(abspath $(ROOT)/lvgl)
+include $(ROOT)/lvgl-patch.mk
 CPPFLAGS += -I$(ROOT)
 CFLAGS ?= -O2 -g
 CFLAGS += -std=gnu11 -Wall -Wextra -Werror -D_FILE_OFFSET_BITS=64 -ffunction-sections -fdata-sections
@@ -895,6 +899,8 @@ UI_SRC = $(ROOT)/tests/ui/test_main_menu.c $(ROOT)/src/gui/shell/main_menu.c \
          $(ROOT)/src/gui/streaming/soundcloud_icon.c \
          $(ROOT)/src/gui/streaming/jellyfin_icon.c \
          $(ROOT)/src/gui/settings/appearance.c \
+         $(ROOT)/src/gui/shell/iconset.c \
+         $(ROOT)/src/system/image/stb_image_impl.c \
          $(ROOT)/src/gui/settings/bootpicpage.c \
          $(ROOT)/src/gui/shell/corners.c $(ROOT)/src/gui/shell/settingsrow.c \
          $(ROOT)/src/gui/shell/theme.c \
@@ -1156,6 +1162,22 @@ stats-ui: $(BUILD)/test_stats
 	$(BUILD)/test_stats
 
 $(BUILD)/test_stats: $(STATS_UI_OBJ)
+	$(CC) -o $@ $^ $(LDFLAGS) $(LDLIBS)
+
+# The SD icon set loader: swap, palette, restore. Writes its own folders, so
+# no card or reader is involved.
+ICONSET_UI_SRC = $(ROOT)/tests/ui/test_iconset.c $(ROOT)/src/gui/shell/iconset.c \
+                 $(ROOT)/src/gui/shell/icons.c $(ROOT)/src/gui/shell/theme.c \
+                 $(ROOT)/src/gui/board_profile.c $(ROOT)/src/system/core/config.c \
+                 $(ROOT)/src/system/image/stb_image_impl.c
+ICONSET_UI_OBJ = $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(ICONSET_UI_SRC)) \
+                 $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(UI_LVGL_SRC))
+
+.PHONY: iconset-ui
+iconset-ui: $(BUILD)/test_iconset
+	$(BUILD)/test_iconset
+
+$(BUILD)/test_iconset: $(ICONSET_UI_OBJ)
 	$(CC) -o $@ $^ $(LDFLAGS) $(LDLIBS)
 
 CORNERS_SRC = $(ROOT)/tests/ui/test_corners.c $(ROOT)/src/gui/shell/corners.c \
