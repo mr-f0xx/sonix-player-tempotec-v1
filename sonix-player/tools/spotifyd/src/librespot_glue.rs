@@ -34,7 +34,9 @@ use librespot::core::session::Session;
 use librespot::core::spotify_id::SpotifyId;
 use librespot::metadata::{Album, Artist, Metadata, Playlist, Track};
 use librespot::playback::audio_backend::{Sink, SinkError, SinkResult};
-use librespot::playback::config::{Bitrate, PlayerConfig};
+use librespot::playback::config::{AudioFormat, Bitrate, PlayerConfig};
+use librespot::playback::convert::Converter;
+use librespot::playback::decoder::AudioPacket;
 use librespot::playback::player::{Player, PlayerEvent};
 
 use protocol::{ListPage, PlaylistRow, Reply, Status, Track as WireTrack};
@@ -86,6 +88,32 @@ impl Shared {
 /// and the player picks it up by seeking when it reopens.
 pub struct SocketSink {
     pub shared: Arc<Shared>,
+    /// What the PCM header line promised the player. The sink is the only
+    /// thing that can keep that promise, because it is the only thing that
+    /// touches the samples.
+    pub format: librespot::playback::config::AudioFormat,
+}
+
+/// Interleaved little-endian bytes from a slice of samples, without `unsafe`:
+/// zero-copy casts from &[i16] are the one thing std does not offer, and
+/// writing the bytes out one field at a time is both safe and fast enough at
+/// 44.1 kHz (a copy of 4 KB per packet).
+fn s16_le(samples: &[i16]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(samples.len() * 2);
+    for s in samples {
+        out.extend_from_slice(&s.to_le_bytes());
+    }
+    out
+}
+
+/// 24-bit samples in three bytes each, which is what S24_3LE means.
+fn s24_3_le(samples: &[i32]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(samples.len() * 3);
+    for s in samples {
+        let b = s.to_le_bytes();
+        out.extend_from_slice(&b[..3]);
+    }
+    out
 }
 
 impl Sink for SocketSink {
@@ -98,21 +126,42 @@ impl Sink for SocketSink {
         Ok(())
     }
 
-    fn write(&mut self, data: &[u8]) -> SinkResult<()> {
-        use std::io::Write;
+    // librespot 0.7 hands the sink decoded packets in f64 and lets the backend
+    // choose its own sample format; it no longer hands over ready-made bytes.
+    // The player asked for S16 (or S24_3LE) in the PCM header, so this is the
+    // one place that decides which of librespot's conversions to use, and it
+    // is decided by `self.format`, which comes from the same config the header
+    // line was written from.
+    fn write(&mut self, packet: AudioPacket, converter: &mut Converter) -> SinkResult<()> {
         let mut guard = self.shared.pcm.lock().map_err(|_| SinkError::NotConnected)?;
-        if let Some(stream) = guard.as_mut() {
+        let stream = match guard.as_mut() {
+            Some(s) => s,
+            None => return Ok(()), // no player listening: drop the frame
+        };
+
+        // Interleaved little-endian bytes, exactly what the header promised.
+        let written = match (self.format, packet) {
+            (AudioFormat::S24_3, AudioPacket::Samples(samples)) => {
+                let out = converter.f64_to_s24(&samples);
+                stream.write_all(&s24_3_le(&out))
+            }
+            (_, AudioPacket::Samples(samples)) => {
+                // S16 is the default, and it is also the honest fallback: the
+                // header said 16 bits unless the config said otherwise.
+                let out = converter.f64_to_s16(&samples);
+                stream.write_all(&s16_le(&out))
+            }
+            (_, AudioPacket::Raw(samples)) => stream.write_all(&samples),
+        };
+
+        if written.is_err() {
             // A broken pipe is the player going away mid-track: clear the
             // channel and let the connection thread close it. Not an error the
             // phone should see.
-            if stream.write_all(data).is_err() {
-                *guard = None;
-            }
+            *guard = None;
         }
         Ok(())
     }
-
-    fn close(&mut self) {}
 }
 
 /// The process's one runtime, and the one library behind every connection.
@@ -173,7 +222,10 @@ async fn open(cfg: &crate::Config) -> Result<Opened, Box<dyn std::error::Error>>
         cache,
         {
             let shared = shared.clone();
-            move || Box::new(SocketSink { shared }) as Box<dyn Sink>
+            // The format the player is told about in the PCM header comes from
+            // this same value, so the sink cannot promise 16 bits and send 24.
+            let format = if cfg.bits == 24 { AudioFormat::S24_3 } else { AudioFormat::S16 };
+            move || Box::new(SocketSink { shared, format }) as Box<dyn Sink>
         },
     );
 
@@ -250,7 +302,7 @@ impl Daemon {
     /// the player. The metadata is fetched first so the status page has words
     /// before the audio starts -- on a slow link the other order shows a
     /// hexadecimal id for a second.
-    fn play_track(&self, id: &str) -> Result<(), Box<dyn std::error::Error>> {
+    async fn play_track(&self, id: &str) -> Result<(), Box<dyn std::error::Error>> {
         let uri = SpotifyId::from_base62(id)?;
         let track = Track::get(&self.session, &uri).await?;
 
@@ -287,19 +339,19 @@ impl Daemon {
     }
 
     /// One page of Liked Songs.
-    fn liked_page(&self, offset: usize, limit: usize) -> Result<ListPage, String> {
+    async fn liked_page(&self, offset: usize, limit: usize) -> Result<ListPage, String> {
         let list = Playlist::get_liked(&self.session).await.map_err(|e| e.to_string())?;
         self.page(&list, offset, limit).await
     }
 
     /// One page of a playlist's tracks.
-    fn playlist_page(&self, id: &str, offset: usize, limit: usize) -> Result<ListPage, String> {
+    async fn playlist_page(&self, id: &str, offset: usize, limit: usize) -> Result<ListPage, String> {
         let uri = SpotifyId::from_base62(id).map_err(|e| e.to_string())?;
         let list = Playlist::get(&self.session, &uri).await.map_err(|e| e.to_string())?;
         self.page(&list, offset, limit).await
     }
 
-    fn playlist_rows(&self) -> Result<Vec<PlaylistRow>, String> {
+    async fn playlist_rows(&self) -> Result<Vec<PlaylistRow>, String> {
         let lists = Playlist::get_playlists(&self.session).await.map_err(|e| e.to_string())?;
         Ok(lists
             .into_iter()
@@ -312,7 +364,7 @@ impl Daemon {
             .collect())
     }
 
-    fn search_page(&self, query: &str) -> Result<ListPage, String> {
+    async fn search_page(&self, query: &str) -> Result<ListPage, String> {
         let page = librespot::metadata::page::Page::<Track>::get(
             &self.session,
             format!("/search?q={}&type=track&limit=50", urlencode(query)),
@@ -440,7 +492,10 @@ impl Library for Daemon {
 
     fn play(&self, id: &str) -> Reply {
         let mut r = Reply::new();
-        r.verdict(self.play_track(id).is_ok(), "could not load the track");
+        // play_track() is async: it fetches the metadata before the audio so
+        // the status page has words before the first sample.
+        let ok = self.runtime.block_on(self.play_track(id)).is_ok();
+        r.verdict(ok, "could not load the track");
         r
     }
 
