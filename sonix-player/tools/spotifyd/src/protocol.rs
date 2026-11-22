@@ -65,8 +65,38 @@ impl Reply {
     }
 
     /// `END` for a command that has nothing to say.
+    ///
+    /// The data lines take the cap and END takes the line after them. Pushing
+    /// END without making room left a full page at 121 lines against a cap of
+    /// 120 -- one line more than the player reads, and the END it was waiting
+    /// for was the line that fell off the end.
     pub fn done(&mut self) {
+        self.set_end();
+    }
+
+    fn set_end(&mut self) {
+        self.lines.retain(|l| l != "END" && !l.starts_with("ERR "));
+        while self.lines.len() >= REPLY_LINES_MAX {
+            self.lines.pop();
+        }
         self.lines.push("END".into());
+    }
+
+    /// Says why, even when the reply is already full.
+    ///
+    /// error() goes through line(), which stops accepting data at
+    /// REPLY_LINES_MAX -- so an error raised by a page that had already used
+    /// its 120 lines was dropped on the floor, and the reply went out as a
+    /// bare END. To the player that is success: it draws an empty page and
+    /// never tells anybody why. The verdict is not data, it is the frame
+    /// around it, so it takes the END's place rather than competing with it.
+    fn set_error(&mut self, why: &str) {
+        self.lines.retain(|l| l != "END");
+        let text = format!("ERR {}", flatten(why));
+        if self.lines.len() >= REPLY_LINES_MAX {
+            self.lines.pop();
+        }
+        self.lines.push(text);
     }
 
     /// `END` or `ERR <why>`, whichever the work earned.
@@ -74,13 +104,13 @@ impl Reply {
         if ok {
             self.done();
         } else {
-            self.line(format!("ERR {}", flatten(why)));
+            self.set_error(why);
         }
     }
 
     pub fn error(why: &str) -> Self {
         let mut r = Reply::new();
-        r.line(format!("ERR {}", flatten(why)));
+        r.set_error(why);
         r
     }
 
@@ -295,6 +325,26 @@ mod tests {
     }
 
     #[test]
+    fn an_error_survives_a_full_page() {
+        // The case error() got wrong: a page that has used every line it may
+        // then fails, and the reason has to reach the player.
+        let mut r = Reply::new();
+        for i in 0..REPLY_LINES_MAX {
+            r.line(format!("row {}", i));
+        }
+        assert_eq!(r.lines.len(), REPLY_LINES_MAX);
+        r.set_error("the session went away");
+        let text = r.encode();
+        assert!(text.contains("ERR the session went away"), "got: {}", text);
+        // ERR is the frame's end: the player stops on it exactly as on END, so
+        // there must be no END after it.
+        assert!(text.ends_with("ERR the session went away\n"), "got tail: {:?}", &text[text.len().saturating_sub(40)..]);
+        // Still inside the cap the player reads, and one line shorter than the
+        // page was, because set_error() replaced the row it displaced.
+        assert!(text.lines().count() <= REPLY_LINES_MAX);
+    }
+
+    #[test]
     fn a_reply_always_ends_with_end() {
         let r = Reply::error("no daemon");
         assert_eq!(r.encode(), "ERR no daemon\n");
@@ -320,8 +370,17 @@ mod tests {
             }));
         }
         let text = page.encode().encode();
-        assert!(text.lines().count() <= REPLY_LINES_MAX + 1);
+        // The cap is on the whole reply, END included: a 121st line is one the
+        // player never reads, and if END is the line that overflows, the player
+        // waits for an end to a reply it has already stopped reading.
+        assert!(
+            text.lines().count() <= REPLY_LINES_MAX,
+            "{} lines, cap is {}",
+            text.lines().count(),
+            REPLY_LINES_MAX
+        );
         assert!(text.ends_with("END\n"));
+        assert!(text.len() <= REPLY_BYTES_MAX);
     }
 
     #[test]
