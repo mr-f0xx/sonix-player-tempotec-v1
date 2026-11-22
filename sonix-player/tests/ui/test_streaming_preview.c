@@ -29,6 +29,13 @@ void subsonicpage_init(gui_config_t *cfg) { (void)cfg; abort(); }
 void jellyfinpage_init(gui_config_t *cfg) { (void)cfg; abort(); }
 void soundcloudpage_init(gui_config_t *cfg) { (void)cfg; abort(); }
 
+// Spotify is a destination on this page whether or not the plugin is on --
+// this fixture keeps every add-on off, and streaming.c still asks for the
+// screen and the icons. The pages themselves are the other test's job.
+lv_obj_t *spotify_screen;
+const lv_image_dsc_t icon_spotify_mark, icon_spotify_menu, icon_spotify_badge;
+void spotifypage_init(gui_config_t *cfg) { (void)cfg; abort(); }
+
 lv_font_t font_ui_14, font_ui_16, font_ui_18, font_ui_20, font_ui_20_bold;
 lv_font_t font_ui_22, font_ui_22_bold, font_ui_24, font_ui_24_bold, font_ui_26, font_ui_28, font_ui_32;
 void fonts_register_change(void (*cb)(void)) { (void)cb; }

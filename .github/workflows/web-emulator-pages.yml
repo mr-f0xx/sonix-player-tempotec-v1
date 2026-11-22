@@ -194,6 +194,68 @@ jobs:
         with:
           path: tools/v1-emulator/dist/pages
 
+  # -------------------------------------------------------------------------
+  # The Spotify daemon
+  #
+  # tools/spotifyd is Rust and the firmware toolchain has no Rust, so nothing in
+  # this repository ever compiled it: the C client has a test suite and the
+  # daemon had a promise. It is built here for two reasons -- to find out
+  # whether it compiles at all, and to hand back a binary, because "set up the
+  # Spotify daemon" is not a step anybody should have to start with `cargo`.
+  #
+  # It lives in this workflow rather than one of its own because GitHub only
+  # registers a new workflow file once it is on the default branch; this one
+  # runs on every branch already.
+  # -------------------------------------------------------------------------
+  spotifyd:
+    name: Build the Spotify daemon
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: sonix-player/tools/spotifyd
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: sonix-player/tools/spotifyd
+
+      # librespot's native dependencies: a C compiler, pkg-config, ALSA's
+      # headers for the default backend, and OpenSSL for the handshake.
+      - name: System dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential pkg-config libasound2-dev libssl-dev
+
+      - name: Protocol tests (no librespot, no network)
+        run: cargo test --lib
+
+      - name: Build
+        run: cargo build --release
+
+      - name: Stage the binary and its configuration
+        run: |
+          mkdir -p "$RUNNER_TEMP/spotifyd"
+          cp target/release/spotifyd "$RUNNER_TEMP/spotifyd/"
+          cp spotifyd.conf.example "$RUNNER_TEMP/spotifyd/"
+          cp README.md "$RUNNER_TEMP/spotifyd/"
+          cp PROTOCOL.md "$RUNNER_TEMP/spotifyd/"
+          file target/release/spotifyd
+          ls -la "$RUNNER_TEMP/spotifyd"
+
+      - name: Upload the daemon
+        uses: actions/upload-artifact@v4
+        with:
+          name: spotifyd-linux-x86_64
+          path: ${{ runner.temp }}/spotifyd
+          if-no-files-found: error
+
   deploy-pages:
     name: Deploy static V1 emulator to GitHub Pages
     needs: build-wasm
