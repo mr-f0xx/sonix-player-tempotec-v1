@@ -67,17 +67,17 @@ fn likestate_id(user: &str) -> Option<SpotifyId> {
 /// radio); handing it a URL rather than megabytes of image keeps the socket for
 /// what it is for.
 fn cover_url(album: &Album) -> String {
+    // Chosen by pixel area, not by ImageSize: that enum is generated from the
+    // protobuf at build time, so its variant names belong to the codegen, not
+    // to a documented API -- and librespot itself never names one. width and
+    // height are plain numbers on Image, and they say what the pick is for.
     let mut best: Option<&librespot::metadata::image::Image> = None;
+    let mut best_area = -1i64;
     for image in album.covers.iter() {
-        match image.size {
-            // 300 px is the largest Spotify publishes for a track's album.
-            librespot::metadata::image::ImageSize::Size640 => {
-                best = Some(image);
-                break;
-            }
-            librespot::metadata::image::ImageSize::Size300 => best = Some(image),
-            librespot::metadata::image::ImageSize::Size64 if best.is_none() => best = Some(image),
-            _ => {}
+        let area = image.width as i64 * image.height as i64;
+        if area > best_area {
+            best_area = area;
+            best = Some(image);
         }
     }
     match best {
@@ -295,28 +295,28 @@ async fn open(cfg: &crate::Config) -> Result<Opened, Box<dyn std::error::Error>>
         let mut events = player.get_player_event_channel();
         std::thread::spawn(move || loop {
             match events.blocking_recv() {
-                Ok(PlayerEvent::Playing { .. }) => {
+                Some(PlayerEvent::Playing { .. }) => {
                     shared.state.store(3, Ordering::SeqCst);
                     shared.playing.store(true, Ordering::SeqCst);
                 }
-                Ok(PlayerEvent::Paused { .. }) => {
+                Some(PlayerEvent::Paused { .. }) => {
                     shared.state.store(4, Ordering::SeqCst);
                     shared.playing.store(false, Ordering::SeqCst);
                 }
-                Ok(PlayerEvent::Stopped { .. }) => {
+                Some(PlayerEvent::Stopped { .. }) => {
                     shared.state.store(5, Ordering::SeqCst);
                     shared.playing.store(false, Ordering::SeqCst);
                 }
-                Ok(PlayerEvent::EndOfTrack { .. }) => {
+                Some(PlayerEvent::EndOfTrack { .. }) => {
                     // The queue's next track is loaded by the status poll: the
                     // event thread must not block on metadata requests, and
                     // this is the one place where a track boundary exists.
                     shared.state.store(5, Ordering::SeqCst);
                     shared.playing.store(false, Ordering::SeqCst);
                 }
-                Ok(PlayerEvent::TimeToPreloadNextTrack { .. }) => {}
-                Ok(_) => {}
-                Err(_) => break, // the player is gone; the daemon is shutting down
+                Some(PlayerEvent::TimeToPreloadNextTrack { .. }) => {}
+                Some(_) => {}
+                None => break, // the player is gone; the daemon is shutting down
             }
         });
     }
@@ -437,7 +437,10 @@ impl Daemon {
         let content = SelectedListContent::try_from(&msg).map_err(|e| e.to_string())?;
 
         let mut rows = Vec::new();
-        for id in content.contents.iter() {
+        // not contents.iter(): a PlaylistItemList is a struct, and the list of
+        // entries is its `items` field.
+        for item in content.contents.items.iter() {
+            let id = &item.id;
             // One request per playlist for its name and length. A user with
             // fifty playlists pays fifty requests once per visit to the page;
             // the player caches the rows, so that is once, not per row scroll.
@@ -446,7 +449,9 @@ impl Daemon {
                     id: id.to_base62().unwrap_or_default(),
                     name: list.name().to_string(),
                     owner: list.id.username.clone(),
-                    count: list.tracks().len(),
+                    // contents.items.len(), not tracks().len(): tracks() is
+                    // an iterator, and the Vec behind it is what has a length.
+                    count: list.contents.items.len(),
                 });
             }
         }
