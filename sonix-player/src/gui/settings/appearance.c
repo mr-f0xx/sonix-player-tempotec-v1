@@ -20,6 +20,8 @@
 #include "src/gui/shell/toast.h"
 #include "src/gui/shell/topbar.h"
 #include "src/gui/settings/bootpicpage.h"
+#include "src/gui/settings/iconsetpage.h"
+#include "src/gui/settings/themefilepage.h"
 #include "src/system/core/config.h"
 #include "src/system/core/lang.h"
 #include "src/system/device/bootlogo.h"
@@ -29,12 +31,12 @@
 lv_obj_t *appearance_screen;
 
 static lv_obj_t *theme_buttons[THEME_KIND_CUSTOM + 1];
-#define CUSTOM_FILE_MAX 24
-static lv_obj_t *custom_files_row;
-static lv_obj_t *custom_file_pills[CUSTOM_FILE_MAX];
-static char custom_file_names[CUSTOM_FILE_MAX][256];
-static int custom_file_count;
 static lv_obj_t *custom_tokyo_switch;
+// The two rows that name card content: which Themes file Custom wears, and
+// which Icons folder the interface draws with. Both open a page of their own
+// rather than listing the content here, so both only carry the current name.
+static lv_obj_t *custom_theme_value;
+static lv_obj_t *iconset_value;
 
 static lv_obj_t *btn_boot[5];		 // Stock / Retrospace / Space / Travelling in space / Custom
 static lv_obj_t *boot_picture_value; // the name of the custom picture, on its row
@@ -242,96 +244,6 @@ static void font_pills_rebuild(void) {
 static void font_pills_reload_cb(lv_event_t *e) {
 	(void)e;
 	font_pills_rebuild();
-}
-
-// ---------------------------------------------------------------------------
-// Settings -> Appearance -> Icon set
-//
-// The artwork the whole interface is drawn with, as a row of pills: Default
-// (the built-in glyphs) plus every folder in Icons/ on the card. See
-// iconset.c for what a set is. Folder names are not translated -- they are
-// the names on the card -- and the row is looked at again every time the
-// page is opened, the way the font row is, so a set copied over while the
-// player was running is offered without anything else moving.
-// ---------------------------------------------------------------------------
-
-#define ICONSET_PILLS_MAX 8 // one is always Default; the rest are folders
-#define ICONSET_NAME_COPY 64
-
-static lv_obj_t *iconset_pills;
-static lv_obj_t *iconset_pill[ICONSET_PILLS_MAX];
-static char iconset_pill_name[ICONSET_PILLS_MAX][ICONSET_NAME_COPY]; // the pill's own copy
-static int iconset_pill_count;
-
-// Paints the chosen set as the filled accent pill, the rest quiet. Default
-// is the empty name, which is what iconset_active_name() reports with no
-// set loaded.
-static void refresh_iconset_pills(void) {
-	const char *active = iconset_active_name();
-	for (int i = 0; i < iconset_pill_count; i++) {
-		settingsrow_pill_active(iconset_pill[i], strcmp(iconset_pill_name[i], active) == 0);
-	}
-}
-
-// The pill's number in the row, one-based, as the pill helpers pass a value
-// to their callback: the name is looked up here rather than carried as user
-// data, so the list can be rebuilt without leaving a pill pointing at a
-// buffer that has moved on.
-static void iconset_pick_cb(lv_event_t *e) {
-	if (switcher_back_drag_active()) {
-		return;
-	}
-	int index = (int)(intptr_t)lv_event_get_user_data(e) - 1;
-	if (index < 0 || index >= iconset_pill_count) {
-		return;
-	}
-	if (!iconset_select(iconset_pill_name[index])) {
-		// The folder went with a card that was pulled out, or the set
-		// shipped no icons the firmware knows. Nothing changes; the row
-		// repaints over the attempt.
-		toast_error("appearance_icon_set_failed");
-		refresh_iconset_pills();
-		return;
-	}
-	config_set("ui", "icon_set", iconset_pill_name[index]);
-	config_save();
-	// The pixels behind every screen on the device just changed.
-	theme_repaint();
-	refresh_iconset_pills();
-}
-
-// Builds the row, and rebuilds it when the folders themselves have changed:
-// a set copied onto the card (or taken off it) appears the next time the
-// page is opened, without the pills already there being disturbed in
-// between.
-static void iconset_pills_rebuild(void) {
-	const char *sets[ICONSET_PILLS_MAX];
-	int folders = iconset_choices(sets, ICONSET_PILLS_MAX - 1);
-
-	bool same = folders + 1 == iconset_pill_count;
-	for (int i = 0; same && i < folders; i++) {
-		same = strcmp(sets[i], iconset_pill_name[i + 1]) == 0;
-	}
-	if (same) {
-		refresh_iconset_pills();
-		return;
-	}
-
-	lv_obj_clean(iconset_pills);
-	iconset_pill_count = folders + 1;
-	iconset_pill_name[0][0] = '\0';
-	iconset_pill[0] = settingsrow_pill_text(iconset_pills, tr("appearance_icon_set_default"), 1, iconset_pick_cb);
-	for (int i = 0; i < folders; i++) {
-		snprintf(iconset_pill_name[i + 1], ICONSET_NAME_COPY, "%s", sets[i]);
-		iconset_pill[i + 1] =
-			settingsrow_pill_text(iconset_pills, iconset_pill_name[i + 1], i + 2, iconset_pick_cb);
-	}
-	refresh_iconset_pills();
-}
-
-static void iconset_pills_reload_cb(lv_event_t *e) {
-	(void)e;
-	iconset_pills_rebuild();
 }
 
 // Paints the active theme choice. Dark and Light keep their original filled
@@ -727,18 +639,6 @@ static lv_obj_t *make_clock_choice(lv_obj_t *parent, const char *text, int pos, 
 	return btn;
 }
 
-static void custom_file_pick_cb(lv_event_t *e);
-
-static void custom_files_refresh(void) {
-	if (!custom_files_row) return;
-	lv_obj_clean(custom_files_row);
-	custom_file_count = theme_custom_files(custom_file_names, CUSTOM_FILE_MAX);
-	for (int i = 0; i < custom_file_count; i++) {
-		custom_file_pills[i] = settingsrow_pill_text(custom_files_row, custom_file_names[i], i + 1, custom_file_pick_cb);
-		settingsrow_pill_active(custom_file_pills[i], strcmp(custom_file_names[i], theme_custom_file()) == 0);
-	}
-}
-
 static void theme_pick_cb(lv_event_t *e) {
 	theme_kind_t kind = (theme_kind_t)(intptr_t)lv_event_get_user_data(e);
 	if (kind == THEME_KIND_CUSTOM && !theme_reload_custom()) {
@@ -750,18 +650,30 @@ static void theme_pick_cb(lv_event_t *e) {
 	appearance_preview_refresh();
 }
 
-static void custom_file_pick_cb(lv_event_t *e) {
-	if (switcher_back_drag_active()) return;
-	int i = (int)(intptr_t)lv_event_get_user_data(e) - 1;
-	if (i < 0 || i >= custom_file_count || !theme_select_custom_file(custom_file_names[i])) {
-		toast_error("appearance_custom_invalid");
+// The two card-content rows name what is currently in force: the Themes file
+// Custom wears, and the icon set the interface draws with. Both change on the
+// pages those rows open, so both are re-read every time Appearance comes up.
+static void refresh_custom_theme_value(void) {
+	if (!custom_theme_value) {
 		return;
 	}
-	theme_set_kind(THEME_KIND_CUSTOM);
-	for (int j = 0; j < custom_file_count; j++)
-		settingsrow_pill_active(custom_file_pills[j], j == i);
-	refresh_buttons();
-	appearance_preview_refresh();
+	char label[64];
+	theme_item_label(theme_custom_file(), label, sizeof(label));
+	lv_label_set_text(custom_theme_value, label);
+}
+
+static void refresh_iconset_value(void) {
+	if (!iconset_value) {
+		return;
+	}
+	const char *name = iconset_active_name();
+	char label[64];
+	if (name[0]) {
+		theme_item_label(name, label, sizeof(label));
+	} else {
+		snprintf(label, sizeof(label), "%s", tr("appearance_icon_set_default"));
+	}
+	lv_label_set_text(iconset_value, label);
 }
 
 // The switch that lets a selected custom palette wear the Tokyo-style
@@ -851,7 +763,14 @@ static void custom_card_refresh_cb(lv_event_t *e) {
 	// The player may have started without a card and mounted one later.
 	theme_set_card_root(storage_sd_root());
 	theme_reload_custom();
-	custom_files_refresh();
+}
+
+// The two rows that name card content re-read what is in force, which the
+// pages they open may have changed: a set swapped, a different file picked.
+static void card_rows_refresh_cb(lv_event_t *e) {
+	(void)e;
+	refresh_custom_theme_value();
+	refresh_iconset_value();
 }
 
 static void boot_light_show(void);
@@ -1129,15 +1048,15 @@ void appearance_init(gui_config_t *cfg) {
 		compact ? "appearance_amber_short" : "appearance_amber_on_black", THEME_KIND_AMBER_ON_BLACK, compact);
 	theme_buttons[THEME_KIND_OLED] = make_theme_choice(row, "appearance_oled", THEME_KIND_OLED, compact);
 	theme_buttons[THEME_KIND_CUSTOM] = make_theme_choice(row, "appearance_custom", THEME_KIND_CUSTOM, compact);
-	custom_files_row = lv_obj_create(card);
-	lv_obj_set_size(custom_files_row, lv_pct(100), LV_SIZE_CONTENT);
-	lv_obj_set_style_bg_opa(custom_files_row, 0, 0);
-	lv_obj_set_style_border_width(custom_files_row, 0, 0);
-	lv_obj_set_style_pad_all(custom_files_row, 0, 0);
-	lv_obj_set_scrollable(custom_files_row, false);
-	lv_obj_set_event_bubble(custom_files_row, true);
-	lv_obj_set_flex_flow(custom_files_row, LV_FLEX_FLOW_ROW_WRAP);
-	custom_files_refresh();
+
+	// Which Themes/*.ini file Custom wears, the way Boot picture names its
+	// picture: a row into a page that lists the card's files. A pill per
+	// file crowded the theme row the moment there was more than one, and a
+	// filename is not a theme name -- the page lists them without their
+	// extension, under the name each palette is known by.
+	settingsrow_add(container, "appearance_custom_theme", &custom_theme_value, switch_screen_cb,
+					 themefilepage_screen);
+
 	lv_obj_t *custom_note = lv_label_create(container);
 	lv_label_set_long_mode(custom_note, LV_LABEL_LONG_WRAP);
 	lv_obj_set_width(custom_note, lv_pct(100));
@@ -1159,9 +1078,11 @@ void appearance_init(gui_config_t *cfg) {
 	build_theme_previews(container, compact);
 
 	// Which artwork the whole interface wears: Default, or a folder from
-	// Icons/ on the card. Under the theme previews because a set is the
-	// same decision the theme row just took, in pictures instead of colour.
-	settingsrow_pills(container, "appearance_icon_set", &iconset_pills);
+	// Icons/ on the card. A row into its own page, the same as Custom's
+	// files -- the folders are card content, discovered on the way in, and
+	// the row under the previews because a set is the same decision the
+	// theme row just took, in pictures instead of colour.
+	settingsrow_add(container, "appearance_icon_set", &iconset_value, switch_screen_cb, iconsetpage_screen);
 
 	lv_obj_t *iconset_note = lv_label_create(container);
 	lv_label_set_long_mode(iconset_note, LV_LABEL_LONG_WRAP);
@@ -1463,7 +1384,6 @@ void appearance_init(gui_config_t *cfg) {
 	settingsrow_toggle_slider_expanded(rounded_corners_card, corners_enabled());
 
 	font_pills_rebuild();
-	iconset_pills_rebuild();
 
 	refresh_buttons();
 	refresh_boot_buttons();
@@ -1471,22 +1391,23 @@ void appearance_init(gui_config_t *cfg) {
 	refresh_clock_buttons();
 	refresh_accent_buttons();
 	refresh_text_size_pills();
-	refresh_iconset_pills();
+	refresh_custom_theme_value();
+	refresh_iconset_value();
 	theme_register_refresh(refresh_buttons);
 	theme_register_refresh(refresh_boot_buttons);
 	theme_register_refresh(refresh_text_size_pills);
 	theme_register_refresh(refresh_clock_buttons);
 	theme_register_refresh(refresh_accent_buttons);
 	theme_register_refresh(refresh_font_pills);
-	theme_register_refresh(refresh_iconset_pills);
 	theme_register_refresh(appearance_preview_refresh);
 
 	// The card's fonts again on every visit: one copied over the USB cable
 	// while the player was running is offered the next time this page comes
 	// up, and one whose card has been pulled out is gone from the row. The
-	// icon sets are the same deal with folders.
+	// two card-content rows re-read their names the same way, because the
+	// pages they open change them.
 	lv_obj_add_event_cb(appearance_screen, font_pills_reload_cb, LV_EVENT_SCREEN_LOADED, NULL);
-	lv_obj_add_event_cb(appearance_screen, iconset_pills_reload_cb, LV_EVENT_SCREEN_LOADED, NULL);
 	lv_obj_add_event_cb(appearance_screen, boot_card_refresh_cb, LV_EVENT_SCREEN_LOADED, NULL);
 	lv_obj_add_event_cb(appearance_screen, custom_card_refresh_cb, LV_EVENT_SCREEN_LOADED, NULL);
+	lv_obj_add_event_cb(appearance_screen, card_rows_refresh_cb, LV_EVENT_SCREEN_LOADED, NULL);
 }

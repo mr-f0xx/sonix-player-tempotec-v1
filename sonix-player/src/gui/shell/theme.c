@@ -171,6 +171,45 @@ int theme_custom_files(char names[][256], int max) {
 
 const char *theme_custom_file(void) { return custom_file; }
 
+void theme_item_label(const char *name, char *out, size_t size) {
+	if (!out || size == 0) {
+		return;
+	}
+	out[0] = '\0';
+	if (!name) {
+		name = "";
+	}
+	// The shipped palettes go by their theme names, not their file names.
+	if (strcmp(name, "catppuccin-mocha") == 0 || strcmp(name, "catppuccin-mocha.ini") == 0) {
+		snprintf(out, size, "Catppuccin");
+		return;
+	}
+	// Drop a .ini suffix, then copy with the separators as spaces and the
+	// first letter of every word up-cased: gruvbox -> Gruvbox, rose-pine ->
+	// Rose Pine, custom.ini -> Custom. Letters already up-cased, digits and
+	// anything outside a-z pass through untouched.
+	size_t len = strlen(name);
+	if (len > 4 && strcmp(name + len - 4, ".ini") == 0) {
+		len -= 4;
+	}
+	bool word_start = true;
+	size_t i = 0;
+	for (; i < len && i + 1 < size; i++) {
+		char c = name[i];
+		if (c == '-' || c == '_' || c == ' ') {
+			out[i] = ' ';
+			word_start = true;
+			continue;
+		}
+		if (word_start && c >= 'a' && c <= 'z') {
+			c = (char)(c - 'a' + 'A');
+		}
+		word_start = false;
+		out[i] = c;
+	}
+	out[i] = '\0';
+}
+
 static bool load_custom_file(const char *name, theme_palette_t *result) {
 	char path[600];
 	if (!custom_root[0] || !name || !*name || strchr(name, '/') || strchr(name, '\\') ||

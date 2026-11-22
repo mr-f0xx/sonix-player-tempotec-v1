@@ -24,9 +24,10 @@ one file per scheme, each mapped from the official colours of its theme:
 | [`catppuccin-mocha.ini`](../sonix-player/examples/themes/catppuccin-mocha.ini) | Catppuccin Mocha | [catppuccin.com/palette](https://catppuccin.com/palette) |
 
 Copy as many as you want into **`Themes/`**, keeping their original `.ini` names.
-The filenames appear under Custom in Appearance; tap one to apply it. Only one
-is active at a time, and its filename is remembered across restarts. Existing
-`Themes/custom.ini` cards continue to work. Each file
+In Settings → Appearance, open **Custom theme** to see the files without their
+`.ini` extensions; choose one to apply it. `catppuccin-mocha.ini` is displayed
+as **Catppuccin**. Only one is active at a time, and its filename is remembered
+across restarts. Existing `Themes/custom.ini` cards continue to work. Each file
 is a complete eight-key palette, so no editing is required; tweak any value if
 you like (for example Dracula's `text_secondary` is its deliberately dim
 Comment grey). The `sonix-player/tools/validate_theme_ini.py` script checks a

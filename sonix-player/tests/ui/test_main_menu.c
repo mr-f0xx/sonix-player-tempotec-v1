@@ -22,6 +22,8 @@
 #include "src/system/streaming/podcast.h"
 #include "src/gui/settings/appearance.h"
 #include "src/gui/settings/bootpicpage.h"
+#include "src/gui/settings/iconsetpage.h"
+#include "src/gui/settings/themefilepage.h"
 #include "src/gui/settings/musicsettings.h"
 #include "src/gui/settings/settings.h"
 #include "src/gui/shell/corners.h"
@@ -668,6 +670,10 @@ int main(int argc, char **argv) {
 
 	bootpicpage_screen = lv_obj_create(NULL); // the page the boot screen's Custom pill opens
 	bootpicpage_init(&cfg);
+	iconsetpage_screen = lv_obj_create(NULL);
+	themefilepage_screen = lv_obj_create(NULL);
+	iconsetpage_init(&cfg);
+	themefilepage_init(&cfg);
 	appearance_screen = lv_obj_create(NULL); // after the page: its row points at it
 	appearance_init(&cfg);
 	lv_obj_t *toggle_label = find_label(appearance_screen, tr("appearance_main_menu_icons_only"));
@@ -921,7 +927,14 @@ int main(int argc, char **argv) {
 	assert(lv_obj_get_sibling(iconset_caption, 1) == accent_card);
 	assert(lv_obj_get_sibling(accent_card, 1) == lv_obj_get_parent(tint_label));
 	/* With no card mounted the row still offers Default. */
-	assert(find_label(appearance_screen, tr("appearance_icon_set_default")));
+	assert(find_label(iconsetpage_screen, tr("appearance_icon_set_default")));
+	assert(find_label(themefilepage_screen, tr("appearance_custom_theme_empty")));
+	assert(find_label(appearance_screen, tr("appearance_custom_theme")));
+	char pretty[128];
+	theme_item_label("catppuccin-mocha.ini", pretty, sizeof(pretty));
+	assert(strcmp(pretty, "Catppuccin") == 0);
+	theme_item_label("rose-pine.ini", pretty, sizeof(pretty));
+	assert(strcmp(pretty, "Rose Pine") == 0);
 	lv_obj_t *accent_row = lv_obj_get_sibling(accent_label, 1);
 	assert(accent_row && lv_obj_get_child_count(accent_row) == 6);
 

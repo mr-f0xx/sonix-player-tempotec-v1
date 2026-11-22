@@ -24,11 +24,11 @@ each ready-made theme palette:
        ...
    ```
 
-2. Settings → Appearance → **Icon set**. Every folder under `Icons/` is
-   offered as a pill; **Default** is the built-in glyphs. The choice is
+2. Settings → Appearance → **Icon set** opens a submenu. Every folder under
+   `Icons/` is listed there; **Default** is the built-in glyphs. The choice is
    saved, applied at once, and restored on the next boot.
 
-The row is re-read every time the page is opened, so a set copied over
+The list is re-read every time the submenu is opened, so a set copied over
 USB while the player is running appears the next time you look.
 
 ## What a set contains
