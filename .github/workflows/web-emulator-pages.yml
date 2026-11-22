@@ -238,14 +238,18 @@ jobs:
       # what broke without anybody downloading an archive.
       - name: Protocol tests (no librespot, no network)
         run: |
-          set -o pipefail
-          cargo test --lib 2>&1 | tee "$RUNNER_TEMP/test.log"
+          # `|| true` so the summary and the artifact are written even when the
+          # tests fail -- the failure is what needs reading, and the job log is
+          # not always reachable from outside.
+          cargo test --lib >"$RUNNER_TEMP/test.log" 2>&1 || true
           {
             echo "### Spotify daemon: protocol tests"
             echo '```'
-            tail -n 40 "$RUNNER_TEMP/test.log"
+            tail -n 60 "$RUNNER_TEMP/test.log"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
+          cat "$RUNNER_TEMP/test.log"
+          grep -q "test result: ok" "$RUNNER_TEMP/test.log"
 
       - name: Build
         run: |
@@ -278,12 +282,14 @@ jobs:
 
       # Only on failure, but always then: the build log is the only way to read
       # the compiler's own words when the job log endpoint is unreachable.
-      - name: Upload the build log when something failed
+      - name: Upload the logs when something failed
         if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: spotifyd-build-log
-          path: ${{ runner.temp }}/build.log
+          path: |
+            ${{ runner.temp }}/test.log
+            ${{ runner.temp }}/build.log
           if-no-files-found: warn
 
   deploy-pages:
