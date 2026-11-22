@@ -181,8 +181,9 @@ pub fn dispatch<W: Write>(lib: &dyn Library, line: &str, out: &mut W) -> std::io
             }
         }
         // The transport commands carry no answer: the caller reads the new
-        // state from the next STATUS. Reply::new().encode() would be a String
-        // here, which is not what this match yields -- the empty Reply is.
+        // state from the next STATUS. Status::encode() and ListPage::encode()
+        // both produce a Reply, which is what this match yields, so a bare
+        // Reply::new() is already the right empty one.
         "TOGGLE" => {
             lib.toggle();
             Reply::new()
@@ -226,7 +227,7 @@ pub fn dispatch<W: Write>(lib: &dyn Library, line: &str, out: &mut W) -> std::io
         }
         // PCM is the connection loop's business: it changes what the rest of
         // the connection means, so it never reaches this table.
-        other => Reply::error(&format!("unknown command {}", other)).encode(),
+        other => Reply::error(&format!("unknown command {}", other)),
     };
 
     out.write_all(reply.as_bytes())?;
