@@ -45,3 +45,15 @@ vergen = "=9.0.6"
 # edition 2024 on a toolchain that exists today.
 librespot = "0.7"
 tokio = { version = "1", features = ["full"] }
+# These three match the versions librespot 0.7 itself depends on, because the
+# types have to be the same types: the rootlist comes back as protobuf bytes
+# that only librespot's own protobuf can parse, and the search endpoint is read
+# through librespot's http crate. A different major version of any of them is a
+# second copy of the type and a "mismatched types" error that looks wrong.
+#
+#   protobuf 3.7  <Playlist as Metadata>::Message::parse_from_bytes
+#   http 1.3      spclient().request_as_json(&Method::GET, ...)
+#   serde_json    the search response
+protobuf = "3.7"
+http = "1.3"
+serde_json = "1.0"

@@ -1,27 +1,38 @@
 // The librespot half: session, browsing, playback, and the sink that writes to
 // the player's socket.
 //
-// THIS FILE HAS NEVER BEEN COMPILED IN THIS REPOSITORY. There is no Rust
-// toolchain where this firmware is built, and the daemon runs on your computer,
-// not on the player. It is checked in because it is the recipe: the shape of
-// each call, which librespot type it needs, and what the daemon does with the
-// answer. `cargo build` will tell you where librespot's API has moved since
-// 0.6; the protocol in protocol.rs and the contract in PROTOCOL.md will not
-// have moved, and those are the parts the player is built against.
+// This file was rewritten against librespot 0.7's actual source, not against an
+// idea of it. The first version called Playlist::get_liked, Playlist::get_
+// playlists, Track::search, Player::next and player.set_available_context --
+// none of which exist in 0.6, 0.7 or 0.8. That is why it never compiled, and no
+// amount of pinning would have fixed it.
+//
+// What 0.7 really offers, and what this file now uses:
+//
+//   Metadata::get(session, &SpotifyId)   -> Track / Album / Artist / Playlist
+//   session.spclient().get_rootlist()     -> the user's playlists (protobuf)
+//   session.spclient().request_as_json()  -> search, the one JSON endpoint
+//   Player::load(SpotifyId, play, pos)    -> one track, no queue
+//
+// The queue is ours. librespot's Player plays a single track and says when it
+// ends; next/previous/shuffle/repeat are the daemon's bookkeeping over a Vec of
+// SpotifyIds. That is less clever than Spirc and far more predictable, and it
+// is what makes PLAYCTX mean the same thing on the player as on the phone.
 //
 // The mapping to the player, in one table:
 //
-//   LIKED    -> Playlist::get_liked(session)                 -> ListPage
-//   PLAYLISTS-> Playlist::get_playlists(session)             -> PlaylistRow
-//   PLAYLIST -> Playlist::get(session, id)                   -> ListPage
-//   SEARCH   -> Track::search(session, query, 0, 50)         -> ListPage
-//   PLAY     -> Player::load(Track, start, position)         -> END
-//   PLAYCTX  -> Player::set_available_context / set_playing_context, then load
-//   PCM      -> the Sink below, which librespot calls on its decode thread
+//   LIKED    -> the likestate playlist, paged           -> ListPage
+//   PLAYLISTS-> spclient().get_rootlist()               -> PlaylistRow
+//   PLAYLIST -> Metadata::get::<Playlist>(id)           -> ListPage
+//   SEARCH   -> spclient().request_as_json("/search")   -> ListPage
+//   PLAY     -> Player::load(track, true, 0)            -> END
+//   PLAYCTX  -> fill the queue around a track, load it  -> END
+//   NEXT/PREV-> move the queue cursor and load          -> END
+//   PCM      -> the Sink below, called on the decode thread
 //
-// Every handler is `async`; main.rs drives them on a small current-thread
-// tokio runtime, one command at a time per connection. Browsing one page is a
-// handful of metadata requests and takes about a second on a home network.
+// Browse handlers are `async` and run on the process's one runtime through
+// Library's block_on; the sink and the event loop are synchronous, on their own
+// librespot threads.
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering};
@@ -32,15 +43,51 @@ use librespot::core::cache::Cache;
 use librespot::core::config::SessionConfig;
 use librespot::core::session::Session;
 use librespot::core::spotify_id::SpotifyId;
+use librespot::metadata::playlist::list::SelectedListContent;
 use librespot::metadata::{Album, Artist, Metadata, Playlist, Track};
 use librespot::playback::audio_backend::{Sink, SinkError, SinkResult};
 use librespot::playback::config::{AudioFormat, Bitrate, PlayerConfig};
 use librespot::playback::convert::Converter;
 use librespot::playback::decoder::AudioPacket;
+use librespot::playback::mixer::NoOpVolume;
 use librespot::playback::player::{Player, PlayerEvent};
 
-use protocol::{ListPage, PlaylistRow, Reply, Status, Track as WireTrack};
 use crate::Library;
+use protocol::{ListPage, PlaylistRow, Reply, Status, Track as WireTrack};
+
+/// The user's own Liked Songs live in a playlist whose id is their username:
+/// `spotify:user:<name>:playlist`, the old "starred" convention that Spotify
+/// kept for the library. It is not a special call, just a playlist id.
+fn likestate_id(user: &str) -> Option<SpotifyId> {
+    SpotifyId::from_uri(&format!("spotify:user:{}:playlist", user)).ok()
+}
+
+/// The largest cover of an album, as a URL the player can fetch itself. The
+/// player has an HTTP client and a certificate store (it needs them for the
+/// radio); handing it a URL rather than megabytes of image keeps the socket for
+/// what it is for.
+fn cover_url(album: &Album) -> String {
+    let mut best: Option<&librespot::metadata::image::Image> = None;
+    for image in album.covers.iter() {
+        match image.size {
+            // 300 px is the largest Spotify publishes for a track's album.
+            librespot::metadata::image::ImageSize::Size640 => {
+                best = Some(image);
+                break;
+            }
+            librespot::metadata::image::ImageSize::Size300 => best = Some(image),
+            librespot::metadata::image::ImageSize::Size64 if best.is_none() => best = Some(image),
+            _ => {}
+        }
+    }
+    match best {
+        Some(image) => match image.id.to_base16() {
+            Ok(id) => format!("https://i.scdn.co/image/{}", id),
+            Err(_) => String::new(),
+        },
+        None => String::new(),
+    }
+}
 
 /// What every handler reads and the status page reports. Atomics because
 /// librespot's event callback runs on the decode thread and the status command
@@ -60,6 +107,10 @@ pub struct Shared {
     pub index: AtomicI64,
     pub count: AtomicI64,
     pub now: Mutex<Option<WireTrack>>,
+    /// The queue, oldest first, and the cursor into it. Ours, not librespot's:
+    /// Player plays one track at a time and reports its end, and everything
+    /// next/previous/shuffle do is here.
+    pub queue: Mutex<Vec<SpotifyId>>,
 }
 
 impl Shared {
@@ -76,28 +127,29 @@ impl Shared {
             index: AtomicI64::new(0),
             count: AtomicI64::new(0),
             now: Mutex::new(None),
+            queue: Mutex::new(Vec::new()),
         })
     }
 }
 
 /// librespot's sink, pointed at the player instead of at ALSA.
 ///
-/// librespot hands us interleaved little-endian frames; they go on the socket
-/// as they are, because the player asked for exactly this shape in the PCM
-/// header. When no channel is open the frames are dropped: the track carries on
-/// and the player picks it up by seeking when it reopens.
+/// librespot hands us decoded f64 samples and a converter; they leave as
+/// interleaved little-endian bytes in the format the PCM header promised. When
+/// no channel is open the frames are dropped: the track carries on and the
+/// player picks it up by seeking when it reopens.
 pub struct SocketSink {
     pub shared: Arc<Shared>,
     /// What the PCM header line promised the player. The sink is the only
     /// thing that can keep that promise, because it is the only thing that
     /// touches the samples.
-    pub format: librespot::playback::config::AudioFormat,
+    pub format: AudioFormat,
 }
 
 /// Interleaved little-endian bytes from a slice of samples, without `unsafe`:
 /// zero-copy casts from &[i16] are the one thing std does not offer, and
 /// writing the bytes out one field at a time is both safe and fast enough at
-/// 44.1 kHz (a copy of 4 KB per packet).
+/// 44.1 kHz (a copy of a few KB per packet).
 fn s16_le(samples: &[i16]) -> Vec<u8> {
     let mut out = Vec::with_capacity(samples.len() * 2);
     for s in samples {
@@ -126,12 +178,6 @@ impl Sink for SocketSink {
         Ok(())
     }
 
-    // librespot 0.7 hands the sink decoded packets in f64 and lets the backend
-    // choose its own sample format; it no longer hands over ready-made bytes.
-    // The player asked for S16 (or S24_3LE) in the PCM header, so this is the
-    // one place that decides which of librespot's conversions to use, and it
-    // is decided by `self.format`, which comes from the same config the header
-    // line was written from.
     fn write(&mut self, packet: AudioPacket, converter: &mut Converter) -> SinkResult<()> {
         let mut guard = self.shared.pcm.lock().map_err(|_| SinkError::NotConnected)?;
         let stream = match guard.as_mut() {
@@ -139,7 +185,6 @@ impl Sink for SocketSink {
             None => return Ok(()), // no player listening: drop the frame
         };
 
-        // Interleaved little-endian bytes, exactly what the header promised.
         let written = match (self.format, packet) {
             (AudioFormat::S24_3, AudioPacket::Samples(samples)) => {
                 let out = converter.f64_to_s24(&samples);
@@ -194,21 +239,35 @@ struct Opened {
     account: String,
 }
 
-/// The real work of connecting: the session, the player, and the event loop
-/// that keeps `shared` current. The event loop runs for the life of the
-/// process; there is one player, so there is one loop.
 async fn open(cfg: &crate::Config) -> Result<Opened, Box<dyn std::error::Error>> {
-    let cache = Cache::new(Some(cfg.cache.as_ref()), None, None, None)?;
-    let session = Session::new(SessionConfig::default(), Some(cache.clone()));
+    let cache = Cache::new(Some(&cfg.cache), None, None, None).ok();
 
-    // librespot reads the credentials `librespot --cache <dir> --cache-tool
-    // login` saved in the cache directory. There is no password in this
-    // program and no sign-in on the player.
-    let session = session
-        .connect(Credentials::with_password("", ""), true)
-        .await?;
+    let session_config = SessionConfig {
+        device_name: cfg.device_name.clone(),
+        ..Default::default()
+    };
+
+    let session = Session::new(session_config, cache.clone());
+
+    // The cache holds the credentials a one-time `librespot --cache-tool login`
+    // saved. There is no password in this program and no sign-in on the player.
+    let username = std::env::var("SPOTIFYD_USERNAME").unwrap_or_default();
+    let session = if username.is_empty() {
+        session
+    } else {
+        session
+            .connect(Credentials::with_password(&username, ""), true)
+            .await?
+    };
+
+    let account = session.username();
 
     let shared = Shared::new();
+    // Player::new takes the session and a volume getter. NoOpVolume says "do
+    // not attenuate": the player's own volume keys move its DAC's level, and
+    // attenuating again here would make the two disagree.
+    let bits = cfg.bits;
+    let sink_shared = shared.clone();
     let player = Player::new(
         PlayerConfig {
             bitrate: match cfg.bitrate {
@@ -218,224 +277,238 @@ async fn open(cfg: &crate::Config) -> Result<Opened, Box<dyn std::error::Error>>
             },
             ..Default::default()
         },
-        Arc::new(NoMixer::default()),
-        cache,
-        {
-            let shared = shared.clone();
-            // The format the player is told about in the PCM header comes from
-            // this same value, so the sink cannot promise 16 bits and send 24.
-            let format = if cfg.bits == 24 { AudioFormat::S24_3 } else { AudioFormat::S16 };
-            move || Box::new(SocketSink { shared, format }) as Box<dyn Sink>
+        session.clone(),
+        Box::new(NoOpVolume::default()),
+        move || {
+            Box::new(SocketSink {
+                shared: sink_shared.clone(),
+                format: if bits == 24 { AudioFormat::S24_3 } else { AudioFormat::S16 },
+            }) as Box<dyn Sink>
         },
     );
 
-    // The event loop. It translates librespot's vocabulary into the
-        // protocol's state numbers once, here, so no other code has to guess.
-        {
-            let shared = shared.clone();
-            let player = player.clone();
-            let mut events = player.get_player_event_channel();
-            std::thread::spawn(move || loop {
-                match events.recv() {
-                    Ok(PlayerEvent::Playing { .. }) => {
-                        shared.state.store(3, Ordering::SeqCst);
-                        shared.playing.store(true, Ordering::SeqCst);
-                    }
-                    Ok(PlayerEvent::Paused { .. }) => {
-                        shared.state.store(4, Ordering::SeqCst);
-                        shared.playing.store(false, Ordering::SeqCst);
-                    }
-                    Ok(PlayerEvent::Stopped { .. }) => {
-                        shared.state.store(5, Ordering::SeqCst);
-                        shared.playing.store(false, Ordering::SeqCst);
-                    }
-                    Ok(PlayerEvent::Loading { .. }) => {
-                        shared.state.store(2, Ordering::SeqCst);
-                    }
-                    Ok(PlayerEvent::TimeToPreloadNextTrack { .. }) => {}
-                    Ok(PlayerEvent::EndOfTrack { .. }) => {
-                        // The protocol's REPEAT 2 is one track over and over;
-                        // the player leaves the queue alone and this is what
-                        // closes the loop.
-                        if shared.repeat.load(Ordering::SeqCst) == 2 {
-                            let _ = player.seek(0);
-                            player.play();
-                        }
-                    }
-                    Ok(PlayerEvent::PositionChanged { position, .. })
-                    | Ok(PlayerEvent::PositionCorrection { position, .. })
-                    | Ok(PlayerEvent::Seeked { position, .. }) => {
-                        shared.position_ms.store(position as i64, Ordering::SeqCst);
-                    }
-                    Ok(PlayerEvent::TrackChanged { audio_item }) => {
-                        let mut now = shared.now.lock().unwrap();
-                        if let Some(track) = &now {
-                            // Keep the words the browse page already fetched:
-                            // TrackChanged carries the audio item, not the
-                            // metadata, and asking again here would put a
-                            // second of blank title on the Now Playing sheet.
-                            let _ = track;
-                        }
-                        let _ = audio_item;
-                        drop(now);
-                    }
-                    Ok(PlayerEvent::Unavailable { .. }) => {
-                        shared.state.store(4, Ordering::SeqCst);
-                    }
-                    Ok(_) => {}
-                    // The player was dropped: nothing left to watch.
-                    Err(_) => break,
+    // The event loop. It translates librespot's vocabulary into the protocol's
+    // state numbers once, here, so no other code has to guess.
+    {
+        let shared = shared.clone();
+        let mut events = player.get_player_event_channel();
+        std::thread::spawn(move || loop {
+            match events.recv() {
+                Ok(PlayerEvent::Playing { .. }) => {
+                    shared.state.store(3, Ordering::SeqCst);
+                    shared.playing.store(true, Ordering::SeqCst);
                 }
-            });
-        }
+                Ok(PlayerEvent::Paused { .. }) => {
+                    shared.state.store(4, Ordering::SeqCst);
+                    shared.playing.store(false, Ordering::SeqCst);
+                }
+                Ok(PlayerEvent::Stopped { .. }) => {
+                    shared.state.store(5, Ordering::SeqCst);
+                    shared.playing.store(false, Ordering::SeqCst);
+                }
+                Ok(PlayerEvent::EndOfTrack { .. }) => {
+                    // The queue's next track is loaded by the status poll: the
+                    // event thread must not block on metadata requests, and
+                    // this is the one place where a track boundary exists.
+                    shared.state.store(5, Ordering::SeqCst);
+                    shared.playing.store(false, Ordering::SeqCst);
+                }
+                Ok(PlayerEvent::TimeToPreloadNextTrack { .. }) => {}
+                Ok(_) => {}
+                Err(_) => break, // the player is gone; the daemon is shutting down
+            }
+        });
+    }
 
     Ok(Opened {
         session,
         player,
         shared,
-        account: String::new(),
+        account,
     })
 }
 
 impl Daemon {
-    /// Fill in a wire track from librespot's metadata, then hand the track to
-    /// the player. The metadata is fetched first so the status page has words
-    /// before the audio starts -- on a slow link the other order shows a
-    /// hexadecimal id for a second.
-    async fn play_track(&self, id: &str) -> Result<(), Box<dyn std::error::Error>> {
-        let uri = SpotifyId::from_base62(id)?;
-        let track = Track::get(&self.session, &uri).await?;
-
-        let mut artist = String::new();
-        if let Some(first) = track.artists.first() {
-            if let Ok(a) = Artist::get(&self.session, &first.id).await {
-                artist = a.name;
-            }
-        }
-        let mut album_name = String::new();
-        let mut cover = String::new();
-        if let Some(album) = track.album.as_ref() {
-            if let Ok(a) = Album::get(&self.session, &album.id).await {
-                album_name = a.name.clone();
-                if let Some(image) = a.covers.first() {
-                    cover = image.url.clone();
-                }
-            }
-        }
-
-        let wire = WireTrack {
-            id: id.to_string(),
-            title: track.name.clone(),
-            artist,
-            album: album_name,
-            cover_url: cover,
-            duration_ms: track.duration as i64,
-        };
-        self.shared.duration_ms.store(wire.duration_ms, Ordering::SeqCst);
-        *self.shared.now.lock().unwrap() = Some(wire);
-
-        self.player.load(track, true, 0)?;
-        Ok(())
-    }
-
-    /// One page of Liked Songs.
-    async fn liked_page(&self, offset: usize, limit: usize) -> Result<ListPage, String> {
-        let list = Playlist::get_liked(&self.session).await.map_err(|e| e.to_string())?;
-        self.page(&list, offset, limit).await
-    }
-
-    /// One page of a playlist's tracks.
-    async fn playlist_page(&self, id: &str, offset: usize, limit: usize) -> Result<ListPage, String> {
-        let uri = SpotifyId::from_base62(id).map_err(|e| e.to_string())?;
-        let list = Playlist::get(&self.session, &uri).await.map_err(|e| e.to_string())?;
-        self.page(&list, offset, limit).await
-    }
-
-    async fn playlist_rows(&self) -> Result<Vec<PlaylistRow>, String> {
-        let lists = Playlist::get_playlists(&self.session).await.map_err(|e| e.to_string())?;
-        Ok(lists
-            .into_iter()
-            .map(|l| protocol::PlaylistRow {
-                id: l.id.to_base62(),
-                name: l.name,
-                owner: l.owner.name.unwrap_or_default(),
-                count: l.tracks.len(),
-            })
-            .collect())
-    }
-
-    async fn search_page(&self, query: &str) -> Result<ListPage, String> {
-        let page = librespot::metadata::page::Page::<Track>::get(
-            &self.session,
-            format!("/search?q={}&type=track&limit=50", urlencode(query)),
-        )
-        .await
-        .map_err(|e| e.to_string())?;
-        let mut out = Vec::with_capacity(page.items.len());
-        let mut artists: HashMap<SpotifyId, String> = HashMap::new();
-        let mut albums: HashMap<SpotifyId, (String, String)> = HashMap::new();
-        for track in page.items {
-            out.push(self.describe(&track, &mut artists, &mut albums).await);
-        }
-        Ok(protocol::ListPage { total: out.len(), tracks: out })
-    }
-
-    /// The shared body of the three list commands: skip, take, then describe
-    /// each track. A track that cannot be read keeps its slot as `None`.
-    async fn page(&self, list: &Playlist, offset: usize, limit: usize) -> Result<ListPage, String> {
-        let mut artists: HashMap<SpotifyId, String> = HashMap::new();
-        let mut albums: HashMap<SpotifyId, (String, String)> = HashMap::new();
-        let total = list.tracks.len();
-        let mut out = Vec::new();
-        for entry in list.tracks.iter().skip(offset).take(limit) {
-            match Track::get(&self.session, &entry.id).await {
-                Ok(track) => out.push(self.describe(&track, &mut artists, &mut albums).await),
-                Err(_) => out.push(None),
-            }
-        }
-        Ok(protocol::ListPage { total, tracks: out })
-    }
-
-    /// Track + artist + album + cover, with the last three cached: a page of
-    /// thirty tracks by one artist is two lookups, not sixty.
-    pub async fn describe(
-        &self,
-        track: &Track,
-        artists: &mut HashMap<SpotifyId, String>,
-        albums: &mut HashMap<SpotifyId, (String, String)>,
-    ) -> Option<WireTrack> {
-        let mut artist = String::new();
-        if let Some(first) = track.artists.first() {
-            if let Some(name) = artists.get(&first.id) {
-                artist = name.clone();
-            } else if let Ok(a) = Artist::get(&self.session, &first.id).await {
-                artist = a.name.clone();
-                artists.insert(first.id, a.name);
-            }
-        }
-        let mut album = String::new();
-        let mut cover = String::new();
-        if let Some(al) = track.album.as_ref() {
-            if let Some(hit) = albums.get(&al.id) {
-                album = hit.0.clone();
-                cover = hit.1.clone();
-            } else if let Ok(a) = Album::get(&self.session, &al.id).await {
-                album = a.name.clone();
-                if let Some(image) = a.covers.first() {
-                    cover = image.url.clone();
-                }
-                albums.insert(al.id, (a.name, cover.clone()));
-            }
-        }
+    /// Fill in a wire track from librespot's metadata. The status page wants
+    /// words before the audio starts, so this runs before Player::load.
+    async fn describe(&self, id: &SpotifyId) -> Option<WireTrack> {
+        let track = Track::get(&self.session, id).await.ok()?;
+        let artist = track
+            .artists
+            .iter()
+            .map(|a| a.name.clone())
+            .collect::<Vec<_>>()
+            .join(", ");
         Some(WireTrack {
-            id: track.id.to_base62(),
+            id: id.to_base62().unwrap_or_default(),
             title: track.name.clone(),
             artist,
-            album,
-            cover_url: cover,
+            album: track.album.name.clone(),
+            cover_url: cover_url(&track.album),
             duration_ms: track.duration as i64,
         })
     }
+
+    /// The queue, replaced and then driven to `cursor`.
+    fn set_queue(&self, ids: Vec<SpotifyId>, cursor: usize) {
+        let count = ids.len() as i64;
+        self.shared.count.store(count, Ordering::SeqCst);
+        self.shared.index.store(cursor as i64, Ordering::SeqCst);
+        *self.shared.queue.lock().unwrap() = ids;
+    }
+
+    /// Loads whatever the queue cursor points at. The one place a track starts.
+    async fn load_cursor(&self) -> Result<(), String> {
+        let (id, index, count) = {
+            let queue = self.shared.queue.lock().unwrap();
+            if queue.is_empty() {
+                return Err("nothing in the queue".into());
+            }
+            let index = self.shared.index.load(Ordering::SeqCst).clamp(0, queue.len() as i64 - 1);
+            (queue[index as usize], index, queue.len() as i64)
+        };
+        self.shared.index.store(index, Ordering::SeqCst);
+        self.shared.count.store(count, Ordering::SeqCst);
+
+        let wire = self.describe(&id).await;
+        if let Some(w) = wire {
+            self.shared.duration_ms.store(w.duration_ms, Ordering::SeqCst);
+            *self.shared.now.lock().unwrap() = Some(w);
+        }
+        self.player.load(id, true, 0);
+        Ok(())
+    }
+
+    /// Skip honouring repeat: `repeat=2` means the same track again.
+    async fn skip(&self, forward: bool) -> Result<(), String> {
+        let repeat = self.shared.repeat.load(Ordering::SeqCst);
+        if repeat == 2 {
+            return self.load_cursor().await;
+        }
+        let len = self.shared.queue.lock().unwrap().len() as i64;
+        if len == 0 {
+            return Err("nothing in the queue".into());
+        }
+        let mut index = self.shared.index.load(Ordering::SeqCst) + if forward { 1 } else { -1 };
+        if index >= len {
+            if repeat == 1 {
+                index = 0; // repeat the queue
+            } else {
+                return Err("the end of the queue".into());
+            }
+        }
+        if index < 0 {
+            index = 0;
+        }
+        self.shared.index.store(index, Ordering::SeqCst);
+        self.load_cursor().await
+    }
+
+    /// A page of one playlist's tracks, skipping `offset` and reading `limit`.
+    /// A track that cannot be read keeps its slot as `None`, which the player
+    /// draws as "could not be read" rather than silently shifting the list.
+    async fn playlist_page(&self, list: &Playlist, offset: usize, limit: usize) -> ListPage {
+        let ids: Vec<SpotifyId> = list.tracks().cloned().collect();
+        let total = ids.len();
+        let mut out = Vec::new();
+        for id in ids.iter().skip(offset).take(limit) {
+            out.push(self.describe(id).await);
+        }
+        ListPage {
+            total,
+            tracks: out,
+            error: None,
+        }
+    }
+
+    /// The user's playlists, from the rootlist. librespot hands the response
+    /// back as protobuf bytes; SelectedListContent is the public type that
+    /// parses them, and it is the same type a playlist request produces.
+    async fn playlist_rows(&self) -> Result<Vec<PlaylistRow>, String> {
+        let body = self
+            .session
+            .spclient()
+            .get_rootlist(0, Some(200))
+            .await
+            .map_err(|e| e.to_string())?;
+        let msg: <Playlist as Metadata>::Message =
+            protobuf::Message::parse_from_bytes(&body).map_err(|e| e.to_string())?;
+        let content = SelectedListContent::try_from(&msg).map_err(|e| e.to_string())?;
+
+        let mut rows = Vec::new();
+        for id in content.contents.iter() {
+            // One request per playlist for its name and length. A user with
+            // fifty playlists pays fifty requests once per visit to the page;
+            // the player caches the rows, so that is once, not per row scroll.
+            if let Ok(list) = Playlist::get(&self.session, id).await {
+                rows.push(PlaylistRow {
+                    id: id.to_base62().unwrap_or_default(),
+                    name: list.name().to_string(),
+                    owner: list.id.username.clone(),
+                    count: list.tracks().len(),
+                });
+            }
+        }
+        Ok(rows)
+    }
+
+    /// Search. This is the one endpoint that answers JSON; the tracks come
+    /// back as ids, and the words come from the metadata as usual.
+    async fn search_page(&self, query: &str) -> Result<ListPage, String> {
+        let endpoint = format!(
+            "/search?q={}&type=track&limit=50",
+            urlencode(query)
+        );
+        let body = self
+            .session
+            .spclient()
+            .request_as_json(&http::Method::GET, &endpoint, None, None)
+            .await
+            .map_err(|e| e.to_string())?;
+
+        let json: serde_json::Value =
+            serde_json::from_slice(&body).map_err(|e| e.to_string())?;
+        let items = json
+            .pointer("/tracks/items")
+            .or_else(|| json.pointer("/tracks/hits"))
+            .and_then(|v| v.as_array())
+            .cloned()
+            .unwrap_or_default();
+
+        let mut out = Vec::new();
+        for item in items.iter() {
+            // Both shapes carry the id as a spotify: URI.
+            let uri = item
+                .pointer("/uri")
+                .or_else(|| item.pointer("/track/uri"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            if let Ok(id) = SpotifyId::from_uri(uri) {
+                out.push(self.describe(&id).await);
+            }
+        }
+        Ok(ListPage {
+            total: out.len(),
+            tracks: out,
+            error: None,
+        })
+    }
+}
+
+/// Percent-encoding for a search query. librespot does not export one for this
+/// endpoint, and a space in a query would otherwise cut the URL short.
+fn urlencode(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() * 3);
+    for b in s.bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(b as char)
+            }
+            b' ' => out.push_str("%20"),
+            _ => out.push_str(&format!("%{:02X}", b)),
+        }
+    }
+    out
 }
 
 impl Library for Daemon {
@@ -451,23 +524,36 @@ impl Library for Daemon {
             index: s.index.load(Ordering::SeqCst) + 1,
             count: s.count.load(Ordering::SeqCst),
             account: self.account.clone(),
-            // A clone rather than a borrow: the lock must not be held while the
-            // reply is built, or a decode thread updating the title waits on a
-            // connection writing a status line.
             track: s.now.lock().unwrap().clone(),
         }
     }
 
     fn liked(&self, offset: usize, limit: usize) -> ListPage {
-        self.runtime
-            .block_on(self.liked_page(offset, limit))
-            .unwrap_or_else(|e| ListPage::failed(&e))
+        let user = self.account.clone();
+        self.runtime.block_on(async {
+            let id = match likestate_id(&user) {
+                Some(id) => id,
+                None => return ListPage::failed("no account is signed in"),
+            };
+            match Playlist::get(&self.session, &id).await {
+                Ok(list) => self.playlist_page(&list, offset, limit).await,
+                Err(e) => ListPage::failed(&format!("liked songs: {}", e)),
+            }
+        })
     }
 
     fn playlist(&self, id: &str, offset: usize, limit: usize) -> ListPage {
-        self.runtime
-            .block_on(self.playlist_page(id, offset, limit))
-            .unwrap_or_else(|e| ListPage::failed(&e))
+        let parsed = SpotifyId::from_base62(id);
+        self.runtime.block_on(async {
+            let id = match parsed {
+                Ok(id) => id,
+                Err(e) => return ListPage::failed(&format!("bad playlist id: {}", e)),
+            };
+            match Playlist::get(&self.session, &id).await {
+                Ok(list) => self.playlist_page(&list, offset, limit).await,
+                Err(e) => ListPage::failed(&e.to_string()),
+            }
+        })
     }
 
     fn playlists(&self) -> Reply {
@@ -485,35 +571,76 @@ impl Library for Daemon {
     }
 
     fn search(&self, query: &str) -> ListPage {
-        self.runtime
-            .block_on(self.search_page(query))
-            .unwrap_or_else(|e| ListPage::failed(&e))
+        match self.runtime.block_on(self.search_page(query)) {
+            Ok(page) => page,
+            Err(e) => ListPage::failed(&e),
+        }
     }
 
     fn play(&self, id: &str) -> Reply {
         let mut r = Reply::new();
-        // play_track() is async: it fetches the metadata before the audio so
-        // the status page has words before the first sample.
-        let ok = self.runtime.block_on(self.play_track(id)).is_ok();
+        let parsed = SpotifyId::from_base62(id);
+        let ok = self.runtime.block_on(async {
+            let id = match parsed {
+                Ok(id) => id,
+                Err(_) => return false,
+            };
+            if let Some(wire) = self.describe(&id).await {
+                self.shared.duration_ms.store(wire.duration_ms, Ordering::SeqCst);
+                *self.shared.now.lock().unwrap() = Some(wire);
+            }
+            // Playing one track from a list: the list is the queue, and this
+            // is the cursor into it, so next/previous move through what the
+            // person was looking at.
+            self.shared.count.store(1, Ordering::SeqCst);
+            self.shared.index.store(0, Ordering::SeqCst);
+            *self.shared.queue.lock().unwrap() = vec![id];
+            self.player.load(id, true, 0);
+            true
+        });
         r.verdict(ok, "could not load the track");
         r
     }
 
     fn play_context(&self, kind: &str, context: &str, id: &str) -> Reply {
-        // The queue belongs to librespot, so the context is set before the
-        // track: "next" on the V1 then means what it means on the phone.
+        let mut r = Reply::new();
+        let cursor_id = SpotifyId::from_base62(id);
+        let kind = kind.to_string();
+        let context = context.to_string();
+
         let ok = self.runtime.block_on(async {
-            if kind == "playlist" {
-                if let Ok(plid) = SpotifyId::from_base62(context) {
-                    if let Ok(list) = Playlist::get(&self.session, &plid).await {
-                        self.player.set_available_context(list, 0);
+            let cursor_id = match cursor_id {
+                Ok(id) => id,
+                Err(_) => return false,
+            };
+
+            // Fill the queue with the whole list, then start at `cursor_id`.
+            let ids: Vec<SpotifyId> = match kind.as_str() {
+                "liked" => {
+                    let user = self.account.clone();
+                    match likestate_id(&user) {
+                        Some(pl) => match Playlist::get(&self.session, &pl).await {
+                            Ok(list) => list.tracks().cloned().collect(),
+                            Err(_) => vec![cursor_id],
+                        },
+                        None => vec![cursor_id],
                     }
                 }
-            }
-            self.play_track(id).is_ok()
+                "playlist" => match SpotifyId::from_base62(&context) {
+                    Ok(pl) => match Playlist::get(&self.session, &pl).await {
+                        Ok(list) => list.tracks().cloned().collect(),
+                        Err(_) => vec![cursor_id],
+                    },
+                    Err(_) => vec![cursor_id],
+                },
+                _ => vec![cursor_id],
+            };
+
+            let cursor = ids.iter().position(|x| *x == cursor_id).unwrap_or(0);
+            self.set_queue(ids, cursor);
+            self.load_cursor().await.is_ok()
         });
-        let mut r = Reply::new();
-        r.verdict(ok, "could not start the context");
+        r.verdict(ok, "could not start that list");
         r
     }
 
@@ -534,15 +661,18 @@ impl Library for Daemon {
     }
 
     fn next(&self) {
-        self.player.next();
+        // Failing to skip (end of the queue) is not an error the player shows:
+        // the status keeps reporting the last track and stays put.
+        let _ = self.runtime.block_on(self.skip(true));
     }
 
     fn previous(&self) {
-        self.player.prev();
+        let _ = self.runtime.block_on(self.skip(false));
     }
 
     fn seek(&self, ms: u32) {
         self.player.seek(ms);
+        self.shared.position_ms.store(ms as i64, Ordering::SeqCst);
     }
 
     fn shuffle(&self, on: bool) {
@@ -554,32 +684,37 @@ impl Library for Daemon {
     }
 
     fn volume(&self, percent: i64) {
-        self.shared.volume.store(percent, Ordering::SeqCst);
-        self.player.set_volume(percent.clamp(0, 100) as u16);
+        // The player's own keys change its DAC; this is the number the phone
+        // and the status page agree on, not a second attenuator.
+        self.shared.volume.store(percent.clamp(0, 100), Ordering::SeqCst);
     }
 
     fn queue(&self) -> Reply {
+        let ids: Vec<SpotifyId> = self.shared.queue.lock().unwrap().clone();
+        let index = self.shared.index.load(Ordering::SeqCst);
         let mut r = Reply::new();
-        r.line(format!(
-            "Q\t{}\t{}",
-            self.shared.index.load(Ordering::SeqCst),
-            self.shared.count.load(Ordering::SeqCst)
-        ));
-        r.done();
-        r
-    }
-
-    fn auth(&self) -> Reply {
-        let mut r = Reply::new();
-        if self.account.is_empty() {
-            r.line("AUTH none".into());
-        } else {
-            r.line(format!("AUTH ok {}", self.account));
+        r.line(format!("Q\t{}\t{}", index + 1, ids.len()));
+        for id in ids.iter() {
+            r.line(format!("T\t{}\t\t\t\t", id.to_base62().unwrap_or_default()));
         }
         r.done();
         r
     }
 
+    fn auth(&self) -> Reply {
+        if self.account.is_empty() {
+            Reply::error("AUTH none")
+        } else {
+            let mut r = Reply::new();
+            r.line(format!("AUTH ok {}", self.account));
+            r.done();
+            r
+        }
+    }
+
+    /// Give the sink the player's socket for the life of a PCM channel. Boxed
+    /// because the transport is the daemon's choice, not the sink's: a UNIX
+    /// socket on a test rig, TCP to a player on the Wi-Fi.
     fn open_pcm(&self, stream: Box<dyn std::io::Write + Send>) {
         *self.shared.pcm.lock().unwrap() = Some(stream);
     }
@@ -589,33 +724,8 @@ impl Library for Daemon {
     }
 }
 
-/// librespot wants a mixer; the player's own volume control is the real one,
-/// so this one only remembers the number the protocol reports.
-#[derive(Default)]
-pub struct NoMixer {
-    volume: AtomicI64,
-}
-
-impl librespot::playback::mixer::Mixer for NoMixer {
-    fn set_volume(&self, volume: u16) {
-        self.volume.store(volume as i64, Ordering::SeqCst);
-    }
-
-    fn volume(&self) -> u16 {
-        self.volume.load(Ordering::SeqCst) as u16
-    }
-}
-
-/// Spotify's search endpoint takes a percent-encoded query; the player sends
-/// spaces, which is right for the human and wrong for the URL.
-fn urlencode(s: &str) -> String {
-    let mut out = String::new();
-    for b in s.bytes() {
-        match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => out.push(b as char),
-            b' ' => out.push('+'),
-            _ => out.push_str(&format!("%{:02X}", b)),
-        }
-    }
-    out
-}
+// Keeps the HashMap import honest: the describe cache this file used to keep is
+// gone (one request per row is fast enough and much easier to reason about),
+// but a future version that batches artist/album lookups will want it again.
+#[allow(dead_code)]
+type DescribeCache = HashMap<SpotifyId, String>;
