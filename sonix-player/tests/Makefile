@@ -1836,6 +1836,22 @@ $(BUILD)/test_jellyfin_pages: $(JELLYFINPAGE_OBJ)
 networkmusic: $(BUILD)/test_networkmusic
 	python3 run_networkmusic_tests.py $(BUILD)/test_networkmusic
 
+# Remembered-password storage next to device_config.ini: write, mode 0600,
+# JSON round-trip, unlink on clear, refusal of anything unreadable.
+.PHONY: networkcredentials
+networkcredentials: $(BUILD)/test_networkcredentials
+	$(BUILD)/test_networkcredentials
+
+$(BUILD)/test_networkcredentials: test_networkcredentials.c $(ROOT)/src/system/net/networkcredentials.c \
+                                $(ROOT)/src/system/core/json.c $(ROOT)/src/system/core/config.c \
+                                $(ROOT)/src/system/net/networkcredentials.h \
+                                $(ROOT)/src/system/core/json.h $(ROOT)/src/system/core/config.h \
+                                $(ROOT)/src/system/net/networkshare.h
+	@mkdir -p $(BUILD)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ test_networkcredentials.c \
+	    $(ROOT)/src/system/net/networkcredentials.c $(ROOT)/src/system/core/json.c \
+	    $(ROOT)/src/system/core/config.c $(LDFLAGS) $(LDLIBS)
+
 NETWORKMUSIC_SRC = test_networkmusic.c $(ROOT)/src/system/streaming/networkmusic.c \
                    $(ROOT)/src/system/net/networkshare.c $(ROOT)/src/system/ebook/epub_xml.c \
                    $(ROOT)/src/system/playback/playlist.c $(ROOT)/src/system/core/utils.c
@@ -1847,7 +1863,8 @@ $(BUILD)/test_networkmusic: $(NETWORKMUSIC_SRC) $(ROOT)/src/system/streaming/net
 NETWORKMUSIC_UI_COMMON = $(ROOT)/src/gui/shell/settingsrow.c $(ROOT)/src/gui/shell/keyboard.c \
                        $(ROOT)/src/gui/shell/theme.c $(ROOT)/src/gui/shell/icons.c $(ROOT)/src/gui/board_profile.c \
                        $(ROOT)/src/system/input/kblayout.c $(ROOT)/src/system/core/config.c $(ROOT)/src/system/core/lang.c
-NETWORKMUSIC_UI_SRC = $(ROOT)/tests/ui/test_networkmusic.c $(ROOT)/src/system/net/networkshare.c $(NETWORKMUSIC_UI_COMMON)
+NETWORKMUSIC_UI_SRC = $(ROOT)/tests/ui/test_networkmusic.c $(ROOT)/src/system/net/networkshare.c \
+                      $(ROOT)/src/system/net/networkcredentials.c $(ROOT)/src/system/core/json.c $(NETWORKMUSIC_UI_COMMON)
 NETWORKMUSIC_UI_OBJ = $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(NETWORKMUSIC_UI_SRC)) $(UI_LVGL_OBJ)
 .PHONY: networkmusic-ui
 ui: networkmusic-ui
@@ -1861,7 +1878,8 @@ $(BUILD)/test_networkmusic_ui: $(NETWORKMUSIC_UI_OBJ)
 # the native test. Native network backends are deliberately not linked.
 LAN_PREVIEW_SRC = tests/ui/test_streaming_preview.c src/gui/streaming/streaming.c \
                   src/gui/streaming/networkmusicpage.c src/gui/wireless/listentogether.c
-LAN_PREVIEW_SHARED = $(NETWORKMUSIC_UI_COMMON) $(ROOT)/src/gui/shell/gridpage.c $(ROOT)/src/gui/pet/peticon.c \
+LAN_PREVIEW_SHARED = $(NETWORKMUSIC_UI_COMMON) $(ROOT)/src/system/net/networkcredentials.c \
+                     $(ROOT)/src/system/core/json.c $(ROOT)/src/gui/shell/gridpage.c $(ROOT)/src/gui/pet/peticon.c \
                      $(ROOT)/src/gui/streaming/soundcloud_icon.c $(ROOT)/src/gui/streaming/jellyfin_icon.c
 LAN_PREVIEW_OBJ = $(addprefix $(BUILD)/ui-preview/,$(LAN_PREVIEW_SRC:.c=.o)) \
                   $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(LAN_PREVIEW_SHARED)) $(UI_LVGL_OBJ)

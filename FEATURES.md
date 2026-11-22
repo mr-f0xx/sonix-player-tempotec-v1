@@ -233,7 +233,9 @@ a self-signed certificate), and HLS.
 - **Network folders** - under **Streaming**, browse a remote WebDAV or FTP
   server and save individual tracks or all tracks in an album folder directly
   to microSD. Save and play opens the completed local file for offline playback.
-  See [Network folders](docs/network-folders.md).
+  An optional **Remember password** toggle keeps the password across reboots
+  in a private, unencrypted, device-local file — off by default, with the
+  warning shown on the page. See [Network folders](docs/network-folders.md).
 - **SonixLink** - a control protocol for a phone: the phone fetches the index
   once and queries it locally instead of paging over the wire. Playback state,
   queue, favourites, artwork and commands.
