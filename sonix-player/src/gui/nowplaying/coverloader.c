@@ -16,6 +16,8 @@ typedef struct {
 	int size;
 	bool image_file;
 	bool directory;
+	bool classify_directory; // browser folder: only artwork for a single album
+	bool directory_album;    // result of that classification, even on a cover miss
 
 	uint32_t generation; // bumped by every request and every release
 	bool pending;		 // asked for, not started
@@ -271,15 +273,24 @@ static void *worker(void *arg) {
 		int size = slot->size;
 		bool image_file = slot->image_file;
 		bool directory = slot->directory;
+		bool classify_directory = slot->classify_directory;
 		uint32_t generation = slot->generation;
 
 		slot->pending = false;
 		slot->running = true;
 		pthread_mutex_unlock(&lock);
 
-		cover_image_t image;
-		bool found = image_file ? cover_load_image_file(path, size, size, COVER_FIT_COVER, &image)
-								: cover_thumb_load(path, directory, size, &image);
+		cover_image_t image = {0};
+		bool directory_album = false;
+		bool found;
+		if (image_file) {
+			found = cover_load_image_file(path, size, size, COVER_FIT_COVER, &image);
+		} else if (classify_directory) {
+			directory_album = cover_directory_is_album(path);
+			found = directory_album && cover_thumb_load(path, true, size, &image);
+		} else {
+			found = cover_thumb_load(path, directory, size, &image);
+		}
 
 		pthread_mutex_lock(&lock);
 		slot->running = false;
@@ -292,6 +303,7 @@ static void *worker(void *arg) {
 		} else {
 			slot->done = true;
 			slot->found = found;
+			slot->directory_album = directory_album;
 			slot->image = image;
 			if (found) {
 				// The descriptor points into its own pixel buffer, which has
@@ -339,6 +351,8 @@ static void discard(slot_t *slot) {
 	}
 	slot->done = false;
 	slot->found = false;
+	slot->classify_directory = false;
+	slot->directory_album = false;
 	memset(&slot->image, 0, sizeof(slot->image));
 }
 
@@ -376,6 +390,21 @@ void coverloader_request_dir(int slot_index, const char *path, int size) {
 	pthread_mutex_unlock(&lock);
 }
 
+void coverloader_request_album_dir(int slot_index, const char *path, int size) {
+	if (slot_index < 0 || slot_index >= COVERLOADER_SLOTS || !path) return;
+	pthread_mutex_lock(&lock);
+	slot_t *slot = &slots[slot_index];
+	discard(slot);
+	snprintf(slot->path, sizeof(slot->path), "%s", path);
+	slot->size = size;
+	slot->image_file = false;
+	slot->directory = true;
+	slot->classify_directory = true;
+	slot->pending = true;
+	pthread_cond_signal(&wakeup);
+	pthread_mutex_unlock(&lock);
+}
+
 void coverloader_request_image(int slot_index, const char *path, int size) {
 	if (slot_index < 0 || slot_index >= COVERLOADER_SLOTS || !path) {
 		return;
@@ -403,7 +432,7 @@ void coverloader_release(int slot_index) {
 	pthread_mutex_unlock(&lock);
 }
 
-bool coverloader_take(int slot_index, cover_image_t *out, bool *finished) {
+static bool coverloader_take_internal(int slot_index, cover_image_t *out, bool *finished, bool *is_album) {
 	if (finished) {
 		*finished = false;
 	}
@@ -423,6 +452,9 @@ bool coverloader_take(int slot_index, cover_image_t *out, bool *finished) {
 	if (finished) {
 		*finished = true;
 	}
+	if (is_album) {
+		*is_album = slot->directory_album;
+	}
 
 	bool found = slot->found;
 	if (found) {
@@ -434,10 +466,19 @@ bool coverloader_take(int slot_index, cover_image_t *out, bool *finished) {
 	// pixels the caller is drawing from.
 	slot->done = false;
 	slot->found = false;
+	slot->directory_album = false;
 	memset(&slot->image, 0, sizeof(slot->image));
 
 	pthread_mutex_unlock(&lock);
 	return found;
+}
+
+bool coverloader_take(int slot_index, cover_image_t *out, bool *finished) {
+	return coverloader_take_internal(slot_index, out, finished, NULL);
+}
+
+bool coverloader_take_album_dir(int slot_index, cover_image_t *out, bool *finished, bool *is_album) {
+	return coverloader_take_internal(slot_index, out, finished, is_album);
 }
 
 // Called with the lock held: forgets whatever the job holds.
