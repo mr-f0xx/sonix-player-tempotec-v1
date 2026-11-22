@@ -386,8 +386,6 @@ impl Daemon {
     }
 }
 
-}
-
 impl Library for Daemon {
     fn status(&self) -> Status {
         let s = &self.shared;
