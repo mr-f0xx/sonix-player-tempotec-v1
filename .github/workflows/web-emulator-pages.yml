@@ -236,11 +236,26 @@ jobs:
       # The summary is what a person reads on the run's page, and the job log
       # is not always reachable. Errors go there in full, so a failure says
       # what broke without anybody downloading an archive.
-      - name: Protocol tests (no librespot, no network)
+      # The protocol is the package's library target but it shares the
+      # package's dependency list, so cargo resolves and builds librespot for
+      # it too. Compiling it directly with rustc tests the part that has no
+      # dependencies at all, and says so in seconds even when librespot is
+      # mid-build.
+      - name: Protocol tests, rustc only (no librespot, no network)
         run: |
-          # `|| true` so the summary and the artifact are written even when the
-          # tests fail -- the failure is what needs reading, and the job log is
-          # not always reachable from outside.
+          rustc --edition 2021 --test src/lib.rs -o "$RUNNER_TEMP/protocol-tests" \
+            >"$RUNNER_TEMP/rustc.log" 2>&1 || true
+          cat "$RUNNER_TEMP/rustc.log"
+          if [ ! -x "$RUNNER_TEMP/protocol-tests" ]; then
+            echo '::error title=spotifyd protocol does not compile::the wire format needs no dependencies; this is our code, not librespot'
+            exit 1
+          fi
+          "$RUNNER_TEMP/protocol-tests" --test-threads=1 | tee "$RUNNER_TEMP/protocol.log"
+
+      - name: Protocol tests through cargo
+        run: |
+          # This one also has to build librespot, so it answers a second
+          # question: does the pinned version compile on this toolchain?
           cargo test --lib >"$RUNNER_TEMP/test.log" 2>&1 || true
           {
             echo "### Spotify daemon: protocol tests"
