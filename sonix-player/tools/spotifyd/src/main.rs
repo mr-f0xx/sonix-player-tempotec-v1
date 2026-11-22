@@ -99,7 +99,12 @@ pub fn read_config(path: &str) -> Config {
 /// questions in words; the glue answers them with librespot. Keeping the seam
 /// here is what lets `cargo test` cover the wire format with no session, no
 /// network and no credentials.
-pub trait Library {
+// Send + Sync: one daemon serves several connections at once, each on its own
+// thread, so every thread holds an Arc to the same Library. That is only sound
+// if the implementation can be shared that way -- without the bound the
+// compiler rejects the spawn at the accept loop, which is where this was
+// caught.
+pub trait Library: Send + Sync {
     fn status(&self) -> protocol::Status;
     fn liked(&self, offset: usize, limit: usize) -> ListPage;
     fn playlist(&self, id: &str, offset: usize, limit: usize) -> ListPage;
