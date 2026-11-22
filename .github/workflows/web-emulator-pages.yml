@@ -214,8 +214,16 @@ jobs:
       run:
         working-directory: sonix-player/tools/spotifyd
     steps:
+      # Full history and tags, because librespot's build script shells out to
+      # git (vergen_gitcl: `git describe`, commit date, sha). A shallow clone
+      # is a repository with no tags and no parents, which is the case that
+      # build script fails on -- and it fails as a compile error in the build
+      # script, E0277, with nothing about git in the message.
       - name: Check out source
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
