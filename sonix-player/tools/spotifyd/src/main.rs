@@ -230,7 +230,9 @@ pub fn dispatch<W: Write>(lib: &dyn Library, line: &str, out: &mut W) -> std::io
         other => Reply::error(&format!("unknown command {}", other)),
     };
 
-    out.write_all(reply.as_bytes())?;
+    // Reply::encode() is the wire form: the lines, each terminated, and
+    // exactly one END. There is no as_bytes on it -- the bytes come from this.
+    out.write_all(reply.encode().as_bytes())?;
     Ok(true)
 }
 
