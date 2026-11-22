@@ -1287,7 +1287,7 @@ STOCKKEYS_UI_SRC = $(ROOT)/tests/ui/test_stockkeys_ui.c \
 STOCKKEYS_UI_OBJ = $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(STOCKKEYS_UI_SRC)) \
                    $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(UI_LVGL_SRC))
 
-.PHONY: ui peq-ui corners playbutton stockkeys-ui tidal-ui
+.PHONY: ui peq-ui corners playbutton stockkeys-ui tidal-ui spotify-ui spotify
 corners: $(BUILD)/test_corners
 	$(BUILD)/test_corners
 
@@ -1317,7 +1317,7 @@ $(BUILD)/test_stockkeys_ui: $(ROOT)/build_gen/streamkeys_key.h $(STOCKKEYS_UI_OB
 .PHONY: ui
 ui: wifitransfer-ui batteryprofile-ui
 ui: $(BUILD)/test_sleeve_hold
-ui: $(BUILD)/test_browser_grid $(BUILD)/test_qobuzgenregrid $(BUILD)/test_main_menu $(BUILD)/test_screensaver $(BUILD)/test_tools_pages $(BUILD)/test_wifi_pages $(BUILD)/test_chargescreen $(BUILD)/test_power_display $(BUILD)/test_touch_wake $(BUILD)/test_lyricsearch $(BUILD)/test_games $(BUILD)/test_peq_profiles $(BUILD)/test_quickpanel_layout $(BUILD)/test_bootlogo $(BUILD)/test_btreceiversession $(BUILD)/test_home_swipe $(BUILD)/test_corners $(BUILD)/test_playbutton $(BUILD)/test_musicsettings_rows $(BUILD)/test_albumgrid_ui $(BUILD)/test_stats $(BUILD)/test_volume_overlay $(BUILD)/test_playerdeck $(BUILD)/test_vinylayout $(BUILD)/test_stickerlayout $(BUILD)/test_waveform_overlay $(BUILD)/test_hiresbadge_ui $(BUILD)/test_statusbar_ui $(BUILD)/test_stockkeys_ui $(BUILD)/test_tidal_pages $(BUILD)/test_soundcloud_pages $(BUILD)/test_qobuz_pages $(BUILD)/test_jellyfin_pages $(BUILD)/test_fwupdate $(BUILD)/test_ota_auto
+ui: $(BUILD)/test_browser_grid $(BUILD)/test_qobuzgenregrid $(BUILD)/test_main_menu $(BUILD)/test_screensaver $(BUILD)/test_tools_pages $(BUILD)/test_wifi_pages $(BUILD)/test_chargescreen $(BUILD)/test_power_display $(BUILD)/test_touch_wake $(BUILD)/test_lyricsearch $(BUILD)/test_games $(BUILD)/test_peq_profiles $(BUILD)/test_quickpanel_layout $(BUILD)/test_bootlogo $(BUILD)/test_btreceiversession $(BUILD)/test_home_swipe $(BUILD)/test_corners $(BUILD)/test_playbutton $(BUILD)/test_musicsettings_rows $(BUILD)/test_albumgrid_ui $(BUILD)/test_stats $(BUILD)/test_volume_overlay $(BUILD)/test_playerdeck $(BUILD)/test_vinylayout $(BUILD)/test_stickerlayout $(BUILD)/test_waveform_overlay $(BUILD)/test_hiresbadge_ui $(BUILD)/test_statusbar_ui $(BUILD)/test_stockkeys_ui $(BUILD)/test_tidal_pages $(BUILD)/test_soundcloud_pages $(BUILD)/test_qobuz_pages $(BUILD)/test_jellyfin_pages $(BUILD)/test_spotify_pages $(BUILD)/test_fwupdate $(BUILD)/test_ota_auto
 	$(BUILD)/test_sleeve_hold ../../sonix-packer/assets/V1/usr/resource/sonix/language
 	$(BUILD)/test_qobuzgenregrid
 	$(BUILD)/test_main_menu ../../sonix-packer/assets/V1/usr/resource/sonix/language
@@ -1356,6 +1356,7 @@ ui: $(BUILD)/test_browser_grid $(BUILD)/test_qobuzgenregrid $(BUILD)/test_main_m
 	$(BUILD)/test_soundcloud_pages ../../sonix-packer/assets/V1/usr/resource/sonix/language
 	$(BUILD)/test_qobuz_pages ../../sonix-packer/assets/V1/usr/resource/sonix/language
 	$(BUILD)/test_jellyfin_pages ../../sonix-packer/assets/V1/usr/resource/sonix/language
+	$(BUILD)/test_spotify_pages ../../sonix-packer/assets/V1/usr/resource/sonix/language
 	$(BUILD)/test_fwupdate
 	$(BUILD)/test_ota_auto
 
@@ -1417,7 +1418,7 @@ $(BUILD)/ui/lvgl/%.o: $(ROOT)/lvgl/%.c ui/lv_conf.h $(ROOT)/lv_conf.h
 	@mkdir -p $(dir $@)
 	$(CC) $(UI_CPPFLAGS) $(filter-out -Werror,$(UI_CFLAGS)) -c $< -o $@
 
--include $(sort $(QOBUZGENRE_UI_OBJ:.o=.d) $(PEQPAGE_OBJ:.o=.d) $(UI_OBJ:.o=.d) $(SAVER_OBJ:.o=.d) $(CHARGE_OBJ:.o=.d) $(WIFIPAGE_OBJ:.o=.d) $(LYRICSEARCH_OBJ:.o=.d) $(GAMES_OBJ:.o=.d) $(CORNERS_OBJ:.o=.d) $(STATS_UI_OBJ:.o=.d) $(PLAYBUTTON_OBJ:.o=.d) $(MUSICROWS_OBJ:.o=.d) $(VOLUMEOVERLAY_OBJ:.o=.d) $(PLAYERDECK_OBJ:.o=.d) $(VINYLLAYOUT_OBJ:.o=.d) $(STICKERLAYOUT_OBJ:.o=.d) $(WAVEOVERLAY_OBJ:.o=.d) $(HIRESBADGE_UI_OBJ:.o=.d) $(STOCKKEYS_UI_OBJ:.o=.d) $(TIDALPAGE_OBJ:.o=.d))
+-include $(sort $(QOBUZGENRE_UI_OBJ:.o=.d) $(PEQPAGE_OBJ:.o=.d) $(UI_OBJ:.o=.d) $(SAVER_OBJ:.o=.d) $(CHARGE_OBJ:.o=.d) $(WIFIPAGE_OBJ:.o=.d) $(LYRICSEARCH_OBJ:.o=.d) $(GAMES_OBJ:.o=.d) $(CORNERS_OBJ:.o=.d) $(STATS_UI_OBJ:.o=.d) $(PLAYBUTTON_OBJ:.o=.d) $(MUSICROWS_OBJ:.o=.d) $(VOLUMEOVERLAY_OBJ:.o=.d) $(PLAYERDECK_OBJ:.o=.d) $(VINYLLAYOUT_OBJ:.o=.d) $(STICKERLAYOUT_OBJ:.o=.d) $(WAVEOVERLAY_OBJ:.o=.d) $(HIRESBADGE_UI_OBJ:.o=.d) $(STOCKKEYS_UI_OBJ:.o=.d) $(TIDALPAGE_OBJ:.o=.d) $(SPOTIFYPAGE_OBJ:.o=.d) $(SPOTIFY_OBJ:.o=.d) $(SPOTIFYMOCK_OBJ:.o=.d))
 
 # Smart Mix track-count limits and traversal, with a memory-only graph fixture.
 GENIUS_SRC = test_genius.c $(ROOT)/src/system/library/genius.c
@@ -1613,6 +1614,21 @@ SOUNDCLOUD_DECODE = $(ROOT)/src/system/decode/decode.c \
                     $(ROOT)/src/system/decode/growfile.c \
                     $(ROOT)/src/system/streaming/streambridge.c
 
+# Spotify: the client half against a fake daemon on a real UNIX socket, and the
+# demo library's own behaviour. No LVGL, no network, no account.
+.PHONY: spotify spotify-ui
+spotify: $(BUILD)/test_spotify
+	$(BUILD)/test_spotify
+
+$(BUILD)/test_spotify: test_spotify.c $(ROOT)/src/system/streaming/spotify.c \
+                       $(ROOT)/src/system/streaming/spotifymock.c \
+                       $(ROOT)/src/system/streaming/spotify.h \
+                       $(ROOT)/src/system/streaming/spotifymock.h
+	@mkdir -p $(BUILD)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -DHOST_BUILD -o $@ test_spotify.c \
+		$(ROOT)/src/system/streaming/spotify.c $(ROOT)/src/system/streaming/spotifymock.c \
+		$(LDFLAGS) $(LDLIBS)
+
 .PHONY: soundcloud soundcloud-ui
 soundcloud: $(BUILD)/test_soundcloud
 	$(BUILD)/test_soundcloud
@@ -1622,6 +1638,35 @@ $(BUILD)/test_soundcloud: test_soundcloud.c $(ROOT)/build_gen/streamkeys_key.h $
 	$(CC) $(CPPFLAGS) $(CFLAGS) -DHOST_BUILD -Wno-error=format-truncation -o $@ test_soundcloud.c $(SOUNDCLOUD_CORE) \
 		-Wno-unused-parameter -Wno-sign-compare -Wno-unused-function -Wno-implicit-fallthrough -Wno-misleading-indentation $(SOUNDCLOUD_DECODE) \
 		$(LDFLAGS) $(LDLIBS)
+
+# The Spotify pages, headless at 240x320: the home grid, Liked Songs, the
+# playlists and search lists, and the account page, in every language and every
+# theme, with the client stubbed.
+SPOTIFYPAGE_SRC = $(ROOT)/tests/ui/test_spotify_pages.c \
+                  $(ROOT)/src/gui/streaming/spotifypage.c \
+                  $(ROOT)/src/gui/shell/spotify_icons.c \
+                  $(ROOT)/src/gui/streaming/soundcloud_icon.c \
+                  $(ROOT)/src/gui/streaming/jellyfin_icon.c \
+                  $(ROOT)/src/gui/shell/settingsrow.c \
+                  $(ROOT)/src/gui/shell/gridpage.c \
+                  $(ROOT)/src/gui/shell/keyboard.c \
+                  $(ROOT)/src/gui/shell/popover.c \
+                  $(ROOT)/src/gui/shell/theme.c \
+                  $(ROOT)/src/gui/shell/icons.c \
+                  $(ROOT)/src/gui/board_profile.c \
+                  $(ROOT)/src/system/input/kblayout.c \
+                  $(ROOT)/src/system/core/config.c \
+                  $(ROOT)/src/system/core/lang.c \
+                  $(ROOT)/src/system/core/utils.c
+SPOTIFYPAGE_OBJ = $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(SPOTIFYPAGE_SRC)) \
+                  $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(UI_LVGL_SRC))
+
+spotify-ui: $(BUILD)/test_spotify_pages
+	$(BUILD)/test_spotify_pages ../../sonix-packer/assets/V1/usr/resource/sonix/language
+
+$(BUILD)/test_spotify_pages: $(SPOTIFYPAGE_OBJ)
+	$(CC) -o $@ $^ $(LDFLAGS) $(LDLIBS)
+-include $(SPOTIFYPAGE_OBJ:.o=.d)
 
 SOUNDCLOUDPAGE_SRC = $(ROOT)/tests/ui/test_soundcloud_pages.c \
                      $(ROOT)/src/gui/streaming/soundcloudpage.c \

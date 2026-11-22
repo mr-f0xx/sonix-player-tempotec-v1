@@ -318,11 +318,28 @@ static void fit_row_label(lv_obj_t *label, int32_t width) {
 	for (size_t i = 0; i < count; i++) {
 		lv_point_t size;
 		lv_text_get_size(&size, text, steps[i], 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
-		if (size.x <= width || i + 1 == count) {
+		bool fits = size.x <= width;
+		bool last = i + 1 == count;
+		if (fits || last) {
 			// Only when it actually changes: setting the same font again
 			// retriggers layout, and this runs from a layout event.
 			if (lv_obj_get_style_text_font(label, LV_PART_MAIN) != steps[i]) {
 				lv_obj_set_style_text_font(label, steps[i], 0);
+			}
+			// Even the smallest step can be too wide: "Qualidade de áudio"
+			// beside "320 kbps" on a 240-pixel V1 leaves the name 110 pixels
+			// and needs 144. Left as it was, the name ran underneath the
+			// value. Capped, it ends in an ellipsis before it gets there --
+			// the row is still readable, which is the point of a row.
+			if (!fits) {
+				lv_label_set_long_mode(label, LV_LABEL_LONG_DOT);
+				lv_obj_set_width(label, width);
+			} else if (lv_label_get_long_mode(label) != LV_LABEL_LONG_CLIP ||
+					   lv_obj_get_style_width(label, LV_PART_MAIN) != LV_SIZE_CONTENT) {
+				// Back to natural width when it does fit, so a row that grew
+				// its space again is not left clipped from an earlier pass.
+				lv_label_set_long_mode(label, LV_LABEL_LONG_CLIP);
+				lv_obj_set_width(label, LV_SIZE_CONTENT);
 			}
 			return;
 		}

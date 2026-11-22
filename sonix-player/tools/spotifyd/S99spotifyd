@@ -1,0 +1,31 @@
+#!/bin/sh
+# Start spotifyd at boot, so the V1 finds its daemon without anyone logging in
+# to the computer first. Install as /etc/init.d/S99spotifyd and chmod +x.
+# The daemon writes its own log; nothing here reads it.
+
+DAEMON=/usr/bin/spotifyd
+CONF=/usr/data/spotifyd.conf
+PIDFILE=/var/run/spotifyd.pid
+
+start() {
+	printf "Starting spotifyd: "
+	[ -x "$DAEMON" ] || { echo "no $DAEMON"; return 1; }
+	[ -f "$CONF" ] && set -- --config "$CONF"
+	start-stop-daemon -S -q -b -m -p "$PIDFILE" -x "$DAEMON" -- "$@"
+	echo "ok"
+}
+
+stop() {
+	printf "Stopping spotifyd: "
+	start-stop-daemon -K -q -p "$PIDFILE"
+	echo "ok"
+}
+
+case "$1" in
+	start) start ;;
+	stop) stop ;;
+	restart) stop; sleep 1; start ;;
+	*) echo "usage: $0 {start|stop|restart}"; exit 1 ;;
+esac
+
+exit $?

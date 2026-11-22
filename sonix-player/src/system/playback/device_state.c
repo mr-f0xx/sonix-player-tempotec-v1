@@ -17,6 +17,7 @@
 #include "src/system/streaming/subsonicstream.h"
 #include "src/system/streaming/tidalcache.h"
 #include "src/system/streaming/radio.h"
+#include "src/system/streaming/spotify.h"
 #include "src/system/audio/replaygain.h"
 #include "src/system/device/system.h"
 
@@ -282,6 +283,32 @@ void device_state_get(device_state_t *out) {
 			snprintf(out->metadata.artist, sizeof(out->metadata.artist), "%s", tr("connecting"));
 		}
 		out->metadata.has_tags = true;
+	} else if (spotify_stream_active()) {
+		// Spotify answers next, and for the same reason the radio does: its
+		// frames go out through audio_external_*, so audio.c knows nothing
+		// about them. It is not `live` -- it is a playlist of real tracks with
+		// a length, a position and a seek bar -- but it is not a file either,
+		// so what is left of this function is skipped rather than run against
+		// a stale path.
+		spotify_now_t now;
+		spotify_get_now(&now);
+
+		out->status = (now.state == SPOTIFY_STATE_PLAYING || now.state == SPOTIFY_STATE_LOADING ||
+					   now.state == SPOTIFY_STATE_PAUSED)
+						  ? (now.state == SPOTIFY_STATE_PAUSED ? AUDIO_STATUS_PAUSED : AUDIO_STATUS_PLAYING)
+						  : AUDIO_STATUS_STOPPED;
+		out->current_file[0] = '\0';
+		out->progress_current_secs = now.position_ms / 1000.0;
+		out->progress_total_secs = now.duration_ms / 1000.0;
+		out->stream_sample_rate = 44100;
+		out->stream_channels = 2;
+		snprintf(out->live_cover, sizeof(out->live_cover), "%s", now.cover_path);
+
+		memset(&out->metadata, 0, sizeof(out->metadata));
+		snprintf(out->metadata.title, sizeof(out->metadata.title), "%s", now.title);
+		snprintf(out->metadata.artist, sizeof(out->metadata.artist), "%s", now.artist);
+		snprintf(out->metadata.album, sizeof(out->metadata.album), "%s", now.album);
+		out->metadata.has_tags = now.title[0] != '\0' || now.artist[0] != '\0';
 	} else {
 		out->status = audio_get_status();
 		audio_get_current_file(out->current_file, sizeof(out->current_file));
@@ -527,8 +554,12 @@ static void load_and_play_at(const char *filepath, double position) {
 
 	// A file and a stream cannot both have the output. Starting a track ends
 	// the radio outright -- not merely stops it -- because from here on the
-	// player belongs to the track.
+	// player belongs to the track. Spotify is the other live source and ends
+	// the same way, for the same reason.
 	radio_clear();
+	if (spotify_stream_active()) {
+		spotify_stop();
+	}
 
 	// Callers may replay the already-loaded track by passing current_metadata_file
 	// itself, so guard against copying a buffer onto itself.
@@ -1173,6 +1204,12 @@ bool device_state_advance_auto(char *out_path, size_t out_size) {
 	if (radio_is_active()) {
 		return false; // a stream never finishes, so there is nothing to advance to
 	}
+	if (spotify_stream_active()) {
+		// The track ended and the daemon is already a second into the next
+		// one: its queue is the play order, and the player has no part in it.
+		// Returning true makes the caller repaint for the new name.
+		return true;
+	}
 
 	// A book ends where it ends. The queue behind a book in one file is its
 	// folder, and on a card that folder is a shelf of other books -- rolling
@@ -1272,6 +1309,13 @@ static void playlist_resync_to_current(void) {
 }
 
 bool device_state_next(char *out_path, size_t out_size) {
+	// Spotify's queue lives in the daemon (it is the play order, shuffled or
+	// not). The player asks it to step and leaves the path untouched: there is
+	// no local file to report.
+	if (spotify_stream_active() || spotify_is_active()) {
+		spotify_next();
+		return true;
+	}
 	char path[512];
 	playlist_resync_to_current();
 
@@ -1300,6 +1344,10 @@ bool device_state_next(char *out_path, size_t out_size) {
 }
 
 bool device_state_prev(char *out_path, size_t out_size) {
+	if (spotify_stream_active() || spotify_is_active()) {
+		spotify_prev();
+		return true;
+	}
 	char path[512];
 	playlist_resync_to_current();
 
@@ -1328,6 +1376,26 @@ bool device_state_prev(char *out_path, size_t out_size) {
 bool device_state_take_completion(void) { return audio_take_completion(); }
 
 audio_status_t device_state_toggle_play_pause(void) {
+	// Spotify: the daemon owns the answer, because it is the one that knows
+	// whether a track is playing, paused, or between two of them. The button
+	// says what it will do to the session; the next poll reconciles.
+	if (spotify_stream_active()) {
+		spotify_status_t st;
+		spotify_status(&st);
+		spotify_play_pause();
+		if (st.state == SPOTIFY_STATE_PLAYING) {
+			return AUDIO_STATUS_PAUSED;
+		}
+		if (st.state == SPOTIFY_STATE_PAUSED || st.state == SPOTIFY_STATE_STOPPED) {
+			// A stopped stream is reopened on the way back: see spotify_resume().
+			if (!spotify_is_active()) {
+				spotify_resume();
+			}
+			return AUDIO_STATUS_PLAYING;
+		}
+		return AUDIO_STATUS_PLAYING;
+	}
+
 	// A live stream cannot be paused: there is no position to come back to,
 	// and starting again means reconnecting. Whoever pressed play/pause --
 	// the player's button, the control centre, the physical key -- means
@@ -1484,6 +1552,12 @@ void device_state_scrub_commit(void) {
 }
 
 void device_state_seek(double seconds) {
+	// Spotify seeks in the daemon's session, not in a decoder here: the frames
+	// simply continue from the new position, and there is nothing to restart.
+	if (spotify_stream_active()) {
+		spotify_seek_ms((int)(seconds * 1000.0 + 0.5));
+		return;
+	}
 	if (subsonicstream_owns(current_metadata_file)) {
 		return; // forward-only RAM source: seeking would require a new request
 	}
@@ -1501,7 +1575,15 @@ void device_state_seek(double seconds) {
 	audio_seek(seconds);
 }
 
-void device_state_stop(void) { audio_stop(); }
+void device_state_stop(void) {
+	// A Spotify track stops through the daemon, which also closes the PCM
+	// channel: leaving it open would keep the DAC away from the next source.
+	if (spotify_stream_active()) {
+		spotify_stop();
+		return;
+	}
+	audio_stop();
+}
 
 void device_state_set_volume(long volume) { set_volume(volume); }
 

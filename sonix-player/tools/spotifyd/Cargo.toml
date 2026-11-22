@@ -1,0 +1,20 @@
+# spotifyd -- the daemon half of Spotify on the TempoTec V1.
+#
+# Built outside the firmware's Makefile, exactly as librespot itself is: the
+# firmware's toolchain is a MIPS cross-compiler with no Rust in it, and the
+# daemon does not run on the player. Build this on the computer that will host
+# it, then start it. See README.md.
+[package]
+name = "sonix-spotifyd"
+version = "0.1.0"
+edition = "2021"
+description = "librespot's library and queue over a text socket, with PCM to the player"
+license = "MIT"
+
+[[bin]]
+name = "spotifyd"
+path = "src/main.rs"
+
+[dependencies]
+librespot = "0.6"
+tokio = { version = "1", features = ["full"] }

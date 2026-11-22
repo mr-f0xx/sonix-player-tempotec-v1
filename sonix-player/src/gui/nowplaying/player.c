@@ -43,6 +43,7 @@
 #include "src/system/playback/sleeptimer.h"
 #include "src/system/gearboy/gearboy.h"
 #include "src/system/streaming/radio.h"
+#include "src/system/streaming/spotify.h"
 #include "src/system/audio/audio.h"
 #include "src/system/playback/audiobook.h"
 #include "src/system/playback/device_state.h"
@@ -300,6 +301,7 @@ static lv_obj_t *tidal_badge;	   // and the Tidal one, over it: only one ever sh
 static lv_obj_t *podcast_badge;	   // and the podcast one, third in the same place
 static lv_obj_t *soundcloud_badge; // and the SoundCloud one, fourth in the same place
 static lv_obj_t *jellyfin_badge;   // and the Jellyfin one, fifth in the same place
+static lv_obj_t *spotify_badge;    // and Spotify's, sixth: a stream and a track at once
 static bool live_mode;
 static bool live_transport_hidden; // prev/next taken away on a stream
 static bool live_custom_nav;	   // on a station from a list, where they change station
@@ -637,6 +639,13 @@ static void apply_connecting(void) {
 // idempotent: called from every now-playing refresh, and does nothing at all
 // unless the mode actually changed.
 static void apply_live_mode(bool live) {
+	// Spotify is the one source that is a live path but a real queue: the
+	// frames come through audio_external_*, yet previous and next mean the
+	// playlist's, the bar has a length to scrub and repeat has a meaning. The
+	// station-shaped rules below (hide prev/next unless radio.txt can step,
+	// hide the bar, take repeat away) are exactly wrong for it, so it keeps
+	// the track's deck. `live` is passed false for it by the caller.
+	//
 	// Previous and next go away on a stream, playing or stopped: they would
 	// start a local track in place of the station. On a station started from a
 	// list -- radio.txt, a country, a search, the starred -- they stay and move
@@ -746,6 +755,9 @@ static void apply_live_mode(bool live) {
 	}
 	if (qobuz_badge && live) {
 		lv_obj_set_hidden(qobuz_badge, true);
+	}
+	if (spotify_badge && live) {
+		lv_obj_set_hidden(spotify_badge, true);
 	}
 
 	// A note means "track", a book means a book, and a station with no artwork
@@ -1089,6 +1101,19 @@ static void apply_playback_status(audio_status_t status) {
 bool player_queue_position(int *position, int *count) {
 	*position = 0;
 	*count = 0;
+	// Spotify is not `live_mode` (its deck is a track's), and its queue is the
+	// daemon's: the place in it comes from the same snapshot the page is drawn
+	// from.
+	if (spotify_stream_active()) {
+		spotify_status_t st;
+		spotify_status(&st);
+		if (st.track.count > 1 && st.track.index > 0) {
+			*position = st.track.index;
+			*count = st.track.count;
+			return true;
+		}
+		return false;
+	}
 	if (live_mode) {
 		int index;
 		int total;
@@ -1111,6 +1136,19 @@ bool player_queue_position(int *position, int *count) {
 
 static void update_queue_position(void) {
 	if (!queue_position_label) {
+		return;
+	}
+
+	if (spotify_stream_active()) {
+		int index;
+		int count;
+		if (player_queue_position(&index, &count)) {
+			lv_label_set_text_fmt(queue_position_label, "%d/%d", index, count);
+		} else {
+			lv_label_set_text(queue_position_label, "");
+		}
+		aam_strip_fit();
+		sticker_pills_sync();
 		return;
 	}
 
@@ -5507,6 +5545,26 @@ static void refresh_now_playing(void) {
 	// a song.
 	apply_audiobook_mode(!state.live && audiobook_is_playing(),
 						 !state.live && podcastcache_is_episode(state.current_file));
+	if (spotify_stream_active()) {
+		// A real track -- name, artists, sleeve -- whose frames arrive from
+		// the daemon. It is not `live` (it has a length and a seek bar) and it
+		// is not a file (there is no path), so it is its own case here.
+		spotify_now_t now;
+		spotify_get_now(&now);
+		scrolltext_set(song_title_label, now.title);
+		scrolltext_set(song_artist_label, now.artist);
+		sticker_album_sync(&state);
+		lyrics_head_sync();
+		alt_pills_sync();
+		update_fav_button();
+		update_format_label(&state);
+		update_qobuz_badge();
+		// The artwork is cached by the Spotify client as it arrives; an empty
+		// path simply leaves the mark up until the file lands.
+		refresh_cover(now.cover_path);
+		return;
+	}
+
 	if (state.live) {
 		// The station on top, what it says is on air underneath -- the same
 		// two lines as a track, carrying the two things a radio knows.
@@ -5696,7 +5754,10 @@ static void update_qobuz_badge(void) {
 	// from one service only. So which one shows is decided here, rather than
 	// leaving each badge to hide itself -- which is how they would eventually
 	// have overlapped.
-	bool from_qobuz = !live_mode && current_qobuz_track() != 0;
+	// A Spotify stream takes the corner outright: the other five are about
+	// which service a FILE came from, and there is no file.
+	bool from_spotify = spotify_stream_active();
+	bool from_qobuz = !from_spotify && !live_mode && current_qobuz_track() != 0;
 	bool from_tidal = !live_mode && !from_qobuz && current_tidal_track() != 0;
 	bool from_podcast = !live_mode && !from_qobuz && !from_tidal && current_podcast_episode();
 	bool from_soundcloud = !live_mode && !from_qobuz && !from_tidal && !from_podcast && current_soundcloud_track() > 0;
@@ -5705,6 +5766,14 @@ static void update_qobuz_badge(void) {
 		!live_mode && !from_qobuz && !from_tidal && !from_podcast && !from_soundcloud &&
 		current_jellyfin_track(jf_id, sizeof(jf_id));
 
+	if (spotify_badge) {
+		if (from_spotify) {
+			lv_obj_set_hidden(spotify_badge, false);
+			lv_obj_move_foreground(spotify_badge);
+		} else {
+			lv_obj_set_hidden(spotify_badge, true);
+		}
+	}
 	if (qobuz_badge) {
 		if (from_qobuz) {
 			lv_obj_set_hidden(qobuz_badge, false);
@@ -6258,6 +6327,35 @@ static void update_repeat_button(void) {
 	const lv_image_dsc_t *icon;
 	lv_color_t color;
 
+	// While Spotify is the source the mode lives in the daemon, so the glyph
+	// is drawn from its two flags rather than from the local queue's mode --
+	// which is still holding whatever the card was last set to.
+	if (spotify_stream_active()) {
+		spotify_status_t st;
+		spotify_status(&st);
+		bool rep = st.repeat == 1;
+		bool one = st.repeat >= 2;
+		if (st.shuffle && rep) {
+			icon = &icon_shuffle_repeat;
+		} else if (st.shuffle || (rep && !one)) {
+			icon = &icon_shuffle;
+		} else if (one) {
+			icon = &icon_repeat_one;
+		} else {
+			icon = &icon_repeat_off;
+		}
+		color = (st.shuffle || st.repeat > 0) ? active : inactive;
+		lv_image_set_src(repeat_btn_icon, icon);
+		lv_image_set_scale(repeat_btn_icon, layout_sticker_now ? STICKER_ICON_SCALE
+												: layout_aam_now ? AAM_MODE_SCALE : 256);
+		if (layout_sticker_now) {
+			color = lv_color_white();
+		}
+		lv_obj_set_style_image_recolor(repeat_btn_icon, color, 0);
+		lv_obj_set_style_image_recolor_opa(repeat_btn_icon, LV_OPA_COVER, 0);
+		return;
+	}
+
 	switch (playlist_get_mode()) {
 	case PLAYBACK_MODE_REPEAT_ONE:
 		icon = &icon_repeat_one;
@@ -6299,6 +6397,15 @@ static void update_repeat_button(void) {
 // per the active playback mode. If a next track starts, refresh the UI to it;
 // otherwise playback simply stays stopped (end of folder in normal mode).
 static void handle_track_finished(void) {
+	// Spotify advances in the daemon, a second or two before this could be
+	// asked: the queue and its play order are the daemon's, and a second
+	// NEXT here would skip a track. The one thing left to do is redraw for
+	// whichever name the daemon has moved on to.
+	if (spotify_stream_active()) {
+		refresh_now_playing();
+		return;
+	}
+
 	// What is playing came from DLNA: the queue belongs to the phone, not to
 	// the player. Tell it the track finished and wait for the next URL,
 	// instead of drawing from a local queue one entry long.
@@ -6372,6 +6479,36 @@ static void update_progress(void) {
 	// the artwork lands when its download finishes -- and the whole thing
 	// ends by itself when a station drops for good. None of that goes through
 	// a track change, so it is followed here.
+	// Spotify changes under the page the same way, and for a different
+	// reason: the daemon owns the queue, so a track that ends there begins the
+	// next one here without a completion and without a poll of ours. The
+	// serial is the client's, and it is bumped by a new name, a pause, a seek
+	// -- anything the display shows.
+	{
+		static unsigned spotify_seen;
+		static bool spotify_was;
+		bool now_spotify = spotify_stream_active();
+		unsigned spotify_serial_now = spotify_serial();
+		if (now_spotify != spotify_was) {
+			spotify_was = now_spotify;
+			spotify_seen = spotify_serial_now;
+			refresh_now_playing();
+			device_state_get(&state);
+		} else if (now_spotify && spotify_serial_now != spotify_seen) {
+			spotify_seen = spotify_serial_now;
+			spotify_now_t now;
+			spotify_get_now(&now);
+			scrolltext_set(song_title_label, now.title);
+			scrolltext_set(song_artist_label, now.artist);
+			update_qobuz_badge();
+			update_repeat_button();
+			update_queue_position();
+			if (strcmp(cover_shown_path, now.cover_path) != 0) {
+				refresh_cover(now.cover_path);
+			}
+		}
+	}
+
 	{
 		static bool was_live;
 		static unsigned last_serial;
@@ -6497,6 +6634,21 @@ static void update_progress(void) {
 static void play_btn_event_cb(lv_event_t *e) {
 	(void)e;
 
+	// Spotify pauses where the daemon's session is, and resumes there: the
+	// only thing the player adds is closing the PCM channel on a stop and
+	// reopening it on a resume, which spotify_stop()/spotify_resume() do.
+	if (spotify_stream_active()) {
+		spotify_status_t st;
+		spotify_status(&st);
+		if (st.state == SPOTIFY_STATE_PLAYING || st.state == SPOTIFY_STATE_LOADING) {
+			spotify_stop();
+		} else {
+			spotify_resume();
+		}
+		player_refresh_now_playing();
+		return;
+	}
+
 	// A live stream has no position to come back to, so this is a stop, not a
 	// pause: the connection goes, the station stays on screen, and pressing
 	// play again reconnects to it. Not while it is still connecting.
@@ -6529,6 +6681,16 @@ static void play_btn_event_cb(lv_event_t *e) {
 // to go, or the station is still connecting (see apply_connecting()), and it
 // did nothing. False when no station is loaded and the press is the queue's.
 static bool live_step(int step) {
+	// Spotify's queue is the daemon's play order, shuffled or not; a step is
+	// asked of it and the next poll brings the new name in.
+	if (spotify_stream_active()) {
+		if (step > 0) {
+			spotify_next();
+		} else {
+			spotify_prev();
+		}
+		return true;
+	}
 	if (!radio_is_active()) {
 		return false;
 	}
@@ -6977,6 +7139,26 @@ static void more_btn_event_cb(lv_event_t *e) {
 // shuffle once through, shuffle round and round.
 static void repeat_btn_event_cb(lv_event_t *e) {
 	(void)e;
+	if (spotify_stream_active()) {
+		// The same three states, kept by the daemon because its queue is the
+		// one being repeated: off, the whole queue, this track.
+		spotify_status_t st;
+		spotify_status(&st);
+		int next = st.repeat >= 2 ? 0 : st.repeat + 1;
+		if (st.shuffle) {
+			// Shuffle and repeat are one glyph here, cycled together like the
+			// playlist modes: off -> repeat queue -> repeat one -> shuffle ->
+			// shuffle+repeat. The daemon keeps them apart, so both are sent.
+			if (next == 1) {
+				spotify_set_shuffle(true);
+			} else if (st.repeat == 2) {
+				spotify_set_shuffle(false);
+			}
+		}
+		spotify_set_repeat(next);
+		update_repeat_button();
+		return;
+	}
 	playlist_cycle_mode();
 	update_repeat_button();
 }
@@ -9031,6 +9213,13 @@ void player_init(gui_config_t *cfg) {
 	lv_image_set_src(jellyfin_badge, &icon_jellyfin_badge);
 	lv_obj_align(jellyfin_badge, LV_ALIGN_TOP_RIGHT, -BADGE_INSET, BADGE_INSET);
 	lv_obj_set_hidden(jellyfin_badge, true);
+
+	// And Spotify's, which -- unlike the five above -- is drawn from the
+	// account rather than from a file: see update_qobuz_badge().
+	spotify_badge = lv_image_create(cover_art_group);
+	lv_image_set_src(spotify_badge, &icon_spotify_badge);
+	lv_obj_align(spotify_badge, LV_ALIGN_TOP_RIGHT, -BADGE_INSET, BADGE_INSET);
+	lv_obj_set_hidden(spotify_badge, true);
 
 	// Shown while there is no artwork for the current track. The mark is drawn
 	// at 128x128 natively, which overflows a V1 sleeve, so it is scaled to a

@@ -215,6 +215,7 @@ Showcase of **OLED** appearance: true black backgrounds with white as the accent
 - [Build a firmware image](#build-a-firmware-image)
 - [Install or restore firmware](#install-or-restore-firmware)
 - [Streaming: Tidal, Qobuz and credentials](#streaming-tidal-qobuz-and-credentials)
+- [Spotify](#spotify)
 - [SoundCloud](#soundcloud)
 - [Subsonic / Gonic](#subsonic--gonic)
 - [Jellyfin](#jellyfin)
@@ -268,6 +269,7 @@ This fork builds on the upstream [Sonix Player](https://github.com/Jepl4r/sonix-
 - 🪼 **Jellyfin** - stream from your own Jellyfin music server with **Quick Connect** (6-digit code + QR) or username/password (token-only `0600` persistence), **Direct Play** original files or server-side MP3/Opus transcoding, browsing across Folders, Playlists, Artists, Albums (A–Z / Recently added), Genres, Favourites and Search, extendable microSD playback cache with lookahead prefetch, offline saves (`Music/Jellyfin`), live favourite sync, and Jellyfin playback reporting. See [Jellyfin](#jellyfin) and [docs/jellyfin.md](docs/jellyfin.md).
 - ☁️ **SoundCloud** - native SoundCloud streaming across anonymous, Free, Go and Go+ tiers: search and play public tracks out of the box without API keys (automatic web `client_id` discovery and rotation), browse Likes, Reposts and Playlists by profile URL / username or `oauth_token`, and stream **Opus 64k**, **MP3 128k** or **Go+ AAC 256k** with an extendable microSD cache (**512 MB** default, up to **1 GB**, **2 GB**, **4 GB**, **8 GB**, or **Unlimited** directly in-app), lookahead prefetch, discreet non-blocking loading spinners, and Now Playing **Like** / **Keep** support. See [SoundCloud](#soundcloud) and [docs/soundcloud.md](docs/soundcloud.md).
 - 🌊 **One-tap Tidal & Qobuz setup + streaming upgrades** - extract the official V1 stock credentials directly on the player over Wi-Fi or from the microSD card (no PC, developer keys or restart needed). Includes V1-adapted **Tidal** with offline downloads (`Music/Tidal/<artist>/<album>`), a 1 GiB SD playback cache, cached lists, favourite playlists, search history, configurable home rows and bulk selection; **Qobuz** up to 24-bit/192 kHz FLAC with full JWT session persistence, plus offline track and album downloads to `Music/Qobuz Downloads`; **FLAC internet radio** with a V1-sized page and Flylo's curated chill-hop picks; and upgraded **Podcasts** (keyless Apple directory with RSS fallback for long shows, heard/unheard tracking, episode ordering and regional charts). See [Streaming: Tidal, Qobuz and credentials](#streaming-tidal-qobuz-and-credentials).
+- 🎧 **Spotify** - a native Spotify client for **Premium** accounts, after [SpotUI](https://github.com/noisetta/spotui-hiby-r3proii): Liked Songs, playlists, search and a queue drawn on the V1's own screen, with the audio decoded by a [librespot](https://github.com/librespot-org/librespot) daemon on a computer on your network and streamed to the player as PCM, so the player's DAC, volume, equaliser and output routing stay in charge. Library writes are out of scope (they need the Web API's OAuth flow); when no daemon is reachable the page offers a built-in **DEMO** library. See [Spotify](#spotify) and [docs/spotify.md](docs/spotify.md).
 - 🧩 **Plugins (`Settings → Plugins`)** - switch optional modules (including Tidal, Qobuz, SoundCloud, Podcasts, Radio, tools and games) on or off so unused pages are never built and RAM stays free. See [docs/ADDONS.md](docs/ADDONS.md).
 - 🎨 **V1 themes** - **Tokyo Night**, **Amber on Black** and **OLED**, designed for the V1 panel, beside Dark and Light. Make your own with a [custom colour theme](docs/custom-themes.md).
 - 🚀 **Boot screens** - Retrospace (the default), Space, Travelling in space, Stock, or your own picture, with a separate brightness for the splash so a late-night power-on need not light the room.
@@ -355,7 +357,7 @@ Only attempt this on a TempoTec Variations V1. Read the warning above before pro
 
 ## Streaming: Tidal, Qobuz and credentials
 
-> **Fresh installs — enable streaming apps first:** On a clean install, optional streaming modules (**Tidal**, **Qobuz**, **SoundCloud**, **Podcasts** and **Radio**) start switched **off** under **Settings → Plugins** so unused pages do not take up RAM (**Subsonic** and **Jellyfin** start on; updating an existing Sonix install keeps all modules enabled). Open **Settings → Plugins**, toggle the services you want **on**, and **restart** the player for them to appear under **Streaming**.
+> **Fresh installs — enable streaming apps first:** On a clean install, optional streaming modules (**Tidal**, **Qobuz**, **SoundCloud**, **Podcasts** and **Radio**) start switched **off** under **Settings → Plugins** so unused pages do not take up RAM (**Subsonic** and **Jellyfin** start on; updating an existing Sonix install keeps all modules enabled). Open **Settings → Plugins**, toggle the services you want **on**, and **restart** the player for them to appear under **Streaming**. **Spotify** is off on every install, new or updated: it needs the daemon described under [Spotify](#spotify), and a tile leading to "no daemon" is worse than no tile until one is set up.
 
 ### Tidal and Qobuz
 
@@ -371,6 +373,23 @@ Instead, Sonix speaks the exact same authentication flows as the stock TempoTec 
 2. **Sign in and stream:**
    - **Tidal:** Sign in with the on-screen device code or QR code at `link.tidal.com` (tokens refresh automatically; read-only partner device keys automatically fall back from `r_usr w_usr` to `r_usr`). Supports **Low** (AAC 96 kbps), **High** (AAC 320 kbps), **Lossless** (16-bit/44.1 kHz FLAC) and **Hi-Res** (up to 24-bit/192 kHz FLAC), search with recent history, albums, artists, playlists, favourites (tracks, albums, artists and the playlists the account has favourited), configurable home rows, bulk selection, 12-hour card list caching, a bounded 1 GiB SD playback cache, and queued offline downloads / **Keep on card** saved with tags and artwork under `Music/Tidal/<artist>/<album>`.
    - **Qobuz:** Sign in with your Qobuz email/username and password over HTTPS (only the session token is kept in `/usr/data/qobuz_session.ini`; your password is never written to disk). Supports **MP3 320**, **CD** (16-bit/44.1 kHz FLAC), **Hi-Res 24/96** and **Hi-Res 24/192** FLAC, search, albums, artists, featured lists, favourites and playlist management.
+
+### Spotify
+
+Spotify has no audio in its Web API: playback lives behind the licensed client protocol that [librespot](https://github.com/librespot-org/librespot) implements. The V1 cannot run librespot, so **Spotify is split in two**:
+
+- The **player** draws the pages, owns the queue controls and plays what it is given through its own DAC — `sonix-player/src/gui/streaming/spotifypage.c` over `src/system/streaming/spotify.c`.
+- **`spotifyd`** (`sonix-player/tools/spotifyd`) runs on a computer on the same Wi-Fi, signs in with librespot once, browses the library, and writes raw 44.1 kHz PCM to the player over a UNIX socket. It never opens an audio device.
+
+A **Spotify Premium** account is required — librespot will not stream for a free one. Setup is three steps on the computer and one on the player:
+
+1. Build the daemon once (`cargo build --release`) and log in once with `librespot --cache /usr/data/librespot-cache --cache-tool login --username you`.
+2. Start it; it creates `/var/run/sonix-spotify.sock`, which is where the player looks.
+3. On the V1, turn **Spotify** on under **Settings → Plugins → Streaming services** (it is off out of the box) and open **Streaming → Spotify**.
+
+The home page is four tiles — **Liked Songs**, **Playlists**, **Search** and **Account** — and the player sheet has the usual play/pause, next/previous, seek, shuffle and repeat. Nothing is written to the microSD card while playing: audio arrives as a stream, like the radio. With the add-on on but no daemon reachable, the page shows its **DEMO** library so every screen still works.
+
+Full instructions, the socket contract and the cross-build steps are in [docs/spotify.md](docs/spotify.md) and [`sonix-player/tools/spotifyd/README.md`](sonix-player/tools/spotifyd/README.md). **The daemon is not part of the firmware build**: the image ships the tile and the client, not the Rust binary.
 
 ### SoundCloud, Podcasts, Last.fm, ListenBrainz and Radio
 

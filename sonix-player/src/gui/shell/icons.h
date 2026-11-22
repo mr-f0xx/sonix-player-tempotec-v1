@@ -320,6 +320,9 @@ extern const lv_image_dsc_t icon_menu_pet;
 extern const lv_image_dsc_t icon_qobuz_badge;
 extern const lv_image_dsc_t icon_tidal_badge;
 extern const lv_image_dsc_t icon_podcast_badge;
+extern const lv_image_dsc_t icon_spotify_badge; // the mark beside the others, 32x32
+extern const lv_image_dsc_t icon_spotify_mark;  // the streaming tile's own, 32x32
+extern const lv_image_dsc_t icon_spotify_menu;  // the Tokyo Night list row's, 32x32
 extern const lv_image_dsc_t icon_hires_audio;
 extern const lv_image_dsc_t icon_metronome;
 extern const lv_image_dsc_t icon_menu_metronome;

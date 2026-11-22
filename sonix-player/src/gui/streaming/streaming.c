@@ -18,6 +18,7 @@
 #include "src/gui/streaming/radiopage.h"
 #include "src/gui/streaming/soundcloud_icon.h"
 #include "src/gui/streaming/soundcloudpage.h"
+#include "src/gui/streaming/spotifypage.h"
 #include "src/gui/streaming/tidalpage.h"
 #include "src/gui/streaming/subsonicpage.h"
 #include "src/system/addons/addons.h"
@@ -45,6 +46,7 @@ static const streaming_item_t tokyo_items[] = {
 	{"qobuz", &icon_qobuz_mark, THEME_SEMANTIC_PURPLE, &qobuz_screen, "qobuz"},
 	{"subsonic", &icon_music_note, THEME_SEMANTIC_BLUE, &subsonic_screen, "subsonic"},
 	{"jellyfin", &icon_jellyfin_mark, THEME_SEMANTIC_PURPLE, &jellyfin_screen, "jellyfin"},
+	{"spotify", &icon_spotify_mark, THEME_SEMANTIC_GREEN, &spotify_screen, "spotify"},
 	{"Network folders", &icon_sub_folders_glyph, THEME_SEMANTIC_CYAN, &networkmusic_screen, NULL},
 	{"Listen Together", &icon_music_note, THEME_SEMANTIC_GREEN, &listentogether_screen, NULL},
 };
@@ -103,6 +105,9 @@ void streaming_init(gui_config_t *cfg) {
 	if (addons_enabled("soundcloud")) {
 		soundcloudpage_init(cfg);
 	}
+	if (addons_enabled("spotify")) {
+		spotifypage_init(cfg);
+	}
 	// Both destinations exist on every build; only their LAN actions are native.
 	networkmusic_page_init(cfg);
 	listentogether_page_init(cfg);
@@ -115,11 +120,12 @@ void streaming_init(gui_config_t *cfg) {
 		{"podcasts", &icon_menu_podcast, &podcast_screen, NULL},
 		{"subsonic", &icon_menu_streaming, &subsonic_screen, NULL},
 		{"jellyfin", &icon_jellyfin_menu, &jellyfin_screen, NULL},
+		{"spotify", &icon_spotify_menu, &spotify_screen, NULL},
 		{"Network folders", &icon_menu_sub_folders, &networkmusic_screen, NULL},
 		{"Listen Together", &icon_menu_streaming, &listentogether_screen, NULL},
 	};
 	const char *const all_addons[] = {
-		"soundcloud", "tidal", "qobuz", "radio", "podcasts", "subsonic", "jellyfin",
+		"soundcloud", "tidal", "qobuz", "radio", "podcasts", "subsonic", "jellyfin", "spotify",
 		NULL, // Network folders is a native file client, not a streaming add-on.
 		NULL, // Listen Together is a native P2P feature, not a streaming add-on.
 	};

@@ -1,0 +1,7 @@
+# spotifyd.conf -- install as /usr/data/spotifyd.conf. Every line is optional;
+# the values below are the defaults.
+socket=/var/run/sonix-spotify.sock     # what the player connects to
+cache=/usr/data/librespot-cache        # credentials and the remembered volume
+device_name=Sonix Player               # what the phone's Spotify app shows
+bitrate=320                            # librespot's 96 / 160 / 320
+bits=16                                # 16 (S16LE) or 24 (S24_3LE)

@@ -22,6 +22,11 @@ static const addon_t ADDONS[] = {
 	{"subsonic", "subsonic", "addon_subsonic_note", "plugins_section_services"},
 	{"jellyfin", "jellyfin", "addon_jellyfin_note", "plugins_section_services"},
 	{"soundcloud", "soundcloud", "addon_soundcloud_note", "plugins_section_services"},
+	// Spotify is off out of the box, unlike the rest: it needs a daemon on a
+	// computer somewhere to speak for it (tools/spotifyd), and a tile that
+	// leads to a page saying "no daemon" is worse than no tile until the
+	// owner has set one up.
+	{"spotify", "spotify", "addon_spotify_note", "plugins_section_services"},
 	// What talks to a pair of earbuds over the Bluetooth link: the AirPods'
 	// battery and noise control through Apple's own protocol. Off means the
 	// worker that speaks it is never started and its page is not built.
