@@ -24,6 +24,20 @@ name = "spotifyd"
 path = "src/main.rs"
 
 [dependencies]
+# librespot-core's build script does `vergen_gitcl::...` and then emits it
+# through vergen's Add trait. The resolver picked vergen 9.1.0, which uses
+# vergen-lib 9.1.0, while vergen-gitcl 1.0.8 still pulls vergen-lib 0.1.6 --
+# two versions of the same crate in one graph, so the trait that ties them
+# together resolves to the wrong one and the build script does not compile:
+#
+#   E0277: the trait bound `vergen::feature::build::Build:
+#          vergen_lib::entries::Add` is not satisfied
+#
+# Naming vergen here, at the same 9.x, makes cargo unify the two: vergen 9.0.6
+# depends on vergen-lib 9.0.x exactly as vergen-gitcl 1.0.8 does, and the
+# duplicate disappears. This is a build-script dependency of a dependency, so
+# the pin is a workaround for librespot, not something this crate uses.
+vergen = "=9.0.6"
 # 0.6 does not build against a current stable Rust: its build script fails with
 # E0277 before a line of this code is compiled. 0.8 renames SpotifyId to
 # SpotifyUri throughout the metadata and player APIs, which is a rewrite of the
