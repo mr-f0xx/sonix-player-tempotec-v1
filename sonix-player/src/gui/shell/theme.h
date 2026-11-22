@@ -161,6 +161,20 @@ bool theme_is_monochrome(void);
 bool theme_uses_function_glyphs(void);
 theme_kind_t theme_get_kind(void);
 
+// An SD icon set (iconset.c) takes over the two colour decisions Tokyo Night
+// made: whether the interface draws function glyphs at all, and what colour
+// each role is. Registered by iconset_init(); NULL until then, which leaves
+// every theme exactly as it was.
+typedef bool (*theme_glyph_mode_fn_t)(void);
+typedef bool (*theme_semantic_color_fn_t)(theme_semantic_t role, lv_color_t *out);
+void theme_set_icon_sources(theme_glyph_mode_fn_t glyphs, theme_semantic_color_fn_t semantic);
+
+// Repaint after something outside a palette change moved pixels under the
+// styles: an SD icon set swapping the glyphs, for one. The palette-change
+// machinery itself (palette_generation and the refresh callbacks) is what
+// runs.
+void theme_repaint(void);
+
 // Tokyo Night's blue, cyan, violet, green, amber, red and muted roles. Amber
 // on Black and OLED map every icon role to their accent; in Dark/Light they
 // resolve to the chosen accent (or secondary text for muted).

@@ -11,7 +11,7 @@
 
 lv_style_t theme_style_card, theme_style_card_pressed, theme_style_text, theme_style_icon;
 lv_font_t font_ui_18, font_ui_14;
-const lv_image_dsc_t icon_music2 = {0};
+lv_image_dsc_t icon_music2 = {0};
 static theme_palette_t palette;
 const theme_palette_t *theme(void) { return &palette; }
 int bp_pick(int compact, int regular) { (void)regular; return compact; }

@@ -47,10 +47,15 @@
 #include "src/system/playback/device_state.h"
 #include "src/system/playback/playlist.h"
 
+// music.c's compact header opens Stats from the Music page. The page itself
+// is exercised by test_stats; here it only has to exist for the link.
+lv_obj_t *stats_screen;
+void stats_refresh(void) {}
+
 static void check_custom_theme(void) {
 	char root[] = "/tmp/sonix-theme-XXXXXX";
 	assert(mkdtemp(root));
-	char dir[256], path[256];
+	char dir[256], path[512];
 	snprintf(dir, sizeof(dir), "%s/Themes", root);
 	snprintf(path, sizeof(path), "%s/custom.ini", dir);
 	assert(mkdir(dir, 0700) == 0);
@@ -79,7 +84,7 @@ static void check_custom_theme(void) {
 	assert(theme_reload_custom());
 	assert(theme()->screen_bg.red == 4);
 	// Multiple named palettes can coexist; selection remembers the basename.
-	char other[256];
+	char other[512];
 	snprintf(other, sizeof(other), "%s/rose-pine.ini", dir);
 	f = fopen(other, "w");
 	assert(f);
@@ -891,15 +896,23 @@ int main(int argc, char **argv) {
 	gridpage_set_tile_label_hidden(section_grid, -1, true);
 	gridpage_set_tile_label_hidden(section_grid, 99, true);
 
-	/* Accent colour comes right after the icon preview, with its tint below. */
+	/* The icon set row sits between the icon preview and the accent colour,
+	   with its caption under it; the tint card follows the accent. */
 	lv_obj_t *glyph_label = find_label(appearance_screen, tr("appearance_function_glyphs"));
 	lv_obj_t *accent_label = find_label(appearance_screen, tr("appearance_accent_colour"));
 	lv_obj_t *tint_label = find_label(appearance_screen, tr("appearance_dynamic_tint"));
-	assert(glyph_label && accent_label && tint_label);
+	lv_obj_t *iconset_label = find_label(appearance_screen, tr("appearance_icon_set"));
+	lv_obj_t *iconset_caption = find_label(appearance_screen, tr("appearance_icon_set_note"));
+	assert(glyph_label && accent_label && tint_label && iconset_label && iconset_caption);
 	lv_obj_t *glyph_card = lv_obj_get_parent(glyph_label);
 	lv_obj_t *accent_card = lv_obj_get_parent(accent_label);
-	assert(lv_obj_get_sibling(glyph_card, 1) == accent_card);
+	lv_obj_t *iconset_card = lv_obj_get_parent(iconset_label);
+	assert(lv_obj_get_sibling(glyph_card, 1) == iconset_card);
+	assert(lv_obj_get_sibling(iconset_card, 1) == iconset_caption);
+	assert(lv_obj_get_sibling(iconset_caption, 1) == accent_card);
 	assert(lv_obj_get_sibling(accent_card, 1) == lv_obj_get_parent(tint_label));
+	/* With no card mounted the row still offers Default. */
+	assert(find_label(appearance_screen, tr("appearance_icon_set_default")));
 	lv_obj_t *accent_row = lv_obj_get_sibling(accent_label, 1);
 	assert(accent_row && lv_obj_get_child_count(accent_row) == 6);
 

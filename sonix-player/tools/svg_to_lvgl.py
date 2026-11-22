@@ -22,13 +22,24 @@ Two kinds of icon come out of this:
 import os
 import sys
 
-try:
-    import cairosvg
-    from PIL import Image
-except ImportError:
-    sys.exit("needs cairosvg and pillow: pip install cairosvg pillow")
-
 import io
+
+# Rendering is only needed when bitmaps are actually produced. The registry
+# pass (--registry-only) must run without cairosvg installed, so the imports
+# live behind this accessor.
+_render_deps = None
+
+
+def _deps():
+    global _render_deps
+    if _render_deps is None:
+        try:
+            import cairosvg
+            from PIL import Image
+        except ImportError:
+            sys.exit("needs cairosvg and pillow: pip install cairosvg pillow")
+        _render_deps = (cairosvg, Image)
+    return _render_deps
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 ICON_DIR = os.path.join(REPO_ROOT, "assets", "icons")
@@ -587,6 +598,7 @@ def render(svg_path, size):
     (width, height) for the AirPods artwork, which is not square.
     """
     width, height = size if isinstance(size, tuple) else (size, size)
+    cairosvg, Image = _deps()
     png = cairosvg.svg2png(url=svg_path, output_width=width, output_height=height)
     img = Image.open(io.BytesIO(png)).convert("RGBA")
 
@@ -605,6 +617,7 @@ def render_color(path, size):
     whose proportions are not square.
     """
     target = size if isinstance(size, tuple) else (size, size)
+    cairosvg, Image = _deps()
     if path.lower().endswith(".svg"):
         png = cairosvg.svg2png(url=path, output_width=target[0], output_height=target[1])
         img = Image.open(io.BytesIO(png)).convert("RGBA")
@@ -629,7 +642,96 @@ def c_array(data, per_line=12):
     return "\n".join(lines)
 
 
+# ---------------------------------------------------------------------------
+# The SD icon-set registry (src/gui/shell/iconset.c).
+#
+# Every SVG-sourced descriptor can have its pixels replaced in place by an SD
+# icon set file named <id>.png; the PNG illustrations (menu tiles, cover art,
+# the HiFi badge) keep their own colours and are not part of a set. The block
+# is marked so --registry-only can refresh it without re-rendering bitmaps.
+# ---------------------------------------------------------------------------
+
+REGISTRY_MARK_START = "/* ICONSET-REGISTRY-START"
+REGISTRY_MARK_END = "ICONSET-REGISTRY-END */"
+
+
+def registry_idents():
+    """Identifiers of every icon an SD set may swap (SVG sources only)."""
+    idents = [name for _f, name, _s in ICONS if _f.endswith(".svg")]
+    idents += [name for _f, name, _s in COLOR_ICONS if _f.endswith(".svg")]
+    return idents
+
+
+def registry_c():
+    lines = [
+        REGISTRY_MARK_START,
+        " * SD icon sets (src/gui/shell/iconset.c) replace the pixels behind these",
+        " * descriptors in place: the id is the set folder's <id>.png. SVG artwork",
+        " * only - the PNG illustrations keep their own colours for tiles and covers.",
+        " */",
+        "const iconset_entry_t iconset_entries[] = {",
+    ]
+    for ident in registry_idents():
+        lines.append('    {"%s", &icon_%s},' % (ident, ident))
+    lines += [
+        "};",
+        "",
+        "const int iconset_entry_count = (int)(sizeof(iconset_entries) / "
+        "sizeof(iconset_entries[0]));",
+        "/* " + REGISTRY_MARK_END,
+    ]
+    return "\n".join(lines) + "\n"
+
+
+def registry_h():
+    return (
+        REGISTRY_MARK_START
+        + "\n"
+        + " * An SD icon set swaps the pixels behind a built-in descriptor in place;\n"
+        + " * the id is the set file's name (<id>.png in Icons/<set>/).\n"
+        + " */\n"
+        + "typedef struct {\n"
+        + "    const char *id;\n"
+        + "    lv_image_dsc_t *dsc;\n"
+        + "} iconset_entry_t;\n"
+        + "\n"
+        + "extern const iconset_entry_t iconset_entries[];\n"
+        + "extern const int iconset_entry_count;\n"
+        + "/* "
+        + REGISTRY_MARK_END
+        + "\n"
+    )
+
+
+def _rewrite_registry(path, block):
+    text = open(path).read()
+    i = text.find(REGISTRY_MARK_START)
+    if i >= 0:
+        j = text.find(REGISTRY_MARK_END, i)
+        if j < 0:
+            sys.exit("%s: registry END marker without START" % path)
+        j += len(REGISTRY_MARK_END)
+        if text[j:j + 1] == "\n":
+            j += 1
+        text = text[:i] + block + text[j:]
+    else:
+        text = text.rstrip("\n") + "\n\n" + block
+    open(path, "w").write(text)
+
+
+def registry_only():
+    """Refresh only the marked registry blocks; the bitmaps stay as they are."""
+    _rewrite_registry(OUT_C, registry_c())
+    _rewrite_registry(OUT_H, registry_h())
+    print("registry updated in %s and %s (%d entries)"
+          % (OUT_C, OUT_H, len(registry_idents())))
+
+
 def main():
+    if "--registry-only" in sys.argv:
+        registry_only()
+        return
+
     parts_c = []
     parts_h = []
 
@@ -646,7 +748,7 @@ def main():
         parts_c.append(
             "// %s, %dx%d\n"
             "static const uint8_t icon_%s_data[] = {\n%s\n};\n\n"
-            "const lv_image_dsc_t icon_%s = {\n"
+            "lv_image_dsc_t icon_%s = {\n"
             "\t.header = {\n"
             "\t\t.magic = LV_IMAGE_HEADER_MAGIC,\n"
             "\t\t.cf = LV_COLOR_FORMAT_ARGB8888,\n"
@@ -659,7 +761,7 @@ def main():
             "};\n"
             % (filename, w, h, name, c_array(data), name, w, h, w * 4, name, name)
         )
-        parts_h.append("extern const lv_image_dsc_t icon_%s;" % name)
+        parts_h.append("extern lv_image_dsc_t icon_%s;" % name)
 
     header = (
         "/*\n"
@@ -674,13 +776,17 @@ def main():
         f.write(header)
         f.write('#include "icons.h"\n\n#include <stdint.h>\n\n')
         f.write("\n".join(parts_c))
+        f.write("\n\n")
+        f.write(registry_c())
 
     with open(OUT_H, "w") as f:
         f.write(header)
         f.write("#ifndef ICONS_H\n#define ICONS_H\n\n")
         f.write('#include "lvgl/lvgl.h"\n\n')
         f.write("\n".join(parts_h))
-        f.write("\n\n#endif // ICONS_H\n")
+        f.write("\n\n")
+        f.write(registry_h())
+        f.write("\n#endif // ICONS_H\n")
 
     print("wrote %s and %s" % (OUT_C, OUT_H))
 

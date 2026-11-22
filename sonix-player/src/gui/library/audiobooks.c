@@ -142,7 +142,7 @@ static void sort_menu_show(lv_obj_t *anchor, list_id_t list, void (*reload)(void
 	popover_item_t items[6];
 	for (int i = 0; i < sorts->choice_count; i++) {
 		sort_choice_t choice = sorts->choices[i];
-		items[i] = (popover_item_t){SORT_LABELS[choice], sort_picked, (void *)(intptr_t)choice, choice == current};
+		items[i] = (popover_item_t){SORT_LABELS[choice], sort_picked, (void *)(intptr_t)choice, choice == current, false};
 	}
 	sort_menu_list = list;
 	sort_menu_reload = reload;

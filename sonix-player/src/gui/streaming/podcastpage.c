@@ -2833,12 +2833,12 @@ static void bulk_episode_sheet(lv_obj_t *anchor) {
 	popover_item_t actions[3];
 	int count = 0;
 	if (has_unheard) {
-		actions[count++] = (popover_item_t){"podcast_mark_listened", bulk_mark_heard_cb, NULL, false};
+		actions[count++] = (popover_item_t){"podcast_mark_listened", bulk_mark_heard_cb, NULL, false, false};
 	}
 	if (has_heard) {
-		actions[count++] = (popover_item_t){"podcast_mark_not_listened", bulk_mark_unheard_cb, NULL, false};
+		actions[count++] = (popover_item_t){"podcast_mark_not_listened", bulk_mark_unheard_cb, NULL, false, false};
 	}
-	actions[count++] = (popover_item_t){"podcast_download", bulk_download_selected_cb, NULL, false};
+	actions[count++] = (popover_item_t){"podcast_download", bulk_download_selected_cb, NULL, false, false};
 	popover_show(anchor, actions, count);
 }
 

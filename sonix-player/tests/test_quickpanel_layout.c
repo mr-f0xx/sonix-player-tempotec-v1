@@ -123,10 +123,10 @@ lv_style_t theme_style_icon;
 static const uint8_t icon_pixels[32 * 32 * 4];
 #define TEST_ICON { .header = { .magic = LV_IMAGE_HEADER_MAGIC, .cf = LV_COLOR_FORMAT_ARGB8888, \
 	.w = 32, .h = 32, .stride = 32 * 4 }, .data_size = sizeof(icon_pixels), .data = icon_pixels }
-const lv_image_dsc_t icon_sun = TEST_ICON;
-const lv_image_dsc_t icon_volume_mute = TEST_ICON;
-const lv_image_dsc_t icon_volume_low = TEST_ICON;
-const lv_image_dsc_t icon_volume_high = TEST_ICON;
+lv_image_dsc_t icon_sun = TEST_ICON;
+lv_image_dsc_t icon_volume_mute = TEST_ICON;
+lv_image_dsc_t icon_volume_low = TEST_ICON;
+lv_image_dsc_t icon_volume_high = TEST_ICON;
 static const uint8_t profile_icon_pixels[46 * 46 * 4];
 static const lv_image_dsc_t profile_test_icon = {
 	.header = { .magic = LV_IMAGE_HEADER_MAGIC, .cf = LV_COLOR_FORMAT_ARGB8888,
@@ -158,7 +158,7 @@ void soundfield_set_width(int hundredths) {
 // are 30 px; the test keeps that difference so a wider cell or a larger drawn
 // glyph cannot pass silently.
 static const uint8_t sf_icon_pixels[46 * 46 * 4];
-const lv_image_dsc_t icon_soundfield_quick = {
+lv_image_dsc_t icon_soundfield_quick = {
 	.header = { .magic = LV_IMAGE_HEADER_MAGIC, .cf = LV_COLOR_FORMAT_ARGB8888,
 				.w = 46, .h = 46, .stride = 46 * 4 },
 	.data_size = sizeof(sf_icon_pixels), .data = sf_icon_pixels
