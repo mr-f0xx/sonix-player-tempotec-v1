@@ -158,7 +158,15 @@ bool theme_is_oled(void);
 bool theme_is_monochrome(void);
 // Tokyo Night, Amber on Black and OLED use the same function-matched icon and
 // compact V1 layouts. Their palettes and semantic hues remain distinct.
+// Appearance's "Tokyo layout for custom themes" switch opts a selected custom
+// palette into the same layouts; see theme_set_custom_tokyo_layout().
 bool theme_uses_function_glyphs(void);
+
+// The switch behind the custom branch of theme_uses_function_glyphs(): config
+// is the single copy, read on every gate call rather than cached, so flipping
+// it in Appearance needs no invalidation dance.
+void theme_set_custom_tokyo_layout(bool on);
+bool theme_custom_tokyo_layout(void);
 theme_kind_t theme_get_kind(void);
 
 // An SD icon set (iconset.c) takes over the two colour decisions Tokyo Night

@@ -39,7 +39,10 @@ the status bar and player controls, `cover_bg` the empty cover, `text_primary`
 and `text_secondary` the foreground, and `accent` the highlight. Custom uses
 the standard dark layout and one accent for functional icons. Some player
 chrome and semantic highlights use built-in colours; this is a palette theme,
-not an icon/font/layout replacement. Dynamic tint, if enabled in Appearance,
+not an icon/font replacement. The **Tokyo layout for custom themes** switch in
+Appearance opts Custom into the same function-matched icon and compact
+layouts that Tokyo Night, Amber on Black and OLED use — with or without an SD
+icon set selected. Dynamic tint, if enabled in Appearance,
 can alter the background and surface colours further. Accent presets override
 the file’s `accent` when a non-default preset is selected; select the first
 accent circle to use the file’s own colour.
