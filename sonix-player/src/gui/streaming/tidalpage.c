@@ -4006,7 +4006,7 @@ static lv_obj_t *login_hint;
 // 320-px height and runs straight into the code label, the spinner and the
 // privacy note below it.
 #define LOGIN_QR_SIZE_LARGE 200
-#define LOGIN_QR_SIZE_V1 44
+#define LOGIN_QR_SIZE_V1 64
 // The quiet zone, the white border around it. The standard asks for four
 // modules; here it is a fixed border, which works better at this size.
 #define LOGIN_QR_QUIET_LARGE 10
@@ -4209,7 +4209,7 @@ static void build_login_page(gui_config_t *cfg) {
 	int top = settingsrow_content_top(cfg);
 
 	// The QR is sized to the panel: the V1's 240x320 leaves room for a
-	// 44-px code with its quiet zone, the written code and the spinner below
+	// 64-px code with its quiet zone, the written code and the spinner below
 	// it, and the privacy note at the foot of the page -- all of which a
 	// 200-px code (sized for a 480-px screen) would run into.
 	bool compact = cfg->screen_width < 320;
