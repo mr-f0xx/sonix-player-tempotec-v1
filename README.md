@@ -264,7 +264,7 @@ This fork builds on the upstream [Sonix Player](https://github.com/Jepl4r/sonix-
 - 🐾 **Music pet** - a Pikachu that grows from the music you hear. See [Music pet](#music-pet).
 - 🧮 **Calculator, Notes, Metronome** - a pocket calculator, text notes from the card, and a metronome with tap tempo, all under More.
 - 🎮 **2048, Snake and Dino** - three small games under More, sized for the V1 panel. Gearboy also gains a cover-art grid and a game-audio mute so you can keep listening to music while playing.
-- 🏷️ **Tag Manager** - view and edit FLAC and MP3 tags and cover art, and search for covers over Wi-Fi. See the [usage and safety notes](docs/tag-manager.md).
+- 🏷️ **Tag Manager** - view and edit FLAC, MP3, M4A, AAC, Opus and Ogg tags and cover art, and search for covers over Wi-Fi. See the [usage and safety notes](docs/tag-manager.md).
 - 🏠 **Subsonic / Gonic** - stream from [your own server](#subsonic--gonic), or [save tracks and albums](docs/subsonic.md#saving-music-to-the-sd-card) to `Music/Subsonic Downloads` for offline listening.
 - 🪼 **Jellyfin** - stream from your own Jellyfin music server with **Quick Connect** (6-digit code + QR) or username/password (token-only `0600` persistence), **Direct Play** original files or server-side MP3/Opus transcoding, browsing across Folders, Playlists, Artists, Albums (A–Z / Recently added), Genres, Favourites and Search, extendable microSD playback cache with lookahead prefetch, offline saves (`Music/Jellyfin`), live favourite sync, and Jellyfin playback reporting. See [Jellyfin](#jellyfin) and [docs/jellyfin.md](docs/jellyfin.md).
 - ☁️ **SoundCloud** - native SoundCloud streaming across anonymous, Free, Go and Go+ tiers: search and play public tracks out of the box without API keys (automatic web `client_id` discovery and rotation), browse Likes, Reposts and Playlists by profile URL / username or `oauth_token`, and stream **Opus 64k**, **MP3 128k** or **Go+ AAC 256k** with an extendable microSD cache (**512 MB** default, up to **1 GB**, **2 GB**, **4 GB**, **8 GB**, or **Unlimited** directly in-app), lookahead prefetch, discreet non-blocking loading spinners, and Now Playing **Like** / **Keep** support. See [SoundCloud](#soundcloud) and [docs/soundcloud.md](docs/soundcloud.md).
@@ -356,7 +356,7 @@ The full rules are in [FEATURES.md](FEATURES.md).
 
 ## Tag Manager
 
-Open **More → Tag Manager** to view FLAC/MP3 tags and cover art, and edit track titles, artists, track numbers or genres, and search for cover art over Wi-Fi on the V1. See the [usage and safety notes](docs/tag-manager.md).
+Open **More → Tag Manager** to view FLAC, MP3, M4A, AAC, Opus and Ogg tags and cover art, and edit track titles, artists, track numbers or genres, and search for cover art over Wi-Fi on the V1. See the [usage and safety notes](docs/tag-manager.md).
 
 ## Tape Deck
 

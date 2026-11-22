@@ -118,7 +118,12 @@ static bool join(char *out, size_t size, const char *base, const char *name) {
 }
 static bool audio(const char *s) {
 	const char *p = strrchr(s, '.');
-	return p && (!strcasecmp(p, ".flac") || !strcasecmp(p, ".mp3"));
+	if (!p)
+		return false;
+	// The writer decides by content, so a misnamed file still edits; these
+	// extensions are just what the browser shows.
+	return !strcasecmp(p, ".flac") || !strcasecmp(p, ".mp3") || !strcasecmp(p, ".m4a") || !strcasecmp(p, ".m4b") ||
+	       !strcasecmp(p, ".aac") || !strcasecmp(p, ".opus") || !strcasecmp(p, ".ogg") || !strcasecmp(p, ".oga");
 }
 static int compare(const void *a, const void *b) {
 	const struct entry *x = a, *y = b;
@@ -203,7 +208,7 @@ static void browse(void) {
 		settingsrow_name_lines(r, 1);
 	}
 	if (!count)
-		label("No folders or FLAC / MP3 files");
+		label("No folders or editable audio files");
 	if (truncated)
 		label("First 200 entries shown");
 	lv_obj_scroll_to_y(list, 0, LV_ANIM_OFF);

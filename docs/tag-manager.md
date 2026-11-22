@@ -2,11 +2,12 @@
 
 Open **More → Tag Manager** to browse the card's **Music** folder and its
 subfolders. If Music does not exist, create it on the MicroSD card; the manager
-does not fall back to the card root. Select a FLAC or MP3 to see its tags and
-cover (embedded first, then a folder image). Tap **Edit title**, **Edit artist**,
-**Edit track number**, or **Edit genre**, type the new value, and tap **OK**.
-The back arrow cancels an edit or goes back up; it cannot go above Music. The
-scrollable list shows at most 200 entries per folder.
+does not fall back to the card root. Select a FLAC, MP3, M4A/M4B, AAC, Opus or
+Ogg Vorbis file to see its tags and cover (embedded first, then a folder
+image). Tap **Edit title**, **Edit artist**, **Edit track number**, or **Edit
+genre**, type the new value, and tap **OK**. The back arrow cancels an edit or
+goes back up; it cannot go above Music. The scrollable list shows at most 200
+entries per folder.
 
 Track numbers accept a positive number or `number/total` (for example `3/12`).
 The editor initially shows the track number only; enter `/total` again if you
@@ -38,14 +39,22 @@ not remove the card or turn off the player during the operation. Large files
 can take a while. A power failure may leave a `.sonix-...` temporary file
 alongside the original.
 
-The writer supports native FLAC Vorbis comments and ordinary ID3v2.3/v2.4 MP3
-tags. MP3 files without an ID3v2 tag, v2.2, unsynchronised/extended/footer
-headers, multiple consecutive ID3 tags, and flagged target frames are refused
-rather than rewritten. UTF-8 values are written as UTF-16 where ID3v2.3 needs
-it. Complex, malformed, or over-16 MiB metadata is refused. Other metadata,
-non-front pictures and audio are retained. Existing ID3 padding is retained
-when possible; moving audio past known offset-bearing chapter/seek frames is
-refused. Symlinks, hard links, read-only files and files owned by another user
-are not edited. File permissions are retained, but filesystem-specific extended
+The writer supports native FLAC Vorbis comments, ordinary ID3v2.3/v2.4 MP3
+tags, MP4 `ilst` tags (M4A/M4B, AAC or ALAC), and Ogg Vorbis comments (Opus
+and Vorbis). The format is decided by the file's content, not its extension.
+MP3 files without an ID3v2 tag, v2.2, unsynchronised/extended/footer headers,
+multiple consecutive ID3 tags, and flagged target frames are refused rather
+than rewritten; the same applies to AAC (ADTS) files without an ID3v2 tag.
+UTF-8 values are written as UTF-16 where ID3v2.3 needs it. Complex, malformed,
+or over-16 MiB metadata is refused. Other metadata, non-front pictures and
+audio are retained. Existing ID3 padding is retained when possible; moving
+audio past known offset-bearing chapter/seek frames is refused. For MP4 files
+with the metadata before the audio, the audio is kept in place with free
+space where possible, and chunk offsets are patched when it must move. For
+Ogg files the comment packet is repaginated and the following pages
+renumbered; a comment packet that does not end on a page boundary is refused.
+Symlinks, hard links, read-only files and files owned by another user are not
+edited. File permissions are retained, but filesystem-specific extended
 attributes are not copied. Editing replaces the file inode and may change its
-modification time. Do not edit files being shared over USB or edited elsewhere.
+modification time. Do not edit files being shared over USB or edited
+elsewhere.
