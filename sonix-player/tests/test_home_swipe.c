@@ -50,6 +50,7 @@ void music_notify_main_menu_reset(void) {}
 bool player_sheet_is_open(void) { return false; }
 void player_sheet_open(bool animate) { (void)animate; }
 void player_sheet_close(bool animate) { (void)animate; }
+bool player_lyrics_back(void) { return false; }
 lv_obj_t *qobuz_list_screen(void) { return NULL; }
 lv_obj_t *tidal_list_screen(void) { return NULL; }
 void topbar_set_hidden(bool hidden) { (void)hidden; }

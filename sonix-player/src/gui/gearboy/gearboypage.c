@@ -475,6 +475,10 @@ void gearboypage_init(gui_config_t *cfg) {
 	lv_obj_set_flex_flow(list_box, LV_FLEX_FLOW_ROW_WRAP);
 	lv_obj_set_flex_align(list_box, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_START);
 	lv_obj_set_scroll_dir(list_box, LV_DIR_VER);
+	// Entered from More the list starts at the first game; back from a game
+	// or the settings it stays on the tile that was tapped. The scan that
+	// screen_loaded_cb() starts rebuilds around whichever offset this left.
+	switcher_mark_fresh_start(list_box);
 	switcher_attach_back_gesture(list_box);
 
 	status_label = lv_label_create(gearboypage_screen);

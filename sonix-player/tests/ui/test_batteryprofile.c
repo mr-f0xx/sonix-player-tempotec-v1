@@ -26,6 +26,7 @@ bool bootpic_present(void) { return false; }
 bool player_sheet_drag_active(void) { return false; }
 bool switcher_back_drag_active(void) { return false; }
 void switcher_attach_back_gesture(lv_obj_t *obj) { (void)obj; }
+void switcher_mark_fresh_start(lv_obj_t *obj) { (void)obj; }
 
 static int seconds, percent = 50, rrt_minutes = 300, pmic_mv = 3950, charge_limit = 500;
 static unsigned samples, voltage_reads, limit_reads, history_reads;

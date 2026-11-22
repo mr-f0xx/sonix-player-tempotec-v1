@@ -119,6 +119,7 @@ bool switcher_back_drag_active(void) { return false; }
 void switch_screen(lv_obj_t *screen) { lv_screen_load(screen); }
 void switch_screen_cb(lv_event_t *e) { switch_screen(lv_event_get_user_data(e)); }
 void switcher_attach_back_gesture(lv_obj_t *screen) { (void)screen; }
+void switcher_mark_fresh_start(lv_obj_t *screen) { (void)screen; }
 void back_btn_cb(lv_event_t *e) { (void)e; }
 
 void power_hold_screen_on(bool hold) { hold_screen_depth += hold ? 1 : -1; }

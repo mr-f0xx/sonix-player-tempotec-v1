@@ -174,6 +174,39 @@ bool switcher_history_contains(lv_obj_t *screen) {
 
 static void load_screen(lv_obj_t *target_screen);
 
+// The mark is one of LVGL's four free per-object bits, so it costs nothing per
+// page and survives everything short of the body being deleted.
+#define FRESH_START_USER_FLAG 0
+
+void switcher_mark_fresh_start(lv_obj_t *body) {
+	if (body) {
+		lv_obj_set_user_flag(body, FRESH_START_USER_FLAG, true);
+	}
+}
+
+bool switcher_is_fresh_start(lv_obj_t *body) { return body && lv_obj_get_user_flag(body, FRESH_START_USER_FLAG); }
+
+// Scrolls every marked body under `obj` back to the top: the page is about to
+// be entered forward, not returned to. A marked body's own children are its
+// rows, so the walk stops there.
+//
+// Runs while the page is still off screen, so the jump is never drawn, and
+// before load_screen() so that a page which scrolls to its selected row in
+// LV_EVENT_SCREEN_LOADED is not undone.
+static void fresh_start_reset(lv_obj_t *obj) {
+	if (!obj) {
+		return;
+	}
+	if (switcher_is_fresh_start(obj)) {
+		lv_obj_scroll_to_y(obj, 0, LV_ANIM_OFF);
+		return;
+	}
+	uint32_t count = lv_obj_get_child_count(obj);
+	for (uint32_t i = 0; i < count; i++) {
+		fresh_start_reset(lv_obj_get_child(obj, i));
+	}
+}
+
 // Forgets the whole back-stack: the next chevron press lands on the main
 // menu. For pages that end a one-way flow (a finished scan) where walking
 // back through the flow's screens would make no sense.
@@ -592,6 +625,11 @@ void switch_screen(lv_obj_t *target_screen) {
 			screen_history_len--;
 		} else {
 			history_push(current);
+			// A step into a page starts it from the top; only the way back
+			// (the pop above, back_btn_cb, switch_screen_return_to) keeps a
+			// page's offset, so a long list is picked up where it was left
+			// and never where it was left the time before.
+			fresh_start_reset(target_screen);
 		}
 	}
 

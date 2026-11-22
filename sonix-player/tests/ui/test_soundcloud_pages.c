@@ -229,6 +229,7 @@ void gui_notify_popup(const char *text) { popup_calls++; }
 void toast_success(const char *text) {}
 void toast_error(const char *text) {}
 void switcher_attach_back_gesture(lv_obj_t *screen) {}
+void switcher_mark_fresh_start(lv_obj_t *screen) {}
 bool switcher_back_drag_active(void) { return false; }
 void switcher_set_back_guard_peek(lv_obj_t *screen, bool (*peek)(void)) {}
 /* The tiled home page brings in the grid, which asks the cover flow whether a
