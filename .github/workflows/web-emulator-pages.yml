@@ -295,8 +295,12 @@ jobs:
             # annotation, because a message cap can cut the rest.
             sed 's/\x1b\[[0-9;]*m//g' "$RUNNER_TEMP/build.log" \
               | grep -vE "^\s*$" | tail -n 60 > "$RUNNER_TEMP/errors.txt"
-            first="$(grep -m1 -E "^error(\[[0-9]+\])?:" "$RUNNER_TEMP/errors.txt" || true)"
-            echo "::error title=spotifyd does not build::${first}"
+            # The E0277 block names the trait and the type that failed the
+            # bound, and those are what say who is at fault. Emitted raw and in
+            # full: an annotation body can be several lines.
+            block="$(awk '/^error\[E0277\]/{f=1} f{print} f&&/^$/{exit}' "$RUNNER_TEMP/errors.txt" | head -n 12)"
+            [ -z "$block" ] && block="$(grep -m1 -E "^error" "$RUNNER_TEMP/errors.txt" || true)"
+            echo "::error title=spotifyd does not build::${block}"
             # The detail goes where a 64 KB cap cannot cut it: a step summary
             # renders it on the run page.
             {
