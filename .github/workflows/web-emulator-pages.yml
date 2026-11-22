@@ -275,6 +275,20 @@ jobs:
             echo "LIBRESPOT_BROKEN=1" >> "$GITHUB_ENV"
           fi
 
+      # The vergen conflict lives in librespot's own build script, and the fix
+      # is to give the whole graph one resolution and keep it. generate-lockfile
+      # resolves the newest compatible set; the lock is then committed, so every
+      # build after this one is the same build.
+      - name: Resolve and keep the dependency lock
+        run: |
+          cargo generate-lockfile
+          {
+            echo "### spotifyd Cargo.lock"
+            echo '```'
+            grep -A2 -E '^name = "(vergen|vergen-lib|vergen-gitcl)"' Cargo.lock || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - name: Build
         run: |
           cargo build --release >"$RUNNER_TEMP/build.log" 2>&1 || true
@@ -331,6 +345,16 @@ jobs:
 
       # Only on failure, but always then: the build log is the only way to read
       # the compiler's own words when the job log endpoint is unreachable.
+      # The lock is the point of the exercise: it is a file this environment
+      # cannot produce (no cargo, no crates.io) and the fix is to commit it.
+      - name: Upload the lock whatever happened
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: spotifyd-cargo-lock
+          path: sonix-player/tools/spotifyd/Cargo.lock
+          if-no-files-found: warn
+
       - name: Upload the logs when something failed
         if: failure()
         uses: actions/upload-artifact@v4
