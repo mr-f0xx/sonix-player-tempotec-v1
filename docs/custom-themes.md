@@ -11,6 +11,25 @@ appearance. Editing a selected Custom theme while the player is running takes
 effect when Appearance is reopened; invalid edits leave the last valid palette
 in memory.
 
+## Ready-made palettes
+
+Four complete palettes ship in [`sonix-player/examples/themes/`](../sonix-player/examples/themes/),
+one file per scheme, each mapped from the official colours of its theme:
+
+| File | Scheme | Source |
+| --- | --- | --- |
+| [`gruvbox.ini`](../sonix-player/examples/themes/gruvbox.ini) | Gruvbox (dark) | [gruvbox.org](https://gruvbox.org/) |
+| [`rose-pine.ini`](../sonix-player/examples/themes/rose-pine.ini) | Rosé Pine (Main) | [rosepinetheme.com/palette](https://rosepinetheme.com/palette) |
+| [`dracula.ini`](../sonix-player/examples/themes/dracula.ini) | Dracula (Classic) | [draculatheme.com/spec](https://draculatheme.com/spec) |
+| [`catppuccin-mocha.ini`](../sonix-player/examples/themes/catppuccin-mocha.ini) | Catppuccin Mocha | [catppuccin.com/palette](https://catppuccin.com/palette) |
+
+Copy the one you want onto the card as **`Themes/custom.ini`** — only one file
+is active at a time — then select **Custom** in Appearance as usual. Each file
+is a complete eight-key palette, so no editing is required; tweak any value if
+you like (for example Dracula's `text_secondary` is its deliberately dim
+Comment grey). The `sonix-player/tools/validate_theme_ini.py` script checks a
+file against the player's parser.
+
 Every key in `[theme]` is required, each with a six-digit `#RRGGBB` value.
 Lines starting with `;` or `#` are comments. `screen_bg` is the page,
 `surface` the cards and rows, `surface_pressed` their pressed state, `panel`
