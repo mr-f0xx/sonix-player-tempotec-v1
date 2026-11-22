@@ -11,6 +11,15 @@ edition = "2021"
 description = "librespot's library and queue over a text socket, with PCM to the player"
 license = "MIT"
 
+# The wire format lives in a library so it can be tested without librespot:
+# protocol.rs has no dependencies and no session, and `cargo test --lib` runs
+# its tests in seconds where building the binary means waiting for librespot.
+# main.rs declares `mod protocol` as well and they are the same file, compiled
+# into both; that is deliberate, not a duplicate.
+[lib]
+name = "sonix_spotifyd"
+path = "src/protocol.rs"
+
 [[bin]]
 name = "spotifyd"
 path = "src/main.rs"

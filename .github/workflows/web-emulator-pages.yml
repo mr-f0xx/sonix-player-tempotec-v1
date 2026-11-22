@@ -233,11 +233,31 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             build-essential pkg-config libasound2-dev libssl-dev
 
+      # The summary is what a person reads on the run's page, and the job log
+      # is not always reachable. Errors go there in full, so a failure says
+      # what broke without anybody downloading an archive.
       - name: Protocol tests (no librespot, no network)
-        run: cargo test --lib
+        run: |
+          set -o pipefail
+          cargo test --lib 2>&1 | tee "$RUNNER_TEMP/test.log"
+          {
+            echo "### Spotify daemon: protocol tests"
+            echo '```'
+            tail -n 40 "$RUNNER_TEMP/test.log"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Build
-        run: cargo build --release
+        run: |
+          set -o pipefail
+          cargo build --release 2>&1 | tee "$RUNNER_TEMP/build.log"
+          {
+            echo "### Spotify daemon: release build"
+            echo '```'
+            grep -E "^(error|warning: unused)" -A6 "$RUNNER_TEMP/build.log" | head -n 120 || true
+            tail -n 15 "$RUNNER_TEMP/build.log"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Stage the binary and its configuration
         run: |
@@ -255,6 +275,16 @@ jobs:
           name: spotifyd-linux-x86_64
           path: ${{ runner.temp }}/spotifyd
           if-no-files-found: error
+
+      # Only on failure, but always then: the build log is the only way to read
+      # the compiler's own words when the job log endpoint is unreachable.
+      - name: Upload the build log when something failed
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: spotifyd-build-log
+          path: ${{ runner.temp }}/build.log
+          if-no-files-found: warn
 
   deploy-pages:
     name: Deploy static V1 emulator to GitHub Pages
