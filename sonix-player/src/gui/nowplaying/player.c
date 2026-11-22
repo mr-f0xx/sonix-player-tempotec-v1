@@ -6351,17 +6351,31 @@ static void track_end_async(void *user) {
 	}
 }
 
+static void xfade_handoff_async(void *user) {
+	(void)user;
+	if (device_state_take_crossfade_handoff()) {
+		refresh_now_playing();
+	}
+}
+
 // Playback thread.
 static void track_end_hook(void) { gui_post(track_end_async, NULL); }
+static void xfade_handoff_hook_cb(void) { gui_post(xfade_handoff_async, NULL); }
 
 // Reads the current device state and reconciles the UI against it. This is the
 // single point that keeps the play/pause button and the progress bar from
 // going stale once a track finishes on its own.
 static void update_progress(void) {
+	if (device_state_take_crossfade_handoff()) {
+		refresh_now_playing();
+	}
+
 	// Auto-advance or loop the folder when the track has played through.
 	if (device_state_take_completion()) {
 		handle_track_finished();
 	}
+
+	device_state_sync_crossfade();
 
 	device_state_t state;
 	device_state_get(&state);
@@ -6978,6 +6992,7 @@ static void more_btn_event_cb(lv_event_t *e) {
 static void repeat_btn_event_cb(lv_event_t *e) {
 	(void)e;
 	playlist_cycle_mode();
+	device_state_sync_crossfade();
 	update_repeat_button();
 }
 
@@ -8731,6 +8746,7 @@ void player_init(gui_config_t *cfg) {
 	cover_poll_timer = NULL;
 	progress_slider_timer = lv_timer_create(progress_slider_timer_cb, POLL_PERIOD_IDLE_MS, NULL);
 	audio_set_completion_hook(track_end_hook);
+	audio_set_crossfade_handoff_hook(xfade_handoff_hook_cb);
 	// Slowed in standby, never stopped: this timer does more than paint --
 	// update_progress() calls device_state_take_completion(), the engine that
 	// advances the queue when a track ends on its own. Stopping it when the

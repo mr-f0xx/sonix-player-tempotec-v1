@@ -34,24 +34,31 @@ void replaygain_set_mode(replaygain_mode_t mode) {
 	config_save();
 }
 
-void replaygain_load(const song_metadata_t *meta) {
+static int compute_gain(const song_metadata_t *meta, replaygain_mode_t *resolved_out, double *db_out, double *peak_out) {
 	replaygain_mode_t mode = replaygain_mode();
-
-	gain_q15 = 32768;
-	active = 0;
-	current_db = 0;
-
+	if (resolved_out) {
+		*resolved_out = mode;
+	}
+	if (db_out) {
+		*db_out = 0.0;
+	}
+	if (peak_out) {
+		*peak_out = 0.0;
+	}
 	if (!meta || mode == REPLAYGAIN_OFF) {
-		return;
+		return 32768;
 	}
 
 	if (mode == REPLAYGAIN_TRACK_WHEN_SHUFFLED) {
 		playback_mode_t playback_mode = (playback_mode_t)config_get_int("player", "playback_mode", 0);
-		if ( playback_mode == PLAYBACK_MODE_SHUFFLE || playback_mode == PLAYBACK_MODE_SHUFFLE_REPEAT ) {
+		if (playback_mode == PLAYBACK_MODE_SHUFFLE || playback_mode == PLAYBACK_MODE_SHUFFLE_REPEAT) {
 			mode = REPLAYGAIN_TRACK;
 		} else {
 			mode = REPLAYGAIN_ALBUM;
 		}
+	}
+	if (resolved_out) {
+		*resolved_out = mode;
 	}
 
 	double db;
@@ -69,7 +76,7 @@ void replaygain_load(const song_metadata_t *meta) {
 		db = meta->album_gain_db;
 		peak = meta->album_peak;
 	} else {
-		return; // nothing to go on
+		return 32768; // nothing to go on
 	}
 
 	if (db > GAIN_MAX_DB) {
@@ -97,19 +104,39 @@ void replaygain_load(const song_metadata_t *meta) {
 		q = 32768 * 4; // +12 dB, the ceiling above, expressed in the same units
 	}
 
+	if (db_out) {
+		*db_out = db;
+	}
+	if (peak_out) {
+		*peak_out = peak;
+	}
+	return q;
+}
+
+int replaygain_compute_q15(const song_metadata_t *meta) {
+	return compute_gain(meta, NULL, NULL, NULL);
+}
+
+void replaygain_load(const song_metadata_t *meta) {
+	replaygain_mode_t mode = REPLAYGAIN_OFF;
+	double db = 0.0;
+	double peak = 0.0;
+	int q = compute_gain(meta, &mode, &db, &peak);
+
 	gain_q15 = q;
-	current_db = db;
+	current_db = (q != 32768) ? db : 0.0;
 	active = (q != 32768);
 
-	printf("replaygain: %s %+.2f dB (peak %.4f)\n", mode == REPLAYGAIN_ALBUM ? "album" : "track", db, peak);
+	if (active) {
+		printf("replaygain: %s %+.2f dB (peak %.4f)\n", mode == REPLAYGAIN_ALBUM ? "album" : "track", db, peak);
+	}
 }
 
 bool replaygain_active(void) { return active != 0; }
 double replaygain_current_db(void) { return current_db; }
 
-void replaygain_process(short *frames, int frame_count, int channels) {
-	int g = gain_q15;
-	if (!active || g == 32768 || frame_count <= 0 || channels <= 0 || !frames) {
+void replaygain_apply_q15_s16(short *frames, int frame_count, int channels, int g) {
+	if (g == 32768 || frame_count <= 0 || channels <= 0 || !frames) {
 		return;
 	}
 
@@ -128,9 +155,9 @@ void replaygain_process(short *frames, int frame_count, int channels) {
 	}
 }
 
-void replaygain_process_s32(int32_t *frames, int frame_count, int channels) {
-	int64_t g = gain_q15;
-	if (!active || g == 32768 || frame_count <= 0 || channels <= 0 || !frames) {
+void replaygain_apply_q15_s32(int32_t *frames, int frame_count, int channels, int gain) {
+	int64_t g = gain;
+	if (g == 32768 || frame_count <= 0 || channels <= 0 || !frames) {
 		return;
 	}
 
@@ -144,4 +171,18 @@ void replaygain_process_s32(int32_t *frames, int frame_count, int channels) {
 		}
 		frames[i] = (int32_t)v;
 	}
+}
+
+void replaygain_process(short *frames, int frame_count, int channels) {
+	if (!active) {
+		return;
+	}
+	replaygain_apply_q15_s16(frames, frame_count, channels, gain_q15);
+}
+
+void replaygain_process_s32(int32_t *frames, int frame_count, int channels) {
+	if (!active) {
+		return;
+	}
+	replaygain_apply_q15_s32(frames, frame_count, channels, gain_q15);
 }

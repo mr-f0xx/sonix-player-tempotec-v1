@@ -230,6 +230,34 @@ void subsonicstream_prefetch(const char *path) {
 	pthread_mutex_unlock(&lock);
 }
 
+bool subsonicstream_ready_for_crossfade(const char *path) {
+	if (!subsonicstream_owns(path)) {
+		return false;
+	}
+	pthread_mutex_lock(&lock);
+	bool ready = false;
+	// Ensure prefetch is started if current track has sufficient reserve.
+	if (wanted_slot >= 0) {
+		streambridge_state_t current;
+		streambridge_state(slots[wanted_slot].bridge, &current);
+		if (!current.failed && !current.canceled && (current.eof || current.buffered >= STREAMBRIDGE_PRECACHE)) {
+			int next_slot = choose_slot(path, true);
+			if (next_slot >= 0 && !slots[next_slot].leased) {
+				streambridge_state_t next_st;
+				streambridge_state(slots[next_slot].bridge, &next_st);
+				if (!next_st.failed && !next_st.canceled &&
+					(next_st.eof || next_st.buffered >= STREAMBRIDGE_PRECACHE / 2)) {
+					streambridge_promote(slots[next_slot].bridge);
+					wanted_slot = next_slot;
+					ready = true;
+				}
+			}
+		}
+	}
+	pthread_mutex_unlock(&lock);
+	return ready;
+}
+
 static void cancel_locked(void) {
 	for (int i = 0; i < 2; i++) {
 		streambridge_cancel(slots[i].bridge);

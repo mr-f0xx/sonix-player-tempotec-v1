@@ -1,4 +1,5 @@
 #include "audio.h"
+#include "crossfade.h"
 #include "visualizer.h"
 #include "src/system/audio/alsa-controls.h"
 #include "src/system/bluetooth/bluetooth.h"
@@ -437,6 +438,7 @@ bool audio_output_is_bluetooth(void) { return output_is_bluetooth(); }
 
 static volatile bool fade_enabled;
 static volatile int fade_secs = 3;
+static volatile audio_fade_mode_t fade_mode = AUDIO_FADE_CROSSFADE;
 
 void audio_set_fade(bool enabled, int seconds) {
 	if (seconds < 1) {
@@ -447,12 +449,66 @@ void audio_set_fade(bool enabled, int seconds) {
 	}
 	fade_enabled = enabled;
 	fade_secs = seconds;
-	fprintf(stderr, "audio: fade %s (%d s)\n", enabled ? "on" : "off", seconds);
+	fprintf(stderr, "audio: fade %s (%d s, mode %s)\n", enabled ? "on" : "off", seconds,
+			fade_mode == AUDIO_FADE_CROSSFADE ? "crossfade" : "fade");
 }
+
+void audio_set_fade_mode(audio_fade_mode_t mode) {
+	fade_mode = (mode == AUDIO_FADE_CROSSFADE) ? AUDIO_FADE_CROSSFADE : AUDIO_FADE_OUT_IN;
+	fprintf(stderr, "audio: fade mode %s\n", fade_mode == AUDIO_FADE_CROSSFADE ? "crossfade" : "fade");
+}
+
+audio_fade_mode_t audio_get_fade_mode(void) { return fade_mode; }
+
+bool audio_crossfade_active(void) { return fade_enabled && fade_mode == AUDIO_FADE_CROSSFADE; }
+
+int audio_fade_seconds(void) { return fade_secs; }
+
+static bool sequential_fade_active(void) { return fade_enabled && fade_mode == AUDIO_FADE_OUT_IN; }
+
+// Staged next track for overlapping crossfade transitions (protected by
+// audio_mutex). Cleared on any manual play/stop/freeze or queue invalidation.
+static char staged_xfade_path[512];
+static int staged_xfade_rg_q15 = 32768;
+static bool xfade_handoff_pending;
+static char xfade_handoff_path[512];
+static void (*xfade_handoff_hook)(void);
+
+void audio_stage_crossfade_next(const char *filepath, int replaygain_q15) {
+	pthread_mutex_lock(&audio_mutex);
+	if (!filepath || !filepath[0]) {
+		staged_xfade_path[0] = '\0';
+		staged_xfade_rg_q15 = 32768;
+	} else {
+		snprintf(staged_xfade_path, sizeof(staged_xfade_path), "%s", filepath);
+		staged_xfade_rg_q15 = replaygain_q15 > 0 ? replaygain_q15 : 32768;
+	}
+	pthread_mutex_unlock(&audio_mutex);
+}
+
+void audio_clear_crossfade_next(void) {
+	audio_stage_crossfade_next(NULL, 32768);
+}
+
+bool audio_take_crossfade_handoff(char *out_path, size_t out_size) {
+	pthread_mutex_lock(&audio_mutex);
+	bool pending = xfade_handoff_pending;
+	if (pending) {
+		xfade_handoff_pending = false;
+		if (out_path && out_size > 0) {
+			snprintf(out_path, out_size, "%s", xfade_handoff_path);
+		}
+		xfade_handoff_path[0] = '\0';
+	}
+	pthread_mutex_unlock(&audio_mutex);
+	return pending;
+}
+
+void audio_set_crossfade_handoff_hook(void (*hook)(void)) { xfade_handoff_hook = hook; }
 
 // 0..1024 for a position in the track. Unity everywhere but the two ends.
 static int fade_gain_q10(double pos_secs, double total_secs) {
-	if (!fade_enabled) {
+	if (!sequential_fade_active()) {
 		return 1024;
 	}
 
@@ -2645,6 +2701,469 @@ static void rebuffer_after_short_read(decoder_t *dec, int sample_rate, uint64_t 
 // the file, no decode step needed.
 static void play_decoded_file(const char *filepath, decode_format_t format);
 
+// ---------------------------------------------------------------------------
+// Overlapping Crossfade runtime (automatic track transitions only)
+//
+// While Track A approaches its natural end, Track B is opened in parallel and
+// mixed into Track A's output stream using an equal-power curve BEFORE the
+// shared effects chain (EQ, soundfield, crossfeed, mono, balance, software
+// volume, visualizer). When Track A finishes, Track B takes over the playback
+// thread seamlessly from its exact read position -- keeping the ALSA PCM open
+// when the output format matches, or switching cleanly to Track B's native
+// rate/depth/channels when it differs.
+// ---------------------------------------------------------------------------
+
+typedef struct {
+	bool open;
+	bool is_wav;
+	char path[512];
+	decode_format_t format;
+	decoder_t *dec;
+	FILE *wav_f;
+	wav_info_t wav_info;
+	unsigned char *wav_raw;
+	size_t wav_raw_cap;
+	int64_t wav_read_pos;
+	uint64_t frames_consumed; // source frames read from dec or wav_f
+	uint64_t total_frames;
+	int sample_rate;
+	int channels;
+	int source_bits;
+	int native_out_bits;
+	int rg_q15;
+	crossfade_resampler_t resampler;
+	void *mix_buf;
+	size_t mix_buf_bytes;
+	double xfade_span_secs;
+	double xfade_elapsed_secs;
+} xfade_incoming_t;
+
+static xfade_incoming_t xfade_carry; // handed off from Track A to Track B on playback_thread
+
+static void xfade_close(xfade_incoming_t *xf) {
+	if (!xf) {
+		return;
+	}
+	if (xf->dec) {
+		decoder_close(xf->dec);
+		xf->dec = NULL;
+	}
+	if (xf->wav_f) {
+		fclose(xf->wav_f);
+		xf->wav_f = NULL;
+	}
+	free(xf->wav_raw);
+	xf->wav_raw = NULL;
+	xf->wav_raw_cap = 0;
+	free(xf->mix_buf);
+	xf->mix_buf = NULL;
+	xf->mix_buf_bytes = 0;
+	xf->open = false;
+}
+
+static bool xfade_open_incoming(xfade_incoming_t *xf, const char *filepath, int rg_q15,
+								int dst_rate, int dst_channels) {
+	memset(xf, 0, sizeof(*xf));
+	if (!filepath || !filepath[0] || dst_rate <= 0 || dst_channels < 1 || dst_channels > 2) {
+		return false;
+	}
+
+	// Never block inside a growing file's open while Track A is actively feeding
+	// the DAC: if a streaming track is still downloading and its header isn't on
+	// disk yet, fall back cleanly to normal completion.
+	decode_format_t fmt = decode_detect_format(filepath);
+	if (fmt == DECODE_FORMAT_UNKNOWN) {
+		FILE *wf = NULL;
+		wav_info_t wi;
+		int parsed = parse_wav(filepath, &wi, &wf);
+		if (parsed == WAV_UNSUPPORTED && sndfile_available()) {
+			fmt = DECODE_FORMAT_SNDFILE;
+		} else if (parsed == WAV_OK) {
+			if (wi.channels < 1 || wi.channels > 2 || wi.sample_rate <= 0 || wi.src_frame_bytes <= 0) {
+				fclose(wf);
+				return false;
+			}
+			xf->is_wav = true;
+			xf->wav_f = wf;
+			xf->wav_info = wi;
+			xf->sample_rate = wi.sample_rate;
+			xf->channels = wi.channels;
+			xf->source_bits = wi.bits_per_sample;
+			xf->native_out_bits = wi.out_bits;
+			xf->total_frames = (uint64_t)(wi.data_size / wi.src_frame_bytes);
+		} else {
+			return false;
+		}
+	}
+
+	if (!xf->is_wav) {
+		decoder_t *dec = decoder_open(filepath, fmt);
+		if (!dec) {
+			return false;
+		}
+		if (decoder_passthrough(dec)) {
+			if (!(output_is_bluetooth() && decoder_dsd_to_pcm(dec))) {
+				// Native DoP cannot be amplitude-scaled or mixed.
+				decoder_close(dec);
+				return false;
+			}
+		}
+		int ch = decoder_channels(dec);
+		int sr = decoder_sample_rate(dec);
+		if (ch < 1 || ch > 2 || sr <= 0) {
+			decoder_close(dec);
+			return false;
+		}
+		xf->dec = dec;
+		xf->format = fmt;
+		xf->sample_rate = sr;
+		xf->channels = ch;
+		xf->source_bits = decoder_source_bits(dec);
+		xf->native_out_bits = xf->source_bits > 16 ? 32 : 16;
+		xf->total_frames = decoder_total_pcm_frames(dec);
+	}
+
+	snprintf(xf->path, sizeof(xf->path), "%s", filepath);
+	xf->rg_q15 = rg_q15 > 0 ? rg_q15 : 32768;
+	crossfade_resampler_init(&xf->resampler, xf->sample_rate, xf->channels, dst_rate, dst_channels);
+	xf->open = true;
+	return true;
+}
+
+static int xfade_read_wav_s16(xfade_incoming_t *xf, int16_t *dst, int max_frames) {
+	if (!xf->wav_f || max_frames <= 0) {
+		return 0;
+	}
+	const wav_info_t *wi = &xf->wav_info;
+	int64_t left = wi->data_size - xf->wav_read_pos;
+	if (left < wi->src_frame_bytes) {
+		return 0;
+	}
+	size_t want_frames = (size_t)max_frames;
+	if ((int64_t)(want_frames * (size_t)wi->src_frame_bytes) > left) {
+		want_frames = (size_t)(left / wi->src_frame_bytes);
+	}
+	if (want_frames == 0) {
+		return 0;
+	}
+
+	if (wi->out_bits == 16 && !wav_needs_conversion(wi)) {
+		size_t got_bytes = fread(dst, 1, want_frames * (size_t)wi->src_frame_bytes, xf->wav_f);
+		size_t got_frames = got_bytes / (size_t)wi->src_frame_bytes;
+		xf->wav_read_pos += (int64_t)(got_frames * (size_t)wi->src_frame_bytes);
+		return (int)got_frames;
+	}
+
+	size_t raw_need = want_frames * (size_t)wi->src_frame_bytes;
+	size_t conv_need = (wi->out_bits == 32) ? want_frames * (size_t)wi->channels * sizeof(int32_t) : 0;
+	size_t total_need = raw_need + conv_need;
+	if (total_need > xf->wav_raw_cap) {
+		unsigned char *grown = realloc(xf->wav_raw, total_need);
+		if (!grown) {
+			return 0;
+		}
+		xf->wav_raw = grown;
+		xf->wav_raw_cap = total_need;
+	}
+	size_t got_bytes = fread(xf->wav_raw, 1, raw_need, xf->wav_f);
+	size_t got_frames = got_bytes / (size_t)wi->src_frame_bytes;
+	xf->wav_read_pos += (int64_t)(got_frames * (size_t)wi->src_frame_bytes);
+	if (got_frames == 0) {
+		return 0;
+	}
+	if (wi->out_bits == 16) {
+		wav_convert(wi, xf->wav_raw, dst, got_frames);
+	} else {
+		int32_t *tmp32 = (int32_t *)(xf->wav_raw + raw_need);
+		if (wav_needs_conversion(wi)) {
+			wav_convert(wi, xf->wav_raw, tmp32, got_frames);
+		} else {
+			memcpy(tmp32, xf->wav_raw, got_frames * (size_t)wi->channels * sizeof(int32_t));
+		}
+		size_t samples = got_frames * (size_t)wi->channels;
+		for (size_t i = 0; i < samples; i++) {
+			dst[i] = (int16_t)(tmp32[i] >> 16);
+		}
+	}
+	return (int)got_frames;
+}
+
+static int xfade_read_wav_s32(xfade_incoming_t *xf, int32_t *dst, int max_frames) {
+	if (!xf->wav_f || max_frames <= 0) {
+		return 0;
+	}
+	const wav_info_t *wi = &xf->wav_info;
+	int64_t left = wi->data_size - xf->wav_read_pos;
+	if (left < wi->src_frame_bytes) {
+		return 0;
+	}
+	size_t want_frames = (size_t)max_frames;
+	if ((int64_t)(want_frames * (size_t)wi->src_frame_bytes) > left) {
+		want_frames = (size_t)(left / wi->src_frame_bytes);
+	}
+	if (want_frames == 0) {
+		return 0;
+	}
+
+	if (wi->out_bits == 32 && !wav_needs_conversion(wi)) {
+		size_t got_bytes = fread(dst, 1, want_frames * (size_t)wi->src_frame_bytes, xf->wav_f);
+		size_t got_frames = got_bytes / (size_t)wi->src_frame_bytes;
+		xf->wav_read_pos += (int64_t)(got_frames * (size_t)wi->src_frame_bytes);
+		return (int)got_frames;
+	}
+
+	size_t raw_need = want_frames * (size_t)wi->src_frame_bytes;
+	size_t conv_need = (wi->out_bits == 16) ? want_frames * (size_t)wi->channels * sizeof(int16_t) : 0;
+	size_t total_need = raw_need + conv_need;
+	if (total_need > xf->wav_raw_cap) {
+		unsigned char *grown = realloc(xf->wav_raw, total_need);
+		if (!grown) {
+			return 0;
+		}
+		xf->wav_raw = grown;
+		xf->wav_raw_cap = total_need;
+	}
+	size_t got_bytes = fread(xf->wav_raw, 1, raw_need, xf->wav_f);
+	size_t got_frames = got_bytes / (size_t)wi->src_frame_bytes;
+	xf->wav_read_pos += (int64_t)(got_frames * (size_t)wi->src_frame_bytes);
+	if (got_frames == 0) {
+		return 0;
+	}
+	if (wi->out_bits == 32) {
+		wav_convert(wi, xf->wav_raw, dst, got_frames);
+	} else {
+		int16_t *tmp16 = (int16_t *)(xf->wav_raw + raw_need);
+		if (wav_needs_conversion(wi)) {
+			wav_convert(wi, xf->wav_raw, tmp16, got_frames);
+		} else {
+			memcpy(tmp16, xf->wav_raw, got_frames * (size_t)wi->channels * sizeof(int16_t));
+		}
+		size_t samples = got_frames * (size_t)wi->channels;
+		for (size_t i = 0; i < samples; i++) {
+			dst[i] = (int32_t)((uint32_t)(uint16_t)tmp16[i] << 16);
+		}
+	}
+	return (int)got_frames;
+}
+
+static int xfade_pull_s16_cb(void *user, int16_t *dst, int max_frames) {
+	xfade_incoming_t *xf = user;
+	int got = 0;
+	if (xf->is_wav) {
+		got = xfade_read_wav_s16(xf, dst, max_frames);
+	} else if (xf->dec) {
+		// Guard growing files so a starved incoming download never stalls Track A.
+		if (decoder_is_growing(xf->dec)) {
+			double head = growing_headroom_secs(xf->dec, xf->sample_rate, xf->frames_consumed);
+			if (head >= 0.0 && head < 0.25) {
+				return 0;
+			}
+		}
+		got = (int)decoder_read_pcm_frames_s16(xf->dec, (uint64_t)max_frames, dst);
+	}
+	if (got > 0) {
+		replaygain_apply_q15_s16(dst, got, xf->channels, xf->rg_q15);
+	}
+	return got;
+}
+
+static int xfade_pull_s32_cb(void *user, int32_t *dst, int max_frames) {
+	xfade_incoming_t *xf = user;
+	int got = 0;
+	if (xf->is_wav) {
+		got = xfade_read_wav_s32(xf, dst, max_frames);
+	} else if (xf->dec) {
+		if (decoder_is_growing(xf->dec)) {
+			double head = growing_headroom_secs(xf->dec, xf->sample_rate, xf->frames_consumed);
+			if (head >= 0.0 && head < 0.25) {
+				return 0;
+			}
+		}
+		got = (int)decoder_read_pcm_frames_s32(xf->dec, (uint64_t)max_frames, dst);
+	}
+	if (got > 0) {
+		replaygain_apply_q15_s32(dst, got, xf->channels, xf->rg_q15);
+	}
+	return got;
+}
+
+static bool xfade_should_allow(double total_secs, bool passthrough, double speed) {
+	if (!audio_crossfade_active() || passthrough) {
+		return false;
+	}
+	if (speed < 0.999 || speed > 1.001) {
+		return false;
+	}
+	if (total_secs <= 0.0) {
+		return false;
+	}
+	int want_secs = fade_secs;
+	if (total_secs < (double)want_secs + 2.0 && total_secs < 4.0) {
+		return false;
+	}
+	pthread_mutex_lock(&audio_mutex);
+	bool ab_on = ab_loop_armed && ab_loop_live();
+	pthread_mutex_unlock(&audio_mutex);
+	return !ab_on;
+}
+
+static double xfade_effective_span(double total_secs) {
+	double span = (double)fade_secs;
+	if (total_secs > 0.0 && span > total_secs * 0.5) {
+		span = total_secs * 0.5;
+	}
+	if (span < 1.0) {
+		span = 1.0;
+	}
+	return span;
+}
+
+static void xfade_step_mix(xfade_incoming_t *xf, void *out_buf, int frames,
+						   int dst_rate, int dst_channels, int dst_bits,
+						   double pos_secs, double total_secs, bool passthrough, double speed) {
+	if (frames <= 0 || dst_rate <= 0 || (dst_channels != 1 && dst_channels != 2)) {
+		return;
+	}
+	if (!xfade_should_allow(total_secs, passthrough, speed)) {
+		if (xf->open) {
+			xfade_close(xf);
+		}
+		return;
+	}
+
+	char staged[512];
+	int staged_rg = 32768;
+	pthread_mutex_lock(&audio_mutex);
+	snprintf(staged, sizeof(staged), "%s", staged_xfade_path);
+	staged_rg = staged_xfade_rg_q15;
+	pthread_mutex_unlock(&audio_mutex);
+
+	if (xf->open && (!staged[0] || strcmp(staged, xf->path) != 0)) {
+		xfade_close(xf);
+	}
+	if (!staged[0]) {
+		return;
+	}
+
+	double span = xfade_effective_span(total_secs);
+	double remaining = total_secs - pos_secs;
+	if (!xf->open) {
+		if (remaining > span) {
+			return;
+		}
+		if (!xfade_open_incoming(xf, staged, staged_rg, dst_rate, dst_channels)) {
+			pthread_mutex_lock(&audio_mutex);
+			if (strcmp(staged_xfade_path, staged) == 0) {
+				staged_xfade_path[0] = '\0';
+			}
+			pthread_mutex_unlock(&audio_mutex);
+			return;
+		}
+		xf->xfade_span_secs = remaining > 0.25 ? remaining : 0.25;
+		xf->xfade_elapsed_secs = 0.0;
+		fprintf(stderr, "audio[%ld]: crossfade: mixing in '%s' over %.2f s (%d Hz/%d ch -> %d Hz/%d ch)\n",
+				log_ms(), xf->path, xf->xfade_span_secs,
+				xf->sample_rate, xf->channels, dst_rate, dst_channels);
+	} else if (xf->resampler.dst_rate != dst_rate || xf->resampler.dst_channels != dst_channels) {
+		crossfade_resampler_init(&xf->resampler, xf->sample_rate, xf->channels, dst_rate, dst_channels);
+	}
+
+	size_t sample_bytes = (dst_bits == 32) ? sizeof(int32_t) : sizeof(int16_t);
+	size_t need_bytes = (size_t)frames * (size_t)dst_channels * sample_bytes;
+	if (need_bytes > xf->mix_buf_bytes) {
+		void *grown = realloc(xf->mix_buf, need_bytes);
+		if (!grown) {
+			xfade_close(xf);
+			return;
+		}
+		xf->mix_buf = grown;
+		xf->mix_buf_bytes = need_bytes;
+	}
+
+	uint64_t consumed = 0;
+	int got = 0;
+	if (dst_bits == 32) {
+		got = crossfade_resample_s32(&xf->resampler, (int32_t *)xf->mix_buf, frames,
+									 xfade_pull_s32_cb, xf, &consumed);
+		if (got < frames) {
+			memset((int32_t *)xf->mix_buf + (size_t)got * (size_t)dst_channels, 0,
+				   (size_t)(frames - got) * (size_t)dst_channels * sizeof(int32_t));
+		}
+	} else {
+		got = crossfade_resample_s16(&xf->resampler, (int16_t *)xf->mix_buf, frames,
+									 xfade_pull_s16_cb, xf, &consumed);
+		if (got < frames) {
+			memset((int16_t *)xf->mix_buf + (size_t)got * (size_t)dst_channels, 0,
+				   (size_t)(frames - got) * (size_t)dst_channels * sizeof(int16_t));
+		}
+	}
+	xf->frames_consumed += consumed;
+
+	double dt = (double)frames / (double)dst_rate;
+	double denom = xf->xfade_span_secs > 0.1 ? xf->xfade_span_secs : 0.1;
+	double t0 = xf->xfade_elapsed_secs / denom;
+	double t1 = (xf->xfade_elapsed_secs + dt) / denom;
+	if (t0 > 1.0) {
+		t0 = 1.0;
+	}
+	if (t1 > 1.0) {
+		t1 = 1.0;
+	}
+	xf->xfade_elapsed_secs += dt;
+
+	if (dst_bits == 32) {
+		crossfade_mix_s32((int32_t *)out_buf, (const int32_t *)xf->mix_buf, frames, dst_channels, t0, t1);
+	} else {
+		crossfade_mix_s16((int16_t *)out_buf, (const int16_t *)xf->mix_buf, frames, dst_channels, t0, t1);
+	}
+}
+
+static bool xfade_commit_handoff(xfade_incoming_t *xf) {
+	if (!xf || !xf->open || xf->frames_consumed == 0) {
+		return false;
+	}
+
+	if (xf->total_frames > 0 && xf->frames_consumed >= xf->total_frames) {
+		xfade_close(xf);
+		return false;
+	}
+
+	free(xf->mix_buf);
+	xf->mix_buf = NULL;
+	xf->mix_buf_bytes = 0;
+
+	pthread_mutex_lock(&audio_mutex);
+	if (audio_command == AUDIO_CMD_STOP || play_request) {
+		pthread_mutex_unlock(&audio_mutex);
+		xfade_close(xf);
+		return false;
+	}
+	snprintf(current_filepath, sizeof(current_filepath), "%s", xf->path);
+	staged_xfade_path[0] = '\0';
+	staged_xfade_rg_q15 = 32768;
+	snprintf(xfade_handoff_path, sizeof(xfade_handoff_path), "%s", xf->path);
+	xfade_handoff_pending = true;
+	audio_command = AUDIO_CMD_PLAY;
+	playback_status = AUDIO_STATUS_PLAYING;
+	track_completed = false;
+	ab_loop_a_secs = -1.0;
+	ab_loop_b_secs = -1.0;
+	ab_loop_armed = false;
+	pthread_mutex_unlock(&audio_mutex);
+
+	xfade_carry = *xf;
+	memset(xf, 0, sizeof(*xf));
+
+	fprintf(stderr, "audio[%ld]: crossfade: handed off seamlessly to '%s' at %.2f s\n",
+			log_ms(), xfade_carry.path,
+			xfade_carry.sample_rate > 0 ? (double)xfade_carry.frames_consumed / xfade_carry.sample_rate : 0.0);
+
+	if (xfade_handoff_hook) {
+		xfade_handoff_hook();
+	}
+	return true;
+}
+
 // What a seek does to the queued audio.
 //
 // A card: dropped and prepared, so the new position is heard at once.
@@ -2668,23 +3187,56 @@ static void seek_flush(snd_pcm_t *pcm, bool already_dropped) {
 	snd_pcm_prepare(pcm);
 }
 
+static void apply_track_replaygain_s16(short *frames, int frame_count, int channels, int carried_rg_q15, bool from_xfade) {
+	if (from_xfade) {
+		replaygain_apply_q15_s16(frames, frame_count, channels, carried_rg_q15);
+	} else {
+		replaygain_process(frames, frame_count, channels);
+	}
+}
+
+static void apply_track_replaygain_s32(int32_t *frames, int frame_count, int channels, int carried_rg_q15, bool from_xfade) {
+	if (from_xfade) {
+		replaygain_apply_q15_s32(frames, frame_count, channels, carried_rg_q15);
+	} else {
+		replaygain_process_s32(frames, frame_count, channels);
+	}
+}
+
 static void play_wav_file(const char *filepath) {
 	FILE *f = NULL;
 	wav_info_t info;
-	int parsed = parse_wav(filepath, &info, &f);
-	// ADPCM, a-law and the rest: libsndfile reads them, and the decoded path
-	// plays what it hands over.
-	if (parsed == WAV_UNSUPPORTED && sndfile_available()) {
-		play_decoded_file(filepath, DECODE_FORMAT_SNDFILE);
-		return;
-	}
-	if (parsed != WAV_OK) {
-		fprintf(stderr, "Audio: Failed to parse WAV metadata: %s\n", filepath);
-		pthread_mutex_lock(&audio_mutex);
-		audio_command = AUDIO_CMD_STOP;
-		playback_status = AUDIO_STATUS_STOPPED;
-		pthread_mutex_unlock(&audio_mutex);
-		return;
+	int64_t initial_bytes = 0;
+	bool from_xfade = false;
+	int carried_rg_q15 = 32768;
+
+	if (xfade_carry.open && xfade_carry.is_wav && strcmp(xfade_carry.path, filepath) == 0) {
+		f = xfade_carry.wav_f;
+		info = xfade_carry.wav_info;
+		initial_bytes = xfade_carry.wav_read_pos;
+		carried_rg_q15 = xfade_carry.rg_q15;
+		xfade_carry.wav_f = NULL;
+		xfade_close(&xfade_carry);
+		from_xfade = true;
+	} else {
+		if (xfade_carry.open) {
+			xfade_close(&xfade_carry);
+		}
+		int parsed = parse_wav(filepath, &info, &f);
+		// ADPCM, a-law and the rest: libsndfile reads them, and the decoded path
+		// plays what it hands over.
+		if (parsed == WAV_UNSUPPORTED && sndfile_available()) {
+			play_decoded_file(filepath, DECODE_FORMAT_SNDFILE);
+			return;
+		}
+		if (parsed != WAV_OK) {
+			fprintf(stderr, "Audio: Failed to parse WAV metadata: %s\n", filepath);
+			pthread_mutex_lock(&audio_mutex);
+			audio_command = AUDIO_CMD_STOP;
+			playback_status = AUDIO_STATUS_STOPPED;
+			pthread_mutex_unlock(&audio_mutex);
+			return;
+		}
 	}
 
 	// Progress, seeks and pauses count bytes of the file, not of what reaches the device.
@@ -2692,7 +3244,7 @@ static void play_wav_file(const char *filepath) {
 	int src_frame_bytes = info.src_frame_bytes;
 	pthread_mutex_lock(&audio_mutex);
 	progress_total_secs = (double)info.data_size / bytes_per_sec;
-	progress_current_secs = opening_position();
+	progress_current_secs = from_xfade ? ((double)initial_bytes / bytes_per_sec) : opening_position();
 	progress_floor_secs = -1.0;
 	stream_sample_rate = info.sample_rate;
 	stream_channels = info.channels;
@@ -2760,10 +3312,14 @@ static void play_wav_file(const char *filepath) {
 	// progress_current_secs negative and also decides whether a track finished
 	// or was cut short (cut_short, below), so the queue would advance on its
 	// own mid-book.
-	int64_t bytes_played = 0;
-	int64_t read_pos = 0; // bytes of the data chunk already read, ahead of bytes_played by what is queued
+	int64_t bytes_played = initial_bytes;
+	int64_t read_pos = initial_bytes; // bytes of the data chunk already read, ahead of bytes_played by what is queued
 	bool is_paused = false;
 	bool played_to_the_end = false;
+	bool handed_off_xfade = false;
+	xfade_incoming_t xfade_next;
+	memset(&xfade_next, 0, sizeof(xfade_next));
+	double total_secs = (double)info.data_size / bytes_per_sec;
 	// Lifted once this track's first samples are in the card; see the write loop.
 	bool gap_unmuted = false;
 	int route_check = 0;
@@ -2785,6 +3341,8 @@ static void play_wav_file(const char *filepath) {
 			double target = seek_target_secs;
 			seek_request = false;
 			pthread_mutex_unlock(&audio_mutex);
+
+			xfade_close(&xfade_next);
 
 			int64_t target_byte_pos = (int64_t)(target * bytes_per_sec);
 			target_byte_pos = (target_byte_pos / src_frame_bytes) * src_frame_bytes;
@@ -2833,6 +3391,7 @@ static void play_wav_file(const char *filepath) {
 				// pause_stop_stream() mutes the DAC before the drop; the mute is
 				// lifted by the unpause's first write.
 				gap_unmuted = false;
+				xfade_close(&xfade_next);
 				int64_t rewind_bytes = pause_stop_stream(pcm_handle, src_frame_bytes);
 				if (rewind_bytes > 0) {
 					// What was still in the buffer was never heard: wind the
@@ -3011,8 +3570,11 @@ static void play_wav_file(const char *filepath) {
 				wav_convert(&info, raw, buffer, (size_t)frames_read);
 			}
 			health_lap(&health, STAGE_READ);
+			double pos_now = (double)bytes_played / bytes_per_sec;
 			if (info.out_bits == 16) {
-				replaygain_process((short *)buffer, frames_read, info.channels);
+				apply_track_replaygain_s16((short *)buffer, frames_read, info.channels, carried_rg_q15, from_xfade);
+				xfade_step_mix(&xfade_next, buffer, frames_read, info.sample_rate, info.channels, 16,
+							   pos_now, total_secs, false, 1.0);
 				eq_process((short *)buffer, frames_read, info.channels, info.sample_rate);
 				// Soundfield last, on the finished stereo pair -- the stock
 				// module sits at the end of the chain too, taking whatever the
@@ -3022,7 +3584,9 @@ static void play_wav_file(const char *filepath) {
 				mono_process((short *)buffer, frames_read, info.channels);
 				balance_process((short *)buffer, frames_read, info.channels);
 			} else {
-				replaygain_process_s32((int32_t *)buffer, frames_read, info.channels);
+				apply_track_replaygain_s32((int32_t *)buffer, frames_read, info.channels, carried_rg_q15, from_xfade);
+				xfade_step_mix(&xfade_next, buffer, frames_read, info.sample_rate, info.channels, 32,
+							   pos_now, total_secs, false, 1.0);
 				eq_process_s32((int32_t *)buffer, frames_read, info.channels, info.sample_rate);
 				soundfield_process_s32((int32_t *)buffer, frames_read, info.channels);
 				crossfeed_process_s32((int32_t *)buffer, frames_read, info.channels, info.sample_rate);
@@ -3045,6 +3609,17 @@ static void play_wav_file(const char *filepath) {
 				break;
 			}
 
+			pthread_mutex_lock(&audio_mutex);
+			bool natural_end = audio_command != AUDIO_CMD_STOP && !play_request;
+			pthread_mutex_unlock(&audio_mutex);
+
+			if (natural_end && xfade_commit_handoff(&xfade_next)) {
+				played_to_the_end = true;
+				handed_off_xfade = true;
+				break;
+			}
+			xfade_close(&xfade_next);
+
 			// Track completed naturally -- unless a stop or another track
 			// arrived while the last read was blocked. That is not an end but
 			// an interrupted read, and calling it "finished" advances the queue
@@ -3053,9 +3628,11 @@ static void play_wav_file(const char *filepath) {
 			// It happens with tracks played while still downloading:
 			// abandoning the download makes the read in flight return empty.
 			pthread_mutex_lock(&audio_mutex);
-			bool natural_end = audio_command != AUDIO_CMD_STOP && !play_request;
-			audio_command = AUDIO_CMD_STOP;
-			playback_status = AUDIO_STATUS_STOPPED;
+			natural_end = audio_command != AUDIO_CMD_STOP && !play_request;
+			if (!play_request) {
+				audio_command = AUDIO_CMD_STOP;
+				playback_status = AUDIO_STATUS_STOPPED;
+			}
 			track_completed = natural_end;
 			pthread_mutex_unlock(&audio_mutex);
 			played_to_the_end = natural_end;
@@ -3066,8 +3643,8 @@ static void play_wav_file(const char *filepath) {
 		}
 
 		snd_pcm_uframes_t frames_to_write = (snd_pcm_uframes_t)frames_read;
-		if (fade_enabled) {
-			int gain = fade_gain_q10((double)bytes_played / bytes_per_sec, (double)info.data_size / bytes_per_sec);
+		if (sequential_fade_active() && !from_xfade) {
+			int gain = fade_gain_q10((double)bytes_played / bytes_per_sec, total_secs);
 			int samples = (int)frames_to_write * info.channels;
 			if (info.out_bits == 32) {
 				fade_apply_s32((int32_t *)buffer, samples, gain);
@@ -3128,13 +3705,18 @@ static void play_wav_file(const char *filepath) {
 		pthread_mutex_unlock(&audio_mutex);
 	}
 
+	xfade_close(&xfade_next);
+
 	pthread_mutex_lock(&audio_mutex);
-	mark_stopped_unless_replaced();
+	if (!handed_off_xfade) {
+		mark_stopped_unless_replaced();
+	}
 	bool replacing = play_request;
 	pthread_mutex_unlock(&audio_mutex);
 
-	// Gapless, on the same conditions as the decoded path.
-	bool keep_open = pcm_handle && gapless_enabled && played_to_the_end && !is_paused &&
+	// Gapless (or crossfade handoff, which always holds the PCM seamlessly when
+	// the output format matches, regardless of the separate gapless setting).
+	bool keep_open = pcm_handle && (gapless_enabled || handed_off_xfade) && played_to_the_end && !is_paused &&
 					 (!pcm_is_bluetooth(pcm_handle) || bt_hold_usable(pcm_handle));
 	if (keep_open) {
 		gapless_hold(pcm_handle, info.channels, info.sample_rate, info.out_bits, period_size);
@@ -3224,38 +3806,55 @@ static int bluetooth_decimation(int sample_rate, int channels, int out_bits, boo
 static bool playback_reader_should_abort(void);
 
 static void play_decoded_file(const char *filepath, decode_format_t format) {
-	decoder_t *dec = decoder_open(filepath, format);
-	if (!dec && !subsonicstream_owns(filepath)) {
-		// A busy card (a cover decoding, the library scanning) can make the
-		// first open fail transiently; one more try costs nothing and saves
-		// the track.
-		usleep(200 * 1000);
-		dec = decoder_open(filepath, format);
-	}
+	decoder_t *dec = NULL;
+	uint64_t initial_frames = 0;
+	bool from_xfade = false;
+	int carried_rg_q15 = 32768;
 
-	// A file still downloading is not a broken file: it is not all there yet.
-	//
-	// A streamed track starts playing while it arrives, as soon as the cache
-	// reports enough. Between that report and this open there are a couple of
-	// thread hops, and now and then the decoder arrives a moment too early: the
-	// FLAC header is not complete and decoder_open() refuses.
-	//
-	// So it waits: while the file grows, bytes are arriving and retrying is
-	// worthwhile. The wait gives up on any command (another track, a stop, a
-	// pause), so it blocks nothing.
-	for (int wait = 0; !dec && growfile_is_growing(filepath) && wait < DECODER_GROW_RETRIES; wait++) {
-		pthread_mutex_lock(&audio_mutex);
-		bool leave = audio_command != AUDIO_CMD_PLAY || play_request || stop_thread;
-		pthread_mutex_unlock(&audio_mutex);
-		if (leave) {
-			break;
+	if (xfade_carry.open && !xfade_carry.is_wav && xfade_carry.dec && strcmp(xfade_carry.path, filepath) == 0) {
+		dec = xfade_carry.dec;
+		initial_frames = xfade_carry.frames_consumed;
+		carried_rg_q15 = xfade_carry.rg_q15;
+		xfade_carry.dec = NULL;
+		xfade_close(&xfade_carry);
+		from_xfade = true;
+	} else {
+		if (xfade_carry.open) {
+			xfade_close(&xfade_carry);
 		}
-		if (wait == 0) {
-			fprintf(stderr, "audio[%ld]: '%s' is still downloading, waiting instead of giving up\n", log_ms(),
-					filepath);
-		}
-		usleep(DECODER_GROW_RETRY_MS * 1000);
 		dec = decoder_open(filepath, format);
+		if (!dec && !subsonicstream_owns(filepath)) {
+			// A busy card (a cover decoding, the library scanning) can make the
+			// first open fail transiently; one more try costs nothing and saves
+			// the track.
+			usleep(200 * 1000);
+			dec = decoder_open(filepath, format);
+		}
+
+		// A file still downloading is not a broken file: it is not all there yet.
+		//
+		// A streamed track starts playing while it arrives, as soon as the cache
+		// reports enough. Between that report and this open there are a couple of
+		// thread hops, and now and then the decoder arrives a moment too early: the
+		// FLAC header is not complete and decoder_open() refuses.
+		//
+		// So it waits: while the file grows, bytes are arriving and retrying is
+		// worthwhile. The wait gives up on any command (another track, a stop, a
+		// pause), so it blocks nothing.
+		for (int wait = 0; !dec && growfile_is_growing(filepath) && wait < DECODER_GROW_RETRIES; wait++) {
+			pthread_mutex_lock(&audio_mutex);
+			bool leave = audio_command != AUDIO_CMD_PLAY || play_request || stop_thread;
+			pthread_mutex_unlock(&audio_mutex);
+			if (leave) {
+				break;
+			}
+			if (wait == 0) {
+				fprintf(stderr, "audio[%ld]: '%s' is still downloading, waiting instead of giving up\n", log_ms(),
+						filepath);
+			}
+			usleep(DECODER_GROW_RETRY_MS * 1000);
+			dec = decoder_open(filepath, format);
+		}
 	}
 
 	if (!dec) {
@@ -3272,7 +3871,10 @@ static void play_decoded_file(const char *filepath, decode_format_t format) {
 	}
 
 	// Headphones have no DSD mode to switch into: DSD goes to them as PCM.
-	bool dsd_as_pcm = decoder_passthrough(dec) && output_is_bluetooth() && decoder_dsd_to_pcm(dec);
+	bool dsd_as_pcm = !from_xfade && decoder_passthrough(dec) && output_is_bluetooth() && decoder_dsd_to_pcm(dec);
+	if (from_xfade && output_is_bluetooth() && decoder_dsd_multiple(dec) > 0 && !decoder_passthrough(dec)) {
+		dsd_as_pcm = true;
+	}
 
 	int channels = decoder_channels(dec);
 	int sample_rate = decoder_sample_rate(dec);
@@ -3281,8 +3883,11 @@ static void play_decoded_file(const char *filepath, decode_format_t format) {
 
 	// New track, clean start: the crossfeed delay line still holds half a
 	// millisecond of the previous one, which would be audible over a quiet
-	// opening.
-	crossfeed_reset();
+	// opening. Keep it continuous when Track B was already playing through the
+	// crossfade overlap.
+	if (!from_xfade) {
+		crossfeed_reset();
+	}
 
 	// DoP: the frames are DSD bits with a marker byte the DAC watches for, not
 	// audio. Nothing in the chain may touch them -- see decoder_passthrough().
@@ -3315,7 +3920,7 @@ static void play_decoded_file(const char *filepath, decode_format_t format) {
 
 	pthread_mutex_lock(&audio_mutex);
 	progress_total_secs = (double)total_frames / sample_rate;
-	progress_current_secs = opening_position();
+	progress_current_secs = from_xfade ? ((double)initial_frames / sample_rate) : opening_position();
 	progress_floor_secs = -1.0;
 	stream_sample_rate = sample_rate;
 	stream_channels = channels;
@@ -3420,9 +4025,13 @@ static void play_decoded_file(const char *filepath, decode_format_t format) {
 	// progress_current_secs negative and also decides whether a track finished
 	// or was cut short (cut_short, below), so the queue would advance on its
 	// own mid-book.
-	int64_t bytes_played = 0;
+	int64_t bytes_played = (int64_t)initial_frames * frame_bytes;
 	bool is_paused = false;
 	bool played_to_the_end = false;
+	bool handed_off_xfade = false;
+	xfade_incoming_t xfade_next;
+	memset(&xfade_next, 0, sizeof(xfade_next));
+	double total_secs = sample_rate > 0 ? (double)total_frames / sample_rate : 0.0;
 	// Lifted once this track's first samples are in the card; see the write loop.
 	bool gap_unmuted = false;
 	int route_check = 0;
@@ -3453,6 +4062,8 @@ static void play_decoded_file(const char *filepath, decode_format_t format) {
 			double target = seek_target_secs;
 			seek_request = false;
 			pthread_mutex_unlock(&audio_mutex);
+
+			xfade_close(&xfade_next);
 
 			uint64_t target_frame = (uint64_t)(target * sample_rate);
 			if (target_frame > total_frames) {
@@ -3566,6 +4177,7 @@ static void play_decoded_file(const char *filepath, decode_format_t format) {
 				// pause_stop_stream() mutes the DAC before the drop; the mute is
 				// lifted by the unpause's first write.
 				gap_unmuted = false;
+				xfade_close(&xfade_next);
 				int64_t rewind_bytes = pause_stop_stream(pcm_handle, frame_bytes) * decim_factor;
 				if (rewind_bytes > 0) {
 					// The frames still queued were never heard: put the decoder
@@ -3734,6 +4346,7 @@ static void play_decoded_file(const char *filepath, decode_format_t format) {
 		// same at normal speed, and deliberately not at any other.
 		uint64_t frames_read;
 		uint64_t input_frames;
+		double pos_now = (double)bytes_played / bytes_per_sec;
 		health_mark(&health);
 		if (out_bits == 32) {
 			frames_read = decoder_read_pcm_frames_s32(dec, chunk_frames, (int32_t *)buffer);
@@ -3752,7 +4365,9 @@ static void play_decoded_file(const char *filepath, decode_format_t format) {
 				// ReplayGain first: it is a correction to the source level, so
 				// everything after it works on the level the listener will
 				// actually hear.
-				replaygain_process_s32((int32_t *)buffer, (int)frames_read, channels);
+				apply_track_replaygain_s32((int32_t *)buffer, (int)frames_read, channels, carried_rg_q15, from_xfade);
+				xfade_step_mix(&xfade_next, buffer, (int)frames_read, out_rate, channels, 32,
+							   pos_now, total_secs, passthrough, 1.0);
 				eq_process_s32((int32_t *)buffer, (int)frames_read, channels, out_rate);
 				soundfield_process_s32((int32_t *)buffer, (int)frames_read, channels);
 				// Crossfeed after soundfield and before balance: one widens the
@@ -3777,7 +4392,9 @@ static void play_decoded_file(const char *filepath, decode_format_t format) {
 			}
 			health_lap(&health, STAGE_READ);
 			if (frames_read != 0) {
-				replaygain_process((short *)buffer, (int)frames_read, channels);
+				apply_track_replaygain_s16((short *)buffer, (int)frames_read, channels, carried_rg_q15, from_xfade);
+				xfade_step_mix(&xfade_next, buffer, (int)frames_read, sample_rate, channels, 16,
+							   pos_now, total_secs, false, want_speed);
 				// The graphic EQ, in place on the decoded block. A no-op when off.
 				eq_process((short *)buffer, (int)frames_read, channels, sample_rate);
 				// ...then the stereo width, at the end of the chain.
@@ -3872,6 +4489,17 @@ static void play_decoded_file(const char *filepath, decode_format_t format) {
 
 			pthread_mutex_lock(&audio_mutex);
 			bool natural_end = audio_command != AUDIO_CMD_STOP && !play_request && !cut_short;
+			pthread_mutex_unlock(&audio_mutex);
+
+			if (natural_end && xfade_commit_handoff(&xfade_next)) {
+				played_to_the_end = true;
+				handed_off_xfade = true;
+				break;
+			}
+			xfade_close(&xfade_next);
+
+			pthread_mutex_lock(&audio_mutex);
+			natural_end = audio_command != AUDIO_CMD_STOP && !play_request && !cut_short;
 			// A replacement can interrupt a RAM read with zero frames. Preserve
 			// its PLAY command/status; only the outgoing track has ended.
 			if (!play_request) {
@@ -3893,8 +4521,10 @@ static void play_decoded_file(const char *filepath, decode_format_t format) {
 		}
 
 		// The fade is a gain, so it is one more thing a DoP stream cannot have.
-		if (fade_enabled && !passthrough) {
-			int gain = fade_gain_q10((double)bytes_played / bytes_per_sec, (double)total_frames / sample_rate);
+		// When Track B entered through crossfade, its opening was already faded
+		// in during the overlap, so skip the sequential fade-in ramp.
+		if (sequential_fade_active() && !passthrough && !from_xfade) {
+			int gain = fade_gain_q10((double)bytes_played / bytes_per_sec, total_secs);
 			int samples = (int)frames_read * channels;
 			if (out_bits == 32) {
 				fade_apply_s32((int32_t *)buffer, samples, gain);
@@ -3964,19 +4594,22 @@ static void play_decoded_file(const char *filepath, decode_format_t format) {
 		pthread_mutex_unlock(&audio_mutex);
 	}
 
+	xfade_close(&xfade_next);
+
 	pthread_mutex_lock(&audio_mutex);
-	mark_stopped_unless_replaced();
+	if (!handed_off_xfade) {
+		mark_stopped_unless_replaced();
+	}
 	// A request waiting here means the user moved on (see the skip hold below).
 	bool replacing = play_request;
 	pthread_mutex_unlock(&audio_mutex);
 
-	// The track ended on its own, gapless is on and nothing special happened:
-	// the PCM stays open with its queue inside and the next track appends to
-	// it. See the comment above gapless_release() for the conditions and the
-	// reason behind each.
+	// The track ended on its own, gapless is on (or crossfade handed off into
+	// the incoming track) and nothing special happened: the PCM stays open with
+	// its queue inside and the next track appends to it.
 	//
 	// Over Bluetooth only while the handle is live: see bt_hold_usable().
-	bool keep_open = pcm_handle && gapless_enabled && played_to_the_end && !is_paused && !passthrough &&
+	bool keep_open = pcm_handle && (gapless_enabled || handed_off_xfade) && played_to_the_end && !is_paused && !passthrough &&
 					 (!pcm_is_bluetooth(pcm_handle) || bt_hold_usable(pcm_handle));
 	if (keep_open) {
 		gapless_hold(pcm_handle, channels, out_rate, out_bits, period_size);
@@ -4173,14 +4806,30 @@ static void *playback_thread_func(void *arg) {
 
 		char filepath[512];
 		strncpy(filepath, current_filepath, sizeof(filepath));
+		filepath[sizeof(filepath) - 1] = '\0';
 		play_request = false;
 		play_request_ms = 0;
 		track_starting = true;
 		playback_context_active = true;
 		pthread_mutex_unlock(&audio_mutex);
 
-		play_file(filepath);
-		track_started(); // a track that never reached its open
+		for (;;) {
+			play_file(filepath);
+			track_started(); // a track that never reached its open
+
+			if (!xfade_carry.open) {
+				break;
+			}
+			pthread_mutex_lock(&audio_mutex);
+			bool interrupted = stop_thread || play_request || audio_command == AUDIO_CMD_STOP;
+			pthread_mutex_unlock(&audio_mutex);
+			if (interrupted) {
+				xfade_close(&xfade_carry);
+				break;
+			}
+			snprintf(filepath, sizeof(filepath), "%s", xfade_carry.path);
+			track_starting = true;
+		}
 
 		pthread_mutex_lock(&audio_mutex);
 		playback_context_active = false;
@@ -4290,6 +4939,10 @@ int audio_play(const char *filepath) {
 	stream_lossy = false;
 	stream_codec[0] = '\0';
 	track_completed = false; // fresh playback; any prior completion is consumed
+	staged_xfade_path[0] = '\0';
+	staged_xfade_rg_q15 = 32768;
+	xfade_handoff_pending = false;
+	xfade_handoff_path[0] = '\0';
 	pthread_cond_signal(&audio_cond);
 	pthread_mutex_unlock(&audio_mutex);
 	return 0;
@@ -4326,6 +4979,10 @@ int audio_play_at(const char *filepath, double start_secs) {
 	ab_loop_a_secs = -1.0;
 	ab_loop_b_secs = -1.0;
 	ab_loop_armed = false;
+	staged_xfade_path[0] = '\0';
+	staged_xfade_rg_q15 = 32768;
+	xfade_handoff_pending = false;
+	xfade_handoff_path[0] = '\0';
 	pthread_mutex_unlock(&audio_mutex);
 
 	pthread_cond_signal(&audio_cond);
@@ -4355,6 +5012,10 @@ int audio_play_paused(const char *filepath, double start_secs) {
 	ab_loop_a_secs = -1.0;
 	ab_loop_b_secs = -1.0;
 	ab_loop_armed = false;
+	staged_xfade_path[0] = '\0';
+	staged_xfade_rg_q15 = 32768;
+	xfade_handoff_pending = false;
+	xfade_handoff_path[0] = '\0';
 	pthread_mutex_unlock(&audio_mutex);
 
 	pthread_cond_signal(&audio_cond);
@@ -4450,6 +5111,10 @@ bool audio_suspend_freeze(int timeout_ms) {
 	seek_request = false;
 	seek_target_secs = -1.0;
 	track_completed = false;
+	staged_xfade_path[0] = '\0';
+	staged_xfade_rg_q15 = 32768;
+	xfade_handoff_pending = false;
+	xfade_handoff_path[0] = '\0';
 	hold_flush_request = true;
 	pthread_cond_broadcast(&audio_cond);
 	pthread_mutex_unlock(&audio_mutex);
@@ -4562,6 +5227,10 @@ void audio_stop(void) {
 	seek_request = false;
 	seek_target_secs = -1.0;
 	track_completed = false; // deliberate stop is not a natural completion
+	staged_xfade_path[0] = '\0';
+	staged_xfade_rg_q15 = 32768;
+	xfade_handoff_pending = false;
+	xfade_handoff_path[0] = '\0';
 	pthread_cond_broadcast(&audio_cond);
 	pthread_mutex_unlock(&audio_mutex);
 	subsonicstream_cancel();

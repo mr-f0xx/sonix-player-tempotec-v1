@@ -169,6 +169,17 @@ void device_state_set_folder_chaining(bool on);
 bool device_state_next(char *out_path, size_t out_size);
 bool device_state_prev(char *out_path, size_t out_size);
 
+// Syncs crossfade's staged next track with the current queue/repeat/chaining
+// state. Safe to call on every UI poll and after queue/mode edits; clears any
+// staged path when crossfade is off or when no automatic next track is ready.
+void device_state_sync_crossfade(void);
+void device_state_invalidate_crossfade(void);
+
+// Commits queue/metadata/play-count state if the playback thread just completed
+// a seamless crossfade handoff into the next track. Returns true when a handoff
+// occurred so the UI can refresh Now Playing.
+bool device_state_take_crossfade_handoff(void);
+
 // Returns true exactly once after the current track finished playing on its
 // own (not from a user stop), so the caller can auto-advance the queue.
 bool device_state_take_completion(void);

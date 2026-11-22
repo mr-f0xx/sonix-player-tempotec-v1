@@ -324,11 +324,18 @@ static void refresh_mseb_sliders(void) {
 static lv_obj_t *fade_screen;
 static lv_obj_t *fade_switch;
 static lv_obj_t *fade_card, *fade_value, *fade_slider;
+static lv_obj_t *fade_mode_card, *fade_mode_pills;
+static lv_obj_t *fade_mode_crossfade_pill, *fade_mode_sequential_pill;
+static lv_obj_t *fade_seq_note, *fade_xfade_note;
 
 // One second per step, one to ten.
 #define FADE_MIN_SECONDS 1
 #define FADE_MAX_SECONDS 10
 #define FADE_STEPS (FADE_MAX_SECONDS - FADE_MIN_SECONDS + 1)
+
+bool musicsettings_crossfade_mode(void) {
+	return (int)config_get_int("audio", "fade_mode", (int)AUDIO_FADE_CROSSFADE) == (int)AUDIO_FADE_CROSSFADE;
+}
 
 static int fade_seconds_setting(void) {
 	int v = (int)config_get_int("audio", "fade_seconds", 3);
@@ -342,19 +349,50 @@ static int fade_seconds_setting(void) {
 }
 
 static void fade_apply_setting(void) {
+	bool xfade = musicsettings_crossfade_mode();
+	audio_set_fade_mode(xfade ? AUDIO_FADE_CROSSFADE : AUDIO_FADE_OUT_IN);
 	audio_set_fade(config_get_bool("audio", "fade", false), fade_seconds_setting());
+	device_state_sync_crossfade();
 }
 
 static void fade_refresh_labels(void) {
+	if (!fade_switch) {
+		return;
+	}
 	lv_label_set_text_fmt(fade_value, "%d s", fade_seconds_setting());
 	bool on = config_get_bool("audio", "fade", false);
+	bool xfade = musicsettings_crossfade_mode();
 	if (on) {
 		lv_obj_add_state(fade_switch, LV_STATE_CHECKED);
 	} else {
 		lv_obj_remove_state(fade_switch, LV_STATE_CHECKED);
 	}
 	settingsrow_toggle_slider_expanded(fade_card, on);
+	if (fade_mode_card) {
+		lv_obj_set_hidden(fade_mode_card, !on);
+	}
+	if (fade_mode_crossfade_pill) {
+		settingsrow_pill_active(fade_mode_crossfade_pill, xfade);
+	}
+	if (fade_mode_sequential_pill) {
+		settingsrow_pill_active(fade_mode_sequential_pill, !xfade);
+	}
+	if (fade_xfade_note) {
+		lv_obj_set_hidden(fade_xfade_note, !xfade);
+	}
+	if (fade_seq_note) {
+		lv_obj_set_hidden(fade_seq_note, xfade);
+	}
 }
+
+void musicsettings_set_crossfade_mode(bool crossfade) {
+	config_set_int("audio", "fade_mode", crossfade ? (int)AUDIO_FADE_CROSSFADE : (int)AUDIO_FADE_OUT_IN);
+	config_save();
+	fade_apply_setting();
+	fade_refresh_labels();
+}
+
+static void refresh_active_chevrons(void);
 
 static void fade_toggle_cb(lv_event_t *e) {
 	(void)e;
@@ -362,6 +400,15 @@ static void fade_toggle_cb(lv_event_t *e) {
 	config_save();
 	fade_apply_setting();
 	fade_refresh_labels();
+	refresh_active_chevrons();
+}
+
+static void fade_mode_pick_cb(lv_event_t *e) {
+	if (player_sheet_drag_active() || switcher_back_drag_active()) {
+		return;
+	}
+	int mode = (int)(intptr_t)lv_event_get_user_data(e);
+	musicsettings_set_crossfade_mode(mode == (int)AUDIO_FADE_CROSSFADE);
 }
 
 static void fade_slider_cb(lv_event_t *e) {
@@ -375,18 +422,30 @@ static void fade_slider_cb(lv_event_t *e) {
 
 static void build_fade_page(gui_config_t *cfg) {
 	fade_screen = lv_obj_create(NULL);
-	lv_obj_t *container = settingsrow_page(fade_screen, cfg, "fade");
+	lv_obj_t *container = settingsrow_page(fade_screen, cfg, "musicsettings_fade_crossfade");
+	settingsrow_title_corner_slots(settingsrow_page_title(fade_screen), cfg, 0);
 
 	fade_card = settingsrow_toggle_slider(container, "fade", FADE_STEPS, &fade_switch, &fade_value,
 										  &fade_slider, fade_toggle_cb, fade_slider_cb);
 	lv_slider_set_value(fade_slider, fade_seconds_setting() - FADE_MIN_SECONDS, LV_ANIM_OFF);
 
-	lv_obj_t *note = lv_label_create(container);
-	lv_label_set_long_mode(note, LV_LABEL_LONG_WRAP);
-	lv_obj_set_width(note, lv_pct(100));
-	lv_obj_add_style(note, &theme_style_text_dim, 0);
-	lv_obj_set_style_text_font(note, &font_ui_22, 0);
-	lv_label_set_text(note, tr("musicsettings_fade_note"));
+	fade_mode_card = settingsrow_pills(container, "fade_mode", &fade_mode_pills);
+	fade_mode_crossfade_pill = settingsrow_pill(fade_mode_pills, "crossfade", AUDIO_FADE_CROSSFADE, fade_mode_pick_cb);
+	fade_mode_sequential_pill = settingsrow_pill(fade_mode_pills, "fade_sequential", AUDIO_FADE_OUT_IN, fade_mode_pick_cb);
+
+	fade_xfade_note = lv_label_create(container);
+	lv_label_set_long_mode(fade_xfade_note, LV_LABEL_LONG_WRAP);
+	lv_obj_set_width(fade_xfade_note, lv_pct(100));
+	lv_obj_add_style(fade_xfade_note, &theme_style_text_dim, 0);
+	lv_obj_set_style_text_font(fade_xfade_note, &font_ui_22, 0);
+	lv_label_set_text(fade_xfade_note, tr("musicsettings_crossfade_note"));
+
+	fade_seq_note = lv_label_create(container);
+	lv_label_set_long_mode(fade_seq_note, LV_LABEL_LONG_WRAP);
+	lv_obj_set_width(fade_seq_note, lv_pct(100));
+	lv_obj_add_style(fade_seq_note, &theme_style_text_dim, 0);
+	lv_obj_set_style_text_font(fade_seq_note, &font_ui_22, 0);
+	lv_label_set_text(fade_seq_note, tr("musicsettings_fade_note"));
 
 	fade_refresh_labels();
 	switcher_attach_back_gesture(fade_screen);
@@ -784,6 +843,8 @@ static void rg_apply_to_loaded_track(void) {
 	device_state_t state;
 	device_state_get(&state);
 	replaygain_load(&state.metadata);
+	device_state_invalidate_crossfade();
+	device_state_sync_crossfade();
 }
 
 static void rg_toggle_cb(lv_event_t *e) {
@@ -2842,7 +2903,7 @@ static void build_playback_page(gui_config_t *cfg) {
 	// The fade at the two ends of a track: a page of its own because it carries
 	// a length as well as a switch.
 	build_fade_page(cfg);
-	fade_row = settingsrow_add(container, "fade", NULL, switch_screen_cb, fade_screen);
+	fade_row = settingsrow_add(container, "musicsettings_fade_crossfade", NULL, switch_screen_cb, fade_screen);
 
 	// Both channels as one, for a single earbud or one ear.
 	if (addons_enabled("mono")) {
@@ -3037,6 +3098,7 @@ void musicsettings_init(gui_config_t *cfg) {
 	}
 
 	theme_register_refresh(rg_refresh);
+	theme_register_refresh(fade_refresh_labels);
 	theme_register_refresh(dsd_gain_refresh);
 	lv_obj_add_event_cb(musicsettings_screen, musicsettings_loaded_cb, LV_EVENT_SCREEN_LOADED, NULL);
 
