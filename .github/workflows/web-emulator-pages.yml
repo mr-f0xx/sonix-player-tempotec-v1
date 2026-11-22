@@ -283,11 +283,16 @@ jobs:
         run: |
           cargo generate-lockfile
           {
-            echo "### spotifyd Cargo.lock"
+            echo "### spotifyd: the versions that matter"
             echo '```'
-            grep -A2 -E '^name = "(vergen|vergen-lib|vergen-gitcl)"' Cargo.lock || true
+            grep -A1 -E '^name = "(vergen|vergen-lib|vergen-gitcl|librespot-core)"' Cargo.lock || true
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
+          # The annotation is fetchable from environments where the artifact is
+          # not, so the answer to "which vergen did it pick" goes there too.
+          vers="$(grep -A1 -E '^name = "(vergen|vergen-lib|vergen-gitcl)"' Cargo.lock \
+                  | grep -E '^(name|version)' | tr '\n' ' ' || true)"
+          echo "::notice title=spotifyd lock::${vers}"
 
       - name: Build
         run: |
