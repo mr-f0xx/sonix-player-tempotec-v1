@@ -4000,12 +4000,17 @@ static void build_search_page(gui_config_t *cfg) {
 // ---------------------------------------------------------------------------
 
 static lv_obj_t *login_hint;
-// The login QR. 200 px on a 480 px screen: large enough for a camera to read
-// it from half a metre, small enough to leave room for the written code below.
-#define LOGIN_QR_SIZE 200
+// The login QR. Sized to the panel, not to a phantom 480-px screen: 200 px on
+// the large display, where there is room for it, and a smaller target on the
+// 240-px TempoTec V1. A 200-px code with its quiet zone alone fills the V1's
+// 320-px height and runs straight into the code label, the spinner and the
+// privacy note below it.
+#define LOGIN_QR_SIZE_LARGE 200
+#define LOGIN_QR_SIZE_V1 64
 // The quiet zone, the white border around it. The standard asks for four
 // modules; here it is a fixed border, which works better at this size.
-#define LOGIN_QR_QUIET 10
+#define LOGIN_QR_QUIET_LARGE 10
+#define LOGIN_QR_QUIET_V1 5
 
 static lv_obj_t *login_qr;
 static lv_obj_t *login_url;
@@ -4203,16 +4208,24 @@ static void build_login_page(gui_config_t *cfg) {
 	settingsrow_title(login_screen, cfg, "tidal_sign_in_to_tidal");
 	int top = settingsrow_content_top(cfg);
 
+	// The QR is sized to the panel: the V1's 240x320 leaves room for a
+	// 64-px code with its quiet zone, the written code and the spinner below
+	// it, and the privacy note at the foot of the page -- all of which a
+	// 200-px code (sized for a 480-px screen) would run into.
+	bool compact = cfg->screen_width < 320;
+	int qr_size = compact ? LOGIN_QR_SIZE_V1 : LOGIN_QR_SIZE_LARGE;
+	int qr_quiet = compact ? LOGIN_QR_QUIET_V1 : LOGIN_QR_QUIET_LARGE;
+
 	// A single centred column: there is nothing to touch here except the retry
 	// button, and everything on it has to be readable from a distance with a
-	// phone in hand.
+	// phone in hand. The row gap is tight so the stack fits the small panel.
 	lv_obj_t *box = lv_obj_create(login_screen);
 	lv_obj_set_size(box, cfg->screen_width - 2 * cfg->padding, LV_SIZE_CONTENT);
-	lv_obj_align(box, LV_ALIGN_TOP_MID, 0, top + 20);
+	lv_obj_align(box, LV_ALIGN_TOP_MID, 0, top);
 	lv_obj_set_style_bg_opa(box, 0, 0);
 	lv_obj_set_style_border_width(box, 0, 0);
 	lv_obj_set_style_pad_all(box, 0, 0);
-	lv_obj_set_style_pad_row(box, 22, 0);
+	lv_obj_set_style_pad_row(box, compact ? 6 : 22, 0);
 	lv_obj_set_scrollable(box, false);
 	lv_obj_set_flex_flow(box, LV_FLEX_FLOW_COLUMN);
 	lv_obj_set_flex_align(box, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
@@ -4222,7 +4235,7 @@ static void build_login_page(gui_config_t *cfg) {
 	lv_obj_set_width(login_hint, lv_pct(100));
 	lv_obj_set_style_text_align(login_hint, LV_TEXT_ALIGN_CENTER, 0);
 	lv_obj_add_style(login_hint, &theme_style_text, 0);
-	lv_obj_set_style_text_font(login_hint, &font_ui_20, 0);
+	lv_obj_set_style_text_font(login_hint, compact ? &font_ui_14 : &font_ui_20, 0);
 	lv_label_set_text(login_hint, "");
 
 	// The QR, which is the URL. It encodes verificationUriComplete, the one
@@ -4235,11 +4248,11 @@ static void build_login_page(gui_config_t *cfg) {
 	// zone is part of the standard, and without it many readers will not lock
 	// onto the code.
 	login_qr = lv_qrcode_create(box);
-	lv_qrcode_set_size(login_qr, LOGIN_QR_SIZE);
+	lv_qrcode_set_size(login_qr, qr_size);
 	lv_qrcode_set_dark_color(login_qr, lv_color_black());
 	lv_qrcode_set_light_color(login_qr, lv_color_white());
 	lv_obj_set_style_border_color(login_qr, lv_color_white(), 0);
-	lv_obj_set_style_border_width(login_qr, LOGIN_QR_QUIET, 0);
+	lv_obj_set_style_border_width(login_qr, qr_quiet, 0);
 	lv_obj_set_style_bg_color(login_qr, lv_color_white(), 0);
 	lv_obj_set_style_bg_opa(login_qr, LV_OPA_COVER, 0);
 
@@ -4250,7 +4263,7 @@ static void build_login_page(gui_config_t *cfg) {
 	lv_label_set_long_mode(login_url, LV_LABEL_LONG_WRAP);
 	lv_obj_set_width(login_url, lv_pct(100));
 	lv_obj_set_style_text_align(login_url, LV_TEXT_ALIGN_CENTER, 0);
-	lv_obj_set_style_text_font(login_url, &font_ui_26, 0);
+	lv_obj_set_style_text_font(login_url, compact ? &font_ui_16 : &font_ui_26, 0);
 	lv_label_set_text(login_url, "");
 
 	// The code below, bold and on one line: the fallback for anyone who cannot
@@ -4260,23 +4273,23 @@ static void build_login_page(gui_config_t *cfg) {
 	// being confused while copying.
 	login_code = lv_label_create(box);
 	lv_label_set_long_mode(login_code, LV_LABEL_LONG_CLIP);
-	lv_obj_set_style_text_font(login_code, &font_ui_36_bold, 0);
-	lv_obj_set_style_text_letter_space(login_code, 5, 0);
+	lv_obj_set_style_text_font(login_code, compact ? &font_ui_24_bold : &font_ui_36_bold, 0);
+	lv_obj_set_style_text_letter_space(login_code, compact ? 3 : 5, 0);
 	lv_label_set_text(login_code, "");
 
-	login_spin = spinner_create(box, &icon_loader_big);
+	login_spin = spinner_create(box, compact ? &icon_loader_small : &icon_loader_big);
 
 	login_message = lv_label_create(box);
 	lv_label_set_long_mode(login_message, LV_LABEL_LONG_WRAP);
 	lv_obj_set_width(login_message, lv_pct(100));
 	lv_obj_set_style_text_align(login_message, LV_TEXT_ALIGN_CENTER, 0);
 	lv_obj_add_style(login_message, &theme_style_text_dim, 0);
-	lv_obj_set_style_text_font(login_message, &font_ui_20, 0);
+	lv_obj_set_style_text_font(login_message, compact ? &font_ui_14 : &font_ui_20, 0);
 	lv_label_set_text(login_message, "");
 
 	login_retry = lv_btn_create(box);
-	lv_obj_set_size(login_retry, LV_SIZE_CONTENT, 56);
-	lv_obj_set_style_pad_hor(login_retry, 22, 0);
+	lv_obj_set_size(login_retry, LV_SIZE_CONTENT, compact ? 44 : 56);
+	lv_obj_set_style_pad_hor(login_retry, compact ? 16 : 22, 0);
 	lv_obj_set_style_radius(login_retry, LV_RADIUS_CIRCLE, 0);
 	lv_obj_set_style_shadow_width(login_retry, 0, 0);
 	lv_obj_set_style_border_width(login_retry, 0, 0);
@@ -4284,7 +4297,7 @@ static void build_login_page(gui_config_t *cfg) {
 
 	lv_obj_t *retry_label = lv_label_create(login_retry);
 	lv_label_set_text(retry_label, tr("tidal_ask_for_a_new_code"));
-	lv_obj_set_style_text_font(retry_label, &font_ui_20, 0);
+	lv_obj_set_style_text_font(retry_label, compact ? &font_ui_14 : &font_ui_20, 0);
 	lv_obj_center(retry_label);
 
 	login_set_visible(login_url, false);
@@ -4296,10 +4309,10 @@ static void build_login_page(gui_config_t *cfg) {
 	lv_obj_t *note = lv_label_create(login_screen);
 	lv_label_set_long_mode(note, LV_LABEL_LONG_WRAP);
 	lv_obj_set_width(note, cfg->screen_width - 2 * cfg->padding);
-	lv_obj_align(note, LV_ALIGN_BOTTOM_MID, 0, -cfg->padding - 10);
+	lv_obj_align(note, LV_ALIGN_BOTTOM_MID, 0, -cfg->padding - (compact ? 4 : 10));
 	lv_obj_set_style_text_align(note, LV_TEXT_ALIGN_CENTER, 0);
 	lv_obj_add_style(note, &theme_style_text_dim, 0);
-	lv_obj_set_style_text_font(note, &font_ui_18, 0);
+	lv_obj_set_style_text_font(note, compact ? &font_ui_14 : &font_ui_18, 0);
 	lv_label_set_text(note, tr("tidal_login_privacy_note"));
 
 	paint_login();
@@ -4482,6 +4495,11 @@ static const int QUALITY_VALUES[4] = {TIDAL_QUALITY_LOW, TIDAL_QUALITY_HIGH, TID
 // distinguishable from "Hi-res", and "AAC 320" alone tells nobody it is lossy.
 static const char *const QUALITY_NAMES[4] = {"tidal_low_aac_96", "tidal_high_aac_320", "tidal_cd_flac_16_44",
 											 "tidal_hi_res_flac_24"};
+
+// The SD cache ceiling presets, the same set SoundCloud and Jellyfin offer.
+// The last is 0: unlimited, held back only by free card space.
+#define TIDAL_CACHE_PRESET_COUNT 6
+static const int TIDAL_CACHE_PRESET_MB[TIDAL_CACHE_PRESET_COUNT] = {512, 1024, 2048, 4096, 8192, 0};
 
 // The two corner buttons: the gear (Tidal settings) and the magnifier. Shown
 // only when signed in, because otherwise there is nothing to configure and
@@ -4796,6 +4814,8 @@ static void build_home_settings_page(gui_config_t *cfg) {
 
 static lv_obj_t *tsettings_screen;
 static lv_obj_t *quality_pills[4];
+static lv_obj_t *cache_limit_pills[TIDAL_CACHE_PRESET_COUNT];
+static lv_obj_t *cache_value;
 
 static void quality_refresh(void) {
 	int current = tidal_get_quality();
@@ -4813,6 +4833,78 @@ static void quality_pick_cb(lv_event_t *e) {
 	}
 	tidal_set_quality((int)(intptr_t)lv_event_get_user_data(e));
 	quality_refresh();
+}
+
+// The SD cache ceiling: the same pill card SoundCloud and Jellyfin use, and a
+// clear-cache row that shows how much of the ceiling the cached tracks take.
+static void cache_limit_refresh(void) {
+	int cur_mb = tidalcache_get_max_mb();
+	for (int i = 0; i < TIDAL_CACHE_PRESET_COUNT; i++) {
+		if (cache_limit_pills[i]) {
+			settingsrow_pill_active(cache_limit_pills[i], TIDAL_CACHE_PRESET_MB[i] == cur_mb);
+		}
+	}
+}
+
+static void cache_label_refresh(void) {
+	if (!cache_value) {
+		return;
+	}
+	long long bytes = tidalcache_bytes();
+	int max_mb = tidalcache_get_max_mb();
+
+	char used_str[32];
+	if (bytes >= 1024LL * 1024LL * 1024LL) {
+		snprintf(used_str, sizeof(used_str), "%.2f GB", (double)bytes / (1024.0 * 1024.0 * 1024.0));
+	} else {
+		snprintf(used_str, sizeof(used_str), "%.1f MB", (double)bytes / (1024.0 * 1024.0));
+	}
+
+	char cap_str[64];
+	if (max_mb <= 0) {
+		snprintf(cap_str, sizeof(cap_str), "%s", tr("tidal_cache_unlimited"));
+	} else if (max_mb >= 1024 && (max_mb % 1024) == 0) {
+		snprintf(cap_str, sizeof(cap_str), "%d GB", max_mb / 1024);
+	} else {
+		snprintf(cap_str, sizeof(cap_str), "%d MB", max_mb);
+	}
+
+	char buf[128];
+	snprintf(buf, sizeof(buf), "%s / %s", used_str, cap_str);
+	lv_label_set_text(cache_value, buf);
+}
+
+static void cache_limit_pill_cb(lv_event_t *e) {
+	if (switcher_back_drag_active()) {
+		return;
+	}
+	int mb = (int)(intptr_t)lv_event_get_user_data(e);
+	tidalcache_set_max_mb(mb);
+	cache_limit_refresh();
+	cache_label_refresh();
+}
+
+static void clear_cache_confirmed(void *user) {
+	(void)user;
+	char active[512];
+	audio_get_current_file(active, sizeof(active));
+	if (tidalcache_owns(active)) {
+		device_state_stop();
+	}
+	tidalcache_clear();
+	cache_label_refresh();
+	toast_success("tidal_cache_cleared");
+}
+
+static void clear_cache_cb(lv_event_t *e) {
+	(void)e;
+	confirm_show("tidal_clear_cache", tr("tidal_clear_cache_note"), "tidal_clear", clear_cache_confirmed, NULL);
+}
+
+static void settings_refresh(void) {
+	quality_refresh();
+	cache_limit_refresh();
+	cache_label_refresh();
 }
 
 static void do_logout(void *user) {
@@ -4851,7 +4943,7 @@ static void logout_cb(lv_event_t *e) {
 
 static void open_settings_cb(lv_event_t *e) {
 	(void)e;
-	quality_refresh();
+	settings_refresh();
 	switch_screen(tsettings_screen);
 }
 
@@ -4872,6 +4964,21 @@ static void build_settings_page(gui_config_t *cfg) {
 		quality_pills[i] = settingsrow_pill(pills, QUALITY_NAMES[i], QUALITY_VALUES[i], quality_pick_cb);
 	}
 
+	// SD cache limit: the same pill card SoundCloud and Jellyfin use. The
+	// ceiling was a fixed 1 GiB before; these pills let it be raised (or set
+	// unlimited) without a rebuild, persisted as [tidal] cache_max_mb.
+	lv_obj_t *cache_pills = NULL;
+	settingsrow_pills(container, "tidal_cache_limit", &cache_pills);
+	cache_limit_pills[0] = settingsrow_pill_text(cache_pills, "512 MB", 512, cache_limit_pill_cb);
+	cache_limit_pills[1] = settingsrow_pill_text(cache_pills, "1 GB", 1024, cache_limit_pill_cb);
+	cache_limit_pills[2] = settingsrow_pill_text(cache_pills, "2 GB", 2048, cache_limit_pill_cb);
+	cache_limit_pills[3] = settingsrow_pill_text(cache_pills, "4 GB", 4096, cache_limit_pill_cb);
+	cache_limit_pills[4] = settingsrow_pill_text(cache_pills, "8 GB", 8192, cache_limit_pill_cb);
+	cache_limit_pills[5] = settingsrow_pill(cache_pills, "tidal_cache_unlimited", 0, cache_limit_pill_cb);
+
+	// The cache's size and ceiling, on the right of the row that empties it.
+	settingsrow_add(container, "tidal_clear_cache", &cache_value, clear_cache_cb, NULL);
+
 	settingsrow_add(container, "tidal_home", NULL, open_home_settings_cb, NULL);
 
 	settingsrow_action(container, "clear_search_history", clear_search_history_cb, NULL);
@@ -4880,8 +4987,8 @@ static void build_settings_page(gui_config_t *cfg) {
 	// account out. The confirmation follows the same word.
 	settingsrow_action(container, "sign_out_of_tidal", logout_cb, NULL);
 
-	quality_refresh();
-	theme_register_refresh(quality_refresh);
+	settings_refresh();
+	theme_register_refresh(settings_refresh);
 	switcher_attach_back_gesture(tsettings_screen);
 }
 
