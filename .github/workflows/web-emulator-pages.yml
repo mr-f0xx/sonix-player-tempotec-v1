@@ -279,10 +279,13 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
           cat "$RUNNER_TEMP/build.log"
           if ! grep -q "Finished" "$RUNNER_TEMP/build.log"; then
-            first="$(grep -m1 -E "^error(\[[0-9]+\])?:" "$RUNNER_TEMP/build.log" || true)"
-            [ -z "$first" ] && first="$(grep -m1 -E "^error" "$RUNNER_TEMP/build.log" || true)"
-            [ -z "$first" ] && first="$(tail -n 4 "$RUNNER_TEMP/build.log" | tr '\n' ' ')"
-            echo "::error title=spotifyd does not build::${first}"
+            # The whole E0277 block, not just its first line: the trait and the
+            # type that failed the bound are on the lines after it, and those
+            # are what say whether this is fixable by pinning something.
+            detail="$(grep -m1 -A8 -E "^error(\[[0-9]+\])?:" "$RUNNER_TEMP/build.log" \
+                      | tr '\n' '|' | tr -d '\033' | sed 's/\[[0-9;]*m//g' || true)"
+            [ -z "$detail" ] && detail="$(tail -n 4 "$RUNNER_TEMP/build.log" | tr '\n' '|')"
+            echo "::error title=spotifyd does not build::${detail}"
             exit 1
           fi
 
