@@ -249,7 +249,17 @@ jobs:
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
           cat "$RUNNER_TEMP/test.log"
-          grep -q "test result: ok" "$RUNNER_TEMP/test.log"
+          # A failure has to be readable from outside the run. The job log
+          # endpoint has been returning EOF, and an artifact needs a download
+          # that fails the same way -- but an annotation is one API call away,
+          # so the first thing cargo complained about goes in one.
+          if ! grep -q "test result: ok" "$RUNNER_TEMP/test.log"; then
+            first="$(grep -m1 -E '^(error|warning: unused)' "$RUNNER_TEMP/test.log" || true)"
+            [ -z "$first" ] && first="$(grep -m1 -E 'panicked|assertion|FAILED' "$RUNNER_TEMP/test.log" || true)"
+            [ -z "$first" ] && first="$(tail -n 3 "$RUNNER_TEMP/test.log" | tr '\n' ' ')"
+            echo "::error title=spotifyd protocol tests::${first}"
+            exit 1
+          fi
 
       - name: Build
         run: |
