@@ -51,6 +51,7 @@ bool switcher_back_drag_active(void) { return back_drag; }
 bool player_sheet_drag_active(void) { return false; }
 void switch_screen(lv_obj_t *screen) { lv_screen_load(screen); }
 void switcher_attach_back_gesture(lv_obj_t *screen) { (void)screen; }
+void switcher_mark_fresh_start(lv_obj_t *screen) { (void)screen; }
 void back_btn_cb(lv_event_t *e) { (void)e; }
 static lv_obj_t *chevron_hidden_on;
 void back_btn_hide_on_screen(lv_obj_t *screen, bool hidden) {

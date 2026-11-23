@@ -220,10 +220,14 @@ int settingsrow_content_top(gui_config_t *cfg) {
 	return cfg->top_bar_height + cfg->padding + settingsrow_corner_button_size(cfg) + cfg->padding;
 }
 
-// Pages built by settingsrow_page() stay alive while another screen is shown.
-// Leave their scroll offset alone on unload so backing out of a setting or
-// submenu returns to the exact row the user left. A page that replaces its
-// contents while away must preserve and restore its own offset around rebuilds.
+// Pages built by settingsrow_page() stay alive while another screen is shown,
+// and their scroll offset is left alone on unload, so backing out of a setting
+// or a submenu returns to the exact row the user left. Entering the page
+// afresh from its parent is different: the list is marked with
+// switcher_mark_fresh_start(), and switch_screen() scrolls it to the top on a
+// forward step, so a page never opens wherever it was left the time before
+// (issue #398). A page that replaces its contents while away must preserve
+// and restore its own offset around rebuilds.
 lv_obj_t *settingsrow_page(lv_obj_t *screen, gui_config_t *cfg, const char *title) {
 	lv_obj_add_style(screen, &theme_style_screen, 0);
 
@@ -244,6 +248,7 @@ lv_obj_t *settingsrow_page(lv_obj_t *screen, gui_config_t *cfg, const char *titl
 	lv_obj_set_flex_flow(container, LV_FLEX_FLOW_COLUMN);
 	lv_obj_set_flex_align(container, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 	lv_obj_set_style_pad_gap(container, compact_rows() ? 4 : ROW_GAP, 0);
+	switcher_mark_fresh_start(container);
 
 	// Settings pages do not pull the player sheet in: a stray horizontal drag
 	// would drag it over the option being adjusted. The swipe-back gesture must

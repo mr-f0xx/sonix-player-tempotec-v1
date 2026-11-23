@@ -274,6 +274,7 @@ void toast_plain_text(const char *text) {}
 void toast_success_text(const char *text) {}
 void toast_error_text(const char *text) {}
 void switcher_attach_back_gesture(lv_obj_t *screen) {}
+void switcher_mark_fresh_start(lv_obj_t *screen) {}
 bool switcher_back_drag_active(void) { return false; }
 void switcher_set_back_guard_peek(lv_obj_t *screen, bool (*peek)(void)) {}
 bool coverflow_drag_active(void) { return false; }

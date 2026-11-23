@@ -150,6 +150,7 @@ void switcher_set_back_guard_peek(lv_obj_t *screen, bool (*peek)(void)) {
 }
 
 void switcher_attach_back_gesture(lv_obj_t *screen) { (void)screen; }
+void switcher_mark_fresh_start(lv_obj_t *screen) { (void)screen; }
 bool switcher_back_drag_active(void) { return false; }
 
 static int busy_toasts;

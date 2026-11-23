@@ -5,6 +5,21 @@
 #include "src/gui/shell/gui.h"
 
 void switch_screen(lv_obj_t *target_screen);
+
+// Marks a scrollable page body that reopens at the top whenever its page is
+// entered afresh -- from a parent menu, a row, a corner button -- and keeps
+// its offset when the page is returned to by the chevron or the swipe-back
+// (issue #398). switch_screen() tells the two apart: a forward step pushes
+// the page being left onto the history, a step back pops it. On a forward
+// step every body on the target screen marked this way is scrolled to the
+// top before the screen's own load callbacks run, so a page that scrolls to
+// its selected row on LV_EVENT_SCREEN_LOADED still wins.
+//
+// settingsrow_page() marks the list it builds; a page with a body of its own
+// marks it itself. The mark is LVGL user flag 0 on the body.
+void switcher_mark_fresh_start(lv_obj_t *body);
+bool switcher_is_fresh_start(lv_obj_t *body);
+
 void screen_history_reset(void); // forget the back-stack (back goes to the menu)
 void switch_screen_no_history(lv_obj_t *target_screen); // load without recording
 void switch_screen_return_to(lv_obj_t *target_screen); // discard newer history and load

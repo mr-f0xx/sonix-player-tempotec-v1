@@ -24,6 +24,7 @@ void fonts_register_change(void (*cb)(void)) { (void)cb; }
 void bootlogo_set(int choice, bool dark) { (void)choice; (void)dark; }
 bool bootpic_present(void) { return false; }
 void switcher_attach_back_gesture(lv_obj_t *obj) { (void)obj; }
+void switcher_mark_fresh_start(lv_obj_t *obj) { (void)obj; }
 bool switcher_back_drag_active(void) { return false; }
 bool player_sheet_drag_active(void) { return false; }
 void player_sheet_attach_drag(lv_obj_t *obj, bool opening) { assert(obj && opening); }

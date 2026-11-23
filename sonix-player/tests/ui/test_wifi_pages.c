@@ -112,6 +112,7 @@ bool clock_automatic_enabled(void) { return true; }
 void clock_set_automatic(bool on) { (void)on; }
 void timeset_show(void) {}
 void switcher_attach_back_gesture(lv_obj_t *obj) { (void)obj; }
+void switcher_mark_fresh_start(lv_obj_t *obj) { (void)obj; }
 bool switcher_back_drag_active(void) { return false; }
 void player_sheet_attach_drag(lv_obj_t *obj, bool opening) {
 	(void)obj;
