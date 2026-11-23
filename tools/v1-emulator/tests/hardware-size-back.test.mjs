@@ -214,7 +214,7 @@ test("an unidentifiable display says the size is approximate instead of claiming
 	assert.match(out.source, /96 dpi/);
 });
 
-test("the front chin spans the glass, with the LED and V1 mark in their corners", async (t) => {
+test("the front chin spans the glass, with the LED and V1 mark placed as on the banner", async (t) => {
 	const page = await open(t, { width: 1600, height: 1100 });
 	await page.click('[data-scale="2"]');
 	await page.waitForTimeout(250);
@@ -233,6 +233,7 @@ test("the front chin spans the glass, with the LED and V1 mark in their corners"
 			inkW: inkR - inkL, inkH: inkB - inkT,
 			inkRightGap: chin.right - inkR, inkBottomGap: chin.bottom - inkB,
 			ledLeft: core.left - chin.left,
+			ledW: core.width, ledH: core.height,
 			ledCentreUp: chin.bottom - (core.top + core.height / 2),
 		};
 	});
@@ -242,15 +243,18 @@ test("the front chin spans the glass, with the LED and V1 mark in their corners"
 		Math.abs(out.chinW - out.glassW) < 1.5,
 		`the chin spans the full glass: ${out.chinW.toFixed(1)} vs ${out.glassW.toFixed(1)} px`,
 	);
-	// Placement on the real chin, as fractions of the chin box. Measured from a
-	// product photo of the actual V1: mark 16.5% W / 7.9% H with a 15.3% right
-	// gap and 14.5% bottom gap; LED 11.5% in from the left, 13.2% up.
+	// Placement taken from the Sonix Player 1.7.1.1 banner, as fractions of the
+	// glass panel: the V1 ink is 17.8% of the width, ends 11.7% in from the right
+	// and sits 13.7% up; the LED starts 10.1% in from the left and its lower end
+	// is 13.3% above the bottom. Both share one centre line.
 	const pct = (v, ref) => (v / ref) * 100;
-	assert.ok(Math.abs(pct(out.inkW, out.chinW) - 16.5) < 2.5, `V1 mark is ~16.5% of the chin width, got ${pct(out.inkW, out.chinW).toFixed(1)}%`);
-	assert.ok(Math.abs(pct(out.inkRightGap, out.chinW) - 15.3) < 2.5, `V1 sits ~15.3% in from the right, got ${pct(out.inkRightGap, out.chinW).toFixed(1)}%`);
-	assert.ok(Math.abs(pct(out.inkBottomGap, out.chinH) - 14.5) < 2.5, `V1 sits ~14.5% up from the bottom, got ${pct(out.inkBottomGap, out.chinH).toFixed(1)}%`);
-	assert.ok(Math.abs(pct(out.ledLeft, out.chinW) - 11.5) < 2.5, `LED is ~11.5% in from the left, got ${pct(out.ledLeft, out.chinW).toFixed(1)}%`);
-	assert.ok(Math.abs(pct(out.ledCentreUp, out.chinH) - 13.2) < 2.5, `LED centre is ~13.2% up from the bottom, got ${pct(out.ledCentreUp, out.chinH).toFixed(1)}%`);
+	assert.ok(Math.abs(pct(out.inkW, out.chinW) - 17.8) < 2.5, `V1 mark is ~17.8% of the chin width, got ${pct(out.inkW, out.chinW).toFixed(1)}%`);
+	assert.ok(Math.abs(pct(out.inkRightGap, out.chinW) - 11.7) < 2.5, `V1 sits ~11.7% in from the right, got ${pct(out.inkRightGap, out.chinW).toFixed(1)}%`);
+	assert.ok(Math.abs(pct(out.inkBottomGap, out.chinH) - 13.7) < 2.5, `V1 sits ~13.7% up from the bottom, got ${pct(out.inkBottomGap, out.chinH).toFixed(1)}%`);
+	assert.ok(Math.abs(pct(out.ledLeft, out.chinW) - 10.1) < 2.5, `LED is ~10.1% in from the left, got ${pct(out.ledLeft, out.chinW).toFixed(1)}%`);
+	// The banner's pill is a tall capsule: 2.3% of the width by 11.5% of the chin
+	assert.ok(Math.abs(pct(out.ledW, out.chinW) - 2.3) < 1.2, `LED is ~2.3% of the chin wide, got ${pct(out.ledW, out.chinW).toFixed(1)}%`);
+	assert.ok(Math.abs(pct(out.ledH, out.chinH) - 11.5) < 2.5, `LED is ~11.5% of the chin tall, got ${pct(out.ledH, out.chinH).toFixed(1)}%`);
 	// Both sit on the same side of the chin only if the corners are respected:
 	// the mark must stay well right of centre and the LED well left of it.
 	assert.ok(out.ledLeft < out.chinW * 0.2, "the LED stays in the left corner");
