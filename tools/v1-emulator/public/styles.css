@@ -788,17 +788,31 @@ html[data-scale="1.5"] #v1-canvas {
    i.e. 325.1 device px. It carries the RGB LED and the brushed V1 mark. */
 .v1-chin {
 	position: relative;
-	width: 100%;
+	/* The chin is part of the glass sheet, not a strip behind the LCD: it runs
+	   glass edge to edge (the real one is the full 41.8 mm body width). The
+	   glass is a centred flex column that also holds the 240 px screen, so
+	   `width: 100%` resolved against the screen and the chin came out ~73% of
+	   the body, pushing the LED and the V1 mark toward the middle. Cancel the
+	   glass's horizontal padding instead of setting a width, so the chin spans
+	   the full sheet without adding to the glass's content width. */
+	align-self: stretch;
+	margin-left: calc(-1 * var(--v1-glass-pad-x) * 1px * var(--screen-scale));
+	margin-right: calc(-1 * var(--v1-glass-pad-x) * 1px * var(--screen-scale));
 	height: calc(var(--v1-chin-h) * 1px * var(--screen-scale));
 	flex-shrink: 0;
 	z-index: 2;
 }
 
-/* Bottom-Left Vertical Pill RGB LED (SGM31324 under obsidian front glass) */
+/* Bottom-Left Vertical Pill RGB LED (SGM31324 under obsidian front glass)
+   Placed from the real chin: the emitter starts ~37 device px (11.5% of the
+   width, 4.7 mm) in from the glass edge and its centre sits ~44 px (13% of the
+   chin, 5.5 mm) above the bottom, tucked into the bottom-left corner rather
+   than floating mid-chin. The housing is 14 x 24 px around a smaller core, so
+   these offsets are its box rather than the visible pill. */
 .v1-led-housing {
 	position: absolute;
-	left: calc(20px * var(--screen-scale));
-	bottom: calc(58px * var(--screen-scale));
+	left: calc(32px * var(--screen-scale));
+	bottom: calc(32px * var(--screen-scale));
 	width: calc(14px * var(--screen-scale));
 	height: calc(24px * var(--screen-scale));
 	display: grid;
@@ -826,11 +840,15 @@ html[data-scale="1.5"] #v1-canvas {
 	z-index: 1;
 }
 
-/* Bottom-Right Brushed-Silver V1 Logo Emblem */
+/* Bottom-Right Brushed-Silver V1 Logo Emblem
+   Placed from the real chin: the wordmark's ink ends ~49 device px (6.2 mm) in
+   from the glass right edge and ~44 px (5.6 mm) above the bottom, on the same
+   centre line as the LED. The SVG carries internal padding, so the offsets
+   below are a few px smaller than the ink gaps they produce. */
 .v1-chin-emblem {
 	position: absolute;
-	right: calc(28px * var(--screen-scale));
-	bottom: calc(75px * var(--screen-scale));
+	right: calc(45px * var(--screen-scale));
+	bottom: calc(42px * var(--screen-scale));
 	display: flex;
 	align-items: center;
 	justify-content: flex-end;
@@ -838,7 +856,8 @@ html[data-scale="1.5"] #v1-canvas {
 }
 
 .v1-mark-svg {
-	width: clamp(26px, calc(34px * var(--screen-scale)), 62px);
+	/* ~58 device px wide on the real chin (the real wordmark is 52.7 x 22.6 dp) */
+	width: clamp(30px, calc(58px * var(--screen-scale)), 104px);
 	height: auto;
 	display: block;
 	filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.7));

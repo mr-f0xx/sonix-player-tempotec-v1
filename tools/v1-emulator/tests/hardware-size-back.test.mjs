@@ -214,6 +214,49 @@ test("an unidentifiable display says the size is approximate instead of claiming
 	assert.match(out.source, /96 dpi/);
 });
 
+test("the front chin spans the glass, with the LED and V1 mark in their corners", async (t) => {
+	const page = await open(t, { width: 1600, height: 1100 });
+	await page.click('[data-scale="2"]');
+	await page.waitForTimeout(250);
+	const out = await page.evaluate(() => {
+		const chin = document.querySelector(".v1-chin").getBoundingClientRect();
+		const glass = document.querySelector(".v1-front-glass").getBoundingClientRect();
+		const svg = document.querySelector(".v1-mark-svg").getBoundingClientRect();
+		const core = document.querySelector("#v1-led-core").getBoundingClientRect();
+		// Ink extents inside the 66x30 viewBox, so padding does not confuse the check
+		const inkR = svg.left + (svg.width * 61.5) / 66;
+		const inkL = svg.left + (svg.width * 2) / 66;
+		const inkB = svg.top + (svg.height * 27.5) / 30;
+		const inkT = svg.top + (svg.height * 3) / 30;
+		return {
+			chinW: chin.width, chinH: chin.height, glassW: glass.width,
+			inkW: inkR - inkL, inkH: inkB - inkT,
+			inkRightGap: chin.right - inkR, inkBottomGap: chin.bottom - inkB,
+			ledLeft: core.left - chin.left,
+			ledCentreUp: chin.bottom - (core.top + core.height / 2),
+		};
+	});
+	// The chin is the glass sheet edge to edge. It used to resolve `width: 100%`
+	// against the 240 px screen inside the padded glass and came out ~73% of it.
+	assert.ok(
+		Math.abs(out.chinW - out.glassW) < 1.5,
+		`the chin spans the full glass: ${out.chinW.toFixed(1)} vs ${out.glassW.toFixed(1)} px`,
+	);
+	// Placement on the real chin, as fractions of the chin box. Measured from a
+	// product photo of the actual V1: mark 16.5% W / 7.9% H with a 15.3% right
+	// gap and 14.5% bottom gap; LED 11.5% in from the left, 13.2% up.
+	const pct = (v, ref) => (v / ref) * 100;
+	assert.ok(Math.abs(pct(out.inkW, out.chinW) - 16.5) < 2.5, `V1 mark is ~16.5% of the chin width, got ${pct(out.inkW, out.chinW).toFixed(1)}%`);
+	assert.ok(Math.abs(pct(out.inkRightGap, out.chinW) - 15.3) < 2.5, `V1 sits ~15.3% in from the right, got ${pct(out.inkRightGap, out.chinW).toFixed(1)}%`);
+	assert.ok(Math.abs(pct(out.inkBottomGap, out.chinH) - 14.5) < 2.5, `V1 sits ~14.5% up from the bottom, got ${pct(out.inkBottomGap, out.chinH).toFixed(1)}%`);
+	assert.ok(Math.abs(pct(out.ledLeft, out.chinW) - 11.5) < 2.5, `LED is ~11.5% in from the left, got ${pct(out.ledLeft, out.chinW).toFixed(1)}%`);
+	assert.ok(Math.abs(pct(out.ledCentreUp, out.chinH) - 13.2) < 2.5, `LED centre is ~13.2% up from the bottom, got ${pct(out.ledCentreUp, out.chinH).toFixed(1)}%`);
+	// Both sit on the same side of the chin only if the corners are respected:
+	// the mark must stay well right of centre and the LED well left of it.
+	assert.ok(out.ledLeft < out.chinW * 0.2, "the LED stays in the left corner");
+	assert.ok(out.inkRightGap < out.chinW * 0.25, "the mark stays in the right corner");
+});
+
 test("the rear shell shows the real V1 back", async (t) => {
 	const page = await open(t);
 	await page.click("#btn-flip-device");
