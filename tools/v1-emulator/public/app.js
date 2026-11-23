@@ -69,6 +69,7 @@ const el = {
 	realBadge: document.getElementById("v1-real-badge"),
 	realSizeNote: document.getElementById("real-size-note"),
 	realSizeNoteDetail: document.getElementById("real-size-note-detail"),
+	realSizeNoteSource: document.getElementById("real-size-note-source"),
 	realSizeNoteFit: document.getElementById("real-size-note-fit"),
 	usbcPort: document.getElementById("v1-usbc"),
 	topJacks: document.getElementById("v1-top-jacks"),
@@ -1032,6 +1033,20 @@ el.deviceShotBtn.addEventListener("click", async () => {
  * -------------------------------------------------------------------------- */
 let activeScaleMode = window.innerWidth <= 980 ? "fit" : "1.25";
 
+/**
+ * The fixed multipliers are relative to the panel's *native* pixels, not to the
+ * CSS the mock-up used before the chassis was corrected to the real V1's
+ * proportions. The old model was 266x515 device px for a 240x320 screen; the
+ * corrected one is 329x687, so the same number here now draws a ~27% smaller
+ * device and lands where the previous release did:
+ *
+ *   1x   0.73 -> 175 x 233 CSS px panel      (was 240 x 320)
+ *   1.25x 0.91 -> 218 x 291                  (was 300 x 400)
+ *   1.5x  1.09 -> 262 x 349                  (was 360 x 480)
+ *   2x    1.46 -> 350 x 467                  (was 480 x 640)
+ */
+const SCALE_STEPS = { "1": 0.73, "1.25": 0.91, "1.5": 1.09, "2": 1.46 };
+
 function isMobileViewport() {
 	return window.innerWidth <= 768;
 }
@@ -1046,12 +1061,21 @@ function isMobileViewport() {
  *
  *     scale (CSS px per device px) = 0.127 / (mm per CSS px)
  *
- * makes the on-screen panel and body exactly the size of the hardware. "mm per
- * CSS px" is measured from a 100 mm CSS probe, which folds in the monitor's
- * reported DPI together with any OS display scaling or browser zoom. That is a
- * best-effort reading: only a display and browser that agree with each other at
- * 100% zoom give a true 1:1 result, which is why the readout reports the actual
- * millimetres drawn rather than just claiming "exact".
+ * makes the on-screen panel and body exactly the size of the hardware.
+ *
+ * "mm per CSS px" is the hard part, because a browser is normally told that one
+ * CSS px is 1/96 inch whatever the display really is. Three sources, best
+ * first:
+ *
+ *   1. This device's own panel. A phone or tablet advertises 96 dpi regardless
+ *      of density, but its CSS viewport, devicePixelRatio and physical DPI
+ *      identify the panel almost uniquely, so a known portrait viewport wins.
+ *   2. The display's reported DPI, when the browser exposes something other
+ *      than the 96 dpi reference (measured off a 1in CSS probe).
+ *   3. The 96 dpi CSS reference itself. On an ordinary desktop this is the best
+ *      available reading, but it is a guess: if the monitor's real DPI differs,
+ *      the drawn size differs with it. The readout says so instead of claiming
+ *      a bare 1:1.
  * -------------------------------------------------------------------------- */
 const V1_REAL = {
 	bodyW: 41.8,
@@ -1062,68 +1086,154 @@ const V1_REAL = {
 	mmPerDevicePx: 0.127,
 	ppi: 200,
 };
-const MM_PER_CSS_PX_FALLBACK = 25.4 / 96; // CSS reference pixel at 96 dpi
-const REAL_SIZE_PROBE_MM = 100;
-
-let mmPerCssPx = MM_PER_CSS_PX_FALLBACK;
+const CSS_MM_PER_PX = 25.4 / 96; // the CSS reference pixel
 
 /**
- * Read the browser's idea of a millimetre. The probe is a 100 mm-wide, hidden,
- * absolutely-positioned element, so its width in CSS px is whatever the UA
- * computes for 100 mm at the current zoom and display scale.
+ * Panels worth identifying from the CSS viewport alone: {dpr, cssWidth, ppi}.
+ * Portrait only, and only where the CSS size is coherent with the density (a
+ * 375 px phone at devicePixelRatio 2 is 750 physical px across).
  */
-function measureMmPerCssPx() {
+const KNOWN_PANELS = [
+	// iPhone, 460 ppi (12/13/14/15/16 class), 3x
+	{ name: "iPhone", dpr: 3, cssWidth: 390, ppi: 460 },
+	{ name: "iPhone", dpr: 3, cssWidth: 393, ppi: 460 },
+	{ name: "iPhone", dpr: 3, cssWidth: 402, ppi: 460 },
+	{ name: "iPhone", dpr: 3, cssWidth: 430, ppi: 460 },
+	{ name: "iPhone", dpr: 3, cssWidth: 375, ppi: 476 },
+	{ name: "iPhone", dpr: 3, cssWidth: 428, ppi: 458 },
+	{ name: "iPhone", dpr: 3, cssWidth: 414, ppi: 458 },
+	// iPhone, 326 ppi (XR/11 and the 4.7" models), 2x
+	{ name: "iPhone", dpr: 2, cssWidth: 414, ppi: 326 },
+	{ name: "iPhone", dpr: 2, cssWidth: 375, ppi: 326 },
+	{ name: "iPhone", dpr: 2, cssWidth: 320, ppi: 326 },
+	{ name: "iPhone", dpr: 2, cssWidth: 390, ppi: 401 },
+	// iPad, 264 ppi, 2x
+	{ name: "iPad", dpr: 2, cssWidth: 768, ppi: 264 },
+	{ name: "iPad", dpr: 2, cssWidth: 810, ppi: 264 },
+	{ name: "iPad", dpr: 2, cssWidth: 820, ppi: 264 },
+	{ name: "iPad", dpr: 2, cssWidth: 834, ppi: 264 },
+	{ name: "iPad", dpr: 2, cssWidth: 1024, ppi: 264 },
+	{ name: "iPad", dpr: 2, cssWidth: 1080, ppi: 264 },
+	{ name: "iPad", dpr: 2, cssWidth: 1112, ppi: 264 },
+	{ name: "iPad", dpr: 2, cssWidth: 1194, ppi: 264 },
+	{ name: "iPad", dpr: 2, cssWidth: 1366, ppi: 264 },
+	// The common Android phone viewports, FHD-class panels near 400 ppi, 3x
+	{ name: "phone", dpr: 3, cssWidth: 360, ppi: 400 },
+	{ name: "phone", dpr: 3, cssWidth: 384, ppi: 412 },
+	{ name: "phone", dpr: 3, cssWidth: 393, ppi: 400 },
+	{ name: "phone", dpr: 3, cssWidth: 412, ppi: 400 },
+	{ name: "phone", dpr: 2.625, cssWidth: 412, ppi: 401 },
+];
+
+let calibration = { mmPerCssPx: CSS_MM_PER_PX, source: "css", detail: "CSS 96 dpi reference" };
+
+/**
+ * How many millimetres the browser thinks a CSS pixel is, from a 1in probe.
+ * Returns null when the probe was not laid out, and the value is still the 96
+ * dpi reference on any browser that does not expose the real DPI.
+ */
+function measureScreenMmPerCssPx() {
 	const probe = document.getElementById("real-size-probe");
-	if (!probe) return MM_PER_CSS_PX_FALLBACK;
+	if (!probe) return null;
 	const width = probe.getBoundingClientRect().width;
-	// 100 mm is 377.95 px at 96 dpi; anything wildly outside that means the probe
-	// was not laid out (display:none, print stylesheet, ...). Keep the CSS ratio.
-	if (!Number.isFinite(width) || width < 40 || width > 4000) return MM_PER_CSS_PX_FALLBACK;
-	return REAL_SIZE_PROBE_MM / width;
+	// 1in is 96 px at the CSS reference; anything wildly outside that means the
+	// probe was not laid out (display: none, print stylesheet, ...).
+	if (!Number.isFinite(width) || width < 40 || width > 2000) return null;
+	return 25.4 / width;
+}
+
+/** The panel this page is running on, when its CSS viewport identifies it. */
+function matchKnownPanel() {
+	if (window.innerHeight <= window.innerWidth) return null; // portrait only
+	const dpr = window.devicePixelRatio || 1;
+	const width = window.innerWidth;
+	return (
+		KNOWN_PANELS.find(
+			(p) => Math.abs(p.dpr - dpr) < 0.05 && Math.abs(p.cssWidth - width) <= Math.max(6, p.cssWidth * 0.05),
+		) || null
+	);
+}
+
+/**
+ * Pick the best available millimetre. A known panel beats a reported DPI,
+ * which beats the 96 dpi CSS reference.
+ */
+function resolveCalibration() {
+	const panel = matchKnownPanel();
+	if (panel) {
+		return {
+			mmPerCssPx: (panel.dpr * 25.4) / panel.ppi,
+			source: "device",
+			detail: `${panel.name} panel, ${panel.dpr}× at ${panel.ppi} ppi`,
+		};
+	}
+	const measured = measureScreenMmPerCssPx();
+	// Only trust a measurement that is clearly not just the CSS reference pixel
+	// (some browsers do expose the real DPI, most report exactly 96 dpi).
+	if (measured && Math.abs(measured - CSS_MM_PER_PX) > CSS_MM_PER_PX * 0.04) {
+		return { mmPerCssPx: measured, source: "screen", detail: "reported display DPI" };
+	}
+	return {
+		mmPerCssPx: CSS_MM_PER_PX,
+		source: "css",
+		detail: "CSS 96 dpi reference — this device does not report its real DPI",
+	};
 }
 
 /**
  * CSS pixels per device pixel that make one panel pixel exactly 0.127 mm:
  * a CSS px is mmPerCssPx millimetres long, so a device pixel needs
- * 0.127 / mmPerCssPx CSS px. On a 96 dpi display that is 0.48, which draws the
- * real 41.8 x 87.2 mm player at 26.4 px per 6.35 mm - genuinely life size.
+ * 0.127 / mmPerCssPx CSS px.
+ *
+ * This is never scaled down to fit the window. Real size means real size: when
+ * the life-size player is taller than the stage (typical on a phone, where the
+ * true draw is ~540 CSS px) the stage scrolls instead, so the drawn dimensions
+ * stay correct and the readout can be held against the real device.
  */
 function computeRealSizeScale() {
-	mmPerCssPx = measureMmPerCssPx();
-	const scale = V1_REAL.mmPerDevicePx / mmPerCssPx;
+	calibration = resolveCalibration();
+	const scale = V1_REAL.mmPerDevicePx / calibration.mmPerCssPx;
 	return Math.round(scale * 10000) / 10000;
 }
 
 /** Millimetres the mockup actually measures once Real size has been applied. */
 function realSizeReport(scale) {
-	const toMm = (devicePx) => devicePx * scale * mmPerCssPx;
+	const toMm = (devicePx) => devicePx * scale * calibration.mmPerCssPx;
 	return {
 		scale,
 		screenW: toMm(240),
 		screenH: toMm(320),
 		bodyW: toMm(V1_REAL.bodyW / V1_REAL.mmPerDevicePx),
 		bodyH: toMm(V1_REAL.bodyH / V1_REAL.mmPerDevicePx),
-		bodyD: V1_REAL.bodyD,
-		cssPerDevicePx: scale,
 	};
 }
 
 function updateRealSizeReadout(scale) {
 	const report = realSizeReport(scale);
 	const fmt = (n) => n.toFixed(1);
+	// Only an identified panel is a real measurement. A reported DPI is a
+	// second-hand reading and the 96 dpi reference is a guess, so both are
+	// labelled approximate rather than dressed up as 1:1.
+	const approximate = calibration.source !== "device";
+	const label = approximate ? "Screen ≈1:1" : "Screen 1:1";
 	if (el.realBadge) {
-		el.realBadge.textContent = `Screen 1:1 · ${fmt(V1_REAL.screenW)} × ${fmt(V1_REAL.screenH)} mm`;
+		el.realBadge.textContent = `${label} · ${fmt(report.screenW)} × ${fmt(report.screenH)} mm`;
+		el.realBadge.classList.toggle("v1-real-badge-approx", approximate);
 		el.realBadge.title =
 			`The 2.0" 240x320 LCD is drawn ${fmt(report.screenW)} x ${fmt(report.screenH)} mm ` +
-			`(${V1_REAL.ppi} ppi panel) inside a ${fmt(report.bodyW)} x ${fmt(report.bodyH)} mm body. ` +
-			`Real hardware: ${V1_REAL.bodyW} x ${V1_REAL.bodyH} x ${V1_REAL.bodyD} mm.`;
+			`inside a ${fmt(report.bodyW)} x ${fmt(report.bodyH)} mm body ` +
+			`(real hardware: ${V1_REAL.bodyW} x ${V1_REAL.bodyH} x ${V1_REAL.bodyD} mm, ${V1_REAL.ppi} ppi panel). ` +
+			`Size source: ${calibration.detail}.`;
 	}
 	if (el.realSizeNoteDetail) {
 		// depth is a printed spec, so keep both decimals
 		el.realSizeNoteDetail.textContent =
 			`2.0" 240x320 LCD · ${fmt(report.screenW)} × ${fmt(report.screenH)} mm · ` +
-			`body ${fmt(report.bodyW)} × ${fmt(report.bodyH)} × ${V1_REAL.bodyD.toFixed(2)} mm` +
-			` · ${Math.round(report.cssPerDevicePx * 100)}% of 1×`;
+			`body ${fmt(report.bodyW)} × ${fmt(report.bodyH)} × ${V1_REAL.bodyD.toFixed(2)} mm`;
+	}
+	if (el.realSizeNoteSource) {
+		el.realSizeNoteSource.textContent = calibration.detail;
+		el.realSizeNote?.classList.toggle("real-size-note-approx", approximate);
 	}
 }
 
@@ -1161,7 +1271,7 @@ function applyScreenScale(mode) {
 	let numericScale;
 	if (activeScaleMode === "fit") numericScale = computeFitScale();
 	else if (isReal) numericScale = computeRealSizeScale();
-	else numericScale = Number(activeScaleMode) || 1.25;
+	else numericScale = SCALE_STEPS[activeScaleMode] ?? SCALE_STEPS["1.25"];
 	document.documentElement.style.setProperty("--screen-scale", String(numericScale));
 	document.documentElement.dataset.scale = activeScaleMode;
 	// One device pixel per CSS pixel keeps the firmware's 240x320 bitmap crisp;
