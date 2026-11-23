@@ -5,12 +5,14 @@
 #include <string.h>
 
 #include "src/gui/board_profile.h"
+#include "src/gui/fonts/fonts.h"
 #include "src/gui/shell/iconset.h"
 #include "src/gui/shell/icons.h"
 #include "src/gui/shell/settingsrow.h"
 #include "src/gui/shell/theme.h"
 #include "src/gui/shell/toast.h"
 #include "src/system/core/config.h"
+#include "src/system/core/lang.h"
 
 lv_obj_t *iconsetpage_screen;
 
@@ -114,6 +116,13 @@ static void screen_loaded_cb(lv_event_t *e) {
 
 void iconsetpage_init(gui_config_t *cfg) {
 	lv_obj_t *container = settingsrow_page(iconsetpage_screen, cfg, "appearance_icon_set");
+
+	lv_obj_t *note = lv_label_create(container);
+	lv_label_set_long_mode(note, LV_LABEL_LONG_WRAP);
+	lv_obj_set_width(note, lv_pct(100));
+	lv_obj_add_style(note, &theme_style_text_dim, 0);
+	lv_obj_set_style_text_font(note, &font_ui_22, 0);
+	lv_label_set_text(note, tr("appearance_icon_set_note"));
 
 	list = lv_obj_create(container);
 	lv_obj_set_width(list, lv_pct(100));
