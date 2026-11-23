@@ -1,6 +1,10 @@
 {
   "name": "sonix-emulator-tests",
   "private": true,
-  "scripts": { "test": "node --test firmware.test.mjs browser.test.mjs" },
-  "devDependencies": { "playwright-core": "1.65.1" }
+  "scripts": {
+    "test": "node --test firmware.test.mjs browser.test.mjs hardware-size-back.test.mjs"
+  },
+  "devDependencies": {
+    "playwright-core": "1.65.1"
+  }
 }

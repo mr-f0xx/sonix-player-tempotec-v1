@@ -1,0 +1,247 @@
+/**
+ * Front-end checks for the two hardware-fidelity features:
+ *
+ *   1. "Real size" — the 2.0" 240x320 panel is drawn at its true 30.48 x 40.64
+ *      mm inside the true 41.8 x 87.2 x 13.75 mm body, using a hidden 100 mm
+ *      CSS probe to convert millimetres to CSS pixels on the current display.
+ *   2. The rear shell — the real Variations V1 back: dark navy aluminium plate
+ *      with the smooth cap whose edge steps UP to the right, the copper chamfer
+ *      insert in that riser, the exposed Torx screw, the 45deg milled rib field
+ *      and the TempoTec piano-key print up the lower right.
+ *
+ * These only exercise the static UI, so they run without a firmware bundle: the
+ * WASM backend never boots and the screen overlay stays up.
+ */
+import assert from "node:assert/strict";
+import fs from "node:fs";
+import http from "node:http";
+import path from "node:path";
+import test from "node:test";
+import { chromium } from "playwright-core";
+
+const PUBLIC = new URL("../public/", import.meta.url);
+
+async function open(t, viewport = { width: 1440, height: 900 }) {
+	const server = http.createServer((req, res) => {
+		const file = (req.url.split("?")[0] || "/").replace(/^\//, "") || "index.html";
+		const full = path.join(PUBLIC.pathname, file);
+		if (!full.startsWith(PUBLIC.pathname) || !fs.existsSync(full) || fs.statSync(full).isDirectory()) {
+			res.writeHead(404).end();
+			return;
+		}
+		res.setHeader("Content-Type", file.endsWith(".js") ? "text/javascript" : file.endsWith(".css") ? "text/css" : "text/html");
+		fs.createReadStream(full).pipe(res);
+	});
+	await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+	t.after(() => server.close());
+	const executablePath = process.env.CHROME_BIN;
+	const browser = await chromium.launch(executablePath ? { executablePath } : { channel: "chrome" });
+	t.after(() => browser.close());
+	const page = await browser.newPage({ viewport });
+	page.on("pageerror", (err) => {
+		throw err;
+	});
+	await page.goto(`http://127.0.0.1:${server.address().port}/`);
+	await page.waitForSelector("#v1-assembly");
+	return page;
+}
+
+/**
+ * Pin the display conversion to a known value: a 800 CSS px wide probe means one
+ * CSS px is 0.125 mm, so the panel's 0.127 mm device pixel needs 1.016 CSS px.
+ */
+async function calibrate(page, probePx = 800) {
+	await page.addStyleTag({ content: `.real-size-probe{width:${probePx}px!important}` });
+}
+
+const mmPerCssPx = (probePx) => 100 / probePx;
+
+test("Real size draws the 2.0in panel at its true 30.48 x 40.64 mm", async (t) => {
+	const page = await open(t);
+	await calibrate(page, 800); // 1 CSS px = 0.125 mm
+	await page.click('[data-scale="real"]');
+	await page.evaluate(() => window.dispatchEvent(new Event("resize")));
+	await page.waitForTimeout(150);
+
+	const out = await page.evaluate(() => {
+		const box = (sel) => {
+			const r = document.querySelector(sel).getBoundingClientRect();
+			return { w: r.width, h: r.height };
+		};
+		return {
+			mode: document.documentElement.dataset.scale,
+			scale: Number(getComputedStyle(document.documentElement).getPropertyValue("--screen-scale")),
+			screen: box("#v1-screen-stage"),
+			body: box("#v1-chassis"),
+			badgeVisible: !document.getElementById("v1-real-badge").classList.contains("hidden"),
+			badgeText: document.getElementById("v1-real-badge").textContent,
+			noteVisible: !document.getElementById("real-size-note").classList.contains("hidden"),
+			noteText: document.getElementById("real-size-note-detail").textContent,
+		};
+	});
+
+	const mm = mmPerCssPx(800);
+	assert.equal(out.mode, "real");
+	// 0.127 mm per device pixel / 0.125 mm per CSS px = 1.016
+	assert.ok(Math.abs(out.scale - 0.127 / mm) < 0.002, `scale should be ${(0.127 / mm).toFixed(3)}, got ${out.scale}`);
+	// The panel is 240x320 device px at that scale
+	assert.ok(Math.abs(out.screen.w * mm - 30.48) < 0.2, `panel should be 30.48 mm wide, got ${(out.screen.w * mm).toFixed(2)}`);
+	assert.ok(Math.abs(out.screen.h * mm - 40.64) < 0.3, `panel should be 40.64 mm tall, got ${(out.screen.h * mm).toFixed(2)}`);
+	// The body is the real 41.8 x 87.2 mm (5px frame each side included)
+	assert.ok(Math.abs(out.body.w * mm - 41.8) < 0.5, `body should be 41.8 mm wide, got ${(out.body.w * mm).toFixed(2)}`);
+	assert.ok(Math.abs(out.body.h * mm - 87.2) < 1.0, `body should be 87.2 mm tall, got ${(out.body.h * mm).toFixed(2)}`);
+	// The readout reports those measurements rather than claiming a bare "1:1"
+	assert.equal(out.badgeVisible, true);
+	assert.equal(out.noteVisible, true);
+	assert.match(out.badgeText, /30\.5 × 40\.6 mm/);
+	assert.match(out.noteText, /41\.8 × 87\.2 × 13\.75 mm/);
+});
+
+test("Real size survives a change of display resolution", async (t) => {
+	const page = await open(t);
+	await calibrate(page, 800);
+	await page.click('[data-scale="real"]');
+	await page.waitForTimeout(120);
+	// A denser display: 100 mm now measures 1200 CSS px (0.0833 mm per px)
+	await calibrate(page, 1200);
+	await page.evaluate(() => window.dispatchEvent(new Event("resize")));
+	await page.waitForTimeout(150);
+	const out = await page.evaluate(() => {
+		const r = document.getElementById("v1-screen-stage").getBoundingClientRect();
+		return { w: r.width, scale: Number(getComputedStyle(document.documentElement).getPropertyValue("--screen-scale")) };
+	});
+	assert.ok(Math.abs(out.scale - 0.127 / mmPerCssPx(1200)) < 0.002, `scale should follow the new probe, got ${out.scale}`);
+	assert.ok(Math.abs(out.w * mmPerCssPx(1200) - 30.48) < 0.2, `panel should still be 30.48 mm, got ${(out.w * mmPerCssPx(1200)).toFixed(2)}`);
+});
+
+test("leaving Real size restores the fitted view and hides the readout", async (t) => {
+	const page = await open(t);
+	await page.click('[data-scale="real"]');
+	assert.equal(await page.locator("#real-size-note").isVisible(), true);
+	await page.click('[data-scale="1.25"]');
+	assert.equal(await page.locator("#real-size-note").isVisible(), false);
+	assert.equal(await page.locator("#v1-real-badge").isVisible(), false);
+	const w = await page.evaluate(() => document.getElementById("v1-screen-stage").getBoundingClientRect().width);
+	assert.ok(Math.abs(w - 300) < 2, `1.25x should give a 300 px wide panel, got ${w.toFixed(1)}`);
+});
+
+test("Fit keeps the whole device, jacks and USB-C included, inside the stage", async (t) => {
+	const page = await open(t, { width: 1440, height: 900 });
+	await page.click('[data-scale="fit"]');
+	await page.waitForTimeout(200);
+	const out = await page.evaluate(() => {
+		const r = (sel) => document.querySelector(sel).getBoundingClientRect();
+		const wrap = r(".stage-canvas-wrap");
+		const asm = r("#v1-assembly");
+		const usbc = r("#v1-usbc");
+		return { wrap: { top: wrap.top, bottom: wrap.bottom }, asmTop: asm.top, usbcBottom: usbc.bottom };
+	});
+	assert.ok(out.asmTop >= out.wrap.top - 12, "the jack strip stays inside the stage");
+	assert.ok(out.usbcBottom <= out.wrap.bottom + 12, "the USB-C port stays inside the stage");
+});
+
+test("the rear shell shows the real V1 back", async (t) => {
+	const page = await open(t);
+	await page.click("#btn-flip-device");
+	await page.waitForTimeout(700); // let the flip settle
+
+	for (const sel of [
+		"#v1-chassis-back .v1-back-top",
+		"#v1-chassis-back .v1-back-plate",
+		"#v1-chassis-back .v1-back-plate-cap",
+		"#v1-chassis-back .v1-back-plate-ribs",
+		"#v1-chassis-back .v1-back-step .v1-back-accent",
+		"#v1-chassis-back .v1-back-screw svg",
+		"#v1-chassis-back .v1-back-brand svg",
+	]) {
+		assert.equal(await page.locator(sel).count(), 1, `${sel} exists on the rear shell`);
+	}
+
+	// The rear chassis must fill the same box as the front: it used to collapse
+	// to the height of its own padding, which blanked the back view.
+	const box = await page.evaluate(() => {
+		const r = (sel) => {
+			const b = document.querySelector(sel).getBoundingClientRect();
+			return { w: b.width, h: b.height };
+		};
+		return { front: r("#v1-chassis"), back: r("#v1-chassis-back"), shell: r("#v1-chassis-back .v1-back-shell") };
+	});
+	assert.ok(Math.abs(box.back.w - box.front.w) < 1, "rear chassis matches the front width");
+	assert.ok(Math.abs(box.back.h - box.front.h) < 1, "rear chassis matches the front height");
+	assert.ok(box.shell.h > box.back.h * 0.95, "the rear plate fills the shell");
+
+	// Feature placement, as fractions of the rear shell
+	const geo = await page.evaluate(() => {
+		const body = document.querySelector("#v1-chassis-back .v1-back-shell").getBoundingClientRect();
+		const frac = (sel) => {
+			const b = document.querySelector(`#v1-chassis-back ${sel}`).getBoundingClientRect();
+			return {
+				x: (b.left - body.left) / body.width,
+				y: (b.top - body.top) / body.height,
+				w: b.width / body.width,
+				h: b.height / body.height,
+			};
+		};
+		return {
+			top: frac(".v1-back-top"),
+			screw: frac(".v1-back-screw"),
+			brand: frac(".v1-back-brand"),
+			accentPoints: [...document.querySelectorAll("#v1-chassis-back .v1-back-accent")].map((p) => p.getAttribute("points")),
+			seam: document.querySelector("#v1-chassis-back .v1-back-step-line").getAttribute("d"),
+		};
+	});
+	// Antenna cap on the top ~21% of the rear
+	assert.ok(geo.top.h > 0.19 && geo.top.h < 0.24, `antenna cap is ~0.214 H tall, got ${geo.top.h.toFixed(3)}`);
+	// Screw just right of the copper insert, centred around 0.886 W / 0.19 H
+	assert.ok(Math.abs(geo.screw.x + geo.screw.w / 2 - 0.886) < 0.02, `screw centre x ~0.886 W, got ${(geo.screw.x + geo.screw.w / 2).toFixed(3)}`);
+	assert.ok(Math.abs(geo.screw.y + geo.screw.h / 2 - 0.192) < 0.03, `screw centre y ~0.192 H, got ${(geo.screw.y + geo.screw.h / 2).toFixed(3)}`);
+	assert.ok(geo.screw.w > 0.035 && geo.screw.w < 0.07, `screw is ~5% of the width, got ${geo.screw.w.toFixed(3)}`);
+	// TempoTec print up the lower right, reading bottom-to-top
+	assert.ok(geo.brand.x > 0.68 && geo.brand.x < 0.84, `print hugs the right side, got ${geo.brand.x.toFixed(3)}`);
+	assert.ok(geo.brand.y > 0.5 && geo.brand.y < 0.75, `print sits in the lower half, got ${geo.brand.y.toFixed(3)}`);
+	// The step rises to the right: flat at 23.55 H, a 45deg riser, then flat lower
+	assert.equal(geo.seam, "M0 23.55 L69 23.55 L85 16.75 L100 16.75");
+	assert.deepEqual(geo.accentPoints, ["69.6,23.05 82.2,16.2 82.2,18.05 69.6,24.9"]);
+
+	// The invented details of the old mock-up must be gone
+	assert.equal(await page.locator(".v1-back-stripes").count(), 0);
+	assert.equal(await page.locator(".v1-back-upper").count(), 0);
+	assert.equal(await page.locator(".v1-back-orange-accent").count(), 0);
+	assert.equal(await page.locator(".v1-back-torx").count(), 0);
+
+	assert.equal((await page.locator("#btn-flip-device").textContent()).trim(), "Front View");
+});
+
+test("the TempoTec print is actually painted, upright, on the rear plate", async (t) => {
+	const page = await open(t);
+	await page.click("#btn-flip-device");
+	await page.waitForTimeout(700);
+	// Screenshot just the print and check its pale pixels are on the plate, not
+	// clipped away by the shell's overflow - the bug that hid it before.
+	const stats = await page.evaluate(() => {
+		const svg = document.querySelector("#v1-chassis-back .v1-tempotec-svg");
+		const shell = document.querySelector("#v1-chassis-back .v1-back-shell").getBoundingClientRect();
+		const b = svg.getBoundingClientRect();
+		const cs = getComputedStyle(svg);
+		return {
+			insideShell: b.left >= shell.left - 1 && b.right <= shell.right + 1 && b.top >= shell.top - 1 && b.bottom <= shell.bottom + 1,
+			transform: cs.transform,
+			width: b.width,
+			height: b.height,
+			visible: cs.visibility !== "hidden" && cs.opacity !== "0",
+		};
+	});
+	assert.equal(stats.visible, true);
+	assert.equal(stats.insideShell, true, "the print stays inside the rear shell");
+	// rotate(90deg) about the top-left corner: matrix(0, 1, -1, 0, w, 0)
+	assert.match(stats.transform, /^matrix\(0,\s*1,\s*-1,\s*0,/);
+	assert.ok(stats.width > 20 && stats.width < 90, `print is ~0.07 W thick, got ${stats.width.toFixed(1)} px`);
+});
+
+test("flipping back returns to the screen", async (t) => {
+	const page = await open(t);
+	await page.click("#btn-flip-device");
+	await page.click("#v1-chassis-back");
+	await page.waitForTimeout(700);
+	assert.equal((await page.locator("#btn-flip-device").textContent()).trim(), "Back View");
+});

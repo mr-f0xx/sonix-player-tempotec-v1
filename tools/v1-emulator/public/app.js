@@ -66,6 +66,10 @@ const el = {
 	overlaySub: document.getElementById("overlay-sub"),
 	overlayBootBtn: document.getElementById("overlay-boot-btn"),
 	rotBadge: document.getElementById("v1-rot-badge"),
+	realBadge: document.getElementById("v1-real-badge"),
+	realSizeNote: document.getElementById("real-size-note"),
+	realSizeNoteDetail: document.getElementById("real-size-note-detail"),
+	realSizeNoteFit: document.getElementById("real-size-note-fit"),
 	usbcPort: document.getElementById("v1-usbc"),
 	topJacks: document.getElementById("v1-top-jacks"),
 	sdSlotBtn: document.getElementById("v1-sd-slot"),
@@ -1032,10 +1036,102 @@ function isMobileViewport() {
 	return window.innerWidth <= 768;
 }
 
+/* --------------------------------------------------------------------------
+ * Real size — draw the device at true physical dimensions
+ *
+ * The real TempoTec Variations V1 body is 41.8 x 87.2 x 13.75 mm, and the 2.0"
+ * 240x320 LCD inside it is 30.48 x 40.64 mm (0.127 mm per device pixel, 200 ppi).
+ * The whole CSS model is authored in those device pixels at --screen-scale: 1
+ * (see --v1-body-w / --v1-body-h), so rendering it at
+ *
+ *     scale (CSS px per device px) = 0.127 / (mm per CSS px)
+ *
+ * makes the on-screen panel and body exactly the size of the hardware. "mm per
+ * CSS px" is measured from a 100 mm CSS probe, which folds in the monitor's
+ * reported DPI together with any OS display scaling or browser zoom. That is a
+ * best-effort reading: only a display and browser that agree with each other at
+ * 100% zoom give a true 1:1 result, which is why the readout reports the actual
+ * millimetres drawn rather than just claiming "exact".
+ * -------------------------------------------------------------------------- */
+const V1_REAL = {
+	bodyW: 41.8,
+	bodyH: 87.2,
+	bodyD: 13.75,
+	screenW: 30.48,
+	screenH: 40.64,
+	mmPerDevicePx: 0.127,
+	ppi: 200,
+};
+const MM_PER_CSS_PX_FALLBACK = 25.4 / 96; // CSS reference pixel at 96 dpi
+const REAL_SIZE_PROBE_MM = 100;
+
+let mmPerCssPx = MM_PER_CSS_PX_FALLBACK;
+
+/**
+ * Read the browser's idea of a millimetre. The probe is a 100 mm-wide, hidden,
+ * absolutely-positioned element, so its width in CSS px is whatever the UA
+ * computes for 100 mm at the current zoom and display scale.
+ */
+function measureMmPerCssPx() {
+	const probe = document.getElementById("real-size-probe");
+	if (!probe) return MM_PER_CSS_PX_FALLBACK;
+	const width = probe.getBoundingClientRect().width;
+	// 100 mm is 377.95 px at 96 dpi; anything wildly outside that means the probe
+	// was not laid out (display:none, print stylesheet, ...). Keep the CSS ratio.
+	if (!Number.isFinite(width) || width < 40 || width > 4000) return MM_PER_CSS_PX_FALLBACK;
+	return REAL_SIZE_PROBE_MM / width;
+}
+
+/**
+ * CSS pixels per device pixel that make one panel pixel exactly 0.127 mm:
+ * a CSS px is mmPerCssPx millimetres long, so a device pixel needs
+ * 0.127 / mmPerCssPx CSS px. On a 96 dpi display that is 0.48, which draws the
+ * real 41.8 x 87.2 mm player at 26.4 px per 6.35 mm - genuinely life size.
+ */
+function computeRealSizeScale() {
+	mmPerCssPx = measureMmPerCssPx();
+	const scale = V1_REAL.mmPerDevicePx / mmPerCssPx;
+	return Math.round(scale * 10000) / 10000;
+}
+
+/** Millimetres the mockup actually measures once Real size has been applied. */
+function realSizeReport(scale) {
+	const toMm = (devicePx) => devicePx * scale * mmPerCssPx;
+	return {
+		scale,
+		screenW: toMm(240),
+		screenH: toMm(320),
+		bodyW: toMm(V1_REAL.bodyW / V1_REAL.mmPerDevicePx),
+		bodyH: toMm(V1_REAL.bodyH / V1_REAL.mmPerDevicePx),
+		bodyD: V1_REAL.bodyD,
+		cssPerDevicePx: scale,
+	};
+}
+
+function updateRealSizeReadout(scale) {
+	const report = realSizeReport(scale);
+	const fmt = (n) => n.toFixed(1);
+	if (el.realBadge) {
+		el.realBadge.textContent = `Screen 1:1 · ${fmt(V1_REAL.screenW)} × ${fmt(V1_REAL.screenH)} mm`;
+		el.realBadge.title =
+			`The 2.0" 240x320 LCD is drawn ${fmt(report.screenW)} x ${fmt(report.screenH)} mm ` +
+			`(${V1_REAL.ppi} ppi panel) inside a ${fmt(report.bodyW)} x ${fmt(report.bodyH)} mm body. ` +
+			`Real hardware: ${V1_REAL.bodyW} x ${V1_REAL.bodyH} x ${V1_REAL.bodyD} mm.`;
+	}
+	if (el.realSizeNoteDetail) {
+		// depth is a printed spec, so keep both decimals
+		el.realSizeNoteDetail.textContent =
+			`2.0" 240x320 LCD · ${fmt(report.screenW)} × ${fmt(report.screenH)} mm · ` +
+			`body ${fmt(report.bodyW)} × ${fmt(report.bodyH)} × ${V1_REAL.bodyD.toFixed(2)} mm` +
+			` · ${Math.round(report.cssPerDevicePx * 100)}% of 1×`;
+	}
+}
+
 function computeFitScale() {
 	const wrap = el.stageCanvasWrap;
 	const mobile = isMobileViewport();
-	// Available space inside the stage wrapper (fallback to viewport if hidden in another mobile tab)
+	// Space the pane actually gives the device: the wrapper's own box, minus the
+	// key badges either side and the jacks / USB-C above and below.
 	const rect = wrap ? wrap.getBoundingClientRect() : null;
 	const hasMeasured = rect && rect.width > 120 && rect.height > 120;
 	const availW = hasMeasured ? rect.width - (mobile ? 8 : 28) : window.innerWidth - (mobile ? 16 : 440);
@@ -1043,28 +1139,44 @@ function computeFitScale() {
 
 	// Account for left + right flanks (compact icon badges on mobile vs full key badges on desktop)
 	const flankW = mobile ? 96 : 196;
-	const portH = 44; // top gold jacks + bottom USB-C + vertical breathing room
-	// Chassis base dimensions at scale=1: width = 266*s + 10, height = 515*s + 10
-	const scaleByW = (availW - flankW - 10) / 266;
-	const scaleByH = (availH - portH - 10) / 515;
+	const portH = mobile ? 28 : 44; // top gold jacks + bottom USB-C + breathing room
+	// The chassis is authored at the real V1's proportions: 329.13 x 686.61
+	// device px at scale 1 (41.8 x 87.2 mm), plus the 16 px jack strip.
+	const baseW = 329.13;
+	const baseH = 686.61 + 16;
+	const scaleByW = (availW - flankW) / baseW;
+	const scaleByH = (availH - portH) / baseH;
 
 	let target = Math.min(scaleByW, scaleByH);
 	if (!Number.isFinite(target) || target <= 0) target = 1;
-	// Clamp cleanly so tiny 320px phones stay usable and large desktops stay balanced
-	target = Math.max(0.58, Math.min(mobile ? 1.35 : 1.75, target));
+	// Clamp so tiny phones stay usable and the fitted view keeps a little headroom
+	// below 1x, which is life size on a 200-ppi-equivalent display.
+	target = Math.max(0.25, Math.min(mobile ? 0.9 : 1.15, target));
 	return Math.round(target * 1000) / 1000;
 }
 
 function applyScreenScale(mode) {
 	activeScaleMode = String(mode);
-	const numericScale = activeScaleMode === "fit" ? computeFitScale() : Number(activeScaleMode) || 1.25;
+	const isReal = activeScaleMode === "real";
+	let numericScale;
+	if (activeScaleMode === "fit") numericScale = computeFitScale();
+	else if (isReal) numericScale = computeRealSizeScale();
+	else numericScale = Number(activeScaleMode) || 1.25;
 	document.documentElement.style.setProperty("--screen-scale", String(numericScale));
 	document.documentElement.dataset.scale = activeScaleMode;
+	// One device pixel per CSS pixel keeps the firmware's 240x320 bitmap crisp;
+	// any other factor is resampled smoothly.
 	const isIntegerScale = Math.abs(numericScale - Math.round(numericScale)) < 0.01;
 	document.documentElement.dataset.scaleSmooth = isIntegerScale ? "0" : "1";
 	document.querySelectorAll("[data-scale]").forEach((b) => {
 		b.classList.toggle("active", b.dataset.scale === activeScaleMode);
 	});
+	// A true-size chassis can be taller/wider than the stage: allow scrolling
+	// instead of clipping it, and tell the user what they are looking at.
+	document.documentElement.classList.toggle("real-size-mode", isReal);
+	el.realBadge?.classList.toggle("hidden", !isReal);
+	el.realSizeNote?.classList.toggle("hidden", !isReal);
+	if (isReal) updateRealSizeReadout(numericScale);
 }
 
 function setMobileView(view) {
@@ -1098,23 +1210,32 @@ if (typeof ResizeObserver !== "undefined" && el.stageCanvasWrap) {
 }
 
 window.addEventListener("resize", () => {
-	if (activeScaleMode === "fit") {
-		applyScreenScale("fit");
+	if (activeScaleMode === "fit" || activeScaleMode === "real") {
+		applyScreenScale(activeScaleMode);
 	}
 });
 
 window.addEventListener("orientationchange", () => {
 	setTimeout(() => {
-		if (activeScaleMode === "fit") {
-			applyScreenScale("fit");
+		if (activeScaleMode === "fit" || activeScaleMode === "real") {
+			applyScreenScale(activeScaleMode);
 		}
 	}, 120);
+});
+
+// Zooming changes how many CSS px a millimetre is, so re-solve Real size after it
+window.addEventListener("pageshow", () => {
+	if (activeScaleMode === "real") applyScreenScale("real");
 });
 
 document.querySelectorAll("[data-scale]").forEach((btn) => {
 	btn.addEventListener("click", () => {
 		applyScreenScale(btn.dataset.scale);
 	});
+});
+
+el.realSizeNoteFit?.addEventListener("click", () => {
+	applyScreenScale("fit");
 });
 
 el.audioToggleBtn.addEventListener("click", () => {
