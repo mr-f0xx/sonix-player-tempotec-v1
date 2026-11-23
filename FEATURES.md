@@ -53,7 +53,10 @@
   for an audible widening when switched on (1.00 is neutral).
 - **Channel balance** - ±20 dB in half-decibel steps.
 - **Crossfeed** - level, cutoff and delay, all adjustable.
-- **ReplayGain** - off, track or album, read from the tags.
+- **ReplayGain** - off, track or album, read from the tags. The correction is
+  held back from the file's peak so it cannot clip, using the true
+  (inter-sample) peak tag when the tagger wrote one and the sample peak when
+  it did not.
 - **Fade** - one to twelve seconds at the track boundary.
 - **Gapless** - on by default; the PCM device stays open between tracks of the same shape. A track that ends on its own hands over its queue. A manual skip (next, previous, or a track picked from a list) drops the old queue and keeps the device open, so the next track skips the device open and the DAC mute. A saved `audio.gapless = 0` turns it off.
 - **DSD** - DoP by default, with nothing in the chain allowed to touch the

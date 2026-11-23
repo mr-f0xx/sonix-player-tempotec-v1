@@ -886,9 +886,10 @@ static void details_genius_cb(lv_event_t *e) {
 // none; `lossy` says the format discards information. See decode.h: for a lossy
 // file the bit/kHz pair describes the PCM leaving the decoder, not what was
 // encoded.
-// One ReplayGain figure from the tags: the correction, and the peak it was
-// measured against when the file gives one.
-static void details_add_gain(const char *name, float gain_db, float peak) {
+// One ReplayGain figure from the tags: the correction, and the peak the
+// correction is held clear of when the file gives one -- the true (inter-sample)
+// peak when there is one, the sample peak otherwise.
+static void details_add_gain(const char *name, float gain_db, double peak) {
 	char buffer[64];
 	if (peak > 0) {
 		snprintf(buffer, sizeof(buffer), tr("trackmenu_rg_gain_peak"), gain_db, peak);
@@ -959,10 +960,10 @@ static void details_fill(const char *file, const song_metadata_t *tags, int bits
 	}
 
 	if (tags->has_track_gain) {
-		details_add_gain("trackmenu_rg_track", tags->track_gain_db, tags->track_peak);
+		details_add_gain("trackmenu_rg_track", tags->track_gain_db, replaygain_effective_peak(tags, false));
 	}
 	if (tags->has_album_gain) {
-		details_add_gain("trackmenu_rg_album", tags->album_gain_db, tags->album_peak);
+		details_add_gain("trackmenu_rg_album", tags->album_gain_db, replaygain_effective_peak(tags, true));
 	}
 	// The applied figure can differ from both tags: it is the one the mode
 	// picks, lowered when the peak would clip, and capped at +12 dB.

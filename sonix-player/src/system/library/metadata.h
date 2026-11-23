@@ -47,6 +47,13 @@ typedef struct {
 	float album_gain_db;
 	float track_peak; // 0 when the file does not say
 	float album_peak;
+	// The true (inter-sample) peak, when the tagger wrote one. A sample peak
+	// can read below full scale while the signal reconstructed between samples
+	// overshoots it, and that overshoot is what actually clips a converter --
+	// so this is the figure that predicts clipping, and the correction is held
+	// clear of it. 0 when the file does not say.
+	float track_true_peak;
+	float album_true_peak;
 } song_metadata_t;
 
 // Reads whatever tag metadata is available for the file (ID3v1/ID3v2 for MP3,

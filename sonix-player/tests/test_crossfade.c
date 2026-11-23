@@ -278,6 +278,31 @@ static void test_replaygain_q15(void) {
 	g = replaygain_compute_q15(&meta);
 	CHECK(abs(g - 40960) <= 16);
 
+	// A true peak tag protects against the overshoot the sample peak cannot
+	// see: sample peak 0.5 would allow the whole +6 dB, true peak 1.1 pulls it
+	// back to 1/1.1 = 0.909x.
+	meta.track_peak = 0.5;
+	meta.track_true_peak = 1.1;
+	g = replaygain_compute_q15(&meta);
+	CHECK(abs(g - (int)(32768.0 / 1.1 + 0.5)) <= 8);
+	CHECK(replaygain_effective_peak(&meta, false) > 1.099 && replaygain_effective_peak(&meta, false) < 1.101);
+	CHECK(replaygain_effective_peak(&meta, true) == 0.0);
+
+	// A true peak below the sample peak does not loosen the limit.
+	meta.track_peak = 0.9;
+	meta.track_true_peak = 0.4;
+	g = replaygain_compute_q15(&meta);
+	CHECK(abs(g - (int)(32768.0 / 0.9 + 0.5)) <= 8);
+
+	// Album mode uses the album pair's true peak.
+	meta.album_gain_db = 6.0;
+	meta.album_peak = 0.5;
+	meta.album_true_peak = 1.05;
+	replaygain_set_mode(REPLAYGAIN_ALBUM);
+	g = replaygain_compute_q15(&meta);
+	CHECK(abs(g - (int)(32768.0 / 1.05 + 0.5)) <= 8);
+	CHECK(replaygain_effective_peak(&meta, true) > 1.049 && replaygain_effective_peak(&meta, true) < 1.051);
+
 	int16_t s16[4] = {10000, -10000, 30000, -30000};
 	replaygain_apply_q15_s16(s16, 2, 2, 16384);
 	CHECK(abs(s16[0] - 5000) <= 1 && abs(s16[1] + 5000) <= 1);

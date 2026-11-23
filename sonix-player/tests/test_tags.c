@@ -1033,6 +1033,68 @@ static void test_japanese_tag_text(const char *dir) {
 	assert(strcmp(chapters[0].title, "宇多田") == 0);
 }
 
+// ---------------------------------------------------------------------------
+// ReplayGain true peak tags: the inter-sample peak a sample peak cannot see.
+// ---------------------------------------------------------------------------
+static void test_replaygain_true_peak_tags(const char *dir) {
+	char path[512];
+
+	// (a) FLAC Vorbis comments: sample and true peaks on both pairs.
+	snprintf(path, sizeof(path), "%s/true_peak.flac", dir);
+	const char *vc[] = {
+		"TITLE=True Peak",
+		"REPLAYGAIN_TRACK_GAIN=-4.00 dB",
+		"REPLAYGAIN_TRACK_PEAK=0.900000",
+		"REPLAYGAIN_TRACK_TRUE_PEAK=1.050000",
+		"REPLAYGAIN_ALBUM_GAIN=-3.00 dB",
+		"REPLAYGAIN_ALBUM_PEAK=0.800000",
+		"REPLAYGAIN_ALBUM_TRUE_PEAK=1.200000",
+	};
+	buf_t flac = {0};
+	append_flac_stream(&flac, vc, 7);
+	write_fixture(path, flac.data, flac.len);
+	free(flac.data);
+
+	song_metadata_t meta;
+	metadata_read(path, &meta);
+	assert(strcmp(meta.title, "True Peak") == 0);
+	assert(meta.has_track_gain && meta.track_gain_db > -4.01f && meta.track_gain_db < -3.99f);
+	assert(meta.track_peak > 0.899f && meta.track_peak < 0.901f);
+	assert(meta.track_true_peak > 1.049f && meta.track_true_peak < 1.051f);
+	assert(meta.has_album_gain && meta.album_gain_db > -3.01f && meta.album_gain_db < -2.99f);
+	assert(meta.album_peak > 0.799f && meta.album_peak < 0.801f);
+	assert(meta.album_true_peak > 1.199f && meta.album_true_peak < 1.201f);
+
+	// (b) APEv2 names, lowercase as foobar2000 writes them: the item whitelist
+	// in apedec.c has to let them through.
+	snprintf(path, sizeof(path), "%s/true_peak_ape.mp3", dir);
+	buf_t mp3 = {0};
+	uint8_t dummy_mpeg[64] = {0xFF, 0xFB, 0x90, 0x64};
+	buf_put(&mp3, dummy_mpeg, sizeof(dummy_mpeg));
+	const char *akeys[] = {"Title", "replaygain_track_gain", "replaygain_track_true_peak"};
+	const char *avals[] = {"APE True Peak", "-5.00 dB", "0.990000"};
+	append_apev2_tag(&mp3, akeys, avals, 3);
+	write_fixture(path, mp3.data, mp3.len);
+	free(mp3.data);
+
+	metadata_read(path, &meta);
+	assert(strcmp(meta.title, "APE True Peak") == 0);
+	assert(meta.has_track_gain && meta.track_gain_db > -5.01f && meta.track_gain_db < -4.99f);
+	assert(meta.track_true_peak > 0.989f && meta.track_true_peak < 0.991f);
+	assert(meta.track_peak == 0); // only the true peak was tagged
+
+	// (c) A bare REPLAYGAIN_TRUE_PEAK is read as the track's.
+	snprintf(path, sizeof(path), "%s/bare_true_peak.flac", dir);
+	const char *bare[] = {"TITLE=Bare", "REPLAYGAIN_TRACK_GAIN=-6.00 dB", "REPLAYGAIN_TRUE_PEAK=1.300000"};
+	buf_t bare_flac = {0};
+	append_flac_stream(&bare_flac, bare, 3);
+	write_fixture(path, bare_flac.data, bare_flac.len);
+	free(bare_flac.data);
+
+	metadata_read(path, &meta);
+	assert(meta.track_true_peak > 1.299f && meta.track_true_peak < 1.301f);
+}
+
 // Exercise the actual writer with the player's real readers and decoder.
 static void test_tagwriter_roundtrip(const char *dir) {
     char path[512]; song_metadata_t meta; buf_t data={0}, frames={0};
@@ -1063,6 +1125,7 @@ int main(void) {
 	test_wrong_extensions_and_cue(dir);
 	test_vorbischap_and_containers(dir);
 	test_japanese_tag_text(dir);
+	test_replaygain_true_peak_tags(dir);
 
 	char cmd[600];
 	snprintf(cmd, sizeof(cmd), "rm -rf '%s'", dir);

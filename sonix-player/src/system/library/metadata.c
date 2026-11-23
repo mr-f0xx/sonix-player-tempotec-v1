@@ -172,6 +172,14 @@ static bool replaygain_field(song_metadata_t *out, const char *key, const char *
 		out->track_peak = (float)number;
 	} else if (strcmp(key, "REPLAYGAIN_ALBUM_PEAK") == 0) {
 		out->album_peak = (float)number;
+	} else if (strcmp(key, "REPLAYGAIN_TRACK_TRUE_PEAK") == 0 || strcmp(key, "REPLAYGAIN_TRUE_PEAK") == 0) {
+		// The inter-sample peak, which is the figure that decides whether the
+		// corrected signal clips. A bare REPLAYGAIN_TRUE_PEAK is what a few
+		// taggers write instead of the track/album pair; it belongs to the
+		// track, the way the bare sample peak would.
+		out->track_true_peak = (float)number;
+	} else if (strcmp(key, "REPLAYGAIN_ALBUM_TRUE_PEAK") == 0) {
+		out->album_true_peak = (float)number;
 	} else {
 		return false;
 	}
@@ -990,6 +998,10 @@ static void fill_missing(song_metadata_t *out, const song_metadata_t *from) {
 		out->track_peak = from->track_peak;
 	if (out->album_peak == 0)
 		out->album_peak = from->album_peak;
+	if (out->track_true_peak == 0)
+		out->track_true_peak = from->track_true_peak;
+	if (out->album_true_peak == 0)
+		out->album_true_peak = from->album_true_peak;
 }
 
 // Reads an ID3v2 tag at the current position of `f` -- the start of an MP3, or
@@ -2108,6 +2120,12 @@ static void read_mp4_metadata(const char *filepath, song_metadata_t *out) {
 	}
 	if ((value = mp4_tag_freeform(m, "replaygain_album_peak")) != NULL && value[0]) {
 		replaygain_field(out, "REPLAYGAIN_ALBUM_PEAK", value, strlen(value));
+	}
+	if ((value = mp4_tag_freeform(m, "replaygain_track_true_peak")) != NULL && value[0]) {
+		replaygain_field(out, "REPLAYGAIN_TRACK_TRUE_PEAK", value, strlen(value));
+	}
+	if ((value = mp4_tag_freeform(m, "replaygain_album_true_peak")) != NULL && value[0]) {
+		replaygain_field(out, "REPLAYGAIN_ALBUM_TRUE_PEAK", value, strlen(value));
 	}
 
 	mp4_close(m);

@@ -46,6 +46,12 @@ double replaygain_current_db(void);
 // active mode, without modifying the loaded track's global gain.
 int replaygain_compute_q15(const song_metadata_t *meta);
 
+// The peak the correction has to stay clear of, for the track or the album
+// pair: the true (inter-sample) peak when the file carries one, otherwise the
+// sample peak. 0 when the file says neither. So the details screen can show
+// the figure the gain was actually held back from.
+double replaygain_effective_peak(const song_metadata_t *meta, bool album);
+
 // In place on interleaved PCM, audio thread only. A no-op when off or when the
 // track carries no usable tag.
 void replaygain_process(short *frames, int frame_count, int channels);
