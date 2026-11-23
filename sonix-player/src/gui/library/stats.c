@@ -2,6 +2,7 @@
 
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "src/gui/board_profile.h"
@@ -59,6 +60,7 @@ static lv_obj_t *albums_empty;
 
 // The series uses external storage; it must stay alive until the next fill.
 static int32_t chart_daily_values[STATS_CHART_MONTH_DAYS];
+static int32_t *chart_all_values;
 static int chart_points = STATS_CHART_WEEK_DAYS;
 
 // How many rows a "Top" card on the page shows before "See all" takes over.
@@ -151,10 +153,16 @@ static lv_obj_t *heading_strip(lv_obj_t *parent, const char *key, lv_event_cb_t 
 	lv_obj_set_style_pad_all(strip, 0, 0);
 	lv_obj_set_scrollable(strip, false);
 	lv_obj_set_flex_flow(strip, LV_FLEX_FLOW_ROW);
-	lv_obj_set_flex_align(strip, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+	lv_obj_set_flex_align(strip, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+	lv_obj_set_style_pad_column(strip, 4, 0);
 	lv_obj_set_event_bubble(strip, true);
 
-	text(strip, tr(key), bp_is_tempotec_v1() ? &font_ui_18 : &font_ui_24, theme()->text_primary);
+	// Give the heading only the space left by the button; long translations
+	// wrap instead of drawing underneath the button.
+	lv_obj_t *heading = text(strip, tr(key), bp_is_tempotec_v1() ? &font_ui_18 : &font_ui_24, theme()->text_primary);
+	lv_obj_set_width(heading, 0);
+	lv_obj_set_flex_grow(heading, 1);
+	lv_label_set_long_mode(heading, LV_LABEL_LONG_WRAP);
 
 	if (cb) {
 		lv_obj_t *see = lv_btn_create(strip);
@@ -316,29 +324,61 @@ static void chart_fill(void) {
 		"stats_month_name_aug", "stats_month_name_sep", "stats_month_name_oct", "stats_month_name_nov",
 		"stats_month_name_dec"};
 	stats_day_t days[STATS_CHART_MONTH_DAYS];
-	int points = 7, month = 0, year = 0;
+	int points = 7, month = 0, year = 0, today_day = 0;
+	int32_t *values = chart_daily_values;
+	int32_t *new_all_values = NULL;
 	char title[80];
 	bool monthly = stats_range == STATS_RANGE_MONTH;
 	chart_clear_marks();
+	lv_obj_set_hidden(chart_viewport, false);
 
 	if (monthly) {
-		points = stats_calendar_month(days, &month, &year);
+		points = stats_calendar_month(days, &month, &year, &today_day);
 		if (points < 1 || points > STATS_CHART_MONTH_DAYS || month < 1 || month > 12) return;
 		snprintf(title, sizeof(title), "%s", tr(MONTH_NAME_KEYS[month - 1]));
 		for (int i = 0; i < points; i++) {
 			chart_daily_values[i] = chart_minutes(days[i].seconds);
 			char label[4];
 			snprintf(label, sizeof(label), "%d", i + 1);
-			chart_mark(label, LV_TEXT_ALIGN_CENTER);
+			lv_obj_t *mark = chart_mark(label, LV_TEXT_ALIGN_CENTER);
+			if (i + 1 == today_day) lv_obj_set_style_text_color(mark, theme()->accent, 0);
 		}
 	} else if (stats_range == STATS_RANGE_YEAR) {
 		int64_t seconds[12] = {0};
 		stats_calendar_year(seconds, &year);
 		points = 12;
-		snprintf(title, sizeof(title), "%s %d", tr("stats_year"), year);
+		snprintf(title, sizeof(title), "%d", year);
 		for (int i = 0; i < points; i++) {
 			chart_daily_values[i] = chart_minutes(seconds[i]);
 			chart_mark(tr(MONTH_KEYS[i]), LV_TEXT_ALIGN_CENTER);
+		}
+	} else if (stats_range == STATS_RANGE_ALL) {
+		int first = 0, count = 0;
+		int64_t *seconds = stats_all_years(&first, &count);
+		if (seconds && count > 0) new_all_values = calloc((size_t)count, sizeof(*new_all_values));
+		if (!new_all_values) {
+			free(seconds);
+			lv_label_set_text(chart_title, tr("stats_all_time"));
+			lv_obj_set_hidden(chart_viewport, true);
+			return; // do not display a fabricated empty history on allocation failure
+		}
+		points = count;
+		values = new_all_values;
+		for (int i = 0; i < points; i++) values[i] = chart_minutes(seconds[i]);
+		free(seconds);
+		snprintf(title, sizeof(title), "%s", tr("stats_all_time"));
+		char label[16];
+		if (points <= 4) {
+			for (int i = 0; i < points; i++) {
+				snprintf(label, sizeof(label), "%d", first + i);
+				chart_mark(label, LV_TEXT_ALIGN_CENTER);
+			}
+		} else {
+			// Endpoint labels stay legible even as more years accumulate.
+			snprintf(label, sizeof(label), "%d", first);
+			chart_mark(label, LV_TEXT_ALIGN_LEFT);
+			snprintf(label, sizeof(label), "%d", first + points - 1);
+			chart_mark(label, LV_TEXT_ALIGN_RIGHT);
 		}
 	} else {
 		stats_daily(points, days, points);
@@ -356,8 +396,11 @@ static void chart_fill(void) {
 	lv_obj_set_clickable(chart_viewport, monthly);
 	if (!monthly) lv_obj_scroll_to_x(chart_viewport, 0, LV_ANIM_OFF);
 	int32_t peak = 0;
-	for (int i = 0; i < points; i++) if (chart_daily_values[i] > peak) peak = chart_daily_values[i];
+	for (int i = 0; i < points; i++) if (values[i] > peak) peak = values[i];
+	lv_chart_set_series_ext_y_array(chart_obj, chart_series, values);
 	lv_chart_set_point_count(chart_obj, points);
+	free(chart_all_values);
+	chart_all_values = new_all_values;
 	chart_points = points;
 	lv_chart_set_range(chart_obj, LV_CHART_AXIS_PRIMARY_Y, 0, peak > 2 ? peak : 2);
 	lv_chart_refresh(chart_obj);
@@ -566,17 +609,18 @@ static void build_stats_page(gui_config_t *cfg) {
 	lv_obj_set_style_pad_ver(container, STATS_CARD_GAP, 0);
 	lv_obj_set_scroll_dir(container, LV_DIR_VER);
 
-	// Week, current calendar month and current calendar year.
+	// Week, current calendar month, current calendar year and all time.
 	lv_obj_t *pills = NULL;
 	lv_obj_t *pills_card = settingsrow_pills(container, "stats_period", &pills);
 	lv_obj_set_width(pills_card, LV_PCT(100));
 	lv_obj_set_style_pad_all(pills_card, STATS_CARD_PAD, 0);
-	lv_obj_set_flex_flow(pills, LV_FLEX_FLOW_ROW);
+	lv_obj_set_flex_flow(pills, LV_FLEX_FLOW_ROW_WRAP);
 	lv_obj_set_flex_align(pills, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 	lv_obj_set_style_pad_gap(pills, bp_pick(2, 8), 0);
 	range_pills[STATS_RANGE_WEEK] = settingsrow_pill(pills, "stats_week", STATS_RANGE_WEEK, range_pick_cb);
 	range_pills[STATS_RANGE_MONTH] = settingsrow_pill(pills, "stats_month", STATS_RANGE_MONTH, range_pick_cb);
 	range_pills[STATS_RANGE_YEAR] = settingsrow_pill(pills, "stats_year", STATS_RANGE_YEAR, range_pick_cb);
+	range_pills[STATS_RANGE_ALL] = settingsrow_pill(pills, "stats_all_time", STATS_RANGE_ALL, range_pick_cb);
 	for (int i = 0; i < STATS_RANGE_COUNT; i++) {
 		lv_obj_set_height(range_pills[i], bp_pick(28, 52));
 		lv_obj_set_style_pad_hor(range_pills[i], bp_pick(5, 22), 0);

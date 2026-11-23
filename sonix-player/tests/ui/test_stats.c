@@ -66,6 +66,9 @@ static void pointer_at(lv_indev_t *indev, int x, int y, lv_indev_state_t state) 
 static bool lists_empty;
 static int stub_month_days = 30;
 static int stub_month_number = 11;
+static int stub_today_day = 23;
+static int stub_year_count = 3;
+static int locale_case;
 static int stub_today = 20780; // Monday 2026-11-23
 
 // The history the page is drawn from, held here so the test decides the shape
@@ -97,9 +100,10 @@ void stats_daily(int days, stats_day_t *out, int count) {
 	}
 }
 
-int stats_calendar_month(stats_day_t out[STATS_CHART_MONTH_DAYS], int *month, int *year) {
+int stats_calendar_month(stats_day_t out[STATS_CHART_MONTH_DAYS], int *month, int *year, int *today_day) {
 	*month = stub_month_number;
 	*year = 2026;
+	*today_day = stub_today_day;
 	for (int i = 0; i < stub_month_days; i++) {
 		out[i].day = 20758 + i;
 		out[i].seconds = i == 0 ? 120 : i == 22 ? 3600 : 0;
@@ -115,10 +119,20 @@ void stats_calendar_year(int64_t out[12], int *year) {
 	out[10] = 3600;
 }
 
+int64_t *stats_all_years(int *first_year, int *count) {
+	*first_year = 2024;
+	*count = stub_year_count;
+	int64_t *values = calloc((size_t)*count, sizeof(*values));
+	assert(values);
+	values[0] = 60;
+	values[*count - 1] = 3600;
+	return values;
+}
+
 void stats_summary(stats_range_t range, stats_summary_t *out) {
 	memset(out, 0, sizeof(*out));
-	out->seconds = range == STATS_RANGE_WEEK ? 3660 : 12 * 3600 + 34 * 60;
-	out->plays = range == STATS_RANGE_WEEK ? 13 : 195;
+	out->seconds = range == STATS_RANGE_WEEK ? 3660 : range == STATS_RANGE_ALL ? 200 * 3600 : 12 * 3600 + 34 * 60;
+	out->plays = range == STATS_RANGE_WEEK ? 13 : range == STATS_RANGE_ALL ? 900 : 195;
 	out->tracks = 4;
 	out->albums = 3;
 	out->artists = 4;
@@ -184,6 +198,15 @@ void coverloader_release(int slot) { (void)slot; }
 // note is only worth checking as a sentence: its length is the whole problem,
 // and "stats_nothing_yet" fits on a line of its own.
 const char *tr(const char *key) {
+	if (locale_case) {
+		if (strcmp(key, "stats_top_artists") == 0) return locale_case == 1 ? "Artistes les plus écoutés" : "Top-Interpreten";
+		if (strcmp(key, "stats_top_albums") == 0) return locale_case == 1 ? "Albums les plus écoutés" : "Top-Alben";
+		if (strcmp(key, "stats_see_all") == 0) return locale_case == 1 ? "Tout voir" : "Alle anzeigen";
+		if (strcmp(key, "stats_week") == 0) return locale_case == 1 ? "Semaine" : "Woche";
+		if (strcmp(key, "stats_month") == 0) return locale_case == 1 ? "Mois" : "Monat";
+		if (strcmp(key, "stats_year") == 0) return locale_case == 1 ? "Année" : "Jahr";
+		if (strcmp(key, "stats_all_time") == 0) return locale_case == 1 ? "Tout" : "Gesamt";
+	}
 	static const char *keys[] = {"stats_month_jan", "stats_month_feb", "stats_month_mar", "stats_month_apr",
 		"stats_month_may", "stats_month_jun", "stats_month_jul", "stats_month_aug", "stats_month_sep",
 		"stats_month_oct", "stats_month_nov", "stats_month_dec"};
@@ -400,17 +423,21 @@ int main(void) {
 	lv_obj_t *week = find_label(stats_screen, "stats_week");
 	lv_obj_t *month = find_label(stats_screen, "stats_month");
 	lv_obj_t *year = find_label(stats_screen, "stats_year");
-	assert(week && month && year && !find_label(stats_screen, "stats_all_time"));
-	lv_area_t wa, ma, ya;
-	lv_obj_get_coords(week, &wa);
-	lv_obj_get_coords(month, &ma);
-	lv_obj_get_coords(year, &ya);
-	// Left to right, and no two of them on top of each other.
-	assert(wa.x1 < ma.x1 && ma.x1 < ya.x1);
-	// All three inside the panel.
-	assert(wa.x1 >= 0 && ya.x2 < W);
-	// On the same line, not wrapped.
-	assert(wa.y1 == ma.y1 && ma.y1 == ya.y1);
+	lv_obj_t *all = find_label(stats_screen, "stats_all_time");
+	assert(week && month && year && all);
+	// Four translated labels may wrap to a second row on the V1. Every pill
+	// must remain within the row, readable and separate from its neighbours.
+	lv_obj_t *pill_labels[] = {week, month, year, all};
+	for (int i = 0; i < 4; i++) {
+		lv_area_t a;
+		lv_obj_get_coords(lv_obj_get_parent(pill_labels[i]), &a);
+		assert(a.x1 >= 0 && a.x2 < W);
+		for (int j = 0; j < i; j++) {
+			lv_area_t b;
+			lv_obj_get_coords(lv_obj_get_parent(pill_labels[j]), &b);
+			assert(a.x1 > b.x2 || a.x2 < b.x1 || a.y1 > b.y2 || a.y2 < b.y1);
+		}
+	}
 
 	lv_obj_send_event(lv_obj_get_parent(year), LV_EVENT_CLICKED, NULL);
 	lv_obj_update_layout(stats_screen);
@@ -439,7 +466,7 @@ int main(void) {
 	assert(pva.y1 > ta.y1 && pva.x1 >= ta.x1 - 4);
 
 	// --- the chart --------------------------------------------------------------
-	lv_obj_t *chart_title = find_label(stats_screen, "stats_year 2026");
+	lv_obj_t *chart_title = find_label(stats_screen, "2026");
 	assert(chart_title);
 	lv_obj_t *chart_card = lv_obj_get_parent(chart_title);
 	lv_obj_t *viewport = lv_obj_get_child(chart_card, 1);
@@ -570,6 +597,17 @@ int main(void) {
 	lv_obj_update_layout(stats_screen);
 	assert(lv_obj_get_child_count(letters_row) == 30);
 	for (int i = 0; i < 30; i++) {
+		lv_color_t actual = lv_obj_get_style_text_color(lv_obj_get_child(letters_row, i), 0);
+		assert(lv_color_eq(actual, i == 22 ? theme()->accent : theme()->text_secondary));
+	}
+	stub_today_day = 1;
+	stats_refresh();
+	assert(lv_color_eq(lv_obj_get_style_text_color(lv_obj_get_child(letters_row, 0), 0), theme()->accent));
+	assert(lv_color_eq(lv_obj_get_style_text_color(lv_obj_get_child(letters_row, 22), 0), theme()->text_secondary));
+	stub_today_day = 23;
+	stats_refresh();
+	lv_obj_update_layout(stats_screen);
+	for (int i = 0; i < 30; i++) {
 		char expected[4];
 		snprintf(expected, sizeof(expected), "%d", i + 1);
 		lv_obj_t *label = lv_obj_get_child(letters_row, i);
@@ -611,6 +649,30 @@ int main(void) {
 	assert(year_shot);
 	lv_draw_buf_destroy(year_shot);
 
+	lv_obj_send_event(lv_obj_get_parent(all), LV_EVENT_CLICKED, NULL);
+	lv_obj_update_layout(stats_screen);
+	assert(strcmp(lv_label_get_text(chart_title), "stats_all_time") == 0);
+	assert(find_label(stats_screen, "200h 00m") && find_label(stats_screen, "900"));
+	assert(lv_chart_get_point_count(chart) == 3);
+	assert(!lv_obj_is_scrollable(viewport));
+	values = lv_chart_get_series_y_array(chart, series);
+	assert(values[0] == 1 && values[1] == 0 && values[2] == 60);
+	assert(strcmp(lv_label_get_text(lv_obj_get_child(letters_row, 0)), "2024") == 0);
+	assert(strcmp(lv_label_get_text(lv_obj_get_child(letters_row, 2)), "2026") == 0);
+	stub_year_count = 6;
+	stats_refresh();
+	lv_obj_update_layout(stats_screen);
+	assert(lv_chart_get_point_count(chart) == 6 && lv_obj_get_child_count(letters_row) == 2);
+	assert(strcmp(lv_label_get_text(lv_obj_get_child(letters_row, 1)), "2029") == 0);
+	values = lv_chart_get_series_y_array(chart, series);
+	assert(values[0] == 1 && values[5] == 60);
+	stub_year_count = 1;
+	stats_refresh();
+	assert(lv_chart_get_point_count(chart) == 1 && lv_obj_get_child_count(letters_row) == 1);
+	stub_year_count = 3;
+	lv_obj_send_event(lv_obj_get_parent(year), LV_EVENT_CLICKED, NULL);
+	lv_obj_update_layout(stats_screen);
+
 	// --- the two top lists ------------------------------------------------------
 	lv_obj_t *top_artists = find_label(stats_screen, "stats_top_artists");
 	lv_obj_t *top_albums = find_label(stats_screen, "stats_top_albums");
@@ -622,7 +684,10 @@ int main(void) {
 	lv_area_t sa, ha;
 	lv_obj_get_coords(see_all, &sa);
 	lv_obj_get_coords(top_artists, &ha);
-	assert(sa.x1 > ha.x1 && sa.y1 <= ha.y1 + 2 && sa.x2 <= W);
+	lv_area_t button_area;
+	lv_obj_get_coords(lv_obj_get_parent(see_all), &button_area);
+	assert(ha.x2 < button_area.x1 && sa.x2 <= W);
+	assert(ha.y1 <= button_area.y2 && button_area.y1 <= ha.y2);
 	// The rows themselves: two per card, in the order the stub gave them.
 	lv_obj_t *first_artist = find_label_prefix(stats_screen, "Slowspace");
 	lv_obj_t *second_artist = find_label_prefix(stats_screen, "Alyzea");
@@ -766,6 +831,40 @@ int main(void) {
 	lv_obj_update_layout(stats_artists_screen);
 	assert(lv_obj_is_hidden(note));
 	assert(find_label_prefix(stats_artists_screen, "Slowspace"));
+
+	// Real long French/German titles and the actual See-all button share
+	// the strip without overlap, also with larger V1 font metrics.
+	font_ui_18 = lv_font_montserrat_20;
+	for (locale_case = 1; locale_case <= 2; locale_case++) {
+		stats_init(&cfg);
+		lv_screen_load(stats_screen);
+		lv_obj_update_layout(stats_screen);
+		const char *headings[] = {tr("stats_top_artists"), tr("stats_top_albums")};
+		for (int i = 0; i < 2; i++) {
+			lv_obj_t *head = find_label(stats_screen, headings[i]);
+			assert(head && lv_label_get_long_mode(head) == LV_LABEL_LONG_WRAP);
+			lv_obj_t *strip = lv_obj_get_parent(head);
+			lv_obj_t *button_label = find_label(strip, tr("stats_see_all"));
+			assert(button_label);
+			lv_obj_t *button = lv_obj_get_parent(button_label);
+			lv_area_t h, b, row;
+			lv_obj_get_coords(head, &h);
+			lv_obj_get_coords(button, &b);
+			lv_obj_get_coords(strip, &row);
+			assert(h.x1 >= row.x1 && h.x2 < b.x1);
+			assert(b.x2 <= row.x2 && row.x2 < W);
+			assert(h.y1 >= row.y1 && h.y2 <= row.y2);
+			assert(b.y1 >= row.y1 && b.y2 <= row.y2);
+		}
+		const char *pill_text[] = {tr("stats_week"), tr("stats_month"), tr("stats_year"), tr("stats_all_time")};
+		for (int i = 0; i < 4; i++) {
+			lv_obj_t *label = find_label(stats_screen, pill_text[i]);
+			assert(label);
+			lv_area_t a;
+			lv_obj_get_coords(lv_obj_get_parent(label), &a);
+			assert(a.x1 >= 0 && a.x2 < W);
+		}
+	}
 
 	printf("stats: the pills, the cards, the chart and the two top lists fit the V1's panel\n");
 	return 0;

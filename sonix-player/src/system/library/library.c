@@ -7866,7 +7866,7 @@ static int stats_first_day(int range, int today) {
 	if (!gmtime_r(&stamp, &date)) return today;
 	if (range == 1) return today - date.tm_mday + 1;
 	if (range == 2) return today - date.tm_yday;
-	return 0; // retained for internal callers needing the entire history
+	return 0; // all time, since the epoch
 }
 
 // A text column into a fixed buffer, NULL as empty. Every string the history
@@ -8111,6 +8111,58 @@ void library_stats_monthly(int today, int64_t out[12]) {
 		}
 	}
 	pthread_mutex_unlock(&db_lock);
+}
+
+// Calendar-year totals from the first recorded year through the current year.
+// A single grouped query is replayed after finding the first year, so gaps can
+// be represented explicitly without allocating the whole daily history.
+int64_t *library_stats_yearly(int today, int *first_year, int *count) {
+	if (!first_year || !count) return NULL;
+	*count = 0;
+	int last;
+	if (!library_stats_calendar(today, NULL, NULL, NULL, &last)) return NULL;
+	int first = last;
+	pthread_mutex_lock(&db_lock);
+	sqlite3_stmt *stmt = NULL;
+	if (db) {
+		const char *sql = "SELECT CAST(strftime('%Y', day * 86400, 'unixepoch') AS INTEGER), SUM(seconds)"
+			" FROM LISTEN_DAY WHERE day >= 0 AND day <= ?1 GROUP BY 1 ORDER BY 1";
+		if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK) {
+			pthread_mutex_unlock(&db_lock);
+			return NULL;
+		}
+		sqlite3_bind_int(stmt, 1, today);
+		int rc = sqlite3_step(stmt);
+		if (rc == SQLITE_ROW) {
+			int oldest = sqlite3_column_int(stmt, 0);
+			if (oldest >= 1970 && oldest < first) first = oldest;
+		} else if (rc != SQLITE_DONE) {
+			sqlite3_finalize(stmt);
+			pthread_mutex_unlock(&db_lock);
+			return NULL;
+		}
+		sqlite3_reset(stmt);
+		sqlite3_bind_int(stmt, 1, today);
+	}
+	int n = last - first + 1;
+	int64_t *values = calloc((size_t)n, sizeof(*values));
+	if (values && stmt) {
+		int rc;
+		while ((rc = sqlite3_step(stmt)) == SQLITE_ROW) {
+			int year = sqlite3_column_int(stmt, 0);
+			if (year >= first && year <= last) values[year - first] = sqlite3_column_int64(stmt, 1);
+		}
+		if (rc != SQLITE_DONE) {
+			free(values);
+			values = NULL;
+		}
+	}
+	if (stmt) sqlite3_finalize(stmt);
+	pthread_mutex_unlock(&db_lock);
+	if (!values) return NULL;
+	*first_year = first;
+	*count = n;
+	return values;
 }
 
 // The summary cards. Distinct tracks, records and artists come from the same
