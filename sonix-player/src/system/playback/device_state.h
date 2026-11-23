@@ -243,6 +243,7 @@ void device_state_refresh_battery(void);
 // restored() told what the boot restore asked for, so a poll that lands before
 //           the decoder has seeked cannot write a zero over it.
 // ---------------------------------------------------------------------------
+void device_state_poll(void);
 void device_state_remember_note(void);
 void device_state_remember_flush(void);
 void device_state_remember_restored(const char *path, double position);

@@ -6482,7 +6482,7 @@ static void update_progress(void) {
 	// "Remember track". The decision, and the writing, live in device_state.c:
 	// the power menu and the automatic shutdown have to do the same thing on
 	// their way out, and neither of them comes through here.
-	device_state_remember_note();
+	device_state_poll();
 
 	// The Stats page's own clock. Handed the position from this poll rather
 	// than one of its own: how far the track moved between two polls is the
