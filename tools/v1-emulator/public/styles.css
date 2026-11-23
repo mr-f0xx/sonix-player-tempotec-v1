@@ -804,35 +804,36 @@ html[data-scale="1.5"] #v1-canvas {
 }
 
 /* Bottom-Left Vertical Pill RGB LED (SGM31324 under obsidian front glass)
-   Placed from the real chin: the emitter starts ~37 device px (11.5% of the
-   width, 4.7 mm) in from the glass edge and its centre sits ~44 px (13% of the
-   chin, 5.5 mm) above the bottom, tucked into the bottom-left corner rather
-   than floating mid-chin. The housing is 14 x 24 px around a smaller core, so
-   these offsets are its box rather than the visible pill. */
+   Placement taken from the Sonix Player 1.7.1.1 banner, as fractions of the
+   glass panel: the pill starts 10.1% of the width in from the left edge, its
+   lower end sits 13.3% of the chin height above the bottom, and it is a tall
+   thin capsule (2.3% W x 11.5% H) rather than a short dot. */
 .v1-led-housing {
 	position: absolute;
-	left: calc(32px * var(--screen-scale));
-	bottom: calc(32px * var(--screen-scale));
+	left: calc(29px * var(--screen-scale));
+	bottom: calc(44px * var(--screen-scale));
 	width: calc(14px * var(--screen-scale));
-	height: calc(24px * var(--screen-scale));
+	height: calc(38px * var(--screen-scale));
 	display: grid;
 	place-items: center;
 }
 
 .v1-led-glow {
 	position: absolute;
-	width: calc(36px * var(--screen-scale));
-	height: calc(50px * var(--screen-scale));
+	/* A tight halo, as on the banner: the glow is only a little wider than the
+	   pill itself, not a soft dome over the whole corner. */
+	width: calc(30px * var(--screen-scale));
+	height: calc(52px * var(--screen-scale));
 	border-radius: 999px;
 	pointer-events: none;
 	opacity: 0;
-	filter: blur(calc(8px * var(--screen-scale)));
+	filter: blur(calc(5px * var(--screen-scale)));
 	transition: opacity 0.08s linear;
 }
 
 .v1-led-core {
-	width: clamp(3.5px, calc(4.2px * var(--screen-scale)), 8px);
-	height: clamp(13px, calc(16px * var(--screen-scale)), 30px);
+	width: clamp(3.5px, calc(7.3px * var(--screen-scale)), 14px);
+	height: clamp(13px, calc(38px * var(--screen-scale)), 72px);
 	border-radius: 999px;
 	background: rgba(20, 24, 32, 0.55);
 	box-shadow: inset 0 0 1px rgba(255, 255, 255, 0.08);
@@ -841,14 +842,15 @@ html[data-scale="1.5"] #v1-canvas {
 }
 
 /* Bottom-Right Brushed-Silver V1 Logo Emblem
-   Placed from the real chin: the wordmark's ink ends ~49 device px (6.2 mm) in
-   from the glass right edge and ~44 px (5.6 mm) above the bottom, on the same
-   centre line as the LED. The SVG carries internal padding, so the offsets
-   below are a few px smaller than the ink gaps they produce. */
+   Placement taken from the Sonix Player 1.7.1.1 banner: the wordmark's ink ends
+   11.7% of the width in from the right edge, sits 13.7% of the chin height
+   above the bottom (sharing the LED's centre line) and is 17.8% of the width.
+   The SVG carries internal padding, so the offsets below are a little smaller
+   than the ink gaps they produce. */
 .v1-chin-emblem {
 	position: absolute;
-	right: calc(45px * var(--screen-scale));
-	bottom: calc(42px * var(--screen-scale));
+	right: calc(33px * var(--screen-scale));
+	bottom: calc(43px * var(--screen-scale));
 	display: flex;
 	align-items: center;
 	justify-content: flex-end;
@@ -856,8 +858,8 @@ html[data-scale="1.5"] #v1-canvas {
 }
 
 .v1-mark-svg {
-	/* ~58 device px wide on the real chin (the real wordmark is 52.7 x 22.6 dp) */
-	width: clamp(30px, calc(58px * var(--screen-scale)), 104px);
+	/* 17.8% of the chin width, per the 1.7.1.1 banner (~63 device px) */
+	width: clamp(30px, calc(63px * var(--screen-scale)), 112px);
 	height: auto;
 	display: block;
 	filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.7));
