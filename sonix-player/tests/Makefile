@@ -625,8 +625,15 @@ $(BUILD)/test_tags: $(TAGS_SRC) $(TAGS_DECODE_SRC) \
 COVERS_SRC = test_covers.c \
              $(ROOT)/src/system/tagmanager/tagwrite.c \
              $(ROOT)/src/system/library/albumart.c \
+             $(ROOT)/src/system/library/metadata.c \
+             $(ROOT)/src/system/library/jisx0208.c \
+             $(ROOT)/src/system/library/tagtext.c \
+             $(ROOT)/src/system/library/id3chap.c \
              $(ROOT)/src/system/library/oggtags.c \
+             $(ROOT)/src/system/library/vorbischap.c \
+             $(ROOT)/src/system/library/tagdate.c \
              $(ROOT)/src/system/library/cue.c \
+             $(ROOT)/src/system/core/config.c \
              $(ROOT)/src/gui/nowplaying/cover.c \
              $(ROOT)/src/gui/nowplaying/coverloader.c \
              $(ROOT)/src/system/image/art_shrink.c \
@@ -639,7 +646,8 @@ covers: $(BUILD)/test_covers
 	$(BUILD)/test_covers
 
 $(BUILD)/test_covers: $(COVERS_SRC) $(TAGS_DECODE_SRC) $(BUILD)/sqlite3_impl.o \
-                      $(ROOT)/src/system/library/albumart.h $(ROOT)/src/gui/nowplaying/cover.h
+                      $(ROOT)/src/system/library/albumart.h $(ROOT)/src/system/library/metadata.h \
+                      $(ROOT)/src/gui/nowplaying/cover.h $(ROOT)/src/gui/nowplaying/coverloader.h
 	@mkdir -p $(BUILD)
 	$(CC) $(UI_CPPFLAGS) $(CFLAGS) -Wno-error=format-truncation -o $@ $(COVERS_SRC) \
 		-Wno-unused-parameter -Wno-sign-compare -Wno-unused-function -Wno-implicit-fallthrough -Wno-misleading-indentation $(TAGS_DECODE_SRC) \

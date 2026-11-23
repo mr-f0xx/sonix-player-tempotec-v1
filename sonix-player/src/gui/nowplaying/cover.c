@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <errno.h>
 #include <signal.h>
 #include <sys/stat.h>
@@ -14,6 +15,8 @@
 #include "src/system/db/sqlite3.h"
 
 #include "src/system/library/albumart.h"
+#include "src/system/library/cue.h"
+#include "src/system/library/metadata.h"
 #include "src/system/streaming/podcastcache.h"
 #include "src/system/image/art_shrink.h"
 #include "src/system/image/jpeg_planes.h"
@@ -1988,6 +1991,179 @@ static cover_build_t thumb_build_source(const char *path, bool is_dir, int size,
 
 static cover_build_t thumb_load_uncached(const char *path, bool is_dir, int size, cover_image_t *out) {
 	return thumb_build_source(path, is_dir, size, out);
+}
+
+// The V1 browser's playable local formats. A directory is only a single album
+// when it has direct tracks, no child folders, and those tracks agree on their
+// album tag (or the directory has one valid CUE sheet / an explicit cover).
+// Keep this list in step with browser.c's is_playable_file().
+static bool cover_dir_track_name(const char *name) {
+	static const char *const extensions[] = {
+		".wav", ".mp3", ".flac", ".ogg", ".m4b", ".m4a", ".alac", ".aac", ".dsf",
+		".dff", ".aif", ".aiff", ".aifc", ".caf", ".opus", ".wv", ".ape",
+	};
+	for (size_t i = 0; i < sizeof(extensions) / sizeof(extensions[0]); i++) {
+		if (has_extension(name, extensions[i])) return true;
+	}
+	return false;
+}
+
+static bool cover_dir_junk_name(const char *name) {
+	if (!name || !name[0] || name[0] == '.') return true;
+	static const char *const junk[] = {
+		"__MACOSX", ".Spotlight-V100", ".Trashes", ".fseventsd", "$RECYCLE.BIN", "System Volume Information",
+	};
+	for (size_t i = 0; i < sizeof(junk) / sizeof(junk[0]); i++) {
+		if (strcasecmp(name, junk[i]) == 0) return true;
+	}
+	return false;
+}
+
+#define COVER_DIR_CLASSIFY_MAX_TRACKS 128
+
+static bool cover_dir_cue_covers_tracks(const char *path, const cue_sheet_t *cue) {
+	if (!cue || cue->track_count <= 0 || cue->track_count > CUE_MAX_TRACKS) return false;
+
+	struct stat cue_files[CUE_MAX_TRACKS];
+	bool cue_file_ok[CUE_MAX_TRACKS] = {0};
+	bool cue_file_seen[CUE_MAX_TRACKS] = {0};
+	for (int i = 0; i < cue->track_count; i++) {
+		if (cue->tracks[i].audio_path[0] && stat(cue->tracks[i].audio_path, &cue_files[i]) == 0)
+			cue_file_ok[i] = true;
+	}
+
+	DIR *dir = opendir(path);
+	if (!dir) return false;
+	bool complete = true;
+	int tracks = 0;
+	struct dirent *de;
+	while ((de = readdir(dir)) != NULL) {
+		if (cover_dir_junk_name(de->d_name) || !cover_dir_track_name(de->d_name)) continue;
+		if (++tracks > COVER_DIR_CLASSIFY_MAX_TRACKS) {
+			complete = false;
+			break;
+		}
+
+		char file[1024];
+		int n = snprintf(file, sizeof(file), "%s/%s", path, de->d_name);
+		struct stat direct_file;
+		if (n < 0 || (size_t)n >= sizeof(file) || stat(file, &direct_file) != 0) {
+			complete = false;
+			break;
+		}
+		bool found = false;
+		for (int i = 0; i < cue->track_count; i++) {
+			if (cue_file_ok[i] && direct_file.st_dev == cue_files[i].st_dev &&
+			    direct_file.st_ino == cue_files[i].st_ino) {
+				cue_file_seen[i] = true;
+				found = true;
+			}
+		}
+		if (!found) {
+			complete = false;
+			break;
+		}
+	}
+	closedir(dir);
+	if (!complete || tracks == 0) return false;
+	for (int i = 0; i < cue->track_count; i++) {
+		if (!cue_file_ok[i] || !cue_file_seen[i]) return false;
+	}
+	return true;
+}
+
+bool cover_directory_is_album(const char *path) {
+	if (!path || !path[0]) return false;
+
+	DIR *dir = opendir(path);
+	if (!dir) return false;
+
+	char album[256] = "";
+	char album_artist[256] = "";
+	bool have_album = false;
+	bool all_tracks_tagged = true;
+	bool conflict = false;
+	bool has_subdirectory = false;
+	bool too_many_tracks = false;
+	int tracks = 0;
+	int cue_sheets = 0;
+	cue_sheet_t *cue = NULL; // about 80 KB: never put one on the worker's stack
+	struct dirent *de;
+
+	while ((de = readdir(dir)) != NULL) {
+		if (cover_dir_junk_name(de->d_name)) continue;
+
+		bool audio = cover_dir_track_name(de->d_name);
+		bool is_dir = de->d_type == DT_DIR;
+		if (!is_dir && de->d_type == DT_UNKNOWN && !audio) {
+			char child[1024];
+			struct stat st;
+			int n = snprintf(child, sizeof(child), "%s/%s", path, de->d_name);
+			if (n >= 0 && (size_t)n < sizeof(child) && stat(child, &st) == 0) {
+				is_dir = S_ISDIR(st.st_mode);
+			}
+		}
+		// A collection folder (or a multi-disc tree) is not itself an album:
+		// showing its first child track's art would be a misleading thumbnail.
+		if (is_dir) {
+			has_subdirectory = true;
+			break;
+		}
+
+		char file[1024];
+		int n = snprintf(file, sizeof(file), "%s/%s", path, de->d_name);
+		if (n < 0 || (size_t)n >= sizeof(file)) {
+			if (audio) all_tracks_tagged = false;
+			continue;
+		}
+
+		// A valid single CUE sheet is itself the album grouping when the audio
+		// files do not carry useful tags. More than one sheet means this folder
+		// is a collection of discs/releases, not one album row.
+		if (cue_is_sheet(de->d_name)) {
+			if (!cue) cue = malloc(sizeof(*cue));
+			if (cue && cue_parse(file, cue) && ++cue_sheets > 1) break;
+		}
+		if (!audio) continue;
+		if (++tracks > COVER_DIR_CLASSIFY_MAX_TRACKS) {
+			too_many_tracks = true;
+			break; // stay conservative rather than walk a huge mixed folder
+		}
+
+		song_metadata_t tags;
+		metadata_read(file, &tags);
+		if (!tags.album[0]) {
+			all_tracks_tagged = false;
+			continue;
+		}
+		if (!have_album) {
+			snprintf(album, sizeof(album), "%s", tags.album);
+			have_album = true;
+		} else if (strcasecmp(album, tags.album) != 0) {
+			conflict = true;
+			break;
+		}
+		if (tags.album_artist[0]) {
+			if (!album_artist[0]) {
+				snprintf(album_artist, sizeof(album_artist), "%s", tags.album_artist);
+			} else if (strcasecmp(album_artist, tags.album_artist) != 0) {
+				conflict = true;
+				break;
+			}
+		}
+	}
+	closedir(dir);
+	free(cue);
+
+	if (has_subdirectory || too_many_tracks || conflict || tracks == 0 || cue_sheets > 1) return false;
+	if ((cue_sheets == 1 && cover_dir_cue_covers_tracks(path, cue)) || (have_album && all_tracks_tagged)) return true;
+
+	// Untagged albums can still be unambiguous when they carry an explicit
+	// folder cover. Do not borrow one random embedded track picture otherwise.
+	albumart_t cover = {0};
+	bool has_folder_cover = albumart_load_dir_candidate(path, 0, &cover);
+	albumart_free(&cover);
+	return has_folder_cover;
 }
 
 bool cover_thumb_cached(const char *path, int size, cover_image_t *out) {

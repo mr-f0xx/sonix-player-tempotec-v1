@@ -50,8 +50,15 @@ void coverloader_start(void);
 // immediately. Any earlier request on this slot is abandoned.
 void coverloader_request(int slot, const char *path, int size);
 
-// A folder cover file, or embedded artwork from its first track.
+// A folder cover file, or embedded artwork from its first track. This generic
+// request does not decide whether the directory represents an album.
 void coverloader_request_dir(int slot, const char *path, int size);
+
+// Browser folder thumbnail: only loads artwork when the folder is one album
+// (no child folders, and its tracks agree on their album tag, have one valid
+// CUE sheet, or it has an explicit folder cover). The take call reports that
+// classification even when no artwork was found.
+void coverloader_request_album_dir(int slot, const char *path, int size);
 
 // Like coverloader_request(), but decodes the named image file itself rather
 // than looking for artwork embedded in or beside an audio file. Used by the
@@ -66,6 +73,10 @@ void coverloader_release(int slot);
 // if there was no artwork. `found` says which of the two it was, so a caller
 // can stop asking.
 bool coverloader_take(int slot, cover_image_t *out, bool *finished);
+
+// Same result for coverloader_request_album_dir(), plus whether the directory
+// is an album. `is_album` is only updated when `finished` becomes true.
+bool coverloader_take_album_dir(int slot, cover_image_t *out, bool *finished, bool *is_album);
 
 // ---------------------------------------------------------------------------
 // The player's artwork -- the big cover and its blurred backdrop.

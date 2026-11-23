@@ -81,15 +81,16 @@ int main(void) {
 	fake.dsc.data_size = 8;
 	fake.dsc.data = fake.pixels;
 	uint8_t *original_pixels = fake.pixels;
-	row_finish_thumb(&rows[0], true, &fake);
+	row_finish_thumb(&rows[0], true, true, &fake);
 	assert(lv_image_get_src(rows[0].icon) == &rows[0].thumb.dsc);
 	row_bind(&rows[0], 16); // recycle a loaded row into the in-memory cache
 	assert(lv_image_get_src(rows[0].icon) == &icon_refresh);
 	row_bind(&rows[0], 0);
 	assert(rows[0].thumb_settled && rows[0].thumb.pixels == original_pixels);
+	assert(rows[0].dir_classified && rows[0].is_album_dir);
 	assert(rows[0].thumb.dsc.data == original_pixels);
 	assert(lv_image_get_src(rows[0].icon) == &rows[0].thumb.dsc);
-	row_finish_thumb(&rows[1], false, NULL);
+	row_finish_thumb(&rows[1], false, false, NULL);
 	assert(lv_image_get_src(rows[1].icon) == &icon_album);
 	row_bind(&rows[1], 17);
 	assert(lv_image_get_src(rows[1].icon) == &icon_refresh);
@@ -148,6 +149,11 @@ int main(void) {
 	browse_covers = true; window_update();
 	assert(lv_image_get_src(rows[0].icon) == &icon_refresh);
 	assert(lv_image_get_src(rows[1].icon) == &icon_music2);
+	row_finish_thumb(&rows[0], false, false, NULL);
+	assert(rows[0].dir_classified && !rows[0].is_album_dir);
+	assert(lv_image_get_src(rows[0].icon) == &icon_folder); // collection / mixed-track folder
+	row_finish_thumb(&rows[0], false, true, NULL);
+	assert(rows[0].is_album_dir && lv_image_get_src(rows[0].icon) == &icon_album);
 	grid_thumb_cache_clear();
 	assert(freed_images >= 1);
 

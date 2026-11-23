@@ -325,6 +325,8 @@ typedef struct {
 	bool has_thumb;
 	bool thumb_requested; // the worker has been asked; the answer has not come back
 	bool thumb_settled;	  // the answer came back, whatever it was
+	bool dir_classified;  // directory thumbnail worker decided whether this is one album
+	bool is_album_dir;
 	cover_image_t thumb;
 } row_t;
 
@@ -339,6 +341,8 @@ typedef struct {
 	uint64_t age;
 	bool valid;
 	bool found;
+	bool dir_classified;
+	bool is_album_dir;
 	cover_image_t image;
 } grid_thumb_entry_t;
 static grid_thumb_entry_t grid_thumb_cache[GRID_THUMB_CACHE_SIZE];
@@ -369,6 +373,8 @@ static void grid_thumb_cache_put(row_t *row) {
 	entry->generation = row->generation;
 	entry->age = ++grid_thumb_clock;
 	entry->found = row->has_thumb;
+	entry->dir_classified = row->dir_classified;
+	entry->is_album_dir = row->is_album_dir;
 	if (entry->found) {
 		entry->image = row->thumb;
 		entry->image.dsc.data = entry->image.pixels;
@@ -384,6 +390,8 @@ static bool grid_thumb_cache_take(row_t *row) {
 		if (!entry->valid || entry->index != row->index || entry->generation != row->generation) continue;
 		row->thumb_settled = true;
 		row->has_thumb = entry->found;
+		row->dir_classified = entry->dir_classified;
+		row->is_album_dir = entry->is_album_dir;
 		if (entry->found) {
 			row->thumb = entry->image;
 			row->thumb.dsc.data = row->thumb.pixels;
@@ -407,10 +415,13 @@ static bool list_directory(const char *path, listing_t *out, cue_sheet_t *sheets
 
 static void row_show_glyph(row_t *row, bool is_dir) {
 	// Audio files get the note, not a generic sheet of paper -- everything a
-	// browser row can show besides a folder is playable anyway.
-	bool placeholder = browse_grid || (browse_covers && is_dir);
+	// browser row can show besides a folder is playable anyway. A folder gets
+	// album art only after the worker confirms it holds one album; collections
+	// and mixed-track folders keep the original folder glyph.
+	bool placeholder = (!is_dir && browse_grid) ||
+		(is_dir && (browse_grid || browse_covers) && (!row->dir_classified || row->is_album_dir));
 	// A circular loading glyph is distinct from the bland album placeholder:
-	// the latter means the worker has actually finished and found no art.
+	// the latter means the worker has finished and found no art for an album.
 	const lv_image_dsc_t *glyph = placeholder ?
 		(row->thumb_settled ? &icon_album : &icon_refresh) : (is_dir ? &icon_folder : &icon_music2);
 	lv_image_set_src(row->icon, glyph);
@@ -456,6 +467,8 @@ static void row_drop_thumb(row_t *row) {
 	}
 	row->thumb_requested = false;
 	row->thumb_settled = false;
+	row->dir_classified = false;
+	row->is_album_dir = false;
 }
 
 // The file playing right now, cached: row_bind runs on every scroll step and
@@ -765,15 +778,19 @@ static void request_row_thumb(row_t *row) {
 	int size = THUMB_SIZE;
 	if (browse_grid) { albumgrid_metrics_t m; grid_metrics(&m); size = m.cover; }
 	if (shown.entries[row->index].is_dir)
-		coverloader_request_dir(row_slot(row), entry_path, size);
+		coverloader_request_album_dir(row_slot(row), entry_path, size);
 	else
 		coverloader_request(row_slot(row), entry_path, size);
 	row->thumb_requested = true;
 }
 
-static void row_finish_thumb(row_t *row, bool found, cover_image_t *image) {
+static void row_finish_thumb(row_t *row, bool found, bool is_album_dir, cover_image_t *image) {
 	row->thumb_requested = false;
 	row->thumb_settled = true;
+	if (row->index >= 0 && (size_t)row->index < shown.count && shown.entries[row->index].is_dir) {
+		row->dir_classified = true;
+		row->is_album_dir = is_album_dir;
+	}
 	if (found) {
 		row->thumb = *image;
 		row->thumb.dsc.data = row->thumb.pixels;
@@ -795,10 +812,13 @@ static void thumbs_update(void) {
 		// Collect a prefetch even while it is still outside the viewport.
 		if (row->thumb_requested) {
 			bool finished = false;
+			bool is_album_dir = false;
 			cover_image_t image;
-			bool found = coverloader_take(row_slot(row), &image, &finished);
+			bool is_dir = shown.entries[row->index].is_dir != 0;
+			bool found = is_dir ? coverloader_take_album_dir(row_slot(row), &image, &finished, &is_album_dir)
+								: coverloader_take(row_slot(row), &image, &finished);
 			if (!finished) busy = true;
-			else row_finish_thumb(row, found, &image);
+			else row_finish_thumb(row, found, is_album_dir, &image);
 			continue;
 		}
 		if ((browse_grid || browse_covers) && !row_is_visible(row->index)) continue;

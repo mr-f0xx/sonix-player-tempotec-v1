@@ -16,6 +16,7 @@
 #include "src/system/device/power.h"
 #include "src/system/image/art_shrink.h"
 #include "src/system/library/albumart.h"
+#include "src/system/library/metadata.h"
 #include "src/system/tagmanager/tagwrite.h"
 #include "src/system/streaming/podcastcache.h"
 #include "src/system/streaming/subsonicstream.h"
@@ -30,6 +31,11 @@ const char *__asan_default_options(void);
 const char *__asan_default_options(void) { return "handle_sigbus=0"; }
 
 bool power_screen_is_on(void) { return true; }
+bool subsonicstream_metadata(const char *path, song_metadata_t *out) {
+	(void)path;
+	(void)out;
+	return false;
+}
 
 bool subsonicstream_owns(const char *path) {
 	(void)path;
@@ -92,6 +98,37 @@ static void write_file_bytes(const char *path, const uint8_t *data, size_t len) 
 	if (len > 0)
 		assert(fwrite(data, 1, len, f) == len);
 	assert(fclose(f) == 0);
+}
+
+static void write_tagged_flac(const char *path, const char *album, const char *album_artist) {
+	buf_t file = {0}, comments = {0};
+	buf_put(&file, "fLaC", 4);
+	uint8_t streaminfo[34] = {0};
+	buf_u8(&file, 0x00); // STREAMINFO, followed by another metadata block
+	buf_be24(&file, sizeof(streaminfo));
+	buf_put(&file, streaminfo, sizeof(streaminfo));
+
+	static const char vendor[] = "sonix-test";
+	buf_le32(&comments, sizeof(vendor) - 1);
+	buf_put(&comments, vendor, sizeof(vendor) - 1);
+	uint32_t count = (album && album[0] ? 1u : 0u) + (album_artist && album_artist[0] ? 1u : 0u);
+	buf_le32(&comments, count);
+	const char *keys[] = {"ALBUM", "ALBUMARTIST"};
+	const char *values[] = {album, album_artist};
+	for (int i = 0; i < 2; i++) {
+		if (!values[i] || !values[i][0]) continue;
+		char text[600];
+		int n = snprintf(text, sizeof(text), "%s=%s", keys[i], values[i]);
+		assert(n > 0 && (size_t)n < sizeof(text));
+		buf_le32(&comments, (uint32_t)n);
+		buf_put(&comments, text, (size_t)n);
+	}
+	buf_u8(&file, 0x84); // last block, VORBIS_COMMENT
+	buf_be24(&file, (uint32_t)comments.len);
+	buf_put(&file, comments.data, comments.len);
+	write_file_bytes(path, file.data, file.len);
+	free(file.data);
+	free(comments.data);
 }
 
 static uint8_t *make_test_jpeg(int w, int h, uint8_t r, uint8_t g, uint8_t b, uint32_t seed, size_t *out_len) {
@@ -389,6 +426,84 @@ static int picture_thumb_count(const char *db_path, int size) {
 	return count;
 }
 
+static void test_browser_folder_classification(const char *dir) {
+	char album[512], mixed[512], collection[512], nested_a[560], nested_b[560],
+		 album_track1[560], album_track2[560], mixed_track1[560], mixed_track2[560],
+		 nested_track[600], explicit_cover[512], explicit_track[560], cover_path[560], empty[512],
+		 cue_album[512], cue_track[560], cue_album_sheet[560], cue_collection[512],
+		 cue_track2[560], cue_track3[560], cue_sheet1[560], cue_sheet2[560],
+		 cue_uncovered[512], uncovered_track1[560], uncovered_track2[560], uncovered_sheet[560];
+	snprintf(album, sizeof(album), "%s/classify_album", dir);
+	snprintf(mixed, sizeof(mixed), "%s/classify_mixed", dir);
+	snprintf(collection, sizeof(collection), "%s/classify_collection", dir);
+	snprintf(nested_a, sizeof(nested_a), "%s/Album A", collection);
+	snprintf(nested_b, sizeof(nested_b), "%s/Album B", collection);
+	snprintf(album_track1, sizeof(album_track1), "%s/01.flac", album);
+	snprintf(album_track2, sizeof(album_track2), "%s/02.flac", album);
+	snprintf(mixed_track1, sizeof(mixed_track1), "%s/01.flac", mixed);
+	snprintf(mixed_track2, sizeof(mixed_track2), "%s/02.flac", mixed);
+	snprintf(nested_track, sizeof(nested_track), "%s/01.flac", nested_a);
+	snprintf(explicit_cover, sizeof(explicit_cover), "%s/classify_explicit_cover", dir);
+	snprintf(explicit_track, sizeof(explicit_track), "%s/01.flac", explicit_cover);
+	snprintf(cover_path, sizeof(cover_path), "%s/cover.jpg", explicit_cover);
+	snprintf(empty, sizeof(empty), "%s/classify_empty", dir);
+	snprintf(cue_album, sizeof(cue_album), "%s/classify_cue_album", dir);
+	snprintf(cue_track, sizeof(cue_track), "%s/01.flac", cue_album);
+	snprintf(cue_album_sheet, sizeof(cue_album_sheet), "%s/album.cue", cue_album);
+	snprintf(cue_collection, sizeof(cue_collection), "%s/classify_cue_collection", dir);
+	snprintf(cue_track2, sizeof(cue_track2), "%s/01.flac", cue_collection);
+	snprintf(cue_track3, sizeof(cue_track3), "%s/02.flac", cue_collection);
+	snprintf(cue_sheet1, sizeof(cue_sheet1), "%s/disc-1.cue", cue_collection);
+	snprintf(cue_sheet2, sizeof(cue_sheet2), "%s/disc-2.cue", cue_collection);
+	snprintf(cue_uncovered, sizeof(cue_uncovered), "%s/classify_cue_uncovered", dir);
+	snprintf(uncovered_track1, sizeof(uncovered_track1), "%s/01.flac", cue_uncovered);
+	snprintf(uncovered_track2, sizeof(uncovered_track2), "%s/02.flac", cue_uncovered);
+	snprintf(uncovered_sheet, sizeof(uncovered_sheet), "%s/album.cue", cue_uncovered);
+
+	assert(mkdir(album, 0755) == 0);
+	assert(mkdir(mixed, 0755) == 0);
+	assert(mkdir(collection, 0755) == 0);
+	assert(mkdir(nested_a, 0755) == 0);
+	assert(mkdir(nested_b, 0755) == 0);
+	assert(mkdir(explicit_cover, 0755) == 0);
+	assert(mkdir(empty, 0755) == 0);
+	assert(mkdir(cue_album, 0755) == 0);
+	assert(mkdir(cue_collection, 0755) == 0);
+	assert(mkdir(cue_uncovered, 0755) == 0);
+
+	write_tagged_flac(album_track1, "One Album", "One Artist");
+	write_tagged_flac(album_track2, "One Album", "One Artist");
+	write_tagged_flac(mixed_track1, "First Album", "Artist A");
+	write_tagged_flac(mixed_track2, "Second Album", "Artist B");
+	write_tagged_flac(nested_track, "Album A", "Artist A");
+	write_tagged_flac(explicit_track, NULL, NULL);
+	write_tagged_flac(cue_track, NULL, NULL);
+	write_tagged_flac(cue_track2, NULL, NULL);
+	write_tagged_flac(cue_track3, NULL, NULL);
+	write_tagged_flac(uncovered_track1, NULL, NULL);
+	write_tagged_flac(uncovered_track2, NULL, NULL);
+	const char *cue_one = "FILE \"01.flac\" WAVE\n TRACK 01 AUDIO\n INDEX 01 00:00:00\n";
+	const char *cue_two = "FILE \"02.flac\" WAVE\n TRACK 01 AUDIO\n INDEX 01 00:00:00\n";
+	write_file_bytes(cue_album_sheet, (const uint8_t *)cue_one, strlen(cue_one));
+	write_file_bytes(cue_sheet1, (const uint8_t *)cue_one, strlen(cue_one));
+	write_file_bytes(cue_sheet2, (const uint8_t *)cue_two, strlen(cue_two));
+	write_file_bytes(uncovered_sheet, (const uint8_t *)cue_one, strlen(cue_one));
+
+	size_t cover_len = 0;
+	uint8_t *cover = make_test_jpeg(32, 32, 100, 120, 140, 77, &cover_len);
+	write_file_bytes(cover_path, cover, cover_len);
+	free(cover);
+
+	assert(cover_directory_is_album(album));
+	assert(!cover_directory_is_album(mixed)); // same folder, different album tags
+	assert(!cover_directory_is_album(collection)); // album subfolders belong to a collection
+	assert(cover_directory_is_album(explicit_cover)); // untagged album with an explicit sleeve
+	assert(cover_directory_is_album(cue_album)); // one CUE sheet groups otherwise untagged tracks
+	assert(!cover_directory_is_album(cue_collection)); // multiple CUE sheets are multiple releases
+	assert(!cover_directory_is_album(cue_uncovered)); // a CUE sheet must cover every direct track
+	assert(!cover_directory_is_album(empty));
+}
+
 static void test_1000_cover_cache_and_loader(const char *dir) {
 	cover_set_cache_dir(dir);
 
@@ -519,6 +634,24 @@ static void test_1000_cover_cache_and_loader(const char *dir) {
 		if (found) { assert(thumb.dsc.header.w == 36); cover_free(&thumb); }
 		if (i == 1) assert(picture_thumb_count(db_path, 36) == before);
 	}
+
+	// Browser directory requests classify before decoding: an album without
+	// art keeps the album fallback, while a mixed folder keeps its folder icon.
+	char album_path[512], mixed_path[512], cue_path[512];
+	snprintf(album_path, sizeof(album_path), "%s/classify_album", dir);
+	snprintf(mixed_path, sizeof(mixed_path), "%s/classify_mixed", dir);
+	snprintf(cue_path, sizeof(cue_path), "%s/classify_cue_album", dir);
+	const char *classified_folders[] = {album_path, mixed_path, cue_path};
+	for (int i = 0; i < 3; i++) {
+		coverloader_request_album_dir(COVERLOADER_BROWSER_BASE, classified_folders[i], 36);
+		cover_image_t thumb;
+		bool done = false, found = false, is_album = false;
+		for (int tries = 0; tries < 400 && !done; tries++) {
+			found = coverloader_take_album_dir(COVERLOADER_BROWSER_BASE, &thumb, &done, &is_album);
+			if (!done) { struct timespec ts = {0, 5 * 1000 * 1000}; nanosleep(&ts, NULL); }
+		}
+		assert(done && !found && is_album == (i != 1));
+	}
 	coverloader_release(COVERLOADER_BROWSER_BASE);
 }
 
@@ -591,6 +724,7 @@ int main(void) {
 	test_sigbus_card_removal_guard(dir);
 	test_ogg_and_wv_embedded_covers(dir);
 	test_immersive_reflection(dir);
+	test_browser_folder_classification(dir);
 	test_1000_cover_cache_and_loader(dir);
 
 	char cmd[600];
@@ -598,6 +732,6 @@ int main(void) {
 	int rc = system(cmd);
 	(void)rc;
 
-	printf("PASS covers (>8MB mmap cover, SIGBUS card-pull guard, Ogg/APEv2 covers, 1000-JPEG cache & id_worker)\n");
+	printf("PASS covers (>8MB mmap cover, SIGBUS card-pull guard, Ogg/APEv2 covers, album-folder detection, 1000-JPEG cache & id_worker)\n");
 	return 0;
 }

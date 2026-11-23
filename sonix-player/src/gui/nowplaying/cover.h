@@ -162,6 +162,12 @@ void cover_set_backdrop_band_brightness(int pct);
 // Returns false when there is no artwork for this path.
 bool cover_thumb_load(const char *path, bool is_dir, int size, cover_image_t *out);
 
+// True only when a directory represents one album: it has no child folders
+// and its tracks identify one release, one valid CUE sheet, or an explicit
+// folder cover. This keeps collections and mixed-album folders from borrowing
+// one arbitrary track's artwork.
+bool cover_directory_is_album(const char *path);
+
 // Like cover_thumb_load, but only looks in the on-disk thumbnail cache --
 // never decodes. For pages that want covers instantly or not at all: the queue
 // list builds a hundred rows in one go, where a hundred small cache reads are
