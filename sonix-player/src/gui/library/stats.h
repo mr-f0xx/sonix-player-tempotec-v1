@@ -8,7 +8,7 @@
 //
 // The shape follows what the player's own screens do -- a title row with the
 // range pills across the top, the two summary cards, the bar chart of the last
-// seven or thirty days, and the leaders by artist and by record -- and every
+// seven or thirty days or yearly all-time totals, and the leaders by artist and by record -- and every
 // number on it comes from src/system/library/listeningstats.h, which counts it
 // while the music plays.
 //

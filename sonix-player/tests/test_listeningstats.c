@@ -353,6 +353,29 @@ static void test_format(void) {
 	CHECK(strcmp(text, "100h 00m") == 0);
 }
 
+static void test_yearly(void) {
+	int first, count;
+	// 2028-06-01, with no history: the baseline and empty intervening years.
+	int64_t *values = library_stats_yearly(21336, &first, &count);
+	CHECK(values && first == 2026 && count == 3);
+	if (values && count == 3) CHECK(values[0] == 0 && values[1] == 0 && values[2] == 0);
+	free(values);
+	// New-year boundary, leap day and an older imported year; future history
+	// must not leak into the partial current year.
+	CHECK(library_stats_add(19722, 11, NULL, 0)); // 2023-12-31
+	CHECK(library_stats_add(19723, 22, NULL, 0)); // 2024-01-01
+	CHECK(library_stats_add(19782, 33, NULL, 0)); // 2024-02-29
+	CHECK(library_stats_add(20454, 44, NULL, 0)); // 2026-01-01
+	CHECK(library_stats_add(21550, 99, NULL, 0)); // future 2029
+	values = library_stats_yearly(21336, &first, &count);
+	CHECK(values && first == 2023 && count == 6);
+	if (values && count == 6) {
+		CHECK(values[0] == 11 && values[1] == 55 && values[2] == 0);
+		CHECK(values[3] == 44 && values[4] == 0 && values[5] == 0);
+	}
+	free(values);
+}
+
 int main(void) {
 	char dir[] = "/tmp/sonix-stats-test-XXXXXX";
 	if (!mkdtemp(dir)) {
@@ -386,6 +409,11 @@ int main(void) {
 	test_accumulator();
 	test_format();
 
+	library_close();
+	unlink(db);
+	// Isolate the fixed-date year tests from the real-today fixture above.
+	CHECK(library_open(db));
+	test_yearly();
 	library_close();
 	unlink(db);
 

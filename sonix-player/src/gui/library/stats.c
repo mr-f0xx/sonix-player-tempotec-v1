@@ -1,7 +1,10 @@
 #include "stats.h"
 
+#include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #include "src/gui/board_profile.h"
 #include "src/gui/fonts/fonts.h"
@@ -54,13 +57,10 @@ static lv_obj_t *albums_full_rows;
 static lv_obj_t *artists_empty;
 static lv_obj_t *albums_empty;
 
-// The chart's own data. LVGL keeps the points, so this array is the series:
-// it is written by stats_fill_chart() and never moved afterwards.
-static int32_t chart_week_values[STATS_CHART_WEEK_DAYS];
-static int32_t chart_month_values[STATS_CHART_MONTH_DAYS];
-static int32_t *chart_values = chart_week_values;
+// The series uses external storage; it must stay alive until the next fill.
+static int32_t chart_daily_values[STATS_CHART_MONTH_DAYS];
+static int32_t *chart_year_values;
 static int chart_points = STATS_CHART_WEEK_DAYS;
-static int chart_days = STATS_CHART_WEEK_DAYS;
 
 // How many rows a "Top" card on the page shows before "See all" takes over.
 #define STATS_PREVIEW_ROWS 2
@@ -210,13 +210,6 @@ static void range_pick_cb(lv_event_t *e) {
 // The chart
 // ---------------------------------------------------------------------------
 
-// Seven bars on a week, thirty on a month -- but a month of thirty bars on a
-// 228 px card is a 5 px bar and a 2 px gap, which reads as a grey smudge. The
-// month is drawn as a week would be, seven days to a bar: the last four weeks
-// and the two days before them, which is the same thirty days the pill counts
-// and the chart the user can actually read.
-#define STATS_CHART_BUCKETS 7
-
 static void chart_build(lv_obj_t *parent) {
 	int height = bp_pick(96, 150);
 
@@ -229,16 +222,14 @@ static void chart_build(lv_obj_t *parent) {
 	lv_chart_set_type(chart_obj, LV_CHART_TYPE_BAR);
 	lv_chart_set_point_count(chart_obj, chart_points);
 	lv_chart_set_div_line_count(chart_obj, 0, 0);
-	// A bar's slot is a seventh of the card, and the bar fills it: the chart's
-	// own default leaves a gap wide enough that seven bars would not line up
-	// with the seven letters under them.
-	lv_obj_set_style_pad_column(chart_obj, 0, LV_PART_MAIN);
+	// A one-pixel gap separates even the thirty narrow daily bars.
+	lv_obj_set_style_pad_column(chart_obj, 1, LV_PART_MAIN);
 	lv_obj_set_style_pad_column(chart_obj, 0, LV_PART_ITEMS);
 	// A chart with nothing in it yet still needs a range, or every value is a
 	// zero-height bar floating on the axis.
 	lv_chart_set_range(chart_obj, LV_CHART_AXIS_PRIMARY_Y, 0, 60);
 	chart_series = lv_chart_add_series(chart_obj, theme()->accent, LV_CHART_AXIS_PRIMARY_Y);
-	lv_chart_set_series_ext_y_array(chart_obj, chart_series, chart_values);
+	lv_chart_set_series_ext_y_array(chart_obj, chart_series, chart_daily_values);
 
 	// The bar's own look: rounded, the accent colour, and no point markers --
 	// the bars ARE the marks.
@@ -264,80 +255,116 @@ static void chart_build(lv_obj_t *parent) {
 	lv_obj_set_height(chart_marks, lv_font_get_line_height(&font_ui_14));
 }
 
-// The letters under the bars: the weekday initial of each bucket's last day,
-// which is what makes the chart readable -- a bar is "the days up to Sunday",
-// so the letter is the day it ends on.
-static void chart_marks_fill(const stats_day_t *days, int count) {
-	while (lv_obj_get_child_count(chart_marks) > 0) {
-		lv_obj_delete(lv_obj_get_child(chart_marks, 0));
-	}
-	static const char *const WEEKDAY_KEYS[7] = {"stats_day_sun", "stats_day_mon", "stats_day_tue", "stats_day_wed",
-												"stats_day_thu", "stats_day_fri", "stats_day_sat"};
-	// 1970-01-01 was a Thursday, and the day number is days since then.
-	int per_bucket = count / STATS_CHART_BUCKETS;
-	if (per_bucket < 1) {
-		per_bucket = 1;
-	}
-	for (int i = 0; i < STATS_CHART_BUCKETS; i++) {
-		int last = (i + 1) * per_bucket - 1;
-		if (last >= count) {
-			last = count - 1;
-		}
-		int weekday = last >= 0 ? (days[last].day + 4) % 7 : 0; // 0 = Sunday
-		lv_obj_t *mark = text(chart_marks, tr(WEEKDAY_KEYS[weekday]), &font_ui_14, theme()->text_secondary);
-		// A box of its own, one seventh of the card: the letter sits centred
-		// under the middle of the bucket, and flex_grow divides the row
-		// evenly even before the first layout pass has run.
-		lv_obj_set_width(mark, 0);
-		lv_obj_set_flex_grow(mark, 1);
-		lv_obj_set_height(mark, lv_font_get_line_height(&font_ui_14));
-		lv_obj_set_style_text_align(mark, LV_TEXT_ALIGN_CENTER, 0);
-		lv_obj_set_style_pad_all(mark, 0, 0);
-	}
+// A label row independent of LVGL's chart axis, which uses the theme font.
+static void chart_clear_marks(void) {
+	while (lv_obj_get_child_count(chart_marks) > 0) lv_obj_delete(lv_obj_get_child(chart_marks, 0));
+}
+
+static lv_obj_t *chart_mark(const char *label, lv_text_align_t align) {
+	lv_obj_t *mark = text(chart_marks, label, &font_ui_14, theme()->text_secondary);
+	lv_obj_set_width(mark, 0);
+	lv_obj_set_flex_grow(mark, 1);
+	lv_obj_set_height(mark, lv_font_get_line_height(&font_ui_14));
+	lv_obj_set_style_text_align(mark, align, 0);
+	lv_obj_set_style_pad_all(mark, 0, 0);
+	return mark;
+}
+
+static int weekday(int day) {
+	// 1970-01-01 was Thursday; return Monday=0 through Sunday=6.
+	return ((day + 3) % 7 + 7) % 7;
+}
+
+static int32_t chart_minutes(int64_t seconds) {
+	if (seconds <= 0) return 0;
+	int64_t minutes = seconds / 60 + (seconds % 60 >= 30);
+	if (minutes < 1) minutes = 1;
+	return minutes > INT32_MAX ? INT32_MAX : (int32_t)minutes;
+}
+
+static void chart_date(int day, char *out, size_t size) {
+	time_t stamp = (time_t)day * 86400;
+	struct tm date;
+	if (gmtime_r(&stamp, &date)) snprintf(out, size, "%d/%d", date.tm_mday, date.tm_mon + 1);
+	else snprintf(out, size, "?");
 }
 
 static void chart_fill(void) {
+	static const char *const WEEKDAY_KEYS[7] = {"stats_day_mon", "stats_day_tue", "stats_day_wed", "stats_day_thu",
+		"stats_day_fri", "stats_day_sat", "stats_day_sun"};
 	stats_day_t days[STATS_CHART_MONTH_DAYS];
-	for (int i = 0; i < STATS_CHART_MONTH_DAYS; i++) {
-		days[i].day = 0;
-		days[i].seconds = 0;
-		days[i].tracks = 0;
-	}
-	stats_daily(chart_days, days, chart_days);
+	int first_year = 2026, years = 0;
+	int64_t *year_seconds = NULL;
+	int32_t *values = chart_daily_values;
+	int32_t *new_year_values = NULL;
+	int points;
+	chart_clear_marks();
 
-	// Seconds per bucket, in whole minutes: a bar is "minutes listened", which
-	// is what the summary card above it is in and what the eye reads. A day
-	// with anything at all on it gets at least a minute, so a single track is
-	// not a bar of zero height.
-	int per_bucket = chart_days / chart_points;
-	if (per_bucket < 1) {
-		per_bucket = 1;
-	}
-	int32_t peak = 0;
-	for (int i = 0; i < chart_points; i++) {
-		long seconds = 0;
-		for (int j = 0; j < per_bucket; j++) {
-			int index = i * per_bucket + j;
-			if (index < chart_days) {
-				seconds += days[index].seconds;
+	if (stats_range == STATS_RANGE_ALL) {
+		year_seconds = stats_yearly(&first_year, &years);
+		if (year_seconds && years > 0) new_year_values = calloc((size_t)years, sizeof(*new_year_values));
+		if (new_year_values) {
+			points = years;
+			values = new_year_values;
+			for (int i = 0; i < years; i++) values[i] = chart_minutes(year_seconds[i]);
+		} else {
+			points = 1;
+			values[0] = 0;
+		}
+		free(year_seconds);
+		lv_label_set_text(chart_title, tr("stats_all_time"));
+		char label[16];
+		if (points <= 4) {
+			for (int i = 0; i < points; i++) {
+				snprintf(label, sizeof(label), "%d", first_year + i);
+				chart_mark(label, LV_TEXT_ALIGN_CENTER);
+			}
+		} else {
+			snprintf(label, sizeof(label), "%d", first_year);
+			chart_mark(label, LV_TEXT_ALIGN_LEFT);
+			snprintf(label, sizeof(label), "%d", first_year + (points - 1) / 2);
+			chart_mark(label, LV_TEXT_ALIGN_CENTER);
+			snprintf(label, sizeof(label), "%d", first_year + points - 1);
+			chart_mark(label, LV_TEXT_ALIGN_RIGHT);
+		}
+	} else {
+		bool month = stats_range == STATS_RANGE_MONTH;
+		points = month ? STATS_CHART_MONTH_DAYS : STATS_CHART_WEEK_DAYS;
+		stats_daily(points, days, points);
+		lv_label_set_text(chart_title, tr(month ? "stats_last_30_days" : "stats_last_7_days"));
+		for (int i = 0; i < points; i++) {
+			// The last seven days are reordered by weekday, not discarded or
+			// replaced with empty future days. Each value follows its own label.
+			int index = month ? i : weekday(days[i].day);
+			values[index] = chart_minutes(days[i].seconds);
+		}
+		if (month) {
+			// One narrow bar per day, but only three dates under the chart.
+			char label[16];
+			chart_date(days[0].day, label, sizeof(label));
+			chart_mark(label, LV_TEXT_ALIGN_LEFT);
+			chart_date(days[points / 2].day, label, sizeof(label));
+			chart_mark(label, LV_TEXT_ALIGN_CENTER);
+			chart_date(days[points - 1].day, label, sizeof(label));
+			chart_mark(label, LV_TEXT_ALIGN_RIGHT);
+		} else {
+			for (int i = 0; i < 7; i++) {
+				lv_obj_t *mark = chart_mark(tr(WEEKDAY_KEYS[i]), LV_TEXT_ALIGN_CENTER);
+				// The fixed Monday-first order wraps at today; make the wrap visible.
+				if (i == weekday(days[points - 1].day)) lv_obj_set_style_text_color(mark, theme()->accent, 0);
 			}
 		}
-		int32_t minutes = (int32_t)((seconds + 30) / 60);
-		if (seconds > 0 && minutes <= 0) {
-			minutes = 1;
-		}
-		chart_values[i] = minutes;
-		if (minutes > peak) {
-			peak = minutes;
-		}
 	}
-	// A quiet week still gets a scale: two minutes at the top, so one bar of
-	// one minute is a bar of half the card and not the whole of it.
-	int32_t top = peak > 2 ? peak : 2;
-	lv_chart_set_range(chart_obj, LV_CHART_AXIS_PRIMARY_Y, 0, top);
-	lv_chart_refresh(chart_obj);
 
-	chart_marks_fill(days, chart_days);
+	int32_t peak = 0;
+	for (int i = 0; i < points; i++) if (values[i] > peak) peak = values[i];
+	lv_chart_set_series_ext_y_array(chart_obj, chart_series, values);
+	lv_chart_set_point_count(chart_obj, points);
+	free(chart_year_values);
+	chart_year_values = new_year_values;
+	chart_points = points;
+	lv_chart_set_range(chart_obj, LV_CHART_AXIS_PRIMARY_Y, 0, peak > 2 ? peak : 2);
+	lv_chart_refresh(chart_obj);
 }
 
 // ---------------------------------------------------------------------------
@@ -451,31 +478,7 @@ static void stats_fill(void) {
 	range_paint();
 	summary_fill();
 
-	// The chart is the last seven days or the last thirty, whatever the range
-	// pills say: it is "how have I been listening lately", and a year of bars
-	// on a 228 px card is a smear. The pills govern the cards and the lists.
-	if (stats_range == STATS_RANGE_MONTH) {
-		chart_days = STATS_CHART_MONTH_DAYS;
-	} else {
-		chart_days = STATS_CHART_WEEK_DAYS;
-	}
-	chart_points = STATS_CHART_BUCKETS;
-	if (chart_obj) {
-		lv_chart_set_point_count(chart_obj, chart_points);
-	}
-	if (chart_days == STATS_CHART_MONTH_DAYS) {
-		chart_values = chart_month_values;
-		lv_label_set_text(chart_title, tr("stats_last_30_days"));
-	} else {
-		chart_values = chart_week_values;
-		lv_label_set_text(chart_title, tr("stats_last_7_days"));
-	}
-	if (chart_series) {
-		lv_chart_set_series_ext_y_array(chart_obj, chart_series, chart_values);
-	}
-	if (chart_obj) {
-		chart_fill();
-	}
+	if (chart_obj) chart_fill();
 
 	top_list_fill(artists_rows, STATS_TOP_ARTISTS, STATS_PREVIEW_ROWS, STATS_SLOT_ARTISTS, &icon_stats_artists);
 	top_list_fill(albums_rows, STATS_TOP_ALBUMS, STATS_PREVIEW_ROWS, STATS_SLOT_ALBUMS, &icon_stats_albums);

@@ -49,6 +49,8 @@ static uint32_t framebuffer[W * H];
 // Set by the empty-list section at the end: a history with nothing in it, the
 // state the "nothing played yet" line is the whole page for.
 static bool lists_empty;
+static int stub_year_count = 6;
+static int stub_today = 20780; // Monday 2026-11-23
 
 // The history the page is drawn from, held here so the test decides the shape
 // of the answer: four artists, three records, all with a file behind them (so a
@@ -66,16 +68,27 @@ void stats_daily(int days, stats_day_t *out, int count) {
 	// has an hour on it and one has a minute, so the chart has more than one
 	// height of bar to lay out.
 	for (int i = 0; i < count; i++) {
-		out[i].day = days - count + i;
+		out[i].day = stub_today - (days - 1) + i;
 		out[i].seconds = 0;
 		out[i].tracks = 0;
 	}
 	if (count >= 7) {
+		out[0].seconds = 120;
 		out[count - 1].seconds = 3600;
 		out[count - 1].tracks = 12;
 		out[count - 3].seconds = 60;
 		out[count - 3].tracks = 1;
 	}
+}
+
+int64_t *stats_yearly(int *first_year, int *count) {
+	*first_year = 2026;
+	*count = stub_year_count;
+	int64_t *values = calloc((size_t)*count, sizeof(*values));
+	assert(values);
+	values[0] = 60;
+	values[*count - 1] = 3600;
+	return values;
 }
 
 void stats_summary(stats_range_t range, stats_summary_t *out) {
@@ -389,6 +402,23 @@ int main(void) {
 	assert(pva.y1 > ta.y1 && pva.x1 >= ta.x1 - 4);
 
 	// --- the chart --------------------------------------------------------------
+	lv_obj_t *all_title = find_label(stats_screen, "stats_all_time"); // pill label
+	(void)all_title;
+	lv_obj_t *chart_card = lv_obj_get_parent(find_label(stats_screen, "2026"));
+	lv_obj_t *chart = lv_obj_get_child(lv_obj_get_parent(chart_card), 1);
+	assert(lv_obj_check_type(chart, &lv_chart_class));
+	assert(lv_chart_get_point_count(chart) == 6);
+	lv_chart_series_t *series = lv_chart_get_series_next(chart, NULL);
+	int32_t *values = lv_chart_get_series_y_array(chart, series);
+	assert(values[0] == 1 && values[5] == 60);
+	assert(find_label(stats_screen, "2031"));
+
+	lv_obj_send_event(lv_obj_get_parent(week), LV_EVENT_CLICKED, NULL);
+	lv_obj_update_layout(stats_screen);
+	assert(lv_chart_get_point_count(chart) == 7);
+	values = lv_chart_get_series_y_array(chart, series);
+	// Monday is today, so the newest bar belongs under Monday, not Sunday.
+	assert(values[0] == 60 && values[1] == 2 && values[5] == 1);
 	lv_obj_t *chart_title = find_label(stats_screen, "stats_last_7_days");
 	assert(chart_title);
 	// Seven weekday letters under the chart, one per bucket: read straight off
@@ -405,6 +435,10 @@ int main(void) {
 	for (int i = 0; i < 7; i++) {
 		lv_obj_t *letter = lv_obj_get_child(letters_row, i);
 		assert(lv_obj_check_type(letter, &lv_label_class));
+		// Every label is in Monday-to-Sunday order.
+		static const char *const expected[] = {"stats_day_mon", "stats_day_tue", "stats_day_wed", "stats_day_thu",
+			"stats_day_fri", "stats_day_sat", "stats_day_sun"};
+		assert(strcmp(lv_label_get_text(letter), expected[i]) == 0);
 		// Every one of them is one of the weekday tags.
 		const char *text = lv_label_get_text(letter);
 		assert(strncmp(text, "stats_day_", 10) == 0);
@@ -425,6 +459,42 @@ int main(void) {
 		assert(a.x1 >= card_area.x1 - 1 && a.x2 <= card_area.x2 + 1);
 		prev = a;
 	}
+
+	lv_obj_send_event(lv_obj_get_parent(month), LV_EVENT_CLICKED, NULL);
+	lv_obj_update_layout(stats_screen);
+	assert(find_label(stats_screen, "stats_last_30_days"));
+	assert(lv_chart_get_point_count(chart) == 30);
+	values = lv_chart_get_series_y_array(chart, series);
+	assert(values[0] == 2 && values[27] == 1 && values[29] == 60);
+	lv_draw_buf_t *month_shot = lv_snapshot_take(chart, LV_COLOR_FORMAT_RGB888);
+	assert(month_shot);
+	lv_draw_buf_destroy(month_shot);
+	assert(lv_obj_get_child_count(letters_row) == 3); // sparse dates, not 30 labels
+	assert(strcmp(lv_label_get_text(lv_obj_get_child(letters_row, 0)), "25/10") == 0);
+	assert(strcmp(lv_label_get_text(lv_obj_get_child(letters_row, 2)), "23/11") == 0);
+	// Repeated changes must replace the chart's external array safely.
+	lv_obj_send_event(lv_obj_get_parent(all), LV_EVENT_CLICKED, NULL);
+	assert(lv_chart_get_point_count(chart) == 6);
+	values = lv_chart_get_series_y_array(chart, series);
+	assert(values[0] == 1 && values[5] == 60);
+	stub_year_count = 4;
+	stats_refresh();
+	lv_obj_update_layout(stats_screen);
+	assert(lv_chart_get_point_count(chart) == 4);
+	assert(lv_obj_get_child_count(letters_row) == 4);
+	assert(find_label(stats_screen, "2027") && find_label(stats_screen, "2029"));
+	stub_year_count = 1;
+	stats_refresh();
+	lv_obj_update_layout(stats_screen);
+	assert(lv_chart_get_point_count(chart) == 1);
+	lv_draw_buf_t *year_shot = lv_snapshot_take(chart, LV_COLOR_FORMAT_RGB888);
+	assert(year_shot);
+	lv_draw_buf_destroy(year_shot);
+	assert(lv_obj_get_child_count(letters_row) == 1);
+	assert(strcmp(lv_label_get_text(lv_obj_get_child(letters_row, 0)), "2026") == 0);
+	stub_year_count = 6;
+	stats_refresh();
+	lv_obj_update_layout(stats_screen);
 
 	// --- the two top lists ------------------------------------------------------
 	lv_obj_t *top_artists = find_label(stats_screen, "stats_top_artists");
@@ -503,6 +573,18 @@ int main(void) {
 	assert(week_plays);
 	assert(!find_label(stats_screen, "12h 34m"));
 	assert(!find_label(stats_screen, "195"));
+	// A Sunday and a Tuesday still map every last-seven-days value to its
+	// weekday, including across the preceding week.
+	stub_today = 20779; // Sunday
+	stats_refresh();
+	values = lv_chart_get_series_y_array(chart, series);
+	assert(values[0] == 2 && values[4] == 1 && values[6] == 60);
+	stub_today = 20781; // Tuesday
+	stats_refresh();
+	values = lv_chart_get_series_y_array(chart, series);
+	assert(values[1] == 60 && values[2] == 2 && values[6] == 1);
+	stub_today = 20780;
+
 
 	// --- the See all pages ------------------------------------------------------
 	// The artist list is a screen of its own, headed like the page it came from,

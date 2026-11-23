@@ -665,6 +665,11 @@ bool library_stats_add(int day, long seconds, const library_stats_play_t *plays,
 // are left at zero.
 void library_stats_daily(int first_day, int count, stats_day_row_t *out);
 
+// Calendar-year totals through today, oldest year first (including empty years).
+// Starts in 2026 unless older history exists; returns a malloc-owned array or
+// NULL on allocation failure. The caller supplies a UTC day for consistency.
+int64_t *library_stats_yearly(int today, int *first_year, int *count);
+
 // The summary cards of one range: see listening_stats_summary_t.
 void library_stats_summary(int range, listening_stats_summary_t *out);
 

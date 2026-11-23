@@ -73,6 +73,9 @@ typedef enum {
 // the chart's own week or month.
 void stats_daily(int days, stats_day_t *out, int count);
 
+// Calendar-year totals for all time, allocated for the caller to free.
+int64_t *stats_yearly(int *first_year, int *count);
+
 // The summary cards for one range.
 void stats_summary(stats_range_t range, stats_summary_t *out);
 

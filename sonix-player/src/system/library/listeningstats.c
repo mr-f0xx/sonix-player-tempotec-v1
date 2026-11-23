@@ -205,6 +205,10 @@ void stats_daily(int days, stats_day_t *out, int count) {
 	}
 }
 
+int64_t *stats_yearly(int *first_year, int *count) {
+	return library_stats_yearly(library_stats_today(), first_year, count);
+}
+
 void stats_summary(stats_range_t range, stats_summary_t *out) {
 	if (!out) {
 		return;

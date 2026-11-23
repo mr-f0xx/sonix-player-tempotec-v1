@@ -8080,6 +8080,47 @@ void library_stats_daily(int first_day, int count, stats_day_row_t *out) {
 	pthread_mutex_unlock(&db_lock);
 }
 
+// Aggregate by UTC calendar year, including gaps and the current partial year.
+// Do not silently drop older imported history: 2026 is a baseline, not a cutoff.
+int64_t *library_stats_yearly(int today, int *first_year, int *count) {
+	if (!first_year || !count) return NULL;
+	*count = 0;
+	time_t now = (time_t)today * 86400;
+	struct tm tm_now;
+	if (!gmtime_r(&now, &tm_now)) return NULL;
+	int last = tm_now.tm_year + 1900;
+	int first = last < 2026 ? last : 2026;
+
+	pthread_mutex_lock(&db_lock);
+	sqlite3_stmt *stmt = NULL;
+	if (db && sqlite3_prepare_v2(db,
+			"SELECT CAST(strftime('%Y', day * 86400, 'unixepoch') AS INTEGER), SUM(seconds)"
+			" FROM LISTEN_DAY WHERE day >= 0 AND day <= ?1 GROUP BY 1 ORDER BY 1", -1, &stmt, NULL) == SQLITE_OK) {
+		sqlite3_bind_int(stmt, 1, today);
+		// Discover the oldest year, then replay the same ordered statement.
+		if (sqlite3_step(stmt) == SQLITE_ROW && sqlite3_column_type(stmt, 0) != SQLITE_NULL) {
+			int oldest = sqlite3_column_int(stmt, 0);
+			if (oldest >= 1970 && oldest < first) first = oldest;
+		}
+		sqlite3_reset(stmt);
+		sqlite3_bind_int(stmt, 1, today);
+	}
+	int n = last - first + 1;
+	int64_t *values = calloc((size_t)n, sizeof(*values));
+	if (values && stmt) {
+		while (sqlite3_step(stmt) == SQLITE_ROW) {
+			int year = sqlite3_column_int(stmt, 0);
+			if (year >= first && year <= last) values[year - first] = sqlite3_column_int64(stmt, 1);
+		}
+	}
+	if (stmt) sqlite3_finalize(stmt);
+	pthread_mutex_unlock(&db_lock);
+	if (!values) return NULL;
+	*first_year = first;
+	*count = n;
+	return values;
+}
+
 // The summary cards. Distinct tracks, records and artists come from the same
 // rows the top lists do, so the card can never say there were three artists
 // under a list of four.
