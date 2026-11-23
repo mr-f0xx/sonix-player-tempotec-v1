@@ -34,6 +34,15 @@ void replaygain_set_mode(replaygain_mode_t mode) {
 	config_save();
 }
 
+// The peak the correction has to stay clear of. A file tagged with a true
+// (inter-sample) peak is protected by that figure: the sample peak can read
+// below full scale while the signal between samples overshoots it, and the
+// overshoot is what clips. A file with both is protected by the larger -- a
+// tag can contradict itself, and the larger is the safe reading.
+static double peak_effective(double sample_peak, double true_peak) {
+	return true_peak > sample_peak ? true_peak : sample_peak;
+}
+
 static int compute_gain(const song_metadata_t *meta, replaygain_mode_t *resolved_out, double *db_out, double *peak_out) {
 	replaygain_mode_t mode = replaygain_mode();
 	if (resolved_out) {
@@ -65,16 +74,16 @@ static int compute_gain(const song_metadata_t *meta, replaygain_mode_t *resolved
 	double peak;
 	if (mode == REPLAYGAIN_ALBUM && meta->has_album_gain) {
 		db = meta->album_gain_db;
-		peak = meta->album_peak;
+		peak = peak_effective(meta->album_peak, meta->album_true_peak);
 	} else if (meta->has_track_gain) {
 		// Album mode falls back to the track figure rather than to nothing: a
 		// file tagged by a track-only tagger is still better corrected than
 		// left alone, and it is what every other player does.
 		db = meta->track_gain_db;
-		peak = meta->track_peak;
+		peak = peak_effective(meta->track_peak, meta->track_true_peak);
 	} else if (meta->has_album_gain) {
 		db = meta->album_gain_db;
-		peak = meta->album_peak;
+		peak = peak_effective(meta->album_peak, meta->album_true_peak);
 	} else {
 		return 32768; // nothing to go on
 	}
@@ -91,6 +100,8 @@ static int compute_gain(const song_metadata_t *meta, replaygain_mode_t *resolved
 	// The peak keeps the correction from clipping: a track measured at 0.95
 	// full scale takes about half a decibel before the loudest sample folds
 	// over, and the fold-over is more audible than the loudness difference.
+	// With a true peak tag, `peak` is the inter-sample peak, which is the
+	// figure that actually decides it.
 	if (peak > 0.0 && factor * peak > 1.0) {
 		factor = 1.0 / peak;
 		db = 20.0 * log10(factor);
@@ -115,6 +126,16 @@ static int compute_gain(const song_metadata_t *meta, replaygain_mode_t *resolved
 
 int replaygain_compute_q15(const song_metadata_t *meta) {
 	return compute_gain(meta, NULL, NULL, NULL);
+}
+
+double replaygain_effective_peak(const song_metadata_t *meta, bool album) {
+	if (!meta) {
+		return 0.0;
+	}
+	if (album) {
+		return peak_effective(meta->album_peak, meta->album_true_peak);
+	}
+	return peak_effective(meta->track_peak, meta->track_true_peak);
 }
 
 void replaygain_load(const song_metadata_t *meta) {

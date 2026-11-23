@@ -5202,3 +5202,35 @@ measurement follows the text size in force then.
 
 `tests/ui/test_tools_pages.c` checks that the key is wider than its word on
 both panels, and that the whole dialog stays inside the 240×320 panel.
+
+## ReplayGain true peak tags
+
+ReplayGain was read from the tags and applied, but the only peak it knew was
+the sample peak, and the sample peak is not the number that decides whether a
+corrected track clips. A recording can have every sample below full scale and
+still reconstruct to an inter-sample overshoot above it -- the overshoot is
+what folds over in the converter. Taggers that measure it write
+`REPLAYGAIN_TRACK_TRUE_PEAK` / `REPLAYGAIN_ALBUM_TRUE_PEAK`, and the player
+dropped them: `replaygain_field()` had no case for either, so the correction
+was held clear of the sample peak alone.
+
+`metadata.c` now reads both, plus a bare `REPLAYGAIN_TRUE_PEAK` (read as the
+track's, the way a bare sample peak would be), in Vorbis comments, ID3v2 TXXX,
+MP4 freeform atoms and APEv2 -- the last through the item whitelist in
+`apedec.c`, which is why a .ape or .wv tagged with a true peak read as if it
+had none. `song_metadata_t` carries them beside the sample peaks, and
+`fill_missing()` carries them across from a secondary tag.
+
+`peak_effective()` in `replaygain.c` picks the figure the correction has to
+stay clear of: the true peak when there is one, the sample peak otherwise,
+and the larger of the two when a file contradicts itself. `compute_gain()`
+takes it for both the track and the album pair, so album mode is protected by
+the album true peak. `replaygain_effective_peak()` exposes the same choice to
+the details screen, which already printed a peak and now prints the one the
+gain was actually held back from.
+
+`tests/test_tags.c` builds FLAC and APEv2 fixtures carrying the tags and
+checks they arrive; `tests/test_crossfade.c` checks that a +6 dB correction
+against a 0.5 sample peak and a 1.1 true peak lands at 1/1.1, that a true
+peak below the sample peak does not loosen the limit, and that album mode
+uses the album pair.

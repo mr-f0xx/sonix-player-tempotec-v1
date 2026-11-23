@@ -742,7 +742,8 @@ static void walk_items(FILE *f, const ape_tag_t *tag,
 static const char *const TAG_ITEMS[] = {
 	"Title",		 "Artist", "Album", "Album Artist",	 "AlbumArtist",			  "album_artist",
 	"Genre",		 "Track",  "Year",	"date",			 "replaygain_track_gain", "replaygain_track_peak",
-	"replaygain_album_gain", "replaygain_album_peak", "Compilation", "Disc", "DiscNumber", "TrackNumber",
+	"replaygain_album_gain", "replaygain_album_peak", "replaygain_track_true_peak", "replaygain_album_true_peak",
+	"Compilation", "Disc", "DiscNumber", "TrackNumber",
 };
 
 typedef struct {
