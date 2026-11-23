@@ -1265,28 +1265,12 @@ void appearance_init(gui_config_t *cfg) {
 	lv_obj_set_style_text_font(boot_light_note, &font_ui_22, 0);
 	lv_label_set_text(boot_light_note, tr("appearance_boot_brightness_note"));
 
-	// Under the card, like the other notes on this page: when the change
-	// becomes visible.
-	lv_obj_t *boot_note = lv_label_create(container);
-	lv_label_set_long_mode(boot_note, LV_LABEL_LONG_WRAP);
-	lv_obj_set_width(boot_note, lv_pct(100));
-	lv_obj_add_style(boot_note, &theme_style_text_dim, 0);
-	lv_obj_set_style_text_font(boot_note, &font_ui_22, 0);
-	lv_label_set_text(boot_note, tr("appearance_boot_screen_note"));
-
 	// Which picture "Custom" means, and the way to it. Its own row rather
 	// than a fifth pill with a name on it: the name is a file name from the
 	// card, and a pill long enough to hold one would push the others off a
 	// 240 px panel.
 	settingsrow_add(container, "appearance_boot_picture", &boot_picture_value, switch_screen_cb,
 					bootpicpage_screen);
-
-	lv_obj_t *boot_picture_note = lv_label_create(container);
-	lv_label_set_long_mode(boot_picture_note, LV_LABEL_LONG_WRAP);
-	lv_obj_set_width(boot_picture_note, lv_pct(100));
-	lv_obj_add_style(boot_picture_note, &theme_style_text_dim, 0);
-	lv_obj_set_style_text_font(boot_picture_note, &font_ui_22, 0);
-	lv_label_set_text(boot_picture_note, tr("appearance_boot_picture_note"));
 
 	// Where the clock sits in the status bar.
 	lv_obj_t *clock_card = lv_obj_create(container);

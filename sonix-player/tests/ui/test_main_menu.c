@@ -842,6 +842,13 @@ int main(int argc, char **argv) {
 	/* And the Appearance page says which one, on the way back in. */
 	lv_obj_send_event(appearance_screen, LV_EVENT_SCREEN_LOADED, NULL);
 	assert(find_label(appearance_screen, "a.jpg"));
+	assert(strcmp(tr("appearance_boot_picture"), "Custom bootlogo") == 0);
+	lv_obj_t *boot_light_note = find_label(appearance_screen, tr("appearance_boot_brightness_note"));
+	lv_obj_t *boot_picture_label = find_label(appearance_screen, tr("appearance_boot_picture"));
+	lv_obj_t *clock_label = find_label(appearance_screen, tr("appearance_clock_position"));
+	assert(boot_light_note && boot_picture_label && clock_label);
+	assert(lv_obj_get_sibling(boot_light_note, 1) == lv_obj_get_parent(boot_picture_label));
+	assert(lv_obj_get_sibling(lv_obj_get_parent(boot_picture_label), 1) == lv_obj_get_parent(clock_label));
 
 	/* Custom is only an answer while the copy is there. */
 	assert(theme_boot_screen() == BOOTLOGO_CUSTOM);
