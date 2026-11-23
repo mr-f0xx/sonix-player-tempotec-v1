@@ -152,38 +152,82 @@ static bool remember_worth_saving(const device_state_t *state) {
 		   !jellyfincache_owns(state->current_file) && !subsonicstream_owns(state->current_file);
 }
 
-// True when the current track was restored paused at boot and has not yet
-// been started in this session.
-static bool restored_uncounted;
+	static void record_current_track_play(void) {
+		if (!current_metadata_file[0] || audiobook_is_playing() || podcastcache_is_episode(current_metadata_file) ||
+			qobuzcache_owns(current_metadata_file) || tidalcache_owns(current_metadata_file) ||
+			soundcloudcache_is_soundcloud_path(current_metadata_file) || jellyfincache_owns(current_metadata_file) ||
+			subsonicstream_owns(current_metadata_file)) {
+			return;
+		}
+		library_record_play(current_metadata_file, current_metadata.title, current_metadata.artist);
 
-static void record_current_track_play(void) {
-	if (!current_metadata_file[0] || audiobook_is_playing() || podcastcache_is_episode(current_metadata_file) ||
-		qobuzcache_owns(current_metadata_file) || tidalcache_owns(current_metadata_file) ||
-		soundcloudcache_is_soundcloud_path(current_metadata_file) || jellyfincache_owns(current_metadata_file) ||
-		subsonicstream_owns(current_metadata_file)) {
-		return;
+		// The same play for the Stats page. Two stores and not one because the
+		// two answer different questions: Most played wants a single number per
+		// file, forever, and the Stats page wants that number split across the
+		// days it was earned on. Neither can be derived from the other. This one
+		// is banked and written a minute later -- see listeningstats.c -- so a
+		// track started and skipped costs nothing on the card.
+		stats_note_play(current_metadata_file);
 	}
-	library_record_play(current_metadata_file, current_metadata.title, current_metadata.artist);
 
-	// The same play for the Stats page. Two stores and not one because the
-	// two answer different questions: Most played wants a single number per
-	// file, forever, and the Stats page wants that number split across the
-	// days it was earned on. Neither can be derived from the other. This one
-	// is banked and written a minute later -- see listeningstats.c -- so a
-	// track started and skipped costs nothing on the card.
-	stats_note_play(current_metadata_file);
-}
+	static bool current_track_counted = false;
+	static double current_track_listened_secs = 0.0;
+	static double last_poll_progress = 0.0;
+	static char current_track_counted_file[512] = "";
 
-void device_state_remember_restored(const char *path, double position) {
-	snprintf(remember.file, sizeof(remember.file), "%s", path ? path : "");
-	remember.status = AUDIO_STATUS_PAUSED;
-	remember.pos = position;
-	remember.saved_ms = remember_now_ms();
-	remember.have = true;
-	remember.restore_pos = position;
-	remember.restore_ms = remember.saved_ms;
-	restored_uncounted = path && path[0];
-}
+	void device_state_poll(void) {
+		device_state_remember_note();
+
+		device_state_t state;
+		device_state_get(&state);
+
+		if (!state.current_file[0] || state.live) {
+			return;
+		}
+
+		if (strcmp(state.current_file, current_track_counted_file) != 0) {
+			snprintf(current_track_counted_file, sizeof(current_track_counted_file), "%s", state.current_file);
+			current_track_counted = false;
+			current_track_listened_secs = 0.0;
+			last_poll_progress = state.progress_current_secs;
+		}
+
+		if (state.progress_current_secs < last_poll_progress) {
+			if (state.progress_current_secs < 5.0 && current_track_counted) {
+				current_track_counted = false;
+				current_track_listened_secs = 0.0;
+			}
+		}
+
+		if (state.status == AUDIO_STATUS_PLAYING && !device_state_scrub_active(NULL)) {
+			double moved = state.progress_current_secs - last_poll_progress;
+			if (moved > 0.0 && moved < 5.0) {
+				current_track_listened_secs += moved;
+			}
+		}
+		last_poll_progress = state.progress_current_secs;
+
+		if (!current_track_counted && state.progress_total_secs > 0) {
+			double threshold = state.progress_total_secs / 2.0;
+			if (threshold > 240.0) {
+				threshold = 240.0;
+			}
+			if (current_track_listened_secs >= threshold) {
+				current_track_counted = true;
+				record_current_track_play();
+			}
+		}
+	}
+
+	void device_state_remember_restored(const char *path, double position) {
+		snprintf(remember.file, sizeof(remember.file), "%s", path ? path : "");
+		remember.status = AUDIO_STATUS_PAUSED;
+		remember.pos = position;
+		remember.saved_ms = remember_now_ms();
+		remember.have = true;
+		remember.restore_pos = position;
+		remember.restore_ms = remember.saved_ms;
+	}
 
 void device_state_remember_note(void) {
 	if (!remember_enabled()) {
@@ -586,9 +630,7 @@ static void load_and_play_at(const char *filepath, double position) {
 		audio_play_at(current_metadata_file, position);
 	} else {
 		audio_play(current_metadata_file);
-		record_current_track_play();
 	}
-	restored_uncounted = false;
 
 	// Any track load supersedes the note: it belongs to the one press that
 	// follows the storage coming back.
@@ -1782,8 +1824,6 @@ bool device_state_take_crossfade_handoff(void) {
 		podcastcache_note_played(current_metadata_file);
 	}
 
-	record_current_track_play();
-	restored_uncounted = false;
 	interrupted_file[0] = '\0';
 	interrupted_pos = -1.0;
 	queue_persist();
@@ -1828,13 +1868,9 @@ audio_status_t device_state_toggle_play_pause(void) {
 			audio_get_progress(&current, &total);
 			double back = current - (double)audiobook_rewind_seconds();
 			audio_seek(back > 0 ? back : 0);
-		}
-		audio_resume();
-		if (restored_uncounted) {
-			restored_uncounted = false;
-			record_current_track_play();
-		}
-		return AUDIO_STATUS_PLAYING;
+			}
+			audio_resume();
+			return AUDIO_STATUS_PLAYING;
 	case AUDIO_STATUS_STOPPED:
 	default:
 		// Playback ended (or was stopped): restart the currently-loaded track
