@@ -665,6 +665,10 @@ bool library_stats_add(int day, long seconds, const library_stats_play_t *plays,
 // are left at zero.
 void library_stats_daily(int first_day, int count, stats_day_row_t *out);
 
+// Calendar dates and current-year month totals, using the UTC day index.
+bool library_stats_calendar(int today, int *first_month, int *month_days, int *month, int *year);
+void library_stats_monthly(int today, int64_t out[12]);
+
 // The summary cards of one range: see listening_stats_summary_t.
 void library_stats_summary(int range, listening_stats_summary_t *out);
 

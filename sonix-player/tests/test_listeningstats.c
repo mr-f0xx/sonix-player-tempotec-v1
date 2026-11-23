@@ -17,6 +17,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include <unistd.h>
 
 #include "src/system/core/config.h"
@@ -29,6 +30,12 @@
 #include "src/system/playback/playlist.h"
 
 static int failures;
+static int fake_today = 20780; // 2026-11-23 UTC
+time_t __wrap_time(time_t *out) {
+	time_t now = (time_t)fake_today * 86400;
+	if (out) *out = now;
+	return now;
+}
 
 #define CHECK(cond)                                                                             \
 	do {                                                                                        \
@@ -161,8 +168,7 @@ static void test_write_and_summary(void) {
 	CHECK(week.albums == 2);
 	CHECK(week.artists == 2);
 
-	// The month does not: forty days back is outside its thirty-day window,
-	// which is what makes the range pills mean something.
+	// Forty days back is in the preceding calendar month.
 	stats_summary_t month;
 	stats_summary(STATS_RANGE_MONTH, &month);
 	CHECK(month.seconds == 900);
@@ -216,10 +222,10 @@ static void test_daily(void) {
 	// Thirty days: twenty-nine back from today, and today's row still last.
 	stats_day_t chart[STATS_CHART_MONTH_DAYS];
 	memset(chart, 0, sizeof(chart));
-	stats_daily(STATS_CHART_MONTH_DAYS, chart, STATS_CHART_MONTH_DAYS);
+	stats_daily(30, chart, 30);
 	CHECK(chart[0].day == today - 29);
-	CHECK(chart[STATS_CHART_MONTH_DAYS - 1].day == today);
-	CHECK(chart[STATS_CHART_MONTH_DAYS - 1].seconds == 900);
+	CHECK(chart[29].day == today);
+	CHECK(chart[29].seconds == 900);
 }
 
 static void test_top_lists(void) {
@@ -353,6 +359,58 @@ static void test_format(void) {
 	CHECK(strcmp(text, "100h 00m") == 0);
 }
 
+static void test_calendar(void) {
+	int first, count, month, year;
+	CHECK(library_stats_calendar(20485, &first, &count, &month, &year)); // Feb 2026
+	CHECK(first == 20485 && count == 28 && month == 2 && year == 2026);
+	CHECK(library_stats_calendar(21243, &first, &count, &month, &year)); // leap day
+	CHECK(first == 21215 && count == 29 && month == 2 && year == 2028);
+	CHECK(library_stats_calendar(20454, &first, &count, &month, &year));
+	CHECK(count == 31 && month == 1);
+	CHECK(library_stats_calendar(20758, &first, &count, &month, &year));
+	CHECK(count == 30 && month == 11);
+
+	seed_index();
+	CHECK(write_minute(20453, "/card/a/01.flac", 10, 1)); // previous year
+	CHECK(write_minute(20454, "/card/a/01.flac", 60, 1));
+	CHECK(write_minute(20512, "/card/a/02.flac", 120, 2));
+	CHECK(write_minute(20758, "/card/b/01.flac", 180, 3));
+	CHECK(write_minute(20780, "/card/b/01.flac", 240, 4));
+	CHECK(write_minute(20787, "/card/a/01.flac", 999, 5)); // future in month
+	CHECK(write_minute(20788, "/card/a/01.flac", 888, 6)); // future month
+	fake_today = 20780;
+	stats_day_t days[STATS_CHART_MONTH_DAYS];
+	CHECK(stats_calendar_month(days, &month, &year) == 30);
+	CHECK(month == 11 && year == 2026 && days[0].day == 20758);
+	CHECK(days[0].seconds == 180 && days[22].seconds == 240 && days[29].seconds == 0);
+	int64_t months[12];
+	stats_calendar_year(months, &year);
+	CHECK(year == 2026 && months[0] == 60 && months[1] == 120 && months[10] == 420 && months[11] == 0);
+	stats_summary_t summary;
+	stats_summary(STATS_RANGE_MONTH, &summary);
+	CHECK(summary.seconds == 420 && summary.plays == 7);
+	CHECK(summary.tracks == 1);
+	stats_entry_t entries[4];
+	CHECK(stats_top(STATS_TOP_TRACKS, STATS_RANGE_MONTH, 0, 4, entries) == 1);
+	CHECK(strcmp(entries[0].name, "Third") == 0 && entries[0].plays == 7);
+	CHECK(stats_top_count(STATS_TOP_TRACKS, STATS_RANGE_MONTH) == 1);
+	stats_summary(STATS_RANGE_YEAR, &summary);
+	CHECK(summary.seconds == 600 && summary.plays == 10 && summary.tracks == 3);
+	CHECK(stats_top_count(STATS_TOP_TRACKS, STATS_RANGE_YEAR) == 3);
+	fake_today = 21243;
+	CHECK(library_stats_add(21243, 55, NULL, 0));
+	CHECK(stats_calendar_month(days, &month, &year) == 29);
+	CHECK(days[28].seconds == 55);
+	stats_calendar_year(months, &year);
+	CHECK(year == 2028 && months[1] == 55);
+	fake_today = 20512;
+	CHECK(stats_calendar_month(days, &month, &year) == 28);
+	fake_today = 20454;
+	CHECK(stats_calendar_month(days, &month, &year) == 31);
+	stats_summary(STATS_RANGE_YEAR, &summary);
+	CHECK(summary.seconds == 60 && summary.plays == 1);
+}
+
 int main(void) {
 	char dir[] = "/tmp/sonix-stats-test-XXXXXX";
 	if (!mkdtemp(dir)) {
@@ -386,6 +444,11 @@ int main(void) {
 	test_accumulator();
 	test_format();
 
+	library_close();
+	unlink(db);
+	// Isolate the fixed-date year tests from the real-today fixture above.
+	CHECK(library_open(db));
+	test_calendar();
 	library_close();
 	unlink(db);
 

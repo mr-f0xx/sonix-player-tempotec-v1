@@ -7844,19 +7844,29 @@ uint32_t library_play_counts_revision(void) {
 // asks for a summary, a chart and three top lists when it is opened.
 // ---------------------------------------------------------------------------
 
-// The first day a range covers, inclusive. All time is 0 -- no day is before
-// it, since the epoch is day 0.
+// The history is indexed by UTC days. Use that same calendar for every view.
+bool library_stats_calendar(int today, int *first_month, int *month_days, int *month, int *year) {
+	time_t stamp = (time_t)today * 86400;
+	struct tm date;
+	if (!gmtime_r(&stamp, &date)) return false;
+	int y = date.tm_year + 1900;
+	static const int lengths[] = {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
+	int leap = y % 4 == 0 && (y % 100 != 0 || y % 400 == 0);
+	if (first_month) *first_month = today - date.tm_mday + 1;
+	if (month_days) *month_days = lengths[date.tm_mon] + (date.tm_mon == 1 && leap);
+	if (month) *month = date.tm_mon + 1;
+	if (year) *year = y;
+	return true;
+}
+
 static int stats_first_day(int range, int today) {
-	switch (range) {
-	case 0: // week: today and the six before it
-		return today - 6;
-	case 1: // month
-		return today - 29;
-	case 2: // year
-		return today - 364;
-	default:
-		return 0;
-	}
+	if (range == 0) return today - 6;
+	time_t stamp = (time_t)today * 86400;
+	struct tm date;
+	if (!gmtime_r(&stamp, &date)) return today;
+	if (range == 1) return today - date.tm_mday + 1;
+	if (range == 2) return today - date.tm_yday;
+	return 0; // retained for internal callers needing the entire history
 }
 
 // A text column into a fixed buffer, NULL as empty. Every string the history
@@ -8080,24 +8090,48 @@ void library_stats_daily(int first_day, int count, stats_day_row_t *out) {
 	pthread_mutex_unlock(&db_lock);
 }
 
+// Twelve calendar-month totals in the current UTC year, up to today.
+void library_stats_monthly(int today, int64_t out[12]) {
+	if (!out) return;
+	memset(out, 0, 12 * sizeof(*out));
+	int first = stats_first_day(2, today);
+	pthread_mutex_lock(&db_lock);
+	if (db) {
+		sqlite3_stmt *stmt = NULL;
+		const char *sql = "SELECT CAST(strftime('%m', day * 86400, 'unixepoch') AS INTEGER), SUM(seconds)"
+			" FROM LISTEN_DAY WHERE day >= ?1 AND day <= ?2 GROUP BY 1";
+		if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) == SQLITE_OK) {
+			sqlite3_bind_int(stmt, 1, first);
+			sqlite3_bind_int(stmt, 2, today);
+			while (sqlite3_step(stmt) == SQLITE_ROW) {
+				int month = sqlite3_column_int(stmt, 0);
+				if (month >= 1 && month <= 12) out[month - 1] = sqlite3_column_int64(stmt, 1);
+			}
+			sqlite3_finalize(stmt);
+		}
+	}
+	pthread_mutex_unlock(&db_lock);
+}
+
 // The summary cards. Distinct tracks, records and artists come from the same
 // rows the top lists do, so the card can never say there were three artists
 // under a list of four.
-static void stats_counts(int first_day, int *tracks, int *albums, int *artists) {
+static void stats_counts(int first_day, int today, int *tracks, int *albums, int *artists) {
 	*tracks = *albums = *artists = 0;
 	const char *SQL[] = {
-		"SELECT COUNT(DISTINCT path) FROM LISTEN_TRACK WHERE day >= ?1",
+		"SELECT COUNT(DISTINCT path) FROM LISTEN_TRACK WHERE day >= ?1 AND day <= ?2",
 		// A record is its value -- name and whose it is -- or its name when the
 		// index never wrote a key: see library.h on album values.
 		"SELECT COUNT(DISTINCT CASE WHEN album_key <> '' THEN album_key ELSE album END)"
-		" FROM LISTEN_TRACK WHERE day >= ?1 AND album <> ''",
-		"SELECT COUNT(DISTINCT artist) FROM LISTEN_TRACK WHERE day >= ?1 AND artist <> ''",
+		" FROM LISTEN_TRACK WHERE day >= ?1 AND day <= ?2 AND album <> ''",
+		"SELECT COUNT(DISTINCT artist) FROM LISTEN_TRACK WHERE day >= ?1 AND day <= ?2 AND artist <> ''",
 	};
 	int *out[3] = {tracks, albums, artists};
 	for (int i = 0; i < 3; i++) {
 		sqlite3_stmt *stmt = NULL;
 		if (sqlite3_prepare_v2(db, SQL[i], -1, &stmt, NULL) == SQLITE_OK) {
 			sqlite3_bind_int(stmt, 1, first_day);
+			sqlite3_bind_int(stmt, 2, today);
 			if (sqlite3_step(stmt) == SQLITE_ROW) {
 				*out[i] = sqlite3_column_int(stmt, 0);
 			}
@@ -8113,19 +8147,21 @@ void library_stats_summary(int range, listening_stats_summary_t *out) {
 	memset(out, 0, sizeof(*out));
 	pthread_mutex_lock(&db_lock);
 	if (db) {
-		int first_day = stats_first_day(range, library_stats_today());
+		int today = library_stats_today();
+		int first_day = stats_first_day(range, today);
 		sqlite3_stmt *stmt = NULL;
 		if (sqlite3_prepare_v2(db, "SELECT COALESCE(SUM(seconds),0), COALESCE(SUM(tracks),0) FROM LISTEN_DAY"
-								   " WHERE day >= ?1",
+								   " WHERE day >= ?1 AND day <= ?2",
 							   -1, &stmt, NULL) == SQLITE_OK) {
 			sqlite3_bind_int(stmt, 1, first_day);
+			sqlite3_bind_int(stmt, 2, today);
 			if (sqlite3_step(stmt) == SQLITE_ROW) {
 				out->seconds = (long)sqlite3_column_int64(stmt, 0);
 				out->plays = (unsigned long)sqlite3_column_int64(stmt, 1);
 			}
 			sqlite3_finalize(stmt);
 		}
-		stats_counts(first_day, &out->tracks, &out->albums, &out->artists);
+		stats_counts(first_day, today, &out->tracks, &out->albums, &out->artists);
 	}
 	pthread_mutex_unlock(&db_lock);
 }
@@ -8142,13 +8178,13 @@ int library_stats_top(int kind, int range, int offset, int count, listening_stat
 	// value, an artist its name) and reads its display columns from the first
 	// row of the group, which is the same for every row in it.
 	static const char *const SQL[3] = {
-		"SELECT name, path, artist, genre, SUM(plays) FROM LISTEN_TRACK WHERE day >= ?1"
+		"SELECT name, path, artist, genre, SUM(plays) FROM LISTEN_TRACK WHERE day >= ?1 AND day <= ?4"
 		" GROUP BY path ORDER BY SUM(plays) DESC, name LIMIT ?2 OFFSET ?3",
 		"SELECT album, (CASE WHEN album_key <> '' THEN album_key ELSE album END), album_artist, genre,"
-		" SUM(plays) FROM LISTEN_TRACK WHERE day >= ?1 AND album <> ''"
+		" SUM(plays) FROM LISTEN_TRACK WHERE day >= ?1 AND day <= ?4 AND album <> ''"
 		" GROUP BY (CASE WHEN album_key <> '' THEN album_key ELSE album END)"
 		" ORDER BY SUM(plays) DESC, album LIMIT ?2 OFFSET ?3",
-		"SELECT artist, '', '', genre, SUM(plays) FROM LISTEN_TRACK WHERE day >= ?1 AND artist <> ''"
+		"SELECT artist, '', '', genre, SUM(plays) FROM LISTEN_TRACK WHERE day >= ?1 AND day <= ?4 AND artist <> ''"
 		" GROUP BY artist ORDER BY SUM(plays) DESC, artist LIMIT ?2 OFFSET ?3",
 	};
 	if (kind < 0 || kind > 2) {
@@ -8159,7 +8195,9 @@ int library_stats_top(int kind, int range, int offset, int count, listening_stat
 	if (db) {
 		sqlite3_stmt *stmt = NULL;
 		if (sqlite3_prepare_v2(db, SQL[kind], -1, &stmt, NULL) == SQLITE_OK) {
-			sqlite3_bind_int(stmt, 1, stats_first_day(range, library_stats_today()));
+			int today = library_stats_today();
+			sqlite3_bind_int(stmt, 1, stats_first_day(range, today));
+			sqlite3_bind_int(stmt, 4, today);
 			sqlite3_bind_int(stmt, 2, count);
 			sqlite3_bind_int(stmt, 3, offset < 0 ? 0 : offset);
 			while (written < count && sqlite3_step(stmt) == SQLITE_ROW) {
@@ -8182,19 +8220,21 @@ int library_stats_top(int kind, int range, int offset, int count, listening_stat
 int library_stats_top_count(int kind, int range) {
 	const char *SQL;
 	if (kind == 0) {
-		SQL = "SELECT COUNT(DISTINCT path) FROM LISTEN_TRACK WHERE day >= ?1";
+		SQL = "SELECT COUNT(DISTINCT path) FROM LISTEN_TRACK WHERE day >= ?1 AND day <= ?2";
 	} else if (kind == 1) {
 		SQL = "SELECT COUNT(DISTINCT (CASE WHEN album_key <> '' THEN album_key ELSE album END))"
-			  " FROM LISTEN_TRACK WHERE day >= ?1 AND album <> ''";
+			  " FROM LISTEN_TRACK WHERE day >= ?1 AND day <= ?2 AND album <> ''";
 	} else {
-		SQL = "SELECT COUNT(DISTINCT artist) FROM LISTEN_TRACK WHERE day >= ?1 AND artist <> ''";
+		SQL = "SELECT COUNT(DISTINCT artist) FROM LISTEN_TRACK WHERE day >= ?1 AND day <= ?2 AND artist <> ''";
 	}
 	int total = 0;
 	pthread_mutex_lock(&db_lock);
 	if (db) {
 		sqlite3_stmt *stmt = NULL;
 		if (sqlite3_prepare_v2(db, SQL, -1, &stmt, NULL) == SQLITE_OK) {
-			sqlite3_bind_int(stmt, 1, stats_first_day(range, library_stats_today()));
+			int today = library_stats_today();
+			sqlite3_bind_int(stmt, 1, stats_first_day(range, today));
+			sqlite3_bind_int(stmt, 2, today);
 			if (sqlite3_step(stmt) == SQLITE_ROW) {
 				total = sqlite3_column_int(stmt, 0);
 			}

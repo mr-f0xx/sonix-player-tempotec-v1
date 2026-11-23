@@ -205,6 +205,25 @@ void stats_daily(int days, stats_day_t *out, int count) {
 	}
 }
 
+int stats_calendar_month(stats_day_t out[STATS_CHART_MONTH_DAYS], int *month, int *year) {
+	int today = library_stats_today(), first, count;
+	if (!out || !library_stats_calendar(today, &first, &count, month, year)) return 0;
+	stats_day_row_t rows[STATS_CHART_MONTH_DAYS] = {0};
+	library_stats_daily(first, today - first + 1, rows);
+	for (int i = 0; i < count; i++) {
+		out[i].day = first + i;
+		out[i].seconds = rows[i].seconds;
+		out[i].tracks = rows[i].tracks;
+	}
+	return count;
+}
+
+void stats_calendar_year(int64_t out[12], int *year) {
+	int today = library_stats_today();
+	if (year && !library_stats_calendar(today, NULL, NULL, NULL, year)) *year = 0;
+	library_stats_monthly(today, out);
+}
+
 void stats_summary(stats_range_t range, stats_summary_t *out) {
 	if (!out) {
 		return;

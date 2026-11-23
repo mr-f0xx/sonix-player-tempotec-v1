@@ -758,7 +758,7 @@ $(BUILD)/test_listeningstats: $(LISTENINGSTATS_SRC) $(BUILD)/sqlite3_impl.o \
                              $(ROOT)/src/system/library/cue.h \
                              $(ROOT)/src/system/decode/mp4.h $(ROOT)/src/system/decode/apedec.h
 	@mkdir -p $(BUILD)
-	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ $(LISTENINGSTATS_SRC) $(BUILD)/sqlite3_impl.o $(LDFLAGS) $(LDLIBS)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ $(LISTENINGSTATS_SRC) $(BUILD)/sqlite3_impl.o $(LDFLAGS) -Wl,--wrap=time $(LDLIBS)
 
 # The boot-time playback record: ordinary and CUE-virtual paths, the saved album
 # queue across a real database reopen, and no automatic card worker with Detect
