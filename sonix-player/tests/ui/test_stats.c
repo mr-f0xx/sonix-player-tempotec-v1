@@ -41,6 +41,21 @@ lv_font_t font_ui_22, font_ui_22_bold, font_ui_24, font_ui_24_bold;
 lv_font_t font_ui_26, font_ui_28, font_ui_32;
 
 static uint32_t framebuffer[W * H];
+static lv_point_t pointer_point;
+static lv_indev_state_t pointer_state;
+static void read_pointer(lv_indev_t *indev, lv_indev_data_t *data) {
+	(void)indev;
+	data->point = pointer_point;
+	data->state = pointer_state;
+}
+static void pointer_at(lv_indev_t *indev, int x, int y, lv_indev_state_t state) {
+	pointer_point.x = x;
+	pointer_point.y = y;
+	pointer_state = state;
+	lv_tick_inc(20);
+	lv_indev_read(indev);
+}
+
 
 // ---------------------------------------------------------------------------
 // What the page asks the world for
@@ -49,7 +64,7 @@ static uint32_t framebuffer[W * H];
 // Set by the empty-list section at the end: a history with nothing in it, the
 // state the "nothing played yet" line is the whole page for.
 static bool lists_empty;
-static int stub_year_count = 6;
+static int stub_month_days = 30;
 static int stub_today = 20780; // Monday 2026-11-23
 
 // The history the page is drawn from, held here so the test decides the shape
@@ -81,14 +96,22 @@ void stats_daily(int days, stats_day_t *out, int count) {
 	}
 }
 
-int64_t *stats_yearly(int *first_year, int *count) {
-	*first_year = 2026;
-	*count = stub_year_count;
-	int64_t *values = calloc((size_t)*count, sizeof(*values));
-	assert(values);
-	values[0] = 60;
-	values[*count - 1] = 3600;
-	return values;
+int stats_calendar_month(stats_day_t out[STATS_CHART_MONTH_DAYS], int *month, int *year) {
+	*month = 11;
+	*year = 2026;
+	for (int i = 0; i < stub_month_days; i++) {
+		out[i].day = 20758 + i;
+		out[i].seconds = i == 0 ? 120 : i == 22 ? 3600 : 0;
+		out[i].tracks = 0;
+	}
+	return stub_month_days;
+}
+
+void stats_calendar_year(int64_t out[12], int *year) {
+	*year = 2026;
+	for (int i = 0; i < 12; i++) out[i] = 0;
+	out[0] = 60;
+	out[10] = 3600;
 }
 
 void stats_summary(stats_range_t range, stats_summary_t *out) {
@@ -160,6 +183,11 @@ void coverloader_release(int slot) { (void)slot; }
 // note is only worth checking as a sentence: its length is the whole problem,
 // and "stats_nothing_yet" fits on a line of its own.
 const char *tr(const char *key) {
+	static const char *keys[] = {"stats_month_jan", "stats_month_feb", "stats_month_mar", "stats_month_apr",
+		"stats_month_may", "stats_month_jun", "stats_month_jul", "stats_month_aug", "stats_month_sep",
+		"stats_month_oct", "stats_month_nov", "stats_month_dec"};
+	static const char *letters[] = {"J", "F", "M", "A", "M", "J", "J", "A", "S", "O", "N", "D"};
+	for (int i = 0; i < 12; i++) if (strcmp(key, keys[i]) == 0) return letters[i];
 	if (strcmp(key, "stats_plays") == 0) {
 		return "%d plays";
 	}
@@ -272,7 +300,7 @@ static bool label_starts_with(const char *text, const char *prefix) {
 	if (available > wanted) {
 		available = wanted;
 	}
-	return available > 0 && strncmp(text, prefix, available) == 0;
+	return available >= (wanted < 3 ? wanted : 3) && strncmp(text, prefix, available) == 0;
 }
 
 static lv_obj_t *find_label_prefix(lv_obj_t *obj, const char *prefix) {
@@ -360,23 +388,24 @@ int main(void) {
 	lv_obj_get_coords(title, &title_area);
 	assert(title_area.x2 < W);
 
-	// The four range pills, in the order the pill row was built, on one row.
+	// The three range pills, in the order the pill row was built, on one row.
 	lv_obj_t *week = find_label(stats_screen, "stats_week");
 	lv_obj_t *month = find_label(stats_screen, "stats_month");
 	lv_obj_t *year = find_label(stats_screen, "stats_year");
-	lv_obj_t *all = find_label(stats_screen, "stats_all_time");
-	assert(week && month && year && all);
-	lv_area_t wa, ma, ya, aa;
+	assert(week && month && year && !find_label(stats_screen, "stats_all_time"));
+	lv_area_t wa, ma, ya;
 	lv_obj_get_coords(week, &wa);
 	lv_obj_get_coords(month, &ma);
 	lv_obj_get_coords(year, &ya);
-	lv_obj_get_coords(all, &aa);
 	// Left to right, and no two of them on top of each other.
-	assert(wa.x1 < ma.x1 && ma.x1 < ya.x1 && ya.x1 < aa.x1);
-	// All four inside the panel.
-	assert(wa.x1 >= 0 && aa.x2 < W);
-	// On the same line: the pills are one row and not a wrapped two.
-	assert(wa.y1 == ma.y1 && ma.y1 == ya.y1 && ya.y1 == aa.y1);
+	assert(wa.x1 < ma.x1 && ma.x1 < ya.x1);
+	// All three inside the panel.
+	assert(wa.x1 >= 0 && ya.x2 < W);
+	// On the same line, not wrapped.
+	assert(wa.y1 == ma.y1 && ma.y1 == ya.y1);
+
+	lv_obj_send_event(lv_obj_get_parent(year), LV_EVENT_CLICKED, NULL);
+	lv_obj_update_layout(stats_screen);
 
 	// --- the summary cards ------------------------------------------------------
 	lv_obj_t *listening = find_label(stats_screen, "stats_listening_time");
@@ -389,8 +418,8 @@ int main(void) {
 	assert(la.x1 < ta.x1);
 	assert(la.y1 == ta.y1);
 	// The figure under the first caption is the formatted listening time; the
-	// one under the second is the play count. The page opens on "All time",
-	// which is the stub's twelve and a half hours and 195 plays.
+	// one under the second is the play count. Year is the stub's twelve and
+	// a half hours and 195 plays.
 	lv_obj_t *time_value = find_label(stats_screen, "12h 34m");
 	lv_obj_t *plays_value = find_label(stats_screen, "195");
 	assert(time_value);
@@ -402,24 +431,37 @@ int main(void) {
 	assert(pva.y1 > ta.y1 && pva.x1 >= ta.x1 - 4);
 
 	// --- the chart --------------------------------------------------------------
-	lv_obj_t *all_title = find_label(stats_screen, "stats_all_time"); // pill label
-	(void)all_title;
-	lv_obj_t *chart_card = lv_obj_get_parent(find_label(stats_screen, "2026"));
-	lv_obj_t *chart = lv_obj_get_child(lv_obj_get_parent(chart_card), 1);
+	lv_obj_t *chart_title = find_label(stats_screen, "stats_year 2026");
+	assert(chart_title);
+	lv_obj_t *chart_card = lv_obj_get_parent(chart_title);
+	lv_obj_t *viewport = lv_obj_get_child(chart_card, 1);
+	lv_obj_t *content = lv_obj_get_child(viewport, 0);
+	lv_obj_t *chart = lv_obj_get_child(content, 0);
+	lv_obj_t *letters_row = lv_obj_get_child(content, 1);
 	assert(lv_obj_check_type(chart, &lv_chart_class));
-	assert(lv_chart_get_point_count(chart) == 6);
+	assert(lv_chart_get_point_count(chart) == 12);
+	assert(!lv_obj_is_scrollable(viewport));
 	lv_chart_series_t *series = lv_chart_get_series_next(chart, NULL);
 	int32_t *values = lv_chart_get_series_y_array(chart, series);
-	assert(values[0] == 1 && values[5] == 60);
-	assert(find_label(stats_screen, "2031"));
+	assert(values[0] == 1 && values[10] == 60 && values[11] == 0);
+	static const char *months[] = {"J", "F", "M", "A", "M", "J", "J", "A", "S", "O", "N", "D"};
+	assert(lv_obj_get_child_count(letters_row) == 12);
+	for (int i = 0; i < 12; i++) {
+		lv_obj_t *mark = lv_obj_get_child(letters_row, i);
+		assert(strcmp(lv_label_get_text(mark), months[i]) == 0);
+		lv_area_t area;
+		lv_obj_get_coords(mark, &area);
+		assert(area.x1 >= 0 && area.x2 < W);
+	}
 
 	lv_obj_send_event(lv_obj_get_parent(week), LV_EVENT_CLICKED, NULL);
 	lv_obj_update_layout(stats_screen);
 	assert(lv_chart_get_point_count(chart) == 7);
+	assert(!lv_obj_is_scrollable(viewport));
 	values = lv_chart_get_series_y_array(chart, series);
 	// Monday is today, so the newest bar belongs under Monday, not Sunday.
 	assert(values[0] == 60 && values[1] == 2 && values[5] == 1);
-	lv_obj_t *chart_title = find_label(stats_screen, "stats_last_7_days");
+	chart_title = find_label(stats_screen, "stats_last_7_days");
 	assert(chart_title);
 	// Seven weekday letters under the chart, one per bucket: read straight off
 	// the row's children, because several buckets legitimately end on the same
@@ -428,7 +470,7 @@ int main(void) {
 	(void)marks_row;
 	lv_obj_t *first_letter = find_label(stats_screen, "stats_day_sun");
 	assert(first_letter);
-	lv_obj_t *letters_row = lv_obj_get_parent(first_letter);
+	assert(letters_row == lv_obj_get_parent(first_letter));
 	assert(letters_row);
 	assert(lv_obj_get_child_count(letters_row) == 7);
 	lv_area_t prev = {0};
@@ -462,39 +504,94 @@ int main(void) {
 
 	lv_obj_send_event(lv_obj_get_parent(month), LV_EVENT_CLICKED, NULL);
 	lv_obj_update_layout(stats_screen);
-	assert(find_label(stats_screen, "stats_last_30_days"));
+	assert(find_label(stats_screen, "stats_month 11/2026"));
 	assert(lv_chart_get_point_count(chart) == 30);
 	values = lv_chart_get_series_y_array(chart, series);
-	assert(values[0] == 2 && values[27] == 1 && values[29] == 60);
-	lv_draw_buf_t *month_shot = lv_snapshot_take(chart, LV_COLOR_FORMAT_RGB888);
-	assert(month_shot);
-	lv_draw_buf_destroy(month_shot);
-	assert(lv_obj_get_child_count(letters_row) == 3); // sparse dates, not 30 labels
-	assert(strcmp(lv_label_get_text(lv_obj_get_child(letters_row, 0)), "25/10") == 0);
-	assert(strcmp(lv_label_get_text(lv_obj_get_child(letters_row, 2)), "23/11") == 0);
-	// Repeated changes must replace the chart's external array safely.
-	lv_obj_send_event(lv_obj_get_parent(all), LV_EVENT_CLICKED, NULL);
-	assert(lv_chart_get_point_count(chart) == 6);
+	assert(values[0] == 2 && values[22] == 60 && values[29] == 0);
+	assert(lv_obj_is_scrollable(viewport));
+	assert(lv_obj_get_scroll_dir(viewport) == LV_DIR_HOR);
+	assert(lv_obj_get_scroll_right(viewport) > 0);
+	// Drag the actual LVGL pointer across the visible chart, in both
+	// directions, and verify a vertical swipe still scrolls the page.
+	lv_obj_t *page = lv_obj_get_parent(chart_card);
+	lv_obj_scroll_to_view(chart_card, LV_ANIM_OFF);
+	lv_obj_update_layout(stats_screen);
+	lv_area_t touch_area;
+	lv_obj_get_coords(viewport, &touch_area);
+	int tx = (touch_area.x1 + touch_area.x2) / 2;
+	int ty = (touch_area.y1 + touch_area.y2) / 2;
+	assert(ty >= 0 && ty < H);
+	lv_indev_t *pointer = lv_indev_create();
+	lv_indev_set_type(pointer, LV_INDEV_TYPE_POINTER);
+	lv_indev_set_read_cb(pointer, read_pointer);
+	pointer_at(pointer, tx + 45, ty, LV_INDEV_STATE_PRESSED);
+	pointer_at(pointer, tx + 10, ty, LV_INDEV_STATE_PRESSED);
+	pointer_at(pointer, tx - 40, ty, LV_INDEV_STATE_PRESSED);
+	assert(lv_indev_get_scroll_obj(pointer) == viewport);
+	int scroll_after_left = lv_obj_get_scroll_x(viewport);
+	assert(scroll_after_left > 0);
+	pointer_at(pointer, tx - 40, ty, LV_INDEV_STATE_RELEASED);
+	// Avoid inertial motion while checking the reverse drag.
+	lv_obj_set_scroll_momentum(viewport, false);
+	pointer_at(pointer, tx - 40, ty, LV_INDEV_STATE_PRESSED);
+	pointer_at(pointer, tx, ty, LV_INDEV_STATE_PRESSED);
+	pointer_at(pointer, tx + 40, ty, LV_INDEV_STATE_PRESSED);
+	assert(lv_obj_get_scroll_x(viewport) < scroll_after_left);
+	pointer_at(pointer, tx + 40, ty, LV_INDEV_STATE_RELEASED);
+	lv_obj_set_scroll_momentum(viewport, true);
+	int page_before = lv_obj_get_scroll_y(page);
+	pointer_at(pointer, tx, ty + 25, LV_INDEV_STATE_PRESSED);
+	pointer_at(pointer, tx, ty, LV_INDEV_STATE_PRESSED);
+	pointer_at(pointer, tx, ty - 25, LV_INDEV_STATE_PRESSED);
+	assert(lv_indev_get_scroll_obj(pointer) == page);
+	assert(lv_obj_get_scroll_y(page) > page_before);
+	pointer_at(pointer, tx, ty - 25, LV_INDEV_STATE_RELEASED);
+	lv_indev_delete(pointer);
+	lv_obj_scroll_to_y(page, 0, LV_ANIM_OFF);
+	lv_obj_scroll_to_x(viewport, 0, LV_ANIM_OFF);
+	lv_obj_update_layout(stats_screen);
+	assert(lv_obj_get_child_count(letters_row) == 30);
+	for (int i = 0; i < 30; i++) {
+		char expected[4];
+		snprintf(expected, sizeof(expected), "%d", i + 1);
+		lv_obj_t *label = lv_obj_get_child(letters_row, i);
+		assert(strcmp(lv_label_get_text(label), expected) == 0);
+		lv_area_t area;
+		lv_obj_get_coords(label, &area);
+		assert(area.x2 - area.x1 + 1 >= 24);
+	}
+	// Scroll to both edges; bars and labels share the same moving content.
+	lv_obj_scroll_to_x(viewport, lv_obj_get_scroll_right(viewport), LV_ANIM_OFF);
+	lv_obj_update_layout(stats_screen);
+	assert(lv_obj_get_scroll_x(viewport) > 0);
+	assert(lv_obj_get_scroll_right(viewport) == 0);
+	lv_area_t last_area, viewport_area;
+	lv_obj_get_coords(lv_obj_get_child(letters_row, 29), &last_area);
+	lv_obj_get_coords(viewport, &viewport_area);
+	assert(last_area.x1 >= viewport_area.x1 && last_area.x2 <= viewport_area.x2);
+	lv_obj_scroll_to_x(viewport, 0, LV_ANIM_OFF);
+	assert(lv_obj_get_scroll_x(viewport) == 0);
+	stub_month_days = 31;
+	stats_refresh();
+	lv_obj_update_layout(stats_screen);
+	assert(lv_chart_get_point_count(chart) == 31);
+	assert(strcmp(lv_label_get_text(lv_obj_get_child(letters_row, 30)), "31") == 0);
+	stub_month_days = 28;
+	stats_refresh();
+	assert(lv_chart_get_point_count(chart) == 28);
+	stub_month_days = 29;
+	stats_refresh();
+	assert(lv_chart_get_point_count(chart) == 29);
+	lv_obj_send_event(lv_obj_get_parent(year), LV_EVENT_CLICKED, NULL);
+	lv_obj_update_layout(stats_screen);
+	assert(lv_chart_get_point_count(chart) == 12);
+	assert(!lv_obj_is_scrollable(viewport));
+	assert(lv_obj_get_scroll_x(viewport) == 0);
 	values = lv_chart_get_series_y_array(chart, series);
-	assert(values[0] == 1 && values[5] == 60);
-	stub_year_count = 4;
-	stats_refresh();
-	lv_obj_update_layout(stats_screen);
-	assert(lv_chart_get_point_count(chart) == 4);
-	assert(lv_obj_get_child_count(letters_row) == 4);
-	assert(find_label(stats_screen, "2027") && find_label(stats_screen, "2029"));
-	stub_year_count = 1;
-	stats_refresh();
-	lv_obj_update_layout(stats_screen);
-	assert(lv_chart_get_point_count(chart) == 1);
+	assert(values[0] == 1 && values[10] == 60 && values[11] == 0);
 	lv_draw_buf_t *year_shot = lv_snapshot_take(chart, LV_COLOR_FORMAT_RGB888);
 	assert(year_shot);
 	lv_draw_buf_destroy(year_shot);
-	assert(lv_obj_get_child_count(letters_row) == 1);
-	assert(strcmp(lv_label_get_text(lv_obj_get_child(letters_row, 0)), "2026") == 0);
-	stub_year_count = 6;
-	stats_refresh();
-	lv_obj_update_layout(stats_screen);
 
 	// --- the two top lists ------------------------------------------------------
 	lv_obj_t *top_artists = find_label(stats_screen, "stats_top_artists");
