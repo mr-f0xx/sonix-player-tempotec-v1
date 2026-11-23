@@ -205,9 +205,10 @@ void stats_daily(int days, stats_day_t *out, int count) {
 	}
 }
 
-int stats_calendar_month(stats_day_t out[STATS_CHART_MONTH_DAYS], int *month, int *year) {
+int stats_calendar_month(stats_day_t out[STATS_CHART_MONTH_DAYS], int *month, int *year, int *today_day) {
 	int today = library_stats_today(), first, count;
 	if (!out || !library_stats_calendar(today, &first, &count, month, year)) return 0;
+	if (today_day) *today_day = today - first + 1;
 	stats_day_row_t rows[STATS_CHART_MONTH_DAYS] = {0};
 	library_stats_daily(first, today - first + 1, rows);
 	for (int i = 0; i < count; i++) {
@@ -222,6 +223,10 @@ void stats_calendar_year(int64_t out[12], int *year) {
 	int today = library_stats_today();
 	if (year && !library_stats_calendar(today, NULL, NULL, NULL, year)) *year = 0;
 	library_stats_monthly(today, out);
+}
+
+int64_t *stats_all_years(int *first_year, int *count) {
+	return library_stats_yearly(library_stats_today(), first_year, count);
 }
 
 void stats_summary(stats_range_t range, stats_summary_t *out) {

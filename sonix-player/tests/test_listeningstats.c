@@ -361,6 +361,10 @@ static void test_format(void) {
 
 static void test_calendar(void) {
 	int first, count, month, year;
+	int first_year_empty, count_empty;
+	int64_t *empty = library_stats_yearly(21336, &first_year_empty, &count_empty);
+	CHECK(empty && first_year_empty == 2028 && count_empty == 1 && empty[0] == 0);
+	free(empty);
 	CHECK(library_stats_calendar(20485, &first, &count, &month, &year)); // Feb 2026
 	CHECK(first == 20485 && count == 28 && month == 2 && year == 2026);
 	CHECK(library_stats_calendar(21243, &first, &count, &month, &year)); // leap day
@@ -380,12 +384,25 @@ static void test_calendar(void) {
 	CHECK(write_minute(20788, "/card/a/01.flac", 888, 6)); // future month
 	fake_today = 20780;
 	stats_day_t days[STATS_CHART_MONTH_DAYS];
-	CHECK(stats_calendar_month(days, &month, &year) == 30);
-	CHECK(month == 11 && year == 2026 && days[0].day == 20758);
+	int today_day;
+	CHECK(stats_calendar_month(days, &month, &year, &today_day) == 30);
+	CHECK(month == 11 && year == 2026 && today_day == 23 && days[0].day == 20758);
 	CHECK(days[0].seconds == 180 && days[22].seconds == 240 && days[29].seconds == 0);
 	int64_t months[12];
 	stats_calendar_year(months, &year);
 	CHECK(year == 2026 && months[0] == 60 && months[1] == 120 && months[10] == 420 && months[11] == 0);
+	int first_year, count_years;
+	int64_t *years = stats_all_years(&first_year, &count_years);
+	CHECK(years && first_year == 2025 && count_years == 2);
+	if (years && count_years == 2) CHECK(years[0] == 10 && years[1] == 600);
+	free(years);
+	// Empty intervening years are retained and future rows do not leak in.
+	fake_today = 21243; // 2028-02-29
+	years = stats_all_years(&first_year, &count_years);
+	CHECK(years && first_year == 2025 && count_years == 4);
+	if (years && count_years == 4) CHECK(years[0] == 10 && years[1] == 2487 && years[2] == 0 && years[3] == 0);
+	free(years);
+	fake_today = 20780;
 	stats_summary_t summary;
 	stats_summary(STATS_RANGE_MONTH, &summary);
 	CHECK(summary.seconds == 420 && summary.plays == 7);
@@ -399,14 +416,14 @@ static void test_calendar(void) {
 	CHECK(stats_top_count(STATS_TOP_TRACKS, STATS_RANGE_YEAR) == 3);
 	fake_today = 21243;
 	CHECK(library_stats_add(21243, 55, NULL, 0));
-	CHECK(stats_calendar_month(days, &month, &year) == 29);
-	CHECK(days[28].seconds == 55);
+	CHECK(stats_calendar_month(days, &month, &year, &today_day) == 29);
+	CHECK(days[28].seconds == 55 && today_day == 29);
 	stats_calendar_year(months, &year);
 	CHECK(year == 2028 && months[1] == 55);
 	fake_today = 20512;
-	CHECK(stats_calendar_month(days, &month, &year) == 28);
+	CHECK(stats_calendar_month(days, &month, &year, &today_day) == 28);
 	fake_today = 20454;
-	CHECK(stats_calendar_month(days, &month, &year) == 31);
+	CHECK(stats_calendar_month(days, &month, &year, &today_day) == 31);
 	stats_summary(STATS_RANGE_YEAR, &summary);
 	CHECK(summary.seconds == 60 && summary.plays == 1);
 }

@@ -6,7 +6,7 @@
 
 // Listening statistics: how long the player has been playing, and which tracks,
 // records and artists it has been playing -- per day, so the Music page's
-// Stats view can answer for the last week, current month or current year.
+// Stats view can answer for the last week, current month, current year or all time.
 //
 // Three things make this cheap enough to keep on a player with ten megabytes
 // free:
@@ -31,13 +31,13 @@
 
 #include "src/system/library/library.h"
 
-// The ranges offered by the Stats page, followed by an internal history range.
+// The ranges offered by the Stats page.
 typedef enum {
 	STATS_RANGE_WEEK = 0,
 	STATS_RANGE_MONTH,
 	STATS_RANGE_YEAR,
+	STATS_RANGE_ALL,
 	STATS_RANGE_COUNT,
-	STATS_RANGE_ALL = STATS_RANGE_COUNT, // internal whole-history queries
 } stats_range_t;
 
 // One day of history, for the chart.
@@ -71,9 +71,12 @@ typedef enum {
 // the chart's own week or month.
 void stats_daily(int days, stats_day_t *out, int count);
 
-// Current UTC month, including empty future days, and current year by month.
-int stats_calendar_month(stats_day_t out[STATS_CHART_MONTH_DAYS], int *month, int *year);
+// Current UTC month, including empty future days and today's day-of-month,
+// and current year by month.
+int stats_calendar_month(stats_day_t out[STATS_CHART_MONTH_DAYS], int *month, int *year, int *today_day);
 void stats_calendar_year(int64_t out[12], int *year);
+// All UTC years from the first recorded year to this year, caller frees result.
+int64_t *stats_all_years(int *first_year, int *count);
 
 // The summary cards for one range.
 void stats_summary(stats_range_t range, stats_summary_t *out);

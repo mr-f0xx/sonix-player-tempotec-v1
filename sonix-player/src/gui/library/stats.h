@@ -4,11 +4,11 @@
 #include "src/gui/shell/gui.h"
 
 // The listening statistics page: how much the player has been played, and to
-// what, over the last week, the current month or the current year.
+// what, over the last week, the current month, the current year or all time.
 //
 // The shape follows what the player's own screens do -- a title row with the
 // range pills across the top, the two summary cards, the bar chart of the last
-// seven days, current-month days or current-year months, and the leaders by
+// seven days, current-month days, current-year months or all-time years, and the leaders by
 // artist and record. Every number comes from listeningstats.h, which counts it
 // while the music plays.
 //
