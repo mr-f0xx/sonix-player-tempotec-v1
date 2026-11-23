@@ -266,6 +266,7 @@ void switch_screen(lv_obj_t *screen) { lv_screen_load(screen); }
 void switch_screen_cb(lv_event_t *e) { switch_screen(lv_event_get_user_data(e)); }
 void ebookpage_open(void) { switch_screen(ebookpage_screen); }
 void switcher_attach_back_gesture(lv_obj_t *obj) { (void)obj; }
+void switcher_mark_fresh_start(lv_obj_t *obj) { (void)obj; }
 bool switcher_back_drag_active(void) { return false; }
 void player_sheet_attach_drag(lv_obj_t *obj, bool opening) { (void)obj; (void)opening; }
 bool player_sheet_drag_active(void) { return false; }

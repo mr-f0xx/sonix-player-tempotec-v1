@@ -353,6 +353,7 @@ bool clock_is_set(void) { return true; }
 /* A timer parked for the screen's dark half; there is no power manager here. */
 void power_pause_in_standby(lv_timer_t *timer) { (void)timer; }
 void switcher_attach_back_gesture(lv_obj_t *obj) { (void)obj; }
+void switcher_mark_fresh_start(lv_obj_t *obj) { (void)obj; }
 bool switcher_back_drag_active(void) { return false; }
 static bool (*last_back_guard)(void);
 void switcher_set_back_guard(lv_obj_t *screen, bool (*handler)(void)) { (void)screen; last_back_guard=handler; }

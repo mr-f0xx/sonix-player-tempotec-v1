@@ -189,6 +189,10 @@ void ebooksettings_init(gui_config_t *cfg) {
 	lv_obj_set_flex_flow(option_list, LV_FLEX_FLOW_COLUMN);
 	lv_obj_set_flex_align(option_list, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 	lv_obj_set_style_pad_gap(option_list, 12, 0);
+	// Not a settingsrow_page() body, so it opts into the shell's rule itself:
+	// top of the list when entered from the ebook page, the row it was left
+	// on when coming back from a child.
+	switcher_mark_fresh_start(option_list);
 
 	for (int i = 0; i < EBOOKBAR_COUNT; i++) {
 		if (i == EBOOKBAR_PROGRESS) {
