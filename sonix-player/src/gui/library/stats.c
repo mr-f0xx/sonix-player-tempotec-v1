@@ -240,6 +240,7 @@ static void chart_build(lv_obj_t *parent) {
 	lv_obj_set_style_pad_all(chart_content, 0, 0);
 	lv_obj_set_style_pad_row(chart_content, 2, 0);
 	lv_obj_set_flex_flow(chart_content, LV_FLEX_FLOW_COLUMN);
+	lv_obj_set_flex_align(chart_content, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_START);
 	lv_obj_set_scrollable(chart_content, false);
 	lv_obj_set_clickable(chart_content, false);
 	parent = chart_content;
@@ -390,8 +391,17 @@ static void chart_fill(void) {
 		}
 	}
 	lv_label_set_text(chart_title, title);
-	// 24px per day accommodates two digits on the V1 without overlap.
-	lv_obj_set_width(chart_content, monthly ? points * bp_pick(24, 32) : LV_PCT(100));
+	// Month alone scrolls. For a short all-time history, keep the year bars
+	// narrow and centered instead of stretching a single year across the card.
+	// The labels use the same gaps as the bars so their centers stay aligned.
+	bool compact_all = stats_range == STATS_RANGE_ALL && points <= 4;
+	int gap = compact_all ? bp_pick(12, 16) : 1;
+	lv_obj_set_width(chart_content, monthly ? points * bp_pick(24, 32)
+										  : compact_all ? points * bp_pick(44, 56) : LV_PCT(100));
+	lv_obj_set_align(chart_content, compact_all ? LV_ALIGN_TOP_MID : LV_ALIGN_TOP_LEFT);
+	lv_obj_set_width(chart_obj, compact_all && points == 1 ? bp_pick(32, 40) : LV_PCT(100));
+	lv_obj_set_style_pad_column(chart_obj, gap, LV_PART_MAIN);
+	lv_obj_set_style_pad_column(chart_marks, compact_all ? gap : 0, 0);
 	lv_obj_set_scrollable(chart_viewport, monthly);
 	lv_obj_set_clickable(chart_viewport, monthly);
 	if (!monthly) lv_obj_scroll_to_x(chart_viewport, 0, LV_ANIM_OFF);
@@ -402,7 +412,14 @@ static void chart_fill(void) {
 	free(chart_all_values);
 	chart_all_values = new_all_values;
 	chart_points = points;
-	lv_chart_set_range(chart_obj, LV_CHART_AXIS_PRIMARY_Y, 0, peak > 2 ? peak : 2);
+	int32_t top = peak > 2 ? peak : 2;
+	if (stats_range == STATS_RANGE_ALL && peak > 0) {
+		// Leave a little headroom instead of a tallest bar filling the card.
+		int64_t padded = (int64_t)peak + ((int64_t)peak + 3) / 4;
+		top = padded > INT32_MAX ? INT32_MAX : (int32_t)padded;
+		if (top < 2) top = 2;
+	}
+	lv_chart_set_range(chart_obj, LV_CHART_AXIS_PRIMARY_Y, 0, top);
 	lv_chart_refresh(chart_obj);
 }
 
