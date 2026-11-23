@@ -311,6 +311,10 @@ static void chart_fill(void) {
 	static const char *const MONTH_KEYS[12] = {"stats_month_jan", "stats_month_feb", "stats_month_mar", "stats_month_apr",
 		"stats_month_may", "stats_month_jun", "stats_month_jul", "stats_month_aug", "stats_month_sep",
 		"stats_month_oct", "stats_month_nov", "stats_month_dec"};
+	static const char *const MONTH_NAME_KEYS[12] = {"stats_month_name_jan", "stats_month_name_feb", "stats_month_name_mar",
+		"stats_month_name_apr", "stats_month_name_may", "stats_month_name_jun", "stats_month_name_jul",
+		"stats_month_name_aug", "stats_month_name_sep", "stats_month_name_oct", "stats_month_name_nov",
+		"stats_month_name_dec"};
 	stats_day_t days[STATS_CHART_MONTH_DAYS];
 	int points = 7, month = 0, year = 0;
 	char title[80];
@@ -319,8 +323,8 @@ static void chart_fill(void) {
 
 	if (monthly) {
 		points = stats_calendar_month(days, &month, &year);
-		if (points < 1 || points > STATS_CHART_MONTH_DAYS) return;
-		snprintf(title, sizeof(title), "%s %d/%d", tr("stats_month"), month, year);
+		if (points < 1 || points > STATS_CHART_MONTH_DAYS || month < 1 || month > 12) return;
+		snprintf(title, sizeof(title), "%s", tr(MONTH_NAME_KEYS[month - 1]));
 		for (int i = 0; i < points; i++) {
 			chart_daily_values[i] = chart_minutes(days[i].seconds);
 			char label[4];

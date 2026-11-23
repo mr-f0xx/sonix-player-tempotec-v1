@@ -65,6 +65,7 @@ static void pointer_at(lv_indev_t *indev, int x, int y, lv_indev_state_t state) 
 // state the "nothing played yet" line is the whole page for.
 static bool lists_empty;
 static int stub_month_days = 30;
+static int stub_month_number = 11;
 static int stub_today = 20780; // Monday 2026-11-23
 
 // The history the page is drawn from, held here so the test decides the shape
@@ -97,7 +98,7 @@ void stats_daily(int days, stats_day_t *out, int count) {
 }
 
 int stats_calendar_month(stats_day_t out[STATS_CHART_MONTH_DAYS], int *month, int *year) {
-	*month = 11;
+	*month = stub_month_number;
 	*year = 2026;
 	for (int i = 0; i < stub_month_days; i++) {
 		out[i].day = 20758 + i;
@@ -188,6 +189,13 @@ const char *tr(const char *key) {
 		"stats_month_oct", "stats_month_nov", "stats_month_dec"};
 	static const char *letters[] = {"J", "F", "M", "A", "M", "J", "J", "A", "S", "O", "N", "D"};
 	for (int i = 0; i < 12; i++) if (strcmp(key, keys[i]) == 0) return letters[i];
+	static const char *name_keys[] = {"stats_month_name_jan", "stats_month_name_feb", "stats_month_name_mar",
+		"stats_month_name_apr", "stats_month_name_may", "stats_month_name_jun", "stats_month_name_jul",
+		"stats_month_name_aug", "stats_month_name_sep", "stats_month_name_oct", "stats_month_name_nov",
+		"stats_month_name_dec"};
+	static const char *names[] = {"January", "February", "March", "April", "May", "June", "July", "August",
+		"September", "October", "November", "December"};
+	for (int i = 0; i < 12; i++) if (strcmp(key, name_keys[i]) == 0) return names[i];
 	if (strcmp(key, "stats_plays") == 0) {
 		return "%d plays";
 	}
@@ -504,7 +512,17 @@ int main(void) {
 
 	lv_obj_send_event(lv_obj_get_parent(month), LV_EVENT_CLICKED, NULL);
 	lv_obj_update_layout(stats_screen);
-	assert(find_label(stats_screen, "stats_month 11/2026"));
+	assert(strcmp(lv_label_get_text(chart_title), "November") == 0);
+	static const char *month_names[] = {"January", "February", "March", "April", "May", "June", "July", "August",
+		"September", "October", "November", "December"};
+	for (int i = 0; i < 12; i++) {
+		stub_month_number = i + 1;
+		stats_refresh();
+		assert(strcmp(lv_label_get_text(chart_title), month_names[i]) == 0);
+	}
+	stub_month_number = 11;
+	stats_refresh();
+	lv_obj_update_layout(stats_screen);
 	assert(lv_chart_get_point_count(chart) == 30);
 	values = lv_chart_get_series_y_array(chart, series);
 	assert(values[0] == 2 && values[22] == 60 && values[29] == 0);
