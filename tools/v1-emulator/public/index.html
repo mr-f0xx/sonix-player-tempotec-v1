@@ -34,12 +34,12 @@
 
 			<div class="topbar-actions">
 				<div class="segmented" role="group" aria-label="Screen scale">
-					<button class="seg-btn" data-scale="fit">Fit</button>
-					<button class="seg-btn" data-scale="real" title="Draw the device at its real physical size: 2.0in 240x320 panel, 30.48 x 40.64 mm, inside the real 41.8 x 87.2 mm body">Real&nbsp;size</button>
-					<button class="seg-btn" data-scale="1">1&times;</button>
-					<button class="seg-btn active" data-scale="1.25">1.25&times;</button>
-					<button class="seg-btn" data-scale="1.5">1.5&times;</button>
-					<button class="seg-btn" data-scale="2">2&times;</button>
+					<button class="seg-btn" data-scale="fit" title="Scale the device to fit the stage">Fit</button>
+					<button class="seg-btn" data-scale="real" title="Draw the device at its real physical size: 2.0in 240x320 panel, 30.48 x 40.64 mm, inside the real 41.8 x 87.2 mm body"><span class="seg-full">Real&nbsp;size</span><span class="seg-short" aria-hidden="true">1:1</span></button>
+					<button class="seg-btn" data-scale="1" title="Screen scale 1x (240 x 320 device pixels at 0.73 CSS px each)">1&times;</button>
+					<button class="seg-btn active" data-scale="1.25" title="Screen scale 1.25x">1.25&times;</button>
+					<button class="seg-btn" data-scale="1.5" title="Screen scale 1.5x">1.5&times;</button>
+					<button class="seg-btn" data-scale="2" title="Screen scale 2x">2&times;</button>
 				</div>
 
 				<button id="btn-audio-toggle" class="btn btn-ghost" title="Enable live browser audio playback from virtual ALSA DAC">
@@ -75,6 +75,18 @@
 				</div>
 
 				<div class="stage-canvas-wrap" id="stage-canvas-wrap">
+					<!-- Real size readout: lives in the wrapper so it always sits beside the
+					     device instead of floating over it -->
+					<div class="real-size-note hidden" id="real-size-note" role="status">
+						<span class="real-size-note-dot" aria-hidden="true"></span>
+						<span class="real-size-note-text">
+							<strong>Real size</strong>
+							<span id="real-size-note-detail">2.0&quot; 240&times;320 LCD &middot; 30.5 &times; 40.6 mm &middot; body 41.8 &times; 87.2 &times; 13.75 mm</span>
+							<span class="real-size-note-source" id="real-size-note-source">CSS 96 dpi reference</span>
+						</span>
+						<button type="button" class="real-size-note-fit" id="real-size-note-fit" title="Back to the fitted view">Fit view</button>
+					</div>
+
 					<div class="v1-assembly" id="v1-assembly">
 						<!-- LEFT FLANK: Volume +, Volume -, and lower microSD card slot -->
 						<div class="v1-flank v1-flank-left" role="group" aria-label="Left side buttons and microSD slot">
@@ -294,16 +306,6 @@
 							</button>
 						</div>
 					</div>
-				</div>
-
-				<!-- Real size readout: only shown while the device is drawn life size -->
-				<div class="real-size-note hidden" id="real-size-note" role="status">
-					<span class="real-size-note-dot" aria-hidden="true"></span>
-					<span class="real-size-note-text">
-						<strong>Real size</strong>
-						<span id="real-size-note-detail">2.0&quot; 240&times;320 LCD &middot; 30.5 &times; 40.6 mm &middot; body 41.8 &times; 87.2 &times; 13.75 mm</span>
-					</span>
-					<button type="button" class="real-size-note-fit" id="real-size-note-fit" title="Back to the fitted view">Fit view</button>
 				</div>
 
 				<!-- Compact Live Telemetry Strip below the V1 -->
@@ -634,7 +636,7 @@
 		</div>
 	</div>
 
-	<!-- Hidden 100 mm CSS probe: calibrates millimetres-per-CSS-pixel for Real size -->
+	<!-- Hidden 1in CSS probe: how many millimetres the browser thinks a CSS pixel is -->
 	<div class="real-size-probe" id="real-size-probe" aria-hidden="true"></div>
 
 	<div class="toast-stack" id="toast-stack" aria-live="polite"></div>

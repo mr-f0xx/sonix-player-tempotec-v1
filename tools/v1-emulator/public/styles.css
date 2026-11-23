@@ -338,7 +338,10 @@ body {
 	flex: 1;
 	display: flex;
 	align-items: center;
-	justify-content: center;
+	/* "safe" is the point: when the assembly is wider than the pane (a large
+	   preset on a narrow phone) centring would clip both flanks, so the content
+	   falls back to the start edge and stays reachable by scrolling. */
+	justify-content: safe center;
 	width: 100%;
 	padding: 22px 14px 28px;
 }
@@ -2615,12 +2618,13 @@ kbd {
  * device is bigger than the pane.
  * -------------------------------------------------------------------------- */
 
-/* Hidden calibration probe: 100 mm of CSS, laid out but never painted */
+/* Hidden calibration probe: 1in of CSS, laid out but never painted. Its width
+   in CSS px is 96 unless the browser exposes the display's real DPI. */
 .real-size-probe {
 	position: absolute;
 	top: 0;
 	left: -10000px;
-	width: 100mm;
+	width: 1in;
 	height: 1px;
 	visibility: hidden;
 	pointer-events: none;
@@ -2646,8 +2650,9 @@ kbd {
 	align-items: center;
 	gap: 9px;
 	flex-shrink: 0;
+	align-self: center;
 	max-width: min(100%, 520px);
-	margin: 0 auto 6px;
+	margin: 0;
 	padding: 6px 8px 6px 11px;
 	border-radius: 10px;
 	background: rgba(18, 23, 32, 0.88);
@@ -2678,6 +2683,50 @@ kbd {
 	color: #86efac;
 	font-size: 11px;
 	font-weight: 700;
+}
+
+/* Where the millimetre reading came from, so an approximation is never
+   presented as a measurement */
+.real-size-note-source {
+	flex-basis: 100%;
+	font-family: var(--font-mono);
+	font-size: 9.5px;
+	line-height: 1.3;
+	color: var(--text-muted);
+}
+
+.real-size-note-approx {
+	border-color: rgba(245, 158, 11, 0.4);
+}
+
+.real-size-note-approx .real-size-note-dot {
+	background: #f59e0b;
+	box-shadow: 0 0 8px rgba(245, 158, 11, 0.8);
+}
+
+.real-size-note-approx .real-size-note-text strong {
+	color: #fcd34d;
+}
+
+.v1-real-badge-approx {
+	background: rgba(245, 158, 11, 0.15);
+	color: #fcd34d;
+	border-color: rgba(245, 158, 11, 0.4);
+}
+
+/* Two-character labels below the compact breakpoint */
+.seg-short {
+	display: none;
+}
+
+@media (max-width: 640px) {
+	.seg-btn .seg-full {
+		display: none;
+	}
+
+	.seg-btn .seg-short {
+		display: inline;
+	}
 }
 
 .real-size-note-fit {
@@ -2712,11 +2761,47 @@ html.real-size-mode .stage-pane {
 }
 
 html.real-size-mode .stage-canvas-wrap {
-	/* size to the true-size device instead of filling the pane, so the readout
-	   sits right under it */
-	flex: 0 1 auto;
+	/* Size to the device instead of filling the pane, and stack the readout
+	   under it. It must NOT shrink: a life-size player is taller than a phone's
+	   stage, and the pane scrolls to it rather than clipping or squashing it. */
+	flex: 0 0 auto;
+	min-height: 0;
+	flex-direction: column;
+	/* the wrapper is centred on both axes, which would line the readout up
+	   beside the device once it became a column; pin the cross axis to centre
+	   and keep the main axis at the top */
+	align-items: center;
+	justify-content: flex-start;
+	gap: 8px;
 	overflow: visible;
+	padding-top: 6px;
 	padding-bottom: 8px;
+}
+
+/* Readout after the device in the column, whatever its markup order */
+html.real-size-mode .real-size-note {
+	order: 2;
+}
+
+html.real-size-mode .v1-assembly {
+	order: 1;
+	flex-shrink: 0;
+}
+
+html.real-size-mode .stage-pane {
+	/* A life-size device can be taller than the pane. Let it overflow and be
+	   reached by scrolling; never squash or clip the player itself. */
+	overflow-y: auto;
+}
+
+/* A large preset on a narrow phone can also be wider than the pane */
+.stage-pane {
+	overflow-x: auto;
+}
+
+/* The pane must never overlap the wrapper with its telemetry strip */
+html.real-size-mode .telemetry-strip {
+	flex-shrink: 0;
 }
 
 html.real-size-mode .telemetry-strip {
@@ -2734,3 +2819,143 @@ html.real-size-mode .v1-assembly {
 		display: none;
 	}
 }
+
+/* --------------------------------------------------------------------------
+ * Real size on phones and small tablets
+ *
+ * A phone's stage pane is only ~380 x 700 CSS px, and a life-size device is
+ * ~26.4 x 55 px at 0.48 CSS px per device pixel - so on a phone the real device
+ * is a small thing in a big pane, and what used to look "inaccurate" was the
+ * chrome around it: the 430 px key-badge columns were eating the width and the
+ * generous stage padding pushed the device around. In Real size the mock-up
+ * reads as a scale reference, so the flank badges collapse to the keycaps and
+ * the pane gives its space to the device.
+ * -------------------------------------------------------------------------- */
+@media (max-width: 768px) {
+	html.real-size-mode .stage-pane {
+		padding: 6px 10px 8px;
+	}
+
+	html.real-size-mode .stage-canvas-wrap {
+		padding: 6px 0 8px;
+	}
+
+	/* Badges off: the keycaps alone sit flush against the device's flanks */
+	html.real-size-mode .flank-tag {
+		display: none;
+	}
+
+	html.real-size-mode .v1-assembly {
+		gap: 4px;
+		margin-top: 2px;
+		margin-bottom: 6px;
+	}
+
+	/* On a phone the readout is a one-line caption: the detail and the
+	   calibration source live in the badge's tooltip, and the space goes to the
+	   life-size device. */
+	html.real-size-mode .real-size-note {
+		width: 100%;
+		max-width: none;
+		align-self: stretch;
+		padding: 4px 6px 4px 9px;
+		gap: 7px;
+		border-radius: 8px;
+	}
+
+	html.real-size-mode .real-size-note-text {
+		font-size: 10px;
+		gap: 5px;
+	}
+
+	html.real-size-mode .real-size-note-text #real-size-note-detail {
+		display: none;
+	}
+
+	html.real-size-mode .real-size-note-source {
+		flex-basis: auto;
+		font-size: 9px;
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
+	}
+
+	html.real-size-mode .real-size-note-fit {
+		padding: 2px 7px;
+		font-size: 9.5px;
+	}
+}
+
+/* Very short viewports: keep the device, drop the readout */
+@media (max-height: 560px) {
+	html.real-size-mode .real-size-note {
+		display: none;
+	}
+}
+
+/* --------------------------------------------------------------------------
+ * Compact scale switch
+ *
+ * Six buttons plus Audio and Back View do not fit a phone toolbar, and the
+ * group was being scrolled so its first item was cut in half. Below 640 px the
+ * "Real size" label becomes "1:1" and the group stops shrinking, so every
+ * scale stays fully visible and tappable.
+ * -------------------------------------------------------------------------- */
+@media (max-width: 640px) {
+	.topbar-actions .segmented {
+		flex-shrink: 0;
+	}
+
+	.seg-btn {
+		padding-left: 7px;
+		padding-right: 7px;
+	}
+}
+
+/* --------------------------------------------------------------------------
+ * Narrow screens: the flank keys and their badges sit outside the chassis, so
+ * a large preset can push the assembly past the viewport even when the chassis
+ * itself fits. Give those extras a smaller fixed footprint and let the whole
+ * assembly shrink to the pane instead of overflowing it.
+ * -------------------------------------------------------------------------- */
+@media (max-width: 640px) {
+	.v1-assembly {
+		max-width: 100%;
+		/* a big preset must not start off-screen to the left */
+		justify-self: start;
+		margin-left: 0;
+		margin-right: 0;
+	}
+
+	.flank-tag {
+		min-width: 22px;
+		min-height: 22px;
+		padding: 2px;
+		font-size: 9px;
+		border-radius: 6px;
+	}
+
+	.flank-btn,
+	.v1-sd-slot-btn {
+		min-height: 26px;
+		gap: 3px;
+	}
+
+	/* Tighten the jack strip and USB-C margin, which scale with the device */
+	.v1-top-ports {
+		gap: 6px;
+	}
+}
+
+/* On a phone a preset larger than the pane scrolls sideways from its left edge
+   rather than being centred and clipped on both flanks. */
+@media (max-width: 640px) {
+	.stage-canvas-wrap {
+		justify-content: flex-start;
+	}
+
+	.stage-canvas-wrap > .v1-assembly {
+		flex-shrink: 0;
+	}
+}
+

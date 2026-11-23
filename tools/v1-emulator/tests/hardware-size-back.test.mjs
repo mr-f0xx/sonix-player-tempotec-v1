@@ -2,8 +2,10 @@
  * Front-end checks for the two hardware-fidelity features:
  *
  *   1. "Real size" — the 2.0" 240x320 panel is drawn at its true 30.48 x 40.64
- *      mm inside the true 41.8 x 87.2 x 13.75 mm body, using a hidden 100 mm
- *      CSS probe to convert millimetres to CSS pixels on the current display.
+ *      mm inside the true 41.8 x 87.2 x 13.75 mm body. A phone or tablet is
+ *      identified from its portrait CSS viewport plus devicePixelRatio, so the
+ *      density is the panel's real dpi; everywhere else a 1in CSS probe is the
+ *      fallback and the readout says the size is an approximation.
  *   2. The rear shell — the real Variations V1 back: dark navy aluminium plate
  *      with the smooth cap whose edge steps UP to the right, the copper chamfer
  *      insert in that riser, the exposed Torx screw, the 45deg milled rib field
@@ -47,18 +49,20 @@ async function open(t, viewport = { width: 1440, height: 900 }) {
 }
 
 /**
- * Pin the display conversion to a known value: a 800 CSS px wide probe means one
- * CSS px is 0.125 mm, so the panel's 0.127 mm device pixel needs 1.016 CSS px.
+ * Pin the display conversion to a known value: a 1in probe laid out 400 CSS px
+ * wide means one CSS px is 0.0635 mm, so the panel's 0.127 mm device pixel
+ * needs 2 CSS px. The probe is defined in inches, so its measured px width is
+ * what the browser believes one inch is.
  */
-async function calibrate(page, probePx = 800) {
+async function calibrate(page, probePx = 400) {
 	await page.addStyleTag({ content: `.real-size-probe{width:${probePx}px!important}` });
 }
 
-const mmPerCssPx = (probePx) => 100 / probePx;
+const mmPerCssPx = (probePx) => 25.4 / probePx;
 
 test("Real size draws the 2.0in panel at its true 30.48 x 40.64 mm", async (t) => {
 	const page = await open(t);
-	await calibrate(page, 800); // 1 CSS px = 0.125 mm
+	await calibrate(page, 400); // 1 CSS px = 0.0635 mm
 	await page.click('[data-scale="real"]');
 	await page.evaluate(() => window.dispatchEvent(new Event("resize")));
 	await page.waitForTimeout(150);
@@ -80,9 +84,9 @@ test("Real size draws the 2.0in panel at its true 30.48 x 40.64 mm", async (t) =
 		};
 	});
 
-	const mm = mmPerCssPx(800);
+	const mm = mmPerCssPx(400);
 	assert.equal(out.mode, "real");
-	// 0.127 mm per device pixel / 0.125 mm per CSS px = 1.016
+	// 0.127 mm per device pixel / 0.0635 mm per CSS px = 2
 	assert.ok(Math.abs(out.scale - 0.127 / mm) < 0.002, `scale should be ${(0.127 / mm).toFixed(3)}, got ${out.scale}`);
 	// The panel is 240x320 device px at that scale
 	assert.ok(Math.abs(out.screen.w * mm - 30.48) < 0.2, `panel should be 30.48 mm wide, got ${(out.screen.w * mm).toFixed(2)}`);
@@ -99,19 +103,19 @@ test("Real size draws the 2.0in panel at its true 30.48 x 40.64 mm", async (t) =
 
 test("Real size survives a change of display resolution", async (t) => {
 	const page = await open(t);
-	await calibrate(page, 800);
+	await calibrate(page, 400);
 	await page.click('[data-scale="real"]');
 	await page.waitForTimeout(120);
-	// A denser display: 100 mm now measures 1200 CSS px (0.0833 mm per px)
-	await calibrate(page, 1200);
+	// A denser display: 1in now measures 600 CSS px (0.0423 mm per px)
+	await calibrate(page, 600);
 	await page.evaluate(() => window.dispatchEvent(new Event("resize")));
 	await page.waitForTimeout(150);
 	const out = await page.evaluate(() => {
 		const r = document.getElementById("v1-screen-stage").getBoundingClientRect();
 		return { w: r.width, scale: Number(getComputedStyle(document.documentElement).getPropertyValue("--screen-scale")) };
 	});
-	assert.ok(Math.abs(out.scale - 0.127 / mmPerCssPx(1200)) < 0.002, `scale should follow the new probe, got ${out.scale}`);
-	assert.ok(Math.abs(out.w * mmPerCssPx(1200) - 30.48) < 0.2, `panel should still be 30.48 mm, got ${(out.w * mmPerCssPx(1200)).toFixed(2)}`);
+	assert.ok(Math.abs(out.scale - 0.127 / mmPerCssPx(600)) < 0.002, `scale should follow the new probe, got ${out.scale}`);
+	assert.ok(Math.abs(out.w * mmPerCssPx(600) - 30.48) < 0.2, `panel should still be 30.48 mm, got ${(out.w * mmPerCssPx(600)).toFixed(2)}`);
 });
 
 test("leaving Real size restores the fitted view and hides the readout", async (t) => {
@@ -122,7 +126,9 @@ test("leaving Real size restores the fitted view and hides the readout", async (
 	assert.equal(await page.locator("#real-size-note").isVisible(), false);
 	assert.equal(await page.locator("#v1-real-badge").isVisible(), false);
 	const w = await page.evaluate(() => document.getElementById("v1-screen-stage").getBoundingClientRect().width);
-	assert.ok(Math.abs(w - 300) < 2, `1.25x should give a 300 px wide panel, got ${w.toFixed(1)}`);
+	// The chassis is modelled in the panel's 240 device px, so the multiplier is
+	// relative to native: 1.25x = 0.91 CSS px per device px = 218 px across.
+	assert.ok(Math.abs(w - 240 * 0.91) < 2, `1.25x should give a 218 px wide panel, got ${w.toFixed(1)}`);
 });
 
 test("Fit keeps the whole device, jacks and USB-C included, inside the stage", async (t) => {
@@ -138,6 +144,74 @@ test("Fit keeps the whole device, jacks and USB-C included, inside the stage", a
 	});
 	assert.ok(out.asmTop >= out.wrap.top - 12, "the jack strip stays inside the stage");
 	assert.ok(out.usbcBottom <= out.wrap.bottom + 12, "the USB-C port stays inside the stage");
+});
+
+test("the fixed multipliers draw a usable device, not an oversized one", async (t) => {
+	const page = await open(t, { width: 1440, height: 900 });
+	// Expected panel widths in CSS px. These match what the previous release drew
+	// (240/300/360/480) now that the chassis is modelled in real device pixels,
+	// so the numbers on the buttons mean what they used to.
+	const expected = { "1": 175, "1.25": 218, "1.5": 262, "2": 350 };
+	for (const [mode, want] of Object.entries(expected)) {
+		await page.click(`[data-scale="${mode}"]`);
+		await page.waitForTimeout(120);
+		const out = await page.evaluate(() => {
+			const r = document.getElementById("v1-screen-stage").getBoundingClientRect();
+			const pane = document.querySelector(".stage-pane");
+			return { w: r.width, paneScroll: pane.scrollHeight > pane.clientHeight + 2 };
+		});
+		assert.ok(Math.abs(out.w - want) < 3, `${mode}x should draw a ${want} px panel, got ${out.w.toFixed(1)}`);
+		// The default view on a normal desktop window must not need scrolling
+		if (mode === "1.25" || mode === "1") {
+			assert.equal(out.paneScroll, false, `${mode}x should fit a 1440x900 stage without scrolling`);
+		}
+	}
+	// 2x is the largest preset and stays under the stage width
+	const widest = await page.evaluate(() => document.getElementById("v1-chassis").getBoundingClientRect().width);
+	assert.ok(widest < 700, `the 2x device is ${widest.toFixed(0)} px wide, well inside the stage`);
+});
+
+test("a phone is identified and Real size is exact there, not the 96 dpi guess", async (t) => {
+	// 390 CSS px at devicePixelRatio 3 is an iPhone 12-16 class 460 ppi panel.
+	// The CSS millimetre would read 0.48 px/device-px here; the panel density
+	// gives the true 0.7667.
+	const page = await open(t, { width: 390, height: 664 });
+	await page.evaluate(() => Object.defineProperty(window, "devicePixelRatio", { value: 3, configurable: true }));
+	await page.click('[data-scale="real"]');
+	await page.evaluate(() => window.dispatchEvent(new Event("resize")));
+	await page.waitForTimeout(200);
+	const out = await page.evaluate(() => {
+		const r = document.getElementById("v1-screen-stage").getBoundingClientRect();
+		return {
+			scale: Number(getComputedStyle(document.documentElement).getPropertyValue("--screen-scale")),
+			w: r.width,
+			badge: document.getElementById("v1-real-badge").textContent,
+			source: document.getElementById("real-size-note-source").textContent,
+			approx: document.getElementById("v1-real-badge").classList.contains("v1-real-badge-approx"),
+		};
+	});
+	// 3 x 25.4 / 460 mm per CSS px, so 0.127 / that = 0.7667
+	assert.ok(Math.abs(out.scale - 0.7667) < 0.01, `iPhone panel scale should be ~0.767, got ${out.scale}`);
+	assert.match(out.source, /460 ppi/, "the readout names the panel it measured against");
+	assert.match(out.badge, /^Screen 1:1/, "a known panel gets an exact 1:1 claim, not an approximation");
+	assert.equal(out.approx, false);
+	assert.match(out.badge, /30\.5 × 40\.6 mm/);
+	assert.ok(Math.abs(out.w - 240 * out.scale) < 2, "the panel is drawn 240 device px across");
+});
+
+test("an unidentifiable display says the size is approximate instead of claiming 1:1", async (t) => {
+	const page = await open(t, { width: 1440, height: 900 });
+	await page.click('[data-scale="real"]');
+	await page.waitForTimeout(150);
+	const out = await page.evaluate(() => ({
+		badge: document.getElementById("v1-real-badge").textContent,
+		approx: document.getElementById("v1-real-badge").classList.contains("v1-real-badge-approx"),
+		source: document.getElementById("real-size-note-source").textContent,
+	}));
+	// A 1440 px desktop cannot be identified, and headless Chromium reports 96 dpi
+	assert.equal(out.approx, true);
+	assert.match(out.badge, /≈1:1/);
+	assert.match(out.source, /96 dpi/);
 });
 
 test("the rear shell shows the real V1 back", async (t) => {
