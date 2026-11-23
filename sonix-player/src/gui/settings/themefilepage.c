@@ -110,8 +110,15 @@ static void screen_loaded_cb(lv_event_t *e) {
 void themefilepage_init(gui_config_t *cfg) {
 	lv_obj_t *container = settingsrow_page(themefilepage_screen, cfg, "appearance_custom_theme");
 
-	// The note first, so it sits above the list rather than under a page
-	// and a half of empty space when the folder is bare.
+	// Keep the custom.ini editing hint with the list it describes.
+	lv_obj_t *note = lv_label_create(container);
+	lv_label_set_long_mode(note, LV_LABEL_LONG_WRAP);
+	lv_obj_set_width(note, lv_pct(100));
+	lv_obj_add_style(note, &theme_style_text_dim, 0);
+	lv_obj_set_style_text_font(note, &font_ui_22, 0);
+	lv_label_set_text(note, tr("appearance_custom_note"));
+
+	// With no themes on the card, this prompt sits above the empty list.
 	empty_note = lv_label_create(container);
 	lv_label_set_long_mode(empty_note, LV_LABEL_LONG_WRAP);
 	lv_obj_set_width(empty_note, lv_pct(100));

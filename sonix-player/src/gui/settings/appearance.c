@@ -1062,20 +1062,6 @@ void appearance_init(gui_config_t *cfg) {
 	// keep the two card-backed selectors together in Appearance.
 	settingsrow_add(container, "appearance_icon_set", &iconset_value, switch_screen_cb, iconsetpage_screen);
 
-	lv_obj_t *iconset_note = lv_label_create(container);
-	lv_label_set_long_mode(iconset_note, LV_LABEL_LONG_WRAP);
-	lv_obj_set_width(iconset_note, lv_pct(100));
-	lv_obj_add_style(iconset_note, &theme_style_text_dim, 0);
-	lv_obj_set_style_text_font(iconset_note, &font_ui_22, 0);
-	lv_label_set_text(iconset_note, tr("appearance_icon_set_note"));
-
-	lv_obj_t *custom_note = lv_label_create(container);
-	lv_label_set_long_mode(custom_note, LV_LABEL_LONG_WRAP);
-	lv_obj_set_width(custom_note, lv_pct(100));
-	lv_obj_add_style(custom_note, &theme_style_text_dim, 0);
-	lv_obj_set_style_text_font(custom_note, &font_ui_22, 0);
-	lv_label_set_text(custom_note, tr("appearance_custom_note"));
-
 	// A custom palette may also wear the Tokyo-style layout; the switch sits
 	// with the note it applies to and only changes what Custom dresses with,
 	// never which palette is selected.

@@ -918,14 +918,16 @@ int main(int argc, char **argv) {
 	lv_obj_t *tint_label = find_label(appearance_screen, tr("appearance_dynamic_tint"));
 	lv_obj_t *iconset_label = find_label(appearance_screen, tr("appearance_icon_set"));
 	lv_obj_t *custom_theme_label = find_label(appearance_screen, tr("appearance_custom_theme"));
-	lv_obj_t *iconset_caption = find_label(appearance_screen, tr("appearance_icon_set_note"));
+	lv_obj_t *iconset_caption = find_label(iconsetpage_screen, tr("appearance_icon_set_note"));
 	assert(glyph_label && accent_label && tint_label && iconset_label && custom_theme_label && iconset_caption);
+	assert(!find_label(appearance_screen, tr("appearance_icon_set_note")));
+	assert(find_label(themefilepage_screen, tr("appearance_custom_note")));
+	assert(!find_label(appearance_screen, tr("appearance_custom_note")));
 	lv_obj_t *glyph_card = lv_obj_get_parent(glyph_label);
 	lv_obj_t *accent_card = lv_obj_get_parent(accent_label);
 	lv_obj_t *custom_theme_card = lv_obj_get_parent(custom_theme_label);
 	lv_obj_t *iconset_card = lv_obj_get_parent(iconset_label);
 	assert(lv_obj_get_sibling(custom_theme_card, 1) == iconset_card);
-	assert(lv_obj_get_sibling(iconset_card, 1) == iconset_caption);
 	assert(lv_obj_get_sibling(glyph_card, 1) == accent_card);
 	assert(lv_obj_get_sibling(accent_card, 1) == lv_obj_get_parent(tint_label));
 	/* With no card mounted the row still offers Default. */
