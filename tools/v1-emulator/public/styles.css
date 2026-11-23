@@ -349,9 +349,33 @@ body {
  * full-front obsidian glass with tall lower chin, bottom-left vertical pill
  * RGB LED, bottom-right silver V1 mark, top dual gold 4.4mm + 3.5mm jacks,
  * bottom USB-C, left Vol+/Vol-/microSD, right Power/Prev/Play/Next.
+ *
+ * The whole mockup is modelled at the panel's native pixel density: its 240x320
+ * LCD is a 2.0" (50.8mm) diagonal, so one device pixel is exactly 0.127mm and
+ * the panel is 30.48 x 40.64 mm wide/tall. Every physical feature below is
+ * therefore expressed in *device pixels* at --screen-scale: 1, which makes the
+ * chassis measure job-printed size instead of a guessed aspect ratio:
+ *
+ *   width   41.8 mm -> 329.13 px   5.66mm side bezel: 240 screen + 2x44.57
+ *   height  87.2 mm -> 686.61 px   4mm top bezel + 320 screen + 37.29mm chin
+ *                                  (the chin holds the LED and the V1 mark)
+ *   glass   31.496 x 39.575 px of bezel on top / each side (4.0 / 5.0 mm)
+ *
+ * "Real size" then only has to convert mm to CSS px to draw the device life
+ * size (see the Real size block at the end of this file).
  * -------------------------------------------------------------------------- */
 .v1-assembly {
 	--v1-top-port-h: 16px;
+	/* Real body in device pixels (0.127 mm per px): 41.8 x 87.2 mm */
+	--v1-body-w: 329.13;
+	--v1-body-h: 686.61;
+	/* Chassis frame (border + padding) = 5 px (0.635 mm) per side; the rest of
+	   the front is the glass slab */
+	--v1-frame-px: 5;
+	/* Glass bezel: (41.8 - 30.48) / 2 mm sides, 4.0 mm above the panel */
+	--v1-glass-pad-x: calc((var(--v1-body-w) - 240 - 2 * var(--v1-frame-px)) / 2);
+	--v1-glass-pad-top: calc(4 / 0.127 - var(--v1-frame-px));
+	--v1-chin-h: calc(var(--v1-body-h) - 320 - var(--v1-glass-pad-top) - 2 * var(--v1-frame-px));
 	--v1-radius-outer: clamp(10px, calc(12px * var(--screen-scale)), 20px);
 	--v1-radius-glass: clamp(7px, calc(9px * var(--screen-scale)), 16px);
 	position: relative;
@@ -536,22 +560,37 @@ body {
 	transform: rotateY(180deg);
 }
 
+/* The two faces share one box: the front face in flow sizes the card, and the
+   rear face is pinned over it. Both turn their back to the camera, so exactly
+   one of them is visible at any point of the flip. The combined
+   .v1-chassis.v1-face-back selectors are deliberate: the chassis rule further
+   down sets position: relative, and matching it here keeps the rear face
+   absolutely positioned (it used to collapse to the height of its padding). */
 .v1-face {
 	backface-visibility: hidden;
 	-webkit-backface-visibility: hidden;
 }
 
-.v1-face-back {
+.v1-chassis.v1-face-back {
 	position: absolute;
 	inset: 0;
 	transform: rotateY(180deg);
 	cursor: pointer;
 }
 
+/* The rear chassis is a pure frame around .v1-back-shell */
+.v1-chassis.v1-face-back .v1-back-shell {
+	position: absolute;
+	inset: 0;
+	width: auto;
+	height: auto;
+}
+
 /* Outer Anodized Gunmetal Machined Chassis Frame */
 .v1-chassis {
 	position: relative;
-	padding: 4px;
+	/* 5px frame (0.635mm) per side, the same on the model and the real body */
+	padding: calc(var(--v1-frame-px) * 1px * var(--screen-scale));
 	border-radius: var(--v1-radius-outer);
 	background: linear-gradient(
 		152deg,
@@ -594,9 +633,10 @@ body {
 		#08090c 100%
 	);
 	border-radius: var(--v1-radius-glass);
+	/* Real bezel: 4.0 mm above the LCD and 5.66 mm to each side of it */
 	padding:
-		calc(13px * var(--screen-scale))
-		calc(13px * var(--screen-scale))
+		calc(var(--v1-glass-pad-top) * 1px * var(--screen-scale))
+		calc(var(--v1-glass-pad-x) * 1px * var(--screen-scale))
 		0;
 	display: flex;
 	flex-direction: column;
@@ -740,11 +780,13 @@ html[data-scale="1.5"] #v1-canvas {
 	max-width: 190px;
 }
 
-/* Signature Tall Glossy Piano-Black Lower Chin */
+/* Signature Tall Glossy Piano-Black Lower Chin
+   Real chin: 87.2mm - 4.0mm top bezel - 40.64mm LCD - 2x0.635mm frame = 41.29mm,
+   i.e. 325.1 device px. It carries the RGB LED and the brushed V1 mark. */
 .v1-chin {
 	position: relative;
 	width: 100%;
-	height: calc(182px * var(--screen-scale));
+	height: calc(var(--v1-chin-h) * 1px * var(--screen-scale));
 	flex-shrink: 0;
 	z-index: 2;
 }
@@ -752,8 +794,8 @@ html[data-scale="1.5"] #v1-canvas {
 /* Bottom-Left Vertical Pill RGB LED (SGM31324 under obsidian front glass) */
 .v1-led-housing {
 	position: absolute;
-	left: calc(4px * var(--screen-scale));
-	bottom: calc(18px * var(--screen-scale));
+	left: calc(20px * var(--screen-scale));
+	bottom: calc(58px * var(--screen-scale));
 	width: calc(14px * var(--screen-scale));
 	height: calc(24px * var(--screen-scale));
 	display: grid;
@@ -784,8 +826,8 @@ html[data-scale="1.5"] #v1-canvas {
 /* Bottom-Right Brushed-Silver V1 Logo Emblem */
 .v1-chin-emblem {
 	position: absolute;
-	right: calc(4px * var(--screen-scale));
-	bottom: calc(16px * var(--screen-scale));
+	right: calc(28px * var(--screen-scale));
+	bottom: calc(75px * var(--screen-scale));
 	display: flex;
 	align-items: center;
 	justify-content: flex-end;
@@ -801,10 +843,31 @@ html[data-scale="1.5"] #v1-canvas {
 }
 
 /* --------------------------------------------------------------------------
- * Back Face: Authentic TempoTec Variations V1 Rear Shell
- * (Diagonal ribbed matte/satin black base + stepped brushed gunmetal upper
- *  cap + bright orange diagonal chamfer insert + exposed CNC Torx screw +
- *  vertical TEMPoTEC piano-key logo along the lower-right side)
+ * Back Face: the real TempoTec Variations V1 rear
+ *
+ * Sampled from straight-on owner photos of the retail device (fractions of the
+ * body's width W / height H; the body is 41.8 x 87.2 mm as on the front):
+ *
+ *   - The whole rear is the same dark navy-graphite (#2e4761 lit, #1b2431 in
+ *     shadow): a moulded plastic antenna cap on the top 21.4%, then the
+ *     aluminium battery door. The real finish is darker and bluer than the
+ *     "gunmetal" of earlier mock-ups, so the model uses those sampled tones.
+ *   - The door's smooth upper cap ends at 0.235 H across the left 0.69 W; the
+ *     seam then RISES at 45deg to 0.167 H by 0.93 W and runs flat to the edge,
+ *     so the cap is taller on its right side. A lit chamfer and a dark gap run
+ *     along the whole seam - the crisp machined line visible on the device.
+ *   - A copper/terracotta chamfer insert is bedded into that 45deg riser from
+ *     ~0.70 W to ~0.82 W, parallel to it (~2% of H thick). It is matte and
+ *     muted (#ae736c -> #c2827a sampled), not the bright safety orange this
+ *     detail is often drawn in.
+ *   - The exposed silver Torx screw sits just right of the insert, centred on
+ *     0.886 W / 0.192 H, about 5% of W across.
+ *   - Below the seam the door carries ~45deg milled ribs (the crosshatch diamond
+ *     finish). They are crisp bright grooves that fade into shadow toward the
+ *     lower middle and lower left, matching where the light falls off.
+ *   - The TempoTec piano-key badge + wordmark are printed up the lower right of
+ *     the door, reading bottom-to-top, centred ~0.83 W and running from ~0.95 H
+ *     up to ~0.66 H (the wordmark is about 0.07 W tall).
  * -------------------------------------------------------------------------- */
 .v1-back-shell {
 	position: relative;
@@ -812,131 +875,172 @@ html[data-scale="1.5"] #v1-canvas {
 	height: 100%;
 	border-radius: var(--v1-radius-glass);
 	overflow: hidden;
-	background: #14161a;
+	/* dark navy-graphite rear of the real device */
+	background: linear-gradient(168deg, #2a415a 0%, #233444 58%, #1b2431 100%);
 	box-shadow:
-		inset 0 0 0 1px rgba(255, 255, 255, 0.1),
-		inset 0 1px 0 rgba(255, 255, 255, 0.16);
+		inset 0 0 0 1px rgba(190, 214, 240, 0.1),
+		inset 0 1px 0 rgba(200, 222, 245, 0.16);
 }
 
-/* Iconic 45-degree alternating matte/satin charcoal stripes running up behind the step */
-.v1-back-stripes {
+/* Top 21.4%: plain moulded plastic antenna section */
+.v1-back-top {
 	position: absolute;
-	inset: 0;
+	inset: 0 0 auto 0;
+	height: 21.4%;
 	background:
-		linear-gradient(
-			180deg,
-			rgba(0, 0, 0, 0.35) 0%,
-			transparent 34%,
-			transparent 90%,
-			rgba(0, 0, 0, 0.42) 100%
+		linear-gradient(180deg, rgba(206, 226, 248, 0.07) 0%, rgba(206, 226, 248, 0) 46%),
+		linear-gradient(102deg, #2d4459 0%, #273748 58%, #212c3a 100%);
+	/* lightly proud of the door, so its lip catches a highlight */
+	border-bottom: 1px solid rgba(158, 186, 214, 0.12);
+	box-shadow: 0 1px 0 rgba(4, 7, 11, 0.34);
+	z-index: 1;
+}
+
+/* Aluminium battery door: smooth cap, 45deg stepped right corner, rib field */
+.v1-back-plate {
+	position: absolute;
+	inset: 20.6% 0 0 0;
+	background: linear-gradient(163deg, #2c435a 0%, #26374a 46%, #1d2634 100%);
+	border-radius: 0 0 calc(var(--v1-radius-glass) - 1px) calc(var(--v1-radius-glass) - 1px);
+	z-index: 2;
+	box-shadow:
+		inset 0 1px 0 rgba(176, 200, 228, 0.14),
+		0 -1px 2px rgba(4, 7, 11, 0.45);
+}
+
+/* Smooth upper cap of the door; its right-hand edge rises by 45deg.
+   The clip is in this element's own coordinates: the plate starts at 20.6% H,
+   so 0.235 H of the body is 11.57% of the plate, and 0.167 H is -5.03%. */
+.v1-back-plate-cap {
+	position: absolute;
+	inset: 0 0 auto 0;
+	/* smooth cap from the plate's top down to the seam (3.65% of the plate is
+	   0.235 H of the body); the stepped riser rises above the plate edge and is
+	   drawn by the plate's own clip */
+	height: 3.65%;
+	background: linear-gradient(102deg, #2d4459 0%, #283848 54%, #223040 100%);
+}
+
+/* 45deg milled rib field (crosshatch diamond finish), lit from the top right */
+.v1-back-plate-ribs {
+	position: absolute;
+	left: 0;
+	right: 0;
+	top: 3.65%;
+	bottom: 0;
+	background:
+		/* the diamond finish: a fainter counter-diagonal cuts the main ribs into
+		   the lozenge cells visible on the real battery door */
+		repeating-linear-gradient(
+			45deg,
+			rgba(6, 10, 15, 0) 0px,
+			rgba(6, 10, 15, 0) calc(8.2px * var(--screen-scale)),
+			rgba(6, 10, 15, 0.24) calc(8.2px * var(--screen-scale)),
+			rgba(6, 10, 15, 0.24) calc(9.4px * var(--screen-scale)),
+			rgba(6, 10, 15, 0) calc(9.4px * var(--screen-scale)),
+			rgba(6, 10, 15, 0) calc(17.6px * var(--screen-scale))
 		),
+		/* light falls off toward the bottom and lower left */
+		radial-gradient(ellipse 92% 58% at 70% 0%, rgba(158, 188, 222, 0.24), rgba(158, 188, 222, 0) 62%),
+		linear-gradient(206deg, rgba(5, 9, 14, 0.08) 8%, rgba(5, 9, 14, 0.5) 56%, rgba(5, 9, 14, 0.7) 100%),
 		repeating-linear-gradient(
 			-45deg,
-			#272b33 0px,
-			#272b33 calc(11px * var(--screen-scale)),
-			#121418 calc(11px * var(--screen-scale)),
-			#121418 calc(22px * var(--screen-scale))
+			rgba(5, 8, 12, 0.68) 0px,
+			rgba(5, 8, 12, 0.68) calc(4.6px * var(--screen-scale)),
+			rgba(192, 214, 238, 0.34) calc(4.6px * var(--screen-scale)),
+			rgba(192, 214, 238, 0.34) calc(5.5px * var(--screen-scale)),
+			rgba(104, 130, 160, 0.16) calc(5.5px * var(--screen-scale)),
+			rgba(104, 130, 160, 0.16) calc(11.4px * var(--screen-scale))
 		);
+	/* the ribs stop at the riser on the right; the riser itself is above the
+	   plate's top edge, so it is cut off here and continues via the cap */
+	clip-path: polygon(0 0, 69% 0, 85% -8.56%, 100% -8.56%, 100% 100%, 0 100%);
+	-webkit-clip-path: polygon(0 0, 69% 0, 85% -8.56%, 100% -8.56%, 100% 100%, 0 100%);
 }
 
-/* Signature bright orange diagonal accent tucked along the 45-degree seam */
-.v1-back-orange-accent {
+/* Machined step line + copper chamfer insert, drawn as vector so the seam stays
+   a hairline at every scale. Percentages here are of the body (the svg spans
+   the whole rear). */
+.v1-back-step {
 	position: absolute;
-	top: 0;
-	left: 0;
-	right: 0;
-	height: 27%;
-	background: linear-gradient(135deg, #ffac33 0%, #ff7a0e 50%, #cc4800 100%);
-	clip-path: polygon(
-		52% 100%,
-		60% 100%,
-		77.5% 63%,
-		69.5% 63%
-	);
-	filter: drop-shadow(0 2px 6px rgba(255, 118, 18, 0.45));
-	z-index: 2;
-}
-
-/* Matte brushed dark-titanium upper rear plate with exact angled right step */
-.v1-back-upper {
-	position: absolute;
-	top: 0;
-	left: 0;
-	right: 0;
-	height: 27%;
-	background:
-		repeating-linear-gradient(
-			180deg,
-			rgba(255, 255, 255, 0.028) 0 1px,
-			transparent 1px 3px
-		),
-		linear-gradient(
-			155deg,
-			#636974 0%,
-			#4a4f59 44%,
-			#383c44 100%
-		);
-	clip-path: polygon(
-		0 0,
-		100% 0,
-		100% 63%,
-		72% 63%,
-		54% 100%,
-		0 100%
-	);
-	box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.28);
-	filter: drop-shadow(0 2px 3px rgba(0, 0, 0, 0.72));
-	z-index: 3;
-}
-
-/* Exposed CNC silver 6-lobe Torx star screw nestled in the stepped upper-right corner */
-.v1-back-torx {
-	position: absolute;
-	right: 5.5%;
-	top: 19.5%;
+	inset: 0;
+	width: 100%;
+	height: 100%;
 	z-index: 4;
+	pointer-events: none;
+	overflow: visible;
+}
+
+.v1-back-step-line {
+	opacity: 0.75;
+	filter: drop-shadow(0 1.2px 0 rgba(3, 6, 10, 0.85));
+}
+
+.v1-back-accent {
+	/* the copper insert reads a touch brighter than its muted sample */
+	filter: saturate(1.15) brightness(1.04);
+}
+
+/* Exposed silver Torx screw, centred 0.886 W / 0.192 H, ~5.1% of W across */
+.v1-back-screw {
+	position: absolute;
+	left: 86.1%;
+	top: 16.6%;
+	width: 5.1%;
+	aspect-ratio: 1;
+	z-index: 5;
 	pointer-events: none;
 }
 
 .v1-torx-svg {
-	width: clamp(19px, calc(22px * var(--screen-scale)), 36px);
-	height: auto;
 	display: block;
-	filter: drop-shadow(0 1px 3px rgba(0, 0, 0, 0.8));
+	width: 100%;
+	height: auto;
+	filter: drop-shadow(0 1px 1.5px rgba(0, 0, 0, 0.55));
 }
 
-/* Vertical TEMPoTEC + Piano-Key Square Logo running upward along the lower-right side */
+/* TempoTec badge + wordmark printed up the lower-right of the door */
 .v1-back-brand {
 	position: absolute;
-	bottom: calc(22px * var(--screen-scale));
-	left: calc(100% - 14px * var(--screen-scale));
-	transform-origin: 0 100%;
-	transform: rotate(-90deg);
+	right: 10%;
+	bottom: 5%;
+	/* footprint of the print once rotated: as wide as the wordmark is tall
+	   (240x40 viewBox -> 292 x 48.7 device px) and as tall as it is long */
+	width: calc(48.7px * var(--screen-scale));
+	height: calc(292px * var(--screen-scale));
 	z-index: 4;
 	pointer-events: none;
 }
 
 .v1-tempotec-svg {
-	width: clamp(134px, calc(154px * var(--screen-scale)), 250px);
+	/* real print runs 0.66 H -> 0.95 H of the body, i.e. ~290 device px */
+	width: calc(292px * var(--screen-scale));
 	height: auto;
 	display: block;
-	filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.8));
-	opacity: 0.92;
+	/* reads bottom-to-top up the right side of the door; the 90deg turn about
+	   the corner lays the 292px-long print up the wrapper's height */
+	position: absolute;
+	top: 0;
+	left: 0;
+	transform-origin: 0 0;
+	transform: rotate(90deg) translateY(-100%);
+	opacity: 0.97;
+	filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.45));
 }
 
 .v1-back-hint {
 	position: absolute;
-	left: 12px;
-	bottom: 12px;
+	left: 10px;
+	bottom: 10px;
 	font-family: var(--font-mono);
 	font-size: 9.5px;
-	color: rgba(255, 255, 255, 0.5);
-	background: rgba(10, 12, 16, 0.72);
+	color: rgba(255, 255, 255, 0.55);
+	background: rgba(8, 11, 16, 0.66);
 	border: 1px solid rgba(255, 255, 255, 0.12);
 	padding: 3px 8px;
 	border-radius: 999px;
-	opacity: 0.8;
-	z-index: 5;
+	opacity: 0;
+	z-index: 7;
 	transition: opacity 0.15s ease, color 0.15s ease;
 }
 
@@ -1069,7 +1173,11 @@ html[data-scale="1.5"] #v1-canvas {
 	position: relative;
 	display: flex;
 	flex-direction: column;
-	padding-top: calc(var(--v1-top-port-h) + 86px * var(--screen-scale));
+	/* The volume rocker starts 12 mm below the top edge of the real body
+	   (device px at the panel's 0.127 mm/px), not at the top of the model. */
+	--v1-flank-top-mm: 12;
+	--v1-flank-bottom-mm: 10;
+	padding-top: calc(var(--v1-top-port-h) + (var(--v1-flank-top-mm) / 0.127) * 1px * var(--screen-scale));
 	z-index: 1;
 	transition: opacity 0.25s ease;
 }
@@ -1077,9 +1185,12 @@ html[data-scale="1.5"] #v1-canvas {
 .v1-flank-left {
 	align-items: flex-end;
 	margin-right: -2px;
-	height: calc(var(--v1-top-port-h) + 515px * var(--screen-scale) + 10px);
+	height: calc(
+		var(--v1-top-port-h) + var(--v1-body-h) * 1px * var(--screen-scale)
+	);
 	justify-content: space-between;
-	padding-bottom: calc(108px * var(--screen-scale));
+	/* microSD slot sits 10 mm above the bottom of the real body */
+	padding-bottom: calc((var(--v1-flank-bottom-mm) / 0.127) * 1px * var(--screen-scale));
 }
 
 .v1-flank-right {
@@ -2491,3 +2602,135 @@ kbd {
 	color: var(--text-secondary);
 }
 
+
+/* --------------------------------------------------------------------------
+ * Real size (true hardware dimensions)
+ *
+ * app.js measures how many CSS px one millimetre is (a hidden 100 mm probe
+ * folds in OS display scaling and browser zoom) and writes the resulting
+ * device-pixel scale to --screen-scale. Because the chassis is modelled in the
+ * panel's own device pixels, that single number draws the 30.48 x 40.64 mm LCD
+ * at true size inside the 41.8 x 87.2 x 13.75 mm body; nothing else here has
+ * to change size. The rules below only make the stage usable when the real
+ * device is bigger than the pane.
+ * -------------------------------------------------------------------------- */
+
+/* Hidden calibration probe: 100 mm of CSS, laid out but never painted */
+.real-size-probe {
+	position: absolute;
+	top: 0;
+	left: -10000px;
+	width: 100mm;
+	height: 1px;
+	visibility: hidden;
+	pointer-events: none;
+}
+
+/* "Screen 1:1" pill in the stage meta bar */
+.v1-real-badge {
+	font-family: var(--font-mono);
+	font-size: 10px;
+	font-weight: 700;
+	letter-spacing: 0.01em;
+	padding: 2px 8px;
+	border-radius: 999px;
+	background: rgba(34, 197, 94, 0.15);
+	color: #86efac;
+	border: 1px solid rgba(34, 197, 94, 0.36);
+	white-space: nowrap;
+}
+
+/* Real size readout under the device */
+.real-size-note {
+	display: flex;
+	align-items: center;
+	gap: 9px;
+	flex-shrink: 0;
+	max-width: min(100%, 520px);
+	margin: 0 auto 6px;
+	padding: 6px 8px 6px 11px;
+	border-radius: 10px;
+	background: rgba(18, 23, 32, 0.88);
+	border: 1px solid rgba(34, 197, 94, 0.3);
+	box-shadow: 0 6px 18px rgba(0, 0, 0, 0.38);
+}
+
+.real-size-note-dot {
+	width: 7px;
+	height: 7px;
+	border-radius: 50%;
+	flex-shrink: 0;
+	background: #22c55e;
+	box-shadow: 0 0 8px rgba(34, 197, 94, 0.8);
+}
+
+.real-size-note-text {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: baseline;
+	gap: 6px;
+	font-size: 11px;
+	color: var(--text-secondary);
+	min-width: 0;
+}
+
+.real-size-note-text strong {
+	color: #86efac;
+	font-size: 11px;
+	font-weight: 700;
+}
+
+.real-size-note-fit {
+	appearance: none;
+	flex-shrink: 0;
+	margin-left: auto;
+	padding: 3px 9px;
+	border-radius: 7px;
+	border: 1px solid var(--border-strong);
+	background: var(--bg-card);
+	color: var(--text-secondary);
+	font-family: var(--font-mono);
+	font-size: 10px;
+	font-weight: 600;
+	cursor: pointer;
+	transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+
+.real-size-note-fit:hover {
+	background: var(--bg-card-hover);
+	color: var(--text-primary);
+	border-color: rgba(34, 197, 94, 0.5);
+}
+
+/* In Real size the mockup may be larger than the stage on small or
+   low-density displays. Scroll it instead of clipping, and start at the top
+   so the screen itself is the first thing in view. */
+html.real-size-mode .stage-pane {
+	/* let the device + readout sit directly under the meta bar, with the
+	   telemetry strip still pinned to the bottom of the pane */
+	justify-content: flex-start;
+}
+
+html.real-size-mode .stage-canvas-wrap {
+	/* size to the true-size device instead of filling the pane, so the readout
+	   sits right under it */
+	flex: 0 1 auto;
+	overflow: visible;
+	padding-bottom: 8px;
+}
+
+html.real-size-mode .telemetry-strip {
+	margin-top: auto;
+}
+
+html.real-size-mode .v1-assembly {
+	margin-top: 4px;
+	margin-bottom: 10px;
+}
+
+/* The bottom-right chin mark and the LED are decorative at that size */
+@media (max-height: 640px) {
+	.real-size-note {
+		display: none;
+	}
+}
