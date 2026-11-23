@@ -68,6 +68,7 @@ static int stub_month_days = 30;
 static int stub_month_number = 11;
 static int stub_today_day = 23;
 static int stub_year_count = 3;
+static bool stub_no_history;
 static int locale_case;
 static int stub_today = 20780; // Monday 2026-11-23
 
@@ -124,8 +125,10 @@ int64_t *stats_all_years(int *first_year, int *count) {
 	*count = stub_year_count;
 	int64_t *values = calloc((size_t)*count, sizeof(*values));
 	assert(values);
-	values[0] = 60;
-	values[*count - 1] = 3600;
+	if (!stub_no_history) {
+		values[0] = 60;
+		values[*count - 1] = 3600;
+	}
 	return values;
 }
 
@@ -669,10 +672,93 @@ int main(void) {
 	assert(values[0] == 1 && values[5] == 60);
 	stub_year_count = 1;
 	stats_refresh();
+	lv_obj_update_layout(stats_screen);
 	assert(lv_chart_get_point_count(chart) == 1 && lv_obj_get_child_count(letters_row) == 1);
+	// One year is a compact centered bar with room for its full label. In
+	// particular it must not fill the entire card like the original bug.
+	lv_area_t chart_area, content_area, view_area, mark_area;
+	lv_obj_get_coords(chart, &chart_area);
+	lv_obj_get_coords(content, &content_area);
+	lv_obj_get_coords(viewport, &view_area);
+	lv_obj_get_coords(lv_obj_get_child(letters_row, 0), &mark_area);
+	assert(lv_obj_get_width(chart) == 32);
+	assert(lv_obj_get_width(content) == 44);
+	assert(lv_obj_get_width(chart) < lv_obj_get_width(viewport) / 3);
+	assert(abs((chart_area.x1 + chart_area.x2) - (view_area.x1 + view_area.x2)) <= 2);
+	assert(abs((chart_area.x1 + chart_area.x2) - (mark_area.x1 + mark_area.x2)) <= 2);
+	assert(mark_area.x1 == content_area.x1 && mark_area.x2 == content_area.x2);
+	assert(strcmp(lv_label_get_text(lv_obj_get_child(letters_row, 0)), "2024") == 0);
+	// The actual LVGL-rendered pixels show a bar with headroom, not a solid
+	// block at the chart's top. The snapshot is RGB888 in BGR byte order.
+	lv_draw_buf_t *shot = lv_snapshot_take(chart, LV_COLOR_FORMAT_RGB888);
+	assert(shot);
+	lv_color_t accent = theme()->accent;
+	int colored = 0, first_y = (int)shot->header.h;
+	for (uint32_t y = 0; y < shot->header.h; y++) {
+		const uint8_t *row = shot->data + y * shot->header.stride;
+		for (uint32_t x = 0; x < shot->header.w; x++) {
+			const uint8_t *pixel = row + 3 * x;
+			if (pixel[0] == accent.blue && pixel[1] == accent.green && pixel[2] == accent.red) {
+				colored++;
+				if ((int)y < first_y) first_y = (int)y;
+			}
+		}
+	}
+	assert(colored > 0 && first_y >= 12 && first_y < (int)shot->header.h / 2);
+	lv_draw_buf_destroy(shot);
+	stub_no_history = true;
+	stats_refresh();
+	assert(lv_chart_get_series_y_array(chart, series)[0] == 0);
+	shot = lv_snapshot_take(chart, LV_COLOR_FORMAT_RGB888);
+	assert(shot);
+	colored = 0;
+	for (uint32_t y = 0; y < shot->header.h; y++) {
+		const uint8_t *row = shot->data + y * shot->header.stride;
+		for (uint32_t x = 0; x < shot->header.w; x++) {
+			const uint8_t *pixel = row + 3 * x;
+			if (pixel[0] == accent.blue && pixel[1] == accent.green && pixel[2] == accent.red) colored++;
+		}
+	}
+	assert(colored == 0);
+	lv_draw_buf_destroy(shot);
+	stub_no_history = false;
+	// Several years have one centered label beneath each separated bar.
+	for (int count = 2; count <= 4; count++) {
+		stub_year_count = count;
+		stats_refresh();
+		lv_obj_update_layout(stats_screen);
+		assert(lv_obj_get_width(content) == count * 44);
+		assert(lv_chart_get_point_count(chart) == (uint32_t)count);
+		assert(lv_obj_get_child_count(letters_row) == (uint32_t)count);
+		lv_obj_get_coords(chart, &chart_area);
+		for (int i = 0; i < count; i++) {
+			lv_point_t p;
+			lv_chart_get_point_pos_by_id(chart, series, (uint32_t)i, &p);
+			lv_obj_get_coords(lv_obj_get_child(letters_row, i), &mark_area);
+			assert(abs(2 * (chart_area.x1 + p.x) - (mark_area.x1 + mark_area.x2)) <= 3);
+		}
+	}
+	stub_year_count = 6;
+	stats_refresh();
+	lv_obj_update_layout(stats_screen);
+	assert(lv_obj_get_width(content) == lv_obj_get_content_width(viewport));
+	assert(lv_obj_get_style_pad_column(chart, LV_PART_MAIN) == 1);
+	assert(lv_obj_get_style_pad_column(letters_row, 0) == 0);
+	assert(!lv_obj_is_scrollable(viewport));
+	// Switching to month restores left alignment and its horizontal scroll.
+	lv_obj_send_event(lv_obj_get_parent(month), LV_EVENT_CLICKED, NULL);
+	lv_obj_update_layout(stats_screen);
+	lv_obj_get_coords(viewport, &view_area);
+	lv_obj_get_coords(content, &content_area);
+	assert(content_area.x1 == view_area.x1);
+	assert(lv_obj_get_width(content) == 29 * 24);
+	assert(lv_obj_is_scrollable(viewport) && lv_obj_get_scroll_right(viewport) > 0);
+	lv_obj_scroll_to_x(viewport, lv_obj_get_scroll_right(viewport), LV_ANIM_OFF);
 	stub_year_count = 3;
 	lv_obj_send_event(lv_obj_get_parent(year), LV_EVENT_CLICKED, NULL);
 	lv_obj_update_layout(stats_screen);
+	assert(lv_obj_get_scroll_x(viewport) == 0 && !lv_obj_is_scrollable(viewport));
+	assert(lv_obj_get_width(content) == lv_obj_get_content_width(viewport));
 
 	// --- the two top lists ------------------------------------------------------
 	lv_obj_t *top_artists = find_label(stats_screen, "stats_top_artists");
