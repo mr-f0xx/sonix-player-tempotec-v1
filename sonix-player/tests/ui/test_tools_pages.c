@@ -444,6 +444,32 @@ static lv_obj_t *find_label(lv_obj_t *obj, const char *text) {
 	return NULL;
 }
 
+/* Every label on a page showing a text, so the two accept keys of a keyboard
+ * -- the QWERTY panel's and the T9 panel's, both built and one hidden -- can
+ * be told apart. */
+static int find_labels_all(lv_obj_t *obj, const char *text, lv_obj_t **out, int max) {
+	int found = 0;
+	if (max > 0 && lv_obj_check_type(obj, &lv_label_class) && strcmp(lv_label_get_text(obj), text) == 0) {
+		out[found++] = obj;
+	}
+	for (uint32_t i = 0; found < max && i < lv_obj_get_child_count(obj); i++) {
+		found += find_labels_all(lv_obj_get_child(obj, i), text, out + found, max - found);
+	}
+	return found;
+}
+
+/* The one of those that is on screen just now. */
+static lv_obj_t *visible_label_of(lv_obj_t *root, const char *text) {
+	lv_obj_t *labels[2];
+	int count = find_labels_all(root, text, labels, 2);
+	for (int i = 0; i < count; i++) {
+		if (lv_obj_is_visible(labels[i])) {
+			return labels[i];
+		}
+	}
+	return NULL;
+}
+
 static lv_obj_t *find_image_button(lv_obj_t *obj, const lv_image_dsc_t *glyph);
 
 static lv_obj_t *find_class(lv_obj_t *obj, const lv_obj_class_t *type) {
@@ -2807,6 +2833,36 @@ static void check_notes_page(gui_config_t *cfg, const char *dir, const char *tag
 	const char *suggested = lv_textarea_get_text(name_field);
 	assert(suggested && suggested[0]);
 	assert(notes_name_ok(suggested));
+
+	// The accept key is drawn around the word it carries: "create" is wider
+	// than the "ok" the shared key was made for, and on the V1 it hung out of
+	// the key on both sides. The word is measured in the font it is drawn in,
+	// so this holds at every text size -- and on both panels, because the
+	// keyboard setting may give the dialog T9 instead.
+	lv_obj_update_layout(notes_screen);
+	lv_obj_t *create_label = visible_label_of(notes_screen, tr("create"));
+	assert(create_label);
+	lv_obj_t *create_key = lv_obj_get_parent(create_label);
+	while (create_key && !lv_obj_check_type(create_key, &lv_button_class)) {
+		create_key = lv_obj_get_parent(create_key);
+	}
+	assert(create_key);
+	assert(lv_obj_get_width(create_key) > lv_obj_get_width(create_label));
+	check_within_panel(notes_screen, cfg, "New note");
+	config_set_int("other", "keyboard_t9", 1);
+	keyboard_refresh_type();
+	lv_obj_update_layout(notes_screen);
+	lv_obj_t *t9_create = visible_label_of(notes_screen, tr("create"));
+	assert(t9_create);
+	lv_obj_t *t9_key = lv_obj_get_parent(t9_create);
+	while (t9_key && !lv_obj_check_type(t9_key, &lv_button_class)) {
+		t9_key = lv_obj_get_parent(t9_key);
+	}
+	assert(t9_key);
+	assert(lv_obj_get_width(t9_key) > lv_obj_get_width(t9_create));
+	check_within_panel(notes_screen, cfg, "New note (T9)");
+	config_set_int("other", "keyboard_t9", 0);
+	keyboard_refresh_type();
 
 	// A name of the test's own, so the file it makes is known here.
 	lv_textarea_set_text(name_field, "test-note");

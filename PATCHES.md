@@ -5179,3 +5179,26 @@ press is what it was waiting for.
 `tests/ui/test_sleeve_hold.c` now attaches the real `player_sheet_attach_drag()`
 alongside the hold, so the two share a press the way they do on the device, and
 every hold it fires asserts that the sheet is still down afterwards.
+
+## The notes page's create key
+
+On the V1, the new-note dialog's keyboard gave its accent key the word
+"create", and the shared 44 px the bottom row draws for "ok". At the panel's
+text size the word is about 53 px wide, so it hung out of the key on both
+sides.
+
+The width cannot be a constant that fits: the word is drawn at whatever
+Settings → Appearance → Text size maps 26 to, so a key that clears it at
+normal does not at large, and one that clears large is needlessly wide at
+small.
+
+`keyboard_fit_accept_text()` measures the word in the font the key is drawn
+in and gives the accept key that and 6 px of air either side, on both the
+QWERTY and the T9 panel. The space and delete keys beside it grow to fill the
+row, so they give up the difference and nothing else moves; a key is never
+made narrower than the shared width, so icon keys and the pages whose word is
+"ok" are untouched. The notes dialog calls it each time it opens, so the
+measurement follows the text size in force then.
+
+`tests/ui/test_tools_pages.c` checks that the key is wider than its word on
+both panels, and that the whole dialog stays inside the 240×320 panel.

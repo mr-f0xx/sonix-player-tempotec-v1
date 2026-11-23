@@ -170,6 +170,12 @@ static void name_layer_show(void) {
 	char suggested[NOTES_NAME_MAX + 1];
 	notes_default_name(dir, suggested, sizeof(suggested));
 	lv_textarea_set_text(name_field, suggested);
+	// The accept key wears the word "create", which is wider than the "ok"
+	// the shared key was sized for, and on the V1 it hung out of the key on
+	// both sides. Fitted here rather than where the keyboard is made, so the
+	// word is measured in the text size in force now -- the setting may have
+	// changed since this page was built.
+	keyboard_fit_accept_text(name_keyboard);
 	lv_obj_set_hidden(name_layer, false);
 	keyboard_reset(name_keyboard);
 	keyboard_set_visible(name_keyboard, true);

@@ -27,6 +27,14 @@ keyboard_t *keyboard_create(lv_obj_t *parent, int width, int height, lv_obj_t *f
 // The tray object itself (for aligning, moving to the foreground...).
 lv_obj_t *keyboard_obj(keyboard_t *kb);
 
+// Widens the accept key, on both the QWERTY and the T9 panel, to the width of
+// the word it carries, with a little air either side. The keys beside it on
+// the bottom row give up the difference. For a page whose accept word is
+// longer than the "ok" the shared width was drawn for (the notes naming
+// dialog's "create"); it does nothing for an icon key. Call it again when the
+// dialog is shown, so the word is measured in the text size then in force.
+void keyboard_fit_accept_text(keyboard_t *kb);
+
 void keyboard_set_visible(keyboard_t *kb, bool visible);
 bool keyboard_is_visible(keyboard_t *kb);
 
