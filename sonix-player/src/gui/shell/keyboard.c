@@ -102,6 +102,11 @@ struct keyboard_s {
 	// KB_T9_CAPS_TWO_LINE_MIN_H).
 	int row_h;
 
+	// The width the mode and accept keys were made at: what
+	// keyboard_fit_accept_text() must not go below, so a page which asks for
+	// the fit never ends up with a narrower "ok" than the one it had.
+	int wide_key_w;
+
 	// The two panels inside the tray: only one is visible, per
 	// [other] keyboard_t9 (see keyboard_refresh_type).
 	lv_obj_t *qwerty;
@@ -1015,6 +1020,7 @@ keyboard_t *keyboard_create(lv_obj_t *parent, int width, int height, lv_obj_t *f
 	int index = 0;
 
 	kb->row_h = row_h;
+	kb->wide_key_w = wide_key_w;
 
 	// The two panels, stacked inside the tray: QWERTY and T9. Only one stays
 	// visible (keyboard_refresh_type), and every keyboard in the player
@@ -1227,6 +1233,44 @@ keyboard_t *keyboard_create(lv_obj_t *parent, int width, int height, lv_obj_t *f
 }
 
 lv_obj_t *keyboard_obj(keyboard_t *kb) { return kb ? kb->tray : NULL; }
+
+// The word on the accept key, measured in the font it is drawn in, and the
+// air left either side of it. The shared key is 44 px wide on the compact
+// tray, which "ok" fits and a longer word does not: the notes page's
+// "create" hung out of its key on both sides. A fixed width cannot answer it,
+// because the word is drawn at whatever the text-size setting maps 26 to.
+#define KB_ACCEPT_TEXT_PAD 6
+
+void keyboard_fit_accept_text(keyboard_t *kb) {
+	if (!kb || !kb->accept_btn || !kb->t9_accept_btn) {
+		return;
+	}
+
+	// The label is the key's one text child. An accept icon has none, and is
+	// already fitted to its row (kb_fit_accept_icon).
+	lv_obj_t *label = NULL;
+	for (uint32_t i = 0; i < lv_obj_get_child_count(kb->accept_btn); i++) {
+		lv_obj_t *child = lv_obj_get_child(kb->accept_btn, i);
+		if (lv_obj_check_type(child, &lv_label_class)) {
+			label = child;
+			break;
+		}
+	}
+	if (!label) {
+		return;
+	}
+
+	lv_point_t size;
+	lv_text_get_size(&size, lv_label_get_text(label), lv_obj_get_style_text_font(label, LV_PART_MAIN),
+			lv_obj_get_style_text_letter_space(label, LV_PART_MAIN), 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+	int width = LV_MAX(kb->wide_key_w, (int)size.x + 2 * KB_ACCEPT_TEXT_PAD);
+
+	// The space and delete keys on the same row grow to fill what is left of
+	// it, so widening the accept key costs them the difference and nothing
+	// else moves. Both panels carry the same word, so both are widened.
+	lv_obj_set_width(kb->accept_btn, width);
+	lv_obj_set_width(kb->t9_accept_btn, width);
+}
 
 void keyboard_set_visible(keyboard_t *kb, bool visible) {
 	if (!kb || !kb->tray) {
