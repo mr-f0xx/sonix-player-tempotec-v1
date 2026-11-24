@@ -37,6 +37,10 @@ and choose **Factory sounds** to move any of the 16 sounds to that pad.
   to the loop. Longer clips are marked **L**, stream from the card, and play
   only when tapped. Tap again to cut the clip. One long clip can play at a time;
   the other pads and the loop can play over it.
+- A WAV pad also has **Trim** controls. **IN -/+** and **OUT -/+** move the
+  start and end markers in 10 ms steps; **Full sample** restores both ends.
+  Trimmed pads are marked **T** on the Pads page. Only the selected region is
+  mixed, so a short slice cut from a long file can be sequenced and overdubbed.
 - First playback takes over from local music, but won't take over an active
   external audio stream. Backing out or changing tabs stops the sampler.
 
@@ -52,9 +56,10 @@ and choose **Factory sounds** to move any of the 16 sounds to that pad.
 
 The sequence points to any imported WAVs by their paths on the card; it does
 not contain copies of those files. Keep the samples in their original folders,
-including long backing tracks. If a sample was moved or is unreadable, the
-load is refused and the current beat is left alone. Unsaved changes and live
-FX switches are session-local.
+including long backing tracks. Saves also keep trim markers, 16-Levels pitch,
+choke groups and interpolation quality; older V1 sequences open unchanged. If a
+sample was moved or is unreadable, the load is refused and the current beat is
+left alone. Unsaved changes and live FX switches are session-local.
 
 ### Record a performance WAV
 
@@ -82,6 +87,24 @@ The three switches work independently, can be stacked, and do not restart the
 loop or stop recording. They affect the whole sampler mix, including backing
 tracks; switching them during a take is audible in the WAV.
 
+### Slice, pitch and choke groups
+
+- **Slice 16** chooses a WAV and divides it into sixteen equal, non-overlapping
+  trim regions. Every pad becomes a playable one-shot slice of that file.
+- **Chromatic** and **Pitch spread** are 16-Levels modes: one WAV is mapped to
+  all 16 pads. Pad 08 is the unison note; Chromatic moves by one semitone per
+  pad and Pitch spread by two. The pad captions show the semitone offset. The
+  engine resamples into the 44.1 kHz mix with a fixed-point Q16 rate and either
+  two-point linear or four-point Catmull-Rom cubic interpolation. **Linear** /
+  **Cubic** in Kits switches the quality for all WAV pads.
+- Each pad has a **Choke** setting. `C1`–`C8` are cutters: triggering one cuts
+  every sounding pad in the same group. `T1`–`T8` are targets: they can be cut
+  but do not cut others. For a classic hi-hat pair, assign the closed hat to
+  `C1` and the open hat to `T1`. Group `OFF` is independent. If two pads fire
+  on the same step, cutters win and receivers are suppressed. Chokes work for
+  manual hits and sequencer steps, without stopping other pads, the loop or a
+  mix recording.
+
 ### Load a whole drum kit
 
 Create a folder under `Drum Kits/` at the root of the microSD. Place the WAVs
@@ -106,7 +129,8 @@ removing or exporting its card.
 Import supports mono or stereo **PCM WAV** (8/16/24/32-bit integer, 8–96 kHz).
 Convert MP3, AAC, FLAC or floating-point WAV to PCM WAV before importing.
 This is a performance sampler with one-bar overdubbing, not a full MPC project
-editor: it doesn't import MPC program files, slice clips or time-stretch them.
+editor: it can slice and pitch-resample PCM WAVs, but it does not import MPC
+program files or time-stretch audio independently of pitch.
 
 ## On-device check
 

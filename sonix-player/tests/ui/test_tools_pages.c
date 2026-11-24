@@ -182,7 +182,11 @@ static tape_pads_state_t deck_beat;
 static int deck_tempo = 120;
 static int deck_hit = -1, deck_loads;
 static bool deck_loop, deck_dub, deck_assigned;
-static unsigned deck_fx;
+static unsigned deck_fx, deck_revision;
+static tape_interp_t deck_interp = TAPE_INTERP_LINEAR;
+static int deck_choke[TAPE_PAD_COUNT];
+static uint32_t deck_trim_start[TAPE_PAD_COUNT], deck_trim_end[TAPE_PAD_COUNT];
+static bool deck_levels;
 static tape_mix_info_t deck_mix;
 static tape_mix_state_t deck_record_result = TAPE_MIX_OPENING;
 static tape_seq_result_t deck_restore_result;
@@ -268,19 +272,81 @@ void tapepads_set_overdub(bool enabled) { assert(deck_loop); deck_dub = enabled;
 void tapepads_pattern(bool demo) { (void)demo; assert(!tapepads_active()); }
 int tapepads_bpm(void) { return deck_tempo; }
 void tapepads_set_bpm(int bpm) { deck_tempo = bpm; }
-unsigned tapepads_revision(void) { return (unsigned)deck_assigned; }
+unsigned tapepads_revision(void) { return deck_revision + (unsigned)deck_assigned; }
 void tapepads_info(tape_pad_info_t out[TAPE_PAD_COUNT]) {
-	for (int p = 0; p < TAPE_PAD_COUNT; p++) out[p] = (tape_pad_info_t){.kind = TAPE_PAD_FACTORY, .preset = p};
-	if (deck_assigned) out[15] = (tape_pad_info_t){.kind = TAPE_PAD_WAV, .long_clip = true, .name = "Vocal.wav"};
+	for (int p = 0; p < TAPE_PAD_COUNT; p++) {
+		out[p] = (tape_pad_info_t){.kind = TAPE_PAD_FACTORY, .preset = p,
+			.pitch_q16 = TAPE_PITCH_UNITY, .choke = deck_choke[p], .interpolation = deck_interp};
+		if (deck_levels) {
+			out[p] = (tape_pad_info_t){.kind = TAPE_PAD_WAV, .frames = TAPE_PAD_RATE,
+				.rate = TAPE_PAD_RATE, .trim_end = TAPE_PAD_RATE, .pitch_q16 = TAPE_PITCH_UNITY,
+				.semitone = p - TAPE_LEVELS_ROOT, .levels = true, .interpolation = deck_interp,
+				.name = "Levels.wav"};
+		}
+	}
+	if (deck_assigned) out[15] = (tape_pad_info_t){.kind = TAPE_PAD_WAV, .long_clip = true,
+		.frames = TAPE_PAD_RATE, .rate = TAPE_PAD_RATE, .trim_start = deck_trim_start[15],
+		.trim_end = deck_trim_end[15] ? deck_trim_end[15] : TAPE_PAD_RATE,
+		.pitch_q16 = TAPE_PITCH_UNITY, .choke = deck_choke[15], .interpolation = deck_interp,
+		.name = "Vocal.wav"};
 }
-void tapepads_factory(void) { deck_assigned = false; }
-void tapepads_set_preset(int pad, int preset) { assert(pad >= 0 && pad < 16 && preset >= -1); }
+void tapepads_factory(void) { deck_assigned = deck_levels = false; deck_revision++; }
+void tapepads_set_preset(int pad, int preset) { assert(pad >= 0 && pad < 16 && preset >= -1); deck_revision++; }
 bool tapepads_assign(int pad, const char *path) {
 	assert(pad == 15 && !strcmp(path, "Vocals/Vocal.wav"));
 	deck_assigned = true;
 	return true;
 }
 int tapepads_load_kit(const char *name) { assert(!strcmp(name, "My Kit")); deck_loads++; return 16; }
+void tapepads_trim(int pad, uint32_t *start, uint32_t *end) {
+	if (start) *start = deck_trim_start[pad];
+	if (end) *end = deck_trim_end[pad];
+}
+bool tapepads_set_trim(int pad, uint32_t start, uint32_t end) {
+	deck_trim_start[pad] = start;
+	deck_trim_end[pad] = end;
+	deck_revision++;
+	return true;
+}
+bool tapepads_set_trim_ms(int pad, unsigned start_ms, unsigned end_ms) {
+	return tapepads_set_trim(pad, start_ms * TAPE_PAD_RATE / 1000, end_ms * TAPE_PAD_RATE / 1000);
+}
+bool tapepads_set_pitch(int pad, int semitones) { (void)pad; (void)semitones; return true; }
+bool tapepads_slice(const char *path, int slices, tape_interp_t interpolation) {
+	assert(path && slices == TAPE_PAD_COUNT);
+	deck_levels = false;
+	deck_interp = interpolation;
+	deck_revision++;
+	return true;
+}
+bool tapepads_set_levels(const char *path, int root_pad, int step, tape_interp_t interpolation) {
+	assert(path && root_pad >= 0 && root_pad < TAPE_PAD_COUNT && step >= 1);
+	deck_levels = true;
+	deck_interp = interpolation;
+	deck_revision++;
+	return true;
+}
+bool tapepads_levels(const char *path, tape_levels_mode_t mode, tape_interp_t interpolation) {
+	return tapepads_set_levels(path, TAPE_LEVELS_ROOT, mode == TAPE_LEVELS_SPREAD ? 2 : 1, interpolation);
+}
+bool tapepads_enable_levels(const char *path, int root_pad, tape_interp_t interpolation) {
+	return tapepads_set_levels(path, root_pad, 1, interpolation);
+}
+bool tapepads_set_16levels(const char *path, int root_pad, tape_interp_t interpolation) {
+	return tapepads_set_levels(path, root_pad, 1, interpolation);
+}
+bool tapepads_levels_active(void) { return deck_levels; }
+void tapepads_set_interpolation(tape_interp_t interpolation) { deck_interp = interpolation; deck_revision++; }
+tape_interp_t tapepads_interpolation(void) { return deck_interp; }
+bool tapepads_set_choke_group(int pad, int group) {
+	assert(pad >= 0 && pad < TAPE_PAD_COUNT && group >= -TAPE_CHOKE_MAX && group <= TAPE_CHOKE_MAX);
+	deck_choke[pad] = group;
+	deck_revision++;
+	return true;
+}
+int tapepads_choke_group(int pad) { return pad >= 0 && pad < TAPE_PAD_COUNT ? deck_choke[pad] : 0; }
+bool tapepads_set_choke(int pad, int group) { return tapepads_set_choke_group(pad, group); }
+int tapepads_choke(int pad) { return tapepads_choke_group(pad); }
 int tape_card_list(const char *dir, bool kit, const tape_file_t *after, tape_file_t *out, int cap) {
 	assert(!after && cap > 0);
 	if (kit) {
@@ -1005,7 +1071,9 @@ static void check_strings(const char *language_dir) {
 		"tape_rec_mix", "tape_end_rec", "tape_write_card", "tape_take_error", "tape_take_partial", "tape_take_saved",
 		"tape_fx_filter", "tape_fx_echo", "tape_fx_drive", "tape_save_seq", "tape_load_seq", "tape_saved_takes",
 		"tape_seq_saved", "tape_seq_loaded", "tape_seq_sample_missing", "tape_seq_save_error", "tape_seq_invalid",
-		"tape_no_takes", "tape_no_seqs",
+		"tape_no_takes", "tape_no_seqs", "tape_edit_saved", "tape_trim", "tape_trim_reset", "tape_trim_hint",
+		"tape_slice", "tape_levels", "tape_levels_chromatic", "tape_levels_spread",
+		"tape_interp_linear", "tape_interp_cubic", "tape_choke", "tape_choke_hint", "tape_levels_hint",
 		"pet", "pet_mood_sleeping", "pet_mood_sad", "pet_mood_okay", "pet_mood_happy",
 		"pet_mood_blissful", "pet_stage_egg", "pet_stage_baby", "pet_stage_child",
 		"pet_stage_teen", "pet_stage_adult", "pet_energy", "pet_today", "pet_streak",
@@ -1392,6 +1460,27 @@ static void check_tapedeck(gui_config_t *cfg) {
 	lv_obj_send_event(deck_button(page, "tape_pads"), LV_EVENT_CLICKED, NULL);
 	lv_obj_send_event(deck_button(page, "16 / L"), LV_EVENT_PRESSED, NULL);
 	assert(deck_hit == 15 && tapepads_active() && !deck_loop);
+
+	// The MPC editing controls are reachable from Kits and from a WAV pad.
+	lv_obj_send_event(deck_button(page, "tape_kits"), LV_EVENT_CLICKED, NULL);
+	lv_obj_send_event(deck_button(page, "tape_interp_linear"), LV_EVENT_CLICKED, NULL);
+	assert(find_label(page, tr("tape_interp_cubic")));
+	lv_obj_send_event(deck_button(page, "tape_interp_cubic"), LV_EVENT_CLICKED, NULL);
+	assert(find_label(page, tr("tape_interp_linear")));
+	lv_obj_send_event(deck_button(page, "tape_levels_chromatic"), LV_EVENT_CLICKED, NULL);
+	lv_obj_send_event(deck_button(page, "Vocals/"), LV_EVENT_CLICKED, NULL);
+	lv_obj_send_event(deck_button(page, "Vocal.wav"), LV_EVENT_CLICKED, NULL);
+	assert(find_label(page, tr("tape_edit_saved")));
+	lv_obj_send_event(deck_button(page, "tape_slice"), LV_EVENT_CLICKED, NULL);
+	lv_obj_send_event(deck_button(page, "Vocals/"), LV_EVENT_CLICKED, NULL);
+	lv_obj_send_event(deck_button(page, "Vocal.wav"), LV_EVENT_CLICKED, NULL);
+	assert(find_label(page, tr("tape_edit_saved")));
+	lv_obj_send_event(deck_button(page, "16  Vocal.wav"), LV_EVENT_CLICKED, NULL);
+	lv_obj_send_event(deck_button(page, "IN +"), LV_EVENT_CLICKED, NULL);
+	assert(find_label(page, "IN 0.01 s   OUT 1.00 s"));
+	lv_obj_send_event(deck_button(page, "tape_choke"), LV_EVENT_CLICKED, NULL);
+	assert(find_label(page, "Choke  C1"));
+
 	lv_screen_load(morepage_screen);
 	assert(!tapepads_active());
 	tapedeck_open();
@@ -3048,7 +3137,7 @@ int main(int argc, char **argv) {
     assert(last_back_guard && !last_back_guard()); // cannot leave Music for card root
     lv_obj_t *nested=find_label(tagpage,"Nested"); assert(nested);
     lv_obj_send_event(lv_obj_get_parent(nested),LV_EVENT_CLICKED,NULL);
-    assert(find_label(tagpage,"No folders or FLAC / MP3 files")); assert(last_back_guard());
+    assert(find_label(tagpage,"No folders or editable audio files")); assert(last_back_guard());
     lv_obj_t *filelabel=find_label(tagpage,"test.flac"); assert(filelabel);
     lv_obj_send_event(lv_obj_get_parent(filelabel),LV_EVENT_CLICKED,NULL);
     lv_obj_update_layout(tagpage); assert(find_label(tagpage,"Title: Test title"));

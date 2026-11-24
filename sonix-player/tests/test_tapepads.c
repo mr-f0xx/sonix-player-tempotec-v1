@@ -8,6 +8,7 @@
 #include <errno.h>
 #include <limits.h>
 #include <fcntl.h>
+#include <math.h>
 #include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -148,6 +149,40 @@ static void wav(const char *file, unsigned rate, unsigned bits, unsigned channel
 	}
 	if (data & 1) put_num(f, 0, 1);
 	assert(fclose(f) == 0);
+}
+
+// A clean sine makes pitch and choke assertions possible without an FFT.
+static void sine_wav(const char *file, unsigned rate, unsigned freq, unsigned frames) {
+	FILE *f = fopen(file, "wb");
+	assert(f);
+	unsigned data = frames * 2;
+	put_str(f, "RIFF"); put_num(f, 36 + data, 4);
+	put_str(f, "WAVE");
+	put_str(f, "fmt "); put_num(f, 16, 4);
+	put_num(f, 1, 2); put_num(f, 1, 2); put_num(f, rate, 4);
+	put_num(f, rate * 2, 4); put_num(f, 2, 2); put_num(f, 16, 2);
+	put_str(f, "data"); put_num(f, data, 4);
+	for (unsigned i = 0; i < frames; i++) {
+		double phase = 6.283185307179586 * (double)freq * i / rate;
+		put_num(f, (uint16_t)(int16_t)lrint(12000.0 * sin(phase)), 2);
+	}
+	assert(fclose(f) == 0);
+}
+
+static unsigned rising_edges(int first, int end) {
+	assert(first >= 0 && end <= received);
+	bool positive = pcm[2 * first] > 0;
+	unsigned edges = 0;
+	for (int i = first + 1; i < end; i++) {
+		bool now = pcm[2 * i] > 0;
+		if (now && !positive) edges++;
+		positive = now;
+	}
+	return edges;
+}
+
+static void cut_open_hat(int frames) {
+	if (frames == 3 * BLOCK) assert(tapepads_hit(1));
 }
 
 static void overdub_once(int frames) {
@@ -507,6 +542,131 @@ static void test_takes(void) {
 	remove_saves(TAPE_STORE_TAKE);
 }
 
+static void test_editing(void) {
+	static const char tone[] = "tone.wav";
+	const unsigned frames = TAPE_PAD_RATE / 2;
+	sine_wav(tone, TAPE_PAD_RATE, 441, frames);
+	tapepads_set_interpolation(TAPE_INTERP_LINEAR);
+	tapepads_factory();
+
+	// The pure C interpolators: linear follows the two inner points, cubic
+	// bends through all four and can overshoot only inside the PCM range.
+	assert(tape_interpolate(0, 1000, 2000, 3000, 32768, TAPE_INTERP_LINEAR) == 1500);
+	assert(tape_interpolate(0, 1000, 2000, 3000, 32768, TAPE_INTERP_CUBIC) == 1500);
+	int bent = tape_interpolate(0, 0, 1000, 0, 32768, TAPE_INTERP_CUBIC);
+	assert(bent > 500 && bent < 650);
+	assert(tape_pitch_q16(0) == TAPE_PITCH_UNITY && tape_pitch_q16(12) == 2 * TAPE_PITCH_UNITY);
+	assert(tape_pitch_q16(-60) == TAPE_PITCH_UNITY / 4 && tape_pitch_q16(60) == 4 * TAPE_PITCH_UNITY);
+
+	// Pitch is a pad property even for a factory drum: +12 semitones halves
+	// the 210 ms kick's resampled duration. Unison still renders sample-exact.
+	run(0, 30 * BLOCK, TAPE_PADS_IDLE);
+	assert(nonzero(15 * BLOCK, 18 * BLOCK));
+	assert(tapepads_set_pitch(0, 12));
+	tape_pad_info_t pitched[TAPE_PAD_COUNT];
+	tapepads_info(pitched);
+	assert(pitched[0].semitone == 12 && pitched[0].pitch_q16 == 2 * TAPE_PITCH_UNITY);
+	run(0, 30 * BLOCK, TAPE_PADS_IDLE);
+	assert(!nonzero(15 * BLOCK, 18 * BLOCK));
+	tapepads_factory();
+
+	// Source-frame trim markers are exact and stop at the end marker even
+	// when the underlying WAV continues. Frame 2048 is the start of a ramp.
+	assert(tapepads_assign(0, sample));
+	assert(tapepads_set_trim(0, 2048, 2052));
+	tape_pad_info_t info[TAPE_PAD_COUNT];
+	tapepads_info(info);
+	assert(info[0].trim_start == 2048 && info[0].trim_end == 2052 && info[0].trimmed && !info[0].long_clip);
+	run(0, BLOCK, TAPE_PADS_IDLE);
+	assert(pcm[0] == 1536 && pcm[1] == 1536 && pcm[2] == 2304);
+	assert(!nonzero(5, BLOCK));
+	assert(tapepads_set_trim_ms(0, 0, 10));
+	tapepads_info(info);
+	assert(info[0].trim_end == TAPE_PAD_RATE / 100 && info[0].trim_start == 0);
+
+	// 16 Levels: one WAV on all pads, a chromatic semitone per pad, Q16
+	// playback-rate resampling and selectable interpolation. Pad 13 is an
+	// octave above pad 01 when the root is pad 01.
+	assert(tapepads_enable_levels(tone, 0, TAPE_INTERP_CUBIC));
+	assert(tapepads_levels_active() && tapepads_interpolation() == TAPE_INTERP_CUBIC);
+	tapepads_info(info);
+	for (int p = 0; p < TAPE_PAD_COUNT; p++) {
+		assert(info[p].kind == TAPE_PAD_WAV && info[p].levels && info[p].semitone == p);
+		assert(info[p].interpolation == TAPE_INTERP_CUBIC && info[p].trim_end == frames);
+	}
+	assert(info[0].pitch_q16 == TAPE_PITCH_UNITY && info[12].pitch_q16 == 2 * TAPE_PITCH_UNITY);
+	run(0, 10 * BLOCK, TAPE_PADS_IDLE);
+	unsigned root_edges = rising_edges(0, 10 * BLOCK);
+	run(12, 10 * BLOCK, TAPE_PADS_IDLE);
+	unsigned octave_edges = rising_edges(0, 10 * BLOCK);
+	assert(root_edges >= 35 && root_edges <= 50);
+	assert(octave_edges > root_edges * 17 / 10 && octave_edges < root_edges * 23 / 10);
+	tapepads_set_interpolation(TAPE_INTERP_LINEAR);
+	assert(tapepads_interpolation() == TAPE_INTERP_LINEAR);
+	run(12, 10 * BLOCK, TAPE_PADS_IDLE);
+	assert(rising_edges(0, 10 * BLOCK) > root_edges * 17 / 10);
+
+	// A slice is just sixteen non-overlapping, persistent trim regions.
+	assert(tapepads_slice(sample, 16, TAPE_INTERP_LINEAR));
+	assert(!tapepads_levels_active());
+	tapepads_info(info);
+	uint32_t previous = 0;
+	for (int p = 0; p < TAPE_PAD_COUNT; p++) {
+		assert(info[p].kind == TAPE_PAD_WAV && info[p].trim_start == previous);
+		assert(info[p].trim_end > info[p].trim_start);
+		previous = info[p].trim_end;
+	}
+	assert(previous == info[0].frames);
+
+	// Without a choke the long open tone keeps sounding. A closed hat with
+	// group +1 cuts the open tone with group -1; the reverse is not true.
+	tapepads_factory();
+	assert(tapepads_assign(0, tone));
+	tapepads_set_preset(1, 8);
+	assert(tapepads_set_choke_group(0, 0) && tapepads_set_choke_group(1, 0));
+	action = cut_open_hat;
+	run(0, 20 * BLOCK, TAPE_PADS_IDLE);
+	assert(nonzero(12 * BLOCK, 16 * BLOCK));
+	assert(tapepads_set_choke_group(0, -1) && tapepads_set_choke_group(1, 1));
+	assert(tapepads_choke_group(0) == -1 && tapepads_choke(1) == 1);
+	run(0, 20 * BLOCK, TAPE_PADS_IDLE);
+	assert(!nonzero(12 * BLOCK, 16 * BLOCK));
+	action = NULL;
+
+	tapepads_factory();
+	tapepads_set_interpolation(TAPE_INTERP_LINEAR);
+}
+
+static void test_sequence_metadata(void) {
+	tapepads_factory();
+	assert(tapepads_assign(0, sample));
+	assert(tapepads_set_trim(0, 100, 1000));
+	assert(tapepads_set_pitch(0, 5));
+	assert(tapepads_set_choke_group(0, -2));
+	assert(tapepads_set_choke_group(1, 2));
+	tapepads_set_interpolation(TAPE_INTERP_CUBIC);
+	assert(tapepads_save_sequence() == TAPE_SEQ_OK);
+	char saved[2][TAPE_SAVE_NAME_SIZE];
+	assert(tape_store_list(TAPE_STORE_SEQUENCE, NULL, saved, 2) == 1);
+	char path[PATH_MAX];
+	assert(snprintf(path, sizeof(path), "Sequences/%s", saved[0]) < (int)sizeof(path));
+	int fd = open(path, O_RDONLY | O_CLOEXEC);
+	uint8_t version;
+	assert(fd >= 0 && pread(fd, &version, 1, 6) == 1 && version == 2 && close(fd) == 0);
+
+	tapepads_factory();
+	assert(tapepads_load_sequence(saved[0]) == TAPE_SEQ_OK);
+	tape_pad_info_t info[TAPE_PAD_COUNT];
+	tapepads_info(info);
+	assert(info[0].kind == TAPE_PAD_WAV && info[0].trim_start == 100 && info[0].trim_end == 1000);
+	assert(info[0].semitone == 5 && info[0].pitch_q16 == tape_pitch_q16(5));
+	assert(info[0].interpolation == TAPE_INTERP_CUBIC && info[0].trimmed);
+	assert(info[0].choke == -2 && info[1].choke == 2);
+	remove_saves(TAPE_STORE_SEQUENCE);
+	tapepads_factory();
+	tapepads_set_interpolation(TAPE_INTERP_LINEAR);
+}
+
 static void test_card(void) {
 	assert(mkdir(TAPE_KIT_DIR, 0700) == 0);
 	assert(mkdir(TAPE_KIT_DIR "/House", 0700) == 0 && mkdir(TAPE_KIT_DIR "/Sort", 0700) == 0);
@@ -582,10 +742,12 @@ static void test_card(void) {
 	run(15, BLOCK, TAPE_PADS_IDLE);
 	have_card = true;
 
+	test_editing();
 	test_sequences();
+	test_sequence_metadata();
 	test_takes();
 
-	assert(unlink("bad.wav") == 0 && unlink("link.wav") == 0 && unlink("LinkedKit") == 0);
+	assert(unlink("bad.wav") == 0 && unlink("link.wav") == 0 && unlink("LinkedKit") == 0 && unlink("tone.wav") == 0);
 	assert(unlink(TAPE_KIT_DIR "/House/01 Kick.wav") == 0 && unlink(TAPE_KIT_DIR "/House/16-Vox.WAV") == 0);
 	assert(unlink(TAPE_KIT_DIR "/Sort/A.wav") == 0 && unlink(TAPE_KIT_DIR "/Sort/Z.wav") == 0);
 	assert(rmdir(TAPE_KIT_DIR "/House") == 0 && rmdir(TAPE_KIT_DIR "/Sort") == 0 && rmdir(TAPE_KIT_DIR) == 0);
@@ -606,6 +768,6 @@ int main(void) {
 	fail_write = false;
 	run(1, BLOCK, TAPE_PADS_IDLE);
 	assert(chdir("/") == 0 && rmdir(card_root) == 0);
-	puts("Tape sampler: pads, overdub, kits, sequences, live FX, stereo takes and card release OK");
+	puts("Tape sampler: pads, overdub, kits, sequences, live FX, stereo takes, trim/slice, 16 Levels, choke groups and card release OK");
 	return 0;
 }
