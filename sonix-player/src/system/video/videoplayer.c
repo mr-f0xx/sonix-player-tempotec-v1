@@ -509,7 +509,14 @@ vp_state_t videoplayer_get_state(void) {
 }
 
 double videoplayer_get_position(void) {
-	return vp_position;
+	double pos = vp_position;
+	if (vp_pcm && vp_rate > 0) {
+		update_audio_clock();
+		pos = vp_audio_clock;
+	}
+	if (pos < 0) pos = 0;
+	if (vp_duration > 0 && pos > vp_duration) pos = vp_duration;
+	return pos;
 }
 
 double videoplayer_get_duration(void) {
