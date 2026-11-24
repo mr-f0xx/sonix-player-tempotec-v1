@@ -6,6 +6,7 @@
 #include "src/system/audio/usbhostmode.h"
 #include "src/system/audio/usbhostprobe.h"
 #include "src/system/core/config.h"
+#include "src/system/core/lang.h"
 #include "src/system/bluetooth/bluetooth.h"
 #include "src/system/device/usb.h"
 #include "src/gui/shell/gui.h"
@@ -75,7 +76,27 @@
 // mean what this file thinks it means.
 #define ID_SETTLE_SECS 3
 
+// The compatibility setting. Under [usb] beside the port's other keys, because
+// it describes the card rather than the music: a DAC that presents one fixed
+// format gets everything converted to it, and one that follows the track is
+// left alone.
+#define COMPAT_SECTION "usb"
+#define COMPAT_KEY "compat_48k"
+
 static atomic_int active_card = -1;		// the USB card in use, -1 when none
+// Cleared by the first poll. A card already on the port at boot was not
+// just plugged in, and the player's own start-up is not a moment to be
+// told about it.
+static bool first_poll = true;
+// A compatibility change made anywhere -- the settings row, or audio.c's
+// fallback on the playback thread -- is published here and written to the
+// config by the poll, which runs on the GUI thread. The config's entries and
+// its file belong to that thread: config_save() rewrites every entry, and a
+// reader on the playback thread walking that array while it is written is a
+// torn string. -1 means nothing pending, 0 and 1 the value.
+static atomic_int compat_pending = -1;
+static atomic_bool compat_save_pending;
+
 static char usb_bus[32];			// the bus device that card is on, "1-1"
 static char active_name[64];			// its id, for the interface
 static char volume_control[64];			// the control the level is written to
@@ -1232,7 +1253,22 @@ static void arbitrate_port(bool audio_present) {
 // flip costs.
 #define CARD_GRACE_POLLS 2
 
+// The attach and detach notices, defined below the poll that emits them.
+static void announce_card(bool compat);
+static void announce_card_gone(void);
+
 void usbaudio_poll(void) {
+	// A compatibility change made from the playback thread (audio.c's fallback)
+	// is written to the config and its file here, on the thread they belong to.
+	usbaudio_flush_compat();
+
+	// Whether this is the poll the player just started on. Taken here and
+	// cleared at once, so it survives the early returns below: a card that was
+	// already on the port at boot must not be announced, and one plugged in a
+	// second later must be.
+	const bool initial = first_poll;
+	first_poll = false;
+
 	// Who owns the port comes first, and is asked whatever playback is doing:
 	// the arbitration is about the socket, not about where the sound goes.
 	static int empty_polls;
@@ -1346,6 +1382,14 @@ void usbaudio_poll(void) {
 		probe_control_floor(card);
 		usbaudio_apply_volume(get_volume_percent());
 		audio_set_output_device(pcm);
+
+		// Said out loud, once, on the way in. Held-role and trial attach
+		// notices are the probe's own and are already on this branch above;
+		// this one is the ordinary dual-role attach, which had none. Not for a
+		// card that was already there when the player started.
+		if (!initial) {
+			announce_card(usbaudio_compat_mode());
+		}
 	} else {
 		active_name[0] = '\0';
 		usb_bus[0] = '\0';
@@ -1356,6 +1400,9 @@ void usbaudio_poll(void) {
 		swvolume_clear_usb_gain();
 		fprintf(stderr, "usbaudio: no USB playback device; playback goes back to the jacks\n");
 		audio_set_output_device(NULL);
+		if (!initial) {
+			announce_card_gone();
+		}
 	}
 }
 
@@ -1368,4 +1415,118 @@ void usbaudio_card_name(char *out, size_t out_size) {
 		return;
 	}
 	snprintf(out, out_size, "%s", active_name);
+}
+
+// ---------------------------------------------------------------------------
+// Compatibility mode
+// ---------------------------------------------------------------------------
+
+bool usbaudio_compat_mode(void) {
+	// A change that has been made but not yet written is the answer, because it
+	// is the one the playback thread has to act on: audio.c asks this on the
+	// track it is about to open, and waiting for the GUI thread's next poll
+	// would be exactly one track late.
+	int pending = atomic_load(&compat_pending);
+	if (pending >= 0) {
+		return pending != 0;
+	}
+	return config_get_bool(COMPAT_SECTION, COMPAT_KEY, false);
+}
+
+void usbaudio_set_compat_mode(bool on) {
+	if (on == usbaudio_compat_mode()) {
+		return;
+	}
+	// Nothing is written here. audio.c's fallback calls this from the playback
+	// thread, and the config's entry array -- let alone its file -- is the GUI
+	// thread's: a writer there and a reader here is a torn string or a torn
+	// section name, and the file itself is rewritten whole. So the value is
+	// published in an atomic, everyone reads it at once, and usbaudio_poll()
+	// makes it durable on the thread that owns it.
+	atomic_store(&compat_pending, on ? 1 : 0);
+	fprintf(stderr, "usbaudio: compatibility mode %s (the port runs at %d Hz / %d bit while a card is attached)\n",
+			on ? "on" : "off", USBAUDIO_COMPAT_RATE, USBAUDIO_COMPAT_BITS);
+}
+
+// The settings row's own switch. Same published value, written through on the
+// spot: the call is already on the GUI thread and the page is about to be left.
+void usbaudio_set_compat_mode_saved(bool on) {
+	usbaudio_set_compat_mode(on);
+	usbaudio_flush_compat();
+}
+
+// Writes a published-but-unsaved change to the config and its file. Called from
+// usbaudio_poll(), which is the GUI thread, and from the settings row.
+void usbaudio_flush_compat(void) {
+	int pending = atomic_exchange(&compat_pending, -1);
+	if (pending >= 0) {
+		config_set_bool(COMPAT_SECTION, COMPAT_KEY, pending != 0);
+		atomic_store(&compat_save_pending, true);
+	}
+	// A save that is already owed -- a row switched back and forth, or a
+	// change made from the playback thread in the same poll -- is the same
+	// file write, so the two are flushed together.
+	if (atomic_exchange(&compat_save_pending, false)) {
+		config_save();
+	}
+}
+
+bool usbaudio_compat_active(void) { return active_card >= 0 && usbaudio_compat_mode(); }
+
+// ---------------------------------------------------------------------------
+// What the port just did
+//
+// The poll already knows the moment a card appears and the moment it goes; the
+// only thing it did not do was say so. A DAC on the Type-C port is a cable
+// somebody has just plugged in, and the interface's answer to that used to be a
+// glyph quietly changing colour in the status bar -- which is the one place
+// nobody is looking when their hands are on a cable.
+//
+// So the two endings are announced: a card taken over ("USB audio out: <name>",
+// and a word about compatibility mode while it is off, since that is the
+// moment a picky DAC is discovered rather than the moment a track fails), and
+// the port going back to the jacks. Both go through gui_notify_popup(), which
+// posts to the GUI thread from wherever this is called -- usbaudio_poll() runs
+// on it, but the volume path may not.
+//
+// Only real changes: the poll runs four times a second and returns early when
+// nothing has moved, and the messages are emitted from the branch that only
+// runs when the route actually changed. A dongle re-enumerating under its own
+// power saving is two of those, four seconds apart at the outside, and the
+// second one is worth seeing: it is the player saying the sound is back.
+// ---------------------------------------------------------------------------
+
+// "USB audio out: <card name>" -- the card's own id ("USB Audio DAC",
+// "Headset", "FiiO K3"...), which is what tells two dongles apart. The prefix
+// is the tag in the language files, the name is appended here so the popup keeps
+// taking a finished sentence.
+#define USB_TOAST_MAX 192
+
+static void announce_card(bool compat) {
+	char name[64];
+	usbaudio_card_name(name, sizeof(name));
+
+	// The tag is a whole sentence with the name on the end of it, so a card
+	// with no id still reads as one: "USB audio out." rather than a sentence
+	// with a hole in it.
+	char text[USB_TOAST_MAX];
+	if (name[0]) {
+		snprintf(text, sizeof(text), "%s %s", tr("usbaudio_connected"), name);
+	} else {
+		snprintf(text, sizeof(text), "%s", tr("usbaudio_connected_plain"));
+	}
+
+	// The one moment the compatibility hint is any use. Saying it on every
+	// attach would be nagging the owners of DACs that work perfectly; saying
+	// it only when a stream has already failed is too late to be read before
+	// the track has stopped.
+	if (!compat) {
+		size_t used = strlen(text);
+		snprintf(text + used, sizeof(text) - used, " %s", tr("usbaudio_compat_hint"));
+	}
+	gui_notify_popup(text);
+}
+
+static void announce_card_gone(void) {
+	gui_notify_popup("usbaudio_disconnected");
 }

@@ -54,4 +54,46 @@ void usbaudio_apply_volume(int percent);
 // the level any more and the software volume takes it over -- see swvolume.c.
 bool usbaudio_has_volume_control(void);
 
+// ---------------------------------------------------------------------------
+// Compatibility mode: 48 kHz, 16 bit, over the port
+//
+// The one thing this file cannot do for a picky DAC is make it accept a stream
+// it does not understand. Plenty of desktop DACs on the end of a Type-C adapter
+// present a single fixed-rate, 16-bit interface -- 48 kHz is the common one --
+// and the V1's usual "open the card at the track's own rate and depth" is then
+// a stream the device refuses: the PCM does not open, and the track plays to
+// nothing with a card that looks healthy in the interface.
+//
+// So there is a fallback: a switch in Developer options, beside the external
+// USB DAC setting, and audio.c turns it on by itself when a card refuses the
+// track's own format and takes 48 kHz/16 bit instead (see open_pcm_device_now).
+// Every stream to the port is then opened at 48 kHz, 16 bit, and the track is
+// converted to it by a plug of the player's own, in front of the card. Nothing
+// else changes -- the route, the level, the glyph all behave as before -- and
+// the attach popup mentions the switch the first time a card appears, which is
+// the moment a picky DAC is met.
+//
+// Off by default, and remembered per player rather than per device: a DAC that
+// needs it has no way of saying so before it has been tried.
+bool usbaudio_compat_mode(void);
+// The plain setter: what audio.c calls when a card has just refused the track's
+// own format. config_save() is left to the poll, which runs on the GUI thread,
+// because the config file's writer is not one that can be shared between the
+// playback thread and the interface.
+void usbaudio_set_compat_mode(bool on);
+// The settings row's switch, which saves on the spot: it is already on the GUI
+// thread and the user is owed the write before the page is left.
+void usbaudio_set_compat_mode_saved(bool on);
+// Writes any change that is published but not yet saved. Called by the poll;
+// exported for the settings row.
+void usbaudio_flush_compat(void);
+
+// Whether compatibility mode is what is in force for the stream right now,
+// which is the setting AND a USB card actually being the output.
+bool usbaudio_compat_active(void);
+
+// The rate and depth the port is opened at when compatibility mode is on.
+#define USBAUDIO_COMPAT_RATE 48000
+#define USBAUDIO_COMPAT_BITS 16
+
 #endif /* USBAUDIO_H */

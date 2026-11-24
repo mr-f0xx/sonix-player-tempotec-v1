@@ -13,6 +13,7 @@
 #include "src/gui/shell/theme.h"
 #include "src/system/bluetooth/btlog.h"
 #include "src/system/device/adb.h"
+#include "src/system/audio/usbaudio.h"
 #include "src/system/audio/usbhostmode.h"
 #include "src/system/audio/usbhostprobe.h"
 #include "src/system/core/lang.h"
@@ -29,6 +30,7 @@ static lv_obj_t *usbhost_switch;
 static lv_obj_t *usbhost_note;
 static lv_obj_t *usbhost_status; // what the setting is doing, under the switch
 static lv_obj_t *usbhost_trial_row; // the timed trial, for a one-off test
+static lv_obj_t *usb_compat_switch; // 48 kHz/16 bit to the port, for picky DACs
 // Whether the confirmation is on screen, so the row does not show as on while
 // nothing has been agreed to yet.
 static bool usbhost_confirming;
@@ -160,6 +162,15 @@ static void update_usbhost_row(void) {
 	if (wanted && !usbhost_confirming) lv_obj_add_state(usbhost_switch, LV_STATE_CHECKED);
 	else lv_obj_remove_state(usbhost_switch, LV_STATE_CHECKED);
 
+	// Compatibility mode can be switched on from outside this page -- audio.c
+	// does it when a card only opens at 48 kHz -- so the switch is read back
+	// from the setting whenever the page is looked at rather than trusting
+	// the last thing a finger did.
+	if (usb_compat_switch) {
+		if (usbaudio_compat_mode()) lv_obj_add_state(usb_compat_switch, LV_STATE_CHECKED);
+		else lv_obj_remove_state(usb_compat_switch, LV_STATE_CHECKED);
+	}
+
 	if (usbhost_note) {
 		// While the port is held, the note is what that means rather than the
 		// warning about the trial: the user has already accepted that.
@@ -198,6 +209,17 @@ static void usbhost_confirm_closed(void *user) {
 	// Cancelled: the switch goes back to the setting, which never moved.
 	usbhost_confirming = false;
 	update_usbhost_row();
+}
+
+// Compatibility mode: writes the key and says so in the log. Nothing is
+// restarted -- the next stream to the port opens through the plug, and a
+// stream already running finishes at the format it began with rather than
+// being cut off under the listener to change rate mid-track.
+static void usb_compat_toggled_cb(lv_event_t *e) {
+	(void)e;
+	bool on = lv_obj_has_state(usb_compat_switch, LV_STATE_CHECKED);
+	usbaudio_set_compat_mode_saved(on);
+	gui_notify_popup(on ? "usb_compat_on" : "usb_compat_off");
 }
 
 static void usbhost_toggled_cb(lv_event_t *e) {
@@ -316,6 +338,16 @@ void devoptions_init(gui_config_t *cfg) {
 	// right tool for a dongle the setting does not fix, because it changes
 	// nothing that survives a reboot.
 	usbhost_trial_row = settingsrow_action(container, "usbhost_try", usbhost_trial_clicked_cb, NULL);
+
+	// And the other half of getting a picky DAC to play: the format it is sent.
+	// Beside the role setting because the two go together -- one gets the card
+	// enumerated, the other gets a stream into it -- and here rather than on
+	// the DAC page, which is the player acting as the DAC rather than driving
+	// one. Switched on by hand, or by audio.c when a card refuses the track's
+	// own format and takes 48 kHz/16 bit instead (see usbaudio.h).
+	settingsrow_toggle(container, "usb_compat_mode", &usb_compat_switch, usb_compat_toggled_cb);
+	if (usbaudio_compat_mode()) lv_obj_add_state(usb_compat_switch, LV_STATE_CHECKED);
+	add_note(container, "usb_compat_note");
 
 	lv_obj_t *log_card = settingsrow_toggle(container, "devoptions_log_to_microsd", &log_switch, log_toggled_cb);
 	log_name_label = lv_obj_get_child(log_card, 0);

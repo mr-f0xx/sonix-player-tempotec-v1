@@ -108,7 +108,23 @@ int snd_pcm_open(snd_pcm_t **pcm, const char *name, snd_pcm_stream_t stream, int
 }
 
 int snd_pcm_open_lconf(snd_pcm_t **pcm, const char *name, snd_pcm_stream_t stream, int mode, snd_config_t *lconf) {
+	// The player opens its converted streams through a plug it defines in a
+	// private config copy, and there is no config here to define anything in:
+	// lconf is ignored, as it is by the header this file implements. Nothing in
+	// the browser needs converting either -- its audio device takes what it is
+	// given -- so a plug's name is opened as the device behind it.
+	//
+	// Only USB compatibility mode's plug, and only by name. Bluetooth's keeps
+	// the behaviour it has always had here (it opens under the plug's own
+	// name), because nothing in the emulator plays over bluealsa and changing
+	// what that open is called would change the route the player records for a
+	// stream that never reaches a real device. A name that is not this one is
+	// opened as itself, so a typo in a plug's definition still fails to open
+	// rather than quietly becoming something else.
 	(void)lconf;
+	if (strcmp(name, "sonix_usb_compat") == 0) {
+		name = "default";
+	}
 	return snd_pcm_open(pcm, name, stream, mode);
 }
 

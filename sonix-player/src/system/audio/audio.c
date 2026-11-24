@@ -12,6 +12,7 @@
 #include "src/system/audio/swvolume.h"
 #include "src/system/audio/eq.h"
 #include "src/system/audio/decimate.h"
+#include "src/system/audio/usbaudio.h"
 #include "src/system/core/config.h"
 #include "src/system/device/power.h"
 #include "src/system/core/utils.h"
@@ -407,6 +408,14 @@ static bool output_is_bluetooth(void) {
 	char device[sizeof(output_pcm)];
 	audio_get_output_device(device, sizeof(device));
 	return strncmp(device, "bluealsa", 8) == 0;
+}
+
+// True when a USB card on the Type-C port is the output: the built-in DAC is
+// "default", Bluetooth is "bluealsa...", and a dongle is a card by number.
+static bool output_is_usb(void) {
+	char device[sizeof(output_pcm)];
+	audio_get_output_device(device, sizeof(device));
+	return strncmp(device, "plughw:", 7) == 0 || strncmp(device, "hw:", 3) == 0;
 }
 
 // ...and over Bluetooth the wait is zero.
@@ -931,10 +940,20 @@ static char held_device[sizeof(output_pcm)];
 static snd_pcm_t *bt_converted_pcm;
 static char bt_converted_device[sizeof(output_pcm)];
 
-// The device name a handle was opened for: the route, for the converted plug.
+// The same for compatibility mode on a USB DAC: a plug of this player's own,
+// its slave pinned to the format the device takes. See open_usb_compat().
+#define USB_COMPAT_PCM "sonix_usb_compat"
+static snd_pcm_t *usb_compat_pcm;
+static char usb_compat_device[sizeof(output_pcm)];
+
+// The device name a handle was opened for: the route, for either converted
+// plug.
 static const char *pcm_device_name(snd_pcm_t *pcm) {
 	if (pcm && pcm == bt_converted_pcm) {
 		return bt_converted_device;
+	}
+	if (pcm && pcm == usb_compat_pcm) {
+		return usb_compat_device;
 	}
 	return pcm ? snd_pcm_name(pcm) : NULL;
 }
@@ -1415,6 +1434,72 @@ static int open_bluetooth_at_rate(snd_pcm_t **pcm, const char *device, unsigned 
 	return err;
 }
 
+// ---------------------------------------------------------------------------
+// A USB DAC at a rate and depth it cannot refuse
+//
+// Compatibility mode, from usbaudio.h: a desktop DAC on the end of a Type-C
+// adapter that presents nothing but 48 kHz/16 bit -- and they exist, two of
+// them behind the Head-Fi reports this was written for -- does not refuse the
+// track politely. The PCM open fails, and audio.c's own answer to a USB open
+// that fails is to fail the track rather than play it to the jacks (see
+// open_pcm_device_now()).
+//
+// The workaround is a plug of this player's own in front of the card, exactly
+// like the Bluetooth one above and for a different reason: its slave is pinned
+// to the format the device is known to take, so the rate and the depth asked of
+// the plug are always acceptable and the conversion happens here rather than in
+// the device's descriptor. ALSA's own plug would do the conversion too, but it
+// would first try to configure the slave at whatever the track runs at -- which
+// is the configuration that fails -- so the slave is fixed before it ever sees
+// the stream.
+// ---------------------------------------------------------------------------
+
+// Opens `device` ("plughw:1,0") behind a plug whose slave is pinned to `rate`,
+// `channels` and 16-bit, under USB_COMPAT_PCM. The plug is added to a copy of
+// the global configuration, as the Bluetooth one is.
+//
+// Only the rate and the depth are the compatibility mode's subject, but the
+// channel count has to be in the definition too: a fixed-format device takes
+// its own channel count as well, and a mono external source (an audiobook
+// over ADB, a recording being monitored) would otherwise be configured at
+// stereo and play at half speed through the plug. The callers pass what they
+// are going to write.
+static int open_usb_compat(snd_pcm_t **pcm, const char *device, unsigned rate, int channels, int mode) {
+	char text[sizeof(output_pcm) + 192];
+	int len = snprintf(text, sizeof(text),
+					   "pcm." USB_COMPAT_PCM " { type plug slave { pcm \"%s\" format S16_LE rate %u"
+					   " channels %d } }",
+					   device, rate, channels);
+	if (len < 0 || (size_t)len >= sizeof(text)) {
+		return -EINVAL;
+	}
+
+	int err = snd_config_update();
+	if (err < 0) {
+		return err;
+	}
+	snd_config_t *conf = NULL;
+	err = snd_config_copy(&conf, snd_config);
+	if (err < 0) {
+		return err;
+	}
+	snd_input_t *in = NULL;
+	err = snd_input_buffer_open(&in, text, len);
+	if (err >= 0) {
+		err = snd_config_load(conf, in);
+		snd_input_close(in);
+	}
+	if (err >= 0) {
+		err = snd_pcm_open_lconf(pcm, USB_COMPAT_PCM, SND_PCM_STREAM_PLAYBACK, mode, conf);
+	}
+	snd_config_delete(conf);
+	if (err >= 0) {
+		usb_compat_pcm = *pcm;
+		snprintf(usb_compat_device, sizeof(usb_compat_device), "%s", device);
+	}
+	return err;
+}
+
 #ifndef HOST_BUILD
 // How the kernel's free memory is split up, one line per zone: the number of
 // free blocks of 1, 2, 4, 8... pages. Written when a driver finds no memory,
@@ -1526,6 +1611,23 @@ static snd_pcm_t *open_pcm_device_now(int channels, int sample_rate, int bits_pe
 		}
 	}
 
+	// Compatibility mode on the port (usbaudio.h): the card is behind a plug
+	// of this player's own whose slave is pinned to 48 kHz/16 bit, so the rate
+	// and depth asked of it are always ones the device takes. The stream is
+	// then converted to that format by the plug, before the card sees it --
+	// which is the whole point, because the card is the thing that was
+	// refusing the stream.
+	//
+	// Only while a USB card is really the output: with the setting on and the
+	// track playing to the jacks, nothing here applies and the built-in DAC
+	// keeps following the file, which is what it is good at.
+	bool usb_compat = false;
+	if (usb_route && usbaudio_compat_mode()) {
+		usb_compat = true;
+		fprintf(stderr, "audio: compatibility mode; the card is fed %d Hz, %d bit, converted by the plug\n",
+				USBAUDIO_COMPAT_RATE, USBAUDIO_COMPAT_BITS);
+	}
+
 	int err = -EBUSY;
 	int attempts = 0;
 	// A dongle that has just been re-enumerated answers ENODEV/ENXIO/EIO for as
@@ -1538,6 +1640,7 @@ static snd_pcm_t *open_pcm_device_now(int channels, int sample_rate, int bits_pe
 	int budget = (bluetooth && bluetooth_audio_active()) ? 160 : (usb_route ? USB_OPEN_USB_BUDGET : 40);
 	for (; attempts < budget; attempts++) {
 		err = convert_to ? open_bluetooth_at_rate(&pcm_handle, device, convert_to, mode)
+			: usb_compat ? open_usb_compat(&pcm_handle, device, USBAUDIO_COMPAT_RATE, channels, mode)
 						 : snd_pcm_open(&pcm_handle, device, SND_PCM_STREAM_PLAYBACK, mode);
 		if (err >= 0) {
 			break;
@@ -1579,6 +1682,36 @@ static snd_pcm_t *open_pcm_device_now(int channels, int sample_rate, int bits_pe
 		// open would move the listener to the jack for good.
 		if (err >= 0 && bluetooth && !bluetooth_audio_active()) {
 			audio_set_output_device(NULL);
+		}
+	} else if (err < 0 && usb_route && !usb_compat) {
+		// A USB card that will not open the track's own format is not
+		// necessarily a card that will not open anything. Some do exactly one:
+		// a fixed 48 kHz/16-bit interface is what two of the desktop DACs
+		// behind the Head-Fi reports present, and they refuse a 44.1 kHz
+		// 24-bit stream with whatever errno their driver picks.
+		//
+		// So the port is asked again at the format those devices take, through
+		// the same plug compatibility mode uses -- and if that is what makes it
+		// play, the setting is switched on and said out loud, because a player
+		// that quietly halved the quality of every track to the port would be
+		// worse than one that refused it. Nothing happens on the back of a
+		// dongle that has merely gone quiet: that one fails here too and the
+		// existing retry rebuilds it, unchanged.
+		fprintf(stderr, "audio: '%s' refused the %d Hz / %d bit stream (%s); trying %d Hz / %d bit\n", device,
+				sample_rate, bits_per_sample, snd_strerror(err), USBAUDIO_COMPAT_RATE, USBAUDIO_COMPAT_BITS);
+		err = open_usb_compat(&pcm_handle, device, USBAUDIO_COMPAT_RATE, channels, mode);
+		if (err >= 0) {
+			fprintf(stderr, "audio: compatibility mode works for '%s'; the port runs at %d Hz / %d bit from now on\n",
+					device, USBAUDIO_COMPAT_RATE, USBAUDIO_COMPAT_BITS);
+			usb_compat = true;
+			usbaudio_set_compat_mode(true);
+			// What the plug is asked for below is still the track's own format:
+			// the plug is the thing converting it, and the caller writes the
+			// frames it decoded. Only the card's side of the plug is pinned.
+		} else {
+			fprintf(stderr, "audio: '%s' would not open (%s after %d attempts); the track waits for it rather than "
+							"playing to the jack\n",
+					device, snd_strerror(err), attempts);
 		}
 	} else if (err < 0 && usb_route) {
 		fprintf(stderr, "audio: '%s' would not open (%s after %d attempts); the track waits for it rather than "
@@ -3876,6 +4009,19 @@ static void play_decoded_file(const char *filepath, decode_format_t format) {
 		dsd_as_pcm = true;
 	}
 
+	// And a USB DAC behind the compatibility plug has no DoP path either,
+	// though for a different reason: the plug resamples, and a DSD bitstream
+	// resampled is noise rather than quieter DSD. So DoP to such a card is
+	// decided the way Bluetooth's is -- converted to PCM here, where the
+	// conversion is a filter and the output is real audio -- rather than being
+	// refused by the device. The 176.4 kHz the DSD decoder produces is still
+	// more than the plug's 48 kHz slave takes, and the plug resamples that
+	// down; the stream is linear PCM by then, so that is a quality choice the
+	// hint on the settings row explains, not a broken bitstream.
+	if (decoder_passthrough(dec) && output_is_usb() && usbaudio_compat_mode() && decoder_dsd_to_pcm(dec)) {
+		dsd_as_pcm = true;
+	}
+
 	int channels = decoder_channels(dec);
 	int sample_rate = decoder_sample_rate(dec);
 	uint64_t total_frames = decoder_total_pcm_frames(dec);
@@ -3905,7 +4051,13 @@ static void play_decoded_file(const char *filepath, decode_format_t format) {
 	int decim_factor = bluetooth_decimation(sample_rate, channels, out_bits, passthrough);
 	// 176.4 kHz is more than any Bluetooth link carries, whatever the
 	// decimation settings say.
-	if (dsd_as_pcm && decim_factor == 1) {
+	//
+	// Bluetooth only, and the sink's own rate: this is the link's budget, not
+	// the codec's. A USB DAC in compatibility mode takes the same 176.4 kHz
+	// straight into the plug, which resamples it down to its slave's 48 kHz
+	// itself -- doing it twice here would be work for nothing, and would put
+	// a decimation stage in front of a device that already has one.
+	if (dsd_as_pcm && output_is_bluetooth() && decim_factor == 1) {
 		unsigned sink = bluetooth_sink_rate();
 		decim_factor = decimate_factor_for(sample_rate, sink ? (int)sink : 44100);
 	}
