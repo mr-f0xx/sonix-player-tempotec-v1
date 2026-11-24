@@ -38,11 +38,13 @@ static lv_obj_t *frame_box;	 // what cover_img sits in: all of cover_box, or the
 static lv_obj_t *title_label;
 static lv_obj_t *artist_label;
 static lv_obj_t *clock_label;
-static lv_obj_t *chevron_icon;
+static lv_obj_t *chevron_btn, *chevron_icon;
 static lv_timer_t *clock_timer;
 
 static bool enabled;
-static bool visualizer_selected;
+static bool visualizer_selected, viz_fullscreen;
+static unsigned viz_layers;
+static int spectrum_h;
 static lv_obj_t *spectrum, *spectrum_segments[VISUALIZER_BANDS][24];
 static lv_obj_t *spectrum_rail; // the baseline the Neon bars rise from
 static lv_obj_t *idle_note;		// the note shown in the field when nothing plays
@@ -136,7 +138,8 @@ static int strip_h;
 
 static screensaver_source_t source;
 static bool spectrum_now(void) { return visualizer_selected && source == SCREENSAVER_SOURCE_ALBUM; }
-// Whether the spectrum up is the LED one rather than Neon.
+static bool fullscreen_now(void) { return spectrum_now() && viz_fullscreen; }
+static bool filaments_now(void) { return spectrum_now() && viz_style == SCREENSAVER_VIZ_STYLE_FILAMENTS; }
 static bool led_now(void) { return spectrum_now() && viz_style == SCREENSAVER_VIZ_STYLE_LED; }
 
 // The largest picture the folder is read for. Elsewhere that is the panel
@@ -250,6 +253,8 @@ bool screensaver_get_enabled(void) { return enabled; }
 static void refresh_content(void);
 static void spectrum_reset(void);
 static void led_build(void);
+static void led_layout(void);
+static void spectrum_layout(void);
 static void spectrum_apply_backdrop(void);
 static void spectrum_apply_idle(bool idle);
 static bool spectrum_music_playing(void);
@@ -268,8 +273,30 @@ void screensaver_set_visualizer(bool on) {
 
 screensaver_viz_style_t screensaver_visualizer_style(void) { return viz_style; }
 
+static screensaver_viz_style_t valid_viz_style(int chosen) {
+	return chosen >= SCREENSAVER_VIZ_STYLE_NEON && chosen <= SCREENSAVER_VIZ_STYLE_FILAMENTS
+			   ? (screensaver_viz_style_t)chosen : SCREENSAVER_VIZ_STYLE_NEON;
+}
+
+bool screensaver_get_visualizer_fullscreen(void) { return viz_fullscreen; }
+void screensaver_set_visualizer_fullscreen(bool fullscreen) {
+	viz_fullscreen = fullscreen;
+	config_set_bool("screen", "screensaver_viz_fullscreen", fullscreen);
+	config_save();
+	if (screensaver_is_visible()) refresh_content();
+}
+
+unsigned screensaver_visualizer_layers(void) { return viz_layers; }
+void screensaver_set_visualizer_layers(unsigned layers) {
+	layers &= FILAMENTS_ALL;
+	if (!layers || layers == viz_layers) return; // keep at least one layer on
+	viz_layers = layers;
+	config_set_int("screen", "screensaver_visualizer_layers", layers);
+	config_save();
+}
+
 void screensaver_set_visualizer_style(screensaver_viz_style_t chosen) {
-	viz_style = chosen == SCREENSAVER_VIZ_STYLE_LED ? SCREENSAVER_VIZ_STYLE_LED : SCREENSAVER_VIZ_STYLE_NEON;
+	viz_style = valid_viz_style(chosen);
 	config_set_int("screen", "screensaver_visualizer_style", (int)viz_style);
 	config_save();
 	// The bars are only built once the style is wanted, so the first switch
@@ -279,7 +306,6 @@ void screensaver_set_visualizer_style(screensaver_viz_style_t chosen) {
 	}
 	if (screensaver_is_visible()) {
 		spectrum_reset();
-		spectrum_apply_backdrop();
 		refresh_content();
 	}
 }
@@ -504,6 +530,8 @@ static const void *shown_cover;
 static void clock_timer_cb(lv_timer_t *timer) {
 	(void)timer;
 
+	if (fullscreen_now()) return;
+
 	// Takes delivery of a decode that landed after the wake had already given
 	// up on it -- a short dark spell, or a slow card. It is only stored, never
 	// swapped in: the picture must not change while it is being looked at.
@@ -610,6 +638,11 @@ static void set_page_backdrop(const lv_image_dsc_t *backdrop) {
 // accent blue for the time. Dark and Light have no
 // field of their own: they keep the light type they have always worn over the
 // blurred strip, whatever the page behind them is.
+static lv_color_t chevron_ink(void) {
+	return metadata_over_art() && !fullscreen_now() ? theme_player_chrome_color(THEME_PLAYER_CHROME_CHEVRON)
+												  : lv_color_white();
+}
+
 static void screensaver_refresh_theme(void) {
 	if (!saver) {
 		return;
@@ -638,13 +671,11 @@ static void screensaver_refresh_theme(void) {
 	lv_color_t ink_title = lv_color_white();
 	lv_color_t ink_artist = lv_color_make(200, 200, 200);
 	lv_color_t ink_clock = lv_color_white();
-	lv_color_t ink_chevron = lv_color_white();
 	if (field) {
 		ink_title = theme_player_chrome_color(THEME_PLAYER_CHROME_PRIMARY);
 		ink_artist = tokyo ? theme_semantic_color(THEME_SEMANTIC_CYAN)
 						   : theme_player_chrome_color(THEME_PLAYER_CHROME_SECONDARY);
 		ink_clock = theme()->accent;
-		ink_chevron = theme_player_chrome_color(THEME_PLAYER_CHROME_CHEVRON);
 	}
 
 	if (cover_placeholder) {
@@ -666,7 +697,7 @@ static void screensaver_refresh_theme(void) {
 		lv_obj_set_style_text_color(clock_label, ink_clock, 0);
 	}
 	if (chevron_icon) {
-		lv_obj_set_style_image_recolor(chevron_icon, ink_chevron, 0);
+		lv_obj_set_style_image_recolor(chevron_icon, chevron_ink(), 0);
 	}
 	if (idle_note) {
 		// The note shown while nothing plays wears the accent, like the rail
@@ -790,6 +821,24 @@ static void draw_from_folder(void) {
 // and freed here -- and so is the Framed style's copy of the artwork, which
 // the player's sleeve only stands in for until it lands.
 static void refresh_content(void) {
+	bool viz = spectrum_now();
+	bool full = fullscreen_now();
+	lv_obj_set_hidden(info_strip, full);
+	lv_obj_set_style_bg_opa(chevron_btn, full ? LV_OPA_60 : LV_OPA_TRANSP, 0);
+	lv_obj_set_style_image_recolor(chevron_icon, chevron_ink(), 0);
+	spectrum_layout();
+	lv_obj_set_hidden(spectrum, !viz);
+	lv_obj_set_hidden(cover_box, viz);
+	if (viz) {
+		set_page_backdrop(NULL);
+		lv_obj_set_style_bg_color(saver, lv_color_black(), 0);
+		lv_obj_set_style_bg_image_src(info_strip, NULL, 0);
+		lv_obj_set_style_bg_opa(info_strip, LV_OPA_TRANSP, 0);
+		spectrum_apply_idle(!spectrum_music_playing());
+		spectrum_apply_backdrop();
+		if (full) return;
+	}
+
 	device_state_t state;
 	device_state_get(&state);
 
@@ -834,23 +883,12 @@ static void refresh_content(void) {
 	// title -- it just must not change the picture.
 	shown_cover = player_cover_image();
 
-	if (!spectrum_now()) {
-		lv_color_t page = (theme_is_monochrome() || theme_is_tokyo_night()) ? theme()->screen_bg : lv_color_black();
-		lv_obj_set_style_bg_color(saver, page, 0);
-	}
-	lv_obj_set_hidden(spectrum, !spectrum_now());
-	lv_obj_set_hidden(cover_box, spectrum_now());
-	if (spectrum_now()) {
-		set_page_backdrop(NULL);
-		lv_obj_set_style_bg_color(saver, lv_color_black(), 0);
-		spectrum_apply_backdrop();
-		spectrum_apply_idle(!spectrum_music_playing());
+	if (viz) {
 		set_strip_height(DEFAULT_STRIP_H);
-		lv_obj_set_style_bg_image_src(info_strip, NULL, 0);
-		lv_obj_set_style_bg_opa(info_strip, LV_OPA_TRANSP, 0);
 		refresh_clock();
 		return;
 	}
+	lv_obj_set_style_bg_color(saver, metadata_over_art() ? theme()->screen_bg : lv_color_black(), 0);
 	if (source == SCREENSAVER_SOURCE_IMAGES) {
 		draw_from_folder();
 		refresh_clock();
@@ -1126,6 +1164,7 @@ static void spectrum_apply_backdrop(void) {
 		lv_obj_set_style_bg_color(spectrum, lv_color_black(), 0);
 		lv_obj_set_style_bg_grad_dir(spectrum, LV_GRAD_DIR_NONE, 0);
 	}
+	lv_obj_set_hidden(spectrum_rail, spectrum_idle || led_now() || filaments_now());
 	// The LED grid is one layer so it can be swapped for Neon's whole: its
 	// segments are never hidden one by one, only recoloured between lit and
 	// the dark red of an unlit slot. It goes with the rest of the bars when
@@ -1182,26 +1221,13 @@ static void led_build(void) {
 	}
 	led_built = true;
 
-	int area_h = screen_h - DEFAULT_STRIP_H;
-	int bottom = screen_h / 40;
-	led_base_y = area_h - bottom;
-	led_cell = screen_w / VISUALIZER_LED_BANDS;
-	if (led_cell < 4) {
-		led_cell = 4;
-	}
-	// The slot edges as their share of the baseline: slot 23's top is
-	// exactly the top of the spectrum area, slot 0's bottom the floor.
-	for (int y = 0; y < LED_SEGMENTS; y++) {
-		led_row_top[y] = (long)(LED_SEGMENTS - 1 - y) * led_base_y / LED_SEGMENTS;
-		led_row_h[y] = (long)(LED_SEGMENTS - y) * led_base_y / LED_SEGMENTS - led_row_top[y];
-	}
+	led_cell = LV_MAX(4, screen_w / VISUALIZER_LED_BANDS);
 
 	led_layer = lv_obj_create(spectrum);
 	// Right after the rail and Neon's bars, before the idle note, so the
 	// spectrum's first children keep their places whatever order the two
 	// grids were built in.
 	lv_obj_move_to_index(led_layer, 1 + VISUALIZER_BANDS * 24);
-	lv_obj_set_size(led_layer, screen_w, area_h);
 	lv_obj_set_pos(led_layer, 0, 0);
 	lv_obj_set_style_bg_opa(led_layer, LV_OPA_TRANSP, 0);
 	lv_obj_set_style_border_width(led_layer, 0, 0);
@@ -1217,8 +1243,6 @@ static void led_build(void) {
 	for (int b = 0; b < VISUALIZER_LED_BANDS; b++) {
 		lv_obj_t *glow = lv_obj_create(led_layer);
 		led_glow[b] = glow;
-		lv_obj_set_pos(glow, b * led_cell + 1, led_base_y);
-		lv_obj_set_size(glow, led_cell - 2, 0);
 		lv_obj_set_style_bg_color(glow, lv_color_make(255, 56, 2), 0);
 		lv_obj_set_style_bg_grad_color(glow, lv_color_make(255, 16, 0), 0);
 		lv_obj_set_style_bg_grad_dir(glow, LV_GRAD_DIR_VER, 0);
@@ -1236,9 +1260,6 @@ static void led_build(void) {
 		for (int y = 0; y < LED_SEGMENTS; y++) {
 			lv_obj_t *segment = lv_obj_create(led_layer);
 			led_segments[b][y] = segment;
-			int gap = led_row_h[y] >= 6 ? 2 : 1;
-			lv_obj_set_pos(segment, b * led_cell + 1, led_row_top[y]);
-			lv_obj_set_size(segment, led_cell - 2, led_row_h[y] - gap);
 			lv_obj_set_style_bg_color(segment, LED_UNLIT, 0);
 			lv_obj_set_style_bg_opa(segment, LED_UNLIT_OPA, 0);
 			lv_obj_set_style_border_width(segment, 0, 0);
@@ -1251,8 +1272,8 @@ static void led_build(void) {
 		// the board casts, not the grey fog a bright shadow leaves.
 		lv_obj_t *cap = lv_obj_create(led_layer);
 		led_peak_obj[b] = cap;
-		lv_obj_set_pos(cap, b * led_cell + 1, led_row_top[LED_SEGMENTS - 1]);
-		lv_obj_set_size(cap, led_cell - 2, led_row_h[LED_SEGMENTS - 1] - 1);
+		lv_obj_set_width(cap, led_cell - 2);
+		lv_obj_set_x(cap, b * led_cell + 1);
 		lv_obj_set_style_bg_color(cap, lv_color_make(255, 232, 165), 0);
 		lv_obj_set_style_bg_opa(cap, LV_OPA_COVER, 0);
 		lv_obj_set_style_border_width(cap, 0, 0);
@@ -1261,6 +1282,50 @@ static void led_build(void) {
 		lv_obj_set_hidden(cap, true);
 		led_peak_shown[b] = -1;
 	}
+	if (spectrum_h) led_layout();
+}
+
+static void led_layout(void) {
+	led_base_y = spectrum_h - screen_h / 40;
+	lv_obj_set_size(led_layer, screen_w, spectrum_h);
+	// Divide the baseline into 24 slots; the top one touches the panel edge.
+	for (int y = 0; y < LED_SEGMENTS; y++) {
+		led_row_top[y] = (LED_SEGMENTS - 1 - y) * led_base_y / LED_SEGMENTS;
+		led_row_h[y] = (LED_SEGMENTS - y) * led_base_y / LED_SEGMENTS - led_row_top[y];
+	}
+	for (int b = 0; b < VISUALIZER_LED_BANDS; b++) {
+		int x = b * led_cell + 1;
+		lv_obj_set_pos(led_glow[b], x, led_base_y);
+		lv_obj_set_size(led_glow[b], led_cell - 2, 0);
+		for (int y = 0; y < LED_SEGMENTS; y++) {
+			int gap = led_row_h[y] >= 6 ? 2 : 1;
+			lv_obj_set_pos(led_segments[b][y], x, led_row_top[y]);
+			lv_obj_set_size(led_segments[b][y], led_cell - 2, led_row_h[y] - gap);
+		}
+	}
+}
+
+static void spectrum_layout(void) {
+	int height = fullscreen_now() ? screen_h : screen_h - DEFAULT_STRIP_H;
+	if (spectrum_h == height) return;
+	spectrum_reset();
+	spectrum_h = height;
+	lv_obj_set_size(spectrum, screen_w, height);
+	int margin = screen_w / 40;
+	int rail_h = LV_MAX(2, screen_h / 80);
+	int rail_y = height - screen_h / 40 - rail_h;
+	int step = LV_MAX(2, (rail_y - screen_h / 12) / 24);
+	int cell = (screen_w - 2 * margin) / VISUALIZER_BANDS;
+	lv_obj_set_pos(spectrum_rail, margin, rail_y);
+	lv_obj_set_size(spectrum_rail, screen_w - 2 * margin, rail_h);
+	for (int b = 0; b < VISUALIZER_BANDS; b++) {
+		for (int y = 0; y < 24; y++) {
+			lv_obj_set_pos(spectrum_segments[b][y], margin + b * cell + 1, rail_y - (y + 1) * step);
+			lv_obj_set_size(spectrum_segments[b][y], cell - 2, step - 1);
+		}
+	}
+	lv_image_set_scale(idle_note, LV_SCALE_NONE * LV_MAX(48, height / 2) / 128);
+	if (led_built) led_layout();
 }
 
 // The LED bars: the same attack and release Neon eases with, plus the caps
@@ -1366,7 +1431,7 @@ static void spectrum_apply_idle(bool idle) {
 		spectrum_reset(); // the bars drop at once rather than decaying under the note
 	}
 	spectrum_idle = idle;
-	lv_obj_set_hidden(spectrum_rail, idle);
+	lv_obj_set_hidden(spectrum_rail, idle || led_now() || filaments_now());
 	lv_obj_set_hidden(idle_note, !idle);
 	if (led_built) {
 		lv_obj_set_hidden(led_layer, idle || !led_now());
@@ -1376,7 +1441,12 @@ static void spectrum_apply_idle(bool idle) {
 static void spectrum_tick(lv_timer_t *timer) {
     (void)timer;
     if (!screensaver_is_visible() || !spectrum_now() || !power_screen_is_on()) return;
-	spectrum_apply_idle(!spectrum_music_playing());
+    spectrum_apply_idle(!spectrum_music_playing());
+    if (spectrum_idle) return;
+    if (filaments_now()) {
+        filaments_draw(spectrum, screen_w, spectrum_h, viz_layers);
+        return;
+    }
     if ((spectrum_frame++ & 1u) == 0) {
         if (led_now()) visualizer_led_levels(led_target);
         else visualizer_levels(spectrum_target);
@@ -1400,6 +1470,7 @@ static void spectrum_tick(lv_timer_t *timer) {
 }
 
 static void spectrum_reset(void) {
+    filaments_release();
     for (int b = 0; b < VISUALIZER_BANDS; b++) {
         for (int y = 0; y < spectrum_height[b]; y++) lv_obj_set_hidden(spectrum_segments[b][y], true);
         spectrum_level[b] = spectrum_height[b] = 0;
@@ -1427,7 +1498,7 @@ static void spectrum_reset(void) {
     // Back to the at-rest drawing: rail up, note away.
     spectrum_idle = false;
     if (spectrum_rail) {
-        lv_obj_set_hidden(spectrum_rail, false);
+        lv_obj_set_hidden(spectrum_rail, led_now() || filaments_now());
     }
     if (idle_note) {
         lv_obj_set_hidden(idle_note, true);
@@ -1444,10 +1515,10 @@ void screensaver_init(gui_config_t *cfg) {
 	screensaver_set_card_root(cfg->sd_root_path);
 	enabled = config_get_bool("screen", "screensaver", false);
 	visualizer_selected = config_get_bool("screen", "screensaver_visualizer", false);
-	viz_style = config_get_int("screen", "screensaver_visualizer_style", SCREENSAVER_VIZ_STYLE_NEON) ==
-						SCREENSAVER_VIZ_STYLE_LED
-					? SCREENSAVER_VIZ_STYLE_LED
-					: SCREENSAVER_VIZ_STYLE_NEON;
+	viz_style = valid_viz_style(config_get_int("screen", "screensaver_visualizer_style", SCREENSAVER_VIZ_STYLE_NEON));
+	viz_fullscreen = config_get_bool("screen", "screensaver_viz_fullscreen", false);
+	viz_layers = config_get_int("screen", "screensaver_visualizer_layers", FILAMENTS_ALL) & FILAMENTS_ALL;
+	if (!viz_layers) viz_layers = FILAMENTS_ALL;
 	source = config_get_int("screen", "screensaver_source", SCREENSAVER_SOURCE_ALBUM) == SCREENSAVER_SOURCE_IMAGES
 				 ? SCREENSAVER_SOURCE_IMAGES
 				 : SCREENSAVER_SOURCE_ALBUM;
@@ -1574,7 +1645,9 @@ void screensaver_init(gui_config_t *cfg) {
 	// does nothing, since the screensaver is only dismissed by dragging -- so it
 	// is not clickable and a finger landing on it talks to the saver underneath,
 	// where the drag gesture lives.
-	lv_obj_t *chevron_btn = lv_obj_create(saver);
+	chevron_btn = lv_obj_create(saver);
+	lv_obj_set_style_bg_color(chevron_btn, lv_color_black(), 0);
+	lv_obj_set_style_radius(chevron_btn, LV_RADIUS_CIRCLE, 0);
 	lv_obj_set_size(chevron_btn, bp_pick(48, 80), bp_pick(30, 52));
 	lv_obj_align(chevron_btn, LV_ALIGN_BOTTOM_MID, 0, -4);
 	lv_obj_set_style_bg_opa(chevron_btn, LV_OPA_TRANSP, 0);
@@ -1592,14 +1665,11 @@ void screensaver_init(gui_config_t *cfg) {
 
 	// The reference uses a black field, segmented bars and a rail. Both use
 	// the shared accent style so theme and accent changes take effect immediately.
-	// Keep it wholly above the metadata strip, so the clock is never covered.
-	// The LED style keeps the same container and strip clearance: its own
-	// dark red field, twice the bars and no rail (see led_build).
+	// All styles share this field. Its height leaves room for the clock unless
+	// the full-screen setting is active (see spectrum_layout).
 	spectrum = lv_obj_create(saver);
-	int spectrum_h = screen_h - DEFAULT_STRIP_H;
-	lv_obj_set_size(spectrum, screen_w, spectrum_h);
 	lv_obj_set_pos(spectrum, 0, 0);
-	spectrum_apply_backdrop();
+	lv_obj_move_foreground(chevron_btn); // remains visible over the full-screen field
 	lv_obj_set_style_bg_opa(spectrum, LV_OPA_COVER, 0);
 	lv_obj_set_style_border_width(spectrum, 0, 0);
 	lv_obj_set_style_radius(spectrum, 0, 0);
@@ -1607,15 +1677,7 @@ void screensaver_init(gui_config_t *cfg) {
 	lv_obj_set_scrollable(spectrum, false);
 	lv_obj_set_clickable(spectrum, false);
 	lv_obj_set_hidden(spectrum, true);
-	int margin = screen_w / 40, rail_h = screen_h / 80;
-	if (rail_h < 2) rail_h = 2;
-	int rail_y = spectrum_h - screen_h / 40 - rail_h;
-	int step = (rail_y - screen_h / 12) / 24;
-	if (step < 2) step = 2;
-	int cell = (screen_w - 2 * margin) / VISUALIZER_BANDS;
 	spectrum_rail = lv_obj_create(spectrum);
-	lv_obj_set_pos(spectrum_rail, margin, rail_y);
-	lv_obj_set_size(spectrum_rail, screen_w - 2 * margin, rail_h);
 	lv_obj_add_style(spectrum_rail, &theme_style_accent_bg, 0);
 	lv_obj_set_style_bg_opa(spectrum_rail, LV_OPA_COVER, 0);
 	lv_obj_set_style_border_width(spectrum_rail, 0, 0);
@@ -1624,8 +1686,6 @@ void screensaver_init(gui_config_t *cfg) {
 	for (int b = 0; b < VISUALIZER_BANDS; b++) for (int y = 0; y < 24; y++) {
 		lv_obj_t *segment = lv_obj_create(spectrum);
 		spectrum_segments[b][y] = segment;
-		lv_obj_set_pos(segment, margin + b * cell + 1, rail_y - (y + 1) * step);
-		lv_obj_set_size(segment, cell - 2, step - 1);
 		lv_obj_add_style(segment, &theme_style_accent_bg, 0);
 		lv_obj_set_style_bg_opa(segment, LV_OPA_COVER, 0);
 		lv_obj_set_style_border_width(segment, 0, 0);
@@ -1636,8 +1696,7 @@ void screensaver_init(gui_config_t *cfg) {
 	spectrum_timer = lv_timer_create(spectrum_tick, 50, NULL);
 	lv_timer_pause(spectrum_timer);
 	power_pause_in_standby(spectrum_timer);
-	// A saved LED choice gets its bars now, so the first wake is already the
-	// analyzer rather than Neon for one screensaver.
+	// A saved LED choice gets its grid before the first wake.
 	if (viz_style == SCREENSAVER_VIZ_STYLE_LED) {
 		led_build();
 	}
@@ -1649,15 +1708,12 @@ void screensaver_init(gui_config_t *cfg) {
 	// places as the spectrum's first children.
 	idle_note = lv_image_create(spectrum);
 	lv_image_set_src(idle_note, &icon_music_note);
-	int note_side = spectrum_h / 2;
-	if (note_side < 48) {
-		note_side = 48;
-	}
-	lv_image_set_scale(idle_note, (uint32_t)(LV_SCALE_NONE * note_side / 128));
 	lv_obj_set_style_image_recolor_opa(idle_note, LV_OPA_COVER, 0);
 	lv_obj_center(idle_note);
 	lv_obj_set_clickable(idle_note, false);
 	lv_obj_set_hidden(idle_note, true);
+	spectrum_layout();
+	spectrum_apply_backdrop();
 
 	// One second, not ten: the clock only needs a minute's resolution, but the
 	// same tick is what notices a track change, and a screensaver that shows

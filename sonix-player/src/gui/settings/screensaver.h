@@ -4,6 +4,7 @@
 #include <stdbool.h>
 
 #include "src/gui/shell/gui.h"
+#include "screensaver_filaments.h"
 
 // The screensaver: what the panel shows for a moment when it lights back up.
 // The loaded track's artwork fills the screen, and underneath it a strip of
@@ -35,9 +36,7 @@ bool screensaver_get_enabled(void);
 void screensaver_set_visualizer(bool enabled);
 bool screensaver_get_visualizer(void);
 
-// How that spectrum is drawn. Config-backed
-// ("screen"/"screensaver_visualizer_style"); whichever it is, the track
-// information and the clock stay where they always were.
+// How the visualizer is drawn ("screen"/"screensaver_visualizer_style").
 //
 // Neon is the visualizer as it came: eight wide segmented bars in the theme's
 // accent colour on black, over a matching rail.
@@ -53,10 +52,16 @@ bool screensaver_get_visualizer(void);
 typedef enum {
 	SCREENSAVER_VIZ_STYLE_NEON = 0,
 	SCREENSAVER_VIZ_STYLE_LED,
+	SCREENSAVER_VIZ_STYLE_FILAMENTS,
 } screensaver_viz_style_t;
 
 screensaver_viz_style_t screensaver_visualizer_style(void);
 void screensaver_set_visualizer_style(screensaver_viz_style_t style);
+// Hide the track and clock and extend the drawing to the whole panel.
+bool screensaver_get_visualizer_fullscreen(void);
+void screensaver_set_visualizer_fullscreen(bool fullscreen);
+unsigned screensaver_visualizer_layers(void);
+void screensaver_set_visualizer_layers(unsigned layers);
 
 // Where the picture comes from.
 //

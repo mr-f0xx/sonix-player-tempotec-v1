@@ -197,3 +197,28 @@ uint8_t visualizer_energy_level(void) {
     if (level >= 1) return 255;
     return (uint8_t)(level * 255 + 0.5f);
 }
+
+void visualizer_motion_levels(float levels[3]) {
+    float data[WINDOW];
+    int rate;
+    levels[0] = levels[1] = levels[2] = 0;
+    // Use the same PCM window as Neon/LED, but without the Hann/Goertzel
+    // analysis. Two one-pole filters give the fork's broad motion bands.
+    if (!copy_window(&mono, data, &rate, VISUALIZER_SCREENSAVER, 250)) return;
+    int stride = rate / 11025;
+    if (stride > 1) rate /= stride;
+    float a = 1.0f - expf(-6.2831853f * 170.0f / rate);
+    float b = 1.0f - expf(-6.2831853f * 2100.0f / rate);
+    float slow = 0, fast = 0, low = 0, mid = 0, high = 0;
+    for (int i = 0; i < WINDOW; i++) {
+        float sample = data[i];
+        slow += a * (sample - slow);
+        fast += b * (sample - fast);
+        low += slow * slow;
+        mid += (fast - slow) * (fast - slow);
+        high += (sample - fast) * (sample - fast);
+    }
+    levels[0] = fminf(sqrtf(low / WINDOW) * 5.6f, 1.0f);
+    levels[1] = fminf(sqrtf(mid / WINDOW) * 5.6f, 1.0f);
+    levels[2] = fminf(sqrtf(high / WINDOW) * 10.0f, 1.0f);
+}

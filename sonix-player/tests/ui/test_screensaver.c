@@ -320,7 +320,7 @@ static lv_obj_t *info_strip(void) { return lv_obj_get_child(saver_obj(), 1); }
 static lv_obj_t *strip_label(int index) { return lv_obj_get_child(info_strip(), index); }
 // The swipe-up sign at the foot of the screen: the saver's last child, hung
 // over the strip's lower edge.
-static lv_obj_t *chevron_btn(void) { return lv_obj_get_child(saver_obj(), 2); }
+static lv_obj_t *chevron_btn(void) { return lv_obj_get_child(saver_obj(), 3); }
 static lv_obj_t *chevron_icon(void) { return lv_obj_get_child(chevron_btn(), 0); }
 
 // The picture on screen, as the screensaver holds it: the descriptor LVGL was
@@ -381,6 +381,34 @@ static void hide_now(void) {
 	for (int i = 0; i < 100 && screensaver_is_visible(); i++) {
 		pump(10);
 	}
+	assert(!screensaver_is_visible());
+}
+
+static lv_indev_data_t touch;
+
+static void read_touch(lv_indev_t *indev, lv_indev_data_t *data) {
+	(void)indev;
+	*data = touch;
+}
+
+static void dismiss_with_swipe(void) {
+	lv_obj_update_layout(saver_obj());
+	lv_indev_t *indev = lv_indev_create();
+	lv_indev_set_type(indev, LV_INDEV_TYPE_POINTER);
+	lv_indev_set_read_cb(indev, read_touch);
+	touch.point = (lv_point_t){screen_w / 2, screen_h - 18}; // on the chevron
+	touch.state = LV_INDEV_STATE_PRESSED;
+	lv_indev_read(indev);
+	for (int i = 0; i < 4; i++) {
+		touch.point.y -= screen_h / 10;
+		lv_tick_inc(20);
+		lv_indev_read(indev);
+		lv_obj_update_layout(saver_obj());
+	}
+	touch.state = LV_INDEV_STATE_RELEASED;
+	lv_indev_read(indev);
+	lv_indev_delete(indev);
+	pump(300);
 	assert(!screensaver_is_visible());
 }
 
@@ -622,12 +650,19 @@ static void check_settings_card(const char *language_dir) {
 	lv_obj_t *framed = settingsrow_pill(style_pills, "screensaver_style_framed", SCREENSAVER_STYLE_FRAMED, noop_cb);
 	settingsrow_pill_active(fill, false);
 	settingsrow_pill_active(framed, true);
-	// The visualizer's own card below it: the switch, and Neon and LED under
-	// it -- the same shape settings.c builds.
+	// Settings helpers on the V1's compact panel, including wrapped layer pills.
 	lv_obj_t *viz_switch = NULL, *viz_pills = NULL;
 	lv_obj_t *viz_card = settingsrow_toggle_pills(page, "screensaver_visualizer", noop_cb, &viz_switch, &viz_pills);
 	lv_obj_t *neon = settingsrow_pill(viz_pills, "screensaver_viz_neon", SCREENSAVER_VIZ_STYLE_NEON, noop_cb);
 	lv_obj_t *led = settingsrow_pill(viz_pills, "screensaver_viz_led", SCREENSAVER_VIZ_STYLE_LED, noop_cb);
+	lv_obj_t *itunes = settingsrow_pill(viz_pills, "screensaver_viz_filaments", SCREENSAVER_VIZ_STYLE_FILAMENTS, noop_cb);
+	lv_obj_t *layer_pills = NULL;
+	lv_obj_t *layer_group = settingsrow_pills_group(viz_card, "screensaver_viz_layers", &layer_pills);
+	settingsrow_pill(layer_pills, "screensaver_viz_sharp", FILAMENTS_SHARP, noop_cb);
+	settingsrow_pill(layer_pills, "screensaver_viz_soft", FILAMENTS_SOFT, noop_cb);
+	settingsrow_pill(layer_pills, "screensaver_viz_sparks", FILAMENTS_SPARKS, noop_cb);
+	settingsrow_pill(layer_pills, "screensaver_viz_tunnel", FILAMENTS_TUNNEL, noop_cb);
+	lv_obj_t *full_row = settingsrow_toggle(page, "screensaver_viz_fullscreen", NULL, noop_cb);
 	lv_obj_update_layout(page);
 
 	assert(lv_obj_get_parent(viz_pills) == viz_card);
@@ -665,10 +700,12 @@ static void check_settings_card(const char *language_dir) {
 	assert(lv_obj_get_height(card) < tall);
 	lv_obj_set_hidden(group, false);
 
-	// Every language has the five texts -- a missing one would show its
+	// Every language has the new texts -- a missing one would show its
 	// bare tag -- and what is on screen follows a switch.
 	const char *keys[] = {"screensaver_album_art", "screensaver_style_fill", "screensaver_style_framed",
-						  "screensaver_viz_neon", "screensaver_viz_led"};
+						  "screensaver_viz_neon", "screensaver_viz_led", "screensaver_viz_filaments",
+						  "screensaver_viz_fullscreen", "screensaver_viz_layers", "screensaver_viz_sharp",
+						  "screensaver_viz_soft", "screensaver_viz_sparks", "screensaver_viz_tunnel"};
 	DIR *dir = opendir(language_dir);
 	assert(dir);
 	int languages = 0;
@@ -689,6 +726,16 @@ static void check_settings_card(const char *language_dir) {
 		assert(strcmp(lv_label_get_text(lv_obj_get_child(framed, 0)), tr("screensaver_style_framed")) == 0);
 		assert(strcmp(lv_label_get_text(lv_obj_get_child(neon, 0)), tr("screensaver_viz_neon")) == 0);
 		assert(strcmp(lv_label_get_text(lv_obj_get_child(led, 0)), tr("screensaver_viz_led")) == 0);
+		assert(strcmp(lv_label_get_text(lv_obj_get_child(itunes, 0)), tr("screensaver_viz_filaments")) == 0);
+		assert(strcmp(lv_label_get_text(lv_obj_get_child(full_row, 0)), tr("screensaver_viz_fullscreen")) == 0);
+		assert(strcmp(lv_label_get_text(lv_obj_get_child(layer_group, 0)), tr("screensaver_viz_layers")) == 0);
+		lv_obj_update_layout(page);
+		lv_area_t row, pill;
+		lv_obj_get_coords(layer_pills, &row);
+		for (int i = 0; i < 4; i++) {
+			lv_obj_get_coords(lv_obj_get_child(layer_pills, i), &pill);
+			assert(pill.x1 >= row.x1 && pill.x2 <= row.x2);
+		}
 		languages++;
 	}
 	closedir(dir);
@@ -809,6 +856,8 @@ int main(int argc, char **argv) {
 
 	screensaver_init(&cfg);
 	assert(screensaver_get_enabled());
+	assert(!screensaver_get_visualizer_fullscreen());
+	assert(screensaver_visualizer_layers() == FILAMENTS_ALL);
 	assert(screensaver_source() == SCREENSAVER_SOURCE_ALBUM);
 	check_picture_limit(argv[1]);
 	assert(screensaver_style() == (saved_framed ? SCREENSAVER_STYLE_FRAMED : SCREENSAVER_STYLE_FILL));
@@ -1048,7 +1097,7 @@ int main(int argc, char **argv) {
 	state.status = AUDIO_STATUS_PLAYING; // music is on while the bars are fed below
 	go_dark();
 	wake();
-	lv_obj_t *spectrum = lv_obj_get_child(saver_obj(), 3);
+	lv_obj_t *spectrum = lv_obj_get_child(saver_obj(), 2);
 	assert(!lv_obj_is_hidden(spectrum));
 	assert(lv_obj_is_hidden(cover_box()));
 	assert(!lv_obj_is_hidden(info_strip()));
@@ -1225,6 +1274,97 @@ int main(int argc, char **argv) {
 	assert(lv_obj_get_style_bg_grad_dir(spectrum, 0) == LV_GRAD_DIR_NONE);
 	assert(lv_obj_is_hidden(led_layer_of(spectrum)));
 
+	/* Full screen changes the geometry even when the screensaver is up. */
+	screensaver_set_visualizer_fullscreen(true);
+	lv_obj_update_layout(saver_obj());
+	assert(lv_obj_get_height(spectrum) == screen_h);
+	assert(lv_obj_get_y(rail) > screen_h - strip_h);
+	assert(lv_obj_is_hidden(info_strip()));
+	assert(lv_obj_get_index(chevron_btn()) > lv_obj_get_index(spectrum));
+	assert(!lv_obj_is_clickable(chevron_btn()));
+	screensaver_set_visualizer_style(SCREENSAVER_VIZ_STYLE_LED);
+	lv_obj_update_layout(saver_obj());
+	assert(lv_obj_get_height(led_layer_of(spectrum)) == screen_h);
+	assert(lv_obj_get_y(led_seg(spectrum, 0, 0)) > screen_h - strip_h);
+
+	/* iTunes shares the same capture, and draws one small RGB565 image. */
+	screensaver_set_visualizer_style(SCREENSAVER_VIZ_STYLE_FILAMENTS);
+	assert(lv_obj_is_hidden(rail) && lv_obj_is_hidden(led_layer_of(spectrum)));
+	for (int i = 0; i < 4096; i++) {
+		pcm[2 * i] = pcm[2 * i + 1] = (int16_t)(5000 * sin(2 * 3.14159265 * 85 * i / 44100));
+	}
+	visualizer_feed(pcm, 4096, 2, 16, 44100);
+	float motion[3];
+	visualizer_motion_levels(motion);
+	assert(motion[0] > .3f && motion[0] > motion[1] && motion[1] > motion[2]);
+	pump(300);
+	lv_obj_t *filaments = lv_obj_get_child(spectrum, -1);
+	assert(lv_obj_check_type(filaments, &lv_image_class) && !lv_obj_is_hidden(filaments));
+	const lv_image_dsc_t *effect = lv_image_get_src(filaments);
+	assert(effect && effect->header.cf == LV_COLOR_FORMAT_RGB565);
+	assert(effect->header.w <= 120 && effect->header.h <= 160);
+	lv_obj_update_layout(saver_obj());
+	assert(lv_obj_get_width(filaments) == screen_w && lv_obj_get_height(filaments) == screen_h);
+	lv_draw_buf_t *shot = lv_snapshot_take(saver_obj(), LV_COLOR_FORMAT_RGB565);
+	assert(shot);
+	int colored = 0;
+	for (int y = screen_h - strip_h; y < screen_h - 36; y++) {
+		const uint16_t *row = (const uint16_t *)(shot->data + y * shot->header.stride);
+		for (int x = 0; x < screen_w; x++) if (row[x]) colored++;
+	}
+	assert(colored > 100); // drawn in the region previously reserved for the strip
+	lv_draw_buf_destroy(shot);
+	dump_snapshot("itunes-full-screen");
+
+	// The layers can run independently; Sparks alone is dark without PCM.
+	screensaver_set_visualizer_layers(FILAMENTS_SPARKS);
+	screensaver_set_visualizer_layers(0);
+	assert(screensaver_visualizer_layers() == FILAMENTS_SPARKS);
+	assert(config_init(config));
+	assert(config_get_bool("screen", "screensaver_viz_fullscreen", false));
+	assert(config_get_int("screen", "screensaver_visualizer_style", -1) == SCREENSAVER_VIZ_STYLE_FILAMENTS);
+	assert(config_get_int("screen", "screensaver_visualizer_layers", -1) == FILAMENTS_SPARKS);
+
+	go_dark();
+	assert(lv_image_get_src(filaments) == NULL);
+	visualizer_feed(pcm, 4096, 2, 16, 44100);
+	visualizer_motion_levels(motion);
+	assert(motion[0] == 0 && motion[1] == 0 && motion[2] == 0);
+	pump(200);
+	assert(lv_image_get_src(filaments) == NULL);
+	wake();
+	pump(50);
+	effect = lv_image_get_src(filaments);
+	assert(effect);
+	for (uint32_t i = 0; i < effect->data_size; i++) assert(effect->data[i] == 0);
+	visualizer_feed(pcm, 4096, 2, 16, 44100);
+	pump(200);
+	bool sparks_lit = false;
+	for (uint32_t i = 0; i < effect->data_size; i++) sparks_lit |= effect->data[i] != 0;
+	assert(sparks_lit);
+
+	state.status = AUDIO_STATUS_PAUSED;
+	pump(50);
+	assert(lv_image_get_src(filaments) == NULL && !lv_obj_is_hidden(idle_note));
+	state.status = AUDIO_STATUS_PLAYING;
+	screensaver_set_visualizer_fullscreen(false);
+	pump(50);
+	lv_obj_update_layout(saver_obj());
+	assert(!lv_obj_is_hidden(info_strip()) && lv_obj_get_height(filaments) == screen_h - strip_h);
+
+	// Pictures and album art do not inherit the fullscreen visualizer setting.
+	screensaver_set_visualizer_fullscreen(true);
+	screensaver_set_source(SCREENSAVER_SOURCE_IMAGES);
+	assert(lv_obj_is_hidden(spectrum) && !lv_obj_is_hidden(info_strip()));
+	assert(lv_image_get_src(filaments) == NULL);
+	screensaver_set_source(SCREENSAVER_SOURCE_ALBUM);
+	assert(!lv_obj_is_hidden(spectrum) && lv_obj_is_hidden(info_strip()));
+	pump(50);
+	assert(lv_image_get_src(filaments));
+	dismiss_with_swipe();
+	assert(lv_image_get_src(filaments) == NULL);
+	wake();
+
 	screensaver_set_visualizer(false);
 	assert(lv_obj_is_hidden(spectrum));
 	assert(!lv_obj_is_hidden(cover_box()));
@@ -1248,7 +1388,7 @@ int main(int argc, char **argv) {
 	lv_deinit();
 	unlink(config);
 	rmdir(dir);
-	printf("PASS screensaver framed artwork (%dx%d, %s)\n", screen_w, screen_h,
+	printf("PASS screensaver artwork and visualizers (%dx%d, %s)\n", screen_w, screen_h,
 		   saved_framed ? "saved setting" : "default setting");
 	return 0;
 }
