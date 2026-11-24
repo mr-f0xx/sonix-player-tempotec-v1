@@ -24,7 +24,7 @@ CORE = $(ROOT)/src/system/streaming/subsonic.c \
        $(ROOT)/src/system/core/json.c $(ROOT)/src/system/core/md5.c \
        $(ROOT)/src/system/core/config.c $(ROOT)/src/system/playback/playlist.c
 
-.PHONY: test sanitize clean extractkeys qobuz gbdb
+.PHONY: test sanitize clean extractkeys qobuz gbdb sdhealth sdhealth-keys
 
 test: $(BUILD)/test_subsonic
 	python3 run_subsonic_tests.py $(BUILD)/test_subsonic
@@ -145,7 +145,7 @@ $(BUILD)/test_subsonic: test_subsonic.c support.c $(CORE) $(shell find $(ROOT)/s
 	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ test_subsonic.c support.c $(CORE) $(LDFLAGS) $(LDLIBS)
 
 sanitize:
-	$(MAKE) BUILD=.build/sanitize CFLAGS='-O1 -g -std=gnu11 -Wall -Wextra -Werror -D_FILE_OFFSET_BITS=64 -ffunction-sections -fdata-sections -fno-omit-frame-pointer -fsanitize=address,undefined' LDFLAGS='-Wl,--gc-sections -fsanitize=address,undefined' test soundcloud jellyfin tapedeck
+	$(MAKE) BUILD=.build/sanitize CFLAGS='-O1 -g -std=gnu11 -Wall -Wextra -Werror -D_FILE_OFFSET_BITS=64 -ffunction-sections -fdata-sections -fno-omit-frame-pointer -fsanitize=address,undefined' LDFLAGS='-Wl,--gc-sections -fsanitize=address,undefined' test soundcloud jellyfin tapedeck sdbench
 
 # The battery guard: when the player warns at five percent, when it switches
 # itself off at one, and which readings leave standby alone. The rule is its own
@@ -185,6 +185,27 @@ $(BUILD)/test_batteryprofile: $(BATTERYPROFILE_SRC) $(ROOT)/src/system/device/ba
 	@mkdir -p $(BUILD)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ $(BATTERYPROFILE_SRC) $(LDFLAGS) $(LDLIBS) \
 		-Wl,--wrap=open,--wrap=open64,--wrap=ioctl,--wrap=close
+
+# The read-only SD-card health benchmark: deterministic fake 4K reads plus the
+# real O_DIRECT/buffered file path. No LVGL or card hardware required.
+SDBENCH_SRC = test_sdbench.c $(ROOT)/src/system/device/sdbench.c
+.PHONY: sdbench
+sdbench: $(BUILD)/test_sdbench
+	$(BUILD)/test_sdbench
+
+$(BUILD)/test_sdbench: $(SDBENCH_SRC) $(ROOT)/src/system/device/sdbench.h
+	@mkdir -p $(BUILD)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ $(SDBENCH_SRC) $(LDFLAGS) $(LDLIBS)
+
+# Every sd_health_* literal used by the page must be present, with a value, in
+# all eleven shipped language files; no stale keys and no silent truncation at
+# lang.c's MAX_ENTRIES. The rest of the INIs have historical language-specific
+# keys, so this check is deliberately scoped to the new page.
+sdhealth-keys:
+	python3 check_sdhealth_language_keys.py
+
+.PHONY: sdhealth
+sdhealth: sdbench sdhealth-keys sdhealth-ui
 
 # Exact percentage cutoff and hysteresis used by both charger paths.
 .PHONY: chargelimit
@@ -1307,6 +1328,24 @@ $(BUILD)/test_batteryprofile_ui: $(BATTERYPROFILE_UI_OBJ) $(UI_LVGL_OBJ)
 
 -include $(BATTERYPROFILE_UI_OBJ:.o=.d)
 
+# The SD card health page on the V1 panel. The benchmark worker is wrapped to
+# run synchronously with a fake result: running/progress, every verdict, USB
+# and card guards, the stalled-read watchdog, theme refresh and all languages.
+SDHEALTH_UI_SRC = $(ROOT)/tests/ui/test_sdhealthpage.c \
+                  $(ROOT)/src/gui/settings/sdhealthpage.c \
+                  $(ROOT)/src/system/device/sdbench.c \
+                  $(ROOT)/src/system/core/lang.c
+SDHEALTH_UI_OBJ = $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(SDHEALTH_UI_SRC)) $(UI_LVGL_OBJ)
+.PHONY: sdhealth-ui
+sdhealth-ui: $(BUILD)/test_sdhealth_ui
+	$(BUILD)/test_sdhealth_ui ../../sonix-packer/assets/V1/usr/resource/sonix/language
+
+$(BUILD)/test_sdhealth_ui: $(SDHEALTH_UI_OBJ)
+	$(CC) -o $@ $^ $(LDFLAGS) $(LDLIBS) \
+		-Wl,--wrap=sdbench_run,--wrap=pthread_create,--wrap=pthread_detach
+
+-include $(SDHEALTH_UI_OBJ:.o=.d)
+
 # The volume pill with the level read as a voltage: the production overlay and
 # reading on the V1 layout, with the audio side reduced to what the test sets.
 # The label has to hold one width, and one line, over every reading.
@@ -1369,7 +1408,7 @@ $(BUILD)/test_stockkeys_ui: $(ROOT)/build_gen/streamkeys_key.h $(STOCKKEYS_UI_OB
 	$(CC) -o $@ $(STOCKKEYS_UI_OBJ) $(LDFLAGS) $(LDLIBS)
 
 .PHONY: ui
-ui: wifitransfer-ui batteryprofile-ui
+ui: wifitransfer-ui batteryprofile-ui sdhealth-ui sdhealth-keys
 ui: $(BUILD)/test_sleeve_hold
 ui: $(BUILD)/test_browser_grid $(BUILD)/test_qobuzgenregrid $(BUILD)/test_main_menu $(BUILD)/test_screensaver $(BUILD)/test_tools_pages $(BUILD)/test_wifi_pages $(BUILD)/test_chargescreen $(BUILD)/test_power_display $(BUILD)/test_touch_wake $(BUILD)/test_lyricsearch $(BUILD)/test_games $(BUILD)/test_peq_profiles $(BUILD)/test_quickpanel_layout $(BUILD)/test_bootlogo $(BUILD)/test_btreceiversession $(BUILD)/test_home_swipe $(BUILD)/test_switcher_scroll $(BUILD)/test_corners $(BUILD)/test_playbutton $(BUILD)/test_musicsettings_rows $(BUILD)/test_albumgrid_ui $(BUILD)/test_stats $(BUILD)/test_volume_overlay $(BUILD)/test_playerdeck $(BUILD)/test_vinylayout $(BUILD)/test_stickerlayout $(BUILD)/test_waveform_overlay $(BUILD)/test_hiresbadge_ui $(BUILD)/test_statusbar_ui $(BUILD)/test_stockkeys_ui $(BUILD)/test_tidal_pages $(BUILD)/test_soundcloud_pages $(BUILD)/test_qobuz_pages $(BUILD)/test_jellyfin_pages $(BUILD)/test_fwupdate $(BUILD)/test_ota_auto
 	$(BUILD)/test_sleeve_hold ../../sonix-packer/assets/V1/usr/resource/sonix/language

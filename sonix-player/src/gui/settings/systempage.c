@@ -13,6 +13,7 @@
 #include "src/gui/settings/batteryprofilepage.h"
 #include "src/gui/settings/fwupdate.h"
 #include "src/gui/settings/ota_auto.h"
+#include "src/gui/settings/sdhealthpage.h"
 #include "src/gui/settings/settings.h"
 #include "src/gui/shell/settingsrow.h"
 #include "src/gui/shell/icons.h"
@@ -533,6 +534,11 @@ void systempage_init(gui_config_t *cfg) {
 	lv_obj_t *profile = batteryprofilepage_init(cfg);
 	row = settingsrow_add(container, "battery_profile_title", NULL, switch_screen_cb, profile);
 	settingsrow_add_accent_icon(row, &icon_battery);
+	// The card test is a page of its own: a five-second job with progress,
+	// live numbers and a verdict, not an action that freezes the System list.
+	lv_obj_t *sdhealth = sdhealthpage_init(cfg);
+	row = settingsrow_add(container, "sd_health_title", NULL, switch_screen_cb, sdhealth);
+	settingsrow_add_accent_icon(row, &icon_chart_column);
 	// Actions, not pages: settingsrow_action leaves off the chevron.
 	row = settingsrow_action(container, "system_update_firmware", firmware_clicked_cb, NULL);
 	settingsrow_add_accent_icon(row, &icon_download);
