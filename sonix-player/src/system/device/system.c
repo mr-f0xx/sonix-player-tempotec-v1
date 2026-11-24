@@ -37,6 +37,7 @@
 #include "src/system/audio/usbhostmode.h"
 #include "src/system/audio/usbhostprobe.h"
 #include "src/system/audio/waveform.h"
+#include "src/system/video/videoplayer.h"
 #include "src/system/playback/device_state.h"
 #include "src/system/library/audiobookdb.h"
 #include "src/system/audio/eq.h"
@@ -1434,6 +1435,11 @@ static uint32_t now_ms(void) {
 // reaches the stream itself, so synchronised, bluealsa passes it on to the
 // headphones, and separate, bluealsa attenuates on this side.
 static void apply_volume_step(int code) {
+	// While the lightweight video player is active, side volume buttons scrub.
+	if (videoplayer_is_active()) {
+		videoplayer_seek(code == KEY_VOLUMEUP ? 10.0 : -10.0);
+		return;
+	}
 	device_state_change_volume_percent(code == KEY_VOLUMEUP ? VOLUME_STEP_PERCENT : -VOLUME_STEP_PERCENT);
 	gui_notify_volume(device_state_get_volume_percent());
 
@@ -1772,6 +1778,55 @@ static void run_mapped_action(keymap_button_t button) {
 }
 
 static void handle_key_press(const char *node, int code, bool headset) {
+	// Video player active: intercept keys for playback control.
+	if (videoplayer_is_active()) {
+		switch (code) {
+		case KEY_VOLUMEUP:
+			videoplayer_seek(10.0);
+			return;
+		case KEY_VOLUMEDOWN:
+			videoplayer_seek(-10.0);
+			return;
+		case KEY_PLAYPAUSE:
+			videoplayer_toggle_pause();
+			return;
+		case KEY_NEXTSONG:
+			videoplayer_seek(30.0);
+			return;
+		case KEY_PREVIOUSSONG:
+			videoplayer_seek(-30.0);
+			return;
+		default:
+			break;
+		}
+		// Side buttons mapped through keymap: check for volume/play actions.
+		if (!headset) {
+			keymap_button_t button = keymap_button_for_code(code);
+			if (button != KEYMAP_BTN_COUNT) {
+				switch (effective_action(button)) {
+				case KEYMAP_ACTION_PLAY_PAUSE:
+					videoplayer_toggle_pause();
+					return;
+				case KEYMAP_ACTION_VOLUME_UP:
+					videoplayer_seek(10.0);
+					return;
+				case KEYMAP_ACTION_VOLUME_DOWN:
+					videoplayer_seek(-10.0);
+					return;
+				case KEYMAP_ACTION_NEXT:
+					videoplayer_seek(30.0);
+					return;
+				case KEYMAP_ACTION_PREV:
+					videoplayer_seek(-30.0);
+					return;
+				default:
+					break;
+				}
+			}
+		}
+		// Fall through for unhandled keys (power, etc.)
+	}
+
 	// The side buttons, translated from kernel code to the button as held (see
 	// keymap_button_for_code() for the R3 Pro II's swapped media keys).
 	if (!headset) {

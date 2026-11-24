@@ -31,4 +31,23 @@ const char *panel_touch_device(void);
 // transients or touches during screen-off do not trigger ghost clicks.
 void panel_touch_flush(void);
 
+// --- Direct framebuffer video mode ---
+// Bypasses LVGL page-flip rendering so a video player can write RGB565 frames
+// directly to /dev/fb0. Only available on the device's double-buffered fbdev
+// display (not the host SDL/Web build). Enter before playing, leave when done.
+bool display_video_supported(void);
+bool display_video_enter(void);
+void display_video_leave(void);
+// Blit a 320x240 landscape RGB565 frame into the 240x320 portrait panel,
+// rotated 90 degrees clockwise, and present it. src_stride_px is pixels per row
+// in src (>= src_w). If overlay is non-NULL it is called with the panel buffer
+// (pw x ph, tight stride) before panning, so the UI can draw controls in panel
+// coordinates. Returns false on failure.
+typedef void (*display_video_overlay_fn)(uint16_t *panel, int pw, int ph, int stride);
+bool display_video_blit_rgb565(const uint16_t *src, int src_w, int src_h, int src_stride_px,
+							   display_video_overlay_fn overlay);
+// Panel dimensions in portrait pixels.
+int display_video_panel_w(void);
+int display_video_panel_h(void);
+
 #endif /* PANEL_H */

@@ -1316,6 +1316,16 @@ void panel_touch_enable(bool enabled) { (void)enabled; }
 const char *panel_touch_device(void) { return NULL; }
 void panel_touch_flush(void) {}
 
+bool display_video_supported(void) { return false; }
+bool display_video_enter(void) { return false; }
+void display_video_leave(void) {}
+bool display_video_blit_rgb565(const uint16_t *src, int src_w, int src_h, int src_stride_px,
+							   void (*overlay)(uint16_t *panel, int pw, int ph, int stride)) {
+	(void)src; (void)src_w; (void)src_h; (void)src_stride_px; (void)overlay; return false;
+}
+int display_video_panel_w(void) { return 240; }
+int display_video_panel_h(void) { return 320; }
+
 // There is no framebuffer to read on the simulator, but the SDL renderer (or
 // web emulator shadow framebuffer) can be read back. The rest of the path is
 // identical (same copy, same flash, same PNG writer).
@@ -1377,6 +1387,7 @@ static int fb_fd = -1;
 static uint8_t *fb_mem;
 static size_t fb_page_size;
 static struct fb_var_screeninfo fb_var;
+static volatile bool fb_video_mode;
 
 // ---------------------------------------------------------------------------
 // 180 degree rotation ("Rotate screen")
@@ -1468,6 +1479,13 @@ static void blit_rotated_180(uint16_t *dst, const uint16_t *src, const lv_area_t
 
 static void fb_pan_flush_cb(lv_display_t *disp, const lv_area_t *area, uint8_t *px) {
 	bool second_page;
+
+	// Video mode owns the framebuffer directly; LVGL should not pan or
+	// overwrite it. Acknowledge flushes so LVGL stays unblocked.
+	if (fb_video_mode) {
+		lv_display_flush_ready(disp);
+		return;
+	}
 
 	if (fb_rotated) {
 		// Collect this frame's damage; the copy happens once, on the last
@@ -1692,6 +1710,108 @@ bool display_wait_vsync(int frames) {
 			}
 			return false;
 		}
+	}
+	return true;
+}
+
+// ---------------------------------------------------------------------------
+// Direct video mode
+// ---------------------------------------------------------------------------
+
+bool display_video_supported(void) { return fb_fd >= 0 && fb_mem && fb_page_size > 0; }
+
+bool display_video_enter(void) {
+	if (!display_video_supported()) {
+		return false;
+	}
+	fb_video_mode = true;
+	return true;
+}
+
+void display_video_leave(void) {
+	if (!fb_video_mode) {
+		return;
+	}
+	fb_video_mode = false;
+	// Force LVGL to redraw the whole screen on next frame.
+	if (fb_display) {
+		area_set_full(&rot_page_pending[0]);
+		area_set_full(&rot_page_pending[1]);
+		lv_obj_invalidate(lv_screen_active());
+	}
+}
+
+int display_video_panel_w(void) { return fb_var.xres ? (int)fb_var.xres : 240; }
+int display_video_panel_h(void) { return fb_var.yres ? (int)fb_var.yres : 320; }
+
+bool display_video_blit_rgb565(const uint16_t *src, int src_w, int src_h, int src_stride_px,
+							   display_video_overlay_fn overlay) {
+	if (!fb_video_mode || !src || src_w <= 0 || src_h <= 0 || fb_fd < 0 || !fb_mem) {
+		return false;
+	}
+	if (src_stride_px < src_w) {
+		src_stride_px = src_w;
+	}
+
+	const int panel_w = (int)fb_var.xres;  // 240
+	const int panel_h = (int)fb_var.yres;  // 320
+	if (panel_w <= 0 || panel_h <= 0) {
+		return false;
+	}
+
+	// Draw into the off-screen page, then pan.
+	bool second_page = (fb_var.yoffset == 0);
+	uint16_t *dst = (uint16_t *)(fb_mem + (second_page ? fb_page_size : 0));
+	const int dst_stride = panel_w; // tight stride (validated at init)
+
+	// Clear to black first (handles letterboxing).
+	for (int y = 0; y < panel_h; y++) {
+		memset(dst + (size_t)y * dst_stride, 0, (size_t)panel_w * sizeof(uint16_t));
+	}
+
+	// Scale-fit src_w x src_h into panel_w x panel_h in landscape after 90° CW.
+	// For 320x240 source on 240x320 panel, 90° CW gives 240x320 - perfect fit.
+	const int rot_w = src_h;  // after 90° CW
+	const int rot_h = src_w;
+	int out_w = panel_w;
+	int out_h = (rot_h * panel_w) / rot_w;
+	if (out_h > panel_h) {
+		out_h = panel_h;
+		out_w = (rot_w * panel_h) / rot_h;
+	}
+	if (out_w < 1) out_w = 1;
+	if (out_h < 1) out_h = 1;
+	const int off_x = (panel_w - out_w) / 2;
+	const int off_y = (panel_h - out_h) / 2;
+
+	// 90° CW: rot(rx,ry)=src(src_w-1-ry, rx), inverse sx=src_w-1-ry, sy=rx.
+	for (int dy = 0; dy < out_h; dy++) {
+		int ry = (dy * rot_h) / out_h;
+		int sx = src_w - 1 - ry;
+		if (sx < 0) sx = 0;
+		if (sx >= src_w) sx = src_w - 1;
+		uint16_t *dst_row = dst + (size_t)(off_y + dy) * dst_stride + off_x;
+		for (int dx = 0; dx < out_w; dx++) {
+			int rx = (dx * rot_w) / out_w;
+			int sy = rx;
+			if (sy < 0) sy = 0;
+			if (sy >= src_h) sy = src_h - 1;
+			dst_row[dx] = src[(size_t)sy * src_stride_px + sx];
+		}
+	}
+
+	if (overlay) {
+		overlay(dst, panel_w, panel_h, dst_stride);
+	}
+
+	fb_var.yoffset = second_page ? fb_var.yres : 0;
+	if (ioctl(fb_fd, FBIOPAN_DISPLAY, &fb_var) < 0) {
+		static bool warned;
+		if (!warned) {
+			perror("fb: FBIOPAN_DISPLAY (video)");
+			warned = true;
+		}
+		return false;
 	}
 	return true;
 }

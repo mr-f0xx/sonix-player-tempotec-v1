@@ -18,6 +18,7 @@
 #include "src/gui/shell/icons.h"
 #include "src/gui/shell/keyboard.h"
 #include "src/gui/library/pictureview.h"
+#include "src/gui/video/videoplayer_ui.h"
 #include "src/gui/library/textview.h"
 #include "src/gui/nowplaying/coverflow.h"
 #include "src/gui/nowplaying/player.h"
@@ -186,6 +187,7 @@ static const char *const EXT_AUDIOBOOK[] = {"m4b", "aa", "aax", NULL};
 static const char *const EXT_PLAYLIST[] = {"m3u", "m3u8", "cue", NULL};
 static const char *const EXT_IMAGE[] = {"bmp", "png", "jpg", "jpeg", "gif", "webp", NULL};
 static const char *const EXT_PICTURE[] = {"png", "jpg", "jpeg", NULL};
+static const char *const EXT_VIDEO[] = {"mpg", "mpeg", "mpe", "mpv", "m1v", NULL};
 static const char *const EXT_TEXT[] = {"lrc", "txt", "t", "ini", "nfo", NULL};
 static const char *const EXT_FIRMWARE[] = {"upt", NULL};
 static const char *const EXT_GAME[] = {"gb", "gbc", "sav", NULL};
@@ -230,8 +232,9 @@ static const lv_image_dsc_t *glyph_for(const entry_t *entry) {
 static bool ext_is_known(const char *name) {
 	const char *ext = ext_of(name);
 	return ext[0] && (ext_in(ext, EXT_AUDIO) || ext_in(ext, EXT_AUDIOBOOK) || ext_in(ext, EXT_PLAYLIST) ||
-					  ext_in(ext, EXT_IMAGE) || ext_in(ext, EXT_TEXT) || ext_in(ext, EXT_FIRMWARE) ||
-					  ext_in(ext, EXT_GAME) || ext_in(ext, EXT_BOOK));
+					  ext_in(ext, EXT_IMAGE) || ext_in(ext, EXT_PICTURE) || ext_in(ext, EXT_VIDEO) ||
+					  ext_in(ext, EXT_TEXT) || ext_in(ext, EXT_FIRMWARE) || ext_in(ext, EXT_GAME) ||
+					  ext_in(ext, EXT_BOOK));
 }
 
 // The player's own way of putting a size on screen, the same one the transfer
@@ -983,6 +986,9 @@ static void row_clicked_cb(lv_event_t *e) {
 			gui_notify_popup("files_text_unreadable");
 		} else if (ext_in(ext, EXT_PICTURE) && child_path(entries[index].name, file, sizeof(file)) &&
 				   !pictureview_open(file)) {
+			gui_notify_popup("files_text_unreadable");
+		} else if (ext_in(ext, EXT_VIDEO) && child_path(entries[index].name, file, sizeof(file)) &&
+				   !videoplayer_ui_open(file)) {
 			gui_notify_popup("files_text_unreadable");
 		}
 		return;

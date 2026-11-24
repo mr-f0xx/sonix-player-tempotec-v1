@@ -50,6 +50,7 @@
 #include "src/gui/library/filespage.h"
 #include "src/gui/library/pictureview.h"
 #include "src/gui/library/textview.h"
+#include "src/gui/video/videoplayer_ui.h"
 #include "src/gui/calculator/calculator.h"
 #include "src/gui/pet/petpage.h"
 #include "src/gui/notes/noteeditor.h"
@@ -731,6 +732,7 @@ void gui_init(gui_config_t *cfg) {
 	filespage_screen = lv_obj_create(NULL);
 	textview_screen = lv_obj_create(NULL);
 	pictureview_screen = lv_obj_create(NULL);
+	videoplayer_screen = lv_obj_create(NULL);
 	gearboypage_screen = lv_obj_create(NULL);
 	gearboyplay_screen = lv_obj_create(NULL);
 	flappybird_screen = lv_obj_create(NULL);
@@ -841,6 +843,7 @@ void gui_init(gui_config_t *cfg) {
 	morepage_init(cfg);
 	textview_init(cfg); // before filespage: a text file tapped there opens here
 	pictureview_init(cfg); // likewise, for JPEG and PNG pictures
+	videoplayer_ui_init(cfg);
 	filespage_init(cfg);
 	streaming_init(cfg);
 
