@@ -142,10 +142,12 @@ static void draw_char_rot90ccw(uint16_t *buf, int pw, int ph, int stride, int x,
 }
 
 static void draw_text_rot90ccw(uint16_t *buf, int pw, int ph, int stride, int x, int y, const char *text, uint8_t r, uint8_t g, uint8_t b) {
-	int cy = y;
+	// Stack chars so text reads left-to-right in landscape (panel bottom->top).
+	int len = (int)strlen(text);
+	int cy = y + (len - 1) * 6;
 	for (const char *p = text; *p; p++) {
 		draw_char_rot90ccw(buf, pw, ph, stride, x, cy, *p, r, g, b);
-		cy += 6;
+		cy -= 6;
 	}
 }
 
