@@ -43,7 +43,11 @@ async function workbench(t, latest) {
 			return res.end(state.latest);
 		}
 		if (file === "builds/past.zip") return res.end(fixture("Past", 31));
-		if (/^[\w-]+\.(js|css|html)$/.test(file)) {
+		if (file === "remote-usb.bundle.js" && state.usbModule) {
+			res.setHeader("Content-Type", "text/javascript");
+			return res.end(state.usbModule);
+		}
+		if (/^[\w-]+(?:\.bundle)?\.(js|css|html)$/.test(file)) {
 			const asset = new URL(`../public/${file}`, import.meta.url);
 			if (fs.existsSync(asset)) {
 				res.setHeader("Content-Type", file.endsWith("js") ? "text/javascript" : file.endsWith("html") ? "text/html" : "text/css");
@@ -157,4 +161,59 @@ test("compiled firmware draws a real screen, then hot-boots from an Actions ZIP"
 		}, prefix, { timeout: 60000 });
 		assert.equal(await page.locator("#lifecycle-pill").textContent(), "Running");
 	}
+});
+
+test('Live USB on a Pages subpath: editor, connection, save and unplug on desktop and mobile', { timeout: 45000 }, async t => {
+	const { page, url, state } = await workbench(t, fixture('USB Test', 31));
+	state.usbModule = `export async function connectV1() {
+		let disconnect;
+		window.usbWrites = [];
+		return {
+			disconnected: new Promise(resolve => { disconnect = window.unplugV1 = resolve; }),
+			close: async () => disconnect(),
+			async createSocket(service) {
+				const marker = service.match(/SONIX_OK_[a-f0-9]+/)[0];
+				return { readable: new Blob(['\\n' + marker + '\\n']).stream(), close: async () => {} };
+			},
+			async sync() {
+				return { write: async ({ filename, file }) => window.usbWrites.push([filename, await new Response(file).text()]),
+					lstat: async () => ({ size: 8 }), read: () => new Blob(['test log']).stream(), dispose: async () => {} };
+			}
+		};
+	}`;
+	await page.addInitScript(() => Object.defineProperty(navigator, 'usb', { value: {} }));
+	await page.goto(url);
+	await waitForBoot(page, 'USB Test', [0, 0, 255], 'Following latest');
+	await page.getByRole('tab', { name: 'Live USB' }).click();
+	const panel = page.getByRole('tabpanel', { name: 'Live USB' });
+	const save = panel.getByRole('button', { name: 'Save new preset to V1' });
+	assert.ok(await save.isDisabled());
+	const curve = panel.locator('.remote-response');
+	const flat = await curve.getAttribute('d');
+	await panel.getByRole('button', { name: 'Select band 6', exact: true }).click();
+	await page.locator('#remote-curve').click({ position: { x: 140, y: 45 } });
+	assert.notEqual(await curve.getAttribute('d'), flat);
+	assert.ok(await panel.getByRole('checkbox', { name: 'Enabled' }).isChecked());
+	await panel.getByLabel('Frequency (Hz)').fill('1000');
+	await panel.getByLabel('Gain (dB)').fill('5');
+	await panel.getByLabel('Gain (dB)').press('Tab');
+	const [exported] = await Promise.all([page.waitForEvent('download'), panel.getByRole('button', { name: 'Export APO file' }).click()]);
+	assert.equal(exported.suggestedFilename(), 'Browser PEQ.txt');
+	await panel.getByRole('button', { name: 'Connect V1' }).click();
+	await page.waitForFunction(() => document.querySelector('#remote-status').textContent.includes('connected over USB'));
+	await save.click();
+	await panel.getByText('Preset saved.', { exact: false }).waitFor();
+	const [[path, text]] = await page.evaluate(() => window.usbWrites);
+	assert.match(path, /^\/mnt\/sd_0\/PEQ\/\.sonix-remote-/);
+	assert.match(text, /Filter 6: ON PK Fc 1000 Hz Gain 5.0 dB/);
+	const [log] = await Promise.all([page.waitForEvent('download'), panel.getByRole('button', { name: 'Download debug log' }).click()]);
+	assert.equal(log.suggestedFilename(), 'sonix_player.log');
+	await page.evaluate(() => window.unplugV1());
+	await page.waitForFunction(() => document.querySelector('#remote-status').textContent.startsWith('V1 disconnected'));
+	assert.ok(await save.isDisabled());
+	await page.setViewportSize({ width: 390, height: 844 });
+	await page.getByRole('button', { name: 'USB', exact: true }).click();
+	assert.ok(await panel.isVisible());
+	assert.equal(await panel.getByLabel('Gain (dB)').inputValue(), '5');
+	assert.equal(await page.locator('.stage-pane').isVisible(), false);
 });

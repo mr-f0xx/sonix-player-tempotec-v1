@@ -82,6 +82,11 @@ jobs:
         with:
           node-version: '22'
 
+      - name: Bundle the same-origin WebUSB transport
+        run: |
+          npm ci --prefix tools/v1-emulator/remote
+          npm run build --prefix tools/v1-emulator/remote
+
       - name: Set up Emscripten
         uses: mymindstorm/setup-emsdk@v14
         with:

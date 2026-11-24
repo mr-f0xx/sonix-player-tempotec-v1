@@ -1483,6 +1483,7 @@ kbd {
 
 .panel-tabs {
 	display: flex;
+	overflow-x: auto;
 	gap: 4px;
 	padding: 8px 12px 0;
 	background: rgba(0, 0, 0, 0.2);
@@ -1492,6 +1493,7 @@ kbd {
 
 .tab-btn {
 	appearance: none;
+	flex-shrink: 0;
 	border: 0;
 	background: transparent;
 	color: var(--text-secondary);
@@ -2298,6 +2300,7 @@ kbd {
 	body[data-mobile-view="builds"] .inspector-pane,
 	body[data-mobile-view="hardware"] .inspector-pane,
 	body[data-mobile-view="sd"] .inspector-pane,
+	body[data-mobile-view="remote"] .inspector-pane,
 	body[data-mobile-view="logs"] .inspector-pane {
 		display: flex;
 		flex-direction: column;
@@ -2305,7 +2308,8 @@ kbd {
 
 	body[data-mobile-view="builds"] .controls-panel,
 	body[data-mobile-view="hardware"] .controls-panel,
-	body[data-mobile-view="sd"] .controls-panel {
+	body[data-mobile-view="sd"] .controls-panel,
+	body[data-mobile-view="remote"] .controls-panel {
 		display: flex;
 		flex: 1;
 		min-height: 0;
@@ -2313,7 +2317,8 @@ kbd {
 
 	body[data-mobile-view="builds"] .log-panel,
 	body[data-mobile-view="hardware"] .log-panel,
-	body[data-mobile-view="sd"] .log-panel {
+	body[data-mobile-view="sd"] .log-panel,
+	body[data-mobile-view="remote"] .log-panel {
 		display: none;
 	}
 
@@ -2412,7 +2417,7 @@ kbd {
 	/* Native-style Mobile Bottom Navigation Bar */
 	.mobile-nav {
 		display: grid;
-		grid-template-columns: repeat(5, 1fr);
+		grid-template-columns: repeat(6, minmax(0, 1fr));
 		gap: 2px;
 		padding: 5px 6px calc(6px + env(safe-area-inset-bottom, 0px));
 		background: linear-gradient(180deg, #121720 0%, #0d1118 100%);
@@ -2980,3 +2985,31 @@ html.real-size-mode .v1-assembly {
 	}
 }
 
+/* Live USB editor cards. */
+.remote-card { display: grid; gap: 10px; padding: 14px; min-width: 0; }
+.remote-card h2, .remote-card p { margin: 0; }
+.remote-card h2 { font-size: 15px; }
+.remote-card p, .remote-card small { color: var(--text-secondary); }
+.remote-card label { display: grid; gap: 4px; min-width: 0; }
+.remote-card input:not([type="checkbox"]), .remote-card select, .remote-card textarea {
+	background: var(--bg-base); color: var(--text-primary); border: 1px solid var(--border-strong);
+	border-radius: 6px; padding: 6px; font: inherit; max-width: 100%; min-width: 0;
+}
+.remote-card textarea { resize: vertical; font-family: var(--font-mono); }
+.remote-card button:disabled { opacity: .5; cursor: not-allowed; }
+.remote-card input[type="checkbox"] { justify-self: start; }
+.remote-card :focus-visible { outline: 2px solid var(--accent-bright); outline-offset: 2px; }
+.remote-actions { display: flex; flex-wrap: wrap; align-items: end; gap: 6px; }
+.remote-actions select { max-width: 100%; width: min(100%, 13rem); }
+.remote-fields, .remote-pads { display: grid; grid-template-columns: repeat(auto-fit, minmax(105px, 1fr)); gap: 8px; }
+.remote-pad { display: grid; gap: 4px; padding: 7px; border: 1px solid var(--border-strong); border-radius: 7px; min-width: 0; }
+.remote-pad-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.remote-pad input { width: 100%; }
+.remote-card [aria-pressed="true"] { background: var(--accent-soft); border-color: var(--accent-bright); }
+#remote-curve { display: block; width: 100%; background: var(--bg-base); border-radius: 7px; touch-action: none; user-select: none; }
+.remote-grid { stroke: var(--border-strong); }
+.remote-axis { fill: var(--text-secondary); font-size: 10px; }
+.remote-response { fill: none; stroke: var(--accent-bright); stroke-width: 2; }
+.remote-point { fill: var(--bg-base); stroke: var(--accent-bright); stroke-width: 1.5; }
+.remote-point.selected { fill: var(--accent-bright); }
+.remote-card [data-error="true"] { color: #fca5a5; }

@@ -1,6 +1,6 @@
 # TempoTec Variations V1 — Interactive Browser Emulator
 
-An interactive browser-based hardware emulator wrapping the real C `sonix-player` firmware (LVGL 9.6, FreeType 2.13.3, SQLite3 library scanner, real SGM31324 RGB LED state machine, real audio decoders, and real single-flank TempoTec V1 button handling) — with **zero npm dependencies** and **zero SDL2/X11 requirements**.
+An interactive browser-based hardware emulator wrapping the real C `sonix-player` firmware (LVGL 9.6, FreeType 2.13.3, SQLite3 library scanner, real SGM31324 RGB LED state machine, real audio decoders, and real single-flank TempoTec V1 button handling) — with **no backend required for WASM mode** and **zero SDL2/X11 requirements**.
 
 Runs in **two modes** from the exact same UI:
 
@@ -39,8 +39,57 @@ The result in **Firmware Builds** shows the booted revision and build time **aft
 
 ### Mobile Devices (iPhone, iPad, Android)
 
-- **GitHub Pages (In-Browser WASM)**: Open the HTTPS GitHub Pages URL directly in iOS Safari (16.4+) or Android Chrome/Firefox. On mobile viewports (`<= 768px`), the TempoTec Variations V1 auto-fits to your screen with compact thumb-friendly side buttons, multi-touch button combos, long-press support, Web Audio unlock, and a bottom navigation bar (`V1`, `Builds`, `Hardware`, `microSD`, `Logs`). You can also use **Add to Home Screen** for a full-screen simulator view.
+- **GitHub Pages (In-Browser WASM)**: Open the HTTPS GitHub Pages URL directly in iOS Safari (16.4+) or Android Chrome/Firefox. On mobile viewports (`<= 768px`), the TempoTec Variations V1 auto-fits to your screen with compact thumb-friendly side buttons, multi-touch button combos, long-press support, Web Audio unlock, and a bottom navigation bar (`V1`, `Builds`, `Hardware`, `microSD`, `USB`, `Logs`). You can also use **Add to Home Screen** for a full-screen simulator view.
 - **Local Wi-Fi (Native Bridge)**: Run `make -C sonix-player run-web-emu` on your desktop and open the printed `Mobile / LAN URL` (`http://<lan-ip>:8080`) on your phone over the same Wi-Fi network.
+
+### Live USB: connect a physical V1
+
+Open the Pages site directly in a recent **Chrome** or another browser with
+**WebUSB** support. On Android, the phone must support USB host/OTG; use a
+data-capable cable or OTG adapter. Firefox and Safari can use the local editors
+but cannot connect over USB. Embedded previews can block USB permission even
+when the browser supports it.
+
+1. On the V1, tap **Settings → System → About → Build number** five times if
+   needed, then turn on **Settings → Developer options → ADB**. Leave the
+   microSD in the player and don't switch to DAC or USB mass-storage mode.
+2. Plug in the player, open **Live USB** (**USB** on mobile), and click
+   **Connect V1**. Choose the V1's ADB device and accept any debugging prompt on
+   the player. If another app is using the ADB interface, close it (for desktop
+   `adb`, run `adb kill-server`) and reconnect. On Linux the normal ADB USB
+   device permissions still apply; on Windows the ADB interface must be
+   accessible to the browser through WinUSB.
+3. Use **Disconnect** when finished, then turn ADB off on the V1 if not needed.
+
+| Tool | What it does on the real device |
+| --- | --- |
+| **Parametric EQ** | Draw the response with draggable bands, or set frequency, gain, Q, and preamp numerically. Open an existing single-curve APO preset or export one locally. **Save new preset to V1** writes `PEQ/<name>.txt`; select it on the V1 to hear it. The graph is a 48 kHz estimate, not a live DSP readout. |
+| **Tape Deck pads** | Assign or swap WAVs across 16 pads. Save as a numbered folder in `Drum Kits/` and select it with **Tape Deck → Pads → Kits → Load drum kit**. Use mono or stereo PCM WAV (8–96 kHz, 8/16/24/32-bit, up to 16 MiB per pad). This doesn't change the current kit or a saved sequence. |
+| **Playlists** | Open an M3U/M3U8 file from the browser or from the card root, including V1 backups in `Playlist/`. To edit an existing library playlist, choose **Backup** in its V1 menu first. Edit or reorder track paths, save a **new** M3U at the card root, then use **Playlists → Import** on the V1. The browser doesn't edit the library database. |
+| **Debug log** | Enable **Log to microSD** on the player, reproduce the issue, then click **Download debug log**. This reads `.local/sonix_player.log` (up to 32 MiB). For larger logs or the full diagnostic bundle, see [Collecting logs](../../docs/collecting-logs.md). Review logs for private paths before sharing. |
+
+The browser uses ADB over WebUSB because the V1 firmware doesn't expose a USB
+serial gadget for WebSerial. Device transfers stay between the browser and the
+player: there is no server upload, and the ADB key (if needed by the device)
+is stored by the browser for this site. Use a trusted site and only load
+trusted firmware bundles. Saves require a new name and never intentionally
+replace an existing file. If USB is unplugged mid-write, a hidden
+`.sonix-remote-*` staging file or folder can be left on the card; it can be
+removed once no transfer is active. The editors don't touch the emulator's
+virtual microSD. Export or save your edits before reloading the page.
+
+#### Test on hardware before publishing
+
+- With the card mounted, connect a real V1 from a desktop WebUSB browser. Save
+  a fresh preset and confirm it appears and applies on the V1. Try the same
+  name again and verify the original stays intact.
+- Save a kit with pads 01 and 16 populated and verify the gaps and sounds on
+  the player. Back up a playlist, open it in the browser, reorder its tracks,
+  save a new name, and import it on the player.
+- Download a nonempty log and compare with one copied directly from the card.
+  Unplug during a transfer and verify the UI disables device actions and can
+  reconnect. Repeat the connection and a small transfer in Android Chrome with
+  an OTG cable. The automated tests use simulated ADB, not physical hardware.
 
 ### Building a `.sonix-web.zip` Bundle Locally (Emscripten)
 
@@ -50,7 +99,9 @@ With [Emscripten](https://emscripten.org/) (`emcc` / `em++`) on your `PATH`:
 # Build sonix_player_wasm.{js,wasm} and pack tools/v1-emulator/dist/*.sonix-web.zip
 make -C sonix-player -j$(nproc) web-wasm-bundle
 
-# Or also stage a ready-to-host static site (identical to GitHub Pages output)
+# Build the optional USB transport, then stage the static site as CI does
+npm ci --prefix tools/v1-emulator/remote
+npm run build --prefix tools/v1-emulator/remote
 node tools/v1-emulator/pack-wasm-bundle.mjs --stage-pages tools/v1-emulator/dist/pages
 ```
 
@@ -95,7 +146,7 @@ Then open **http://localhost:8080** in your browser (override the port with `POR
 
 ## Checking the loader
 
-The emulator itself has no npm dependencies. Loader tests use Node 22; the browser smoke test also uses Playwright Core (test-only) and an installed Chrome. The Pages workflow runs it against the compiled firmware before publishing.
+The emulator core and native bridge have no npm dependencies. Building the optional WebUSB transport installs pinned dependencies in `remote/`. Loader tests use Node 22; the browser smoke test also uses Playwright Core (test-only) and an installed Chrome. The Pages workflow runs it against the compiled firmware before publishing.
 
 ```bash
 node --test tools/v1-emulator/tests/firmware.test.mjs

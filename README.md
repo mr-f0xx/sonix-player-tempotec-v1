@@ -6,6 +6,8 @@ The firmware builder starts with an official V1 1.3 update package, replaces the
 
 You can now try Sonix in the **[Tempotec V1](https://mr-f0xx.github.io/sonix-player-tempotec-v1/)** browser emulator I made (PC & Mobile compatible)
 
+The web workbench also has a [Live USB tab](tools/v1-emulator/README.md#live-usb-connect-a-physical-v1) for editing PEQ presets, Tape Deck kits, and playlists on a physical V1 and downloading its debug log.
+
 ## Previews
 
 Expand a theme to see its screenshots. Select a screenshot to view it full size.
