@@ -2,17 +2,17 @@
 
 The static showcase lives at the repository root:
 
-- `index.html` — hero, live emulator frame, feature cards, install steps and release download panel.
+- `index.html` — hero with a V1 chassis and device screenshot, feature cards, install steps and release download panel. It links out to the emulator; it does **not** embed it.
 - `assets/css/styles.css`, `assets/js/main.js`, `assets/favicon.svg`, `assets/screenshots/` — self-contained assets. No frameworks, no build step.
-- `coi-serviceworker.js` — must be served from the **site root** (keep in sync with `tools/v1-emulator/public/coi-serviceworker.js`).
-- `tools/v1-emulator/public/` — the actual emulator workbench. It is embedded in the hero iframe from `./emulator/index.html?embed=1&mode=wasm`.
+- `coi-serviceworker.js` — served from the site root; keeps the project origin cross-origin isolated.
+- `tools/v1-emulator/public/` — the original emulator workbench. The deployed site serves it at `./emulator/`; its **Website** tab (desktop inspector tab bar and mobile bottom nav) links back to `../index.html`. In local native mode, where no sibling showcase is served, that link falls back to the published GitHub Pages URL.
 
 `.github/workflows/web-emulator-pages.yml` compiles the WASM firmware, stages the workbench at `dist/pages/emulator/` (including its `builds/` catalog), copies the showcase files to `dist/pages/`, and publishes that directory to GitHub Pages. Enable **Settings → Pages → Build and deployment → Source → GitHub Actions**.
 
 ## Two GitHub Pages gotchas
 
-1. **SharedArrayBuffer / pthreads.** GitHub Pages does not allow custom `Cross-Origin-Opener-Policy` and `Cross-Origin-Embedder-Policy` headers. `coi-serviceworker.js` is loaded by `index.html` at the root of the site: it registers a service worker with root scope, which adds COOP/COEP/CORP to same-origin responses and makes both the top page and the iframe cross-origin isolated. Emscripten pthreads then work on static HTTPS hosting, including iOS Safari. The workbench carries its own copy for standalone use; its script deliberately skips registration inside an iframe, so the root worker governs the embedded view. If isolation fails, use the **Full workbench** link above the emulator.
-2. **Relative paths only.** Project sites are served from `https://<owner>.github.io/<repo>/`, not the domain root. Every local URL in the showcase is relative (`./assets/…`, `./emulator/…`, `./coi-serviceworker.js`); the workbench's own catalog fetch is relative (`./builds/manifest.json`). Do not replace those with absolute `/assets/…` paths.
+1. **SharedArrayBuffer / pthreads.** GitHub Pages does not allow custom `Cross-Origin-Opener-Policy` and `Cross-Origin-Embedder-Policy` headers. `coi-serviceworker.js` is present at the site root and inside `emulator/`; each registers a service worker for its own scope, adding COOP/COEP/CORP to same-origin responses. The workbench is therefore cross-origin isolated when opened on its own, so Emscripten pthreads work on static HTTPS hosting, including iOS Safari. Keep the two copies in sync.
+2. **Relative paths only.** Project sites are served from `https://<owner>.github.io/<repo>/`, not the domain root. Every local URL in the showcase is relative (`./assets/…`, `./emulator/…`, `./coi-serviceworker.js`); the workbench's catalog fetch is relative (`./builds/manifest.json`) and its Website tab uses `../index.html`. Do not replace them with absolute `/assets/…` paths.
 
 ## Live release data
 
@@ -29,4 +29,4 @@ cp tools/v1-emulator/public/* "$SITE/emulator/"
 python3 -m http.server 8080 --bind 0.0.0.0 --directory "$SITE"
 ```
 
-The layout and release panel work immediately. To boot the real firmware in the iframe, download the `sonix-v1-web-wasm-*` Actions artifact, extract the inner `.sonix-web.zip`, drop it into `emulator/builds/`, and write an `emulator/builds/manifest.json` with a `builds` entry pointing at that relative URL (or load the ZIP through the workbench's **Firmware Builds** panel). Multi-threaded WASM needs HTTPS or `localhost`; a plain LAN HTTP URL cannot provide SharedArrayBuffer.
+The showcase and its links work immediately. To boot real firmware in the workbench, download the `sonix-v1-web-wasm-*` Actions artifact, extract the inner `.sonix-web.zip`, drop it into `emulator/builds/`, and write an `emulator/builds/manifest.json` with a `builds` entry pointing at that relative URL (or load the ZIP through the workbench's **Firmware Builds** panel). Multi-threaded WASM needs HTTPS or `localhost`; a plain LAN HTTP URL cannot provide SharedArrayBuffer.

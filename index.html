@@ -11,9 +11,9 @@
 	<meta property="og:type" content="website">
 	<link rel="icon" href="./assets/favicon.svg" type="image/svg+xml">
 	<link rel="stylesheet" href="./assets/css/styles.css">
-	<!-- GitHub Pages cannot set COOP/COEP headers. This worker adds them at the
-	     site root so the WASM emulator (Emscripten pthreads / SharedArrayBuffer)
-	     works in the hero iframe AND when opened as a standalone page. -->
+	<!-- GitHub Pages cannot set custom headers. This root worker keeps the
+	     project origin cross-origin isolated for the WASM workbench at
+	     ./emulator/ (Emscripten pthreads / SharedArrayBuffer). -->
 	<script src="./coi-serviceworker.js"></script>
 </head>
 <body id="top">
@@ -47,7 +47,7 @@
 				<span class="brand-text"><strong>SONIX</strong><small>TEMPO TEC · VARIATIONS</small></span>
 			</a>
 			<nav class="site-nav" aria-label="Main navigation">
-				<a href="#emulator">Emulator</a>
+				<a href="./emulator/index.html">Emulator</a>
 				<a href="#why">Why Sonix</a>
 				<a href="#features">Features</a>
 				<a href="#install">Install</a>
@@ -71,7 +71,7 @@
 							<svg class="icon" aria-hidden="true"><use href="#i-download"/></svg>
 							<span>Download Latest Firmware <b>v1.upt</b></span>
 						</a>
-						<a class="btn btn-secondary btn-lg" href="#emulator">Try the live emulator</a>
+						<a class="btn btn-secondary btn-lg" href="./emulator/index.html">Try the live emulator</a>
 					</div>
 					<p class="release-line" id="release-line" data-release-status aria-live="polite">Checking GitHub Releases for the latest version…</p>
 					<div class="hero-meta" role="group" aria-label="Firmware highlights">
@@ -83,7 +83,7 @@
 				</div>
 
 				<div class="hero-device" id="emulator">
-					<div class="section-kicker"><span class="kicker-line"></span> Live hardware emulator</div>
+					<div class="section-kicker"><span class="kicker-line"></span> On the V1</div>
 					<div class="v1-chassis">
 						<div class="chassis-top">
 							<span class="jack" aria-hidden="true"><span></span></span>
@@ -94,24 +94,18 @@
 							<span class="screw screw-tl" aria-hidden="true"></span>
 							<span class="screw screw-tr" aria-hidden="true"></span>
 							<div class="screen-well">
-								<iframe
-									src="./emulator/index.html?embed=1&amp;mode=wasm"
-									title="Interactive WebAssembly emulator of the TempoTec Variations V1 running Sonix Player"
-									loading="lazy"
-									allow="autoplay; fullscreen; clipboard-write; gyroscope; accelerometer"
-									sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-downloads"
-									referrerpolicy="no-referrer"></iframe>
+								<img src="./assets/screenshots/now-playing.png" width="240" height="320" alt="Sonix Player's now playing screen on the TempoTec V1" loading="lazy">
 							</div>
 							<span class="screw screw-bl" aria-hidden="true"></span>
 							<span class="screw screw-br" aria-hidden="true"></span>
 						</div>
 						<div class="chassis-foot">
 							<div class="flank-keys" aria-hidden="true"><span>VOL−</span><span>VOL+</span><span>⏵/⏸</span></div>
-							<div class="chassis-badge"><span class="led" aria-hidden="true"></span> LIVE · 240 × 320</div>
-							<a class="expand-link" href="./emulator/index.html?mode=wasm" target="_blank" rel="noopener">Full workbench <span aria-hidden="true">↗</span></a>
+							<div class="chassis-badge"><span class="led" aria-hidden="true"></span> 240 × 320 · LVGL 9.6</div>
+							<a class="expand-link" href="./emulator/index.html" target="_blank" rel="noopener">Open the emulator <span aria-hidden="true">↗</span></a>
 						</div>
 					</div>
-					<p class="emulator-hint"><svg class="icon" aria-hidden="true"><use href="#i-shield"/></svg> Tap the touchscreen or use the side keys. Open <b>microSD</b> in the workbench and drop in your own audio to hear it in the emulator.</p>
+					<p class="emulator-hint"><svg class="icon" aria-hidden="true"><use href="#i-shield"/></svg> Curious how it feels? The <a href="./emulator/index.html" target="_blank" rel="noopener">browser workbench</a> runs the real firmware — touch the screen, use the side keys and load your own tracks onto the virtual microSD.</p>
 				</div>
 			</div>
 		</section>
@@ -343,7 +337,7 @@
 				<p>An independent community firmware project. Not affiliated with TempoTec.</p>
 			</div>
 			<nav aria-label="Footer navigation">
-				<a href="#emulator">Emulator</a>
+				<a href="./emulator/index.html">Emulator</a>
 				<a href="#features">Features</a>
 				<a href="#install">Install</a>
 				<a href="https://github.com/mr-f0xx/sonix-player-tempotec-v1/releases">Releases</a>

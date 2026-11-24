@@ -168,11 +168,12 @@ b, strong { font-weight: 650; }
 .screw-tl { top: 8px; left: 8px; } .screw-tr { top: 8px; right: 8px; }
 .screw-bl { bottom: 8px; left: 8px; } .screw-br { bottom: 8px; right: 8px; }
 .screen-well {
+	display: grid; place-items: center; aspect-ratio: 3 / 4;
 	border-radius: 13px; overflow: hidden; background: #05070a;
 	border: 1px solid rgba(255,255,255,.09);
 	box-shadow: inset 0 0 0 3px rgba(0,0,0,.65), inset 0 0 22px rgba(0,0,0,.9);
 }
-.screen-well iframe { display: block; width: 100%; height: clamp(520px, 66vh, 660px); border: 0; background: #0b0e13; }
+.screen-well img { display: block; width: 100%; height: 100%; object-fit: cover; }
 .chassis-foot { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 13px 6px 1px; }
 .flank-keys { display: flex; gap: 5px; }
 .flank-keys span { font-family: var(--font-mono); font-size: 9px; color: #8290a3; border: 1px solid rgba(255,255,255,.10); border-radius: 5px; padding: 3px 6px; background: rgba(255,255,255,.03); }
@@ -318,7 +319,6 @@ b, strong { font-weight: 650; }
 	.v1-chassis { padding: 12px 10px 10px; border-radius: 26px; }
 	.chassis-top { padding-inline: 6px; }
 	.chassis-etched { font-size: 7.5px; letter-spacing: .16em; }
-	.screen-well iframe { height: 590px; }
 	.flank-keys span { font-size: 8px; padding: 3px 4px; }
 	.chassis-badge { display: none; }
 	.gallery { grid-template-columns: repeat(2, minmax(0,1fr)); padding-inline: 20px; }

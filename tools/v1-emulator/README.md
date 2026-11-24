@@ -14,11 +14,11 @@ The repository includes `.github/workflows/web-emulator-pages.yml`, which automa
 - Packs a self-contained **`.sonix-web.zip`** bundle (`manifest.json` + `sonix_player_wasm.js` + `sonix_player_wasm.wasm` + TempoTec V1 `usr/` assets) and uploads it as a GitHub Actions artifact for every commit/PR.
 - Deploys the static emulator webpage and build history catalog (`builds/manifest.json`) to **GitHub Pages** on pushes to `main`, tags, or manual dispatch.
 
-The showcase homepage embeds this workbench in an iframe at
-`./emulator/index.html?embed=1&mode=wasm`. `embed=1` only hides the workbench's
-top header; all device controls, the build loader, microSD panel and logs stay
-available. Cross-origin isolation for the embedded WebAssembly threads comes
-from the showcase's root `coi-serviceworker.js`.
+The showcase homepage lives one directory above this workbench on GitHub Pages
+(`../index.html`). It links out to the emulator instead of embedding it, and the
+workbench links back through the **Website** tab in the inspector tab bar (and
+**Site** in the mobile bottom navigation). On a local Node bridge, where there
+is no sibling showcase, that tab opens the published GitHub Pages site instead.
 
 ### One-Time Repository Setup for GitHub Pages
 
