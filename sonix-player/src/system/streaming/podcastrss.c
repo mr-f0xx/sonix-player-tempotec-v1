@@ -194,7 +194,15 @@ static bool only_space(const char *text, size_t len) {
 // put somewhere. Nothing else inside an item is read: a feed carries show
 // notes, transcripts and whole HTML documents beside the six fields this
 // needs, and copying them would fill memory the device does not have.
-typedef enum { WANT_NONE, WANT_TITLE, WANT_GUID, WANT_DATE, WANT_DURATION } want_t;
+typedef enum {
+	WANT_NONE,
+	WANT_TITLE,
+	WANT_GUID,
+	WANT_DATE,
+	WANT_DURATION,
+	WANT_AUTHOR,
+	WANT_IMAGE_URL,
+} want_t;
 
 // The six fields of one <item>, gathered while it is walked. A struct rather
 // than six locals because both readers want the same set.
@@ -231,8 +239,14 @@ static bool item_episode(const rss_item_t *it, long long feed_id, const char *fe
 	if (out->id == 0) {
 		out->id = podcastrss_guid_id(it->guid);
 	}
+	// A feed with no <guid> at all still has an episode: its enclosure is the
+	// one thing it always carries, and a stable id is what lets a downloaded
+	// episode be found again next time. Better than dropping the episode.
 	if (out->id == 0) {
-		return false; // no guid and no directory id: nothing to name a file
+		out->id = podcastrss_guid_id(it->enclosure);
+	}
+	if (out->id == 0) {
+		return false; // no guid, no enclosure and no directory id: nothing to name a file
 	}
 
 	out->feed_id = feed_id;
@@ -359,6 +373,114 @@ static int feed_walk(const char *body, rss_item_fn each, void *user, int *items_
 		*items_seen = seen;
 	}
 	return seen;
+}
+
+// The channel's own fields. A walk of the same document with a different
+// decision at the end: everything outside an <item> is channel material, and
+// the three fields wanted are the title, the author and the artwork.
+//
+// The artwork has two spellings and the walk reads both: `<itunes:image
+// href="..."/>`, which is its own element, and the plain `<image><url>...`
+// of RSS 2.0. Inside the latter sits a <title> of its own, which is why the
+// title is read only outside an <image>.
+bool podcastrss_channel(const char *body, char *title, size_t title_size, char *author, size_t author_size,
+						char *image, size_t image_size) {
+	if (title && title_size) {
+		title[0] = '\0';
+	}
+	if (author && author_size) {
+		author[0] = '\0';
+	}
+	if (image && image_size) {
+		image[0] = '\0';
+	}
+	if (!body) {
+		return false;
+	}
+
+	epub_xml_t x;
+	epub_xml_init(&x, body);
+
+	bool in_item = false;
+	bool in_image = false;
+	bool in_channel = true; // lenient: a feed with no <channel> still has a title
+	want_t want = WANT_NONE;
+
+	while (epub_xml_next(&x)) {
+		if (x.event == EPUB_XML_TEXT) {
+			if (in_item || !in_channel || want == WANT_NONE) {
+				continue;
+			}
+			if (only_space(x.text, x.text_len)) {
+				continue;
+			}
+			char *dst = NULL;
+			size_t size = 0;
+			if (want == WANT_TITLE && title && !title[0]) {
+				dst = title;
+				size = title_size;
+			} else if (want == WANT_AUTHOR && author && !author[0]) {
+				dst = author;
+				size = author_size;
+			} else if (want == WANT_IMAGE_URL && image && !image[0]) {
+				dst = image;
+				size = image_size;
+			}
+			want = WANT_NONE;
+			if (dst) {
+				copy_unescaped(dst, size, x.text, x.text_len);
+				trim_in_place(dst);
+			}
+			continue;
+		}
+
+		if (x.event == EPUB_XML_CLOSE) {
+			if (epub_xml_is(&x, "item")) {
+				in_item = false;
+			} else if (epub_xml_is(&x, "image")) {
+				in_image = false;
+			} else if (epub_xml_is(&x, "channel")) {
+				in_channel = false;
+			}
+			want = WANT_NONE;
+			continue;
+		}
+
+		// An element opening.
+		if (epub_xml_is(&x, "item")) {
+			in_item = true;
+			want = WANT_NONE;
+			continue;
+		}
+		if (in_item || !in_channel) {
+			continue;
+		}
+		if (epub_xml_is(&x, "image")) {
+			const char *value = NULL;
+			size_t len = 0;
+			if (image && image_size && epub_xml_attr(&x, "href", &value, &len)) {
+				copy_unescaped(image, image_size, value, len);
+				trim_in_place(image);
+			}
+			if (!x.self_closing) {
+				in_image = true;
+			}
+			want = WANT_NONE;
+			continue;
+		}
+		if (epub_xml_is(&x, "title") && !in_image) {
+			want = WANT_TITLE;
+		} else if (epub_xml_is(&x, "author")) {
+			want = WANT_AUTHOR;
+		} else if (epub_xml_is(&x, "url") && in_image) {
+			want = WANT_IMAGE_URL;
+		}
+		if (x.self_closing) {
+			want = WANT_NONE;
+		}
+	}
+
+	return title && title[0];
 }
 
 typedef struct {

@@ -18,6 +18,11 @@ static const addon_t ADDONS[] = {
 	{"tidal", "tidal", "addon_tidal_note", "plugins_section_services"},
 	{"qobuz", "qobuz", "addon_qobuz_note", "plugins_section_services"},
 	{"podcasts", "podcasts", "addon_podcasts_note", "plugins_section_services"},
+	// The offline catcher: feeds.txt on the card, read when Wi-Fi joins a
+	// network, new episodes downloaded into the Podcast folder. Opt-in even on
+	// an existing device, because it moves files onto the card and reads the
+	// network without being asked twice -- see addon_is_opt_in().
+	{"podcastcatcher", "podcast_catcher", "addon_podcastcatcher_note", "plugins_section_services"},
 	{"radio", "radio", "addon_radio_note", "plugins_section_services"},
 	{"subsonic", "subsonic", "addon_subsonic_note", "plugins_section_services"},
 	{"jellyfin", "jellyfin", "addon_jellyfin_note", "plugins_section_services"},
@@ -82,6 +87,15 @@ const addon_t *addons_find(const char *id) {
 	return NULL;
 }
 
+// The modules that are never switched on by an update, however the seeding
+// goes. Everything else an existing device had stays on when the firmware is
+// updated, because a feature that disappears after an update is a bug; these
+// are different in kind -- they fetch from the network and write to the card
+// on their own -- so they wait to be asked for.
+static bool addon_is_opt_in(const char *id) {
+	return id && strcmp(id, "podcastcatcher") == 0;
+}
+
 // Fresh install defaults: a lean set. Everything not named here starts off.
 // The DSP modules that the player has always had on stay on, so the sound a
 // new owner hears out of the box is the sound this firmware has always made.
@@ -130,6 +144,9 @@ void addons_seed(bool fresh_install) {
 	}
 	for (int i = 0; i < addons_count(); i++) {
 		bool on = fresh_install ? addon_is_default_on(ADDONS[i].id) : true;
+		if (addon_is_opt_in(ADDONS[i].id)) {
+			on = false;
+		}
 		config_set_bool("addons", ADDONS[i].id, on);
 	}
 	config_set_bool("addons", "seeded", true);

@@ -63,6 +63,8 @@
 #include "src/system/streaming/podcastcache.h"
 #include "src/system/streaming/podcastsubs.h"
 #include "src/system/streaming/podcastplayed.h"
+#include "src/system/streaming/podcastcatcher.h"
+#include "src/system/streaming/podcastbookmark.h"
 #include "src/system/streaming/jellyfin.h"
 #include "src/system/streaming/jellyfincache.h"
 #include "src/system/streaming/soundcloud.h"
@@ -2412,6 +2414,8 @@ int main(int argc, char **argv) {
 	// Which episodes were heard. The marks live in podcast.db beside the
 	// followed podcasts, so they are handed the same card.
 	podcastplayed_set_root(card_root && card_root[0] ? card_root : gui_cfg.sd_root_path);
+	// Where each episode was left, for the catcher's auto-bookmarking.
+	podcastbookmark_set_root(card_root && card_root[0] ? card_root : gui_cfg.sd_root_path);
 	// And where a track arriving over DLNA lands: same card, same reason.
 	dlna_set_root(card_root && card_root[0] ? card_root : gui_cfg.sd_root_path);
 	// And where the emulator looks for Games/GB and Games/GBC. Unlike the
@@ -2462,6 +2466,12 @@ int main(int argc, char **argv) {
 	ota_auto_init();
 
 	gui_init(&gui_cfg);
+
+	// The offline podcast catcher, if it is switched on. After gui_init,
+	// because that is where the Plugins switches are seeded; after the card's
+	// databases are handed their root, which happened above. The worker starts
+	// its own thread and returns at once.
+	podcastcatcher_start();
 
 	// "Rotate screen", as it was left. After gui_init so there are screens to
 	// redraw, and before the first frame the user sees.

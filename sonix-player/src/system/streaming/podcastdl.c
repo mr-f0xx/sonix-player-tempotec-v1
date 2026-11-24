@@ -26,14 +26,20 @@ typedef struct {
 	char path[768];
 	char part[800];
 	char image[PODCAST_URL_MAX];
+	// The GUI's one-slot state and the catcher's own thread both run this
+	// code. Which download a cancel reaches is decided per job rather than
+	// globally, so cancelling the card on screen cannot cut short an episode
+	// the background catcher is fetching.
+	volatile bool cancel;
+	http_stream_t *stream; // guarded by `lock`; NULL outside the body loop
+	long long total;		 // what the server said it would send, 0 when it did not
 } job_t;
 
 static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
 static podcastdl_state_t state = PODCASTDL_IDLE;
 static long long bytes_done;
 static long long bytes_total;
-static volatile bool cancel_asked;
-static http_stream_t *active_stream; // guarded by `lock`; NULL outside the body loop
+static job_t *gui_job; // the download the card on screen is following, or NULL
 
 static char root[512];
 
@@ -205,17 +211,23 @@ static bool download_body(job_t *job) {
 	}
 
 	pthread_mutex_lock(&lock);
-	bytes_total = st->content_length > 0 ? st->content_length : 0;
-	active_stream = st;
+	// The progress counters belong to the download the card on screen is
+	// following. A background catch running at the same time must not make
+	// that bar jump to another episode's byte count.
+	job->total = st->content_length > 0 ? st->content_length : 0;
+	if (gui_job == job) {
+		bytes_total = job->total;
+	}
+	job->stream = st;
 	pthread_mutex_unlock(&lock);
 
 	bool ok = false;
-	FILE *f = cancel_asked ? NULL : fopen(job->part, "wb");
+	FILE *f = job->cancel ? NULL : fopen(job->part, "wb");
 	if (f) {
 		char *buf = malloc(DL_CHUNK);
 		ok = buf != NULL;
 		long long done = 0;
-		while (ok && !cancel_asked) {
+		while (ok && !job->cancel) {
 			int n = http_stream_read(st, buf, DL_CHUNK);
 			if (n < 0) {
 				ok = false;
@@ -231,20 +243,22 @@ static bool download_body(job_t *job) {
 			}
 			done += n;
 			pthread_mutex_lock(&lock);
-			bytes_done = done;
+			if (gui_job == job) {
+				bytes_done = done;
+			}
 			pthread_mutex_unlock(&lock);
 		}
 		free(buf);
 		if (fclose(f) != 0) {
 			ok = false;
 		}
-		if (cancel_asked || done == 0 || (bytes_total > 0 && done != bytes_total)) {
+		if (job->cancel || done == 0 || (job->total > 0 && done != job->total)) {
 			ok = false;
 		}
 	}
 
 	pthread_mutex_lock(&lock);
-	active_stream = NULL;
+	job->stream = NULL;
 	pthread_mutex_unlock(&lock);
 	http_stream_close(st);
 	free(st);
@@ -277,11 +291,13 @@ static void write_tags(const job_t *job) {
 	}
 }
 
-static void *download_main(void *arg) {
-	job_t *job = arg;
-	thread_be_low_priority("podcast save"); // the card on screen is waiting for it
-
-	bool ok = !cancel_asked && download_body(job);
+// One episode, from the first byte to the cover: the body loop, the rename
+// out of `.part`, the publication date on the file, the sidecar and the
+// folder's cover. Shared by the GUI's thread and by the background catcher,
+// which calls it synchronously on its own thread and wants none of the
+// one-slot state the card on screen reads.
+static bool job_run(job_t *job) {
+	bool ok = !job->cancel && download_body(job);
 	if (ok && rename(job->part, job->path) != 0) {
 		fprintf(stderr, "podcastdl: rename to %s failed: %s\n", job->path, strerror(errno));
 		ok = false;
@@ -299,8 +315,23 @@ static void *download_main(void *arg) {
 	}
 	sync();
 
-	printf("podcastdl: %s %s\n", job->path, ok ? "complete" : cancel_asked ? "cancelled" : "failed");
-	set_state(ok ? PODCASTDL_DONE : cancel_asked ? PODCASTDL_CANCELLED : PODCASTDL_FAILED);
+	printf("podcastdl: %s %s\n", job->path, ok ? "complete" : job->cancel ? "cancelled" : "failed");
+	return ok;
+}
+
+static void *download_main(void *arg) {
+	job_t *job = arg;
+	thread_be_low_priority("podcast save"); // the card on screen is waiting for it
+
+	bool ok = job_run(job);
+
+	pthread_mutex_lock(&lock);
+	if (gui_job == job) {
+		gui_job = NULL;
+	}
+	pthread_mutex_unlock(&lock);
+
+	set_state(ok ? PODCASTDL_DONE : job->cancel ? PODCASTDL_CANCELLED : PODCASTDL_FAILED);
 	free(job);
 	return NULL;
 }
@@ -311,21 +342,17 @@ bool podcastdl_owns(const char *path) {
 	return path && n > 0 && strncasecmp(path, base, n) == 0 && path[n] == '/';
 }
 
-bool podcastdl_start(const podcast_episode_t *episode, const char *feed_title, const char *feed_author,
-					 const char *feed_image) {
+// The job a download runs on: the episode, the folder it belongs in, the
+// path it will have and the `.part` it grows under. Also makes the folder,
+// which is why the caller does not have to.
+static job_t *job_make(const podcast_episode_t *episode, const char *feed_title, const char *feed_author,
+					   const char *feed_image) {
 	if (!episode || !episode->enclosure[0]) {
-		return false;
+		return NULL;
 	}
-	pthread_mutex_lock(&lock);
-	bool busy = state == PODCASTDL_RUNNING;
-	pthread_mutex_unlock(&lock);
-	if (busy) {
-		return false;
-	}
-
 	job_t *job = calloc(1, sizeof(*job));
 	if (!job) {
-		return false;
+		return NULL;
 	}
 	job->episode = *episode;
 	const char *title = feed_title && feed_title[0] ? feed_title : episode->feed_title;
@@ -334,7 +361,7 @@ bool podcastdl_start(const podcast_episode_t *episode, const char *feed_title, c
 	if (!folder_of(title, job->folder, sizeof(job->folder)) ||
 		!podcastdl_path(episode, title, job->path, sizeof(job->path))) {
 		free(job);
-		return false;
+		return NULL;
 	}
 	mkdir(podcastdl_root(), 0755);
 	mkdir(job->folder, 0755);
@@ -342,17 +369,33 @@ bool podcastdl_start(const podcast_episode_t *episode, const char *feed_title, c
 	if (stat(job->folder, &st) != 0 || !S_ISDIR(st.st_mode)) {
 		fprintf(stderr, "podcastdl: cannot make %s\n", job->folder);
 		free(job);
-		return false;
+		return NULL;
 	}
 	const char *slash = strrchr(job->path, '/');
 	snprintf(job->part, sizeof(job->part), "%s/.%s.part", job->folder, slash ? slash + 1 : job->path);
 	snprintf(job->image, sizeof(job->image), "%s", feed_image && feed_image[0] ? feed_image : episode->image);
+	return job;
+}
+
+bool podcastdl_start(const podcast_episode_t *episode, const char *feed_title, const char *feed_author,
+					const char *feed_image) {
+	pthread_mutex_lock(&lock);
+	bool busy = state == PODCASTDL_RUNNING;
+	pthread_mutex_unlock(&lock);
+	if (busy) {
+		return false;
+	}
+
+	job_t *job = job_make(episode, feed_title, feed_author, feed_image);
+	if (!job) {
+		return false;
+	}
 
 	pthread_mutex_lock(&lock);
 	state = PODCASTDL_RUNNING;
 	bytes_done = 0;
 	bytes_total = 0;
-	cancel_asked = false;
+	gui_job = job;
 	pthread_mutex_unlock(&lock);
 
 	pthread_t thread;
@@ -363,6 +406,11 @@ bool podcastdl_start(const podcast_episode_t *episode, const char *feed_title, c
 	bool started = pthread_create(&thread, &attr, download_main, job) == 0;
 	pthread_attr_destroy(&attr);
 	if (!started) {
+		pthread_mutex_lock(&lock);
+		if (gui_job == job) {
+			gui_job = NULL;
+		}
+		pthread_mutex_unlock(&lock);
 		free(job);
 		set_state(PODCASTDL_FAILED);
 		return false;
@@ -370,13 +418,30 @@ bool podcastdl_start(const podcast_episode_t *episode, const char *feed_title, c
 	return true;
 }
 
+// The same download, on the caller's own thread. The background catcher uses
+// this: it has a thread of its own and a queue of its own, and must not
+// compete with the user for the one slot the podcast page's card reads.
+bool podcastdl_fetch(const podcast_episode_t *episode, const char *feed_title, const char *feed_author,
+					const char *feed_image) {
+	job_t *job = job_make(episode, feed_title, feed_author, feed_image);
+	if (!job) {
+		return false;
+	}
+	thread_be_low_priority("podcast catch");
+	bool ok = job_run(job);
+	free(job);
+	return ok;
+}
+
 void podcastdl_cancel(void) {
-	cancel_asked = true;
 	// A read blocked on a stalled socket returns only at the receive timeout
 	// unless the socket is shut under it.
 	pthread_mutex_lock(&lock);
-	if (active_stream) {
-		http_stream_wake(active_stream);
+	if (gui_job) {
+		gui_job->cancel = true;
+		if (gui_job->stream) {
+			http_stream_wake(gui_job->stream);
+		}
 	}
 	pthread_mutex_unlock(&lock);
 }

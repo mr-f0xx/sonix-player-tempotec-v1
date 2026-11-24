@@ -52,6 +52,8 @@
 #include "src/system/streaming/podcastcache.h"
 #include "src/system/streaming/podcastsubs.h"
 #include "src/system/streaming/podcastplayed.h"
+#include "src/system/streaming/podcastcatcher.h"
+#include "src/system/streaming/podcastbookmark.h"
 #include "src/system/streaming/radio.h"
 #include "src/system/streaming/jellyfincache.h"
 #include "src/system/streaming/soundcloudcache.h"
@@ -961,6 +963,11 @@ static void card_databases_attach(const char *root) {
 	podcastcache_set_root(root);
 	podcastsubs_set_root(root);
 	podcastplayed_set_root(root);
+	podcastbookmark_set_root(root);
+	// A card that arrived while Wi-Fi was already up carries its own
+	// feeds.txt; without this it would wait for the next disconnect and
+	// reconnect before the catcher read it.
+	podcastcatcher_card_changed();
 	dlna_set_root(root);
 	gbdb_set_root(root);
 

@@ -57,6 +57,7 @@
 #include "src/system/library/lyrics.h"
 #include "src/system/playback/playlist.h"
 #include "src/system/streaming/podcast.h"
+#include "src/system/streaming/podcastbookmark.h"
 #include "src/system/streaming/podcastcache.h"
 #include "src/system/streaming/podcastsubs.h"
 #include "src/system/streaming/podcastplayed.h"
@@ -6323,6 +6324,10 @@ static void handle_track_finished(void) {
 	if (podcastcache_is_episode(path)) {
 		long long episode = podcastcache_episode_id(path);
 		podcastplayed_set(episode, true);
+		// The episode is over, so there is no place in it to come back to.
+		// Cleared here as well as by the position checkpoint, because the
+		// last few seconds of a file can run out between two checkpoints.
+		podcastbookmark_clear(path);
 		// The lists that carry the mark are behind this sheet, not unloaded:
 		// closing it reloads no screen, so the rows are told now. Each does
 		// nothing unless it is the list on screen, and only rebinds the row

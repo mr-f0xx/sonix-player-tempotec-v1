@@ -39,6 +39,23 @@ typedef struct {
 	long long id;
 } podcastrss_known_t;
 
+// The channel's own three fields, read without walking an item: the title a
+// folder is named after, the author a sidecar carries and the artwork a
+// folder is given. Needed by the catcher, which has no catalogue to ask and
+// only the feed itself.
+//
+// `body` is the feed. Each output may be NULL, and each is cleared first, so a
+// caller that wants only the title passes NULL for the rest. False when the
+// document has no readable channel title -- which is what the catcher uses to
+// decide whether the response was a feed at all.
+//
+// The title is `<channel><title>`, and not an item's: the walk stops reading
+// channel fields at the first `<item>`. `itunes:image` and the plain
+// `<image><url>` both answer for the artwork; the author is `itunes:author`,
+// falling back to `author`.
+bool podcastrss_channel(const char *body, char *title, size_t title_size, char *author, size_t author_size,
+						char *image, size_t image_size);
+
 // Reads `body` as a feed and fills `out` with up to `max` episodes, in the
 // order the feed lists them -- newest first, which is the convention and what
 // the directories answer with too.

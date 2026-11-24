@@ -17,7 +17,7 @@ the section heading on the Plugins page.
 
 | Section | Module (id) | What switching it off removes |
 | --- | --- | --- |
-| Streaming services | `tidal`, `qobuz`, `podcasts`, `radio`, `soundcloud`, `subsonic`, `jellyfin` | The service's pages and its Streaming tile or list row. (`tidal` and `qobuz` also require API keys, which can be extracted on-device via **Set up from stock firmware**; see [qobuz-stock-firmware.md](qobuz-stock-firmware.md). See [soundcloud.md](soundcloud.md) for SoundCloud setup and [jellyfin.md](jellyfin.md) for Jellyfin setup.) |
+| Streaming services | `tidal`, `qobuz`, `podcasts`, `podcastcatcher`, `radio`, `soundcloud`, `subsonic`, `jellyfin` | The service's pages and its Streaming tile or list row. (`tidal` and `qobuz` also require API keys, which can be extracted on-device via **Set up from stock firmware**; see [qobuz-stock-firmware.md](qobuz-stock-firmware.md). See [soundcloud.md](soundcloud.md) for SoundCloud setup and [jellyfin.md](jellyfin.md) for Jellyfin setup.) |
 | Earbuds | `airpods` | The AirPods worker and its page. |
 | Library | `ebook` | The Books shelf and the EPUB reader (home Books tile). |
 | Player | `coverflow` | The album carousel and its larger cover cache. |
@@ -31,6 +31,46 @@ the section heading on the Plugins page.
 Not every feature is a module. Cover Flow's own layout switch, Audiobooks, the
 sleep timer and artwork are not gated. Modules that the fork does not ship are
 not listed.
+
+## The podcast catcher (opt-in)
+
+`podcastcatcher` is the one module that is never switched on by an update,
+even for a device that is seeded as an existing install. It fetches from the
+network and writes to the card on its own, so it waits to be asked for.
+
+It reads `feeds.txt` on the card -- one feed address a line, `#` for comments --
+whenever Wi-Fi joins a network, and once at start-up if the radio is already
+up. Each feed's new episodes are downloaded into the same `Podcast` folder the
+Podcasts page downloads into, so they appear under **Saved podcasts** and play
+with the podcast controls. As an episode plays its position is bookmarked
+per file, so opening it again carries on where it was left; hearing it to the
+end clears the bookmark and marks it heard like any other episode.
+
+```text
+# feeds.txt, in the root of the card
+# One feed per line. Blank lines and lines starting with # are ignored.
+https://feeds.example.com/show.rss
+https://example.org/other.xml
+```
+
+The first check of a feed takes its newest `max_episodes` (default 3) and
+records the rest as seen, so adding a feed with years of back catalogue does
+not fill the card. Later checks take only what is new and retry a failed
+download on the next connection, up to three times. A feed removed from
+`feeds.txt` is forgotten with its episode records.
+
+The settings live in `[podcast_catcher]` of `device_config.ini`:
+
+```ini
+[podcast_catcher]
+feeds_file = feeds.txt      ; on the card, relative to its root
+max_episodes = 3            ; newest episodes taken per feed, per check
+auto_bookmark = true        ; remember where each episode was left
+min_free_mb = 200           ; stop rather than fill the card
+```
+
+The module needs the **Podcasts** module as well: that is the page the
+downloaded episodes are shown on. With either module off, nothing runs.
 
 ## Fresh installs and existing devices
 
