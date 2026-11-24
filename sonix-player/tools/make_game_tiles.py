@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""Generate the Dark/Light More game tiles using the metronome's stack style.
+"""Generate the Dark/Light More game tiles using the turned-back-tile stack.
 
 Requires pillow and resvg-py. Run this, then tools/svg_to_lvgl.py.
 Monochrome SVGs remain separate for function-glyph themes and compact lists.
 """
 from pathlib import Path
 
-import make_metronome_tile as tile
+import make_more_tile as tile
 
 ICONS = Path(__file__).resolve().parents[1] / "assets" / "icons"
 # Back, front gradient top, front gradient bottom: blue, green, amber.

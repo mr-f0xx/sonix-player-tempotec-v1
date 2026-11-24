@@ -1155,7 +1155,6 @@ TOOLS_SRC = $(ROOT)/tests/ui/test_tools_pages.c \
             $(ROOT)/src/gui/games/game2048.c $(ROOT)/src/gui/games/dino.c \
             $(ROOT)/src/gui/notes/notes.c $(ROOT)/src/gui/notes/noteeditor.c \
             $(ROOT)/src/gui/tagmanager/tagmanager.c $(ROOT)/src/system/tagmanager/tagwrite.c \
-            $(ROOT)/src/gui/metronome/metronome.c \
             $(ROOT)/src/gui/tapedeck/tapedeck.c \
             $(ROOT)/src/gui/tapedeck/tapesampler.c \
             $(ROOT)/src/gui/pet/petpage.c $(ROOT)/src/gui/pet/peticon.c $(ROOT)/src/gui/pet/pikachu.c \

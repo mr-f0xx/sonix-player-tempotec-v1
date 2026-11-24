@@ -269,7 +269,7 @@ bool audio_external_begin(int sample_rate, int channels, int bits);
 //
 // Needed by the emulator, which has the opposite problem to the one the 750 ms
 // solve: a game must sound the button press now, and the short buffer doubles
-// as its metronome -- writing one frame's samples to a blocking PCM lets ALSA
+// as its clock -- writing one frame's samples to a blocking PCM lets ALSA
 // keep the pace of 59.73 frames per second.
 bool audio_external_begin_latency(int sample_rate, int channels, int bits, int buffer_ms);
 

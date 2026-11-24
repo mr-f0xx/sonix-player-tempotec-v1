@@ -859,7 +859,7 @@ static bool wav_needs_conversion(const wav_info_t *info) {
 //
 // It exists for the emulator, whose need is the reverse of the one the 750 ms
 // serve: a game has to sound a button press now, not three quarters of a second
-// later, and the short buffer doubles as its metronome -- writing 738 samples
+// later, and the short buffer doubles as its clock -- writing 738 samples
 // per frame to a blocking PCM lets ALSA keep the 59.73 fps pace instead of an
 // estimating usleep. The short reserve is affordable because the emulator does
 // not read the card while running: the ROM is already entirely in memory.

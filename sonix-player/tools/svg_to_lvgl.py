@@ -419,9 +419,6 @@ ICONS = [
     ("pencil.svg", "tag_manager", 36),
     ("calculator.svg", "calculator", 32),
     ("notes.svg", "notes", 32),
-    # The metronome, beside them in the More list: the page header's glyph, at
-    # the same 32 px.
-    ("metronome.svg", "metronome", 32),
     ("enter.svg", "enter", 34),
     ("year.svg", "year", 32),
     ("most-played.svg", "most_played", 32),
@@ -569,7 +566,6 @@ COLOR_ICONS = [
     ("calculator.png", "menu_calculator", SECTION_ICON_SIZE),
     ("notes.png", "menu_notes", SECTION_ICON_SIZE),
     ("vault.png", "menu_vault", SECTION_ICON_SIZE),
-    ("metronome.png", "menu_metronome", SECTION_ICON_SIZE),
     # The two newest More destinations: their own full-colour art in Dark and
     # Light. The tag editor no longer borrows the File Manager's folder, and
     # the pet no longer arrives as a bare white silhouette.

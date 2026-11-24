@@ -199,9 +199,9 @@ typedef enum {
 
 // ---- tap along -----------------------------------------------------------
 //
-// Once a day the page offers a short rhythm game: sixteen beats of the tempo
-// the metronome page uses, tapped on the glass. The score is the share of the
-// beats hit near their moment, and it pays a handful of notes and a little of
+// Once a day the page offers a short rhythm game: sixteen beats at 100 BPM,
+// tapped on the glass. The score is the share of the beats hit near their
+// moment, and it pays a handful of notes and a little of
 // both meters. It is a game, not a source of income: the ceiling is a dozen
 // notes a day.
 #define PET_RHYTHM_BPM 100

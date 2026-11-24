@@ -321,8 +321,6 @@ extern lv_image_dsc_t icon_qobuz_badge;
 extern lv_image_dsc_t icon_tidal_badge;
 extern lv_image_dsc_t icon_podcast_badge;
 extern lv_image_dsc_t icon_hires_audio;
-extern lv_image_dsc_t icon_metronome;
-extern lv_image_dsc_t icon_menu_metronome;
 extern lv_image_dsc_t icon_settings_plugins;
 extern lv_image_dsc_t icon_settings_more;
 extern lv_image_dsc_t icon_chart_column;
