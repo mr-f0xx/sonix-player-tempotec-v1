@@ -396,7 +396,7 @@ static void dismiss_with_swipe(void) {
 	lv_indev_t *indev = lv_indev_create();
 	lv_indev_set_type(indev, LV_INDEV_TYPE_POINTER);
 	lv_indev_set_read_cb(indev, read_touch);
-	touch.point = (lv_point_t){screen_w / 2, screen_h - 18}; // on the chevron
+	touch.point = (lv_point_t){screen_w / 2, screen_h - 18}; // where the chevron usually sits
 	touch.state = LV_INDEV_STATE_PRESSED;
 	lv_indev_read(indev);
 	for (int i = 0; i < 4; i++) {
@@ -663,6 +663,7 @@ static void check_settings_card(const char *language_dir) {
 	settingsrow_pill(layer_pills, "screensaver_viz_sparks", FILAMENTS_SPARKS, noop_cb);
 	settingsrow_pill(layer_pills, "screensaver_viz_tunnel", FILAMENTS_TUNNEL, noop_cb);
 	lv_obj_t *full_row = settingsrow_toggle(page, "screensaver_viz_fullscreen", NULL, noop_cb);
+	lv_obj_t *chevron_row = settingsrow_toggle(page, "screensaver_chevron", NULL, noop_cb);
 	lv_obj_update_layout(page);
 
 	assert(lv_obj_get_parent(viz_pills) == viz_card);
@@ -704,7 +705,7 @@ static void check_settings_card(const char *language_dir) {
 	// bare tag -- and what is on screen follows a switch.
 	const char *keys[] = {"screensaver_album_art", "screensaver_style_fill", "screensaver_style_framed",
 						  "screensaver_viz_neon", "screensaver_viz_led", "screensaver_viz_filaments",
-						  "screensaver_viz_fullscreen", "screensaver_viz_layers", "screensaver_viz_sharp",
+						  "screensaver_viz_fullscreen", "screensaver_chevron", "screensaver_viz_layers", "screensaver_viz_sharp",
 						  "screensaver_viz_soft", "screensaver_viz_sparks", "screensaver_viz_tunnel"};
 	DIR *dir = opendir(language_dir);
 	assert(dir);
@@ -728,6 +729,7 @@ static void check_settings_card(const char *language_dir) {
 		assert(strcmp(lv_label_get_text(lv_obj_get_child(led, 0)), tr("screensaver_viz_led")) == 0);
 		assert(strcmp(lv_label_get_text(lv_obj_get_child(itunes, 0)), tr("screensaver_viz_filaments")) == 0);
 		assert(strcmp(lv_label_get_text(lv_obj_get_child(full_row, 0)), tr("screensaver_viz_fullscreen")) == 0);
+		assert(strcmp(lv_label_get_text(lv_obj_get_child(chevron_row, 0)), tr("screensaver_chevron")) == 0);
 		assert(strcmp(lv_label_get_text(lv_obj_get_child(layer_group, 0)), tr("screensaver_viz_layers")) == 0);
 		lv_obj_update_layout(page);
 		lv_area_t row, pill;
@@ -816,6 +818,7 @@ int main(int argc, char **argv) {
 	config_set_bool("screen", "screensaver", true);
 	if (saved_framed) {
 		config_set_int("screen", "screensaver_style", SCREENSAVER_STYLE_FRAMED);
+		config_set_bool("screen", "screensaver_chevron", false);
 	}
 	assert(config_save());
 	assert(config_init(config));
@@ -856,6 +859,12 @@ int main(int argc, char **argv) {
 
 	screensaver_init(&cfg);
 	assert(screensaver_get_enabled());
+	assert(screensaver_get_show_chevron() == !saved_framed);
+	assert(lv_obj_is_hidden(chevron_btn()) == saved_framed);
+	if (saved_framed) {
+		screensaver_set_show_chevron(true);
+		assert(!lv_obj_is_hidden(chevron_btn()));
+	}
 	assert(!screensaver_get_visualizer_fullscreen());
 	assert(screensaver_visualizer_layers() == FILAMENTS_ALL);
 	assert(screensaver_source() == SCREENSAVER_SOURCE_ALBUM);
@@ -1352,18 +1361,28 @@ int main(int argc, char **argv) {
 	lv_obj_update_layout(saver_obj());
 	assert(!lv_obj_is_hidden(info_strip()) && lv_obj_get_height(filaments) == screen_h - strip_h);
 
+	// Hide the whole hint, including its background, regardless of source.
+	screensaver_set_show_chevron(false);
+	assert(lv_obj_is_hidden(chevron_btn()));
+	assert(config_init(config) && !config_get_bool("screen", "screensaver_chevron", true));
+
 	// Pictures and album art do not inherit the fullscreen visualizer setting.
 	screensaver_set_visualizer_fullscreen(true);
 	screensaver_set_source(SCREENSAVER_SOURCE_IMAGES);
 	assert(lv_obj_is_hidden(spectrum) && !lv_obj_is_hidden(info_strip()));
 	assert(lv_image_get_src(filaments) == NULL);
+	assert(lv_obj_is_hidden(chevron_btn()));
 	screensaver_set_source(SCREENSAVER_SOURCE_ALBUM);
 	assert(!lv_obj_is_hidden(spectrum) && lv_obj_is_hidden(info_strip()));
 	pump(50);
 	assert(lv_image_get_src(filaments));
+	assert(lv_obj_is_hidden(chevron_btn()));
 	dismiss_with_swipe();
 	assert(lv_image_get_src(filaments) == NULL);
 	wake();
+	assert(lv_obj_is_hidden(chevron_btn()));
+	screensaver_set_show_chevron(true);
+	assert(!lv_obj_is_hidden(chevron_btn()));
 
 	screensaver_set_visualizer(false);
 	assert(lv_obj_is_hidden(spectrum));

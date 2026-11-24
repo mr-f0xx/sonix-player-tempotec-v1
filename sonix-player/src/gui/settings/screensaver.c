@@ -42,6 +42,7 @@ static lv_obj_t *chevron_btn, *chevron_icon;
 static lv_timer_t *clock_timer;
 
 static bool enabled;
+static bool show_chevron;
 static bool visualizer_selected, viz_fullscreen;
 static unsigned viz_layers;
 static int spectrum_h;
@@ -249,6 +250,14 @@ static void set_strip_height(int height) {
 
 bool screensaver_is_visible(void) { return saver && !lv_obj_is_hidden(saver); }
 bool screensaver_get_enabled(void) { return enabled; }
+
+bool screensaver_get_show_chevron(void) { return show_chevron; }
+void screensaver_set_show_chevron(bool visible) {
+	show_chevron = visible;
+	config_set_bool("screen", "screensaver_chevron", visible);
+	config_save();
+	if (chevron_btn) lv_obj_set_hidden(chevron_btn, !visible);
+}
 
 static void refresh_content(void);
 static void spectrum_reset(void);
@@ -1514,6 +1523,7 @@ void screensaver_init(gui_config_t *cfg) {
 
 	screensaver_set_card_root(cfg->sd_root_path);
 	enabled = config_get_bool("screen", "screensaver", false);
+	show_chevron = config_get_bool("screen", "screensaver_chevron", true);
 	visualizer_selected = config_get_bool("screen", "screensaver_visualizer", false);
 	viz_style = valid_viz_style(config_get_int("screen", "screensaver_visualizer_style", SCREENSAVER_VIZ_STYLE_NEON));
 	viz_fullscreen = config_get_bool("screen", "screensaver_viz_fullscreen", false);
@@ -1656,6 +1666,7 @@ void screensaver_init(gui_config_t *cfg) {
 	lv_obj_set_style_pad_all(chevron_btn, 0, 0);
 	lv_obj_set_clickable(chevron_btn, false);
 	lv_obj_set_scrollable(chevron_btn, false);
+	lv_obj_set_hidden(chevron_btn, !show_chevron);
 
 	chevron_icon = lv_image_create(chevron_btn);
 	lv_image_set_src(chevron_icon, &icon_chevron_up);
