@@ -63,6 +63,7 @@ static unsigned vp_rate;
 static int vp_channels;
 static volatile double vp_audio_clock; // seconds played out
 static uint64_t vp_samples_written;
+static double vp_audio_base; // absolute seconds corresponding to samples_written==0
 
 // Latest decoded video frame converted to RGB565 (320x240 or source size)
 static uint16_t *vp_rgb565;
@@ -110,6 +111,7 @@ static bool open_pcm(unsigned rate, int channels) {
 	vp_rate = rate;
 	vp_channels = channels;
 	vp_samples_written = 0;
+	vp_audio_base = 0.0;
 	vp_audio_clock = 0.0;
 	return true;
 }
@@ -120,7 +122,7 @@ static void update_audio_clock(void) {
 	if (snd_pcm_delay(vp_pcm, &delay) < 0 || delay < 0) delay = 0;
 	double played = (double)vp_samples_written - (double)delay;
 	if (played < 0) played = 0;
-	vp_audio_clock = played / (double)vp_rate;
+	vp_audio_clock = vp_audio_base + played / (double)vp_rate;
 }
 
 static int16_t clamp_s16(float v) {
@@ -344,6 +346,7 @@ static void *vp_thread_fn(void *arg) {
 			if (!paused && vp_pcm) {
 				snd_pcm_prepare(vp_pcm);
 				vp_samples_written = 0;
+				vp_audio_base = vp_position;
 				vp_audio_clock = vp_position;
 				have_base = false;
 			}
@@ -364,6 +367,7 @@ static void *vp_thread_fn(void *arg) {
 				snd_pcm_drop(vp_pcm);
 				snd_pcm_prepare(vp_pcm);
 				vp_samples_written = 0;
+				vp_audio_base = target;
 				vp_audio_clock = target;
 			}
 			plm_seek(plm, target, 1);
