@@ -346,6 +346,7 @@
 						<button class="tab-btn" data-tab="sd" role="tab" aria-selected="false">microSD</button>
 						<button class="tab-btn" id="remote-tab-button" data-tab="remote" role="tab" aria-selected="false" aria-controls="tab-remote">Live USB</button>
 						<button class="tab-btn" data-tab="shortcuts" role="tab" aria-selected="false">Keys</button>
+						<button class="tab-btn" data-tab="video" role="tab" aria-selected="false">Video</button>
 					</div>
 
 					<!-- Tab 0: Firmware Build Loader (Static WASM / GitHub Pages & Custom Bundles) -->
@@ -629,6 +630,37 @@
 								<li>Click <strong>Hold Power (2s)</strong> or hold the side <strong>PWR</strong> button to summon the V1 Power Menu.</li>
 								<li>Slide Battery to <strong>15%</strong> or switch Charger to <strong>Charging</strong> and watch both the topbar icon and the breathing RGB LED respond.</li>
 								<li>Try <strong>Settings &rarr; Buttons</strong> to test hardware button remapping, or <strong>Settings &rarr; Screen &rarr; Rotate 180&deg;</strong>.</li>
+							</ul>
+						</div>
+					</div>
+
+					<!-- Tab: Video Converter -->
+					<div class="tab-content" id="tab-video">
+						<div class="card">
+							<div class="card-head">
+								<h2>Video for TempoTec V1</h2>
+							</div>
+							<p class="hint">The Ingenic X1600 has no hardware H.264/HEVC video decoder. Sonix plays video by software-decoding <strong>MPEG-1 video + MP2 audio</strong> in an MPEG-PS <code>.mpg</code> container at the native <strong>320×240</strong> landscape resolution (rotated to the 240×320 panel during playback).</p>
+						</div>
+						<div class="card">
+							<div class="card-head">
+								<h2>One-Click ffmpeg Converter</h2>
+							</div>
+							<p class="hint">Convert any video to a V1-friendly <code>.mpg</code>. Requires <a href="https://ffmpeg.org/download.html" target="_blank" rel="noopener">ffmpeg</a> installed on your computer.</p>
+							<div style="margin:8px 0;">
+								<div class="hint" style="margin-bottom:4px;"><strong>Recommended (320×240, 24 fps, good quality):</strong></div>
+								<pre id="vp-cmd-1" style="white-space:pre-wrap;word-break:break-all;background:rgba(0,0,0,.25);padding:10px;border-radius:8px;font-size:12px;line-height:1.4;margin:0;">ffmpeg -i input.mp4 -vf "scale=320:240:force_original_aspect_ratio=decrease,pad=320:240:(ow-iw)/2:(oh-ih)/2,fps=24" -c:v mpeg1video -q:v 6 -c:a mp2 -b:a 128k -ar 44100 -ac 2 output.mpg</pre>
+								<button class="btn btn-ghost btn-xs" type="button" onclick="navigator.clipboard.writeText(document.getElementById('vp-cmd-1').textContent)">Copy</button>
+							</div>
+							<div style="margin:8px 0;">
+								<div class="hint" style="margin-bottom:4px;"><strong>Smaller file (lower bitrate):</strong></div>
+								<pre id="vp-cmd-2" style="white-space:pre-wrap;word-break:break-all;background:rgba(0,0,0,.25);padding:10px;border-radius:8px;font-size:12px;line-height:1.4;margin:0;">ffmpeg -i input.mp4 -vf "scale=320:240:force_original_aspect_ratio=decrease,pad=320:240:(ow-iw)/2:(oh-ih)/2,fps=20" -c:v mpeg1video -b:v 600k -c:a mp2 -b:a 96k -ar 44100 -ac 2 output.mpg</pre>
+								<button class="btn btn-ghost btn-xs" type="button" onclick="navigator.clipboard.writeText(document.getElementById('vp-cmd-2').textContent)">Copy</button>
+							</div>
+							<ul class="tips-list">
+								<li>Copy the resulting <code>.mpg</code> to your microSD card and open it from <strong>Files</strong>.</li>
+								<li>Video plays in landscape (320×240). During playback, side volume buttons scrub ±10s; play/pause toggles playback.</li>
+								<li>Keep bitrates modest (≤1.5 Mbps video) for smooth software decode on the ~1 GHz MIPS CPU.</li>
 							</ul>
 						</div>
 					</div>

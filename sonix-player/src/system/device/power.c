@@ -16,6 +16,7 @@
 #include "src/system/device/ota.h"
 #include "src/gui/library/browser.h"
 #include "src/gui/settings/screensaver.h"
+#include "src/gui/video/videoplayer_ui.h"
 #include "src/system/device/system.h"
 #include "src/system/core/panel.h"
 
@@ -1830,6 +1831,9 @@ void power_screen_off(void) {
 	webemu_notify_screen(false);
 #endif
 
+	// Release direct-fb video before the wake hook renders the screensaver.
+	videoplayer_ui_suspend();
+
 	// With the panel dark, draw what the next wake should open on straight
 	// into the framebuffer. Unblanking presents whatever the framebuffer
 	// already holds, and it holds the last thing drawn, so without this the
@@ -2080,6 +2084,12 @@ void power_screen_on(void) {
 	// power-button path. Keep the explicit activity clock in step as well: the
 	// screensaver's idle policy uses it while its lock screen is visible.
 	power_notify_activity();
+
+	// Resume direct-fb video if it was suspended for screen off and the
+	// screensaver is not holding the screen.
+	if (videoplayer_ui_is_suspended() && !screensaver_is_visible()) {
+		videoplayer_ui_resume();
+	}
 
 	// Radio restoration can involve slow hardware work and does not belong
 	// between the power press and the first visible frame.
