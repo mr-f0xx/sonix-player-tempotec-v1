@@ -32,6 +32,9 @@ void screensaver_init(gui_config_t *cfg);
 // Off is the default.
 void screensaver_set_enabled(bool enabled);
 bool screensaver_get_enabled(void);
+// Show the swipe-up hint (on by default). Does not change the gesture.
+void screensaver_set_show_chevron(bool visible);
+bool screensaver_get_show_chevron(void);
 // Replace album artwork with a live spectrum; folder pictures are unaffected.
 void screensaver_set_visualizer(bool enabled);
 bool screensaver_get_visualizer(void);

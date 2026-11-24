@@ -78,6 +78,7 @@ static lv_obj_t *screen_off_value;
 static lv_obj_t *screen_off_slider;
 static lv_obj_t *doubletap_switch;
 static lv_obj_t *screensaver_switch;
+static lv_obj_t *screensaver_chevron_row, *screensaver_chevron_switch;
 static lv_obj_t *screensaver_visualizer_switch;
 static lv_obj_t *screensaver_pills;
 static lv_obj_t *screensaver_album_pill;
@@ -129,6 +130,12 @@ static void screensaver_refresh(void) {
 		lv_obj_remove_state(screensaver_switch, LV_STATE_CHECKED);
 		lv_obj_set_hidden(screensaver_pills, true);
 	}
+	lv_obj_set_hidden(screensaver_chevron_row, !on);
+	if (screensaver_get_show_chevron())
+		lv_obj_add_state(screensaver_chevron_switch, LV_STATE_CHECKED);
+	else
+		lv_obj_remove_state(screensaver_chevron_switch, LV_STATE_CHECKED);
+
 	screensaver_source_t source = screensaver_source();
 	settingsrow_pill_active(screensaver_album_pill, source == SCREENSAVER_SOURCE_ALBUM);
 	settingsrow_pill_active(screensaver_images_pill, source == SCREENSAVER_SOURCE_IMAGES);
@@ -175,6 +182,11 @@ static void screensaver_toggle_cb(lv_event_t *e) {
 	// moment the switch is flipped.
 	screensaver_set_enabled(lv_obj_has_state(screensaver_switch, LV_STATE_CHECKED));
 	screensaver_refresh();
+}
+
+static void screensaver_chevron_cb(lv_event_t *e) {
+	lv_obj_t *toggle = lv_event_get_target_obj(e);
+	screensaver_set_show_chevron(lv_obj_has_state(toggle, LV_STATE_CHECKED));
 }
 
 static void screensaver_source_cb(lv_event_t *e) {
@@ -564,6 +576,9 @@ static void build_screen_page(gui_config_t *cfg) {
 		settingsrow_pill(style_pills, "screensaver_style_fill", SCREENSAVER_STYLE_FILL, screensaver_style_cb);
 	screensaver_framed_pill =
 		settingsrow_pill(style_pills, "screensaver_style_framed", SCREENSAVER_STYLE_FRAMED, screensaver_style_cb);
+
+	screensaver_chevron_row = settingsrow_toggle(container, "screensaver_chevron", &screensaver_chevron_switch,
+												   screensaver_chevron_cb);
 
 	// Settings for the Album source only; folder pictures take precedence.
 	screensaver_viz_card = settingsrow_toggle_pills(container, "screensaver_visualizer", screensaver_visualizer_cb,
