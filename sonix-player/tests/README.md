@@ -23,6 +23,7 @@ make -C sonix-player/tests btreceiver-session
 make -C sonix-player/tests power-display
 make -C sonix-player/tests chargerattached
 make -C sonix-player/tests batteryprofile batteryprofile-ui
+make -C sonix-player/tests sdhealth
 make -C sonix-player/tests corners
 make -C sonix-player/tests playbutton
 make -C sonix-player/tests musicsettings-rows
@@ -57,7 +58,7 @@ make -C sonix-player/tests subsonicdl
 make -C sonix-player/tests subsonic-all
 ```
 
-The non-UI suites require only a C compiler, Make and Python 3 (plus standard pthread/dl/math libraries). The `hiresbadge-ui`, `peq-ui`, `quickpanel-layout`, `btreceiver-session`, `power-display`, `batteryprofile-ui`, `corners`, `playbutton`, `musicsettings-rows`, `volume-overlay`, `playerdeck`, `vinylayout`, `waveform-overlay`, `edge-lock`, `home-swipe`, `switcher-scroll`, `tidal-ui` and aggregate `ui` targets also need the LVGL 9.6.0 checkout described below. None requires ALSA, SDL, a MIPS toolchain, a music server, a real account, or downloaded audio.
+The non-UI suites require only a C compiler, Make and Python 3 (plus standard pthread/dl/math libraries). The `hiresbadge-ui`, `peq-ui`, `quickpanel-layout`, `btreceiver-session`, `power-display`, `batteryprofile-ui`, `sdhealth-ui`, `corners`, `playbutton`, `musicsettings-rows`, `volume-overlay`, `playerdeck`, `vinylayout`, `waveform-overlay`, `edge-lock`, `home-swipe`, `switcher-scroll`, `tidal-ui` and aggregate `ui` targets also need the LVGL 9.6.0 checkout described below. None requires ALSA, SDL, a MIPS toolchain, a music server, a real account, or downloaded audio.
 
 `run_subsonic_tests.py` starts a temporary threaded localhost HTTP server plus three HTTPS servers carrying the certificates in `tls_fixtures.py`, runs the C binary with a private temporary config directory, verifies its requests, then shuts down. All account values are synthetic. Build products live in ignored `.build/`; response/PCM fixtures are generated in memory rather than added to Git, and the three test certificates are pasted into that Python file rather than downloaded.
 
@@ -104,6 +105,8 @@ The `sleeve-hold-ui` test holds a finger still on the album artwork with the rea
 The `lyrics-size-ui` test exercises the lyrics text-size and timing popovers on the 240×320 LVGL display. It checks that the three header buttons stay clear of each other, the active size is marked, synced lines stay centred, untimed lyrics retain their scroll position, and the saved lyrics size leaves the UI setting unchanged. It also checks live timing nudges with one save on dismissal (none for a net-zero edit), highlighting and seek targets, reset, and a track change with the menu open. The `mostplayed` database fixture verifies per-track offset persistence across a reopen.
 
 The `batteryprofile` test uses temporary sysfs files and a wrapped I²C adapter to check stock V1 units, missing or invalid readings, read-only charge-limit access, discharge estimates, and same-source deltas. `batteryprofile-ui` drives the production page at 240×320 with fake battery samples. It covers USB and screen-off behavior, charge history, baseline and resample actions, polling off-page, and translated metric layouts. To validate a real cell's load response, follow the [on-device A/B procedure](../../docs/battery-profiler.md).
+
+The `sdhealth` aggregate runs three checks for the [SD card health page](../../docs/sd-card-health.md). `sdbench` injects a fake 4K card and clock to cover rate formatting, healthy and slow cards, bad blocks, 250 ms stalls, identical distant probes as a fake-capacity hint, cancellation, verdict priority and the real `O_DIRECT`/buffered path against a temporary sparse file. `sdhealth-ui` drives the production 240×320 page with a synchronous wrapped worker and covers running/progress, every verdict, USB and missing-card guards before and during a run, cancel, stale-worker isolation, thread-start failure, the 15-second stalled-read watchdog, theme refresh and larger text across all 11 languages. `sdhealth-keys` checks that every `sd_health_*` literal used by the page has a non-empty value in every shipped INI, that there are no stale or duplicate keys, and that the files stay below `lang.c`'s table cap. None needs a real card; physical interpretation of the numbers is described in the guide.
 
 The `musicsettings-rows` UI test checks that NOS does not reuse Filters' waveform bitmap and that the expandable DSD gain card shares the icon/title columns and collapsed midline of ordinary Music settings rows across all 11 shipped languages, all five themes, both switch states and larger text.
 

@@ -21,7 +21,10 @@
 // globals -- what is on screen is in the language being left and can only be
 // read with its table, while the new text has to come from the other.
 #define ARENA_STEP (32 * 1024)
-#define MAX_ENTRIES 2048
+// Italiano.ini carries a few dozen extra legacy keys, and each new settings
+// page adds its own. Leave room for both: table_add() silently drops entries
+// past this limit, which would show bare tags for the last rows of a file.
+#define MAX_ENTRIES 2304
 #define BUCKETS 1024
 
 typedef struct {

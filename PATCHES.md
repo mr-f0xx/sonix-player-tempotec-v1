@@ -5234,3 +5234,60 @@ checks they arrive; `tests/test_crossfade.c` checks that a +6 dB correction
 against a 0.5 sample peak and a 1.1 true peak lands at 1/1.1, that a true
 peak below the sample peak does not loosen the limit, and that album mode
 uses the album pair.
+
+## Five seconds on a card that can freeze the interface
+
+A cheap, worn or fake-capacity microSD card can still enumerate, show a plausible
+size and hold a music library while taking hundreds of milliseconds to answer
+one 4K read. That is the same pause a user sees as a mysterious UI freeze, and
+it arrives before the filesystem reports any corruption. The V1 has no SMART
+interface to ask: SD controllers remap failing flash privately. What it can do
+is sample reads from the raw block device and show the latency and errors.
+
+The new **Settings → System → SD card health** page deliberately never reads a
+block on the LVGL thread. `sdhealthpage.c` starts a detached `SCHED_IDLE`
+worker, and the worker calls `sdbench.c`; a 100 ms page timer copies only a
+mutex-protected result structure. Progress, measured rates and the verdict are
+painted on the UI thread. Each run owns a small heap state with its own cancel
+flag and generation, so a new test cannot clear a hung worker's cancellation or
+let it publish a stale result. A stalled kernel `pread()` cannot be interrupted
+from userspace, so after five seconds plus a ten-second grace the timer
+invalidates that worker's generation, reports **Card stopped answering** and
+discards any result that eventually returns; the worker frees its own state at
+that point. USB handover or card removal flips the worker's cancel flag between
+individual reads; starting while USB owns the block device is refused before
+the thread exists.
+
+`sdbench.c` opens `storage_sd_device()` read-only and writes nothing. It proves
+`O_DIRECT` with an aligned 4K read before using it, then falls back to buffered
+reads with `POSIX_FADV_RANDOM` and `POSIX_FADV_DONTNEED` so a second pass cannot
+become a RAM benchmark. Five untimed probes near 0%, 12%, 50%, 87% and the last
+block look for read errors, long stalls and identical non-uniform content at
+distant offsets, a fake-capacity hint rather than proof. The timed five seconds
+is an explicit half-and-half decision: 2.5 s walking consecutive blocks and
+2.5 s walking a fixed, coprime-stride pseudo-random sequence over distinct
+blocks. It reports decimal MB/s, random IOPS, worst latency, counts, and the
+byte offsets of the first error, stall and repeated probe.
+
+The comparison values are **diagnostic references, not a pass/fail
+certification**. The 10 MB/s figure is a minimum sequential *write* rate for
+Class 10/U1/V10, and A1's 1500 random-read IOPS belongs to an application
+class that also specifies writes; this read-only test cannot certify either.
+A quarter-second (250 ms) slow-read cutoff is simply an operationally visible
+stall. The page therefore says "Looks healthy" for a sample, never "card
+certified", and shows every measured number alongside the verdict. Read errors
+outrank repeated probe content, which outrank stalls, which outrank the rate
+references. The guide spells out that a five-second sample is not a full
+surface scan, a write verification or a remaining-life measurement, and points
+to F3/H2testw off-player for a suspected fake.
+
+Forty-two `sd_health_*` strings were added to all eleven shipped INIs. Raising
+`lang.c`'s `MAX_ENTRIES` from 2048 to 2304 was necessary because `table_add()`
+stops silently at the cap: Italiano already carried extra legacy keys, and the
+new page would otherwise have shown bare tags at the end of the file. The
+`sdhealth-keys` check derives its key list from the page sources, so a new
+literal cannot ship without all eleven translations. `sdbench`, `sdhealth-ui`
+and that key check are grouped under `make -C sonix-player/tests sdhealth`; the
+UI test holds a worker back to exercise cancel, USB/card removal and stale
+results, and the engine is included in `sanitize`. The UI target is also part
+of the aggregate `ui` suite.
