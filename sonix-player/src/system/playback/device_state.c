@@ -14,6 +14,7 @@
 #include "src/system/remote/dlna.h"
 #include "src/system/streaming/jellyfincache.h"
 #include "src/system/streaming/podcast.h"
+#include "src/system/streaming/podcastbookmark.h"
 #include "src/system/streaming/podcastcache.h"
 #include "src/system/streaming/qobuzcache.h"
 #include "src/system/streaming/soundcloudcache.h"
@@ -241,6 +242,10 @@ void device_state_remember_note(void) {
 	if (remember_should_write(&remember, state.current_file, state.status, state.progress_current_secs,
 							  remember_now_ms())) {
 		library_playback_state_save(state.current_file, state.progress_current_secs);
+		// The same checkpoint, per episode: "remember track" keeps one track
+		// for the whole player, which is not what coming back to a podcast
+		// means. No-op outside the podcast folder and with the catcher off.
+		podcastbookmark_note(state.current_file, state.progress_current_secs, state.progress_total_secs);
 	}
 }
 
@@ -280,6 +285,7 @@ void device_state_remember_flush(void) {
 	}
 	remember.restore_pos = -1.0;
 	library_playback_state_save(state.current_file, state.progress_current_secs);
+	podcastbookmark_note(state.current_file, state.progress_current_secs, state.progress_total_secs);
 	snprintf(remember.file, sizeof(remember.file), "%s", state.current_file);
 	remember.status = state.status;
 	remember.pos = state.progress_current_secs;
@@ -545,6 +551,9 @@ void device_state_note_storage_gone(void) {
 	device_state_get(&state);
 	// The databases on the card close right after this.
 	flush_book_position(&state);
+	// And the podcast's own place: the same checkpoint the ten-second timer
+	// would have written, on the way out while the card is still there.
+	podcastbookmark_note(state.current_file, state.progress_current_secs, state.progress_total_secs);
 	// A second in is not a position worth coming back to, and a live stream has
 	// none at all.
 	if (state.live || !state.current_file[0] || state.progress_current_secs <= 1.0) {
@@ -624,6 +633,21 @@ static void load_and_play_at(const char *filepath, double position) {
 		audiobook_track_changed(current_metadata_file);
 		replaygain_load(&current_metadata);
 		apply_track_speed();
+	}
+
+	// Where an episode in the podcast folder was left. Below zero means "the
+	// beginning", which for an episode is wherever it was paused last time;
+	// an explicit zero means "from the start", and the old place is forgotten
+	// rather than left to catch the next open. A file that is not a podcast
+	// episode, or a player with the catcher switched off, answers false and
+	// starts where it always did.
+	if (position < 0) {
+		double bookmark = 0.0;
+		if (podcastbookmark_get(current_metadata_file, &bookmark)) {
+			position = bookmark;
+		}
+	} else if (position == 0.0) {
+		podcastbookmark_clear(current_metadata_file);
 	}
 
 	if (position > 0) {

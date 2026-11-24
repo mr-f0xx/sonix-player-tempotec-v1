@@ -293,6 +293,46 @@ static void test_find(void) {
 	printf("  finding one episode\n");
 }
 
+// The channel's own fields, for the catcher: it has no catalogue to ask, so
+// the feed is the only place the folder's name, the sidecar's author and the
+// folder's artwork come from.
+static void test_channel(void) {
+	char title[PODCAST_TITLE_MAX], author[PODCAST_AUTHOR_MAX], image[PODCAST_URL_MAX];
+
+	// The messy feed: the channel's title, the itunes:image of the channel and
+	// the author. The item's own image is not the channel's, and the item's
+	// title is not the channel's either.
+	CHECK(podcastrss_channel(MESSY, title, sizeof(title), author, sizeof(author), image, sizeof(image)));
+	CHECK_STR(title, "The Show Itself");
+	CHECK_STR(image, "https://art.example/show.jpg");
+	CHECK_STR(author, "");
+
+	// RSS 2.0's <image><url>, and an author on either spelling.
+	const char *plain =
+		"<rss><channel>"
+		"<title>A Plain Show</title>"
+		"<itunes:author>Someone &amp; Sons</itunes:author>"
+		"<image><url>https://art.example/plain.png</url><title>Not the show</title></image>"
+		"<item><title>An episode</title><guid>g</guid>"
+		"<enclosure url=\"https://cdn.example/1.mp3\"/></item>"
+		"</channel></rss>";
+	CHECK(podcastrss_channel(plain, title, sizeof(title), author, sizeof(author), image, sizeof(image)));
+	CHECK_STR(title, "A Plain Show");
+	CHECK_STR(author, "Someone & Sons");
+	CHECK_STR(image, "https://art.example/plain.png");
+
+	// A document with no channel title is not a feed, which is the catcher's
+	// cue to keep whatever it had rather than trust an error page.
+	CHECK(!podcastrss_channel("<html><body>No</body></html>", title, sizeof(title), NULL, 0, NULL, 0));
+	CHECK(!podcastrss_channel(NULL, title, sizeof(title), NULL, 0, NULL, 0));
+
+	// A caller that wants only the title may pass NULL for the rest.
+	CHECK(podcastrss_channel(plain, title, sizeof(title), NULL, 0, NULL, 0));
+	CHECK_STR(title, "A Plain Show");
+
+	printf("  the channel\n");
+}
+
 int main(void) {
 	printf("podcast feed tests\n");
 
@@ -302,6 +342,7 @@ int main(void) {
 	test_walk();
 	test_not_a_feed();
 	test_find();
+	test_channel();
 
 	if (failures) {
 		fprintf(stderr, "%d check(s) failed\n", failures);

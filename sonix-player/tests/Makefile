@@ -789,6 +789,32 @@ $(BUILD)/test_podcastplayed: test_podcastplayed.c $(ROOT)/src/system/streaming/p
 	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ test_podcastplayed.c \
 		$(ROOT)/src/system/streaming/podcastplayed.c $(BUILD)/sqlite3_impl.o $(LDFLAGS) $(LDLIBS)
 
+# The offline catcher's decisions with no network: feeds.txt is read the way a
+# hand-written file is, and the new-episode decision is the one that can fill
+# a card if it is wrong. The state is the real SQLite on a temporary card.
+.PHONY: podcastcatcher
+podcastcatcher: $(BUILD)/test_podcastcatcher
+	$(BUILD)/test_podcastcatcher
+
+$(BUILD)/test_podcastcatcher: test_podcastcatcher.c $(ROOT)/src/system/streaming/podcastcatcher.c \
+                              $(ROOT)/src/system/streaming/podcastcatcher_internal.h \
+                              $(ROOT)/src/system/streaming/podcastcatcher.h $(BUILD)/sqlite3_impl.o
+	@mkdir -p $(BUILD)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ test_podcastcatcher.c \
+		$(ROOT)/src/system/streaming/podcastcatcher.c $(BUILD)/sqlite3_impl.o $(LDFLAGS) $(LDLIBS)
+
+# Per-episode playback bookmarks against the real SQLite. The module switch,
+# the config key and the podcast-folder test are stubbed; the store is real.
+.PHONY: podcastbookmark
+podcastbookmark: $(BUILD)/test_podcastbookmark
+	$(BUILD)/test_podcastbookmark
+
+$(BUILD)/test_podcastbookmark: test_podcastbookmark.c $(ROOT)/src/system/streaming/podcastbookmark.c \
+                               $(ROOT)/src/system/streaming/podcastbookmark.h $(BUILD)/sqlite3_impl.o
+	@mkdir -p $(BUILD)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ test_podcastbookmark.c \
+		$(ROOT)/src/system/streaming/podcastbookmark.c $(BUILD)/sqlite3_impl.o $(LDFLAGS) $(LDLIBS)
+
 # The podcast catalogue on both of the directories it can use, which is to say
 # the requests each one builds and the structs each one fills. The real
 # podcast.c, JSON parser, settings, region list and SHA-1 are linked; the

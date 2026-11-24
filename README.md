@@ -410,6 +410,7 @@ Instead, Sonix speaks the exact same authentication flows as the stock TempoTec 
 - **SoundCloud**, **Internet Radio**, **Subsonic / Gonic**, **Jellyfin** and **Podcasts** require no API keys.
 - **SoundCloud** searches and streams public tracks out of the box (automatically discovering and rotating a public web `client_id`), and optionally accepts a profile URL / `username` or session `oauth_token` on-device or under `[soundcloud]` in `streaming-keys.ini` — see [SoundCloud](#soundcloud).
 - **Podcasts** search, chart, play and download from Apple's public podcast directory, which asks for nothing: no signup, no key, no account. It works out of the box on any install, including a published image that ships without keys. Podcast Index remains available for anyone who has a pair -- see below.
+- **Podcast catcher** (opt-in under **Settings → Plugins**) reads `feeds.txt` on the card whenever Wi-Fi connects, downloads new episodes into the `Podcast` folder, and bookmarks each one as it plays -- see [Offline podcast catcher](#offline-podcast-catcher).
 - **ListenBrainz** requires no key in `streaming-keys.ini`: request a personal user token at `listenbrainz.org/settings` and paste it into **Settings → Music → ListenBrainz**. Scrobbling to Last.fm and ListenBrainz are independent and can run side by side.
 - **Last.fm** uses a free personal API key (`last.fm/api`). Copy `sonix-player/streaming-keys.ini.example` to the root of the microSD card as `streaming-keys.ini` (or edit the `streaming-keys.ini` already created on the card), fill in `[lastfm]`, and restart the player. Do not commit or share this file.
 
@@ -460,6 +461,47 @@ oauth_token =
 username =
 client_id =
 ```
+
+### Offline podcast catcher
+
+An opt-in module under **Settings → Plugins** (`podcastcatcher`), for someone
+who knows which feeds they follow and would rather not look them up in a
+catalogue. It needs the **Podcasts** module on as well: the episodes it
+downloads are shown by the Podcasts page's **Saved podcasts** list.
+
+Put a `feeds.txt` in the root of the microSD card, one feed address a line:
+
+```
+# One feed per line. Blank lines and lines starting with # are ignored.
+https://feeds.example.com/show.rss
+https://example.org/other.xml
+```
+
+Whenever Wi-Fi joins a network -- and once at start-up if it is already up --
+each feed is read and its new episodes are downloaded into the `Podcast`
+folder as ordinary files, with the sidecar and cover the Podcasts page's own
+downloads get. As an episode plays its position is bookmarked per file, so
+opening it again carries on where it was left; hearing it to the end clears
+the bookmark and marks the episode heard like any other.
+
+The first check of a feed takes its newest `max_episodes` and records the rest
+as seen, so a feed with years of back catalogue cannot fill the card. Later
+checks take only what is genuinely new, and a failed download is retried on
+the next connection, up to three times. A feed removed from `feeds.txt` is
+forgotten with its episode records. The settings live in
+`[podcast_catcher]` of `device_config.ini`:
+
+```ini
+[podcast_catcher]
+feeds_file = feeds.txt      ; on the card, relative to its root
+max_episodes = 3            ; newest episodes taken per feed, per check
+auto_bookmark = true        ; remember where each episode was left
+min_free_mb = 200           ; stop rather than fill the card
+```
+
+The module is never switched on by a firmware update, even on a device that is
+seeded as an existing install: it fetches from the network and writes to the
+card on its own, so it waits to be asked for.
 
 ### Alternative PC / private-build key extraction
 

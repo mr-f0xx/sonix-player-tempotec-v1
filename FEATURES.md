@@ -163,6 +163,18 @@ A–Z and Z–A beside it under Podcast settings → Order; the chart and a podc
 episodes are kept on the card, so a tab opens on the names it showed last time.
 A row's menu has **Select**: tick several podcasts and follow or unfollow them
 as a group from the corner.
+- **Offline podcast catcher (opt-in)** - a `feeds.txt` in the root of the
+card, one feed address a line, read whenever Wi-Fi joins a network and once at
+start-up if the radio is already up. New episodes are downloaded into the same
+`Podcast` folder as the Podcasts page uses, so they appear under Saved
+podcasts and play with the podcast controls. Each episode is bookmarked as it
+plays, per file, so opening it again carries on where it was left; hearing it
+to the end clears the mark and ticks it heard like any other episode. The
+first check of a feed takes its newest `max_episodes` (default 3) and records
+the rest as seen, so a feed with years of back catalogue cannot fill the card;
+a failed download is retried on the next connection, up to three times. Under
+**Settings → Plugins**, and never switched on by an update. See
+[docs/ADDONS.md](docs/ADDONS.md).
 - **Episodes heard and unheard** - an episode played to its end wears a ticked
 badge on its cover in the list and its text steps back, kept in `podcast.db` by
 episode id, so it reads the same whether it was streamed or downloaded. A long press marks one heard (or heard

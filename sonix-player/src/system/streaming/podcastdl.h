@@ -46,7 +46,15 @@ bool podcastdl_exists(const podcast_episode_t *episode, const char *feed_title);
 // starting nothing, when a download is already running, there is no card, or
 // the folder cannot be made.
 bool podcastdl_start(const podcast_episode_t *episode, const char *feed_title, const char *feed_author,
-					 const char *feed_image);
+					const char *feed_image);
+
+// The same download, on the calling thread, for the background catcher: it
+// runs its own queue and must not compete with the user for the one slot the
+// podcast page's download card reads. Blocks until the episode is on the card
+// or has failed, and returns which of the two happened. The file, the sidecar
+// and the cover are exactly the ones podcastdl_start() writes.
+bool podcastdl_fetch(const podcast_episode_t *episode, const char *feed_title, const char *feed_author,
+					const char *feed_image);
 
 // True when `path` is inside the Podcast folder.
 bool podcastdl_owns(const char *path);
