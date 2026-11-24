@@ -1,13 +1,13 @@
 # Pocket vault (Keybox)
 
-An optional More tool for one small block of text that should not sit in the
-open on a microSD card: passwords, recovery codes, a seed phrase, the Wi-Fi key
-of a place you visit. It is modelled on Rockbox's **Keybox** and is deliberately
-the opposite of a password manager account -- there is no account, no sync, no
-network and no phone. The card is the only copy.
+An optional More tool for the passwords and recovery codes that should not sit
+in the open on a microSD card: one row per title, the password underneath it,
+up to 200 rows. It is modelled on Rockbox's **Keybox** and
+is deliberately the opposite of a password manager account -- there is no
+account, no sync, no network and no phone. The card is the only copy.
 
 > **There is no recovery.** The PIN is not stored and no recovery key exists. A
-> forgotten PIN means the text is gone. So does losing the card with an
+> forgotten PIN means every entry is gone. So does losing the card with an
 > attacker willing to work on the file. Read [What this does and does not
 > protect](#what-this-does-and-does-not-protect) before trusting it with
 > something you cannot lose.
@@ -15,24 +15,30 @@ network and no phone. The card is the only copy.
 ## Using it
 
 **More → Vault** asks for a PIN the first time. Type 4 to 12 digits twice; the
-page says when the two do not match. A new vault opens straight into the
-editor, because the first thing to do with it is write something. The pencil in
-the corner switches between reading and writing, the check on the keyboard or
-in the corner saves, and the ellipsis opens three choices:
+page says when the two do not match. A new vault opens on an empty list with
+one accent row, **New password**. Tap it and type a **Title** (Wi-Fi, bank,
+email) and the **Password** below it; the check in the corner, or on the
+keyboard, saves the row and returns to the list. Tapping a row reopens it for
+editing, and the eye beside the password shows or hides it. The trash in the
+corner deletes the entry that is open, after asking first. The ellipsis opens
+three choices for the whole vault:
 
-- **Change PIN** -- re-encrypts the text under a new PIN with a new salt. The
-  old PIN stops working as soon as it finishes.
+- **Change PIN** -- re-encrypts every entry under a new PIN with a new salt.
+  The old PIN stops working as soon as it finishes.
 - **Lock now** -- puts the keys away without leaving the page.
 - **Erase vault** -- asks first. Erasing removes the file; there is no undo and
   no copy.
 
-The vault locks itself after **two minutes without typing**, and saves unsaved
-writing first if the card will take it. Leaving the page also saves and locks.
-The page never draws the PIN, only a row of dots, and the entry field has no
-cut/copy history.
+The vault locks itself after **two minutes without typing**, and saves the
+entry being edited first if the card will take it. Leaving the page also saves
+and locks. The page never draws the PIN, only a row of dots, and the editor
+keeps no cut/copy history.
 
-The text is stored as UTF-8 and may be up to **16 KB** (16,384 bytes). That is
-several pages of passwords or a whole seed phrase several times over.
+Up to **200 entries** fit in one vault, and all of them together may take
+**64 KB** (65,536 bytes) before encryption. A title is one line of up to 96
+bytes; a password may be up to 16 KB, so a long seed phrase or a note can still
+live in one row. Both fields are UTF-8. The list shows the first line of each
+password, dimmed under its title, with an eye to mask it.
 
 ## What is on the card
 
@@ -50,7 +56,7 @@ rather than half of a new one.
 ```text
 offset  size  field
 0       8     "SONIXVLT"
-8       2     version, big-endian (1)
+8       2     version, big-endian (2)
 10      2     reserved, zero
 12      4     PBKDF2 iteration count, big-endian
 16      16    salt
@@ -58,6 +64,19 @@ offset  size  field
 48      4     ciphertext length, big-endian
 52      n     ciphertext
 52+n    32    HMAC-SHA256 tag
+```
+
+The plaintext is one length-prefixed table, so a save writes every entry
+together rather than leaving a file per password:
+
+```text
+"VLT2"
+entry count, big-endian (0..200)
+for each entry:
+    title length, big-endian
+    secret length, big-endian
+    title bytes
+    secret bytes
 ```
 
 The keys come from the PIN alone:
@@ -68,11 +87,13 @@ enc_key = keys[0..31]
 mac_key = keys[32..63]
 ```
 
-The text is encrypted with **AES-256 in counter (CTR) mode** under `enc_key` and
-the random 128-bit counter. The tag is `HMAC-SHA256(mac_key, header ||
+The table is encrypted with **AES-256 in counter (CTR) mode** under `enc_key`
+and the random 128-bit counter. The tag is `HMAC-SHA256(mac_key, header ||
 ciphertext)`, computed over every byte before it. On opening, the tag is checked
 **before** anything is decrypted; a wrong PIN, a flipped byte and a card that
-was pulled out are then the same answer -- the vault does not open. The header
+was pulled out are then the same answer -- the vault does not open. A count or
+length field that does not add up is refused before anything is allocated for
+it. The header
 is inside the tag, so the iteration count, salt and counter cannot be changed
 underneath the ciphertext.
 
@@ -93,8 +114,10 @@ It is checked against published vectors in `tests/test_vault.c`: the AES-256
 block vectors from FIPS 197, the counter-mode vector from NIST SP 800-38A, and
 the HMAC-SHA256 and PBKDF2 answers from RFC 4231 and RFC 7914's published
 PBKDF2-SHA256 tests. The same test creates a vault on a temporary card and takes
-it through a wrong PIN, a flipped ciphertext byte, an edited iteration count, a
-truncated file, a PIN change and erasure.
+it through adding, editing and removing entries, the 200-entry and 64 KB
+ceilings, a wrong PIN, a flipped ciphertext byte, an edited iteration count, a
+truncated file, a PIN change, erasure, and a version-1 file written by hand so
+the migration to the table is tested against the format that shipped.
 
 ```sh
 cd sonix-player/tests && make vault
@@ -103,10 +126,11 @@ make -C sonix-player/tests tools-ui   # the page on the real renderer
 
 ## What this does and does not protect
 
-It protects the text **at rest on the card**: someone who finds the card, reads
-it in a computer, or copies the file cannot read the text without the PIN, and
-cannot tell whether a guess was close. It also protects against a casual look at
-the player, because the text is not in the file and the page locks itself.
+It protects the entries **at rest on the card**: someone who finds the card,
+reads it in a computer, or copies the file cannot read a title or a password
+without the PIN, and cannot tell whether a guess was close. It also protects
+against a casual look at the player, because nothing is in the file in the open
+and the page locks itself.
 
 It does **not** protect against:
 
@@ -115,14 +139,17 @@ It does **not** protect against:
   a short PIN quickly; a 6- to 8-digit PIN is a great deal better. Choose the
   longest PIN you are willing to type on the glass keypad, and never reuse the
   PIN of a bank card or a door.
-- **A player that is already unlocked.** While the vault is open its text and
-  keys are in RAM. The page locks after two minutes, on leaving, and on a
+- **A player that is already unlocked.** While the vault is open its entries
+  and keys are in RAM. The page locks after two minutes, on leaving, and on a
   restart, but software running on the device -- or someone holding it while it
-  is open -- can read what is on the screen.
-- **Remnants in memory.** The session's text and keys are overwritten before
-  they are freed. LVGL's own copy of the textarea buffer is freed without being
-  scrubbed; that is a limitation of the toolkit, not a promise this page can
-  make. Locking the page and restarting the player is the clean answer.
+  is open -- can read what is on the screen. The list shows passwords unless the
+  eye on each row is used; the editor masks the password until its eye is
+  tapped.
+- **Remnants in memory.** The session's entries and keys are overwritten before
+  they are freed, and the editor's fields are cleared when the list returns.
+  LVGL's own freed textarea buffers are not scrubbed; that is a limitation of
+  the toolkit, not a promise this page can make. Locking the page and
+  restarting the player is the clean answer.
 - **A compromised firmware.** If the build itself is not trusted, it can log
   the PIN as it is typed. The vault is a feature of the firmware, not a separate
   secure element: the V1 has none.
@@ -140,8 +167,8 @@ its pages from being built at start-up.
 Usually there is nothing to recover: the tag covers the header and the
 ciphertext, so a file that fails to open is not a file that can be repaired by
 hand. A vault that does not open after a card error can sometimes be restored
-from a backup of the `Vault` folder. Re-creating it means erasing it and writing
-the text again; the PIN does not help with a damaged ciphertext.
+from a backup of the `Vault` folder. Re-creating it means erasing it and typing
+the entries again; the PIN does not help with a damaged ciphertext.
 
 If the player says **Cannot open the vault** for a file that was working, check
 the card first -- `Settings → System → SD card health` is read-only -- and copy
@@ -151,11 +178,15 @@ the file off before writing anything else to the card.
 
 | Path | What it is |
 | --- | --- |
-| `src/system/vault/vaultstore.{h,c}` | The file format, PBKDF2 keys, sealing, opening, erasing. No UI. |
-| `src/gui/vault/vaultpage.{h,c}` | The two faces of the page: PIN pad and text, the idle lock and the menu. |
+| `src/system/vault/vaultstore.{h,c}` | The file format, the entry table, PBKDF2 keys, sealing, opening, erasing. No UI. |
+| `src/gui/vault/vaultpage.{h,c}` | The three faces of the page: PIN pad, entry list and editor, the idle lock and the menu. |
 | `src/system/crypto/aes256.{h,c}`, `kdf.{h,c}` | AES-256/CTR, HMAC-SHA256 and PBKDF2. |
 | `tests/test_vault.c` | Known-answer tests and the store's failure cases on a temporary card. |
-| `tests/ui/test_tools_pages.c` | The page on the renderer: creating, locking, changing the PIN and erasing. |
+| `tests/ui/test_tools_pages.c` | The page on the renderer: creating, adding and editing rows, locking, changing the PIN and erasing. |
+
+A version-1 file (one encrypted text block) still opens: its text becomes one
+entry titled **Vault**, and the next save writes the version-2 table. That is
+the only migration path, and it needs no extra pass over the card.
 
 The module is registered in `src/system/addons/addons.c` as `vault`; its tile is
 gate-checked in `morepage.c` and `gridpage.c`, and `gui.c` builds the page only

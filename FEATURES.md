@@ -361,18 +361,22 @@ a self-signed certificate), and HLS.
   > written as UTF-8; a file saved as UTF-16 or Windows-1252 is read and shown
   > correctly too, and a note longer than the editor holds is offered to the
   > file manager's viewer instead of being cut short here.
-- **Vault** - a single block of secret text kept on the card in
-  `Vault/vault.kbx`, locked behind a **4- to 12-digit PIN** and encrypted with
-  **AES-256** before it reaches the card. PBKDF2-HMAC-SHA256 turns the PIN into
-  a separate encryption and authentication key; the text is encrypted in
-  counter mode and the whole file is signed, so a wrong PIN, a damaged card and
-  a file edited in a computer all leave the vault shut rather than opening it
-  onto the wrong bytes. The PIN is never stored and cannot be recovered. The
-  page shows dots, not digits, locks itself after two minutes without typing
-  and again when you leave it, and offers **Change PIN**, **Lock now** and
-  **Erase vault** from the corner menu. There is no account, no sync and no
-  network: the card is the only copy. See the [vault guide](docs/vault.md) for
-  the format and what it does and does not protect.
+- **Vault** - a small password manager on the card, in `Vault/vault.kbx`:
+  every entry has a **title** and the **password** underneath it, up to **200
+  entries** and **64 KB** together. A row at the top makes a new one; tapping
+  a row reopens it for editing, the eye masks a password in the list, and the
+  trash deletes the open entry after asking. The vault is locked behind a
+  **4- to 12-digit PIN** and encrypted with **AES-256** before anything
+  reaches the card. PBKDF2-HMAC-SHA256 turns the PIN into a separate encryption
+  and authentication key; the entry table is encrypted in counter mode and the
+  whole file is signed, so a wrong PIN, a damaged card and a file edited in a
+  computer all leave the vault shut rather than opening it onto the wrong
+  bytes. The PIN is never stored and cannot be recovered. The page shows dots,
+  not digits, locks itself after two minutes without typing and again when you
+  leave it, and offers **Change PIN**, **Lock now** and **Erase vault** from the
+  corner menu. There is no account, no sync and no network: the card is the only
+  copy. See the [vault guide](docs/vault.md) for the format and what it does and
+  does not protect.
 - **Metronome** - a tempo from **30 to 250 BPM**, a bar of **one to seven
   beats**, and a click on every beat with the first of the bar accented and
   lit. The tempo is dragged on a slider or taken from the finger with **Tap**,

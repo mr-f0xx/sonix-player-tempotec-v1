@@ -1,12 +1,17 @@
 // The pocket vault, headless: AES-256 and its counter mode against the NIST
-// vectors, HMAC and PBKDF2 against the RFCs, and the file itself against a
+// vectors, HMAC and PBKDF2 against the RFCs, and the entry table against a
 // temporary card.
 //
 // The cryptography is checked against published answers rather than against
 // itself, because a vault that encrypts and decrypts consistently can still be
 // encrypting with the wrong cipher. The store's failure cases -- a wrong PIN, a
-// flipped byte, a dropped iteration count, a file cut short -- are checked just
-// as closely: those are the paths nobody exercises until the day they matter.
+// flipped byte, a dropped iteration count, a file cut short, a list past its
+// ceiling -- are checked just as closely: those are the paths nobody exercises
+// until the day they matter.
+//
+// The old single-text file is written here by hand, with the same primitives,
+// so the transition to the table is tested against the format that shipped
+// rather than against a fixture nobody can regenerate.
 
 #include <assert.h>
 #include <dirent.h>
@@ -95,8 +100,7 @@ static void test_kdf(void) {
 	hmac_sha256(key, sizeof(key), data, strlen(data), mac);
 	expect_hex(mac, sizeof(mac), "b0344c61d8db38535ca8afceaf0bf12b881dc200c9833da726e9376c2e32cff7");
 
-	// RFC 4231 test case 2, whose key is longer than "Jefe": the short-key
-	// path and the block-size rules are both exercised.
+	// RFC 4231 test case 2, whose key is shorter than the block.
 	hmac_sha256("Jefe", 4, "what do ya want for nothing?", 28, mac);
 	expect_hex(mac, sizeof(mac), "5bdcc146bf60754e6a042426089575c75a003f089d2739839dec58b964ec3843");
 
@@ -152,6 +156,59 @@ static bool file_contains(const unsigned char *data, size_t len, const char *nee
 	return false;
 }
 
+// The version 1 file: the same header, an empty salt/counter filled with a
+// fixed pattern, and the text encrypted and signed exactly as that build did.
+static void write_legacy(const char *path, const char *pin, const char *text) {
+	enum { HEADER = 52, TAG = 32, SALT = 16, NONCE = 16, ITERATIONS = 1000 };
+	unsigned char salt[SALT], nonce[NONCE], enc_key[32], mac_key[32], keys[64];
+	for (int i = 0; i < SALT; i++) {
+		salt[i] = (unsigned char)(0x10 + i);
+		nonce[i] = (unsigned char)(0x40 + i);
+	}
+	pbkdf2_hmac_sha256(pin, strlen(pin), salt, sizeof(salt), ITERATIONS, keys, sizeof(keys));
+	memcpy(enc_key, keys, 32);
+	memcpy(mac_key, keys + 32, 32);
+
+	size_t len = strlen(text);
+	unsigned char *cipher = malloc(len ? len : 1);
+	assert(cipher);
+	aes256_ctx aes;
+	aes256_init(&aes, enc_key);
+	aes256_ctr_xor(&aes, nonce, (const unsigned char *)text, cipher, len);
+
+	unsigned char header[HEADER];
+	memset(header, 0, sizeof(header));
+	memcpy(header, "SONIXVLT", 8);
+	header[9] = 1; // version 1, big endian
+	header[12] = (unsigned char)(ITERATIONS >> 24);
+	header[13] = (unsigned char)(ITERATIONS >> 16);
+	header[14] = (unsigned char)(ITERATIONS >> 8);
+	header[15] = (unsigned char)ITERATIONS;
+	memcpy(header + 16, salt, sizeof(salt));
+	memcpy(header + 32, nonce, sizeof(nonce));
+	header[48] = (unsigned char)(len >> 24);
+	header[49] = (unsigned char)(len >> 16);
+	header[50] = (unsigned char)(len >> 8);
+	header[51] = (unsigned char)len;
+
+	unsigned char tag[TAG];
+	hmac_sha256_ctx mac;
+	hmac_sha256_init(&mac, mac_key, 32);
+	hmac_sha256_update(&mac, header, sizeof(header));
+	if (len) {
+		hmac_sha256_update(&mac, cipher, len);
+	}
+	hmac_sha256_final(&mac, tag);
+
+	FILE *f = fopen(path, "wb");
+	assert(f);
+	assert(fwrite(header, 1, sizeof(header), f) == sizeof(header));
+	assert(!len || fwrite(cipher, 1, len, f) == len);
+	assert(fwrite(tag, 1, sizeof(tag), f) == sizeof(tag));
+	assert(fclose(f) == 0);
+	free(cipher);
+}
+
 static void test_paths(void) {
 	char dir[64];
 	char path[128];
@@ -168,7 +225,6 @@ static void test_paths(void) {
 static void test_pins(void) {
 	assert(vault_pin_ok("1234"));
 	assert(vault_pin_ok("123456789012"));
-	// Four digits is the floor, twelve the ceiling.
 	assert(!vault_pin_ok("123"));
 	assert(!vault_pin_ok("1234567890123"));
 	assert(!vault_pin_ok("12a4"));
@@ -178,82 +234,119 @@ static void test_pins(void) {
 	assert(!vault_pin_ok(NULL));
 }
 
-static void test_round_trip(const char *dir) {
-	char path[512];
-	assert(vault_path(path, sizeof(path), dir, VAULT_FILE));
+static void check_entry(vault_session *session, size_t index, const char *title, const char *secret) {
+	assert(vault_session_count(session) > index);
+	assert(strcmp(vault_session_title(session, index), title) == 0);
+	assert(strcmp(vault_session_secret(session, index), secret) == 0);
+}
+
+static void test_entries(const char *dir) {
+	char path[VAULT_PATH_MAX];
+	assert(vault_path(path, sizeof(path), dir, "entries.kbx"));
 	remove(path);
 
-	const char *secret = "wifi: hunter2\nseed: alpha braVo charlie delta echo\n";
 	vault_session *session = NULL;
-	assert(vault_create(path, "123456", secret, &session) == VAULT_OK);
-	assert(session);
-	assert(vault_exists(path));
-	assert(strcmp(vault_session_text(session), secret) == 0);
+	assert(vault_create(path, "246810", &session) == VAULT_OK);
+	assert(vault_session_count(session) == 0);
 
-	// The file is opaque: the secret is not in it, and neither is the PIN.
-	// The header is the only part with a recognisable shape.
+	// An empty table is still a table: the file has a magic and a count.
+	assert(vault_session_save(session) == VAULT_OK);
 	size_t len = 0;
 	unsigned char *raw = read_bytes(path, &len);
-	assert(len > 52 + 32);
+	assert(len == 52 + 8 + 32);
 	assert(memcmp(raw, "SONIXVLT", 8) == 0);
-	assert(!file_contains(raw, len, "hunter2"));
-	assert(!file_contains(raw, len, "123456"));
-	assert(!file_contains(raw, len, "seed:"));
+	assert(raw[8] == 0 && raw[9] == 2);
 	free(raw);
 
-	// It opens with the PIN that made it, and with nothing else.
+	// Two entries keep their order, and their titles need not be unique.
+	size_t second = 99;
+	assert(vault_session_add(session, "Wi-Fi", "hunter2", NULL) == VAULT_OK);
+	assert(vault_session_add(session, "Email", "correct horse battery staple", &second) == VAULT_OK);
+	assert(second == 1);
+	assert(vault_session_add(session, "Email", "another one", NULL) == VAULT_OK);
+	assert(vault_session_count(session) == 3);
+	check_entry(session, 0, "Wi-Fi", "hunter2");
+	check_entry(session, 1, "Email", "correct horse battery staple");
+	check_entry(session, 2, "Email", "another one");
+
+	// Neither field may be empty, and both have a ceiling.
+	assert(vault_session_add(session, "", "x", NULL) == VAULT_ERR_ARG);
+	assert(vault_session_add(session, "x", "", NULL) == VAULT_ERR_ARG);
+	assert(vault_session_add(session, NULL, "x", NULL) == VAULT_ERR_ARG);
+	assert(vault_session_add(session, "x", NULL, NULL) == VAULT_ERR_ARG);
+	// A title is a list row: one line, no newlines.
+	assert(vault_session_add(session, "two\nlines", "x", NULL) == VAULT_ERR_ARG);
+	assert(vault_session_add(session, "two\rlines", "x", NULL) == VAULT_ERR_ARG);
+	assert(vault_session_update(session, 0, "two\nlines", "x") == VAULT_ERR_ARG);
+
+	// Save and reopen: the list is there, the secret is not in the file.
+	assert(vault_session_save(session) == VAULT_OK);
+	raw = read_bytes(path, &len);
+	assert(!file_contains(raw, len, "hunter2"));
+	assert(!file_contains(raw, len, "Wi-Fi"));
+	assert(!file_contains(raw, len, "correct horse"));
+	free(raw);
+
 	vault_session *opened = NULL;
-	assert(vault_unlock(path, "123456", &opened) == VAULT_OK);
-	assert(strcmp(vault_session_text(opened), secret) == 0);
+	assert(vault_unlock(path, "246810", &opened) == VAULT_OK);
+	assert(vault_session_count(opened) == 3);
+	check_entry(opened, 0, "Wi-Fi", "hunter2");
+	check_entry(opened, 1, "Email", "correct horse battery staple");
+	check_entry(opened, 2, "Email", "another one");
+
+	// Update keeps the entry in place; remove shifts the rest up.
+	assert(vault_session_update(opened, 1, "Bank", "1234") == VAULT_OK);
+	assert(vault_session_remove(opened, 0) == VAULT_OK);
+	assert(vault_session_count(opened) == 2);
+	assert(strcmp(vault_session_title(opened, 0), "Bank") == 0);
+	assert(strcmp(vault_session_title(opened, 1), "Email") == 0);
+	assert(vault_session_save(opened) == VAULT_OK);
 	vault_session_lock(opened);
 	opened = NULL;
-	assert(vault_unlock(path, "123457", &opened) == VAULT_ERR_AUTH);
-	assert(opened == NULL);
-	assert(vault_unlock(path, "123", &opened) == VAULT_ERR_PIN);
-	assert(vault_unlock(path, "abcdef", &opened) == VAULT_ERR_PIN);
 
-	// A save keeps the keys and changes the file: the same PIN opens the new
-	// text, and the file on the card is not the one from before.
-	unsigned char *before = read_bytes(path, &len);
-	size_t before_len = len;
-	assert(vault_session_save(session, "changed\n") == VAULT_OK);
-	unsigned char *after = read_bytes(path, &len);
-	assert(len > 52 + 32 && len < before_len);
-	// The counter is random, so at least the nonce has moved.
-	assert(memcmp(before + 32, after + 32, 16) != 0);
-	free(before);
-	free(after);
-	vault_session_lock(session);
-	assert(vault_unlock(path, "123456", &opened) == VAULT_OK);
-	assert(strcmp(vault_session_text(opened), "changed\n") == 0);
+	assert(vault_unlock(path, "246810", &opened) == VAULT_OK);
+	assert(vault_session_count(opened) == 2);
+	check_entry(opened, 0, "Bank", "1234");
+	check_entry(opened, 1, "Email", "another one");
 
-	// A new PIN re-encrypts with a new salt: the old PIN stops working.
-	assert(vault_session_change_pin(opened, "987654", "changed\n") == VAULT_OK);
-	assert(strcmp(vault_session_text(opened), "changed\n") == 0);
+	// A new PIN re-encrypts the same list with a new salt.
+	assert(vault_session_change_pin(opened, "987654") == VAULT_OK);
 	vault_session_lock(opened);
 	opened = NULL;
-	assert(vault_unlock(path, "123456", &opened) == VAULT_ERR_AUTH);
+	assert(vault_unlock(path, "246810", &opened) == VAULT_ERR_AUTH);
 	assert(vault_unlock(path, "987654", &opened) == VAULT_OK);
-	assert(strcmp(vault_session_text(opened), "changed\n") == 0);
+	assert(vault_session_count(opened) == 2);
+	check_entry(opened, 0, "Bank", "1234");
+
+	// Wrong PIN, bad PIN.
+	vault_session *none = NULL;
+	assert(vault_unlock(path, "123", &none) == VAULT_ERR_PIN);
+	assert(vault_unlock(path, "000000", &none) == VAULT_ERR_AUTH);
+	assert(none == NULL);
 	vault_session_lock(opened);
 
-	// An empty vault is a vault: the ciphertext can be zero bytes, and the
-	// tag still covers the header.
-	assert(vault_erase(path));
-	assert(vault_create(path, "1234", "", &session) == VAULT_OK);
-	assert(strcmp(vault_session_text(session), "") == 0);
+	// UTF-8 in both fields survives byte for byte.
 	vault_session_lock(session);
-	assert(vault_unlock(path, "1234", &opened) == VAULT_OK);
-	assert(strcmp(vault_session_text(opened), "") == 0);
+	session = NULL;
+	assert(vault_erase(path));
+	assert(vault_create(path, "2222", &session) == VAULT_OK);
+	const char *title = "Caf\xC3\xA9 \xE6\x97\xA5\xE6\x9C\xAC\xE8\xAA\x9E";
+	const char *secret = "p\xC3\xA4ssw\xC3\xB6rd \xF0\x9F\x94\x90";
+	assert(vault_session_add(session, title, secret, NULL) == VAULT_OK);
+	assert(vault_session_save(session) == VAULT_OK);
+	vault_session_lock(session);
+	session = NULL;
+	assert(vault_unlock(path, "2222", &opened) == VAULT_OK);
+	check_entry(opened, 0, title, secret);
 	vault_session_lock(opened);
 
 	// Creating over an existing vault is refused rather than quietly
 	// replacing it.
-	assert(vault_create(path, "5555", "second", &session) == VAULT_ERR_EXISTS);
+	assert(vault_create(path, "5555", &session) == VAULT_ERR_EXISTS);
 
 	// A card with no vault says so instead of pretending the PIN was wrong.
 	char missing[VAULT_PATH_MAX];
-	snprintf(missing, sizeof(missing), "%s/none.kbx", dir);
+	assert(vault_path(missing, sizeof(missing), dir, "none.kbx"));
 	assert(vault_unlock(missing, "1234", &opened) == VAULT_ERR_NO_FILE);
 	assert(!vault_exists(missing));
 
@@ -262,20 +355,143 @@ static void test_round_trip(const char *dir) {
 	assert(vault_erase(path)); // and erasing nothing is not an error
 }
 
+static void test_limits(const char *dir) {
+	char path[VAULT_PATH_MAX];
+	char title[VAULT_MAX_TITLE + 2];
+	char secret[VAULT_MAX_SECRET + 2];
+	assert(vault_path(path, sizeof(path), dir, "limits.kbx"));
+	remove(path);
+
+	memset(title, 't', sizeof(title) - 1);
+	title[sizeof(title) - 1] = '\0';
+	memset(secret, 's', sizeof(secret) - 1);
+	secret[sizeof(secret) - 1] = '\0';
+
+	vault_session *session = NULL;
+	assert(vault_create(path, "1111", &session) == VAULT_OK);
+
+	title[VAULT_MAX_TITLE] = '\0';
+	secret[VAULT_MAX_SECRET] = '\0';
+	assert(vault_session_add(session, title, "x", NULL) == VAULT_OK);
+	assert(vault_session_add(session, "t", secret, NULL) == VAULT_OK);
+	title[VAULT_MAX_TITLE] = 't';
+	secret[VAULT_MAX_SECRET] = 's';
+	assert(vault_session_add(session, title, "x", NULL) == VAULT_ERR_TOO_LONG);
+	assert(vault_session_add(session, "t", secret, NULL) == VAULT_ERR_TOO_LONG);
+
+	// The byte ceiling is the one that stops a vault full of seed phrases.
+	vault_session_lock(session);
+	assert(vault_erase(path));
+	assert(vault_create(path, "2222", &session) == VAULT_OK);
+	char block[VAULT_MAX_SECRET + 1];
+	memset(block, 'b', VAULT_MAX_SECRET);
+	block[VAULT_MAX_SECRET] = '\0';
+	size_t added = 0;
+	for (int i = 0; i < 8; i++) {
+		vault_status_t status = vault_session_add(session, "Long", block, NULL);
+		if (status == VAULT_ERR_TOO_LONG) {
+			break;
+		}
+		assert(status == VAULT_OK);
+		added++;
+	}
+	assert(added >= 2 && added < 8);
+	assert(vault_session_save(session) == VAULT_OK);
+	// The entry that would have crossed the ceiling is refused without
+	// touching the list.
+	size_t before = vault_session_count(session);
+	assert(vault_session_add(session, "Long", block, NULL) == VAULT_ERR_TOO_LONG);
+	assert(vault_session_count(session) == before);
+
+	// And the entry-count ceiling, with short entries.
+	vault_session_lock(session);
+	assert(vault_erase(path));
+	assert(vault_create(path, "3333", &session) == VAULT_OK);
+	for (size_t i = 0; i < VAULT_MAX_ENTRIES; i++) {
+		assert(vault_session_add(session, "P", "s", NULL) == VAULT_OK);
+	}
+	assert(vault_session_count(session) == VAULT_MAX_ENTRIES);
+	assert(vault_session_add(session, "P", "s", NULL) == VAULT_ERR_FULL);
+	assert(vault_session_save(session) == VAULT_OK);
+	vault_session_lock(session);
+	vault_session *opened = NULL;
+	assert(vault_unlock(path, "3333", &opened) == VAULT_OK);
+	assert(vault_session_count(opened) == VAULT_MAX_ENTRIES);
+	assert(strcmp(vault_session_title(opened, VAULT_MAX_ENTRIES - 1), "P") == 0);
+	vault_session_lock(opened);
+	remove(path);
+}
+
+static void test_legacy(const char *dir) {
+	char path[VAULT_PATH_MAX];
+	assert(vault_path(path, sizeof(path), dir, "legacy.kbx"));
+	remove(path);
+
+	const char *text = "wifi: hunter2\nseed: alpha bravo charlie\n";
+	write_legacy(path, "1357", text);
+
+	vault_session *session = NULL;
+	assert(vault_unlock(path, "1357", &session) == VAULT_OK);
+	assert(vault_session_count(session) == 1);
+	check_entry(session, 0, "Vault", text);
+
+	// The next save is the table, and the entry survives it.
+	assert(vault_session_save(session) == VAULT_OK);
+	size_t len = 0;
+	unsigned char *raw = read_bytes(path, &len);
+	assert(raw[8] == 0 && raw[9] == 2);
+	assert(len > 52 + 8 + 32);
+	free(raw);
+	vault_session_lock(session);
+
+	assert(vault_unlock(path, "1357", &session) == VAULT_OK);
+	assert(vault_session_count(session) == 1);
+	check_entry(session, 0, "Vault", text);
+	vault_session_lock(session);
+
+	// An empty old vault opens as an empty list.
+	write_legacy(path, "8642", "");
+	assert(vault_unlock(path, "8642", &session) == VAULT_OK);
+	assert(vault_session_count(session) == 0);
+	vault_session_lock(session);
+
+	// The old ceiling was 16 KB, not the 4 KB a single password might suggest.
+	// A long text still opens as one entry, and still saves as the table.
+	size_t long_len = 12000;
+	char *long_text = malloc(long_len + 1);
+	assert(long_text);
+	memset(long_text, 'x', long_len);
+	long_text[long_len] = '\0';
+	write_legacy(path, "9753", long_text);
+	free(long_text);
+	assert(vault_unlock(path, "9753", &session) == VAULT_OK);
+	assert(vault_session_count(session) == 1);
+	assert(strlen(vault_session_secret(session, 0)) == long_len);
+	assert(vault_session_save(session) == VAULT_OK);
+	vault_session_lock(session);
+	assert(vault_unlock(path, "9753", &session) == VAULT_OK);
+	assert(strlen(vault_session_secret(session, 0)) == long_len);
+	vault_session_lock(session);
+	remove(path);
+}
+
 static void test_damage(const char *dir) {
 	char path[VAULT_PATH_MAX];
 	char other[VAULT_PATH_MAX];
 	assert(vault_path(path, sizeof(path), dir, "damage.kbx"));
-	snprintf(other, sizeof(other), "%s", path);
+	assert(vault_path(other, sizeof(other), dir, "damage-copy.kbx"));
 	remove(path);
+	remove(other);
 
 	vault_session *session = NULL;
-	assert(vault_create(path, "246810", "a secret that must not come out\n", &session) == VAULT_OK);
+	assert(vault_create(path, "246810", &session) == VAULT_OK);
+	assert(vault_session_add(session, "Secret", "a secret that must not come out", NULL) == VAULT_OK);
+	assert(vault_session_save(session) == VAULT_OK);
 	vault_session_lock(session);
 
 	size_t len = 0;
 	unsigned char *raw = read_bytes(path, &len);
-	assert(len > 52 + 32);
+	assert(len > 52 + 40);
 	unsigned char *copy = malloc(len);
 	assert(copy);
 
@@ -286,17 +502,15 @@ static void test_damage(const char *dir) {
 	vault_session *opened = NULL;
 	assert(vault_unlock(other, "246810", &opened) == VAULT_ERR_AUTH);
 
-	// A changed salt or iteration count is refused too: those fields tell the
-	// KDF what to do, and an attacker who can edit them would otherwise be
-	// choosing the key.
+	// A changed salt is refused too: it tells the KDF what to do.
 	memcpy(copy, raw, len);
 	copy[16] ^= 0x80;
 	write_bytes(other, copy, len);
 	assert(vault_unlock(other, "246810", &opened) == VAULT_ERR_AUTH);
 
+	// A valid-looking count, still within the accepted range, is caught by
+	// the tag rather than the field check.
 	memcpy(copy, raw, len);
-	// A valid-looking count, still within the accepted range, so this is
-	// caught by the tag rather than the field check.
 	copy[12] = 0x00;
 	copy[13] = 0x01;
 	copy[14] = 0x00;
@@ -304,9 +518,13 @@ static void test_damage(const char *dir) {
 	write_bytes(other, copy, len);
 	assert(vault_unlock(other, "246810", &opened) == VAULT_ERR_AUTH);
 
-	// A different magic is not a vault at all.
+	// Neither an unknown version nor a different magic is a vault.
 	memcpy(copy, raw, len);
 	copy[0] = 'X';
+	write_bytes(other, copy, len);
+	assert(vault_unlock(other, "246810", &opened) == VAULT_ERR_FORMAT);
+	memcpy(copy, raw, len);
+	copy[9] = 9;
 	write_bytes(other, copy, len);
 	assert(vault_unlock(other, "246810", &opened) == VAULT_ERR_FORMAT);
 
@@ -322,7 +540,7 @@ static void test_damage(const char *dir) {
 	free(longer);
 
 	// A length field smaller than the ciphertext present is refused before
-	// any of it is read as text.
+	// any of it is read as a table.
 	memcpy(copy, raw, len);
 	copy[48] = 0;
 	copy[49] = 0;
@@ -334,44 +552,6 @@ static void test_damage(const char *dir) {
 	free(copy);
 	free(raw);
 	remove(other);
-	remove(path);
-}
-
-static void test_limits(const char *dir) {
-	char path[512];
-	assert(vault_path(path, sizeof(path), dir, "limits.kbx"));
-	remove(path);
-
-	char *big = malloc(VAULT_MAX_TEXT + 2);
-	assert(big);
-	memset(big, 'a', VAULT_MAX_TEXT);
-	big[VAULT_MAX_TEXT] = '\0';
-
-	vault_session *session = NULL;
-	assert(vault_create(path, "1111", big, &session) == VAULT_OK);
-	assert(strlen(vault_session_text(session)) == VAULT_MAX_TEXT);
-	vault_session_lock(session);
-
-	// One byte over the ceiling is refused, by create and by save.
-	big[VAULT_MAX_TEXT] = 'a';
-	big[VAULT_MAX_TEXT + 1] = '\0';
-	assert(vault_create(path, "1111", big, &session) == VAULT_ERR_TOO_LONG);
-	vault_session *opened = NULL;
-	assert(vault_unlock(path, "1111", &opened) == VAULT_OK);
-	assert(vault_session_save(opened, big) == VAULT_ERR_TOO_LONG);
-	assert(strlen(vault_session_text(opened)) == VAULT_MAX_TEXT); // unchanged
-	vault_session_lock(opened);
-
-	// UTF-8 survives byte for byte: the store never decodes or re-encodes it.
-	const char *unicode = "Wi-Fi: caf\xC3\xA9 \xE6\x97\xA5\xE6\x9C\xAC\xE8\xAA\x9E \xF0\x9F\x94\x90\n";
-	assert(vault_erase(path));
-	assert(vault_create(path, "2222", unicode, &session) == VAULT_OK);
-	vault_session_lock(session);
-	assert(vault_unlock(path, "2222", &opened) == VAULT_OK);
-	assert(strcmp(vault_session_text(opened), unicode) == 0);
-	vault_session_lock(opened);
-
-	free(big);
 	remove(path);
 }
 
@@ -397,9 +577,10 @@ int main(void) {
 	test_kdf();
 	test_paths();
 	test_pins();
-	test_round_trip(dir);
-	test_damage(dir);
+	test_entries(dir);
 	test_limits(dir);
+	test_legacy(dir);
+	test_damage(dir);
 	test_no_temporary(dir);
 
 	char command[600];

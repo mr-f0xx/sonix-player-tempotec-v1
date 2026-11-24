@@ -1071,7 +1071,11 @@ static void check_strings(const char *language_dir) {
 		"vault_cannot_open", "vault_cannot_save", "vault_erase_failed", "vault_erase_title",
 		"vault_erase_note", "vault_erase", "vault_erased", "vault_saved", "vault_created",
 		"vault_pin_changed", "vault_locked_toast", "vault_change_pin", "vault_lock_now",
-		"vault_empty", "vault_placeholder",
+		"vault_empty", "vault_placeholder", "vault_new_entry", "vault_saved_passwords",
+		"vault_empty_hint", "vault_entry_title", "vault_entry_password", "vault_title_placeholder",
+		"vault_password_placeholder", "vault_entry_required", "vault_entry_saved",
+		"vault_entry_deleted", "vault_delete_title", "vault_delete_note", "vault_delete",
+		"vault_full",
 		"library_empty_most_played",
 		"musicsettings_rearrange_main_page",
 		"metronome", "metronome_bpm", "metronome_beats", "metronome_start",
@@ -3071,6 +3075,85 @@ static void vault_open_page(void) {
 	lv_obj_update_layout(vault_screen);
 }
 
+/* The page's corner controls are direct children of the screen and carry an
+ * image rather than a caption. The keyboard's own accept key is an image
+ * button too, but it is not a direct child, so this cannot pick it up. */
+static lv_obj_t *vault_corner_button(const lv_image_dsc_t *glyph) {
+	for (uint32_t i = 0; i < lv_obj_get_child_count(vault_screen); i++) {
+		lv_obj_t *child = lv_obj_get_child(vault_screen, i);
+		if (!lv_obj_check_type(child, &lv_button_class) || lv_obj_is_hidden(child)) {
+			continue;
+		}
+		if (find_image_button(child, glyph)) {
+			return child;
+		}
+	}
+	return NULL;
+}
+
+static lv_obj_t *find_class_nth(lv_obj_t *obj, const lv_obj_class_t *type, int *seen, int want) {
+	if (lv_obj_check_type(obj, type)) {
+		if (*seen == want) {
+			return obj;
+		}
+		(*seen)++;
+	}
+	for (uint32_t i = 0; i < lv_obj_get_child_count(obj); i++) {
+		lv_obj_t *found = find_class_nth(lv_obj_get_child(obj, i), type, seen, want);
+		if (found) {
+			return found;
+		}
+	}
+	return NULL;
+}
+
+static lv_obj_t *vault_field(int index) {
+	int seen = 0;
+	return find_class_nth(vault_screen, &lv_textarea_class, &seen, index);
+}
+
+/* The list is the container under the "Saved passwords" caption. Asking it
+ * directly keeps a hidden editor's textarea -- which still holds the strings it
+ * was last given -- out of a question about what the list shows. */
+static lv_obj_t *vault_list_view(void) {
+	lv_obj_t *caption = find_label(vault_screen, tr("vault_saved_passwords"));
+	return caption ? lv_obj_get_parent(caption) : NULL;
+}
+
+static bool vault_list_has(const char *text) {
+	lv_obj_t *list_view = vault_list_view();
+	return list_view && find_label(list_view, text);
+}
+
+/* A row is the button above the title label; the eye is another control on the
+ * same row, so the test reaches the row by climbing, the way a finger does not
+ * have to. */
+static lv_obj_t *vault_row_for(const char *title) {
+	lv_obj_t *list_view = vault_list_view();
+	lv_obj_t *label = list_view ? find_label(list_view, title) : NULL;
+	if (!label) {
+		return NULL;
+	}
+	lv_obj_t *column = lv_obj_get_parent(label);
+	lv_obj_t *row = column ? lv_obj_get_parent(column) : NULL;
+	return row && lv_obj_check_type(row, &lv_button_class) ? row : NULL;
+}
+
+static void vault_open_row(const char *title) {
+	lv_obj_t *row = vault_row_for(title);
+	assert(row);
+	vault_press_key(row);
+	lv_obj_update_layout(vault_screen);
+}
+
+static void vault_fill_entry(const char *title, const char *secret) {
+	lv_obj_t *title_field = vault_field(0);
+	lv_obj_t *secret_field = vault_field(1);
+	assert(title_field && secret_field);
+	lv_textarea_set_text(title_field, title);
+	lv_textarea_set_text(secret_field, secret);
+}
+
 static void check_vault_page(gui_config_t *cfg, const char *tag) {
 	char dir[VAULT_PATH_MAX];
 	char path[VAULT_PATH_MAX];
@@ -3094,6 +3177,9 @@ static void check_vault_page(gui_config_t *cfg, const char *tag) {
 	check_within_panel(vault_screen, cfg, "Vault setup");
 	dump_snapshot(vault_screen, tag);
 	assert(find_label(vault_screen, tr("vault_setup_title")));
+	char setup_tag[96];
+	snprintf(setup_tag, sizeof(setup_tag), "%s-setup", tag);
+	dump_snapshot(vault_screen, setup_tag);
 	lv_obj_t *pad = vault_keypad(vault_screen);
 	assert(pad && lv_obj_get_child_count(pad) == 12);
 	for (uint32_t i = 0; i < 12; i++) {
@@ -3126,35 +3212,87 @@ static void check_vault_page(gui_config_t *cfg, const char *tag) {
 	assert(vault_exists(path));
 	assert(plain_toasts == toasts + 1); // "Vault created"
 
-	// A new vault opens in the editor with the keyboard up, and its textarea
-	// is inside the panel while the keyboard is showing.
-	lv_obj_t *field = find_class(vault_screen, &lv_textarea_class);
-	assert(field);
-	lv_textarea_set_text(field, "wifi: hunter2");
-	check_within_panel(vault_screen, cfg, "Vault editor");
+	// A new vault shows the list, not a blank editor: the accent row is the
+	// only thing to do, and the empty card says so.
+	assert(find_label(vault_screen, tr("vault_new_entry")));
+	assert(find_label(vault_screen, tr("vault_empty")));
+	assert(find_label(vault_screen, tr("vault_empty_hint")));
+	lv_obj_t *plus = vault_corner_button(&icon_plus);
+	assert(plus);
+	char empty_tag[96];
+	snprintf(empty_tag, sizeof(empty_tag), "%s-empty", tag);
+	dump_snapshot(vault_screen, empty_tag);
 
-	// Leaving with unsaved typing still ends with it on the card, encrypted.
+	// The first entry: a title, then the password underneath it in the list.
+	vault_press_key(plus);
+	lv_obj_update_layout(vault_screen);
+	assert(vault_field(0) && vault_field(1));
+	vault_fill_entry("Wi-Fi", "hunter2");
+	check_within_panel(vault_screen, cfg, "Vault editor");
+	char editor_tag[96];
+	snprintf(editor_tag, sizeof(editor_tag), "%s-editor", tag);
+	dump_snapshot(vault_screen, editor_tag);
+	lv_obj_t *check = vault_corner_button(&icon_check);
+	assert(check);
+	vault_press_key(check);
+	lv_obj_update_layout(vault_screen);
+	assert(find_label(vault_screen, "Wi-Fi"));
+	assert(find_label(vault_screen, "hunter2"));
+	assert(!find_label(vault_screen, tr("vault_empty")));
+
+	// A second entry. Titles need not be unique; order is the order they were
+	// added, and both stay on the glass at once.
+	plus = vault_corner_button(&icon_plus);
+	assert(plus);
+	vault_press_key(plus);
+	vault_fill_entry("Email", "correct horse");
+	check = vault_corner_button(&icon_check);
+	assert(check);
+	vault_press_key(check);
+	lv_obj_update_layout(vault_screen);
+	assert(find_label(vault_screen, "Email"));
+	assert(find_label(vault_screen, "correct horse"));
+	char list_tag[96];
+	snprintf(list_tag, sizeof(list_tag), "%s-list", tag);
+	dump_snapshot(vault_screen, list_tag);
+
+	// The eye on a row hides the password without leaving the list.
+	lv_obj_t *row = vault_row_for("Wi-Fi");
+	assert(row);
+	lv_obj_t *eye = find_image_button(row, &icon_eye);
+	assert(eye);
+	vault_press_key(eye);
+	assert(!find_label(vault_screen, "hunter2"));
+	vault_press_key(eye);
+	assert(find_label(vault_screen, "hunter2"));
+
+	// Leaving with the list open still writes the entries, and the card does
+	// not carry either title or password in the clear.
 	switch_screen(music_screen);
 	FILE *file = fopen(path, "rb");
 	assert(file && fseek(file, 0, SEEK_END) == 0);
 	long size = ftell(file);
-	assert(size > 52 + 32);
+	assert(size > 52 + 8 + 32);
 	rewind(file);
 	unsigned char *raw = malloc((size_t)size);
 	assert(raw && fread(raw, 1, (size_t)size, file) == (size_t)size);
 	fclose(file);
 	assert(memcmp(raw, "SONIXVLT", 8) == 0);
+	assert(raw[8] == 0 && raw[9] == 2);
 	bool leaked = false;
-	for (long i = 0; i + 18 <= size; i++) {
-		if (memcmp(raw + i, "wifi: hunter2", 13) == 0) {
-			leaked = true;
+	const char *secrets[] = {"hunter2", "correct horse", "Wi-Fi", "Email"};
+	for (size_t k = 0; k < sizeof(secrets) / sizeof(secrets[0]); k++) {
+		for (long i = 0; i + (long)strlen(secrets[k]) <= size; i++) {
+			if (memcmp(raw + i, secrets[k], strlen(secrets[k])) == 0) {
+				leaked = true;
+			}
 		}
 	}
 	assert(!leaked);
 	free(raw);
 
 	// Opened again, it asks for the PIN. The wrong one clears the dots and
-	// says so; the right one shows the text that was typed.
+	// says so; the right one brings the same two rows back.
 	vault_open_page();
 	assert(find_label(vault_screen, tr("vault_locked")));
 	expected_error = tr("vault_wrong_pin");
@@ -3163,29 +3301,70 @@ static void check_vault_page(gui_config_t *cfg, const char *tag) {
 	assert(find_label(vault_screen, tr("vault_locked")));
 	assert(find_label(vault_screen, tr("vault_enter_pin"))); // the hint came back
 	vault_type_pin(vault_screen, "2468");
-	assert(field);
-	assert(strcmp(lv_textarea_get_text(field), "wifi: hunter2") == 0);
+	assert(find_label(vault_screen, "Wi-Fi"));
+	assert(find_label(vault_screen, "hunter2"));
+	assert(find_label(vault_screen, "Email"));
 
-	// The pencil starts writing, and two minutes of no typing saves the
-	// writing and puts the vault away by itself.
-	lv_obj_t *pencil = find_image_button(vault_screen, &icon_pencil);
-	assert(pencil);
-	vault_press_key(pencil);
-	lv_textarea_set_text(field, "seed: alpha bravo");
+	// Editing an entry changes it in place: title and password both, and the
+	// list redraws around it.
+	vault_open_row("Wi-Fi");
+	lv_obj_t *title_field = vault_field(0);
+	lv_obj_t *secret_field = vault_field(1);
+	assert(title_field && secret_field);
+	assert(strcmp(lv_textarea_get_text(title_field), "Wi-Fi") == 0);
+	assert(strcmp(lv_textarea_get_text(secret_field), "hunter2") == 0);
+	// The password opens masked, and the eye beside its caption reveals it.
+	assert(lv_textarea_get_password_mode(secret_field));
+	lv_obj_t *field_eye = find_image_button(vault_screen, &icon_eye_off);
+	assert(field_eye);
+	vault_press_key(field_eye);
+	assert(!lv_textarea_get_password_mode(secret_field));
+	vault_press_key(field_eye);
+	assert(lv_textarea_get_password_mode(secret_field));
+	lv_textarea_set_text(title_field, "Wi-Fi 6");
+	lv_textarea_set_text(secret_field, "hunter3");
+	check = vault_corner_button(&icon_check);
+	assert(check);
+	vault_press_key(check);
+	lv_obj_update_layout(vault_screen);
+	assert(find_label(vault_screen, "Wi-Fi 6"));
+	assert(find_label(vault_screen, "hunter3"));
+	assert(!find_label(vault_screen, "Wi-Fi"));
+
+	// Deleting is per entry, asks first, and leaves the other one alone.
+	vault_open_row("Wi-Fi 6");
+	lv_obj_t *trash = vault_corner_button(&icon_trash);
+	assert(trash);
+	vault_press_key(trash);
+	lv_obj_update_layout(lv_layer_top());
+	assert(confirm_visible());
+	lv_obj_t *question = find_visible_label(lv_layer_top(), tr("vault_delete_title"));
+	assert(question);
+	lv_obj_t *ok = find_visible_label(lv_layer_top(), tr("vault_delete"));
+	assert(ok);
+	vault_press_key(lv_obj_get_parent(ok));
+	// The confirmation's action runs on the next tick, once the card is down.
+	for (int i = 0; i < 8 && vault_list_has("Wi-Fi 6"); i++) {
+		lv_timer_handler();
+	}
+	lv_obj_update_layout(vault_screen);
+	assert(!vault_list_has("Wi-Fi 6"));
+	assert(!vault_list_has("hunter3"));
+	assert(vault_list_has("Email"));
+
+	// Two minutes of no typing saves nothing new -- there is nothing new --
+	// and puts the list away.
 	toasts = plain_toasts;
 	lv_tick_inc(2 * 60 * 1000 + 1000);
 	lv_timer_handler();
 	assert(find_label(vault_screen, tr("vault_locked")));
 	assert(plain_toasts > toasts);
 	vault_type_pin(vault_screen, "2468");
-	assert(strcmp(lv_textarea_get_text(field), "seed: alpha bravo") == 0);
-	char open_tag[96];
-	snprintf(open_tag, sizeof(open_tag), "%s-open", tag);
-	dump_snapshot(vault_screen, open_tag);
+	assert(find_label(vault_screen, "Email"));
 
 	// A menu left open when the clock runs out goes away with the vault: the
 	// question is not left on top of a page that has already locked.
-	lv_obj_t *menu = find_image_button(vault_screen, &icon_ellipsis_vertical);
+	lv_obj_t *menu = vault_corner_button(&icon_ellipsis_vertical);
 	assert(menu);
 	vault_press_key(menu);
 	assert(popover_visible());
@@ -3194,11 +3373,11 @@ static void check_vault_page(gui_config_t *cfg, const char *tag) {
 	assert(!popover_visible());
 	assert(find_label(vault_screen, tr("vault_locked")));
 	vault_type_pin(vault_screen, "2468");
-	assert(strcmp(lv_textarea_get_text(field), "seed: alpha bravo") == 0);
+	assert(find_label(vault_screen, "Email"));
 
-	// The menu changes the PIN: the vault stays open, and the old PIN stops
-	// working while the new one opens it.
-	menu = find_image_button(vault_screen, &icon_ellipsis_vertical);
+	// The menu changes the PIN: the vault stays open on the same list, and
+	// the old PIN stops working while the new one opens it.
+	menu = vault_corner_button(&icon_ellipsis_vertical);
 	assert(menu);
 	vault_press_key(menu);
 	lv_obj_update_layout(lv_layer_top());
@@ -3209,9 +3388,9 @@ static void check_vault_page(gui_config_t *cfg, const char *tag) {
 	vault_type_pin(vault_screen, "1357");
 	assert(find_label(vault_screen, tr("vault_confirm_title")));
 	vault_type_pin(vault_screen, "1357");
-	assert(strcmp(lv_textarea_get_text(field), "seed: alpha bravo") == 0);
+	assert(find_label(vault_screen, "Email"));
 
-	menu = find_image_button(vault_screen, &icon_ellipsis_vertical);
+	menu = vault_corner_button(&icon_ellipsis_vertical);
 	assert(menu);
 	vault_press_key(menu);
 	lv_obj_update_layout(lv_layer_top());
@@ -3223,11 +3402,11 @@ static void check_vault_page(gui_config_t *cfg, const char *tag) {
 	vault_type_pin(vault_screen, "2468");
 	assert(!expected_error);
 	vault_type_pin(vault_screen, "1357");
-	assert(strcmp(lv_textarea_get_text(field), "seed: alpha bravo") == 0);
+	assert(find_label(vault_screen, "Email"));
 
 	// Erasing asks first, and only then removes the file and offers a new
-	// PIN. The confirmation is the one place where the text really is gone.
-	menu = find_image_button(vault_screen, &icon_ellipsis_vertical);
+	// PIN. The confirmation is the one place where every entry really is gone.
+	menu = vault_corner_button(&icon_ellipsis_vertical);
 	assert(menu);
 	vault_press_key(menu);
 	lv_obj_update_layout(lv_layer_top());
@@ -3236,7 +3415,7 @@ static void check_vault_page(gui_config_t *cfg, const char *tag) {
 	vault_press_key(lv_obj_get_parent(erase));
 	lv_obj_update_layout(lv_layer_top());
 	assert(confirm_visible());
-	lv_obj_t *ok = find_visible_label(lv_layer_top(), tr("vault_erase"));
+	ok = find_visible_label(lv_layer_top(), tr("vault_erase"));
 	assert(ok);
 	vault_press_key(lv_obj_get_parent(ok));
 	for (int i = 0; i < 8 && vault_exists(path); i++) {

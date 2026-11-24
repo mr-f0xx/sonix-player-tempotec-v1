@@ -7,18 +7,20 @@
 
 // The pocket vault, from the More menu.
 //
-// One screen with two faces. Locked -- or being set up for the first time --
+// One screen with three faces. Locked -- or being set up for the first time --
 // it is a PIN pad: three columns of digits, a backspace and a check, and a row
-// of dots showing how much of the PIN has been typed. Open, it is the vault's
-// text, read like a note and written with the same pencil-and-check corner:
-// the keyboard comes up, the text makes room for it, and a check puts it back
-// on the card, encrypted.
+// of dots showing how much of the PIN has been typed. Open, it is the list:
+// an accent "new password" row first, then one card per entry with its title
+// and the password underneath it, an eye to mask each one, and a corner plus
+// and menu. Tapping a row (or the plus) opens the editor: a title field above
+// a password field, sharing one keyboard, with the check to save and the
+// trash to delete. The list's ellipsis carries the vault-wide actions.
 //
 // Nothing is remembered between visits. Leaving the page -- by the chevron,
 // the swipe back, the home gesture or the two-minute idle timer -- writes any
-// unsaved text and throws the keys away, so coming back means typing the PIN
-// again. That is the whole feature: the text is not on the card in a form
-// anything but this player with the PIN can read.
+// unsaved entry and throws the keys away, so coming back means typing the PIN
+// again. That is the whole feature: no title or password is on the card in a
+// form anything but this player with the PIN can read.
 //
 // The store underneath (src/system/vault) does the cryptography; this page
 // only draws it and never handles a key.
