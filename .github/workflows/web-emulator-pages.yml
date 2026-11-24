@@ -15,6 +15,9 @@ on:
   pull_request:
     paths:
       - .github/workflows/web-emulator-pages.yml
+      - index.html
+      - assets/**
+      - coi-serviceworker.js
       - sonix-player/**
       - sonix-packer/assets/V1/**
       - tools/v1-emulator/**
@@ -121,15 +124,15 @@ jobs:
           PAGES_BASE_URL: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}
         run: |
           set -euo pipefail
-          mkdir -p tools/v1-emulator/dist/pages/builds
+          mkdir -p tools/v1-emulator/dist/pages/emulator/builds
 
           # Carry forward recent previously published builds from live GitHub Pages
           # so the webpage's "Published Sonix Builds" dropdown preserves build history.
           MERGE_ARGS=""
           if [ "$PUBLISH" = true ] && curl --fail --silent --location --max-time 15 \
-               "$PAGES_BASE_URL/builds/manifest.json" \
+               "$PAGES_BASE_URL/emulator/builds/manifest.json" \
                -o "$RUNNER_TEMP/prev-manifest.json"; then
-            echo "Fetched existing catalog from $PAGES_BASE_URL/builds/manifest.json"
+            echo "Fetched existing catalog from $PAGES_BASE_URL/emulator/builds/manifest.json"
             node -e '
               const fs = require("fs");
               const m = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
@@ -140,8 +143,8 @@ jobs:
               fname="$(basename "$rel_url")"
               if [ -n "$fname" ]; then
                 curl --fail --silent --location --max-time 60 \
-                  "$PAGES_BASE_URL/$rel_url" \
-                  -o "tools/v1-emulator/dist/pages/builds/$fname" || rm -f "tools/v1-emulator/dist/pages/builds/$fname"
+                  "$PAGES_BASE_URL/emulator/$rel_url" \
+                  -o "tools/v1-emulator/dist/pages/emulator/builds/$fname" || rm -f "tools/v1-emulator/dist/pages/emulator/builds/$fname"
               fi
             done
             MERGE_ARGS="--merge-manifest $RUNNER_TEMP/prev-manifest.json --max-history 8"
@@ -151,14 +154,25 @@ jobs:
 
           node tools/v1-emulator/pack-wasm-bundle.mjs \
             --ref "$BUILD_REF" \
-            --stage-pages tools/v1-emulator/dist/pages \
+            --stage-pages tools/v1-emulator/dist/pages/emulator \
             $MERGE_ARGS
 
           BUNDLE_PATH="$(ls -1 tools/v1-emulator/dist/*.sonix-web.zip | head -n 1)"
           BUNDLE_NAME="$(basename "$BUNDLE_PATH")"
           echo "bundle_path=$BUNDLE_PATH" >> "$GITHUB_OUTPUT"
           echo "bundle_name=$BUNDLE_NAME" >> "$GITHUB_OUTPUT"
-          ls -lh tools/v1-emulator/dist/pages tools/v1-emulator/dist/pages/builds
+          ls -lh tools/v1-emulator/dist/pages tools/v1-emulator/dist/pages/emulator/builds
+
+      - name: Stage the showcase site at the Pages root
+        run: |
+          set -euo pipefail
+          SITE=tools/v1-emulator/dist/pages
+          # The emulator workbench lives at ./emulator/; the showcase owns the root.
+          cp index.html coi-serviceworker.js "$SITE/"
+          cp -R assets "$SITE/assets"
+          : > "$SITE/.nojekyll"
+          echo "Staged showcase + emulator:"
+          ls -lh "$SITE"
 
       - name: Boot the compiled firmware and test the build loader in Chrome
         env:

@@ -3013,3 +3013,12 @@ html.real-size-mode .v1-assembly {
 .remote-point { fill: var(--bg-base); stroke: var(--accent-bright); stroke-width: 1.5; }
 .remote-point.selected { fill: var(--accent-bright); }
 .remote-card [data-error="true"] { color: #fca5a5; }
+
+/* --------------------------------------------------------------------------
+ * Showcase embed mode (?embed=1): the workbench header is redundant inside the
+ * site's hardware frame. Device controls, build loader, microSD and logs stay
+ * reachable through the normal tabs / bottom navigation.
+ * -------------------------------------------------------------------------- */
+html[data-embed="1"] .topbar { display: none; }
+html[data-embed="1"] .app-shell { min-height: 0; }
+html[data-embed="1"] .workspace { min-height: 0; }

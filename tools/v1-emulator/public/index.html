@@ -10,6 +10,9 @@
 	<meta name="mobile-web-app-capable" content="yes">
 	<title>TempoTec Variations V1 — Interactive Emulator</title>
 	<script src="coi-serviceworker.js"></script>
+	<!-- ?embed=1 is used by the showcase site: hide the workbench header but
+	     keep the device, microSD and build tabs available inside the iframe. -->
+	<script>if (new URLSearchParams(location.search).has("embed")) document.documentElement.dataset.embed = "1";</script>
 	<link rel="stylesheet" href="styles.css">
 </head>
 <body data-mobile-view="device">
