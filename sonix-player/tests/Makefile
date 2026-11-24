@@ -309,7 +309,7 @@ $(BUILD)/test_crossfade: $(XFADE_SRC) $(ROOT)/src/system/audio/crossfade.h $(ROO
 # The explicit V1 external-DAC host trial against a private fake sysfs tree.
 # Exercises the real role writes, bounded wait, rollback and crash recovery.
 .PHONY: usbhost
-usbhost: $(BUILD)/test_usbhostprobe $(BUILD)/test_usbhost_reset $(BUILD)/test_usb_ownership $(BUILD)/test_usbexport $(BUILD)/test_usb_storage $(BUILD)/test_usbaudio_arbitration $(BUILD)/test_usbaudio_volume $(BUILD)/test_usbhostmode $(BUILD)/test_card_release
+usbhost: $(BUILD)/test_usbhostprobe $(BUILD)/test_usbhost_reset $(BUILD)/test_usb_ownership $(BUILD)/test_usbexport $(BUILD)/test_usb_storage $(BUILD)/test_usbaudio_arbitration $(BUILD)/test_usbaudio_volume $(BUILD)/test_usbaudio_compat $(BUILD)/test_usbhostmode $(BUILD)/test_card_release
 	$(BUILD)/test_usbhostprobe
 	$(BUILD)/test_usbhost_reset
 	$(BUILD)/test_usb_ownership
@@ -317,6 +317,7 @@ usbhost: $(BUILD)/test_usbhostprobe $(BUILD)/test_usbhost_reset $(BUILD)/test_us
 	$(BUILD)/test_usb_storage
 	$(BUILD)/test_usbaudio_arbitration
 	$(BUILD)/test_usbaudio_volume
+	$(BUILD)/test_usbaudio_compat
 	$(BUILD)/test_usbhostmode
 	$(BUILD)/test_card_release
 
@@ -343,6 +344,17 @@ $(BUILD)/test_usbaudio_arbitration: test_usbaudio_arbitration.c $(ROOT)/src/syst
                                    stubs/lvgl/lvgl.h stubs/alsa/asoundlib.h
 	@mkdir -p $(BUILD)
 	$(CC) $(CPPFLAGS) -Istubs $(CFLAGS) -o $@ test_usbaudio_arbitration.c $(LDFLAGS) $(LDLIBS)
+
+# The 48 kHz/16 bit compatibility setting for a USB DAC that presents one
+# format and refuses the rest: where it is stored, that it is off until asked
+# for, that a change off the playback thread is saved by the poll rather than
+# there, that it is in force only while a card is really the output, and what
+# the attach notice says. The config is a two-cell fake; everything from the
+# setting to the notice is the real usbaudio.c.
+$(BUILD)/test_usbaudio_compat: test_usbaudio_compat.c $(ROOT)/src/system/audio/usbaudio.c \
+                               $(ROOT)/src/system/audio/usbaudio.h stubs/lvgl/lvgl.h stubs/alsa/asoundlib.h
+	@mkdir -p $(BUILD)
+	$(CC) $(CPPFLAGS) -Istubs $(CFLAGS) -o $@ test_usbaudio_compat.c $(LDFLAGS) $(LDLIBS)
 
 # Where the level physically happens on a USB DAC: the device's own control by
 # default, the samples the remainder, and the samples the whole of it when the
@@ -1309,6 +1321,32 @@ MUSICROWS_OBJ = $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(MUSICROWS_SRC)) \
 musicsettings-rows: $(BUILD)/test_musicsettings_rows
 	$(BUILD)/test_musicsettings_rows ../../sonix-packer/assets/V1/usr/resource/sonix/language
 
+# Developer options: the USB 48 kHz compatibility row. The page is built by the
+# real devoptions_init(), so the row under test is the one the player draws, in
+# the place it draws it; what is checked is its position (under the External USB
+# DAC row), that its switch opens showing the setting, that a tap writes it, and
+# that a change made by audio.c -- which can switch it on by itself -- is what
+# the page shows when it is next opened.
+# devoptions.c is included by the test rather than compiled beside it: the page's
+# own static rows are what the checks look at, and they are only visible there.
+DEVOPTIONS_SRC = $(ROOT)/tests/ui/test_devoptions_usbcompat.c \
+                 $(ROOT)/src/gui/shell/settingsrow.c $(ROOT)/src/gui/shell/theme.c \
+                 $(ROOT)/src/gui/shell/icons.c $(ROOT)/src/gui/board_profile.c \
+                 $(ROOT)/src/system/core/config.c $(ROOT)/src/system/core/lang.c
+DEVOPTIONS_OBJ = $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(DEVOPTIONS_SRC)) \
+                 $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(UI_LVGL_SRC))
+
+.PHONY: devoptions
+devoptions: $(BUILD)/test_devoptions_usbcompat
+	$(BUILD)/test_devoptions_usbcompat ../../sonix-packer/assets/V1/usr/resource/sonix/language
+
+# devoptions.c is listed again as a prerequisite because the test includes it:
+# the object rule cannot see through the #include, and without this an edit to
+# the page would leave this test running the binary from before it.
+$(BUILD)/test_devoptions_usbcompat: $(DEVOPTIONS_OBJ) $(ROOT)/src/gui/settings/devoptions.c
+	$(CC) $(LDFLAGS) -o $@ $(DEVOPTIONS_OBJ) -lpthread -lm -ldl
+
+
 $(BUILD)/test_musicsettings_rows: $(MUSICROWS_OBJ)
 	$(CC) -o $@ $^ $(LDFLAGS) $(LDLIBS)
 
@@ -1511,7 +1549,7 @@ $(BUILD)/ui/lvgl/%.o: $(ROOT)/lvgl/%.c ui/lv_conf.h $(ROOT)/lv_conf.h
 	@mkdir -p $(dir $@)
 	$(CC) $(UI_CPPFLAGS) $(filter-out -Werror,$(UI_CFLAGS)) -c $< -o $@
 
--include $(sort $(QOBUZGENRE_UI_OBJ:.o=.d) $(PEQPAGE_OBJ:.o=.d) $(UI_OBJ:.o=.d) $(SAVER_OBJ:.o=.d) $(CHARGE_OBJ:.o=.d) $(WIFIPAGE_OBJ:.o=.d) $(LYRICSEARCH_OBJ:.o=.d) $(GAMES_OBJ:.o=.d) $(CORNERS_OBJ:.o=.d) $(STATS_UI_OBJ:.o=.d) $(PLAYBUTTON_OBJ:.o=.d) $(MUSICROWS_OBJ:.o=.d) $(VOLUMEOVERLAY_OBJ:.o=.d) $(PLAYERDECK_OBJ:.o=.d) $(VINYLLAYOUT_OBJ:.o=.d) $(STICKERLAYOUT_OBJ:.o=.d) $(WAVEOVERLAY_OBJ:.o=.d) $(HIRESBADGE_UI_OBJ:.o=.d) $(STOCKKEYS_UI_OBJ:.o=.d) $(TIDALPAGE_OBJ:.o=.d))
+-include $(sort $(QOBUZGENRE_UI_OBJ:.o=.d) $(PEQPAGE_OBJ:.o=.d) $(UI_OBJ:.o=.d) $(SAVER_OBJ:.o=.d) $(CHARGE_OBJ:.o=.d) $(WIFIPAGE_OBJ:.o=.d) $(LYRICSEARCH_OBJ:.o=.d) $(GAMES_OBJ:.o=.d) $(CORNERS_OBJ:.o=.d) $(STATS_UI_OBJ:.o=.d) $(PLAYBUTTON_OBJ:.o=.d) $(MUSICROWS_OBJ:.o=.d) $(VOLUMEOVERLAY_OBJ:.o=.d) $(PLAYERDECK_OBJ:.o=.d) $(VINYLLAYOUT_OBJ:.o=.d) $(STICKERLAYOUT_OBJ:.o=.d) $(WAVEOVERLAY_OBJ:.o=.d) $(HIRESBADGE_UI_OBJ:.o=.d) $(STOCKKEYS_UI_OBJ:.o=.d) $(TIDALPAGE_OBJ:.o=.d) $(DEVOPTIONS_OBJ:.o=.d))
 
 # Smart Mix track-count limits and traversal, with a memory-only graph fixture.
 GENIUS_SRC = test_genius.c $(ROOT)/src/system/library/genius.c

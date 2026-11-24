@@ -15,6 +15,9 @@ sonix-player/build_web
 sonix-player/build_wasm
 sonix-player/build_gen
 
+# A local copy (or link) of the resource tree, for running the host build.
+sonix-player/usr
+
 tools/v1-emulator/.runtime
 tools/v1-emulator/dist
 

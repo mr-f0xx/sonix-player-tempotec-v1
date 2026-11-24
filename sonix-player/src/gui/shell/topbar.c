@@ -142,6 +142,10 @@ static lv_timer_t *battery_timer;
 static lv_timer_t *jack_timer;
 static int last_jack_state = -1;
 static int last_usb_audio_state = -1;
+// The compatibility mode as of the last draw, for the glyph's colour: a DAC
+// already attached when the setting changes has no attach to announce itself
+// with, so the colour is the only thing that moves.
+static int last_usb_compat_state = -1;
 
 // Tint the requested glyphs and all parts of the battery icon while leaving
 // the background, text, signal strength, and battery level/visibility intact.
@@ -436,7 +440,9 @@ static void refresh_headphone_icon(bool force) {
 	usbaudio_poll();
 
 	int usb = usbaudio_active() ? 1 : 0;
-	bool changed = state != last_jack_state || usb != last_usb_audio_state;
+	int compat = usbaudio_compat_active() ? 1 : 0;
+	bool changed = state != last_jack_state || usb != last_usb_audio_state ||
+				   compat != last_usb_compat_state;
 
 	if (changed) {
 		// Something left one of the sockets. Pausing belongs here and not
@@ -460,6 +466,7 @@ static void refresh_headphone_icon(bool force) {
 
 		last_jack_state = state;
 		last_usb_audio_state = usb;
+		last_usb_compat_state = compat;
 	}
 
 	// A normal poll can return when the hardware answer is unchanged. The forced
@@ -476,8 +483,15 @@ static void refresh_headphone_icon(bool force) {
 	// whatever is plugged into them.
 	if (usb) {
 		lv_image_set_src(hp_icon, &icon_usbaudioout);
+		// Amber while the 48 kHz/16 bit compatibility plug is in front of the
+		// card, cyan otherwise. The glyph is the only thing on screen that
+		// describes the port, and the converted stream is a different one to
+		// listen to: a listener comparing what they hear against the track's
+		// own format should be able to see why they differ without going into
+		// the settings to find out.
 		if (theme_uses_function_glyphs()) {
-			lv_obj_set_style_image_recolor(hp_icon, theme_semantic_color(THEME_SEMANTIC_CYAN), 0);
+			theme_semantic_t colour = usbaudio_compat_active() ? THEME_SEMANTIC_AMBER : THEME_SEMANTIC_CYAN;
+			lv_obj_set_style_image_recolor(hp_icon, theme_semantic_color(colour), 0);
 			lv_obj_set_style_image_recolor_opa(hp_icon, LV_OPA_COVER, 0);
 		} else {
 			lv_obj_remove_local_style_prop(hp_icon, LV_STYLE_IMAGE_RECOLOR, 0);

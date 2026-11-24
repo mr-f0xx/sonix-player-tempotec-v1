@@ -70,7 +70,14 @@
   Control Centre remains available for EQ, PEQ, MSEB, gain and output controls;
   the graphic EQ, PEQ and MSEB process incoming PCM, while DSD passes through
   untouched.
-- **USB audio out** - a DAC or USB-C headphones driven with the player as host.
+- **USB audio out** - a DAC or USB-C headphones driven with the player as host,
+  announced with the card's own name when it is plugged in and again when it
+  goes. A desktop DAC on a Type-C adapter that accepts only one format is
+  handled by **48 kHz compatibility** (Developer options, or switched on by
+  itself when a card refuses the track's own format): every track is converted
+  to 48 kHz / 16 bit before it leaves the port, DSD included -- through a
+  conversion rather than as DoP, because a resampled DoP bitstream is noise.
+  Off by default, and only in force while a card is really the output.
 - **External USB DAC** - a switch under Developer options that keeps the
   USB-C port supplying power and acting as host, for a dongle that the
   default dual-role setting never brings up. It is what made a JCally and
