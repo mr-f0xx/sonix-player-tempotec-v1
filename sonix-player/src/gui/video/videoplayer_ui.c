@@ -18,6 +18,8 @@ static bool overlay_visible;
 static uint32_t overlay_hide_ms;
 static bool ui_suspended;
 static bool was_playing_before_suspend;
+static lv_timer_t *click_timer;
+static uint32_t last_click_ms;
 
 // ---------------------------------------------------------------------------
 // Small helpers
@@ -172,10 +174,12 @@ static void overlay_draw(uint16_t *panel, int pw, int ph, int stride) {
 	double frac = (dur > 0.0) ? (pos / dur) : 0.0;
 	if (frac < 0) frac = 0;
 	if (frac > 1) frac = 1;
-	char tcur[16], tdur[16], tbuf[40];
+	char tcur[16], trem[16], tbuf[40];
+	double rem = dur - pos;
+	if (rem < 0) rem = 0;
 	format_time(tcur, sizeof(tcur), pos);
-	format_time(tdur, sizeof(tdur), dur);
-	snprintf(tbuf, sizeof(tbuf), "%s/%s", tcur, tdur);
+	format_time(trem, sizeof(trem), rem);
+	snprintf(tbuf, sizeof(tbuf), "%s -%s", tcur, trem);
 	vp_state_t st = videoplayer_get_state();
 	const char *icon = (st == VP_STATE_PAUSED) ? ">" : "||";
 
@@ -244,6 +248,11 @@ static void overlay_draw(uint16_t *panel, int pw, int ph, int stride) {
 static void stop_and_exit(void) {
 	ui_suspended = false;
 	was_playing_before_suspend = false;
+	last_click_ms = 0;
+	if (click_timer) {
+		lv_timer_delete(click_timer);
+		click_timer = NULL;
+	}
 	if (tick_timer) {
 		lv_timer_delete(tick_timer);
 		tick_timer = NULL;
@@ -260,25 +269,39 @@ static void screen_unloaded_cb(lv_event_t *e) {
 	stop_and_exit();
 }
 
+static void single_click_timer_cb(lv_timer_t *t) {
+	(void)t;
+	if (click_timer) {
+		lv_timer_delete(click_timer);
+		click_timer = NULL;
+	}
+	if (!overlay_visible) return;
+	videoplayer_toggle_pause();
+	show_overlay();
+}
+
 static void screen_clicked_cb(lv_event_t *e) {
 	(void)e;
-	lv_indev_t *indev = lv_indev_active();
-	lv_point_t p = {0, 0};
-	if (indev) lv_indev_get_point(indev, &p);
-
 	if (!overlay_visible) {
 		show_overlay();
 		return;
 	}
-	// Top strip toggles landscape/portrait orientation.
-	if (p.y < 48) {
+	uint32_t now = now_ms();
+	if (last_click_ms != 0 && (now - last_click_ms) < 350) {
+		// Double tap: toggle orientation.
+		if (click_timer) {
+			lv_timer_delete(click_timer);
+			click_timer = NULL;
+		}
+		last_click_ms = 0;
 		display_video_set_landscape(!display_video_is_landscape());
 		show_overlay();
 		return;
 	}
-	// When overlay visible, a tap toggles play/pause and keeps overlay up
-	videoplayer_toggle_pause();
-	show_overlay();
+	last_click_ms = now;
+	if (click_timer) lv_timer_delete(click_timer);
+	click_timer = lv_timer_create(single_click_timer_cb, 300, NULL);
+	lv_timer_set_repeat_count(click_timer, 1);
 }
 
 static void tick_timer_cb(lv_timer_t *timer) {
