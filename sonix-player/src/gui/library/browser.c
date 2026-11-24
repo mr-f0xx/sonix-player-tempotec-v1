@@ -1193,6 +1193,16 @@ static void screen_unloaded_cb(lv_event_t *e) {
 	grid_thumb_cache_clear();
 }
 
+static void entry_pressed_cb(lv_event_t *e) {
+	row_t *pressed = row_of_button(lv_event_get_current_target(e));
+	for (int i = 0; i < ROW_POOL; i++) {
+		bool on = (&rows[i] == pressed);
+		if (rows[i].label) {
+			scrolltext_set_active(rows[i].label, on);
+		}
+	}
+}
+
 static void entry_clicked_cb(lv_event_t *e) {
 	if (player_sheet_drag_active() || switcher_back_drag_active()) {
 		return; // a swipe across the row, not a tap on it
@@ -1885,6 +1895,7 @@ static void build_rows(int width) {
 		lv_obj_add_style(row->button, &theme_style_card_pressed, LV_STATE_PRESSED);
 		lv_obj_set_hidden(row->button, true);
 		lv_obj_set_event_bubble(row->button, true); // so a swipe can start on a row
+		lv_obj_add_event_cb(row->button, entry_pressed_cb, LV_EVENT_PRESSED, NULL);
 		lv_obj_add_event_cb(row->button, entry_clicked_cb, LV_EVENT_CLICKED, NULL);
 		lv_obj_add_event_cb(row->button, entry_long_pressed_cb, LV_EVENT_LONG_PRESSED, NULL);
 
@@ -1906,6 +1917,7 @@ static void build_rows(int width) {
 		// off. A single line keeps the row height stable.
 		lv_obj_set_height(row->label, lv_font_get_line_height(bp_tile_label_font()));
 		scrolltext_apply(row->label);
+		scrolltext_set_active(row->label, false);
 
 		row->check = lv_image_create(row->button);
 		lv_image_set_src(row->check, &icon_check);

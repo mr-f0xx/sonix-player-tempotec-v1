@@ -473,6 +473,19 @@ static void scroll_cb(lv_event_t *e) {
 	window_update();
 }
 
+static void row_pressed_cb(lv_event_t *e) {
+	lv_obj_t *btn = lv_event_get_current_target(e);
+	for (int i = 0; i < SEARCH_POOL; i++) {
+		bool on = (rows[i].button == btn);
+		if (rows[i].title) {
+			scrolltext_set_active(rows[i].title, on);
+		}
+		if (rows[i].subtitle) {
+			scrolltext_set_active(rows[i].subtitle, on);
+		}
+	}
+}
+
 static void row_clicked_cb(lv_event_t *e) {
 	if (player_sheet_drag_active() || switcher_back_drag_active()) {
 		return;
@@ -525,6 +538,7 @@ static void row_create(row_t *row) {
 	lv_obj_set_flex_flow(button, LV_FLEX_FLOW_ROW);
 	lv_obj_set_flex_align(button, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 	lv_obj_set_style_pad_column(button, 12, 0);
+	lv_obj_add_event_cb(button, row_pressed_cb, LV_EVENT_PRESSED, row);
 	lv_obj_add_event_cb(button, row_clicked_cb, LV_EVENT_CLICKED, row);
 	lv_obj_add_event_cb(button, track_long_pressed_cb, LV_EVENT_LONG_PRESSED, row);
 	lv_obj_set_hidden(button, true);
@@ -554,6 +568,7 @@ static void row_create(row_t *row) {
 	lv_obj_add_style(row->title, &theme_style_text, 0);
 	lv_obj_set_style_text_font(row->title, &font_ui_24, 0);
 	scrolltext_apply(row->title);
+	scrolltext_set_active(row->title, false);
 
 	row->subtitle = lv_label_create(texts);
 	lv_obj_set_width(row->subtitle, lv_pct(100));
@@ -561,6 +576,7 @@ static void row_create(row_t *row) {
 	lv_obj_add_style(row->subtitle, &theme_style_text_dim, 0);
 	lv_obj_set_style_text_font(row->subtitle, &font_ui_18, 0);
 	scrolltext_apply(row->subtitle);
+	scrolltext_set_active(row->subtitle, false);
 
 	row->chevron = lv_image_create(button);
 	lv_image_set_src(row->chevron, &icon_chevron_right);

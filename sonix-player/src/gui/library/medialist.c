@@ -2740,6 +2740,22 @@ static library_filter_t filter_for(library_list_t kind) {
 	}
 }
 
+// Only the row the user is touching scrolls its long title; the rest stay
+// dotted so the list doesn't move everywhere at once.
+static void row_pressed_cb(lv_event_t *e) {
+	panel_t *p = (panel_t *)lv_event_get_user_data(e);
+	lv_obj_t *btn = lv_event_get_current_target(e);
+	for (int i = 0; i < ROW_POOL; i++) {
+		bool on = (p->rows[i].button == btn);
+		if (p->rows[i].label) {
+			scrolltext_set_active(p->rows[i].label, on);
+		}
+		if (p->rows[i].artist) {
+			scrolltext_set_active(p->rows[i].artist, on);
+		}
+	}
+}
+
 static void row_clicked_cb(lv_event_t *e) {
 	if (player_sheet_drag_active() || switcher_back_drag_active()) {
 		return; // a swipe across the list, not a tap
@@ -4047,6 +4063,7 @@ static void build_panel(panel_t *p, gui_config_t *cfg, bool is_tracks, int slot_
 		lv_obj_add_style(row->button, &theme_style_card_pressed, LV_STATE_PRESSED);
 		lv_obj_set_hidden(row->button, true);
 		lv_obj_set_event_bubble(row->button, true); // so the player sheet can be dragged in
+		lv_obj_add_event_cb(row->button, row_pressed_cb, LV_EVENT_PRESSED, p);
 		lv_obj_add_event_cb(row->button, row_clicked_cb, LV_EVENT_CLICKED, p);
 		lv_obj_add_event_cb(row->button, row_long_pressed_cb, LV_EVENT_LONG_PRESSED, p);
 
@@ -4085,6 +4102,7 @@ static void build_panel(panel_t *p, gui_config_t *cfg, bool is_tracks, int slot_
 		lv_obj_add_style(row->label, &theme_style_text, 0);
 		lv_obj_set_style_text_font(row->label, ROW_TITLE_FONT, 0);
 		scrolltext_apply(row->label);
+		scrolltext_set_active(row->label, false);
 
 		row->detail = lv_obj_create(row->text);
 		lv_obj_remove_style_all(row->detail);
@@ -4115,6 +4133,7 @@ static void build_panel(panel_t *p, gui_config_t *cfg, bool is_tracks, int slot_
 		lv_obj_set_style_text_font(row->artist, ROW_DETAIL_FONT, 0);
 		scrolltext_apply(row->artist);
 		scrolltext_set(row->artist, "");
+		scrolltext_set_active(row->artist, false);
 		lv_obj_set_hidden(row->artist, true);
 
 		// Out of the flex layout on purpose: it sits in the row's own left

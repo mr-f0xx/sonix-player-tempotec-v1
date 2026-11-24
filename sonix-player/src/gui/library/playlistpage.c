@@ -606,6 +606,29 @@ static void menu_btn_cb(lv_event_t *e) {
 // the mirror refreshes in the background: between drawing a row and tapping it
 // the index can shift, and the track would land in a different playlist from
 // the one on screen. A uuid attached to the row cannot slide.
+static void set_scroll_active_walk(lv_obj_t *obj, bool active) {
+	if (lv_obj_check_type(obj, &lv_label_class)) {
+		scrolltext_set_active(obj, active);
+	}
+	uint32_t n = lv_obj_get_child_count(obj);
+	for (uint32_t i = 0; i < n; i++) {
+		set_scroll_active_walk(lv_obj_get_child(obj, i), active);
+	}
+}
+
+static void row_pressed_cb(lv_event_t *e) {
+	lv_obj_t *btn = lv_event_get_current_target(e);
+	lv_obj_t *parent = lv_obj_get_parent(btn);
+	if (!parent) {
+		return;
+	}
+	uint32_t n = lv_obj_get_child_count(parent);
+	for (uint32_t i = 0; i < n; i++) {
+		lv_obj_t *child = lv_obj_get_child(parent, i);
+		set_scroll_active_walk(child, child == btn);
+	}
+}
+
 // Returns the subtitle label, for a caller that has to correct it later.
 static lv_obj_t *add_row(const char *name, const char *subtitle, const lv_image_dsc_t *glyph, long qobuz_id,
 						 const char *tidal_uuid) {
@@ -627,6 +650,7 @@ static lv_obj_t *add_row(const char *name, const char *subtitle, const lv_image_
 	lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
 	lv_obj_set_flex_align(row, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 	lv_obj_set_event_bubble(row, true); // the player sheet drags from here too
+	lv_obj_add_event_cb(row, row_pressed_cb, LV_EVENT_PRESSED, NULL);
 	char *uuid = NULL;
 	if (qobuz_id > 0) {
 		// An account playlist has no file to delete, so it carries no menu:
@@ -670,6 +694,7 @@ static lv_obj_t *add_row(const char *name, const char *subtitle, const lv_image_
 	lv_obj_set_style_text_font(name_label, compact_page() ? &font_ui_18 : &font_ui_24, 0);
 	scrolltext_apply(name_label);
 	scrolltext_set(name_label, name);
+	scrolltext_set_active(name_label, false);
 
 	lv_obj_t *sub = NULL;
 	if (subtitle && subtitle[0]) {
@@ -1180,6 +1205,7 @@ static void import_add_candidate_row(int index) {
 	lv_obj_set_style_pad_column(row, page_icon_gap(), 0);
 	lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
 	lv_obj_set_flex_align(row, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+	lv_obj_add_event_cb(row, row_pressed_cb, LV_EVENT_PRESSED, NULL);
 	lv_obj_add_event_cb(row, import_row_clicked_cb, LV_EVENT_CLICKED, (void *)(intptr_t)index);
 
 	lv_obj_t *tick = lv_image_create(row);
@@ -1208,6 +1234,7 @@ static void import_add_candidate_row(int index) {
 	lv_obj_set_style_text_font(name, compact_page() ? &font_ui_18 : &font_ui_24, 0);
 	scrolltext_apply(name);
 	scrolltext_set(name, import_candidates[index].name);
+	scrolltext_set_active(name, false);
 
 	lv_obj_t *where = lv_label_create(texts);
 	lv_label_set_text(where,tr(get_playlist_location_tr(import_candidates[index])));

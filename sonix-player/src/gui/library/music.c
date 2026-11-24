@@ -272,6 +272,19 @@ static bool recent_library_file_available(const recent_row_t *row) {
 	return stat(row->path, &info) == 0 && S_ISREG(info.st_mode);
 }
 
+static void recent_row_pressed_cb(lv_event_t *e) {
+	recent_row_t *pressed = lv_event_get_user_data(e);
+	for (int i = 0; i < TOKYO_RECENT_COUNT; i++) {
+		bool on = (&recent_rows[i] == pressed);
+		if (recent_rows[i].title) {
+			scrolltext_set_active(recent_rows[i].title, on);
+		}
+		if (recent_rows[i].artist) {
+			scrolltext_set_active(recent_rows[i].artist, on);
+		}
+	}
+}
+
 static void recent_track_clicked_cb(lv_event_t *e) {
 	if (player_sheet_drag_active() || switcher_back_drag_active()) {
 		return;
@@ -570,6 +583,7 @@ static void tokyo_music_build(gui_config_t *cfg) {
 		lv_obj_set_flex_flow(row->button, LV_FLEX_FLOW_ROW);
 		lv_obj_set_flex_align(row->button, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 		lv_obj_set_event_bubble(row->button, true);
+		lv_obj_add_event_cb(row->button, recent_row_pressed_cb, LV_EVENT_PRESSED, row);
 		lv_obj_add_event_cb(row->button, recent_track_clicked_cb, LV_EVENT_CLICKED, row);
 
 		row->icon = lv_image_create(row->button);
@@ -597,6 +611,7 @@ static void tokyo_music_build(gui_config_t *cfg) {
 		lv_obj_add_style(row->title, &theme_style_text, 0);
 		lv_obj_set_style_text_font(row->title, &font_ui_14, 0);
 		scrolltext_apply(row->title);
+		scrolltext_set_active(row->title, false);
 
 		row->artist = lv_label_create(copy);
 		lv_obj_set_width(row->artist, lv_pct(100));
@@ -604,6 +619,7 @@ static void tokyo_music_build(gui_config_t *cfg) {
 		lv_obj_add_style(row->artist, &theme_style_text_dim, 0);
 		lv_obj_set_style_text_font(row->artist, &font_ui_14, 0);
 		scrolltext_apply(row->artist);
+		scrolltext_set_active(row->artist, false);
 
 		row->play_icon = lv_image_create(row->button);
 		lv_image_set_src(row->play_icon, &icon_play);

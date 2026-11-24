@@ -1101,6 +1101,7 @@ static void build_rows(int width) {
 		// Gestures (back, and pulling the player in) often start on a row, and a
 		// button keeps the press to itself.
 		lv_obj_set_event_bubble(row->button, true);
+		lv_obj_add_event_cb(row->button, row_pressed_cb, LV_EVENT_PRESSED, NULL);
 		lv_obj_add_event_cb(row->button, row_clicked_cb, LV_EVENT_CLICKED, NULL);
 		lv_obj_add_event_cb(row->button, row_long_cb, LV_EVENT_LONG_PRESSED, NULL);
 
@@ -1133,6 +1134,7 @@ static void build_rows(int width) {
 		lv_obj_add_style(row->title, &theme_style_text, 0);
 		lv_obj_set_style_text_font(row->title, ROW_TITLE_FONT, 0);
 		scrolltext_apply(row->title);
+		scrolltext_set_active(row->title, false);
 
 		row->detail = lv_label_create(texts);
 		lv_obj_set_width(row->detail, lv_pct(100));
@@ -1140,6 +1142,7 @@ static void build_rows(int width) {
 		lv_obj_add_style(row->detail, &theme_style_text_dim, 0);
 		lv_obj_set_style_text_font(row->detail, ROW_DETAIL_FONT, 0);
 		scrolltext_apply(row->detail);
+		scrolltext_set_active(row->detail, false);
 
 		// The tick of an episode that has been heard, worn on the cover.
 		//
@@ -2250,6 +2253,19 @@ static void *worker_main(void *arg) {
 // ---------------------------------------------------------------------------
 // tapping a row
 // ---------------------------------------------------------------------------
+
+static void row_pressed_cb(lv_event_t *e) {
+	lv_obj_t *btn = lv_event_get_current_target(e);
+	for (int i = 0; i < ROW_POOL; i++) {
+		bool on = (rows[i].button == btn);
+		if (rows[i].title) {
+			scrolltext_set_active(rows[i].title, on);
+		}
+		if (rows[i].detail) {
+			scrolltext_set_active(rows[i].detail, on);
+		}
+	}
+}
 
 static void row_clicked_cb(lv_event_t *e) {
 	if (switcher_back_drag_active() || player_sheet_drag_active()) {

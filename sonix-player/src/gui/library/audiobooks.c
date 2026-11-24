@@ -723,6 +723,16 @@ void audiobooks_play_at(const char *book, const char *file, double seconds) {
 	player_refresh_now_playing();
 }
 
+static void book_pressed_cb(lv_event_t *e) {
+	lv_obj_t *btn = lv_event_get_current_target(e);
+	for (int i = 0; i < ROW_POOL; i++) {
+		bool on = (rows[i].button == btn);
+		if (rows[i].label) {
+			scrolltext_set_active(rows[i].label, on);
+		}
+	}
+}
+
 static void book_clicked_cb(lv_event_t *e) {
 	if (player_sheet_drag_active() || switcher_back_drag_active()) {
 		return; // a swipe across the list, not a tap
@@ -780,6 +790,7 @@ static void build_books_page(gui_config_t *cfg) {
 		lv_obj_set_style_pad_column(row->button, ROW_PAD, 0);
 		lv_obj_set_hidden(row->button, true);
 		lv_obj_set_event_bubble(row->button, true); // so the player sheet can be dragged in
+		lv_obj_add_event_cb(row->button, book_pressed_cb, LV_EVENT_PRESSED, NULL);
 		lv_obj_add_event_cb(row->button, book_clicked_cb, LV_EVENT_CLICKED, NULL);
 		lv_obj_set_flex_flow(row->button, LV_FLEX_FLOW_ROW);
 		lv_obj_set_flex_align(row->button, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
@@ -795,6 +806,7 @@ static void build_books_page(gui_config_t *cfg) {
 		// One scrolling line: long names scroll into view instead of being cut off.
 		lv_obj_set_height(row->label, lv_font_get_line_height(&font_ui_24));
 		scrolltext_apply(row->label);
+		scrolltext_set_active(row->label, false);
 
 		// Out of the flex layout: it sits in the row's own left padding.
 		row->playmark = lv_obj_create(row->button);
@@ -952,6 +964,16 @@ static void names_open(list_id_t kind) {
 	switch_screen(names_screen);
 }
 
+static void name_pressed_cb(lv_event_t *e) {
+	lv_obj_t *btn = lv_event_get_current_target(e);
+	for (int i = 0; i < ROW_POOL; i++) {
+		bool on = (name_rows[i].button == btn);
+		if (name_rows[i].label) {
+			scrolltext_set_active(name_rows[i].label, on);
+		}
+	}
+}
+
 static void name_clicked_cb(lv_event_t *e) {
 	if (player_sheet_drag_active() || switcher_back_drag_active()) {
 		return;
@@ -1002,6 +1024,7 @@ static void build_names_page(gui_config_t *cfg) {
 		lv_obj_set_style_pad_column(row->button, bp_pick(8, 12), 0);
 		lv_obj_set_hidden(row->button, true);
 		lv_obj_set_event_bubble(row->button, true);
+		lv_obj_add_event_cb(row->button, name_pressed_cb, LV_EVENT_PRESSED, NULL);
 		lv_obj_add_event_cb(row->button, name_clicked_cb, LV_EVENT_CLICKED, NULL);
 		lv_obj_set_flex_flow(row->button, LV_FLEX_FLOW_ROW);
 		lv_obj_set_flex_align(row->button, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
@@ -1012,6 +1035,7 @@ static void build_names_page(gui_config_t *cfg) {
 		lv_obj_add_style(row->label, &theme_style_text, 0);
 		lv_obj_set_style_text_font(row->label, &font_ui_24, 0);
 		scrolltext_apply(row->label);
+		scrolltext_set_active(row->label, false);
 
 		row->count = lv_label_create(row->button);
 		lv_obj_add_style(row->count, &theme_style_text_dim, 0);
