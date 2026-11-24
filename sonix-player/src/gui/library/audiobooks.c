@@ -15,6 +15,7 @@
 #include "src/gui/shell/gridpage.h"
 #include "src/gui/shell/icons.h"
 #include "src/gui/shell/popover.h"
+#include "src/gui/shell/scrolltext.h"
 #include "src/gui/shell/settingsrow.h"
 #include "src/gui/shell/switcher.h"
 #include "src/gui/shell/theme.h"
@@ -396,7 +397,7 @@ static void row_bind(row_t *row, int index) {
 
 	lv_obj_set_hidden(row->button, false);
 	lv_obj_set_y(row->button, index * ROW_PITCH);
-	lv_label_set_text(row->label, name);
+	scrolltext_set(row->label, name);
 	row_show_glyph(row);
 	row_update_playmark(row);
 }
@@ -722,6 +723,16 @@ void audiobooks_play_at(const char *book, const char *file, double seconds) {
 	player_refresh_now_playing();
 }
 
+static void book_pressed_cb(lv_event_t *e) {
+	lv_obj_t *btn = lv_event_get_current_target(e);
+	for (int i = 0; i < ROW_POOL; i++) {
+		bool on = (rows[i].button == btn);
+		if (rows[i].label) {
+			scrolltext_set_active(rows[i].label, on);
+		}
+	}
+}
+
 static void book_clicked_cb(lv_event_t *e) {
 	if (player_sheet_drag_active() || switcher_back_drag_active()) {
 		return; // a swipe across the list, not a tap
@@ -779,6 +790,7 @@ static void build_books_page(gui_config_t *cfg) {
 		lv_obj_set_style_pad_column(row->button, ROW_PAD, 0);
 		lv_obj_set_hidden(row->button, true);
 		lv_obj_set_event_bubble(row->button, true); // so the player sheet can be dragged in
+		lv_obj_add_event_cb(row->button, book_pressed_cb, LV_EVENT_PRESSED, NULL);
 		lv_obj_add_event_cb(row->button, book_clicked_cb, LV_EVENT_CLICKED, NULL);
 		lv_obj_set_flex_flow(row->button, LV_FLEX_FLOW_ROW);
 		lv_obj_set_flex_align(row->button, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
@@ -788,14 +800,13 @@ static void build_books_page(gui_config_t *cfg) {
 		lv_image_set_inner_align(row->icon, LV_IMAGE_ALIGN_CENTER);
 
 		row->label = lv_label_create(row->button);
-		lv_label_set_long_mode(row->label, LV_LABEL_LONG_DOT);
 		lv_obj_set_flex_grow(row->label, 1);
 		lv_obj_add_style(row->label, &theme_style_text, 0);
 		lv_obj_set_style_text_font(row->label, &font_ui_24, 0);
-		// Two lines at most: the cap on the height is what makes LV_LABEL_LONG_DOT
-		// cut the name there, with the ellipsis. A cap and not a height, so a
-		// one-line name stays centred.
-		lv_obj_set_style_max_height(row->label, 2 * lv_font_get_line_height(&font_ui_24) + lv_obj_get_style_text_line_space(row->label, LV_PART_MAIN), 0);
+		// One scrolling line: long names scroll into view instead of being cut off.
+		lv_obj_set_height(row->label, lv_font_get_line_height(&font_ui_24));
+		scrolltext_apply(row->label);
+		scrolltext_set_active(row->label, false);
 
 		// Out of the flex layout: it sits in the row's own left padding.
 		row->playmark = lv_obj_create(row->button);
@@ -899,7 +910,7 @@ static void name_row_bind(name_row_t *row, int index) {
 	}
 	lv_obj_set_hidden(row->button, false);
 	lv_obj_set_y(row->button, index * NAME_ROW_PITCH);
-	lv_label_set_text(row->label, shown_name(names[index].name));
+	scrolltext_set(row->label, shown_name(names[index].name));
 	lv_label_set_text_fmt(row->count, "%d", names[index].books);
 }
 
@@ -953,6 +964,16 @@ static void names_open(list_id_t kind) {
 	switch_screen(names_screen);
 }
 
+static void name_pressed_cb(lv_event_t *e) {
+	lv_obj_t *btn = lv_event_get_current_target(e);
+	for (int i = 0; i < ROW_POOL; i++) {
+		bool on = (name_rows[i].button == btn);
+		if (name_rows[i].label) {
+			scrolltext_set_active(name_rows[i].label, on);
+		}
+	}
+}
+
 static void name_clicked_cb(lv_event_t *e) {
 	if (player_sheet_drag_active() || switcher_back_drag_active()) {
 		return;
@@ -1003,16 +1024,18 @@ static void build_names_page(gui_config_t *cfg) {
 		lv_obj_set_style_pad_column(row->button, bp_pick(8, 12), 0);
 		lv_obj_set_hidden(row->button, true);
 		lv_obj_set_event_bubble(row->button, true);
+		lv_obj_add_event_cb(row->button, name_pressed_cb, LV_EVENT_PRESSED, NULL);
 		lv_obj_add_event_cb(row->button, name_clicked_cb, LV_EVENT_CLICKED, NULL);
 		lv_obj_set_flex_flow(row->button, LV_FLEX_FLOW_ROW);
 		lv_obj_set_flex_align(row->button, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 
 		row->label = lv_label_create(row->button);
-		lv_label_set_long_mode(row->label, LV_LABEL_LONG_DOT);
 		lv_obj_set_flex_grow(row->label, 1);
 		lv_obj_set_height(row->label, lv_font_get_line_height(&font_ui_24));
 		lv_obj_add_style(row->label, &theme_style_text, 0);
 		lv_obj_set_style_text_font(row->label, &font_ui_24, 0);
+		scrolltext_apply(row->label);
+		scrolltext_set_active(row->label, false);
 
 		row->count = lv_label_create(row->button);
 		lv_obj_add_style(row->count, &theme_style_text_dim, 0);
@@ -1070,8 +1093,8 @@ static void continue_preview_refresh(void) {
 	lv_obj_set_hidden(tokyo_continue_empty, has_book);
 	lv_obj_set_hidden(tokyo_continue_book, !has_book);
 	if (has_book) {
-		lv_label_set_text(tokyo_continue_title, book_title[0] ? book_title : tr("audiobook_continue"));
-		lv_label_set_text(tokyo_continue_author, book_author);
+		scrolltext_set(tokyo_continue_title, book_title[0] ? book_title : tr("audiobook_continue"));
+		scrolltext_set(tokyo_continue_author, book_author);
 	}
 }
 
@@ -1170,17 +1193,17 @@ static void tokyo_continue_panel_build(gui_config_t *cfg) {
 	lv_obj_set_scrollable(copy, false);
 	lv_obj_set_flex_flow(copy, LV_FLEX_FLOW_COLUMN);
 	tokyo_continue_title = lv_label_create(copy);
-	lv_label_set_long_mode(tokyo_continue_title, LV_LABEL_LONG_DOT);
 	lv_obj_set_width(tokyo_continue_title, lv_pct(100));
 	lv_obj_set_height(tokyo_continue_title, lv_font_get_line_height(&font_ui_14));
 	lv_obj_add_style(tokyo_continue_title, &theme_style_text, 0);
 	lv_obj_set_style_text_font(tokyo_continue_title, &font_ui_14, 0);
+	scrolltext_apply(tokyo_continue_title);
 	tokyo_continue_author = lv_label_create(copy);
-	lv_label_set_long_mode(tokyo_continue_author, LV_LABEL_LONG_DOT);
 	lv_obj_set_width(tokyo_continue_author, lv_pct(100));
 	lv_obj_set_height(tokyo_continue_author, lv_font_get_line_height(&font_ui_14));
 	lv_obj_add_style(tokyo_continue_author, &theme_style_text_dim, 0);
 	lv_obj_set_style_text_font(tokyo_continue_author, &font_ui_14, 0);
+	scrolltext_apply(tokyo_continue_author);
 	lv_obj_set_hidden(tokyo_continue_book, true);
 
 	lv_obj_t *open_continue = lv_btn_create(continue_card);

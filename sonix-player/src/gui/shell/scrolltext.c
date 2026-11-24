@@ -104,8 +104,8 @@ static int32_t text_width(lv_obj_t *label, const char *text) {
 // ---------------------------------------------------------------------------
 
 #define FADE_EDGE_PX 24
-#define FADE_CACHE_MAX 8
-#define FADE_LABELS_MAX 16
+#define FADE_CACHE_MAX 16
+#define FADE_LABELS_MAX 128
 #define FADE_POLL_MS 80
 
 // One size, and the two masks for it: `both` while the text moves, `tail` while
@@ -193,23 +193,33 @@ static const fade_masks_t *fade_masks(int32_t w, int32_t h) {
 typedef struct {
 	lv_obj_t *label;
 	const fade_masks_t *masks; // NULL while the text fits
+	bool active;				// when false, overflowing text is dotted, not scrolled
 } fade_label_t;
 
 static fade_label_t fade_labels[FADE_LABELS_MAX];
 static int fade_label_count;
 static lv_timer_t *fade_timer;
 
-static fade_label_t *fade_entry(lv_obj_t *label) {
+static fade_label_t *fade_find(lv_obj_t *label) {
 	for (int i = 0; i < fade_label_count; i++) {
 		if (fade_labels[i].label == label) {
 			return &fade_labels[i];
 		}
+	}
+	return NULL;
+}
+
+static fade_label_t *fade_entry(lv_obj_t *label) {
+	fade_label_t *entry = fade_find(label);
+	if (entry) {
+		return entry;
 	}
 	if (fade_label_count >= FADE_LABELS_MAX) {
 		return NULL;
 	}
 	fade_labels[fade_label_count].label = label;
 	fade_labels[fade_label_count].masks = NULL;
+	fade_labels[fade_label_count].active = true;
 	return &fade_labels[fade_label_count++];
 }
 
@@ -225,7 +235,7 @@ static bool text_is_moving(lv_obj_t *label) {
 // Puts the right mask of the pair on the label, or none at all.
 static void fade_pick(fade_label_t *entry) {
 	const lv_image_dsc_t *want = NULL;
-	if (entry->masks) {
+	if (entry->masks && entry->active) {
 		want = text_is_moving(entry->label) ? &entry->masks->both : &entry->masks->tail;
 	}
 
@@ -303,10 +313,14 @@ static void scroll_fit(lv_obj_t *label) {
 	if (!label) {
 		return;
 	}
+	fade_label_t *entry = fade_entry(label);
+	bool active = !entry || entry->active;
 	lv_label_long_mode_t want = LV_LABEL_LONG_SCROLL_CIRCULAR;
 	int32_t room = lv_obj_get_content_width(label);
 	if (room > 0 && text_width(label, lv_label_get_text(label)) <= room) {
 		want = LV_LABEL_LONG_CLIP;
+	} else if (!active) {
+		want = LV_LABEL_LONG_DOT;
 	}
 	// Compared before writing: the property rebuilds the animation and
 	// invalidates the object.
@@ -501,4 +515,20 @@ void scrolltext_set(lv_obj_t *label, const char *text) {
 	if (line != text) {
 		free(line);
 	}
+}
+
+void scrolltext_set_active(lv_obj_t *label, bool active) {
+	if (!label) {
+		return;
+	}
+	fade_label_t *entry = fade_find(label);
+	if (!entry) {
+		return;
+	}
+	if (entry->active == active) {
+		return;
+	}
+	entry->active = active;
+	scroll_fit(label);
+	fade_pick(entry);
 }

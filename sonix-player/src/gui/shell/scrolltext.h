@@ -5,7 +5,9 @@
 
 // A label that scrolls its text sideways when it does not fit -- but only
 // after standing still long enough to be read first, and pausing again at the
-// end of every pass.
+// end of every pass. By default a label is active (scrolling when overflowing).
+// Call scrolltext_set_active() to pause/resume scrolling for contexts like
+// list rows where only the interacted row should scroll.
 //
 // LVGL's LV_LABEL_LONG_SCROLL_CIRCULAR starts moving the instant the text is
 // set, so a long track title slides away before it can be read. LVGL has no
@@ -41,5 +43,10 @@ void scrolltext_apply(lv_obj_t *label);
 // push the start of the scroll back for ever and the text would never move.
 // Setting it only on a real change also saves the layout pass.
 void scrolltext_set(lv_obj_t *label, const char *text);
+
+// Enable or disable scrolling for a scrolltext label. When inactive, an
+// overflowing label shows LV_LABEL_LONG_DOT instead of scrolling; when active
+// again it resumes scrolling. Labels are active by default.
+void scrolltext_set_active(lv_obj_t *label, bool active);
 
 #endif /* SCROLLTEXT_H */

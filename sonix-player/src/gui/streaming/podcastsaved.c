@@ -18,6 +18,7 @@
 #include "src/gui/streaming/podcastpage.h"
 #include "src/gui/shell/confirm.h"
 #include "src/gui/shell/icons.h"
+#include "src/gui/shell/scrolltext.h"
 #include "src/gui/shell/popover.h"
 #include "src/gui/shell/settingsrow.h"
 #include "src/gui/shell/switcher.h"
@@ -360,6 +361,29 @@ static void paint_thumb(lv_obj_t *thumb, const cover_image_t *image) {
 	lv_obj_set_style_radius(thumb, 0, 0);
 }
 
+static void set_scroll_active_walk(lv_obj_t *obj, bool active) {
+	if (lv_obj_check_type(obj, &lv_label_class)) {
+		scrolltext_set_active(obj, active);
+	}
+	uint32_t n = lv_obj_get_child_count(obj);
+	for (uint32_t i = 0; i < n; i++) {
+		set_scroll_active_walk(lv_obj_get_child(obj, i), active);
+	}
+}
+
+static void row_pressed_cb(lv_event_t *e) {
+	lv_obj_t *btn = lv_event_get_current_target(e);
+	lv_obj_t *list = lv_obj_get_parent(btn);
+	if (!list) {
+		return;
+	}
+	uint32_t n = lv_obj_get_child_count(list);
+	for (uint32_t i = 0; i < n; i++) {
+		lv_obj_t *child = lv_obj_get_child(list, i);
+		set_scroll_active_walk(child, child == btn);
+	}
+}
+
 static lv_obj_t *make_row(lv_obj_t *parent, const cover_image_t *image, const char *title, const char *detail,
 						  lv_event_cb_t cb, lv_event_cb_t long_cb, lv_event_cb_t menu_cb, int index, bool heard) {
 	lv_obj_t *row = lv_btn_create(parent);
@@ -376,6 +400,7 @@ static lv_obj_t *make_row(lv_obj_t *parent, const cover_image_t *image, const ch
 	lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
 	lv_obj_set_flex_align(row, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 	lv_obj_set_event_bubble(row, true);
+	lv_obj_add_event_cb(row, row_pressed_cb, LV_EVENT_PRESSED, NULL);
 	lv_obj_add_event_cb(row, cb, LV_EVENT_CLICKED, (void *)(intptr_t)index);
 	if (long_cb) {
 		lv_obj_add_event_cb(row, long_cb, LV_EVENT_LONG_PRESSED, (void *)(intptr_t)index);
@@ -397,22 +422,24 @@ static lv_obj_t *make_row(lv_obj_t *parent, const cover_image_t *image, const ch
 	lv_obj_set_flex_flow(texts, LV_FLEX_FLOW_COLUMN);
 
 	lv_obj_t *name = lv_label_create(texts);
-	lv_label_set_text(name, title);
-	lv_label_set_long_mode(name, LV_LABEL_LONG_DOT);
 	lv_obj_set_width(name, lv_pct(100));
 	lv_obj_set_height(name, lv_font_get_line_height(SAVED_TITLE_FONT));
 	lv_obj_add_style(name, &theme_style_text, 0);
 	lv_obj_set_style_text_font(name, SAVED_TITLE_FONT, 0);
+	scrolltext_apply(name);
+	scrolltext_set(name, title);
+	scrolltext_set_active(name, false);
 
 	lv_obj_t *sub = NULL;
 	if (detail && detail[0]) {
 		sub = lv_label_create(texts);
-		lv_label_set_text(sub, detail);
-		lv_label_set_long_mode(sub, LV_LABEL_LONG_DOT);
 		lv_obj_set_width(sub, lv_pct(100));
 		lv_obj_set_height(sub, lv_font_get_line_height(SAVED_DETAIL_FONT));
 		lv_obj_add_style(sub, &theme_style_text_dim, 0);
 		lv_obj_set_style_text_font(sub, SAVED_DETAIL_FONT, 0);
+		scrolltext_apply(sub);
+		scrolltext_set(sub, detail);
+		scrolltext_set_active(sub, false);
 	}
 
 	// An episode heard to its end wears the tick the online list gives it, and
