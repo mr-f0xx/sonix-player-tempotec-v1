@@ -564,7 +564,7 @@ void tapesampler_build(lv_obj_t *parent, lv_obj_t **out_pads, lv_obj_t **out_kit
 	lv_obj_t *transport = stack(surface, LV_FLEX_FLOW_ROW, 31, 4, false);
 	play = compact_key(transport, tr("tape_loop"), play_cb, 0);
 	dub = compact_key(transport, tr("tape_overdub"), dub_cb, 0);
-	stop = compact_key(transport, tr("metronome_stop"), stop_cb, 0);
+	stop = compact_key(transport, tr("stop"), stop_cb, 0);
 	rec = compact_key(transport, tr("tape_rec_mix"), record_cb, 0);
 	// Give the longer captions a little more of the 216 px available.
 	lv_obj_set_flex_grow(play, 42);

@@ -15,10 +15,10 @@
 #include "src/gui/gearboy/gearboypage.h"
 #include "src/gui/library/audiobooks.h"
 #include "src/gui/library/filespage.h"
-#include "src/gui/metronome/metronome.h"
 #include "src/gui/notes/notes.h"
 #include "src/gui/tapedeck/tapedeck.h"
 #include "src/gui/tagmanager/tagmanager.h"
+#include "src/gui/vault/vaultpage.h"
 #include "src/gui/pet/petpage.h"
 #include "src/gui/pet/peticon.h"
 #include "src/gui/nowplaying/player.h"
@@ -89,12 +89,14 @@ static bool more_tokyo_icon(const char *label, const lv_image_dsc_t **icon, them
 	} else if (strcmp(label, "notes") == 0) {
 		*icon = &icon_notes;
 		*tone = THEME_SEMANTIC_PURPLE;
+	} else if (strcmp(label, "vault") == 0) {
+		// A padlock, in the amber the interface gives a warning rather than a
+		// game: what this page holds is not an ordinary note.
+		*icon = &icon_keylock_quick;
+		*tone = THEME_SEMANTIC_AMBER;
 	} else if (strcmp(label, "tape_deck") == 0) {
 		*icon = &icon_audio_waveform;
 		*tone = THEME_SEMANTIC_RED;
-	} else if (strcmp(label, "metronome") == 0) {
-		*icon = &icon_metronome;
-		*tone = THEME_SEMANTIC_GREEN;
 	} else if (strcmp(label, "pet") == 0) {
 		*icon = &icon_pet;
 		*tone = THEME_SEMANTIC_PURPLE;
@@ -142,10 +144,10 @@ static void more_list_add_entries(const grid_entry_t *entries, int count) {
 //
 // Every other tiled page in the player holds six destinations and is drawn as
 // the two-column, three-row page the main menu uses. More is the one page that
-// grew: with the calculator and the notes shelf it holds seven, and a seventh
-// tile in a 2x3 grid would be laid out past the bottom of an unscrollable page
-// -- visible to nobody. So the shape follows the count: six or fewer stay as
-// they are, and seven or more move to a third column.
+// kept growing: it holds more than six, and a seventh tile in a 2x3 grid would
+// be laid out past the bottom of an unscrollable page -- visible to nobody. So
+// the shape follows the count: six or fewer stay as they are, and seven or more
+// move to a third column.
 //
 // Three columns are what a 240 px V1 can afford without shrinking the tiles
 // below the size the rest of the interface draws them: at 72 px the 46 px
@@ -192,10 +194,10 @@ static const grid_entry_t MORE_ENTRIES[] = {
 	// it was left holding, and the notes shelf reads the card.
 	{"calculator", &icon_menu_calculator, NULL, calculator_open},
 	{"notes", &icon_menu_notes, NULL, notes_open},
-	// An action for the calculator's reason: the tempo and the bar come back
-	// from the settings as they were left, and the page repaints them on the
-	// way in.
-	{"metronome", &icon_menu_metronome, NULL, metronome_open},
+	// The vault is an action for the notes shelf's reason -- it reads the card
+	// on the way in and decides between its lock pad and its setup pad -- and
+	// for one of its own: opening it again is meant to find it locked.
+	{"vault", &icon_menu_vault, NULL, vault_open},
 	// The pet is an action for the same reason, and one more: it is built the
 	// first time it is opened, so a player who never visits it pays nothing for
 	// it. What it knows about the music comes from a one-second tick that runs
@@ -231,7 +233,7 @@ static const char *more_addon_of(const char *label) {
 	if (strcmp(label, "dino") == 0) return "dino";
 	if (strcmp(label, "calculator") == 0) return "calculator";
 	if (strcmp(label, "notes") == 0) return "notes";
-	if (strcmp(label, "metronome") == 0) return "metronome";
+	if (strcmp(label, "vault") == 0) return "vault";
 	if (strcmp(label, "tape_deck") == 0) return "tapedeck";
 	if (strcmp(label, "pet") == 0) return "pet";
 	return NULL;

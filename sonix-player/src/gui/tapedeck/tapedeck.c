@@ -161,8 +161,8 @@ static void paint_rec(void) {
 	paint_meter(segments);
 	lv_obj_set_style_opa(clip, s.clipped ? LV_OPA_COVER : LV_OPA_30, 0);
 
-	label_text(lv_obj_get_child(monitor_btn, 0), tr(monitoring ? "metronome_stop" : "tape_meter"));
-	label_text(lv_obj_get_child(record_btn, 0), tr(recording ? "metronome_stop" : "tape_record"));
+	label_text(lv_obj_get_child(monitor_btn, 0), tr(monitoring ? "stop" : "tape_meter"));
+	label_text(lv_obj_get_child(record_btn, 0), tr(recording ? "stop" : "tape_record"));
 	disabled(monitor_btn, stopping || recording || saving || (!monitoring && !have_input));
 	disabled(record_btn, stopping || saving || (opening && !s.record) || (!recording && !have_input));
 	selected(record_btn, recording || !active);

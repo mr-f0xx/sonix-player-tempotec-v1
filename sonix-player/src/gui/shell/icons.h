@@ -321,8 +321,6 @@ extern lv_image_dsc_t icon_qobuz_badge;
 extern lv_image_dsc_t icon_tidal_badge;
 extern lv_image_dsc_t icon_podcast_badge;
 extern lv_image_dsc_t icon_hires_audio;
-extern lv_image_dsc_t icon_metronome;
-extern lv_image_dsc_t icon_menu_metronome;
 extern lv_image_dsc_t icon_settings_plugins;
 extern lv_image_dsc_t icon_settings_more;
 extern lv_image_dsc_t icon_chart_column;
@@ -332,6 +330,8 @@ extern lv_image_dsc_t icon_stats_artists;
 extern lv_image_dsc_t icon_stats_albums;
 extern lv_image_dsc_t icon_layout_grid;
 extern lv_image_dsc_t icon_layout_list;
+
+extern lv_image_dsc_t icon_menu_vault;
 
 /* ICONSET-REGISTRY-START
  * An SD icon set swaps the pixels behind a built-in descriptor in place;

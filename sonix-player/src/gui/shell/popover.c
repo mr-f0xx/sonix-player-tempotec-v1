@@ -37,6 +37,8 @@ void popover_set_item_text(int index, const char *text) {
 	if (editor_closed && index >= 0 && index < items_count) lv_label_set_text(labels[index], text);
 }
 
+bool popover_visible(void) { return veil && !lv_obj_is_hidden(veil); }
+
 static void veil_clicked_cb(lv_event_t *e) {
 	(void)e;
 	popover_close();

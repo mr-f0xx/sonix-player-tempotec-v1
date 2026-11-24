@@ -419,9 +419,6 @@ ICONS = [
     ("pencil.svg", "tag_manager", 36),
     ("calculator.svg", "calculator", 32),
     ("notes.svg", "notes", 32),
-    # The metronome, beside them in the More list: the page header's glyph, at
-    # the same 32 px.
-    ("metronome.svg", "metronome", 32),
     ("enter.svg", "enter", 34),
     ("year.svg", "year", 32),
     ("most-played.svg", "most_played", 32),
@@ -568,7 +565,7 @@ COLOR_ICONS = [
     ("file-explorer.png", "menu_file_explorer", SECTION_ICON_SIZE),
     ("calculator.png", "menu_calculator", SECTION_ICON_SIZE),
     ("notes.png", "menu_notes", SECTION_ICON_SIZE),
-    ("metronome.png", "menu_metronome", SECTION_ICON_SIZE),
+    ("vault.png", "menu_vault", SECTION_ICON_SIZE),
     # The two newest More destinations: their own full-colour art in Dark and
     # Light. The tag editor no longer borrows the File Manager's folder, and
     # the pet no longer arrives as a bare white silhouette.
@@ -614,14 +611,17 @@ def render_color(path, size):
     """PNG or SVG -> BGRA bytes with the original colours kept.
 
     A side gives a square; an explicit (width, height) also supports artwork
-    whose proportions are not square.
+    whose proportions are not square. A PNG needs neither cairosvg nor its
+    native cairo library, which is what lets --only add menu artwork on a
+    machine that has only Pillow.
     """
     target = size if isinstance(size, tuple) else (size, size)
-    cairosvg, Image = _deps()
     if path.lower().endswith(".svg"):
+        cairosvg, Image = _deps()
         png = cairosvg.svg2png(url=path, output_width=target[0], output_height=target[1])
         img = Image.open(io.BytesIO(png)).convert("RGBA")
     else:
+        from PIL import Image
         img = Image.open(path).convert("RGBA")
     if img.size != target:
         img = img.resize(target, Image.LANCZOS)
@@ -727,9 +727,82 @@ def registry_only():
           % (OUT_C, OUT_H, len(registry_idents())))
 
 
+def descriptor_c(filename, name, data, w, h):
+    """One icon's C descriptor, in the exact shape a full run emits."""
+    return (
+        "// %s, %dx%d\n"
+        "static const uint8_t icon_%s_data[] = {\n%s\n};\n\n"
+        "lv_image_dsc_t icon_%s = {\n"
+        "\t.header = {\n"
+        "\t\t.magic = LV_IMAGE_HEADER_MAGIC,\n"
+        "\t\t.cf = LV_COLOR_FORMAT_ARGB8888,\n"
+        "\t\t.w = %d,\n"
+        "\t\t.h = %d,\n"
+        "\t\t.stride = %d,\n"
+        "\t},\n"
+        "\t.data_size = sizeof(icon_%s_data),\n"
+        "\t.data = icon_%s_data,\n"
+        "};\n"
+        % (filename, w, h, name, c_array(data), name, w, h, w * 4, name, name)
+    )
+
+
+def insert_only(names):
+    """Adds the named icons to the generated files without rerendering the rest.
+
+    A full run is the right thing when the artwork as a whole changes, but it
+    needs cairosvg and a native cairo for every SVG in the tree. Adding one
+    PNG menu illustration should not depend on that, and rerendering three
+    hundred existing icons with a different rasteriser would bury the one new
+    bitmap in noise. This writes just the new descriptors, ahead of the registry
+    block, and refuses to add a name the header already has.
+    """
+    chosen = [(f, n, sz, True) for f, n, sz in COLOR_ICONS if n in names]
+    chosen += [(f, n, s, False) for f, n, s in ICONS if n in names]
+    if len(chosen) != len(names):
+        missing = sorted(set(names) - {n for _f, n, _s, _c in chosen})
+        sys.exit("no such icon: %s" % ", ".join(missing))
+
+    c_text = open(OUT_C).read()
+    h_text = open(OUT_H).read()
+    for filename, name, size, keep_colour in chosen:
+        if ("icon_%s_data" % name) in c_text or ("icon_%s;" % name) in h_text:
+            sys.exit("icon_%s is already in %s / %s" % (name, OUT_C, OUT_H))
+
+    parts_c = []
+    parts_h = []
+    for filename, name, size, keep_colour in chosen:
+        path = os.path.join(ICON_DIR, filename)
+        if not os.path.exists(path):
+            sys.exit("missing icon: %s" % path)
+        data, w, h = render_color(path, size) if keep_colour else render(path, size)
+        parts_c.append(descriptor_c(filename, name, data, w, h))
+        parts_h.append("extern lv_image_dsc_t icon_%s;" % name)
+
+    mark = "/* ICONSET-REGISTRY-START"
+    at = c_text.find(mark)
+    if at < 0:
+        sys.exit("%s: registry marker not found" % OUT_C)
+    c_text = c_text[:at] + "\n".join(parts_c) + "\n\n" + c_text[at:]
+    at = h_text.find(mark)
+    if at < 0:
+        sys.exit("%s: registry marker not found" % OUT_H)
+    h_text = h_text[:at] + "\n".join(parts_h) + "\n\n" + h_text[at:]
+
+    open(OUT_C, "w").write(c_text)
+    open(OUT_H, "w").write(h_text)
+    print("added %s to %s and %s" % (", ".join(names), OUT_C, OUT_H))
+
+
 def main():
     if "--registry-only" in sys.argv:
         registry_only()
+        return
+    if "--only" in sys.argv:
+        at = sys.argv.index("--only")
+        if at + 1 >= len(sys.argv):
+            sys.exit("--only needs a comma-separated list of icon names")
+        insert_only([name for name in sys.argv[at + 1].split(",") if name])
         return
 
     parts_c = []
