@@ -1764,35 +1764,37 @@ bool display_video_blit_rgb565(const uint16_t *src, int src_w, int src_h, int sr
 	uint16_t *dst = (uint16_t *)(fb_mem + (second_page ? fb_page_size : 0));
 	const int dst_stride = panel_w; // tight stride (validated at init)
 
-	// Clear to black first (handles letterboxing).
-	for (int y = 0; y < panel_h; y++) {
-		memset(dst + (size_t)y * dst_stride, 0, (size_t)panel_w * sizeof(uint16_t));
-	}
-
-	// Scale-fit src_w x src_h into panel_w x panel_h in landscape after 90° CW.
-	// For 320x240 source on 240x320 panel, 90° CW gives 240x320 - perfect fit.
-	const int rot_w = src_h;  // after 90° CW
+	// Cover-fit: fill the entire panel (no black bars), cropping overflow.
+	// 90° CW gives rot_w=src_h, rot_h=src_w in panel coordinates.
+	const int rot_w = src_h;
 	const int rot_h = src_w;
-	int out_w = panel_w;
-	int out_h = (rot_h * panel_w) / rot_w;
-	if (out_h > panel_h) {
-		out_h = panel_h;
-		out_w = (rot_w * panel_h) / rot_h;
+	int vis_rw = rot_w;
+	int vis_rh = rot_h;
+	int crop_rx = 0;
+	int crop_ry = 0;
+	if (rot_w * panel_h > rot_h * panel_w) {
+		// Wider than panel: fill height, crop left/right.
+		vis_rh = rot_h;
+		vis_rw = (panel_w * rot_h) / panel_h;
+		if (vis_rw < 1) vis_rw = 1;
+		crop_rx = (rot_w - vis_rw) / 2;
+	} else if (rot_w * panel_h < rot_h * panel_w) {
+		// Taller than panel: fill width, crop top/bottom.
+		vis_rw = rot_w;
+		vis_rh = (panel_h * rot_w) / panel_w;
+		if (vis_rh < 1) vis_rh = 1;
+		crop_ry = (rot_h - vis_rh) / 2;
 	}
-	if (out_w < 1) out_w = 1;
-	if (out_h < 1) out_h = 1;
-	const int off_x = (panel_w - out_w) / 2;
-	const int off_y = (panel_h - out_h) / 2;
 
 	// 90° CW: rot(rx,ry)=src(src_w-1-ry, rx), inverse sx=src_w-1-ry, sy=rx.
-	for (int dy = 0; dy < out_h; dy++) {
-		int ry = (dy * rot_h) / out_h;
+	for (int dy = 0; dy < panel_h; dy++) {
+		int ry = crop_ry + (dy * vis_rh) / panel_h;
 		int sx = src_w - 1 - ry;
 		if (sx < 0) sx = 0;
 		if (sx >= src_w) sx = src_w - 1;
-		uint16_t *dst_row = dst + (size_t)(off_y + dy) * dst_stride + off_x;
-		for (int dx = 0; dx < out_w; dx++) {
-			int rx = (dx * rot_w) / out_w;
+		uint16_t *dst_row = dst + (size_t)dy * dst_stride;
+		for (int dx = 0; dx < panel_w; dx++) {
+			int rx = crop_rx + (dx * vis_rw) / panel_w;
 			int sy = rx;
 			if (sy < 0) sy = 0;
 			if (sy >= src_h) sy = src_h - 1;

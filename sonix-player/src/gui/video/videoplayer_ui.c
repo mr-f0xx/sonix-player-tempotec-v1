@@ -16,6 +16,8 @@ static gui_config_t *ui_cfg;
 static lv_timer_t *tick_timer;
 static bool overlay_visible;
 static uint32_t overlay_hide_ms;
+static bool ui_suspended;
+static bool was_playing_before_suspend;
 
 // ---------------------------------------------------------------------------
 // Small helpers
@@ -184,6 +186,8 @@ static void overlay_draw(uint16_t *panel, int pw, int ph, int stride) {
 // ---------------------------------------------------------------------------
 
 static void stop_and_exit(void) {
+	ui_suspended = false;
+	was_playing_before_suspend = false;
 	if (tick_timer) {
 		lv_timer_delete(tick_timer);
 		tick_timer = NULL;
@@ -214,6 +218,7 @@ static void screen_clicked_cb(lv_event_t *e) {
 static void tick_timer_cb(lv_timer_t *timer) {
 	(void)timer;
 	if (lv_screen_active() != videoplayer_screen) return;
+	if (ui_suspended) return;
 
 	videoplayer_tick();
 
@@ -228,6 +233,40 @@ static void tick_timer_cb(lv_timer_t *timer) {
 		}
 	}
 }
+
+void videoplayer_ui_suspend(void) {
+	if (ui_suspended) return;
+	if (lv_screen_active() != videoplayer_screen) return;
+	if (!videoplayer_is_active() && !display_video_supported()) return;
+
+	was_playing_before_suspend = (videoplayer_get_state() == VP_STATE_PLAYING);
+	if (was_playing_before_suspend) {
+		videoplayer_pause();
+	}
+	videoplayer_set_overlay_callback(NULL);
+	display_video_leave();
+	ui_suspended = true;
+}
+
+void videoplayer_ui_resume(void) {
+	if (!ui_suspended) return;
+	if (lv_screen_active() != videoplayer_screen) {
+		ui_suspended = false;
+		was_playing_before_suspend = false;
+		return;
+	}
+	ui_suspended = false;
+	if (display_video_enter()) {
+		videoplayer_set_overlay_callback(overlay_draw);
+		show_overlay();
+		if (was_playing_before_suspend) {
+			videoplayer_resume();
+		}
+	}
+	was_playing_before_suspend = false;
+}
+
+bool videoplayer_ui_is_suspended(void) { return ui_suspended; }
 
 bool videoplayer_ui_open(const char *path) {
 	if (!path || !path[0]) return false;

@@ -21,6 +21,7 @@
 #include "src/system/playback/device_state.h"
 #include "src/system/device/power.h"
 #include "src/system/device/screensaverpics.h"
+#include "src/gui/video/videoplayer_ui.h"
 
 // Movement that turns a press into a drag, and how long the slide that follows
 // the release lasts. The dismiss threshold itself is a quarter of the screen,
@@ -996,6 +997,11 @@ static void finish_hide(void) {
 	// before the next screen-off, which asks for its own.
 	drop_frame();
 	power_notify_activity(); // dismissing it counts as using the device
+
+	// Resume video if it was paused for the screensaver/screen-off.
+	if (videoplayer_ui_is_suspended()) {
+		videoplayer_ui_resume();
+	}
 }
 
 static void anim_y_cb(void *obj, int32_t v) { lv_obj_set_y((lv_obj_t *)obj, v); }
