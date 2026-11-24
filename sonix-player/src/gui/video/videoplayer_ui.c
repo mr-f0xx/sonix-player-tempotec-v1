@@ -121,6 +121,32 @@ static void draw_text(uint16_t *buf, int pw, int ph, int stride, int x, int y, c
 	}
 }
 
+// Rotated 90° CCW for landscape overlay (readable when device held landscape).
+static void draw_char_rot90ccw(uint16_t *buf, int pw, int ph, int stride, int x, int y, char c, uint8_t r, uint8_t g, uint8_t b) {
+	int gi = glyph_index(c);
+	for (int col = 0; col < 5; col++) {
+		uint8_t bits = FONT5X7[gi][col];
+		for (int row = 0; row < 7; row++) {
+			if (bits & (1 << row)) {
+				// 90° CCW: (col,row) -> (row, 4-col)
+				int px = x + row;
+				int py = y + (4 - col);
+				if (px >= 0 && px < pw && py >= 0 && py < ph) {
+					buf[py * stride + px] = rgb565(r, g, b);
+				}
+			}
+		}
+	}
+}
+
+static void draw_text_rot90ccw(uint16_t *buf, int pw, int ph, int stride, int x, int y, const char *text, uint8_t r, uint8_t g, uint8_t b) {
+	int cy = y;
+	for (const char *p = text; *p; p++) {
+		draw_char_rot90ccw(buf, pw, ph, stride, x, cy, *p, r, g, b);
+		cy += 6;
+	}
+}
+
 static void format_time(char *out, size_t outsz, double sec) {
 	if (sec < 0) sec = 0;
 	int s = (int)(sec + 0.5);
@@ -141,44 +167,74 @@ static void overlay_draw(uint16_t *panel, int pw, int ph, int stride) {
 		return;
 	}
 
-	const int bar_h = 44;
-	const int y0 = ph - bar_h;
-	// Semi-transparent background
-	fill_rect_alpha(panel, pw, ph, stride, 0, y0, pw, bar_h, 0, 0, 0, 140);
-
-	// Progress bar
 	double pos = videoplayer_get_position();
 	double dur = videoplayer_get_duration();
 	double frac = (dur > 0.0) ? (pos / dur) : 0.0;
 	if (frac < 0) frac = 0;
 	if (frac > 1) frac = 1;
-	int pad = 8;
-	int bar_y = y0 + 8;
-	int bar_w = pw - pad * 2;
-	int bar_h2 = 4;
-	fill_rect_alpha(panel, pw, ph, stride, pad, bar_y, bar_w, bar_h2, 80, 80, 80, 200);
-	int fill_w = (int)(bar_w * frac);
-	if (fill_w > 0) {
-		fill_rect_alpha(panel, pw, ph, stride, pad, bar_y, fill_w, bar_h2, 255, 255, 255, 230);
-	}
-	// Scrub knob
-	int kx = pad + fill_w - 2;
-	if (kx < pad) kx = pad;
-	if (kx > pad + bar_w - 4) kx = pad + bar_w - 4;
-	fill_rect_alpha(panel, pw, ph, stride, kx, bar_y - 2, 4, bar_h2 + 4, 255, 255, 255, 255);
-
-	// Time text
 	char tcur[16], tdur[16], tbuf[40];
 	format_time(tcur, sizeof(tcur), pos);
 	format_time(tdur, sizeof(tdur), dur);
 	snprintf(tbuf, sizeof(tbuf), "%s/%s", tcur, tdur);
-	draw_text(panel, pw, ph, stride, pad, y0 + 20, tbuf, 220, 220, 220);
-
-	// Play/Pause indicator on right
 	vp_state_t st = videoplayer_get_state();
 	const char *icon = (st == VP_STATE_PAUSED) ? ">" : "||";
-	int icon_w = (int)strlen(icon) * 6;
-	draw_text(panel, pw, ph, stride, pw - pad - icon_w, y0 + 20, icon, 220, 220, 220);
+
+	if (display_video_is_landscape()) {
+		// Landscape: bar on panel right edge (bottom of landscape view).
+		// Panel mapping (90°CW): panel right=landscape bottom, panel top=landscape right,
+		// panel bottom=landscape left. Progress fills upward (toward landscape right).
+		const int bar_w = 44;
+		const int x0 = pw - bar_w;
+		fill_rect_alpha(panel, pw, ph, stride, x0, 0, bar_w, ph, 0, 0, 0, 140);
+
+		int pad = 8;
+		int bar_x = x0 + 10;
+		int bar_w2 = 4;
+		int bar_len = ph - pad * 2;
+		// Track background
+		fill_rect_alpha(panel, pw, ph, stride, bar_x, pad, bar_w2, bar_len, 80, 80, 80, 200);
+		// Fill: from bottom (landscape left/start) upward (landscape right/end)
+		int fill_len = (int)(bar_len * frac);
+		if (fill_len > 0) {
+			fill_rect_alpha(panel, pw, ph, stride, bar_x, pad + bar_len - fill_len, bar_w2, fill_len, 255, 255, 255, 230);
+		}
+		int ky = pad + bar_len - fill_len - 2;
+		if (ky < pad) ky = pad;
+		if (ky > pad + bar_len - 4) ky = pad + bar_len - 4;
+		fill_rect_alpha(panel, pw, ph, stride, bar_x - 2, ky, bar_w2 + 4, 4, 255, 255, 255, 255);
+
+		// Time text rotated 90° CCW, reading upward (landscape left->right).
+		int text_x = x0 + 22;
+		int text_y = ph - pad - (int)strlen(tbuf) * 6;
+		if (text_y < pad) text_y = pad;
+		draw_text_rot90ccw(panel, pw, ph, stride, text_x, text_y, tbuf, 220, 220, 220);
+
+		// Play/pause icon near top (landscape right side)
+		draw_text_rot90ccw(panel, pw, ph, stride, text_x, pad, icon, 220, 220, 220);
+	} else {
+		// Portrait: bar at bottom of panel.
+		const int bar_h = 44;
+		const int y0 = ph - bar_h;
+		fill_rect_alpha(panel, pw, ph, stride, 0, y0, pw, bar_h, 0, 0, 0, 140);
+
+		int pad = 8;
+		int bar_y = y0 + 8;
+		int bar_len = pw - pad * 2;
+		int bar_h2 = 4;
+		fill_rect_alpha(panel, pw, ph, stride, pad, bar_y, bar_len, bar_h2, 80, 80, 80, 200);
+		int fill_w = (int)(bar_len * frac);
+		if (fill_w > 0) {
+			fill_rect_alpha(panel, pw, ph, stride, pad, bar_y, fill_w, bar_h2, 255, 255, 255, 230);
+		}
+		int kx = pad + fill_w - 2;
+		if (kx < pad) kx = pad;
+		if (kx > pad + bar_len - 4) kx = pad + bar_len - 4;
+		fill_rect_alpha(panel, pw, ph, stride, kx, bar_y - 2, 4, bar_h2 + 4, 255, 255, 255, 255);
+
+		draw_text(panel, pw, ph, stride, pad, y0 + 20, tbuf, 220, 220, 220);
+		int icon_w = (int)strlen(icon) * 6;
+		draw_text(panel, pw, ph, stride, pw - pad - icon_w, y0 + 20, icon, 220, 220, 220);
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -206,7 +262,17 @@ static void screen_unloaded_cb(lv_event_t *e) {
 
 static void screen_clicked_cb(lv_event_t *e) {
 	(void)e;
+	lv_indev_t *indev = lv_indev_active();
+	lv_point_t p = {0, 0};
+	if (indev) lv_indev_get_point(indev, &p);
+
 	if (!overlay_visible) {
+		show_overlay();
+		return;
+	}
+	// Top strip toggles landscape/portrait orientation.
+	if (p.y < 48) {
+		display_video_set_landscape(!display_video_is_landscape());
 		show_overlay();
 		return;
 	}
@@ -300,6 +366,7 @@ bool videoplayer_ui_open(const char *path) {
 		return false;
 	}
 
+	display_video_set_landscape(true);
 	videoplayer_set_overlay_callback(overlay_draw);
 	show_overlay();
 

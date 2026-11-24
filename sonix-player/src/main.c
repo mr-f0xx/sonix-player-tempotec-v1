@@ -1325,6 +1325,8 @@ bool display_video_blit_rgb565(const uint16_t *src, int src_w, int src_h, int sr
 }
 int display_video_panel_w(void) { return 240; }
 int display_video_panel_h(void) { return 320; }
+void display_video_set_landscape(bool landscape) { (void)landscape; }
+bool display_video_is_landscape(void) { return true; }
 
 // There is no framebuffer to read on the simulator, but the SDL renderer (or
 // web emulator shadow framebuffer) can be read back. The rest of the path is
@@ -1388,6 +1390,7 @@ static uint8_t *fb_mem;
 static size_t fb_page_size;
 static struct fb_var_screeninfo fb_var;
 static volatile bool fb_video_mode;
+static volatile bool fb_video_landscape = true;
 
 // ---------------------------------------------------------------------------
 // 180 degree rotation ("Rotate screen")
@@ -1743,6 +1746,8 @@ void display_video_leave(void) {
 
 int display_video_panel_w(void) { return fb_var.xres ? (int)fb_var.xres : 240; }
 int display_video_panel_h(void) { return fb_var.yres ? (int)fb_var.yres : 320; }
+void display_video_set_landscape(bool landscape) { fb_video_landscape = landscape; }
+bool display_video_is_landscape(void) { return fb_video_landscape; }
 
 bool display_video_blit_rgb565(const uint16_t *src, int src_w, int src_h, int src_stride_px,
 							   display_video_overlay_fn overlay) {
@@ -1765,40 +1770,69 @@ bool display_video_blit_rgb565(const uint16_t *src, int src_w, int src_h, int sr
 	const int dst_stride = panel_w; // tight stride (validated at init)
 
 	// Cover-fit: fill the entire panel (no black bars), cropping overflow.
-	// 90° CW gives rot_w=src_h, rot_h=src_w in panel coordinates.
-	const int rot_w = src_h;
-	const int rot_h = src_w;
-	int vis_rw = rot_w;
-	int vis_rh = rot_h;
-	int crop_rx = 0;
-	int crop_ry = 0;
-	if (rot_w * panel_h > rot_h * panel_w) {
-		// Wider than panel: fill height, crop left/right.
-		vis_rh = rot_h;
-		vis_rw = (panel_w * rot_h) / panel_h;
-		if (vis_rw < 1) vis_rw = 1;
-		crop_rx = (rot_w - vis_rw) / 2;
-	} else if (rot_w * panel_h < rot_h * panel_w) {
-		// Taller than panel: fill width, crop top/bottom.
-		vis_rw = rot_w;
-		vis_rh = (panel_h * rot_w) / panel_w;
-		if (vis_rh < 1) vis_rh = 1;
-		crop_ry = (rot_h - vis_rh) / 2;
-	}
-
-	// 90° CW: rot(rx,ry)=src(src_w-1-ry, rx), inverse sx=src_w-1-ry, sy=rx.
-	for (int dy = 0; dy < panel_h; dy++) {
-		int ry = crop_ry + (dy * vis_rh) / panel_h;
-		int sx = src_w - 1 - ry;
-		if (sx < 0) sx = 0;
-		if (sx >= src_w) sx = src_w - 1;
-		uint16_t *dst_row = dst + (size_t)dy * dst_stride;
-		for (int dx = 0; dx < panel_w; dx++) {
-			int rx = crop_rx + (dx * vis_rw) / panel_w;
-			int sy = rx;
+	if (fb_video_landscape) {
+		// 90° CW gives rot_w=src_h, rot_h=src_w in panel coordinates.
+		const int rot_w = src_h;
+		const int rot_h = src_w;
+		int vis_rw = rot_w;
+		int vis_rh = rot_h;
+		int crop_rx = 0;
+		int crop_ry = 0;
+		if (rot_w * panel_h > rot_h * panel_w) {
+			vis_rh = rot_h;
+			vis_rw = (panel_w * rot_h) / panel_h;
+			if (vis_rw < 1) vis_rw = 1;
+			crop_rx = (rot_w - vis_rw) / 2;
+		} else if (rot_w * panel_h < rot_h * panel_w) {
+			vis_rw = rot_w;
+			vis_rh = (panel_h * rot_w) / panel_w;
+			if (vis_rh < 1) vis_rh = 1;
+			crop_ry = (rot_h - vis_rh) / 2;
+		}
+		// 90° CW: rot(rx,ry)=src(src_w-1-ry, rx), inverse sx=src_w-1-ry, sy=rx.
+		for (int dy = 0; dy < panel_h; dy++) {
+			int ry = crop_ry + (dy * vis_rh) / panel_h;
+			int sx = src_w - 1 - ry;
+			if (sx < 0) sx = 0;
+			if (sx >= src_w) sx = src_w - 1;
+			uint16_t *dst_row = dst + (size_t)dy * dst_stride;
+			for (int dx = 0; dx < panel_w; dx++) {
+				int rx = crop_rx + (dx * vis_rw) / panel_w;
+				int sy = rx;
+				if (sy < 0) sy = 0;
+				if (sy >= src_h) sy = src_h - 1;
+				dst_row[dx] = src[(size_t)sy * src_stride_px + sx];
+			}
+		}
+	} else {
+		// Portrait/vertical: cover-fit source directly to panel.
+		int vis_w = src_w;
+		int vis_h = src_h;
+		int crop_x = 0;
+		int crop_y = 0;
+		if (src_w * panel_h > src_h * panel_w) {
+			vis_h = src_h;
+			vis_w = (panel_w * src_h) / panel_h;
+			if (vis_w < 1) vis_w = 1;
+			crop_x = (src_w - vis_w) / 2;
+		} else if (src_w * panel_h < src_h * panel_w) {
+			vis_w = src_w;
+			vis_h = (panel_h * src_w) / panel_w;
+			if (vis_h < 1) vis_h = 1;
+			crop_y = (src_h - vis_h) / 2;
+		}
+		for (int dy = 0; dy < panel_h; dy++) {
+			int sy = crop_y + (dy * vis_h) / panel_h;
 			if (sy < 0) sy = 0;
 			if (sy >= src_h) sy = src_h - 1;
-			dst_row[dx] = src[(size_t)sy * src_stride_px + sx];
+			const uint16_t *src_row = src + (size_t)sy * src_stride_px;
+			uint16_t *dst_row = dst + (size_t)dy * dst_stride;
+			for (int dx = 0; dx < panel_w; dx++) {
+				int sx = crop_x + (dx * vis_w) / panel_w;
+				if (sx < 0) sx = 0;
+				if (sx >= src_w) sx = src_w - 1;
+				dst_row[dx] = src_row[sx];
+			}
 		}
 	}
 
