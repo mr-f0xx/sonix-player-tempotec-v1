@@ -530,13 +530,19 @@ accents, for example:
 SONIX_PLAYBUTTON_SNAPSHOTS=.build/playbutton- make -C sonix-player/tests playbutton
 ```
 
-## Headless screensaver artwork tests
+## Headless screensaver artwork and visualizer tests
 
 The same `ui` target also builds `test_screensaver`, which links the real
 screensaver, scrolling labels, themes, settings card helpers, language loader
 and configuration store. The player that lends the artwork, the cover loader
 and the device services are substituted. The test drives the loader by hand,
 so it decides when a decode lands, what size it is, or that it found nothing.
+
+The visualizer checks cover Neon and LED’s response to PCM, full-screen
+geometry for all three styles, iTunes’ RGB565 buffer and spark response,
+swipe dismissal, saved settings, and capture/rendering shutdown when the
+screen goes dark. They also check that Pictures still takes precedence and
+that all visualizer labels fit and translate on the V1.
 
 It checks the **Album art: Fill / Framed** choice, default
 and saved:

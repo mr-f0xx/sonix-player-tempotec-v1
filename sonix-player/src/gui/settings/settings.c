@@ -85,11 +85,24 @@ static lv_obj_t *screensaver_images_pill;
 static lv_obj_t *screensaver_style_group; // "Album art", under the pills above
 static lv_obj_t *screensaver_fill_pill;
 static lv_obj_t *screensaver_framed_pill;
-// The visualizer's own card: the switch, and under it the two styles --
-// Neon, the segmented bars in the theme's colour, and LED, the analyzer.
-static lv_obj_t *screensaver_viz_pills;
-static lv_obj_t *screensaver_neon_pill;
-static lv_obj_t *screensaver_led_pill;
+static lv_obj_t *screensaver_viz_card, *screensaver_viz_pills, *screensaver_fullscreen_row;
+static lv_obj_t *screensaver_fullscreen_switch, *screensaver_layers_group;
+static const char *const viz_styles[] = {
+	[SCREENSAVER_VIZ_STYLE_NEON] = "screensaver_viz_neon",
+	[SCREENSAVER_VIZ_STYLE_LED] = "screensaver_viz_led",
+	[SCREENSAVER_VIZ_STYLE_FILAMENTS] = "screensaver_viz_filaments",
+};
+static lv_obj_t *screensaver_viz_style_pills[sizeof(viz_styles) / sizeof(viz_styles[0])];
+static const struct {
+	const char *label;
+	filaments_layer_t layer;
+} viz_layers[] = {
+	{"screensaver_viz_sharp", FILAMENTS_SHARP},
+	{"screensaver_viz_soft", FILAMENTS_SOFT},
+	{"screensaver_viz_sparks", FILAMENTS_SPARKS},
+	{"screensaver_viz_tunnel", FILAMENTS_TUNNEL},
+};
+static lv_obj_t *screensaver_layer_pills[sizeof(viz_layers) / sizeof(viz_layers[0])];
 static lv_obj_t *rotate_switch;
 
 static void doubletap_toggle_cb(lv_event_t *e) {
@@ -129,13 +142,24 @@ static void screensaver_refresh(void) {
 	settingsrow_pill_active(screensaver_fill_pill, style == SCREENSAVER_STYLE_FILL);
 	settingsrow_pill_active(screensaver_framed_pill, style == SCREENSAVER_STYLE_FRAMED);
 
-	// Which spectrum the visualizer draws when it is on: Neon or LED.
-	// Hidden with the switch, and with the screensaver itself.
-	if (screensaver_viz_pills) {
-		lv_obj_set_hidden(screensaver_viz_pills, !on || !viz);
+	if (screensaver_viz_card) {
+		bool album_viz = on && source == SCREENSAVER_SOURCE_ALBUM;
+		lv_obj_set_hidden(screensaver_viz_card, !album_viz);
+		lv_obj_set_hidden(screensaver_viz_pills, !viz);
+		lv_obj_set_hidden(screensaver_fullscreen_row, !album_viz || !viz);
+		if (screensaver_get_visualizer_fullscreen())
+			lv_obj_add_state(screensaver_fullscreen_switch, LV_STATE_CHECKED);
+		else
+			lv_obj_remove_state(screensaver_fullscreen_switch, LV_STATE_CHECKED);
 		screensaver_viz_style_t viz_style = screensaver_visualizer_style();
-		settingsrow_pill_active(screensaver_neon_pill, viz_style == SCREENSAVER_VIZ_STYLE_NEON);
-		settingsrow_pill_active(screensaver_led_pill, viz_style == SCREENSAVER_VIZ_STYLE_LED);
+		for (size_t i = 0; i < sizeof(viz_styles) / sizeof(viz_styles[0]); i++) {
+			settingsrow_pill_active(screensaver_viz_style_pills[i], i == (size_t)viz_style);
+		}
+		lv_obj_set_hidden(screensaver_layers_group, !viz || viz_style != SCREENSAVER_VIZ_STYLE_FILAMENTS);
+		unsigned layers = screensaver_visualizer_layers();
+		for (size_t i = 0; i < sizeof(viz_layers) / sizeof(viz_layers[0]); i++) {
+			settingsrow_pill_active(screensaver_layer_pills[i], layers & viz_layers[i].layer);
+		}
 	}
 }
 
@@ -183,13 +207,23 @@ static void screensaver_style_cb(lv_event_t *e) {
 	screensaver_refresh();
 }
 
-// Neon or LED: which of the two spectra the visualizer draws. Takes effect at
-// the next wake, like the screensaver it belongs to.
 static void screensaver_viz_style_cb(lv_event_t *e) {
 	if (player_sheet_drag_active() || switcher_back_drag_active()) {
 		return;
 	}
 	screensaver_set_visualizer_style((screensaver_viz_style_t)(intptr_t)lv_event_get_user_data(e));
+	screensaver_refresh();
+}
+
+static void screensaver_fullscreen_cb(lv_event_t *e) {
+	lv_obj_t *toggle = lv_event_get_target_obj(e);
+	screensaver_set_visualizer_fullscreen(lv_obj_has_state(toggle, LV_STATE_CHECKED));
+}
+
+static void screensaver_layer_cb(lv_event_t *e) {
+	if (player_sheet_drag_active() || switcher_back_drag_active()) return;
+	unsigned layer = (unsigned)(intptr_t)lv_event_get_user_data(e);
+	screensaver_set_visualizer_layers(screensaver_visualizer_layers() ^ layer);
 	screensaver_refresh();
 }
 
@@ -531,18 +565,21 @@ static void build_screen_page(gui_config_t *cfg) {
 	screensaver_framed_pill =
 		settingsrow_pill(style_pills, "screensaver_style_framed", SCREENSAVER_STYLE_FRAMED, screensaver_style_cb);
 
-	// The visualizer, on its own card below: the switch replaces the album
-	// with a live spectrum, and the pills under it say which -- Neon, the
-	// segmented bars in the theme's colour, or LED, the analyzer. The pills
-	// hide with the switch (see screensaver_refresh).
-	lv_obj_t *viz_pills = NULL;
-	settingsrow_toggle_pills(container, "screensaver_visualizer", screensaver_visualizer_cb,
-							 &screensaver_visualizer_switch, &viz_pills);
-	screensaver_viz_pills = viz_pills;
-	screensaver_neon_pill =
-		settingsrow_pill(viz_pills, "screensaver_viz_neon", SCREENSAVER_VIZ_STYLE_NEON, screensaver_viz_style_cb);
-	screensaver_led_pill =
-		settingsrow_pill(viz_pills, "screensaver_viz_led", SCREENSAVER_VIZ_STYLE_LED, screensaver_viz_style_cb);
+	// Settings for the Album source only; folder pictures take precedence.
+	screensaver_viz_card = settingsrow_toggle_pills(container, "screensaver_visualizer", screensaver_visualizer_cb,
+												  &screensaver_visualizer_switch, &screensaver_viz_pills);
+	for (size_t i = 0; i < sizeof(viz_styles) / sizeof(viz_styles[0]); i++) {
+		screensaver_viz_style_pills[i] = settingsrow_pill(screensaver_viz_pills, viz_styles[i], (int)i,
+														screensaver_viz_style_cb);
+	}
+	lv_obj_t *layer_pills = NULL;
+	screensaver_layers_group = settingsrow_pills_group(screensaver_viz_card, "screensaver_viz_layers", &layer_pills);
+	for (size_t i = 0; i < sizeof(viz_layers) / sizeof(viz_layers[0]); i++) {
+		screensaver_layer_pills[i] = settingsrow_pill(layer_pills, viz_layers[i].label, viz_layers[i].layer,
+												  screensaver_layer_cb);
+	}
+	screensaver_fullscreen_row = settingsrow_toggle(container, "screensaver_viz_fullscreen", &screensaver_fullscreen_switch,
+												  screensaver_fullscreen_cb);
 	if (screensaver_get_visualizer()) lv_obj_add_state(screensaver_visualizer_switch, LV_STATE_CHECKED);
 	screensaver_refresh();
 

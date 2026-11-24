@@ -20,6 +20,8 @@ void visualizer_enable(visualizer_consumer_t consumer, bool enabled);
 void visualizer_feed(const void *pcm, int frames, int channels, int bits, int rate);
 void visualizer_levels(uint8_t levels[VISUALIZER_BANDS]);
 void visualizer_led_levels(uint8_t levels[VISUALIZER_LED_BANDS]);
+// Normalized bass, mid and treble amplitudes for the animated screensaver.
+void visualizer_motion_levels(float levels[3]);
 // Bass energy from fresh PCM, or zero when the feed has stopped. The LED
 // worker turns rising edges into pulses; audio playback is never made to wait.
 uint8_t visualizer_bass_level(void);
