@@ -545,13 +545,11 @@ void videoplayer_set_overlay_callback(videoplayer_overlay_fn fn) {
 }
 
 void videoplayer_tick(void) {
-	// Blit latest frame if ready. Called from UI/main loop context.
+	// Blit latest frame if ready. Also blit when overlay is active so the
+	// overlay (time/scrub) stays responsive even while paused.
 	if (!vp_thread_running) return;
-	if (!vp_frame_ready) return;
-
 	vp_lock_fn();
-	if (vp_frame_ready && vp_rgb565 && vp_frame_w > 0 && vp_frame_h > 0) {
-		// Copy frame out so we don't hold lock during blit
+	if (vp_rgb565 && vp_frame_w > 0 && vp_frame_h > 0 && (vp_frame_ready || vp_overlay_cb)) {
 		int w = vp_frame_w, h = vp_frame_h;
 		size_t sz = (size_t)w * (size_t)h * sizeof(uint16_t);
 		uint16_t *copy = (uint16_t *)malloc(sz);

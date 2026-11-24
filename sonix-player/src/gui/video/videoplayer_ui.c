@@ -20,6 +20,12 @@ static bool ui_suspended;
 static bool was_playing_before_suspend;
 static lv_timer_t *click_timer;
 static uint32_t last_click_ms;
+static bool scrubbing;
+static double scrub_frac;
+static lv_point_t press_pt;
+static bool press_on_bar;
+static bool pending_tap_on_bar;
+static double pending_tap_frac;
 
 // ---------------------------------------------------------------------------
 // Small helpers
@@ -165,8 +171,8 @@ static void format_time(char *out, size_t outsz, double sec) {
 // ---------------------------------------------------------------------------
 
 static void overlay_draw(uint16_t *panel, int pw, int ph, int stride) {
-	if (!overlay_visible) return;
-	if (now_ms() > overlay_hide_ms) {
+	if (!overlay_visible && !scrubbing) return;
+	if (!scrubbing && now_ms() > overlay_hide_ms) {
 		overlay_visible = false;
 		return;
 	}
@@ -176,6 +182,10 @@ static void overlay_draw(uint16_t *panel, int pw, int ph, int stride) {
 	double frac = (dur > 0.0) ? (pos / dur) : 0.0;
 	if (frac < 0) frac = 0;
 	if (frac > 1) frac = 1;
+	if (scrubbing) {
+		frac = scrub_frac;
+		pos = dur * frac;
+	}
 	char tcur[16], trem[16], tbuf[40];
 	double rem = dur - pos;
 	if (rem < 0) rem = 0;
@@ -251,6 +261,9 @@ static void stop_and_exit(void) {
 	ui_suspended = false;
 	was_playing_before_suspend = false;
 	last_click_ms = 0;
+	scrubbing = false;
+	press_on_bar = false;
+	pending_tap_on_bar = false;
 	if (click_timer) {
 		lv_timer_delete(click_timer);
 		click_timer = NULL;
@@ -271,6 +284,26 @@ static void screen_unloaded_cb(lv_event_t *e) {
 	stop_and_exit();
 }
 
+static bool point_on_bar(lv_point_t p, int pw, int ph) {
+	if (display_video_is_landscape()) return p.x >= pw - 56;
+	return p.y >= ph - 56;
+}
+
+static double frac_from_point(lv_point_t p, int pw, int ph) {
+	int pad = 8;
+	double frac;
+	if (display_video_is_landscape()) {
+		int bar_len = ph - pad * 2;
+		frac = (double)((pad + bar_len) - p.y) / (double)bar_len;
+	} else {
+		int bar_len = pw - pad * 2;
+		frac = (double)(p.x - pad) / (double)bar_len;
+	}
+	if (frac < 0) frac = 0;
+	if (frac > 1) frac = 1;
+	return frac;
+}
+
 static void single_click_timer_cb(lv_timer_t *t) {
 	(void)t;
 	if (click_timer) {
@@ -278,29 +311,93 @@ static void single_click_timer_cb(lv_timer_t *t) {
 		click_timer = NULL;
 	}
 	if (!overlay_visible) return;
+	if (pending_tap_on_bar) {
+		pending_tap_on_bar = false;
+		double dur = videoplayer_get_duration();
+		if (dur > 0) videoplayer_seek_to(dur * pending_tap_frac);
+		show_overlay();
+		return;
+	}
 	videoplayer_toggle_pause();
 	show_overlay();
 }
 
-static void screen_clicked_cb(lv_event_t *e) {
-	(void)e;
-	if (!overlay_visible) {
-		show_overlay();
+static void screen_event_cb(lv_event_t *e) {
+	lv_event_code_t code = lv_event_get_code(e);
+	lv_indev_t *indev = lv_indev_active();
+	lv_point_t p = {0, 0};
+	if (indev) lv_indev_get_point(indev, &p);
+
+	if (code == LV_EVENT_PRESSED) {
+		press_pt = p;
+		press_on_bar = false;
+		scrubbing = false;
+		if (overlay_visible) {
+			int pw = display_video_panel_w();
+			int ph = display_video_panel_h();
+			press_on_bar = point_on_bar(p, pw, ph);
+		}
 		return;
 	}
-	uint32_t now = now_ms();
-	if (last_click_ms != 0 && (now - last_click_ms) < 350) {
-		// Double tap: toggle orientation.
+
+	if (code == LV_EVENT_PRESSING) {
+		if (!overlay_visible || !press_on_bar) return;
+		int dx = p.x - press_pt.x;
+		int dy = p.y - press_pt.y;
+		if (dx < 0) dx = -dx;
+		if (dy < 0) dy = -dy;
+		if (!scrubbing && dx < 6 && dy < 6) return;
+		int pw = display_video_panel_w();
+		int ph = display_video_panel_h();
+		scrubbing = true;
+		scrub_frac = frac_from_point(p, pw, ph);
+		// While scrubbing, keep overlay up and cancel pending single-tap.
 		if (click_timer) {
 			lv_timer_delete(click_timer);
 			click_timer = NULL;
 		}
 		last_click_ms = 0;
+		pending_tap_on_bar = false;
+		show_overlay();
+		return;
+	}
+
+	if (code != LV_EVENT_RELEASED) return;
+
+	if (!overlay_visible) {
+		show_overlay();
+		return;
+	}
+
+	if (scrubbing) {
+		double dur = videoplayer_get_duration();
+		videoplayer_seek_to(dur * scrub_frac);
+		scrubbing = false;
+		press_on_bar = false;
+		show_overlay();
+		return;
+	}
+
+	// Tap (not scrub): double-tap toggles orientation, single tap seeks on bar or toggles play/pause.
+	uint32_t now = now_ms();
+	if (last_click_ms != 0 && (now - last_click_ms) < 350) {
+		if (click_timer) {
+			lv_timer_delete(click_timer);
+			click_timer = NULL;
+		}
+		last_click_ms = 0;
+		pending_tap_on_bar = false;
 		display_video_set_landscape(!display_video_is_landscape());
 		show_overlay();
 		return;
 	}
 	last_click_ms = now;
+	pending_tap_on_bar = press_on_bar;
+	if (press_on_bar) {
+		int pw = display_video_panel_w();
+		int ph = display_video_panel_h();
+		pending_tap_frac = frac_from_point(p, pw, ph);
+	}
 	if (click_timer) lv_timer_delete(click_timer);
 	click_timer = lv_timer_create(single_click_timer_cb, 300, NULL);
 	lv_timer_set_repeat_count(click_timer, 1);
@@ -378,7 +475,9 @@ bool videoplayer_ui_open(const char *path) {
 	lv_obj_set_style_bg_color(videoplayer_screen, lv_color_black(), 0);
 	lv_obj_set_style_bg_opa(videoplayer_screen, LV_OPA_COVER, 0);
 	lv_obj_set_scrollable(videoplayer_screen, false);
-	lv_obj_add_event_cb(videoplayer_screen, screen_clicked_cb, LV_EVENT_CLICKED, NULL);
+	lv_obj_add_event_cb(videoplayer_screen, screen_event_cb, LV_EVENT_PRESSED, NULL);
+	lv_obj_add_event_cb(videoplayer_screen, screen_event_cb, LV_EVENT_PRESSING, NULL);
+	lv_obj_add_event_cb(videoplayer_screen, screen_event_cb, LV_EVENT_RELEASED, NULL);
 	lv_obj_add_event_cb(videoplayer_screen, screen_unloaded_cb, LV_EVENT_SCREEN_UNLOADED, NULL);
 	switcher_attach_back_gesture(videoplayer_screen);
 
