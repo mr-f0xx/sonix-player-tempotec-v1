@@ -10,6 +10,7 @@
 #include "src/gui/shell/gui.h"
 #include "src/gui/fonts/fonts.h"
 #include "src/gui/shell/icons.h"
+#include "src/gui/shell/scrolltext.h"
 #include "src/gui/shell/keyboard.h"
 #include "src/gui/library/geniusui.h"
 #include "src/gui/library/medialist.h"
@@ -663,13 +664,12 @@ static lv_obj_t *add_row(const char *name, const char *subtitle, const lv_image_
 	lv_obj_set_flex_align(texts, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
 
 	lv_obj_t *name_label = lv_label_create(texts);
-	lv_label_set_text(name_label, name);
-	lv_label_set_long_mode(name_label, LV_LABEL_LONG_DOT);
 	lv_obj_set_width(name_label, lv_pct(100));
-	// One line, cut with dots past it.
 	lv_obj_set_height(name_label, lv_font_get_line_height(compact_page() ? &font_ui_18 : &font_ui_24));
 	lv_obj_add_style(name_label, &theme_style_text, 0);
 	lv_obj_set_style_text_font(name_label, compact_page() ? &font_ui_18 : &font_ui_24, 0);
+	scrolltext_apply(name_label);
+	scrolltext_set(name_label, name);
 
 	lv_obj_t *sub = NULL;
 	if (subtitle && subtitle[0]) {
@@ -1202,12 +1202,12 @@ static void import_add_candidate_row(int index) {
 	lv_obj_set_flex_align(texts, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
 
 	lv_obj_t *name = lv_label_create(texts);
-	lv_label_set_text(name, import_candidates[index].name);
-	lv_label_set_long_mode(name, LV_LABEL_LONG_DOT);
 	lv_obj_set_width(name, lv_pct(100));
 	lv_obj_set_height(name, lv_font_get_line_height(compact_page() ? &font_ui_18 : &font_ui_24));
 	lv_obj_add_style(name, &theme_style_text, 0);
 	lv_obj_set_style_text_font(name, compact_page() ? &font_ui_18 : &font_ui_24, 0);
+	scrolltext_apply(name);
+	scrolltext_set(name, import_candidates[index].name);
 
 	lv_obj_t *where = lv_label_create(texts);
 	lv_label_set_text(where,tr(get_playlist_location_tr(import_candidates[index])));

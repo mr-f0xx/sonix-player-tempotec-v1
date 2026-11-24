@@ -1070,7 +1070,7 @@ static void row_update_detail(panel_t *p, row_t *row, int index, const char *pat
 		artist = NULL;
 	}
 	if (artist) {
-		lv_label_set_text(row->artist, artist);
+		scrolltext_set(row->artist, artist);
 		lv_obj_set_hidden(row->artist, false);
 	} else {
 		lv_obj_set_hidden(row->artist, true);
@@ -1796,7 +1796,7 @@ static void row_bind(panel_t *p, row_t *row, int index) {
 	// only the name is for reading.
 	char shown[sizeof(((winrow_t *)0)->name)];
 	library_album_title(name, shown, sizeof(shown));
-	lv_label_set_text(row->label, shown);
+	scrolltext_set(row->label, shown);
 	// A grid tile is its cover: no room for a second line, a chevron or a
 	// play mark beside it, and a name that only fits under the picture. Set
 	// on every bind, so a panel that switches modes while it holds a list is
@@ -4077,14 +4077,14 @@ static void build_panel(panel_t *p, gui_config_t *cfg, bool is_tracks, int slot_
 		lv_obj_set_event_bubble(row->text, true);
 
 		row->label = lv_label_create(row->text);
-		lv_label_set_long_mode(row->label, LV_LABEL_LONG_DOT);
 		lv_obj_set_width(row->label, LV_PCT(100));
 		// Album names in the Album Artist view often need a second line. Keep
 		// the artist/track rows on one line so their detail rows retain space.
 		lv_obj_set_height(row->label, lv_font_get_line_height(ROW_TITLE_FONT) *
-						 (p == &panel_artist_albums ? 2 : 1));
+					 (p == &panel_artist_albums ? 2 : 1));
 		lv_obj_add_style(row->label, &theme_style_text, 0);
 		lv_obj_set_style_text_font(row->label, ROW_TITLE_FONT, 0);
+		scrolltext_apply(row->label);
 
 		row->detail = lv_obj_create(row->text);
 		lv_obj_remove_style_all(row->detail);
@@ -4106,14 +4106,15 @@ static void build_panel(panel_t *p, gui_config_t *cfg, bool is_tracks, int slot_
 			lv_obj_set_clickable(row->quality, false);
 		}
 
-		// One line like the title, cut with dots, in the quieter colour.
+		// One line like the title, in the quieter colour. Scrolls when it
+		// does not fit, so a long artist name can be read instead of cut off.
 		row->artist = lv_label_create(row->detail);
-		lv_label_set_text(row->artist, "");
-		lv_label_set_long_mode(row->artist, LV_LABEL_LONG_DOT);
 		lv_obj_set_flex_grow(row->artist, 1);
 		lv_obj_set_height(row->artist, lv_font_get_line_height(ROW_DETAIL_FONT));
 		lv_obj_add_style(row->artist, &theme_style_text_dim, 0);
 		lv_obj_set_style_text_font(row->artist, ROW_DETAIL_FONT, 0);
+		scrolltext_apply(row->artist);
+		scrolltext_set(row->artist, "");
 		lv_obj_set_hidden(row->artist, true);
 
 		// Out of the flex layout on purpose: it sits in the row's own left

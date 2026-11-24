@@ -20,6 +20,7 @@
 #include "src/gui/shell/gui.h"
 #include "src/gui/shell/icons.h"
 #include "src/gui/shell/popover.h"
+#include "src/gui/shell/scrolltext.h"
 #include "src/gui/shell/settingsrow.h"
 #include "src/gui/shell/switcher.h"
 #include "src/gui/shell/theme.h"
@@ -591,18 +592,18 @@ static void tokyo_music_build(gui_config_t *cfg) {
 		lv_obj_set_flex_align(copy, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
 
 		row->title = lv_label_create(copy);
-		lv_label_set_long_mode(row->title, LV_LABEL_LONG_DOT);
 		lv_obj_set_width(row->title, lv_pct(100));
 		lv_obj_set_height(row->title, lv_font_get_line_height(&font_ui_14));
 		lv_obj_add_style(row->title, &theme_style_text, 0);
 		lv_obj_set_style_text_font(row->title, &font_ui_14, 0);
+		scrolltext_apply(row->title);
 
 		row->artist = lv_label_create(copy);
-		lv_label_set_long_mode(row->artist, LV_LABEL_LONG_DOT);
 		lv_obj_set_width(row->artist, lv_pct(100));
 		lv_obj_set_height(row->artist, lv_font_get_line_height(&font_ui_14));
 		lv_obj_add_style(row->artist, &theme_style_text_dim, 0);
 		lv_obj_set_style_text_font(row->artist, &font_ui_14, 0);
+		scrolltext_apply(row->artist);
 
 		row->play_icon = lv_image_create(row->button);
 		lv_image_set_src(row->play_icon, &icon_play);
@@ -739,8 +740,8 @@ static void music_recent_refresh(void) {
 			row->queue_revision = revision;
 			snprintf(row->path, sizeof(row->path), "%s", path);
 			row->library_file = library_file;
-			lv_label_set_text(row->title, title);
-			lv_label_set_text(row->artist, artist);
+			scrolltext_set(row->title, title);
+			scrolltext_set(row->artist, artist);
 			lv_obj_set_hidden(row->button, false);
 			filled++;
 		}

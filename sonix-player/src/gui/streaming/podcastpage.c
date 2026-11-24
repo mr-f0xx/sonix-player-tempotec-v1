@@ -15,6 +15,7 @@
 #include "src/system/playback/sleeptimer.h"
 #include "src/gui/shell/gui.h"
 #include "src/gui/shell/icons.h"
+#include "src/gui/shell/scrolltext.h"
 #include "src/gui/shell/keyboard.h"
 #include "src/gui/nowplaying/player.h"
 #include "src/gui/shell/popover.h"
@@ -854,12 +855,12 @@ static void row_bind(row_t *row, int index) {
 
 	const char *title =
 		list_kind == JOB_EPISODES ? result_episodes[index].title : result_feeds[index].title;
-	lv_label_set_text(row->title, title);
+	scrolltext_set(row->title, title);
 
 	char detail[200];
 	row_detail(index, detail, sizeof(detail));
 	if (detail[0]) {
-		lv_label_set_text(row->detail, detail);
+		scrolltext_set(row->detail, detail);
 		lv_obj_set_hidden(row->detail, false);
 	} else {
 		lv_obj_set_hidden(row->detail, true);
@@ -1127,18 +1128,18 @@ static void build_rows(int width) {
 		lv_obj_set_flex_align(texts, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
 
 		row->title = lv_label_create(texts);
-		lv_label_set_long_mode(row->title, LV_LABEL_LONG_DOT);
 		lv_obj_set_width(row->title, lv_pct(100));
 		lv_obj_set_height(row->title, lv_font_get_line_height(ROW_TITLE_FONT));
 		lv_obj_add_style(row->title, &theme_style_text, 0);
 		lv_obj_set_style_text_font(row->title, ROW_TITLE_FONT, 0);
+		scrolltext_apply(row->title);
 
 		row->detail = lv_label_create(texts);
-		lv_label_set_long_mode(row->detail, LV_LABEL_LONG_DOT);
 		lv_obj_set_width(row->detail, lv_pct(100));
 		lv_obj_set_height(row->detail, lv_font_get_line_height(ROW_DETAIL_FONT));
 		lv_obj_add_style(row->detail, &theme_style_text_dim, 0);
 		lv_obj_set_style_text_font(row->detail, ROW_DETAIL_FONT, 0);
+		scrolltext_apply(row->detail);
 
 		// The tick of an episode that has been heard, worn on the cover.
 		//

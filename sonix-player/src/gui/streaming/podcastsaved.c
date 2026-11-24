@@ -18,6 +18,7 @@
 #include "src/gui/streaming/podcastpage.h"
 #include "src/gui/shell/confirm.h"
 #include "src/gui/shell/icons.h"
+#include "src/gui/shell/scrolltext.h"
 #include "src/gui/shell/popover.h"
 #include "src/gui/shell/settingsrow.h"
 #include "src/gui/shell/switcher.h"
@@ -397,22 +398,22 @@ static lv_obj_t *make_row(lv_obj_t *parent, const cover_image_t *image, const ch
 	lv_obj_set_flex_flow(texts, LV_FLEX_FLOW_COLUMN);
 
 	lv_obj_t *name = lv_label_create(texts);
-	lv_label_set_text(name, title);
-	lv_label_set_long_mode(name, LV_LABEL_LONG_DOT);
 	lv_obj_set_width(name, lv_pct(100));
 	lv_obj_set_height(name, lv_font_get_line_height(SAVED_TITLE_FONT));
 	lv_obj_add_style(name, &theme_style_text, 0);
 	lv_obj_set_style_text_font(name, SAVED_TITLE_FONT, 0);
+	scrolltext_apply(name);
+	scrolltext_set(name, title);
 
 	lv_obj_t *sub = NULL;
 	if (detail && detail[0]) {
 		sub = lv_label_create(texts);
-		lv_label_set_text(sub, detail);
-		lv_label_set_long_mode(sub, LV_LABEL_LONG_DOT);
 		lv_obj_set_width(sub, lv_pct(100));
 		lv_obj_set_height(sub, lv_font_get_line_height(SAVED_DETAIL_FONT));
 		lv_obj_add_style(sub, &theme_style_text_dim, 0);
 		lv_obj_set_style_text_font(sub, SAVED_DETAIL_FONT, 0);
+		scrolltext_apply(sub);
+		scrolltext_set(sub, detail);
 	}
 
 	// An episode heard to its end wears the tick the online list gives it, and
