@@ -53,6 +53,10 @@ static const addon_t ADDONS[] = {
 	{"listenbrainz", "listenbrainz", "addon_listenbrainz_note", "plugins_section_features"},
 	{"calculator", "calculator", "addon_calculator_note", "plugins_section_tools"},
 	{"notes", "notes", "addon_notes_note", "plugins_section_tools"},
+	// A locked box of text on the card, and no account or network anywhere
+	// near it. Off on a fresh install like the other tools; the page is only
+	// built when it is on.
+	{"vault", "vault", "addon_vault_note", "plugins_section_tools"},
 	{"tagmanager", "addon_tagmanager_label", "addon_tagmanager_note", "plugins_section_tools"},
 	{"metronome", "metronome", "addon_metronome_note", "plugins_section_tools"},
 	{"tapedeck", "tape_deck", "addon_tapedeck_note", "plugins_section_tools"},

@@ -1,6 +1,6 @@
 /*
- * The two pages the More menu gained -- the Calculator and the Notes shelf --
- * on the real renderer, at both panel sizes.
+ * The pages the More menu gained -- the Calculator, the Notes shelf and the
+ * vault -- on the real renderer, at both panel sizes.
  *
  * The arithmetic (test_calculator.c) and the folder rules (test_notes.c) are
  * checked in plain C elsewhere; what is checked here is the part that only
@@ -40,9 +40,12 @@
 #include "src/gui/shell/gridpage.h"
 #include "src/system/playback/device_state.h"
 #include "src/gui/shell/icons.h"
+#include "src/gui/shell/confirm.h"
 #include "src/gui/shell/keyboard.h"
+#include "src/gui/shell/popover.h"
 #include "src/gui/shell/morepage.h"
 #include "src/gui/shell/theme.h"
+#include "src/gui/vault/vaultpage.h"
 #include "src/system/addons/addons.h"
 #include "src/system/core/config.h"
 #include "src/system/core/lang.h"
@@ -51,6 +54,7 @@
 #include "src/system/pet/pet.h"
 #include "src/system/pet/petwatch.h"
 #include "src/system/text/textfile.h"
+#include "src/system/vault/vaultstore.h"
 
 /* ---- the parts of the shell these pages lean on, substituted ------------- */
 
@@ -1061,6 +1065,13 @@ static void check_strings(const char *language_dir) {
 		"calculator", "calculator_error", "notes", "notes_new", "notes_empty",
 		"notes_more", "notes_placeholder", "notes_saved", "notes_cannot_save",
 		"notes_cannot_open", "notes_too_long", "music_years", "music_most_played",
+		"vault", "addon_vault_note", "vault_locked", "vault_enter_pin", "vault_setup_title",
+		"vault_setup_hint", "vault_confirm_title", "vault_confirm_hint", "vault_new_pin",
+		"vault_pin_hint", "vault_working", "vault_pin_mismatch", "vault_wrong_pin", "vault_too_long",
+		"vault_cannot_open", "vault_cannot_save", "vault_erase_failed", "vault_erase_title",
+		"vault_erase_note", "vault_erase", "vault_erased", "vault_saved", "vault_created",
+		"vault_pin_changed", "vault_locked_toast", "vault_change_pin", "vault_lock_now",
+		"vault_empty", "vault_placeholder",
 		"library_empty_most_played",
 		"musicsettings_rearrange_main_page",
 		"metronome", "metronome_bpm", "metronome_beats", "metronome_start",
@@ -1199,6 +1210,7 @@ static void check_more_page(gui_config_t *cfg, const char *tag) {
 	assert(has_entry(shown, tr("metronome")));
 	assert(has_entry(shown, tr("tape_deck")));
 	assert(has_entry(shown, tr("pet")));
+	assert(has_entry(shown, tr("vault")));
 	// The three games are on the page too, after Flappy Bird, which they sit
 	// beside: they are the rows the More menu gained back.
 	assert(has_entry(shown, tr("2048")));
@@ -1208,10 +1220,10 @@ static void check_more_page(gui_config_t *cfg, const char *tag) {
 	// Dark/Light use full-colour section art, not enlarged toolbar glyphs.
 	// This also runs after theme changes, catching stale icon sources.
 	if (theme_get_kind() == THEME_KIND_DARK || theme_get_kind() == THEME_KIND_LIGHT) {
-		const char *labels[] = {"2048", "snake", "dino", "Tag Manager", "pet"};
+		const char *labels[] = {"2048", "snake", "dino", "Tag Manager", "pet", "vault"};
 		const lv_image_dsc_t *art[] = {
 			&icon_menu_game_2048, &icon_menu_game_snake, &icon_menu_game_dino,
-			&icon_menu_tag_manager, &icon_menu_pet,
+			&icon_menu_tag_manager, &icon_menu_pet, &icon_menu_vault,
 		};
 		assert(tiles);
 		for (size_t i = 0; i < sizeof(art) / sizeof(art[0]); i++) {
@@ -3006,6 +3018,240 @@ static lv_obj_t *find_image_button(lv_obj_t *obj, const lv_image_dsc_t *glyph) {
 	return NULL;
 }
 
+
+/* ---- the vault ----------------------------------------------------------- */
+
+/* The PIN pad is the one flex row-wrap on the page with twelve keys on it. Its
+ * digits are found inside it rather than on the screen: the keyboard behind the
+ * editor has digit keys of its own, and a test that typed 2468 into whichever
+ * "2" came first would be testing the keyboard. */
+static lv_obj_t *vault_keypad(lv_obj_t *obj) {
+	if (lv_obj_get_child_count(obj) == 12 &&
+		lv_obj_get_style_flex_flow(obj, LV_PART_MAIN) == LV_FLEX_FLOW_ROW_WRAP) {
+		return obj;
+	}
+	for (uint32_t i = 0; i < lv_obj_get_child_count(obj); i++) {
+		lv_obj_t *found = vault_keypad(lv_obj_get_child(obj, i));
+		if (found) {
+			return found;
+		}
+	}
+	return NULL;
+}
+
+static void vault_press_key(lv_obj_t *button) {
+	assert(button);
+	lv_obj_send_event(button, LV_EVENT_CLICKED, NULL);
+}
+
+static void vault_type_pin(lv_obj_t *page, const char *pin) {
+	lv_obj_t *pad = vault_keypad(page);
+	assert(pad);
+	for (const char *p = pin; *p; p++) {
+		char digit[2] = {*p, '\0'};
+		lv_obj_t *label = find_label(pad, digit);
+		assert(label);
+		vault_press_key(lv_obj_get_parent(label));
+	}
+	// The last key is the check: delete, zero, then accept.
+	vault_press_key(lv_obj_get_child(pad, 11));
+}
+
+static lv_obj_t *vault_tile(void) {
+	bool tiles;
+	lv_obj_t *shown = morepage_shape(&tiles);
+	lv_obj_t *entry = entry_with_label(shown, tr("vault"));
+	assert(entry);
+	return entry;
+}
+
+static void vault_open_page(void) {
+	lv_obj_send_event(vault_tile(), LV_EVENT_CLICKED, NULL);
+	assert(lv_screen_active() == vault_screen);
+	lv_obj_update_layout(vault_screen);
+}
+
+static void check_vault_page(gui_config_t *cfg, const char *tag) {
+	char dir[VAULT_PATH_MAX];
+	char path[VAULT_PATH_MAX];
+	assert(vault_dir(dir, sizeof(dir), cfg->sd_root_path));
+	assert(vault_path(path, sizeof(path), dir, VAULT_FILE));
+	remove(path);
+	rmdir(dir);
+
+	// The tile is on the page, under the tinted padlock in the list themes.
+	bool tiles = false;
+	lv_obj_t *shown = morepage_shape(&tiles);
+	lv_obj_t *tile = entry_with_label(shown, tr("vault"));
+	assert(tile);
+	if (theme_uses_function_glyphs()) {
+		assert(entry_icon_source(tile) == &icon_keylock_quick);
+	}
+
+	// Opening it with no vault on the card asks for a first PIN, and the pad
+	// fits the panel without a scroll.
+	vault_open_page();
+	check_within_panel(vault_screen, cfg, "Vault setup");
+	dump_snapshot(vault_screen, tag);
+	assert(find_label(vault_screen, tr("vault_setup_title")));
+	lv_obj_t *pad = vault_keypad(vault_screen);
+	assert(pad && lv_obj_get_child_count(pad) == 12);
+	for (uint32_t i = 0; i < 12; i++) {
+		lv_obj_t *key = lv_obj_get_child(pad, i);
+		lv_area_t area;
+		lv_obj_get_coords(key, &area);
+		assert(area.x1 >= 0 && area.x2 < (int32_t)cfg->screen_width);
+		assert(area.y1 >= 0 && area.y2 < (int32_t)cfg->screen_height);
+		assert(lv_obj_get_width(key) >= 56 && lv_obj_get_height(key) >= bp_pick(34, 40));
+	}
+
+	// A PIN too short is refused with the hint, and nothing is written.
+	int toasts = plain_toasts;
+	expected_error = tr("vault_pin_hint");
+	vault_type_pin(vault_screen, "12");
+	assert(!expected_error);
+	assert(!vault_exists(path));
+	// A refused PIN is not thrown away -- the next digit can still fix it --
+	// so take the two back before starting again.
+	vault_press_key(lv_obj_get_child(pad, 9));
+	vault_press_key(lv_obj_get_child(pad, 9));
+	vault_type_pin(vault_screen, "2468");
+	assert(find_label(vault_screen, tr("vault_confirm_title")));
+	expected_error = tr("vault_pin_mismatch");
+	vault_type_pin(vault_screen, "1357");
+	assert(!expected_error);
+	assert(find_label(vault_screen, tr("vault_confirm_title"))); // mismatch keeps the question up
+	assert(!vault_exists(path));
+	vault_type_pin(vault_screen, "2468");
+	assert(vault_exists(path));
+	assert(plain_toasts == toasts + 1); // "Vault created"
+
+	// A new vault opens in the editor with the keyboard up, and its textarea
+	// is inside the panel while the keyboard is showing.
+	lv_obj_t *field = find_class(vault_screen, &lv_textarea_class);
+	assert(field);
+	lv_textarea_set_text(field, "wifi: hunter2");
+	check_within_panel(vault_screen, cfg, "Vault editor");
+
+	// Leaving with unsaved typing still ends with it on the card, encrypted.
+	switch_screen(music_screen);
+	FILE *file = fopen(path, "rb");
+	assert(file && fseek(file, 0, SEEK_END) == 0);
+	long size = ftell(file);
+	assert(size > 52 + 32);
+	rewind(file);
+	unsigned char *raw = malloc((size_t)size);
+	assert(raw && fread(raw, 1, (size_t)size, file) == (size_t)size);
+	fclose(file);
+	assert(memcmp(raw, "SONIXVLT", 8) == 0);
+	bool leaked = false;
+	for (long i = 0; i + 18 <= size; i++) {
+		if (memcmp(raw + i, "wifi: hunter2", 13) == 0) {
+			leaked = true;
+		}
+	}
+	assert(!leaked);
+	free(raw);
+
+	// Opened again, it asks for the PIN. The wrong one clears the dots and
+	// says so; the right one shows the text that was typed.
+	vault_open_page();
+	assert(find_label(vault_screen, tr("vault_locked")));
+	expected_error = tr("vault_wrong_pin");
+	vault_type_pin(vault_screen, "1111");
+	assert(!expected_error);
+	assert(find_label(vault_screen, tr("vault_locked")));
+	assert(find_label(vault_screen, tr("vault_enter_pin"))); // the hint came back
+	vault_type_pin(vault_screen, "2468");
+	assert(field);
+	assert(strcmp(lv_textarea_get_text(field), "wifi: hunter2") == 0);
+
+	// The pencil starts writing, and two minutes of no typing saves the
+	// writing and puts the vault away by itself.
+	lv_obj_t *pencil = find_image_button(vault_screen, &icon_pencil);
+	assert(pencil);
+	vault_press_key(pencil);
+	lv_textarea_set_text(field, "seed: alpha bravo");
+	toasts = plain_toasts;
+	lv_tick_inc(2 * 60 * 1000 + 1000);
+	lv_timer_handler();
+	assert(find_label(vault_screen, tr("vault_locked")));
+	assert(plain_toasts > toasts);
+	vault_type_pin(vault_screen, "2468");
+	assert(strcmp(lv_textarea_get_text(field), "seed: alpha bravo") == 0);
+	char open_tag[96];
+	snprintf(open_tag, sizeof(open_tag), "%s-open", tag);
+	dump_snapshot(vault_screen, open_tag);
+
+	// A menu left open when the clock runs out goes away with the vault: the
+	// question is not left on top of a page that has already locked.
+	lv_obj_t *menu = find_image_button(vault_screen, &icon_ellipsis_vertical);
+	assert(menu);
+	vault_press_key(menu);
+	assert(popover_visible());
+	lv_tick_inc(2 * 60 * 1000 + 1000);
+	lv_timer_handler();
+	assert(!popover_visible());
+	assert(find_label(vault_screen, tr("vault_locked")));
+	vault_type_pin(vault_screen, "2468");
+	assert(strcmp(lv_textarea_get_text(field), "seed: alpha bravo") == 0);
+
+	// The menu changes the PIN: the vault stays open, and the old PIN stops
+	// working while the new one opens it.
+	menu = find_image_button(vault_screen, &icon_ellipsis_vertical);
+	assert(menu);
+	vault_press_key(menu);
+	lv_obj_update_layout(lv_layer_top());
+	lv_obj_t *change = find_visible_label(lv_layer_top(), tr("vault_change_pin"));
+	assert(change);
+	vault_press_key(lv_obj_get_parent(change));
+	assert(find_label(vault_screen, tr("vault_new_pin")));
+	vault_type_pin(vault_screen, "1357");
+	assert(find_label(vault_screen, tr("vault_confirm_title")));
+	vault_type_pin(vault_screen, "1357");
+	assert(strcmp(lv_textarea_get_text(field), "seed: alpha bravo") == 0);
+
+	menu = find_image_button(vault_screen, &icon_ellipsis_vertical);
+	assert(menu);
+	vault_press_key(menu);
+	lv_obj_update_layout(lv_layer_top());
+	lv_obj_t *lock = find_visible_label(lv_layer_top(), tr("vault_lock_now"));
+	assert(lock);
+	vault_press_key(lv_obj_get_parent(lock));
+	assert(find_label(vault_screen, tr("vault_locked")));
+	expected_error = tr("vault_wrong_pin");
+	vault_type_pin(vault_screen, "2468");
+	assert(!expected_error);
+	vault_type_pin(vault_screen, "1357");
+	assert(strcmp(lv_textarea_get_text(field), "seed: alpha bravo") == 0);
+
+	// Erasing asks first, and only then removes the file and offers a new
+	// PIN. The confirmation is the one place where the text really is gone.
+	menu = find_image_button(vault_screen, &icon_ellipsis_vertical);
+	assert(menu);
+	vault_press_key(menu);
+	lv_obj_update_layout(lv_layer_top());
+	lv_obj_t *erase = find_visible_label(lv_layer_top(), tr("vault_erase"));
+	assert(erase);
+	vault_press_key(lv_obj_get_parent(erase));
+	lv_obj_update_layout(lv_layer_top());
+	assert(confirm_visible());
+	lv_obj_t *ok = find_visible_label(lv_layer_top(), tr("vault_erase"));
+	assert(ok);
+	vault_press_key(lv_obj_get_parent(ok));
+	for (int i = 0; i < 8 && vault_exists(path); i++) {
+		lv_timer_handler();
+	}
+	assert(!vault_exists(path));
+	assert(find_label(vault_screen, tr("vault_setup_title")));
+
+	// Back on More, a fresh visit has no vault to open and asks for a PIN
+	// again rather than remembering the one that was just erased.
+	vault_open_page();
+	assert(find_label(vault_screen, tr("vault_setup_title")));
+	switch_screen(music_screen);
+}
+
 int main(int argc, char **argv) {
 	assert(argc == 2);
 
@@ -3087,6 +3333,10 @@ int main(int argc, char **argv) {
 	pet_defaults(&pet_state, petwatch_now(), pet_day_now(petwatch_now()));
 	petpage_init(&cfg);
 	morepage_init(&cfg);
+	popover_init();
+	confirm_init(&cfg);
+	vault_screen = lv_obj_create(NULL);
+	vaultpage_init(&cfg);
 	player_drag_attaches = 0; // counting from here: only the viewers are built below
 	textview_init(&cfg); // the notes shelf shows a long note through it
 	pictureview_init(&cfg);
@@ -3195,8 +3445,9 @@ int main(int argc, char **argv) {
 					 bp_is_tempotec_v1() ? "v1-note-editor-writing" : "hiby-note-editor-writing",
 					 bp_is_tempotec_v1() ? "v1-notes-after" : "hiby-notes-after",
 					 bp_is_tempotec_v1() ? "v1-note-long" : "hiby-note-long");
+	check_vault_page(&cfg, bp_is_tempotec_v1() ? "v1-vault" : "hiby-vault");
 
 	lv_deinit();
-	printf("PASS calculator, notes, metronome, Tape Deck and pet pages (%s)\n", bp_is_tempotec_v1() ? "240x320" : "480x720");
+	printf("PASS calculator, notes, metronome, Tape Deck, pet and vault pages (%s)\n", bp_is_tempotec_v1() ? "240x320" : "480x720");
 	return 0;
 }

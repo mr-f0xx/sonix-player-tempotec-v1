@@ -306,6 +306,7 @@ static bool gridpage_tokyo_icon(const char *label, const lv_image_dsc_t **icon, 
 		{"dino", &icon_game_dino, THEME_SEMANTIC_AMBER},
 		{"calculator", &icon_calculator, THEME_SEMANTIC_CYAN},
 		{"notes", &icon_notes, THEME_SEMANTIC_PURPLE},
+		{"vault", &icon_keylock_quick, THEME_SEMANTIC_AMBER},
 		{"pet", &icon_pet, THEME_SEMANTIC_PURPLE},
 	};
 

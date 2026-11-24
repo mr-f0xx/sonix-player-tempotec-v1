@@ -20,6 +20,13 @@ typedef struct {
 void sha256_init(sha256_ctx *c);
 void sha256_update(sha256_ctx *c, const void *data, size_t len);
 
+// The digest, as 32 bytes. The context is spent afterwards.
+//
+// Separate from the hex form because the key vault's HMAC and PBKDF2 want the
+// bytes, and turning them into hex only to parse them back would be work for
+// nothing on a player that takes a second over a PIN already.
+void sha256_final(sha256_ctx *c, unsigned char out[SHA256_DIGEST_LEN]);
+
 // Writes the digest as lower-case hex. The context is spent afterwards.
 void sha256_final_hex(sha256_ctx *c, char out[SHA256_HEX_LEN]);
 

@@ -57,6 +57,7 @@
 #include "src/gui/metronome/metronome.h"
 #include "src/gui/tapedeck/tapedeck.h"
 #include "src/gui/notes/notes.h"
+#include "src/gui/vault/vaultpage.h"
 #include "src/gui/tagmanager/tagmanager.h"
 #include "src/gui/shell/morepage.h"
 #include "src/gui/shell/popover.h"
@@ -739,6 +740,7 @@ void gui_init(gui_config_t *cfg) {
 	calculator_screen = lv_obj_create(NULL);
 	petpage_screen = lv_obj_create(NULL);
 	notes_screen = lv_obj_create(NULL);
+	vault_screen = lv_obj_create(NULL);
 	metronome_screen = lv_obj_create(NULL);
 	noteeditor_screen = lv_obj_create(NULL);
 
@@ -830,6 +832,9 @@ void gui_init(gui_config_t *cfg) {
 	if (addons_enabled("notes")) {
 		noteeditor_init(cfg); // before notes: a row of the shelf opens it
 		notes_init(cfg);
+	}
+	if (addons_enabled("vault")) {
+		vaultpage_init(cfg);
 	}
 	if (addons_enabled("tagmanager")) {
 		tagmanager_init(cfg);

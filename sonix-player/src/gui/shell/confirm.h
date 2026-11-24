@@ -31,4 +31,9 @@ void confirm_notice(const char *title, const char *message);
 
 void confirm_close(void);
 
+// Whether the card is up. A page with a back guard of its own asks before it
+// takes the chevron: a question on top of the page is the first thing to put
+// away, not the page itself.
+bool confirm_visible(void);
+
 #endif /* CONFIRM_H */

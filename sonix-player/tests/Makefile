@@ -145,7 +145,7 @@ $(BUILD)/test_subsonic: test_subsonic.c support.c $(CORE) $(shell find $(ROOT)/s
 	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ test_subsonic.c support.c $(CORE) $(LDFLAGS) $(LDLIBS)
 
 sanitize:
-	$(MAKE) BUILD=.build/sanitize CFLAGS='-O1 -g -std=gnu11 -Wall -Wextra -Werror -D_FILE_OFFSET_BITS=64 -ffunction-sections -fdata-sections -fno-omit-frame-pointer -fsanitize=address,undefined' LDFLAGS='-Wl,--gc-sections -fsanitize=address,undefined' test soundcloud jellyfin tapedeck sdbench
+	$(MAKE) BUILD=.build/sanitize CFLAGS='-O1 -g -std=gnu11 -Wall -Wextra -Werror -D_FILE_OFFSET_BITS=64 -ffunction-sections -fdata-sections -fno-omit-frame-pointer -fsanitize=address,undefined' LDFLAGS='-Wl,--gc-sections -fsanitize=address,undefined' test soundcloud jellyfin tapedeck sdbench vault
 
 # The battery guard: when the player warns at five percent, when it switches
 # itself off at one, and which readings leave standby alone. The rule is its own
@@ -547,6 +547,24 @@ notes: $(BUILD)/test_notes
 $(BUILD)/test_notes: $(NOTES_SRC) $(ROOT)/src/system/notes/notesstore.h $(ROOT)/src/system/text/textfile.h
 	@mkdir -p $(BUILD)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ $(NOTES_SRC) $(LDFLAGS) $(LDLIBS)
+
+# The pocket vault: AES-256, HMAC and PBKDF2 against their published vectors,
+# then the file format against a temporary card -- creation, a wrong PIN, a
+# flipped byte, a changed iteration count, a truncated file, a PIN change and
+# erasure. No LVGL and no card of its own: the store reads /dev/urandom and a
+# path the test makes with mkdtemp.
+VAULT_SRC = test_vault.c $(ROOT)/src/system/vault/vaultstore.c \
+            $(ROOT)/src/system/crypto/aes256.c $(ROOT)/src/system/crypto/kdf.c \
+            $(ROOT)/src/system/core/sha256.c
+.PHONY: vault
+vault: $(BUILD)/test_vault
+	$(BUILD)/test_vault
+
+$(BUILD)/test_vault: $(VAULT_SRC) $(ROOT)/src/system/vault/vaultstore.h \
+                     $(ROOT)/src/system/crypto/aes256.h $(ROOT)/src/system/crypto/kdf.h \
+                     $(ROOT)/src/system/core/sha256.h
+	@mkdir -p $(BUILD)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ $(VAULT_SRC) $(LDFLAGS) $(LDLIBS)
 
 # The ListenBrainz module's rules without a network: the queue file on the
 # card, the JSON body a request carries and the answers the server sends. The
@@ -1149,7 +1167,11 @@ TOOLS_SRC = $(ROOT)/tests/ui/test_tools_pages.c \
             $(ROOT)/src/gui/streaming/jellyfin_icon.c \
             $(ROOT)/src/system/addons/addons.c \
             $(ROOT)/src/gui/shell/settingsrow.c $(ROOT)/src/gui/shell/keyboard.c \
-            $(ROOT)/src/gui/shell/popover.c $(ROOT)/src/system/input/kblayout.c \
+            $(ROOT)/src/gui/shell/popover.c $(ROOT)/src/gui/shell/confirm.c \
+            $(ROOT)/src/system/input/kblayout.c \
+            $(ROOT)/src/gui/vault/vaultpage.c $(ROOT)/src/system/vault/vaultstore.c \
+            $(ROOT)/src/system/crypto/aes256.c $(ROOT)/src/system/crypto/kdf.c \
+            $(ROOT)/src/system/core/sha256.c \
             $(ROOT)/src/gui/shell/theme.c $(ROOT)/src/gui/shell/icons.c \
             $(ROOT)/src/gui/board_profile.c \
             $(ROOT)/src/system/core/config.c $(ROOT)/src/system/core/lang.c

@@ -19,6 +19,7 @@
 #include "src/gui/notes/notes.h"
 #include "src/gui/tapedeck/tapedeck.h"
 #include "src/gui/tagmanager/tagmanager.h"
+#include "src/gui/vault/vaultpage.h"
 #include "src/gui/pet/petpage.h"
 #include "src/gui/pet/peticon.h"
 #include "src/gui/nowplaying/player.h"
@@ -89,6 +90,11 @@ static bool more_tokyo_icon(const char *label, const lv_image_dsc_t **icon, them
 	} else if (strcmp(label, "notes") == 0) {
 		*icon = &icon_notes;
 		*tone = THEME_SEMANTIC_PURPLE;
+	} else if (strcmp(label, "vault") == 0) {
+		// A padlock, in the amber the interface gives a warning rather than a
+		// game: what this page holds is not an ordinary note.
+		*icon = &icon_keylock_quick;
+		*tone = THEME_SEMANTIC_AMBER;
 	} else if (strcmp(label, "tape_deck") == 0) {
 		*icon = &icon_audio_waveform;
 		*tone = THEME_SEMANTIC_RED;
@@ -192,6 +198,10 @@ static const grid_entry_t MORE_ENTRIES[] = {
 	// it was left holding, and the notes shelf reads the card.
 	{"calculator", &icon_menu_calculator, NULL, calculator_open},
 	{"notes", &icon_menu_notes, NULL, notes_open},
+	// The vault is an action for the notes shelf's reason -- it reads the card
+	// on the way in and decides between its lock pad and its setup pad -- and
+	// for one of its own: opening it again is meant to find it locked.
+	{"vault", &icon_menu_vault, NULL, vault_open},
 	// An action for the calculator's reason: the tempo and the bar come back
 	// from the settings as they were left, and the page repaints them on the
 	// way in.
@@ -231,6 +241,7 @@ static const char *more_addon_of(const char *label) {
 	if (strcmp(label, "dino") == 0) return "dino";
 	if (strcmp(label, "calculator") == 0) return "calculator";
 	if (strcmp(label, "notes") == 0) return "notes";
+	if (strcmp(label, "vault") == 0) return "vault";
 	if (strcmp(label, "metronome") == 0) return "metronome";
 	if (strcmp(label, "tape_deck") == 0) return "tapedeck";
 	if (strcmp(label, "pet") == 0) return "pet";

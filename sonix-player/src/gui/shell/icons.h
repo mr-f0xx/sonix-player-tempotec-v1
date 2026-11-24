@@ -333,6 +333,8 @@ extern lv_image_dsc_t icon_stats_albums;
 extern lv_image_dsc_t icon_layout_grid;
 extern lv_image_dsc_t icon_layout_list;
 
+extern lv_image_dsc_t icon_menu_vault;
+
 /* ICONSET-REGISTRY-START
  * An SD icon set swaps the pixels behind a built-in descriptor in place;
  * the id is the set file's name (<id>.png in Icons/<set>/).
