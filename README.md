@@ -210,6 +210,7 @@ Showcase of **OLED** appearance: true black backgrounds with white as the accent
   - [Amber on Black theme](#amber-on-black-theme)
   - [OLED theme](#oled-theme)
 - [Custom theme](#custom-theme)
+- [Video](#video)
 - [Music pet](#music-pet)
 - [Tag Manager](#tag-manager)
 - [Tape Deck](#tape-deck)
@@ -340,6 +341,69 @@ Every key in `[theme]` is required. Lines starting with `;` or `#` are comments.
 Four ready-made palettes — **Gruvbox**, **Rosé Pine**, **Dracula** and **Catppuccin Mocha** — are in [`sonix-player/examples/themes/`](sonix-player/examples/themes/): copy any or all of them into `Themes/` keeping their `.ini` names to switch between them in **Settings → Appearance → Custom theme**, or use one as a starting point for your own colours.
 
 Each of the four also has an **icon set** in [`sonix-player/examples/icon-sets/`](sonix-player/examples/icon-sets/): copy one to `Icons/<set>` on the card and choose it under **Settings → Appearance → Icon set**, and every glyph in the interface wears that palette — same colours, same function matching, artwork instead of tint. The sets live entirely on the card; see [docs/icon-sets.md](docs/icon-sets.md).
+
+## Video
+
+The V1 can play video on its own panel. Open a `.mpg`, `.mpeg`, `.mpe`, `.mpv` or
+`.m1v` file in **More → File manager** and it plays in place.
+
+The Ingenic X1600 has no hardware H.264 or HEVC decoder, so there is no pretending
+at modern video. What it does have is a fast MIPS core and a framebuffer, so the
+player decodes **MPEG-1 video with MP2 audio** in an **MPEG-PS** container in
+software, from the vendored [`pl_mpeg`](sonix-player/src/system/video/pl_mpeg.h)
+decoder. Frames are converted from YUV420 to RGB565, written straight to the
+panel's off-screen page and panned in — LVGL is bypassed entirely while a video
+plays, which is what makes it fast enough to be worth watching.
+
+### Turning a file into something the V1 plays
+
+The **[workbench](https://mr-f0xx.github.io/sonix-player-tempotec-v1/)** has a
+**Video** tab with copyable ffmpeg presets. The recommended one renders at the
+panel's native **320×240** landscape, 24 fps, MPEG-1 video with MP2 audio:
+
+```bash
+ffmpeg -i input.mp4 -vf "scale=320:240:force_original_aspect_ratio=decrease,pad=320:240:(ow-iw)/2:(oh-ih)/2,fps=24" \
+  -c:v mpeg1video -q:v 6 -c:a mp2 -b:a 128k -ar 44100 -ac 2 output.mpg
+```
+
+Copy the resulting `.mpg` to the microSD card and open it from the file manager.
+Keep video bitrates modest (**≤ 1.5 Mbps** is a safe ceiling) — the decode is
+entirely on the CPU, and a heavier file is one that stutters rather than one that
+refuses to play.
+
+### Watching
+
+- **Landscape by default.** A 320×240 frame is rotated 90° clockwise into the
+  V1's 240×320 portrait panel and cropped to fill it, so a widescreen video uses
+  the whole screen rather than sitting in a letterbox. **Double-tap** the picture
+  to switch between landscape and portrait.
+- **The overlay.** A tap brings up a control strip with the elapsed and remaining
+  time, a play/pause glyph and a progress bar along the panel edge; it hides
+  itself again after three seconds, and a tap on a hidden one only brings it
+  back. While it is showing, a tap on the picture pauses or resumes and a tap on
+  the bar jumps to that point; pressing and sliding along the picture scrubs.
+- **The side keys.** **Next** and **Previous** seek **±30 s**, and **Play/Pause**
+  pauses and resumes. The volume keys keep their usual job — they are not
+  turned into seek keys while a video plays.
+- **Sound stays in sync.** The audio clock is the master: it is derived from the
+  samples actually written to ALSA, less what the card still reports as queued.
+  A frame that falls more than **100 ms** behind the audio is dropped rather
+  than queued, and a frame that is ahead is held back by ALSA write backpressure.
+  The result is that a video too heavy for the CPU loses frames instead of
+  slowly drifting out of sync with its own soundtrack.
+- **Pausing and leaving.** Letting the screen go dark pauses the video and hands
+  the panel back; waking it picks up from the same frame, and if the screensaver
+  is holding the screen it waits for that to be dismissed. Backing out stops
+  playback and returns the panel to the interface; the player also closes itself
+  when the file ends.
+- **Music stops first.** Starting a video stops whatever is playing and waits for
+  the audio device to be released, because the player opens ALSA itself.
+
+> The video player needs the real framebuffer, so it runs on the V1 and not in the
+> [browser emulator](https://mr-f0xx.github.io/sonix-player-tempotec-v1/) or the
+> desktop build, where the display hooks report that direct video is
+> unsupported. The **Video** tab's converter is the part of it that works there,
+> and it is worth using: it is what produces a file the player can actually read.
 
 ## Music pet
 
