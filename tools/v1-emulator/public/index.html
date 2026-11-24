@@ -344,6 +344,7 @@
 						<button class="tab-btn active" data-tab="builds" role="tab" aria-selected="true">Firmware Builds</button>
 						<button class="tab-btn" data-tab="hardware" role="tab" aria-selected="false">Hardware</button>
 						<button class="tab-btn" data-tab="sd" role="tab" aria-selected="false">microSD</button>
+						<button class="tab-btn" id="remote-tab-button" data-tab="remote" role="tab" aria-selected="false" aria-controls="tab-remote">Live USB</button>
 						<button class="tab-btn" data-tab="shortcuts" role="tab" aria-selected="false">Keys</button>
 					</div>
 
@@ -539,6 +540,71 @@
 						<div class="sd-list" id="sd-list"></div>
 					</div>
 
+					<div class="tab-content" id="tab-remote" role="tabpanel" aria-labelledby="remote-tab-button">
+						<div class="card remote-card">
+							<h2>Live USB remote</h2>
+							<p>This controls a physical V1, not the emulator. Enable <strong>Developer options → ADB</strong> on the player, leave its microSD inserted, and connect with a USB data cable. Open this site directly in a WebUSB-capable browser. On Android, use USB host/OTG.</p>
+							<div class="remote-actions">
+								<button type="button" id="remote-connect" class="btn btn-primary btn-sm" disabled>Connect V1</button>
+								<button type="button" id="remote-disconnect" class="btn btn-ghost btn-sm" disabled>Disconnect</button>
+								<button type="button" id="remote-log" class="btn btn-ghost btn-sm" data-needs-usb disabled>Download debug log</button>
+							</div>
+							<p id="remote-status" role="status" aria-live="polite">Not connected. The editors also work offline.</p>
+							<small>Logs require <strong>Log to microSD</strong> and may contain private paths. Nothing is uploaded to the site.</small>
+						</div>
+						<div class="card remote-card">
+							<h2>Parametric EQ</h2>
+							<p>Select a band, then drag on the chart to set frequency and gain. Use the fields below for precise values. The preview uses 48 kHz and does not change playback.</p>
+							<svg id="remote-curve" viewBox="0 0 420 186" role="img" aria-label="Estimated 48 kHz PEQ response from 20 Hz to 20 kHz"></svg>
+							<div id="remote-bands" class="remote-actions" role="group" aria-label="Select EQ band"></div>
+							<div class="remote-fields">
+								<label>Enabled <input id="remote-band-on" type="checkbox"></label>
+								<label>Type <select id="remote-band-type"><option value="PK">Peak</option><option value="LSC">Low shelf</option><option value="HSC">High shelf</option><option value="LPQ">Low pass</option><option value="HPQ">High pass</option></select></label>
+								<label>Frequency (Hz) <input id="remote-band-freq" type="number" min="20" max="20000" step="1"></label>
+								<label>Gain (dB) <input id="remote-band-gain" type="number" min="-15" max="15" step="0.1"></label>
+								<label>Q <input id="remote-band-q" type="number" min="0.1" max="10" step="0.01"></label>
+								<label>Preamp (dB) <input id="remote-preamp" type="number" min="-15" max="6" step="0.1" value="0"></label>
+							</div>
+							<div class="remote-actions">
+								<label>Open local preset <input id="remote-peq-file" type="file" accept=".txt"></label>
+								<button type="button" id="remote-peq-list" class="btn btn-ghost btn-sm" data-needs-usb disabled>List V1 presets</button>
+								<select id="remote-peq-select" aria-label="V1 preset" data-needs-usb disabled><option value="">Choose a preset</option></select>
+								<button type="button" id="remote-peq-load" class="btn btn-ghost btn-sm" data-needs-usb disabled>Open V1 preset</button>
+							</div>
+							<label>New preset name <input id="remote-peq-name" type="text" maxlength="48" value="Browser PEQ"></label>
+							<div class="remote-actions">
+								<button type="button" id="remote-peq-export" class="btn btn-ghost btn-sm">Export APO file</button>
+								<button type="button" id="remote-peq-save" class="btn btn-primary btn-sm" data-needs-usb disabled>Save new preset to V1</button>
+							</div>
+							<small>Saved to <code>PEQ/</code>. Select the new preset on the player to apply it.</small>
+						</div>
+						<div class="card remote-card">
+							<h2>Tape Deck pad bank</h2>
+							<p>Choose local PCM WAVs for any of the 16 pads. Move samples between slots with the arrows; empty slots stay empty.</p>
+							<div id="remote-pads" class="remote-pads"></div>
+							<label>New kit name <input id="remote-kit-name" type="text" maxlength="48" value="Browser Kit"></label>
+							<div class="remote-actions"><button type="button" id="remote-kit-save" class="btn btn-primary btn-sm" data-needs-usb disabled>Save new kit to V1</button></div>
+							<small>On the V1, open <strong>Tape Deck → Pads → Kits → Load drum kit</strong>. This creates a kit, not a saved sequence.</small>
+						</div>
+						<div class="card remote-card">
+							<h2>Playlist editor</h2>
+							<p>Edit one track path per line. Use paths relative to the card root, such as <code>Music/Album/Track.flac</code>. Saving creates a new import file, not an edit to the V1 library database.</p>
+							<div class="remote-actions">
+								<label>Open local playlist <input id="remote-playlist-file" type="file" accept=".m3u,.m3u8"></label>
+								<button type="button" id="remote-playlist-list" class="btn btn-ghost btn-sm" data-needs-usb disabled>List V1 playlists &amp; backups</button>
+								<select id="remote-playlist-select" aria-label="V1 playlist file" data-needs-usb disabled><option value="">Choose a playlist file</option></select>
+								<button type="button" id="remote-playlist-load" class="btn btn-ghost btn-sm" data-needs-usb disabled>Open V1 playlist file</button>
+							</div>
+							<label>Playlist contents <textarea id="remote-playlist" rows="7" spellcheck="false" placeholder="Music/Album/Track.flac" maxlength="262144"></textarea></label>
+							<label>New playlist name <input id="remote-playlist-name" type="text" maxlength="48" value="Browser Playlist"></label>
+							<div class="remote-actions">
+								<button type="button" id="remote-playlist-export" class="btn btn-ghost btn-sm">Export M3U</button>
+								<button type="button" id="remote-playlist-save" class="btn btn-primary btn-sm" data-needs-usb disabled>Save new import file to V1</button>
+							</div>
+							<small>Use <strong>Playlists → Backup</strong> on the V1 to expose an existing library playlist, or <strong>Import</strong> to add a saved file to your library.</small>
+						</div>
+					</div>
+
 					<!-- Tab 3: Keyboard Shortcuts & Tips -->
 					<div class="tab-content" id="tab-shortcuts">
 						<div class="card">
@@ -612,6 +678,10 @@
 				<span class="mobile-nav-icon" aria-hidden="true">&#x25A4;</span>
 				<span class="mobile-nav-label">microSD</span>
 			</button>
+			<button type="button" class="mobile-nav-btn" data-mobile-nav="remote">
+				<span class="mobile-nav-icon" aria-hidden="true">&#x21C4;</span>
+				<span class="mobile-nav-label">USB</span>
+			</button>
 			<button type="button" class="mobile-nav-btn" data-mobile-nav="logs">
 				<span class="mobile-nav-icon" aria-hidden="true">&gt;_</span>
 				<span class="mobile-nav-label">Logs</span>
@@ -642,5 +712,6 @@
 	<div class="toast-stack" id="toast-stack" aria-live="polite"></div>
 
 	<script type="module" src="app.js"></script>
+	<script type="module" src="remote-ui.js"></script>
 </body>
 </html>

@@ -67,3 +67,7 @@ sonix-player/tests/.build/
 sonix-player/tests/__pycache__/
 sonix-player/tools/__pycache__/
 sonix-player/web/build/
+
+# Generated browser USB transport
+tools/v1-emulator/remote/node_modules/
+tools/v1-emulator/public/remote-usb.bundle.js

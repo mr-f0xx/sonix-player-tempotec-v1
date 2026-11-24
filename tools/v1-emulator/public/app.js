@@ -1294,7 +1294,7 @@ function setMobileView(view) {
 	document.querySelectorAll("[data-mobile-nav]").forEach((b) => {
 		b.classList.toggle("active", b.dataset.mobileNav === view);
 	});
-	if (view === "builds" || view === "hardware" || view === "sd") {
+	if (view === "builds" || view === "hardware" || view === "sd" || view === "remote") {
 		activateTab(view, false);
 	}
 	if (view === "device" && activeScaleMode === "fit") {
@@ -1599,7 +1599,7 @@ function activateTab(target, syncMobile = true) {
 	document.querySelectorAll(".tab-content").forEach((pane) => {
 		pane.classList.toggle("active", pane.id === `tab-${target}`);
 	});
-	if (syncMobile && isMobileViewport() && (target === "builds" || target === "hardware" || target === "sd")) {
+	if (syncMobile && isMobileViewport() && (target === "builds" || target === "hardware" || target === "sd" || target === "remote")) {
 		document.body.dataset.mobileView = target;
 		document.querySelectorAll("[data-mobile-nav]").forEach((b) => {
 			b.classList.toggle("active", b.dataset.mobileNav === target);
