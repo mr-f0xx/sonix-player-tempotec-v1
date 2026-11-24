@@ -719,7 +719,11 @@ static void delete_done_cb(void *user) {
 		status = vault_session_save(session);
 	}
 	if (status != VAULT_OK) {
-		vault_session_add(session, title, secret, NULL);
+		size_t restored = 0;
+		vault_session_add(session, title, secret, &restored);
+		// The entry has moved to the end; the editor must follow it, or the
+		// next check would update whichever entry now holds the old index.
+		edit_index = (int)restored;
 		free(title);
 		free(secret);
 		toast_error(tr("vault_cannot_save"));
