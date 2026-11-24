@@ -226,3 +226,91 @@ bool tape_wav_sample(int fd, const tape_wav_t *wav, tape_wav_cache_t *cache, uin
 	*right = wav->channels == 2 ? interpolation(a + bytes, b + bytes, bytes, frac) : *left;
 	return true;
 }
+
+// 2^(n/12) in Q16, for n = -24..+24. A table keeps the audio worker and the
+// kit/sequence loaders free of floating point and gives exact unison, octave
+// and double-octave ratios.
+static const uint32_t pitch_q16[49] = {
+	16384u, 17358u, 18390u, 19484u, 20643u, 21870u, 23170u, 24548u,
+	26008u, 27554u, 29193u, 30929u, 32768u, 34716u, 36781u, 38968u,
+	41285u, 43740u, 46341u, 49097u, 52016u, 55109u, 58386u, 61858u,
+	65536u, 69433u, 73562u, 77936u, 82570u, 87480u, 92682u, 98193u,
+	104032u, 110218u, 116772u, 123715u, 131072u, 138866u, 147123u, 155872u,
+	165140u, 174960u, 185364u, 196386u, 208064u, 220436u, 233544u, 247431u,
+	262144u,
+};
+
+uint32_t tape_pitch_q16(int semitones) {
+	if (semitones < -24) semitones = -24;
+	if (semitones > 24) semitones = 24;
+	return pitch_q16[semitones + 24];
+}
+
+// Catmull-Rom coefficients: 1/2 * (c0 + c1*t + c2*t² + c3*t³). All products
+// are staged in Q16 so the largest intermediate stays well inside int64_t.
+int32_t tape_interpolate(int32_t p0, int32_t p1, int32_t p2, int32_t p3,
+	uint16_t frac, tape_interp_t mode) {
+	if (mode == TAPE_INTERP_LINEAR) {
+		// The legacy sampler quantizes the Q16 position to 8 fractional bits.
+		return p1 + (p2 - p1) * (int32_t)(frac >> 8) / 256;
+	}
+	int64_t t = frac;
+	int64_t t2 = t * t >> 16;
+	int64_t t3 = t2 * t >> 16;
+	int64_t c0 = 2 * (int64_t)p1;
+	int64_t c1 = -(int64_t)p0 + p2;
+	int64_t c2 = 2 * (int64_t)p0 - 5 * (int64_t)p1 + 4 * (int64_t)p2 - p3;
+	int64_t c3 = -(int64_t)p0 + 3 * (int64_t)p1 - 3 * (int64_t)p2 + p3;
+	int64_t sum = c0 * 65536 + c1 * t + c2 * t2 + c3 * t3;
+	int64_t value = sum / (2 * 65536); // sum is Q16 of twice the sample
+	if (value < -32768) value = -32768; // cubic overshoot at sharp transients
+	if (value > 32767) value = 32767;
+	return (int32_t)value;
+}
+
+static void decoded_frame(const uint8_t *p, unsigned bytes, unsigned channels, int *left, int *right) {
+	*left = sample_s16(p, bytes);
+	*right = channels == 2 ? sample_s16(p + bytes, bytes) : *left;
+}
+
+bool tape_wav_resample(int fd, const tape_wav_t *wav, tape_wav_resample_cache_t *cache,
+	uint64_t pos, uint32_t end, tape_interp_t mode, int *left, int *right) {
+	if (!wav || !cache || !left || !right || !wav->frames) return false;
+	if (!end || end > wav->frames) end = wav->frames;
+	uint64_t frame64 = pos >> 16;
+	if (frame64 >= end) return false;
+	uint32_t frame = (uint32_t)frame64, last = end - 1;
+	uint32_t next = frame < UINT32_MAX ? frame + 1 : frame;
+	uint32_t after = frame < UINT32_MAX - 1 ? frame + 2 : frame;
+	uint32_t frames[4] = {frame ? frame - 1 : 0, frame, next, after};
+	if (frames[2] > last) frames[2] = last;
+	if (frames[3] > last) frames[3] = last;
+	unsigned stride = wav->channels * wav->bytes_per_sample;
+	if (frames[0] < cache->at || frames[3] >= cache->at + cache->count) {
+		uint32_t block = frame / TAPE_WAV_CACHE_FRAMES * TAPE_WAV_CACHE_FRAMES;
+		uint32_t at = block ? block - 1 : 0;
+		uint32_t count = end - at;
+		if (count > TAPE_WAV_CACHE_FRAMES + 3) count = TAPE_WAV_CACHE_FRAMES + 3;
+		if (!read_at(fd, cache->data, (size_t)count * stride,
+			wav->offset + (off_t)at * stride)) {
+			cache->count = 0;
+			return false;
+		}
+		cache->at = at;
+		cache->count = count;
+	}
+	int l[4], r[4];
+	for (unsigned i = 0; i < 4; i++) {
+		uint32_t at = frames[i];
+		if (at < cache->at || at >= cache->at + cache->count) {
+			cache->count = 0;
+			return false;
+		}
+		decoded_frame(cache->data + (at - cache->at) * stride,
+			wav->bytes_per_sample, wav->channels, &l[i], &r[i]);
+	}
+	uint16_t frac = (uint16_t)(pos & 0xffffu);
+	*left = tape_interpolate(l[0], l[1], l[2], l[3], frac, mode);
+	*right = wav->channels == 2 ? tape_interpolate(r[0], r[1], r[2], r[3], frac, mode) : *left;
+	return true;
+}

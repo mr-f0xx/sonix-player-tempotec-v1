@@ -359,9 +359,11 @@ a self-signed certificate), and HLS.
   indicator and voice memos saved as mono WAVs in `Recordings/` on the microSD.
   A capture-capable ALSA input is required; the headset remote ADC is not a
   microphone. The 16-pad sampler can play the factory drums without a mic or
-  card, import drums and long vocal WAVs, and overdub a 16-step loop. Save and
-  reopen editable sequences, toggle filter/echo/drive during playback, and
-  record the wet stereo mix directly to microSD. See the
+  card, import drums and long vocal WAVs, and overdub a 16-step loop. Trim or
+  slice WAVs across pads, play one sample chromatically in 16 Levels with
+  linear/cubic resampling, and use one-way choke groups for open/closed hats.
+  Save and reopen editable sequences, toggle filter/echo/drive during playback,
+  and record the wet stereo mix directly to microSD. See the
   [Tape Deck guide](docs/tape-deck.md) for setup.
 
 - **Pet** - a small creature fed by the music it can actually be heard by: a

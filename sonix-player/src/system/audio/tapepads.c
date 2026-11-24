@@ -29,7 +29,7 @@ static pthread_t worker;
 static bool joinable, accepting;
 static unsigned pending;
 static int job_card = -1;
-static atomic_int state, step = -1, tempo = 120;
+static atomic_int state, step = -1, tempo = 120, resample_mode = TAPE_INTERP_LINEAR;
 static atomic_uint sounding, revision, effects, playable = (1u << TAPE_PAD_COUNT) - 1;
 static atomic_bool stop_requested, looping, overdub, needs_card;
 static const char output_owner;
@@ -37,7 +37,13 @@ static const char output_owner;
 typedef struct {
 	tape_pad_kind_t kind;
 	int preset; // zero means the pad's default; otherwise preset index + 1
-	bool long_clip;
+	bool long_clip, levels;
+	uint32_t frames, rate; // complete source WAV, used to validate markers
+	uint32_t trim_start, trim_end; // source frames; trim_end == 0 means full
+	uint32_t pitch_q16; // zero on untouched factory pads means unity
+	int semitone;
+	int8_t choke; // positive cuts, negative is cut, zero is independent
+	uint8_t interpolation;
 	char path[TAPE_PATH_SIZE];
 } pad_slot_t;
 static pad_slot_t slots[TAPE_PAD_COUNT]; // frozen until the worker is joined
@@ -66,6 +72,49 @@ void tapepads_finish(void) {
 
 static int preset_of(const pad_slot_t *slot, int pad) { return slot->preset ? slot->preset - 1 : pad; }
 
+static uint32_t slot_pitch(const pad_slot_t *slot) {
+	return slot->pitch_q16 ? slot->pitch_q16 : TAPE_PITCH_UNITY;
+}
+
+static tape_interp_t slot_interp(const pad_slot_t *slot) {
+	return slot->interpolation == TAPE_INTERP_CUBIC ? TAPE_INTERP_CUBIC : TAPE_INTERP_LINEAR;
+}
+
+static uint32_t slot_end(const pad_slot_t *slot) {
+	return slot->trim_end ? slot->trim_end : slot->frames;
+}
+
+static bool trimmed(const pad_slot_t *slot) {
+	return slot->kind == TAPE_PAD_WAV && (slot->trim_start || (slot->trim_end && slot->trim_end < slot->frames));
+}
+
+// A trimmed region of a long file becomes a normal one-shot, and pitching the
+// sample changes how long it takes to play. The sequencer uses this decision,
+// not the length of the entire WAV on the card.
+static void update_long_clip(pad_slot_t *slot) {
+	if (slot->kind != TAPE_PAD_WAV || !slot->frames || !slot->rate) {
+		slot->long_clip = false;
+		return;
+	}
+	uint32_t end = slot_end(slot);
+	if (end > slot->frames) end = slot->frames;
+	uint64_t length = end > slot->trim_start ? end - slot->trim_start : 0;
+	uint64_t denom = (uint64_t)slot->rate * slot_pitch(slot);
+	uint64_t played = denom ? ((length * (uint64_t)TAPE_PAD_RATE * TAPE_PITCH_UNITY) + denom / 2) / denom : 0;
+	slot->long_clip = played > (uint64_t)TAPE_PAD_RATE * TAPE_SHORT_CLIP_SECONDS;
+}
+
+static pad_slot_t factory_slot(int pad, int preset) {
+	(void)pad;
+	return (pad_slot_t){.kind = preset < 0 ? TAPE_PAD_EMPTY : TAPE_PAD_FACTORY,
+		.preset = preset + 1, .pitch_q16 = TAPE_PITCH_UNITY,
+		.interpolation = (uint8_t)resample_mode};
+}
+
+static void reset_factory(pad_slot_t *dst, int count) {
+	for (int p = 0; p < count; p++) dst[p] = factory_slot(p, p);
+}
+
 static void publish_slots(void) {
 	unsigned mask = 0;
 	bool wavs = false;
@@ -82,7 +131,7 @@ static void publish_slots(void) {
 void tapepads_factory(void) {
 	pthread_mutex_lock(&worker_lock);
 	finish_locked();
-	memset(slots, 0, sizeof(slots));
+	reset_factory(slots, TAPE_PAD_COUNT);
 	publish_slots();
 	pthread_mutex_unlock(&worker_lock);
 }
@@ -91,7 +140,7 @@ void tapepads_release_card(void) {
 	pthread_mutex_lock(&worker_lock);
 	if (needs_card) {
 		finish_locked(); // every sample and the anchored directory close before unmount
-		memset(slots, 0, sizeof(slots));
+		reset_factory(slots, TAPE_PAD_COUNT);
 		publish_slots();
 	} else {
 		// A factory-only performance has no sample fds, but the take is
@@ -105,7 +154,9 @@ void tapepads_set_preset(int pad, int preset) {
 	if (pad < 0 || pad >= TAPE_PAD_COUNT || preset < -1 || preset >= TAPE_PAD_COUNT) return;
 	pthread_mutex_lock(&worker_lock);
 	finish_locked();
-	slots[pad] = (pad_slot_t){.kind = preset < 0 ? TAPE_PAD_EMPTY : TAPE_PAD_FACTORY, .preset = preset + 1};
+	int8_t choke = slots[pad].choke; // editing the sound keeps the performance routing
+	slots[pad] = factory_slot(pad, preset);
+	slots[pad].choke = choke;
 	publish_slots();
 	pthread_mutex_unlock(&worker_lock);
 }
@@ -116,7 +167,13 @@ void tapepads_info(tape_pad_info_t out[TAPE_PAD_COUNT]) {
 	pthread_mutex_lock(&worker_lock);
 	for (int p = 0; p < TAPE_PAD_COUNT; p++) {
 		const pad_slot_t *s = &slots[p];
-		out[p] = (tape_pad_info_t){.kind = s->kind, .preset = preset_of(s, p), .long_clip = s->long_clip};
+		out[p] = (tape_pad_info_t){
+			.kind = s->kind, .preset = preset_of(s, p), .long_clip = s->long_clip,
+			.frames = s->frames, .rate = s->rate, .trim_start = s->trim_start,
+			.trim_end = slot_end(s), .pitch_q16 = slot_pitch(s), .semitone = s->semitone,
+			.choke = s->choke, .interpolation = slot_interp(s), .levels = s->levels,
+			.trimmed = trimmed(s),
+		};
 		if (s->kind == TAPE_PAD_WAV) {
 			const char *base = strrchr(s->path, '/');
 			// Every path component was bounded when the file was opened.
@@ -134,8 +191,11 @@ static bool read_slot(int card, const char *path, pad_slot_t *slot) {
 	bool ok = tape_wav_probe(fd, &wav);
 	close(fd);
 	if (!ok) return false;
-	*slot = (pad_slot_t){.kind = TAPE_PAD_WAV, .long_clip = tape_wav_is_long(&wav)};
+	*slot = (pad_slot_t){.kind = TAPE_PAD_WAV, .frames = wav.frames, .rate = wav.rate,
+		.trim_end = wav.frames, .pitch_q16 = TAPE_PITCH_UNITY,
+		.interpolation = (uint8_t)resample_mode};
 	strcpy(slot->path, path); // tape_open_at checked the length
+	update_long_clip(slot);
 	return true;
 }
 
@@ -148,6 +208,7 @@ bool tapepads_assign(int pad, const char *path) {
 	if (ok) {
 		pthread_mutex_lock(&worker_lock);
 		finish_locked();
+		sample.choke = slots[pad].choke; // keep the pad's choke assignment
 		slots[pad] = sample;
 		publish_slots();
 		pthread_mutex_unlock(&worker_lock);
@@ -223,9 +284,14 @@ int tapepads_load_kit(const char *name) {
 
 // Sequence v1: six magic bytes, version/reserved, LE16 BPM, sixteen LE16
 // step masks, then one tag per pad. A WAV tag is followed by its LE16 path
-// length and raw card-relative path (no NUL). No samples or native structs.
-static const uint8_t seq_magic[] = {'S','N','X','S','E','Q',1,0};
-#define SEQ_HEADER (sizeof(seq_magic) + 2 + TAPE_PAD_STEPS * 2)
+// length and raw card-relative path (no NUL). V2 keeps that layout and adds
+// one fixed 16-byte record per pad: trim start/end, Q16 pitch, semitone,
+// choke group, interpolation and level flags. No samples or native structs.
+static const uint8_t seq_prefix[] = {'S','N','X','S','E','Q'};
+#define SEQ_V1 1
+#define SEQ_V2 2
+#define SEQ_HEADER (sizeof(seq_prefix) + 2 + 2 + TAPE_PAD_STEPS * 2)
+#define SEQ_META 16
 #define SEQ_EMPTY 16
 #define SEQ_WAV 17
 
@@ -235,6 +301,14 @@ static void put_le16(uint8_t *p, unsigned value) {
 }
 
 static unsigned get_le16(const uint8_t *p) { return (unsigned)p[0] | (unsigned)p[1] << 8; }
+
+static void put_le32(uint8_t *p, uint32_t value) {
+	for (unsigned i = 0; i < 4; i++) p[i] = (uint8_t)(value >> (8 * i));
+}
+
+static uint32_t get_le32(const uint8_t *p) {
+	return (uint32_t)p[0] | (uint32_t)p[1] << 8 | (uint32_t)p[2] << 16 | (uint32_t)p[3] << 24;
+}
 
 static ssize_t seq_read(int fd, void *out, size_t size) {
 	ssize_t n;
@@ -253,17 +327,40 @@ static bool read_exact(int fd, void *out, size_t size) {
 	return true;
 }
 
+static bool seq_has_metadata(const pad_slot_t saved[TAPE_PAD_COUNT]) {
+	for (int p = 0; p < TAPE_PAD_COUNT; p++) {
+		const pad_slot_t *slot = &saved[p];
+		if (slot->choke || slot->interpolation == TAPE_INTERP_CUBIC || slot->levels ||
+			slot->semitone || slot_pitch(slot) != TAPE_PITCH_UNITY || trimmed(slot)) return true;
+	}
+	return false;
+}
+
+static void seq_metadata(uint8_t out[SEQ_META], const pad_slot_t *slot) {
+	memset(out, 0, SEQ_META);
+	put_le32(out, slot->trim_start);
+	put_le32(out + 4, slot_end(slot));
+	put_le32(out + 8, slot_pitch(slot));
+	out[12] = (uint8_t)(int8_t)(slot->semitone < -24 ? -24 : slot->semitone > 24 ? 24 : slot->semitone);
+	out[13] = (uint8_t)slot->choke;
+	out[14] = (uint8_t)slot_interp(slot);
+	out[15] = (uint8_t)(slot->levels && slot->kind == TAPE_PAD_WAV ? 1 : 0);
+}
+
 tape_seq_result_t tapepads_save_sequence(void) {
 	int card = tape_card_begin(true);
 	if (card < 0) return TAPE_SEQ_NO_CARD;
 	uint8_t head[SEQ_HEADER];
-	memcpy(head, seq_magic, sizeof(seq_magic));
+	memcpy(head, seq_prefix, sizeof(seq_prefix));
+	head[sizeof(seq_prefix) + 1] = 0;
 	pad_slot_t saved[TAPE_PAD_COUNT];
 	pthread_mutex_lock(&worker_lock);
 	memcpy(saved, slots, sizeof(saved));
+	bool metadata = seq_has_metadata(saved);
+	head[sizeof(seq_prefix)] = metadata ? SEQ_V2 : SEQ_V1;
 	pthread_mutex_lock(&command_lock);
-	put_le16(head + sizeof(seq_magic), (unsigned)tempo);
-	for (int i = 0; i < TAPE_PAD_STEPS; i++) put_le16(head + sizeof(seq_magic) + 2 + 2 * i, pattern[i]);
+	put_le16(head + sizeof(seq_prefix) + 2, (unsigned)tempo);
+	for (int i = 0; i < TAPE_PAD_STEPS; i++) put_le16(head + sizeof(seq_prefix) + 4 + 2 * i, pattern[i]);
 	pthread_mutex_unlock(&command_lock);
 	pthread_mutex_unlock(&worker_lock);
 
@@ -283,6 +380,13 @@ tape_seq_result_t tapepads_save_sequence(void) {
 				ok = tape_store_write(file.fd, size, sizeof(size)) && tape_store_write(file.fd, slot->path, len);
 			}
 		}
+		if (metadata) {
+			for (int p = 0; p < TAPE_PAD_COUNT && ok; p++) {
+				uint8_t meta[SEQ_META];
+				seq_metadata(meta, &saved[p]);
+				ok = tape_store_write(file.fd, meta, sizeof(meta));
+			}
+		}
 		ok = tape_store_end(&file, ok);
 	}
 	close(card);
@@ -292,15 +396,19 @@ tape_seq_result_t tapepads_save_sequence(void) {
 
 static tape_seq_result_t read_sequence(int card, int fd, int *bpm, unsigned *beats, pad_slot_t *pads) {
 	uint8_t head[SEQ_HEADER];
-	if (!read_exact(fd, head, sizeof(head)) || memcmp(head, seq_magic, sizeof(seq_magic))) return TAPE_SEQ_INVALID;
-	*bpm = (int)get_le16(head + sizeof(seq_magic));
+	if (!read_exact(fd, head, sizeof(head)) || memcmp(head, seq_prefix, sizeof(seq_prefix)) ||
+		head[sizeof(seq_prefix) + 1] || (head[sizeof(seq_prefix)] != SEQ_V1 && head[sizeof(seq_prefix)] != SEQ_V2)) {
+		return TAPE_SEQ_INVALID;
+	}
+	bool v2 = head[sizeof(seq_prefix)] == SEQ_V2;
+	*bpm = (int)get_le16(head + sizeof(seq_prefix) + 2);
 	if (*bpm < TAPE_PAD_MIN_BPM || *bpm > TAPE_PAD_MAX_BPM) return TAPE_SEQ_INVALID;
-	for (int i = 0; i < TAPE_PAD_STEPS; i++) beats[i] = get_le16(head + sizeof(seq_magic) + 2 + 2 * i);
+	for (int i = 0; i < TAPE_PAD_STEPS; i++) beats[i] = get_le16(head + sizeof(seq_prefix) + 4 + 2 * i);
 	for (int p = 0; p < TAPE_PAD_COUNT; p++) {
 		uint8_t tag;
 		if (!read_exact(fd, &tag, 1)) return TAPE_SEQ_INVALID;
-		if (tag < TAPE_PAD_COUNT) pads[p] = (pad_slot_t){.kind = TAPE_PAD_FACTORY, .preset = tag + 1};
-		else if (tag == SEQ_EMPTY) pads[p] = (pad_slot_t){.kind = TAPE_PAD_EMPTY};
+		if (tag < TAPE_PAD_COUNT) pads[p] = factory_slot(p, tag);
+		else if (tag == SEQ_EMPTY) pads[p] = factory_slot(p, -1);
 		else if (tag == SEQ_WAV) {
 			uint8_t size[2];
 			char path[TAPE_PATH_SIZE];
@@ -310,6 +418,28 @@ static tape_seq_result_t read_sequence(int card, int fd, int *bpm, unsigned *bea
 			path[len] = '\0';
 			if (!read_slot(card, path, &pads[p])) return TAPE_SEQ_SAMPLE_MISSING;
 		} else return TAPE_SEQ_INVALID;
+	}
+	if (v2) {
+		for (int p = 0; p < TAPE_PAD_COUNT; p++) {
+			uint8_t meta[SEQ_META];
+			if (!read_exact(fd, meta, sizeof(meta))) return TAPE_SEQ_INVALID;
+			uint32_t start = get_le32(meta), end = get_le32(meta + 4), pitch = get_le32(meta + 8);
+			int semitone = (int8_t)meta[12], choke = (int8_t)meta[13];
+			if (pitch < TAPE_PITCH_MIN || pitch > TAPE_PITCH_MAX || meta[14] > TAPE_INTERP_CUBIC ||
+				choke < -TAPE_CHOKE_MAX || choke > TAPE_CHOKE_MAX || (meta[15] & ~1u)) return TAPE_SEQ_INVALID;
+			pads[p].choke = (int8_t)choke;
+			pads[p].interpolation = meta[14];
+			pads[p].pitch_q16 = pitch;
+			pads[p].semitone = semitone;
+			pads[p].levels = ((meta[15] & 1u) != 0) && pads[p].kind == TAPE_PAD_WAV;
+			if (pads[p].kind != TAPE_PAD_WAV) continue;
+			uint32_t frames = pads[p].frames;
+			if (!end || end > frames) end = frames;
+			if (start >= end) { start = 0; end = frames; }
+			pads[p].trim_start = start;
+			pads[p].trim_end = end;
+			update_long_clip(&pads[p]);
+		}
 	}
 	uint8_t extra;
 	return seq_read(fd, &extra, 1) == 0 ? TAPE_SEQ_OK : TAPE_SEQ_INVALID;
@@ -337,6 +467,212 @@ tape_seq_result_t tapepads_load_sequence(const char *name) {
 	tape_card_end();
 	return result;
 }
+
+static tape_interp_t checked_interp(tape_interp_t interpolation) {
+	return interpolation == TAPE_INTERP_CUBIC ? TAPE_INTERP_CUBIC : TAPE_INTERP_LINEAR;
+}
+
+void tapepads_trim(int pad, uint32_t *start, uint32_t *end) {
+	if (start) *start = 0;
+	if (end) *end = 0;
+	if (pad < 0 || pad >= TAPE_PAD_COUNT) return;
+	pthread_mutex_lock(&worker_lock);
+	if (slots[pad].kind == TAPE_PAD_WAV) {
+		if (start) *start = slots[pad].trim_start;
+		if (end) *end = slot_end(&slots[pad]);
+	}
+	pthread_mutex_unlock(&worker_lock);
+}
+
+bool tapepads_set_trim(int pad, uint32_t start, uint32_t end) {
+	if (pad < 0 || pad >= TAPE_PAD_COUNT) return false;
+	pthread_mutex_lock(&worker_lock);
+	pad_slot_t *slot = &slots[pad];
+	if (slot->kind != TAPE_PAD_WAV || !slot->frames) {
+		pthread_mutex_unlock(&worker_lock);
+		return false;
+	}
+	finish_locked();
+	uint32_t frames = slot->frames;
+	if (!end || end > frames) end = frames;
+	if (start >= frames) start = frames - 1;
+	if (start >= end) {
+		if (end > 1) start = end - 1;
+		else { start = 0; end = 1; }
+	}
+	slot->trim_start = start;
+	slot->trim_end = end;
+	update_long_clip(slot);
+	publish_slots();
+	pthread_mutex_unlock(&worker_lock);
+	return true;
+}
+
+bool tapepads_set_trim_ms(int pad, unsigned start_ms, unsigned end_ms) {
+	if (pad < 0 || pad >= TAPE_PAD_COUNT) return false;
+	pthread_mutex_lock(&worker_lock);
+	uint32_t rate = slots[pad].rate;
+	pthread_mutex_unlock(&worker_lock);
+	if (!rate) return false;
+	uint64_t start = (uint64_t)start_ms * rate / 1000;
+	uint64_t end = end_ms ? (uint64_t)end_ms * rate / 1000 : 0;
+	if (start > UINT32_MAX) start = UINT32_MAX;
+	if (end > UINT32_MAX) end = UINT32_MAX;
+	return tapepads_set_trim(pad, (uint32_t)start, (uint32_t)end);
+}
+
+bool tapepads_set_pitch(int pad, int semitones) {
+	if (pad < 0 || pad >= TAPE_PAD_COUNT) return false;
+	pthread_mutex_lock(&worker_lock);
+	pad_slot_t *slot = &slots[pad];
+	if (slot->kind == TAPE_PAD_EMPTY) {
+		pthread_mutex_unlock(&worker_lock);
+		return false;
+	}
+	finish_locked();
+	if (semitones < -24) semitones = -24;
+	if (semitones > 24) semitones = 24;
+	slot->semitone = semitones;
+	slot->pitch_q16 = tape_pitch_q16(semitones);
+	update_long_clip(slot);
+	publish_slots();
+	pthread_mutex_unlock(&worker_lock);
+	return true;
+}
+
+void tapepads_set_interpolation(tape_interp_t interpolation) {
+	tape_interp_t mode = checked_interp(interpolation);
+	resample_mode = mode;
+	pthread_mutex_lock(&worker_lock);
+	finish_locked();
+	for (int p = 0; p < TAPE_PAD_COUNT; p++) {
+		if (slots[p].kind != TAPE_PAD_EMPTY) slots[p].interpolation = (uint8_t)mode;
+	}
+	publish_slots();
+	pthread_mutex_unlock(&worker_lock);
+}
+
+tape_interp_t tapepads_interpolation(void) { return checked_interp((tape_interp_t)resample_mode); }
+
+bool tapepads_slice(const char *path, int slices, tape_interp_t interpolation) {
+	if (!path) return false;
+	if (slices == 0) slices = TAPE_PAD_COUNT;
+	if (slices < 1 || slices > TAPE_PAD_COUNT) return false;
+	tape_interp_t mode = checked_interp(interpolation);
+	resample_mode = mode;
+	int card = tape_card_begin(false);
+	if (card < 0) return false;
+	pad_slot_t sample;
+	bool ok = read_slot(card, path, &sample);
+	if (ok) {
+		pthread_mutex_lock(&worker_lock);
+		finish_locked();
+		for (int p = 0; p < TAPE_PAD_COUNT; p++) {
+			if (p >= slices) {
+				slots[p] = factory_slot(p, -1);
+				continue;
+			}
+			slots[p] = sample;
+			slots[p].trim_start = (uint32_t)((uint64_t)sample.frames * (unsigned)p / (unsigned)slices);
+			slots[p].trim_end = (uint32_t)((uint64_t)sample.frames * (unsigned)(p + 1) / (unsigned)slices);
+			slots[p].interpolation = (uint8_t)mode;
+			slots[p].levels = false;
+			slots[p].choke = 0;
+			if (slots[p].trim_end <= slots[p].trim_start) {
+				slots[p].trim_end = slots[p].trim_start + 1;
+				if (slots[p].trim_end > sample.frames) {
+					slots[p].trim_end = sample.frames;
+					slots[p].trim_start = sample.frames - 1;
+				}
+			}
+			update_long_clip(&slots[p]);
+		}
+		publish_slots();
+		pthread_mutex_unlock(&worker_lock);
+	}
+	close(card);
+	tape_card_end();
+	return ok;
+}
+
+bool tapepads_set_levels(const char *path, int root_pad, int semitone_step, tape_interp_t interpolation) {
+	if (!path) return false;
+	if (root_pad < 0) root_pad = TAPE_LEVELS_ROOT;
+	if (root_pad >= TAPE_PAD_COUNT) root_pad = TAPE_PAD_COUNT - 1;
+	if (semitone_step < 1) semitone_step = 1;
+	if (semitone_step > 4) semitone_step = 4;
+	tape_interp_t mode = checked_interp(interpolation);
+	resample_mode = mode;
+	int card = tape_card_begin(false);
+	if (card < 0) return false;
+	pad_slot_t sample;
+	bool ok = read_slot(card, path, &sample);
+	if (ok) {
+		pthread_mutex_lock(&worker_lock);
+		finish_locked();
+		for (int p = 0; p < TAPE_PAD_COUNT; p++) {
+			slots[p] = sample;
+			int semitones = (p - root_pad) * semitone_step;
+			if (semitones < -24) semitones = -24;
+			if (semitones > 24) semitones = 24;
+			slots[p].semitone = semitones;
+			slots[p].pitch_q16 = tape_pitch_q16(semitones);
+			slots[p].interpolation = (uint8_t)mode;
+			slots[p].levels = true;
+			slots[p].choke = 0;
+			update_long_clip(&slots[p]);
+		}
+		publish_slots();
+		pthread_mutex_unlock(&worker_lock);
+	}
+	close(card);
+	tape_card_end();
+	return ok;
+}
+
+bool tapepads_levels(const char *path, tape_levels_mode_t mode, tape_interp_t interpolation) {
+	int step = mode == TAPE_LEVELS_SPREAD ? 2 : 1;
+	return tapepads_set_levels(path, TAPE_LEVELS_ROOT, step, interpolation);
+}
+
+bool tapepads_enable_levels(const char *path, int root_pad, tape_interp_t interpolation) {
+	return tapepads_set_levels(path, root_pad, 1, interpolation);
+}
+
+bool tapepads_set_16levels(const char *path, int root_pad, tape_interp_t interpolation) {
+	return tapepads_set_levels(path, root_pad, 1, interpolation);
+}
+
+bool tapepads_levels_active(void) {
+	pthread_mutex_lock(&worker_lock);
+	bool active = true;
+	for (int p = 0; p < TAPE_PAD_COUNT && active; p++) {
+		active = slots[p].kind == TAPE_PAD_WAV && slots[p].levels;
+	}
+	pthread_mutex_unlock(&worker_lock);
+	return active;
+}
+
+bool tapepads_set_choke_group(int pad, int group) {
+	if (pad < 0 || pad >= TAPE_PAD_COUNT || group < -TAPE_CHOKE_MAX || group > TAPE_CHOKE_MAX) return false;
+	pthread_mutex_lock(&worker_lock);
+	finish_locked();
+	slots[pad].choke = (int8_t)group;
+	publish_slots();
+	pthread_mutex_unlock(&worker_lock);
+	return true;
+}
+
+int tapepads_choke_group(int pad) {
+	if (pad < 0 || pad >= TAPE_PAD_COUNT) return 0;
+	pthread_mutex_lock(&worker_lock);
+	int group = slots[pad].choke;
+	pthread_mutex_unlock(&worker_lock);
+	return group;
+}
+
+bool tapepads_set_choke(int pad, int group) { return tapepads_set_choke_group(pad, group); }
+int tapepads_choke(int pad) { return tapepads_choke_group(pad); }
 
 typedef struct { unsigned frames; int16_t pcm[DRUM_FRAMES]; } drum_t;
 // Only touched by the audio worker. Lazily render each factory sound once, so
@@ -389,11 +725,13 @@ static const drum_t *factory_drum(int preset) {
 
 typedef struct {
 	const drum_t *drum;
-	tape_wav_cache_t *cache;
+	tape_wav_resample_cache_t *cache;
 	tape_wav_t wav;
 	int fd;
 	uint32_t advance;
+	uint32_t start, end, drum_end;
 	uint64_t pos;
+	tape_interp_t interpolation;
 	bool on;
 } voice_t;
 
@@ -401,11 +739,63 @@ static bool open_sample(voice_t *voice, const pad_slot_t *slot) {
 	voice->fd = tape_open_at(job_card, slot->path, false);
 	if (voice->fd < 0 || !tape_wav_probe(voice->fd, &voice->wav)) return false;
 	voice->cache = calloc(1, sizeof(*voice->cache));
-	voice->advance = (uint32_t)((((uint64_t)voice->wav.rate << 16) + TAPE_PAD_RATE / 2) / TAPE_PAD_RATE);
-	return voice->cache != NULL;
+	if (!voice->cache) return false;
+	uint32_t pitch = slot_pitch(slot);
+	voice->advance = (uint32_t)(((uint64_t)voice->wav.rate * pitch + TAPE_PAD_RATE / 2) / TAPE_PAD_RATE);
+	if (!voice->advance) voice->advance = 1;
+	voice->interpolation = slot_interp(slot);
+	voice->start = slot->trim_start;
+	voice->end = slot_end(slot);
+	if (!voice->end || voice->end > voice->wav.frames) voice->end = voice->wav.frames;
+	if (voice->start >= voice->end) { voice->start = 0; voice->end = voice->wav.frames; }
+	voice->drum = NULL;
+	return true;
 }
 
-static bool trigger(voice_t voices[TAPE_PAD_COUNT], unsigned mask, bool manual, unsigned *recordable) {
+static unsigned choke_groups(unsigned mask) {
+	unsigned groups = 0;
+	for (int p = 0; p < TAPE_PAD_COUNT; p++) {
+		if ((mask & (1u << p)) && slots[p].choke > 0) groups |= 1u << (slots[p].choke - 1);
+	}
+	return groups;
+}
+
+// A positive group is a cutter (closed hi-hat). Negative pads are receivers
+// (open hi-hat): triggering one never cuts the cutter, so the choke is one-way.
+// `extra` carries cutters from manual taps earlier in the same mix block, and
+// `protected_hits` keeps those newly started cutters from being cut again.
+// When a step contains both, cutters win; if several cutters share a group,
+// the highest-numbered pad in that trigger is the one that remains.
+static unsigned prepare_trigger(voice_t voices[TAPE_PAD_COUNT], unsigned mask,
+	unsigned extra, unsigned protected_hits) {
+	unsigned groups = choke_groups(mask) | extra;
+	if (!groups) return mask;
+	for (int p = 0; p < TAPE_PAD_COUNT; p++) {
+		if (protected_hits & (1u << p)) continue;
+		int group = slots[p].choke;
+		if (group < 0) group = -group;
+		if (group && (groups & (1u << (group - 1)))) voices[p].on = false;
+	}
+	unsigned allowed = mask;
+	for (int p = 0; p < TAPE_PAD_COUNT; p++) {
+		if (!(mask & (1u << p))) continue;
+		int group = slots[p].choke;
+		if (group < 0) {
+			if (groups & (1u << (-group - 1))) allowed &= ~(1u << p);
+		} else if (group > 0) {
+			bool cut = (extra & (1u << (group - 1))) != 0;
+			for (int q = p + 1; q < TAPE_PAD_COUNT && !cut; q++) {
+				if ((mask & (1u << q)) && slots[q].choke == group) cut = true;
+			}
+			if (cut) allowed &= ~(1u << p);
+		}
+	}
+	return allowed;
+}
+
+static bool trigger(voice_t voices[TAPE_PAD_COUNT], unsigned hits, bool manual,
+	unsigned *recordable, unsigned extra, unsigned protected_hits) {
+	unsigned mask = prepare_trigger(voices, hits, extra, protected_hits);
 	for (int p = 0; p < TAPE_PAD_COUNT; p++) {
 		if (!(mask & (1u << p))) continue;
 		voice_t *v = &voices[p];
@@ -414,19 +804,27 @@ static bool trigger(voice_t voices[TAPE_PAD_COUNT], unsigned mask, bool manual, 
 		if (s->kind == TAPE_PAD_WAV) {
 			if (!manual && s->long_clip) continue; // a backing track is not a drum hit
 			if (v->fd < 0 && !open_sample(v, s)) return false;
-			if (tape_wav_is_long(&v->wav)) {
+			if (s->long_clip) {
 				if (!manual) continue;
 				bool want = !v->on;
 				for (int k = 0; k < TAPE_PAD_COUNT; k++) {
-					if (voices[k].fd >= 0 && tape_wav_is_long(&voices[k].wav)) voices[k].on = false;
+					if (voices[k].fd >= 0 && slots[k].long_clip) voices[k].on = false;
 				}
 				if (!want) continue;
 			} else if (recordable) *recordable |= 1u << p;
+			v->drum = NULL;
+			v->interpolation = slot_interp(s);
+			v->pos = (uint64_t)v->start << 16;
 		} else {
 			v->drum = factory_drum(preset_of(s, p));
+			v->advance = slot_pitch(s);
+			v->interpolation = slot_interp(s);
+			v->drum_end = s->trim_end && s->trim_end < v->drum->frames ? s->trim_end : v->drum->frames;
+			v->start = s->trim_start;
+			if (v->start >= v->drum_end) { v->start = 0; v->drum_end = v->drum->frames; }
+			v->pos = (uint64_t)v->start << 16;
 			if (recordable) *recordable |= 1u << p;
 		}
-		v->pos = 0;
 		v->on = true;
 	}
 	return true;
@@ -439,12 +837,23 @@ static bool mix(voice_t voices[TAPE_PAD_COUNT], int32_t *sum, unsigned frames) {
 		for (unsigned i = 0; i < frames; i++) {
 			int left, right;
 			if (v->drum) {
-				left = right = v->drum->pcm[v->pos++];
-				v->on = v->pos < v->drum->frames;
-			} else {
-				if (!tape_wav_sample(v->fd, &v->wav, v->cache, v->pos, &left, &right)) return false;
+				uint64_t end = (uint64_t)v->drum_end << 16;
+				uint32_t frame = (uint32_t)(v->pos >> 16), last = v->drum_end - 1;
+				uint32_t at[4] = {frame ? frame - 1 : 0, frame,
+					frame < last ? frame + 1 : last, frame + 1 < last ? frame + 2 : last};
+				if (at[0] > last) at[0] = last;
+				if (at[1] > last) at[1] = last;
+				int32_t p[4] = {v->drum->pcm[at[0]], v->drum->pcm[at[1]],
+					v->drum->pcm[at[2]], v->drum->pcm[at[3]]};
+				left = right = tape_interpolate(p[0], p[1], p[2], p[3],
+					(uint16_t)(v->pos & 0xffffu), v->interpolation);
 				v->pos += v->advance;
-				v->on = (v->pos >> 16) < v->wav.frames;
+				v->on = v->pos < end;
+			} else {
+				if (!tape_wav_resample(v->fd, &v->wav, v->cache, v->pos, v->end,
+					v->interpolation, &left, &right)) return false;
+				v->pos += v->advance;
+				v->on = v->pos < ((uint64_t)v->end << 16);
 				// Leave a little room for drums over a full-scale vocal.
 				left = left * 3 / 4;
 				right = right * 3 / 4;
@@ -567,8 +976,8 @@ static void *pads_main(void *unused) {
 		if (loop && !was_looping) { phase = STEP_PHASE; current = TAPE_PAD_STEPS - 1; }
 		if (!loop && was_looping) step = -1;
 		was_looping = loop;
-		unsigned performed = 0;
-		if (!trigger(voices, hits, true, &performed)) goto bad_sample;
+		unsigned performed = 0, manual_groups = choke_groups(hits);
+		if (!trigger(voices, hits, true, &performed, 0, 0)) goto bad_sample;
 		if (loop && dub && performed) {
 			unsigned at = phase >= STEP_PHASE ? (current + 1) % TAPE_PAD_STEPS : current;
 			pthread_mutex_lock(&command_lock);
@@ -585,7 +994,8 @@ static void *pads_main(void *unused) {
 					phase -= STEP_PHASE;
 					current = (current + 1) % TAPE_PAD_STEPS;
 					step = current;
-					if (!trigger(voices, pattern[current] & ~(at == 0 ? hits : 0u), false, NULL)) goto bad_sample;
+					if (!trigger(voices, pattern[current] & ~(at == 0 ? hits : 0u), false, NULL,
+						manual_groups, hits)) goto bad_sample;
 				}
 				unsigned left = (STEP_PHASE - phase + advance - 1) / advance;
 				if (n > left) n = left;
