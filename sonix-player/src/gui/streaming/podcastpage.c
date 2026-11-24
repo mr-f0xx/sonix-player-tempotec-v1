@@ -189,6 +189,7 @@ static bool refresh_notes(void);
 static void refresh_corner_buttons(void);
 static bool network_up(void);
 static void paint_pill(lv_obj_t *btn, bool on);
+static void row_pressed_cb(lv_event_t *e);
 static void row_clicked_cb(lv_event_t *e);
 static bool job_is_list(job_kind_t kind);
 static void list_nav_drop(void);
