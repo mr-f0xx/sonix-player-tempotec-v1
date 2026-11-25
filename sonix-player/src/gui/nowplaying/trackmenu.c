@@ -9,6 +9,7 @@
 #include "src/gui/board_profile.h"
 #include "src/gui/fonts/fonts.h"
 #include "src/gui/shell/icons.h"
+#include "src/gui/library/explicitmark.h"
 #include "src/gui/library/geniusui.h"
 #include "src/gui/library/medialist.h"
 #include "src/gui/nowplaying/player.h"
@@ -263,6 +264,7 @@ static void queue_row_bind(queue_row_t *row, int index) {
 	}
 
 	char title[256];
+	bool marked = library_track_explicit(path);
 	if (!library_track_title(path, title, sizeof(title))) {
 		// Not in the library: it may be a Qobuz track, which is kept out of the
 		// library on purpose. The title is still there, in the sidecar file next
@@ -270,6 +272,7 @@ static void queue_row_bind(queue_row_t *row, int index) {
 		// were the file names.
 		song_metadata_t meta;
 		metadata_read(path, &meta);
+		marked = meta.is_explicit;
 		if (meta.title[0]) {
 			snprintf(title, sizeof(title), "%.250s", meta.title);
 		} else {
@@ -284,7 +287,9 @@ static void queue_row_bind(queue_row_t *row, int index) {
 
 	lv_obj_set_hidden(row->button, false);
 	lv_obj_set_y(row->button, index * QUEUE_ROW_PITCH);
-	lv_label_set_text(row->label, title);
+	char decorated[sizeof(title) + sizeof(EXPLICIT_MARK)];
+	explicit_decorate(decorated, sizeof(decorated), title, marked);
+	lv_label_set_text(row->label, decorated);
 
 	queue_row_paint_mark(row);
 }

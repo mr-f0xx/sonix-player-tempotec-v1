@@ -9,6 +9,7 @@
 
 #include "src/gui/library/browser.h"
 #include "src/gui/library/audiobookextras.h"
+#include "src/gui/library/explicitmark.h"
 #include "src/gui/nowplaying/chapters.h"
 #include "src/gui/nowplaying/aamlayout.h"
 #include "src/gui/nowplaying/cover.h"
@@ -5516,7 +5517,9 @@ static void refresh_now_playing(void) {
 	if (state.live) {
 		// The station on top, what it says is on air underneath -- the same
 		// two lines as a track, carrying the two things a radio knows.
-		scrolltext_set(song_title_label, state.metadata.title);
+		char shown[sizeof(state.metadata.title) + sizeof(EXPLICIT_MARK)];
+		explicit_decorate(shown, sizeof(shown), state.metadata.title, state.metadata.is_explicit);
+		scrolltext_set(song_title_label, shown);
 		scrolltext_set(song_artist_label, state.metadata.artist);
 		sticker_album_sync(&state);
 		lyrics_head_sync();
@@ -5533,7 +5536,10 @@ static void refresh_now_playing(void) {
 
 	const char *file = state.current_file;
 	const char *slash = strrchr(file, '/');
-	scrolltext_set(song_title_label, state.metadata.title[0] ? state.metadata.title : (slash ? slash + 1 : file));
+	const char *base_title = state.metadata.title[0] ? state.metadata.title : (slash ? slash + 1 : file);
+	char shown[sizeof(state.metadata.title) + sizeof(EXPLICIT_MARK)];
+	explicit_decorate(shown, sizeof(shown), base_title, state.metadata.is_explicit);
+	scrolltext_set(song_title_label, shown);
 	aam_strip_fit(); // the strip shares its row by what the two names now say
 
 	// Whose name goes under the title: a podcast episode names its show's
@@ -5589,7 +5595,9 @@ static void refresh_now_playing(void) {
 // refresh_now_playing(): that throws the decoded cover away and asks for it
 // again, which for a station whose icon has not changed is work for nothing.
 static void refresh_live_texts(const device_state_t *state) {
-	scrolltext_set(song_title_label, state->metadata.title);
+	char shown[sizeof(state->metadata.title) + sizeof(EXPLICIT_MARK)];
+	explicit_decorate(shown, sizeof(shown), state->metadata.title, state->metadata.is_explicit);
+	scrolltext_set(song_title_label, shown);
 	scrolltext_set(song_artist_label, state->metadata.artist);
 	sticker_album_sync(state);
 	lyrics_head_sync();
@@ -7903,7 +7911,14 @@ static void sticker_album_sync(const device_state_t *state) {
 	if (state->live && (!album || !album[0])) {
 		album = state->metadata.genre;
 	}
-	lv_label_set_text(sticker_view.album_label, album ? album : "");
+	char shown[sizeof(state->metadata.album) + sizeof(EXPLICIT_MARK)];
+	// An album value is its name and its key: 300 bytes in the public API.
+	char value[300];
+	if (!library_track_album_value(state->current_file, value, sizeof(value))) {
+		snprintf(value, sizeof(value), "%s", album ? album : "");
+	}
+	explicit_decorate(shown, sizeof(shown), album, library_album_explicit(value));
+	lv_label_set_text(sticker_view.album_label, shown);
 	sticker_pills_sync();
 }
 

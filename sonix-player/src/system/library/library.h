@@ -347,6 +347,14 @@ void library_album_title(const char *value, char *out, size_t size);
 // found.
 bool library_album_same(const char *a, const char *b);
 
+// Whether a track carries the iTunes explicit advisory flag. False for a
+// path that is not indexed and on an index written before the flag existed.
+bool library_track_explicit(const char *path);
+
+// Whether any track of an album (name, or name+key value as the Albums list
+// carries it) carries the flag. One explicit song marks the whole record.
+bool library_album_explicit(const char *album_value);
+
 // The album a track belongs to, as its name. False when the file is not
 // indexed or carries no album tag.
 bool library_track_album(const char *path, char *out, size_t out_size);

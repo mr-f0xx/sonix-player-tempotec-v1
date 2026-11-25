@@ -783,6 +783,19 @@ $(BUILD)/test_mostplayed: $(MOSTPLAYED_SRC) $(BUILD)/sqlite3_impl.o \
 	@mkdir -p $(BUILD)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ $(MOSTPLAYED_SRC) $(BUILD)/sqlite3_impl.o $(LDFLAGS) $(LDLIBS)
 
+# The explicit marker: real library.c and SQLite, no LVGL. The advisory's
+# own parsing is exercised with real M4A fixtures by `make tags`.
+EXPLICIT_SRC = test_explicit.c $(ROOT)/src/system/library/library.c \
+               $(ROOT)/src/system/core/config.c $(ROOT)/src/system/core/utils.c
+.PHONY: explicit
+explicit: $(BUILD)/test_explicit
+	$(BUILD)/test_explicit
+
+$(BUILD)/test_explicit: $(EXPLICIT_SRC) $(BUILD)/sqlite3_impl.o \
+                        $(ROOT)/src/system/library/library.h $(ROOT)/src/gui/library/explicitmark.h
+	@mkdir -p $(BUILD)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ $(EXPLICIT_SRC) $(BUILD)/sqlite3_impl.o $(LDFLAGS) $(LDLIBS)
+
 # The album grid's arithmetic: the four covers that fill the V1's 240x320
 # panel, and the same rules on the wide boards. No LVGL, no library: plain C.
 .PHONY: albumgrid

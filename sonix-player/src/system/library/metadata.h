@@ -12,7 +12,15 @@ typedef struct {
 	int track_number; // 0 if unknown
 	int disc_number;  // 0 if unknown, which is read as disc one; see below
 	int year;	  // 0 if unknown
-	bool has_tags;	  // true if any tag field was found
+	bool has_tags;	// true if any tag field was found
+
+	// Marked explicit by the file's own iTunes advisory tag: `rtng` (or a
+	// ----:ITUNESADVISORY freeform tag) on M4A/AAC and M4A/ALAC. 0, 2 and an
+	// absent tag all leave this false. It is a separate flag rather than a
+	// character appended to `title`: the lists keep the real tag text and
+	// decide for themselves where the marker goes, and an album is marked
+	// when any one of its tracks is.
+	bool is_explicit;
 
 	// The date tag's own text: "2026", "2026-03", "2026-03-12" or
 	// "2026-03-12T08:00:00". `year` above is its leading number; the podcast

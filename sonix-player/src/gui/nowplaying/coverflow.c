@@ -6,6 +6,7 @@
 #include <string.h>
 
 #include "src/gui/board_profile.h"
+#include "src/gui/library/explicitmark.h"
 #include "src/gui/nowplaying/cover.h"
 #include "src/gui/nowplaying/coverloader.h"
 #include "src/gui/fonts/fonts.h"
@@ -1013,9 +1014,10 @@ static void relayout(void) {
 static void refresh_title(void) {
 	const cf_row_t *album = album_at(centre);
 	// The row's name is the album's value (name and key, see library.h).
-	char shown[256];
+	char shown[256], decorated[sizeof(shown) + sizeof(EXPLICIT_MARK)];
 	library_album_title(album ? album->name : "", shown, sizeof(shown));
-	scrolltext_set(title_label, shown);
+	explicit_decorate(decorated, sizeof(decorated), shown, library_album_explicit(album ? album->name : ""));
+	scrolltext_set(title_label, decorated);
 	if (album_count <= 0) {
 		lv_obj_set_hidden(empty_label, false);
 	} else {
@@ -1150,7 +1152,6 @@ static void track_clicked_cb(lv_event_t *e) {
 }
 
 static bool track_fill_cb(const char *name, const char *path, const char *artist, void *user) {
-	(void)path;
 	track_fill_t *fill = user;
 	if (fill->written >= CF_BACK_ROWS) {
 		return false;
@@ -1190,7 +1191,9 @@ static bool track_fill_cb(const char *name, const char *path, const char *artist
 	lv_obj_set_height(label, lv_font_get_line_height(&font_ui_20));
 	lv_obj_set_style_text_color(label, theme()->text_primary, 0);
 	lv_obj_set_style_text_font(label, &font_ui_20, 0);
-	lv_label_set_text(label, name ? name : "");
+	char decorated[320];
+	explicit_decorate(decorated, sizeof(decorated), name, library_track_explicit(path));
+	lv_label_set_text(label, decorated);
 
 	// A hairline under every row but the last, drawn as a child of the row so it
 	// travels with it and needs no second pass over the list.
@@ -1216,9 +1219,10 @@ static void back_fill(const char *album) {
 	lv_obj_clean(back_list);
 	back_close_index();
 	snprintf(back_album, sizeof(back_album), "%s", album ? album : "");
-	char shown[sizeof(back_album)];
+	char shown[sizeof(back_album)], decorated[sizeof(shown) + sizeof(EXPLICIT_MARK)];
 	library_album_title(back_album, shown, sizeof(shown));
-	lv_label_set_text(back_title, shown);
+	explicit_decorate(decorated, sizeof(decorated), shown, library_album_explicit(back_album));
+	lv_label_set_text(back_title, decorated);
 	lv_label_set_text(back_sub, "");
 	if (!back_album[0]) {
 		return;

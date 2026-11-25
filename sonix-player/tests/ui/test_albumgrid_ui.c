@@ -266,6 +266,10 @@ void library_album_title(const char *value, char *out, size_t size) {
 	snprintf(out, size, "%s", value ? value : "");
 }
 bool library_album_same(const char *a, const char *b) { return a && b && strcmp(a, b) == 0; }
+// The advisory flag comes from the database in the player; these rows are
+// synthetic, so none of them is explicit.
+bool library_track_explicit(const char *path) { (void)path; return false; }
+bool library_album_explicit(const char *value) { (void)value; return false; }
 bool library_album_artist(const char *album, char *out, size_t size) {
 	(void)album;
 	if (out && size) {

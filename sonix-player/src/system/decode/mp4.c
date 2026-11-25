@@ -100,6 +100,8 @@ struct mp4_file {
 	char artist[256];
 	char album_artist[256];
 	bool compilation; // the cpil atom
+	int advisory;	 // the rtng atom; -1 absent, 1 explicit, 0/2 clean or none
+	int freeform_advisory; // ----:ITUNESADVISORY, used when rtng is absent
 	char album[256];
 	char genre[128];
 	int year;
@@ -541,6 +543,28 @@ static void set_description(mp4_file_t *m, const unsigned char *value, size_t le
 	m->description_rank = rank;
 }
 
+// iTunes writes the advisory rating as an integer atom (`rtng`: 0 unrated,
+// 1 explicit, 2 clean, 4 explicit), and several taggers instead write a
+// freeform ----:ITUNESADVISORY with the same value as text. The freeform
+// reader below copies its payload as text, so a 21-type atom holding a single
+// byte arrives as 0x01 rather than '1'; both spellings are read.
+static int advisory_value(const unsigned char *value, size_t len) {
+	while (len > 0 && (*value == ' ' || *value == '\t')) {
+		value++;
+		len--;
+	}
+	while (len > 0 && (value[len - 1] == ' ' || value[len - 1] == '\t')) {
+		len--;
+	}
+	if (len == 0) {
+		return 0;
+	}
+	if (len == 1 && (*value == 1 || *value == 4)) {
+		return 1; // a freeform integer, not text
+	}
+	return (len == 1 && (*value == '1' || *value == '4')) ? 1 : 0;
+}
+
 static const char *const GENRES[] = {
 	"Blues", "Classic Rock", "Country", "Dance", "Disco", "Funk", "Grunge", "Hip-Hop", "Jazz", "Metal",
 	"New Age", "Oldies", "Other", "Pop", "R&B", "Rap", "Reggae", "Rock", "Techno", "Industrial",
@@ -603,6 +627,8 @@ static void parse_ilst(mp4_file_t *m, const box_t *ilst) {
 			}
 			if (name[0] && value[0] && strcasecmp(name, "iTunSMPB") == 0) {
 				snprintf(m->itunsmpb, sizeof(m->itunsmpb), "%s", value);
+			} else if (name[0] && value[0] && strcasecmp(name, "ITUNESADVISORY") == 0) {
+				m->freeform_advisory = advisory_value((const unsigned char *)value, strlen(value));
 			} else if (name[0] && value[0] && strcasecmp(name, "SERIES") == 0) {
 				snprintf(m->series, sizeof(m->series), "%s", value);
 			} else if (name[0] && value[0] && (strcasecmp(name, "SERIES-PART") == 0 || strcasecmp(name, "SERIES_PART") == 0)) {
@@ -657,6 +683,14 @@ static void parse_ilst(mp4_file_t *m, const box_t *ilst) {
 		// A one-byte integer, 1 on a compilation.
 		case FOURCC('c', 'p', 'i', 'l'):
 			m->compilation = value_len >= 1 && value[value_len - 1] != 0;
+			break;
+		// The parental advisory: 1 (and, from older taggers, 4) is explicit;
+		// 0 and 2 say nothing to show. The last byte is the value whether the
+		// atom was written as one byte or as a 32-bit integer.
+		case FOURCC('r', 't', 'n', 'g'):
+			if (m->advisory < 0 && value_len >= 1) {
+				m->advisory = advisory_value(value + value_len - 1, 1);
+			}
 			break;
 		case FOURCC(0xA9, 'a', 'l', 'b'):
 			copy_text(m->album, sizeof(m->album), value, value_len);
@@ -1300,6 +1334,7 @@ mp4_file_t *mp4_open(const char *path) {
 	}
 	m->audio = -1;
 	m->cache_track = -1;
+	m->advisory = -1;
 
 	m->fd = open(path, O_RDONLY);
 	if (m->fd < 0) {
@@ -1598,6 +1633,12 @@ const char *mp4_tag_title(const mp4_file_t *m) { return m ? m->title : ""; }
 const char *mp4_tag_artist(const mp4_file_t *m) { return m ? m->artist : ""; }
 const char *mp4_tag_album_artist(const mp4_file_t *m) { return m ? m->album_artist : ""; }
 bool mp4_tag_compilation(const mp4_file_t *m) { return m && m->compilation; }
+int mp4_tag_advisory(const mp4_file_t *m) {
+	if (!m) {
+		return 0;
+	}
+	return m->advisory >= 0 ? m->advisory : m->freeform_advisory;
+}
 const char *mp4_tag_album(const mp4_file_t *m) { return m ? m->album : ""; }
 const char *mp4_tag_genre(const mp4_file_t *m) { return m ? m->genre : ""; }
 int mp4_tag_year(const mp4_file_t *m) { return m ? m->year : 0; }

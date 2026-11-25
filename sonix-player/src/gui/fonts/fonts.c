@@ -54,6 +54,12 @@ static const char *const FONT_DEFAULT_FILES[] = FACE_FILES("default");
 static const char *const FONT_BOLD_FILES[] = FACE_FILES("bold");
 static const char *const FONT_NEON_FILES[] = FACE_FILES("Neon");
 
+// The squared E used for explicit tracks. None of the UI faces carries
+// U+1F170; this one-glyph face sits behind every one of them so the marker
+// draws instead of a missing-glyph box.
+static const char *const FONT_SYMBOLS_FILES[] = FACE_FILES("symbols");
+static const char *symbols_file;
+
 // ---------------------------------------------------------------------------
 // Settings -> Appearance -> UI font
 //
@@ -683,6 +689,16 @@ static bool open_chain(const ui_font_t *ui, int size, font_set_t *set, size_t in
 	freetype_glyph_dsc = head->get_glyph_dsc;
 	lv_font_t *tail = head;
 
+	// Symbols come before the script faces: none of them claims U+1F170,
+	// but the first one that did would otherwise hide the mark.
+	if (symbols_file) {
+		lv_font_t *symbols = chain_open(set, index, symbols_file, size);
+		if (symbols) {
+			tail->fallback = symbols;
+			tail = symbols;
+		}
+	}
+
 	lv_font_t *rodin = NULL;
 	if (ui->bold && japanese.bold) {
 		rodin = chain_open(set, index, japanese.bold, size);
@@ -1097,6 +1113,7 @@ bool fonts_init(void) {
 		scripts[i].regular = first_present(scripts[i].regular_files);
 		scripts[i].bold = first_present(scripts[i].bold_files);
 	}
+	symbols_file = first_present(FONT_SYMBOLS_FILES);
 	japanese.regular = first_present(japanese.regular_files);
 	japanese.bold = first_present(japanese.bold_files);
 	japanese_ui = strcmp(lang_current(), FONTS_JAPANESE_LANGUAGE) == 0;

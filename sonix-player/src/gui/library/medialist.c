@@ -13,6 +13,7 @@
 
 #include "src/gui/board_profile.h"
 #include "src/gui/library/albumgrid.h"
+#include "src/gui/library/explicitmark.h"
 #include "src/gui/nowplaying/coverloader.h"
 #include "src/gui/fonts/fonts.h"
 #include "src/gui/shell/gui.h"
@@ -1795,8 +1796,15 @@ static void row_bind(panel_t *p, row_t *row, int index) {
 	// An album row is named by its value -- name and key, see library.h -- and
 	// only the name is for reading.
 	char shown[sizeof(((winrow_t *)0)->name)];
+	char decorated[sizeof(shown) + sizeof(EXPLICIT_MARK)];
 	library_album_title(name, shown, sizeof(shown));
-	scrolltext_set(row->label, shown);
+	// A track wears the marker from its own advisory tag; an album from any
+	// one of its tracks. The undecorated name stays what the menu, the
+	// filters and the queue use.
+	bool marked = p->is_tracks ? library_track_explicit(path)
+							   : (p->kind == LIBRARY_LIST_ALBUMS && library_album_explicit(name));
+	explicit_decorate(decorated, sizeof(decorated), shown, marked);
+	scrolltext_set(row->label, decorated);
 	// A grid tile is its cover: no room for a second line, a chevron or a
 	// play mark beside it, and a name that only fits under the picture. Set
 	// on every bind, so a panel that switches modes while it holds a list is
