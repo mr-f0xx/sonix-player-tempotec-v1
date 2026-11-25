@@ -85,3 +85,12 @@ h1 em,h2 em{text-shadow:0 0 32px rgba(255,110,0,.3)}
 
 /* Uniform dark terminal background across all page surfaces. */
 body,.topbar,.release-strip,.feature-card,.fork-section,.fork-grid article,.compare-section,.spec-panel,.safety,.donate-card,.outro,.lang-menu,.nav-toggle,.lang-button{background:#100d08}
+
+/* Compact contact/social shortcut row. */
+.contact-section{padding:0 0 90px}
+.contact-strip{display:grid;grid-template-columns:repeat(3,1fr);margin-top:18px;border:1px solid var(--line)}
+.contact-strip a{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 18px;border-right:1px solid var(--line);background:#100d08;font:700 10px var(--mono);letter-spacing:1px;color:#d5a351;transition:background .2s,color .2s}
+.contact-strip a:last-child{border-right:0}
+.contact-strip a small{font:500 10px var(--sans);letter-spacing:0;color:var(--muted)}
+.contact-strip a:hover{background:#1b1408;color:var(--amber)}
+@media(max-width:700px){.contact-section{padding:0 0 70px}.contact-strip{grid-template-columns:1fr}.contact-strip a{border-right:0;border-bottom:1px solid var(--line);padding:12px 16px}.contact-strip a:last-child{border-bottom:0}}

@@ -181,3 +181,15 @@ body::after {
 	background: rgba(255, 157, 18, 0.3);
 	color: #fff2dc;
 }
+
+/* The hardware RGB telemetry dot must match the amber workbench theme. */
+.mini-led {
+	background: #ff9d12 !important;
+	border-color: rgba(255, 190, 90, 0.55) !important;
+	box-shadow: 0 0 8px rgba(255, 157, 18, 0.75) !important;
+}
+
+.mode-btn.active {
+	border-color: rgba(255, 157, 18, 0.5);
+	color: #ffc247;
+}

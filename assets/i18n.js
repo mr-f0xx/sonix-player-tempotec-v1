@@ -17,7 +17,7 @@
   // release notes stay in their original wording.
   const STRINGS = {
     it: {
-      nav_features: 'FUNZIONALITÀ', nav_fork: 'AGGIUNTE DEL FORK', nav_upgrade: "L'AGGIORNAMENTO", nav_install: 'INSTALLAZIONE', nav_donate: 'DONAZIONI',
+      nav_features: 'FUNZIONALITÀ', nav_fork: 'AGGIUNTE DEL FORK', nav_upgrade: "L'AGGIORNAMENTO", nav_install: 'INSTALLAZIONE', nav_donate: 'DONAZIONI', nav_contact: 'CONTATTI / SOCIAL',
       hero_eyebrow: 'FIRMWARE COMUNITARIO', hero_title: 'IL TUO PLAYER.<br><em>Amplificato.</em>',
       hero_desc: '<strong>La tua musica, pronta quando vuoi.</strong> Sonix porta il tuo TempoTec V1 oltre lo stock 1.3: modella il suono per le tue cuffie, tieni la libreria sulla scheda e riscopri cosa può fare questo piccolo player.',
       btn_emulator: 'AVVIA EMULATORE WEB', latest: 'ULTIMO AGGIORNAMENTO', release_date: 'DATA RILASCIO', release_notes: 'NOTE DI RILASCIO', view_release: 'VEDI RILASCIO <span>↗</span>',
@@ -34,9 +34,10 @@
       s5_kicker: '05 / SUPPORTO', s5_kicker_right: 'MANTIENI VIVO IL FORK', s5_overline: 'TI PIACE SONIX?', s5_title: 'Sostieni il <em>lavoro.</em>',
       s5_desc: 'Questo fork è un progetto comunitario. Se il tuo V1 è diventato più divertente, puoi sostenere direttamente lo sviluppo.',
       footer_tagline: 'UN PROGETTO COMUNITARIO DI IMRE FERENCZI. CREATO PER AMORE DELLA MUSICA.',
+      s6_kicker: '06 / CONTATTI', s6_kicker_right: 'TROVAMI ONLINE', c_github: 'Profilo GitHub', c_reddit: 'Profilo Reddit', c_soundcloud: 'Musica su SoundCloud',
     },
     de: {
-      nav_features: 'FUNKTIONEN', nav_fork: 'FORK-ERGÄNZUNGEN', nav_upgrade: 'DAS UPGRADE', nav_install: 'INSTALLATION', nav_donate: 'SPENDEN',
+      nav_features: 'FUNKTIONEN', nav_fork: 'FORK-ERGÄNZUNGEN', nav_upgrade: 'DAS UPGRADE', nav_install: 'INSTALLATION', nav_donate: 'SPENDEN', nav_contact: 'KONTAKT / SOCIAL MEDIA',
       hero_eyebrow: 'COMMUNITY-FIRMWARE', hero_title: 'DEIN PLAYER.<br><em>Verstärkt.</em>',
       hero_desc: '<strong>Deine Musik, bereit wenn du es bist.</strong> Sonix bringt deinen TempoTec V1 über Stock 1.3 hinaus: Forme den Klang für deine Kopfhörer, behalte deine Bibliothek auf der Karte und entdecke diesen kleinen Player neu.',
       btn_emulator: 'WEB-EMULATOR STARTEN', latest: 'NEUESTES UPDATE', release_date: 'VERÖFFENTLICHT', release_notes: 'RELEASE-NOTIZEN', view_release: 'RELEASE ANSEHEN <span>↗</span>',
@@ -53,9 +54,10 @@
       s5_kicker: '05 / UNTERSTÜTZEN', s5_kicker_right: 'DEN FORK AM LEBEN HALTEN', s5_overline: 'GEFÄLLT DIR SONIX?', s5_title: 'Unterstütze die <em>Arbeit.</em>',
       s5_desc: 'Dieser Fork ist ein Community-Projekt. Wenn dein V1 mehr Spaß macht, kannst du die Entwicklung direkt unterstützen.',
       footer_tagline: 'EIN COMMUNITY-PROJEKT VON IMRE FERENCZI. AUS LIEBE ZUR MUSIK GEMACHT.',
+      s6_kicker: '06 / KONTAKT', s6_kicker_right: 'FIND MICH ONLINE', c_github: 'GitHub-Profil', c_reddit: 'Reddit-Profil', c_soundcloud: 'Musik auf SoundCloud',
     },
     es: {
-      nav_features: 'FUNCIONES', nav_fork: 'AÑADIDOS DEL FORK', nav_upgrade: 'LA ACTUALIZACIÓN', nav_install: 'INSTALAR', nav_donate: 'DONAR',
+      nav_features: 'FUNCIONES', nav_fork: 'AÑADIDOS DEL FORK', nav_upgrade: 'LA ACTUALIZACIÓN', nav_install: 'INSTALAR', nav_donate: 'DONAR', nav_contact: 'CONTACTO / REDES SOCIALES',
       hero_eyebrow: 'FIRMWARE COMUNITARIO', hero_title: 'TU REPRODUCTOR.<br><em>Amplificado.</em>',
       hero_desc: '<strong>Tu música, lista cuando quieras.</strong> Sonix lleva tu TempoTec V1 más allá del stock 1.3: modela el sonido para tus auriculares, mantén tu biblioteca en la tarjeta y redescubre lo que puede hacer este pequeño reproductor.',
       btn_emulator: 'ABRIR EMULADOR WEB', latest: 'ÚLTIMA ACTUALIZACIÓN', release_date: 'FECHA DE LANZAMIENTO', release_notes: 'NOTAS DE LA VERSIÓN', view_release: 'VER VERSIÓN <span>↗</span>',
@@ -72,9 +74,10 @@
       s5_kicker: '05 / APOYO', s5_kicker_right: 'MANTÉN VIVO EL FORK', s5_overline: '¿TE GUSTA SONIX?', s5_title: 'Apoya el <em>trabajo.</em>',
       s5_desc: 'Este fork es un proyecto comunitario. Si tu V1 es más divertido, puedes apoyar directamente el desarrollo.',
       footer_tagline: 'UN PROYECTO COMUNITARIO DE IMRE FERENCZI. HECHO POR AMOR A LA MÚSICA.',
+      s6_kicker: '06 / CONTACTO', s6_kicker_right: 'ENCUÉNTRAME EN LÍNEA', c_github: 'Perfil de GitHub', c_reddit: 'Perfil de Reddit', c_soundcloud: 'Música en SoundCloud',
     },
     fr: {
-      nav_features: 'FONCTIONS', nav_fork: 'AJOUTS DU FORK', nav_upgrade: 'LA MISE À NIVEAU', nav_install: 'INSTALLATION', nav_donate: 'FAIRE UN DON',
+      nav_features: 'FONCTIONS', nav_fork: 'AJOUTS DU FORK', nav_upgrade: 'LA MISE À NIVEAU', nav_install: 'INSTALLATION', nav_donate: 'FAIRE UN DON', nav_contact: 'CONTACT / RÉSEAUX SOCIAUX',
       hero_eyebrow: 'FIRMWARE COMMUNAUTAIRE', hero_title: 'VOTRE LECTEUR.<br><em>Amplifié.</em>',
       hero_desc: '<strong>Votre musique, prête quand vous l’êtes.</strong> Sonix emmène votre TempoTec V1 au-delà de la version 1.3 : façonnez le son pour vos casques, gardez votre bibliothèque sur la carte et redécouvrez ce petit lecteur.',
       btn_emulator: 'LANCER L’ÉMULATEUR WEB', latest: 'DERNIÈRE VERSION', release_date: 'DATE DE SORTIE', release_notes: 'NOTES DE VERSION', view_release: 'VOIR LA VERSION <span>↗</span>',
@@ -91,9 +94,10 @@
       s5_kicker: '05 / SOUTENIR', s5_kicker_right: 'FAITES VIVRE LE FORK', s5_overline: 'SONIX VOUS PLAÎT ?', s5_title: 'Soutenez le <em>travail.</em>',
       s5_desc: 'Ce fork est un projet communautaire. Si votre V1 est plus amusant, vous pouvez soutenir directement le développement.',
       footer_tagline: 'UN PROJET COMMUNAUTAIRE DE IMRE FERENCZI. PAR AMOUR DE LA MUSIQUE.',
+      s6_kicker: '06 / CONTACT', s6_kicker_right: 'RETROUVEZ-MOI EN LIGNE', c_github: 'Profil GitHub', c_reddit: 'Profil Reddit', c_soundcloud: 'Musique sur SoundCloud',
     },
     nl: {
-      nav_features: 'FUNCTIES', nav_fork: 'FORK-TOEVOEGINGEN', nav_upgrade: 'DE UPGRADE', nav_install: 'INSTALLEREN', nav_donate: 'DONEREN',
+      nav_features: 'FUNCTIES', nav_fork: 'FORK-TOEVOEGINGEN', nav_upgrade: 'DE UPGRADE', nav_install: 'INSTALLEREN', nav_donate: 'DONEREN', nav_contact: 'CONTACT / SOCIALE MEDIA',
       hero_eyebrow: 'COMMUNITY-FIRMWARE', hero_title: 'JOUW SPELER.<br><em>Versterkt.</em>',
       hero_desc: '<strong>Je muziek, klaar wanneer jij klaar bent.</strong> Sonix brengt je TempoTec V1 voorbij stock 1.3: vorm het geluid voor jouw koptelefoons, houd je bibliotheek op de kaart en ontdek deze kleine speler opnieuw.',
       btn_emulator: 'WEB-EMULATOR STARTEN', latest: 'NIEUWSTE RELEASE', release_date: 'RELEASEDATUM', release_notes: 'RELEASENOTITIES', view_release: 'RELEASE BEKIJKEN <span>↗</span>',
@@ -110,9 +114,10 @@
       s5_kicker: '05 / STEUN', s5_kicker_right: 'HOUD DE FORK LEVEND', s5_overline: 'VIND JE SONIX LEUK?', s5_title: 'Steun het <em>werk.</em>',
       s5_desc: 'Deze fork is een communityproject. Als je V1 leuker is geworden, kun je de ontwikkeling direct steunen.',
       footer_tagline: 'EEN COMMUNITYPROJECT DOOR IMRE FERENCZI. GEMAAKT UIT LIEFDE VOOR MUZIEK.',
+      s6_kicker: '06 / CONTACT', s6_kicker_right: 'VIND ME ONLINE', c_github: 'GitHub-profiel', c_reddit: 'Reddit-profiel', c_soundcloud: 'Muziek op SoundCloud',
     },
     pl: {
-      nav_features: 'FUNKCJE', nav_fork: 'DODATKI FORKA', nav_upgrade: 'AKTUALIZACJA', nav_install: 'INSTALACJA', nav_donate: 'WSPARCIE',
+      nav_features: 'FUNKCJE', nav_fork: 'DODATKI FORKA', nav_upgrade: 'AKTUALIZACJA', nav_install: 'INSTALACJA', nav_donate: 'WSPARCIE', nav_contact: 'KONTAKT / MEDIA SPOŁECZNOŚCIOWE',
       hero_eyebrow: 'FIRMWARE SPOŁECZNOŚCI', hero_title: 'TWÓJ ODTWARZACZ.<br><em>Wzmocniony.</em>',
       hero_desc: '<strong>Twoja muzyka, gotowa gdy ty jesteś.</strong> Sonix wyprowadza Twój TempoTec V1 poza stock 1.3: kształtuj dźwięk pod swoje słuchawki, trzymaj bibliotekę na karcie i odkryj ten mały odtwarzacz na nowo.',
       btn_emulator: 'URUCHOM EMULATOR WWW', latest: 'NAJNOWSZA WERSJA', release_date: 'DATA WYDANIA', release_notes: 'INFORMACJE O WERSJI', view_release: 'ZOBACZ WERSJĘ <span>↗</span>',
@@ -129,9 +134,10 @@
       s5_kicker: '05 / WSPARCIE', s5_kicker_right: 'UTRZYMAJ FORKA PRZY ŻYCIU', s5_overline: 'PODoba CI SIĘ SONIX?', s5_title: 'Wsparcie dla <em>pracy.</em>',
       s5_desc: 'Ten fork to projekt społeczności. Jeśli Twój V1 daje więcej frajdy, możesz bezpośrednio wspierać rozwój.',
       footer_tagline: 'PROJEKT SPOŁECZNOŚCI AUTORSTWA IMRE FERENCZIEGO. TWORZONY Z MIŁOŚCI DO MUZYKI.',
+      s6_kicker: '06 / KONTAKT', s6_kicker_right: 'ZNAJDŹ MNIE ONLINE', c_github: 'Profil GitHub', c_reddit: 'Profil Reddit', c_soundcloud: 'Muzyka na SoundCloud',
     },
     'pt-BR': {
-      nav_features: 'RECURSOS', nav_fork: 'ADIÇÕES DO FORK', nav_upgrade: 'A ATUALIZAÇÃO', nav_install: 'INSTALAR', nav_donate: 'DOAR',
+      nav_features: 'RECURSOS', nav_fork: 'ADIÇÕES DO FORK', nav_upgrade: 'A ATUALIZAÇÃO', nav_install: 'INSTALAR', nav_donate: 'DOAR', nav_contact: 'CONTATO / REDES SOCIAIS',
       hero_eyebrow: 'FIRMWARE DA COMUNIDADE', hero_title: 'SEU PLAYER.<br><em>Amplificado.</em>',
       hero_desc: '<strong>Sua música, pronta quando você quiser.</strong> O Sonix leva seu TempoTec V1 além do stock 1.3: molde o som para seus fones, mantenha sua biblioteca no cartão e redescubra o que este pequeno player pode fazer.',
       btn_emulator: 'ABRIR EMULADOR WEB', latest: 'ÚLTIMO LANÇAMENTO', release_date: 'DATA DO LANÇAMENTO', release_notes: 'NOTAS DA VERSÃO', view_release: 'VER LANÇAMENTO <span>↗</span>',
@@ -148,9 +154,10 @@
       s5_kicker: '05 / APOIO', s5_kicker_right: 'MANTENHA O FORK VIVO', s5_overline: 'GOSTA DO SONIX?', s5_title: 'Apoie o <em>trabalho.</em>',
       s5_desc: 'Este fork é um projeto comunitário. Se o seu V1 ficou mais divertido, você pode apoiar o desenvolvimento diretamente.',
       footer_tagline: 'UM PROJETO COMUNITÁRIO POR IMRE FERENCZI. FEITO POR AMOR À MÚSICA.',
+      s6_kicker: '06 / CONTATO', s6_kicker_right: 'ME ENCONTRE ONLINE', c_github: 'Perfil no GitHub', c_reddit: 'Perfil no Reddit', c_soundcloud: 'Música no SoundCloud',
     },
     uk: {
-      nav_features: 'ФУНКЦІЇ', nav_fork: 'ДОДАТКИ ФОРКА', nav_upgrade: 'ОНОВЛЕННЯ', nav_install: 'ВСТАНОВЛЕННЯ', nav_donate: 'ПІДТРИМКА',
+      nav_features: 'ФУНКЦІЇ', nav_fork: 'ДОДАТКИ ФОРКА', nav_upgrade: 'ОНОВЛЕННЯ', nav_install: 'ВСТАНОВЛЕННЯ', nav_donate: 'ПІДТРИМКА', nav_contact: 'КОНТАКТИ / СОЦМЕРЕЖІ',
       hero_eyebrow: 'ГРОМАДСЬКА ПРОШИВКА', hero_title: 'ВАШ ПЛЕЄР.<br><em>Підсилений.</em>',
       hero_desc: '<strong>Ваша музика, готова, коли ви готові.</strong> Sonix виводить ваш TempoTec V1 за межі stock 1.3: налаштовуйте звук під свої навушники, тримайте бібліотеку на карті та відкрийте цей маленький плеєр заново.',
       btn_emulator: 'ЗАПУСТИТИ ВЕБ-ЕМУЛЯТОР', latest: 'ОСТАННЯ ВЕРСІЯ', release_date: 'ДАТА ВИПУСКУ', release_notes: 'ПРИМІТКИ ДО ВЕРСІЇ', view_release: 'ДИВИТИСЯ ВЕРСІЮ <span>↗</span>',
@@ -167,9 +174,10 @@
       s5_kicker: '05 / ПІДТРИМКА', s5_kicker_right: 'ПІДТРИМУЙТЕ FORK', s5_overline: 'ПОДОБАЄТЬСЯ SONIX?', s5_title: 'Підтримайте <em>роботу.</em>',
       s5_desc: 'Цей форк — громадський проект. Якщо ваш V1 став цікавішим, ви можете напряму підтримати розвиток.',
       footer_tagline: 'ГРОМАДСЬКИЙ ПРОЕКТ ВІД IMRE FERENCZI. СТВОРЕНИЙ З ЛЮБОВІ ДО МУЗИКИ.',
+      s6_kicker: '06 / КОНТАКТИ', s6_kicker_right: 'ЗНАЙДИ МЕНЕ ОНЛАЙН', c_github: 'Профіль GitHub', c_reddit: 'Профіль Reddit', c_soundcloud: 'Музика на SoundCloud',
     },
     ru: {
-      nav_features: 'ВОЗМОЖНОСТИ', nav_fork: 'ДОПОЛНЕНИЯ ФОРКА', nav_upgrade: 'ОБНОВЛЕНИЕ', nav_install: 'УСТАНОВКА', nav_donate: 'ПОДДЕРЖКА',
+      nav_features: 'ВОЗМОЖНОСТИ', nav_fork: 'ДОПОЛНЕНИЯ ФОРКА', nav_upgrade: 'ОБНОВЛЕНИЕ', nav_install: 'УСТАНОВКА', nav_donate: 'ПОДДЕРЖКА', nav_contact: 'КОНТАКТЫ / СОЦСЕТИ',
       hero_eyebrow: 'СООБЩЕСТВЕННАЯ ПРОШИВКА', hero_title: 'ВАШ ПЛЕЕР.<br><em>Усиленный.</em>',
       hero_desc: '<strong>Ваша музыка, готова, когда вы готовы.</strong> Sonix выводит ваш TempoTec V1 за пределы stock 1.3: настраивайте звук под свои наушники, держите библиотеку на карте и заново откройте этот маленький плеер.',
       btn_emulator: 'ЗАПУСТИТЬ ВЕБ-ЭМУЛЯТОР', latest: 'ПОСЛЕДНЯЯ ВЕРСИЯ', release_date: 'ДАТА ВЫПУСКА', release_notes: 'СПИСОК ИЗМЕНЕНИЙ', view_release: 'СМОТРЕТЬ ВЕРСИЮ <span>↗</span>',
@@ -186,9 +194,10 @@
       s5_kicker: '05 / ПОДДЕРЖКА', s5_kicker_right: 'ПОДДЕРЖИВАЙТЕ FORK', s5_overline: 'НРАВИТСЯ SONIX?', s5_title: 'Поддержите <em>работу.</em>',
       s5_desc: 'Этот форк — проект сообщества. Если ваш V1 стал интереснее, вы можете напрямую поддержать разработку.',
       footer_tagline: 'ПРОЕКТ СООБЩЕСТВА ОТ IMRE FERENCZI. СОЗДАН ПО ЛЮБВИ К МУЗЫКЕ.',
+      s6_kicker: '06 / КОНТАКТЫ', s6_kicker_right: 'НАЙДИ МЕНЯ ОНЛАЙН', c_github: 'Профиль GitHub', c_reddit: 'Профиль Reddit', c_soundcloud: 'Музыка на SoundCloud',
     },
     ja: {
-      nav_features: '機能', nav_fork: 'フォーク追加機能', nav_upgrade: 'アップグレード', nav_install: 'インストール', nav_donate: '寄付',
+      nav_features: '機能', nav_fork: 'フォーク追加機能', nav_upgrade: 'アップグレード', nav_install: 'インストール', nav_donate: '寄付', nav_contact: 'お問い合わせ / SNS',
       hero_eyebrow: 'コミュニティファームウェア', hero_title: 'あなたのプレイヤー。<br><em>さらにパワフルに。</em>',
       hero_desc: '<strong>あなたの音楽を、いつでも。</strong> SonixはTempoTec V1を純正1.3の先へ連れて行きます。ヘッドホンに合わせた音作り、カード上のライブラリ、この小さなプレイヤーの再発見を。',
       btn_emulator: 'ウェブエミュレータを起動', latest: '最新リリース', release_date: '公開日', release_notes: 'リリースノート', view_release: 'リリースを見る <span>↗</span>',
@@ -205,6 +214,7 @@
       s5_kicker: '05 / サポート', s5_kicker_right: 'FORK を育て続ける', s5_overline: 'Sonixを気に入りましたか？', s5_title: 'この<em>活動</em>を応援。',
       s5_desc: 'このフォークはコミュニティプロジェクトです。V1がより楽しくなったなら、開発を直接支援できます。',
       footer_tagline: 'IMRE FERENCZI によるコミュニティプロジェクト。音楽への愛から生まれました。',
+      s6_kicker: '06 / お問い合わせ', s6_kicker_right: 'オンラインで見つける', c_github: 'GitHub プロフィール', c_reddit: 'Reddit プロフィール', c_soundcloud: 'SoundCloud の音楽',
     },
   };
 
