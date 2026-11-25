@@ -126,6 +126,7 @@ typedef enum {
 	JOB_RX_INFO,   // re-read what a device streaming to this one is sending
 	JOB_RX_CODEC,  // text: the codec to move the incoming stream onto
 	JOB_RX_INVITE, // the sender delivers nothing: ask it for a stream again
+	JOB_RX_VOLUME_MODE, // re-apply the receive PCM SoftVolume setting
 	JOB_MEDIA,	   // text: an AVRCP member to send to that device
 } job_type_t;
 
@@ -192,6 +193,7 @@ static unsigned alias_cache_replace;
 // connected headphones are the output, and a switch that could send the music
 // back to the jack while they are still worn causes confusion, not choice.
 static bool g_volume_sync;	  // the player's volume drives the headphones'
+static bool g_rx_soft_volume = true; // the phone's volume scales the received stream
 static bool g_a2dp_connected; // a bluealsa PCM exists: the only truthful source
 static unsigned g_output_generation; // see bluetooth_output_generation()
 static bool g_bluealsa_restarted;	 // worker only: the next sink is a new daemon's
@@ -3501,8 +3503,7 @@ static void do_read_receiver(void);
 static unsigned g_rx_volume_generation;
 static unsigned g_rx_volume_misses;
 
-// Makes the phone's volume turn the sound down on this side, whatever the new
-// transport started with.
+// Applies the configured receive-volume mode to the phone's receive PCM.
 //
 // What a phone's volume keys do here is bluealsa's to decide, and 4.1.1 decides
 // by one flag on the receive PCM. The player starts the daemon with
@@ -3512,19 +3513,25 @@ static unsigned g_rx_volume_misses;
 // bluealsa's io.c), so every position of the phone's slider but the bottom one
 // plays at full scale: an on/off switch. With SoftVolume on, the decoder scales
 // by the level the phone sent -- the gradual control the phone's slider is
-// meant to be. Nothing else in the player ever wrote the flag for this
-// direction, so which of the two a link got depended on what bluealsa happened
-// to have stored for the device and on a transport being rebuilt by a codec
-// change, which gets the default again.
+// meant to be.
 //
-// Written whenever it is not already on, for every new receive PCM, and said in
-// the log either way: the logs this was worked from could not say which mode
-// the link had been in, and the next one will.
+// rx_soft_volume (default on) keeps the current behaviour: force SoftVolume on
+// so the phone's AVRCP absolute volume is applied by bluealsa. When off, force
+// SoftVolume off so the phone slider is only an on/off-at-zero and the V1's own
+// volume/DAC is the final level control, matching stock TempoTec firmware.
+//
+// Written whenever it differs from the configured mode, for every new receive
+// PCM, and said in the log either way: the logs this was worked from could not
+// say which mode the link had been in, and the next one will.
 //
 // True when the PCM answered, so the caller does not ask again for this one;
 // false when it was not there yet (a transport is rebuilt a moment after the
 // codec call returns) and the next round tries again.
 static bool rx_apply_soft_volume(const char *mac, const char *why) {
+	pthread_mutex_lock(&lock);
+	bool desired = g_rx_soft_volume;
+	pthread_mutex_unlock(&lock);
+
 	bool soft = false;
 	if (!btstack_pcm_softvolume_get(mac, true, &soft)) {
 		return false;
@@ -3539,19 +3546,32 @@ static bool rx_apply_soft_volume(const char *mac, const char *why) {
 				 ((word >> 8) & 0x80) || (word & 0x80) ? ", muted" : "");
 	}
 
-	if (soft) {
-		fprintf(stderr, "bluetooth: RX stream on %s (%s): the phone's volume is applied here, %s\n", mac, why, level);
+	if (soft == desired) {
+		if (desired) {
+			fprintf(stderr, "bluetooth: RX stream on %s (%s): the phone's volume is applied here, %s\n", mac, why, level);
+		} else {
+			fprintf(stderr,
+					"bluetooth: RX stream on %s (%s): the phone's volume is not applied here (V1 volume only), %s\n",
+					mac, why, level);
+		}
 		return true;
 	}
-	if (!btstack_pcm_softvolume_set(mac, true, true)) {
-		fprintf(stderr, "bluetooth: RX stream on %s (%s): the phone's volume would only mute at zero, and turning "
-						"the software volume on failed\n",
-				mac, why);
+	if (!btstack_pcm_softvolume_set(mac, true, desired)) {
+		fprintf(stderr,
+				"bluetooth: RX stream on %s (%s): could not set receive SoftVolume %s\n",
+				mac, why, desired ? "on" : "off");
 		return false;
 	}
-	fprintf(stderr, "bluetooth: RX stream on %s (%s): the phone's volume would only have muted at zero; it is now "
-					"applied here, %s\n",
-			mac, why, level);
+	if (desired) {
+		fprintf(stderr,
+				"bluetooth: RX stream on %s (%s): the phone's volume would only have muted at zero; it is now "
+				"applied here, %s\n",
+				mac, why, level);
+	} else {
+		fprintf(stderr,
+				"bluetooth: RX stream on %s (%s): the phone's volume will not scale the stream here (V1 volume only), %s\n",
+				mac, why, level);
+	}
 	return true;
 }
 
@@ -4838,6 +4858,21 @@ static void *bluetooth_worker(void *arg) {
 				break;
 			}
 
+			case JOB_RX_VOLUME_MODE: {
+				g_rx_volume_misses = 0;
+				char mac[BT_MAC_MAX];
+				if (btstack_audio_source(mac, sizeof(mac))) {
+					if (rx_apply_soft_volume(mac, "setting changed")) {
+						g_rx_volume_generation = btstack_rx_pcm_generation();
+					} else {
+						g_rx_volume_generation = 0;
+					}
+				} else {
+					g_rx_volume_generation = 0;
+				}
+				break;
+			}
+
 			case JOB_MEDIA:
 				do_media_command(job.text);
 				break;
@@ -4891,6 +4926,7 @@ void bluetooth_init(void) {
 
 	g_enabled = config_get_int("wireless", "bluetooth", 0) != 0;
 	g_volume_sync = config_get_int("wireless", "bt_volume_sync", 1) != 0;
+	g_rx_soft_volume = config_get_int("bluetooth", "rx_soft_volume", 1) != 0;
 
 	// Before anything asks for it. Bring-up reads it too, but the settings page
 	// shows the name with the radio off, and until this the answer was the
@@ -5491,6 +5527,25 @@ void bluetooth_set_volume_sync(bool on) {
 	btvolume_set_sync(on);
 	config_set_int("wireless", "bt_volume_sync", on ? 1 : 0);
 	config_save();
+}
+
+bool bluetooth_rx_soft_volume(void) {
+	pthread_mutex_lock(&lock);
+	bool on = g_rx_soft_volume;
+	pthread_mutex_unlock(&lock);
+	return on;
+}
+
+void bluetooth_set_rx_soft_volume(bool on) {
+	pthread_mutex_lock(&lock);
+	g_rx_soft_volume = on;
+	pthread_mutex_unlock(&lock);
+
+	config_set_int("bluetooth", "rx_soft_volume", on ? 1 : 0);
+	config_save();
+
+	job_t job = {.type = JOB_RX_VOLUME_MODE};
+	post_job(&job);
 }
 
 // The player's volume has moved. It is handed to the stream whichever way the
