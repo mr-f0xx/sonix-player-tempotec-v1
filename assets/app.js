@@ -6,6 +6,7 @@
   const notes = document.querySelector('#release-notes');
   const button = document.querySelector('#download-button');
   const releaseLink = document.querySelector('#release-link');
+  const themeButton = document.querySelector('#theme-button');
 
   // Release notes are untrusted Markdown: extract a readable short preview, never HTML.
   function highlights(body) {
@@ -21,6 +22,12 @@
     const assets = (release && release.assets) || [];
     return assets.find(item => item.name && item.name.toLowerCase() === 'v1.upt') ||
       assets.find(item => item.name && item.name.toLowerCase().endsWith('.upt'));
+  }
+
+  function themeAsset(release) {
+    const assets = (release && release.assets) || [];
+    return assets.find(item => /icon.*theme|theme.*icon/i.test(item.name || '')) ||
+      assets.find(item => (item.name || '').toLowerCase().endsWith('.zip') && !/sonix-web/i.test(item.name));
   }
 
   let shownRelease = false;
@@ -41,6 +48,12 @@
 
     notes.textContent = highlights(release.body);
     if (release.html_url && release.html_url.startsWith('https://github.com/')) releaseLink.href = release.html_url;
+    const themes = themeAsset(release);
+    if (themeButton) {
+      themeButton.href = themes && themes.browser_download_url && themes.browser_download_url.startsWith('https://github.com/')
+        ? themes.browser_download_url
+        : './assets/sonix-themes-icons.zip';
+    }
 
     if (asset && asset.browser_download_url && asset.browser_download_url.startsWith('https://github.com/')) {
       button.href = asset.browser_download_url;
