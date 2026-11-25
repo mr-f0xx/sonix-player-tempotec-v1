@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Sonix Player: a community-made custom firmware for the TempoTec Variations V1.">
+  <meta name="theme-color" content="#0a0805">
+  <title>Sonix Player — A new frequency for your V1</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="./assets/style.css">
+  <script src="./assets/app.js" defer></script>
+</head>
+<body>
+  <svg class="svg-defs" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><symbol id="arrow" viewBox="0 0 24 24"><path d="M5 12h14M14 7l5 5-5 5"/></symbol><symbol id="download" viewBox="0 0 24 24"><path d="M12 3v12m-4-4 4 4 4-4M5 17v3h14v-3"/></symbol><symbol id="play" viewBox="0 0 24 24"><path d="m8 5 11 7-11 7z"/></symbol><symbol id="wave" viewBox="0 0 24 24"><path d="M3 12h2l2-6 3 12 3-14 3 16 2-8h3"/></symbol><symbol id="sliders" viewBox="0 0 24 24"><path d="M5 4v16M12 4v16M19 4v16M2 8h6M9 16h6M16 10h6"/></symbol><symbol id="grid" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></symbol><symbol id="wifi" viewBox="0 0 24 24"><path d="M2 8a15 15 0 0 1 20 0M5 12a10 10 0 0 1 14 0M8 16a5 5 0 0 1 8 0M12 20h.01"/></symbol></svg>
+  <header class="topbar">
+    <div class="wrap nav">
+      <a class="brand" href="#top" aria-label="Sonix Player home"><span class="brand-mark">S<span>///</span></span><span>SONIX <b>PLAYER</b><small>FOR TEMPOTEC V1</small></span></a>
+      <nav aria-label="Main navigation"><a href="#features">FEATURES</a><a href="#compare">THE UPGRADE</a><a href="#install">INSTALL</a></nav>
+      <a class="nav-github" href="https://github.com/mr-f0xx/sonix-player-tempotec-v1">GITHUB <span>↗</span></a>
+    </div>
+  </header>
+  <main id="top">
+    <section class="hero wrap">
+      <div class="hero-copy">
+        <div class="eyebrow"><span class="status-dot"></span> COMMUNITY FIRMWARE <span class="eyebrow-divider">/</span> TEMPO TEC VARIATIONS V1</div>
+        <h1>Your player.<br><em>Amplified.</em></h1>
+        <p class="hero-description">A whole new frequency for your TempoTec V1. Meet the community firmware that takes your player beyond stock 1.3.</p>
+        <div class="hero-actions">
+          <a class="button button-primary" id="download-button" href="https://github.com/mr-f0xx/sonix-player-tempotec-v1/releases/latest"><svg><use href="#download"/></svg><span>DOWNLOAD FIRMWARE</span><span class="button-arrow">↗</span></a>
+          <a class="button button-secondary" href="./emulator/index.html"><svg><use href="#play"/></svg><span>LAUNCH WEB EMULATOR</span><span class="button-arrow">↗</span></a>
+        </div>
+        <div class="hero-note"><span>●</span> OPEN SOURCE <i></i> BUILT FOR THE V1 <i></i> MADE FOR MUSIC</div>
+      </div>
+      <div class="hero-visual" aria-label="Sonix Player running on a TempoTec V1">
+        <div class="visual-caption"><span>FIG 01. / THE PLAYER, REIMAGINED</span><span>V1 — 001</span></div>
+        <div class="device-stage">
+          <div class="stage-ring ring-one"></div><div class="stage-ring ring-two"></div>
+          <div class="stage-label stage-label-left"><span>◈</span> PRECISION<br>IN YOUR POCKET</div>
+          <div class="stage-label stage-label-right">CUSTOM<br>FIRMWARE <span>↗</span></div>
+          <div class="device">
+            <div class="device-top"><span>SONIX</span><span>◉</span></div>
+            <div class="device-screen"><img src="./screenshots/ember/now-playing.png" alt="Amber Sonix now-playing screen on the V1"></div>
+            <div class="device-bottom"><span>VARIATIONS V1</span><span>● ● ●</span></div>
+          </div>
+        </div>
+        <div class="visual-bottom"><span>DESIGNED FOR LISTENING</span><span>240 × 320 PX &nbsp; / &nbsp; 2.0 IN</span></div>
+      </div>
+    </section>
+    <noscript><div class="wrap no-js">JavaScript is disabled; use the firmware button to visit GitHub Releases.</div></noscript>
+    <section class="release-strip wrap" aria-label="Latest firmware release" aria-live="polite">
+      <div class="release-icon">↳</div><div class="release-title"><span class="micro">LATEST TRANSMISSION</span><strong id="release-version">Checking for release…</strong></div><div class="release-date"><span class="micro">RELEASE DATE</span><strong id="release-date">—</strong></div><div class="release-highlights"><span class="micro">RELEASE NOTES</span><span id="release-notes">Fetching the latest update from GitHub.</span></div><a id="release-link" class="text-link" href="https://github.com/mr-f0xx/sonix-player-tempotec-v1/releases/latest">VIEW RELEASE <span>↗</span></a>
+    </section>
+    <section class="intro-section wrap" id="features">
+      <div class="section-kicker"><span>01 / THE EXPERIENCE</span><span>MORE THAN A MUSIC PLAYER</span></div>
+      <div class="section-heading"><div><p class="overline">THE V1, UNLOCKED</p><h2>Small device.<br><em>Big possibilities.</em></h2></div><p>All the things you love about your V1, with a whole lot more under the hood. Built by the community, for the way you listen.</p></div>
+      <div class="feature-grid">
+        <article class="feature-card"><div class="card-top"><span class="icon-box"><svg><use href="#wave"/></svg></span><span>01 / SOUND</span></div><h3>Sound, your way<span>.</span></h3><p>Make every listen yours with powerful tools for shaping and discovering sound.</p><div class="card-tags"><span>10-BAND PEQ</span><span>AUTOEQ</span><span>MSEB</span></div><ul><li>Subsonic / Gonic streaming</li><li>Qobuz offline cache</li><li>WebDAV &amp; FTP network folders</li><li>Listen Together Wi-Fi sync</li></ul></article>
+        <article class="feature-card"><div class="card-top"><span class="icon-box"><svg><use href="#sliders"/></svg></span><span>02 / CREATE</span></div><h3>More than playback<span>.</span></h3><p>From making beats to managing your library, the V1 has a few new tricks.</p><div class="card-tags"><span>TAPE DECK</span><span>TAG MANAGER</span></div><ul><li>16-pad sampler, overdubs &amp; live FX</li><li>Record your mix to WAV</li><li>Wi-Fi artwork lookup &amp; folder transfers</li><li>Smart LED &amp; Stealth mode</li></ul></article>
+        <article class="feature-card"><div class="card-top"><span class="icon-box"><svg><use href="#grid"/></svg></span><span>03 / EXPLORE</span></div><h3>Make it yours<span>.</span></h3><p>Little details, useful extras, and a little bit of fun along the way.</p><div class="card-tags"><span>LISTENING STATS</span><span>MUSIC PET</span></div><ul><li>Wrapped recaps &amp; 2×2 album grid</li><li>A–B loop &amp; battery profiling</li><li>An evolving Music Pet</li><li>Gearboy emulator &amp; mini-games</li></ul></article>
+      </div>
+      <div class="feature-footer"><span>✳ &nbsp; THERE'S EVEN MORE TO DISCOVER</span><a href="https://github.com/mr-f0xx/sonix-player-tempotec-v1/blob/main/FEATURES.md">EXPLORE ALL FEATURES <span>↗</span></a></div>
+    </section>
+    <section class="compare-section" id="compare"><div class="wrap compare-layout"><div class="compare-copy"><p class="overline">02 / THE UPGRADE</p><h2>Same hardware.<br><em>New horizons.</em></h2><p>Sonix starts with the official V1 1.3 firmware and replaces the player and interface. The familiar device, with a lot more room to play.</p><a class="inline-link" href="https://github.com/mr-f0xx/sonix-player-tempotec-v1#features">GET TO KNOW SONIX <span>↗</span></a></div><div class="spec-panel"><div class="panel-header"><span>FEATURE MATRIX</span><span>V1 / REV. 01</span></div><table><thead><tr><th>CAPABILITY</th><th>STOCK 1.3</th><th>SONIX FORK</th></tr></thead><tbody><tr><th>Music playback</th><td>●</td><td>●</td></tr><tr><th>10-band PEQ &amp; AutoEq</th><td>—</td><td>●</td></tr><tr><th>Subsonic / Gonic</th><td>—</td><td>●</td></tr><tr><th>Tape Deck sampler</th><td>—</td><td>●</td></tr><tr><th>Wi-Fi folder transfers</th><td>—</td><td>●</td></tr><tr><th>Music Pet &amp; games</th><td>—</td><td>●</td></tr></tbody></table><div class="panel-foot"><span>● INCLUDED</span><span>— NOT INCLUDED</span><span>COMMUNITY BUILT / V1 ONLY</span></div></div></div></section>
+    <section class="install-section wrap" id="install"><div class="section-kicker"><span>03 / GET STARTED</span><span>PLEASE READ BEFORE FLASHING</span></div><div class="section-heading"><div><p class="overline">READY WHEN YOU ARE</p><h2>Make the <em>switch.</em></h2></div><p>A little preparation goes a long way. Follow the steps below and keep your stock files safe.</p></div><div class="steps"><article><span class="step-number">01</span><h3>Save your stock files</h3><p>Keep the official V1 <code>v1.upt</code> and its matching <code>v1_md5.txt</code> somewhere safe before you begin.</p></article><article><span class="step-number">02</span><h3>Copy &amp; update</h3><p>Download the latest Sonix <code>v1.upt</code>, place it at the root of your microSD card, and run the V1’s built-in firmware updater.</p></article><article><span class="step-number">03</span><h3>Return to stock</h3><p>To revert, put the original vendor <code>v1.upt</code> and matching checksum file at the card root and run the same updater.</p></article></div><div class="safety"><span class="safety-icon">!</span><p><strong>A NOTE ON SAFETY</strong><br>For the TempoTec Variations V1 only. This is unofficial community firmware; read the full instructions and warnings before updating.</p><a href="https://github.com/mr-f0xx/sonix-player-tempotec-v1#install-or-restore-firmware">READ THE GUIDE ↗</a></div></section>
+    <section class="outro wrap"><div><p class="overline">YOUR MUSIC. YOUR PLAYER.</p><h2>Ready to tune in<span>?</span></h2><p>Try the interface in your browser, or take Sonix with you.</p></div><a class="button button-secondary" href="./emulator/index.html"><svg><use href="#play"/></svg> LAUNCH WEB EMULATOR <span class="button-arrow">↗</span></a></section>
+  </main>
+  <footer><div class="wrap footer-inner"><a class="brand footer-brand" href="#top"><span class="brand-mark">S<span>///</span></span><span>SONIX <b>PLAYER</b><small>FOR TEMPOTEC V1</small></span></a><p>A COMMUNITY PROJECT. BUILT FOR THE LOVE OF MUSIC.</p><div><a href="https://github.com/mr-f0xx/sonix-player-tempotec-v1">GITHUB ↗</a><a href="#top">BACK TO TOP ↑</a></div></div></footer>
+</body>
+</html>
