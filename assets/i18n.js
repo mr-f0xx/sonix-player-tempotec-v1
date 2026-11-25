@@ -208,14 +208,39 @@
     },
   };
 
+  const EXTRA = window.SONIX_I18N_EXTRA;
+  if (EXTRA) {
+    (EXTRA.keys || []).forEach((key, index) => {
+      Object.keys(EXTRA.translations || {}).forEach(code => {
+        STRINGS[code] = STRINGS[code] || {};
+        if (!STRINGS[code][key]) STRINGS[code][key] = EXTRA.translations[code][index];
+      });
+    });
+  }
+
+  const DYNAMIC_EN = {
+    btn_download: 'DOWNLOAD FIRMWARE',
+    nav_menu: 'MENU',
+    nav_close: 'CLOSE',
+    rel_unavailable: 'Release unavailable',
+    rel_failed: 'Could not load release details. Visit GitHub to download the firmware.',
+    rel_no_asset: ' No .upt asset found; check the release page.',
+  };
+
   const root = document.documentElement;
   const wrapper = document.querySelector('#lang-switcher');
   const button = document.querySelector('#lang-button');
   const menu = document.querySelector('#lang-menu');
   const flag = document.querySelector('#lang-flag');
-  const codeLabel = document.querySelector('#lang-code');
   const storageKey = 'sonix-site-language';
   let current = 'en';
+
+  window.sonixI18n = {
+    t(key) {
+      const value = (STRINGS[current] || {})[key];
+      return value || DYNAMIC_EN[key] || '';
+    },
+  };
 
   function rememberOriginals() {
     document.querySelectorAll('[data-i18n], [data-i18n-html]').forEach(element => {
@@ -240,7 +265,6 @@
     current = selected.code;
     root.lang = current;
     if (flag) flag.textContent = selected.flag;
-    if (codeLabel) codeLabel.textContent = selected.label;
     if (button) button.setAttribute('aria-label', 'Language: ' + selected.name);
     if (menu) {
       menu.querySelectorAll('[data-lang]').forEach(item => {

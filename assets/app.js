@@ -40,22 +40,22 @@
 
     if (asset && asset.browser_download_url && asset.browser_download_url.startsWith('https://github.com/')) {
       button.href = asset.browser_download_url;
-      button.querySelector('span').textContent = 'DOWNLOAD ' + asset.name.toUpperCase();
+      button.querySelector('span').textContent = window.sonixI18n.t('btn_download') + ' ' + asset.name.toUpperCase();
     } else {
       button.href = release.html_url && release.html_url.startsWith('https://github.com/') ? release.html_url : releases;
-      button.querySelector('span').textContent = 'VIEW LATEST RELEASE';
-      notes.textContent += ' No .upt asset found; check the release page.';
+      button.querySelector('span').textContent = window.sonixI18n.t('view_release').replace(/<[^>]*>/g, '');
+      notes.textContent += window.sonixI18n.t('rel_no_asset');
     }
     shownRelease = true;
   }
 
   function showUnavailable() {
     if (shownRelease) return;
-    version.textContent = 'Release unavailable';
+    version.textContent = window.sonixI18n.t('rel_unavailable');
     date.textContent = '—';
-    notes.textContent = 'Could not load release details. Visit GitHub to download the firmware.';
+    notes.textContent = window.sonixI18n.t('rel_failed');
     button.href = releases;
-    button.querySelector('span').textContent = 'VIEW LATEST RELEASE';
+    button.querySelector('span').textContent = window.sonixI18n.t('view_release').replace(/<[^>]*>/g, '');
   }
 
   // The workflow refreshes this JSON at deploy time, so the strip works even
@@ -87,7 +87,7 @@
     const setOpen = open => {
       nav.classList.toggle('open', open);
       navToggle.setAttribute('aria-expanded', String(open));
-      navToggle.querySelector('span').textContent = open ? 'CLOSE' : 'MENU';
+      navToggle.querySelector('span').textContent = window.sonixI18n.t(open ? 'nav_close' : 'nav_menu');
     };
     navToggle.addEventListener('click', () => setOpen(!nav.classList.contains('open')));
     nav.addEventListener('click', event => {

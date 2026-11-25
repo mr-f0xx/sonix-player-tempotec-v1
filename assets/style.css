@@ -56,8 +56,8 @@
 
 /* Language picker beside the GitHub tile */
 .lang-switcher{position:relative}
-.lang-button{display:inline-flex;align-items:center;gap:7px;border:1px solid #49320e;background:#151006;color:#d9b068;padding:10px 12px;font:700 10px var(--mono);letter-spacing:1px;cursor:pointer}
-.lang-button:hover{border-color:var(--amber);color:var(--amber)}
+.lang-button{display:inline-flex;align-items:center;justify-content:center;min-width:44px;border:1px solid #49320e;background:linear-gradient(180deg,#1a1409,#100d07);color:#d9b068;padding:10px 11px;line-height:1;cursor:pointer;transition:border-color .2s,background .2s}
+.lang-button:hover{border-color:var(--amber);background:#251a08}
 .lang-button #lang-flag{font-size:14px;line-height:1}
 .lang-menu{position:absolute;right:0;top:calc(100% + 8px);min-width:190px;background:#110e08;border:1px solid #6d4a14;padding:6px;display:none;flex-direction:column;z-index:40;box-shadow:0 18px 40px #000a}
 .lang-menu.open{display:flex}
@@ -65,6 +65,5 @@
 .lang-menu button:hover,.lang-menu button.active{color:var(--amber);background:#1b1408}
 .lang-menu-flag{font-size:15px}
 @media(max-width:480px){
-  .lang-code{display:none}
   .lang-button{padding:9px 10px}
 }
