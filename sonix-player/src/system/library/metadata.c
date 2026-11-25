@@ -2090,6 +2090,7 @@ static void read_mp4_metadata(const char *filepath, song_metadata_t *out) {
 	snprintf(out->artist, sizeof(out->artist), "%s", mp4_tag_artist(m));
 	snprintf(out->album_artist, sizeof(out->album_artist), "%s", mp4_tag_album_artist(m));
 	out->compilation = mp4_tag_compilation(m);
+	out->is_explicit = mp4_tag_advisory(m) == 1;
 	snprintf(out->album, sizeof(out->album), "%s", mp4_tag_album(m));
 	snprintf(out->genre, sizeof(out->genre), "%s", mp4_tag_genre(m));
 	out->year = mp4_tag_year(m);

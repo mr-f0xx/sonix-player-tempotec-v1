@@ -12,6 +12,7 @@
 #include "src/gui/shell/icons.h"
 #include "src/gui/shell/keyboard.h"
 #include "src/gui/shell/scrolltext.h"
+#include "src/gui/library/explicitmark.h"
 #include "src/gui/library/geniusui.h"
 #include "src/gui/library/medialist.h"
 #include "src/gui/library/playlistpage.h"
@@ -383,9 +384,12 @@ static void row_bind(row_t *row, int index, const hit_t *hit) {
 	lv_obj_set_style_image_recolor_opa(row->icon, LV_OPA_COVER, 0);
 
 	// An album comes named by its value (name and key, see library.h).
-	char shown[256];
+	char shown[256], decorated[sizeof(shown) + sizeof(EXPLICIT_MARK)];
 	library_album_title(hit->name, shown, sizeof(shown));
-	scrolltext_set(row->title, shown);
+	bool marked = current_cat == CAT_TRACKS ? library_track_explicit(hit->path)
+										   : (current_cat == CAT_ALBUMS && library_album_explicit(hit->name));
+	explicit_decorate(decorated, sizeof(decorated), shown, marked);
+	scrolltext_set(row->title, decorated);
 
 	// Who it is by, under the title: a track's artist, an album's artist.
 	if (current_cat != CAT_ARTISTS && hit->artist[0]) {

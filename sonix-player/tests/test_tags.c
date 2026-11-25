@@ -1095,6 +1095,267 @@ static void test_replaygain_true_peak_tags(const char *dir) {
 	assert(meta.track_true_peak > 1.299f && meta.track_true_peak < 1.301f);
 }
 
+// ---------------------------------------------------------------------------
+// A small but real M4A: AAC or ALAC, with an ilst to carry the advisory tag.
+// The container parser needs an audio sample entry with a configuration box,
+// a sample count and the sample tables; everything else here is tags.
+// ---------------------------------------------------------------------------
+
+static void mp4_wrap(buf_t *out, const char type[4], const buf_t *body) {
+	buf_be32(out, (uint32_t)(8 + body->len));
+	buf_put(out, type, 4);
+	buf_put(out, body->data, body->len);
+}
+
+static void mp4_data_item(buf_t *ilst, const char type[4], uint32_t data_type, const void *value, size_t len) {
+	buf_t data = {0};
+	buf_be32(&data, data_type << 24); // data type
+	buf_be32(&data, 0);				 // locale
+	buf_put(&data, value, len);
+	buf_t item = {0};
+	mp4_wrap(&item, "data", &data);
+	mp4_wrap(ilst, type, &item);
+	free(data.data);
+	free(item.data);
+}
+
+static void mp4_freeform_item(buf_t *ilst, const char *name, const char *value) {
+	buf_t named = {0};
+	buf_be32(&named, 0);
+	buf_put(&named, name, strlen(name));
+	buf_t data = {0};
+	buf_be32(&data, 1 << 24); // UTF-8
+	buf_be32(&data, 0);		  // locale
+	buf_put(&data, value, strlen(value));
+	buf_t item = {0};
+	mp4_wrap(&item, "name", &named);
+	mp4_wrap(&item, "data", &data);
+	mp4_wrap(ilst, "----", &item);
+	free(named.data);
+	free(data.data);
+	free(item.data);
+}
+
+static void append_m4a(buf_t *out, bool alac, int advisory, const char *freeform, const char *title) {
+	// AudioSampleEntry: 6 reserved, 2 data-reference, 8 version/revision,
+	// 2 channels, 2 sample size, 2 pre-defined, 2 reserved, 4 rate(16.16).
+	buf_t entry = {0};
+	unsigned char audio[28] = {0};
+	audio[17] = 2; // channels
+	audio[19] = 16;
+	audio[27] = 44; // 44100 >> 10 in the 16.16 field's high byte
+	buf_put(&entry, audio, sizeof(audio));
+
+	buf_t config_body = {0};
+	if (alac) {
+		buf_be32(&config_body, 0);
+		for (int i = 0; i < 24; i++) {
+			buf_u8(&config_body, 0);
+		}
+		mp4_wrap(&entry, "alac", &config_body);
+	} else {
+		const unsigned char esds[] = {
+			0, 0, 0, 0, // version + flags
+			0x03, 22, 0, 1, 0, // ES_Descriptor
+			// DecoderConfigDescriptor: object type, stream type, buffer size,
+			// max bitrate and average bitrate -- thirteen bytes in all.
+			0x04, 13, 0x40, 0x15, 0, 0, 0, 0, 0, 3, 0xE8, 0, 0, 3, 0xE8,
+			0x05, 2, 0x12, 0x10, // AudioSpecificConfig: AAC-LC, 44.1 kHz, stereo
+		};
+		buf_put(&config_body, esds, sizeof(esds));
+		mp4_wrap(&entry, "esds", &config_body);
+	}
+	buf_t sample_entry = {0};
+	mp4_wrap(&sample_entry, alac ? "alac" : "mp4a", &entry);
+
+	buf_t stsd_body = {0};
+	buf_be32(&stsd_body, 0); // version + flags
+	buf_be32(&stsd_body, 1); // one entry
+	buf_put(&stsd_body, sample_entry.data, sample_entry.len);
+	buf_t stsd = {0};
+	mp4_wrap(&stsd, "stsd", &stsd_body);
+
+	buf_t stts_body = {0};
+	buf_be32(&stts_body, 0);
+	buf_be32(&stts_body, 1);
+	buf_be32(&stts_body, 1);	// one sample
+	buf_be32(&stts_body, 1024); // its duration
+	buf_t stts = {0};
+	mp4_wrap(&stts, "stts", &stts_body);
+
+	buf_t stsz_body = {0};
+	buf_be32(&stsz_body, 0);
+	buf_be32(&stsz_body, 4); // uniform sample size
+	buf_be32(&stsz_body, 1); // one sample
+	buf_t stsz = {0};
+	mp4_wrap(&stsz, "stsz", &stsz_body);
+
+	buf_t stco_body = {0};
+	buf_be32(&stco_body, 0);
+	buf_be32(&stco_body, 1);
+	buf_be32(&stco_body, 0);
+	buf_t stco = {0};
+	mp4_wrap(&stco, "stco", &stco_body);
+
+	buf_t stbl = {0};
+	buf_put(&stbl, stsd.data, stsd.len);
+	buf_put(&stbl, stts.data, stts.len);
+	buf_put(&stbl, stsz.data, stsz.len);
+	buf_put(&stbl, stco.data, stco.len);
+
+	buf_t minf = {0};
+	mp4_wrap(&minf, "stbl", &stbl);
+
+	buf_t mdhd_body = {0};
+	buf_be32(&mdhd_body, 0); // version + flags, creation and modification
+	buf_be32(&mdhd_body, 0);
+	buf_be32(&mdhd_body, 0);
+	buf_be32(&mdhd_body, 44100);
+	buf_be32(&mdhd_body, 1024);
+	buf_be16(&mdhd_body, 0x55C4); // language, packed
+	buf_be16(&mdhd_body, 0);
+	buf_t mdhd = {0};
+	mp4_wrap(&mdhd, "mdhd", &mdhd_body);
+
+	buf_t hdlr_body = {0};
+	buf_be32(&hdlr_body, 0);
+	buf_be32(&hdlr_body, 0);
+	buf_put(&hdlr_body, "soun", 4);
+	buf_be32(&hdlr_body, 0);
+	buf_be32(&hdlr_body, 0);
+	buf_be32(&hdlr_body, 0);
+	buf_u8(&hdlr_body, 0);
+	buf_t hdlr = {0};
+	mp4_wrap(&hdlr, "hdlr", &hdlr_body);
+
+	buf_t mdia = {0};
+	buf_put(&mdia, mdhd.data, mdhd.len);
+	buf_put(&mdia, hdlr.data, hdlr.len);
+	buf_put(&mdia, minf.data, minf.len);
+
+	buf_t trak_body = {0};
+	mp4_wrap(&trak_body, "mdia", &mdia);
+	buf_t trak = {0};
+	mp4_wrap(&trak, "trak", &trak_body);
+
+	buf_t mvhd_body = {0};
+	buf_be32(&mvhd_body, 0);
+	buf_be32(&mvhd_body, 0);
+	buf_be32(&mvhd_body, 0);
+	buf_be32(&mvhd_body, 1000);
+	buf_be32(&mvhd_body, 1024);
+	for (int i = 0; i < 80; i++) {
+		buf_u8(&mvhd_body, 0);
+	}
+	buf_t mvhd = {0};
+	mp4_wrap(&mvhd, "mvhd", &mvhd_body);
+
+	buf_t ilst = {0};
+	mp4_data_item(&ilst, "\xA9nam", 1, title, strlen(title));
+	if (advisory >= 0) {
+		const unsigned char value[4] = {0, 0, 0, (unsigned char)advisory};
+		mp4_data_item(&ilst, "rtng", 21, value + 3, 1); // the last byte of the integer
+	}
+	if (freeform) {
+		mp4_freeform_item(&ilst, "ITUNESADVISORY", freeform);
+	}
+
+	buf_t meta_body = {0};
+	buf_be32(&meta_body, 0); // QuickTime-style full box: four version bytes
+	buf_t mhdlr_body = {0};
+	buf_be32(&mhdlr_body, 0);
+	buf_be32(&mhdlr_body, 0);
+	buf_put(&mhdlr_body, "mdir", 4);
+	buf_put(&mhdlr_body, "appl", 4);
+	buf_t mhdlr = {0};
+	mp4_wrap(&mhdlr, "hdlr", &mhdlr_body);
+	buf_t ilst_box = {0};
+	mp4_wrap(&ilst_box, "ilst", &ilst);
+	buf_put(&meta_body, mhdlr.data, mhdlr.len);
+	buf_put(&meta_body, ilst_box.data, ilst_box.len);
+	buf_t meta = {0};
+	mp4_wrap(&meta, "meta", &meta_body);
+
+	buf_t udta_body = {0};
+	buf_put(&udta_body, meta.data, meta.len);
+	buf_t udta = {0};
+	mp4_wrap(&udta, "udta", &udta_body);
+
+	buf_t moov_body = {0};
+	buf_put(&moov_body, mvhd.data, mvhd.len);
+	buf_put(&moov_body, trak.data, trak.len);
+	buf_put(&moov_body, udta.data, udta.len);
+	buf_t moov = {0};
+	mp4_wrap(&moov, "moov", &moov_body);
+
+	buf_be32(out, 16);
+	buf_put(out, "ftypisom", 8);
+	buf_be32(out, 0x200);
+	buf_put(out, moov.data, moov.len);
+
+	free(entry.data); free(config_body.data); free(sample_entry.data);
+	free(stsd_body.data); free(stsd.data); free(stts_body.data); free(stts.data);
+	free(stsz_body.data); free(stsz.data); free(stco_body.data); free(stco.data);
+	free(stbl.data); free(minf.data); free(mdhd_body.data); free(mdhd.data);
+	free(hdlr_body.data); free(hdlr.data); free(mdia.data);
+	free(trak_body.data); free(trak.data); free(mvhd_body.data); free(mvhd.data);
+	free(ilst.data); free(meta_body.data); free(mhdlr_body.data); free(mhdlr.data);
+	free(ilst_box.data); free(meta.data); free(udta_body.data); free(udta.data);
+	free(moov_body.data); free(moov.data);
+}
+
+static void test_m4a_advisory(const char *dir) {
+	char path[512];
+	song_metadata_t meta;
+	buf_t file = {0};
+
+	// 0 and 2 are "none" and "clean"; only 1 (and the older 4) is explicit.
+	const int ratings[] = {-1, 0, 1, 2, 4};
+	const char *names[] = {"absent", "none", "explicit", "clean", "older"};
+	for (size_t i = 0; i < sizeof(ratings) / sizeof(ratings[0]); i++) {
+		snprintf(path, sizeof(path), "%s/%s.m4a", dir, names[i]);
+		file.len = 0;
+		append_m4a(&file, false, ratings[i], NULL, "BBHMM");
+		write_fixture(path, file.data, file.len);
+
+		metadata_read(path, &meta);
+		assert(strcmp(meta.title, "BBHMM") == 0);
+		assert(meta.is_explicit == (ratings[i] == 1 || ratings[i] == 4));
+	}
+
+	// ALAC is a different sample entry in the same container: the advisory
+	// is read exactly the same way.
+	file.len = 0;
+	append_m4a(&file, true, 1, NULL, "ALAC Track");
+	snprintf(path, sizeof(path), "%s/alac.m4a", dir);
+	write_fixture(path, file.data, file.len);
+	metadata_read(path, &meta);
+	assert(strcmp(meta.title, "ALAC Track") == 0);
+	assert(meta.is_explicit);
+
+	// A tagger writing the name as a freeform atom rather than as rtng.
+	const char *values[] = {"1", "4", "2", "0"};
+	const bool expected[] = {true, true, false, false};
+	for (size_t i = 0; i < sizeof(values) / sizeof(values[0]); i++) {
+		file.len = 0;
+		append_m4a(&file, false, -1, values[i], "Freeform");
+		snprintf(path, sizeof(path), "%s/freeform-%s.m4a", dir, values[i]);
+		write_fixture(path, file.data, file.len);
+		metadata_read(path, &meta);
+		assert(meta.is_explicit == expected[i]);
+	}
+
+	// A present clean rating wins over a freeform value in the same file.
+	file.len = 0;
+	append_m4a(&file, false, 2, "1", "Both");
+	snprintf(path, sizeof(path), "%s/both.m4a", dir);
+	write_fixture(path, file.data, file.len);
+	metadata_read(path, &meta);
+	assert(!meta.is_explicit);
+
+	free(file.data);
+}
+
 // Exercise the actual writer with the player's real readers and decoder.
 static void test_tagwriter_roundtrip(const char *dir) {
     char path[512]; song_metadata_t meta; buf_t data={0}, frames={0};
@@ -1126,6 +1387,7 @@ int main(void) {
 	test_vorbischap_and_containers(dir);
 	test_japanese_tag_text(dir);
 	test_replaygain_true_peak_tags(dir);
+	test_m4a_advisory(dir);
 
 	char cmd[600];
 	snprintf(cmd, sizeof(cmd), "rm -rf '%s'", dir);
@@ -1133,6 +1395,6 @@ int main(void) {
 	(void)rc;
 
 	printf("PASS tags (FLAC+ID3, broken ID3v2.4/zlib/unsync/chained, format sniffing, CUE, Ogg streaming, V1 tagdate, "
-		   "Japanese/Latin-1/UTF-8/UTF-16/CP1251 tag text)\n");
+		   "Japanese/Latin-1/UTF-8/UTF-16/CP1251 tag text, M4A iTunes advisory)\n");
 	return 0;
 }

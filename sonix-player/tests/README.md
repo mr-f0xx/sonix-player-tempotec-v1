@@ -661,6 +661,18 @@ table with plays in it: the row-id pass named a `sortkey` column that
 `PLAY_COUNTS` has never had, so the statement failed to prepare and the page
 showed its "nothing to show" note whatever was counted.
 
+## Explicit advisory tag
+
+`make -C sonix-player/tests explicit` links the real `library.c` and SQLite:
+it checks that the advisory flag is stored per track, that one explicit song
+marks its whole album (and only that album when two records share a name), that
+an index written before the column existed still opens with its tracks
+unmarked, and that the marker the lists draw is appended without changing the
+name used to search for or open a record. The tag parsing itself is in
+`make -C sonix-player/tests tags`, which builds small real M4A containers with
+AAC and ALAC sample entries, native `rtng` atoms and freeform
+`----:ITUNESADVISORY` tags.
+
 ## Boot-time playback state and automatic card checks
 
 `make -C sonix-player/tests playback-state` links the real library, CUE parser
