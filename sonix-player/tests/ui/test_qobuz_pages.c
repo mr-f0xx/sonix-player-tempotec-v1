@@ -580,6 +580,21 @@ static lv_obj_t *find_clickable_with_label(lv_obj_t *root, const char *needle) {
 	return NULL;
 }
 
+// A search-kind button says what it searches for as its own data rather than as
+// a label: the glyph is all that is drawn. This finds it by that word, the same
+// way the label helper finds a button by its text.
+static lv_obj_t *find_clickable_with_data(lv_obj_t *root, const char *needle) {
+	if (!root || lv_obj_is_hidden(root) || lv_obj_has_state(root, LV_STATE_DISABLED)) return NULL;
+	const char *data = lv_obj_get_user_data(root);
+	if (data && strcmp(data, needle) == 0 && lv_obj_is_clickable(root)) return root;
+	uint32_t cnt = lv_obj_get_child_count(root);
+	for (uint32_t i = 0; i < cnt; i++) {
+		lv_obj_t *hit = find_clickable_with_data(lv_obj_get_child(root, (int32_t)i), needle);
+		if (hit) return hit;
+	}
+	return NULL;
+}
+
 static lv_obj_t *find_label_by_text(lv_obj_t *root, const char *text) {
 	if (lv_obj_check_type(root, &lv_label_class) && strcmp(lv_label_get_text(root), text) == 0) {
 		return root;
@@ -786,8 +801,120 @@ int main(int argc, char **argv) {
 	assert(lang_set("English"));
 	theme_set_kind(THEME_KIND_DARK);
 
+	// 7. The search page. Its three kinds used to be 140-px pills stepping
+	// 150 px, which put the third at x=306 on a 240-px panel: "Artists" could
+	// not be reached without dragging the row sideways, and the first pill
+	// drew the raw tag "tracks_2", a key no language file has. They are now
+	// three round glyph buttons: all three on the panel, none under the
+	// keyboard tray, and no word drawn at all -- so nothing to translate and
+	// nothing to clip.
+	{
+		// The magnifier the page puts in its second corner slot.
+		lv_obj_t *magnifier = NULL;
+		uint32_t cnt = lv_obj_get_child_count(qobuz_screen);
+		for (uint32_t i = 0; i < cnt; i++) {
+			lv_obj_t *ch = lv_obj_get_child(qobuz_screen, (int32_t)i);
+			if (lv_obj_is_hidden(ch) || !lv_obj_check_type(ch, &lv_button_class)) continue;
+			lv_obj_t *icon = lv_obj_get_child(ch, 0);
+			if (icon && lv_obj_check_type(icon, &lv_image_class) && lv_image_get_src(icon) == &icon_search) {
+				magnifier = ch;
+			}
+		}
+		assert(magnifier != NULL);
+		lv_obj_send_event(magnifier, LV_EVENT_CLICKED, NULL);
+		lv_timer_handler();
+		lv_obj_t *search = lv_screen_active();
+		assert(search != NULL && search != qobuz_screen);
+		lv_obj_update_layout(search);
+
+		static const char *const KINDS[] = {"search_tracks_2", "albums", "artists"};
+		for (size_t li = 0; li < sizeof(LANGS) / sizeof(LANGS[0]); li++) {
+			assert(lang_set(LANGS[li]));
+			for (int tk = 0; tk < THEME_KIND_COUNT; tk++) {
+				theme_set_kind((theme_kind_t)tk);
+				lv_obj_update_layout(search);
+
+				int prev_x2 = -1;
+				for (int i = 0; i < 3; i++) {
+					lv_obj_t *btn = find_clickable_with_data(search, KINDS[i]);
+					if (!btn) {
+						fprintf(stderr, "[search / %s / theme %d] no button for kind '%s'\n", LANGS[li], tk,
+								KINDS[i]);
+						assert(!"missing search kind button");
+					}
+					lv_area_t a;
+					lv_obj_get_coords(btn, &a);
+					// On the panel, left to right, and never wider than a finger
+					// can miss: the rule the three pills broke.
+					assert(a.x1 >= 0 && a.x2 <= (int32_t)cfg.screen_width - 1);
+					assert(a.x1 > prev_x2);
+					assert(a.x2 - a.x1 + 1 >= 44 && a.y2 - a.y1 + 1 >= 44);
+					prev_x2 = a.x2;
+
+					// Each carries the glyph that means it, and it is the glyph
+					// closest to the same meaning in the local library search.
+					const lv_image_dsc_t *glyph = i == 0 ? &icon_music2 : (i == 1 ? &icon_album : &icon_artist);
+					assert(tree_has_visible_glyph(btn, glyph));
+				}
+
+				// All three kinds above the keys, not underneath them. The
+				// keys are the one wide child that takes the bottom of the
+				// panel (LV_USE_KEYBOARD is off in this build, so the tray is
+				// the shell's own widget tree rather than lv_keyboard's).
+				lv_obj_t *kb = NULL;
+				uint32_t kids = lv_obj_get_child_count(search);
+				for (uint32_t i = 0; i < kids; i++) {
+					lv_obj_t *ch = lv_obj_get_child(search, (int32_t)i);
+					if (!ch || lv_obj_is_hidden(ch)) continue;
+					lv_area_t ka;
+					lv_obj_get_coords(ch, &ka);
+					if (ka.y1 > (int32_t)cfg.screen_height / 2 && (ka.x2 - ka.x1) > (int32_t)cfg.screen_width / 2) {
+						kb = ch;
+					}
+				}
+				assert(kb != NULL);
+				lv_area_t kb_area;
+				lv_obj_get_coords(kb, &kb_area);
+				for (int i = 0; i < 3; i++) {
+					lv_area_t a;
+					lv_obj_get_coords(find_clickable_with_data(search, KINDS[i]), &a);
+					if (a.y2 >= kb_area.y1) {
+						fprintf(stderr, "[search / %s / theme %d] kind '%s' [%d,%d..%d,%d] runs under the keys [%d..]\n",
+								LANGS[li], tk, KINDS[i], (int)a.x1, (int)a.y1, (int)a.x2, (int)a.y2, (int)kb_area.y1);
+						assert(!"search kind button under the keyboard");
+					}
+				}
+
+				// A tap moves the accent, and the accent is the only thing that
+				// says which kind is chosen -- so it has to follow the tap.
+				lv_obj_t *artists_btn = find_clickable_with_data(search, "artists");
+				lv_obj_send_event(artists_btn, LV_EVENT_CLICKED, NULL);
+				lv_obj_update_layout(search);
+				lv_obj_t *tracks_btn = find_clickable_with_data(search, "search_tracks_2");
+				assert(lv_color_eq(lv_obj_get_style_bg_color(artists_btn, 0), theme()->accent));
+				assert(!lv_color_eq(lv_obj_get_style_bg_color(tracks_btn, 0), theme()->accent));
+				lv_obj_send_event(tracks_btn, LV_EVENT_CLICKED, NULL);
+				lv_obj_update_layout(search);
+				assert(lv_color_eq(lv_obj_get_style_bg_color(tracks_btn, 0), theme()->accent));
+				assert(lv_color_eq(lv_obj_get_style_bg_color(artists_btn, 0), theme()->surface_pressed));
+			}
+		}
+		assert(lang_set("English"));
+		theme_set_kind(THEME_KIND_DARK);
+
+		// The search page draws no translated words of its own beyond the
+		// placeholder and the keys, so there is no key it can leak the way the
+		// old pills leaked "tracks_2".
+		for (uint32_t i = 0; i < lv_obj_get_child_count(search); i++) {
+			lv_obj_t *ch = lv_obj_get_child(search, (int32_t)i);
+			if (lv_obj_check_type(ch, &lv_label_class)) {
+				assert(strcmp(lv_label_get_text(ch), "tracks_2") != 0);
+			}
+		}
+	}
+
 	printf("PASS qobuz_pages (240x320, 11 languages x 5 themes zero-overlap, four tiles, "
-		   "no scrolling, sign-in and offline states)\n");
+		   "no scrolling, sign-in and offline states, search kinds on the panel)\n");
 
 	nftw(tmp, unlink_cb, 64, FTW_DEPTH | FTW_PHYS);
 	return 0;
