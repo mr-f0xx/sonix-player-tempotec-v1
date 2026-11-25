@@ -18,6 +18,9 @@ on:
       - sonix-player/**
       - sonix-packer/assets/V1/**
       - tools/v1-emulator/**
+      - index.html
+      - assets/**
+      - screenshots/ember/now-playing.png
   push:
     branches:
       - '**'
@@ -75,7 +78,7 @@ jobs:
         if: github.event_name == 'workflow_dispatch' && inputs.build_ref != ''
         run: |
           git fetch --no-tags --depth=1 origin "$GITHUB_SHA"
-          git restore --source="$GITHUB_SHA" --worktree -- tools/v1-emulator
+          git restore --source="$GITHUB_SHA" --worktree -- tools/v1-emulator index.html assets screenshots/ember/now-playing.png
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -126,10 +129,14 @@ jobs:
           # Carry forward recent previously published builds from live GitHub Pages
           # so the webpage's "Published Sonix Builds" dropdown preserves build history.
           MERGE_ARGS=""
-          if [ "$PUBLISH" = true ] && curl --fail --silent --location --max-time 15 \
-               "$PAGES_BASE_URL/builds/manifest.json" \
-               -o "$RUNNER_TEMP/prev-manifest.json"; then
-            echo "Fetched existing catalog from $PAGES_BASE_URL/builds/manifest.json"
+          # The emulator now lives under /emulator/. Fall back to the former
+          # root catalog on the first deployment so existing builds survive.
+          CATALOG_BASE="$PAGES_BASE_URL/emulator"
+          if [ "$PUBLISH" = true ] && { curl --fail --silent --location --max-time 15 \
+               "$CATALOG_BASE/builds/manifest.json" -o "$RUNNER_TEMP/prev-manifest.json" || \
+             { CATALOG_BASE="$PAGES_BASE_URL"; curl --fail --silent --location --max-time 15 \
+               "$CATALOG_BASE/builds/manifest.json" -o "$RUNNER_TEMP/prev-manifest.json"; }; }; then
+            echo "Fetched existing catalog from $CATALOG_BASE/builds/manifest.json"
             node -e '
               const fs = require("fs");
               const m = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
@@ -140,7 +147,7 @@ jobs:
               fname="$(basename "$rel_url")"
               if [ -n "$fname" ]; then
                 curl --fail --silent --location --max-time 60 \
-                  "$PAGES_BASE_URL/$rel_url" \
+                  "$CATALOG_BASE/$rel_url" \
                   -o "tools/v1-emulator/dist/pages/builds/$fname" || rm -f "tools/v1-emulator/dist/pages/builds/$fname"
               fi
             done
@@ -167,6 +174,19 @@ jobs:
           npm ci --prefix tools/v1-emulator/tests --ignore-scripts
           npm test --prefix tools/v1-emulator/tests
 
+      # Keep the existing emulator tests against the original staged layout,
+      # then publish it as a standalone subsite beside the landing page.
+      - name: Assemble showcase and emulator Pages site
+        run: |
+          set -euo pipefail
+          mv tools/v1-emulator/dist/pages tools/v1-emulator/dist/emulator-stage
+          mkdir -p tools/v1-emulator/dist/pages/screenshots/ember
+          mv tools/v1-emulator/dist/emulator-stage tools/v1-emulator/dist/pages/emulator
+          cp index.html tools/v1-emulator/dist/pages/index.html
+          cp -R assets tools/v1-emulator/dist/pages/assets
+          cp screenshots/ember/now-playing.png tools/v1-emulator/dist/pages/screenshots/ember/
+          touch tools/v1-emulator/dist/pages/.nojekyll
+
       - name: Upload downloadable .sonix-web.zip artifact
         id: web_artifact
         uses: actions/upload-artifact@v4
@@ -181,7 +201,7 @@ jobs:
         env:
           ARTIFACT_URL: ${{ steps.web_artifact.outputs.artifact-url }}
           REVISION: ${{ steps.source.outputs.short_sha }}
-          SITE_URL: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/
+          SITE_URL: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/emulator/
         run: |
           echo "[Download the web build for $REVISION]($ARTIFACT_URL), then drop the downloaded ZIP into **Firmware Builds** in the [V1 emulator]($SITE_URL). No extraction or device update needed." >> "$GITHUB_STEP_SUMMARY"
 
@@ -222,7 +242,7 @@ jobs:
         run: |
           {
             echo "### Live TempoTec V1 Browser Emulator"
-            echo "Open directly in your browser (zero install): ${{ steps.deployment.outputs.page_url }}"
+            echo "Open directly in your browser (zero install): ${{ steps.deployment.outputs.page_url }}emulator/"
             echo ""
             echo "Latest bundle included: \`${{ needs.build-wasm.outputs.bundle_name }}\`"
           } >> "$GITHUB_STEP_SUMMARY"
