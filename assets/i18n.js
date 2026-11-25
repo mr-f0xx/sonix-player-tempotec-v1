@@ -33,7 +33,7 @@
       safety_title: 'NOTA SULLA SICUREZZA', safety_desc: 'Solo per TempoTec Variations V1. Firmware comunitario non ufficiale: leggi istruzioni e avvertimenti prima di aggiornare.', read_guide: 'LEGGI LA GUIDA',
       s5_kicker: '05 / SUPPORTO', s5_kicker_right: 'MANTIENI VIVO IL FORK', s5_overline: 'TI PIACE SONIX?', s5_title: 'Sostieni il <em>lavoro.</em>',
       s5_desc: 'Questo fork è un progetto comunitario. Se il tuo V1 è diventato più divertente, puoi sostenere direttamente lo sviluppo.',
-      footer_tagline: 'UN PROGETTO COMUNITARIO. CREATO PER AMORE DELLA MUSICA.',
+      footer_tagline: 'UN PROGETTO COMUNITARIO DI IMRE FERENCZI. CREATO PER AMORE DELLA MUSICA.',
     },
     de: {
       nav_features: 'FUNKTIONEN', nav_fork: 'FORK-ERGÄNZUNGEN', nav_upgrade: 'DAS UPGRADE', nav_install: 'INSTALLATION', nav_donate: 'SPENDEN',
@@ -52,7 +52,7 @@
       safety_title: 'SICHERHEITSHINWEIS', safety_desc: 'Nur für den TempoTec Variations V1. Inoffizielle Community-Firmware; lies die vollständigen Anweisungen und Warnungen vor dem Update.', read_guide: 'ANLEITUNG LESEN',
       s5_kicker: '05 / UNTERSTÜTZEN', s5_kicker_right: 'DEN FORK AM LEBEN HALTEN', s5_overline: 'GEFÄLLT DIR SONIX?', s5_title: 'Unterstütze die <em>Arbeit.</em>',
       s5_desc: 'Dieser Fork ist ein Community-Projekt. Wenn dein V1 mehr Spaß macht, kannst du die Entwicklung direkt unterstützen.',
-      footer_tagline: 'EIN COMMUNITY-PROJEKT. AUS LIEBE ZUR MUSIK GEMACHT.',
+      footer_tagline: 'EIN COMMUNITY-PROJEKT VON IMRE FERENCZI. AUS LIEBE ZUR MUSIK GEMACHT.',
     },
     es: {
       nav_features: 'FUNCIONES', nav_fork: 'AÑADIDOS DEL FORK', nav_upgrade: 'LA ACTUALIZACIÓN', nav_install: 'INSTALAR', nav_donate: 'DONAR',
@@ -71,7 +71,7 @@
       safety_title: 'NOTA DE SEGURIDAD', safety_desc: 'Solo para TempoTec Variations V1. Firmware comunitario no oficial; lee las instrucciones y advertencias completas antes de actualizar.', read_guide: 'LEER LA GUÍA',
       s5_kicker: '05 / APOYO', s5_kicker_right: 'MANTÉN VIVO EL FORK', s5_overline: '¿TE GUSTA SONIX?', s5_title: 'Apoya el <em>trabajo.</em>',
       s5_desc: 'Este fork es un proyecto comunitario. Si tu V1 es más divertido, puedes apoyar directamente el desarrollo.',
-      footer_tagline: 'UN PROYECTO COMUNITARIO. HECHO POR AMOR A LA MÚSICA.',
+      footer_tagline: 'UN PROYECTO COMUNITARIO DE IMRE FERENCZI. HECHO POR AMOR A LA MÚSICA.',
     },
     fr: {
       nav_features: 'FONCTIONS', nav_fork: 'AJOUTS DU FORK', nav_upgrade: 'LA MISE À NIVEAU', nav_install: 'INSTALLATION', nav_donate: 'FAIRE UN DON',
@@ -90,7 +90,7 @@
       safety_title: 'NOTE DE SÉCURITÉ', safety_desc: 'Uniquement pour TempoTec Variations V1. Firmware communautaire non officiel : lisez les instructions et avertissements avant la mise à jour.', read_guide: 'LIRE LE GUIDE',
       s5_kicker: '05 / SOUTENIR', s5_kicker_right: 'FAITES VIVRE LE FORK', s5_overline: 'SONIX VOUS PLAÎT ?', s5_title: 'Soutenez le <em>travail.</em>',
       s5_desc: 'Ce fork est un projet communautaire. Si votre V1 est plus amusant, vous pouvez soutenir directement le développement.',
-      footer_tagline: 'UN PROJET COMMUNAUTAIRE. PAR AMOUR DE LA MUSIQUE.',
+      footer_tagline: 'UN PROJET COMMUNAUTAIRE DE IMRE FERENCZI. PAR AMOUR DE LA MUSIQUE.',
     },
     nl: {
       nav_features: 'FUNCTIES', nav_fork: 'FORK-TOEVOEGINGEN', nav_upgrade: 'DE UPGRADE', nav_install: 'INSTALLEREN', nav_donate: 'DONEREN',
@@ -109,7 +109,7 @@
       safety_title: 'VEILIGHEIDSNOTITIE', safety_desc: 'Alleen voor TempoTec Variations V1. Officiële community-firmware; lees de volledige instructies en waarschuwingen voor het updaten.', read_guide: 'LEES DE HANDLEIDING',
       s5_kicker: '05 / STEUN', s5_kicker_right: 'HOUD DE FORK LEVEND', s5_overline: 'VIND JE SONIX LEUK?', s5_title: 'Steun het <em>werk.</em>',
       s5_desc: 'Deze fork is een communityproject. Als je V1 leuker is geworden, kun je de ontwikkeling direct steunen.',
-      footer_tagline: 'EEN COMMUNITYPROJECT. GEMAAKT UIT LIEFDE VOOR MUZIEK.',
+      footer_tagline: 'EEN COMMUNITYPROJECT DOOR IMRE FERENCZI. GEMAAKT UIT LIEFDE VOOR MUZIEK.',
     },
     pl: {
       nav_features: 'FUNKCJE', nav_fork: 'DODATKI FORKA', nav_upgrade: 'AKTUALIZACJA', nav_install: 'INSTALACJA', nav_donate: 'WSPARCIE',
@@ -128,7 +128,7 @@
       safety_title: 'UWAGA DOTYCZĄCA BEZPIECZEŃSTWA', safety_desc: 'Tylko dla TempoTec Variations V1. To nieoficjalny firmware społeczności; przed aktualizacją przeczytaj pełne instrukcje i ostrzeżenia.', read_guide: 'PRZECZYTAJ PRZEWODNIK',
       s5_kicker: '05 / WSPARCIE', s5_kicker_right: 'UTRZYMAJ FORKA PRZY ŻYCIU', s5_overline: 'PODoba CI SIĘ SONIX?', s5_title: 'Wsparcie dla <em>pracy.</em>',
       s5_desc: 'Ten fork to projekt społeczności. Jeśli Twój V1 daje więcej frajdy, możesz bezpośrednio wspierać rozwój.',
-      footer_tagline: 'PROJEKT SPOŁECZNOŚCI. TWORZONY Z MIŁOŚCI DO MUZYKI.',
+      footer_tagline: 'PROJEKT SPOŁECZNOŚCI AUTORSTWA IMRE FERENCZIEGO. TWORZONY Z MIŁOŚCI DO MUZYKI.',
     },
     'pt-BR': {
       nav_features: 'RECURSOS', nav_fork: 'ADIÇÕES DO FORK', nav_upgrade: 'A ATUALIZAÇÃO', nav_install: 'INSTALAR', nav_donate: 'DOAR',
@@ -147,7 +147,7 @@
       safety_title: 'NOTA DE SEGURANÇA', safety_desc: 'Apenas para TempoTec Variations V1. Este é um firmware comunitário não oficial; leia as instruções e avisos completos antes de atualizar.', read_guide: 'LER O GUIA',
       s5_kicker: '05 / APOIO', s5_kicker_right: 'MANTENHA O FORK VIVO', s5_overline: 'GOSTA DO SONIX?', s5_title: 'Apoie o <em>trabalho.</em>',
       s5_desc: 'Este fork é um projeto comunitário. Se o seu V1 ficou mais divertido, você pode apoiar o desenvolvimento diretamente.',
-      footer_tagline: 'UM PROJETO COMUNITÁRIO. FEITO POR AMOR À MÚSICA.',
+      footer_tagline: 'UM PROJETO COMUNITÁRIO POR IMRE FERENCZI. FEITO POR AMOR À MÚSICA.',
     },
     uk: {
       nav_features: 'ФУНКЦІЇ', nav_fork: 'ДОДАТКИ ФОРКА', nav_upgrade: 'ОНОВЛЕННЯ', nav_install: 'ВСТАНОВЛЕННЯ', nav_donate: 'ПІДТРИМКА',
@@ -166,7 +166,7 @@
       safety_title: 'ПРИМІТКА ЩОДО БЕЗПЕКИ', safety_desc: 'Тільки для TempoTec Variations V1. Це неофіційна громадська прошивка; перед оновленням прочитайте повні інструкції та попередження.', read_guide: 'ЧИТАТИ ІНСТРУКЦІЮ',
       s5_kicker: '05 / ПІДТРИМКА', s5_kicker_right: 'ПІДТРИМУЙТЕ FORK', s5_overline: 'ПОДОБАЄТЬСЯ SONIX?', s5_title: 'Підтримайте <em>роботу.</em>',
       s5_desc: 'Цей форк — громадський проект. Якщо ваш V1 став цікавішим, ви можете напряму підтримати розвиток.',
-      footer_tagline: 'ГРОМАДСЬКИЙ ПРОЕКТ. СТВОРЕНИЙ З ЛЮБОВІ ДО МУЗИКИ.',
+      footer_tagline: 'ГРОМАДСЬКИЙ ПРОЕКТ ВІД IMRE FERENCZI. СТВОРЕНИЙ З ЛЮБОВІ ДО МУЗИКИ.',
     },
     ru: {
       nav_features: 'ВОЗМОЖНОСТИ', nav_fork: 'ДОПОЛНЕНИЯ ФОРКА', nav_upgrade: 'ОБНОВЛЕНИЕ', nav_install: 'УСТАНОВКА', nav_donate: 'ПОДДЕРЖКА',
@@ -185,7 +185,7 @@
       safety_title: 'ПРИМЕЧАНИЕ О БЕЗОПАСНОСТИ', safety_desc: 'Только для TempoTec Variations V1. Это неофициальная прошивка сообщества; перед обновлением прочитайте полные инструкции и предупреждения.', read_guide: 'ЧИТАТЬ РУКОВОДСТВО',
       s5_kicker: '05 / ПОДДЕРЖКА', s5_kicker_right: 'ПОДДЕРЖИВАЙТЕ FORK', s5_overline: 'НРАВИТСЯ SONIX?', s5_title: 'Поддержите <em>работу.</em>',
       s5_desc: 'Этот форк — проект сообщества. Если ваш V1 стал интереснее, вы можете напрямую поддержать разработку.',
-      footer_tagline: 'ПРОЕКТ СООБЩЕСТВА. СОЗДАН ПО ЛЮБВИ К МУЗЫКЕ.',
+      footer_tagline: 'ПРОЕКТ СООБЩЕСТВА ОТ IMRE FERENCZI. СОЗДАН ПО ЛЮБВИ К МУЗЫКЕ.',
     },
     ja: {
       nav_features: '機能', nav_fork: 'フォーク追加機能', nav_upgrade: 'アップグレード', nav_install: 'インストール', nav_donate: '寄付',
@@ -204,7 +204,7 @@
       safety_title: '安全上の注意', safety_desc: 'TempoTec Variations V1専用です。非公式のコミュニティファームウェアです。更新前に完全な説明と警告をお読みください。', read_guide: 'ガイドを読む',
       s5_kicker: '05 / サポート', s5_kicker_right: 'FORK を育て続ける', s5_overline: 'Sonixを気に入りましたか？', s5_title: 'この<em>活動</em>を応援。',
       s5_desc: 'このフォークはコミュニティプロジェクトです。V1がより楽しくなったなら、開発を直接支援できます。',
-      footer_tagline: 'コミュニティプロジェクト。音楽への愛から生まれました。',
+      footer_tagline: 'IMRE FERENCZI によるコミュニティプロジェクト。音楽への愛から生まれました。',
     },
   };
 

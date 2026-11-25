@@ -138,3 +138,46 @@ body::after {
 }
 
 /* The physical V1 mockup keeps its realistic hardware colours. */
+
+/* Warm the remaining workbench controls and log stream that still used blue. */
+.build-select-row select,
+.build-select-row select option,
+.build-url-row input,
+.log-controls input[type="search"] {
+	background: #0d0a06;
+	border-color: #4d2c0e;
+	color: #fff2dc;
+}
+
+.log-panel {
+	background: #0f0600;
+}
+
+.log-header,
+.log-stream-filters {
+	background: rgba(255, 157, 18, 0.035);
+	border-bottom-color: #4d2c0e;
+}
+
+.log-count,
+.stream-chip.active {
+	background: rgba(255, 157, 18, 0.1);
+	color: #e5b45f;
+}
+
+.log-stdout .log-tag {
+	color: #e5b45f;
+}
+
+.log-emu .log-tag {
+	color: #9bd45e;
+}
+
+.log-emu .log-msg {
+	color: #c9e6a0;
+}
+
+::selection {
+	background: rgba(255, 157, 18, 0.3);
+	color: #fff2dc;
+}
