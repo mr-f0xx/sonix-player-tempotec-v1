@@ -39,10 +39,10 @@ int main(void) {
 	lv_style_set_bg_color(&theme, lv_color_hex(0x202020));
 	lv_obj_add_style(bar, &theme, 0);
 	for (size_t i = 0; i < sizeof(pixels) / sizeof(pixels[0]); i++) pixels[i] = 0xf800;
-	// Standard/Waveform/Album Art Max use the full backdrop except in OLED;
-	// Studio and Immersive keep their blur even in OLED. Poster, Vinyl and
-	// Sticker use their solid grounds. A not-yet-loaded or mismatched image is
-	// not used.
+	// Standard and Waveform follow the theme; Studio and Immersive keep their
+	// blur even in OLED. Album Art Max has an independent toggle, while Poster,
+	// Vinyl and Sticker use their solid grounds. A not-yet-loaded or mismatched
+	// image is not used.
 	assert(statusbarlayout_uses_blur(false, false, false, false, false, false, true, false));
 	assert(!statusbarlayout_uses_blur(false, false, false, false, false, true, true, false));
 	assert(statusbarlayout_uses_blur(false, false, false, true, false, true, true, false));
@@ -52,6 +52,9 @@ int main(void) {
 	assert(!statusbarlayout_uses_blur(false, true, false, false, false, false, true, true));
 	assert(!statusbarlayout_uses_blur(false, false, true, false, false, false, true, true));
 	assert(!statusbarlayout_uses_blur(false, false, false, false, false, false, false, false));
+	assert(statusbarlayout_aam_uses_blur(true, true)); // explicitly enabled, even on OLED
+	assert(!statusbarlayout_aam_uses_blur(false, true)); // explicitly disabled on any theme
+	assert(!statusbarlayout_aam_uses_blur(true, false)); // no full-size matching backdrop
 	uint32_t plain = sample(bar);
 	statusbarstyle_frost(bar, &blur);
 	uint32_t frosted = sample(bar);

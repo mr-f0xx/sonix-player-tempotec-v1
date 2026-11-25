@@ -13,4 +13,10 @@ static inline bool statusbarlayout_uses_blur(bool poster, bool vinyl, bool stick
 	return !oled && full_backdrop;
 }
 
+// Album Art Max has its own preference: unlike the other layouts, its blur can
+// be explicitly enabled on OLED or disabled on any other theme.
+static inline bool statusbarlayout_aam_uses_blur(bool enabled, bool full_backdrop) {
+	return enabled && full_backdrop;
+}
+
 #endif

@@ -448,6 +448,7 @@ static bool layout_poster_now;	  // and for the fifth: the sleeve at the width o
 static int player_screen_height, player_status_height;
 static bool player_status_bar;
 static bool player_status_color;
+static bool player_aam_blur;
 static bool layout_aam_now;		  // and for the sixth: the sleeve over the page, the media controls traded for it
 static bool layout_sticker_now;
 static int player_content_top(void) {
@@ -1921,10 +1922,12 @@ static bool backdrop_blur_wanted(void) { return !theme_is_oled(); }
 // whether album-colored icons are enabled.
 static void player_status_background_apply(void) {
 	bool visible = sheet_open && (player_status_bar || layout_aam_now);
-	bool layout_blur = visible && statusbarlayout_uses_blur(
-		layout_poster_now, layout_vinyl_now, layout_sticker_now,
-		layout_studio_now, layout_immersive_now,
-		theme_is_oled(), backdrop_is_full, backdrop_is_band);
+	bool layout_blur = visible && (layout_aam_now
+		? statusbarlayout_aam_uses_blur(player_aam_blur, backdrop_is_full)
+		: statusbarlayout_uses_blur(
+			layout_poster_now, layout_vinyl_now, layout_sticker_now,
+			layout_studio_now, layout_immersive_now,
+			theme_is_oled(), backdrop_is_full, backdrop_is_band));
 	bool use_blur = current_backdrop.pixels && layout_blur;
 	// Vinyl's page is deliberately solid black, independently of the theme;
 	// Sticker uses its deep violet-black ground; Poster and the missing-art
@@ -1946,7 +1949,9 @@ static void full_backdrop_apply(void) {
 	if (!backdrop_full || !studio_bg || layout_studio_now || lyrics_look_on) {
 		return;
 	}
-	bool have = !layout_vinyl_now && !layout_sticker_now && backdrop_blur_wanted() && current_backdrop.pixels != NULL && backdrop_is_full;
+	bool blur_wanted = layout_aam_now ? player_aam_blur : backdrop_blur_wanted();
+	bool have = !layout_vinyl_now && !layout_sticker_now && blur_wanted &&
+		current_backdrop.pixels != NULL && backdrop_is_full;
 	lv_image_set_src(studio_bg, have ? &current_backdrop.dsc : NULL);
 	lv_obj_set_hidden(studio_bg, !have);
 	if (have) {
@@ -7180,6 +7185,17 @@ void player_status_color_set(bool enabled) {
 	player_status_color_apply();
 }
 
+bool player_aam_blur_get(void) { return player_aam_blur; }
+
+void player_aam_blur_set(bool enabled) {
+	if (!bp_is_tempotec_v1() || player_aam_blur == enabled) return;
+	player_aam_blur = enabled;
+	config_set_bool("screen", "player_aam_blur", enabled);
+	config_save();
+	full_backdrop_apply();
+	player_status_background_apply();
+}
+
 bool player_status_bar_get(void) { return player_status_bar; }
 
 void player_status_bar_set(bool enabled) {
@@ -8445,6 +8461,9 @@ void player_init(gui_config_t *cfg) {
 	player_status_height = cfg->top_bar_height;
 	player_status_bar = bp_is_tempotec_v1() && config_get_bool("screen", "player_status_bar", false);
 	player_status_color = bp_is_tempotec_v1() && config_get_bool("screen", "player_status_color", false);
+	// Match the existing theme default until the user chooses an explicit value.
+	player_aam_blur = bp_is_tempotec_v1() &&
+		config_get_bool("screen", "player_aam_blur", !theme_is_oled());
 
 	// Geometry first, because everything else hangs off it. The V1 gets a
 	// deck exactly as tall as its four rows need (compact_deck_height()), a

@@ -120,6 +120,10 @@ void player_status_bar_set(bool enabled);
 bool player_status_color_get(void);
 void player_status_color_set(bool enabled);
 
+// Whether Album Art Max shows its blurred artwork behind the uncovered bands.
+bool player_aam_blur_get(void);
+void player_aam_blur_set(bool enabled);
+
 // Whether the play/pause glyph and the played part of the progress bar take
 // the playing sleeve's main colour instead of the theme's accent, in every
 // arrangement and on every theme (the monochrome palettes too: the switch is
