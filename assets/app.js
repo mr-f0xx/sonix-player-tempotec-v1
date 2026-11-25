@@ -124,26 +124,19 @@
     });
   }
 
-  // Crossfade real theme screenshots inside the device's display area.
-  // The hidden layer is filled with the *upcoming* image while it is still
-  // invisible, so a fade can never reveal a stale now-playing frame first.
+  // Crossfade only the two Amber V1 screens. The incoming image is always
+  // placed on top and faded in, so the layer swap can never briefly expose a
+  // stale or dark frame underneath.
   const frontLayer = document.querySelector('#device-display');
   const backLayer = document.querySelector('#device-display-next');
   if (frontLayer && backLayer && !window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
     const screens = [
       { src: './screenshots/ember/now-playing.png', label: 'Amber · Now playing' },
-      { src: './screenshots/tokyonight/now-playing.png', label: 'Tokyo Night · Now playing' },
       { src: './screenshots/ember/main-menu.png', label: 'Amber · Main menu' },
-      { src: './screenshots/tokyonight/main-menu.png', label: 'Tokyo Night · Main menu' },
-      { src: './screenshots/ember/music.png', label: 'Amber · Music library' },
-      { src: './screenshots/tokyonight/music.png', label: 'Tokyo Night · Music library' },
-      { src: './screenshots/ember/settings.png', label: 'Amber · Settings' },
-      { src: './screenshots/tokyonight/settings.png', label: 'Tokyo Night · Settings' },
     ];
     const HOLD_MS = 8000;
     const FADE_MS = 1400;
 
-    // Warm the browser cache before the first swap.
     const warm = new Map();
     screens.forEach(screen => {
       const image = new Image();
@@ -152,6 +145,7 @@
     });
 
     const wait = ms => new Promise(resolve => window.setTimeout(resolve, ms));
+    const settle = layer => { void layer.offsetWidth; };
 
     let front = frontLayer;
     let back = backLayer;
@@ -159,15 +153,23 @@
     let nextIndex = 1;
     let fading = false;
 
+    front.style.zIndex = '1';
+    back.style.zIndex = '2';
+
     async function prepare(layer, position) {
       const screen = screens[position];
+      // Hide instantly before swapping the image, then restore the fade.
+      layer.style.transition = 'none';
+      layer.style.opacity = '0';
+      settle(layer);
       layer.src = screen.src;
       layer.alt = 'Sonix Player ' + screen.label + ' screen shown on the V1 display';
       try {
         if (layer.decode) await layer.decode();
         else await (warm.get(screen.src) || Promise.resolve());
       } catch (_) {}
-      // The layer is still transparent here; the next screen is ready to fade in.
+      settle(layer);
+      layer.style.transition = '';
     }
 
     async function advance() {
@@ -180,17 +182,27 @@
         return;
       }
 
+      // Incoming layer is decoded and already holds the next screen.
+      back.style.zIndex = '2';
+      front.style.zIndex = '1';
       back.setAttribute('aria-hidden', 'false');
       front.setAttribute('aria-hidden', 'true');
       back.style.opacity = '1';
-      front.style.opacity = '0';
+
       [front, back] = [back, front];
       index = nextIndex;
       nextIndex = (index + 1) % screens.length;
 
       await wait(FADE_MS);
+
+      // Retire the outgoing layer without a visible fade of its own.
+      back.style.transition = 'none';
+      back.style.opacity = '0';
+      settle(back);
+      back.style.transition = '';
       back.setAttribute('aria-hidden', 'true');
       await prepare(back, nextIndex);
+
       fading = false;
       window.setTimeout(advance, HOLD_MS);
     }
