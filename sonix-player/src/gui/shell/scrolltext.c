@@ -42,6 +42,7 @@
 // the style keeps the pointer, not a copy -- so it is a single static one,
 // which is fine because every label wants the same timing.
 static lv_anim_t scroll_template;
+static lv_anim_t scroll_template_immediate;
 static bool template_ready;
 
 static void build_template(void) {
@@ -57,6 +58,13 @@ static void build_template(void) {
 	// The label copies the repeat count from the template too; without this it
 	// would scroll exactly once and stop.
 	lv_anim_set_repeat_count(&scroll_template, LV_ANIM_REPEAT_INFINITE);
+
+	// Same timing shape but no initial/repeat delay: used when the user
+	// presses a row to read a long title immediately.
+	lv_anim_init(&scroll_template_immediate);
+	lv_anim_set_delay(&scroll_template_immediate, 0);
+	lv_anim_set_repeat_delay(&scroll_template_immediate, 0);
+	lv_anim_set_repeat_count(&scroll_template_immediate, LV_ANIM_REPEAT_INFINITE);
 	template_ready = true;
 }
 
@@ -529,15 +537,8 @@ void scrolltext_set_active(lv_obj_t *label, bool active) {
 		return;
 	}
 	entry->active = active;
-	if (active) {
-		// Start scrolling immediately on press, instead of waiting the
-		// normal read-first delay used by always-on labels.
-		lv_obj_set_style_anim_delay(label, 0, LV_PART_MAIN);
-		lv_obj_set_style_anim_repeat_delay(label, 0, LV_PART_MAIN);
-	} else {
-		lv_obj_remove_local_style_prop(label, LV_STYLE_ANIM_DELAY, LV_PART_MAIN);
-		lv_obj_remove_local_style_prop(label, LV_STYLE_ANIM_REPEAT_DELAY, LV_PART_MAIN);
-	}
+	build_template();
+	lv_obj_set_style_anim(label, active ? &scroll_template_immediate : &scroll_template, LV_PART_MAIN);
 	scroll_fit(label);
 	apply_duration(label, lv_label_get_text(label));
 	fade_pick(entry);
