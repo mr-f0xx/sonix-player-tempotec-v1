@@ -1856,20 +1856,48 @@ static lv_obj_t *search_field;
 static lv_obj_t *search_clear_btn; // the x that empties the field
 static keyboard_t *search_keyboard;
 static int search_kind_index; // 0 tracks, 1 albums, 2 artists
-static lv_obj_t *search_pills[3];
+// What is searched for, as three round glyph buttons. They were three 140-px
+// pills stepping 150 px, which put the third one at x=306 on a 240-px panel:
+// the row had to be dragged sideways to reach "Artists", and the pills sat at
+// y=top+78, under the keyboard tray. A glyph needs no width of its own, so all
+// three fit, in every language, and the row keeps clear of the keys.
+#define SEARCH_KIND_COUNT 3
+static lv_obj_t *search_kind_btns[SEARCH_KIND_COUNT];
+static const lv_image_dsc_t *const SEARCH_KIND_GLYPHS[SEARCH_KIND_COUNT] = {&icon_music2, &icon_album,
+																			 &icon_artist};
+// The words the glyphs stand for, so that anything which has to name one of
+// them -- a test, a translation check -- can: the same tags the local library
+// search uses for its row glyphs, so a track, an album and an artist look the
+// same in both places.
+static const char *const SEARCH_KIND_LABELS[SEARCH_KIND_COUNT] = {"search_tracks_2", "albums", "artists"};
 
-static void paint_search_pills(void) {
-	for (int i = 0; i < 3; i++) {
+static void paint_search_kinds(void) {
+	for (int i = 0; i < SEARCH_KIND_COUNT; i++) {
+		if (!search_kind_btns[i]) {
+			return;
+		}
 		bool on = i == search_kind_index;
-		lv_obj_set_style_bg_color(search_pills[i], on ? theme()->accent : theme()->surface_pressed, 0);
-		lv_obj_set_style_text_color(lv_obj_get_child(search_pills[i], 0), on ? theme_on_accent() : theme()->text_primary,
-									0);
+		lv_obj_set_style_bg_color(search_kind_btns[i], on ? theme()->accent : theme()->surface_pressed, 0);
+		lv_obj_t *icon = lv_obj_get_child(search_kind_btns[i], 0);
+		if (icon) {
+			// Recoloured rather than merely tinted: the icon style paints them
+			// in the text colour, and on the accent the glyph has to be the
+			// colour that accent carries its text in (white, or black on a
+			// white accent). The unselected three stay legible on the dim
+			// circle without competing with the chosen one.
+			lv_obj_set_style_image_recolor(icon, on ? theme_on_accent() : theme()->text_primary, 0);
+			lv_obj_set_style_image_opa(icon, on ? LV_OPA_COVER : LV_OPA_70, 0);
+		}
 	}
 }
 
-static void search_pill_cb(lv_event_t *e) {
-	search_kind_index = (int)(intptr_t)lv_event_get_user_data(e);
-	paint_search_pills();
+static void search_kind_cb(lv_event_t *e) {
+	int kind = (int)(intptr_t)lv_event_get_user_data(e);
+	if (kind == search_kind_index) {
+		return;
+	}
+	search_kind_index = kind;
+	paint_search_kinds();
 }
 
 // The x shows only when there is something to clear.
@@ -1930,26 +1958,36 @@ static void build_search_page(gui_config_t *cfg) {
 	settingsrow_title(search_screen, cfg, "qobuz_search_qobuz");
 	int top = settingsrow_content_top(cfg);
 
+	// On the V1 the field is one line of text high, as on Tidal's search: the
+	// 62 px it was drawn for belonged to a 480 px panel, and the eleven pixels
+	// it gives back here are what the kind buttons need to sit between it and
+	// the keyboard instead of under it.
+	const bool compact = cfg->screen_width < 320;
+	const int field_h = compact ? 44 : 62;
+
 	search_field = lv_textarea_create(search_screen);
 	lv_textarea_set_one_line(search_field, true);
 	lv_textarea_set_placeholder_text(search_field, tr("artist_album_or_track"));
-	lv_obj_set_size(search_field, cfg->screen_width - 2 * cfg->padding, 62);
+	lv_obj_set_size(search_field, cfg->screen_width - 2 * cfg->padding, field_h);
 	lv_obj_set_scrollbar_mode(search_field, LV_SCROLLBAR_MODE_OFF);
 	lv_obj_align(search_field, LV_ALIGN_TOP_LEFT, cfg->padding, top);
 	lv_obj_add_style(search_field, &theme_style_card, 0);
-	lv_obj_set_style_radius(search_field, 12, 0);
+	lv_obj_set_style_radius(search_field, compact ? 10 : 12, 0);
 	lv_obj_set_style_border_width(search_field, 0, 0);
 	lv_obj_set_style_shadow_width(search_field, 0, 0);
-	lv_obj_set_style_pad_all(search_field, 14, 0);
-	lv_obj_set_style_text_font(search_field, &font_ui_24, 0);
+	lv_obj_set_style_pad_all(search_field, compact ? 8 : 14, 0);
+	lv_obj_set_style_text_font(search_field, compact ? &font_ui_18 : &font_ui_24, 0);
 	keyboard_style_caret(search_field);
 	lv_obj_add_event_cb(search_field, search_field_changed_cb, LV_EVENT_VALUE_CHANGED, NULL);
 
 	// The x on the right edge of the field, as in the local search: clears the
 	// query with one tap. Hidden while the field is empty.
+	const int clear_side = compact ? 40 : 56;
+
 	search_clear_btn = lv_btn_create(search_screen);
-	lv_obj_set_size(search_clear_btn, 56, 56);
-	lv_obj_align(search_clear_btn, LV_ALIGN_TOP_RIGHT, -cfg->padding - 4, top + (62 - 56) / 2);
+	lv_obj_set_size(search_clear_btn, clear_side, clear_side);
+	lv_obj_align(search_clear_btn, LV_ALIGN_TOP_RIGHT, -cfg->padding - (compact ? 0 : 4),
+				 top + (field_h - clear_side) / 2);
 	lv_obj_set_style_bg_opa(search_clear_btn, LV_OPA_TRANSP, 0);
 	lv_obj_set_style_shadow_width(search_clear_btn, 0, 0);
 	lv_obj_set_style_border_width(search_clear_btn, 0, 0);
@@ -1964,30 +2002,48 @@ static void build_search_page(gui_config_t *cfg) {
 	lv_obj_center(search_clear_icon);
 
 	// Room for it, so a long query does not run underneath.
-	lv_obj_set_style_pad_right(search_field, 60, 0);
+	lv_obj_set_style_pad_right(search_field, compact ? 42 : 60, 0);
 
-	static const char *const KINDS[] = {"tracks_2", "albums", "artists"};
-	for (int i = 0; i < 3; i++) {
-		lv_obj_t *pill = lv_btn_create(search_screen);
-		lv_obj_set_size(pill, 140, 52);
-		lv_obj_set_style_radius(pill, LV_RADIUS_CIRCLE, 0);
-		lv_obj_set_style_shadow_width(pill, 0, 0);
-		lv_obj_set_style_border_width(pill, 0, 0);
-		lv_obj_align(pill, LV_ALIGN_TOP_LEFT, cfg->padding + i * 150, top + 78);
-		lv_obj_add_event_cb(pill, search_pill_cb, LV_EVENT_CLICKED, (void *)(intptr_t)i);
+	// The three kinds, as round glyph buttons across the row between the field
+	// and the keys.
+	//
+	// The row is centred and sized from the panel rather than from a pair of
+	// pixel constants, so nothing is ever cut off at the right edge. The
+	// selected one is filled with the accent -- a colour cue, and not the only
+	// one: each button carries the word it stands for as its own data, so
+	// anything that has to name it can.
+	const int kind_btn = compact ? 44 : 52;
+	const int kind_gap = compact ? 12 : 24;
+	const int kinds_w = SEARCH_KIND_COUNT * kind_btn + (SEARCH_KIND_COUNT - 1) * kind_gap;
+	const int kinds_x = (cfg->screen_width - kinds_w) / 2;
+	const int kinds_y = top + field_h + (compact ? 8 : 12);
+	for (int i = 0; i < SEARCH_KIND_COUNT; i++) {
+		lv_obj_t *btn = lv_btn_create(search_screen);
+		lv_obj_set_size(btn, kind_btn, kind_btn);
+		lv_obj_set_style_radius(btn, LV_RADIUS_CIRCLE, 0);
+		lv_obj_set_style_shadow_width(btn, 0, 0);
+		lv_obj_set_style_border_width(btn, 0, 0);
+		lv_obj_set_style_pad_all(btn, 0, 0);
+		lv_obj_align(btn, LV_ALIGN_TOP_LEFT, kinds_x + i * (kind_btn + kind_gap), kinds_y);
+		lv_obj_add_event_cb(btn, search_kind_cb, LV_EVENT_CLICKED, (void *)(intptr_t)i);
 
-		lv_obj_t *label = lv_label_create(pill);
-		lv_label_set_text(label, tr(KINDS[i]));
-		lv_obj_set_style_text_font(label, &font_ui_20, 0);
-		lv_obj_center(label);
-		search_pills[i] = pill;
+		lv_obj_t *icon = lv_image_create(btn);
+		lv_image_set_src(icon, SEARCH_KIND_GLYPHS[i]);
+		lv_obj_add_style(icon, &theme_style_icon, 0);
+		lv_obj_set_style_image_recolor_opa(icon, LV_OPA_COVER, 0);
+		lv_obj_center(icon);
+		// The glyph is the whole of what is drawn, so the word it stands for
+		// is carried as the button's own data: nothing has to read it on the
+		// panel, but a page that has to name what is on it can.
+		lv_obj_set_user_data(btn, (void *)SEARCH_KIND_LABELS[i]);
+		search_kind_btns[i] = btn;
 	}
-	paint_search_pills();
+	paint_search_kinds();
 
-	search_keyboard = keyboard_create(search_screen, cfg->screen_width, cfg->screen_width < 320 ? 144 : 316, search_field, NULL, "ok",
+	search_keyboard = keyboard_create(search_screen, cfg->screen_width, compact ? 144 : 316, search_field, NULL, "ok",
 									  search_accept_cb, NULL);
 	switcher_attach_back_gesture(search_screen);
-	theme_register_refresh(paint_search_pills);
+	theme_register_refresh(paint_search_kinds);
 }
 
 // ---------------------------------------------------------------------------
