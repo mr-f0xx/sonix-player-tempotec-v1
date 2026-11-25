@@ -25,7 +25,7 @@ the section heading on the Plugins page.
 | Music features | `eq`, `peq`, `mseb`, `autoeq` | The equaliser, parametric EQ, MSEB tuning and AutoEq pages and their quick-panel buttons. |
 | Music features | `mono`, `soundfield`, `crossfeed`, `channel_balance`, `volume_limit` | The filter in the audio chain and its row in Music settings. |
 | Music features | `lastfm`, `listenbrainz` | Scrobbling to that service. |
-| Tools | `calculator`, `notes`, `tagmanager`, `metronome`, `tapedeck` | The tile on the More page. See the [Tape Deck guide](tape-deck.md) for input requirements. |
+| Tools | `calculator`, `notes`, `vault`, `tagmanager`, `tapedeck` | The tile on the More page. See the [Tape Deck guide](tape-deck.md) for input requirements and the [vault guide](vault.md) for its format and limits. |
 | Games | `gearboy`, `flappy`, `game2048`, `snake`, `dino`, `pet` | The tile on the More page. `gearboy` is only listed in builds with the Game Boy core. |
 
 Not every feature is a module. Cover Flow's own layout switch, Audiobooks, the

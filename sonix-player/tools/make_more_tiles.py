@@ -2,7 +2,7 @@
 """Generate the Pet and Tag Manager tiles for Dark and Light.
 
 Requires pillow and resvg-py. Run this, then tools/svg_to_lvgl.py. The two
-drawings use the same turned-back-tile stack as the metronome and the games, so
+drawings use the same turned-back-tile stack as the games, so
 the newest More destinations sit with the older ones instead of showing a bare
 white glyph or borrowing the File Manager's folder.
 
@@ -17,7 +17,7 @@ from pathlib import Path
 import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import make_metronome_tile as tile
+import make_more_tile as tile
 
 ICONS = Path(__file__).resolve().parents[1] / "assets" / "icons"
 

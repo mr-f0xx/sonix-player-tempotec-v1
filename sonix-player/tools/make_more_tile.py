@@ -1,14 +1,13 @@
 #!/usr/bin/env python3
-"""Draws assets/icons/metronome.png: the More tile's two-tile stack.
+"""Draws a More tile: the turned-back two-tile stack.
 
-The same construction as the other More tiles -- a back tile turned a little,
-a shadow under it, a front tile with a vertical gradient and a white glyph --
-so the metronome sits next to the calculator and the notes shelf without
-looking like a different picture. Drawn at four times the size and scaled down,
-which is what keeps the edges and the glyph as clean as the shipped ones.
+A back tile turned a little, a shadow under it, a front tile with a vertical
+gradient and a white glyph. The other tile scripts import this module and set
+its colours before calling main(), so every More tile is built the same way.
+Drawn at four times the size and scaled down, which keeps the edges and the
+glyph as clean as the shipped ones.
 """
 import io
-import sys
 
 from PIL import Image, ImageDraw, ImageFilter
 import resvg_py
@@ -83,7 +82,3 @@ def main(svg_path, out_path):
 
     canvas.resize((SIZE, SIZE), Image.LANCZOS).save(out_path)
     print("wrote", out_path, canvas.size, "->", SIZE)
-
-
-if __name__ == "__main__":
-    main(sys.argv[1], sys.argv[2])

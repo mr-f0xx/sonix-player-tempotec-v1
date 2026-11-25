@@ -321,10 +321,11 @@ a self-signed certificate), and HLS.
 
 ## Tools
 
-> **Calculator**, **Notes**, **Metronome** and **Pet** are in the **More**
-> menu, under the file manager. All four are drawn for the panel they are on:
-> on the 240x320 V1 the twenty keys stay a finger's width, and each page --
-> display, keypad and labels -- fits without scrolling.
+> **Calculator**, **Notes**, **Vault** and **Pet** are in the
+> **More** menu, under the file manager. All of them are drawn for the panel
+> they are on: on the 240x320 V1 the calculator's twenty keys and the vault's
+> twelve stay a finger's width, and each page -- display, keypad and labels --
+> fits without scrolling.
 
 - **Calculator** - a display and the twenty keys of an ordinary pocket
   calculator: the four operations, sign, percent, backspace and clear. The sum
@@ -360,20 +361,22 @@ a self-signed certificate), and HLS.
   > written as UTF-8; a file saved as UTF-16 or Windows-1252 is read and shown
   > correctly too, and a note longer than the editor holds is offered to the
   > file manager's viewer instead of being cut short here.
-- **Metronome** - a tempo from **30 to 250 BPM**, a bar of **one to seven
-  beats**, and a click on every beat with the first of the bar accented and
-  lit. The tempo is dragged on a slider or taken from the finger with **Tap**,
-  which averages the last few taps rather than the last gap alone, so one
-  hurried tap does not move the tempo a dozen beats. A tap slower than 30 or
-  faster than 250 leaves the tempo at that end of the scale instead of outside
-  it, and the button works while the click is running. The click is synthesised
-  in the player -- two short bursts, a bright one on the downbeat -- so there is
-  nothing extra to ship, and it is played through the same output as the music:
-  starting it stops local playback and the radio, as the emulator does. The
-  dots follow the beat the audio thread has actually written, so what is on the
-  glass cannot drift from what is in the ear. The tempo and the bar are
-  remembered across visits and across a reboot; leaving the page stops the
-  click, because the page is the only place it can be stopped from.
+- **Vault** - a small password manager on the card, in `Vault/vault.kbx`:
+  every entry has a **title** and the **password** underneath it, up to **200
+  entries** and **64 KB** together. A row at the top makes a new one; tapping
+  a row reopens it for editing, the eye masks a password in the list, and the
+  trash deletes the open entry after asking. The vault is locked behind a
+  **4- to 12-digit PIN** and encrypted with **AES-256** before anything
+  reaches the card. PBKDF2-HMAC-SHA256 turns the PIN into a separate encryption
+  and authentication key; the entry table is encrypted in counter mode and the
+  whole file is signed, so a wrong PIN, a damaged card and a file edited in a
+  computer all leave the vault shut rather than opening it onto the wrong
+  bytes. The PIN is never stored and cannot be recovered. The page shows dots,
+  not digits, locks itself after two minutes without typing and again when you
+  leave it, and offers **Change PIN**, **Lock now** and **Erase vault** from the
+  corner menu. There is no account, no sync and no network: the card is the only
+  copy. See the [vault guide](docs/vault.md) for the format and what it does and
+  does not protect.
 
 - **Tape Deck** - an optional More tool with a peak input meter, clipping
   indicator and voice memos saved as mono WAVs in `Recordings/` on the microSD.
@@ -410,8 +413,8 @@ a self-signed certificate), and HLS.
   listening it has no character yet, and the page says nothing. A genre tag also
   nudges how it moves: a slow sway for jazz, ambient or lo-fi, a faster bob for
   rock, metal and electronic, and a breath no faster than two seconds even
-  then. **Once a day it offers a tap-along**: sixteen beats of the metronome's
-  tempo, tapped on the glass, worth up to a dozen notes and a freeze for a clean
+  then. **Once a day it offers a tap-along**: sixteen beats at 100 BPM,
+  tapped on the glass, worth up to a dozen notes and a freeze for a clean
   run. And it has a limit on flicking through a library: **more than five
   skipped tracks in ten minutes** and it is dizzy for fifteen -- still fed by
   whatever is playing, but earning nothing until it clears. It never dies, and nothing it does

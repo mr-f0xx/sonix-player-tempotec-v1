@@ -953,7 +953,7 @@ static void *pads_main(void *unused) {
 	bool owned = false;
 	if (usb_dac_mode() || audio_external_is_active() || stop_requested) goto done;
 	// Do not borrow an existing external stream; a deliberate tap/Loop is an
-	// input change, like Play in the metronome or starting a track.
+	// input change, like Play or starting a track.
 	if (audio_playback_context_active() || audio_get_status() != AUDIO_STATUS_STOPPED) audio_stop_and_wait(1000);
 	owned = !stop_requested && !audio_playback_context_active() &&
 		audio_external_begin_owned(&output_owner, TAPE_PAD_RATE, 2, 16, 32);

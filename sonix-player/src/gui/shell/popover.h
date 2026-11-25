@@ -38,4 +38,8 @@ void popover_set_item_text(int index, const char *text);
 // Closes the current menu, if any.
 void popover_close(void);
 
+// Whether a menu is up. A page whose back guard would otherwise leave can ask
+// this first and close the menu instead.
+bool popover_visible(void);
+
 #endif /* POPOVER_H */

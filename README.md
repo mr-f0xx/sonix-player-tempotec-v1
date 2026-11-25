@@ -4,9 +4,11 @@ This repository is originally a **TempoTec Variations V1** community port of the
 
 The firmware builder starts with an official V1 1.3 update package, replaces the stock music player and its interface with Sonix, then repackages the update as `v1.upt`.
 
-You can now try Sonix in the **[Tempotec V1](https://mr-f0xx.github.io/sonix-player-tempotec-v1/)** browser emulator I made (PC & Mobile compatible)
+You can now try Sonix in the **[Tempotec V1](https://mr-f0xx.github.io/sonix-player-tempotec-v1/emulator/)** browser emulator I made (PC & Mobile compatible)
 
 The web workbench also has a [Live USB tab](tools/v1-emulator/README.md#live-usb-connect-a-physical-v1) for editing PEQ presets, Tape Deck kits, and playlists on a physical V1 and downloading its debug log.
+
+The GitHub Pages workflow publishes the static showcase from `index.html` at the site root and the built emulator under `/emulator/`. The emulator and its WebAssembly bundle are staged by the workflow; serving the repository root alone previews the showcase but does not build the emulator.
 
 ## Previews
 
@@ -271,7 +273,8 @@ This fork builds on the upstream [Sonix Player](https://github.com/Jepl4r/sonix-
 - 🖥️ **V1 browser emulator** - [try Sonix on a phone or computer](https://mr-f0xx.github.io/sonix-player-tempotec-v1/) without flashing a player. Use the touchscreen and side buttons, or load your own music onto the virtual microSD. It follows the latest published web firmware. To test your changes, drop the `sonix-v1-web-wasm` Actions artifact ZIP for your commit into **Firmware Builds**, or use **Rebuild & boot local** in the native bridge. See the [emulator guide](tools/v1-emulator/README.md#testing-a-firmware-change). A **Video** tab also carries copyable ffmpeg presets for the MPEG-1 video player above, so a file dropped onto the card plays on the V1 rather than only on a computer.
 - 🔗 **Fork QR code** - scan the code under **Settings → System → About → Forked by** to open this repository on your phone. The V1 can display the code offline.
 - 🐾 **Music pet** - a Pikachu that grows from the music you hear. See [Music pet](#music-pet).
-- 🧮 **Calculator, Notes, Metronome** - a pocket calculator, text notes from the card, and a metronome with tap tempo, all under More.
+- 🧮 **Calculator and Notes** - a pocket calculator and text notes from the card, both under More.
+- 🔐 **Vault** - a PIN-locked, **AES-256** encrypted password manager on the microSD (`Vault/vault.kbx`), under More: a title and the password beneath it for every entry, up to 200 of them, each one added, edited or deleted on its own. No account, no sync and no network: PBKDF2 turns a 4- to 12-digit PIN into the keys, the whole table is signed so a wrong PIN or a damaged card does not open it, and the page locks after two minutes. The PIN cannot be recovered. See [docs/vault.md](docs/vault.md).
 - 🎮 **2048, Snake and Dino** - three small games under More, sized for the V1 panel. Gearboy also gains a cover-art grid and a game-audio mute so you can keep listening to music while playing.
 - 🏷️ **Tag Manager** - view and edit FLAC, MP3, M4A, AAC, Opus and Ogg tags and cover art, and search for covers over Wi-Fi. See the [usage and safety notes](docs/tag-manager.md).
 - 🏠 **Subsonic / Gonic** - stream from [your own server](#subsonic--gonic), or [save tracks and albums](docs/subsonic.md#saving-music-to-the-sd-card) to `Music/Subsonic Downloads` for offline listening.
@@ -421,7 +424,7 @@ How it works:
 - **Daily goal and streak:** a 15-minute daily goal builds a streak. A bought streak freeze covers one missed day.
 - **Musical Notes:** the pet earns notes for the minutes it hears, plus bonuses for listening late, finishing an album, five genres in a day, and half an hour without a pause. Spend them in the wardrobe on hats, headphones, a scarf, a crown, room themes and streak freezes.
 - **Character:** after about a month of listening, the genres you play give it a character. Pop and dance make it Upbeat, jazz and classical make it Calm, and indie, alternative and metal make it Curious.
-- **Tap-along:** once a day it offers a sixteen-beat tap-along using the metronome.
+- **Tap-along:** once a day it offers a sixteen-beat tap-along at 100 BPM.
 - **Naming:** it starts as Pikachu. Use the pencil in the corner to rename it.
 
 The full rules are in [FEATURES.md](FEATURES.md).
