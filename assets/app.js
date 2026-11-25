@@ -112,8 +112,8 @@
   }
 
   // Crossfade real theme screenshots inside the device's display area.
-  // Each image is decoded before it is shown, and the fade is timed from its
-  // completion so a slow decode can never cut a screen short or flash blank.
+  // The hidden layer is filled with the *upcoming* image while it is still
+  // invisible, so a fade can never reveal a stale now-playing frame first.
   const frontLayer = document.querySelector('#device-display');
   const backLayer = document.querySelector('#device-display-next');
   if (frontLayer && backLayer && !window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
@@ -129,41 +129,59 @@
     ];
     const HOLD_MS = 8000;
     const FADE_MS = 1400;
-    const decoded = new Map();
+
+    // Warm the browser cache before the first swap.
+    const warm = new Map();
     screens.forEach(screen => {
       const image = new Image();
       image.src = screen.src;
-      decoded.set(screen.src, image.decode ? image.decode().catch(() => {}) : Promise.resolve());
+      warm.set(screen.src, image.decode ? image.decode().catch(() => {}) : Promise.resolve());
     });
+
+    const wait = ms => new Promise(resolve => window.setTimeout(resolve, ms));
 
     let front = frontLayer;
     let back = backLayer;
     let index = 0;
-    let running = false;
+    let nextIndex = 1;
+    let fading = false;
+
+    async function prepare(layer, position) {
+      const screen = screens[position];
+      layer.src = screen.src;
+      layer.alt = 'Sonix Player ' + screen.label + ' screen shown on the V1 display';
+      try {
+        if (layer.decode) await layer.decode();
+        else await (warm.get(screen.src) || Promise.resolve());
+      } catch (_) {}
+      // The layer is still transparent here; the next screen is ready to fade in.
+    }
 
     async function advance() {
-      if (running) return;
-      running = true;
-      const next = (index + 1) % screens.length;
-      const screen = screens[next];
-      back.src = screen.src;
-      try { await (decoded.get(screen.src) || Promise.resolve()); } catch (_) {}
+      if (fading) return;
+      fading = true;
+
       if (document.hidden) {
-        running = false;
+        fading = false;
         window.setTimeout(advance, HOLD_MS);
         return;
       }
-      back.alt = 'Sonix Player ' + screen.label + ' screen shown on the V1 display';
+
       back.setAttribute('aria-hidden', 'false');
+      front.setAttribute('aria-hidden', 'true');
       back.style.opacity = '1';
       front.style.opacity = '0';
-      front.setAttribute('aria-hidden', 'true');
       [front, back] = [back, front];
-      index = next;
-      running = false;
-      window.setTimeout(advance, HOLD_MS + FADE_MS);
+      index = nextIndex;
+      nextIndex = (index + 1) % screens.length;
+
+      await wait(FADE_MS);
+      back.setAttribute('aria-hidden', 'true');
+      await prepare(back, nextIndex);
+      fading = false;
+      window.setTimeout(advance, HOLD_MS);
     }
 
-    window.setTimeout(advance, HOLD_MS);
+    prepare(back, nextIndex).then(() => window.setTimeout(advance, HOLD_MS));
   }
 })();
