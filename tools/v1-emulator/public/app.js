@@ -1591,7 +1591,7 @@ for (const [slider, label] of [
  * Inspector Tabs
  * -------------------------------------------------------------------------- */
 function activateTab(target, syncMobile = true) {
-	document.querySelectorAll(".tab-btn").forEach((b) => {
+	document.querySelectorAll(".tab-btn[data-tab]").forEach((b) => {
 		const isTarget = b.dataset.tab === target;
 		b.classList.toggle("active", isTarget);
 		b.setAttribute("aria-selected", String(isTarget));
@@ -1612,9 +1612,25 @@ function activateTab(target, syncMobile = true) {
 
 document.querySelectorAll(".tab-btn").forEach((btn) => {
 	btn.addEventListener("click", () => {
+		if (!btn.dataset.tab) return; // Website tab is a link, not an inspector pane.
 		activateTab(btn.dataset.tab);
 	});
 });
+
+/* Showcase tab: on GitHub Pages the sibling ../index.html is the showcase.
+   The local Node bridge only serves this workbench, so fall back to the
+   published site there. */
+(() => {
+	const links = document.querySelectorAll("[data-site-link]");
+	if (!links.length) return;
+	const useHostedSite = () => links.forEach((link) => {
+		link.href = "https://mr-f0xx.github.io/sonix-player-tempotec-v1/";
+	});
+	fetch("../index.html", { cache: "no-store" })
+		.then((res) => (res.ok ? res.text() : Promise.reject(new Error(`HTTP ${res.status}`))))
+		.then((html) => { if (!html.includes("data-release-version")) useHostedSite(); })
+		.catch(useHostedSite);
+})();
 
 /* --------------------------------------------------------------------------
  * Virtual microSD Browser, Drag-and-Drop Upload & Screenshot Preview

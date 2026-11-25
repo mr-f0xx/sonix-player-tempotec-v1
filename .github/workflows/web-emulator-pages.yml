@@ -20,6 +20,7 @@ on:
       - tools/v1-emulator/**
       - index.html
       - assets/**
+      - coi-serviceworker.js
       - screenshots/ember/now-playing.png
   push:
     branches:
@@ -182,7 +183,7 @@ jobs:
           mv tools/v1-emulator/dist/pages tools/v1-emulator/dist/emulator-stage
           mkdir -p tools/v1-emulator/dist/pages/screenshots/ember
           mv tools/v1-emulator/dist/emulator-stage tools/v1-emulator/dist/pages/emulator
-          cp index.html tools/v1-emulator/dist/pages/index.html
+          cp index.html coi-serviceworker.js tools/v1-emulator/dist/pages/
           cp -R assets tools/v1-emulator/dist/pages/assets
           cp screenshots/ember/now-playing.png tools/v1-emulator/dist/pages/screenshots/ember/
           touch tools/v1-emulator/dist/pages/.nojekyll

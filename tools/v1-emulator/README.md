@@ -14,6 +14,12 @@ The repository includes `.github/workflows/web-emulator-pages.yml`, which automa
 - Packs a self-contained **`.sonix-web.zip`** bundle (`manifest.json` + `sonix_player_wasm.js` + `sonix_player_wasm.wasm` + TempoTec V1 `usr/` assets) and uploads it as a GitHub Actions artifact for every commit/PR.
 - Deploys the static emulator webpage and build history catalog (`builds/manifest.json`) to **GitHub Pages** on pushes to `main`, tags, or manual dispatch.
 
+The showcase homepage lives one directory above this workbench on GitHub Pages
+(`../index.html`). It links out to the emulator instead of embedding it, and the
+workbench links back through the **Website** tab in the inspector tab bar (and
+**Site** in the mobile bottom navigation). On a local Node bridge, where there
+is no sibling showcase, that tab opens the published GitHub Pages site instead.
+
 ### One-Time Repository Setup for GitHub Pages
 
 In your GitHub repository: **Settings → Pages → Build and deployment → Source → GitHub Actions**. Once enabled, pushes to `main` (or running the `TempoTec V1 Web Emulator (WASM & GitHub Pages)` workflow manually) publish the clickable site at:
