@@ -139,7 +139,30 @@ static int strip_h;
 // ---------------------------------------------------------------------------
 
 static screensaver_source_t source;
-static bool spectrum_now(void) { return visualizer_selected && source == SCREENSAVER_SOURCE_ALBUM; }
+// Whether music is playing right now; defined with the spectrum below.
+static bool spectrum_music_playing(void);
+// Whether the source draws a folder picture at all: Images always, Auto when
+// nothing plays. The decode and the pixels it owns are shared by both.
+static bool source_uses_pictures(void) {
+	return source == SCREENSAVER_SOURCE_IMAGES || source == SCREENSAVER_SOURCE_AUTO;
+}
+// Whether the visualizer can be shown: the switch on, and a source that
+// carries one -- Album always, Auto while music plays.
+static bool viz_available(void) {
+	return visualizer_selected && (source == SCREENSAVER_SOURCE_ALBUM || source == SCREENSAVER_SOURCE_AUTO);
+}
+// Whether the spectrum is the layer on screen right now. Album shows it
+// whenever it is available, idle note and all; Auto only while music plays,
+// and a folder picture otherwise.
+static bool spectrum_now(void) {
+	if (!viz_available()) {
+		return false;
+	}
+	if (source == SCREENSAVER_SOURCE_AUTO) {
+		return spectrum_music_playing();
+	}
+	return true;
+}
 static bool fullscreen_now(void) { return spectrum_now() && viz_fullscreen; }
 static bool filaments_now(void) { return spectrum_now() && viz_style == SCREENSAVER_VIZ_STYLE_FILAMENTS; }
 static bool led_now(void) { return spectrum_now() && viz_style == SCREENSAVER_VIZ_STYLE_LED; }
@@ -241,7 +264,7 @@ static void set_strip_height(int height) {
 		lv_obj_set_height(info_strip, strip_h);
 		lv_obj_align(info_strip, LV_ALIGN_BOTTOM_MID, 0, 0);
 	}
-	bool over_art = !framed_now() && (source == SCREENSAVER_SOURCE_IMAGES || metadata_over_art());
+	bool over_art = !framed_now() && (source_uses_pictures() || metadata_over_art());
 	int want = over_art ? screen_h : screen_h - strip_h;
 	if (want != cover_box_h) {
 		cover_box_h = want;
@@ -267,7 +290,6 @@ static void led_layout(void);
 static void spectrum_layout(void);
 static void spectrum_apply_backdrop(void);
 static void spectrum_apply_idle(bool idle);
-static bool spectrum_music_playing(void);
 screensaver_source_t screensaver_source(void) { return source; }
 bool screensaver_get_visualizer(void) { return visualizer_selected; }
 void screensaver_set_visualizer(bool on) {
@@ -325,13 +347,23 @@ static void drop_next(void);
 static void drop_frame(void);
 static void refresh_content(void);
 
+static screensaver_source_t valid_source(int chosen) {
+	if (chosen == SCREENSAVER_SOURCE_IMAGES) {
+		return SCREENSAVER_SOURCE_IMAGES;
+	}
+	if (chosen == SCREENSAVER_SOURCE_AUTO) {
+		return SCREENSAVER_SOURCE_AUTO;
+	}
+	return SCREENSAVER_SOURCE_ALBUM;
+}
+
 void screensaver_set_source(screensaver_source_t chosen) {
-	source = chosen == SCREENSAVER_SOURCE_IMAGES ? SCREENSAVER_SOURCE_IMAGES : SCREENSAVER_SOURCE_ALBUM;
+	source = valid_source((int)chosen);
 	config_set_int("screen", "screensaver_source", (int)source);
 	config_save();
-	if (source == SCREENSAVER_SOURCE_IMAGES) {
+	if (source_uses_pictures()) {
 		// The framed copy belongs to the album source; a folder picture never
-		// needs it.
+		// needs it. Auto needs one too, for the moments nothing plays.
 		drop_frame();
 		// Asked for now rather than at the first screen-off, so the first wake
 		// after the option is chosen already has a picture to show.
@@ -375,7 +407,7 @@ bool screensaver_has_images(void) { return screensaverpics_any(picture_max_w, pi
 // A no-op while one is already in hand or in flight, so the repeated wake-hook
 // calls cost nothing.
 static void request_next(void) {
-	if (source != SCREENSAVER_SOURCE_IMAGES || next_ready || next_pending) {
+	if (!source_uses_pictures() || next_ready || next_pending) {
 		return;
 	}
 	char chosen[sizeof(next_file)];
@@ -532,6 +564,20 @@ static void refresh_clock(void) {
 // from a track that changed while the screensaver was up.
 static char shown_file[512];
 static const void *shown_cover;
+// Whether music was playing when refresh_content() last drew. Auto swaps its
+// layer on this, so the tick watches it as well as the track.
+static bool shown_playing;
+
+static void spectrum_sync(void) {
+	bool wanted = spectrum_now() && power_screen_is_on();
+	visualizer_enable(VISUALIZER_SCREENSAVER, wanted);
+	if (wanted) {
+		lv_timer_resume(spectrum_timer);
+	} else {
+		lv_timer_pause(spectrum_timer);
+		spectrum_reset();
+	}
+}
 
 // Runs while the screensaver is up. The clock is the obvious reason, but the
 // important one is the track: the player frees its artwork at every track
@@ -539,8 +585,6 @@ static const void *shown_cover;
 // this check is what puts the new one back.
 static void clock_timer_cb(lv_timer_t *timer) {
 	(void)timer;
-
-	if (fullscreen_now()) return;
 
 	// Takes delivery of a decode that landed after the wake had already given
 	// up on it -- a short dark spell, or a slow card. It is only stored, never
@@ -557,6 +601,19 @@ static void clock_timer_cb(lv_timer_t *timer) {
 
 	device_state_t state;
 	device_state_get(&state);
+	bool playing = state.status == AUDIO_STATUS_PLAYING;
+
+	// Auto swaps between the visualizer and a folder picture on this alone,
+	// and it has to be seen even in full screen, where the clock below is
+	// hidden and the early return would otherwise swallow it.
+	if (source == SCREENSAVER_SOURCE_AUTO && playing != shown_playing) {
+		spectrum_sync();
+		refresh_content(); // refreshes the clock on its way through
+		return;
+	}
+
+	if (fullscreen_now()) return;
+
 	const void *cover = player_cover_image();
 
 	const char *now = state.live ? state.metadata.title : state.current_file;
@@ -833,6 +890,7 @@ static void draw_from_folder(void) {
 static void refresh_content(void) {
 	bool viz = spectrum_now();
 	bool full = fullscreen_now();
+	shown_playing = spectrum_music_playing();
 	lv_obj_set_hidden(info_strip, full);
 	lv_obj_set_style_bg_opa(chevron_btn, full ? LV_OPA_60 : LV_OPA_TRANSP, 0);
 	lv_obj_set_style_image_recolor(chevron_icon, chevron_ink(), 0);
@@ -840,6 +898,7 @@ static void refresh_content(void) {
 	lv_obj_set_hidden(spectrum, !viz);
 	lv_obj_set_hidden(cover_box, viz);
 	if (viz) {
+		spectrum_sync(); // the layer going up is the one being fed: start or stop the tick with it
 		set_page_backdrop(NULL);
 		lv_obj_set_style_bg_color(saver, lv_color_black(), 0);
 		lv_obj_set_style_bg_image_src(info_strip, NULL, 0);
@@ -899,7 +958,7 @@ static void refresh_content(void) {
 		return;
 	}
 	lv_obj_set_style_bg_color(saver, metadata_over_art() ? theme()->screen_bg : lv_color_black(), 0);
-	if (source == SCREENSAVER_SOURCE_IMAGES) {
+	if (source_uses_pictures()) {
 		draw_from_folder();
 		refresh_clock();
 		return;
@@ -1048,7 +1107,7 @@ bool screensaver_prepare(void) {
 	// no decode, nothing between the button and the backlight.
 	bool waking = power_screen_is_on();
 	if (!waking) { visualizer_enable(VISUALIZER_SCREENSAVER, false); spectrum_reset(); }
-	else if (spectrum_now()) visualizer_enable(VISUALIZER_SCREENSAVER, true);
+	else spectrum_sync();
 
 	if (screensaver_is_visible()) {
 		collect_next();
@@ -1074,10 +1133,11 @@ void screensaver_release_artwork(void) {
 	if (!cover_img) {
 		return;
 	}
-	if (source == SCREENSAVER_SOURCE_IMAGES) {
+	if (source_uses_pictures()) {
 		// Nothing here is the player's: it can free its artwork without this
 		// screen losing anything, and blanking the picture would put a black
-		// screen up for no reason.
+		// screen up for no reason. Auto is the same while it shows a picture,
+		// and while it shows the spectrum there is no artwork to blank either.
 		return;
 	}
 
@@ -1535,9 +1595,7 @@ void screensaver_init(gui_config_t *cfg) {
 	viz_fullscreen = config_get_bool("screen", "screensaver_viz_fullscreen", false);
 	viz_layers = config_get_int("screen", "screensaver_visualizer_layers", FILAMENTS_ALL) & FILAMENTS_ALL;
 	if (!viz_layers) viz_layers = FILAMENTS_ALL;
-	source = config_get_int("screen", "screensaver_source", SCREENSAVER_SOURCE_ALBUM) == SCREENSAVER_SOURCE_IMAGES
-				 ? SCREENSAVER_SOURCE_IMAGES
-				 : SCREENSAVER_SOURCE_ALBUM;
+	source = valid_source(config_get_int("screen", "screensaver_source", SCREENSAVER_SOURCE_ALBUM));
 	style = config_get_int("screen", "screensaver_style", SCREENSAVER_STYLE_FILL) == SCREENSAVER_STYLE_FRAMED
 				? SCREENSAVER_STYLE_FRAMED
 				: SCREENSAVER_STYLE_FILL;
