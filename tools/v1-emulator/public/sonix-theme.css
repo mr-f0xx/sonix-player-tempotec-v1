@@ -1,0 +1,140 @@
+/*
+ * Sonix Player showcase theme for the V1 workbench.
+ * Loaded after styles.css so the emulator keeps its layout and realistic
+ * hardware mockup while its chrome matches the amber/dark showcase site.
+ */
+
+:root {
+	--bg-base: #0a0805;
+	--bg-surface: #110e08;
+	--bg-card: #171208;
+	--bg-card-hover: #21180a;
+	--border-subtle: #34260f;
+	--border-strong: #6d4a14;
+	--text-primary: #eee5d2;
+	--text-secondary: #a79a83;
+	--text-muted: #77674c;
+	--accent: #ffb000;
+	--accent-bright: #ffc247;
+	--accent-soft: rgba(255, 176, 0, 0.14);
+	--ok: #9bd45e;
+	--warn: #ffb000;
+	--err: #ff6b57;
+	--font-sans: "DM Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+	--font-mono: "JetBrains Mono", "Fira Code", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+/* The same faint scanline wash used by the showcase site. */
+body::after {
+	content: "";
+	position: fixed;
+	inset: 0;
+	pointer-events: none;
+	background: repeating-linear-gradient(to bottom, transparent 0, transparent 3px, rgba(255, 176, 0, 0.015) 4px);
+	z-index: 20;
+}
+
+.topbar {
+	background: linear-gradient(180deg, #171208 0%, #0e0b06 100%);
+	border-bottom-color: var(--border-subtle);
+}
+
+.brand-mark {
+	border-radius: 0;
+	background: var(--accent);
+	border-color: #ffd070;
+	box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.2);
+	color: #171006;
+	font-family: var(--font-mono);
+	letter-spacing: -1px;
+}
+
+.brand-sub {
+	font-family: var(--font-mono);
+	letter-spacing: 0.04em;
+}
+
+.site-back {
+	font: 600 10px var(--font-mono);
+	letter-spacing: 1.1px;
+	color: #dfaa4c;
+	border: 1px solid #49320e;
+	padding: 8px 12px;
+	white-space: nowrap;
+}
+
+.site-back:hover {
+	color: var(--accent);
+	border-color: var(--accent);
+	background: var(--accent-soft);
+}
+
+.pill-info {
+	color: #f1c16b;
+	border-color: rgba(255, 176, 0, 0.35);
+	background: rgba(255, 176, 0, 0.12);
+}
+
+.btn-ghost,
+.btn-soft,
+.chip,
+.segmented {
+	background: rgba(255, 176, 0, 0.04);
+}
+
+.btn:hover,
+.chip:hover {
+	border-color: var(--border-strong);
+}
+
+.btn-ghost.active {
+	border-color: rgba(255, 176, 0, 0.5);
+}
+
+.btn-primary,
+.btn-primary:hover {
+	background: linear-gradient(180deg, #ffb000 0%, #e49700 100%);
+	border-color: #ffc247;
+	color: #171006;
+}
+
+.icon-dot.on {
+	background: var(--ok);
+	box-shadow: 0 0 8px rgba(155, 212, 94, 0.7);
+}
+
+.stage-pane {
+	background:
+		radial-gradient(ellipse 68% 54% at 50% 44%, rgba(255, 176, 0, 0.08), transparent 64%),
+		radial-gradient(circle at 50% 42%, rgba(255, 176, 0, 0.045), transparent 52%),
+		radial-gradient(rgba(255, 176, 0, 0.055) 1px, transparent 1px),
+		var(--bg-base);
+}
+
+.v1-rot-badge,
+.v1-real-badge {
+	background: rgba(255, 176, 0, 0.14);
+	border-color: rgba(255, 176, 0, 0.36);
+	color: #f1c16b;
+}
+
+.inspector-pane,
+.controls-panel {
+	border-color: var(--border-subtle);
+}
+
+.panel-tabs {
+	background: #0d0a06;
+}
+
+.card-badge {
+	background: rgba(255, 176, 0, 0.1);
+}
+
+.card-head h2,
+.panel-title,
+.section-title {
+	letter-spacing: 0.045em;
+}
+
+/* The physical V1 mockup keeps its realistic hardware colours. */
