@@ -14,7 +14,7 @@
     return lines.slice(0, 2).map(line => line
       .replace(/^[-*+]\s+/, '').replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
       .replace(/\s+by @\S+ in https?:\/\/\S+.*$/, '')
-      .replace(/[*_`#]/g, '').trim()).filter(Boolean).join(' · ') || 'See the release on GitHub for full details.';
+      .replace(/[*_`#]/g, '').trim()).filter(Boolean).join(' · ') || window.sonixI18n.t('rel_notes_external');
   }
 
   function uptAsset(release) {
@@ -24,15 +24,19 @@
   }
 
   let shownRelease = false;
+  let lastRelease = null;
+  let unavailable = false;
 
   function render(release) {
     if (!release || typeof release !== 'object') return;
+    lastRelease = release;
+    unavailable = false;
     const asset = uptAsset(release);
     version.textContent = release.tag_name || 'Latest release';
 
     const published = new Date(release.published_at);
     date.textContent = release.published_at && !Number.isNaN(published.valueOf())
-      ? new Intl.DateTimeFormat('en', { year: 'numeric', month: 'short', day: 'numeric', timeZone: 'UTC' }).format(published)
+      ? new Intl.DateTimeFormat(document.documentElement.lang || 'en', { year: 'numeric', month: 'short', day: 'numeric', timeZone: 'UTC' }).format(published)
       : '—';
 
     notes.textContent = highlights(release.body);
@@ -51,12 +55,24 @@
 
   function showUnavailable() {
     if (shownRelease) return;
+    unavailable = true;
     version.textContent = window.sonixI18n.t('rel_unavailable');
     date.textContent = '—';
     notes.textContent = window.sonixI18n.t('rel_failed');
     button.href = releases;
     button.querySelector('span').textContent = window.sonixI18n.t('view_release').replace(/<[^>]*>/g, '');
   }
+
+  function refreshLanguage() {
+    if (lastRelease) render(lastRelease);
+    else if (unavailable) {
+      shownRelease = false;
+      showUnavailable();
+    }
+  }
+
+  document.addEventListener('sonix:languagechange', refreshLanguage);
+  refreshLanguage();
 
   // The workflow refreshes this JSON at deploy time, so the strip works even
   // when api.github.com is rate-limited or blocked in the visitor's browser.
