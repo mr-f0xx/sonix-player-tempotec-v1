@@ -366,9 +366,10 @@ void bluetooth_set_volume_sync(bool on);
 void bluetooth_notify_volume(int percent);
 
 // Whether bluealsa carries the A2DP sink, the profile a phone or a computer
-// streams to. On only while the receiver page is open: with it the class of
-// device says "Rendering" and some speakers refuse to take audio from this
-// device. A change restarts bluealsa on the worker; the headphones that were
+// streams to. On for the lifetime of a receiver session, which may continue
+// off its page: with it the class of device says "Rendering" and some speakers
+// refuse to take audio from this device. A change restarts bluealsa on the
+// worker; the headphones that were
 // playing are asked for their stream again, and a phone or computer already
 // linked is asked to stream here when it goes on.
 bool bluetooth_receiver_profile(void);

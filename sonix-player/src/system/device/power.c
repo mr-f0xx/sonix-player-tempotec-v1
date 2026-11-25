@@ -920,9 +920,13 @@ static void park_wifi_now(void) {
 //
 // SonixLink switched on counts, as it does for the Wi-Fi radio: a phone can
 // reach it over Bluetooth, and a parked radio is one the phone cannot find.
+// The A2DP sink counts for the same reason. It used to be tied to the receiver
+// page, which kept the screen -- and so the radio -- up on its own; now the
+// receiver may be left running in the background, where a phone still has to
+// be able to find it.
 static bool bluetooth_in_use(void) {
 	return bluetooth_a2dp_link_active() || bluetooth_connected_device(NULL) || bluetooth_scan_running() ||
-		   bluetooth_busy() || sonixlink_get_enabled();
+		   bluetooth_busy() || bluetooth_receiver_profile() || sonixlink_get_enabled();
 }
 
 // Whether the player has anything on. This is what holds the shutdown timer at

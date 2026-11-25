@@ -15,8 +15,9 @@
 // Two halves, and only one of them lives in this file.
 //
 // The profile is the other half and belongs to bluetooth.c: while the receiver
-// page is open bluealsa runs with `-p a2dp-sink` and BlueZ advertises a local
-// AudioSink. The rest of the time it runs with the source alone
+// session is live bluealsa runs with `-p a2dp-sink` and BlueZ advertises a
+// local AudioSink. A session may outlive its page (btreceiversession.h); when
+// it ends the stack goes back to the source alone
 // (bluetooth_set_receiver_profile()).
 //
 // This file is the audio. bluealsa publishes a capture PCM for the link,

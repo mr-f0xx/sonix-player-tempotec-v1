@@ -38,9 +38,12 @@ bool bluetooth_receiver_track(bt_track_t *out) {
 // The receiver's session, as the control centre sees it: whether the user is in
 // it, which page it was asked to wait behind, and how often it was ended.
 static bool session_in_use;
+static bool background_on;
 static lv_obj_t *session_held_for;
 static int session_ends;
+lv_obj_t *btreceiverpage_screen;
 bool btreceiversession_in_use(void) { return session_in_use; }
+bool btreceiversession_background(void) { return background_on; }
 void btreceiversession_hold_for(lv_obj_t *screen) { session_held_for = screen; }
 void btreceiversession_end(void) {
 	session_ends++;
@@ -70,6 +73,17 @@ static void (*confirm_ok)(void *);
 static void *confirm_ok_user;
 static void (*confirm_cancel)(void *);
 static void *confirm_cancel_user;
+void confirm_show(const char *title, const char *message, const char *ok_label, void (*on_ok)(void *user),
+				  void *user) {
+	(void)message;
+	(void)ok_label;
+	confirm_calls++;
+	confirm_title_seen = title;
+	confirm_ok = on_ok;
+	confirm_ok_user = user;
+	confirm_cancel = NULL;
+	confirm_cancel_user = NULL;
+}
 void confirm_show_with_cancel(const char *title, const char *message, const char *ok_label, void (*on_ok)(void *user),
 							  void *user, const char *cancel_label, void (*on_cancel)(void *user), void *cancel_user) {
 	(void)message;
@@ -553,17 +567,18 @@ static void test_receiver_card(void) {
 	snprintf(receiver_track.title, sizeof(receiver_track.title), "Song");
 	snprintf(receiver_track.artist, sizeof(receiver_track.artist), "Artist");
 
-	// Hidden and tappable as a local card would leave them: the receiver's card
-	// has to put them right itself.
+	// Hidden and untappable as the DAC's card leaves them: the receiver's card
+	// has to put them right itself. Its two lines stay tappable -- they are the
+	// way back to the page when the receiver is running in the background.
 	lv_obj_set_hidden(np_title, true);
 	lv_obj_set_hidden(np_artist, true);
 	lv_obj_set_hidden(np_transport, false);
-	lv_obj_set_clickable(np_title, true);
-	lv_obj_set_clickable(np_artist, true);
+	lv_obj_set_clickable(np_title, false);
+	lv_obj_set_clickable(np_artist, false);
 	assert(refresh_mode_card());
 	assert(lv_obj_is_hidden(np_transport));
 	assert(!lv_obj_is_hidden(np_title) && !lv_obj_is_hidden(np_artist));
-	assert(!lv_obj_is_clickable(np_title) && !lv_obj_is_clickable(np_artist));
+	assert(lv_obj_is_clickable(np_title) && lv_obj_is_clickable(np_artist));
 	assert(!strcmp(card_title, "Song") && !strcmp(card_line, "Artist · AAC 44.1 kHz"));
 
 	// The transport's buttons are local: they do nothing while the receiver is on.
@@ -624,6 +639,7 @@ static void reset_navigation(void) {
 	session_held_for = NULL;
 	receiver_active = false;
 	session_in_use = false;
+	background_on = false;
 }
 
 // The equaliser's pages are what the sheet is allowed over the receiver for, so
@@ -794,6 +810,83 @@ static void test_leave_receiver_then(void) {
 	lv_display_delete(display);
 }
 
+// A background receiver is reached through its own page, and stopped from the
+// card: neither the long-press menu nor the page-opening paths may cut it off
+// on the way.
+static void test_background_receiver_navigation_and_stop(void) {
+	lv_display_t *display = lv_display_create(240, 320);
+	lv_obj_t *page = lv_obj_create(NULL);
+	lv_obj_t *other = lv_obj_create(NULL);
+	int by_two = 2;
+	btreceiverpage_screen = page;
+	lv_screen_load(other);
+
+	// The receiver's own page is a way back, never a reason to end the mode.
+	reset_navigation();
+	background_on = true;
+	receiver_active = true;
+	session_in_use = true;
+	open_page(page);
+	assert(page_switches == 1 && page_switched_to == page);
+	assert(confirm_calls == 0 && session_ends == 0);
+	lv_screen_load(page);
+
+	// Every other page opens straight away: the receiver keeps playing behind it.
+	reset_navigation();
+	background_on = true;
+	receiver_active = true;
+	session_in_use = true;
+	open_page(other);
+	assert(page_switches == 1 && page_switched_to == other);
+	assert(confirm_calls == 0 && session_ends == 0 && session_held_for == NULL);
+
+	// The same for an action that has to leave the receiver first (Wi-Fi
+	// transfer, say): the callback runs without a question or a stop.
+	reset_navigation();
+	then_runs = 0;
+	background_on = true;
+	receiver_active = true;
+	session_in_use = true;
+	leave_receiver_then(then_cb, &by_two);
+	assert(then_runs == 2 && confirm_calls == 0 && session_ends == 0);
+
+	// Tapping the card goes back to the page. A tap that ended a long press is
+	// consumed by that press, as on the other sheet controls.
+	lv_screen_load(other);
+	reset_navigation();
+	background_on = true;
+	receiver_active = true;
+	session_in_use = true;
+	long_press_consumed = true;
+	receiver_card_click_cb(NULL);
+	assert(!long_press_consumed && page_switches == 0);
+	receiver_card_click_cb(NULL);
+	assert(page_switches == 1 && page_switched_to == page && session_ends == 0);
+
+	// Holding the card asks before stopping, and the answer stops the mode.
+	reset_navigation();
+	background_on = true;
+	receiver_active = true;
+	session_in_use = true;
+	receiver_card_hold_cb(NULL);
+	assert(confirm_calls == 1 && !strcmp(confirm_title_seen, "btreceiver_stop_confirm"));
+	assert(session_ends == 0 && receiver_active);
+	confirm_ok(confirm_ok_user);
+	assert(session_ends == 1 && !receiver_active && !session_in_use);
+
+	// The radios say what to do instead of offering to cut the stream.
+	reset_navigation();
+	background_on = true;
+	receiver_active = true;
+	session_in_use = true;
+	assert(radios_held_by_receiver());
+	assert(popup_seen != NULL && !strcmp(popup_seen, "btreceiver_stop_from_card"));
+
+	reset_navigation();
+	btreceiverpage_screen = NULL;
+	lv_display_delete(display);
+}
+
 // The receiver is a session for the control centre's purposes whenever the user
 // is in it, and only that makes its card, its radios and its pages what they are.
 static void test_receiver_session(void) {
@@ -874,6 +967,7 @@ int main(void) {
 	test_open_equaliser_pages_over_receiver();
 	test_open_other_pages_over_receiver();
 	test_leave_receiver_then();
+	test_background_receiver_navigation_and_stop();
 
 	// A config that has never carried a layout gets the panel as it ships: the
 	// eight buttons the first page has always had, in their old order, and a

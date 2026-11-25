@@ -4828,9 +4828,10 @@ static void *bluetooth_worker(void *arg) {
 				break;
 
 			case JOB_RX_INVITE: {
-				// Nothing to invite once the receiver page has been closed: the
-				// A2DP sink is gone with it, and the ConnectProfile would be
-				// refused for lack of a local endpoint.
+				// Nothing to invite once the receiver session has ended: the A2DP
+				// sink is gone with it, and the ConnectProfile would be refused for
+				// lack of a local endpoint. A session left running in the
+				// background still has one.
 				if (bluetooth_receiver_profile()) {
 					bool waited = false;
 					try_invite_source(job.text, true, &waited);
