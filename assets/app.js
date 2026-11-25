@@ -95,27 +95,35 @@
     });
   }
 
-  // Cycle the real V1 screenshots inside the device's display area.
-  const deviceScreen = document.querySelector('#device-display');
-  if (deviceScreen && !window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+  // Crossfade real theme screenshots inside the device's display area.
+  const frontLayer = document.querySelector('#device-display');
+  const backLayer = document.querySelector('#device-display-next');
+  if (frontLayer && backLayer && !window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
     const screens = [
-      { src: './screenshots/ember/now-playing.png', label: 'Now playing' },
-      { src: './screenshots/ember/main-menu.png', label: 'Main menu' },
-      { src: './screenshots/ember/music.png', label: 'Music library' },
-      { src: './screenshots/ember/streaming.png', label: 'Streaming' },
-      { src: './screenshots/ember/settings.png', label: 'Settings' },
-      { src: './screenshots/ember/wireless.png', label: 'Wireless' },
+      { src: './screenshots/ember/now-playing.png', label: 'Amber · Now playing' },
+      { src: './screenshots/tokyonight/now-playing.png', label: 'Tokyo Night · Now playing' },
+      { src: './screenshots/ember/main-menu.png', label: 'Amber · Main menu' },
+      { src: './screenshots/tokyonight/main-menu.png', label: 'Tokyo Night · Main menu' },
+      { src: './screenshots/ember/music.png', label: 'Amber · Music library' },
+      { src: './screenshots/tokyonight/music.png', label: 'Tokyo Night · Music library' },
+      { src: './screenshots/ember/settings.png', label: 'Amber · Settings' },
+      { src: './screenshots/tokyonight/settings.png', label: 'Tokyo Night · Settings' },
     ];
     screens.forEach(screen => { const image = new Image(); image.src = screen.src; });
+
+    let front = frontLayer;
+    let back = backLayer;
     let index = 0;
     window.setInterval(() => {
-      deviceScreen.style.opacity = '0';
-      window.setTimeout(() => {
-        index = (index + 1) % screens.length;
-        deviceScreen.src = screens[index].src;
-        deviceScreen.alt = 'Sonix Player ' + screens[index].label + ' screen shown on the V1 display';
-        deviceScreen.style.opacity = '1';
-      }, 280);
-    }, 3200);
+      const next = (index + 1) % screens.length;
+      back.src = screens[next].src;
+      back.alt = 'Sonix Player ' + screens[next].label + ' screen shown on the V1 display';
+      back.setAttribute('aria-hidden', 'false');
+      back.style.opacity = '1';
+      front.style.opacity = '0';
+      front.setAttribute('aria-hidden', 'true');
+      [front, back] = [back, front];
+      index = next;
+    }, 6000);
   }
 })();

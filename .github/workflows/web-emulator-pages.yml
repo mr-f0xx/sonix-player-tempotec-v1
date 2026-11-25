@@ -22,6 +22,7 @@ on:
       - assets/**
       - coi-serviceworker.js
       - screenshots/ember/**
+      - screenshots/tokyonight/**
   push:
     branches:
       - '**'
@@ -79,7 +80,7 @@ jobs:
         if: github.event_name == 'workflow_dispatch' && inputs.build_ref != ''
         run: |
           git fetch --no-tags --depth=1 origin "$GITHUB_SHA"
-          git restore --source="$GITHUB_SHA" --worktree -- tools/v1-emulator index.html assets screenshots/ember
+          git restore --source="$GITHUB_SHA" --worktree -- tools/v1-emulator index.html assets screenshots/ember screenshots/tokyonight
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -199,10 +200,12 @@ jobs:
           set -euo pipefail
           mv tools/v1-emulator/dist/pages tools/v1-emulator/dist/emulator-stage
           mkdir -p tools/v1-emulator/dist/pages/screenshots/ember
+          mkdir -p tools/v1-emulator/dist/pages/screenshots/tokyonight
           mv tools/v1-emulator/dist/emulator-stage tools/v1-emulator/dist/pages/emulator
           cp index.html coi-serviceworker.js tools/v1-emulator/dist/pages/
           cp -R assets tools/v1-emulator/dist/pages/assets
           cp screenshots/ember/*.png tools/v1-emulator/dist/pages/screenshots/ember/
+          cp screenshots/tokyonight/*.png tools/v1-emulator/dist/pages/screenshots/tokyonight/
           touch tools/v1-emulator/dist/pages/.nojekyll
 
       - name: Upload downloadable .sonix-web.zip artifact
