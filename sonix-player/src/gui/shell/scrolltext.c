@@ -540,6 +540,12 @@ void scrolltext_set_active(lv_obj_t *label, bool active) {
 	build_template();
 	lv_obj_set_style_anim(label, active ? &scroll_template_immediate : &scroll_template, LV_PART_MAIN);
 	scroll_fit(label);
+	if (active && lv_label_get_long_mode(label) == LV_LABEL_LONG_SCROLL_CIRCULAR) {
+		// Force a clean restart so the immediate template takes effect now,
+		// even if the label was already in circular scroll mode.
+		lv_label_set_long_mode(label, LV_LABEL_LONG_CLIP);
+		lv_label_set_long_mode(label, LV_LABEL_LONG_SCROLL_CIRCULAR);
+	}
 	apply_duration(label, lv_label_get_text(label));
 	fade_pick(entry);
 }

@@ -4064,6 +4064,7 @@ static void build_panel(panel_t *p, gui_config_t *cfg, bool is_tracks, int slot_
 		lv_obj_set_hidden(row->button, true);
 		lv_obj_set_event_bubble(row->button, true); // so the player sheet can be dragged in
 		lv_obj_add_event_cb(row->button, row_pressed_cb, LV_EVENT_PRESSED, p);
+		lv_obj_add_event_cb(row->button, row_pressed_cb, LV_EVENT_PRESSING, p);
 		lv_obj_add_event_cb(row->button, row_clicked_cb, LV_EVENT_CLICKED, p);
 		lv_obj_add_event_cb(row->button, row_long_pressed_cb, LV_EVENT_LONG_PRESSED, p);
 
