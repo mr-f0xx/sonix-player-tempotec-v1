@@ -83,6 +83,7 @@ static lv_obj_t *screensaver_visualizer_switch;
 static lv_obj_t *screensaver_pills;
 static lv_obj_t *screensaver_album_pill;
 static lv_obj_t *screensaver_images_pill;
+static lv_obj_t *screensaver_auto_pill;
 static lv_obj_t *screensaver_style_group; // "Album art", under the pills above
 static lv_obj_t *screensaver_fill_pill;
 static lv_obj_t *screensaver_framed_pill;
@@ -114,7 +115,7 @@ static void doubletap_toggle_cb(lv_event_t *e) {
 	power_set_double_tap_wake(on);
 }
 
-// The two pills under the switch, and which of them is lit. Hidden with the
+// The pills under the switch, and which of them is lit. Hidden with the
 // screensaver off: "album or pictures" means nothing when there is no
 // screensaver to show either. Likewise the album's Fill and Framed under them,
 // which mean nothing unless it is the album being shown.
@@ -139,10 +140,11 @@ static void screensaver_refresh(void) {
 	screensaver_source_t source = screensaver_source();
 	settingsrow_pill_active(screensaver_album_pill, source == SCREENSAVER_SOURCE_ALBUM);
 	settingsrow_pill_active(screensaver_images_pill, source == SCREENSAVER_SOURCE_IMAGES);
+	settingsrow_pill_active(screensaver_auto_pill, source == SCREENSAVER_SOURCE_AUTO);
 
 	// How the album is drawn, under its pill: only while the album is what
 	// the screensaver shows. A folder picture is made for the screen and is
-	// always drawn the one way.
+	// always drawn the one way, and Auto draws neither way.
 	bool viz = screensaver_get_visualizer();
 	lv_obj_set_hidden(screensaver_style_group, !on || source != SCREENSAVER_SOURCE_ALBUM || viz);
 	screensaver_style_t style = screensaver_style();
@@ -150,10 +152,10 @@ static void screensaver_refresh(void) {
 	settingsrow_pill_active(screensaver_framed_pill, style == SCREENSAVER_STYLE_FRAMED);
 
 	if (screensaver_viz_card) {
-		bool album_viz = on && source == SCREENSAVER_SOURCE_ALBUM;
-		lv_obj_set_hidden(screensaver_viz_card, !album_viz);
+		bool viz_source = on && (source == SCREENSAVER_SOURCE_ALBUM || source == SCREENSAVER_SOURCE_AUTO);
+		lv_obj_set_hidden(screensaver_viz_card, !viz_source);
 		lv_obj_set_hidden(screensaver_viz_pills, !viz);
-		lv_obj_set_hidden(screensaver_fullscreen_row, !album_viz || !viz);
+		lv_obj_set_hidden(screensaver_fullscreen_row, !viz_source || !viz);
 		if (screensaver_get_visualizer_fullscreen())
 			lv_obj_add_state(screensaver_fullscreen_switch, LV_STATE_CHECKED);
 		else
@@ -197,8 +199,9 @@ static void screensaver_source_cb(lv_event_t *e) {
 
 	// Pictures is refused rather than accepted-and-blank: the folder is judged
 	// now, while the user is looking at the answer, instead of at a wake hours
-	// later with nothing to show and no way to tell why.
-	if (chosen == SCREENSAVER_SOURCE_IMAGES && !screensaver_has_images()) {
+	// later with nothing to show and no way to tell why. Auto needs the same
+	// folder for the moments nothing plays.
+	if ((chosen == SCREENSAVER_SOURCE_IMAGES || chosen == SCREENSAVER_SOURCE_AUTO) && !screensaver_has_images()) {
 		confirm_notice("settings_no_pictures_to_show", "screensaver_empty_note");
 		screensaver_set_source(SCREENSAVER_SOURCE_ALBUM);
 		screensaver_refresh();
@@ -559,14 +562,17 @@ static void build_screen_page(gui_config_t *cfg) {
 
 	// The screensaver: a picture, the track and the time over everything else
 	// the moment the panel lights back up. A swipe up puts it away. The pills
-	// say where the picture comes from -- the record being played, or the
-	// card's own Screensaver folder.
+	// say where the picture comes from -- the record being played, the card's
+	// own Screensaver folder, or both at once: the visualizer while music
+	// plays and a folder picture while it does not.
 	lv_obj_t *screensaver_card = settingsrow_toggle_pills(container, "screensaver", screensaver_toggle_cb,
 														  &screensaver_switch, &screensaver_pills);
 	screensaver_album_pill =
 		settingsrow_pill(screensaver_pills, "screensaver_source_album", SCREENSAVER_SOURCE_ALBUM, screensaver_source_cb);
 	screensaver_images_pill =
 		settingsrow_pill(screensaver_pills, "screensaver_source_images", SCREENSAVER_SOURCE_IMAGES, screensaver_source_cb);
+	screensaver_auto_pill =
+		settingsrow_pill(screensaver_pills, "screensaver_source_auto", SCREENSAVER_SOURCE_AUTO, screensaver_source_cb);
 	// And how the album is drawn: filling the screen, enlarged to do it, or
 	// framed with margins at its own resolution. In the same card, since it
 	// is a detail of the Album pill above it rather than a setting of its own.
@@ -580,7 +586,8 @@ static void build_screen_page(gui_config_t *cfg) {
 	screensaver_chevron_row = settingsrow_toggle(container, "screensaver_chevron", &screensaver_chevron_switch,
 												   screensaver_chevron_cb);
 
-	// Settings for the Album source only; folder pictures take precedence.
+	// Settings for the Album and Auto sources; plain folder pictures take
+	// precedence over the visualizer entirely.
 	screensaver_viz_card = settingsrow_toggle_pills(container, "screensaver_visualizer", screensaver_visualizer_cb,
 												  &screensaver_visualizer_switch, &screensaver_viz_pills);
 	for (size_t i = 0; i < sizeof(viz_styles) / sizeof(viz_styles[0]); i++) {

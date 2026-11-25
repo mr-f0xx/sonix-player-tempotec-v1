@@ -141,6 +141,10 @@ bool screensaverpics_pick(const char *current, int max_w, int max_h, char *out, 
 	return false;
 }
 const char *metadata_shown_artist(const song_metadata_t *m) { return m->artist; }
+// The video player resumes itself when the screensaver goes away; the test
+// never suspends one, so these never have anything to do.
+bool videoplayer_ui_is_suspended(void) { return false; }
+void videoplayer_ui_resume(void) {}
 
 /* ---- pictures, and the bookkeeping that catches a leak or a double free --- */
 
@@ -630,10 +634,10 @@ static bool is_ini(const char *name) {
 	return n > 4 && strcmp(name + n - 4, ".ini") == 0;
 }
 
-// The card on the Screen page: the switch, Album and Pictures, and under them
-// a captioned second row for how the album is drawn. Built with the same
-// helpers settings.c uses; the wiring that hides the group is a single line
-// there (screensaver_refresh).
+// The card on the Screen page: the switch, Album, Pictures and Visualizer +
+// Picture, and under them a captioned second row for how the album is drawn.
+// Built with the same helpers settings.c uses; the wiring that hides the
+// group is a single line there (screensaver_refresh).
 static void check_settings_card(const char *language_dir) {
 	lv_obj_t *previous = lv_screen_active();
 	lv_obj_t *page = lv_obj_create(NULL);
@@ -645,6 +649,7 @@ static void check_settings_card(const char *language_dir) {
 	lv_obj_t *card = settingsrow_toggle_pills(page, "screensaver", noop_cb, &toggle, &pills);
 	lv_obj_t *album = settingsrow_pill(pills, "screensaver_source_album", 0, noop_cb);
 	settingsrow_pill(pills, "screensaver_source_images", 1, noop_cb);
+	settingsrow_pill(pills, "screensaver_source_auto", 2, noop_cb);
 	lv_obj_t *group = settingsrow_pills_group(card, "screensaver_album_art", &style_pills);
 	lv_obj_t *fill = settingsrow_pill(style_pills, "screensaver_style_fill", SCREENSAVER_STYLE_FILL, noop_cb);
 	lv_obj_t *framed = settingsrow_pill(style_pills, "screensaver_style_framed", SCREENSAVER_STYLE_FRAMED, noop_cb);
@@ -704,6 +709,7 @@ static void check_settings_card(const char *language_dir) {
 	// Every language has the new texts -- a missing one would show its
 	// bare tag -- and what is on screen follows a switch.
 	const char *keys[] = {"screensaver_album_art", "screensaver_style_fill", "screensaver_style_framed",
+						  "screensaver_source_auto",
 						  "screensaver_viz_neon", "screensaver_viz_led", "screensaver_viz_filaments",
 						  "screensaver_viz_fullscreen", "screensaver_chevron", "screensaver_viz_layers", "screensaver_viz_sharp",
 						  "screensaver_viz_soft", "screensaver_viz_sparks", "screensaver_viz_tunnel"};
@@ -1383,6 +1389,46 @@ int main(int argc, char **argv) {
 	assert(lv_obj_is_hidden(chevron_btn()));
 	screensaver_set_show_chevron(true);
 	assert(!lv_obj_is_hidden(chevron_btn()));
+
+	/* Visualizer + Picture: the visualizer while music plays, a folder
+	 * picture when it does not. The swap happens on the once-a-second clock
+	 * tick, playback state and nothing else -- and with full screen out of
+	 * the way, the two layers trade places both ways. */
+	screensaver_set_visualizer_style(SCREENSAVER_VIZ_STYLE_NEON); // the filaments section above left its own style behind
+	screensaver_set_visualizer_fullscreen(false);
+	screensaver_set_source(SCREENSAVER_SOURCE_AUTO);
+	assert(screensaver_source() == SCREENSAVER_SOURCE_AUTO);
+	assert(config_init(config) && config_get_int("screen", "screensaver_source", -1) == SCREENSAVER_SOURCE_AUTO);
+	assert(!lv_obj_is_hidden(spectrum) && lv_obj_is_hidden(cover_box())); // still playing
+	state.status = AUDIO_STATUS_PAUSED;
+	pump(1010); // the clock tick sees the pause
+	assert(lv_obj_is_hidden(spectrum) && !lv_obj_is_hidden(cover_box()));
+	// No folder picture ever lands here (the stubbed folder is empty), so the
+	// paused screen shows the placeholder note where the picture goes.
+	assert(lv_obj_is_hidden(picture()));
+	assert(!lv_obj_is_hidden(placeholder()));
+	state.status = AUDIO_STATUS_PLAYING;
+	pump(1010);
+	assert(!lv_obj_is_hidden(spectrum) && lv_obj_is_hidden(cover_box()));
+	state.status = AUDIO_STATUS_STOPPED;
+	pump(1010);
+	assert(lv_obj_is_hidden(spectrum) && !lv_obj_is_hidden(cover_box()));
+	// Music restarted while the panel was off has to come up as the
+	// visualizer, fed and animating -- not a frozen screen and not the
+	// picture with the bars dead behind it.
+	state.status = AUDIO_STATUS_PAUSED;
+	go_dark();
+	state.status = AUDIO_STATUS_PLAYING;
+	wake();
+	assert(!lv_obj_is_hidden(spectrum) && lv_obj_is_hidden(cover_box()));
+	memset(pcm, 0, sizeof(pcm));
+	for (int i = 0; i < 4096; i++) pcm[2 * i] = pcm[2 * i + 1] = (int16_t)(24000 * sin(2 * 3.14159265 * 850 * i / 44100));
+	visualizer_feed(pcm, 4096, 2, 16, 44100);
+	pump(100);
+	assert(spectrum_bar_height(spectrum, 4) > 0);
+	// Back to the album source: everything as it was.
+	screensaver_set_source(SCREENSAVER_SOURCE_ALBUM);
+	assert(!lv_obj_is_hidden(spectrum));
 
 	screensaver_set_visualizer(false);
 	assert(lv_obj_is_hidden(spectrum));

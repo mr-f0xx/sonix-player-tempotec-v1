@@ -35,7 +35,9 @@ bool screensaver_get_enabled(void);
 // Show the swipe-up hint (on by default). Does not change the gesture.
 void screensaver_set_show_chevron(bool visible);
 bool screensaver_get_show_chevron(void);
-// Replace album artwork with a live spectrum; folder pictures are unaffected.
+// Replace album artwork with a live spectrum. With the Album source that is
+// the whole story; with Auto it is half of it -- the spectrum while music
+// plays, a folder picture while it does not. Plain Images is unaffected.
 void screensaver_set_visualizer(bool enabled);
 bool screensaver_get_visualizer(void);
 
@@ -72,9 +74,16 @@ void screensaver_set_visualizer_layers(unsigned layers);
 // Images is the card's own Screensaver folder, and costs a decode at every
 // wake -- which is why it is not the default and why the folder is judged
 // before the option can be chosen at all.
+//
+// Auto is the two together: the visualizer while music plays, a folder
+// picture while it does not. The picture is prepared in the background
+// exactly as for Images, so the switch costs nothing when it happens; the
+// visualizer's style, fullscreen and layers are the ones below. With the
+// visualizer switch off it is Images in all but name.
 typedef enum {
 	SCREENSAVER_SOURCE_ALBUM = 0,
 	SCREENSAVER_SOURCE_IMAGES,
+	SCREENSAVER_SOURCE_AUTO,
 } screensaver_source_t;
 
 screensaver_source_t screensaver_source(void);
