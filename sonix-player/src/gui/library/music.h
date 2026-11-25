@@ -5,18 +5,9 @@
 
 #include "lvgl/lvgl.h"
 
-typedef enum {
-	MUSIC_TILE_ALL_TRACKS = 0,
-	MUSIC_TILE_ALBUMS,
-	MUSIC_TILE_ARTISTS,
-	MUSIC_TILE_ALBUM_ARTISTS,
-	MUSIC_TILE_GENRES,
-	MUSIC_TILE_YEARS,
-	MUSIC_TILE_PLAYLISTS,
-	MUSIC_TILE_MOST_PLAYED,
-	MUSIC_TILE_BROWSE,
-	MUSIC_TILE_COUNT,
-} music_tile_id_t;
+// The tiles themselves live in music_tiles.h, which the tile arrangement rule
+// (settings/tilelayout.c) can include without pulling the page in.
+#include "src/gui/library/music_tiles.h"
 
 // The Music page: the library's index tiles (all tracks, albums, artists,
 // album artists, genres, years, playlists, most played) plus the file browser,

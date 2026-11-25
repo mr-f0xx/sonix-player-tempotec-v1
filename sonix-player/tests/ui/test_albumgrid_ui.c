@@ -103,7 +103,8 @@ void gui_notify_no_card(void) {}
 void gui_notify_popup(const char *text) { (void)text; }
 void toast_success(const char *text) { (void)text; }
 void toast_error(const char *text) { (void)text; }
-void scrolltext_apply(lv_obj_t *label) { (void)label; }
+// The real scrolltext.c is linked (medialist's rows ask it to scroll), so
+// scrolltext_apply() is not stubbed here: it is the real binding.
 void power_pause_in_standby(lv_timer_t *timer) { (void)timer; }
 bool musicsettings_allow_delete(void) { return false; }
 bool musicsettings_endless_shuffle(void) { return false; }

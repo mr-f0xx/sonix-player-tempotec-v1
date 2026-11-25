@@ -4,10 +4,12 @@
  * What is checked is the page's SHAPE, not its arithmetic: that the range pills
  * sit across the title row and the chosen one is the only one lit, that the two
  * summary cards share a row and neither runs off the panel, that the chart's
- * seven bars and the seven weekday letters under them line up, and that the two
+ * seven bars and the seven weekday letters under them line up, that the three
  * top lists draw their rank, cover, name and plays inside a row of the height
- * the panel has for them. The numbers themselves are listeningstats.c's and are
- * covered by test_listeningstats.c against the real database.
+ * the panel has for them, and that every row is a way in -- a track plays, a
+ * record opens its tracks, an artist opens their page. The numbers themselves
+ * are listeningstats.c's and are covered by test_listeningstats.c against the
+ * real database.
  *
  * Real: LVGL and its software renderer, the shell's row and pill builders, the
  * theme, and the page's own code. The listening history is a stub that hands
@@ -15,6 +17,7 @@
  * artefact of what happened to be in a database.
  */
 #include <assert.h>
+#include <dirent.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -148,8 +151,9 @@ int stats_top(stats_top_t kind, stats_range_t range, int offset, int count, stat
 	}
 	static const char *const ARTISTS[] = {"Slowspace", "Alyzea", "Nightjar", "Kessler"};
 	static const char *const ALBUMS[] = {"Red", "Blue", "Green"};
+	static const char *const TRACKS[] = {"First Light", "Second Wind", "Third Rail", "Fourth Wall"};
 	static const char *const FILES[] = {"/card/a/01.flac", "/card/b/01.flac", "/card/c/01.flac", "/card/d/01.flac"};
-	int total = kind == STATS_TOP_ARTISTS ? 4 : kind == STATS_TOP_ALBUMS ? 3 : 4;
+	int total = kind == STATS_TOP_ALBUMS ? 3 : 4;
 	int written = 0;
 	for (int i = offset; i < total && written < count; i++, written++) {
 		if (kind == STATS_TOP_ARTISTS) {
@@ -157,7 +161,10 @@ int stats_top(stats_top_t kind, stats_range_t range, int offset, int count, stat
 		} else if (kind == STATS_TOP_ALBUMS) {
 			stub_entry(&out[written], ALBUMS[i], FILES[i % 4], 22 - i * 5);
 		} else {
-			stub_entry(&out[written], "A Track", FILES[i % 4], 9 - i);
+			// A track is its path, its title and whose record it is on: the row
+			// plays the path and the full page writes the record under it.
+			stub_entry(&out[written], TRACKS[i], FILES[i % 4], 9 - i);
+			snprintf(out[written].artist, sizeof(out[written].artist), "%s", ARTISTS[i % 4]);
 		}
 	}
 	return written;
@@ -244,8 +251,11 @@ lv_image_dsc_t icon_stats_artists = {.header = {.magic = LV_IMAGE_HEADER_MAGIC, 
 													  .w = 2, .h = 2, .stride = 2},
 										   .data = GLYPH_BYTES, .data_size = sizeof(GLYPH_BYTES)};
 lv_image_dsc_t icon_stats_albums = {.header = {.magic = LV_IMAGE_HEADER_MAGIC, .cf = LV_COLOR_FORMAT_A8,
-													 .w = 2, .h = 2, .stride = 2},
-										  .data = GLYPH_BYTES, .data_size = sizeof(GLYPH_BYTES)};
+												 .w = 2, .h = 2, .stride = 2},
+								  .data = GLYPH_BYTES, .data_size = sizeof(GLYPH_BYTES)};
+lv_image_dsc_t icon_stats_tracks = {.header = {.magic = LV_IMAGE_HEADER_MAGIC, .cf = LV_COLOR_FORMAT_A8,
+												 .w = 2, .h = 2, .stride = 2},
+								  .data = GLYPH_BYTES, .data_size = sizeof(GLYPH_BYTES)};
 lv_image_dsc_t icon_chevron_right = {.header = {.magic = LV_IMAGE_HEADER_MAGIC, .cf = LV_COLOR_FORMAT_A8,
 													  .w = 2, .h = 2, .stride = 2},
 										   .data = GLYPH_BYTES, .data_size = sizeof(GLYPH_BYTES)};
@@ -265,6 +275,38 @@ void switch_screen(lv_obj_t *target) {
 bool medialist_album_view(void) { return true; }
 bool medialist_go_to_current(void) { return false; }
 bool medialist_quality_badges(void) { return false; }
+
+// Where a row's tap went: the artist page it opened, or the file it played.
+// The page's rows are ways in (issue #494), so what matters is that the same
+// tap the row is drawn for reaches the same list the Music page opens.
+static char opened_artist[128];
+static char opened_album[300];
+static char played_file[512];
+static int opened_album_tracks;
+void medialist_open_artist(const char *name) { snprintf(opened_artist, sizeof(opened_artist), "%s", name); }
+void medialist_open(const char *title, library_list_t kind, library_filter_t filter, const char *value) {
+	(void)title;
+	opened_album_tracks = kind == LIBRARY_LIST_TRACKS && filter == LIBRARY_FILTER_ALBUM;
+	snprintf(opened_album, sizeof(opened_album), "%s", value ? value : "");
+}
+void player_play_file(const char *filepath) { snprintf(played_file, sizeof(played_file), "%s", filepath); }
+
+// A tap on a track hands the whole ranked list over as the queue, the way the
+// Most played list did: what is checked is that the list is the top tracks in
+// the order the page shows them, opened at the row that was tapped.
+#define PLAYED_LIST_MAX 8 // as many as the full page shows at once
+static const char *played_list[PLAYED_LIST_MAX];
+static int played_list_count;
+static int played_list_start;
+void device_state_play_list(const char *const *list, int count, int start_index) {
+	played_list_count = count < PLAYED_LIST_MAX ? count : PLAYED_LIST_MAX;
+	played_list_start = start_index;
+	for (int i = 0; i < played_list_count; i++) {
+		played_list[i] = list[i];
+	}
+}
+void player_refresh_now_playing(void) {}
+lv_obj_t *player_screen;
 
 // ---------------------------------------------------------------------------
 
@@ -338,6 +380,10 @@ static bool label_starts_with(const char *text, const char *prefix) {
 	return available >= (wanted < 3 ? wanted : 3) && strncmp(text, prefix, available) == 0;
 }
 
+// The row a name label sits in. A row's name and its second line share a box
+// of their own, so the row itself is two levels up.
+static lv_obj_t *hit_row(lv_obj_t *name_label) { return lv_obj_get_parent(lv_obj_get_parent(name_label)); }
+
 static lv_obj_t *find_label_prefix(lv_obj_t *obj, const char *prefix) {
 	uint32_t count = lv_obj_get_child_count(obj);
 	for (uint32_t i = 0; i < count; i++) {
@@ -377,7 +423,48 @@ static void dump_snapshot(lv_obj_t *screen, const char *tag) {
 	lv_draw_buf_destroy(shot);
 }
 
-int main(void) {
+// Every shipped language carries the page's own strings. Read straight from the
+// files, because that is what the player reads: a key missing here is a tag on
+// the panel in that language and nothing else would say so.
+static void check_language_files(const char *dir) {
+	static const char *const KEYS[] = {"stats_top_tracks", "stats_top_artists", "stats_top_albums", "stats_see_all",
+									   "stats_nothing_yet"};
+	DIR *d = opendir(dir);
+	assert(d);
+	struct dirent *entry;
+	int files = 0;
+	while ((entry = readdir(d)) != NULL) {
+		size_t len = strlen(entry->d_name);
+		if (len < 4 || strcmp(entry->d_name + len - 4, ".ini") != 0) {
+			continue;
+		}
+		char path[1024];
+		snprintf(path, sizeof(path), "%s/%s", dir, entry->d_name);
+		FILE *file = fopen(path, "r");
+		assert(file);
+		char text[1 << 20];
+		size_t got = fread(text, 1, sizeof(text) - 1, file);
+		text[got] = '\0';
+		fclose(file);
+		files++;
+		for (size_t i = 0; i < sizeof(KEYS) / sizeof(KEYS[0]); i++) {
+			char wanted[64];
+			snprintf(wanted, sizeof(wanted), "\n%s = ", KEYS[i]);
+			// Also at the very start of the file.
+			char first[64];
+			snprintf(first, sizeof(first), "%s = ", KEYS[i]);
+			if (!strstr(text, wanted) && strncmp(text, first, strlen(first)) != 0) {
+				fprintf(stderr, "FAIL %s has no %s\n", entry->d_name, KEYS[i]);
+				assert(0);
+			}
+		}
+	}
+	closedir(d);
+	assert(files == 11); // the eleven the packer ships
+	printf("stats strings: %d languages carry every key the page draws\n", files);
+}
+
+int main(int argc, char **argv) {
 	char dir[] = "/tmp/sonix-stats-ui-XXXXXX";
 	assert(mkdtemp(dir));
 	char path[256];
@@ -406,6 +493,7 @@ int main(void) {
 	// player: a title row, a swiped-back screen, and nothing else.
 	stats_init(&cfg);
 	assert(stats_screen);
+	assert(stats_tracks_screen);
 	assert(stats_artists_screen);
 	assert(stats_albums_screen);
 
@@ -760,10 +848,56 @@ int main(void) {
 	assert(lv_obj_get_scroll_x(viewport) == 0 && !lv_obj_is_scrollable(viewport));
 	assert(lv_obj_get_width(content) == lv_obj_get_content_width(viewport));
 
-	// --- the two top lists ------------------------------------------------------
+	// --- the three top lists -----------------------------------------------------
+	// Tracks, artists and albums, in that order: the tracks are what the Music
+	// page's "Most played" tile used to be, and they lead because "what did I
+	// actually play" is the most particular answer of the three.
+	lv_obj_t *top_tracks = find_label(stats_screen, "stats_top_tracks");
 	lv_obj_t *top_artists = find_label(stats_screen, "stats_top_artists");
 	lv_obj_t *top_albums = find_label(stats_screen, "stats_top_albums");
-	assert(top_artists && top_albums);
+	assert(top_tracks && top_artists && top_albums);
+	lv_area_t tt;
+	lv_obj_get_coords(top_tracks, &tt);
+	{
+		lv_area_t ta;
+		lv_obj_get_coords(top_artists, &ta);
+		assert(tt.y2 < ta.y1); // tracks above artists
+		// And in the page's own column: the pills, the two cards, the chart,
+		// then these three, which is the order the issue asked for.
+		lv_obj_t *column = lv_obj_get_child(stats_screen, 1);
+		assert(column);
+		assert(find_label(lv_obj_get_child(column, 3), "stats_top_tracks"));
+		assert(find_label(lv_obj_get_child(column, 4), "stats_top_artists"));
+		assert(find_label(lv_obj_get_child(column, 5), "stats_top_albums"));
+	}
+
+	// The tracks card's own "See all", and its two rows: the first two tracks
+	// the stub handed back, with their plays beside them.
+	lv_obj_t *tracks_see_all = find_label(lv_obj_get_parent(top_tracks), "stats_see_all");
+	assert(tracks_see_all);
+	lv_obj_t *first_track = find_label_prefix(stats_screen, "First Light");
+	lv_obj_t *second_track = find_label_prefix(stats_screen, "Second Wind");
+	lv_obj_t *third_track = find_label_prefix(stats_screen, "Third Rail");
+	assert(!third_track); // the card shows two and no more
+	{
+		lv_obj_t *plays_nine = find_label(hit_row(first_track), "9 plays");
+		lv_obj_t *plays_eight = find_label(hit_row(second_track), "8 plays");
+		assert(plays_nine && plays_eight);
+		lv_area_t fa, na, pa;
+		lv_obj_get_coords(first_track, &na);
+		lv_obj_get_coords(find_label(hit_row(first_track), "1"), &fa);
+		lv_obj_get_coords(plays_nine, &pa);
+		assert(fa.x1 < na.x1 && pa.x1 > na.x1 && pa.x2 <= W);
+	}
+
+	// Tapping a track plays it and brings the player up -- what the Music
+	// page's Most played rows did, and what the issue asked for by name.
+	assert(played_list_count == 0 && played_file[0] == '\0');
+	lv_obj_send_event(hit_row(first_track), LV_EVENT_CLICKED, NULL);
+	assert(played_list_count == 4);
+	assert(played_list_start == 0);
+	assert(strcmp(played_list[0], "/card/a/01.flac") == 0);
+	assert(strcmp(played_list[3], "/card/d/01.flac") == 0);
 	// Each card's heading carries a "See all" of its own, to the right of the
 	// title and on the same line.
 	lv_obj_t *see_all = find_label(lv_obj_get_parent(top_artists), "stats_see_all");
@@ -801,13 +935,13 @@ int main(void) {
 
 	// The ranks and the play counts are on the row: "1" beside the first name
 	// horizontally, and the plays at the right edge of the same row.
-	lv_obj_t *rank = find_label(lv_obj_get_parent(first_artist), "1");
+	lv_obj_t *rank = find_label(hit_row(first_artist), "1");
 	assert(rank);
 	lv_area_t ra, na;
 	lv_obj_get_coords(rank, &ra);
 	lv_obj_get_coords(first_artist, &na);
 	assert(ra.x1 < na.x1);
-	lv_obj_t *plays = find_label(lv_obj_get_parent(first_artist), "31 plays");
+	lv_obj_t *plays = find_label(hit_row(first_artist), "31 plays");
 	assert(plays);
 	lv_area_t pa;
 	lv_obj_get_coords(plays, &pa);
@@ -854,8 +988,19 @@ int main(void) {
 
 
 	// --- the See all pages ------------------------------------------------------
-	// The artist list is a screen of its own, headed like the page it came from,
-	// and it holds the whole list rather than the two the card shows.
+	// Each list is a screen of its own, headed like the page it came from, and
+	// it holds the whole list rather than the two the card shows.
+	lv_screen_load(stats_tracks_screen);
+	lv_obj_update_layout(stats_tracks_screen);
+	assert(settingsrow_page_title(stats_tracks_screen));
+	dump_snapshot(stats_tracks_screen, "tracks");
+	lv_obj_t *all_four_tracks = find_label_prefix(stats_tracks_screen, "Fourth Wall");
+	assert(all_four_tracks); // the fourth track, which the card did not have room for
+	// And the line under a track's name, which the cards have no height for: a
+	// track row says whose record it is on, as the albums page says whose each
+	// record is. The fourth track is the stub's on Kessler.
+	assert(find_label(hit_row(all_four_tracks), "Kessler"));
+
 	lv_screen_load(stats_artists_screen);
 	lv_obj_update_layout(stats_artists_screen);
 	assert(settingsrow_page_title(stats_artists_screen));
@@ -864,8 +1009,25 @@ int main(void) {
 	assert(all_four); // the fourth artist, which the card did not have room for
 	lv_screen_load(stats_albums_screen);
 	lv_obj_update_layout(stats_albums_screen);
+	dump_snapshot(stats_albums_screen, "albums");
 	lv_obj_t *all_three = find_label_prefix(stats_albums_screen, "Green");
 	assert(all_three);
+
+	// Every row of the three pages is a way in, as the issue asked: a track
+	// plays, an album opens its tracks and an artist opens their page -- the
+	// same lists the Music page opens for the same things.
+	opened_artist[0] = opened_album[0] = '\0';
+	played_file[0] = '\0';
+	played_list_count = played_list_start = 0;
+	lv_obj_send_event(hit_row(all_four_tracks), LV_EVENT_CLICKED, NULL);
+	assert(played_list_count == 4);
+	assert(played_list_start == 3); // the row that was tapped, not the first
+	assert(strcmp(played_list[3], "/card/d/01.flac") == 0);
+	lv_obj_send_event(hit_row(all_three), LV_EVENT_CLICKED, NULL);
+	assert(opened_album_tracks);
+	assert(strcmp(opened_album, "/card/c/01.flac") == 0);
+	lv_obj_send_event(hit_row(all_four), LV_EVENT_CLICKED, NULL);
+	assert(strcmp(opened_artist, "Kessler") == 0);
 
 	// --- the page with nothing on it --------------------------------------------
 	// Neither list has a row, so the note saying so is all either page has to
@@ -926,8 +1088,8 @@ int main(void) {
 		stats_init(&cfg);
 		lv_screen_load(stats_screen);
 		lv_obj_update_layout(stats_screen);
-		const char *headings[] = {tr("stats_top_artists"), tr("stats_top_albums")};
-		for (int i = 0; i < 2; i++) {
+		const char *headings[] = {tr("stats_top_tracks"), tr("stats_top_artists"), tr("stats_top_albums")};
+		for (int i = 0; i < 3; i++) {
 			lv_obj_t *head = find_label(stats_screen, headings[i]);
 			assert(head && lv_label_get_long_mode(head) == LV_LABEL_LONG_WRAP);
 			lv_obj_t *strip = lv_obj_get_parent(head);
@@ -953,6 +1115,16 @@ int main(void) {
 		}
 	}
 
-	printf("stats: the pills, the cards, the chart and the two top lists fit the V1's panel\n");
+	// --- the page's strings, in every language the player ships -------------
+	// The three headings are the page's own words and none of them may be
+	// missing: tr() falls back to the key, so a language without "Top tracks"
+	// draws "stats_top_tracks" across the card, and nobody notices a tag where
+	// a heading should be. The three seen above are the French and German ones;
+	// reading the shipped files is what says the other nine have them too.
+	if (argc > 1) {
+		check_language_files(argv[1]);
+	}
+
+	printf("stats: the pills, the cards, the chart and the three top lists fit the V1's panel\n");
 	return 0;
 }

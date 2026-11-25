@@ -19,6 +19,7 @@
 #include "src/gui/nowplaying/coverflow.h"
 #include "src/gui/settings/artistexceptions.h"
 #include "src/gui/settings/lastfmsettings.h"
+#include "src/gui/settings/tilelayout.h"
 #include "src/gui/settings/listenbrainzsettings.h"
 #include "src/gui/library/medialist.h"
 #include "src/gui/library/music.h"
@@ -1968,181 +1969,36 @@ static void aam_leftie_cb(lv_event_t *e) {
 // two-section grip drag as the control centre and keyboard layout pages.
 // ---------------------------------------------------------------------------
 
-static const struct {
-	const char *slug;
+// What a row of "Rearrange main page" needs: the words it is labelled with and
+// the glyph it wears. The name it is saved under, and the rule about which
+// tiles are offered at all, live in tilelayout.c -- see the note there about
+// "Most played".
+typedef struct {
 	const char *label;
 	const lv_image_dsc_t *icon;
-} TILE_INFO[MUSIC_TILE_COUNT] = {
-	[MUSIC_TILE_ALL_TRACKS] = {"all_tracks", "music_all_tracks", &icon_music2},
-	[MUSIC_TILE_ALBUMS] = {"albums", "albums", &icon_album},
-	[MUSIC_TILE_ARTISTS] = {"artists", "artists", &icon_artist},
-	[MUSIC_TILE_ALBUM_ARTISTS] = {"album_artists", "music_album_artists", &icon_artist_album},
-	[MUSIC_TILE_GENRES] = {"genres", "music_genres", &icon_genre},
-	[MUSIC_TILE_YEARS] = {"years", "music_years", &icon_year},
-	[MUSIC_TILE_PLAYLISTS] = {"playlists", "playlists", &icon_list_music},
-	[MUSIC_TILE_MOST_PLAYED] = {"most_played", "music_most_played", &icon_most_played},
-	[MUSIC_TILE_BROWSE] = {"browse", "music_browse", &icon_folder},
+} tile_info_t;
+
+static const tile_info_t TILE_INFO[MUSIC_TILE_COUNT] = {
+	[MUSIC_TILE_ALL_TRACKS] = {"music_all_tracks", &icon_music2},
+	[MUSIC_TILE_ALBUMS] = {"albums", &icon_album},
+	[MUSIC_TILE_ARTISTS] = {"artists", &icon_artist},
+	[MUSIC_TILE_ALBUM_ARTISTS] = {"music_album_artists", &icon_artist_album},
+	[MUSIC_TILE_GENRES] = {"music_genres", &icon_genre},
+	[MUSIC_TILE_YEARS] = {"music_years", &icon_year},
+	[MUSIC_TILE_PLAYLISTS] = {"playlists", &icon_list_music},
+	[MUSIC_TILE_MOST_PLAYED] = {"music_most_played", &icon_most_played},
+	[MUSIC_TILE_BROWSE] = {"music_browse", &icon_folder},
 };
 
-const char *musicsettings_tile_label(music_tile_id_t id) {
-	if (id < 0 || id >= MUSIC_TILE_COUNT) {
-		return "";
-	}
-	return TILE_INFO[id].label;
-}
+int musicsettings_main_tiles(music_tile_id_t *out, int max) { return tilelayout_active(out, max); }
 
-static int parse_tile_slug(const char *s, size_t len) {
-	for (int i = 0; i < MUSIC_TILE_COUNT; i++) {
-		if ( strlen(TILE_INFO[i].slug) == len && strncmp(TILE_INFO[i].slug, s, len) == 0) {
-			return i;
-		}
-	}
-	return -1;
-}
-
-static int parse_tile_list(const char *csv, music_tile_id_t *out, int max, bool *seen) {
-	if (!csv || !csv[0] || !out || max <= 0) {
-		return 0;
-	}
-	int count = 0;
-	const char *p = csv;
-	while (*p && count < max) {
-		while (*p == ' ' || *p == ',') {
-			p++;
-		}
-		if (!*p) {
-			break;
-		}
-		const char *end = p;
-		while (*end && *end != ',' && *end != ' ') {
-			end++;
-		}
-		int id = parse_tile_slug(p, (size_t)(end - p));
-		if (id >= 0 && !seen[id]) {
-			seen[id] = true;
-			out[count++] = (music_tile_id_t)id;
-		}
-		p = end;
-	}
-	return count;
-}
-
-static void load_tile_arrangement(music_tile_id_t *active, int *active_count, music_tile_id_t *hidden,
-								  int *hidden_count) {
-	bool seen[MUSIC_TILE_COUNT] = {false};
-	char active_csv[256] = "";
-	char hidden_csv[256] = "";
-	const char *saved_active = config_get("music", "main_tiles", "");
-	const char *saved_hidden = config_get("music", "main_tiles_hidden", "");
-	if (saved_active) {
-		snprintf(active_csv, sizeof(active_csv), "%s", saved_active);
-	}
-	if (saved_hidden) {
-		snprintf(hidden_csv, sizeof(hidden_csv), "%s", saved_hidden);
-	}
-
-	int act_n = parse_tile_list(active_csv, active, MUSIC_TILE_COUNT, seen);
-	int hid_n = parse_tile_list(hidden_csv, hidden, MUSIC_TILE_COUNT, seen);
-
-	for (int i = 0; i < MUSIC_TILE_COUNT; i++) {
-		if (!seen[i] && act_n < MUSIC_TILE_COUNT) {
-			active[act_n++] = (music_tile_id_t)i;
-		}
-	}
-	if (act_n == 0 && hid_n > 0) {
-		active[act_n++] = hidden[0];
-		memmove(&hidden[0], &hidden[1], (size_t)(hid_n - 1) * sizeof(music_tile_id_t));
-		hid_n--;
-	}
-	*active_count = act_n;
-	*hidden_count = hid_n;
-}
-
-int musicsettings_main_tiles(music_tile_id_t *out, int max) {
-	music_tile_id_t active[MUSIC_TILE_COUNT];
-	music_tile_id_t hidden[MUSIC_TILE_COUNT];
-	int act_n = 0, hid_n = 0;
-	load_tile_arrangement(active, &act_n, hidden, &hid_n);
-	if (out && max > 0) {
-		int n = act_n < max ? act_n : max;
-		memcpy(out, active, (size_t)n * sizeof(music_tile_id_t));
-		return n;
-	}
-	return act_n;
-}
-
-int musicsettings_hidden_tiles(music_tile_id_t *out, int max) {
-	music_tile_id_t active[MUSIC_TILE_COUNT];
-	music_tile_id_t hidden[MUSIC_TILE_COUNT];
-	int act_n = 0, hid_n = 0;
-	load_tile_arrangement(active, &act_n, hidden, &hid_n);
-	if (out && max > 0) {
-		int n = hid_n < max ? hid_n : max;
-		memcpy(out, hidden, (size_t)n * sizeof(music_tile_id_t));
-		return n;
-	}
-	return hid_n;
-}
-
-static void format_tile_csv(const music_tile_id_t *list, int count, char *buf, size_t size) {
-	size_t used = 0;
-	if (size > 0) {
-		buf[0] = '\0';
-	}
-	for (int i = 0; i < count; i++) {
-		music_tile_id_t id = list[i];
-		if (id < 0 || id >= MUSIC_TILE_COUNT) {
-			continue;
-		}
-		int n = snprintf(buf + used, size - used, "%s%s", used > 0 ? "," : "", TILE_INFO[id].slug);
-		if (n < 0 || (size_t)n >= size - used) {
-			break;
-		}
-		used += (size_t)n;
-	}
-}
+int musicsettings_hidden_tiles(music_tile_id_t *out, int max) { return tilelayout_hidden(out, max); }
 
 static void rearrange_populate(void);
 
 void musicsettings_set_main_tiles(const music_tile_id_t *active, int active_count, const music_tile_id_t *hidden,
 								  int hidden_count) {
-	bool seen[MUSIC_TILE_COUNT] = {false};
-	music_tile_id_t clean_active[MUSIC_TILE_COUNT];
-	music_tile_id_t clean_hidden[MUSIC_TILE_COUNT];
-	int act_n = 0, hid_n = 0;
-
-	for (int i = 0; active && i < active_count && act_n < MUSIC_TILE_COUNT; i++) {
-		music_tile_id_t id = active[i];
-		if (id >= 0 && id < MUSIC_TILE_COUNT && !seen[id]) {
-			seen[id] = true;
-			clean_active[act_n++] = id;
-		}
-	}
-	for (int i = 0; hidden && i < hidden_count && hid_n < MUSIC_TILE_COUNT; i++) {
-		music_tile_id_t id = hidden[i];
-		if (id >= 0 && id < MUSIC_TILE_COUNT && !seen[id]) {
-			seen[id] = true;
-			clean_hidden[hid_n++] = id;
-		}
-	}
-	for (int i = 0; i < MUSIC_TILE_COUNT; i++) {
-		if (!seen[i]) {
-			clean_active[act_n++] = (music_tile_id_t)i;
-		}
-	}
-	if (act_n == 0 && hid_n > 0) {
-		clean_active[act_n++] = clean_hidden[0];
-		memmove(&clean_hidden[0], &clean_hidden[1], (size_t)(hid_n - 1) * sizeof(music_tile_id_t));
-		hid_n--;
-	}
-
-	char act_csv[256];
-	char hid_csv[256];
-	format_tile_csv(clean_active, act_n, act_csv, sizeof(act_csv));
-	format_tile_csv(clean_hidden, hid_n, hid_csv, sizeof(hid_csv));
-	config_set("music", "main_tiles", act_csv);
-	config_set("music", "main_tiles_hidden", hid_csv);
-	config_save();
+	tilelayout_save(active, active_count, hidden, hidden_count);
 
 	rearrange_populate();
 	music_refresh_layout();
@@ -2217,7 +2073,7 @@ static void rearrange_populate(void) {
 	music_tile_id_t active[MUSIC_TILE_COUNT];
 	music_tile_id_t hidden[MUSIC_TILE_COUNT];
 	int act_n = 0, hid_n = 0;
-	load_tile_arrangement(active, &act_n, hidden, &hid_n);
+	tilelayout_load(active, &act_n, hidden, &hid_n);
 
 	for (int i = 0; i < act_n; i++) {
 		rearrange_entries[i].tile = active[i];
@@ -2240,6 +2096,11 @@ static void rearrange_populate(void) {
 		lv_label_set_text(e->name, tr(TILE_INFO[e->tile].label));
 		lv_obj_set_pos(e->row, 0, rearrange_row_y(i));
 		lv_obj_set_style_border_width(e->row, 0, 0);
+		// A tile the page no longer offers sits here dimmed, and tapping it
+		// does nothing: it is where an arrangement written by an older build
+		// keeps it, so that arranging the page again does not throw it away.
+		bool offered = tilelayout_available(e->tile);
+		lv_obj_set_style_opa(e->row, offered ? LV_OPA_COVER : LV_OPA_50, 0);
 	}
 
 	int rows_below = hid_n > 0 ? hid_n : 1;
@@ -2369,6 +2230,12 @@ static void rearrange_drop(int from, rearrange_drop_target_t target) {
 
 static void rearrange_toggle_entry(int index) {
 	if (index < 0 || index >= MUSIC_TILE_COUNT) {
+		return;
+	}
+	// The retired tile has no business being put back on the page: what it
+	// showed is Music > Stats now. Tapping its row does nothing, and the row is
+	// dimmed to say so (see rearrange_populate()).
+	if (!tilelayout_available(rearrange_entries[index].tile)) {
 		return;
 	}
 	int n_in_use = rearrange_count_in_use();

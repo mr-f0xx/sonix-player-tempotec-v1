@@ -169,6 +169,11 @@ void clock_remember(void) {}
 bool clock_resync(void) { return false; }
 void batteryhistory_init(void) {} // This display fixture must not open the history store.
 void panel_touch_flush(void) {}
+// Video playback releases the panel and the decoder while the screen is off;
+// this fixture has no video player, and the power path only has to ask.
+void videoplayer_ui_suspend(void) {}
+void videoplayer_ui_resume(void) {}
+bool videoplayer_ui_is_suspended(void) { return false; }
 void topbar_refresh_audio_outputs(void) {}
 const sysinfo_model_t *sysinfo_model(void) {
 	static const sysinfo_model_t model = {.tap_wake = false};
