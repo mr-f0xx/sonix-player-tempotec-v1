@@ -529,6 +529,16 @@ void scrolltext_set_active(lv_obj_t *label, bool active) {
 		return;
 	}
 	entry->active = active;
+	if (active) {
+		// Start scrolling immediately on press, instead of waiting the
+		// normal read-first delay used by always-on labels.
+		lv_obj_set_style_anim_delay(label, 0, LV_PART_MAIN);
+		lv_obj_set_style_anim_repeat_delay(label, 0, LV_PART_MAIN);
+	} else {
+		lv_obj_remove_local_style_prop(label, LV_STYLE_ANIM_DELAY, LV_PART_MAIN);
+		lv_obj_remove_local_style_prop(label, LV_STYLE_ANIM_REPEAT_DELAY, LV_PART_MAIN);
+	}
 	scroll_fit(label);
+	apply_duration(label, lv_label_get_text(label));
 	fade_pick(entry);
 }
