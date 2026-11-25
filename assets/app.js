@@ -96,6 +96,8 @@
   }
 
   // Crossfade real theme screenshots inside the device's display area.
+  // Each image is decoded before it is shown, and the fade is timed from its
+  // completion so a slow decode can never cut a screen short or flash blank.
   const frontLayer = document.querySelector('#device-display');
   const backLayer = document.querySelector('#device-display-next');
   if (frontLayer && backLayer && !window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
@@ -109,21 +111,43 @@
       { src: './screenshots/ember/settings.png', label: 'Amber · Settings' },
       { src: './screenshots/tokyonight/settings.png', label: 'Tokyo Night · Settings' },
     ];
-    screens.forEach(screen => { const image = new Image(); image.src = screen.src; });
+    const HOLD_MS = 8000;
+    const FADE_MS = 1400;
+    const decoded = new Map();
+    screens.forEach(screen => {
+      const image = new Image();
+      image.src = screen.src;
+      decoded.set(screen.src, image.decode ? image.decode().catch(() => {}) : Promise.resolve());
+    });
 
     let front = frontLayer;
     let back = backLayer;
     let index = 0;
-    window.setInterval(() => {
+    let running = false;
+
+    async function advance() {
+      if (running) return;
+      running = true;
       const next = (index + 1) % screens.length;
-      back.src = screens[next].src;
-      back.alt = 'Sonix Player ' + screens[next].label + ' screen shown on the V1 display';
+      const screen = screens[next];
+      back.src = screen.src;
+      try { await (decoded.get(screen.src) || Promise.resolve()); } catch (_) {}
+      if (document.hidden) {
+        running = false;
+        window.setTimeout(advance, HOLD_MS);
+        return;
+      }
+      back.alt = 'Sonix Player ' + screen.label + ' screen shown on the V1 display';
       back.setAttribute('aria-hidden', 'false');
       back.style.opacity = '1';
       front.style.opacity = '0';
       front.setAttribute('aria-hidden', 'true');
       [front, back] = [back, front];
       index = next;
-    }, 6000);
+      running = false;
+      window.setTimeout(advance, HOLD_MS + FADE_MS);
+    }
+
+    window.setTimeout(advance, HOLD_MS);
   }
 })();
