@@ -50,4 +50,8 @@
   .donate-card{min-height:0;padding:22px}
 }
 
-.device-display{transition:opacity .35s ease}
+/* Brushed grey-metal chassis and a true two-layer screenshot crossfade. */
+.device-body{filter:grayscale(.82) brightness(1.6) contrast(.78) saturate(1.1)}
+.device-photo::after{content:"";position:absolute;left:16%;top:87.8%;width:2.3%;height:4.3%;border-radius:999px;background:#2f7bff;box-shadow:0 0 12px #2f7bff,0 0 24px #1d5fff;opacity:.9;transform:rotate(-6deg);pointer-events:none}
+.device-display{transition:opacity .9s ease}
+.device-display-next{opacity:0}

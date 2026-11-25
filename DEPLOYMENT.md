@@ -3,7 +3,7 @@
 The static showcase lives at the repository root:
 
 - `index.html` — hero with the **YOUR PLAYER. Amplified.** headline, the real TempoTec V1 photo shown straight on (no tilted render or orange panel), the **Your music, ready when you are** pitch, release strip, feature / fork-addition sections, comparison, install steps, support/donation links and a single link out to the emulator.
-- `assets/style.css`, `assets/app.js`, `assets/tempotec-v1.png` — self-contained site assets. No frameworks, no build step. The device screen cycles through the Ember screenshots in `screenshots/ember/`, which the workflow stages alongside the site.
+- `assets/style.css`, `assets/app.js`, `assets/tempotec-v1.png` — self-contained site assets. No frameworks, no build step. The device screen crossfades between the Amber (Ember) and Tokyo Night screenshots in `screenshots/ember/` and `screenshots/tokyonight/`, which the workflow stages alongside the site.
 - `coi-serviceworker.js` — copied to the site root for WASM integrations; the workbench itself registers its own copy from `./emulator/`.
 - `tools/v1-emulator/public/` — the original emulator workbench. The deployed site serves it at `./emulator/`; its **Website** tab (desktop inspector tab bar and mobile bottom nav) links back to `../index.html`. In local native mode, where no sibling showcase is served, that tab falls back to the published GitHub Pages URL.
 
@@ -22,10 +22,11 @@ The static showcase lives at the repository root:
 
 ```sh
 SITE=tools/v1-emulator/dist/preview
-mkdir -p "$SITE/emulator" "$SITE/screenshots/ember"
+mkdir -p "$SITE/emulator" "$SITE/screenshots/ember" "$SITE/screenshots/tokyonight"
 cp index.html coi-serviceworker.js "$SITE/"
 cp -R assets/. "$SITE/assets/"
 cp screenshots/ember/*.png "$SITE/screenshots/ember/"
+cp screenshots/tokyonight/*.png "$SITE/screenshots/tokyonight/"
 cp tools/v1-emulator/public/* "$SITE/emulator/"
 python3 -m http.server 8080 --bind 0.0.0.0 --directory "$SITE"
 ```
