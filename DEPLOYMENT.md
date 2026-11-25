@@ -2,8 +2,8 @@
 
 The static showcase lives at the repository root:
 
-- `index.html` — hero with the **YOUR PLAYER. Amplified.** headline, the real TempoTec V1 photo shown straight on (no tilted render or orange panel), the **Your music, ready when you are** pitch, release strip, feature / fork-addition sections, comparison, install steps and a single link out to the emulator.
-- `assets/style.css`, `assets/app.js`, `assets/tempotec-v1.png` — self-contained site assets. No frameworks, no build step. The device screen is composited from `screenshots/ember/now-playing.png`, which the workflow stages alongside the site.
+- `index.html` — hero with the **YOUR PLAYER. Amplified.** headline, the real TempoTec V1 photo shown straight on (no tilted render or orange panel), the **Your music, ready when you are** pitch, release strip, feature / fork-addition sections, comparison, install steps, support/donation links and a single link out to the emulator.
+- `assets/style.css`, `assets/app.js`, `assets/tempotec-v1.png` — self-contained site assets. No frameworks, no build step. The device screen cycles through the Ember screenshots in `screenshots/ember/`, which the workflow stages alongside the site.
 - `coi-serviceworker.js` — copied to the site root for WASM integrations; the workbench itself registers its own copy from `./emulator/`.
 - `tools/v1-emulator/public/` — the original emulator workbench. The deployed site serves it at `./emulator/`; its **Website** tab (desktop inspector tab bar and mobile bottom nav) links back to `../index.html`. In local native mode, where no sibling showcase is served, that tab falls back to the published GitHub Pages URL.
 
@@ -16,7 +16,7 @@ The static showcase lives at the repository root:
 
 ## Live release data
 
-`assets/app.js` calls the public GitHub Releases API, picks the `v1.upt` asset and fills in the version, date, short release notes and the primary download button. If the API is unavailable or rate-limited, the button falls back to `https://github.com/mr-f0xx/sonix-player-tempotec-v1/releases/latest`, which always serves the newest asset.
+`assets/app.js` reads the same-origin `assets/release.json` snapshot first, then calls the public GitHub Releases API to refresh it. It picks the `v1.upt` asset and fills in the version, date, short release notes and the primary download button. The workflow regenerates the snapshot on every deploy, so the strip still works when the API is rate-limited or blocked. If neither source is usable, the button falls back to `https://github.com/mr-f0xx/sonix-player-tempotec-v1/releases/latest`.
 
 ## Local preview
 
@@ -24,8 +24,8 @@ The static showcase lives at the repository root:
 SITE=tools/v1-emulator/dist/preview
 mkdir -p "$SITE/emulator" "$SITE/screenshots/ember"
 cp index.html coi-serviceworker.js "$SITE/"
-cp -R assets "$SITE/assets"
-cp screenshots/ember/now-playing.png "$SITE/screenshots/ember/"
+cp -R assets/. "$SITE/assets/"
+cp screenshots/ember/*.png "$SITE/screenshots/ember/"
 cp tools/v1-emulator/public/* "$SITE/emulator/"
 python3 -m http.server 8080 --bind 0.0.0.0 --directory "$SITE"
 ```

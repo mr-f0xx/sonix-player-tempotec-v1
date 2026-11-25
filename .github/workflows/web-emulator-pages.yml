@@ -21,7 +21,7 @@ on:
       - index.html
       - assets/**
       - coi-serviceworker.js
-      - screenshots/ember/now-playing.png
+      - screenshots/ember/**
   push:
     branches:
       - '**'
@@ -79,7 +79,7 @@ jobs:
         if: github.event_name == 'workflow_dispatch' && inputs.build_ref != ''
         run: |
           git fetch --no-tags --depth=1 origin "$GITHUB_SHA"
-          git restore --source="$GITHUB_SHA" --worktree -- tools/v1-emulator index.html assets screenshots/ember/now-playing.png
+          git restore --source="$GITHUB_SHA" --worktree -- tools/v1-emulator index.html assets screenshots/ember
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -175,6 +175,23 @@ jobs:
           npm ci --prefix tools/v1-emulator/tests --ignore-scripts
           npm test --prefix tools/v1-emulator/tests
 
+      # Refresh the same-origin release snapshot used by the landing page.
+      # This keeps the release strip working if api.github.com is rate-limited
+      # or blocked in a visitor's browser; app.js still tries the live API.
+      - name: Refresh latest release snapshot
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if gh api "repos/${GITHUB_REPOSITORY}/releases/latest" \
+              --jq '{tag_name, published_at, html_url, body, assets: [.assets[] | {name, browser_download_url}]}' \
+              > "$RUNNER_TEMP/release.json"; then
+            mv "$RUNNER_TEMP/release.json" assets/release.json
+            echo "Release snapshot: $(node -p "require('./assets/release.json').tag_name")"
+          else
+            echo "Using committed release snapshot."
+          fi
+
       # Keep the existing emulator tests against the original staged layout,
       # then publish it as a standalone subsite beside the landing page.
       - name: Assemble showcase and emulator Pages site
@@ -185,7 +202,7 @@ jobs:
           mv tools/v1-emulator/dist/emulator-stage tools/v1-emulator/dist/pages/emulator
           cp index.html coi-serviceworker.js tools/v1-emulator/dist/pages/
           cp -R assets tools/v1-emulator/dist/pages/assets
-          cp screenshots/ember/now-playing.png tools/v1-emulator/dist/pages/screenshots/ember/
+          cp screenshots/ember/*.png tools/v1-emulator/dist/pages/screenshots/ember/
           touch tools/v1-emulator/dist/pages/.nojekyll
 
       - name: Upload downloadable .sonix-web.zip artifact

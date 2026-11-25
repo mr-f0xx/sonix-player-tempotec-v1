@@ -16,3 +16,38 @@
 @media(max-width:380px){.fork-grid{grid-template-columns:1fr}}
 
 @media(min-width:701px) and (max-width:850px){.nav nav{gap:16px}.nav nav a{font-size:9px}}
+
+/* Mobile navigation toggle */
+.nav-toggle{display:none;appearance:none;border:1px solid #49320e;background:#151006;color:#d9b068;padding:10px 14px;font:700 10px var(--mono);letter-spacing:1px;cursor:pointer}
+.nav-toggle:hover{border-color:var(--amber);color:var(--amber)}
+@media(max-width:900px){
+  .nav{height:auto;min-height:70px;padding:14px 0;flex-wrap:wrap}
+  .nav-toggle{display:inline-flex}
+  .nav nav{display:none;width:100%;order:3;flex-direction:column;gap:0;padding-top:12px}
+  .nav nav.open{display:flex}
+  .nav nav a{padding:12px 0;border-bottom:1px solid var(--line)}
+  .nav-github{margin-left:auto}
+}
+@media(max-width:480px){
+  .brand small{display:none}
+  .nav-github{padding:9px 11px;font-size:9px}
+  .nav-github span{display:none}
+}
+
+/* Support / donation cards */
+.donate-section{padding-top:100px;padding-bottom:110px}
+.donate-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-top:45px}
+.donate-card{border:1px solid var(--line);background:linear-gradient(135deg,#171208,#100d08);padding:26px;min-height:210px;display:flex;flex-direction:column;transition:border-color .2s,transform .2s}
+.donate-card:hover{border-color:#8a5f18;transform:translateY(-2px)}
+.donate-tag{font:600 9px var(--mono);letter-spacing:1px;color:#ae7c32}
+.donate-card h3{font-size:20px;letter-spacing:-.4px;margin:24px 0 8px}
+.donate-card p{color:var(--muted);font-size:13px;line-height:1.7;margin:0}
+.donate-cta{margin-top:auto;padding-top:22px;font:700 10px var(--mono);color:#d5a351}
+.donate-cta span{margin-left:10px}
+@media(max-width:700px){
+  .donate-section{padding:80px 0}
+  .donate-grid{grid-template-columns:1fr;margin-top:35px}
+  .donate-card{min-height:0;padding:22px}
+}
+
+.device-display{transition:opacity .35s ease}
