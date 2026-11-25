@@ -163,17 +163,20 @@ int main(int argc, char **argv) {
 	check_metric(page, "system_battery_last_charge", tr("system_battery_not_recorded"));
 	check_metric(page, "system_battery_charge_point", "—");
 	check_metric(page, "system_battery_on_time", "—");
+	check_metric(page, "system_battery_active_time", "—");
 
 	history = (batteryhistory_saved_t){
 		.mark = BATTERYHISTORY_MARK_CHARGED_TO_TARGET,
 		.charge_target = 80,
 		.marked_at = 1704067200,
 		.on_seconds = 62 * 60,
+		.active_seconds = 47 * 60,
 	};
 	advance(10);
 	check_metric(page, "system_battery_last_charge", "2024-01-01 00:00");
 	check_metric(page, "system_battery_charge_point", "Charged to 80%");
 	check_metric(page, "system_battery_on_time", "1h 02m");
+	check_metric(page, "system_battery_active_time", "47m");
 	assert(!lv_obj_has_state(save, LV_STATE_DISABLED));
 	check_metric(page, "battery_profile_runtime", "4.9 h");
 	check_metric(page, "battery_profile_draw", "140 mA");
@@ -205,6 +208,7 @@ int main(int argc, char **argv) {
 	advance(1);
 	check_metric(page, "battery_profile_delta", "+60 mA (+43%)");
 	check_metric(page, "system_battery_on_time", "1h 03m");
+	check_metric(page, "system_battery_active_time", "47m");
 
 	cable = true;
 	advance(2);
@@ -228,13 +232,14 @@ int main(int argc, char **argv) {
 	lv_screen_load(other);
 	before = samples;
 	histories = history_reads;
-	history = (batteryhistory_saved_t){.mark = BATTERYHISTORY_MARK_UNPLUGGED, .on_seconds = 25 * 3600};
+	history = (batteryhistory_saved_t){.mark = BATTERYHISTORY_MARK_UNPLUGGED, .on_seconds = 25 * 3600, .active_seconds = 9 * 3600 + 30 * 60};
 	advance(8);
 	assert(samples == before && history_reads == histories);
 	lv_screen_load(page);
 	check_metric(page, "system_battery_last_charge", tr("system_battery_time_not_set"));
 	check_metric(page, "system_battery_charge_point", tr("system_battery_unplugged"));
 	check_metric(page, "system_battery_on_time", "1d 01h");
+	check_metric(page, "system_battery_active_time", "9h 30m");
 	advance(10);
 	check_metric(page, "battery_profile_delta", "+60 mA (+43%)");
 	pmic_mv = charge_limit = rrt_minutes = -1;
@@ -284,6 +289,7 @@ int main(int argc, char **argv) {
 		check_metric(page, "system_battery_last_charge", tr("system_battery_time_not_set"));
 		check_metric(page, "system_battery_charge_point", tr("system_battery_unplugged"));
 		check_metric(page, "system_battery_on_time", "1d 01h");
+		check_metric(page, "system_battery_active_time", "9h 30m");
 		named(page, "battery_profile_save");
 		named(page, "battery_profile_resample");
 	}

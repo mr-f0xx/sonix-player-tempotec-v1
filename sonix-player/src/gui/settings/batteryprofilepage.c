@@ -46,7 +46,7 @@ typedef struct {
 static lv_obj_t *screen;
 static lv_timer_t *poll;
 static lv_obj_t *level_value, *voltage_value, *charge_limit_value;
-static lv_obj_t *last_charge_value, *charge_point_value, *on_time_value;
+static lv_obj_t *last_charge_value, *charge_point_value, *on_time_value, *active_time_value;
 static lv_obj_t *runtime_value, *draw_value, *estimate_note;
 static lv_obj_t *load_value, *baseline_value, *baseline_note, *baseline_load_value, *delta_value, *save_row;
 static batteryprofile_t sample;
@@ -107,6 +107,18 @@ static void set_reading(lv_obj_t *label, int n, const char *unit) {
 	}
 }
 
+static void format_duration(char *text, size_t size, uint64_t seconds) {
+	unsigned long long minutes = seconds / 60;
+	unsigned long long hours = minutes / 60;
+	if (hours >= 24) {
+		snprintf(text, size, "%llud %02lluh", hours / 24, hours % 24);
+	} else if (hours) {
+		snprintf(text, size, "%lluh %02llum", hours, minutes % 60);
+	} else {
+		snprintf(text, size, "%llum", minutes);
+	}
+}
+
 static void refresh_history(void) {
 	// The power manager tracks charge history even when the profiler is closed.
 	batteryhistory_saved_t history;
@@ -114,6 +126,7 @@ static void refresh_history(void) {
 		set_text(last_charge_value, tr("system_battery_not_recorded"));
 		set_text(charge_point_value, NO_VALUE);
 		set_text(on_time_value, NO_VALUE);
+		set_text(active_time_value, NO_VALUE);
 		return;
 	}
 
@@ -130,16 +143,10 @@ static void refresh_history(void) {
 		set_text(charge_point_value, tr("system_battery_unplugged"));
 	}
 
-	unsigned long long minutes = history.on_seconds / 60;
-	unsigned long long hours = minutes / 60;
-	if (hours >= 24) {
-		snprintf(text, sizeof(text), "%llud %02lluh", hours / 24, hours % 24);
-	} else if (hours) {
-		snprintf(text, sizeof(text), "%lluh %02llum", hours, minutes % 60);
-	} else {
-		snprintf(text, sizeof(text), "%llum", minutes);
-	}
+	format_duration(text, sizeof(text), history.on_seconds);
 	set_text(on_time_value, text);
+	format_duration(text, sizeof(text), history.active_seconds);
+	set_text(active_time_value, text);
 }
 
 static void set_load(lv_obj_t *label, load_t value) {
@@ -344,6 +351,7 @@ lv_obj_t *batteryprofilepage_init(gui_config_t *cfg) {
 	last_charge_value = metric(history, "system_battery_last_charge");
 	charge_point_value = metric(history, "system_battery_charge_point");
 	on_time_value = metric(history, "system_battery_on_time");
+	active_time_value = metric(history, "system_battery_active_time");
 
 	save_row = settingsrow_action(container, "battery_profile_save", save_cb, NULL);
 	lv_obj_t *resample = settingsrow_action(container, "battery_profile_resample", resample_cb, NULL);

@@ -4,7 +4,7 @@ Open **Settings → System → Battery profiler**. While visible, it refreshes e
 
 The programmed limit is **not** current flowing into the cell. The AXP2101 has no public current ADC, and the bundled 1.3 `axp_battery/current_now` returns a fixed 200,000 µA, not a sensor reading. Neither that value nor the driver's fixed “Good” health value is displayed as telemetry. The V1 does not report measured charge current, full-charge capacity or battery wear.
 
-Below the live readings, the profiler shows the last charge date and time, whether the battery reached its charge target or was unplugged, and how long the player has been on since then. On-time includes standby, but not time spent powered off.
+Below the live readings, the profiler shows the last charge date and time, whether the battery reached its charge target or was unplugged, and two durations since then. **On-time** is how long the player has been powered on, including standby and suspend, but not time spent switched off. **Active time** counts only while the screen is on or audio is playing (local, radio, Bluetooth receiver or tape), so a night spent suspended stays in the on-time but never in the active time. When comparing two setups, use the active time: it shows how much was actually used, not how long ago the player was charged.
 
 ## Compare two playback setups
 
