@@ -2,7 +2,7 @@
 
 The static showcase lives at the repository root:
 
-- `index.html` — hero with a V1 chassis and device screenshot, feature cards, install steps and release download panel. It links out to the emulator; it does **not** embed it.
+- `index.html` — hero with the "YOUR PLAYER. Amplified." headline, a straight-on V1 device render, the **Your music, ready when you are** pitch, why-upgrade section, feature cards, install steps and release panel. It links out to the emulator once; it does **not** embed it.
 - `assets/css/styles.css`, `assets/js/main.js`, `assets/favicon.svg`, `assets/screenshots/` — self-contained assets. No frameworks, no build step.
 - `coi-serviceworker.js` — served from the site root; keeps the project origin cross-origin isolated.
 - `tools/v1-emulator/public/` — the original emulator workbench. The deployed site serves it at `./emulator/`; its **Website** tab (desktop inspector tab bar and mobile bottom nav) links back to `../index.html`. In local native mode, where no sibling showcase is served, that link falls back to the published GitHub Pages URL.

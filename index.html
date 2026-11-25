@@ -4,10 +4,10 @@
 	<meta charset="utf-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1">
 	<meta name="theme-color" content="#080b10">
-	<meta name="description" content="Sonix Player for the TempoTec Variations V1: 10-band PEQ, AutoEq, Tape Deck sampler, Subsonic, Qobuz offline, Listen Together and a live WebAssembly emulator. Try it in your browser, then flash v1.upt.">
-	<title>Sonix Player · TempoTec Variations V1</title>
+	<meta name="description" content="Your music, ready when you are. Sonix Player upgrades the TempoTec Variations V1 with 10-band PEQ, AutoEq, offline Qobuz and Subsonic, a 16-pad Tape Deck, wireless transfers and a live browser emulator.">
+	<title>Sonix Player · Your music, ready when you are</title>
 	<meta property="og:title" content="Sonix Player for TempoTec Variations V1">
-	<meta property="og:description" content="A small player with a big personality. Try the live V1 emulator in your browser, then give your player a firmware upgrade.">
+	<meta property="og:description" content="Your music, ready when you are. A small DAP with a much bigger personality — try the firmware in the browser, then flash v1.upt.">
 	<meta property="og:type" content="website">
 	<link rel="icon" href="./assets/favicon.svg" type="image/svg+xml">
 	<link rel="stylesheet" href="./assets/css/styles.css">
@@ -18,13 +18,13 @@
 </head>
 <body id="top">
 	<svg class="icon-sprite" aria-hidden="true" xmlns="http://www.w3.org/2000/svg">
-		<symbol id="i-eq" viewBox="0 0 24 24"><path d="M4 20V10m5 10V4m5 16v-7m5 7V8" /><circle cx="4" cy="7" r="1.6"/><circle cx="9" cy="17" r="1.6"/><circle cx="14" cy="10" r="1.6"/><circle cx="19" cy="5" r="1.6"/></symbol>
-		<symbol id="i-stream" viewBox="0 0 24 24"><path d="M4 6h16M4 12h10M4 18h7"/><circle cx="18" cy="16" r="3"/></symbol>
+		<symbol id="i-eq" viewBox="0 0 24 24"><path d="M4 20V10m5 10V4m5 16v-7m5 7V8"/><circle cx="4" cy="7" r="1.6"/><circle cx="9" cy="17" r="1.6"/><circle cx="14" cy="10" r="1.6"/><circle cx="19" cy="5" r="1.6"/></symbol>
 		<symbol id="i-cloud" viewBox="0 0 24 24"><path d="M7 18h10a4 4 0 0 0 .4-7.98A6 6 0 0 0 6.1 9.5 4.25 4.25 0 0 0 7 18Z"/><path d="m10 14 2-2 2 2m-2-2v6"/></symbol>
+		<symbol id="i-stream" viewBox="0 0 24 24"><path d="M4 6h16M4 12h10M4 18h7"/><circle cx="18" cy="16" r="3"/></symbol>
+		<symbol id="i-folder" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z"/><path d="M12 11v6m-3-3 3 3 3-3"/></symbol>
 		<symbol id="i-wifi" viewBox="0 0 24 24"><path d="M2.5 8.5a15 15 0 0 1 19 0M5.5 12a10.5 10.5 0 0 1 13 0M8.8 15.5a5.6 5.6 0 0 1 6.4 0"/><circle cx="12" cy="19" r="1.3"/></symbol>
 		<symbol id="i-pad" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><path d="M17.5 14v7m-3.5-3.5h7"/></symbol>
 		<symbol id="i-tag" viewBox="0 0 24 24"><path d="M20 13.2 12.9 20.3a2 2 0 0 1-2.8 0L3.7 13.9V4h9.9l6.4 6.4a2 2 0 0 1 0 2.8Z"/><circle cx="8" cy="8" r="1.4"/></symbol>
-		<symbol id="i-folder" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z"/><path d="M12 11v6m-3-3 3 3 3-3"/></symbol>
 		<symbol id="i-led" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v3m0 14v3M2 12h3m14 0h3M4.9 4.9 7 7m10 10 2.1 2.1M19.1 4.9 17 7M7 17l-2.1 2.1"/></symbol>
 		<symbol id="i-stats" viewBox="0 0 24 24"><path d="M4 20V10m5 10V4m5 16v-6m5 6V8"/><path d="M2 20h20"/></symbol>
 		<symbol id="i-grid" viewBox="0 0 24 24"><rect x="3" y="3" width="8" height="8" rx="1.5"/><rect x="13" y="3" width="8" height="8" rx="1.5"/><rect x="3" y="13" width="8" height="8" rx="1.5"/><rect x="13" y="13" width="8" height="8" rx="1.5"/></symbol>
@@ -44,273 +44,153 @@
 		<div class="header-inner">
 			<a class="brand" href="#top" aria-label="Sonix Player home">
 				<span class="brand-mark" aria-hidden="true">V1</span>
-				<span class="brand-text"><strong>SONIX</strong><small>TEMPO TEC · VARIATIONS</small></span>
+				<span class="brand-text"><strong>SONIX</strong><small>FOR VARIATIONS V1</small></span>
 			</a>
 			<nav class="site-nav" aria-label="Main navigation">
-				<a href="./emulator/index.html">Emulator</a>
-				<a href="#why">Why Sonix</a>
+				<a href="#why">Why upgrade</a>
 				<a href="#features">Features</a>
 				<a href="#install">Install</a>
+				<a href="#download">Release</a>
 			</nav>
-			<a class="header-cta" href="#download">
-				<span>Get firmware</span>
-				<svg class="icon" aria-hidden="true"><use href="#i-arrow"/></svg>
-			</a>
+			<a class="header-cta" href="#download"><span>Get firmware</span><svg class="icon" aria-hidden="true"><use href="#i-arrow"/></svg></a>
 		</div>
 	</header>
 
 	<main id="main">
 		<section class="hero" aria-labelledby="hero-title">
-			<div class="hero-grid">
-				<div class="hero-copy">
-					<p class="eyebrow"><span class="status-dot" aria-hidden="true"></span> Community firmware · TempoTec Variations V1</p>
-					<h1 id="hero-title">Small player.<br><span>Big personality.</span></h1>
-					<p class="hero-lede">Sonix replaces the stock 1.3 music player with a faster, deeper, endlessly tunable listening machine — built from the official V1 update package and made for that little 240×320 screen.</p>
-					<div class="hero-actions">
-						<a class="btn btn-primary btn-lg" data-download href="https://github.com/mr-f0xx/sonix-player-tempotec-v1/releases/latest">
-							<svg class="icon" aria-hidden="true"><use href="#i-download"/></svg>
-							<span>Download Latest Firmware <b>v1.upt</b></span>
-						</a>
-						<a class="btn btn-secondary btn-lg" href="./emulator/index.html">Try the live emulator</a>
-					</div>
-					<p class="release-line" id="release-line" data-release-status aria-live="polite">Checking GitHub Releases for the latest version…</p>
-					<div class="hero-meta" role="group" aria-label="Firmware highlights">
-						<div><strong data-release-version>—</strong><span>Latest tag</span></div>
-						<div><strong>10-band</strong><span>Parametric EQ</span></div>
-						<div><strong>LVGL 9.6</strong><span>Interface</span></div>
-						<div><strong>WASM</strong><span>In-browser demo</span></div>
-					</div>
+			<div class="hero-inner">
+				<p class="eyebrow"><span class="status-dot" aria-hidden="true"></span> Custom firmware · TempoTec Variations V1</p>
+
+				<div class="hero-stage">
+					<h1 id="hero-title">YOUR PLAYER.<span>Amplified.</span></h1>
+					<figure class="hero-device">
+						<div class="device-body">
+							<span class="device-jack device-jack-left" aria-hidden="true"><i></i></span>
+							<span class="device-jack device-jack-right" aria-hidden="true"><i></i></span>
+							<div class="device-screen"><img src="./assets/screenshots/now-playing.png" width="240" height="320" alt="Sonix Player now playing screen on the V1" fetchpriority="high"></div>
+							<div class="device-base" aria-hidden="true"><span>VOL</span><span class="device-brand">VARIATIONS V1</span><span>TF</span></div>
+						</div>
+						<figcaption>TempoTec V1</figcaption>
+					</figure>
 				</div>
 
-				<div class="hero-device" id="emulator">
-					<div class="section-kicker"><span class="kicker-line"></span> On the V1</div>
-					<div class="v1-chassis">
-						<div class="chassis-top">
-							<span class="jack" aria-hidden="true"><span></span></span>
-							<span class="chassis-etched">TEMPO TEC <b>VARIATIONS V1</b></span>
-							<span class="jack" aria-hidden="true"><span></span></span>
-						</div>
-						<div class="chassis-body">
-							<span class="screw screw-tl" aria-hidden="true"></span>
-							<span class="screw screw-tr" aria-hidden="true"></span>
-							<div class="screen-well">
-								<img src="./assets/screenshots/now-playing.png" width="240" height="320" alt="Sonix Player's now playing screen on the TempoTec V1" loading="lazy">
-							</div>
-							<span class="screw screw-bl" aria-hidden="true"></span>
-							<span class="screw screw-br" aria-hidden="true"></span>
-						</div>
-						<div class="chassis-foot">
-							<div class="flank-keys" aria-hidden="true"><span>VOL−</span><span>VOL+</span><span>⏵/⏸</span></div>
-							<div class="chassis-badge"><span class="led" aria-hidden="true"></span> 240 × 320 · LVGL 9.6</div>
-							<a class="expand-link" href="./emulator/index.html" target="_blank" rel="noopener">Open the emulator <span aria-hidden="true">↗</span></a>
-						</div>
-					</div>
-					<p class="emulator-hint"><svg class="icon" aria-hidden="true"><use href="#i-shield"/></svg> Curious how it feels? The <a href="./emulator/index.html" target="_blank" rel="noopener">browser workbench</a> runs the real firmware — touch the screen, use the side keys and load your own tracks onto the virtual microSD.</p>
+				<p class="hero-lede"><strong>Your music, ready when you are.</strong> Sonix gives your V1 the sound control, offline music and little extras the stock player never had — tuned for the screen you already own, built on the official 1.3 package, and ready to flash from one file.</p>
+
+				<div class="hero-actions">
+					<a class="btn btn-primary btn-lg" data-download href="https://github.com/mr-f0xx/sonix-player-tempotec-v1/releases/latest">
+						<svg class="icon" aria-hidden="true"><use href="#i-download"/></svg>
+						<span>Download Latest Firmware <b>v1.upt</b></span>
+					</a>
+					<a class="btn btn-quiet btn-lg" href="./emulator/index.html">
+						Try the live emulator <svg class="icon" aria-hidden="true"><use href="#i-arrow"/></svg>
+					</a>
+				</div>
+
+				<div class="promises" role="group" aria-label="Why upgrade">
+					<div><span class="promise-dot" aria-hidden="true"></span><p><strong>Sound that fits</strong><small>PEQ, AutoEq, MSEB</small></p></div>
+					<div><span class="promise-dot" aria-hidden="true"></span><p><strong>Music that stays</strong><small>Offline caches &amp; card library</small></p></div>
+					<div><span class="promise-dot" aria-hidden="true"></span><p><strong>A player with soul</strong><small>Sampler, pet, themes, games</small></p></div>
 				</div>
 			</div>
 		</section>
 
-		<section class="ticker" aria-hidden="true">
-			<div class="ticker-track">
-				<span>10-BAND PEQ</span><i></i><span>AutoEq</span><i></i><span>MSEB</span><i></i><span>Tape Deck</span><i></i><span>Subsonic / Gonic</span><i></i><span>Qobuz offline</span><i></i><span>Listen Together</span><i></i><span>WebDAV &amp; FTP</span><i></i><span>Music Pet</span><i></i><span>Gearboy</span><i></i>
-				<span>10-BAND PEQ</span><i></i><span>AutoEq</span><i></i><span>MSEB</span><i></i><span>Tape Deck</span><i></i><span>Subsonic / Gonic</span><i></i><span>Qobuz offline</span><i></i><span>Listen Together</span><i></i><span>WebDAV &amp; FTP</span><i></i><span>Music Pet</span><i></i><span>Gearboy</span><i></i>
-			</div>
-		</section>
-
-		<section class="section" id="why" aria-labelledby="why-title">
+		<section class="section why" id="why" aria-labelledby="why-title">
 			<div class="section-head">
-				<p class="section-kicker"><span class="kicker-line"></span> Beyond stock 1.3</p>
-				<h2 id="why-title">The same player.<br><span>A completely different experience.</span></h2>
-				<p>This fork starts with the official V1 1.3 update package, swaps the stock music app and interface for Sonix, and repackages it as <code>v1.upt</code>. It is a firmware application, not a new kernel or Linux distribution — your V1 stays a V1.</p>
+				<p class="kicker"><span></span> Why flash it</p>
+				<h2 id="why-title">A better V1.<br><em>Without buying a new one.</em></h2>
 			</div>
-			<div class="compare">
-				<article class="compare-card compare-stock">
-					<header><span class="compare-tag">Stock</span><h3>V1 firmware 1.3</h3></header>
-					<ul>
-						<li>Basic library and playback screens</li>
-						<li>Graphic EQ and standard streaming apps</li>
-						<li>Limited themes, tools and on-device tuning</li>
-					</ul>
+			<div class="why-grid">
+				<article class="why-card">
+					<span class="why-num">01</span>
+					<h3>Make the sound yours</h3>
+					<p>Two 10-band parametric EQ profiles, AutoEq presets and MSEB let you shape the sound for the headphones you are actually wearing — then switch profiles in one tap.</p>
 				</article>
-				<div class="compare-arrow" aria-hidden="true"><svg class="icon"><use href="#i-arrow"/></svg></div>
-				<article class="compare-card compare-sonix">
-					<header><span class="compare-tag">This fork</span><h3>Sonix Player</h3></header>
-					<ul>
-						<li>10-band PEQ with two profiles, AutoEq and MSEB</li>
-						<li>Home-server streaming, offline caches and Wi-Fi sync</li>
-						<li>Sampler, tag editor, themes, stats, games and a music pet</li>
-					</ul>
+				<article class="why-card">
+					<span class="why-num">02</span>
+					<h3>Keep the music close</h3>
+					<p>Your card library gets faster browsing and cover grids; Qobuz, Subsonic and WebDAV downloads stay on the microSD. No signal, no problem — your music is already there.</p>
+				</article>
+				<article class="why-card">
+					<span class="why-num">03</span>
+					<h3>Rediscover the little player</h3>
+					<p>A 16-pad sampler, tag editor, listening stats, a pet that grows with you, custom themes and Game Boy games turn a familiar DAP into something you want to pick up.</p>
 				</article>
 			</div>
+			<p class="why-footnote">Still your hardware, still your card. The package is built from the official vendor 1.3 update — it replaces the music app, not the device.</p>
 		</section>
 
 		<section class="section features" id="features" aria-labelledby="features-title">
-			<div class="section-head">
-				<p class="section-kicker"><span class="kicker-line"></span> Feature tour</p>
-				<h2 id="features-title">Everything tucked into 2 inches.</h2>
-				<p>Optional modules can be switched off under <b>Settings → Plugins</b>, so the pages you never use do not take up RAM.</p>
+			<div class="section-head section-head-split">
+				<div>
+					<p class="kicker"><span></span> Inside the firmware</p>
+					<h2 id="features-title">All of it, in 2 inches.</h2>
+				</div>
+				<p>Optional modules live under <b>Settings → Plugins</b>, so pages you never use stay switched off and out of RAM.</p>
 			</div>
 
 			<div class="feature-group">
-				<div class="group-head"><span class="group-index">01</span><h3>Audio &amp; Streaming</h3><p>Shape the sound, then take it anywhere.</p></div>
+				<div class="group-head"><span>01</span><h3>Audio &amp; streaming</h3></div>
 				<div class="feature-grid">
-					<article class="feature-card">
-						<div class="card-icon"><svg class="icon"><use href="#i-eq"/></svg></div>
-						<h4>10-band PEQ, AutoEq &amp; MSEB</h4>
-						<p>Two independent parametric profiles for two pairs of headphones, one-tap control-centre switching, AutoEq presets and MSEB tuning. Draw curves on a PC over Live USB or dial in frequency, gain and Q on the V1.</p>
-						<span class="card-path">Settings → Equalizer</span>
-					</article>
-					<article class="feature-card">
-						<div class="card-icon"><svg class="icon"><use href="#i-cloud"/></svg></div>
-						<h4>Qobuz offline cache</h4>
-						<p>Up to 24-bit/192 kHz FLAC with persistent sign-in, playlists and downloads to <code>Music/Qobuz Downloads</code>. A configurable SD cache keeps your favourites ready without Wi-Fi.</p>
-						<span class="card-path">Streaming → Qobuz</span>
-					</article>
-					<article class="feature-card">
-						<div class="card-icon"><svg class="icon"><use href="#i-stream"/></svg></div>
-						<h4>Subsonic / Gonic</h4>
-						<p>Point the player at your own server, browse artists and folders, stream on Wi-Fi or save whole albums to the card for offline listening. Self-signed certificates are supported.</p>
-						<span class="card-path">Streaming → Subsonic</span>
-					</article>
-					<article class="feature-card">
-						<div class="card-icon"><svg class="icon"><use href="#i-folder"/></svg></div>
-						<h4>WebDAV &amp; FTP</h4>
-						<p>Browse a network folder, then save tracks or the current album straight to <code>Music/Network Downloads</code>. <b>Save and play</b> starts the file once the copy has finished.</p>
-						<span class="card-path">Streaming → Network folders</span>
-					</article>
-					<article class="feature-card feature-wide">
-						<div class="card-icon"><svg class="icon"><use href="#i-wifi"/></svg></div>
-						<h4>Listen Together</h4>
-						<p>Two V1s, one listening session. Start hosting on the player that has the music, join from the other on the same Wi-Fi, and hear the same track in sync.</p>
-						<span class="card-path">Streaming → Listen Together</span>
-					</article>
+					<article class="feature-card"><div class="card-icon"><svg class="icon"><use href="#i-eq"/></svg></div><h4>10-band PEQ, AutoEq &amp; MSEB</h4><p>Two profiles, numeric band entry, AutoEq presets and headroom control. Draw the curve on a PC or tune it on the V1.</p><span>Equalizer</span></article>
+					<article class="feature-card"><div class="card-icon"><svg class="icon"><use href="#i-cloud"/></svg></div><h4>Qobuz offline</h4><p>Up to 24-bit/192 kHz FLAC, persistent sign-in and downloads to <code>Music/Qobuz Downloads</code>. Your favourites travel with you.</p><span>Streaming → Qobuz</span></article>
+					<article class="feature-card"><div class="card-icon"><svg class="icon"><use href="#i-stream"/></svg></div><h4>Subsonic / Gonic</h4><p>Stream from your own server or save albums to the card for offline listening. Self-signed certificates are supported.</p><span>Streaming → Subsonic</span></article>
+					<article class="feature-card"><div class="card-icon"><svg class="icon"><use href="#i-folder"/></svg></div><h4>WebDAV &amp; FTP</h4><p>Browse a network folder and save tracks or a whole album to <code>Music/Network Downloads</code>, then play locally.</p><span>Streaming → Network folders</span></article>
+					<article class="feature-card feature-accent"><div class="card-icon"><svg class="icon"><use href="#i-wifi"/></svg></div><h4>Listen Together</h4><p>Start hosting on one V1, join from another on the same Wi-Fi, and hear the same track in sync.</p><span>Streaming → Listen Together</span></article>
 				</div>
 			</div>
 
 			<div class="feature-group">
-				<div class="group-head"><span class="group-index">02</span><h3>Creation &amp; Utilities</h3><p>Tools that turn a DAP into a little studio.</p></div>
+				<div class="group-head"><span>02</span><h3>Creation &amp; utilities</h3></div>
 				<div class="feature-grid">
-					<article class="feature-card">
-						<div class="card-icon"><svg class="icon"><use href="#i-pad"/></svg></div>
-						<h4>Tape Deck sampler</h4>
-						<p>Sixteen pads, custom WAV kits, trim and slice markers, chromatic pitch resampling and choke groups. Overdub a one-bar loop with live filter, echo and drive, then record the stereo mix to microSD.</p>
-						<span class="card-path">More → Tape Deck</span>
-					</article>
-					<article class="feature-card">
-						<div class="card-icon"><svg class="icon"><use href="#i-tag"/></svg></div>
-						<h4>Tag Manager</h4>
-						<p>Inspect and edit FLAC, MP3, M4A, AAC, Opus and Ogg tags on the device, and look up missing album art over Wi-Fi. No desktop tagging round-trip required.</p>
-						<span class="card-path">More → Tag Manager</span>
-					</article>
-					<article class="feature-card">
-						<div class="card-icon"><svg class="icon"><use href="#i-folder"/></svg></div>
-						<h4>Wireless folder transfers</h4>
-						<p>Pair a browser by QR code or session code, then drop whole album folders onto the microSD card with their paths intact. Great for moving a library without pulling the card.</p>
-						<span class="card-path">Wireless → Transfer</span>
-					</article>
-					<article class="feature-card">
-						<div class="card-icon"><svg class="icon"><use href="#i-led"/></svg></div>
-						<h4>Smart LED &amp; Stealth mode</h4>
-						<p>Bass Pulse, Energy Glow or Rainbow Breath with ten brightness steps. Red blinks warn at low battery, green confirms uploads and updates — and Stealth keeps the light off even while charging.</p>
-						<span class="card-path">Settings → Power</span>
-					</article>
+					<article class="feature-card"><div class="card-icon"><svg class="icon"><use href="#i-pad"/></svg></div><h4>Tape Deck</h4><p>Sixteen WAV pads, slicing and chromatic pitch, one-bar overdubs, live filter / echo / drive and stereo WAV recording to the card.</p><span>More → Tape Deck</span></article>
+					<article class="feature-card"><div class="card-icon"><svg class="icon"><use href="#i-tag"/></svg></div><h4>Tag Manager</h4><p>Edit FLAC, MP3, M4A, AAC, Opus and Ogg tags on the device, and search for cover art over Wi-Fi.</p><span>More → Tag Manager</span></article>
+					<article class="feature-card"><div class="card-icon"><svg class="icon"><use href="#i-folder"/></svg></div><h4>Wireless folder transfers</h4><p>Pair by QR or session code, then drop whole albums onto the microSD with their folder paths intact.</p><span>Wireless → Transfer</span></article>
+					<article class="feature-card"><div class="card-icon"><svg class="icon"><use href="#i-led"/></svg></div><h4>Smart LED &amp; Stealth</h4><p>Bass Pulse, Energy Glow or Rainbow Breath, battery and upload blink cues — and a true off switch even while charging.</p><span>Settings → Power</span></article>
 				</div>
 			</div>
 
 			<div class="feature-group">
-				<div class="group-head"><span class="group-index">03</span><h3>Customization &amp; Extras</h3><p>The small delights that make it yours.</p></div>
+				<div class="group-head"><span>03</span><h3>Customization &amp; extras</h3></div>
 				<div class="feature-grid">
-					<article class="feature-card">
-						<div class="card-icon"><svg class="icon"><use href="#i-stats"/></svg></div>
-						<h4>Listening stats &amp; recaps</h4>
-						<p>See what you actually listened to by week, month, year or all time — your own wrapped-style recap of top tracks, albums and artists. Plays count only after you have really heard them.</p>
-						<span class="card-path">Music → Stats</span>
-					</article>
-					<article class="feature-card">
-						<div class="card-icon"><svg class="icon"><use href="#i-grid"/></svg></div>
-						<h4>2×2 album grid</h4>
-						<p>Browse four covers at a time, with optional folder artwork and cover grids in the file browser. A better fit for a portrait screen than a long list.</p>
-						<span class="card-path">Settings → Music → Library</span>
-					</article>
-					<article class="feature-card">
-						<div class="card-icon"><svg class="icon"><use href="#i-loop"/></svg></div>
-						<h4>A–B loop</h4>
-						<p>Drop two markers from the track menu to repeat a passage on any seekable file; both points stay visible on the progress bar.</p>
-						<span class="card-path">Now Playing → Track menu</span>
-					</article>
-					<article class="feature-card">
-						<div class="card-icon"><svg class="icon"><use href="#i-battery"/></svg></div>
-						<h4>Battery profiling</h4>
-						<p>Check voltage and estimated runtime, compare draw against a saved baseline, and review charge history to learn how your V1 behaves.</p>
-						<span class="card-path">Settings → System</span>
-					</article>
-					<article class="feature-card">
-						<div class="card-icon"><svg class="icon"><use href="#i-pet"/></svg></div>
-						<h4>Music Pet</h4>
-						<p>A little companion that grows from the music you hear. Feed it, hit a daily listening goal, earn Musical Notes and dress it up from the wardrobe.</p>
-						<span class="card-path">More → Pet</span>
-					</article>
-					<article class="feature-card">
-						<div class="card-icon"><svg class="icon"><use href="#i-game"/></svg></div>
-						<h4>Gearboy &amp; mini-games</h4>
-						<p>Play Game Boy / Game Boy Color cartridges with a cover-art grid and game-audio mute, or kill time with 2048, Snake, Dino and Flappy Bird.</p>
-						<span class="card-path">More → Games</span>
-					</article>
+					<article class="feature-card"><div class="card-icon"><svg class="icon"><use href="#i-stats"/></svg></div><h4>Stats &amp; recaps</h4><p>See what you heard by week, month, year or all time — your own wrapped-style recap of top tracks, albums and artists.</p><span>Music → Stats</span></article>
+					<article class="feature-card"><div class="card-icon"><svg class="icon"><use href="#i-grid"/></svg></div><h4>2×2 album grid</h4><p>Four covers at a time, with optional folder artwork and cover grids in the browser.</p><span>Settings → Music → Library</span></article>
+					<article class="feature-card"><div class="card-icon"><svg class="icon"><use href="#i-loop"/></svg></div><h4>A–B loop</h4><p>Mark two points from the track menu and repeat a passage, with both markers visible on the progress bar.</p><span>Now Playing → Track menu</span></article>
+					<article class="feature-card"><div class="card-icon"><svg class="icon"><use href="#i-battery"/></svg></div><h4>Battery profiling</h4><p>Voltage, estimated runtime, a saved baseline and charge history in one place.</p><span>Settings → System</span></article>
+					<article class="feature-card"><div class="card-icon"><svg class="icon"><use href="#i-pet"/></svg></div><h4>Music Pet</h4><p>A companion that grows from the music you hear, with daily goals, Musical Notes and a wardrobe.</p><span>More → Pet</span></article>
+					<article class="feature-card"><div class="card-icon"><svg class="icon"><use href="#i-game"/></svg></div><h4>Gearboy &amp; mini-games</h4><p>Game Boy / GBC with a cover grid and game-audio mute, plus 2048, Snake, Dino and Flappy Bird.</p><span>More → Games</span></article>
 				</div>
 			</div>
 		</section>
 
-		<section class="gallery" aria-label="Screenshots of Sonix Player on the V1">
-			<figure class="gallery-card"><img src="./assets/screenshots/main-menu.png" alt="Sonix Player main menu on the TempoTec V1" loading="lazy"><figcaption>Main menu</figcaption></figure>
-			<figure class="gallery-card"><img src="./assets/screenshots/now-playing.png" alt="Now playing screen with album art and playback controls" loading="lazy"><figcaption>Now playing</figcaption></figure>
-			<figure class="gallery-card"><img src="./assets/screenshots/streaming.png" alt="Streaming services menu on the V1" loading="lazy"><figcaption>Streaming</figcaption></figure>
-			<figure class="gallery-card"><img src="./assets/screenshots/tokyonight-main.png" alt="Tokyo Night theme on the V1" loading="lazy"><figcaption>Tokyo Night</figcaption></figure>
+		<section class="gallery" aria-label="Sonix Player screens">
+			<figure><img src="./assets/screenshots/main-menu.png" alt="Sonix Player main menu" loading="lazy"><figcaption>Main menu</figcaption></figure>
+			<figure><img src="./assets/screenshots/now-playing.png" alt="Now playing screen with album art" loading="lazy"><figcaption>Now playing</figcaption></figure>
+			<figure><img src="./assets/screenshots/tokyonight-main.png" alt="Tokyo Night theme on the V1" loading="lazy"><figcaption>Tokyo Night</figcaption></figure>
 		</section>
 
 		<section class="section install" id="install" aria-labelledby="install-title">
 			<div class="section-head">
-				<p class="section-kicker"><span class="kicker-line"></span> Quick installation &amp; safety</p>
-				<h2 id="install-title">Three steps to Sonix.</h2>
-				<p>The update is a <code>v1.upt</code> package for the <b>TempoTec Variations V1 only</b>. Keep your player charged and do not interrupt the update.</p>
+				<p class="kicker"><span></span> Quick install &amp; safety</p>
+				<h2 id="install-title">One file. Three steps.</h2>
+				<p>For the <b>TempoTec Variations V1 only</b>. Keep the player charged and let the update finish without interruption.</p>
 			</div>
 			<ol class="steps">
-				<li>
-					<span class="step-num">01</span>
-					<h3>Keep your stock files</h3>
-					<p>Copy the official V1 <code>v1.upt</code> and its matching <code>v1_md5.txt</code> somewhere safe. They are your way back to stock firmware.</p>
-				</li>
-				<li>
-					<span class="step-num">02</span>
-					<h3>Put v1.upt on the card</h3>
-					<p>Download the latest <code>v1.upt</code> below and place it in the <b>root</b> of your microSD card — not inside a folder. Run the V1's built-in firmware updater and let it finish.</p>
-				</li>
-				<li>
-					<span class="step-num">03</span>
-					<h3>Need to go back?</h3>
-					<p>Copy the original vendor <code>v1.upt</code> and its checksum file back to the card root and use the same update process to restore stock.</p>
-				</li>
+				<li><span>01</span><h3>Save your stock files</h3><p>Keep the official <code>v1.upt</code> and <code>v1_md5.txt</code> somewhere safe — they are your way back.</p></li>
+				<li><span>02</span><h3>Copy &amp; update</h3><p>Put the latest <code>v1.upt</code> in the <b>root</b> of your microSD card, then run the V1's built-in firmware updater.</p></li>
+				<li><span>03</span><h3>Restore if you want</h3><p>Copy the original vendor files back to the card root and use the same updater to return to stock.</p></li>
 			</ol>
-			<div class="safety-note">
-				<svg class="icon" aria-hidden="true"><use href="#i-shield"/></svg>
-				<p><strong>Before you flash:</strong> back up your music, use a charged player, and only install packages built for the Variations V1. See the <a href="https://github.com/mr-f0xx/sonix-player-tempotec-v1#install-or-restore-firmware">full install guide</a> and <a href="https://github.com/mr-f0xx/sonix-player-tempotec-v1/blob/main/docs/collecting-logs.md">troubleshooting notes</a> if anything looks wrong.</p>
-			</div>
+			<div class="safety-chip"><svg class="icon" aria-hidden="true"><use href="#i-shield"/></svg><p>Back up your music first. Need details? <a href="https://github.com/mr-f0xx/sonix-player-tempotec-v1#install-or-restore-firmware">Read the full guide</a>.</p></div>
 		</section>
 
-		<section class="section download" id="download" aria-labelledby="download-title">
-			<div class="download-panel">
-				<div class="download-copy">
-					<p class="section-kicker"><span class="kicker-line"></span> Latest build</p>
-					<h2 id="download-title">Ready for your V1.</h2>
-					<p>The button always points at the newest <code>v1.upt</code> asset from GitHub Releases, fetched fresh in your browser.</p>
-					<div class="download-links">
-						<a class="btn btn-primary btn-lg" data-download href="https://github.com/mr-f0xx/sonix-player-tempotec-v1/releases/latest">
-							<svg class="icon" aria-hidden="true"><use href="#i-download"/></svg>
-							<span>Download Latest Firmware <b>v1.upt</b></span>
-						</a>
-						<a class="btn btn-secondary" href="https://github.com/mr-f0xx/sonix-player-tempotec-v1/releases">All releases</a>
-						<a class="btn btn-ghost" href="https://github.com/mr-f0xx/sonix-player-tempotec-v1">
-							<svg class="icon" aria-hidden="true"><use href="#i-github"/></svg> Source on GitHub
-						</a>
+		<section class="section release" id="download" aria-labelledby="release-title">
+			<div class="release-panel">
+				<div class="release-copy">
+					<p class="kicker"><span></span> Latest release</p>
+					<h2 id="release-title">Your V1 is one file away.</h2>
+					<p>The download button above always resolves the newest <code>v1.upt</code> from GitHub Releases. Here is exactly what it is serving right now.</p>
+					<div class="release-links">
+						<a href="https://github.com/mr-f0xx/sonix-player-tempotec-v1/releases">All releases <svg class="icon" aria-hidden="true"><use href="#i-arrow"/></svg></a>
+						<a href="https://github.com/mr-f0xx/sonix-player-tempotec-v1"><svg class="icon" aria-hidden="true"><use href="#i-github"/></svg> Source on GitHub</a>
 					</div>
 				</div>
 				<div class="release-card">
@@ -324,25 +204,17 @@
 					<p class="release-note" data-release-status aria-live="polite">Fetching release details…</p>
 				</div>
 			</div>
-			<div class="deployment-notes">
-				<p><strong>For maintainers:</strong> GitHub Pages cannot set custom headers, so <code>coi-serviceworker.js</code> sits at the site root to enable SharedArrayBuffer / WASM pthreads. Every local path here is relative (<code>./assets/…</code>, <code>./emulator/…</code>) so the site also works from the <code>/sonix-player-tempotec-v1/</code> project subpath.</p>
-			</div>
+			<p class="deploy-note">Maintainers: GitHub Pages cannot set custom headers, so <code>coi-serviceworker.js</code> lives at the site root for WASM pthreads. All local paths stay relative (<code>./assets/…</code>, <code>./emulator/…</code>) for the project subpath. See <code>DEPLOYMENT.md</code>.</p>
 		</section>
 	</main>
 
 	<footer class="site-footer">
 		<div class="footer-inner">
-			<div>
-				<a class="brand" href="#top"><span class="brand-mark" aria-hidden="true">V1</span><span class="brand-text"><strong>SONIX</strong><small>TEMPO TEC · VARIATIONS</small></span></a>
-				<p>An independent community firmware project. Not affiliated with TempoTec.</p>
-			</div>
+			<a class="brand" href="#top"><span class="brand-mark" aria-hidden="true">V1</span><span class="brand-text"><strong>SONIX</strong><small>FOR VARIATIONS V1</small></span></a>
 			<nav aria-label="Footer navigation">
-				<a href="./emulator/index.html">Emulator</a>
-				<a href="#features">Features</a>
-				<a href="#install">Install</a>
-				<a href="https://github.com/mr-f0xx/sonix-player-tempotec-v1/releases">Releases</a>
-				<a href="https://github.com/mr-f0xx/sonix-player-tempotec-v1/blob/main/README.md">README</a>
+				<a href="#why">Why upgrade</a><a href="#features">Features</a><a href="#install">Install</a><a href="#download">Release</a><a href="https://github.com/mr-f0xx/sonix-player-tempotec-v1/blob/main/README.md">README</a>
 			</nav>
+			<p>Independent community firmware. Not affiliated with TempoTec.</p>
 		</div>
 	</footer>
 
