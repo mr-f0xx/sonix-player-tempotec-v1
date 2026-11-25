@@ -9,12 +9,16 @@
 #include "src/gui/fonts/fonts.h"
 #include "src/gui/library/medialist.h"
 #include "src/gui/nowplaying/coverloader.h"
+#include "src/gui/nowplaying/player.h"
 #include "src/gui/shell/icons.h"
 #include "src/gui/shell/settingsrow.h"
 #include "src/gui/shell/switcher.h"
 #include "src/gui/shell/theme.h"
 #include "src/system/core/lang.h"
 #include "src/system/library/listeningstats.h"
+#include "src/system/playback/device_state.h"
+
+#include "lvgl/lvgl.h"
 
 // The Stats page, drawn from the listening history the player keeps.
 //
@@ -27,6 +31,7 @@
 lv_obj_t *stats_screen;
 lv_obj_t *stats_artists_screen;
 lv_obj_t *stats_albums_screen;
+lv_obj_t *stats_tracks_screen;
 
 static gui_config_t *stats_cfg;
 
@@ -47,14 +52,18 @@ static lv_obj_t *chart_content;
 static lv_obj_t *chart_obj;
 static lv_chart_series_t *chart_series;
 static lv_obj_t *chart_marks;
+static lv_obj_t *tracks_card;
+static lv_obj_t *tracks_rows;
 static lv_obj_t *artists_card;
 static lv_obj_t *artists_rows;
 static lv_obj_t *albums_card;
 static lv_obj_t *albums_rows;
 
 // The full lists, and the scroll panels they draw into.
+static lv_obj_t *tracks_full_rows;
 static lv_obj_t *artists_full_rows;
 static lv_obj_t *albums_full_rows;
+static lv_obj_t *tracks_empty;
 static lv_obj_t *artists_empty;
 static lv_obj_t *albums_empty;
 
@@ -78,11 +87,15 @@ static const lv_font_t *title_font(void) { return bp_is_tempotec_v1() ? &font_ui
 #define STATS_THUMB (bp_is_tempotec_v1() ? 32 : 52)
 
 // The slot pools the lists' covers use. The pages' own pools live in
-// coverloader.h; these three are the ones no other page asks for.
-#define STATS_SLOT_ARTISTS 36
-#define STATS_SLOT_ALBUMS 48
-#define STATS_SLOT_FULL_ARTISTS 60
-#define STATS_SLOT_FULL_ALBUMS 72
+// coverloader.h; these four are the ones no other page asks for, and they fit
+// inside its 128 with the twenty-four rows a page can show at once.
+#define STATS_SLOT_TRACKS 0
+#define STATS_SLOT_ARTISTS 8
+#define STATS_SLOT_ALBUMS 16
+#define STATS_SLOT_FULL_TRACKS 24
+#define STATS_SLOT_FULL_ARTISTS 32
+#define STATS_SLOT_FULL_ALBUMS 40
+
 
 // ---------------------------------------------------------------------------
 // Text
@@ -427,24 +440,122 @@ static void chart_fill(void) {
 // The top lists
 // ---------------------------------------------------------------------------
 
-// One row of a top list: the rank, the cover, the name and the two lines under
-// it ("N tracks played"), and the plays on the right.
-static lv_obj_t *top_row(lv_obj_t *parent, const stats_entry_t *entry, int rank, int slot, const lv_image_dsc_t *glyph) {
-	lv_obj_t *row = lv_obj_create(parent);
+// What a row of a top list stands for, and so what tapping it does: a track
+// plays, a record opens its tracks, an artist opens their page. The row keeps
+// only what that needs -- the list it was drawn from is refilled under it the
+// moment the range changes, so it cannot hold a pointer into the rows it came
+// from.
+typedef struct {
+	stats_top_t kind;
+	char name[256];
+	char value[300];
+} stats_hit_t;
+
+// Opens what a row stood for, in the list the player already opens for that
+// kind of thing. An artist goes through medialist_open_artist(), which is the
+// one the search page uses: their records or their tracks, whichever the disc
+// button was last left on.
+static void stats_hit_open(const stats_hit_t *hit) {
+	switch (hit->kind) {
+	case STATS_TOP_TRACKS: {
+		// The ranked list is the queue, the way a tap on Most played's own list
+		// was: next and previous walk the top tracks rather than whatever else
+		// is in the file's folder. The list is read again here rather than kept
+		// on the row, so it is the one the page is showing for the range that
+		// is chosen now.
+		if (!hit->value[0]) {
+			break;
+		}
+		stats_entry_t rows[STATS_FULL_ROWS];
+		const char *paths[STATS_FULL_ROWS];
+		int count = stats_top(STATS_TOP_TRACKS, stats_range, 0, STATS_FULL_ROWS, rows);
+		int start = -1;
+		for (int i = 0; i < count; i++) {
+			paths[i] = rows[i].value;
+			if (start < 0 && strcmp(rows[i].value, hit->value) == 0) {
+				start = i;
+			}
+		}
+		if (start >= 0 && count > 0) {
+			device_state_play_list(paths, count, start);
+			player_refresh_now_playing();
+		} else {
+			// The list has moved under the row, or there is nothing else in it:
+			// at the very least play the track that was tapped.
+			player_play_file(hit->value);
+		}
+		switch_screen(player_screen);
+		break;
+	}
+	case STATS_TOP_ALBUMS:
+		if (hit->value[0]) {
+			medialist_open(hit->name, LIBRARY_LIST_TRACKS, LIBRARY_FILTER_ALBUM, hit->value);
+		}
+		break;
+	case STATS_TOP_ARTISTS:
+		if (hit->name[0]) {
+			medialist_open_artist(hit->name);
+		}
+		break;
+	}
+}
+
+static void stats_row_clicked_cb(lv_event_t *e) { stats_hit_open(lv_event_get_user_data(e)); }
+
+// The hit goes with the row that was drawn for it, so a card refilled on a
+// range change leaves nothing behind.
+static void stats_row_delete_cb(lv_event_t *e) { free(lv_event_get_user_data(e)); }
+
+// Deletes the children of a row list, each row taking its own hit with it.
+static void rows_clear(lv_obj_t *parent) {
+	// lv_obj_clean() leaves the children in place for the rest of this layout
+	// pass, so a card refilled on a range change would keep the old rows until
+	// something else happened to redraw it. Deleted, not cleaned.
+	uint32_t stale = lv_obj_get_child_count(parent);
+	for (uint32_t i = 0; i < stale; i++) {
+		lv_obj_delete(lv_obj_get_child(parent, 0));
+	}
+}
+
+// One row of a top list: the rank, the cover, the name and the plays, with
+// `detail` underneath the name when the row wants a second line (whose record
+// a track is on, whose artist). The whole row is the button, so the target is
+// the same size as the thing it describes.
+//
+// The row itself carries its hit and frees it when it goes, which is what
+// makes refilling the card safe: nothing outlives the row that was drawn for
+// it.
+static lv_obj_t *top_row(lv_obj_t *parent, stats_top_t kind, const stats_entry_t *entry, int rank, int slot,
+						 const lv_image_dsc_t *glyph, const char *detail) {
+	stats_hit_t *hit = malloc(sizeof(*hit));
+	if (!hit) {
+		return NULL; // a row that cannot be opened is not drawn at all
+	}
+	hit->kind = kind;
+	snprintf(hit->name, sizeof(hit->name), "%s", entry->name);
+	snprintf(hit->value, sizeof(hit->value), "%s", entry->value);
+
+	lv_obj_t *row = lv_btn_create(parent);
+	// A plain box with a button's worth of feedback: the default button look
+	// would draw a pill around every row.
+	lv_obj_remove_style_all(row);
 	lv_obj_set_size(row, LV_PCT(100), STATS_ROW_HEIGHT);
 	lv_obj_set_style_bg_opa(row, 0, 0);
-	lv_obj_set_style_border_width(row, 0, 0);
+	lv_obj_set_style_radius(row, 6, 0);
+	lv_obj_add_style(row, &theme_style_card_pressed, LV_STATE_PRESSED);
 	lv_obj_set_style_pad_all(row, 0, 0);
 	lv_obj_set_style_pad_column(row, bp_pick(6, 10), 0);
 	lv_obj_set_scrollable(row, false);
-	lv_obj_set_clickable(row, false);
 	lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
 	lv_obj_set_flex_align(row, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+	lv_obj_set_event_bubble(row, true);
+	lv_obj_add_event_cb(row, stats_row_clicked_cb, LV_EVENT_CLICKED, hit);
+	lv_obj_add_event_cb(row, stats_row_delete_cb, LV_EVENT_DELETE, hit);
 
 	// The rank: a narrow column of its own so the covers line up whatever the
 	// number is.
 	lv_obj_t *rank_label = lv_label_create(row);
-	char rank_text[8];
+	char rank_text[12];
 	snprintf(rank_text, sizeof(rank_text), "%d", rank);
 	lv_label_set_text(rank_label, rank_text);
 	lv_obj_set_style_text_font(rank_label, &font_ui_14, 0);
@@ -466,17 +577,34 @@ static lv_obj_t *top_row(lv_obj_t *parent, const stats_entry_t *entry, int rank,
 		coverloader_request(slot, entry->value, STATS_THUMB);
 	}
 
-	// The name, and only the name: the count is already on the right, so a
-	// second line under it saying the same number again would only eat the
-	// width the name needs, and "a hundred and twelve plays" is not something
-	// the eye reads twice.
-	lv_obj_t *name = lv_label_create(row);
-	lv_obj_set_flex_grow(name, 1);
+	// The name, with the detail under it when there is one. Two lines only
+	// where the font has the room: the V1's row is 44 px and the cover 32, so
+	// anything more would not fit.
+	lv_obj_t *labels = lv_obj_create(row);
+	lv_obj_set_flex_grow(labels, 1);
+	lv_obj_set_height(labels, bp_pick(34, 50));
+	lv_obj_set_style_bg_opa(labels, 0, 0);
+	lv_obj_set_style_border_width(labels, 0, 0);
+	lv_obj_set_style_pad_all(labels, 0, 0);
+	lv_obj_set_style_pad_row(labels, 0, 0);
+	lv_obj_set_scrollable(labels, false);
+	lv_obj_set_clickable(labels, false);
+	lv_obj_set_flex_flow(labels, LV_FLEX_FLOW_COLUMN);
+	lv_obj_set_flex_align(labels, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
+
+	lv_obj_t *name = lv_label_create(labels);
+	lv_obj_set_width(name, LV_PCT(100));
 	lv_label_set_text(name, entry->name);
 	lv_label_set_long_mode(name, LV_LABEL_LONG_DOT);
 	lv_obj_set_height(name, lv_font_get_line_height(title_font()));
 	lv_obj_add_style(name, &theme_style_text, 0);
 	lv_obj_set_style_text_font(name, title_font(), 0);
+
+	if (detail && detail[0]) {
+		lv_obj_t *under = text(labels, detail, &font_ui_14, theme()->text_secondary);
+		lv_obj_set_width(under, LV_PCT(100));
+		lv_label_set_long_mode(under, LV_LABEL_LONG_DOT);
+	}
 
 	// The plays themselves, at the right-hand edge of the row.
 	char plays[64];
@@ -487,23 +615,34 @@ static lv_obj_t *top_row(lv_obj_t *parent, const stats_entry_t *entry, int rank,
 	return row;
 }
 
+// The line under a name, when the row has one: whose record a track is on,
+// whose record an album is, or what an artist mostly plays. All three were
+// written down with the play, so this reads nothing.
+static const char *row_detail(stats_top_t kind, const stats_entry_t *entry) {
+	switch (kind) {
+	case STATS_TOP_TRACKS:
+	case STATS_TOP_ALBUMS:
+		return entry->artist;
+	case STATS_TOP_ARTISTS:
+	default:
+		return entry->genre;
+	}
+}
+
 // A list of `count` rows out of the database, starting at row 0. Only the
 // first `limit` are drawn; the page's cards want two, the full lists want a
-// screenful.
-static void top_list_fill(lv_obj_t *parent, stats_top_t kind, int limit, int slot_base, const lv_image_dsc_t *glyph) {
-	// lv_obj_clean() leaves the children in place for the rest of this layout
-	// pass, so a card refilled on a range change would keep the old rows until
-	// something else happened to redraw it. Deleted, not cleaned.
-	uint32_t stale = lv_obj_get_child_count(parent);
-	for (uint32_t i = 0; i < stale; i++) {
-		lv_obj_delete(lv_obj_get_child(parent, 0));
-	}
+// screenful. `detail` asks for the second line under each name, which the full
+// pages want and the cards do not have the height for on a V1.
+static void top_list_fill(lv_obj_t *parent, stats_top_t kind, int limit, int slot_base, const lv_image_dsc_t *glyph,
+						  bool detail) {
+	rows_clear(parent);
 
 	stats_entry_t rows[STATS_FULL_ROWS];
 	int count = stats_top(kind, stats_range, 0, limit, rows);
 	for (int i = 0; i < count; i++) {
-		lv_obj_t *row = top_row(parent, &rows[i], i + 1, slot_base + i, glyph);
-		if (i > 0) {
+		lv_obj_t *row = top_row(parent, kind, &rows[i], i + 1, slot_base + i, glyph,
+								detail ? row_detail(kind, &rows[i]) : NULL);
+		if (row && i > 0) {
 			lv_obj_set_style_pad_top(row, bp_pick(4, 8), 0);
 		}
 	}
@@ -536,8 +675,9 @@ static void stats_fill(void) {
 
 	if (chart_obj) chart_fill();
 
-	top_list_fill(artists_rows, STATS_TOP_ARTISTS, STATS_PREVIEW_ROWS, STATS_SLOT_ARTISTS, &icon_stats_artists);
-	top_list_fill(albums_rows, STATS_TOP_ALBUMS, STATS_PREVIEW_ROWS, STATS_SLOT_ALBUMS, &icon_stats_albums);
+	top_list_fill(tracks_rows, STATS_TOP_TRACKS, STATS_PREVIEW_ROWS, STATS_SLOT_TRACKS, &icon_stats_tracks, false);
+	top_list_fill(artists_rows, STATS_TOP_ARTISTS, STATS_PREVIEW_ROWS, STATS_SLOT_ARTISTS, &icon_stats_artists, false);
+	top_list_fill(albums_rows, STATS_TOP_ALBUMS, STATS_PREVIEW_ROWS, STATS_SLOT_ALBUMS, &icon_stats_albums, false);
 }
 
 void stats_refresh(void) { stats_fill(); }
@@ -569,18 +709,33 @@ static lv_obj_t *summary_card(lv_obj_t *parent, const char *key, lv_obj_t **valu
 	return box;
 }
 
-// The two "See all" pages read the same list as the card they came from, only
-// further down it, and for whatever range is chosen on the page behind them.
+// The three "See all" pages read the same list as the card they came from,
+// only further down it, and for whatever range is chosen on the page behind
+// them. Each row carries the second line the card's two rows have no height
+// for.
+static void tracks_full_fill(void) {
+	int count = stats_top_count(STATS_TOP_TRACKS, stats_range);
+	top_list_fill(tracks_full_rows, STATS_TOP_TRACKS, STATS_FULL_ROWS, STATS_SLOT_FULL_TRACKS, &icon_stats_tracks, true);
+	lv_obj_set_hidden(tracks_empty, count > 0);
+}
+
 static void artists_full_fill(void) {
 	int count = stats_top_count(STATS_TOP_ARTISTS, stats_range);
-	top_list_fill(artists_full_rows, STATS_TOP_ARTISTS, STATS_FULL_ROWS, STATS_SLOT_FULL_ARTISTS, &icon_stats_artists);
+	top_list_fill(artists_full_rows, STATS_TOP_ARTISTS, STATS_FULL_ROWS, STATS_SLOT_FULL_ARTISTS, &icon_stats_artists,
+				  true);
 	lv_obj_set_hidden(artists_empty, count > 0);
 }
 
 static void albums_full_fill(void) {
 	int count = stats_top_count(STATS_TOP_ALBUMS, stats_range);
-	top_list_fill(albums_full_rows, STATS_TOP_ALBUMS, STATS_FULL_ROWS, STATS_SLOT_FULL_ALBUMS, &icon_stats_albums);
+	top_list_fill(albums_full_rows, STATS_TOP_ALBUMS, STATS_FULL_ROWS, STATS_SLOT_FULL_ALBUMS, &icon_stats_albums, true);
 	lv_obj_set_hidden(albums_empty, count > 0);
+}
+
+static void see_all_tracks_cb(lv_event_t *e) {
+	(void)e;
+	tracks_full_fill();
+	switch_screen(stats_tracks_screen);
 }
 
 static void see_all_artists_cb(lv_event_t *e) {
@@ -595,10 +750,18 @@ static void see_all_albums_cb(lv_event_t *e) {
 	switch_screen(stats_albums_screen);
 }
 
-// Both pages fill themselves when they are opened rather than only when the
-// card's button is the way in: the back gesture returns to the stats page, but
-// nothing stops the list page being the first screen drawn -- and a page left
-// with the previous range's rows would read as a page that had not noticed.
+// All three pages fill themselves when they are opened rather than only when
+// the card's button is the way in: the back gesture returns to the stats page,
+// but nothing stops the list page being the first screen drawn -- and a page
+// left with the previous range's rows would read as a page that had not
+// noticed.
+static void tracks_loaded_cb(lv_event_t *e) {
+	(void)e;
+	if (tracks_full_rows) {
+		tracks_full_fill();
+	}
+}
+
 static void artists_loaded_cb(lv_event_t *e) {
 	(void)e;
 	if (artists_full_rows) {
@@ -611,6 +774,27 @@ static void albums_loaded_cb(lv_event_t *e) {
 	if (albums_full_rows) {
 		albums_full_fill();
 	}
+}
+
+// A "Top" card: its heading and "See all" strip, then the column its two rows
+// are drawn into. The three are identical but for what fills them.
+static lv_obj_t *top_card(lv_obj_t *parent, const char *key, lv_event_cb_t cb, lv_obj_t **rows_out) {
+	lv_obj_t *box = card(parent, LV_PCT(100), LV_SIZE_CONTENT);
+	lv_obj_set_width(box, LV_PCT(100));
+	lv_obj_set_flex_flow(box, LV_FLEX_FLOW_COLUMN);
+	lv_obj_set_style_pad_row(box, bp_pick(2, 6), 0);
+	heading_strip(box, key, cb, NULL);
+
+	*rows_out = lv_obj_create(box);
+	lv_obj_set_width(*rows_out, LV_PCT(100));
+	lv_obj_set_height(*rows_out, LV_SIZE_CONTENT);
+	lv_obj_set_style_bg_opa(*rows_out, 0, 0);
+	lv_obj_set_style_border_width(*rows_out, 0, 0);
+	lv_obj_set_style_pad_all(*rows_out, 0, 0);
+	lv_obj_set_scrollable(*rows_out, false);
+	lv_obj_set_clickable(*rows_out, false);
+	lv_obj_set_flex_flow(*rows_out, LV_FLEX_FLOW_COLUMN);
+	return box;
 }
 
 static void build_stats_page(gui_config_t *cfg) {
@@ -672,45 +856,20 @@ static void build_stats_page(gui_config_t *cfg) {
 	lv_label_set_long_mode(chart_title, LV_LABEL_LONG_DOT);
 	chart_build(chart_card);
 
-	// Top artists, then top albums: each a card of two rows and a way in to
-	// the whole list.
-	artists_card = card(container, LV_PCT(100), LV_SIZE_CONTENT);
-	lv_obj_set_width(artists_card, LV_PCT(100));
-	lv_obj_set_flex_flow(artists_card, LV_FLEX_FLOW_COLUMN);
-	lv_obj_set_style_pad_row(artists_card, bp_pick(2, 6), 0);
-	heading_strip(artists_card, "stats_top_artists", see_all_artists_cb, NULL);
-	artists_rows = lv_obj_create(artists_card);
-	lv_obj_set_width(artists_rows, LV_PCT(100));
-	lv_obj_set_height(artists_rows, LV_SIZE_CONTENT);
-	lv_obj_set_style_bg_opa(artists_rows, 0, 0);
-	lv_obj_set_style_border_width(artists_rows, 0, 0);
-	lv_obj_set_style_pad_all(artists_rows, 0, 0);
-	lv_obj_set_scrollable(artists_rows, false);
-	lv_obj_set_clickable(artists_rows, false);
-	lv_obj_set_flex_flow(artists_rows, LV_FLEX_FLOW_COLUMN);
-
-	albums_card = card(container, LV_PCT(100), LV_SIZE_CONTENT);
-	lv_obj_set_width(albums_card, LV_PCT(100));
-	lv_obj_set_flex_flow(albums_card, LV_FLEX_FLOW_COLUMN);
-	lv_obj_set_style_pad_row(albums_card, bp_pick(2, 6), 0);
-	heading_strip(albums_card, "stats_top_albums", see_all_albums_cb, NULL);
-	albums_rows = lv_obj_create(albums_card);
-	lv_obj_set_width(albums_rows, LV_PCT(100));
-	lv_obj_set_height(albums_rows, LV_SIZE_CONTENT);
-	lv_obj_set_style_bg_opa(albums_rows, 0, 0);
-	lv_obj_set_style_border_width(albums_rows, 0, 0);
-	lv_obj_set_style_pad_all(albums_rows, 0, 0);
-	lv_obj_set_scrollable(albums_rows, false);
-	lv_obj_set_clickable(albums_rows, false);
-	lv_obj_set_flex_flow(albums_rows, LV_FLEX_FLOW_COLUMN);
+	// Top tracks, then top artists, then top albums: each a card of two rows
+	// and a way in to the whole list. The tracks come first because they are
+	// the ones the Music page's "Most played" tile used to be, and because a
+	// list of what was actually played is the most particular answer of the
+	// three.
+	tracks_card = top_card(container, "stats_top_tracks", see_all_tracks_cb, &tracks_rows);
+	artists_card = top_card(container, "stats_top_artists", see_all_artists_cb, &artists_rows);
+	albums_card = top_card(container, "stats_top_albums", see_all_albums_cb, &albums_rows);
 
 	switcher_attach_back_gesture(stats_screen);
 }
 
-// The two "See all" pages: the same rows, a screenful at a time, scrolled.
-static lv_obj_t *build_full_page(gui_config_t *cfg, const char *title, lv_obj_t **rows_out, lv_obj_t **empty_out,
-								 stats_top_t kind) {
-	(void)kind;
+// The three "See all" pages: the same rows, a screenful at a time, scrolled.
+static lv_obj_t *build_full_page(gui_config_t *cfg, const char *title, lv_obj_t **rows_out, lv_obj_t **empty_out) {
 	lv_obj_t *screen = lv_obj_create(NULL);
 	lv_obj_t *container = settingsrow_page(screen, cfg, title);
 	settingsrow_title_corner_slots(settingsrow_page_title(screen), cfg, 0);
@@ -742,13 +901,14 @@ void stats_init(gui_config_t *cfg) {
 	stats_cfg = cfg;
 
 	build_stats_page(cfg);
-	stats_artists_screen =
-		build_full_page(cfg, "stats_top_artists", &artists_full_rows, &artists_empty, STATS_TOP_ARTISTS);
-	stats_albums_screen = build_full_page(cfg, "stats_top_albums", &albums_full_rows, &albums_empty, STATS_TOP_ALBUMS);
+	stats_tracks_screen = build_full_page(cfg, "stats_top_tracks", &tracks_full_rows, &tracks_empty);
+	stats_artists_screen = build_full_page(cfg, "stats_top_artists", &artists_full_rows, &artists_empty);
+	stats_albums_screen = build_full_page(cfg, "stats_top_albums", &albums_full_rows, &albums_empty);
 
 	// The page is refilled every time it is opened: the numbers move while the
 	// music plays, and a page drawn once at boot would be yesterday's answer.
 	lv_obj_add_event_cb(stats_screen, stats_loaded_cb, LV_EVENT_SCREEN_LOADED, NULL);
+	lv_obj_add_event_cb(stats_tracks_screen, tracks_loaded_cb, LV_EVENT_SCREEN_LOADED, NULL);
 	lv_obj_add_event_cb(stats_artists_screen, artists_loaded_cb, LV_EVENT_SCREEN_LOADED, NULL);
 	lv_obj_add_event_cb(stats_albums_screen, albums_loaded_cb, LV_EVENT_SCREEN_LOADED, NULL);
 

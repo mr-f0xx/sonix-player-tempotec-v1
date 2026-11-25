@@ -320,12 +320,15 @@ bool device_state_play_queue_index(int index) { (void)index; return false; }
 void device_state_play_file(const char *path) { (void)path; }
 bool musicsettings_playlists_first(void) { return false; }
 
+// The page's own arrangement, as the real one now reads it: "Most played" is
+// no longer among them (issue #494 -- it is Music > Stats' Top tracks card),
+// and the test below is about the tiles that are still there.
 static music_tile_id_t test_active_tiles[MUSIC_TILE_COUNT] = {
 	MUSIC_TILE_ALL_TRACKS, MUSIC_TILE_ALBUMS, MUSIC_TILE_ARTISTS,
 	MUSIC_TILE_ALBUM_ARTISTS, MUSIC_TILE_GENRES, MUSIC_TILE_YEARS,
-	MUSIC_TILE_PLAYLISTS, MUSIC_TILE_MOST_PLAYED, MUSIC_TILE_BROWSE,
+	MUSIC_TILE_PLAYLISTS, MUSIC_TILE_BROWSE,
 };
-static int test_active_tile_count = MUSIC_TILE_COUNT;
+static int test_active_tile_count = MUSIC_TILE_COUNT - 1;
 
 int musicsettings_main_tiles(music_tile_id_t *out, int max) {
 	int n = test_active_tile_count < max ? test_active_tile_count : max;
@@ -876,16 +879,18 @@ int main(int argc, char **argv) {
 	musicsettings_screen = lv_obj_create(NULL);
 	music_init(&cfg);
 	lv_obj_t *music_tile_grid = lv_obj_get_child(music_screen, 0);
-	assert(lv_obj_get_child_count(music_tile_grid) == MUSIC_TILE_COUNT);
+	assert(lv_obj_get_child_count(music_tile_grid) == (uint32_t)test_active_tile_count);
 	assert(find_label(music_tile_grid, tr("music_years")));
-	assert(find_label(music_tile_grid, tr("music_most_played")));
+	/* "Most played" is not a tile any more: what it showed is Music > Stats'
+	   Top tracks card (issue #494), and the page has one tile the fewer. */
+	assert(!find_label(music_tile_grid, tr("music_most_played")));
 	if (bp_is_tempotec_v1()) {
 		lv_obj_t *tokyo_panel = lv_obj_get_child(music_screen, lv_obj_get_child_count(music_screen) - 1);
 		assert(find_label(tokyo_panel, tr("music_years")));
-		assert(find_label(tokyo_panel, tr("music_most_played")));
+		assert(!find_label(tokyo_panel, tr("music_most_played")));
 	}
 
-	/* Rearrange and disable Years and Most played; verify both tile_grid and tokyo_music_panel update. */
+	/* Rearrange and disable Years; verify both tile_grid and tokyo_music_panel update. */
 	test_active_tiles[0] = MUSIC_TILE_PLAYLISTS;
 	test_active_tiles[1] = MUSIC_TILE_ALBUMS;
 	test_active_tiles[2] = MUSIC_TILE_ARTISTS;

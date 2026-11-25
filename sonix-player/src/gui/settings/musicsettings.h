@@ -20,7 +20,9 @@ int musicsettings_main_tiles(music_tile_id_t *out, int max);
 int musicsettings_hidden_tiles(music_tile_id_t *out, int max);
 void musicsettings_set_main_tiles(const music_tile_id_t *active, int active_count, const music_tile_id_t *hidden,
 								  int hidden_count);
-const char *musicsettings_tile_label(music_tile_id_t id);
+// What a saved arrangement means -- which tiles are on the page, in what order,
+// what waits in "Not in use" and what a name stands for -- is tilelayout.h's,
+// so that it can be read without a display.
 
 // The EQ and MSEB pages, so the control centre's quick buttons can open them
 // on a long press. They are settings pages like any other -- switch_screen()
