@@ -18,6 +18,7 @@
 #define KEY_TARGET "target"
 #define KEY_AT "at"
 #define KEY_ON_SECONDS "on_seconds"
+#define KEY_ACTIVE_SECONDS "active_seconds"
 
 static batteryhistory_state_t g_history;
 static bool g_history_ready;
@@ -64,18 +65,33 @@ uint64_t batteryhistory_state_on_seconds(const batteryhistory_state_t *state, ui
 	return state->saved.on_seconds + elapsed_since(state->session_started_boottime, boottime_seconds);
 }
 
+uint64_t batteryhistory_state_active_seconds(const batteryhistory_state_t *state, uint64_t boottime_seconds) {
+	if (!state || !saved_mark_is_valid(state->saved.mark)) {
+		return 0;
+	}
+	uint64_t total = state->saved.active_seconds;
+	if (state->active) {
+		total += elapsed_since(state->active_started_boottime, boottime_seconds);
+	}
+	return total;
+}
+
 void batteryhistory_state_checkpoint(batteryhistory_state_t *state, uint64_t boottime_seconds) {
 	if (!state) {
 		return;
 	}
 	if (saved_mark_is_valid(state->saved.mark)) {
 		state->saved.on_seconds = batteryhistory_state_on_seconds(state, boottime_seconds);
+		state->saved.active_seconds = batteryhistory_state_active_seconds(state, boottime_seconds);
 	}
 	state->session_started_boottime = boottime_seconds;
+	if (state->active) {
+		state->active_started_boottime = boottime_seconds;
+	}
 }
 
 static bool mark_charge_point(batteryhistory_state_t *state, batteryhistory_mark_t mark, int target,
-					  int64_t wall_seconds, uint64_t boottime_seconds) {
+							  int64_t wall_seconds, uint64_t boottime_seconds) {
 	if (!state) {
 		return false;
 	}
@@ -83,14 +99,36 @@ static bool mark_charge_point(batteryhistory_state_t *state, batteryhistory_mark
 	state->saved.charge_target = clamp_target(target);
 	state->saved.marked_at = wall_seconds >= EARLIEST_REAL_UNIX_TIME ? wall_seconds : 0;
 	state->saved.on_seconds = 0;
+	state->saved.active_seconds = 0;
 	state->session_started_boottime = boottime_seconds;
+	if (state->active) {
+		state->active_started_boottime = boottime_seconds;
+	} else {
+		state->active_started_boottime = 0;
+	}
 	return true;
 }
 
 bool batteryhistory_state_step(batteryhistory_state_t *state, int battery_percent, bool cable_present,
-						   int charge_target, int64_t wall_seconds, uint64_t boottime_seconds) {
+							   int charge_target, int64_t wall_seconds, uint64_t boottime_seconds, bool active) {
 	if (!state) {
 		return false;
+	}
+
+	// Track the active interval first, so every early return below still
+	// leaves the active clock correct. Suspended time never lands here:
+	// suspend only happens while the screen is off and nothing is playing,
+	// so the interval is already closed before the SoC sleeps, and the
+	// BOOTTIME jump across the suspend is never added to the active total.
+	if (active && !state->active) {
+		state->active = true;
+		state->active_started_boottime = boottime_seconds;
+	} else if (!active && state->active) {
+		if (saved_mark_is_valid(state->saved.mark)) {
+			state->saved.active_seconds += elapsed_since(state->active_started_boottime, boottime_seconds);
+		}
+		state->active = false;
+		state->active_started_boottime = 0;
 	}
 
 	charge_target = clamp_target(charge_target);
@@ -198,6 +236,7 @@ static void persist(uint64_t now) {
 	config_set_int(HISTORY_SECTION, KEY_TARGET, g_history.saved.charge_target);
 	config_set_i64(KEY_AT, g_history.saved.marked_at);
 	config_set_u64(KEY_ON_SECONDS, g_history.saved.on_seconds);
+	config_set_u64(KEY_ACTIVE_SECONDS, g_history.saved.active_seconds);
 	config_save();
 	g_last_checkpoint_boottime = now;
 }
@@ -209,19 +248,20 @@ void batteryhistory_init(void) {
 		.charge_target = (int)config_get_int(HISTORY_SECTION, KEY_TARGET, 100),
 		.marked_at = config_i64(KEY_AT, 0),
 		.on_seconds = config_u64(KEY_ON_SECONDS, 0),
+		.active_seconds = config_u64(KEY_ACTIVE_SECONDS, 0),
 	};
 	batteryhistory_state_restore(&g_history, &saved, now);
 	g_last_checkpoint_boottime = now;
 	g_history_ready = true;
 }
 
-void batteryhistory_tick(int battery_percent, bool cable_present, int charge_target) {
+void batteryhistory_tick(int battery_percent, bool cable_present, int charge_target, bool active) {
 	if (!g_history_ready) {
 		return;
 	}
 	uint64_t now = boottime_seconds();
 	bool charge_point_changed = batteryhistory_state_step(&g_history, battery_percent, cable_present, charge_target,
-										 wall_seconds(), now);
+														  wall_seconds(), now, active);
 	if (charge_point_changed || elapsed_since(g_last_checkpoint_boottime, now) >= HISTORY_CHECKPOINT_SECONDS) {
 		persist(now);
 	}
@@ -238,6 +278,8 @@ bool batteryhistory_snapshot(batteryhistory_saved_t *out) {
 		return false;
 	}
 	*out = g_history.saved;
-	out->on_seconds = batteryhistory_state_on_seconds(&g_history, boottime_seconds());
+	uint64_t now = boottime_seconds();
+	out->on_seconds = batteryhistory_state_on_seconds(&g_history, now);
+	out->active_seconds = batteryhistory_state_active_seconds(&g_history, now);
 	return saved_mark_is_valid(out->mark);
 }

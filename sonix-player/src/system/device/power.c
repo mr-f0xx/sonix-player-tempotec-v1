@@ -2291,7 +2291,9 @@ static void power_timer_cb(lv_timer_t *timer) {
 	// Record a full/limited charge or an unplug edge, and add only this running
 	// session to the on-time shown under System > About. The gauge is cached by
 	// the status-bar poll, so this is not another sysfs read every 250 ms.
-	batteryhistory_tick(battery_percent_cached(), usb_now, power_get_charge_limit());
+	// Active means the screen is on or audio is playing: the suspended hours
+	// stay in the total on-time but never in the active figure.
+	batteryhistory_tick(battery_percent_cached(), usb_now, power_get_charge_limit(), g_screen_on || audio_busy);
 	bool usb_changed = g_usb_present_known && usb_now != g_usb_present_last;
 	if (audio_busy || input_idle < POWER_TICK_MS * 2 || usb_changed) {
 		g_mem_active_ms = now;
