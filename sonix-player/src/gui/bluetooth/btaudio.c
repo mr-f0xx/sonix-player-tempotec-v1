@@ -30,6 +30,7 @@ lv_obj_t *btaudio_screen;
 #define BTAUDIO_POLL_MS 700
 
 static lv_obj_t *volume_switch;
+static lv_obj_t *rx_soft_volume_switch;
 static lv_obj_t *output_row;
 static lv_obj_t *output_value;
 static lv_obj_t *airpods_row;
@@ -286,6 +287,11 @@ static void volume_toggle_cb(lv_event_t *e) {
 	bluetooth_set_volume_sync(lv_obj_has_state(volume_switch, LV_STATE_CHECKED));
 }
 
+static void rx_soft_volume_toggle_cb(lv_event_t *e) {
+	(void)e;
+	bluetooth_set_rx_soft_volume(lv_obj_has_state(rx_soft_volume_switch, LV_STATE_CHECKED));
+}
+
 static void refresh_name_row(void);
 
 static void refresh_page(void) {
@@ -314,6 +320,15 @@ static void refresh_page(void) {
 			lv_obj_add_state(volume_switch, LV_STATE_CHECKED);
 		} else {
 			lv_obj_remove_state(volume_switch, LV_STATE_CHECKED);
+		}
+	}
+
+	bool rx_soft = bluetooth_rx_soft_volume();
+	if (lv_obj_has_state(rx_soft_volume_switch, LV_STATE_CHECKED) != rx_soft) {
+		if (rx_soft) {
+			lv_obj_add_state(rx_soft_volume_switch, LV_STATE_CHECKED);
+		} else {
+			lv_obj_remove_state(rx_soft_volume_switch, LV_STATE_CHECKED);
 		}
 	}
 }
@@ -578,6 +593,14 @@ void btaudio_init(gui_config_t *cfg) {
 	settingsrow_toggle(container, "btaudio_synchronised_volume", &volume_switch, volume_toggle_cb);
 	if (bluetooth_volume_sync()) {
 		lv_obj_add_state(volume_switch, LV_STATE_CHECKED);
+	}
+
+	// Receive (A2DP sink): when on, the phone's AVRCP absolute volume is applied
+	// by bluealsa's SoftVolume. When off, the phone slider is effectively
+	// on/off-at-zero and the V1's own volume/DAC is the only final level control.
+	settingsrow_toggle(container, "btaudio_phone_volume", &rx_soft_volume_switch, rx_soft_volume_toggle_cb);
+	if (bluetooth_rx_soft_volume()) {
+		lv_obj_add_state(rx_soft_volume_switch, LV_STATE_CHECKED);
 	}
 
 	// --- the codec list, on a page of its own ---

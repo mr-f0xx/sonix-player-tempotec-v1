@@ -360,6 +360,16 @@ void bluetooth_receiver_ask_to_stream(void);
 bool bluetooth_volume_sync(void);
 void bluetooth_set_volume_sync(bool on);
 
+// Whether the phone's media volume scales the sound received from it (A2DP sink).
+//
+// On (default), SoftVolume is forced on the receive PCM so bluealsa applies the
+// phone's AVRCP absolute volume. Off, the receive PCM is left at bluealsa's
+// native-volume default (--a2dp-volume), so the phone slider acts like an
+// on/off-at-zero and the V1's own volume/DAC is the only final level control.
+// Persisted under [bluetooth] rx_soft_volume.
+bool bluetooth_rx_soft_volume(void);
+void bluetooth_set_rx_soft_volume(bool on);
+
 // Tells the radio the volume changed. Cheap and safe to call on every step: it
 // does nothing unless a device is connected, and the worker coalesces a held
 // key down to one write.
