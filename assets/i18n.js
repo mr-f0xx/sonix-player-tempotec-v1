@@ -31,7 +31,7 @@
       s4_kicker: '04 / PER INIZIARE', s4_kicker_right: 'LEGGI PRIMA DI AGGIORNARE', s4_overline: 'PRONTO QUANDO VUOI', s4_title: 'Fai il <em>passo.</em>',
       s4_desc: "Un po' di preparazione fa la differenza. Segui i passaggi qui sotto e conserva al sicuro i file originali.",
       safety_title: 'NOTA SULLA SICUREZZA', safety_desc: 'Solo per TempoTec Variations V1. Firmware comunitario non ufficiale: leggi istruzioni e avvertimenti prima di aggiornare.', read_guide: 'LEGGI LA GUIDA',
-      s5_kicker: '05 / SUPPORTO', s5_overline: 'TI PIACE SONIX?', s5_title: 'Sostieni il <em>lavoro.</em>',
+      s5_kicker: '05 / SUPPORTO', s5_kicker_right: 'MANTIENI VIVO IL FORK', s5_overline: 'TI PIACE SONIX?', s5_title: 'Sostieni il <em>lavoro.</em>',
       s5_desc: 'Questo fork è un progetto comunitario. Se il tuo V1 è diventato più divertente, puoi sostenere direttamente lo sviluppo.',
       footer_tagline: 'UN PROGETTO COMUNITARIO. CREATO PER AMORE DELLA MUSICA.',
     },
@@ -50,7 +50,7 @@
       s4_kicker: '04 / LOSLEGEN', s4_kicker_right: 'VOR DEM FLASHEN LESEN', s4_overline: 'BEREIT WENN DU ES BIST', s4_title: 'Mach den <em>Wechsel.</em>',
       s4_desc: 'Ein wenig Vorbereitung hilft viel. Folge den Schritten und bewahre deine Originaldateien sicher auf.',
       safety_title: 'SICHERHEITSHINWEIS', safety_desc: 'Nur für den TempoTec Variations V1. Inoffizielle Community-Firmware; lies die vollständigen Anweisungen und Warnungen vor dem Update.', read_guide: 'ANLEITUNG LESEN',
-      s5_kicker: '05 / UNTERSTÜTZEN', s5_overline: 'GEFÄLLT DIR SONIX?', s5_title: 'Unterstütze die <em>Arbeit.</em>',
+      s5_kicker: '05 / UNTERSTÜTZEN', s5_kicker_right: 'DEN FORK AM LEBEN HALTEN', s5_overline: 'GEFÄLLT DIR SONIX?', s5_title: 'Unterstütze die <em>Arbeit.</em>',
       s5_desc: 'Dieser Fork ist ein Community-Projekt. Wenn dein V1 mehr Spaß macht, kannst du die Entwicklung direkt unterstützen.',
       footer_tagline: 'EIN COMMUNITY-PROJEKT. AUS LIEBE ZUR MUSIK GEMACHT.',
     },
@@ -69,7 +69,7 @@
       s4_kicker: '04 / PARA EMPEZAR', s4_kicker_right: 'LEE ANTES DE FLASHAR', s4_overline: 'LISTO CUANDO QUIERAS', s4_title: 'Haz el <em>cambio.</em>',
       s4_desc: 'Un poco de preparación ayuda mucho. Sigue los pasos y guarda a salvo tus archivos originales.',
       safety_title: 'NOTA DE SEGURIDAD', safety_desc: 'Solo para TempoTec Variations V1. Firmware comunitario no oficial; lee las instrucciones y advertencias completas antes de actualizar.', read_guide: 'LEER LA GUÍA',
-      s5_kicker: '05 / APOYO', s5_overline: '¿TE GUSTA SONIX?', s5_title: 'Apoya el <em>trabajo.</em>',
+      s5_kicker: '05 / APOYO', s5_kicker_right: 'MANTÉN VIVO EL FORK', s5_overline: '¿TE GUSTA SONIX?', s5_title: 'Apoya el <em>trabajo.</em>',
       s5_desc: 'Este fork es un proyecto comunitario. Si tu V1 es más divertido, puedes apoyar directamente el desarrollo.',
       footer_tagline: 'UN PROYECTO COMUNITARIO. HECHO POR AMOR A LA MÚSICA.',
     },
@@ -88,7 +88,7 @@
       s4_kicker: '04 / POUR COMMENCER', s4_kicker_right: 'À LIRE AVANT LE FLASHAGE', s4_overline: 'PRÊT QUAND VOUS L’ÊTES', s4_title: 'Faites le <em>pas.</em>',
       s4_desc: 'Un peu de préparation change tout. Suivez les étapes et gardez vos fichiers d’origine en sécurité.',
       safety_title: 'NOTE DE SÉCURITÉ', safety_desc: 'Uniquement pour TempoTec Variations V1. Firmware communautaire non officiel : lisez les instructions et avertissements avant la mise à jour.', read_guide: 'LIRE LE GUIDE',
-      s5_kicker: '05 / SOUTENIR', s5_overline: 'SONIX VOUS PLAÎT ?', s5_title: 'Soutenez le <em>travail.</em>',
+      s5_kicker: '05 / SOUTENIR', s5_kicker_right: 'FAITES VIVRE LE FORK', s5_overline: 'SONIX VOUS PLAÎT ?', s5_title: 'Soutenez le <em>travail.</em>',
       s5_desc: 'Ce fork est un projet communautaire. Si votre V1 est plus amusant, vous pouvez soutenir directement le développement.',
       footer_tagline: 'UN PROJET COMMUNAUTAIRE. PAR AMOUR DE LA MUSIQUE.',
     },
@@ -107,7 +107,7 @@
       s4_kicker: '04 / AAN DE SLAG', s4_kicker_right: 'LEES VOOR HET FLASHEN', s4_overline: 'KLAAR WANNEER JIJ KLAAR BENT', s4_title: 'Maak de <em>stap.</em>',
       s4_desc: 'Een kleine voorbereiding helpt veel. Volg de stappen en bewaar je originele bestanden veilig.',
       safety_title: 'VEILIGHEIDSNOTITIE', safety_desc: 'Alleen voor TempoTec Variations V1. Officiële community-firmware; lees de volledige instructies en waarschuwingen voor het updaten.', read_guide: 'LEES DE HANDLEIDING',
-      s5_kicker: '05 / STEUN', s5_overline: 'VIND JE SONIX LEUK?', s5_title: 'Steun het <em>werk.</em>',
+      s5_kicker: '05 / STEUN', s5_kicker_right: 'HOUD DE FORK LEVEND', s5_overline: 'VIND JE SONIX LEUK?', s5_title: 'Steun het <em>werk.</em>',
       s5_desc: 'Deze fork is een communityproject. Als je V1 leuker is geworden, kun je de ontwikkeling direct steunen.',
       footer_tagline: 'EEN COMMUNITYPROJECT. GEMAAKT UIT LIEFDE VOOR MUZIEK.',
     },
@@ -126,7 +126,7 @@
       s4_kicker: '04 / ZACZNIJ', s4_kicker_right: 'PRZECZYTAJ PRZED FLASHEM', s4_overline: 'GOTOWY, KIEDY JESTEŚ', s4_title: 'Zrób <em>krok.</em>',
       s4_desc: 'Trochę przygotowania wiele zmienia. Wykonaj poniższe kroki i zachowaj oryginalne pliki.',
       safety_title: 'UWAGA DOTYCZĄCA BEZPIECZEŃSTWA', safety_desc: 'Tylko dla TempoTec Variations V1. To nieoficjalny firmware społeczności; przed aktualizacją przeczytaj pełne instrukcje i ostrzeżenia.', read_guide: 'PRZECZYTAJ PRZEWODNIK',
-      s5_kicker: '05 / WSPARCIE', s5_overline: 'PODoba CI SIĘ SONIX?', s5_title: 'Wsparcie dla <em>pracy.</em>',
+      s5_kicker: '05 / WSPARCIE', s5_kicker_right: 'UTRZYMAJ FORKA PRZY ŻYCIU', s5_overline: 'PODoba CI SIĘ SONIX?', s5_title: 'Wsparcie dla <em>pracy.</em>',
       s5_desc: 'Ten fork to projekt społeczności. Jeśli Twój V1 daje więcej frajdy, możesz bezpośrednio wspierać rozwój.',
       footer_tagline: 'PROJEKT SPOŁECZNOŚCI. TWORZONY Z MIŁOŚCI DO MUZYKI.',
     },
@@ -145,7 +145,7 @@
       s4_kicker: '04 / COMEÇAR', s4_kicker_right: 'LEIA ANTES DE INSTALAR', s4_overline: 'PRONTO QUANDO VOCÊ QUISER', s4_title: 'Faça a <em>mudança.</em>',
       s4_desc: 'Um pouco de preparação ajuda muito. Siga os passos abaixo e mantenha seus arquivos originais seguros.',
       safety_title: 'NOTA DE SEGURANÇA', safety_desc: 'Apenas para TempoTec Variations V1. Este é um firmware comunitário não oficial; leia as instruções e avisos completos antes de atualizar.', read_guide: 'LER O GUIA',
-      s5_kicker: '05 / APOIO', s5_overline: 'GOSTA DO SONIX?', s5_title: 'Apoie o <em>trabalho.</em>',
+      s5_kicker: '05 / APOIO', s5_kicker_right: 'MANTENHA O FORK VIVO', s5_overline: 'GOSTA DO SONIX?', s5_title: 'Apoie o <em>trabalho.</em>',
       s5_desc: 'Este fork é um projeto comunitário. Se o seu V1 ficou mais divertido, você pode apoiar o desenvolvimento diretamente.',
       footer_tagline: 'UM PROJETO COMUNITÁRIO. FEITO POR AMOR À MÚSICA.',
     },
@@ -164,7 +164,7 @@
       s4_kicker: '04 / ПОЧНИМО', s4_kicker_right: 'ПРОЧИТАЙТЕ ПЕРЕД ПРОШИВКОЮ', s4_overline: 'ГОТОВИЙ, КОЛИ ВИ ГОТОВІ', s4_title: 'Зробіть <em>крок.</em>',
       s4_desc: 'Невелика підготовка багато змінює. Виконайте кроки нижче й збережіть оригінальні файли.',
       safety_title: 'ПРИМІТКА ЩОДО БЕЗПЕКИ', safety_desc: 'Тільки для TempoTec Variations V1. Це неофіційна громадська прошивка; перед оновленням прочитайте повні інструкції та попередження.', read_guide: 'ЧИТАТИ ІНСТРУКЦІЮ',
-      s5_kicker: '05 / ПІДТРИМКА', s5_overline: 'ПОДОБАЄТЬСЯ SONIX?', s5_title: 'Підтримайте <em>роботу.</em>',
+      s5_kicker: '05 / ПІДТРИМКА', s5_kicker_right: 'ПІДТРИМУЙТЕ FORK', s5_overline: 'ПОДОБАЄТЬСЯ SONIX?', s5_title: 'Підтримайте <em>роботу.</em>',
       s5_desc: 'Цей форк — громадський проект. Якщо ваш V1 став цікавішим, ви можете напряму підтримати розвиток.',
       footer_tagline: 'ГРОМАДСЬКИЙ ПРОЕКТ. СТВОРЕНИЙ З ЛЮБОВІ ДО МУЗИКИ.',
     },
@@ -183,7 +183,7 @@
       s4_kicker: '04 / НАЧНЁМ', s4_kicker_right: 'ПРОЧТИТЕ ПЕРЕД ПРОШИВКОЙ', s4_overline: 'ГОТОВ, КОГДА ВЫ ГОТОВЫ', s4_title: 'Сделайте <em>шаг.</em>',
       s4_desc: 'Небольшая подготовка многое меняет. Выполните шаги ниже и сохраните оригинальные файлы.',
       safety_title: 'ПРИМЕЧАНИЕ О БЕЗОПАСНОСТИ', safety_desc: 'Только для TempoTec Variations V1. Это неофициальная прошивка сообщества; перед обновлением прочитайте полные инструкции и предупреждения.', read_guide: 'ЧИТАТЬ РУКОВОДСТВО',
-      s5_kicker: '05 / ПОДДЕРЖКА', s5_overline: 'НРАВИТСЯ SONIX?', s5_title: 'Поддержите <em>работу.</em>',
+      s5_kicker: '05 / ПОДДЕРЖКА', s5_kicker_right: 'ПОДДЕРЖИВАЙТЕ FORK', s5_overline: 'НРАВИТСЯ SONIX?', s5_title: 'Поддержите <em>работу.</em>',
       s5_desc: 'Этот форк — проект сообщества. Если ваш V1 стал интереснее, вы можете напрямую поддержать разработку.',
       footer_tagline: 'ПРОЕКТ СООБЩЕСТВА. СОЗДАН ПО ЛЮБВИ К МУЗЫКЕ.',
     },
@@ -202,7 +202,7 @@
       s4_kicker: '04 / はじめる', s4_kicker_right: '書き換え前に読んでください', s4_overline: 'いつでも準備OK', s4_title: '<em>切り替え</em>を。',
       s4_desc: '少しの準備が大きな違いを生みます。以下の手順に従い、純正ファイルを安全に保管してください。',
       safety_title: '安全上の注意', safety_desc: 'TempoTec Variations V1専用です。非公式のコミュニティファームウェアです。更新前に完全な説明と警告をお読みください。', read_guide: 'ガイドを読む',
-      s5_kicker: '05 / サポート', s5_overline: 'Sonixを気に入りましたか？', s5_title: 'この<em>活動</em>を応援。',
+      s5_kicker: '05 / サポート', s5_kicker_right: 'FORK を育て続ける', s5_overline: 'Sonixを気に入りましたか？', s5_title: 'この<em>活動</em>を応援。',
       s5_desc: 'このフォークはコミュニティプロジェクトです。V1がより楽しくなったなら、開発を直接支援できます。',
       footer_tagline: 'コミュニティプロジェクト。音楽への愛から生まれました。',
     },
@@ -225,6 +225,7 @@
     rel_unavailable: 'Release unavailable',
     rel_failed: 'Could not load release details. Visit GitHub to download the firmware.',
     rel_no_asset: ' No .upt asset found; check the release page.',
+    rel_notes_external: 'See the release on GitHub for full details.',
   };
 
   const root = document.documentElement;
@@ -274,6 +275,7 @@
       });
     }
     try { localStorage.setItem(storageKey, current); } catch (_) {}
+    document.dispatchEvent(new CustomEvent('sonix:languagechange', { detail: { lang: current } }));
   }
 
   if (menu) {
