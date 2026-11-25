@@ -31,6 +31,12 @@ typedef int AAC_DECODER_ERROR;
 #define AAC_PCM_MIN_OUTPUT_CHANNELS 0x0011
 #define AAC_PCM_MAX_OUTPUT_CHANNELS 0x0012
 #define AAC_CONCEAL_METHOD 0x0100
+#define AAC_DRC_ATTENUATION_FACTOR 0x0201
+#define AAC_DRC_BOOST_FACTOR 0x0202
+#define AAC_DRC_REFERENCE_LEVEL 0x0203
+#define AAC_DRC_HEAVY_COMPRESSION 0x0204
+#define AAC_DRC_DEFAULT_PRESENTATION_MODE 0x0205
+#define AAC_UNIDRC_SET_EFFECT 0x0207
 #define AAC_TPDEC_CLEAR_BUFFER 0x0603
 
 // The head of CStreamInfo. Everything past these three is decoder internals, so
@@ -155,6 +161,15 @@ aacdec_t *aacdec_open(const unsigned char *asc, int asc_len) {
 	// audio.c opens a mono stream instead of doubling every sample.
 	api.set_param(d->handle, AAC_PCM_MIN_OUTPUT_CHANNELS, -1);
 	api.set_param(d->handle, AAC_PCM_MAX_OUTPUT_CHANNELS, -1);
+	// Disable MPEG-4 / MPEG-D DRC and loudness normalization so libfdk-aac
+	// outputs the raw decoded level instead of attenuating tracks that carry
+	// DRC metadata.
+	api.set_param(d->handle, AAC_DRC_ATTENUATION_FACTOR, 0);
+	api.set_param(d->handle, AAC_DRC_BOOST_FACTOR, 0);
+	api.set_param(d->handle, AAC_DRC_REFERENCE_LEVEL, -1);
+	api.set_param(d->handle, AAC_DRC_HEAVY_COMPRESSION, 0);
+	api.set_param(d->handle, AAC_DRC_DEFAULT_PRESENTATION_MODE, 0);
+	api.set_param(d->handle, AAC_UNIDRC_SET_EFFECT, 0);
 
 	return d;
 }
