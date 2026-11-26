@@ -5291,3 +5291,45 @@ and that key check are grouped under `make -C sonix-player/tests sdhealth`; the
 UI test holds a worker back to exercise cancel, USB/card removal and stale
 results, and the engine is included in `sanitize`. The UI target is also part
 of the aggregate `ui` suite.
+
+## Korean bold dropped from the image
+
+The 2.5 MB `korean-bold.otf` is gone from both font trees —
+`sonix-player/assets/fonts` for the simulator and
+`sonix-packer/assets/V1/usr/resource/sonix/fonts` for the image — and about
+1.03 MB with it: 2,556,404 bytes raw, 1,032,598 once the rootfs is built, since
+the eleven thousand Hangul syllables a Korean face has to carry compress to
+about two fifths of that and no further. That is 2.2 % of the 45 MiB image, or
+some forty-six releases of growth at the rate the firmware has been gaining.
+The regular `korean.otf` stays.
+
+Nothing needed changing for it. `fonts.c` has always described the script
+faces' bold files as optional — "the regular one stands in at the bold sizes
+when it is not there" — and builds the chain that way: the bold file is opened
+for a bold size when it is found, and the regular one answers at that size when
+it is not. `bold.otf`, `thai-bold.otf` and `arabic-bold.otf` have all been
+optional on the same rule. The row for Korean in `scripts[]` therefore keeps
+naming both files: with no bold file to find, the fallback is the path taken,
+and a tree that gains one back gets it used again without a change here.
+
+No letter is lost, which is what makes this one safe where deleting the regular
+file would not be. The two cmaps were compared before the file went: 11,288
+entries each, no codepoint in the bold one that the regular lacks, none in the
+regular one that the bold lacks. The regular face keeps every Hangul syllable,
+the jamo, the half-width forms and the Japanese marks MiSans does not carry
+(the middle dot, the wave dash, the low double prime), which matter in a
+non-Japanese interface because Rodin sits behind a filter that only answers
+them in Japanese.
+
+What changes is weight, at the five bold sizes only, and only for text that can
+hold Hangul: an album name on the back of the Coverflow record, a grid tile
+label, a settings roller's selected line. Hangul in those renders in the
+regular weight beside bold Latin. The prominent cases are unaffected — the
+large A–Z hint letter is never Hangul, because the index buckets are `#`, `A`
+to `Z` and an ellipsis, so a Korean artist sorts under `#`; and most of the
+36 and 64 px faces carry percentages, login codes, calculator keys and the
+Gearboy's button letters, which are ASCII.
+
+Deleting the file rather than only dropping it from the table is deliberate:
+the tree is now a firmware without bold Hangul, and a table that still promised
+the file would be the only place saying otherwise.
