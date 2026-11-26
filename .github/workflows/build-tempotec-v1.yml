@@ -278,6 +278,14 @@ jobs:
           compression-level: 0
           retention-days: 14
 
+      - name: Upload debug ELF artifact
+        uses: actions/upload-artifact@v5
+        with:
+          name: sonix_player_debug-${{ steps.source.outputs.sha }}
+          path: sonix-player/sonix_player_debug
+          if-no-files-found: warn
+          retention-days: 14
+
       # A tag is a promise that the image under it was built from the commit
       # that tag names. It is checked and only then kept: a run asked for a
       # release's own commit puts the image on that release, replacing whatever
