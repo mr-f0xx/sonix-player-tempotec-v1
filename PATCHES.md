@@ -5291,3 +5291,39 @@ and that key check are grouped under `make -C sonix-player/tests sdhealth`; the
 UI test holds a worker back to exercise cancel, USB/card removal and stale
 results, and the engine is included in `sanitize`. The UI target is also part
 of the aggregate `ui` suite.
+
+## Optional low-latency USB DAC mode (issue #505)
+
+The USB DAC input is read from `/dev/uac_sa` in ten-millisecond packets, then
+written straight to the same ALSA external-output path as other received audio.
+The default DAC profile requested an 80 ms output buffer; `audio.c` starts the
+PCM only after that buffer fills, so the output queue is a substantial part of
+the host-to-DAC delay. The ordinary music-player buffer is much deeper, but it
+is not used by this path.
+
+The DAC page now has a saved **Low latency** switch (`[usb] dac_low_latency`),
+off by default. It asks ALSA for a 20 ms buffer (with the existing full-buffer
+start threshold), and the USB audio worker requests the same modest `SCHED_RR`
+priority as local playback while the option is on. Toggling it during a stream
+reopens the output PCM on the next input packet. EQ, PEQ and MSEB remain enabled
+as configured; this change does not trade away sound processing.
+
+A driver that refuses the smaller request is retried with the standard 80 ms
+buffer rather than losing the stream. The DAC page identifies that fallback,
+and the logs report both the requested USB-DAC buffer and the buffer/period
+ALSA actually negotiated. The existing `[usb] dac_output_ms` setting remains an
+explicit override, clamped to 20–500 ms.
+
+`make -C sonix-player/tests usbdac-latency` checks the default-off behavior,
+persistence across a simulated restart, buffer selection and the manual
+override bounds; it also checks both new strings in all eleven language files.
+`usbdac-eq` still checks that PCM effects are retained and DSD remains
+untouched.
+
+**Hardware validation pending.** No physical V1 was available here to measure
+host-to-ear latency or check for glitches at 20 ms. The 20 ms value is an ALSA
+request, not a guarantee of total system latency: the USB gadget, host and codec
+can add more. Please compare the normal and low-latency profiles on the V1 at
+48 kHz and a higher sample rate, and report whether audio clicks or the player
+stutters. If low latency falls back, the DAC page says so and the log contains
+`usbdac: ... output buffer ...` plus the actual ALSA buffer/period line.

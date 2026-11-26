@@ -69,7 +69,13 @@
 - **USB DAC** - the player becomes a USB sound card, 32 kHz to 384 kHz. The
   Control Centre remains available for EQ, PEQ, MSEB, gain and output controls;
   the graphic EQ, PEQ and MSEB process incoming PCM, while DSD passes through
-  untouched.
+  untouched. An optional **Low latency** switch on the DAC page is off by
+  default; it requests a 20 ms ALSA output buffer instead of the standard
+  80 ms and requests real-time priority for the USB audio worker. If the
+  smaller buffer is refused, playback retries at the standard depth and the
+  page says so.
+  Smaller buffers can click under load, and the end-to-end result still needs
+  checking on the V1.
 - **USB audio out** - a DAC or USB-C headphones driven with the player as host,
   announced with the card's own name when it is plugged in and again when it
   goes. A desktop DAC on a Type-C adapter that accepts only one format is
