@@ -24,6 +24,10 @@ on:
         description: Ref to build (branch, tag or commit). Empty builds the ref this was dispatched from.
         required: false
         type: string
+      test_lzo9:
+        description: Compare LZO level 9 against the default and package the smaller rootfs (test artifact only)
+        type: boolean
+        default: false
       publish_release_tag:
         description: Release tag to upload the built image to, replacing its assets (v1.upt, v1_md5.txt). Empty publishes nothing.
         required: false
@@ -200,10 +204,21 @@ jobs:
         run: make target -j"$(nproc)"
 
       - name: Build v1.upt
+        env:
+          SONIX_TEST_LZO9: ${{ inputs.test_lzo9 && '1' || '0' }}
+          RELEASE_TAG: ${{ inputs.publish_release_tag }}
         run: |
+          if [[ "$SONIX_TEST_LZO9" == 1 && ( -n "$RELEASE_TAG" || "$GITHUB_REF_TYPE" == tag ) ]]; then
+            echo "::error::The LZO experiment is for test artifacts only."
+            exit 1
+          fi
           install -m 0755 sonix-player/sonix_player sonix-packer/sonix_player
           install -m 0755 sonix-player/sonix_launch sonix-packer/sonix_launch
-          sonix-packer/sonix_firmware_packer.sh
+          set -o pipefail
+          sonix-packer/sonix_firmware_packer.sh | tee "$RUNNER_TEMP/v1-packer.txt"
+          if [[ "$SONIX_TEST_LZO9" == 1 ]]; then
+            { echo '### Experimental rootfs compression'; grep 'LZO comparison:' "$RUNNER_TEMP/v1-packer.txt"; } >> "$GITHUB_STEP_SUMMARY"
+          fi
 
       # Besides the Sonix install: the kernel is the stock one, and every file
       # of the package outside the rootfs -- the OTA config, the 1.3

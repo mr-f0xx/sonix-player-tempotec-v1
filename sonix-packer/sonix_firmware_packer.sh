@@ -41,7 +41,10 @@
 #
 # No questions asked: run it and it does the lot.
 #
-# One opt-in: SONIX_EMBED_STOCK_KEYS=1 pulls the Qobuz application credentials
+# SONIX_TEST_LZO9=1 compares the default rootfs with LZO level 9 and
+# packages the smaller image. Leave it unset for the normal release build.
+#
+# SONIX_EMBED_STOCK_KEYS=1 pulls the Qobuz application credentials
 # out of the stock hiby_player while it is still unpacked, and ships them so
 # Qobuz works without a streaming-keys.ini on the card. It is off by default:
 # those are HiBy's credentials, not this project's, and an image built with it
@@ -855,6 +858,20 @@ if [ \"\$boot_sel\" = \"logo:4\" ]; then boot_waited=0; while [ \$boot_waited -l
 
 	step "[$MODEL_NAME] building the filesystem"
 	mksquashfs "$SQUASH_DIR" "$ROOTFS_NEW" -comp lzo -all-root > /dev/null
+	if [ "${SONIX_TEST_LZO9:-0}" = 1 ]; then
+		# Both images use the exact same staged rootfs and block size.
+		LZO_TRIAL="$WORK_DIR/rootfs-lzo9.squashfs"
+		mksquashfs "$SQUASH_DIR" "$LZO_TRIAL" -comp lzo -all-root -Xcompression-level 9 > /dev/null
+		BASE_BYTES="$(get_size "$ROOTFS_NEW")"
+		TRIAL_BYTES="$(get_size "$LZO_TRIAL")"
+		say "    LZO comparison: default $BASE_BYTES bytes; level 9 $TRIAL_BYTES bytes (savings: $((BASE_BYTES - TRIAL_BYTES)) bytes)"
+		if [ "$TRIAL_BYTES" -lt "$BASE_BYTES" ]; then
+			mv "$LZO_TRIAL" "$ROOTFS_NEW"
+			say "    Using experimental LZO level 9 rootfs"
+		else
+			say "    Keeping the default rootfs: level 9 did not save space"
+		fi
+	fi
 
 	ORIGINAL_SUM="$(get_md5 "$ROOTFS_NEW")"
 	SIZE="$(get_size "$ROOTFS_NEW")"
