@@ -1145,6 +1145,7 @@ static void track_clicked_cb(lv_event_t *e) {
 		// overwrites its own buffer with dots, so a name too long for the card
 		// would be looked up in the library as "Somethin..." and never found.
 		playlist_set_album(back_album);
+		device_state_refresh_normalization();
 		player_refresh_now_playing();
 	}
 	sheet_park();

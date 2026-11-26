@@ -7010,7 +7010,7 @@ static void more_btn_event_cb(lv_event_t *e) {
 static void repeat_btn_event_cb(lv_event_t *e) {
 	(void)e;
 	playlist_cycle_mode();
-	device_state_sync_crossfade();
+	device_state_refresh_normalization();
 	update_repeat_button();
 }
 

@@ -119,6 +119,10 @@ const char *mp4_tag_date(const mp4_file_t *m);
 // nowhere else. NULL when the file has no such tag; `name` is matched without
 // regard to case, as taggers disagree about it.
 const char *mp4_tag_freeform(const mp4_file_t *m, const char *name);
+// The Apple Sound Check tag (----:iTunNORM), ten space-separated hex integers
+// of eight digits each (~90 bytes, longer than a generic freeform slot).
+// Empty string when absent, never NULL.
+const char *mp4_tag_itunnorm(const mp4_file_t *m);
 // The series of an audiobook and its place in it: ----:SERIES and
 // ----:SERIES-PART, else the movement name and number. Empty when absent.
 const char *mp4_tag_series(const mp4_file_t *m);

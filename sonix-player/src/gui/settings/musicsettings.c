@@ -812,12 +812,16 @@ static void build_volume_limit_page(gui_config_t *cfg) {
 }
 
 // ---------------------------------------------------------------------------
-// Replay gain
+// ReplayGain and Sound Check (mutually exclusive)
 // ---------------------------------------------------------------------------
 
 static lv_obj_t *rg_switch;
 static lv_obj_t *rg_card, *rg_pills;
 static lv_obj_t *rg_track_pill, *rg_album_pill, *rg_track_when_shuffled_pill;
+
+static lv_obj_t *sc_switch;
+static lv_obj_t *sc_card, *sc_pills;
+static lv_obj_t *sc_adaptive_pill, *sc_consistent_pill;
 
 static void rg_refresh(void) {
 	if (!rg_switch) {
@@ -838,25 +842,43 @@ static void rg_refresh(void) {
 	settingsrow_pill_active(rg_track_when_shuffled_pill, mode == REPLAYGAIN_TRACK_WHEN_SHUFFLED);
 }
 
+static void sc_refresh(void) {
+	if (!sc_switch) {
+		return;
+	}
+	soundcheck_mode_t mode = soundcheck_mode();
+	bool on = mode != SOUNDCHECK_OFF;
+
+	if (on) {
+		lv_obj_add_state(sc_switch, LV_STATE_CHECKED);
+		lv_obj_set_hidden(sc_pills, false);
+	} else {
+		lv_obj_remove_state(sc_switch, LV_STATE_CHECKED);
+		lv_obj_set_hidden(sc_pills, true);
+	}
+	settingsrow_pill_active(sc_adaptive_pill, mode == SOUNDCHECK_ADAPTIVE);
+	settingsrow_pill_active(sc_consistent_pill, mode == SOUNDCHECK_CONSISTENT);
+}
+
+static void normalization_refresh_ui(void) {
+	rg_refresh();
+	sc_refresh();
+}
+
 // Whatever the setting becomes, the track already loaded has to be re-measured
 // against it -- otherwise switching this on does nothing until the next song.
-static void rg_apply_to_loaded_track(void) {
-	device_state_t state;
-	device_state_get(&state);
-	replaygain_load(&state.metadata);
-	device_state_invalidate_crossfade();
-	device_state_sync_crossfade();
-}
+static void normalization_apply_to_loaded_track(void) { device_state_refresh_normalization(); }
 
 static void rg_toggle_cb(lv_event_t *e) {
 	(void)e;
 	bool on = lv_obj_has_state(rg_switch, LV_STATE_CHECKED);
-	// Switching it back on returns to whichever of the two modes was last
-	// chosen, rather than always to track gain.
-	replaygain_set_mode(on ? (replaygain_mode_t)config_get_int("audio", "replaygain_last", REPLAYGAIN_TRACK)
-						   : REPLAYGAIN_OFF);
-	rg_apply_to_loaded_track();
-	rg_refresh();
+	long last = config_get_int("audio", "replaygain_last", REPLAYGAIN_TRACK);
+	if (last < REPLAYGAIN_TRACK || last > REPLAYGAIN_TRACK_WHEN_SHUFFLED) {
+		last = REPLAYGAIN_TRACK;
+	}
+	replaygain_set_mode(on ? (replaygain_mode_t)last : REPLAYGAIN_OFF);
+	normalization_apply_to_loaded_track();
+	normalization_refresh_ui();
 }
 
 static void rg_pick_cb(lv_event_t *e) {
@@ -867,8 +889,32 @@ static void rg_pick_cb(lv_event_t *e) {
 	replaygain_set_mode(mode);
 	config_set_int("audio", "replaygain_last", (long)mode);
 	config_save();
-	rg_apply_to_loaded_track();
-	rg_refresh();
+	normalization_apply_to_loaded_track();
+	normalization_refresh_ui();
+}
+
+static void sc_toggle_cb(lv_event_t *e) {
+	(void)e;
+	bool on = lv_obj_has_state(sc_switch, LV_STATE_CHECKED);
+	long last = config_get_int("audio", "soundcheck_last", SOUNDCHECK_ADAPTIVE);
+	if (last != SOUNDCHECK_ADAPTIVE && last != SOUNDCHECK_CONSISTENT) {
+		last = SOUNDCHECK_ADAPTIVE;
+	}
+	soundcheck_set_mode(on ? (soundcheck_mode_t)last : SOUNDCHECK_OFF);
+	normalization_apply_to_loaded_track();
+	normalization_refresh_ui();
+}
+
+static void sc_pick_cb(lv_event_t *e) {
+	if (player_sheet_drag_active() || switcher_back_drag_active()) {
+		return;
+	}
+	soundcheck_mode_t mode = (soundcheck_mode_t)(intptr_t)lv_event_get_user_data(e);
+	soundcheck_set_mode(mode);
+	config_set_int("audio", "soundcheck_last", (long)mode);
+	config_save();
+	normalization_apply_to_loaded_track();
+	normalization_refresh_ui();
 }
 
 // ---------------------------------------------------------------------------
@@ -2729,8 +2775,8 @@ static void playback_loaded_cb(lv_event_t *e) {
 	(void)e;
 	settingsrow_duration_set_minutes(&sleep_row, sleeptimer_minutes(SLEEPTIMER_MUSIC));
 	sleep_refresh();
-	// ReplayGain and mono have buttons in the control centre too.
-	rg_refresh();
+	// ReplayGain, Sound Check and mono stay in step with the control centre.
+	normalization_refresh_ui();
 	if (mono_switch) {
 		if (mono_get_enabled()) {
 			lv_obj_add_state(mono_switch, LV_STATE_CHECKED);
@@ -2773,6 +2819,13 @@ static void build_playback_page(gui_config_t *cfg) {
 	rg_album_pill = settingsrow_pill(rg_pills, "albums", REPLAYGAIN_ALBUM, rg_pick_cb);
 	rg_track_when_shuffled_pill = settingsrow_pill(rg_pills, "track_when_shuffled", REPLAYGAIN_TRACK_WHEN_SHUFFLED, rg_pick_cb);
 	rg_refresh();
+
+	// Apple Sound Check (`iTunNORM` on M4A and AIFF/AIFF-C), mutually exclusive with ReplayGain.
+	sc_card = settingsrow_toggle_pills(container, "musicsettings_sound_check", sc_toggle_cb, &sc_switch, &sc_pills);
+	sc_adaptive_pill = settingsrow_pill(sc_pills, "soundcheck_adaptive", SOUNDCHECK_ADAPTIVE, sc_pick_cb);
+	sc_consistent_pill = settingsrow_pill(sc_pills, "soundcheck_consistent", SOUNDCHECK_CONSISTENT, sc_pick_cb);
+	sc_refresh();
+	option_note(container, "musicsettings_sound_check_note");
 
 	// The fade at the two ends of a track: a page of its own because it carries
 	// a length as well as a switch.
@@ -2841,7 +2894,7 @@ static void build_playback_page(gui_config_t *cfg) {
 
 static void musicsettings_loaded_cb(lv_event_t *e) {
 	(void)e;
-	rg_refresh();
+	normalization_refresh_ui();
 }
 
 // Every destination in the Music settings menu gets a persistent, theme-accent
@@ -2971,7 +3024,7 @@ void musicsettings_init(gui_config_t *cfg) {
 		}
 	}
 
-	theme_register_refresh(rg_refresh);
+	theme_register_refresh(normalization_refresh_ui);
 	theme_register_refresh(fade_refresh_labels);
 	theme_register_refresh(dsd_gain_refresh);
 	lv_obj_add_event_cb(musicsettings_screen, musicsettings_loaded_cb, LV_EVENT_SCREEN_LOADED, NULL);

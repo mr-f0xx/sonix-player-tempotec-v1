@@ -1397,6 +1397,29 @@ void playlist_set_mode(playback_mode_t new_mode) {
 
 playback_mode_t playlist_get_mode(void) { return ordered_queue ? PLAYBACK_MODE_NORMAL : mode; }
 
+bool playlist_is_shuffled(void) { return shuffling(); }
+
+bool playlist_is_album_queue(void) {
+	if (ordered_queue) {
+		return false;
+	}
+	if (queue_album[0]) {
+		return true;
+	}
+	if (!custom_queue) {
+		return true;
+	}
+	if (source_ix) {
+		library_index_spec_t spec;
+		library_index_describe(source_ix, &spec);
+		if (spec.valid && spec.kind == LIBRARY_LIST_TRACKS &&
+			(spec.filter == LIBRARY_FILTER_ALBUM || spec.order == LIBRARY_ORDER_ALBUM)) {
+			return true;
+		}
+	}
+	return false;
+}
+
 playback_mode_t playlist_cycle_mode(void) {
 	// An ordered queue is played in its own sequence: a mode change would
 	// reshuffle or repeat it, so cycling stays on normal play-through.

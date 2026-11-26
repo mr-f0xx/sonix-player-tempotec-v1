@@ -3483,6 +3483,7 @@ static void play_artist(panel_t *p, bool shuffled) {
 		}
 	}
 	stamp_last_album(p);
+	device_state_refresh_normalization();
 
 	player_refresh_now_playing();
 	switch_screen(player_screen);
@@ -3545,6 +3546,7 @@ static void play_menu_albums_random_cb(lv_event_t *e) {
 	// The queue is this record, so the chaining knows which one has ended and
 	// can draw the next.
 	playlist_set_album(album);
+	device_state_refresh_normalization();
 	player_refresh_now_playing();
 	switch_screen(player_screen);
 }

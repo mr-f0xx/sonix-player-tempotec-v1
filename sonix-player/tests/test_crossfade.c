@@ -310,6 +310,97 @@ static void test_replaygain_q15(void) {
 	replaygain_set_mode(REPLAYGAIN_OFF);
 }
 
+static void test_soundcheck_modes_and_mutual_exclusion(void) {
+	const char *tracks[] = {"/card/a1.m4a", "/card/a2.m4a", "/card/a3.m4a"};
+	playlist_load_paths(tracks, 3, 0);
+	playlist_set_mode(PLAYBACK_MODE_NORMAL);
+	playlist_set_album("");
+	soundcheck_set_album_gain(false, 0.0f, 0.0f);
+
+	// 1. Mutual exclusion between ReplayGain and Sound Check
+	replaygain_set_mode(REPLAYGAIN_TRACK);
+	CHECK(replaygain_mode() == REPLAYGAIN_TRACK);
+	CHECK(soundcheck_mode() == SOUNDCHECK_OFF);
+
+	soundcheck_set_mode(SOUNDCHECK_ADAPTIVE);
+	CHECK(soundcheck_mode() == SOUNDCHECK_ADAPTIVE);
+	CHECK(replaygain_mode() == REPLAYGAIN_OFF);
+
+	replaygain_set_mode(REPLAYGAIN_ALBUM);
+	CHECK(replaygain_mode() == REPLAYGAIN_ALBUM);
+	CHECK(soundcheck_mode() == SOUNDCHECK_OFF);
+
+	soundcheck_set_mode(SOUNDCHECK_CONSISTENT);
+	CHECK(soundcheck_mode() == SOUNDCHECK_CONSISTENT);
+	CHECK(replaygain_mode() == REPLAYGAIN_OFF);
+
+	// 2. Consistent mode always uses Track Sound Check regardless of album queue or shuffle
+	song_metadata_t meta;
+	memset(&meta, 0, sizeof(meta));
+	meta.has_soundcheck = true;
+	meta.soundcheck_gain_db = -6.0206f; // ~0.5x -> 16384 in Q15
+	meta.soundcheck_peak = 0.9f;
+	// Even if ReplayGain tags are also on the file, Sound Check uses iTunNORM when active
+	meta.has_track_gain = true;
+	meta.track_gain_db = 0.0f;
+
+	playlist_set_album("Discovery");
+	soundcheck_set_album_gain(true, 0.0f, 0.5f); // album gain = 0 dB (unity = 32768)
+
+	int g = replaygain_compute_q15(&meta);
+	CHECK(abs(g - 16384) <= 8);
+
+	// 3. Adaptive mode:
+	//    (a) Album queue + non-shuffled -> uses Album Sound Check gain (0 dB -> 32768)
+	soundcheck_set_mode(SOUNDCHECK_ADAPTIVE);
+	CHECK(playlist_is_album_queue());
+	CHECK(!playlist_is_shuffled());
+	g = replaygain_compute_q15(&meta);
+	CHECK(g == 32768);
+
+	//    (b) Album queue + shuffled -> switches to Track Sound Check (-6.02 dB -> 16384)
+	playlist_set_mode(PLAYBACK_MODE_SHUFFLE);
+	CHECK(playlist_is_shuffled());
+	g = replaygain_compute_q15(&meta);
+	CHECK(abs(g - 16384) <= 8);
+
+	playlist_set_mode(PLAYBACK_MODE_SHUFFLE_REPEAT);
+	CHECK(playlist_is_shuffled());
+	g = replaygain_compute_q15(&meta);
+	CHECK(abs(g - 16384) <= 8);
+
+	//    (c) Playlist / Smart Mix / All Songs queue (album == "") + non-shuffled -> Track Sound Check
+	playlist_set_mode(PLAYBACK_MODE_NORMAL);
+	playlist_set_album("");
+	CHECK(!playlist_is_album_queue());
+	g = replaygain_compute_q15(&meta);
+	CHECK(abs(g - 16384) <= 8);
+
+	//    (d) Adaptive peak clamping protects individual tracks when positive album gain would clip
+	playlist_set_album("Quiet Record");
+	meta.soundcheck_gain_db = 3.0f;
+	meta.soundcheck_peak = 0.8f; // track peak 0.8 -> max linear gain 1.25 (40960)
+	soundcheck_set_album_gain(true, 6.0f, 0.8f); // +6 dB wants ~2.0x, clamped by 0.8 peak to 40960
+	g = replaygain_compute_q15(&meta);
+	CHECK(abs(g - 40960) <= 16);
+
+	//    (e) Explicit album context helper for crossfade staging onto another album
+	g = soundcheck_compute_q15_with_album(&meta, true, true, -6.0206f, 0.8f);
+	CHECK(abs(g - 16384) <= 8);
+	g = soundcheck_compute_q15_with_album(&meta, false, true, -6.0206f, 0.8f); // non-album context -> track +3 dB clamped by 0.8 -> 40960
+	CHECK(abs(g - 40960) <= 16);
+
+	//    (f) Track without iTunNORM plays at unity (32768) even when Sound Check is on
+	memset(&meta, 0, sizeof(meta));
+	meta.has_track_gain = true;
+	meta.track_gain_db = -6.0f;
+	CHECK(replaygain_compute_q15(&meta) == 32768);
+
+	soundcheck_set_album_gain(false, 0.0f, 0.0f);
+	soundcheck_set_mode(SOUNDCHECK_OFF);
+	playlist_set_album("");
+}
+
 static void test_playlist_peek_crossfade_modes(void) {
 	const char *tracks[] = {"/card/t1.flac", "/card/t2.flac", "/card/t3.flac", "/card/t4.flac"};
 	char peek[128], adv[128];
@@ -366,6 +457,7 @@ int main(void) {
 	test_mix_s16_and_s32();
 	test_resampler_and_channel_map();
 	test_replaygain_q15();
+	test_soundcheck_modes_and_mutual_exclusion();
 	test_playlist_peek_crossfade_modes();
 
 	unlink(cfg_path);
@@ -375,6 +467,6 @@ int main(void) {
 		fprintf(stderr, "test_crossfade: %d failure(s)\n", failures);
 		return 1;
 	}
-	printf("test_crossfade: equal-power curve, s16/s32 mix, resampler, ReplayGain Q15, and shuffle-repeat peek passed\n");
+	printf("test_crossfade: equal-power curve, s16/s32 mix, resampler, ReplayGain/Sound Check Q15, and shuffle-repeat peek passed\n");
 	return 0;
 }

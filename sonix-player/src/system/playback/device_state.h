@@ -175,6 +175,11 @@ bool device_state_prev(char *out_path, size_t out_size);
 void device_state_sync_crossfade(void);
 void device_state_invalidate_crossfade(void);
 
+// Re-evaluates ReplayGain / Sound Check (including Adaptive Sound Check's
+// album-wide loudness and shuffle/playlist context) for the loaded track and
+// refreshes any staged crossfade transition.
+void device_state_refresh_normalization(void);
+
 // Commits queue/metadata/play-count state if the playback thread just completed
 // a seamless crossfade handoff into the next track. Returns true when a handoff
 // occurred so the UI can refresh Now Playing.
