@@ -1124,6 +1124,8 @@ static void poll_cb(lv_timer_t *timer) {
 typedef struct {
 	int written;
 	char artist[192];
+	lv_obj_t *labels[CF_BACK_ROWS];
+	char *paths[CF_BACK_ROWS];
 } track_fill_t;
 
 static void track_clicked_cb(lv_event_t *e) {
@@ -1191,9 +1193,9 @@ static bool track_fill_cb(const char *name, const char *path, const char *artist
 	lv_obj_set_height(label, lv_font_get_line_height(&font_ui_20));
 	lv_obj_set_style_text_color(label, theme()->text_primary, 0);
 	lv_obj_set_style_text_font(label, &font_ui_20, 0);
-	char decorated[320];
-	explicit_decorate(decorated, sizeof(decorated), name, library_track_explicit(path));
-	lv_label_set_text(label, decorated);
+	lv_label_set_text(label, name);
+	fill->labels[number - 1] = label;
+	fill->paths[number - 1] = (path && path[0]) ? strdup(path) : NULL;
 
 	// A hairline under every row but the last, drawn as a child of the row so it
 	// travels with it and needs no second pass over the list.
@@ -1235,6 +1237,16 @@ static void back_fill(const char *album) {
 	}
 	track_fill_t fill = {0};
 	library_index_window(back_ix, 0, CF_BACK_ROWS, track_fill_cb, &fill);
+	for (int i = 0; i < fill.written; i++) {
+		if (fill.paths[i]) {
+			if (library_track_explicit(fill.paths[i])) {
+				char decorated[320];
+				explicit_decorate(decorated, sizeof(decorated), lv_label_get_text(fill.labels[i]), true);
+				lv_label_set_text(fill.labels[i], decorated);
+			}
+			free(fill.paths[i]);
+		}
+	}
 	back_count = library_index_count(back_ix);
 
 	if (fill.artist[0]) {
