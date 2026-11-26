@@ -9,6 +9,7 @@ make -C sonix-player/tests swvolume
 make -C sonix-player/tests volumereadout
 make -C sonix-player/tests eq
 make -C sonix-player/tests usbdac-eq
+make -C sonix-player/tests usbdac-latency
 make -C sonix-player/tests usbhost
 make -C sonix-player/tests readfile
 make -C sonix-player/tests bluetooth
@@ -268,6 +269,13 @@ handler and links the real DSP engine. It checks that signed 32-bit PCM changes
 with GEQ, PEQ or MSEB enabled, off-state PCM is unchanged, and DSD words remain
 bit-for-bit intact with all three effects enabled. It builds no gadget and
 opens no ALSA device.
+
+`make -C sonix-player/tests usbdac-latency` checks the saved profile is off by
+default, selects the 20 ms request when enabled, survives a simulated restart,
+falls back to 80 ms when the smaller buffer is refused, and leaves the existing
+`dac_output_ms` override and its bounds intact. It also
+checks the new DAC-page strings in all eleven language files. It does not open
+ALSA or claim a measured end-to-end latency; that still needs a physical V1.
 
 `make -C sonix-player/tests peq-ui` links the real PEQ page and DSP engine to
 LVGL's headless renderer. It checks the profile pills at 240×320 in all eleven

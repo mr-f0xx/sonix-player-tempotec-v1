@@ -6,6 +6,7 @@
 #include "src/system/audio/eq.h"
 #include "src/system/core/config.h"
 #include "src/system/core/lang.h"
+#include "src/system/core/utils.h"
 #include "src/system/device/power.h"
 #include "src/system/device/system.h"
 #include "src/system/device/usb.h"
@@ -14,6 +15,7 @@
 #include <dirent.h>
 #include <fcntl.h>
 #include <pthread.h>
+#include <sched.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -77,15 +79,13 @@ struct uac_format {
 // write.
 //
 // Lower is tighter and closer to an underrun, which on this path is a click
-// rather than a stall. [usb] dac_output_ms moves it.
+// rather than a stall. The optional low-latency profile asks ALSA for the
+// smallest buffer we consider useful with the gadget's ten-millisecond input
+// blocks. [usb] dac_output_ms remains an explicit per-device override.
 #define OUTPUT_MS_DEFAULT 80
 #define OUTPUT_MS_MIN 20
 #define OUTPUT_MS_MAX 500
-
-static int output_ms(void) {
-	int ms = (int)config_get_int("usb", "dac_output_ms", OUTPUT_MS_DEFAULT);
-	return ms < OUTPUT_MS_MIN ? OUTPUT_MS_MIN : (ms > OUTPUT_MS_MAX ? OUTPUT_MS_MAX : ms);
-}
+#define OUTPUT_MS_LOW_LATENCY OUTPUT_MS_MIN
 
 // Ten milliseconds of audio, sized the way the stock player sizes it:
 // rate * 8 / 100 bytes, eight bytes per frame -- stereo, 32 bits a sample --
@@ -108,6 +108,70 @@ static int node_fd = -1;
 
 static void touch(void) {
 	serial++;
+}
+
+// Read the latency preferences once, then keep the values used by the audio
+// thread behind `lock`. In particular, the DAC page can change the profile
+// while audio is arriving; the worker must not race config.c's mutable table.
+static bool latency_settings_loaded;
+static bool low_latency_enabled;
+static bool output_ms_override_present;
+static long output_ms_override;
+
+static void latency_settings_load_locked(void) {
+	if (latency_settings_loaded) {
+		return;
+	}
+	low_latency_enabled = config_get_bool("usb", "dac_low_latency", false);
+	const char *configured_ms = config_get("usb", "dac_output_ms", NULL);
+	if (configured_ms && configured_ms[0]) {
+		output_ms_override_present = true;
+		output_ms_override = config_get_int("usb", "dac_output_ms", OUTPUT_MS_DEFAULT);
+	}
+	latency_settings_loaded = true;
+}
+
+bool usbdac_low_latency_enabled(void) {
+	pthread_mutex_lock(&lock);
+	latency_settings_load_locked();
+	bool enabled = low_latency_enabled;
+	pthread_mutex_unlock(&lock);
+	return enabled;
+}
+
+void usbdac_set_low_latency(bool enabled) {
+	pthread_mutex_lock(&lock);
+	latency_settings_load_locked();
+	bool changed = low_latency_enabled != enabled;
+	if (changed) {
+		low_latency_enabled = enabled;
+		state.low_latency_fallback = false;
+		touch();
+	}
+	pthread_mutex_unlock(&lock);
+
+	if (!changed) {
+		return;
+	}
+
+	config_set_bool("usb", "dac_low_latency", enabled);
+	if (!config_save()) {
+		fprintf(stderr, "usbdac: could not save low-latency preference\n");
+	}
+	fprintf(stderr, "usbdac: low-latency mode %s\n", enabled ? "enabled" : "disabled");
+}
+
+static int output_ms_for_mode(bool *low_latency_out) {
+	pthread_mutex_lock(&lock);
+	latency_settings_load_locked();
+	bool low_latency = low_latency_enabled;
+	long ms = output_ms_override_present ? output_ms_override
+										 : (low_latency ? OUTPUT_MS_LOW_LATENCY : OUTPUT_MS_DEFAULT);
+	pthread_mutex_unlock(&lock);
+	if (low_latency_out) {
+		*low_latency_out = low_latency;
+	}
+	return ms < OUTPUT_MS_MIN ? OUTPUT_MS_MIN : (ms > OUTPUT_MS_MAX ? OUTPUT_MS_MAX : (int)ms);
 }
 
 static void set_error(const char *fmt, ...) {
@@ -465,19 +529,73 @@ static void process_usb_dac_audio(int32_t *frames, int frame_count, int sample_r
 	}
 }
 
+static void audio_thread_priority(bool low_latency) {
+	if (low_latency) {
+		// Match the local playback thread: the USB node must be drained before
+		// its next ten-millisecond packet arrives. This is requested only for
+		// the opt-in profile, so default DAC mode keeps its old scheduling.
+		thread_be_realtime("usbdac", 10);
+		return;
+	}
+
+	struct sched_param normal = {0};
+	int err = pthread_setschedparam(pthread_self(), SCHED_OTHER, &normal);
+	if (err != 0) {
+		fprintf(stderr, "usbdac: could not restore normal audio-thread scheduling: %s\n", strerror(err));
+	} else {
+		fprintf(stderr, "thread: usbdac runs at normal priority\n");
+	}
+}
+
+static bool open_output_pcm(int sample_rate, int bits, bool dsd, bool low_latency, int requested_buffer_ms,
+							int *active_buffer_ms, bool *low_latency_fallback) {
+	int active_ms = requested_buffer_ms;
+	bool fallback = false;
+	bool opened = audio_external_begin_latency(sample_rate, 2, dsd ? 32 : bits, active_ms);
+	if (!opened && low_latency && requested_buffer_ms < OUTPUT_MS_DEFAULT) {
+		// Some kernel/codec combinations cannot run with the smaller buffer.
+		// Keep the stream useful: retry at the standard depth instead of
+		// leaving this optional mode with no sound.
+		fprintf(stderr, "usbdac: %d ms output buffer refused at %d Hz; retrying with %d ms\n", requested_buffer_ms,
+				sample_rate, OUTPUT_MS_DEFAULT);
+		active_ms = OUTPUT_MS_DEFAULT;
+		opened = audio_external_begin_latency(sample_rate, 2, dsd ? 32 : bits, active_ms);
+		fallback = opened;
+	}
+	if (active_buffer_ms) {
+		*active_buffer_ms = active_ms;
+	}
+	if (low_latency_fallback) {
+		*low_latency_fallback = fallback;
+	}
+	return opened;
+}
+
 static void *audio_main(void *arg) {
 	(void)arg;
 
 	char *buffer = NULL;
 	int buffer_size = 0;
-	int open_rate = 0, open_bits = 0;
+	int open_rate = 0, open_bits = 0, open_buffer_ms = 0;
 	bool output_open = false;
-
-	struct uac_format current = {0};
+	bool priority_initialized = false;
+	bool realtime_priority = false;
 
 	int idle_us = 0;
 
 	while (running) {
+		bool low_latency = false;
+		int requested_buffer_ms = output_ms_for_mode(&low_latency);
+		if (!priority_initialized || low_latency != realtime_priority) {
+			if (low_latency) {
+				audio_thread_priority(true);
+			} else if (priority_initialized && realtime_priority) {
+				audio_thread_priority(false);
+			}
+			realtime_priority = low_latency;
+			priority_initialized = true;
+		}
+
 		int host_state = 0;
 		if (ioctl(node_fd, UAC_IOCTL_STATE, &host_state) != 0) {
 			// The driver went away, or the host pulled the cable. Not fatal on
@@ -499,9 +617,10 @@ static void *audio_main(void *arg) {
 				}
 				audio_external_end();
 				output_open = false;
-				open_rate = open_bits = 0;
+				open_rate = open_bits = open_buffer_ms = 0;
 				pthread_mutex_lock(&lock);
 				state.streaming = false;
+				state.low_latency_fallback = false;
 				touch();
 				pthread_mutex_unlock(&lock);
 				printf("usbdac: host stopped; DAC released\n");
@@ -542,13 +661,19 @@ static void *audio_main(void *arg) {
 			buffer_size = want;
 		}
 
-		if (!output_open || fmt.rate != open_rate || bits != open_bits) {
+		if (!output_open || fmt.rate != open_rate || bits != open_bits || requested_buffer_ms != open_buffer_ms) {
 			if (output_open) {
 				audio_external_end();
 				output_open = false;
 			}
+
 			// DSD is handed to the DAC as it comes; the chip does the rest.
-			output_open = audio_external_begin_latency(fmt.rate, 2, dsd ? 32 : bits, output_ms());
+			// A live change of the latency switch reopens the PCM on this next
+			// input block, rather than waiting for the host to start a new stream.
+			int active_buffer_ms = requested_buffer_ms;
+			bool low_latency_fallback = false;
+			output_open = open_output_pcm(fmt.rate, bits, dsd, low_latency, requested_buffer_ms, &active_buffer_ms,
+										  &low_latency_fallback);
 			if (!output_open) {
 				// Say so, but keep reading: the gadget's OUT endpoint has to
 				// go on being drained or the host sees a device that stopped
@@ -558,26 +683,30 @@ static void *audio_main(void *arg) {
 			}
 			open_rate = fmt.rate;
 			open_bits = bits;
+			open_buffer_ms = requested_buffer_ms;
 
 			// fmt.format is logged because it is the only field left that could
 			// carry the host's own bit depth. The driver always hands over
 			// 32-bit words -- that is why the page says 32 whatever the Mac is
 			// set to -- but if this number moves when the host setting changes,
 			// it is the one to map.
-			printf("usbdac: host is sending %d Hz, %s (format=%d flags=%d), output buffer %d ms\n", fmt.rate,
-				   dsd ? "DSD" : "32 bit PCM", fmt.format, fmt.flags, output_ms());
+			const char *buffer_note = low_latency_fallback ? " (standard-buffer fallback)"
+										 : (low_latency && active_buffer_ms < OUTPUT_MS_DEFAULT ? " (low-latency)" : "");
+			printf("usbdac: host is sending %d Hz, %s (format=%d flags=%d), output buffer %d ms%s\n", fmt.rate,
+				   dsd ? "DSD" : "32 bit PCM", fmt.format, fmt.flags, active_buffer_ms, buffer_note);
 			pthread_mutex_lock(&lock);
 			state.streaming = true;
 			state.sample_rate = fmt.rate;
 			state.bits = bits;
 			state.channels = 2;
 			state.dsd = dsd;
-			state.error[0] = '\0';
+			state.low_latency_fallback = low_latency_fallback;
+			if (output_open) {
+				state.error[0] = '\0';
+			}
 			touch();
 			pthread_mutex_unlock(&lock);
-			current = fmt;
 		}
-		(void)current;
 
 		ssize_t got = read(node_fd, buffer, (size_t)buffer_size);
 		if (got <= 0) {
@@ -604,6 +733,7 @@ static void *audio_main(void *arg) {
 
 	pthread_mutex_lock(&lock);
 	state.streaming = false;
+	state.low_latency_fallback = false;
 	touch();
 	pthread_mutex_unlock(&lock);
 	printf("usbdac: audio thread finished\n");

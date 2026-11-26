@@ -49,6 +49,7 @@ typedef struct {
 	int bits;		 // 32 for PCM, 1 for DSD
 	int channels;
 	bool dsd;
+	bool low_latency_fallback; // ALSA refused the smaller buffer; the standard buffer is in use
 	char error[128];
 } usbdac_state_t;
 
@@ -74,6 +75,12 @@ void usbdac_get_state(usbdac_state_t *out);
 // Bumped whenever the state changes, so a page can redraw only when there is
 // something new -- the rate changing under it included.
 unsigned usbdac_serial(void);
+
+// Optional USB-DAC buffering profile. Off by default; on requests a 20 ms
+// output buffer and real-time scheduling for the USB audio worker. The setting
+// is persisted, and a live change is applied on the next input buffer.
+bool usbdac_low_latency_enabled(void);
+void usbdac_set_low_latency(bool enabled);
 
 // ---------------------------------------------------------------------------
 // Charging
