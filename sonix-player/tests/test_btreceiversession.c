@@ -32,6 +32,8 @@ void bluetooth_set_receiver_profile(bool on) {
 		profile_off++;
 	}
 }
+static bool radio_on = true;
+bool bluetooth_get_enabled(void) { return radio_on; }
 
 // The back-stack, and the three ways the switcher moves along it.
 static lv_obj_t *history[8];
@@ -86,6 +88,10 @@ typedef struct {
 // follow. Counters are zeroed once the user is on the receiver's page.
 static world_t make_world(void) {
 	world_t w;
+	// The switch's setting lives across pages; each world starts with the
+	// page-only behaviour the older tests were written for.
+	btreceiversession_background_set(false);
+	radio_on = true;
 	w.display = lv_display_create(240, 320);
 	w.menu = lv_obj_create(NULL);
 	w.page = lv_obj_create(NULL);
@@ -105,7 +111,12 @@ static world_t make_world(void) {
 	return w;
 }
 
-static void free_world(world_t *w) { lv_display_delete(w->display); }
+static void free_world(world_t *w) {
+	// A world may be freed with a session still live (a parked receiver, or one
+	// running in the background); end it before the next world counts stops.
+	btreceiversession_end();
+	lv_display_delete(w->display);
+}
 
 static bool is_parked(void) { return parked; }
 
@@ -274,13 +285,13 @@ static void test_ending_the_session(void) {
 	assert(mode_stops == 1 && profile_off == 1);
 	free_world(&w);
 
-	// On the page: only the mode stops. Leaving the page is what gives the sink
-	// back, and it is about to.
+	// On the page: the mode and the sink both stop. Ending the session is the
+	// explicit way out, whether the user is on the page or not.
 	w = make_world();
 	btreceiversession_end();
-	assert(mode_stops == 1 && profile_off == 0 && !is_parked());
+	assert(mode_stops == 1 && profile_off == 1 && !is_parked());
 	go(w.other);
-	assert(profile_off == 1);
+	assert(mode_stops == 1 && profile_off == 1);
 	free_world(&w);
 
 	// A request waiting for a page is dropped with the session.
@@ -327,6 +338,68 @@ static void test_init_is_idempotent(void) {
 	free_world(&w);
 }
 
+// With background reception on, no route out of the page ends the session:
+// not a forward step, not a swipe home that removes the way back, not another
+// page on top. It ends only when the user stops it.
+static void test_background_survives_every_way_out(void) {
+	world_t w = make_world();
+	btreceiversession_background_set(true);
+
+	go(w.other);
+	assert(btreceiversession_in_use() && !is_parked());
+	assert(mode_stops == 0 && profile_off == 0);
+
+	home(w.menu); // the chevron no longer leads back to the receiver's page
+	assert(btreceiversession_in_use() && !is_parked());
+	assert(mode_stops == 0 && profile_off == 0);
+
+	go(w.page); // coming back finds it where it was
+	assert(btreceiversession_in_use() && mode_stops == 0);
+	go(w.peq);
+	assert(btreceiversession_in_use() && !is_parked() && mode_stops == 0);
+
+	btreceiversession_end();
+	assert(!btreceiversession_in_use() && mode_stops == 1 && profile_off == 1);
+	go(w.other);
+	home(w.menu);
+	assert(mode_stops == 1 && profile_off == 1);
+	free_world(&w);
+}
+
+// The page's poll ends a session whose radio has gone away: a receiver cannot
+// play through a Bluetooth stack that is off.
+static void test_a_radio_going_away_ends_the_background_session(void) {
+	world_t w = make_world();
+	btreceiversession_background_set(true);
+	go(w.other);
+	assert(btreceiversession_in_use());
+
+	radio_on = false;
+	btreceiversession_tick();
+	assert(!btreceiversession_in_use() && mode_stops == 1 && profile_off == 1);
+	btreceiversession_tick();
+	assert(mode_stops == 1 && profile_off == 1);
+	free_world(&w);
+}
+
+// A hold is for the page-only mode. In background mode it is ignored, and
+// switching the setting off again restores the old rules on the next leave.
+static void test_background_ignores_a_hold_and_can_be_switched_off(void) {
+	world_t w = make_world();
+	btreceiversession_background_set(true);
+
+	btreceiversession_hold_for(w.other);
+	go(w.other);
+	assert(btreceiversession_in_use() && !is_parked() && hold_target == NULL);
+	assert(mode_stops == 0 && profile_off == 0);
+
+	go(w.page);
+	btreceiversession_background_set(false);
+	go(w.peq);
+	assert(!btreceiversession_in_use() && mode_stops == 1 && profile_off == 1);
+	free_world(&w);
+}
+
 int main(void) {
 	lv_init();
 
@@ -339,7 +412,10 @@ int main(void) {
 	test_ending_the_session();
 	test_nothing_happens_outside_the_session();
 	test_init_is_idempotent();
+	test_background_survives_every_way_out();
+	test_a_radio_going_away_ends_the_background_session();
+	test_background_ignores_a_hold_and_can_be_switched_off();
 
-	puts("btreceiversession: the receiver parks behind the equaliser, comes back, and ends when the way back is gone");
+	puts("btreceiversession: the receiver can park behind the equaliser or keep playing in the background until stopped");
 	return 0;
 }

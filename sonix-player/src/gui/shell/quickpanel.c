@@ -5,6 +5,7 @@
 
 #include "src/gui/wireless/airplay.h"
 #include "src/gui/bluetooth/btreceiversession.h"
+#include "src/gui/bluetooth/btreceiverpage.h"
 #include "src/gui/bluetooth/btsettings.h"
 #include "src/gui/nowplaying/coverflow.h"
 #include "src/gui/shell/confirm.h"
@@ -492,8 +493,12 @@ static void receiver_card_text(const btreceiver_state_t *st, bool have_track, co
 // play, next and previous to the sender over AVRCP, and the buttons here would
 // have to do the same to mean anything.
 static void refresh_receiver_card(const btreceiver_state_t *st) {
-	lv_obj_set_clickable(np_title, false);
-	lv_obj_set_clickable(np_artist, false);
+	// Unlike the DAC's, the receiver's card is a door back to its page: with
+	// background reception the page may be far away, and this is where the user
+	// can reach it (or hold the card to stop). The callbacks themselves check
+	// the mode, so leaving them attached for a local track does nothing.
+	lv_obj_set_clickable(np_title, true);
+	lv_obj_set_clickable(np_artist, true);
 	lv_obj_set_hidden(np_transport, true);
 	lv_obj_set_hidden(np_title, false);
 	lv_obj_set_hidden(np_artist, false);
@@ -1618,6 +1623,40 @@ static void np_open_player_cb(lv_event_t *e) {
 	}
 }
 
+// A receiver playing in the background is still this player's business. Tap
+// its card to go back to the page that owns it; hold the card to stop it. Both
+// handlers are attached to the two card lines for every mode: the check here
+// is what keeps a local track's card from acquiring a second meaning.
+static void receiver_stop_confirmed(void *user) {
+	(void)user;
+	btreceiversession_end();
+}
+
+static void receiver_card_click_cb(lv_event_t *e) {
+	(void)e;
+	if (long_press_consumed) {
+		long_press_consumed = false;
+		return;
+	}
+	if (press_dragged || !btreceiver_is_active()) {
+		return;
+	}
+	quickpanel_close();
+	if (lv_screen_active() != btreceiverpage_screen) {
+		switch_screen(btreceiverpage_screen);
+	}
+}
+
+static void receiver_card_hold_cb(lv_event_t *e) {
+	(void)e;
+	if (press_dragged || !btreceiver_is_active()) {
+		return;
+	}
+	long_press_consumed = true;
+	quickpanel_close();
+	confirm_show("btreceiver_stop_confirm", "btreceiver_stop_confirm_note", "stop", receiver_stop_confirmed, NULL);
+}
+
 static void repeat_cb(lv_event_t *e) {
 	(void)e;
 	playlist_cycle_mode();
@@ -2513,6 +2552,8 @@ static void make_np_open_line(lv_obj_t *label) {
 	lv_obj_set_event_bubble(label, true);
 	lv_obj_add_event_cb(label, circle_guard_cb, LV_EVENT_CLICKED, NULL);
 	lv_obj_add_event_cb(label, np_open_player_cb, LV_EVENT_CLICKED, NULL);
+	lv_obj_add_event_cb(label, receiver_card_click_cb, LV_EVENT_CLICKED, NULL);
+	lv_obj_add_event_cb(label, receiver_card_hold_cb, LV_EVENT_LONG_PRESSED, NULL);
 }
 
 // One round quick control: a circle in the pressed-surface colour with the
@@ -2706,24 +2747,25 @@ static void lineout_clicked_cb(lv_event_t *e) {
 //
 // The equaliser's pages -- EQ, MSEB and PEQ -- are the reason the sheet is
 // allowed here at all: the receiver's audio goes through them (btreceiver.c),
-// so they are where the sound it is playing is set. Opening one takes the user
-// off the receiver's page, which would end the mode in the middle of the song,
-// so the receiver is held for it instead and waits behind it
-// (btreceiversession.h). Back out of the equaliser and it is where it was.
+// so they are where the sound it is playing is set. With the page's switch off,
+// opening one of them would end the mode in the middle of the song, so the
+// receiver is held for it and waits behind it (btreceiversession.h). Back out
+// of the equaliser and it is where it was. With the switch on, every page is
+// one the receiver can wait behind.
 //
-// Every other page a hold can open is somewhere the receiver cannot follow --
-// the radio settings would pull out what it plays over, a file server would
-// claim the screen -- so those ask the question the page's own back button
-// asks, and go on once the answer is yes. With nothing playing there is
-// nothing to ask: a page waiting for a phone to connect is simply left.
+// When reception is tied to the page, every other page asks the question the
+// page's own back button asks and goes on once the answer is yes. With nothing
+// playing there is nothing to ask: a page waiting for a phone to connect is
+// simply left. A background session just carries on.
 //
-// And the two switches that would take the radio away from under the stream --
+// The two switches that would take the radio away from under the stream --
 // Bluetooth, and airplane mode -- are not offered at all while it lasts; they
-// say why. Leaving by the page is the way to switch the radio off.
+// say why. Hold the receiver's card to stop it before switching them.
 // ---------------------------------------------------------------------------
 
-// The user is in the receiver: it is playing, or its page is open waiting for a
-// sender, or it is parked behind one of the equaliser's pages.
+// The user is in the receiver: it is playing, its page is open waiting for a
+// sender, it is parked behind one of the equaliser's pages, or it is running in
+// the background.
 static bool receiver_session(void) { return btreceiver_is_active() || btreceiversession_in_use(); }
 
 // The pages the receiver can wait behind: the ones that set what its audio goes
@@ -2765,11 +2807,16 @@ static void receiver_leave_confirmed(void *unused) {
 	lv_async_call(after_receiver_run, NULL);
 }
 
-// Leaves the receiver on the way to somewhere it cannot follow, then runs
-// `then`. While it is playing that is a question first, and `then` waits for
-// the yes -- and is dropped on a no. With nothing playing the session is ended
-// quietly and `then` runs at once.
+// Leaves the receiver on the way to somewhere it would otherwise have to stop,
+// then runs `then`. A background session is not going to stop, so nothing is
+// asked. Otherwise, while it is playing that is a question first, and `then`
+// waits for the yes -- and is dropped on a no. With nothing playing the session
+// is ended quietly and `then` runs at once.
 static void leave_receiver_then(after_receiver_t then, void *user) {
+	if (btreceiversession_background()) {
+		then(user);
+		return;
+	}
 	if (!btreceiver_is_active()) {
 		btreceiversession_end();
 		then(user);
@@ -2787,7 +2834,7 @@ static bool radios_held_by_receiver(void) {
 	if (!receiver_session()) {
 		return false;
 	}
-	gui_notify_popup("btreceiver_radios_held");
+	gui_notify_popup(btreceiversession_background() ? "btreceiver_stop_from_card" : "btreceiver_radios_held");
 	return true;
 }
 
@@ -3361,8 +3408,15 @@ static void open_page(lv_obj_t *screen) {
 	if (!screen) {
 		return;
 	}
-	// Every hold on a button that opens a page comes through here, so this is
-	// the one place the receiver has to be dealt with.
+	// The receiver's own page is always a way back to it, never a page to
+	// leave the receiver for -- including from the card's tap handler. It is
+	// the one page the session does not have to be ended to reach.
+	if (screen == btreceiverpage_screen) {
+		open_page_now(screen);
+		return;
+	}
+	// Every other hold on a button that opens a page comes through here, so
+	// this is the one place the receiver has to be dealt with.
 	if (screen != lv_screen_active() && receiver_session()) {
 		if (page_serves_receiver(screen)) {
 			btreceiversession_hold_for(screen);

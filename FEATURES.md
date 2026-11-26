@@ -236,17 +236,23 @@ a self-signed certificate), and HLS.
   codecs because it is the one that ran dry in the logs
   (`receiver_aptx_capture_ms`, `receiver_aptx_output_ms` in `[bluetooth]`; 0
   turns each off). The graphic EQ, MSEB and PEQ process the incoming audio.
+  **It keeps playing when you leave the page**: the **Keep playing off this
+  page** switch is on by default, so a swipe home, a notification or a jump to
+  another section leaves the A2DP sink and the stream alive, and a phone can
+  connect while you are elsewhere. The receiver LED and the Bluetooth status
+  glyph stay on for as long as it lasts. Pull down the control centre to see
+  the sender's track: tap the card to go back to the receiver page, hold it to
+  stop, and stop it there before switching Bluetooth or airplane mode off.
+  Turn the switch off (or set `receiver_background = 0` in `[bluetooth]`) for
+  the page-only behaviour: leaving asks first and stops the audio, except that
+  a long press on **EQ**, **MSEB** or **PEQ** in the control centre parks the
+  stream behind that page until you back out or lose the way back. Cover Flow
+  stays shut either way.
   **The control centre works over the receiver**: pull it down from the status
   bar (or up from the bottom edge, if Appearance has the stock gestures on) as
   anywhere else for volume, brightness, EQ, MSEB and PEQ on/off, and the other
   toggles. Its card shows the phone's track and the codec in place of the local
-  transport; the side keys still go to the phone. A long press on **EQ**,
-  **MSEB** or **PEQ** opens its page *without leaving the receiver*: it keeps
-  playing behind it, and backing out lands on the receiver page again (a swipe
-  home or a jump to another section ends it, as leaving the receiver always
-  has). Bluetooth and airplane mode are not offered while it lasts, and any
-  other long press asks before it leaves, since that would silence the phone.
-  Cover Flow stays shut.
+  transport; the side keys still go to the phone.
 - **AirPlay** - the player appears as an AirPlay target.
 - **DLNA** - the player appears as a renderer, and casts the current track the
   other way: **Wireless → DLNA → Cast to a DLNA renderer** finds the televisions
