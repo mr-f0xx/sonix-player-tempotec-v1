@@ -399,6 +399,23 @@ $(BUILD)/test_usbdac_eq: test_usbdac_eq.c $(ROOT)/src/system/audio/usbdac.c \
 	$(CC) $(CPPFLAGS) -Istubs $(CFLAGS) -o $@ test_usbdac_eq.c \
 		$(ROOT)/src/system/audio/eq.c $(ROOT)/src/system/core/config.c $(ROOT)/src/system/addons/addons.c $(LDFLAGS) $(LDLIBS)
 
+# The opt-in USB DAC low-latency profile: off by default, persistent across a
+# simulated restart, and compatible with the existing manual buffer override.
+.PHONY: usbdac-latency usbdac-latency-keys
+usbdac-latency: $(BUILD)/test_usbdac_latency usbdac-latency-keys
+	$(BUILD)/test_usbdac_latency
+
+usbdac-latency-keys:
+	python3 check_usbdac_language_keys.py
+
+$(BUILD)/test_usbdac_latency: test_usbdac_latency.c $(ROOT)/src/system/audio/usbdac.c \
+                              $(ROOT)/src/system/audio/usbdac.h \
+                              $(ROOT)/src/system/audio/eq.c $(ROOT)/src/system/audio/eq.h \
+                              $(ROOT)/src/system/core/config.c $(ROOT)/src/system/core/config.h
+	@mkdir -p $(BUILD)
+	$(CC) $(CPPFLAGS) -Istubs $(CFLAGS) -o $@ test_usbdac_latency.c \
+		$(ROOT)/src/system/audio/eq.c $(ROOT)/src/system/core/config.c $(ROOT)/src/system/addons/addons.c $(LDFLAGS) $(LDLIBS)
+
 # The Wi-Fi worker's hidden-network join: the real wifi.c against a fake
 # wpa_cli on PATH (see test_wifi.c). Plain C, no LVGL and no radio.
 WIFI_SRC = test_wifi.c $(ROOT)/src/system/net/wifi.c

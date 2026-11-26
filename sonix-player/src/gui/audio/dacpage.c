@@ -14,6 +14,7 @@
 lv_obj_t *dacpage_screen;
 
 static lv_obj_t *mode_switch;
+static lv_obj_t *low_latency_switch;
 static lv_obj_t *big_icon;
 static lv_obj_t *format_label;
 static lv_obj_t *status_label;
@@ -95,7 +96,7 @@ static void refresh(void) {
 		snprintf(text, sizeof(text), "%.1f kHz", st.sample_rate / 1000.0);
 	}
 	lv_label_set_text(format_label, text);
-	lv_label_set_text(status_label, tr("dac_playing"));
+	lv_label_set_text(status_label, tr(st.low_latency_fallback ? "dac_low_latency_fallback" : "dac_playing"));
 }
 
 static void poll_cb(lv_timer_t *timer) {
@@ -141,6 +142,27 @@ static void mode_cb(lv_event_t *e) {
 	// toggle in the settings pages: the target of a VALUE_CHANGED can be the
 	// row rather than the switch depending on how the row was built.
 	apply_mode_from_switch();
+}
+
+static void apply_low_latency_from_switch(void) {
+	usbdac_set_low_latency(lv_obj_has_state(low_latency_switch, LV_STATE_CHECKED));
+	last_serial = (unsigned)-1;
+	refresh();
+}
+
+static void low_latency_row_cb(lv_event_t *e) {
+	(void)e;
+	if (lv_obj_has_state(low_latency_switch, LV_STATE_CHECKED)) {
+		lv_obj_remove_state(low_latency_switch, LV_STATE_CHECKED);
+	} else {
+		lv_obj_add_state(low_latency_switch, LV_STATE_CHECKED);
+	}
+	apply_low_latency_from_switch();
+}
+
+static void low_latency_cb(lv_event_t *e) {
+	(void)e;
+	apply_low_latency_from_switch();
 }
 
 static bool leaving;
@@ -237,6 +259,17 @@ void dacpage_init(gui_config_t *cfg) {
 	lv_obj_t *mode_row = settingsrow_toggle(container, "dac_mode", &mode_switch, mode_cb);
 	lv_obj_set_clickable(mode_row, true);
 	lv_obj_add_event_cb(mode_row, mode_row_cb, LV_EVENT_CLICKED, NULL);
+
+	// Smaller ALSA buffering is opt-in. It is saved across boots and can be
+	// changed while the host is streaming; the worker reopens its output PCM
+	// on the next input block, using a standard-buffer fallback if needed.
+	low_latency_switch = NULL;
+	lv_obj_t *latency_row = settingsrow_toggle(container, "dac_low_latency", &low_latency_switch, low_latency_cb);
+	if (usbdac_low_latency_enabled()) {
+		lv_obj_add_state(low_latency_switch, LV_STATE_CHECKED);
+	}
+	lv_obj_set_clickable(latency_row, true);
+	lv_obj_add_event_cb(latency_row, low_latency_row_cb, LV_EVENT_CLICKED, NULL);
 
 	// Straight into the flex flow, with no alignment of its own: the container
 	// settingsrow_page() builds already centres its children on the cross axis,
