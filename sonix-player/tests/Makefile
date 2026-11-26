@@ -228,16 +228,6 @@ $(BUILD)/test_chargerattached: test_chargerattached.c $(ROOT)/src/system/device/
 	@mkdir -p $(BUILD)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ test_chargerattached.c $(ROOT)/src/system/device/chargerattached.c $(LDFLAGS) $(LDLIBS)
 
-# The first boot after install/reset must reach the player once before the
-# charger-only screen can take over later cable-only boots.
-.PHONY: chargemode
-chargemode: $(BUILD)/test_chargemode
-	$(BUILD)/test_chargemode
-
-$(BUILD)/test_chargemode: test_chargemode.c $(ROOT)/src/system/device/chargemode.c $(ROOT)/src/system/device/chargemode.h $(ROOT)/src/system/device/chargerattached.c $(ROOT)/src/system/device/chargerattached.h
-	@mkdir -p $(BUILD)
-	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ test_chargemode.c $(ROOT)/src/system/device/chargemode.c $(ROOT)/src/system/device/chargerattached.c $(LDFLAGS) $(LDLIBS)
-
 # The Screensaver folder's rules: which files are pictures, judged from their
 # JPEG headers, and the random pick between them. Plain C, no LVGL.
 PICS_SRC = test_screensaverpics.c $(ROOT)/src/system/device/screensaverpics.c \

@@ -24,15 +24,15 @@
 //   * power_shutdown() -- the menu's Power off, the automatic shutdown, the
 //     battery guard at one percent -- takes it off again.
 //
-// A boot with a cable in and no running marker is a candidate charger boot,
-// but only after the player has initialized this install once. A separate
-// initialized marker makes the first boot after installation or factory reset
-// go directly to the player: with no history, the player cannot tell a charger
-// insertion from someone trying to start the newly flashed device. Once it has
-// run, a clean power-off removes only the running marker; reboots, crashes and
-// firmware updates keep it, and so continue into the player. A power cut also
-// keeps it, which is the price of not putting a battery screen over every
-// reboot.
+// A boot with a cable in and no marker is therefore a player that was switched
+// off and then put on a charger. Everything else keeps the marker and comes up
+// as it always did: a reboot from the menu, a crash and a firmware update all
+// leave the device running the player, where the user left it. A board whose
+// power was cut -- the cell pulled -- keeps the marker too and boots the player;
+// that is the price of not putting a battery screen over every reboot. The one
+// boot that loses the marker without a clean shutdown is the first one after a
+// factory reset, whose recovery script wipes /usr/data; it shows the battery
+// screen if a cable is in, and a hold on the power key is the way past it.
 //
 // [power] charge_screen = 0 in device_config.ini turns the whole thing off.
 //
