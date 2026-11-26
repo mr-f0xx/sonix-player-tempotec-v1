@@ -11,13 +11,14 @@
 
 // Beside device_config.ini, in /usr/data: the only partition that is writable
 // and always there, and the one the settings already prove survives a power
-// cut. A dot file, so it does not turn up in a listing of what the user keeps.
+// cut. Dot files, so they do not turn up in a listing of what the user keeps.
 #define PLAYER_RUNNING_MARKER ".sonix_player_running"
+#define PLAYER_INITIALIZED_MARKER ".sonix_player_initialized"
 
-// Where the marker goes, from the settings file's own path -- so a build that
-// moves the settings (SONIX_CONFIG, or a test) moves this with them. False when
-// there is no settings path to hang it off: the host build without one.
-static bool marker_path(char *out, size_t out_size) {
+// Where a marker goes, from the settings file's own path -- so a build that
+// moves the settings (SONIX_CONFIG, or a test) moves these with them. False
+// when there is no settings path to hang them off: the host build without one.
+static bool marker_path(const char *name, char *out, size_t out_size) {
 	const char *settings = config_path();
 	if (!settings || !settings[0]) {
 		return false;
@@ -25,7 +26,7 @@ static bool marker_path(char *out, size_t out_size) {
 
 	const char *slash = strrchr(settings, '/');
 	size_t dir_len = slash ? (size_t)(slash - settings) + 1 : 0;
-	size_t name_len = strlen(PLAYER_RUNNING_MARKER);
+	size_t name_len = strlen(name);
 	if (dir_len + name_len + 1 > out_size) {
 		return false;
 	}
@@ -33,8 +34,22 @@ static bool marker_path(char *out, size_t out_size) {
 	if (dir_len) {
 		memcpy(out, settings, dir_len);
 	}
-	memcpy(out + dir_len, PLAYER_RUNNING_MARKER, name_len + 1);
+	memcpy(out + dir_len, name, name_len + 1);
 	return true;
+}
+
+static bool write_marker(const char *name, const char *value) {
+	char path[600];
+	if (!marker_path(name, path, sizeof(path))) {
+		return false;
+	}
+
+	FILE *f = fopen(path, "w");
+	if (!f) {
+		return false;
+	}
+	fputs(value, f);
+	return fclose(f) == 0;
 }
 
 bool chargemode_wanted(void) {
@@ -57,11 +72,27 @@ bool chargemode_wanted(void) {
 		return false;
 	}
 
+	// A clean install or factory reset has no history to distinguish "booted
+	// because a charger was connected" from "the user is trying to start the
+	// newly installed player while it is connected". Do not intercept that
+	// first boot with the charger-only screen: make the player run once and
+	// establish the persistent sentinel below. This also keeps an ambiguous
+	// battery-status report from stranding a newly flashed unit on that screen.
+	char initialized[600];
+	if (!marker_path(PLAYER_INITIALIZED_MARKER, initialized, sizeof(initialized))) {
+		printf("chargemode: no settings path to hang the first-boot marker off -- the player starts as usual\n");
+		return false;
+	}
+	if (access(initialized, F_OK) != 0) {
+		printf("chargemode: first player start after install/reset -- skipping the charger screen\n");
+		return false;
+	}
+
 	// The marker first: it is one access(), it is set on every boot the player
 	// itself was running, and it is the common case by far -- an ordinary boot
 	// pays nothing here and never reaches the sysfs probes below.
 	char path[600];
-	if (!marker_path(path, sizeof(path))) {
+	if (!marker_path(PLAYER_RUNNING_MARKER, path, sizeof(path))) {
 		printf("chargemode: no settings path to hang the marker off -- the player starts as usual\n");
 		return false;
 	}
@@ -106,22 +137,25 @@ void chargemode_player_started(void) {
 #ifdef HOST_BUILD
 	return; // no marker on a PC: wanted() answers from the environment
 #else
+	// Written only after the player has actually passed the charger-screen
+	// decision and is continuing its normal startup. It survives a clean power
+	// off and OTA updates; a factory reset clears it, so the next first boot is
+	// safe too. Avoid rewriting it on every boot.
+	char initialized[600];
+	if (!marker_path(PLAYER_INITIALIZED_MARKER, initialized, sizeof(initialized)) ||
+		(access(initialized, F_OK) != 0 && !write_marker(PLAYER_INITIALIZED_MARKER, "initialized\n"))) {
+		fprintf(stderr, "chargemode: cannot write the first-boot marker; the charger screen will stay disabled until this succeeds\n");
+	}
+
 	char path[600];
-	if (!marker_path(path, sizeof(path))) {
+	if (!marker_path(PLAYER_RUNNING_MARKER, path, sizeof(path))) {
 		return;
 	}
 
-	FILE *f = fopen(path, "w");
-	if (!f) {
+	if (!write_marker(PLAYER_RUNNING_MARKER, "running\n")) {
 		// Not fatal -- the player runs either way -- but the next boot with a
 		// cable in will come up on the charging screen, so say so.
-		fprintf(stderr, "chargemode: cannot write %s; the next charger boot will show the battery screen\n",
-				path);
-		return;
-	}
-	fputs("running\n", f);
-	if (fclose(f) != 0) {
-		fprintf(stderr, "chargemode: %s did not close cleanly\n", path);
+		fprintf(stderr, "chargemode: cannot write %s; the next charger boot may show the battery screen\n", path);
 	}
 #endif
 }
@@ -131,7 +165,7 @@ void chargemode_player_stopping(void) {
 	return;
 #else
 	char path[600];
-	if (!marker_path(path, sizeof(path))) {
+	if (!marker_path(PLAYER_RUNNING_MARKER, path, sizeof(path))) {
 		return;
 	}
 	if (unlink(path) == 0) {

@@ -3514,7 +3514,7 @@ wardrobe's prices, the fortune, the tap-along and the shelf behind the ball, and
 dizzy rule -- is as it was. The other More tiles' pictures, which is the rest of
 `icons.c`, are untouched, and so is `petlisten.c`.
 
-## The charger, with the player off## The charger, with the player off
+## The charger, with the player off
 
 The stock player comes up on a battery screen when the device was switched off
 and a cable is plugged in: the charger powers the board, and the thing the user
@@ -3531,35 +3531,38 @@ reason either. What *can* be known is what the device was doing before it
 started, and that is the question actually being asked: a boot with a cable in
 is a charger boot only if the player was off when the cable went in.
 
-So the player writes a marker beside the settings, on `/usr/data` -- the one
-partition that is writable and always there:
+So the player writes two markers beside the settings, on `/usr/data` -- the
+one partition that is writable and always there:
 
 ```
+/usr/data/.sonix_player_initialized
 /usr/data/.sonix_player_running
 ```
 
-It goes down as the player's own startup begins and `power_shutdown()` takes it
-off, first, before the databases are closed and the card is unmounted. A boot
-with a cable in and **no** marker is therefore a device that was off and has
-just been put on a charger:
+The initialized marker is written once the player has entered ordinary startup
+for the first time. Until then, the player always starts normally, even if a
+cable is connected: without history there is no reliable way to distinguish a
+first boot after installation from a charger-only boot. After initialization,
+the running marker goes down as the player's own startup begins and
+`power_shutdown()` takes it off, first, before the databases are closed and the
+card is unmounted. A boot with a cable in and **no running marker** is then a
+device that was off and has just been put on a charger:
 
-| how the device started | marker | what comes up |
-|---|---|---|
-| Power off (menu, auto-off, flat battery), then the cable goes in | absent | the charging screen |
-| Power off, then the power key | absent, no cable | the player |
-| Reboot from the menu, a crash, a firmware update | present | the player |
-| Power cut, cell pulled -- no clean shutdown | present | the player |
-| Factory reset (recovery wipes `/usr/data` on the next boot) | absent | the charging screen, if the cable is in |
+| how the device started | initialized | running | what comes up |
+|---|---|---|---|
+| First boot after install or factory reset | absent | absent | the player |
+| Power off (menu, auto-off, flat battery), then the cable goes in | present | absent | the charging screen |
+| Power off, then the power key | present | absent, no cable | the player |
+| Reboot from the menu, a crash, a firmware update | present | present | the player |
+| Power cut, cell pulled -- no clean shutdown | present | present | the player |
 
-The marker says "this device was running the player", not "the player was
-switched off purposefully", because that is the answer that keeps a battery
+The running marker says "this device was running the player", not "the player
+was switched off purposefully", because that is the answer that keeps a battery
 screen off a reboot: a crash leaves the marker, and the device comes back to the
 player the user was using. The cost is the fourth row -- a player whose power
-was cut with the cable in boots the player rather than the battery screen -- and
-the fifth, which is the recovery script's wipe of `/usr/data` and the one thing
-here that no code in the player can observe. Both are rare, and both are
-answered by holding power for a moment, which is what the screen would have
-asked for anyway.
+was cut with the cable in boots the player rather than the battery screen. A
+factory reset clears both markers, so the first boot goes to the player once;
+subsequent clean power-offs regain the charger-screen behavior.
 
 The cable half of that decision is deliberately generous. `charger_attached()`
 -- shared by the boot and by the screen watching for an unplug -- does not ask

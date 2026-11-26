@@ -594,8 +594,10 @@ a self-signed certificate), and HLS.
   all. The screen is told apart from an ordinary boot by a marker the player
   keeps on the writable partition while it is running -- and drops as it
   switches itself off -- so a reboot, a crash or a firmware update still starts
-  the player as usual. `[power] charge_screen = 0` in `device_config.ini` turns
-  the screen off entirely.
+  the player as usual. The first boot after install or factory reset always
+  starts the player once, because there is no previous state to identify a
+  charger-only boot safely. `[power] charge_screen = 0` in `device_config.ini`
+  turns the screen off entirely.
 - **Power → Hold power for the menu** - what a held power button does. On, the
   default, the hold brings up the power menu and switching off or rebooting
   takes a slide to confirm. Off, the same hold switches the player off where it
