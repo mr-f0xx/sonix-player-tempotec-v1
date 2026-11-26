@@ -42,6 +42,7 @@
 // the style keeps the pointer, not a copy -- so it is a single static one,
 // which is fine because every label wants the same timing.
 static lv_anim_t scroll_template;
+static lv_anim_t scroll_template_immediate;
 static bool template_ready;
 
 static void build_template(void) {
@@ -57,6 +58,13 @@ static void build_template(void) {
 	// The label copies the repeat count from the template too; without this it
 	// would scroll exactly once and stop.
 	lv_anim_set_repeat_count(&scroll_template, LV_ANIM_REPEAT_INFINITE);
+
+	// Same timing shape but no initial/repeat delay: used when the user
+	// presses a row to read a long title immediately.
+	lv_anim_init(&scroll_template_immediate);
+	lv_anim_set_delay(&scroll_template_immediate, 0);
+	lv_anim_set_repeat_delay(&scroll_template_immediate, 0);
+	lv_anim_set_repeat_count(&scroll_template_immediate, LV_ANIM_REPEAT_INFINITE);
 	template_ready = true;
 }
 
@@ -104,8 +112,8 @@ static int32_t text_width(lv_obj_t *label, const char *text) {
 // ---------------------------------------------------------------------------
 
 #define FADE_EDGE_PX 24
-#define FADE_CACHE_MAX 16
-#define FADE_LABELS_MAX 128
+#define FADE_CACHE_MAX 32
+#define FADE_LABELS_MAX 256
 #define FADE_POLL_MS 80
 
 // One size, and the two masks for it: `both` while the text moves, `tail` while
@@ -529,6 +537,15 @@ void scrolltext_set_active(lv_obj_t *label, bool active) {
 		return;
 	}
 	entry->active = active;
+	build_template();
+	lv_obj_set_style_anim(label, active ? &scroll_template_immediate : &scroll_template, LV_PART_MAIN);
 	scroll_fit(label);
+	if (active && lv_label_get_long_mode(label) == LV_LABEL_LONG_SCROLL_CIRCULAR) {
+		// Force a clean restart so the immediate template takes effect now,
+		// even if the label was already in circular scroll mode.
+		lv_label_set_long_mode(label, LV_LABEL_LONG_CLIP);
+		lv_label_set_long_mode(label, LV_LABEL_LONG_SCROLL_CIRCULAR);
+	}
+	apply_duration(label, lv_label_get_text(label));
 	fade_pick(entry);
 }
