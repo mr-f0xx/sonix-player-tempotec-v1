@@ -33,10 +33,25 @@ permissions:
   contents: read
   pages: read
 
+# Publishing is main-only, and a release must not be able to skip it.
+#
+# The github-pages environment only admits the main branch (Settings →
+# Environments → github-pages → Deployment branches), so a tag push could never
+# publish: 1.7.7's run died with "Tag 1.7.7 is not allowed to deploy to
+# github-pages" *after* the release had already been cut, which left the site
+# announcing 1.7.6 until somebody pushed to main again. Three consequences:
+#
+#   1. A tag push no longer deploys. It still builds and uploads its bundle, so
+#      the tag gets the artifact; the site comes from main.
+#   2. A tag push also *asks for* a main deploy, because a release is exactly
+#      the moment the page must not keep pointing at the previous version.
+#   3. The refresh step never eats a newer snapshot. A main run that started
+#      before the release was published can no longer write the old tag over a
+#      newer committed one.
 concurrency:
   # Only publications share a deployment queue. A burst of PR/branch builds
   # must not cancel a pending main deployment (or another revision's artifact).
-  group: v1-emulator-${{ ((github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref_type == 'tag')) || (github.event_name == 'workflow_dispatch' && inputs.deploy_pages)) && 'pages' || github.run_id }}
+  group: v1-emulator-${{ ((github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'workflow_dispatch' && inputs.deploy_pages)) && 'pages' || github.run_id }}
   cancel-in-progress: false
 
 jobs:
@@ -44,6 +59,11 @@ jobs:
     name: Build WebAssembly firmware bundle (.sonix-web.zip)
     runs-on: ubuntu-24.04
     timeout-minutes: 45
+    permissions:
+      contents: read
+      pages: read
+      # A tag push asks for the main deploy that can actually publish (below).
+      actions: write
 
     outputs:
       short_sha: ${{ steps.source.outputs.short_sha }}
@@ -122,7 +142,7 @@ jobs:
         id: pack
         env:
           BUILD_REF: ${{ steps.source.outputs.ref_label }}
-          PUBLISH: ${{ (github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref_type == 'tag')) || (github.event_name == 'workflow_dispatch' && inputs.deploy_pages) }}
+          PUBLISH: ${{ (github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'workflow_dispatch' && inputs.deploy_pages) }}
           PAGES_BASE_URL: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}
         run: |
           set -euo pipefail
@@ -179,19 +199,92 @@ jobs:
       # Refresh the same-origin release snapshot used by the landing page.
       # This keeps the release strip working if api.github.com is rate-limited
       # or blocked in a visitor's browser; app.js still tries the live API.
+      #
+      # Never downgrade: a main run that started before a release was published
+      # would otherwise write the older tag over a newer committed snapshot and
+      # republish it. Only a strictly newer tag replaces the file, so this step
+      # is safe to re-run and safe to race.
       - name: Refresh latest release snapshot
+        env:
+          GH_TOKEN: ${{ github.token }}
+          # A tag-triggered run fires the instant the tag is pushed, which can
+          # be a moment before the release (or its assets) exists. Wait it out.
+          RELEASE_TAG: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
+        run: |
+          set -euo pipefail
+          if [ -n "$RELEASE_TAG" ]; then
+            for attempt in $(seq 1 12); do
+              published="$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${RELEASE_TAG}" \
+                --jq '[.assets[].name] | index("v1.upt") != null' 2>/dev/null || true)"
+              if [ "$published" = "true" ]; then
+                echo "Release $RELEASE_TAG is published with its v1.upt asset."
+                break
+              fi
+              echo "Waiting for release $RELEASE_TAG and its v1.upt asset (attempt $attempt/12)…"
+              sleep 10
+            done
+          fi
+          if gh api "repos/${GITHUB_REPOSITORY}/releases/latest" \
+              --jq '{tag_name, published_at, html_url, body, assets: [.assets[] | {name, browser_download_url}]}' \
+              > "$RUNNER_TEMP/release.json"; then
+            newest="$(node -p "require('$RUNNER_TEMP/release.json').tag_name")"
+            current="$(node -p "require('./assets/release.json').tag_name")"
+            # 1 = newer, 0 = same, -1 = older. Compare numerically so 1.7.10
+            # sorts above 1.7.9, which string comparison gets wrong.
+            relation="$(node -e '
+              const parse = (v) => String(v).replace(/^v/, "").split(".").map((n) => parseInt(n, 10) || 0);
+              const a = parse(process.argv[1]);
+              const b = parse(process.argv[2]);
+              for (let i = 0; i < Math.max(a.length, b.length); i += 1) {
+                if ((a[i] || 0) !== (b[i] || 0)) {
+                  process.stdout.write((a[i] || 0) > (b[i] || 0) ? "1" : "-1");
+                  process.exit(0);
+                }
+              }
+              process.stdout.write("0");
+            ' "$newest" "$current")"
+            case "$relation" in
+              1)
+                mv "$RUNNER_TEMP/release.json" assets/release.json
+                echo "Release snapshot: $current -> $newest"
+                ;;
+              0)
+                echo "Release snapshot already current at $newest."
+                ;;
+              *)
+                echo "Release snapshot kept at $current: GitHub reported $newest, which is older. Refusing to publish a downgrade."
+                ;;
+            esac
+          else
+            echo "Using committed release snapshot ($(node -p "require('./assets/release.json').tag_name"))."
+          fi
+
+      # The github-pages environment admits main only, so a tag can build but
+      # never publish. Rather than let that run fail at the deploy step and
+      # leave the page advertising the previous version (which is what happened
+      # to 1.7.7), ask for the deploy that can happen: a main build, which
+      # re-reads the release snapshot. The tag still keeps its own artifact.
+      - name: Request the main Pages deploy for this release
+        if: github.event_name == 'push' && github.ref_type == 'tag'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          if gh api "repos/${GITHUB_REPOSITORY}/releases/latest" \
-              --jq '{tag_name, published_at, html_url, body, assets: [.assets[] | {name, browser_download_url}]}' \
-              > "$RUNNER_TEMP/release.json"; then
-            mv "$RUNNER_TEMP/release.json" assets/release.json
-            echo "Release snapshot: $(node -p "require('./assets/release.json').tag_name")"
+          echo "Tag ${GITHUB_REF_NAME} cannot deploy to the github-pages environment (main only)."
+          if gh workflow run web-emulator-pages.yml \
+              --ref main \
+              -F deploy_pages=true; then
+            status="A main deploy was requested to publish release ${GITHUB_REF_NAME}."
           else
-            echo "Using committed release snapshot."
+            echo "::warning::Could not request the main deploy. Push to main, or run this workflow from main, to publish ${GITHUB_REF_NAME}."
+            status="Could not request a main deploy; push to main to publish ${GITHUB_REF_NAME}."
           fi
+          {
+            echo "### Release ${GITHUB_REF_NAME}"
+            echo "$status"
+            echo ""
+            echo "This run's \`.sonix-web.zip\` bundle was still built from \`${GITHUB_REF_NAME}\`."
+          } >> "$GITHUB_STEP_SUMMARY"
 
       # Keep the existing emulator tests against the original staged layout,
       # then publish it as a standalone subsite beside the landing page.
@@ -228,13 +321,13 @@ jobs:
 
       - name: Configure GitHub Pages
         if: >-
-          (github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/'))) ||
+          (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
           (github.event_name == 'workflow_dispatch' && inputs.deploy_pages != false)
         uses: actions/configure-pages@v5
 
       - name: Upload GitHub Pages artifact
         if: >-
-          (github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/'))) ||
+          (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
           (github.event_name == 'workflow_dispatch' && inputs.deploy_pages != false)
         uses: actions/upload-pages-artifact@v3
         with:
@@ -247,7 +340,7 @@ jobs:
       pages: write
       id-token: write
     if: >-
-      (github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/'))) ||
+      (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
       (github.event_name == 'workflow_dispatch' && inputs.deploy_pages != false)
     runs-on: ubuntu-24.04
     environment:
