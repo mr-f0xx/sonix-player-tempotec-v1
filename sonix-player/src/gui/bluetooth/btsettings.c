@@ -8,6 +8,7 @@
 #include "lvgl/lvgl.h"
 
 #include "src/gui/bluetooth/btaudio.h"
+#include "src/gui/bluetooth/btreceiversession.h"
 #include "src/gui/bluetooth/btreceiverpage.h"
 #include "src/gui/fonts/fonts.h"
 #include "src/gui/shell/gui.h"
@@ -623,6 +624,15 @@ static void switch_changed_cb(lv_event_t *e) {
 	if (on && !bluetooth_available()) {
 		lv_obj_remove_state(bt_switch, LV_STATE_CHECKED);
 		gui_notify_popup("bt_bluetooth_not_available");
+		return;
+	}
+	// A background receiver keeps the sink up even though its page is not on
+	// screen. Turning the radio off here would cut a stream the user cannot see
+	// from this page; stop it from the receiver's card first, as the control
+	// centre already requires.
+	if (!on && btreceiversession_in_use()) {
+		lv_obj_remove_state(bt_switch, LV_STATE_CHECKED);
+		gui_notify_popup("btreceiver_radios_held");
 		return;
 	}
 

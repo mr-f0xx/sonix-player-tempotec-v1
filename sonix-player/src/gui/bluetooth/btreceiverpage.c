@@ -14,6 +14,7 @@
 #include "src/gui/shell/theme.h"
 #include "src/system/bluetooth/bluetooth.h"
 #include "src/system/bluetooth/btreceiver.h"
+#include "src/system/core/config.h"
 #include "src/system/core/lang.h"
 
 lv_obj_t *btreceiverpage_screen;
@@ -25,6 +26,7 @@ static lv_obj_t *format_label;
 static lv_obj_t *device_label;
 static lv_obj_t *status_label;
 static lv_obj_t *title_label;
+static lv_obj_t *background_switch;
 static lv_timer_t *poll_timer;
 typedef struct {
 	unsigned receiver, devices, stream, track;
@@ -153,13 +155,21 @@ static void start_if_sender(void) {
 	btreceiver_start();
 }
 
+static void background_changed_cb(lv_event_t *e) {
+	(void)e;
+	bool on = lv_obj_has_state(background_switch, LV_STATE_CHECKED);
+	btreceiversession_background_set(on);
+	config_set_bool("bluetooth", "receiver_background", on);
+}
+
 static void poll_cb(lv_timer_t *timer) {
 	(void)timer;
-	// A receiver parked behind the equaliser (btreceiversession.h) is still the
-	// receiver: a phone that connects, or connects again after a drop, while the
-	// user is setting the PEQ has to be started exactly as it would be here, or
-	// it would sit linked to a sink nobody is reading. Only the drawing is for
-	// when the page is actually on screen.
+	btreceiversession_tick();
+	// A receiver left running in the background, or parked behind the equaliser
+	// (btreceiversession.h), is still the receiver: a phone that connects, or
+	// connects again after a drop, has to be started exactly as it would be
+	// here, or it would sit linked to a sink nobody is reading. Only the drawing
+	// is for when the page is actually on screen.
 	if (!btreceiversession_in_use()) {
 		return;
 	}
@@ -251,9 +261,11 @@ static void leave_async(void *user) {
 // Deferred by one turn of the event loop, as on the DAC page: this runs from
 // inside the confirmation's own handler, and navigating out from under a dialog
 // that is still closing leaves the screen change undone.
+// The page's unload is the one that decides what leaving means: with background
+// reception on, it keeps the session; with it off, it stops the mode and gives
+// the sink back. Stopping here as well would race the session's own decision.
 static void really_leave(void *user) {
 	(void)user;
-	btreceiver_stop();
 	have_snapshot = false;
 	refresh();
 	leaving = true;
@@ -261,9 +273,11 @@ static void really_leave(void *user) {
 }
 
 // The back chevron and the swipe both come through here. True means "handled,
-// stay put": leaving stops the audio, and that is worth one question.
+// stay put": with reception tied to the page, leaving stops the audio and that
+// is worth one question. With background reception on there is nothing to warn
+// about, so the chevron just leaves.
 static bool back_guard(void) {
-	if (leaving || !btreceiver_is_active()) {
+	if (leaving || btreceiversession_background() || !btreceiver_is_active()) {
 		return false;
 	}
 	confirm_show("btreceiver_leave_confirm", "btreceiver_leave_confirm_note", "leave", really_leave, NULL);
@@ -274,13 +288,13 @@ static bool back_guard(void) {
 
 static void loaded_cb(lv_event_t *e) {
 	(void)e;
-	// Arriving back from a page the receiver was parked behind puts it back
-	// where it was; there is nothing to start, and everything below is safe to
-	// repeat on a receiver that never stopped.
+	// Arriving back from a page the receiver was left behind puts it back where
+	// it was; there is nothing to start, and everything below is safe to repeat
+	// on a receiver that never stopped.
 	btreceiversession_page_loaded();
-	// The A2DP sink exists only while this page is open (bluetooth.h): a phone
-	// connects to it from here on, and bring-up starts straight into sink mode
-	// when entered while the radio was off.
+	// The A2DP sink is wanted for as long as the session lives, which now
+	// includes the pages after this one (bluetooth.h). Bring-up starts straight
+	// into sink mode when entered while the radio was off.
 	bluetooth_set_receiver_profile(true);
 	if (!bluetooth_get_enabled() && bluetooth_available()) {
 		bluetooth_set_enabled(true);
@@ -295,12 +309,9 @@ static void loaded_cb(lv_event_t *e) {
 
 static void unloaded_cb(lv_event_t *e) {
 	(void)e;
-	// Every other way out -- the power menu, a notification, a screen change
-	// this page did not ask for -- ends the mode too. The guard above catches
-	// the deliberate ones; this catches the rest, so the device is never left
-	// holding a stream nobody can see. The one exception is the control centre
-	// taking the user to the equaliser, and what it is and how it ends is in
-	// btreceiversession.h.
+	// What outliving this page means is decided in btreceiversession.h: with
+	// background reception it keeps playing, with a control-centre hold it waits
+	// behind one page, and otherwise it ends here.
 	btreceiversession_page_unloaded();
 }
 
@@ -380,6 +391,24 @@ void btreceiverpage_init(gui_config_t *cfg) {
 	lv_obj_set_style_margin_top(status_label, compact ? 2 : 10, 0);
 	lv_label_set_text(status_label, "");
 	status_normal_color = lv_obj_get_style_text_color(status_label, LV_PART_MAIN);
+
+	// The switch is here rather than in Bluetooth settings: it is a choice
+	// about this mode, made while looking at what it will keep doing. On by
+	// default -- leaving the page is not meant to cut the phone off.
+	background_switch = settingsrow_toggle(container, "btreceiver_background", NULL, background_changed_cb);
+
+	lv_obj_t *hint = lv_label_create(container);
+	lv_obj_set_width(hint, lv_pct(100));
+	lv_obj_set_style_text_font(hint, compact ? &font_ui_14 : &font_ui_18, 0);
+	lv_obj_add_style(hint, &theme_style_text_dim, 0);
+	lv_label_set_long_mode(hint, LV_LABEL_LONG_WRAP);
+	lv_label_set_text(hint, tr("btreceiver_background_hint"));
+
+	bool keep_playing = config_get_bool("bluetooth", "receiver_background", true);
+	if (keep_playing) {
+		lv_obj_add_state(background_switch, LV_STATE_CHECKED);
+	}
+	btreceiversession_background_set(keep_playing);
 
 	btreceiversession_init(btreceiverpage_screen);
 	lv_obj_add_event_cb(btreceiverpage_screen, loaded_cb, LV_EVENT_SCREEN_LOADED, NULL);
