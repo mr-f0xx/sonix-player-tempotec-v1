@@ -1119,7 +1119,7 @@ static void mp4_data_item(buf_t *ilst, const char type[4], uint32_t data_type, c
 	free(item.data);
 }
 
-static void mp4_freeform_item(buf_t *ilst, const char *name, const char *value) {
+static void mp4_freeform_item_full(buf_t *ilst, const char *mean, const char *name, const char *value) {
 	buf_t named = {0};
 	buf_be32(&named, 0);
 	buf_put(&named, name, strlen(name));
@@ -1128,6 +1128,13 @@ static void mp4_freeform_item(buf_t *ilst, const char *name, const char *value) 
 	buf_be32(&data, 0);		  // locale
 	buf_put(&data, value, strlen(value));
 	buf_t item = {0};
+	if (mean) {
+		buf_t mean_body = {0};
+		buf_be32(&mean_body, 0);
+		buf_put(&mean_body, mean, strlen(mean));
+		mp4_wrap(&item, "mean", &mean_body);
+		free(mean_body.data);
+	}
 	mp4_wrap(&item, "name", &named);
 	mp4_wrap(&item, "data", &data);
 	mp4_wrap(ilst, "----", &item);
@@ -1136,7 +1143,12 @@ static void mp4_freeform_item(buf_t *ilst, const char *name, const char *value) 
 	free(item.data);
 }
 
-static void append_m4a(buf_t *out, bool alac, int advisory, const char *freeform, const char *title) {
+static void mp4_freeform_item(buf_t *ilst, const char *name, const char *value) {
+	mp4_freeform_item_full(ilst, NULL, name, value);
+}
+
+static void append_m4a_ex(buf_t *out, bool alac, int advisory, const char *freeform, const char *itunnorm,
+						  const char *title) {
 	// AudioSampleEntry: 6 reserved, 2 data-reference, 8 version/revision,
 	// 2 channels, 2 sample size, 2 pre-defined, 2 reserved, 4 rate(16.16).
 	buf_t entry = {0};
@@ -1259,6 +1271,9 @@ static void append_m4a(buf_t *out, bool alac, int advisory, const char *freeform
 	if (freeform) {
 		mp4_freeform_item(&ilst, "ITUNESADVISORY", freeform);
 	}
+	if (itunnorm) {
+		mp4_freeform_item_full(&ilst, "com.apple.iTunes", "iTunNORM", itunnorm);
+	}
 
 	buf_t meta_body = {0};
 	buf_be32(&meta_body, 0); // QuickTime-style full box: four version bytes
@@ -1302,6 +1317,10 @@ static void append_m4a(buf_t *out, bool alac, int advisory, const char *freeform
 	free(ilst.data); free(meta_body.data); free(mhdlr_body.data); free(mhdlr.data);
 	free(ilst_box.data); free(meta.data); free(udta_body.data); free(udta.data);
 	free(moov_body.data); free(moov.data);
+}
+
+static void append_m4a(buf_t *out, bool alac, int advisory, const char *freeform, const char *title) {
+	append_m4a_ex(out, alac, advisory, freeform, NULL, title);
 }
 
 static void test_m4a_advisory(const char *dir) {
@@ -1356,6 +1375,151 @@ static void test_m4a_advisory(const char *dir) {
 	free(file.data);
 }
 
+static void append_id3v2_comm_ascii(buf_t *frames, uint8_t version, const char lang[3], const char *desc,
+									const char *text) {
+	buf_t body = {0};
+	buf_put(&body, lang, 3);
+	buf_put(&body, desc, strlen(desc) + 1);
+	buf_put(&body, text, strlen(text));
+	append_id3v2_text_frame(frames, version, "COMM", 0x00, body.data, body.len, false);
+	free(body.data);
+}
+
+static void append_id3v2_txxx_ascii(buf_t *frames, uint8_t version, const char *desc, const char *text) {
+	buf_t body = {0};
+	buf_put(&body, desc, strlen(desc) + 1);
+	buf_put(&body, text, strlen(text));
+	append_id3v2_text_frame(frames, version, "TXXX", 0x00, body.data, body.len, false);
+	free(body.data);
+}
+
+static void build_aiff_with_id3(buf_t *out, bool aifc, const char id3_chunk_id[4], const buf_t *id3_tag) {
+	buf_t body = {0};
+	buf_put(&body, aifc ? "AIFC" : "AIFF", 4);
+
+	// Minimal COMM chunk (18 bytes for AIFF: 2ch, 4 frames, 16-bit, 80-bit 44100 Hz).
+	static const uint8_t comm_payload[18] = {
+		0x00, 0x02, 0x00, 0x00, 0x00, 0x04, 0x00, 0x10,
+		0x40, 0x0E, 0xAC, 0x44, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+	};
+	buf_put(&body, "COMM", 4);
+	buf_be32(&body, sizeof(comm_payload));
+	buf_put(&body, comm_payload, sizeof(comm_payload));
+
+	if (id3_tag && id3_tag->len > 0) {
+		buf_put(&body, id3_chunk_id, 4);
+		buf_be32(&body, (uint32_t)id3_tag->len);
+		buf_put(&body, id3_tag->data, id3_tag->len);
+		if (id3_tag->len & 1) {
+			buf_u8(&body, 0);
+		}
+	}
+
+	buf_put(out, "FORM", 4);
+	buf_be32(out, (uint32_t)body.len);
+	buf_put(out, body.data, body.len);
+	free(body.data);
+}
+
+static void test_soundcheck_tags(const char *dir) {
+	char path[512];
+	song_metadata_t meta;
+	buf_t file = {0};
+
+	// Standard 10-word iTunNORM:
+	//   word 0 = 0x00000FA0 (4000), word 1 = 0x000007D0 (2000) -> max = 4000 -> -10*log10(4000/1000) = -6.0206 dB
+	//   word 6 = 0x00006000 (24576), word 7 = 0x00007333 (29491) -> max = 29491 -> 29491/32768 ~= 0.899994
+	const char *sc_minus6 =
+		" 00000FA0 000007D0 00002710 00001388 00024CA8 00024CA8 00006000 00007333 00024CA8 00024CA8";
+
+	// (a) M4A AAC with ----:com.apple.iTunes:iTunNORM
+	file.len = 0;
+	append_m4a_ex(&file, false, -1, NULL, sc_minus6, "AAC Sound Check");
+	snprintf(path, sizeof(path), "%s/sc_aac.m4a", dir);
+	write_fixture(path, file.data, file.len);
+	metadata_read(path, &meta);
+	assert(strcmp(meta.title, "AAC Sound Check") == 0);
+	assert(meta.has_soundcheck);
+	assert(fabsf(meta.soundcheck_gain_db - (-6.0206f)) < 0.02f);
+	assert(fabsf(meta.soundcheck_peak - (29491.0f / 32768.0f)) < 0.001f);
+
+	// (b) M4A ALAC with 1/2500 fallback (words 0 & 1 are zero, words 2 & 3 = 0x000004E2 = 1250 -> +3.0103 dB)
+	const char *sc_plus3_alt =
+		" 00000000 00000000 000004E2 000003E8 00000000 00000000 00004000 00004000 00000000 00000000";
+	file.len = 0;
+	append_m4a_ex(&file, true, -1, NULL, sc_plus3_alt, "ALAC Sound Check");
+	snprintf(path, sizeof(path), "%s/sc_alac.m4a", dir);
+	write_fixture(path, file.data, file.len);
+	metadata_read(path, &meta);
+	assert(strcmp(meta.title, "ALAC Sound Check") == 0);
+	assert(meta.has_soundcheck);
+	assert(fabsf(meta.soundcheck_gain_db - 3.0103f) < 0.02f);
+	assert(fabsf(meta.soundcheck_peak - 0.5f) < 0.001f);
+
+	// (c) AIFF with ID3v2 COMM("eng", "iTunNORM", ...) + iTunSMPB comment:
+	// Sound Check is parsed and neither iTun* hex comment leaks into book description.
+	buf_t frames = {0}, id3 = {0};
+	const char *title_aiff = "AIFF Sound Check";
+	append_id3v2_text_frame(&frames, 3, "TIT2", 0, title_aiff, strlen(title_aiff), false);
+	append_id3v2_comm_ascii(&frames, 3, "eng", "iTunNORM", sc_minus6);
+	append_id3v2_comm_ascii(&frames, 3, "eng", "iTunSMPB", " 00000000 00000210 00000870 00000000003B7980");
+	wrap_id3v2_tag(&id3, 3, 0, &frames);
+	file.len = 0;
+	build_aiff_with_id3(&file, false, "ID3 ", &id3);
+	snprintf(path, sizeof(path), "%s/sc.aiff", dir);
+	write_fixture(path, file.data, file.len);
+	free(frames.data);
+	free(id3.data);
+
+	char *desc = metadata_read_with_description(path, &meta);
+	assert(desc == NULL);
+	assert(strcmp(meta.title, "AIFF Sound Check") == 0);
+	assert(meta.has_soundcheck);
+	assert(fabsf(meta.soundcheck_gain_db - (-6.0206f)) < 0.02f);
+	assert(fabsf(meta.soundcheck_peak - (29491.0f / 32768.0f)) < 0.001f);
+
+	// (d) AIFF-C (`FORM....AIFC`, lowercase `"id3 "` chunk, TXXX `iTunNORM` + real summary COMM)
+	frames = (buf_t){0};
+	id3 = (buf_t){0};
+	const char *title_aifc = "AIFC Sound Check";
+	append_id3v2_text_frame(&frames, 4, "TIT2", 0, title_aifc, strlen(title_aifc), false);
+	append_id3v2_txxx_ascii(&frames, 4, "iTunNORM", sc_plus3_alt);
+	append_id3v2_comm_ascii(&frames, 4, "eng", "", "Actual liner notes.");
+	wrap_id3v2_tag(&id3, 4, 0, &frames);
+	file.len = 0;
+	build_aiff_with_id3(&file, true, "id3 ", &id3);
+	snprintf(path, sizeof(path), "%s/sc.aifc", dir);
+	write_fixture(path, file.data, file.len);
+	free(frames.data);
+	free(id3.data);
+
+	desc = metadata_read_with_description(path, &meta);
+	assert(desc != NULL && strcmp(desc, "Actual liner notes.") == 0);
+	free(desc);
+	assert(strcmp(meta.title, "AIFC Sound Check") == 0);
+	assert(meta.has_soundcheck);
+	assert(fabsf(meta.soundcheck_gain_db - 3.0103f) < 0.02f);
+
+	// (e) MP3 carrying a stray iTunNORM COMM/TXXX is NOT treated as Sound Check
+	// (issue #506 scopes Sound Check strictly to M4A AAC/ALAC and AIFF/AIFF-C).
+	frames = (buf_t){0};
+	file.len = 0;
+	append_id3v2_text_frame(&frames, 3, "TIT2", 0, "MP3 Track", 9, false);
+	append_id3v2_comm_ascii(&frames, 3, "eng", "iTunNORM", sc_minus6);
+	append_id3v2_txxx_ascii(&frames, 3, "iTunNORM", sc_minus6);
+	wrap_id3v2_tag(&file, 3, 0, &frames);
+	buf_put(&file, "\xff\xfb\x90\x00", 4);
+	snprintf(path, sizeof(path), "%s/sc_ignored.mp3", dir);
+	write_fixture(path, file.data, file.len);
+	free(frames.data);
+
+	metadata_read(path, &meta);
+	assert(strcmp(meta.title, "MP3 Track") == 0);
+	assert(!meta.has_soundcheck);
+
+	free(file.data);
+}
+
 // Exercise the actual writer with the player's real readers and decoder.
 static void test_tagwriter_roundtrip(const char *dir) {
     char path[512]; song_metadata_t meta; buf_t data={0}, frames={0};
@@ -1388,6 +1552,7 @@ int main(void) {
 	test_japanese_tag_text(dir);
 	test_replaygain_true_peak_tags(dir);
 	test_m4a_advisory(dir);
+	test_soundcheck_tags(dir);
 
 	char cmd[600];
 	snprintf(cmd, sizeof(cmd), "rm -rf '%s'", dir);
@@ -1395,6 +1560,6 @@ int main(void) {
 	(void)rc;
 
 	printf("PASS tags (FLAC+ID3, broken ID3v2.4/zlib/unsync/chained, format sniffing, CUE, Ogg streaming, V1 tagdate, "
-		   "Japanese/Latin-1/UTF-8/UTF-16/CP1251 tag text, M4A iTunes advisory)\n");
+		   "Japanese/Latin-1/UTF-8/UTF-16/CP1251 tag text, M4A iTunes advisory, M4A/AIFF Sound Check)\n");
 	return 0;
 }

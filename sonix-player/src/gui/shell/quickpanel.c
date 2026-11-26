@@ -1621,7 +1621,7 @@ static void np_open_player_cb(lv_event_t *e) {
 static void repeat_cb(lv_event_t *e) {
 	(void)e;
 	playlist_cycle_mode();
-	device_state_sync_crossfade();
+	device_state_refresh_normalization();
 	refresh_repeat_icon();
 }
 
@@ -3253,11 +3253,7 @@ static void replaygain_clicked_cb(lv_event_t *e) {
 		}
 		replaygain_set_mode((replaygain_mode_t)last);
 	}
-	device_state_t state;
-	device_state_get(&state);
-	replaygain_load(&state.metadata);
-	device_state_invalidate_crossfade();
-	device_state_sync_crossfade();
+	device_state_refresh_normalization();
 	toggled();
 }
 

@@ -25,6 +25,7 @@
 #include "src/system/device/system.h"
 
 #include <dirent.h>
+#include <math.h>
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -508,8 +509,11 @@ static void queue_persist(void) {
 	free(list);
 }
 
+static void apply_track_normalization(const char *filepath, const song_metadata_t *meta);
+
 void device_state_queue_changed(void) {
 	queue_persist();
+	apply_track_normalization(current_metadata_file, &current_metadata);
 	device_state_invalidate_crossfade();
 }
 
@@ -577,6 +581,156 @@ static void apply_track_speed(void) {
 	}
 }
 
+typedef struct {
+	double power_sum;
+	float max_peak;
+	int count;
+} sc_album_acc_t;
+
+#define SC_ALBUM_TRACK_CAP 256
+
+static bool sc_album_track_cb(const char *name, const char *path, const char *artist, void *user) {
+	(void)name;
+	(void)artist;
+	sc_album_acc_t *acc = user;
+	if (!path || !path[0]) {
+		return true;
+	}
+	song_metadata_t m;
+	metadata_read(path, &m);
+	if (m.has_soundcheck) {
+		acc->power_sum += pow(10.0, -(double)m.soundcheck_gain_db / 10.0);
+		if (m.soundcheck_peak > acc->max_peak) {
+			acc->max_peak = m.soundcheck_peak;
+		}
+		acc->count++;
+	}
+	return acc->count < SC_ALBUM_TRACK_CAP;
+}
+
+static struct {
+	bool valid;
+	char key[576];
+	unsigned queue_rev;
+	bool has_gain;
+	float gain_db;
+	float peak;
+} sc_album_cache;
+
+static bool resolve_soundcheck_album_gain(const char *filepath, const song_metadata_t *meta, float *gain_out,
+										  float *peak_out) {
+	if (!filepath || !filepath[0] || !meta || !meta->has_soundcheck) {
+		return false;
+	}
+
+	char album_val[300] = "";
+	if (!library_track_album_value(filepath, album_val, sizeof(album_val))) {
+		const char *qa = playlist_album();
+		if (qa && qa[0]) {
+			char shown[256];
+			library_album_title(qa, shown, sizeof(shown));
+			if (!meta->album[0] || strcasecmp(shown, meta->album) == 0) {
+				snprintf(album_val, sizeof(album_val), "%s", qa);
+			}
+		}
+	}
+
+	char cache_key[576] = "";
+	unsigned rev = 0;
+	bool use_library = album_val[0] != '\0';
+	if (use_library) {
+		snprintf(cache_key, sizeof(cache_key), "lib:%s", album_val);
+	} else {
+		const char *slash = strrchr(filepath, '/');
+		int dir_len = slash ? (int)(slash - filepath) : 0;
+		rev = playlist_revision();
+		snprintf(cache_key, sizeof(cache_key), "q:%.*s|%s", dir_len, filepath, meta->album);
+	}
+
+	if (sc_album_cache.valid && sc_album_cache.queue_rev == rev && strcmp(sc_album_cache.key, cache_key) == 0) {
+		if (sc_album_cache.has_gain) {
+			*gain_out = sc_album_cache.gain_db;
+			*peak_out = sc_album_cache.peak;
+		}
+		return sc_album_cache.has_gain;
+	}
+
+	sc_album_acc_t acc = {0.0, 0.0f, 0};
+	if (use_library) {
+		library_for_each_ordered(LIBRARY_LIST_TRACKS, LIBRARY_FILTER_ALBUM, album_val, LIBRARY_ORDER_DEFAULT,
+								 sc_album_track_cb, &acc);
+	}
+	if (acc.count == 0 && !playlist_is_library_backed()) {
+		const char *slash = strrchr(filepath, '/');
+		size_t dir_len = slash ? (size_t)(slash - filepath) : 0;
+		int qcount = playlist_count();
+		if (qcount > SC_ALBUM_TRACK_CAP) {
+			qcount = SC_ALBUM_TRACK_CAP;
+		}
+		for (int i = 0; i < qcount; i++) {
+			char qpath[512];
+			if (!playlist_path_at(i, qpath, sizeof(qpath))) {
+				continue;
+			}
+			if (!playlist_is_custom()) {
+				const char *qslash = strrchr(qpath, '/');
+				size_t qdir_len = qslash ? (size_t)(qslash - qpath) : 0;
+				if (qdir_len != dir_len || (dir_len > 0 && strncmp(qpath, filepath, dir_len) != 0)) {
+					continue;
+				}
+			}
+			song_metadata_t m;
+			metadata_read(qpath, &m);
+			if (meta->album[0] && m.album[0] && strcasecmp(meta->album, m.album) != 0) {
+				continue;
+			}
+			if (m.has_soundcheck) {
+				acc.power_sum += pow(10.0, -(double)m.soundcheck_gain_db / 10.0);
+				if (m.soundcheck_peak > acc.max_peak) {
+					acc.max_peak = m.soundcheck_peak;
+				}
+				acc.count++;
+			}
+		}
+	}
+
+	sc_album_cache.valid = true;
+	snprintf(sc_album_cache.key, sizeof(sc_album_cache.key), "%s", cache_key);
+	sc_album_cache.queue_rev = rev;
+	if (acc.count > 0 && acc.power_sum > 0.0) {
+		double avg_power = acc.power_sum / (double)acc.count;
+		sc_album_cache.has_gain = true;
+		sc_album_cache.gain_db = (float)(-10.0 * log10(avg_power));
+		sc_album_cache.peak = acc.max_peak;
+		*gain_out = sc_album_cache.gain_db;
+		*peak_out = sc_album_cache.peak;
+		return true;
+	}
+	sc_album_cache.has_gain = false;
+	sc_album_cache.gain_db = 0.0f;
+	sc_album_cache.peak = 0.0f;
+	return false;
+}
+
+static void apply_track_normalization(const char *filepath, const song_metadata_t *meta) {
+	if (soundcheck_mode() == SOUNDCHECK_ADAPTIVE && !playlist_is_shuffled() && playlist_is_album_queue() && meta &&
+		meta->has_soundcheck) {
+		float album_db = 0.0f;
+		float album_peak = 0.0f;
+		bool ok = resolve_soundcheck_album_gain(filepath, meta, &album_db, &album_peak);
+		soundcheck_set_album_gain(ok, album_db, album_peak);
+	} else {
+		soundcheck_set_album_gain(false, 0.0f, 0.0f);
+	}
+	replaygain_load(meta);
+}
+
+void device_state_refresh_normalization(void) {
+	apply_track_normalization(current_metadata_file, &current_metadata);
+	device_state_invalidate_crossfade();
+	device_state_sync_crossfade();
+}
+
 // Loads metadata for `filepath` and starts playback, without touching the
 // folder queue. Shared by fresh selections, queue advances, and replays.
 //
@@ -607,8 +761,8 @@ static void load_and_play_at(const char *filepath, double position) {
 	// from it. Every route by which the track can change passes through one of
 	// these calls.
 	audiobook_track_changed(current_metadata_file);
-	// The ReplayGain the tags asked for, worked out once per track.
-	replaygain_load(&current_metadata);
+	// The ReplayGain / Sound Check the tags asked for, worked out once per track.
+	apply_track_normalization(current_metadata_file, &current_metadata);
 	apply_track_speed();
 
 	// The file may not be there yet: with Qobuz and Tidal the queue holds the
@@ -631,7 +785,7 @@ static void load_and_play_at(const char *filepath, double position) {
 	if (strcmp(prepared_path, current_metadata_file) != 0) {
 		metadata_read(current_metadata_file, &current_metadata);
 		audiobook_track_changed(current_metadata_file);
-		replaygain_load(&current_metadata);
+		apply_track_normalization(current_metadata_file, &current_metadata);
 		apply_track_speed();
 	}
 
@@ -677,7 +831,7 @@ static void load_paused(const char *filepath) {
 	}
 	metadata_read(current_metadata_file, &current_metadata);
 	audiobook_track_changed(current_metadata_file);
-	replaygain_load(&current_metadata);
+	apply_track_normalization(current_metadata_file, &current_metadata);
 	apply_track_speed();
 
 	audio_play_paused(current_metadata_file, 0);
@@ -717,8 +871,8 @@ void device_state_restore_file(const char *filepath, double position) {
 	// from it. Every route by which the track can change passes through one of
 	// these calls.
 	audiobook_track_changed(current_metadata_file);
-	// The ReplayGain the tags asked for, worked out once per track.
-	replaygain_load(&current_metadata);
+	// The ReplayGain / Sound Check the tags asked for, worked out once per track.
+	apply_track_normalization(current_metadata_file, &current_metadata);
 	apply_track_speed();
 
 	audio_play_paused(current_metadata_file, position);
@@ -795,13 +949,13 @@ void device_state_restore_index(library_index_t *ix, int start_index, const char
 	current_metadata_file[sizeof(current_metadata_file) - 1] = '\0';
 	metadata_read(current_metadata_file, &current_metadata);
 	audiobook_track_changed(current_metadata_file);
-	replaygain_load(&current_metadata);
 	apply_track_speed();
 
 	// The queue just loaded is the saved one: do not write it straight back.
 	saved_queue_revision = playlist_revision();
 	queue_ever_saved = true;
 	restore_queue_album();
+	apply_track_normalization(current_metadata_file, &current_metadata);
 
 	audio_play_paused(current_metadata_file, position);
 	device_state_remember_restored(current_metadata_file, position);
@@ -850,14 +1004,13 @@ void device_state_restore_list(const char *const *list, int count, int start_ind
 	// from it. Every route by which the track can change passes through one of
 	// these calls.
 	audiobook_track_changed(current_metadata_file);
-	// The ReplayGain the tags asked for, worked out once per track.
-	replaygain_load(&current_metadata);
 	apply_track_speed();
 
 	// The queue just loaded is the saved one: do not write it straight back.
 	saved_queue_revision = playlist_revision();
 	queue_ever_saved = true;
 	restore_queue_album();
+	apply_track_normalization(current_metadata_file, &current_metadata);
 
 	audio_play_paused(current_metadata_file, position);
 	device_state_remember_restored(current_metadata_file, position);
@@ -891,8 +1044,8 @@ void device_state_play_file_at(const char *filepath, double position) {
 	}
 	metadata_read(current_metadata_file, &current_metadata);
 	audiobook_track_changed(current_metadata_file);
-	// The ReplayGain the tags asked for, worked out once per track.
-	replaygain_load(&current_metadata);
+	// The ReplayGain / Sound Check the tags asked for, worked out once per track.
+	apply_track_normalization(current_metadata_file, &current_metadata);
 	apply_track_speed();
 
 	audio_play_at(current_metadata_file, position);
@@ -1163,13 +1316,17 @@ static bool play_album_beside(const char *album, bool forward) {
 
 	bool started = false;
 	if (tracks.count > 0) {
-		device_state_play_list((const char *const *)tracks.paths, tracks.count,
-							   forward ? 0 : tracks.count - 1);
+		playlist_load_paths((const char *const *)tracks.paths, tracks.count,
+							forward ? 0 : tracks.count - 1);
 		playlist_set_album(wanted); // so the record beyond that one can follow too
-		char shown[256];
-		library_album_title(wanted, shown, sizeof(shown));
-		fprintf(stderr, "album: %s \"%s\" (%d tracks)\n", forward ? "on to" : "back to", shown, tracks.count);
-		started = true;
+		char path[512];
+		if (playlist_current_path(path, sizeof(path))) {
+			load_and_play(path);
+			char shown[256];
+			library_album_title(wanted, shown, sizeof(shown));
+			fprintf(stderr, "album: %s \"%s\" (%d tracks)\n", forward ? "on to" : "back to", shown, tracks.count);
+			started = true;
+		}
 	}
 
 	for (int i = 0; i < tracks.count; i++) {
@@ -1763,7 +1920,63 @@ void device_state_sync_crossfade(void) {
 	song_metadata_t next_meta;
 	memset(&next_meta, 0, sizeof(next_meta));
 	metadata_read(resolved, &next_meta);
-	int rg_q15 = replaygain_compute_q15(&next_meta);
+	int rg_q15;
+	if (soundcheck_mode() == SOUNDCHECK_ADAPTIVE && !playlist_is_shuffled()) {
+		bool next_is_album = (chain_kind == XFADE_CHAIN_ALBUM || chain_kind == XFADE_CHAIN_FOLDER) ||
+							 playlist_is_album_queue();
+		float next_album_db = 0.0f;
+		float next_album_peak = 0.0f;
+		bool next_has_album = false;
+		if (next_is_album && next_meta.has_soundcheck) {
+			if (chain_kind == XFADE_CHAIN_ALBUM && chain_target[0]) {
+				sc_album_acc_t acc = {0.0, 0.0f, 0};
+				library_for_each_ordered(LIBRARY_LIST_TRACKS, LIBRARY_FILTER_ALBUM, chain_target, LIBRARY_ORDER_DEFAULT,
+										 sc_album_track_cb, &acc);
+				if (acc.count > 0 && acc.power_sum > 0.0) {
+					next_has_album = true;
+					next_album_db = (float)(-10.0 * log10(acc.power_sum / (double)acc.count));
+					next_album_peak = acc.max_peak;
+				}
+			} else if (chain_kind == XFADE_CHAIN_FOLDER && chain_target[0]) {
+				DIR *dir = opendir(chain_target);
+				if (dir) {
+					sc_album_acc_t acc = {0.0, 0.0f, 0};
+					struct dirent *de;
+					while ((de = readdir(dir)) != NULL && acc.count < SC_ALBUM_TRACK_CAP) {
+						if (!playlist_is_playable_file(de->d_name)) {
+							continue;
+						}
+						char fpath[768];
+						snprintf(fpath, sizeof(fpath), "%s/%s", chain_target, de->d_name);
+						song_metadata_t fm;
+						metadata_read(fpath, &fm);
+						if (next_meta.album[0] && fm.album[0] && strcasecmp(next_meta.album, fm.album) != 0) {
+							continue;
+						}
+						if (fm.has_soundcheck) {
+							acc.power_sum += pow(10.0, -(double)fm.soundcheck_gain_db / 10.0);
+							if (fm.soundcheck_peak > acc.max_peak) {
+								acc.max_peak = fm.soundcheck_peak;
+							}
+							acc.count++;
+						}
+					}
+					closedir(dir);
+					if (acc.count > 0 && acc.power_sum > 0.0) {
+						next_has_album = true;
+						next_album_db = (float)(-10.0 * log10(acc.power_sum / (double)acc.count));
+						next_album_peak = acc.max_peak;
+					}
+				}
+			} else {
+				next_has_album = resolve_soundcheck_album_gain(resolved, &next_meta, &next_album_db, &next_album_peak);
+			}
+		}
+		rg_q15 = soundcheck_compute_q15_with_album(&next_meta, next_is_album, next_has_album, next_album_db,
+												   next_album_peak);
+	} else {
+		rg_q15 = replaygain_compute_q15(&next_meta);
+	}
 
 	xfade_plan.active = true;
 	snprintf(xfade_plan.raw_path, sizeof(xfade_plan.raw_path), "%s", raw_next);
@@ -1831,7 +2044,7 @@ bool device_state_take_crossfade_handoff(void) {
 	snprintf(current_metadata_file, sizeof(current_metadata_file), "%s", handed_path);
 	metadata_read(current_metadata_file, &current_metadata);
 	audiobook_track_changed(current_metadata_file);
-	replaygain_load(&current_metadata);
+	apply_track_normalization(current_metadata_file, &current_metadata);
 	apply_track_speed();
 
 	// Notify streaming caches/protections for the track now playing without

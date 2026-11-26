@@ -111,7 +111,7 @@ static void wire_to_mode(int wire) {
 		playlist_set_mode(PLAYBACK_MODE_NORMAL);
 		break;
 	}
-	device_state_sync_crossfade();
+	device_state_refresh_normalization();
 }
 
 // Whether the track playing now is starred. The answer is remembered by path:
@@ -362,6 +362,10 @@ static void play_all(const sonixlink_command_t *cmd) {
 	playlist_set_album("");
 	int start = shuffled && count > 1 ? (int)lv_rand(0, (uint32_t)(count - 1)) : 0;
 	if (device_state_play_index(ix, start)) {
+		if (cmd->list == SONIXLINK_LIST_ALBUM && cmd->value[0]) {
+			playlist_set_album(cmd->value);
+			device_state_refresh_normalization();
+		}
 		player_refresh_now_playing();
 	}
 }
@@ -551,6 +555,10 @@ static void apply_command(const sonixlink_command_t *cmd) {
 		bool started = false;
 		if (ix && at >= 0) {
 			started = device_state_play_index(ix, at);
+			if (started && filter == LIBRARY_FILTER_ALBUM && value) {
+				playlist_set_album(value);
+				device_state_refresh_normalization();
+			}
 		} else if (ix) {
 			library_index_close(ix);
 		}

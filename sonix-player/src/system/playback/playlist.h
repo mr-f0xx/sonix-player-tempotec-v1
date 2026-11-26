@@ -226,6 +226,14 @@ bool playlist_prev(char *out, size_t out_size);
 
 void playlist_set_mode(playback_mode_t mode);
 playback_mode_t playlist_get_mode(void);
+// True when the active playback mode is shuffling (SHUFFLE or SHUFFLE_REPEAT
+// on a queue that does not carry a fixed order of its own).
+bool playlist_is_shuffled(void);
+// True when the queue is an album-oriented context rather than a playlist,
+// Smart Mix, favourites list, or flat track list: an album/artist-albums queue
+// (`playlist_album()` non-empty), a library list grouped by album (`ALBUM`
+// filter or `LIBRARY_ORDER_ALBUM`), or a plain folder queue.
+bool playlist_is_album_queue(void);
 // Advances to the next mode (NORMAL -> REPEAT_ALL -> REPEAT_ONE -> SHUFFLE ->
 // NORMAL) and returns the new mode.
 playback_mode_t playlist_cycle_mode(void);

@@ -62,6 +62,14 @@ typedef struct {
 	// clear of it. 0 when the file does not say.
 	float track_true_peak;
 	float album_true_peak;
+
+	// Apple Sound Check (`iTunNORM`), read on M4A (AAC / ALAC) and AIFF /
+	// AIFF-C files: the correction in dB derived from iTunes' ten-word hex
+	// normalization string (referenced to -16 LUFS), and the peak sample
+	// amplitude (0..1+) carried in words 6 and 7.
+	bool has_soundcheck;
+	float soundcheck_gain_db;
+	float soundcheck_peak;
 } song_metadata_t;
 
 // Reads whatever tag metadata is available for the file (ID3v1/ID3v2 for MP3,

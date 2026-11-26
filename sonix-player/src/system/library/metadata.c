@@ -13,6 +13,7 @@
 #include "src/system/core/utils.h"
 
 #include <ctype.h>
+#include <math.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -185,6 +186,72 @@ static bool replaygain_field(song_metadata_t *out, const char *key, const char *
 	}
 	return true;
 }
+
+// Apple Sound Check (`iTunNORM`): ten space-separated 8-digit hex words.
+// Words 0 and 1 are L/R `1000 * 10^(-dB / 10)` (`dB = -10 * log10(v / 1000)`),
+// words 2 and 3 are the same on a 2500 base, and words 6 and 7 are the L/R
+// peak sample values scaled to 32768. Following iTunes / Sound Check, the
+// channel with the lower gain adjustment (the louder channel, larger `v`)
+// governs so the louder side is not pushed above target.
+static bool soundcheck_field(song_metadata_t *out, const char *value) {
+	if (!out || !value) {
+		return false;
+	}
+	uint32_t words[10] = {0};
+	const char *p = value;
+	int count = 0;
+	while (count < 10) {
+		while (*p && isspace((unsigned char)*p)) {
+			p++;
+		}
+		if (!*p) {
+			break;
+		}
+		char *end = NULL;
+		unsigned long v = strtoul(p, &end, 16);
+		if (end == p || (*end && !isspace((unsigned char)*end))) {
+			return false;
+		}
+		words[count++] = (uint32_t)v;
+		p = end;
+	}
+	if (count < 2) {
+		return false;
+	}
+
+	double base = 1000.0;
+	uint32_t v0 = words[0];
+	uint32_t v1 = words[1];
+	if (v0 == 0 && v1 == 0 && count >= 4) {
+		base = 2500.0;
+		v0 = words[2];
+		v1 = words[3];
+	}
+	uint32_t v = v0 > v1 ? v0 : v1;
+	if (v == 0) {
+		return false;
+	}
+
+	double db = -10.0 * log10((double)v / base);
+	if (!isfinite(db) || db < -60.0 || db > 60.0) {
+		return false;
+	}
+
+	float peak = 0.0f;
+	if (count >= 8) {
+		uint32_t pm = words[6] > words[7] ? words[6] : words[7];
+		if (pm > 0) {
+			peak = (float)pm / 32768.0f;
+		}
+	}
+
+	out->has_soundcheck = true;
+	out->soundcheck_gain_db = (float)db;
+	out->soundcheck_peak = peak;
+	return true;
+}
+
+static __thread bool soundcheck_wanted;
 
 // Applies a single "KEY=VALUE" Vorbis comment string (not null-terminated) to
 // the relevant metadata field.
@@ -738,16 +805,43 @@ static void id3_lyrics_uslt(const uint8_t *buf, size_t len) {
 }
 
 // COMM: encoding, language, a short description, then the comment. Where
-// Mp3tag and most audiobook tools put the publisher's summary.
-static void id3_description_comm(const uint8_t *buf, size_t len) {
+// Mp3tag and most audiobook tools put the publisher's summary, and where
+// iTunes / Music.app writes `iTunNORM` on an AIFF / AIFF-C file.
+static void id3_comm(song_metadata_t *out, const uint8_t *buf, size_t len) {
 	if (len < 5) {
 		return;
 	}
 	uint8_t encoding = buf[0];
-	size_t pos = 4 + id3_skip_string(encoding, buf + 4, len - 4);
+	bool wide = encoding == 0x01 || encoding == 0x02;
+	size_t skip = id3_skip_string(encoding, buf + 4, len - 4);
+	size_t pos = 4 + skip;
 	if (pos >= len) {
 		return;
 	}
+
+	char desc[48] = {0};
+	size_t desc_len = skip >= (wide ? 2u : 1u) ? skip - (wide ? 2u : 1u) : 0;
+	if (desc_len > 0) {
+		id3_decode_text(encoding, buf + 4, desc_len, desc, sizeof(desc));
+	}
+
+	if (strcasecmp(desc, "iTunNORM") == 0) {
+		if (soundcheck_wanted) {
+			char sc_text[256];
+			id3_decode_text(encoding, buf + pos, len - pos, sc_text, sizeof(sc_text));
+			soundcheck_field(out, sc_text);
+		}
+		return;
+	}
+	// Do not hand Apple's internal iTunSMPB / iTunPGAP hex comments off as the
+	// book summary when `description_wanted` is active.
+	if (strncasecmp(desc, "iTun", 4) == 0) {
+		return;
+	}
+	if (!description_wanted) {
+		return;
+	}
+
 	size_t out_size = (len - pos) * 2 + 16;
 	char *text = malloc(out_size);
 	if (!text) {
@@ -841,6 +935,8 @@ static void id3_txxx(song_metadata_t *out, uint8_t encoding, const uint8_t *data
 		copy_bounded(out->series_part, sizeof(out->series_part), text);
 	} else if (strncmp(key, "REPLAYGAIN_", 11) == 0 || strcmp(key, "R128_TRACK_GAIN") == 0) {
 		replaygain_field(out, key, text, strlen(text));
+	} else if (soundcheck_wanted && strcmp(key, "ITUNNORM") == 0) {
+		soundcheck_field(out, text);
 	} else if (strcmp(key, "COMPILATION") == 0) {
 		out->compilation = flag_is_set(text, strlen(text));
 	} else if ((strcmp(key, "ALBUM ARTIST") == 0 || strcmp(key, "ALBUMARTIST") == 0 || strcmp(key, "ALBUM_ARTIST") == 0) &&
@@ -1002,6 +1098,11 @@ static void fill_missing(song_metadata_t *out, const song_metadata_t *from) {
 		out->track_true_peak = from->track_true_peak;
 	if (out->album_true_peak == 0)
 		out->album_true_peak = from->album_true_peak;
+	if (!out->has_soundcheck && from->has_soundcheck) {
+		out->has_soundcheck = true;
+		out->soundcheck_gain_db = from->soundcheck_gain_db;
+		out->soundcheck_peak = from->soundcheck_peak;
+	}
 }
 
 // Reads an ID3v2 tag at the current position of `f` -- the start of an MP3, or
@@ -1159,7 +1260,7 @@ static bool read_id3v2(FILE *f, song_metadata_t *out) {
 					  strcmp(frame_id, "TXXX") == 0 || strcmp(frame_id, "TCMP") == 0;
 
 		bool lyrics_frame = lyrics_wanted && (strcmp(frame_id, "USLT") == 0 || strcmp(frame_id, "SYLT") == 0);
-		bool comment_frame = description_wanted && strcmp(frame_id, "COMM") == 0;
+		bool comment_frame = (description_wanted || soundcheck_wanted) && strcmp(frame_id, "COMM") == 0;
 
 		if (!wanted && !lyrics_frame && !comment_frame) {
 			if (!id3s_read(&s, NULL, frame_size))
@@ -1219,7 +1320,7 @@ static bool read_id3v2(FILE *f, song_metadata_t *out) {
 		}
 
 		if (comment_frame) {
-			id3_description_comm(data, len);
+			id3_comm(out, data, len);
 		} else if (lyrics_frame) {
 			if (strcmp(frame_id, "USLT") == 0) {
 				id3_lyrics_uslt(data, len);
@@ -1947,7 +2048,8 @@ static void read_aiff_metadata(const char *filepath, song_metadata_t *out) {
 		return;
 
 	uint8_t form[12];
-	if (fread(form, 1, sizeof(form), f) != sizeof(form) || memcmp(form, "FORM", 4) != 0) {
+	if (fread(form, 1, sizeof(form), f) != sizeof(form) || memcmp(form, "FORM", 4) != 0 ||
+		(memcmp(form + 8, "AIFF", 4) != 0 && memcmp(form + 8, "AIFC", 4) != 0)) {
 		fclose(f);
 		return;
 	}
@@ -1974,7 +2076,10 @@ static void read_aiff_metadata(const char *filepath, song_metadata_t *out) {
 			break;
 		}
 		if ((memcmp(ch, "ID3 ", 4) == 0 || memcmp(ch, "id3 ", 4) == 0) && !id3_read) {
+			bool prev_sc = soundcheck_wanted;
+			soundcheck_wanted = true;
 			id3_read = read_id3v2(f, out);
+			soundcheck_wanted = prev_sc;
 		} else if (memcmp(ch, "NAME", 4) == 0 || memcmp(ch, "AUTH", 4) == 0) {
 			char text[256];
 			size_t len = size < sizeof(text) - 1 ? size : sizeof(text) - 1;
@@ -2127,6 +2232,9 @@ static void read_mp4_metadata(const char *filepath, song_metadata_t *out) {
 	}
 	if ((value = mp4_tag_freeform(m, "replaygain_album_true_peak")) != NULL && value[0]) {
 		replaygain_field(out, "REPLAYGAIN_ALBUM_TRUE_PEAK", value, strlen(value));
+	}
+	if ((value = mp4_tag_itunnorm(m)) != NULL && value[0]) {
+		soundcheck_field(out, value);
 	}
 
 	mp4_close(m);
@@ -2416,11 +2524,13 @@ void metadata_read(const char *filepath, song_metadata_t *out) {
 		read_ape_metadata(filepath, out);
 		break;
 	default: {
-		// WAV, which audio.c plays itself, and what libsndfile reads.
-		unsigned char magic[4] = {0};
+		// WAV, which audio.c plays itself, and what libsndfile reads (AIFF /
+		// AIFF-C, or an AIFF misnamed `.wav` when libsndfile is absent).
+		unsigned char magic[8] = {0};
 		FILE *f = fopen(filepath, "rb");
 		if (f) {
-			if (fread(magic, 1, 4, f) != 4) {
+			size_t got = fread(magic, 1, sizeof(magic), f);
+			if (got < 4) {
 				memset(magic, 0, sizeof(magic));
 			}
 			fclose(f);
@@ -2431,6 +2541,8 @@ void metadata_read(const char *filepath, song_metadata_t *out) {
 			read_aiff_metadata(filepath, out);
 		} else if (memcmp(magic, "caff", 4) == 0) {
 			read_caf_metadata(filepath, out);
+		} else if (memcmp(magic + 4, "ftyp", 4) == 0) {
+			read_mp4_metadata(filepath, out);
 		}
 		break;
 	}

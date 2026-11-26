@@ -970,14 +970,24 @@ static void details_fill(const char *file, const song_metadata_t *tags, int bits
 	if (tags->has_album_gain) {
 		details_add_gain("trackmenu_rg_album", tags->album_gain_db, replaygain_effective_peak(tags, true));
 	}
-	// The applied figure can differ from both tags: it is the one the mode
-	// picks, lowered when the peak would clip, and capped at +12 dB.
-	if (playing && (tags->has_track_gain || tags->has_album_gain)) {
-		if (replaygain_mode() == REPLAYGAIN_OFF) {
-			details_add_row("trackmenu_rg_applied", tr("trackmenu_rg_off"));
-		} else {
+	if (tags->has_soundcheck) {
+		details_add_gain("trackmenu_soundcheck", tags->soundcheck_gain_db, tags->soundcheck_peak);
+	}
+	// The applied figure can differ from the raw tag: it is the one the active
+	// mode picks, lowered when the peak would clip, and capped at +12 dB.
+	if (playing) {
+		if (soundcheck_enabled() && tags->has_soundcheck) {
 			snprintf(buffer, sizeof(buffer), "%+.2f dB", replaygain_current_db());
-			details_add_row("trackmenu_rg_applied", buffer);
+			details_add_row("trackmenu_sc_applied", buffer);
+		} else if (!soundcheck_enabled() && (tags->has_track_gain || tags->has_album_gain)) {
+			if (replaygain_mode() == REPLAYGAIN_OFF) {
+				details_add_row("trackmenu_rg_applied", tr("trackmenu_rg_off"));
+			} else {
+				snprintf(buffer, sizeof(buffer), "%+.2f dB", replaygain_current_db());
+				details_add_row("trackmenu_rg_applied", buffer);
+			}
+		} else if (tags->has_soundcheck && replaygain_mode() == REPLAYGAIN_OFF) {
+			details_add_row("trackmenu_sc_applied", tr("trackmenu_rg_off"));
 		}
 	}
 

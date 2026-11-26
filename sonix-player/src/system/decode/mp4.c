@@ -91,6 +91,7 @@ struct mp4_file {
 	int audio; // index into tracks, -1 when none
 	uint32_t movie_timescale; // mvhd
 	char itunsmpb[160];		  // ----:iTunSMPB, whole
+	char itunnorm[160];		  // ----:iTunNORM, whole
 
 	mp4_chapter_t *chapters;
 	int chapter_count;
@@ -627,6 +628,8 @@ static void parse_ilst(mp4_file_t *m, const box_t *ilst) {
 			}
 			if (name[0] && value[0] && strcasecmp(name, "iTunSMPB") == 0) {
 				snprintf(m->itunsmpb, sizeof(m->itunsmpb), "%s", value);
+			} else if (name[0] && value[0] && strcasecmp(name, "iTunNORM") == 0) {
+				snprintf(m->itunnorm, sizeof(m->itunnorm), "%s", value);
 			} else if (name[0] && value[0] && strcasecmp(name, "ITUNESADVISORY") == 0) {
 				m->freeform_advisory = advisory_value((const unsigned char *)value, strlen(value));
 			} else if (name[0] && value[0] && strcasecmp(name, "SERIES") == 0) {
@@ -1664,6 +1667,7 @@ const char *mp4_tag_freeform(const mp4_file_t *m, const char *name) {
 	}
 	return NULL;
 }
+const char *mp4_tag_itunnorm(const mp4_file_t *m) { return m ? m->itunnorm : ""; }
 int mp4_tag_track_number(const mp4_file_t *m) { return m ? m->track_number : 0; }
 int mp4_tag_disc_number(const mp4_file_t *m) { return m ? m->disc_number : 0; }
 

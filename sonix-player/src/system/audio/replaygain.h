@@ -29,22 +29,50 @@ typedef enum {
 	REPLAYGAIN_TRACK_WHEN_SHUFFLED = 3,
 } replaygain_mode_t;
 
+// Apple Sound Check (`iTunNORM`), mutually exclusive with ReplayGain:
+//   - Adaptive preserves volume differences between tracks on an album (using
+//     an album-wide Sound Check gain when supplied), switching to per-track
+//     gain when shuffle is active or when tracks are played from a playlist;
+//   - Consistent applies each track's own Sound Check gain unconditionally.
+typedef enum {
+	SOUNDCHECK_OFF = 0,
+	SOUNDCHECK_ADAPTIVE = 1,
+	SOUNDCHECK_CONSISTENT = 2,
+} soundcheck_mode_t;
+
 replaygain_mode_t replaygain_mode(void);
 void replaygain_set_mode(replaygain_mode_t mode);
 
+soundcheck_mode_t soundcheck_mode(void);
+void soundcheck_set_mode(soundcheck_mode_t mode);
+
+// Supplies (or clears, when `has_album_gain` is false) the uniform album Sound
+// Check gain and peak for the album currently queued, so Adaptive mode can
+// preserve relative loudness across tracks of an album.
+void soundcheck_set_album_gain(bool has_album_gain, float gain_db, float peak);
+
 // Called at each track change with what the tags said. Works out the gain once
-// and hands it to the audio thread; a file with no ReplayGain tags leaves
-// playback untouched, whatever the mode.
+// and hands it to the audio thread; a file with no usable ReplayGain / Sound
+// Check tags leaves playback untouched, whatever the mode.
 void replaygain_load(const song_metadata_t *meta);
+
+// True when Sound Check (rather than ReplayGain) is the active normalization
+// mode selected in settings.
+bool soundcheck_enabled(void);
 
 // What is being applied right now, in dB, and whether anything is. For the
 // interface to be able to say so.
 bool replaygain_active(void);
 double replaygain_current_db(void);
 
-// Works out the Q15 ReplayGain multiplier (32768 = unity) for `meta` under the
-// active mode, without modifying the loaded track's global gain.
+// Works out the Q15 ReplayGain / Sound Check multiplier (32768 = unity) for
+// `meta` under the active mode, without modifying the loaded track's global
+// gain. `soundcheck_compute_q15_with_album` overrides the album Sound Check
+// figure explicitly (used when crossfade stages a track on a chained next
+// album before the queue itself moves).
 int replaygain_compute_q15(const song_metadata_t *meta);
+int soundcheck_compute_q15_with_album(const song_metadata_t *meta, bool in_album_queue, bool has_album_gain,
+									  float album_gain_db, float album_peak);
 
 // The peak the correction has to stay clear of, for the track or the album
 // pair: the true (inter-sample) peak when the file carries one, otherwise the
