@@ -27,6 +27,7 @@
 #include "src/gui/wireless/sonixlink.h"
 #include "src/gui/wireless/wifitransfer.h"
 #include "src/gui/shell/theme.h"
+#include "src/gui/shell/glasswallpaper.h"
 #include "src/system/playback/audiobook.h"
 #include "src/system/streaming/podcast.h"
 #include "src/system/streaming/podcastcache.h"
@@ -750,6 +751,9 @@ static void anim_y_cb(void *obj, int32_t v);
 // Defined further down with the circle buttons; panel_prepare() needs it here.
 static void refresh_audio_buttons(void);
 
+// Defined with the sheet build; panel_prepare() and the theme refresh need it.
+static void panel_glass_frost_apply(void);
+
 // The full-screen object behind the sheet has no background: it exists only to
 // collect the tap that closes the sheet, and LVGL does not draw a background it
 // cannot see.
@@ -1154,6 +1158,7 @@ static void panel_prepare(void) {
 	refresh_audio_buttons();
 
 	place_sheet();
+	panel_glass_frost_apply();
 
 	// The sheet always comes in on its first page, as Android's does, and never
 	// in edit mode.
@@ -3550,6 +3555,30 @@ static lv_obj_t *make_level_row(lv_obj_t **icon_out, lv_obj_t **slider_out) {
 	return row;
 }
 
+// Liquid Glass: the control centre is a sheet over the live page, so a clear
+// pane would show the whole menu straight through it (the shared screen style
+// is zero-opacity under glass). Ground the sheet in the theme wallpaper over
+// the dark ground -- opaque, softly dimmed -- so it reads as its own frosted
+// pane and the page behind never shows. Same treatment as the Now Playing
+// sheet (player_glass_background_apply). Other themes keep the shared style.
+static void panel_glass_frost_apply(void) {
+	if (!panel) {
+		return;
+	}
+	if (theme_is_liquid_glass()) {
+		lv_obj_set_style_bg_opa(panel, LV_OPA_COVER, 0);
+		lv_obj_set_style_bg_color(panel, theme()->screen_bg, 0);
+		lv_obj_set_style_bg_image_src(panel, &glass_wallpaper_dsc, 0);
+		// Soft art over the dark ground: a frosted surface, never see-through.
+		lv_obj_set_style_bg_image_opa(panel, LV_OPA_40, 0);
+	} else {
+		lv_obj_remove_local_style_prop(panel, LV_STYLE_BG_IMAGE_SRC, 0);
+		lv_obj_remove_local_style_prop(panel, LV_STYLE_BG_IMAGE_OPA, 0);
+		lv_obj_remove_local_style_prop(panel, LV_STYLE_BG_OPA, 0);
+		lv_obj_remove_local_style_prop(panel, LV_STYLE_BG_COLOR, 0);
+	}
+}
+
 void quickpanel_init(gui_config_t *cfg) {
 	panel_h = cfg->screen_height;
 	qp_compact = cfg->screen_width < 320;
@@ -4028,6 +4057,10 @@ void quickpanel_init(gui_config_t *cfg) {
 	// The cards and the grabber for the arrangement in force at startup. Every
 	// open asks again, so switching the setting needs no rebuild.
 	place_sheet();
+	panel_glass_frost_apply();
+	// Follow the palette: a theme switch while the sheet is parked must still
+	// drop (or restore) the frosted ground before the next open.
+	theme_register_refresh(panel_glass_frost_apply);
 
 	poll_timer = lv_timer_create(poll_cb, PANEL_POLL_MS, NULL);
 	lv_timer_pause(poll_timer);
