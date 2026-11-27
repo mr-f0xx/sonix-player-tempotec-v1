@@ -25,14 +25,14 @@ typedef enum {
 
 // The frost levels Liquid Glass draws its shared surfaces at. The screen is
 // fully clear (the wallpaper / blurred artwork on the bottom layer shows
-// through). Cards are a light frosted film with a luminous top-to-bottom
-// gradient and a bright specular rim, the closest LVGL gets to a pane of iOS
-// Liquid Glass; panels and bars keep a half-dark ground so their white labels
-// stay legible.
+// through). Cards are CLEAR glass like iOS 26: only a whisper of white tint so
+// the wallpaper shows through almost fully, defined by a bright specular rim
+// and a faint top highlight -- not a gray or dark film. Panels and bars keep a
+// half-dark ground so their white labels stay legible.
 #define THEME_GLASS_PANEL_OPA LV_OPA_50
-#define THEME_GLASS_CARD_OPA LV_OPA_40
-#define THEME_GLASS_CARD_PRESSED_OPA LV_OPA_60
-#define THEME_GLASS_EDGE_OPA LV_OPA_50
+#define THEME_GLASS_CARD_OPA LV_OPA_10
+#define THEME_GLASS_CARD_PRESSED_OPA LV_OPA_30
+#define THEME_GLASS_EDGE_OPA LV_OPA_60
 #define THEME_GLASS_ACCENT_OPA LV_OPA_80
 
 // Fixed semantic accents used by Tokyo Night's function-matched glyphs.

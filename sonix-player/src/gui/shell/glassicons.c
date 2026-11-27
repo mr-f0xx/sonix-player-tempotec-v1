@@ -117,8 +117,9 @@ static void render_badge(uint8_t *buf, int size, lv_color_t color, const lv_imag
 	}
 	for (int y = 0; y < size; y++) {
 		float t = size > 1 ? (float)y / (float)(size - 1) : 0.0f;
-		// Frosted body: lighter at the top, clearer at the foot.
-		float body = 0.30f + 0.22f * (1.0f - t);
+		// Clear glass body: a whisper of milk, lighter at the top, so the
+		// wallpaper shows through like iOS 26's clear icons.
+		float body = 0.16f + 0.16f * (1.0f - t);
 		for (int x = 0; x < size; x++) {
 			// Signed distance to a rounded square, for a clean anti-aliased rim.
 			float px = (float)x + 0.5f;

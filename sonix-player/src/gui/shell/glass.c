@@ -98,10 +98,10 @@ static void glass_ambient_paint(void) {
 	uint32_t sy = (uint32_t)(LV_SCALE_NONE * h / (int)glass_wallpaper_dsc.header.h);
 	lv_image_set_scale(glass_ambient_img, sx > sy ? sx : sy);
 	lv_image_set_inner_align(glass_ambient_img, LV_IMAGE_ALIGN_CENTER);
-	// A gentle dim, the way iOS settles a wallpaper under glass: the art stays
-	// clearly visible but the bright streaks no longer wash out white labels.
+	// Only a whisper of dim: iOS 26 clear glass shows the wallpaper almost at
+	// full strength, so the art stays vivid through the clear tiles.
 	lv_obj_set_style_image_recolor(glass_ambient_img, lv_color_black(), 0);
-	lv_obj_set_style_image_recolor_opa(glass_ambient_img, LV_OPA_40, 0);
+	lv_obj_set_style_image_recolor_opa(glass_ambient_img, LV_OPA_10, 0);
 	lv_obj_set_hidden(glass_ambient_img, false);
 }
 
