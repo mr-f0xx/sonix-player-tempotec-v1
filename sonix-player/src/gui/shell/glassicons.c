@@ -103,7 +103,13 @@ static void stamp_glyph(uint8_t *buf, int size, const lv_image_dsc_t *g) {
 	}
 }
 
+// Apple's Liquid Glass "clear" app icon: a translucent frosted squircle that
+// lets the wallpaper show through, a bright specular rim (stronger along the
+// top edge where light catches the glass), and the glyph in solid white. The
+// badge is mostly partial-alpha, so it composites over whatever is behind it
+// like a real pane of glass rather than a painted tile.
 static void render_badge(uint8_t *buf, int size, lv_color_t color, const lv_image_dsc_t *glyph) {
+	(void)color; // clear glass is neutral; the hue lives in the wallpaper behind
 	float half = (float)size * 0.5f;
 	float radius = (float)size * 0.225f; // the iOS corner roundness
 	if (radius < 1.0f) {
@@ -111,15 +117,8 @@ static void render_badge(uint8_t *buf, int size, lv_color_t color, const lv_imag
 	}
 	for (int y = 0; y < size; y++) {
 		float t = size > 1 ? (float)y / (float)(size - 1) : 0.0f;
-		// A faint vertical gradient: a touch lighter at the top, a touch deeper
-		// at the foot, so the badge reads as a lit tile rather than flat paint.
-		float shade[3];
-		for (int c = 0; c < 3; c++) {
-			float base = c == 0 ? (float)color.blue : c == 1 ? (float)color.green : (float)color.red;
-			float top = base + (255.0f - base) * 0.16f;
-			float bot = base * 0.94f;
-			shade[c] = top + (bot - top) * t;
-		}
+		// Frosted body: lighter at the top, clearer at the foot.
+		float body = 0.30f + 0.22f * (1.0f - t);
 		for (int x = 0; x < size; x++) {
 			// Signed distance to a rounded square, for a clean anti-aliased rim.
 			float px = (float)x + 0.5f;
@@ -134,11 +133,20 @@ static void render_badge(uint8_t *buf, int size, lv_color_t color, const lv_imag
 			}
 			float dist = sqrtf(ax * ax + ay * ay) + inner - radius;
 			float cov = clampf(0.5f - dist, 0.0f, 1.0f);
+			// Specular rim: a bright line just inside the edge, catching more
+			// light along the top than the foot.
+			float rim = clampf(1.0f - fabsf(dist) / 1.5f, 0.0f, 1.0f);
+			float rim_a = rim * (0.95f - 0.35f * t);
+			float a = body;
+			if (rim_a > a) {
+				a = rim_a;
+			}
+			a *= cov;
 			uint8_t *pxb = buf + ((size_t)y * size + x) * 4;
-			pxb[0] = (uint8_t)clampf(shade[0] + 0.5f, 0.0f, 255.0f);
-			pxb[1] = (uint8_t)clampf(shade[1] + 0.5f, 0.0f, 255.0f);
-			pxb[2] = (uint8_t)clampf(shade[2] + 0.5f, 0.0f, 255.0f);
-			pxb[3] = (uint8_t)clampf(cov * 255.0f + 0.5f, 0.0f, 255.0f);
+			pxb[0] = 255; // B
+			pxb[1] = 255; // G
+			pxb[2] = 255; // R
+			pxb[3] = (uint8_t)clampf(a * 255.0f + 0.5f, 0.0f, 255.0f);
 		}
 	}
 	if (glyph && glyph->data) {

@@ -107,18 +107,18 @@ static theme_palette_t palette_oled = {
 	.dark = true,
 };
 
-// Liquid Glass: a dark pane the interface is drawn on. The page itself is
-// clear -- the wallpaper / blurred artwork on the bottom layer (glass.c) is the
-// background -- and the surfaces are smoked films over it: a half-dark ground
-// for cards, bars and panels, each with a hairline of light along its edge.
-// `surface` is dark (not white) so the frost darkens the bright field behind it
-// and the white labels stay readable; the opacity, not the colour, is what
-// makes it glass. The accent is the iOS system blue, the one hue the frosted
-// controls wear.
+// Liquid Glass: a pane of glass the interface is drawn on. The page itself is
+// clear -- the supplied wallpaper / blurred artwork on the bottom layer
+// (glass.c) is the background -- and the cards are a light frosted film over it
+// with a luminous gradient and a bright specular rim, like iOS Liquid Glass.
+// `surface` is white because that is what the frost is drawn in; the opacity
+// and the gradient, not a flat colour, are what make it glass. Bars and panels
+// keep a half-dark ground so their labels stay legible. The accent is the iOS
+// system blue, the one hue the frosted controls wear.
 static theme_palette_t palette_glass = {
 	.screen_bg = LV_COLOR_MAKE(16, 16, 20),         // the ground under the artwork
-	.surface = LV_COLOR_MAKE(18, 22, 32),           // card frost, smoked dark
-	.surface_pressed = LV_COLOR_MAKE(32, 38, 52),
+	.surface = LV_COLOR_MAKE(255, 255, 255),        // card frost, light glass
+	.surface_pressed = LV_COLOR_MAKE(255, 255, 255),
 	.panel = LV_COLOR_MAKE(24, 24, 30),             // bars and overlays, half dark
 	.cover_bg = LV_COLOR_MAKE(24, 24, 30),
 	.text_primary = LV_COLOR_MAKE(255, 255, 255),
@@ -491,6 +491,10 @@ static void apply_palette(void) {
 		lv_style_set_outline_color(&theme_style_card, lv_color_white());
 		lv_style_set_outline_opa(&theme_style_card, THEME_GLASS_EDGE_OPA);
 		lv_style_set_radius(&theme_style_card, 16);
+		// A luminous vertical gradient: light catches the top of the pane and
+		// fades toward the foot, so the frost reads as curved glass, not paint.
+		lv_style_set_bg_grad_color(&theme_style_card, lv_color_make(175, 190, 212));
+		lv_style_set_bg_grad_dir(&theme_style_card, LV_GRAD_DIR_VER);
 	} else {
 		lv_style_remove_prop(&theme_style_panel, LV_STYLE_OUTLINE_WIDTH);
 		lv_style_remove_prop(&theme_style_panel, LV_STYLE_OUTLINE_PAD);
@@ -501,6 +505,8 @@ static void apply_palette(void) {
 		lv_style_remove_prop(&theme_style_card, LV_STYLE_OUTLINE_COLOR);
 		lv_style_remove_prop(&theme_style_card, LV_STYLE_OUTLINE_OPA);
 		lv_style_remove_prop(&theme_style_card, LV_STYLE_RADIUS);
+		lv_style_remove_prop(&theme_style_card, LV_STYLE_BG_GRAD_COLOR);
+		lv_style_remove_prop(&theme_style_card, LV_STYLE_BG_GRAD_DIR);
 	}
 
 	bool oled = selected_kind == THEME_KIND_OLED;

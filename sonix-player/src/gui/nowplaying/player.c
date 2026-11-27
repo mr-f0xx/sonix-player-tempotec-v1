@@ -37,6 +37,7 @@
 #include "src/gui/shell/scrolltext.h"
 #include "src/gui/nowplaying/trackmenu.h"
 #include "src/gui/shell/switcher.h"
+#include "src/gui/shell/glasswallpaper.h"
 #include "src/gui/shell/theme.h"
 #include "src/gui/shell/toast.h"
 #include "src/gui/shell/topbar.h"
@@ -5434,10 +5435,32 @@ static void player_clear_footer_edge(void) {
 // Repaints the bits that are coloured by hand, and rebuilds the blurred
 // artwork behind the controls -- it is dimmed towards the page background, so
 // it has to be regenerated when that background changes.
+// Liquid Glass: the player is a sheet that slides over the page beneath, so a
+// clear sheet would show the main menu straight through it. Ground the sheet in
+// the theme wallpaper (opaque) so Now Playing reads as its own glass pane over
+// the artwork, never see-through. Other themes keep the shared screen style.
+static void player_glass_background_apply(void) {
+	if (!player_screen) {
+		return;
+	}
+	if (theme_is_liquid_glass()) {
+		lv_obj_set_style_bg_opa(player_screen, LV_OPA_COVER, 0);
+		lv_obj_set_style_bg_color(player_screen, theme()->screen_bg, 0);
+		lv_obj_set_style_bg_image_src(player_screen, &glass_wallpaper_dsc, 0);
+		lv_obj_set_style_bg_image_opa(player_screen, LV_OPA_COVER, 0);
+	} else {
+		lv_obj_remove_local_style_prop(player_screen, LV_STYLE_BG_IMAGE_SRC, 0);
+		lv_obj_remove_local_style_prop(player_screen, LV_STYLE_BG_IMAGE_OPA, 0);
+		lv_obj_remove_local_style_prop(player_screen, LV_STYLE_BG_OPA, 0);
+		lv_obj_remove_local_style_prop(player_screen, LV_STYLE_BG_COLOR, 0);
+	}
+}
+
 static void player_refresh_theme(void) {
 	if (!cover_panel)
 		return;
 
+	player_glass_background_apply();
 	bool mono = theme_is_monochrome();
 	if (mono) {
 		player_clear_footer_edge();
@@ -8473,6 +8496,7 @@ void player_init(gui_config_t *cfg) {
 	coverloader_start();
 
 	lv_obj_add_style(player_screen, &theme_style_screen, 0);
+	player_glass_background_apply();
 
 	// The player is a panel parked just off the right edge (see player.h).
 	sheet_width = (int)cfg->screen_width;

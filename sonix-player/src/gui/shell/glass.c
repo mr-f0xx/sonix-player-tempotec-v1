@@ -7,6 +7,7 @@
 
 #include "src/gui/nowplaying/cover.h"
 #include "src/gui/nowplaying/player.h"
+#include "src/gui/shell/glasswallpaper.h"
 #include "src/gui/shell/gui.h"
 #include "src/gui/shell/theme.h"
 
@@ -15,13 +16,10 @@
 static cover_image_t glass_pic;
 static lv_obj_t *glass_img;
 
-// The always-on wallpaper under everything: a soft iOS-style colour field so
-// the frosted panels have something to show through even with no track loaded.
-// Rendered once per screen size into an RGB565 buffer, kept while glass is
-// active and freed when the theme leaves it.
-static cover_image_t glass_ambient;
+// The always-on wallpaper under everything: the supplied abstract-glass art,
+// shown so the frosted panels have something to show through even with no
+// track loaded. Static art, no allocation; hidden when the theme leaves glass.
 static lv_obj_t *glass_ambient_img;
-static int glass_ambient_w, glass_ambient_h;
 
 // Bumped to discard any blur still in flight: a job whose generation no longer
 // matches is freed instead of installed, so a track change (or a switch out of
@@ -66,73 +64,17 @@ static void glass_base_paint(void) {
 	lv_obj_set_style_bg_grad_dir(bottom, LV_GRAD_DIR_VER, 0);
 }
 
-// One soft colour glow in the wallpaper, positioned and sized as fractions of
-// the screen so the field scales with the panel.
-typedef struct {
-	float cx, cy, r;
-	uint8_t cr, cg, cb;
-	float strength;
-} glass_glow_t;
-
-// A fixed iOS-style wallpaper: magenta and violet up top, blue through the
-// middle, teal and cyan low down, over a deep navy ground. Smooth radial
-// falloffs keep it looking like a blurred photograph rather than flat paint,
-// so the 20%-white cards over it read as frosted glass.
-static void glass_render_aurora(uint8_t *px, int w, int h) {
-	static const glass_glow_t glows[] = {
-		{0.88f, 0.10f, 0.95f, 255, 70, 150, 0.95f},  // magenta, top right
-		{0.12f, 0.08f, 0.80f, 120, 70, 255, 0.75f},  // violet, top left
-		{0.50f, 0.45f, 0.95f, 30, 120, 255, 0.65f},  // blue, centre
-		{0.12f, 0.92f, 0.95f, 30, 220, 150, 0.90f},  // teal, bottom left
-		{0.90f, 0.82f, 0.85f, 60, 200, 255, 0.60f},  // cyan, bottom right
-	};
-	const float base_r = 12, base_g = 14, base_b = 28;
-	for (int y = 0; y < h; y++) {
-		float fy = (float)y / (float)h;
-		for (int x = 0; x < w; x++) {
-			float fx = (float)x / (float)w;
-			float r = base_r, g = base_g, b = base_b;
-			for (unsigned i = 0; i < sizeof(glows) / sizeof(glows[0]); i++) {
-				const glass_glow_t *gl = &glows[i];
-				float dx = (fx - gl->cx) / gl->r;
-				float dy = (fy - gl->cy) / gl->r;
-				float d = sqrtf(dx * dx + dy * dy);
-				float t = 1.0f - d;
-				if (t <= 0.0f) {
-					continue;
-				}
-				t = t * t * (3.0f - 2.0f * t); // smoothstep falloff
-				float a = t * gl->strength;
-				r += (float)gl->cr * a;
-				g += (float)gl->cg * a;
-				b += (float)gl->cb * a;
-			}
-			// A touch below full brightness so the field reads as a wallpaper
-			// rather than a lamp; the smoked frost handles label contrast.
-			r *= 0.85f;
-			g *= 0.85f;
-			b *= 0.85f;
-			if (r > 255) r = 255;
-			if (g > 255) g = 255;
-			if (b > 255) b = 255;
-			uint16_t c = (uint16_t)(((int)r >> 3) << 11 | ((int)g >> 2) << 5 | ((int)b >> 3));
-			px[(y * w + x) * 2] = (uint8_t)(c & 0xFF);
-			px[(y * w + x) * 2 + 1] = (uint8_t)(c >> 8);
-		}
-	}
-}
-
 static void glass_ambient_free(void) {
 	if (glass_ambient_img) {
 		lv_image_set_src(glass_ambient_img, NULL);
 		lv_obj_set_hidden(glass_ambient_img, true);
 	}
-	cover_free(&glass_ambient);
-	glass_ambient_w = glass_ambient_h = 0;
 }
 
-// Ensures the wallpaper image exists and is showing at the current screen
-// size. The blurred sleeve, when present, is drawn on top of it.
+// Shows the supplied abstract-glass wallpaper on the bottom layer, scaled to
+// cover the panel. It is static art (no allocation), always present while glass
+// is active so the frosted panels have something to show through even with no
+// track; the blurred sleeve, when present, is drawn on top of it.
 static void glass_ambient_paint(void) {
 	lv_obj_t *bottom = lv_layer_bottom();
 	if (!bottom) {
@@ -148,29 +90,19 @@ static void glass_ambient_paint(void) {
 		lv_obj_set_clickable(glass_ambient_img, false);
 		lv_obj_move_to_index(glass_ambient_img, 0); // behind the sleeve blur
 	}
-	if (glass_ambient_w != w || glass_ambient_h != h || !glass_ambient.pixels) {
-		cover_free(&glass_ambient);
-		memset(&glass_ambient, 0, sizeof(glass_ambient));
-		glass_ambient.pixels = malloc((size_t)w * h * 2);
-		if (glass_ambient.pixels) {
-			glass_render_aurora(glass_ambient.pixels, w, h);
-			glass_ambient.dsc.header.magic = LV_IMAGE_HEADER_MAGIC;
-			glass_ambient.dsc.header.cf = LV_COLOR_FORMAT_RGB565;
-			glass_ambient.dsc.header.w = w;
-			glass_ambient.dsc.header.h = h;
-			glass_ambient.dsc.header.stride = w * 2;
-			glass_ambient.dsc.data = glass_ambient.pixels;
-			glass_ambient.dsc.data_size = (size_t)w * h * 2;
-			glass_ambient_w = w;
-			glass_ambient_h = h;
-		}
-	}
-	if (glass_ambient.pixels) {
-		lv_obj_set_size(glass_ambient_img, w, h);
-		lv_obj_align(glass_ambient_img, LV_ALIGN_TOP_LEFT, 0, 0);
-		lv_image_set_src(glass_ambient_img, &glass_ambient.dsc);
-		lv_obj_set_hidden(glass_ambient_img, false);
-	}
+	lv_obj_set_size(glass_ambient_img, w, h);
+	lv_obj_align(glass_ambient_img, LV_ALIGN_TOP_LEFT, 0, 0);
+	lv_image_set_src(glass_ambient_img, &glass_wallpaper_dsc);
+	// Cover the panel: scale by the larger axis ratio so no edge is left bare.
+	uint32_t sx = (uint32_t)(LV_SCALE_NONE * w / (int)glass_wallpaper_dsc.header.w);
+	uint32_t sy = (uint32_t)(LV_SCALE_NONE * h / (int)glass_wallpaper_dsc.header.h);
+	lv_image_set_scale(glass_ambient_img, sx > sy ? sx : sy);
+	lv_image_set_inner_align(glass_ambient_img, LV_IMAGE_ALIGN_CENTER);
+	// A gentle dim, the way iOS settles a wallpaper under glass: the art stays
+	// clearly visible but the bright streaks no longer wash out white labels.
+	lv_obj_set_style_image_recolor(glass_ambient_img, lv_color_black(), 0);
+	lv_obj_set_style_image_recolor_opa(glass_ambient_img, LV_OPA_40, 0);
+	lv_obj_set_hidden(glass_ambient_img, false);
 }
 
 // Drops the picture and discards any blur still being made of it. The ambient

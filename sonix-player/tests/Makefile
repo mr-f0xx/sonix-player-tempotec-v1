@@ -1319,6 +1319,7 @@ CORNERS_OBJ = $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(CORNERS_SRC)) \
 # Liquid Glass: the theme wiring and the blurred-artwork backdrop. The player,
 # the cover blur and the cross-thread post are stubbed in the test itself.
 GLASS_UI_SRC = $(ROOT)/tests/ui/test_liquidglass.c $(ROOT)/src/gui/shell/glass.c \
+               $(ROOT)/src/gui/shell/glasswallpaper.c \
                $(ROOT)/src/gui/shell/theme.c $(ROOT)/src/system/core/config.c
 GLASS_UI_OBJ = $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(GLASS_UI_SRC)) \
                $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(UI_LVGL_SRC))
