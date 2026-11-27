@@ -5447,7 +5447,9 @@ static void player_glass_background_apply(void) {
 		lv_obj_set_style_bg_opa(player_screen, LV_OPA_COVER, 0);
 		lv_obj_set_style_bg_color(player_screen, theme()->screen_bg, 0);
 		lv_obj_set_style_bg_image_src(player_screen, &glass_wallpaper_dsc, 0);
-		lv_obj_set_style_bg_image_opa(player_screen, LV_OPA_COVER, 0);
+		// Half-strength art over the dark ground, matching the menu's dimmed
+		// wallpaper so Now Playing is opaque but equally dark.
+		lv_obj_set_style_bg_image_opa(player_screen, LV_OPA_50, 0);
 	} else {
 		lv_obj_remove_local_style_prop(player_screen, LV_STYLE_BG_IMAGE_SRC, 0);
 		lv_obj_remove_local_style_prop(player_screen, LV_STYLE_BG_IMAGE_OPA, 0);
