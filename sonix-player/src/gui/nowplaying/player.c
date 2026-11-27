@@ -37,7 +37,6 @@
 #include "src/gui/shell/scrolltext.h"
 #include "src/gui/nowplaying/trackmenu.h"
 #include "src/gui/shell/switcher.h"
-#include "src/gui/shell/glasswallpaper.h"
 #include "src/gui/shell/theme.h"
 #include "src/gui/shell/toast.h"
 #include "src/gui/shell/topbar.h"
@@ -1437,10 +1436,12 @@ static void set_over_cover(bool on) {
 		} else if (over) {
 			lv_obj_set_style_image_recolor(icon_objs[i], lv_color_white(), 0);
 			lv_obj_set_style_image_recolor_opa(icon_objs[i], LV_OPA_COVER, 0);
-		} else if (theme_uses_function_glyphs()) {
+		} else if (theme_uses_function_glyphs() && !theme_is_liquid_glass()) {
 			lv_obj_set_style_image_recolor(icon_objs[i], theme_semantic_color(THEME_SEMANTIC_CYAN), 0);
 			lv_obj_set_style_image_recolor_opa(icon_objs[i], LV_OPA_COVER, 0);
 		} else {
+			// Liquid Glass keeps the deck's default icon colouring: the player
+			// is left exactly as it is under the standard themes.
 			lv_obj_remove_local_style_prop(icon_objs[i], LV_STYLE_IMAGE_RECOLOR, 0);
 			lv_obj_remove_local_style_prop(icon_objs[i], LV_STYLE_IMAGE_RECOLOR_OPA, 0);
 		}
@@ -1491,12 +1492,6 @@ static void set_over_cover(bool on) {
 static void (*cover_release_cb)(void);
 
 void player_set_cover_release_cb(void (*cb)(void)) { cover_release_cb = cb; }
-
-// An additive follower of the artwork (Liquid Glass blurs it behind the whole
-// interface). Told when a picture lands and when it goes; see player.h.
-static void (*cover_observer_cb)(void);
-
-void player_register_cover_observer(void (*cb)(void)) { cover_observer_cb = cb; }
 
 // The path whose artwork is currently up. A live stream refreshes its text
 // several times a minute (every new on-air title), and re-decoding the same
@@ -5131,9 +5126,6 @@ static void reload_cover(const char *filepath) {
 	topbar_set_player_frost(NULL); // detach the borrowed image before freeing it
 	cover_free(&current_cover);
 	cover_free(&current_backdrop);
-	if (cover_observer_cb) {
-		cover_observer_cb(); // the sleeve is gone; drop any blur made of it
-	}
 	player_status_color_apply();
 	full_backdrop_apply(); // nothing to show behind the V1's page until the next one lands
 	immersive_blur_apply(); // and nothing for the frost to be made of, likewise
@@ -5346,10 +5338,6 @@ static void apply_cover_result(void) {
 		// The words' background, ready before they are pulled in.
 		lyrics_bg_prepare();
 
-		if (cover_observer_cb) {
-			cover_observer_cb(); // a new sleeve is up; the glass follows it
-		}
-
 		lv_obj_invalidate(cover_panel);
 		lv_obj_invalidate(player_menu);
 	}
@@ -5432,38 +5420,32 @@ static void player_clear_footer_edge(void) {
 	lv_obj_set_style_shadow_width(player_menu, 0, 0);
 }
 
-// Repaints the bits that are coloured by hand, and rebuilds the blurred
-// artwork behind the controls -- it is dimmed towards the page background, so
-// it has to be regenerated when that background changes.
-// Liquid Glass: the player is a sheet that slides over the page beneath, so a
-// clear sheet would show the main menu straight through it. Ground the sheet in
-// the theme wallpaper (opaque) so Now Playing reads as its own glass pane over
-// the artwork, never see-through. Other themes keep the shared screen style.
-static void player_glass_background_apply(void) {
+// Liquid Glass makes the shared screen style transparent so menus read as
+// glass over the wallpaper. The Now Playing deck must NOT be see-through (it
+// is a sheet over the live page), so keep its ground opaque exactly as the
+// default theme's is. This only restores opacity -- it changes no layout,
+// colour scheme or artwork treatment; the player is otherwise untouched.
+static void player_glass_ground_apply(void) {
 	if (!player_screen) {
 		return;
 	}
 	if (theme_is_liquid_glass()) {
 		lv_obj_set_style_bg_opa(player_screen, LV_OPA_COVER, 0);
 		lv_obj_set_style_bg_color(player_screen, theme()->screen_bg, 0);
-		lv_obj_set_style_bg_image_src(player_screen, &glass_wallpaper_dsc, 0);
-		// Art at 30% over the dark ground: the menu dims its wallpaper with a
-		// 70% black recolor (leaving 30% art), so this matches it exactly while
-		// Now Playing stays opaque.
-		lv_obj_set_style_bg_image_opa(player_screen, LV_OPA_30, 0);
 	} else {
-		lv_obj_remove_local_style_prop(player_screen, LV_STYLE_BG_IMAGE_SRC, 0);
-		lv_obj_remove_local_style_prop(player_screen, LV_STYLE_BG_IMAGE_OPA, 0);
 		lv_obj_remove_local_style_prop(player_screen, LV_STYLE_BG_OPA, 0);
 		lv_obj_remove_local_style_prop(player_screen, LV_STYLE_BG_COLOR, 0);
 	}
 }
 
+// Repaints the bits that are coloured by hand, and rebuilds the blurred
+// artwork behind the controls -- it is dimmed towards the page background, so
+// it has to be regenerated when that background changes.
 static void player_refresh_theme(void) {
 	if (!cover_panel)
 		return;
 
-	player_glass_background_apply();
+	player_glass_ground_apply();
 	bool mono = theme_is_monochrome();
 	if (mono) {
 		player_clear_footer_edge();
@@ -8499,7 +8481,7 @@ void player_init(gui_config_t *cfg) {
 	coverloader_start();
 
 	lv_obj_add_style(player_screen, &theme_style_screen, 0);
-	player_glass_background_apply();
+	player_glass_ground_apply();
 
 	// The player is a panel parked just off the right edge (see player.h).
 	sheet_width = (int)cfg->screen_width;

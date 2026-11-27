@@ -254,13 +254,5 @@ const char *player_cover_path(void);
 // clears it.
 void player_set_cover_release_cb(void (*cb)(void));
 
-// An additive observer of the artwork lifecycle, run on the UI thread: once
-// when a new picture has landed (player_cover_image() now returns it) and once
-// when it has been thrown away (player_cover_image() now returns NULL). Unlike
-// the release callback above -- single-owner, the screensaver -- this is for
-// anyone who merely wants to follow the picture. Liquid Glass uses it to blur
-// the sleeve behind the whole interface. One at a time; NULL clears it.
-void player_register_cover_observer(void (*cb)(void));
-
 
 #endif

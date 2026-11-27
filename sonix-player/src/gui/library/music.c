@@ -323,16 +323,16 @@ static lv_obj_t *make_browse_button(lv_obj_t *parent, const char *label_key, con
 	lv_obj_t *button = lv_btn_create(parent);
 	music_remove_edges(button);
 	int cell_width = (music_cfg->screen_width - 2 * music_cfg->padding - 14 - 4) / 2;
-	lv_obj_set_size(button, cell_width, 42);
+	lv_obj_set_size(button, cell_width, 48);
 	lv_obj_set_style_bg_color(button, theme_now_playing_fill(), 0);
 	lv_obj_set_style_bg_opa(button, LV_OPA_COVER, 0);
 	lv_obj_add_style(button, &theme_style_card_pressed, LV_STATE_PRESSED);
 	lv_obj_set_style_border_width(button, 0, 0);
 	lv_obj_set_style_radius(button, bp_tile_radius(), 0);
 	theme_glass_pane(button); // clear glass under Liquid Glass, opaque elsewhere
-	lv_obj_set_style_pad_hor(button, 5, 0);
-	lv_obj_set_style_pad_ver(button, 3, 0);
-	lv_obj_set_style_pad_column(button, 6, 0);
+	lv_obj_set_style_pad_hor(button, 8, 0);
+	lv_obj_set_style_pad_ver(button, 5, 0);
+	lv_obj_set_style_pad_column(button, 7, 0);
 	lv_obj_set_flex_flow(button, LV_FLEX_FLOW_ROW);
 	lv_obj_set_flex_align(button, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 	lv_obj_set_event_bubble(button, true);
@@ -341,24 +341,26 @@ static lv_obj_t *make_browse_button(lv_obj_t *parent, const char *label_key, con
 	lv_obj_t *icon = lv_image_create(button);
 	lv_image_set_src(icon, source);
 	lv_obj_add_style(icon, &theme_style_icon, 0);
-	lv_obj_set_size(icon, 17, 17);
+	lv_obj_set_size(icon, 18, 18);
 	lv_image_set_inner_align(icon, LV_IMAGE_ALIGN_CENTER);
 	int source_side = LV_MAX((int)source->header.w, (int)source->header.h);
-	lv_image_set_scale(icon, source_side ? (uint32_t)(LV_SCALE_NONE * 17 / source_side) : LV_SCALE_NONE);
+	lv_image_set_scale(icon, source_side ? (uint32_t)(LV_SCALE_NONE * 18 / source_side) : LV_SCALE_NONE);
 	lv_obj_set_style_image_recolor(icon, theme_semantic_color(tone), 0);
 	lv_obj_set_style_image_recolor_opa(icon, LV_OPA_COVER, 0);
 	if (index >= 0 && index < TOKYO_BROWSE_COUNT) {
 		browse_tiles[index] = (browse_tile_t){.button = button, .icon = icon, .tone = tone};
 	}
 
-		lv_obj_t *label = lv_label_create(button);
-		label_set_wrapped_translation(label, label_key, two_lines);
-		lv_label_set_long_mode(label, LV_LABEL_LONG_DOT);
+	lv_obj_t *label = lv_label_create(button);
+	label_set_wrapped_translation(label, label_key, two_lines);
+	// Two-line labels wrap onto their second line; single-line labels ellipsize.
+	// (Forcing LONG_DOT on a wrapped label truncated the second line.)
+	lv_label_set_long_mode(label, two_lines ? LV_LABEL_LONG_WRAP : LV_LABEL_LONG_DOT);
 	lv_obj_set_flex_grow(label, 1);
-	lv_obj_set_style_text_line_space(label, 0, 0);
+	lv_obj_set_style_text_line_space(label, 1, 0);
 	lv_obj_add_style(label, &theme_style_text, 0);
 	lv_obj_set_style_text_font(label, &font_ui_14, 0);
-	lv_obj_set_height(label, lv_font_get_line_height(&font_ui_14) * (two_lines ? 2 : 1));
+	lv_obj_set_height(label, lv_font_get_line_height(&font_ui_14) * (two_lines ? 2 : 1) + (two_lines ? 1 : 0));
 	return button;
 }
 

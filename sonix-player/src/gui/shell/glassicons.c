@@ -69,7 +69,9 @@ static float glyph_alpha_bilinear(const lv_image_dsc_t *g, float sx, float sy) {
 // Composites the white glyph, bilinearly scaled to ~56% of the badge, centred
 // over the badge pixel already in `buf` (straight alpha, B G R A order).
 static void stamp_glyph(uint8_t *buf, int size, const lv_image_dsc_t *g) {
-	int gs = (int)((float)size * 0.56f + 0.5f);
+	// The glyph is the icon: solid white and large enough to read as the iOS
+	// Liquid Glass white symbol, centred in the clear squircle.
+	int gs = (int)((float)size * 0.60f + 0.5f);
 	if (gs < 1) {
 		gs = 1;
 	}
