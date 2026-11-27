@@ -234,6 +234,8 @@ static void main_menu_refresh_tiles(void) {
 		gridpage_set_tile_label_hidden(menu_grid, i, icons_only);
 		if (tokyo) {
 			// Keep the decorative left-column glow only in the labeled layout.
+			// Liquid Glass suppresses it inside gridpage_set_tile_icon_style,
+			// where the tinted glyph becomes an iOS-style app badge instead.
 			bool glow = !icons_only && compact && (i % 2 == 0);
 			gridpage_set_tile_icon_style(menu_grid, i, source, icon_size, true,
 										 theme_semantic_color(TOKYO_MENU_TONES[i]), glow);
@@ -244,7 +246,7 @@ static void main_menu_refresh_tiles(void) {
 		gridpage_set_tile_orientation(menu_grid, i, horizontal);
 
 		lv_obj_set_style_border_width(tile, 0, 0);
-		if (tokyo) {
+		if (tokyo && !theme_is_liquid_glass()) {
 			lv_obj_set_style_outline_width(tile, 0, 0);
 		} else {
 			lv_obj_remove_local_style_prop(tile, LV_STYLE_OUTLINE_WIDTH, 0);
@@ -442,7 +444,8 @@ static void main_menu_refresh_theme(void) {
 
 		lv_color_t strip_fill = theme_now_playing_fill();
 		lv_obj_set_style_bg_color(mini_player, strip_fill, 0);
-		lv_obj_set_style_bg_opa(mini_player, LV_OPA_COVER, 0);
+		// Liquid Glass lets the blurred sleeve show through the live strip too.
+		lv_obj_set_style_bg_opa(mini_player, theme_is_liquid_glass() ? THEME_GLASS_PANEL_OPA : LV_OPA_COVER, 0);
 		mini_player_clear_edge();
 		main_menu_layout_tokyo_home(true);
 	} else {

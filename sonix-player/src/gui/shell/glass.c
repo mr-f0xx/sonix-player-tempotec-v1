@@ -44,10 +44,16 @@ static void glass_base_paint(void) {
 	if (!bottom) {
 		return;
 	}
-	lv_color_t lift = lv_color_mix(lv_color_white(), theme()->screen_bg, LV_OPA_10);
+	// A wallpaper the main menu always sits on, even before any track has
+	// artwork: the deep ground lifted towards the accent at the top and eased
+	// back to black at the foot, a soft colour wash rather than a flat panel.
+	// The blurred sleeve, when there is one, covers it edge to edge.
+	lv_color_t base = theme()->screen_bg;
+	lv_color_t top = lv_color_mix(theme()->accent, base, LV_OPA_30);
+	top = lv_color_mix(lv_color_white(), top, LV_OPA_10);
 	lv_obj_set_style_bg_opa(bottom, LV_OPA_COVER, 0);
-	lv_obj_set_style_bg_color(bottom, lift, 0);
-	lv_obj_set_style_bg_grad_color(bottom, theme()->screen_bg, 0);
+	lv_obj_set_style_bg_color(bottom, top, 0);
+	lv_obj_set_style_bg_grad_color(bottom, base, 0);
 	lv_obj_set_style_bg_grad_dir(bottom, LV_GRAD_DIR_VER, 0);
 }
 

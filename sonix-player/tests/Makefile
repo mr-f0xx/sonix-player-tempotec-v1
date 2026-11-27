@@ -1003,7 +1003,7 @@ printf-flag:
 UI_SRC = $(ROOT)/tests/ui/test_main_menu.c $(ROOT)/src/gui/shell/main_menu.c \
          $(ROOT)/src/gui/library/music.c $(ROOT)/src/gui/shell/popover.c \
          $(ROOT)/src/gui/shell/scrolltext.c \
-         $(ROOT)/src/gui/shell/gridpage.c $(ROOT)/src/gui/pet/peticon.c \
+         $(ROOT)/src/gui/shell/gridpage.c $(ROOT)/src/gui/shell/glassicons.c $(ROOT)/src/gui/pet/peticon.c \
          $(ROOT)/src/gui/streaming/soundcloud_icon.c \
          $(ROOT)/src/gui/streaming/jellyfin_icon.c \
          $(ROOT)/src/gui/settings/appearance.c \
@@ -1192,7 +1192,7 @@ TOOLS_SRC = $(ROOT)/tests/ui/test_tools_pages.c \
             $(ROOT)/src/system/pet/pet.c \
             $(ROOT)/src/system/notes/notesstore.c $(ROOT)/src/system/text/textfile.c \
             $(ROOT)/src/gui/library/textview.c $(ROOT)/src/gui/library/pictureview.c \
-            $(ROOT)/src/gui/shell/morepage.c $(ROOT)/src/gui/shell/gridpage.c \
+            $(ROOT)/src/gui/shell/morepage.c $(ROOT)/src/gui/shell/gridpage.c $(ROOT)/src/gui/shell/glassicons.c \
             $(ROOT)/src/gui/streaming/soundcloud_icon.c \
             $(ROOT)/src/gui/streaming/jellyfin_icon.c \
             $(ROOT)/src/system/addons/addons.c \
@@ -1866,7 +1866,7 @@ SOUNDCLOUDPAGE_SRC = $(ROOT)/tests/ui/test_soundcloud_pages.c \
                      $(ROOT)/src/gui/streaming/soundcloud_icon.c \
                      $(ROOT)/src/gui/streaming/jellyfin_icon.c \
                      $(ROOT)/src/gui/shell/settingsrow.c \
-                     $(ROOT)/src/gui/shell/gridpage.c \
+                     $(ROOT)/src/gui/shell/gridpage.c $(ROOT)/src/gui/shell/glassicons.c \
                      $(ROOT)/src/gui/shell/keyboard.c \
                      $(ROOT)/src/gui/shell/popover.c \
                      $(ROOT)/src/gui/shell/spinner.c \
@@ -1896,7 +1896,7 @@ SUBSONICPAGE_SRC = $(ROOT)/tests/ui/test_subsonic_pages.c \
                      $(ROOT)/src/gui/streaming/soundcloud_icon.c \
                      $(ROOT)/src/gui/streaming/jellyfin_icon.c \
                      $(ROOT)/src/gui/shell/settingsrow.c \
-                     $(ROOT)/src/gui/shell/gridpage.c \
+                     $(ROOT)/src/gui/shell/gridpage.c $(ROOT)/src/gui/shell/glassicons.c \
                      $(ROOT)/src/gui/shell/keyboard.c \
                      $(ROOT)/src/gui/shell/popover.c \
                      $(ROOT)/src/gui/shell/spinner.c \
@@ -1924,7 +1924,7 @@ RADIOPAGE_SRC = $(ROOT)/tests/ui/test_radio_pages.c \
                      $(ROOT)/src/gui/streaming/soundcloud_icon.c \
                      $(ROOT)/src/gui/streaming/jellyfin_icon.c \
                      $(ROOT)/src/gui/shell/settingsrow.c \
-                     $(ROOT)/src/gui/shell/gridpage.c \
+                     $(ROOT)/src/gui/shell/gridpage.c $(ROOT)/src/gui/shell/glassicons.c \
                      $(ROOT)/src/gui/shell/azindex.c \
                      $(ROOT)/src/gui/shell/keyboard.c \
                      $(ROOT)/src/gui/shell/popover.c \
@@ -1957,7 +1957,7 @@ QOBUZPAGE_SRC = $(ROOT)/tests/ui/test_qobuz_pages.c \
                      $(ROOT)/src/gui/streaming/soundcloud_icon.c \
                      $(ROOT)/src/gui/streaming/jellyfin_icon.c \
                      $(ROOT)/src/gui/shell/settingsrow.c \
-                     $(ROOT)/src/gui/shell/gridpage.c \
+                     $(ROOT)/src/gui/shell/gridpage.c $(ROOT)/src/gui/shell/glassicons.c \
                      $(ROOT)/src/gui/shell/keyboard.c \
                      $(ROOT)/src/gui/shell/popover.c \
                      $(ROOT)/src/gui/shell/spinner.c \
@@ -2010,7 +2010,7 @@ JELLYFINPAGE_SRC = $(ROOT)/tests/ui/test_jellyfin_pages.c \
                    $(ROOT)/src/gui/streaming/jellyfin_icon.c \
                    $(ROOT)/src/gui/streaming/soundcloud_icon.c \
                    $(ROOT)/src/gui/shell/settingsrow.c \
-                   $(ROOT)/src/gui/shell/gridpage.c \
+                   $(ROOT)/src/gui/shell/gridpage.c $(ROOT)/src/gui/shell/glassicons.c \
                    $(ROOT)/src/gui/shell/keyboard.c \
                    $(ROOT)/src/gui/shell/popover.c \
                    $(ROOT)/src/gui/shell/spinner.c \
@@ -2080,7 +2080,7 @@ $(BUILD)/test_networkmusic_ui: $(NETWORKMUSIC_UI_OBJ)
 LAN_PREVIEW_SRC = tests/ui/test_streaming_preview.c src/gui/streaming/streaming.c \
                   src/gui/streaming/networkmusicpage.c src/gui/wireless/listentogether.c
 LAN_PREVIEW_SHARED = $(NETWORKMUSIC_UI_COMMON) $(ROOT)/src/system/net/networkcredentials.c \
-                     $(ROOT)/src/system/core/json.c $(ROOT)/src/gui/shell/gridpage.c $(ROOT)/src/gui/pet/peticon.c \
+                     $(ROOT)/src/system/core/json.c $(ROOT)/src/gui/shell/gridpage.c $(ROOT)/src/gui/shell/glassicons.c $(ROOT)/src/gui/pet/peticon.c \
                      $(ROOT)/src/gui/streaming/soundcloud_icon.c $(ROOT)/src/gui/streaming/jellyfin_icon.c
 LAN_PREVIEW_OBJ = $(addprefix $(BUILD)/ui-preview/,$(LAN_PREVIEW_SRC:.c=.o)) \
                   $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(LAN_PREVIEW_SHARED)) $(UI_LVGL_OBJ)

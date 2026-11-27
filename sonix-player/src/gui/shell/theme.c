@@ -896,8 +896,11 @@ bool theme_uses_function_glyphs(void) {
 	if (selected_kind == THEME_KIND_CUSTOM) {
 		return theme_custom_tokyo_layout();
 	}
+	// Liquid Glass wears the same compact V1 layout as Tokyo Night -- the
+	// horizontal icon-and-label cards, the home header and the live mini-player
+	// -- with its glyphs drawn as iOS-style app badges (see glassicons.c).
 	return selected_kind == THEME_KIND_TOKYO_NIGHT || selected_kind == THEME_KIND_AMBER_ON_BLACK ||
-		   selected_kind == THEME_KIND_OLED;
+		   selected_kind == THEME_KIND_OLED || selected_kind == THEME_KIND_LIQUID_GLASS;
 }
 
 lv_color_t theme_ink_on(lv_color_t fill) { return theme_color_is_light(fill) ? lv_color_black() : lv_color_white(); }
@@ -913,6 +916,28 @@ lv_color_t theme_semantic_color(theme_semantic_t role) {
 		lv_color_t from_set;
 		if (icon_semantic_color(role, &from_set)) {
 			return from_set;
+		}
+	}
+	// Liquid Glass colours its app badges and status marks with the iOS system
+	// palette (dark variant): a distinct hue per role, fixed rather than borrowed
+	// from the accent, the way app icons keep their own colours under any tint.
+	if (selected_kind == THEME_KIND_LIQUID_GLASS) {
+		switch (role) {
+		case THEME_SEMANTIC_BLUE:
+			return lv_color_make(10, 132, 255);   // #0a84ff
+		case THEME_SEMANTIC_CYAN:
+			return lv_color_make(100, 210, 255);  // #64d2ff
+		case THEME_SEMANTIC_PURPLE:
+			return lv_color_make(191, 90, 242);   // #bf5af2
+		case THEME_SEMANTIC_GREEN:
+			return lv_color_make(48, 209, 88);    // #30d158
+		case THEME_SEMANTIC_AMBER:
+			return lv_color_make(255, 159, 10);   // #ff9f0a
+		case THEME_SEMANTIC_RED:
+			return lv_color_make(255, 69, 58);    // #ff453a
+		case THEME_SEMANTIC_MUTED:
+		default:
+			return lv_color_make(142, 142, 147);  // #8e8e93
 		}
 	}
 	if (role == THEME_SEMANTIC_MUTED) {

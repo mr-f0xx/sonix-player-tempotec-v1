@@ -888,12 +888,16 @@ static void appearance_preview_refresh(void) {
 	bool tokyo = theme_is_tokyo_night();
 	bool amber = theme_is_amber_on_black();
 	bool oled = theme_is_oled();
-	bool show = bp_is_tempotec_v1() && (tokyo || amber || oled);
+	bool glass = theme_is_liquid_glass();
+	bool show = bp_is_tempotec_v1() && (tokyo || amber || oled || glass);
 	if (theme_palette_card) {
 		lv_obj_set_hidden(theme_palette_card, !show);
 	}
 	if (theme_palette_title) {
-		const char *title = amber ? "appearance_amber_palette" : oled ? "appearance_oled_palette" : "appearance_tokyo_palette";
+		const char *title = amber ? "appearance_amber_palette"
+							: oled ? "appearance_oled_palette"
+							: glass ? "appearance_glass_palette"
+									: "appearance_tokyo_palette";
 		lv_label_set_text(theme_palette_title, tr(title));
 	}
 	if (function_glyph_card) {

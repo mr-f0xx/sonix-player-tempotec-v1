@@ -27,6 +27,7 @@
 #include "src/gui/settings/musicsettings.h"
 #include "src/gui/settings/settings.h"
 #include "src/gui/shell/corners.h"
+#include "src/gui/shell/glassicons.h"
 #include "src/gui/shell/gridpage.h"
 #include "src/gui/shell/icons.h"
 #include "src/gui/shell/main_menu.h"
@@ -415,7 +416,63 @@ static void set_icons_only(bool enabled) {
  * but LVGL still enlarged a tiny antialiased toolbar bitmap inside it. Verify
  * the real software renderer preserves the new source's pixels one-for-one,
  * including its alpha edges and theme tint, in ARGB8888 and the panel's RGB565. */
+/* Liquid Glass replaces the tinted mask with a pre-composited iOS app badge.
+ * Verify the widget draws exactly that badge: one ARGB8888 picture at the
+ * requested size, unscaled, with its squircle alpha edges and baked colours
+ * preserved in both ARGB8888 and the panel's RGB565. */
+static void check_glass_badge(lv_obj_t *icon, int tile, int size) {
+	const lv_image_dsc_t *source = lv_image_get_src(icon);
+	const lv_image_dsc_t *glyph = main_menu_icon_native(tile, true, size);
+	assert(glyph);
+	const lv_image_dsc_t *expected = NULL;
+	for (int tone = THEME_SEMANTIC_BLUE; tone <= THEME_SEMANTIC_MUTED; tone++) {
+		const lv_image_dsc_t *badge = glass_icon_badge_find(glyph, size, theme_semantic_color((theme_semantic_t)tone));
+		if (badge && badge == source) {
+			expected = badge;
+			break;
+		}
+	}
+	assert(expected && expected != glyph);
+	assert(source->header.cf == LV_COLOR_FORMAT_ARGB8888);
+	assert(source->header.w == size && source->header.h == size);
+	assert(lv_image_get_scale_x(icon) == LV_SCALE_NONE);
+	assert(lv_image_get_scale_y(icon) == LV_SCALE_NONE);
+	assert(lv_image_get_rotation(icon) == 0);
+	assert(lv_obj_get_style_image_recolor_opa(icon, 0) == LV_OPA_TRANSP);
+	lv_draw_buf_t *rgba = lv_snapshot_take(icon, LV_COLOR_FORMAT_ARGB8888);
+	lv_draw_buf_t *rgb565 = lv_snapshot_take(icon, LV_COLOR_FORMAT_RGB565);
+	assert(rgba && rgb565);
+	assert(rgba->header.w == size && rgba->header.h == size);
+	int opaque_pixels = 0;
+	for (int y = 0; y < size; y++) {
+		const uint8_t *src = source->data + y * source->header.stride;
+		const uint8_t *out = rgba->data + y * rgba->header.stride;
+		const uint8_t *panel = rgb565->data + y * rgb565->header.stride;
+		for (int x = 0; x < size; x++) {
+			int alpha = src[x * 4 + 3];
+			assert(abs(out[x * 4 + 3] - alpha) <= 3);
+			if (alpha != 255) {
+				continue;
+			}
+			opaque_pixels++;
+			uint8_t b = src[x * 4], g = src[x * 4 + 1], r = src[x * 4 + 2];
+			assert(out[x * 4] == b && out[x * 4 + 1] == g && out[x * 4 + 2] == r);
+			uint16_t actual;
+			memcpy(&actual, panel + x * 2, sizeof(actual));
+			uint16_t expected565 = (uint16_t)(((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3));
+			assert(actual == expected565);
+		}
+	}
+	assert(opaque_pixels > 0);
+	lv_draw_buf_destroy(rgba);
+	lv_draw_buf_destroy(rgb565);
+}
+
 static void check_native_icon(lv_obj_t *icon, int tile, int size) {
+	if (theme_is_liquid_glass()) {
+		check_glass_badge(icon, tile, size);
+		return;
+	}
 	const lv_image_dsc_t *source = lv_image_get_src(icon);
 	assert(source == main_menu_icon_native(tile, theme_uses_function_glyphs(), size));
 	assert(source && source->header.w == size && source->header.h == size);
@@ -504,7 +561,8 @@ static void check_grid(lv_obj_t *grid, bool icons_only) {
 					visible_halos++;
 				}
 			}
-			bool glow_expected = !icons_only && bp_is_tempotec_v1() && theme_uses_function_glyphs() && (i % 2 == 0);
+			bool glow_expected = !icons_only && bp_is_tempotec_v1() && theme_uses_function_glyphs() &&
+								 !theme_is_liquid_glass() && (i % 2 == 0);
 			assert(visible_halos == (glow_expected ? 1 : 0));
 		}
 		if (!icons_only) {
@@ -963,7 +1021,14 @@ int main(int argc, char **argv) {
 		tile_metrics_t year_tile = tile_metrics(lv_obj_get_child(section_grid, 2));
 		tile_metrics_t most_tile = tile_metrics(lv_obj_get_child(section_grid, 3));
 		tile_metrics_t play_tile = tile_metrics(lv_obj_get_child(section_grid, 4));
-		if (theme_uses_function_glyphs()) {
+		if (theme_is_liquid_glass()) {
+			/* The same function glyphs, dressed as iOS app badges at the compact
+			 * menu size with each destination's semantic hue. */
+			int sz = bp_is_tempotec_v1() ? 22 : 42;
+			assert(year_tile.source == glass_icon_badge(&icon_year, sz, theme_semantic_color(THEME_SEMANTIC_AMBER)));
+			assert(most_tile.source == glass_icon_badge(&icon_most_played, sz, theme_semantic_color(THEME_SEMANTIC_PURPLE)));
+			assert(play_tile.source == glass_icon_badge(&icon_list_music, sz, theme_semantic_color(THEME_SEMANTIC_CYAN)));
+		} else if (theme_uses_function_glyphs()) {
 			assert(year_tile.source == &icon_year);
 			assert(most_tile.source == &icon_most_played);
 			assert(play_tile.source == &icon_list_music);
