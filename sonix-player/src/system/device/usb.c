@@ -140,12 +140,24 @@ static void usb_inquiry_string(char *out, size_t out_size) {
 #ifndef STORAGE_UDC_PATH
 #define STORAGE_UDC_PATH STORAGE_GADGET "/UDC"
 #endif
+#ifndef USB_TCS1421_CFG
+#define USB_TCS1421_CFG "/sys/devices/platform/tcs1421/tcs1421_cfg"
+#endif
+#ifndef USB_TYPEC_PORT_FMT
+#define USB_TYPEC_PORT_FMT "/sys/class/typec/port%d/port_type"
+#endif
 
 // Protected by storage_lock; set only when the host trial parked our own
 // disconnected gadget. It is rebound after normal role arbitration permits it.
 static bool host_parked_storage;
+// Protected by storage_lock; tracks the CC role held while USB DAC mode is on.
+static bool dac_forced_tcs;
+static char dac_saved_tcs_mode[32];
+static int dac_forced_typec_port = -1;
 static bool gadget_write_udc(const char *text);
 static bool gadget_rebind(void);
+static void dac_port_force_sink_locked(void);
+static void dac_port_restore_role_locked(void);
 
 bool usb_storage_active(void) { return storage_active; }
 
@@ -245,6 +257,21 @@ bool usb_set_dac_mode(bool on) {
 			suppress_popups = false;
 			return false;
 		}
+		// Force the Type-C CC controller into Sink (Rd-only UFP) before the
+		// audio gadget is bound, matching stock hiby_player's PC/Phone DAC
+		// entry. Without this, the V1's TCS1421 stays in NormalDRP and USB-C
+		// DRP phones (such as iPhone) never assume the Host/DFP role or supply
+		// VBUS. Held until DAC mode exits; usbaudio.c leaves the role alone
+		// while usb_dac_mode() is true.
+		pthread_mutex_lock(&storage_lock);
+		dac_port_force_sink_locked();
+		pthread_mutex_unlock(&storage_lock);
+	} else {
+		// Restore the pre-DAC dual-role setting before clearing dac_owns_usb so
+		// neither usbaudio.c nor usbhostmode_tick() observes a stale Sink role.
+		pthread_mutex_lock(&storage_lock);
+		dac_port_restore_role_locked();
+		pthread_mutex_unlock(&storage_lock);
 	}
 	dac_owns_usb = on;
 	owner_changed();
@@ -349,6 +376,117 @@ static void typec_force_sink(void) {
 	if (!announced) {
 		announced = true;
 		fprintf(stderr, "usb: no writable /sys/class/typec/portN/port_type; leaving the role alone\n");
+	}
+}
+
+// Forces the CC controller to Sink for the duration of USB DAC mode, where the
+// player is unambiguously a peripheral. Supports both the TempoTec V1's TCS1421
+// platform attribute ("Sink" / "NormalDRP") and the standard Linux Type-C class
+// ("sink" / "dual"). Caller holds storage_lock.
+static void dac_port_force_sink_locked(void) {
+	if (access(USB_TCS1421_CFG, W_OK) == 0) {
+		char prev[32] = "?";
+		char *content = read_file_content(USB_TCS1421_CFG);
+		if (content) {
+			content[strcspn(content, "\r\n")] = '\0';
+			if (content[0]) {
+				snprintf(prev, sizeof(prev), "%s", content);
+			}
+			free(content);
+		}
+		if (!dac_forced_tcs) {
+			// Restore dual-role mode when DAC mode exits. Preserve StrongDRP if
+			// it was active; otherwise return to the V1's NormalDRP default.
+			snprintf(dac_saved_tcs_mode, sizeof(dac_saved_tcs_mode), "%s",
+					 strcmp(prev, "StrongDRP") == 0 ? "StrongDRP" : "NormalDRP");
+		}
+		int err = 0;
+		FILE *f = fopen(USB_TCS1421_CFG, "w");
+		if (!f) {
+			err = errno;
+		} else {
+			if (fputs("Sink\n", f) < 0) {
+				err = errno;
+			}
+			if (fclose(f) != 0 && !err) {
+				err = errno;
+			}
+		}
+		if (!err) {
+			dac_forced_tcs = true;
+		}
+		fprintf(stderr, "usb: DAC mode: %s <- Sink (was %s) (%s)\n", USB_TCS1421_CFG, prev,
+				err ? strerror(err) : "ok");
+		return;
+	}
+
+	for (int port = 0; port < 4; port++) {
+		char path[PATH_MAX];
+		int n = snprintf(path, sizeof(path), USB_TYPEC_PORT_FMT, port);
+		if (n < 0 || (size_t)n >= sizeof(path) || access(path, W_OK) != 0) {
+			continue;
+		}
+		int err = 0;
+		FILE *f = fopen(path, "w");
+		if (!f) {
+			err = errno;
+		} else {
+			if (fputs("sink", f) < 0) {
+				err = errno;
+			}
+			if (fclose(f) != 0 && !err) {
+				err = errno;
+			}
+		}
+		if (!err && dac_forced_typec_port < 0) {
+			dac_forced_typec_port = port;
+		}
+		fprintf(stderr, "usb: DAC mode: %s <- sink (%s)\n", path, err ? strerror(err) : "ok");
+		return;
+	}
+}
+
+static void dac_port_restore_role_locked(void) {
+	if (dac_forced_tcs) {
+		const char *restore = dac_saved_tcs_mode[0] ? dac_saved_tcs_mode : "NormalDRP";
+		int err = 0;
+		FILE *f = fopen(USB_TCS1421_CFG, "w");
+		if (!f) {
+			err = errno;
+		} else {
+			if (fprintf(f, "%s\n", restore) < 0) {
+				err = errno;
+			}
+			if (fclose(f) != 0 && !err) {
+				err = errno;
+			}
+		}
+		fprintf(stderr, "usb: DAC mode off: %s <- %s (%s)\n", USB_TCS1421_CFG, restore,
+				err ? strerror(err) : "ok");
+		dac_forced_tcs = false;
+		dac_saved_tcs_mode[0] = '\0';
+		return;
+	}
+
+	if (dac_forced_typec_port >= 0) {
+		char path[PATH_MAX];
+		int n = snprintf(path, sizeof(path), USB_TYPEC_PORT_FMT, dac_forced_typec_port);
+		if (n >= 0 && (size_t)n < sizeof(path)) {
+			int err = 0;
+			FILE *f = fopen(path, "w");
+			if (!f) {
+				err = errno;
+			} else {
+				if (fputs("dual", f) < 0) {
+					err = errno;
+				}
+				if (fclose(f) != 0 && !err) {
+					err = errno;
+				}
+			}
+			fprintf(stderr, "usb: DAC mode off: %s <- dual (%s)\n", path, err ? strerror(err) : "ok");
+		}
+		dac_forced_typec_port = -1;
 	}
 }
 

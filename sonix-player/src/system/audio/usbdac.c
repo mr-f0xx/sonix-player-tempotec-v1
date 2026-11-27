@@ -36,6 +36,23 @@
 #endif
 #define UAC_FUNC GADGET "/functions/uac_sa.a"
 #define UAC_NODE "/dev/uac_sa"
+#ifndef UAC_UDC_CLASS
+#define UAC_UDC_CLASS "/sys/class/udc"
+#endif
+#ifndef UAC_CLASS_PRIMARY
+#define UAC_CLASS_PRIMARY "/sys/class/uac_sa/uac_sa"
+#endif
+#ifndef UAC_CLASS_FALLBACK
+#define UAC_CLASS_FALLBACK "/sys/class/android_usb/f_uac_sa"
+#endif
+
+// Stock TempoTec V1 USB DAC identity (/usr/resource/config.json: vid=0x22E1,
+// dac_pid=0xF008). Kept distinct from mass storage (0x32BB:0x0101) so hosts do
+// not reuse cached storage descriptors, and written explicitly so a gadget
+// rebuilt after ADB teardown never advertises 0x0000:0x0000.
+#define DAC_ID_VENDOR "0x22E1"
+#define DAC_ID_PRODUCT "0xF008"
+#define DAC_MANUFACTURER "TempoTec"
 
 // The ioctls the driver answers, with the numbers the stock player passes.
 #define UAC_IOCTL_STATE 0	// int: 0 idle, >0 the host is streaming
@@ -298,7 +315,7 @@ static const char *chip_serial(void) {
 }
 
 static bool first_udc(char *out, size_t out_size) {
-	DIR *dir = opendir("/sys/class/udc");
+	DIR *dir = opendir(UAC_UDC_CLASS);
 	if (!dir) {
 		return false;
 	}
@@ -365,6 +382,8 @@ static bool gadget_build(void) {
 	write_file(GADGET "/bDeviceProtocol", "1");
 	write_file(GADGET "/bcdUSB", "0x200");
 	write_file(GADGET "/bcdDevice", "0x100");
+	write_noted(GADGET "/idVendor", DAC_ID_VENDOR);
+	write_noted(GADGET "/idProduct", DAC_ID_PRODUCT);
 
 	// No IN stream. The kernel defaults p_chmask to 3, which would declare a
 	// capture interface -- the device as a microphone -- that nothing here ever
@@ -383,7 +402,7 @@ static bool gadget_build(void) {
 
 	// The device's own name. Without these string descriptors a host has
 	// nothing to call the device but "Unknown USB Audio Device".
-	write_noted(GADGET "/strings/0x409/manufacturer", "HiBy");
+	write_noted(GADGET "/strings/0x409/manufacturer", DAC_MANUFACTURER);
 	write_noted(GADGET "/strings/0x409/product", usb_product());
 	write_noted(GADGET "/strings/0x409/serialnumber", chip_serial());
 
@@ -420,23 +439,30 @@ static bool gadget_build(void) {
 	}
 	printf("usbdac: gadget bound to %s\n", udc);
 
-	// Only after the bind. /sys/class/android_usb/f_uac_sa/ is created by the
-	// function when it is instantiated, so writing to it any earlier fails with
-	// ENOENT.
+	// Only after the bind. On the V1 kernel f_uac_sa registers its attributes
+	// under /sys/class/uac_sa/uac_sa/; older Android-gadget kernels use
+	// /sys/class/android_usb/f_uac_sa/.
 	//
 	// dynamic_feedback is the one that matters. Asynchronous USB audio needs
 	// the device to keep telling the host how fast its own clock is really
 	// consuming, so the host can trim what it sends; without it the two clocks
 	// drift and the host aborts within a second of pressing play. The stock
 	// settings carry it as `dac_feedback` and default it on.
-	static const char *const CLASS_DIR = "/sys/class/android_usb/f_uac_sa";
-	if (path_exists(CLASS_DIR)) {
+	const char *class_dir = NULL;
+	const char *candidates[] = {UAC_CLASS_PRIMARY, UAC_CLASS_FALLBACK, NULL};
+	for (int i = 0; candidates[i]; i++) {
+		if (path_exists(candidates[i])) {
+			class_dir = candidates[i];
+			break;
+		}
+	}
+	if (class_dir) {
 		char attr[512];
-		snprintf(attr, sizeof(attr), "%s/dynamic_feedback", CLASS_DIR);
+		snprintf(attr, sizeof(attr), "%s/dynamic_feedback", class_dir);
 		write_noted(attr, "1");
 
 		// Log the rest of the directory too, so the values are on record.
-		DIR *dir = opendir(CLASS_DIR);
+		DIR *dir = opendir(class_dir);
 		if (dir) {
 			struct dirent *de;
 			while ((de = readdir(dir)) != NULL) {
@@ -444,15 +470,16 @@ static bool gadget_build(void) {
 					continue;
 				}
 				char value[128];
-				snprintf(attr, sizeof(attr), "%s/%s", CLASS_DIR, de->d_name);
+				snprintf(attr, sizeof(attr), "%s/%s", class_dir, de->d_name);
 				if (read_first_line(attr, value, sizeof(value))) {
-					printf("usbdac:   f_uac_sa/%s = %s\n", de->d_name, value);
+					printf("usbdac:   %s/%s = %s\n", class_dir, de->d_name, value);
 				}
 			}
 			closedir(dir);
 		}
 	} else {
-		fprintf(stderr, "usbdac: %s does not exist; no feedback endpoint to enable\n", CLASS_DIR);
+		fprintf(stderr, "usbdac: neither %s nor %s exists; no feedback endpoint to enable\n", UAC_CLASS_PRIMARY,
+				UAC_CLASS_FALLBACK);
 	}
 
 	force_reenumeration();

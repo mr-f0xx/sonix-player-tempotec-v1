@@ -10,7 +10,7 @@
 
 static char fake_typec[256], fake_partner[256], fake_tcs[256], fake_id[256], fake_bus[256];
 static char fake_sound[256];
-static bool fake_vbus, fake_probe;
+static bool fake_vbus, fake_probe, fake_dac;
 static time_t fake_now = 100;
 static time_t fake_time(time_t *out) { if (out) *out = fake_now; return fake_now; }
 
@@ -26,6 +26,7 @@ static time_t fake_time(time_t *out) { if (out) *out = fake_now; return fake_now
 #undef time
 
 bool usb_vbus_present(void) { return fake_vbus; }
+bool usb_dac_mode(void) { return fake_dac; }
 bool usbhostprobe_active(void) { return fake_probe; }
 void usbhostprobe_recover(void) {}
 
@@ -80,6 +81,23 @@ int main(void) {
 	expect(fake_tcs, "Source\n");
 	assert(!usbaudio_ensure_dual());
 	fake_probe = false;
+
+	// While USB DAC mode holds the port as Sink on an empty connector (waiting
+	// for an iPhone or PC cable), arbitration must not revert TCS1421 back to
+	// NormalDRP, and must clear handover_pending so nothing treats it as host.
+	put(fake_tcs, "Sink\n");
+	fake_dac = true;
+	for (int i = 0; i < 20; i++) { arbitrate_port(false); fake_now++; }
+	assert(!usbaudio_handover_pending());
+	expect(fake_tcs, "Sink\n");
+	assert(!usbaudio_ensure_dual());
+	assert(!usbaudio_init());
+	expect(fake_tcs, "Sink\n");
+	// Once DAC mode ends with the port still empty, normal arbitration resumes
+	// and restores NormalDRP after RELEASE_SECS.
+	fake_dac = false;
+	for (int i = 0; i < 10; i++) { arbitrate_port(false); fake_now++; }
+	expect(fake_tcs, "NormalDRP\n");
 
 	// An enumerated audio interface holds the host-side handover even before
 	// ALSA exposes a card, including on kernels with no readable ID line.
