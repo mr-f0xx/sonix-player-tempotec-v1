@@ -117,7 +117,17 @@ static void apply_theme(void) {
 	}
 
 	lv_obj_set_style_bg_color(overlay, theme()->panel, 0);
-	lv_obj_set_style_bg_opa(overlay, LV_OPA_90, 0);
+	// Liquid Glass lets more of the blurred sleeve show through the pill, and
+	// rims it with the same hairline of light the other panes wear.
+	lv_obj_set_style_bg_opa(overlay, theme_is_liquid_glass() ? LV_OPA_60 : LV_OPA_90, 0);
+	if (theme_is_liquid_glass()) {
+		lv_obj_set_style_outline_width(overlay, 1, 0);
+		lv_obj_set_style_outline_pad(overlay, 0, 0);
+		lv_obj_set_style_outline_color(overlay, lv_color_white(), 0);
+		lv_obj_set_style_outline_opa(overlay, THEME_GLASS_EDGE_OPA, 0);
+	} else {
+		lv_obj_set_style_outline_width(overlay, 0, 0);
+	}
 
 	lv_obj_set_style_image_recolor(overlay_icon, theme()->text_primary, 0);
 	lv_obj_set_style_image_recolor_opa(overlay_icon, LV_OPA_COVER, 0);

@@ -23,6 +23,7 @@
 #include "src/gui/bluetooth/btsettings.h"
 #include "src/gui/shell/confirm.h"
 #include "src/gui/shell/corners.h"
+#include "src/gui/shell/glass.h"
 #include "src/gui/settings/kblayoutpage.h"
 #include "src/gui/settings/screensaver.h"
 #include "src/gui/library/audiobookextras.h"
@@ -676,6 +677,11 @@ void gui_init(gui_config_t *cfg) {
 	// Then the saved icon set, if any: it publishes its glyph mode to the
 	// theme before any screen below asks what mode it draws in.
 	iconset_init();
+
+	// The Liquid Glass backdrop owns the bottom layer the clear pages show
+	// through. Built before any screen so it is already there when the first
+	// one is drawn; it follows the palette and the playing sleeve from here on.
+	glass_init();
 
 	// The player sheet is parked off the right edge of the top layer, which
 	// makes that layer scrollable unless told otherwise -- and then a sideways

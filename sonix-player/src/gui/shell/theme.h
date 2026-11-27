@@ -7,17 +7,31 @@
 
 // The built-in appearances. Dark and Light keep their existing palettes;
 // Tokyo Night, Amber on Black and OLED add three dark palettes designed for
-// the V1. OLED is true black with white as its accent.
+// the V1. OLED is true black with white as its accent. Liquid Glass is a dark
+// frosted palette: its panels, cards and bars are drawn semi-transparent over
+// a blurred copy of the playing track's artwork (see glass.c), the way the
+// Now Playing deck already frosts its controls.
 typedef enum {
 	THEME_KIND_DARK = 0,
 	THEME_KIND_LIGHT = 1,
 	THEME_KIND_TOKYO_NIGHT = 2,
 	THEME_KIND_AMBER_ON_BLACK = 3,
 	THEME_KIND_OLED = 4,
-	THEME_KIND_CUSTOM = 5,
+	THEME_KIND_LIQUID_GLASS = 5,
+	THEME_KIND_CUSTOM = 6,
 } theme_kind_t;
 
-#define THEME_KIND_COUNT 5 // built-in themes; Custom is a separate SD-card choice
+#define THEME_KIND_COUNT 6 // built-in themes; Custom is a separate SD-card choice
+
+// The frost levels Liquid Glass draws its shared surfaces at. The screen is
+// fully clear (the blurred artwork on the bottom layer shows through); panels
+// and bars keep half their dark ground; cards are a thin white film with a
+// hairline of light along the edge, the specular rim of a pane of glass.
+#define THEME_GLASS_PANEL_OPA LV_OPA_50
+#define THEME_GLASS_CARD_OPA LV_OPA_20
+#define THEME_GLASS_CARD_PRESSED_OPA LV_OPA_40
+#define THEME_GLASS_EDGE_OPA LV_OPA_20
+#define THEME_GLASS_ACCENT_OPA LV_OPA_80
 
 // Fixed semantic accents used by Tokyo Night's function-matched glyphs.
 // Amber on Black and OLED map every icon role to their accent (signal amber,
@@ -156,6 +170,9 @@ bool theme_is_dark(void);
 bool theme_is_tokyo_night(void);
 bool theme_is_amber_on_black(void);
 bool theme_is_oled(void);
+// Liquid Glass: the frosted, semi-transparent palette. Pages that paint a
+// local fill or opacity by hand ask this to draw it as glass instead.
+bool theme_is_liquid_glass(void);
 // The single-hue palettes, Amber on Black and OLED: every glyph and status
 // mark wears the accent, and nothing borrows a second hue (no Bluetooth blue,
 // codec colours or balanced-output gold). The roles still come from the

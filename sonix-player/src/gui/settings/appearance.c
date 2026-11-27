@@ -277,7 +277,17 @@ static void refresh_buttons(void) {
 			lv_obj_set_style_text_color(label, theme()->text_primary, 0);
 			lv_obj_set_style_border_width(button, 0, 0);
 		}
-		lv_obj_set_style_bg_opa(button, LV_OPA_COVER, 0);
+		// Liquid Glass draws its pills as glass too: the chosen one a tinted
+		// pane, the rest the dark panel ground, both with light ink and a little
+		// of the backdrop showing through -- not solid white fills.
+		if (theme_is_liquid_glass()) {
+			if (!active) {
+				lv_obj_set_style_bg_color(button, theme()->panel, 0);
+			}
+			lv_obj_set_style_bg_opa(button, active ? THEME_GLASS_ACCENT_OPA : THEME_GLASS_PANEL_OPA, 0);
+		} else {
+			lv_obj_set_style_bg_opa(button, LV_OPA_COVER, 0);
+		}
 	}
 }
 
@@ -1047,6 +1057,8 @@ void appearance_init(gui_config_t *cfg) {
 	theme_buttons[THEME_KIND_AMBER_ON_BLACK] = make_theme_choice(row,
 		compact ? "appearance_amber_short" : "appearance_amber_on_black", THEME_KIND_AMBER_ON_BLACK, compact);
 	theme_buttons[THEME_KIND_OLED] = make_theme_choice(row, "appearance_oled", THEME_KIND_OLED, compact);
+	theme_buttons[THEME_KIND_LIQUID_GLASS] =
+		make_theme_choice(row, "appearance_liquid_glass", THEME_KIND_LIQUID_GLASS, compact);
 	theme_buttons[THEME_KIND_CUSTOM] = make_theme_choice(row, "appearance_custom", THEME_KIND_CUSTOM, compact);
 
 	// Which Themes/*.ini file Custom wears, the way Boot picture names its

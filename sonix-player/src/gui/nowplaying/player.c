@@ -1491,6 +1491,12 @@ static void (*cover_release_cb)(void);
 
 void player_set_cover_release_cb(void (*cb)(void)) { cover_release_cb = cb; }
 
+// An additive follower of the artwork (Liquid Glass blurs it behind the whole
+// interface). Told when a picture lands and when it goes; see player.h.
+static void (*cover_observer_cb)(void);
+
+void player_register_cover_observer(void (*cb)(void)) { cover_observer_cb = cb; }
+
 // The path whose artwork is currently up. A live stream refreshes its text
 // several times a minute (every new on-air title), and re-decoding the same
 // station icon each time would be pointless work on the UI thread.
@@ -5124,6 +5130,9 @@ static void reload_cover(const char *filepath) {
 	topbar_set_player_frost(NULL); // detach the borrowed image before freeing it
 	cover_free(&current_cover);
 	cover_free(&current_backdrop);
+	if (cover_observer_cb) {
+		cover_observer_cb(); // the sleeve is gone; drop any blur made of it
+	}
 	player_status_color_apply();
 	full_backdrop_apply(); // nothing to show behind the V1's page until the next one lands
 	immersive_blur_apply(); // and nothing for the frost to be made of, likewise
@@ -5335,6 +5344,10 @@ static void apply_cover_result(void) {
 
 		// The words' background, ready before they are pulled in.
 		lyrics_bg_prepare();
+
+		if (cover_observer_cb) {
+			cover_observer_cb(); // a new sleeve is up; the glass follows it
+		}
 
 		lv_obj_invalidate(cover_panel);
 		lv_obj_invalidate(player_menu);

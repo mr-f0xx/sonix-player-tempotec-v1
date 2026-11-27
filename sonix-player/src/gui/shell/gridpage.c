@@ -365,7 +365,9 @@ static void gridpage_apply_theme_page(gridpage_theme_page_t *page) {
 		if (tile) {
 			// Tokyo Night tiles are separated by gaps and fill, not keylines.
 			// Clear both border and focus-outline styles; a zero-opacity line
-			// still reads as a card edge on the V1's small panel.
+			// still reads as a card edge on the V1's small panel. Liquid Glass
+			// keeps its rim through the shared card style's outline, which the
+			// non-glyph branch below leaves in place.
 			lv_obj_set_style_border_width(tile, 0, 0);
 			if (tokyo) {
 				lv_obj_set_style_outline_width(tile, 0, 0);

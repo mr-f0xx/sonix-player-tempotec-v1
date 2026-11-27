@@ -1391,7 +1391,18 @@ void settingsrow_pill_active(lv_obj_t *pill, bool active) {
 	if (!pill) {
 		return;
 	}
+	// Liquid Glass pills are dark glass with light ink -- an idle one the panel
+	// ground, the chosen one the accent -- so the label keeps real contrast
+	// instead of white type on a white frost. A little of the backdrop shows
+	// through both.
+	if (theme_is_liquid_glass()) {
+		lv_obj_set_style_bg_color(pill, active ? theme()->accent : theme()->panel, 0);
+		lv_obj_set_style_bg_opa(pill, active ? THEME_GLASS_ACCENT_OPA : THEME_GLASS_PANEL_OPA, 0);
+		lv_obj_set_style_text_color(lv_obj_get_child(pill, 0), active ? theme_on_accent() : theme()->text_primary, 0);
+		return;
+	}
 	lv_obj_set_style_bg_color(pill, active ? theme()->accent : theme()->surface_pressed, 0);
+	lv_obj_set_style_bg_opa(pill, LV_OPA_COVER, 0);
 	lv_obj_set_style_text_color(lv_obj_get_child(pill, 0), active ? theme_on_accent() : theme()->text_primary, 0);
 }
 

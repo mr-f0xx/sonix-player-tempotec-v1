@@ -107,6 +107,25 @@ static theme_palette_t palette_oled = {
 	.dark = true,
 };
 
+// Liquid Glass: a dark pane the interface is drawn on. The page itself is
+// clear -- the blurred artwork on the bottom layer (glass.c) is the background
+// -- and the surfaces are films over it: a thin white frost for cards, a
+// half-dark ground for the bars and panels, each with a hairline of light along
+// its edge. `surface` and `surface_pressed` are white because that is what the
+// frost is drawn in; the opacity, not the colour, is what makes it glass. The
+// accent is the iOS system blue, the one hue the frosted controls wear.
+static theme_palette_t palette_glass = {
+	.screen_bg = LV_COLOR_MAKE(16, 16, 20),         // the ground under the artwork
+	.surface = LV_COLOR_MAKE(255, 255, 255),        // card frost, drawn thin
+	.surface_pressed = LV_COLOR_MAKE(255, 255, 255),
+	.panel = LV_COLOR_MAKE(24, 24, 30),             // bars and overlays, half dark
+	.cover_bg = LV_COLOR_MAKE(24, 24, 30),
+	.text_primary = LV_COLOR_MAKE(255, 255, 255),
+	.text_secondary = LV_COLOR_MAKE(190, 190, 196),
+	.accent = LV_COLOR_MAKE(10, 132, 255),          // #0a84ff
+	.dark = true,
+};
+
 // Only basenames discovered in Themes are accepted; parsing is transactional.
 static char custom_root[512];
 static theme_palette_t palette_custom;
@@ -282,6 +301,8 @@ static theme_palette_t *selected_palette(void) {
 		return &palette_amber;
 	case THEME_KIND_OLED:
 		return &palette_oled;
+	case THEME_KIND_LIQUID_GLASS:
+		return &palette_glass;
 	case THEME_KIND_CUSTOM:
 		return &palette_custom;
 	case THEME_KIND_DARK:
@@ -331,6 +352,8 @@ static lv_color_t default_accent(theme_kind_t kind) {
 		return lv_color_make(255, 173, 46); // Amber on Black signal
 	case THEME_KIND_OLED:
 		return lv_color_make(255, 255, 255); // OLED white
+	case THEME_KIND_LIQUID_GLASS:
+		return lv_color_make(10, 132, 255); // the iOS system blue
 	case THEME_KIND_CUSTOM:
 		return custom_accent;
 	case THEME_KIND_DARK:
@@ -437,16 +460,65 @@ static void rebuild_active(void) {
 
 // Pushes the active palette into the shared styles.
 static void apply_palette(void) {
+	bool glass = selected_kind == THEME_KIND_LIQUID_GLASS;
+
 	lv_style_set_bg_color(&theme_style_screen, active->screen_bg);
+	// Liquid Glass clears the page so the blurred artwork on the bottom layer
+	// shows through; every other theme paints an opaque ground.
+	lv_style_set_bg_opa(&theme_style_screen, glass ? LV_OPA_TRANSP : LV_OPA_COVER);
 
 	lv_style_set_bg_color(&theme_style_panel, active->panel);
+	lv_style_set_bg_opa(&theme_style_panel, glass ? THEME_GLASS_PANEL_OPA : LV_OPA_COVER);
 
 	lv_style_set_bg_color(&theme_style_card, active->surface);
 	lv_style_set_text_color(&theme_style_card, active->text_primary);
+	lv_style_set_bg_opa(&theme_style_card, glass ? THEME_GLASS_CARD_OPA : LV_OPA_COVER);
+
+	// The specular rim: a hairline of light along the edge of every pane. It is
+	// an OUTLINE, not a border: a border is part of the box's content space and
+	// would shift every label and control inside by a pixel, where an outline
+	// is drawn just outside the box and moves nothing. Only Liquid Glass draws
+	// it; elsewhere the properties are taken back out so the cards and bars
+	// keep the edge-free look they have always had.
+	if (glass) {
+		lv_style_set_outline_width(&theme_style_panel, 1);
+		lv_style_set_outline_pad(&theme_style_panel, 0);
+		lv_style_set_outline_color(&theme_style_panel, lv_color_white());
+		lv_style_set_outline_opa(&theme_style_panel, THEME_GLASS_EDGE_OPA);
+		lv_style_set_outline_width(&theme_style_card, 1);
+		lv_style_set_outline_pad(&theme_style_card, 0);
+		lv_style_set_outline_color(&theme_style_card, lv_color_white());
+		lv_style_set_outline_opa(&theme_style_card, THEME_GLASS_EDGE_OPA);
+		lv_style_set_radius(&theme_style_card, 16);
+	} else {
+		lv_style_remove_prop(&theme_style_panel, LV_STYLE_OUTLINE_WIDTH);
+		lv_style_remove_prop(&theme_style_panel, LV_STYLE_OUTLINE_PAD);
+		lv_style_remove_prop(&theme_style_panel, LV_STYLE_OUTLINE_COLOR);
+		lv_style_remove_prop(&theme_style_panel, LV_STYLE_OUTLINE_OPA);
+		lv_style_remove_prop(&theme_style_card, LV_STYLE_OUTLINE_WIDTH);
+		lv_style_remove_prop(&theme_style_card, LV_STYLE_OUTLINE_PAD);
+		lv_style_remove_prop(&theme_style_card, LV_STYLE_OUTLINE_COLOR);
+		lv_style_remove_prop(&theme_style_card, LV_STYLE_OUTLINE_OPA);
+		lv_style_remove_prop(&theme_style_card, LV_STYLE_RADIUS);
+	}
 
 	bool oled = selected_kind == THEME_KIND_OLED;
 	lv_color_t pressed = oled ? lv_color_make(OLED_PRESSED_LEVEL, OLED_PRESSED_LEVEL, OLED_PRESSED_LEVEL) : active->surface_pressed;
 	lv_style_set_bg_color(&theme_style_card_pressed, pressed);
+	lv_style_set_bg_opa(&theme_style_card_pressed, glass ? THEME_GLASS_CARD_PRESSED_OPA : LV_OPA_COVER);
+	if (glass) {
+		lv_style_set_outline_width(&theme_style_card_pressed, 1);
+		lv_style_set_outline_pad(&theme_style_card_pressed, 0);
+		lv_style_set_outline_color(&theme_style_card_pressed, lv_color_white());
+		lv_style_set_outline_opa(&theme_style_card_pressed, THEME_GLASS_EDGE_OPA);
+		lv_style_set_radius(&theme_style_card_pressed, 16);
+	} else {
+		lv_style_remove_prop(&theme_style_card_pressed, LV_STYLE_OUTLINE_WIDTH);
+		lv_style_remove_prop(&theme_style_card_pressed, LV_STYLE_OUTLINE_PAD);
+		lv_style_remove_prop(&theme_style_card_pressed, LV_STYLE_OUTLINE_COLOR);
+		lv_style_remove_prop(&theme_style_card_pressed, LV_STYLE_OUTLINE_OPA);
+		lv_style_remove_prop(&theme_style_card_pressed, LV_STYLE_RADIUS);
+	}
 
 	lv_style_set_text_color(&theme_style_text, active->text_primary);
 	lv_style_set_text_color(&theme_style_text_dim, active->text_secondary);
@@ -454,16 +526,29 @@ static void apply_palette(void) {
 	lv_style_set_image_recolor(&theme_style_icon, active->text_primary);
 
 	lv_style_set_bg_color(&theme_style_switch, active->surface_pressed);
-	// The ring only exists on OLED. Elsewhere the property is left out of the
-	// style altogether, so the controls that carry it look exactly as before.
+	// An off switch (and the quick panel's idle circles, which wear this style)
+	// is a thin frost in Liquid Glass, a solid fill everywhere else.
+	lv_style_set_bg_opa(&theme_style_switch, glass ? THEME_GLASS_CARD_OPA : LV_OPA_COVER);
+	// The ring only exists on OLED and Liquid Glass. Clear both treatments
+	// first so switching between them leaves nothing behind, then draw the one
+	// this theme uses. OLED's is a border (part of its solid track); Liquid
+	// Glass's is an outline, so it rims the control without moving the knob.
+	lv_style_remove_prop(&theme_style_switch, LV_STYLE_BORDER_WIDTH);
+	lv_style_remove_prop(&theme_style_switch, LV_STYLE_BORDER_COLOR);
+	lv_style_remove_prop(&theme_style_switch, LV_STYLE_BORDER_OPA);
+	lv_style_remove_prop(&theme_style_switch, LV_STYLE_OUTLINE_WIDTH);
+	lv_style_remove_prop(&theme_style_switch, LV_STYLE_OUTLINE_PAD);
+	lv_style_remove_prop(&theme_style_switch, LV_STYLE_OUTLINE_COLOR);
+	lv_style_remove_prop(&theme_style_switch, LV_STYLE_OUTLINE_OPA);
 	if (oled) {
 		lv_style_set_border_width(&theme_style_switch, OLED_RING_WIDTH);
 		lv_style_set_border_color(&theme_style_switch, lv_color_make(OLED_RING_LEVEL, OLED_RING_LEVEL, OLED_RING_LEVEL));
 		lv_style_set_border_opa(&theme_style_switch, LV_OPA_COVER);
-	} else {
-		lv_style_remove_prop(&theme_style_switch, LV_STYLE_BORDER_WIDTH);
-		lv_style_remove_prop(&theme_style_switch, LV_STYLE_BORDER_COLOR);
-		lv_style_remove_prop(&theme_style_switch, LV_STYLE_BORDER_OPA);
+	} else if (glass) {
+		lv_style_set_outline_width(&theme_style_switch, 1);
+		lv_style_set_outline_pad(&theme_style_switch, 0);
+		lv_style_set_outline_color(&theme_style_switch, lv_color_white());
+		lv_style_set_outline_opa(&theme_style_switch, THEME_GLASS_EDGE_OPA);
 	}
 	// A switch that is on: the ring takes the accent and closes up with the
 	// track. A disabled one: the default theme washes it 50% towards a light
@@ -486,6 +571,8 @@ static void apply_palette(void) {
 
 	lv_style_set_bg_color(&theme_style_accent_bg, active->accent);
 	lv_style_set_text_color(&theme_style_accent_bg, theme_on_accent());
+	// The filled controls keep a little of the glass behind them showing through.
+	lv_style_set_bg_opa(&theme_style_accent_bg, glass ? THEME_GLASS_ACCENT_OPA : LV_OPA_COVER);
 	lv_style_set_bg_color(&theme_style_slider_track, active->text_secondary);
 }
 
@@ -596,6 +683,8 @@ static void select_active(void) {
 		selected_kind = THEME_KIND_AMBER_ON_BLACK;
 	} else if (saved_theme && strcmp(saved_theme, "oled") == 0) {
 		selected_kind = THEME_KIND_OLED;
+	} else if (saved_theme && strcmp(saved_theme, "liquid-glass") == 0) {
+		selected_kind = THEME_KIND_LIQUID_GLASS;
 	} else if (saved_theme && strcmp(saved_theme, "custom") == 0) {
 		selected_kind = load_custom(&palette_custom) ? THEME_KIND_CUSTOM : THEME_KIND_DARK;
 		if (selected_kind == THEME_KIND_CUSTOM) custom_accent = palette_custom.accent;
@@ -634,6 +723,7 @@ static void select_active(void) {
 		palette_tokyo.accent = custom_accent_color;
 		palette_amber.accent = custom_accent_color;
 		palette_oled.accent = custom_accent_color;
+		palette_glass.accent = custom_accent_color;
 		palette_custom.accent = custom_accent_color;
 	} else {
 		palette_dark.accent = ACCENT_COLORS[accent_index];
@@ -641,6 +731,7 @@ static void select_active(void) {
 		palette_tokyo.accent = accent_index == 0 ? default_accent(THEME_KIND_TOKYO_NIGHT) : ACCENT_COLORS[accent_index];
 		palette_amber.accent = accent_index == 0 ? default_accent(THEME_KIND_AMBER_ON_BLACK) : ACCENT_COLORS[accent_index];
 		palette_oled.accent = accent_index == 0 ? default_accent(THEME_KIND_OLED) : ACCENT_COLORS[accent_index];
+		palette_glass.accent = accent_index == 0 ? default_accent(THEME_KIND_LIQUID_GLASS) : ACCENT_COLORS[accent_index];
 		palette_custom.accent = accent_index == 0 ? custom_accent : ACCENT_COLORS[accent_index];
 	}
 
@@ -756,6 +847,12 @@ lv_color_t theme_now_playing_fill(void) {
 	if (selected_kind == THEME_KIND_OLED) {
 		return active->surface;
 	}
+	// Liquid Glass frosts its surfaces in white, so a tenth of the accent over
+	// white would be a pale grey; the strip takes the dark panel ground instead
+	// and is drawn semi-transparent by the page that shows it.
+	if (selected_kind == THEME_KIND_LIQUID_GLASS) {
+		return active->panel;
+	}
 	return lv_color_mix(active->accent, active->surface, LV_OPA_10);
 }
 
@@ -766,6 +863,8 @@ bool theme_is_tokyo_night(void) { return selected_kind == THEME_KIND_TOKYO_NIGHT
 bool theme_is_amber_on_black(void) { return selected_kind == THEME_KIND_AMBER_ON_BLACK; }
 
 bool theme_is_oled(void) { return selected_kind == THEME_KIND_OLED; }
+
+bool theme_is_liquid_glass(void) { return selected_kind == THEME_KIND_LIQUID_GLASS; }
 
 bool theme_is_monochrome(void) {
 	return selected_kind == THEME_KIND_AMBER_ON_BLACK || selected_kind == THEME_KIND_OLED;
@@ -1052,6 +1151,8 @@ static const char *theme_config_value(theme_kind_t kind) {
 		return "amber-on-black";
 	case THEME_KIND_OLED:
 		return "oled";
+	case THEME_KIND_LIQUID_GLASS:
+		return "liquid-glass";
 	case THEME_KIND_CUSTOM:
 		return "custom";
 	case THEME_KIND_DARK:
@@ -1105,11 +1206,13 @@ void theme_set_kind(theme_kind_t kind) {
 		palette_tokyo.accent = custom_accent_color;
 		palette_amber.accent = custom_accent_color;
 		palette_oled.accent = custom_accent_color;
+		palette_glass.accent = custom_accent_color;
 		palette_custom.accent = custom_accent_color;
 	} else {
 		palette_tokyo.accent = accent_index == 0 ? default_accent(THEME_KIND_TOKYO_NIGHT) : ACCENT_COLORS[accent_index];
 		palette_amber.accent = accent_index == 0 ? default_accent(THEME_KIND_AMBER_ON_BLACK) : ACCENT_COLORS[accent_index];
 		palette_oled.accent = accent_index == 0 ? default_accent(THEME_KIND_OLED) : ACCENT_COLORS[accent_index];
+		palette_glass.accent = accent_index == 0 ? default_accent(THEME_KIND_LIQUID_GLASS) : ACCENT_COLORS[accent_index];
 		palette_custom.accent = accent_index == 0 ? custom_accent : ACCENT_COLORS[accent_index];
 	}
 	rebuild_active();
@@ -1139,6 +1242,7 @@ void theme_set_accent(int index) {
 	palette_tokyo.accent = index == 0 ? default_accent(THEME_KIND_TOKYO_NIGHT) : ACCENT_COLORS[index];
 	palette_amber.accent = index == 0 ? default_accent(THEME_KIND_AMBER_ON_BLACK) : ACCENT_COLORS[index];
 	palette_oled.accent = index == 0 ? default_accent(THEME_KIND_OLED) : ACCENT_COLORS[index];
+	palette_glass.accent = index == 0 ? default_accent(THEME_KIND_LIQUID_GLASS) : ACCENT_COLORS[index];
 	palette_custom.accent = index == 0 ? custom_accent : ACCENT_COLORS[index];
 	rebuild_active(); // the tint is drawn from the accent, so it moves with it
 	apply_palette();
@@ -1161,6 +1265,7 @@ void theme_set_custom_accent(lv_color_t color) {
 	palette_tokyo.accent = color;
 	palette_amber.accent = color;
 	palette_oled.accent = color;
+	palette_glass.accent = color;
 	palette_custom.accent = color;
 	rebuild_active();
 	apply_palette();

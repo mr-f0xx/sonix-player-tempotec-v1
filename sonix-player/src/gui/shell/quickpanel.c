@@ -2602,7 +2602,7 @@ static void circle_button_set_on(lv_obj_t *btn, bool on) {
 
 	if (on) {
 		lv_obj_set_style_bg_color(btn, theme()->accent, 0);
-		lv_obj_set_style_bg_opa(btn, LV_OPA_COVER, 0);
+		lv_obj_set_style_bg_opa(btn, theme_is_liquid_glass() ? THEME_GLASS_ACCENT_OPA : LV_OPA_COVER, 0);
 		lv_obj_set_style_border_width(btn, 0, 0); // a filled circle needs no ring
 		if (icon) {
 			lv_obj_set_style_image_recolor(icon, theme_on_accent(), 0);

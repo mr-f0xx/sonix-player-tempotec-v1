@@ -1316,6 +1316,13 @@ CORNERS_SRC = $(ROOT)/tests/ui/test_corners.c $(ROOT)/src/gui/shell/corners.c \
 CORNERS_OBJ = $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(CORNERS_SRC)) \
               $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(UI_LVGL_SRC))
 
+# Liquid Glass: the theme wiring and the blurred-artwork backdrop. The player,
+# the cover blur and the cross-thread post are stubbed in the test itself.
+GLASS_UI_SRC = $(ROOT)/tests/ui/test_liquidglass.c $(ROOT)/src/gui/shell/glass.c \
+               $(ROOT)/src/gui/shell/theme.c $(ROOT)/src/system/core/config.c
+GLASS_UI_OBJ = $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(GLASS_UI_SRC)) \
+               $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(UI_LVGL_SRC))
+
 # The V1 player deck's real flex layout, including switching to and from Waveform.
 PLAYERDECK_SRC = $(ROOT)/tests/ui/test_playerdeck.c
 PLAYERDECK_OBJ = $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(PLAYERDECK_SRC)) \
@@ -1509,9 +1516,12 @@ STOCKKEYS_UI_SRC = $(ROOT)/tests/ui/test_stockkeys_ui.c \
 STOCKKEYS_UI_OBJ = $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(STOCKKEYS_UI_SRC)) \
                    $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(UI_LVGL_SRC))
 
-.PHONY: ui peq-ui corners playbutton stockkeys-ui tidal-ui
+.PHONY: ui peq-ui corners playbutton stockkeys-ui tidal-ui liquidglass-ui
 corners: $(BUILD)/test_corners
 	$(BUILD)/test_corners
+
+liquidglass-ui: $(BUILD)/test_liquidglass
+	$(BUILD)/test_liquidglass
 
 playbutton: $(BUILD)/test_playbutton
 	$(BUILD)/test_playbutton ../../sonix-packer/assets/V1/usr/resource/sonix/language
@@ -1539,7 +1549,7 @@ $(BUILD)/test_stockkeys_ui: $(ROOT)/build_gen/streamkeys_key.h $(STOCKKEYS_UI_OB
 .PHONY: ui
 ui: wifitransfer-ui batteryprofile-ui sdhealth-ui sdhealth-keys musictiles
 ui: $(BUILD)/test_sleeve_hold
-ui: $(BUILD)/test_browser_grid $(BUILD)/test_qobuzgenregrid $(BUILD)/test_main_menu $(BUILD)/test_screensaver $(BUILD)/test_tools_pages $(BUILD)/test_wifi_pages $(BUILD)/test_chargescreen $(BUILD)/test_power_display $(BUILD)/test_touch_wake $(BUILD)/test_lyricsearch $(BUILD)/test_games $(BUILD)/test_peq_profiles $(BUILD)/test_quickpanel_layout $(BUILD)/test_bootlogo $(BUILD)/test_btreceiversession $(BUILD)/test_home_swipe $(BUILD)/test_switcher_scroll $(BUILD)/test_corners $(BUILD)/test_playbutton $(BUILD)/test_musicsettings_rows $(BUILD)/test_albumgrid_ui $(BUILD)/test_stats $(BUILD)/test_volume_overlay $(BUILD)/test_playerdeck $(BUILD)/test_vinylayout $(BUILD)/test_stickerlayout $(BUILD)/test_waveform_overlay $(BUILD)/test_hiresbadge_ui $(BUILD)/test_statusbar_ui $(BUILD)/test_stockkeys_ui $(BUILD)/test_tidal_pages $(BUILD)/test_soundcloud_pages $(BUILD)/test_qobuz_pages $(BUILD)/test_jellyfin_pages $(BUILD)/test_fwupdate $(BUILD)/test_ota_auto
+ui: $(BUILD)/test_browser_grid $(BUILD)/test_qobuzgenregrid $(BUILD)/test_main_menu $(BUILD)/test_screensaver $(BUILD)/test_tools_pages $(BUILD)/test_wifi_pages $(BUILD)/test_chargescreen $(BUILD)/test_power_display $(BUILD)/test_touch_wake $(BUILD)/test_lyricsearch $(BUILD)/test_games $(BUILD)/test_peq_profiles $(BUILD)/test_quickpanel_layout $(BUILD)/test_bootlogo $(BUILD)/test_btreceiversession $(BUILD)/test_home_swipe $(BUILD)/test_switcher_scroll $(BUILD)/test_corners $(BUILD)/test_playbutton $(BUILD)/test_musicsettings_rows $(BUILD)/test_albumgrid_ui $(BUILD)/test_stats $(BUILD)/test_volume_overlay $(BUILD)/test_playerdeck $(BUILD)/test_vinylayout $(BUILD)/test_stickerlayout $(BUILD)/test_waveform_overlay $(BUILD)/test_hiresbadge_ui $(BUILD)/test_statusbar_ui $(BUILD)/test_stockkeys_ui $(BUILD)/test_tidal_pages $(BUILD)/test_soundcloud_pages $(BUILD)/test_qobuz_pages $(BUILD)/test_jellyfin_pages $(BUILD)/test_fwupdate $(BUILD)/test_ota_auto $(BUILD)/test_liquidglass
 	$(BUILD)/test_sleeve_hold ../../sonix-packer/assets/V1/usr/resource/sonix/language
 	$(BUILD)/test_qobuzgenregrid
 	$(BUILD)/test_main_menu ../../sonix-packer/assets/V1/usr/resource/sonix/language
@@ -1560,6 +1570,7 @@ ui: $(BUILD)/test_browser_grid $(BUILD)/test_qobuzgenregrid $(BUILD)/test_main_m
 	$(BUILD)/test_home_swipe
 	$(BUILD)/test_switcher_scroll
 	$(BUILD)/test_corners
+	$(BUILD)/test_liquidglass
 	$(BUILD)/test_playbutton ../../sonix-packer/assets/V1/usr/resource/sonix/language
 	$(BUILD)/test_musicsettings_rows ../../sonix-packer/assets/V1/usr/resource/sonix/language
 	$(BUILD)/test_browser_grid
@@ -1629,6 +1640,9 @@ $(BUILD)/test_games: $(GAMES_OBJ)
 $(BUILD)/test_corners: $(CORNERS_OBJ)
 	$(CC) -o $@ $^ $(LDFLAGS) $(LDLIBS)
 
+$(BUILD)/test_liquidglass: $(GLASS_UI_OBJ)
+	$(CC) -o $@ $^ $(LDFLAGS) $(LDLIBS)
+
 $(BUILD)/test_playbutton: $(PLAYBUTTON_OBJ)
 	$(CC) -o $@ $^ $(LDFLAGS) $(LDLIBS)
 
@@ -1641,7 +1655,7 @@ $(BUILD)/ui/lvgl/%.o: $(ROOT)/lvgl/%.c ui/lv_conf.h $(ROOT)/lv_conf.h
 	@mkdir -p $(dir $@)
 	$(CC) $(UI_CPPFLAGS) $(filter-out -Werror,$(UI_CFLAGS)) -c $< -o $@
 
--include $(sort $(QOBUZGENRE_UI_OBJ:.o=.d) $(PEQPAGE_OBJ:.o=.d) $(UI_OBJ:.o=.d) $(SAVER_OBJ:.o=.d) $(CHARGE_OBJ:.o=.d) $(WIFIPAGE_OBJ:.o=.d) $(LYRICSEARCH_OBJ:.o=.d) $(GAMES_OBJ:.o=.d) $(CORNERS_OBJ:.o=.d) $(STATS_UI_OBJ:.o=.d) $(PLAYBUTTON_OBJ:.o=.d) $(MUSICROWS_OBJ:.o=.d) $(VOLUMEOVERLAY_OBJ:.o=.d) $(PLAYERDECK_OBJ:.o=.d) $(VINYLLAYOUT_OBJ:.o=.d) $(STICKERLAYOUT_OBJ:.o=.d) $(WAVEOVERLAY_OBJ:.o=.d) $(HIRESBADGE_UI_OBJ:.o=.d) $(STOCKKEYS_UI_OBJ:.o=.d) $(TIDALPAGE_OBJ:.o=.d) $(DEVOPTIONS_OBJ:.o=.d))
+-include $(sort $(QOBUZGENRE_UI_OBJ:.o=.d) $(PEQPAGE_OBJ:.o=.d) $(UI_OBJ:.o=.d) $(SAVER_OBJ:.o=.d) $(CHARGE_OBJ:.o=.d) $(WIFIPAGE_OBJ:.o=.d) $(LYRICSEARCH_OBJ:.o=.d) $(GAMES_OBJ:.o=.d) $(CORNERS_OBJ:.o=.d) $(GLASS_UI_OBJ:.o=.d) $(STATS_UI_OBJ:.o=.d) $(PLAYBUTTON_OBJ:.o=.d) $(MUSICROWS_OBJ:.o=.d) $(VOLUMEOVERLAY_OBJ:.o=.d) $(PLAYERDECK_OBJ:.o=.d) $(VINYLLAYOUT_OBJ:.o=.d) $(STICKERLAYOUT_OBJ:.o=.d) $(WAVEOVERLAY_OBJ:.o=.d) $(HIRESBADGE_UI_OBJ:.o=.d) $(STOCKKEYS_UI_OBJ:.o=.d) $(TIDALPAGE_OBJ:.o=.d) $(DEVOPTIONS_OBJ:.o=.d))
 
 # Smart Mix track-count limits and traversal, with a memory-only graph fixture.
 GENIUS_SRC = test_genius.c $(ROOT)/src/system/library/genius.c

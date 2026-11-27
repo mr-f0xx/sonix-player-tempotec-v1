@@ -208,7 +208,17 @@ static lv_color_t kb_tray_color(void) {
 	if (theme_is_oled()) {
 		return theme()->screen_bg; // OLED fills nothing grey
 	}
+	if (theme_is_liquid_glass()) {
+		return theme()->panel; // the dark glass ground, drawn semi-transparent
+	}
 	return theme()->dark ? lv_color_make(22, 22, 22) : lv_color_make(206, 209, 216);
+}
+
+// The tray is a solid sheet in every theme but Liquid Glass, where it is a
+// pane of the same dark glass as the bars, letting the blurred sleeve behind
+// the page show through it.
+static lv_opa_t kb_tray_opa(void) {
+	return theme_is_liquid_glass() ? LV_OPA_80 : LV_OPA_COVER;
 }
 
 // How many keys a row of the panel carries now, and what the one at `col`
@@ -974,7 +984,7 @@ static void kb_refresh_theme(void) {
 		}
 		if (kb->tray) {
 			lv_obj_set_style_bg_color(kb->tray, kb_tray_color(), 0);
-			lv_obj_set_style_bg_opa(kb->tray, LV_OPA_COVER, 0);
+			lv_obj_set_style_bg_opa(kb->tray, kb_tray_opa(), 0);
 		}
 		kb_refresh_caps(kb);
 	}
@@ -1005,7 +1015,7 @@ keyboard_t *keyboard_create(lv_obj_t *parent, int width, int height, lv_obj_t *f
 	lv_obj_set_size(kb->tray, width, height);
 	lv_obj_align(kb->tray, LV_ALIGN_BOTTOM_MID, 0, 0);
 	lv_obj_set_style_bg_color(kb->tray, kb_tray_color(), 0);
-	lv_obj_set_style_bg_opa(kb->tray, LV_OPA_COVER, 0);
+	lv_obj_set_style_bg_opa(kb->tray, kb_tray_opa(), 0);
 	lv_obj_set_style_border_width(kb->tray, 0, 0);
 	lv_obj_set_style_radius(kb->tray, 0, 0);
 	lv_obj_set_style_pad_all(kb->tray, 8, 0);
