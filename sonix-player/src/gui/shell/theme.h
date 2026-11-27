@@ -173,6 +173,14 @@ lv_color_t theme_now_playing_fill(void);
 // bar, Music Browse tiles, Wireless quick tiles): clear frost + specular rim
 // under Liquid Glass, glass props removed for every other theme.
 void theme_glass_pane(lv_obj_t *obj);
+
+// The colours of the glass frost / gradient / specular rim. Neutral white by
+// default; when Dynamic tint is on under Liquid Glass they borrow the chosen
+// accent's hue (Apple-style tinted glass) while the glass opacities and
+// geometry stay exactly the same. Shared by the palette and theme_glass_pane.
+lv_color_t theme_glass_frost(void);
+lv_color_t theme_glass_frost_grad(void);
+lv_color_t theme_glass_rim(void);
 bool theme_is_dark(void);
 bool theme_is_tokyo_night(void);
 bool theme_is_amber_on_black(void);

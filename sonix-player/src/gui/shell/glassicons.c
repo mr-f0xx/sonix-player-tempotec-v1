@@ -4,6 +4,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "src/gui/shell/theme.h"
+
 // One cached badge. The descriptor's data points at `buf`, an ARGB8888 bitmap
 // (LVGL's byte order is B, G, R, A) rendered once and kept until the theme
 // leaves Liquid Glass. Nothing is ever evicted while a widget may still draw
@@ -24,6 +26,21 @@ typedef struct {
 static badge_t badges[BADGE_POOL];
 
 static uint32_t pack(lv_color_t c) { return ((uint32_t)c.red << 16) | ((uint32_t)c.green << 8) | c.blue; }
+
+// The badge colour follows the theme, not the per-tile semantic colour: clear
+// glass is neutral white, tinted glass (Dynamic tint) is the chosen accent. The
+// key carries a tinted flag so toggling the tint never reuses a stale badge.
+static uint32_t glass_badge_key(bool *tinted, lv_color_t *tint) {
+	bool t = theme_is_liquid_glass() && theme_dynamic_tint();
+	lv_color_t c = t ? theme()->accent : lv_color_white();
+	if (tinted) {
+		*tinted = t;
+	}
+	if (tint) {
+		*tint = c;
+	}
+	return t ? (0x1000000u | pack(c)) : 0u;
+}
 
 static float clampf(float v, float lo, float hi) { return v < lo ? lo : (v > hi ? hi : v); }
 
@@ -66,11 +83,12 @@ static float glyph_alpha_bilinear(const lv_image_dsc_t *g, float sx, float sy) {
 	return top + (bot - top) * fy;
 }
 
-// Composites the white glyph, bilinearly scaled to ~56% of the badge, centred
-// over the badge pixel already in `buf` (straight alpha, B G R A order).
-static void stamp_glyph(uint8_t *buf, int size, const lv_image_dsc_t *g) {
-	// The glyph is the icon: solid white and large enough to read as the iOS
-	// Liquid Glass white symbol, centred in the clear squircle.
+// Composites the glyph, bilinearly scaled to ~60% of the badge, centred over
+// the badge pixel already in `buf` (straight alpha, B G R A order). `gc` is the
+// glyph colour: white for clear glass, a bright accent for tinted glass.
+static void stamp_glyph(uint8_t *buf, int size, const lv_image_dsc_t *g, lv_color_t gc) {
+	// The glyph is the icon: solid and large enough to read as the iOS
+	// Liquid Glass symbol, centred in the clear squircle.
 	int gs = (int)((float)size * 0.60f + 0.5f);
 	if (gs < 1) {
 		gs = 1;
@@ -96,8 +114,9 @@ static void stamp_glyph(uint8_t *buf, int size, const lv_image_dsc_t *g) {
 			if (out_a <= 0.0f) {
 				continue;
 			}
+			const uint8_t gcv[3] = {gc.blue, gc.green, gc.red};
 			for (int c = 0; c < 3; c++) {
-				float over = (255.0f * ga + (float)px[c] * ba * (1.0f - ga)) / out_a;
+				float over = ((float)gcv[c] * ga + (float)px[c] * ba * (1.0f - ga)) / out_a;
 				px[c] = (uint8_t)clampf(over + 0.5f, 0.0f, 255.0f);
 			}
 			px[3] = (uint8_t)clampf(out_a * 255.0f + 0.5f, 0.0f, 255.0f);
@@ -110,8 +129,13 @@ static void stamp_glyph(uint8_t *buf, int size, const lv_image_dsc_t *g) {
 // top edge where light catches the glass), and the glyph in solid white. The
 // badge is mostly partial-alpha, so it composites over whatever is behind it
 // like a real pane of glass rather than a painted tile.
-static void render_badge(uint8_t *buf, int size, lv_color_t color, const lv_image_dsc_t *glyph) {
-	(void)color; // clear glass is neutral; the hue lives in the wallpaper behind
+static void render_badge(uint8_t *buf, int size, lv_color_t tint, bool tinted, const lv_image_dsc_t *glyph) {
+	// Clear glass is neutral white; tinted glass borrows the accent's hue for
+	// the body, the rim and the glyph, exactly like Apple's tinted icons. The
+	// alpha curve (body + specular rim) is identical either way, so the glass
+	// effect is unchanged -- only the colour follows the accent.
+	const uint8_t body_rgb[3] = {tint.blue, tint.green, tint.red};
+	lv_color_t glyph_color = tinted ? lv_color_mix(tint, lv_color_white(), 110) : lv_color_white();
 	float half = (float)size * 0.5f;
 	float radius = (float)size * 0.225f; // the iOS corner roundness
 	if (radius < 1.0f) {
@@ -146,14 +170,14 @@ static void render_badge(uint8_t *buf, int size, lv_color_t color, const lv_imag
 			}
 			a *= cov;
 			uint8_t *pxb = buf + ((size_t)y * size + x) * 4;
-			pxb[0] = 255; // B
-			pxb[1] = 255; // G
-			pxb[2] = 255; // R
+			pxb[0] = body_rgb[0]; // B
+			pxb[1] = body_rgb[1]; // G
+			pxb[2] = body_rgb[2]; // R
 			pxb[3] = (uint8_t)clampf(a * 255.0f + 0.5f, 0.0f, 255.0f);
 		}
 	}
 	if (glyph && glyph->data) {
-		stamp_glyph(buf, size, glyph);
+		stamp_glyph(buf, size, glyph, glyph_color);
 	}
 }
 
@@ -167,17 +191,21 @@ static const lv_image_dsc_t *badge_lookup(const lv_image_dsc_t *glyph, int size,
 }
 
 const lv_image_dsc_t *glass_icon_badge_find(const lv_image_dsc_t *glyph, int size, lv_color_t color) {
+	(void)color; // the badge colour follows the theme tint, not the tile colour
 	if (!glyph || size < 3) {
 		return NULL;
 	}
-	return badge_lookup(glyph, size, pack(color));
+	return badge_lookup(glyph, size, glass_badge_key(NULL, NULL));
 }
 
 const lv_image_dsc_t *glass_icon_badge(const lv_image_dsc_t *glyph, int size, lv_color_t color) {
+	(void)color; // the badge colour follows the theme tint, not the tile colour
 	if (!glyph || size < 3) {
 		return glyph;
 	}
-	uint32_t key = pack(color);
+	bool tinted = false;
+	lv_color_t tint = lv_color_white();
+	uint32_t key = glass_badge_key(&tinted, &tint);
 	const lv_image_dsc_t *cached = badge_lookup(glyph, size, key);
 	if (cached) {
 		return cached;
@@ -197,7 +225,7 @@ const lv_image_dsc_t *glass_icon_badge(const lv_image_dsc_t *glyph, int size, lv
 	if (!buf) {
 		return glyph;
 	}
-	render_badge(buf, size, color, glyph);
+	render_badge(buf, size, tint, tinted, glyph);
 
 	badge_t *b = &badges[slot];
 	b->glyph = glyph;

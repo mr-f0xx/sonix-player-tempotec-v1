@@ -482,18 +482,21 @@ static void apply_palette(void) {
 	// it; elsewhere the properties are taken back out so the cards and bars
 	// keep the edge-free look they have always had.
 	if (glass) {
+		// Tinted glass (Dynamic tint) borrows the accent for the frost, the
+		// gradient and the rim; clear glass keeps them neutral white.
+		lv_style_set_bg_color(&theme_style_card, theme_glass_frost());
 		lv_style_set_outline_width(&theme_style_panel, 1);
 		lv_style_set_outline_pad(&theme_style_panel, 0);
-		lv_style_set_outline_color(&theme_style_panel, lv_color_white());
+		lv_style_set_outline_color(&theme_style_panel, theme_glass_rim());
 		lv_style_set_outline_opa(&theme_style_panel, THEME_GLASS_EDGE_OPA);
 		lv_style_set_outline_width(&theme_style_card, 1);
 		lv_style_set_outline_pad(&theme_style_card, 0);
-		lv_style_set_outline_color(&theme_style_card, lv_color_white());
+		lv_style_set_outline_color(&theme_style_card, theme_glass_rim());
 		lv_style_set_outline_opa(&theme_style_card, THEME_GLASS_EDGE_OPA);
 		lv_style_set_radius(&theme_style_card, 16);
 		// A luminous vertical gradient: light catches the top of the pane and
 		// fades toward the foot, so the frost reads as curved glass, not paint.
-		lv_style_set_bg_grad_color(&theme_style_card, lv_color_make(175, 190, 212));
+		lv_style_set_bg_grad_color(&theme_style_card, theme_glass_frost_grad());
 		lv_style_set_bg_grad_dir(&theme_style_card, LV_GRAD_DIR_VER);
 	} else {
 		lv_style_remove_prop(&theme_style_panel, LV_STYLE_OUTLINE_WIDTH);
@@ -516,7 +519,7 @@ static void apply_palette(void) {
 	if (glass) {
 		lv_style_set_outline_width(&theme_style_card_pressed, 1);
 		lv_style_set_outline_pad(&theme_style_card_pressed, 0);
-		lv_style_set_outline_color(&theme_style_card_pressed, lv_color_white());
+		lv_style_set_outline_color(&theme_style_card_pressed, theme_glass_rim());
 		lv_style_set_outline_opa(&theme_style_card_pressed, THEME_GLASS_EDGE_OPA);
 		lv_style_set_radius(&theme_style_card_pressed, 16);
 	} else {
@@ -853,18 +856,46 @@ const theme_palette_t *theme(void) { return active; }
 // a surface that was glass never keeps a stray rim/gradient. Pages that paint
 // their own opaque fill call this after setting it: under glass the clear frost
 // wins; elsewhere the page's fill stays and the glass props are removed.
+// Apple-style tinted glass: when the user turns on Dynamic tint while Liquid
+// Glass is active, the frost, the gradient and the specular rim borrow the
+// chosen accent's hue instead of neutral white. The opacities, the gradient
+// direction and the rim geometry are untouched, so the pane stays exactly the
+// same glass -- only its colour follows the accent. Off keeps the clear look.
+static bool glass_tint_on(void) { return selected_kind == THEME_KIND_LIQUID_GLASS && dynamic_tint; }
+
+lv_color_t theme_glass_frost(void) {
+	if (!glass_tint_on()) {
+		return lv_color_white();
+	}
+	return lv_color_mix(active->accent, lv_color_white(), 120);
+}
+
+lv_color_t theme_glass_frost_grad(void) {
+	if (!glass_tint_on()) {
+		return lv_color_make(175, 190, 212);
+	}
+	return lv_color_mix(active->accent, lv_color_make(175, 190, 212), 160);
+}
+
+lv_color_t theme_glass_rim(void) {
+	if (!glass_tint_on()) {
+		return lv_color_white();
+	}
+	return lv_color_mix(active->accent, lv_color_white(), 150);
+}
+
 void theme_glass_pane(lv_obj_t *obj) {
 	if (!obj) {
 		return;
 	}
 	if (theme_is_liquid_glass()) {
-		lv_obj_set_style_bg_color(obj, lv_color_white(), 0);
+		lv_obj_set_style_bg_color(obj, theme_glass_frost(), 0);
 		lv_obj_set_style_bg_opa(obj, THEME_GLASS_CARD_OPA, 0);
-		lv_obj_set_style_bg_grad_color(obj, lv_color_make(175, 190, 212), 0);
+		lv_obj_set_style_bg_grad_color(obj, theme_glass_frost_grad(), 0);
 		lv_obj_set_style_bg_grad_dir(obj, LV_GRAD_DIR_VER, 0);
 		lv_obj_set_style_outline_width(obj, 1, 0);
 		lv_obj_set_style_outline_pad(obj, 0, 0);
-		lv_obj_set_style_outline_color(obj, lv_color_white(), 0);
+		lv_obj_set_style_outline_color(obj, theme_glass_rim(), 0);
 		lv_obj_set_style_outline_opa(obj, THEME_GLASS_EDGE_OPA, 0);
 		lv_obj_set_style_radius(obj, 16, 0);
 	} else {

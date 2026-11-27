@@ -175,6 +175,25 @@ int main(void) {
 	assert(lv_image_get_src(wall) == wall_src);
 	assert(blur_calls == 0); // the constant backdrop never blurs the sleeve
 
+	// --- Apple-style tinted glass follows the chosen accent -----------------
+	theme_set_accent(8); // purple
+	theme_set_dynamic_tint(true);
+	assert(theme_dynamic_tint());
+	lv_color_t frost = theme_glass_frost();
+	lv_color_t rim = theme_glass_rim();
+	// Tinted frost and rim are no longer neutral white...
+	assert(!(frost.red == 255 && frost.green == 255 && frost.blue == 255));
+	assert(!(rim.red == 255 && rim.green == 255 && rim.blue == 255));
+	// ...and they carry the accent's hue (purple: red & blue above green).
+	assert(frost.red > frost.green && frost.blue > frost.green);
+	// The glass opacities are untouched by the tint.
+	assert(style_bg_opa(&theme_style_card) == THEME_GLASS_CARD_OPA);
+	assert(style_bg_opa(&theme_style_card_pressed) == THEME_GLASS_CARD_PRESSED_OPA);
+	// Turning the tint off returns the clear white frost.
+	theme_set_dynamic_tint(false);
+	frost = theme_glass_frost();
+	assert(frost.red == 255 && frost.green == 255 && frost.blue == 255);
+
 	// --- leaving Liquid Glass restores the opaque styles --------------------
 	theme_set_kind(THEME_KIND_DARK);
 	assert(!theme_is_liquid_glass());
