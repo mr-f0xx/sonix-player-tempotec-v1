@@ -865,9 +865,17 @@ static void jack_timer_cb(lv_timer_t *timer) {
 	// runs off it -- there is simply nothing left to indicate.
 	bool done = state.battery_charging && percent >= 0 && (percent >= 100 || power_charging_held());
 
+	// Running off the cable in DAC mode with the charger switched off is the
+	// same thing again, and the power supplies do not report it: charging is
+	// suppressed there, so `battery_charging` reads false and the battery would
+	// come up as no cable at all. It is a cable -- one that is carrying the
+	// player with the battery left out of it -- so the port's own word on
+	// whether one is in stands in for the supply's.
+	bool plugged = state.battery_charging || (power_charging_blocked() && usb_vbus_present());
+
 	// One number for the whole answer, so the two halves can never disagree:
 	// 0 no cable, 1 a cable with nothing going into the battery, 2 charging.
-	int charge_state = !state.battery_charging ? 0 : (done ? 1 : 2);
+	int charge_state = !plugged ? 0 : (!state.battery_charging || done ? 1 : 2);
 
 	// A new answer has to come back the same way CHARGE_SETTLE_POLLS times
 	// before it is acted on.

@@ -5369,3 +5369,69 @@ can add more. Please compare the normal and low-latency profiles on the V1 at
 48 kHz and a higher sample rate, and report whether audio clicks or the player
 stutters. If low latency falls back, the DAC page says so and the log contains
 `usbdac: ... output buffer ...` plus the actual ALSA buffer/period line.
+
+## Pass-through charging in DAC mode (issue #504)
+
+A player used as a USB DAC on a desk sits on the cable for hours. Charging
+while it does so puts cycles and heat into a cell that is not being used, and
+the two existing knobs -- the 80% voltage cap and the 500 mA current cap --
+only soften it: the battery still takes part in every session. What was asked
+for is to take it out altogether, running the player from VBUS with the cell
+neither charged nor drained.
+
+That is what the hardware already does when the charger is told to stop, which
+is the part worth writing down because it is not obvious from the sysfs nodes.
+On the V1 the charger is the AXP2101 PMIC, and its charge-enable bit (`REG18h`
+bit 1, through `axpcharge_set_charging_enabled()`) stops only what would go
+into the cell: the input path keeps carrying the system. Measured on the device
+while the bit was off -- 250 mA in from the cable, 0 mA into the battery, the
+system rail held about 200 mV above the cell -- and the player powers on from
+the cable alone with the battery physically removed. On the builds whose
+charger is an MP2731, the same job is the driver's `step_charging_enabled`
+node, whose `CHG_CONFIG` stops the charge and leaves the input active. Throttling
+the input instead (`input_current_limited`) is deliberately not what this does:
+that starves the system as well as the cell, which is the soft-brick the
+charger code in `power.c` was written to avoid.
+
+What is new is where the choice lives and how it is shown.
+
+- **DAC page → Run from USB power** (`[usb] dac_charge_disable`, off by
+  default). A named row with a line under it saying what it does, so the
+  setting can be found and read rather than guessed at from a glyph. It can be
+  set with the cable out and the mode off: the choice is remembered and applied
+  whenever DAC mode starts. The lightning bolt in the page header, which was
+  already there, stays as the same setting in the form of a live toggle while
+  DAC mode is running, and the two are driven by one function so they cannot
+  disagree. It outranks the percentage limit and outlasts it -- `power.c` keeps
+  the user's choice separate from the automatic cutoff, so the five-second
+  charger tick never undoes it.
+- **The charger is given back on the way out.** Leaving DAC mode re-enables
+  charging and the indication with it, and so do the paths that end the player,
+  because both charger implementations keep their enable bit across a shutdown.
+- **The indication stopped lying in the other direction.** With charging
+  suppressed, `read_battery_charging()` reads false, so the battery came up as
+  *no cable* -- indistinguishable from a player on its own cell. The status bar
+  now asks the port whether a cable is really in (`power_charging_blocked()`
+  plus `usb_vbus_present()`) and answers *a cable with nothing going into the
+  battery*, which is the same reading a full battery or a charge held at the
+  limit gives: the bolt off, the LED's charging red off, the cable accounted
+  for.
+
+`make -C sonix-player/tests usbdac-charging` checks the setting itself against
+the real `usbdac.c`: off by default with nothing written, remembered in
+`[usb] dac_charge_disable` while DAC mode is off and nothing sent to the
+charger, applied when the mode starts, live from either control, the same after
+a simulated reboot, and released when the mode stops. `dacpage-charging` checks
+the page on the real V1 layout: where the row sits, the note under it, that it
+opens showing the setting, that a tap writes and saves it, and that the header
+bolt follows. `usbdac-latency-keys` now checks every DAC page label -- fifteen
+of them -- in all eleven language files rather than the two latency strings
+alone.
+
+**Hardware validation pending.** No physical V1 was available here. The
+behaviour this relies on is the one already measured on the device with the
+charge bit off, but two things are worth confirming in a long session: that the
+cell stays flat (or very nearly) over hours of DAC use on a normal port, and
+that a port too weak to carry the player shows the cell making up the
+difference rather than the player dropping out -- the PMIC decides that on its
+own and nothing here can stop it.

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Keep the USB DAC latency labels in all shipped language files."""
+"""Keep the DAC page's labels in all shipped language files."""
 
 from __future__ import annotations
 
@@ -12,9 +12,13 @@ SOURCE = ROOT / "sonix-player/src/gui/audio/dacpage.c"
 LANG_DIR = ROOT / "sonix-packer/assets/V1/usr/resource/sonix/language"
 MAX_ENTRIES = 2304  # sonix-player/src/system/core/lang.c
 
-used = set(re.findall(r'"(dac_low_latency(?:_[A-Za-z0-9_]+)?)"', SOURCE.read_text(encoding="utf-8")))
+# Every `dac...` tag the page asks for: the mode and low-latency rows, the
+# pass-through charging row and its note, the status lines, the confirmation and
+# the two popups. A key missing from one language shows up on the device as the
+# bare tag, and a key left behind by a rename is a line no reader ever sees.
+used = set(re.findall(r'"(dac(?:_[A-Za-z0-9_]+)?)"', SOURCE.read_text(encoding="utf-8")))
 if not used:
-    sys.exit("no USB DAC low-latency translation keys found in dacpage.c")
+    sys.exit("no DAC page translation keys found in dacpage.c")
 
 files = sorted(LANG_DIR.glob("*.ini"))
 if len(files) != 11:
@@ -29,7 +33,7 @@ for path in files:
         key, value = line.split("=", 1)
         key, value = key.strip(), value.strip()
         entries.append(key)
-        if key.startswith("dac_low_latency"):
+        if re.fullmatch(r"dac(?:_[A-Za-z0-9_]+)?", key):
             if key in found:
                 sys.exit(f"{path.name}:{lineno}: duplicate key {key}")
             if not value:
@@ -41,6 +45,6 @@ for path in files:
     extra = sorted(found - used)
     if missing or extra:
         sys.exit(f"{path.name}: missing={missing} stale={extra}")
-    print(f"{path.name}: {len(entries)} entries, {len(found)} USB DAC latency keys")
+    print(f"{path.name}: {len(entries)} entries, {len(found)} DAC page keys")
 
-print(f"PASS USB DAC latency translations ({len(used)} keys, {len(files)} languages)")
+print(f"PASS DAC page translations ({len(used)} keys, {len(files)} languages)")

@@ -405,6 +405,7 @@ $(BUILD)/test_usbdac_eq: test_usbdac_eq.c $(ROOT)/src/system/audio/usbdac.c \
 usbdac-latency: $(BUILD)/test_usbdac_latency usbdac-latency-keys
 	$(BUILD)/test_usbdac_latency
 
+# Every DAC page label, in all eleven shipped languages.
 usbdac-latency-keys:
 	python3 check_usbdac_language_keys.py
 
@@ -414,6 +415,22 @@ $(BUILD)/test_usbdac_latency: test_usbdac_latency.c $(ROOT)/src/system/audio/usb
                               $(ROOT)/src/system/core/config.c $(ROOT)/src/system/core/config.h
 	@mkdir -p $(BUILD)
 	$(CC) $(CPPFLAGS) -Istubs $(CFLAGS) -o $@ test_usbdac_latency.c \
+		$(ROOT)/src/system/audio/eq.c $(ROOT)/src/system/core/config.c $(ROOT)/src/system/addons/addons.c $(LDFLAGS) $(LDLIBS)
+
+# Pass-through charging in DAC mode (issue #504): opt-in, remembered across
+# boots, applied to the charger only while DAC mode has the cable, and released
+# on the way out. The test includes usbdac.c and records the two calls it makes
+# into the rest of the player rather than driving hardware.
+.PHONY: usbdac-charging
+usbdac-charging: $(BUILD)/test_usbdac_charging
+	$(BUILD)/test_usbdac_charging
+
+$(BUILD)/test_usbdac_charging: test_usbdac_charging.c $(ROOT)/src/system/audio/usbdac.c \
+                               $(ROOT)/src/system/audio/usbdac.h \
+                               $(ROOT)/src/system/audio/eq.c $(ROOT)/src/system/audio/eq.h \
+                               $(ROOT)/src/system/core/config.c $(ROOT)/src/system/core/config.h
+	@mkdir -p $(BUILD)
+	$(CC) $(CPPFLAGS) -Istubs $(CFLAGS) -o $@ test_usbdac_charging.c \
 		$(ROOT)/src/system/audio/eq.c $(ROOT)/src/system/core/config.c $(ROOT)/src/system/addons/addons.c $(LDFLAGS) $(LDLIBS)
 
 # The Wi-Fi worker's hidden-network join: the real wifi.c against a fake
@@ -1436,6 +1453,24 @@ devoptions: $(BUILD)/test_devoptions_usbcompat
 # the page would leave this test running the binary from before it.
 $(BUILD)/test_devoptions_usbcompat: $(DEVOPTIONS_OBJ) $(ROOT)/src/gui/settings/devoptions.c
 	$(CC) $(LDFLAGS) -o $@ $(DEVOPTIONS_OBJ) -lpthread -lm -ldl
+
+# The DAC page's pass-through charging row (issue #504): where it sits, what it
+# says, that it opens showing the setting, that a tap writes it, and that the
+# header bolt -- the same setting as a quick toggle -- follows it.
+DACPAGE_SRC = $(ROOT)/tests/ui/test_dacpage_charging.c \
+              $(ROOT)/src/gui/shell/settingsrow.c $(ROOT)/src/gui/shell/theme.c \
+              $(ROOT)/src/gui/shell/icons.c $(ROOT)/src/gui/board_profile.c \
+              $(ROOT)/src/system/core/config.c $(ROOT)/src/system/core/lang.c
+DACPAGE_OBJ = $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(DACPAGE_SRC)) \
+              $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(UI_LVGL_SRC))
+
+.PHONY: dacpage-charging
+dacpage-charging: $(BUILD)/test_dacpage_charging
+	$(BUILD)/test_dacpage_charging ../../sonix-packer/assets/V1/usr/resource/sonix/language
+
+# dacpage.c is a prerequisite for the same reason devoptions.c is above.
+$(BUILD)/test_dacpage_charging: $(DACPAGE_OBJ) $(ROOT)/src/gui/audio/dacpage.c
+	$(CC) $(LDFLAGS) -o $@ $(DACPAGE_OBJ) -lpthread -lm -ldl
 
 
 $(BUILD)/test_musicsettings_rows: $(MUSICROWS_OBJ)

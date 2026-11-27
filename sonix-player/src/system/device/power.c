@@ -636,9 +636,16 @@ int power_get_charge_limit(void) { return g_charge_limit; }
 
 bool power_charging_held(void) { return g_charging_suspended || axpcharge_holding(); }
 
+// The user's own choice, not the limit's: DAC mode running the player off the
+// cable with the battery left out of it. It stays true with no cable in, so the
+// indication can tell "the cable is in and nothing is going into the battery"
+// from "there is no cable" instead of reading both as unplugged.
+bool power_charging_blocked(void) { return g_charging_blocked; }
+
 static void charger_run(bool run);
 
 void power_charging_release(void) {
+	g_charging_blocked = false; // the charger is back on; say so in the state too
 	if (axpcharge_applies()) {
 		axpcharge_set_charging_enabled(true);
 		g_charging_suspended = false;

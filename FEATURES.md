@@ -76,6 +76,13 @@
   page says so.
   Smaller buffers can click under load, and the end-to-end result still needs
   checking on the V1.
+  A **Run from USB power** switch on the same page, also off by default, takes
+  the battery out of a long session on the desk: the cable carries the player
+  and the cell is neither charged nor drained, so the session costs it no
+  cycles and no heat. The lightning bolt in the page header is the same setting
+  as a quick toggle while the mode runs. Charging comes back by itself when DAC
+  mode is left, and meanwhile the status bar shows a cable that is in with
+  nothing going into the battery, rather than no cable at all.
 - **USB audio out** - a DAC or USB-C headphones driven with the player as host,
   announced with the card's own name when it is plugged in and again when it
   goes. A desktop DAC on a Type-C adapter that accepts only one format is
