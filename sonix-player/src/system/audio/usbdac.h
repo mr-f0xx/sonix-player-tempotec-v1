@@ -88,12 +88,16 @@ void usbdac_set_low_latency(bool enabled);
 //
 // "Limited USB current" in the stock settings, and the reason it exists: a DAC
 // drawing charge current off the same cable it is taking audio from is a noise
-// source, and some people would rather run off the battery.
+// source, and some people would rather run off the battery. Pass-through
+// charging, as issue #504 asked for it, is the same switch seen from the other
+// side: on the DAC page it reads **Run from USB power**, with the header's
+// lightning bolt as a quick toggle for the same setting.
 //
 // It stops the charge rather than throttling the input: the cable keeps
-// supplying the player, and only what would go into the battery is held off.
-// Remembered in config as [usb] dac_charge_disable and applied whenever DAC
-// mode starts.
+// supplying the player, and only what would go into the battery is held off, so
+// the cell is neither charged nor drained. Remembered in config as
+// [usb] dac_charge_disable, off by default, and applied whenever DAC mode
+// starts.
 void usbdac_set_charging(bool enabled);
 bool usbdac_charging_enabled(void);
 

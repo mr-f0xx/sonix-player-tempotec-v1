@@ -237,6 +237,13 @@ void power_shutdown(void);
 // charger_run() -- and this is the only place that knows them.
 void power_set_charging_allowed(bool allowed);
 
+// True while charging is forbidden outright by that choice -- DAC mode running
+// from the cable, with the battery neither charged nor drained -- as opposed to
+// the percentage limit holding the charger off because the level is reached.
+// True with no cable in as well, which is what lets the status bar tell a cable
+// that is carrying the player from no cable at all.
+bool power_charging_blocked(void);
+
 // Powers the device off after `minutes` with no input and nothing playing.
 void power_set_auto_off(bool enabled, uint32_t minutes);
 

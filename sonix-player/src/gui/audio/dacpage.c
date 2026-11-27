@@ -15,6 +15,7 @@ lv_obj_t *dacpage_screen;
 
 static lv_obj_t *mode_switch;
 static lv_obj_t *low_latency_switch;
+static lv_obj_t *usb_power_switch;
 static lv_obj_t *big_icon;
 static lv_obj_t *format_label;
 static lv_obj_t *status_label;
@@ -31,6 +32,30 @@ static void refresh_charge_glyph(void) {
 	// A lightning bolt when the cable is allowed to charge, the struck-through
 	// one when it is not.
 	lv_image_set_src(charge_glyph, usbdac_charging_enabled() ? &icon_zap : &icon_zap_off);
+}
+
+// Pass-through charging, seen from the user's side: the switch reads "run from
+// USB power" and is on when charging is off, while usbdac.c remembers the same
+// choice the other way round as "charging disabled". The switch follows the
+// setting rather than the finger, because the bolt in the header changes it too.
+static void sync_usb_power_switch(void) {
+	if (!usb_power_switch) {
+		return;
+	}
+	if (usbdac_charging_enabled()) {
+		lv_obj_remove_state(usb_power_switch, LV_STATE_CHECKED);
+	} else {
+		lv_obj_add_state(usb_power_switch, LV_STATE_CHECKED);
+	}
+}
+
+// One function behind both controls, so the row and the bolt can never disagree.
+// usbdac.c writes the config and applies it to the charger right away when DAC
+// mode is running; with the mode off the choice simply waits for the next start.
+static void set_usb_power(bool powered) {
+	usbdac_set_charging(!powered);
+	refresh_charge_glyph();
+	sync_usb_power_switch();
 }
 
 static void refresh(void) {
@@ -50,6 +75,7 @@ static void refresh(void) {
 	// and explains itself instead of silently doing nothing.
 	lv_obj_set_style_opa(charge_glyph, st.active ? LV_OPA_COVER : LV_OPA_40, 0);
 	refresh_charge_glyph();
+	sync_usb_power_switch();
 
 	// Back to the theme's colour unless the checks below make it red. Set, never
 	// removed: lv_obj_remove_style(obj, NULL, ...) drops every local style on
@@ -165,6 +191,25 @@ static void low_latency_cb(lv_event_t *e) {
 	apply_low_latency_from_switch();
 }
 
+static void apply_usb_power_from_switch(void) {
+	set_usb_power(lv_obj_has_state(usb_power_switch, LV_STATE_CHECKED));
+}
+
+static void usb_power_row_cb(lv_event_t *e) {
+	(void)e;
+	if (lv_obj_has_state(usb_power_switch, LV_STATE_CHECKED)) {
+		lv_obj_remove_state(usb_power_switch, LV_STATE_CHECKED);
+	} else {
+		lv_obj_add_state(usb_power_switch, LV_STATE_CHECKED);
+	}
+	apply_usb_power_from_switch();
+}
+
+static void usb_power_cb(lv_event_t *e) {
+	(void)e;
+	apply_usb_power_from_switch();
+}
+
 static bool leaving;
 
 // Leaves for real; the guard below lets the chevron through once `leaving` is
@@ -207,10 +252,10 @@ static void charge_cb(lv_event_t *e) {
 		return;
 	}
 	// The choice is written to the config, so a player set never to charge in
-	// DAC mode stays that way across reboots.
+	// DAC mode stays that way across reboots. The switch on the page says the
+	// same thing, and set_usb_power() keeps the two together.
 	bool now_on = !usbdac_charging_enabled();
-	usbdac_set_charging(now_on);
-	refresh_charge_glyph();
+	set_usb_power(!now_on);
 
 	// The two glyphs differ by one thin diagonal stroke, which at 34 px is not
 	// enough to tell a state change from a button that did nothing. Say it in
@@ -270,6 +315,28 @@ void dacpage_init(gui_config_t *cfg) {
 	}
 	lv_obj_set_clickable(latency_row, true);
 	lv_obj_add_event_cb(latency_row, low_latency_row_cb, LV_EVENT_CLICKED, NULL);
+
+	// Pass-through charging (issue #504): with the cable in, the player runs off
+	// VBUS and the battery is left out of it entirely -- nothing goes in, nothing
+	// comes out, so a long session on the desk costs it no cycles and no heat.
+	// Off by default, and nothing changes until it is switched on. The choice is
+	// saved and applied whenever DAC mode starts, so it can be set here with the
+	// cable out and the mode off, which is also why this row -- unlike the bolt
+	// in the header, a live control -- works at any time.
+	usb_power_switch = NULL;
+	lv_obj_t *usb_power_row = settingsrow_toggle(container, "dac_usb_power_only", &usb_power_switch, usb_power_cb);
+	sync_usb_power_switch();
+	lv_obj_set_clickable(usb_power_row, true);
+	lv_obj_add_event_cb(usb_power_row, usb_power_row_cb, LV_EVENT_CLICKED, NULL);
+
+	// In words, under the switch: the two bolts differ by one thin diagonal
+	// stroke, which says nothing about the battery.
+	lv_obj_t *usb_power_note = lv_label_create(container);
+	lv_label_set_long_mode(usb_power_note, LV_LABEL_LONG_WRAP);
+	lv_obj_set_width(usb_power_note, lv_pct(100));
+	lv_obj_add_style(usb_power_note, &theme_style_text_dim, 0);
+	lv_obj_set_style_text_font(usb_power_note, compact ? &font_ui_14 : &font_ui_22, 0);
+	lv_label_set_text(usb_power_note, tr("dac_usb_power_only_note"));
 
 	// Straight into the flex flow, with no alignment of its own: the container
 	// settingsrow_page() builds already centres its children on the cross axis,
