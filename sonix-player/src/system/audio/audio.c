@@ -1537,6 +1537,42 @@ static void release_page_cache(void) {
 #endif
 }
 
+// The TempoTec V1's built-in AIC DMA driver (soc_aic.ko) computes its playback
+// hrtimer interval in milliseconds as:
+//
+//   period_ms = ((params_period_size(params) * 1000) / rate) / frame_bytes
+//
+// using period_size (frames) instead of period_bytes and then dividing by
+// frame_bytes (channels * physical_width / 8: 8 for 24/32-bit stereo, 4 for
+// 16-bit stereo). When period_ms truncates to 0, aic_hrtimer_callback() calls
+// hrtimer_forward(timer, now, 0) and returns HRTIMER_RESTART, locking the
+// kernel permanently in hard-IRQ context.
+//
+// Keep time-sized opens on the built-in DAC above that threshold with a 2 ms
+// margin so ALSA's 32-byte PERIOD_BYTES step constraint cannot round the chosen
+// period below frame_bytes ms (for example 88.2 / 176.4 / 352.8 kHz at 8 ms).
+static unsigned int aic_physical_frame_bytes(int channels, int bits_per_sample) {
+	unsigned int ch = channels > 0 ? (unsigned int)channels : 2u;
+	unsigned int sample_bytes = bits_per_sample <= 8 ? 1u : (bits_per_sample <= 16 ? 2u : 4u);
+	return ch * sample_bytes;
+}
+
+static void aic_clamp_time_sizing(int channels, int bits_per_sample, unsigned int *buffer_time_us,
+								  unsigned int *period_time_us) {
+	unsigned int phys_frame_bytes = aic_physical_frame_bytes(channels, bits_per_sample);
+	unsigned int min_period_us = (phys_frame_bytes + 2u) * 1000u;
+	unsigned int min_buffer_us = min_period_us * 4u;
+	if (*period_time_us < min_period_us) {
+		*period_time_us = min_period_us;
+	}
+	if (*buffer_time_us < min_buffer_us) {
+		*buffer_time_us = min_buffer_us;
+	}
+	if (*buffer_time_us < *period_time_us * 4u) {
+		*buffer_time_us = *period_time_us * 4u;
+	}
+}
+
 static snd_pcm_t *open_pcm_device_now(int channels, int sample_rate, int bits_per_sample, snd_pcm_uframes_t *period_size_out) {
 	snd_pcm_t *pcm_handle = NULL;
 
@@ -1854,8 +1890,40 @@ static snd_pcm_t *open_pcm_device_now(int channels, int sample_rate, int bits_pe
 	if (buffer_time_ms > 0) {
 		unsigned int buffer_time = (unsigned int)buffer_time_ms * 1000u;   // microseconds
 		unsigned int period_time = buffer_time / 4;
-		snd_pcm_hw_params_set_buffer_time_near(pcm_handle, hw_params, &buffer_time, &dir);
-		snd_pcm_hw_params_set_period_time_near(pcm_handle, hw_params, &period_time, &dir);
+		if (!usb_card && !bluetooth) {
+			unsigned int req_buffer = buffer_time;
+			unsigned int req_period = period_time;
+			aic_clamp_time_sizing(channels, bits_per_sample, &buffer_time, &period_time);
+			if (buffer_time != req_buffer || period_time != req_period) {
+				fprintf(stderr,
+						"audio: raising buffer %u->%u us / period %u->%u us to keep soc_aic hrtimer non-zero\n",
+						req_buffer, buffer_time, req_period, period_time);
+			}
+		}
+		int bdir = 0;
+		int pdir = 0;
+		snd_pcm_hw_params_set_buffer_time_near(pcm_handle, hw_params, &buffer_time, &bdir);
+		snd_pcm_hw_params_set_period_time_near(pcm_handle, hw_params, &period_time, &pdir);
+		if (!usb_card && !bluetooth) {
+			unsigned int phys_frame_bytes = aic_physical_frame_bytes(channels, bits_per_sample);
+			unsigned int rate_hz = val ? val : (unsigned int)sample_rate;
+			snd_pcm_uframes_t chosen_period = 0;
+			int cdir = 0;
+			if (rate_hz > 0 && snd_pcm_hw_params_get_period_size(hw_params, &chosen_period, &cdir) >= 0 &&
+				chosen_period > 0 && ((unsigned long long)chosen_period * 1000ULL) / rate_hz < phys_frame_bytes) {
+				snd_pcm_uframes_t safe_period =
+					(snd_pcm_uframes_t)((((unsigned long long)rate_hz * (phys_frame_bytes + 2u)) + 999ULL) / 1000ULL);
+				unsigned int safe_periods = 4;
+				int sdir = 0;
+				fprintf(stderr,
+						"audio: chosen period %lu frames at %u Hz would zero soc_aic hrtimer; raising to %lu frames\n",
+						(unsigned long)chosen_period, rate_hz, (unsigned long)safe_period);
+				snd_pcm_hw_params_copy(hw_params, unsized);
+				snd_pcm_hw_params_set_periods_near(pcm_handle, hw_params, &safe_periods, &sdir);
+				sdir = 0;
+				snd_pcm_hw_params_set_period_size_near(pcm_handle, hw_params, &safe_period, &sdir);
+			}
+		}
 		fprintf(stderr, "audio: stock-style sizing, buffer %u us / period %u us\n", buffer_time,
 				period_time);
 	} else {
@@ -5874,7 +5942,42 @@ static int external_write(const void *owner, const void *frames, int count) {
 
 	int written = 0;
 	long last_progress_ms = log_ms();
+	bool bluetooth = pcm_is_bluetooth(external_pcm);
 	while (written < count) {
+		// Guard the built-in AIC card the same way pcm_write_recover() does:
+		// never enter blocking snd_pcm_writei() blind on a RUNNING stream, or a
+		// stopped AIC clock after underruns leaves this thread wedged inside
+		// ALSA holding external_lock. Only wait once the stream is running --
+		// soc_aic.ko's poll does not signal on a freshly PREPARED stream.
+		if (!bluetooth) {
+			snd_pcm_state_t st = snd_pcm_state(external_pcm);
+			if (st == SND_PCM_STATE_RUNNING || st == SND_PCM_STATE_DRAINING) {
+				bool room = false;
+				while (!room) {
+					int r = snd_pcm_wait(external_pcm, 100);
+					if (r != 0) {
+						room = true;
+						break;
+					}
+					long since = log_ms() - last_progress_ms;
+					if (since < 0) {
+						last_progress_ms = log_ms();
+						continue;
+					}
+					if (since >= BT_WRITE_STALL_MS) {
+						break;
+					}
+				}
+				if (!room) {
+					if (!external_wait_room(&last_progress_ms)) {
+						break;
+					}
+					bluetooth = pcm_is_bluetooth(external_pcm);
+					continue;
+				}
+			}
+		}
+
 		const void *chunk = (const char *)volume_frames + (size_t)written * external_frame_bytes;
 		if (pcm_takes_s24(external_pcm, external_bits)) {
 			chunk = s24_from_s32(&external_s24, chunk, (size_t)(count - written) * (size_t)external_channels);
@@ -5893,6 +5996,7 @@ static int external_write(const void *owner, const void *frames, int count) {
 			if (!external_wait_room(&last_progress_ms)) {
 				break;
 			}
+			bluetooth = pcm_is_bluetooth(external_pcm);
 			continue;
 		}
 		if (got == -EPIPE) {

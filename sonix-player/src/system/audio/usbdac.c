@@ -96,11 +96,16 @@ struct uac_format {
 // write.
 //
 // Lower is tighter and closer to an underrun, which on this path is a click
-// rather than a stall. The optional low-latency profile asks ALSA for the
-// smallest buffer we consider useful with the gadget's ten-millisecond input
-// blocks. [usb] dac_output_ms remains an explicit per-device override.
+// rather than a stall. The TempoTec V1's soc_aic.ko driver computes its
+// playback hrtimer interval as ((period_size * 1000) / rate) / frame_bytes ms
+// (8 bytes per frame for 24/32-bit stereo); any period below 8 ms truncates
+// that interval to 0 ns and hard-locks the kernel in aic_hrtimer_callback().
+// With ALSA's 4-period sizing and 32-byte period alignment, 40 ms (4 x 10 ms)
+// is the smallest buffer safe across every UAC2 rate up to 768 kHz, and at
+// 44.1 / 48 kHz it already sits at the driver's own 4 x 4096 B floor
+// (~43-46 ms). [usb] dac_output_ms remains an explicit per-device override.
 #define OUTPUT_MS_DEFAULT 80
-#define OUTPUT_MS_MIN 20
+#define OUTPUT_MS_MIN 40
 #define OUTPUT_MS_MAX 500
 #define OUTPUT_MS_LOW_LATENCY OUTPUT_MS_MIN
 
@@ -605,7 +610,6 @@ static void *audio_main(void *arg) {
 	int buffer_size = 0;
 	int open_rate = 0, open_bits = 0, open_buffer_ms = 0;
 	bool output_open = false;
-	bool priority_initialized = false;
 	bool realtime_priority = false;
 
 	int idle_us = 0;
@@ -613,14 +617,9 @@ static void *audio_main(void *arg) {
 	while (running) {
 		bool low_latency = false;
 		int requested_buffer_ms = output_ms_for_mode(&low_latency);
-		if (!priority_initialized || low_latency != realtime_priority) {
-			if (low_latency) {
-				audio_thread_priority(true);
-			} else if (priority_initialized && realtime_priority) {
-				audio_thread_priority(false);
-			}
-			realtime_priority = low_latency;
-			priority_initialized = true;
+		if (!low_latency && realtime_priority) {
+			audio_thread_priority(false);
+			realtime_priority = false;
 		}
 
 		int host_state = 0;
@@ -641,6 +640,10 @@ static void *audio_main(void *arg) {
 				if (idle_us < IDLE_CLOSE_MS * 1000) {
 					usleep(GAP_POLL_US);
 					continue;
+				}
+				if (realtime_priority) {
+					audio_thread_priority(false);
+					realtime_priority = false;
 				}
 				audio_external_end();
 				output_open = false;
@@ -689,6 +692,13 @@ static void *audio_main(void *arg) {
 		}
 
 		if (!output_open || fmt.rate != open_rate || bits != open_bits || requested_buffer_ms != open_buffer_ms) {
+			// Run PCM teardown and open at normal priority so we do not preempt
+			// the kernel's aic_work kworker (stop_work / start_work) or the UI
+			// while switching buffers live on a single core.
+			if (realtime_priority) {
+				audio_thread_priority(false);
+				realtime_priority = false;
+			}
 			if (output_open) {
 				audio_external_end();
 				output_open = false;
@@ -735,6 +745,11 @@ static void *audio_main(void *arg) {
 			pthread_mutex_unlock(&lock);
 		}
 
+		if (output_open && low_latency && !realtime_priority) {
+			audio_thread_priority(true);
+			realtime_priority = true;
+		}
+
 		ssize_t got = read(node_fd, buffer, (size_t)buffer_size);
 		if (got <= 0) {
 			// End of a stream, or the host paused between tracks: back to the
@@ -753,6 +768,9 @@ static void *audio_main(void *arg) {
 		}
 	}
 
+	if (realtime_priority) {
+		audio_thread_priority(false);
+	}
 	if (output_open) {
 		audio_external_end();
 	}
