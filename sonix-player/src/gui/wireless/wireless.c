@@ -361,6 +361,7 @@ static lv_obj_t *wireless_action_grid(lv_obj_t *parent) {
 		lv_obj_set_style_bg_opa(button, LV_OPA_COVER, 0);
 		lv_obj_add_style(button, &theme_style_card_pressed, LV_STATE_PRESSED);
 		lv_obj_set_style_radius(button, bp_tile_radius(), 0);
+		theme_glass_pane(button); // clear glass under Liquid Glass, not white
 		lv_obj_set_style_pad_all(button, 4, 0);
 		lv_obj_set_style_pad_gap(button, 2, 0);
 		lv_obj_set_event_bubble(button, true);
@@ -439,6 +440,8 @@ static void wireless_refresh_theme(void) {
 		}
 		if (action_icons[i].button) {
 			lv_obj_set_style_bg_color(action_icons[i].button, theme()->surface_pressed, 0);
+			lv_obj_set_style_bg_opa(action_icons[i].button, LV_OPA_COVER, 0);
+			theme_glass_pane(action_icons[i].button);
 		}
 	}
 	radio_row_t *radio_rows[] = {&wifi_row, &bluetooth_row};

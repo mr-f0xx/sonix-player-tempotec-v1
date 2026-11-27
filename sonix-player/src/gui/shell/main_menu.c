@@ -444,9 +444,10 @@ static void main_menu_refresh_theme(void) {
 
 		lv_color_t strip_fill = theme_now_playing_fill();
 		lv_obj_set_style_bg_color(mini_player, strip_fill, 0);
-		// Liquid Glass lets the blurred sleeve show through the live strip too.
-		lv_obj_set_style_bg_opa(mini_player, theme_is_liquid_glass() ? THEME_GLASS_PANEL_OPA : LV_OPA_COVER, 0);
+		lv_obj_set_style_bg_opa(mini_player, LV_OPA_COVER, 0);
 		mini_player_clear_edge();
+		// The live strip is a clear glass pane like the tiles, not a solid bar.
+		theme_glass_pane(mini_player);
 		main_menu_layout_tokyo_home(true);
 	} else {
 		lv_obj_set_hidden(home_header, true);

@@ -848,6 +848,35 @@ void theme_register_refresh(theme_refresh_cb_t cb) {
 
 const theme_palette_t *theme(void) { return active; }
 
+// Dress a button/panel as a clear Liquid Glass pane (the same frost + specular
+// rim as the shared card), or take the glass props back off for other themes so
+// a surface that was glass never keeps a stray rim/gradient. Pages that paint
+// their own opaque fill call this after setting it: under glass the clear frost
+// wins; elsewhere the page's fill stays and the glass props are removed.
+void theme_glass_pane(lv_obj_t *obj) {
+	if (!obj) {
+		return;
+	}
+	if (theme_is_liquid_glass()) {
+		lv_obj_set_style_bg_color(obj, lv_color_white(), 0);
+		lv_obj_set_style_bg_opa(obj, THEME_GLASS_CARD_OPA, 0);
+		lv_obj_set_style_bg_grad_color(obj, lv_color_make(175, 190, 212), 0);
+		lv_obj_set_style_bg_grad_dir(obj, LV_GRAD_DIR_VER, 0);
+		lv_obj_set_style_outline_width(obj, 1, 0);
+		lv_obj_set_style_outline_pad(obj, 0, 0);
+		lv_obj_set_style_outline_color(obj, lv_color_white(), 0);
+		lv_obj_set_style_outline_opa(obj, THEME_GLASS_EDGE_OPA, 0);
+		lv_obj_set_style_radius(obj, 16, 0);
+	} else {
+		lv_obj_remove_local_style_prop(obj, LV_STYLE_OUTLINE_WIDTH, 0);
+		lv_obj_remove_local_style_prop(obj, LV_STYLE_OUTLINE_PAD, 0);
+		lv_obj_remove_local_style_prop(obj, LV_STYLE_OUTLINE_COLOR, 0);
+		lv_obj_remove_local_style_prop(obj, LV_STYLE_OUTLINE_OPA, 0);
+		lv_obj_remove_local_style_prop(obj, LV_STYLE_BG_GRAD_COLOR, 0);
+		lv_obj_remove_local_style_prop(obj, LV_STYLE_BG_GRAD_DIR, 0);
+	}
+}
+
 lv_color_t theme_now_playing_fill(void) {
 	// OLED keeps even this one black: a tenth of its white accent would be
 	// exactly the grey card it leaves out.

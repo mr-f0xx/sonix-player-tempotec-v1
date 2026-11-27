@@ -329,6 +329,7 @@ static lv_obj_t *make_browse_button(lv_obj_t *parent, const char *label_key, con
 	lv_obj_add_style(button, &theme_style_card_pressed, LV_STATE_PRESSED);
 	lv_obj_set_style_border_width(button, 0, 0);
 	lv_obj_set_style_radius(button, bp_tile_radius(), 0);
+	theme_glass_pane(button); // clear glass under Liquid Glass, opaque elsewhere
 	lv_obj_set_style_pad_hor(button, 5, 0);
 	lv_obj_set_style_pad_ver(button, 3, 0);
 	lv_obj_set_style_pad_column(button, 6, 0);
@@ -804,6 +805,7 @@ static void music_refresh_theme(void) {
 		if (browse_tiles[i].button) {
 			lv_obj_set_style_bg_color(browse_tiles[i].button, browse_fill, 0);
 			lv_obj_set_style_bg_opa(browse_tiles[i].button, LV_OPA_COVER, 0);
+			theme_glass_pane(browse_tiles[i].button);
 		}
 		if (browse_tiles[i].icon) {
 			lv_obj_set_style_image_recolor(browse_tiles[i].icon, theme_semantic_color(browse_tiles[i].tone), 0);

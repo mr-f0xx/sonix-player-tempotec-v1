@@ -168,6 +168,11 @@ const theme_palette_t *theme(void);
 // The subtle accent-tinted surface shared by the dark themes' mini-player
 // and Music browse tiles. OLED's is plain black, like the rest of its cards.
 lv_color_t theme_now_playing_fill(void);
+
+// Clear-glass pane treatment for pages that paint their own surface (Now Playing
+// bar, Music Browse tiles, Wireless quick tiles): clear frost + specular rim
+// under Liquid Glass, glass props removed for every other theme.
+void theme_glass_pane(lv_obj_t *obj);
 bool theme_is_dark(void);
 bool theme_is_tokyo_night(void);
 bool theme_is_amber_on_black(void);
