@@ -113,7 +113,23 @@ void bootlogo_set(int choice, bool dark) {
 bool bootpic_present(void) { return false; }
 
 // --- helpers ----------------------------------------------------------------
+// The sleeve blur is the topmost image on the bottom layer; the always-on
+// wallpaper sits behind it at index 0. Return the last image so the checks
+// below observe the blur, not the wallpaper.
 static lv_obj_t *glass_image(void) {
+	lv_obj_t *bottom = lv_layer_bottom();
+	lv_obj_t *found = NULL;
+	for (uint32_t i = 0; i < lv_obj_get_child_count(bottom); i++) {
+		lv_obj_t *child = lv_obj_get_child(bottom, (int32_t)i);
+		if (lv_obj_check_type(child, &lv_image_class)) {
+			found = child;
+		}
+	}
+	return found;
+}
+
+// The always-on wallpaper, behind the blur at index 0.
+static lv_obj_t *glass_wallpaper(void) {
 	lv_obj_t *bottom = lv_layer_bottom();
 	for (uint32_t i = 0; i < lv_obj_get_child_count(bottom); i++) {
 		lv_obj_t *child = lv_obj_get_child(bottom, (int32_t)i);
@@ -185,6 +201,34 @@ int main(void) {
 	assert(style_bg_opa(&theme_style_card_pressed) == THEME_GLASS_CARD_PRESSED_OPA);
 	assert(style_bg_opa(&theme_style_accent_bg) == THEME_GLASS_ACCENT_OPA);
 	assert(lv_obj_is_hidden(img)); // still no artwork: the ambient ground alone
+	// Even with no track, the menu sits on a visible wallpaper, not flat black.
+	lv_obj_t *wall = glass_wallpaper();
+	assert(wall && wall != img);
+	assert(!lv_obj_is_hidden(wall));
+	const lv_image_dsc_t *wall_src = lv_image_get_src(wall);
+	assert(wall_src && wall_src->data);
+	// A smooth colour field, not a flat fill: many distinct pixels, and both a
+	// warm (magenta) and a cool (teal) region so the frost has colour to show.
+	int distinct = 0, warm = 0, cool = 0;
+	uint16_t seen[64];
+	int seen_n = 0;
+	for (uint32_t y = 0; y < wall_src->header.h; y += 4) {
+		const uint8_t *row = wall_src->data + y * wall_src->header.stride;
+		for (uint32_t x = 0; x < wall_src->header.w; x += 4) {
+			uint16_t p;
+			memcpy(&p, row + x * 2, sizeof(p));
+			int r = (p >> 11) & 31, g = (p >> 5) & 63, b = p & 31;
+			if (r > 20 && r > g && r > b) warm++;
+			if (g > 25 && g > r && g >= b) cool++;
+			int dup = 0;
+			for (int i = 0; i < seen_n; i++) if (seen[i] == p) { dup = 1; break; }
+			if (!dup && seen_n < 64) seen[seen_n++] = p;
+			distinct++;
+		}
+	}
+	assert(seen_n >= 32); // a gradient, not a solid colour
+	assert(warm > 0 && cool > 0);
+	(void)distinct;
 
 	// --- a sleeve lands: the backdrop blurs it ------------------------------
 	lv_image_dsc_t a = make_cover(1);
@@ -226,6 +270,7 @@ int main(void) {
 	theme_set_kind(THEME_KIND_DARK);
 	assert(!theme_is_liquid_glass());
 	assert(lv_obj_is_hidden(img));
+	assert(lv_obj_is_hidden(glass_wallpaper())); // wallpaper dropped with the theme
 	assert(style_bg_opa(&theme_style_screen) == LV_OPA_COVER);
 	assert(style_bg_opa(&theme_style_panel) == LV_OPA_COVER);
 	assert(style_bg_opa(&theme_style_card) == LV_OPA_COVER);

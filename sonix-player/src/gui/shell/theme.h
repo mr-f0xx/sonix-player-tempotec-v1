@@ -24,12 +24,13 @@ typedef enum {
 #define THEME_KIND_COUNT 6 // built-in themes; Custom is a separate SD-card choice
 
 // The frost levels Liquid Glass draws its shared surfaces at. The screen is
-// fully clear (the blurred artwork on the bottom layer shows through); panels
-// and bars keep half their dark ground; cards are a thin white film with a
+// fully clear (the wallpaper / blurred artwork on the bottom layer shows
+// through); panels, bars and cards are a smoked dark film -- half to two-thirds
+// opaque -- so white labels stay readable over a bright field, each with a
 // hairline of light along the edge, the specular rim of a pane of glass.
 #define THEME_GLASS_PANEL_OPA LV_OPA_50
-#define THEME_GLASS_CARD_OPA LV_OPA_20
-#define THEME_GLASS_CARD_PRESSED_OPA LV_OPA_40
+#define THEME_GLASS_CARD_OPA LV_OPA_50
+#define THEME_GLASS_CARD_PRESSED_OPA LV_OPA_70
 #define THEME_GLASS_EDGE_OPA LV_OPA_20
 #define THEME_GLASS_ACCENT_OPA LV_OPA_80
 

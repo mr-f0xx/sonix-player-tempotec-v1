@@ -108,16 +108,17 @@ static theme_palette_t palette_oled = {
 };
 
 // Liquid Glass: a dark pane the interface is drawn on. The page itself is
-// clear -- the blurred artwork on the bottom layer (glass.c) is the background
-// -- and the surfaces are films over it: a thin white frost for cards, a
-// half-dark ground for the bars and panels, each with a hairline of light along
-// its edge. `surface` and `surface_pressed` are white because that is what the
-// frost is drawn in; the opacity, not the colour, is what makes it glass. The
-// accent is the iOS system blue, the one hue the frosted controls wear.
+// clear -- the wallpaper / blurred artwork on the bottom layer (glass.c) is the
+// background -- and the surfaces are smoked films over it: a half-dark ground
+// for cards, bars and panels, each with a hairline of light along its edge.
+// `surface` is dark (not white) so the frost darkens the bright field behind it
+// and the white labels stay readable; the opacity, not the colour, is what
+// makes it glass. The accent is the iOS system blue, the one hue the frosted
+// controls wear.
 static theme_palette_t palette_glass = {
 	.screen_bg = LV_COLOR_MAKE(16, 16, 20),         // the ground under the artwork
-	.surface = LV_COLOR_MAKE(255, 255, 255),        // card frost, drawn thin
-	.surface_pressed = LV_COLOR_MAKE(255, 255, 255),
+	.surface = LV_COLOR_MAKE(18, 22, 32),           // card frost, smoked dark
+	.surface_pressed = LV_COLOR_MAKE(32, 38, 52),
 	.panel = LV_COLOR_MAKE(24, 24, 30),             // bars and overlays, half dark
 	.cover_bg = LV_COLOR_MAKE(24, 24, 30),
 	.text_primary = LV_COLOR_MAKE(255, 255, 255),
