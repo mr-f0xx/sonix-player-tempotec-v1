@@ -28,6 +28,7 @@
 #include "src/gui/fonts/fonts.h"
 #include "src/gui/board_profile.h"
 #include "src/gui/shell/confirm.h"
+#include "src/gui/shell/glassbg.h"
 #include "src/gui/shell/gui.h"
 #include "src/gui/shell/icons.h"
 #include "src/gui/shell/popover.h"
@@ -3351,6 +3352,81 @@ static void lyrics_bg_prepare(void) {
 	}
 }
 
+// The Liquid Glass background option: the menus and lists sit on the playing
+// track's cover, blurred to the panel, instead of the wallpaper. Built off the
+// interface thread from a copy of the sleeve on hand, exactly like the words'
+// background above, and handed to glassbg -- which owns the choice, the dim and
+// the fallback to the wallpaper when no track or no cover is up.
+typedef struct {
+	unsigned generation;
+	int w, h; // the panel
+	cover_image_t src;
+	cover_image_t out;
+} glass_artwork_job_t;
+
+static unsigned glass_artwork_generation;
+static int glass_artwork_last_mode = -1;
+static int glass_artwork_last_glass = -1;
+
+static void glass_artwork_arrived(void *user) {
+	glass_artwork_job_t *job = user;
+	if (job->generation == glass_artwork_generation && job->out.pixels &&
+		glassbg_artwork_enabled() && theme_is_liquid_glass()) {
+		// Ownership of the buffer moves to glassbg; the descriptor it builds
+		// points at the same pixels, so nothing here is freed.
+		glassbg_install_artwork(job->out.pixels, job->w, job->h);
+		job->out.pixels = NULL;
+	}
+	cover_free(&job->out);
+	free(job);
+}
+
+static void *glass_artwork_worker(void *arg) {
+	glass_artwork_job_t *job = arg;
+	cover_blur_glass(&job->src, job->w, job->h, &job->out);
+	cover_free(&job->src);
+	if (!gui_post(glass_artwork_arrived, job)) {
+		cover_free(&job->out);
+		free(job);
+	}
+	return NULL;
+}
+
+// Rebuild the background for the cover on hand now, or drop it back to the
+// wallpaper. Called when a cover lands or goes away, and when the option or the
+// theme changes -- not on a dim drag, which leaves the picture itself alone.
+static void glass_artwork_rebuild(void) {
+	glass_artwork_generation++;
+	if (!glassbg_artwork_enabled() || !theme_is_liquid_glass() || !current_cover.pixels) {
+		glassbg_clear_artwork();
+		return;
+	}
+	glass_artwork_job_t *job = calloc(1, sizeof(*job));
+	if (!job) {
+		return;
+	}
+	size_t size = current_cover.dsc.data_size;
+	job->src = current_cover;
+	job->src.pixels = malloc(size);
+	if (!job->src.pixels) {
+		free(job);
+		return;
+	}
+	memcpy(job->src.pixels, current_cover.pixels, size);
+	job->src.dsc.data = job->src.pixels;
+	job->generation = glass_artwork_generation;
+	job->w = (int)lv_obj_get_width(player_screen);
+	job->h = (int)lv_obj_get_height(player_screen);
+
+	pthread_t thread;
+	if (pthread_create(&thread, NULL, glass_artwork_worker, job) == 0) {
+		pthread_detach(thread);
+	} else {
+		cover_free(&job->src);
+		free(job);
+	}
+}
+
 // Which of the four quality marks belongs to what is playing.
 //
 // Asked of the stream and not of the library, so a radio station and a track
@@ -5366,6 +5442,10 @@ static void apply_cover_result(void) {
 	}
 	// No artwork: the placeholder is already showing.
 
+	// The glass background follows the sleeve that just landed (or goes back to
+	// the wallpaper when there is none), whether or not the player is up.
+	glass_artwork_rebuild();
+
 	prefetch_next_cover();
 }
 
@@ -5455,6 +5535,17 @@ static void player_refresh_theme(void) {
 		return;
 
 	player_glass_ground_apply();
+
+	// The blurred-artwork background follows the option and the theme, not the
+	// dim slider: rebuild only when one of those two has actually moved, so a
+	// dim drag never costs a blur.
+	int ga_mode = glassbg_artwork_enabled() ? 1 : 0;
+	int ga_glass = theme_is_liquid_glass() ? 1 : 0;
+	if (ga_mode != glass_artwork_last_mode || ga_glass != glass_artwork_last_glass) {
+		glass_artwork_last_mode = ga_mode;
+		glass_artwork_last_glass = ga_glass;
+		glass_artwork_rebuild();
+	}
 	bool mono = theme_is_monochrome();
 	// Liquid Glass leaves the player's own layout alone: strip the menu's glass
 	// rim/gradient from the deck so no white edge lines appear over the artwork.

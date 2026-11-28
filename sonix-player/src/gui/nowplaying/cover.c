@@ -1007,7 +1007,12 @@ bool cover_blur_copy(const cover_image_t *src, cover_image_t *out) {
 	return cover_blur_fill(src, (int)src->dsc.header.w, (int)src->dsc.header.h, out);
 }
 
-bool cover_blur_fill(const cover_image_t *src, int out_w, int out_h, cover_image_t *out) {
+// The shared blur: centre-crop to the target shape, shrink, box-blur, grow
+// back, then optionally tone the brightness. `brightness_pct` of 100 or more
+// leaves the picture at full strength -- the Liquid Glass background wants
+// that, because its own dim control is the only darkening it should get.
+static bool blur_fill_impl(const cover_image_t *src, int out_w, int out_h, cover_image_t *out,
+						   int brightness_pct) {
 	if (!out) {
 		return false;
 	}
@@ -1059,17 +1064,29 @@ bool cover_blur_fill(const cover_image_t *src, int out_w, int out_h, cover_image
 		return false;
 	}
 
-	for (int i = 0; i < out_w * out_h * 3; i++) {
-		if (backdrop_light) {
-			big[i] = (uint8_t)(255 - ((255 - big[i]) * BACKDROP_BRIGHTNESS_PCT) / 100);
-		} else {
-			big[i] = (uint8_t)((big[i] * BACKDROP_BRIGHTNESS_PCT) / 100);
+	if (brightness_pct < 100) {
+		for (int i = 0; i < out_w * out_h * 3; i++) {
+			if (backdrop_light) {
+				big[i] = (uint8_t)(255 - ((255 - big[i]) * brightness_pct) / 100);
+			} else {
+				big[i] = (uint8_t)((big[i] * brightness_pct) / 100);
+			}
 		}
 	}
 
 	bool ok = pack_rgb565_dithered(big, out_w, out_h, out);
 	free(big);
 	return ok;
+}
+
+bool cover_blur_fill(const cover_image_t *src, int out_w, int out_h, cover_image_t *out) {
+	return blur_fill_impl(src, out_w, out_h, out, BACKDROP_BRIGHTNESS_PCT);
+}
+
+bool cover_blur_glass(const cover_image_t *src, int out_w, int out_h, cover_image_t *out) {
+	// Full strength: the glass background's own dim slider is the only wash
+	// over it, so the artwork keeps its colour until the user darkens it.
+	return blur_fill_impl(src, out_w, out_h, out, 100);
 }
 
 // ---------------------------------------------------------------------------

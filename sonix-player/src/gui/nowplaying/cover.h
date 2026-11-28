@@ -110,6 +110,11 @@ bool cover_blur_copy(const cover_image_t *src, cover_image_t *out);
 // covers the controls. The caller owns `out` and must cover_free() it.
 bool cover_blur_fill(const cover_image_t *src, int out_w, int out_h, cover_image_t *out);
 
+// The same blur at full strength -- no brightness wash -- for the Liquid Glass
+// background, whose own dim control is the only darkening it should get. The
+// caller owns `out` and must cover_free() it.
+bool cover_blur_glass(const cover_image_t *src, int out_w, int out_h, cover_image_t *out);
+
 // The one colour that stands for a sleeve, as 0xRRGGBB. Cover Flow throws it
 // under the record in the middle; the player's alternative layout tints the
 // title pill, the waveform and the star with it. A grey sleeve comes back a
