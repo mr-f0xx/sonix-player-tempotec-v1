@@ -262,6 +262,10 @@ void calculator_init(gui_config_t *cfg) {
 	lv_obj_set_style_radius(keypad, 0, 0);
 	lv_obj_set_style_pad_all(keypad, 0, 0);
 	lv_obj_set_style_pad_gap(keypad, gap, 0);
+	// The keys' Liquid Glass rim is an outline drawn just outside each key; a
+	// clipping keypad cut the outer column's rims at its own edge. The keypad
+	// never scrolls, so let the rims spill the extra pixel and stay whole.
+	lv_obj_set_overflow_visible(keypad, true);
 	lv_obj_set_scrollable(keypad, false);
 	lv_obj_set_flex_flow(keypad, LV_FLEX_FLOW_ROW_WRAP);
 	// SPACE_BETWEEN rather than START: a width that does not divide by four

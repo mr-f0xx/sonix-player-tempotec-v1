@@ -233,6 +233,14 @@ static void choose_tab(int which) {
 	// A stable playing surface: swiping across percussion keys doesn't move
 	// the grid. Other views scroll, including the file and assignment lists.
 	lv_obj_set_scrollable(body, view != PADS);
+	// The pad grid does not scroll, so let its keys' outside-drawn rims spill
+	// past the page edge instead of being cut off. The scrolling views keep
+	// their clip so a list never paints over the header while it moves.
+	if (view == PADS) {
+		lv_obj_set_overflow_visible(body, true);
+	} else {
+		lv_obj_set_overflow_visible(body, false);
+	}
 	lv_obj_scroll_to_y(body, 0, LV_ANIM_OFF);
 	if (view == PADS) tapesampler_open_pads();
 	else if (view == KITS) tapesampler_open_kits();

@@ -104,6 +104,19 @@ static void refresh_view_buttons(void) {
 		bool on = colour[i] == show_color;
 		lv_obj_set_style_bg_color(buttons[i], on ? theme()->accent : theme()->surface_pressed, 0);
 		lv_obj_set_style_text_color(lv_obj_get_child(buttons[i], 0), on ? theme_on_accent() : theme()->text_primary, 0);
+		// Liquid Glass draws the selector as glass, not a solid white oval: the
+		// chosen side a tinted pane, the other the dark panel ground, both semi
+		// transparent with light ink -- the same treatment the Appearance pills
+		// wear. (The glass palette's surface_pressed is white, so the plain fill
+		// above read as a blank white pill on device.)
+		if (theme_is_liquid_glass()) {
+			if (!on) {
+				lv_obj_set_style_bg_color(buttons[i], theme()->panel, 0);
+			}
+			lv_obj_set_style_bg_opa(buttons[i], on ? THEME_GLASS_ACCENT_OPA : THEME_GLASS_PANEL_OPA, 0);
+		} else {
+			lv_obj_set_style_bg_opa(buttons[i], LV_OPA_COVER, 0);
+		}
 	}
 }
 
@@ -470,6 +483,12 @@ void gearboypage_init(gui_config_t *cfg) {
 	lv_obj_set_style_radius(list_box, 0, 0);
 	lv_obj_set_style_pad_all(list_box, 0, 0);
 	lv_obj_set_style_pad_bottom(list_box, cfg->padding, 0);
+	// The cartridge rim is an outline drawn just outside the tile. The grid
+	// scrolls vertically and must keep that clip, so instead of letting tiles
+	// overflow, inset the columns a couple of pixels: the outer rims then sit
+	// inside the clip and close fully instead of being cut at the grid edge.
+	lv_obj_set_style_pad_left(list_box, 2, 0);
+	lv_obj_set_style_pad_right(list_box, 2, 0);
 	lv_obj_set_style_pad_row(list_box, 12, 0);
 	lv_obj_set_style_pad_column(list_box, 12, 0);
 	lv_obj_set_flex_flow(list_box, LV_FLEX_FLOW_ROW_WRAP);

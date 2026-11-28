@@ -1293,6 +1293,10 @@ static void build_lock_view(gui_config_t *cfg) {
 	lv_obj_set_style_radius(keypad, 0, 0);
 	lv_obj_set_style_pad_all(keypad, 0, 0);
 	lv_obj_set_style_pad_gap(keypad, PIN_KEY_GAP, 0);
+	// The PIN keys rim themselves with an outline drawn just outside the key;
+	// a clipping keypad cut the outer columns' rims. It never scrolls, so let
+	// the rims spill the extra pixel and close the full rounded rectangle.
+	lv_obj_set_overflow_visible(keypad, true);
 	lv_obj_set_flex_flow(keypad, LV_FLEX_FLOW_ROW_WRAP);
 	lv_obj_set_flex_align(keypad, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
 	lv_obj_set_scrollable(keypad, false);

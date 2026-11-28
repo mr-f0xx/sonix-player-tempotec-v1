@@ -209,6 +209,10 @@ static lv_obj_t *wireless_card(lv_obj_t *parent, int height) {
 	lv_obj_set_style_pad_all(card, 8, 0);
 	lv_obj_set_scrollable(card, false);
 	lv_obj_set_event_bubble(card, true);
+	// The radio switch rims itself with an outline drawn just outside the
+	// track; a clipping card cut that rim at the card's right edge. The card
+	// never scrolls, so let the rim spill and stay whole.
+	lv_obj_set_overflow_visible(card, true);
 	return card;
 }
 
@@ -230,6 +234,9 @@ static lv_obj_t *radio_card(lv_obj_t *parent, const char *label, const lv_image_
 	lv_obj_set_flex_flow(heading, LV_FLEX_FLOW_ROW);
 	lv_obj_set_flex_align(heading, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 	lv_obj_set_event_bubble(heading, true);
+	// The switch's outline rim sits a pixel outside the heading's right edge;
+	// let it show rather than be cut (the card above already allows overflow).
+	lv_obj_set_overflow_visible(heading, true);
 
 	lv_obj_t *open = lv_btn_create(heading);
 	wireless_remove_edges(open);

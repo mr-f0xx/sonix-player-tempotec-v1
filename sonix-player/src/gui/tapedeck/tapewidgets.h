@@ -30,6 +30,11 @@ static inline lv_obj_t *stack(lv_obj_t *parent, lv_flex_flow_t flow, int height,
 	lv_obj_set_style_pad_gap(obj, gap, 0);
 	lv_obj_set_scrollable(obj, false);
 	lv_obj_set_event_bubble(obj, true);
+	// The keys wear their Liquid Glass rim as an outline, drawn just outside
+	// the key box. A clipping container would cut the outer keys' rims at its
+	// own edge (the tab row and the pad grid showed open borders). These stacks
+	// never scroll, so letting children overflow keeps every rim whole.
+	lv_obj_set_overflow_visible(obj, true);
 	lv_obj_set_flex_flow(obj, flow);
 	lv_obj_set_flex_align(obj, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 	return obj;
