@@ -1031,7 +1031,18 @@ el.deviceShotBtn.addEventListener("click", async () => {
  * Responsive Scale Switcher (Fit / 1x / 1.25x / 1.5x / 2x), Mobile Views,
  * Audio Toggle, Flip View & Hardware Port Shortcuts
  * -------------------------------------------------------------------------- */
-let activeScaleMode = window.innerWidth <= 980 ? "fit" : "1.25";
+const mobileScaleQuery = window.matchMedia("(max-width: 768px)");
+let desktopScaleMode = window.innerWidth <= 980 ? "fit" : "1.25";
+let activeScaleMode = mobileScaleQuery.matches ? "real" : desktopScaleMode;
+
+mobileScaleQuery.addEventListener("change", (event) => {
+	if (event.matches) {
+		desktopScaleMode = activeScaleMode;
+		applyScreenScale("real");
+	} else {
+		applyScreenScale(desktopScaleMode);
+	}
+});
 
 /**
  * The fixed multipliers are relative to the panel's *native* pixels, not to the
