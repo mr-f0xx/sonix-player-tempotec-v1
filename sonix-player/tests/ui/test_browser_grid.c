@@ -26,6 +26,7 @@ ICON(icon_folder); ICON(icon_music2); ICON(icon_album); ICON(icon_refresh);
 
 // Dialog frost is a no-op here: these suites substitute the theme engine.
 void theme_glass_dialog(lv_obj_t *obj) { (void)obj; }
+void theme_glass_action_button(lv_obj_t *btn, bool accent) { (void)btn; (void)accent; }
 
 int main(void) {
 	// Only the actual Music tree, including mounts with a trailing slash or /.

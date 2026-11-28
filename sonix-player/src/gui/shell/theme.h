@@ -189,6 +189,12 @@ void theme_glass_dialog(lv_obj_t *obj);
 // Opaque wallpaper ground for full-screen top-layer pages (Date & time) under
 // Liquid Glass so the live screen behind never shows through; a no-op elsewhere.
 void theme_glass_page_ground(lv_obj_t *obj);
+
+// A dialog / page action button under Liquid Glass: the accent action wears a
+// tinted glass fill, the quiet one a dark glass fill, both with the specular
+// border rim. Elsewhere it restores the flat accent fill (accent) or leaves the
+// shared neutral style (quiet), so the same call is safe on every theme.
+void theme_glass_action_button(lv_obj_t *btn, bool accent);
 bool theme_is_dark(void);
 bool theme_is_tokyo_night(void);
 bool theme_is_amber_on_black(void);

@@ -194,6 +194,8 @@ static void set_button(int i, const char *key, bool accent, action_fn action) {
 
 	lv_label_set_text(button_labels[i], tr(key));
 	lv_obj_set_style_text_color(button_labels[i], accent ? theme_on_accent() : theme()->text_primary, 0);
+	// Glass buttons under Liquid Glass; the flat fill above stands elsewhere.
+	theme_glass_action_button(btn, accent);
 	button_actions[i] = action;
 	lv_obj_set_hidden(btn, false);
 }

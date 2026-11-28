@@ -3569,11 +3569,17 @@ static void panel_glass_frost_apply(void) {
 		lv_obj_set_style_bg_opa(panel, LV_OPA_COVER, 0);
 		lv_obj_set_style_bg_color(panel, theme()->screen_bg, 0);
 		lv_obj_set_style_bg_image_src(panel, &glass_wallpaper_dsc, 0);
-		// Soft art over the dark ground: a frosted surface, never see-through.
-		lv_obj_set_style_bg_image_opa(panel, LV_OPA_40, 0);
+		// The same deep dim the main menu wears (glass.c recolors the wallpaper
+		// 70% black), so the control centre is as dark as the page behind it --
+		// opaque, never see-through.
+		lv_obj_set_style_bg_image_recolor(panel, lv_color_black(), 0);
+		lv_obj_set_style_bg_image_recolor_opa(panel, LV_OPA_70, 0);
+		lv_obj_set_style_bg_image_opa(panel, LV_OPA_COVER, 0);
 	} else {
 		lv_obj_remove_local_style_prop(panel, LV_STYLE_BG_IMAGE_SRC, 0);
 		lv_obj_remove_local_style_prop(panel, LV_STYLE_BG_IMAGE_OPA, 0);
+		lv_obj_remove_local_style_prop(panel, LV_STYLE_BG_IMAGE_RECOLOR, 0);
+		lv_obj_remove_local_style_prop(panel, LV_STYLE_BG_IMAGE_RECOLOR_OPA, 0);
 		lv_obj_remove_local_style_prop(panel, LV_STYLE_BG_OPA, 0);
 		lv_obj_remove_local_style_prop(panel, LV_STYLE_BG_COLOR, 0);
 	}

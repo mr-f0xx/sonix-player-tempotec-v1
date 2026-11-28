@@ -923,11 +923,64 @@ void theme_glass_dialog(lv_obj_t *obj) {
 		lv_obj_set_style_bg_color(obj, lv_color_mix(lv_color_white(), active->panel, 30), 0);
 		lv_obj_set_style_bg_grad_color(obj, active->panel, 0);
 		lv_obj_set_style_bg_grad_dir(obj, LV_GRAD_DIR_VER, 0);
+		// The specular rim as a border (inside the card), so its rounded corners
+		// stay whole -- an outline's corner arcs clip at the card's radius.
+		lv_obj_set_style_border_width(obj, 1, 0);
+		lv_obj_set_style_border_side(obj, LV_BORDER_SIDE_FULL, 0);
+		lv_obj_set_style_border_color(obj, theme_glass_rim(), 0);
+		lv_obj_set_style_border_opa(obj, THEME_GLASS_EDGE_OPA, 0);
+		lv_obj_set_style_outline_width(obj, 0, 0);
 	} else {
 		lv_obj_remove_local_style_prop(obj, LV_STYLE_BG_OPA, 0);
 		lv_obj_remove_local_style_prop(obj, LV_STYLE_BG_COLOR, 0);
 		lv_obj_remove_local_style_prop(obj, LV_STYLE_BG_GRAD_COLOR, 0);
 		lv_obj_remove_local_style_prop(obj, LV_STYLE_BG_GRAD_DIR, 0);
+		lv_obj_remove_local_style_prop(obj, LV_STYLE_BORDER_WIDTH, 0);
+		lv_obj_remove_local_style_prop(obj, LV_STYLE_BORDER_SIDE, 0);
+		lv_obj_remove_local_style_prop(obj, LV_STYLE_BORDER_COLOR, 0);
+		lv_obj_remove_local_style_prop(obj, LV_STYLE_BORDER_OPA, 0);
+		lv_obj_remove_local_style_prop(obj, LV_STYLE_OUTLINE_WIDTH, 0);
+	}
+}
+
+void theme_glass_action_button(lv_obj_t *btn, bool accent) {
+	if (!btn) {
+		return;
+	}
+	if (theme_is_liquid_glass()) {
+		// The accent action is a pane of tinted glass; the quiet one a pane of
+		// dark glass. Both carry the specular border rim and a soft vertical
+		// gradient so they read as glass, not a flat slab of colour.
+		lv_color_t fill = accent ? active->accent : active->panel;
+		lv_obj_set_style_bg_color(btn, fill, 0);
+		lv_obj_set_style_bg_opa(btn, accent ? THEME_GLASS_ACCENT_OPA : THEME_GLASS_PANEL_OPA, 0);
+		lv_obj_set_style_bg_grad_color(btn, lv_color_mix(lv_color_black(), fill, 70), 0);
+		lv_obj_set_style_bg_grad_dir(btn, LV_GRAD_DIR_VER, 0);
+		lv_obj_set_style_border_width(btn, 1, 0);
+		lv_obj_set_style_border_side(btn, LV_BORDER_SIDE_FULL, 0);
+		lv_obj_set_style_border_color(btn, theme_glass_rim(), 0);
+		lv_obj_set_style_border_opa(btn, THEME_GLASS_EDGE_OPA, 0);
+		lv_obj_set_style_outline_width(btn, 0, 0);
+		lv_obj_set_style_outline_width(btn, 0, LV_STATE_PRESSED);
+	} else {
+		// Take the glass treatment back out so the flat themes look as they
+		// always did: a solid accent fill, or the shared neutral style.
+		lv_obj_remove_local_style_prop(btn, LV_STYLE_BG_GRAD_COLOR, 0);
+		lv_obj_remove_local_style_prop(btn, LV_STYLE_BG_GRAD_DIR, 0);
+		lv_obj_remove_local_style_prop(btn, LV_STYLE_BORDER_SIDE, 0);
+		lv_obj_remove_local_style_prop(btn, LV_STYLE_BORDER_COLOR, 0);
+		lv_obj_remove_local_style_prop(btn, LV_STYLE_BORDER_OPA, 0);
+		lv_obj_remove_local_style_prop(btn, LV_STYLE_OUTLINE_WIDTH, 0);
+		lv_obj_remove_local_style_prop(btn, LV_STYLE_OUTLINE_WIDTH, LV_STATE_PRESSED);
+		if (accent) {
+			lv_obj_set_style_bg_color(btn, active->accent, 0);
+			lv_obj_set_style_bg_opa(btn, LV_OPA_COVER, 0);
+			lv_obj_set_style_border_width(btn, 0, 0);
+		} else {
+			lv_obj_remove_local_style_prop(btn, LV_STYLE_BG_COLOR, 0);
+			lv_obj_remove_local_style_prop(btn, LV_STYLE_BG_OPA, 0);
+			lv_obj_remove_local_style_prop(btn, LV_STYLE_BORDER_WIDTH, 0);
+		}
 	}
 }
 

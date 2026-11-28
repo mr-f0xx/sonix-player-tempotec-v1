@@ -120,6 +120,10 @@ static lv_obj_t *make_button(lv_obj_t *parent, const char *text, bool accent, lv
 	lv_obj_set_style_text_color(label, accent ? theme_on_accent() : theme()->text_primary, 0);
 	lv_obj_center(label);
 
+	// Liquid Glass turns the pair into glass buttons (tinted action, dark quiet);
+	// every other theme keeps the flat fill set above.
+	theme_glass_action_button(btn, accent);
+
 	if (label_out) {
 		*label_out = label;
 	}
@@ -194,7 +198,13 @@ void confirm_init(gui_config_t *cfg) {
 // the shared one, so they have to be repainted by hand on every theme change.
 static void refresh_theme(void) {
 	if (ok_btn) {
-		lv_obj_set_style_bg_color(ok_btn, theme()->accent, 0);
+		theme_glass_action_button(ok_btn, true);
+	}
+	if (ok_label) {
+		lv_obj_set_style_text_color(ok_label, theme_on_accent(), 0);
+	}
+	if (cancel_btn) {
+		theme_glass_action_button(cancel_btn, false);
 	}
 	if (cancel_label) {
 		lv_obj_set_style_text_color(cancel_label, theme()->text_primary, 0);

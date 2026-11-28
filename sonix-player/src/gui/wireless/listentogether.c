@@ -11,6 +11,8 @@ lv_obj_t *listentogether_screen = NULL;
 
 static lv_obj_t *status_lbl = NULL;
 static lv_obj_t *stats_lbl = NULL;
+static lv_obj_t *host_btn = NULL;
+static lv_obj_t *join_btn = NULL;
 static lv_obj_t *host_btn_lbl = NULL;
 static lv_obj_t *join_btn_lbl = NULL;
 static lv_timer_t *lt_ui_timer = NULL;
@@ -85,6 +87,29 @@ static void listentogether_apply_ground(void) {
 	}
 }
 
+// The two actions are glass buttons under Liquid Glass (tinted panes with the
+// specular rim), not the default solid blue; other themes take the accent fill.
+static void listentogether_style_buttons(void) {
+	lv_obj_t *btns[2] = {host_btn, join_btn};
+	lv_obj_t *lbls[2] = {host_btn_lbl, join_btn_lbl};
+	for (int i = 0; i < 2; i++) {
+		if (!btns[i]) {
+			continue;
+		}
+		lv_obj_set_style_radius(btns[i], 12, 0);
+		lv_obj_set_style_shadow_width(btns[i], 0, 0);
+		theme_glass_action_button(btns[i], true);
+		if (lbls[i]) {
+			lv_obj_set_style_text_color(lbls[i], theme_on_accent(), 0);
+		}
+	}
+}
+
+static void listentogether_refresh_theme(void) {
+	listentogether_apply_ground();
+	listentogether_style_buttons();
+}
+
 void listentogether_page_init(gui_config_t *cfg) {
 	(void)cfg;
 	if (listentogether_screen) return;
@@ -94,7 +119,7 @@ void listentogether_page_init(gui_config_t *cfg) {
 	// the wallpaper shows through; other themes keep the solid black ground.
 	lv_obj_add_style(listentogether_screen, &theme_style_screen, 0);
 	listentogether_apply_ground();
-	theme_register_refresh(listentogether_apply_ground);
+	theme_register_refresh(listentogether_refresh_theme);
 
 	lv_obj_t *cont = lv_obj_create(listentogether_screen);
 	lv_obj_set_size(cont, LV_PCT(92), LV_PCT(88));
@@ -111,15 +136,17 @@ void listentogether_page_init(gui_config_t *cfg) {
 	stats_lbl = lv_label_create(cont);
 	lv_obj_set_style_text_color(stats_lbl, lv_color_hex(0x9BA3AE), 0);
 
-	lv_obj_t *host_btn = lv_button_create(cont);
+	host_btn = lv_button_create(cont);
 	lv_obj_set_width(host_btn, LV_PCT(80));
 	host_btn_lbl = lv_label_create(host_btn);
 	lv_obj_center(host_btn_lbl);
 
-	lv_obj_t *join_btn = lv_button_create(cont);
+	join_btn = lv_button_create(cont);
 	lv_obj_set_width(join_btn, LV_PCT(80));
 	join_btn_lbl = lv_label_create(join_btn);
 	lv_obj_center(join_btn_lbl);
+
+	listentogether_style_buttons();
 
 	if (STREAMING_LAN_PREVIEW_ONLY) {
 		lv_label_set_text(status_lbl, tr("Listen Together"));
