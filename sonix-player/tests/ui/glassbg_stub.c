@@ -50,3 +50,11 @@ void glassbg_install(uint8_t *px, int panel_w, int panel_h, const char *name) {
 }
 void glassbg_reset(void) {}
 void glassbg_sync(void) {}
+bool glassbg_artwork_enabled(void) { return false; }
+void glassbg_set_artwork(bool on) { (void)on; }
+void glassbg_install_artwork(uint8_t *px, int panel_w, int panel_h) {
+	(void)panel_w;
+	(void)panel_h;
+	free(px);
+}
+void glassbg_clear_artwork(void) {}

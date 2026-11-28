@@ -56,6 +56,7 @@ static lv_obj_t *borders_card, *borders_toggle, *borders_note;
 static lv_obj_t *glass_bg_card, *glass_bg_value;
 static lv_obj_t *glass_dim_card, *glass_dim_value, *glass_dim_slider;
 static lv_obj_t *glass_dim_note;
+static lv_obj_t *glass_artwork_card, *glass_artwork_toggle, *glass_artwork_note;
 static lv_obj_t *main_menu_icons_toggle;
 static lv_obj_t *main_menu_books_toggle;
 static lv_obj_t *main_menu_browse_toggle;
@@ -899,6 +900,13 @@ static void glass_dim_released_cb(lv_event_t *e) {
 	glass_dim_show();
 }
 
+// Blurred artwork instead of the wallpaper: glassbg owns the choice and the
+// fallback; the player builds the blur from the sleeve on hand and repaints.
+static void glass_artwork_cb(lv_event_t *e) {
+	(void)e;
+	glassbg_set_artwork(lv_obj_has_state(glass_artwork_toggle, LV_STATE_CHECKED));
+}
+
 // The four names are not translated, the way a font's name is not: they are
 // the names this setting gives the four pictures, and they are the words the
 // flash notes and the changelog use. "Custom" is -- it is not a picture's
@@ -992,6 +1000,12 @@ static void appearance_preview_refresh(void) {
 	}
 	if (glass_dim_note) {
 		lv_obj_set_hidden(glass_dim_note, !glass);
+	}
+	if (glass_artwork_card) {
+		lv_obj_set_hidden(glass_artwork_card, !glass);
+	}
+	if (glass_artwork_note) {
+		lv_obj_set_hidden(glass_artwork_note, !glass);
 	}
 	if (borders_card) {
 		lv_obj_set_hidden(borders_card, !glass);
@@ -1313,6 +1327,20 @@ void appearance_init(gui_config_t *cfg) {
 	lv_obj_add_style(glass_dim_note, &theme_style_text_dim, 0);
 	lv_obj_set_style_text_font(glass_dim_note, &font_ui_22, 0);
 	lv_label_set_text(glass_dim_note, tr("appearance_glass_dim_note"));
+
+	// The blurred-artwork background: the current album's cover, blurred, behind
+	// the menus and lists in place of the wallpaper. Liquid Glass alone, like the
+	// wallpaper rows above it; the same dim knob darkens it too.
+	glass_artwork_card = settingsrow_toggle(container, "appearance_glass_artwork", &glass_artwork_toggle, glass_artwork_cb);
+	if (glassbg_artwork_enabled()) {
+		lv_obj_add_state(glass_artwork_toggle, LV_STATE_CHECKED);
+	}
+	glass_artwork_note = lv_label_create(container);
+	lv_label_set_long_mode(glass_artwork_note, LV_LABEL_LONG_WRAP);
+	lv_obj_set_width(glass_artwork_note, lv_pct(100));
+	lv_obj_add_style(glass_artwork_note, &theme_style_text_dim, 0);
+	lv_obj_set_style_text_font(glass_artwork_note, &font_ui_22, 0);
+	lv_label_set_text(glass_artwork_note, tr("appearance_glass_artwork_note"));
 
 	settingsrow_toggle(container, "appearance_main_menu_icons_only", &main_menu_icons_toggle, main_menu_icons_cb);
 	if (main_menu_icons_only()) {

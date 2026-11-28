@@ -31,8 +31,70 @@ static lv_image_dsc_t custom_dsc;
 static bool custom_active;
 static bool pending;
 
+// The blurred-artwork background: the playing track's cover, blurred to the
+// panel by the player and handed over here. It outranks the wallpaper while it
+// is on hand; with none, the wallpaper (custom or supplied) shows instead.
+static bool artwork_mode;
+static uint8_t *artwork_px;
+static lv_image_dsc_t artwork_dsc;
+static bool artwork_active;
+
 const lv_image_dsc_t *glassbg_source(void) {
+	if (artwork_active) {
+		return &artwork_dsc;
+	}
 	return custom_active ? &custom_dsc : &glass_wallpaper_dsc;
+}
+
+bool glassbg_artwork_enabled(void) {
+	return artwork_mode;
+}
+
+static void set_artwork(uint8_t *px, int w, int h) {
+	free(artwork_px);
+	artwork_px = px;
+	memset(&artwork_dsc, 0, sizeof(artwork_dsc));
+	if (px) {
+		artwork_dsc.header.magic = LV_IMAGE_HEADER_MAGIC;
+		artwork_dsc.header.cf = LV_COLOR_FORMAT_RGB565;
+		artwork_dsc.header.w = (uint32_t)w;
+		artwork_dsc.header.h = (uint32_t)h;
+		artwork_dsc.header.stride = (uint32_t)(w * 2);
+		artwork_dsc.data_size = (size_t)w * (size_t)h * 2;
+		artwork_dsc.data = px;
+		artwork_active = true;
+	} else {
+		artwork_active = false;
+	}
+}
+
+void glassbg_set_artwork(bool on) {
+	if (artwork_mode == on) {
+		return;
+	}
+	artwork_mode = on;
+	config_set_bool("ui", "glass_bg_artwork", on);
+	config_save();
+	if (!on) {
+		set_artwork(NULL, 0, 0);
+	}
+	theme_repaint();
+}
+
+void glassbg_install_artwork(uint8_t *px, int panel_w, int panel_h) {
+	if (!px) {
+		return;
+	}
+	set_artwork(px, panel_w, panel_h);
+	theme_repaint();
+}
+
+void glassbg_clear_artwork(void) {
+	if (!artwork_active) {
+		return;
+	}
+	set_artwork(NULL, 0, 0);
+	theme_repaint();
 }
 
 lv_opa_t glassbg_dim_opa(void) {
@@ -357,5 +419,6 @@ void glassbg_init(void) {
 		dim_percent = GLASSBG_DIM_MAX;
 	}
 	snprintf(wallpaper_name, sizeof(wallpaper_name), "%s", config_get("ui", "glass_wallpaper", ""));
+	artwork_mode = config_get_bool("ui", "glass_bg_artwork", false);
 	pending = true;
 }

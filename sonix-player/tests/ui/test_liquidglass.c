@@ -328,6 +328,36 @@ int main(void) {
 	theme_set_kind(THEME_KIND_LIQUID_GLASS);
 	theme_set_glass_borders_hidden(false);
 
+	// --- Blurred artwork background: outranks the wallpaper, falls back -----
+	assert(!glassbg_artwork_enabled()); // off by default
+	const lv_image_dsc_t *art_wall_src = glassbg_source();
+	glassbg_set_artwork(true);
+	assert(glassbg_artwork_enabled());
+	assert(config_get_bool("ui", "glass_bg_artwork", false));
+	// No blur on hand yet: the wallpaper still shows.
+	assert(glassbg_source() == art_wall_src);
+	uint8_t *art = malloc(4 * 4 * 2);
+	assert(art);
+	memset(art, 0x55, 4 * 4 * 2);
+	glassbg_install_artwork(art, 4, 4);
+	assert(glassbg_source() != art_wall_src);
+	assert(glassbg_source()->data == art);
+	assert(glassbg_source()->header.w == 4 && glassbg_source()->header.h == 4);
+	// Dropping it falls back to the wallpaper without forgetting the choice.
+	glassbg_clear_artwork();
+	assert(glassbg_source() == art_wall_src);
+	assert(glassbg_artwork_enabled());
+	// Turning the option off clears it and is remembered across a restart.
+	glassbg_install_artwork(malloc(2 * 2 * 2), 2, 2);
+	assert(glassbg_source() != art_wall_src);
+	glassbg_set_artwork(false);
+	assert(!glassbg_artwork_enabled());
+	assert(glassbg_source() == art_wall_src);
+	assert(config_save());
+	assert(config_init(config));
+	glassbg_init();
+	assert(!glassbg_artwork_enabled());
+
 	printf("PASS liquid-glass theme and constant backdrop\n");
 	return 0;
 }

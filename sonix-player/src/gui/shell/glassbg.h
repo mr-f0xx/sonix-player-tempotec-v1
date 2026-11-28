@@ -36,9 +36,26 @@ void glassbg_init(void);
 // read the chosen picture again.
 void glassbg_set_root(const char *card_root);
 
-// The wallpaper every glass surface should draw: the custom picture when one
-// is loaded, the supplied art otherwise. Never NULL.
+// The wallpaper every glass surface should draw: the blurred artwork of the
+// playing track when that option is on and a blur is on hand, else the custom
+// picture when one is loaded, else the supplied art. Never NULL.
 const lv_image_dsc_t *glassbg_source(void);
+
+// The blurred-artwork background: instead of the wallpaper, the menus and
+// lists sit on the current album's cover, blurred to the panel and darkened by
+// the same dim control. Off by default, remembered in the config. Liquid Glass
+// only. The player builds the blur off the interface thread and hands it over
+// with glassbg_install_artwork(); with no track or no cover the wallpaper shows
+// through until one arrives.
+bool glassbg_artwork_enabled(void);
+void glassbg_set_artwork(bool on);
+
+// Make a panel-sized blurred buffer the artwork background: takes ownership of
+// `px` and repaints. Interface thread. A NULL `px` is ignored.
+void glassbg_install_artwork(uint8_t *px, int panel_w, int panel_h);
+
+// Drop the artwork background and fall back to the wallpaper. Interface thread.
+void glassbg_clear_artwork(void);
 
 // The dim as an LVGL opacity (black recolor over the picture).
 lv_opa_t glassbg_dim_opa(void);
