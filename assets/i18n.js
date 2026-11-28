@@ -235,6 +235,9 @@
     STRINGS[lang].download_count_scope = scope;
   }
 
+  const downloadAsOf = { it: 'al', de: 'Stand', es: 'a fecha de', fr: 'au', nl: 'per', pl: 'stan na', 'pt-BR': 'em', uk: 'станом на', ru: 'на', ja: '時点' };
+  for (const [lang, label] of Object.entries(downloadAsOf)) STRINGS[lang].download_count_as_of = label;
+
   const EXTRA = window.SONIX_I18N_EXTRA;
   if (EXTRA) {
     (EXTRA.keys || []).forEach((key, index) => {
