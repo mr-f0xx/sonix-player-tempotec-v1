@@ -403,6 +403,14 @@ static void pick_retheme(void) {
 		theme_glass_dialog(pick_card);
 		pick_flat_border(pick_card);
 	}
+	// The folder rows carry their glass rim as local styles, so a live
+	// Hide borders / theme change has to repaint them here too.
+	if (pick_list) {
+		uint32_t rows = lv_obj_get_child_count(pick_list);
+		for (uint32_t i = 0; i < rows; i++) {
+			theme_glass_pane(lv_obj_get_child(pick_list, (int32_t)i));
+		}
+	}
 	if (pick_scan_btn) {
 		theme_glass_action_button(pick_scan_btn, true);
 		pick_flat_border(pick_scan_btn);

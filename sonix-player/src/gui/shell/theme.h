@@ -336,4 +336,12 @@ void theme_set_boot_screen_custom(const char *name);
 bool theme_dynamic_tint(void);
 void theme_set_dynamic_tint(bool on);
 
+// Hide borders (Appearance > Hide borders): the opt-in borderless Liquid
+// Glass. Every specular rim -- card/panel outlines, pane, dialog and button
+// borders, the switch ring, the A-Z strip, the volume pill -- draws at zero
+// width while the frost and gradients stay. Remembered in the config; the
+// flat themes ignore it. The setter repaints every page.
+bool theme_glass_borders_hidden(void);
+void theme_set_glass_borders_hidden(bool on);
+
 #endif // THEME_H

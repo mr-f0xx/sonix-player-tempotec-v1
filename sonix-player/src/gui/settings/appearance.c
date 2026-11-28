@@ -50,6 +50,7 @@ static lv_obj_t *custom_accent_swatch;
 static lv_obj_t *custom_accent_hex;
 static bool appearance_compact;
 static lv_obj_t *tint_toggle;
+static lv_obj_t *borders_card, *borders_toggle, *borders_note;
 // Liquid Glass only: the background picture row, its dim slider and the note
 // under it. Hidden on every other theme (appearance_preview_refresh).
 static lv_obj_t *glass_bg_card, *glass_bg_value;
@@ -113,6 +114,13 @@ static void corner_radius_cb(lv_event_t *e) {
 static void dynamic_tint_cb(lv_event_t *e) {
 	(void)e;
 	theme_set_dynamic_tint(lv_obj_has_state(tint_toggle, LV_STATE_CHECKED));
+}
+
+// Hide borders: the borderless glass, every rim in the theme at once.
+// theme_set_glass_borders_hidden repaints the interface itself, this page included.
+static void hide_borders_cb(lv_event_t *e) {
+	(void)e;
+	theme_set_glass_borders_hidden(lv_obj_has_state(borders_toggle, LV_STATE_CHECKED));
 }
 
 static void main_menu_icons_cb(lv_event_t *e) {
@@ -985,6 +993,12 @@ static void appearance_preview_refresh(void) {
 	if (glass_dim_note) {
 		lv_obj_set_hidden(glass_dim_note, !glass);
 	}
+	if (borders_card) {
+		lv_obj_set_hidden(borders_card, !glass);
+	}
+	if (borders_note) {
+		lv_obj_set_hidden(borders_note, !glass);
+	}
 	glass_bg_show();
 	glass_dim_show();
 
@@ -1265,6 +1279,21 @@ void appearance_init(gui_config_t *cfg) {
 	lv_obj_add_style(tint_note, &theme_style_text_dim, 0);
 	lv_obj_set_style_text_font(tint_note, &font_ui_22, 0);
 	lv_label_set_text(tint_note, tr("appearance_dynamic_tint_note"));
+
+	// The borderless glass: one opt-in that takes every specular rim out of
+	// the theme while the frost stays. Liquid Glass alone, like the wallpaper
+	// rows below it.
+	borders_card = settingsrow_toggle(container, "appearance_hide_borders", &borders_toggle, hide_borders_cb);
+	if (theme_glass_borders_hidden()) {
+		lv_obj_add_state(borders_toggle, LV_STATE_CHECKED);
+	}
+
+	borders_note = lv_label_create(container);
+	lv_label_set_long_mode(borders_note, LV_LABEL_LONG_WRAP);
+	lv_obj_set_width(borders_note, lv_pct(100));
+	lv_obj_add_style(borders_note, &theme_style_text_dim, 0);
+	lv_obj_set_style_text_font(borders_note, &font_ui_22, 0);
+	lv_label_set_text(borders_note, tr("appearance_hide_borders_note"));
 
 	// The background the glass sits on: the supplied art, or a picture from
 	// the card's Wallpaper folder, shown on every glass surface at once. Its

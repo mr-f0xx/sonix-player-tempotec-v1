@@ -99,6 +99,15 @@ static lv_opa_t style_bg_opa(const lv_style_t *style) {
 	return opa;
 }
 
+static int32_t style_outline_width(const lv_style_t *style) {
+	lv_obj_t *probe = lv_obj_create(lv_screen_active());
+	lv_obj_remove_style_all(probe);
+	lv_obj_add_style(probe, style, 0);
+	int32_t w = lv_obj_get_style_outline_width(probe, LV_PART_MAIN);
+	lv_obj_delete(probe);
+	return w;
+}
+
 // A small sleeve to lend the backdrop. The backdrop must not react to it.
 static lv_image_dsc_t make_cover(uint8_t fill) {
 	static uint8_t buf[3][4 * 4 * 2];
@@ -272,6 +281,52 @@ int main(void) {
 	assert(theme_get_kind() == THEME_KIND_LIQUID_GLASS);
 	assert(theme_is_liquid_glass());
 	assert(style_bg_opa(&theme_style_screen) == LV_OPA_TRANSP);
+
+	// --- Hide borders: every rim to zero width, the frost stays -------------
+	theme_set_glass_borders_hidden(true);
+	assert(theme_glass_borders_hidden());
+	assert(style_outline_width(&theme_style_card) == 0);
+	assert(style_outline_width(&theme_style_panel) == 0);
+	assert(style_outline_width(&theme_style_card_pressed) == 0);
+	assert(style_outline_width(&theme_style_switch) == 0);
+	assert(style_bg_opa(&theme_style_card) == THEME_GLASS_CARD_OPA);
+	lv_obj_t *pane = lv_obj_create(lv_screen_active());
+	theme_glass_pane(pane);
+	assert(lv_obj_get_style_border_width(pane, LV_PART_MAIN) == 0);
+	lv_obj_t *strip = lv_obj_create(lv_screen_active());
+	theme_glass_index_bar(strip);
+	assert(lv_obj_get_style_border_width(strip, LV_PART_MAIN) == 0);
+	lv_obj_t *dlg = lv_obj_create(lv_screen_active());
+	theme_glass_dialog(dlg);
+	assert(lv_obj_get_style_border_width(dlg, LV_PART_MAIN) == 0);
+	// Back off: the rims return, everywhere the helpers draw them.
+	theme_set_glass_borders_hidden(false);
+	assert(!theme_glass_borders_hidden());
+	assert(style_outline_width(&theme_style_card) == 1);
+	assert(style_outline_width(&theme_style_switch) == 1);
+	theme_glass_pane(pane);
+	assert(lv_obj_get_style_border_width(pane, LV_PART_MAIN) == 1);
+	theme_glass_index_bar(strip);
+	assert(lv_obj_get_style_border_width(strip, LV_PART_MAIN) == 1);
+	theme_glass_dialog(dlg);
+	assert(lv_obj_get_style_border_width(dlg, LV_PART_MAIN) == 1);
+	lv_obj_delete(pane);
+	lv_obj_delete(strip);
+	lv_obj_delete(dlg);
+	// The choice survives a restart like the other glass settings.
+	theme_set_glass_borders_hidden(true);
+	assert(config_save());
+	assert(config_init(config));
+	theme_init();
+	assert(theme_glass_borders_hidden());
+	theme_set_glass_borders_hidden(false);
+	assert(!config_get_bool("ui", "glass_hide_borders", true));
+	// The flat themes ignore it: their cards never carried a glass rim.
+	theme_set_glass_borders_hidden(true);
+	theme_set_kind(THEME_KIND_DARK);
+	assert(style_outline_width(&theme_style_card) == 0);
+	theme_set_kind(THEME_KIND_LIQUID_GLASS);
+	theme_set_glass_borders_hidden(false);
 
 	printf("PASS liquid-glass theme and constant backdrop\n");
 	return 0;

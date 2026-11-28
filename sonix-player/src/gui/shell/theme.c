@@ -359,6 +359,13 @@ static theme_palette_t *selected_palette(void) {
 // seed. Off by default, remembered in the config.
 static bool dynamic_tint;
 
+// Appearance > Hide borders: the opt-in borderless glass. Every specular rim
+// the theme draws -- card and panel outlines, pane/dialog/button borders, the
+// switch ring, the A-Z strip, the volume pill -- goes to zero width while the
+// frost and gradients stay, so the glass reads as one continuous surface.
+// Off by default, remembered in the config; Liquid Glass only.
+static bool glass_hide_borders;
+
 // The tinted copy of whichever preset is chosen. Rebuilt on every theme,
 // accent or tint change; `active` points here while the tint is on.
 static theme_palette_t tinted;
@@ -504,6 +511,8 @@ static void rebuild_active(void) {
 // Pushes the active palette into the shared styles.
 static void apply_palette(void) {
 	bool glass = selected_kind == THEME_KIND_LIQUID_GLASS;
+	// Hide borders takes every specular rim to zero width; the frost stays.
+	const int rim_w = glass_hide_borders ? 0 : 1;
 
 	lv_style_set_bg_color(&theme_style_screen, active->screen_bg);
 	// Liquid Glass clears the page so the blurred artwork on the bottom layer
@@ -537,11 +546,11 @@ static void apply_palette(void) {
 		// Tinted glass (Dynamic tint) borrows the accent for the frost, the
 		// gradient and the rim; clear glass keeps them neutral white.
 		lv_style_set_bg_color(&theme_style_card, theme_glass_frost());
-		lv_style_set_outline_width(&theme_style_panel, 1);
+		lv_style_set_outline_width(&theme_style_panel, rim_w);
 		lv_style_set_outline_pad(&theme_style_panel, 0);
 		lv_style_set_outline_color(&theme_style_panel, theme_glass_rim());
 		lv_style_set_outline_opa(&theme_style_panel, THEME_GLASS_EDGE_OPA);
-		lv_style_set_outline_width(&theme_style_card, 1);
+		lv_style_set_outline_width(&theme_style_card, rim_w);
 		lv_style_set_outline_pad(&theme_style_card, 0);
 		lv_style_set_outline_color(&theme_style_card, theme_glass_rim());
 		lv_style_set_outline_opa(&theme_style_card, THEME_GLASS_EDGE_OPA);
@@ -569,7 +578,7 @@ static void apply_palette(void) {
 	lv_style_set_bg_color(&theme_style_card_pressed, pressed);
 	lv_style_set_bg_opa(&theme_style_card_pressed, glass ? THEME_GLASS_CARD_PRESSED_OPA : LV_OPA_COVER);
 	if (glass) {
-		lv_style_set_outline_width(&theme_style_card_pressed, 1);
+		lv_style_set_outline_width(&theme_style_card_pressed, rim_w);
 		lv_style_set_outline_pad(&theme_style_card_pressed, 0);
 		lv_style_set_outline_color(&theme_style_card_pressed, theme_glass_rim());
 		lv_style_set_outline_opa(&theme_style_card_pressed, THEME_GLASS_EDGE_OPA);
@@ -607,7 +616,7 @@ static void apply_palette(void) {
 		lv_style_set_border_color(&theme_style_switch, lv_color_make(OLED_RING_LEVEL, OLED_RING_LEVEL, OLED_RING_LEVEL));
 		lv_style_set_border_opa(&theme_style_switch, LV_OPA_COVER);
 	} else if (glass) {
-		lv_style_set_outline_width(&theme_style_switch, 1);
+		lv_style_set_outline_width(&theme_style_switch, rim_w);
 		lv_style_set_outline_pad(&theme_style_switch, 0);
 		lv_style_set_outline_color(&theme_style_switch, lv_color_white());
 		lv_style_set_outline_opa(&theme_style_switch, THEME_GLASS_EDGE_OPA);
@@ -822,6 +831,7 @@ static void select_active(void) {
 	}
 
 	dynamic_tint = config_get_bool("ui", "dynamic_tint", false);
+	glass_hide_borders = config_get_bool("ui", "glass_hide_borders", false);
 
 	rebuild_active();
 }
@@ -1015,7 +1025,7 @@ void theme_glass_dialog(lv_obj_t *obj) {
 		lv_obj_set_style_bg_grad_dir(obj, LV_GRAD_DIR_VER, 0);
 		// The specular rim as a border (inside the card), so its rounded corners
 		// stay whole -- an outline's corner arcs clip at the card's radius.
-		lv_obj_set_style_border_width(obj, 1, 0);
+		lv_obj_set_style_border_width(obj, glass_hide_borders ? 0 : 1, 0);
 		lv_obj_set_style_border_side(obj, LV_BORDER_SIDE_FULL, 0);
 		lv_obj_set_style_border_color(obj, theme_glass_rim(), 0);
 		lv_obj_set_style_border_opa(obj, THEME_GLASS_EDGE_OPA, 0);
@@ -1046,7 +1056,7 @@ void theme_glass_action_button(lv_obj_t *btn, bool accent) {
 		lv_obj_set_style_bg_opa(btn, accent ? THEME_GLASS_ACCENT_OPA : THEME_GLASS_PANEL_OPA, 0);
 		lv_obj_set_style_bg_grad_color(btn, lv_color_mix(lv_color_black(), fill, 70), 0);
 		lv_obj_set_style_bg_grad_dir(btn, LV_GRAD_DIR_VER, 0);
-		lv_obj_set_style_border_width(btn, 1, 0);
+		lv_obj_set_style_border_width(btn, glass_hide_borders ? 0 : 1, 0);
 		lv_obj_set_style_border_side(btn, LV_BORDER_SIDE_FULL, 0);
 		lv_obj_set_style_border_color(btn, theme_glass_rim(), 0);
 		lv_obj_set_style_border_opa(btn, THEME_GLASS_EDGE_OPA, 0);
@@ -1088,7 +1098,7 @@ void theme_glass_pane(lv_obj_t *obj) {
 		// radius, leaving the tile corners open (the Browse grid showed cut-off
 		// rims). A border always closes the full rounded rectangle. It costs a
 		// pixel of content space, which the pane's flex layout absorbs.
-		lv_obj_set_style_border_width(obj, 1, 0);
+		lv_obj_set_style_border_width(obj, glass_hide_borders ? 0 : 1, 0);
 		lv_obj_set_style_border_side(obj, LV_BORDER_SIDE_FULL, 0);
 		lv_obj_set_style_border_color(obj, theme_glass_rim(), 0);
 		lv_obj_set_style_border_opa(obj, THEME_GLASS_EDGE_OPA, 0);
@@ -1130,7 +1140,7 @@ void theme_glass_index_bar(lv_obj_t *bar) {
 		// The rim is a BORDER, drawn inside the pill: an outline's rounded
 		// corner arcs clip at this radius (see theme_glass_pane), and the
 		// strip's flex layout absorbs the pixel of content space.
-		lv_obj_set_style_border_width(bar, 1, 0);
+		lv_obj_set_style_border_width(bar, glass_hide_borders ? 0 : 1, 0);
 		lv_obj_set_style_border_side(bar, LV_BORDER_SIDE_FULL, 0);
 		lv_obj_set_style_border_color(bar, theme_glass_rim(), 0);
 		lv_obj_set_style_border_opa(bar, THEME_GLASS_EDGE_OPA, 0);
@@ -1619,6 +1629,24 @@ void theme_set_dynamic_tint(bool on) {
 	apply_palette();
 
 	config_set_bool("ui", "dynamic_tint", on);
+	config_save();
+
+	refresh_all();
+}
+
+bool theme_glass_borders_hidden(void) { return glass_hide_borders; }
+
+void theme_set_glass_borders_hidden(bool on) {
+	if (glass_hide_borders == on) {
+		return;
+	}
+	glass_hide_borders = on;
+	// The shared rim styles repaint from here; the pages that hand-set their
+	// rims (panes, dialogs, the volume pill, the picker) re-apply them from
+	// their own refresh callbacks, which refresh_all() runs next.
+	apply_palette();
+
+	config_set_bool("ui", "glass_hide_borders", on);
 	config_save();
 
 	refresh_all();
