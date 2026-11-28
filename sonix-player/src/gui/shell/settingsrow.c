@@ -1275,7 +1275,14 @@ lv_obj_t *settingsrow_toggle_pills(lv_obj_t *parent, const char *title, lv_event
 	lv_obj_set_size(head, lv_pct(100), LV_SIZE_CONTENT);
 	lv_obj_set_style_bg_opa(head, 0, 0);
 	lv_obj_set_style_border_width(head, 0, 0);
+	// The switch rims with an outline drawn just outside its box, and this head
+	// clips children to its own box. SPACE_BETWEEN parks the switch flush to the
+	// right edge, so its rim was cut there (and top/bottom). Grow the head's draw
+	// area -- and so its child clip -- by 2px instead of padding it: the switch
+	// keeps the exact right edge and midline of the ordinary rows, while its rim
+	// lands inside the clip. The card's own 8px padding has room for the spill.
 	lv_obj_set_style_pad_all(head, 0, 0);
+	lv_obj_set_ext_draw_size(head, 2);
 	lv_obj_set_scrollable(head, false);
 	lv_obj_set_event_bubble(head, true);
 	lv_obj_set_flex_flow(head, LV_FLEX_FLOW_ROW);

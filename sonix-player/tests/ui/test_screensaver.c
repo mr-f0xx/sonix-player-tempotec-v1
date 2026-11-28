@@ -99,6 +99,14 @@ static void use_device_metrics(void) {
 void fonts_register_change(void (*cb)(void)) { (void)cb; }
 int fonts_text_size(void) { return FONTS_TEXT_NORMAL; }
 
+/* The settings-row page builder reaches for the switcher's swipe-back hooks and
+ * the player-sheet drag guards; this test renders the rows, not the gestures,
+ * so they stand in as no-ops (the same stubs test_musicsettings_rows uses). */
+bool player_sheet_drag_active(void) { return false; }
+bool switcher_back_drag_active(void) { return false; }
+void switcher_attach_back_gesture(lv_obj_t *screen) { (void)screen; }
+void switcher_mark_fresh_start(lv_obj_t *screen) { (void)screen; }
+
 /* ---- device services ------------------------------------------------------ */
 
 static bool screen_on; // what power_screen_is_on() answers: false going dark, true waking
