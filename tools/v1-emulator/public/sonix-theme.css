@@ -137,6 +137,21 @@ body::after {
 	letter-spacing: 0.045em;
 }
 
+/* Warm the firmware drop target and telemetry chrome to match the showcase. */
+.build-dropzone {
+	border-color: rgba(255, 176, 0, 0.38);
+	background: rgba(255, 176, 0, 0.06);
+}
+
+.build-dropzone.dragover {
+	border-color: var(--accent-bright);
+	background: rgba(255, 176, 0, 0.18);
+}
+
+.telemetry-strip {
+	background: rgba(23, 18, 8, 0.85);
+}
+
 /* The physical V1 mockup keeps its realistic hardware colours. */
 
 /* Warm the remaining workbench controls and log stream that still used blue. */
