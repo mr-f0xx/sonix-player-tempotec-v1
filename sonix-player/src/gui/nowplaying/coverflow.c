@@ -2074,7 +2074,34 @@ void coverflow_attach_edge(lv_obj_t *target, gui_config_t *cfg) {
 // thrown away and asked for again, which is a handful of reads from the
 // thumbnail database and happens when somebody changes the theme, not while
 // anything is moving.
+// Liquid Glass: the crate is a sheet over the live page, and the shared screen
+// style is zero-opacity under glass -- the menu, its mini-player and the
+// wallpaper all read straight through the records, which is the see-through
+// mess the crate used to open into. Ground the sheet in an opaque dark frost
+// of its own: the panel lifted a touch at the top, fading to the screen ground
+// at the foot, the same curved-glass light the cards wear. No wallpaper here
+// on purpose -- the records are the picture, and they sit in a quiet dark room
+// instead of on top of the busy page behind. Other themes keep the shared
+// opaque screen style untouched.
+static void sheet_glass_ground_apply(void) {
+	if (!sheet) {
+		return;
+	}
+	if (theme_is_liquid_glass()) {
+		lv_obj_set_style_bg_opa(sheet, LV_OPA_COVER, 0);
+		lv_obj_set_style_bg_color(sheet, lv_color_mix(lv_color_white(), theme()->panel, 16), 0);
+		lv_obj_set_style_bg_grad_color(sheet, theme()->screen_bg, 0);
+		lv_obj_set_style_bg_grad_dir(sheet, LV_GRAD_DIR_VER, 0);
+	} else {
+		lv_obj_remove_local_style_prop(sheet, LV_STYLE_BG_OPA, 0);
+		lv_obj_remove_local_style_prop(sheet, LV_STYLE_BG_COLOR, 0);
+		lv_obj_remove_local_style_prop(sheet, LV_STYLE_BG_GRAD_COLOR, 0);
+		lv_obj_remove_local_style_prop(sheet, LV_STYLE_BG_GRAD_DIR, 0);
+	}
+}
+
 static void refresh_theme(void) {
+	sheet_glass_ground_apply();
 	if (title_label) {
 		lv_obj_set_style_text_color(title_label, theme()->text_primary, 0);
 	}
