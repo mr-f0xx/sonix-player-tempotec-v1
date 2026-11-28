@@ -311,7 +311,7 @@ static void refresh_fork_qr(void) {
 }
 
 static void add_fork_qr(lv_obj_t *row) {
-	static const char url[] = "https://github.com/mr-f0xx/sonix-player-tempotec-v1";
+	static const char url[] = "https://mr-f0xx.github.io/sonix-player-tempotec-v1/";
 	// Keep the 33-module QR at whole pixels per module and leave a quiet
 	// zone four modules wide on each side.
 	enum { MODULE_PX = 3, QR_SIZE = 33 * MODULE_PX, QUIET = 4 * MODULE_PX, FRAME_SIZE = QR_SIZE + 2 * QUIET };

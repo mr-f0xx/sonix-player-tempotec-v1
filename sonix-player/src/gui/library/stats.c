@@ -163,7 +163,12 @@ static lv_obj_t *heading_strip(lv_obj_t *parent, const char *key, lv_event_cb_t 
 	lv_obj_set_height(strip, LV_SIZE_CONTENT);
 	lv_obj_set_style_bg_opa(strip, 0, 0);
 	lv_obj_set_style_border_width(strip, 0, 0);
-	lv_obj_set_style_pad_all(strip, 0, 0);
+	// The "See all" button rims with an outline drawn just outside its box, and
+	// the strip clips children to its own box, so a button flush to the right
+	// edge had its rim cut. Inset the right and vertical edges 2px; the heading
+	// keeps the left edge so it stays aligned with the rows below it.
+	lv_obj_set_style_pad_right(strip, 2, 0);
+	lv_obj_set_style_pad_ver(strip, 2, 0);
 	lv_obj_set_scrollable(strip, false);
 	lv_obj_set_flex_flow(strip, LV_FLEX_FLOW_ROW);
 	lv_obj_set_flex_align(strip, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
@@ -836,7 +841,11 @@ static void build_stats_page(gui_config_t *cfg) {
 	lv_obj_set_height(summary, LV_SIZE_CONTENT);
 	lv_obj_set_style_bg_opa(summary, 0, 0);
 	lv_obj_set_style_border_width(summary, 0, 0);
-	lv_obj_set_style_pad_all(summary, 0, 0);
+	// The two cards rim with an outline drawn just outside their boxes, and this
+	// row clips children to its own box. Sized exactly to the cards, it cut the
+	// outer rims (Listening time on the left, Tracks played on the right). Inset
+	// 2px so the rims land inside the clip; the cards flex to fill the row.
+	lv_obj_set_style_pad_all(summary, 2, 0);
 	lv_obj_set_style_pad_column(summary, STATS_CARD_GAP, 0);
 	lv_obj_set_scrollable(summary, false);
 	lv_obj_set_clickable(summary, false);

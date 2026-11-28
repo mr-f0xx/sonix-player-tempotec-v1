@@ -1,5 +1,7 @@
 #include "theme.h"
 
+#include "src/gui/shell/glassbg.h"
+#include "src/gui/shell/glasswallpaper.h"
 #include "src/system/core/config.h"
 #include "src/system/device/bootlogo.h"
 #include "src/system/device/bootpic.h"
@@ -21,10 +23,50 @@ lv_style_t theme_style_icon;
 lv_style_t theme_style_switch;		   // switch track, off state
 lv_style_t theme_style_switch_checked; // switch indicator, on state
 lv_style_t theme_style_switch_knob_checked; // switch knob, on state
+lv_style_t theme_style_switch_knob;		   // switch knob, every state (glass droplet)
 lv_style_t theme_style_switch_track_checked; // switch track, on state (OLED's ring)
 lv_style_t theme_style_switch_disabled;      // switch, disabled (OLED only)
 lv_style_t theme_style_accent_bg;	   // anything that must follow the accent
 lv_style_t theme_style_slider_track;   // a slider's unfilled part
+
+// The scrollbar, every page: Liquid Glass draws it fully transparent so no
+// pale strip runs down the edge of the clear pages. The style is shared and
+// attached to every object the theme touches (see theme_install_scrollbar),
+// so a palette change repaints every scrollbar at once -- and removing the
+// property for the flat themes lets the stock scrollbar show through again.
+static lv_style_t theme_style_scrollbar;
+
+static void theme_scrollbar_apply_cb(lv_theme_t *th, lv_obj_t *obj) {
+	(void)th;
+	// Both selectors: the stock theme opacifies the scrollbar again while the
+	// page is actively scrolling (LV_STATE_SCROLLED), and a state-specific
+	// style outranks a plain one regardless of the order they were added in.
+	lv_obj_add_style(obj, &theme_style_scrollbar, LV_PART_SCROLLBAR);
+	lv_obj_add_style(obj, &theme_style_scrollbar, LV_PART_SCROLLBAR | LV_STATE_SCROLLED);
+}
+
+// Wrap the display's stock theme in one of our own so every object built on
+// this display carries the shared scrollbar style. The stock theme stays the
+// parent, so LVGL applies all of its styles first and our callback only adds
+// the scrollbar part on top; public API only, no private LVGL headers.
+static void theme_install_scrollbar(void) {
+	lv_display_t *disp = lv_display_get_default();
+	if (!disp) {
+		return;
+	}
+	lv_theme_t *stock = lv_display_get_theme(disp);
+	if (!stock) {
+		return;
+	}
+	lv_theme_t *wrap = lv_theme_create();
+	if (!wrap) {
+		return;
+	}
+	lv_theme_copy(wrap, stock); // fonts, colours, flags the widgets read
+	lv_theme_set_parent(wrap, stock);
+	lv_theme_set_apply_cb(wrap, theme_scrollbar_apply_cb);
+	lv_display_set_theme(disp, wrap);
+}
 
 // GNOME Adwaita (libadwaita) colours, dark variant: window #242424, cards
 // #303030 (white at 8%% over the window), accent blue #3584e4. Secondary text
@@ -104,6 +146,26 @@ static theme_palette_t palette_oled = {
 	.text_primary = LV_COLOR_MAKE(255, 255, 255),   // #ffffff
 	.text_secondary = LV_COLOR_MAKE(160, 160, 160), // #a0a0a0
 	.accent = LV_COLOR_MAKE(255, 255, 255),         // #ffffff
+	.dark = true,
+};
+
+// Liquid Glass: a pane of glass the interface is drawn on. The page itself is
+// clear -- the supplied wallpaper / blurred artwork on the bottom layer
+// (glass.c) is the background -- and the cards are a light frosted film over it
+// with a luminous gradient and a bright specular rim, like iOS Liquid Glass.
+// `surface` is white because that is what the frost is drawn in; the opacity
+// and the gradient, not a flat colour, are what make it glass. Bars and panels
+// keep a half-dark ground so their labels stay legible. The accent is the iOS
+// system blue, the one hue the frosted controls wear.
+static theme_palette_t palette_glass = {
+	.screen_bg = LV_COLOR_MAKE(16, 16, 20),         // the ground under the artwork
+	.surface = LV_COLOR_MAKE(255, 255, 255),        // card frost, light glass
+	.surface_pressed = LV_COLOR_MAKE(255, 255, 255),
+	.panel = LV_COLOR_MAKE(24, 24, 30),             // bars and overlays, half dark
+	.cover_bg = LV_COLOR_MAKE(24, 24, 30),
+	.text_primary = LV_COLOR_MAKE(255, 255, 255),
+	.text_secondary = LV_COLOR_MAKE(190, 190, 196),
+	.accent = LV_COLOR_MAKE(10, 132, 255),          // #0a84ff
 	.dark = true,
 };
 
@@ -282,6 +344,8 @@ static theme_palette_t *selected_palette(void) {
 		return &palette_amber;
 	case THEME_KIND_OLED:
 		return &palette_oled;
+	case THEME_KIND_LIQUID_GLASS:
+		return &palette_glass;
 	case THEME_KIND_CUSTOM:
 		return &palette_custom;
 	case THEME_KIND_DARK:
@@ -294,6 +358,13 @@ static theme_palette_t *selected_palette(void) {
 // -- borrow the accent's hue, the way Material You colours a system from one
 // seed. Off by default, remembered in the config.
 static bool dynamic_tint;
+
+// Appearance > Hide borders: the opt-in borderless glass. Every specular rim
+// the theme draws -- card and panel outlines, pane/dialog/button borders, the
+// switch ring, the A-Z strip, the volume pill -- goes to zero width while the
+// frost and gradients stay, so the glass reads as one continuous surface.
+// Off by default, remembered in the config; Liquid Glass only.
+static bool glass_hide_borders;
 
 // The tinted copy of whichever preset is chosen. Rebuilt on every theme,
 // accent or tint change; `active` points here while the tint is on.
@@ -331,6 +402,8 @@ static lv_color_t default_accent(theme_kind_t kind) {
 		return lv_color_make(255, 173, 46); // Amber on Black signal
 	case THEME_KIND_OLED:
 		return lv_color_make(255, 255, 255); // OLED white
+	case THEME_KIND_LIQUID_GLASS:
+		return lv_color_make(10, 132, 255); // the iOS system blue
 	case THEME_KIND_CUSTOM:
 		return custom_accent;
 	case THEME_KIND_DARK:
@@ -437,16 +510,86 @@ static void rebuild_active(void) {
 
 // Pushes the active palette into the shared styles.
 static void apply_palette(void) {
+	bool glass = selected_kind == THEME_KIND_LIQUID_GLASS;
+	// Hide borders takes every specular rim to zero width; the frost stays.
+	const int rim_w = glass_hide_borders ? 0 : 1;
+
 	lv_style_set_bg_color(&theme_style_screen, active->screen_bg);
+	// Liquid Glass clears the page so the blurred artwork on the bottom layer
+	// shows through; every other theme paints an opaque ground.
+	lv_style_set_bg_opa(&theme_style_screen, glass ? LV_OPA_TRANSP : LV_OPA_COVER);
+
+	// The scrollbar goes fully transparent under Liquid Glass: a pale stock
+	// strip down the edge of a clear page reads as a seam in the glass. The
+	// flat themes take the property back out, so the stock theme's own
+	// scrollbar style shows through unchanged.
+	if (glass) {
+		lv_style_set_bg_opa(&theme_style_scrollbar, LV_OPA_TRANSP);
+	} else {
+		lv_style_remove_prop(&theme_style_scrollbar, LV_STYLE_BG_OPA);
+	}
 
 	lv_style_set_bg_color(&theme_style_panel, active->panel);
+	lv_style_set_bg_opa(&theme_style_panel, glass ? THEME_GLASS_PANEL_OPA : LV_OPA_COVER);
 
 	lv_style_set_bg_color(&theme_style_card, active->surface);
 	lv_style_set_text_color(&theme_style_card, active->text_primary);
+	lv_style_set_bg_opa(&theme_style_card, glass ? THEME_GLASS_CARD_OPA : LV_OPA_COVER);
+
+	// The specular rim: a hairline of light along the edge of every pane. It is
+	// an OUTLINE, not a border: a border is part of the box's content space and
+	// would shift every label and control inside by a pixel, where an outline
+	// is drawn just outside the box and moves nothing. Only Liquid Glass draws
+	// it; elsewhere the properties are taken back out so the cards and bars
+	// keep the edge-free look they have always had.
+	if (glass) {
+		// Tinted glass (Dynamic tint) borrows the accent for the frost, the
+		// gradient and the rim; clear glass keeps them neutral white.
+		lv_style_set_bg_color(&theme_style_card, theme_glass_frost());
+		lv_style_set_outline_width(&theme_style_panel, rim_w);
+		lv_style_set_outline_pad(&theme_style_panel, 0);
+		lv_style_set_outline_color(&theme_style_panel, theme_glass_rim());
+		lv_style_set_outline_opa(&theme_style_panel, THEME_GLASS_EDGE_OPA);
+		lv_style_set_outline_width(&theme_style_card, rim_w);
+		lv_style_set_outline_pad(&theme_style_card, 0);
+		lv_style_set_outline_color(&theme_style_card, theme_glass_rim());
+		lv_style_set_outline_opa(&theme_style_card, THEME_GLASS_EDGE_OPA);
+		lv_style_set_radius(&theme_style_card, 16);
+		// A luminous vertical gradient: light catches the top of the pane and
+		// fades toward the foot, so the frost reads as curved glass, not paint.
+		lv_style_set_bg_grad_color(&theme_style_card, theme_glass_frost_grad());
+		lv_style_set_bg_grad_dir(&theme_style_card, LV_GRAD_DIR_VER);
+	} else {
+		lv_style_remove_prop(&theme_style_panel, LV_STYLE_OUTLINE_WIDTH);
+		lv_style_remove_prop(&theme_style_panel, LV_STYLE_OUTLINE_PAD);
+		lv_style_remove_prop(&theme_style_panel, LV_STYLE_OUTLINE_COLOR);
+		lv_style_remove_prop(&theme_style_panel, LV_STYLE_OUTLINE_OPA);
+		lv_style_remove_prop(&theme_style_card, LV_STYLE_OUTLINE_WIDTH);
+		lv_style_remove_prop(&theme_style_card, LV_STYLE_OUTLINE_PAD);
+		lv_style_remove_prop(&theme_style_card, LV_STYLE_OUTLINE_COLOR);
+		lv_style_remove_prop(&theme_style_card, LV_STYLE_OUTLINE_OPA);
+		lv_style_remove_prop(&theme_style_card, LV_STYLE_RADIUS);
+		lv_style_remove_prop(&theme_style_card, LV_STYLE_BG_GRAD_COLOR);
+		lv_style_remove_prop(&theme_style_card, LV_STYLE_BG_GRAD_DIR);
+	}
 
 	bool oled = selected_kind == THEME_KIND_OLED;
 	lv_color_t pressed = oled ? lv_color_make(OLED_PRESSED_LEVEL, OLED_PRESSED_LEVEL, OLED_PRESSED_LEVEL) : active->surface_pressed;
 	lv_style_set_bg_color(&theme_style_card_pressed, pressed);
+	lv_style_set_bg_opa(&theme_style_card_pressed, glass ? THEME_GLASS_CARD_PRESSED_OPA : LV_OPA_COVER);
+	if (glass) {
+		lv_style_set_outline_width(&theme_style_card_pressed, rim_w);
+		lv_style_set_outline_pad(&theme_style_card_pressed, 0);
+		lv_style_set_outline_color(&theme_style_card_pressed, theme_glass_rim());
+		lv_style_set_outline_opa(&theme_style_card_pressed, THEME_GLASS_EDGE_OPA);
+		lv_style_set_radius(&theme_style_card_pressed, 16);
+	} else {
+		lv_style_remove_prop(&theme_style_card_pressed, LV_STYLE_OUTLINE_WIDTH);
+		lv_style_remove_prop(&theme_style_card_pressed, LV_STYLE_OUTLINE_PAD);
+		lv_style_remove_prop(&theme_style_card_pressed, LV_STYLE_OUTLINE_COLOR);
+		lv_style_remove_prop(&theme_style_card_pressed, LV_STYLE_OUTLINE_OPA);
+		lv_style_remove_prop(&theme_style_card_pressed, LV_STYLE_RADIUS);
+	}
 
 	lv_style_set_text_color(&theme_style_text, active->text_primary);
 	lv_style_set_text_color(&theme_style_text_dim, active->text_secondary);
@@ -454,16 +597,29 @@ static void apply_palette(void) {
 	lv_style_set_image_recolor(&theme_style_icon, active->text_primary);
 
 	lv_style_set_bg_color(&theme_style_switch, active->surface_pressed);
-	// The ring only exists on OLED. Elsewhere the property is left out of the
-	// style altogether, so the controls that carry it look exactly as before.
+	// An off switch (and the quick panel's idle circles, which wear this style)
+	// is a thin frost in Liquid Glass, a solid fill everywhere else.
+	lv_style_set_bg_opa(&theme_style_switch, glass ? THEME_GLASS_CARD_OPA : LV_OPA_COVER);
+	// The ring only exists on OLED and Liquid Glass. Clear both treatments
+	// first so switching between them leaves nothing behind, then draw the one
+	// this theme uses. OLED's is a border (part of its solid track); Liquid
+	// Glass's is an outline, so it rims the control without moving the knob.
+	lv_style_remove_prop(&theme_style_switch, LV_STYLE_BORDER_WIDTH);
+	lv_style_remove_prop(&theme_style_switch, LV_STYLE_BORDER_COLOR);
+	lv_style_remove_prop(&theme_style_switch, LV_STYLE_BORDER_OPA);
+	lv_style_remove_prop(&theme_style_switch, LV_STYLE_OUTLINE_WIDTH);
+	lv_style_remove_prop(&theme_style_switch, LV_STYLE_OUTLINE_PAD);
+	lv_style_remove_prop(&theme_style_switch, LV_STYLE_OUTLINE_COLOR);
+	lv_style_remove_prop(&theme_style_switch, LV_STYLE_OUTLINE_OPA);
 	if (oled) {
 		lv_style_set_border_width(&theme_style_switch, OLED_RING_WIDTH);
 		lv_style_set_border_color(&theme_style_switch, lv_color_make(OLED_RING_LEVEL, OLED_RING_LEVEL, OLED_RING_LEVEL));
 		lv_style_set_border_opa(&theme_style_switch, LV_OPA_COVER);
-	} else {
-		lv_style_remove_prop(&theme_style_switch, LV_STYLE_BORDER_WIDTH);
-		lv_style_remove_prop(&theme_style_switch, LV_STYLE_BORDER_COLOR);
-		lv_style_remove_prop(&theme_style_switch, LV_STYLE_BORDER_OPA);
+	} else if (glass) {
+		lv_style_set_outline_width(&theme_style_switch, rim_w);
+		lv_style_set_outline_pad(&theme_style_switch, 0);
+		lv_style_set_outline_color(&theme_style_switch, lv_color_white());
+		lv_style_set_outline_opa(&theme_style_switch, THEME_GLASS_EDGE_OPA);
 	}
 	// A switch that is on: the ring takes the accent and closes up with the
 	// track. A disabled one: the default theme washes it 50% towards a light
@@ -482,10 +638,36 @@ static void apply_palette(void) {
 		lv_style_remove_prop(&theme_style_switch_disabled, LV_STYLE_OPA);
 	}
 	lv_style_set_bg_color(&theme_style_switch_checked, active->accent);
+	// Liquid Glass: the on track is the accent as a tinted pane, not a solid
+	// slab -- the same translucency the selected pills wear, so the backdrop
+	// shows through and the control reads as glass rather than a bright fill.
+	lv_style_set_bg_opa(&theme_style_switch_checked, glass ? THEME_GLASS_ACCENT_OPA : LV_OPA_COVER);
 	lv_style_set_bg_color(&theme_style_switch_knob_checked, theme_on_accent());
+	// The knob is a bright glass droplet under Liquid Glass: a white circle
+	// lifted off the track by a soft shadow, in both states. Other themes keep
+	// the stock knob, so clear these props rather than leave a stale shadow.
+	if (glass) {
+		lv_style_set_bg_color(&theme_style_switch_knob, lv_color_white());
+		lv_style_set_bg_opa(&theme_style_switch_knob, LV_OPA_COVER);
+		lv_style_set_radius(&theme_style_switch_knob, LV_RADIUS_CIRCLE);
+		lv_style_set_shadow_color(&theme_style_switch_knob, lv_color_black());
+		lv_style_set_shadow_width(&theme_style_switch_knob, 6);
+		lv_style_set_shadow_opa(&theme_style_switch_knob, LV_OPA_50);
+		lv_style_set_shadow_offset_y(&theme_style_switch_knob, 2);
+	} else {
+		lv_style_remove_prop(&theme_style_switch_knob, LV_STYLE_BG_COLOR);
+		lv_style_remove_prop(&theme_style_switch_knob, LV_STYLE_BG_OPA);
+		lv_style_remove_prop(&theme_style_switch_knob, LV_STYLE_RADIUS);
+		lv_style_remove_prop(&theme_style_switch_knob, LV_STYLE_SHADOW_COLOR);
+		lv_style_remove_prop(&theme_style_switch_knob, LV_STYLE_SHADOW_WIDTH);
+		lv_style_remove_prop(&theme_style_switch_knob, LV_STYLE_SHADOW_OPA);
+		lv_style_remove_prop(&theme_style_switch_knob, LV_STYLE_SHADOW_OFFSET_Y);
+	}
 
 	lv_style_set_bg_color(&theme_style_accent_bg, active->accent);
 	lv_style_set_text_color(&theme_style_accent_bg, theme_on_accent());
+	// The filled controls keep a little of the glass behind them showing through.
+	lv_style_set_bg_opa(&theme_style_accent_bg, glass ? THEME_GLASS_ACCENT_OPA : LV_OPA_COVER);
 	lv_style_set_bg_color(&theme_style_slider_track, active->text_secondary);
 }
 
@@ -596,6 +778,8 @@ static void select_active(void) {
 		selected_kind = THEME_KIND_AMBER_ON_BLACK;
 	} else if (saved_theme && strcmp(saved_theme, "oled") == 0) {
 		selected_kind = THEME_KIND_OLED;
+	} else if (saved_theme && strcmp(saved_theme, "liquid-glass") == 0) {
+		selected_kind = THEME_KIND_LIQUID_GLASS;
 	} else if (saved_theme && strcmp(saved_theme, "custom") == 0) {
 		selected_kind = load_custom(&palette_custom) ? THEME_KIND_CUSTOM : THEME_KIND_DARK;
 		if (selected_kind == THEME_KIND_CUSTOM) custom_accent = palette_custom.accent;
@@ -634,6 +818,7 @@ static void select_active(void) {
 		palette_tokyo.accent = custom_accent_color;
 		palette_amber.accent = custom_accent_color;
 		palette_oled.accent = custom_accent_color;
+		palette_glass.accent = custom_accent_color;
 		palette_custom.accent = custom_accent_color;
 	} else {
 		palette_dark.accent = ACCENT_COLORS[accent_index];
@@ -641,10 +826,12 @@ static void select_active(void) {
 		palette_tokyo.accent = accent_index == 0 ? default_accent(THEME_KIND_TOKYO_NIGHT) : ACCENT_COLORS[accent_index];
 		palette_amber.accent = accent_index == 0 ? default_accent(THEME_KIND_AMBER_ON_BLACK) : ACCENT_COLORS[accent_index];
 		palette_oled.accent = accent_index == 0 ? default_accent(THEME_KIND_OLED) : ACCENT_COLORS[accent_index];
+		palette_glass.accent = accent_index == 0 ? default_accent(THEME_KIND_LIQUID_GLASS) : ACCENT_COLORS[accent_index];
 		palette_custom.accent = accent_index == 0 ? custom_accent : ACCENT_COLORS[accent_index];
 	}
 
 	dynamic_tint = config_get_bool("ui", "dynamic_tint", false);
+	glass_hide_borders = config_get_bool("ui", "glass_hide_borders", false);
 
 	rebuild_active();
 }
@@ -680,6 +867,7 @@ void theme_init(void) {
 	lv_style_set_bg_opa(&theme_style_switch_checked, LV_OPA_COVER);
 	lv_style_init(&theme_style_switch_knob_checked);
 	lv_style_set_bg_opa(&theme_style_switch_knob_checked, LV_OPA_COVER);
+	lv_style_init(&theme_style_switch_knob);
 	lv_style_init(&theme_style_switch_track_checked);
 	lv_style_init(&theme_style_switch_disabled);
 
@@ -688,6 +876,8 @@ void theme_init(void) {
 	lv_style_init(&theme_style_slider_track);
 	lv_style_set_bg_opa(&theme_style_slider_track, LV_OPA_40);
 	lv_style_set_radius(&theme_style_slider_track, LV_RADIUS_CIRCLE);
+
+	lv_style_init(&theme_style_scrollbar);
 
 	theme_resolve_boot_palette();
 
@@ -702,6 +892,11 @@ void theme_init(void) {
 	bootlogo_set(theme_boot_screen(), selected_palette()->dark);
 
 	apply_palette();
+
+	// Every object built from here on carries the shared scrollbar style, so
+	// the glass transparency (or the flat themes' stock scrollbar) follows the
+	// palette on every page without each page having to opt in.
+	theme_install_scrollbar();
 }
 
 void theme_apply_slider_knob(lv_obj_t *slider) {
@@ -723,6 +918,7 @@ void theme_apply_switch(lv_obj_t *sw) {
 	lv_obj_add_style(sw, &theme_style_switch_track_checked, LV_PART_MAIN | LV_STATE_CHECKED);
 	lv_obj_add_style(sw, &theme_style_switch_disabled, LV_PART_MAIN | LV_STATE_DISABLED);
 	lv_obj_add_style(sw, &theme_style_switch_checked, LV_PART_INDICATOR | LV_STATE_CHECKED);
+	lv_obj_add_style(sw, &theme_style_switch_knob, LV_PART_KNOB);
 	lv_obj_add_style(sw, &theme_style_switch_knob_checked, LV_PART_KNOB | LV_STATE_CHECKED);
 }
 
@@ -750,11 +946,227 @@ void theme_register_refresh(theme_refresh_cb_t cb) {
 
 const theme_palette_t *theme(void) { return active; }
 
+// Dress a button/panel as a clear Liquid Glass pane (the same frost + specular
+// rim as the shared card), or take the glass props back off for other themes so
+// a surface that was glass never keeps a stray rim/gradient. Pages that paint
+// their own opaque fill call this after setting it: under glass the clear frost
+// wins; elsewhere the page's fill stays and the glass props are removed.
+// Apple-style tinted glass: when the user turns on Dynamic tint while Liquid
+// Glass is active, the frost, the gradient and the specular rim borrow the
+// chosen accent's hue instead of neutral white. The opacities, the gradient
+// direction and the rim geometry are untouched, so the pane stays exactly the
+// same glass -- only its colour follows the accent. Off keeps the clear look.
+static bool glass_tint_on(void) { return selected_kind == THEME_KIND_LIQUID_GLASS && dynamic_tint; }
+
+lv_color_t theme_glass_frost(void) {
+	if (!glass_tint_on()) {
+		return lv_color_white();
+	}
+	return lv_color_mix(active->accent, lv_color_white(), 120);
+}
+
+lv_color_t theme_glass_frost_grad(void) {
+	if (!glass_tint_on()) {
+		return lv_color_make(175, 190, 212);
+	}
+	return lv_color_mix(active->accent, lv_color_make(175, 190, 212), 160);
+}
+
+lv_color_t theme_glass_rim(void) {
+	if (!glass_tint_on()) {
+		return lv_color_white();
+	}
+	return lv_color_mix(active->accent, lv_color_white(), 150);
+}
+
+// Full-screen pages that live on the top layer (the Date & time overlay) sit
+// OVER the live screen, so a transparent glass background would show the page
+// behind straight through them. Ground them in the dimmed wallpaper over the
+// dark base -- opaque, like the control centre -- so they read as their own
+// glass page. Other themes keep the shared opaque screen style.
+void theme_glass_page_ground(lv_obj_t *obj) {
+	if (!obj) {
+		return;
+	}
+	if (theme_is_liquid_glass()) {
+		lv_obj_set_style_bg_opa(obj, LV_OPA_COVER, 0);
+		lv_obj_set_style_bg_color(obj, active->screen_bg, 0);
+		// The same wallpaper and dim as the main menu and the control centre
+		// (glassbg), so a top-layer page reads as its own opaque glass page.
+		lv_obj_set_style_bg_image_src(obj, glassbg_source(), 0);
+		lv_obj_set_style_bg_image_recolor(obj, lv_color_black(), 0);
+		lv_obj_set_style_bg_image_recolor_opa(obj, glassbg_dim_opa(), 0);
+		lv_obj_set_style_bg_image_opa(obj, LV_OPA_COVER, 0);
+	} else {
+		lv_obj_remove_local_style_prop(obj, LV_STYLE_BG_IMAGE_SRC, 0);
+		lv_obj_remove_local_style_prop(obj, LV_STYLE_BG_IMAGE_OPA, 0);
+		lv_obj_remove_local_style_prop(obj, LV_STYLE_BG_IMAGE_RECOLOR, 0);
+		lv_obj_remove_local_style_prop(obj, LV_STYLE_BG_IMAGE_RECOLOR_OPA, 0);
+		lv_obj_remove_local_style_prop(obj, LV_STYLE_BG_OPA, 0);
+		lv_obj_remove_local_style_prop(obj, LV_STYLE_BG_COLOR, 0);
+	}
+}
+
+// Dialogs (confirm, the update card, popovers) must NOT be see-through: a clear
+// 10% card would let the page behind read straight through the choices. Under
+// Liquid Glass they get an opaque frosted ground (a dark lift of the panel)
+// while keeping the shared specular rim and radius, so they read as a solid
+// glass alert. Other themes keep the shared opaque card untouched.
+void theme_glass_dialog(lv_obj_t *obj) {
+	if (!obj) {
+		return;
+	}
+	if (theme_is_liquid_glass()) {
+		lv_obj_set_style_bg_opa(obj, LV_OPA_COVER, 0);
+		// A dark frost (a slight lift of the panel), not a white one: the alert
+		// belongs to the dark glass theme and its white type must read on it.
+		lv_obj_set_style_bg_color(obj, lv_color_mix(lv_color_white(), active->panel, 30), 0);
+		lv_obj_set_style_bg_grad_color(obj, active->panel, 0);
+		lv_obj_set_style_bg_grad_dir(obj, LV_GRAD_DIR_VER, 0);
+		// The specular rim as a border (inside the card), so its rounded corners
+		// stay whole -- an outline's corner arcs clip at the card's radius.
+		lv_obj_set_style_border_width(obj, glass_hide_borders ? 0 : 1, 0);
+		lv_obj_set_style_border_side(obj, LV_BORDER_SIDE_FULL, 0);
+		lv_obj_set_style_border_color(obj, theme_glass_rim(), 0);
+		lv_obj_set_style_border_opa(obj, THEME_GLASS_EDGE_OPA, 0);
+		lv_obj_set_style_outline_width(obj, 0, 0);
+	} else {
+		lv_obj_remove_local_style_prop(obj, LV_STYLE_BG_OPA, 0);
+		lv_obj_remove_local_style_prop(obj, LV_STYLE_BG_COLOR, 0);
+		lv_obj_remove_local_style_prop(obj, LV_STYLE_BG_GRAD_COLOR, 0);
+		lv_obj_remove_local_style_prop(obj, LV_STYLE_BG_GRAD_DIR, 0);
+		lv_obj_remove_local_style_prop(obj, LV_STYLE_BORDER_WIDTH, 0);
+		lv_obj_remove_local_style_prop(obj, LV_STYLE_BORDER_SIDE, 0);
+		lv_obj_remove_local_style_prop(obj, LV_STYLE_BORDER_COLOR, 0);
+		lv_obj_remove_local_style_prop(obj, LV_STYLE_BORDER_OPA, 0);
+		lv_obj_remove_local_style_prop(obj, LV_STYLE_OUTLINE_WIDTH, 0);
+	}
+}
+
+void theme_glass_action_button(lv_obj_t *btn, bool accent) {
+	if (!btn) {
+		return;
+	}
+	if (theme_is_liquid_glass()) {
+		// The accent action is a pane of tinted glass; the quiet one a pane of
+		// dark glass. Both carry the specular border rim and a soft vertical
+		// gradient so they read as glass, not a flat slab of colour.
+		lv_color_t fill = accent ? active->accent : active->panel;
+		lv_obj_set_style_bg_color(btn, fill, 0);
+		lv_obj_set_style_bg_opa(btn, accent ? THEME_GLASS_ACCENT_OPA : THEME_GLASS_PANEL_OPA, 0);
+		lv_obj_set_style_bg_grad_color(btn, lv_color_mix(lv_color_black(), fill, 70), 0);
+		lv_obj_set_style_bg_grad_dir(btn, LV_GRAD_DIR_VER, 0);
+		lv_obj_set_style_border_width(btn, glass_hide_borders ? 0 : 1, 0);
+		lv_obj_set_style_border_side(btn, LV_BORDER_SIDE_FULL, 0);
+		lv_obj_set_style_border_color(btn, theme_glass_rim(), 0);
+		lv_obj_set_style_border_opa(btn, THEME_GLASS_EDGE_OPA, 0);
+		lv_obj_set_style_outline_width(btn, 0, 0);
+		lv_obj_set_style_outline_width(btn, 0, LV_STATE_PRESSED);
+	} else {
+		// Take the glass treatment back out so the flat themes look as they
+		// always did: a solid accent fill, or the shared neutral style.
+		lv_obj_remove_local_style_prop(btn, LV_STYLE_BG_GRAD_COLOR, 0);
+		lv_obj_remove_local_style_prop(btn, LV_STYLE_BG_GRAD_DIR, 0);
+		lv_obj_remove_local_style_prop(btn, LV_STYLE_BORDER_SIDE, 0);
+		lv_obj_remove_local_style_prop(btn, LV_STYLE_BORDER_COLOR, 0);
+		lv_obj_remove_local_style_prop(btn, LV_STYLE_BORDER_OPA, 0);
+		lv_obj_remove_local_style_prop(btn, LV_STYLE_OUTLINE_WIDTH, 0);
+		lv_obj_remove_local_style_prop(btn, LV_STYLE_OUTLINE_WIDTH, LV_STATE_PRESSED);
+		if (accent) {
+			lv_obj_set_style_bg_color(btn, active->accent, 0);
+			lv_obj_set_style_bg_opa(btn, LV_OPA_COVER, 0);
+			lv_obj_set_style_border_width(btn, 0, 0);
+		} else {
+			lv_obj_remove_local_style_prop(btn, LV_STYLE_BG_COLOR, 0);
+			lv_obj_remove_local_style_prop(btn, LV_STYLE_BG_OPA, 0);
+			lv_obj_remove_local_style_prop(btn, LV_STYLE_BORDER_WIDTH, 0);
+		}
+	}
+}
+
+void theme_glass_pane(lv_obj_t *obj) {
+	if (!obj) {
+		return;
+	}
+	if (theme_is_liquid_glass()) {
+		lv_obj_set_style_bg_color(obj, theme_glass_frost(), 0);
+		lv_obj_set_style_bg_opa(obj, THEME_GLASS_CARD_OPA, 0);
+		lv_obj_set_style_bg_grad_color(obj, theme_glass_frost_grad(), 0);
+		lv_obj_set_style_bg_grad_dir(obj, LV_GRAD_DIR_VER, 0);
+		// The specular rim is a BORDER, drawn inside the pane. An outline sits
+		// just outside the box, and LVGL clips its rounded corner arcs at this
+		// radius, leaving the tile corners open (the Browse grid showed cut-off
+		// rims). A border always closes the full rounded rectangle. It costs a
+		// pixel of content space, which the pane's flex layout absorbs.
+		lv_obj_set_style_border_width(obj, glass_hide_borders ? 0 : 1, 0);
+		lv_obj_set_style_border_side(obj, LV_BORDER_SIDE_FULL, 0);
+		lv_obj_set_style_border_color(obj, theme_glass_rim(), 0);
+		lv_obj_set_style_border_opa(obj, THEME_GLASS_EDGE_OPA, 0);
+		lv_obj_set_style_outline_width(obj, 0, 0);
+		// The pressed card style carries an outline of its own; suppress it so
+		// the pane keeps a single border rim while pressed.
+		lv_obj_set_style_outline_width(obj, 0, LV_STATE_PRESSED);
+		lv_obj_set_style_radius(obj, 16, 0);
+	} else {
+		lv_obj_set_style_border_width(obj, 0, 0);
+		lv_obj_remove_local_style_prop(obj, LV_STYLE_BORDER_SIDE, 0);
+		lv_obj_remove_local_style_prop(obj, LV_STYLE_BORDER_COLOR, 0);
+		lv_obj_remove_local_style_prop(obj, LV_STYLE_BORDER_OPA, 0);
+		lv_obj_remove_local_style_prop(obj, LV_STYLE_OUTLINE_WIDTH, 0);
+		lv_obj_remove_local_style_prop(obj, LV_STYLE_OUTLINE_WIDTH, LV_STATE_PRESSED);
+		lv_obj_remove_local_style_prop(obj, LV_STYLE_OUTLINE_PAD, 0);
+		lv_obj_remove_local_style_prop(obj, LV_STYLE_OUTLINE_COLOR, 0);
+		lv_obj_remove_local_style_prop(obj, LV_STYLE_OUTLINE_OPA, 0);
+		lv_obj_remove_local_style_prop(obj, LV_STYLE_BG_GRAD_COLOR, 0);
+		lv_obj_remove_local_style_prop(obj, LV_STYLE_BG_GRAD_DIR, 0);
+	}
+}
+
+// The A–Z jump strip on the track lists (Library and Radio share the look).
+// Under Liquid Glass it is a clear glass pill -- the same frost, gradient and
+// specular rim as the tiles -- instead of the half-opaque surface wash that
+// reads as a solid grey bar over the wallpaper. The flat themes keep that
+// wash exactly as it was. The pill radius belongs to the caller and is left
+// alone, so the strip keeps its shape in every theme.
+void theme_glass_index_bar(lv_obj_t *bar) {
+	if (!bar) {
+		return;
+	}
+	if (theme_is_liquid_glass()) {
+		lv_obj_set_style_bg_color(bar, theme_glass_frost(), 0);
+		lv_obj_set_style_bg_opa(bar, THEME_GLASS_CARD_OPA, 0);
+		lv_obj_set_style_bg_grad_color(bar, theme_glass_frost_grad(), 0);
+		lv_obj_set_style_bg_grad_dir(bar, LV_GRAD_DIR_VER, 0);
+		// The rim is a BORDER, drawn inside the pill: an outline's rounded
+		// corner arcs clip at this radius (see theme_glass_pane), and the
+		// strip's flex layout absorbs the pixel of content space.
+		lv_obj_set_style_border_width(bar, glass_hide_borders ? 0 : 1, 0);
+		lv_obj_set_style_border_side(bar, LV_BORDER_SIDE_FULL, 0);
+		lv_obj_set_style_border_color(bar, theme_glass_rim(), 0);
+		lv_obj_set_style_border_opa(bar, THEME_GLASS_EDGE_OPA, 0);
+	} else {
+		lv_obj_set_style_bg_color(bar, theme()->surface, 0);
+		lv_obj_set_style_bg_opa(bar, LV_OPA_60, 0);
+		lv_obj_set_style_border_width(bar, 0, 0);
+		lv_obj_remove_local_style_prop(bar, LV_STYLE_BORDER_SIDE, 0);
+		lv_obj_remove_local_style_prop(bar, LV_STYLE_BORDER_COLOR, 0);
+		lv_obj_remove_local_style_prop(bar, LV_STYLE_BORDER_OPA, 0);
+		lv_obj_remove_local_style_prop(bar, LV_STYLE_BG_GRAD_COLOR, 0);
+		lv_obj_remove_local_style_prop(bar, LV_STYLE_BG_GRAD_DIR, 0);
+	}
+}
+
 lv_color_t theme_now_playing_fill(void) {
 	// OLED keeps even this one black: a tenth of its white accent would be
 	// exactly the grey card it leaves out.
 	if (selected_kind == THEME_KIND_OLED) {
 		return active->surface;
+	}
+	// Liquid Glass frosts its surfaces in white, so a tenth of the accent over
+	// white would be a pale grey; the strip takes the dark panel ground instead
+	// and is drawn semi-transparent by the page that shows it.
+	if (selected_kind == THEME_KIND_LIQUID_GLASS) {
+		return active->panel;
 	}
 	return lv_color_mix(active->accent, active->surface, LV_OPA_10);
 }
@@ -766,6 +1178,8 @@ bool theme_is_tokyo_night(void) { return selected_kind == THEME_KIND_TOKYO_NIGHT
 bool theme_is_amber_on_black(void) { return selected_kind == THEME_KIND_AMBER_ON_BLACK; }
 
 bool theme_is_oled(void) { return selected_kind == THEME_KIND_OLED; }
+
+bool theme_is_liquid_glass(void) { return selected_kind == THEME_KIND_LIQUID_GLASS; }
 
 bool theme_is_monochrome(void) {
 	return selected_kind == THEME_KIND_AMBER_ON_BLACK || selected_kind == THEME_KIND_OLED;
@@ -797,8 +1211,11 @@ bool theme_uses_function_glyphs(void) {
 	if (selected_kind == THEME_KIND_CUSTOM) {
 		return theme_custom_tokyo_layout();
 	}
+	// Liquid Glass wears the same compact V1 layout as Tokyo Night -- the
+	// horizontal icon-and-label cards, the home header and the live mini-player
+	// -- with its glyphs drawn as iOS-style app badges (see glassicons.c).
 	return selected_kind == THEME_KIND_TOKYO_NIGHT || selected_kind == THEME_KIND_AMBER_ON_BLACK ||
-		   selected_kind == THEME_KIND_OLED;
+		   selected_kind == THEME_KIND_OLED || selected_kind == THEME_KIND_LIQUID_GLASS;
 }
 
 lv_color_t theme_ink_on(lv_color_t fill) { return theme_color_is_light(fill) ? lv_color_black() : lv_color_white(); }
@@ -814,6 +1231,28 @@ lv_color_t theme_semantic_color(theme_semantic_t role) {
 		lv_color_t from_set;
 		if (icon_semantic_color(role, &from_set)) {
 			return from_set;
+		}
+	}
+	// Liquid Glass colours its app badges and status marks with the iOS system
+	// palette (dark variant): a distinct hue per role, fixed rather than borrowed
+	// from the accent, the way app icons keep their own colours under any tint.
+	if (selected_kind == THEME_KIND_LIQUID_GLASS) {
+		switch (role) {
+		case THEME_SEMANTIC_BLUE:
+			return lv_color_make(10, 132, 255);   // #0a84ff
+		case THEME_SEMANTIC_CYAN:
+			return lv_color_make(100, 210, 255);  // #64d2ff
+		case THEME_SEMANTIC_PURPLE:
+			return lv_color_make(191, 90, 242);   // #bf5af2
+		case THEME_SEMANTIC_GREEN:
+			return lv_color_make(48, 209, 88);    // #30d158
+		case THEME_SEMANTIC_AMBER:
+			return lv_color_make(255, 159, 10);   // #ff9f0a
+		case THEME_SEMANTIC_RED:
+			return lv_color_make(255, 69, 58);    // #ff453a
+		case THEME_SEMANTIC_MUTED:
+		default:
+			return lv_color_make(142, 142, 147);  // #8e8e93
 		}
 	}
 	if (role == THEME_SEMANTIC_MUTED) {
@@ -1052,6 +1491,8 @@ static const char *theme_config_value(theme_kind_t kind) {
 		return "amber-on-black";
 	case THEME_KIND_OLED:
 		return "oled";
+	case THEME_KIND_LIQUID_GLASS:
+		return "liquid-glass";
 	case THEME_KIND_CUSTOM:
 		return "custom";
 	case THEME_KIND_DARK:
@@ -1105,11 +1546,13 @@ void theme_set_kind(theme_kind_t kind) {
 		palette_tokyo.accent = custom_accent_color;
 		palette_amber.accent = custom_accent_color;
 		palette_oled.accent = custom_accent_color;
+		palette_glass.accent = custom_accent_color;
 		palette_custom.accent = custom_accent_color;
 	} else {
 		palette_tokyo.accent = accent_index == 0 ? default_accent(THEME_KIND_TOKYO_NIGHT) : ACCENT_COLORS[accent_index];
 		palette_amber.accent = accent_index == 0 ? default_accent(THEME_KIND_AMBER_ON_BLACK) : ACCENT_COLORS[accent_index];
 		palette_oled.accent = accent_index == 0 ? default_accent(THEME_KIND_OLED) : ACCENT_COLORS[accent_index];
+		palette_glass.accent = accent_index == 0 ? default_accent(THEME_KIND_LIQUID_GLASS) : ACCENT_COLORS[accent_index];
 		palette_custom.accent = accent_index == 0 ? custom_accent : ACCENT_COLORS[accent_index];
 	}
 	rebuild_active();
@@ -1139,6 +1582,7 @@ void theme_set_accent(int index) {
 	palette_tokyo.accent = index == 0 ? default_accent(THEME_KIND_TOKYO_NIGHT) : ACCENT_COLORS[index];
 	palette_amber.accent = index == 0 ? default_accent(THEME_KIND_AMBER_ON_BLACK) : ACCENT_COLORS[index];
 	palette_oled.accent = index == 0 ? default_accent(THEME_KIND_OLED) : ACCENT_COLORS[index];
+	palette_glass.accent = index == 0 ? default_accent(THEME_KIND_LIQUID_GLASS) : ACCENT_COLORS[index];
 	palette_custom.accent = index == 0 ? custom_accent : ACCENT_COLORS[index];
 	rebuild_active(); // the tint is drawn from the accent, so it moves with it
 	apply_palette();
@@ -1161,6 +1605,7 @@ void theme_set_custom_accent(lv_color_t color) {
 	palette_tokyo.accent = color;
 	palette_amber.accent = color;
 	palette_oled.accent = color;
+	palette_glass.accent = color;
 	palette_custom.accent = color;
 	rebuild_active();
 	apply_palette();
@@ -1184,6 +1629,24 @@ void theme_set_dynamic_tint(bool on) {
 	apply_palette();
 
 	config_set_bool("ui", "dynamic_tint", on);
+	config_save();
+
+	refresh_all();
+}
+
+bool theme_glass_borders_hidden(void) { return glass_hide_borders; }
+
+void theme_set_glass_borders_hidden(bool on) {
+	if (glass_hide_borders == on) {
+		return;
+	}
+	glass_hide_borders = on;
+	// The shared rim styles repaint from here; the pages that hand-set their
+	// rims (panes, dialogs, the volume pill, the picker) re-apply them from
+	// their own refresh callbacks, which refresh_all() runs next.
+	apply_palette();
+
+	config_set_bool("ui", "glass_hide_borders", on);
 	config_save();
 
 	refresh_all();

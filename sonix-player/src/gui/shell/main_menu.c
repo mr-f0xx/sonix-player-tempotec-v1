@@ -129,6 +129,14 @@ static void set_label_if_changed(lv_obj_t *label, const char *text) {
 	}
 }
 
+// The home tagline and the live artist line wear the accent when Liquid Glass
+// has Dynamic tint on -- the same opt-in tint the frost and rims borrow (see
+// glass_tint_on in theme.c). Off, or on any other theme, both keep the dim
+// secondary ink, so the default home is unchanged.
+static lv_color_t home_tinted_ink(void) {
+	return (theme_is_liquid_glass() && theme_dynamic_tint()) ? theme()->accent : theme()->text_secondary;
+}
+
 // The V1 home's title and tagline. OLED leaves both out: its grid starts right
 // under the status bar, and the six cards share the height the header took.
 #define HOME_HEADER_HEIGHT 62
@@ -234,6 +242,8 @@ static void main_menu_refresh_tiles(void) {
 		gridpage_set_tile_label_hidden(menu_grid, i, icons_only);
 		if (tokyo) {
 			// Keep the decorative left-column glow only in the labeled layout.
+			// Liquid Glass suppresses it inside gridpage_set_tile_icon_style,
+			// where the tinted glyph becomes an iOS-style app badge instead.
 			bool glow = !icons_only && compact && (i % 2 == 0);
 			gridpage_set_tile_icon_style(menu_grid, i, source, icon_size, true,
 										 theme_semantic_color(TOKYO_MENU_TONES[i]), glow);
@@ -244,7 +254,7 @@ static void main_menu_refresh_tiles(void) {
 		gridpage_set_tile_orientation(menu_grid, i, horizontal);
 
 		lv_obj_set_style_border_width(tile, 0, 0);
-		if (tokyo) {
+		if (tokyo && !theme_is_liquid_glass()) {
 			lv_obj_set_style_outline_width(tile, 0, 0);
 		} else {
 			lv_obj_remove_local_style_prop(tile, LV_STYLE_OUTLINE_WIDTH, 0);
@@ -398,6 +408,10 @@ static void main_menu_refresh_now_playing(void) {
 	}
 	set_label_if_changed(mini_player_title, title ? title : "");
 	set_label_if_changed(mini_player_subtitle, artist);
+	// The artist line takes the accent under Liquid Glass + Dynamic tint; the
+	// title above it keeps the primary ink. Refreshed here so it follows both
+	// the live track and a theme/tint change (refresh_theme calls this too).
+	lv_obj_set_style_text_color(mini_player_subtitle, home_tinted_ink(), 0);
 	main_menu_layout_strip_text(loaded);
 }
 
@@ -427,6 +441,9 @@ static void main_menu_refresh_theme(void) {
 	if (prototype_layout) {
 		lv_obj_set_hidden(home_header, !home_header_shown());
 		lv_obj_set_hidden(home_note, !home_header_shown());
+		// "Your music, ready when you are." follows the accent under Liquid
+		// Glass + Dynamic tint, like the live artist line; dim otherwise.
+		lv_obj_set_style_text_color(home_note, home_tinted_ink(), 0);
 		lv_obj_set_hidden(mini_player, false);
 
 		// Status bar: y=0..24. The bold 36 px title row and single-line note
@@ -444,6 +461,8 @@ static void main_menu_refresh_theme(void) {
 		lv_obj_set_style_bg_color(mini_player, strip_fill, 0);
 		lv_obj_set_style_bg_opa(mini_player, LV_OPA_COVER, 0);
 		mini_player_clear_edge();
+		// The live strip is a clear glass pane like the tiles, not a solid bar.
+		theme_glass_pane(mini_player);
 		main_menu_layout_tokyo_home(true);
 	} else {
 		lv_obj_set_hidden(home_header, true);

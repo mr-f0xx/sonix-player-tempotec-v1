@@ -950,6 +950,9 @@ static void test_profile_icon_fits_its_circle(void) {
 	circle_button_size = CIRCLE_BUTTON_SIZE;
 }
 
+// Dialog frost is a no-op here: these suites substitute the theme engine.
+void theme_glass_dialog(lv_obj_t *obj) { (void)obj; }
+
 int main(void) {
 	lv_init();
 	char dir[] = "/tmp/sonix-qp-layout-XXXXXX";

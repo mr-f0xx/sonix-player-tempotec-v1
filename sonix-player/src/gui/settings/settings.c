@@ -653,9 +653,9 @@ static void refresh_kbtype_buttons(void) {
 			continue;
 		}
 		bool on = i == active;
-		lv_obj_set_style_bg_color(kbtype_buttons[i], on ? theme()->accent : theme()->surface_pressed, 0);
-		lv_obj_set_style_text_color(lv_obj_get_child(kbtype_buttons[i], 0),
-									on ? theme_on_accent() : theme()->text_primary, 0);
+		// Shared pill treatment: dark glass idle / accent active under Liquid
+		// Glass, solid elsewhere -- never a white blob.
+		settingsrow_pill_active(kbtype_buttons[i], on);
 	}
 }
 
@@ -777,6 +777,9 @@ static void build_other_page(gui_config_t *cfg) {
 
 void settings_init(gui_config_t *cfg) {
 	lv_obj_t *container = settingsrow_page(settings_screen, cfg, "settings");
+	// The root list stays edge-free under Liquid Glass; the submenus it opens
+	// box their rows so every option tile on a page matches its neighbours.
+	settingsrow_set_flat_page(settings_screen);
 
 	build_screen_page(cfg);
 	build_other_page(cfg);

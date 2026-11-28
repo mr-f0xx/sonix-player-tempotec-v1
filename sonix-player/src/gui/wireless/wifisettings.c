@@ -1037,7 +1037,13 @@ static lv_obj_t *make_rows(lv_obj_t *parent) {
 	lv_obj_set_height(box, LV_SIZE_CONTENT);
 	lv_obj_set_style_bg_opa(box, 0, 0);
 	lv_obj_set_style_border_width(box, 0, 0);
-	lv_obj_set_style_pad_all(box, 0, 0);
+	// The network rows rim with an outline drawn just outside their boxes, and
+	// this box clips children to its own box. Flush to the edges, the rows had
+	// their rims cut -- the connected network on the right especially. Inset the
+	// left, right and top 2px so the rims land inside the clip; the rows flex to
+	// fill the width. The bottom keeps its 12px gap before the next heading.
+	lv_obj_set_style_pad_hor(box, 2, 0);
+	lv_obj_set_style_pad_top(box, 2, 0);
 	lv_obj_set_style_pad_bottom(box, 12, 0);
 	lv_obj_set_style_pad_gap(box, 8, 0);
 	lv_obj_set_scrollable(box, false);

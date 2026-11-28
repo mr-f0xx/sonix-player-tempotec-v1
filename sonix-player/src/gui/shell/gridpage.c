@@ -9,6 +9,7 @@
 #include "src/gui/fonts/fonts.h"
 #include "src/gui/pet/peticon.h"
 #include "src/gui/nowplaying/player.h"
+#include "src/gui/shell/glassicons.h"
 #include "src/gui/shell/icons.h"
 #include "src/gui/shell/settingsrow.h"
 #include "src/gui/shell/switcher.h"
@@ -129,6 +130,20 @@ void gridpage_set_tile_icon_style(lv_obj_t *grid, int index, const lv_image_dsc_
 		return;
 	}
 
+	// Liquid Glass dresses every tinted menu glyph as an iOS-style app badge:
+	// a coloured squircle with the white glyph baked in. The badge is a single
+	// ARGB8888 picture, so it needs no recolour and no decorative halo, and it
+	// drops into the same image object without touching the tile's layout.
+	if (recolor && theme_is_liquid_glass()) {
+		int badge_size = icon_size > 0 ? icon_size : LV_MAX((int)source->header.w, (int)source->header.h);
+		const lv_image_dsc_t *badge = glass_icon_badge(source, badge_size, color);
+		if (badge && badge != source) {
+			source = badge;
+			recolor = false;
+			glow = false;
+		}
+	}
+
 	lv_obj_t *halo = NULL;
 	if (tile_has_icon_halo(tile)) {
 		halo = lv_obj_get_child(tile, 0);
@@ -222,6 +237,15 @@ void gridpage_set_tile_icon_size(lv_obj_t *grid, int index, int icon_size) {
 	const lv_image_dsc_t *source = lv_image_get_src(icon);
 	if (!source) {
 		return;
+	}
+	// A Liquid Glass app badge is re-rendered at the requested size rather than
+	// upscaled, so a SoundCloud/Jellyfin card's larger picture stays crisp.
+	if (theme_is_liquid_glass()) {
+		const lv_image_dsc_t *bigger = glass_icon_badge_resized(source, icon_size);
+		if (bigger) {
+			source = bigger;
+			lv_image_set_src(icon, bigger);
+		}
 	}
 	int source_w = (int)source->header.w;
 	int source_h = (int)source->header.h;
@@ -356,18 +380,21 @@ static void gridpage_apply_theme_page(gridpage_theme_page_t *page) {
 		} else {
 			gridpage_classic_icon(page->labels[i], &icon);
 		}
-		gridpage_set_tile_icon_style(page->grid, i, icon, tokyo ? (compact_grid() ? 22 : 42) :
-							 compact_grid() ? COMPACT_TILE_ICON_MAX : 0,
-							 tokyo, theme_semantic_color(tone), false);
+		int icon_size = tokyo ? (compact_grid() ? 22 : 42) : (compact_grid() ? COMPACT_TILE_ICON_MAX : 0);
+		// Liquid Glass turns the tinted glyph into an iOS-style app badge inside
+		// gridpage_set_tile_icon_style, so every page gets the same treatment.
+		gridpage_set_tile_icon_style(page->grid, i, icon, icon_size, tokyo, theme_semantic_color(tone), false);
 		gridpage_set_tile_orientation(page->grid, i, horizontal);
 
 		lv_obj_t *tile = lv_obj_get_child(page->grid, i);
 		if (tile) {
 			// Tokyo Night tiles are separated by gaps and fill, not keylines.
 			// Clear both border and focus-outline styles; a zero-opacity line
-			// still reads as a card edge on the V1's small panel.
+			// still reads as a card edge on the V1's small panel. Liquid Glass
+			// keeps its rim through the shared card style's outline, which the
+			// branch below leaves in place.
 			lv_obj_set_style_border_width(tile, 0, 0);
-			if (tokyo) {
+			if (tokyo && !theme_is_liquid_glass()) {
 				lv_obj_set_style_outline_width(tile, 0, 0);
 			} else {
 				lv_obj_remove_local_style_prop(tile, LV_STYLE_OUTLINE_WIDTH, 0);
@@ -379,6 +406,12 @@ static void gridpage_apply_theme_page(gridpage_theme_page_t *page) {
 static void gridpage_refresh_theme(void) {
 	for (int i = 0; i < theme_page_count; i++) {
 		gridpage_apply_theme_page(&theme_pages[i]);
+	}
+	// Every page has just been handed its plain glyphs back when the theme is
+	// no longer Liquid Glass, so the cached app badges are no longer drawn and
+	// can be freed together. While glass is active they stay cached.
+	if (!theme_is_liquid_glass()) {
+		glass_icons_clear();
 	}
 }
 

@@ -1436,10 +1436,12 @@ static void set_over_cover(bool on) {
 		} else if (over) {
 			lv_obj_set_style_image_recolor(icon_objs[i], lv_color_white(), 0);
 			lv_obj_set_style_image_recolor_opa(icon_objs[i], LV_OPA_COVER, 0);
-		} else if (theme_uses_function_glyphs()) {
+		} else if (theme_uses_function_glyphs() && !theme_is_liquid_glass()) {
 			lv_obj_set_style_image_recolor(icon_objs[i], theme_semantic_color(THEME_SEMANTIC_CYAN), 0);
 			lv_obj_set_style_image_recolor_opa(icon_objs[i], LV_OPA_COVER, 0);
 		} else {
+			// Liquid Glass keeps the deck's default icon colouring: the player
+			// is left exactly as it is under the standard themes.
 			lv_obj_remove_local_style_prop(icon_objs[i], LV_STYLE_IMAGE_RECOLOR, 0);
 			lv_obj_remove_local_style_prop(icon_objs[i], LV_STYLE_IMAGE_RECOLOR_OPA, 0);
 		}
@@ -5408,14 +5410,41 @@ static void update_repeat_button(void);
 // but its default focus outline or shadow can still show as a grey one-pixel
 // seam along the bottom in Amber on Black.
 static void player_clear_footer_edge(void) {
-	if (!player_menu) {
+	if (player_menu) {
+		lv_obj_set_style_border_width(player_menu, 0, 0);
+		lv_obj_set_style_border_opa(player_menu, LV_OPA_TRANSP, 0);
+		lv_obj_set_style_outline_width(player_menu, 0, 0);
+		lv_obj_set_style_outline_opa(player_menu, LV_OPA_TRANSP, 0);
+		lv_obj_set_style_shadow_width(player_menu, 0, 0);
+		lv_obj_remove_local_style_prop(player_menu, LV_STYLE_BG_GRAD_DIR, 0);
+		lv_obj_remove_local_style_prop(player_menu, LV_STYLE_BG_GRAD_COLOR, 0);
+	}
+	// The deck and the sleeve box must not wear the Liquid Glass specular rim
+	// or gradient: the player keeps its own look, never the menu's glass edge.
+	if (cover_panel) {
+		lv_obj_set_style_outline_width(cover_panel, 0, 0);
+		lv_obj_set_style_outline_opa(cover_panel, LV_OPA_TRANSP, 0);
+		lv_obj_set_style_border_width(cover_panel, 0, 0);
+		lv_obj_set_style_shadow_width(cover_panel, 0, 0);
+	}
+}
+
+// Liquid Glass makes the shared screen style transparent so menus read as
+// glass over the wallpaper. The Now Playing deck must NOT be see-through (it
+// is a sheet over the live page), so keep its ground opaque exactly as the
+// default theme's is. This only restores opacity -- it changes no layout,
+// colour scheme or artwork treatment; the player is otherwise untouched.
+static void player_glass_ground_apply(void) {
+	if (!player_screen) {
 		return;
 	}
-	lv_obj_set_style_border_width(player_menu, 0, 0);
-	lv_obj_set_style_border_opa(player_menu, LV_OPA_TRANSP, 0);
-	lv_obj_set_style_outline_width(player_menu, 0, 0);
-	lv_obj_set_style_outline_opa(player_menu, LV_OPA_TRANSP, 0);
-	lv_obj_set_style_shadow_width(player_menu, 0, 0);
+	if (theme_is_liquid_glass()) {
+		lv_obj_set_style_bg_opa(player_screen, LV_OPA_COVER, 0);
+		lv_obj_set_style_bg_color(player_screen, theme()->screen_bg, 0);
+	} else {
+		lv_obj_remove_local_style_prop(player_screen, LV_STYLE_BG_OPA, 0);
+		lv_obj_remove_local_style_prop(player_screen, LV_STYLE_BG_COLOR, 0);
+	}
 }
 
 // Repaints the bits that are coloured by hand, and rebuilds the blurred
@@ -5425,8 +5454,11 @@ static void player_refresh_theme(void) {
 	if (!cover_panel)
 		return;
 
+	player_glass_ground_apply();
 	bool mono = theme_is_monochrome();
-	if (mono) {
+	// Liquid Glass leaves the player's own layout alone: strip the menu's glass
+	// rim/gradient from the deck so no white edge lines appear over the artwork.
+	if (mono || theme_is_liquid_glass()) {
 		player_clear_footer_edge();
 	}
 	lv_color_t progress_rest = lv_color_make(255, 255, 255);
@@ -8460,6 +8492,7 @@ void player_init(gui_config_t *cfg) {
 	coverloader_start();
 
 	lv_obj_add_style(player_screen, &theme_style_screen, 0);
+	player_glass_ground_apply();
 
 	// The player is a panel parked just off the right edge (see player.h).
 	sheet_width = (int)cfg->screen_width;
@@ -8558,7 +8591,7 @@ void player_init(gui_config_t *cfg) {
 	lv_obj_set_flex_flow(player_menu, LV_FLEX_FLOW_COLUMN);
 	lv_obj_set_flex_align(player_menu, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 	lv_obj_set_style_border_width(player_menu, 0, 0);
-	if (theme_is_monochrome()) {
+	if (theme_is_monochrome() || theme_is_liquid_glass()) {
 		player_clear_footer_edge();
 	}
 	lv_obj_set_style_radius(player_menu, 0, 0);

@@ -255,12 +255,17 @@ void calculator_init(gui_config_t *cfg) {
 	lv_label_set_text(display_label, calc_display(&model));
 
 	lv_obj_t *keypad = lv_obj_create(calculator_screen);
-	lv_obj_set_size(keypad, keypad_w, key_h * CALC_ROWS + gap * (CALC_ROWS - 1));
-	lv_obj_align(keypad, LV_ALIGN_TOP_LEFT, padding, keypad_top);
+	// The keys' Liquid Glass rim is an outline drawn just outside each key box,
+	// and a parent clips children to its own box -- so a keypad sized exactly to
+	// the keys cut the outer rims. Grow the (transparent) keypad by 2px on every
+	// side and pad it back in: the keys keep their exact place and size, while
+	// the outer rims now land inside the clip and close into full rectangles.
+	lv_obj_set_size(keypad, keypad_w + 4, key_h * CALC_ROWS + gap * (CALC_ROWS - 1) + 4);
+	lv_obj_align(keypad, LV_ALIGN_TOP_LEFT, padding - 2, keypad_top - 2);
 	lv_obj_set_style_bg_opa(keypad, LV_OPA_TRANSP, 0);
 	lv_obj_set_style_border_width(keypad, 0, 0);
 	lv_obj_set_style_radius(keypad, 0, 0);
-	lv_obj_set_style_pad_all(keypad, 0, 0);
+	lv_obj_set_style_pad_all(keypad, 2, 0);
 	lv_obj_set_style_pad_gap(keypad, gap, 0);
 	lv_obj_set_scrollable(keypad, false);
 	lv_obj_set_flex_flow(keypad, LV_FLEX_FLOW_ROW_WRAP);

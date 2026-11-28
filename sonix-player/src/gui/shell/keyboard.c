@@ -208,7 +208,17 @@ static lv_color_t kb_tray_color(void) {
 	if (theme_is_oled()) {
 		return theme()->screen_bg; // OLED fills nothing grey
 	}
+	if (theme_is_liquid_glass()) {
+		return theme()->panel; // the dark glass ground, drawn semi-transparent
+	}
 	return theme()->dark ? lv_color_make(22, 22, 22) : lv_color_make(206, 209, 216);
+}
+
+// The tray is a solid sheet in every theme but Liquid Glass, where it is a
+// pane of the same dark glass as the bars, letting the blurred sleeve behind
+// the page show through it.
+static lv_opa_t kb_tray_opa(void) {
+	return theme_is_liquid_glass() ? LV_OPA_80 : LV_OPA_COVER;
 }
 
 // How many keys a row of the panel carries now, and what the one at `col`
@@ -883,7 +893,12 @@ static lv_obj_t *kb_make_row(lv_obj_t *parent, int height) {
 	lv_obj_set_size(row, lv_pct(100), height);
 	lv_obj_set_style_bg_opa(row, 0, 0);
 	lv_obj_set_style_border_width(row, 0, 0);
-	lv_obj_set_style_pad_all(row, 0, 0);
+	// Each key's Liquid Glass rim is an outline drawn just outside the key box,
+	// and the row clips children to its own box. The row is exactly as wide as
+	// its keys, so the first and last key's outer rims were cut. Inset the row
+	// 2px: the keys flex to fill, so they only shrink by a hair while the outer
+	// rims land inside the clip and close into full rounded rectangles.
+	lv_obj_set_style_pad_all(row, 2, 0);
 	lv_obj_set_style_pad_gap(row, 6, 0);
 	lv_obj_set_scrollable(row, false);
 	lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
@@ -974,7 +989,7 @@ static void kb_refresh_theme(void) {
 		}
 		if (kb->tray) {
 			lv_obj_set_style_bg_color(kb->tray, kb_tray_color(), 0);
-			lv_obj_set_style_bg_opa(kb->tray, LV_OPA_COVER, 0);
+			lv_obj_set_style_bg_opa(kb->tray, kb_tray_opa(), 0);
 		}
 		kb_refresh_caps(kb);
 	}
@@ -1005,7 +1020,7 @@ keyboard_t *keyboard_create(lv_obj_t *parent, int width, int height, lv_obj_t *f
 	lv_obj_set_size(kb->tray, width, height);
 	lv_obj_align(kb->tray, LV_ALIGN_BOTTOM_MID, 0, 0);
 	lv_obj_set_style_bg_color(kb->tray, kb_tray_color(), 0);
-	lv_obj_set_style_bg_opa(kb->tray, LV_OPA_COVER, 0);
+	lv_obj_set_style_bg_opa(kb->tray, kb_tray_opa(), 0);
 	lv_obj_set_style_border_width(kb->tray, 0, 0);
 	lv_obj_set_style_radius(kb->tray, 0, 0);
 	lv_obj_set_style_pad_all(kb->tray, 8, 0);

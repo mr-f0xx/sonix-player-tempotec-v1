@@ -8,6 +8,7 @@
 #include "src/gui/board_profile.h"
 #include "src/gui/fonts/fonts.h"
 #include "src/gui/shell/icons.h"
+#include "src/gui/shell/settingsrow.h"
 #include "src/gui/shell/theme.h"
 #include "src/gui/shell/topbar.h"
 #include "src/system/device/clock.h"
@@ -65,11 +66,9 @@ static void dst_paint(void) {
 			continue;
 		}
 		bool active = (i == 1) == on;
-		lv_obj_set_style_bg_color(dst_pills[i], active ? theme()->accent : theme()->surface_pressed, 0);
-		lv_obj_t *label = lv_obj_get_child(dst_pills[i], 0);
-		if (label) {
-			lv_obj_set_style_text_color(label, active ? theme_on_accent() : theme()->text_primary, 0);
-		}
+		// Shared pill treatment: dark glass idle / accent active under Liquid
+		// Glass, solid elsewhere -- never a white blob.
+		settingsrow_pill_active(dst_pills[i], active);
 	}
 }
 
@@ -649,14 +648,27 @@ void timeset_show(void) {
 
 // Re-paints the rollers' hand-set colours after a theme or accent switch.
 static void timeset_refresh_theme(void) {
+	// The page and the zone list are top-layer overlays: ground them so the
+	// live screen behind never shows through under Liquid Glass.
+	theme_glass_page_ground(panel);
+	theme_glass_page_ground(tz_panel);
+
 	lv_obj_t *const rollers[] = {roller_day, roller_month, roller_year, roller_hour, roller_minute, roller_ampm};
 	for (size_t i = 0; i < sizeof(rollers) / sizeof(rollers[0]); i++) {
 		if (!rollers[i]) {
 			continue;
 		}
 		lv_obj_set_style_text_color(rollers[i], theme()->text_secondary, 0);
-		lv_obj_set_style_bg_color(rollers[i], theme()->surface_pressed, LV_PART_SELECTED);
-		lv_obj_set_style_text_color(rollers[i], theme()->accent, LV_PART_SELECTED);
+		if (theme_is_liquid_glass()) {
+			// A glass highlight band, not a solid white row.
+			lv_obj_set_style_bg_color(rollers[i], theme_glass_frost(), LV_PART_SELECTED);
+			lv_obj_set_style_bg_opa(rollers[i], THEME_GLASS_CARD_PRESSED_OPA, LV_PART_SELECTED);
+			lv_obj_set_style_text_color(rollers[i], theme()->text_primary, LV_PART_SELECTED);
+		} else {
+			lv_obj_set_style_bg_color(rollers[i], theme()->surface_pressed, LV_PART_SELECTED);
+			lv_obj_set_style_bg_opa(rollers[i], LV_OPA_COVER, LV_PART_SELECTED);
+			lv_obj_set_style_text_color(rollers[i], theme()->accent, LV_PART_SELECTED);
+		}
 	}
 
 	// And the pill: its fill is set by hand when the page is built, so it holds
@@ -1070,5 +1082,6 @@ void timeset_init(gui_config_t *cfg) {
 	timeset_manual_controls(!clock_automatic_enabled());
 
 	theme_register_refresh(timeset_refresh_theme);
+	timeset_refresh_theme(); // ground the overlays + glass rollers from the start
 	lv_timer_create(timeset_auto_sync_poll_cb, 1000, NULL);
 }

@@ -26,6 +26,7 @@
 #include "src/gui/settings/screensaver.h"
 #include "src/gui/shell/gui.h"
 #include "src/system/device/bootpic.h"
+#include "src/gui/shell/glassbg.h"
 #include "src/system/device/sysinfo.h"
 #include "src/system/bluetooth/bluetooth.h"
 #include "src/system/bluetooth/btlog.h"
@@ -949,6 +950,7 @@ static void card_databases_attach(const char *root) {
 	playlists_init(root);
 	screensaver_set_card_root(root);
 	bootpic_set_root(root);
+	glassbg_set_root(root);
 	cover_set_cache_dir(root);
 	waveform_set_cache_dir(root);
 	eq_presets_set_dir(root);

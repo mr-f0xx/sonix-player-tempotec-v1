@@ -2660,8 +2660,9 @@ static void paint_pill(lv_obj_t *btn, bool on) {
 	if (!btn) {
 		return;
 	}
-	lv_obj_set_style_bg_color(btn, on ? theme()->accent : theme()->surface_pressed, 0);
-	lv_obj_set_style_text_color(lv_obj_get_child(btn, 0), on ? theme_on_accent() : theme()->text_primary, 0);
+	// Shared pill treatment: dark glass idle / accent active under Liquid
+	// Glass, solid elsewhere -- never a white blob.
+	settingsrow_pill_active(btn, on);
 	lv_obj_set_style_radius(btn, LV_RADIUS_CIRCLE, 0);
 }
 

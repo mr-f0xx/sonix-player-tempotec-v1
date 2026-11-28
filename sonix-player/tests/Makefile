@@ -1003,13 +1003,15 @@ printf-flag:
 UI_SRC = $(ROOT)/tests/ui/test_main_menu.c $(ROOT)/src/gui/shell/main_menu.c \
          $(ROOT)/src/gui/library/music.c $(ROOT)/src/gui/shell/popover.c \
          $(ROOT)/src/gui/shell/scrolltext.c \
-         $(ROOT)/src/gui/shell/gridpage.c $(ROOT)/src/gui/pet/peticon.c \
+         $(ROOT)/src/gui/shell/gridpage.c $(ROOT)/src/gui/shell/glassicons.c $(ROOT)/src/gui/pet/peticon.c \
          $(ROOT)/src/gui/streaming/soundcloud_icon.c \
          $(ROOT)/src/gui/streaming/jellyfin_icon.c \
          $(ROOT)/src/gui/settings/appearance.c \
          $(ROOT)/src/gui/shell/iconset.c \
          $(ROOT)/src/system/image/stb_image_impl.c \
          $(ROOT)/src/gui/settings/bootpicpage.c \
+         $(ROOT)/src/gui/settings/glassbgpage.c \
+         $(ROOT)/src/gui/shell/glassbg.c $(ROOT)/src/gui/shell/glasswallpaper.c \
          $(ROOT)/src/gui/settings/iconsetpage.c \
          $(ROOT)/src/gui/settings/themefilepage.c \
          $(ROOT)/src/gui/shell/corners.c $(ROOT)/src/gui/shell/settingsrow.c \
@@ -1122,7 +1124,8 @@ $(BUILD)/test_quickpanel_layout: test_quickpanel_layout.c $(ROOT)/src/gui/shell/
 	@mkdir -p $(BUILD)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -I$(ROOT)/lvgl \
 		-DLV_CONF_PATH='"$(abspath ui/lv_conf.h)"' -o $@ test_quickpanel_layout.c \
-		$(ROOT)/src/system/core/config.c $(ROOT)/src/system/addons/addons.c $(UI_LVGL_OBJ) $(LDFLAGS) $(LDLIBS)
+		$(ROOT)/src/system/core/config.c $(ROOT)/src/system/addons/addons.c $(ROOT)/tests/ui/glassbg_stub.c \
+		$(UI_LVGL_OBJ) $(LDFLAGS) $(LDLIBS)
 
 # The Bluetooth receiver's session on real LVGL screens: it parks behind the
 # equaliser pages the control centre opens, comes back with them, and ends the
@@ -1151,7 +1154,7 @@ WIFIPAGE_SRC = $(ROOT)/tests/ui/test_wifi_pages.c $(ROOT)/src/gui/wireless/wifis
             $(ROOT)/src/gui/shell/popover.c $(ROOT)/src/gui/shell/spinner.c \
             $(ROOT)/src/gui/shell/theme.c $(ROOT)/src/gui/shell/icons.c \
             $(ROOT)/src/gui/board_profile.c $(ROOT)/src/system/input/kblayout.c \
-            $(ROOT)/src/system/core/config.c $(ROOT)/src/system/core/lang.c
+            $(ROOT)/src/system/core/config.c $(ROOT)/src/system/core/lang.c $(ROOT)/tests/ui/glassbg_stub.c
 WIFIPAGE_OBJ = $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(WIFIPAGE_SRC)) \
             $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(UI_LVGL_SRC))
 
@@ -1165,7 +1168,7 @@ TIDALPAGE_SRC = $(ROOT)/tests/ui/test_tidal_pages.c $(ROOT)/src/gui/streaming/ti
             $(ROOT)/src/gui/shell/popover.c $(ROOT)/src/gui/shell/spinner.c \
             $(ROOT)/src/gui/shell/theme.c $(ROOT)/src/gui/shell/icons.c \
             $(ROOT)/src/gui/board_profile.c $(ROOT)/src/system/input/kblayout.c \
-            $(ROOT)/src/system/core/config.c $(ROOT)/src/system/core/lang.c
+            $(ROOT)/src/system/core/config.c $(ROOT)/src/system/core/lang.c $(ROOT)/tests/ui/glassbg_stub.c
 TIDALPAGE_OBJ = $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(TIDALPAGE_SRC)) \
             $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(UI_LVGL_SRC))
 
@@ -1174,7 +1177,7 @@ SAVER_SRC = $(ROOT)/tests/ui/test_screensaver.c $(ROOT)/src/gui/settings/screens
             $(ROOT)/src/gui/shell/scrolltext.c $(ROOT)/src/gui/shell/settingsrow.c \
             $(ROOT)/src/gui/shell/theme.c $(ROOT)/src/gui/shell/icons.c \
             $(ROOT)/src/gui/board_profile.c \
-            $(ROOT)/src/system/core/config.c $(ROOT)/src/system/core/lang.c
+            $(ROOT)/src/system/core/config.c $(ROOT)/src/system/core/lang.c $(ROOT)/tests/ui/glassbg_stub.c
 SAVER_OBJ = $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(SAVER_SRC)) \
             $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(UI_LVGL_SRC))
 
@@ -1192,7 +1195,7 @@ TOOLS_SRC = $(ROOT)/tests/ui/test_tools_pages.c \
             $(ROOT)/src/system/pet/pet.c \
             $(ROOT)/src/system/notes/notesstore.c $(ROOT)/src/system/text/textfile.c \
             $(ROOT)/src/gui/library/textview.c $(ROOT)/src/gui/library/pictureview.c \
-            $(ROOT)/src/gui/shell/morepage.c $(ROOT)/src/gui/shell/gridpage.c \
+            $(ROOT)/src/gui/shell/morepage.c $(ROOT)/src/gui/shell/gridpage.c $(ROOT)/src/gui/shell/glassicons.c \
             $(ROOT)/src/gui/streaming/soundcloud_icon.c \
             $(ROOT)/src/gui/streaming/jellyfin_icon.c \
             $(ROOT)/src/system/addons/addons.c \
@@ -1204,7 +1207,7 @@ TOOLS_SRC = $(ROOT)/tests/ui/test_tools_pages.c \
             $(ROOT)/src/system/core/sha256.c \
             $(ROOT)/src/gui/shell/theme.c $(ROOT)/src/gui/shell/icons.c \
             $(ROOT)/src/gui/board_profile.c \
-            $(ROOT)/src/system/core/config.c $(ROOT)/src/system/core/lang.c
+            $(ROOT)/src/system/core/config.c $(ROOT)/src/system/core/lang.c $(ROOT)/tests/ui/glassbg_stub.c
 TOOLS_OBJ = $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(TOOLS_SRC)) \
             $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(UI_LVGL_SRC))
 
@@ -1229,7 +1232,7 @@ LYRICSEARCH_SRC = $(ROOT)/tests/ui/test_lyricsearch.c \
                   $(ROOT)/src/system/library/lrclib.c \
                   $(ROOT)/src/system/core/json.c \
                   $(ROOT)/src/system/core/config.c \
-                  $(ROOT)/src/system/core/lang.c
+                  $(ROOT)/src/system/core/lang.c $(ROOT)/tests/ui/glassbg_stub.c
 LYRICSEARCH_OBJ = $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(LYRICSEARCH_SRC)) \
                   $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(UI_LVGL_SRC))
 
@@ -1241,7 +1244,7 @@ GAMES_SRC = $(ROOT)/tests/ui/test_games.c \
             $(ROOT)/src/gui/games/game2048.c $(ROOT)/src/gui/games/dino.c \
             $(ROOT)/src/gui/shell/theme.c $(ROOT)/src/gui/shell/icons.c \
             $(ROOT)/src/gui/board_profile.c \
-            $(ROOT)/src/system/core/config.c $(ROOT)/src/system/core/lang.c
+            $(ROOT)/src/system/core/config.c $(ROOT)/src/system/core/lang.c $(ROOT)/tests/ui/glassbg_stub.c
 GAMES_OBJ = $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(GAMES_SRC)) \
             $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(UI_LVGL_SRC))
 
@@ -1253,7 +1256,7 @@ PEQPAGE_SRC = $(ROOT)/tests/ui/test_peq_profiles.c $(ROOT)/src/gui/audio/peqpage
               $(ROOT)/src/gui/shell/settingsrow.c \
               $(ROOT)/src/gui/shell/theme.c $(ROOT)/src/gui/shell/icons.c \
               $(ROOT)/src/gui/board_profile.c $(ROOT)/src/system/core/config.c \
-              $(ROOT)/src/system/core/lang.c
+              $(ROOT)/src/system/core/lang.c $(ROOT)/tests/ui/glassbg_stub.c
 PEQPAGE_OBJ = $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(PEQPAGE_SRC)) \
               $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(UI_LVGL_SRC))
 
@@ -1268,7 +1271,7 @@ PEQPAGE_OBJ = $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(PEQPAGE_SRC)) \
 ALBUMGRID_UI_SRC = $(ROOT)/tests/ui/test_albumgrid_ui.c $(ROOT)/src/gui/library/medialist.c \
                    $(ROOT)/src/gui/library/albumgrid.c $(ROOT)/src/gui/shell/settingsrow.c \
                    $(ROOT)/src/gui/shell/theme.c $(ROOT)/src/gui/board_profile.c \
-                   $(ROOT)/src/system/core/config.c
+                   $(ROOT)/src/system/core/config.c $(ROOT)/tests/ui/glassbg_stub.c
 ALBUMGRID_UI_OBJ = $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(ALBUMGRID_UI_SRC)) \
                    $(BUILD)/ui/src/gui/shell/scrolltext.o \
                    $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(UI_LVGL_SRC))
@@ -1284,7 +1287,7 @@ $(BUILD)/test_albumgrid_ui: $(ALBUMGRID_UI_OBJ)
 
 STATS_UI_SRC = $(ROOT)/tests/ui/test_stats.c $(ROOT)/src/gui/library/stats.c \
                $(ROOT)/src/gui/shell/settingsrow.c $(ROOT)/src/gui/shell/theme.c \
-               $(ROOT)/src/gui/board_profile.c $(ROOT)/src/system/core/config.c
+               $(ROOT)/src/gui/board_profile.c $(ROOT)/src/system/core/config.c $(ROOT)/tests/ui/glassbg_stub.c
 STATS_UI_OBJ = $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(STATS_UI_SRC)) \
                $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(UI_LVGL_SRC))
 
@@ -1300,7 +1303,7 @@ $(BUILD)/test_stats: $(STATS_UI_OBJ)
 ICONSET_UI_SRC = $(ROOT)/tests/ui/test_iconset.c $(ROOT)/src/gui/shell/iconset.c \
                  $(ROOT)/src/gui/shell/icons.c $(ROOT)/src/gui/shell/theme.c \
                  $(ROOT)/src/gui/board_profile.c $(ROOT)/src/system/core/config.c \
-                 $(ROOT)/src/system/image/stb_image_impl.c
+                 $(ROOT)/src/system/image/stb_image_impl.c $(ROOT)/tests/ui/glassbg_stub.c
 ICONSET_UI_OBJ = $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(ICONSET_UI_SRC)) \
                  $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(UI_LVGL_SRC))
 
@@ -1315,6 +1318,14 @@ CORNERS_SRC = $(ROOT)/tests/ui/test_corners.c $(ROOT)/src/gui/shell/corners.c \
               $(ROOT)/src/gui/board_profile.c $(ROOT)/src/system/core/config.c
 CORNERS_OBJ = $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(CORNERS_SRC)) \
               $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(UI_LVGL_SRC))
+
+# Liquid Glass: the theme wiring and the blurred-artwork backdrop. The player,
+# the cover blur and the cross-thread post are stubbed in the test itself.
+GLASS_UI_SRC = $(ROOT)/tests/ui/test_liquidglass.c $(ROOT)/src/gui/shell/glass.c \
+               $(ROOT)/src/gui/shell/glasswallpaper.c $(ROOT)/src/gui/shell/glassbg.c \
+               $(ROOT)/src/gui/shell/theme.c $(ROOT)/src/system/core/config.c
+GLASS_UI_OBJ = $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(GLASS_UI_SRC)) \
+               $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(UI_LVGL_SRC))
 
 # The V1 player deck's real flex layout, including switching to and from Waveform.
 PLAYERDECK_SRC = $(ROOT)/tests/ui/test_playerdeck.c
@@ -1383,7 +1394,7 @@ $(BUILD)/test_hiresbadge_ui: $(HIRESBADGE_UI_OBJ)
 PLAYBUTTON_SRC = $(ROOT)/tests/ui/test_playbutton.c $(ROOT)/src/gui/nowplaying/playbutton.c \
                  $(ROOT)/src/gui/shell/theme.c $(ROOT)/src/gui/shell/icons.c \
                  $(ROOT)/src/gui/board_profile.c $(ROOT)/src/system/core/config.c \
-                 $(ROOT)/src/system/core/lang.c
+                 $(ROOT)/src/system/core/lang.c $(ROOT)/tests/ui/glassbg_stub.c
 PLAYBUTTON_OBJ = $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(PLAYBUTTON_SRC)) \
                  $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(UI_LVGL_SRC))
 
@@ -1392,7 +1403,7 @@ PLAYBUTTON_OBJ = $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(PLAYBUTTON_SRC)) \
 MUSICROWS_SRC = $(ROOT)/tests/ui/test_musicsettings_rows.c \
                 $(ROOT)/src/gui/shell/settingsrow.c $(ROOT)/src/gui/shell/theme.c \
                 $(ROOT)/src/gui/shell/icons.c $(ROOT)/src/gui/board_profile.c \
-                $(ROOT)/src/system/core/config.c $(ROOT)/src/system/core/lang.c
+                $(ROOT)/src/system/core/config.c $(ROOT)/src/system/core/lang.c $(ROOT)/tests/ui/glassbg_stub.c
 MUSICROWS_OBJ = $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(MUSICROWS_SRC)) \
                 $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(UI_LVGL_SRC))
 
@@ -1423,7 +1434,7 @@ $(BUILD)/test_musictiles: $(MUSICTILES_SRC) $(ROOT)/src/gui/settings/tilelayout.
 DEVOPTIONS_SRC = $(ROOT)/tests/ui/test_devoptions_usbcompat.c \
                  $(ROOT)/src/gui/shell/settingsrow.c $(ROOT)/src/gui/shell/theme.c \
                  $(ROOT)/src/gui/shell/icons.c $(ROOT)/src/gui/board_profile.c \
-                 $(ROOT)/src/system/core/config.c $(ROOT)/src/system/core/lang.c
+                 $(ROOT)/src/system/core/config.c $(ROOT)/src/system/core/lang.c $(ROOT)/tests/ui/glassbg_stub.c
 DEVOPTIONS_OBJ = $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(DEVOPTIONS_SRC)) \
                  $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(UI_LVGL_SRC))
 
@@ -1446,7 +1457,7 @@ BATTERYPROFILE_UI_SRC = $(ROOT)/tests/ui/test_batteryprofile.c \
                        $(ROOT)/src/gui/settings/batteryprofilepage.c $(ROOT)/src/system/device/batteryprofile.c \
                        $(ROOT)/src/gui/shell/settingsrow.c $(ROOT)/src/gui/shell/theme.c \
                        $(ROOT)/src/gui/shell/icons.c $(ROOT)/src/gui/board_profile.c \
-                       $(ROOT)/src/system/core/config.c $(ROOT)/src/system/core/lang.c
+                       $(ROOT)/src/system/core/config.c $(ROOT)/src/system/core/lang.c $(ROOT)/tests/ui/glassbg_stub.c
 BATTERYPROFILE_UI_OBJ = $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(BATTERYPROFILE_UI_SRC))
 .PHONY: batteryprofile-ui
 batteryprofile-ui: $(BUILD)/test_batteryprofile_ui
@@ -1481,7 +1492,7 @@ $(BUILD)/test_sdhealth_ui: $(SDHEALTH_UI_OBJ)
 VOLUMEOVERLAY_SRC = $(ROOT)/tests/ui/test_volume_overlay.c \
                     $(ROOT)/src/gui/shell/volume_overlay.c $(ROOT)/src/gui/shell/volumereadout.c \
                     $(ROOT)/src/gui/shell/theme.c $(ROOT)/src/gui/shell/icons.c \
-                    $(ROOT)/src/gui/board_profile.c $(ROOT)/src/system/core/config.c
+                    $(ROOT)/src/gui/board_profile.c $(ROOT)/src/system/core/config.c $(ROOT)/tests/ui/glassbg_stub.c
 VOLUMEOVERLAY_OBJ = $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(VOLUMEOVERLAY_SRC)) \
                     $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(UI_LVGL_SRC))
 
@@ -1505,13 +1516,16 @@ STOCKKEYS_UI_SRC = $(ROOT)/tests/ui/test_stockkeys_ui.c \
                    $(ROOT)/src/gui/shell/icons.c \
                    $(ROOT)/src/gui/board_profile.c \
                    $(ROOT)/src/system/core/config.c \
-                   $(ROOT)/src/system/core/lang.c
+                   $(ROOT)/src/system/core/lang.c $(ROOT)/tests/ui/glassbg_stub.c
 STOCKKEYS_UI_OBJ = $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(STOCKKEYS_UI_SRC)) \
                    $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(UI_LVGL_SRC))
 
-.PHONY: ui peq-ui corners playbutton stockkeys-ui tidal-ui
+.PHONY: ui peq-ui corners playbutton stockkeys-ui tidal-ui liquidglass-ui
 corners: $(BUILD)/test_corners
 	$(BUILD)/test_corners
+
+liquidglass-ui: $(BUILD)/test_liquidglass
+	$(BUILD)/test_liquidglass
 
 playbutton: $(BUILD)/test_playbutton
 	$(BUILD)/test_playbutton ../../sonix-packer/assets/V1/usr/resource/sonix/language
@@ -1539,7 +1553,7 @@ $(BUILD)/test_stockkeys_ui: $(ROOT)/build_gen/streamkeys_key.h $(STOCKKEYS_UI_OB
 .PHONY: ui
 ui: wifitransfer-ui batteryprofile-ui sdhealth-ui sdhealth-keys musictiles
 ui: $(BUILD)/test_sleeve_hold
-ui: $(BUILD)/test_browser_grid $(BUILD)/test_qobuzgenregrid $(BUILD)/test_main_menu $(BUILD)/test_screensaver $(BUILD)/test_tools_pages $(BUILD)/test_wifi_pages $(BUILD)/test_chargescreen $(BUILD)/test_power_display $(BUILD)/test_touch_wake $(BUILD)/test_lyricsearch $(BUILD)/test_games $(BUILD)/test_peq_profiles $(BUILD)/test_quickpanel_layout $(BUILD)/test_bootlogo $(BUILD)/test_btreceiversession $(BUILD)/test_home_swipe $(BUILD)/test_switcher_scroll $(BUILD)/test_corners $(BUILD)/test_playbutton $(BUILD)/test_musicsettings_rows $(BUILD)/test_albumgrid_ui $(BUILD)/test_stats $(BUILD)/test_volume_overlay $(BUILD)/test_playerdeck $(BUILD)/test_vinylayout $(BUILD)/test_stickerlayout $(BUILD)/test_waveform_overlay $(BUILD)/test_hiresbadge_ui $(BUILD)/test_statusbar_ui $(BUILD)/test_stockkeys_ui $(BUILD)/test_tidal_pages $(BUILD)/test_soundcloud_pages $(BUILD)/test_qobuz_pages $(BUILD)/test_jellyfin_pages $(BUILD)/test_fwupdate $(BUILD)/test_ota_auto
+ui: $(BUILD)/test_browser_grid $(BUILD)/test_qobuzgenregrid $(BUILD)/test_main_menu $(BUILD)/test_screensaver $(BUILD)/test_tools_pages $(BUILD)/test_wifi_pages $(BUILD)/test_chargescreen $(BUILD)/test_power_display $(BUILD)/test_touch_wake $(BUILD)/test_lyricsearch $(BUILD)/test_games $(BUILD)/test_peq_profiles $(BUILD)/test_quickpanel_layout $(BUILD)/test_bootlogo $(BUILD)/test_btreceiversession $(BUILD)/test_home_swipe $(BUILD)/test_switcher_scroll $(BUILD)/test_corners $(BUILD)/test_playbutton $(BUILD)/test_musicsettings_rows $(BUILD)/test_albumgrid_ui $(BUILD)/test_stats $(BUILD)/test_volume_overlay $(BUILD)/test_playerdeck $(BUILD)/test_vinylayout $(BUILD)/test_stickerlayout $(BUILD)/test_waveform_overlay $(BUILD)/test_hiresbadge_ui $(BUILD)/test_statusbar_ui $(BUILD)/test_stockkeys_ui $(BUILD)/test_tidal_pages $(BUILD)/test_soundcloud_pages $(BUILD)/test_qobuz_pages $(BUILD)/test_jellyfin_pages $(BUILD)/test_fwupdate $(BUILD)/test_ota_auto $(BUILD)/test_liquidglass
 	$(BUILD)/test_sleeve_hold ../../sonix-packer/assets/V1/usr/resource/sonix/language
 	$(BUILD)/test_qobuzgenregrid
 	$(BUILD)/test_main_menu ../../sonix-packer/assets/V1/usr/resource/sonix/language
@@ -1560,6 +1574,7 @@ ui: $(BUILD)/test_browser_grid $(BUILD)/test_qobuzgenregrid $(BUILD)/test_main_m
 	$(BUILD)/test_home_swipe
 	$(BUILD)/test_switcher_scroll
 	$(BUILD)/test_corners
+	$(BUILD)/test_liquidglass
 	$(BUILD)/test_playbutton ../../sonix-packer/assets/V1/usr/resource/sonix/language
 	$(BUILD)/test_musicsettings_rows ../../sonix-packer/assets/V1/usr/resource/sonix/language
 	$(BUILD)/test_browser_grid
@@ -1600,7 +1615,7 @@ $(BUILD)/test_wifi_pages: $(WIFIPAGE_OBJ)
 
 WIFITRANSFER_UI_SRC = $(ROOT)/tests/ui/test_wifitransfer.c $(ROOT)/src/gui/shell/settingsrow.c \
                       $(ROOT)/src/gui/shell/theme.c $(ROOT)/src/gui/shell/icons.c \
-                      $(ROOT)/src/gui/board_profile.c $(ROOT)/src/system/core/config.c $(ROOT)/src/system/core/lang.c
+                      $(ROOT)/src/gui/board_profile.c $(ROOT)/src/system/core/config.c $(ROOT)/src/system/core/lang.c $(ROOT)/tests/ui/glassbg_stub.c
 WIFITRANSFER_UI_OBJ = $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(WIFITRANSFER_UI_SRC)) $(UI_LVGL_OBJ)
 .PHONY: wifitransfer-ui
 wifitransfer-ui: $(BUILD)/test_wifitransfer_ui
@@ -1629,6 +1644,9 @@ $(BUILD)/test_games: $(GAMES_OBJ)
 $(BUILD)/test_corners: $(CORNERS_OBJ)
 	$(CC) -o $@ $^ $(LDFLAGS) $(LDLIBS)
 
+$(BUILD)/test_liquidglass: $(GLASS_UI_OBJ)
+	$(CC) -o $@ $^ $(LDFLAGS) $(LDLIBS)
+
 $(BUILD)/test_playbutton: $(PLAYBUTTON_OBJ)
 	$(CC) -o $@ $^ $(LDFLAGS) $(LDLIBS)
 
@@ -1641,7 +1659,7 @@ $(BUILD)/ui/lvgl/%.o: $(ROOT)/lvgl/%.c ui/lv_conf.h $(ROOT)/lv_conf.h
 	@mkdir -p $(dir $@)
 	$(CC) $(UI_CPPFLAGS) $(filter-out -Werror,$(UI_CFLAGS)) -c $< -o $@
 
--include $(sort $(QOBUZGENRE_UI_OBJ:.o=.d) $(PEQPAGE_OBJ:.o=.d) $(UI_OBJ:.o=.d) $(SAVER_OBJ:.o=.d) $(CHARGE_OBJ:.o=.d) $(WIFIPAGE_OBJ:.o=.d) $(LYRICSEARCH_OBJ:.o=.d) $(GAMES_OBJ:.o=.d) $(CORNERS_OBJ:.o=.d) $(STATS_UI_OBJ:.o=.d) $(PLAYBUTTON_OBJ:.o=.d) $(MUSICROWS_OBJ:.o=.d) $(VOLUMEOVERLAY_OBJ:.o=.d) $(PLAYERDECK_OBJ:.o=.d) $(VINYLLAYOUT_OBJ:.o=.d) $(STICKERLAYOUT_OBJ:.o=.d) $(WAVEOVERLAY_OBJ:.o=.d) $(HIRESBADGE_UI_OBJ:.o=.d) $(STOCKKEYS_UI_OBJ:.o=.d) $(TIDALPAGE_OBJ:.o=.d) $(DEVOPTIONS_OBJ:.o=.d))
+-include $(sort $(QOBUZGENRE_UI_OBJ:.o=.d) $(PEQPAGE_OBJ:.o=.d) $(UI_OBJ:.o=.d) $(SAVER_OBJ:.o=.d) $(CHARGE_OBJ:.o=.d) $(WIFIPAGE_OBJ:.o=.d) $(LYRICSEARCH_OBJ:.o=.d) $(GAMES_OBJ:.o=.d) $(CORNERS_OBJ:.o=.d) $(GLASS_UI_OBJ:.o=.d) $(STATS_UI_OBJ:.o=.d) $(PLAYBUTTON_OBJ:.o=.d) $(MUSICROWS_OBJ:.o=.d) $(VOLUMEOVERLAY_OBJ:.o=.d) $(PLAYERDECK_OBJ:.o=.d) $(VINYLLAYOUT_OBJ:.o=.d) $(STICKERLAYOUT_OBJ:.o=.d) $(WAVEOVERLAY_OBJ:.o=.d) $(HIRESBADGE_UI_OBJ:.o=.d) $(STOCKKEYS_UI_OBJ:.o=.d) $(TIDALPAGE_OBJ:.o=.d) $(DEVOPTIONS_OBJ:.o=.d))
 
 # Smart Mix track-count limits and traversal, with a memory-only graph fixture.
 GENIUS_SRC = test_genius.c $(ROOT)/src/system/library/genius.c
@@ -1852,7 +1870,7 @@ SOUNDCLOUDPAGE_SRC = $(ROOT)/tests/ui/test_soundcloud_pages.c \
                      $(ROOT)/src/gui/streaming/soundcloud_icon.c \
                      $(ROOT)/src/gui/streaming/jellyfin_icon.c \
                      $(ROOT)/src/gui/shell/settingsrow.c \
-                     $(ROOT)/src/gui/shell/gridpage.c \
+                     $(ROOT)/src/gui/shell/gridpage.c $(ROOT)/src/gui/shell/glassicons.c \
                      $(ROOT)/src/gui/shell/keyboard.c \
                      $(ROOT)/src/gui/shell/popover.c \
                      $(ROOT)/src/gui/shell/spinner.c \
@@ -1862,7 +1880,7 @@ SOUNDCLOUDPAGE_SRC = $(ROOT)/tests/ui/test_soundcloud_pages.c \
                      $(ROOT)/src/system/input/kblayout.c \
                      $(ROOT)/src/system/core/config.c \
                      $(ROOT)/src/system/core/lang.c \
-                     $(ROOT)/src/system/core/utils.c
+                     $(ROOT)/src/system/core/utils.c $(ROOT)/tests/ui/glassbg_stub.c
 SOUNDCLOUDPAGE_OBJ = $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(SOUNDCLOUDPAGE_SRC)) \
                      $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(UI_LVGL_SRC))
 
@@ -1882,7 +1900,7 @@ SUBSONICPAGE_SRC = $(ROOT)/tests/ui/test_subsonic_pages.c \
                      $(ROOT)/src/gui/streaming/soundcloud_icon.c \
                      $(ROOT)/src/gui/streaming/jellyfin_icon.c \
                      $(ROOT)/src/gui/shell/settingsrow.c \
-                     $(ROOT)/src/gui/shell/gridpage.c \
+                     $(ROOT)/src/gui/shell/gridpage.c $(ROOT)/src/gui/shell/glassicons.c \
                      $(ROOT)/src/gui/shell/keyboard.c \
                      $(ROOT)/src/gui/shell/popover.c \
                      $(ROOT)/src/gui/shell/spinner.c \
@@ -1892,7 +1910,7 @@ SUBSONICPAGE_SRC = $(ROOT)/tests/ui/test_subsonic_pages.c \
                      $(ROOT)/src/system/input/kblayout.c \
                      $(ROOT)/src/system/core/config.c \
                      $(ROOT)/src/system/core/lang.c \
-                     $(ROOT)/src/system/core/utils.c
+                     $(ROOT)/src/system/core/utils.c $(ROOT)/tests/ui/glassbg_stub.c
 SUBSONICPAGE_OBJ = $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(SUBSONICPAGE_SRC)) \
                      $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(UI_LVGL_SRC))
 
@@ -1910,7 +1928,7 @@ RADIOPAGE_SRC = $(ROOT)/tests/ui/test_radio_pages.c \
                      $(ROOT)/src/gui/streaming/soundcloud_icon.c \
                      $(ROOT)/src/gui/streaming/jellyfin_icon.c \
                      $(ROOT)/src/gui/shell/settingsrow.c \
-                     $(ROOT)/src/gui/shell/gridpage.c \
+                     $(ROOT)/src/gui/shell/gridpage.c $(ROOT)/src/gui/shell/glassicons.c \
                      $(ROOT)/src/gui/shell/azindex.c \
                      $(ROOT)/src/gui/shell/keyboard.c \
                      $(ROOT)/src/gui/shell/popover.c \
@@ -1921,7 +1939,7 @@ RADIOPAGE_SRC = $(ROOT)/tests/ui/test_radio_pages.c \
                      $(ROOT)/src/system/input/kblayout.c \
                      $(ROOT)/src/system/core/config.c \
                      $(ROOT)/src/system/core/lang.c \
-                     $(ROOT)/src/system/core/utils.c
+                     $(ROOT)/src/system/core/utils.c $(ROOT)/tests/ui/glassbg_stub.c
 RADIOPAGE_OBJ = $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(RADIOPAGE_SRC)) \
                      $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(UI_LVGL_SRC))
 
@@ -1943,7 +1961,7 @@ QOBUZPAGE_SRC = $(ROOT)/tests/ui/test_qobuz_pages.c \
                      $(ROOT)/src/gui/streaming/soundcloud_icon.c \
                      $(ROOT)/src/gui/streaming/jellyfin_icon.c \
                      $(ROOT)/src/gui/shell/settingsrow.c \
-                     $(ROOT)/src/gui/shell/gridpage.c \
+                     $(ROOT)/src/gui/shell/gridpage.c $(ROOT)/src/gui/shell/glassicons.c \
                      $(ROOT)/src/gui/shell/keyboard.c \
                      $(ROOT)/src/gui/shell/popover.c \
                      $(ROOT)/src/gui/shell/spinner.c \
@@ -1953,7 +1971,7 @@ QOBUZPAGE_SRC = $(ROOT)/tests/ui/test_qobuz_pages.c \
                      $(ROOT)/src/system/input/kblayout.c \
                      $(ROOT)/src/system/core/config.c \
                      $(ROOT)/src/system/core/lang.c \
-                     $(ROOT)/src/system/core/utils.c
+                     $(ROOT)/src/system/core/utils.c $(ROOT)/tests/ui/glassbg_stub.c
 QOBUZPAGE_OBJ = $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(QOBUZPAGE_SRC)) \
                      $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(UI_LVGL_SRC))
 
@@ -1996,7 +2014,7 @@ JELLYFINPAGE_SRC = $(ROOT)/tests/ui/test_jellyfin_pages.c \
                    $(ROOT)/src/gui/streaming/jellyfin_icon.c \
                    $(ROOT)/src/gui/streaming/soundcloud_icon.c \
                    $(ROOT)/src/gui/shell/settingsrow.c \
-                   $(ROOT)/src/gui/shell/gridpage.c \
+                   $(ROOT)/src/gui/shell/gridpage.c $(ROOT)/src/gui/shell/glassicons.c \
                    $(ROOT)/src/gui/shell/keyboard.c \
                    $(ROOT)/src/gui/shell/popover.c \
                    $(ROOT)/src/gui/shell/spinner.c \
@@ -2006,7 +2024,7 @@ JELLYFINPAGE_SRC = $(ROOT)/tests/ui/test_jellyfin_pages.c \
                    $(ROOT)/src/system/input/kblayout.c \
                    $(ROOT)/src/system/core/config.c \
                    $(ROOT)/src/system/core/lang.c \
-                   $(ROOT)/src/system/core/utils.c
+                   $(ROOT)/src/system/core/utils.c $(ROOT)/tests/ui/glassbg_stub.c
 JELLYFINPAGE_OBJ = $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(JELLYFINPAGE_SRC)) \
                    $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(UI_LVGL_SRC))
 
@@ -2049,7 +2067,7 @@ $(BUILD)/test_networkmusic: $(NETWORKMUSIC_SRC) $(ROOT)/src/system/streaming/net
 
 NETWORKMUSIC_UI_COMMON = $(ROOT)/src/gui/shell/settingsrow.c $(ROOT)/src/gui/shell/keyboard.c \
                        $(ROOT)/src/gui/shell/theme.c $(ROOT)/src/gui/shell/icons.c $(ROOT)/src/gui/board_profile.c \
-                       $(ROOT)/src/system/input/kblayout.c $(ROOT)/src/system/core/config.c $(ROOT)/src/system/core/lang.c
+                       $(ROOT)/src/system/input/kblayout.c $(ROOT)/src/system/core/config.c $(ROOT)/src/system/core/lang.c $(ROOT)/tests/ui/glassbg_stub.c
 NETWORKMUSIC_UI_SRC = $(ROOT)/tests/ui/test_networkmusic.c $(ROOT)/src/system/net/networkshare.c \
                       $(ROOT)/src/system/net/networkcredentials.c $(ROOT)/src/system/core/json.c $(NETWORKMUSIC_UI_COMMON)
 NETWORKMUSIC_UI_OBJ = $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(NETWORKMUSIC_UI_SRC)) $(UI_LVGL_OBJ)
@@ -2066,7 +2084,7 @@ $(BUILD)/test_networkmusic_ui: $(NETWORKMUSIC_UI_OBJ)
 LAN_PREVIEW_SRC = tests/ui/test_streaming_preview.c src/gui/streaming/streaming.c \
                   src/gui/streaming/networkmusicpage.c src/gui/wireless/listentogether.c
 LAN_PREVIEW_SHARED = $(NETWORKMUSIC_UI_COMMON) $(ROOT)/src/system/net/networkcredentials.c \
-                     $(ROOT)/src/system/core/json.c $(ROOT)/src/gui/shell/gridpage.c $(ROOT)/src/gui/pet/peticon.c \
+                     $(ROOT)/src/system/core/json.c $(ROOT)/src/gui/shell/gridpage.c $(ROOT)/src/gui/shell/glassicons.c $(ROOT)/src/gui/pet/peticon.c \
                      $(ROOT)/src/gui/streaming/soundcloud_icon.c $(ROOT)/src/gui/streaming/jellyfin_icon.c
 LAN_PREVIEW_OBJ = $(addprefix $(BUILD)/ui-preview/,$(LAN_PREVIEW_SRC:.c=.o)) \
                   $(patsubst $(ROOT)/%.c,$(BUILD)/ui/%.o,$(LAN_PREVIEW_SHARED)) $(UI_LVGL_OBJ)

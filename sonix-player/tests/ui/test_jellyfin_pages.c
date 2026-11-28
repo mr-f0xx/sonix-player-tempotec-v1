@@ -20,6 +20,7 @@
 #include "src/gui/fonts/fonts.h"
 #include "src/gui/nowplaying/player.h"
 #include "src/gui/shell/confirm.h"
+#include "src/gui/shell/glassicons.h"
 #include "src/gui/shell/gridpage.h"
 #include "src/gui/shell/gui.h"
 #include "src/gui/shell/icons.h"
@@ -837,6 +838,15 @@ int main(int argc, char **argv) {
 			if (tk == THEME_KIND_DARK || tk == THEME_KIND_LIGHT) {
 				assert(saved_src == &icon_jellyfin_saved_card);
 				assert(stream_src == &icon_jellyfin_menu_card);
+			} else if (theme_is_liquid_glass()) {
+				// The same marks, dressed as iOS app badges. The home grid is
+				// enlarged to JF_TILE_GLYPH_PX, the section grid stays compact.
+				lv_color_t green = theme_semantic_color(THEME_SEMANTIC_GREEN);
+				lv_color_t purple = theme_semantic_color(THEME_SEMANTIC_PURPLE);
+				assert(saved_src == glass_icon_badge_find(&icon_podcast_downloaded, 22, green) ||
+					   saved_src == glass_icon_badge_find(&icon_podcast_downloaded, 40, green));
+				assert(stream_src == glass_icon_badge_find(&icon_jellyfin_mark, 22, purple) ||
+					   stream_src == glass_icon_badge_find(&icon_jellyfin_mark, 40, purple));
 			} else if (theme_uses_function_glyphs()) {
 				assert(saved_src == &icon_podcast_downloaded);
 				assert(stream_src == &icon_jellyfin_mark);

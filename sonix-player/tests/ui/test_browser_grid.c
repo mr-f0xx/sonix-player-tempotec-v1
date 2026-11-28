@@ -24,6 +24,10 @@ static const uint8_t glyph[] = {255};
 #define ICON(n) lv_image_dsc_t n = { .header = { .magic = LV_IMAGE_HEADER_MAGIC, .cf = LV_COLOR_FORMAT_A8, .w = 1, .h = 1, .stride = 1 }, .data = glyph, .data_size = 1 }
 ICON(icon_folder); ICON(icon_music2); ICON(icon_album); ICON(icon_refresh);
 
+// Dialog frost is a no-op here: these suites substitute the theme engine.
+void theme_glass_dialog(lv_obj_t *obj) { (void)obj; }
+void theme_glass_action_button(lv_obj_t *btn, bool accent) { (void)btn; (void)accent; }
+
 int main(void) {
 	// Only the actual Music tree, including mounts with a trailing slash or /.
 	assert(browser_in_music("/card", "/card/Music"));

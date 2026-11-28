@@ -194,6 +194,8 @@ static void set_button(int i, const char *key, bool accent, action_fn action) {
 
 	lv_label_set_text(button_labels[i], tr(key));
 	lv_obj_set_style_text_color(button_labels[i], accent ? theme_on_accent() : theme()->text_primary, 0);
+	// Glass buttons under Liquid Glass; the flat fill above stands elsewhere.
+	theme_glass_action_button(btn, accent);
 	button_actions[i] = action;
 	lv_obj_set_hidden(btn, false);
 }
@@ -854,6 +856,7 @@ void fwupdate_show(void) {
 	}
 	phase = PHASE_NONE;
 	show_choice();
+	theme_glass_dialog(card); // opaque frost under Liquid Glass, never see-through
 	lv_obj_set_hidden(veil, false);
 	lv_obj_move_foreground(veil);
 	if (!holding_screen) {
@@ -873,6 +876,7 @@ void fwupdate_start_download(void) {
 	start_download();
 	// Whether the download started or the busy notice came up, the card is
 	// what the user should see.
+	theme_glass_dialog(card);
 	lv_obj_set_hidden(veil, false);
 	lv_obj_move_foreground(veil);
 }

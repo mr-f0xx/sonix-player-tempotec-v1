@@ -571,6 +571,78 @@ lv_obj_t *settingsrow_page_title(lv_obj_t *screen) {
 	return NULL;
 }
 
+// Every option card this file has built (toggles, sliders, pills), so a theme
+// change can give them the same edge treatment as the navigation rows. Pages
+// build their cards once and keep them.
+#define SETTINGSROW_MAX_CARDS 128
+static lv_obj_t *built_cards[SETTINGSROW_MAX_CARDS];
+static int built_card_count;
+
+// The root menus (Settings, and any other page that asks) stay edge-free under
+// Liquid Glass; every submenu boxes its rows and cards with the glass rim, so
+// a page never mixes bordered and borderless tiles. Screens live for the whole
+// run, so the registry never shrinks.
+#define SETTINGSROW_MAX_FLAT_PAGES 4
+static lv_obj_t *flat_pages[SETTINGSROW_MAX_FLAT_PAGES];
+static int flat_page_count;
+
+void settingsrow_set_flat_page(lv_obj_t *screen) {
+	if (!screen) {
+		return;
+	}
+	for (int i = 0; i < flat_page_count; i++) {
+		if (flat_pages[i] == screen) {
+			return;
+		}
+	}
+	if (flat_page_count < SETTINGSROW_MAX_FLAT_PAGES) {
+		flat_pages[flat_page_count++] = screen;
+	}
+}
+
+// Whether a row/card on this page draws without its glass rim. The flat
+// themes keep the compact-layout rule they have always had; Liquid Glass
+// boxes every submenu and leaves only the registered root menus flat.
+static bool settingsrow_edges_flat(lv_obj_t *obj) {
+	if (!theme_is_liquid_glass()) {
+		return compact_rows() && theme_uses_function_glyphs();
+	}
+	lv_obj_t *screen = lv_obj_get_screen(obj);
+	for (int i = 0; i < flat_page_count; i++) {
+		if (flat_pages[i] == screen) {
+			return true;
+		}
+	}
+	return false;
+}
+
+static void settingsrow_card_deleted_cb(lv_event_t *e) {
+	lv_obj_t *card = lv_event_get_target(e);
+	for (int i = 0; i < built_card_count; i++) {
+		if (built_cards[i] == card) {
+			built_cards[i] = built_cards[--built_card_count];
+			return;
+		}
+	}
+}
+
+// The navigation rows are buttons whose boxed/flat treatment follows the
+// theme (settingsrow_update_edges); the option cards must match them or a
+// toggle row keeps a bright glass rim while every row beside it is flat --
+// the white border the System page's Update notifications tile showed. Only
+// the outline is touched: a card's border stays zeroed in every theme, so the
+// flat themes keep the edge-free cards they have always had.
+static void settingsrow_card_edges(lv_obj_t *card, bool flat) {
+	if (!card) {
+		return;
+	}
+	if (flat) {
+		lv_obj_set_style_outline_width(card, 0, 0);
+	} else {
+		lv_obj_remove_local_style_prop(card, LV_STYLE_OUTLINE_WIDTH, 0);
+	}
+}
+
 // Shared shell for the richer rows: the same card, tall enough for a control
 // underneath the name.
 static lv_obj_t *make_card(lv_obj_t *parent, const char *name, lv_obj_t **value_out, int height) {
@@ -581,6 +653,11 @@ static lv_obj_t *make_card(lv_obj_t *parent, const char *name, lv_obj_t **value_
 	lv_obj_set_style_radius(card, compact_rows() ? bp_tile_radius() : ROW_RADIUS, 0);
 	lv_obj_set_style_border_width(card, 0, 0);
 	lv_obj_set_style_shadow_width(card, 0, 0);
+	settingsrow_card_edges(card, settingsrow_edges_flat(card));
+	if (built_card_count < SETTINGSROW_MAX_CARDS) {
+		built_cards[built_card_count++] = card;
+		lv_obj_add_event_cb(card, settingsrow_card_deleted_cb, LV_EVENT_DELETE, NULL);
+	}
 	lv_obj_set_style_pad_hor(card, compact_rows() ? 8 : 20, 0);
 	lv_obj_set_style_pad_ver(card, compact_rows() ? 8 : 14, 0);
 	lv_obj_set_scrollable(card, false);
@@ -631,7 +708,9 @@ static void settingsrow_refresh_theme(void) {
 	}
 
 	bool function_glyphs = theme_uses_function_glyphs();
-	bool flat_rows = compact_rows() && function_glyphs;
+	for (int i = 0; i < built_card_count; i++) {
+		settingsrow_card_edges(built_cards[i], settingsrow_edges_flat(built_cards[i]));
+	}
 	for (int i = 0; i < leading_icon_count; i++) {
 		lv_obj_t *row = leading_icons[i].row;
 		lv_obj_t *icon = leading_icons[i].icon;
@@ -641,7 +720,7 @@ static void settingsrow_refresh_theme(void) {
 		// Navigation rows are buttons whose flat/boxed treatment changes by
 		// theme. Option cards set their own edge styles and should keep them.
 		if (lv_obj_check_type(row, &lv_button_class)) {
-			settingsrow_update_edges(row, flat_rows);
+			settingsrow_update_edges(row, settingsrow_edges_flat(row));
 		}
 		bool accent = leading_icons[i].accent;
 		lv_obj_set_hidden(icon, !function_glyphs && !accent);
@@ -1275,7 +1354,17 @@ lv_obj_t *settingsrow_toggle_pills(lv_obj_t *parent, const char *title, lv_event
 	lv_obj_set_size(head, lv_pct(100), LV_SIZE_CONTENT);
 	lv_obj_set_style_bg_opa(head, 0, 0);
 	lv_obj_set_style_border_width(head, 0, 0);
+	// The switch rims with an outline drawn just outside its box and its glass
+	// knob casts a soft shadow, but this head clips children to its own box and
+	// SPACE_BETWEEN parks the switch flush to the right edge, so the rim was cut
+	// there. Let the head's children spill past its box: overflow_visible alone
+	// is not enough -- LVGL only widens the child clip by ext_draw_size when
+	// overflow_visible is set (lv_refr.c) -- so set both. The switch keeps the
+	// exact right edge and midline of the ordinary rows (no padding shift), while
+	// its rim and shadow land inside the clip; the card's 8px padding has room.
 	lv_obj_set_style_pad_all(head, 0, 0);
+	lv_obj_set_overflow_visible(head, true);
+	lv_obj_set_ext_draw_size(head, 8);
 	lv_obj_set_scrollable(head, false);
 	lv_obj_set_event_bubble(head, true);
 	lv_obj_set_flex_flow(head, LV_FLEX_FLOW_ROW);
@@ -1391,7 +1480,18 @@ void settingsrow_pill_active(lv_obj_t *pill, bool active) {
 	if (!pill) {
 		return;
 	}
+	// Liquid Glass pills are dark glass with light ink -- an idle one the panel
+	// ground, the chosen one the accent -- so the label keeps real contrast
+	// instead of white type on a white frost. A little of the backdrop shows
+	// through both.
+	if (theme_is_liquid_glass()) {
+		lv_obj_set_style_bg_color(pill, active ? theme()->accent : theme()->panel, 0);
+		lv_obj_set_style_bg_opa(pill, active ? THEME_GLASS_ACCENT_OPA : THEME_GLASS_PANEL_OPA, 0);
+		lv_obj_set_style_text_color(lv_obj_get_child(pill, 0), active ? theme_on_accent() : theme()->text_primary, 0);
+		return;
+	}
 	lv_obj_set_style_bg_color(pill, active ? theme()->accent : theme()->surface_pressed, 0);
+	lv_obj_set_style_bg_opa(pill, LV_OPA_COVER, 0);
 	lv_obj_set_style_text_color(lv_obj_get_child(pill, 0), active ? theme_on_accent() : theme()->text_primary, 0);
 }
 

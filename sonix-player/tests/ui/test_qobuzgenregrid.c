@@ -19,6 +19,10 @@ int bp_tile_radius(void) { return 10; }
 static int clicked = -1;
 static void click_cb(lv_event_t *e) { clicked = (int)(intptr_t)lv_event_get_user_data(e); }
 
+// Dialog frost is a no-op here: these suites substitute the theme engine.
+void theme_glass_dialog(lv_obj_t *obj) { (void)obj; }
+void theme_glass_action_button(lv_obj_t *btn, bool accent) { (void)btn; (void)accent; }
+
 int main(void) {
     lv_init();
     font_ui_14 = lv_font_montserrat_14;

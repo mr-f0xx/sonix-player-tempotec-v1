@@ -7,17 +7,33 @@
 
 // The built-in appearances. Dark and Light keep their existing palettes;
 // Tokyo Night, Amber on Black and OLED add three dark palettes designed for
-// the V1. OLED is true black with white as its accent.
+// the V1. OLED is true black with white as its accent. Liquid Glass is a dark
+// frosted palette: its panels, cards and bars are drawn semi-transparent over
+// a blurred copy of the playing track's artwork (see glass.c), the way the
+// Now Playing deck already frosts its controls.
 typedef enum {
 	THEME_KIND_DARK = 0,
 	THEME_KIND_LIGHT = 1,
 	THEME_KIND_TOKYO_NIGHT = 2,
 	THEME_KIND_AMBER_ON_BLACK = 3,
 	THEME_KIND_OLED = 4,
-	THEME_KIND_CUSTOM = 5,
+	THEME_KIND_LIQUID_GLASS = 5,
+	THEME_KIND_CUSTOM = 6,
 } theme_kind_t;
 
-#define THEME_KIND_COUNT 5 // built-in themes; Custom is a separate SD-card choice
+#define THEME_KIND_COUNT 6 // built-in themes; Custom is a separate SD-card choice
+
+// The frost levels Liquid Glass draws its shared surfaces at. The screen is
+// fully clear (the wallpaper / blurred artwork on the bottom layer shows
+// through). Cards are CLEAR glass like iOS 26: only a whisper of white tint so
+// the wallpaper shows through almost fully, defined by a bright specular rim
+// and a faint top highlight -- not a gray or dark film. Panels and bars keep a
+// half-dark ground so their white labels stay legible.
+#define THEME_GLASS_PANEL_OPA LV_OPA_50
+#define THEME_GLASS_CARD_OPA LV_OPA_10
+#define THEME_GLASS_CARD_PRESSED_OPA LV_OPA_30
+#define THEME_GLASS_EDGE_OPA LV_OPA_60
+#define THEME_GLASS_ACCENT_OPA LV_OPA_80
 
 // Fixed semantic accents used by Tokyo Night's function-matched glyphs.
 // Amber on Black and OLED map every icon role to their accent (signal amber,
@@ -79,6 +95,13 @@ extern lv_style_t theme_style_switch_checked; // image_recolor for monochrome ic
 // accent (OLED), where a white knob would vanish into the track.
 // theme_apply_switch() adds it with LV_PART_KNOB | LV_STATE_CHECKED.
 extern lv_style_t theme_style_switch_knob_checked;
+
+// The knob in every state. Liquid Glass draws it as a bright glass droplet --
+// a white circle lifted off the track by a soft shadow -- so it reads as the
+// specular bead on a tinted pane rather than a flat dot. Every other theme
+// leaves this empty and keeps the stock knob. theme_apply_switch() adds it
+// with LV_PART_KNOB.
+extern lv_style_t theme_style_switch_knob;
 
 // Two states of the track that only OLED draws differently; for every other
 // theme both styles are empty. While the switch is on, the ring OLED draws
@@ -152,10 +175,45 @@ const theme_palette_t *theme(void);
 // The subtle accent-tinted surface shared by the dark themes' mini-player
 // and Music browse tiles. OLED's is plain black, like the rest of its cards.
 lv_color_t theme_now_playing_fill(void);
+
+// Clear-glass pane treatment for pages that paint their own surface (Now Playing
+// bar, Music Browse tiles, Wireless quick tiles): clear frost + specular rim
+// under Liquid Glass, glass props removed for every other theme.
+void theme_glass_pane(lv_obj_t *obj);
+
+// The A–Z jump strip (Library lists, Radio): a clear glass pill with the
+// specular rim under Liquid Glass, the half-opaque surface wash everywhere
+// else. Paints background and rim only; the caller keeps the pill radius.
+void theme_glass_index_bar(lv_obj_t *bar);
+
+// The colours of the glass frost / gradient / specular rim. Neutral white by
+// default; when Dynamic tint is on under Liquid Glass they borrow the chosen
+// accent's hue (Apple-style tinted glass) while the glass opacities and
+// geometry stay exactly the same. Shared by the palette and theme_glass_pane.
+lv_color_t theme_glass_frost(void);
+lv_color_t theme_glass_frost_grad(void);
+lv_color_t theme_glass_rim(void);
+
+// Opaque frosted ground for dialog cards (confirm / update / popover) under
+// Liquid Glass so the page behind never shows through; a no-op elsewhere.
+void theme_glass_dialog(lv_obj_t *obj);
+
+// Opaque wallpaper ground for full-screen top-layer pages (Date & time) under
+// Liquid Glass so the live screen behind never shows through; a no-op elsewhere.
+void theme_glass_page_ground(lv_obj_t *obj);
+
+// A dialog / page action button under Liquid Glass: the accent action wears a
+// tinted glass fill, the quiet one a dark glass fill, both with the specular
+// border rim. Elsewhere it restores the flat accent fill (accent) or leaves the
+// shared neutral style (quiet), so the same call is safe on every theme.
+void theme_glass_action_button(lv_obj_t *btn, bool accent);
 bool theme_is_dark(void);
 bool theme_is_tokyo_night(void);
 bool theme_is_amber_on_black(void);
 bool theme_is_oled(void);
+// Liquid Glass: the frosted, semi-transparent palette. Pages that paint a
+// local fill or opacity by hand ask this to draw it as glass instead.
+bool theme_is_liquid_glass(void);
 // The single-hue palettes, Amber on Black and OLED: every glyph and status
 // mark wears the accent, and nothing borrows a second hue (no Bluetooth blue,
 // codec colours or balanced-output gold). The roles still come from the
@@ -277,5 +335,13 @@ void theme_set_boot_screen_custom(const char *name);
 // alone entirely. Off by default, persists in the config.
 bool theme_dynamic_tint(void);
 void theme_set_dynamic_tint(bool on);
+
+// Hide borders (Appearance > Hide borders): the opt-in borderless Liquid
+// Glass. Every specular rim -- card/panel outlines, pane, dialog and button
+// borders, the switch ring, the A-Z strip, the volume pill -- draws at zero
+// width while the frost and gradients stay. Remembered in the config; the
+// flat themes ignore it. The setter repaints every page.
+bool theme_glass_borders_hidden(void);
+void theme_set_glass_borders_hidden(bool on);
 
 #endif // THEME_H

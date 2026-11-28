@@ -233,7 +233,9 @@ static lv_obj_t *radio_card(lv_obj_t *parent, const char *label, const lv_image_
 
 	lv_obj_t *open = lv_btn_create(heading);
 	wireless_remove_edges(open);
-	lv_obj_set_size(open, wireless_cfg->screen_width - 2 * wireless_cfg->padding - 10 - 44 - 8, 36);
+	// Leave 2px past the switch for its outline rim: the heading clips children
+	// to its own box, so a switch flush to the right edge had its rim cut.
+	lv_obj_set_size(open, wireless_cfg->screen_width - 2 * wireless_cfg->padding - 10 - 44 - 10, 36);
 	lv_obj_set_style_bg_opa(open, LV_OPA_TRANSP, 0);
 	lv_obj_add_style(open, &theme_style_card_pressed, LV_STATE_PRESSED);
 	lv_obj_set_style_border_width(open, 0, 0);
@@ -256,7 +258,7 @@ static lv_obj_t *radio_card(lv_obj_t *parent, const char *label, const lv_image_
 
 	lv_obj_t *copy = lv_obj_create(open);
 	lv_obj_remove_style_all(copy);
-	lv_obj_set_size(copy, LV_MAX(1, wireless_cfg->screen_width - 2 * wireless_cfg->padding - 10 - 44 - 8 - 25),
+	lv_obj_set_size(copy, LV_MAX(1, wireless_cfg->screen_width - 2 * wireless_cfg->padding - 10 - 44 - 10 - 25),
 					LV_SIZE_CONTENT);
 	lv_obj_set_style_pad_all(copy, 0, 0);
 	lv_obj_set_style_pad_row(copy, 1, 0);
@@ -361,6 +363,7 @@ static lv_obj_t *wireless_action_grid(lv_obj_t *parent) {
 		lv_obj_set_style_bg_opa(button, LV_OPA_COVER, 0);
 		lv_obj_add_style(button, &theme_style_card_pressed, LV_STATE_PRESSED);
 		lv_obj_set_style_radius(button, bp_tile_radius(), 0);
+		theme_glass_pane(button); // clear glass under Liquid Glass, not white
 		lv_obj_set_style_pad_all(button, 4, 0);
 		lv_obj_set_style_pad_gap(button, 2, 0);
 		lv_obj_set_event_bubble(button, true);
@@ -439,6 +442,8 @@ static void wireless_refresh_theme(void) {
 		}
 		if (action_icons[i].button) {
 			lv_obj_set_style_bg_color(action_icons[i].button, theme()->surface_pressed, 0);
+			lv_obj_set_style_bg_opa(action_icons[i].button, LV_OPA_COVER, 0);
+			theme_glass_pane(action_icons[i].button);
 		}
 	}
 	radio_row_t *radio_rows[] = {&wifi_row, &bluetooth_row};
