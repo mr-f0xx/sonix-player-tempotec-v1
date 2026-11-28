@@ -129,6 +129,14 @@ static void set_label_if_changed(lv_obj_t *label, const char *text) {
 	}
 }
 
+// The home tagline and the live artist line wear the accent when Liquid Glass
+// has Dynamic tint on -- the same opt-in tint the frost and rims borrow (see
+// glass_tint_on in theme.c). Off, or on any other theme, both keep the dim
+// secondary ink, so the default home is unchanged.
+static lv_color_t home_tinted_ink(void) {
+	return (theme_is_liquid_glass() && theme_dynamic_tint()) ? theme()->accent : theme()->text_secondary;
+}
+
 // The V1 home's title and tagline. OLED leaves both out: its grid starts right
 // under the status bar, and the six cards share the height the header took.
 #define HOME_HEADER_HEIGHT 62
@@ -400,6 +408,10 @@ static void main_menu_refresh_now_playing(void) {
 	}
 	set_label_if_changed(mini_player_title, title ? title : "");
 	set_label_if_changed(mini_player_subtitle, artist);
+	// The artist line takes the accent under Liquid Glass + Dynamic tint; the
+	// title above it keeps the primary ink. Refreshed here so it follows both
+	// the live track and a theme/tint change (refresh_theme calls this too).
+	lv_obj_set_style_text_color(mini_player_subtitle, home_tinted_ink(), 0);
 	main_menu_layout_strip_text(loaded);
 }
 
@@ -429,6 +441,9 @@ static void main_menu_refresh_theme(void) {
 	if (prototype_layout) {
 		lv_obj_set_hidden(home_header, !home_header_shown());
 		lv_obj_set_hidden(home_note, !home_header_shown());
+		// "Your music, ready when you are." follows the accent under Liquid
+		// Glass + Dynamic tint, like the live artist line; dim otherwise.
+		lv_obj_set_style_text_color(home_note, home_tinted_ink(), 0);
 		lv_obj_set_hidden(mini_player, false);
 
 		// Status bar: y=0..24. The bold 36 px title row and single-line note
