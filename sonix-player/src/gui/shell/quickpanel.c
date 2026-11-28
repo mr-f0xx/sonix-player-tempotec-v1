@@ -27,6 +27,7 @@
 #include "src/gui/wireless/sonixlink.h"
 #include "src/gui/wireless/wifitransfer.h"
 #include "src/gui/shell/theme.h"
+#include "src/gui/shell/glassbg.h"
 #include "src/gui/shell/glasswallpaper.h"
 #include "src/system/playback/audiobook.h"
 #include "src/system/streaming/podcast.h"
@@ -3568,12 +3569,12 @@ static void panel_glass_frost_apply(void) {
 	if (theme_is_liquid_glass()) {
 		lv_obj_set_style_bg_opa(panel, LV_OPA_COVER, 0);
 		lv_obj_set_style_bg_color(panel, theme()->screen_bg, 0);
-		lv_obj_set_style_bg_image_src(panel, &glass_wallpaper_dsc, 0);
-		// The same deep dim the main menu wears (glass.c recolors the wallpaper
-		// 70% black), so the control centre is as dark as the page behind it --
-		// opaque, never see-through.
+		// The same wallpaper and dim the main menu wears (glassbg), so the
+		// control centre is as dark as the page behind it -- opaque, never
+		// see-through, and following the user's chosen background.
+		lv_obj_set_style_bg_image_src(panel, glassbg_source(), 0);
 		lv_obj_set_style_bg_image_recolor(panel, lv_color_black(), 0);
-		lv_obj_set_style_bg_image_recolor_opa(panel, LV_OPA_70, 0);
+		lv_obj_set_style_bg_image_recolor_opa(panel, glassbg_dim_opa(), 0);
 		lv_obj_set_style_bg_image_opa(panel, LV_OPA_COVER, 0);
 	} else {
 		lv_obj_remove_local_style_prop(panel, LV_STYLE_BG_IMAGE_SRC, 0);

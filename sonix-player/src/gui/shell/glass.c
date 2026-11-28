@@ -1,5 +1,6 @@
 #include "glass.h"
 
+#include "src/gui/shell/glassbg.h"
 #include "src/gui/shell/glasswallpaper.h"
 #include "src/gui/shell/gui.h"
 #include "src/gui/shell/theme.h"
@@ -61,16 +62,19 @@ static void glass_ambient_paint(void) {
 	}
 	lv_obj_set_size(glass_ambient_img, w, h);
 	lv_obj_align(glass_ambient_img, LV_ALIGN_TOP_LEFT, 0, 0);
-	lv_image_set_src(glass_ambient_img, &glass_wallpaper_dsc);
+	// The supplied art, or the user's own picture from the card (glassbg).
+	const lv_image_dsc_t *src = glassbg_source();
+	lv_image_set_src(glass_ambient_img, src);
 	// Cover the panel: scale by the larger axis ratio so no edge is left bare.
-	uint32_t sx = (uint32_t)(LV_SCALE_NONE * w / (int)glass_wallpaper_dsc.header.w);
-	uint32_t sy = (uint32_t)(LV_SCALE_NONE * h / (int)glass_wallpaper_dsc.header.h);
+	// A custom picture is already panel-sized, so this leaves it at 1:1.
+	uint32_t sx = (uint32_t)(LV_SCALE_NONE * w / (int)src->header.w);
+	uint32_t sy = (uint32_t)(LV_SCALE_NONE * h / (int)src->header.h);
 	lv_image_set_scale(glass_ambient_img, sx > sy ? sx : sy);
 	lv_image_set_inner_align(glass_ambient_img, LV_IMAGE_ALIGN_CENTER);
-	// A deep dim so the background sits dark behind the clear glass, while the
-	// artwork still reads through and white labels stay legible.
+	// The dim the user chose (darker/lighter), black over the picture so the
+	// background sits behind the clear glass and white labels stay legible.
 	lv_obj_set_style_image_recolor(glass_ambient_img, lv_color_black(), 0);
-	lv_obj_set_style_image_recolor_opa(glass_ambient_img, LV_OPA_70, 0);
+	lv_obj_set_style_image_recolor_opa(glass_ambient_img, glassbg_dim_opa(), 0);
 	lv_obj_set_hidden(glass_ambient_img, false);
 }
 
@@ -85,6 +89,7 @@ static void glass_sync(void) {
 		glass_ambient_free(); // hidden behind the opaque pages of every other theme
 		return;
 	}
+	glassbg_sync(); // read a chosen picture pending from startup or a card change
 	glass_base_paint();
 	glass_ambient_paint();
 }

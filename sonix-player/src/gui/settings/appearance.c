@@ -20,6 +20,8 @@
 #include "src/gui/shell/toast.h"
 #include "src/gui/shell/topbar.h"
 #include "src/gui/settings/bootpicpage.h"
+#include "src/gui/settings/glassbgpage.h"
+#include "src/gui/shell/glassbg.h"
 #include "src/gui/settings/iconsetpage.h"
 #include "src/gui/settings/themefilepage.h"
 #include "src/system/core/config.h"
@@ -48,6 +50,11 @@ static lv_obj_t *custom_accent_swatch;
 static lv_obj_t *custom_accent_hex;
 static bool appearance_compact;
 static lv_obj_t *tint_toggle;
+// Liquid Glass only: the background picture row, its dim slider and the note
+// under it. Hidden on every other theme (appearance_preview_refresh).
+static lv_obj_t *glass_bg_card, *glass_bg_value;
+static lv_obj_t *glass_dim_card, *glass_dim_value, *glass_dim_slider;
+static lv_obj_t *glass_dim_note;
 static lv_obj_t *main_menu_icons_toggle;
 static lv_obj_t *main_menu_books_toggle;
 static lv_obj_t *main_menu_browse_toggle;
@@ -65,6 +72,7 @@ static lv_obj_t *theme_palette_swatches[8];
 static lv_obj_t *function_glyph_card;
 static lv_obj_t *function_glyph_icons[4];
 static void appearance_preview_refresh(void);
+static void glass_bg_show(void);
 // The status bar draws the battery either way; this setting is only about the
 // number beside it, and is on by default.
 static void battery_percent_cb(lv_event_t *e) {
@@ -777,6 +785,9 @@ static void card_rows_refresh_cb(lv_event_t *e) {
 	(void)e;
 	refresh_custom_theme_value();
 	refresh_iconset_value();
+	// Re-set the background name now the row has its width, so a long file
+	// name ellipsizes into the value column instead of running over the name.
+	glass_bg_show();
 }
 
 static void boot_light_show(void);
@@ -815,6 +826,58 @@ static void boot_light_released_cb(lv_event_t *e) {
 	int light = BOOTLOGO_LIGHT_MIN + (int)lv_slider_get_value(boot_light_slider) * BOOTLOGO_LIGHT_STEP;
 	theme_set_boot_brightness(light);
 	boot_light_show();
+}
+
+// ---------------------------------------------------------------------------
+// The Liquid Glass background: which picture from the card, and how dark it
+// sits behind the glass. Both rows exist only under Liquid Glass; every other
+// theme is opaque and has no wallpaper to choose or dim.
+// ---------------------------------------------------------------------------
+
+#define GLASS_DIM_STEP 5
+#define GLASS_DIM_COUNT (GLASSBG_DIM_MAX / GLASS_DIM_STEP + 1)
+
+static void glass_bg_show(void) {
+	if (!glass_bg_value) {
+		return;
+	}
+	const char *name = glassbg_current_name();
+	lv_label_set_text(glass_bg_value, name[0] ? name : tr("glassbg_default"));
+	// A file name from the card can be long: keep it inside the value column,
+	// ellipsized, so it never runs back over the row's name. The width is only
+	// known once the row has been laid out (the screen-loaded refresh).
+	lv_obj_t *row = lv_obj_get_parent(glass_bg_value);
+	int32_t w = lv_obj_get_content_width(row);
+	if (w > 0) {
+		lv_label_set_long_mode(glass_bg_value, LV_LABEL_LONG_DOT);
+		lv_obj_set_width(glass_bg_value, w * 55 / 100);
+		lv_obj_align(glass_bg_value, LV_ALIGN_RIGHT_MID, 0, 0);
+	}
+}
+
+static void glass_dim_show(void) {
+	if (glass_dim_value) {
+		lv_label_set_text_fmt(glass_dim_value, "%d%%", glassbg_dim_percent());
+	}
+	if (glass_dim_slider) {
+		lv_slider_set_value(glass_dim_slider, glassbg_dim_percent() / GLASS_DIM_STEP, LV_ANIM_OFF);
+	}
+}
+
+// The label and the backdrop follow the finger; the flash write waits for it
+// to lift -- the same bargain the boot brightness slider makes, since a drag
+// fires VALUE_CHANGED many times and NAND has a finite number of erase cycles.
+static void glass_dim_changed_cb(lv_event_t *e) {
+	(void)e;
+	int dim = (int)lv_slider_get_value(glass_dim_slider) * GLASS_DIM_STEP;
+	lv_label_set_text_fmt(glass_dim_value, "%d%%", dim);
+	glassbg_preview_dim(dim);
+}
+
+static void glass_dim_released_cb(lv_event_t *e) {
+	(void)e;
+	glassbg_set_dim((int)lv_slider_get_value(glass_dim_slider) * GLASS_DIM_STEP);
+	glass_dim_show();
 }
 
 // The four names are not translated, the way a font's name is not: they are
@@ -899,6 +962,20 @@ static void appearance_preview_refresh(void) {
 	if (function_glyph_card) {
 		lv_obj_set_hidden(function_glyph_card, !show);
 	}
+
+	// The background picture and its dim are Liquid Glass alone: the other
+	// themes paint opaque pages with no wallpaper behind them.
+	if (glass_bg_card) {
+		lv_obj_set_hidden(glass_bg_card, !glass);
+	}
+	if (glass_dim_card) {
+		lv_obj_set_hidden(glass_dim_card, !glass);
+	}
+	if (glass_dim_note) {
+		lv_obj_set_hidden(glass_dim_note, !glass);
+	}
+	glass_bg_show();
+	glass_dim_show();
 
 	// Tokyo Night keeps its semantic hues. Amber on Black shows the distinct
 	// dark track, subdued star, playback, artist and cream-title colors from
@@ -1178,6 +1255,25 @@ void appearance_init(gui_config_t *cfg) {
 	lv_obj_set_style_text_font(tint_note, &font_ui_22, 0);
 	lv_label_set_text(tint_note, tr("appearance_dynamic_tint_note"));
 
+	// The background the glass sits on: the supplied art, or a picture from
+	// the card's Wallpaper folder, shown on every glass surface at once. Its
+	// own row rather than a pill: the name is a file name from the card.
+	glass_bg_card = settingsrow_add(container, "appearance_glass_background", &glass_bg_value,
+									switch_screen_cb, glassbgpage_screen);
+
+	// How dark that background sits behind the glass -- darker to the right,
+	// lighter to the left, the whole interface following the one knob.
+	glass_dim_card = settingsrow_slider(container, "appearance_glass_dim", GLASS_DIM_COUNT,
+										&glass_dim_value, &glass_dim_slider, glass_dim_changed_cb);
+	lv_obj_add_event_cb(glass_dim_slider, glass_dim_released_cb, LV_EVENT_RELEASED, NULL);
+
+	glass_dim_note = lv_label_create(container);
+	lv_label_set_long_mode(glass_dim_note, LV_LABEL_LONG_WRAP);
+	lv_obj_set_width(glass_dim_note, lv_pct(100));
+	lv_obj_add_style(glass_dim_note, &theme_style_text_dim, 0);
+	lv_obj_set_style_text_font(glass_dim_note, &font_ui_22, 0);
+	lv_label_set_text(glass_dim_note, tr("appearance_glass_dim_note"));
+
 	settingsrow_toggle(container, "appearance_main_menu_icons_only", &main_menu_icons_toggle, main_menu_icons_cb);
 	if (main_menu_icons_only()) {
 		lv_obj_add_state(main_menu_icons_toggle, LV_STATE_CHECKED);
@@ -1373,6 +1469,8 @@ void appearance_init(gui_config_t *cfg) {
 	refresh_text_size_pills();
 	refresh_custom_theme_value();
 	refresh_iconset_value();
+	glass_bg_show();
+	glass_dim_show();
 	theme_register_refresh(refresh_buttons);
 	theme_register_refresh(refresh_boot_buttons);
 	theme_register_refresh(refresh_text_size_pills);

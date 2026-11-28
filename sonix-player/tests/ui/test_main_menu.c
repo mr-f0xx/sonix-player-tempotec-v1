@@ -22,6 +22,8 @@
 #include "src/system/streaming/podcast.h"
 #include "src/gui/settings/appearance.h"
 #include "src/gui/settings/bootpicpage.h"
+#include "src/gui/settings/glassbgpage.h"
+#include "src/gui/shell/glassbg.h"
 #include "src/gui/settings/iconsetpage.h"
 #include "src/gui/settings/themefilepage.h"
 #include "src/gui/settings/musicsettings.h"
@@ -261,6 +263,22 @@ const char *bootpic_result_key(bootpic_result_t result) {
 	(void)result;
 	return "bootpic_unreadable";
 }
+
+/* ---- the wallpaper codecs, substituted ------------------------------------
+ * The background picker's rows, threads and choice are what this test checks;
+ * the JPEG/PNG decoders have their own tests and are not linked here. A decode
+ * that finds nothing leaves the supplied art in place, the same as a picture
+ * that has left the card. */
+uint8_t *jpeg_scaled_decode(const uint8_t *data, size_t size, int min_box, int *out_w, int *out_h,
+							int *src_w, int *src_h) {
+	(void)data; (void)size; (void)min_box; (void)out_w; (void)out_h; (void)src_w; (void)src_h;
+	return NULL;
+}
+uint8_t *png_scaled_decode(const uint8_t *data, size_t size, int min_box, int *out_w, int *out_h) {
+	(void)data; (void)size; (void)min_box; (void)out_w; (void)out_h;
+	return NULL;
+}
+/* jpeg_planes_decode is the real one from stb_image_impl.c, linked here. */
 void topbar_set_battery_percent(bool shown) { (void)shown; }
 void topbar_set_clock_position(int pos) { (void)pos; }
 void switch_screen(lv_obj_t *screen) { lv_screen_load(screen); }
@@ -732,6 +750,9 @@ int main(int argc, char **argv) {
 
 	bootpicpage_screen = lv_obj_create(NULL); // the page the boot screen's Custom pill opens
 	bootpicpage_init(&cfg);
+	glassbg_init();
+	glassbgpage_screen = lv_obj_create(NULL); // the page the glass Background row opens
+	glassbgpage_init(&cfg);
 	iconsetpage_screen = lv_obj_create(NULL);
 	themefilepage_screen = lv_obj_create(NULL);
 	iconsetpage_init(&cfg);
@@ -742,6 +763,22 @@ int main(int argc, char **argv) {
 	assert(toggle_label);
 	menu_toggle = child_of_type(lv_obj_get_parent(toggle_label), &lv_switch_class);
 	assert(lv_obj_has_state(menu_toggle, LV_STATE_CHECKED) == saved_icons_only);
+
+	/* The background picture and its dim belong to Liquid Glass alone: the
+	 * rows are there under glass and hidden on every other theme, and the
+	 * picker page lists the Default choice even with no card folder. */
+	lv_obj_t *glass_bg_label = find_label(appearance_screen, tr("appearance_glass_background"));
+	assert(glass_bg_label);
+	lv_obj_t *glass_bg_row = lv_obj_get_parent(glass_bg_label);
+	lv_obj_t *glass_dim_label = find_label(appearance_screen, tr("appearance_glass_dim"));
+	assert(glass_dim_label);
+	lv_obj_t *glass_dim_row = lv_obj_get_parent(glass_dim_label);
+	theme_set_kind(THEME_KIND_LIQUID_GLASS);
+	assert(!lv_obj_is_hidden(glass_bg_row) && !lv_obj_is_hidden(glass_dim_row));
+	assert(glassbg_dim_percent() == GLASSBG_DIM_DEFAULT);
+	theme_set_kind(THEME_KIND_DARK);
+	assert(lv_obj_is_hidden(glass_bg_row) && lv_obj_is_hidden(glass_dim_row));
+	assert(find_label(glassbgpage_screen, tr("glassbg_default")));
 
 	assert(!main_menu_books());
 	assert(find_label(lv_obj_get_child(grid, 3), tr("audiobooks")));

@@ -11,6 +11,8 @@
 
 #include "src/gui/nowplaying/cover.h"
 #include "src/gui/shell/glass.h"
+#include "src/gui/shell/glassbg.h"
+#include "src/gui/shell/glasswallpaper.h"
 #include "src/gui/shell/theme.h"
 #include "src/system/core/config.h"
 
@@ -32,6 +34,24 @@ void cover_free(cover_image_t *img) { (void)img; }
 
 // --- gui_post, stubbed (the constant backdrop never posts) ------------------
 bool gui_post(void (*cb)(void *), void *user) { (void)cb; (void)user; return true; }
+
+// --- the wallpaper codecs, stubbed: no card picture is decoded here ---------
+// The provider's choice, dim and fallback are what this test checks; a decode
+// that finds nothing leaves the supplied art, the same as a picture gone.
+uint8_t *jpeg_scaled_decode(const uint8_t *data, size_t size, int min_box, int *out_w, int *out_h,
+							int *src_w, int *src_h) {
+	(void)data; (void)size; (void)min_box; (void)out_w; (void)out_h; (void)src_w; (void)src_h;
+	return NULL;
+}
+uint8_t *jpeg_planes_decode(const uint8_t *data, size_t size, int box, size_t budget_bytes, int *out_w,
+							int *out_h, size_t *peak_bytes) {
+	(void)data; (void)size; (void)box; (void)budget_bytes; (void)out_w; (void)out_h; (void)peak_bytes;
+	return NULL;
+}
+uint8_t *png_scaled_decode(const uint8_t *data, size_t size, int min_box, int *out_w, int *out_h) {
+	(void)data; (void)size; (void)min_box; (void)out_w; (void)out_h;
+	return NULL;
+}
 
 // LVGL's configured default font; the theme and backdrop draw no text, so a
 // built-in face stands in for the firmware's UI fonts.
@@ -107,6 +127,7 @@ int main(void) {
 	font_ui_14 = lv_font_montserrat_14;
 	lv_display_create(240, 320);
 	theme_init();
+	glassbg_init();
 	glass_init();
 
 	// --- selecting Liquid Glass --------------------------------------------
@@ -193,6 +214,46 @@ int main(void) {
 	theme_set_dynamic_tint(false);
 	frost = theme_glass_frost();
 	assert(frost.red == 255 && frost.green == 255 && frost.blue == 255);
+
+	// --- the custom background: choice, dim, and the fallback ---------------
+	// With nothing chosen the supplied art is the source, at the default dim.
+	assert(glassbg_source() == &glass_wallpaper_dsc);
+	assert(glassbg_dim_percent() == GLASSBG_DIM_DEFAULT);
+	assert(glassbg_dim_opa() == (lv_opa_t)(GLASSBG_DIM_DEFAULT * 255 / 100));
+	assert(glassbg_current_name()[0] == '\0');
+
+	// A decoded picture becomes the wallpaper the backdrop draws, and the
+	// choice is kept by name so it follows the card.
+	uint8_t *px = malloc((size_t)240 * 320 * 2);
+	assert(px);
+	memset(px, 0x5A, (size_t)240 * 320 * 2);
+	glassbg_install(px, 240, 320, "holiday.jpg");
+	assert(glassbg_source() != &glass_wallpaper_dsc);
+	assert(glassbg_source()->header.w == 240 && glassbg_source()->header.h == 320);
+	assert(strcmp(glassbg_current_name(), "holiday.jpg") == 0);
+	assert(strcmp(config_get("ui", "glass_wallpaper", ""), "holiday.jpg") == 0);
+	assert(lv_image_get_src(wall) == glassbg_source()); // the backdrop follows
+
+	// The dim knob clamps to its range, saves on set, and the backdrop wears
+	// it; a preview moves the backdrop without touching the saved value.
+	glassbg_set_dim(40);
+	assert(glassbg_dim_percent() == 40);
+	assert(config_get_int("ui", "glass_wallpaper_dim", 0) == 40);
+	assert(lv_obj_get_style_image_recolor_opa(wall, 0) == glassbg_dim_opa());
+	glassbg_set_dim(500);
+	assert(glassbg_dim_percent() == GLASSBG_DIM_MAX);
+	glassbg_preview_dim(10);
+	assert(glassbg_dim_percent() == 10);
+	assert(config_get_int("ui", "glass_wallpaper_dim", 0) == GLASSBG_DIM_MAX); // preview did not save
+	glassbg_set_dim(-5);
+	assert(glassbg_dim_percent() == 0);
+
+	// Back to the supplied art forgets the choice and frees the picture.
+	glassbg_reset();
+	assert(glassbg_source() == &glass_wallpaper_dsc);
+	assert(glassbg_current_name()[0] == '\0');
+	assert(config_get("ui", "glass_wallpaper", "x")[0] == '\0');
+	assert(lv_image_get_src(wall) == &glass_wallpaper_dsc);
 
 	// --- leaving Liquid Glass restores the opaque styles --------------------
 	theme_set_kind(THEME_KIND_DARK);

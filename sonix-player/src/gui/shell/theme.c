@@ -1,5 +1,6 @@
 #include "theme.h"
 
+#include "src/gui/shell/glassbg.h"
 #include "src/gui/shell/glasswallpaper.h"
 #include "src/system/core/config.h"
 #include "src/system/device/bootlogo.h"
@@ -897,11 +898,17 @@ void theme_glass_page_ground(lv_obj_t *obj) {
 	if (theme_is_liquid_glass()) {
 		lv_obj_set_style_bg_opa(obj, LV_OPA_COVER, 0);
 		lv_obj_set_style_bg_color(obj, active->screen_bg, 0);
-		lv_obj_set_style_bg_image_src(obj, &glass_wallpaper_dsc, 0);
-		lv_obj_set_style_bg_image_opa(obj, LV_OPA_40, 0);
+		// The same wallpaper and dim as the main menu and the control centre
+		// (glassbg), so a top-layer page reads as its own opaque glass page.
+		lv_obj_set_style_bg_image_src(obj, glassbg_source(), 0);
+		lv_obj_set_style_bg_image_recolor(obj, lv_color_black(), 0);
+		lv_obj_set_style_bg_image_recolor_opa(obj, glassbg_dim_opa(), 0);
+		lv_obj_set_style_bg_image_opa(obj, LV_OPA_COVER, 0);
 	} else {
 		lv_obj_remove_local_style_prop(obj, LV_STYLE_BG_IMAGE_SRC, 0);
 		lv_obj_remove_local_style_prop(obj, LV_STYLE_BG_IMAGE_OPA, 0);
+		lv_obj_remove_local_style_prop(obj, LV_STYLE_BG_IMAGE_RECOLOR, 0);
+		lv_obj_remove_local_style_prop(obj, LV_STYLE_BG_IMAGE_RECOLOR_OPA, 0);
 		lv_obj_remove_local_style_prop(obj, LV_STYLE_BG_OPA, 0);
 		lv_obj_remove_local_style_prop(obj, LV_STYLE_BG_COLOR, 0);
 	}

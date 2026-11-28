@@ -20,10 +20,12 @@
 #include "src/gui/settings/themefilepage.h"
 #include "src/gui/bluetooth/btaudio.h"
 #include "src/gui/settings/bootpicpage.h"
+#include "src/gui/settings/glassbgpage.h"
 #include "src/gui/bluetooth/btsettings.h"
 #include "src/gui/shell/confirm.h"
 #include "src/gui/shell/corners.h"
 #include "src/gui/shell/glass.h"
+#include "src/gui/shell/glassbg.h"
 #include "src/gui/settings/kblayoutpage.h"
 #include "src/gui/settings/screensaver.h"
 #include "src/gui/library/audiobookextras.h"
@@ -681,6 +683,9 @@ void gui_init(gui_config_t *cfg) {
 	// The Liquid Glass backdrop owns the bottom layer the clear pages show
 	// through. Built before any screen so it is already there when the first
 	// one is drawn; it follows the palette and the playing sleeve from here on.
+	// The saved background choice is read first, so the first frame already
+	// wears the user's picture when one was chosen.
+	glassbg_init();
 	glass_init();
 
 	// The player sheet is parked off the right edge of the top layer, which
@@ -704,6 +709,7 @@ void gui_init(gui_config_t *cfg) {
 	powersettings_screen = lv_obj_create(NULL);
 	appearance_screen = lv_obj_create(NULL);
 	bootpicpage_screen = lv_obj_create(NULL); // the page the boot screen's Custom pill opens
+	glassbgpage_screen = lv_obj_create(NULL); // the page the glass Background row opens
 	iconsetpage_screen = lv_obj_create(NULL);
 	themefilepage_screen = lv_obj_create(NULL);
 	language_screen = lv_obj_create(NULL);
@@ -871,6 +877,7 @@ void gui_init(gui_config_t *cfg) {
 	systempage_init(cfg);
 	appearance_init(cfg);
 	bootpicpage_init(cfg); // after appearance: its Custom pill opens this page
+	glassbgpage_init(cfg); // after appearance: its glass Background row opens this page
 	iconsetpage_init(cfg);
 	themefilepage_init(cfg);
 	language_init(cfg);
@@ -925,7 +932,7 @@ void gui_init(gui_config_t *cfg) {
 	lv_obj_t *const back_swipe_screens[] = {
 		main_menu_screen, music_screen,			browser_screen,	  settings_screen,
 		devoptions_screen, processespage_screen, musicsettings_screen, powersettings_screen, appearance_screen,
-		bootpicpage_screen, language_screen,
+		bootpicpage_screen, glassbgpage_screen, language_screen,
 		medialist_screen,  medialist_tracks_screen, medialist_albums_screen, audiobooks_screen, audiobooksettings_screen,
 		stats_screen, stats_artists_screen, stats_albums_screen,
 		queue_screen,	  chapters_screen,		 details_screen,   audiobookcontrols_screen,
