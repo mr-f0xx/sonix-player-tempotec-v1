@@ -285,14 +285,17 @@ static void refresh_buttons(void) {
 			lv_obj_set_style_text_color(label, theme()->text_primary, 0);
 			lv_obj_set_style_border_width(button, 0, 0);
 		}
-		// Liquid Glass draws its pills as glass too: the chosen one a tinted
-		// pane, the rest the dark panel ground, both with light ink and a little
-		// of the backdrop showing through -- not solid white fills.
+		// Liquid Glass draws its pills as glass too: the chosen one the accent
+		// as a tinted pane, the rest the dark panel ground, both semi-transparent
+		// with light ink -- the same treatment the Settings and Gearboy pills
+		// wear. The outlined branch above mixes the accent toward the surface,
+		// which is white in glass, so it left a near-white slab with a bright
+		// accent border; use the accent itself and drop that border here.
 		if (theme_is_liquid_glass()) {
-			if (!active) {
-				lv_obj_set_style_bg_color(button, theme()->panel, 0);
-			}
+			lv_obj_set_style_bg_color(button, active ? theme()->accent : theme()->panel, 0);
 			lv_obj_set_style_bg_opa(button, active ? THEME_GLASS_ACCENT_OPA : THEME_GLASS_PANEL_OPA, 0);
+			lv_obj_set_style_text_color(label, active ? theme_on_accent() : theme()->text_primary, 0);
+			lv_obj_set_style_border_width(button, 0, 0);
 		} else {
 			lv_obj_set_style_bg_opa(button, LV_OPA_COVER, 0);
 		}
