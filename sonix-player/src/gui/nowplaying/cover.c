@@ -1083,10 +1083,108 @@ bool cover_blur_fill(const cover_image_t *src, int out_w, int out_h, cover_image
 	return blur_fill_impl(src, out_w, out_h, out, BACKDROP_BRIGHTNESS_PCT);
 }
 
+// The Liquid Glass background is an ambient, not a picture: it has to look
+// composed whatever the sleeve is -- a white cover must not wash the page out,
+// a black one must not leave it dead, a neon one must not shout. So beyond a
+// stronger, smoother blur than the player's backdrop, the wash is normalised:
+// every pixel's brightness is pulled toward one pleasant target (shadows lift,
+// highlights roll off) while its hue is kept and its colour given a little more
+// life, and a faint top-to-bottom fall adds depth. The glass dim slider is then
+// the only further darkening, so the result is consistent from record to record.
+#define GLASS_BG_SCALE_DIVISOR 4
+#define GLASS_BG_BLUR_PASSES 4
+#define GLASS_BG_LUMA_TARGET 200 // the brightness every sleeve settles around
+#define GLASS_BG_LUMA_KEEP 45	// % of the original light/dark spread that survives
+#define GLASS_BG_SAT_PCT 120	 // a touch more colour than the sleeve itself
+#define GLASS_BG_FOOT_PCT 90	 // the foot of the wash sits this dark vs the top
+
+static inline int glass_clamp255(int v) {
+	if (v < 0) {
+		return 0;
+	}
+	if (v > 255) {
+		return 255;
+	}
+	return v;
+}
+
 bool cover_blur_glass(const cover_image_t *src, int out_w, int out_h, cover_image_t *out) {
-	// Full strength: the glass background's own dim slider is the only wash
-	// over it, so the artwork keeps its colour until the user darkens it.
-	return blur_fill_impl(src, out_w, out_h, out, 100);
+	if (!out) {
+		return false;
+	}
+	memset(out, 0, sizeof(*out));
+	if (out_w < 2 || out_h < 2) {
+		return false;
+	}
+
+	raw_image_t opened;
+	if (!raw_from_cover(src, &opened)) {
+		return false;
+	}
+	uint8_t *rgb = opened.pixels;
+	int w = opened.w;
+	int h = opened.h;
+
+	raw_image_t whole_img = {.pixels = rgb, .w = w, .h = h};
+	crop_t whole = crop_to_aspect(w, h, out_w, out_h);
+	int small_w = out_w / GLASS_BG_SCALE_DIVISOR;
+	int small_h = out_h / GLASS_BG_SCALE_DIVISOR;
+	if (small_w < 2) {
+		small_w = 2;
+	}
+	if (small_h < 2) {
+		small_h = 2;
+	}
+	uint8_t *small = resample_rgb(&whole_img, &whole, small_w, small_h, false);
+	free(rgb);
+	if (!small) {
+		return false;
+	}
+
+	// A wide, repeated box blur at the small size reads as a soft Gaussian wash
+	// once grown back: no recognisable shapes, only fields of colour.
+	int radius = small_w / 8;
+	if (radius < 3) {
+		radius = 3;
+	}
+	uint8_t *scratch = malloc((size_t)small_w * small_h * 3);
+	if (scratch) {
+		for (int i = 0; i < GLASS_BG_BLUR_PASSES; i++) {
+			box_blur_pass(small, scratch, small_w, small_h, radius);
+		}
+		free(scratch);
+	}
+
+	raw_image_t tiny = {.pixels = small, .w = small_w, .h = small_h};
+	crop_t tiny_whole = {0, 0, small_w, small_h};
+	uint8_t *big = resample_rgb(&tiny, &tiny_whole, out_w, out_h, false);
+	free(small);
+	if (!big) {
+		return false;
+	}
+
+	for (int y = 0; y < out_h; y++) {
+		// A faint fall toward the foot, so the wash has a light source and the
+		// lower page sits a shade deeper.
+		int fall = 255 - (255 - GLASS_BG_FOOT_PCT) * y / out_h;
+		uint8_t *row = big + (size_t)y * out_w * 3;
+		for (int x = 0; x < out_w; x++) {
+			uint8_t *px = row + (size_t)x * 3;
+			int r = px[0], g = px[1], b = px[2];
+			int luma = (r * 299 + g * 587 + b * 114) / 1000;
+			int norm = GLASS_BG_LUMA_TARGET + (luma - GLASS_BG_LUMA_TARGET) * GLASS_BG_LUMA_KEEP / 100;
+			int cr = (r - luma) * GLASS_BG_SAT_PCT / 100;
+			int cg = (g - luma) * GLASS_BG_SAT_PCT / 100;
+			int cb = (b - luma) * GLASS_BG_SAT_PCT / 100;
+			px[0] = (uint8_t)(glass_clamp255(norm + cr) * fall / 255);
+			px[1] = (uint8_t)(glass_clamp255(norm + cg) * fall / 255);
+			px[2] = (uint8_t)(glass_clamp255(norm + cb) * fall / 255);
+		}
+	}
+
+	bool ok = pack_rgb565_dithered(big, out_w, out_h, out);
+	free(big);
+	return ok;
 }
 
 // ---------------------------------------------------------------------------
