@@ -152,6 +152,16 @@ body::after {
 	background: rgba(23, 18, 8, 0.85);
 }
 
+/* Match the mobile navigation bar and selected tab to the amber theme. */
+.mobile-nav {
+	background: linear-gradient(180deg, #171208 0%, #0e0b06 100%);
+	border-top-color: var(--border-subtle);
+}
+
+.mobile-nav-btn.active {
+	background: var(--accent-soft);
+}
+
 /* Phones always use real size; keep the desktop scale controls unchanged. */
 @media (max-width: 768px) {
 	.topbar-actions .segmented,
