@@ -259,6 +259,30 @@ jobs:
             echo "Using committed release snapshot ($(node -p "require('./assets/release.json').tag_name"))."
           fi
 
+      # Keep a dated fallback for visitors whose browser cannot reach GitHub's
+      # unauthenticated API. Live counts still take precedence in the browser.
+      - name: Refresh firmware download count snapshot
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if gh api --paginate "repos/${GITHUB_REPOSITORY}/releases?per_page=100" \
+              --jq '.[] | select(.draft == false) | .assets[] | select(.name | ascii_downcase | endswith(".upt")) | .download_count' \
+              > "$RUNNER_TEMP/firmware-counts.txt" && \
+              node -e '
+                const fs = require("fs");
+                const raw = fs.readFileSync(process.argv[1], "utf8").trim();
+                const lines = raw ? raw.split(/\s+/) : [];
+                if (!lines.length || lines.some(x => !/^\d+$/.test(x))) process.exit(1);
+                const count = lines.reduce((sum, x) => sum + Number(x), 0);
+                if (!Number.isSafeInteger(count)) process.exit(1);
+                fs.writeFileSync(process.argv[2], JSON.stringify({count, asOf: new Date().toISOString()}) + "\n");
+              ' "$RUNNER_TEMP/firmware-counts.txt" "$RUNNER_TEMP/download-count.json"; then
+            mv "$RUNNER_TEMP/download-count.json" assets/download-count.json
+          else
+            echo "::warning::Could not refresh firmware download counts; keeping the dated snapshot."
+          fi
+
       # The github-pages environment admits main only, so a tag can build but
       # never publish. Rather than let that run fail at the deploy step and
       # leave the page advertising the previous version (which is what happened

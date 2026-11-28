@@ -34,14 +34,34 @@
     return total;
   }
 
+  const snapshotLabel = document.querySelector('#download-count-snapshot');
+  const snapshotDate = document.querySelector('#download-count-date');
   let count;
+  let asOf;
+  let liveLoaded = false;
   function render() {
     if (count === undefined) return;
-    value.textContent = new Intl.NumberFormat(document.documentElement.lang || 'en').format(count);
+    const locale = document.documentElement.lang || 'en';
+    value.textContent = new Intl.NumberFormat(locale).format(count);
+    snapshotLabel.hidden = !asOf;
+    if (asOf) {
+      snapshotDate.dateTime = asOf;
+      snapshotDate.textContent = new Intl.DateTimeFormat(locale, { year: 'numeric', month: 'short', day: 'numeric', timeZone: 'UTC' }).format(new Date(asOf));
+    }
     badge.hidden = false;
   }
   document.addEventListener('sonix:languagechange', render);
-  // Hide rather than claim an inaccurate or partial total when GitHub is offline
-  // or rate-limits a visitor. The rest of the page works without this request.
-  loadCount().then(result => { count = result; render(); }).catch(() => {});
+
+  // A dated same-origin snapshot remains useful when GitHub is blocked or
+  // rate-limits the visitor. Never overwrite a live result with the snapshot.
+  fetch('./assets/download-count.json', { cache: 'no-cache' })
+    .then(response => { if (!response.ok) throw new Error('Snapshot unavailable'); return response.json(); })
+    .then(snapshot => {
+      if (liveLoaded || !Number.isSafeInteger(snapshot.count) || snapshot.count < 0 ||
+          typeof snapshot.asOf !== 'string' || !Number.isFinite(Date.parse(snapshot.asOf))) return;
+      count = snapshot.count;
+      asOf = snapshot.asOf;
+      render();
+    }).catch(() => {});
+  loadCount().then(result => { liveLoaded = true; count = result; asOf = undefined; render(); }).catch(() => {});
 })();
