@@ -181,6 +181,11 @@ lv_color_t theme_now_playing_fill(void);
 // under Liquid Glass, glass props removed for every other theme.
 void theme_glass_pane(lv_obj_t *obj);
 
+// The A–Z jump strip (Library lists, Radio): a clear glass pill with the
+// specular rim under Liquid Glass, the half-opaque surface wash everywhere
+// else. Paints background and rim only; the caller keeps the pill radius.
+void theme_glass_index_bar(lv_obj_t *bar);
+
 // The colours of the glass frost / gradient / specular rim. Neutral white by
 // default; when Dynamic tint is on under Liquid Glass they borrow the chosen
 // accent's hue (Apple-style tinted glass) while the glass opacities and

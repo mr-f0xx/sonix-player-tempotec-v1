@@ -571,6 +571,40 @@ lv_obj_t *settingsrow_page_title(lv_obj_t *screen) {
 	return NULL;
 }
 
+// Every option card this file has built (toggles, sliders, pills), so a theme
+// change can give them the same edge treatment as the navigation rows. Pages
+// build their cards once and keep them.
+#define SETTINGSROW_MAX_CARDS 128
+static lv_obj_t *built_cards[SETTINGSROW_MAX_CARDS];
+static int built_card_count;
+
+static void settingsrow_card_deleted_cb(lv_event_t *e) {
+	lv_obj_t *card = lv_event_get_target(e);
+	for (int i = 0; i < built_card_count; i++) {
+		if (built_cards[i] == card) {
+			built_cards[i] = built_cards[--built_card_count];
+			return;
+		}
+	}
+}
+
+// The navigation rows are buttons whose boxed/flat treatment follows the
+// theme (settingsrow_update_edges); the option cards must match them or a
+// toggle row keeps a bright glass rim while every row beside it is flat --
+// the white border the System page's Update notifications tile showed. Only
+// the outline is touched: a card's border stays zeroed in every theme, so the
+// flat themes keep the edge-free cards they have always had.
+static void settingsrow_card_edges(lv_obj_t *card, bool flat) {
+	if (!card) {
+		return;
+	}
+	if (flat) {
+		lv_obj_set_style_outline_width(card, 0, 0);
+	} else {
+		lv_obj_remove_local_style_prop(card, LV_STYLE_OUTLINE_WIDTH, 0);
+	}
+}
+
 // Shared shell for the richer rows: the same card, tall enough for a control
 // underneath the name.
 static lv_obj_t *make_card(lv_obj_t *parent, const char *name, lv_obj_t **value_out, int height) {
@@ -581,6 +615,11 @@ static lv_obj_t *make_card(lv_obj_t *parent, const char *name, lv_obj_t **value_
 	lv_obj_set_style_radius(card, compact_rows() ? bp_tile_radius() : ROW_RADIUS, 0);
 	lv_obj_set_style_border_width(card, 0, 0);
 	lv_obj_set_style_shadow_width(card, 0, 0);
+	settingsrow_card_edges(card, compact_rows() && theme_uses_function_glyphs());
+	if (built_card_count < SETTINGSROW_MAX_CARDS) {
+		built_cards[built_card_count++] = card;
+		lv_obj_add_event_cb(card, settingsrow_card_deleted_cb, LV_EVENT_DELETE, NULL);
+	}
 	lv_obj_set_style_pad_hor(card, compact_rows() ? 8 : 20, 0);
 	lv_obj_set_style_pad_ver(card, compact_rows() ? 8 : 14, 0);
 	lv_obj_set_scrollable(card, false);
@@ -632,6 +671,9 @@ static void settingsrow_refresh_theme(void) {
 
 	bool function_glyphs = theme_uses_function_glyphs();
 	bool flat_rows = compact_rows() && function_glyphs;
+	for (int i = 0; i < built_card_count; i++) {
+		settingsrow_card_edges(built_cards[i], flat_rows);
+	}
 	for (int i = 0; i < leading_icon_count; i++) {
 		lv_obj_t *row = leading_icons[i].row;
 		lv_obj_t *icon = leading_icons[i].icon;

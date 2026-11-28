@@ -2640,7 +2640,7 @@ static void index_theme_refresh(void) {
 	panel_t *panels[] = {&panel_names, &panel_tracks, &panel_artist_albums};
 	for (size_t i = 0; i < sizeof(panels) / sizeof(panels[0]); i++) {
 		if (panels[i]->index_bar) {
-			lv_obj_set_style_bg_color(panels[i]->index_bar, theme()->surface, 0);
+			theme_glass_index_bar(panels[i]->index_bar);
 		}
 		if (panels[i]->index_hint) {
 			lv_obj_set_style_bg_color(panels[i]->index_hint, theme()->accent, 0);
@@ -2664,9 +2664,8 @@ static void index_build(panel_t *p, gui_config_t *cfg) {
 	lv_obj_set_size(p->index_bar, bar_width, bar_height);
 	lv_obj_align(p->index_bar, LV_ALIGN_TOP_RIGHT, -2, content_top + 4);
 	lv_obj_set_style_pad_ver(p->index_bar, INDEX_BAR_PAD_V, 0);
-	lv_obj_set_style_bg_color(p->index_bar, theme()->surface, 0);
-	lv_obj_set_style_bg_opa(p->index_bar, LV_OPA_60, 0);
 	lv_obj_set_style_radius(p->index_bar, bar_width / 2, 0);
+	theme_glass_index_bar(p->index_bar);
 	lv_obj_set_scrollable(p->index_bar, false);
 	lv_obj_set_hidden(p->index_bar, true);
 	lv_obj_set_flex_flow(p->index_bar, LV_FLEX_FLOW_COLUMN);

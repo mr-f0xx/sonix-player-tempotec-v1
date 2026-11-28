@@ -312,7 +312,7 @@ static void timer_cb(lv_timer_t *t) {
 // The hand-set colours; the letters follow their shared style on their own.
 static void theme_refresh(void) {
 	for (int i = 0; i < strip_count; i++) {
-		lv_obj_set_style_bg_color(strips[i]->bar, theme()->surface, 0);
+		theme_glass_index_bar(strips[i]->bar);
 		lv_obj_set_style_bg_color(strips[i]->hint, theme()->accent, 0);
 		if (strips[i]->hint_label) {
 			lv_obj_set_style_text_color(strips[i]->hint_label, theme_on_accent(), 0);
@@ -343,9 +343,8 @@ azindex_t *azindex_create(lv_obj_t *screen, gui_config_t *cfg, lv_obj_t *list, i
 	lv_obj_set_size(ix->bar, bar_width, bar_height);
 	lv_obj_align(ix->bar, LV_ALIGN_TOP_RIGHT, -2, content_top + 4);
 	lv_obj_set_style_pad_ver(ix->bar, BAR_PAD_V, 0);
-	lv_obj_set_style_bg_color(ix->bar, theme()->surface, 0);
-	lv_obj_set_style_bg_opa(ix->bar, LV_OPA_60, 0);
 	lv_obj_set_style_radius(ix->bar, bar_width / 2, 0);
+	theme_glass_index_bar(ix->bar);
 	lv_obj_set_scrollable(ix->bar, false);
 	lv_obj_set_hidden(ix->bar, true);
 	lv_obj_set_flex_flow(ix->bar, LV_FLEX_FLOW_COLUMN);

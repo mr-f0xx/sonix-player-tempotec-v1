@@ -29,6 +29,45 @@ lv_style_t theme_style_switch_disabled;      // switch, disabled (OLED only)
 lv_style_t theme_style_accent_bg;	   // anything that must follow the accent
 lv_style_t theme_style_slider_track;   // a slider's unfilled part
 
+// The scrollbar, every page: Liquid Glass draws it fully transparent so no
+// pale strip runs down the edge of the clear pages. The style is shared and
+// attached to every object the theme touches (see theme_install_scrollbar),
+// so a palette change repaints every scrollbar at once -- and removing the
+// property for the flat themes lets the stock scrollbar show through again.
+static lv_style_t theme_style_scrollbar;
+
+static void theme_scrollbar_apply_cb(lv_theme_t *th, lv_obj_t *obj) {
+	(void)th;
+	// Both selectors: the stock theme opacifies the scrollbar again while the
+	// page is actively scrolling (LV_STATE_SCROLLED), and a state-specific
+	// style outranks a plain one regardless of the order they were added in.
+	lv_obj_add_style(obj, &theme_style_scrollbar, LV_PART_SCROLLBAR);
+	lv_obj_add_style(obj, &theme_style_scrollbar, LV_PART_SCROLLBAR | LV_STATE_SCROLLED);
+}
+
+// Wrap the display's stock theme in one of our own so every object built on
+// this display carries the shared scrollbar style. The stock theme stays the
+// parent, so LVGL applies all of its styles first and our callback only adds
+// the scrollbar part on top; public API only, no private LVGL headers.
+static void theme_install_scrollbar(void) {
+	lv_display_t *disp = lv_display_get_default();
+	if (!disp) {
+		return;
+	}
+	lv_theme_t *stock = lv_display_get_theme(disp);
+	if (!stock) {
+		return;
+	}
+	lv_theme_t *wrap = lv_theme_create();
+	if (!wrap) {
+		return;
+	}
+	lv_theme_copy(wrap, stock); // fonts, colours, flags the widgets read
+	lv_theme_set_parent(wrap, stock);
+	lv_theme_set_apply_cb(wrap, theme_scrollbar_apply_cb);
+	lv_display_set_theme(disp, wrap);
+}
+
 // GNOME Adwaita (libadwaita) colours, dark variant: window #242424, cards
 // #303030 (white at 8%% over the window), accent blue #3584e4. Secondary text
 // is white at 55%%, flattened against the card colour.
@@ -471,6 +510,16 @@ static void apply_palette(void) {
 	// shows through; every other theme paints an opaque ground.
 	lv_style_set_bg_opa(&theme_style_screen, glass ? LV_OPA_TRANSP : LV_OPA_COVER);
 
+	// The scrollbar goes fully transparent under Liquid Glass: a pale stock
+	// strip down the edge of a clear page reads as a seam in the glass. The
+	// flat themes take the property back out, so the stock theme's own
+	// scrollbar style shows through unchanged.
+	if (glass) {
+		lv_style_set_bg_opa(&theme_style_scrollbar, LV_OPA_TRANSP);
+	} else {
+		lv_style_remove_prop(&theme_style_scrollbar, LV_STYLE_BG_OPA);
+	}
+
 	lv_style_set_bg_color(&theme_style_panel, active->panel);
 	lv_style_set_bg_opa(&theme_style_panel, glass ? THEME_GLASS_PANEL_OPA : LV_OPA_COVER);
 
@@ -818,6 +867,8 @@ void theme_init(void) {
 	lv_style_set_bg_opa(&theme_style_slider_track, LV_OPA_40);
 	lv_style_set_radius(&theme_style_slider_track, LV_RADIUS_CIRCLE);
 
+	lv_style_init(&theme_style_scrollbar);
+
 	theme_resolve_boot_palette();
 
 	// The marker the boot script reads has to agree with the setting too, not
@@ -831,6 +882,11 @@ void theme_init(void) {
 	bootlogo_set(theme_boot_screen(), selected_palette()->dark);
 
 	apply_palette();
+
+	// Every object built from here on carries the shared scrollbar style, so
+	// the glass transparency (or the flat themes' stock scrollbar) follows the
+	// palette on every page without each page having to opt in.
+	theme_install_scrollbar();
 }
 
 void theme_apply_slider_knob(lv_obj_t *slider) {
@@ -1053,6 +1109,40 @@ void theme_glass_pane(lv_obj_t *obj) {
 		lv_obj_remove_local_style_prop(obj, LV_STYLE_OUTLINE_OPA, 0);
 		lv_obj_remove_local_style_prop(obj, LV_STYLE_BG_GRAD_COLOR, 0);
 		lv_obj_remove_local_style_prop(obj, LV_STYLE_BG_GRAD_DIR, 0);
+	}
+}
+
+// The A–Z jump strip on the track lists (Library and Radio share the look).
+// Under Liquid Glass it is a clear glass pill -- the same frost, gradient and
+// specular rim as the tiles -- instead of the half-opaque surface wash that
+// reads as a solid grey bar over the wallpaper. The flat themes keep that
+// wash exactly as it was. The pill radius belongs to the caller and is left
+// alone, so the strip keeps its shape in every theme.
+void theme_glass_index_bar(lv_obj_t *bar) {
+	if (!bar) {
+		return;
+	}
+	if (theme_is_liquid_glass()) {
+		lv_obj_set_style_bg_color(bar, theme_glass_frost(), 0);
+		lv_obj_set_style_bg_opa(bar, THEME_GLASS_CARD_OPA, 0);
+		lv_obj_set_style_bg_grad_color(bar, theme_glass_frost_grad(), 0);
+		lv_obj_set_style_bg_grad_dir(bar, LV_GRAD_DIR_VER, 0);
+		// The rim is a BORDER, drawn inside the pill: an outline's rounded
+		// corner arcs clip at this radius (see theme_glass_pane), and the
+		// strip's flex layout absorbs the pixel of content space.
+		lv_obj_set_style_border_width(bar, 1, 0);
+		lv_obj_set_style_border_side(bar, LV_BORDER_SIDE_FULL, 0);
+		lv_obj_set_style_border_color(bar, theme_glass_rim(), 0);
+		lv_obj_set_style_border_opa(bar, THEME_GLASS_EDGE_OPA, 0);
+	} else {
+		lv_obj_set_style_bg_color(bar, theme()->surface, 0);
+		lv_obj_set_style_bg_opa(bar, LV_OPA_60, 0);
+		lv_obj_set_style_border_width(bar, 0, 0);
+		lv_obj_remove_local_style_prop(bar, LV_STYLE_BORDER_SIDE, 0);
+		lv_obj_remove_local_style_prop(bar, LV_STYLE_BORDER_COLOR, 0);
+		lv_obj_remove_local_style_prop(bar, LV_STYLE_BORDER_OPA, 0);
+		lv_obj_remove_local_style_prop(bar, LV_STYLE_BG_GRAD_COLOR, 0);
+		lv_obj_remove_local_style_prop(bar, LV_STYLE_BG_GRAD_DIR, 0);
 	}
 }
 
