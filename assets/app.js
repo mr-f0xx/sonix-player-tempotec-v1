@@ -7,6 +7,10 @@
   const button = document.querySelector('#download-button');
   const releaseLink = document.querySelector('#release-link');
   const themeButton = document.querySelector('#theme-button');
+  const changelog = document.querySelector('#release-changelog');
+  const releaseDownloads = document.querySelector('#release-downloads');
+  const releaseCount = document.querySelector('#release-download-count');
+  const releaseCountDate = document.querySelector('#release-count-date');
 
   // Release notes are untrusted Markdown: extract a readable short preview, never HTML.
   function highlights(body) {
@@ -32,11 +36,13 @@
 
   let shownRelease = false;
   let lastRelease = null;
+  let lastIsSnapshot = false;
   let unavailable = false;
 
-  function render(release) {
+  function render(release, isSnapshot = false) {
     if (!release || typeof release !== 'object') return;
     lastRelease = release;
+    lastIsSnapshot = isSnapshot;
     unavailable = false;
     const asset = uptAsset(release);
     version.textContent = release.tag_name || 'Latest release';
@@ -47,6 +53,20 @@
       : '—';
 
     notes.textContent = highlights(release.body);
+    // Release notes come from GitHub and may contain HTML: show the complete
+    // Markdown as text, never inject it into the document as executable markup.
+    if (changelog) changelog.textContent = release.body || window.sonixI18n.t('rel_notes_external');
+    if (releaseDownloads && releaseCount && releaseCountDate) {
+      const asOf = isSnapshot && release.count_as_of ? new Date(release.count_as_of) : null;
+      const validSnapshot = !isSnapshot || (asOf && !Number.isNaN(asOf.valueOf()));
+      const hasCount = asset && Number.isSafeInteger(asset.download_count) && asset.download_count >= 0 && validSnapshot;
+      releaseDownloads.hidden = !hasCount;
+      if (hasCount) {
+        releaseCount.textContent = new Intl.NumberFormat(document.documentElement.lang || 'en').format(asset.download_count);
+        releaseCountDate.hidden = !isSnapshot;
+        if (isSnapshot) releaseCountDate.textContent = window.sonixI18n.t('download_count_as_of') + ' ' + new Intl.DateTimeFormat(document.documentElement.lang || 'en', { year: 'numeric', month: 'short', day: 'numeric', timeZone: 'UTC' }).format(asOf);
+      }
+    }
     if (release.html_url && release.html_url.startsWith('https://github.com/')) releaseLink.href = release.html_url;
     const themes = themeAsset(release);
     if (themeButton) {
@@ -72,12 +92,13 @@
     version.textContent = window.sonixI18n.t('rel_unavailable');
     date.textContent = '—';
     notes.textContent = window.sonixI18n.t('rel_failed');
+    if (changelog) changelog.textContent = window.sonixI18n.t('rel_failed');
     button.href = releases;
     button.querySelector('span').textContent = window.sonixI18n.t('view_release').replace(/<[^>]*>/g, '');
   }
 
   function refreshLanguage() {
-    if (lastRelease) render(lastRelease);
+    if (lastRelease) render(lastRelease, lastIsSnapshot);
     else if (unavailable) {
       shownRelease = false;
       showUnavailable();
@@ -91,7 +112,7 @@
   // when api.github.com is rate-limited or blocked in the visitor's browser.
   const local = fetch('./assets/release.json?t=' + Date.now(), { cache: 'no-store' })
     .then(response => { if (!response.ok) throw new Error('No local release snapshot'); return response.json(); })
-    .then(render);
+    .then(release => render(release, true));
 
   local
     .catch(() => {})

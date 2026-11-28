@@ -65,6 +65,18 @@ test("the page links to /releases/latest, never to a pinned tag", () => {
 	);
 });
 
+test("latest release fallback includes a dated firmware download count", () => {
+	const firmware = snapshot.assets.find(asset => asset.name === 'v1.upt');
+	assert.ok(Number.isSafeInteger(firmware.download_count) && firmware.download_count >= 0);
+	assert.ok(!Number.isNaN(new Date(snapshot.count_as_of).valueOf()));
+});
+
+test("release notes expand without interpreting untrusted release HTML", () => {
+	assert.match(page, /<details class="release-details">/);
+	assert.match(page, /id="release-changelog"/);
+	assert.match(read("assets/app.js"), /changelog\.textContent = release\.body/);
+});
+
 test("the page still lets app.js refine the links from the live release", () => {
 	assert.match(page, /id="download-button"/);
 	assert.match(page, /id="theme-button"/);
