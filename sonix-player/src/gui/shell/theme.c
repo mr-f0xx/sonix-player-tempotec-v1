@@ -940,13 +940,27 @@ void theme_glass_pane(lv_obj_t *obj) {
 		lv_obj_set_style_bg_opa(obj, THEME_GLASS_CARD_OPA, 0);
 		lv_obj_set_style_bg_grad_color(obj, theme_glass_frost_grad(), 0);
 		lv_obj_set_style_bg_grad_dir(obj, LV_GRAD_DIR_VER, 0);
-		lv_obj_set_style_outline_width(obj, 1, 0);
-		lv_obj_set_style_outline_pad(obj, 0, 0);
-		lv_obj_set_style_outline_color(obj, theme_glass_rim(), 0);
-		lv_obj_set_style_outline_opa(obj, THEME_GLASS_EDGE_OPA, 0);
+		// The specular rim is a BORDER, drawn inside the pane. An outline sits
+		// just outside the box, and LVGL clips its rounded corner arcs at this
+		// radius, leaving the tile corners open (the Browse grid showed cut-off
+		// rims). A border always closes the full rounded rectangle. It costs a
+		// pixel of content space, which the pane's flex layout absorbs.
+		lv_obj_set_style_border_width(obj, 1, 0);
+		lv_obj_set_style_border_side(obj, LV_BORDER_SIDE_FULL, 0);
+		lv_obj_set_style_border_color(obj, theme_glass_rim(), 0);
+		lv_obj_set_style_border_opa(obj, THEME_GLASS_EDGE_OPA, 0);
+		lv_obj_set_style_outline_width(obj, 0, 0);
+		// The pressed card style carries an outline of its own; suppress it so
+		// the pane keeps a single border rim while pressed.
+		lv_obj_set_style_outline_width(obj, 0, LV_STATE_PRESSED);
 		lv_obj_set_style_radius(obj, 16, 0);
 	} else {
+		lv_obj_set_style_border_width(obj, 0, 0);
+		lv_obj_remove_local_style_prop(obj, LV_STYLE_BORDER_SIDE, 0);
+		lv_obj_remove_local_style_prop(obj, LV_STYLE_BORDER_COLOR, 0);
+		lv_obj_remove_local_style_prop(obj, LV_STYLE_BORDER_OPA, 0);
 		lv_obj_remove_local_style_prop(obj, LV_STYLE_OUTLINE_WIDTH, 0);
+		lv_obj_remove_local_style_prop(obj, LV_STYLE_OUTLINE_WIDTH, LV_STATE_PRESSED);
 		lv_obj_remove_local_style_prop(obj, LV_STYLE_OUTLINE_PAD, 0);
 		lv_obj_remove_local_style_prop(obj, LV_STYLE_OUTLINE_COLOR, 0);
 		lv_obj_remove_local_style_prop(obj, LV_STYLE_OUTLINE_OPA, 0);
