@@ -23,6 +23,7 @@ lv_style_t theme_style_icon;
 lv_style_t theme_style_switch;		   // switch track, off state
 lv_style_t theme_style_switch_checked; // switch indicator, on state
 lv_style_t theme_style_switch_knob_checked; // switch knob, on state
+lv_style_t theme_style_switch_knob;		   // switch knob, every state (glass droplet)
 lv_style_t theme_style_switch_track_checked; // switch track, on state (OLED's ring)
 lv_style_t theme_style_switch_disabled;      // switch, disabled (OLED only)
 lv_style_t theme_style_accent_bg;	   // anything that must follow the accent
@@ -579,7 +580,31 @@ static void apply_palette(void) {
 		lv_style_remove_prop(&theme_style_switch_disabled, LV_STYLE_OPA);
 	}
 	lv_style_set_bg_color(&theme_style_switch_checked, active->accent);
+	// Liquid Glass: the on track is the accent as a tinted pane, not a solid
+	// slab -- the same translucency the selected pills wear, so the backdrop
+	// shows through and the control reads as glass rather than a bright fill.
+	lv_style_set_bg_opa(&theme_style_switch_checked, glass ? THEME_GLASS_ACCENT_OPA : LV_OPA_COVER);
 	lv_style_set_bg_color(&theme_style_switch_knob_checked, theme_on_accent());
+	// The knob is a bright glass droplet under Liquid Glass: a white circle
+	// lifted off the track by a soft shadow, in both states. Other themes keep
+	// the stock knob, so clear these props rather than leave a stale shadow.
+	if (glass) {
+		lv_style_set_bg_color(&theme_style_switch_knob, lv_color_white());
+		lv_style_set_bg_opa(&theme_style_switch_knob, LV_OPA_COVER);
+		lv_style_set_radius(&theme_style_switch_knob, LV_RADIUS_CIRCLE);
+		lv_style_set_shadow_color(&theme_style_switch_knob, lv_color_black());
+		lv_style_set_shadow_width(&theme_style_switch_knob, 6);
+		lv_style_set_shadow_opa(&theme_style_switch_knob, LV_OPA_50);
+		lv_style_set_shadow_offset_y(&theme_style_switch_knob, 2);
+	} else {
+		lv_style_remove_prop(&theme_style_switch_knob, LV_STYLE_BG_COLOR);
+		lv_style_remove_prop(&theme_style_switch_knob, LV_STYLE_BG_OPA);
+		lv_style_remove_prop(&theme_style_switch_knob, LV_STYLE_RADIUS);
+		lv_style_remove_prop(&theme_style_switch_knob, LV_STYLE_SHADOW_COLOR);
+		lv_style_remove_prop(&theme_style_switch_knob, LV_STYLE_SHADOW_WIDTH);
+		lv_style_remove_prop(&theme_style_switch_knob, LV_STYLE_SHADOW_OPA);
+		lv_style_remove_prop(&theme_style_switch_knob, LV_STYLE_SHADOW_OFFSET_Y);
+	}
 
 	lv_style_set_bg_color(&theme_style_accent_bg, active->accent);
 	lv_style_set_text_color(&theme_style_accent_bg, theme_on_accent());
@@ -783,6 +808,7 @@ void theme_init(void) {
 	lv_style_set_bg_opa(&theme_style_switch_checked, LV_OPA_COVER);
 	lv_style_init(&theme_style_switch_knob_checked);
 	lv_style_set_bg_opa(&theme_style_switch_knob_checked, LV_OPA_COVER);
+	lv_style_init(&theme_style_switch_knob);
 	lv_style_init(&theme_style_switch_track_checked);
 	lv_style_init(&theme_style_switch_disabled);
 
@@ -826,6 +852,7 @@ void theme_apply_switch(lv_obj_t *sw) {
 	lv_obj_add_style(sw, &theme_style_switch_track_checked, LV_PART_MAIN | LV_STATE_CHECKED);
 	lv_obj_add_style(sw, &theme_style_switch_disabled, LV_PART_MAIN | LV_STATE_DISABLED);
 	lv_obj_add_style(sw, &theme_style_switch_checked, LV_PART_INDICATOR | LV_STATE_CHECKED);
+	lv_obj_add_style(sw, &theme_style_switch_knob, LV_PART_KNOB);
 	lv_obj_add_style(sw, &theme_style_switch_knob_checked, LV_PART_KNOB | LV_STATE_CHECKED);
 }
 

@@ -1011,7 +1011,7 @@ UI_SRC = $(ROOT)/tests/ui/test_main_menu.c $(ROOT)/src/gui/shell/main_menu.c \
          $(ROOT)/src/system/image/stb_image_impl.c \
          $(ROOT)/src/gui/settings/bootpicpage.c \
          $(ROOT)/src/gui/settings/glassbgpage.c \
-         $(ROOT)/src/gui/shell/glassbg.c \
+         $(ROOT)/src/gui/shell/glassbg.c $(ROOT)/src/gui/shell/glasswallpaper.c \
          $(ROOT)/src/gui/settings/iconsetpage.c \
          $(ROOT)/src/gui/settings/themefilepage.c \
          $(ROOT)/src/gui/shell/corners.c $(ROOT)/src/gui/shell/settingsrow.c \

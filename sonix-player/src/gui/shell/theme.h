@@ -96,6 +96,13 @@ extern lv_style_t theme_style_switch_checked; // image_recolor for monochrome ic
 // theme_apply_switch() adds it with LV_PART_KNOB | LV_STATE_CHECKED.
 extern lv_style_t theme_style_switch_knob_checked;
 
+// The knob in every state. Liquid Glass draws it as a bright glass droplet --
+// a white circle lifted off the track by a soft shadow -- so it reads as the
+// specular bead on a tinted pane rather than a flat dot. Every other theme
+// leaves this empty and keeps the stock knob. theme_apply_switch() adds it
+// with LV_PART_KNOB.
+extern lv_style_t theme_style_switch_knob;
+
 // Two states of the track that only OLED draws differently; for every other
 // theme both styles are empty. While the switch is on, the ring OLED draws
 // around an off track takes the accent, so the track is one solid pill. While
