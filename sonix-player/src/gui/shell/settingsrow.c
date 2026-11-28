@@ -578,6 +578,44 @@ lv_obj_t *settingsrow_page_title(lv_obj_t *screen) {
 static lv_obj_t *built_cards[SETTINGSROW_MAX_CARDS];
 static int built_card_count;
 
+// The root menus (Settings, and any other page that asks) stay edge-free under
+// Liquid Glass; every submenu boxes its rows and cards with the glass rim, so
+// a page never mixes bordered and borderless tiles. Screens live for the whole
+// run, so the registry never shrinks.
+#define SETTINGSROW_MAX_FLAT_PAGES 4
+static lv_obj_t *flat_pages[SETTINGSROW_MAX_FLAT_PAGES];
+static int flat_page_count;
+
+void settingsrow_set_flat_page(lv_obj_t *screen) {
+	if (!screen) {
+		return;
+	}
+	for (int i = 0; i < flat_page_count; i++) {
+		if (flat_pages[i] == screen) {
+			return;
+		}
+	}
+	if (flat_page_count < SETTINGSROW_MAX_FLAT_PAGES) {
+		flat_pages[flat_page_count++] = screen;
+	}
+}
+
+// Whether a row/card on this page draws without its glass rim. The flat
+// themes keep the compact-layout rule they have always had; Liquid Glass
+// boxes every submenu and leaves only the registered root menus flat.
+static bool settingsrow_edges_flat(lv_obj_t *obj) {
+	if (!theme_is_liquid_glass()) {
+		return compact_rows() && theme_uses_function_glyphs();
+	}
+	lv_obj_t *screen = lv_obj_get_screen(obj);
+	for (int i = 0; i < flat_page_count; i++) {
+		if (flat_pages[i] == screen) {
+			return true;
+		}
+	}
+	return false;
+}
+
 static void settingsrow_card_deleted_cb(lv_event_t *e) {
 	lv_obj_t *card = lv_event_get_target(e);
 	for (int i = 0; i < built_card_count; i++) {
@@ -615,7 +653,7 @@ static lv_obj_t *make_card(lv_obj_t *parent, const char *name, lv_obj_t **value_
 	lv_obj_set_style_radius(card, compact_rows() ? bp_tile_radius() : ROW_RADIUS, 0);
 	lv_obj_set_style_border_width(card, 0, 0);
 	lv_obj_set_style_shadow_width(card, 0, 0);
-	settingsrow_card_edges(card, compact_rows() && theme_uses_function_glyphs());
+	settingsrow_card_edges(card, settingsrow_edges_flat(card));
 	if (built_card_count < SETTINGSROW_MAX_CARDS) {
 		built_cards[built_card_count++] = card;
 		lv_obj_add_event_cb(card, settingsrow_card_deleted_cb, LV_EVENT_DELETE, NULL);
@@ -670,9 +708,8 @@ static void settingsrow_refresh_theme(void) {
 	}
 
 	bool function_glyphs = theme_uses_function_glyphs();
-	bool flat_rows = compact_rows() && function_glyphs;
 	for (int i = 0; i < built_card_count; i++) {
-		settingsrow_card_edges(built_cards[i], flat_rows);
+		settingsrow_card_edges(built_cards[i], settingsrow_edges_flat(built_cards[i]));
 	}
 	for (int i = 0; i < leading_icon_count; i++) {
 		lv_obj_t *row = leading_icons[i].row;
@@ -683,7 +720,7 @@ static void settingsrow_refresh_theme(void) {
 		// Navigation rows are buttons whose flat/boxed treatment changes by
 		// theme. Option cards set their own edge styles and should keep them.
 		if (lv_obj_check_type(row, &lv_button_class)) {
-			settingsrow_update_edges(row, flat_rows);
+			settingsrow_update_edges(row, settingsrow_edges_flat(row));
 		}
 		bool accent = leading_icons[i].accent;
 		lv_obj_set_hidden(icon, !function_glyphs && !accent);

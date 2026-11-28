@@ -31,6 +31,12 @@ int settingsrow_content_top(gui_config_t *cfg);
 // container the rows go into.
 lv_obj_t *settingsrow_page(lv_obj_t *screen, gui_config_t *cfg, const char *title);
 
+// Marks a root menu (the Settings list) as edge-free under Liquid Glass: its
+// rows and cards draw without the glass rim, while every submenu boxes them
+// so a page never mixes bordered and borderless tiles. Call once, right after
+// settingsrow_page(); other themes keep their own compact-layout rule.
+void settingsrow_set_flat_page(lv_obj_t *screen);
+
 // Narrows a heading to clear `buttons` controls in the page's top right corner.
 // The heading is built reserving room for one; a page with more has to say so,
 // or a long title runs underneath them. Harmless to call with 1, and 0 gives a

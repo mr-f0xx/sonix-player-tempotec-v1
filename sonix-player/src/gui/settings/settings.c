@@ -777,6 +777,9 @@ static void build_other_page(gui_config_t *cfg) {
 
 void settings_init(gui_config_t *cfg) {
 	lv_obj_t *container = settingsrow_page(settings_screen, cfg, "settings");
+	// The root list stays edge-free under Liquid Glass; the submenus it opens
+	// box their rows so every option tile on a page matches its neighbours.
+	settingsrow_set_flat_page(settings_screen);
 
 	build_screen_page(cfg);
 	build_other_page(cfg);
