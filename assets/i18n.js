@@ -238,6 +238,24 @@
   const downloadAsOf = { it: 'al', de: 'Stand', es: 'a fecha de', fr: 'au', nl: 'per', pl: 'stan na', 'pt-BR': 'em', uk: 'станом на', ru: 'на', ja: '時点' };
   for (const [lang, label] of Object.entries(downloadAsOf)) STRINGS[lang].download_count_as_of = label;
 
+  // Keep the support message consistent with the English copy in every language.
+  const donationCopy = {
+    it: ["Se apprezzi il mio lavoro, puoi offrirmi un caffè o una birra, se ti senti generoso! Ma non è affatto obbligatorio.", "Se preferisci offrirmi un caffè o una birra tramite Revolut, eccoci qui!"],
+    de: ['Wenn dir meine Arbeit gefällt, kannst du mir einen Kaffee oder ein Bier ausgeben, wenn du großzügig sein möchtest! Das ist aber keineswegs Pflicht.', 'Wenn du mir lieber über Revolut einen Kaffee oder ein Bier ausgeben möchtest, hier entlang!'],
+    es: ['Si aprecias mi trabajo, puedes invitarme a un café o una cerveza si te sientes generoso. ¡Pero no es obligatorio en absoluto!', 'Si prefieres invitarme a un café o una cerveza por Revolut, ¡adelante!'],
+    fr: ["Si vous appréciez mon travail, vous pouvez m'offrir un café ou une bière si vous vous sentez généreux ! Mais ce n'est absolument pas obligatoire.", "Si vous préférez m'offrir un café ou une bière via Revolut, c'est par ici !"],
+    nl: ['Als je mijn werk waardeert, kun je me een koffie of een biertje aanbieden als je vrijgevig bent! Maar het is zeker niet verplicht.', 'Geef je me liever een koffie of een biertje via Revolut? Dat kan hier!'],
+    pl: ['Jeśli doceniasz moją pracę, możesz postawić mi kawę lub piwo, jeśli masz ochotę! Ale absolutnie nie jest to obowiązkowe.', 'Jeśli wolisz postawić mi kawę lub piwo przez Revolut, zapraszam!'],
+    'pt-BR': ['Se você gosta do meu trabalho, pode me pagar um café ou uma cerveja, se estiver se sentindo generoso! Mas isso não é obrigatório.', 'Se preferir me pagar um café ou uma cerveja pelo Revolut, é por aqui!'],
+    uk: ['Якщо вам подобається моя робота, можете пригостити мене кавою або пивом, якщо маєте бажання! Але це зовсім не обов’язково.', 'Якщо ви бажаєте пригостити мене кавою або пивом через Revolut, вам сюди!'],
+    ru: ['Если вам нравится моя работа, можете угостить меня кофе или пивом, если захотите! Но это совершенно необязательно.', 'Если вы предпочитаете угостить меня кофе или пивом через Revolut, вам сюда!'],
+    ja: ['私の作品を気に入っていただけたら、よろしければコーヒーやビールをおごってください！もちろん、決して必須ではありません。', 'Revolutでコーヒーやビールをおごっていただける場合はこちらからどうぞ！'],
+  };
+  for (const [lang, [kofi, revolut]] of Object.entries(donationCopy)) {
+    STRINGS[lang].d_kofi_d = kofi;
+    STRINGS[lang].d_rev_d = revolut;
+  }
+
   const EXTRA = window.SONIX_I18N_EXTRA;
   if (EXTRA) {
     (EXTRA.keys || []).forEach((key, index) => {
