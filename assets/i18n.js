@@ -218,6 +218,23 @@
     },
   };
 
+  const downloadCopy = {
+    it: ['download del firmware', 'Release GitHub · download, non persone uniche'],
+    de: ['Firmware-Downloads', 'GitHub-Releases · Downloads, keine einzelnen Personen'],
+    es: ['descargas del firmware', 'Versiones de GitHub · descargas, no personas únicas'],
+    fr: ['téléchargements du firmware', 'Versions GitHub · téléchargements, pas personnes uniques'],
+    nl: ['firmwaredownloads', 'GitHub-releases · downloads, geen unieke personen'],
+    pl: ['pobrań firmware', 'Wydania GitHub · pobrania, nie unikalne osoby'],
+    'pt-BR': ['downloads do firmware', 'Versões do GitHub · downloads, não pessoas únicas'],
+    uk: ['завантажень прошивки', 'Релізи GitHub · завантаження, а не кількість людей'],
+    ru: ['загрузок прошивки', 'Релизы GitHub · загрузки, а не число людей'],
+    ja: ['ファームウェアのダウンロード', 'GitHubリリース · ダウンロード数（人数ではありません）'],
+  };
+  for (const [lang, [label, scope]] of Object.entries(downloadCopy)) {
+    STRINGS[lang].firmware_downloads = label;
+    STRINGS[lang].download_count_scope = scope;
+  }
+
   const EXTRA = window.SONIX_I18N_EXTRA;
   if (EXTRA) {
     (EXTRA.keys || []).forEach((key, index) => {
