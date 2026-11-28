@@ -181,6 +181,10 @@ void theme_glass_pane(lv_obj_t *obj);
 lv_color_t theme_glass_frost(void);
 lv_color_t theme_glass_frost_grad(void);
 lv_color_t theme_glass_rim(void);
+
+// Opaque frosted ground for dialog cards (confirm / update / popover) under
+// Liquid Glass so the page behind never shows through; a no-op elsewhere.
+void theme_glass_dialog(lv_obj_t *obj);
 bool theme_is_dark(void);
 bool theme_is_tokyo_night(void);
 bool theme_is_amber_on_black(void);

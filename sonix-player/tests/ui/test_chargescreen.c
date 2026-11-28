@@ -230,6 +230,9 @@ static int check_strings(const char *language_dir, char names[][32], int max_nam
 
 /* ---- the screen ---------------------------------------------------------- */
 
+// Dialog frost is a no-op here: these suites substitute the theme engine.
+void theme_glass_dialog(lv_obj_t *obj) { (void)obj; }
+
 int main(int argc, char **argv) {
 	assert(argc == 2);
 

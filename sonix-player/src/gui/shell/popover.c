@@ -207,6 +207,7 @@ void popover_show_editor(lv_obj_t *anchor, const popover_item_t *items, int coun
 
 	lv_obj_set_pos(card, x, y);
 
+	theme_glass_dialog(card); // opaque frost under Liquid Glass, never see-through
 	lv_obj_set_hidden(veil, false);
 	lv_obj_move_foreground(veil);
 }

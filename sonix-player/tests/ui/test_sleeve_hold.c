@@ -178,6 +178,9 @@ static void queue_row_cb(lv_event_t *e) {
 	rows_tapped++;
 }
 
+// Dialog frost is a no-op here: these suites substitute the theme engine.
+void theme_glass_dialog(lv_obj_t *obj) { (void)obj; }
+
 int main(int argc, char **argv) {
 	assert(argc == 2);
 

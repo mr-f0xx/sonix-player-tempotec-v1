@@ -614,13 +614,9 @@ static void refresh_clock_buttons(void) {
 		if (!btn_clock[i]) {
 			continue;
 		}
-		if (i == active) {
-			lv_obj_set_style_bg_color(btn_clock[i], theme()->accent, 0);
-			lv_obj_set_style_text_color(lv_obj_get_child(btn_clock[i], 0), theme_on_accent(), 0);
-		} else {
-			lv_obj_set_style_bg_color(btn_clock[i], theme()->surface_pressed, 0);
-			lv_obj_set_style_text_color(lv_obj_get_child(btn_clock[i], 0), theme()->text_primary, 0);
-		}
+		// Same pill treatment as every other choice row: dark glass under
+		// Liquid Glass (never a solid white blob), accent on the active one.
+		settingsrow_pill_active(btn_clock[i], i == active);
 	}
 }
 
@@ -725,10 +721,10 @@ static void refresh_boot_buttons(void) {
 		if (!btn_boot[i]) {
 			continue;
 		}
-		bool on = i == choice;
-		lv_obj_set_style_bg_color(btn_boot[i], on ? theme()->accent : theme()->surface_pressed, 0);
-		lv_obj_set_style_text_color(lv_obj_get_child(btn_boot[i], 0),
-									on ? theme_on_accent() : theme()->text_primary, 0);
+		// Same pill treatment as every other choice row: dark glass under
+		// Liquid Glass (a white frost would hide the white label), accent on
+		// the active one.
+		settingsrow_pill_active(btn_boot[i], i == choice);
 	}
 }
 

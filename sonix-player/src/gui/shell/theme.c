@@ -884,6 +884,28 @@ lv_color_t theme_glass_rim(void) {
 	return lv_color_mix(active->accent, lv_color_white(), 150);
 }
 
+// Dialogs (confirm, the update card, popovers) must NOT be see-through: a clear
+// 10% card would let the page behind read straight through the choices. Under
+// Liquid Glass they get an opaque frosted ground (a dark lift of the panel)
+// while keeping the shared specular rim and radius, so they read as a solid
+// glass alert. Other themes keep the shared opaque card untouched.
+void theme_glass_dialog(lv_obj_t *obj) {
+	if (!obj) {
+		return;
+	}
+	if (theme_is_liquid_glass()) {
+		lv_obj_set_style_bg_opa(obj, LV_OPA_COVER, 0);
+		lv_obj_set_style_bg_color(obj, lv_color_mix(active->panel, lv_color_white(), 26), 0);
+		lv_obj_set_style_bg_grad_color(obj, active->panel, 0);
+		lv_obj_set_style_bg_grad_dir(obj, LV_GRAD_DIR_VER, 0);
+	} else {
+		lv_obj_remove_local_style_prop(obj, LV_STYLE_BG_OPA, 0);
+		lv_obj_remove_local_style_prop(obj, LV_STYLE_BG_COLOR, 0);
+		lv_obj_remove_local_style_prop(obj, LV_STYLE_BG_GRAD_COLOR, 0);
+		lv_obj_remove_local_style_prop(obj, LV_STYLE_BG_GRAD_DIR, 0);
+	}
+}
+
 void theme_glass_pane(lv_obj_t *obj) {
 	if (!obj) {
 		return;

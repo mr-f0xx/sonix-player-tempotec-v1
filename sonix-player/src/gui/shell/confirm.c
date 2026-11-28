@@ -252,6 +252,7 @@ void confirm_show_with_cancel(const char *title, const char *message, const char
 		lv_obj_set_hidden(cancel_btn, false);
 	}
 
+	theme_glass_dialog(card); // opaque frost under Liquid Glass, never see-through
 	lv_obj_set_hidden(veil, false);
 	lv_obj_move_foreground(veil);
 }

@@ -132,6 +132,9 @@ static int label_y(lv_obj_t *label) {
 	return area.y1;
 }
 
+// Dialog frost is a no-op here: these suites substitute the theme engine.
+void theme_glass_dialog(lv_obj_t *obj) { (void)obj; }
+
 int main(int argc, char **argv) {
 	assert(argc == 2);
 	char dir[] = "/tmp/sonix-lyrics-size-XXXXXX";

@@ -639,6 +639,7 @@ static void tokyo_music_build(gui_config_t *cfg) {
 
 	lv_obj_t *browse_card = lv_obj_create(tokyo_music_panel);
 	music_remove_edges(browse_card);
+	lv_obj_set_overflow_visible(browse_card, true); // keep tile rims whole
 	lv_obj_set_width(browse_card, lv_pct(100));
 	lv_obj_set_height(browse_card, LV_SIZE_CONTENT);
 	lv_obj_add_style(browse_card, &theme_style_card, 0);
@@ -659,6 +660,9 @@ static void tokyo_music_build(gui_config_t *cfg) {
 	tokyo_browse_grid = lv_obj_create(browse_card);
 	music_remove_edges(tokyo_browse_grid);
 	lv_obj_set_size(tokyo_browse_grid, lv_pct(100), LV_SIZE_CONTENT);
+	// The glass rim is a 1px outline drawn just outside each tile; let it spill
+	// past the grid's edge so the outer tiles' rims are not clipped off.
+	lv_obj_set_overflow_visible(tokyo_browse_grid, true);
 	lv_obj_set_style_bg_opa(tokyo_browse_grid, LV_OPA_TRANSP, 0);
 	lv_obj_set_style_border_width(tokyo_browse_grid, 0, 0);
 	lv_obj_set_style_pad_all(tokyo_browse_grid, 0, 0);

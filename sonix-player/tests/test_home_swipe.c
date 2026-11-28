@@ -87,6 +87,9 @@ static void swipe_up(lv_indev_t *indev, int x, int y_from, int y_to) {
 	read_at(indev, x, y_to, LV_INDEV_STATE_RELEASED);
 }
 
+// Dialog frost is a no-op here: these suites substitute the theme engine.
+void theme_glass_dialog(lv_obj_t *obj) { (void)obj; }
+
 int main(void) {
 	char dir[] = "/tmp/sonix-home-swipe-XXXXXX";
 	assert(mkdtemp(dir));

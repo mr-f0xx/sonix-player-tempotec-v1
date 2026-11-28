@@ -413,6 +413,9 @@ static const char *const translation_keys[] = {
 	"sd_health_first_repeat", "sd_health_help", "sd_health_limits_note",
 };
 
+// Dialog frost is a no-op here: these suites substitute the theme engine.
+void theme_glass_dialog(lv_obj_t *obj) { (void)obj; }
+
 int main(int argc, char **argv) {
 	assert(argc == 2);
 	lv_init();

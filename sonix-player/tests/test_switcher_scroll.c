@@ -119,6 +119,9 @@ static lv_obj_t *make_page(lv_obj_t **list_out, bool nested) {
 
 static int scroll_y(lv_obj_t *list) { return (int)lv_obj_get_scroll_y(list); }
 
+// Dialog frost is a no-op here: these suites substitute the theme engine.
+void theme_glass_dialog(lv_obj_t *obj) { (void)obj; }
+
 int main(void) {
 	char dir[] = "/tmp/sonix-switcher-scroll-XXXXXX";
 	assert(mkdtemp(dir));

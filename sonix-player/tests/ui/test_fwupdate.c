@@ -162,6 +162,9 @@ static void snapshot(const char *name) {
 	lv_draw_buf_destroy(shot);
 }
 
+// Dialog frost is a no-op here: these suites substitute the theme engine.
+void theme_glass_dialog(lv_obj_t *obj) { (void)obj; }
+
 int main(void) {
 	lv_init();
 	font_ui_14 = lv_font_montserrat_14;
