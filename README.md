@@ -5,6 +5,7 @@ This repository is originally a **TempoTec Variations V1** community port of the
 The firmware builder starts with an official V1 1.3 update package, replaces the stock music player and its interface with Sonix, then repackages the update as `v1.upt`.
 
 You can now try Sonix in the **[Tempotec V1](https://mr-f0xx.github.io/sonix-player-tempotec-v1/emulator/)** browser emulator I made (PC & Mobile compatible)
+Also created a Sonix V1's **[webpage](https://mr-f0xx.github.io/sonix-player-v1/)**
 
 The web workbench also has a [Live USB tab](tools/v1-emulator/README.md#live-usb-connect-a-physical-v1) for editing PEQ presets, Tape Deck kits, and playlists on a physical V1 and downloading its debug log.
 
