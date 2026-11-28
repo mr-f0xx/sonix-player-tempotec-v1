@@ -58,6 +58,7 @@ static lv_obj_t *glass_dim_card, *glass_dim_value, *glass_dim_slider;
 static lv_obj_t *glass_dim_note;
 static lv_obj_t *glass_artwork_card, *glass_artwork_toggle, *glass_artwork_note;
 static lv_obj_t *main_menu_icons_toggle;
+static lv_obj_t *main_menu_icons_card, *main_menu_icon_scale_value, *main_menu_icon_scale_slider;
 static lv_obj_t *main_menu_books_toggle;
 static lv_obj_t *main_menu_browse_toggle;
 static lv_obj_t *stock_gestures_toggle;
@@ -126,7 +127,22 @@ static void hide_borders_cb(lv_event_t *e) {
 
 static void main_menu_icons_cb(lv_event_t *e) {
 	(void)e;
-	main_menu_set_icons_only(lv_obj_has_state(main_menu_icons_toggle, LV_STATE_CHECKED));
+	bool enabled = lv_obj_has_state(main_menu_icons_toggle, LV_STATE_CHECKED);
+	main_menu_set_icons_only(enabled);
+	settingsrow_toggle_slider_expanded(main_menu_icons_card, enabled);
+}
+
+#define MAIN_MENU_ICON_SCALE_MIN 60
+#define MAIN_MENU_ICON_SCALE_MAX 110
+#define MAIN_MENU_ICON_SCALE_STEP 5
+#define MAIN_MENU_ICON_SCALE_STEPS (((MAIN_MENU_ICON_SCALE_MAX - MAIN_MENU_ICON_SCALE_MIN) / MAIN_MENU_ICON_SCALE_STEP) + 1)
+static void main_menu_icon_scale_show(void) {
+ lv_label_set_text_fmt(main_menu_icon_scale_value, "%d%%", main_menu_icon_scale());
+}
+static void main_menu_icon_scale_cb(lv_event_t *e) {
+ (void)e;
+ main_menu_set_icon_scale(MAIN_MENU_ICON_SCALE_MIN + (int)lv_slider_get_value(main_menu_icon_scale_slider) * MAIN_MENU_ICON_SCALE_STEP);
+ main_menu_icon_scale_show();
 }
 
 // Which edge each sheet is pulled from (see gestures.h). Nothing is rebuilt here:
@@ -1342,16 +1358,13 @@ void appearance_init(gui_config_t *cfg) {
 	lv_obj_set_style_text_font(glass_artwork_note, &font_ui_22, 0);
 	lv_label_set_text(glass_artwork_note, tr("appearance_glass_artwork_note"));
 
-	settingsrow_toggle(container, "appearance_main_menu_icons_only", &main_menu_icons_toggle, main_menu_icons_cb);
-	if (main_menu_icons_only()) {
-		lv_obj_add_state(main_menu_icons_toggle, LV_STATE_CHECKED);
-	}
-	lv_obj_t *menu_note = lv_label_create(container);
-	lv_label_set_long_mode(menu_note, LV_LABEL_LONG_WRAP);
-	lv_obj_set_width(menu_note, lv_pct(100));
-	lv_obj_add_style(menu_note, &theme_style_text_dim, 0);
-	lv_obj_set_style_text_font(menu_note, &font_ui_22, 0);
-	lv_label_set_text(menu_note, tr("appearance_main_menu_icons_only_note"));
+	main_menu_icons_card = settingsrow_toggle_slider(container, "appearance_main_menu_icons_only", MAIN_MENU_ICON_SCALE_STEPS,
+									 &main_menu_icons_toggle, &main_menu_icon_scale_value, &main_menu_icon_scale_slider,
+									 main_menu_icons_cb, main_menu_icon_scale_cb);
+	lv_slider_set_value(main_menu_icon_scale_slider, (main_menu_icon_scale() - MAIN_MENU_ICON_SCALE_MIN) / MAIN_MENU_ICON_SCALE_STEP, LV_ANIM_OFF);
+	main_menu_icon_scale_show();
+	settingsrow_toggle_slider_expanded(main_menu_icons_card, main_menu_icons_only());
+	if (main_menu_icons_only()) lv_obj_add_state(main_menu_icons_toggle, LV_STATE_CHECKED);
 
 	// The two sheets, and which edge each is pulled from. Classic -- the control
 	// centre from the status bar, Cover Flow up from the main menu -- is what this
