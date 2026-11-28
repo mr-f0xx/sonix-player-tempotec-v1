@@ -84,6 +84,17 @@
 .device-photo{filter:drop-shadow(0 22px 26px #000) drop-shadow(0 0 18px rgba(255,110,0,.1))}
 h1 em,h2 em{text-shadow:0 0 32px rgba(255,110,0,.3)}
 
+/* Keep breathing room between the logo and compact mobile navigation. */
+@media(max-width:480px){
+  .nav{grid-template-columns:minmax(0,1fr) auto;column-gap:12px}
+  .nav .brand{min-width:0}
+  .nav .brand-logo{max-width:100%;height:auto}
+  .nav-actions{gap:6px}
+  .nav-github{padding:0 8px}
+  .nav-toggle{padding:0 8px}
+  .lang-button{min-width:36px;padding:0 7px}
+}
+
 /* Uniform dark terminal background across all page surfaces. */
 body,.topbar,.release-strip,.feature-card,.fork-section,.fork-grid article,.compare-section,.spec-panel,.safety,.donate-card,.outro,.lang-menu,.nav-toggle,.lang-button{background:#100d08}
 
