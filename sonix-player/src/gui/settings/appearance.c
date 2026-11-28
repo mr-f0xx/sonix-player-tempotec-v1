@@ -337,7 +337,15 @@ static void refresh_accent_buttons(void) {
 		char hex[16];
 		snprintf(hex, sizeof(hex), "#%02X%02X%02X", c.red, c.green, c.blue);
 		lv_label_set_text(custom_accent_hex, hex);
-		if (is_custom) {
+		if (theme_is_liquid_glass()) {
+			// The row blends into the Accent colour card like the colour circles:
+			// no selection box and no glass rim (the shared card style would
+			// otherwise outline it), resting or pressed. The swatch and the hex
+			// value still name the chosen colour.
+			lv_obj_set_style_border_width(btn_custom_accent, 0, 0);
+			lv_obj_set_style_outline_width(btn_custom_accent, 0, 0);
+			lv_obj_set_style_outline_width(btn_custom_accent, 0, LV_STATE_PRESSED);
+		} else if (is_custom) {
 			lv_obj_set_style_border_width(btn_custom_accent, 2, 0);
 			lv_obj_set_style_border_color(btn_custom_accent, theme()->text_primary, 0);
 			lv_obj_set_style_border_opa(btn_custom_accent, LV_OPA_COVER, 0);
