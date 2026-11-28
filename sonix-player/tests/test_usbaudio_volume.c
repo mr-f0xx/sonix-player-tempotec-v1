@@ -310,6 +310,7 @@ const char *config_get(const char *section, const char *key, const char *fallbac
 }
 
 bool usb_vbus_present(void) { return false; }
+bool usb_dac_mode(void) { return false; }
 bool usbhostprobe_active(void) { return false; }
 void usbhostprobe_recover(void) {}
 bool bluetooth_audio_active(void) { return false; }

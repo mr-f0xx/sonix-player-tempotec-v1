@@ -9,9 +9,10 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-static char fake_udcs[256], fake_mounts[256], fake_lun[256], fake_card[256];
+static char fake_udcs[256], fake_mounts[256], fake_lun[256], fake_card[256], fake_tcs[256];
 static bool claim_succeeds, claim_unmounts, fail_lun_write, switch_adb_during_claim;
 static bool adb_wanted, adb_running, handover, recorder_finished, samples_released;
+static bool hostmode_release_ok = true;
 static int stop_calls, closes, opens, mount_calls, begin_calls, end_calls, claim_fd = -1;
 
 static void set_mount(bool mounted) {
@@ -30,6 +31,7 @@ static int fake_system(const char *command) { (void)command; return 0; }
 #define USB_UDC_CLASS fake_udcs
 #define USB_MOUNTS fake_mounts
 #define STORAGE_LUN_PATH fake_lun
+#define USB_TCS1421_CFG fake_tcs
 #define fopen fake_fopen
 #define system fake_system
 #include "../src/system/device/usb.c"
@@ -39,6 +41,9 @@ static int fake_system(const char *command) { (void)command; return 0; }
 bool adb_switched_on(void) { return adb_wanted; }
 bool adb_is_running(void) { return adb_running; }
 bool usbaudio_handover_pending(void) { return handover; }
+bool usbaudio_active(void) { return false; }
+bool usbhostmode_release(bool keep_off) { (void)keep_off; return hostmode_release_ok; }
+const sysinfo_model_t *sysinfo_model(void) { return NULL; }
 bool storage_usb_begin(void) { begin_calls++; return true; }
 void storage_usb_end(void) { end_calls++; }
 int usbexport_detach_and_claim(const char *device, const char *mountpoint, bool *unmounted) {
@@ -115,6 +120,7 @@ int main(void) {
 	pathcat(fake_mounts, sizeof(fake_mounts), root, "/mounts");
 	pathcat(fake_lun, sizeof(fake_lun), root, "/lun");
 	pathcat(fake_card, sizeof(fake_card), root, "/card");
+	pathcat(fake_tcs, sizeof(fake_tcs), root, "/tcs1421_cfg");
 	assert(mkdir(fake_udcs, 0700) == 0 && mkdir(fake_card, 0700) == 0);
 	char udc[256], state[256];
 	pathcat(udc, sizeof(udc), fake_udcs, "/udc0");
@@ -170,8 +176,38 @@ int main(void) {
 	assert(begin_calls == end_calls);
 	expect(fake_lun, "\n");
 
+	// Entering USB DAC mode forces TCS1421 to Sink (so dual-role phones such
+	// as iPhone assume Host/DFP and supply VBUS) and leaving restores the
+	// previous dual-role mode.
+	put(fake_tcs, "NormalDRP\n");
+	assert(usb_set_dac_mode(true));
+	assert(usb_dac_mode());
+	expect(fake_tcs, "Sink\n");
+	// A second entry while already active must not clobber the saved NormalDRP.
+	assert(usb_set_dac_mode(true));
+	expect(fake_tcs, "Sink\n");
+	assert(usb_set_dac_mode(false));
+	assert(!usb_dac_mode());
+	expect(fake_tcs, "NormalDRP\n");
+
+	// StrongDRP is preserved across a DAC session.
+	put(fake_tcs, "StrongDRP\n");
+	assert(usb_set_dac_mode(true));
+	expect(fake_tcs, "Sink\n");
+	assert(usb_set_dac_mode(false));
+	expect(fake_tcs, "StrongDRP\n");
+
+	// A refused host-mode release leaves DAC mode off and TCS1421 untouched.
+	put(fake_tcs, "NormalDRP\n");
+	hostmode_release_ok = false;
+	assert(!usb_set_dac_mode(true));
+	assert(!usb_dac_mode());
+	expect(fake_tcs, "NormalDRP\n");
+	hostmode_release_ok = true;
+
+	assert(unlink(fake_tcs) == 0);
 	assert(unlink(state) == 0 && rmdir(udc) == 0 && rmdir(fake_udcs) == 0);
 	assert(unlink(fake_lun) == 0 && unlink(fake_mounts) == 0 && rmdir(fake_card) == 0 && rmdir(root) == 0);
-	puts("PASS USB storage rollback (services, ownership and verified LUN removal)");
+	puts("PASS USB storage rollback and DAC TCS1421 role control");
 	return 0;
 }

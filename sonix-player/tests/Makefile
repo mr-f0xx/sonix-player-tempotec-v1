@@ -309,7 +309,7 @@ $(BUILD)/test_crossfade: $(XFADE_SRC) $(ROOT)/src/system/audio/crossfade.h $(ROO
 # The explicit V1 external-DAC host trial against a private fake sysfs tree.
 # Exercises the real role writes, bounded wait, rollback and crash recovery.
 .PHONY: usbhost
-usbhost: $(BUILD)/test_usbhostprobe $(BUILD)/test_usbhost_reset $(BUILD)/test_usb_ownership $(BUILD)/test_usbexport $(BUILD)/test_usb_storage $(BUILD)/test_usbaudio_arbitration $(BUILD)/test_usbaudio_volume $(BUILD)/test_usbaudio_compat $(BUILD)/test_usbhostmode $(BUILD)/test_card_release
+usbhost: $(BUILD)/test_usbhostprobe $(BUILD)/test_usbhost_reset $(BUILD)/test_usb_ownership $(BUILD)/test_usbexport $(BUILD)/test_usb_storage $(BUILD)/test_usbaudio_arbitration $(BUILD)/test_usbaudio_volume $(BUILD)/test_usbaudio_compat $(BUILD)/test_usbhostmode $(BUILD)/test_card_release $(BUILD)/test_usbdac_gadget
 	$(BUILD)/test_usbhostprobe
 	$(BUILD)/test_usbhost_reset
 	$(BUILD)/test_usb_ownership
@@ -320,6 +320,7 @@ usbhost: $(BUILD)/test_usbhostprobe $(BUILD)/test_usbhost_reset $(BUILD)/test_us
 	$(BUILD)/test_usbaudio_compat
 	$(BUILD)/test_usbhostmode
 	$(BUILD)/test_card_release
+	$(BUILD)/test_usbdac_gadget
 
 CARD_RELEASE_SRC = test_card_release.c $(ROOT)/src/system/core/logging.c $(ROOT)/src/system/audio/waveform.c
 $(BUILD)/test_card_release: $(CARD_RELEASE_SRC) $(ROOT)/src/system/core/logging.h \
@@ -415,6 +416,15 @@ $(BUILD)/test_usbdac_latency: test_usbdac_latency.c $(ROOT)/src/system/audio/usb
 	@mkdir -p $(BUILD)
 	$(CC) $(CPPFLAGS) -Istubs $(CFLAGS) -o $@ test_usbdac_latency.c \
 		$(ROOT)/src/system/audio/eq.c $(ROOT)/src/system/core/config.c $(ROOT)/src/system/addons/addons.c $(LDFLAGS) $(LDLIBS)
+
+.PHONY: usbdac-gadget
+usbdac-gadget: $(BUILD)/test_usbdac_gadget
+	$(BUILD)/test_usbdac_gadget
+
+$(BUILD)/test_usbdac_gadget: test_usbdac_gadget.c $(ROOT)/src/system/audio/usbdac.c \
+                             $(ROOT)/src/system/audio/usbdac.h stubs/lvgl/lvgl.h
+	@mkdir -p $(BUILD)
+	$(CC) $(CPPFLAGS) -Istubs $(CFLAGS) -o $@ test_usbdac_gadget.c $(LDFLAGS) $(LDLIBS)
 
 # The Wi-Fi worker's hidden-network join: the real wifi.c against a fake
 # wpa_cli on PATH (see test_wifi.c). Plain C, no LVGL and no radio.

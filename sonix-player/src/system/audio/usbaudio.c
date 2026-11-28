@@ -350,7 +350,7 @@ static void port_become_sink(void) {
 // unbound as the cable comes and goes. Checking and rewriting costs one read a
 // second and a write only when the answer is wrong.
 bool usbaudio_ensure_dual(void) {
-	if (usbhostprobe_active()) return false; // the explicit host trial owns the role
+	if (usbhostprobe_active() || usb_dac_mode()) return false; // host trial or USB DAC mode owns the role
 	if (port_is_dual()) {
 		return true;
 	}
@@ -377,7 +377,7 @@ bool usbaudio_ensure_dual(void) {
 // is on the port arrived before this player did.
 bool usbaudio_init(void) {
 	usbhostprobe_recover(); // also called before ADB starts; safe to repeat
-	if (usbhostprobe_active()) return false;
+	if (usbhostprobe_active() || usb_dac_mode()) return false;
 	// On TCS1421, a PC or charger can make VBUS present without a readable
 	// OTG-ID or a host-bus device. partner_present() alone misses that case
 	// and would change the role under an already-connected source at boot.
@@ -1178,6 +1178,15 @@ static void arbitrate_port(bool audio_present) {
 		// Its explicit Source/host request must not be replaced by NormalDRP
 		// or sink while the trial or a failed restoration owns the port.
 		handover_pending = true;
+		attached_at = empty_at = 0;
+		return;
+	}
+
+	if (usb_dac_mode()) {
+		// USB DAC mode holds the port in Sink (UFP) so dual-role phones such as
+		// iPhone assume Host/DFP role and enumerate the audio gadget. Do not
+		// revert to NormalDRP/dual while waiting for a cable or streaming.
+		handover_pending = false;
 		attached_at = empty_at = 0;
 		return;
 	}

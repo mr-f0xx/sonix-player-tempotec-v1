@@ -36,6 +36,23 @@
 #endif
 #define UAC_FUNC GADGET "/functions/uac_sa.a"
 #define UAC_NODE "/dev/uac_sa"
+#ifndef UAC_UDC_CLASS
+#define UAC_UDC_CLASS "/sys/class/udc"
+#endif
+#ifndef UAC_CLASS_PRIMARY
+#define UAC_CLASS_PRIMARY "/sys/class/uac_sa/uac_sa"
+#endif
+#ifndef UAC_CLASS_FALLBACK
+#define UAC_CLASS_FALLBACK "/sys/class/android_usb/f_uac_sa"
+#endif
+
+// Stock TempoTec V1 USB DAC identity (/usr/resource/config.json: vid=0x22E1,
+// dac_pid=0xF008). Kept distinct from mass storage (0x32BB:0x0101) so hosts do
+// not reuse cached storage descriptors, and written explicitly so a gadget
+// rebuilt after ADB teardown never advertises 0x0000:0x0000.
+#define DAC_ID_VENDOR "0x22E1"
+#define DAC_ID_PRODUCT "0xF008"
+#define DAC_MANUFACTURER "TempoTec"
 
 // The ioctls the driver answers, with the numbers the stock player passes.
 #define UAC_IOCTL_STATE 0	// int: 0 idle, >0 the host is streaming
@@ -79,11 +96,16 @@ struct uac_format {
 // write.
 //
 // Lower is tighter and closer to an underrun, which on this path is a click
-// rather than a stall. The optional low-latency profile asks ALSA for the
-// smallest buffer we consider useful with the gadget's ten-millisecond input
-// blocks. [usb] dac_output_ms remains an explicit per-device override.
+// rather than a stall. The TempoTec V1's soc_aic.ko driver computes its
+// playback hrtimer interval as ((period_size * 1000) / rate) / frame_bytes ms
+// (8 bytes per frame for 24/32-bit stereo); any period below 8 ms truncates
+// that interval to 0 ns and hard-locks the kernel in aic_hrtimer_callback().
+// With ALSA's 4-period sizing and 32-byte period alignment, 40 ms (4 x 10 ms)
+// is the smallest buffer safe across every UAC2 rate up to 768 kHz, and at
+// 44.1 / 48 kHz it already sits at the driver's own 4 x 4096 B floor
+// (~43-46 ms). [usb] dac_output_ms remains an explicit per-device override.
 #define OUTPUT_MS_DEFAULT 80
-#define OUTPUT_MS_MIN 20
+#define OUTPUT_MS_MIN 40
 #define OUTPUT_MS_MAX 500
 #define OUTPUT_MS_LOW_LATENCY OUTPUT_MS_MIN
 
@@ -298,7 +320,7 @@ static const char *chip_serial(void) {
 }
 
 static bool first_udc(char *out, size_t out_size) {
-	DIR *dir = opendir("/sys/class/udc");
+	DIR *dir = opendir(UAC_UDC_CLASS);
 	if (!dir) {
 		return false;
 	}
@@ -365,6 +387,8 @@ static bool gadget_build(void) {
 	write_file(GADGET "/bDeviceProtocol", "1");
 	write_file(GADGET "/bcdUSB", "0x200");
 	write_file(GADGET "/bcdDevice", "0x100");
+	write_noted(GADGET "/idVendor", DAC_ID_VENDOR);
+	write_noted(GADGET "/idProduct", DAC_ID_PRODUCT);
 
 	// No IN stream. The kernel defaults p_chmask to 3, which would declare a
 	// capture interface -- the device as a microphone -- that nothing here ever
@@ -383,7 +407,7 @@ static bool gadget_build(void) {
 
 	// The device's own name. Without these string descriptors a host has
 	// nothing to call the device but "Unknown USB Audio Device".
-	write_noted(GADGET "/strings/0x409/manufacturer", "HiBy");
+	write_noted(GADGET "/strings/0x409/manufacturer", DAC_MANUFACTURER);
 	write_noted(GADGET "/strings/0x409/product", usb_product());
 	write_noted(GADGET "/strings/0x409/serialnumber", chip_serial());
 
@@ -420,23 +444,30 @@ static bool gadget_build(void) {
 	}
 	printf("usbdac: gadget bound to %s\n", udc);
 
-	// Only after the bind. /sys/class/android_usb/f_uac_sa/ is created by the
-	// function when it is instantiated, so writing to it any earlier fails with
-	// ENOENT.
+	// Only after the bind. On the V1 kernel f_uac_sa registers its attributes
+	// under /sys/class/uac_sa/uac_sa/; older Android-gadget kernels use
+	// /sys/class/android_usb/f_uac_sa/.
 	//
 	// dynamic_feedback is the one that matters. Asynchronous USB audio needs
 	// the device to keep telling the host how fast its own clock is really
 	// consuming, so the host can trim what it sends; without it the two clocks
 	// drift and the host aborts within a second of pressing play. The stock
 	// settings carry it as `dac_feedback` and default it on.
-	static const char *const CLASS_DIR = "/sys/class/android_usb/f_uac_sa";
-	if (path_exists(CLASS_DIR)) {
+	const char *class_dir = NULL;
+	const char *candidates[] = {UAC_CLASS_PRIMARY, UAC_CLASS_FALLBACK, NULL};
+	for (int i = 0; candidates[i]; i++) {
+		if (path_exists(candidates[i])) {
+			class_dir = candidates[i];
+			break;
+		}
+	}
+	if (class_dir) {
 		char attr[512];
-		snprintf(attr, sizeof(attr), "%s/dynamic_feedback", CLASS_DIR);
+		snprintf(attr, sizeof(attr), "%s/dynamic_feedback", class_dir);
 		write_noted(attr, "1");
 
 		// Log the rest of the directory too, so the values are on record.
-		DIR *dir = opendir(CLASS_DIR);
+		DIR *dir = opendir(class_dir);
 		if (dir) {
 			struct dirent *de;
 			while ((de = readdir(dir)) != NULL) {
@@ -444,15 +475,16 @@ static bool gadget_build(void) {
 					continue;
 				}
 				char value[128];
-				snprintf(attr, sizeof(attr), "%s/%s", CLASS_DIR, de->d_name);
+				snprintf(attr, sizeof(attr), "%s/%s", class_dir, de->d_name);
 				if (read_first_line(attr, value, sizeof(value))) {
-					printf("usbdac:   f_uac_sa/%s = %s\n", de->d_name, value);
+					printf("usbdac:   %s/%s = %s\n", class_dir, de->d_name, value);
 				}
 			}
 			closedir(dir);
 		}
 	} else {
-		fprintf(stderr, "usbdac: %s does not exist; no feedback endpoint to enable\n", CLASS_DIR);
+		fprintf(stderr, "usbdac: neither %s nor %s exists; no feedback endpoint to enable\n", UAC_CLASS_PRIMARY,
+				UAC_CLASS_FALLBACK);
 	}
 
 	force_reenumeration();
@@ -578,7 +610,6 @@ static void *audio_main(void *arg) {
 	int buffer_size = 0;
 	int open_rate = 0, open_bits = 0, open_buffer_ms = 0;
 	bool output_open = false;
-	bool priority_initialized = false;
 	bool realtime_priority = false;
 
 	int idle_us = 0;
@@ -586,14 +617,9 @@ static void *audio_main(void *arg) {
 	while (running) {
 		bool low_latency = false;
 		int requested_buffer_ms = output_ms_for_mode(&low_latency);
-		if (!priority_initialized || low_latency != realtime_priority) {
-			if (low_latency) {
-				audio_thread_priority(true);
-			} else if (priority_initialized && realtime_priority) {
-				audio_thread_priority(false);
-			}
-			realtime_priority = low_latency;
-			priority_initialized = true;
+		if (!low_latency && realtime_priority) {
+			audio_thread_priority(false);
+			realtime_priority = false;
 		}
 
 		int host_state = 0;
@@ -614,6 +640,10 @@ static void *audio_main(void *arg) {
 				if (idle_us < IDLE_CLOSE_MS * 1000) {
 					usleep(GAP_POLL_US);
 					continue;
+				}
+				if (realtime_priority) {
+					audio_thread_priority(false);
+					realtime_priority = false;
 				}
 				audio_external_end();
 				output_open = false;
@@ -662,6 +692,13 @@ static void *audio_main(void *arg) {
 		}
 
 		if (!output_open || fmt.rate != open_rate || bits != open_bits || requested_buffer_ms != open_buffer_ms) {
+			// Run PCM teardown and open at normal priority so we do not preempt
+			// the kernel's aic_work kworker (stop_work / start_work) or the UI
+			// while switching buffers live on a single core.
+			if (realtime_priority) {
+				audio_thread_priority(false);
+				realtime_priority = false;
+			}
 			if (output_open) {
 				audio_external_end();
 				output_open = false;
@@ -708,6 +745,11 @@ static void *audio_main(void *arg) {
 			pthread_mutex_unlock(&lock);
 		}
 
+		if (output_open && low_latency && !realtime_priority) {
+			audio_thread_priority(true);
+			realtime_priority = true;
+		}
+
 		ssize_t got = read(node_fd, buffer, (size_t)buffer_size);
 		if (got <= 0) {
 			// End of a stream, or the host paused between tracks: back to the
@@ -726,6 +768,9 @@ static void *audio_main(void *arg) {
 		}
 	}
 
+	if (realtime_priority) {
+		audio_thread_priority(false);
+	}
 	if (output_open) {
 		audio_external_end();
 	}

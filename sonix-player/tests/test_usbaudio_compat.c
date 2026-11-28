@@ -104,6 +104,7 @@ bool swvolume_active(void) { return false; }
 void swvolume_set_index(int percent) { (void)percent; }
 
 bool usb_vbus_present(void) { return false; }
+bool usb_dac_mode(void) { return false; }
 bool usbhostprobe_active(void) { return false; }
 void usbhostprobe_recover(void) {}
 bool bluetooth_audio_active(void) { return false; }

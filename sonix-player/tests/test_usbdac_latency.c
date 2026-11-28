@@ -1,6 +1,7 @@
-// USB DAC's opt-in low-latency profile: defaults, persistence and the
-// existing explicit output-buffer override. The profile is kept off unless a
-// user enables it; its buffer request is 20 ms instead of the normal 80 ms.
+// USB DAC's opt-in low-latency profile: defaults, persistence, soc_aic.ko
+// hrtimer safety across all UAC2 sample rates, and the existing explicit
+// output-buffer override. The profile is kept off unless a user enables it;
+// its buffer request is 40 ms instead of the normal 80 ms.
 #define _GNU_SOURCE 1
 #include "../src/system/audio/usbdac.c"
 
@@ -25,6 +26,35 @@ static void reset_buffer_requests(int refuse_ms) {
 	memset(buffer_requests, 0, sizeof(buffer_requests));
 	buffer_request_count = 0;
 	refused_buffer_ms = refuse_ms;
+}
+
+// Reproduces TempoTec V1's soc_aic.ko period rounding (period_bytes_min=4096,
+// 32-byte PERIOD_BYTES step) and hrtimer formula:
+//   hrtimer_ms = ((period_size * 1000) / rate) / frame_bytes
+// Returning 0 reproduces the kernel hard-lockup in aic_hrtimer_callback().
+static unsigned int sim_soc_aic_hrtimer_ms(unsigned int rate, int buffer_ms, unsigned int frame_bytes) {
+	unsigned int period_us = ((unsigned int)buffer_ms * 1000u) / 4u;
+	unsigned int req_frames = (unsigned int)(((unsigned long long)rate * period_us) / 1000000ULL);
+	unsigned int req_bytes = req_frames * frame_bytes;
+	unsigned int period_bytes = (req_bytes / 32u) * 32u;
+	if (period_bytes < 4096u) {
+		period_bytes = 4096u;
+	}
+	unsigned int period_frames = period_bytes / frame_bytes;
+	return ((period_frames * 1000u) / rate) / frame_bytes;
+}
+
+static void test_soc_aic_hrtimer_safety(void) {
+	static const unsigned int rates[] = {
+		44100u, 48000u, 64000u, 88200u, 96000u, 176400u, 192000u, 352800u, 384000u, 705600u, 768000u,
+	};
+	assert(OUTPUT_MS_MIN >= 40);
+	assert(OUTPUT_MS_LOW_LATENCY == OUTPUT_MS_MIN);
+	assert(OUTPUT_MS_LOW_LATENCY < OUTPUT_MS_DEFAULT);
+	for (size_t i = 0; i < sizeof(rates) / sizeof(rates[0]); i++) {
+		assert(sim_soc_aic_hrtimer_ms(rates[i], OUTPUT_MS_LOW_LATENCY, 8u) >= 1u);
+		assert(sim_soc_aic_hrtimer_ms(rates[i], OUTPUT_MS_DEFAULT, 8u) >= 1u);
+	}
 }
 
 static void test_open_and_fallback(void) {
@@ -75,6 +105,7 @@ static bool file_contains(const char *path, const char *needle) {
 }
 
 int main(void) {
+	test_soc_aic_hrtimer_safety();
 	test_open_and_fallback();
 
 	char dir[] = "/tmp/sonix-usbdac-latency-XXXXXX";
