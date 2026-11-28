@@ -26,15 +26,15 @@ static inline lv_obj_t *stack(lv_obj_t *parent, lv_flex_flow_t flow, int height,
 	if (card) lv_obj_add_style(obj, &theme_style_card, 0);
 	lv_obj_set_size(obj, lv_pct(100), height);
 	lv_obj_set_style_radius(obj, card ? bp_tile_radius() : 0, 0);
-	lv_obj_set_style_pad_all(obj, card ? 8 : 0, 0);
+	// The keys wear their Liquid Glass rim as an outline drawn just outside the
+	// key box, and a parent clips children to its own box. A zero-padding key
+	// row therefore cut the outer keys' rims (the tabs and pads showed open
+	// borders). Inset the row 2px so the rims land inside the clip; the keys
+	// flex to fill, so they only shrink by a hair. Card rows already pad 8.
+	lv_obj_set_style_pad_all(obj, card ? 8 : 2, 0);
 	lv_obj_set_style_pad_gap(obj, gap, 0);
 	lv_obj_set_scrollable(obj, false);
 	lv_obj_set_event_bubble(obj, true);
-	// The keys wear their Liquid Glass rim as an outline, drawn just outside
-	// the key box. A clipping container would cut the outer keys' rims at its
-	// own edge (the tab row and the pad grid showed open borders). These stacks
-	// never scroll, so letting children overflow keeps every rim whole.
-	lv_obj_set_overflow_visible(obj, true);
 	lv_obj_set_flex_flow(obj, flow);
 	lv_obj_set_flex_align(obj, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 	return obj;

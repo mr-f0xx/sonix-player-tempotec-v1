@@ -1286,17 +1286,17 @@ static void build_lock_view(gui_config_t *cfg) {
 	}
 
 	keypad = lv_obj_create(lock_view);
-	lv_obj_set_size(keypad, pad_w, content_h - PIN_PAD_TOP);
-	lv_obj_align(keypad, LV_ALIGN_TOP_LEFT, cfg->padding, PIN_PAD_TOP);
+	// The PIN keys rim with an outline drawn just outside the key box, which a
+	// parent clips at its own edge. Grow the transparent keypad 2px on every
+	// side and pad it back in so the keys keep their place while the outer rims
+	// land inside the clip and close into full rounded rectangles.
+	lv_obj_set_size(keypad, pad_w + 4, content_h - PIN_PAD_TOP + 4);
+	lv_obj_align(keypad, LV_ALIGN_TOP_LEFT, cfg->padding - 2, PIN_PAD_TOP - 2);
 	lv_obj_set_style_bg_opa(keypad, LV_OPA_TRANSP, 0);
 	lv_obj_set_style_border_width(keypad, 0, 0);
 	lv_obj_set_style_radius(keypad, 0, 0);
-	lv_obj_set_style_pad_all(keypad, 0, 0);
+	lv_obj_set_style_pad_all(keypad, 2, 0);
 	lv_obj_set_style_pad_gap(keypad, PIN_KEY_GAP, 0);
-	// The PIN keys rim themselves with an outline drawn just outside the key;
-	// a clipping keypad cut the outer columns' rims. It never scrolls, so let
-	// the rims spill the extra pixel and close the full rounded rectangle.
-	lv_obj_set_overflow_visible(keypad, true);
 	lv_obj_set_flex_flow(keypad, LV_FLEX_FLOW_ROW_WRAP);
 	lv_obj_set_flex_align(keypad, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
 	lv_obj_set_scrollable(keypad, false);

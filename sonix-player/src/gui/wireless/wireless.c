@@ -209,10 +209,6 @@ static lv_obj_t *wireless_card(lv_obj_t *parent, int height) {
 	lv_obj_set_style_pad_all(card, 8, 0);
 	lv_obj_set_scrollable(card, false);
 	lv_obj_set_event_bubble(card, true);
-	// The radio switch rims itself with an outline drawn just outside the
-	// track; a clipping card cut that rim at the card's right edge. The card
-	// never scrolls, so let the rim spill and stay whole.
-	lv_obj_set_overflow_visible(card, true);
 	return card;
 }
 
@@ -234,13 +230,12 @@ static lv_obj_t *radio_card(lv_obj_t *parent, const char *label, const lv_image_
 	lv_obj_set_flex_flow(heading, LV_FLEX_FLOW_ROW);
 	lv_obj_set_flex_align(heading, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 	lv_obj_set_event_bubble(heading, true);
-	// The switch's outline rim sits a pixel outside the heading's right edge;
-	// let it show rather than be cut (the card above already allows overflow).
-	lv_obj_set_overflow_visible(heading, true);
 
 	lv_obj_t *open = lv_btn_create(heading);
 	wireless_remove_edges(open);
-	lv_obj_set_size(open, wireless_cfg->screen_width - 2 * wireless_cfg->padding - 10 - 44 - 8, 36);
+	// Leave 2px past the switch for its outline rim: the heading clips children
+	// to its own box, so a switch flush to the right edge had its rim cut.
+	lv_obj_set_size(open, wireless_cfg->screen_width - 2 * wireless_cfg->padding - 10 - 44 - 10, 36);
 	lv_obj_set_style_bg_opa(open, LV_OPA_TRANSP, 0);
 	lv_obj_add_style(open, &theme_style_card_pressed, LV_STATE_PRESSED);
 	lv_obj_set_style_border_width(open, 0, 0);
@@ -263,7 +258,7 @@ static lv_obj_t *radio_card(lv_obj_t *parent, const char *label, const lv_image_
 
 	lv_obj_t *copy = lv_obj_create(open);
 	lv_obj_remove_style_all(copy);
-	lv_obj_set_size(copy, LV_MAX(1, wireless_cfg->screen_width - 2 * wireless_cfg->padding - 10 - 44 - 8 - 25),
+	lv_obj_set_size(copy, LV_MAX(1, wireless_cfg->screen_width - 2 * wireless_cfg->padding - 10 - 44 - 10 - 25),
 					LV_SIZE_CONTENT);
 	lv_obj_set_style_pad_all(copy, 0, 0);
 	lv_obj_set_style_pad_row(copy, 1, 0);

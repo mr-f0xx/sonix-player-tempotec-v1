@@ -893,7 +893,12 @@ static lv_obj_t *kb_make_row(lv_obj_t *parent, int height) {
 	lv_obj_set_size(row, lv_pct(100), height);
 	lv_obj_set_style_bg_opa(row, 0, 0);
 	lv_obj_set_style_border_width(row, 0, 0);
-	lv_obj_set_style_pad_all(row, 0, 0);
+	// Each key's Liquid Glass rim is an outline drawn just outside the key box,
+	// and the row clips children to its own box. The row is exactly as wide as
+	// its keys, so the first and last key's outer rims were cut. Inset the row
+	// 2px: the keys flex to fill, so they only shrink by a hair while the outer
+	// rims land inside the clip and close into full rounded rectangles.
+	lv_obj_set_style_pad_all(row, 2, 0);
 	lv_obj_set_style_pad_gap(row, 6, 0);
 	lv_obj_set_scrollable(row, false);
 	lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
