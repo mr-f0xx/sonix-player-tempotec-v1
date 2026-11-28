@@ -14,6 +14,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
+import vm from "node:vm";
 
 const ROOT = new URL("../../../", import.meta.url).pathname;
 const read = (file) => fs.readFileSync(path.join(ROOT, file), "utf8");
@@ -74,7 +75,21 @@ test("latest release fallback includes a dated firmware download count", () => {
 test("release notes expand without interpreting untrusted release HTML", () => {
 	assert.match(page, /<details class="release-details">/);
 	assert.match(page, /id="release-changelog"/);
-	assert.match(read("assets/app.js"), /changelog\.textContent = release\.body/);
+	assert.match(read("assets/app.js"), /changelog\.textContent = cleanChangelog\(release\.body\)/);
+});
+
+test("changelog removes release boilerplate while preserving changes", () => {
+	const app = read("assets/app.js");
+	const source = app.match(/  function cleanChangelog\(body\) \{[\s\S]*?\n  \}/)?.[0];
+	assert.ok(source);
+	const clean = vm.runInNewContext(`(${source.trim()})`);
+	const result = clean(snapshot.body);
+	assert.match(result, /What's Changed/);
+	assert.match(result, /• Scroll long library titles/);
+	assert.doesNotMatch(result, /<img|by @mr-f0xx|Full Changelog|\*\*/);
+	assert.match(result, /Designed a Sonix firmware showcase website/);
+	assert.match(clean('* Fix <script>alert(1)</script> by @dev in https://github.com/x/y/pull/2'), /<script>/);
+	assert.equal(clean('**Full Changelog**: https://github.com/a/b/compare/a...b'), '');
 });
 
 test("the page still lets app.js refine the links from the live release", () => {

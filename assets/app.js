@@ -22,6 +22,26 @@
       .replace(/[*_`#]/g, '').trim()).filter(Boolean).join(' · ') || window.sonixI18n.t('rel_notes_external');
   }
 
+  // Keep the release notes readable without rendering untrusted GitHub HTML.
+  function cleanChangelog(body) {
+    return (body || '')
+      .replace(/<img\b[^>]*>/gi, '')
+      .replace(/!\[[^\]]*\]\([^\n)]*\)/g, '')
+      .split(/\r?\n/)
+      .filter(line => !/^\s*(?:\*\*|__)?full changelog(?:\*\*|__)?\s*:/i.test(line))
+      .map(line => line
+        .replace(/\s+by\s+@[-\w]+\s+in\s+(?:https?:\/\/\S+|\[[^\]]+\]\(https?:\/\/[^)]+\))\s*$/i, '')
+        .replace(/\[([^\]]+)\]\(https?:\/\/[^)]+\)/g, '$1')
+        .replace(/^\s*#{1,6}\s+/, '')
+        .replace(/^\s*[-*+]\s+/, '• ')
+        .replace(/\*\*([^*]+)\*\*|__([^_]+)__/g, (_, a, b) => a || b)
+        .replace(/`([^`]+)`/g, '$1')
+        .trimEnd())
+      .join('\n')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim();
+  }
+
   function uptAsset(release) {
     const assets = (release && release.assets) || [];
     return assets.find(item => item.name && item.name.toLowerCase() === 'v1.upt') ||
@@ -53,9 +73,8 @@
       : '—';
 
     notes.textContent = highlights(release.body);
-    // Release notes come from GitHub and may contain HTML: show the complete
-    // Markdown as text, never inject it into the document as executable markup.
-    if (changelog) changelog.textContent = release.body || window.sonixI18n.t('rel_notes_external');
+    // Render cleaned notes as text, never as executable markup.
+    if (changelog) changelog.textContent = cleanChangelog(release.body) || window.sonixI18n.t('rel_notes_external');
     if (releaseDownloads && releaseCount && releaseCountDate) {
       const asOf = isSnapshot && release.count_as_of ? new Date(release.count_as_of) : null;
       const validSnapshot = !isSnapshot || (asOf && !Number.isNaN(asOf.valueOf()));

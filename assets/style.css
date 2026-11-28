@@ -24,7 +24,7 @@
 .release-details summary::before{content:'+ ';color:var(--amber)}
 .release-details[open] summary::before{content:'− '}
 .release-details summary:focus-visible{outline:2px solid var(--amber);outline-offset:4px}
-.release-changelog{white-space:pre-wrap;overflow-wrap:anywhere;color:var(--muted);font:12px/1.7 var(--sans);margin:18px 0 2px}
+.release-changelog{white-space:pre-wrap;overflow-wrap:anywhere;color:var(--text);font:700 12px/1.8 var(--sans);margin:18px 0 2px}
 @media(max-width:1000px){.release-strip-row{gap:15px}}
 @media(max-width:700px){.release-strip-row{flex-wrap:wrap}.release-strip-row .text-link{width:auto;margin-left:auto}}
 
