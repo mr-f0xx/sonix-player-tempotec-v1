@@ -260,8 +260,10 @@ void libraryscan_begin(void) {
 
 static gui_config_t *pick_cfg;
 static lv_obj_t *pick_veil;
+static lv_obj_t *pick_card;
 static lv_obj_t *pick_list;
 static lv_obj_t *pick_scan_btn;
+static lv_obj_t *pick_cancel_btn;
 static char **pick_names;
 static bool *pick_on;
 static lv_obj_t **pick_marks;
@@ -381,6 +383,44 @@ static void pick_veil_cb(lv_event_t *e) {
 	}
 }
 
+// theme_glass_dialog and theme_glass_action_button return to the flat themes by
+// removing the local border_width, which uncovers the LVGL default theme's grey
+// card border. Put the edge-free flat look back explicitly so the picker matches
+// the other flat dialogs pixel for pixel.
+static void pick_flat_border(lv_obj_t *obj) {
+	if (obj && !theme_is_liquid_glass()) {
+		lv_obj_set_style_border_width(obj, 0, 0);
+	}
+}
+
+// The card and the two buttons are built once and outlive a theme change, while
+// the folder rows are rebuilt on every open. Repaint the persistent parts for the
+// theme active now: glass frost and glass buttons under Liquid Glass, the flat
+// fills everywhere else. The label colours ride along so the accent action keeps
+// readable ink on every palette.
+static void pick_retheme(void) {
+	if (pick_card) {
+		theme_glass_dialog(pick_card);
+		pick_flat_border(pick_card);
+	}
+	if (pick_scan_btn) {
+		theme_glass_action_button(pick_scan_btn, true);
+		pick_flat_border(pick_scan_btn);
+		lv_obj_t *label = lv_obj_get_child(pick_scan_btn, 0);
+		if (label) {
+			lv_obj_set_style_text_color(label, theme_on_accent(), 0);
+		}
+	}
+	if (pick_cancel_btn) {
+		theme_glass_action_button(pick_cancel_btn, false);
+		pick_flat_border(pick_cancel_btn);
+		lv_obj_t *label = lv_obj_get_child(pick_cancel_btn, 0);
+		if (label) {
+			lv_obj_set_style_text_color(label, theme()->text_primary, 0);
+		}
+	}
+}
+
 static void pick_cancel_cb(lv_event_t *e) {
 	(void)e;
 	pick_close();
@@ -416,14 +456,25 @@ static lv_obj_t *pick_button(lv_obj_t *parent, const char *text, bool accent, lv
 	lv_obj_set_flex_grow(btn, 1);
 	lv_obj_set_style_radius(btn, LV_RADIUS_CIRCLE, 0);
 	lv_obj_set_style_shadow_width(btn, 0, 0);
-	lv_obj_set_style_border_width(btn, 0, 0);
-	lv_obj_set_style_bg_color(btn, accent ? theme()->accent : theme()->surface_pressed, 0);
+	if (accent) {
+		lv_obj_set_style_border_width(btn, 0, 0);
+		lv_obj_set_style_bg_color(btn, theme()->accent, 0);
+		lv_obj_set_style_bg_opa(btn, LV_OPA_COVER, 0);
+	} else {
+		// The quiet neutral fill: surface_pressed solid on the flat themes,
+		// the same base the confirm dialog's cancel button wears.
+		lv_obj_add_style(btn, &theme_style_switch, 0);
+	}
 	lv_obj_add_event_cb(btn, cb, LV_EVENT_CLICKED, NULL);
 	lv_obj_t *label = lv_label_create(btn);
 	lv_label_set_text(label, tr(text));
 	lv_obj_set_style_text_font(label, bp_is_tempotec_v1() ? &font_ui_18 : &font_ui_22, 0);
 	lv_obj_set_style_text_color(label, accent ? theme_on_accent() : theme()->text_primary, 0);
 	lv_obj_center(label);
+	// Liquid Glass turns the pair into glass buttons (tinted action, dark quiet);
+	// every other theme keeps the flat fill set above.
+	theme_glass_action_button(btn, accent);
+	pick_flat_border(btn);
 	return btn;
 }
 
@@ -444,6 +495,7 @@ static void pick_build(void) {
 	lv_obj_add_event_cb(pick_veil, pick_veil_cb, LV_EVENT_CLICKED, NULL);
 
 	lv_obj_t *card = lv_obj_create(pick_veil);
+	pick_card = card;
 	lv_obj_set_size(card, cfg->screen_width - 2 * cfg->padding, LV_SIZE_CONTENT);
 	lv_obj_set_style_max_height(card, cfg->screen_height - cfg->top_bar_height - 2 * cfg->padding, 0);
 	lv_obj_add_style(card, &theme_style_card, 0);
@@ -457,6 +509,10 @@ static void pick_build(void) {
 	lv_obj_set_event_bubble(card, false);
 	lv_obj_set_flex_flow(card, LV_FLEX_FLOW_COLUMN);
 	lv_obj_align(card, LV_ALIGN_CENTER, 0, cfg->top_bar_height / 2);
+	// Opaque dark frost under Liquid Glass so the page behind never shows through;
+	// a no-op that leaves the flat card on every other theme.
+	theme_glass_dialog(card);
+	pick_flat_border(card);
 
 	lv_obj_t *title = lv_label_create(card);
 	lv_label_set_text(title, tr("musicsettings_scan_the_music_library"));
@@ -491,7 +547,7 @@ static void pick_build(void) {
 	lv_obj_set_size(buttons, lv_pct(100), LV_SIZE_CONTENT);
 	lv_obj_set_style_pad_column(buttons, PICK_BUTTON_GAP, 0);
 	lv_obj_set_flex_flow(buttons, LV_FLEX_FLOW_ROW);
-	pick_button(buttons, "cancel", false, pick_cancel_cb);
+	pick_cancel_btn = pick_button(buttons, "cancel", false, pick_cancel_cb);
 	pick_scan_btn = pick_button(buttons, "scan", true, pick_scan_cb);
 }
 
@@ -509,6 +565,10 @@ static void pick_append(int n) {
 		lv_obj_set_style_pad_column(row, PICK_ROW_GAP, 0);
 		lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
 		lv_obj_set_flex_align(row, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+		// A clear glass tile under Liquid Glass (the surface_pressed fill is white
+		// there, which would hide the white folder glyph and name); the flat
+		// themes keep their solid surface_pressed row.
+		theme_glass_pane(row);
 		lv_obj_set_scroll_on_focus(row, true);
 		lv_obj_add_event_cb(row, pick_row_cb, LV_EVENT_CLICKED, (void *)(intptr_t)i);
 
@@ -559,6 +619,7 @@ void libraryscan_choose_folders(void) {
 	if (!pick_veil) {
 		pick_build();
 	}
+	pick_retheme();
 	pick_read_folders();
 	pick_load_selection();
 	pick_fill();
