@@ -1,6 +1,7 @@
 #include "src/gui/wireless/listentogether.h"
 #include "src/system/net/listentogether.h"
 #include "src/gui/streaming/streaming.h"
+#include "src/gui/shell/theme.h"
 #include "src/system/core/lang.h"
 
 #include <stdio.h>
@@ -69,12 +70,31 @@ static void join_btn_cb(lv_event_t *e) {
 	update_ui();
 }
 
+// Liquid Glass shows the wallpaper behind the page (the shared screen style is
+// clear); every other theme keeps the original solid black ground.
+static void listentogether_apply_ground(void) {
+	if (!listentogether_screen) {
+		return;
+	}
+	if (theme_is_liquid_glass()) {
+		lv_obj_remove_local_style_prop(listentogether_screen, LV_STYLE_BG_COLOR, 0);
+		lv_obj_remove_local_style_prop(listentogether_screen, LV_STYLE_BG_OPA, 0);
+	} else {
+		lv_obj_set_style_bg_color(listentogether_screen, lv_color_black(), 0);
+		lv_obj_set_style_bg_opa(listentogether_screen, LV_OPA_COVER, 0);
+	}
+}
+
 void listentogether_page_init(gui_config_t *cfg) {
 	(void)cfg;
 	if (listentogether_screen) return;
 
 	listentogether_screen = lv_obj_create(NULL);
-	lv_obj_set_style_bg_color(listentogether_screen, lv_color_black(), 0);
+	// Follow the theme: under Liquid Glass the shared screen style is clear so
+	// the wallpaper shows through; other themes keep the solid black ground.
+	lv_obj_add_style(listentogether_screen, &theme_style_screen, 0);
+	listentogether_apply_ground();
+	theme_register_refresh(listentogether_apply_ground);
 
 	lv_obj_t *cont = lv_obj_create(listentogether_screen);
 	lv_obj_set_size(cont, LV_PCT(92), LV_PCT(88));

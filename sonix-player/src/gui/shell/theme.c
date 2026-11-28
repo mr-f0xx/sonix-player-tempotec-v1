@@ -1,5 +1,6 @@
 #include "theme.h"
 
+#include "src/gui/shell/glasswallpaper.h"
 #include "src/system/core/config.h"
 #include "src/system/device/bootlogo.h"
 #include "src/system/device/bootpic.h"
@@ -884,6 +885,28 @@ lv_color_t theme_glass_rim(void) {
 	return lv_color_mix(active->accent, lv_color_white(), 150);
 }
 
+// Full-screen pages that live on the top layer (the Date & time overlay) sit
+// OVER the live screen, so a transparent glass background would show the page
+// behind straight through them. Ground them in the dimmed wallpaper over the
+// dark base -- opaque, like the control centre -- so they read as their own
+// glass page. Other themes keep the shared opaque screen style.
+void theme_glass_page_ground(lv_obj_t *obj) {
+	if (!obj) {
+		return;
+	}
+	if (theme_is_liquid_glass()) {
+		lv_obj_set_style_bg_opa(obj, LV_OPA_COVER, 0);
+		lv_obj_set_style_bg_color(obj, active->screen_bg, 0);
+		lv_obj_set_style_bg_image_src(obj, &glass_wallpaper_dsc, 0);
+		lv_obj_set_style_bg_image_opa(obj, LV_OPA_40, 0);
+	} else {
+		lv_obj_remove_local_style_prop(obj, LV_STYLE_BG_IMAGE_SRC, 0);
+		lv_obj_remove_local_style_prop(obj, LV_STYLE_BG_IMAGE_OPA, 0);
+		lv_obj_remove_local_style_prop(obj, LV_STYLE_BG_OPA, 0);
+		lv_obj_remove_local_style_prop(obj, LV_STYLE_BG_COLOR, 0);
+	}
+}
+
 // Dialogs (confirm, the update card, popovers) must NOT be see-through: a clear
 // 10% card would let the page behind read straight through the choices. Under
 // Liquid Glass they get an opaque frosted ground (a dark lift of the panel)
@@ -895,7 +918,9 @@ void theme_glass_dialog(lv_obj_t *obj) {
 	}
 	if (theme_is_liquid_glass()) {
 		lv_obj_set_style_bg_opa(obj, LV_OPA_COVER, 0);
-		lv_obj_set_style_bg_color(obj, lv_color_mix(active->panel, lv_color_white(), 26), 0);
+		// A dark frost (a slight lift of the panel), not a white one: the alert
+		// belongs to the dark glass theme and its white type must read on it.
+		lv_obj_set_style_bg_color(obj, lv_color_mix(lv_color_white(), active->panel, 30), 0);
 		lv_obj_set_style_bg_grad_color(obj, active->panel, 0);
 		lv_obj_set_style_bg_grad_dir(obj, LV_GRAD_DIR_VER, 0);
 	} else {
