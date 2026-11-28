@@ -144,6 +144,10 @@ static lv_color_t home_tinted_ink(void) {
 static bool home_header_shown(void) { return !theme_is_oled(); }
 
 bool main_menu_icons_only(void) { return config_get_bool("ui", "main_menu_icons_only", false); }
+int main_menu_icon_scale(void) {
+ int value = config_get_int("ui", "main_menu_icon_scale", 100);
+ return LV_MAX(60, LV_MIN(110, value));
+}
 
 // Whether the EPUB shelf (Books) takes the Audiobooks slot on the home screen.
 // Only while the books module is on: with it switched off the shelf was never
@@ -220,6 +224,7 @@ static void main_menu_refresh_tiles(void) {
 			if (theme_is_oled()) {
 				icon_size = LV_MAX(1, icon_size * 4 / 5);
 			}
+			icon_size = LV_MAX(1, (icon_size * main_menu_icon_scale() + 50) / 100);
 			// A further 5% reduction in every theme, rounded to the nearest
 			// display pixel so compact glyphs do not shrink by a full extra pixel.
 			icon_size = LV_MAX(1, (icon_size * 95 + 50) / 100);
@@ -489,6 +494,14 @@ void main_menu_set_icons_only(bool enabled) {
 	config_set_bool("ui", "main_menu_icons_only", enabled);
 	config_save();
 	main_menu_refresh_theme();
+}
+
+void main_menu_set_icon_scale(int percent) {
+ percent = LV_MAX(60, LV_MIN(110, percent));
+ if (main_menu_icon_scale() == percent) return;
+ config_set_int("ui", "main_menu_icon_scale", percent);
+ config_save();
+ main_menu_refresh_theme();
 }
 
 void main_menu_init(gui_config_t *cfg) {
