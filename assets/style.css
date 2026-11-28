@@ -11,6 +11,23 @@
 .device-display{position:absolute;left:16.39%;top:7.46%;width:66.67%;height:45.35%;object-fit:fill}
 
 .fork-section{border-top:1px solid #2b200f;background:#100d08;padding:110px 0}.fork-grid{display:grid;grid-template-columns:repeat(4,1fr);border-top:1px solid var(--line);border-left:1px solid var(--line)}.fork-grid article{border-right:1px solid var(--line);border-bottom:1px solid var(--line);padding:24px;background:linear-gradient(135deg,#181208,#100d08)}.fork-grid article>span{font:600 9px var(--mono);letter-spacing:1px;color:#ae7c32}.fork-grid h3{font-size:17px;letter-spacing:-.3px;margin:20px 0 8px}.fork-grid p{font-size:12px;line-height:1.7;color:var(--muted);margin:0}.fork-note{display:flex;justify-content:space-between;gap:25px;color:#99896e;font-size:12px;margin-top:22px}.fork-note a{font:700 9px var(--mono);letter-spacing:.4px;color:#d5a351;white-space:nowrap;align-self:center}
+/* Expandable release notes; preserve the compact strip on every screen size. */
+.release-strip{display:block}
+.release-strip-row{display:flex;align-items:center;gap:24px;min-width:0}
+.release-downloads{flex:none}
+.release-downloads strong{font:600 12px var(--mono);color:#f1c16b}
+.release-downloads small{display:block;color:var(--muted);font-size:10px}
+.release-downloads small[hidden]{display:none}
+.release-details{border-top:1px solid var(--line);margin-top:16px;padding-top:12px}
+.release-details summary{cursor:pointer;color:#dfaa4c;font:700 10px var(--mono);letter-spacing:.6px;list-style:none}
+.release-details summary::-webkit-details-marker{display:none}
+.release-details summary::before{content:'+ ';color:var(--amber)}
+.release-details[open] summary::before{content:'− '}
+.release-details summary:focus-visible{outline:2px solid var(--amber);outline-offset:4px}
+.release-changelog{white-space:pre-wrap;overflow-wrap:anywhere;color:var(--muted);font:12px/1.7 var(--sans);margin:18px 0 2px}
+@media(max-width:1000px){.release-strip-row{gap:15px}}
+@media(max-width:700px){.release-strip-row{flex-wrap:wrap}.release-strip-row .text-link{width:auto;margin-left:auto}}
+
 /* GitHub release download count, shown only after a complete count is available. */
 .download-count:not([hidden]){display:inline-flex;align-items:center;gap:11px;margin-top:22px;color:var(--text);font-size:13px;line-height:1.35}
 .download-count svg{width:19px;height:19px;color:var(--amber)}

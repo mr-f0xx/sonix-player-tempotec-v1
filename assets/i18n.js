@@ -256,6 +256,23 @@
     STRINGS[lang].d_rev_d = revolut;
   }
 
+  const releaseCopy = {
+    it: ['CHANGELOG COMPLETO', 'DOWNLOAD ULTIMO FIRMWARE'],
+    de: ['VOLLSTÄNDIGES CHANGELOG', 'DOWNLOADS DER NEUESTEN FIRMWARE'],
+    es: ['REGISTRO DE CAMBIOS COMPLETO', 'DESCARGAS DEL ÚLTIMO FIRMWARE'],
+    fr: ['JOURNAL DES MODIFICATIONS COMPLET', 'TÉLÉCHARGEMENTS DE LA DERNIÈRE VERSION'],
+    nl: ['VOLLEDIGE WIJZIGINGENLIJST', 'DOWNLOADS NIEUWSTE FIRMWARE'],
+    pl: ['PEŁNA LISTA ZMIAN', 'POBRANIA NAJNOWSZEGO FIRMWARE'],
+    'pt-BR': ['LISTA COMPLETA DE ALTERAÇÕES', 'DOWNLOADS DO FIRMWARE MAIS RECENTE'],
+    uk: ['ПОВНИЙ СПИСОК ЗМІН', 'ЗАВАНТАЖЕННЯ ОСТАННЬОЇ ПРОШИВКИ'],
+    ru: ['ПОЛНЫЙ СПИСОК ИЗМЕНЕНИЙ', 'ЗАГРУЗКИ ПОСЛЕДНЕЙ ПРОШИВКИ'],
+    ja: ['変更履歴の全文', '最新ファームウェアのダウンロード数'],
+  };
+  for (const [lang, [changelog, downloads]] of Object.entries(releaseCopy)) {
+    STRINGS[lang].show_changelog = changelog;
+    STRINGS[lang].latest_downloads = downloads;
+  }
+
   const EXTRA = window.SONIX_I18N_EXTRA;
   if (EXTRA) {
     (EXTRA.keys || []).forEach((key, index) => {
@@ -268,6 +285,7 @@
 
   const DYNAMIC_EN = {
     btn_download: 'DOWNLOAD FIRMWARE',
+    download_count_as_of: 'as of',
     nav_menu: 'MENU',
     nav_close: 'CLOSE',
     rel_unavailable: 'Release unavailable',

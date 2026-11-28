@@ -202,8 +202,8 @@ jobs:
       #
       # Never downgrade: a main run that started before a release was published
       # would otherwise write the older tag over a newer committed snapshot and
-      # republish it. Only a strictly newer tag replaces the file, so this step
-      # is safe to re-run and safe to race.
+      # republish it. A newer or matching tag replaces the file; older tags are
+      # rejected, while matching tags refresh the dated download counts.
       - name: Refresh latest release snapshot
         env:
           GH_TOKEN: ${{ github.token }}
@@ -225,8 +225,9 @@ jobs:
             done
           fi
           if gh api "repos/${GITHUB_REPOSITORY}/releases/latest" \
-              --jq '{tag_name, published_at, html_url, body, assets: [.assets[] | {name, browser_download_url}]}' \
+              --jq '{tag_name, published_at, html_url, body, assets: [.assets[] | {name, browser_download_url, download_count}]}' \
               > "$RUNNER_TEMP/release.json"; then
+            node -e 'const fs = require("fs"); const file = process.argv[1]; const data = JSON.parse(fs.readFileSync(file)); data.count_as_of = new Date().toISOString(); fs.writeFileSync(file, JSON.stringify(data) + "\n");' "$RUNNER_TEMP/release.json"
             newest="$(node -p "require('$RUNNER_TEMP/release.json').tag_name")"
             current="$(node -p "require('./assets/release.json').tag_name")"
             # 1 = newer, 0 = same, -1 = older. Compare numerically so 1.7.10
@@ -249,7 +250,8 @@ jobs:
                 echo "Release snapshot: $current -> $newest"
                 ;;
               0)
-                echo "Release snapshot already current at $newest."
+                mv "$RUNNER_TEMP/release.json" assets/release.json
+                echo "Refreshed release snapshot and download counts for $newest."
                 ;;
               *)
                 echo "Release snapshot kept at $current: GitHub reported $newest, which is older. Refusing to publish a downgrade."
